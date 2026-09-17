@@ -26,14 +26,7 @@ func openTestOperationStore(t *testing.T) *operationStore {
 
 func attachTestOperationStore(t *testing.T, s *server, store *operationStore) {
 	t.Helper()
-	managementOperationStoresMu.Lock()
-	managementOperationStores[s] = store
-	managementOperationStoresMu.Unlock()
-	t.Cleanup(func() {
-		managementOperationStoresMu.Lock()
-		delete(managementOperationStores, s)
-		managementOperationStoresMu.Unlock()
-	})
+	s.operations = store
 }
 
 func TestOperationStoreCreatesPrivatePersistentJournal(t *testing.T) {
