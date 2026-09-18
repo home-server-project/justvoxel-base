@@ -62,29 +62,12 @@ stable-YYYYMMDD-<git-sha>
 
 No automatic stable schedule or main-push build is enabled during active development.
 
-## Final products
+## Channel contract
 
-Channels are the composition contract. Source/build inputs use the signed moving channel appropriate to the development or release path; image digests are produced, signed, verified, and recorded as evidence rather than manually maintained as source inputs.
+Tags/channels are the source and update contract.
 
-During active development, the final JustVoxel `testing` branch consumes:
+JustVoxel Base consumes the signed Home Server Base channel directly and publishes its own testing or stable Base channel according to the workflow being run. Digests are produced, signed, verified, and recorded as build evidence; they are not manually maintained source/build inputs.
 
-```text
-ghcr.io/home-server-project/justvoxel-base:testing
-```
-
-and builds only the HWE testing delta.
-
-The intended stable product split is:
-
-```text
-justvoxel-base:stable
-        |
-        +--> JustVoxel VM   (promotion/copy of the approved Base)
-        |
-        +--> JustVoxel HWE  (physical-hardware delta built on the approved Base)
-```
-
-The Base image owns trust for the Base repository and the future VM repository. HWE repository trust belongs to the final JustVoxel HWE layer and is intentionally not wired into JustVoxel Base.
 
 ## Rechunk limits
 
