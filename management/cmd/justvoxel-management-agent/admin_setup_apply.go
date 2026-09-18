@@ -17,6 +17,7 @@ type adminSetupApplyRequest struct {
 	PlanFingerprint string                `json:"plan_fingerprint"`
 	Request         adminSetupPlanRequest `json:"request"`
 	SMBPassword     string                `json:"smb_password,omitempty"`
+	EULAAccepted    bool                  `json:"eula_accepted"`
 }
 
 type adminSetupApplyResponse struct {
@@ -46,6 +47,10 @@ func (s *server) adminSetupApply(w http.ResponseWriter, r *http.Request) {
 	}
 	if !operationFingerprintPattern.MatchString(request.PlanFingerprint) {
 		writeAdminSetupApplyFailure(w, http.StatusBadRequest, "invalid_plan_fingerprint", "invalid reviewed setup fingerprint")
+		return
+	}
+	if !request.EULAAccepted {
+		writeAdminSetupApplyFailure(w, http.StatusBadRequest, "eula_required", "Minecraft EULA acceptance is required before setup can execute")
 		return
 	}
 
@@ -119,6 +124,12 @@ func (s *server) adminSetupApply(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusOK
 	}
 	writeJSON(w, status, adminSetupApplyResponse{OK: true, Created: created, Operation: &operation})
+	if created {
+		secret := []byte(request.SMBPassword)
+		request.SMBPassword = ""
+		planCopy := *plan.Normalized
+		startSetupWorker(s, operation.OperationID, planCopy, secret)
+	}
 }
 
 func decodeAdminSetupApplyRequest(w http.ResponseWriter, r *http.Request, target *adminSetupApplyRequest) bool {
