@@ -5,6 +5,7 @@ A53_TRANSACTION_ROOT="${A53_TRANSACTION_ROOT:-/var/lib/justvoxel/management/tran
 A53_SCHEMA_VERSION=v1
 A53_DEFAULT_DATA_PATH=/var/lib/justvoxel/minecraft
 A53_DEFAULT_BACKUP_PATH=/var/lib/justvoxel/backups
+A54_SMB_CREDENTIALS="${A54_SMB_CREDENTIALS:-/etc/justvoxel/smb-backup.credentials}"
 
 A53_REQUEST=''
 A53_OPERATION_ID=''
@@ -19,6 +20,12 @@ A53_FSTAB_GID=''
 A53_MUTATION_STARTED=false
 A53_MOUNTS_BY_US=()
 A53_DIRS_CREATED=()
+A54_SMB_PASSWORD=''
+A54_CREDENTIALS_EXISTED=false
+A54_CREDENTIALS_CHANGED=false
+A54_CREDENTIALS_MODE=''
+A54_CREDENTIALS_UID=''
+A54_CREDENTIALS_GID=''
 
 _a53_json() {
     local ok="$1" applied="$2" phase="$3" rollback_state="$4" rollback_result="$5" error="$6"
@@ -120,14 +127,15 @@ _a53_parse_request() {
     A53_REQUEST="$(cat)"
     jq -e '
       type == "object" and
-      ((keys - ["schema_version","operation_id","plan_fingerprint","storage","backups"]) | length == 0) and
+      ((keys - ["schema_version","operation_id","plan_fingerprint","storage","backups","smb_password"]) | length == 0) and
       .schema_version == "v1" and
       (.operation_id|type == "string") and
       (.plan_fingerprint|type == "string") and
+      ((.smb_password // "")|type == "string") and
       (.storage|type == "object") and
       (.backups|type == "object") and
       ((.storage|keys) - ["type","path","device","parent_disk","filesystem","uuid","mount_point","expected_uuid","expected_source"] | length == 0) and
-      ((.backups|keys) - ["type","path","device","parent_disk","filesystem","uuid","mount_point","expected_uuid","expected_source"] | length == 0) and
+      ((.backups|keys) - ["type","path","device","parent_disk","filesystem","uuid","mount_point","expected_uuid","expected_source","source","username","domain","credentials_required"] | length == 0) and
       ([.storage,.backups][] | .type|type == "string") and
       ([.storage,.backups][] | .path|type == "string") and
       ([.storage,.backups][] | (.device // "")|type == "string") and
@@ -137,8 +145,15 @@ _a53_parse_request() {
       ([.storage,.backups][] | (.mount_point // "")|type == "string") and
       ([.storage,.backups][] | (.expected_uuid // "")|type == "string") and
       ([.storage,.backups][] | (.expected_source // "")|type == "string") and
-      ([paths | select((last|type) == "string" and ((last|ascii_downcase)|contains("password")))] | length == 0)
+      ((.backups.source // "")|type == "string") and
+      ((.backups.username // "")|type == "string") and
+      ((.backups.domain // "")|type == "string") and
+      ((.backups.credentials_required // false)|type == "boolean")
     ' >/dev/null 2>&1 <<< "${A53_REQUEST}" || return 1
+
+    A54_SMB_PASSWORD="$(jq -r '.smb_password // ""' <<< "${A53_REQUEST}")"
+    [[ ${A54_SMB_PASSWORD} != *$'\n'* && ${A54_SMB_PASSWORD} != *$'\r'* && ${#A54_SMB_PASSWORD} -le 4096 ]] || return 1
+    A53_REQUEST="$(jq -c 'del(.smb_password)' <<< "${A53_REQUEST}")" || return 1
 
     A53_OPERATION_ID="$(jq -r '.operation_id' <<< "${A53_REQUEST}")"
     A53_PLAN_FINGERPRINT="$(jq -r '.plan_fingerprint' <<< "${A53_REQUEST}")"
@@ -223,6 +238,46 @@ _a53_validate_partition_target() {
     return 0
 }
 
+_a54_validate_network_target() {
+    local target_json="$1" type path mountpoint source expected_source username domain credentials_required actual_source
+    target_json="$2"
+    type="$(jq -r '.type' <<< "${target_json}")"
+    path="$(_a53_normalize_path "$(jq -r '.path' <<< "${target_json}")")"
+    mountpoint="$(_a53_normalize_path "$(jq -r '.mount_point // ""' <<< "${target_json}")")"
+    source="$(jq -r '.source // ""' <<< "${target_json}")"
+    expected_source="$(jq -r '.expected_source // ""' <<< "${target_json}")"
+    username="$(jq -r '.username // ""' <<< "${target_json}")"
+    domain="$(jq -r '.domain // ""' <<< "${target_json}")"
+    credentials_required="$(jq -r '.credentials_required // false' <<< "${target_json}")"
+
+    [[ -n ${path} && -n ${mountpoint} && -n ${source} ]] || return 1
+    validate_storage_path "${path}" >/dev/null 2>&1 || return 1
+    storage_validate_mountpoint_path "${mountpoint}" >/dev/null 2>&1 || return 1
+    _a53_path_within "${path}" "${mountpoint}" || return 1
+    [[ -z ${expected_source} || ${expected_source} == "${source}" ]] || return 1
+
+    case "${type}" in
+        nfs)
+            [[ ${source} == *:* && ${source} != *[[:space:]]* ]] || return 1
+            [[ ${credentials_required} == false && -z ${username} && -z ${domain} ]] || return 1
+            ;;
+        smb)
+            [[ ${source} == //*/* && ${source} != *[[:space:]]* ]] || return 1
+            [[ ${credentials_required} == true && -n ${username} ]] || return 1
+            validate_simple_text "${username}" >/dev/null 2>&1 || return 1
+            validate_simple_text "${domain}" >/dev/null 2>&1 || return 1
+            [[ ${username} != *$'\t'* && ${domain} != *$'\t'* ]] || return 1
+            ;;
+        *) return 2 ;;
+    esac
+
+    if mountpoint -q -- "${mountpoint}"; then
+        actual_source="$(findmnt -n -o SOURCE --target "${mountpoint}" 2>/dev/null || true)"
+        [[ ${actual_source} == "${source}" ]] || return 1
+    fi
+    return 0
+}
+
 _a53_validate_target() {
     local purpose="$1" target_json="$2" type path
     type="$(jq -r '.type' <<< "${target_json}")"
@@ -230,12 +285,16 @@ _a53_validate_target() {
     case "${type}" in
         system) _a53_validate_system_target "${purpose}" "${path}" ;;
         partition) _a53_validate_partition_target "${purpose}" "${target_json}" ;;
+        nfs|smb)
+            [[ ${purpose} == backup ]] || return 2
+            _a54_validate_network_target "${purpose}" "${target_json}"
+            ;;
         *) return 2 ;;
     esac
 }
 
 _a53_validate_all() {
-    local storage backups storage_path backup_path
+    local storage backups storage_path backup_path backup_type
     storage="$(jq -c '.storage' <<< "${A53_REQUEST}")"
     backups="$(jq -c '.backups' <<< "${A53_REQUEST}")"
     _a53_validate_target data "${storage}" || return $?
@@ -243,5 +302,12 @@ _a53_validate_all() {
     storage_path="$(_a53_normalize_path "$(jq -r '.path' <<< "${storage}")")"
     backup_path="$(_a53_normalize_path "$(jq -r '.path' <<< "${backups}")")"
     _a53_paths_overlap "${storage_path}" "${backup_path}" && return 1
+    backup_type="$(jq -r '.type' <<< "${backups}")"
+    if [[ ${backup_type} == smb && -z ${A54_SMB_PASSWORD} ]]; then
+        return 3
+    fi
+    if [[ ${backup_type} != smb && -n ${A54_SMB_PASSWORD} ]]; then
+        return 1
+    fi
     return 0
 }
