@@ -42,12 +42,14 @@ This repository builds the shared, VM-ready Base image:
 ghcr.io/home-server-project/justvoxel-base
 ```
 
-The final JustVoxel product repository consumes the approved `:stable` Base channel.
+During active development, the final JustVoxel `testing` branch consumes `justvoxel-base:testing` to build the HWE testing product. It does not rebuild the shared appliance source.
 
-- **JustVoxel VM** is a promotion/copy of the approved Base image.
-- **JustVoxel HWE** derives from the approved Base and adds the physical-hardware administration delta.
+The intended stable product model is:
 
-The HWE package list, HWE build logic, installation media, and final release mechanics belong outside this Base repository.
+- **JustVoxel VM** — promotion/copy of an approved stable Base image.
+- **JustVoxel HWE** — the approved Base plus the physical-hardware administration delta.
+
+The HWE package list, HWE build logic, HWE update trust, installation media, and final release mechanics belong outside this Base repository.
 
 For the exact layering model, see [`docs/VARIANTS.md`](docs/VARIANTS.md).
 
@@ -66,6 +68,8 @@ The interaction model is inspired by Universal Blue's `ujust` / `ugum` work in [
 For the complete interface and command reference, see [`docs/MJUST.md`](docs/MJUST.md).
 
 ## Web management
+
+The WebUI source and the privileged Management Agent source are maintained in this Base repository and built/tested from the same appliance source commit. That source consolidation does not collapse the runtime security boundary: the browser-facing WebUI remains unprivileged and reaches approved privileged operations only through Management API v1 over the local Unix socket.
 
 JustVoxel WebUI is intended for administration from a trusted local network. By default, Web management uses plain HTTP on TCP port `8099`, allowing direct access from the appliance LAN address without a self-signed certificate warning.
 
