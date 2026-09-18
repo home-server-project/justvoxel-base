@@ -137,6 +137,8 @@ _a55_validate_runtime_inputs() {
     for file in "${A55_RUNTIME_FILES[@]}"; do
         [[ ! -e ${file} ]] || return 1
     done
+    systemctl cat minecraft.service >/dev/null 2>&1 && return 1
+    systemctl cat minecraft-backup.timer >/dev/null 2>&1 && return 1
     [[ ! -e ${A55_SETUP_MARKER} ]] || return 1
     return 0
 }
@@ -218,13 +220,21 @@ _a55_rollback_action() {
     selinux_added="$(jq -r '.runtime.selinux_rule_added // false' "${A53_MANIFEST}")"
 
     systemctl disable --now minecraft-backup.timer >/dev/null 2>&1 || true
+    if systemctl is-active --quiet minecraft-backup.timer 2>/dev/null; then failure=1; fi
     systemctl stop minecraft.service >/dev/null 2>&1 || true
+    if systemctl is-active --quiet minecraft.service 2>/dev/null; then failure=1; fi
 
     rm -f -- "${JV_QUADLET}" "${JV_MC_ENV}" "${JV_BACKUP_ENV}" "${JV_BACKUP_SERVICE}" "${JV_BACKUP_TIMER}" "${JV_CONFIG}" || failure=1
     systemctl daemon-reload >/dev/null 2>&1 || failure=1
 
-    if [[ ${java_pre} != true ]]; then firewall-cmd --permanent --remove-port="${JAVA_PORT}/tcp" >/dev/null 2>&1 || true; fi
-    if [[ ${BEDROCK_ENABLED} == yes && ${bedrock_pre} != true ]]; then firewall-cmd --permanent --remove-port="${BEDROCK_PORT}/udp" >/dev/null 2>&1 || true; fi
+    if [[ ${java_pre} != true ]]; then
+        firewall-cmd --permanent --remove-port="${JAVA_PORT}/tcp" >/dev/null 2>&1 || true
+        firewall-cmd --permanent --query-port="${JAVA_PORT}/tcp" >/dev/null 2>&1 && failure=1
+    fi
+    if [[ ${BEDROCK_ENABLED} == yes && ${bedrock_pre} != true ]]; then
+        firewall-cmd --permanent --remove-port="${BEDROCK_PORT}/udp" >/dev/null 2>&1 || true
+        firewall-cmd --permanent --query-port="${BEDROCK_PORT}/udp" >/dev/null 2>&1 && failure=1
+    fi
     firewall-cmd --reload >/dev/null 2>&1 || failure=1
 
     if [[ ${selinux_added} == true ]]; then
