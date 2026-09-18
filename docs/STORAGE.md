@@ -19,9 +19,9 @@ If JustVoxel VM sees no safe secondary disk, the storage wizard tells the admini
 
 A virtual disk is treated exactly like local block storage. The hypervisor can snapshot, replicate, or back up that virtual disk using its own policy independently of JustVoxel.
 
-## Bare Metal design
+## HWE / physical-hardware design
 
-Bare Metal supports:
+JustVoxel HWE supports:
 
 - dedicated internal disk
 - external USB disk or USB stick
@@ -57,7 +57,7 @@ The system disk is allowed for this operation because only already-free space is
 
 ## Network backups
 
-NFS and SMB/CIFS are supported for both VM and Bare Metal backup targets.
+NFS and SMB/CIFS are supported for both VM and HWE backup targets.
 
 Network mounts created by mjust are written persistently to `/etc/fstab` with `_netdev` and `nofail`. If the requested NFS/SMB source is already mounted at the selected path, mjust adopts that mount without rewriting its existing mount configuration. A network outage therefore does not block the appliance from booting. The backup job still fails closed: if the expected share is not mounted or the reported source does not match the stored source, Minecraft is not stopped and no archive is written to the local root filesystem by mistake.
 
