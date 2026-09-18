@@ -34,33 +34,22 @@ If you can install Windows or Linux yourself, create a VM, write an ISO to a USB
 
 Experienced administrators are not locked out. JustVoxel remains a normal immutable EL10 server built on Home Server Base 10 / AlmaLinux 10, and standard Linux administration tools remain available when deeper control or troubleshooting is wanted.
 
-## Install JustVoxel
+## Product layering
 
-For a fresh installation, use the dedicated [JustVoxel ISO Builder](https://github.com/home-server-project/justvoxel-iso).
+This repository builds the shared, VM-ready Base image:
 
-The ISO project owns the installation side of JustVoxel, including:
+```text
+ghcr.io/home-server-project/justvoxel-base
+```
 
-- VM versus physical/HWE installation
-- CPU, memory, and disk guidance
-- installer-media creation
-- installation-disk safety
-- SSH and first-access guidance
-- installer options
-- first boot
+The final JustVoxel product repository consumes the approved `:stable` Base channel.
 
-The normal user path is to install JustVoxel from its installer media rather than manually rebasing another operating system to the JustVoxel image.
+- **JustVoxel VM** is a promotion/copy of the approved Base image.
+- **JustVoxel HWE** derives from the approved Base and adds the physical-hardware administration delta.
 
-Advanced bootc users can still work directly with the published images, but that is not the primary installation path documented for normal users.
+The HWE package list, HWE build logic, installation media, and final release mechanics belong outside this Base repository.
 
-## Base, VM release, and HWE
-
-This repository builds one shared appliance image: **JustVoxel Base**.
-
-The Base is already VM-ready. After validation, the final JustVoxel product repository can promote the approved `justvoxel-base:stable` image into the VM release without rebuilding the same appliance content.
-
-**JustVoxel HWE** is the physical-machine product. It derives from the approved Base and adds only the hardware-specific administration delta.
-
-For the product layering, see [`docs/VARIANTS.md`](docs/VARIANTS.md).
+For the exact layering model, see [`docs/VARIANTS.md`](docs/VARIANTS.md).
 
 ## Operate the appliance with mjust
 
@@ -127,28 +116,26 @@ Start with the document that matches what you are trying to do:
 - [`docs/BUILD.md`](docs/BUILD.md) — image composition, signing, CI, branches, and release mechanics
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — current priorities, future features, and project non-goals
 
-## Branch and release model
+## Branch and channel model
 
-- `testing` — active Base development
-- `main` — validated Base promotions
+- `testing` — active development; push or manual workflow builds `justvoxel-base:testing`
+- `main` — validated Base source; stable workflow remains manual-only during active development
 
-Testing builds run on pushes to `testing` and manual **Run workflow** invocations. They publish:
+Testing publishes:
 
 ```text
 ghcr.io/home-server-project/justvoxel-base:testing
 testing-YYYYMMDD-<git-sha>
 ```
 
-There is no scheduled testing build.
-
-The stable Base workflow is currently manual-only. When deliberately run from validated `main`, it publishes:
+When deliberately run from validated `main`, the stable workflow publishes:
 
 ```text
 ghcr.io/home-server-project/justvoxel-base:stable
 stable-YYYYMMDD-<git-sha>
 ```
 
-Final JustVoxel VM/HWE release images are owned by the separate final product repository and consume the approved `justvoxel-base:stable` channel.
+This Base repository does not publish final VM or HWE releases.
 
 ## License
 
