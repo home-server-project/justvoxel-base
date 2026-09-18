@@ -226,6 +226,13 @@ func registerAdminSetupPlanRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("POST /v1/admin/setup/plan", s.adminSetupPlan)
 }
 
+type adminSetupPlanningError struct {
+	status  int
+	message string
+}
+
+func (e *adminSetupPlanningError) Error() string { return e.message }
+
 func (s *server) adminSetupPlan(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.requireAdministrator(w, r); !ok {
 		return
@@ -235,49 +242,53 @@ func (s *server) adminSetupPlan(w http.ResponseWriter, r *http.Request) {
 	if !decodeAdminSetupPlanRequest(w, r, &request) {
 		return
 	}
-	payload, err := json.Marshal(request)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "first-run setup request could not be prepared")
+	out, planningErr := authoritativeAdminSetupPlan(r.Context(), request)
+	if planningErr != nil {
+		writeError(w, planningErr.status, planningErr.message)
 		return
 	}
+	if !out.OK {
+		writeJSON(w, http.StatusBadRequest, out)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
 
-	ctx, cancel := context.WithTimeout(r.Context(), adminSetupPlanTimeout)
+func authoritativeAdminSetupPlan(parent context.Context, request adminSetupPlanRequest) (adminSetupPlanResponse, *adminSetupPlanningError) {
+	var out adminSetupPlanResponse
+	payload, err := json.Marshal(request)
+	if err != nil {
+		return out, &adminSetupPlanningError{status: http.StatusInternalServerError, message: "first-run setup request could not be prepared"}
+	}
+
+	ctx, cancel := context.WithTimeout(parent, adminSetupPlanTimeout)
 	defer cancel()
 	output, err := runAdminSetupPlanHelper(ctx, payload)
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "first-run setup planning is unavailable")
-		return
+		return out, &adminSetupPlanningError{status: http.StatusServiceUnavailable, message: "first-run setup planning is unavailable"}
 	}
-
-	var out adminSetupPlanResponse
 	if err := decodeAdminSetupPlanResponse(output, &out); err != nil {
-		writeError(w, http.StatusInternalServerError, "first-run setup planner returned invalid data")
-		return
+		return out, &adminSetupPlanningError{status: http.StatusInternalServerError, message: "first-run setup planner returned invalid data"}
 	}
 	if out.SchemaVersion != "v1" {
-		writeError(w, http.StatusInternalServerError, "first-run setup planner returned an unsupported schema")
-		return
+		return out, &adminSetupPlanningError{status: http.StatusInternalServerError, message: "first-run setup planner returned an unsupported schema"}
 	}
 	if out.Warnings == nil {
 		out.Warnings = []adminSetupPlanWarning{}
 	}
-
 	if !out.OK {
 		out.Error = boundedSetupPlanError(out.Error)
-		writeJSON(w, http.StatusBadRequest, out)
-		return
+		return out, nil
 	}
 	if out.Normalized == nil || out.Requirements == nil || out.Normalized.Minecraft.VersionPolicy == "" || out.Normalized.Storage.Type == "" || out.Normalized.Backups.Type == "" {
-		writeError(w, http.StatusInternalServerError, "first-run setup planner returned incomplete data")
-		return
+		return out, &adminSetupPlanningError{status: http.StatusInternalServerError, message: "first-run setup planner returned incomplete data"}
 	}
 	fingerprint, err := adminSetupPlanFingerprint(out.SchemaVersion, out.Normalized, out.Requirements)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "first-run setup plan identity could not be created")
-		return
+		return out, &adminSetupPlanningError{status: http.StatusInternalServerError, message: "first-run setup plan identity could not be created"}
 	}
 	out.PlanFingerprint = fingerprint
-	writeJSON(w, http.StatusOK, out)
+	return out, nil
 }
 
 func adminSetupPlanFingerprint(schemaVersion string, normalized *adminSetupNormalizedPlan, requirements *adminSetupPlanRequirements) (string, error) {
