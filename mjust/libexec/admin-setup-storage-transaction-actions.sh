@@ -20,8 +20,9 @@ a53_validate_action() {
     _a53_validate_all || validate_rc=$?
     if (( validate_rc != 0 )); then
         case ${validate_rc} in
-            2) _a53_json false false storage_preflight not_started no_changes 'A5.3 supports only system storage and existing local filesystems.' ;;
-            *) _a53_json false false storage_preflight not_started no_changes 'Reviewed local storage no longer matches the current appliance state.' ;;
+            2) _a53_json false false storage_preflight not_started no_changes 'A5.4 supports system storage, existing local filesystems, NFS, and SMB backups.' ;;
+            3) _a53_json false false storage_preflight not_started no_changes 'SMB password is required only when setup is executed.' ;;
+            *) _a53_json false false storage_preflight not_started no_changes 'Reviewed storage no longer matches the current appliance state.' ;;
         esac
         return 0
     fi
@@ -38,8 +39,9 @@ a53_apply_action() {
     _a53_validate_all || validate_rc=$?
     if (( validate_rc != 0 )); then
         case ${validate_rc} in
-            2) _a53_json false false storage_preflight not_started no_changes 'A5.3 supports only system storage and existing local filesystems.' ;;
-            *) _a53_json false false storage_preflight not_started no_changes 'Reviewed local storage no longer matches the current appliance state.' ;;
+            2) _a53_json false false storage_preflight not_started no_changes 'A5.4 supports system storage, existing local filesystems, NFS, and SMB backups.' ;;
+            3) _a53_json false false storage_preflight not_started no_changes 'SMB password is required only when setup is executed.' ;;
+            *) _a53_json false false storage_preflight not_started no_changes 'Reviewed storage no longer matches the current appliance state.' ;;
         esac
         return 0
     fi
@@ -59,11 +61,16 @@ a53_apply_action() {
     _a53_manifest_set_phase storage_mount || { _a53_apply_failure 'Could not persist storage transaction state.'; return 0; }
     _a53_mount_target "${storage}" || { _a53_apply_failure 'Minecraft local storage could not be mounted safely.'; return 0; }
 
-    if [[ $(jq -r '.type' <<< "${backups}") == partition ]]; then
-        if [[ $(jq -r '.mount_point' <<< "${backups}") != "$(jq -r '.mount_point' <<< "${storage}")" || $(jq -r '.expected_uuid' <<< "${backups}") != "$(jq -r '.expected_uuid' <<< "${storage}")" ]]; then
-            _a53_mount_target "${backups}" || { _a53_apply_failure 'Backup local storage could not be mounted safely.'; return 0; }
-        fi
-    fi
+    case "$(jq -r '.type' <<< "${backups}")" in
+        partition)
+            if [[ $(jq -r '.mount_point' <<< "${backups}") != "$(jq -r '.mount_point' <<< "${storage}")" || $(jq -r '.expected_uuid' <<< "${backups}") != "$(jq -r '.expected_uuid' <<< "${storage}")" ]]; then
+                _a53_mount_target "${backups}" || { _a53_apply_failure 'Backup local storage could not be mounted safely.'; return 0; }
+            fi
+            ;;
+        nfs|smb)
+            _a54_mount_network_target "${backups}" || { _a53_apply_failure 'Network backup storage could not be mounted and verified safely.'; return 0; }
+            ;;
+    esac
 
     _a53_manifest_set_phase storage_paths || { _a53_apply_failure 'Could not persist storage transaction state.'; return 0; }
     _a53_prepare_paths || { _a53_apply_failure 'Local storage directories could not be prepared or verified writable.'; return 0; }
