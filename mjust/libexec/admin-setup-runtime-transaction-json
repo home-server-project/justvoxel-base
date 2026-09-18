@@ -201,7 +201,7 @@ _a55_verify_action() {
     wait_for_rcon 900 || return 1
     podman exec minecraft rcon-cli version >/dev/null 2>&1 || return 1
     if [[ ${BEDROCK_ENABLED} == yes ]]; then
-        configure_geyser_floodgate || return 1
+        configure_geyser_floodgate >/dev/null 2>&1 || return 1
         podman exec minecraft rcon-cli 'geyser version' >/dev/null 2>&1 || return 1
     fi
     activate_backup_timer || return 1
