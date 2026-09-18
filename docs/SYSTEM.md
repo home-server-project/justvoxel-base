@@ -9,7 +9,7 @@ JustVoxel keeps operating-system maintenance separate from Minecraft/container m
 - `mjust resources` — open the live btop system resource monitor
 - `mjust reboot` — player-aware graceful reboot
 - `mjust poweroff` — player-aware graceful power off
-- `mjust firmware` — HWE-only reboot into firmware/UEFI setup
+- `mjust firmware` — reboot into firmware/UEFI setup when supported on physical hardware
 
 All commands are also reachable from `mjust` -> **System**.
 
@@ -62,9 +62,9 @@ An ordinary reboot/poweroff does not force a Minecraft backup. If a bootc update
 
 ## Firmware / UEFI
 
-`mjust firmware` is intended only for JustVoxel HWE. The VM-ready Base/VM product refuses the operation and directs the administrator to the hypervisor.
+`mjust firmware` is intended only for supported physical-hardware deployments. VM or otherwise unsupported environments refuse the operation and direct the administrator to the platform/hypervisor controls.
 
-HWE verifies EFI/systemd firmware-reboot support, performs a best-effort DRM display check, warns when no display is detected or display state is unknown, requires confirmation, performs the same Minecraft-safe shutdown, and requests `systemctl reboot --firmware-setup`.
+The firmware workflow verifies EFI/systemd firmware-reboot support, performs a best-effort DRM display check, warns when no display is detected or display state is unknown, requires confirmation, performs the same Minecraft-safe shutdown, and requests `systemctl reboot --firmware-setup`.
 
 Display detection is advisory because KVM switches, EDID behavior, firmware and hardware can make Linux connector state imperfect.
 
