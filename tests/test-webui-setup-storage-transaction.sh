@@ -25,6 +25,14 @@ install() {
     command install "${args[@]}"
 }
 
+chown() {
+    local requested="${1:-}" path="${2:-}"
+    local current
+    current="$(id -u):$(id -g)"
+    [[ "${requested}" == "${current}" ]] || fail "test attempted unexpected ownership restore ${requested} for ${path}"
+    return 0
+}
+
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
