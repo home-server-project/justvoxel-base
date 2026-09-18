@@ -6,7 +6,13 @@ set -ouex pipefail
 : "${IMAGE_VARIANT:?IMAGE_VARIANT must be set}"
 : "${IMAGE_VARIANT_ID:?IMAGE_VARIANT_ID must be set}"
 
-/ctx/build_files/install-image-trust.sh "${IMAGE_REPOSITORY}"
+IMAGE_ADDITIONAL_TRUST_REPOSITORIES="${IMAGE_ADDITIONAL_TRUST_REPOSITORIES:-}"
+trust_repositories=("${IMAGE_REPOSITORY}")
+if [[ -n "${IMAGE_ADDITIONAL_TRUST_REPOSITORIES//[[:space:]]/}" ]]; then
+    read -r -a additional_trust_repositories <<< "${IMAGE_ADDITIONAL_TRUST_REPOSITORIES}"
+    trust_repositories+=("${additional_trust_repositories[@]}")
+fi
+/ctx/build_files/install-image-trust.sh "${trust_repositories[@]}"
 
 OS_RELEASE_USR=/usr/lib/os-release
 OS_RELEASE_ETC=/etc/os-release
@@ -160,5 +166,7 @@ test "$(stat -c '%a %U %G' /var/tmp)" = "1777 root root"
 jq empty /etc/containers/policy.json
 test -f /usr/lib/pki/containers/home-server-project.pub
 test -f /etc/containers/registries.d/ghcr.io-home-server-project.yaml
-grep -Fq "${IMAGE_REPOSITORY}:" /etc/containers/registries.d/ghcr.io-home-server-project.yaml
+for trust_repository in "${trust_repositories[@]}"; do
+    grep -Fq "${trust_repository}:" /etc/containers/registries.d/ghcr.io-home-server-project.yaml
+done
 grep -Fq "use-sigstore-attachments: true" /etc/containers/registries.d/ghcr.io-home-server-project.yaml
