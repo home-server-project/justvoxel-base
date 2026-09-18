@@ -252,6 +252,94 @@ func TestAdminSetupApplyRejectsUnknownSecretAndTrailingJSON(t *testing.T) {
 	}
 }
 
+func TestAdminSetupApplyRequiresTransientSMBPasswordWithoutPersistingIt(t *testing.T) {
+	s := surfaceTestServer(t, roleAdministrator)
+	store := openTestOperationStore(t)
+	attachTestOperationStore(t, s, store)
+
+	var planned adminSetupPlanResponse
+	if err := json.Unmarshal([]byte(validAdminSetupPlanResponse), &planned); err != nil {
+		t.Fatal(err)
+	}
+	planned.Normalized.Backups.Type = "smb"
+	planned.Normalized.Backups.Path = "/var/mnt/backups/minecraft"
+	planned.Normalized.Backups.MountPoint = "/var/mnt/backups"
+	planned.Normalized.Backups.Source = "//nas/backups"
+	planned.Normalized.Backups.ExpectedSource = "//nas/backups"
+	planned.Normalized.Backups.Username = "backup-user"
+	planned.Normalized.Backups.CredentialsRequired = true
+	planned.Requirements.SMBPasswordRequired = true
+	planned.Requirements.NetworkBackupValidationOnApply = true
+	fingerprint, err := adminSetupPlanFingerprint(planned.SchemaVersion, planned.Normalized, planned.Requirements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plannerJSON, err := json.Marshal(planned)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var request adminSetupPlanRequest
+	if err := json.Unmarshal([]byte(validAdminSetupPlanRequest), &request); err != nil {
+		t.Fatal(err)
+	}
+	request.Backups.Type = "smb"
+	request.Backups.Path = "/var/mnt/backups/minecraft"
+	request.Backups.MountPoint = "/var/mnt/backups"
+	request.Backups.Source = "//nas/backups"
+	request.Backups.Username = "backup-user"
+	body, err := json.Marshal(adminSetupApplyRequest{PlanFingerprint: fingerprint, Request: request})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oldPlan := runAdminSetupPlanHelper
+	oldDiscovery := runAdminDiscoveryHelper
+	defer func() {
+		runAdminSetupPlanHelper = oldPlan
+		runAdminDiscoveryHelper = oldDiscovery
+	}()
+	runAdminSetupPlanHelper = func(_ context.Context, payload []byte) ([]byte, error) {
+		if strings.Contains(string(payload), "super-secret") {
+			t.Fatal("SMB secret leaked into authoritative planning payload")
+		}
+		return plannerJSON, nil
+	}
+	runAdminDiscoveryHelper = func(_ context.Context, _ string) ([]byte, error) {
+		return []byte(`{"configured":false,"minecraft":{},"backup":{}}`), nil
+	}
+
+	rr := httptest.NewRecorder()
+	s.adminSetupApply(rr, surfaceRequest(http.MethodPost, "/v1/admin/setup/apply", string(body)))
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), `"code":"smb_password_required"`) {
+		t.Fatalf("missing password status = %d: %s", rr.Code, rr.Body.String())
+	}
+	if current, err := store.currentSetup(); err != nil || current != nil {
+		t.Fatalf("operation created without SMB password: %#v err=%v", current, err)
+	}
+
+	body, err = json.Marshal(adminSetupApplyRequest{PlanFingerprint: fingerprint, Request: request, SMBPassword: "super-secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr = httptest.NewRecorder()
+	s.adminSetupApply(rr, surfaceRequest(http.MethodPost, "/v1/admin/setup/apply", string(body)))
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("SMB apply contract status = %d: %s", rr.Code, rr.Body.String())
+	}
+	current, err := store.currentSetup()
+	if err != nil || current == nil {
+		t.Fatalf("current=%#v err=%v", current, err)
+	}
+	journalJSON, err := json.Marshal(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(journalJSON), "super-secret") {
+		t.Fatal("SMB password leaked into operation journal")
+	}
+}
+
 func TestAdminSetupApplyPreflightFailureIsSanitized(t *testing.T) {
 	s := surfaceTestServer(t, roleAdministrator)
 	attachTestOperationStore(t, s, openTestOperationStore(t))
