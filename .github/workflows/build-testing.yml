@@ -184,7 +184,6 @@ jobs:
             --build-arg "HOME_SERVER_BASE_IMAGE=${HOME_SERVER_BASE_IMAGE}" \
             --build-arg "JUSTVOXEL_BASE_REPOSITORY=${IMAGE_REPOSITORY}" \
             --build-arg "JUSTVOXEL_VM_REPOSITORY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/justvoxel-vm" \
-            --build-arg "JUSTVOXEL_HWE_REPOSITORY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/justvoxel-hwe" \
             --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
             --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --label "io.home-server-project.justvoxel.webui.version=${WEBUI_VERSION}" \
