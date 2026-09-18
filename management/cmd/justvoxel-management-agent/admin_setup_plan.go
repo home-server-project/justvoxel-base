@@ -284,7 +284,7 @@ func authoritativeAdminSetupPlan(parent context.Context, request adminSetupPlanR
 		out.Error = boundedSetupPlanError(out.Error)
 		return out, nil
 	}
-	if out.Normalized == nil || out.Requirements == nil || out.Normalized.Minecraft.VersionPolicy == "" || out.Normalized.Storage.Type == "" || out.Normalized.Backups.Type == "" {
+	if out.Normalized == nil || out.Requirements == nil || out.Normalized.Minecraft.VersionPolicy == "" || out.Normalized.Minecraft.MinecraftUID == 0 || out.Normalized.Minecraft.MinecraftGID == 0 || out.Normalized.Storage.Type == "" || out.Normalized.Backups.Type == "" {
 		return out, &adminSetupPlanningError{status: http.StatusInternalServerError, message: "first-run setup planner returned incomplete data"}
 	}
 	fingerprint, err := adminSetupPlanFingerprint(out.SchemaVersion, out.Normalized, out.Requirements)
