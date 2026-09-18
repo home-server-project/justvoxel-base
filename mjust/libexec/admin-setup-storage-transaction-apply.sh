@@ -269,7 +269,17 @@ _a53_load_manifest_for_rollback() {
 
 _a53_remove_created_empty_dirs() {
     local path i
-    _a53_remove_created_empty_dirs
+    if (( ${#A53_DIRS_CREATED[@]} == 0 )); then
+        while IFS= read -r path; do
+            [[ -n ${path} ]] && A53_DIRS_CREATED+=("${path}")
+        done < <(jq -r '.directories_created[]?' "${A53_MANIFEST}" 2>/dev/null)
+    fi
+    for (( i=${#A53_DIRS_CREATED[@]}-1; i>=0; i-- )); do
+        path="${A53_DIRS_CREATED[$i]}"
+        if [[ -d ${path} ]]; then
+            rmdir -- "${path}" >/dev/null 2>&1 || true
+        fi
+    done
 }
 
 _a53_rollback() {
@@ -331,17 +341,7 @@ _a53_rollback() {
         _a54_restore_smb_credentials || failure=1
     fi
 
-    if (( ${#A53_DIRS_CREATED[@]} == 0 )); then
-        while IFS= read -r path; do
-            [[ -n ${path} ]] && A53_DIRS_CREATED+=("${path}")
-        done < <(jq -r '.directories_created[]?' "${A53_MANIFEST}" 2>/dev/null)
-    fi
-    for (( i=${#A53_DIRS_CREATED[@]}-1; i>=0; i-- )); do
-        path="${A53_DIRS_CREATED[$i]}"
-        if [[ -d ${path} ]]; then
-            rmdir -- "${path}" >/dev/null 2>&1 || true
-        fi
-    done
+    _a53_remove_created_empty_dirs
 
     if (( failure != 0 )); then
         _a53_manifest_set_rollback failed needs_attention >/dev/null 2>&1 || true
