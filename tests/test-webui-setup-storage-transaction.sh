@@ -11,6 +11,20 @@ source "${repo_root}/mjust/libexec/admin-setup-storage-transaction-actions.sh"
 
 fail(){ echo "FAIL: $*" >&2; exit 1; }
 
+# Production transaction code owns files as root. CI runs this isolated
+# temp-directory harness unprivileged, so preserve install modes while
+# dropping only owner/group flags inside the test process.
+install() {
+    local -a args=()
+    while (( $# )); do
+        case "$1" in
+            -o|-g) shift 2 ;;
+            *) args+=("$1"); shift ;;
+        esac
+    done
+    command install "${args[@]}"
+}
+
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
