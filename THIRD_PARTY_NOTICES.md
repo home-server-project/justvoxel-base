@@ -1,9 +1,10 @@
 # Third-party notices
 
-## AlmaLinux / bootc foundation
+## Home Server Base 10 / AlmaLinux / bootc foundation
 
-JustVoxel composes an AlmaLinux 10 minimal-plus bootc root filesystem using AlmaLinux repositories and the upstream `bootc-base-imagectl` build pattern.
+JustVoxel Base inherits its shared AlmaLinux 10 Minimal Plus bootc foundation from the Home Server Project's Home Server Base 10 image. Home Server Base 10 owns the generic operating-system composition; JustVoxel Base adds the Minecraft-appliance layer on top.
 
+- Home Server Base 10: https://github.com/home-server-project/home-server-base-10
 - AlmaLinux: https://almalinux.org/
 - bootc: https://github.com/bootc-dev/bootc
 
