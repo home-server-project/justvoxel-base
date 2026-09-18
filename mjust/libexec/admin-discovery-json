@@ -77,7 +77,7 @@ configuration_values_json() {
 }
 
 configuration_json() {
-    if [[ -e /var/lib/justvoxel/management/setup-in-progress ]]; then
+    if [[ -e ${JV_SETUP_IN_PROGRESS} ]]; then
         jq -n '{configured:false,minecraft:{},backup:{}}'
         return 0
     fi
