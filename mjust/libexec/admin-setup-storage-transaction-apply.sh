@@ -1,5 +1,5 @@
 _a53_prepare_transaction() {
-    local fstab_snapshot before manifest
+    local fstab_snapshot before manifest credentials_snapshot credentials_before
     install -d -m0700 -o root -g root "${A53_TRANSACTION_ROOT}" || return 1
     A53_TX_DIR="${A53_TRANSACTION_ROOT}/${A53_OPERATION_ID}"
     [[ ! -e ${A53_TX_DIR} ]] || return 2
@@ -22,6 +22,26 @@ _a53_prepare_transaction() {
     fi
     chmod 0600 "${fstab_snapshot}" || return 1
     before="$(_a53_file_sha256 "${fstab_snapshot}")"
+
+    credentials_snapshot="${A53_TX_DIR}/smb.credentials.before"
+    if [[ -e ${A54_SMB_CREDENTIALS} ]]; then
+        cat -- "${A54_SMB_CREDENTIALS}" > "${credentials_snapshot}" || return 1
+        chmod 0600 "${credentials_snapshot}" || return 1
+        A54_CREDENTIALS_EXISTED=true
+        A54_CREDENTIALS_MODE="$(stat -c '%a' "${A54_SMB_CREDENTIALS}" 2>/dev/null || true)"
+        A54_CREDENTIALS_UID="$(stat -c '%u' "${A54_SMB_CREDENTIALS}" 2>/dev/null || true)"
+        A54_CREDENTIALS_GID="$(stat -c '%g' "${A54_SMB_CREDENTIALS}" 2>/dev/null || true)"
+        [[ -n ${A54_CREDENTIALS_MODE} && -n ${A54_CREDENTIALS_UID} && -n ${A54_CREDENTIALS_GID} ]] || return 1
+    else
+        : > "${credentials_snapshot}" || return 1
+        chmod 0600 "${credentials_snapshot}" || return 1
+        A54_CREDENTIALS_EXISTED=false
+        A54_CREDENTIALS_MODE=''
+        A54_CREDENTIALS_UID=''
+        A54_CREDENTIALS_GID=''
+    fi
+    credentials_before="$(_a53_file_sha256 "${credentials_snapshot}")"
+
     manifest="$(jq -cn \
         --arg operation_id "${A53_OPERATION_ID}" \
         --arg plan_fingerprint "${A53_PLAN_FINGERPRINT}" \
@@ -30,7 +50,12 @@ _a53_prepare_transaction() {
         --arg fstab_mode "${A53_FSTAB_MODE}" \
         --arg fstab_uid "${A53_FSTAB_UID}" \
         --arg fstab_gid "${A53_FSTAB_GID}" \
-        '{schema_version:"v1",operation_id:$operation_id,plan_fingerprint:$plan_fingerprint,phase:"storage_snapshot",fstab_existed:$fstab_existed,fstab_before_sha256:$fstab_before_sha256,fstab_mode:$fstab_mode,fstab_uid:$fstab_uid,fstab_gid:$fstab_gid,fstab_changed:false,fstab_after_sha256:"",mounts_by_transaction:[],directories_created:[],rollback:{state:"not_started",result:""}}')" || return 1
+        --argjson credentials_existed "${A54_CREDENTIALS_EXISTED}" \
+        --arg credentials_before_sha256 "${credentials_before}" \
+        --arg credentials_mode "${A54_CREDENTIALS_MODE}" \
+        --arg credentials_uid "${A54_CREDENTIALS_UID}" \
+        --arg credentials_gid "${A54_CREDENTIALS_GID}" \
+        '{schema_version:"v1",operation_id:$operation_id,plan_fingerprint:$plan_fingerprint,phase:"storage_snapshot",fstab_existed:$fstab_existed,fstab_before_sha256:$fstab_before_sha256,fstab_mode:$fstab_mode,fstab_uid:$fstab_uid,fstab_gid:$fstab_gid,fstab_changed:false,fstab_after_sha256:"",credentials_existed:$credentials_existed,credentials_before_sha256:$credentials_before_sha256,credentials_mode:$credentials_mode,credentials_uid:$credentials_uid,credentials_gid:$credentials_gid,credentials_changed:false,credentials_after_sha256:"",mounts_by_transaction:[],directories_created:[],rollback:{state:"not_started",result:""}}')" || return 1
     _a53_manifest_write "${manifest}" || return 1
     return 0
 }
@@ -76,6 +101,71 @@ _a53_write_local_fstab() {
     A53_MUTATION_STARTED=true
     _a53_manifest_set_fstab_changed || return 1
     systemctl daemon-reload >/dev/null 2>&1 || return 1
+}
+
+
+_a54_write_network_fstab() {
+    local source="$1" mountpoint="$2" fstype="$3" options="$4" tmp
+    [[ -e ${A53_FSTAB} ]] || : > "${A53_FSTAB}" || return 1
+    tmp="$(mktemp "$(dirname -- "${A53_FSTAB}")/.fstab.justvoxel-a54.XXXXXX")" || return 1
+    awk -v mp="${mountpoint}" '/^[[:space:]]*#/ || NF < 2 || $2 != mp {print}' "${A53_FSTAB}" > "${tmp}" || { rm -f -- "${tmp}"; return 1; }
+    printf '%s %s %s %s 0 0\n' "${source}" "${mountpoint}" "${fstype}" "${options}" >> "${tmp}" || { rm -f -- "${tmp}"; return 1; }
+    install -o root -g root -m0644 "${tmp}" "${A53_FSTAB}" || { rm -f -- "${tmp}"; return 1; }
+    rm -f -- "${tmp}"
+    A53_MUTATION_STARTED=true
+    _a53_manifest_set_fstab_changed || return 1
+    systemctl daemon-reload >/dev/null 2>&1 || return 1
+}
+
+_a54_write_smb_credentials() {
+    local username="$1" password="$2" domain="$3" after
+    install -d -m0700 -o root -g root "$(dirname -- "${A54_SMB_CREDENTIALS}")" || return 1
+    umask 077
+    {
+        printf 'username=%s\n' "${username}"
+        printf 'password=%s\n' "${password}"
+        [[ -n ${domain} ]] && printf 'domain=%s\n' "${domain}"
+    } > "${A54_SMB_CREDENTIALS}" || return 1
+    chown root:root "${A54_SMB_CREDENTIALS}" || return 1
+    chmod 0600 "${A54_SMB_CREDENTIALS}" || return 1
+    A54_CREDENTIALS_CHANGED=true
+    after="$(_a53_file_sha256 "${A54_SMB_CREDENTIALS}")"
+    _a53_manifest_update ".credentials_changed = true | .credentials_after_sha256 = \"${after}\"" || return 1
+}
+
+_a54_mount_network_target() {
+    local target_json="$1" type mountpoint source username domain actual_source options
+    type="$(jq -r '.type' <<< "${target_json}")"
+    [[ ${type} == nfs || ${type} == smb ]] || return 0
+    mountpoint="$(_a53_normalize_path "$(jq -r '.mount_point' <<< "${target_json}")")"
+    source="$(jq -r '.source' <<< "${target_json}")"
+    username="$(jq -r '.username // ""' <<< "${target_json}")"
+    domain="$(jq -r '.domain // ""' <<< "${target_json}")"
+
+    if mountpoint -q -- "${mountpoint}"; then
+        actual_source="$(findmnt -n -o SOURCE --target "${mountpoint}" 2>/dev/null || true)"
+        [[ ${actual_source} == "${source}" ]] || return 1
+        return 0
+    fi
+    if [[ ! -d ${mountpoint} ]]; then
+        _a53_ensure_dir "${mountpoint}" 0755 || return 1
+    fi
+
+    if [[ ${type} == nfs ]]; then
+        _a54_write_network_fstab "${source}" "${mountpoint}" nfs 'rw,_netdev,nofail,x-systemd.mount-timeout=20s' || return 1
+    else
+        _a54_write_smb_credentials "${username}" "${A54_SMB_PASSWORD}" "${domain}" || return 1
+        options="credentials=${A54_SMB_CREDENTIALS},vers=3.0,rw,_netdev,nofail,x-systemd.mount-timeout=20s,uid=0,gid=0,file_mode=0600,dir_mode=0700"
+        _a54_write_network_fstab "${source}" "${mountpoint}" cifs "${options}" || return 1
+    fi
+
+    mount "${mountpoint}" >/dev/null 2>&1 || return 1
+    A53_MUTATION_STARTED=true
+    actual_source="$(findmnt -n -o SOURCE --target "${mountpoint}" 2>/dev/null || true)"
+    A53_MOUNTS_BY_US+=("${mountpoint}||${actual_source}")
+    _a53_manifest_record_mount "${mountpoint}" "" "${actual_source}" || return 1
+    [[ ${actual_source} == "${source}" ]] || return 1
+    return 0
 }
 
 _a53_mount_target() {
@@ -139,6 +229,21 @@ _a53_restore_fstab() {
     return 0
 }
 
+
+_a54_restore_smb_credentials() {
+    local snapshot="${A53_TX_DIR}/smb.credentials.before"
+    [[ -f ${snapshot} ]] || return 1
+    if [[ ${A54_CREDENTIALS_EXISTED} == true ]]; then
+        install -d -m0700 -o root -g root "$(dirname -- "${A54_SMB_CREDENTIALS}")" || return 1
+        cat -- "${snapshot}" > "${A54_SMB_CREDENTIALS}" || return 1
+        chmod "${A54_CREDENTIALS_MODE}" "${A54_SMB_CREDENTIALS}" || return 1
+        chown "${A54_CREDENTIALS_UID}:${A54_CREDENTIALS_GID}" "${A54_SMB_CREDENTIALS}" || return 1
+    else
+        rm -f -- "${A54_SMB_CREDENTIALS}" || return 1
+    fi
+    return 0
+}
+
 _a53_load_manifest_for_rollback() {
     local operation_id fingerprint
     A53_TX_DIR="${A53_TRANSACTION_ROOT}/${A53_OPERATION_ID}"
@@ -152,6 +257,11 @@ _a53_load_manifest_for_rollback() {
     A53_FSTAB_MODE="$(jq -r '.fstab_mode // ""' "${A53_MANIFEST}")"
     A53_FSTAB_UID="$(jq -r '.fstab_uid // ""' "${A53_MANIFEST}")"
     A53_FSTAB_GID="$(jq -r '.fstab_gid // ""' "${A53_MANIFEST}")"
+    A54_CREDENTIALS_EXISTED="$(jq -r '.credentials_existed // false' "${A53_MANIFEST}")"
+    A54_CREDENTIALS_CHANGED="$(jq -r '.credentials_changed // false' "${A53_MANIFEST}")"
+    A54_CREDENTIALS_MODE="$(jq -r '.credentials_mode // ""' "${A53_MANIFEST}")"
+    A54_CREDENTIALS_UID="$(jq -r '.credentials_uid // ""' "${A53_MANIFEST}")"
+    A54_CREDENTIALS_GID="$(jq -r '.credentials_gid // ""' "${A53_MANIFEST}")"
     return 0
 }
 
@@ -163,6 +273,17 @@ _a53_rollback() {
         expected_after="$(jq -r '.fstab_after_sha256 // ""' "${A53_MANIFEST}" 2>/dev/null || true)"
         current_after="$(_a53_file_sha256 "${A53_FSTAB}")"
         if [[ -z ${expected_after} || ${expected_after} != "${current_after}" ]]; then
+            _a53_manifest_set_rollback failed needs_attention >/dev/null 2>&1 || true
+            return 1
+        fi
+    fi
+
+
+    if [[ ${mode} == explicit && ${A54_CREDENTIALS_CHANGED} == true ]]; then
+        local expected_credentials current_credentials
+        expected_credentials="$(jq -r '.credentials_after_sha256 // ""' "${A53_MANIFEST}" 2>/dev/null || true)"
+        current_credentials="$(_a53_file_sha256 "${A54_SMB_CREDENTIALS}")"
+        if [[ -z ${expected_credentials} || ${expected_credentials} != "${current_credentials}" ]]; then
             _a53_manifest_set_rollback failed needs_attention >/dev/null 2>&1 || true
             return 1
         fi
@@ -182,7 +303,11 @@ _a53_rollback() {
         if mountpoint -q -- "${mountpoint}"; then
             current_uuid="$(findmnt -n -o UUID --target "${mountpoint}" 2>/dev/null || true)"
             current_source="$(findmnt -n -o SOURCE --target "${mountpoint}" 2>/dev/null || true)"
-            if [[ ${current_uuid} != "${uuid}" || ( -n ${source} && ${current_source} != "${source}" ) ]]; then
+            if [[ -n ${uuid} && ${current_uuid} != "${uuid}" ]]; then
+                failure=1
+                continue
+            fi
+            if [[ -n ${source} && ${current_source} != "${source}" ]]; then
                 failure=1
                 continue
             fi
@@ -192,6 +317,9 @@ _a53_rollback() {
 
     if [[ ${A53_FSTAB_CHANGED} == true ]]; then
         _a53_restore_fstab || failure=1
+    fi
+    if [[ ${A54_CREDENTIALS_CHANGED} == true ]]; then
+        _a54_restore_smb_credentials || failure=1
     fi
 
     if (( ${#A53_DIRS_CREATED[@]} == 0 )); then
