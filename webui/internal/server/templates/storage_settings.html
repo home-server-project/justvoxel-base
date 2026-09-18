@@ -1,0 +1,55 @@
+{{define "storage_settings.html"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JustVoxel - Storage overview</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js" defer></script></head>
+<body class="role-administrator">{{template "app-header" .}}
+<main>
+  <div class="title-row"><div><p class="eyebrow">Administrator · discovery</p><h1>Storage overview</h1></div><span class="badge">{{.Identity.Username}}</span></div>
+  <p class="muted">Read-only disk, filesystem, and mount inventory. Storage changes arrive in the storage-management phase.</p>
+
+  {{if .Configuration.Configured}}
+  <section class="panel details">
+    <div class="section-heading"><div><p class="eyebrow">Current paths</p><h2>JustVoxel storage</h2></div></div>
+    <dl>
+      <div><dt>Minecraft data</dt><dd><code>{{.Configuration.Minecraft.DataPath}}</code></dd></div>
+      {{if .Configuration.Minecraft.DataMountPoint}}<div><dt>Minecraft mount</dt><dd><code>{{.Configuration.Minecraft.DataMountPoint}}</code></dd></div>{{end}}
+      <div><dt>Backup directory</dt><dd><code>{{.Configuration.Backup.Path}}</code></dd></div>
+      {{if .Configuration.Backup.MountPoint}}<div><dt>Backup mount</dt><dd><code>{{.Configuration.Backup.MountPoint}}</code></dd></div>{{end}}
+      <div><dt>Backup type</dt><dd>{{.Configuration.Backup.Type}}</dd></div>
+    </dl>
+  </section>
+  {{else}}
+  <div class="notice">Minecraft is not configured yet. Device discovery is still available so the setup wizard can make safe storage choices later.</div>
+  {{end}}
+
+  <section class="panel details">
+    <div class="section-heading"><div><p class="eyebrow">Protection</p><h2>System disks</h2></div></div>
+    {{if .SystemDisks}}
+    <div class="player-list">{{range .SystemDisks}}<span class="player-chip"><code>{{.}}</code> · system</span>{{end}}</div>
+    {{else}}
+    <p class="muted">No system disk identity was reported. Destructive storage provisioning must remain unavailable.</p>
+    {{end}}
+  </section>
+
+  <section class="panel details">
+    <div class="section-heading"><div><p class="eyebrow">Discovered storage</p><h2>Devices & filesystems</h2></div></div>
+    <div class="user-list">
+    {{range .Devices}}
+      <article class="user-card">
+        <div class="user-card-heading">
+          <div><strong>{{if .Model}}{{.Model}}{{else}}{{.Name}}{{end}}</strong><span class="muted"><code>{{.Path}}</code> · {{.Type}} · {{.Size}}</span></div>
+          {{if .System}}<span class="badge">System</span>{{else if .ReadOnly}}<span class="badge">Read only</span>{{end}}
+        </div>
+        <dl class="user-details">
+          {{if .Filesystem}}<div><dt>Filesystem</dt><dd>{{.Filesystem}}</dd></div>{{end}}
+          {{if .Label}}<div><dt>Label</dt><dd>{{.Label}}</dd></div>{{end}}
+          {{if .UUID}}<div><dt>UUID</dt><dd><code>{{.UUID}}</code></dd></div>{{end}}
+          {{if .Mountpoints}}<div><dt>Mounted at</dt><dd><code>{{.Mountpoints}}</code></dd></div>{{end}}
+          {{if .Transport}}<div><dt>Connection</dt><dd>{{.Transport}}</dd></div>{{end}}
+        </dl>
+      </article>
+    {{else}}
+      <p class="muted">No block storage devices were reported.</p>
+    {{end}}
+    </div>
+  </section>
+  <p class="foot">WebUI {{.Version}} · Management API {{.ManagementAPI}}</p>
+</main></body></html>{{end}}

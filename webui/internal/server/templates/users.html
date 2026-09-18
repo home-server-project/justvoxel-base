@@ -1,0 +1,131 @@
+{{define "users.html"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>JustVoxel - Users</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body class="role-administrator">
+{{template "app-header" .}}
+<main>
+  <div class="title-row">
+    <div><p class="eyebrow">Administration</p><h1>Users</h1></div>
+    <span class="badge">{{.Username}}</span>
+  </div>
+
+  {{if .Message}}<div class="notice success">{{.Message}}</div>{{end}}
+  {{if .Error}}<div class="notice error">{{.Error}}</div>{{end}}
+
+  <section class="panel details">
+    <div class="section-heading">
+      <div><p class="eyebrow">Primary administrator</p><h2>{{.PrimaryAdmin}}</h2></div>
+      <span class="badge">Administrator</span>
+    </div>
+    <p class="muted compact">This is the permanent system administrator. It is not a WebUI-only account and cannot be deleted, disabled, or demoted here.</p>
+  </section>
+
+  <section class="panel details">
+    <div class="section-heading">
+      <div><p class="eyebrow">New WebUI account</p><h2>Create user</h2></div>
+    </div>
+    <form method="post" action="/settings/users/create" class="admin-form-grid">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <label>Username<input name="username" required maxlength="64" autocomplete="off"></label>
+      <label>Role
+        <select name="role" required>
+          <option value="operator">Operator</option>
+          <option value="viewer">Viewer</option>
+        </select>
+      </label>
+      <label>Password<input type="password" name="password" required minlength="{{.MinimumPasswordLen}}" autocomplete="new-password"></label>
+      <label>Confirm password<input type="password" name="confirm_password" required minlength="{{.MinimumPasswordLen}}" autocomplete="new-password"></label>
+      <div class="form-actions"><button type="submit">Create user</button></div>
+    </form>
+    <p class="muted compact">WebUI-only users do not receive Linux, SSH, or sudo accounts. Passwords follow the appliance host policy.</p>
+  </section>
+
+  <section class="panel details">
+    <div class="section-heading">
+      <div><p class="eyebrow">WebUI identities</p><h2>Operators and Viewers</h2></div>
+      <span class="state-text">{{len .Users}} account{{if ne (len .Users) 1}}s{{end}}</span>
+    </div>
+
+    {{if .Users}}
+    <div class="user-list">
+      {{range .Users}}
+      <article class="user-card">
+        <div class="user-card-heading">
+          <div>
+            <strong>{{.Username}}</strong>
+            <span class="muted">{{if .Enabled}}Enabled{{else}}Disabled{{end}}</span>
+          </div>
+          <span class="badge">{{.Role}}</span>
+        </div>
+
+        <div class="quota-grid">
+          <div class="quota-box"><span>Restart allowance</span><strong>{{.RestartUsed}} / {{.RestartLimit}}</strong></div>
+          <div class="quota-box"><span>Backup allowance</span><strong>{{.BackupUsed}} / {{.BackupLimit}}</strong></div>
+        </div>
+
+        <div class="user-actions-grid">
+          <form method="post" action="/settings/users/{{.ID}}/role">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}">
+            <label>Role
+              <select name="role">
+                <option value="operator" {{if eq .Role "operator"}}selected{{end}}>Operator</option>
+                <option value="viewer" {{if eq .Role "viewer"}}selected{{end}}>Viewer</option>
+              </select>
+            </label>
+            <button class="secondary" type="submit">Save role</button>
+          </form>
+
+          <form method="post" action="/settings/users/{{.ID}}/enabled">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}">
+            <input type="hidden" name="enabled" value="{{if .Enabled}}false{{else}}true{{end}}">
+            <button class="secondary" type="submit">{{if .Enabled}}Disable{{else}}Enable{{end}}</button>
+          </form>
+
+          <form method="post" action="/settings/users/{{.ID}}/restart-allowance/reset">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}">
+            <button class="secondary" type="submit" {{if eq .RestartUsed 0}}disabled{{end}}>Reset restart allowance</button>
+          </form>
+
+          <form method="post" action="/settings/users/{{.ID}}/backup-allowance/reset">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}">
+            <button class="secondary" type="submit" {{if eq .BackupUsed 0}}disabled{{end}}>Reset backup allowance</button>
+          </form>
+        </div>
+
+        <details class="user-details">
+          <summary>Change password</summary>
+          <form method="post" action="/settings/users/{{.ID}}/password" class="admin-form-grid compact-form">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}">
+            <label>New password<input type="password" name="password" required minlength="{{$.MinimumPasswordLen}}" autocomplete="new-password"></label>
+            <label>Confirm password<input type="password" name="confirm_password" required minlength="{{$.MinimumPasswordLen}}" autocomplete="new-password"></label>
+            <div class="form-actions"><button class="secondary" type="submit">Change password</button></div>
+          </form>
+        </details>
+
+        <details class="user-details danger-zone">
+          <summary>Delete account</summary>
+          <p class="muted compact">Deleting this WebUI identity also removes its saved Operator quota history.</p>
+          <form method="post" action="/settings/users/{{.ID}}/delete">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}">
+            <button class="danger" type="submit">Delete {{.Username}}</button>
+          </form>
+        </details>
+      </article>
+      {{end}}
+    </div>
+    {{else}}
+      <p class="muted compact">No Operator or Viewer accounts exist yet.</p>
+    {{end}}
+  </section>
+
+  <p class="foot">WebUI {{.Version}} · Management API {{.ManagementAPI}}</p>
+  <p class="disclaimer">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</p>
+</main>
+</body>
+</html>{{end}}
