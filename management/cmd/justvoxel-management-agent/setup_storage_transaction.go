@@ -26,13 +26,13 @@ var runAdminSetupStorageTransactionHelper = func(ctx context.Context, action str
 }
 
 type setupStorageTransactionTarget struct {
-	Type           string `json:"type"`
-	Path           string `json:"path"`
-	Device         string `json:"device,omitempty"`
-	ParentDisk     string `json:"parent_disk,omitempty"`
-	Filesystem     string `json:"filesystem,omitempty"`
-	UUID           string `json:"uuid,omitempty"`
-	MountPoint     string `json:"mount_point,omitempty"`
+	Type                string `json:"type"`
+	Path                string `json:"path"`
+	Device              string `json:"device,omitempty"`
+	ParentDisk          string `json:"parent_disk,omitempty"`
+	Filesystem          string `json:"filesystem,omitempty"`
+	UUID                string `json:"uuid,omitempty"`
+	MountPoint          string `json:"mount_point,omitempty"`
 	ExpectedUUID        string `json:"expected_uuid,omitempty"`
 	ExpectedSource      string `json:"expected_source,omitempty"`
 	Source              string `json:"source,omitempty"`
