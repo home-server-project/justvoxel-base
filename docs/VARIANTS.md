@@ -27,15 +27,15 @@ It intentionally excludes the physical-hardware-only administration delta.
 
 ## JustVoxel VM
 
-The final VM product is intended to be promoted from an approved `justvoxel-base:stable` image rather than rebuilt as a second copy of the same appliance content.
+The final VM product is intended to be promoted from an approved stable Base image rather than rebuilt as a second copy of the same appliance content.
 
-The final product repository owns the VM release tag and release mechanics.
+The current final-product `testing` workflow does not build a separate VM image; the Base itself is the VM-ready development artifact. Final VM release/tag mechanics belong to the final product repository.
 
 ## JustVoxel HWE
 
 JustVoxel HWE is the physical-machine product.
 
-It derives from the approved `justvoxel-base:stable` channel and adds only the physical-hardware administration delta, such as UPS, storage-health, sensor, firmware, and hardware-diagnostic support.
+During active development, the final JustVoxel `testing` branch consumes `justvoxel-base:testing` and adds only the physical-hardware administration delta. The future stable HWE path is expected to consume an approved stable Base channel, with the exact stable release mechanics owned by the final product repository.
 
 The HWE package list, HWE build logic, and HWE validation belong in the final JustVoxel product repository, not in `justvoxel-base`.
 
