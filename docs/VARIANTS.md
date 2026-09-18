@@ -1,38 +1,42 @@
-# JustVoxel variants
+# JustVoxel product layering
 
-## Shared core
+JustVoxel now separates the shared appliance Base from final product-specific delivery.
 
-Both VM and Bare Metal receive:
+## JustVoxel Base
 
-- AlmaLinux 10 minimal-plus / bootc
+`justvoxel-base` contains the complete shared Minecraft appliance and is already VM-ready.
+
+It includes:
+
+- Home Server Base 10 / AlmaLinux 10 bootc foundation
 - Podman and Quadlet support
 - NetworkManager + `nmtui`
 - OpenSSH
 - firewalld
 - SELinux container policy and administration tools
-- upstream `just`
-- `skopeo`
-- basic network/file troubleshooting utilities
-- Tailscale and NetBird clients, installed but disabled/unconfigured
+- JustVoxel management agent
+- JustVoxel WebUI integration
+- `mjust`
+- Minecraft runtime templates and helpers
+- backup, storage, migration, restore, and system-management logic
+- VM guest tooling
+- `health/common`
+- `health/vm`
 
-Neither image includes Cockpit, a virtualization stack, a NAS stack, databases, monitoring suites, or unrelated application servers.
+It intentionally excludes the physical-hardware-only administration delta.
 
-## VM
+## JustVoxel VM
 
-The VM image intentionally excludes physical-hardware administration packages such as NUT, Btrfs administration, SMART/NVMe tooling, sensors, firmware update tooling, and USB/PCI diagnostics.
+The final VM product is intended to be promoted from an approved `justvoxel-base:stable` image rather than rebuilt as a second copy of the same appliance content.
 
-## Bare Metal
+The final product repository owns the VM release tag and release mechanics.
 
-Bare Metal adds:
+## JustVoxel HWE
 
-- NUT / NUT client
-- Btrfs tools
-- SMART tools + SELinux policy
-- NVMe CLI
-- lm_sensors
-- ethtool
-- USB / PCI utilities
-- dmidecode
-- fwupd / fwupd-efi
+JustVoxel HWE is the physical-machine product.
 
-NUT is shipped disabled and unconfigured because UPS hardware and policy are site-specific.
+It derives from the approved `justvoxel-base:stable` channel and adds only the physical-hardware administration delta, such as UPS, storage-health, sensor, firmware, and hardware-diagnostic support.
+
+The HWE package list, HWE build logic, and HWE validation belong in the final JustVoxel product repository, not in `justvoxel-base`.
+
+Hardware-specific runtime configuration remains deployment-specific. For example, UPS hardware identifiers, NUT driver selection, credentials, and shutdown policy are not baked into the generic Base image.

@@ -1,39 +1,90 @@
-# JustVoxel build model
+# JustVoxel Base build model
 
-JustVoxel follows the Home Server Project's shared Home Server Base 10 bootc composition model.
+JustVoxel Base follows the Home Server Project's shared Home Server Base 10 bootc composition model.
 
-## Base
+## Parent image
 
-Both variants consume [Home Server Base 10](https://github.com/home-server-project/home-server-base-10) as their direct bootc parent.
+JustVoxel Base consumes [Home Server Base 10](https://github.com/home-server-project/home-server-base-10) directly from the signed moving channel:
 
-Home Server Base 10 owns the shared AlmaLinux 10 Minimal Plus rootfs composition, including the standard system-configuration, persistent-journal, and generic-growfs fragments. AlmaLinux 10 remains the upstream Enterprise Linux source for the kernel and core operating-system packages.
+```text
+ghcr.io/home-server-project/home-server-base-10:stable
+```
 
-JustVoxel does not maintain a second local Minimal Plus manifest or rootfs-builder path. CI resolves the Home Server Base `:stable` image to one exact digest, verifies that digest with Cosign, and supplies the same verified parent to both the VM and Bare Metal image builds.
+The workflow verifies the current `:stable` signature with Cosign and builds from that tag directly. The parent image is not maintained as a manually pinned digest in this repository.
 
 The supported host-management model is bootc. No host-side rpm-ostree layering workflow is supported.
 
-## Variants
+## Base image
 
-The `Containerfile` has two final targets:
+This repository builds one image:
 
-- `justvoxel-vm`
-- `justvoxel-baremetal`
+```text
+ghcr.io/home-server-project/justvoxel-base
+```
 
-Both derive from the same `justvoxel-common` stage. Bare Metal adds only the physical-machine administration package delta.
+The Base contains the complete shared JustVoxel appliance layer and is already VM-ready. It includes the management agent, WebUI integration, `mjust`, Minecraft runtime templates and helpers, common networking/storage tooling, and both `health/common` and `health/vm` validation.
+
+Physical-hardware-only packages and validation are intentionally not part of this repository. That delta belongs to the final JustVoxel HWE product.
+
+## Channels
+
+### Testing
+
+The `testing` branch builds on:
+
+- push to `testing`
+- manual `workflow_dispatch`
+
+It publishes:
+
+```text
+ghcr.io/home-server-project/justvoxel-base:testing
+testing-YYYYMMDD-<git-sha>
+```
+
+There is no scheduled testing build.
+
+### Stable
+
+The stable workflow is currently manual-only:
+
+```yaml
+on:
+  workflow_dispatch:
+```
+
+When deliberately run from validated `main`, it publishes:
+
+```text
+ghcr.io/home-server-project/justvoxel-base:stable
+stable-YYYYMMDD-<git-sha>
+```
+
+No automatic stable schedule or main-push build is enabled during active development.
+
+## Final products
+
+The final product repository consumes `justvoxel-base:stable` by tag.
+
+The intended product split is:
+
+```text
+justvoxel-base:stable
+        |
+        +--> JustVoxel VM   (promotion/copy of the approved Base)
+        |
+        +--> JustVoxel HWE  (physical-hardware delta built on the approved Base)
+```
+
+The Base image installs signed-image trust for the Base repository and the future VM and HWE repositories so a promoted VM image does not require rebuilding solely to change repository identity.
 
 ## Rechunk limits
 
-CI rechunks each completed image with:
+CI rechunks the completed Base image with:
 
 - RPM chunk target: `127`
 - OCI layer hard limit: `128`
 
-This matches the Passive Black Box build pattern.
-
-## Branches
-
-`testing` builds on push, manual dispatch, and daily at 14:40 UTC. It publishes moving `:testing` tags plus immutable `testing-YYYYMMDD-<git-sha>` tags for both variants and never creates GitHub Releases. Testing immutable images older than 45 days are eligible for cleanup while at least seven recent tagged builds per variant are retained. `main` publishes stable `:10` images and is the only branch allowed to create GitHub Releases.
-
 ## Signing
 
-Published images are signed with the Home Server Project Cosign key. The image installs scoped `containers/image` trust for its own GHCR repository.
+Published Base images are signed with the Home Server Project Cosign key. CI verifies the signature after publication.

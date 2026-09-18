@@ -1,10 +1,10 @@
-# JustVoxel
+# JustVoxel Base
 
-JustVoxel is a purpose-built immutable server appliance for running and managing a Minecraft server workload.
+JustVoxel Base is the shared, VM-ready immutable appliance image used to develop and release the JustVoxel Minecraft server platform.
 
 It is designed for people who are comfortable installing an operating system and following normal computer instructions, but who do not want to become Linux, container, systemd, firewall, SELinux, or Minecraft-server administrators just to run a reliable family or small-community server.
 
-> **Development status:** active implementation is on the `testing` branch. The project is still being validated in VMs and on physical hardware before stable promotion.
+> **Development status:** active Base development is on the `testing` branch. Stable Base publication remains manual-only until the development line is deliberately promoted.
 
 ## What JustVoxel is
 
@@ -40,7 +40,7 @@ For a fresh installation, use the dedicated [JustVoxel ISO Builder](https://gith
 
 The ISO project owns the installation side of JustVoxel, including:
 
-- VM versus Bare Metal installation
+- VM versus physical/HWE installation
 - CPU, memory, and disk guidance
 - installer-media creation
 - installation-disk safety
@@ -52,17 +52,15 @@ The normal user path is to install JustVoxel from its installer media rather tha
 
 Advanced bootc users can still work directly with the published images, but that is not the primary installation path documented for normal users.
 
-## VM or Bare Metal
+## Base, VM release, and HWE
 
-JustVoxel is built in two variants from the same appliance core.
+This repository builds one shared appliance image: **JustVoxel Base**.
 
-**JustVoxel VM** is intended for KVM/libvirt, Proxmox, VMware, Hyper-V, VirtualBox, and similar hypervisors.
+The Base is already VM-ready. After validation, the final JustVoxel product repository can promote the approved `justvoxel-base:stable` image into the VM release without rebuilding the same appliance content.
 
-**JustVoxel Bare Metal** is intended for installation directly on physical hardware and adds physical-machine administration support that does not make sense inside a VM.
+**JustVoxel HWE** is the physical-machine product. It derives from the approved Base and adds only the hardware-specific administration delta.
 
-The normal JustVoxel and Minecraft management experience is the same on both.
-
-For the exact technical differences, see [`docs/VARIANTS.md`](docs/VARIANTS.md).
+For the product layering, see [`docs/VARIANTS.md`](docs/VARIANTS.md).
 
 ## Operate the appliance with mjust
 
@@ -125,30 +123,32 @@ Start with the document that matches what you are trying to do:
 - [`docs/RESTORE.md`](docs/RESTORE.md) — world and full Minecraft-data recovery
 - [`docs/MANAGEMENT.md`](docs/MANAGEMENT.md) — management layers and native Linux administration
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — why JustVoxel is built as an immutable appliance
-- [`docs/VARIANTS.md`](docs/VARIANTS.md) — VM versus Bare Metal technical differences
+- [`docs/VARIANTS.md`](docs/VARIANTS.md) — Base, VM release, and HWE product layering
 - [`docs/BUILD.md`](docs/BUILD.md) — image composition, signing, CI, branches, and release mechanics
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — current priorities, future features, and project non-goals
 
 ## Branch and release model
 
-- `testing` — active development and Testing images
-- `main` — validated promotions and stable `:10` images
-- GitHub Releases are created from `main` only
+- `testing` — active Base development
+- `main` — validated Base promotions
 
-Testing builds run on pushes to `testing`, manual **Run workflow** invocations, and the daily **14:40 UTC** schedule. Both VM and Bare Metal variants publish a moving `:testing` tag plus an immutable tag:
+Testing builds run on pushes to `testing` and manual **Run workflow** invocations. They publish:
 
 ```text
+ghcr.io/home-server-project/justvoxel-base:testing
 testing-YYYYMMDD-<git-sha>
 ```
 
-Testing never creates GitHub Releases. Immutable `testing-*` image versions older than 45 days are eligible for cleanup while at least seven recent tagged builds are retained for each variant. The moving `:testing` tags are preserved.
+There is no scheduled testing build.
 
-Stable image targets are intended to be:
+The stable Base workflow is currently manual-only. When deliberately run from validated `main`, it publishes:
 
 ```text
-ghcr.io/home-server-project/justvoxel-vm:10
-ghcr.io/home-server-project/justvoxel-baremetal:10
+ghcr.io/home-server-project/justvoxel-base:stable
+stable-YYYYMMDD-<git-sha>
 ```
+
+Final JustVoxel VM/HWE release images are owned by the separate final product repository and consume the approved `justvoxel-base:stable` channel.
 
 ## License
 
