@@ -239,8 +239,7 @@ _a53_validate_partition_target() {
 }
 
 _a54_validate_network_target() {
-    local target_json="$1" type path mountpoint source expected_source username domain credentials_required actual_source
-    target_json="$2"
+    local target_json="$2" type path mountpoint source expected_source username domain credentials_required actual_source
     type="$(jq -r '.type' <<< "${target_json}")"
     path="$(_a53_normalize_path "$(jq -r '.path' <<< "${target_json}")")"
     mountpoint="$(_a53_normalize_path "$(jq -r '.mount_point // ""' <<< "${target_json}")")"
