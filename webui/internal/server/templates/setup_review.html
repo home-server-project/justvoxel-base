@@ -1,0 +1,125 @@
+{{define "setup_review.html"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>JustVoxel - Review setup</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/setup.css">
+  <link rel="stylesheet" href="/static/setup-review.css">
+</head>
+<body class="role-administrator setup-body">
+<header class="setup-header">
+  <a class="brand-link" href="/setup/review" aria-current="page" aria-label="JustVoxel first setup review"><strong>JustVoxel</strong><span>Minecraft Server Appliance</span></a>
+  <form class="nav-logout" method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Log out</button></form>
+</header>
+<main class="setup-shell">
+  <div class="title-row setup-title-row"><div><p class="eyebrow">First setup</p><h1>Review your JustVoxel setup</h1></div><span class="badge">Step 5 of 5</span></div>
+  <ol class="setup-progress" aria-label="Setup progress">
+    <li class="complete"><span class="setup-number">1</span><span>Server</span></li>
+    <li class="complete"><span class="setup-number">2</span><span>Minecraft</span></li>
+    <li class="complete"><span class="setup-number">3</span><span>Storage</span></li>
+    <li class="complete"><span class="setup-number">4</span><span>Backups</span></li>
+    <li class="active" aria-current="step"><span class="setup-number">5</span><span>Review</span></li>
+  </ol>
+
+  <section class="panel setup-step-panel">
+    <p class="setup-lead">This page shows the configuration normalized and validated by the JustVoxel Management Agent. Nothing has been applied yet.</p>
+    {{if .Error}}<div class="notice error"><strong>Setup needs attention</strong><br>{{.Error}}</div>{{end}}
+
+    {{if .Plan.OK}}
+    <div class="notice setup-safe-note"><strong>Configuration validated.</strong><span>The values below are the authoritative review result, including the resolved Minecraft version and storage identities.</span></div>
+
+    <div class="setup-review-grid">
+      <section class="setup-review-card">
+        <h2>Server</h2>
+        <dl class="setup-review-list">
+          <div><dt>Welcome message</dt><dd>{{.Plan.Normalized.Server.MOTD}}</dd></div>
+          <div><dt>Maximum players</dt><dd>{{.Plan.Normalized.Server.MaxPlayers}}</dd></div>
+          <div><dt>Bedrock cross-play</dt><dd>{{if .Plan.Normalized.Server.BedrockEnabled}}Enabled{{else}}Disabled{{end}}</dd></div>
+          <div><dt>Timezone</dt><dd><code>{{.Plan.Normalized.Server.Timezone}}</code></dd></div>
+        </dl>
+      </section>
+
+      <section class="setup-review-card">
+        <h2>Minecraft</h2>
+        <dl class="setup-review-list">
+          <div><dt>Game memory</dt><dd>{{.Plan.Normalized.Minecraft.JavaMemory}} <small>Java heap</small></dd></div>
+          <div><dt>Maximum Minecraft memory</dt><dd>{{.Plan.Normalized.Minecraft.ContainerMemory}} <small>container limit</small></dd></div>
+          <div><dt>Java port</dt><dd>{{.Plan.Normalized.Minecraft.JavaPort}}/TCP</dd></div>
+          {{if .Plan.Normalized.Server.BedrockEnabled}}<div><dt>Bedrock port</dt><dd>{{.Plan.Normalized.Minecraft.BedrockPort}}/UDP</dd></div>{{end}}
+          <div><dt>Container channel / tag</dt><dd><code>{{.Plan.Normalized.Minecraft.ImageTag}}</code></dd></div>
+          <div><dt>Version choice</dt><dd>{{.VersionLabel}}</dd></div>
+          <div><dt>Resolved Minecraft version</dt><dd><strong>{{.Plan.Normalized.Minecraft.Version}}</strong>{{if eq .Plan.Normalized.Minecraft.VersionPolicy "pinned"}} <small>pinned for this validated plan</small>{{end}}</dd></div>
+        </dl>
+      </section>
+
+      <section class="setup-review-card">
+        <h2>Storage</h2>
+        <dl class="setup-review-list">
+          <div><dt>Location</dt><dd>{{.StorageLabel}}</dd></div>
+          <div><dt>Minecraft data</dt><dd><code>{{.Plan.Normalized.Storage.Path}}</code></dd></div>
+          {{if .Plan.Normalized.Storage.Device}}<div><dt>Device</dt><dd><code>{{.Plan.Normalized.Storage.Device}}</code>{{if .Plan.Normalized.Storage.Model}} · {{.Plan.Normalized.Storage.Model}}{{end}}{{if .StorageSize}} · {{.StorageSize}}{{end}}</dd></div>{{end}}
+          {{if .Plan.Normalized.Storage.Filesystem}}<div><dt>Filesystem</dt><dd>{{.Plan.Normalized.Storage.Filesystem}}</dd></div>{{end}}
+          {{if .Plan.Normalized.Storage.UUID}}<div><dt>Filesystem UUID</dt><dd><code>{{.Plan.Normalized.Storage.UUID}}</code></dd></div>{{end}}
+          {{if .Plan.Normalized.Storage.MountPoint}}<div><dt>Mount point</dt><dd><code>{{.Plan.Normalized.Storage.MountPoint}}</code></dd></div>{{end}}
+        </dl>
+      </section>
+
+      <section class="setup-review-card">
+        <h2>Backups</h2>
+        <dl class="setup-review-list">
+          <div><dt>Automatic backups</dt><dd>{{if .Plan.Normalized.Backups.Automatic}}Enabled{{else}}Disabled{{end}}</dd></div>
+          {{if .Plan.Normalized.Backups.Automatic}}<div><dt>Daily time</dt><dd>{{.Plan.Normalized.Backups.DailyTime}}</dd></div>{{end}}
+          <div><dt>Backups to keep</dt><dd>{{.Plan.Normalized.Backups.Keep}}</dd></div>
+          <div><dt>Destination</dt><dd>{{.BackupLabel}}</dd></div>
+          <div><dt>Backup directory</dt><dd><code>{{.Plan.Normalized.Backups.Path}}</code></dd></div>
+          {{if .Plan.Normalized.Backups.Device}}<div><dt>Device</dt><dd><code>{{.Plan.Normalized.Backups.Device}}</code>{{if .Plan.Normalized.Backups.Model}} · {{.Plan.Normalized.Backups.Model}}{{end}}{{if .BackupSize}} · {{.BackupSize}}{{end}}</dd></div>{{end}}
+          {{if .Plan.Normalized.Backups.Filesystem}}<div><dt>Filesystem</dt><dd>{{.Plan.Normalized.Backups.Filesystem}}</dd></div>{{end}}
+          {{if .Plan.Normalized.Backups.UUID}}<div><dt>Filesystem UUID</dt><dd><code>{{.Plan.Normalized.Backups.UUID}}</code></dd></div>{{end}}
+          {{if .Plan.Normalized.Backups.Source}}<div><dt>Network source</dt><dd><code>{{.Plan.Normalized.Backups.Source}}</code></dd></div>{{end}}
+          {{if .Plan.Normalized.Backups.MountPoint}}<div><dt>Mount point</dt><dd><code>{{.Plan.Normalized.Backups.MountPoint}}</code></dd></div>{{end}}
+          {{if .Plan.Normalized.Backups.Username}}<div><dt>Username</dt><dd>{{.Plan.Normalized.Backups.Username}}{{if .Plan.Normalized.Backups.Domain}} · {{.Plan.Normalized.Backups.Domain}}{{end}}</dd></div>{{end}}
+        </dl>
+      </section>
+    </div>
+
+    {{if .Plan.Warnings}}
+    <section class="setup-review-warnings" aria-label="Setup warnings">
+      <h2>Warnings</h2>
+      {{range .Plan.Warnings}}<div class="notice warning"><strong>{{.Code}}</strong><br>{{.Message}}</div>{{end}}
+    </section>
+    {{end}}
+
+    {{if .Plan.Requirements.SMBPasswordRequired}}<div class="notice setup-secret-note"><strong>SMB password required during execution.</strong><span>The password is not stored in this setup draft or review. JustVoxel will request it only when the setup transaction is actually started.</span></div>{{end}}
+    {{if .Plan.Requirements.NetworkBackupValidationOnApply}}<div class="notice"><strong>Network backup validation happens during execution.</strong><br>The configured network source will be mounted and verified before JustVoxel uses it. Planning does not mount the share.</div>{{end}}
+
+    <section class="setup-eula-card">
+      <h2>Minecraft EULA</h2>
+      <p>Running a Minecraft server requires agreement to the Minecraft End User License Agreement. <a href="{{.EULAURL}}" target="_blank" rel="noopener noreferrer">Read the official Minecraft EULA</a>.</p>
+      <form method="post" action="/setup/review/eula">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <input type="hidden" name="plan_fingerprint" value="{{.Plan.PlanFingerprint}}">
+        <label class="setup-choice setup-eula-choice"><input type="checkbox" name="eula_accepted" {{if .EULAAccepted}}checked{{end}}><span><strong>I agree to the Minecraft End User License Agreement</strong><small>This records acceptance only for the exact validated plan shown on this page. It does not configure or start Minecraft.</small></span></label>
+        <div class="setup-primary-action"><button type="submit">{{if .EULAAccepted}}EULA accepted{{else}}Accept EULA{{end}}</button></div>
+      </form>
+      {{if .EULAAccepted}}<div class="notice setup-safe-note"><strong>Ready for the next phase.</strong><span>Configuration is validated and EULA acceptance is bound to this exact reviewed plan.</span></div>{{end}}
+    </section>
+
+    {{if .ShortPlanReference}}<p class="muted compact">Validated plan: <code>{{.ShortPlanReference}}</code></p>{{end}}
+    <div class="setup-execution-placeholder">
+      <strong>Configure JustVoxel</strong>
+      <span>Setup execution will be enabled by the transactional setup engine. A4.4 does not modify the appliance.</span>
+      <button type="button" disabled>Configure JustVoxel</button>
+    </div>
+    {{end}}
+
+    <div class="setup-actions setup-actions-split">
+      <form method="post" action="/setup/review/cancel"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Cancel setup</button></form>
+      <form method="post" action="/setup/review/back"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Back to backups</button></form>
+    </div>
+  </section>
+  <p class="disclaimer">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</p>
+</main>
+</body>
+</html>{{end}}

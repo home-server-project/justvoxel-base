@@ -1,0 +1,163 @@
+{{define "server_settings.html"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JustVoxel - Minecraft settings</title><link rel="stylesheet" href="/static/app.css"><link rel="stylesheet" href="/static/settings.css"><script src="/static/app.js" defer></script><script src="/static/settings.js" defer></script></head>
+<body class="role-administrator">{{template "app-header" .}}
+<main>
+  <div class="title-row"><div><p class="eyebrow">Administrator</p><h1>Minecraft settings</h1></div><span class="badge">{{.Identity.Username}}</span></div>
+  <p class="muted">Change the normal Minecraft and automatic-backup settings from the appliance WebUI. Review is always shown before anything is applied.</p>
+  {{if .Message}}<div class="notice success">{{.Message}}</div>{{end}}
+  {{if .Error}}<div class="notice error">{{.Error}}</div>{{end}}
+
+  {{if .Configuration.Configured}}
+  <form class="settings-form" method="post" action="/settings/server/plan" id="minecraft-settings-form">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+
+    <section class="panel details memory-settings" data-memory-settings data-system-memory-mib="{{.Defaults.SystemMemoryMiB}}" data-min-reserve-mib="{{.Defaults.SystemReserveMinimumMiB}}" data-recommended-reserve-mib="{{.Defaults.SystemReserveRecommendedMiB}}">
+      <div class="section-heading"><div><p class="eyebrow">Memory</p><h2>Minecraft memory</h2></div><span class="badge">{{.SystemMemory}} detected</span></div>
+      <p class="muted">JustVoxel recommends leaving about {{.SystemReserveRecommended}} for the operating system and system services. {{.SystemReserveMinimum}} is the minimum reserve before memory pressure becomes a serious concern.</p>
+      <div class="memory-presets" role="group" aria-label="Memory starting points">
+        <button type="button" class="secondary memory-preset" data-memory-preset="light">Light</button>
+        <button type="button" class="secondary memory-preset" data-memory-preset="recommended">Recommended</button>
+        <button type="button" class="secondary memory-preset" data-memory-preset="high">High memory</button>
+        <button type="button" class="secondary memory-preset" data-memory-preset="custom">Custom</button>
+      </div>
+      <p class="muted compact">Presets use detected system memory and the maximum-player setting below. Each additional block of 10 players increases the suggested Minecraft memory until the home-server preset caps are reached. Large public servers should use Custom and tune for their workload.</p>
+      <div class="settings-grid two-column">
+        <label>Minecraft game memory
+          <input id="java-memory" name="java_memory" value="{{.Form.JavaMemory}}" required autocomplete="off">
+          <span class="field-help">Memory available directly to the Minecraft Java server. Technical name: Java heap. Examples: <code>4G</code>, <code>6144M</code>.</span>
+        </label>
+        <label>Maximum Minecraft memory
+          <input id="container-memory" name="container_memory" value="{{.Form.ContainerMemory}}" required autocomplete="off">
+          <span class="field-help">Maximum memory for the complete Minecraft server process, including Java, plugins and runtime overhead. Technical name: container memory limit.</span>
+        </label>
+      </div>
+      <div id="memory-status" class="memory-status" aria-live="polite"></div>
+    </section>
+
+    <section class="panel details">
+      <div class="section-heading"><div><p class="eyebrow">Server</p><h2>Players & identity</h2></div></div>
+      <div class="settings-grid two-column">
+        <label>Maximum players
+          <input id="max-players" name="max_players" type="number" min="1" step="1" value="{{.Form.MaxPlayers}}" required>
+          <span class="field-help">Used by Minecraft and by the memory starting-point recommendations above.</span>
+        </label>
+        <label>Server welcome message (MOTD)
+          <input name="motd" value="{{.Form.MOTD}}" required>
+          <span class="field-help">The one-line server description players see in their Minecraft server list.</span>
+        </label>
+        <label>Timezone
+          <input name="timezone" value="{{.Form.Timezone}}" required autocomplete="off">
+          <span class="field-help">IANA timezone, for example <code>America/Toronto</code> or <code>Europe/Kyiv</code>.</span>
+        </label>
+      </div>
+    </section>
+
+    <section class="panel details">
+      <div class="section-heading"><div><p class="eyebrow">Network</p><h2>Java & Bedrock</h2></div></div>
+      <div class="settings-grid two-column">
+        <label>Minecraft Java port
+          <input name="java_port" type="number" min="1" max="65535" value="{{.Form.JavaPort}}" required>
+          <span class="field-help">TCP port used by Java Edition clients. Default: <code>25565</code>.</span>
+        </label>
+        <label>Bedrock UDP port
+          <input name="bedrock_port" type="number" min="1" max="65535" value="{{.Form.BedrockPort}}" required>
+          <span class="field-help">UDP port used by Bedrock/Geyser clients. Default: <code>19132</code>.</span>
+        </label>
+      </div>
+      <label class="toggle-line"><input name="bedrock_enabled" type="checkbox" {{if .Form.BedrockEnabled}}checked{{end}}> Enable Bedrock cross-play</label>
+      <p class="muted compact">Port and Bedrock changes update JustVoxel's firewall configuration when applied. Minecraft itself is not restarted automatically.</p>
+    </section>
+
+    <section class="panel details">
+      <div class="section-heading"><div><p class="eyebrow">Software</p><h2>Minecraft version policy</h2></div></div>
+      <div class="settings-grid two-column">
+        <label>Minecraft container channel or tag
+          <input name="image_tag" value="{{.Form.ImageTag}}" required autocomplete="off">
+          <span class="field-help"><code>stable</code>, <code>latest</code>, or an exact upstream itzg/minecraft-server image tag.</span>
+        </label>
+        <label>Version policy
+          <select name="version_policy" id="version-policy">
+            <option value="pinned" {{if eq .Form.VersionPolicy "pinned"}}selected{{end}}>Pinned exact Minecraft version</option>
+            <option value="recommended">Resolve newest stable Paper-supported version now</option>
+            <option value="latest" {{if eq .Form.VersionPolicy "latest"}}selected{{end}}>LATEST when Minecraft starts</option>
+          </select>
+          <span class="field-help">Pinned is the most predictable. LATEST may move to a newer Minecraft/Paper release when the server starts.</span>
+        </label>
+        <label>Exact Minecraft version
+          <input name="version" id="minecraft-version" value="{{.Form.Version}}" autocomplete="off">
+          <span class="field-help">Used when the policy is Pinned. Example: <code>1.21.8</code>.</span>
+        </label>
+      </div>
+    </section>
+
+    <section class="panel details">
+      <div class="section-heading"><div><p class="eyebrow">Backups</p><h2>Automatic backup policy</h2></div></div>
+      <div class="settings-grid two-column">
+        <label>Backups retained
+          <input name="backup_keep" type="number" min="1" step="1" value="{{.Form.BackupKeep}}" required>
+          <span class="field-help">How many completed backups JustVoxel keeps before old backups are rotated out.</span>
+        </label>
+        <label>Automatic backup schedule
+          <input name="backup_schedule" value="{{.Form.BackupSchedule}}" required autocomplete="off">
+          <span class="field-help">Systemd calendar format. Daily at 04:30 is <code>*-*-* 04:30:00</code>.</span>
+        </label>
+      </div>
+      <label class="toggle-line"><input name="backup_timer_enabled" type="checkbox" {{if .Form.BackupTimerEnabled}}checked{{end}}> Enable automatic backups</label>
+      <p class="muted compact">Backup destination remains unchanged in A2. Storage and backup-location management comes in A3.</p>
+    </section>
+
+    <section class="panel details">
+      <div class="section-heading"><div><p class="eyebrow">Current appliance</p><h2>Read-only context</h2></div></div>
+      <dl>
+        <div><dt>Minecraft data</dt><dd><code>{{.Configuration.Minecraft.DataPath}}</code></dd></div>
+        <div><dt>Backup directory</dt><dd><code>{{.Configuration.Backup.Path}}</code></dd></div>
+        <div><dt>Game mode</dt><dd>{{.Configuration.Minecraft.GameMode}}</dd></div>
+        <div><dt>Difficulty</dt><dd>{{.Configuration.Minecraft.Difficulty}}</dd></div>
+        <div><dt>Whitelist</dt><dd>{{if .Configuration.Minecraft.WhitelistEnabled}}Enabled{{else}}Disabled{{end}}{{if .Configuration.Minecraft.EnforceWhitelist}} · enforced{{end}}</dd></div>
+      </dl>
+    </section>
+
+    <div class="settings-submit-row"><button type="submit">Review changes</button><span class="muted">Nothing is changed until you review and press Apply.</span></div>
+  </form>
+
+  {{if .Plan}}
+  <section class="panel details review-panel" id="review">
+    <div class="section-heading"><div><p class="eyebrow">Review</p><h2>Proposed changes</h2></div>{{if .Plan.RestartRequired}}<span class="badge">Restart required</span>{{end}}</div>
+    {{range .Plan.Warnings}}<div class="notice warning">{{.}}</div>{{end}}
+    {{if .Plan.Changes}}
+      <div class="change-list">{{range .Plan.Changes}}<div class="change-row"><div><strong>{{.Label}}</strong>{{if .RestartRequired}}<span class="muted">Minecraft restart required</span>{{end}}</div><div><code>{{.Before}}</code><span aria-hidden="true">→</span><code>{{.After}}</code></div></div>{{end}}</div>
+      <p class="muted">Estimated memory left for JustVoxel after the configured Minecraft maximum: <strong>{{.Plan.MemoryRemainingMiB}} MiB</strong>.</p>
+      {{if .Plan.RestartRequired}}<div class="notice warning"><strong>Minecraft will not restart automatically.</strong> The new server settings are saved and runtime files are prepared; restart Minecraft when it is safe for players.</div>{{end}}
+      <form class="action-form" method="post" action="/settings/server/apply" data-progress="Applying…">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <input type="hidden" name="java_memory" value="{{.Plan.Proposed.Minecraft.JavaMemory}}"><input type="hidden" name="container_memory" value="{{.Plan.Proposed.Minecraft.ContainerMemory}}">
+        <input type="hidden" name="max_players" value="{{.Plan.Proposed.Minecraft.MaxPlayers}}"><input type="hidden" name="motd" value="{{.Plan.Proposed.Minecraft.MOTD}}"><input type="hidden" name="timezone" value="{{.Plan.Proposed.Minecraft.Timezone}}">
+        <input type="hidden" name="java_port" value="{{.Plan.Proposed.Minecraft.JavaPort}}"><input type="hidden" name="bedrock_port" value="{{.Plan.Proposed.Minecraft.BedrockPort}}">{{if .Plan.Proposed.Minecraft.BedrockEnabled}}<input type="hidden" name="bedrock_enabled" value="on">{{end}}
+        <input type="hidden" name="image_tag" value="{{.Plan.Proposed.Minecraft.ImageTag}}"><input type="hidden" name="version_policy" value="{{.Plan.Proposed.Minecraft.VersionMode}}"><input type="hidden" name="version" value="{{.Plan.Proposed.Minecraft.Version}}">
+        <input type="hidden" name="backup_keep" value="{{.Plan.Proposed.Backup.Keep}}"><input type="hidden" name="backup_schedule" value="{{.Plan.Proposed.Backup.Schedule}}">{{if .Plan.Proposed.Backup.TimerEnabled}}<input type="hidden" name="backup_timer_enabled" value="on">{{end}}
+        <div class="action-row"><button type="submit">Apply changes</button><a class="button-link secondary" href="/settings/server">Cancel</a></div>
+      </form>
+    {{else}}
+      <p>No configuration changes were detected.</p>
+    {{end}}
+  </section>
+  {{end}}
+
+  {{else}}
+  <div class="notice">Minecraft is not configured yet. Editing is intentionally unavailable here; the first-run setup wizard will handle a new appliance in Phase A4.</div>
+  <section class="panel details">
+    <div class="section-heading"><div><p class="eyebrow">Setup foundation</p><h2>Suggested defaults</h2></div></div>
+    <dl>
+      <div><dt>System memory detected</dt><dd>{{.SystemMemory}}</dd></div>
+      <div><dt>Recommended system reserve</dt><dd>{{.SystemReserveRecommended}}</dd></div>
+      <div><dt>Minimum system reserve</dt><dd>{{.SystemReserveMinimum}}</dd></div>
+      <div><dt>Minecraft game memory</dt><dd>{{.Defaults.JavaMemory}}</dd></div>
+      <div><dt>Maximum Minecraft memory</dt><dd>{{.Defaults.ContainerMemory}}</dd></div>
+      <div><dt>Maximum players</dt><dd>{{.Defaults.MaxPlayers}}</dd></div>
+      <div><dt>Java port</dt><dd>{{.Defaults.JavaPort}}/tcp</dd></div>
+      <div><dt>Bedrock default</dt><dd>{{if .Defaults.BedrockEnabled}}Enabled{{else}}Disabled{{end}} · {{.Defaults.BedrockPort}}/udp</dd></div>
+    </dl>
+  </section>
+  {{end}}
+  <p class="foot">WebUI {{.Version}} · Management API {{.ManagementAPI}}</p>
+</main></body></html>{{end}}
