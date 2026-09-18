@@ -187,6 +187,7 @@ out="$ACTION_OUT"
 jq -e '.ok and .applied' >/dev/null <<< "$out" || fail "partition apply: $out"
 [[ $MOUNTED -eq 1 && $MOUNT_CALLS -eq 1 ]] || fail "mount count/state $MOUNT_CALLS/$MOUNTED"
 [[ $(grep -c "UUID=$CURRENT_UUID $MOUNT xfs" "$A53_FSTAB") -eq 1 ]] || fail 'expected exactly one UUID fstab entry'
+[[ ! -e $A53_TRANSACTION_ROOT/22222222-2222-4222-8222-222222222222/smb.credentials.before ]] || fail 'local transaction created unnecessary SMB credential snapshot'
 reset_runtime
 run_action a53_rollback_action "$req"
 out="$ACTION_OUT"
@@ -213,6 +214,7 @@ run_action a53_apply_action "$req"
 out="$ACTION_OUT"
 jq -e '.ok and .applied' >/dev/null <<< "$out" || fail "NFS apply failed: $out"
 grep -Fq "nas:/backup $MOUNT nfs rw,_netdev,nofail,x-systemd.mount-timeout=20s" "$A53_FSTAB" || fail 'NFS fstab entry missing'
+[[ ! -e $A53_TRANSACTION_ROOT/44444444-4444-4444-8444-444444444444/smb.credentials.before ]] || fail 'NFS transaction created unnecessary SMB credential snapshot'
 reset_runtime
 run_action a53_rollback_action "$req"
 out="$ACTION_OUT"
@@ -233,6 +235,7 @@ grep -Fq 'password=super-secret' "$A54_SMB_CREDENTIALS" || fail 'SMB password no
 if grep -R -Fq 'super-secret' "$A53_TRANSACTION_ROOT"; then
     fail 'SMB password leaked into transaction evidence'
 fi
+[[ ! -e $A53_TRANSACTION_ROOT/44444444-4444-4444-8444-555555555555/smb.credentials.before ]] || fail 'new SMB credentials created an unnecessary empty snapshot'
 reset_runtime
 req_without_password="$(jq 'del(.smb_password)' <<< "$req")"
 run_action a53_rollback_action "$req_without_password"
@@ -240,6 +243,7 @@ out="$ACTION_OUT"
 jq -e '.ok and .rollback_state=="succeeded"' >/dev/null <<< "$out" || fail "SMB rollback failed without secret: $out"
 [[ $MOUNTED -eq 0 ]] || fail 'SMB rollback left mount active'
 [[ ! -e $A54_SMB_CREDENTIALS ]] || fail 'SMB rollback left new credential file'
+[[ ! -e $A53_TRANSACTION_ROOT/44444444-4444-4444-8444-555555555555/smb.credentials.before ]] || fail 'successful SMB rollback retained credential snapshot'
 cmp -s "$A53_FSTAB" "$TMP/fstab.expected" || fail 'SMB rollback did not restore fstab'
 
 # Pre-existing SMB credentials must be restored exactly, including mode.
@@ -254,6 +258,7 @@ req="$(make_network_request 44444444-4444-4444-8444-666666666666 smb '//nas/back
 run_action a53_apply_action "$req"
 out="$ACTION_OUT"
 jq -e '.ok and .applied' >/dev/null <<< "$out" || fail "SMB replacement apply failed: $out"
+[[ -f $A53_TRANSACTION_ROOT/44444444-4444-4444-8444-666666666666/smb.credentials.before ]] || fail 'existing SMB credentials were not snapshotted for active transaction'
 reset_runtime
 req_without_password="$(jq 'del(.smb_password)' <<< "$req")"
 run_action a53_rollback_action "$req_without_password"
@@ -261,6 +266,26 @@ out="$ACTION_OUT"
 jq -e '.ok and .rollback_state=="succeeded"' >/dev/null <<< "$out" || fail "SMB existing-credential rollback failed: $out"
 cmp -s "$A54_SMB_CREDENTIALS" "$TMP/smb.credentials.expected" || fail 'SMB rollback did not restore previous credential contents'
 [[ $(stat -c '%a' "$A54_SMB_CREDENTIALS") == 640 ]] || fail 'SMB rollback did not restore previous credential mode'
+[[ ! -e $A53_TRANSACTION_ROOT/44444444-4444-4444-8444-666666666666/smb.credentials.before ]] || fail 'successful SMB rollback retained previous credential snapshot'
+rm -f "$A54_SMB_CREDENTIALS"
+rmdir "$(dirname "$A54_SMB_CREDENTIALS")" 2>/dev/null || true
+
+# Already-mounted SMB source is verified but does not overwrite or snapshot credentials.
+install -d -m0700 "$(dirname "$A54_SMB_CREDENTIALS")"
+printf 'username=mounted\npassword=mounted-secret\n' > "$A54_SMB_CREDENTIALS"
+chmod 0600 "$A54_SMB_CREDENTIALS"
+cp "$A54_SMB_CREDENTIALS" "$TMP/smb.mounted.expected"
+MOUNTED=1
+MOUNT_CALLS=0
+MOUNT_SOURCE='//nas/backups'
+req="$(make_network_request 44444444-4444-4444-8444-777777777777 smb '//nas/backups' 'unused-secret')"
+run_action a53_apply_action "$req"
+out="$ACTION_OUT"
+jq -e '.ok and .applied' >/dev/null <<< "$out" || fail "already-mounted SMB apply failed: $out"
+[[ $MOUNT_CALLS -eq 0 ]] || fail 'already-mounted SMB source was remounted'
+cmp -s "$A54_SMB_CREDENTIALS" "$TMP/smb.mounted.expected" || fail 'already-mounted SMB credentials were modified'
+[[ ! -e $A53_TRANSACTION_ROOT/44444444-4444-4444-8444-777777777777/smb.credentials.before ]] || fail 'already-mounted SMB transaction created credential snapshot'
+MOUNTED=0
 rm -f "$A54_SMB_CREDENTIALS"
 rmdir "$(dirname "$A54_SMB_CREDENTIALS")" 2>/dev/null || true
 
@@ -276,6 +301,30 @@ jq -e '(.ok|not) and .rollback_state=="succeeded" and .rollback_result=="rolled_
 [[ $MOUNTED -eq 0 ]] || fail 'automatic rollback left mount active'
 cmp -s "$A53_FSTAB" "$TMP/fstab.expected" || fail 'automatic rollback did not restore fstab'
 PROBE_FAIL_PATH=''
+
+# SMB rollback failure preserves the credential snapshot as recovery evidence.
+install -d -m0700 "$(dirname "$A54_SMB_CREDENTIALS")"
+printf 'username=old\npassword=recovery-secret\n' > "$A54_SMB_CREDENTIALS"
+chmod 0600 "$A54_SMB_CREDENTIALS"
+MOUNTED=0
+MOUNT_CALLS=0
+MOUNT_SOURCE='//nas/backups'
+req="$(make_network_request 44444444-4444-4444-8444-888888888888 smb '//nas/backups' 'replacement-secret')"
+run_action a53_apply_action "$req"
+out="$ACTION_OUT"
+jq -e '.ok and .applied' >/dev/null <<< "$out" || fail "SMB rollback-failure setup failed: $out"
+snapshot="$A53_TRANSACTION_ROOT/44444444-4444-4444-8444-888888888888/smb.credentials.before"
+[[ -f $snapshot ]] || fail 'SMB recovery snapshot missing before rollback failure'
+printf '# concurrent admin change\n' >> "$A53_FSTAB"
+reset_runtime
+req_without_password="$(jq 'del(.smb_password)' <<< "$req")"
+run_action a53_rollback_action "$req_without_password"
+out="$ACTION_OUT"
+jq -e '(.ok|not) and .rollback_state=="failed" and .rollback_result=="needs_attention"' >/dev/null <<< "$out" || fail "SMB rollback failure did not require attention: $out"
+[[ -f $snapshot ]] || fail 'failed SMB rollback removed required recovery snapshot'
+cp "$TMP/fstab.expected" "$A53_FSTAB"
+rm -f "$A54_SMB_CREDENTIALS"
+rmdir "$(dirname "$A54_SMB_CREDENTIALS")" 2>/dev/null || true
 
 # Concurrent fstab change must block explicit rollback and preserve recovery evidence.
 MOUNTED=0
