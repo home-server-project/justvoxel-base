@@ -79,7 +79,7 @@ Use:
 - `mjust resources` for the live btop resource monitor
 - `mjust reboot` for a player-aware graceful reboot
 - `mjust poweroff` for a player-aware graceful shutdown
-- `mjust firmware` on HWE for reboot into firmware/UEFI setup when supported
+- `mjust firmware` for reboot into firmware/UEFI setup when supported on physical hardware
 
 This keeps `mjust status` focused on answering one question quickly: is the appliance healthy and what needs attention?
 
