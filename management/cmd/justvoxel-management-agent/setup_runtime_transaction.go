@@ -161,7 +161,7 @@ func executeSetupTransaction(parent context.Context, store *operationStore, oper
 	validated, err := runSetupRuntimeTransactionAction(parent, "validate", setupRuntimeValidateTimeout, request)
 	if err != nil || !validated.OK {
 		if err == nil {
-			err = errors.New(firstNonEmpty(validated.Error, "runtime preflight failed"))
+			err = errors.New(setupRuntimeFirstNonEmpty(validated.Error, "runtime preflight failed"))
 		}
 		return failSetupAfterStorage(parent, store, operationID, plan, request, err)
 	}
@@ -171,7 +171,7 @@ func executeSetupTransaction(parent context.Context, store *operationStore, oper
 	applied, err := runSetupRuntimeTransactionAction(parent, "apply", setupRuntimeApplyTimeout, request)
 	if err != nil || !applied.OK || !applied.Applied {
 		if err == nil {
-			err = errors.New(firstNonEmpty(applied.Error, "runtime activation failed"))
+			err = errors.New(setupRuntimeFirstNonEmpty(applied.Error, "runtime activation failed"))
 		}
 		return failSetupAfterStorage(parent, store, operationID, plan, request, err)
 	}
@@ -182,7 +182,7 @@ func executeSetupTransaction(parent context.Context, store *operationStore, oper
 	verified, err := runSetupRuntimeTransactionAction(parent, "verify", setupRuntimeVerifyTimeout, request)
 	if err != nil || !verified.OK {
 		if err == nil {
-			err = errors.New(firstNonEmpty(verified.Error, "Minecraft runtime verification failed"))
+			err = errors.New(setupRuntimeFirstNonEmpty(verified.Error, "Minecraft runtime verification failed"))
 		}
 		return failSetupAfterStorage(parent, store, operationID, plan, request, err)
 	}
@@ -192,7 +192,7 @@ func executeSetupTransaction(parent context.Context, store *operationStore, oper
 	committed, err := runSetupRuntimeTransactionAction(parent, "commit", setupRuntimeCommitTimeout, request)
 	if err != nil || !committed.OK {
 		if err == nil {
-			err = errors.New(firstNonEmpty(committed.Error, "configured state could not be committed"))
+			err = errors.New(setupRuntimeFirstNonEmpty(committed.Error, "configured state could not be committed"))
 		}
 		return failSetupAfterStorage(parent, store, operationID, plan, request, err)
 	}
@@ -235,7 +235,7 @@ func zeroBytes(value []byte) {
 	}
 }
 
-func firstNonEmpty(value, fallback string) string {
+func setupRuntimeFirstNonEmpty(value, fallback string) string {
 	if value != "" {
 		return value
 	}
