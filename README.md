@@ -114,6 +114,8 @@ Start with the document that matches what you are trying to do:
 - [`docs/SYSTEM.md`](docs/SYSTEM.md) — OS status, updates, resources, reboot, poweroff, and firmware controls
 - [`docs/STORAGE.md`](docs/STORAGE.md) — storage choices, provisioning, mounts, and migration
 - [`docs/RESTORE.md`](docs/RESTORE.md) — world and full Minecraft-data recovery
+- [`docs/MIGRATION.md`](docs/MIGRATION.md) — import, export, and server migration
+- [`docs/WEBUI.md`](docs/WEBUI.md) — WebUI authentication, access, and security model
 - [`docs/MANAGEMENT.md`](docs/MANAGEMENT.md) — management layers and native Linux administration
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — why JustVoxel is built as an immutable appliance
 - [`docs/VARIANTS.md`](docs/VARIANTS.md) — Base, VM release, and HWE product layering
