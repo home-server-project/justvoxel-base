@@ -23,7 +23,7 @@ const validAdminSetupPlanResponse = `{
   "schema_version":"v1",
   "normalized":{
     "server":{"motd":"Family server","max_players":10,"bedrock_enabled":true,"timezone":"America/Toronto"},
-    "minecraft":{"java_memory":"4G","container_memory":"6G","java_port":25565,"bedrock_port":19132,"image_tag":"stable","requested_version_policy":"recommended","version_policy":"pinned","version":"1.21.8","system_memory_mib":8192,"system_reserve_mib":2048},
+    "minecraft":{"java_memory":"4G","container_memory":"6G","java_port":25565,"bedrock_port":19132,"image_tag":"stable","requested_version_policy":"recommended","version_policy":"pinned","version":"1.21.8","system_memory_mib":8192,"system_reserve_mib":2048,"minecraft_uid":1000,"minecraft_gid":1000},
     "storage":{"type":"system","path":"/var/lib/justvoxel/minecraft","model":"JustVoxel system storage","system_disk":true},
     "backups":{"type":"system","path":"/var/lib/justvoxel/backups","model":"JustVoxel system storage","system_disk":true,"credentials_required":false,"automatic":true,"daily_time":"04:30","schedule":"*-*-* 04:30:00","keep":7}
   },
@@ -120,6 +120,16 @@ func TestAdminSetupPlanFingerprintIsStableAndExecutionRelevant(t *testing.T) {
 	}
 
 	response.Normalized.Minecraft.Version = "1.21.8"
+	response.Normalized.Minecraft.MinecraftUID = 1001
+	changed, err = adminSetupPlanFingerprint(response.SchemaVersion, response.Normalized, response.Requirements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed == first {
+		t.Fatal("Minecraft runtime UID change did not change the reviewed-plan fingerprint")
+	}
+
+	response.Normalized.Minecraft.MinecraftUID = 1000
 	response.Normalized.Storage.ExpectedUUID = "replacement-storage-uuid"
 	changed, err = adminSetupPlanFingerprint(response.SchemaVersion, response.Normalized, response.Requirements)
 	if err != nil {
