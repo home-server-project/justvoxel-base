@@ -24,7 +24,7 @@ ghcr.io/home-server-project/justvoxel-base
 
 The Base contains the complete shared JustVoxel appliance layer and is already VM-ready. It includes the management agent, WebUI integration, `mjust`, Minecraft runtime templates and helpers, common networking/storage tooling, and both `health/common` and `health/vm` validation.
 
-Physical-hardware-only packages and validation are intentionally not part of this repository. That delta belongs to the final JustVoxel HWE product.
+Hardware-dependent appliance logic can live in Base, while hardware-specific package payloads are not required for the VM-ready Base image.
 
 ## Channels
 
