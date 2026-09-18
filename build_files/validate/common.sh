@@ -117,8 +117,14 @@ test -x /usr/libexec/justvoxel/justvoxel-webui
 ldd /usr/libexec/justvoxel/management-agent | grep -Fq 'libpam.so'
 ldd /usr/libexec/justvoxel/management-agent | grep -Fq 'libpwquality.so'
 test -r /usr/lib/justvoxel/webui-release.json
-jq -e '.management_api == "v1" and (.artifact_sha256 | test("^[0-9a-f]{64}$"))' /usr/lib/justvoxel/webui-release.json >/dev/null
-/usr/libexec/justvoxel/justvoxel-webui -version | grep -Fq 'management-api=v1'
+jq -e '.management_api == "v1" and (.version | type == "string" and length > 0) and (.source_commit | test("^[0-9a-f]{40}$")) and (.build_date | type == "string" and length > 0) and (.go_version | type == "string" and length > 0) and (has("artifact_sha256") | not) and (has("release_tag") | not)' /usr/lib/justvoxel/webui-release.json >/dev/null
+webui_version="$(jq -r '.version' /usr/lib/justvoxel/webui-release.json)"
+webui_source="$(jq -r '.source_commit' /usr/lib/justvoxel/webui-release.json)"
+webui_api="$(jq -r '.management_api' /usr/lib/justvoxel/webui-release.json)"
+webui_version_output="$(/usr/libexec/justvoxel/justvoxel-webui -version)"
+grep -Fqx "JustVoxel WebUI ${webui_version}" <<<"${webui_version_output}"
+grep -Fqx "source=${webui_source}" <<<"${webui_version_output}"
+grep -Fqx "management-api=${webui_api}" <<<"${webui_version_output}"
 /usr/libexec/justvoxel/management-agent version | grep -Fq 'JustVoxel Management API v1'
 
 test -x /usr/libexec/justvoxel/minecraft-backup
