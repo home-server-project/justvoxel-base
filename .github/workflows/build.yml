@@ -1,29 +1,19 @@
 ---
-name: Build signed JustVoxel stable images
+name: stable
 
 on:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
-    paths-ignore:
-      - '**/README.md'
-      - 'docs/**'
   workflow_dispatch:
-  schedule:
-    - cron: '20 4 * * 6'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
+  group: ${{ github.workflow }}-stable
   cancel-in-progress: true
 
 env:
-  CURRENT_TAG: '10'
+  IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/justvoxel-base
+  CURRENT_TAG: 'stable'
   RECHUNK_MAX_LAYERS: '127'
   OCI_LAYER_LIMIT: '128'
-  ALMA_REPOS_IMAGE: quay.io/almalinuxorg/10-base:10
-  BOOTC_IMAGECTL_IMAGE: quay.io/centos-bootc/centos-bootc:stream10
-  ALMA_BUILDER_IMAGE: quay.io/almalinuxorg/10-kitten-base:10-kitten
+  HOME_SERVER_BASE_IMAGE: ghcr.io/home-server-project/home-server-base-10:stable
 
 jobs:
   source-tests:
@@ -41,6 +31,13 @@ jobs:
           go-version: '1.25.x'
           check-latest: true
           cache: false
+
+      - name: Install PAM source-test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libpam0g-dev libpwquality-dev
 
       - name: Run shell and mjust regression tests
         shell: bash
@@ -61,15 +58,15 @@ jobs:
             bash "${test_script}"
           done
 
-      - name: Build and test management agent
+      - name: Build and test management agent source
         shell: bash
         run: |
           set -euo pipefail
           cd management
           go mod download
-          go vet ./...
-          go test ./...
-          CGO_ENABLED=0 go build -trimpath -o /tmp/management-agent ./cmd/justvoxel-management-agent
+          CGO_ENABLED=1 go vet ./...
+          CGO_ENABLED=1 go test ./...
+          CGO_ENABLED=1 go build -trimpath -o /tmp/management-agent ./cmd/justvoxel-management-agent
           /tmp/management-agent version
 
   resolve-webui:
@@ -95,33 +92,17 @@ jobs:
           echo "Selected JustVoxel WebUI ${version}"
 
   build:
+    name: Build JustVoxel Base stable
     needs: [source-tests, resolve-webui]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
       id-token: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - variant: vm
-            target: justvoxel-vm
-            repository: justvoxel-vm
-          - variant: baremetal
-            target: justvoxel-baremetal
-            repository: justvoxel-baremetal
 
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: Set up Go
-        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6
-        with:
-          go-version: '1.25.x'
-          check-latest: true
-          cache: false
 
       - name: Install build dependencies
         shell: bash
@@ -135,6 +116,15 @@ jobs:
         with:
           cosign-release: 'v3.1.2'
 
+      - name: Verify Home Server Base stable signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          cosign verify \
+            --new-bundle-format=false \
+            --key cosign.pub \
+            "${HOME_SERVER_BASE_IMAGE}" >/dev/null
+
       - name: Fetch and verify exact WebUI release
         shell: bash
         env:
@@ -144,107 +134,99 @@ jobs:
           set -euo pipefail
           ./build_files/resolve-webui-release.sh fetch "${WEBUI_VERSION}" build_artifacts/webui
 
-      - name: Build management agent
+      - name: Build management agent on Home Server Base 10
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p build_artifacts/management
-          cd management
-          go mod download
-          go test ./...
-          CGO_ENABLED=0 go build -trimpath -o ../build_artifacts/management/management-agent ./cmd/justvoxel-management-agent
+          sudo podman run --rm \
+            --pull=always \
+            --security-opt=label=disable \
+            -v "${PWD}/management:/src:ro" \
+            -v "${PWD}/system_files/etc/pam.d/justvoxel:/etc/pam.d/justvoxel:ro" \
+            -v "${PWD}/tests/run-pam-integration-alma.sh:/run-pam-integration-alma.sh:ro" \
+            -v "${PWD}/build_artifacts/management:/out" \
+            "${HOME_SERVER_BASE_IMAGE}" \
+            /bin/bash -c '
+              set -euo pipefail
+              dnf install -y gcc golang pam-devel libpwquality-devel diffutils authselect authselect-libs shadow-utils
+              mkdir -p /work /tmp/go-home /tmp/go-build-cache /tmp/go-path
+              cp -a /src/. /work/
+              cd /work
+              HOME=/tmp/go-home GOCACHE=/tmp/go-build-cache GOPATH=/tmp/go-path GOENV=off go mod tidy
+              dirty=0
+              diff -u /src/go.mod /work/go.mod || dirty=1
+              diff -u /src/go.sum /work/go.sum || dirty=1
+              if (( dirty != 0 )); then
+                echo "ERROR: AlmaLinux Go requires module metadata changes shown above." >&2
+                exit 1
+              fi
+              HOME=/tmp/go-home GOCACHE=/tmp/go-build-cache GOPATH=/tmp/go-path GOENV=off CGO_ENABLED=1 go test -mod=readonly ./...
+              HOME=/tmp/go-home \
+              GOCACHE=/tmp/go-build-cache \
+              GOPATH=/tmp/go-path \
+              GOENV=off \
+              bash /run-pam-integration-alma.sh
+              HOME=/tmp/go-home GOCACHE=/tmp/go-build-cache GOPATH=/tmp/go-path GOENV=off CGO_ENABLED=1 go build -mod=readonly -trimpath -o /out/management-agent ./cmd/justvoxel-management-agent
+            '
+          sudo chmod 0755 build_artifacts/management/management-agent
 
-      - name: Resolve Alma build inputs
-        id: inputs
-        shell: bash
-        run: |
-          set -euo pipefail
-          resolve_ref() {
-            local image="$1" digest
-            digest="$(skopeo inspect --override-arch amd64 --format '{{.Digest}}' "docker://${image}")"
-            [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
-            printf '%s@%s' "${image%:*}" "${digest}"
-          }
-          echo "repos_ref=$(resolve_ref "${ALMA_REPOS_IMAGE}")" >> "${GITHUB_OUTPUT}"
-          echo "imagectl_ref=$(resolve_ref "${BOOTC_IMAGECTL_IMAGE}")" >> "${GITHUB_OUTPUT}"
-          echo "builder_ref=$(resolve_ref "${ALMA_BUILDER_IMAGE}")" >> "${GITHUB_OUTPUT}"
-
-      - name: Build ${{ matrix.variant }} image
+      - name: Build JustVoxel Base
         shell: bash
         env:
-          ALMA_REPOS_REF: ${{ steps.inputs.outputs.repos_ref }}
-          BOOTC_IMAGECTL_REF: ${{ steps.inputs.outputs.imagectl_ref }}
-          ALMA_BUILDER_REF: ${{ steps.inputs.outputs.builder_ref }}
-          TARGET: ${{ matrix.target }}
-          VARIANT: ${{ matrix.variant }}
           WEBUI_VERSION: ${{ needs.resolve-webui.outputs.version }}
         run: |
           set -euo pipefail
-          image_repo="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ matrix.repository }}"
           sudo podman build \
             --pull=always \
             --security-opt=label=disable \
             --cap-add=all \
             --device /dev/fuse \
-            --build-arg "ALMA_REPOS_IMAGE=${ALMA_REPOS_REF}" \
-            --build-arg "BOOTC_IMAGECTL_IMAGE=${BOOTC_IMAGECTL_REF}" \
-            --build-arg "ALMA_BUILDER_IMAGE=${ALMA_BUILDER_REF}" \
+            --build-arg "HOME_SERVER_BASE_IMAGE=${HOME_SERVER_BASE_IMAGE}" \
+            --build-arg "JUSTVOXEL_BASE_REPOSITORY=${IMAGE_REPOSITORY}" \
             --build-arg "JUSTVOXEL_VM_REPOSITORY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/justvoxel-vm" \
-            --build-arg "JUSTVOXEL_BAREMETAL_REPOSITORY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/justvoxel-baremetal" \
+            --build-arg "JUSTVOXEL_HWE_REPOSITORY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/justvoxel-hwe" \
             --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
             --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --label "io.home-server-project.justvoxel.webui.version=${WEBUI_VERSION}" \
             --label "io.home-server-project.justvoxel.management-api=v1" \
-            --target "${TARGET}" \
-            --tag "justvoxel-${VARIANT}:unrechunked" \
+            --target justvoxel-base \
+            --tag justvoxel-base:unrechunked \
             --file Containerfile \
             .
-          echo "IMAGE_REPOSITORY=${image_repo}" >> "${GITHUB_ENV}"
 
-      - name: Rechunk ${{ matrix.variant }} image
+      - name: Rechunk JustVoxel Base
         id: rechunk
         shell: bash
-        env:
-          VARIANT: ${{ matrix.variant }}
         run: |
           set -euo pipefail
-          rechunk_tmp="${RUNNER_TEMP}/justvoxel-${VARIANT}-rechunk"
+          rechunk_tmp="${RUNNER_TEMP}/justvoxel-base-rechunk"
           sudo mkdir -p "${rechunk_tmp}"
           sudo chmod 1777 "${rechunk_tmp}"
           sudo podman run --rm --privileged \
             -v /var/lib/containers:/var/lib/containers \
             -v "${rechunk_tmp}:/var/tmp" \
             --entrypoint /usr/libexec/bootc-base-imagectl \
-            "localhost/justvoxel-${VARIANT}:unrechunked" \
+            localhost/justvoxel-base:unrechunked \
             rechunk \
             --max-layers "${RECHUNK_MAX_LAYERS}" \
-            "localhost/justvoxel-${VARIANT}:unrechunked" \
-            "localhost/justvoxel-${VARIANT}:test"
-          layer_count="$(sudo skopeo inspect --raw "containers-storage:localhost/justvoxel-${VARIANT}:test" | jq -r '.layers | length')"
+            localhost/justvoxel-base:unrechunked \
+            localhost/justvoxel-base:test
+          layer_count="$(sudo skopeo inspect --raw containers-storage:localhost/justvoxel-base:test | jq -r '.layers | length')"
           [[ "${layer_count}" =~ ^[0-9]+$ ]]
           (( layer_count <= OCI_LAYER_LIMIT ))
           echo "layers=${layer_count}" >> "${GITHUB_OUTPUT}"
 
-      - name: Validate completed image
+      - name: Validate completed Base image
         shell: bash
-        env:
-          VARIANT: ${{ matrix.variant }}
         run: |
           set -euo pipefail
           sudo podman run --rm \
             --entrypoint /bin/bash \
-            "justvoxel-${VARIANT}:test" \
-            -c "/usr/libexec/justvoxel/health/common && /usr/libexec/justvoxel/health/${VARIANT} && bootc container lint --fatal-warnings"
-
-      - name: Prepare stable tag
-        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "BUILD_TAG=10-$(date -u +%Y%m%d)-${GITHUB_SHA:0:7}" >> "${GITHUB_ENV}"
+            justvoxel-base:test \
+            -c '/usr/libexec/justvoxel/health/common && /usr/libexec/justvoxel/health/vm && bootc container lint --fatal-warnings'
 
       - name: Login to GHCR
-        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
         shell: bash
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -256,29 +238,30 @@ jobs:
             ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
           chmod 600 "${HOME}/.docker/config.json"
 
-      - name: Push stable image
+      - name: Push stable Base image
         id: push
-        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
         shell: bash
-        env:
-          VARIANT: ${{ matrix.variant }}
         run: |
           set -euo pipefail
-          sudo podman tag "justvoxel-${VARIANT}:test" "${IMAGE_REPOSITORY}:${BUILD_TAG}"
-          sudo podman tag "justvoxel-${VARIANT}:test" "${IMAGE_REPOSITORY}:${CURRENT_TAG}"
+          build_tag="stable-$(date -u +%Y%m%d)-${GITHUB_SHA:0:7}"
+          echo "BUILD_TAG=${build_tag}" >> "${GITHUB_ENV}"
+
+          sudo podman tag justvoxel-base:test "${IMAGE_REPOSITORY}:${build_tag}"
+          sudo podman tag justvoxel-base:test "${IMAGE_REPOSITORY}:${CURRENT_TAG}"
+
           sudo podman push \
             --authfile "${HOME}/.docker/config.json" \
             --digestfile /tmp/digest \
-            "${IMAGE_REPOSITORY}:${BUILD_TAG}"
+            "${IMAGE_REPOSITORY}:${build_tag}"
           sudo podman push \
             --authfile "${HOME}/.docker/config.json" \
             "${IMAGE_REPOSITORY}:${CURRENT_TAG}"
+
           digest="$(cat /tmp/digest)"
           [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
           echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
 
-      - name: Sign stable image digest
-        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      - name: Sign stable Base image digest
         shell: bash
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
@@ -291,8 +274,7 @@ jobs:
             --key env://COSIGN_PRIVATE_KEY \
             "${IMAGE_REPOSITORY}@${DIGEST}"
 
-      - name: Verify stable signature
-        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      - name: Verify stable Base signature
         shell: bash
         env:
           DIGEST: ${{ steps.push.outputs.digest }}
@@ -307,103 +289,19 @@ jobs:
         if: always()
         shell: bash
         env:
-          VARIANT: ${{ matrix.variant }}
           LAYERS: ${{ steps.rechunk.outputs.layers }}
           DIGEST: ${{ steps.push.outputs.digest }}
           WEBUI_VERSION: ${{ needs.resolve-webui.outputs.version }}
         run: |
           {
-            echo "## JustVoxel ${VARIANT}"
+            echo "## JustVoxel Base stable"
             echo
-            echo "- Base: AlmaLinux 10 minimal-plus"
+            echo "- Home Server Base input: ${HOME_SERVER_BASE_IMAGE}"
             echo "- WebUI: ${WEBUI_VERSION:-unresolved}"
             echo "- Management API: v1"
             echo "- Rechunked layers: ${LAYERS:-unknown} / ${OCI_LAYER_LIMIT}"
-            echo "- Image: ${IMAGE_REPOSITORY:-not-published}"
+            echo "- Moving tag: ${IMAGE_REPOSITORY}:${CURRENT_TAG}"
+            echo "- Immutable tag: ${IMAGE_REPOSITORY}:${BUILD_TAG:-n/a}"
             echo "- Digest: ${DIGEST:-not-published}"
+            echo "- VM-ready: health/common + health/vm"
           } >> "${GITHUB_STEP_SUMMARY}"
-
-  release:
-    name: Publish GitHub release
-    needs: [resolve-webui, build]
-    if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-      packages: read
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: Install release tools
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y jq skopeo
-
-      - name: Login to GHCR
-        shell: bash
-        env:
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          printf '%s' "${GHCR_TOKEN}" | skopeo login ghcr.io \
-            --username "${GITHUB_ACTOR}" --password-stdin
-
-      - name: Publish release for both variants
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          WEBUI_VERSION: ${{ needs.resolve-webui.outputs.version }}
-        run: |
-          set -euo pipefail
-          registry="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
-          short_sha="${GITHUB_SHA:0:7}"
-          pattern="^10-[0-9]{8}-${short_sha}$"
-          release_tag="$(skopeo list-tags "docker://${registry}/justvoxel-vm" | jq -r --arg pattern "${pattern}" '.Tags[]? | select(test($pattern))' | sort | tail -n 1)"
-          [[ -n "${release_tag}" ]]
-
-          vm_image="${registry}/justvoxel-vm:${release_tag}"
-          baremetal_image="${registry}/justvoxel-baremetal:${release_tag}"
-          vm_digest="$(skopeo inspect --format '{{.Digest}}' "docker://${vm_image}")"
-          baremetal_digest="$(skopeo inspect --format '{{.Digest}}' "docker://${baremetal_image}")"
-          [[ "${vm_digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
-          [[ "${baremetal_digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
-
-          build_date="${release_tag#10-}"
-          build_date="${build_date%-${short_sha}}"
-          release_date="${build_date:0:4}-${build_date:4:2}-${build_date:6:2}"
-
-          cat > /tmp/release-notes.md <<EOF_NOTES
-          ## JustVoxel 10
-
-          Signed AlmaLinux 10 minimal-plus bootc images.
-
-          WebUI: ${WEBUI_VERSION}
-          Management API: v1
-
-          ### VM
-
-          \`\`\`text
-          ${registry}/justvoxel-vm:10
-          ${vm_image}
-          ${vm_digest}
-          \`\`\`
-
-          ### Bare Metal
-
-          \`\`\`text
-          ${registry}/justvoxel-baremetal:10
-          ${baremetal_image}
-          ${baremetal_digest}
-          \`\`\`
-          EOF_NOTES
-
-          title="JustVoxel 10 - ${release_date}"
-          if gh release view "${release_tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            gh release edit "${release_tag}" --repo "${GITHUB_REPOSITORY}" --title "${title}" --notes-file /tmp/release-notes.md --latest
-          else
-            gh release create "${release_tag}" --repo "${GITHUB_REPOSITORY}" --target "${GITHUB_SHA}" --title "${title}" --notes-file /tmp/release-notes.md --latest
-          fi
