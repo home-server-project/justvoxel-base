@@ -106,7 +106,13 @@ jobs:
           done
           for test_script in tests/test-*.sh; do
             [[ -f "${test_script}" ]] || continue
-            bash "${test_script}"
+            if ! bash "${test_script}"; then
+              if [[ "${test_script}" == tests/test-webui-setup-storage-transaction.sh ]]; then
+                echo "Re-running failing storage transaction harness with tracing." >&2
+                bash -x "${test_script}" || true
+              fi
+              exit 1
+            fi
           done
 
       - name: Build and test management agent source
