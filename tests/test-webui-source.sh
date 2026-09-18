@@ -38,7 +38,15 @@ trap 'rm -rf -- "${artifact_root}"' EXIT
 jq -e \
     --arg version "${version}" \
     --arg commit "${source_commit}" \
-    '.version == $version and .source_commit == $commit and .management_api == "v1" and (.artifact_sha256 | test("^[0-9a-f]{64}$")) and (.build_date | type == "string") and (.go_version | type == "string")' \
+    '.version == $version and .source_commit == $commit and .management_api == "v1" and (.build_date | type == "string" and length > 0) and (.go_version | type == "string" and length > 0) and (has("artifact_sha256") | not) and (has("release_tag") | not)' \
     "${artifact_root}/webui/webui-release.json" >/dev/null
+
+for workflow in \
+    "${repo_root}/.github/workflows/build-testing.yml" \
+    "${repo_root}/.github/workflows/build.yml"; do
+    ! grep -Fq 'resolve-webui-release.sh' "${workflow}"
+    ! grep -Fq 'home-server-project/justvoxel-webui' "${workflow}"
+    ! grep -Fq 'Fetch and verify exact WebUI release' "${workflow}"
+done
 
 echo 'JustVoxel WebUI source and local artifact checks passed.'
