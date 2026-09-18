@@ -39,7 +39,7 @@ emit_players_from_raw() {
 
 web_players() {
     local configured_max=0 raw
-    if [[ ! -r ${JV_CONFIG} ]]; then
+    if [[ ! -r ${JV_CONFIG} || -e ${JV_SETUP_IN_PROGRESS} ]]; then
         jq -n '{configured:false,state:"not_configured",online:0,max:0,names:[]}'
         return 0
     fi
@@ -91,7 +91,7 @@ emit_confirmation_from_raw() {
 web_action() {
     local action="$1" confirmation="${2:-}" mode safety_output rc message
 
-    if [[ ! -r ${JV_CONFIG} ]]; then
+    if [[ ! -r ${JV_CONFIG} || -e ${JV_SETUP_IN_PROGRESS} ]]; then
         jq -n \
             --arg action "${action}" \
             --arg reason not_configured \
@@ -175,7 +175,7 @@ web_status() {
     local backup_enabled backup_last backup_next list_output version_output latest latest_log log_version
     local webui_version api_version justvoxel_version
 
-    if [[ -r ${JV_CONFIG} ]]; then
+    if [[ -r ${JV_CONFIG} && ! -e ${JV_SETUP_IN_PROGRESS} ]]; then
         # shellcheck disable=SC1090
         source "${JV_CONFIG}"
         configured=yes
