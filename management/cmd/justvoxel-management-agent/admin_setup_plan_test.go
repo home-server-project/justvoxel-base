@@ -23,7 +23,7 @@ const validAdminSetupPlanResponse = `{
   "schema_version":"v1",
   "normalized":{
     "server":{"motd":"Family server","max_players":10,"bedrock_enabled":true,"timezone":"America/Toronto"},
-    "minecraft":{"java_memory":"4G","container_memory":"6G","java_port":25565,"bedrock_port":19132,"image_tag":"stable","requested_version_policy":"recommended","version_policy":"pinned","version":"1.21.8","system_memory_mib":8192,"system_reserve_mib":2048},
+    "minecraft":{"java_memory":"4G","container_memory":"6G","java_port":25565,"bedrock_port":19132,"image_tag":"stable","requested_version_policy":"recommended","version_policy":"pinned","version":"1.21.8","system_memory_mib":8192,"system_reserve_mib":2048,"minecraft_uid":1000,"minecraft_gid":1000},
     "storage":{"type":"system","path":"/var/lib/justvoxel/minecraft","model":"JustVoxel system storage","system_disk":true},
     "backups":{"type":"system","path":"/var/lib/justvoxel/backups","model":"JustVoxel system storage","system_disk":true,"credentials_required":false,"automatic":true,"daily_time":"04:30","schedule":"*-*-* 04:30:00","keep":7}
   },
@@ -120,6 +120,16 @@ func TestAdminSetupPlanFingerprintIsStableAndExecutionRelevant(t *testing.T) {
 	}
 
 	response.Normalized.Minecraft.Version = "1.21.8"
+	response.Normalized.Minecraft.MinecraftUID = 1001
+	changed, err = adminSetupPlanFingerprint(response.SchemaVersion, response.Normalized, response.Requirements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed == first {
+		t.Fatal("Minecraft runtime UID change did not change the reviewed-plan fingerprint")
+	}
+
+	response.Normalized.Minecraft.MinecraftUID = 1000
 	response.Normalized.Storage.ExpectedUUID = "replacement-storage-uuid"
 	changed, err = adminSetupPlanFingerprint(response.SchemaVersion, response.Normalized, response.Requirements)
 	if err != nil {
@@ -206,6 +216,29 @@ func TestAdminSetupPlanTimeoutIsBounded(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "first-run setup planning is unavailable") {
 		t.Fatalf("bounded timeout error missing: %s", rr.Body.String())
+	}
+}
+
+func TestAdminSetupPlanRejectsMissingRuntimeIdentity(t *testing.T) {
+	s := surfaceTestServer(t, roleAdministrator)
+	old := runAdminSetupPlanHelper
+	defer func() { runAdminSetupPlanHelper = old }()
+	runAdminSetupPlanHelper = func(_ context.Context, _ []byte) ([]byte, error) {
+		var response map[string]any
+		if err := json.Unmarshal([]byte(validAdminSetupPlanResponse), &response); err != nil {
+			t.Fatal(err)
+		}
+		normalized := response["normalized"].(map[string]any)
+		minecraft := normalized["minecraft"].(map[string]any)
+		delete(minecraft, "minecraft_uid")
+		delete(minecraft, "minecraft_gid")
+		return json.Marshal(response)
+	}
+
+	rr := httptest.NewRecorder()
+	s.adminSetupPlan(rr, surfaceRequest(http.MethodPost, "/v1/admin/setup/plan", validAdminSetupPlanRequest))
+	if rr.Code != http.StatusInternalServerError || !strings.Contains(rr.Body.String(), "planner returned incomplete data") {
+		t.Fatalf("status = %d: %s", rr.Code, rr.Body.String())
 	}
 }
 

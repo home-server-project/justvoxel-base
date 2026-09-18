@@ -297,6 +297,9 @@ backup_domain="$(jq -r '.backups.domain // ""' <<< "${request}")"
 
 warnings='[]'
 
+read -r minecraft_uid minecraft_gid minecraft_id_source < <(resolve_minecraft_ids)
+validate_nonroot_id "${minecraft_uid}" && validate_nonroot_id "${minecraft_gid}" || { json_error 'Minecraft runtime identity could not be resolved safely.' invalid_minecraft; exit 0; }
+
 validate_simple_text "${motd}" || { json_error 'Server welcome message must be a single line.' invalid_server; exit 0; }
 validate_positive_int "${max_players}" || { json_error 'Maximum players must be a positive integer.' invalid_server; exit 0; }
 [[ -n ${timezone} && ${timezone} != /* && ${timezone} != *..* && -e /usr/share/zoneinfo/${timezone} ]] || { json_error 'Timezone was not found on this JustVoxel system.' invalid_server; exit 0; }
@@ -493,7 +496,9 @@ minecraft_json="$(jq -n \
     --arg version "${version}" \
     --argjson system_memory_mib "${total_mib}" \
     --argjson system_reserve_mib "${remaining_mib}" \
-    '{java_memory:$java_memory,container_memory:$container_memory,java_port:$java_port,bedrock_port:$bedrock_port,image_tag:$image_tag,requested_version_policy:$requested_version_policy,version_policy:$version_policy,version:$version,system_memory_mib:$system_memory_mib,system_reserve_mib:$system_reserve_mib}')"
+    --argjson minecraft_uid "${minecraft_uid}" \
+    --argjson minecraft_gid "${minecraft_gid}" \
+    '{java_memory:$java_memory,container_memory:$container_memory,java_port:$java_port,bedrock_port:$bedrock_port,image_tag:$image_tag,requested_version_policy:$requested_version_policy,version_policy:$version_policy,version:$version,system_memory_mib:$system_memory_mib,system_reserve_mib:$system_reserve_mib,minecraft_uid:$minecraft_uid,minecraft_gid:$minecraft_gid}')"
 
 backup_json="$(jq -c \
     --argjson automatic "${backup_automatic}" \

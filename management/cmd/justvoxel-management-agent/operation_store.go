@@ -1,0 +1,507 @@
+package main
+
+import (
+	"bytes"
+	"crypto/rand"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+)
+
+const (
+	operationSchemaVersion = "v1"
+	operationStateDir      = "/var/lib/justvoxel/management"
+	operationTypeSetup     = "setup"
+)
+
+type operationState string
+
+const (
+	operationQueued         operationState = "queued"
+	operationValidating     operationState = "validating"
+	operationRunning        operationState = "running"
+	operationVerifying      operationState = "verifying"
+	operationSucceeded      operationState = "succeeded"
+	operationFailed         operationState = "failed"
+	operationRollingBack    operationState = "rolling_back"
+	operationRolledBack     operationState = "rolled_back"
+	operationNeedsAttention operationState = "needs_attention"
+)
+
+var (
+	operationIDPattern          = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+	operationFingerprintPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+	operationStagePattern       = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+
+	errOperationNotFound  = errors.New("operation not found")
+	errSetupOperationBusy = errors.New("another setup operation is already active")
+	errSetupLockBusy      = errors.New("setup operation lock is already held")
+)
+
+type operationRollback struct {
+	State  string `json:"state"`
+	Result string `json:"result,omitempty"`
+}
+
+type operationJournal struct {
+	SchemaVersion   string            `json:"schema_version"`
+	OperationID     string            `json:"operation_id"`
+	OperationType   string            `json:"operation_type"`
+	PlanFingerprint string            `json:"plan_fingerprint"`
+	State           operationState    `json:"state"`
+	Stage           string            `json:"stage"`
+	Status          string            `json:"status"`
+	StartedAt       string            `json:"started_at"`
+	UpdatedAt       string            `json:"updated_at"`
+	FinishedAt      string            `json:"finished_at,omitempty"`
+	InterruptedAt   string            `json:"interrupted_at,omitempty"`
+	Rollback        operationRollback `json:"rollback"`
+}
+
+type operationStore struct {
+	mu             sync.Mutex
+	baseDir        string
+	operationsDir  string
+	lockFile       *os.File
+	setupLockHeld  bool
+	currentSetupID string
+	operations     map[string]operationJournal
+	now            func() time.Time
+}
+
+func openOperationStore(baseDir string) (*operationStore, error) {
+	if baseDir == "" {
+		return nil, errors.New("operation state directory is required")
+	}
+	operationsDir := filepath.Join(baseDir, "operations")
+	if err := ensurePrivateDirectory(baseDir); err != nil {
+		return nil, err
+	}
+	if err := ensurePrivateDirectory(operationsDir); err != nil {
+		return nil, err
+	}
+	lockPath := filepath.Join(baseDir, "setup.lock")
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open setup operation lock: %w", err)
+	}
+	if err := lockFile.Chmod(0o600); err != nil {
+		lockFile.Close()
+		return nil, fmt.Errorf("protect setup operation lock: %w", err)
+	}
+
+	s := &operationStore{
+		baseDir:       baseDir,
+		operationsDir: operationsDir,
+		lockFile:      lockFile,
+		operations:    make(map[string]operationJournal),
+		now:           time.Now,
+	}
+	if err := s.loadAndRecover(); err != nil {
+		lockFile.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
+func ensurePrivateDirectory(path string) error {
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return fmt.Errorf("create operation state directory %s: %w", path, err)
+	}
+	if err := os.Chmod(path, 0o700); err != nil {
+		return fmt.Errorf("protect operation state directory %s: %w", path, err)
+	}
+	return nil
+}
+
+func (s *operationStore) close() error {
+	if s == nil || s.lockFile == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.setupLockHeld {
+		_ = syscall.Flock(int(s.lockFile.Fd()), syscall.LOCK_UN)
+		s.setupLockHeld = false
+	}
+	err := s.lockFile.Close()
+	s.lockFile = nil
+	return err
+}
+
+func (s *operationStore) loadAndRecover() error {
+	entries, err := os.ReadDir(s.operationsDir)
+	if err != nil {
+		return fmt.Errorf("read operation journals: %w", err)
+	}
+	activeSetup := ""
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return fmt.Errorf("inspect operation journal %s: %w", entry.Name(), err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("operation journal %s is not a regular file", entry.Name())
+		}
+		path := filepath.Join(s.operationsDir, entry.Name())
+		journal, err := readOperationJournal(path)
+		if err != nil {
+			return fmt.Errorf("read operation journal %s: %w", entry.Name(), err)
+		}
+		if entry.Name() != journal.OperationID+".json" {
+			return fmt.Errorf("operation journal filename does not match operation id")
+		}
+		if err := os.Chmod(path, 0o600); err != nil {
+			return fmt.Errorf("protect operation journal %s: %w", entry.Name(), err)
+		}
+		if journal.OperationType == operationTypeSetup && operationIsCurrent(journal.State) {
+			if activeSetup != "" {
+				return errors.New("multiple active setup operation journals require attention")
+			}
+			activeSetup = journal.OperationID
+		}
+		s.operations[journal.OperationID] = journal
+	}
+
+	if activeSetup == "" {
+		return nil
+	}
+	if err := s.acquireSetupLock(); err != nil {
+		return err
+	}
+	journal := s.operations[activeSetup]
+	if operationInterruptedByRestart(journal.State) {
+		now := s.now().UTC().Format(time.RFC3339Nano)
+		journal.State = operationNeedsAttention
+		journal.Stage = "interrupted"
+		journal.Status = "Setup was interrupted before completion."
+		journal.UpdatedAt = now
+		journal.InterruptedAt = now
+		if err := s.persist(journal); err != nil {
+			_ = s.releaseSetupLock()
+			return err
+		}
+		s.operations[journal.OperationID] = journal
+	}
+	s.currentSetupID = activeSetup
+	return nil
+}
+
+func readOperationJournal(path string) (operationJournal, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return operationJournal{}, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var journal operationJournal
+	if err := decoder.Decode(&journal); err != nil {
+		return operationJournal{}, err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return operationJournal{}, errors.New("unexpected trailing JSON value")
+		}
+		return operationJournal{}, err
+	}
+	if err := validateOperationJournal(journal); err != nil {
+		return operationJournal{}, err
+	}
+	return journal, nil
+}
+
+func validateOperationJournal(journal operationJournal) error {
+	if journal.SchemaVersion != operationSchemaVersion {
+		return errors.New("unsupported operation journal schema")
+	}
+	if !validOperationID(journal.OperationID) {
+		return errors.New("invalid operation id")
+	}
+	if journal.OperationType != operationTypeSetup {
+		return errors.New("unsupported operation type")
+	}
+	if !operationFingerprintPattern.MatchString(journal.PlanFingerprint) {
+		return errors.New("invalid operation plan fingerprint")
+	}
+	if !validOperationState(journal.State) {
+		return errors.New("invalid operation state")
+	}
+	if journal.Stage != "" && !operationStagePattern.MatchString(journal.Stage) {
+		return errors.New("invalid operation stage")
+	}
+	if !validOperationStatus(journal.Status) {
+		return errors.New("invalid operation status")
+	}
+	if journal.StartedAt == "" || journal.UpdatedAt == "" {
+		return errors.New("operation timestamps are incomplete")
+	}
+	if journal.Rollback.State == "" {
+		return errors.New("rollback state is required")
+	}
+	return nil
+}
+
+func validOperationID(value string) bool {
+	return operationIDPattern.MatchString(value)
+}
+
+func validOperationState(state operationState) bool {
+	switch state {
+	case operationQueued, operationValidating, operationRunning, operationVerifying, operationSucceeded,
+		operationFailed, operationRollingBack, operationRolledBack, operationNeedsAttention:
+		return true
+	default:
+		return false
+	}
+}
+
+func validOperationStatus(value string) bool {
+	return value != "" && len(value) <= 512 && !strings.ContainsAny(value, "\r\n")
+}
+
+func operationIsCurrent(state operationState) bool {
+	return state != operationSucceeded && state != operationRolledBack
+}
+
+func operationInterruptedByRestart(state operationState) bool {
+	switch state {
+	case operationQueued, operationValidating, operationRunning, operationVerifying, operationFailed, operationRollingBack:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *operationStore) beginSetup(planFingerprint string) (operationJournal, bool, error) {
+	if !operationFingerprintPattern.MatchString(planFingerprint) {
+		return operationJournal{}, false, errors.New("invalid setup plan fingerprint")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.currentSetupID != "" {
+		current := s.operations[s.currentSetupID]
+		if current.PlanFingerprint == planFingerprint {
+			return current, false, nil
+		}
+		return operationJournal{}, false, errSetupOperationBusy
+	}
+	if err := s.acquireSetupLock(); err != nil {
+		return operationJournal{}, false, err
+	}
+
+	id, err := newOperationID()
+	if err != nil {
+		_ = s.releaseSetupLock()
+		return operationJournal{}, false, err
+	}
+	now := s.now().UTC().Format(time.RFC3339Nano)
+	journal := operationJournal{
+		SchemaVersion:   operationSchemaVersion,
+		OperationID:     id,
+		OperationType:   operationTypeSetup,
+		PlanFingerprint: planFingerprint,
+		State:           operationQueued,
+		Stage:           "queued",
+		Status:          "Setup operation queued.",
+		StartedAt:       now,
+		UpdatedAt:       now,
+		Rollback:        operationRollback{State: "not_started"},
+	}
+	if err := s.persist(journal); err != nil {
+		_ = s.releaseSetupLock()
+		return operationJournal{}, false, err
+	}
+	s.operations[id] = journal
+	s.currentSetupID = id
+	return journal, true, nil
+}
+
+func (s *operationStore) get(id string) (operationJournal, error) {
+	if !validOperationID(id) {
+		return operationJournal{}, errOperationNotFound
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	journal, ok := s.operations[id]
+	if !ok {
+		return operationJournal{}, errOperationNotFound
+	}
+	return journal, nil
+}
+
+func (s *operationStore) currentSetup() (*operationJournal, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.currentSetupID == "" {
+		return nil, nil
+	}
+	journal, ok := s.operations[s.currentSetupID]
+	if !ok {
+		return nil, errors.New("current setup operation journal is missing")
+	}
+	copy := journal
+	return &copy, nil
+}
+
+func (s *operationStore) transition(id string, next operationState, stage, status string) (operationJournal, error) {
+	if !validOperationID(id) {
+		return operationJournal{}, errOperationNotFound
+	}
+	if !validOperationState(next) {
+		return operationJournal{}, errors.New("invalid operation state")
+	}
+	if stage == "" || !operationStagePattern.MatchString(stage) {
+		return operationJournal{}, errors.New("invalid operation stage")
+	}
+	if !validOperationStatus(status) {
+		return operationJournal{}, errors.New("invalid operation status")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	journal, ok := s.operations[id]
+	if !ok {
+		return operationJournal{}, errOperationNotFound
+	}
+	if !operationTransitionAllowed(journal.State, next) {
+		return operationJournal{}, fmt.Errorf("invalid operation transition %s -> %s", journal.State, next)
+	}
+	journal.State = next
+	journal.Stage = stage
+	journal.Status = status
+	journal.UpdatedAt = s.now().UTC().Format(time.RFC3339Nano)
+	if next == operationRollingBack {
+		journal.Rollback.State = "running"
+	}
+	if next == operationRolledBack {
+		journal.Rollback.State = "succeeded"
+		journal.Rollback.Result = "rolled_back"
+	}
+	if next == operationSucceeded || next == operationRolledBack {
+		journal.FinishedAt = journal.UpdatedAt
+	}
+	if err := s.persist(journal); err != nil {
+		return operationJournal{}, err
+	}
+	s.operations[id] = journal
+	if journal.OperationType == operationTypeSetup && (next == operationSucceeded || next == operationRolledBack) {
+		s.currentSetupID = ""
+		if err := s.releaseSetupLock(); err != nil {
+			return operationJournal{}, err
+		}
+	}
+	return journal, nil
+}
+
+func operationTransitionAllowed(current, next operationState) bool {
+	switch current {
+	case operationQueued:
+		return next == operationValidating || next == operationFailed || next == operationNeedsAttention
+	case operationValidating:
+		return next == operationRunning || next == operationFailed || next == operationNeedsAttention
+	case operationRunning:
+		return next == operationVerifying || next == operationFailed || next == operationNeedsAttention
+	case operationVerifying:
+		return next == operationSucceeded || next == operationFailed || next == operationNeedsAttention
+	case operationFailed:
+		return next == operationRollingBack || next == operationNeedsAttention
+	case operationRollingBack:
+		return next == operationRolledBack || next == operationNeedsAttention
+	default:
+		return false
+	}
+}
+
+func (s *operationStore) acquireSetupLock() error {
+	if s.setupLockHeld {
+		return nil
+	}
+	if err := syscall.Flock(int(s.lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+			return errSetupLockBusy
+		}
+		return fmt.Errorf("acquire setup operation lock: %w", err)
+	}
+	s.setupLockHeld = true
+	return nil
+}
+
+func (s *operationStore) releaseSetupLock() error {
+	if !s.setupLockHeld {
+		return nil
+	}
+	if err := syscall.Flock(int(s.lockFile.Fd()), syscall.LOCK_UN); err != nil {
+		return fmt.Errorf("release setup operation lock: %w", err)
+	}
+	s.setupLockHeld = false
+	return nil
+}
+
+func (s *operationStore) persist(journal operationJournal) error {
+	if err := validateOperationJournal(journal); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(journal, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	path := filepath.Join(s.operationsDir, journal.OperationID+".json")
+	tmp, err := os.CreateTemp(s.operationsDir, ".operation-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return err
+	}
+	dir, err := os.Open(s.operationsDir)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
+}
+
+func newOperationID() (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	raw[6] = (raw[6] & 0x0f) | 0x40
+	raw[8] = (raw[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		raw[0:4], raw[4:6], raw[6:8], raw[8:10], raw[10:16]), nil
+}

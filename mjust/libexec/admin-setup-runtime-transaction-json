@@ -1,0 +1,286 @@
+#!/usr/bin/bash
+set -uo pipefail
+
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/admin-setup-storage-transaction-common.sh
+require_root
+
+readonly A55_SETUP_MARKER=${JV_SETUP_IN_PROGRESS}
+readonly A55_RUNTIME_FILES=(
+    /etc/justvoxel/justvoxel.conf
+    /etc/justvoxel/minecraft.env
+    /etc/justvoxel/minecraft-backup.env
+    /etc/containers/systemd/minecraft.container
+    /etc/systemd/system/minecraft-backup.service
+    /etc/systemd/system/minecraft-backup.timer
+)
+
+A55_REQUEST=''
+A55_OPERATION_ID=''
+A55_PLAN_FINGERPRINT=''
+
+_a55_json() {
+    local ok="$1" applied="$2" phase="$3" error="$4"
+    jq -n --argjson ok "${ok}" --argjson applied "${applied}" --arg phase "${phase}" --arg error "${error}"         '{ok:$ok,applied:$applied,phase:$phase} + (if $error == "" then {} else {error:$error} end)'
+}
+
+_a55_parse_request() {
+    A55_REQUEST="$(cat)"
+    jq -e '
+      type == "object" and
+      ((keys - ["schema_version","operation_id","plan_fingerprint","server","minecraft","storage","backups"]) | length == 0) and
+      .schema_version == "v1" and
+      (.operation_id|type == "string") and
+      (.plan_fingerprint|type == "string") and
+      (.server|type == "object") and
+      (.minecraft|type == "object") and
+      (.storage|type == "object") and
+      (.backups|type == "object") and
+      ((.server|keys) - ["motd","max_players","bedrock_enabled","timezone"] | length == 0) and
+      ((.minecraft|keys) - ["java_memory","container_memory","java_port","bedrock_port","image_tag","version_policy","version","minecraft_uid","minecraft_gid"] | length == 0) and
+      ((.storage|keys) - ["type","path","mount_point","expected_uuid","expected_source"] | length == 0) and
+      ((.backups|keys) - ["type","path","mount_point","expected_uuid","expected_source","automatic","schedule","keep"] | length == 0) and
+      (.server.motd|type == "string") and
+      (.server.max_players|type == "number") and
+      (.server.bedrock_enabled|type == "boolean") and
+      (.server.timezone|type == "string") and
+      (.minecraft.java_memory|type == "string") and
+      (.minecraft.container_memory|type == "string") and
+      (.minecraft.java_port|type == "number") and
+      (.minecraft.bedrock_port|type == "number") and
+      (.minecraft.image_tag|type == "string") and
+      (.minecraft.version_policy|type == "string") and
+      (.minecraft.version|type == "string") and
+      (.minecraft.minecraft_uid|type == "number") and
+      (.minecraft.minecraft_gid|type == "number") and
+      (.storage.type|type == "string") and
+      (.storage.path|type == "string") and
+      ((.storage.mount_point // "")|type == "string") and
+      ((.storage.expected_uuid // "")|type == "string") and
+      ((.storage.expected_source // "")|type == "string") and
+      (.backups.type|type == "string") and
+      (.backups.path|type == "string") and
+      ((.backups.mount_point // "")|type == "string") and
+      ((.backups.expected_uuid // "")|type == "string") and
+      ((.backups.expected_source // "")|type == "string") and
+      (.backups.automatic|type == "boolean") and
+      (.backups.schedule|type == "string") and
+      (.backups.keep|type == "number") and
+      ([paths | select((last|type) == "string" and ((last|ascii_downcase)|contains("password")))] | length == 0)
+    ' >/dev/null 2>&1 <<< "${A55_REQUEST}" || return 1
+
+    A55_OPERATION_ID="$(jq -r '.operation_id' <<< "${A55_REQUEST}")"
+    A55_PLAN_FINGERPRINT="$(jq -r '.plan_fingerprint' <<< "${A55_REQUEST}")"
+    [[ ${A55_OPERATION_ID} =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] || return 1
+    [[ ${A55_PLAN_FINGERPRINT} =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+    A53_OPERATION_ID="${A55_OPERATION_ID}"
+    A53_PLAN_FINGERPRINT="${A55_PLAN_FINGERPRINT}"
+    A53_TX_DIR="${A53_TRANSACTION_ROOT}/${A55_OPERATION_ID}"
+    A53_MANIFEST="${A53_TX_DIR}/manifest.json"
+    [[ -f ${A53_MANIFEST} ]] || return 1
+    [[ $(jq -r '.operation_id // ""' "${A53_MANIFEST}") == "${A55_OPERATION_ID}" ]] || return 1
+    [[ $(jq -r '.plan_fingerprint // ""' "${A53_MANIFEST}") == "${A55_PLAN_FINGERPRINT}" ]] || return 1
+    return 0
+}
+
+_a55_load_values() {
+    DATA_PATH="$(jq -r '.storage.path' <<< "${A55_REQUEST}")"
+    DATA_MOUNT_POINT="$(jq -r '.storage.mount_point // ""' <<< "${A55_REQUEST}")"
+    DATA_EXPECTED_UUID="$(jq -r '.storage.expected_uuid // ""' <<< "${A55_REQUEST}")"
+    DATA_EXPECTED_SOURCE="$(jq -r '.storage.expected_source // ""' <<< "${A55_REQUEST}")"
+    BACKUP_TYPE="$(jq -r '.backups.type' <<< "${A55_REQUEST}")"
+    BACKUP_PATH="$(jq -r '.backups.path' <<< "${A55_REQUEST}")"
+    BACKUP_MOUNT_POINT="$(jq -r '.backups.mount_point // ""' <<< "${A55_REQUEST}")"
+    BACKUP_EXPECTED_UUID="$(jq -r '.backups.expected_uuid // ""' <<< "${A55_REQUEST}")"
+    BACKUP_EXPECTED_SOURCE="$(jq -r '.backups.expected_source // ""' <<< "${A55_REQUEST}")"
+    BACKUP_KEEP="$(jq -r '.backups.keep' <<< "${A55_REQUEST}")"
+    BACKUP_SCHEDULE="$(jq -r '.backups.schedule' <<< "${A55_REQUEST}")"
+    if [[ $(jq -r '.backups.automatic' <<< "${A55_REQUEST}") == true ]]; then BACKUP_TIMER_ENABLED=yes; else BACKUP_TIMER_ENABLED=no; fi
+
+    JAVA_PORT="$(jq -r '.minecraft.java_port' <<< "${A55_REQUEST}")"
+    BEDROCK_PORT="$(jq -r '.minecraft.bedrock_port' <<< "${A55_REQUEST}")"
+    if [[ $(jq -r '.server.bedrock_enabled' <<< "${A55_REQUEST}") == true ]]; then BEDROCK_ENABLED=yes; else BEDROCK_ENABLED=no; fi
+    BEDROCK_MANAGED_PLUGINS=yes
+    JAVA_MEMORY="$(jq -r '.minecraft.java_memory' <<< "${A55_REQUEST}")"
+    CONTAINER_MEMORY="$(jq -r '.minecraft.container_memory' <<< "${A55_REQUEST}")"
+    MINECRAFT_IMAGE_TAG="$(jq -r '.minecraft.image_tag' <<< "${A55_REQUEST}")"
+    MINECRAFT_VERSION_MODE="$(jq -r '.minecraft.version_policy' <<< "${A55_REQUEST}")"
+    MINECRAFT_VERSION="$(jq -r '.minecraft.version' <<< "${A55_REQUEST}")"
+    MINECRAFT_UID="$(jq -r '.minecraft.minecraft_uid' <<< "${A55_REQUEST}")"
+    MINECRAFT_GID="$(jq -r '.minecraft.minecraft_gid' <<< "${A55_REQUEST}")"
+    TIMEZONE="$(jq -r '.server.timezone' <<< "${A55_REQUEST}")"
+    MAX_PLAYERS="$(jq -r '.server.max_players' <<< "${A55_REQUEST}")"
+    MOTD="$(jq -r '.server.motd' <<< "${A55_REQUEST}")"
+    GAME_MODE=survival
+    DIFFICULTY=normal
+    WHITELIST_ENABLED=yes
+    ENFORCE_WHITELIST=yes
+}
+
+_a55_validate_runtime_inputs() {
+    _a55_load_values
+    validate_storage_path "${DATA_PATH}" || return 1
+    validate_storage_path "${BACKUP_PATH}" || return 1
+    validate_memory "${JAVA_MEMORY}" && validate_memory "${CONTAINER_MEMORY}" || return 1
+    validate_port "${JAVA_PORT}" && validate_port "${BEDROCK_PORT}" || return 1
+    validate_nonroot_id "${MINECRAFT_UID}" && validate_nonroot_id "${MINECRAFT_GID}" || return 1
+    validate_positive_int "${MAX_PLAYERS}" && validate_positive_int "${BACKUP_KEEP}" || return 1
+    validate_simple_text "${MOTD}" || return 1
+    [[ -e /usr/share/zoneinfo/${TIMEZONE} ]] || return 1
+    [[ ${MINECRAFT_IMAGE_TAG} =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || return 1
+    [[ ${MINECRAFT_VERSION_MODE} == pinned || ${MINECRAFT_VERSION_MODE} == latest ]] || return 1
+    [[ -n ${MINECRAFT_VERSION} ]] || return 1
+    [[ -d ${DATA_PATH} && -w ${BACKUP_PATH} ]] || return 1
+    if [[ -n ${DATA_MOUNT_POINT} ]]; then mountpoint -q -- "${DATA_MOUNT_POINT}" || return 1; fi
+    if [[ -n ${BACKUP_MOUNT_POINT} ]]; then mountpoint -q -- "${BACKUP_MOUNT_POINT}" || return 1; fi
+    local file
+    for file in "${A55_RUNTIME_FILES[@]}"; do
+        [[ ! -e ${file} ]] || return 1
+    done
+    systemctl cat minecraft.service >/dev/null 2>&1 && return 1
+    systemctl cat minecraft-backup.timer >/dev/null 2>&1 && return 1
+    [[ ! -e ${A55_SETUP_MARKER} ]] || return 1
+    return 0
+}
+
+_a55_manifest_update() {
+    local filter="$1" tmp current
+    current="$(cat -- "${A53_MANIFEST}")" || return 1
+    tmp="$(mktemp "${A53_TX_DIR}/.runtime-manifest.XXXXXX")" || return 1
+    jq -c "${filter}" <<< "${current}" > "${tmp}" || { rm -f -- "${tmp}"; return 1; }
+    chmod 0600 "${tmp}" || { rm -f -- "${tmp}"; return 1; }
+    mv -f -- "${tmp}" "${A53_MANIFEST}" || { rm -f -- "${tmp}"; return 1; }
+}
+
+_a55_record_initial_state() {
+    local java_open=false bedrock_open=false
+    firewall-cmd --permanent --query-port="${JAVA_PORT}/tcp" >/dev/null 2>&1 && java_open=true
+    if [[ ${BEDROCK_ENABLED} == yes ]]; then
+        firewall-cmd --permanent --query-port="${BEDROCK_PORT}/udp" >/dev/null 2>&1 && bedrock_open=true
+    fi
+    _a55_manifest_update ".runtime = {java_firewall_preexisting:${java_open},bedrock_firewall_preexisting:${bedrock_open},selinux_rule_added:false,minecraft_started:false,timer_activated:false,marker:true}" || return 1
+}
+
+_a55_apply_selinux() {
+    local escaped context
+    escaped="$(path_regex_escape "${DATA_PATH}")"
+    if semanage fcontext -a -t container_file_t "${escaped}(/.*)?" >/dev/null 2>&1; then
+        _a55_manifest_update '.runtime.selinux_rule_added = true' || return 1
+    fi
+    restorecon -RF "${DATA_PATH}" >/dev/null 2>&1 || return 1
+    context="$(ls -Zd "${DATA_PATH}" 2>/dev/null || true)"
+    grep -q 'container_file_t' <<< "${context}" || return 1
+}
+
+_a55_apply_action() {
+    _a55_load_values
+    install -d -m0700 -o root -g root "$(dirname -- "${A55_SETUP_MARKER}")" || return 1
+    printf '%s %s\n' "${A55_OPERATION_ID}" "${A55_PLAN_FINGERPRINT}" > "${A55_SETUP_MARKER}" || return 1
+    chmod 0600 "${A55_SETUP_MARKER}" || return 1
+    _a55_record_initial_state || return 1
+
+    if jq -e --arg p "${DATA_PATH}" '.directories_created | index($p) != null' "${A53_MANIFEST}" >/dev/null 2>&1; then
+        chown "${MINECRAFT_UID}:${MINECRAFT_GID}" "${DATA_PATH}" || return 1
+        chmod 0750 "${DATA_PATH}" || return 1
+    fi
+
+    write_main_config || return 1
+    _a55_apply_selinux || return 1
+    render_runtime_files || return 1
+
+    firewall-cmd --permanent --add-port="${JAVA_PORT}/tcp" >/dev/null || return 1
+    if [[ ${BEDROCK_ENABLED} == yes ]]; then
+        firewall-cmd --permanent --add-port="${BEDROCK_PORT}/udp" >/dev/null || return 1
+    fi
+    firewall-cmd --reload >/dev/null || return 1
+    _a55_json true true runtime_configured ''
+}
+
+_a55_verify_action() {
+    _a55_load_values
+    systemctl start minecraft.service || return 1
+    _a55_manifest_update '.runtime.minecraft_started = true' || return 1
+    wait_for_rcon 900 || return 1
+    podman exec minecraft rcon-cli version >/dev/null 2>&1 || return 1
+    if [[ ${BEDROCK_ENABLED} == yes ]]; then
+        configure_geyser_floodgate >/dev/null 2>&1 || return 1
+        podman exec minecraft rcon-cli 'geyser version' >/dev/null 2>&1 || return 1
+    fi
+    activate_backup_timer || return 1
+    _a55_manifest_update '.runtime.timer_activated = true' || return 1
+    /usr/libexec/justvoxel/mjust/validate >/dev/null 2>&1 || return 1
+    _a55_json true true runtime_verified ''
+}
+
+_a55_rollback_action() {
+    _a55_load_values
+    local failure=0 java_pre=false bedrock_pre=false selinux_added=false
+    java_pre="$(jq -r '.runtime.java_firewall_preexisting // false' "${A53_MANIFEST}")"
+    bedrock_pre="$(jq -r '.runtime.bedrock_firewall_preexisting // false' "${A53_MANIFEST}")"
+    selinux_added="$(jq -r '.runtime.selinux_rule_added // false' "${A53_MANIFEST}")"
+
+    systemctl disable --now minecraft-backup.timer >/dev/null 2>&1 || true
+    if systemctl is-active --quiet minecraft-backup.timer 2>/dev/null; then failure=1; fi
+    systemctl stop minecraft.service >/dev/null 2>&1 || true
+    if systemctl is-active --quiet minecraft.service 2>/dev/null; then failure=1; fi
+
+    rm -f -- "${JV_QUADLET}" "${JV_MC_ENV}" "${JV_BACKUP_ENV}" "${JV_BACKUP_SERVICE}" "${JV_BACKUP_TIMER}" "${JV_CONFIG}" || failure=1
+    systemctl daemon-reload >/dev/null 2>&1 || failure=1
+
+    if [[ ${java_pre} != true ]]; then
+        firewall-cmd --permanent --remove-port="${JAVA_PORT}/tcp" >/dev/null 2>&1 || true
+        firewall-cmd --permanent --query-port="${JAVA_PORT}/tcp" >/dev/null 2>&1 && failure=1
+    fi
+    if [[ ${BEDROCK_ENABLED} == yes && ${bedrock_pre} != true ]]; then
+        firewall-cmd --permanent --remove-port="${BEDROCK_PORT}/udp" >/dev/null 2>&1 || true
+        firewall-cmd --permanent --query-port="${BEDROCK_PORT}/udp" >/dev/null 2>&1 && failure=1
+    fi
+    firewall-cmd --reload >/dev/null 2>&1 || failure=1
+
+    if [[ ${selinux_added} == true ]]; then
+        local escaped
+        escaped="$(path_regex_escape "${DATA_PATH}")"
+        semanage fcontext -d "${escaped}(/.*)?" >/dev/null 2>&1 || failure=1
+        restorecon -RF "${DATA_PATH}" >/dev/null 2>&1 || failure=1
+    fi
+    rm -f -- "${A55_SETUP_MARKER}" || failure=1
+    if (( failure != 0 )); then
+        _a55_json false false runtime_rollback 'Runtime rollback could not be completed safely.'
+    else
+        _a55_json true false runtime_rolled_back ''
+    fi
+}
+
+_a55_commit_action() {
+    [[ -f ${JV_CONFIG} && -f ${JV_QUADLET} ]] || { _a55_json false false runtime_commit 'Runtime configuration is incomplete.'; return 0; }
+    systemctl is-active --quiet minecraft.service || { _a55_json false false runtime_commit 'Minecraft is not active.'; return 0; }
+    rm -f -- "${A55_SETUP_MARKER}" || { _a55_json false false runtime_commit 'Could not finalize configured state.'; return 0; }
+    _a55_json true true runtime_committed ''
+}
+
+action="${1:-validate}"
+if ! _a55_parse_request; then
+    _a55_json false false runtime_preflight 'Runtime transaction request is invalid or storage transaction evidence is missing.'
+    exit 0
+fi
+
+case "${action}" in
+    validate)
+        if _a55_validate_runtime_inputs; then _a55_json true false runtime_preflight ''; else _a55_json false false runtime_preflight 'Runtime preflight failed or managed runtime files already exist.'; fi
+        ;;
+    apply)
+        if _a55_validate_runtime_inputs && _a55_apply_action; then :; else _a55_json false false runtime_config 'Runtime configuration could not be applied safely.'; fi
+        ;;
+    verify)
+        if _a55_verify_action; then :; else _a55_json false false runtime_verify 'Minecraft runtime verification failed.'; fi
+        ;;
+    rollback)
+        _a55_rollback_action
+        ;;
+    commit)
+        _a55_commit_action
+        ;;
+    *)
+        _a55_json false false invalid_action 'Usage: admin-setup-runtime-transaction-json {validate|apply|verify|rollback|commit}'
+        ;;
+esac
