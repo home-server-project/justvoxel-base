@@ -352,7 +352,7 @@ resolve_latest_stable_paper_version() {
     return 1
 }
 
-render_runtime() {
+render_runtime_files() {
     require_config
     install -d -m0700 -o root -g root "${JV_CONFIG_DIR}"
     install -d -m0755 -o root -g root /etc/containers/systemd
@@ -436,12 +436,20 @@ render_runtime() {
     rm -f "${timer_tmp}"
 
     systemctl daemon-reload
+}
+
+activate_backup_timer() {
     if [[ ${BACKUP_TIMER_ENABLED} == yes ]]; then
         systemctl enable minecraft-backup.timer >/dev/null
         systemctl restart minecraft-backup.timer
     else
         systemctl disable --now minecraft-backup.timer 2>/dev/null || true
     fi
+}
+
+render_runtime() {
+    render_runtime_files
+    activate_backup_timer
 }
 
 configure_firewall_initial() {
