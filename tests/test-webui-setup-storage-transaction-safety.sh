@@ -34,7 +34,7 @@ grep -Fq 'rw,_netdev,nofail,x-systemd.mount-timeout=20s' "${apply}"
 grep -Fq 'vers=3.0,rw,_netdev,nofail,x-systemd.mount-timeout=20s' "${apply}"
 grep -Fq 'rollback' "${helper}"
 
-if grep -Eq 'executeSetupLocalStorage|admin-setup-storage-transaction-json|runAdminSetupStorageTransactionHelper' "${agent_apply}"; then
+if grep -Eq 'executeSetupStorage|executeSetupLocalStorage|admin-setup-storage-transaction-json|runAdminSetupStorageTransactionHelper' "${agent_apply}"; then
     echo 'A5.4 storage execution was wired into production Apply too early.' >&2
     exit 1
 fi
