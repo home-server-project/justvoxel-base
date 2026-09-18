@@ -89,7 +89,11 @@ See [MJUST.md](MJUST.md) and [MANAGEMENT.md](MANAGEMENT.md).
 
 ## Security model
 
-JustVoxel uses the normal Linux security boundaries rather than replacing them with a custom all-powerful management process.
+The WebUI source and Management Agent source are maintained together in JustVoxel Base so they can be built and tested from the same appliance commit. This repository consolidation does not collapse their runtime privilege boundary.
+
+The browser-facing WebUI remains unprivileged. It communicates through Management API v1 over the local Unix socket with the privileged JustVoxel Management Agent, which exposes only approved host operations and authentication paths.
+
+JustVoxel also uses the normal Linux security boundaries rather than replacing them with a custom all-powerful management process.
 
 The appliance relies on:
 
@@ -123,9 +127,11 @@ Keeping these paths separate reduces unnecessary coupling between the appliance 
 
 This repository builds one shared JustVoxel Base image.
 
-The Base is already VM-ready and contains the complete appliance core plus VM validation. After validation, the final product repository can promote the approved `justvoxel-base:stable` image into the JustVoxel VM release without rebuilding the same content.
+The Base is already VM-ready and contains the complete appliance core plus VM validation.
 
-JustVoxel HWE is the physical-machine product. It derives from the approved Base and adds the physical-hardware administration delta such as UPS, storage-health, sensor, firmware, and hardware-diagnostic tooling.
+During active development, the final JustVoxel `testing` branch consumes `justvoxel-base:testing` and builds only the HWE testing layer. The common appliance is inherited rather than duplicated.
+
+For the future stable product path, the intended model is to promote an approved stable Base into the JustVoxel VM release without rebuilding identical content, while JustVoxel HWE derives from the approved stable Base and adds the physical-hardware administration delta such as UPS, storage-health, sensor, firmware, and hardware-diagnostic tooling. Final stable release mechanics remain owned by the final product repository.
 
 See [VARIANTS.md](VARIANTS.md) for the product layering.
 
