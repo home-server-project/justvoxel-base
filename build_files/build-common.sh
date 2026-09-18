@@ -78,7 +78,6 @@ jq -e '.management_api == "v1" and (.version | type == "string") and (.source_co
 install -d -m0755 /usr/libexec/justvoxel/health
 install -m0755 /ctx/build_files/validate/common.sh /usr/libexec/justvoxel/health/common
 install -m0755 /ctx/build_files/validate/vm.sh /usr/libexec/justvoxel/health/vm
-install -m0755 /ctx/build_files/validate/baremetal.sh /usr/libexec/justvoxel/health/baremetal
 
 for cmd in \
     bootc podman skopeo nmcli nmtui resolvectl firewall-cmd sshd sudo just mjust \
