@@ -22,7 +22,7 @@ JustVoxel consumes Home Server Base 10 as its direct operating-system parent. Ho
 
 The project needs a conservative server-oriented base with systemd, NetworkManager, firewalld, SELinux, Podman, and the normal Linux administration model expected on a long-lived home server. Home Server Base 10 centralizes that generic EL10 foundation so JustVoxel can focus on the Minecraft-appliance layer instead of maintaining its own duplicate rootfs composition.
 
-JustVoxel Base adds the complete shared appliance layer and remains VM-ready. Final VM release promotion and the HWE physical-hardware delta are owned outside this Base repository.
+JustVoxel Base adds the complete shared appliance layer and remains VM-ready. Appliance behavior, management logic, WebUI/API functionality, and capability gating are owned here.
 
 For exact image composition and build details, see [BUILD.md](BUILD.md).
 
@@ -123,17 +123,14 @@ The Minecraft/Paper container workload is maintained separately. `mjust update-m
 
 Keeping these paths separate reduces unnecessary coupling between the appliance OS and the server workload.
 
-## Base and final product variants
+## Capability model
 
-This repository builds one shared JustVoxel Base image.
+JustVoxel Base owns one common appliance implementation.
 
-The Base is already VM-ready and contains the complete appliance core plus VM validation.
+The Base is VM-ready, but the same management layer may also contain hardware-aware functionality. Hardware-dependent controls are exposed only when the running system provides the required capability and platform support.
 
-During active development, the final JustVoxel `testing` branch consumes `justvoxel-base:testing` and builds only the HWE testing layer. The common appliance is inherited rather than duplicated.
+This avoids separate WebUI, Management API, or mjust implementations for different deployment types. The browser interface, privileged Management Agent, command workflows, validation model, and documentation remain common; only capability availability changes at runtime.
 
-For the future stable product path, the intended model is to promote an approved stable Base into the JustVoxel VM release without rebuilding identical content, while JustVoxel HWE derives from the approved stable Base and adds the physical-hardware administration delta such as UPS, storage-health, sensor, firmware, and hardware-diagnostic tooling. Final stable release mechanics remain owned by the final product repository.
-
-See [VARIANTS.md](VARIANTS.md) for the product layering.
 
 ## Storage is independent from the immutable image
 
@@ -156,7 +153,6 @@ The documentation is intentionally split by purpose:
 - [SYSTEM.md](SYSTEM.md) — OS maintenance and power controls
 - [STORAGE.md](STORAGE.md) — storage and migration
 - [RESTORE.md](RESTORE.md) — Minecraft-data recovery
-- [VARIANTS.md](VARIANTS.md) — Base, VM release, and HWE product layering
 - [BUILD.md](BUILD.md) — image composition, CI, signing, and release mechanics
 - [JustVoxel ISO Builder](https://github.com/home-server-project/justvoxel-iso) — fresh installation, hardware/disk guidance, installation access, and installer-media creation
 
