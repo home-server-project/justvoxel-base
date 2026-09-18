@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -15,6 +16,7 @@ const adminSetupApplyRequestLimit = 24 * 1024
 type adminSetupApplyRequest struct {
 	PlanFingerprint string                `json:"plan_fingerprint"`
 	Request         adminSetupPlanRequest `json:"request"`
+	SMBPassword     string                `json:"smb_password,omitempty"`
 }
 
 type adminSetupApplyResponse struct {
@@ -76,6 +78,15 @@ func (s *server) adminSetupApply(w http.ResponseWriter, r *http.Request) {
 	}
 	if plan.PlanFingerprint != request.PlanFingerprint {
 		writeAdminSetupApplyFailure(w, http.StatusConflict, "stale_plan", "the reviewed setup has changed; return to Review before configuring")
+		return
+	}
+	if plan.Requirements != nil && plan.Requirements.SMBPasswordRequired {
+		if request.SMBPassword == "" || strings.ContainsAny(request.SMBPassword, "\r\n") || len(request.SMBPassword) > 4096 {
+			writeAdminSetupApplyFailure(w, http.StatusBadRequest, "smb_password_required", "SMB password is required when setup is executed")
+			return
+		}
+	} else if request.SMBPassword != "" {
+		writeAdminSetupApplyFailure(w, http.StatusBadRequest, "unexpected_smb_password", "SMB password is not required for the reviewed setup")
 		return
 	}
 
