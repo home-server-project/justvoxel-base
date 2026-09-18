@@ -25,13 +25,6 @@ type adminSetupApplyResponse struct {
 	Operation *operationJournal `json:"operation,omitempty"`
 }
 
-type setupApplyPreflightError struct {
-	status  int
-	message string
-}
-
-func (e *setupApplyPreflightError) Error() string { return e.message }
-
 func registerAdminSetupApplyRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("POST /v1/admin/setup/apply", s.adminSetupApply)
 }
@@ -68,7 +61,7 @@ func (s *server) adminSetupApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	plan, preflightErr := authoritativeSetupPlanForApply(r.Context(), request.Request)
+	plan, preflightErr := authoritativeAdminSetupPlan(r.Context(), request.Request)
 	if preflightErr != nil {
 		writeAdminSetupApplyFailure(w, preflightErr.status, "preflight_unavailable", preflightErr.message)
 		return
@@ -132,58 +125,22 @@ func decodeAdminSetupApplyRequest(w http.ResponseWriter, r *http.Request, target
 	return true
 }
 
-func authoritativeSetupPlanForApply(parent context.Context, request adminSetupPlanRequest) (adminSetupPlanResponse, *setupApplyPreflightError) {
-	var out adminSetupPlanResponse
-	payload, err := json.Marshal(request)
-	if err != nil {
-		return out, &setupApplyPreflightError{status: http.StatusInternalServerError, message: "first-run setup request could not be prepared"}
-	}
-	ctx, cancel := context.WithTimeout(parent, adminSetupPlanTimeout)
-	defer cancel()
-	output, err := runAdminSetupPlanHelper(ctx, payload)
-	if err != nil {
-		return out, &setupApplyPreflightError{status: http.StatusServiceUnavailable, message: "first-run setup planning is unavailable"}
-	}
-	if err := decodeAdminSetupPlanResponse(output, &out); err != nil {
-		return out, &setupApplyPreflightError{status: http.StatusInternalServerError, message: "first-run setup planner returned invalid data"}
-	}
-	if out.SchemaVersion != "v1" {
-		return out, &setupApplyPreflightError{status: http.StatusInternalServerError, message: "first-run setup planner returned an unsupported schema"}
-	}
-	if out.Warnings == nil {
-		out.Warnings = []adminSetupPlanWarning{}
-	}
-	if !out.OK {
-		out.Error = boundedSetupPlanError(out.Error)
-		return out, nil
-	}
-	if out.Normalized == nil || out.Requirements == nil || out.Normalized.Minecraft.VersionPolicy == "" || out.Normalized.Storage.Type == "" || out.Normalized.Backups.Type == "" {
-		return out, &setupApplyPreflightError{status: http.StatusInternalServerError, message: "first-run setup planner returned incomplete data"}
-	}
-	fingerprint, err := adminSetupPlanFingerprint(out.SchemaVersion, out.Normalized, out.Requirements)
-	if err != nil {
-		return out, &setupApplyPreflightError{status: http.StatusInternalServerError, message: "first-run setup plan identity could not be created"}
-	}
-	out.PlanFingerprint = fingerprint
-	return out, nil
-}
-
-func setupAlreadyConfiguredForApply(parent context.Context) (bool, *setupApplyPreflightError) {
+func setupAlreadyConfiguredForApply(parent context.Context) (bool, *adminSetupPlanningError) {
 	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
 	output, err := runAdminDiscoveryHelper(ctx, "configuration")
 	if err != nil {
-		return false, &setupApplyPreflightError{status: http.StatusServiceUnavailable, message: "appliance configuration preflight is unavailable"}
+		return false, &adminSetupPlanningError{status: http.StatusServiceUnavailable, message: "appliance configuration preflight is unavailable"}
 	}
 	decoder := json.NewDecoder(bytes.NewReader(output))
 	decoder.DisallowUnknownFields()
 	var configuration adminConfigurationDiscovery
 	if err := decoder.Decode(&configuration); err != nil {
-		return false, &setupApplyPreflightError{status: http.StatusInternalServerError, message: "appliance configuration preflight returned invalid data"}
+		return false, &adminSetupPlanningError{status: http.StatusInternalServerError, message: "appliance configuration preflight returned invalid data"}
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
-		return false, &setupApplyPreflightError{status: http.StatusInternalServerError, message: "appliance configuration preflight returned invalid data"}
+		return false, &adminSetupPlanningError{status: http.StatusInternalServerError, message: "appliance configuration preflight returned invalid data"}
 	}
 	return configuration.Configured, nil
 }
