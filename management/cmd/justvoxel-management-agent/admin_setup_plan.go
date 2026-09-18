@@ -91,6 +91,8 @@ type adminSetupPlanMinecraft struct {
 	Version                string `json:"version"`
 	SystemMemoryMiB        int    `json:"system_memory_mib"`
 	SystemReserveMiB       int    `json:"system_reserve_mib"`
+	MinecraftUID           uint32 `json:"minecraft_uid"`
+	MinecraftGID           uint32 `json:"minecraft_gid"`
 }
 
 type adminSetupPlanStorage struct {
@@ -170,6 +172,8 @@ type adminSetupFingerprintMinecraft struct {
 	RequestedVersionPolicy string `json:"requested_version_policy"`
 	VersionPolicy          string `json:"version_policy"`
 	Version                string `json:"version"`
+	MinecraftUID           uint32 `json:"minecraft_uid"`
+	MinecraftGID           uint32 `json:"minecraft_gid"`
 }
 
 type adminSetupFingerprintStorage struct {
@@ -304,6 +308,7 @@ func adminSetupPlanFingerprint(schemaVersion string, normalized *adminSetupNorma
 				JavaPort: normalized.Minecraft.JavaPort, BedrockPort: normalized.Minecraft.BedrockPort,
 				ImageTag: normalized.Minecraft.ImageTag, RequestedVersionPolicy: normalized.Minecraft.RequestedVersionPolicy,
 				VersionPolicy: normalized.Minecraft.VersionPolicy, Version: normalized.Minecraft.Version,
+				MinecraftUID: normalized.Minecraft.MinecraftUID, MinecraftGID: normalized.Minecraft.MinecraftGID,
 			},
 			Storage: adminSetupFingerprintStorage{
 				Type: normalized.Storage.Type, Path: normalized.Storage.Path, Device: normalized.Storage.Device,
