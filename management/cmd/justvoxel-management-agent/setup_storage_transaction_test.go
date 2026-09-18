@@ -209,35 +209,45 @@ func TestSetupStorageHelperResponseIsStrict(t *testing.T) {
 	}
 }
 
-func TestAdminSetupApplyStillDoesNotDispatchStorageExecution(t *testing.T) {
+func TestAdminSetupApplyDoesNotLaunchDuplicateWorker(t *testing.T) {
 	s := surfaceTestServer(t, roleAdministrator)
 	store := openTestOperationStore(t)
 	attachTestOperationStore(t, s, store)
+
 	oldPlan := runAdminSetupPlanHelper
 	oldDiscovery := runAdminDiscoveryHelper
-	oldStorage := runAdminSetupStorageTransactionHelper
+	oldWorker := startSetupWorker
 	defer func() {
 		runAdminSetupPlanHelper = oldPlan
 		runAdminDiscoveryHelper = oldDiscovery
-		runAdminSetupStorageTransactionHelper = oldStorage
+		startSetupWorker = oldWorker
 	}()
+
 	runAdminSetupPlanHelper = func(_ context.Context, _ []byte) ([]byte, error) {
 		return []byte(validAdminSetupPlanResponse), nil
 	}
 	runAdminDiscoveryHelper = func(_ context.Context, _ string) ([]byte, error) {
 		return []byte(`{"configured":false,"minecraft":{},"backup":{}}`), nil
 	}
-	storageCalled := false
-	runAdminSetupStorageTransactionHelper = func(_ context.Context, _ string, _ []byte) ([]byte, error) {
-		storageCalled = true
-		return nil, errors.New("A5.3 must not dispatch")
+	workerCalls := 0
+	startSetupWorker = func(_ *server, _ string, _ adminSetupNormalizedPlan, secret []byte) {
+		workerCalls++
+		zeroBytes(secret)
 	}
-	rr := httptest.NewRecorder()
-	s.adminSetupApply(rr, surfaceRequest(http.MethodPost, "/v1/admin/setup/apply", setupApplyBody(t, exactSetupApplyFingerprint(t))))
-	if rr.Code != http.StatusAccepted {
-		t.Fatalf("apply status = %d: %s", rr.Code, rr.Body.String())
+
+	body := setupApplyBody(t, exactSetupApplyFingerprint(t))
+	for i := 0; i < 2; i++ {
+		rr := httptest.NewRecorder()
+		s.adminSetupApply(rr, surfaceRequest(http.MethodPost, "/v1/admin/setup/apply", body))
+		want := http.StatusAccepted
+		if i == 1 {
+			want = http.StatusOK
+		}
+		if rr.Code != want {
+			t.Fatalf("apply %d status = %d, want %d: %s", i+1, rr.Code, want, rr.Body.String())
+		}
 	}
-	if storageCalled {
-		t.Fatal("A5.2 Apply endpoint dispatched A5.3 storage execution")
+	if workerCalls != 1 {
+		t.Fatalf("worker calls = %d, want exactly one", workerCalls)
 	}
 }
