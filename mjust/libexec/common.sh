@@ -11,6 +11,7 @@ readonly JV_BACKUP_SERVICE=/etc/systemd/system/minecraft-backup.service
 readonly JV_BACKUP_TIMER=/etc/systemd/system/minecraft-backup.timer
 readonly JV_MAINTENANCE_LOCK=/run/justvoxel-minecraft-maintenance.lock
 readonly JV_STATE_DIR=/var/lib/justvoxel/state
+readonly JV_SETUP_IN_PROGRESS=/var/lib/justvoxel/management/setup-in-progress
 readonly JV_PREVIOUS_IMAGE_STATE=${JV_STATE_DIR}/minecraft-previous-image-id
 readonly JV_MINECRAFT_IMAGE_REPO=docker.io/itzg/minecraft-server
 readonly JV_ITZG_IMAGES_URL=https://raw.githubusercontent.com/itzg/docker-minecraft-server/refs/heads/master/images.json
