@@ -29,7 +29,7 @@ func setupApplyBody(t *testing.T, fingerprint string) string {
 	if err := json.Unmarshal([]byte(validAdminSetupPlanRequest), &request); err != nil {
 		t.Fatal(err)
 	}
-	body, err := json.Marshal(adminSetupApplyRequest{PlanFingerprint: fingerprint, Request: request})
+	body, err := json.Marshal(adminSetupApplyRequest{PlanFingerprint: fingerprint, Request: request, EULAAccepted: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,6 +68,13 @@ func TestAdminSetupApplyRequiresAdministratorBeforePreflight(t *testing.T) {
 }
 
 func TestAdminSetupApplyExactReviewedPlanCreatesQueuedOperation(t *testing.T) {
+	oldWorker := startSetupWorker
+	workerCalls := 0
+	startSetupWorker = func(_ *server, _ string, _ adminSetupNormalizedPlan, secret []byte) {
+		workerCalls++
+		zeroBytes(secret)
+	}
+	defer func() { startSetupWorker = oldWorker }()
 	s := surfaceTestServer(t, roleAdministrator)
 	store := openTestOperationStore(t)
 	attachTestOperationStore(t, s, store)
@@ -117,6 +124,27 @@ func TestAdminSetupApplyExactReviewedPlanCreatesQueuedOperation(t *testing.T) {
 	current, err := store.currentSetup()
 	if err != nil || current == nil || current.OperationID != response.Operation.OperationID {
 		t.Fatalf("current=%#v err=%v", current, err)
+	}
+	if workerCalls != 1 {
+		t.Fatalf("worker calls = %d, want exactly one", workerCalls)
+	}
+}
+
+func TestAdminSetupApplyRequiresExplicitEULAAcceptance(t *testing.T) {
+	s := surfaceTestServer(t, roleAdministrator)
+	attachTestOperationStore(t, s, openTestOperationStore(t))
+	var request adminSetupPlanRequest
+	if err := json.Unmarshal([]byte(validAdminSetupPlanRequest), &request); err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(adminSetupApplyRequest{PlanFingerprint: exactSetupApplyFingerprint(t), Request: request})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	s.adminSetupApply(rr, surfaceRequest(http.MethodPost, "/v1/admin/setup/apply", string(body)))
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), `"code":"eula_required"`) {
+		t.Fatalf("EULA status = %d: %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -253,6 +281,9 @@ func TestAdminSetupApplyRejectsUnknownSecretAndTrailingJSON(t *testing.T) {
 }
 
 func TestAdminSetupApplyRequiresTransientSMBPasswordWithoutPersistingIt(t *testing.T) {
+	oldWorker := startSetupWorker
+	startSetupWorker = func(_ *server, _ string, _ adminSetupNormalizedPlan, secret []byte) { zeroBytes(secret) }
+	defer func() { startSetupWorker = oldWorker }()
 	s := surfaceTestServer(t, roleAdministrator)
 	store := openTestOperationStore(t)
 	attachTestOperationStore(t, s, store)
@@ -288,7 +319,7 @@ func TestAdminSetupApplyRequiresTransientSMBPasswordWithoutPersistingIt(t *testi
 	request.Backups.MountPoint = "/var/mnt/backups"
 	request.Backups.Source = "//nas/backups"
 	request.Backups.Username = "backup-user"
-	body, err := json.Marshal(adminSetupApplyRequest{PlanFingerprint: fingerprint, Request: request})
+	body, err := json.Marshal(adminSetupApplyRequest{PlanFingerprint: fingerprint, Request: request, EULAAccepted: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +349,7 @@ func TestAdminSetupApplyRequiresTransientSMBPasswordWithoutPersistingIt(t *testi
 		t.Fatalf("operation created without SMB password: %#v err=%v", current, err)
 	}
 
-	body, err = json.Marshal(adminSetupApplyRequest{PlanFingerprint: fingerprint, Request: request, SMBPassword: "super-secret"})
+	body, err = json.Marshal(adminSetupApplyRequest{PlanFingerprint: fingerprint, Request: request, SMBPassword: "super-secret", EULAAccepted: true})
 	if err != nil {
 		t.Fatal(err)
 	}
