@@ -1,7 +1,6 @@
 ARG HOME_SERVER_BASE_IMAGE=ghcr.io/home-server-project/home-server-base-10:stable
 ARG JUSTVOXEL_BASE_REPOSITORY=ghcr.io/home-server-project/justvoxel-base
 ARG JUSTVOXEL_VM_REPOSITORY=ghcr.io/home-server-project/justvoxel-vm
-ARG JUSTVOXEL_HWE_REPOSITORY=ghcr.io/home-server-project/justvoxel-hwe
 
 FROM scratch AS ctx
 COPY build_files /build_files
@@ -16,7 +15,6 @@ COPY cosign.pub /cosign.pub
 FROM ${HOME_SERVER_BASE_IMAGE} AS justvoxel-base
 ARG JUSTVOXEL_BASE_REPOSITORY
 ARG JUSTVOXEL_VM_REPOSITORY
-ARG JUSTVOXEL_HWE_REPOSITORY
 
 LABEL containers.bootc=1 \
       ostree.bootable=1 \
@@ -39,7 +37,7 @@ RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
 RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     --mount=type=tmpfs,dst=/tmp \
     IMAGE_REPOSITORY="${JUSTVOXEL_BASE_REPOSITORY}" \
-    IMAGE_ADDITIONAL_TRUST_REPOSITORIES="${JUSTVOXEL_VM_REPOSITORY} ${JUSTVOXEL_HWE_REPOSITORY}" \
+    IMAGE_ADDITIONAL_TRUST_REPOSITORIES="${JUSTVOXEL_VM_REPOSITORY}" \
     IMAGE_PRETTY_NAME="JustVoxel VM 10" \
     IMAGE_VARIANT="JustVoxel VM" \
     IMAGE_VARIANT_ID="justvoxel-vm" \
