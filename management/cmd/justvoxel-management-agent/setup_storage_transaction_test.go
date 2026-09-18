@@ -65,8 +65,12 @@ func TestSetupStorageRequestCarriesNFSAndTransientSMBSecret(t *testing.T) {
 						t.Fatalf("payload missing %s: %s", want, body)
 					}
 				}
-				if tc.wantPassword != strings.Contains(body, tc.password) {
-					t.Fatalf("password presence mismatch in payload: %s", body)
+				hasPassword := strings.Contains(body, `"smb_password":`)
+				if tc.wantPassword != hasPassword {
+					t.Fatalf("SMB password field presence mismatch in payload: %s", body)
+				}
+				if tc.wantPassword && !strings.Contains(body, tc.password) {
+					t.Fatalf("SMB password value missing from helper payload: %s", body)
 				}
 				if action == "validate" {
 					return []byte(`{"ok":true,"applied":false,"phase":"storage_preflight","rollback_state":"not_started","rollback_result":"no_changes"}`), nil
