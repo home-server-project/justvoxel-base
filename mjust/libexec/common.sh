@@ -11,6 +11,7 @@ readonly JV_BACKUP_SERVICE=/etc/systemd/system/minecraft-backup.service
 readonly JV_BACKUP_TIMER=/etc/systemd/system/minecraft-backup.timer
 readonly JV_MAINTENANCE_LOCK=/run/justvoxel-minecraft-maintenance.lock
 readonly JV_STATE_DIR=/var/lib/justvoxel/state
+readonly JV_SETUP_IN_PROGRESS=/var/lib/justvoxel/management/setup-in-progress
 readonly JV_PREVIOUS_IMAGE_STATE=${JV_STATE_DIR}/minecraft-previous-image-id
 readonly JV_MINECRAFT_IMAGE_REPO=docker.io/itzg/minecraft-server
 readonly JV_ITZG_IMAGES_URL=https://raw.githubusercontent.com/itzg/docker-minecraft-server/refs/heads/master/images.json
@@ -352,7 +353,7 @@ resolve_latest_stable_paper_version() {
     return 1
 }
 
-render_runtime() {
+render_runtime_files() {
     require_config
     install -d -m0700 -o root -g root "${JV_CONFIG_DIR}"
     install -d -m0755 -o root -g root /etc/containers/systemd
@@ -436,12 +437,20 @@ render_runtime() {
     rm -f "${timer_tmp}"
 
     systemctl daemon-reload
+}
+
+activate_backup_timer() {
     if [[ ${BACKUP_TIMER_ENABLED} == yes ]]; then
         systemctl enable minecraft-backup.timer >/dev/null
         systemctl restart minecraft-backup.timer
     else
         systemctl disable --now minecraft-backup.timer 2>/dev/null || true
     fi
+}
+
+render_runtime() {
+    render_runtime_files
+    activate_backup_timer
 }
 
 configure_firewall_initial() {

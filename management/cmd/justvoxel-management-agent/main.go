@@ -56,8 +56,9 @@ type session struct {
 }
 
 type server struct {
-	webUID uint32
-	store  *webUIStore
+	webUID     uint32
+	store      *webUIStore
+	operations *operationStore
 
 	mu       sync.Mutex
 	sessions map[string]session
@@ -155,6 +156,12 @@ func serve(socket string) error {
 	}
 	defer store.close()
 
+	operations, err := openOperationStore(operationStateDir)
+	if err != nil {
+		return fmt.Errorf("open operation journal: %w", err)
+	}
+	defer operations.close()
+
 	webAccount, err := user.Lookup("justvoxel-web")
 	if err != nil {
 		return fmt.Errorf("lookup justvoxel-web: %w", err)
@@ -176,7 +183,7 @@ func serve(socket string) error {
 		return err
 	}
 
-	s := &server{webUID: uint32(uid64), store: store, sessions: make(map[string]session)}
+	s := &server{webUID: uint32(uid64), store: store, operations: operations, sessions: make(map[string]session)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/auth/login", s.providerLogin)
 	mux.HandleFunc("POST /v1/auth/logout", s.logout)
@@ -403,7 +410,7 @@ func randomPassword(length int) (string, error) {
 				out[i] = passwordChars[int(b[0])%len(passwordChars)]
 				break
 			}
-	}
+		}
 	}
 	return string(out), nil
 }
