@@ -219,6 +219,29 @@ func TestAdminSetupPlanTimeoutIsBounded(t *testing.T) {
 	}
 }
 
+func TestAdminSetupPlanRejectsMissingRuntimeIdentity(t *testing.T) {
+	s := surfaceTestServer(t, roleAdministrator)
+	old := runAdminSetupPlanHelper
+	defer func() { runAdminSetupPlanHelper = old }()
+	runAdminSetupPlanHelper = func(_ context.Context, _ []byte) ([]byte, error) {
+		var response map[string]any
+		if err := json.Unmarshal([]byte(validAdminSetupPlanResponse), &response); err != nil {
+			t.Fatal(err)
+		}
+		normalized := response["normalized"].(map[string]any)
+		minecraft := normalized["minecraft"].(map[string]any)
+		delete(minecraft, "minecraft_uid")
+		delete(minecraft, "minecraft_gid")
+		return json.Marshal(response)
+	}
+
+	rr := httptest.NewRecorder()
+	s.adminSetupPlan(rr, surfaceRequest(http.MethodPost, "/v1/admin/setup/plan", validAdminSetupPlanRequest))
+	if rr.Code != http.StatusInternalServerError || !strings.Contains(rr.Body.String(), "planner returned incomplete data") {
+		t.Fatalf("status = %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestAdminSetupPlanRejectsUnexpectedHelperFields(t *testing.T) {
 	s := surfaceTestServer(t, roleAdministrator)
 	old := runAdminSetupPlanHelper
