@@ -3,7 +3,7 @@
 JustVoxel migration moves the **complete persistent Minecraft server state** to another JustVoxel installation. It is separate from normal JustVoxel Backup/Restore.
 
 - **Backup / Restore** protects the current appliance and uses its configured backup destination.
-- **Export / Import** is for reinstall, VM-to-VM, VM-to-HWE, HWE-to-VM, another machine, or an existing external Paper server.
+- **Export / Import** is for reinstall, VM-to-VM, VM-to-physical-hardware, physical-hardware-to-VM, another machine, or an existing external Paper server.
 
 The normal commands are:
 
@@ -282,7 +282,7 @@ Useful transfer choices for a JustVoxel VM include:
 
 A disk used once as a migration source is mounted temporarily; selecting it for migration does not permanently adopt or reconfigure it as JustVoxel storage.
 
-## HWE / physical-hardware migration examples
+## Physical-hardware migration examples
 
 Useful choices include:
 
