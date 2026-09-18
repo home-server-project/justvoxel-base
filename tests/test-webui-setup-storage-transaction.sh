@@ -29,8 +29,10 @@ chown() {
     local requested="${1:-}" path="${2:-}"
     local current
     current="$(id -u):$(id -g)"
-    [[ "${requested}" == "${current}" ]] || fail "test attempted unexpected ownership restore ${requested} for ${path}"
-    return 0
+    case "${requested}" in
+        root:root|"${current}") return 0 ;;
+        *) fail "test attempted unexpected ownership change ${requested} for ${path}" ;;
+    esac
 }
 
 TMP="$(mktemp -d)"
