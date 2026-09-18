@@ -48,6 +48,10 @@ if grep -Eq '^[[:space:]]*(zram-size|compression-algorithm|swap-priority|writeba
     exit 1
 fi
 
+test -f /etc/rpm-ostreed.conf
+grep -Fqx '[Daemon]' /etc/rpm-ostreed.conf
+grep -Eq '^[[:space:]]*LockLayering[[:space:]]*=[[:space:]]*true[[:space:]]*$' /etc/rpm-ostreed.conf
+
 semodule -l >/dev/null
 
 test "$(systemctl is-enabled NetworkManager.service)" = "enabled"

@@ -93,6 +93,8 @@ JustVoxel keeps operating-system updates and Minecraft workload updates separate
 
 The appliance operating system is updated through bootc and can be managed through `mjust` system-management commands.
 
+JustVoxel disables rpm-ostree package layering by default to keep deployed systems aligned with the tested appliance image. This does not affect system updates. For more details, see [rpm-ostree package layering](docs/SYSTEM.md#rpm-ostree-package-layering).
+
 The separate Minecraft/Paper workload has its own update flow, backup safeguards, version policy, and rollback handling.
 
 See [`docs/SYSTEM.md`](docs/SYSTEM.md) for operating-system maintenance and [`docs/MJUST.md`](docs/MJUST.md) for the Minecraft update workflow.

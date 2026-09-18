@@ -29,6 +29,14 @@ Downloading/staging an OS image does not reboot the host, stop Minecraft, query 
 
 There is intentionally no separate `mjust os-apply` command. Reboot is the normal bootc apply boundary.
 
+## rpm-ostree package layering
+
+JustVoxel disables rpm-ostree package layering by default through `/etc/rpm-ostreed.conf` with `LockLayering=true`. This keeps deployed systems aligned with the tested appliance image instead of allowing local package overlays, package overrides, or other mutations of the base OSTree deployment.
+
+This does not disable JustVoxel system updates. `mjust os-update` and `bootc upgrade` continue to check, download, and stage newer JustVoxel images normally.
+
+An administrator with root access can deliberately override the policy when local layering is required by changing `LockLayering=false` in `/etc/rpm-ostreed.conf` and running `sudo rpm-ostree reload`. A system with local layering enabled is a locally customized deployment rather than the default JustVoxel appliance state.
+
 ## System resources
 
 `mjust resources` opens `btop` as a live resource view for CPU, memory and swap, disks, network activity, and running processes.
