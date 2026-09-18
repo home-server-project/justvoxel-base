@@ -18,80 +18,37 @@ Safety remains more important than automation. If JustVoxel cannot reliably dete
 
 The immediate priority is to finish and harden what already exists before expanding the appliance surface.
 
-Current work includes:
+Current Base work includes:
 
 - real-world WebUI testing and bug fixing
-- VM validation
-- Bare Metal validation
+- VM-ready Base validation
 - installer and first-boot validation
 - backup and restore validation
+- import/export and migration validation
 - destructive and failure-path storage testing
 - network-storage failure testing
 - Minecraft/Paper update testing
 - operating-system update testing
 - documentation reconciliation after behavior is proven
 
-Existing capabilities such as scheduled backups, manual backups, restore, storage provisioning and migration, Minecraft updates, bootc OS update staging, status, validation, resources, reboot, poweroff, and firmware handling are implemented features rather than future roadmap items.
+HWE-specific package, hardware, and physical-machine validation belongs to the final JustVoxel product repository.
 
-## Near-term: one administrator identity by default
+Existing capabilities such as System-account PAM authentication, the optional Separate WebUI password provider, player-aware interruption checks, scheduled backups, manual backups, restore, import/export, migration recovery, storage provisioning and migration, Minecraft updates, bootc OS update staging, status, validation, resources, reboot, poweroff, and firmware handling are implemented features rather than future roadmap items.
 
-JustVoxel should avoid making a home user manage unrelated system and WebUI administrator passwords by default.
+## Near-term: player-aware maintenance improvements
 
-The preferred default is one JustVoxel administrator account, normally `voxel`, with the local AlmaLinux account as the authoritative administrator identity. WebUI authentication should use the supported RHEL/AlmaLinux PAM path through the privileged management agent rather than reading `/etc/shadow` directly or maintaining a second synchronized password copy.
+The shared player-awareness and fail-closed interruption checks are already implemented. Minecraft stop/restart, update, restore, migration, reboot, poweroff, and related disruptive workflows can check whether players are online before interruption.
 
-The browser-facing WebUI must remain unprivileged. PAM interaction, password changes, session invalidation, and other privileged authentication work belong behind the existing management-agent boundary.
+The remaining usability improvement is to make the shutdown experience smarter:
 
-First-boot behavior should be simple: the bootstrap administrator credential is replaced once, and the resulting system credential is the same credential used for local console access, WebUI administration, and SSH password authentication when SSH password login is enabled.
+- if Minecraft is already stopped, continue immediately;
+- if zero players are online, avoid an unnecessary long player-warning delay;
+- if players are online, provide useful in-game maintenance countdown notices such as 60, 30, 10, and 5 seconds where the runtime supports it cleanly;
+- avoid duplicated waiting between JustVoxel's maintenance flow and the underlying Minecraft container shutdown behavior.
 
-Password policy should follow the normal supported AlmaLinux/RHEL stack rather than introducing a custom JustVoxel password-complexity framework or manually rewriting authselect-managed PAM files. JustVoxel should accept the platform's practical minimum requirement and explain that stronger passwords are recommended without forcing unnecessary application-specific composition rules.
+This work should improve convenience without weakening the current fail-closed player-state policy.
 
-A later optional authentication mode may allow the WebUI administrator password to be separate from the system account. That should be implemented as an explicit alternate authentication provider, not by copying or synchronizing passwords between databases. Future Operator or Viewer accounts should remain WebUI-only identities and should not automatically become Linux users.
-
-## Near-term: player-aware maintenance shutdowns
-
-Maintenance actions should not make an empty Minecraft server wait through a player warning timer, but active players should receive clear in-game notice before interruption.
-
-A shared player-aware maintenance path should be used by operations that can stop Minecraft, including restart, Minecraft update, appliance reboot or poweroff, restore, migration, and other maintenance workflows where applicable.
-
-Desired behavior:
-
-- if Minecraft is already stopped, continue without a warning delay
-- if zero players are online, perform the normal clean stop immediately or after only a very short safety delay
-- if players are online, show visible in-game maintenance warnings at useful intervals such as 60, 30, 10, and 5 seconds before the clean stop
-- if player state cannot be determined reliably, fail closed rather than assuming the server is empty
-- avoid duplicated delays between JustVoxel's player-aware logic and the underlying Minecraft container shutdown mechanism
-
-The goal is to make reboot, shutdown, update, and restart fast when the home server is unused while still giving players enough time to finish what they are doing when the server is active.
-
-## Next: existing-server import and portable export
-
-The highest-priority new capability after stabilization is safe migration into and out of JustVoxel.
-
-### Import an existing Minecraft server
-
-JustVoxel should be able to adopt an existing Minecraft/Paper server without requiring the user to manually rebuild the world, plugins, configuration, whitelist, and related persistent data.
-
-The intended import workflow should support safe sources such as:
-
-- an archive supplied by the administrator
-- attached USB or other local storage
-- supported network storage
-
-Import should inspect and stage the source before activation. It should preserve the original source, identify the important Minecraft data that was found, normalize ownership and SELinux state where required, validate the staged server, and only activate it after the import passes the required checks.
-
-A failed import must not silently replace a working JustVoxel installation.
-
-A real existing Minecraft server should be used as an acceptance case in a disposable JustVoxel VM before this feature is considered proven.
-
-### Export / migration package
-
-JustVoxel should also be able to produce a portable, validated export suitable for migration, disaster recovery, or transfer to another JustVoxel installation.
-
-The export format should make clear what is included and should not depend on the original appliance continuing to exist.
-
-Import and export should share as much validation and archive-handling logic as practical so the appliance has one understandable migration model rather than several incompatible ones.
-
-## After migration: notifications and event history
+## Next: notifications and event history
 
 JustVoxel should provide useful appliance-level notifications without becoming a full monitoring platform.
 
@@ -110,9 +67,13 @@ Event history should complement notifications by keeping short appliance-relevan
 
 Systemd should remain the normal service-recovery mechanism rather than adding a second custom watchdog solely for Minecraft restarts.
 
-## Later: Bare Metal UPS monitoring
+## Later: HWE UPS monitoring
 
-The Bare Metal JustVoxel image should eventually expose native UPS monitoring in the JustVoxel WebUI. The VM image should remain unchanged unless a separate remote-NUT use case is deliberately added later.
+The JustVoxel HWE product should eventually expose native UPS monitoring in the JustVoxel WebUI. The VM-ready Base/VM product should remain unchanged unless a separate remote-NUT use case is deliberately added later.
+
+Base owns the future Management API and WebUI capability. Physical NUT packages, HWE image integration, and hardware validation belong to the final JustVoxel repository.
+
+The detailed physical-HWE implementation notes below are retained during D1 so useful validated knowledge is not discarded before the final HWE documentation is created in D2. They should move out of the Base roadmap during that stage.
 
 The preferred design is not to add a second Cockpit administration interface or embed the Cockpit UPSide plugin. JustVoxel should use Network UPS Tools (NUT) as the backend and expose a narrow UPS API through the existing privileged management agent:
 
@@ -164,7 +125,7 @@ JustVoxel should validate those or the current package-equivalent permissions af
 
 #### Do not enable an unconfigured UPS stack globally
 
-A generic image cannot assume that every Bare Metal machine has a directly attached UPS. NUT hardware identifiers, UPS name, driver, credentials, shutdown thresholds, listener addresses, and site-specific power policy remain deployment-specific.
+A generic image cannot assume that every HWE machine has a directly attached UPS. NUT hardware identifiers, UPS name, driver, credentials, shutdown thresholds, listener addresses, and site-specific power policy remain deployment-specific.
 
 The image should therefore ship the capability without pretending it is configured. Once a local UPS has been configured, the setup path should ensure the appropriate NUT top-level target/service set is enabled and survives reboot.
 
@@ -216,9 +177,9 @@ UPSide is tightly coupled to Cockpit's runtime and `cockpit.spawn()` API. Instal
 
 If actual UPSide source code is reused rather than only its public NUT behavior and UI ideas, its `LGPL-2.1-or-later` licensing and required notices must be handled explicitly. A native JustVoxel implementation using standard NUT interfaces avoids that coupling.
 
-### Bare Metal UPS acceptance criteria
+### HWE UPS acceptance criteria
 
-Before the native UPS feature is considered complete, test it on real Bare Metal hardware with a supported USB UPS and include at least:
+Before the native UPS feature is considered complete, test it on real HWE hardware with a supported USB UPS and include at least:
 
 - USB UPS detection/scanning
 - NUT driver start and stable communication
@@ -236,7 +197,7 @@ Before the native UPS feature is considered complete, test it on real Bare Metal
 
 JustVoxel documentation should remain available on the appliance even when the Internet is unavailable.
 
-The repository Markdown documentation should remain the single source of truth and continue to ship with the matching JustVoxel system image. A future `mjust docs` experience should make the local documentation easy to browse or search from the terminal.
+The JustVoxel Base Markdown documentation should remain the authoritative appliance source of truth and continue to ship with the matching Base system image. A future `mjust docs` experience should make the local documentation easy to browse or search from the terminal.
 
 The WebUI should provide a Help or Documentation area that renders those same bundled Markdown documents as a readable local documentation site with normal navigation, headings, links, tables, notes, and warnings rather than exposing raw Markdown text.
 
