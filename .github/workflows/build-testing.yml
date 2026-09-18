@@ -3,7 +3,7 @@ name: testing
 
 on:
   push:
-    branches: [testing, integration/a5.5-hsb10]
+    branches: [testing]
     paths-ignore:
       - '**/README.md'
       - 'docs/**'
@@ -12,7 +12,7 @@ on:
     - cron: '40 14 * * *'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref_name }}
+  group: ${{ github.workflow }}-testing
   cancel-in-progress: true
 
 env:
@@ -30,10 +30,10 @@ jobs:
       base_ref: ${{ steps.base.outputs.base_ref }}
 
     steps:
-      - name: Checkout current branch
+      - name: Checkout testing branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.ref_name }}
+          ref: testing
 
       - name: Install image resolver
         shell: bash
@@ -71,10 +71,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout current branch
+      - name: Checkout testing branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.ref_name }}
+          ref: testing
 
       - name: Set up Go
         uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6
@@ -106,13 +106,7 @@ jobs:
           done
           for test_script in tests/test-*.sh; do
             [[ -f "${test_script}" ]] || continue
-            if ! bash "${test_script}"; then
-              if [[ "${test_script}" == tests/test-webui-setup-storage-transaction.sh ]]; then
-                echo "Re-running failing storage transaction harness with tracing." >&2
-                bash -x "${test_script}" || true
-              fi
-              exit 1
-            fi
+            bash "${test_script}"
           done
 
       - name: Build and test management agent source
@@ -126,77 +120,18 @@ jobs:
           CGO_ENABLED=1 go build -trimpath -o /tmp/management-agent ./cmd/justvoxel-management-agent
           /tmp/management-agent version
 
-  hsb-management-tests:
-    name: HSB10 management/PAM compatibility
-    needs: resolve-base
-    if: github.ref == 'refs/heads/integration/a5.5-hsb10'
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout integration branch
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ github.ref_name }}
-
-      - name: Install Podman
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y podman
-
-      - name: Build and test management agent on Home Server Base 10
-        shell: bash
-        env:
-          HOME_SERVER_BASE_REF: ${{ needs.resolve-base.outputs.base_ref }}
-        run: |
-          set -euo pipefail
-          mkdir -p build_artifacts/management
-          sudo podman run --rm \
-            --security-opt=label=disable \
-            -v "${PWD}/management:/src:ro" \
-            -v "${PWD}/system_files/etc/pam.d/justvoxel:/etc/pam.d/justvoxel:ro" \
-            -v "${PWD}/tests/run-pam-integration-alma.sh:/run-pam-integration-alma.sh:ro" \
-            -v "${PWD}/build_artifacts/management:/out" \
-            "${HOME_SERVER_BASE_REF}" \
-            /bin/bash -c '
-              set -euo pipefail
-              dnf install -y gcc golang pam-devel libpwquality-devel diffutils authselect authselect-libs shadow-utils
-              mkdir -p /work /tmp/go-home /tmp/go-build-cache /tmp/go-path
-              cp -a /src/. /work/
-              cd /work
-              HOME=/tmp/go-home GOCACHE=/tmp/go-build-cache GOPATH=/tmp/go-path GOENV=off go mod tidy
-              dirty=0
-              diff -u /src/go.mod /work/go.mod || dirty=1
-              diff -u /src/go.sum /work/go.sum || dirty=1
-              if (( dirty != 0 )); then
-                echo "ERROR: HSB10 Go requires module metadata changes shown above." >&2
-                exit 1
-              fi
-              HOME=/tmp/go-home GOCACHE=/tmp/go-build-cache GOPATH=/tmp/go-path GOENV=off CGO_ENABLED=1 go test -mod=readonly ./...
-              HOME=/tmp/go-home \
-              GOCACHE=/tmp/go-build-cache \
-              GOPATH=/tmp/go-path \
-              GOENV=off \
-              bash /run-pam-integration-alma.sh
-              HOME=/tmp/go-home GOCACHE=/tmp/go-build-cache GOPATH=/tmp/go-path GOENV=off CGO_ENABLED=1 go build -mod=readonly -trimpath -o /out/management-agent ./cmd/justvoxel-management-agent
-            '
-          sudo chmod 0755 build_artifacts/management/management-agent
-
   resolve-webui:
     name: Resolve testing WebUI release
-    if: github.ref == 'refs/heads/testing'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
     outputs:
       version: ${{ steps.resolve.outputs.version }}
     steps:
-      - name: Checkout current branch
+      - name: Checkout testing branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.ref_name }}
+          ref: testing
 
       - name: Resolve newest testing WebUI release
         id: resolve
@@ -211,7 +146,6 @@ jobs:
 
   build:
     needs: [resolve-base, source-tests, resolve-webui]
-    if: github.ref == 'refs/heads/testing'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -229,10 +163,10 @@ jobs:
             repository: justvoxel-baremetal
 
     steps:
-      - name: Checkout current branch
+      - name: Checkout testing branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.ref_name }}
+          ref: testing
 
       - name: Install build dependencies
         shell: bash
@@ -444,7 +378,6 @@ jobs:
   cleanup:
     name: cleanup
     needs: build
-    if: github.ref == 'refs/heads/testing'
     runs-on: ubuntu-24.04
     permissions:
       packages: write
