@@ -41,23 +41,19 @@ install -d -m0755 "${output_dir}"
 )
 chmod 0755 "${output_dir}/justvoxel-webui"
 
-artifact_sha256="$(sha256sum "${output_dir}/justvoxel-webui" | awk '{print $1}')"
-printf '{"version":"%s","source_commit":"%s","management_api":"v1","build_date":"%s","go_version":"%s","artifact_sha256":"%s"}\n' \
-    "${version}" "${source_commit}" "${build_date}" "${go_version}" "${artifact_sha256}" \
+printf '{"version":"%s","source_commit":"%s","management_api":"v1","build_date":"%s","go_version":"%s"}\n' \
+    "${version}" "${source_commit}" "${build_date}" "${go_version}" \
     > "${output_dir}/webui-release.json"
 chmod 0644 "${output_dir}/webui-release.json"
 
 jq -e \
     --arg version "${version}" \
     --arg commit "${source_commit}" \
-    --arg sha "${artifact_sha256}" \
-    '.version == $version and .source_commit == $commit and .management_api == "v1" and .artifact_sha256 == $sha and (.build_date | type == "string") and (.go_version | type == "string")' \
+    '.version == $version and .source_commit == $commit and .management_api == "v1" and (.build_date | type == "string" and length > 0) and (.go_version | type == "string" and length > 0)' \
     "${output_dir}/webui-release.json" >/dev/null
 
 version_output="$("${output_dir}/justvoxel-webui" -version)"
 grep -Fqx "JustVoxel WebUI ${version}" <<<"${version_output}"
 grep -Fqx "source=${source_commit}" <<<"${version_output}"
 grep -Fqx 'management-api=v1' <<<"${version_output}"
-[[ "$(sha256sum "${output_dir}/justvoxel-webui" | awk '{print $1}')" == "${artifact_sha256}" ]]
-
 printf 'Built JustVoxel WebUI %s from %s\n' "${version}" "${source_commit}"

@@ -71,8 +71,14 @@ install -m0755 /ctx/build_artifacts/management/management-agent /usr/libexec/jus
 install -m0755 /ctx/build_artifacts/webui/justvoxel-webui /usr/libexec/justvoxel/justvoxel-webui
 install -d -m0755 /usr/lib/justvoxel
 install -m0644 /ctx/build_artifacts/webui/webui-release.json /usr/lib/justvoxel/webui-release.json
-jq -e '.management_api == "v1" and (.version | type == "string") and (.source_commit | test("^[0-9a-f]{40}$")) and (.artifact_sha256 | test("^[0-9a-f]{64}$"))' /usr/lib/justvoxel/webui-release.json >/dev/null
-/usr/libexec/justvoxel/justvoxel-webui -version | grep -Fq "management-api=v1"
+jq -e '.management_api == "v1" and (.version | type == "string" and length > 0) and (.source_commit | test("^[0-9a-f]{40}$")) and (.build_date | type == "string" and length > 0) and (.go_version | type == "string" and length > 0) and (has("artifact_sha256") | not) and (has("release_tag") | not)' /usr/lib/justvoxel/webui-release.json >/dev/null
+webui_version="$(jq -r '.version' /usr/lib/justvoxel/webui-release.json)"
+webui_source="$(jq -r '.source_commit' /usr/lib/justvoxel/webui-release.json)"
+webui_api="$(jq -r '.management_api' /usr/lib/justvoxel/webui-release.json)"
+webui_version_output="$(/usr/libexec/justvoxel/justvoxel-webui -version)"
+grep -Fqx "JustVoxel WebUI ${webui_version}" <<<"${webui_version_output}"
+grep -Fqx "source=${webui_source}" <<<"${webui_version_output}"
+grep -Fqx "management-api=${webui_api}" <<<"${webui_version_output}"
 /usr/libexec/justvoxel/management-agent version | grep -Fq 'JustVoxel Management API v1'
 
 install -d -m0755 /usr/libexec/justvoxel/health
