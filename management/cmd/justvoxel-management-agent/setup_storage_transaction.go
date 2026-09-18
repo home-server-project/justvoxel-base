@@ -33,8 +33,12 @@ type setupStorageTransactionTarget struct {
 	Filesystem     string `json:"filesystem,omitempty"`
 	UUID           string `json:"uuid,omitempty"`
 	MountPoint     string `json:"mount_point,omitempty"`
-	ExpectedUUID   string `json:"expected_uuid,omitempty"`
-	ExpectedSource string `json:"expected_source,omitempty"`
+	ExpectedUUID        string `json:"expected_uuid,omitempty"`
+	ExpectedSource      string `json:"expected_source,omitempty"`
+	Source              string `json:"source,omitempty"`
+	Username            string `json:"username,omitempty"`
+	Domain              string `json:"domain,omitempty"`
+	CredentialsRequired bool   `json:"credentials_required,omitempty"`
 }
 
 type setupStorageTransactionRequest struct {
@@ -43,6 +47,7 @@ type setupStorageTransactionRequest struct {
 	PlanFingerprint string                        `json:"plan_fingerprint"`
 	Storage         setupStorageTransactionTarget `json:"storage"`
 	Backups         setupStorageTransactionTarget `json:"backups"`
+	SMBPassword     string                        `json:"smb_password,omitempty"`
 }
 
 type setupStorageTransactionResponse struct {
@@ -54,20 +59,21 @@ type setupStorageTransactionResponse struct {
 	Error          string `json:"error,omitempty"`
 }
 
-var errSetupStorageTypeUnsupported = errors.New("A5.3 supports only system storage and existing local filesystems")
+var errSetupStorageTypeUnsupported = errors.New("unsupported setup storage type")
 
-func setupStorageTargetFromPlan(targetType, path, device, parentDisk, filesystem, uuid, mountPoint, expectedUUID, expectedSource string) (setupStorageTransactionTarget, error) {
-	if targetType != "system" && targetType != "partition" {
+func setupStorageTargetFromPlan(targetType, path, device, parentDisk, filesystem, uuid, mountPoint, expectedUUID, expectedSource, source, username, domain string, credentialsRequired, allowNetwork bool) (setupStorageTransactionTarget, error) {
+	if targetType != "system" && targetType != "partition" && !(allowNetwork && (targetType == "nfs" || targetType == "smb")) {
 		return setupStorageTransactionTarget{}, errSetupStorageTypeUnsupported
 	}
 	return setupStorageTransactionTarget{
 		Type: targetType, Path: path, Device: device, ParentDisk: parentDisk,
 		Filesystem: filesystem, UUID: uuid, MountPoint: mountPoint,
 		ExpectedUUID: expectedUUID, ExpectedSource: expectedSource,
+		Source: source, Username: username, Domain: domain, CredentialsRequired: credentialsRequired,
 	}, nil
 }
 
-func setupStorageTransactionRequestForOperation(operation operationJournal, plan *adminSetupNormalizedPlan) (setupStorageTransactionRequest, error) {
+func setupStorageTransactionRequestForOperation(operation operationJournal, plan *adminSetupNormalizedPlan, smbPassword string) (setupStorageTransactionRequest, error) {
 	if plan == nil {
 		return setupStorageTransactionRequest{}, errors.New("normalized setup plan is required")
 	}
@@ -78,6 +84,7 @@ func setupStorageTransactionRequestForOperation(operation operationJournal, plan
 		plan.Storage.Type, plan.Storage.Path, plan.Storage.Device, plan.Storage.ParentDisk,
 		plan.Storage.Filesystem, plan.Storage.UUID, plan.Storage.MountPoint,
 		plan.Storage.ExpectedUUID, plan.Storage.ExpectedSource,
+		"", "", "", false, false,
 	)
 	if err != nil {
 		return setupStorageTransactionRequest{}, err
@@ -86,6 +93,7 @@ func setupStorageTransactionRequestForOperation(operation operationJournal, plan
 		plan.Backups.Type, plan.Backups.Path, plan.Backups.Device, plan.Backups.ParentDisk,
 		plan.Backups.Filesystem, plan.Backups.UUID, plan.Backups.MountPoint,
 		plan.Backups.ExpectedUUID, plan.Backups.ExpectedSource,
+		plan.Backups.Source, plan.Backups.Username, plan.Backups.Domain, plan.Backups.CredentialsRequired, true,
 	)
 	if err != nil {
 		return setupStorageTransactionRequest{}, err
@@ -96,6 +104,7 @@ func setupStorageTransactionRequestForOperation(operation operationJournal, plan
 		PlanFingerprint: operation.PlanFingerprint,
 		Storage:         storage,
 		Backups:         backups,
+		SMBPassword:     smbPassword,
 	}, nil
 }
 
@@ -132,7 +141,7 @@ func runSetupStorageTransactionAction(parent context.Context, action string, tim
 	return response, nil
 }
 
-func executeSetupLocalStorage(parent context.Context, store *operationStore, operationID string, plan *adminSetupNormalizedPlan) error {
+func executeSetupStorage(parent context.Context, store *operationStore, operationID string, plan *adminSetupNormalizedPlan, smbPassword string) error {
 	if store == nil {
 		return errors.New("operation store is unavailable")
 	}
@@ -143,12 +152,12 @@ func executeSetupLocalStorage(parent context.Context, store *operationStore, ope
 	if operation.State != operationQueued {
 		return fmt.Errorf("setup storage execution requires queued operation, got %s", operation.State)
 	}
-	request, err := setupStorageTransactionRequestForOperation(operation, plan)
+	request, err := setupStorageTransactionRequestForOperation(operation, plan, smbPassword)
 	if err != nil {
 		return err
 	}
 
-	if _, err := store.transition(operationID, operationValidating, "storage_preflight", "Revalidating reviewed local storage."); err != nil {
+	if _, err := store.transition(operationID, operationValidating, "storage_preflight", "Revalidating reviewed storage."); err != nil {
 		return err
 	}
 	validation, err := runSetupStorageTransactionAction(parent, "validate", setupStorageValidateTimeout, request)
@@ -156,7 +165,7 @@ func executeSetupLocalStorage(parent context.Context, store *operationStore, ope
 		return finishSetupStorageWithoutMutation(store, operationID, validation, err)
 	}
 
-	if _, err := store.transition(operationID, operationRunning, "storage_snapshot", "Preparing reversible local storage transaction."); err != nil {
+	if _, err := store.transition(operationID, operationRunning, "storage_snapshot", "Preparing reversible storage transaction."); err != nil {
 		return err
 	}
 	applied, err := runSetupStorageTransactionAction(parent, "apply", setupStorageApplyTimeout, request)
@@ -171,12 +180,12 @@ func executeSetupLocalStorage(parent context.Context, store *operationStore, ope
 		_, _ = store.transition(operationID, operationNeedsAttention, "storage_unknown", "Storage helper returned an unexpected completion phase.")
 		return errors.New("unexpected setup storage completion phase")
 	}
-	_, err = store.updateProgress(operationID, operationRunning, "storage_verified", "Local storage transaction completed and was verified.")
+	_, err = store.updateProgress(operationID, operationRunning, "storage_verified", "Storage transaction completed and was verified.")
 	return err
 }
 
 func finishSetupStorageWithoutMutation(store *operationStore, operationID string, response setupStorageTransactionResponse, helperErr error) error {
-	message := "Reviewed local storage could not be revalidated."
+	message := "Reviewed storage could not be revalidated."
 	if response.Error != "" {
 		message = response.Error
 	}
@@ -198,7 +207,7 @@ func finishSetupStorageWithoutMutation(store *operationStore, operationID string
 func finishSetupStorageAfterApplyFailure(store *operationStore, operationID string, response setupStorageTransactionResponse) error {
 	message := response.Error
 	if message == "" {
-		message = "Local storage transaction failed."
+		message = "Storage transaction failed."
 	}
 	if _, err := store.transition(operationID, operationFailed, "storage_failed", message); err != nil {
 		return err
@@ -207,7 +216,7 @@ func finishSetupStorageAfterApplyFailure(store *operationStore, operationID stri
 		if _, err := store.transition(operationID, operationRollingBack, "storage_rollback", "Storage rollback completed; finalizing operation state."); err != nil {
 			return err
 		}
-		if _, err := store.transition(operationID, operationRolledBack, "storage_rolled_back", "Local storage changes were rolled back."); err != nil {
+		if _, err := store.transition(operationID, operationRolledBack, "storage_rolled_back", "Storage changes were rolled back."); err != nil {
 			return err
 		}
 		return errors.New(message)
@@ -218,7 +227,7 @@ func finishSetupStorageAfterApplyFailure(store *operationStore, operationID stri
 	return errors.New(message)
 }
 
-func rollbackSetupLocalStorage(parent context.Context, store *operationStore, operationID string, plan *adminSetupNormalizedPlan) (setupStorageTransactionResponse, error) {
+func rollbackSetupStorage(parent context.Context, store *operationStore, operationID string, plan *adminSetupNormalizedPlan) (setupStorageTransactionResponse, error) {
 	var response setupStorageTransactionResponse
 	if store == nil {
 		return response, errors.New("operation store is unavailable")
@@ -227,9 +236,17 @@ func rollbackSetupLocalStorage(parent context.Context, store *operationStore, op
 	if err != nil {
 		return response, err
 	}
-	request, err := setupStorageTransactionRequestForOperation(operation, plan)
+	request, err := setupStorageTransactionRequestForOperation(operation, plan, "")
 	if err != nil {
 		return response, err
 	}
 	return runSetupStorageTransactionAction(parent, "rollback", setupStorageRollbackTimeout, request)
+}
+
+func executeSetupLocalStorage(parent context.Context, store *operationStore, operationID string, plan *adminSetupNormalizedPlan) error {
+	return executeSetupStorage(parent, store, operationID, plan, "")
+}
+
+func rollbackSetupLocalStorage(parent context.Context, store *operationStore, operationID string, plan *adminSetupNormalizedPlan) (setupStorageTransactionResponse, error) {
+	return rollbackSetupStorage(parent, store, operationID, plan)
 }
