@@ -134,7 +134,9 @@ _a54_write_smb_credentials() {
     {
         printf 'username=%s\n' "${username}"
         printf 'password=%s\n' "${password}"
-        [[ -n ${domain} ]] && printf 'domain=%s\n' "${domain}"
+        if [[ -n ${domain} ]]; then
+            printf 'domain=%s\n' "${domain}"
+        fi
     } > "${A54_SMB_CREDENTIALS}" || return 1
     chown root:root "${A54_SMB_CREDENTIALS}" || return 1
     chmod 0600 "${A54_SMB_CREDENTIALS}" || return 1
