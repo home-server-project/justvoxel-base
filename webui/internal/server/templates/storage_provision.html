@@ -1,0 +1,119 @@
+{{define "storage_provision.html"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JustVoxel - Advanced storage</title><link rel="stylesheet" href="/static/app.css"><link rel="stylesheet" href="/static/settings.css"><link rel="stylesheet" href="/static/storage.css"><script src="/static/app.js" defer></script><script src="/static/storage-provision.js" defer></script></head>
+<body class="role-administrator">{{template "app-header" .}}
+<main>
+  <div class="title-row"><div><p class="eyebrow">Administrator · destructive storage</p><h1>Advanced storage</h1></div><span class="badge">{{.Identity.Username}}</span></div>
+  <p class="muted">Provision new local storage for JustVoxel backups. Every destructive operation requires Review first, then the exact highlighted confirmation phrase shown for the selected device.</p>
+  {{if .Message}}<div class="notice success">{{.Message}}</div>{{end}}
+  {{if .Error}}<div class="notice error">{{.Error}}</div>{{end}}
+
+  {{if .Configuration.Configured}}
+  <div class="notice warning"><strong>These operations can permanently destroy data.</strong> JustVoxel re-checks the selected device and disk layout immediately before Apply. If anything changed since Review, the operation is refused.</div>
+
+  <section class="panel details provision-choice">
+    <div class="section-heading"><div><p class="eyebrow">Option 1</p><h2>Dedicated disk or USB drive</h2></div><span class="badge">Entire disk</span></div>
+    <p>Use a whole unused disk as backup storage. System disks and disks with mounted filesystems are excluded from this list.</p>
+    {{if .WholeDisks}}
+    <form class="settings-form" method="post" action="/settings/storage-provision/plan">
+      <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="operation" value="erase_disk"><input type="hidden" name="size_gib" value="all">
+      <label>Disk to erase and use
+        <select name="device" required>
+          <option value="">Choose a whole disk</option>
+          {{range .WholeDisks}}<option value="{{.Path}}" {{if and (eq $.Form.Operation "erase_disk") (eq $.Form.Device .Path)}}selected{{end}}>{{if .Model}}{{.Model}} · {{end}}{{.Path}} · {{.Size}}{{if .Transport}} · {{.Transport}}{{end}}</option>{{end}}
+        </select>
+      </label>
+      <div class="settings-grid two-column">
+        <label>Mount point<input name="mount_point" value="{{if eq .Form.Operation "erase_disk"}}{{.Form.MountPoint}}{{else}}/var/mnt/justvoxel-backup{{end}}" required autocomplete="off"><span class="field-help">Where the new XFS filesystem will be mounted.</span></label>
+        <label>Backup directory<input name="path" value="{{if eq .Form.Operation "erase_disk"}}{{.Form.Path}}{{else}}/var/mnt/justvoxel-backup/backups{{end}}" required autocomplete="off"><span class="field-help">Must be inside the mount point.</span></label>
+      </div>
+      <div class="settings-submit-row"><button type="submit">Review whole-disk erase</button><span class="muted">Review does not modify the disk.</span></div>
+    </form>
+    {{else}}<div class="notice">No safe unused whole disk is currently available. Attach a second disk/USB device or choose another storage method.</div>{{end}}
+  </section>
+
+  <section class="panel details provision-choice">
+    <div class="section-heading"><div><p class="eyebrow">Option 2</p><h2>Format a blank partition</h2></div><span class="badge">Selected partition only</span></div>
+    <p>Use a writable partition that currently has no detected filesystem. Existing formatted filesystems belong on the normal <a href="/settings/backup-storage">Backup storage</a> page and are never reformatted here.</p>
+    {{if .BlankPartitions}}
+    <form class="settings-form" method="post" action="/settings/storage-provision/plan">
+      <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="operation" value="format_partition"><input type="hidden" name="size_gib" value="all">
+      <label>Blank partition to format
+        <select name="device" required>
+          <option value="">Choose a blank partition</option>
+          {{range .BlankPartitions}}<option value="{{.Path}}" {{if and (eq $.Form.Operation "format_partition") (eq $.Form.Device .Path)}}selected{{end}}>{{if .Model}}{{.Model}} · {{end}}{{.Path}} · {{.Size}}{{if .SystemDisk}} · on system disk{{end}}</option>{{end}}
+        </select>
+      </label>
+      <div class="settings-grid two-column">
+        <label>Mount point<input name="mount_point" value="{{if eq .Form.Operation "format_partition"}}{{.Form.MountPoint}}{{else}}/var/mnt/justvoxel-backup{{end}}" required autocomplete="off"></label>
+        <label>Backup directory<input name="path" value="{{if eq .Form.Operation "format_partition"}}{{.Form.Path}}{{else}}/var/mnt/justvoxel-backup/backups{{end}}" required autocomplete="off"></label>
+      </div>
+      <div class="settings-submit-row"><button type="submit">Review partition format</button><span class="muted">The selected partition will become XFS only after typed confirmation.</span></div>
+    </form>
+    {{else}}<div class="notice">No writable blank partition is currently available.</div>{{end}}
+  </section>
+
+  <section class="panel details provision-choice">
+    <div class="section-heading"><div><p class="eyebrow">Option 3</p><h2>Use already-unallocated disk space</h2></div><span class="badge">No shrinking</span></div>
+    <p>Create a new XFS partition only in existing unallocated space. JustVoxel never shrinks, moves, or resizes an existing partition or filesystem.</p>
+    {{if .FreeSpaceDisks}}
+    <form class="settings-form" method="post" action="/settings/storage-provision/plan">
+      <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="operation" value="create_partition">
+      <label>Disk with unallocated space
+        <select name="device" required>
+          <option value="">Choose a disk</option>
+          {{range .FreeSpaceDisks}}<option value="{{.Path}}" {{if and (eq $.Form.Operation "create_partition") (eq $.Form.Device .Path)}}selected{{end}}>{{if .Model}}{{.Model}} · {{end}}{{.Path}} · {{.Size}} total · {{.Free}} largest free segment{{if .SystemDisk}} · system disk{{end}}</option>{{end}}
+        </select>
+      </label>
+      <div class="settings-grid two-column">
+        <label>New partition size
+          <input name="size_gib" value="{{if eq .Form.Operation "create_partition"}}{{.Form.SizeGiB}}{{else}}all{{end}}" required autocomplete="off">
+          <span class="field-help">Enter <code>all</code> to use the largest unallocated segment, or an integer GiB value such as <code>100</code>.</span>
+        </label>
+        <label>Mount point<input name="mount_point" value="{{if eq .Form.Operation "create_partition"}}{{.Form.MountPoint}}{{else}}/var/mnt/justvoxel-backup{{end}}" required autocomplete="off"></label>
+      </div>
+      <label>Backup directory<input name="path" value="{{if eq .Form.Operation "create_partition"}}{{.Form.Path}}{{else}}/var/mnt/justvoxel-backup/backups{{end}}" required autocomplete="off"></label>
+      <div class="settings-submit-row"><button type="submit">Review partition creation</button><span class="muted">Review shows the exact free-space range before anything changes.</span></div>
+    </form>
+    {{else}}<div class="notice">No disk currently has an unallocated segment of at least 1 GiB.</div>{{end}}
+  </section>
+
+  {{if .Plan}}
+  <section class="panel details destructive-review" id="review">
+    <div class="section-heading"><div><p class="eyebrow">Final review</p><h2>Confirm the exact storage target</h2></div><span class="badge">Destructive</span></div>
+    {{range .Plan.Warnings}}<div class="notice warning">{{.}}</div>{{end}}
+    <dl>
+      <div><dt>Operation</dt><dd>{{if eq .Plan.Proposed.Operation "erase_disk"}}Erase and provision whole disk{{else if eq .Plan.Proposed.Operation "format_partition"}}Format blank partition as XFS{{else}}Create XFS partition in unallocated space{{end}}</dd></div>
+      <div><dt>Exact device</dt><dd><code>{{.Plan.Proposed.Device}}</code></dd></div>
+      {{if .Plan.Proposed.Model}}<div><dt>Device model</dt><dd>{{.Plan.Proposed.Model}}</dd></div>{{end}}
+      <div><dt>Device size</dt><dd>{{.PlanDeviceSize}}</dd></div>
+      {{if eq .Plan.Proposed.Operation "create_partition"}}<div><dt>Largest free segment</dt><dd>{{.PlanFreeSize}} · <code>{{.Plan.Proposed.FreeStart}}</code> → <code>{{.Plan.Proposed.FreeEnd}}</code></dd></div><div><dt>New partition</dt><dd>{{.PlanCreateSize}} · <code>{{.Plan.Proposed.FreeStart}}</code> → <code>{{.Plan.Proposed.PlannedEnd}}</code></dd></div>{{end}}
+      <div><dt>New mount point</dt><dd><code>{{.Plan.Proposed.MountPoint}}</code></dd></div>
+      <div><dt>New backup directory</dt><dd><code>{{.Plan.Proposed.Path}}</code></dd></div>
+      <div><dt>New filesystem</dt><dd>XFS</dd></div>
+    </dl>
+
+    <div class="confirmation-example confirmation-required">
+      <span>To confirm this exact operation, type exactly:</span>
+      <code id="storage-confirmation-phrase">{{.Plan.Proposed.Confirmation}}</code>
+    </div>
+
+    <form class="action-form destructive-apply-form" method="post" action="/settings/storage-provision/apply" data-progress="Provisioning storage…" data-exact-confirmation="{{.Plan.Proposed.Confirmation}}">
+      <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="operation" value="{{.Plan.Proposed.Operation}}"><input type="hidden" name="device" value="{{.Plan.Proposed.Device}}"><input type="hidden" name="mount_point" value="{{.Plan.Proposed.MountPoint}}"><input type="hidden" name="path" value="{{.Plan.Proposed.Path}}"><input type="hidden" name="size_gib" value="{{.Plan.Proposed.SizeGiB}}"><input type="hidden" name="fingerprint" value="{{.Plan.Proposed.Fingerprint}}">
+      <label>Confirmation phrase
+        <input id="storage-confirmation-input" name="confirmation" required autocomplete="off" spellcheck="false" placeholder="Type the highlighted phrase exactly">
+        <span class="field-help">This must match character-for-character, including the action and exact <code>/dev/...</code> device shown above.</span>
+      </label>
+      <div class="action-row"><button id="storage-provision-apply" type="submit" disabled>Apply destructive operation</button><a class="button-link secondary" href="/settings/storage-provision">Cancel</a></div>
+    </form>
+  </section>
+  {{end}}
+
+  <section class="panel details">
+    <div class="section-heading"><div><p class="eyebrow">Non-destructive choices</p><h2>Already formatted or network storage?</h2></div></div>
+    <p>Use <a href="/settings/backup-storage">Backup storage</a> for an existing XFS/ext4/Btrfs filesystem, a directory on the JustVoxel system, NFS, or SMB/CIFS. Those options do not belong in this destructive workflow.</p>
+  </section>
+  {{else}}
+  <div class="notice">Minecraft is not configured yet. Advanced storage provisioning for a fresh appliance will be integrated into the first-run setup flow rather than changing backup configuration from this page.</div>
+  {{end}}
+  <p class="foot">WebUI {{.Version}} · Management API {{.ManagementAPI}}</p>
+</main></body></html>{{end}}

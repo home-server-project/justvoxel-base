@@ -1,0 +1,46 @@
+{{define "app-header"}}
+<header class="app-header">
+  <a class="brand-link" href="/" aria-label="JustVoxel dashboard"><strong>JustVoxel</strong><span>Minecraft Server Appliance</span></a>
+  <nav class="primary-nav" aria-label="Primary navigation">
+    <details class="nav-group" data-nav-group="server">
+      <summary class="nav-trigger">Server</summary>
+      <div class="nav-menu">
+        <span class="nav-section-label">Server</span>
+        <a href="/activity">Activity</a>
+        <a class="nav-admin-only" href="/settings/server">Minecraft settings</a>
+        <a class="nav-operator-plus" href="/operations#whitelist">Whitelist</a>
+        <a class="nav-operator-plus" href="/operations#minecraft-logs">Minecraft logs</a>
+      </div>
+    </details>
+
+    <details class="nav-group nav-operator-plus" data-nav-group="storage">
+      <summary class="nav-trigger">Storage &amp; Backups</summary>
+      <div class="nav-menu">
+        <span class="nav-section-label">Storage</span>
+        <a class="nav-admin-only" href="/settings/storage">Storage overview</a>
+        <a class="nav-admin-only" href="/settings/backup-storage">Backup storage</a>
+        <a class="nav-admin-only" href="/settings/storage-provision">Advanced storage</a>
+        <span class="nav-section-label">Backups</span>
+        <a href="/operations#manual-backup">Create backup</a>
+      </div>
+    </details>
+
+    <details class="nav-group nav-admin-only" data-nav-group="administration">
+      <summary class="nav-trigger">Administration</summary>
+      <div class="nav-menu">
+        <span class="nav-section-label">Appliance</span>
+        <a href="/settings/activity">Admin activity</a>
+        <span class="nav-section-label">Accounts</span>
+        <a href="/settings/users">Users</a>
+        <a href="/settings/authentication">Authentication</a>
+        <a href="/password">Change password</a>
+      </div>
+    </details>
+
+    <form class="nav-logout" method="post" action="/logout">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <button class="secondary" type="submit">Log out</button>
+    </form>
+  </nav>
+</header>
+{{end}}

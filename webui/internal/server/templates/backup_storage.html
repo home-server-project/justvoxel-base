@@ -1,0 +1,169 @@
+{{define "backup_storage.html"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JustVoxel - Backup storage</title><link rel="stylesheet" href="/static/app.css"><link rel="stylesheet" href="/static/settings.css"><link rel="stylesheet" href="/static/storage.css"><script src="/static/app.js" defer></script><script src="/static/storage.js" defer></script></head>
+<body class="role-administrator">{{template "app-header" .}}
+<main>
+  <div class="title-row"><div><p class="eyebrow">Administrator</p><h1>Backup storage</h1></div><span class="badge">{{.Identity.Username}}</span></div>
+  <p class="muted">Choose where JustVoxel stores manual and automatic backups. This page uses existing safe storage or network shares. To erase a dedicated disk, format a blank partition, or create a partition in unallocated space, use Advanced storage.</p>
+  {{if .Message}}<div class="notice success">{{.Message}}</div>{{end}}
+  {{if .Error}}<div class="notice error">{{.Error}}</div>{{end}}
+
+  {{if .Configuration.Configured}}
+  <section class="panel details">
+    <div class="section-heading"><div><p class="eyebrow">Current destination</p><h2>Backup health</h2></div><span class="badge storage-status storage-status-{{.Status.Current.Status}}">{{.Status.Current.Status}}</span></div>
+    <p>{{.Status.Current.StatusDetail}}</p>
+    <dl>
+      <div><dt>Type</dt><dd>{{.Status.Current.Type}}</dd></div>
+      <div><dt>Backup directory</dt><dd><code>{{.Status.Current.Path}}</code></dd></div>
+      {{if .Status.Current.MountPoint}}<div><dt>Mount point</dt><dd><code>{{.Status.Current.MountPoint}}</code></dd></div>{{end}}
+      {{if .Status.Current.ExpectedSource}}<div><dt>Expected source</dt><dd><code>{{.Status.Current.ExpectedSource}}</code></dd></div>{{end}}
+      {{if .Status.Current.ExpectedUUID}}<div><dt>Filesystem UUID</dt><dd><code>{{.Status.Current.ExpectedUUID}}</code></dd></div>{{end}}
+      <div><dt>Available space</dt><dd>{{.CurrentAvailable}}</dd></div>
+      <div><dt>Filesystem size</dt><dd>{{.CurrentFilesystemSize}}</dd></div>
+    </dl>
+    {{if .Status.Current.SamePhysicalDisk}}<div class="notice warning"><strong>Same physical disk.</strong> This destination can help with accidental file loss or reinstall recovery, but it does not protect against failure of the disk that also holds Minecraft data.</div>{{end}}
+  </section>
+
+  <form class="settings-form storage-form" method="post" action="/settings/backup-storage/plan" data-storage-form>
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <section class="panel details">
+      <div class="section-heading"><div><p class="eyebrow">Change location</p><h2>Select backup destination</h2></div></div>
+      <label>Storage type
+        <select name="type" id="storage-type">
+          <option value="system" {{if eq .Form.Type "system"}}selected{{end}}>Directory on this JustVoxel system</option>
+          <option value="partition" {{if eq .Form.Type "partition"}}selected{{end}}>Existing local filesystem / partition</option>
+          <option value="nfs" {{if eq .Form.Type "nfs"}}selected{{end}}>NFS network share</option>
+          <option value="smb" {{if eq .Form.Type "smb"}}selected{{end}}>SMB / CIFS network share</option>
+        </select>
+        <span class="field-help">Choose an existing safe destination. New disk formatting and partition creation are available separately under <a href="/settings/storage-provision">Advanced storage</a>.</span>
+      </label>
+    </section>
+
+    <section class="panel details storage-kind" data-storage-kind="system">
+      <div class="section-heading"><div><p class="eyebrow">Local directory</p><h2>Directory on this system</h2></div></div>
+      <label>Backup directory
+        <input name="path" data-storage-path="system" value="{{if eq .Form.Type "system"}}{{.Form.Path}}{{end}}" placeholder="/var/lib/justvoxel/backups" autocomplete="off">
+        <span class="field-help">The directory is created if needed and must be writable. It cannot be the Minecraft data directory or a folder inside it.</span>
+      </label>
+    </section>
+
+    <section class="panel details storage-kind" data-storage-kind="partition">
+      <div class="section-heading"><div><p class="eyebrow">Local filesystem</p><h2>Existing partition</h2></div></div>
+      {{if .Partitions}}
+      <label>Filesystem / partition
+        <select name="device" id="storage-partition">
+          <option value="">Choose a filesystem</option>
+          {{range .Partitions}}<option value="{{.Path}}" data-mountpoint="{{.Mountpoint}}" {{if eq $.Form.Device .Path}}selected{{end}}>{{if .Model}}{{.Model}} · {{end}}{{.Path}} · {{.Filesystem}} · {{.Size}}{{if .Mountpoint}} · mounted {{.Mountpoint}}{{end}}{{if .SystemDisk}} · system disk{{end}}</option>{{end}}
+        </select>
+        <span class="field-help">Only writable XFS, ext4 and Btrfs filesystems are offered. Critical system mounts are excluded.</span>
+      </label>
+      <div class="settings-grid two-column">
+        <label>Mount point
+          <input name="mount_point" data-storage-mount="partition" value="{{if eq .Form.Type "partition"}}{{.Form.MountPoint}}{{end}}" placeholder="/var/mnt/justvoxel-backup" autocomplete="off">
+          <span class="field-help">If the filesystem is already mounted, JustVoxel adopts that mount. For an unmounted filesystem, choose where it should be mounted persistently by UUID.</span>
+        </label>
+        <label>Backup directory on that filesystem
+          <input name="path" data-storage-path="partition" value="{{if eq .Form.Type "partition"}}{{.Form.Path}}{{end}}" placeholder="/var/mnt/justvoxel-backup/backups" autocomplete="off">
+          <span class="field-help">Must be inside the selected filesystem mount point.</span>
+        </label>
+      </div>
+      {{else}}
+      <div class="notice">No existing writable XFS, ext4 or Btrfs partition is currently available for safe adoption.</div>
+      {{end}}
+      <p class="muted compact">If the partition is blank and needs a filesystem, use <a href="/settings/storage-provision">Advanced storage</a>. JustVoxel will show the exact partition and required FORMAT confirmation before writing it.</p>
+    </section>
+
+    <section class="panel details storage-kind" data-storage-kind="nfs">
+      <div class="section-heading"><div><p class="eyebrow">Network storage</p><h2>NFS share</h2></div></div>
+      <div class="settings-grid two-column">
+        <label>NFS source
+          <input name="source" data-storage-source="nfs" value="{{if eq .Form.Type "nfs"}}{{.Form.Source}}{{end}}" placeholder="nas.local:/volume/backups" autocomplete="off">
+          <span class="field-help">Use the normal <code>server:/export</code> form.</span>
+        </label>
+        <label>Local mount point
+          <input name="mount_point" data-storage-mount="nfs" value="{{if eq .Form.Type "nfs"}}{{.Form.MountPoint}}{{end}}" placeholder="/var/mnt/justvoxel-backup" autocomplete="off">
+          <span class="field-help">If the exact share is already mounted here, JustVoxel adopts it without rewriting its mount configuration.</span>
+        </label>
+      </div>
+      <label>Backup directory on the share
+        <input name="path" data-storage-path="nfs" value="{{if eq .Form.Type "nfs"}}{{.Form.Path}}{{end}}" placeholder="/var/mnt/justvoxel-backup/backups" autocomplete="off">
+      </label>
+    </section>
+
+    <section class="panel details storage-kind" data-storage-kind="smb">
+      <div class="section-heading"><div><p class="eyebrow">Network storage</p><h2>SMB / CIFS share</h2></div></div>
+      <div class="settings-grid two-column">
+        <label>SMB source
+          <input name="source" data-storage-source="smb" value="{{if eq .Form.Type "smb"}}{{.Form.Source}}{{end}}" placeholder="//nas/backups" autocomplete="off">
+          <span class="field-help">Use the normal <code>//server/share</code> form.</span>
+        </label>
+        <label>Local mount point
+          <input name="mount_point" data-storage-mount="smb" value="{{if eq .Form.Type "smb"}}{{.Form.MountPoint}}{{end}}" placeholder="/var/mnt/justvoxel-backup" autocomplete="off">
+        </label>
+        <label>SMB username
+          <input name="username" value="{{if eq .Form.Type "smb"}}{{.Form.Username}}{{end}}" autocomplete="username">
+          <span class="field-help">Needed only when JustVoxel must create the mount. Existing matching mounts can be adopted as-is.</span>
+        </label>
+        <label>Domain / workgroup (optional)
+          <input name="domain" value="{{if eq .Form.Type "smb"}}{{.Form.Domain}}{{end}}" autocomplete="off">
+        </label>
+      </div>
+      <label>Backup directory on the share
+        <input name="path" data-storage-path="smb" value="{{if eq .Form.Type "smb"}}{{.Form.Path}}{{end}}" placeholder="/var/mnt/justvoxel-backup/backups" autocomplete="off">
+      </label>
+      <p class="muted compact">The SMB password is not requested during Review and is never placed in the review page. If a new mount needs credentials, JustVoxel asks for the password only when you apply the reviewed destination.</p>
+    </section>
+
+    <div class="settings-submit-row"><button type="submit">Review backup location</button><span class="muted">Nothing is changed during Review.</span></div>
+  </form>
+
+  {{if .Plan}}
+  <section class="panel details review-panel" id="review">
+    <div class="section-heading"><div><p class="eyebrow">Review</p><h2>Proposed backup destination</h2></div>{{if .Plan.Changed}}<span class="badge">Change ready</span>{{else}}<span class="badge">Already current</span>{{end}}</div>
+    {{range .Plan.Warnings}}<div class="notice warning">{{.}}</div>{{end}}
+    <dl>
+      <div><dt>Type</dt><dd>{{.Plan.Proposed.Type}}</dd></div>
+      <div><dt>Backup directory</dt><dd><code>{{.Plan.Proposed.Path}}</code></dd></div>
+      {{if .Plan.Proposed.Device}}<div><dt>Partition</dt><dd><code>{{.Plan.Proposed.Device}}</code>{{if .Plan.Proposed.Filesystem}} · {{.Plan.Proposed.Filesystem}}{{end}}</dd></div>{{end}}
+      {{if .Plan.Proposed.Model}}<div><dt>Device</dt><dd>{{.Plan.Proposed.Model}}{{if .Plan.Proposed.SizeBytes}} · {{.Plan.Proposed.SizeBytes}} bytes{{end}}</dd></div>{{end}}
+      {{if .Plan.Proposed.MountPoint}}<div><dt>Mount point</dt><dd><code>{{.Plan.Proposed.MountPoint}}</code>{{if .Plan.Proposed.AlreadyMounted}} · already mounted{{end}}</dd></div>{{end}}
+      {{if .Plan.Proposed.ExpectedSource}}<div><dt>Source</dt><dd><code>{{.Plan.Proposed.ExpectedSource}}</code></dd></div>{{end}}
+      {{if .Plan.Proposed.ExpectedUUID}}<div><dt>Filesystem UUID</dt><dd><code>{{.Plan.Proposed.ExpectedUUID}}</code></dd></div>{{end}}
+      <div><dt>Available space</dt><dd>{{.ProposedAvailable}}</dd></div>
+      <div><dt>Filesystem size</dt><dd>{{.ProposedFilesystemSize}}</dd></div>
+    </dl>
+    {{if .Plan.Changed}}
+      <div class="notice"><strong>No Minecraft restart.</strong> Applying this change updates only the backup destination and backup runtime configuration.</div>
+      <form class="action-form storage-apply-form" method="post" action="/settings/backup-storage/apply" data-progress="Applying backup storage…">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <input type="hidden" name="type" value="{{.Plan.Proposed.Type}}">
+        <input type="hidden" name="path" value="{{.Plan.Proposed.Path}}">
+        <input type="hidden" name="device" value="{{.Plan.Proposed.Device}}">
+        <input type="hidden" name="mount_point" value="{{.Plan.Proposed.MountPoint}}">
+        <input type="hidden" name="source" value="{{.Plan.Proposed.ExpectedSource}}">
+        <input type="hidden" name="username" value="{{.Form.Username}}">
+        <input type="hidden" name="domain" value="{{.Form.Domain}}">
+        {{if .Plan.Proposed.CredentialsNeeded}}
+        <label class="credential-confirm">SMB password
+          <input name="password" type="password" required autocomplete="current-password">
+          <span class="field-help">Enter it now to create the reviewed SMB mount. The browser review page does not retain or redisplay this password.</span>
+        </label>
+        {{end}}
+        <div class="action-row"><button type="submit">Apply backup location</button><a class="button-link secondary" href="/settings/backup-storage">Cancel</a></div>
+      </form>
+    {{else}}
+      <p>This destination already matches the current JustVoxel backup configuration.</p>
+    {{end}}
+  </section>
+  {{end}}
+
+  <section class="panel details destructive-preview">
+    <div class="section-heading"><div><p class="eyebrow">Advanced local storage</p><h2>Need to prepare a new disk or partition?</h2></div></div>
+    <p>Advanced storage can erase a dedicated whole disk, format a currently blank partition, or create a new partition only in already-unallocated space. Each operation shows the exact selected device, disk model, size, planned change, and the exact typed confirmation phrase before Apply.</p>
+    <div class="confirmation-example"><span>Example only — the real page uses the selected device</span><code>ERASE /dev/sdb</code></div>
+    <div class="action-row"><a class="button-link" href="/settings/storage-provision">Open Advanced storage</a></div>
+  </section>
+  {{else}}
+  <div class="notice">Minecraft is not configured yet. Backup storage changes are handled by the first-run setup wizard in Phase A4.</div>
+  {{end}}
+  <p class="foot">WebUI {{.Version}} · Management API {{.ManagementAPI}}</p>
+</main></body></html>{{end}}

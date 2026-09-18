@@ -1,0 +1,107 @@
+{{define "dashboard.html"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>JustVoxel - Dashboard</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/first-run.js" defer></script>
+  <script src="/static/app.js" defer></script>
+</head>
+<body class="role-pending">
+{{template "app-header" .}}
+<main id="dashboard" data-dashboard-status="/api/dashboard-status" data-session-info="/api/session-info" data-pending-action="{{.PendingAction}}">
+  <div class="title-row">
+    <div><p class="eyebrow">Dashboard · <span id="session-role">loading role</span></p><h1>Server overview</h1></div>
+    <span class="badge">{{.Status.System.Variant}}</span>
+  </div>
+
+  {{if .Message}}<div class="notice success">{{.Message}}</div>{{end}}
+  {{if .Error}}<div class="notice error">{{.Error}}</div>{{end}}
+
+  {{if .ConfirmAction}}
+  <section class="panel confirmation {{if eq .ConfirmAction "stop"}}role-admin{{else}}role-admin-or-operator{{end}}">
+    <p class="eyebrow">Confirmation required</p>
+    <h2>Players are online</h2>
+    <p>{{.ConfirmOnline}} player{{if ne .ConfirmOnline 1}}s are{{else}} is{{end}} currently online. {{.ConfirmOperation}} will disconnect {{if eq .ConfirmOnline 1}}that player{{else}}those players{{end}}.</p>
+    {{if .ConfirmPlayers}}
+    <div class="player-list">{{range .ConfirmPlayers}}<span class="player-chip">{{.}}</span>{{end}}</div>
+    {{end}}
+    <div class="action-row">
+      <a class="button-link secondary" href="/">Cancel</a>
+      <form method="post" action="/minecraft/{{.ConfirmAction}}" class="action-form" data-progress="{{.ConfirmProgress}}" data-minecraft-action="{{.ConfirmAction}}">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <input type="hidden" name="confirm_players" value="yes">
+        <button class="danger" type="submit">{{.ConfirmLabel}}</button>
+      </form>
+    </div>
+  </section>
+  {{end}}
+
+  <section class="grid">
+    <article class="card"><span>Minecraft</span><strong id="minecraft-state-summary">{{.Status.Minecraft.State}}</strong></article>
+    <article class="card"><span>Players</span><strong id="minecraft-players-summary">{{if .Status.Minecraft.Configured}}{{.Status.Minecraft.Players}} / {{.Status.Minecraft.MaxPlayers}}{{else}}Not configured{{end}}</strong></article>
+    <article class="card"><span>Version</span><strong id="minecraft-version-summary">{{.Status.Minecraft.Version}}</strong></article>
+    <article class="card"><span>System</span><strong id="system-health-summary">{{.Status.System.Health}}</strong></article>
+    <article class="card"><span>IPv4</span><strong id="system-ipv4-summary">{{.Status.System.IPv4}}</strong></article>
+    <article class="card"><span>Backup</span><strong id="backup-summary">{{if .Status.Backup.Enabled}}Enabled{{else}}Disabled{{end}}</strong></article>
+  </section>
+
+  <section class="panel control-panel">
+    <div class="section-heading">
+      <div><p class="eyebrow">Minecraft</p><h2>Server control</h2></div>
+      <span class="state-text" id="minecraft-control-state">{{.Status.Minecraft.State}}</span>
+    </div>
+    <p class="viewer-only muted compact">Viewer access is read-only. Server controls are intentionally unavailable.</p>
+    <div class="action-row role-admin-or-operator">
+      <form method="post" action="/minecraft/start" class="action-form" data-progress="Starting…" data-minecraft-action="start">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <button type="submit" {{if or .PendingAction (not .Status.Minecraft.Configured) (eq .Status.Minecraft.State "Running")}}disabled{{end}}>Start</button>
+      </form>
+      <form method="post" action="/minecraft/stop" class="action-form role-admin" data-progress="Stopping…" data-minecraft-action="stop">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <button class="secondary" type="submit" {{if or .PendingAction (ne .Status.Minecraft.State "Running")}}disabled{{end}}>Stop</button>
+      </form>
+      <form method="post" action="/minecraft/restart" class="action-form" data-progress="Restarting…" data-minecraft-action="restart">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <button class="secondary" type="submit" {{if or .PendingAction (ne .Status.Minecraft.State "Running")}}disabled{{end}}>Restart</button>
+      </form>
+    </div>
+    {{if not .Status.Minecraft.Configured}}<p class="muted compact">Run <code>mjust setup</code> before Minecraft controls become available.</p>{{end}}
+  </section>
+
+  <section class="panel players-panel">
+    <div class="section-heading">
+      <div><p class="eyebrow">Players</p><h2>Online now</h2></div>
+      <span class="state-text" id="players-panel-count">{{if .Players.Configured}}{{.Players.Online}} / {{.Players.Max}}{{end}}</span>
+    </div>
+    <div id="players-panel-body">
+    {{if eq .Players.State "not_configured"}}
+      <p class="muted compact">Minecraft is not configured yet.</p>
+    {{else if eq .Players.State "stopped"}}
+      <p class="muted compact">Minecraft is stopped. Player information will appear when the server is running.</p>
+    {{else if eq .Players.State "unavailable"}}
+      <p class="muted compact">{{if .Players.Error}}{{.Players.Error}}{{else}}Player information is temporarily unavailable.{{end}}</p>
+    {{else if eq .Players.Online 0}}
+      <p class="muted compact">No players online.</p>
+    {{else if .Players.Names}}
+      <div class="player-list">{{range .Players.Names}}<span class="player-chip">{{.}}</span>{{end}}</div>
+    {{else}}
+      <p class="muted compact">{{.Players.Online}} players online.</p>
+    {{end}}
+    </div>
+  </section>
+
+  <section class="panel details">
+    <h2>Appliance</h2>
+    <dl>
+      <div><dt>JustVoxel</dt><dd>{{.Status.JustVoxel.Version}}</dd></div>
+      <div><dt>WebUI</dt><dd>{{.Version}}</dd></div>
+      <div><dt>Management API</dt><dd>{{.ManagementAPI}}</dd></div>
+      <div><dt>Source</dt><dd>{{.Commit}}</dd></div>
+    </dl>
+  </section>
+  <p class="disclaimer">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</p>
+</main>
+</body>
+</html>{{end}}
