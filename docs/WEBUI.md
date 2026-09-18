@@ -1,5 +1,9 @@
 # Web management
 
+The WebUI source and the privileged JustVoxel Management Agent source are maintained together in `justvoxel-base` and are built/tested from the same appliance source commit.
+
+This source consolidation does not change the runtime security model. The browser-facing WebUI remains unprivileged and communicates through Management API v1 over the local Unix socket with the privileged Management Agent.
+
 JustVoxel WebUI is designed for simple administration from a trusted local home network.
 
 By default, Web management uses plain HTTP on TCP port `8099`. This is intentional: the appliance can show both a friendly local address such as `http://justvoxel.local:8099` and a direct address such as `http://192.168.1.50:8099` without requiring a private certificate or a self-signed certificate exception.
