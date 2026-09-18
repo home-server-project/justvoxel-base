@@ -1,10 +1,6 @@
-# JustVoxel product layering
+# JustVoxel Base capability model
 
-JustVoxel now separates the shared appliance Base from final product-specific delivery.
-
-## JustVoxel Base
-
-`justvoxel-base` contains the complete shared Minecraft appliance and is already VM-ready.
+JustVoxel Base contains one common Minecraft appliance implementation and is already VM-ready.
 
 It includes:
 
@@ -14,29 +10,33 @@ It includes:
 - OpenSSH
 - firewalld
 - SELinux container policy and administration tools
-- JustVoxel management agent
-- JustVoxel WebUI integration
+- JustVoxel Management Agent
+- JustVoxel WebUI
+- Management API v1 and Unix-socket privilege boundary
 - `mjust`
 - Minecraft runtime templates and helpers
-- backup, storage, migration, restore, and system-management logic
+- backup, restore, import/export, migration, storage, and system-management logic
+- common appliance validation
 - VM guest tooling
-- `health/common`
-- `health/vm`
 
-It intentionally excludes the physical-hardware-only administration delta.
+## One appliance implementation
 
-## JustVoxel VM
+JustVoxel does not maintain separate WebUI, Management Agent, Management API, or mjust implementations for VM and physical-hardware deployments.
 
-The final VM product is intended to be promoted from an approved stable Base image rather than rebuilt as a second copy of the same appliance content.
+The common appliance code owns the behavior. Hardware-dependent functionality can be present in that common code and is shown or enabled only when the running system provides the required capability.
 
-The current final-product `testing` workflow does not build a separate VM image; the Base itself is the VM-ready development artifact. Final VM release/tag mechanics belong to the final product repository.
+Examples include operations that need firmware interfaces, UPS/NUT support, hardware sensors, storage-health tooling, or other physical-device access.
 
-## JustVoxel HWE
+The capability check belongs in the appliance management layer so unsupported controls can be hidden or refused cleanly without creating a second management stack.
 
-JustVoxel HWE is the physical-machine product.
+## VM-ready baseline
 
-During active development, the final JustVoxel `testing` branch consumes `justvoxel-base:testing` and adds only the physical-hardware administration delta. The future stable HWE path is expected to consume an approved stable Base channel, with the exact stable release mechanics owned by the final product repository.
+The Base image is directly suitable for VM validation and includes guest tooling required by supported hypervisors.
 
-The HWE package list, HWE build logic, and HWE validation belong in the final JustVoxel product repository, not in `justvoxel-base`.
+Hardware-dependent features must not make ordinary VM operation depend on physical-device packages or hardware being present.
 
-Hardware-specific runtime configuration remains deployment-specific. For example, UPS hardware identifiers, NUT driver selection, credentials, and shutdown policy are not baked into the generic Base image.
+## Physical-hardware capability
+
+When the running system supplies the required hardware support, the same JustVoxel WebUI, Management Agent, mjust workflows, and validation model can expose the corresponding physical-machine functionality.
+
+Deployment-specific hardware configuration remains local state. UPS identifiers, NUT driver selection, credentials, shutdown policy, device paths, and similar machine-specific values are not baked into the generic Base image.
