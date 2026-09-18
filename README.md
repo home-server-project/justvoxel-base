@@ -44,6 +44,8 @@ ghcr.io/home-server-project/justvoxel-base
 
 Hardware-dependent appliance features remain part of the common JustVoxel management design and can be exposed or hidden according to the capabilities available on the running system.
 
+For a human-readable overview of the packages included in Base and why they are present, see [`docs/PACKAGES.md`](docs/PACKAGES.md). The exact package declaration remains in [`build_files/packages.env`](build_files/packages.env).
+
 ## Operate the appliance with mjust
 
 `mjust` is JustVoxel's built-in administration interface.
@@ -109,6 +111,7 @@ Start with the document that matches what you are trying to do:
 - [`docs/WEBUI.md`](docs/WEBUI.md) — WebUI authentication, access, and security model
 - [`docs/MANAGEMENT.md`](docs/MANAGEMENT.md) — management layers and native Linux administration
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — why JustVoxel is built as an immutable appliance
+- [`docs/PACKAGES.md`](docs/PACKAGES.md) — package groups included in JustVoxel Base and their purpose
 - [`docs/BUILD.md`](docs/BUILD.md) — image composition, signing, CI, branches, and release mechanics
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — current priorities, future features, and project non-goals
 
