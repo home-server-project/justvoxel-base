@@ -239,7 +239,8 @@ func TestAdminSetupApplyRejectsUnknownSecretAndTrailingJSON(t *testing.T) {
 
 	body := setupApplyBody(t, exactSetupApplyFingerprint(t))
 	withPassword := strings.Replace(body, `"domain":""`, `"domain":"","password":"secret"`, 1)
-	for _, tc := range []string{withPassword, body + ` {}`} {
+	oversized := strings.Replace(body, `"Family server"`, `"`+strings.Repeat("x", adminSetupApplyRequestLimit)+`"`, 1)
+	for _, tc := range []string{withPassword, body + ` {}`, oversized} {
 		rr := httptest.NewRecorder()
 		s.adminSetupApply(rr, surfaceRequest(http.MethodPost, "/v1/admin/setup/apply", tc))
 		if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), `"code":"invalid_request"`) {
