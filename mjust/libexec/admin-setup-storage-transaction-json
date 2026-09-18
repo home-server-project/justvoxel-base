@@ -1,0 +1,17 @@
+#!/usr/bin/bash
+set -uo pipefail
+
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/storage-common-base.sh
+source /usr/libexec/justvoxel/mjust/admin-setup-storage-transaction-common.sh
+source /usr/libexec/justvoxel/mjust/admin-setup-storage-transaction-apply.sh
+source /usr/libexec/justvoxel/mjust/admin-setup-storage-transaction-actions.sh
+require_root
+
+action="${1:-validate}"
+case "${action}" in
+    validate) a53_validate_action ;;
+    apply) a53_apply_action ;;
+    rollback) a53_rollback_action ;;
+    *) _a53_json false false invalid_action not_started no_changes 'Usage: admin-setup-storage-transaction-json {validate|apply|rollback}' ;;
+esac
