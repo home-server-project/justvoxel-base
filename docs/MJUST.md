@@ -10,7 +10,7 @@ The interaction model is inspired by Universal Blue's `ujust` / `ugum` work in `
 
 JustVoxel remains a normal immutable AlmaLinux server underneath. Advanced administrators can still use normal Linux tools directly when they want deeper control.
 
-> JustVoxel is still under active development on the `testing` branch. VM and Bare Metal validation are required before production use.
+> JustVoxel is still under active development on the `testing` branch. The VM-ready Base is validated here; final HWE validation belongs to the final JustVoxel product repository.
 
 ## How mjust is organized
 
@@ -114,6 +114,18 @@ Restore uses archive validation, staging, player-aware shutdown, an exact `RESTO
 
 See `RESTORE.md` for the detailed recovery model and boundaries.
 
+## Import, export, and migration
+
+`mjust export` creates a portable JustVoxel migration bundle containing the complete persistent Minecraft server state plus versioned migration metadata and integrity information.
+
+`mjust import` can adopt a native JustVoxel migration bundle, an existing JustVoxel backup, or supported external Paper server data after staging and validation. Import does not treat migration as a Minecraft version upgrade.
+
+`mjust migration-recover` is the recovery path for an incomplete or failed migration transaction that requires administrator review.
+
+Migration uses the same appliance safety principles as restore and storage workflows: staging before activation, player-aware interruption, destination-specific configuration, transaction preservation, SELinux/ownership normalization, runtime validation, and rollback of the previous live state when possible.
+
+See `MIGRATION.md` for supported sources, transport options, version/identity safety, transaction behavior, and recovery boundaries.
+
 ## Minecraft/Paper updates
 
 `mjust update-minecraft` handles Minecraft container-image maintenance and the configured Minecraft/Paper version policy.
@@ -159,13 +171,13 @@ The current system-management commands are:
 - `mjust resources` — open the live btop resource monitor
 - `mjust reboot` — player-aware graceful reboot
 - `mjust poweroff` — player-aware graceful power off
-- `mjust firmware` — Bare Metal-only reboot into firmware/UEFI setup
+- `mjust firmware` — HWE-only reboot into firmware/UEFI setup
 
 Checking or downloading a bootc OS update does not stop Minecraft, create a backup, or reboot the appliance. The staged deployment is used on the next normal reboot.
 
 Reboot and poweroff use the same player-awareness policy as other disruptive Minecraft operations.
 
-`mjust firmware` is available only on the Bare Metal variant and refuses the operation on the VM variant.
+`mjust firmware` is available only on the HWE product and refuses the operation on the VM-ready Base/VM product.
 
 A JustVoxel-aware bootc rollback workflow is not implemented. It remains a future roadmap item; see `ROADMAP.md`.
 
@@ -263,6 +275,6 @@ See `MANAGEMENT.md` for how interactive mjust, direct commands, Web management, 
 
 The management, backup/restore, storage, system-status/update, resource-monitoring, and power-control flows are implemented on `testing`.
 
-The priority remains validation and hardening before stable promotion. VM validation should come first, followed by destructive/failure-path storage testing, backup and restore testing, network-storage failure testing, Minecraft update testing, installation/first-boot testing, and then Bare Metal validation.
+The priority remains validation and hardening before stable promotion. Base validation covers the shared appliance and VM-ready behavior, including destructive/failure-path storage testing, backup and restore, migration, network-storage failure handling, Minecraft updates, and installation/first-boot behavior. HWE-specific validation belongs to the final JustVoxel product repository.
 
 Future feature priorities, including JustVoxel-aware system rollback, are tracked in `ROADMAP.md`.
