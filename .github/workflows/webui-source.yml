@@ -5,6 +5,8 @@ on:
     branches: [testing]
     paths:
       - 'webui/**'
+      - 'build_files/build-webui.sh'
+      - 'tests/test-webui-source.sh'
       - '.github/workflows/webui-source.yml'
 
 permissions:
@@ -25,43 +27,8 @@ jobs:
           check-latest: true
           cache: false
 
-      - name: Validate WebUI milestone
+      - name: Run WebUI source and local artifact checks
         shell: bash
         run: |
           set -euo pipefail
-          version="$(tr -d '[:space:]' < webui/VERSION)"
-          [[ "${version}" == "1.0.0-beta.8" ]]
-          echo "WEBUI_VERSION=${version}" >> "${GITHUB_ENV}"
-
-      - name: Format check
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd webui
-          test -z "$(gofmt -l .)"
-
-      - name: Vet
-        run: cd webui && go vet ./...
-
-      - name: Test
-        run: cd webui && go test ./...
-
-      - name: Build static binary
-        shell: bash
-        env:
-          CGO_ENABLED: '0'
-        run: |
-          set -euo pipefail
-          cd webui
-          go build -trimpath \
-            -ldflags "-X github.com/home-server-project/justvoxel-webui/internal/version.Version=${WEBUI_VERSION} -X github.com/home-server-project/justvoxel-webui/internal/version.Commit=${GITHUB_SHA} -X github.com/home-server-project/justvoxel-webui/internal/version.ManagementAPI=v1" \
-            -o /tmp/justvoxel-webui ./cmd/justvoxel-webui
-
-      - name: Smoke version output
-        shell: bash
-        run: |
-          set -euo pipefail
-          output="$(/tmp/justvoxel-webui -version)"
-          grep -Fqx "JustVoxel WebUI ${WEBUI_VERSION}" <<<"${output}"
-          grep -Fqx "source=${GITHUB_SHA}" <<<"${output}"
-          grep -Fqx "management-api=v1" <<<"${output}"
+          bash tests/test-webui-source.sh "${GITHUB_SHA}"
