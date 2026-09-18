@@ -76,33 +76,9 @@ jobs:
           CGO_ENABLED=1 go build -trimpath -o /tmp/management-agent ./cmd/justvoxel-management-agent
           /tmp/management-agent version
 
-  resolve-webui:
-    name: Resolve testing WebUI release
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    outputs:
-      version: ${{ steps.resolve.outputs.version }}
-    steps:
-      - name: Checkout testing branch
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: testing
-
-      - name: Resolve newest testing WebUI release
-        id: resolve
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          version="$(./build_files/resolve-webui-release.sh select testing)"
-          echo "version=${version}" >> "${GITHUB_OUTPUT}"
-          echo "Selected JustVoxel WebUI ${version}"
-
   build:
     name: Build JustVoxel Base testing
-    needs: [source-tests, resolve-webui]
+    needs: [source-tests]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -136,14 +112,19 @@ jobs:
             --key cosign.pub \
             "${HOME_SERVER_BASE_IMAGE}" >/dev/null
 
-      - name: Fetch and verify exact WebUI release
+      - name: Build local WebUI artifact
+        id: webui
         shell: bash
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          WEBUI_VERSION: ${{ needs.resolve-webui.outputs.version }}
         run: |
           set -euo pipefail
-          ./build_files/resolve-webui-release.sh fetch "${WEBUI_VERSION}" build_artifacts/webui
+          ./build_files/build-webui.sh "${GITHUB_SHA}" build_artifacts/webui
+          version="$(jq -r '.version' build_artifacts/webui/webui-release.json)"
+          source_commit="$(jq -r '.source_commit' build_artifacts/webui/webui-release.json)"
+          management_api="$(jq -r '.management_api' build_artifacts/webui/webui-release.json)"
+          [[ -n "${version}" && "${version}" != "null" ]]
+          [[ "${source_commit}" == "${GITHUB_SHA}" ]]
+          [[ "${management_api}" == "v1" ]]
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
 
       - name: Build management agent on Home Server Base 10
         shell: bash
@@ -185,7 +166,7 @@ jobs:
       - name: Build JustVoxel Base
         shell: bash
         env:
-          WEBUI_VERSION: ${{ needs.resolve-webui.outputs.version }}
+          WEBUI_VERSION: ${{ steps.webui.outputs.version }}
         run: |
           set -euo pipefail
           sudo podman build \
@@ -302,7 +283,7 @@ jobs:
         env:
           LAYERS: ${{ steps.rechunk.outputs.layers }}
           DIGEST: ${{ steps.push.outputs.digest }}
-          WEBUI_VERSION: ${{ needs.resolve-webui.outputs.version }}
+          WEBUI_VERSION: ${{ steps.webui.outputs.version }}
         run: |
           {
             echo "## JustVoxel Base testing"
