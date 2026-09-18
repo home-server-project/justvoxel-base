@@ -87,7 +87,7 @@ func TestSetupStorageRequestCarriesNFSAndTransientSMBSecret(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if strings.Contains(string(journalData), tc.password) {
+			if tc.password != "" && strings.Contains(string(journalData), tc.password) {
 				t.Fatal("SMB password leaked into operation journal")
 			}
 		})
