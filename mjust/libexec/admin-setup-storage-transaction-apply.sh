@@ -267,6 +267,12 @@ _a53_load_manifest_for_rollback() {
     return 0
 }
 
+_a53_remove_created_empty_dirs() {
+    local path i
+    _a53_remove_created_empty_dirs
+}
+
+
 _a53_rollback() {
     local mode="${1:-explicit}" failure=0 entry mountpoint uuid source current_uuid current_source path expected_after current_after
     _a53_manifest_set_rollback running rollback_in_progress >/dev/null 2>&1 || true
@@ -290,6 +296,8 @@ _a53_rollback() {
             return 1
         fi
     fi
+
+    _a53_remove_created_empty_dirs
 
     if (( ${#A53_MOUNTS_BY_US[@]} == 0 )); then
         while IFS=$'\t' read -r mountpoint uuid source; do
