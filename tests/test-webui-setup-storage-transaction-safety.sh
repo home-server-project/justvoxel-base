@@ -10,27 +10,32 @@ agent_apply="${repo_root}/management/cmd/justvoxel-management-agent/admin_setup_
 agent_runner="${repo_root}/management/cmd/justvoxel-management-agent/setup_storage_transaction.go"
 
 for file in "${helper}" "${common}" "${apply}" "${actions}" "${agent_apply}" "${agent_runner}"; do
-    [[ -f ${file} ]] || { echo "missing A5.3 file: ${file}" >&2; exit 1; }
+    [[ -f ${file} ]] || { echo "missing A5.4 file: ${file}" >&2; exit 1; }
     bash -n "${file}" 2>/dev/null || [[ ${file} == *.go ]]
 done
 
 for forbidden in     'mkfs(\.[[:alnum:]]+)?[[:space:]]'     'wipefs[[:space:]]'     'parted[[:space:]]'     'fdisk[[:space:]]'     'sfdisk[[:space:]]'     'storage-provision'     'admin-backup-storage-json'; do
     if grep -Eq "${forbidden}" "${helper}" "${common}" "${apply}" "${actions}"; then
-        echo "A5.3 local storage helper contains forbidden operation: ${forbidden}" >&2
+        echo "A5.4 storage helper contains forbidden operation: ${forbidden}" >&2
         exit 1
     fi
 done
 
-grep -Fq 'contains("password")' "${common}"
+grep -Fq 'del(.smb_password)' "${common}"
+grep -Fq 'A54_SMB_CREDENTIALS' "${common}"
 grep -Fq 'A53_TRANSACTION_ROOT' "${common}"
 grep -Fq 'fstab.before' "${apply}"
 grep -Fq 'mounts_by_transaction' "${apply}"
 grep -Fq 'directories_created' "${apply}"
 grep -Fq 'fstab_after_sha256' "${apply}"
+grep -Fq 'credentials_after_sha256' "${apply}"
+grep -Fq 'chmod 0600 "${A54_SMB_CREDENTIALS}"' "${apply}"
+grep -Fq 'rw,_netdev,nofail,x-systemd.mount-timeout=20s' "${apply}"
+grep -Fq 'vers=3.0,rw,_netdev,nofail,x-systemd.mount-timeout=20s' "${apply}"
 grep -Fq 'rollback' "${helper}"
 
 if grep -Eq 'executeSetupLocalStorage|admin-setup-storage-transaction-json|runAdminSetupStorageTransactionHelper' "${agent_apply}"; then
-    echo 'A5.3 storage execution was wired into production Apply too early.' >&2
+    echo 'A5.4 storage execution was wired into production Apply too early.' >&2
     exit 1
 fi
 
@@ -38,4 +43,4 @@ grep -Fq 'storage_preflight' "${agent_runner}"
 grep -Fq 'storage_verified' "${agent_runner}"
 grep -Fq 'operationNeedsAttention' "${agent_runner}"
 
-echo 'WebUI first-run A5.3 local storage transaction safety checks passed.'
+echo 'WebUI first-run A5.4 network storage transaction safety checks passed.'
