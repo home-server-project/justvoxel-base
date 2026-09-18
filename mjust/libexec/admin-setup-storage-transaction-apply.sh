@@ -172,7 +172,7 @@ _a54_mount_network_target() {
     mount "${mountpoint}" >/dev/null 2>&1 || return 1
     A53_MUTATION_STARTED=true
     actual_source="$(findmnt -n -o SOURCE --target "${mountpoint}" 2>/dev/null || true)"
-    A53_MOUNTS_BY_US+=("${mountpoint}||${actual_source}")
+    A53_MOUNTS_BY_US+=("$(jq -cn --arg mountpoint "${mountpoint}" --arg uuid "" --arg source "${actual_source}" '{mountpoint:$mountpoint,uuid:$uuid,source:$source}')")
     _a53_manifest_record_mount "${mountpoint}" "" "${actual_source}" || return 1
     [[ ${actual_source} == "${source}" ]] || return 1
     return 0
@@ -199,7 +199,7 @@ _a53_mount_target() {
     A53_MUTATION_STARTED=true
     actual_uuid="$(findmnt -n -o UUID --target "${mountpoint}" 2>/dev/null || true)"
     actual_source="$(findmnt -n -o SOURCE --target "${mountpoint}" 2>/dev/null || true)"
-    A53_MOUNTS_BY_US+=("${mountpoint}|${actual_uuid}|${actual_source}")
+    A53_MOUNTS_BY_US+=("$(jq -cn --arg mountpoint "${mountpoint}" --arg uuid "${actual_uuid}" --arg source "${actual_source}" '{mountpoint:$mountpoint,uuid:$uuid,source:$source}')")
     _a53_manifest_record_mount "${mountpoint}" "${actual_uuid}" "${actual_source}" || return 1
     [[ ${actual_uuid} == "${expected_uuid}" ]] || return 1
     return 0
@@ -317,16 +317,16 @@ _a53_rollback() {
     _a53_remove_created_empty_dirs
 
     if (( ${#A53_MOUNTS_BY_US[@]} == 0 )); then
-        while IFS=$'\t' read -r mountpoint uuid source; do
-            [[ -n ${mountpoint} ]] || continue
-            A53_MOUNTS_BY_US+=("${mountpoint}|${uuid}|${source}")
-        done < <(jq -r '.mounts_by_transaction[]? | [.mountpoint,.uuid,.source] | @tsv' "${A53_MANIFEST}" 2>/dev/null)
+        mapfile -t A53_MOUNTS_BY_US < <(jq -c '.mounts_by_transaction[]?' "${A53_MANIFEST}" 2>/dev/null)
     fi
 
     local i
     for (( i=${#A53_MOUNTS_BY_US[@]}-1; i>=0; i-- )); do
         entry="${A53_MOUNTS_BY_US[$i]}"
-        IFS='|' read -r mountpoint uuid source <<< "${entry}"
+        mountpoint="$(jq -r '.mountpoint // ""' <<< "${entry}" 2>/dev/null || true)"
+        uuid="$(jq -r '.uuid // ""' <<< "${entry}" 2>/dev/null || true)"
+        source="$(jq -r '.source // ""' <<< "${entry}" 2>/dev/null || true)"
+        [[ -n ${mountpoint} ]] || { failure=1; continue; }
         if mountpoint -q -- "${mountpoint}"; then
             current_uuid="$(findmnt -n -o UUID --target "${mountpoint}" 2>/dev/null || true)"
             current_source="$(findmnt -n -o SOURCE --target "${mountpoint}" 2>/dev/null || true)"
