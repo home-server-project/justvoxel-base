@@ -22,7 +22,7 @@ JustVoxel consumes Home Server Base 10 as its direct operating-system parent. Ho
 
 The project needs a conservative server-oriented base with systemd, NetworkManager, firewalld, SELinux, Podman, and the normal Linux administration model expected on a long-lived home server. Home Server Base 10 centralizes that generic EL10 foundation so JustVoxel can focus on the Minecraft-appliance layer instead of maintaining its own duplicate rootfs composition.
 
-JustVoxel adds only the appliance components and policy required by the shared core, VM variant, and Bare Metal variant.
+JustVoxel Base adds the complete shared appliance layer and remains VM-ready. Final VM release promotion and the HWE physical-hardware delta are owned outside this Base repository.
 
 For exact image composition and build details, see [BUILD.md](BUILD.md).
 
@@ -119,17 +119,15 @@ The Minecraft/Paper container workload is maintained separately. `mjust update-m
 
 Keeping these paths separate reduces unnecessary coupling between the appliance OS and the server workload.
 
-## VM and Bare Metal variants
+## Base and final product variants
 
-JustVoxel has one shared appliance core with two thin variants.
+This repository builds one shared JustVoxel Base image.
 
-The VM image is intended for hypervisors and excludes physical-hardware administration packages that do not make sense inside a virtual machine.
+The Base is already VM-ready and contains the complete appliance core plus VM validation. After validation, the final product repository can promote the approved `justvoxel-base:stable` image into the JustVoxel VM release without rebuilding the same content.
 
-The Bare Metal image adds physical-machine administration support such as storage-health, sensor, UPS, firmware, and hardware-diagnostic tooling.
+JustVoxel HWE is the physical-machine product. It derives from the approved Base and adds the physical-hardware administration delta such as UPS, storage-health, sensor, firmware, and hardware-diagnostic tooling.
 
-The Minecraft management experience remains the same across both variants.
-
-See [VARIANTS.md](VARIANTS.md) for the exact technical differences.
+See [VARIANTS.md](VARIANTS.md) for the product layering.
 
 ## Storage is independent from the immutable image
 
@@ -152,7 +150,7 @@ The documentation is intentionally split by purpose:
 - [SYSTEM.md](SYSTEM.md) — OS maintenance and power controls
 - [STORAGE.md](STORAGE.md) — storage and migration
 - [RESTORE.md](RESTORE.md) — Minecraft-data recovery
-- [VARIANTS.md](VARIANTS.md) — VM versus Bare Metal technical differences
+- [VARIANTS.md](VARIANTS.md) — Base, VM release, and HWE product layering
 - [BUILD.md](BUILD.md) — image composition, CI, signing, and release mechanics
 - [JustVoxel ISO Builder](https://github.com/home-server-project/justvoxel-iso) — fresh installation, hardware/disk guidance, installation access, and installer-media creation
 
