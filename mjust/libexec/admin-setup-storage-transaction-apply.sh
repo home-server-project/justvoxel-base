@@ -119,7 +119,9 @@ _a54_write_network_fstab() {
 
 _a54_write_smb_credentials() {
     local username="$1" password="$2" domain="$3" after
-    install -d -m0700 -o root -g root "$(dirname -- "${A54_SMB_CREDENTIALS}")" || return 1
+    if [[ ! -d $(dirname -- "${A54_SMB_CREDENTIALS}") ]]; then
+        _a53_ensure_dir "$(dirname -- "${A54_SMB_CREDENTIALS}")" 0700 || return 1
+    fi
     umask 077
     {
         printf 'username=%s\n' "${username}"
