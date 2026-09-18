@@ -31,8 +31,6 @@ Current Base work includes:
 - operating-system update testing
 - documentation reconciliation after behavior is proven
 
-HWE-specific package, hardware, and physical-machine validation belongs to the final JustVoxel product repository.
-
 Existing capabilities such as System-account PAM authentication, the optional Separate WebUI password provider, player-aware interruption checks, scheduled backups, manual backups, restore, import/export, migration recovery, storage provisioning and migration, Minecraft updates, bootc OS update staging, status, validation, resources, reboot, poweroff, and firmware handling are implemented features rather than future roadmap items.
 
 ## Near-term: player-aware maintenance improvements
@@ -67,13 +65,13 @@ Event history should complement notifications by keeping short appliance-relevan
 
 Systemd should remain the normal service-recovery mechanism rather than adding a second custom watchdog solely for Minecraft restarts.
 
-## Later: HWE UPS monitoring
+## Later: UPS monitoring
 
-The JustVoxel HWE product should eventually expose native UPS monitoring in the JustVoxel WebUI. The VM-ready Base/VM product should remain unchanged unless a separate remote-NUT use case is deliberately added later.
+JustVoxel Base should eventually expose native UPS monitoring through the common JustVoxel WebUI and Management API.
 
-Base owns the future Management API and WebUI capability. Physical NUT packages, HWE image integration, and hardware validation belong to the final JustVoxel repository.
+UPS support is part of the appliance capability model owned by Base. The same WebUI, Management Agent, API, mjust layer, and validation model should handle UPS functionality when the running system provides the required NUT/hardware capability. On systems where that capability is unavailable or inappropriate, the UPS controls should remain hidden or disabled.
 
-The detailed physical-HWE implementation notes below are retained during D1 so useful validated knowledge is not discarded before the final HWE documentation is created in D2. They should move out of the Base roadmap during that stage.
+The implementation should therefore be feature-gated by detected capability rather than split into a separate management stack.
 
 The preferred design is not to add a second Cockpit administration interface or embed the Cockpit UPSide plugin. JustVoxel should use Network UPS Tools (NUT) as the backend and expose a narrow UPS API through the existing privileged management agent:
 
@@ -125,7 +123,7 @@ JustVoxel should validate those or the current package-equivalent permissions af
 
 #### Do not enable an unconfigured UPS stack globally
 
-A generic image cannot assume that every HWE machine has a directly attached UPS. NUT hardware identifiers, UPS name, driver, credentials, shutdown thresholds, listener addresses, and site-specific power policy remain deployment-specific.
+A generic image cannot assume that every physical machine has a directly attached UPS. NUT hardware identifiers, UPS name, driver, credentials, shutdown thresholds, listener addresses, and site-specific power policy remain deployment-specific.
 
 The image should therefore ship the capability without pretending it is configured. Once a local UPS has been configured, the setup path should ensure the appropriate NUT top-level target/service set is enabled and survives reboot.
 
@@ -177,9 +175,9 @@ UPSide is tightly coupled to Cockpit's runtime and `cockpit.spawn()` API. Instal
 
 If actual UPSide source code is reused rather than only its public NUT behavior and UI ideas, its `LGPL-2.1-or-later` licensing and required notices must be handled explicitly. A native JustVoxel implementation using standard NUT interfaces avoids that coupling.
 
-### HWE UPS acceptance criteria
+### UPS acceptance criteria
 
-Before the native UPS feature is considered complete, test it on real HWE hardware with a supported USB UPS and include at least:
+Before the native UPS feature is considered complete, test it on real physical hardware with a supported USB UPS and include at least:
 
 - USB UPS detection/scanning
 - NUT driver start and stable communication
