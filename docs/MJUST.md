@@ -10,7 +10,7 @@ The interaction model is inspired by Universal Blue's `ujust` / `ugum` work in `
 
 JustVoxel remains a normal immutable AlmaLinux server underneath. Advanced administrators can still use normal Linux tools directly when they want deeper control.
 
-> JustVoxel is still under active development on the `testing` branch. The VM-ready Base is validated here; final HWE validation belongs to the final JustVoxel product repository.
+> JustVoxel is still under active development on the `testing` branch and remains under active validation before stable promotion.
 
 ## How mjust is organized
 
@@ -171,13 +171,13 @@ The current system-management commands are:
 - `mjust resources` — open the live btop resource monitor
 - `mjust reboot` — player-aware graceful reboot
 - `mjust poweroff` — player-aware graceful power off
-- `mjust firmware` — HWE-only reboot into firmware/UEFI setup
+- `mjust firmware` — reboot into firmware/UEFI setup when supported on physical hardware
 
 Checking or downloading a bootc OS update does not stop Minecraft, create a backup, or reboot the appliance. The staged deployment is used on the next normal reboot.
 
 Reboot and poweroff use the same player-awareness policy as other disruptive Minecraft operations.
 
-`mjust firmware` is available only on the HWE product and refuses the operation on the VM-ready Base/VM product.
+`mjust firmware` is available only when the running system supports the physical-hardware firmware workflow and refuses unsupported/VM use.
 
 A JustVoxel-aware bootc rollback workflow is not implemented. It remains a future roadmap item; see `ROADMAP.md`.
 
@@ -275,6 +275,6 @@ See `MANAGEMENT.md` for how interactive mjust, direct commands, Web management, 
 
 The management, backup/restore, storage, system-status/update, resource-monitoring, and power-control flows are implemented on `testing`.
 
-The priority remains validation and hardening before stable promotion. Base validation covers the shared appliance and VM-ready behavior, including destructive/failure-path storage testing, backup and restore, migration, network-storage failure handling, Minecraft updates, and installation/first-boot behavior. HWE-specific validation belongs to the final JustVoxel product repository.
+The priority remains validation and hardening before stable promotion. Validation covers the shared appliance behavior, including VM-ready operation, destructive/failure-path storage testing, backup and restore, migration, network-storage failure handling, Minecraft updates, installation/first-boot behavior, and hardware-dependent paths when the required capability is available.
 
 Future feature priorities, including JustVoxel-aware system rollback, are tracked in `ROADMAP.md`.
