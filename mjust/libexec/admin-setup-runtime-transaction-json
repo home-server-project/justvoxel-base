@@ -5,7 +5,7 @@ source /usr/libexec/justvoxel/mjust/common.sh
 source /usr/libexec/justvoxel/mjust/admin-setup-storage-transaction-common.sh
 require_root
 
-readonly A55_SETUP_MARKER=/var/lib/justvoxel/management/setup-in-progress
+readonly A55_SETUP_MARKER=${JV_SETUP_IN_PROGRESS}
 readonly A55_RUNTIME_FILES=(
     /etc/justvoxel/justvoxel.conf
     /etc/justvoxel/minecraft.env
