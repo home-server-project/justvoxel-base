@@ -272,7 +272,6 @@ _a53_remove_created_empty_dirs() {
     _a53_remove_created_empty_dirs
 }
 
-
 _a53_rollback() {
     local mode="${1:-explicit}" failure=0 entry mountpoint uuid source current_uuid current_source path expected_after current_after
     _a53_manifest_set_rollback running rollback_in_progress >/dev/null 2>&1 || true
