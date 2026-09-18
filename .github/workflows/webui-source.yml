@@ -5,6 +5,8 @@ on:
     branches: [testing]
     paths:
       - 'webui/**'
+      - 'build_files/build-webui.sh'
+      - 'tests/test-webui-source.sh'
       - '.github/workflows/webui-source.yml'
 
 permissions:
@@ -25,34 +27,8 @@ jobs:
           check-latest: true
           cache: false
 
-      - name: Validate WebUI milestone
+      - name: Run WebUI source and local artifact checks
         shell: bash
         run: |
           set -euo pipefail
-          version="$(tr -d '[:space:]' < webui/VERSION)"
-          [[ "${version}" == "1.0.0-beta.8" ]]
-          echo "WEBUI_VERSION=${version}" >> "${GITHUB_ENV}"
-
-      - name: Format check
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd webui
-          test -z "$(gofmt -l .)"
-
-      - name: Vet
-        run: cd webui && go vet ./...
-
-      - name: Test
-        run: cd webui && go test ./...
-
-      - name: Build and verify local WebUI artifact
-        shell: bash
-        run: |
-          set -euo pipefail
-          ./build_files/build-webui.sh "${GITHUB_SHA}" build_artifacts/webui
-          jq -e \
-            --arg version "${WEBUI_VERSION}" \
-            --arg commit "${GITHUB_SHA}" \
-            '.version == $version and .source_commit == $commit and .management_api == "v1" and (.artifact_sha256 | test("^[0-9a-f]{64}$"))' \
-            build_artifacts/webui/webui-release.json >/dev/null
+          bash tests/test-webui-source.sh "${GITHUB_SHA}"
