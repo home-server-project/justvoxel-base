@@ -31,31 +31,63 @@ func beginStorageTestOperation(t *testing.T, store *operationStore) operationJou
 	return op
 }
 
-func TestSetupStorageRequestRejectsNetworkBeforeHelper(t *testing.T) {
-	store := openTestOperationStore(t)
-	operation := beginStorageTestOperation(t, store)
-	plan := systemSetupPlanForStorageTest(t)
-	plan.Backups.Type = "nfs"
-	plan.Backups.Source = "nas:/backups"
+func TestSetupStorageRequestCarriesNFSAndTransientSMBSecret(t *testing.T) {
+	for _, tc := range []struct {
+		name, backupType, source, password string
+		wantPassword bool
+	}{
+		{name: "nfs", backupType: "nfs", source: "nas:/backups"},
+		{name: "smb", backupType: "smb", source: "//nas/backups", password: "super-secret", wantPassword: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := openTestOperationStore(t)
+			operation := beginStorageTestOperation(t, store)
+			plan := systemSetupPlanForStorageTest(t)
+			plan.Backups.Type = tc.backupType
+			plan.Backups.Path = "/var/mnt/backups/minecraft"
+			plan.Backups.MountPoint = "/var/mnt/backups"
+			plan.Backups.Source = tc.source
+			plan.Backups.ExpectedSource = tc.source
+			plan.Backups.Username = ""
+			plan.Backups.Domain = ""
+			plan.Backups.CredentialsRequired = false
+			if tc.backupType == "smb" {
+				plan.Backups.Username = "backup-user"
+				plan.Backups.CredentialsRequired = true
+			}
 
-	old := runAdminSetupStorageTransactionHelper
-	defer func() { runAdminSetupStorageTransactionHelper = old }()
-	called := false
-	runAdminSetupStorageTransactionHelper = func(_ context.Context, _ string, _ []byte) ([]byte, error) {
-		called = true
-		return nil, errors.New("must not run")
-	}
-
-	err := executeSetupLocalStorage(context.Background(), store, operation.OperationID, plan)
-	if !errors.Is(err, errSetupStorageTypeUnsupported) {
-		t.Fatalf("error = %v, want unsupported A5.3 storage type", err)
-	}
-	if called {
-		t.Fatal("storage helper ran for unsupported network storage")
-	}
-	current, err := store.currentSetup()
-	if err != nil || current == nil || current.State != operationQueued {
-		t.Fatalf("current=%#v err=%v, want original queued operation", current, err)
+			old := runAdminSetupStorageTransactionHelper
+			defer func() { runAdminSetupStorageTransactionHelper = old }()
+			runAdminSetupStorageTransactionHelper = func(_ context.Context, action string, payload []byte) ([]byte, error) {
+				body := string(payload)
+				for _, want := range []string{`"type":"` + tc.backupType + `"`, `"source":"` + tc.source + `"`} {
+					if !strings.Contains(body, want) {
+						t.Fatalf("payload missing %s: %s", want, body)
+					}
+				}
+				if tc.wantPassword != strings.Contains(body, tc.password) {
+					t.Fatalf("password presence mismatch in payload: %s", body)
+				}
+				if action == "validate" {
+					return []byte(`{"ok":true,"applied":false,"phase":"storage_preflight","rollback_state":"not_started","rollback_result":"no_changes"}`), nil
+				}
+				return []byte(`{"ok":true,"applied":true,"phase":"storage_verified","rollback_state":"not_started","rollback_result":""}`), nil
+			}
+			if err := executeSetupStorage(context.Background(), store, operation.OperationID, plan, tc.password); err != nil {
+				t.Fatal(err)
+			}
+			current, err := store.currentSetup()
+			if err != nil || current == nil || current.State != operationRunning || current.Stage != "storage_verified" {
+				t.Fatalf("current=%#v err=%v", current, err)
+			}
+			journalData, err := json.Marshal(current)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(journalData), tc.password) {
+				t.Fatal("SMB password leaked into operation journal")
+			}
+		})
 	}
 }
 
