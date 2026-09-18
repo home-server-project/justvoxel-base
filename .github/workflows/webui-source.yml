@@ -46,22 +46,13 @@ jobs:
       - name: Test
         run: cd webui && go test ./...
 
-      - name: Build static binary
-        shell: bash
-        env:
-          CGO_ENABLED: '0'
-        run: |
-          set -euo pipefail
-          cd webui
-          go build -trimpath \
-            -ldflags "-X github.com/home-server-project/justvoxel-webui/internal/version.Version=${WEBUI_VERSION} -X github.com/home-server-project/justvoxel-webui/internal/version.Commit=${GITHUB_SHA} -X github.com/home-server-project/justvoxel-webui/internal/version.ManagementAPI=v1" \
-            -o /tmp/justvoxel-webui ./cmd/justvoxel-webui
-
-      - name: Smoke version output
+      - name: Build and verify local WebUI artifact
         shell: bash
         run: |
           set -euo pipefail
-          output="$(/tmp/justvoxel-webui -version)"
-          grep -Fqx "JustVoxel WebUI ${WEBUI_VERSION}" <<<"${output}"
-          grep -Fqx "source=${GITHUB_SHA}" <<<"${output}"
-          grep -Fqx "management-api=v1" <<<"${output}"
+          ./build_files/build-webui.sh "${GITHUB_SHA}" build_artifacts/webui
+          jq -e \
+            --arg version "${WEBUI_VERSION}" \
+            --arg commit "${GITHUB_SHA}" \
+            '.version == $version and .source_commit == $commit and .management_api == "v1" and (.artifact_sha256 | test("^[0-9a-f]{64}$"))' \
+            build_artifacts/webui/webui-release.json >/dev/null
