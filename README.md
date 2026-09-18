@@ -34,24 +34,15 @@ If you can install Windows or Linux yourself, create a VM, write an ISO to a USB
 
 Experienced administrators are not locked out. JustVoxel remains a normal immutable EL10 server built on Home Server Base 10 / AlmaLinux 10, and standard Linux administration tools remain available when deeper control or troubleshooting is wanted.
 
-## Product layering
+## Base image
 
-This repository builds the shared, VM-ready Base image:
+This repository builds the shared, VM-ready JustVoxel Base image and owns the complete common appliance implementation.
 
 ```text
 ghcr.io/home-server-project/justvoxel-base
 ```
 
-During active development, the final JustVoxel `testing` branch consumes `justvoxel-base:testing` to build the HWE testing product. It does not rebuild the shared appliance source.
-
-The intended stable product model is:
-
-- **JustVoxel VM** — promotion/copy of an approved stable Base image.
-- **JustVoxel HWE** — the approved Base plus the physical-hardware administration delta.
-
-The HWE package list, HWE build logic, HWE update trust, installation media, and final release mechanics belong outside this Base repository.
-
-For the exact layering model, see [`docs/VARIANTS.md`](docs/VARIANTS.md).
+Hardware-dependent appliance features remain part of the common JustVoxel management design and can be exposed or hidden according to the capabilities available on the running system.
 
 ## Operate the appliance with mjust
 
@@ -118,7 +109,6 @@ Start with the document that matches what you are trying to do:
 - [`docs/WEBUI.md`](docs/WEBUI.md) — WebUI authentication, access, and security model
 - [`docs/MANAGEMENT.md`](docs/MANAGEMENT.md) — management layers and native Linux administration
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — why JustVoxel is built as an immutable appliance
-- [`docs/VARIANTS.md`](docs/VARIANTS.md) — Base, VM release, and HWE product layering
 - [`docs/BUILD.md`](docs/BUILD.md) — image composition, signing, CI, branches, and release mechanics
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — current priorities, future features, and project non-goals
 
@@ -141,7 +131,7 @@ ghcr.io/home-server-project/justvoxel-base:stable
 stable-YYYYMMDD-<git-sha>
 ```
 
-This Base repository does not publish final VM or HWE releases.
+This repository publishes JustVoxel Base images only.
 
 ## License
 
