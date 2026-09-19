@@ -85,6 +85,15 @@ grep -Fqx 'z /var/lib/gssproxy/rcache  0700 root root -' /usr/lib/tmpfiles.d/jus
 test -f /etc/profile.d/zz-justvoxel-prompt.sh
 grep -Fq '38;5;82' /etc/profile.d/zz-justvoxel-prompt.sh
 
+test -f /etc/issue
+grep -Fqx '                    JUSTVOXEL' /etc/issue
+grep -Fqx '              Minecraft Server Appliance' /etc/issue
+grep -Fqx '  System:           \S{PRETTY_NAME}' /etc/issue
+grep -Fqx '  Host:             \n' /etc/issue
+grep -Fqx '  IPv4:             \4' /etc/issue
+grep -Fqx '  Web interface:    http://\4:8099' /etc/issue
+grep -Fqx '  Sign in below for local administration.' /etc/issue
+
 test -f /etc/profile.d/90-justvoxel-motd.sh
 bash -n /etc/profile.d/90-justvoxel-motd.sh
 test -x /usr/libexec/justvoxel/motd
