@@ -11,6 +11,7 @@ fi
 variant_id="$(cat /usr/lib/justvoxel/variant 2>/dev/null || true)"
 case "${variant_id}" in
     justvoxel-vm|vm) variant='VM' ;;
+    justvoxel-hwe|hwe) variant='HWE' ;;
     justvoxel-baremetal|baremetal) variant='Bare Metal' ;;
     *) variant='Unknown' ;;
 esac
@@ -24,6 +25,34 @@ if [[ -z ${ipv4} ]]; then
     ipv4="$(ip -o -4 addr show scope global up 2>/dev/null | awk '{split($4,a,"/"); print a[1]; exit}')"
 fi
 [[ -n ${ipv4} ]] || ipv4='Not assigned'
+
+network_state='No Ethernet interface detected'
+mapfile -t ethernet_devices < <(nmcli -t -f DEVICE,TYPE device status 2>/dev/null | awk -F: '$2 == "ethernet" {print $1}')
+if (( ${#ethernet_devices[@]} > 0 )); then
+    ethernet_carrier=no
+    ethernet_connecting=no
+    ethernet_connected=no
+
+    for device in "${ethernet_devices[@]}"; do
+        carrier="$(nmcli -g GENERAL.CARRIER device show "${device}" 2>/dev/null || true)"
+        state="$(nmcli -g GENERAL.STATE device show "${device}" 2>/dev/null || true)"
+        state="${state%% *}"
+
+        [[ ${carrier} == on ]] && ethernet_carrier=yes
+        [[ ${state} == 100 ]] && ethernet_connected=yes
+        if [[ ${state} =~ ^[0-9]+$ ]] && (( state >= 40 && state < 100 )); then
+            ethernet_connecting=yes
+        fi
+    done
+
+    if [[ ${ipv4} != 'Not assigned' || ${ethernet_connected} == yes ]]; then
+        network_state='Ethernet connected'
+    elif [[ ${ethernet_carrier} == yes || ${ethernet_connecting} == yes ]]; then
+        network_state='Ethernet connected, obtaining address...'
+    else
+        network_state='Ethernet cable disconnected'
+    fi
+fi
 
 if [[ -f /etc/containers/systemd/minecraft.container ]]; then
     minecraft_state='Configured'
@@ -77,6 +106,7 @@ printf '%s%s====================================================%s\n\n' "${cyan}
 line 'System:' "${white}" "${pretty_name}"
 line 'Variant:' "${white}" "${variant}"
 line 'Host:' "${white}" "${host}"
+line 'Network:' "${white}" "${network_state}"
 line 'IPv4:' "${white}" "${ipv4}"
 line 'Minecraft:' "$([[ ${minecraft_state} == Configured ]] && printf '%s' "${green}" || printf '%s' "${yellow}")" "${minecraft_state}"
 printf '\n'

@@ -90,6 +90,11 @@ bash -n /etc/profile.d/90-justvoxel-motd.sh
 test -x /usr/libexec/justvoxel/motd
 bash -n /usr/libexec/justvoxel/motd
 grep -Fq 'Minecraft Server Appliance' /usr/libexec/justvoxel/motd
+grep -Fq "justvoxel-hwe|hwe) variant='HWE'" /usr/libexec/justvoxel/motd
+grep -Fq "network_state='No Ethernet interface detected'" /usr/libexec/justvoxel/motd
+grep -Fq "network_state='Ethernet connected, obtaining address...'" /usr/libexec/justvoxel/motd
+grep -Fq "network_state='Ethernet cable disconnected'" /usr/libexec/justvoxel/motd
+grep -Fq "line 'Network:'" /usr/libexec/justvoxel/motd
 grep -Fq 'IPv4:' /usr/libexec/justvoxel/motd
 grep -Fq 'Web interface:' /usr/libexec/justvoxel/motd
 grep -Fq 'mjust setup-advanced' /usr/libexec/justvoxel/motd
