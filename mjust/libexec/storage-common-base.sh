@@ -142,6 +142,7 @@ storage_validate_mountpoint_path() {
         echo "ERROR: refusing to manage critical mount point: ${mountpoint}" >&2
         return 1
     }
+    return 0
 }
 
 storage_mount_local() {
