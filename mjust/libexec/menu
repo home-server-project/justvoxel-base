@@ -21,7 +21,7 @@ preview() {
         update) echo -e 'Update Minecraft\n\nCheck Minecraft/Paper and container image updates.' ;;
         system) echo -e 'System\n\nView OS status and updates, resources, reboot and power controls.\n\nSystem resources opens btop. Press q to return to JustVoxel. Esc opens the btop menu, and Ctrl-C also exits the monitor.' ;;
         validate) echo -e 'Validation\n\nRun the complete JustVoxel deployment validation.' ;;
-        logs) echo -e 'Logs\n\nReadable Minecraft logs or the full systemd journal.' ;;
+        logs) echo -e 'Logs\n\nReadable recent Minecraft logs from the JustVoxel Management API.' ;;
         advanced) echo -e 'Advanced\n\nDetailed status, storage device provisioning, welcome controls and reset tools.' ;;
         exit) echo 'Exit the JustVoxel menu.' ;;
         *) echo 'Unknown menu item.' ;;
@@ -212,18 +212,6 @@ system_menu() {
     done
 }
 
-logs_menu() {
-    local choice
-    while true; do
-        choice="$(jui_choose 'Logs' 'Minecraft logs' 'Advanced / full system log' 'Back')" || return 0
-        case "${choice}" in
-            'Minecraft logs') /usr/bin/mjust logs || true ;;
-            'Advanced / full system log') sudo /usr/libexec/justvoxel/mjust/logs --advanced || true ;;
-            'Back') return 0 ;;
-        esac
-    done
-}
-
 all_commands() {
     echo 'All mjust commands'
     echo '------------------'
@@ -311,7 +299,7 @@ while true; do
         update) run_and_pause /usr/bin/mjust update-minecraft || true ;;
         system) system_menu ;;
         validate) run_and_pause /usr/bin/mjust validate || true ;;
-        logs) logs_menu ;;
+        logs) run_and_pause /usr/bin/mjust logs || true ;;
         advanced) advanced_menu ;;
         exit) exit 0 ;;
         *) echo 'Unknown menu selection.' >&2 ;;

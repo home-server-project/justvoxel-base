@@ -114,11 +114,9 @@ for forbidden in 'systemctl ' '/usr/libexec/justvoxel/minecraft-backup' 'flock '
     fi
 done
 
-grep -Fq "'/v1/logs/minecraft?limit=100&format=cat'" "${logs}" || fail 'normal mJust logs do not use the Management API'
-grep -Fq 'if [[ ${mode} == advanced ]]' "${logs}" || fail 'advanced logs branch is missing'
-grep -Fq 'journalctl "${journal_args[@]}" -f' "${logs}" || fail 'advanced logs no longer provide the direct systemd follow view'
-if grep -Fq -- '-o cat' "${logs}"; then
-    fail 'normal mJust logs still contain the old direct journalctl -o cat path'
+grep -Fq "'/v1/logs/minecraft?limit=100&format=cat'" "${logs}" || fail 'mJust logs do not use the Management API'
+if grep -Fq -- '--advanced' "${logs}" || grep -Fq 'journalctl ' "${logs}"; then
+    fail 'mJust logs still expose the removed direct advanced journal path'
 fi
 grep -Fq 'outputMode := "short-iso"' "${operator_surfaces}" || fail 'WebUI/default Minecraft log format changed'
 grep -Fq 'case "cat":' "${operator_surfaces}" || fail 'Management API message-only log format is missing'

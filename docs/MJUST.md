@@ -198,9 +198,11 @@ It requires an interactive terminal. Inside btop, `q` exits directly back to the
 
 ## Logs
 
-`mjust logs` follows the Minecraft systemd journal for troubleshooting.
+`mjust logs` shows a bounded recent Minecraft log view through the JustVoxel Management API.
 
-It is separate from the friendly status dashboard and the stricter validation workflow.
+The old advanced/full-system journal mode is intentionally not exposed through mJust. Administrators who need lower-level journal inspection can use standard Linux tools such as `journalctl` directly.
+
+Logs remain separate from the friendly status dashboard and the stricter validation workflow.
 
 ## Validation
 
