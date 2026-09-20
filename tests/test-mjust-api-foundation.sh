@@ -16,6 +16,11 @@ logs="${repo_root}/mjust/libexec/logs"
 configure="${repo_root}/mjust/libexec/configure"
 configure_max="${repo_root}/mjust/libexec/configure-max-players"
 configuration_api="${repo_root}/mjust/libexec/configuration-api.sh"
+backup_storage="${repo_root}/mjust/libexec/backup-storage"
+backup_storage_api="${repo_root}/mjust/libexec/backup-storage-api.sh"
+storage_provision="${repo_root}/mjust/libexec/storage-provision"
+admin_backup_storage="${repo_root}/management/cmd/justvoxel-management-agent/admin_backup_storage.go"
+admin_storage_provision="${repo_root}/management/cmd/justvoxel-management-agent/admin_storage_provision.go"
 admin_configuration="${repo_root}/management/cmd/justvoxel-management-agent/admin_configuration.go"
 admin_discovery="${repo_root}/management/cmd/justvoxel-management-agent/admin_discovery.go"
 operator_surfaces="${repo_root}/management/cmd/justvoxel-management-agent/operator_surfaces.go"
@@ -26,7 +31,7 @@ fail() {
     exit 1
 }
 
-for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${admin_configuration}" "${admin_discovery}" "${operator_surfaces}" "${justfile}"; do
+for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${backup_storage}" "${backup_storage_api}" "${storage_provision}" "${admin_backup_storage}" "${admin_storage_provision}" "${admin_configuration}" "${admin_discovery}" "${operator_surfaces}" "${justfile}"; do
     [[ -f ${file} ]] || fail "missing mJust Management API file: ${file}"
 done
 
@@ -130,4 +135,32 @@ if grep -Fq 'Authorization:' "${configuration_api}"; then
     fail 'mJust configuration API helper must not introduce a bearer token'
 fi
 
-echo 'mJust Management API foundation, Players, Minecraft control, Status, Whitelist, Manual Backup, Logs, and Configuration migration checks passed.'
+grep -Fq 'GET /v1/admin/backup-storage' "${backup_storage_api}" || fail 'mJust backup storage status does not use the Management API'
+grep -Fq 'jv_backup_storage_post /v1/admin/backup-storage/plan' "${backup_storage_api}" || fail 'mJust backup storage validation does not use the Management API'
+grep -Fq 'jv_backup_storage_post /v1/admin/backup-storage/apply' "${backup_storage_api}" || fail 'mJust backup storage apply does not use the Management API'
+grep -Fq 'GET /v1/admin/storage-provision' "${backup_storage_api}" || fail 'mJust advanced backup storage discovery does not use the Management API'
+grep -Fq 'jv_backup_storage_post /v1/admin/storage-provision/plan' "${backup_storage_api}" || fail 'mJust advanced storage validation does not use the Management API'
+grep -Fq 'jv_backup_storage_post /v1/admin/storage-provision/apply' "${backup_storage_api}" || fail 'mJust advanced storage apply does not use the Management API'
+grep -Fq '"${JV_BACKUP_STORAGE_API_CLIENT}" POST "${path}" --data' "${backup_storage_api}" || fail 'mJust backup storage POST helper does not use the Management API client'
+grep -Fq 'backup-storage-api.sh' "${backup_storage}" || fail 'mJust backup storage frontend does not use the API helper'
+grep -Fq 'jv_backup_storage_apply_target' "${backup_storage}" || fail 'normal backup targets do not apply through the Agent'
+grep -Fq 'jv_backup_storage_apply_provision' "${backup_storage}" || fail 'destructive backup provisioning does not apply through the Agent'
+grep -Fq 'Type exactly:' "${backup_storage}" || fail 'destructive backup provisioning exact confirmation is missing'
+grep -Fq '/usr/libexec/justvoxel/mjust/backup-storage backup' "${storage_provision}" || fail 'configured backup storage menu does not delegate to the API frontend'
+grep -Fq '/usr/libexec/justvoxel/mjust/backup-storage "${mode}"' "${storage_provision}" || fail 'configured local backup provisioning does not delegate to the API frontend'
+grep -Fq '/usr/libexec/justvoxel/mjust/backup-storage network' "${storage_provision}" || fail 'configured network backup storage does not delegate to the API frontend'
+grep -Fq '/usr/libexec/justvoxel/mjust/backup-storage system' "${storage_provision}" || fail 'configured system backup storage does not delegate to the API frontend'
+grep -Fq 'migrate_data()' "${storage_provision}" || fail 'Minecraft data migration path was unexpectedly removed'
+grep -Fq 'registerAdminBackupStorageRoutes' "${admin_backup_storage}" || fail 'Management Agent backup storage routes are missing'
+grep -Fq 'registerAdminStorageProvisionRoutes' "${admin_storage_provision}" || fail 'Management Agent storage provisioning routes are missing'
+
+for forbidden in 'lsblk ' 'findmnt ' 'mount ' 'umount ' 'mkfs' 'parted ' 'wipefs ' 'write_main_config' 'render_runtime' 'systemctl ' '/etc/fstab' '/proc/'; do
+    if grep -Fq "${forbidden}" "${backup_storage}"; then
+        fail "mJust backup storage frontend still performs direct backend work: ${forbidden}"
+    fi
+done
+if grep -Fq 'Authorization:' "${backup_storage_api}"; then
+    fail 'mJust backup storage API helper must not introduce a bearer token'
+fi
+
+echo 'mJust Management API foundation, Players, Minecraft control, Status, Whitelist, Manual Backup, Logs, Configuration, and Backup Storage migration checks passed.'
