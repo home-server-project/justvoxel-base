@@ -11,6 +11,7 @@ service="${repo_root}/mjust/libexec/service"
 status="${repo_root}/mjust/libexec/status"
 whitelist="${repo_root}/mjust/libexec/whitelist"
 whitelist_backend="${repo_root}/mjust/libexec/whitelist-backend"
+backup="${repo_root}/mjust/libexec/backup"
 operator_surfaces="${repo_root}/management/cmd/justvoxel-management-agent/operator_surfaces.go"
 justfile="${repo_root}/mjust/justfile"
 
@@ -19,7 +20,7 @@ fail() {
     exit 1
 }
 
-for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${operator_surfaces}" "${justfile}"; do
+for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${operator_surfaces}" "${justfile}"; do
     [[ -f ${file} ]] || fail "missing mJust Management API file: ${file}"
 done
 
@@ -81,4 +82,12 @@ for forbidden in 'systemctl ' 'podman ' 'rcon-cli' 'source "${JV_LIBEXEC_DIR}/co
 done
 grep -Fq 'podman exec minecraft rcon-cli' "${whitelist_backend}" || fail 'whitelist backend lost authoritative RCON implementation'
 
-echo 'mJust Management API foundation, Players, Minecraft control, Status, and Whitelist migration checks passed.'
+grep -Fq '"${api_client}" POST /v1/backups/manual' "${backup}" || fail 'mJust manual backup does not use the Management API'
+grep -Fq 'sudo /usr/libexec/justvoxel/mjust/backup' "${justfile}" || fail 'mJust backup recipe does not use the API frontend'
+for forbidden in 'systemctl ' '/usr/libexec/justvoxel/minecraft-backup' 'flock ' 'tar '; do
+    if grep -Fq "${forbidden}" "${backup}"; then
+        fail "mJust backup frontend still performs direct backup work: ${forbidden}"
+    fi
+done
+
+echo 'mJust Management API foundation, Players, Minecraft control, Status, Whitelist, and Manual Backup migration checks passed.'
