@@ -1,11 +1,7 @@
 #!/usr/bin/bash
-set -Eeuo pipefail
-source /usr/libexec/justvoxel/mjust/common.sh
+set -euo pipefail
 source /usr/libexec/justvoxel/mjust/ui.sh
-source /usr/libexec/justvoxel/mjust/backup-common.sh
-source /usr/libexec/justvoxel/mjust/restore-common.sh
-require_root
-require_config
+source /usr/libexec/justvoxel/mjust/restore-api.sh
 
 mode="${1:-world}"
 case "${mode}" in
@@ -13,57 +9,55 @@ case "${mode}" in
     *) echo 'Usage: restore {world|full}' >&2; exit 2 ;;
 esac
 
+if (( EUID != 0 )); then
+    echo 'ERROR: this operation must run as root.' >&2
+    exit 1
+fi
 if ! jui_has_tty; then
     echo 'ERROR: restore is interactive and requires a controlling terminal.' >&2
     echo 'For SSH, allocate a terminal, for example: ssh -t <host> mjust restore' >&2
     exit 1
 fi
 
-jv_backup_load_config
-jv_backup_require_read_target
-
-configured_data_path="$(realpath -m -- "${DATA_PATH}")"
-if [[ ${minecraft_data_path} != "${configured_data_path}" ]]; then
-    echo 'ERROR: backup configuration and active Minecraft DATA_PATH do not match.' >&2
-    echo "Backup configuration: ${minecraft_data_path}" >&2
-    echo "Active DATA_PATH:     ${configured_data_path}" >&2
-    exit 1
+current="$(jv_restore_current_operation)" || exit 1
+if [[ $(jq -r '.operation != null' <<<"${current}") == true ]]; then
+    operation_id="$(jq -r '.operation.operation_id // empty' <<<"${current}")"
+    [[ -n ${operation_id} ]] || { echo 'ERROR: Management Agent returned an invalid current Restore operation.' >&2; exit 1; }
+    echo "Reconnecting to Restore operation ${operation_id}."
+    jv_restore_monitor_operation "${operation_id}"
+    exit $?
 fi
 
-/usr/libexec/justvoxel/mjust/validate-data-mount
-jv_restore_validate_data_layout "${configured_data_path}"
-
-data_parent="$(dirname -- "${configured_data_path}")"
-stale_transaction="$(find "${data_parent}" -maxdepth 1 -type d -name '.justvoxel-restore-*' -print -quit 2>/dev/null || true)"
-if [[ -n ${stale_transaction} ]]; then
-    echo 'ERROR: an earlier JustVoxel restore transaction still exists.' >&2
-    echo "Recovery state: ${stale_transaction}" >&2
-    echo 'Refusing to start another destructive restore until it is reviewed.' >&2
+backups="$(jv_restore_backups)" || exit 1
+if ! jq -e '.backups | type == "array"' <<<"${backups}" >/dev/null 2>&1; then
+    echo 'ERROR: Management Agent returned invalid Restore backup discovery data.' >&2
     exit 1
 fi
-
-mapfile -t backup_records < <(jv_restore_list_archives "${minecraft_backup_path}")
-if (( ${#backup_records[@]} == 0 )); then
-    echo "No completed JustVoxel Minecraft backups were found in: ${minecraft_backup_path}"
+backup_count="$(jq -r '.backups | length' <<<"${backups}")"
+if (( backup_count == 0 )); then
+    echo 'No completed JustVoxel Minecraft backups were found.'
     echo 'Nothing was changed.'
     exit 0
 fi
 
 choices=()
-archives=()
-epochs=()
-sizes=()
-for index in "${!backup_records[@]}"; do
-    IFS=$'\t' read -r epoch size path <<< "${backup_records[index]}"
-    epoch_int="${epoch%%.*}"
-    human_date="$(date -d "@${epoch_int}" '+%b %d, %Y  %H:%M' 2>/dev/null || printf '%s' "${epoch_int}")"
-    human_size="$(jv_restore_human_bytes "${size}")"
+backup_ids=()
+for (( index=0; index<backup_count; index++ )); do
+    backup_id="$(jq -r ".backups[${index}].id" <<<"${backups}")"
+    created_at="$(jq -r ".backups[${index}].created_at" <<<"${backups}")"
+    size_bytes="$(jq -r ".backups[${index}].size_bytes" <<<"${backups}")"
+    metadata_status="$(jq -r ".backups[${index}].metadata_status" <<<"${backups}")"
+    human_date="$(date -d "${created_at}" '+%b %d, %Y  %H:%M' 2>/dev/null || printf '%s' "${created_at}")"
+    human_size="$(numfmt --to=iec-i --suffix=B "${size_bytes}" 2>/dev/null || printf '%s bytes' "${size_bytes}")"
     newest=''
     (( index == 0 )) && newest='   newest'
-    choices+=("${human_date}   ${human_size}${newest}")
-    archives+=("${path}")
-    epochs+=("${epoch_int}")
-    sizes+=("${size}")
+    metadata_note=''
+    case "${metadata_status}" in
+        missing) metadata_note='   metadata unavailable' ;;
+        invalid) metadata_note='   metadata invalid' ;;
+    esac
+    choices+=("${human_date}   ${human_size}${newest}${metadata_note}   ${backup_id}")
+    backup_ids+=("${backup_id}")
 done
 
 if [[ ${mode} == world ]]; then
@@ -84,84 +78,32 @@ for index in "${!choices[@]}"; do
     fi
 done
 (( selected_index >= 0 )) || { echo 'ERROR: selected backup could not be resolved.' >&2; exit 1; }
+backup_id="${backup_ids[selected_index]}"
 
-selected_archive="${archives[selected_index]}"
-selected_epoch="${epochs[selected_index]}"
-selected_size="${sizes[selected_index]}"
-selected_date="$(date -d "@${selected_epoch}" '+%b %d, %Y at %H:%M' 2>/dev/null || printf '%s' "${selected_epoch}")"
-selected_identity="$(jv_restore_archive_identity "${selected_archive}")"
-
-printf 'Verifying selected backup: %s\n' "$(basename -- "${selected_archive}")"
-gzip -t -- "${selected_archive}" || {
-    echo 'ERROR: selected backup failed gzip integrity verification. Current Minecraft data was not touched.' >&2
+plan_request="$(jq -cn --arg backup_id "${backup_id}" --arg mode "${mode}" '{backup_id:$backup_id,mode:$mode}')"
+plan="$(jv_restore_plan "${plan_request}")" || exit 1
+if ! jq -e '.ok == true and (.plan_fingerprint | type == "string") and (.normalized | type == "object") and (.requirements | type == "object")' <<<"${plan}" >/dev/null 2>&1; then
+    jv_restore_api_error "${plan}" 'Restore planning returned invalid data.'
     exit 1
-}
-archive_info="$(/usr/libexec/justvoxel/mjust/restore-archive inspect "${selected_archive}")" || {
-    echo 'ERROR: selected backup failed archive safety validation. Current Minecraft data was not touched.' >&2
-    exit 1
-}
-
-if [[ ${mode} == world && $(jq -r '.primaryWorldPresent' <<< "${archive_info}") != true ]]; then
-    echo 'ERROR: selected backup does not contain its primary Minecraft world.' >&2
-    echo 'Current Minecraft data was not touched.' >&2
-    exit 1
-fi
-
-backup_version_mode='unknown'
-backup_version='unknown'
-metadata="${selected_archive}.meta.json"
-if [[ -f ${metadata} ]]; then
-    if jq -e '.schemaVersion == 1' "${metadata}" >/dev/null 2>&1; then
-        backup_version_mode="$(jq -r '.minecraft.versionMode // "unknown"' "${metadata}")"
-        backup_version="$(jq -r '.minecraft.configuredVersion // "unknown"' "${metadata}")"
-    else
-        echo "WARNING: backup metadata is invalid and will be ignored: $(basename -- "${metadata}")" >&2
-    fi
-fi
-
-relation="$(jv_restore_version_relation "${backup_version_mode}" "${backup_version}" "${MINECRAFT_VERSION_MODE}" "${MINECRAFT_VERSION}")"
-
-mapfile -t world_dirs < <(jq -r '.worldDirectories[]' <<< "${archive_info}")
-if [[ ${mode} == world ]]; then
-    for name in "${world_dirs[@]}"; do
-        if [[ -L ${configured_data_path}/${name} ]]; then
-            echo "ERROR: current world path is a symlink and cannot be swapped safely: ${name}" >&2
-            exit 1
-        fi
-    done
 fi
 
 echo
 echo 'Selected backup:'
-printf '  %s\n' "${selected_date}"
-printf '  Size: %s\n' "$(jv_restore_human_bytes "${selected_size}")"
-if [[ ${backup_version} != unknown ]]; then
-    printf '  Backup Minecraft version: %s (%s)\n' "${backup_version}" "${backup_version_mode}"
-else
-    echo '  Backup Minecraft version: Unknown (older backup or no metadata)'
-fi
-printf '  Current configured version: %s (%s)\n' "${MINECRAFT_VERSION}" "${MINECRAFT_VERSION_MODE}"
+printf '  %s\n' "$(jq -r '.normalized.created_at' <<<"${plan}")"
+size_bytes="$(jq -r '.normalized.size_bytes' <<<"${plan}")"
+printf '  Size: %s\n' "$(numfmt --to=iec-i --suffix=B "${size_bytes}" 2>/dev/null || printf '%s bytes' "${size_bytes}")"
+backup_version="$(jq -r '.normalized.metadata.minecraft.configured_version // "Unknown"' <<<"${plan}")"
+backup_version_mode="$(jq -r '.normalized.metadata.minecraft.version_mode // "unknown"' <<<"${plan}")"
+current_version="$(jq -r '.normalized.current.version' <<<"${plan}")"
+current_version_mode="$(jq -r '.normalized.current.version_mode' <<<"${plan}")"
+printf '  Backup Minecraft version: %s (%s)\n' "${backup_version}" "${backup_version_mode}"
+printf '  Current configured version: %s (%s)\n' "${current_version}" "${current_version_mode}"
 
-case "${relation}" in
-    backup_newer)
-        echo
-        echo 'ERROR: this backup was created for a newer pinned Minecraft version than the version currently configured.' >&2
-        echo 'Opening newer world data with an older Minecraft version is unsafe and can cause downgrade damage.' >&2
-        echo 'Configure the same or a newer Minecraft/Paper version first, then retry restore.' >&2
-        exit 1
-        ;;
-    backup_older)
-        echo
-        echo 'WARNING: this backup was created with an older Minecraft version.'
-        echo "The data will be restored, but Minecraft will still start using the currently configured version ${MINECRAFT_VERSION}."
-        echo 'Minecraft may upgrade the restored world data when it starts.'
-        ;;
-    unknown)
-        echo
-        echo 'Backup/current version safety cannot be compared exactly.'
-        echo 'Restore will keep the current JustVoxel Minecraft version policy unchanged.'
-        ;;
-esac
+if [[ $(jq -r '.warnings | length' <<<"${plan}") -gt 0 ]]; then
+    echo
+    echo 'Restore warnings:'
+    jq -r '.warnings[] | "  " + .message' <<<"${plan}"
+fi
 
 echo
 if [[ ${mode} == world ]]; then
@@ -173,11 +115,11 @@ world directories with the selected backup. Normal world-based player data
 (inventories, positions, advancements and statistics) rolls back with the world.
 
 Current plugins, plugin data stored outside the world directories,
-server.properties, whitelist/ops, JustVoxel configuration, Quadlet, container
-image/channel and bootc operating-system deployment stay unchanged.
+server.properties, whitelist/ops, JustVoxel configuration, container policy,
+Minecraft version policy and the operating-system deployment stay unchanged.
 
-The current world directories will be protected as a pre-restore safety copy
-until the restored server passes validation.
+The Management Agent will protect the current world data until the restored
+server passes runtime validation.
 TEXT
 else
     cat <<'TEXT'
@@ -187,37 +129,28 @@ This will replace the complete Minecraft persistent data directory with the
 selected backup, including worlds, normal player data, plugins, plugin data,
 server.properties, whitelist/ops and other Minecraft-side persistent files.
 
-JustVoxel system configuration, Quadlet, current container image/channel,
-Minecraft version policy and bootc operating-system deployment stay unchanged.
+JustVoxel system configuration, container policy, Minecraft version policy and
+the operating-system deployment stay unchanged.
 
-The current Minecraft data directory will be protected as a pre-restore safety
-copy until the restored server passes validation.
+The Management Agent will protect the current Minecraft data until the restored
+server passes runtime validation.
 TEXT
 fi
 
-players_override=no
-minecraft_stopped_by_restore=no
-query_players() {
-    podman exec minecraft rcon-cli 'list' 2>/dev/null || true
-}
-
-if systemctl is-active --quiet minecraft.service; then
+players_confirmed=false
+if [[ $(jq -r '.requirements.players_confirmation_required // false' <<<"${plan}") == true ]]; then
     echo
-    echo 'Checking players through RCON.'
-    initial_players="$(query_players)"
-    if [[ -z ${initial_players} ]]; then
-        echo 'ERROR: could not confirm player status. Current Minecraft data was left untouched.' >&2
-        exit 1
+    online="$(jq -r '.requirements.online // 0' <<<"${plan}")"
+    echo "Players currently online: ${online}"
+    if [[ $(jq -r '.requirements.players | length' <<<"${plan}") -gt 0 ]]; then
+        jq -r '.requirements.players[] | "  " + .' <<<"${plan}"
     fi
-    echo "${initial_players}"
-    if ! grep -q 'There are 0 of' <<< "${initial_players}"; then
-        echo 'Players are currently online. Restore will use the normal graceful shutdown path.'
-        if jui_confirm 'Continue preparing this restore?'; then
-            players_override=yes
-        else
-            echo 'Restore cancelled.'
-            exit 0
-        fi
+    echo 'Restore will use Minecraft graceful shutdown before changing live data.'
+    if jui_confirm 'Continue with this Restore even though players are online?'; then
+        players_confirmed=true
+    else
+        echo 'Restore cancelled.'
+        exit 0
     fi
 fi
 
@@ -229,236 +162,14 @@ if [[ ${confirmation} != RESTORE ]]; then
     exit 0
 fi
 
-exec 9>"${JV_MAINTENANCE_LOCK}"
-if ! flock -n 9; then
-    echo 'ERROR: another JustVoxel Minecraft maintenance operation is already running.' >&2
-    exit 1
-fi
+fingerprint="$(jq -r '.plan_fingerprint' <<<"${plan}")"
+apply_payload="$(jq -cn \
+    --arg fingerprint "${fingerprint}" \
+    --argjson request "${plan_request}" \
+    --argjson players_confirmed "${players_confirmed}" \
+    '{plan_fingerprint:$fingerprint,request:$request,destructive_confirmed:true,players_confirmed:$players_confirmed}')"
+apply="$(jv_restore_apply "${apply_payload}")" || exit 1
+operation_id="$(jq -r '.operation.operation_id // empty' <<<"${apply}")"
+[[ -n ${operation_id} ]] || { echo 'ERROR: Management Agent did not return a Restore operation id.' >&2; exit 1; }
 
-jv_backup_require_read_target
-[[ -f ${selected_archive} ]] || { echo 'ERROR: selected backup disappeared before restore.' >&2; exit 1; }
-current_identity="$(jv_restore_archive_identity "${selected_archive}")"
-if [[ ${current_identity} != "${selected_identity}" ]]; then
-    echo 'ERROR: selected backup changed after it was verified. Refusing restore.' >&2
-    exit 1
-fi
-gzip -t -- "${selected_archive}"
-archive_info_locked="$(/usr/libexec/justvoxel/mjust/restore-archive inspect "${selected_archive}")"
-if [[ ${archive_info_locked} != "${archive_info}" ]]; then
-    echo 'ERROR: selected backup contents changed after verification. Refusing restore.' >&2
-    exit 1
-fi
-
-transaction="${data_parent}/.justvoxel-restore-$(date +%Y%m%d-%H%M%S)-$$"
-install -d -m0700 -o root -g root "${transaction}"
-jv_restore_write_state "${transaction}" preparing "${mode}" "${selected_archive}"
-
-validated=no
-live_modified=no
-declare -A world_original_moved=()
-declare -A world_restored_activated=()
-
-rollback_restore() {
-    local rollback_ok=yes name
-    echo
-    echo 'Restore did not validate. Attempting automatic rollback to the pre-restore state.' >&2
-    jv_restore_write_state "${transaction}" rollback "${mode}" "${selected_archive}" || true
-
-    if systemctl is-active --quiet minecraft.service 2>/dev/null; then
-        systemctl stop minecraft.service || rollback_ok=no
-    fi
-
-    if [[ ${mode} == full ]]; then
-        if [[ -e ${configured_data_path} ]]; then
-            if [[ -e ${transaction}/failed-restored ]]; then
-                rollback_ok=no
-            else
-                mv -- "${configured_data_path}" "${transaction}/failed-restored" || rollback_ok=no
-            fi
-        fi
-        if [[ -e ${transaction}/pre-restore && ! -e ${configured_data_path} ]]; then
-            mv -- "${transaction}/pre-restore" "${configured_data_path}" || rollback_ok=no
-        elif [[ ! -e ${configured_data_path} ]]; then
-            rollback_ok=no
-        fi
-    else
-        install -d -m0700 -o root -g root "${transaction}/failed-restored" || rollback_ok=no
-        for name in "${world_dirs[@]}"; do
-            if [[ ${world_restored_activated[${name}]:-no} == yes && -e ${configured_data_path}/${name} ]]; then
-                mv -- "${configured_data_path}/${name}" "${transaction}/failed-restored/${name}" || rollback_ok=no
-            fi
-            if [[ ${world_original_moved[${name}]:-no} == yes && -e ${transaction}/pre-restore/${name} ]]; then
-                mv -- "${transaction}/pre-restore/${name}" "${configured_data_path}/${name}" || rollback_ok=no
-            fi
-        done
-    fi
-
-    restorecon -RF "${configured_data_path}" >/dev/null 2>&1 || true
-
-    if [[ ${rollback_ok} == yes ]]; then
-        if systemctl start minecraft.service \
-            && /usr/libexec/justvoxel/mjust/restore-runtime-validate; then
-            live_modified=no
-            jv_restore_write_state "${transaction}" rolled-back "${mode}" "${selected_archive}" || true
-            echo 'The original Minecraft data was restored and validated successfully.' >&2
-            echo "Failed restored data was preserved under: ${transaction}/failed-restored" >&2
-            echo "Selected backup was not modified: ${selected_archive}" >&2
-            return 0
-        fi
-    fi
-
-    echo 'CRITICAL: automatic rollback could not be fully validated.' >&2
-    echo "Recovery transaction was preserved at: ${transaction}" >&2
-    echo "Selected backup was not modified: ${selected_archive}" >&2
-    return 1
-}
-
-on_exit() {
-    local rc=$?
-    trap - EXIT
-    if (( rc != 0 )); then
-        if [[ ${live_modified} == yes && ${validated} != yes ]]; then
-            rollback_restore || true
-        elif [[ ${validated} != yes && -n ${transaction:-} && -d ${transaction} ]]; then
-            rm -rf -- "${transaction}" || true
-            if [[ ${minecraft_stopped_by_restore:-no} == yes ]] && ! systemctl is-active --quiet minecraft.service 2>/dev/null; then
-                echo 'Restore failed before live data changed; restarting the previously running Minecraft server.' >&2
-                systemctl start minecraft.service || true
-            fi
-        fi
-    fi
-    exit "${rc}"
-}
-trap on_exit EXIT
-
-if [[ ${mode} == full ]]; then
-    staging_bytes="$(jq -r '.totalBytes' <<< "${archive_info}")"
-    extract_action=extract-full
-else
-    staging_bytes="$(jq -r '.worldBytes' <<< "${archive_info}")"
-    extract_action=extract-world
-fi
-[[ ${staging_bytes} =~ ^[0-9]+$ ]] || { echo 'ERROR: invalid restore size from archive inspection.' >&2; exit 1; }
-jv_restore_require_space "${data_parent}" "${staging_bytes}"
-
-echo
-echo 'Preparing verified restore data in staging. Minecraft continues running during this step.'
-staging="${transaction}/staging"
-/usr/libexec/justvoxel/mjust/restore-archive "${extract_action}" "${selected_archive}" "${staging}" >/dev/null
-if [[ $(jv_restore_archive_identity "${selected_archive}") != "${selected_identity}" ]]; then
-    echo 'ERROR: selected backup changed while restore staging was being prepared.' >&2
-    exit 1
-fi
-
-archive_root="$(jq -r '.root' <<< "${archive_info}")"
-staged_root="${staging}/${archive_root}"
-[[ -d ${staged_root} ]] || { echo 'ERROR: restore staging root is missing after extraction.' >&2; exit 1; }
-jv_restore_write_state "${transaction}" prepared "${mode}" "${selected_archive}"
-
-if systemctl is-active --quiet minecraft.service; then
-    echo 'Final player check immediately before the graceful stop.'
-    final_players="$(query_players)"
-    if [[ -z ${final_players} ]]; then
-        echo 'ERROR: player state became unknown. Restore cancelled before live data was touched.' >&2
-        exit 1
-    fi
-    echo "${final_players}"
-    if ! grep -q 'There are 0 of' <<< "${final_players}" && [[ ${players_override} != yes ]]; then
-        echo 'A player joined after restore staging was prepared.'
-        if ! jui_confirm 'Continue with the normal graceful shutdown and restore?'; then
-            echo 'Restore cancelled before live data was touched.'
-            exit 0
-        fi
-    fi
-
-    echo 'Stopping Minecraft through its configured graceful shutdown path.'
-    systemctl stop minecraft.service
-    minecraft_stopped_by_restore=yes
-    if systemctl is-active --quiet minecraft.service; then
-        echo 'ERROR: Minecraft is still running. Restore will not touch live data.' >&2
-        exit 1
-    fi
-fi
-
-/usr/libexec/justvoxel/mjust/validate-data-mount
-jv_restore_write_state "${transaction}" switching "${mode}" "${selected_archive}"
-
-if [[ ${mode} == full ]]; then
-    live_modified=yes
-    mv -- "${configured_data_path}" "${transaction}/pre-restore"
-    mv -- "${staged_root}" "${configured_data_path}"
-else
-    install -d -m0700 -o root -g root "${transaction}/pre-restore"
-    live_modified=yes
-    for name in "${world_dirs[@]}"; do
-        if [[ -e ${configured_data_path}/${name} ]]; then
-            mv -- "${configured_data_path}/${name}" "${transaction}/pre-restore/${name}"
-            world_original_moved["${name}"]=yes
-        fi
-    done
-    for name in "${world_dirs[@]}"; do
-        if [[ -e ${staged_root}/${name} ]]; then
-            mv -- "${staged_root}/${name}" "${configured_data_path}/${name}"
-            world_restored_activated["${name}"]=yes
-        fi
-    done
-fi
-
-jv_restore_write_state "${transaction}" restored-active "${mode}" "${selected_archive}"
-
-if [[ ${mode} == full ]]; then
-    chown -R "${MINECRAFT_UID}:${MINECRAFT_GID}" "${configured_data_path}"
-else
-    for name in "${world_dirs[@]}"; do
-        if [[ -e ${configured_data_path}/${name} ]]; then
-            chown -R "${MINECRAFT_UID}:${MINECRAFT_GID}" "${configured_data_path}/${name}"
-        fi
-    done
-fi
-apply_data_selinux
-/usr/libexec/justvoxel/mjust/validate-data-mount
-
-echo 'Starting restored Minecraft data.'
-systemctl start minecraft.service
-jv_restore_write_state "${transaction}" validating "${mode}" "${selected_archive}"
-/usr/libexec/justvoxel/mjust/restore-runtime-validate
-
-validated=yes
-jv_restore_write_state "${transaction}" validated "${mode}" "${selected_archive}"
-
-if ! rm -rf -- "${transaction}"; then
-    echo 'ERROR: restored Minecraft is healthy, but restore cleanup is incomplete.' >&2
-    echo "Recovery/safety state remains under: ${transaction}" >&2
-    echo 'The healthy restored server was NOT rolled back.' >&2
-    exit 1
-fi
-
-trap - EXIT
-live_modified=no
-
-players_summary="$(podman exec minecraft rcon-cli 'list' 2>/dev/null || true)"
-version_summary="$(podman exec minecraft rcon-cli 'version' 2>/dev/null | head -n1 || true)"
-host_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i == "src") {print $(i+1); exit}}')"
-[[ -n ${host_ip} ]] || host_ip='Unknown'
-
-echo
-echo 'Restore completed successfully.'
-echo
-echo 'Restored backup:'
-printf '  %s\n' "${selected_date}"
-if [[ ${mode} == world ]]; then
-    echo '  Scope: primary world + standard Nether/End world data'
-else
-    echo '  Scope: complete Minecraft persistent data'
-fi
-echo
-echo 'Minecraft:'
-echo '  Running'
-printf '  Players: %s\n' "${players_summary:-Unknown}"
-printf '  Version: %s\n' "${version_summary:-Unknown}"
-printf '  Java: %s:%s\n' "${host_ip}" "${JAVA_PORT}"
-if [[ ${BEDROCK_ENABLED} == yes ]]; then
-    printf '  Bedrock: %s:%s\n' "${host_ip}" "${BEDROCK_PORT}"
-fi
-echo
-echo "Selected backup remains unchanged: ${selected_archive}"
+jv_restore_monitor_operation "${operation_id}"

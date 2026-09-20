@@ -114,22 +114,50 @@ for text in \
 done
 
 restore="${repo_root}/mjust/libexec/restore"
+restore_api="${repo_root}/mjust/libexec/restore-api.sh"
 backup="${repo_root}/runtime/minecraft-backup"
 menu="${repo_root}/mjust/libexec/menu"
 justfile="${repo_root}/mjust/justfile"
 
 for text in \
-    'Type RESTORE to continue:' \
-    'JV_MAINTENANCE_LOCK' \
-    'pre-restore' \
-    'failed-restored' \
-    'rollback_restore' \
-    'restore-runtime-validate' \
-    'jv_backup_require_read_target' \
-    'gzip -t' \
-    'apply_data_selinux'; do
-    grep -Fq "${text}" "${restore}" || fail "restore safety behavior missing: ${text}"
+    'restore-api.sh' \
+    'jv_restore_current_operation' \
+    'jv_restore_backups' \
+    'jv_restore_plan' \
+    'jv_restore_apply' \
+    'jv_restore_monitor_operation' \
+    '.requirements.players_confirmation_required' \
+    'Type RESTORE to continue:'; do
+    grep -Fq "${text}" "${restore}" || fail "mJust Restore API frontend behavior missing: ${text}"
 done
+
+grep -Fq 'jv_restore_get /v1/admin/restore/backups' "${restore_api}" || fail 'Restore frontend does not discover backups through the Management API'
+grep -Fq 'jv_restore_get /v1/admin/restore/current-operation' "${restore_api}" || fail 'Restore frontend cannot reconnect through the Management API'
+grep -Fq 'jv_restore_post /v1/admin/restore/plan' "${restore_api}" || fail 'Restore frontend does not plan through the Management API'
+grep -Fq 'jv_restore_post /v1/admin/restore/apply' "${restore_api}" || fail 'Restore frontend does not apply through the Management API'
+grep -Fq 'jv_restore_get "/v1/admin/operations/${id}"' "${restore_api}" || fail 'Restore frontend does not monitor persistent operations through the Management API'
+
+for forbidden in \
+    'JV_MAINTENANCE_LOCK' \
+    'jv_backup_require_read_target' \
+    'jv_restore_archive_identity' \
+    'gzip -t' \
+    'restore-archive' \
+    'restore-runtime-validate' \
+    'validate-data-mount' \
+    'apply_data_selinux' \
+    'systemctl ' \
+    'podman ' \
+    'rcon-cli' \
+    'chown ' \
+    'restorecon '; do
+    if grep -Fq "${forbidden}" "${restore}"; then
+        fail "mJust Restore frontend still performs direct backend/safety work: ${forbidden}"
+    fi
+done
+if grep -Fq 'Authorization:' "${restore_api}"; then
+    fail 'mJust Restore API helper must not introduce a bearer token'
+fi
 
 grep -Fq 'restore world' "${justfile}" || fail 'mjust restore world recipe missing'
 grep -Fq 'restore full' "${justfile}" || fail 'mjust restore-full recipe missing'
@@ -143,7 +171,7 @@ grep -Fq 'jv_backup_write_metadata' "${backup}" || fail 'backup metadata writer 
 grep -Fq 'rm -f -- "${minecraft_archives[index]}.meta.json"' "${backup}" || fail 'retention does not remove matching metadata sidecars'
 
 if grep -Eq '/etc/containers/systemd/minecraft\.container.*(cp|mv|tar)|bootc rollback' "${restore}"; then
-    fail 'Minecraft restore must not restore Quadlet or bootc deployment'
+    fail 'Minecraft Restore frontend must not restore Quadlet or bootc deployment'
 fi
 
 echo 'restore workflow regression tests passed.'
