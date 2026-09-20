@@ -182,9 +182,9 @@ The current system-management commands are:
 
 Checking or downloading a bootc OS update does not stop Minecraft, create a backup, or reboot the appliance. The staged deployment is used on the next normal reboot.
 
-Reboot and poweroff use the same player-awareness policy as other disruptive Minecraft operations.
+Reboot, poweroff, and firmware reboot are thin frontends over the Management API. The Management Agent owns host capability checks, player-aware Minecraft shutdown, and the final system action, allowing the future WebUI to use the same implementation.
 
-`mjust firmware` is available only when the running system supports the physical-hardware firmware workflow and refuses unsupported/VM use.
+`mjust firmware` is available only when the Agent reports that the running HWE system supports the physical-hardware firmware workflow and refuses unsupported/VM use.
 
 A JustVoxel-aware bootc rollback workflow is not implemented. It remains a future roadmap item; see `ROADMAP.md`.
 
