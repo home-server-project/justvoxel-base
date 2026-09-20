@@ -22,7 +22,7 @@ transport_files=(
 transport_text="$(cat "${transport_files[@]}")"
 common="${repo_root}/mjust/libexec/common.sh"
 migration_common="${repo_root}/mjust/libexec/migration-common.sh"
-validate="${repo_root}/mjust/libexec/validate"
+validate_backend="${repo_root}/mjust/libexec/validate-backend"
 template="${repo_root}/templates/config/minecraft.env.in"
 menu="${repo_root}/mjust/libexec/menu"
 justfile="${repo_root}/mjust/justfile"
@@ -71,10 +71,10 @@ grep -Fq '/usr/libexec/justvoxel/mjust/restore-runtime-validate' "${recovery}" |
 grep -Fq 'FINALIZE ROLLBACK' "${recovery}" || fail 'migration recovery destructive confirmation missing'
 grep -Fq 'rm -rf -- "${transaction}"' "${recovery}" || fail 'migration recovery finalization cleanup missing'
 
-grep -Fq "warn '/dev/zram0 is not available" "${validate}" || fail 'missing advisory zram-disabled validation path'
-grep -Fq "warn 'zram0 is not active as swap" "${validate}" || fail 'missing advisory zram-inactive validation path'
-if grep -Fq "fail '/dev/zram0 is not available" "${validate}"; then fail 'zram absence must not be a fatal appliance validation failure'; fi
-if grep -Fq "fail 'zram0 is not active as swap" "${validate}"; then fail 'zram inactivity must not be a fatal appliance validation failure'; fi
+grep -Fq "warn '/dev/zram0 is not available" "${validate_backend}" || fail 'missing advisory zram-disabled validation path'
+grep -Fq "warn 'zram0 is not active as swap" "${validate_backend}" || fail 'missing advisory zram-inactive validation path'
+if grep -Fq "fail '/dev/zram0 is not available" "${validate_backend}"; then fail 'zram absence must not be a fatal appliance validation failure'; fi
+if grep -Fq "fail 'zram0 is not active as swap" "${validate_backend}"; then fail 'zram inactivity must not be a fatal appliance validation failure'; fi
 
 grep -Fq 'Migration' "${menu}" || fail 'Migration TUI missing'
 grep -Fq 'Import existing Minecraft server' "${menu}" || fail 'fresh-appliance import entry missing'
