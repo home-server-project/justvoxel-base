@@ -139,7 +139,7 @@ func TestSetupReviewExplainsDisabledBedrockCompatibility(t *testing.T) {
 	client.plan.Normalized.Minecraft.Version = "26.3"
 	client.plan.Warnings = append(client.plan.Warnings, api.AdminSetupPlanWarning{
 		Code:    "bedrock_version_unsupported",
-		Message: "Bedrock cross-play was turned off because Geyser/Floodgate currently supports Minecraft 26.2, while this setup uses 26.3. Java server setup can continue. Come back later and enable Bedrock cross-play after Geyser/Floodgate adds support for this Minecraft version.",
+		Message: "Bedrock cross-play was turned off because Geyser/Floodgate currently supports Minecraft 26.2, while this setup uses 26.3. Geyser/Floodgate will not be installed, and Java server setup can continue. Come back later and check again after Geyser/Floodgate adds support for this Minecraft version.",
 	})
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
 	if err != nil {
@@ -154,7 +154,7 @@ func TestSetupReviewExplainsDisabledBedrockCompatibility(t *testing.T) {
 		t.Fatalf("review returned %d: %s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"Bedrock cross-play</dt><dd>Disabled", "Bedrock cross-play unavailable", "currently supports Minecraft 26.2", "Come back later and enable Bedrock cross-play"} {
+	for _, want := range []string{"Bedrock cross-play</dt><dd>Disabled", "Bedrock cross-play unavailable", "currently supports Minecraft 26.2", "Come back later and check again"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("Bedrock compatibility review missing %q: %s", want, body)
 		}
