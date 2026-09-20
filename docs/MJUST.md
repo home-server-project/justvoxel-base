@@ -74,7 +74,9 @@ The normal commands are:
 
 Stop and restart are player-aware. When Minecraft is running, JustVoxel checks players through internal RCON before interruption. If player state cannot be confirmed, the operation fails closed instead of guessing.
 
-When players are online, the user must explicitly approve the interruption. JustVoxel then uses the configured graceful Minecraft shutdown path.
+When no players are online, JustVoxel skips the container's fixed 60-second announcement delay and completes the graceful stop immediately. When players are online and the interruption is approved, JustVoxel keeps the 60-second grace period and sends in-game countdown notices at 60, 30, 15, 10, 5, 4, 3, 2, and 1 seconds before shutdown.
+
+The same adaptive shutdown path is reused by host reboot/poweroff and disruptive Minecraft maintenance so those workflows do not independently implement player timing.
 
 ## Players and whitelist
 

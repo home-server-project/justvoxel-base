@@ -37,6 +37,10 @@ grep -Fq '/v1/minecraft/' "${service}" || fail 'Minecraft service control must u
 if grep -Eq 'systemctl |podman |rcon-cli|jv_player_check_before_interrupt' "${service}"; then
     fail 'Minecraft service frontend must not perform direct system or player-safety operations'
 fi
+grep -Fq 'jv_stop_minecraft_adaptive' "${repo_root}/mjust/libexec/web-status-json" || fail 'Minecraft API backend does not use adaptive shutdown'
+grep -Fq 'jv_stop_minecraft_adaptive' "${repo_root}/runtime/minecraft-backup" || fail 'cold backup does not use adaptive shutdown'
+grep -Fq '/usr/libexec/justvoxel/mjust/service stop' "${repo_root}/mjust/libexec/start-over" || fail 'Start Over does not use the shared Minecraft stop path'
+grep -Fq 'jv_stop_minecraft_for_system_action' "${power}" || fail 'system power actions must use the shared adaptive Minecraft shutdown path'
 grep -Fq 'systemctl reboot' "${power}" || fail 'reboot action missing'
 grep -Fq 'systemctl poweroff' "${power}" || fail 'poweroff action missing'
 grep -Fq 'systemctl reboot --firmware-setup' "${firmware}" || fail 'firmware reboot action missing'
@@ -44,8 +48,8 @@ grep -Fq 'Firmware setup is available on JustVoxel HWE only.' "${firmware}" || f
 grep -Fq 'jv_variant_is_hwe' "${firmware}" || fail 'firmware must use canonical HWE detection'
 grep -Fq 'jv_variant_is_hwe' "${menu}" || fail 'System menu must use canonical HWE detection'
 
-# Direct recipes remain authoritative even though the normal menu presents one
-# combined user workflow for OS status and updates.
+# Direct recipes remain supported entry points even though the normal menu
+# presents one combined user workflow for OS status and updates.
 for recipe in os-status os-update reboot poweroff firmware password-reset; do
     grep -Fq "${recipe}:" "${justfile}" || fail "missing recipe: ${recipe}"
 done
