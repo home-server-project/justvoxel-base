@@ -20,7 +20,7 @@ grep -Fq 'web_action' "${helper}"
 grep -Fq -- '--confirm-players' "${helper}"
 grep -Fq "printf '%s\\n'" "${helper}"
 grep -Fq 'systemctl --no-block start minecraft.service' "${helper}"
-grep -Fq 'systemctl --no-block "${action}" minecraft.service' "${helper}"
+grep -Fq 'jv_stop_minecraft_adaptive "${action^} Minecraft"' "${helper}"
 
 grep -Fq 'NoNewPrivileges=no' "${management_unit}"
 if grep -Fq 'NoNewPrivileges=yes' "${management_unit}"; then
@@ -37,6 +37,13 @@ grep -Fq 'JV_INTERRUPT_CONFIRMATION_MODE:-interactive' "${interrupt}"
 grep -Fq 'required)' "${interrupt}"
 grep -Fq 'return 10' "${interrupt}"
 grep -Fq 'confirmed)' "${interrupt}"
+grep -Fq 'podman kill --signal SIGUSR1 minecraft' "${interrupt}"
+grep -Fq 'for next in 30 15 10 5 4 3 2 1' "${interrupt}"
+grep -Fq 'jv_minecraft_announce_shutdown' "${interrupt}"
+grep -Fq 'jv_wait_minecraft_stopped' "${interrupt}"
+grep -Fq 'jv_stop_minecraft_adaptive' "${interrupt}"
+grep -Fq '180*time.Second' "${agent_control}"
+grep -Fq 'STOP_SERVER_ANNOUNCE_DELAY=60' templates/config/minecraft.env.in
 
 grep -Fq 'registerMinecraftRoutes(mux, s)' "${agent}"
 grep -Fq 'GET /v1/players' "${agent_control}"

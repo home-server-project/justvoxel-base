@@ -125,7 +125,7 @@ web_action() {
             fi
 
             set +e
-            safety_output="$(JV_INTERRUPT_CONFIRMATION_MODE="${mode}" jv_player_check_before_interrupt "${action^} Minecraft" 2>/dev/null)"
+            safety_output="$(JV_INTERRUPT_CONFIRMATION_MODE="${mode}" jv_stop_minecraft_adaptive "${action^} Minecraft" 2>/dev/null)"
             rc=$?
             set -e
             case "${rc}" in
@@ -136,26 +136,26 @@ web_action() {
                     return 10
                     ;;
                 1)
-                    jq -n --arg action "${action}" --arg reason player_status_unavailable --arg message 'Could not confirm player status through RCON. Minecraft was not interrupted.' \
+                    jq -n --arg action "${action}" --arg reason player_status_unavailable --arg message 'Could not safely stop Minecraft after checking player state.' \
                         '{ok:false,action:$action,reason:$reason,message:$message}'
                     return 3
                     ;;
                 *)
-                    jq -n --arg action "${action}" --arg reason operation_failed --arg message 'Minecraft safety check failed.' \
+                    jq -n --arg action "${action}" --arg reason operation_failed --arg message 'Minecraft adaptive shutdown failed.' \
                         '{ok:false,action:$action,reason:$reason,message:$message}'
                     return 4
                     ;;
             esac
 
-            if ! systemctl --no-block "${action}" minecraft.service; then
-                jq -n --arg action "${action}" --arg reason operation_failed --arg message "Minecraft ${action} failed." \
-                    '{ok:false,action:$action,reason:$reason,message:$message}'
-                return 4
-            fi
-            if [[ ${action} == stop ]]; then
-                message='Minecraft stop requested.'
+            if [[ ${action} == restart ]]; then
+                if ! systemctl --no-block start minecraft.service; then
+                    jq -n --arg action "${action}" --arg reason operation_failed --arg message 'Minecraft stopped but could not be restarted.' \
+                        '{ok:false,action:$action,reason:$reason,message:$message}'
+                    return 4
+                fi
+                message='Minecraft restart requested after graceful shutdown.'
             else
-                message='Minecraft restart requested.'
+                message='Minecraft stopped gracefully.'
             fi
             jq -n --arg action "${action}" --arg message "${message}" \
                 '{ok:true,action:$action,message:$message}'
