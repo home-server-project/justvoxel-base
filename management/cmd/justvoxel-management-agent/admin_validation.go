@@ -14,6 +14,10 @@ var runAdminValidationHelper = func(ctx context.Context) ([]byte, error) {
 	return exec.CommandContext(ctx, adminValidationHelper).CombinedOutput()
 }
 
+type validationExitCoder interface {
+	ExitCode() int
+}
+
 type adminValidationResponse struct {
 	OK       bool   `json:"ok"`
 	Output   string `json:"output"`
@@ -39,7 +43,7 @@ func (s *server) adminValidation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var exitErr *exec.ExitError
+	var exitErr validationExitCoder
 	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
 		writeJSON(w, http.StatusOK, adminValidationResponse{
 			OK: false, Output: string(output), ExitCode: 1,
