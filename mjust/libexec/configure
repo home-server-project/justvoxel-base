@@ -1,159 +1,132 @@
 #!/usr/bin/bash
 set -euo pipefail
-source /usr/libexec/justvoxel/mjust/common.sh
 source /usr/libexec/justvoxel/mjust/ui.sh
-require_root
-require_config
+source /usr/libexec/justvoxel/mjust/configuration-api.sh
+
+if (( EUID != 0 )); then
+    echo 'ERROR: this operation must run as root.' >&2
+    exit 1
+fi
+
+configuration=''
+
+refresh_configuration() {
+    configuration="$(jv_config_get)"
+}
+
+base_payload() {
+    jv_config_payload <<<"${configuration}"
+}
+
+apply_and_refresh() {
+    local payload="$1"
+    jv_config_apply_payload "${payload}" || return 1
+    refresh_configuration
+}
 
 show_configuration() {
-    echo "Minecraft data: ${DATA_PATH}"
-    echo "Container image: $(minecraft_image_ref)"
-    echo "Minecraft version policy: ${MINECRAFT_VERSION_MODE} (${MINECRAFT_VERSION})"
-    echo "Java heap / maximum total Minecraft memory: ${JAVA_MEMORY} / ${CONTAINER_MEMORY}"
-    echo "Java port: ${JAVA_PORT}/tcp"
-    echo "Bedrock: ${BEDROCK_ENABLED} (${BEDROCK_PORT}/udp)"
-    echo "Backup type: ${BACKUP_TYPE}"
-    echo "Backup path: ${BACKUP_PATH}"
-    echo "Backup mount: ${BACKUP_MOUNT_POINT:-none}"
-    echo "Backup schedule: ${BACKUP_SCHEDULE}"
-    echo "Backup timer enabled: ${BACKUP_TIMER_ENABLED}"
-    echo "Maximum players: ${MAX_PLAYERS}"
-    echo "MOTD: ${MOTD}"
+    echo "Minecraft data: $(jq -r '.minecraft.data_path // "Unknown"' <<<"${configuration}")"
+    echo "Container image: docker.io/itzg/minecraft-server:$(jq -r '.minecraft.image_tag // "Unknown"' <<<"${configuration}")"
+    echo "Minecraft version policy: $(jq -r '.minecraft.version_mode // "Unknown"' <<<"${configuration}") ($(jq -r '.minecraft.version // "Unknown"' <<<"${configuration}"))"
+    echo "Java heap / maximum total Minecraft memory: $(jq -r '.minecraft.java_memory // "Unknown"' <<<"${configuration}") / $(jq -r '.minecraft.container_memory // "Unknown"' <<<"${configuration}")"
+    echo "Java port: $(jq -r '.minecraft.java_port // 0' <<<"${configuration}")/tcp"
+    echo "Bedrock: $(jq -r 'if .minecraft.bedrock_enabled then "yes" else "no" end' <<<"${configuration}") ($(jq -r '.minecraft.bedrock_port // 0' <<<"${configuration}")/udp)"
+    echo "Backup type: $(jq -r '.backup.type // "Unknown"' <<<"${configuration}")"
+    echo "Backup path: $(jq -r '.backup.path // "Unknown"' <<<"${configuration}")"
+    echo "Backup mount: $(jq -r 'if (.backup.mount_point // "") == "" then "none" else .backup.mount_point end' <<<"${configuration}")"
+    echo "Backup schedule: $(jq -r '.backup.schedule // "Unknown"' <<<"${configuration}")"
+    echo "Backup timer enabled: $(jq -r 'if .backup.timer_enabled then "yes" else "no" end' <<<"${configuration}")"
+    echo "Maximum players: $(jq -r '.minecraft.max_players // 0' <<<"${configuration}")"
+    echo "MOTD: $(jq -r '.minecraft.motd // ""' <<<"${configuration}")"
 }
 
 configure_memory() {
-    local new_java new_container
-    new_java="$(jui_input 'Minecraft Java heap' "${JAVA_MEMORY}")" || return 0
-    new_container="$(jui_input 'Maximum total Minecraft memory' "${CONTAINER_MEMORY}")" || return 0
-    validate_memory "${new_java}" && validate_memory "${new_container}" || {
-        echo 'ERROR: memory values must look like 4G or 4096M.' >&2
-        return 1
-    }
-    (( $(memory_to_mib "${new_container}") > $(memory_to_mib "${new_java}") )) || {
-        echo 'ERROR: maximum total Minecraft memory must be larger than the Java heap.' >&2
-        return 1
-    }
-    JAVA_MEMORY="${new_java}"
-    CONTAINER_MEMORY="${new_container}"
-    write_main_config
-    render_runtime
-    echo 'Memory configuration updated. Restart Minecraft when it is safe to apply it.'
+    local java_memory container_memory new_java new_container payload
+    java_memory="$(jq -r '.minecraft.java_memory' <<<"${configuration}")"
+    container_memory="$(jq -r '.minecraft.container_memory' <<<"${configuration}")"
+    new_java="$(jui_input 'Minecraft Java heap' "${java_memory}")" || return 0
+    new_container="$(jui_input 'Maximum total Minecraft memory' "${container_memory}")" || return 0
+    payload="$(base_payload | jq -c --arg java "${new_java}" --arg container "${new_container}" '.java_memory=$java | .container_memory=$container')"
+    apply_and_refresh "${payload}"
 }
 
 configure_ports() {
-    local old_java="${JAVA_PORT}" old_bedrock_enabled="${BEDROCK_ENABLED}" old_bedrock="${BEDROCK_PORT}"
-    local new_java new_bedrock
-    new_java="$(jui_input 'Java host TCP port' "${JAVA_PORT}")" || return 0
-    validate_port "${new_java}" || { echo 'ERROR: invalid Java port.' >&2; return 1; }
-    new_bedrock="${BEDROCK_PORT}"
-    if [[ ${BEDROCK_ENABLED} == yes ]]; then
-        new_bedrock="$(jui_input 'Bedrock host UDP port' "${BEDROCK_PORT}")" || return 0
-        validate_port "${new_bedrock}" || { echo 'ERROR: invalid Bedrock port.' >&2; return 1; }
+    local bedrock_enabled java_port bedrock_port new_java new_bedrock payload
+    bedrock_enabled="$(jq -r '.minecraft.bedrock_enabled' <<<"${configuration}")"
+    java_port="$(jq -r '.minecraft.java_port' <<<"${configuration}")"
+    bedrock_port="$(jq -r '.minecraft.bedrock_port' <<<"${configuration}")"
+    new_java="$(jui_input 'Java host TCP port' "${java_port}")" || return 0
+    new_bedrock="${bedrock_port}"
+    if [[ ${bedrock_enabled} == true ]]; then
+        new_bedrock="$(jui_input 'Bedrock host UDP port' "${bedrock_port}")" || return 0
     fi
-    JAVA_PORT="${new_java}"
-    BEDROCK_PORT="${new_bedrock}"
-    write_main_config
-    render_runtime
-    update_firewall_ports "${old_java}" "${old_bedrock_enabled}" "${old_bedrock}"
-    echo 'Port configuration updated. Restart Minecraft when it is safe to apply it.'
+    payload="$(base_payload | jq -c --argjson java "${new_java}" --argjson bedrock "${new_bedrock}" '.java_port=$java | .bedrock_port=$bedrock')"
+    apply_and_refresh "${payload}"
 }
 
 configure_bedrock() {
-    local choice state old_java="${JAVA_PORT}" old_bedrock_enabled="${BEDROCK_ENABLED}" old_bedrock="${BEDROCK_PORT}"
-    if [[ ${BEDROCK_ENABLED} == yes ]]; then state='enabled'; else state='disabled'; fi
-    choice="$(jui_choose "Bedrock cross-play - currently ${state}" \
-        "$([[ ${BEDROCK_ENABLED} == yes ]] && printf 'Disable Bedrock cross-play' || printf 'Enable Bedrock cross-play')" \
-        'Back')" || return 0
+    local enabled state choice port new_port payload
+    enabled="$(jq -r '.minecraft.bedrock_enabled' <<<"${configuration}")"
+    port="$(jq -r '.minecraft.bedrock_port' <<<"${configuration}")"
+    if [[ ${enabled} == true ]]; then state='enabled'; else state='disabled'; fi
+    choice="$(jui_choose "Bedrock cross-play - currently ${state}"         "$([[ ${enabled} == true ]] && printf 'Disable Bedrock cross-play' || printf 'Enable Bedrock cross-play')"         'Back')" || return 0
     [[ ${choice} != Back ]] || return 0
 
-    if [[ ${BEDROCK_ENABLED} == yes ]]; then
-        BEDROCK_ENABLED=no
+    if [[ ${enabled} == true ]]; then
+        payload="$(base_payload | jq -c '.bedrock_enabled=false')"
     else
-        BEDROCK_ENABLED=yes
-        BEDROCK_PORT="$(jui_input 'Bedrock host UDP port' "${BEDROCK_PORT}")" || return 0
-        validate_port "${BEDROCK_PORT}" || { echo 'ERROR: invalid Bedrock port.' >&2; return 1; }
+        new_port="$(jui_input 'Bedrock host UDP port' "${port}")" || return 0
+        payload="$(base_payload | jq -c --argjson port "${new_port}" '.bedrock_enabled=true | .bedrock_port=$port')"
     fi
-
-    write_main_config
-    render_runtime
-    update_firewall_ports "${old_java}" "${old_bedrock_enabled}" "${old_bedrock}"
-    echo "Bedrock cross-play is now ${BEDROCK_ENABLED}. Restart Minecraft when it is safe to apply it."
+    apply_and_refresh "${payload}"
 }
 
 configure_motd() {
-    local new_motd
-    new_motd="$(jui_input 'Server welcome message (MOTD)' "${MOTD}")" || return 0
-    validate_simple_text "${new_motd}" || { echo 'ERROR: MOTD must be one line.' >&2; return 1; }
-    MOTD="${new_motd}"
-    write_main_config
-    render_runtime
-    echo 'Server welcome message updated. Restart Minecraft when it is safe to apply it.'
+    local current new_motd payload
+    current="$(jq -r '.minecraft.motd' <<<"${configuration}")"
+    new_motd="$(jui_input 'Server welcome message (MOTD)' "${current}")" || return 0
+    payload="$(base_payload | jq -c --arg motd "${new_motd}" '.motd=$motd')"
+    apply_and_refresh "${payload}"
 }
 
 configure_backup_schedule() {
-    local new_schedule timer_choice new_timer
-    new_schedule="$(jui_input 'Backup systemd calendar schedule' "${BACKUP_SCHEDULE}")" || return 0
-    systemd-analyze calendar "${new_schedule}" >/dev/null 2>&1 || {
-        echo 'ERROR: invalid systemd calendar schedule.' >&2
-        return 1
-    }
-    timer_choice="$(jui_choose 'Scheduled backup timer' \
-        "Keep current: ${BACKUP_TIMER_ENABLED}" \
-        'Enable scheduled backups' \
-        'Disable scheduled backups' \
-        'Back')" || return 0
+    local schedule timer_enabled new_schedule timer_choice new_timer payload
+    schedule="$(jq -r '.backup.schedule' <<<"${configuration}")"
+    timer_enabled="$(jq -r '.backup.timer_enabled' <<<"${configuration}")"
+    new_schedule="$(jui_input 'Backup systemd calendar schedule' "${schedule}")" || return 0
+    timer_choice="$(jui_choose 'Scheduled backup timer'         "Keep current: $([[ ${timer_enabled} == true ]] && printf yes || printf no)"         'Enable scheduled backups'         'Disable scheduled backups'         'Back')" || return 0
     case "${timer_choice}" in
         'Back') return 0 ;;
-        'Enable scheduled backups') new_timer=yes ;;
-        'Disable scheduled backups') new_timer=no ;;
-        *) new_timer="${BACKUP_TIMER_ENABLED}" ;;
+        'Enable scheduled backups') new_timer=true ;;
+        'Disable scheduled backups') new_timer=false ;;
+        *) new_timer="${timer_enabled}" ;;
     esac
-    BACKUP_SCHEDULE="${new_schedule}"
-    BACKUP_TIMER_ENABLED="${new_timer}"
-    write_main_config
-    render_runtime
-    echo 'Backup timer configuration updated.'
+    payload="$(base_payload | jq -c --arg schedule "${new_schedule}" --argjson timer "${new_timer}" '.backup_schedule=$schedule | .backup_timer_enabled=$timer')"
+    apply_and_refresh "${payload}"
 }
 
 configure_image_version() {
-    local image_choice version_choice new_tag="${MINECRAFT_IMAGE_TAG}"
-    local new_mode="${MINECRAFT_VERSION_MODE}" new_version="${MINECRAFT_VERSION}" rc
+    local current_tag current_mode current_version image_choice version_choice new_tag new_mode new_version payload
+    current_tag="$(jq -r '.minecraft.image_tag' <<<"${configuration}")"
+    current_mode="$(jq -r '.minecraft.version_mode' <<<"${configuration}")"
+    current_version="$(jq -r '.minecraft.version' <<<"${configuration}")"
+    new_tag="${current_tag}"
+    new_mode="${current_mode}"
+    new_version="${current_version}"
 
-    image_choice="$(jui_choose 'Container image policy' \
-        "Keep current: ${MINECRAFT_IMAGE_TAG}" \
-        'latest - newest upstream main-branch image' \
-        'stable - newest released image' \
-        'custom / exact tag' \
-        'Back')" || return 0
+    image_choice="$(jui_choose 'Container image policy'         "Keep current: ${current_tag}"         'latest - newest upstream main-branch image'         'stable - newest released image'         'custom / exact tag'         'Back')" || return 0
     case "${image_choice}" in
         'Back') return 0 ;;
         'latest - newest upstream main-branch image') new_tag=latest ;;
         'stable - newest released image') new_tag=stable ;;
-        'custom / exact tag') new_tag="$(jui_input 'Container image tag' "${MINECRAFT_IMAGE_TAG}")" || return 0 ;;
+        'custom / exact tag') new_tag="$(jui_input 'Container image tag' "${current_tag}")" || return 0 ;;
     esac
 
-    validate_minecraft_image_tag "${new_tag}" || {
-        rc=$?
-        if (( rc == 2 )); then
-            echo "ERROR: upstream marks image tag '${new_tag}' deprecated." >&2
-        else
-            echo "ERROR: image tag '${new_tag}' could not be validated." >&2
-        fi
-        return 1
-    }
-
-    version_choice="$(jui_choose 'Minecraft version policy' \
-        "Keep current: ${MINECRAFT_VERSION_MODE} (${MINECRAFT_VERSION})" \
-        'Pin newest stable Paper-supported Minecraft version' \
-        'LATEST - resolve newest Minecraft/Paper release when Minecraft starts' \
-        'Pin another exact stable Paper-supported version' \
-        'Back')" || return 0
+    version_choice="$(jui_choose 'Minecraft version policy'         "Keep current: ${current_mode} (${current_version})"         'Pin newest stable Paper-supported Minecraft version'         'LATEST - resolve newest Minecraft/Paper release when Minecraft starts'         'Pin another exact stable Paper-supported version'         'Back')" || return 0
     case "${version_choice}" in
         'Back') return 0 ;;
         'Pin newest stable Paper-supported Minecraft version')
-            new_version="$(resolve_latest_stable_paper_version || true)"
-            [[ -n ${new_version} ]] || { echo 'ERROR: could not resolve a stable Paper version.' >&2; return 1; }
-            new_mode=pinned
+            new_mode=recommended
             ;;
         'LATEST - resolve newest Minecraft/Paper release when Minecraft starts')
             new_mode=latest
@@ -161,22 +134,16 @@ configure_image_version() {
             echo 'WARNING: the game/Paper version may update when Minecraft starts, even without pulling a newer Podman image.'
             ;;
         'Pin another exact stable Paper-supported version')
-            new_version="$(jui_input 'Exact Minecraft version')" || return 0
-            paper_version_has_stable_build "${new_version}" || {
-                echo 'ERROR: PaperMC did not confirm a stable build for that version.' >&2
-                return 1
-            }
             new_mode=pinned
+            new_version="$(jui_input 'Exact Minecraft version' "${current_version}")" || return 0
             ;;
     esac
 
-    MINECRAFT_IMAGE_TAG="${new_tag}"
-    MINECRAFT_VERSION_MODE="${new_mode}"
-    MINECRAFT_VERSION="${new_version}"
-    write_main_config
-    render_runtime
-    echo 'Version policy updated. Minecraft was not restarted automatically.'
+    payload="$(base_payload | jq -c --arg tag "${new_tag}" --arg policy "${new_mode}" --arg version "${new_version}" '.image_tag=$tag | .version_policy=$policy | .version=$version')"
+    apply_and_refresh "${payload}"
 }
+
+refresh_configuration
 
 case "${1:-menu}" in
     backup)
@@ -191,17 +158,7 @@ case "${1:-menu}" in
 esac
 
 while true; do
-    choice="$(jui_choose 'Safe configuration changes' \
-        'Show current configuration' \
-        'Change maximum players' \
-        'Change memory limits' \
-        'Change Java/Bedrock host ports' \
-        'Enable / disable Bedrock cross-play' \
-        'Change server welcome message (MOTD)' \
-        'Change backup schedule/timer' \
-        'Change storage / migrate Minecraft data' \
-        'Change container image or Minecraft version policy' \
-        'Back')" || exit 0
+    choice="$(jui_choose 'Safe configuration changes'         'Show current configuration'         'Change maximum players'         'Change memory limits'         'Change Java/Bedrock host ports'         'Enable / disable Bedrock cross-play'         'Change server welcome message (MOTD)'         'Change backup schedule/timer'         'Change storage / migrate Minecraft data'         'Change container image or Minecraft version policy'         'Back')" || exit 0
 
     case "${choice}" in
         'Show current configuration') show_configuration ;;
