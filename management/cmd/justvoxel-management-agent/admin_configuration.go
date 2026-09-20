@@ -11,21 +11,21 @@ import (
 )
 
 type adminConfigurationChangeRequest struct {
-	JavaMemory        string `json:"java_memory"`
-	ContainerMemory   string `json:"container_memory"`
-	JavaPort          int    `json:"java_port"`
-	BedrockEnabled    bool   `json:"bedrock_enabled"`
-	BedrockPort       int    `json:"bedrock_port"`
-	Timezone          string `json:"timezone"`
-	MaxPlayers        int    `json:"max_players"`
-	MOTD              string `json:"motd"`
-	ImageTag          string `json:"image_tag"`
-	VersionPolicy     string `json:"version_policy"`
-	Version           string `json:"version"`
-	BackupKeep        int    `json:"backup_keep"`
-	BackupSchedule    string `json:"backup_schedule"`
-	BackupTimerEnabled bool  `json:"backup_timer_enabled"`
-	ConfirmPlayers      bool  `json:"confirm_players"`
+	JavaMemory         string `json:"java_memory"`
+	ContainerMemory    string `json:"container_memory"`
+	JavaPort           int    `json:"java_port"`
+	BedrockEnabled     bool   `json:"bedrock_enabled"`
+	BedrockPort        int    `json:"bedrock_port"`
+	Timezone           string `json:"timezone"`
+	MaxPlayers         int    `json:"max_players"`
+	MOTD               string `json:"motd"`
+	ImageTag           string `json:"image_tag"`
+	VersionPolicy      string `json:"version_policy"`
+	Version            string `json:"version"`
+	BackupKeep         int    `json:"backup_keep"`
+	BackupSchedule     string `json:"backup_schedule"`
+	BackupTimerEnabled bool   `json:"backup_timer_enabled"`
+	ConfirmPlayers     bool   `json:"confirm_players"`
 }
 
 type adminConfigurationChange struct {
@@ -37,21 +37,21 @@ type adminConfigurationChange struct {
 }
 
 type adminConfigurationChangeResponse struct {
-	OK                 bool                        `json:"ok"`
-	Error              string                      `json:"error,omitempty"`
-	Changes            []adminConfigurationChange  `json:"changes"`
-	Warnings           []string                    `json:"warnings"`
-	RestartRequired    bool                        `json:"restart_required"`
+	OK                    bool                        `json:"ok"`
+	Error                 string                      `json:"error,omitempty"`
+	Changes               []adminConfigurationChange  `json:"changes"`
+	Warnings              []string                    `json:"warnings"`
+	RestartRequired       bool                        `json:"restart_required"`
 	MemoryRestartRequired bool                        `json:"memory_restart_required"`
-	MemoryRemainingMiB   int                         `json:"memory_remaining_mib"`
-	Proposed             adminConfigurationDiscovery `json:"proposed"`
-	Applied              bool                        `json:"applied"`
-	ConfirmationRequired bool                        `json:"confirmation_required"`
-	Online               int                         `json:"online"`
-	Players              []string                    `json:"players"`
-	Restarted            bool                        `json:"restarted"`
-	RestartDeferred      bool                        `json:"restart_deferred"`
-	Message              string                      `json:"message,omitempty"`
+	MemoryRemainingMiB    int                         `json:"memory_remaining_mib"`
+	Proposed              adminConfigurationDiscovery `json:"proposed"`
+	Applied               bool                        `json:"applied"`
+	ConfirmationRequired  bool                        `json:"confirmation_required"`
+	Online                int                         `json:"online"`
+	Players               []string                    `json:"players"`
+	Restarted             bool                        `json:"restarted"`
+	RestartDeferred       bool                        `json:"restart_deferred"`
+	Message               string                      `json:"message,omitempty"`
 }
 
 var runAdminConfigurationHelper = func(ctx context.Context, action string, request []byte) ([]byte, error) {
