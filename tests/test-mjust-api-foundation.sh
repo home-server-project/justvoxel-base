@@ -8,6 +8,7 @@ identity="${repo_root}/management/cmd/justvoxel-management-agent/identity.go"
 main="${repo_root}/management/cmd/justvoxel-management-agent/main.go"
 players="${repo_root}/mjust/libexec/players"
 service="${repo_root}/mjust/libexec/service"
+status="${repo_root}/mjust/libexec/status"
 justfile="${repo_root}/mjust/justfile"
 
 fail() {
@@ -15,7 +16,7 @@ fail() {
     exit 1
 }
 
-for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${justfile}"; do
+for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${justfile}"; do
     [[ -f ${file} ]] || fail "missing mJust Management API file: ${file}"
 done
 
@@ -55,4 +56,14 @@ for forbidden in 'systemctl ' 'podman ' 'rcon-cli' 'jv_player_check_before_inter
     fi
 done
 
-echo 'mJust Management API foundation, Players, and Minecraft control migration checks passed.'
+grep -Fq 'path=/v1/status' "${status}" || fail 'mJust status does not use the Management API'
+grep -Fq "path='/v1/status?details=1'" "${status}" || fail 'mJust detailed status does not use the Management API'
+grep -Fq 'sudo /usr/libexec/justvoxel/mjust/status' "${justfile}" || fail 'mJust status must enter the API path through sudo/root'
+grep -Fq 'r.URL.Query().Get("details") == "1"' "${main}" || fail 'Management API does not expose bounded detailed status'
+for forbidden in 'systemctl ' 'podman ' 'rcon-cli' 'findmnt ' 'df -' 'ip -4 ' 'resolvectl '; do
+    if grep -Fq "${forbidden}" "${status}"; then
+        fail "mJust status still performs direct system inspection: ${forbidden}"
+    fi
+done
+
+echo 'mJust Management API foundation, Players, Minecraft control, and Status migration checks passed.'
