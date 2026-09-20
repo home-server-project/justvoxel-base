@@ -390,10 +390,10 @@ esac
 if [[ ${requested_bedrock_enabled} == true ]]; then
     if [[ -z ${geyser_supported_version} || -z ${bedrock_compatibility_version} ]]; then
         bedrock_enabled=false
-        warnings="$(warning_add "${warnings}" bedrock_compatibility_unavailable 'Bedrock cross-play was turned off because JustVoxel could not confirm the current Geyser/Floodgate Minecraft compatibility. Java server setup can continue. Come back later and enable Bedrock cross-play after compatibility can be checked again.')"
+        warnings="$(warning_add "${warnings}" bedrock_compatibility_unavailable 'Bedrock cross-play was turned off because JustVoxel could not confirm the current Geyser/Floodgate Minecraft compatibility. Geyser/Floodgate will not be installed, and Java server setup can continue. Come back later and check again.')"
     elif ! bedrock_crossplay_supports_version "${bedrock_compatibility_version}" "${geyser_supported_version}"; then
         bedrock_enabled=false
-        warnings="$(warning_add "${warnings}" bedrock_version_unsupported "Bedrock cross-play was turned off because Geyser/Floodgate currently supports Minecraft ${geyser_supported_version}, while this setup uses ${bedrock_compatibility_version}. Java server setup can continue. Come back later and enable Bedrock cross-play after Geyser/Floodgate adds support for this Minecraft version.")"
+        warnings="$(warning_add "${warnings}" bedrock_version_unsupported "Bedrock cross-play was turned off because Geyser/Floodgate currently supports Minecraft ${geyser_supported_version}, while this setup uses ${bedrock_compatibility_version}. Geyser/Floodgate will not be installed, and Java server setup can continue. Come back later and check again after Geyser/Floodgate adds support for this Minecraft version.")"
     elif [[ ${version_policy} == latest ]]; then
         warnings="$(warning_add "${warnings}" bedrock_moving_version "Bedrock cross-play is compatible with Minecraft ${bedrock_compatibility_version} now, but Always newest can move to a newer Minecraft version before Geyser/Floodgate catches up.")"
     fi
