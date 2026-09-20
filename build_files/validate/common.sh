@@ -40,6 +40,11 @@ grep -Fqx 'auth       include      system-auth' /etc/pam.d/justvoxel
 grep -Fqx 'account    include      system-auth' /etc/pam.d/justvoxel
 grep -Fqx 'password   include      system-auth' /etc/pam.d/justvoxel
 
+test -f /etc/sudoers.d/justvoxel-pwfeedback
+test "$(stat -c '%a %U %G' /etc/sudoers.d/justvoxel-pwfeedback)" = '440 root root'
+grep -Fqx 'Defaults pwfeedback' /etc/sudoers.d/justvoxel-pwfeedback
+visudo -cf /etc/sudoers.d/justvoxel-pwfeedback >/dev/null
+
 test -x /usr/lib/systemd/system-generators/zram-generator
 test -f /etc/systemd/zram-generator.conf
 grep -Fqx '[zram0]' /etc/systemd/zram-generator.conf

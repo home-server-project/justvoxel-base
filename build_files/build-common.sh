@@ -7,6 +7,7 @@ source /ctx/build_files/packages.env
 : "${NETBIRD_PACKAGE:?NETBIRD_PACKAGE must be set}"
 
 cp -avf /ctx/system_files/. /
+install -m0440 /ctx/system_files/etc/sudoers.d/justvoxel-pwfeedback /etc/sudoers.d/justvoxel-pwfeedback
 
 if ! dnf repolist --enabled | grep -Eiq '(^|[[:space:]])crb([[:space:]]|$)'; then
     echo "ERROR: AlmaLinux CRB repository is not enabled."
