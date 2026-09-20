@@ -24,7 +24,7 @@ type AdminConfigurationChangeRequest struct {
 	BackupKeep         int    `json:"backup_keep"`
 	BackupSchedule     string `json:"backup_schedule"`
 	BackupTimerEnabled bool   `json:"backup_timer_enabled"`
-	ConfirmPlayers      bool   `json:"confirm_players"`
+	ConfirmPlayers     bool   `json:"confirm_players"`
 }
 
 type AdminConfigurationChange struct {
@@ -36,21 +36,21 @@ type AdminConfigurationChange struct {
 }
 
 type AdminConfigurationChangeResponse struct {
-	OK                 bool                        `json:"ok"`
-	Error              string                      `json:"error,omitempty"`
-	Changes            []AdminConfigurationChange  `json:"changes"`
-	Warnings           []string                    `json:"warnings"`
-	RestartRequired    bool                        `json:"restart_required"`
+	OK                    bool                        `json:"ok"`
+	Error                 string                      `json:"error,omitempty"`
+	Changes               []AdminConfigurationChange  `json:"changes"`
+	Warnings              []string                    `json:"warnings"`
+	RestartRequired       bool                        `json:"restart_required"`
 	MemoryRestartRequired bool                        `json:"memory_restart_required"`
-	MemoryRemainingMiB   int                         `json:"memory_remaining_mib"`
-	Proposed             AdminConfigurationDiscovery `json:"proposed"`
-	Applied              bool                        `json:"applied"`
-	ConfirmationRequired bool                        `json:"confirmation_required"`
-	Online               int                         `json:"online"`
-	Players              []string                    `json:"players"`
-	Restarted            bool                        `json:"restarted"`
-	RestartDeferred      bool                        `json:"restart_deferred"`
-	Message              string                      `json:"message,omitempty"`
+	MemoryRemainingMiB    int                         `json:"memory_remaining_mib"`
+	Proposed              AdminConfigurationDiscovery `json:"proposed"`
+	Applied               bool                        `json:"applied"`
+	ConfirmationRequired  bool                        `json:"confirmation_required"`
+	Online                int                         `json:"online"`
+	Players               []string                    `json:"players"`
+	Restarted             bool                        `json:"restarted"`
+	RestartDeferred       bool                        `json:"restart_deferred"`
+	Message               string                      `json:"message,omitempty"`
 }
 
 func (c *Client) AdminConfigurationPlan(ctx context.Context, session string, request AdminConfigurationChangeRequest) (AdminConfigurationChangeResponse, error) {
