@@ -57,12 +57,12 @@ choose_partition() {
 }
 
 partition_mount() {
-    local device="$1" mounted
+    local device="$1" default_mount="$2" mounted
     mounted="$(jq -r --arg device "${device}" '.devices[] | select(.path == $device) | (.mountpoints[0] // "")' <<<"${inventory}")"
     if [[ -n ${mounted} ]]; then
         printf '%s\n' "${mounted}"
     else
-        jui_input 'Mount point' '/var/mnt/justvoxel-data'
+        jui_input 'Mount point' "${default_mount}"
     fi
 }
 
@@ -112,7 +112,7 @@ case "${data_choice}" in
     *)
         storage_type=partition
         storage_device="$(choose_partition 'Minecraft data filesystem')" || exit 0
-        storage_mount="$(partition_mount "${storage_device}")" || exit 0
+        storage_mount="$(partition_mount "${storage_device}" '/var/mnt/justvoxel-data')" || exit 0
         storage_path="$(jui_input 'Minecraft data directory' "${storage_mount}/minecraft")" || exit 0
         ;;
 esac
@@ -128,7 +128,7 @@ case "${backup_choice}" in
     'Existing formatted local partition')
         backup_type=partition
         backup_device="$(choose_partition 'Backup filesystem')" || exit 0
-        backup_mount="$(partition_mount "${backup_device}")" || exit 0
+        backup_mount="$(partition_mount "${backup_device}" '/var/mnt/justvoxel-backup')" || exit 0
         backup_path="$(jui_input 'Backup directory' "${backup_mount}/backups")" || exit 0
         ;;
     'NFS network share')
