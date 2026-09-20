@@ -33,7 +33,10 @@ if grep -Eq '^ProtectSystem=(full|strict)$' "${management_unit}"; then
     fail 'management service must not make /etc read-only while PAM system password changes are supported'
 fi
 
-grep -Fq 'jv_player_check_before_interrupt' "${service}" || fail 'Minecraft service control does not share interruption safety'
+grep -Fq '/v1/minecraft/' "${service}" || fail 'Minecraft service control must use the Management API'
+if grep -Eq 'systemctl |podman |rcon-cli|jv_player_check_before_interrupt' "${service}"; then
+    fail 'Minecraft service frontend must not perform direct system or player-safety operations'
+fi
 grep -Fq 'systemctl reboot' "${power}" || fail 'reboot action missing'
 grep -Fq 'systemctl poweroff' "${power}" || fail 'poweroff action missing'
 grep -Fq 'systemctl reboot --firmware-setup' "${firmware}" || fail 'firmware reboot action missing'
