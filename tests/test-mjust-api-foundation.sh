@@ -7,6 +7,7 @@ authorization="${repo_root}/management/cmd/justvoxel-management-agent/authorizat
 identity="${repo_root}/management/cmd/justvoxel-management-agent/identity.go"
 main="${repo_root}/management/cmd/justvoxel-management-agent/main.go"
 players="${repo_root}/mjust/libexec/players"
+service="${repo_root}/mjust/libexec/service"
 justfile="${repo_root}/mjust/justfile"
 
 fail() {
@@ -14,7 +15,7 @@ fail() {
     exit 1
 }
 
-for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${justfile}"; do
+for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${justfile}"; do
     [[ -f ${file} ]] || fail "missing mJust Management API file: ${file}"
 done
 
@@ -40,4 +41,17 @@ for forbidden in 'systemctl ' 'podman ' 'rcon-cli'; do
     fi
 done
 
-echo 'mJust Management API foundation and Players migration checks passed.'
+for action in start stop restart; do
+    grep -Fq "POST \"/v1/minecraft/${action}\"" "${service}" || fail "mJust ${action} does not use the Management API"
+    grep -Fq "${action}:" "${justfile}" || fail "mJust ${action} recipe is missing"
+    grep -Fq "sudo /usr/libexec/justvoxel/mjust/service ${action}" "${justfile}" || fail "mJust ${action} must enter the API path through sudo/root"
+done
+grep -Fq '.confirmation_required // false' "${service}" || fail 'mJust service frontend does not handle player confirmation responses'
+grep -Fq '"confirm_players":%s' "${service}" || fail 'mJust service frontend does not send explicit player confirmation'
+for forbidden in 'systemctl ' 'podman ' 'rcon-cli' 'jv_player_check_before_interrupt'; do
+    if grep -Fq "${forbidden}" "${service}"; then
+        fail "mJust service frontend still performs direct system/safety access: ${forbidden}"
+    fi
+done
+
+echo 'mJust Management API foundation, Players, and Minecraft control migration checks passed.'
