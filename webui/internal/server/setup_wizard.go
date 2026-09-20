@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -95,6 +97,7 @@ type setupWizardPageData struct {
 	SystemMemory             string
 	SystemReserveMinimum     string
 	SystemReserveRecommended string
+	Timezones                []string
 }
 
 var setupWizardSteps = []setupWizardStepView{
@@ -314,10 +317,40 @@ func (a *App) renderSetupWizard(w http.ResponseWriter, identity api.SessionInfo,
 		SystemMemory:             formatMemoryMiB(draft.Defaults.SystemMemoryMiB),
 		SystemReserveMinimum:     formatMemoryMiB(draft.Defaults.SystemReserveMinimumMiB),
 		SystemReserveRecommended: formatMemoryMiB(draft.Defaults.SystemReserveRecommendedMiB),
+		Timezones:                setupTimezoneOptions(draft.Server.Timezone),
 		CanBack:                  draft.Started && draft.CurrentStep > 1,
 		CanNext:                  draft.Started && draft.CurrentStep < len(steps),
 	}
 	a.renderAdminDiscovery(w, "setup_wizard.html", data)
+}
+
+func setupTimezoneOptions(current string) []string {
+	zones := map[string]struct{}{"UTC": {}}
+	for _, path := range []string{"/usr/share/zoneinfo/zone1970.tab", "/usr/share/zoneinfo/zone.tab"} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			fields := strings.Fields(line)
+			if len(fields) >= 3 && setupTimezonePattern.MatchString(fields[2]) {
+				zones[fields[2]] = struct{}{}
+			}
+		}
+	}
+	if current = strings.TrimSpace(current); current != "" && setupTimezonePattern.MatchString(current) {
+		zones[current] = struct{}{}
+	}
+	out := make([]string, 0, len(zones))
+	for zone := range zones {
+		out = append(out, zone)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func normalizedSetupDefaults(defaults api.AdminSetupDefaults) api.AdminSetupDefaults {
