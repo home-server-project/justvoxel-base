@@ -58,11 +58,15 @@ func (a *App) registerSetupWizardReviewRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /setup/review/eula", a.setupWizardReviewEULA)
 	mux.HandleFunc("POST /setup/review/back", a.setupWizardReviewBack)
 	mux.HandleFunc("POST /setup/review/cancel", a.setupWizardReviewCancel)
+	a.registerSetupWizardApplyRoutes(mux)
 }
 
 func (a *App) setupWizardReviewPage(w http.ResponseWriter, r *http.Request) {
 	session, client, identity, ok := a.setupWizardRequest(w, r, false)
 	if !ok {
+		return
+	}
+	if a.redirectCurrentSetupOperation(w, r, session, client) {
 		return
 	}
 	draft, exists := firstRunSetupDrafts.get(a, session)
