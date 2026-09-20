@@ -9,6 +9,29 @@ import (
 	"testing"
 )
 
+func TestLocalRootCanReadConfigurationWithoutBearerSession(t *testing.T) {
+	s := surfaceTestServer(t, roleViewer)
+	old := runAdminDiscoveryHelper
+	defer func() { runAdminDiscoveryHelper = old }()
+
+	runAdminDiscoveryHelper = func(_ context.Context, action string) ([]byte, error) {
+		if action != "configuration" {
+			t.Fatalf("action = %q, want configuration", action)
+		}
+		return []byte(`{"configured":true,"minecraft":{"java_memory":"4G","container_memory":"6G","java_port":25565,"bedrock_enabled":false,"bedrock_port":19132,"timezone":"UTC","max_players":10,"motd":"JustVoxel","image_tag":"stable","version_mode":"pinned","version":"1.21.8"},"backup":{"keep":7,"schedule":"*-*-* 04:30:00","timer_enabled":true}}`), nil
+	}
+
+	req := requestWithPeerUID(http.MethodGet, "http://unix/v1/admin/configuration", 0)
+	rr := httptest.NewRecorder()
+	s.adminConfiguration(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("local root configuration read returned %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"configured":true`) || !strings.Contains(rr.Body.String(), `"max_players":10`) {
+		t.Fatalf("unexpected local root configuration response: %s", rr.Body.String())
+	}
+}
+
 func TestAdminDiscoveryRequiresAdministrator(t *testing.T) {
 	old := runAdminDiscoveryHelper
 	defer func() { runAdminDiscoveryHelper = old }()
