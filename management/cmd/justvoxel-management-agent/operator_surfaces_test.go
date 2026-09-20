@@ -70,6 +70,75 @@ func TestLocalRootCanUseWhitelistWithoutBearerSession(t *testing.T) {
 	}
 }
 
+func TestLocalRootCanReadMinecraftLogsWithoutBearerSession(t *testing.T) {
+	s := &server{sessions: make(map[string]session)}
+	old := readMinecraftLogs
+	defer func() { readMinecraftLogs = old }()
+
+	gotLimit := 0
+	gotMode := ""
+	readMinecraftLogs = func(_ context.Context, limit int, outputMode string) ([]byte, error) {
+		gotLimit = limit
+		gotMode = outputMode
+		return []byte("line one\nline two\n"), nil
+	}
+
+	req := requestWithPeerUID(http.MethodGet, "http://unix/v1/logs/minecraft?limit=50&format=cat", 0)
+	rr := httptest.NewRecorder()
+	s.minecraftLogs(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("local root Minecraft logs returned %d: %s", rr.Code, rr.Body.String())
+	}
+	if gotLimit != 50 || gotMode != "cat" {
+		t.Fatalf("local root logs reader args = limit=%d mode=%q", gotLimit, gotMode)
+	}
+	if !strings.Contains(rr.Body.String(), `"line one"`) || !strings.Contains(rr.Body.String(), `"line two"`) {
+		t.Fatalf("unexpected local root logs response: %s", rr.Body.String())
+	}
+}
+
+func TestMinecraftLogsDefaultFormatRemainsShortISO(t *testing.T) {
+	s := surfaceTestServer(t, roleOperator)
+	old := readMinecraftLogs
+	defer func() { readMinecraftLogs = old }()
+
+	gotMode := ""
+	readMinecraftLogs = func(_ context.Context, _ int, outputMode string) ([]byte, error) {
+		gotMode = outputMode
+		return []byte("timestamped line\n"), nil
+	}
+
+	rr := httptest.NewRecorder()
+	s.minecraftLogs(rr, surfaceRequest(http.MethodGet, "/v1/logs/minecraft", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("default Minecraft logs returned %d: %s", rr.Code, rr.Body.String())
+	}
+	if gotMode != "short-iso" {
+		t.Fatalf("default Minecraft logs mode = %q, want short-iso", gotMode)
+	}
+}
+
+func TestMinecraftLogsRejectUnsupportedFormat(t *testing.T) {
+	s := surfaceTestServer(t, roleOperator)
+	old := readMinecraftLogs
+	defer func() { readMinecraftLogs = old }()
+
+	called := false
+	readMinecraftLogs = func(_ context.Context, _ int, _ string) ([]byte, error) {
+		called = true
+		return nil, nil
+	}
+
+	rr := httptest.NewRecorder()
+	s.minecraftLogs(rr, surfaceRequest(http.MethodGet, "/v1/logs/minecraft?format=json", ""))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("unsupported Minecraft logs format returned %d: %s", rr.Code, rr.Body.String())
+	}
+	if called {
+		t.Fatal("unsupported Minecraft logs format reached journal reader")
+	}
+}
+
 func TestViewerCannotAccessWhitelistOrRawMinecraftLogs(t *testing.T) {
 	s := surfaceTestServer(t, roleViewer)
 
