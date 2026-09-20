@@ -43,6 +43,10 @@ finish_backup_selection() {
 
 provision_backup_mode() {
     local rc
+    if [[ ${have_config} == yes ]]; then
+        /usr/libexec/justvoxel/mjust/backup-storage backup
+        return $?
+    fi
     if storage_prepare_backup_interactive yes; then
         :
     else
@@ -54,6 +58,10 @@ provision_backup_mode() {
 }
 
 provision_system_backup() {
+    if [[ ${have_config} == yes ]]; then
+        /usr/libexec/justvoxel/mjust/backup-storage system
+        return $?
+    fi
     STORAGE_TYPE=system
     STORAGE_MOUNT_POINT=''
     STORAGE_EXPECTED_UUID=''
@@ -152,6 +160,10 @@ migrate_data() {
 
 provision_specific() {
     local mode="$1"
+    if [[ ${have_config} == yes ]]; then
+        /usr/libexec/justvoxel/mjust/backup-storage "${mode}"
+        return $?
+    fi
     case "${mode}" in
         disk) storage_prepare_whole_disk backup ;;
         partition) storage_prepare_existing_partition backup ;;
@@ -162,6 +174,10 @@ provision_specific() {
 
 provision_network() {
     local network_choice
+    if [[ ${have_config} == yes ]]; then
+        /usr/libexec/justvoxel/mjust/backup-storage network
+        return $?
+    fi
     network_choice="$(jui_choose 'Network backup type' 'NFS' 'SMB/CIFS' 'Back')" || return 2
     case "${network_choice}" in
         'NFS') storage_prepare_nfs ;;
