@@ -11,6 +11,7 @@ import_files=(
     "${repo_root}/mjust/libexec/migration-import-activate.sh"
 )
 import_text="$(cat "${import_files[@]}")"
+grep -Fq 'interrupt-safety.sh' "${repo_root}/mjust/libexec/migration-import" || fail 'migration import does not load shared interruption safety'
 exporter="${repo_root}/mjust/libexec/migration-export"
 recovery="${repo_root}/mjust/libexec/migration-recover"
 transport_files=(
@@ -42,6 +43,7 @@ for text in \
     'jv_migration_assert_fresh_selinux_path' \
     'jv_migration_remove_fresh_selinux_rule' \
     'restore-runtime-validate' \
+    'jv_stop_minecraft_adaptive' \
     '/usr/libexec/justvoxel/mjust/validate' \
     'JUSTVOXEL_REGENERATE_RCON=1' \
     'online-mode=false' \

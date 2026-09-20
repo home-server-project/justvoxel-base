@@ -104,12 +104,13 @@ for text in \
     'pre-restore' \
     'failed-restored' \
     'players_confirmed' \
-    'systemctl stop minecraft.service' \
+    'jv_stop_minecraft_adaptive' \
     'chown -R' \
     'apply_data_selinux' \
     'restore-runtime-validate' \
     'rolling_back' \
-    'needs_attention'; do
+    'needs_attention' \
+    'interrupt-safety.sh'; do
     grep -Fq "${text}" "${transaction_helper}" || fail "Restore API transaction safety behavior missing: ${text}"
 done
 
