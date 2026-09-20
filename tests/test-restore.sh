@@ -2,6 +2,7 @@
 set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${repo_root}/mjust/libexec/restore-common.sh"
+source "${repo_root}/mjust/libexec/restore-discovery-common.sh"
 source "${repo_root}/mjust/libexec/backup-common.sh"
 
 fail(){ echo "FAIL: $*" >&2; exit 1; }

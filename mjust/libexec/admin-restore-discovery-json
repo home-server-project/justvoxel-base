@@ -4,6 +4,7 @@ set -euo pipefail
 source /usr/libexec/justvoxel/mjust/common.sh
 source /usr/libexec/justvoxel/mjust/backup-common.sh
 source /usr/libexec/justvoxel/mjust/restore-common.sh
+source /usr/libexec/justvoxel/mjust/restore-discovery-common.sh
 
 require_root
 require_config
