@@ -208,7 +208,7 @@ _a55_verify_action() {
     fi
     activate_backup_timer || return 1
     _a55_manifest_update '.runtime.timer_activated = true' || return 1
-    /usr/libexec/justvoxel/mjust/validate >/dev/null 2>&1 || return 1
+    /usr/libexec/justvoxel/mjust/validate-backend >/dev/null 2>&1 || return 1
     _a55_json true true runtime_verified ''
 }
 
