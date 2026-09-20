@@ -53,6 +53,31 @@ grep -Fq 'JustVoxel is already configured' "${helper}"
 # critical and malformed paths remain rejected.
 # shellcheck disable=SC1091
 source "${repo_root}/mjust/libexec/common.sh"
+
+geyser_fixture='{"java":{"supported":"26.2"}}'
+[[ $(geyser_supported_java_version_from_json "${geyser_fixture}") == 26.2 ]] || {
+    echo 'Geyser Java support metadata was not parsed correctly.' >&2
+    exit 1
+}
+if geyser_supported_java_version_from_json '{"java":{"supported":"26.2-26.3"}}' >/dev/null 2>&1; then
+    echo 'Ambiguous Geyser Java support metadata was accepted.' >&2
+    exit 1
+fi
+bedrock_crossplay_supports_version 26.2 26.2 || {
+    echo 'Matching Minecraft/Geyser versions were rejected.' >&2
+    exit 1
+}
+if bedrock_crossplay_supports_version 26.3 26.2; then
+    echo 'Unsupported Minecraft/Geyser version mismatch was accepted.' >&2
+    exit 1
+fi
+
+grep -Fq 'resolve_geyser_supported_java_version' "${helper}"
+grep -Fq 'version="${geyser_supported_version}"' "${helper}"
+grep -Fq 'bedrock_enabled=false' "${helper}"
+grep -Fq 'bedrock_version_unsupported' "${helper}"
+grep -Fq 'Come back later and enable Bedrock cross-play' "${helper}"
+
 # shellcheck disable=SC1091
 source "${repo_root}/mjust/libexec/storage-common-base.sh"
 
