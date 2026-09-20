@@ -16,8 +16,8 @@ var runWhitelistHelper = func(ctx context.Context, args ...string) ([]byte, erro
 	return exec.CommandContext(ctx, whitelistHelper, args...).CombinedOutput()
 }
 
-var readMinecraftLogs = func(ctx context.Context, limit int) ([]byte, error) {
-	return exec.CommandContext(ctx, "journalctl", "--no-pager", "-u", "minecraft.service", "-n", strconv.Itoa(limit), "-o", "short-iso").CombinedOutput()
+var readMinecraftLogs = func(ctx context.Context, limit int, outputMode string) ([]byte, error) {
+	return exec.CommandContext(ctx, "journalctl", "--no-pager", "-u", "minecraft.service", "-n", strconv.Itoa(limit), "-o", outputMode).CombinedOutput()
 }
 
 type publicActivityView struct {
@@ -163,9 +163,13 @@ func (s *server) minecraftLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit := boundedQueryLimit(r, 100, 200)
+	outputMode := "short-iso"
+	if r.URL.Query().Get("format") == "cat" {
+		outputMode = "cat"
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	output, err := readMinecraftLogs(ctx, limit)
+	output, err := readMinecraftLogs(ctx, limit, outputMode)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "Minecraft logs are unavailable")
 		return
