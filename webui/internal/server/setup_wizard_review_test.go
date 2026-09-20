@@ -133,6 +133,56 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 	}
 }
 
+func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
+	client := setupReviewClient()
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer firstRunSetupReviews.delete(app, "session-token")
+	advanceSetupToReview(t, app)
+
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("review returned %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{"Cancel setup", ">Back</button>", "setup-execution-copy"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("review layout missing %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "Back to backups") {
+		t.Fatal("review still uses the old Back to backups label")
+	}
+
+	css, err := assets.ReadFile("static/setup-review.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles := string(css)
+	for _, want := range []string{
+		"repeat(auto-fit,minmax(min(100%,460px),1fr))",
+		"white-space:nowrap",
+		"overflow-x:auto",
+		"grid-template-columns:minmax(0,1fr) auto",
+	} {
+		if !strings.Contains(styles, want) {
+			t.Fatalf("responsive review CSS missing %q", want)
+		}
+	}
+
+	setupCSS, err := assets.ReadFile("static/setup.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"max-width:1180px", ".setup-step-actions", "@media(max-width:850px)"} {
+		if !strings.Contains(string(setupCSS), want) {
+			t.Fatalf("responsive setup CSS missing %q", want)
+		}
+	}
+}
 func TestSetupReviewExplainsDisabledBedrockCompatibility(t *testing.T) {
 	client := setupReviewClient()
 	client.plan.Normalized.Server.BedrockEnabled = false
