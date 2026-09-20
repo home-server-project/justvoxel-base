@@ -16,9 +16,10 @@ const (
 	roleOperator      principalRole = "operator"
 	roleViewer        principalRole = "viewer"
 
-	authSourceSystem   authSource = "system"
-	authSourceSeparate authSource = "separate"
-	authSourceWebUI    authSource = "webui"
+	authSourceSystem    authSource = "system"
+	authSourceSeparate  authSource = "separate"
+	authSourceWebUI     authSource = "webui"
+	authSourceLocalRoot authSource = "local-root"
 )
 
 type identityAuthResult struct {
