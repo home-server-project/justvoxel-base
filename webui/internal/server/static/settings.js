@@ -48,7 +48,7 @@ if (memoryPanel) {
     }
     const remaining = totalMiB - maximumMiB;
     if (remaining < minimumReserveMiB) {
-      status.textContent = `Very tight memory configuration: about ${formatRemaining(remaining)} remains outside Minecraft. JustVoxel itself typically uses roughly 0.6–1.0 GiB; less than 1 GiB of headroom can cause memory pressure or an unresponsive appliance.`;
+      status.textContent = `Not enough memory remains outside Minecraft: about ${formatRemaining(remaining)}. JustVoxel requires at least 1 GiB outside the Minecraft limit; reduce Maximum Minecraft memory before continuing.`;
       status.classList.add("danger");
     } else if (remaining < recommendedReserveMiB) {
       status.textContent = `Tight memory configuration: about ${formatRemaining(remaining)} remains outside Minecraft. JustVoxel itself typically uses roughly 0.6–1.0 GiB; around 2 GiB gives extra room for cache, backups, updates and temporary spikes.`;
