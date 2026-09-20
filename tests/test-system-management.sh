@@ -65,8 +65,9 @@ grep -Fq 'POST /v1/admin/system/firmware-reboot' "${system_actions_agent}" || fa
 grep -Fq 'registerAdminSystemActionRoutes(mux, s)' "${management_main}" || fail 'System Actions routes are not registered'
 grep -Fq 'WriteTimeout:      210 * time.Second' "${management_main}" || fail 'Management API write timeout is too short for player countdown actions'
 
-grep -Fq 'jv_system_actions_get /v1/admin/system/actions' "${system_actions_api}" || fail 'System Actions frontend status endpoint missing'
+grep -Fq '"${JV_SYSTEM_ACTIONS_API_CLIENT}" GET /v1/admin/system/actions' "${system_actions_api}" || fail 'System Actions frontend status endpoint missing'
 grep -Fq 'POST "/v1/admin/system/${action}" --data' "${system_actions_api}" || fail 'System Actions frontend apply endpoint missing'
+grep -Fq 'reboot|poweroff|firmware-reboot)' "${system_actions_api}" || fail 'System Actions frontend action allowlist missing'
 grep -Fq 'action_confirmed:true' "${system_actions_api}" || fail 'System Actions frontend explicit action confirmation missing'
 grep -Fq 'confirm_players:$players_confirmed' "${system_actions_api}" || fail 'System Actions player confirmation replay missing'
 
