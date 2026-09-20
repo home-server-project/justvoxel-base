@@ -69,9 +69,10 @@ for forbidden in 'systemctl ' 'podman exec' 'podman stats' 'podman ps' 'podman c
     fi
 done
 
-grep -Fq '"${api_client}" GET /v1/whitelist' "${whitelist}" || fail 'mJust whitelist list does not use the Management API'
+grep -Fq '"${api_client}" GET "${path}"' "${whitelist}" || fail 'mJust whitelist GET helper does not use the Management API client'
+grep -Fq 'api_get /v1/whitelist' "${whitelist}" || fail 'mJust whitelist list does not use the Management API'
 grep -Fq 'POST /v1/whitelist --data' "${whitelist}" || fail 'mJust whitelist changes do not use the Management API'
-grep -Fq '"${api_client}" GET /v1/status' "${whitelist}" || fail 'mJust Bedrock availability check does not use the Management API'
+grep -Fq 'api_get /v1/status' "${whitelist}" || fail 'mJust Bedrock availability check does not use the Management API'
 grep -Fq 'whitelist-backend' "${operator_surfaces}" || fail 'Management Agent does not use the whitelist backend helper'
 for forbidden in 'systemctl ' 'podman ' 'rcon-cli' 'source "${JV_LIBEXEC_DIR}/common.sh"' 'require_config'; do
     if grep -Fq "${forbidden}" "${whitelist}"; then
