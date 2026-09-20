@@ -1,12 +1,1 @@
-====================================================
-                    JUSTVOXEL
-              Minecraft Server Appliance
-====================================================
-
-  System:           \S{PRETTY_NAME}
-  Host:             \n
-  IPv4:             \4
-  Web interface:    http://\4:8099
-
-  Sign in below for local administration.
-
+/run/justvoxel/issue

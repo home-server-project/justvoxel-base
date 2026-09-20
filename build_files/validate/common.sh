@@ -85,15 +85,27 @@ grep -Fqx 'z /var/lib/gssproxy/rcache  0700 root root -' /usr/lib/tmpfiles.d/jus
 test -f /etc/profile.d/zz-justvoxel-prompt.sh
 grep -Fq '38;5;82' /etc/profile.d/zz-justvoxel-prompt.sh
 
-test -f /etc/issue
-grep -Fqx '                    JUSTVOXEL' /etc/issue
-grep -Fqx '              Minecraft Server Appliance' /etc/issue
-grep -Fqx '  System:           \S{PRETTY_NAME}' /etc/issue
-grep -Fqx '  Host:             \n' /etc/issue
-grep -Fqx '  IPv4:             \4' /etc/issue
-grep -Fqx '  Web interface:    http://\4:8099' /etc/issue
-grep -Fqx '  Sign in below for local administration.' /etc/issue
-
+test -L /etc/issue
+test "$(readlink /etc/issue)" = '/run/justvoxel/issue'
+test -f /usr/lib/systemd/system/getty@.service.d/10-justvoxel-issue.conf
+grep -Fqx 'After=NetworkManager.service justvoxel-webui.service' /usr/lib/systemd/system/getty@.service.d/10-justvoxel-issue.conf
+grep -Fqx 'ExecStartPre=/usr/libexec/justvoxel/console-issue-refresh' /usr/lib/systemd/system/getty@.service.d/10-justvoxel-issue.conf
+test -x /usr/libexec/justvoxel/console-issue-refresh
+bash -n /usr/libexec/justvoxel/console-issue-refresh
+/usr/libexec/justvoxel/console-issue-refresh
+test -r /run/justvoxel/issue
+grep -Fq 'JUSTVOXEL' /run/justvoxel/issue
+grep -Fq 'Variant:' /run/justvoxel/issue
+grep -Fq 'Network:' /run/justvoxel/issue
+grep -Fq 'Minecraft:' /run/justvoxel/issue
+grep -Fq 'Web interface:' /run/justvoxel/issue
+grep -Fq 'Open in browser:' /run/justvoxel/issue
+grep -Fq 'Direct address:' /run/justvoxel/issue
+grep -Fq '\e[38;5;45m' /run/justvoxel/issue
+if grep -Fq 'Common commands' /run/justvoxel/issue; then
+    echo 'ERROR: pre-login console banner must stop before Common commands.' >&2
+    exit 1
+fi
 test -f /etc/profile.d/90-justvoxel-motd.sh
 bash -n /etc/profile.d/90-justvoxel-motd.sh
 test -x /usr/libexec/justvoxel/motd

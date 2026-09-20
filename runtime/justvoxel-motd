@@ -1,6 +1,14 @@
 #!/usr/bin/bash
 set -u
 
+output_mode='shell'
+if [[ ${1:-} == '--issue' ]]; then
+    output_mode='issue'
+elif (( $# > 0 )); then
+    printf 'Usage: %s [--issue]\n' "$0" >&2
+    exit 2
+fi
+
 pretty_name='JustVoxel'
 if [[ -r /etc/os-release ]]; then
     # shellcheck disable=SC1091
@@ -81,7 +89,17 @@ elif [[ ! -e ${web_initialized_marker} ]]; then
     web_state='Starting...'
 fi
 
-if [[ -t 1 && ${TERM:-dumb} != dumb ]]; then
+if [[ ${output_mode} == issue ]]; then
+    # agetty translates \e into ESC, preserving the interactive 256-color palette.
+    cyan='\e[38;5;45m'
+    white='\e[97m'
+    green='\e[38;5;82m'
+    yellow='\e[38;5;220m'
+    blue='\e[38;5;75m'
+    dim='\e[38;5;245m'
+    bold='\e[1m'
+    reset='\e[0m'
+elif [[ -t 1 && ${TERM:-dumb} != dumb ]]; then
     cyan=$'\033[38;5;45m'
     white=$'\033[97m'
     green=$'\033[38;5;82m'
@@ -123,6 +141,11 @@ case "${web_state}" in
         line 'Check status:' "${green}" 'mjust web status'
         ;;
 esac
+
+if [[ ${output_mode} == issue ]]; then
+    printf '\n'
+    exit 0
+fi
 
 printf '\n%s%sCommon commands%s\n' "${bold}" "${cyan}" "${reset}"
 if [[ ${needs_setup} == yes ]]; then

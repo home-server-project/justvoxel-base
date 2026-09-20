@@ -1,0 +1,11 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+install -d -m0755 /run/justvoxel
+tmp="$(mktemp /run/justvoxel/issue.XXXXXX)"
+trap 'rm -f "${tmp}"' EXIT
+
+/usr/libexec/justvoxel/motd --issue > "${tmp}"
+chmod 0644 "${tmp}"
+mv -f "${tmp}" /run/justvoxel/issue
+trap - EXIT
