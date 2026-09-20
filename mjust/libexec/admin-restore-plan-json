@@ -1,0 +1,209 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/backup-common.sh
+source /usr/libexec/justvoxel/mjust/restore-common.sh
+source /usr/libexec/justvoxel/mjust/restore-discovery-common.sh
+
+require_root
+
+emit_plan_error() {
+    local code="$1" message="$2"
+    jq -cn --arg code "${code}" --arg error "${message}"         '{ok:false,schema_version:"v1",code:$code,error:$error,warnings:[]}'
+}
+
+request="$(cat)"
+if ! jq -e '
+    type == "object"
+    and ((keys | sort) == ["backup_id","mode"])
+    and (.backup_id | type == "string")
+    and (.mode | type == "string")
+' >/dev/null 2>&1 <<< "${request}"; then
+    emit_plan_error invalid_request 'Invalid restore planning request.'
+    exit 0
+fi
+
+backup_id="$(jq -r '.backup_id' <<< "${request}")"
+mode="$(jq -r '.mode' <<< "${request}")"
+if [[ ! ${backup_id} =~ ^minecraft-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}\.tar\.gz$ ]]; then
+    emit_plan_error invalid_backup_id 'Selected backup identifier is invalid.'
+    exit 0
+fi
+case "${mode}" in
+    world|full) ;;
+    *)
+        emit_plan_error invalid_mode 'Restore mode must be world or full.'
+        exit 0
+        ;;
+esac
+
+if [[ ! -r ${JV_CONFIG} || -e ${JV_SETUP_IN_PROGRESS} ]]; then
+    emit_plan_error not_configured 'Minecraft must be configured before restore.'
+    exit 0
+fi
+require_config
+
+jv_backup_load_config
+if ! jv_backup_require_read_target >/dev/null 2>&1; then
+    emit_plan_error backup_source_unavailable 'Configured backup storage is not available or does not match its expected identity.'
+    exit 0
+fi
+
+configured_data_path="$(realpath -m -- "${DATA_PATH}")"
+if [[ ${minecraft_data_path} != "${configured_data_path}" ]]; then
+    emit_plan_error data_path_mismatch 'Backup configuration and active Minecraft data storage do not match.'
+    exit 0
+fi
+if ! /usr/libexec/justvoxel/mjust/validate-data-mount >/dev/null 2>&1; then
+    emit_plan_error data_mount_invalid 'Minecraft data storage failed safety validation.'
+    exit 0
+fi
+if ! jv_restore_validate_data_layout "${configured_data_path}" >/dev/null 2>&1; then
+    emit_plan_error data_layout_invalid 'Minecraft data layout is not safe for transactional restore.'
+    exit 0
+fi
+
+data_parent="$(dirname -- "${configured_data_path}")"
+if find "${data_parent}" -maxdepth 1 -type d -name '.justvoxel-restore-*' -print -quit 2>/dev/null | grep -q .; then
+    emit_plan_error restore_recovery_required 'An earlier restore transaction requires administrator recovery before another restore can start.'
+    exit 0
+fi
+
+selected_record=''
+while IFS= read -r record; do
+    IFS="$(printf '\t')" read -r epoch size path <<< "${record}"
+    if [[ $(basename -- "${path}") == "${backup_id}" ]]; then
+        selected_record="${record}"
+        break
+    fi
+done < <(jv_restore_list_archives "${minecraft_backup_path}")
+
+if [[ -z ${selected_record} ]]; then
+    emit_plan_error backup_not_found 'Selected completed backup was not found on the configured backup storage.'
+    exit 0
+fi
+
+IFS="$(printf '\t')" read -r selected_epoch selected_size selected_archive <<< "${selected_record}"
+if [[ ! -f ${selected_archive} || -L ${selected_archive} ]]; then
+    emit_plan_error backup_not_found 'Selected completed backup is no longer a regular file.'
+    exit 0
+fi
+selected_identity="$(jv_restore_archive_identity "${selected_archive}")" || {
+    emit_plan_error backup_unavailable 'Selected backup identity could not be verified.'
+    exit 0
+}
+epoch_int="${selected_epoch%%.*}"
+created_at="$(date -u -d "@${epoch_int}" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null)" || {
+    emit_plan_error backup_unavailable 'Selected backup timestamp could not be verified.'
+    exit 0
+}
+
+metadata_record="$(jv_restore_metadata_summary_json "${selected_archive}.meta.json")"
+metadata_status="$(jq -r '.status' <<< "${metadata_record}")"
+metadata_json="$(jq -c '.metadata' <<< "${metadata_record}")"
+backup_version_mode='unknown'
+backup_version='unknown'
+if [[ ${metadata_status} == valid ]]; then
+    backup_version_mode="$(jq -r '.metadata.minecraft.version_mode // "unknown"' <<< "${metadata_record}")"
+    backup_version="$(jq -r '.metadata.minecraft.configured_version // "unknown"' <<< "${metadata_record}")"
+fi
+relation="$(jv_restore_version_relation "${backup_version_mode}" "${backup_version}" "${MINECRAFT_VERSION_MODE}" "${MINECRAFT_VERSION}")"
+
+players_json="$(/usr/libexec/justvoxel/mjust/web-status-json players 2>/dev/null)" || {
+    emit_plan_error player_status_unavailable 'Minecraft player status could not be checked safely.'
+    exit 0
+}
+if ! jq -e '
+    type == "object"
+    and (.state | type == "string")
+    and (.online | type == "number")
+    and (.names | type == "array")
+' >/dev/null 2>&1 <<< "${players_json}"; then
+    emit_plan_error player_status_unavailable 'Minecraft player status could not be checked safely.'
+    exit 0
+fi
+player_state="$(jq -r '.state' <<< "${players_json}")"
+case "${player_state}" in
+    running|stopped) ;;
+    *)
+        emit_plan_error player_status_unavailable 'Minecraft player status could not be checked safely.'
+        exit 0
+        ;;
+esac
+online="$(jq -r '.online' <<< "${players_json}")"
+players="$(jq -c '.names' <<< "${players_json}")"
+players_confirmation_required=false
+if [[ ${player_state} == running && ${online} =~ ^[0-9]+$ ]] && (( online > 0 )); then
+    players_confirmation_required=true
+fi
+
+warnings='[]'
+add_warning() {
+    local code="$1" message="$2"
+    warnings="$(jq -cn --argjson warnings "${warnings}" --arg code "${code}" --arg message "${message}"         '$warnings + [{code:$code,message:$message}]')"
+}
+case "${metadata_status}" in
+    missing) add_warning metadata_missing 'This backup has no restore metadata, so Minecraft version compatibility cannot be compared exactly.' ;;
+    invalid) add_warning metadata_invalid 'This backup has invalid restore metadata, so Minecraft version compatibility cannot be compared exactly.' ;;
+esac
+case "${relation}" in
+    backup_older)
+        add_warning backup_older 'This backup was created for an older pinned Minecraft version. The current configured version may upgrade restored data.'
+        ;;
+    unknown)
+        add_warning compatibility_unknown 'Backup/current Minecraft version safety cannot be compared exactly. Restore will keep the current version policy unchanged.'
+        ;;
+esac
+
+bedrock_enabled=false
+[[ ${BEDROCK_ENABLED} == yes ]] && bedrock_enabled=true
+normalized="$(jq -cn     --arg backup_id "${backup_id}"     --arg mode "${mode}"     --arg created_at "${created_at}"     --argjson size_bytes "${selected_size}"     --arg metadata_status "${metadata_status}"     --argjson metadata "${metadata_json}"     --arg current_version_mode "${MINECRAFT_VERSION_MODE}"     --arg current_version "${MINECRAFT_VERSION}"     --argjson bedrock_enabled "${bedrock_enabled}"     --arg version_relation "${relation}"     '{
+        backup_id:$backup_id,
+        mode:$mode,
+        created_at:$created_at,
+        size_bytes:$size_bytes,
+        metadata_status:$metadata_status,
+        metadata:$metadata,
+        current:{
+            version_mode:$current_version_mode,
+            version:$current_version,
+            bedrock_enabled:$bedrock_enabled
+        },
+        version_relation:$version_relation,
+        validation:{
+            archive_integrity:"pending_apply",
+            archive_safety:"pending_apply",
+            staging_space:"pending_apply"
+        }
+    }')"
+
+requirements="$(jq -cn     --argjson players_confirmation_required "${players_confirmation_required}"     --arg player_state "${player_state}"     --argjson online "${online}"     --argjson players "${players}"     '{
+        destructive_confirmation_required:true,
+        players_confirmation_required:$players_confirmation_required,
+        minecraft_state:$player_state,
+        online:$online,
+        players:$players,
+        archive_integrity_validation_on_apply:true,
+        archive_safety_validation_on_apply:true,
+        staging_space_validation_on_apply:true
+    }')"
+
+context="$(jq -cn     --arg archive_identity "${selected_identity}"     --arg data_path "${configured_data_path}"     --arg backup_path "${minecraft_backup_path}"     --arg minecraft_uid "${MINECRAFT_UID}"     --arg minecraft_gid "${MINECRAFT_GID}"     --arg backup_type "${BACKUP_TYPE}"     --arg backup_mount_point "${BACKUP_MOUNT_POINT}"     --arg backup_expected_uuid "${BACKUP_EXPECTED_UUID}"     --arg backup_expected_source "${BACKUP_EXPECTED_SOURCE}"     '{
+        archive_identity:$archive_identity,
+        data_path:$data_path,
+        backup_path:$backup_path,
+        minecraft_uid:$minecraft_uid,
+        minecraft_gid:$minecraft_gid,
+        backup_type:$backup_type,
+        backup_mount_point:$backup_mount_point,
+        backup_expected_uuid:$backup_expected_uuid,
+        backup_expected_source:$backup_expected_source
+    }')"
+
+if [[ ${relation} == backup_newer ]]; then
+    jq -cn         --arg code backup_newer         --arg error 'This backup was created for a newer pinned Minecraft version. Configure the same or a newer version before restoring it.'         --argjson normalized "${normalized}"         --argjson warnings "${warnings}"         --argjson requirements "${requirements}"         '{ok:false,schema_version:"v1",code:$code,error:$error,normalized:$normalized,warnings:$warnings,requirements:$requirements}'
+    exit 0
+fi
+
+jq -cn     --argjson normalized "${normalized}"     --argjson warnings "${warnings}"     --argjson requirements "${requirements}"     --argjson context "${context}"     '{ok:true,schema_version:"v1",normalized:$normalized,warnings:$warnings,requirements:$requirements,context:$context}'

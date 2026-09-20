@@ -73,6 +73,24 @@ if jv_backup_validate_mount_identity >/dev/null 2>&1; then
     fail 'missing configured backup mount must fail closed'
 fi
 
+plan_helper="${repo_root}/mjust/libexec/admin-restore-plan-json"
+for text in \
+    'jv_backup_require_read_target' \
+    'validate-data-mount' \
+    'jv_restore_validate_data_layout' \
+    '.justvoxel-restore-*' \
+    'jv_restore_archive_identity' \
+    'web-status-json players' \
+    'backup_newer' \
+    'archive_integrity_validation_on_apply' \
+    'archive_safety_validation_on_apply' \
+    'staging_space_validation_on_apply'; do
+    grep -Fq "${text}" "${plan_helper}" || fail "Restore API plan safety behavior missing: ${text}"
+done
+if grep -Eq 'systemctl[[:space:]]+(stop|restart)[[:space:]]+minecraft|restore-archive[[:space:]]+extract-|chown[[:space:]]+-R|restorecon[[:space:]]+-R' "${plan_helper}"; then
+    fail 'Restore API planning helper must remain read-only'
+fi
+
 restore="${repo_root}/mjust/libexec/restore"
 backup="${repo_root}/runtime/minecraft-backup"
 menu="${repo_root}/mjust/libexec/menu"

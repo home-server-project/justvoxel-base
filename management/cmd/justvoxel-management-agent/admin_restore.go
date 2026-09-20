@@ -60,6 +60,7 @@ type adminRestoreBackupsResponse struct {
 
 func registerAdminRestoreRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("GET /v1/admin/restore/backups", s.adminRestoreBackups)
+	mux.HandleFunc("POST /v1/admin/restore/plan", s.adminRestorePlan)
 }
 
 func (s *server) adminRestoreBackups(w http.ResponseWriter, r *http.Request) {
