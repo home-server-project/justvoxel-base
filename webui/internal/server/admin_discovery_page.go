@@ -88,9 +88,14 @@ func (a *App) serverSettingsPage(w http.ResponseWriter, r *http.Request) {
 	}
 	message := ""
 	if r.URL.Query().Get("result") == "saved" {
-		if r.URL.Query().Get("restart") == "1" {
+		switch {
+		case r.URL.Query().Get("memory_restart") == "1":
+			message = "Memory settings saved and Minecraft restarted with the new limits."
+		case r.URL.Query().Get("next_start") == "1":
+			message = "Memory settings saved. Minecraft is stopped, so the new limits will be used on its next start."
+		case r.URL.Query().Get("restart") == "1":
 			message = "Settings saved. Minecraft was not restarted; restart it when it is safe to apply the server changes."
-		} else {
+		default:
 			message = "Settings saved and applied."
 		}
 	}

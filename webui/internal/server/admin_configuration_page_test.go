@@ -101,7 +101,7 @@ func TestMinecraftSettingsUsesUserFriendlyMemoryControls(t *testing.T) {
 	for _, want := range []string{
 		"Minecraft game memory", "Technical name: Java heap", "Maximum Minecraft memory", "container memory limit",
 		"8.0 GiB detected", "2.0 GiB", "1.0 GiB", "Light", "Recommended", "High memory", "Custom",
-		"additional block of 10 players", "/static/settings.js", "Review changes",
+		"additional block of 10 players", "JustVoxel itself typically uses roughly 0.6–1.0 GiB", "Memory left outside Minecraft is not reserved", "/static/settings.js", "Review changes",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("settings page missing %q", want)
@@ -147,9 +147,86 @@ func TestMinecraftSettingsPlanShowsReviewWithoutApplying(t *testing.T) {
 	}
 }
 
+func TestMinecraftMemoryApplyRequiresPlayerConfirmationBeforeMutation(t *testing.T) {
+	client := configuredSettingsFake()
+	proposed := client.configuration
+	proposed.Minecraft.JavaMemory = "5G"
+	proposed.Minecraft.ContainerMemory = "7G"
+	client.applyResponse = api.AdminConfigurationChangeResponse{
+		OK: true, RestartRequired: true, MemoryRestartRequired: true, MemoryRemainingMiB: 1024,
+		Changes: []api.AdminConfigurationChange{
+			{Field: "java_memory", Label: "Minecraft game memory", Before: "4G", After: "5G", RestartRequired: true},
+			{Field: "container_memory", Label: "Maximum Minecraft memory", Before: "6G", After: "7G", RestartRequired: true},
+		},
+		Proposed: proposed, ConfirmationRequired: true, Online: 2, Players: []string{"Alex", "Steve"},
+	}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := settingsFormValues()
+	values.Set("java_memory", "5G")
+	values.Set("container_memory", "7G")
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/settings/server/apply", values.Encode()))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("confirmation apply returned %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{"Players are online.", "2 players", "Alex", "Steve", `name="confirm_players" value="yes"`, "Restart Minecraft and apply", "No settings have been changed yet."} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("memory restart confirmation missing %q: %s", want, body)
+		}
+	}
+	if client.applyCalls != 1 || client.appliedRequest.ConfirmPlayers {
+		t.Fatalf("first apply calls=%d confirm=%t", client.applyCalls, client.appliedRequest.ConfirmPlayers)
+	}
+}
+
+func TestMinecraftMemoryConfirmedApplyRedirectsAfterRestart(t *testing.T) {
+	client := configuredSettingsFake()
+	client.applyResponse = api.AdminConfigurationChangeResponse{
+		OK: true, Applied: true, RestartRequired: true, MemoryRestartRequired: true, Restarted: true,
+	}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := settingsFormValues()
+	values.Set("java_memory", "5G")
+	values.Set("container_memory", "7G")
+	values.Set("confirm_players", "yes")
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/settings/server/apply", values.Encode()))
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("confirmed memory apply returned %d: %s", rr.Code, rr.Body.String())
+	}
+	if rr.Header().Get("Location") != "/settings/server?result=saved&memory_restart=1" {
+		t.Fatalf("unexpected redirect %q", rr.Header().Get("Location"))
+	}
+	if !client.appliedRequest.ConfirmPlayers {
+		t.Fatal("confirmed memory apply did not carry player confirmation")
+	}
+}
+
+func TestMinecraftMemoryStoppedServerDefersUntilNextStart(t *testing.T) {
+	client := configuredSettingsFake()
+	client.applyResponse = api.AdminConfigurationChangeResponse{
+		OK: true, Applied: true, RestartRequired: true, MemoryRestartRequired: true, RestartDeferred: true,
+	}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := settingsFormValues()
+	values.Set("java_memory", "5G")
+	values.Set("container_memory", "7G")
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/settings/server/apply", values.Encode()))
+	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/settings/server?result=saved&next_start=1" {
+		t.Fatalf("stopped memory apply returned %d %q", rr.Code, rr.Header().Get("Location"))
+	}
+}
 func TestMinecraftSettingsApplyRedirectsWithRestartNotice(t *testing.T) {
 	client := configuredSettingsFake()
-	client.applyResponse = api.AdminConfigurationChangeResponse{OK: true, Applied: true, RestartRequired: true}
+	client.applyResponse = api.AdminConfigurationChangeResponse{OK: true, Applied: true, RestartRequired: true, RestartDeferred: true}
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
 	if err != nil {
 		t.Fatal(err)

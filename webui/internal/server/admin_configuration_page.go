@@ -62,8 +62,32 @@ func (a *App) serverSettingsApply(w http.ResponseWriter, r *http.Request) {
 		a.renderServerSettingsFormError(w, r, client, session, identity, request, apiMessage(err, "Could not apply these settings."))
 		return
 	}
+	if result.ConfirmationRequired {
+		configuration, err := client.AdminConfiguration(r.Context(), session)
+		if err != nil {
+			a.handleAdminDiscoveryError(w, r, err)
+			return
+		}
+		defaults, err := client.AdminSetupDefaults(r.Context(), session)
+		if err != nil {
+			a.handleAdminDiscoveryError(w, r, err)
+			return
+		}
+		data := a.buildServerSettingsPageData(identity, configuration, defaults, request, &result, "", "")
+		data.CSRF = csrfFromRequest(r)
+		a.renderAdminDiscovery(w, "server_settings.html", data)
+		return
+	}
+	if !result.Applied {
+		a.renderServerSettingsFormError(w, r, client, session, identity, request, "Settings were not applied.")
+		return
+	}
 	location := "/settings/server?result=saved"
-	if result.RestartRequired {
+	if result.Restarted {
+		location += "&memory_restart=1"
+	} else if result.MemoryRestartRequired && result.RestartDeferred {
+		location += "&next_start=1"
+	} else if result.RestartRequired && result.RestartDeferred {
 		location += "&restart=1"
 	}
 	http.Redirect(w, r, location, http.StatusSeeOther)
@@ -144,6 +168,7 @@ func parseServerSettingsForm(r *http.Request) (api.AdminConfigurationChangeReque
 	out.BackupSchedule = strings.TrimSpace(r.FormValue("backup_schedule"))
 	out.BedrockEnabled = r.FormValue("bedrock_enabled") == "on"
 	out.BackupTimerEnabled = r.FormValue("backup_timer_enabled") == "on"
+	out.ConfirmPlayers = r.FormValue("confirm_players") == "yes"
 
 	var err error
 	if out.JavaPort, err = parsePositiveFormInt(r.FormValue("java_port"), "Minecraft Java port"); err != nil {
