@@ -92,20 +92,29 @@ grep -Fqx 'After=NetworkManager.service justvoxel-webui.service' /usr/lib/system
 grep -Fqx 'ExecStartPre=/usr/libexec/justvoxel/console-issue-refresh' /usr/lib/systemd/system/getty@.service.d/10-justvoxel-issue.conf
 test -x /usr/libexec/justvoxel/console-issue-refresh
 bash -n /usr/libexec/justvoxel/console-issue-refresh
-/usr/libexec/justvoxel/console-issue-refresh
-test -r /run/justvoxel/issue
-grep -Fq 'JUSTVOXEL' /run/justvoxel/issue
-grep -Fq 'Variant:' /run/justvoxel/issue
-grep -Fq 'Network:' /run/justvoxel/issue
-grep -Fq 'Minecraft:' /run/justvoxel/issue
-grep -Fq 'Web interface:' /run/justvoxel/issue
-grep -Fq 'Open in browser:' /run/justvoxel/issue
-grep -Fq 'Direct address:' /run/justvoxel/issue
-grep -Fq '\e[38;5;45m' /run/justvoxel/issue
-if grep -Fq 'Common commands' /run/justvoxel/issue; then
+
+# Validate the renderer directly. Image-build containers do not run the WebUI
+# service, so the issue contract must not depend on WebUI being Ready.
+issue_test="$(mktemp)"
+trap 'rm -f "${issue_test}"' EXIT
+/usr/libexec/justvoxel/motd --issue > "${issue_test}"
+grep -Fq 'JUSTVOXEL' "${issue_test}"
+grep -Fq 'Variant:' "${issue_test}"
+grep -Fq 'Network:' "${issue_test}"
+grep -Fq 'Minecraft:' "${issue_test}"
+grep -Fq 'Web interface:' "${issue_test}"
+grep -Fq 'Open in browser:' "${issue_test}"
+grep -Fq 'Direct address:' "${issue_test}"
+grep -Fq '\e[38;5;45m' "${issue_test}"
+if grep -Fq 'Common commands' "${issue_test}"; then
     echo 'ERROR: pre-login console banner must stop before Common commands.' >&2
     exit 1
 fi
+rm -f "${issue_test}"
+trap - EXIT
+
+/usr/libexec/justvoxel/console-issue-refresh
+test -r /run/justvoxel/issue
 test -f /etc/profile.d/90-justvoxel-motd.sh
 bash -n /etc/profile.d/90-justvoxel-motd.sh
 test -x /usr/libexec/justvoxel/motd

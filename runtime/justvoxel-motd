@@ -71,16 +71,22 @@ else
 fi
 
 web_state='Disabled'
-web_browser=''
-web_direct=''
+if [[ ${host} != unknown ]]; then
+    web_browser="http://${host}.local:8099"
+else
+    web_browser='Waiting for hostname'
+fi
+if [[ ${ipv4} == 'Not assigned' ]]; then
+    web_direct='Waiting for network address'
+else
+    web_direct="http://${ipv4}:8099"
+fi
 web_enabled_marker=/var/lib/justvoxel/webui/enabled
 web_initialized_marker=/var/lib/justvoxel/webui/initialized
 
 if systemctl is-active --quiet justvoxel-webui.service 2>/dev/null && \
     curl -fsS --max-time 1 http://127.0.0.1:8099/healthz >/dev/null 2>&1; then
     web_state='Ready'
-    if [[ ${host} != unknown ]]; then web_browser="http://${host}.local:8099"; else web_browser='Waiting for hostname'; fi
-    if [[ ${ipv4} == 'Not assigned' ]]; then web_direct='Waiting for network address'; else web_direct="http://${ipv4}:8099"; fi
 elif systemctl is-failed --quiet justvoxel-web-bootstrap.service 2>/dev/null; then
     web_state='Unavailable'
 elif [[ -e ${web_enabled_marker} ]]; then
@@ -129,6 +135,13 @@ line 'IPv4:' "${white}" "${ipv4}"
 line 'Minecraft:' "$([[ ${minecraft_state} == Configured ]] && printf '%s' "${green}" || printf '%s' "${yellow}")" "${minecraft_state}"
 printf '\n'
 line 'Web interface:' "$([[ ${web_state} == Ready ]] && printf '%s' "${green}" || printf '%s' "${yellow}")" "${web_state}"
+if [[ ${output_mode} == issue ]]; then
+    line 'Open in browser:' "${blue}" "${web_browser}"
+    line 'Direct address:' "${blue}" "${web_direct}"
+    printf '\n'
+    exit 0
+fi
+
 case "${web_state}" in
     Ready)
         line 'Open in browser:' "${blue}" "${web_browser}"
@@ -141,11 +154,6 @@ case "${web_state}" in
         line 'Check status:' "${green}" 'mjust web status'
         ;;
 esac
-
-if [[ ${output_mode} == issue ]]; then
-    printf '\n'
-    exit 0
-fi
 
 printf '\n%s%sCommon commands%s\n' "${bold}" "${cyan}" "${reset}"
 if [[ ${needs_setup} == yes ]]; then
