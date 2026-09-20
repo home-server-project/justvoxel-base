@@ -133,7 +133,11 @@ grep -Fq "network_state='Ethernet cable disconnected'" /usr/libexec/justvoxel/mo
 grep -Fq "line 'Network:'" /usr/libexec/justvoxel/motd
 grep -Fq 'IPv4:' /usr/libexec/justvoxel/motd
 grep -Fq 'Web interface:' /usr/libexec/justvoxel/motd
-grep -Fq 'mjust setup-advanced' /usr/libexec/justvoxel/motd
+grep -Fq "line 'First setup:'" /usr/libexec/justvoxel/motd
+if grep -Fq 'setup-advanced' /usr/libexec/justvoxel/motd; then
+    echo 'ERROR: login guidance must not expose the removed Advanced Setup path.' >&2
+    exit 1
+fi
 
 test -f /usr/lib/justvoxel/variant
 test -f /usr/lib/tmpfiles.d/justvoxel.conf
@@ -197,7 +201,10 @@ for script in /usr/libexec/justvoxel/mjust/*; do
     bash -n "${script}"
 done
 mjust_list="$(/usr/bin/mjust --list)"
-grep -Fq 'setup-advanced' <<<"${mjust_list}"
+if grep -Fq 'setup-advanced' <<<"${mjust_list}"; then
+    echo 'ERROR: mjust command list must not expose the removed Advanced Setup path.' >&2
+    exit 1
+fi
 grep -Fq 'status' <<<"${mjust_list}"
 grep -Fq 'status --details' <<<"${mjust_list}"
 grep -Fq 'web' <<<"${mjust_list}"

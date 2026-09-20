@@ -157,8 +157,7 @@ esac
 
 printf '\n%s%sCommon commands%s\n' "${bold}" "${cyan}" "${reset}"
 if [[ ${needs_setup} == yes ]]; then
-    line 'Normal setup:' "${green}" 'mjust setup'
-    line 'Advanced setup:' "${green}" 'mjust setup-advanced'
+    line 'First setup:' "${green}" 'mjust setup'
 fi
 line 'Admin menu:' "${green}" 'mjust'
 line 'Server status:' "${green}" 'mjust status'
