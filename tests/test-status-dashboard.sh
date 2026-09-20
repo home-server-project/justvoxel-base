@@ -24,23 +24,36 @@ fail() {
 [[ $(jv_status_overall Running 0 unknown healthy healthy healthy) == 'Unknown' ]] || fail 'unknown system state should remain Unknown'
 
 status="${repo_root}/mjust/libexec/status"
+collector="${repo_root}/mjust/libexec/web-status-json"
 common="${repo_root}/mjust/libexec/common.sh"
 for section in System Minecraft Network Storage Backups Container; do
     grep -Fq "section '${section}'" "${status}" || fail "status ${section} section missing"
 done
 
-grep -Fq 'df -Pk -- "$1"' "${status}" || fail 'portable filesystem usage query missing'
-if grep -Fq 'df -Pk --output=' "${status}"; then
+grep -Fq '"${api_client}" GET "${path}"' "${status}" || fail 'mJust status must use the Management API'
+grep -Fq "path='/v1/status?details=1'" "${status}" || fail 'mJust detailed status must use the Management API'
+grep -Fq 'extended.system.hostname' "${status}" || fail 'mJust status does not consume extended system status'
+grep -Fq 'extended.storage.system' "${status}" || fail 'mJust status does not consume extended storage status'
+
+for forbidden in 'systemctl ' 'podman ' 'rcon-cli' 'findmnt ' 'df -' 'ip -4 ' 'resolvectl '; do
+    if grep -Fq "${forbidden}" "${status}"; then
+        fail "mJust status still performs direct system inspection: ${forbidden}"
+    fi
+done
+
+grep -Fq 'df -Pk -- /var' "${collector}" || fail 'Agent status collector is missing portable filesystem usage'
+if grep -Fq 'df -Pk --output=' "${collector}"; then
     fail 'invalid GNU df -P/--output combination returned'
 fi
 
-grep -Fq 'jv_variant_name' "${status}" || fail 'status must use canonical variant normalization'
+grep -Fq 'jv_variant_name' "${collector}" || fail 'Agent status collector must use canonical variant normalization'
 grep -Fq 'justvoxel-hwe' "${common}" || fail 'JustVoxel HWE variant normalization missing'
 grep -Fq 'justvoxel-baremetal' "${common}" || fail 'legacy Bare Metal compatibility missing'
 grep -Fq 'c_good=' "${status}" || fail 'healthy status color missing'
 grep -Fq 'c_warn=' "${status}" || fail 'warning status color missing'
 grep -Fq 'c_bad=' "${status}" || fail 'failure status color missing'
 grep -Fq "section 'Advanced details'" "${status}" || fail 'advanced status detail section missing'
-grep -Fq 'systemctl --failed --type=service' "${status}" || fail 'failed service details missing'
+grep -Fq 'details_failed=' "${collector}" || fail 'Agent detailed failed-service status is missing'
+grep -Fq 'details_systemd=' "${collector}" || fail 'Agent detailed Minecraft service status is missing'
 
-echo 'status dashboard regression tests passed.'
+echo 'status dashboard API migration regression tests passed.'
