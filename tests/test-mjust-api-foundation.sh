@@ -21,12 +21,15 @@ backup_storage_api="${repo_root}/mjust/libexec/backup-storage-api.sh"
 setup="${repo_root}/mjust/libexec/setup"
 setup_api="${repo_root}/mjust/libexec/setup-api.sh"
 setup_legacy="${repo_root}/mjust/libexec/setup-legacy"
+validate="${repo_root}/mjust/libexec/validate"
+validate_backend="${repo_root}/mjust/libexec/validate-backend"
 storage_provision="${repo_root}/mjust/libexec/storage-provision"
 admin_backup_storage="${repo_root}/management/cmd/justvoxel-management-agent/admin_backup_storage.go"
 admin_storage_provision="${repo_root}/management/cmd/justvoxel-management-agent/admin_storage_provision.go"
 admin_setup_plan="${repo_root}/management/cmd/justvoxel-management-agent/admin_setup_plan.go"
 admin_setup_apply="${repo_root}/management/cmd/justvoxel-management-agent/admin_setup_apply.go"
 admin_operations="${repo_root}/management/cmd/justvoxel-management-agent/admin_operations.go"
+admin_validation="${repo_root}/management/cmd/justvoxel-management-agent/admin_validation.go"
 admin_configuration="${repo_root}/management/cmd/justvoxel-management-agent/admin_configuration.go"
 admin_discovery="${repo_root}/management/cmd/justvoxel-management-agent/admin_discovery.go"
 operator_surfaces="${repo_root}/management/cmd/justvoxel-management-agent/operator_surfaces.go"
@@ -37,7 +40,7 @@ fail() {
     exit 1
 }
 
-for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${backup_storage}" "${backup_storage_api}" "${setup}" "${setup_api}" "${setup_legacy}" "${storage_provision}" "${admin_backup_storage}" "${admin_storage_provision}" "${admin_setup_plan}" "${admin_setup_apply}" "${admin_operations}" "${admin_configuration}" "${admin_discovery}" "${operator_surfaces}" "${justfile}"; do
+for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${backup_storage}" "${backup_storage_api}" "${setup}" "${setup_api}" "${setup_legacy}" "${validate}" "${validate_backend}" "${storage_provision}" "${admin_backup_storage}" "${admin_storage_provision}" "${admin_setup_plan}" "${admin_setup_apply}" "${admin_operations}" "${admin_validation}" "${admin_configuration}" "${admin_discovery}" "${operator_surfaces}" "${justfile}"; do
     [[ -f ${file} ]] || fail "missing mJust Management API file: ${file}"
 done
 
@@ -199,4 +202,20 @@ if grep -Fq 'Authorization:' "${setup_api}"; then
     fail 'mJust setup API helper must not introduce a bearer token'
 fi
 
-echo 'mJust Management API foundation, Players, Minecraft control, Status, Whitelist, Manual Backup, Logs, Configuration, Backup Storage, and First-run Setup migration checks passed.'
+grep -Fq '"${api_client}" GET /v1/admin/validation' "${validate}" || fail 'mJust validate does not use the Management API'
+grep -Fq 'adminValidationHelper = "/usr/libexec/justvoxel/mjust/validate-backend"' "${admin_validation}" || fail 'Management Agent validation helper is not the preserved backend'
+grep -Fq 'GET /v1/admin/validation' "${admin_validation}" || fail 'Management Agent validation route is missing'
+grep -Fq 'registerAdminValidationRoutes(mux, s)' "${main}" || fail 'Management Agent validation route is not registered'
+grep -Fq 'systemctl --failed' "${validate_backend}" || fail 'validation backend lost systemd health checks'
+grep -Fq 'podman exec minecraft rcon-cli' "${validate_backend}" || fail 'validation backend lost Minecraft RCON checks'
+
+for forbidden in 'systemctl ' 'podman ' 'rcon-cli' 'firewall-cmd ' 'findmnt ' 'mountpoint ' 'swapon ' '/proc/' '/sys/' 'ls -Z' 'storage-summary'; do
+    if grep -Fq "${forbidden}" "${validate}"; then
+        fail "mJust validate frontend still performs direct system inspection: ${forbidden}"
+    fi
+done
+if grep -Fq 'Authorization:' "${validate}"; then
+    fail 'mJust validate frontend must not introduce a bearer token'
+fi
+
+echo 'mJust Management API foundation, Players, Minecraft control, Status, Whitelist, Manual Backup, Logs, Configuration, Backup Storage, First-run Setup, and Validation migration checks passed.'
