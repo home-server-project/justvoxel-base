@@ -53,7 +53,7 @@ func TestSetupReviewMutationsRequireCSRF(t *testing.T) {
 	advanceSetupToReview(t, app)
 	_ = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
 
-	for _, path := range []string{"/setup/review/eula", "/setup/review/back", "/setup/review/cancel"} {
+	for _, path := range []string{"/setup/review/eula", "/setup/review/apply", "/setup/review/back", "/setup/review/cancel"} {
 		rr := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, "http://example"+path, strings.NewReader(""))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -72,8 +72,8 @@ func TestSetupReviewMutationsRequireCSRF(t *testing.T) {
 	}
 }
 
-func TestSetupReviewRemainsNonExecutableAndSecretFree(t *testing.T) {
-	client := setupReviewClient()
+func TestSetupReviewExecutionSurfaceKeepsSMBSecretTransientAndManagementAPIPrivate(t *testing.T) {
+	client := setupExecutionClient()
 	client.plan.Requirements.SMBPasswordRequired = true
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
 	if err != nil {
@@ -88,20 +88,25 @@ func TestSetupReviewRemainsNonExecutableAndSecretFree(t *testing.T) {
 		t.Fatalf("review returned %d: %s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, forbidden := range []string{`type="password"`, `name="password"`, `name="backup_password"`, `action="/setup/apply"`, `action="/v1/admin/setup/apply"`} {
-		if strings.Contains(body, forbidden) {
-			t.Fatalf("review exposed forbidden Apply/secret surface %q: %s", forbidden, body)
+	for _, want := range []string{
+		`action="/setup/review/apply"`,
+		`type="password" name="smb_password"`,
+		"SMB password required during execution",
+		"It is not stored in the setup draft or operation journal.",
+		`<button type="submit" disabled>Configure JustVoxel</button>`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("review execution surface missing %q: %s", want, body)
 		}
 	}
-	if !strings.Contains(body, "SMB password required during execution") {
-		t.Fatal("review did not explain execution-time SMB credential requirement")
-	}
-	if !strings.Contains(body, `<button type="button" disabled>Configure JustVoxel</button>`) {
-		t.Fatal("A4.4 review did not keep Configure JustVoxel disabled")
+	for _, forbidden := range []string{`name="password"`, `name="backup_password"`, `action="/setup/apply"`, `action="/v1/admin/setup/apply"`, "family-secret"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("review exposed forbidden management/secret surface %q: %s", forbidden, body)
+		}
 	}
 
-	apply := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/apply", "csrf=csrf-token"))
-	if apply.Code < 400 {
-		t.Fatalf("WebUI setup Apply path unexpectedly executable: status=%d body=%s", apply.Code, apply.Body.String())
+	legacy := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/apply", "csrf=csrf-token"))
+	if legacy.Code < 400 {
+		t.Fatalf("legacy WebUI setup Apply path unexpectedly executable: status=%d body=%s", legacy.Code, legacy.Body.String())
 	}
 }

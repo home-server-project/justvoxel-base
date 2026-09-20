@@ -123,6 +123,9 @@ func (a *App) setupWizardPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if a.redirectCurrentSetupOperation(w, r, session, client) {
+		return
+	}
 	draft, exists := firstRunSetupDrafts.get(a, session)
 	if !exists {
 		draft = setupDraft{}

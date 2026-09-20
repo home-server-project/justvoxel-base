@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/static/app.css">
   <link rel="stylesheet" href="/static/setup.css">
   <link rel="stylesheet" href="/static/setup-review.css">
+  <script src="/static/setup-operation.js" defer></script>
 </head>
 <body class="role-administrator setup-body">
 <header class="setup-header">
@@ -107,10 +108,21 @@
     </section>
 
     {{if .ShortPlanReference}}<p class="muted compact">Validated plan: <code>{{.ShortPlanReference}}</code></p>{{end}}
-    <div class="setup-execution-placeholder">
-      <div class="setup-execution-copy"><strong>Configure JustVoxel</strong><span>Setup execution will be enabled by the transactional setup engine. A4.4 does not modify the appliance.</span></div>
-      <button type="button" disabled>Configure JustVoxel</button>
-    </div>
+    <form class="setup-execution-placeholder" method="post" action="/setup/review/apply" data-setup-apply>
+      <div class="setup-execution-copy">
+        <strong>Configure JustVoxel</strong>
+        <span>Apply this exact validated plan using JustVoxel's transactional setup engine. Progress and rollback status will remain available if the browser temporarily loses connection.</span>
+        {{if .Plan.Requirements.SMBPasswordRequired}}
+        <label class="setup-secret-input">SMB password
+          <input type="password" name="smb_password" required maxlength="4096" autocomplete="off" {{if not .EULAAccepted}}disabled{{end}}>
+          <small>Used only while mounting and validating the reviewed SMB backup destination. It is not stored in the setup draft or operation journal.</small>
+        </label>
+        {{end}}
+      </div>
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <input type="hidden" name="plan_fingerprint" value="{{.Plan.PlanFingerprint}}">
+      <button type="submit" {{if not .EULAAccepted}}disabled{{end}}>Configure JustVoxel</button>
+    </form>
     {{end}}
 
     <div class="setup-actions setup-actions-split">

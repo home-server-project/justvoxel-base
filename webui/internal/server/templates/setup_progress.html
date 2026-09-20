@@ -1,0 +1,58 @@
+{{define "setup_progress.html"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>JustVoxel - Configuring</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/setup.css">
+  <link rel="stylesheet" href="/static/setup-review.css">
+  <script src="/static/setup-operation.js" defer></script>
+</head>
+<body class="role-administrator setup-body">
+<header class="setup-header">
+  <a class="brand-link" href="/setup/progress/{{.Operation.OperationID}}" aria-current="page" aria-label="JustVoxel setup progress"><strong>JustVoxel</strong><span>Minecraft Server Appliance</span></a>
+  <form class="nav-logout" method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Log out</button></form>
+</header>
+<main class="setup-shell">
+  <div class="title-row setup-title-row"><div><p class="eyebrow">First setup</p><h1>Configuring JustVoxel</h1></div><span class="badge" id="setup-operation-state">{{.StateLabel}}</span></div>
+
+  <section class="panel setup-step-panel setup-operation-panel"
+    data-setup-operation
+    data-status-url="/api/setup/progress/{{.Operation.OperationID}}"
+    data-operation-id="{{.Operation.OperationID}}">
+    <div class="setup-operation-icon" aria-hidden="true"></div>
+    <p class="setup-lead" id="setup-operation-status">{{.Operation.Status}}</p>
+    <div class="setup-operation-details">
+      <div><span>Stage</span><strong id="setup-operation-stage">{{.StageLabel}}</strong></div>
+      <div><span>Operation</span><code>{{.Operation.OperationID}}</code></div>
+    </div>
+
+    <div class="notice setup-reconnect-note" id="setup-reconnect-note" hidden>
+      <strong>Reconnecting to JustVoxel…</strong><br>
+      Setup may still be running. Do not power off the server. This page will keep trying to reconnect to the same operation.
+    </div>
+
+    <div class="notice success" id="setup-operation-success" {{if ne .Operation.State "succeeded"}}hidden{{end}}>
+      <strong>JustVoxel is configured.</strong><br>Minecraft and the selected backup workflow passed the first-run verification.
+    </div>
+
+    <div class="notice warning" id="setup-operation-rollback" {{if ne .Operation.State "rolled_back"}}hidden{{end}}>
+      <strong>Setup was rolled back safely.</strong><br>The reviewed setup did not complete, and JustVoxel restored the reversible changes it could confirm.
+    </div>
+
+    <div class="notice error" id="setup-operation-attention" {{if ne .Operation.State "needs_attention"}}hidden{{end}}>
+      <strong>Setup needs attention.</strong><br>JustVoxel could not confirm a safe automatic recovery. Do not start another setup operation until the reported issue is reviewed.
+    </div>
+
+    <div class="setup-operation-actions">
+      <a class="button-link" id="setup-dashboard-link" href="/" {{if ne .Operation.State "succeeded"}}hidden{{end}}>Open dashboard</a>
+      <a class="button-link secondary" id="setup-review-link" href="/setup/review" {{if ne .Operation.State "rolled_back"}}hidden{{end}}>Return to Review</a>
+    </div>
+  </section>
+
+  <p class="muted compact">Progress is stored by the JustVoxel Management Agent. Refreshing or reopening this operation URL does not start setup again.</p>
+  <p class="disclaimer">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</p>
+</main>
+</body>
+</html>{{end}}
