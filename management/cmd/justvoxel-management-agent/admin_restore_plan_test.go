@@ -49,7 +49,9 @@ func TestAdminRestorePlanLocalRootAllowedAndRolesDenied(t *testing.T) {
 
 	s := surfaceTestServer(t, roleViewer)
 	rr := httptest.NewRecorder()
-	s.adminRestorePlan(rr, requestWithPeerUIDBody(http.MethodPost, "http://unix/v1/admin/restore/plan", 0, body))
+	localRootRequest := httptest.NewRequest(http.MethodPost, "http://unix/v1/admin/restore/plan", strings.NewReader(body))
+	localRootRequest = localRootRequest.WithContext(context.WithValue(localRootRequest.Context(), peerUIDKey{}, uint32(0)))
+	s.adminRestorePlan(rr, localRootRequest)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("local root restore plan returned %d: %s", rr.Code, rr.Body.String())
 	}
