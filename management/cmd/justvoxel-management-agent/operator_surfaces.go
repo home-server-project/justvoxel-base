@@ -164,8 +164,13 @@ func (s *server) minecraftLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	limit := boundedQueryLimit(r, 100, 200)
 	outputMode := "short-iso"
-	if r.URL.Query().Get("format") == "cat" {
+	switch strings.TrimSpace(r.URL.Query().Get("format")) {
+	case "", "short-iso":
+	case "cat":
 		outputMode = "cat"
+	default:
+		writeError(w, http.StatusBadRequest, "unsupported Minecraft log format")
+		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
