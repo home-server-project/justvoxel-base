@@ -4,6 +4,7 @@ set -Eeuo pipefail
 source /usr/libexec/justvoxel/mjust/common.sh
 source /usr/libexec/justvoxel/mjust/backup-common.sh
 source /usr/libexec/justvoxel/mjust/restore-common.sh
+source /usr/libexec/justvoxel/mjust/interrupt-safety.sh
 
 require_root
 
@@ -47,7 +48,13 @@ rollback_restore() {
     jv_restore_write_state "${transaction}" rollback "${mode}" "${selected_archive}" || rollback_ok=no
 
     if systemctl is-active --quiet minecraft.service 2>/dev/null; then
-        systemctl stop minecraft.service >/dev/null 2>&1 || rollback_ok=no
+        if ! JV_INTERRUPT_CONFIRMATION_MODE=confirmed \
+            jv_stop_minecraft_adaptive 'Roll back Minecraft Restore' >/dev/null 2>&1; then
+            # Runtime validation may have failed badly enough that RCON is unavailable.
+            # In recovery, fall back to the container's native graceful stop rather
+            # than blocking rollback of known-good pre-restore data.
+            systemctl stop minecraft.service >/dev/null 2>&1 || rollback_ok=no
+        fi
     fi
 
     if [[ ${mode} == full ]]; then
@@ -293,13 +300,27 @@ if systemctl is-active --quiet minecraft.service; then
         exit 1
     fi
 
-    emit_progress running minecraft_stop 'Stopping Minecraft through its configured graceful shutdown path.'
-    systemctl stop minecraft.service >/dev/null
-    minecraft_stopped_by_restore=yes
-    if systemctl is-active --quiet minecraft.service; then
-        echo 'ERROR: Minecraft remained active after the graceful stop request.' >&2
-        exit 1
-    fi
+    emit_progress running minecraft_stop 'Stopping Minecraft through the player-aware graceful shutdown path.'
+    stop_mode=required
+    [[ ${players_confirmed} == true ]] && stop_mode=confirmed
+    set +e
+    JV_INTERRUPT_CONFIRMATION_MODE="${stop_mode}" \
+        jv_stop_minecraft_adaptive 'Restore Minecraft data' >/dev/null 2>&1
+    stop_rc=$?
+    set -e
+    case "${stop_rc}" in
+        0)
+            minecraft_stopped_by_restore=yes
+            ;;
+        10)
+            echo 'ERROR: a player joined after Restore review; interruption confirmation is required again.' >&2
+            exit 1
+            ;;
+        *)
+            echo 'ERROR: Minecraft could not be stopped safely for Restore.' >&2
+            exit 1
+            ;;
+    esac
 fi
 
 /usr/libexec/justvoxel/mjust/validate-data-mount >/dev/null
