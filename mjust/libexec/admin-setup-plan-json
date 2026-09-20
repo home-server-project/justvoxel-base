@@ -326,11 +326,6 @@ if port_in_use tcp "${java_port}"; then
     json_error "Minecraft Java TCP port ${java_port} is already in use on this appliance." port_conflict
     exit 0
 fi
-if [[ ${bedrock_enabled} == true ]] && port_in_use udp "${bedrock_port}"; then
-    json_error "Bedrock UDP port ${bedrock_port} is already in use on this appliance." port_conflict
-    exit 0
-fi
-
 if [[ -z ${image_tag} || ! ${image_tag} =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
     json_error 'Minecraft container channel or tag is invalid.' invalid_minecraft
     exit 0
@@ -402,6 +397,11 @@ if [[ ${requested_bedrock_enabled} == true ]]; then
     elif [[ ${version_policy} == latest ]]; then
         warnings="$(warning_add "${warnings}" bedrock_moving_version "Bedrock cross-play is compatible with Minecraft ${bedrock_compatibility_version} now, but Always newest can move to a newer Minecraft version before Geyser/Floodgate catches up.")"
     fi
+fi
+
+if [[ ${bedrock_enabled} == true ]] && port_in_use udp "${bedrock_port}"; then
+    json_error "Bedrock UDP port ${bedrock_port} is already in use on this appliance." port_conflict
+    exit 0
 fi
 
 storage_json=''
