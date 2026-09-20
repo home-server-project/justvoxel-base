@@ -1,0 +1,324 @@
+---
+name: mjust-testing
+
+on:
+  push:
+    branches: [mjust-testing]
+    paths-ignore:
+      - '**/README.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-mjust-testing
+  cancel-in-progress: true
+
+env:
+  IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/justvoxel-base
+  CURRENT_TAG: 'mjust-testing'
+  RECHUNK_MAX_LAYERS: '127'
+  OCI_LAYER_LIMIT: '128'
+  HOME_SERVER_BASE_IMAGE: ghcr.io/home-server-project/home-server-base-10:stable
+
+jobs:
+  source-tests:
+    name: Source and management tests
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout mjust-testing branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: mjust-testing
+
+      - name: Set up Go
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6
+        with:
+          go-version: '1.25.x'
+          check-latest: true
+          cache: false
+
+      - name: Install PAM source-test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libpam0g-dev libpwquality-dev
+
+      - name: Run shell and mjust regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for script in \
+            build_files/*.sh \
+            build_files/validate/*.sh \
+            mjust/bin/mjust \
+            mjust/libexec/* \
+            runtime/* \
+            tests/*.sh; do
+            [[ -f "${script}" ]] || continue
+            bash -n "${script}"
+          done
+          for test_script in tests/test-*.sh; do
+            [[ -f "${test_script}" ]] || continue
+            bash "${test_script}"
+          done
+
+      - name: Build and test management agent source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd management
+          go mod download
+          CGO_ENABLED=1 go vet ./...
+          CGO_ENABLED=1 go test ./...
+          CGO_ENABLED=1 go build -trimpath -o /tmp/management-agent ./cmd/justvoxel-management-agent
+          /tmp/management-agent version
+
+  build:
+    name: Build JustVoxel Base mjust-testing
+    needs: [source-tests]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    steps:
+      - name: Checkout mjust-testing branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: mjust-testing
+
+      - name: Set up Go for local WebUI build
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6
+        with:
+          go-version: '1.25.x'
+          check-latest: true
+          cache: false
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y podman skopeo jq
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: 'v3.1.2'
+
+      - name: Verify Home Server Base stable signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          cosign verify \
+            --new-bundle-format=false \
+            --key cosign.pub \
+            "${HOME_SERVER_BASE_IMAGE}" >/dev/null
+
+      - name: Build local WebUI artifact
+        id: webui
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./build_files/build-webui.sh "${GITHUB_SHA}" "${GITHUB_WORKSPACE}/build_artifacts/webui"
+          version="$(jq -r '.version' build_artifacts/webui/webui-release.json)"
+          source_commit="$(jq -r '.source_commit' build_artifacts/webui/webui-release.json)"
+          management_api="$(jq -r '.management_api' build_artifacts/webui/webui-release.json)"
+          [[ -n "${version}" && "${version}" != "null" ]]
+          [[ "${source_commit}" == "${GITHUB_SHA}" ]]
+          [[ "${management_api}" == "v1" ]]
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build management agent on Home Server Base 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build_artifacts/management
+          sudo podman run --rm \
+            --pull=always \
+            --security-opt=label=disable \
+            -v "${PWD}/management:/src:ro" \
+            -v "${PWD}/system_files/etc/pam.d/justvoxel:/etc/pam.d/justvoxel:ro" \
+            -v "${PWD}/tests/run-pam-integration-alma.sh:/run-pam-integration-alma.sh:ro" \
+            -v "${PWD}/build_artifacts/management:/out" \
+            "${HOME_SERVER_BASE_IMAGE}" \
+            /bin/bash -c '
+              set -euo pipefail
+              dnf install -y gcc golang pam-devel libpwquality-devel diffutils authselect authselect-libs shadow-utils
+              mkdir -p /work /tmp/go-home /tmp/go-build-cache /tmp/go-path
+              cp -a /src/. /work/
+              cd /work
+              HOME=/tmp/go-home GOCACHE=/tmp/go-build-cache GOPATH=/tmp/go-path GOENV=off go mod tidy
+              dirty=0
+              diff -u /src/go.mod /work/go.mod || dirty=1
+              diff -u /src/go.sum /work/go.sum || dirty=1
+              if (( dirty != 0 )); then
+                echo "ERROR: AlmaLinux Go requires module metadata changes shown above." >&2
+                exit 1
+              fi
+              HOME=/tmp/go-home GOCACHE=/tmp/go-build-cache GOPATH=/tmp/go-path GOENV=off CGO_ENABLED=1 go test -mod=readonly ./...
+              HOME=/tmp/go-home \
+              GOCACHE=/tmp/go-build-cache \
+              GOPATH=/tmp/go-path \
+              GOENV=off \
+              bash /run-pam-integration-alma.sh
+              HOME=/tmp/go-home GOCACHE=/tmp/go-build-cache GOPATH=/tmp/go-path GOENV=off CGO_ENABLED=1 go build -mod=readonly -trimpath -o /out/management-agent ./cmd/justvoxel-management-agent
+            '
+          sudo chmod 0755 build_artifacts/management/management-agent
+
+      - name: Build JustVoxel Base
+        shell: bash
+        env:
+          WEBUI_VERSION: ${{ steps.webui.outputs.version }}
+        run: |
+          set -euo pipefail
+          sudo podman build \
+            --pull=always \
+            --security-opt=label=disable \
+            --cap-add=all \
+            --device /dev/fuse \
+            --build-arg "HOME_SERVER_BASE_IMAGE=${HOME_SERVER_BASE_IMAGE}" \
+            --build-arg "JUSTVOXEL_BASE_REPOSITORY=${IMAGE_REPOSITORY}" \
+            --build-arg "JUSTVOXEL_VM_REPOSITORY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/justvoxel-vm" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --label "io.home-server-project.justvoxel.webui.version=${WEBUI_VERSION}" \
+            --label "io.home-server-project.justvoxel.management-api=v1" \
+            --target justvoxel-base \
+            --tag justvoxel-base:unrechunked \
+            --file Containerfile \
+            .
+
+      - name: Rechunk JustVoxel Base
+        id: rechunk
+        shell: bash
+        run: |
+          set -euo pipefail
+          rechunk_tmp="${RUNNER_TEMP}/justvoxel-base-rechunk"
+          sudo mkdir -p "${rechunk_tmp}"
+          sudo chmod 1777 "${rechunk_tmp}"
+          sudo podman run --rm --privileged \
+            -v /var/lib/containers:/var/lib/containers \
+            -v "${rechunk_tmp}:/var/tmp" \
+            --entrypoint /usr/libexec/bootc-base-imagectl \
+            localhost/justvoxel-base:unrechunked \
+            rechunk \
+            --max-layers "${RECHUNK_MAX_LAYERS}" \
+            localhost/justvoxel-base:unrechunked \
+            localhost/justvoxel-base:test
+          layer_count="$(sudo skopeo inspect --raw containers-storage:localhost/justvoxel-base:test | jq -r '.layers | length')"
+          [[ "${layer_count}" =~ ^[0-9]+$ ]]
+          (( layer_count <= OCI_LAYER_LIMIT ))
+          echo "layers=${layer_count}" >> "${GITHUB_OUTPUT}"
+
+      - name: Validate completed Base image
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo podman run --rm \
+            --entrypoint /bin/bash \
+            justvoxel-base:test \
+            -c '/usr/libexec/justvoxel/health/common && /usr/libexec/justvoxel/health/vm && bootc container lint --fatal-warnings'
+
+      - name: Login to GHCR
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${HOME}/.docker"
+          printf '%s' "${GHCR_TOKEN}" | podman login \
+            --authfile "${HOME}/.docker/config.json" \
+            ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+          chmod 600 "${HOME}/.docker/config.json"
+
+      - name: Push mjust-testing Base image
+        id: push
+        shell: bash
+        run: |
+          set -euo pipefail
+          build_tag="mjust-testing-$(date -u +%Y%m%d)-${GITHUB_SHA:0:7}"
+          echo "BUILD_TAG=${build_tag}" >> "${GITHUB_ENV}"
+
+          sudo podman tag justvoxel-base:test "${IMAGE_REPOSITORY}:${build_tag}"
+          sudo podman tag justvoxel-base:test "${IMAGE_REPOSITORY}:${CURRENT_TAG}"
+
+          sudo podman push \
+            --authfile "${HOME}/.docker/config.json" \
+            --digestfile /tmp/digest \
+            "${IMAGE_REPOSITORY}:${build_tag}"
+          sudo podman push \
+            --authfile "${HOME}/.docker/config.json" \
+            "${IMAGE_REPOSITORY}:${CURRENT_TAG}"
+
+          digest="$(cat /tmp/digest)"
+          [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+
+      - name: Sign mjust-testing Base image digest
+        shell: bash
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cosign sign -y \
+            --new-bundle-format=false \
+            --use-signing-config=false \
+            --key env://COSIGN_PRIVATE_KEY \
+            "${IMAGE_REPOSITORY}@${DIGEST}"
+
+      - name: Verify mjust-testing Base signature
+        shell: bash
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cosign verify \
+            --new-bundle-format=false \
+            --key cosign.pub \
+            "${IMAGE_REPOSITORY}@${DIGEST}"
+
+      - name: Build summary
+        if: always()
+        shell: bash
+        env:
+          LAYERS: ${{ steps.rechunk.outputs.layers }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+          WEBUI_VERSION: ${{ steps.webui.outputs.version }}
+        run: |
+          {
+            echo "## JustVoxel Base mjust-testing"
+            echo
+            echo "- Home Server Base input: ${HOME_SERVER_BASE_IMAGE}"
+            echo "- WebUI: ${WEBUI_VERSION:-unresolved}"
+            echo "- Management API: v1"
+            echo "- Rechunked layers: ${LAYERS:-unknown} / ${OCI_LAYER_LIMIT}"
+            echo "- Moving tag: ${IMAGE_REPOSITORY}:${CURRENT_TAG}"
+            echo "- Immutable tag: ${IMAGE_REPOSITORY}:${BUILD_TAG:-n/a}"
+            echo "- Digest: ${DIGEST:-not-published}"
+            echo "- VM-ready: health/common + health/vm"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  cleanup:
+    name: cleanup
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+
+    steps:
+      - name: Remove expired mjust-testing Base images
+        uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          packages: justvoxel-base
+          delete-tags: 'mjust-testing-*'
+          exclude-tags: 'mjust-testing,testing,testing-*,stable,stable-*'
+          older-than: 45 days
+          keep-n-tagged: 7
+          validate: true
