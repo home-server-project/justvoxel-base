@@ -226,7 +226,7 @@ func TestMinecraftMemoryStoppedServerDefersUntilNextStart(t *testing.T) {
 }
 func TestMinecraftSettingsApplyRedirectsWithRestartNotice(t *testing.T) {
 	client := configuredSettingsFake()
-	client.applyResponse = api.AdminConfigurationChangeResponse{OK: true, Applied: true, RestartRequired: true}
+	client.applyResponse = api.AdminConfigurationChangeResponse{OK: true, Applied: true, RestartRequired: true, RestartDeferred: true}
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
 	if err != nil {
 		t.Fatal(err)
