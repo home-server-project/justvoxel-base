@@ -30,6 +30,13 @@ jv_system_actions_get() {
 
 jv_system_actions_apply() {
     local action="$1" players_confirmed="${2:-false}" payload response rc
+    case "${action}" in
+        reboot|poweroff|firmware-reboot) ;;
+        *)
+            echo 'ERROR: unsupported JustVoxel system action.' >&2
+            return 2
+            ;;
+    esac
     payload="$(jq -cn --argjson players_confirmed "${players_confirmed}"         '{action_confirmed:true,confirm_players:$players_confirmed}')"
     set +e
     response="$(printf '%s\n' "${payload}" | "${JV_SYSTEM_ACTIONS_API_CLIENT}" POST "/v1/admin/system/${action}" --data)"
