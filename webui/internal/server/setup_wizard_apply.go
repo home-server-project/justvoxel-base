@@ -26,6 +26,8 @@ type setupProgressPageData struct {
 	CSRF          string
 	Identity      api.SessionInfo
 	Operation     api.PersistentOperation
+	StateLabel    string
+	StageLabel    string
 }
 
 func (a *App) registerSetupWizardApplyRoutes(mux *http.ServeMux) {
@@ -163,6 +165,8 @@ func (a *App) setupWizardProgressPage(w http.ResponseWriter, r *http.Request) {
 	a.renderAdminDiscovery(w, "setup_progress.html", setupProgressPageData{
 		Title: "Configuring JustVoxel", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
 		CSRF: csrfFromRequest(r), Identity: identity, Operation: *response.Operation,
+		StateLabel: setupOperationStateLabel(response.Operation.State),
+		StageLabel: setupOperationStageLabel(response.Operation.Stage),
 	})
 }
 
@@ -222,6 +226,66 @@ func (a *App) setupWizardProgressStatus(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		http.Error(w, "could not encode setup operation", http.StatusInternalServerError)
+	}
+}
+
+func setupOperationStateLabel(state string) string {
+	switch state {
+	case "queued":
+		return "Queued"
+	case "validating":
+		return "Validating"
+	case "running":
+		return "Configuring"
+	case "verifying":
+		return "Verifying"
+	case "failed":
+		return "Recovering"
+	case "rolling_back":
+		return "Rolling back"
+	case "rolled_back":
+		return "Rolled back"
+	case "needs_attention":
+		return "Needs attention"
+	case "succeeded":
+		return "Complete"
+	default:
+		return "Working"
+	}
+}
+
+func setupOperationStageLabel(stage string) string {
+	switch stage {
+	case "queued":
+		return "Waiting to start"
+	case "storage_preflight":
+		return "Checking storage"
+	case "storage_snapshot":
+		return "Preparing storage changes"
+	case "storage_verified":
+		return "Storage ready"
+	case "runtime_preflight":
+		return "Checking Minecraft configuration"
+	case "runtime_config":
+		return "Writing Minecraft configuration"
+	case "minecraft_verify":
+		return "Starting and checking Minecraft"
+	case "final_validation":
+		return "Final validation"
+	case "completed":
+		return "Complete"
+	case "setup_failed":
+		return "Preparing recovery"
+	case "runtime_rollback":
+		return "Restoring Minecraft configuration"
+	case "storage_rollback":
+		return "Restoring storage changes"
+	case "setup_rolled_back":
+		return "Rolled back"
+	case "interrupted":
+		return "Interrupted"
+	default:
+		return "Working"
 	}
 }
 
