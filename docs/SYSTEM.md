@@ -2,6 +2,12 @@
 
 JustVoxel keeps operating-system maintenance separate from Minecraft/container maintenance.
 
+Reboot, poweroff, and firmware/UEFI reboot use the same Management API architecture as other migrated appliance controls:
+
+`mJust / WebUI -> Management API -> Management Agent -> system action backend`
+
+The terminal commands are presentation/confirmation frontends. Host power control, firmware capability checks, player-safety decisions, and final systemd actions are owned behind the Management API.
+
 ## Commands
 
 - `mjust os-status` — friendly bootc deployment status
@@ -57,22 +63,28 @@ The JustVoxel menu does not add an extra pause after btop exits.
 
 ## Reboot and power off
 
-`mjust reboot` and `mjust poweroff` use the same player-awareness policy as Minecraft service interruption:
+`mjust reboot` and `mjust poweroff` are thin Management API frontends.
+
+The Agent exposes system-action capability/status data and requires explicit confirmation before accepting either action. It applies the same player-aware interruption policy as Minecraft service control:
 
 1. if Minecraft is stopped, no RCON query is needed
 2. if Minecraft is running, query players through internal RCON
 3. fail closed if player state cannot be determined
 4. require explicit approval when players are online
-5. stop Minecraft through its normal graceful systemd/Quadlet path
-6. perform the requested host power action
+5. stop Minecraft through the shared adaptive graceful-shutdown path
+6. queue the requested host action only after Minecraft has stopped safely
+
+Accepted host actions are queued with a short delay so the API can return a final accepted response before the machine goes down.
 
 An ordinary reboot/poweroff does not force a Minecraft backup. If a bootc update is staged, the next boot uses it normally.
 
 ## Firmware / UEFI
 
-`mjust firmware` is intended only for supported physical-hardware deployments. VM or otherwise unsupported environments refuse the operation and direct the administrator to the platform/hypervisor controls.
+`mjust firmware` is a thin frontend over the same System Actions API and is intended only for supported physical-hardware deployments. VM or otherwise unsupported environments refuse the operation and direct the administrator to the platform/hypervisor controls.
 
-The firmware workflow verifies EFI/systemd firmware-reboot support, performs a best-effort DRM display check, warns when no display is detected or display state is unknown, requires confirmation, performs the same Minecraft-safe shutdown, and requests `systemctl reboot --firmware-setup`.
+The Agent owns the HWE/VM decision, EFI/systemd firmware-reboot capability check, best-effort DRM display state, player-safe Minecraft shutdown, and final firmware reboot request. The terminal only presents those results and asks for confirmation.
+
+The same capability/status endpoint is available to the future WebUI, so firmware support is not reimplemented separately there.
 
 Display detection is advisory because KVM switches, EDID behavior, firmware and hardware can make Linux connector state imperfect.
 
