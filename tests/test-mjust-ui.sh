@@ -75,9 +75,13 @@ justfile="${repo_root}/mjust/justfile"
 mjust_bin="${repo_root}/mjust/bin/mjust"
 storage_plan="${repo_root}/mjust/libexec/storage-plan"
 
-for id in setup setup-advanced status players configure service whitelist backups migration storage update system validate logs advanced exit; do
+for id in setup status players configure service whitelist backups migration storage update system validate logs advanced exit; do
     grep -Fq "${id})" "${menu}" || fail "menu preview/dispatch id missing: ${id}"
 done
+
+if grep -Fq 'setup-advanced' "${menu}" || grep -Fq 'Advanced setup' "${menu}" || grep -Fq 'setup-advanced' "${justfile}"; then
+    fail 'legacy Advanced Setup must not be exposed through the mJust menu or recipes'
+fi
 
 grep -Fq "jui_choose 'Safe configuration changes'" "${configure}" || fail 'Configure must use the interactive selector'
 grep -Fq "jui_choose 'Container image policy'" "${configure}" || fail 'container image policy must use the interactive selector'

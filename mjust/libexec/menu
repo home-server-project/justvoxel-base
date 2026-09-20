@@ -10,7 +10,6 @@ preview() {
     case "${1:-}" in
         setup) echo -e 'First setup\n\nConfigure Minecraft, memory, ports, Bedrock cross-play, storage and backups.' ;;
         import) echo -e 'Import existing Minecraft server\n\nImport an existing JustVoxel, Paper or compatible server.' ;;
-        setup-advanced) echo -e 'Advanced setup\n\nFirst setup with additional administrator controls.' ;;
         status) echo -e 'Status\n\nFriendly JustVoxel health dashboard. Advanced details are available separately.' ;;
         players) echo -e 'Players\n\nShow the current Minecraft player list.' ;;
         configure) echo -e 'Configure Minecraft\n\nChange supported Minecraft settings through guided menus.' ;;
@@ -249,13 +248,12 @@ advanced_storage_menu() {
 
 advanced_menu() {
     local -a options=('Detailed status' 'Storage devices / provisioning' 'Administrator password' 'Show login welcome' 'Hide login welcome' 'Enable login welcome' 'All mjust commands')
-    if [[ ${configured} == yes ]]; then options+=('Start over / reset Minecraft'); else options=('Advanced first setup' "${options[@]}"); fi
+    if [[ ${configured} == yes ]]; then options+=('Start over / reset Minecraft'); fi
     options+=('Back')
 
     local choice
     choice="$(jui_choose 'Advanced' "${options[@]}")" || return 0
     case "${choice}" in
-        'Advanced first setup') run_and_pause /usr/bin/mjust setup-advanced || true ;;
         'Detailed status') run_and_pause /usr/bin/mjust status --details || true ;;
         'Storage devices / provisioning') advanced_storage_menu ;;
         'Administrator password') run_and_pause /usr/bin/mjust password-reset || true ;;
@@ -273,7 +271,7 @@ select_rich() {
     if [[ ${configured} == yes ]]; then
         rows=$'status\tStatus\nplayers\tPlayers\nconfigure\tConfigure Minecraft\nservice\tStart / Stop / Restart\nwhitelist\tWhitelist\nbackups\tBackups\nmigration\tMigration\nstorage\tStorage\nupdate\tUpdate Minecraft\nsystem\tSystem\nvalidate\tValidation\nlogs\tLogs\nadvanced\tAdvanced\nexit\tExit'
     else
-        rows=$'setup\tFirst setup\nimport\tImport existing Minecraft server\nstatus\tStatus\nstorage\tStorage\nsystem\tSystem\nsetup-advanced\tAdvanced setup\nexit\tExit'
+        rows=$'setup\tFirst setup\nimport\tImport existing Minecraft server\nstatus\tStatus\nstorage\tStorage\nsystem\tSystem\nexit\tExit'
     fi
     selected="$(printf '%s\n' "${rows}" | fzf --delimiter=$'\t' --with-nth=2 --no-multi --layout=reverse --border --height=90% --prompt='JustVoxel > ' --preview='/usr/libexec/justvoxel/mjust/menu --preview {1}' --preview-window='right,55%,wrap,border-left' || true)"
     [[ -n ${selected} ]] || { printf 'exit'; return 0; }
@@ -290,8 +288,8 @@ select_compact() {
             'Validation') printf 'validate' ;; 'Logs') printf 'logs' ;; 'Advanced') printf 'advanced' ;; *) printf 'exit' ;;
         esac
     else
-        choice="$(jui_choose 'JustVoxel' 'First setup' 'Import existing Minecraft server' 'Status' 'Storage' 'System' 'Advanced setup' 'Exit')" || { printf 'exit'; return 0; }
-        case "${choice}" in 'First setup') printf 'setup' ;; 'Import existing Minecraft server') printf 'import' ;; 'Status') printf 'status' ;; 'Storage') printf 'storage' ;; 'System') printf 'system' ;; 'Advanced setup') printf 'setup-advanced' ;; *) printf 'exit' ;; esac
+        choice="$(jui_choose 'JustVoxel' 'First setup' 'Import existing Minecraft server' 'Status' 'Storage' 'System' 'Exit')" || { printf 'exit'; return 0; }
+        case "${choice}" in 'First setup') printf 'setup' ;; 'Import existing Minecraft server') printf 'import' ;; 'Status') printf 'status' ;; 'Storage') printf 'storage' ;; 'System') printf 'system' ;; *) printf 'exit' ;; esac
     fi
 }
 
@@ -302,7 +300,6 @@ while true; do
     case "${action}" in
         setup) run_and_pause /usr/bin/mjust setup || true ;;
         import) run_and_pause /usr/bin/mjust import || true ;;
-        setup-advanced) run_and_pause /usr/bin/mjust setup-advanced || true ;;
         status) run_and_pause /usr/bin/mjust status || true ;;
         players) run_and_pause /usr/bin/mjust players || true ;;
         configure) configure_menu ;;

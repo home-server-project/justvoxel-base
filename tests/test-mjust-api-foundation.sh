@@ -20,7 +20,6 @@ backup_storage="${repo_root}/mjust/libexec/backup-storage"
 backup_storage_api="${repo_root}/mjust/libexec/backup-storage-api.sh"
 setup="${repo_root}/mjust/libexec/setup"
 setup_api="${repo_root}/mjust/libexec/setup-api.sh"
-setup_legacy="${repo_root}/mjust/libexec/setup-legacy"
 validate="${repo_root}/mjust/libexec/validate"
 validate_backend="${repo_root}/mjust/libexec/validate-backend"
 storage_provision="${repo_root}/mjust/libexec/storage-provision"
@@ -40,7 +39,7 @@ fail() {
     exit 1
 }
 
-for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${backup_storage}" "${backup_storage_api}" "${setup}" "${setup_api}" "${setup_legacy}" "${validate}" "${validate_backend}" "${storage_provision}" "${admin_backup_storage}" "${admin_storage_provision}" "${admin_setup_plan}" "${admin_setup_apply}" "${admin_operations}" "${admin_validation}" "${admin_configuration}" "${admin_discovery}" "${operator_surfaces}" "${justfile}"; do
+for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${backup_storage}" "${backup_storage_api}" "${setup}" "${setup_api}" "${validate}" "${validate_backend}" "${storage_provision}" "${admin_backup_storage}" "${admin_storage_provision}" "${admin_setup_plan}" "${admin_setup_apply}" "${admin_operations}" "${admin_validation}" "${admin_configuration}" "${admin_discovery}" "${operator_surfaces}" "${justfile}"; do
     [[ -f ${file} ]] || fail "missing mJust Management API file: ${file}"
 done
 
@@ -176,7 +175,9 @@ if grep -Fq 'Authorization:' "${backup_storage_api}"; then
 fi
 
 grep -Fq 'setup-api.sh' "${setup}" || fail 'normal mJust setup does not use the setup API helper'
-grep -Fq 'exec /usr/libexec/justvoxel/mjust/setup-legacy --advanced' "${setup}" || fail 'setup-advanced does not delegate to the preserved legacy path'
+if grep -Fq 'setup-legacy' "${setup}" || grep -Fq -- '--advanced' "${setup}"; then
+    fail 'normal mJust setup must not expose the legacy Advanced Setup path'
+fi
 grep -Fq 'jv_setup_current_operation' "${setup}" || fail 'normal mJust setup cannot reconnect to an active setup operation'
 grep -Fq 'jv_setup_defaults' "${setup}" || fail 'normal mJust setup does not obtain Agent defaults'
 grep -Fq 'jv_setup_storage' "${setup}" || fail 'normal mJust setup does not obtain Agent storage discovery'
@@ -197,7 +198,6 @@ for forbidden in 'write_main_config' 'render_runtime' 'configure_firewall_initia
         fail "normal mJust setup still performs direct backend work: ${forbidden}"
     fi
 done
-grep -Fq 'write_main_config' "${setup_legacy}" || fail 'advanced legacy setup implementation was not preserved'
 if grep -Fq 'Authorization:' "${setup_api}"; then
     fail 'mJust setup API helper must not introduce a bearer token'
 fi

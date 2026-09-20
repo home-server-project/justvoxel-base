@@ -6,9 +6,6 @@ default:
 setup:
     @sudo /usr/libexec/justvoxel/mjust/setup
 
-setup-advanced:
-    @sudo /usr/libexec/justvoxel/mjust/setup --advanced
-
 configure:
     @sudo /usr/libexec/justvoxel/mjust/configure
 

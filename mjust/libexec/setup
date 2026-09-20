@@ -3,11 +3,8 @@ set -euo pipefail
 source /usr/libexec/justvoxel/mjust/ui.sh
 source /usr/libexec/justvoxel/mjust/setup-api.sh
 
-if [[ ${1:-} == --advanced ]]; then
-    exec /usr/libexec/justvoxel/mjust/setup-legacy --advanced
-fi
 if (( $# > 0 )); then
-    echo 'Usage: setup [--advanced]' >&2
+    echo 'Usage: setup' >&2
     exit 2
 fi
 if (( EUID != 0 )); then
@@ -68,8 +65,7 @@ partition_mount() {
 
 echo 'JustVoxel first setup'
 echo '---------------------'
-echo 'Normal setup uses the JustVoxel Management Agent for validation, apply and rollback.'
-echo 'Use mjust setup-advanced only for custom UID/GID or destructive storage provisioning.'
+echo 'Setup uses the JustVoxel Management Agent for validation, apply and rollback.'
 echo
 
 motd="$(jui_input 'Server welcome message (MOTD)' "$(jq -r '.motd' <<<"${defaults}")")" || exit 0

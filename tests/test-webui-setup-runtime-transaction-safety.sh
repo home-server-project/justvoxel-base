@@ -50,12 +50,15 @@ if grep -Eq 'exec\.Command(Context)?\([^,]+,[[:space:]]*request|/bin/(sh|bash)[[
     exit 1
 fi
 
-# Normal mjust setup now uses the Management API; only setup-advanced retains the legacy direct runtime path.
+# Normal mjust setup is the single supported first-run setup path and uses the Management API.
 grep -Fq 'setup-api.sh' "${repo_root}/mjust/libexec/setup"
 if grep -Fq 'render_runtime' "${repo_root}/mjust/libexec/setup"; then
     echo 'normal mJust setup must not render runtime files directly' >&2
     exit 1
 fi
-grep -Fq 'render_runtime' "${repo_root}/mjust/libexec/setup-legacy"
+if grep -Fq 'setup-legacy' "${repo_root}/mjust/libexec/setup" || grep -Fq -- '--advanced' "${repo_root}/mjust/libexec/setup"; then
+    echo 'normal mJust setup must not expose the legacy Advanced Setup path' >&2
+    exit 1
+fi
 
 echo 'WebUI first-run A5.5 runtime transaction safety checks passed.'
