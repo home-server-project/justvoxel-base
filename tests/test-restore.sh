@@ -19,6 +19,37 @@ mapfile -t records < <(jv_restore_list_archives "${tmp}/backups")
 [[ ${records[0]} == *'minecraft-2026-09-15-043000.tar.gz' ]] || fail 'backups are not sorted newest first'
 [[ ${records[1]} == *'minecraft-2026-09-13-043000.tar.gz' ]] || fail 'older backup ordering is wrong'
 
+
+cat > "${tmp}/backups/minecraft-2026-09-13-043000.tar.gz.meta.json" <<'JSON'
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-09-13T08:30:00Z",
+  "minecraft": {
+    "versionMode": "pinned",
+    "configuredVersion": "26.1",
+    "serverReportedVersion": "Paper 26.1"
+  },
+  "bedrock": {
+    "enabled": false,
+    "geyserReportedVersion": null,
+    "floodgateConfigured": false
+  },
+  "justvoxel": {
+    "variant": "justvoxel-vm"
+  }
+}
+JSON
+touch "${tmp}/backups/minecraft-manual.tar.gz"
+discovery="$(jv_restore_discovery_json "${tmp}/backups")"
+[[ $(jq -r '.backups | length' <<< "${discovery}") == 2 ]] || fail 'API restore discovery must expose only canonical completed backups'
+[[ $(jq -r '.backups[0].id' <<< "${discovery}") == minecraft-2026-09-15-043000.tar.gz ]] || fail 'API restore discovery ordering is wrong'
+[[ $(jq -r '.backups[0].metadata_status' <<< "${discovery}") == invalid ]] || fail 'invalid restore metadata must be marked invalid'
+[[ $(jq -r '.backups[1].metadata_status' <<< "${discovery}") == valid ]] || fail 'valid restore metadata was not recognized'
+[[ $(jq -r '.backups[1].metadata.minecraft.configured_version' <<< "${discovery}") == 26.1 ]] || fail 'safe restore metadata summary is incomplete'
+if grep -Fq "${tmp}/backups" <<< "${discovery}"; then
+    fail 'API restore discovery must not expose backup filesystem paths'
+fi
+
 [[ $(jv_restore_version_relation pinned 26.1 pinned 26.2) == backup_older ]] || fail 'older backup version relation wrong'
 [[ $(jv_restore_version_relation pinned 26.2 pinned 26.2) == same ]] || fail 'same version relation wrong'
 [[ $(jv_restore_version_relation pinned 26.3 pinned 26.2) == backup_newer ]] || fail 'newer backup version relation wrong'

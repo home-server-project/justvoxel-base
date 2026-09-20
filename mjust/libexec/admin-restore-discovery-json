@@ -1,0 +1,12 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/backup-common.sh
+source /usr/libexec/justvoxel/mjust/restore-common.sh
+
+require_root
+require_config
+jv_backup_load_config
+jv_backup_require_read_target
+jv_restore_discovery_json "${minecraft_backup_path}"
