@@ -162,6 +162,20 @@ func TestSetupWizardUsesCompactAlignedActions(t *testing.T) {
 	if strings.Contains(body, "Save Minecraft choices and continue") {
 		t.Fatal("Minecraft step still uses the long continue label")
 	}
+
+	template, err := assets.ReadFile("templates/setup_wizard.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(template)
+	for _, oldLabel := range []string{"Save server choices and continue", "Save Minecraft choices and continue", "Save storage choice and continue", "Save backup choices and continue"} {
+		if strings.Contains(markup, oldLabel) {
+			t.Fatalf("setup template still contains old action label %q", oldLabel)
+		}
+	}
+	if strings.Count(markup, ">Continue</button>") != 4 {
+		t.Fatalf("setup template Continue button count = %d, want 4", strings.Count(markup, ">Continue</button>"))
+	}
 }
 
 func TestSetupWizardAdvancedStorageKeepsReturnContext(t *testing.T) {
