@@ -3,6 +3,7 @@ set -euo pipefail
 
 source /usr/libexec/justvoxel/mjust/common.sh
 source /usr/libexec/justvoxel/mjust/storage-common-base.sh
+source /usr/libexec/justvoxel/mjust/interrupt-safety.sh
 require_root
 
 action="${1:-configuration}"
@@ -160,6 +161,7 @@ configuration_change_json() {
     local new_java_memory new_container_memory new_java_port new_bedrock_enabled_json new_bedrock_enabled new_bedrock_port
     local new_timezone new_max_players new_motd new_image_tag new_version_policy new_version
     local new_backup_keep new_backup_schedule new_backup_timer_enabled_json new_backup_timer_enabled
+    local confirm_players_json confirm_players
 
     new_java_memory="$(jq -r '.java_memory // ""' <<< "${request}")"
     new_container_memory="$(jq -r '.container_memory // ""' <<< "${request}")"
@@ -175,9 +177,11 @@ configuration_change_json() {
     new_backup_keep="$(jq -r '.backup_keep // 0' <<< "${request}")"
     new_backup_schedule="$(jq -r '.backup_schedule // ""' <<< "${request}")"
     new_backup_timer_enabled_json="$(jq -r '.backup_timer_enabled // false' <<< "${request}")"
+    confirm_players_json="$(jq -r '.confirm_players // false' <<< "${request}")"
 
     if [[ ${new_bedrock_enabled_json} == true ]]; then new_bedrock_enabled=yes; else new_bedrock_enabled=no; fi
     if [[ ${new_backup_timer_enabled_json} == true ]]; then new_backup_timer_enabled=yes; else new_backup_timer_enabled=no; fi
+    if [[ ${confirm_players_json} == true ]]; then confirm_players=yes; else confirm_players=no; fi
 
     if ! validate_memory "${new_java_memory}" || ! validate_memory "${new_container_memory}"; then
         jq -n '{ok:false,error:"Memory values must use a size such as 4G or 4096M."}'
@@ -192,8 +196,8 @@ configuration_change_json() {
     total_mib="$(system_memory_mib)"
     container_mib="$(memory_to_mib "${new_container_memory}")"
     remaining_mib=$(( total_mib - container_mib ))
-    if (( total_mib > 0 && container_mib >= total_mib )); then
-        jq -n '{ok:false,error:"Maximum Minecraft memory must leave some memory available for JustVoxel and system services."}'
+    if (( total_mib > 0 && remaining_mib < 1024 )); then
+        jq -n '{ok:false,error:"Maximum Minecraft memory must leave at least 1 GiB outside Minecraft for JustVoxel and system services."}'
         return 0
     fi
 
@@ -296,12 +300,8 @@ configuration_change_json() {
     add_change backup_schedule 'Automatic backup schedule' "${old_backup_schedule}" "${new_backup_schedule}" false
     add_change backup_timer_enabled 'Automatic backups' "${old_backup_timer_enabled}" "${new_backup_timer_enabled}" false
 
-    if (( total_mib > 0 )); then
-        if (( remaining_mib < 1024 )); then
-            warnings="$(jq -c --arg message "This configuration leaves less than 1 GB for JustVoxel and system services. The appliance may become less responsive under load." '. + [$message]' <<< "${warnings}")"
-        elif (( remaining_mib < 2048 )); then
-            warnings="$(jq -c --arg message "This is a tight memory configuration. JustVoxel recommends leaving about 2 GB for the operating system and system services." '. + [$message]' <<< "${warnings}")"
-        fi
+    if (( total_mib > 0 && remaining_mib < 2048 )); then
+        warnings="$(jq -c --arg message "Memory remaining outside Minecraft is below the recommended 2 GiB headroom. JustVoxel itself typically uses roughly 0.6–1.0 GiB; the rest is useful for Linux cache, backups, updates, management services and temporary workload spikes." '. + [$message]' <<< "${warnings}")"
     fi
 
     JAVA_MEMORY="${new_java_memory^^}"
