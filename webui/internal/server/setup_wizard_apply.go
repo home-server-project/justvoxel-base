@@ -158,9 +158,12 @@ func (a *App) setupWizardProgressPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "setup operation not found", http.StatusNotFound)
 		return
 	}
-	if response.Operation.State == "succeeded" {
+	switch response.Operation.State {
+	case "succeeded":
 		firstRunSetupReviews.delete(a, session)
 		firstRunSetupDrafts.delete(a, session)
+	case "rolled_back":
+		firstRunSetupReviews.delete(a, session)
 	}
 	a.renderAdminDiscovery(w, "setup_progress.html", setupProgressPageData{
 		Title: "Configuring JustVoxel", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
@@ -218,9 +221,12 @@ func (a *App) setupWizardProgressStatus(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "setup operation not found", http.StatusNotFound)
 		return
 	}
-	if response.Operation.State == "succeeded" {
+	switch response.Operation.State {
+	case "succeeded":
 		firstRunSetupReviews.delete(a, session)
 		firstRunSetupDrafts.delete(a, session)
+	case "rolled_back":
+		firstRunSetupReviews.delete(a, session)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
