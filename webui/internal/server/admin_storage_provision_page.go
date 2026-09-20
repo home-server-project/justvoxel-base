@@ -42,6 +42,7 @@ type storageProvisionPageData struct {
 	PlanCreateSize  string
 	Error           string
 	Message         string
+	FromSetup       bool
 }
 
 func (a *App) registerAdminStorageProvisionPages(mux *http.ServeMux) {
@@ -125,6 +126,7 @@ func (a *App) renderStorageProvisionPage(w http.ResponseWriter, r *http.Request,
 		Title: "Advanced storage", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
 		CSRF: csrfFromRequest(r), Identity: identity, Configuration: configuration,
 		Form: form, Plan: plan, Error: errorMessage, Message: message,
+		FromSetup: r.URL.Query().Get("from") == "setup" || !configuration.Configured,
 	}
 	if configuration.Configured {
 		discovery, err := client.AdminStorageProvisionDiscover(r.Context(), session)
