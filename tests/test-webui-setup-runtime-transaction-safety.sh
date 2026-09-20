@@ -30,7 +30,11 @@ grep -Fq 'activate_backup_timer' "${common}"
 grep -Fq 'render_runtime_files' "${runtime_helper}"
 grep -Fq 'activate_backup_timer' "${runtime_helper}"
 grep -Fq 'wait_for_rcon 900' "${runtime_helper}"
-grep -Fq '/usr/libexec/justvoxel/mjust/validate' "${runtime_helper}"
+grep -Fq '/usr/libexec/justvoxel/mjust/validate-backend' "${runtime_helper}"
+if grep -Fq '/usr/libexec/justvoxel/mjust/validate ' "${runtime_helper}"; then
+    echo 'A5.5 runtime transaction must not recurse through the mJust validation API frontend.' >&2
+    exit 1
+fi
 grep -Fq 'runtime_rollback' "${runner}"
 grep -Fq 'rollbackSetupStorage' "${runner}"
 grep -Fq 'MinecraftUID' "${runner}"
