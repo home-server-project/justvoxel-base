@@ -56,9 +56,11 @@ configure_ports() {
     java_port="$(jq -r '.minecraft.java_port' <<<"${configuration}")"
     bedrock_port="$(jq -r '.minecraft.bedrock_port' <<<"${configuration}")"
     new_java="$(jui_input 'Java host TCP port' "${java_port}")" || return 0
+    [[ ${new_java} =~ ^[0-9]+$ ]] || { echo 'ERROR: Java port must be a number.' >&2; return 1; }
     new_bedrock="${bedrock_port}"
     if [[ ${bedrock_enabled} == true ]]; then
         new_bedrock="$(jui_input 'Bedrock host UDP port' "${bedrock_port}")" || return 0
+        [[ ${new_bedrock} =~ ^[0-9]+$ ]] || { echo 'ERROR: Bedrock port must be a number.' >&2; return 1; }
     fi
     payload="$(base_payload | jq -c --argjson java "${new_java}" --argjson bedrock "${new_bedrock}" '.java_port=$java | .bedrock_port=$bedrock')"
     apply_and_refresh "${payload}"
@@ -76,6 +78,7 @@ configure_bedrock() {
         payload="$(base_payload | jq -c '.bedrock_enabled=false')"
     else
         new_port="$(jui_input 'Bedrock host UDP port' "${port}")" || return 0
+        [[ ${new_port} =~ ^[0-9]+$ ]] || { echo 'ERROR: Bedrock port must be a number.' >&2; return 1; }
         payload="$(base_payload | jq -c --argjson port "${new_port}" '.bedrock_enabled=true | .bedrock_port=$port')"
     fi
     apply_and_refresh "${payload}"
