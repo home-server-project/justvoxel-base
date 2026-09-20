@@ -138,3 +138,28 @@ if (window.location.hash === "#review") {
   const review = document.getElementById("review");
   if (review) review.scrollIntoView({ block: "start" });
 }
+
+
+const imageChannel = document.getElementById("image-channel");
+const imageTag = document.getElementById("image-tag");
+const customImageTagField = document.getElementById("custom-image-tag-field");
+const customImageTag = document.getElementById("custom-image-tag");
+if (imageChannel && imageTag && customImageTagField && customImageTag) {
+  const syncImageChannel = () => {
+    const custom = imageChannel.value === "custom";
+    customImageTagField.hidden = !custom;
+    if (custom) {
+      imageTag.value = customImageTag.value.trim();
+      customImageTag.required = true;
+    } else {
+      imageTag.value = imageChannel.value;
+      customImageTag.required = false;
+    }
+  };
+  imageChannel.addEventListener("change", () => {
+    syncImageChannel();
+    if (imageChannel.value === "custom") customImageTag.focus();
+  });
+  customImageTag.addEventListener("input", syncImageChannel);
+  syncImageChannel();
+}

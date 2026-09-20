@@ -88,7 +88,7 @@ func TestSetupWizardShowsWelcomeForUnconfiguredAdministrator(t *testing.T) {
 	}
 	body := rr.Body.String()
 	for _, want := range []string{
-		"Welcome to JustVoxel", "Start setup", "Safe to explore", "Server", "Minecraft", "Storage", "Backups", "Review", "mjust setup",
+		"Welcome to JustVoxel", "Start setup", "Safe to explore", "Server", "Minecraft", "Storage", "Backups", "Review", "mjust setup", "setup-terminal-note",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("setup welcome missing %q: %s", want, body)
@@ -113,7 +113,7 @@ func TestSetupWizardStartsWithFriendlyServerDefaults(t *testing.T) {
 		t.Fatalf("server step returned %d: %s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"Step 1 of 5", "Server name / welcome message", "Family", "Maximum players", "Bedrock cross-play", "America/Toronto", "Technical name: MOTD"} {
+	for _, want := range []string{"Step 1 of 5", "Server name / welcome message", "Family", "Maximum players", "Bedrock cross-play", "America/Toronto", "Technical name: MOTD", `list="timezone-options"`, `id="timezone-options"`, `value="UTC"`} {
 		if want == "Family" {
 			continue
 		}
@@ -144,7 +144,7 @@ func TestSetupWizardServerStepValidatesAndPersistsChoices(t *testing.T) {
 	}
 	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	body := page.Body.String()
-	for _, want := range []string{"Step 2 of 5", "Minecraft game memory", "Technical name: Java heap", "Maximum Minecraft memory", "container memory limit", "8.0 GiB detected", "2.0 GiB", "1.0 GiB", "20-player limit", "Recommended", "High memory", "/static/settings.js"} {
+	for _, want := range []string{"Step 2 of 5", "Minecraft game memory", "Technical name: Java heap", "Maximum Minecraft memory", "container memory limit", "8.0 GiB detected", "2.0 GiB", "1.0 GiB", "20-player limit", "Recommended", "High memory", "/static/settings.js", "Minecraft container release channel", "Stable (recommended)", "Latest", "Custom", `id="image-tag"`, `value="stable"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("Minecraft step missing %q: %s", want, body)
 		}
@@ -236,7 +236,7 @@ func TestSetupWizardMinecraftBackPreservesUnsavedValues(t *testing.T) {
 	}
 	_ = saveServerStep(t, app, validServerValues())
 	minecraftPage := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-	for _, want := range []string{`value="5G"`, `value="7G"`, `value="java21"`} {
+	for _, want := range []string{`value="5G"`, `value="7G"`, `value="java21"`, `value="custom" selected`, "Custom container tag"} {
 		if !strings.Contains(minecraftPage.Body.String(), want) {
 			t.Fatalf("Minecraft draft lost %q: %s", want, minecraftPage.Body.String())
 		}
