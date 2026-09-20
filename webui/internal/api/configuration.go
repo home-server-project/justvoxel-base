@@ -77,6 +77,9 @@ func (c *Client) adminConfigurationChange(ctx context.Context, path, session str
 
 	client := *c.http
 	client.Timeout = 30 * time.Second
+	if path == "/v1/admin/configuration/apply" {
+		client.Timeout = 95 * time.Second
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return out, fmt.Errorf("management API unavailable: %w", err)
