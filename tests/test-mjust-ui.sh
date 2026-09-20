@@ -102,11 +102,11 @@ if grep -Fq "'Operating system status' 'Check / download OS update'" "${menu}"; 
     fail 'duplicate OS status/update menu entries remain'
 fi
 
-grep -Fq "'Minecraft logs' 'Advanced / full system log' 'Back'" "${menu}" || fail 'simple/advanced logs submenu missing'
-grep -Fq '/v1/logs/minecraft?limit=100&format=cat' "${logs}" || fail 'simple logs must use the message-only Management API view'
-if grep -Fq -- '-o cat' "${logs}"; then fail 'simple logs still use direct journalctl -o cat'; fi
-grep -Fq -- '--advanced' "${logs}" || fail 'advanced logs mode missing'
-grep -Fq 'journalctl "${journal_args[@]}" -f' "${logs}" || fail 'advanced logs direct systemd follow view missing'
+grep -Fq "logs) /usr/bin/mjust logs || true ;;" "${menu}" || fail 'Logs menu does not open the API-backed Minecraft log view directly'
+grep -Fq '/v1/logs/minecraft?limit=100&format=cat' "${logs}" || fail 'Minecraft logs must use the message-only Management API view'
+if grep -Fq -- '--advanced' "${logs}" || grep -Fq 'journalctl ' "${logs}" || grep -Fq 'Advanced / full system log' "${menu}"; then
+    fail 'legacy advanced/full-system logs remain exposed through mJust'
+fi
 
 grep -Fq 'Administrator password' "${menu}" || fail 'administrator password menu entry missing'
 grep -Fq '/usr/bin/mjust password-reset' "${menu}" || fail 'administrator password menu dispatch missing'
