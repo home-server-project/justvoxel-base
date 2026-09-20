@@ -12,6 +12,7 @@ status="${repo_root}/mjust/libexec/status"
 whitelist="${repo_root}/mjust/libexec/whitelist"
 whitelist_backend="${repo_root}/mjust/libexec/whitelist-backend"
 backup="${repo_root}/mjust/libexec/backup"
+logs="${repo_root}/mjust/libexec/logs"
 operator_surfaces="${repo_root}/management/cmd/justvoxel-management-agent/operator_surfaces.go"
 justfile="${repo_root}/mjust/justfile"
 
@@ -20,7 +21,7 @@ fail() {
     exit 1
 }
 
-for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${operator_surfaces}" "${justfile}"; do
+for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${operator_surfaces}" "${justfile}"; do
     [[ -f ${file} ]] || fail "missing mJust Management API file: ${file}"
 done
 
@@ -90,4 +91,14 @@ for forbidden in 'systemctl ' '/usr/libexec/justvoxel/minecraft-backup' 'flock '
     fi
 done
 
-echo 'mJust Management API foundation, Players, Minecraft control, Status, Whitelist, and Manual Backup migration checks passed.'
+grep -Fq "'/v1/logs/minecraft?limit=100&format=cat'" "${logs}" || fail 'normal mJust logs do not use the Management API'
+grep -Fq 'if [[ ${mode} == advanced ]]' "${logs}" || fail 'advanced logs branch is missing'
+grep -Fq 'journalctl "${journal_args[@]}" -f' "${logs}" || fail 'advanced logs no longer provide the direct systemd follow view'
+if grep -Fq -- '-o cat' "${logs}"; then
+    fail 'normal mJust logs still contain the old direct journalctl -o cat path'
+fi
+grep -Fq 'outputMode := "short-iso"' "${operator_surfaces}" || fail 'WebUI/default Minecraft log format changed'
+grep -Fq 'case "cat":' "${operator_surfaces}" || fail 'Management API message-only log format is missing'
+grep -Fq 'unsupported Minecraft log format' "${operator_surfaces}" || fail 'Management API log format allowlist is missing'
+
+echo 'mJust Management API foundation, Players, Minecraft control, Status, Whitelist, Manual Backup, and Logs migration checks passed.'
