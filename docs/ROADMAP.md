@@ -96,6 +96,21 @@ These are intentionally early because they are relatively contained improvements
 - expose it through Help / Documentation in the JustVoxel WebUI
 - keep documentation matched to the installed bootc generation and available offline
 
+### Minecraft server software choice
+
+Keep the initial implementation within the existing single-server appliance model.
+
+- allow first-run setup to choose Paper, Purpur, or Vanilla
+- keep Paper as the default server software
+- keep one Minecraft container and one active server
+- support Bedrock cross-play for Paper and Purpur through the existing managed Geyser/Floodgate path
+- make Vanilla Java-only in the initial implementation
+- support safe in-place switching between Paper and Purpur
+- treat the Paper/Purpur switch as a managed operation with stop, backup, type change, restart, and validation
+- keep Minecraft version changes separate from server-software switching
+- expose the same capability rules through both mjust and WebUI so the two interfaces do not drift
+- do not support in-place migration to or from Vanilla in the initial implementation
+
 ## P2 - Appliance workflow improvements
 
 ### Player-aware maintenance
@@ -165,6 +180,26 @@ Consider an appliance-aware bootc rollback workflow only after its interaction w
 ### Future System Resources presentation
 
 If the Glances WebUI eventually proves limiting, a later JustVoxel-native System Resources page may consume the Glances API while keeping Glances as the metrics backend.
+
+### Vanilla migration
+
+Consider supported migration between Vanilla and Paper/Purpur only after the conversion paths are explicitly designed, backed up, tested, and recoverable.
+
+- do not treat Vanilla migration as a simple server-type toggle
+- preserve the current single-server model while evaluating this
+- require clear compatibility and rollback behavior before exposing it in mjust or WebUI
+
+### Multiple Minecraft server instances
+
+Very long-term option only after the single-server appliance is mature and stable.
+
+- allow multiple independent Minecraft containers only as a separately designed feature
+- give each instance its own configuration, storage, ports, backups, lifecycle, and status
+- add host resource budgeting before allowing additional running instances
+- account for reserved RAM, configured container memory limits, CPU capacity, and port conflicts
+- prevent users from starting more instances than the appliance can safely support
+- keep multi-instance management primarily WebUI-focused, with mjust retaining the necessary recovery and administration paths
+- consider developing this on a dedicated future branch because it changes core single-server assumptions
 
 ## Roadmap rule
 
