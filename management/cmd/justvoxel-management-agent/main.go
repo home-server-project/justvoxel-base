@@ -303,6 +303,9 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) authorize(r *http.Request, allowMustChange bool) (string, session, bool) {
+	if sess, ok := localRootAdministrator(r); ok {
+		return "", sess, true
+	}
 	header := r.Header.Get("Authorization")
 	if !strings.HasPrefix(header, "Bearer ") {
 		return "", session{}, false
