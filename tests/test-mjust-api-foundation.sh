@@ -9,6 +9,9 @@ main="${repo_root}/management/cmd/justvoxel-management-agent/main.go"
 players="${repo_root}/mjust/libexec/players"
 service="${repo_root}/mjust/libexec/service"
 status="${repo_root}/mjust/libexec/status"
+whitelist="${repo_root}/mjust/libexec/whitelist"
+whitelist_backend="${repo_root}/mjust/libexec/whitelist-backend"
+operator_surfaces="${repo_root}/management/cmd/justvoxel-management-agent/operator_surfaces.go"
 justfile="${repo_root}/mjust/justfile"
 
 fail() {
@@ -16,7 +19,7 @@ fail() {
     exit 1
 }
 
-for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${justfile}"; do
+for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${operator_surfaces}" "${justfile}"; do
     [[ -f ${file} ]] || fail "missing mJust Management API file: ${file}"
 done
 
@@ -66,4 +69,15 @@ for forbidden in 'systemctl ' 'podman exec' 'podman stats' 'podman ps' 'podman c
     fi
 done
 
-echo 'mJust Management API foundation, Players, Minecraft control, and Status migration checks passed.'
+grep -Fq '"${api_client}" GET /v1/whitelist' "${whitelist}" || fail 'mJust whitelist list does not use the Management API'
+grep -Fq 'POST /v1/whitelist --data' "${whitelist}" || fail 'mJust whitelist changes do not use the Management API'
+grep -Fq '"${api_client}" GET /v1/status' "${whitelist}" || fail 'mJust Bedrock availability check does not use the Management API'
+grep -Fq 'whitelist-backend' "${operator_surfaces}" || fail 'Management Agent does not use the whitelist backend helper'
+for forbidden in 'systemctl ' 'podman ' 'rcon-cli' 'source "${JV_LIBEXEC_DIR}/common.sh"' 'require_config'; do
+    if grep -Fq "${forbidden}" "${whitelist}"; then
+        fail "mJust whitelist frontend still performs direct backend work: ${forbidden}"
+    fi
+done
+grep -Fq 'podman exec minecraft rcon-cli' "${whitelist_backend}" || fail 'whitelist backend lost authoritative RCON implementation'
+
+echo 'mJust Management API foundation, Players, Minecraft control, Status, and Whitelist migration checks passed.'
