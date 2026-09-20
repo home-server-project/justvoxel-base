@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const whitelistHelper = "/usr/libexec/justvoxel/mjust/whitelist"
+const whitelistHelper = "/usr/libexec/justvoxel/mjust/whitelist-backend"
 
 var runWhitelistHelper = func(ctx context.Context, args ...string) ([]byte, error) {
 	return exec.CommandContext(ctx, whitelistHelper, args...).CombinedOutput()
