@@ -70,12 +70,7 @@ if [[ -r ${JV_CONFIG} ]]; then
 fi
 
 hostname_value="$(hostname -s 2>/dev/null || hostname 2>/dev/null || printf Unknown)"
-variant_raw="$(cat /usr/lib/justvoxel/variant 2>/dev/null || true)"
-case "${variant_raw}" in
-    vm|justvoxel-vm) variant='VM' ;;
-    baremetal|justvoxel-baremetal) variant='Bare Metal' ;;
-    *) variant="${variant_raw:-Unknown}" ;;
-esac
+variant="$(jv_variant_name)"
 
 host_uptime_s="$(awk '{print int($1)}' /proc/uptime 2>/dev/null || echo 0)"
 host_uptime="$(jv_status_format_duration "${host_uptime_s}")"

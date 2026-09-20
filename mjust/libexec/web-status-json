@@ -4,7 +4,6 @@ source /usr/libexec/justvoxel/mjust/common.sh
 source /usr/libexec/justvoxel/mjust/interrupt-safety.sh
 
 metadata=/usr/lib/justvoxel/webui-release.json
-variant_file=/usr/lib/justvoxel/variant
 
 trim_player_names_json() {
     local names="${1:-}"
@@ -181,12 +180,7 @@ web_status() {
         configured=yes
     fi
 
-    variant_raw="$(cat "${variant_file}" 2>/dev/null || true)"
-    case "${variant_raw}" in
-        justvoxel-vm|vm) variant='VM' ;;
-        justvoxel-baremetal|baremetal) variant='Bare Metal' ;;
-        *) variant='Unknown' ;;
-    esac
+    variant="$(jv_variant_name)"
 
     ipv4="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i == "src") {print $(i+1); exit}}' || true)"
     if [[ -z ${ipv4} ]]; then

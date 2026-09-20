@@ -1,15 +1,20 @@
 #!/usr/bin/bash
 set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
 
 readonly JV_FSTAB=/etc/fstab
 readonly JV_SMB_CREDENTIALS=/etc/justvoxel/smb-backup.credentials
 
 storage_variant() {
-    cat /usr/lib/justvoxel/variant 2>/dev/null || printf 'unknown\n'
+    jv_variant_name
 }
 
 storage_is_vm() {
-    [[ $(storage_variant) == justvoxel-vm ]]
+    jv_variant_is_vm
+}
+
+storage_is_hwe() {
+    jv_variant_is_hwe
 }
 
 storage_system_disks() {

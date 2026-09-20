@@ -33,13 +33,18 @@ if storage_is_vm; then
     else
         echo "Secondary disk(s) visible: ${secondary}"
     fi
-else
-    echo 'Bare Metal backup choices:'
+elif storage_is_hwe; then
+    echo 'HWE backup choices:'
     echo '  - dedicated internal disk'
     echo '  - external USB disk/stick (provisioned like any other dedicated disk)'
     echo '  - existing filesystem/partition'
     echo '  - new partition created only in already-unallocated space'
     echo '  - NFS or SMB/CIFS network share'
+else
+    echo 'Backup choices:'
+    echo '  - existing filesystem/partition'
+    echo '  - NFS or SMB/CIFS network share'
+    echo '  - directory on the system filesystem'
 fi
 
 echo

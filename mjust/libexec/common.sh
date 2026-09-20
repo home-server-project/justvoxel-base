@@ -17,6 +17,36 @@ readonly JV_MINECRAFT_IMAGE_REPO=docker.io/itzg/minecraft-server
 readonly JV_ITZG_IMAGES_URL=https://raw.githubusercontent.com/itzg/docker-minecraft-server/refs/heads/master/images.json
 readonly JV_PAPER_USER_AGENT='JustVoxel/0.1 (https://github.com/home-server-project/justvoxel)'
 
+jv_variant_raw() {
+    cat /usr/lib/justvoxel/variant 2>/dev/null || printf 'unknown\n'
+}
+
+jv_variant_kind() {
+    local raw="${1:-}"
+    [[ -n ${raw} ]] || raw="$(jv_variant_raw)"
+    case "${raw}" in
+        vm|justvoxel-vm) printf 'vm\n' ;;
+        hwe|justvoxel-hwe|baremetal|justvoxel-baremetal) printf 'hwe\n' ;;
+        *) printf 'unknown\n' ;;
+    esac
+}
+
+jv_variant_name() {
+    case "$(jv_variant_kind "${1:-}")" in
+        vm) printf 'VM\n' ;;
+        hwe) printf 'HWE\n' ;;
+        *) printf 'Unknown\n' ;;
+    esac
+}
+
+jv_variant_is_vm() {
+    [[ $(jv_variant_kind "${1:-}") == vm ]]
+}
+
+jv_variant_is_hwe() {
+    [[ $(jv_variant_kind "${1:-}") == hwe ]]
+}
+
 require_root() {
     if [[ ${EUID} -ne 0 ]]; then
         echo 'ERROR: this operation must run as root.' >&2

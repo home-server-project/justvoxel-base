@@ -37,11 +37,13 @@ grep -Fq 'jv_player_check_before_interrupt' "${service}" || fail 'Minecraft serv
 grep -Fq 'systemctl reboot' "${power}" || fail 'reboot action missing'
 grep -Fq 'systemctl poweroff' "${power}" || fail 'poweroff action missing'
 grep -Fq 'systemctl reboot --firmware-setup' "${firmware}" || fail 'firmware reboot action missing'
-grep -Fq 'Bare Metal JustVoxel feature' "${firmware}" || fail 'VM firmware refusal missing'
+grep -Fq 'Firmware setup is available on JustVoxel HWE only.' "${firmware}" || fail 'VM firmware refusal missing'
+grep -Fq 'jv_variant_is_hwe' "${firmware}" || fail 'firmware must use canonical HWE detection'
+grep -Fq 'jv_variant_is_hwe' "${menu}" || fail 'System menu must use canonical HWE detection'
 
 # Direct recipes remain authoritative even though the normal menu presents one
 # combined user workflow for OS status and updates.
-for recipe in os-status os-update reboot poweroff firmware; do
+for recipe in os-status os-update reboot poweroff firmware password-reset; do
     grep -Fq "${recipe}:" "${justfile}" || fail "missing recipe: ${recipe}"
 done
 

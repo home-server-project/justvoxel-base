@@ -4,9 +4,8 @@ source /usr/libexec/justvoxel/mjust/common.sh
 source /usr/libexec/justvoxel/mjust/interrupt-safety.sh
 require_root
 
-variant="$(cat /usr/lib/justvoxel/variant 2>/dev/null || true)"
-if [[ ${variant} != *baremetal* ]]; then
-    echo 'Firmware setup is a Bare Metal JustVoxel feature.'
+if ! jv_variant_is_hwe; then
+    echo 'Firmware setup is available on JustVoxel HWE only.'
     echo 'For a JustVoxel VM, manage firmware/UEFI through the hypervisor.'
     exit 1
 fi

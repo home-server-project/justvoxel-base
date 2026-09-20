@@ -93,6 +93,9 @@ firmware:
 web action="status":
     @sudo /usr/libexec/justvoxel/mjust/web "{{action}}"
 
+password-reset:
+    @sudo /usr/libexec/justvoxel/mjust/web password-reset
+
 welcome:
     @/usr/libexec/justvoxel/mjust/welcome show
 

@@ -1,5 +1,6 @@
 #!/usr/bin/bash
 set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
 source /usr/libexec/justvoxel/mjust/ui.sh
 
 configured=no
@@ -40,6 +41,7 @@ JustVoxel mjust
 Interactive menu unavailable because this session has no usable TTY.
 Use a direct command instead, for example:
   mjust status
+  mjust status --details
   mjust players
   mjust configure
   mjust whitelist-list
@@ -50,6 +52,8 @@ Use a direct command instead, for example:
   mjust update-minecraft
   mjust os-status
   mjust os-update
+  mjust web status
+  mjust password-reset
   mjust logs
   mjust --list
 
@@ -191,10 +195,9 @@ system_status_menu() {
 }
 
 system_menu() {
-    local variant choice
+    local choice
     local -a options=('System status & updates' 'System resources' 'Reboot JustVoxel' 'Power off JustVoxel')
-    variant="$(cat /usr/lib/justvoxel/variant 2>/dev/null || true)"
-    [[ ${variant} == *baremetal* ]] && options+=('Firmware / UEFI setup')
+    jv_variant_is_hwe && options+=('Firmware / UEFI setup')
     options+=('Back')
 
     while true; do
@@ -245,7 +248,7 @@ advanced_storage_menu() {
 }
 
 advanced_menu() {
-    local -a options=('Detailed status' 'Storage devices / provisioning' 'Show login welcome' 'Hide login welcome' 'Enable login welcome' 'All mjust commands')
+    local -a options=('Detailed status' 'Storage devices / provisioning' 'Administrator password' 'Show login welcome' 'Hide login welcome' 'Enable login welcome' 'All mjust commands')
     if [[ ${configured} == yes ]]; then options+=('Start over / reset Minecraft'); else options=('Advanced first setup' "${options[@]}"); fi
     options+=('Back')
 
@@ -255,6 +258,7 @@ advanced_menu() {
         'Advanced first setup') run_and_pause /usr/bin/mjust setup-advanced || true ;;
         'Detailed status') run_and_pause /usr/bin/mjust status --details || true ;;
         'Storage devices / provisioning') advanced_storage_menu ;;
+        'Administrator password') run_and_pause /usr/bin/mjust password-reset || true ;;
         'Show login welcome') run_and_pause /usr/bin/mjust welcome || true ;;
         'Hide login welcome') run_and_pause /usr/bin/mjust welcome-off || true ;;
         'Enable login welcome') run_and_pause /usr/bin/mjust welcome-on || true ;;
