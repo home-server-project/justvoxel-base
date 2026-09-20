@@ -1,0 +1,322 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/storage-common.sh
+require_root
+
+advanced=no
+if [[ ${1:-} == --advanced ]]; then
+    advanced=yes
+    shift
+fi
+if (( $# > 0 )); then
+    echo 'Usage: setup [--advanced]' >&2
+    exit 2
+fi
+
+if [[ -e ${JV_CONFIG} || -e ${JV_QUADLET} ]]; then
+    echo 'ERROR: an existing JustVoxel configuration was found.' >&2
+    echo 'Use mjust configure for safe changes. Setup will not overwrite an installed server.' >&2
+    exit 1
+fi
+
+echo 'JustVoxel first setup'
+echo '---------------------'
+if [[ ${advanced} == yes ]]; then
+    echo 'Mode: advanced'
+else
+    echo 'Mode: normal'
+fi
+
+read -r MINECRAFT_UID MINECRAFT_GID MINECRAFT_ID_SOURCE < <(resolve_minecraft_ids)
+if [[ ${advanced} == no ]]; then
+    echo
+    echo 'Minecraft data ownership'
+    echo 'Normal setup automatically uses the administrator account running setup'
+    echo 'for Minecraft data ownership.'
+    echo
+    case "${MINECRAFT_ID_SOURCE}" in
+        sudo)
+            echo "Current ownership: ${MINECRAFT_UID}:${MINECRAFT_GID} (from sudo administrator)"
+            ;;
+        voxel)
+            echo "Current ownership: ${MINECRAFT_UID}:${MINECRAFT_GID} (from voxel account)"
+            ;;
+        fallback)
+            echo "Current ownership: ${MINECRAFT_UID}:${MINECRAFT_GID} (fallback)"
+            ;;
+    esac
+    echo
+    echo 'This allows the Minecraft container to read and write its world data.'
+    echo 'Use `mjust setup-advanced` if you need custom numeric UID/GID values.'
+fi
+
+echo
+echo 'The image templates under /usr/share/justvoxel are immutable references only.'
+echo 'This setup creates administrator-owned runtime files under /etc and persistent data at the paths you choose.'
+echo
+
+DATA_PATH="$(prompt_default 'Minecraft persistent data path' '/var/lib/justvoxel/minecraft')"
+DATA_PATH="$(realpath -m -- "${DATA_PATH}")"
+validate_storage_path "${DATA_PATH}" || { echo 'ERROR: use an absolute storage path without spaces or shell-special characters.' >&2; exit 1; }
+
+DATA_MOUNT_POINT=''
+DATA_EXPECTED_UUID=''
+DATA_EXPECTED_SOURCE=''
+if confirm 'Is the Minecraft data path on a separate mounted filesystem (for example NVMe)?'; then
+    DATA_MOUNT_POINT="$(prompt_default 'Existing Minecraft-data mount point' "$(dirname "${DATA_PATH}")")"
+    DATA_MOUNT_POINT="$(realpath -m -- "${DATA_MOUNT_POINT}")"
+    validate_storage_path "${DATA_MOUNT_POINT}" || { echo 'ERROR: invalid Minecraft-data mount point.' >&2; exit 1; }
+    mountpoint -q -- "${DATA_MOUNT_POINT}" || { echo "ERROR: data mount is not mounted: ${DATA_MOUNT_POINT}" >&2; exit 1; }
+    case "${DATA_PATH}/" in
+        "${DATA_MOUNT_POINT}/"*) ;;
+        *) echo 'ERROR: Minecraft data path is outside the selected data mount.' >&2; exit 1 ;;
+    esac
+    DATA_EXPECTED_UUID="$(findmnt -n -o UUID --target "${DATA_MOUNT_POINT}" 2>/dev/null || true)"
+    DATA_EXPECTED_SOURCE="$(findmnt -n -o SOURCE --target "${DATA_MOUNT_POINT}" 2>/dev/null || true)"
+    [[ -n ${DATA_EXPECTED_UUID} || -n ${DATA_EXPECTED_SOURCE} ]] || { echo 'ERROR: could not identify the selected data mount.' >&2; exit 1; }
+fi
+
+read -r suggested_java suggested_container < <(suggest_memory_values)
+echo 'Minecraft memory'
+echo 'Java heap is the memory available to the Minecraft JVM.'
+echo 'Maximum total Minecraft memory is the container limit and includes the Java heap plus container/runtime overhead.'
+JAVA_MEMORY="$(prompt_default 'Minecraft Java heap' "${suggested_java}")"
+validate_memory "${JAVA_MEMORY}" || { echo 'ERROR: use a value such as 4G or 4096M.' >&2; exit 1; }
+CONTAINER_MEMORY="$(prompt_default 'Maximum total Minecraft memory' "${suggested_container}")"
+validate_memory "${CONTAINER_MEMORY}" || { echo 'ERROR: use a value such as 6G or 6144M.' >&2; exit 1; }
+(( $(memory_to_mib "${CONTAINER_MEMORY}") > $(memory_to_mib "${JAVA_MEMORY}") )) || { echo 'ERROR: maximum total Minecraft memory must be larger than the Java heap.' >&2; exit 1; }
+
+JAVA_PORT="$(prompt_default 'Minecraft Java port' '25565')"
+validate_port "${JAVA_PORT}" || { echo 'ERROR: invalid Java port.' >&2; exit 1; }
+
+if confirm 'Enable Bedrock cross-play with Geyser and Floodgate?'; then
+    BEDROCK_ENABLED=yes
+    BEDROCK_PORT="$(prompt_default 'Bedrock host UDP port' '19132')"
+    validate_port "${BEDROCK_PORT}" || { echo 'ERROR: invalid Bedrock port.' >&2; exit 1; }
+else
+    BEDROCK_ENABLED=no
+    BEDROCK_PORT=19132
+fi
+
+TIMEZONE="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
+TIMEZONE="$(prompt_default 'Timezone' "${TIMEZONE:-UTC}")"
+[[ -e "/usr/share/zoneinfo/${TIMEZONE}" ]] || { echo 'ERROR: timezone was not found in /usr/share/zoneinfo.' >&2; exit 1; }
+MAX_PLAYERS="$(prompt_default 'Maximum players' '10')"
+validate_positive_int "${MAX_PLAYERS}" || { echo 'ERROR: maximum players must be a positive integer.' >&2; exit 1; }
+MOTD="$(prompt_default 'Server welcome message (MOTD)' 'JustVoxel Java and Bedrock Server')"
+validate_simple_text "${MOTD}" || { echo 'ERROR: MOTD must be a single line.' >&2; exit 1; }
+
+if [[ ${advanced} == yes ]]; then
+    echo
+    echo 'Minecraft data ownership'
+    echo "Suggested UID:GID: ${MINECRAFT_UID}:${MINECRAFT_GID}"
+    MINECRAFT_UID="$(prompt_default 'Minecraft data UID' "${MINECRAFT_UID}")"
+    MINECRAFT_GID="$(prompt_default 'Minecraft data GID' "${MINECRAFT_GID}")"
+    validate_nonroot_id "${MINECRAFT_UID}" && validate_nonroot_id "${MINECRAFT_GID}" || {
+        echo 'ERROR: UID and GID must be valid non-root numeric IDs.' >&2
+        exit 1
+    }
+    MINECRAFT_ID_SOURCE=advanced
+fi
+
+echo
+echo 'Container image policy'
+echo 'The container image tag and Minecraft/Paper game version are independent settings.'
+image_choice="$(choose_default 'Minecraft container channel' 1 \
+    'Stable - newest released itzg/minecraft-server container (recommended)' \
+    'Latest - newest upstream main-branch container image' \
+    'Exact/custom tag - advanced users only')"
+case "${image_choice}" in
+    1) MINECRAFT_IMAGE_TAG=stable ;;
+    2) MINECRAFT_IMAGE_TAG=latest ;;
+    3) MINECRAFT_IMAGE_TAG="$(prompt_default 'Container image tag' 'stable')" ;;
+esac
+if validate_minecraft_image_tag "${MINECRAFT_IMAGE_TAG}"; then
+    :
+else
+    image_tag_rc=$?
+    if (( image_tag_rc == 2 )); then
+        echo "ERROR: upstream marks container image tag '${MINECRAFT_IMAGE_TAG}' deprecated." >&2
+    else
+        echo "ERROR: container image tag '${MINECRAFT_IMAGE_TAG}' could not be validated in the upstream registry." >&2
+    fi
+    exit 1
+fi
+
+echo
+echo 'Minecraft/Paper version policy'
+version_choice="$(choose_default 'Minecraft game version' 1 \
+    'Recommended - newest Minecraft version with a stable Paper build, pinned' \
+    'Latest - check for the newest Minecraft/Paper release when Minecraft starts' \
+    'Exact version - advanced users only')"
+case "${version_choice}" in
+    1)
+        echo 'Checking PaperMC for the newest Minecraft version with a stable Paper build...'
+        MINECRAFT_VERSION="$(resolve_latest_stable_paper_version || true)"
+        [[ -n ${MINECRAFT_VERSION} ]] || { echo 'ERROR: could not resolve a stable Paper-supported Minecraft version.' >&2; exit 1; }
+        MINECRAFT_VERSION_MODE=pinned
+        echo "Selected stable Paper-supported Minecraft version: ${MINECRAFT_VERSION}"
+        ;;
+    2)
+        MINECRAFT_VERSION_MODE=latest
+        MINECRAFT_VERSION=LATEST
+        echo 'WARNING: the game/Paper version may update when Minecraft starts, even without pulling a newer Podman image.'
+        ;;
+    3)
+        MINECRAFT_VERSION_MODE=pinned
+        read -r -p 'Exact Minecraft version: ' MINECRAFT_VERSION
+        [[ ${MINECRAFT_VERSION} =~ ^[0-9A-Za-z._-]+$ && ${MINECRAFT_VERSION} != LATEST ]] || { echo 'ERROR: invalid exact Minecraft version.' >&2; exit 1; }
+        if paper_version_has_stable_build "${MINECRAFT_VERSION}"; then
+            echo "Confirmed stable Paper build availability for ${MINECRAFT_VERSION}."
+        else
+            echo "ERROR: PaperMC did not confirm a stable build for ${MINECRAFT_VERSION}." >&2
+            exit 1
+        fi
+        ;;
+esac
+
+echo
+storage_prepare_backup_interactive
+BACKUP_PATH="$(realpath -m -- "${BACKUP_PATH}")"
+validate_storage_path "${BACKUP_PATH}" || { echo 'ERROR: invalid backup path.' >&2; exit 1; }
+if [[ ${BACKUP_PATH} == "${DATA_PATH}" || ${BACKUP_PATH} == "${DATA_PATH}/"* ]]; then
+    echo 'ERROR: backup path cannot be the Minecraft data directory or a child of it.' >&2
+    exit 1
+fi
+
+BACKUP_KEEP="$(prompt_default 'Number of backups to keep' '7')"
+validate_positive_int "${BACKUP_KEEP}" || { echo 'ERROR: backup retention must be a positive integer.' >&2; exit 1; }
+
+if [[ ${advanced} == yes ]]; then
+    BACKUP_SCHEDULE="$(prompt_default 'Backup systemd calendar schedule' '*-*-* 04:30:00')"
+    if ! systemd-analyze calendar "${BACKUP_SCHEDULE}" >/dev/null 2>&1; then
+        echo 'ERROR: systemd did not accept that backup schedule.' >&2
+        exit 1
+    fi
+    if confirm 'Enable the scheduled cold-backup timer?'; then
+        BACKUP_TIMER_ENABLED=yes
+    else
+        BACKUP_TIMER_ENABLED=no
+    fi
+else
+    SYSTEM_TIMEZONE="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
+    SYSTEM_TIMEZONE="${SYSTEM_TIMEZONE:-UTC}"
+    echo
+    echo 'Automatic backup schedule'
+    echo "Backups run once every day using the system timezone: ${SYSTEM_TIMEZONE}."
+    while true; do
+        BACKUP_DAILY_TIME="$(prompt_default 'Daily backup time' '04:30')"
+        if BACKUP_DAILY_TIME="$(normalize_daily_backup_time "${BACKUP_DAILY_TIME}")"; then
+            break
+        fi
+        echo 'ERROR: enter a valid daily time such as 04:30 or 21:15.' >&2
+    done
+    BACKUP_SCHEDULE="$(daily_backup_schedule_from_time "${BACKUP_DAILY_TIME}")"
+    if ! systemd-analyze calendar "${BACKUP_SCHEDULE}" >/dev/null 2>&1; then
+        echo 'ERROR: systemd did not accept the generated daily backup schedule.' >&2
+        exit 1
+    fi
+    echo
+    echo 'Automatic backups'
+    echo 'JustVoxel uses verified cold backups.'
+    echo 'Minecraft is stopped cleanly, the world data is backed up and verified,'
+    echo 'then Minecraft is started again.'
+    if confirm 'Enable automatic daily backups?'; then
+        BACKUP_TIMER_ENABLED=yes
+    else
+        BACKUP_TIMER_ENABLED=no
+    fi
+fi
+
+echo
+echo 'Minecraft EULA acceptance is required before JustVoxel can start the server.'
+echo 'Review: https://aka.ms/MinecraftEULA'
+read -r -p 'Type ACCEPT to confirm that you accept the Minecraft EULA: ' eula_acceptance
+if [[ ${eula_acceptance} != ACCEPT ]]; then
+    echo 'EULA not accepted. No JustVoxel runtime configuration was created.'
+    exit 1
+fi
+
+echo
+echo 'Planned configuration:'
+echo "  Minecraft data: ${DATA_PATH}"
+[[ -n ${DATA_MOUNT_POINT} ]] && echo "  Minecraft data mount: ${DATA_MOUNT_POINT}"
+echo "  Minecraft ownership: ${MINECRAFT_UID}:${MINECRAFT_GID} (${MINECRAFT_ID_SOURCE})"
+echo "  Container image: $(minecraft_image_ref)"
+echo "  Minecraft version policy: ${MINECRAFT_VERSION_MODE} (${MINECRAFT_VERSION})"
+echo "  Java heap / maximum total Minecraft memory: ${JAVA_MEMORY} / ${CONTAINER_MEMORY}"
+echo "  Java: ${JAVA_PORT}/tcp"
+if [[ ${BEDROCK_ENABLED} == yes ]]; then
+    echo "  Bedrock: ${BEDROCK_PORT}/udp"
+else
+    echo '  Bedrock: disabled'
+fi
+echo "  Backup type: ${BACKUP_TYPE}"
+echo "  Backup path: ${BACKUP_PATH}"
+[[ -n ${BACKUP_MOUNT_POINT} ]] && echo "  Backup mount: ${BACKUP_MOUNT_POINT}"
+echo "  Backup retention: ${BACKUP_KEEP}"
+if [[ ${advanced} == yes ]]; then
+    echo "  Backup schedule: ${BACKUP_SCHEDULE} (${BACKUP_TIMER_ENABLED})"
+else
+    if [[ ${BACKUP_TIMER_ENABLED} == yes ]]; then
+        echo "  Backup schedule: daily at ${BACKUP_DAILY_TIME} (enabled)"
+    else
+        echo "  Backup schedule: daily at ${BACKUP_DAILY_TIME} (disabled)"
+    fi
+fi
+echo
+if ! confirm 'Create this JustVoxel configuration?'; then
+    echo 'Cancelled. No JustVoxel runtime configuration was created; any storage you explicitly provisioned remains unchanged.'
+    exit 0
+fi
+
+if [[ -n ${DATA_MOUNT_POINT} ]] && ! mountpoint -q -- "${DATA_MOUNT_POINT}"; then
+    echo "ERROR: Minecraft data mount disappeared before setup: ${DATA_MOUNT_POINT}" >&2
+    exit 1
+fi
+install -d -m0750 -o "${MINECRAFT_UID}" -g "${MINECRAFT_GID}" "${DATA_PATH}"
+if [[ -n ${BACKUP_MOUNT_POINT} ]] && ! mountpoint -q -- "${BACKUP_MOUNT_POINT}"; then
+    echo "ERROR: backup mount disappeared before setup: ${BACKUP_MOUNT_POINT}" >&2
+    exit 1
+fi
+if [[ ${BACKUP_TYPE} == nfs || ${BACKUP_TYPE} == smb ]]; then
+    mkdir -p -- "${BACKUP_PATH}"
+else
+    install -d -m0700 -o root -g root "${BACKUP_PATH}"
+fi
+[[ -w ${BACKUP_PATH} ]] || { echo "ERROR: backup path is not writable: ${BACKUP_PATH}" >&2; exit 1; }
+
+backing="$(findmnt -n -o SOURCE,TARGET,FSTYPE --target "${DATA_PATH}" 2>/dev/null || true)"
+echo "Minecraft data backing filesystem: ${backing:-unknown}"
+
+write_main_config
+apply_data_selinux
+render_runtime
+configure_firewall_initial
+
+echo 'Starting Minecraft for first-run generation. This can take several minutes.'
+systemctl start minecraft.service
+if ! wait_for_rcon 900; then
+    echo 'ERROR: Minecraft did not become RCON-ready within 15 minutes.' >&2
+    echo 'Inspect: journalctl -u minecraft.service -n 200 --no-pager' >&2
+    exit 1
+fi
+
+if [[ ${BEDROCK_ENABLED} == yes ]]; then
+    configure_geyser_floodgate
+fi
+
+echo 'Running final validation.'
+/usr/libexec/justvoxel/mjust/validate
+
+echo
+echo 'JustVoxel setup completed.'
+echo "Java address: $(hostname -f 2>/dev/null || hostname):${JAVA_PORT}"
+if [[ ${BEDROCK_ENABLED} == yes ]]; then
+    echo "Bedrock address: $(hostname -f 2>/dev/null || hostname):${BEDROCK_PORT}"
+fi
+echo "Minecraft image: $(minecraft_image_ref)"
+echo "Minecraft version policy: ${MINECRAFT_VERSION_MODE} (${MINECRAFT_VERSION})"
+echo "Minecraft data: ${DATA_PATH}"
+echo "Backups: ${BACKUP_PATH}"
