@@ -299,7 +299,7 @@ while true; do
         update) run_and_pause /usr/bin/mjust update-minecraft || true ;;
         system) system_menu ;;
         validate) run_and_pause /usr/bin/mjust validate || true ;;
-        logs) run_and_pause /usr/bin/mjust logs || true ;;
+        logs) /usr/bin/mjust logs || true ;;
         advanced) advanced_menu ;;
         exit) exit 0 ;;
         *) echo 'Unknown menu selection.' >&2 ;;
