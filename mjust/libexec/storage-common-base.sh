@@ -1,6 +1,9 @@
 #!/usr/bin/bash
 set -euo pipefail
-source /usr/libexec/justvoxel/mjust/common.sh
+
+if ! declare -F jv_variant_name >/dev/null; then
+    source /usr/libexec/justvoxel/mjust/common.sh
+fi
 
 readonly JV_FSTAB=/etc/fstab
 readonly JV_SMB_CREDENTIALS=/etc/justvoxel/smb-backup.credentials
