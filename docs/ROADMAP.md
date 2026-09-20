@@ -172,15 +172,6 @@ Create a dedicated public-release ISO repository separate from the customizable 
 - publish checksums and release metadata alongside the ISOs
 - provide a small public website, likely through GitHub Pages, with product information, screenshots, clear VM/HWE download choices, documentation, and source links
 
-### Player-aware maintenance
-
-Improve the existing player-aware interruption flow:
-
-- skip unnecessary delay when Minecraft is already stopped
-- avoid long warnings when no players are online
-- provide useful in-game countdown notices when players are online
-- avoid duplicated waiting between JustVoxel and the Minecraft container shutdown path
-
 ### USB backup workflow in WebUI
 
 Build on the storage support already available through `mjust` and the current WebUI storage work:
