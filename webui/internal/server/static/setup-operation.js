@@ -40,6 +40,24 @@ document.addEventListener("DOMContentLoaded", () => {
     return state || "Working";
   };
 
+  const stageLabel = (stage) => {
+    if (stage === "queued") return "Waiting to start";
+    if (stage === "storage_preflight") return "Checking storage";
+    if (stage === "storage_snapshot") return "Preparing storage changes";
+    if (stage === "storage_verified") return "Storage ready";
+    if (stage === "runtime_preflight") return "Checking Minecraft configuration";
+    if (stage === "runtime_config") return "Writing Minecraft configuration";
+    if (stage === "minecraft_verify") return "Starting and checking Minecraft";
+    if (stage === "final_validation") return "Final validation";
+    if (stage === "completed") return "Complete";
+    if (stage === "setup_failed") return "Preparing recovery";
+    if (stage === "runtime_rollback") return "Restoring Minecraft configuration";
+    if (stage === "storage_rollback") return "Restoring storage changes";
+    if (stage === "setup_rolled_back") return "Rolled back";
+    if (stage === "interrupted") return "Interrupted";
+    return "Working";
+  };
+
   const terminalState = (state) => ["succeeded", "rolled_back", "needs_attention"].includes(state);
 
   const render = (operation) => {
@@ -48,7 +66,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (reconnectNote) reconnectNote.hidden = true;
     if (statusText) statusText.textContent = operation.status || "Setup is running.";
     if (stateBadge) stateBadge.textContent = stateLabel(operation.state);
-    if (stageText) stageText.textContent = operation.stage || "working";
+    if (stageText) stageText.textContent = stageLabel(operation.stage);
 
     const succeeded = operation.state === "succeeded";
     const rolledBack = operation.state === "rolled_back";
@@ -61,6 +79,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (terminalState(operation.state)) {
       finished = true;
+      panel.classList.add("is-finished");
       if (succeeded) {
         window.setTimeout(() => window.location.assign("/"), 2500);
       }
