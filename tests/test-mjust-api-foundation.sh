@@ -145,7 +145,7 @@ grep -Fq '"${JV_BACKUP_STORAGE_API_CLIENT}" POST "${path}" --data' "${backup_sto
 grep -Fq 'backup-storage-api.sh' "${backup_storage}" || fail 'mJust backup storage frontend does not use the API helper'
 grep -Fq 'jv_backup_storage_apply_target' "${backup_storage}" || fail 'normal backup targets do not apply through the Agent'
 grep -Fq 'jv_backup_storage_apply_provision' "${backup_storage}" || fail 'destructive backup provisioning does not apply through the Agent'
-grep -Fq 'Type exactly:' "${backup_storage}" || fail 'destructive backup provisioning exact confirmation is missing'
+grep -Fq 'Type exactly:' "${backup_storage_api}" || fail 'destructive backup provisioning exact confirmation is missing'
 grep -Fq '/usr/libexec/justvoxel/mjust/backup-storage backup' "${storage_provision}" || fail 'configured backup storage menu does not delegate to the API frontend'
 grep -Fq '/usr/libexec/justvoxel/mjust/backup-storage "${mode}"' "${storage_provision}" || fail 'configured local backup provisioning does not delegate to the API frontend'
 grep -Fq '/usr/libexec/justvoxel/mjust/backup-storage network' "${storage_provision}" || fail 'configured network backup storage does not delegate to the API frontend'
