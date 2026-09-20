@@ -303,11 +303,11 @@ func setupBackupTypeLabel(value string) string {
 func setupVersionPolicyLabel(value string) string {
 	switch value {
 	case "recommended":
-		return "Recommended stable"
+		return "Recommended version"
 	case "latest":
-		return "Latest available"
+		return "Always newest version"
 	case "pinned":
-		return "Pinned version"
+		return "Specific version"
 	default:
 		return value
 	}

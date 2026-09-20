@@ -144,7 +144,7 @@ func TestSetupWizardServerStepValidatesAndPersistsChoices(t *testing.T) {
 	}
 	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	body := page.Body.String()
-	for _, want := range []string{"Step 2 of 5", "Minecraft game memory", "Technical name: Java heap", "Maximum Minecraft memory", "container memory limit", "8.0 GiB detected", "2.0 GiB", "1.0 GiB", "20-player limit", "Recommended", "High memory", "/static/settings.js", "Minecraft container release channel", "Stable (recommended)", "Latest", "Custom", `id="image-tag"`, `value="stable"`} {
+	for _, want := range []string{"Step 2 of 5", "Minecraft game memory", "Technical name: Java heap", "Maximum Minecraft memory", "container memory limit", "8.0 GiB detected", "2.0 GiB", "1.0 GiB", "20-player limit", "Recommended", "High memory", "/static/settings.js", "Minecraft container release channel", "Stable (recommended)", "Latest", "Custom", `id="image-tag"`, `value="stable"`, "Recommended version", "Always newest version", "Specific version", `id="specific-version-field"`, "Bedrock compatibility is checked before setup."} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("Minecraft step missing %q: %s", want, body)
 		}
@@ -172,6 +172,27 @@ func TestSetupWizardServerStepRejectsInvalidPlayerLimit(t *testing.T) {
 	draft, ok := firstRunSetupDrafts.get(app, "session-token")
 	if !ok || draft.CurrentStep != 1 {
 		t.Fatalf("invalid server form advanced draft: %#v", draft)
+	}
+}
+
+func TestSetupWizardSpecificVersionRequiresExplicitValue(t *testing.T) {
+	client := setupWizardClient()
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstRunSetupDrafts.delete(app, "session-token")
+	startSetup(t, app)
+	if rr := saveServerStep(t, app, validServerValues()); rr.Code != http.StatusSeeOther {
+		t.Fatalf("server save returned %d", rr.Code)
+	}
+
+	values := validMinecraftValues()
+	values.Set("version_policy", "pinned")
+	values.Set("version", "")
+	rr := saveMinecraftStep(t, app, values)
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "Specific Minecraft version is invalid") {
+		t.Fatalf("missing specific version was not rejected: %d %s", rr.Code, rr.Body.String())
 	}
 }
 

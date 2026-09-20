@@ -123,12 +123,15 @@ if (memoryPanel) {
 
 const versionPolicy = document.getElementById("version-policy");
 const versionInput = document.getElementById("minecraft-version");
-if (versionPolicy && versionInput) {
+const specificVersionField = document.getElementById("specific-version-field");
+if (versionPolicy && versionInput && specificVersionField) {
   const updateVersionHelp = () => {
-    const pinned = versionPolicy.value === "pinned";
-    versionInput.required = pinned;
-    versionInput.readOnly = !pinned;
+    const specific = versionPolicy.value === "pinned";
+    specificVersionField.hidden = !specific;
+    versionInput.required = specific;
+    versionInput.readOnly = !specific;
     if (versionPolicy.value === "latest") versionInput.value = "LATEST";
+    if (versionPolicy.value === "recommended") versionInput.value = "";
   };
   versionPolicy.addEventListener("change", updateVersionHelp);
   updateVersionHelp();

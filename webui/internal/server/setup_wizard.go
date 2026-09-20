@@ -102,7 +102,7 @@ type setupWizardPageData struct {
 
 var setupWizardSteps = []setupWizardStepView{
 	{Number: 1, Name: "Server", Description: "Choose the server welcome message, player limit, Bedrock cross-play and timezone."},
-	{Number: 2, Name: "Minecraft", Description: "Choose Minecraft memory, ports, container channel and version policy."},
+	{Number: 2, Name: "Minecraft", Description: "Choose Minecraft memory, ports, container channel and version."},
 	{Number: 3, Name: "Storage", Description: "Choose where Minecraft worlds, configuration and server data will live."},
 	{Number: 4, Name: "Backups", Description: "Choose backup location, retention and automatic backup schedule."},
 	{Number: 5, Name: "Review", Description: "The complete setup plan and Minecraft EULA acceptance will be reviewed here before any changes are applied."},
@@ -471,10 +471,10 @@ func validateSetupMinecraft(minecraft setupMinecraftDraft, defaults api.AdminSet
 		// LATEST intentionally follows the container's moving Minecraft release.
 	case "pinned":
 		if minecraft.Version == "" || minecraft.Version == "LATEST" || !setupVersionPattern.MatchString(minecraft.Version) {
-			return errors.New("Pinned Minecraft version is invalid.")
+			return errors.New("Specific Minecraft version is invalid.")
 		}
 	default:
-		return errors.New("Choose a Minecraft version policy.")
+		return errors.New("Choose a Minecraft version.")
 	}
 	return nil
 }

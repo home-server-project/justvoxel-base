@@ -15,6 +15,7 @@ readonly JV_SETUP_IN_PROGRESS=/var/lib/justvoxel/management/setup-in-progress
 readonly JV_PREVIOUS_IMAGE_STATE=${JV_STATE_DIR}/minecraft-previous-image-id
 readonly JV_MINECRAFT_IMAGE_REPO=docker.io/itzg/minecraft-server
 readonly JV_ITZG_IMAGES_URL=https://raw.githubusercontent.com/itzg/docker-minecraft-server/refs/heads/master/images.json
+readonly JV_GEYSER_VERSIONS_URL=https://raw.githubusercontent.com/GeyserMC/GeyserWebsite/refs/heads/master/src/data/versions.json
 readonly JV_PAPER_USER_AGENT='JustVoxel/0.1 (https://github.com/home-server-project/justvoxel)'
 
 jv_variant_raw() {
@@ -355,6 +356,24 @@ capture_backup_mount_identity() {
             return 1
         fi
     fi
+}
+
+geyser_supported_java_version_from_json() {
+    local metadata="$1" version
+    version="$(jq -er '.java.supported | select(type == "string")' <<< "${metadata}" 2>/dev/null)" || return 1
+    [[ ${version} =~ ^[0-9]+([.][0-9]+){1,2}$ ]] || return 1
+    printf '%s' "${version}"
+}
+
+resolve_geyser_supported_java_version() {
+    local metadata
+    metadata="$(curl -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" "${JV_GEYSER_VERSIONS_URL}" 2>/dev/null)" || return 1
+    geyser_supported_java_version_from_json "${metadata}"
+}
+
+bedrock_crossplay_supports_version() {
+    local minecraft_version="$1" geyser_java_version="$2"
+    [[ -n ${minecraft_version} && -n ${geyser_java_version} && ${minecraft_version} == "${geyser_java_version}" ]]
 }
 
 paper_version_has_stable_build() {

@@ -326,11 +326,6 @@ if port_in_use tcp "${java_port}"; then
     json_error "Minecraft Java TCP port ${java_port} is already in use on this appliance." port_conflict
     exit 0
 fi
-if [[ ${bedrock_enabled} == true ]] && port_in_use udp "${bedrock_port}"; then
-    json_error "Bedrock UDP port ${bedrock_port} is already in use on this appliance." port_conflict
-    exit 0
-fi
-
 if [[ -z ${image_tag} || ! ${image_tag} =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
     json_error 'Minecraft container channel or tag is invalid.' invalid_minecraft
     exit 0
@@ -348,33 +343,66 @@ else
     exit 0
 fi
 
+requested_bedrock_enabled="${bedrock_enabled}"
+geyser_supported_version=''
+bedrock_compatibility_version=''
+if [[ ${requested_bedrock_enabled} == true ]]; then
+    geyser_supported_version="$(resolve_geyser_supported_java_version || true)"
+fi
+
 case "${version_policy}" in
     recommended)
-        version="$(resolve_latest_stable_paper_version || true)"
-        [[ -n ${version} ]] || { json_error 'Could not resolve the newest Minecraft version with a stable Paper build.' upstream_unavailable; exit 0; }
+        if [[ ${requested_bedrock_enabled} == true && -n ${geyser_supported_version} ]] && paper_version_has_stable_build "${geyser_supported_version}"; then
+            version="${geyser_supported_version}"
+        else
+            version="$(resolve_latest_stable_paper_version || true)"
+        fi
+        [[ -n ${version} ]] || { json_error 'Could not resolve a stable Paper-backed Minecraft version.' upstream_unavailable; exit 0; }
+        bedrock_compatibility_version="${version}"
         resolved_version_policy=pinned
         ;;
     latest)
+        if [[ ${requested_bedrock_enabled} == true ]]; then
+            bedrock_compatibility_version="$(resolve_latest_stable_paper_version || true)"
+        fi
         resolved_version_policy=latest
         version=LATEST
-        warnings="$(warning_add "${warnings}" moving_minecraft_version 'Latest allows the Minecraft/Paper version to move when Minecraft starts. Recommended stable pins the reviewed version instead.')"
+        warnings="$(warning_add "${warnings}" moving_minecraft_version 'Always newest can move the Minecraft/Paper version when Minecraft starts. Recommended version pins the reviewed version instead.')"
         ;;
     pinned)
         if [[ -z ${version} || ${version} == LATEST || ! ${version} =~ ^[0-9A-Za-z._-]+$ ]]; then
-            json_error 'Pinned Minecraft version is invalid.' invalid_minecraft
+            json_error 'Specific Minecraft version is invalid.' invalid_minecraft
             exit 0
         fi
         if ! paper_version_has_stable_build "${version}"; then
             json_error 'PaperMC did not confirm a stable build for that Minecraft version.' invalid_minecraft
             exit 0
         fi
+        bedrock_compatibility_version="${version}"
         resolved_version_policy=pinned
         ;;
     *)
-        json_error 'Minecraft version policy is invalid.' invalid_minecraft
+        json_error 'Minecraft version choice is invalid.' invalid_minecraft
         exit 0
         ;;
 esac
+
+if [[ ${requested_bedrock_enabled} == true ]]; then
+    if [[ -z ${geyser_supported_version} || -z ${bedrock_compatibility_version} ]]; then
+        bedrock_enabled=false
+        warnings="$(warning_add "${warnings}" bedrock_compatibility_unavailable 'Bedrock cross-play was turned off because JustVoxel could not confirm the current Geyser/Floodgate Minecraft compatibility. Geyser/Floodgate will not be installed, and Java server setup can continue. Come back later and check again.')"
+    elif ! bedrock_crossplay_supports_version "${bedrock_compatibility_version}" "${geyser_supported_version}"; then
+        bedrock_enabled=false
+        warnings="$(warning_add "${warnings}" bedrock_version_unsupported "Bedrock cross-play was turned off because Geyser/Floodgate currently supports Minecraft ${geyser_supported_version}, while this setup uses ${bedrock_compatibility_version}. Geyser/Floodgate will not be installed, and Java server setup can continue. Come back later and check again after Geyser/Floodgate adds support for this Minecraft version.")"
+    elif [[ ${version_policy} == latest ]]; then
+        warnings="$(warning_add "${warnings}" bedrock_moving_version "Bedrock cross-play is compatible with Minecraft ${bedrock_compatibility_version} now, but Always newest can move to a newer Minecraft version before Geyser/Floodgate catches up.")"
+    fi
+fi
+
+if [[ ${bedrock_enabled} == true ]] && port_in_use udp "${bedrock_port}"; then
+    json_error "Bedrock UDP port ${bedrock_port} is already in use on this appliance." port_conflict
+    exit 0
+fi
 
 storage_json=''
 case "${storage_type}" in
