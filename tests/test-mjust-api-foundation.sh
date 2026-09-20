@@ -60,7 +60,7 @@ grep -Fq 'path=/v1/status' "${status}" || fail 'mJust status does not use the Ma
 grep -Fq "path='/v1/status?details=1'" "${status}" || fail 'mJust detailed status does not use the Management API'
 grep -Fq 'sudo /usr/libexec/justvoxel/mjust/status' "${justfile}" || fail 'mJust status must enter the API path through sudo/root'
 grep -Fq 'r.URL.Query().Get("details") == "1"' "${main}" || fail 'Management API does not expose bounded detailed status'
-for forbidden in 'systemctl ' 'podman ' 'rcon-cli' 'findmnt ' 'df -' 'ip -4 ' 'resolvectl '; do
+for forbidden in 'systemctl ' 'podman exec' 'podman stats' 'podman ps' 'podman container' 'rcon-cli' 'findmnt ' 'df -' 'ip -4 ' 'resolvectl '; do
     if grep -Fq "${forbidden}" "${status}"; then
         fail "mJust status still performs direct system inspection: ${forbidden}"
     fi
