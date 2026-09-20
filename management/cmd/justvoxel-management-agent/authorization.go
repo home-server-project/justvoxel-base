@@ -2,6 +2,18 @@ package main
 
 import "net/http"
 
+func localRootAdministrator(r *http.Request) (session, bool) {
+	uid, ok := r.Context().Value(peerUIDKey{}).(uint32)
+	if !ok || uid != 0 {
+		return session{}, false
+	}
+	return session{
+		Username:   systemAdminUsername,
+		Role:       roleAdministrator,
+		AuthSource: authSourceLocalRoot,
+	}, true
+}
+
 func (s *server) authorizeSession(w http.ResponseWriter, r *http.Request) (session, bool) {
 	_, sess, ok := s.authorize(r, false)
 	if ok {
