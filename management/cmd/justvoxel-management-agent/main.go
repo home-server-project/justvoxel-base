@@ -286,7 +286,11 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, statusHelper)
+	args := []string{}
+	if r.URL.Query().Get("details") == "1" {
+		args = append(args, "--details")
+	}
+	cmd := exec.CommandContext(ctx, statusHelper, args...)
 	output, err := cmd.Output()
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "status collection failed")
