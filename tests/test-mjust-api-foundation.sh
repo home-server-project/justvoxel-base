@@ -135,10 +135,10 @@ if grep -Fq 'Authorization:' "${configuration_api}"; then
     fail 'mJust configuration API helper must not introduce a bearer token'
 fi
 
-grep -Fq 'GET /v1/admin/backup-storage' "${backup_storage_api}" || fail 'mJust backup storage status does not use the Management API'
+grep -Fq 'jv_backup_storage_get /v1/admin/backup-storage' "${backup_storage_api}" || fail 'mJust backup storage status does not use the Management API'
 grep -Fq 'jv_backup_storage_post /v1/admin/backup-storage/plan' "${backup_storage_api}" || fail 'mJust backup storage validation does not use the Management API'
 grep -Fq 'jv_backup_storage_post /v1/admin/backup-storage/apply' "${backup_storage_api}" || fail 'mJust backup storage apply does not use the Management API'
-grep -Fq 'GET /v1/admin/storage-provision' "${backup_storage_api}" || fail 'mJust advanced backup storage discovery does not use the Management API'
+grep -Fq 'jv_backup_storage_get /v1/admin/storage-provision' "${backup_storage_api}" || fail 'mJust advanced backup storage discovery does not use the Management API'
 grep -Fq 'jv_backup_storage_post /v1/admin/storage-provision/plan' "${backup_storage_api}" || fail 'mJust advanced storage validation does not use the Management API'
 grep -Fq 'jv_backup_storage_post /v1/admin/storage-provision/apply' "${backup_storage_api}" || fail 'mJust advanced storage apply does not use the Management API'
 grep -Fq '"${JV_BACKUP_STORAGE_API_CLIENT}" POST "${path}" --data' "${backup_storage_api}" || fail 'mJust backup storage POST helper does not use the Management API client'
