@@ -1,6 +1,7 @@
 #!/usr/bin/bash
 set -Eeuo pipefail
 source /usr/libexec/justvoxel/mjust/backup-common.sh
+source /usr/libexec/justvoxel/mjust/interrupt-safety.sh
 
 readonly config_file="/etc/justvoxel/minecraft-backup.env"
 readonly lock_file="/run/justvoxel-minecraft-maintenance.lock"
@@ -76,15 +77,16 @@ if grep -Eq '^[[:space:]]*auth-type:[[:space:]]*floodgate[[:space:]]*$' "${geyse
 fi
 
 if systemctl is-active --quiet "${MINECRAFT_SERVICE}"; then
-    echo 'Minecraft is running; stopping through its configured graceful shutdown path'
+    echo 'Minecraft is running; stopping through the player-aware graceful shutdown path'
     minecraft_restart_required=1
-    systemctl stop "${MINECRAFT_SERVICE}"
+    JV_INTERRUPT_CONFIRMATION_MODE=confirmed \
+        jv_stop_minecraft_adaptive 'Create Minecraft backup'
 else
     echo 'Minecraft was already stopped; it will remain stopped after backup'
 fi
 
-if systemctl is-active --quiet "${MINECRAFT_SERVICE}"; then
-    echo "ERROR: ${MINECRAFT_SERVICE} is still active." >&2
+if jv_minecraft_still_running; then
+    echo "ERROR: ${MINECRAFT_SERVICE} is still running after the backup shutdown path." >&2
     exit 1
 fi
 
