@@ -76,7 +76,7 @@ grep -Fq 'resolve_geyser_supported_java_version' "${helper}"
 grep -Fq 'version="${geyser_supported_version}"' "${helper}"
 grep -Fq 'bedrock_enabled=false' "${helper}"
 grep -Fq 'bedrock_version_unsupported' "${helper}"
-grep -Fq 'Come back later and enable Bedrock cross-play' "${helper}"
+grep -Fq 'Come back later and check again' "${helper}"
 
 # shellcheck disable=SC1091
 source "${repo_root}/mjust/libexec/storage-common-base.sh"
