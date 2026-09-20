@@ -370,6 +370,12 @@ resolve_geyser_supported_java_version() {
     metadata="$(curl -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" "${JV_GEYSER_VERSIONS_URL}" 2>/dev/null)" || return 1
     geyser_supported_java_version_from_json "${metadata}"
 }
+
+bedrock_crossplay_supports_version() {
+    local minecraft_version="$1" geyser_java_version="$2"
+    [[ -n ${minecraft_version} && -n ${geyser_java_version} && ${minecraft_version} == "${geyser_java_version}" ]]
+}
+
 paper_version_has_stable_build() {
     local version="$1" builds
     builds="$(curl -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
