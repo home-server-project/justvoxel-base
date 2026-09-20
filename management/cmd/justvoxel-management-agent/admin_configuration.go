@@ -25,6 +25,7 @@ type adminConfigurationChangeRequest struct {
 	BackupKeep        int    `json:"backup_keep"`
 	BackupSchedule    string `json:"backup_schedule"`
 	BackupTimerEnabled bool  `json:"backup_timer_enabled"`
+	ConfirmPlayers      bool  `json:"confirm_players"`
 }
 
 type adminConfigurationChange struct {
@@ -41,9 +42,16 @@ type adminConfigurationChangeResponse struct {
 	Changes            []adminConfigurationChange  `json:"changes"`
 	Warnings           []string                    `json:"warnings"`
 	RestartRequired    bool                        `json:"restart_required"`
-	MemoryRemainingMiB int                         `json:"memory_remaining_mib"`
-	Proposed           adminConfigurationDiscovery `json:"proposed"`
-	Applied            bool                        `json:"applied"`
+	MemoryRestartRequired bool                        `json:"memory_restart_required"`
+	MemoryRemainingMiB   int                         `json:"memory_remaining_mib"`
+	Proposed             adminConfigurationDiscovery `json:"proposed"`
+	Applied              bool                        `json:"applied"`
+	ConfirmationRequired bool                        `json:"confirmation_required"`
+	Online               int                         `json:"online"`
+	Players              []string                    `json:"players"`
+	Restarted            bool                        `json:"restarted"`
+	RestartDeferred      bool                        `json:"restart_deferred"`
+	Message              string                      `json:"message,omitempty"`
 }
 
 var runAdminConfigurationHelper = func(ctx context.Context, action string, request []byte) ([]byte, error) {
@@ -82,7 +90,11 @@ func (s *server) runAdminConfigurationChange(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "configuration request could not be prepared")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	timeout := 25 * time.Second
+	if action == "apply" {
+		timeout = 90 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 	output, err := runAdminConfigurationHelper(ctx, action, payload)
 	if err != nil {
@@ -110,8 +122,8 @@ func (s *server) runAdminConfigurationChange(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusBadRequest, out)
 		return
 	}
-	if action == "apply" {
-		context := fmt.Sprintf("changes=%d restart_required=%t", len(out.Changes), out.RestartRequired)
+	if action == "apply" && out.Applied {
+		context := fmt.Sprintf("changes=%d restart_required=%t memory_restart_required=%t restarted=%t restart_deferred=%t", len(out.Changes), out.RestartRequired, out.MemoryRestartRequired, out.Restarted, out.RestartDeferred)
 		_ = s.store.recordAuditEvent(actor, "update_minecraft_configuration", "justvoxel.conf", true, context)
 	}
 	writeJSON(w, http.StatusOK, out)
