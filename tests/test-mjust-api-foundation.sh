@@ -6,14 +6,16 @@ api_client="${repo_root}/mjust/libexec/api-client"
 authorization="${repo_root}/management/cmd/justvoxel-management-agent/authorization.go"
 identity="${repo_root}/management/cmd/justvoxel-management-agent/identity.go"
 main="${repo_root}/management/cmd/justvoxel-management-agent/main.go"
+players="${repo_root}/mjust/libexec/players"
+justfile="${repo_root}/mjust/justfile"
 
 fail() {
     echo "FAIL: $*" >&2
     exit 1
 }
 
-for file in "${api_client}" "${authorization}" "${identity}" "${main}"; do
-    [[ -f ${file} ]] || fail "missing Phase 0B file: ${file}"
+for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${justfile}"; do
+    [[ -f ${file} ]] || fail "missing mJust Management API file: ${file}"
 done
 
 grep -Fq 'authSourceLocalRoot authSource = "local-root"' "${identity}" || fail 'local-root auth source is missing'
@@ -29,4 +31,13 @@ if grep -Fq 'Authorization:' "${api_client}"; then
     fail 'mJust API client must not introduce a persistent bearer token'
 fi
 
-echo 'mJust Management API foundation checks passed.'
+grep -Fq '"${api_client}" GET /v1/players' "${players}" || fail 'mJust Players does not use the Management API'
+grep -Fq 'players:' "${justfile}" || fail 'mJust Players recipe is missing'
+grep -Fq 'sudo /usr/libexec/justvoxel/mjust/players' "${justfile}" || fail 'mJust Players must enter the API path through sudo/root'
+for forbidden in 'systemctl ' 'podman ' 'rcon-cli'; do
+    if grep -Fq "${forbidden}" "${players}"; then
+        fail "mJust Players still performs direct system access: ${forbidden}"
+    fi
+done
+
+echo 'mJust Management API foundation and Players migration checks passed.'
