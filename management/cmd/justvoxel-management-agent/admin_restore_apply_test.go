@@ -172,7 +172,7 @@ func TestAdminRestoreApplySameFingerprintReconnectsWithoutPreflight(t *testing.T
 	}
 	rr := httptest.NewRecorder()
 	s.adminRestoreApply(rr, surfaceRequest(http.MethodPost, "/v1/admin/restore/apply", restoreApplyBody(t, fingerprint, true, false)))
-	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), operation.OperationID) || !strings.Contains(rr.Body.String(), `"created":false"`) {
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), operation.OperationID) || !strings.Contains(rr.Body.String(), `"created":false`) {
 		t.Fatalf("reconnect status = %d: %s", rr.Code, rr.Body.String())
 	}
 	if called {
