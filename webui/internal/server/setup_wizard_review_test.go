@@ -115,7 +115,7 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 		"Review your JustVoxel setup", "Configuration validated.", "Normalized Family Server", "20", "1.21.8",
 		"Recommended version", "/var/lib/justvoxel/minecraft", "/var/lib/justvoxel/backups",
 		"same_physical_disk", "Minecraft End User License Agreement", "https://www.minecraft.net/eula",
-		"Setup execution will be enabled by the transactional setup engine", "/static/setup-review.css",
+		"Apply this exact validated plan using JustVoxel's transactional setup engine", "/static/setup-review.css", "/static/setup-operation.js",
 		`name="plan_fingerprint" value="` + setupReviewFingerprint + `"`, "Validated plan:", "01234567…",
 	} {
 		if !strings.Contains(body, want) {
