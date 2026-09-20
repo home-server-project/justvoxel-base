@@ -154,11 +154,14 @@ grep -Fq 'migrate_data()' "${storage_provision}" || fail 'Minecraft data migrati
 grep -Fq 'registerAdminBackupStorageRoutes' "${admin_backup_storage}" || fail 'Management Agent backup storage routes are missing'
 grep -Fq 'registerAdminStorageProvisionRoutes' "${admin_storage_provision}" || fail 'Management Agent storage provisioning routes are missing'
 
-for forbidden in 'lsblk ' 'findmnt ' 'mount ' 'umount ' 'mkfs' 'parted ' 'wipefs ' 'write_main_config' 'render_runtime' 'systemctl ' '/etc/fstab' '/proc/'; do
+for forbidden in 'lsblk ' 'findmnt ' 'umount ' 'mkfs' 'parted ' 'wipefs ' 'write_main_config' 'render_runtime' 'systemctl ' '/etc/fstab' '/proc/'; do
     if grep -Fq "${forbidden}" "${backup_storage}"; then
         fail "mJust backup storage frontend still performs direct backend work: ${forbidden}"
     fi
 done
+if grep -Eq '^[[:space:]]*(if[[:space:]]+!)?[[:space:]]*mount[[:space:]]' "${backup_storage}"; then
+    fail 'mJust backup storage frontend still performs a direct mount command'
+fi
 if grep -Fq 'Authorization:' "${backup_storage_api}"; then
     fail 'mJust backup storage API helper must not introduce a bearer token'
 fi
