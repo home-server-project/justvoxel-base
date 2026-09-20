@@ -52,6 +52,9 @@ decode_line="$(grep -n 'decodeAdminSetupPlanRequest' "${agent}" | grep -v '^.*fu
 # Direct terminal administration remains a supported fallback independent of
 # the WebUI first-run flow.
 grep -A1 '^setup:$' "${justfile}" | grep -Fq '/usr/libexec/justvoxel/mjust/setup'
-grep -A1 '^setup-advanced:$' "${justfile}" | grep -Fq '/usr/libexec/justvoxel/mjust/setup --advanced'
+if grep -Fq 'setup-advanced:' "${justfile}" || grep -Fq 'setup --advanced' "${justfile}"; then
+    echo 'Legacy Advanced Setup must not be exposed as an mJust recipe.' >&2
+    exit 1
+fi
 
 echo 'WebUI A4.4 first-run planning integration checks passed.'
