@@ -107,8 +107,9 @@ grep -Fq 'case "cat":' "${operator_surfaces}" || fail 'Management API message-on
 grep -Fq 'unsupported Minecraft log format' "${operator_surfaces}" || fail 'Management API log format allowlist is missing'
 
 grep -Fq 'GET /v1/admin/configuration' "${configuration_api}" || fail 'mJust configuration does not read current state through the Management API'
-grep -Fq 'POST /v1/admin/configuration/plan' "${configuration_api}" || fail 'mJust configuration does not validate changes through the Management API'
-grep -Fq 'POST /v1/admin/configuration/apply' "${configuration_api}" || fail 'mJust configuration does not apply changes through the Management API'
+grep -Fq 'jv_config_post /v1/admin/configuration/plan' "${configuration_api}" || fail 'mJust configuration does not validate changes through the Management API'
+grep -Fq 'jv_config_post /v1/admin/configuration/apply' "${configuration_api}" || fail 'mJust configuration does not apply changes through the Management API'
+grep -Fq '"${JV_CONFIG_API_CLIENT}" POST "${path}" --data' "${configuration_api}" || fail 'mJust configuration POST helper does not use the Management API client'
 grep -Fq 'GET /v1/status' "${configuration_api}" || fail 'mJust configuration guidance does not use API status'
 grep -Fq '.confirmation_required // false' "${configuration_api}" || fail 'mJust configuration does not handle player restart confirmation'
 grep -Fq 'configuration-api.sh' "${configure}" || fail 'main mJust configure frontend does not use the configuration API helper'
