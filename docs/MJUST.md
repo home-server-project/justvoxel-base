@@ -40,8 +40,6 @@ It collects the settings needed to bring the appliance online, including Minecra
 
 The normal flow tries to keep Linux-specific details out of the way. Memory values are suggested from installed physical RAM, but the user can change them.
 
-`mjust setup-advanced` uses the same setup implementation and exposes additional controls such as custom Minecraft data UID/GID values and a raw systemd backup schedule.
-
 Setup refuses to silently overwrite an already-configured JustVoxel installation.
 
 ## Configure an installed server
@@ -110,7 +108,14 @@ JustVoxel provides two restore levels.
 
 `mjust restore-full` restores the complete backed-up Minecraft persistent-data directory, including plugins, plugin data, and Minecraft-side configuration.
 
-Restore uses archive validation, staging, player-aware shutdown, an exact `RESTORE` confirmation, a pre-restore safety copy, SELinux relabeling, and post-restore runtime validation. If the restored server fails validation, JustVoxel attempts to return to the preserved pre-restore state.
+The Restore command is a thin Management API frontend. Backup discovery,
+compatibility decisions, archive validation, staging, player-safety policy,
+shutdown, data switching, SELinux handling, runtime validation and rollback are
+owned by the Management Agent and shared Restore backend. The terminal keeps the
+human-facing selection and exact `RESTORE` confirmation.
+
+If the terminal disconnects during a Restore, running `mjust restore` again
+reconnects to the persistent Restore operation and resumes progress display.
 
 See `RESTORE.md` for the detailed recovery model and boundaries.
 

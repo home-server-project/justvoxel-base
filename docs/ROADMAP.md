@@ -61,7 +61,6 @@ Rebuild mJust around the same authoritative management layer already used by the
 
 Management API gaps that still need shared implementations before the corresponding direct CLI paths can disappear include:
 
-- restore and backup-history discovery
 - import/export and migration
 - Minecraft update policy and execution
 - bootc status and operating-system updates
@@ -69,8 +68,6 @@ Management API gaps that still need shared implementations before the correspond
 - administrator validation
 - Start Over / reset workflows
 - WebUI lifecycle and recovery behavior
-
-The existing restore implementation has substantial archive validation, compatibility, player-safety, rollback, and recovery logic. Preserve that behavior and move it behind the shared Management API rather than implementing separate restore engines for WebUI and mJust.
 
 ### Cross-interface validation
 

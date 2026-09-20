@@ -13,21 +13,25 @@ JustVoxel can be administered in four ways:
 3. **Direct `mjust` commands** — the same operations can be called directly without opening the menu.
 4. **Native Linux administration** — advanced users can use standard tools such as `systemctl`, `journalctl`, `podman`, `bootc`, `nmcli`, `firewall-cmd`, `findmnt`, and `lsblk` directly over SSH or the local console.
 
-A typical relationship is:
+A typical supported appliance relationship is:
 
 ```text
-WebUI
-  |
-JustVoxel Management API / mjust helpers
-  |
-JustVoxel runtime and configuration
-  |
-systemd / Podman / bootc / NetworkManager / firewalld
-  |
-AlmaLinux 10 bootc host
+WebUI --------\
+               -> JustVoxel Management API -> Management Agent -> shared appliance implementation
+mJust --------/
+                                                         |
+                              systemd / Podman / bootc / NetworkManager / firewalld
+                                                         |
+                                              AlmaLinux 10 bootc host
 ```
 
-This diagram describes the normal supported flow, not a restriction. An administrator may work at any appropriate layer.
+The Management API and Agent are the authoritative appliance-management layer
+for migrated capabilities. WebUI and mJust are separate user interfaces over
+that same implementation rather than separate management engines.
+
+This diagram describes the normal supported appliance flow, not a restriction.
+An administrator may still use appropriate native Linux tools directly for
+inspection, troubleshooting, or deliberate advanced administration.
 
 ## `mjust` is a convenience and safety layer
 
@@ -47,7 +51,12 @@ mjust resources
 mjust validate
 ```
 
-The interactive menu is therefore not a separate implementation. Direct `mjust` commands remain authoritative and are suitable for normal SSH administration, documentation, automation, and troubleshooting.
+The interactive menu and direct `mjust` commands are not separate appliance
+implementations. For capabilities migrated to the Management API, direct
+`mjust` commands are thin terminal frontends over the same Management Agent
+used by WebUI. They remain suitable entry points for normal SSH administration,
+documentation, automation, and troubleshooting, but they do not own duplicate
+business logic or safety policy.
 
 ## Native Linux administration remains available
 
@@ -113,9 +122,12 @@ Therefore:
 
 Administrators who intentionally diverge from the supported generated configuration should treat those changes as their own advanced configuration management responsibility.
 
-## Safety lives below the menu
+## Safety lives below the frontends
 
-Important safety checks are implemented in the command/workflow layer rather than only in the interactive menu. Calling a direct command does not bypass the intended protections.
+Important appliance safety checks belong behind the Management API in the
+Management Agent and shared backend implementation rather than only in the
+interactive menu, direct mJust command, or WebUI. Calling a direct mJust command
+does not bypass the intended protections.
 
 Examples include:
 
@@ -129,7 +141,8 @@ Examples include:
 - SELinux relabeling and runtime validation;
 - fail-closed behavior when critical state cannot be confirmed.
 
-The WebUI should call the same management capabilities rather than create a second independent definition of appliance behavior.
+WebUI and mJust should call the same management capabilities rather than create
+independent definitions of appliance behavior.
 
 ## Web management architecture
 
