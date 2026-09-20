@@ -4,6 +4,7 @@ source /usr/libexec/justvoxel/mjust/common.sh
 source /usr/libexec/justvoxel/mjust/ui.sh
 source /usr/libexec/justvoxel/mjust/backup-common.sh
 source /usr/libexec/justvoxel/mjust/restore-common.sh
+source /usr/libexec/justvoxel/mjust/interrupt-safety.sh
 source /usr/libexec/justvoxel/mjust/storage-common.sh
 source /usr/libexec/justvoxel/mjust/migration-common.sh
 source /usr/libexec/justvoxel/mjust/migration-transport.sh

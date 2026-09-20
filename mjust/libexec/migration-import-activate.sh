@@ -47,10 +47,28 @@ if [[ ${configured} == yes && ${minecraft_was_active} == yes ]]; then
             exit 0
         fi
     fi
-    echo 'Stopping Minecraft through its configured graceful shutdown path.'
-    systemctl stop minecraft.service
+    echo 'Stopping Minecraft through the player-aware graceful shutdown path.'
+    stop_mode=required
+    [[ ${players_override} == yes ]] && stop_mode=confirmed
+    set +e
+    JV_INTERRUPT_CONFIRMATION_MODE="${stop_mode}" \
+        jv_stop_minecraft_adaptive 'Import Minecraft data'
+    stop_rc=$?
+    set -e
+    if (( stop_rc == 10 )); then
+        if jui_confirm 'A player joined after the final check. Continue with the 60-second shutdown countdown?'; then
+            set +e
+            JV_INTERRUPT_CONFIRMATION_MODE=confirmed \
+                jv_stop_minecraft_adaptive 'Import Minecraft data'
+            stop_rc=$?
+            set -e
+        fi
+    fi
+    if (( stop_rc != 0 )); then
+        echo 'ERROR: Minecraft could not be stopped safely. Live data was not changed.' >&2
+        exit 1
+    fi
     minecraft_stopped_by_import=yes
-    systemctl is-active --quiet minecraft.service && { echo 'ERROR: Minecraft is still running. Live data was not changed.' >&2; exit 1; }
 fi
 
 if [[ ${configured} == yes ]]; then /usr/libexec/justvoxel/mjust/validate-data-mount; fi
