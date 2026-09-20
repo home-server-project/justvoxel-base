@@ -13,6 +13,11 @@ whitelist="${repo_root}/mjust/libexec/whitelist"
 whitelist_backend="${repo_root}/mjust/libexec/whitelist-backend"
 backup="${repo_root}/mjust/libexec/backup"
 logs="${repo_root}/mjust/libexec/logs"
+configure="${repo_root}/mjust/libexec/configure"
+configure_max="${repo_root}/mjust/libexec/configure-max-players"
+configuration_api="${repo_root}/mjust/libexec/configuration-api.sh"
+admin_configuration="${repo_root}/management/cmd/justvoxel-management-agent/admin_configuration.go"
+admin_discovery="${repo_root}/management/cmd/justvoxel-management-agent/admin_discovery.go"
 operator_surfaces="${repo_root}/management/cmd/justvoxel-management-agent/operator_surfaces.go"
 justfile="${repo_root}/mjust/justfile"
 
@@ -21,7 +26,7 @@ fail() {
     exit 1
 }
 
-for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${operator_surfaces}" "${justfile}"; do
+for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${admin_configuration}" "${admin_discovery}" "${operator_surfaces}" "${justfile}"; do
     [[ -f ${file} ]] || fail "missing mJust Management API file: ${file}"
 done
 
@@ -101,4 +106,27 @@ grep -Fq 'outputMode := "short-iso"' "${operator_surfaces}" || fail 'WebUI/defau
 grep -Fq 'case "cat":' "${operator_surfaces}" || fail 'Management API message-only log format is missing'
 grep -Fq 'unsupported Minecraft log format' "${operator_surfaces}" || fail 'Management API log format allowlist is missing'
 
-echo 'mJust Management API foundation, Players, Minecraft control, Status, Whitelist, Manual Backup, and Logs migration checks passed.'
+grep -Fq 'GET /v1/admin/configuration' "${configuration_api}" || fail 'mJust configuration does not read current state through the Management API'
+grep -Fq 'POST /v1/admin/configuration/plan' "${configuration_api}" || fail 'mJust configuration does not validate changes through the Management API'
+grep -Fq 'POST /v1/admin/configuration/apply' "${configuration_api}" || fail 'mJust configuration does not apply changes through the Management API'
+grep -Fq 'GET /v1/status' "${configuration_api}" || fail 'mJust configuration guidance does not use API status'
+grep -Fq '.confirmation_required // false' "${configuration_api}" || fail 'mJust configuration does not handle player restart confirmation'
+grep -Fq 'configuration-api.sh' "${configure}" || fail 'main mJust configure frontend does not use the configuration API helper'
+grep -Fq 'configuration-api.sh' "${configure_max}" || fail 'maximum-player frontend does not use the configuration API helper'
+grep -Fq 'jv_config_apply_payload' "${configure}" || fail 'main mJust configure frontend does not apply through the Agent'
+grep -Fq 'jv_config_apply_payload' "${configure_max}" || fail 'maximum-player frontend does not apply through the Agent'
+grep -Fq 'registerAdminConfigurationRoutes' "${admin_configuration}" || fail 'Management Agent configuration routes are missing'
+grep -Fq 'GET /v1/admin/configuration' "${admin_discovery}" || fail 'Management Agent configuration discovery route is missing'
+
+for frontend in "${configure}" "${configure_max}"; do
+    for forbidden in 'write_main_config' 'render_runtime' 'update_firewall_ports' 'systemctl ' 'require_config' '/etc/justvoxel' '/proc/'; do
+        if grep -Fq "${forbidden}" "${frontend}"; then
+            fail "mJust configuration frontend still performs direct backend work: ${forbidden}"
+        fi
+    done
+done
+if grep -Fq 'Authorization:' "${configuration_api}"; then
+    fail 'mJust configuration API helper must not introduce a bearer token'
+fi
+
+echo 'mJust Management API foundation, Players, Minecraft control, Status, Whitelist, Manual Backup, Logs, and Configuration migration checks passed.'
