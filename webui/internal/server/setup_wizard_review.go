@@ -93,6 +93,9 @@ func (a *App) setupWizardReviewEULA(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if a.redirectCurrentSetupOperation(w, r, session, client) {
+		return
+	}
 	draft, exists := firstRunSetupDrafts.get(a, session)
 	if !exists || !setupDraftReadyForReview(draft) {
 		http.Redirect(w, r, "/setup", http.StatusSeeOther)
@@ -128,8 +131,11 @@ func (a *App) setupWizardReviewEULA(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) setupWizardReviewBack(w http.ResponseWriter, r *http.Request) {
-	session, _, _, ok := a.setupWizardRequest(w, r, true)
+	session, client, _, ok := a.setupWizardRequest(w, r, true)
 	if !ok {
+		return
+	}
+	if a.redirectCurrentSetupOperation(w, r, session, client) {
 		return
 	}
 	draft, exists := firstRunSetupDrafts.get(a, session)
@@ -144,8 +150,11 @@ func (a *App) setupWizardReviewBack(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) setupWizardReviewCancel(w http.ResponseWriter, r *http.Request) {
-	session, _, _, ok := a.setupWizardRequest(w, r, true)
+	session, client, _, ok := a.setupWizardRequest(w, r, true)
 	if !ok {
+		return
+	}
+	if a.redirectCurrentSetupOperation(w, r, session, client) {
 		return
 	}
 	firstRunSetupReviews.delete(a, session)
