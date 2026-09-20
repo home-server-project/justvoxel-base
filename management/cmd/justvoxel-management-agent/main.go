@@ -202,12 +202,13 @@ func serve(socket string) error {
 	registerAdminRestoreRoutes(mux, s)
 	registerOperationalRoutes(mux, s)
 	registerMinecraftRoutes(mux, s)
+	registerAdminSystemActionRoutes(mux, s)
 
 	httpServer := &http.Server{
 		Handler:           s.requirePeer(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      30 * time.Second,
+		WriteTimeout:      210 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
 			uid, err := peerUID(c)
