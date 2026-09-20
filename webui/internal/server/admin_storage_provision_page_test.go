@@ -67,6 +67,26 @@ func TestAdvancedStorageShowsSafeCandidateGroups(t *testing.T) {
 	}
 }
 
+func TestAdvancedStorageFreshApplianceReturnsToSetup(t *testing.T) {
+	client := &fakeStorageProvisionAPI{}
+	client.configuration.Configured = false
+
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/storage-provision?from=setup", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("advanced storage returned %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{`href="/setup"`, "Back to setup", "Minecraft is not configured yet"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("fresh Advanced Storage page missing %q: %s", want, body)
+		}
+	}
+}
 func TestAdvancedStorageTemplateMakesTypedConfirmationExplicit(t *testing.T) {
 	content, err := assets.ReadFile("templates/storage_provision.html")
 	if err != nil {
