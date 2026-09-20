@@ -42,9 +42,39 @@ Recent WebUI storage work is implemented and now needs real-system validation:
 - transactional setup/apply path
   - including execution-time SMB credential handling
 
+### Unified Management API and mJust rebuild
+
+Rebuild mJust around the same authoritative management layer already used by the WebUI.
+
+- keep the JustVoxel Management Agent / Management API as the single appliance-management engine
+- treat WebUI and mJust as two frontends over that same engine
+- keep the new mJust intentionally thin: terminal navigation, user input, API calls, and presentation of results
+- do not recreate validation, safety policy, storage logic, Minecraft policy, or other business logic independently in mJust
+- use local console or SSH authentication plus `sudo` as the CLI administrative trust boundary
+- allow an explicitly authorized local UID 0 client to act as the Management API administrator without creating a second CLI login/session system
+- keep the existing WebUI Bearer-session and Administrator / Operator / Viewer authorization model unchanged
+- do not grant the ordinary `voxel` account unrestricted direct access to the privileged management socket
+- migrate capabilities in small, independently verified steps instead of a single large rewrite
+- keep the normal `testing` branch as a read-only reference for the legacy mJust behavior while the new architecture is developed on `mjust-testing`
+- do not delete helpers merely because they currently live under `mjust/libexec`; helpers used by the Management Agent remain shared implementation until they are safely moved or rewritten
+- progressively move shared backend helpers out of the misleading mJust namespace after direct CLI callers have been removed
+
+Management API gaps that still need shared implementations before the corresponding direct CLI paths can disappear include:
+
+- restore and backup-history discovery
+- import/export and migration
+- Minecraft update policy and execution
+- bootc status and operating-system updates
+- host reboot, poweroff, and firmware/UEFI operations
+- administrator validation
+- Start Over / reset workflows
+- WebUI lifecycle and recovery behavior
+
+The existing restore implementation has substantial archive validation, compatibility, player-safety, rollback, and recovery logic. Preserve that behavior and move it behind the shared Management API rather than implementing separate restore engines for WebUI and mJust.
+
 ### Cross-interface validation
 
-Verify that CLI and WebUI remain consistent:
+Verify that CLI and WebUI remain consistent through shared Management API behavior rather than duplicated frontend business logic:
 
 - configuration made through one interface is correctly understood by the other
 - storage and backup state survives reboot
@@ -84,17 +114,30 @@ These are intentionally early because they are relatively contained improvements
 - preserve existing administrator/editor tools
 - update Micro with the JustVoxel image rather than through an independent user-managed lifecycle
 
-### Local documentation - CLI
+### Documentation source and local documentation
 
-- use Glow to render the bundled Markdown documentation
+Create a dedicated documentation repository as the authoritative user-documentation source.
+
+- use `main` for approved, published documentation
+- use `draft` for active documentation work and incomplete updates
+- promote documentation from `draft` to `main` through a clean reviewed PR
+- keep retired or historical material in an excluded directory such as `archive/` or `retired/` rather than adding another permanent publication branch
+- have stable/public JustVoxel builds consume only approved documentation from `main`
+- resolve and record a specific documentation commit for each image build so the installed documentation is reproducible
+- exclude draft, retired, contributor-only, and other non-user-facing material from the appliance documentation payload
+
+For the CLI:
+
+- use Glow to render the bundled Markdown snapshot
 - provide an easy `mjust docs` entry point
-- keep the bundled Markdown files as the authoritative documentation source
 
-### Local documentation - WebUI
+For the WebUI:
 
-- use Material for MkDocs to present the same bundled documentation as a local readable site
-- expose it through Help / Documentation in the JustVoxel WebUI
+- use Material for MkDocs to present the same bundled snapshot as a local readable site
+- expose it through Help / Documentation
 - keep documentation matched to the installed bootc generation and available offline
+
+The future public website should present or link to the approved documentation from the same source repository so online and bundled documentation share one publication path.
 
 ### Minecraft server software choice
 
@@ -112,6 +155,25 @@ Keep the initial implementation within the existing single-server appliance mode
 - do not support in-place migration to or from Vanilla in the initial implementation
 
 ## P2 - Appliance workflow improvements
+
+### Public release and ISO distribution
+
+Create a dedicated public-release ISO repository separate from the customizable `justvoxel-iso` builder.
+
+- keep the existing customizable ISO repository for user-specific builds such as SSH-key, timezone, keyboard, and partition choices
+- use a separate public ISO repository only for official release media
+- build official media from stable/release JustVoxel images, not development/testing channels
+- publish two official x86-64 installers:
+  - JustVoxel VM for virtual machines and hypervisors
+  - JustVoxel HWE for physical hardware
+- refresh public installation media approximately monthly so the installer does not become unnecessarily stale as the underlying AlmaLinux/base image evolves
+- allow an additional on-demand public ISO build for important installer fixes, security changes, or significant user-facing functionality
+- do not rebuild public ISOs for every routine bootc image rebuild
+- use SourceForge as the planned public ISO hosting/mirror target and automate publication from GitHub Actions
+- make the current VM/HWE pair the primary public downloads
+- optionally retain one previous VM/HWE pair when storage availability makes it useful, without cluttering the main download experience
+- publish checksums and release metadata alongside the ISOs
+- provide a small public website, likely through GitHub Pages, with product information, screenshots, clear VM/HWE download choices, documentation, and source links
 
 ### Player-aware maintenance
 
