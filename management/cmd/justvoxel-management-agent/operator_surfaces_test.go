@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -26,6 +27,47 @@ func surfaceRequest(method, path, body string) *http.Request {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	return req
+}
+
+func TestLocalRootCanUseWhitelistWithoutBearerSession(t *testing.T) {
+	s := &server{sessions: make(map[string]session)}
+	old := runWhitelistHelper
+	defer func() { runWhitelistHelper = old }()
+
+	calls := make([][]string, 0, 3)
+	runWhitelistHelper = func(_ context.Context, args ...string) ([]byte, error) {
+		calls = append(calls, append([]string(nil), args...))
+		if len(args) == 1 && args[0] == "list" {
+			if len(calls) == 1 {
+				return []byte("There are 0 whitelisted player(s):\n"), nil
+			}
+			return []byte("There are 0 whitelisted player(s):\n"), nil
+		}
+		if len(args) == 2 && args[0] == "add-java" && args[1] == "Alex" {
+			return []byte("Added Alex to the whitelist\nThere are 1 whitelisted player(s): Alex\n"), nil
+		}
+		t.Fatalf("unexpected helper args: %#v", args)
+		return nil, nil
+	}
+
+	req := requestWithPeerUID(http.MethodGet, "http://unix/v1/whitelist", 0)
+	rr := httptest.NewRecorder()
+	s.whitelistList(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("local root whitelist list failed: %d %s", rr.Code, rr.Body.String())
+	}
+
+	req = requestWithPeerUID(http.MethodPost, "http://unix/v1/whitelist", 0)
+	req.Body = io.NopCloser(strings.NewReader(`{"platform":"java","action":"add","name":"Alex"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	s.whitelistChange(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("local root whitelist change failed: %d %s", rr.Code, rr.Body.String())
+	}
+	if len(calls) != 3 || calls[2][0] != "add-java" || calls[2][1] != "Alex" {
+		t.Fatalf("unexpected whitelist helper calls: %#v", calls)
+	}
 }
 
 func TestViewerCannotAccessWhitelistOrRawMinecraftLogs(t *testing.T) {
