@@ -115,6 +115,7 @@ trap - EXIT
 
 /usr/libexec/justvoxel/console-issue-refresh
 test -r /run/justvoxel/issue
+rm -rf /run/justvoxel
 test -f /etc/profile.d/90-justvoxel-motd.sh
 bash -n /etc/profile.d/90-justvoxel-motd.sh
 test -x /usr/libexec/justvoxel/motd
