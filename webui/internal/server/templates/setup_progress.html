@@ -15,7 +15,7 @@
   <form class="nav-logout" method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Log out</button></form>
 </header>
 <main class="setup-shell">
-  <div class="title-row setup-title-row"><div><p class="eyebrow">First setup</p><h1>Configuring JustVoxel</h1></div><span class="badge" id="setup-operation-state">{{.Operation.State}}</span></div>
+  <div class="title-row setup-title-row"><div><p class="eyebrow">First setup</p><h1>Configuring JustVoxel</h1></div><span class="badge" id="setup-operation-state">{{.StateLabel}}</span></div>
 
   <section class="panel setup-step-panel setup-operation-panel"
     data-setup-operation
@@ -24,7 +24,7 @@
     <div class="setup-operation-icon" aria-hidden="true"></div>
     <p class="setup-lead" id="setup-operation-status">{{.Operation.Status}}</p>
     <div class="setup-operation-details">
-      <div><span>Stage</span><strong id="setup-operation-stage">{{.Operation.Stage}}</strong></div>
+      <div><span>Stage</span><strong id="setup-operation-stage">{{.StageLabel}}</strong></div>
       <div><span>Operation</span><code>{{.Operation.OperationID}}</code></div>
     </div>
 
