@@ -20,6 +20,7 @@ const (
 	operationSchemaVersion = "v1"
 	operationStateDir      = "/var/lib/justvoxel/management"
 	operationTypeSetup     = "setup"
+	operationTypeRestore   = "restore"
 )
 
 type operationState string
@@ -41,9 +42,11 @@ var (
 	operationFingerprintPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 	operationStagePattern       = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
-	errOperationNotFound  = errors.New("operation not found")
-	errSetupOperationBusy = errors.New("another setup operation is already active")
-	errSetupLockBusy      = errors.New("setup operation lock is already held")
+	errOperationNotFound    = errors.New("operation not found")
+	errSetupOperationBusy   = errors.New("another setup operation is already active")
+	errSetupLockBusy        = errors.New("setup operation lock is already held")
+	errRestoreOperationBusy = errors.New("another restore operation is already active")
+	errRestoreLockBusy      = errors.New("restore operation lock is already held")
 )
 
 type operationRollback struct {
@@ -67,14 +70,17 @@ type operationJournal struct {
 }
 
 type operationStore struct {
-	mu             sync.Mutex
-	baseDir        string
-	operationsDir  string
-	lockFile       *os.File
-	setupLockHeld  bool
-	currentSetupID string
-	operations     map[string]operationJournal
-	now            func() time.Time
+	mu               sync.Mutex
+	baseDir          string
+	operationsDir    string
+	lockFile         *os.File
+	restoreLockFile  *os.File
+	setupLockHeld    bool
+	restoreLockHeld  bool
+	currentSetupID   string
+	currentRestoreID string
+	operations       map[string]operationJournal
+	now              func() time.Time
 }
 
 func openOperationStore(baseDir string) (*operationStore, error) {
@@ -97,15 +103,28 @@ func openOperationStore(baseDir string) (*operationStore, error) {
 		lockFile.Close()
 		return nil, fmt.Errorf("protect setup operation lock: %w", err)
 	}
+	restoreLockPath := filepath.Join(baseDir, "restore.lock")
+	restoreLockFile, err := os.OpenFile(restoreLockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		lockFile.Close()
+		return nil, fmt.Errorf("open restore operation lock: %w", err)
+	}
+	if err := restoreLockFile.Chmod(0o600); err != nil {
+		restoreLockFile.Close()
+		lockFile.Close()
+		return nil, fmt.Errorf("protect restore operation lock: %w", err)
+	}
 
 	s := &operationStore{
-		baseDir:       baseDir,
-		operationsDir: operationsDir,
-		lockFile:      lockFile,
-		operations:    make(map[string]operationJournal),
-		now:           time.Now,
+		baseDir:         baseDir,
+		operationsDir:   operationsDir,
+		lockFile:        lockFile,
+		restoreLockFile: restoreLockFile,
+		operations:      make(map[string]operationJournal),
+		now:             time.Now,
 	}
 	if err := s.loadAndRecover(); err != nil {
+		restoreLockFile.Close()
 		lockFile.Close()
 		return nil, err
 	}
@@ -123,18 +142,35 @@ func ensurePrivateDirectory(path string) error {
 }
 
 func (s *operationStore) close() error {
-	if s == nil || s.lockFile == nil {
+	if s == nil {
 		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.setupLockHeld {
+
+	if s.setupLockHeld && s.lockFile != nil {
 		_ = syscall.Flock(int(s.lockFile.Fd()), syscall.LOCK_UN)
 		s.setupLockHeld = false
 	}
-	err := s.lockFile.Close()
-	s.lockFile = nil
-	return err
+	if s.restoreLockHeld && s.restoreLockFile != nil {
+		_ = syscall.Flock(int(s.restoreLockFile.Fd()), syscall.LOCK_UN)
+		s.restoreLockHeld = false
+	}
+
+	var firstErr error
+	if s.restoreLockFile != nil {
+		if err := s.restoreLockFile.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		s.restoreLockFile = nil
+	}
+	if s.lockFile != nil {
+		if err := s.lockFile.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		s.lockFile = nil
+	}
+	return firstErr
 }
 
 func (s *operationStore) loadAndRecover() error {
@@ -143,6 +179,7 @@ func (s *operationStore) loadAndRecover() error {
 		return fmt.Errorf("read operation journals: %w", err)
 	}
 	activeSetup := ""
+	activeRestore := ""
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
@@ -165,36 +202,70 @@ func (s *operationStore) loadAndRecover() error {
 		if err := os.Chmod(path, 0o600); err != nil {
 			return fmt.Errorf("protect operation journal %s: %w", entry.Name(), err)
 		}
-		if journal.OperationType == operationTypeSetup && operationIsCurrent(journal.State) {
-			if activeSetup != "" {
-				return errors.New("multiple active setup operation journals require attention")
+		if operationIsCurrent(journal.State) {
+			switch journal.OperationType {
+			case operationTypeSetup:
+				if activeSetup != "" {
+					return errors.New("multiple active setup operation journals require attention")
+				}
+				activeSetup = journal.OperationID
+			case operationTypeRestore:
+				if activeRestore != "" {
+					return errors.New("multiple active restore operation journals require attention")
+				}
+				activeRestore = journal.OperationID
 			}
-			activeSetup = journal.OperationID
 		}
 		s.operations[journal.OperationID] = journal
 	}
 
-	if activeSetup == "" {
-		return nil
-	}
-	if err := s.acquireSetupLock(); err != nil {
-		return err
-	}
-	journal := s.operations[activeSetup]
-	if operationInterruptedByRestart(journal.State) {
-		now := s.now().UTC().Format(time.RFC3339Nano)
-		journal.State = operationNeedsAttention
-		journal.Stage = "interrupted"
-		journal.Status = "Setup was interrupted before completion."
-		journal.UpdatedAt = now
-		journal.InterruptedAt = now
-		if err := s.persist(journal); err != nil {
-			_ = s.releaseSetupLock()
+	if activeSetup != "" {
+		if err := s.acquireSetupLock(); err != nil {
 			return err
 		}
-		s.operations[journal.OperationID] = journal
+		journal := s.operations[activeSetup]
+		if operationInterruptedByRestart(journal.State) {
+			now := s.now().UTC().Format(time.RFC3339Nano)
+			journal.State = operationNeedsAttention
+			journal.Stage = "interrupted"
+			journal.Status = "Setup was interrupted before completion."
+			journal.UpdatedAt = now
+			journal.InterruptedAt = now
+			if err := s.persist(journal); err != nil {
+				_ = s.releaseSetupLock()
+				return err
+			}
+			s.operations[journal.OperationID] = journal
+		}
+		s.currentSetupID = activeSetup
 	}
-	s.currentSetupID = activeSetup
+
+	if activeRestore != "" {
+		if err := s.acquireRestoreLock(); err != nil {
+			if activeSetup != "" {
+				_ = s.releaseSetupLock()
+			}
+			return err
+		}
+		journal := s.operations[activeRestore]
+		if operationInterruptedByRestart(journal.State) {
+			now := s.now().UTC().Format(time.RFC3339Nano)
+			journal.State = operationNeedsAttention
+			journal.Stage = "interrupted"
+			journal.Status = "Restore was interrupted before completion. Review preserved restore recovery state before continuing."
+			journal.UpdatedAt = now
+			journal.InterruptedAt = now
+			if err := s.persist(journal); err != nil {
+				_ = s.releaseRestoreLock()
+				if activeSetup != "" {
+					_ = s.releaseSetupLock()
+				}
+				return err
+			}
+			s.operations[journal.OperationID] = journal
+		}
+		s.currentRestoreID = activeRestore
+	}
 	return nil
 }
 
@@ -229,7 +300,7 @@ func validateOperationJournal(journal operationJournal) error {
 	if !validOperationID(journal.OperationID) {
 		return errors.New("invalid operation id")
 	}
-	if journal.OperationType != operationTypeSetup {
+	if journal.OperationType != operationTypeSetup && journal.OperationType != operationTypeRestore {
 		return errors.New("unsupported operation type")
 	}
 	if !operationFingerprintPattern.MatchString(journal.PlanFingerprint) {
@@ -329,6 +400,52 @@ func (s *operationStore) beginSetup(planFingerprint string) (operationJournal, b
 	return journal, true, nil
 }
 
+
+func (s *operationStore) beginRestore(planFingerprint string) (operationJournal, bool, error) {
+	if !operationFingerprintPattern.MatchString(planFingerprint) {
+		return operationJournal{}, false, errors.New("invalid restore plan fingerprint")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.currentRestoreID != "" {
+		current := s.operations[s.currentRestoreID]
+		if current.PlanFingerprint == planFingerprint {
+			return current, false, nil
+		}
+		return operationJournal{}, false, errRestoreOperationBusy
+	}
+	if err := s.acquireRestoreLock(); err != nil {
+		return operationJournal{}, false, err
+	}
+
+	id, err := newOperationID()
+	if err != nil {
+		_ = s.releaseRestoreLock()
+		return operationJournal{}, false, err
+	}
+	now := s.now().UTC().Format(time.RFC3339Nano)
+	journal := operationJournal{
+		SchemaVersion:   operationSchemaVersion,
+		OperationID:     id,
+		OperationType:   operationTypeRestore,
+		PlanFingerprint: planFingerprint,
+		State:           operationQueued,
+		Stage:           "queued",
+		Status:          "Restore operation queued.",
+		StartedAt:       now,
+		UpdatedAt:       now,
+		Rollback:        operationRollback{State: "not_started"},
+	}
+	if err := s.persist(journal); err != nil {
+		_ = s.releaseRestoreLock()
+		return operationJournal{}, false, err
+	}
+	s.operations[id] = journal
+	s.currentRestoreID = id
+	return journal, true, nil
+}
+
 func (s *operationStore) get(id string) (operationJournal, error) {
 	if !validOperationID(id) {
 		return operationJournal{}, errOperationNotFound
@@ -351,6 +468,21 @@ func (s *operationStore) currentSetup() (*operationJournal, error) {
 	journal, ok := s.operations[s.currentSetupID]
 	if !ok {
 		return nil, errors.New("current setup operation journal is missing")
+	}
+	copy := journal
+	return &copy, nil
+}
+
+
+func (s *operationStore) currentRestore() (*operationJournal, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.currentRestoreID == "" {
+		return nil, nil
+	}
+	journal, ok := s.operations[s.currentRestoreID]
+	if !ok {
+		return nil, errors.New("current restore operation journal is missing")
 	}
 	copy := journal
 	return &copy, nil
@@ -397,10 +529,18 @@ func (s *operationStore) transition(id string, next operationState, stage, statu
 		return operationJournal{}, err
 	}
 	s.operations[id] = journal
-	if journal.OperationType == operationTypeSetup && (next == operationSucceeded || next == operationRolledBack) {
-		s.currentSetupID = ""
-		if err := s.releaseSetupLock(); err != nil {
-			return operationJournal{}, err
+	if next == operationSucceeded || next == operationRolledBack {
+		switch journal.OperationType {
+		case operationTypeSetup:
+			s.currentSetupID = ""
+			if err := s.releaseSetupLock(); err != nil {
+				return operationJournal{}, err
+			}
+		case operationTypeRestore:
+			s.currentRestoreID = ""
+			if err := s.releaseRestoreLock(); err != nil {
+				return operationJournal{}, err
+			}
 		}
 	}
 	return journal, nil
@@ -447,6 +587,38 @@ func (s *operationStore) releaseSetupLock() error {
 		return fmt.Errorf("release setup operation lock: %w", err)
 	}
 	s.setupLockHeld = false
+	return nil
+}
+
+
+func (s *operationStore) acquireRestoreLock() error {
+	if s.restoreLockHeld {
+		return nil
+	}
+	if s.restoreLockFile == nil {
+		return errors.New("restore operation lock is unavailable")
+	}
+	if err := syscall.Flock(int(s.restoreLockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+			return errRestoreLockBusy
+		}
+		return fmt.Errorf("acquire restore operation lock: %w", err)
+	}
+	s.restoreLockHeld = true
+	return nil
+}
+
+func (s *operationStore) releaseRestoreLock() error {
+	if !s.restoreLockHeld {
+		return nil
+	}
+	if s.restoreLockFile == nil {
+		return errors.New("restore operation lock is unavailable")
+	}
+	if err := syscall.Flock(int(s.restoreLockFile.Fd()), syscall.LOCK_UN); err != nil {
+		return fmt.Errorf("release restore operation lock: %w", err)
+	}
+	s.restoreLockHeld = false
 	return nil
 }
 

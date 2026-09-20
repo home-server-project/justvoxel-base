@@ -12,6 +12,7 @@ type adminOperationResponse struct {
 func registerAdminOperationRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("GET /v1/admin/operations/{id}", s.adminOperationStatus)
 	mux.HandleFunc("GET /v1/admin/setup/current-operation", s.adminCurrentSetupOperation)
+	mux.HandleFunc("GET /v1/admin/restore/current-operation", s.adminCurrentRestoreOperation)
 }
 
 func (s *server) adminOperationStatus(w http.ResponseWriter, r *http.Request) {
@@ -50,6 +51,22 @@ func (s *server) adminCurrentSetupOperation(w http.ResponseWriter, r *http.Reque
 	operation, err := s.operations.currentSetup()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "current setup operation could not be read")
+		return
+	}
+	writeJSON(w, http.StatusOK, adminOperationResponse{Operation: operation})
+}
+
+func (s *server) adminCurrentRestoreOperation(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdministrator(w, r); !ok {
+		return
+	}
+	if s.operations == nil {
+		writeError(w, http.StatusServiceUnavailable, "operation status is unavailable")
+		return
+	}
+	operation, err := s.operations.currentRestore()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "current restore operation could not be read")
 		return
 	}
 	writeJSON(w, http.StatusOK, adminOperationResponse{Operation: operation})
