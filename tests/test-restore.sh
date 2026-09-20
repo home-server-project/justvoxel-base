@@ -91,6 +91,28 @@ if grep -Eq 'systemctl[[:space:]]+(stop|restart)[[:space:]]+minecraft|restore-ar
     fail 'Restore API planning helper must remain read-only'
 fi
 
+transaction_helper="${repo_root}/mjust/libexec/admin-restore-transaction-json"
+for text in \
+    'JV_MAINTENANCE_LOCK' \
+    'jv_backup_require_read_target' \
+    'jv_restore_archive_identity' \
+    'gzip -t' \
+    'restore-archive inspect' \
+    'jv_restore_require_space' \
+    'extract-full' \
+    'extract-world' \
+    'pre-restore' \
+    'failed-restored' \
+    'players_confirmed' \
+    'systemctl stop minecraft.service' \
+    'chown -R' \
+    'apply_data_selinux' \
+    'restore-runtime-validate' \
+    'rolling_back' \
+    'needs_attention'; do
+    grep -Fq "${text}" "${transaction_helper}" || fail "Restore API transaction safety behavior missing: ${text}"
+done
+
 restore="${repo_root}/mjust/libexec/restore"
 backup="${repo_root}/runtime/minecraft-backup"
 menu="${repo_root}/mjust/libexec/menu"
