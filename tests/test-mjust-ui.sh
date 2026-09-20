@@ -87,7 +87,7 @@ grep -Fq 'Enable / disable Bedrock cross-play' "${configure}" || fail 'post-setu
 
 grep -Fq "'Show whitelist' 'Add player' 'Remove player' 'Back'" "${menu}" || fail 'friendly whitelist menu missing'
 grep -Fq 'bedrock-enabled' "${whitelist}" || fail 'whitelist Bedrock capability probe missing'
-grep -Fq 'Bedrock cross-play is disabled.' "${whitelist}" || fail 'friendly disabled-Bedrock message missing'
+grep -Fq 'Bedrock cross-play is disabled.' "${menu}" || fail 'friendly disabled-Bedrock message missing from the terminal menu'
 
 grep -Fq "'Storage overview' 'Move Minecraft data' 'Back'" "${menu}" || fail 'friendly storage menu missing'
 grep -Fq 'Storage devices / provisioning' "${menu}" || fail 'advanced storage provisioning entry missing'
