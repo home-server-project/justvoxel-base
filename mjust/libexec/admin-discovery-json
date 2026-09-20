@@ -300,6 +300,11 @@ configuration_change_json() {
     add_change backup_schedule 'Automatic backup schedule' "${old_backup_schedule}" "${new_backup_schedule}" false
     add_change backup_timer_enabled 'Automatic backups' "${old_backup_timer_enabled}" "${new_backup_timer_enabled}" false
 
+    local memory_restart_required=false
+    if jq -e 'any(.[]; .field == "java_memory" or .field == "container_memory")' <<< "${changes}" >/dev/null; then
+        memory_restart_required=true
+    fi
+
     if (( total_mib > 0 && remaining_mib < 2048 )); then
         warnings="$(jq -c --arg message "Memory remaining outside Minecraft is below the recommended 2 GiB headroom. JustVoxel itself typically uses roughly 0.6–1.0 GiB; the rest is useful for Linux cache, backups, updates, management services and temporary workload spikes." '. + [$message]' <<< "${warnings}")"
     fi
@@ -319,6 +324,47 @@ configuration_change_json() {
     BACKUP_SCHEDULE="${new_backup_schedule}"
     BACKUP_TIMER_ENABLED="${new_backup_timer_enabled}"
 
+    local proposed confirmation_required=false restarted=false restart_deferred=false
+    local online=0 players='[]' result_message='' was_running=false
+    proposed="$(configuration_values_json)"
+
+    if [[ ${mode} == apply && ${memory_restart_required} == true ]] && systemctl is-active --quiet minecraft.service 2>/dev/null; then
+        was_running=true
+        local safety_mode=required safety_output='' safety_rc=0 player_names=''
+        [[ ${confirm_players} == yes ]] && safety_mode=confirmed
+        set +e
+        safety_output="$(JV_INTERRUPT_CONFIRMATION_MODE="${safety_mode}" jv_player_check_before_interrupt 'restart Minecraft for the new memory settings' 2>/dev/null)"
+        safety_rc=$?
+        set -e
+        case "${safety_rc}" in
+            0)
+                ;;
+            10)
+                confirmation_required=true
+                if [[ ${safety_output} =~ There[[:space:]]are[[:space:]]([0-9]+)[[:space:]]of[[:space:]]a[[:space:]]max[[:space:]]of[[:space:]]([0-9]+)[[:space:]]players[[:space:]]online:?([[:space:]]*)(.*) ]]; then
+                    online="${BASH_REMATCH[1]}"
+                    player_names="${BASH_REMATCH[4]}"
+                    players="$(printf '%s\n' "${player_names}" | jq -R 'if length == 0 then [] else split(",") | map(gsub("^ +| +$"; "")) | map(select(length > 0)) end')"
+                fi
+                jq -n \
+                    --argjson changes "${changes}" --argjson warnings "${warnings}" \
+                    --argjson restart_required "${restart_required}" --argjson memory_restart_required "${memory_restart_required}" \
+                    --argjson memory_remaining_mib "$(( remaining_mib > 0 ? remaining_mib : 0 ))" \
+                    --argjson proposed "${proposed}" --argjson online "${online}" --argjson players "${players}" \
+                    '{ok:true,changes:$changes,warnings:$warnings,restart_required:$restart_required,memory_restart_required:$memory_restart_required,memory_remaining_mib:$memory_remaining_mib,proposed:$proposed,applied:false,confirmation_required:true,online:$online,players:$players,restarted:false,restart_deferred:false,message:""}'
+                return 0
+                ;;
+            1)
+                jq -n '{ok:false,error:"Could not confirm player status through RCON. No settings were changed and Minecraft was not restarted."}'
+                return 0
+                ;;
+            *)
+                jq -n '{ok:false,error:"Minecraft restart safety check failed. No settings were changed."}'
+                return 0
+                ;;
+        esac
+    fi
+
     if [[ ${mode} == apply && $(jq 'length' <<< "${changes}") -gt 0 ]]; then
         local config_backup failed_java failed_bedrock_enabled failed_bedrock_port
         config_backup="$(mktemp "${JV_CONFIG_DIR}/.justvoxel.conf.pre-webui.XXXXXX")"
@@ -332,22 +378,54 @@ configuration_change_json() {
             render_runtime >/dev/null 2>&1 || true
             update_firewall_ports "${failed_java}" "${failed_bedrock_enabled}" "${failed_bedrock_port}" >/dev/null 2>&1 || true
             rm -f "${config_backup}"
-            echo 'ERROR: failed to apply WebUI configuration; previous configuration was restored.' >&2
-            return 1
+            jq -n '{ok:false,error:"Could not apply the new settings. Previous settings were restored."}'
+            return 0
+        fi
+
+        if [[ ${memory_restart_required} == true && ${was_running} == true ]]; then
+            if ! systemctl restart minecraft.service || ! systemctl is-active --quiet minecraft.service; then
+                failed_java="${JAVA_PORT}"
+                failed_bedrock_enabled="${BEDROCK_ENABLED}"
+                failed_bedrock_port="${BEDROCK_PORT}"
+                cp -a "${config_backup}" "${JV_CONFIG}"
+                require_config || true
+                render_runtime >/dev/null 2>&1 || true
+                update_firewall_ports "${failed_java}" "${failed_bedrock_enabled}" "${failed_bedrock_port}" >/dev/null 2>&1 || true
+                systemctl restart minecraft.service >/dev/null 2>&1 || true
+                rm -f "${config_backup}"
+                jq -n '{ok:false,error:"Minecraft could not restart with the new memory settings. Previous settings were restored."}'
+                return 0
+            fi
+            restarted=true
+            result_message='Memory settings saved and Minecraft restarted with the new limits.'
+        elif [[ ${memory_restart_required} == true ]]; then
+            restart_deferred=true
+            result_message='Memory settings saved. Minecraft is stopped, so the new limits will be used on its next start.'
+        elif [[ ${restart_required} == true ]]; then
+            restart_deferred=true
+            result_message='Settings saved. Minecraft must be restarted later for the server changes to take effect.'
+        else
+            result_message='Settings saved and applied.'
         fi
         rm -f "${config_backup}"
+        proposed="$(configuration_values_json)"
     fi
 
-    local proposed
-    proposed="$(configuration_values_json)"
     jq -n \
         --argjson changes "${changes}" \
         --argjson warnings "${warnings}" \
         --argjson restart_required "${restart_required}" \
+        --argjson memory_restart_required "${memory_restart_required}" \
         --argjson memory_remaining_mib "$(( remaining_mib > 0 ? remaining_mib : 0 ))" \
         --argjson proposed "${proposed}" \
         --argjson applied "$([[ ${mode} == apply ]] && printf true || printf false)" \
-        '{ok:true,changes:$changes,warnings:$warnings,restart_required:$restart_required,memory_remaining_mib:$memory_remaining_mib,proposed:$proposed,applied:$applied}'
+        --argjson confirmation_required "${confirmation_required}" \
+        --argjson online "${online}" \
+        --argjson players "${players}" \
+        --argjson restarted "${restarted}" \
+        --argjson restart_deferred "${restart_deferred}" \
+        --arg message "${result_message}" \
+        '{ok:true,changes:$changes,warnings:$warnings,restart_required:$restart_required,memory_restart_required:$memory_restart_required,memory_remaining_mib:$memory_remaining_mib,proposed:$proposed,applied:$applied,confirmation_required:$confirmation_required,online:$online,players:$players,restarted:$restarted,restart_deferred:$restart_deferred,message:$message}'
 }
 
 case "${action}" in
