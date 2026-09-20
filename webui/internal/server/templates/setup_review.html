@@ -108,15 +108,14 @@
 
     {{if .ShortPlanReference}}<p class="muted compact">Validated plan: <code>{{.ShortPlanReference}}</code></p>{{end}}
     <div class="setup-execution-placeholder">
-      <strong>Configure JustVoxel</strong>
-      <span>Setup execution will be enabled by the transactional setup engine. A4.4 does not modify the appliance.</span>
+      <div class="setup-execution-copy"><strong>Configure JustVoxel</strong><span>Setup execution will be enabled by the transactional setup engine. A4.4 does not modify the appliance.</span></div>
       <button type="button" disabled>Configure JustVoxel</button>
     </div>
     {{end}}
 
     <div class="setup-actions setup-actions-split">
       <form method="post" action="/setup/review/cancel"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Cancel setup</button></form>
-      <form method="post" action="/setup/review/back"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Back to backups</button></form>
+      <form method="post" action="/setup/review/back"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Back</button></form>
     </div>
   </section>
   <p class="disclaimer">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</p>
