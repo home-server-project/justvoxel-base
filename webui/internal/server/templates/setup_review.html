@@ -87,7 +87,7 @@
     {{if .Plan.Warnings}}
     <section class="setup-review-warnings" aria-label="Setup warnings">
       <h2>Warnings</h2>
-      {{range .Plan.Warnings}}<div class="notice warning"><strong>{{.Code}}</strong><br>{{.Message}}</div>{{end}}
+      {{range .Plan.Warnings}}<div class="notice warning"><strong>{{if eq .Code "bedrock_version_unsupported"}}Bedrock cross-play unavailable{{else if eq .Code "bedrock_compatibility_unavailable"}}Bedrock compatibility could not be checked{{else if eq .Code "bedrock_moving_version"}}Bedrock compatibility may change{{else}}{{.Code}}{{end}}</strong><br>{{.Message}}</div>{{end}}
     </section>
     {{end}}
 
