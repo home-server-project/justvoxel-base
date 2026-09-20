@@ -85,6 +85,28 @@ func TestPlayersUsesAllowlistedHelperAndReturnsJSON(t *testing.T) {
 	}
 }
 
+func TestLocalRootCanReadPlayersWithoutBearerSession(t *testing.T) {
+	s := &server{sessions: make(map[string]session)}
+	oldRunner := runWebHelper
+	runWebHelper = func(_ context.Context, args ...string) ([]byte, int, error) {
+		if len(args) != 1 || args[0] != "players" {
+			t.Fatalf("unexpected helper args: %#v", args)
+		}
+		return []byte(`{"configured":true,"state":"running","online":2,"max":10,"names":["Alex","Steve"]}`), 0, nil
+	}
+	defer func() { runWebHelper = oldRunner }()
+
+	req := requestWithPeerUID(http.MethodGet, "http://unix/v1/players", 0)
+	rr := httptest.NewRecorder()
+	s.players(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("local root Players request failed: %d %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"online":2`) || !strings.Contains(rr.Body.String(), `"Alex"`) {
+		t.Fatalf("unexpected local root Players response: %s", rr.Body.String())
+	}
+}
+
 func TestViewerCanReadPlayersButCannotMutateMinecraft(t *testing.T) {
 	s := roleServerForTest(roleViewer)
 	oldRunner := runWebHelper
