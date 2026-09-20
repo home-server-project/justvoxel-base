@@ -4,6 +4,7 @@
 <main>
   <div class="title-row"><div><p class="eyebrow">Administrator · destructive storage</p><h1>Advanced storage</h1></div><span class="badge">{{.Identity.Username}}</span></div>
   <p class="muted">Provision new local storage for JustVoxel backups. Every destructive operation requires Review first, then the exact highlighted confirmation phrase shown for the selected device.</p>
+  {{if .FromSetup}}<div class="action-row"><a class="button-link secondary" href="/setup">Back to setup</a></div>{{end}}
   {{if .Message}}<div class="notice success">{{.Message}}</div>{{end}}
   {{if .Error}}<div class="notice error">{{.Error}}</div>{{end}}
 

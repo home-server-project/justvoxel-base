@@ -129,6 +129,64 @@ func TestSetupWizardStartsWithFriendlyServerDefaults(t *testing.T) {
 	}
 }
 
+func TestSetupWizardUsesCompactAlignedActions(t *testing.T) {
+	client := setupWizardClient()
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstRunSetupDrafts.delete(app, "session-token")
+	startSetup(t, app)
+
+	step1 := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
+	body := step1.Body.String()
+	for _, want := range []string{"setup-step-actions", "setup-step-navigation", "Cancel setup", ">Continue</button>"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("server actions missing %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "Save server choices and continue") {
+		t.Fatal("server step still uses the long continue label")
+	}
+
+	if rr := saveServerStep(t, app, validServerValues()); rr.Code != http.StatusSeeOther {
+		t.Fatalf("server save returned %d", rr.Code)
+	}
+	step2 := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
+	body = step2.Body.String()
+	for _, want := range []string{"Cancel setup", ">Back</button>", ">Continue</button>"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("Minecraft actions missing %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "Save Minecraft choices and continue") {
+		t.Fatal("Minecraft step still uses the long continue label")
+	}
+
+	template, err := assets.ReadFile("templates/setup_wizard.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(template)
+	for _, oldLabel := range []string{"Save server choices and continue", "Save Minecraft choices and continue", "Save storage choice and continue", "Save backup choices and continue"} {
+		if strings.Contains(markup, oldLabel) {
+			t.Fatalf("setup template still contains old action label %q", oldLabel)
+		}
+	}
+	if strings.Count(markup, ">Continue</button>") != 4 {
+		t.Fatalf("setup template Continue button count = %d, want 4", strings.Count(markup, ">Continue</button>"))
+	}
+}
+
+func TestSetupWizardAdvancedStorageKeepsReturnContext(t *testing.T) {
+	content, err := assets.ReadFile("templates/setup_wizard.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), `href="/settings/storage-provision?from=setup">Advanced Storage</a>`) {
+		t.Fatal("first-run Advanced Storage link does not preserve setup return context")
+	}
+}
 func TestSetupWizardServerStepValidatesAndPersistsChoices(t *testing.T) {
 	client := setupWizardClient()
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
