@@ -113,7 +113,7 @@ func TestSetupWizardStartsWithFriendlyServerDefaults(t *testing.T) {
 		t.Fatalf("server step returned %d: %s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"Step 1 of 5", "Server name / welcome message", "Family", "Maximum players", "Bedrock cross-play", "America/Toronto", "Technical name: MOTD", `list="timezone-options"`, `id="timezone-options"`} {
+	for _, want := range []string{"Step 1 of 5", "Server name / welcome message", "Family", "Maximum players", "Bedrock cross-play", "America/Toronto", "Technical name: MOTD", `list="timezone-options"`, `id="timezone-options"`, `value="UTC"`} {
 		if want == "Family" {
 			continue
 		}
