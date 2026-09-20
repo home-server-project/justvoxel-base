@@ -173,3 +173,42 @@ func TestAdminSystemActionsStatusRejectsMalformedBackendData(t *testing.T) {
 		t.Fatalf("invalid backend status = %d, want 500: %s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestLocalRootCanRequestConfirmedSystemAction(t *testing.T) {
+	old := runAdminSystemActionHelper
+	defer func() { runAdminSystemActionHelper = old }()
+	runAdminSystemActionHelper = func(_ context.Context, args ...string) ([]byte, int, error) {
+		if len(args) != 2 || args[0] != "apply" || args[1] != "reboot" {
+			t.Fatalf("unexpected local-root helper args: %#v", args)
+		}
+		return []byte(`{"ok":true,"action":"reboot","accepted":true,"message":"Reboot JustVoxel accepted."}`), 0, nil
+	}
+
+	s := &server{sessions: make(map[string]session)}
+	req := localRootMinecraftRequest(http.MethodPost, "http://unix/v1/admin/system/reboot", `{"action_confirmed":true,"confirm_players":false}`)
+	rr := httptest.NewRecorder()
+	s.adminSystemAction(rr, req, "reboot")
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("local-root reboot = %d, want 202: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestOperatorCannotRequestSystemAction(t *testing.T) {
+	old := runAdminSystemActionHelper
+	defer func() { runAdminSystemActionHelper = old }()
+	called := false
+	runAdminSystemActionHelper = func(_ context.Context, _ ...string) ([]byte, int, error) {
+		called = true
+		return nil, 0, nil
+	}
+
+	s := roleServerForTest(roleOperator)
+	rr := httptest.NewRecorder()
+	s.adminSystemAction(rr, authorizedRequest(http.MethodPost, "http://unix/v1/admin/system/reboot", `{"action_confirmed":true,"confirm_players":false}`), "reboot")
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("operator reboot = %d, want 403", rr.Code)
+	}
+	if called {
+		t.Fatal("system action helper ran for forbidden operator request")
+	}
+}
