@@ -18,9 +18,15 @@ configure_max="${repo_root}/mjust/libexec/configure-max-players"
 configuration_api="${repo_root}/mjust/libexec/configuration-api.sh"
 backup_storage="${repo_root}/mjust/libexec/backup-storage"
 backup_storage_api="${repo_root}/mjust/libexec/backup-storage-api.sh"
+setup="${repo_root}/mjust/libexec/setup"
+setup_api="${repo_root}/mjust/libexec/setup-api.sh"
+setup_legacy="${repo_root}/mjust/libexec/setup-legacy"
 storage_provision="${repo_root}/mjust/libexec/storage-provision"
 admin_backup_storage="${repo_root}/management/cmd/justvoxel-management-agent/admin_backup_storage.go"
 admin_storage_provision="${repo_root}/management/cmd/justvoxel-management-agent/admin_storage_provision.go"
+admin_setup_plan="${repo_root}/management/cmd/justvoxel-management-agent/admin_setup_plan.go"
+admin_setup_apply="${repo_root}/management/cmd/justvoxel-management-agent/admin_setup_apply.go"
+admin_operations="${repo_root}/management/cmd/justvoxel-management-agent/admin_operations.go"
 admin_configuration="${repo_root}/management/cmd/justvoxel-management-agent/admin_configuration.go"
 admin_discovery="${repo_root}/management/cmd/justvoxel-management-agent/admin_discovery.go"
 operator_surfaces="${repo_root}/management/cmd/justvoxel-management-agent/operator_surfaces.go"
@@ -31,7 +37,7 @@ fail() {
     exit 1
 }
 
-for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${backup_storage}" "${backup_storage_api}" "${storage_provision}" "${admin_backup_storage}" "${admin_storage_provision}" "${admin_configuration}" "${admin_discovery}" "${operator_surfaces}" "${justfile}"; do
+for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${backup_storage}" "${backup_storage_api}" "${setup}" "${setup_api}" "${setup_legacy}" "${storage_provision}" "${admin_backup_storage}" "${admin_storage_provision}" "${admin_setup_plan}" "${admin_setup_apply}" "${admin_operations}" "${admin_configuration}" "${admin_discovery}" "${operator_surfaces}" "${justfile}"; do
     [[ -f ${file} ]] || fail "missing mJust Management API file: ${file}"
 done
 
@@ -166,4 +172,31 @@ if grep -Fq 'Authorization:' "${backup_storage_api}"; then
     fail 'mJust backup storage API helper must not introduce a bearer token'
 fi
 
-echo 'mJust Management API foundation, Players, Minecraft control, Status, Whitelist, Manual Backup, Logs, Configuration, and Backup Storage migration checks passed.'
+grep -Fq 'setup-api.sh' "${setup}" || fail 'normal mJust setup does not use the setup API helper'
+grep -Fq 'exec /usr/libexec/justvoxel/mjust/setup-legacy --advanced' "${setup}" || fail 'setup-advanced does not delegate to the preserved legacy path'
+grep -Fq 'jv_setup_current_operation' "${setup}" || fail 'normal mJust setup cannot reconnect to an active setup operation'
+grep -Fq 'jv_setup_defaults' "${setup}" || fail 'normal mJust setup does not obtain Agent defaults'
+grep -Fq 'jv_setup_storage' "${setup}" || fail 'normal mJust setup does not obtain Agent storage discovery'
+grep -Fq 'jv_setup_plan' "${setup}" || fail 'normal mJust setup does not plan through the Agent'
+grep -Fq 'jv_setup_apply' "${setup}" || fail 'normal mJust setup does not apply through the Agent'
+grep -Fq 'jv_setup_monitor_operation' "${setup}" || fail 'normal mJust setup does not monitor the persistent Agent operation'
+grep -Fq 'jv_setup_get /v1/admin/setup-defaults' "${setup_api}" || fail 'setup defaults are not read through the Management API'
+grep -Fq 'jv_setup_get /v1/admin/storage' "${setup_api}" || fail 'setup storage discovery is not read through the Management API'
+grep -Fq 'jv_setup_post /v1/admin/setup/plan' "${setup_api}" || fail 'setup planning does not use the Management API'
+grep -Fq 'jv_setup_post /v1/admin/setup/apply' "${setup_api}" || fail 'setup apply does not use the Management API'
+grep -Fq 'jv_setup_get "/v1/admin/operations/${id}"' "${setup_api}" || fail 'setup operation status does not use the Management API'
+grep -Fq 'registerAdminSetupPlanRoutes' "${admin_setup_plan}" || fail 'Management Agent setup plan route is missing'
+grep -Fq 'registerAdminSetupApplyRoutes' "${admin_setup_apply}" || fail 'Management Agent setup apply route is missing'
+grep -Fq 'registerAdminOperationRoutes' "${admin_operations}" || fail 'Management Agent setup operation routes are missing'
+
+for forbidden in 'write_main_config' 'render_runtime' 'configure_firewall_initial' 'apply_data_selinux' 'systemctl ' 'mountpoint ' 'findmnt ' 'install -d' 'storage_prepare_' '/etc/justvoxel' '/proc/'; do
+    if grep -Fq "${forbidden}" "${setup}"; then
+        fail "normal mJust setup still performs direct backend work: ${forbidden}"
+    fi
+done
+grep -Fq 'write_main_config' "${setup_legacy}" || fail 'advanced legacy setup implementation was not preserved'
+if grep -Fq 'Authorization:' "${setup_api}"; then
+    fail 'mJust setup API helper must not introduce a bearer token'
+fi
+
+echo 'mJust Management API foundation, Players, Minecraft control, Status, Whitelist, Manual Backup, Logs, Configuration, Backup Storage, and First-run Setup migration checks passed.'
