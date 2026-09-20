@@ -48,7 +48,7 @@
         <label class="setup-field">Timezone<input id="timezone" name="timezone" list="timezone-options" value="{{.Server.Timezone}}" autocomplete="off" placeholder="Search, for example America/Toronto"><datalist id="timezone-options">{{range .Timezones}}<option value="{{.}}"></option>{{end}}</datalist><span class="field-help">Start typing a city or region and choose a timezone from the suggestions, for example <code>America/Toronto</code> or <code>UTC</code>.</span></label>
       </div>
       <label class="setup-choice"><input type="checkbox" name="bedrock_enabled" {{if .Server.BedrockEnabled}}checked{{end}}><span><strong>Enable Bedrock cross-play</strong><small>Allow supported Bedrock clients to join through Geyser/Floodgate. You can change this later.</small></span></label>
-      <div class="setup-primary-action"><button type="submit">Save server choices and continue</button></div>
+      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button type="submit">Continue</button></div></div>
     </form>
 
     {{else if eq .CurrentStep 2}}
@@ -72,7 +72,7 @@
         <label id="specific-version-field" class="setup-field setup-field-wide" {{if ne .Minecraft.VersionPolicy "pinned"}}hidden{{end}}>Specific Minecraft version<input id="minecraft-version" name="version" value="{{.Minecraft.Version}}" autocomplete="off" placeholder="26.2"><span class="field-help">Use an exact Minecraft version when you need one. JustVoxel verifies Paper and Bedrock compatibility during Review.</span></label>
         {{if .Server.BedrockEnabled}}<div class="notice setup-field-wide"><strong>Bedrock compatibility is checked before setup.</strong><br>If the selected Minecraft version is newer than Geyser/Floodgate currently supports, Java server setup can continue but Bedrock cross-play will be turned off and Geyser/Floodgate will not be installed. Come back later and check again after support catches up.</div>{{end}}
       </div>
-      <div class="setup-primary-action setup-primary-action-split"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next">Save Minecraft choices and continue</button></div>
+      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
     </form>
 
     {{else if eq .CurrentStep 3}}
@@ -104,8 +104,8 @@
         </div>
         {{else}}<div class="notice">No safe existing XFS, ext4 or Btrfs filesystem is currently available.</div>{{end}}
       </div>
-      <div class="notice setup-advanced-note"><strong>Need to prepare a new disk?</strong><span>Disk erase, formatting and partition creation stay outside this normal first-run form. <a href="/settings/storage-provision">Advanced Storage</a> uses the separate typed-confirmation safety workflow; <code>mjust setup</code> remains available from the terminal as well.</span></div>
-      <div class="setup-primary-action setup-primary-action-split"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next">Save storage choice and continue</button></div>
+      <div class="notice setup-advanced-note"><strong>Need to prepare a new disk?</strong><span>Disk erase, formatting and partition creation stay outside this normal first-run form. <a href="/settings/storage-provision?from=setup">Advanced Storage</a> uses the separate typed-confirmation safety workflow; <code>mjust setup</code> remains available from the terminal as well.</span></div>
+      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
     </form>
 
     {{else if eq .CurrentStep 4}}
@@ -134,7 +134,7 @@
       </div>
       <div data-setup-backup-kind="nfs" hidden><div class="setup-form-grid"><label class="setup-field setup-field-wide">NFS source<input name="backup_source" value="{{.Backups.Source}}" data-setup-backup-field="nfs" autocomplete="off" placeholder="nas:/volume/backups"><span class="field-help">Use <code>server:/export</code>.</span></label><label class="setup-field">Local mount point<input name="backup_mount_point" value="{{.Backups.MountPoint}}" data-setup-backup-field="nfs" data-default="/var/mnt/justvoxel-backup" autocomplete="off" placeholder="/var/mnt/justvoxel-backup"></label><label class="setup-field">Backup directory<input name="backup_path" value="{{.Backups.Path}}" data-setup-backup-field="nfs" autocomplete="off" placeholder="/var/mnt/justvoxel-backup/backups"></label></div><div class="notice">Network backups depend on the NFS server being reachable. The final setup will validate the expected share before it is used.</div></div>
       <div data-setup-backup-kind="smb" hidden><div class="setup-form-grid"><label class="setup-field setup-field-wide">SMB share<input name="backup_source" value="{{.Backups.Source}}" data-setup-backup-field="smb" autocomplete="off" placeholder="//nas/backups"><span class="field-help">Use <code>//server/share</code>.</span></label><label class="setup-field">Username<input name="backup_username" value="{{.Backups.Username}}" data-setup-backup-field="smb" autocomplete="username"></label><label class="setup-field">Domain / workgroup <span class="muted">optional</span><input name="backup_domain" value="{{.Backups.Domain}}" data-setup-backup-field="smb" autocomplete="off"></label><label class="setup-field">Local mount point<input name="backup_mount_point" value="{{.Backups.MountPoint}}" data-setup-backup-field="smb" data-default="/var/mnt/justvoxel-backup" autocomplete="off" placeholder="/var/mnt/justvoxel-backup"></label><label class="setup-field">Backup directory<input name="backup_path" value="{{.Backups.Path}}" data-setup-backup-field="smb" autocomplete="off" placeholder="/var/mnt/justvoxel-backup/backups"></label></div><div class="notice setup-secret-note"><strong>Password is not stored in this setup draft.</strong><span>JustVoxel will request the SMB password only when the final setup is actually applied. It will not be shown again or placed in browser URLs/logs.</span></div></div>
-      <div class="setup-primary-action setup-primary-action-split"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next">Save backup choices and continue</button></div>
+      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
     </form>
 
     {{else}}
@@ -142,10 +142,6 @@
     {{if .SameDiskWarning}}<div class="notice warning"><strong>Backup resilience warning</strong><br>{{.SameDiskWarning}}</div>{{end}}
     {{end}}
 
-    <div class="setup-actions setup-actions-split">
-      <form method="post" action="/setup/cancel"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Cancel setup</button></form>
-      {{if eq .CurrentStep 5}}<div class="setup-navigation"><form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="direction" value="back"><button class="secondary" type="submit">Back</button></form><button type="button" disabled>Apply unavailable until Review is implemented</button></div>{{end}}
-    </div>
   </section>
   {{end}}
   <p class="disclaimer">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</p>
