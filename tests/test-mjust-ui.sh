@@ -99,8 +99,10 @@ if grep -Fq "'Operating system status' 'Check / download OS update'" "${menu}"; 
 fi
 
 grep -Fq "'Minecraft logs' 'Advanced / full system log' 'Back'" "${menu}" || fail 'simple/advanced logs submenu missing'
-grep -Fq -- '-o cat' "${logs}" || fail 'simple logs must use message-only journal output'
+grep -Fq '/v1/logs/minecraft?limit=100&format=cat' "${logs}" || fail 'simple logs must use the message-only Management API view'
+if grep -Fq -- '-o cat' "${logs}"; then fail 'simple logs still use direct journalctl -o cat'; fi
 grep -Fq -- '--advanced' "${logs}" || fail 'advanced logs mode missing'
+grep -Fq 'journalctl "${journal_args[@]}" -f' "${logs}" || fail 'advanced logs direct systemd follow view missing'
 
 grep -Fq 'Administrator password' "${menu}" || fail 'administrator password menu entry missing'
 grep -Fq '/usr/bin/mjust password-reset' "${menu}" || fail 'administrator password menu dispatch missing'
