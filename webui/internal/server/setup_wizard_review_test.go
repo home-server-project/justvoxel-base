@@ -113,7 +113,7 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 	body := rr.Body.String()
 	for _, want := range []string{
 		"Review your JustVoxel setup", "Configuration validated.", "Normalized Family Server", "20", "1.21.8",
-		"Recommended stable", "/var/lib/justvoxel/minecraft", "/var/lib/justvoxel/backups",
+		"Recommended version", "/var/lib/justvoxel/minecraft", "/var/lib/justvoxel/backups",
 		"same_physical_disk", "Minecraft End User License Agreement", "https://www.minecraft.net/eula",
 		"Setup execution will be enabled by the transactional setup engine", "/static/setup-review.css",
 		`name="plan_fingerprint" value="` + setupReviewFingerprint + `"`, "Validated plan:", "01234567…",
@@ -130,6 +130,34 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 	}
 	if strings.Contains(body, `type="password"`) || strings.Contains(body, `name="backup_password"`) {
 		t.Fatal("review rendered a password field")
+	}
+}
+
+func TestSetupReviewExplainsDisabledBedrockCompatibility(t *testing.T) {
+	client := setupReviewClient()
+	client.plan.Normalized.Server.BedrockEnabled = false
+	client.plan.Normalized.Minecraft.Version = "26.3"
+	client.plan.Warnings = append(client.plan.Warnings, api.AdminSetupPlanWarning{
+		Code:    "bedrock_version_unsupported",
+		Message: "Bedrock cross-play was turned off because Geyser/Floodgate currently supports Minecraft 26.2, while this setup uses 26.3. Java server setup can continue. Come back later and enable Bedrock cross-play after Geyser/Floodgate adds support for this Minecraft version.",
+	})
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer firstRunSetupReviews.delete(app, "session-token")
+	advanceSetupToReview(t, app)
+
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("review returned %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{"Bedrock cross-play</dt><dd>Disabled", "Bedrock cross-play unavailable", "currently supports Minecraft 26.2", "Come back later and enable Bedrock cross-play"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("Bedrock compatibility review missing %q: %s", want, body)
+		}
 	}
 }
 
