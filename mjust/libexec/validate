@@ -37,7 +37,7 @@ if ! jq -e '
     exit 1
 fi
 
-jq -r '.output' <<<"${response}"
+jq -rj '.output' <<<"${response}"
 
 if [[ $(jq -r '.ok' <<<"${response}") == true ]]; then
     exit 0
