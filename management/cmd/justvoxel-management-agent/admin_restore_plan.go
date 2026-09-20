@@ -104,6 +104,7 @@ type adminRestorePlanResponse struct {
 	Normalized      *adminRestorePlanNormalized   `json:"normalized,omitempty"`
 	Warnings        []adminRestorePlanWarning     `json:"warnings"`
 	Requirements    *adminRestorePlanRequirements `json:"requirements,omitempty"`
+	Context         *adminRestorePlanContext      `json:"-"`
 }
 
 type adminRestoreFingerprintPayload struct {
@@ -192,6 +193,7 @@ func authoritativeAdminRestorePlan(parent context.Context, request adminRestoreP
 		return adminRestorePlanResponse{}, &adminRestorePlanningError{status: http.StatusInternalServerError, message: "restore plan identity could not be created"}
 	}
 	public.PlanFingerprint = fingerprint
+	public.Context = helper.Context
 	return public, nil
 }
 
