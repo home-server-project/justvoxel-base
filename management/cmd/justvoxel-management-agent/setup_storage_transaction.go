@@ -51,12 +51,13 @@ type setupStorageTransactionRequest struct {
 }
 
 type setupStorageTransactionResponse struct {
-	OK             bool   `json:"ok"`
-	Applied        bool   `json:"applied"`
-	Phase          string `json:"phase"`
-	RollbackState  string `json:"rollback_state"`
-	RollbackResult string `json:"rollback_result"`
-	Error          string `json:"error,omitempty"`
+	OK             bool              `json:"ok"`
+	Applied        bool              `json:"applied"`
+	Phase          string            `json:"phase"`
+	RollbackState  string            `json:"rollback_state"`
+	RollbackResult string            `json:"rollback_result"`
+	Error          string            `json:"error,omitempty"`
+	Evidence       map[string]string `json:"evidence,omitempty"`
 }
 
 var errSetupStorageTypeUnsupported = errors.New("unsupported setup storage type")
@@ -162,6 +163,7 @@ func executeSetupStorage(parent context.Context, store *operationStore, operatio
 	}
 	store.appendSetupStorageEvidenceBestEffort(operationID, "preflight", plan, "not_run")
 	validation, err := runSetupStorageTransactionAction(parent, "validate", setupStorageValidateTimeout, request)
+	store.appendSetupStorageHelperEvidenceBestEffort(operationID, "validate", validation.Evidence)
 	if err != nil {
 		store.appendSetupHelperFailureBestEffort(operationID, "storage", "validate", err)
 	}
@@ -182,6 +184,7 @@ func executeSetupStorage(parent context.Context, store *operationStore, operatio
 		return err
 	}
 	applied, err := runSetupStorageTransactionAction(parent, "apply", setupStorageApplyTimeout, request)
+	store.appendSetupStorageHelperEvidenceBestEffort(operationID, "apply", applied.Evidence)
 	if err != nil {
 		store.appendSetupHelperFailureBestEffort(operationID, "storage", "apply", err)
 	}
@@ -266,6 +269,7 @@ func rollbackSetupStorage(parent context.Context, store *operationStore, operati
 		return response, err
 	}
 	response, err = runSetupStorageTransactionAction(parent, "rollback", setupStorageRollbackTimeout, request)
+	store.appendSetupStorageHelperEvidenceBestEffort(operationID, "rollback", response.Evidence)
 	if err != nil {
 		store.appendSetupHelperFailureBestEffort(operationID, "storage", "rollback", err)
 		store.appendSetupStorageFailureEvidenceBestEffort(operationID, "rollback", plan, err)

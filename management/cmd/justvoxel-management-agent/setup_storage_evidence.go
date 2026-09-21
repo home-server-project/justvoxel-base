@@ -23,6 +23,18 @@ type setupStorageDiagnosticManifest struct {
 	} `json:"rollback"`
 }
 
+func (s *operationStore) appendSetupStorageHelperEvidenceBestEffort(operationID, action string, evidence map[string]string) {
+	if s == nil || !validOperationID(operationID) || len(evidence) == 0 {
+		return
+	}
+	values := make(map[string]string, len(evidence)+1)
+	values["action"] = action
+	for key, value := range evidence {
+		values[key] = value
+	}
+	_ = s.appendSetupDiagnostic(operationID, "STORAGE", "storage helper evidence", values)
+}
+
 func (s *operationStore) appendSetupStorageEvidenceBestEffort(operationID, phase string, plan *adminSetupNormalizedPlan, writeProbe string) {
 	if s == nil || !validOperationID(operationID) {
 		return

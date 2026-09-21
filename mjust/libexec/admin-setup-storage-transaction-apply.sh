@@ -109,8 +109,8 @@ _a53_write_local_fstab() {
     A53_MUTATION_STARTED=true
     _a53_manifest_set_fstab_changed || return 1
     systemctl daemon-reload >/dev/null 2>&1 || return 1
+    _a53_evidence_set fstab_update ok
 }
-
 
 _a54_write_network_fstab() {
     local source="$1" mountpoint="$2" fstype="$3" options="$4" tmp
@@ -123,6 +123,7 @@ _a54_write_network_fstab() {
     A53_MUTATION_STARTED=true
     _a53_manifest_set_fstab_changed || return 1
     systemctl daemon-reload >/dev/null 2>&1 || return 1
+    _a53_evidence_set network_fstab_update ok
 }
 
 _a54_write_smb_credentials() {
@@ -143,10 +144,11 @@ _a54_write_smb_credentials() {
     A54_CREDENTIALS_CHANGED=true
     after="$(_a53_file_sha256 "${A54_SMB_CREDENTIALS}")"
     _a53_manifest_update ".credentials_changed = true | .credentials_after_sha256 = \"${after}\"" || return 1
+    _a53_evidence_set smb_credentials_written yes
 }
 
 _a54_mount_network_target() {
-    local target_json="$1" type mountpoint source username domain actual_source options
+    local target_json="$1" type mountpoint source username domain actual_source options output rc
     type="$(jq -r '.type' <<< "${target_json}")"
     [[ ${type} == nfs || ${type} == smb ]] || return 0
     mountpoint="$(_a53_normalize_path "$(jq -r '.mount_point' <<< "${target_json}")")"
@@ -156,8 +158,13 @@ _a54_mount_network_target() {
 
     if mountpoint -q -- "${mountpoint}"; then
         actual_source="$(findmnt -n -o SOURCE --target "${mountpoint}" 2>/dev/null || true)"
-        [[ ${actual_source} == "${source}" ]] || return 1
-        return 0
+        _a53_evidence_set backup_mount_result already_mounted
+        if [[ ${actual_source} == "${source}" ]]; then
+            _a53_evidence_set backup_source_match yes
+            return 0
+        fi
+        _a53_evidence_set backup_source_match no
+        return 1
     fi
     if [[ ! -d ${mountpoint} ]]; then
         _a53_ensure_dir "${mountpoint}" 0755 || return 1
@@ -171,25 +178,40 @@ _a54_mount_network_target() {
         _a54_write_network_fstab "${source}" "${mountpoint}" cifs "${options}" || return 1
     fi
 
-    mount "${mountpoint}" >/dev/null 2>&1 || return 1
+    output="$(mount "${mountpoint}" 2>&1)"
+    rc=$?
+    _a53_evidence_set_bounded backup_mount_output "${output}"
+    if (( rc != 0 )); then
+        _a53_evidence_set backup_mount_result failed
+        return 1
+    fi
+    _a53_evidence_set backup_mount_result mounted
     A53_MUTATION_STARTED=true
     actual_source="$(findmnt -n -o SOURCE --target "${mountpoint}" 2>/dev/null || true)"
     A53_MOUNTS_BY_US+=("$(jq -cn --arg mountpoint "${mountpoint}" --arg uuid "" --arg source "${actual_source}" '{mountpoint:$mountpoint,uuid:$uuid,source:$source}')")
     _a53_manifest_record_mount "${mountpoint}" "" "${actual_source}" || return 1
-    [[ ${actual_source} == "${source}" ]] || return 1
-    return 0
+    if [[ ${actual_source} == "${source}" ]]; then
+        _a53_evidence_set backup_source_match yes
+        return 0
+    fi
+    _a53_evidence_set backup_source_match no
+    return 1
 }
 
 _a53_mount_target() {
-    local target_json="$1" type mountpoint expected_uuid filesystem device actual_uuid actual_source mounted
+    local target_json="$1" role="${2:-local}" type mountpoint expected_uuid filesystem device actual_uuid actual_source mounted output rc
     type="$(jq -r '.type' <<< "${target_json}")"
-    [[ ${type} == partition ]] || return 0
+    if [[ ${type} != partition ]]; then
+        _a53_evidence_set "${role}_mount_result" not_applicable
+        return 0
+    fi
     mountpoint="$(_a53_normalize_path "$(jq -r '.mount_point' <<< "${target_json}")")"
     expected_uuid="$(jq -r '.expected_uuid' <<< "${target_json}")"
     filesystem="$(jq -r '.filesystem' <<< "${target_json}")"
     device="$(jq -r '.device' <<< "${target_json}")"
     mounted="$(lsblk -nro MOUNTPOINT "${device}" 2>/dev/null | sed '/^$/d' | head -n1)"
     if [[ -n ${mounted} ]]; then
+        _a53_evidence_set "${role}_mount_result" already_mounted
         return 0
     fi
 
@@ -197,21 +219,40 @@ _a53_mount_target() {
         _a53_ensure_dir "${mountpoint}" 0755 || return 1
     fi
     _a53_write_local_fstab "${expected_uuid}" "${mountpoint}" "${filesystem}" || return 1
-    mount "${mountpoint}" >/dev/null 2>&1 || return 1
+    output="$(mount "${mountpoint}" 2>&1)"
+    rc=$?
+    _a53_evidence_set_bounded "${role}_mount_output" "${output}"
+    if (( rc != 0 )); then
+        _a53_evidence_set "${role}_mount_result" failed
+        return 1
+    fi
+    _a53_evidence_set "${role}_mount_result" mounted
     A53_MUTATION_STARTED=true
     actual_uuid="$(findmnt -n -o UUID --target "${mountpoint}" 2>/dev/null || true)"
     actual_source="$(findmnt -n -o SOURCE --target "${mountpoint}" 2>/dev/null || true)"
     A53_MOUNTS_BY_US+=("$(jq -cn --arg mountpoint "${mountpoint}" --arg uuid "${actual_uuid}" --arg source "${actual_source}" '{mountpoint:$mountpoint,uuid:$uuid,source:$source}')")
     _a53_manifest_record_mount "${mountpoint}" "${actual_uuid}" "${actual_source}" || return 1
-    [[ ${actual_uuid} == "${expected_uuid}" ]] || return 1
-    return 0
+    if [[ ${actual_uuid} == "${expected_uuid}" ]]; then
+        _a53_evidence_set "${role}_uuid_match" yes
+        return 0
+    fi
+    _a53_evidence_set "${role}_uuid_match" no
+    return 1
 }
 
 _a53_write_probe() {
-    local path="$1" probe
+    local path="$1" role="${2:-path}" probe
     probe="${path}/.justvoxel-a53-write-test.$$"
-    : > "${probe}" 2>/dev/null || return 1
-    rm -f -- "${probe}" || return 1
+    if ! : > "${probe}" 2>/dev/null; then
+        _a53_evidence_set "${role}_write_probe" failed
+        return 1
+    fi
+    if ! rm -f -- "${probe}"; then
+        _a53_evidence_set "${role}_write_probe" cleanup_failed
+        return 1
+    fi
+    _a53_evidence_set "${role}_write_probe" passed
+    return 0
 }
 
 _a53_prepare_paths() {
@@ -222,8 +263,9 @@ _a53_prepare_paths() {
     backup_path="$(_a53_normalize_path "$(jq -r '.path' <<< "${backups}")")"
     _a53_ensure_dir "${data_path}" 0750 || return 1
     _a53_ensure_dir "${backup_path}" 0700 || return 1
-    _a53_write_probe "${data_path}" || return 1
-    _a53_write_probe "${backup_path}" || return 1
+    _a53_write_probe "${data_path}" data || return 1
+    _a53_write_probe "${backup_path}" backup || return 1
+    _a53_evidence_set storage_paths prepared
     return 0
 }
 
