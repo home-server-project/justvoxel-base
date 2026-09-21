@@ -160,11 +160,21 @@ func executeSetupStorage(parent context.Context, store *operationStore, operatio
 	if _, err := store.transition(operationID, operationValidating, "storage_preflight", "Revalidating reviewed storage."); err != nil {
 		return err
 	}
+	store.appendSetupStorageEvidenceBestEffort(operationID, "preflight", plan, "not_run")
 	validation, err := runSetupStorageTransactionAction(parent, "validate", setupStorageValidateTimeout, request)
 	if err != nil {
 		store.appendSetupHelperFailureBestEffort(operationID, "storage", "validate", err)
 	}
 	if err != nil || !validation.OK {
+		cause := err
+		if cause == nil {
+			message := validation.Error
+			if message == "" {
+				message = "storage preflight failed"
+			}
+			cause = errors.New(message)
+		}
+		store.appendSetupStorageFailureEvidenceBestEffort(operationID, "validate", plan, cause)
 		return finishSetupStorageWithoutMutation(store, operationID, validation, err)
 	}
 
@@ -176,16 +186,25 @@ func executeSetupStorage(parent context.Context, store *operationStore, operatio
 		store.appendSetupHelperFailureBestEffort(operationID, "storage", "apply", err)
 	}
 	if err != nil {
+		store.appendSetupStorageFailureEvidenceBestEffort(operationID, "apply", plan, err)
 		_, _ = store.transition(operationID, operationNeedsAttention, "storage_unknown", "Storage execution stopped without a trustworthy rollback result.")
 		return err
 	}
 	if !applied.OK || !applied.Applied {
+		message := applied.Error
+		if message == "" {
+			message = "storage transaction failed"
+		}
+		store.appendSetupStorageFailureEvidenceBestEffort(operationID, "apply", plan, errors.New(message))
 		return finishSetupStorageAfterApplyFailure(store, operationID, applied)
 	}
 	if applied.Phase != "storage_verified" {
+		err := errors.New("unexpected setup storage completion phase")
+		store.appendSetupStorageFailureEvidenceBestEffort(operationID, "apply", plan, err)
 		_, _ = store.transition(operationID, operationNeedsAttention, "storage_unknown", "Storage helper returned an unexpected completion phase.")
-		return errors.New("unexpected setup storage completion phase")
+		return err
 	}
+	store.appendSetupStorageEvidenceBestEffort(operationID, "verified", plan, "passed")
 	_, err = store.updateProgress(operationID, operationRunning, "storage_verified", "Storage transaction completed and was verified.")
 	return err
 }
@@ -249,8 +268,19 @@ func rollbackSetupStorage(parent context.Context, store *operationStore, operati
 	response, err = runSetupStorageTransactionAction(parent, "rollback", setupStorageRollbackTimeout, request)
 	if err != nil {
 		store.appendSetupHelperFailureBestEffort(operationID, "storage", "rollback", err)
+		store.appendSetupStorageFailureEvidenceBestEffort(operationID, "rollback", plan, err)
+		return response, err
 	}
-	return response, err
+	if !response.OK || response.RollbackState != "succeeded" {
+		message := response.Error
+		if message == "" {
+			message = "storage rollback could not be confirmed"
+		}
+		store.appendSetupStorageFailureEvidenceBestEffort(operationID, "rollback", plan, errors.New(message))
+		return response, nil
+	}
+	store.appendSetupStorageEvidenceBestEffort(operationID, "rolled_back", plan, "rollback_verified")
+	return response, nil
 }
 
 func executeSetupLocalStorage(parent context.Context, store *operationStore, operationID string, plan *adminSetupNormalizedPlan) error {

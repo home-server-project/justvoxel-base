@@ -222,6 +222,7 @@ func executeSetupTransaction(parent context.Context, store *operationStore, oper
 		return failSetupAfterStorage(parent, store, operationID, plan, request, err)
 	}
 	store.appendSetupRuntimeEvidenceBestEffort(operationID, "committed", plan)
+	store.appendSetupStorageEvidenceBestEffort(operationID, "final", plan, "passed")
 	_, err = store.transition(operationID, operationSucceeded, "completed", "JustVoxel first-run setup completed successfully.")
 	return err
 }
