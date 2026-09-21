@@ -56,6 +56,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (["export_needs_attention", "export_backend_interrupted", "export_backend_incomplete"].includes(stage)) return "Administrator attention required";
     }
     if (type === "migration_import") {
+      if (stage === "recovery_handoff") return "Recovery responsibility transferred";
       if (stage === "import_preflight") return "Rechecking reviewed Import";
       if (stage === "import_storage") return "Preparing fresh destination storage";
       if (stage === "import_execute") return "Importing Minecraft server data";
@@ -64,6 +65,12 @@ document.addEventListener("DOMContentLoaded", () => {
       if (stage === "rollback") return "Finalizing Import rollback";
       if (stage === "import_rolled_back") return "Import rolled back";
       if (["import_needs_attention", "import_backend_interrupted", "import_backend_incomplete"].includes(stage)) return "Administrator attention required";
+    }
+    if (type === "migration_recovery") {
+      if (stage === "recovery_preflight") return "Rechecking retained recovery state";
+      if (stage === "recovery_finalize") return "Finalizing retained recovery state";
+      if (stage === "recovery_verify") return "Verifying recovery finalization";
+      if (["recovery_backend_failed", "recovery_backend_invalid", "recovery_backend_incomplete"].includes(stage)) return "Administrator attention required";
     }
     return friendlyToken(stage);
   };

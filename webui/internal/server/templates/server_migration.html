@@ -32,8 +32,9 @@
     {{else}}
       <div class="notice">No retained migration recovery transaction is currently reported.</div>
     {{end}}
+    <div class="action-row"><a class="button-link" href="/settings/server-migration/recovery">Open Migration Recovery</a></div>
   </section>
 
-  <div class="notice">Server Export and Server Import are available now. Guided Recovery is added in the next WebUI migration slice. If a migration operation is already active, this page reconnects directly to its persistent progress record.</div>
+  <div class="notice">Server Export, Server Import, and guided Migration Recovery are available through the same Management Agent authority. If a migration operation is already active, this page reconnects directly to its persistent progress record.</div>
   <p class="foot">WebUI {{.Version}} · Management API {{.ManagementAPI}}</p>
 </main></body></html>{{end}}

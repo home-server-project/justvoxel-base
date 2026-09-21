@@ -1,0 +1,48 @@
+{{define "server_migration_recovery_review.html"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JustVoxel - Review Migration Recovery</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js" defer></script></head>
+<body class="role-administrator">{{template "app-header" .}}
+<main>
+  <div class="title-row"><div><p class="eyebrow">Administrator · migration</p><h1>Review Migration Recovery</h1></div><span class="badge">{{.Identity.Username}}</span></div>
+  {{if .Error}}<div class="notice error"><strong>Migration Recovery needs another review.</strong><br>{{.Error}}</div>{{end}}
+
+  {{if .Plan.OK}}
+    {{if .Plan.Normalized}}
+    <section class="panel">
+      <p class="eyebrow">Authoritative Recovery plan</p>
+      <h2>{{.ModeLabel}}</h2>
+      <div class="details">
+        <strong>Phase</strong><br><span class="muted">{{.PhaseLabel}}</span><br><br>
+        <strong>Source type</strong><br><span class="muted">{{if .Plan.Normalized.SourceType}}{{.Plan.Normalized.SourceType}}{{else}}Unknown{{end}}</span><br><br>
+        <strong>Updated</strong><br><span class="muted">{{.Plan.Normalized.UpdatedAt}}</span><br><br>
+        <strong>Recovery transaction</strong><br><code>{{.Plan.Normalized.Transaction}}</code>
+      </div>
+    </section>
+    {{end}}
+
+    {{if .Plan.Warnings}}<section class="panel"><p class="eyebrow">Recovery warnings</p>{{range .Plan.Warnings}}<div class="notice warning">{{.Message}}</div>{{end}}</section>{{end}}
+
+    {{if .Plan.Requirements}}
+    <section class="panel">
+      <p class="eyebrow">What the Agent will validate</p>
+      <div class="notice"><strong>This finalization does not rerun the failed Import and does not copy or replace Minecraft server data.</strong><br>It confirms the reviewed post-rollback safety state and removes retained recovery evidence only after validation succeeds.</div>
+      {{if .Plan.Requirements.RuntimeValidationRequired}}<p>The Management Agent will validate the current JustVoxel runtime before the retained recovery transaction is removed.</p>{{end}}
+      {{if .Plan.Requirements.UnconfiguredValidationRequired}}<p>The Management Agent will verify that fresh-Import runtime files remain absent and Minecraft is inactive before the retained recovery transaction is removed.</p>{{end}}
+      <p class="muted">The Recovery transaction is re-planned and its state identity is checked again when Apply starts. If the retained state changed, finalization is refused.</p>
+    </section>
+    {{end}}
+
+    <form method="post" action="/settings/server-migration/recovery/apply" autocomplete="off">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <input type="hidden" name="transaction" value="{{.Request.Transaction}}">
+      <input type="hidden" name="plan_fingerprint" value="{{.Plan.PlanFingerprint}}">
+      <label for="migration-recovery-confirmation"><strong>Type FINALIZE to continue</strong></label>
+      <input id="migration-recovery-confirmation" name="finalize_confirmation" autocomplete="off" required>
+      <div class="action-row"><button type="submit">Finalize Migration Recovery</button><a class="button-link secondary" href="/settings/server-migration/recovery">Cancel</a></div>
+    </form>
+  {{else}}
+    <section class="panel"><div class="notice error">{{if .Plan.Error}}{{.Plan.Error}}{{else}}The Management Agent did not approve this retained Recovery state for finalization.{{end}}</div></section>
+    <div class="action-row"><a class="button-link secondary" href="/settings/server-migration/recovery">Back to Migration Recovery</a></div>
+  {{end}}
+
+  <p class="foot">WebUI {{.Version}} · Management API {{.ManagementAPI}}</p>
+</main></body></html>{{end}}

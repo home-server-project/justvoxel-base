@@ -423,6 +423,8 @@ func serverMigrationStageLabel(operationType, value string) string {
 		}
 	case "migration_import":
 		switch value {
+		case "recovery_handoff":
+			return "Recovery responsibility transferred"
 		case "import_preflight":
 			return "Rechecking reviewed Import"
 		case "import_storage":
@@ -438,6 +440,17 @@ func serverMigrationStageLabel(operationType, value string) string {
 		case "import_rolled_back":
 			return "Import rolled back"
 		case "import_needs_attention", "import_backend_interrupted", "import_backend_incomplete":
+			return "Administrator attention required"
+		}
+	case "migration_recovery":
+		switch value {
+		case "recovery_preflight":
+			return "Rechecking retained recovery state"
+		case "recovery_finalize":
+			return "Finalizing retained recovery state"
+		case "recovery_verify":
+			return "Verifying recovery finalization"
+		case "recovery_backend_failed", "recovery_backend_invalid", "recovery_backend_incomplete":
 			return "Administrator attention required"
 		}
 	}

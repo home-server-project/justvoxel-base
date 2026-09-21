@@ -105,7 +105,7 @@ func TestServerMigrationHubIsAdministratorOnlyAndShowsSharedWorkflows(t *testing
 	}
 	for _, want := range []string{
 		"Server Migration", "Export this server", "Import a server", "Migration Recovery",
-		"local, backup, smb", "Fresh, unconfigured JustVoxel appliance", "rolled-back-fresh",
+		"local, backup, smb", "Fresh, unconfigured JustVoxel appliance", "rolled-back-fresh", "Open Migration Recovery",
 	} {
 		if !strings.Contains(page.Body.String(), want) {
 			t.Fatalf("Server Migration page missing %q: %s", want, page.Body.String())
