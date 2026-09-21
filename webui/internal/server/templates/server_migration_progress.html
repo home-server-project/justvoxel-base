@@ -1,0 +1,18 @@
+{{define "server_migration_progress.html"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JustVoxel - Server Migration progress</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js" defer></script></head>
+<body class="role-administrator">{{template "app-header" .}}
+<main>
+  <div class="title-row"><div><p class="eyebrow">Administrator · migration</p><h1>{{.OperationName}}</h1></div><span class="badge">{{.StateLabel}}</span></div>
+  <p class="muted">This page is connected to the persistent Management Agent operation journal. Refreshing the WebUI does not create a second migration operation.</p>
+
+  <section class="panel">
+    <div class="details"><strong>State</strong><br><span class="muted">{{.StateLabel}}</span></div>
+    <div class="details"><strong>Stage</strong><br><span class="muted">{{.StageLabel}}</span></div>
+    <div class="details"><strong>Status</strong><br><span class="muted">{{.Operation.Status}}</span></div>
+    <div class="details"><strong>Operation ID</strong><br><span class="muted">{{.Operation.OperationID}}</span></div>
+    {{if ne .Operation.Rollback.State "not_started"}}<div class="notice"><strong>Rollback</strong><br>{{.Operation.Rollback.State}}{{if .Operation.Rollback.Result}} · {{.Operation.Rollback.Result}}{{end}}</div>{{end}}
+  </section>
+
+  <div class="action-row"><a class="button secondary" href="/settings/server-migration">Refresh migration status</a></div>
+  <p class="foot">WebUI {{.Version}} · Management API {{.ManagementAPI}}</p>
+</main></body></html>{{end}}

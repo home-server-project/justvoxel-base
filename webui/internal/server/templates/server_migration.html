@@ -1,0 +1,37 @@
+{{define "server_migration.html"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JustVoxel - Server Migration</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js" defer></script></head>
+<body class="role-administrator">{{template "app-header" .}}
+<main>
+  <div class="title-row"><div><p class="eyebrow">Administrator · migration</p><h1>Server Migration</h1></div><span class="badge">{{.Identity.Username}}</span></div>
+  <p class="muted">Move a complete Minecraft server between JustVoxel appliances through the same authoritative Management Agent used by <code>mjust</code>. WebUI supplies navigation and reviewed choices; migration policy and execution remain in the Agent.</p>
+
+  <section class="panel">
+    <div class="section-heading"><div><p class="eyebrow">Export</p><h2>Export this server</h2></div><span class="badge">Available</span></div>
+    <p>Create a portable JustVoxel migration bundle for another appliance.</p>
+    <div class="details"><strong>Available destination types</strong><br><span class="muted">{{if .ExportTargets}}{{.ExportTargets}}{{else}}None reported{{end}}</span></div>
+    <div class="details"><strong>Suggested bundle</strong><br><span class="muted">{{.Export.SuggestedFilename}}</span></div>
+    {{if .Export.ConfiguredBackupAvailable}}<div class="notice">Configured backup storage is available as an Export destination.</div>{{end}}
+  </section>
+
+  <section class="panel">
+    <div class="section-heading"><div><p class="eyebrow">Import</p><h2>Import a server</h2></div><span class="badge">Available</span></div>
+    <p>Bring an exported JustVoxel server or supported Minecraft server directory into this appliance.</p>
+    <div class="details"><strong>Available source types</strong><br><span class="muted">{{if .ImportSources}}{{.ImportSources}}{{else}}None reported{{end}}</span></div>
+    <div class="details"><strong>Destination state</strong><br><span class="muted">{{if .Import.Configured}}Configured JustVoxel server{{else}}Fresh, unconfigured JustVoxel appliance{{end}}</span></div>
+  </section>
+
+  <section class="panel">
+    <div class="section-heading"><div><p class="eyebrow">Recovery</p><h2>Migration Recovery</h2></div>{{if .Recovery.Transactions}}<span class="badge">Attention available</span>{{else}}<span class="badge">No retained recovery</span>{{end}}</div>
+    <p>Finalize retained Import rollback or recovery evidence through the Management Agent.</p>
+    {{if .Recovery.Transactions}}
+      {{range .Recovery.Transactions}}
+      <div class="details"><strong>{{.Mode}}</strong> · {{.Phase}}<br><span class="muted">Updated {{.UpdatedAt}}{{if .Finalizable}} · ready for reviewed recovery{{end}}</span></div>
+      {{end}}
+    {{else}}
+      <div class="notice">No retained migration recovery transaction is currently reported.</div>
+    {{end}}
+  </section>
+
+  <div class="notice">Guided Export, Import, and Recovery forms are enabled in the next WebUI migration slices. If a migration operation is already active, this page reconnects directly to its persistent progress record.</div>
+  <p class="foot">WebUI {{.Version}} · Management API {{.ManagementAPI}}</p>
+</main></body></html>{{end}}

@@ -101,6 +101,7 @@ func (a *App) Handler() http.Handler {
 	a.registerAdminValidationPages(mux)
 	a.registerAdminRestorePages(mux)
 	a.registerAdminDataMigrationPages(mux)
+	a.registerAdminServerMigrationPages(mux)
 	a.registerAdminSystemActionPages(mux)
 	mux.HandleFunc("GET /api/dashboard-status", a.dashboardStatus)
 	mux.HandleFunc("POST /minecraft/start", a.minecraftAction("start"))
