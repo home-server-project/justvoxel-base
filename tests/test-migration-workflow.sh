@@ -56,7 +56,7 @@ for text in \
     'mjust migration-recover'; do
     grep -Fq "${text}" <<< "${import_text}" || fail "import workflow invariant missing: ${text}"
 done
-grep -Fq 'exec /usr/libexec/justvoxel/mjust/migration-export-backend "$@"' "${export_frontend}" || fail 'migration export compatibility frontend does not delegate to the shared backend'
+grep -Fq 'migration-api.sh' "${export_frontend}" || fail 'migration Export frontend does not use shared API helper'
 for text in '.partial' 'verify-native' 'flock -n' 'jv_player_check_before_interrupt' 'sync -f' 'mv -- "${partial}"'; do
     grep -Fq "${text}" "${exporter}" || fail "shared export backend invariant missing: ${text}"
 done

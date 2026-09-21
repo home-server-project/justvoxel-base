@@ -1,3 +1,72 @@
 #!/usr/bin/bash
 set -euo pipefail
-exec /usr/libexec/justvoxel/mjust/migration-export-backend "$@"
+source /usr/libexec/justvoxel/mjust/ui.sh
+source /usr/libexec/justvoxel/mjust/migration-api.sh
+(( EUID == 0 )) || { echo "ERROR: mjust export must run through sudo/root." >&2; exit 1; }
+(( $# <= 1 )) || { echo "Usage: migration-export [DESTINATION]" >&2; exit 2; }
+
+current="$(jv_migration_current_operation)" || exit 1
+current_id="$(jq -r '.operation.operation_id // empty' <<< "${current}")"
+current_type="$(jq -r '.operation.operation_type // empty' <<< "${current}")"
+if [[ -n ${current_id} ]]; then
+    if [[ ${current_type} == migration_export ]]; then jv_migration_monitor_operation "${current_id}" migration_export "Server migration Export"; exit $?; fi
+    echo "ERROR: another server migration operation is already active: ${current_type}" >&2; exit 1
+fi
+
+discovery="$(jv_migration_export_discovery)" || exit 1
+filename="$(jq -r '.suggested_filename' <<< "${discovery}")"
+kind=''; path=''; device=''; removable=false; source_ref=''; username=''; domain=''
+if (( $# == 1 )); then
+    requested="$1"
+    if [[ ${requested} == *.tar.gz ]]; then path="$(realpath -m -- "$(dirname -- "${requested}")")"; filename="$(basename -- "${requested}")"; else path="$(realpath -m -- "${requested}")"; fi
+    kind=local
+else
+    jui_has_tty || { echo "ERROR: interactive export destination selection requires a controlling terminal." >&2; exit 1; }
+    options=("Local directory")
+    [[ $(jq -r '.configured_backup_available' <<< "${discovery}") == true ]] && options+=("Configured backup storage")
+    [[ $(jq -r '.devices | length' <<< "${discovery}") -gt 0 ]] && options+=("Existing disk / USB filesystem")
+    options+=("NFS share" "SMB/CIFS share" "Back")
+    choice="$(jui_choose "Migration export destination" "${options[@]}")" || exit 0
+    case "${choice}" in
+        "Local directory") kind=local; path="$(jui_input "Export directory" "/var/tmp")" || exit 0; path="$(realpath -m -- "${path}")" ;;
+        "Configured backup storage") kind=backup ;;
+        "Existing disk / USB filesystem")
+            mapfile -t devices < <(jq -r '.devices[].path' <<< "${discovery}")
+            labels=(); for dev in "${devices[@]}"; do labels+=("$(jq -r --arg d "${dev}" '.devices[] | select(.path==$d) | "\(.path)  \(.filesystem)  \(.model)"' <<< "${discovery}")"); done
+            labels+=("Back"); selected="$(jui_choose "Migration media" "${labels[@]}")" || exit 0; [[ ${selected} == Back ]] && exit 0
+            for i in "${!devices[@]}"; do [[ ${selected} == "${labels[$i]}" ]] && { device="${devices[$i]}"; removable="$(jq -r --arg d "${device}" '.devices[] | select(.path==$d) | .removable' <<< "${discovery}")"; break; }; done
+            kind=device ;;
+        "NFS share") kind=nfs; source_ref="$(jui_input "NFS share (server:/export)")" || exit 0 ;;
+        "SMB/CIFS share") kind=smb; source_ref="$(jui_input "SMB share (//server/share)")" || exit 0; username="$(jui_input "SMB username")" || exit 0; domain="$(jui_input "SMB domain (optional)" "")" || exit 0 ;;
+        *) exit 0 ;;
+    esac
+fi
+request="$(jq -cn --arg kind "${kind}" --arg path "${path}" --arg device "${device}" --argjson removable "${removable}" --arg source "${source_ref}" --arg username "${username}" --arg domain "${domain}" --arg filename "${filename}" '{kind:$kind,path:$path,device:$device,removable:$removable,source:$source,username:$username,domain:$domain,filename:$filename}')"
+plan="$(jv_migration_export_plan "${request}")" || exit 1
+fingerprint="$(jq -r '.plan_fingerprint // empty' <<< "${plan}")"
+[[ -n ${fingerprint} ]] || { echo "ERROR: Export plan did not return a review fingerprint." >&2; exit 1; }
+echo
+echo "Migration Export plan"
+echo "---------------------"
+echo "Target: $(jq -r '.normalized.target_display' <<< "${plan}")"
+echo "Minecraft data: $(jq -r '.normalized.data_path' <<< "${plan}")"
+while IFS= read -r warning; do [[ -n ${warning} ]] && echo "WARNING: ${warning}"; done < <(jq -r '.warnings[].message?' <<< "${plan}")
+players_confirmed=false
+if [[ $(jq -r '.requirements.players_confirmation_required' <<< "${plan}") == true ]]; then
+    jui_has_tty || { echo "ERROR: players are online and confirmation requires a terminal." >&2; exit 1; }
+    echo "Players online: $(jq -r '.requirements.players | join(", ")' <<< "${plan}")"
+    jui_confirm "Continue with the normal graceful shutdown path?" || { echo "Export cancelled."; exit 0; }
+    players_confirmed=true
+fi
+if (( $# == 0 )); then jui_confirm "Create this migration Export?" || { echo "Export cancelled."; exit 0; }; fi
+smb_password=''
+if [[ $(jq -r '.requirements.smb_password_required' <<< "${plan}") == true ]]; then
+    jui_has_tty || { echo "ERROR: SMB password requires a terminal." >&2; exit 1; }
+    printf "SMB password: " >/dev/tty; IFS= read -rs smb_password </dev/tty; echo >/dev/tty
+fi
+apply="$(jq -cn --arg fingerprint "${fingerprint}" --argjson request "${request}" --argjson players "${players_confirmed}" --arg password "${smb_password}" '{plan_fingerprint:$fingerprint,request:$request,export_confirmed:true,players_confirmed:$players,smb_password:$password}')"
+response="$(jv_migration_export_apply "${apply}")" || exit 1
+smb_password=""
+id="$(jq -r '.operation.operation_id // empty' <<< "${response}")"
+[[ -n ${id} ]] || { echo "ERROR: Management Agent did not return an Export operation." >&2; exit 1; }
+jv_migration_monitor_operation "${id}" migration_export "Server migration Export"

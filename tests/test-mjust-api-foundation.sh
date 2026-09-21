@@ -38,6 +38,7 @@ admin_data_migration_plan="${repo_root}/management/cmd/justvoxel-management-agen
 admin_data_migration_apply="${repo_root}/management/cmd/justvoxel-management-agent/admin_data_migration_apply.go"
 data_migration_worker="${repo_root}/management/cmd/justvoxel-management-agent/data_migration_worker.go"
 migration_export="${repo_root}/mjust/libexec/migration-export"
+migration_api="${repo_root}/mjust/libexec/migration-api.sh"
 migration_export_backend="${repo_root}/mjust/libexec/migration-export-backend"
 migration_export_plan_backend="${repo_root}/mjust/libexec/admin-migration-export-plan-json"
 migration_export_transaction_backend="${repo_root}/mjust/libexec/admin-migration-export-transaction-json"
@@ -60,7 +61,7 @@ fail() {
     exit 1
 }
 
-for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${backup_storage}" "${backup_storage_api}" "${setup}" "${setup_api}" "${restore}" "${restore_api}" "${admin_restore}" "${admin_restore_apply}" "${restore_worker}" "${validate}" "${validate_backend}" "${storage_provision}" "${storage_plan}" "${storage_api}" "${data_migration}" "${data_migration_api}" "${data_migration_plan_backend}" "${data_migration_transaction_backend}" "${admin_data_migration_plan}" "${admin_data_migration_apply}" "${data_migration_worker}" "${migration_export}" "${migration_export_backend}" "${migration_export_plan_backend}" "${migration_export_transaction_backend}" "${admin_migration_export_plan}" "${admin_migration_export_apply}" "${migration_export_worker}" "${admin_backup_storage}" "${admin_storage_provision}" "${admin_setup_plan}" "${admin_setup_apply}" "${admin_operations}" "${admin_validation}" "${admin_configuration}" "${admin_discovery}" "${operator_surfaces}" "${justfile}"; do
+for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${backup_storage}" "${backup_storage_api}" "${setup}" "${setup_api}" "${restore}" "${restore_api}" "${admin_restore}" "${admin_restore_apply}" "${restore_worker}" "${validate}" "${validate_backend}" "${storage_provision}" "${storage_plan}" "${storage_api}" "${data_migration}" "${data_migration_api}" "${data_migration_plan_backend}" "${data_migration_transaction_backend}" "${admin_data_migration_plan}" "${admin_data_migration_apply}" "${data_migration_worker}" "${migration_export}" "${migration_api}" "${migration_export_backend}" "${migration_export_plan_backend}" "${migration_export_transaction_backend}" "${admin_migration_export_plan}" "${admin_migration_export_apply}" "${migration_export_worker}" "${admin_backup_storage}" "${admin_storage_provision}" "${admin_setup_plan}" "${admin_setup_apply}" "${admin_operations}" "${admin_validation}" "${admin_configuration}" "${admin_discovery}" "${operator_surfaces}" "${justfile}"; do
     [[ -f ${file} ]] || fail "missing mJust Management API file: ${file}"
 done
 
@@ -227,7 +228,12 @@ fi
 if grep -Fq 'Authorization:' "${data_migration_api}"; then
     fail 'mJust data migration API helper must not introduce a bearer token'
 fi
-grep -Fq 'exec /usr/libexec/justvoxel/mjust/migration-export-backend "$@"' "${migration_export}" || fail 'mJust export compatibility wrapper does not preserve the extracted export backend'
+grep -Fq 'migration-api.sh' "${migration_export}" || fail 'mJust Export frontend does not use the server migration API helper'
+grep -Fq 'jv_migration_export_plan' "${migration_export}" || fail 'mJust Export does not plan through the Management API'
+grep -Fq 'jv_migration_export_apply' "${migration_export}" || fail 'mJust Export does not apply through the Management API'
+grep -Fq 'jv_migration_monitor_operation' "${migration_export}" || fail 'mJust Export does not monitor the persistent Agent operation'
+for forbidden in 'systemctl ' 'podman ' 'rcon-cli' 'migration-export-backend' 'JV_MAINTENANCE_LOCK' 'flock '; do if grep -Fq "${forbidden}" "${migration_export}"; then fail "mJust Export frontend still performs direct backend work: ${forbidden}"; fi; done
+if grep -Fq 'Authorization:' "${migration_api}"; then fail 'server migration API helper must not introduce a bearer token'; fi
 grep -Fq 'GET /v1/admin/migration/export' "${admin_migration_export_apply}" || fail 'server migration export discovery route is missing'
 grep -Fq 'POST /v1/admin/migration/export/plan' "${admin_migration_export_apply}" || fail 'server migration export plan route is missing'
 grep -Fq 'POST /v1/admin/migration/export/apply' "${admin_migration_export_apply}" || fail 'server migration export apply route is missing'
