@@ -67,10 +67,6 @@ Management API gaps that still need shared implementations before the correspond
 - Start Over / reset workflows
 - WebUI lifecycle and recovery behavior
 
-Host reboot, poweroff, and UEFI/firmware reboot are already owned by the shared System Actions API. mJust is a thin frontend over that API. The remaining parity work is to expose those existing capabilities safely in the WebUI without duplicating host-action or player-safety policy.
-
-The first WebUI System Actions surface should remain Administrator-only. Use a familiar power control in the top-right application header. Opening it should present Restart, Power off, and, only when the Management Agent reports supported HWE/EFI capability, Restart to UEFI/BIOS. Selecting an action should open a separate centered confirmation dialog before anything is submitted. VM deployments must not show the UEFI/BIOS action.
-
 Administrator validation is now unified: both mJust and WebUI consume the same Administrator Validation endpoint in the Management Agent, which runs the shared authoritative validation backend.
 
 ### Cross-interface validation
