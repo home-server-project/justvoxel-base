@@ -19,8 +19,8 @@ func TestAdminRestoreBackupsClientPreservesMetadata(t *testing.T) {
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
-			Body: io.NopCloser(strings.NewReader(`{"backups":[{"id":"minecraft-2026-09-20-043000.tar.gz","created_at":"2026-09-20T08:30:00Z","size_bytes":12345,"metadata_status":"valid","metadata":{"created_at":"2026-09-20T08:30:00Z","minecraft":{"version_mode":"pinned","configured_version":"26.2","server_reported_version":"Paper 26.2"},"bedrock":{"enabled":false,"floodgate_configured":false},"justvoxel":{"variant":"justvoxel-vm"}}}]}`)),
-			Header: make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"backups":[{"id":"minecraft-2026-09-20-043000.tar.gz","created_at":"2026-09-20T08:30:00Z","size_bytes":12345,"metadata_status":"valid","metadata":{"created_at":"2026-09-20T08:30:00Z","minecraft":{"version_mode":"pinned","configured_version":"26.2","server_reported_version":"Paper 26.2"},"bedrock":{"enabled":false,"floodgate_configured":false},"justvoxel":{"variant":"justvoxel-vm"}}}]}`)),
+			Header:     make(http.Header),
 		}, nil
 	})}}
 
@@ -85,10 +85,10 @@ func TestAdminRestoreApplyClientSendsConfirmationsAndPersistentOperation(t *test
 	})}}
 
 	response, err := client.AdminRestoreApply(context.Background(), "session-token", AdminRestoreApplyRequest{
-		PlanFingerprint: restoreTestFingerprint,
-		Request: AdminRestorePlanRequest{BackupID: "minecraft-2026-09-20-043000.tar.gz", Mode: "world"},
+		PlanFingerprint:      restoreTestFingerprint,
+		Request:              AdminRestorePlanRequest{BackupID: "minecraft-2026-09-20-043000.tar.gz", Mode: "world"},
 		DestructiveConfirmed: true,
-		PlayersConfirmed: true,
+		PlayersConfirmed:     true,
 	})
 	if err != nil {
 		t.Fatal(err)

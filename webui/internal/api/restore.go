@@ -43,10 +43,10 @@ type AdminRestoreMetadataJustVoxel struct {
 }
 
 type AdminRestoreBackupMetadata struct {
-	CreatedAt string                          `json:"created_at,omitempty"`
-	Minecraft AdminRestoreMetadataMinecraft   `json:"minecraft"`
-	Bedrock   AdminRestoreMetadataBedrock     `json:"bedrock"`
-	JustVoxel AdminRestoreMetadataJustVoxel   `json:"justvoxel"`
+	CreatedAt string                        `json:"created_at,omitempty"`
+	Minecraft AdminRestoreMetadataMinecraft `json:"minecraft"`
+	Bedrock   AdminRestoreMetadataBedrock   `json:"bedrock"`
+	JustVoxel AdminRestoreMetadataJustVoxel `json:"justvoxel"`
 }
 
 type AdminRestoreBackup struct {

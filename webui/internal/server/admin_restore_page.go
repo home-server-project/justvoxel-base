@@ -186,7 +186,7 @@ func (a *App) restoreApply(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := client.AdminRestoreApply(r.Context(), session, api.AdminRestoreApplyRequest{
 		PlanFingerprint: plan.PlanFingerprint,
-		Request: request, DestructiveConfirmed: true, PlayersConfirmed: playersConfirmed,
+		Request:         request, DestructiveConfirmed: true, PlayersConfirmed: playersConfirmed,
 	})
 	if err != nil {
 		a.renderRestoreReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), apiMessage(err, "Could not start Restore."))

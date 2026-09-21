@@ -104,12 +104,12 @@ func restorePlan(players bool) api.AdminRestorePlanResponse {
 		Normalized: &api.AdminRestorePlanNormalized{
 			BackupID: "minecraft-2026-09-20-043000.tar.gz", Mode: "world", CreatedAt: "2026-09-20T08:30:00Z",
 			SizeBytes: 12345, MetadataStatus: "valid",
-			Metadata: &api.AdminRestoreBackupMetadata{Minecraft: api.AdminRestoreMetadataMinecraft{VersionMode: "pinned", ConfiguredVersion: "26.2"}},
-			Current: api.AdminRestorePlanCurrent{VersionMode: "pinned", Version: "26.3"},
+			Metadata:        &api.AdminRestoreBackupMetadata{Minecraft: api.AdminRestoreMetadataMinecraft{VersionMode: "pinned", ConfiguredVersion: "26.2"}},
+			Current:         api.AdminRestorePlanCurrent{VersionMode: "pinned", Version: "26.3"},
 			VersionRelation: "backup_older",
-			Validation: api.AdminRestorePlanValidation{ArchiveIntegrity: "pending_apply", ArchiveSafety: "pending_apply", StagingSpace: "pending_apply"},
+			Validation:      api.AdminRestorePlanValidation{ArchiveIntegrity: "pending_apply", ArchiveSafety: "pending_apply", StagingSpace: "pending_apply"},
 		},
-		Warnings: []api.AdminRestorePlanWarning{{Code: "backup_older", Message: "This backup is older than the configured Minecraft version."}},
+		Warnings:     []api.AdminRestorePlanWarning{{Code: "backup_older", Message: "This backup is older than the configured Minecraft version."}},
 		Requirements: requirements,
 	}
 }
@@ -210,7 +210,7 @@ func TestRestoreEntryReconnectsToCurrentOperationAndProgressUsesSameJournal(t *t
 	operation := &api.PersistentOperation{
 		SchemaVersion: "v1", OperationID: restorePageOperationID, OperationType: "restore",
 		PlanFingerprint: restorePageFingerprint, State: "running", Stage: "staging",
-		Status: "Preparing verified Restore data on the Minecraft data filesystem.",
+		Status:    "Preparing verified Restore data on the Minecraft data filesystem.",
 		StartedAt: "2026-09-20T12:00:00Z", UpdatedAt: "2026-09-20T12:01:00Z",
 		Rollback: api.PersistentOperationRollback{State: "not_started"},
 	}
