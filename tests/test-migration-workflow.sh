@@ -33,6 +33,7 @@ transport_files=(
     "${repo_root}/mjust/libexec/migration-transport-ui.sh"
 )
 transport_text="$(cat "${transport_files[@]}")"
+import_source_helper="${repo_root}/mjust/libexec/migration-import-source.sh"
 common="${repo_root}/mjust/libexec/common.sh"
 migration_common="${repo_root}/mjust/libexec/migration-common.sh"
 validate_backend="${repo_root}/mjust/libexec/validate-backend"
@@ -71,6 +72,9 @@ for fs in ext4 xfs btrfs vfat exfat; do
     grep -Fq "${fs}" <<< "${transport_text}" || fail "temporary media allowlist missing ${fs}"
 done
 grep -Fq 'NTFS removable media is not supported' <<< "${transport_text}" || fail 'NTFS refusal is missing'
+grep -Fq 'jv_migration_import_source_prepare' "${import_source_helper}" || fail 'shared Import source resolver is missing'
+grep -Fq 'jv_migration_import_source_entries_json' "${import_source_helper}" || fail 'shared Import source candidate discovery is missing'
+grep -Fq 'jv_migration_import_source_cleanup' "${import_source_helper}" || fail 'shared Import source cleanup is missing'
 if grep -Fq 'storage_write_network_fstab' <<< "${transport_text}"; then fail 'temporary migration transport must not write fstab'; fi
 grep -Fq 'JV_MIGRATION_SMB_CREDENTIALS="${JV_MIGRATION_TRANSPORT_ROOT}/smb.credentials"' <<< "${transport_text}" || fail 'temporary SMB credentials are not under /run transport state'
 grep -Fq 'chmod 0600 "${JV_MIGRATION_SMB_CREDENTIALS}"' <<< "${transport_text}" || fail 'temporary SMB credentials are not mode 0600'
