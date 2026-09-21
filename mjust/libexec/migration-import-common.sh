@@ -1,5 +1,15 @@
 #!/usr/bin/bash
 # Sourced by migration-import: transaction helpers and fresh-destination prompts.
+jv_migration_api_result() {
+    local outcome="$1" phase="$2" recovery_transaction="$3" status="$4" result_file="${JV_MIGRATION_API_RESULT_FILE:-}" tmp
+    [[ ${JV_MIGRATION_API_MODE:-0} == 1 && -n ${result_file} ]] || return 0
+    case "${result_file}" in "${JV_MIGRATION_RUN_ROOT}/"*) ;; *) echo 'ERROR: invalid Management API Import result path.' >&2; return 1 ;; esac
+    install -d -m0700 -o root -g root "${JV_MIGRATION_RUN_ROOT}"
+    tmp="${result_file}.tmp.$"
+    jq -cn --arg outcome "${outcome}" --arg phase "${phase}" --arg transaction "${recovery_transaction}" --arg status "${status}"         '{outcome:$outcome,phase:$phase,transaction:$transaction,status:$status}' > "${tmp}"
+    chmod 0600 "${tmp}"
+    mv -f -- "${tmp}" "${result_file}"
+}
 rollback_import() {
     local rollback_ok=yes validation_started=no
     rollback_attempted=yes
@@ -68,12 +78,14 @@ rollback_import() {
         if [[ ${configured} == yes ]]; then
             jv_migration_write_state "${transaction}" rolled-back "${JV_MIGRATION_SOURCE:-unknown}" "${source_class}" || true
             jv_migration_register_recovery "${transaction}" || echo "WARNING: retained migration recovery state could not be registered automatically." >&2
+            jv_migration_api_result rolled_back rolled-back "${transaction}" 'Server migration Import failed, but the original configured server was restored and validated.' || true
             echo 'Import failed.' >&2
             echo 'Original server restored and validated.' >&2
             echo "Failed imported data was retained at: ${transaction}/failed-import" >&2
         else
             jv_migration_write_state "${transaction}" rolled-back-fresh "${JV_MIGRATION_SOURCE:-unknown}" "${source_class}" || true
             jv_migration_register_recovery "${transaction}" || echo "WARNING: retained fresh-import recovery state could not be registered automatically." >&2
+            jv_migration_api_result rolled_back rolled-back-fresh "${transaction}" 'Server migration Import failed, and JustVoxel was returned to its previous unconfigured state.' || true
             echo 'Import failed.' >&2
             echo 'JustVoxel returned to its previous unconfigured runtime state.' >&2
             echo "Failed imported data was retained at: ${transaction}/failed-import" >&2
@@ -83,6 +95,7 @@ rollback_import() {
 
     jv_migration_write_state "${transaction}" critical-rollback "${JV_MIGRATION_SOURCE:-unknown}" "${source_class}" || true
     jv_migration_register_recovery "${transaction}" || echo "WARNING: critical migration recovery state could not be registered automatically." >&2
+    jv_migration_api_result needs_attention critical-rollback "${transaction}" 'Automatic Import rollback could not be fully validated; retained recovery state requires administrator attention.' || true
     echo 'CRITICAL: automatic import rollback could not be fully validated.' >&2
     echo "ALL recovery state was retained at: ${transaction}" >&2
     echo 'Do not delete that directory until the destination server has been recovered.' >&2

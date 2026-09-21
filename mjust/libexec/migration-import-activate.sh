@@ -66,7 +66,13 @@ if [[ ${configured} == yes && ${minecraft_was_active} == yes ]]; then
     stop_rc=$?
     set -e
     if (( stop_rc == 10 )); then
-        if jui_confirm 'A player joined after the final check. Continue with the 60-second shutdown countdown?'; then
+        if [[ ${JV_MIGRATION_API_MODE:-0} == 1 && ${JV_MIGRATION_API_PLAYERS_CONFIRMED:-no} == yes ]]; then
+            set +e
+            JV_INTERRUPT_CONFIRMATION_MODE=confirmed \
+                jv_stop_minecraft_adaptive 'Import Minecraft data'
+            stop_rc=$?
+            set -e
+        elif [[ ${JV_MIGRATION_API_MODE:-0} != 1 ]] && jui_confirm 'A player joined after the final check. Continue with the 60-second shutdown countdown?'; then
             set +e
             JV_INTERRUPT_CONFIRMATION_MODE=confirmed \
                 jv_stop_minecraft_adaptive 'Import Minecraft data'
@@ -132,6 +138,7 @@ fi
 transaction=''
 live_modified=no
 minecraft_stopped_by_import=no
+jv_migration_api_result succeeded validated '' 'Server migration Import completed successfully and the imported Minecraft runtime validated.' || true
 
 removable_owned=no
 if [[ ${transport_started} == yes ]]; then

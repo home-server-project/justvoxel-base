@@ -52,6 +52,12 @@ migration_recovery_transaction_backend="${repo_root}/mjust/libexec/admin-migrati
 admin_migration_recovery="${repo_root}/management/cmd/justvoxel-management-agent/admin_migration_recovery.go"
 admin_migration_recovery_apply="${repo_root}/management/cmd/justvoxel-management-agent/admin_migration_recovery_apply.go"
 migration_recovery_worker="${repo_root}/management/cmd/justvoxel-management-agent/migration_recovery_worker.go"
+migration_import_backend="${repo_root}/mjust/libexec/migration-import-backend"
+migration_import_plan_backend="${repo_root}/mjust/libexec/admin-migration-import-plan-json"
+migration_import_transaction_backend="${repo_root}/mjust/libexec/admin-migration-import-transaction-json"
+admin_migration_import_plan="${repo_root}/management/cmd/justvoxel-management-agent/admin_migration_import_plan.go"
+admin_migration_import_apply="${repo_root}/management/cmd/justvoxel-management-agent/admin_migration_import_apply.go"
+migration_import_worker="${repo_root}/management/cmd/justvoxel-management-agent/migration_import_worker.go"
 admin_backup_storage="${repo_root}/management/cmd/justvoxel-management-agent/admin_backup_storage.go"
 admin_storage_provision="${repo_root}/management/cmd/justvoxel-management-agent/admin_storage_provision.go"
 admin_setup_plan="${repo_root}/management/cmd/justvoxel-management-agent/admin_setup_plan.go"
@@ -68,7 +74,7 @@ fail() {
     exit 1
 }
 
-for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${backup_storage}" "${backup_storage_api}" "${setup}" "${setup_api}" "${restore}" "${restore_api}" "${admin_restore}" "${admin_restore_apply}" "${restore_worker}" "${validate}" "${validate_backend}" "${storage_provision}" "${storage_plan}" "${storage_api}" "${data_migration}" "${data_migration_api}" "${data_migration_plan_backend}" "${data_migration_transaction_backend}" "${admin_data_migration_plan}" "${admin_data_migration_apply}" "${data_migration_worker}" "${migration_export}" "${migration_api}" "${migration_export_backend}" "${migration_export_plan_backend}" "${migration_export_transaction_backend}" "${admin_migration_export_plan}" "${admin_migration_export_apply}" "${migration_export_worker}" "${migration_recovery}" "${migration_recovery_backend}" "${migration_recovery_plan_backend}" "${migration_recovery_transaction_backend}" "${admin_migration_recovery}" "${admin_migration_recovery_apply}" "${migration_recovery_worker}" "${admin_backup_storage}" "${admin_storage_provision}" "${admin_setup_plan}" "${admin_setup_apply}" "${admin_operations}" "${admin_validation}" "${admin_configuration}" "${admin_discovery}" "${operator_surfaces}" "${justfile}"; do
+for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${backup_storage}" "${backup_storage_api}" "${setup}" "${setup_api}" "${restore}" "${restore_api}" "${admin_restore}" "${admin_restore_apply}" "${restore_worker}" "${validate}" "${validate_backend}" "${storage_provision}" "${storage_plan}" "${storage_api}" "${data_migration}" "${data_migration_api}" "${data_migration_plan_backend}" "${data_migration_transaction_backend}" "${admin_data_migration_plan}" "${admin_data_migration_apply}" "${data_migration_worker}" "${migration_export}" "${migration_api}" "${migration_export_backend}" "${migration_export_plan_backend}" "${migration_export_transaction_backend}" "${admin_migration_export_plan}" "${admin_migration_export_apply}" "${migration_export_worker}" "${migration_recovery}" "${migration_recovery_backend}" "${migration_recovery_plan_backend}" "${migration_recovery_transaction_backend}" "${admin_migration_recovery}" "${admin_migration_recovery_apply}" "${migration_recovery_worker}" "${migration_import_backend}" "${migration_import_plan_backend}" "${migration_import_transaction_backend}" "${admin_migration_import_plan}" "${admin_migration_import_apply}" "${migration_import_worker}" "${admin_backup_storage}" "${admin_storage_provision}" "${admin_setup_plan}" "${admin_setup_apply}" "${admin_operations}" "${admin_validation}" "${admin_configuration}" "${admin_discovery}" "${operator_surfaces}" "${justfile}"; do
     [[ -f ${file} ]] || fail "missing mJust Management API file: ${file}"
 done
 
@@ -274,6 +280,14 @@ grep -Fq 'adminMigrationRecoveryTransactionHelper' "${migration_recovery_worker}
 grep -Fq 'admin-migration-recovery-json plan' "${migration_recovery_transaction_backend}" || fail 'server migration Recovery transaction does not revalidate reviewed recovery state'
 grep -Fq 'rolled-back-fresh' "${migration_recovery_backend}" || fail 'server migration Recovery backend lost fresh-unconfigured support'
 bash -n "${migration_recovery}" "${migration_recovery_backend}" "${migration_recovery_plan_backend}" "${migration_recovery_transaction_backend}" || fail 'server migration Recovery shell source failed bash syntax validation'
+grep -Fq 'POST /v1/admin/migration/import/apply' "${admin_migration_import_plan}" || fail 'server migration Import apply route is missing'
+grep -Fq 'authoritativeAdminMigrationImportPlan' "${admin_migration_import_apply}" || fail 'server migration Import apply does not re-run authoritative planning'
+grep -Fq 'adminMigrationImportTransactionHelper' "${migration_import_worker}" || fail 'server migration Import worker does not use the authoritative transaction backend'
+grep -Fq 'admin-migration-import-plan-json plan' "${migration_import_transaction_backend}" || fail 'server migration Import transaction does not revalidate the reviewed plan'
+grep -Fq 'JV_MIGRATION_API_MODE=1' "${migration_import_transaction_backend}" || fail 'server migration Import transaction does not invoke the preserved backend in Agent mode'
+grep -Fq 'migration-import-backend' "${migration_import_transaction_backend}" || fail 'server migration Import transaction lost the preserved authoritative backend'
+grep -Fq 'jv_migration_api_result' "${repo_root}/mjust/libexec/migration-import-common.sh" || fail 'server migration Import backend does not report rollback safety to the Agent'
+bash -n "${migration_import_backend}" "${migration_import_plan_backend}" "${migration_import_transaction_backend}" || fail 'server migration Import shell source failed bash syntax validation'
 
 grep -Fq 'registerAdminBackupStorageRoutes' "${admin_backup_storage}" || fail 'Management Agent backup storage routes are missing'
 grep -Fq 'registerAdminStorageProvisionRoutes' "${admin_storage_provision}" || fail 'Management Agent storage provisioning routes are missing'
