@@ -1,5 +1,11 @@
 # JustVoxel server migration
 
+## Shared Management API status
+
+Server **Export** now has an authoritative Management API/backend foundation. The Agent owns Export discovery, reviewed planning and fingerprints, player interruption requirements, persistent operation tracking, target revalidation, temporary local/NFS/SMB/device transport handling, the cold portable-bundle transaction, SHA-256 verification, Minecraft restart validation, and conservative restart/interruption recovery.
+
+During this 5A.1 stage, `mjust export` remains behavior-compatible through the extracted shared Export backend; it is **not yet the thin API frontend**. Import and migration recovery also remain on their existing direct mjust workflows. Step 5A.2 will move Import/Recovery behind the same migration operation family and then convert all three terminal commands to thin Management API frontends.
+
 JustVoxel migration moves the **complete persistent Minecraft server state** to another JustVoxel installation. It is separate from normal JustVoxel Backup/Restore.
 
 - **Backup / Restore** protects the current appliance and uses its configured backup destination.

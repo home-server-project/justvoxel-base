@@ -22,6 +22,7 @@ const (
 	operationTypeSetup         = "setup"
 	operationTypeRestore       = "restore"
 	operationTypeDataMigration = "data_migration"
+	operationTypeMigrationExport = "migration_export"
 )
 
 type operationState string
@@ -50,6 +51,8 @@ var (
 	errRestoreLockBusy           = errors.New("restore operation lock is already held")
 	errDataMigrationOperationBusy = errors.New("another data migration operation is already active")
 	errDataMigrationLockBusy      = errors.New("data migration operation lock is already held")
+	errMigrationOperationBusy     = errors.New("another server migration operation is already active")
+	errMigrationLockBusy          = errors.New("server migration operation lock is already held")
 )
 
 type operationRollback struct {
@@ -79,12 +82,15 @@ type operationStore struct {
 	lockFile         *os.File
 	restoreLockFile      *os.File
 	dataMigrationLockFile *os.File
+	migrationLockFile     *os.File
 	setupLockHeld        bool
 	restoreLockHeld      bool
 	dataMigrationLockHeld bool
+	migrationLockHeld     bool
 	currentSetupID       string
 	currentRestoreID     string
 	currentDataMigrationID string
+	currentMigrationID     string
 	operations       map[string]operationJournal
 	now              func() time.Time
 }
@@ -133,6 +139,21 @@ func openOperationStore(baseDir string) (*operationStore, error) {
 		lockFile.Close()
 		return nil, fmt.Errorf("protect data migration operation lock: %w", err)
 	}
+	migrationLockPath := filepath.Join(baseDir, "server-migration.lock")
+	migrationLockFile, err := os.OpenFile(migrationLockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		dataMigrationLockFile.Close()
+		restoreLockFile.Close()
+		lockFile.Close()
+		return nil, fmt.Errorf("open server migration operation lock: %w", err)
+	}
+	if err := migrationLockFile.Chmod(0o600); err != nil {
+		migrationLockFile.Close()
+		dataMigrationLockFile.Close()
+		restoreLockFile.Close()
+		lockFile.Close()
+		return nil, fmt.Errorf("protect server migration operation lock: %w", err)
+	}
 
 	s := &operationStore{
 		baseDir:               baseDir,
@@ -140,10 +161,12 @@ func openOperationStore(baseDir string) (*operationStore, error) {
 		lockFile:              lockFile,
 		restoreLockFile:       restoreLockFile,
 		dataMigrationLockFile: dataMigrationLockFile,
+		migrationLockFile:     migrationLockFile,
 		operations:            make(map[string]operationJournal),
 		now:                   time.Now,
 	}
 	if err := s.loadAndRecover(); err != nil {
+		migrationLockFile.Close()
 		dataMigrationLockFile.Close()
 		restoreLockFile.Close()
 		lockFile.Close()
@@ -181,8 +204,18 @@ func (s *operationStore) close() error {
 		_ = syscall.Flock(int(s.dataMigrationLockFile.Fd()), syscall.LOCK_UN)
 		s.dataMigrationLockHeld = false
 	}
+	if s.migrationLockHeld && s.migrationLockFile != nil {
+		_ = syscall.Flock(int(s.migrationLockFile.Fd()), syscall.LOCK_UN)
+		s.migrationLockHeld = false
+	}
 
 	var firstErr error
+	if s.migrationLockFile != nil {
+		if err := s.migrationLockFile.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		s.migrationLockFile = nil
+	}
 	if s.dataMigrationLockFile != nil {
 		if err := s.dataMigrationLockFile.Close(); err != nil && firstErr == nil {
 			firstErr = err
@@ -212,6 +245,7 @@ func (s *operationStore) loadAndRecover() error {
 	activeSetup := ""
 	activeRestore := ""
 	activeDataMigration := ""
+	activeMigration := ""
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
@@ -251,6 +285,11 @@ func (s *operationStore) loadAndRecover() error {
 					return errors.New("multiple active data migration operation journals require attention")
 				}
 				activeDataMigration = journal.OperationID
+			case operationTypeMigrationExport:
+				if activeMigration != "" {
+					return errors.New("multiple active server migration operation journals require attention")
+				}
+				activeMigration = journal.OperationID
 			}
 		}
 		s.operations[journal.OperationID] = journal
@@ -330,6 +369,36 @@ func (s *operationStore) loadAndRecover() error {
 		}
 		s.currentDataMigrationID = activeDataMigration
 	}
+
+	if activeMigration != "" {
+		if err := s.acquireMigrationLock(); err != nil {
+			if activeDataMigration != "" {
+				_ = s.releaseDataMigrationLock()
+			}
+			if activeRestore != "" {
+				_ = s.releaseRestoreLock()
+			}
+			if activeSetup != "" {
+				_ = s.releaseSetupLock()
+			}
+			return err
+		}
+		journal := s.operations[activeMigration]
+		if operationInterruptedByRestart(journal.State) {
+			now := s.now().UTC().Format(time.RFC3339Nano)
+			journal.State = operationNeedsAttention
+			journal.Stage = "interrupted"
+			journal.Status = "Server migration export was interrupted before completion. Review the destination and Minecraft runtime before continuing."
+			journal.UpdatedAt = now
+			journal.InterruptedAt = now
+			if err := s.persist(journal); err != nil {
+				_ = s.releaseMigrationLock()
+				return err
+			}
+			s.operations[journal.OperationID] = journal
+		}
+		s.currentMigrationID = activeMigration
+	}
 	return nil
 }
 
@@ -364,7 +433,7 @@ func validateOperationJournal(journal operationJournal) error {
 	if !validOperationID(journal.OperationID) {
 		return errors.New("invalid operation id")
 	}
-	if journal.OperationType != operationTypeSetup && journal.OperationType != operationTypeRestore && journal.OperationType != operationTypeDataMigration {
+	if journal.OperationType != operationTypeSetup && journal.OperationType != operationTypeRestore && journal.OperationType != operationTypeDataMigration && journal.OperationType != operationTypeMigrationExport {
 		return errors.New("unsupported operation type")
 	}
 	if !operationFingerprintPattern.MatchString(journal.PlanFingerprint) {
@@ -556,6 +625,51 @@ func (s *operationStore) beginDataMigration(planFingerprint string) (operationJo
 	return journal, true, nil
 }
 
+func (s *operationStore) beginMigrationExport(planFingerprint string) (operationJournal, bool, error) {
+	if !operationFingerprintPattern.MatchString(planFingerprint) {
+		return operationJournal{}, false, errors.New("invalid server migration export plan fingerprint")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.currentMigrationID != "" {
+		current := s.operations[s.currentMigrationID]
+		if current.PlanFingerprint == planFingerprint && current.OperationType == operationTypeMigrationExport {
+			return current, false, nil
+		}
+		return operationJournal{}, false, errMigrationOperationBusy
+	}
+	if err := s.acquireMigrationLock(); err != nil {
+		return operationJournal{}, false, err
+	}
+
+	id, err := newOperationID()
+	if err != nil {
+		_ = s.releaseMigrationLock()
+		return operationJournal{}, false, err
+	}
+	now := s.now().UTC().Format(time.RFC3339Nano)
+	journal := operationJournal{
+		SchemaVersion:   operationSchemaVersion,
+		OperationID:     id,
+		OperationType:   operationTypeMigrationExport,
+		PlanFingerprint: planFingerprint,
+		State:           operationQueued,
+		Stage:           "queued",
+		Status:          "Server migration export operation queued.",
+		StartedAt:       now,
+		UpdatedAt:       now,
+		Rollback:        operationRollback{State: "not_started"},
+	}
+	if err := s.persist(journal); err != nil {
+		_ = s.releaseMigrationLock()
+		return operationJournal{}, false, err
+	}
+	s.operations[id] = journal
+	s.currentMigrationID = id
+	return journal, true, nil
+}
+
 func (s *operationStore) get(id string) (operationJournal, error) {
 	if !validOperationID(id) {
 		return operationJournal{}, errOperationNotFound
@@ -608,6 +722,20 @@ func (s *operationStore) currentDataMigration() (*operationJournal, error) {
 	journal, ok := s.operations[s.currentDataMigrationID]
 	if !ok {
 		return nil, errors.New("current data migration operation journal is missing")
+	}
+	copy := journal
+	return &copy, nil
+}
+
+func (s *operationStore) currentMigration() (*operationJournal, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.currentMigrationID == "" {
+		return nil, nil
+	}
+	journal, ok := s.operations[s.currentMigrationID]
+	if !ok {
+		return nil, errors.New("current server migration operation journal is missing")
 	}
 	copy := journal
 	return &copy, nil
@@ -669,6 +797,11 @@ func (s *operationStore) transition(id string, next operationState, stage, statu
 		case operationTypeDataMigration:
 			s.currentDataMigrationID = ""
 			if err := s.releaseDataMigrationLock(); err != nil {
+				return operationJournal{}, err
+			}
+		case operationTypeMigrationExport:
+			s.currentMigrationID = ""
+			if err := s.releaseMigrationLock(); err != nil {
 				return operationJournal{}, err
 			}
 		}
@@ -781,6 +914,37 @@ func (s *operationStore) releaseDataMigrationLock() error {
 		return fmt.Errorf("release data migration operation lock: %w", err)
 	}
 	s.dataMigrationLockHeld = false
+	return nil
+}
+
+func (s *operationStore) acquireMigrationLock() error {
+	if s.migrationLockHeld {
+		return nil
+	}
+	if s.migrationLockFile == nil {
+		return errors.New("server migration operation lock is unavailable")
+	}
+	if err := syscall.Flock(int(s.migrationLockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+			return errMigrationLockBusy
+		}
+		return fmt.Errorf("acquire server migration operation lock: %w", err)
+	}
+	s.migrationLockHeld = true
+	return nil
+}
+
+func (s *operationStore) releaseMigrationLock() error {
+	if !s.migrationLockHeld {
+		return nil
+	}
+	if s.migrationLockFile == nil {
+		return errors.New("server migration operation lock is unavailable")
+	}
+	if err := syscall.Flock(int(s.migrationLockFile.Fd()), syscall.LOCK_UN); err != nil {
+		return fmt.Errorf("release server migration operation lock: %w", err)
+	}
+	s.migrationLockHeld = false
 	return nil
 }
 

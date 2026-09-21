@@ -1,0 +1,257 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/backup-common.sh
+source /usr/libexec/justvoxel/mjust/storage-common.sh
+source /usr/libexec/justvoxel/mjust/migration-common.sh
+source /usr/libexec/justvoxel/mjust/migration-transport-device.sh
+
+require_root
+
+emit_error() {
+    local code="$1" message="$2"
+    jq -cn --arg code "$code" --arg error "$message" \
+        '{ok:false,schema_version:"v1",code:$code,error:$error,warnings:[]}'
+}
+
+append_warning() {
+    local warnings="$1" code="$2" message="$3"
+    jq -cn --argjson warnings "$warnings" --arg code "$code" --arg message "$message" \
+        '$warnings + [{code:$code,message:$message}]'
+}
+
+safe_filename() {
+    [[ "$1" =~ ^justvoxel-migration-[A-Za-z0-9._-]+[.]tar[.]gz$ && ${#1} -le 160 ]]
+}
+
+canonical_device() {
+    readlink -f -- "$1" 2>/dev/null || true
+}
+
+device_identity() {
+    local device="$1" parent
+    parent="$(jv_migration_parent_disk "$device" 2>/dev/null || true)"
+    {
+        printf 'device=%s\n' "$(canonical_device "$device")"
+        lsblk -b -P -o PATH,PKNAME,TYPE,SIZE,FSTYPE,UUID,PARTUUID,MOUNTPOINTS,RO,MODEL,SERIAL,WWN,TRAN,HOTPLUG,RM "$device" 2>/dev/null || true
+        blkid "$device" 2>/dev/null || true
+        [[ -n "$parent" ]] && lsblk -b -P -o PATH,TYPE,SIZE,MODEL,SERIAL,WWN,TRAN,HOTPLUG,RM "$parent" 2>/dev/null || true
+    } | sha256sum | awk '{print $1}'
+}
+
+candidate_json() {
+    local device="$1" parent fstype mountpoint model transport size removable=false
+    parent="$(jv_migration_parent_disk "$device" 2>/dev/null || true)"
+    fstype="$(blkid -s TYPE -o value "$device" 2>/dev/null || true)"
+    mountpoint="$(jv_migration_existing_mount_for_device "$device" 2>/dev/null || true)"
+    model="$(lsblk -dnro MODEL "${parent:-$device}" 2>/dev/null | xargs || true)"
+    transport="$(lsblk -dnro TRAN "${parent:-$device}" 2>/dev/null | xargs || true)"
+    size="$(lsblk -bdnro SIZE "$device" 2>/dev/null | head -n1)"
+    size="${size:-0}"
+    if [[ "$transport" == usb || "$(lsblk -dnro RM "${parent:-$device}" 2>/dev/null || true)" == 1 || "$(lsblk -dnro HOTPLUG "${parent:-$device}" 2>/dev/null || true)" == 1 ]]; then
+        removable=true
+    fi
+    jq -cn --arg path "$(canonical_device "$device")" --arg parent "$parent" --arg filesystem "$fstype" \
+        --arg mountpoint "$mountpoint" --arg model "$model" --arg transport "$transport" \
+        --argjson size_bytes "$size" --argjson removable "$removable" \
+        '{path:$path,parent:$parent,filesystem:$filesystem,mountpoint:$mountpoint,model:$model,transport:$transport,size_bytes:$size_bytes,removable:$removable}'
+}
+
+discover() {
+    require_config
+    local devices='[]' device fstype filename backup_available=false
+    while IFS= read -r device; do
+        [[ -n "$device" ]] || continue
+        fstype="$(blkid -s TYPE -o value "$device" 2>/dev/null || true)"
+        [[ -n "$fstype" ]] || continue
+        case "${fstype,,}" in ext4|xfs|btrfs|vfat|exfat) ;; *) continue ;; esac
+        if jv_migration_validate_media_device "$device" no >/dev/null 2>&1; then
+            devices="$(jq -cn --argjson a "$devices" --argjson item "$(candidate_json "$device")" '$a + [$item]')"
+        fi
+    done < <(lsblk -lnpo NAME,TYPE | awk '$2 == "part" || $2 == "disk" {print $1}')
+
+    if jv_backup_load_config >/dev/null 2>&1 && jv_backup_validate_mount_identity >/dev/null 2>&1; then
+        backup_available=true
+    fi
+    filename="justvoxel-migration-$(date -u +%Y-%m-%d-%H%M%S).tar.gz"
+    jq -cn --arg filename "$filename" --argjson devices "$devices" --argjson backup_available "$backup_available" \
+        '{ok:true,schema_version:"v1",suggested_filename:$filename,configured_backup_available:$backup_available,devices:$devices,target_kinds:["local","backup","device","nfs","smb"]}'
+}
+
+plan() {
+    require_config
+    local request kind path device raw_device removable source username domain filename normalized_path=''
+    local data_info data_bytes player_json state online players players_confirmation=false
+    local warnings='[]' target_identity_value='' target_display='' target_fstype='' target_available=0
+    local config_identity data_identity parent existing_mount backup_identity
+
+    request="$(cat)"
+    if ! jq -e '
+        type == "object"
+        and ((keys - ["kind","path","device","removable","source","username","domain","filename"]) | length == 0)
+        and (.kind | type == "string")
+        and ((.path // "") | type == "string")
+        and ((.device // "") | type == "string")
+        and ((.removable // false) | type == "boolean")
+        and ((.source // "") | type == "string")
+        and ((.username // "") | type == "string")
+        and ((.domain // "") | type == "string")
+        and (.filename | type == "string")
+    ' >/dev/null 2>&1 <<< "$request"; then
+        emit_error invalid_request 'Invalid server migration export planning request.'
+        return 0
+    fi
+
+    kind="$(jq -r '.kind' <<< "$request")"
+    path="$(jq -r '.path // ""' <<< "$request")"
+    raw_device="$(jq -r '.device // ""' <<< "$request")"
+    device="$raw_device"
+    removable="$(jq -r '.removable // false' <<< "$request")"
+    source="$(jq -r '.source // ""' <<< "$request")"
+    username="$(jq -r '.username // ""' <<< "$request")"
+    domain="$(jq -r '.domain // ""' <<< "$request")"
+    filename="$(jq -r '.filename' <<< "$request")"
+
+    safe_filename "$filename" || { emit_error invalid_filename 'Use a safe JustVoxel migration filename ending in .tar.gz.'; return 0; }
+    [[ "$username" != *$'\n'* && "$username" != *$'\r'* && "$domain" != *$'\n'* && "$domain" != *$'\r'* ]] || {
+        emit_error invalid_credentials 'SMB username/domain contains invalid characters.'
+        return 0
+    }
+
+    /usr/libexec/justvoxel/mjust/validate-data-mount >/dev/null 2>&1 || {
+        emit_error data_unavailable 'Minecraft data storage could not be validated.'
+        return 0
+    }
+    [[ -d "$DATA_PATH" && ! -L "$DATA_PATH" ]] || { emit_error data_unavailable 'Minecraft data directory is unavailable.'; return 0; }
+    data_info="$(/usr/libexec/justvoxel/mjust/migration-archive inspect "$DATA_PATH" 2>/dev/null)" || {
+        emit_error data_unavailable 'Minecraft data could not be inspected for export.'
+        return 0
+    }
+    data_bytes="$(jq -r '.expandedBytes // 0' <<< "$data_info")"
+    [[ "$data_bytes" =~ ^[0-9]+$ ]] || { emit_error data_unavailable 'Minecraft data size could not be measured safely.'; return 0; }
+
+    case "$kind" in
+        local)
+            [[ "$path" == /* ]] || { emit_error invalid_target 'Local export directory must be an absolute path.'; return 0; }
+            normalized_path="$(realpath -m -- "$path" 2>/dev/null || true)"
+            [[ -n "$normalized_path" && "$normalized_path" == "$path" && "$normalized_path" != / ]] || {
+                emit_error invalid_target 'Use a normalized absolute local export directory.'
+                return 0
+            }
+            if [[ -e "$normalized_path" && ! -d "$normalized_path" ]]; then
+                emit_error invalid_target 'Local export target must be a directory.'
+                return 0
+            fi
+            parent="$normalized_path"
+            while [[ ! -e "$parent" && "$parent" != / ]]; do parent="$(dirname -- "$parent")"; done
+            [[ -d "$parent" ]] || { emit_error invalid_target 'Local export parent directory is unavailable.'; return 0; }
+            target_identity_value="$(stat -Lc 'local:%d:%i:%Y' "$parent" 2>/dev/null || true)"
+            target_available="$(df -B1 --output=avail -- "$parent" 2>/dev/null | tail -n1 | tr -d ' ' || true)"
+            target_display="$normalized_path/$filename"
+            target_fstype="$(findmnt -n -o FSTYPE --target "$parent" 2>/dev/null || true)"
+            ;;
+        backup)
+            jv_backup_load_config >/dev/null 2>&1 || { emit_error backup_unavailable 'Configured JustVoxel backup storage is unavailable.'; return 0; }
+            jv_backup_validate_mount_identity >/dev/null 2>&1 || { emit_error backup_unavailable 'Configured JustVoxel backup storage identity could not be verified.'; return 0; }
+            normalized_path="$minecraft_backup_path"
+            target_display="$normalized_path/$filename"
+            parent="$normalized_path"
+            while [[ ! -e "$parent" && "$parent" != / ]]; do parent="$(dirname -- "$parent")"; done
+            target_available="$(df -B1 --output=avail -- "$parent" 2>/dev/null | tail -n1 | tr -d ' ' || true)"
+            target_fstype="$(findmnt -n -o FSTYPE --target "$parent" 2>/dev/null || true)"
+            backup_identity="$(printf '%s\n%s\n%s\n%s\n' "$BACKUP_TYPE" "${BACKUP_MOUNT_POINT:-}" "${BACKUP_EXPECTED_UUID:-}" "${BACKUP_EXPECTED_SOURCE:-}" | sha256sum | awk '{print $1}')"
+            target_identity_value="backup:$backup_identity"
+            ;;
+        device)
+            device="$(canonical_device "$raw_device")"
+            [[ -n "$device" && "$device" == "$raw_device" ]] || { emit_error invalid_target 'Choose a canonical migration media device.'; return 0; }
+            if [[ "$removable" == true ]]; then
+                jv_migration_validate_media_device "$device" yes >/dev/null 2>&1 || { emit_error invalid_target 'Selected device is not safe supported removable migration media.'; return 0; }
+            else
+                jv_migration_validate_media_device "$device" no >/dev/null 2>&1 || { emit_error invalid_target 'Selected device is not safe supported migration media.'; return 0; }
+            fi
+            target_fstype="$(blkid -s TYPE -o value "$device" 2>/dev/null || true)"
+            existing_mount="$(jv_migration_existing_mount_for_device "$device" 2>/dev/null || true)"
+            if [[ -n "$existing_mount" ]]; then
+                target_available="$(df -B1 --output=avail -- "$existing_mount" 2>/dev/null | tail -n1 | tr -d ' ' || true)"
+            fi
+            target_identity_value="device:$(device_identity "$device")"
+            target_display="$device:$filename"
+            warnings="$(append_warning "$warnings" temporary_media 'JustVoxel will use the reviewed existing filesystem without formatting it. A temporary mount is removed after export; an administrator-owned existing mount is left mounted.')"
+            ;;
+        nfs)
+            [[ "$source" == *:* && "$source" != *' '* && "$source" != *$'\n'* && "$source" != *$'\r'* ]] || {
+                emit_error invalid_target 'NFS source must use server:/export form.'
+                return 0
+            }
+            target_identity_value="nfs:$(printf '%s' "$source" | sha256sum | awk '{print $1}')"
+            target_display="$source/$filename"
+            warnings="$(append_warning "$warnings" temporary_network 'JustVoxel will mount this NFS destination temporarily for the export and will not create a persistent fstab entry.')"
+            ;;
+        smb)
+            [[ "$source" == //*/* && "$source" != *' '* && "$source" != *$'\n'* && "$source" != *$'\r'* ]] || {
+                emit_error invalid_target 'SMB source must use //server/share form.'
+                return 0
+            }
+            [[ -n "$username" ]] || { emit_error invalid_credentials 'SMB username is required.'; return 0; }
+            target_identity_value="smb:$(printf '%s\n%s\n%s\n' "$source" "$username" "$domain" | sha256sum | awk '{print $1}')"
+            target_display="$source/$filename"
+            warnings="$(append_warning "$warnings" temporary_network 'JustVoxel will mount this SMB destination temporarily using an Apply-only credential. No persistent fstab entry is created.')"
+            ;;
+        *)
+            emit_error invalid_target 'Choose local, configured backup storage, existing media, NFS, or SMB as the export target.'
+            return 0
+            ;;
+    esac
+
+    [[ -n "$target_identity_value" ]] || { emit_error target_unavailable 'Export target identity could not be captured safely.'; return 0; }
+    [[ "$target_available" =~ ^[0-9]+$ ]] || target_available=0
+    if (( target_available > 0 && target_available < data_bytes + 64 * 1024 * 1024 )); then
+        emit_error insufficient_space 'Export target does not have enough free space for the conservative preflight.'
+        return 0
+    fi
+    if [[ "${target_fstype,,}" == vfat ]] && (( data_bytes >= 4294967295 )); then
+        emit_error fat32_limit 'FAT32/vfat cannot safely hold this migration bundle because the source data is already at or above the single-file limit.'
+        return 0
+    fi
+
+    player_json="$(/usr/libexec/justvoxel/mjust/web-status-json players 2>/dev/null)" || {
+        emit_error player_status_unavailable 'Minecraft player status could not be checked safely.'
+        return 0
+    }
+    if ! jq -e 'type=="object" and (.state|type=="string") and (.online|type=="number") and (.names|type=="array")' >/dev/null 2>&1 <<< "$player_json"; then
+        emit_error player_status_unavailable 'Minecraft player status could not be checked safely.'
+        return 0
+    fi
+    state="$(jq -r '.state' <<< "$player_json")"
+    case "$state" in running|stopped) ;; *) emit_error player_status_unavailable 'Minecraft player status could not be checked safely.'; return 0 ;; esac
+    online="$(jq -r '.online' <<< "$player_json")"
+    players="$(jq -c '.names' <<< "$player_json")"
+    if [[ "$state" == running && "$online" =~ ^[0-9]+$ ]] && (( online > 0 )); then players_confirmation=true; fi
+
+    config_identity="$(sha256sum "$JV_CONFIG" | awk '{print $1}')"
+    data_identity="$(stat -Lc '%d:%i:%s:%Y' "$DATA_PATH" 2>/dev/null || true)"
+    [[ -n "$config_identity" && -n "$data_identity" ]] || { emit_error data_unavailable 'Export source identity could not be captured safely.'; return 0; }
+
+    warnings="$(append_warning "$warnings" cold_export 'Export creates a cold portable bundle. If Minecraft is running, it is stopped through the normal player-aware graceful shutdown path and restarted afterward.')"
+    normalized="$(jq -cn --arg kind "$kind" --arg path "$normalized_path" --arg device "$device" \
+        --argjson removable "$removable" --arg source "$source" --arg username "$username" --arg domain "$domain" \
+        --arg filename "$filename" --arg target_display "$target_display" --arg target_filesystem "$target_fstype" \
+        --arg data_path "$DATA_PATH" --argjson data_bytes "$data_bytes" --argjson target_available_bytes "$target_available" \
+        '{kind:$kind,path:$path,device:$device,removable:$removable,source:$source,username:$username,domain:$domain,filename:$filename,target_display:$target_display,target_filesystem:$target_filesystem,data_path:$data_path,data_bytes:$data_bytes,target_available_bytes:$target_available_bytes}')"
+    requirements="$(jq -cn --argjson players_confirmation "$players_confirmation" --arg minecraft_state "$state" \
+        --argjson online "$online" --argjson players "$players" --argjson smb_password_required "$([[ "$kind" == smb ]] && echo true || echo false)" \
+        '{export_confirmation_required:true,players_confirmation_required:$players_confirmation,minecraft_state:$minecraft_state,online:$online,players:$players,smb_password_required:$smb_password_required,target_validation_on_apply:true,integrity_validation_required:true,runtime_validation_required:true}')"
+    context="$(jq -cn --arg config_identity "$config_identity" --arg data_identity "$data_identity" --arg target_identity "$target_identity_value" \
+        '{config_identity:$config_identity,data_identity:$data_identity,target_identity:$target_identity}')"
+
+    jq -cn --argjson normalized "$normalized" --argjson warnings "$warnings" --argjson requirements "$requirements" --argjson context "$context" \
+        '{ok:true,schema_version:"v1",normalized:$normalized,warnings:$warnings,requirements:$requirements,context:$context}'
+}
+
+case "${1:-plan}" in
+    discover) discover ;;
+    plan) plan ;;
+    *) emit_error invalid_action 'Usage: admin-migration-export-plan-json {discover|plan}' ;;
+esac

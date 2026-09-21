@@ -200,6 +200,7 @@ func serve(socket string) error {
 	registerAdminConfigurationRoutes(mux, s)
 	registerAdminValidationRoutes(mux, s)
 	registerAdminRestoreRoutes(mux, s)
+	registerAdminMigrationExportRoutes(mux, s)
 	registerOperationalRoutes(mux, s)
 	registerMinecraftRoutes(mux, s)
 	registerAdminSystemActionRoutes(mux, s)

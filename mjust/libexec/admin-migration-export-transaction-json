@@ -1,0 +1,249 @@
+#!/usr/bin/bash
+set -Eeuo pipefail
+
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/backup-common.sh
+source /usr/libexec/justvoxel/mjust/storage-common.sh
+source /usr/libexec/justvoxel/mjust/interrupt-safety.sh
+source /usr/libexec/justvoxel/mjust/migration-common.sh
+source /usr/libexec/justvoxel/mjust/migration-transport-device.sh
+
+require_root
+
+result_emitted=no
+restart_required=no
+transport_started=no
+destination=''
+failure_status='Server migration export did not complete.'
+
+emit_progress() {
+    jq -cn --arg state "$1" --arg stage "$2" --arg status "$3" \
+        '{event:"progress",state:$state,stage:$stage,status:$status}'
+}
+
+emit_result() {
+    result_emitted=yes
+    jq -cn --arg outcome "$1" --arg status "$2" \
+        '{event:"result",outcome:$outcome,status:$status}'
+}
+
+cleanup() {
+    local rc=$? safe=yes
+    trap - EXIT INT TERM
+
+    if [[ -n "$destination" && -f "$destination.partial" ]]; then
+        rm -f -- "$destination.partial" || safe=no
+    fi
+
+    if [[ "$restart_required" == yes ]]; then
+        if systemctl start minecraft.service >/dev/null 2>&1 \
+            && /usr/libexec/justvoxel/mjust/restore-runtime-validate >/dev/null 2>&1; then
+            restart_required=no
+        else
+            safe=no
+        fi
+    fi
+
+    if [[ "$transport_started" == yes ]]; then
+        jv_migration_transport_cleanup >/dev/null 2>&1 || safe=no
+        transport_started=no
+    fi
+
+    if [[ "$result_emitted" == yes ]]; then
+        exit "$rc"
+    fi
+    if [[ "$safe" == yes ]]; then
+        emit_result rolled_back "$failure_status Minecraft runtime and temporary transport state were restored safely."
+    else
+        emit_result needs_attention "$failure_status Runtime or temporary transport cleanup could not be confirmed; administrator attention is required."
+    fi
+    exit 0
+}
+trap cleanup EXIT INT TERM
+
+payload="$(cat)"
+if ! jq -e '
+    type == "object"
+    and ((keys - ["operation_id","plan_fingerprint","request","config_identity","data_identity","target_identity","expected_minecraft_state","players_confirmed","smb_password"]) | length == 0)
+    and (.operation_id | type == "string")
+    and (.plan_fingerprint | type == "string")
+    and (.request | type == "object")
+    and (.config_identity | type == "string")
+    and (.data_identity | type == "string")
+    and (.target_identity | type == "string")
+    and (.expected_minecraft_state | type == "string")
+    and (.players_confirmed | type == "boolean")
+    and ((.smb_password // "") | type == "string")
+' >/dev/null 2>&1 <<< "$payload"; then
+    failure_status='Server migration export execution request was invalid.'
+    exit 1
+fi
+
+operation_id="$(jq -r '.operation_id' <<< "$payload")"
+plan_fingerprint="$(jq -r '.plan_fingerprint' <<< "$payload")"
+plan_request="$(jq -c '.request' <<< "$payload")"
+expected_config_identity="$(jq -r '.config_identity' <<< "$payload")"
+expected_data_identity="$(jq -r '.data_identity' <<< "$payload")"
+expected_target_identity="$(jq -r '.target_identity' <<< "$payload")"
+expected_minecraft_state="$(jq -r '.expected_minecraft_state' <<< "$payload")"
+players_confirmed="$(jq -r '.players_confirmed' <<< "$payload")"
+smb_password="$(jq -r '.smb_password // ""' <<< "$payload")"
+
+[[ "$operation_id" =~ ^[0-9a-f-]+$ ]] || { failure_status='Server migration export operation identity was invalid.'; exit 1; }
+[[ "$plan_fingerprint" =~ ^sha256:[0-9a-f]{64}$ ]] || { failure_status='Server migration export plan identity was invalid.'; exit 1; }
+case "$expected_minecraft_state" in running|stopped) ;; *) failure_status='Reviewed Minecraft service state was invalid.'; exit 1 ;; esac
+[[ "$smb_password" != *$'\n'* && "$smb_password" != *$'\r'* ]] || { failure_status='SMB password contains invalid characters.'; exit 1; }
+
+emit_progress validating export_preflight 'Revalidating the reviewed server migration export before touching Minecraft.'
+
+replan="$(printf '%s\n' "$plan_request" | /usr/libexec/justvoxel/mjust/admin-migration-export-plan-json plan)"
+if [[ "$(jq -r '.ok // false' <<< "$replan")" != true ]]; then
+    failure_status="$(jq -r '.error // "Server migration export target is no longer valid."' <<< "$replan")"
+    exit 1
+fi
+[[ "$(jq -r '.context.config_identity' <<< "$replan")" == "$expected_config_identity" ]] || { failure_status='JustVoxel configuration changed after export review.'; exit 1; }
+[[ "$(jq -r '.context.data_identity' <<< "$replan")" == "$expected_data_identity" ]] || { failure_status='Minecraft data identity changed after export review.'; exit 1; }
+[[ "$(jq -r '.context.target_identity' <<< "$replan")" == "$expected_target_identity" ]] || { failure_status='Export target identity changed after review.'; exit 1; }
+
+kind="$(jq -r '.kind' <<< "$plan_request")"
+path="$(jq -r '.path // ""' <<< "$plan_request")"
+device="$(jq -r '.device // ""' <<< "$plan_request")"
+removable="$(jq -r '.removable // false' <<< "$plan_request")"
+source="$(jq -r '.source // ""' <<< "$plan_request")"
+username="$(jq -r '.username // ""' <<< "$plan_request")"
+domain="$(jq -r '.domain // ""' <<< "$plan_request")"
+filename="$(jq -r '.filename' <<< "$plan_request")"
+data_bytes="$(jq -r '.normalized.data_bytes' <<< "$replan")"
+
+emit_progress running target_prepare 'Preparing the reviewed server migration export target.'
+
+target_root=''
+case "$kind" in
+    local)
+        [[ -e "$path" && -L "$path" ]] && { failure_status='Local export directory became a symbolic link.'; exit 1; }
+        install -d -m0700 -o root -g root "$path"
+        target_root="$path"
+        ;;
+    backup)
+        jv_backup_load_config >/dev/null
+        jv_backup_prepare_write_target >/dev/null
+        target_root="$minecraft_backup_path"
+        ;;
+    device)
+        transport_started=yes
+        if [[ "$removable" == true ]]; then
+            jv_migration_mount_device "$device" export yes >/dev/null
+        else
+            jv_migration_mount_device "$device" export no >/dev/null
+        fi
+        target_root="$JV_MIGRATION_MEDIA_MOUNT"
+        ;;
+    nfs)
+        transport_started=yes
+        jv_migration_transport_begin
+        JV_MIGRATION_MEDIA_MOUNT="$JV_MIGRATION_TRANSPORT_ROOT/nfs"
+        install -d -m0700 -o root -g root "$JV_MIGRATION_MEDIA_MOUNT"
+        mount -t nfs -o rw,nodev,nosuid,noexec "$source" "$JV_MIGRATION_MEDIA_MOUNT"
+        actual="$(findmnt -n -o SOURCE --target "$JV_MIGRATION_MEDIA_MOUNT" 2>/dev/null || true)"
+        [[ -n "$actual" ]] || { failure_status='Temporary NFS export target identity could not be verified.'; exit 1; }
+        JV_MIGRATION_OWNED_MOUNT="$JV_MIGRATION_MEDIA_MOUNT"
+        target_root="$JV_MIGRATION_MEDIA_MOUNT"
+        ;;
+    smb)
+        [[ -n "$smb_password" ]] || { failure_status='SMB password is required for this reviewed export target.'; exit 1; }
+        transport_started=yes
+        jv_migration_transport_begin
+        JV_MIGRATION_SMB_CREDENTIALS="$JV_MIGRATION_TRANSPORT_ROOT/smb.credentials"
+        umask 077
+        {
+            printf 'username=%s\n' "$username"
+            printf 'password=%s\n' "$smb_password"
+            [[ -n "$domain" ]] && printf 'domain=%s\n' "$domain"
+        } > "$JV_MIGRATION_SMB_CREDENTIALS"
+        chmod 0600 "$JV_MIGRATION_SMB_CREDENTIALS"
+        unset smb_password
+        JV_MIGRATION_MEDIA_MOUNT="$JV_MIGRATION_TRANSPORT_ROOT/smb"
+        install -d -m0700 -o root -g root "$JV_MIGRATION_MEDIA_MOUNT"
+        mount -t cifs -o "credentials=$JV_MIGRATION_SMB_CREDENTIALS,vers=3.0,rw,nodev,nosuid,noexec,uid=0,gid=0,file_mode=0600,dir_mode=0700" "$source" "$JV_MIGRATION_MEDIA_MOUNT"
+        actual="$(findmnt -n -o SOURCE --target "$JV_MIGRATION_MEDIA_MOUNT" 2>/dev/null || true)"
+        [[ -n "$actual" ]] || { failure_status='Temporary SMB export target identity could not be verified.'; exit 1; }
+        JV_MIGRATION_OWNED_MOUNT="$JV_MIGRATION_MEDIA_MOUNT"
+        target_root="$JV_MIGRATION_MEDIA_MOUNT"
+        ;;
+    *)
+        failure_status='Reviewed export target kind is unsupported.'
+        exit 1
+        ;;
+esac
+
+destination="$target_root/$filename"
+[[ -d "$target_root" && -w "$target_root" ]] || { failure_status='Reviewed export target is not writable.'; exit 1; }
+[[ ! -e "$destination" && ! -e "$destination.partial" ]] || { failure_status='Reviewed export destination already exists.'; exit 1; }
+
+available="$(jv_migration_available_bytes "$target_root")" || { failure_status='Export target free space could not be measured.'; exit 1; }
+required=$((data_bytes + 64 * 1024 * 1024))
+(( available >= required )) || { failure_status='Export target no longer has enough free space.'; exit 1; }
+
+target_fstype="$(findmnt -n -o FSTYPE --target "$target_root" 2>/dev/null || true)"
+if [[ "${target_fstype,,}" == vfat ]] && (( data_bytes >= 4294967295 )); then
+    failure_status='FAT32/vfat cannot hold this migration bundle safely.'
+    exit 1
+fi
+
+exec 9>"$JV_MAINTENANCE_LOCK"
+if ! flock -n 9; then
+    failure_status='Another JustVoxel Minecraft maintenance operation is already running.'
+    exit 1
+fi
+
+if systemctl is-active --quiet minecraft.service; then
+    live_minecraft_state=running
+else
+    live_minecraft_state=stopped
+fi
+[[ "$live_minecraft_state" == "$expected_minecraft_state" ]] || { failure_status='Minecraft service state changed after export review.'; exit 1; }
+
+server_reported=''
+geyser_reported=''
+if [[ "$live_minecraft_state" == running ]]; then
+    server_reported="$(podman exec minecraft rcon-cli 'version' 2>/dev/null | head -n1 || true)"
+    geyser_reported="$(podman exec minecraft rcon-cli 'geyser version' 2>/dev/null | head -n1 || true)"
+    emit_progress running player_recheck 'Rechecking players immediately before the cold export.'
+    stop_mode=required
+    [[ "$players_confirmed" == true ]] && stop_mode=confirmed
+    set +e
+    JV_INTERRUPT_CONFIRMATION_MODE="$stop_mode" jv_stop_minecraft_adaptive 'Export server' >/dev/null 2>&1
+    stop_rc=$?
+    set -e
+    case "$stop_rc" in
+        0) restart_required=yes ;;
+        10) failure_status='A player joined after export review; interruption confirmation is required again.'; exit 1 ;;
+        *) failure_status='Minecraft could not be stopped safely for export.'; exit 1 ;;
+    esac
+fi
+
+emit_progress running exporting 'Creating and verifying the cold portable JustVoxel migration bundle.'
+JV_MIGRATION_EXPORT_MAINTENANCE_LOCK_HELD=1 \
+JV_MIGRATION_EXPORT_SERVER_REPORTED="$server_reported" \
+JV_MIGRATION_EXPORT_GEYSER_REPORTED="$geyser_reported" \
+    /usr/libexec/justvoxel/mjust/migration-export-backend "$destination" >/dev/null
+
+if [[ "$restart_required" == yes ]]; then
+    emit_progress running minecraft_restart 'Restarting Minecraft after the cold export.'
+    systemctl start minecraft.service
+    restart_required=no
+    emit_progress verifying minecraft_runtime 'Validating Minecraft after the export.'
+    /usr/libexec/justvoxel/mjust/restore-runtime-validate >/dev/null
+else
+    emit_progress verifying export_complete 'Verifying the completed server migration export.'
+fi
+
+if [[ "$transport_started" == yes ]]; then
+    sync
+    jv_migration_transport_cleanup
+    transport_started=no
+fi
+
+emit_result succeeded 'Server migration export completed successfully and the prior Minecraft runtime state is healthy.'
+trap - EXIT INT TERM
+exit 0

@@ -65,7 +65,7 @@ Rebuild mJust around the same authoritative management layer already used by the
 
 Management API gaps that still need shared implementations before the corresponding direct CLI paths can disappear include:
 
-- import/export and migration
+- import and migration recovery; Export now has the shared persistent Management API/backend foundation, while terminal frontend conversion remains part of the same migration rebuild
 - Minecraft update policy and execution
 - bootc status and operating-system updates
 - Start Over / reset workflows
