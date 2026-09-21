@@ -120,7 +120,7 @@ func dataMigrationPagePlan(players, destructive bool) api.AdminDataMigrationPlan
 			SizeGiB: "all", SizeBytes: 10737418240, DataBytes: 2147483648,
 			TargetCapacityBytes: 10737418240, CurrentDataPath: "/var/lib/justvoxel/minecraft",
 		},
-		Warnings: []api.AdminDataMigrationWarning{{Code: "old_data_retained", Message: "The old Minecraft data directory will be retained."}},
+		Warnings:     []api.AdminDataMigrationWarning{{Code: "old_data_retained", Message: "The old Minecraft data directory will be retained."}},
 		Requirements: requirements,
 	}
 }
@@ -250,7 +250,7 @@ func TestDataMigrationEntryReconnectsAndProgressUsesSameJournal(t *testing.T) {
 	operation := &api.PersistentOperation{
 		SchemaVersion: "v1", OperationID: migrationPageOperationID, OperationType: "data_migration",
 		PlanFingerprint: migrationPageFingerprint, State: "running", Stage: "copying",
-		Status: "Copying Minecraft data to the reviewed storage target.",
+		Status:    "Copying Minecraft data to the reviewed storage target.",
 		StartedAt: "2026-09-20T12:00:00Z", UpdatedAt: "2026-09-20T12:01:00Z",
 		Rollback: api.PersistentOperationRollback{State: "not_started"},
 	}
