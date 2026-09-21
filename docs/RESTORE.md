@@ -18,10 +18,17 @@ validates the restored runtime, and controls rollback/recovery state.
 
 Restore operations are persistent. If the terminal disconnects while a restore
 is running, rerunning `mjust restore` reconnects to the current Restore
-operation instead of starting a second transaction.
+operation instead of starting a second transaction. The WebUI behaves the same
+way: opening the Restore page while an operation is active redirects to that
+operation, and refreshing the progress page continues monitoring it rather than
+starting another transaction.
 
-A future WebUI Restore page must use this same Management API and backend rather
-than implementing separate restore policy.
+The WebUI Restore page uses this same Management API and backend. It discovers
+backups, requests the authoritative plan, presents the Agent's warnings and
+confirmation requirements, submits the reviewed fingerprint, and reconnects to
+the same persistent Restore operation after refresh or browser reconnect. The
+WebUI does not duplicate Restore compatibility, archive, storage, shutdown,
+runtime-validation, or rollback policy.
 
 ## Restore world
 

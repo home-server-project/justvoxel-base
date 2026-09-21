@@ -47,6 +47,10 @@ func (c *Client) AdminCurrentSetupOperation(ctx context.Context, session string)
 	return c.getPersistentOperation(ctx, session, "/v1/admin/setup/current-operation")
 }
 
+func (c *Client) AdminCurrentRestoreOperation(ctx context.Context, session string) (PersistentOperationResponse, error) {
+	return c.getPersistentOperation(ctx, session, "/v1/admin/restore/current-operation")
+}
+
 func (c *Client) getPersistentOperation(ctx context.Context, session, path string) (PersistentOperationResponse, error) {
 	var out PersistentOperationResponse
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://unix"+path, nil)

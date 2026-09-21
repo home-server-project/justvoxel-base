@@ -27,6 +27,7 @@ func TestGroupedHeaderNavigationUX(t *testing.T) {
 		`href="/settings/storage"`,
 		`href="/settings/backup-storage"`,
 		`href="/operations#manual-backup"`,
+		`href="/settings/restore"`,
 		`href="/settings/activity"`,
 		`href="/settings/validation"`,
 		`href="/settings/users"`,
@@ -88,6 +89,9 @@ func TestAuthenticatedTemplatesUseSharedHeader(t *testing.T) {
 		"server_settings.html",
 		"storage_settings.html",
 		"backup_storage.html",
+		"restore.html",
+		"restore_review.html",
+		"restore_progress.html",
 	} {
 		content, err := assets.ReadFile("templates/" + name)
 		if err != nil {
