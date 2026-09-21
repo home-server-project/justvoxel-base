@@ -331,8 +331,18 @@ available_bytes="$(df -B1 --output=avail "${new_mount}" 2>/dev/null | tail -n1 |
     exit 1
 }
 
-emit_progress running player_recheck 'Rechecking players immediately before the verified cold backup.'
+emit_progress running player_recheck 'Rechecking Minecraft service state and players immediately before the verified cold backup.'
 if systemctl is-active --quiet minecraft.service; then
+    live_minecraft_state=running
+else
+    live_minecraft_state=stopped
+fi
+[[ ${live_minecraft_state} == "${expected_minecraft_state}" ]] || {
+    echo 'ERROR: Minecraft service state changed after migration review.' >&2
+    exit 1
+}
+
+if [[ ${live_minecraft_state} == running ]]; then
     final_online="$(query_online_players)" || {
         echo 'ERROR: Minecraft player state became unavailable.' >&2
         exit 1
