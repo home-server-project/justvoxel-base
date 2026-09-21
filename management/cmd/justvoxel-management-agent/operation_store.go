@@ -23,6 +23,7 @@ const (
 	operationTypeRestore       = "restore"
 	operationTypeDataMigration = "data_migration"
 	operationTypeMigrationExport = "migration_export"
+	operationTypeMigrationImport = "migration_import"
 )
 
 type operationState string
@@ -285,7 +286,7 @@ func (s *operationStore) loadAndRecover() error {
 					return errors.New("multiple active data migration operation journals require attention")
 				}
 				activeDataMigration = journal.OperationID
-			case operationTypeMigrationExport:
+			case operationTypeMigrationExport, operationTypeMigrationImport:
 				if activeMigration != "" {
 					return errors.New("multiple active server migration operation journals require attention")
 				}
@@ -388,7 +389,11 @@ func (s *operationStore) loadAndRecover() error {
 			now := s.now().UTC().Format(time.RFC3339Nano)
 			journal.State = operationNeedsAttention
 			journal.Stage = "interrupted"
-			journal.Status = "Server migration export was interrupted before completion. Review the destination and Minecraft runtime before continuing."
+			if journal.OperationType == operationTypeMigrationImport {
+				journal.Status = "Server migration import was interrupted before completion. Review preserved import recovery state and the Minecraft runtime before continuing."
+			} else {
+				journal.Status = "Server migration export was interrupted before completion. Review the destination and Minecraft runtime before continuing."
+			}
 			journal.UpdatedAt = now
 			journal.InterruptedAt = now
 			if err := s.persist(journal); err != nil {
@@ -433,7 +438,7 @@ func validateOperationJournal(journal operationJournal) error {
 	if !validOperationID(journal.OperationID) {
 		return errors.New("invalid operation id")
 	}
-	if journal.OperationType != operationTypeSetup && journal.OperationType != operationTypeRestore && journal.OperationType != operationTypeDataMigration && journal.OperationType != operationTypeMigrationExport {
+	if journal.OperationType != operationTypeSetup && journal.OperationType != operationTypeRestore && journal.OperationType != operationTypeDataMigration && journal.OperationType != operationTypeMigrationExport && journal.OperationType != operationTypeMigrationImport {
 		return errors.New("unsupported operation type")
 	}
 	if !operationFingerprintPattern.MatchString(journal.PlanFingerprint) {
@@ -670,6 +675,51 @@ func (s *operationStore) beginMigrationExport(planFingerprint string) (operation
 	return journal, true, nil
 }
 
+func (s *operationStore) beginMigrationImport(planFingerprint string) (operationJournal, bool, error) {
+	if !operationFingerprintPattern.MatchString(planFingerprint) {
+		return operationJournal{}, false, errors.New("invalid server migration import plan fingerprint")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.currentMigrationID != "" {
+		current := s.operations[s.currentMigrationID]
+		if current.PlanFingerprint == planFingerprint && current.OperationType == operationTypeMigrationImport {
+			return current, false, nil
+		}
+		return operationJournal{}, false, errMigrationOperationBusy
+	}
+	if err := s.acquireMigrationLock(); err != nil {
+		return operationJournal{}, false, err
+	}
+
+	id, err := newOperationID()
+	if err != nil {
+		_ = s.releaseMigrationLock()
+		return operationJournal{}, false, err
+	}
+	now := s.now().UTC().Format(time.RFC3339Nano)
+	journal := operationJournal{
+		SchemaVersion:   operationSchemaVersion,
+		OperationID:     id,
+		OperationType:   operationTypeMigrationImport,
+		PlanFingerprint: planFingerprint,
+		State:           operationQueued,
+		Stage:           "queued",
+		Status:          "Server migration import operation queued.",
+		StartedAt:       now,
+		UpdatedAt:       now,
+		Rollback:        operationRollback{State: "not_started"},
+	}
+	if err := s.persist(journal); err != nil {
+		_ = s.releaseMigrationLock()
+		return operationJournal{}, false, err
+	}
+	s.operations[id] = journal
+	s.currentMigrationID = id
+	return journal, true, nil
+}
+
 func (s *operationStore) get(id string) (operationJournal, error) {
 	if !validOperationID(id) {
 		return operationJournal{}, errOperationNotFound
@@ -799,7 +849,7 @@ func (s *operationStore) transition(id string, next operationState, stage, statu
 			if err := s.releaseDataMigrationLock(); err != nil {
 				return operationJournal{}, err
 			}
-		case operationTypeMigrationExport:
+		case operationTypeMigrationExport, operationTypeMigrationImport:
 			s.currentMigrationID = ""
 			if err := s.releaseMigrationLock(); err != nil {
 				return operationJournal{}, err
