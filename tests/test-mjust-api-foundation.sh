@@ -269,6 +269,7 @@ grep -Fq 'migration-api.sh' "${migration_recovery}" || fail 'mJust Recovery fron
 grep -Fq 'jv_migration_recovery_discovery' "${migration_recovery}" || fail 'mJust Recovery does not discover retained recovery state through the Management API'
 grep -Fq 'jv_migration_recovery_plan' "${migration_recovery}" || fail 'mJust Recovery does not plan through the Management API'
 grep -Fq 'jv_migration_recovery_apply' "${migration_recovery}" || fail 'mJust Recovery does not apply through the Management API'
+grep -Fq 'migration_import && ${current_state} == needs_attention' "${migration_recovery}" || fail 'mJust Recovery cannot take ownership of a needs-attention Import'
 grep -Fq 'jv_migration_monitor_operation' "${migration_recovery}" || fail 'mJust Recovery does not monitor the persistent Agent operation'
 grep -Fq 'FINALIZE ROLLBACK' "${migration_recovery}" || fail 'mJust Recovery destructive confirmation phrase changed'
 for forbidden in 'systemctl ' 'migration-recover-backend' 'restore-runtime-validate' 'rm -rf' 'jv_migration_runtime_paths'; do if grep -Fq "${forbidden}" "${migration_recovery}"; then fail "mJust Recovery frontend still performs direct backend work: ${forbidden}"; fi; done
@@ -285,6 +286,8 @@ grep -Fq 'authoritativeAdminMigrationImportPlan' "${admin_migration_import_apply
 grep -Fq 'adminMigrationImportTransactionHelper' "${migration_import_worker}" || fail 'server migration Import worker does not use the authoritative transaction backend'
 grep -Fq 'admin-migration-import-plan-json plan' "${migration_import_transaction_backend}" || fail 'server migration Import transaction does not revalidate the reviewed plan'
 grep -Fq 'JV_MIGRATION_API_MODE=1' "${migration_import_transaction_backend}" || fail 'server migration Import transaction does not invoke the preserved backend in Agent mode'
+grep -Fq 'JV_MIGRATION_API_MINECRAFT_UID' "${migration_import_transaction_backend}" || fail 'server migration Import transaction does not preserve the reviewed Minecraft UID'
+grep -Fq 'JV_MIGRATION_API_MINECRAFT_GID' "${migration_import_transaction_backend}" || fail 'server migration Import transaction does not preserve the reviewed Minecraft GID'
 grep -Fq 'migration-import-backend' "${migration_import_transaction_backend}" || fail 'server migration Import transaction lost the preserved authoritative backend'
 grep -Fq 'jv_migration_api_result' "${repo_root}/mjust/libexec/migration-import-common.sh" || fail 'server migration Import backend does not report rollback safety to the Agent'
 bash -n "${migration_import_backend}" "${migration_import_plan_backend}" "${migration_import_transaction_backend}" || fail 'server migration Import shell source failed bash syntax validation'

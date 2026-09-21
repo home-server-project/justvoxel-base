@@ -32,7 +32,9 @@ func (s *server) adminMigrationRecoveryApply(w http.ResponseWriter, r *http.Requ
     if err != nil { writeMigrationRecoveryApplyFailure(w, http.StatusInternalServerError, "operation_status_failed", "current server migration operation could not be read"); return }
     if current != nil {
         if current.OperationType == operationTypeMigrationRecovery && current.PlanFingerprint == request.PlanFingerprint { writeJSON(w, http.StatusOK, adminMigrationRecoveryApplyResponse{OK:true, Created:false, Operation:current}); return }
-        writeMigrationRecoveryApplyFailure(w, http.StatusConflict, "migration_busy", "another server migration operation is already active"); return
+        if current.OperationType != operationTypeMigrationImport || current.State != operationNeedsAttention {
+            writeMigrationRecoveryApplyFailure(w, http.StatusConflict, "migration_busy", "another server migration operation is already active"); return
+        }
     }
     helper, fingerprint, planErr := authoritativeMigrationRecoveryPlan(r.Context(), request.Transaction)
     if planErr != nil { writeMigrationRecoveryApplyFailure(w, http.StatusServiceUnavailable, "preflight_unavailable", planErr.Error()); return }

@@ -76,3 +76,27 @@ func TestOperationStoreRestartMarksInterruptedMigrationImportNeedsAttention(t *t
 		t.Fatalf("interrupted import status is not recovery-oriented: %q", current.Status)
 	}
 }
+
+
+func TestOperationStoreRecoveryTakesOwnershipOfNeedsAttentionImport(t *testing.T) {
+	store := openTestOperationStore(t)
+	imp, _, err := store.beginMigrationImport(testMigrationImportFingerprint)
+	if err != nil { t.Fatal(err) }
+	if _, err := store.transition(imp.OperationID, operationValidating, "import_preflight", "Checking Import."); err != nil { t.Fatal(err) }
+	if _, err := store.transition(imp.OperationID, operationNeedsAttention, "import_attention", "Recovery required."); err != nil { t.Fatal(err) }
+
+	recoveryFingerprint := "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+	recovery, created, err := store.beginMigrationRecovery(recoveryFingerprint)
+	if err != nil || !created { t.Fatalf("begin recovery: created=%t err=%v", created, err) }
+
+	previous, err := store.get(imp.OperationID)
+	if err != nil { t.Fatal(err) }
+	if previous.State != operationRolledBack || previous.Stage != "recovery_handoff" || previous.Rollback.Result != "recovery_handoff" {
+		t.Fatalf("Import attention was not transferred to Recovery: %#v", previous)
+	}
+	current, err := store.currentMigration()
+	if err != nil { t.Fatal(err) }
+	if current == nil || current.OperationID != recovery.OperationID || current.OperationType != operationTypeMigrationRecovery {
+		t.Fatalf("current migration = %#v, want Recovery %s", current, recovery.OperationID)
+	}
+}

@@ -13,8 +13,14 @@ if [[ -n ${current_id} ]]; then
         jv_migration_monitor_operation "${current_id}" migration_recovery "Server migration Recovery"
         exit $?
     fi
-    echo "ERROR: another server migration operation is already active: ${current_type}" >&2
-    exit 1
+    current_state="$(jq -r '.operation.state // empty' <<< "${current}")"
+    if [[ ${current_type} == migration_import && ${current_state} == needs_attention ]]; then
+        echo "The previous server migration Import needs attention."
+        echo "Recovery can take ownership of its retained rollback state after you review and confirm the transaction."
+    else
+        echo "ERROR: another server migration operation is already active: ${current_type}" >&2
+        exit 1
+    fi
 fi
 
 transaction=""

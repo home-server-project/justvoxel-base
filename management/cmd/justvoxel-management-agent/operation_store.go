@@ -730,19 +730,62 @@ func (s *operationStore) beginMigrationRecovery(planFingerprint string) (operati
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	var handedOff *operationJournal
 	if s.currentMigrationID != "" {
 		current := s.operations[s.currentMigrationID]
 		if current.PlanFingerprint == planFingerprint && current.OperationType == operationTypeMigrationRecovery {
 			return current, false, nil
 		}
-		return operationJournal{}, false, errMigrationOperationBusy
+		if current.OperationType != operationTypeMigrationImport || current.State != operationNeedsAttention {
+			return operationJournal{}, false, errMigrationOperationBusy
+		}
+		original := current
+		handedOff = &original
+		now := s.now().UTC().Format(time.RFC3339Nano)
+		current.State = operationRolledBack
+		current.Stage = "recovery_handoff"
+		current.Status = "Import recovery responsibility transferred to a dedicated server migration Recovery operation."
+		current.UpdatedAt = now
+		current.FinishedAt = now
+		current.Rollback.State = "delegated"
+		current.Rollback.Result = "recovery_handoff"
+		if err := s.persist(current); err != nil {
+			return operationJournal{}, false, err
+		}
+		s.operations[current.OperationID] = current
+		s.currentMigrationID = ""
 	}
-	if err := s.acquireMigrationLock(); err != nil { return operationJournal{}, false, err }
+	if err := s.acquireMigrationLock(); err != nil {
+		if handedOff != nil {
+			_ = s.persist(*handedOff)
+			s.operations[handedOff.OperationID] = *handedOff
+			s.currentMigrationID = handedOff.OperationID
+		}
+		return operationJournal{}, false, err
+	}
 	id, err := newOperationID()
-	if err != nil { _ = s.releaseMigrationLock(); return operationJournal{}, false, err }
+	if err != nil {
+		if handedOff != nil {
+			_ = s.persist(*handedOff)
+			s.operations[handedOff.OperationID] = *handedOff
+			s.currentMigrationID = handedOff.OperationID
+		} else {
+			_ = s.releaseMigrationLock()
+		}
+		return operationJournal{}, false, err
+	}
 	now := s.now().UTC().Format(time.RFC3339Nano)
 	journal := operationJournal{SchemaVersion:operationSchemaVersion, OperationID:id, OperationType:operationTypeMigrationRecovery, PlanFingerprint:planFingerprint, State:operationQueued, Stage:"queued", Status:"Server migration recovery operation queued.", StartedAt:now, UpdatedAt:now, Rollback:operationRollback{State:"not_started"}}
-	if err := s.persist(journal); err != nil { _ = s.releaseMigrationLock(); return operationJournal{}, false, err }
+	if err := s.persist(journal); err != nil {
+		if handedOff != nil {
+			_ = s.persist(*handedOff)
+			s.operations[handedOff.OperationID] = *handedOff
+			s.currentMigrationID = handedOff.OperationID
+		} else {
+			_ = s.releaseMigrationLock()
+		}
+		return operationJournal{}, false, err
+	}
 	s.operations[id] = journal
 	s.currentMigrationID = id
 	return journal, true, nil

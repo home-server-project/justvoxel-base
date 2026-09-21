@@ -77,6 +77,9 @@ if [[ ${configured} == no ]]; then
     TIMEZONE="${TIMEZONE:-UTC}"
     MINECRAFT_IMAGE_TAG=stable
     if [[ ${JV_MIGRATION_API_MODE:-0} == 1 ]]; then
+        MINECRAFT_UID="${JV_MIGRATION_API_MINECRAFT_UID:-${MINECRAFT_UID}}"
+        MINECRAFT_GID="${JV_MIGRATION_API_MINECRAFT_GID:-${MINECRAFT_GID}}"
+        validate_nonroot_id "${MINECRAFT_UID}" && validate_nonroot_id "${MINECRAFT_GID}" || { echo 'ERROR: reviewed Minecraft runtime identity is invalid.' >&2; exit 1; }
         JAVA_MEMORY="${JV_MIGRATION_API_JAVA_MEMORY:-${JAVA_MEMORY}}"
         CONTAINER_MEMORY="${JV_MIGRATION_API_CONTAINER_MEMORY:-${CONTAINER_MEMORY}}"
         TIMEZONE="${JV_MIGRATION_API_TIMEZONE:-${TIMEZONE}}"
