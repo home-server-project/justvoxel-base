@@ -23,6 +23,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const attentionNote = document.getElementById("setup-operation-attention");
   const dashboardLink = document.getElementById("setup-dashboard-link");
   const reviewLink = document.getElementById("setup-review-link");
+  const diagnosticLogLink = document.getElementById("setup-diagnostic-log-link");
 
   let failures = 0;
   let finished = false;
@@ -76,13 +77,11 @@ document.addEventListener("DOMContentLoaded", () => {
     if (attentionNote) attentionNote.hidden = !needsAttention;
     if (dashboardLink) dashboardLink.hidden = !succeeded;
     if (reviewLink) reviewLink.hidden = !rolledBack;
+    if (diagnosticLogLink) diagnosticLogLink.hidden = !terminalState(operation.state);
 
     if (terminalState(operation.state)) {
       finished = true;
       panel.classList.add("is-finished");
-      if (succeeded) {
-        window.setTimeout(() => window.location.assign("/"), 2500);
-      }
     }
   };
 

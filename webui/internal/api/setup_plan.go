@@ -53,10 +53,11 @@ type AdminSetupPlanBackupsRequest struct {
 }
 
 type AdminSetupPlanRequest struct {
-	Server    AdminSetupPlanServerRequest    `json:"server"`
-	Minecraft AdminSetupPlanMinecraftRequest `json:"minecraft"`
-	Storage   AdminSetupPlanStorageRequest   `json:"storage"`
-	Backups   AdminSetupPlanBackupsRequest   `json:"backups"`
+	DiagnosticSessionID string                         `json:"diagnostic_session_id,omitempty"`
+	Server              AdminSetupPlanServerRequest    `json:"server"`
+	Minecraft           AdminSetupPlanMinecraftRequest `json:"minecraft"`
+	Storage             AdminSetupPlanStorageRequest   `json:"storage"`
+	Backups             AdminSetupPlanBackupsRequest   `json:"backups"`
 }
 
 type AdminSetupPlanWarning struct {

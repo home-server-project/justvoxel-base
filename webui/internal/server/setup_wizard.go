@@ -48,8 +48,9 @@ type setupMinecraftDraft struct {
 }
 
 type setupDraft struct {
-	Started     bool
-	CurrentStep int
+	Started             bool
+	CurrentStep         int
+	DiagnosticSessionID string
 	Server      setupServerDraft
 	Minecraft   setupMinecraftDraft
 	Storage     setupStorageDraft
@@ -149,6 +150,7 @@ func (a *App) setupWizardStart(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	diagnosticID := a.beginSetupDiagnosticBestEffort(r.Context(), client, session)
 	defaults, err := client.AdminSetupDefaults(r.Context(), session)
 	if err != nil {
 		a.handleAdminDiscoveryError(w, r, err)
@@ -161,11 +163,16 @@ func (a *App) setupWizardStart(w http.ResponseWriter, r *http.Request) {
 	}
 	firstRunSetupReviews.delete(a, session)
 	firstRunSetupDrafts.start(a, session, normalizedSetupDefaults(defaults), storage)
+	if draft, exists := firstRunSetupDrafts.get(a, session); exists {
+		draft.DiagnosticSessionID = diagnosticID
+		firstRunSetupDrafts.save(a, session, draft)
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "initial WebUI setup defaults loaded", draft)
+	}
 	http.Redirect(w, r, "/setup", http.StatusSeeOther)
 }
 
 func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
-	session, _, identity, ok := a.setupWizardRequest(w, r, true)
+	session, client, identity, ok := a.setupWizardRequest(w, r, true)
 	if !ok {
 		return
 	}
@@ -184,6 +191,7 @@ func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
 	if err := validateSetupServer(draft.Server); err != nil {
 		draft.Server.Complete = false
 		firstRunSetupDrafts.save(a, session, draft)
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "server settings rejected", draft)
 		w.WriteHeader(http.StatusBadRequest)
 		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
 		return
@@ -192,11 +200,12 @@ func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
 	draft.CurrentStep = 2
 	firstRunSetupReviews.delete(a, session)
 	firstRunSetupDrafts.save(a, session, draft)
+	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "server settings saved", draft)
 	http.Redirect(w, r, "/setup", http.StatusSeeOther)
 }
 
 func (a *App) setupWizardSaveMinecraft(w http.ResponseWriter, r *http.Request) {
-	session, _, identity, ok := a.setupWizardRequest(w, r, true)
+	session, client, identity, ok := a.setupWizardRequest(w, r, true)
 	if !ok {
 		return
 	}
@@ -221,12 +230,14 @@ func (a *App) setupWizardSaveMinecraft(w http.ResponseWriter, r *http.Request) {
 		draft.CurrentStep = 1
 		firstRunSetupReviews.delete(a, session)
 		firstRunSetupDrafts.save(a, session, draft)
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "Minecraft settings changed; user returned to Server", draft)
 		http.Redirect(w, r, "/setup", http.StatusSeeOther)
 		return
 	}
 	if err := validateSetupMinecraft(draft.Minecraft, draft.Defaults); err != nil {
 		draft.Minecraft.Complete = false
 		firstRunSetupDrafts.save(a, session, draft)
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "Minecraft settings rejected", draft)
 		w.WriteHeader(http.StatusBadRequest)
 		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
 		return
@@ -241,11 +252,12 @@ func (a *App) setupWizardSaveMinecraft(w http.ResponseWriter, r *http.Request) {
 	draft.CurrentStep = 3
 	firstRunSetupReviews.delete(a, session)
 	firstRunSetupDrafts.save(a, session, draft)
+	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "Minecraft settings saved", draft)
 	http.Redirect(w, r, "/setup", http.StatusSeeOther)
 }
 
 func (a *App) setupWizardNavigate(w http.ResponseWriter, r *http.Request) {
-	session, _, _, ok := a.setupWizardRequest(w, r, true)
+	session, client, _, ok := a.setupWizardRequest(w, r, true)
 	if !ok {
 		return
 	}
@@ -259,13 +271,19 @@ func (a *App) setupWizardNavigate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	firstRunSetupReviews.delete(a, session)
+	if draft, exists := firstRunSetupDrafts.get(a, session); exists {
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "wizard navigation changed", draft)
+	}
 	http.Redirect(w, r, "/setup", http.StatusSeeOther)
 }
 
 func (a *App) setupWizardCancel(w http.ResponseWriter, r *http.Request) {
-	session, _, _, ok := a.setupWizardRequest(w, r, true)
+	session, client, _, ok := a.setupWizardRequest(w, r, true)
 	if !ok {
 		return
+	}
+	if draft, exists := firstRunSetupDrafts.get(a, session); exists {
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "WebUI setup wizard cancelled", draft)
 	}
 	firstRunSetupReviews.delete(a, session)
 	firstRunSetupDrafts.delete(a, session)
