@@ -161,7 +161,6 @@ func TestPersistentOperationClientMapsAuthorizationErrors(t *testing.T) {
 	}
 }
 
-
 func TestAdminCurrentMigrationOperationSupportsNoCurrentOperation(t *testing.T) {
 	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path != "/v1/admin/migration/current-operation" {
