@@ -24,7 +24,14 @@ var runAdminMigrationImportPlanHelper = func(ctx context.Context, action string,
 }
 
 type adminMigrationImportSourceRequest struct {
+    Kind string `json:"kind,omitempty"`
     Path string `json:"path"`
+    Device string `json:"device,omitempty"`
+    Removable bool `json:"removable,omitempty"`
+    Source string `json:"source,omitempty"`
+    Username string `json:"username,omitempty"`
+    Domain string `json:"domain,omitempty"`
+    SMBPassword string `json:"smb_password,omitempty"`
     SelectedRoot string `json:"selected_root,omitempty"`
     SourceVersion string `json:"source_version,omitempty"`
 }
@@ -62,6 +69,10 @@ type adminMigrationImportDiscoveryResponse struct {
     Configured bool `json:"configured"`
     SourceKinds []string `json:"source_kinds"`
     Defaults adminMigrationImportDefaults `json:"defaults"`
+}
+type adminMigrationImportSourceEntry struct {
+    Path string `json:"path"`
+    Kind string `json:"kind"`
 }
 type adminMigrationImportCandidate struct {
     Root string `json:"root"`
@@ -142,6 +153,7 @@ type adminMigrationImportHelperResponse struct {
     Requirements *adminMigrationImportRequirements `json:"requirements,omitempty"`
     Context *adminMigrationImportContext `json:"context,omitempty"`
     Candidates []adminMigrationImportCandidate `json:"candidates"`
+    SourceEntries []adminMigrationImportSourceEntry `json:"source_entries"`
 }
 type adminMigrationImportPlanResponse struct {
     OK bool `json:"ok"`
@@ -153,6 +165,7 @@ type adminMigrationImportPlanResponse struct {
     Warnings []adminMigrationExportWarning `json:"warnings"`
     Requirements *adminMigrationImportRequirements `json:"requirements,omitempty"`
     Candidates []adminMigrationImportCandidate `json:"candidates"`
+    SourceEntries []adminMigrationImportSourceEntry `json:"source_entries"`
     Context *adminMigrationImportContext `json:"-"`
 }
 type adminMigrationImportPlanningError struct { status int; message string }
@@ -188,8 +201,8 @@ func authoritativeAdminMigrationImportPlan(parent context.Context, request admin
     if err != nil { return adminMigrationImportPlanResponse{}, &adminMigrationImportPlanningError{http.StatusServiceUnavailable,"server migration Import planning is unavailable"} }
     var helper adminMigrationImportHelperResponse
     if err := decodeAdminMigrationImportJSON(output, &helper); err != nil || helper.SchemaVersion != "v1" { return adminMigrationImportPlanResponse{}, &adminMigrationImportPlanningError{http.StatusInternalServerError,"server migration Import planner returned invalid data"} }
-    if helper.Warnings == nil { helper.Warnings=[]adminMigrationExportWarning{} }; if helper.Candidates == nil { helper.Candidates=[]adminMigrationImportCandidate{} }
-    public := adminMigrationImportPlanResponse{OK:helper.OK,SchemaVersion:helper.SchemaVersion,Code:helper.Code,Error:boundedMigrationImportError(helper.Error),Normalized:helper.Normalized,Warnings:helper.Warnings,Requirements:helper.Requirements,Candidates:helper.Candidates}
+    if helper.Warnings == nil { helper.Warnings=[]adminMigrationExportWarning{} }; if helper.Candidates == nil { helper.Candidates=[]adminMigrationImportCandidate{} }; if helper.SourceEntries == nil { helper.SourceEntries=[]adminMigrationImportSourceEntry{} }
+    public := adminMigrationImportPlanResponse{OK:helper.OK,SchemaVersion:helper.SchemaVersion,Code:helper.Code,Error:boundedMigrationImportError(helper.Error),Normalized:helper.Normalized,Warnings:helper.Warnings,Requirements:helper.Requirements,Candidates:helper.Candidates,SourceEntries:helper.SourceEntries}
     if !helper.OK { if public.Error=="" { return adminMigrationImportPlanResponse{}, &adminMigrationImportPlanningError{http.StatusInternalServerError,"server migration Import rejection contract changed"} }; return public,nil }
     if err := validateSuccessfulAdminMigrationImportPlan(request,&helper); err != nil { return adminMigrationImportPlanResponse{}, &adminMigrationImportPlanningError{http.StatusInternalServerError,"server migration Import planning contract changed"} }
     fingerprint, err := adminMigrationImportPlanFingerprint(helper.SchemaVersion,helper.Normalized,helper.Requirements,helper.Context); if err != nil { return adminMigrationImportPlanResponse{}, &adminMigrationImportPlanningError{http.StatusInternalServerError,"server migration Import plan identity could not be created"} }
@@ -215,7 +228,23 @@ func adminMigrationImportPlanFingerprint(schema string, normalized *adminMigrati
     if err!=nil{return "",err}; sum:=sha256.Sum256(payload); return "sha256:"+hex.EncodeToString(sum[:]),nil
 }
 func validAdminMigrationImportRequest(request adminMigrationImportRequest) bool {
-    if request.Source.Path=="" || !strings.HasPrefix(request.Source.Path,"/") || strings.ContainsAny(request.Source.Path+request.Source.SelectedRoot+request.Source.SourceVersion,"\r\n") { return false }
+    source := request.Source
+    if source.Kind=="" { source.Kind="local" }
+    if strings.ContainsAny(source.Kind+source.Path+source.Device+source.Source+source.Username+source.Domain+source.SMBPassword+source.SelectedRoot+source.SourceVersion,"\r\n") || len(source.SMBPassword)>4096 { return false }
+    switch source.Kind {
+    case "local":
+        if source.Path=="" || !strings.HasPrefix(source.Path,"/") || source.Device!="" || source.Source!="" || source.Username!="" || source.Domain!="" || source.SMBPassword!="" { return false }
+    case "backup":
+        if strings.HasPrefix(source.Path,"/") || source.Device!="" || source.Source!="" || source.Username!="" || source.Domain!="" || source.SMBPassword!="" { return false }
+    case "device":
+        if source.Device=="" || !strings.HasPrefix(source.Device,"/dev/") || strings.HasPrefix(source.Path,"/") || source.Source!="" || source.Username!="" || source.Domain!="" || source.SMBPassword!="" { return false }
+    case "nfs":
+        if source.Source=="" || !strings.Contains(source.Source,":") || strings.HasPrefix(source.Path,"/") || source.Device!="" || source.Username!="" || source.Domain!="" || source.SMBPassword!="" { return false }
+    case "smb":
+        if source.Source=="" || !strings.HasPrefix(source.Source,"//") || source.Username=="" || strings.HasPrefix(source.Path,"/") || source.Device!="" { return false }
+    default:
+        return false
+    }
     if request.Destination.JavaPort<0 || request.Destination.JavaPort>65535 || request.Destination.BedrockPort<0 || request.Destination.BedrockPort>65535 || request.Destination.BackupKeep<1 { return false }
     if strings.ContainsAny(request.Destination.JavaMemory+request.Destination.ContainerMemory+request.Destination.Timezone+request.Destination.BackupDailyTime+request.Destination.Storage.Path+request.Destination.Storage.Device+request.Destination.Storage.MountPoint+request.Destination.Backups.Path+request.Destination.Backups.Device+request.Destination.Backups.MountPoint+request.Destination.Backups.Source+request.Destination.Backups.Username+request.Destination.Backups.Domain,"\r\n") { return false }
     return true
