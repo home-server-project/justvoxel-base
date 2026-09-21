@@ -37,6 +37,8 @@ type adminMigrationImportDestinationRequest struct {
     BackupKeep int `json:"backup_keep"`
     BackupDailyTime string `json:"backup_daily_time,omitempty"`
     BackupAutomatic bool `json:"backup_automatic"`
+    Storage adminSetupPlanStorageRequest `json:"storage"`
+    Backups adminSetupPlanBackupsRequest `json:"backups"`
 }
 type adminMigrationImportRequest struct {
     Source adminMigrationImportSourceRequest `json:"source"`
@@ -103,6 +105,8 @@ type adminMigrationImportDestinationNormalized struct {
     BackupKeep int `json:"backup_keep"`
     BackupSchedule string `json:"backup_schedule"`
     BackupAutomatic bool `json:"backup_automatic"`
+    Storage *adminSetupPlanStorage `json:"storage,omitempty"`
+    Backups *adminSetupPlanBackups `json:"backups,omitempty"`
 }
 type adminMigrationImportNormalized struct {
     Source adminMigrationImportSourceNormalized `json:"source"`
@@ -121,6 +125,7 @@ type adminMigrationImportRequirements struct {
     SourceRevalidationOnApply bool `json:"source_revalidation_on_apply"`
     RuntimeValidationRequired bool `json:"runtime_validation_required"`
     RollbackRequired bool `json:"rollback_required"`
+    BackupSMBPasswordRequired bool `json:"backup_smb_password_required"`
 }
 type adminMigrationImportContext struct {
     SourceIdentity string `json:"source_identity"`
@@ -198,6 +203,7 @@ func validateSuccessfulAdminMigrationImportPlan(request adminMigrationImportRequ
     if n.Source.MinecraftVersion=="" || n.Source.OnlineMode!="online" || n.Source.SourceClass=="" || n.Source.CandidateType=="" || n.Source.MaxPlayers<=0 || n.Source.ExpandedBytes==0 { return errors.New("Import source plan incomplete") }
     if n.Destination.Mode!="replace" && n.Destination.Mode!="fresh" { return errors.New("invalid Import destination mode") }
     if !strings.HasPrefix(n.Destination.DataPath,"/") || !strings.HasPrefix(n.Destination.BackupPath,"/") || n.Destination.JavaPort<1 || n.Destination.BedrockPort<1 || n.Destination.MinecraftUID==0 || n.Destination.MinecraftGID==0 { return errors.New("Import destination plan incomplete") }
+    if n.Destination.Mode=="fresh" && (n.Destination.Storage==nil || n.Destination.Backups==nil) { return errors.New("fresh Import storage plan incomplete") }
     if !req.ImportConfirmationRequired || !req.SourceRevalidationOnApply || !req.RuntimeValidationRequired || !req.RollbackRequired || req.Players==nil { return errors.New("Import safety requirements missing") }
     if req.PlayersConfirmationRequired && req.Online==0 { return errors.New("invalid Import player requirement") }
     if ctx.SourceIdentity=="" || ctx.DestinationIdentity=="" { return errors.New("Import fingerprint context incomplete") }
@@ -211,7 +217,7 @@ func adminMigrationImportPlanFingerprint(schema string, normalized *adminMigrati
 func validAdminMigrationImportRequest(request adminMigrationImportRequest) bool {
     if request.Source.Path=="" || !strings.HasPrefix(request.Source.Path,"/") || strings.ContainsAny(request.Source.Path+request.Source.SelectedRoot+request.Source.SourceVersion,"\r\n") { return false }
     if request.Destination.JavaPort<0 || request.Destination.JavaPort>65535 || request.Destination.BedrockPort<0 || request.Destination.BedrockPort>65535 || request.Destination.BackupKeep<1 { return false }
-    if strings.ContainsAny(request.Destination.JavaMemory+request.Destination.ContainerMemory+request.Destination.Timezone+request.Destination.BackupDailyTime,"\r\n") { return false }
+    if strings.ContainsAny(request.Destination.JavaMemory+request.Destination.ContainerMemory+request.Destination.Timezone+request.Destination.BackupDailyTime+request.Destination.Storage.Path+request.Destination.Storage.Device+request.Destination.Storage.MountPoint+request.Destination.Backups.Path+request.Destination.Backups.Device+request.Destination.Backups.MountPoint+request.Destination.Backups.Source+request.Destination.Backups.Username+request.Destination.Backups.Domain,"\r\n") { return false }
     return true
 }
 func decodeAdminMigrationImportRequest(w http.ResponseWriter,r *http.Request,target *adminMigrationImportRequest) bool {
