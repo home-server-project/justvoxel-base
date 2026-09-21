@@ -11,6 +11,7 @@
     <div class="details"><strong>Available destination types</strong><br><span class="muted">{{if .ExportTargets}}{{.ExportTargets}}{{else}}None reported{{end}}</span></div>
     <div class="details"><strong>Suggested bundle</strong><br><span class="muted">{{.Export.SuggestedFilename}}</span></div>
     {{if .Export.ConfiguredBackupAvailable}}<div class="notice">Configured backup storage is available as an Export destination.</div>{{end}}
+    <div class="action-row"><a class="button-link" href="/settings/server-migration/export">Open Server Export</a></div>
   </section>
 
   <section class="panel">
@@ -32,6 +33,6 @@
     {{end}}
   </section>
 
-  <div class="notice">Guided Export, Import, and Recovery forms are enabled in the next WebUI migration slices. If a migration operation is already active, this page reconnects directly to its persistent progress record.</div>
+  <div class="notice">Server Export is available now. Guided Server Import and Recovery forms are added in the next WebUI migration slices. If a migration operation is already active, this page reconnects directly to its persistent progress record.</div>
   <p class="foot">WebUI {{.Version}} · Management API {{.ManagementAPI}}</p>
 </main></body></html>{{end}}

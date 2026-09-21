@@ -46,6 +46,7 @@ type serverMigrationProgressPageData struct {
 func (a *App) registerAdminServerMigrationPages(mux *http.ServeMux) {
 	mux.HandleFunc("GET /settings/server-migration", a.serverMigrationPage)
 	mux.HandleFunc("GET /settings/server-migration/progress/{id}", a.serverMigrationProgressPage)
+	a.registerAdminServerExportPages(mux)
 }
 
 func (a *App) serverMigrationRequest(w http.ResponseWriter, r *http.Request) (string, adminServerMigrationAPI, api.SessionInfo, bool) {
@@ -144,7 +145,7 @@ func (a *App) serverMigrationProgressPage(w http.ResponseWriter, r *http.Request
 		Operation:     *response.Operation,
 		OperationName: serverMigrationOperationName(response.Operation.OperationType),
 		StateLabel:    serverMigrationStateLabel(response.Operation.State),
-		StageLabel:    friendlyMigrationToken(response.Operation.Stage),
+		StageLabel:    serverMigrationStageLabel(response.Operation.Stage),
 	})
 }
 
