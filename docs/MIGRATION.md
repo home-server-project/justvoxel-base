@@ -2,9 +2,9 @@
 
 ## Shared Management API status
 
-Server **Export** now has an authoritative Management API/backend foundation. The Agent owns Export discovery, reviewed planning and fingerprints, player interruption requirements, persistent operation tracking, target revalidation, temporary local/NFS/SMB/device transport handling, the cold portable-bundle transaction, SHA-256 verification, Minecraft restart validation, and conservative restart/interruption recovery.
+Server migration **Export, Import, and Recovery** now share the authoritative Management API/backend. The Agent owns reviewed planning and fingerprints, the exclusive server-migration operation family, persistent operation tracking, player interruption requirements, source and destination revalidation, temporary local/configured-backup/device/NFS/SMB transport handling, transactional execution, verification, rollback state, and conservative restart/interruption recovery.
 
-During this 5A.1 stage, `mjust export` remains behavior-compatible through the extracted shared Export backend; it is **not yet the thin API frontend**. Import and migration recovery also remain on their existing direct mjust workflows. Step 5A.2 will move Import/Recovery behind the same migration operation family and then convert all three terminal commands to thin Management API frontends.
+Step 5A.2 is complete. `mjust export`, `mjust import`, and `mjust migration-recover` are thin terminal frontends over that shared Management API. Import preserves the legacy source choices and fresh-destination storage review without returning mount, storage, rollback, or Minecraft lifecycle authority to the terminal frontend. WebUI Import/Export/Recovery parity remains a separate Step 5B.
 
 JustVoxel migration moves the **complete persistent Minecraft server state** to another JustVoxel installation. It is separate from normal JustVoxel Backup/Restore.
 
@@ -384,6 +384,16 @@ Original server restored and validated.
 If rollback itself cannot be validated, JustVoxel reports a **CRITICAL** state and retains all recovery evidence under the `.justvoxel-import-*` transaction directory. Do not delete that recovery directory until the appliance is recovered.
 
 For a fresh import failure, generated Minecraft runtime/firewall state is removed and the appliance returns to its previous unconfigured runtime state. Storage that the administrator explicitly provisioned is not reformatted or destroyed merely because the Minecraft import failed.
+
+## Guided migration recovery
+
+Use `mjust migration-recover` when an Import leaves retained rollback/recovery evidence or an interrupted persistent migration operation requires administrator attention.
+
+Recovery is owned by the Management Agent and uses the same exclusive server-migration operation family as Export and Import. The Agent discovers the retained Import recovery state, validates the expected configured or fresh-unconfigured destination state, requires the reviewed recovery confirmation, and removes retained transaction evidence only after the recovery state is safely finalized.
+
+Fresh Import rollback state is supported explicitly. A successful fresh rollback can leave a `rolled-back-fresh` transaction while the appliance is intentionally unconfigured; Recovery can validate and finalize that state without requiring a normal configured Minecraft destination.
+
+If the Management Agent or appliance restarts during an active migration operation, the persistent operation journal is preserved conservatively as requiring attention rather than assuming success or silently restarting destructive work.
 
 ## After migration
 

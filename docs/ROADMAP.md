@@ -63,9 +63,10 @@ Rebuild mJust around the same authoritative management layer already used by the
 - do not delete helpers merely because they currently live under `mjust/libexec`; helpers used by the Management Agent remain shared implementation until they are safely moved or rewritten
 - progressively move shared backend helpers out of the misleading mJust namespace after direct CLI callers have been removed
 
+The server-migration terminal rebuild is complete: Export, Import, and Recovery share the persistent Management API operation family, and their mJust commands are thin frontends over the same authoritative backend. Migration WebUI parity remains a separate follow-up.
+
 Management API gaps that still need shared implementations before the corresponding direct CLI paths can disappear include:
 
-- import and migration recovery; Export now has the shared persistent Management API/backend foundation, while terminal frontend conversion remains part of the same migration rebuild
 - Minecraft update policy and execution
 - bootc status and operating-system updates
 - Start Over / reset workflows
