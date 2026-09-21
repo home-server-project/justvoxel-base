@@ -1,3 +1,82 @@
 #!/usr/bin/bash
 set -euo pipefail
-exec /usr/libexec/justvoxel/mjust/migration-recover-backend "$@"
+source /usr/libexec/justvoxel/mjust/ui.sh
+source /usr/libexec/justvoxel/mjust/migration-api.sh
+(( EUID == 0 )) || { echo "ERROR: mjust migration-recover must run through sudo/root." >&2; exit 1; }
+(( $# <= 1 )) || { echo "Usage: migration-recover [TRANSACTION_DIR]" >&2; exit 2; }
+
+current="$(jv_migration_current_operation)" || exit 1
+current_id="$(jq -r '.operation.operation_id // empty' <<< "${current}")"
+current_type="$(jq -r '.operation.operation_type // empty' <<< "${current}")"
+if [[ -n ${current_id} ]]; then
+    if [[ ${current_type} == migration_recovery ]]; then
+        jv_migration_monitor_operation "${current_id}" migration_recovery "Server migration Recovery"
+        exit $?
+    fi
+    echo "ERROR: another server migration operation is already active: ${current_type}" >&2
+    exit 1
+fi
+
+transaction=""
+if (( $# == 1 )); then
+    transaction="$(realpath -m -- "$1")"
+else
+    discovery="$(jv_migration_recovery_discovery)" || exit 1
+    count="$(jq -r '.transactions | length' <<< "${discovery}")"
+    case "${count}" in
+        0)
+            echo "No retained migration recovery transaction was found."
+            exit 0
+            ;;
+        1)
+            transaction="$(jq -r '.transactions[0].transaction' <<< "${discovery}")"
+            ;;
+        *)
+            jui_has_tty || { echo "ERROR: multiple recovery transactions exist; rerun from an interactive terminal or provide the transaction path." >&2; exit 1; }
+            mapfile -t transactions < <(jq -r '.transactions[].transaction' <<< "${discovery}")
+            labels=()
+            for item in "${transactions[@]}"; do
+                labels+=("$(jq -r --arg p "${item}" '.transactions[] | select(.transaction==$p) | "\(.transaction)  [\(.phase), \(.mode)]"' <<< "${discovery}")")
+            done
+            labels+=("Back")
+            selected="$(jui_choose "Migration recovery transaction" "${labels[@]}")" || exit 0
+            [[ ${selected} == Back ]] && exit 0
+            for i in "${!transactions[@]}"; do
+                [[ ${selected} == "${labels[$i]}" ]] && { transaction="${transactions[$i]}"; break; }
+            done
+            ;;
+    esac
+fi
+
+request="$(jq -cn --arg transaction "${transaction}" '{transaction:$transaction}')"
+plan="$(jv_migration_recovery_plan "${request}")" || exit 1
+fingerprint="$(jq -r '.plan_fingerprint // empty' <<< "${plan}")"
+[[ -n ${fingerprint} ]] || { echo "ERROR: Recovery plan did not return a review fingerprint." >&2; exit 1; }
+
+echo
+echo "Migration Recovery"
+echo "------------------"
+echo "Transaction: $(jq -r '.normalized.transaction' <<< "${plan}")"
+echo "Phase:       $(jq -r '.normalized.phase' <<< "${plan}")"
+echo "Source type: $(jq -r '.normalized.source_type // "unknown"' <<< "${plan}")"
+echo "Mode:        $(jq -r '.normalized.mode' <<< "${plan}")"
+if [[ $(jq -r '.requirements.runtime_validation_required' <<< "${plan}") == true ]]; then
+    echo "Validation:  restored Minecraft runtime will be validated again before finalization"
+else
+    echo "Validation:  appliance must remain unconfigured and generated runtime state must stay absent"
+fi
+echo
+echo "Finalizing recovery permanently removes the retained failed-import/staging transaction."
+if ! jui_has_tty; then
+    echo "ERROR: recovery finalization confirmation requires a controlling terminal." >&2
+    exit 1
+fi
+printf "Type FINALIZE ROLLBACK to remove this recovery transaction: " >/dev/tty
+IFS= read -r confirmation </dev/tty
+[[ ${confirmation} == "FINALIZE ROLLBACK" ]] || { echo "Recovery finalization cancelled."; exit 0; }
+
+apply="$(jq -cn --arg fingerprint "${fingerprint}" --arg transaction "${transaction}" '{plan_fingerprint:$fingerprint,transaction:$transaction,finalize_confirmed:true}')"
+response="$(jv_migration_recovery_apply "${apply}")" || exit 1
+id="$(jq -r '.operation.operation_id // empty' <<< "${response}")"
+[[ -n ${id} ]] || { echo "ERROR: Management Agent did not return a Recovery operation." >&2; exit 1; }
+jv_migration_monitor_operation "${id}" migration_recovery "Server migration Recovery"

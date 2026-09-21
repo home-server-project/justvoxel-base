@@ -74,7 +74,9 @@ grep -Fq 'GAME_MODE="${GAME_MODE:-survival}"' "${common}" || fail 'backward-comp
 grep -Fq 'WHITELIST_ENABLED="${WHITELIST_ENABLED:-yes}"' "${common}" || fail 'backward-compatible whitelist default missing'
 grep -Fq 'JUSTVOXEL_REGENERATE_RCON' "${common}" || fail 'RCON regeneration support missing'
 
-grep -Fq 'exec /usr/libexec/justvoxel/mjust/migration-recover-backend "$@"' "${recovery}" || fail 'migration recovery compatibility frontend does not delegate to shared backend'
+grep -Fq 'migration-api.sh' "${recovery}" || fail 'migration Recovery frontend does not use shared API helper'
+grep -Fq 'jv_migration_recovery_plan' "${recovery}" || fail 'migration Recovery frontend does not plan through the Agent'
+grep -Fq 'jv_migration_recovery_apply' "${recovery}" || fail 'migration Recovery frontend does not apply through the Agent'
 grep -Fq 'rolled-back-fresh' "${recovery_backend}" || fail 'fresh unconfigured rollback recovery is not supported'
 grep -Fq '/usr/libexec/justvoxel/mjust/restore-runtime-validate' "${recovery_backend}" || fail 'configured migration recovery must validate the restored Minecraft runtime'
 grep -Fq 'jv_migration_runtime_paths' "${recovery_backend}" || fail 'fresh migration recovery does not prove generated runtime files are absent'
