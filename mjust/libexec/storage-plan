@@ -1,51 +1,107 @@
 #!/usr/bin/bash
 set -euo pipefail
-source /usr/libexec/justvoxel/mjust/common.sh
-source /usr/libexec/justvoxel/mjust/storage-common.sh
-require_root
+
+source /usr/libexec/justvoxel/mjust/storage-api.sh
+
+if (( EUID != 0 )); then
+    echo 'ERROR: storage overview must run as root through mjust.' >&2
+    exit 1
+fi
+
+discovery="$(jv_storage_discovery)"
+status="$(jv_storage_status)"
+variant="$(jq -r '.system.variant // "Unknown"' <<<"${status}")"
+variant_key="${variant,,}"
+
+human_bytes() {
+    local bytes="${1:-0}"
+    if command -v numfmt >/dev/null 2>&1; then
+        numfmt --to=iec-i --suffix=B --format='%.1f' "${bytes}" 2>/dev/null || printf '%s B' "${bytes}"
+    else
+        printf '%s B' "${bytes}"
+    fi
+}
 
 echo 'JustVoxel storage plan'
 echo '----------------------'
-echo "Variant: $(storage_variant)"
+echo "Variant: ${variant}"
 echo
-storage_show_devices
+echo 'Detected block storage:'
+if [[ $(jq '.devices | length' <<<"${discovery}") -eq 0 ]]; then
+    echo '  No block devices reported by the Management Agent.'
+else
+    while IFS=$'\t' read -r path type size filesystem mountpoints model transport read_only system parent; do
+        [[ -n ${path} ]] || continue
+        flags=()
+        [[ ${system} == true ]] && flags+=('system')
+        [[ ${read_only} == true ]] && flags+=('read-only')
+        flag_text=''
+        if (( ${#flags[@]} > 0 )); then
+            flag_text=" [$(IFS=', '; echo "${flags[*]}")]"
+        fi
+        printf '  %s  %s  %s' "${path}" "${type:-unknown}" "$(human_bytes "${size:-0}")"
+        [[ -n ${filesystem} ]] && printf '  fs=%s' "${filesystem}"
+        [[ -n ${mountpoints} ]] && printf '  mounted=%s' "${mountpoints}"
+        [[ -n ${transport} ]] && printf '  transport=%s' "${transport}"
+        [[ -n ${model} ]] && printf '  model=%s' "${model}"
+        [[ -n ${parent} ]] && printf '  parent=%s' "${parent}"
+        printf '%s\n' "${flag_text}"
+    done < <(jq -r '
+        .devices[] |
+        [
+            .path,
+            .type,
+            (.size_bytes | tostring),
+            .filesystem,
+            (.mountpoints | join(",")),
+            (.model | gsub("[\\t\\r\\n]"; " ")),
+            .transport,
+            (.read_only | tostring),
+            (.system | tostring),
+            .parent
+        ] | @tsv
+    ' <<<"${discovery}")
+fi
+
 echo
 echo 'System disk(s) protected from whole-disk erase:'
-storage_system_disks | sed 's/^/  /'
+if [[ $(jq '.system_disks | length' <<<"${discovery}") -eq 0 ]]; then
+    echo '  None identified.'
+else
+    jq -r '.system_disks[] | "  " + .' <<<"${discovery}"
+fi
 echo
 
-if storage_is_vm; then
-    echo 'Recommended VM design:'
-    echo '  - primary virtual disk: JustVoxel OS + Minecraft data'
-    echo '  - second virtual disk: backups'
-    echo '  - NFS or SMB/CIFS: also supported as backup targets'
-    echo
-    secondary=0
-    while IFS= read -r disk; do
-        [[ -n ${disk} ]] || continue
-        if ! storage_disk_is_system "${disk}"; then
-            secondary=$((secondary + 1))
+case "${variant_key}" in
+    vm)
+        echo 'Recommended VM design:'
+        echo '  - primary virtual disk: JustVoxel OS + Minecraft data'
+        echo '  - second virtual disk: backups'
+        echo '  - NFS or SMB/CIFS: also supported as backup targets'
+        echo
+        secondary="$(jq '[.devices[] | select(.type == "disk" and .system == false)] | length' <<<"${discovery}")"
+        if (( secondary == 0 )); then
+            echo 'No secondary virtual disk is currently visible.'
+            echo 'Add one in the hypervisor, or use NFS/SMB, then rerun storage setup.'
+        else
+            echo "Secondary disk(s) visible: ${secondary}"
         fi
-    done < <(lsblk -dnpo NAME,TYPE | awk '$2 == "disk" {print $1}')
-    if (( secondary == 0 )); then
-        echo 'No secondary virtual disk is currently visible.'
-        echo 'Add one in the hypervisor, or use NFS/SMB, then rerun storage setup.'
-    else
-        echo "Secondary disk(s) visible: ${secondary}"
-    fi
-elif storage_is_hwe; then
-    echo 'HWE backup choices:'
-    echo '  - dedicated internal disk'
-    echo '  - external USB disk/stick (provisioned like any other dedicated disk)'
-    echo '  - existing filesystem/partition'
-    echo '  - new partition created only in already-unallocated space'
-    echo '  - NFS or SMB/CIFS network share'
-else
-    echo 'Backup choices:'
-    echo '  - existing filesystem/partition'
-    echo '  - NFS or SMB/CIFS network share'
-    echo '  - directory on the system filesystem'
-fi
+        ;;
+    hwe)
+        echo 'HWE backup choices:'
+        echo '  - dedicated internal disk'
+        echo '  - external USB disk/stick (provisioned like any other dedicated disk)'
+        echo '  - existing filesystem/partition'
+        echo '  - new partition created only in already-unallocated space'
+        echo '  - NFS or SMB/CIFS network share'
+        ;;
+    *)
+        echo 'Backup choices:'
+        echo '  - existing filesystem/partition'
+        echo '  - NFS or SMB/CIFS network share'
+        echo '  - directory on the system filesystem'
+        ;;
+esac
 
 echo
 echo 'Safety policy:'
