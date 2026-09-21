@@ -209,11 +209,14 @@ grep -Fq 'JV_MAINTENANCE_LOCK' "${data_migration_transaction_backend}" || fail '
 grep -Fq 'minecraft-backup --leave-stopped' "${data_migration_transaction_backend}" || fail 'data migration transaction lost the verified pre-migration cold backup'
 grep -Fq 'rsync -aHAX' "${data_migration_transaction_backend}" || fail 'data migration transaction lost copy/verification semantics'
 grep -Fq 'restore-runtime-validate' "${data_migration_transaction_backend}" || fail 'data migration transaction lost runtime validation'
-for forbidden in 'systemctl ' 'podman ' 'rcon-cli' 'rsync ' 'flock ' 'mkfs' 'parted ' 'wipefs ' 'write_main_config' 'render_runtime' 'apply_data_selinux' 'storage-common.sh' 'storage_prepare_' 'lsblk ' 'findmnt ' 'mount ' '/etc/fstab' 'JV_MAINTENANCE_LOCK'; do
+for forbidden in 'systemctl ' 'podman ' 'rcon-cli' 'rsync ' 'flock ' 'mkfs' 'parted ' 'wipefs ' 'write_main_config' 'render_runtime' 'apply_data_selinux' 'storage-common.sh' 'storage_prepare_' 'lsblk ' 'findmnt ' '/etc/fstab' 'JV_MAINTENANCE_LOCK'; do
     if grep -Fq "${forbidden}" "${data_migration}"; then
         fail "mJust data migration frontend still performs direct backend/safety work: ${forbidden}"
     fi
 done
+if grep -Eq '^[[:space:]]*(if[[:space:]]+!)?[[:space:]]*mount[[:space:]]' "${data_migration}"; then
+    fail 'mJust data migration frontend still performs a direct mount command'
+fi
 if grep -Fq 'Authorization:' "${data_migration_api}"; then
     fail 'mJust data migration API helper must not introduce a bearer token'
 fi
