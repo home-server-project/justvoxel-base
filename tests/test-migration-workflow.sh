@@ -13,7 +13,10 @@ import_files=(
 import_text="$(cat "${import_files[@]}")"
 import_frontend="${repo_root}/mjust/libexec/migration-import"
 import_backend="${repo_root}/mjust/libexec/migration-import-backend"
-grep -Fq 'exec /usr/libexec/justvoxel/mjust/migration-import-backend "$@"' "${import_frontend}" || fail 'migration import compatibility frontend does not delegate to the shared backend'
+grep -Fq 'migration-api.sh' "${import_frontend}" || fail 'migration Import frontend does not use the shared API helper'
+grep -Fq 'jv_migration_import_plan_review' "${import_frontend}" || fail 'migration Import frontend does not plan through the Agent'
+grep -Fq 'jv_migration_import_apply' "${import_frontend}" || fail 'migration Import frontend does not apply through the Agent'
+grep -Fq 'jv_migration_monitor_operation' "${import_frontend}" || fail 'migration Import frontend does not monitor the persistent Agent operation'
 grep -Fq 'interrupt-safety.sh' "${import_backend}" || fail 'shared migration import backend does not load interruption safety'
 grep -Fq 'JV_MIGRATION_API_MODE' "${import_backend}" || fail 'shared migration Import backend has no non-interactive Agent mode'
 for api_file in "${repo_root}/mjust/libexec/migration-import-common.sh" "${repo_root}/mjust/libexec/migration-import-plan-source.sh" "${repo_root}/mjust/libexec/migration-import-plan-destination.sh" "${repo_root}/mjust/libexec/migration-import-activate.sh"; do

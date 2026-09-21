@@ -52,6 +52,7 @@ migration_recovery_transaction_backend="${repo_root}/mjust/libexec/admin-migrati
 admin_migration_recovery="${repo_root}/management/cmd/justvoxel-management-agent/admin_migration_recovery.go"
 admin_migration_recovery_apply="${repo_root}/management/cmd/justvoxel-management-agent/admin_migration_recovery_apply.go"
 migration_recovery_worker="${repo_root}/management/cmd/justvoxel-management-agent/migration_recovery_worker.go"
+migration_import="${repo_root}/mjust/libexec/migration-import"
 migration_import_backend="${repo_root}/mjust/libexec/migration-import-backend"
 migration_import_plan_backend="${repo_root}/mjust/libexec/admin-migration-import-plan-json"
 migration_import_transaction_backend="${repo_root}/mjust/libexec/admin-migration-import-transaction-json"
@@ -74,7 +75,7 @@ fail() {
     exit 1
 }
 
-for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${backup_storage}" "${backup_storage_api}" "${setup}" "${setup_api}" "${restore}" "${restore_api}" "${admin_restore}" "${admin_restore_apply}" "${restore_worker}" "${validate}" "${validate_backend}" "${storage_provision}" "${storage_plan}" "${storage_api}" "${data_migration}" "${data_migration_api}" "${data_migration_plan_backend}" "${data_migration_transaction_backend}" "${admin_data_migration_plan}" "${admin_data_migration_apply}" "${data_migration_worker}" "${migration_export}" "${migration_api}" "${migration_export_backend}" "${migration_export_plan_backend}" "${migration_export_transaction_backend}" "${admin_migration_export_plan}" "${admin_migration_export_apply}" "${migration_export_worker}" "${migration_recovery}" "${migration_recovery_backend}" "${migration_recovery_plan_backend}" "${migration_recovery_transaction_backend}" "${admin_migration_recovery}" "${admin_migration_recovery_apply}" "${migration_recovery_worker}" "${migration_import_backend}" "${migration_import_plan_backend}" "${migration_import_transaction_backend}" "${admin_migration_import_plan}" "${admin_migration_import_apply}" "${migration_import_worker}" "${admin_backup_storage}" "${admin_storage_provision}" "${admin_setup_plan}" "${admin_setup_apply}" "${admin_operations}" "${admin_validation}" "${admin_configuration}" "${admin_discovery}" "${operator_surfaces}" "${justfile}"; do
+for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${backup_storage}" "${backup_storage_api}" "${setup}" "${setup_api}" "${restore}" "${restore_api}" "${admin_restore}" "${admin_restore_apply}" "${restore_worker}" "${validate}" "${validate_backend}" "${storage_provision}" "${storage_plan}" "${storage_api}" "${data_migration}" "${data_migration_api}" "${data_migration_plan_backend}" "${data_migration_transaction_backend}" "${admin_data_migration_plan}" "${admin_data_migration_apply}" "${data_migration_worker}" "${migration_export}" "${migration_api}" "${migration_export_backend}" "${migration_export_plan_backend}" "${migration_export_transaction_backend}" "${admin_migration_export_plan}" "${admin_migration_export_apply}" "${migration_export_worker}" "${migration_recovery}" "${migration_recovery_backend}" "${migration_recovery_plan_backend}" "${migration_recovery_transaction_backend}" "${admin_migration_recovery}" "${admin_migration_recovery_apply}" "${migration_recovery_worker}" "${migration_import}" "${migration_import_backend}" "${migration_import_plan_backend}" "${migration_import_transaction_backend}" "${admin_migration_import_plan}" "${admin_migration_import_apply}" "${migration_import_worker}" "${admin_backup_storage}" "${admin_storage_provision}" "${admin_setup_plan}" "${admin_setup_apply}" "${admin_operations}" "${admin_validation}" "${admin_configuration}" "${admin_discovery}" "${operator_surfaces}" "${justfile}"; do
     [[ -f ${file} ]] || fail "missing mJust Management API file: ${file}"
 done
 
@@ -281,6 +282,18 @@ grep -Fq 'adminMigrationRecoveryTransactionHelper' "${migration_recovery_worker}
 grep -Fq 'admin-migration-recovery-json plan' "${migration_recovery_transaction_backend}" || fail 'server migration Recovery transaction does not revalidate reviewed recovery state'
 grep -Fq 'rolled-back-fresh' "${migration_recovery_backend}" || fail 'server migration Recovery backend lost fresh-unconfigured support'
 bash -n "${migration_recovery}" "${migration_recovery_backend}" "${migration_recovery_plan_backend}" "${migration_recovery_transaction_backend}" || fail 'server migration Recovery shell source failed bash syntax validation'
+grep -Fq 'migration-api.sh' "${migration_import}" || fail 'mJust Import frontend does not use the server migration API helper'
+grep -Fq 'jv_migration_import_discovery' "${migration_import}" || fail 'mJust Import does not discover defaults through the Management API'
+grep -Fq 'jv_migration_import_plan_review' "${migration_import}" || fail 'mJust Import does not plan through the Management API'
+grep -Fq 'jv_migration_import_apply' "${migration_import}" || fail 'mJust Import does not apply through the Management API'
+grep -Fq 'jv_migration_monitor_operation' "${migration_import}" || fail 'mJust Import does not monitor the persistent Agent operation'
+grep -Fq 'Type ONLINE to confirm source online-mode=true:' "${migration_import}" || fail 'mJust Import online-mode identity confirmation changed'
+grep -Fq 'Type ACCEPT to confirm that you accept the Minecraft EULA:' "${migration_import}" || fail 'mJust Import EULA confirmation changed'
+grep -Fq 'Type IMPORT to continue:' "${migration_import}" || fail 'mJust Import destructive confirmation changed'
+for forbidden in 'systemctl ' 'podman ' 'rcon-cli' 'migration-import-backend' 'JV_MAINTENANCE_LOCK' 'flock ' 'write_main_config' 'render_runtime'; do if grep -Fq "${forbidden}" "${migration_import}"; then fail "mJust Import frontend still performs direct backend work: ${forbidden}"; fi; done
+grep -Fq 'jv_migration_get /v1/admin/migration/import' "${migration_api}" || fail 'server migration Import discovery helper is missing'
+grep -Fq 'jv_migration_post_review /v1/admin/migration/import/plan' "${migration_api}" || fail 'server migration Import planning helper is missing'
+grep -Fq 'jv_migration_post /v1/admin/migration/import/apply' "${migration_api}" || fail 'server migration Import apply helper is missing'
 grep -Fq 'POST /v1/admin/migration/import/apply' "${admin_migration_import_plan}" || fail 'server migration Import apply route is missing'
 grep -Fq 'authoritativeAdminMigrationImportPlan' "${admin_migration_import_apply}" || fail 'server migration Import apply does not re-run authoritative planning'
 grep -Fq 'adminMigrationImportTransactionHelper' "${migration_import_worker}" || fail 'server migration Import worker does not use the authoritative transaction backend'

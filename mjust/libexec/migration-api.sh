@@ -30,6 +30,16 @@ jv_migration_operation() {
     local id="$1"; [[ ${id} =~ ^[0-9a-f-]+$ ]] || { echo "ERROR: invalid server migration operation id." >&2; return 1; }
     jv_migration_get "/v1/admin/operations/${id}"
 }
+jv_migration_post_review() {
+    local path="$1" payload="$2" response rc
+    set +e; response="$(printf '%s\n' "${payload}" | "${JV_MIGRATION_API_CLIENT}" POST "${path}" --data)"; rc=$?; set -e
+    printf '%s' "${response}"
+    return "${rc}"
+}
+
+jv_migration_import_discovery() { jv_migration_get /v1/admin/migration/import; }
+jv_migration_import_plan_review() { jv_migration_post_review /v1/admin/migration/import/plan "$1"; }
+jv_migration_import_apply() { jv_migration_post /v1/admin/migration/import/apply "$1"; }
 jv_migration_export_discovery() { jv_migration_get /v1/admin/migration/export; }
 jv_migration_export_plan() { jv_migration_post /v1/admin/migration/export/plan "$1"; }
 jv_migration_export_apply() { jv_migration_post /v1/admin/migration/export/apply "$1"; }

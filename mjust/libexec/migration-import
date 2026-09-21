@@ -1,3 +1,167 @@
 #!/usr/bin/bash
 set -euo pipefail
-exec /usr/libexec/justvoxel/mjust/migration-import-backend "$@"
+source /usr/libexec/justvoxel/mjust/ui.sh
+source /usr/libexec/justvoxel/mjust/migration-api.sh
+
+(( EUID == 0 )) || { echo 'ERROR: mjust import must run through sudo/root.' >&2; exit 1; }
+(( $# <= 1 )) || { echo 'Usage: migration-import [SOURCE]' >&2; exit 2; }
+
+current="$(jv_migration_current_operation)" || exit 1
+current_id="$(jq -r '.operation.operation_id // empty' <<< "${current}")"
+current_type="$(jq -r '.operation.operation_type // empty' <<< "${current}")"
+current_state="$(jq -r '.operation.state // empty' <<< "${current}")"
+if [[ -n ${current_id} ]]; then
+    if [[ ${current_type} == migration_import ]]; then
+        jv_migration_monitor_operation "${current_id}" migration_import 'Server migration Import'
+        exit $?
+    fi
+    echo "ERROR: another server migration operation is already active: ${current_type} (${current_state})" >&2
+    exit 1
+fi
+
+discovery="$(jv_migration_import_discovery)" || exit 1
+if (( $# == 1 )); then
+    source_path="$(realpath -m -- "$1")"
+else
+    jui_has_tty || { echo 'ERROR: interactive Import source selection requires a controlling terminal.' >&2; exit 1; }
+    echo 'Server migration Import'
+    echo '-----------------------'
+    echo 'This Step 5 frontend currently accepts a local path or an already-mounted filesystem path.'
+    echo 'Attached-media and temporary network-source parity is added in the next migration parity step.'
+    source_path="$(jui_input 'Migration archive or server directory path')" || exit 0
+    [[ -n ${source_path} ]] || exit 0
+    source_path="$(realpath -m -- "${source_path}")"
+fi
+
+java_port="$(jq -r '.defaults.java_port' <<< "${discovery}")"
+bedrock_port="$(jq -r '.defaults.bedrock_port' <<< "${discovery}")"
+java_memory="$(jq -r '.defaults.java_memory' <<< "${discovery}")"
+container_memory="$(jq -r '.defaults.container_memory' <<< "${discovery}")"
+timezone="$(jq -r '.defaults.timezone' <<< "${discovery}")"
+backup_keep="$(jq -r '.defaults.backup_keep' <<< "${discovery}")"
+backup_daily_time="$(jq -r '.defaults.backup_daily_time' <<< "${discovery}")"
+backup_automatic="$(jq -r '.defaults.backup_automatic' <<< "${discovery}")"
+selected_root=''
+source_version=''
+
+build_request() {
+    jq -cn         --arg path "${source_path}"         --arg selected_root "${selected_root}"         --arg source_version "${source_version}"         --argjson java_port "${java_port}"         --argjson bedrock_port "${bedrock_port}"         --arg java_memory "${java_memory}"         --arg container_memory "${container_memory}"         --arg timezone "${timezone}"         --argjson backup_keep "${backup_keep}"         --arg backup_daily_time "${backup_daily_time}"         --argjson backup_automatic "${backup_automatic}"         '{source:{path:$path,selected_root:$selected_root,source_version:$source_version},destination:{java_port:$java_port,bedrock_port:$bedrock_port,java_memory:$java_memory,container_memory:$container_memory,timezone:$timezone,backup_keep:$backup_keep,backup_daily_time:$backup_daily_time,backup_automatic:$backup_automatic}}'
+}
+
+while true; do
+    request="$(build_request)"
+    set +e
+    plan="$(jv_migration_import_plan_review "${request}")"
+    plan_rc=$?
+    set -e
+    if (( plan_rc == 0 )) && [[ $(jq -r '.ok // false' <<< "${plan}" 2>/dev/null) == true ]]; then
+        break
+    fi
+    code="$(jq -r '.code // empty' <<< "${plan}" 2>/dev/null || true)"
+    case "${code}" in
+        multiple_roots)
+            jui_has_tty || { jv_migration_api_error "${plan}" 'Multiple Minecraft roots require interactive selection.'; exit 1; }
+            mapfile -t roots < <(jq -r '.candidates[].root_relative' <<< "${plan}")
+            labels=()
+            for root in "${roots[@]}"; do
+                labels+=("$(jq -r --arg root "${root}" '.candidates[] | select(.root_relative==$root) | "\($root)  [\(.sourceType), Minecraft \(.minecraftVersion // "unknown")]"' <<< "${plan}")")
+            done
+            labels+=('Back')
+            choice="$(jui_choose 'Select Minecraft server root' "${labels[@]}")" || exit 0
+            [[ ${choice} == Back ]] && exit 0
+            for i in "${!roots[@]}"; do
+                [[ ${choice} == "${labels[$i]}" ]] && { selected_root="${roots[$i]}"; break; }
+            done
+            [[ -n ${selected_root} || ${#roots[@]} -gt 0 ]] || { echo 'ERROR: no Minecraft root was selected.' >&2; exit 1; }
+            ;;
+        source_version_required)
+            jui_has_tty || { jv_migration_api_error "${plan}" 'Exact source Minecraft version requires interactive input.'; exit 1; }
+            source_version="$(jui_input 'Exact source Minecraft version (example 1.21.8)')" || exit 0
+            ;;
+        *)
+            jv_migration_api_error "${plan}" 'Server migration Import planning failed.'
+            exit 1
+            ;;
+    esac
+done
+
+fingerprint="$(jq -r '.plan_fingerprint // empty' <<< "${plan}")"
+[[ -n ${fingerprint} ]] || { echo 'ERROR: Import plan did not return a review fingerprint.' >&2; exit 1; }
+
+echo
+echo 'Import plan'
+echo '-----------'
+echo "Source:            $(jq -r '.normalized.source.path' <<< "${plan}")"
+echo "Source type:       $(jq -r '.normalized.source.source_class + " (" + .normalized.source.candidate_type + ")"' <<< "${plan}")"
+echo "Minecraft version: $(jq -r '.normalized.source.minecraft_version' <<< "${plan}")"
+echo "Destination mode:  $(jq -r '.normalized.destination.mode' <<< "${plan}")"
+echo "Minecraft data:    $(jq -r '.normalized.destination.data_path' <<< "${plan}")"
+echo "Java port:         $(jq -r '.normalized.destination.java_port' <<< "${plan}")/tcp"
+if [[ $(jq -r '.normalized.source.bedrock_enabled' <<< "${plan}") == true ]]; then
+    echo "Bedrock port:      $(jq -r '.normalized.destination.bedrock_port' <<< "${plan}")/udp"
+else
+    echo 'Bedrock:           disabled'
+fi
+echo "Plugins preserved: $(jq -r '.normalized.source.plugin_count' <<< "${plan}") JAR(s)"
+while IFS= read -r warning; do [[ -n ${warning} ]] && echo "WARNING: ${warning}"; done < <(jq -r '.warnings[].message?' <<< "${plan}")
+
+online_confirmed=false
+vanilla_confirmed=false
+plugins_confirmed=false
+players_confirmed=false
+eula_accepted=false
+
+if [[ $(jq -r '.requirements.online_mode_confirmation_required' <<< "${plan}") == true ]]; then
+    jui_has_tty || { echo 'ERROR: source online-mode confirmation requires a terminal.' >&2; exit 1; }
+    echo
+    echo 'JustVoxel could not determine the source Java online-mode setting.'
+    echo 'Only continue if you verified that the source server used online-mode=true.'
+    printf 'Type ONLINE to confirm source online-mode=true: ' >/dev/tty
+    IFS= read -r answer </dev/tty
+    [[ ${answer} == ONLINE ]] || { echo 'Import cancelled because source identity mode was not confirmed.'; exit 0; }
+    online_confirmed=true
+fi
+
+if [[ $(jq -r '.requirements.vanilla_confirmation_required' <<< "${plan}") == true ]]; then
+    jui_has_tty || { echo 'ERROR: Vanilla to Paper confirmation requires a terminal.' >&2; exit 1; }
+    jui_confirm 'Continue with the reviewed vanilla -> Paper conversion?' || { echo 'Import cancelled.'; exit 0; }
+    vanilla_confirmed=true
+fi
+
+if [[ $(jq -r '.requirements.plugins_confirmation_required' <<< "${plan}") == true ]]; then
+    jui_has_tty || { echo 'ERROR: external plugin confirmation requires a terminal.' >&2; exit 1; }
+    echo 'Minecraft plugins are executable server code and will run inside the Minecraft container.'
+    jui_confirm 'Continue with the reviewed external plugin JARs?' || { echo 'Import cancelled.'; exit 0; }
+    plugins_confirmed=true
+fi
+
+if [[ $(jq -r '.requirements.players_confirmation_required' <<< "${plan}") == true ]]; then
+    jui_has_tty || { echo 'ERROR: online-player interruption confirmation requires a terminal.' >&2; exit 1; }
+    echo "Players online: $(jq -r '.requirements.players | join(", ")' <<< "${plan}")"
+    jui_confirm 'Continue with the normal graceful shutdown path?' || { echo 'Import cancelled.'; exit 0; }
+    players_confirmed=true
+fi
+
+if [[ $(jq -r '.requirements.eula_acceptance_required' <<< "${plan}") == true ]]; then
+    jui_has_tty || { echo 'ERROR: Minecraft EULA acceptance requires a terminal.' >&2; exit 1; }
+    echo
+    echo 'Minecraft EULA acceptance is required before JustVoxel can start the imported server.'
+    echo 'The source eula.txt, if present, is NOT accepted as destination administrator consent.'
+    echo 'Review: https://aka.ms/MinecraftEULA'
+    printf 'Type ACCEPT to confirm that you accept the Minecraft EULA: ' >/dev/tty
+    IFS= read -r answer </dev/tty
+    [[ ${answer} == ACCEPT ]] || { echo 'EULA not accepted. Import cancelled.'; exit 0; }
+    eula_accepted=true
+fi
+
+jui_has_tty || { echo 'ERROR: final Import confirmation requires a controlling terminal.' >&2; exit 1; }
+echo
+printf 'Type IMPORT to continue: ' >/dev/tty
+IFS= read -r answer </dev/tty
+[[ ${answer} == IMPORT ]] || { echo 'Import cancelled.'; exit 0; }
+
+apply="$(jq -cn     --arg fingerprint "${fingerprint}"     --argjson request "${request}"     --argjson players "${players_confirmed}"     --argjson eula "${eula_accepted}"     --argjson vanilla "${vanilla_confirmed}"     --argjson plugins "${plugins_confirmed}"     --argjson online_mode "${online_confirmed}"     '{plan_fingerprint:$fingerprint,request:$request,import_confirmed:true,players_confirmed:$players,eula_accepted:$eula,vanilla_confirmed:$vanilla,plugins_confirmed:$plugins,online_mode_confirmed:$online_mode}')"
+response="$(jv_migration_import_apply "${apply}")" || exit 1
+id="$(jq -r '.operation.operation_id // empty' <<< "${response}")"
+[[ -n ${id} ]] || { echo 'ERROR: Management Agent did not return an Import operation.' >&2; exit 1; }
+jv_migration_monitor_operation "${id}" migration_import 'Server migration Import'
