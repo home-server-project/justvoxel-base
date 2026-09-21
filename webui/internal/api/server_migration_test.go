@@ -17,8 +17,8 @@ func TestServerMigrationDiscoveryClientsUseAuthoritativeEndpoints(t *testing.T) 
 	}{
 		{
 			name: "export",
-			path:   adminMigrationExportPath,
-			body:   `{"ok":true,"schema_version":"v1","suggested_filename":"justvoxel-migration-test.tar.gz","configured_backup_available":true,"devices":[],"target_kinds":["local","backup"]}`,
+			path: adminMigrationExportPath,
+			body: `{"ok":true,"schema_version":"v1","suggested_filename":"justvoxel-migration-test.tar.gz","configured_backup_available":true,"devices":[],"target_kinds":["local","backup"]}`,
 			call: func(client *Client) error {
 				_, err := client.AdminMigrationExportDiscovery(context.Background(), "session-token")
 				return err
@@ -26,8 +26,8 @@ func TestServerMigrationDiscoveryClientsUseAuthoritativeEndpoints(t *testing.T) 
 		},
 		{
 			name: "import",
-			path:   adminMigrationImportPath,
-			body:   `{"ok":true,"schema_version":"v1","configured":true,"source_kinds":["local","backup"],"defaults":{"data_path":"/var/lib/justvoxel/minecraft","backup_path":"/var/lib/justvoxel/backups","java_memory":"4G","container_memory":"6G","timezone":"UTC","java_port":25565,"bedrock_port":19132,"backup_keep":7,"backup_daily_time":"04:30","backup_automatic":true}}`,
+			path: adminMigrationImportPath,
+			body: `{"ok":true,"schema_version":"v1","configured":true,"source_kinds":["local","backup"],"defaults":{"data_path":"/var/lib/justvoxel/minecraft","backup_path":"/var/lib/justvoxel/backups","java_memory":"4G","container_memory":"6G","timezone":"UTC","java_port":25565,"bedrock_port":19132,"backup_keep":7,"backup_daily_time":"04:30","backup_automatic":true}}`,
 			call: func(client *Client) error {
 				_, err := client.AdminMigrationImportDiscovery(context.Background(), "session-token")
 				return err
@@ -35,8 +35,8 @@ func TestServerMigrationDiscoveryClientsUseAuthoritativeEndpoints(t *testing.T) 
 		},
 		{
 			name: "recovery",
-			path:   adminMigrationRecoveryPath,
-			body:   `{"ok":true,"schema_version":"v1","configured":true,"transactions":[]}`,
+			path: adminMigrationRecoveryPath,
+			body: `{"ok":true,"schema_version":"v1","configured":true,"transactions":[]}`,
 			call: func(client *Client) error {
 				_, err := client.AdminMigrationRecoveryDiscovery(context.Background(), "session-token")
 				return err
