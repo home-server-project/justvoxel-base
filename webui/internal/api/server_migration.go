@@ -14,21 +14,21 @@ import (
 )
 
 const (
-	adminMigrationExportPath         = "/v1/admin/migration/export"
-	adminMigrationExportPlanPath     = "/v1/admin/migration/export/plan"
-	adminMigrationExportApplyPath    = "/v1/admin/migration/export/apply"
-	adminMigrationImportPath         = "/v1/admin/migration/import"
-	adminMigrationImportPlanPath     = "/v1/admin/migration/import/plan"
-	adminMigrationImportApplyPath    = "/v1/admin/migration/import/apply"
-	adminMigrationRecoveryPath       = "/v1/admin/migration/recovery"
-	adminMigrationRecoveryPlanPath   = "/v1/admin/migration/recovery/plan"
-	adminMigrationRecoveryApplyPath  = "/v1/admin/migration/recovery/apply"
+	adminMigrationExportPath        = "/v1/admin/migration/export"
+	adminMigrationExportPlanPath    = "/v1/admin/migration/export/plan"
+	adminMigrationExportApplyPath   = "/v1/admin/migration/export/apply"
+	adminMigrationImportPath        = "/v1/admin/migration/import"
+	adminMigrationImportPlanPath    = "/v1/admin/migration/import/plan"
+	adminMigrationImportApplyPath   = "/v1/admin/migration/import/apply"
+	adminMigrationRecoveryPath      = "/v1/admin/migration/recovery"
+	adminMigrationRecoveryPlanPath  = "/v1/admin/migration/recovery/plan"
+	adminMigrationRecoveryApplyPath = "/v1/admin/migration/recovery/apply"
 )
 
 var (
-	adminMigrationDiscoveryTimeout = 35 * time.Second
-	adminMigrationPlanTimeout      = 10 * time.Minute
-	adminMigrationApplyTimeout     = 35 * time.Second
+	adminMigrationDiscoveryTimeout    = 35 * time.Second
+	adminMigrationPlanTimeout         = 10 * time.Minute
+	adminMigrationApplyTimeout        = 35 * time.Second
 	serverMigrationFingerprintPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 )
 
@@ -99,14 +99,14 @@ type AdminMigrationExportRequirements struct {
 }
 
 type AdminMigrationExportPlanResponse struct {
-	OK              bool                               `json:"ok"`
-	SchemaVersion   string                             `json:"schema_version"`
-	PlanFingerprint string                             `json:"plan_fingerprint,omitempty"`
-	Code            string                             `json:"code,omitempty"`
-	Error           string                             `json:"error,omitempty"`
-	Normalized      *AdminMigrationExportNormalized    `json:"normalized,omitempty"`
-	Warnings        []AdminMigrationWarning            `json:"warnings"`
-	Requirements    *AdminMigrationExportRequirements  `json:"requirements,omitempty"`
+	OK              bool                              `json:"ok"`
+	SchemaVersion   string                            `json:"schema_version"`
+	PlanFingerprint string                            `json:"plan_fingerprint,omitempty"`
+	Code            string                            `json:"code,omitempty"`
+	Error           string                            `json:"error,omitempty"`
+	Normalized      *AdminMigrationExportNormalized   `json:"normalized,omitempty"`
+	Warnings        []AdminMigrationWarning           `json:"warnings"`
+	Requirements    *AdminMigrationExportRequirements `json:"requirements,omitempty"`
 }
 
 type AdminMigrationExportApplyRequest struct {
@@ -257,15 +257,15 @@ type AdminMigrationImportPlanResponse struct {
 }
 
 type AdminMigrationImportApplyRequest struct {
-	PlanFingerprint      string                      `json:"plan_fingerprint"`
-	Request              AdminMigrationImportRequest `json:"request"`
-	ImportConfirmed      bool                        `json:"import_confirmed"`
-	PlayersConfirmed     bool                        `json:"players_confirmed"`
-	EULAAccepted         bool                        `json:"eula_accepted"`
-	VanillaConfirmed     bool                        `json:"vanilla_confirmed"`
-	PluginsConfirmed     bool                        `json:"plugins_confirmed"`
-	OnlineModeConfirmed  bool                        `json:"online_mode_confirmed"`
-	BackupSMBPassword    string                      `json:"backup_smb_password,omitempty"`
+	PlanFingerprint     string                      `json:"plan_fingerprint"`
+	Request             AdminMigrationImportRequest `json:"request"`
+	ImportConfirmed     bool                        `json:"import_confirmed"`
+	PlayersConfirmed    bool                        `json:"players_confirmed"`
+	EULAAccepted        bool                        `json:"eula_accepted"`
+	VanillaConfirmed    bool                        `json:"vanilla_confirmed"`
+	PluginsConfirmed    bool                        `json:"plugins_confirmed"`
+	OnlineModeConfirmed bool                        `json:"online_mode_confirmed"`
+	BackupSMBPassword   string                      `json:"backup_smb_password,omitempty"`
 }
 
 type AdminMigrationRecoverySummary struct {
@@ -289,26 +289,26 @@ type AdminMigrationRecoveryPlanRequest struct {
 }
 
 type AdminMigrationRecoveryRequirements struct {
-	FinalizeConfirmationRequired bool `json:"finalize_confirmation_required"`
-	RuntimeValidationRequired    bool `json:"runtime_validation_required"`
+	FinalizeConfirmationRequired   bool `json:"finalize_confirmation_required"`
+	RuntimeValidationRequired      bool `json:"runtime_validation_required"`
 	UnconfiguredValidationRequired bool `json:"unconfigured_validation_required"`
 }
 
 type AdminMigrationRecoveryPlanResponse struct {
-	OK              bool                                 `json:"ok"`
-	SchemaVersion   string                               `json:"schema_version"`
-	PlanFingerprint string                               `json:"plan_fingerprint,omitempty"`
-	Code            string                               `json:"code,omitempty"`
-	Error           string                               `json:"error,omitempty"`
-	Normalized      *AdminMigrationRecoverySummary       `json:"normalized,omitempty"`
-	Warnings        []AdminMigrationWarning              `json:"warnings"`
-	Requirements    *AdminMigrationRecoveryRequirements  `json:"requirements,omitempty"`
+	OK              bool                                `json:"ok"`
+	SchemaVersion   string                              `json:"schema_version"`
+	PlanFingerprint string                              `json:"plan_fingerprint,omitempty"`
+	Code            string                              `json:"code,omitempty"`
+	Error           string                              `json:"error,omitempty"`
+	Normalized      *AdminMigrationRecoverySummary      `json:"normalized,omitempty"`
+	Warnings        []AdminMigrationWarning             `json:"warnings"`
+	Requirements    *AdminMigrationRecoveryRequirements `json:"requirements,omitempty"`
 }
 
 type AdminMigrationRecoveryApplyRequest struct {
-	PlanFingerprint  string `json:"plan_fingerprint"`
-	Transaction      string `json:"transaction"`
-	FinalizeConfirmed bool  `json:"finalize_confirmed"`
+	PlanFingerprint   string `json:"plan_fingerprint"`
+	Transaction       string `json:"transaction"`
+	FinalizeConfirmed bool   `json:"finalize_confirmed"`
 }
 
 type AdminMigrationApplyResponse struct {

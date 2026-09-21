@@ -67,11 +67,11 @@ func TestServerMigrationPlanAndApplyClientPaths(t *testing.T) {
 	const operationID = "12345678-1234-4123-8123-123456789abc"
 
 	tests := []struct {
-		name      string
-		path      string
-		status    int
-		body      string
-		call      func(*Client) error
+		name   string
+		path   string
+		status int
+		body   string
+		call   func(*Client) error
 	}{
 		{
 			name: "export plan",
