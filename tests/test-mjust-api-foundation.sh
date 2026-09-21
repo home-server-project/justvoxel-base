@@ -37,6 +37,13 @@ data_migration_transaction_backend="${repo_root}/mjust/libexec/admin-data-migrat
 admin_data_migration_plan="${repo_root}/management/cmd/justvoxel-management-agent/admin_data_migration_plan.go"
 admin_data_migration_apply="${repo_root}/management/cmd/justvoxel-management-agent/admin_data_migration_apply.go"
 data_migration_worker="${repo_root}/management/cmd/justvoxel-management-agent/data_migration_worker.go"
+migration_export="${repo_root}/mjust/libexec/migration-export"
+migration_export_backend="${repo_root}/mjust/libexec/migration-export-backend"
+migration_export_plan_backend="${repo_root}/mjust/libexec/admin-migration-export-plan-json"
+migration_export_transaction_backend="${repo_root}/mjust/libexec/admin-migration-export-transaction-json"
+admin_migration_export_plan="${repo_root}/management/cmd/justvoxel-management-agent/admin_migration_export_plan.go"
+admin_migration_export_apply="${repo_root}/management/cmd/justvoxel-management-agent/admin_migration_export_apply.go"
+migration_export_worker="${repo_root}/management/cmd/justvoxel-management-agent/migration_export_worker.go"
 admin_backup_storage="${repo_root}/management/cmd/justvoxel-management-agent/admin_backup_storage.go"
 admin_storage_provision="${repo_root}/management/cmd/justvoxel-management-agent/admin_storage_provision.go"
 admin_setup_plan="${repo_root}/management/cmd/justvoxel-management-agent/admin_setup_plan.go"
@@ -53,7 +60,7 @@ fail() {
     exit 1
 }
 
-for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${backup_storage}" "${backup_storage_api}" "${setup}" "${setup_api}" "${restore}" "${restore_api}" "${admin_restore}" "${admin_restore_apply}" "${restore_worker}" "${validate}" "${validate_backend}" "${storage_provision}" "${storage_plan}" "${storage_api}" "${data_migration}" "${data_migration_api}" "${data_migration_plan_backend}" "${data_migration_transaction_backend}" "${admin_data_migration_plan}" "${admin_data_migration_apply}" "${data_migration_worker}" "${admin_backup_storage}" "${admin_storage_provision}" "${admin_setup_plan}" "${admin_setup_apply}" "${admin_operations}" "${admin_validation}" "${admin_configuration}" "${admin_discovery}" "${operator_surfaces}" "${justfile}"; do
+for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${backup_storage}" "${backup_storage_api}" "${setup}" "${setup_api}" "${restore}" "${restore_api}" "${admin_restore}" "${admin_restore_apply}" "${restore_worker}" "${validate}" "${validate_backend}" "${storage_provision}" "${storage_plan}" "${storage_api}" "${data_migration}" "${data_migration_api}" "${data_migration_plan_backend}" "${data_migration_transaction_backend}" "${admin_data_migration_plan}" "${admin_data_migration_apply}" "${data_migration_worker}" "${migration_export}" "${migration_export_backend}" "${migration_export_plan_backend}" "${migration_export_transaction_backend}" "${admin_migration_export_plan}" "${admin_migration_export_apply}" "${migration_export_worker}" "${admin_backup_storage}" "${admin_storage_provision}" "${admin_setup_plan}" "${admin_setup_apply}" "${admin_operations}" "${admin_validation}" "${admin_configuration}" "${admin_discovery}" "${operator_surfaces}" "${justfile}"; do
     [[ -f ${file} ]] || fail "missing mJust Management API file: ${file}"
 done
 
@@ -220,6 +227,25 @@ fi
 if grep -Fq 'Authorization:' "${data_migration_api}"; then
     fail 'mJust data migration API helper must not introduce a bearer token'
 fi
+grep -Fq 'exec /usr/libexec/justvoxel/mjust/migration-export-backend "$@"' "${migration_export}" || fail 'mJust export compatibility wrapper does not preserve the extracted export backend'
+grep -Fq 'GET /v1/admin/migration/export' "${admin_migration_export_apply}" || fail 'server migration export discovery route is missing'
+grep -Fq 'POST /v1/admin/migration/export/plan' "${admin_migration_export_apply}" || fail 'server migration export plan route is missing'
+grep -Fq 'POST /v1/admin/migration/export/apply' "${admin_migration_export_apply}" || fail 'server migration export apply route is missing'
+grep -Fq 'authoritativeAdminMigrationExportPlan' "${admin_migration_export_apply}" || fail 'server migration export apply does not re-run authoritative planning'
+grep -Fq 'adminMigrationExportTransactionHelper' "${migration_export_worker}" || fail 'server migration export worker does not use the authoritative transaction backend'
+grep -Fq 'admin-migration-export-plan-json plan' "${migration_export_transaction_backend}" || fail 'server migration export transaction does not revalidate the reviewed plan'
+grep -Fq 'JV_MAINTENANCE_LOCK' "${migration_export_transaction_backend}" || fail 'server migration export transaction lost the shared Minecraft maintenance lock'
+grep -Fq 'jv_stop_minecraft_adaptive' "${migration_export_transaction_backend}" || fail 'server migration export transaction lost player-aware shutdown'
+grep -Fq 'migration-export-backend' "${migration_export_transaction_backend}" || fail 'server migration export transaction lost the shared export backend'
+grep -Fq 'restore-runtime-validate' "${migration_export_transaction_backend}" || fail 'server migration export transaction lost runtime validation'
+grep -Fq 'JV_MIGRATION_EXPORT_SERVER_REPORTED' "${migration_export_transaction_backend}" || fail 'server migration export transaction does not preserve server-reported metadata'
+grep -Fq 'JV_MIGRATION_EXPORT_GEYSER_REPORTED' "${migration_export_transaction_backend}" || fail 'server migration export transaction does not preserve Geyser metadata'
+grep -Fq 'migration-archive create-native' "${migration_export_backend}" || fail 'shared export backend lost native bundle creation'
+grep -Fq 'migration-archive verify-native' "${migration_export_backend}" || fail 'shared export backend lost SHA-256 integrity verification'
+grep -Fq 'JV_MIGRATION_EXPORT_MAINTENANCE_LOCK_HELD' "${migration_export_backend}" || fail 'shared export backend cannot run under the Agent-held maintenance lock'
+grep -Fq 'GET /v1/admin/migration/current-operation' "${admin_operations}" || fail 'server migration current-operation route is missing'
+bash -n "${migration_export}" "${migration_export_backend}" "${migration_export_plan_backend}" "${migration_export_transaction_backend}" || fail 'server migration export shell source failed bash syntax validation'
+
 grep -Fq 'registerAdminBackupStorageRoutes' "${admin_backup_storage}" || fail 'Management Agent backup storage routes are missing'
 grep -Fq 'registerAdminStorageProvisionRoutes' "${admin_storage_provision}" || fail 'Management Agent storage provisioning routes are missing'
 
@@ -301,4 +327,4 @@ if grep -Fq 'Authorization:' "${validate}"; then
     fail 'mJust validate frontend must not introduce a bearer token'
 fi
 
-echo 'mJust Management API foundation, Players, Minecraft control, Status, Whitelist, Manual Backup, Logs, Configuration, Backup Storage, Minecraft Data Migration, First-run Setup, Restore, and Validation migration checks passed.'
+echo 'mJust Management API foundation, Players, Minecraft control, Status, Whitelist, Manual Backup, Logs, Configuration, Backup Storage, Minecraft Data Migration, Server Migration Export API, First-run Setup, Restore, and Validation migration checks passed.'
