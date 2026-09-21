@@ -32,15 +32,15 @@ type serverMigrationPageData struct {
 }
 
 type serverMigrationProgressPageData struct {
-	Title         string
-	Version       string
-	ManagementAPI string
-	CSRF          string
-	Identity      api.SessionInfo
-	Operation     api.PersistentOperation
-	OperationName string
-	StateLabel    string
-	StageLabel       string
+	Title             string
+	Version           string
+	ManagementAPI     string
+	CSRF              string
+	Identity          api.SessionInfo
+	Operation         api.PersistentOperation
+	OperationName     string
+	StateLabel        string
+	StageLabel        string
 	CanReviewRecovery bool
 }
 
@@ -140,15 +140,15 @@ func (a *App) serverMigrationProgressPage(w http.ResponseWriter, r *http.Request
 		return
 	}
 	a.renderServerMigration(w, "server_migration_progress.html", http.StatusOK, serverMigrationProgressPageData{
-		Title:         "Server Migration progress",
-		Version:       a.config.Version,
-		ManagementAPI: a.config.ManagementAPI,
-		CSRF:          csrfFromRequest(r),
-		Identity:      identity,
-		Operation:     *response.Operation,
-		OperationName: serverMigrationOperationName(response.Operation.OperationType),
-		StateLabel:    serverMigrationStateLabel(response.Operation.State),
-		StageLabel:       serverMigrationStageLabel(response.Operation.OperationType, response.Operation.Stage),
+		Title:             "Server Migration progress",
+		Version:           a.config.Version,
+		ManagementAPI:     a.config.ManagementAPI,
+		CSRF:              csrfFromRequest(r),
+		Identity:          identity,
+		Operation:         *response.Operation,
+		OperationName:     serverMigrationOperationName(response.Operation.OperationType),
+		StateLabel:        serverMigrationStateLabel(response.Operation.State),
+		StageLabel:        serverMigrationStageLabel(response.Operation.OperationType, response.Operation.Stage),
 		CanReviewRecovery: response.Operation.OperationType == "migration_import" && response.Operation.State == "needs_attention",
 	})
 }
