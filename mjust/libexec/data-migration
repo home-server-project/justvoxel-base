@@ -1,0 +1,246 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+source /usr/libexec/justvoxel/mjust/ui.sh
+source /usr/libexec/justvoxel/mjust/data-migration-api.sh
+
+if (( EUID != 0 )); then
+    echo 'ERROR: this operation must run as root through mjust.' >&2
+    exit 1
+fi
+if ! jui_has_tty; then
+    echo 'ERROR: Minecraft data migration is interactive and requires a controlling terminal.' >&2
+    echo 'For SSH, allocate a terminal, for example: ssh -t <host> mjust storage-migrate' >&2
+    exit 1
+fi
+
+current="$(jv_data_migration_current_operation)" || exit 1
+if [[ $(jq -r '.operation != null' <<<"${current}") == true ]]; then
+    operation_id="$(jq -r '.operation.operation_id // empty' <<<"${current}")"
+    [[ -n ${operation_id} ]] || { echo 'ERROR: Management Agent returned an invalid current Minecraft data migration operation.' >&2; exit 1; }
+    echo "Reconnecting to Minecraft data migration operation ${operation_id}."
+    jv_data_migration_monitor_operation "${operation_id}"
+    exit $?
+fi
+
+discovery="$(jv_data_migration_discovery)" || exit 1
+if ! jq -e '
+    .ok == true
+    and (.whole_disks | type == "array")
+    and (.partitions | type == "array")
+    and (.blank_partitions | type == "array")
+    and (.free_space_disks | type == "array")
+' <<<"${discovery}" >/dev/null 2>&1; then
+    echo 'ERROR: Management Agent returned invalid Minecraft data migration discovery data.' >&2
+    exit 1
+fi
+
+human_bytes() {
+    local bytes="${1:-0}"
+    numfmt --to=iec-i --suffix=B "${bytes}" 2>/dev/null || printf '%s bytes' "${bytes}"
+}
+
+candidate_label() {
+    local item="$1" path size filesystem mountpoint model transport details=''
+    path="$(jq -r '.path' <<<"${item}")"
+    size="$(human_bytes "$(jq -r '.size_bytes' <<<"${item}")")"
+    filesystem="$(jq -r '.filesystem // empty' <<<"${item}")"
+    mountpoint="$(jq -r '.mountpoint // empty' <<<"${item}")"
+    model="$(jq -r '.model // empty' <<<"${item}")"
+    transport="$(jq -r '.transport // empty' <<<"${item}")"
+    [[ -n ${filesystem} ]] && details+="  fs=${filesystem}"
+    [[ -n ${mountpoint} ]] && details+="  mounted=${mountpoint}"
+    [[ -n ${transport} ]] && details+="  ${transport}"
+    [[ -n ${model} ]] && details+="  ${model}"
+    printf '%s  %s%s' "${path}" "${size}" "${details}"
+}
+
+choose_candidate() {
+    local array_name="$1" title="$2" count item selection index
+    local -a labels=() paths=()
+    count="$(jq -r ".${array_name} | length" <<<"${discovery}")"
+    (( count > 0 )) || {
+        echo "No safe candidates are currently available for: ${title}" >/dev/tty
+        return 1
+    }
+
+    for (( index=0; index<count; index++ )); do
+        item="$(jq -c ".${array_name}[${index}]" <<<"${discovery}")"
+        labels+=("$(candidate_label "${item}")")
+        paths+=("$(jq -r '.path' <<<"${item}")")
+    done
+    labels+=('Back')
+
+    selection="$(jui_choose "${title}" "${labels[@]}")" || return 2
+    [[ ${selection} != Back ]] || return 2
+    for index in "${!labels[@]}"; do
+        if [[ ${labels[index]} == "${selection}" ]]; then
+            printf '%s' "${paths[index]}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+choice="$(jui_choose 'Minecraft data target' \
+    'Provision a dedicated whole disk' \
+    'Use an existing filesystem/partition' \
+    'Format a blank partition' \
+    'Create a partition in already-unallocated disk space' \
+    'Back')" || exit 0
+
+operation=''
+device=''
+mount_point=''
+size_gib=all
+
+case "${choice}" in
+    'Provision a dedicated whole disk')
+        operation=erase_disk
+        device="$(choose_candidate whole_disks 'Whole disk to erase for Minecraft data')" || exit 0
+        mount_point="$(jui_input 'Mount point' '/var/mnt/justvoxel-data')" || exit 0
+        ;;
+    'Use an existing filesystem/partition')
+        operation=use_partition
+        device="$(choose_candidate partitions 'Existing filesystem for Minecraft data')" || exit 0
+        mounted="$(jq -r --arg path "${device}" '.partitions[] | select(.path == $path) | .mountpoint // empty' <<<"${discovery}")"
+        if [[ -n ${mounted} ]]; then
+            mount_point="${mounted}"
+            echo "Using existing mount point: ${mount_point}"
+        else
+            mount_point="$(jui_input 'Mount point' '/var/mnt/justvoxel-data')" || exit 0
+        fi
+        ;;
+    'Format a blank partition')
+        operation=format_partition
+        device="$(choose_candidate blank_partitions 'Blank partition to format for Minecraft data')" || exit 0
+        mount_point="$(jui_input 'Mount point' '/var/mnt/justvoxel-data')" || exit 0
+        ;;
+    'Create a partition in already-unallocated disk space')
+        operation=create_partition
+        device="$(choose_candidate free_space_disks 'Disk containing unallocated space')" || exit 0
+        size_gib="$(jui_input 'Partition size in GiB, or all' 'all')" || exit 0
+        mount_point="$(jui_input 'Mount point' '/var/mnt/justvoxel-data')" || exit 0
+        ;;
+    'Back')
+        exit 0
+        ;;
+    *)
+        exit 0
+        ;;
+esac
+
+mount_point="${mount_point%/}"
+data_path="$(jui_input 'Minecraft data directory on this storage' "${mount_point}/minecraft")" || exit 0
+
+plan_request="$(jq -cn \
+    --arg operation "${operation}" \
+    --arg device "${device}" \
+    --arg mount_point "${mount_point}" \
+    --arg path "${data_path}" \
+    --arg size_gib "${size_gib}" \
+    '{operation:$operation,device:$device,mount_point:$mount_point,path:$path,size_gib:$size_gib}')"
+
+plan="$(jv_data_migration_plan "${plan_request}")" || exit 1
+if ! jq -e '
+    .ok == true
+    and (.plan_fingerprint | type == "string")
+    and (.normalized | type == "object")
+    and (.requirements | type == "object")
+    and (.warnings | type == "array")
+' <<<"${plan}" >/dev/null 2>&1; then
+    jv_data_migration_api_error "${plan}" 'Minecraft data migration planning returned invalid data.'
+    exit 1
+fi
+
+echo
+echo 'Minecraft data migration plan'
+echo '-----------------------------'
+printf 'Current data: %s\n' "$(jq -r '.normalized.current_data_path' <<<"${plan}")"
+printf 'Target device: %s\n' "$(jq -r '.normalized.device' <<<"${plan}")"
+model="$(jq -r '.normalized.model // empty' <<<"${plan}")"
+transport="$(jq -r '.normalized.transport // empty' <<<"${plan}")"
+filesystem="$(jq -r '.normalized.filesystem // empty' <<<"${plan}")"
+[[ -n ${model} ]] && printf 'Model: %s\n' "${model}"
+[[ -n ${transport} ]] && printf 'Transport: %s\n' "${transport}"
+[[ -n ${filesystem} ]] && printf 'Filesystem: %s\n' "${filesystem}"
+printf 'Mount point: %s\n' "$(jq -r '.normalized.mount_point' <<<"${plan}")"
+printf 'New data path: %s\n' "$(jq -r '.normalized.path' <<<"${plan}")"
+printf 'Current Minecraft data size: %s\n' "$(human_bytes "$(jq -r '.normalized.data_bytes' <<<"${plan}")")"
+capacity="$(jq -r '.normalized.target_capacity_bytes // 0' <<<"${plan}")"
+if [[ ${capacity} =~ ^[0-9]+$ ]] && (( capacity > 0 )); then
+    printf 'Reviewed target capacity: %s\n' "$(human_bytes "${capacity}")"
+fi
+
+if [[ $(jq -r '.warnings | length' <<<"${plan}") -gt 0 ]]; then
+    echo
+    echo 'Migration warnings:'
+    jq -r '.warnings[] | "  " + .message' <<<"${plan}"
+fi
+
+cat <<'TEXT'
+
+The Management Agent will:
+  - revalidate this exact target before changing storage
+  - hold the shared Minecraft maintenance lock
+  - create a verified pre-migration cold backup
+  - copy and verify the complete Minecraft persistent-data tree
+  - switch the administrator-owned data path only after verification
+  - restore SELinux/runtime configuration
+  - validate the migrated Minecraft runtime when Minecraft was running
+  - roll back to the original configuration/runtime when validation fails
+
+The old Minecraft data directory is intentionally retained after success.
+TEXT
+
+players_confirmed=false
+if [[ $(jq -r '.requirements.players_confirmation_required // false' <<<"${plan}") == true ]]; then
+    echo
+    online="$(jq -r '.requirements.online // 0' <<<"${plan}")"
+    echo "Players currently online: ${online}"
+    if [[ $(jq -r '.requirements.players | length' <<<"${plan}") -gt 0 ]]; then
+        jq -r '.requirements.players[] | "  " + .' <<<"${plan}"
+    fi
+    echo 'Migration will use the normal player-aware graceful shutdown path.'
+    if jui_confirm 'Continue with Minecraft data migration even though players are online?'; then
+        players_confirmed=true
+    else
+        echo 'Migration cancelled.'
+        exit 0
+    fi
+fi
+
+confirmation=''
+if [[ $(jq -r '.requirements.destructive_confirmation_required // false' <<<"${plan}") == true ]]; then
+    phrase="$(jq -r '.requirements.confirmation_phrase // empty' <<<"${plan}")"
+    [[ -n ${phrase} ]] || { echo 'ERROR: Management Agent omitted the required destructive confirmation phrase.' >&2; exit 1; }
+    echo
+    echo 'This target requires destructive storage preparation.'
+    typed="$(jui_input "Type exactly: ${phrase}" '')" || exit 0
+    if [[ ${typed} != "${phrase}" ]]; then
+        echo 'Migration cancelled.'
+        exit 0
+    fi
+    confirmation="${typed}"
+fi
+
+echo
+typed_migrate="$(jui_input 'Type MIGRATE to start this reviewed Minecraft data migration' '')" || exit 0
+if [[ ${typed_migrate} != MIGRATE ]]; then
+    echo 'Migration cancelled.'
+    exit 0
+fi
+
+fingerprint="$(jq -r '.plan_fingerprint' <<<"${plan}")"
+apply_payload="$(jq -cn \
+    --arg fingerprint "${fingerprint}" \
+    --argjson request "${plan_request}" \
+    --arg confirmation "${confirmation}" \
+    --argjson players_confirmed "${players_confirmed}" \
+    '{plan_fingerprint:$fingerprint,request:$request,migration_confirmed:true,confirmation:$confirmation,players_confirmed:$players_confirmed}')"
+
+apply="$(jv_data_migration_apply "${apply_payload}")" || exit 1
+operation_id="$(jq -r '.operation.operation_id // empty' <<<"${apply}")"
+[[ -n ${operation_id} ]] || { echo 'ERROR: Management Agent did not return a Minecraft data migration operation id.' >&2; exit 1; }
+
+jv_data_migration_monitor_operation "${operation_id}"
