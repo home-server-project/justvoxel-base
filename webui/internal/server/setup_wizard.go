@@ -51,13 +51,13 @@ type setupDraft struct {
 	Started             bool
 	CurrentStep         int
 	DiagnosticSessionID string
-	Server      setupServerDraft
-	Minecraft   setupMinecraftDraft
-	Storage     setupStorageDraft
-	Backups     setupBackupDraft
-	Defaults    api.AdminSetupDefaults
-	Inventory   api.AdminStorageDiscovery
-	UpdatedAt   time.Time
+	Server              setupServerDraft
+	Minecraft           setupMinecraftDraft
+	Storage             setupStorageDraft
+	Backups             setupBackupDraft
+	Defaults            api.AdminSetupDefaults
+	Inventory           api.AdminStorageDiscovery
+	UpdatedAt           time.Time
 }
 
 type setupDraftStore struct {
