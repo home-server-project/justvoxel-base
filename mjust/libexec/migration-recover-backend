@@ -1,0 +1,121 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/ui.sh
+source /usr/libexec/justvoxel/mjust/migration-common.sh
+require_root
+
+if (( $# > 1 )); then
+    echo 'Usage: migration-recover [TRANSACTION_DIR]' >&2
+    exit 2
+fi
+
+if ! jui_has_tty; then
+    echo 'ERROR: migration recovery requires a controlling terminal.' >&2
+    echo 'For SSH, allocate a terminal, for example: ssh -t <host> mjust migration-recover' >&2
+    exit 1
+fi
+
+configured=no
+data_parent=''
+if [[ -r ${JV_CONFIG} && -e ${JV_QUADLET} ]]; then
+    configured=yes
+    require_config
+    data_parent="$(dirname -- "${DATA_PATH}")"
+fi
+transaction=''
+mapfile -t registered_transactions < <(jv_migration_registered_recoveries | sort -u)
+
+if (( $# == 1 )); then
+    transaction="$(realpath -m -- "$1")"
+else
+    transactions=()
+    if [[ ${configured} == yes ]]; then
+        while IFS= read -r path; do [[ -n ${path} ]] && transactions+=("${path}"); done < <(find "${data_parent}" -maxdepth 1 -type d -name '.justvoxel-import-*' -print 2>/dev/null | sort)
+    fi
+    transactions+=("${registered_transactions[@]}")
+    mapfile -t transactions < <(printf '%s\n' "${transactions[@]}" | sed '/^$/d' | sort -u)
+    case "${#transactions[@]}" in
+        0)
+            echo 'No retained migration recovery transaction was found.'
+            exit 0
+            ;;
+        1) transaction="${transactions[0]}" ;;
+        *)
+            labels=()
+            for path in "${transactions[@]}"; do
+                labels+=("$(basename -- "${path}")")
+            done
+            labels+=('Back')
+            selection="$(jui_choose 'Migration recovery transaction' "${labels[@]}")" || exit 0
+            [[ ${selection} == Back ]] && exit 0
+            for path in "${transactions[@]}"; do
+                [[ $(basename -- "${path}") == "${selection}" ]] && { transaction="${path}"; break; }
+            done
+            ;;
+    esac
+fi
+
+[[ ${transaction} == /* && $(basename -- "${transaction}") == .justvoxel-import-* ]] || { echo "ERROR: invalid migration recovery transaction path: ${transaction}" >&2; exit 1; }
+registered=no
+for path in "${registered_transactions[@]}"; do [[ ${path} == "${transaction}" ]] && registered=yes; done
+if [[ ${registered} != yes && ${configured} == yes ]]; then
+    case "${transaction}/" in "${data_parent}/.justvoxel-import-"*) ;; *) echo 'ERROR: transaction is outside the configured Minecraft data parent and is not registered recovery state.' >&2; exit 1 ;; esac
+elif [[ ${registered} != yes && ${configured} == no && $# -eq 0 ]]; then
+    echo 'ERROR: unconfigured JustVoxel recovery requires registered recovery state.' >&2
+    exit 1
+fi
+[[ -d ${transaction} && ! -L ${transaction} ]] || { echo "ERROR: recovery transaction does not exist: ${transaction}" >&2; exit 1; }
+[[ -r ${transaction}/state ]] || { echo 'ERROR: recovery transaction state file is missing.' >&2; exit 1; }
+
+phase="$(sed -n 's/^phase=//p' "${transaction}/state" | head -n1)"
+source_type="$(sed -n 's/^source_type=//p' "${transaction}/state" | head -n1)"
+updated_at="$(sed -n 's/^updated_at=//p' "${transaction}/state" | head -n1)"
+
+echo 'Migration recovery'
+echo '------------------'
+echo "Transaction: ${transaction}"
+echo "Phase:       ${phase:-unknown}"
+echo "Source type: ${source_type:-unknown}"
+echo "Updated:     ${updated_at:-unknown}"
+echo
+echo 'Retained recovery content:'
+for name in destination-state failed-import pre-import staging-source; do
+    [[ -e ${transaction}/${name} ]] && echo "  ${name}"
+done
+
+case "${phase}" in
+    critical-rollback|rolled-back)
+        [[ ${configured} == yes ]] || { echo 'ERROR: this recovery state expects a configured restored server.' >&2; exit 1; }
+        echo
+        echo 'Validating the currently restored Minecraft server before finalizing recovery.'
+        /usr/libexec/justvoxel/mjust/restore-runtime-validate
+        echo
+        echo 'The current Minecraft runtime validated successfully.'
+        ;;
+    rolled-back-fresh)
+        [[ ${configured} == no ]] || { echo 'ERROR: fresh-import rollback expects an unconfigured appliance.' >&2; exit 1; }
+        while IFS= read -r path; do
+            [[ ! -e ${path} && ! -L ${path} ]] || { echo "ERROR: fresh-import recovery found generated runtime state: ${path}" >&2; exit 1; }
+        done < <(jv_migration_runtime_paths)
+        if systemctl is-active --quiet minecraft.service 2>/dev/null; then echo 'ERROR: Minecraft is active after a fresh-import rollback.' >&2; exit 1; fi
+        echo
+        echo 'The fresh import rollback is clean: JustVoxel remains unconfigured and generated runtime files are absent.'
+        ;;
+    *)
+        echo
+        echo 'This transaction is not in a recovery state that JustVoxel can finalize automatically.' >&2
+        echo 'JustVoxel will not delete it automatically. Inspect/recover it manually before another import.' >&2
+        exit 1
+        ;;
+esac
+echo 'Finalizing recovery will permanently delete the retained failed-import/staging transaction.'
+echo 'The currently running Minecraft data and configuration will NOT be deleted.'
+printf 'Type FINALIZE ROLLBACK to remove this recovery transaction: ' >/dev/tty
+IFS= read -r confirmation </dev/tty
+[[ ${confirmation} == 'FINALIZE ROLLBACK' ]] || { echo 'Recovery finalization cancelled.'; exit 0; }
+
+rm -rf -- "${transaction}"
+jv_migration_clear_recovery "${transaction}" || true
+echo 'Migration rollback recovery finalized.'
+echo 'The retained transaction was removed and a new import may now be started.'

@@ -67,11 +67,13 @@ rollback_import() {
         live_modified=no
         if [[ ${configured} == yes ]]; then
             jv_migration_write_state "${transaction}" rolled-back "${JV_MIGRATION_SOURCE:-unknown}" "${source_class}" || true
+            jv_migration_register_recovery "${transaction}" || echo "WARNING: retained migration recovery state could not be registered automatically." >&2
             echo 'Import failed.' >&2
             echo 'Original server restored and validated.' >&2
             echo "Failed imported data was retained at: ${transaction}/failed-import" >&2
         else
             jv_migration_write_state "${transaction}" rolled-back-fresh "${JV_MIGRATION_SOURCE:-unknown}" "${source_class}" || true
+            jv_migration_register_recovery "${transaction}" || echo "WARNING: retained fresh-import recovery state could not be registered automatically." >&2
             echo 'Import failed.' >&2
             echo 'JustVoxel returned to its previous unconfigured runtime state.' >&2
             echo "Failed imported data was retained at: ${transaction}/failed-import" >&2
@@ -80,6 +82,7 @@ rollback_import() {
     fi
 
     jv_migration_write_state "${transaction}" critical-rollback "${JV_MIGRATION_SOURCE:-unknown}" "${source_class}" || true
+    jv_migration_register_recovery "${transaction}" || echo "WARNING: critical migration recovery state could not be registered automatically." >&2
     echo 'CRITICAL: automatic import rollback could not be fully validated.' >&2
     echo "ALL recovery state was retained at: ${transaction}" >&2
     echo 'Do not delete that directory until the destination server has been recovered.' >&2

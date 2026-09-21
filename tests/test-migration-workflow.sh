@@ -18,6 +18,7 @@ grep -Fq 'interrupt-safety.sh' "${import_backend}" || fail 'shared migration imp
 export_frontend="${repo_root}/mjust/libexec/migration-export"
 exporter="${repo_root}/mjust/libexec/migration-export-backend"
 recovery="${repo_root}/mjust/libexec/migration-recover"
+recovery_backend="${repo_root}/mjust/libexec/migration-recover-backend"
 transport_files=(
     "${repo_root}/mjust/libexec/migration-transport.sh"
     "${repo_root}/mjust/libexec/migration-transport-device.sh"
@@ -73,10 +74,12 @@ grep -Fq 'GAME_MODE="${GAME_MODE:-survival}"' "${common}" || fail 'backward-comp
 grep -Fq 'WHITELIST_ENABLED="${WHITELIST_ENABLED:-yes}"' "${common}" || fail 'backward-compatible whitelist default missing'
 grep -Fq 'JUSTVOXEL_REGENERATE_RCON' "${common}" || fail 'RCON regeneration support missing'
 
-grep -Fq 'critical-rollback|rolled-back' "${recovery}" || fail 'migration recovery must limit automatic finalization to completed rollback states'
-grep -Fq '/usr/libexec/justvoxel/mjust/restore-runtime-validate' "${recovery}" || fail 'migration recovery must validate the restored Minecraft runtime'
-grep -Fq 'FINALIZE ROLLBACK' "${recovery}" || fail 'migration recovery destructive confirmation missing'
-grep -Fq 'rm -rf -- "${transaction}"' "${recovery}" || fail 'migration recovery finalization cleanup missing'
+grep -Fq 'exec /usr/libexec/justvoxel/mjust/migration-recover-backend "$@"' "${recovery}" || fail 'migration recovery compatibility frontend does not delegate to shared backend'
+grep -Fq 'rolled-back-fresh' "${recovery_backend}" || fail 'fresh unconfigured rollback recovery is not supported'
+grep -Fq '/usr/libexec/justvoxel/mjust/restore-runtime-validate' "${recovery_backend}" || fail 'configured migration recovery must validate the restored Minecraft runtime'
+grep -Fq 'jv_migration_runtime_paths' "${recovery_backend}" || fail 'fresh migration recovery does not prove generated runtime files are absent'
+grep -Fq 'FINALIZE ROLLBACK' "${recovery_backend}" || fail 'migration recovery destructive confirmation missing'
+grep -Fq 'jv_migration_clear_recovery' "${recovery_backend}" || fail 'migration recovery registry cleanup missing'
 
 grep -Fq "warn '/dev/zram0 is not available" "${validate_backend}" || fail 'missing advisory zram-disabled validation path'
 grep -Fq "warn 'zram0 is not active as swap" "${validate_backend}" || fail 'missing advisory zram-inactive validation path'
