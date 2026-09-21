@@ -98,6 +98,14 @@ The WebUI uses the existing Management API for completed-backup discovery, autho
 
 The browser presents Agent warnings and confirmation requirements, requires the explicit destructive confirmation `RESTORE`, and requires a separate online-player interruption confirmation when the Agent says it is needed. Browser refresh or reconnect resumes the same persistent Restore operation.
 
+## System power controls
+
+Administrator users have a power control in the top-right WebUI header. It opens appliance-level actions for **Restart** and **Power off**. On supported physical HWE systems, the same menu also exposes **Restart to UEFI/BIOS**. VM deployments do not show that action.
+
+Selecting a power action first opens a centered confirmation dialog. The WebUI then submits the action through the existing System Actions API; it does not call systemd or firmware tools directly. If Minecraft players are online, the Management Agent returns its player-confirmation requirement and the dialog asks again before the existing graceful shutdown path is allowed to continue.
+
+The Agent remains authoritative for HWE/VM capability detection, player state, graceful Minecraft shutdown, firmware/UEFI availability, and final host action acceptance.
+
 ## Local behavior
 
 When Web management is enabled and healthy, the console/SSH welcome message reports `Web interface: Ready` and shows the friendly `hostname.local:8099` address plus the direct IPv4 address. The live health check takes precedence over bootstrap marker timing so a healthy listener is not reported as merely starting.
