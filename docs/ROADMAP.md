@@ -35,6 +35,10 @@ Recent WebUI storage work is implemented and now needs real-system validation:
   - format a blank partition
   - create a partition from existing unallocated space
   - destructive review, confirmation, and re-validation
+- Minecraft data storage migration
+  - Agent-discovered local migration targets
+  - authoritative review, destructive/player confirmations, and plan re-validation
+  - persistent migration progress, reconnect, rollback, and needs-attention recovery state
 - First-run setup
   - Minecraft data-storage selection
   - backup-destination selection

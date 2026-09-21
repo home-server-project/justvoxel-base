@@ -77,7 +77,7 @@ The runtime records the expected UUID/source and validates it before Minecraft o
 
 ## Minecraft data migration
 
-`mjust storage-migrate` is a thin Administrator frontend over the shared Minecraft data migration Management API. The terminal selects from Agent-discovered safe targets, displays the authoritative plan and warnings, collects the exact destructive phrase when storage preparation requires one, confirms player interruption when required, and monitors the persistent migration operation.
+`mjust storage-migrate` and **WebUI -> Storage & Backups -> Minecraft data storage** are thin Administrator frontends over the shared Minecraft data migration Management API. Both use Agent-discovered safe targets, display the authoritative plan and warnings, collect the exact destructive phrase when storage preparation requires one, confirm player interruption when required, and monitor/reconnect to the same persistent migration operation.
 
 The Management Agent owns the migration transaction:
 
@@ -94,7 +94,7 @@ The Management Agent owns the migration transaction:
 11. start and validate Minecraft when it was running before migration
 12. roll back to the old data-path configuration/runtime if migrated runtime validation fails
 
-The operation is journaled persistently. Re-running `mjust storage-migrate` reconnects to an active operation instead of starting a second migration. If the Agent or appliance is interrupted before a safe terminal result can be proven, the operation becomes `needs_attention` and preserves migration recovery state for administrator review.
+The operation is journaled persistently. Re-running `mjust storage-migrate` or reopening the WebUI migration entry point reconnects to an active operation instead of starting a second migration. If the Agent or appliance is interrupted before a safe terminal result can be proven, the operation becomes `needs_attention` and preserves migration recovery state for administrator review.
 
 The old Minecraft data directory is never deleted automatically. After a successful migration the administrator removes it only after verifying normal gameplay and backups. Storage preparation already completed on a reviewed target may remain after a safe rollback; the original Minecraft configuration/runtime remains authoritative.
 
