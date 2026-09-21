@@ -303,6 +303,8 @@ grep -Fq 'jv_migration_get /v1/admin/migration/import' "${migration_api}" || fai
 grep -Fq 'jv_migration_get /v1/admin/storage' "${migration_api}" || fail 'server migration Import storage discovery helper is missing'
 grep -Fq 'jv_migration_post_review /v1/admin/migration/import/plan' "${migration_api}" || fail 'server migration Import planning helper is missing'
 grep -Fq 'jv_migration_post /v1/admin/migration/import/apply' "${migration_api}" || fail 'server migration Import apply helper is missing'
+grep -Fq 'source_entries' "${admin_migration_import_plan}" || fail 'Import Management API does not expose reviewed transport source entries'
+grep -Fq 'SMBPassword string' "${admin_migration_import_plan}" || fail 'Import Management API source transport schema lacks execution credential field'
 grep -Fq 'POST /v1/admin/migration/import/apply' "${admin_migration_import_plan}" || fail 'server migration Import apply route is missing'
 grep -Fq 'authoritativeAdminMigrationImportPlan' "${admin_migration_import_apply}" || fail 'server migration Import apply does not re-run authoritative planning'
 grep -Fq 'adminMigrationImportTransactionHelper' "${migration_import_worker}" || fail 'server migration Import worker does not use the authoritative transaction backend'
