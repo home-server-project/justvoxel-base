@@ -19,7 +19,7 @@ preview() {
         migration) echo -e 'Migration\n\nExport, import or recover a server migration.' ;;
         storage) echo -e 'Storage\n\nView storage and move Minecraft data. Device provisioning is under Advanced.' ;;
         update) echo -e 'Update Minecraft\n\nCheck Minecraft/Paper and container image updates.' ;;
-        system) echo -e 'System\n\nView OS status and updates, resources, files, reboot and power controls.\n\nSystem resources opens btop. File browser opens Superfile. Press q in either tool to return to JustVoxel.' ;;
+        system) echo -e 'System\n\nView OS status and updates, resources, files, reboot and power controls.\n\nSystem resources opens btop. Press q to return to JustVoxel. Esc opens the btop menu, and Ctrl-C also exits the monitor. File browser opens Superfile; press q to return to the System menu.' ;;
         validate) echo -e 'Validation\n\nRun the complete JustVoxel deployment validation.' ;;
         logs) echo -e 'Logs\n\nReadable recent Minecraft logs from the JustVoxel Management API.' ;;
         advanced) echo -e 'Advanced\n\nDetailed status, storage device provisioning, welcome controls and reset tools.' ;;
