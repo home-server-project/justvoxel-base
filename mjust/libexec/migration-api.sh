@@ -38,6 +38,7 @@ jv_migration_post_review() {
 }
 
 jv_migration_import_discovery() { jv_migration_get /v1/admin/migration/import; }
+jv_migration_storage_discovery() { jv_migration_get /v1/admin/storage; }
 jv_migration_import_plan_review() { jv_migration_post_review /v1/admin/migration/import/plan "$1"; }
 jv_migration_import_apply() { jv_migration_post /v1/admin/migration/import/apply "$1"; }
 jv_migration_export_discovery() { jv_migration_get /v1/admin/migration/export; }

@@ -41,11 +41,143 @@ timezone="$(jq -r '.defaults.timezone' <<< "${discovery}")"
 backup_keep="$(jq -r '.defaults.backup_keep' <<< "${discovery}")"
 backup_daily_time="$(jq -r '.defaults.backup_daily_time' <<< "${discovery}")"
 backup_automatic="$(jq -r '.defaults.backup_automatic' <<< "${discovery}")"
+configured="$(jq -r '.configured' <<< "${discovery}")"
+storage_type=system
+storage_path="$(jq -r '.defaults.data_path' <<< "${discovery}")"
+storage_device=''
+storage_mount=''
+backup_type=system
+backup_path="$(jq -r '.defaults.backup_path' <<< "${discovery}")"
+backup_device=''
+backup_mount=''
+backup_source=''
+backup_username=''
+backup_domain=''
+backup_smb_password=''
+
+choose_partition() {
+    local title="$1" choice
+    local -a paths=() labels=()
+    while IFS=$'\t' read -r path model fs size; do
+        [[ -n ${path} ]] || continue
+        paths+=("${path}")
+        labels+=("${path} - ${fs}, ${size} GiB${model:+ - ${model}}")
+    done < <(jq -r '
+        .devices[]
+        | select(.type == "part" and (.read_only == false))
+        | select(.filesystem == "xfs" or .filesystem == "ext4" or .filesystem == "btrfs")
+        | select((.mountpoints // []) | all(. != "/" and . != "/var" and . != "/boot" and . != "/boot/efi"))
+        | [.path, (.model // ""), .filesystem, (((.size_bytes / 1073741824) * 10 | floor) / 10 | tostring)]
+        | @tsv
+    ' <<< "${inventory}")
+    (( ${#paths[@]} > 0 )) || { echo 'No safe existing formatted partition is available.' >&2; return 1; }
+    labels+=('Back')
+    choice="$(jui_choose "${title}" "${labels[@]}")" || return 1
+    [[ ${choice} != Back ]] || return 1
+    for i in "${!paths[@]}"; do
+        if [[ ${choice} == "${labels[$i]}" ]]; then printf '%s\n' "${paths[$i]}"; return 0; fi
+    done
+    return 1
+}
+
+partition_mount() {
+    local device="$1" fallback="$2" mounted
+    mounted="$(jq -r --arg device "${device}" '.devices[] | select(.path == $device) | (.mountpoints[0] // "")' <<< "${inventory}")"
+    if [[ -n ${mounted} ]]; then printf '%s\n' "${mounted}"; else jui_input 'Mount point' "${fallback}"; fi
+}
+
+jui_has_tty || { echo 'ERROR: destination review requires a controlling terminal.' >&2; exit 1; }
+if [[ ${configured} == true ]]; then
+    java_port="$(jui_input 'Destination Java host TCP port' "${java_port}")" || exit 0
+    bedrock_port="$(jui_input 'Destination Bedrock host UDP port' "${bedrock_port}")" || exit 0
+else
+    java_memory="$(jui_input 'Minecraft Java heap' "${java_memory}")" || exit 0
+    container_memory="$(jui_input 'Maximum total Minecraft memory' "${container_memory}")" || exit 0
+    timezone="$(jui_input 'Timezone' "${timezone}")" || exit 0
+    java_port="$(jui_input 'Destination Java host TCP port' "${java_port}")" || exit 0
+    bedrock_port="$(jui_input 'Destination Bedrock host UDP port' "${bedrock_port}")" || exit 0
+    inventory="$(jv_migration_storage_discovery)" || exit 1
+
+    data_choice="$(jui_choose 'Destination Minecraft storage' 'Directory on the JustVoxel system filesystem' 'Use an existing filesystem/partition' 'Back')" || exit 0
+    case "${data_choice}" in
+        'Directory on the JustVoxel system filesystem')
+            storage_type=system
+            storage_path="$(jq -r '.defaults.data_path' <<< "${discovery}")"
+            ;;
+        'Use an existing filesystem/partition')
+            storage_type=partition
+            storage_device="$(choose_partition 'Minecraft data filesystem')" || exit 0
+            storage_mount="$(partition_mount "${storage_device}" '/var/mnt/justvoxel-data')" || exit 0
+            storage_path="$(jui_input 'Minecraft data directory' "${storage_mount}/minecraft")" || exit 0
+            ;;
+        *) exit 0 ;;
+    esac
+
+    backup_choice="$(jui_choose 'Backup storage' 'Directory on the JustVoxel system filesystem' 'Use an existing filesystem/partition' 'NFS network share' 'SMB/CIFS network share' 'Back')" || exit 0
+    case "${backup_choice}" in
+        'Directory on the JustVoxel system filesystem')
+            backup_type=system
+            backup_path="$(jq -r '.defaults.backup_path' <<< "${discovery}")"
+            ;;
+        'Use an existing filesystem/partition')
+            backup_type=partition
+            backup_device="$(choose_partition 'Backup filesystem')" || exit 0
+            backup_mount="$(partition_mount "${backup_device}" '/var/mnt/justvoxel-backup')" || exit 0
+            backup_path="$(jui_input 'Backup directory' "${backup_mount}/backups")" || exit 0
+            ;;
+        'NFS network share')
+            backup_type=nfs
+            backup_source="$(jui_input 'NFS source (server:/export)' 'server:/export')" || exit 0
+            backup_mount="$(jui_input 'Local mount point' '/var/mnt/justvoxel-backup')" || exit 0
+            backup_path="$(jui_input 'Backup directory' "${backup_mount}/backups")" || exit 0
+            ;;
+        'SMB/CIFS network share')
+            backup_type=smb
+            backup_source="$(jui_input 'SMB source (//server/share)' '//server/share')" || exit 0
+            backup_mount="$(jui_input 'Local mount point' '/var/mnt/justvoxel-backup')" || exit 0
+            backup_path="$(jui_input 'Backup directory' "${backup_mount}/backups")" || exit 0
+            backup_username="$(jui_input 'SMB username' '')" || exit 0
+            backup_domain="$(jui_input 'SMB domain/workgroup (optional)' '')" || exit 0
+            ;;
+        *) exit 0 ;;
+    esac
+
+    backup_keep="$(jui_input 'Number of backups to keep' "${backup_keep}")" || exit 0
+    backup_daily_time="$(jui_input 'Daily backup time' "${backup_daily_time}")" || exit 0
+    automatic_choice="$(jui_choose 'Automatic daily backups' 'Enable automatic backups' 'Disable automatic backups')" || exit 0
+    if [[ ${automatic_choice} == 'Enable automatic backups' ]]; then backup_automatic=true; else backup_automatic=false; fi
+fi
+[[ ${java_port} =~ ^[0-9]+$ && ${bedrock_port} =~ ^[0-9]+$ ]] || { echo 'ERROR: Minecraft ports must be numbers.' >&2; exit 1; }
+[[ ${backup_keep} =~ ^[1-9][0-9]*$ ]] || { echo 'ERROR: backup retention must be a positive integer.' >&2; exit 1; }
+
 selected_root=''
 source_version=''
 
 build_request() {
-    jq -cn         --arg path "${source_path}"         --arg selected_root "${selected_root}"         --arg source_version "${source_version}"         --argjson java_port "${java_port}"         --argjson bedrock_port "${bedrock_port}"         --arg java_memory "${java_memory}"         --arg container_memory "${container_memory}"         --arg timezone "${timezone}"         --argjson backup_keep "${backup_keep}"         --arg backup_daily_time "${backup_daily_time}"         --argjson backup_automatic "${backup_automatic}"         '{source:{path:$path,selected_root:$selected_root,source_version:$source_version},destination:{java_port:$java_port,bedrock_port:$bedrock_port,java_memory:$java_memory,container_memory:$container_memory,timezone:$timezone,backup_keep:$backup_keep,backup_daily_time:$backup_daily_time,backup_automatic:$backup_automatic}}'
+    jq -cn \
+        --arg path "${source_path}" \
+        --arg selected_root "${selected_root}" \
+        --arg source_version "${source_version}" \
+        --argjson java_port "${java_port}" \
+        --argjson bedrock_port "${bedrock_port}" \
+        --arg java_memory "${java_memory}" \
+        --arg container_memory "${container_memory}" \
+        --arg timezone "${timezone}" \
+        --argjson backup_keep "${backup_keep}" \
+        --arg backup_daily_time "${backup_daily_time}" \
+        --argjson backup_automatic "${backup_automatic}" \
+        --arg storage_type "${storage_type}" \
+        --arg storage_path "${storage_path}" \
+        --arg storage_device "${storage_device}" \
+        --arg storage_mount "${storage_mount}" \
+        --arg backup_type "${backup_type}" \
+        --arg backup_path "${backup_path}" \
+        --arg backup_device "${backup_device}" \
+        --arg backup_mount "${backup_mount}" \
+        --arg backup_source "${backup_source}" \
+        --arg backup_username "${backup_username}" \
+        --arg backup_domain "${backup_domain}" \
+        '{source:{path:$path,selected_root:$selected_root,source_version:$source_version},destination:{java_port:$java_port,bedrock_port:$bedrock_port,java_memory:$java_memory,container_memory:$container_memory,timezone:$timezone,backup_keep:$backup_keep,backup_daily_time:$backup_daily_time,backup_automatic:$backup_automatic,storage:{type:$storage_type,path:$storage_path,device:$storage_device,mount_point:$storage_mount},backups:{automatic:$backup_automatic,daily_time:$backup_daily_time,keep:$backup_keep,type:$backup_type,path:$backup_path,device:$backup_device,mount_point:$backup_mount,source:$backup_source,username:$backup_username,domain:$backup_domain}}}'
 }
 
 while true; do
@@ -96,6 +228,7 @@ echo "Source type:       $(jq -r '.normalized.source.source_class + " (" + .norm
 echo "Minecraft version: $(jq -r '.normalized.source.minecraft_version' <<< "${plan}")"
 echo "Destination mode:  $(jq -r '.normalized.destination.mode' <<< "${plan}")"
 echo "Minecraft data:    $(jq -r '.normalized.destination.data_path' <<< "${plan}")"
+echo "Backup storage:    $(jq -r '.normalized.destination.backup_path' <<< "${plan}")"
 echo "Java port:         $(jq -r '.normalized.destination.java_port' <<< "${plan}")/tcp"
 if [[ $(jq -r '.normalized.source.bedrock_enabled' <<< "${plan}") == true ]]; then
     echo "Bedrock port:      $(jq -r '.normalized.destination.bedrock_port' <<< "${plan}")/udp"
@@ -154,14 +287,21 @@ if [[ $(jq -r '.requirements.eula_acceptance_required' <<< "${plan}") == true ]]
     eula_accepted=true
 fi
 
+if [[ $(jq -r '.requirements.backup_smb_password_required // false' <<< "${plan}") == true ]]; then
+    printf 'SMB backup password: ' >/dev/tty
+    IFS= read -rs backup_smb_password </dev/tty
+    echo >/dev/tty
+fi
+
 jui_has_tty || { echo 'ERROR: final Import confirmation requires a controlling terminal.' >&2; exit 1; }
 echo
 printf 'Type IMPORT to continue: ' >/dev/tty
 IFS= read -r answer </dev/tty
 [[ ${answer} == IMPORT ]] || { echo 'Import cancelled.'; exit 0; }
 
-apply="$(jq -cn     --arg fingerprint "${fingerprint}"     --argjson request "${request}"     --argjson players "${players_confirmed}"     --argjson eula "${eula_accepted}"     --argjson vanilla "${vanilla_confirmed}"     --argjson plugins "${plugins_confirmed}"     --argjson online_mode "${online_confirmed}"     '{plan_fingerprint:$fingerprint,request:$request,import_confirmed:true,players_confirmed:$players,eula_accepted:$eula,vanilla_confirmed:$vanilla,plugins_confirmed:$plugins,online_mode_confirmed:$online_mode}')"
+apply="$(jq -cn     --arg fingerprint "${fingerprint}"     --argjson request "${request}"     --argjson players "${players_confirmed}"     --argjson eula "${eula_accepted}"     --argjson vanilla "${vanilla_confirmed}"     --argjson plugins "${plugins_confirmed}"     --argjson online_mode "${online_confirmed}"     --arg backup_smb_password "${backup_smb_password}"     '{plan_fingerprint:$fingerprint,request:$request,import_confirmed:true,players_confirmed:$players,eula_accepted:$eula,vanilla_confirmed:$vanilla,plugins_confirmed:$plugins,online_mode_confirmed:$online_mode,backup_smb_password:$backup_smb_password}')"
 response="$(jv_migration_import_apply "${apply}")" || exit 1
+backup_smb_password=''
 id="$(jq -r '.operation.operation_id // empty' <<< "${response}")"
 [[ -n ${id} ]] || { echo 'ERROR: Management Agent did not return an Import operation.' >&2; exit 1; }
 jv_migration_monitor_operation "${id}" migration_import 'Server migration Import'
