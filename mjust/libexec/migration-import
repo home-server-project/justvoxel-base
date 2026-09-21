@@ -20,17 +20,394 @@ if [[ -n ${current_id} ]]; then
 fi
 
 discovery="$(jv_migration_import_discovery)" || exit 1
+source_kind=local
+source_path=''
+source_device=''
+source_removable=false
+source_ref=''
+source_username=''
+source_domain=''
+source_smb_password=''
+backup_smb_password=''
+request=''
+apply=''
+trap 'source_smb_password=""; backup_smb_password=""; request=""; apply=""' EXIT
+
+source_kind_supported() {
+    jq -e --arg kind "$1" '.source_kinds | index($kind) != null' >/dev/null 2>&1 <<< "${discovery}"
+}
+choose_import_source_device() {
+    local title="$1" choice
+    local -a paths=() labels=()
+    source_inventory="$(jv_migration_storage_discovery)" || return 1
+    while IFS=
+java_port="$(jq -r '.defaults.java_port' <<< "${discovery}")"
+bedrock_port="$(jq -r '.defaults.bedrock_port' <<< "${discovery}")"
+java_memory="$(jq -r '.defaults.java_memory' <<< "${discovery}")"
+container_memory="$(jq -r '.defaults.container_memory' <<< "${discovery}")"
+timezone="$(jq -r '.defaults.timezone' <<< "${discovery}")"
+backup_keep="$(jq -r '.defaults.backup_keep' <<< "${discovery}")"
+backup_daily_time="$(jq -r '.defaults.backup_daily_time' <<< "${discovery}")"
+backup_automatic="$(jq -r '.defaults.backup_automatic' <<< "${discovery}")"
+configured="$(jq -r '.configured' <<< "${discovery}")"
+storage_type=system
+storage_path="$(jq -r '.defaults.data_path' <<< "${discovery}")"
+storage_device=''
+storage_mount=''
+backup_type=system
+backup_path="$(jq -r '.defaults.backup_path' <<< "${discovery}")"
+backup_device=''
+backup_mount=''
+backup_source=''
+backup_username=''
+backup_domain=''
+choose_partition() {
+    local title="$1" choice
+    local -a paths=() labels=()
+    while IFS=$'\t' read -r path model fs size; do
+        [[ -n ${path} ]] || continue
+        paths+=("${path}")
+        labels+=("${path} - ${fs}, ${size} GiB${model:+ - ${model}}")
+    done < <(jq -r '
+        .devices[]
+        | select(.type == "part" and (.read_only == false))
+        | select(.filesystem == "xfs" or .filesystem == "ext4" or .filesystem == "btrfs")
+        | select((.mountpoints // []) | all(. != "/" and . != "/var" and . != "/boot" and . != "/boot/efi"))
+        | [.path, (.model // ""), .filesystem, (((.size_bytes / 1073741824) * 10 | floor) / 10 | tostring)]
+        | @tsv
+    ' <<< "${inventory}")
+    (( ${#paths[@]} > 0 )) || { echo 'No safe existing formatted partition is available.' >&2; return 1; }
+    labels+=('Back')
+    choice="$(jui_choose "${title}" "${labels[@]}")" || return 1
+    [[ ${choice} != Back ]] || return 1
+    for i in "${!paths[@]}"; do
+        if [[ ${choice} == "${labels[$i]}" ]]; then printf '%s\n' "${paths[$i]}"; return 0; fi
+    done
+    return 1
+}
+
+partition_mount() {
+    local device="$1" fallback="$2" mounted
+    mounted="$(jq -r --arg device "${device}" '.devices[] | select(.path == $device) | (.mountpoints[0] // "")' <<< "${inventory}")"
+    if [[ -n ${mounted} ]]; then printf '%s\n' "${mounted}"; else jui_input 'Mount point' "${fallback}"; fi
+}
+
+jui_has_tty || { echo 'ERROR: destination review requires a controlling terminal.' >&2; exit 1; }
+if [[ ${configured} == true ]]; then
+    java_port="$(jui_input 'Destination Java host TCP port' "${java_port}")" || exit 0
+    bedrock_port="$(jui_input 'Destination Bedrock host UDP port' "${bedrock_port}")" || exit 0
+else
+    java_memory="$(jui_input 'Minecraft Java heap' "${java_memory}")" || exit 0
+    container_memory="$(jui_input 'Maximum total Minecraft memory' "${container_memory}")" || exit 0
+    timezone="$(jui_input 'Timezone' "${timezone}")" || exit 0
+    java_port="$(jui_input 'Destination Java host TCP port' "${java_port}")" || exit 0
+    bedrock_port="$(jui_input 'Destination Bedrock host UDP port' "${bedrock_port}")" || exit 0
+    inventory="$(jv_migration_storage_discovery)" || exit 1
+
+    data_choice="$(jui_choose 'Destination Minecraft storage' 'Directory on the JustVoxel system filesystem' 'Use an existing filesystem/partition' 'Back')" || exit 0
+    case "${data_choice}" in
+        'Directory on the JustVoxel system filesystem')
+            storage_type=system
+            storage_path="$(jq -r '.defaults.data_path' <<< "${discovery}")"
+            ;;
+        'Use an existing filesystem/partition')
+            storage_type=partition
+            storage_device="$(choose_partition 'Minecraft data filesystem')" || exit 0
+            storage_mount="$(partition_mount "${storage_device}" '/var/mnt/justvoxel-data')" || exit 0
+            storage_path="$(jui_input 'Minecraft data directory' "${storage_mount}/minecraft")" || exit 0
+            ;;
+        *) exit 0 ;;
+    esac
+
+    backup_choice="$(jui_choose 'Backup storage' 'Directory on the JustVoxel system filesystem' 'Use an existing filesystem/partition' 'NFS network share' 'SMB/CIFS network share' 'Back')" || exit 0
+    case "${backup_choice}" in
+        'Directory on the JustVoxel system filesystem')
+            backup_type=system
+            backup_path="$(jq -r '.defaults.backup_path' <<< "${discovery}")"
+            ;;
+        'Use an existing filesystem/partition')
+            backup_type=partition
+            backup_device="$(choose_partition 'Backup filesystem')" || exit 0
+            backup_mount="$(partition_mount "${backup_device}" '/var/mnt/justvoxel-backup')" || exit 0
+            backup_path="$(jui_input 'Backup directory' "${backup_mount}/backups")" || exit 0
+            ;;
+        'NFS network share')
+            backup_type=nfs
+            backup_source="$(jui_input 'NFS source (server:/export)' 'server:/export')" || exit 0
+            backup_mount="$(jui_input 'Local mount point' '/var/mnt/justvoxel-backup')" || exit 0
+            backup_path="$(jui_input 'Backup directory' "${backup_mount}/backups")" || exit 0
+            ;;
+        'SMB/CIFS network share')
+            backup_type=smb
+            backup_source="$(jui_input 'SMB source (//server/share)' '//server/share')" || exit 0
+            backup_mount="$(jui_input 'Local mount point' '/var/mnt/justvoxel-backup')" || exit 0
+            backup_path="$(jui_input 'Backup directory' "${backup_mount}/backups")" || exit 0
+            backup_username="$(jui_input 'SMB username' '')" || exit 0
+            backup_domain="$(jui_input 'SMB domain/workgroup (optional)' '')" || exit 0
+            ;;
+        *) exit 0 ;;
+    esac
+
+    backup_keep="$(jui_input 'Number of backups to keep' "${backup_keep}")" || exit 0
+    backup_daily_time="$(jui_input 'Daily backup time' "${backup_daily_time}")" || exit 0
+    automatic_choice="$(jui_choose 'Automatic daily backups' 'Enable automatic backups' 'Disable automatic backups')" || exit 0
+    if [[ ${automatic_choice} == 'Enable automatic backups' ]]; then backup_automatic=true; else backup_automatic=false; fi
+fi
+[[ ${java_port} =~ ^[0-9]+$ && ${bedrock_port} =~ ^[0-9]+$ ]] || { echo 'ERROR: Minecraft ports must be numbers.' >&2; exit 1; }
+[[ ${backup_keep} =~ ^[1-9][0-9]*$ ]] || { echo 'ERROR: backup retention must be a positive integer.' >&2; exit 1; }
+
+selected_root=''
+source_version=''
+
+build_request() {
+    jq -cn \
+        --arg source_kind "${source_kind}" \
+        --arg path "${source_path}" \
+        --arg source_device "${source_device}" \
+        --argjson source_removable "${source_removable}" \
+        --arg source_ref "${source_ref}" \
+        --arg source_username "${source_username}" \
+        --arg source_domain "${source_domain}" \
+        --arg source_smb_password "${source_smb_password}" \
+        --arg selected_root "${selected_root}" \
+        --arg source_version "${source_version}" \
+        --argjson java_port "${java_port}" \
+        --argjson bedrock_port "${bedrock_port}" \
+        --arg java_memory "${java_memory}" \
+        --arg container_memory "${container_memory}" \
+        --arg timezone "${timezone}" \
+        --argjson backup_keep "${backup_keep}" \
+        --arg backup_daily_time "${backup_daily_time}" \
+        --argjson backup_automatic "${backup_automatic}" \
+        --arg storage_type "${storage_type}" \
+        --arg storage_path "${storage_path}" \
+        --arg storage_device "${storage_device}" \
+        --arg storage_mount "${storage_mount}" \
+        --arg backup_type "${backup_type}" \
+        --arg backup_path "${backup_path}" \
+        --arg backup_device "${backup_device}" \
+        --arg backup_mount "${backup_mount}" \
+        --arg backup_source "${backup_source}" \
+        --arg backup_username "${backup_username}" \
+        --arg backup_domain "${backup_domain}" \
+        '{source:{kind:$source_kind,path:$path,device:$source_device,removable:$source_removable,source:$source_ref,username:$source_username,domain:$source_domain,smb_password:$source_smb_password,selected_root:$selected_root,source_version:$source_version},destination:{java_port:$java_port,bedrock_port:$bedrock_port,java_memory:$java_memory,container_memory:$container_memory,timezone:$timezone,backup_keep:$backup_keep,backup_daily_time:$backup_daily_time,backup_automatic:$backup_automatic,storage:{type:$storage_type,path:$storage_path,device:$storage_device,mount_point:$storage_mount},backups:{automatic:$backup_automatic,daily_time:$backup_daily_time,keep:$backup_keep,type:$backup_type,path:$backup_path,device:$backup_device,mount_point:$backup_mount,source:$backup_source,username:$backup_username,domain:$backup_domain}}}'
+}
+
+while true; do
+    request="$(build_request)"
+    set +e
+    plan="$(jv_migration_import_plan_review "${request}")"
+    plan_rc=$?
+    set -e
+    if (( plan_rc == 0 )) && [[ $(jq -r '.ok // false' <<< "${plan}" 2>/dev/null) == true ]]; then
+        break
+    fi
+    code="$(jq -r '.code // empty' <<< "${plan}" 2>/dev/null || true)"
+    case "${code}" in
+        source_selection_required)
+            jui_has_tty || { jv_migration_api_error "${plan}" 'Migration source entry selection requires an interactive terminal.'; exit 1; }
+            mapfile -t source_entries < <(jq -r '.source_entries[].path' <<< "${plan}")
+            labels=()
+            for entry in "${source_entries[@]}"; do
+                labels+=("$(jq -r --arg path "${entry}" '.source_entries[] | select(.path==$path) | "\($path)  [\(.kind)]"' <<< "${plan}")")
+            done
+            labels+=('Enter path manually' 'Back')
+            choice="$(jui_choose 'Select migration archive or server directory' "${labels[@]}")" || exit 0
+            [[ ${choice} == Back ]] && exit 0
+            if [[ ${choice} == 'Enter path manually' ]]; then
+                source_path="$(jui_input 'Path relative to the selected migration source')" || exit 0
+            else
+                for i in "${!source_entries[@]}"; do
+                    [[ ${choice} == "${labels[$i]}" ]] && { source_path="${source_entries[$i]}"; break; }
+                done
+            fi
+            [[ -n ${source_path} ]] || { echo 'ERROR: no migration source path was selected.' >&2; exit 1; }
+            ;;
+        multiple_roots)
+            jui_has_tty || { jv_migration_api_error "${plan}" 'Multiple Minecraft roots require interactive selection.'; exit 1; }
+            mapfile -t roots < <(jq -r '.candidates[].root_relative' <<< "${plan}")
+            labels=()
+            for root in "${roots[@]}"; do
+                labels+=("$(jq -r --arg root "${root}" '.candidates[] | select(.root_relative==$root) | "\($root)  [\(.sourceType), Minecraft \(.minecraftVersion // "unknown")]"' <<< "${plan}")")
+            done
+            labels+=('Back')
+            choice="$(jui_choose 'Select Minecraft server root' "${labels[@]}")" || exit 0
+            [[ ${choice} == Back ]] && exit 0
+            for i in "${!roots[@]}"; do
+                [[ ${choice} == "${labels[$i]}" ]] && { selected_root="${roots[$i]}"; break; }
+            done
+            [[ -n ${selected_root} || ${#roots[@]} -gt 0 ]] || { echo 'ERROR: no Minecraft root was selected.' >&2; exit 1; }
+            ;;
+        source_version_required)
+            jui_has_tty || { jv_migration_api_error "${plan}" 'Exact source Minecraft version requires interactive input.'; exit 1; }
+            source_version="$(jui_input 'Exact source Minecraft version (example 1.21.8)')" || exit 0
+            ;;
+        *)
+            jv_migration_api_error "${plan}" 'Server migration Import planning failed.'
+            exit 1
+            ;;
+    esac
+done
+
+fingerprint="$(jq -r '.plan_fingerprint // empty' <<< "${plan}")"
+[[ -n ${fingerprint} ]] || { echo 'ERROR: Import plan did not return a review fingerprint.' >&2; exit 1; }
+
+echo
+echo 'Import plan'
+echo '-----------'
+echo "Source transport:  ${source_kind}"
+echo "Source:            $(jq -r '.normalized.source.path' <<< "${plan}")"
+echo "Source type:       $(jq -r '.normalized.source.source_class + " (" + .normalized.source.candidate_type + ")"' <<< "${plan}")"
+echo "Minecraft version: $(jq -r '.normalized.source.minecraft_version' <<< "${plan}")"
+echo "Destination mode:  $(jq -r '.normalized.destination.mode' <<< "${plan}")"
+echo "Minecraft data:    $(jq -r '.normalized.destination.data_path' <<< "${plan}")"
+echo "Backup storage:    $(jq -r '.normalized.destination.backup_path' <<< "${plan}")"
+echo "Java port:         $(jq -r '.normalized.destination.java_port' <<< "${plan}")/tcp"
+if [[ $(jq -r '.normalized.source.bedrock_enabled' <<< "${plan}") == true ]]; then
+    echo "Bedrock port:      $(jq -r '.normalized.destination.bedrock_port' <<< "${plan}")/udp"
+else
+    echo 'Bedrock:           disabled'
+fi
+echo "Plugins preserved: $(jq -r '.normalized.source.plugin_count' <<< "${plan}") JAR(s)"
+while IFS= read -r warning; do [[ -n ${warning} ]] && echo "WARNING: ${warning}"; done < <(jq -r '.warnings[].message?' <<< "${plan}")
+
+online_confirmed=false
+vanilla_confirmed=false
+plugins_confirmed=false
+players_confirmed=false
+eula_accepted=false
+
+if [[ $(jq -r '.requirements.online_mode_confirmation_required' <<< "${plan}") == true ]]; then
+    jui_has_tty || { echo 'ERROR: source online-mode confirmation requires a terminal.' >&2; exit 1; }
+    echo
+    echo 'JustVoxel could not determine the source Java online-mode setting.'
+    echo 'Only continue if you verified that the source server used online-mode=true.'
+    printf 'Type ONLINE to confirm source online-mode=true: ' >/dev/tty
+    IFS= read -r answer </dev/tty
+    [[ ${answer} == ONLINE ]] || { echo 'Import cancelled because source identity mode was not confirmed.'; exit 0; }
+    online_confirmed=true
+fi
+
+if [[ $(jq -r '.requirements.vanilla_confirmation_required' <<< "${plan}") == true ]]; then
+    jui_has_tty || { echo 'ERROR: Vanilla to Paper confirmation requires a terminal.' >&2; exit 1; }
+    jui_confirm 'Continue with the reviewed vanilla -> Paper conversion?' || { echo 'Import cancelled.'; exit 0; }
+    vanilla_confirmed=true
+fi
+
+if [[ $(jq -r '.requirements.plugins_confirmation_required' <<< "${plan}") == true ]]; then
+    jui_has_tty || { echo 'ERROR: external plugin confirmation requires a terminal.' >&2; exit 1; }
+    echo 'Minecraft plugins are executable server code and will run inside the Minecraft container.'
+    jui_confirm 'Continue with the reviewed external plugin JARs?' || { echo 'Import cancelled.'; exit 0; }
+    plugins_confirmed=true
+fi
+
+if [[ $(jq -r '.requirements.players_confirmation_required' <<< "${plan}") == true ]]; then
+    jui_has_tty || { echo 'ERROR: online-player interruption confirmation requires a terminal.' >&2; exit 1; }
+    echo "Players online: $(jq -r '.requirements.players | join(", ")' <<< "${plan}")"
+    jui_confirm 'Continue with the normal graceful shutdown path?' || { echo 'Import cancelled.'; exit 0; }
+    players_confirmed=true
+fi
+
+if [[ $(jq -r '.requirements.eula_acceptance_required' <<< "${plan}") == true ]]; then
+    jui_has_tty || { echo 'ERROR: Minecraft EULA acceptance requires a terminal.' >&2; exit 1; }
+    echo
+    echo 'Minecraft EULA acceptance is required before JustVoxel can start the imported server.'
+    echo 'The source eula.txt, if present, is NOT accepted as destination administrator consent.'
+    echo 'Review: https://aka.ms/MinecraftEULA'
+    printf 'Type ACCEPT to confirm that you accept the Minecraft EULA: ' >/dev/tty
+    IFS= read -r answer </dev/tty
+    [[ ${answer} == ACCEPT ]] || { echo 'EULA not accepted. Import cancelled.'; exit 0; }
+    eula_accepted=true
+fi
+
+if [[ $(jq -r '.requirements.backup_smb_password_required // false' <<< "${plan}") == true ]]; then
+    printf 'SMB backup password: ' >/dev/tty
+    IFS= read -rs backup_smb_password </dev/tty
+    echo >/dev/tty
+fi
+
+jui_has_tty || { echo 'ERROR: final Import confirmation requires a controlling terminal.' >&2; exit 1; }
+echo
+printf 'Type IMPORT to continue: ' >/dev/tty
+IFS= read -r answer </dev/tty
+[[ ${answer} == IMPORT ]] || { echo 'Import cancelled.'; exit 0; }
+
+apply="$(jq -cn     --arg fingerprint "${fingerprint}"     --argjson request "${request}"     --argjson players "${players_confirmed}"     --argjson eula "${eula_accepted}"     --argjson vanilla "${vanilla_confirmed}"     --argjson plugins "${plugins_confirmed}"     --argjson online_mode "${online_confirmed}"     --arg backup_smb_password "${backup_smb_password}"     '{plan_fingerprint:$fingerprint,request:$request,import_confirmed:true,players_confirmed:$players,eula_accepted:$eula,vanilla_confirmed:$vanilla,plugins_confirmed:$plugins,online_mode_confirmed:$online_mode,backup_smb_password:$backup_smb_password}')"
+response="$(jv_migration_import_apply "${apply}")" || exit 1
+source_smb_password=''
+backup_smb_password=''
+request=''
+apply=''
+id="$(jq -r '.operation.operation_id // empty' <<< "${response}")"
+[[ -n ${id} ]] || { echo 'ERROR: Management Agent did not return an Import operation.' >&2; exit 1; }
+jv_migration_monitor_operation "${id}" migration_import 'Server migration Import'
+\t' read -r path transport model fs size; do
+        [[ -n ${path} ]] || continue
+        paths+=("${path}")
+        labels+=("${path} - ${fs}, ${size} GiB${transport:+ - ${transport}}${model:+ - ${model}}")
+    done < <(jq -r '
+        .devices[]
+        | select((.type == "part" or .type == "disk") and (.system == false))
+        | select(.filesystem == "ext4" or .filesystem == "xfs" or .filesystem == "btrfs" or .filesystem == "vfat" or .filesystem == "exfat")
+        | [.path, (.transport // ""), (.model // ""), .filesystem, (((.size_bytes / 1073741824) * 10 | floor) / 10 | tostring)]
+        | @tsv
+    ' <<< "${source_inventory}")
+    (( ${#paths[@]} > 0 )) || { echo 'No supported non-system migration source filesystem is available.' >&2; return 1; }
+    labels+=('Back')
+    choice="$(jui_choose "${title}" "${labels[@]}")" || return 1
+    [[ ${choice} != Back ]] || return 1
+    for i in "${!paths[@]}"; do
+        [[ ${choice} == "${labels[$i]}" ]] && { printf '%s\n' "${paths[$i]}"; return 0; }
+    done
+    return 1
+}
+
 if (( $# == 1 )); then
     source_path="$(realpath -m -- "$1")"
 else
     jui_has_tty || { echo 'ERROR: interactive Import source selection requires a controlling terminal.' >&2; exit 1; }
-    echo 'Server migration Import'
-    echo '-----------------------'
-    echo 'This Step 5 frontend currently accepts a local path or an already-mounted filesystem path.'
-    echo 'Attached-media and temporary network-source parity is added in the next migration parity step.'
-    source_path="$(jui_input 'Migration archive or server directory path')" || exit 0
-    [[ -n ${source_path} ]] || exit 0
-    source_path="$(realpath -m -- "${source_path}")"
+    options=('Local file / directory or already-mounted filesystem')
+    if source_kind_supported device; then options+=('Attached disk / partition' 'USB / removable storage'); fi
+    if [[ ${configured} == true ]] && source_kind_supported backup; then options+=('Configured JustVoxel backup storage'); fi
+    source_kind_supported nfs && options+=('Temporary NFS share')
+    source_kind_supported smb && options+=('Temporary SMB/CIFS share')
+    options+=('Back')
+    choice="$(jui_choose 'Import source' "${options[@]}")" || exit 0
+    case "${choice}" in
+        'Local file / directory or already-mounted filesystem')
+            source_kind=local
+            source_path="$(jui_input 'Migration archive or server directory path')" || exit 0
+            [[ -n ${source_path} ]] || exit 0
+            source_path="$(realpath -m -- "${source_path}")"
+            ;;
+        'Attached disk / partition')
+            source_kind=device
+            source_device="$(choose_import_source_device 'Attached migration source filesystem')" || exit 0
+            source_removable=false
+            ;;
+        'USB / removable storage')
+            source_kind=device
+            source_device="$(choose_import_source_device 'USB / removable migration source filesystem')" || exit 0
+            source_removable=true
+            ;;
+        'Configured JustVoxel backup storage')
+            source_kind=backup
+            ;;
+        'Temporary NFS share')
+            source_kind=nfs
+            source_ref="$(jui_input 'NFS source (server:/export)')" || exit 0
+            ;;
+        'Temporary SMB/CIFS share')
+            source_kind=smb
+            source_ref="$(jui_input 'SMB source (//server/share)')" || exit 0
+            source_username="$(jui_input 'SMB username')" || exit 0
+            source_domain="$(jui_input 'SMB domain/workgroup (optional)' '')" || exit 0
+            printf 'SMB source password: ' >/dev/tty
+            IFS= read -rs source_smb_password </dev/tty
+            echo >/dev/tty
+            ;;
+        *) exit 0 ;;
+    esac
 fi
 
 java_port="$(jq -r '.defaults.java_port' <<< "${discovery}")"
