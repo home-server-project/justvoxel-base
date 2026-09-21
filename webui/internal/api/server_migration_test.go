@@ -105,7 +105,7 @@ func TestServerMigrationPlanAndApplyClientPaths(t *testing.T) {
 		},
 		{
 			name:   "export apply",
-			path: adminMigrationExportApplyPath,
+			path:   adminMigrationExportApplyPath,
 			status: http.StatusAccepted,
 			body:   `{"ok":true,"created":true,"operation":{"schema_version":"v1","operation_id":"` + operationID + `","operation_type":"migration_export","plan_fingerprint":"` + fingerprint + `","state":"queued","stage":"queued","status":"Queued.","started_at":"x","updated_at":"x","rollback":{"state":"not_started"}}}`,
 			call: func(client *Client) error {
@@ -115,7 +115,7 @@ func TestServerMigrationPlanAndApplyClientPaths(t *testing.T) {
 		},
 		{
 			name:   "import apply",
-			path: adminMigrationImportApplyPath,
+			path:   adminMigrationImportApplyPath,
 			status: http.StatusAccepted,
 			body:   `{"ok":true,"created":true,"operation":{"schema_version":"v1","operation_id":"` + operationID + `","operation_type":"migration_import","plan_fingerprint":"` + fingerprint + `","state":"queued","stage":"queued","status":"Queued.","started_at":"x","updated_at":"x","rollback":{"state":"not_started"}}}`,
 			call: func(client *Client) error {
@@ -125,7 +125,7 @@ func TestServerMigrationPlanAndApplyClientPaths(t *testing.T) {
 		},
 		{
 			name:   "recovery apply",
-			path: adminMigrationRecoveryApplyPath,
+			path:   adminMigrationRecoveryApplyPath,
 			status: http.StatusAccepted,
 			body:   `{"ok":true,"created":true,"operation":{"schema_version":"v1","operation_id":"` + operationID + `","operation_type":"migration_recovery","plan_fingerprint":"` + fingerprint + `","state":"queued","stage":"queued","status":"Queued.","started_at":"x","updated_at":"x","rollback":{"state":"not_started"}}}`,
 			call: func(client *Client) error {
