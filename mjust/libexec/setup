@@ -20,6 +20,11 @@ if [[ $(jq -r '.operation != null' <<<"${current}") == true ]]; then
     exit $?
 fi
 
+diagnostic_id="$(jv_setup_diagnostic_start || true)"
+if [[ -n ${diagnostic_id} ]]; then
+    jv_setup_diagnostic_event "${diagnostic_id}" 'mjust setup started' '{}'
+fi
+
 defaults="$(jv_setup_defaults)" || exit 1
 inventory="$(jv_setup_storage)" || exit 1
 
@@ -75,6 +80,7 @@ max_players="$(jui_input 'Maximum players' "$(jq -r '.max_players' <<<"${default
 bedrock_choice="$(jui_choose 'Bedrock cross-play' 'Enable Bedrock cross-play' 'Disable Bedrock cross-play')" || exit 0
 if [[ ${bedrock_choice} == 'Enable Bedrock cross-play' ]]; then bedrock_enabled=true; else bedrock_enabled=false; fi
 timezone="$(jui_input 'Timezone' "$(jq -r '.timezone' <<<"${defaults}")")" || exit 0
+jv_setup_diagnostic_event "${diagnostic_id}" 'server settings collected' "$(jq -cn --arg motd "${motd}" --arg max_players "${max_players}" --arg bedrock_enabled "${bedrock_enabled}" --arg timezone "${timezone}" '{motd:$motd,max_players:$max_players,bedrock_enabled:$bedrock_enabled,timezone:$timezone}')"
 
 java_memory="$(jui_input 'Minecraft Java heap' "$(jq -r '.java_memory' <<<"${defaults}")")" || exit 0
 container_memory="$(jui_input 'Maximum total Minecraft memory' "$(jq -r '.container_memory' <<<"${defaults}")")" || exit 0
@@ -95,6 +101,7 @@ case "${version_choice}" in
     'Latest - check newest version when Minecraft starts') version_policy=latest; version=LATEST ;;
     *) version_policy=pinned; version="$(jui_input 'Exact Minecraft version' '')" || exit 0 ;;
 esac
+jv_setup_diagnostic_event "${diagnostic_id}" 'Minecraft settings collected' "$(jq -cn --arg java_memory "${java_memory}" --arg container_memory "${container_memory}" --arg java_port "${java_port}" --arg bedrock_port "${bedrock_port}" --arg minecraft_image "${image_tag}" --arg version_policy "${version_policy}" --arg minecraft_version "${version}" '{java_memory:$java_memory,container_memory:$container_memory,java_port:$java_port,bedrock_port:$bedrock_port,minecraft_image:$minecraft_image,version_policy:$version_policy,minecraft_version:$minecraft_version}')"
 
 data_choice="$(jui_choose 'Minecraft data storage'     'JustVoxel system storage'     'Existing formatted local partition'     'Back')" || exit 0
 case "${data_choice}" in
@@ -112,6 +119,7 @@ case "${data_choice}" in
         storage_path="$(jui_input 'Minecraft data directory' "${storage_mount}/minecraft")" || exit 0
         ;;
 esac
+jv_setup_diagnostic_event "${diagnostic_id}" 'storage settings collected' "$(jq -cn --arg storage_type "${storage_type}" --arg storage_path "${storage_path}" --arg storage_device "${storage_device}" --arg storage_mount_point "${storage_mount}" '{storage_type:$storage_type,storage_path:$storage_path,storage_device:$storage_device,storage_mount_point:$storage_mount_point}')"
 
 backup_choice="$(jui_choose 'Backup storage'     'JustVoxel system storage'     'Existing formatted local partition'     'NFS network share'     'SMB/CIFS network share'     'Back')" || exit 0
 backup_device='' backup_mount='' backup_source='' backup_username='' backup_domain='' smb_password=''
@@ -157,12 +165,17 @@ request="$(jq -cn     --arg motd "${motd}" --argjson max_players "${max_players}
     }')"
 
 echo
+if [[ -n ${diagnostic_id} ]]; then
+    request="$(jq -c --arg diagnostic_session_id "${diagnostic_id}" '. + {diagnostic_session_id:$diagnostic_session_id}' <<<"${request}")"
+fi
+
 echo 'Validating setup with the Management Agent...'
 plan="$(jv_setup_plan "${request}")" || exit 1
 if ! jq -e '.ok == true and (.plan_fingerprint | type == "string")' <<<"${plan}" >/dev/null 2>&1; then
     jv_setup_api_error "${plan}" 'Setup validation returned invalid data.'
     exit 1
 fi
+jv_setup_diagnostic_event "${diagnostic_id}" 'backup settings collected' "$(jq -cn --arg backup_automatic "${backup_automatic}" --arg backup_daily_time "${backup_daily_time}" --arg backup_keep "${backup_keep}" --arg backup_type "${backup_type}" --arg backup_path "${backup_path}" --arg backup_device "${backup_device}" --arg backup_mount_point "${backup_mount}" --arg backup_source "${backup_source}" --arg backup_username "${backup_username}" --arg backup_domain "${backup_domain}" '{backup_automatic:$backup_automatic,backup_daily_time:$backup_daily_time,backup_keep:$backup_keep,backup_type:$backup_type,backup_path:$backup_path,backup_device:$backup_device,backup_mount_point:$backup_mount_point,backup_source:$backup_source,backup_username:$backup_username,backup_domain:$backup_domain}')"
 
 if [[ $(jq '.warnings | length' <<<"${plan}") -gt 0 ]]; then
     echo
@@ -195,9 +208,11 @@ echo 'Minecraft EULA acceptance is required before JustVoxel can start the serve
 echo 'Review: https://www.minecraft.net/eula'
 read -r -p 'Type ACCEPT to confirm that you accept the Minecraft EULA: ' eula
 if [[ ${eula} != ACCEPT ]]; then
+    jv_setup_diagnostic_event "${diagnostic_id}" 'Minecraft EULA not accepted' '{}'
     echo 'EULA not accepted. No JustVoxel runtime configuration was created.'
     exit 1
 fi
+jv_setup_diagnostic_event "${diagnostic_id}" 'Minecraft EULA accepted' '{}'
 
 if [[ $(jq -r '.requirements.smb_password_required // false' <<<"${plan}") == true ]]; then
     read -r -s -p 'SMB password: ' smb_password
@@ -206,12 +221,17 @@ fi
 
 read -r -p 'Create this JustVoxel configuration? [y/N]: ' answer
 if [[ ${answer,,} != y && ${answer,,} != yes ]]; then
+    jv_setup_diagnostic_event "${diagnostic_id}" 'mjust setup cancelled after Review' '{}'
     echo 'Cancelled. No JustVoxel runtime configuration was created.'
+    [[ -n ${diagnostic_id} ]] && echo "Setup diagnostic log: $(jv_setup_diagnostic_path "${diagnostic_id}")"
     exit 0
 fi
 
 fingerprint="$(jq -r '.plan_fingerprint' <<<"${plan}")"
 apply_payload="$(jq -cn --arg fingerprint "${fingerprint}" --argjson request "${request}" --arg password "${smb_password}"     '{plan_fingerprint:$fingerprint,request:$request,smb_password:$password,eula_accepted:true}')"
+if [[ -n ${diagnostic_id} ]]; then
+    apply_payload="$(jq -c --arg diagnostic_session_id "${diagnostic_id}" '. + {diagnostic_session_id:$diagnostic_session_id}' <<<"${apply_payload}")"
+fi
 apply="$(jv_setup_apply "${apply_payload}")" || exit 1
 operation_id="$(jq -r '.operation.operation_id // empty' <<<"${apply}")"
 [[ -n ${operation_id} ]] || { echo 'ERROR: Management Agent did not return a setup operation id.' >&2; exit 1; }

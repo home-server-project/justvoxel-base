@@ -66,6 +66,28 @@ jv_setup_operation() {
     jv_setup_get "/v1/admin/operations/${id}"
 }
 
+jv_setup_diagnostic_start() {
+    local response rc
+    set +e
+    response="$(printf '%s\n' '{"interface":"mjust"}' | "${JV_SETUP_API_CLIENT}" POST /v1/admin/setup/diagnostics/session --data 2>/dev/null)"
+    rc=$?
+    set -e
+    (( rc == 0 )) || return 1
+    jq -er '.session_id | select(type == "string" and length > 0)' <<<"${response}" 2>/dev/null
+}
+
+jv_setup_diagnostic_event() {
+    local id="$1" event="$2" values="${3:-{}}" payload
+    [[ ${id} =~ ^[0-9a-f-]+$ ]] || return 0
+    payload="$(jq -cn --arg event "${event}" --argjson values "${values}" '{event:$event,values:$values}')" || return 0
+    printf '%s\n' "${payload}" | "${JV_SETUP_API_CLIENT}" POST "/v1/admin/setup/diagnostics/${id}/event" --data >/dev/null 2>&1 || true
+}
+
+jv_setup_diagnostic_path() {
+    local id="$1"
+    printf '/var/lib/justvoxel/management/setup-logs/%s.log\n' "${id}"
+}
+
 jv_setup_monitor_operation() {
     local id="$1" response state stage status last=''
     echo
@@ -84,16 +106,19 @@ jv_setup_monitor_operation() {
             succeeded)
                 echo
                 echo 'JustVoxel setup completed.'
+                echo "Setup diagnostic log: $(jv_setup_diagnostic_path "${id}")"
                 return 0
                 ;;
             rolled_back)
                 echo
                 echo 'ERROR: setup failed and the Agent rolled back the changes.' >&2
+                echo "Setup diagnostic log: $(jv_setup_diagnostic_path "${id}")" >&2
                 return 1
                 ;;
             needs_attention)
                 echo
                 echo 'ERROR: setup needs administrator attention. Review mjust status --details.' >&2
+                echo "Setup diagnostic log: $(jv_setup_diagnostic_path "${id}")" >&2
                 return 1
                 ;;
         esac
