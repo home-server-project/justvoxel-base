@@ -76,88 +76,6 @@ provision_system_backup() {
     finish_backup_selection
 }
 
-migrate_data() {
-    require_config
-    local old_data old_mount old_uuid old_source was_active=no players diff_output rc
-    old_data="${DATA_PATH}"
-    old_mount="${DATA_MOUNT_POINT}"
-    old_uuid="${DATA_EXPECTED_UUID}"
-    old_source="${DATA_EXPECTED_SOURCE}"
-
-    if storage_prepare_data_target_interactive; then
-        :
-    else
-        rc=$?
-        (( rc == 2 )) && return 2
-        return "${rc}"
-    fi
-    [[ ${STORAGE_PATH} != "${old_data}" ]] || { echo 'ERROR: new data path is the current data path.' >&2; return 1; }
-    if [[ -e ${STORAGE_PATH} ]] && find "${STORAGE_PATH}" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
-        echo "ERROR: migration target is not empty: ${STORAGE_PATH}" >&2
-        return 1
-    fi
-    install -d -m0750 -o "${MINECRAFT_UID}" -g "${MINECRAFT_GID}" "${STORAGE_PATH}"
-
-    if systemctl is-active --quiet minecraft.service; then
-        was_active=yes
-        players="$(podman exec minecraft rcon-cli 'list' 2>/dev/null || true)"
-        [[ -n ${players} ]] || { echo 'ERROR: player state is unknown; refusing migration.' >&2; return 1; }
-        echo "${players}"
-        if ! grep -q 'There are 0 of' <<< "${players}"; then
-            confirm 'Players are online. Continue with the normal 60-second shutdown warning?' || {
-                echo 'Migration cancelled.'
-                return 1
-            }
-        fi
-    fi
-
-    echo 'Creating a verified pre-migration cold backup.'
-    exec 9>"${JV_MAINTENANCE_LOCK}"
-    flock -n 9 || { echo 'ERROR: another JustVoxel maintenance operation is running.' >&2; return 1; }
-    JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/minecraft-backup --leave-stopped
-
-    echo "Copying Minecraft data to ${STORAGE_PATH}"
-    rsync -aHAX --numeric-ids --delete "${old_data}/" "${STORAGE_PATH}/"
-    diff_output="$(rsync -aHAXn --numeric-ids --delete --itemize-changes "${old_data}/" "${STORAGE_PATH}/")"
-    if [[ -n ${diff_output} ]]; then
-        echo 'ERROR: migration verification found differences. Existing configuration is unchanged.' >&2
-        printf '%s\n' "${diff_output}" >&2
-        [[ ${was_active} == yes ]] && systemctl start minecraft.service || true
-        return 1
-    fi
-
-    DATA_PATH="${STORAGE_PATH}"
-    DATA_MOUNT_POINT="${STORAGE_MOUNT_POINT}"
-    DATA_EXPECTED_UUID="${STORAGE_EXPECTED_UUID}"
-    DATA_EXPECTED_SOURCE="${STORAGE_EXPECTED_SOURCE}"
-    write_main_config
-    apply_data_selinux
-    render_runtime
-
-    if [[ ${was_active} == yes ]]; then
-        if systemctl start minecraft.service && wait_for_rcon 900; then
-            echo 'Minecraft started successfully from the new storage.'
-        else
-            echo 'ERROR: Minecraft failed from the new storage; restoring the old configuration.' >&2
-            DATA_PATH="${old_data}"
-            DATA_MOUNT_POINT="${old_mount}"
-            DATA_EXPECTED_UUID="${old_uuid}"
-            DATA_EXPECTED_SOURCE="${old_source}"
-            write_main_config
-            apply_data_selinux
-            render_runtime
-            systemctl start minecraft.service || true
-            return 1
-        fi
-    fi
-
-    echo
-    echo 'Minecraft data migration completed.'
-    echo "New data path: ${DATA_PATH}"
-    echo "Old data was intentionally retained at: ${old_data}"
-    echo 'Remove the old copy only after you have verified normal gameplay and backups.'
-}
-
 provision_specific() {
     local mode="$1"
     if [[ ${have_config} == yes ]]; then
@@ -220,9 +138,7 @@ storage_menu() {
                 if provision_network; then :; else rc=$?; (( rc == 2 )) || return "${rc}"; fi
                 ;;
             'Directory on the system filesystem') provision_system_backup ;;
-            'Migrate Minecraft data to local storage')
-                if migrate_data; then :; else rc=$?; (( rc == 2 )) || return "${rc}"; fi
-                ;;
+            'Migrate Minecraft data to local storage') /usr/libexec/justvoxel/mjust/data-migration ;;
             'Show storage plan / devices') /usr/libexec/justvoxel/mjust/storage-plan ;;
             'Back') return 0 ;;
         esac
@@ -265,13 +181,7 @@ case "${action}" in
         provision_system_backup
         ;;
     migrate)
-        if migrate_data; then
-            :
-        else
-            rc=$?
-            (( rc == 2 )) && exit 0
-            exit "${rc}"
-        fi
+        /usr/libexec/justvoxel/mjust/data-migration
         ;;
     *)
         echo 'Usage: storage-provision {menu|backup|disk|partition|free|network|system|migrate}' >&2

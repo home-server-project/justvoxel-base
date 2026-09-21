@@ -77,23 +77,26 @@ The runtime records the expected UUID/source and validates it before Minecraft o
 
 ## Minecraft data migration
 
-`mjust storage-migrate` can move an installed Minecraft data directory to a dedicated local disk, existing partition, or a new partition in already-unallocated space.
+`mjust storage-migrate` is a thin Administrator frontend over the shared Minecraft data migration Management API. The terminal selects from Agent-discovered safe targets, displays the authoritative plan and warnings, collects the exact destructive phrase when storage preparation requires one, confirms player interruption when required, and monitors the persistent migration operation.
 
-The migration flow is:
+The Management Agent owns the migration transaction:
 
-1. provision or adopt the destination storage
-2. refuse a non-empty destination data directory
-3. query players through RCON and fail closed if player state is unknown
-4. if players are online, require explicit confirmation and use the normal 60-second shutdown warning
-5. hold the shared maintenance lock
-6. create a verified cold backup and leave Minecraft stopped
+1. revalidate the exact reviewed target, configuration identity, capacity, and player state
+2. prepare or adopt the reviewed local destination
+3. refuse a non-empty destination data directory
+4. hold the shared Minecraft maintenance lock
+5. recheck players immediately before interruption
+6. create a verified pre-migration cold backup and leave Minecraft stopped
 7. copy the complete persistent data tree with rsync
-8. run a dry-run rsync verification
-9. update the administrator-owned data path/mount identity
-10. restore SELinux labels and regenerate the local Quadlet
-11. start and verify Minecraft if it was running before migration
+8. run a dry-run rsync verification before switching configuration
+9. update the administrator-owned data path and persistent mount identity
+10. restore SELinux labels and regenerate runtime configuration
+11. start and validate Minecraft when it was running before migration
+12. roll back to the old data-path configuration/runtime if migrated runtime validation fails
 
-If the new runtime fails to start, mjust restores the old data-path configuration and attempts to start the old deployment again. The old data directory is never deleted automatically; the administrator removes it only after verifying normal gameplay and backups.
+The operation is journaled persistently. Re-running `mjust storage-migrate` reconnects to an active operation instead of starting a second migration. If the Agent or appliance is interrupted before a safe terminal result can be proven, the operation becomes `needs_attention` and preserves migration recovery state for administrator review.
+
+The old Minecraft data directory is never deleted automatically. After a successful migration the administrator removes it only after verifying normal gameplay and backups. Storage preparation already completed on a reviewed target may remain after a safe rollback; the original Minecraft configuration/runtime remains authoritative.
 
 ## Backup retention and failure behavior
 

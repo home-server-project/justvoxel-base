@@ -1,0 +1,339 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/storage-common.sh
+
+require_root
+
+emit_error() {
+    local code="$1" message="$2"
+    jq -cn --arg code "${code}" --arg error "${message}" \
+        '{ok:false,schema_version:"v1",code:$code,error:$error,warnings:[]}'
+}
+
+append_warning() {
+    local warnings="$1" code="$2" message="$3"
+    jq -cn --argjson warnings "${warnings}" --arg code "${code}" --arg message "${message}" \
+        '$warnings + [{code:$code,message:$message}]'
+}
+
+real_device() {
+    readlink -f -- "$1" 2>/dev/null || true
+}
+
+parent_disk() {
+    local real
+    real="$(real_device "$1")"
+    [[ -n ${real} ]] || return 0
+    lsblk -s -npo NAME,TYPE "${real}" 2>/dev/null | awk '$2 == "disk" {print $1; exit}'
+}
+
+model_for() {
+    lsblk -dnro MODEL "$1" 2>/dev/null | xargs || true
+}
+
+transport_for() {
+    lsblk -dnro TRAN "$1" 2>/dev/null | xargs || true
+}
+
+size_for() {
+    lsblk -bdnro SIZE "$1" 2>/dev/null | head -n1
+}
+
+filesystem_for() {
+    blkid -s TYPE -o value "$1" 2>/dev/null || true
+}
+
+mountpoint_for() {
+    lsblk -nro MOUNTPOINT "$1" 2>/dev/null | sed '/^$/d' | head -n1
+}
+
+largest_free_segment() {
+    local disk="$1"
+    parted -s -m "${disk}" unit MiB print free 2>/dev/null \
+        | awk -F: '$5 == "free;" {s=$4; gsub("MiB","",s); if ((s+0) > max) {max=s+0; line=$0}} END {print line}'
+}
+
+target_identity() {
+    local device="$1" parent
+    {
+        printf 'device=%s\n' "$(real_device "${device}")"
+        lsblk -b -P -o PATH,PKNAME,TYPE,SIZE,FSTYPE,UUID,PARTUUID,MOUNTPOINTS,START,RO,MODEL,SERIAL,WWN,TRAN "${device}" 2>/dev/null || true
+        blkid "${device}" 2>/dev/null || true
+        parent="$(parent_disk "${device}")"
+        if [[ -n ${parent} ]]; then
+            parted -s -m "${parent}" unit MiB print free 2>/dev/null || true
+        fi
+    } | sha256sum | awk '{print $1}'
+}
+
+candidate_json() {
+    local device="$1" system=false parent model transport size filesystem mounted
+    parent="$(parent_disk "${device}")"
+    [[ -n ${parent} ]] && storage_disk_is_system "${parent}" && system=true
+    model="$(model_for "${device}")"
+    transport="$(transport_for "${device}")"
+    size="$(size_for "${device}")"; size="${size:-0}"
+    filesystem="$(filesystem_for "${device}")"
+    mounted="$(mountpoint_for "${device}")"
+    jq -cn \
+        --arg path "$(real_device "${device}")" \
+        --arg parent "${parent}" \
+        --arg model "${model}" \
+        --arg transport "${transport}" \
+        --arg filesystem "${filesystem}" \
+        --arg mountpoint "${mounted}" \
+        --argjson size_bytes "${size}" \
+        --argjson system_disk "${system}" \
+        '{path:$path,parent:$parent,model:$model,transport:$transport,filesystem:$filesystem,mountpoint:$mountpoint,size_bytes:$size_bytes,system_disk:$system_disk}'
+}
+
+discover() {
+    require_config
+    local whole='[]' partitions='[]' blank='[]' free='[]' disk part fstype mounted free_line free_size
+    storage_require_identified_system_disk >/dev/null 2>&1 || {
+        emit_error unsafe_system_disk 'JustVoxel could not identify the system disk safely.'
+        return 0
+    }
+
+    while IFS= read -r disk; do
+        [[ -n ${disk} ]] || continue
+        storage_validate_disk "${disk}" >/dev/null 2>&1 || continue
+        if ! storage_disk_is_system "${disk}" && ! storage_has_mounted_children "${disk}"; then
+            whole="$(jq -cn --argjson a "${whole}" --argjson item "$(candidate_json "${disk}")" '$a + [$item]')"
+        fi
+        free_line="$(largest_free_segment "${disk}")"
+        if [[ -n ${free_line} ]]; then
+            IFS=: read -r _ _ _ free_size _ <<< "${free_line}"
+            free_size="${free_size%MiB}"
+            if awk -v n="${free_size:-0}" 'BEGIN {exit !(n >= 1024)}'; then
+                free="$(jq -cn --argjson a "${free}" --argjson item "$(candidate_json "${disk}")" '$a + [$item]')"
+            fi
+        fi
+    done < <(lsblk -dnpo NAME,TYPE | awk '$2 == "disk" {print $1}')
+
+    while IFS= read -r part; do
+        [[ -n ${part} ]] || continue
+        storage_validate_partition "${part}" >/dev/null 2>&1 || continue
+        mounted="$(mountpoint_for "${part}")"
+        if [[ -n ${mounted} ]] && storage_mount_is_critical "${mounted}"; then
+            continue
+        fi
+        fstype="$(filesystem_for "${part}")"
+        if [[ -z ${fstype} ]]; then
+            blank="$(jq -cn --argjson a "${blank}" --argjson item "$(candidate_json "${part}")" '$a + [$item]')"
+            continue
+        fi
+        case "${fstype}" in
+            xfs|ext4|btrfs)
+                partitions="$(jq -cn --argjson a "${partitions}" --argjson item "$(candidate_json "${part}")" '$a + [$item]')"
+                ;;
+        esac
+    done < <(lsblk -lnpo NAME,TYPE | awk '$2 == "part" {print $1}')
+
+    jq -cn --argjson whole_disks "${whole}" --argjson partitions "${partitions}" \
+        --argjson blank_partitions "${blank}" --argjson free_space_disks "${free}" \
+        '{ok:true,schema_version:"v1",warnings:[],whole_disks:$whole_disks,partitions:$partitions,blank_partitions:$blank_partitions,free_space_disks:$free_space_disks}'
+}
+
+plan() {
+    require_config
+    local request operation raw_device_path device raw_mount mount_point raw_path data_path size_gib current_data
+    local model transport size filesystem mounted parent current_parent table free_line free_size
+    local free_start='' free_end='' planned_end='' planned_mib=0 free_mib=0
+    local exact_confirmation='' destructive=false target_fs='' warnings='[]' target_bytes=0 data_bytes
+    local players_json state online players players_confirmation=false config_identity identity current_identity
+    local current_source current_uuid current_mount
+
+    request="$(cat)"
+    if ! jq -e '
+        type == "object"
+        and ((keys - ["operation","device","mount_point","path","size_gib"]) | length == 0)
+        and (.operation | type == "string")
+        and (.device | type == "string")
+        and (.mount_point | type == "string")
+        and (.path | type == "string")
+        and ((.size_gib // "all") | type == "string")
+    ' >/dev/null 2>&1 <<< "${request}"; then
+        emit_error invalid_request 'Invalid Minecraft data migration planning request.'
+        return 0
+    fi
+
+    operation="$(jq -r '.operation' <<< "${request}")"
+    raw_device_path="$(jq -r '.device' <<< "${request}")"
+    raw_mount="$(jq -r '.mount_point' <<< "${request}")"
+    raw_path="$(jq -r '.path' <<< "${request}")"
+    device="$(real_device "${raw_device_path}")"
+    mount_point="$(realpath -m -- "${raw_mount}" 2>/dev/null || true)"
+    data_path="$(realpath -m -- "${raw_path}" 2>/dev/null || true)"
+    size_gib="$(jq -r '.size_gib // "all"' <<< "${request}")"
+    current_data="$(realpath -m -- "${DATA_PATH}")"
+
+    [[ ${raw_device_path} == "${device}" ]] || { emit_error invalid_target 'Choose a canonical /dev device from JustVoxel storage discovery.'; return 0; }
+    [[ ${raw_mount} == "${mount_point}" && ${raw_path} == "${data_path}" ]] || { emit_error invalid_path 'Use normalized absolute storage paths.'; return 0; }
+    [[ -n ${device} && -b ${device} ]] || { emit_error invalid_target 'Choose a valid local storage device.'; return 0; }
+    storage_validate_mountpoint_path "${mount_point}" >/dev/null 2>&1 || { emit_error invalid_mount 'Choose a safe non-critical mount point.'; return 0; }
+    validate_storage_path "${data_path}" || { emit_error invalid_path 'Choose a valid Minecraft data path.'; return 0; }
+    case "${data_path}/" in
+        "${mount_point}/"*) ;;
+        *) emit_error invalid_path 'Minecraft data path must be inside the selected mount point.'; return 0 ;;
+    esac
+    [[ ${data_path} != "${current_data}" ]] || { emit_error same_path 'New Minecraft data path is the current data path.'; return 0; }
+    if [[ -e ${data_path} ]] && find "${data_path}" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null | grep -q .; then
+        emit_error target_not_empty 'Minecraft data migration target must be empty.'
+        return 0
+    fi
+
+    storage_require_identified_system_disk >/dev/null 2>&1 || {
+        emit_error unsafe_system_disk 'JustVoxel could not identify the system disk safely.'
+        return 0
+    }
+
+    model="$(model_for "${device}")"
+    transport="$(transport_for "${device}")"
+    size="$(size_for "${device}")"; size="${size:-0}"
+    filesystem="$(filesystem_for "${device}")"
+    mounted="$(mountpoint_for "${device}")"
+    parent="$(parent_disk "${device}")"
+    current_source="$(findmnt -n -o SOURCE --target "${current_data}" 2>/dev/null || true)"
+    current_parent="$(parent_disk "${current_source}")"
+
+    case "${operation}" in
+        erase_disk)
+            storage_validate_disk "${device}" >/dev/null 2>&1 || { emit_error invalid_target 'Selected target is not a writable whole disk.'; return 0; }
+            storage_disk_is_system "${device}" && { emit_error system_disk 'The system disk can never be erased by JustVoxel.'; return 0; }
+            storage_has_mounted_children "${device}" && { emit_error mounted_target 'Selected disk or one of its partitions is mounted.'; return 0; }
+            destructive=true
+            exact_confirmation="ERASE ${device}"
+            target_fs=xfs
+            target_bytes="${size}"
+            warnings="$(append_warning "${warnings}" destructive_disk 'This erases the entire selected disk before Minecraft data is copied. The current Minecraft data is not deleted automatically.')"
+            ;;
+        use_partition)
+            storage_validate_partition "${device}" >/dev/null 2>&1 || { emit_error invalid_target 'Selected target is not a writable partition.'; return 0; }
+            case "${filesystem}" in xfs|ext4|btrfs) ;; *) emit_error unsupported_filesystem 'Existing Minecraft data storage must use XFS, ext4, or Btrfs.'; return 0 ;; esac
+            if [[ -n ${mounted} ]]; then
+                storage_mount_is_critical "${mounted}" && { emit_error critical_mount 'Refusing to use a critical system mount.'; return 0; }
+                [[ "$(realpath -m -- "${mounted}")" == "${mount_point}" ]] || { emit_error mount_mismatch 'Selected mounted filesystem does not match the reviewed mount point.'; return 0; }
+                target_bytes="$(df -B1 --output=avail "${mount_point}" 2>/dev/null | tail -n1 | tr -d ' ' || true)"
+            else
+                target_bytes="${size}"
+            fi
+            target_fs="${filesystem}"
+            ;;
+        format_partition)
+            storage_validate_partition "${device}" >/dev/null 2>&1 || { emit_error invalid_target 'Selected target is not a writable partition.'; return 0; }
+            [[ -z ${filesystem} ]] || { emit_error target_has_filesystem 'Only a blank partition can be formatted by this migration flow.'; return 0; }
+            [[ -z ${mounted} ]] || { emit_error mounted_target 'Selected blank partition is mounted.'; return 0; }
+            destructive=true
+            exact_confirmation="FORMAT ${device}"
+            target_fs=xfs
+            target_bytes="${size}"
+            warnings="$(append_warning "${warnings}" destructive_partition 'This formats the selected blank partition as XFS before Minecraft data is copied.')"
+            ;;
+        create_partition)
+            storage_validate_disk "${device}" >/dev/null 2>&1 || { emit_error invalid_target 'Selected target is not a writable disk.'; return 0; }
+            table="$(parted -s -m "${device}" print 2>/dev/null | awk -F: 'NR == 2 {print $6}' || true)"
+            [[ -n ${table} && ${table} != unknown ]] || { emit_error no_partition_table 'Selected disk has no usable partition table.'; return 0; }
+            free_line="$(largest_free_segment "${device}")"
+            [[ -n ${free_line} ]] || { emit_error no_free_space 'No unallocated disk segment is available.'; return 0; }
+            IFS=: read -r _ free_start free_end free_size _ <<< "${free_line}"
+            free_size="${free_size%MiB}"
+            awk -v n="${free_size}" 'BEGIN {exit !(n >= 1024)}' || { emit_error no_free_space 'Largest unallocated segment is smaller than 1 GiB.'; return 0; }
+            free_mib="$(awk -v n="${free_size}" 'BEGIN {printf "%.0f", n}')"
+            if [[ ${size_gib} == all ]]; then
+                planned_end="${free_end}"
+                planned_mib="${free_mib}"
+            elif [[ ${size_gib} =~ ^[1-9][0-9]*$ ]]; then
+                (( size_gib * 1024 <= free_mib )) || { emit_error insufficient_free_space 'Requested partition is larger than the available segment.'; return 0; }
+                planned_mib=$((size_gib * 1024))
+                planned_end="$(awk -v s="${free_start%MiB}" -v m="${planned_mib}" 'BEGIN {printf "%.2fMiB", s + m}')"
+            else
+                emit_error invalid_size 'Partition size must be an integer GiB value or all.'
+                return 0
+            fi
+            destructive=true
+            exact_confirmation="CREATE PARTITION ${device}"
+            target_fs=xfs
+            target_bytes=$((planned_mib * 1024 * 1024))
+            warnings="$(append_warning "${warnings}" partition_table 'JustVoxel will create a new XFS partition only inside the reviewed unallocated segment. Existing partitions are not resized.')"
+            if storage_disk_is_system "${device}"; then
+                warnings="$(append_warning "${warnings}" system_disk_free_space 'The new partition will be created in already-unallocated space on the system disk.')"
+            fi
+            ;;
+        *)
+            emit_error invalid_operation 'Choose whole-disk erase, existing filesystem, blank-partition format, or unallocated-space partition creation.'
+            return 0
+            ;;
+    esac
+
+    data_bytes="$(du -sb -- "${current_data}" 2>/dev/null | awk '{print $1}' || true)"
+    [[ ${data_bytes} =~ ^[0-9]+$ ]] || { emit_error data_unavailable 'Current Minecraft data size could not be measured safely.'; return 0; }
+    [[ ${target_bytes} =~ ^[0-9]+$ ]] || target_bytes=0
+    if (( target_bytes > 0 && target_bytes <= data_bytes )); then
+        emit_error insufficient_space 'Selected target is not large enough for the current Minecraft data.'
+        return 0
+    fi
+
+    players_json="$(/usr/libexec/justvoxel/mjust/web-status-json players 2>/dev/null)" || {
+        emit_error player_status_unavailable 'Minecraft player status could not be checked safely.'
+        return 0
+    }
+    if ! jq -e 'type=="object" and (.state|type=="string") and (.online|type=="number") and (.names|type=="array")' >/dev/null 2>&1 <<< "${players_json}"; then
+        emit_error player_status_unavailable 'Minecraft player status could not be checked safely.'
+        return 0
+    fi
+    state="$(jq -r '.state' <<< "${players_json}")"
+    case "${state}" in running|stopped) ;; *) emit_error player_status_unavailable 'Minecraft player status could not be checked safely.'; return 0 ;; esac
+    online="$(jq -r '.online' <<< "${players_json}")"
+    players="$(jq -c '.names' <<< "${players_json}")"
+    if [[ ${state} == running && ${online} =~ ^[0-9]+$ ]] && (( online > 0 )); then
+        players_confirmation=true
+    fi
+
+    config_identity="$(sha256sum "${JV_CONFIG}" | awk '{print $1}')"
+    identity="$(target_identity "${device}")"
+    [[ -n ${identity} ]] || { emit_error target_unavailable 'Selected target identity could not be captured safely.'; return 0; }
+    current_identity="$(stat -Lc '%d:%i:%s:%Y' "${current_data}" 2>/dev/null || true)"
+    [[ -n ${current_identity} ]] || { emit_error data_unavailable 'Current Minecraft data identity could not be captured safely.'; return 0; }
+    current_mount="${DATA_MOUNT_POINT:-}"
+    current_uuid="${DATA_EXPECTED_UUID:-}"
+    current_source="${DATA_EXPECTED_SOURCE:-}"
+
+    if [[ -n ${parent} && -n ${current_parent} && ${parent} == "${current_parent}" ]]; then
+        warnings="$(append_warning "${warnings}" same_physical_disk 'The selected target is on the same physical disk as the current Minecraft data. This migration changes layout but does not improve disk-failure isolation.')"
+    fi
+    warnings="$(append_warning "${warnings}" old_data_retained 'The old Minecraft data directory will be retained after a successful migration until the administrator removes it manually.')"
+
+    normalized="$(jq -cn \
+        --arg operation "${operation}" --arg device "${device}" --arg model "${model}" --arg transport "${transport}" \
+        --arg filesystem "${target_fs}" --arg mount_point "${mount_point}" --arg path "${data_path}" --arg size_gib "${size_gib}" \
+        --arg free_start "${free_start}" --arg free_end "${free_end}" --arg planned_end "${planned_end}" \
+        --argjson size_bytes "${size}" --argjson data_bytes "${data_bytes}" --argjson target_capacity_bytes "${target_bytes}" \
+        --argjson free_mib "${free_mib}" --argjson planned_mib "${planned_mib}" --arg current_data_path "${current_data}" \
+        '{operation:$operation,device:$device,model:$model,transport:$transport,filesystem:$filesystem,mount_point:$mount_point,path:$path,size_gib:$size_gib,size_bytes:$size_bytes,data_bytes:$data_bytes,target_capacity_bytes:$target_capacity_bytes,current_data_path:$current_data_path,free_start:$free_start,free_end:$free_end,planned_end:$planned_end,free_mib:$free_mib,planned_mib:$planned_mib}')"
+
+    requirements="$(jq -cn \
+        --argjson destructive "${destructive}" --arg confirmation "${exact_confirmation}" \
+        --argjson players_confirmation "${players_confirmation}" --arg minecraft_state "${state}" \
+        --argjson online "${online}" --argjson players "${players}" \
+        '{migration_confirmation_required:true,destructive_confirmation_required:$destructive,confirmation_phrase:$confirmation,players_confirmation_required:$players_confirmation,minecraft_state:$minecraft_state,online:$online,players:$players,exact_space_validation_on_apply:true,cold_backup_required:true,copy_verification_required:true,runtime_validation_required:true}')"
+
+    context="$(jq -cn \
+        --arg config_identity "${config_identity}" --arg target_identity "${identity}" --arg current_data_identity "${current_identity}" \
+        --arg current_data_path "${current_data}" --arg current_mount_point "${current_mount}" --arg current_expected_uuid "${current_uuid}" \
+        --arg current_expected_source "${current_source}" --arg minecraft_uid "${MINECRAFT_UID}" --arg minecraft_gid "${MINECRAFT_GID}" \
+        --arg backup_path "${BACKUP_PATH}" --arg backup_mount_point "${BACKUP_MOUNT_POINT:-}" \
+        --arg backup_expected_uuid "${BACKUP_EXPECTED_UUID:-}" --arg backup_expected_source "${BACKUP_EXPECTED_SOURCE:-}" \
+        '{config_identity:$config_identity,target_identity:$target_identity,current_data_identity:$current_data_identity,current_data_path:$current_data_path,current_mount_point:$current_mount_point,current_expected_uuid:$current_expected_uuid,current_expected_source:$current_expected_source,minecraft_uid:$minecraft_uid,minecraft_gid:$minecraft_gid,backup_path:$backup_path,backup_mount_point:$backup_mount_point,backup_expected_uuid:$backup_expected_uuid,backup_expected_source:$backup_expected_source}')"
+
+    jq -cn --argjson normalized "${normalized}" --argjson warnings "${warnings}" --argjson requirements "${requirements}" --argjson context "${context}" \
+        '{ok:true,schema_version:"v1",normalized:$normalized,warnings:$warnings,requirements:$requirements,context:$context}'
+}
+
+case "${1:-plan}" in
+    discover) discover ;;
+    plan) plan ;;
+    *) emit_error invalid_action 'Usage: admin-data-migration-plan-json {discover|plan}' ;;
+esac
