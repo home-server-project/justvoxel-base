@@ -151,7 +151,7 @@ Run `mjust storage` to open the storage-management menu.
 
 The current direct storage operations are:
 
-- `mjust storage-plan` — read-only storage/device overview
+- `mjust storage-plan` — read-only storage/device overview from the shared Management API discovery
 - `mjust storage-disk` — provision a dedicated whole disk or USB device
 - `mjust storage-partition` — adopt/use an existing partition
 - `mjust storage-free-space` — create a partition only in already-unallocated space

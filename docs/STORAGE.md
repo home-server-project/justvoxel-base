@@ -8,6 +8,10 @@ Minecraft data and backup storage are independent. A typical physical appliance 
 
 Podman's global image store is not relocated by mjust.
 
+## Read-only storage overview
+
+`mjust storage-plan` is a thin Management API frontend. Device discovery, system-disk identification, filesystem metadata, mountpoints, model/transport information, and read-only/system flags come from `GET /v1/admin/storage`; the terminal only formats that authoritative discovery for a human-readable overview. It does not run its own `lsblk` or system-disk discovery path.
+
 ## VM design
 
 The recommended VM layout is:

@@ -28,6 +28,8 @@ restore_worker="${repo_root}/management/cmd/justvoxel-management-agent/restore_w
 validate="${repo_root}/mjust/libexec/validate"
 validate_backend="${repo_root}/mjust/libexec/validate-backend"
 storage_provision="${repo_root}/mjust/libexec/storage-provision"
+storage_plan="${repo_root}/mjust/libexec/storage-plan"
+storage_api="${repo_root}/mjust/libexec/storage-api.sh"
 admin_backup_storage="${repo_root}/management/cmd/justvoxel-management-agent/admin_backup_storage.go"
 admin_storage_provision="${repo_root}/management/cmd/justvoxel-management-agent/admin_storage_provision.go"
 admin_setup_plan="${repo_root}/management/cmd/justvoxel-management-agent/admin_setup_plan.go"
@@ -44,7 +46,7 @@ fail() {
     exit 1
 }
 
-for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${backup_storage}" "${backup_storage_api}" "${setup}" "${setup_api}" "${restore}" "${restore_api}" "${admin_restore}" "${admin_restore_apply}" "${restore_worker}" "${validate}" "${validate_backend}" "${storage_provision}" "${admin_backup_storage}" "${admin_storage_provision}" "${admin_setup_plan}" "${admin_setup_apply}" "${admin_operations}" "${admin_validation}" "${admin_configuration}" "${admin_discovery}" "${operator_surfaces}" "${justfile}"; do
+for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${backup_storage}" "${backup_storage_api}" "${setup}" "${setup_api}" "${restore}" "${restore_api}" "${admin_restore}" "${admin_restore_apply}" "${restore_worker}" "${validate}" "${validate_backend}" "${storage_provision}" "${storage_plan}" "${storage_api}" "${admin_backup_storage}" "${admin_storage_provision}" "${admin_setup_plan}" "${admin_setup_apply}" "${admin_operations}" "${admin_validation}" "${admin_configuration}" "${admin_discovery}" "${operator_surfaces}" "${justfile}"; do
     [[ -f ${file} ]] || fail "missing mJust Management API file: ${file}"
 done
 
@@ -157,6 +159,22 @@ grep -Fq 'backup-storage-api.sh' "${backup_storage}" || fail 'mJust backup stora
 grep -Fq 'jv_backup_storage_apply_target' "${backup_storage}" || fail 'normal backup targets do not apply through the Agent'
 grep -Fq 'jv_backup_storage_apply_provision' "${backup_storage}" || fail 'destructive backup provisioning does not apply through the Agent'
 grep -Fq 'Type exactly:' "${backup_storage_api}" || fail 'destructive backup provisioning exact confirmation is missing'
+
+grep -Fq 'storage-api.sh' "${storage_plan}" || fail 'mJust storage-plan does not use the storage API helper'
+grep -Fq 'jv_storage_discovery' "${storage_plan}" || fail 'mJust storage-plan does not obtain storage discovery from the Agent'
+grep -Fq 'jv_storage_status' "${storage_plan}" || fail 'mJust storage-plan does not obtain the variant through the Management API'
+grep -Fq 'jv_storage_get /v1/admin/storage' "${storage_api}" || fail 'mJust storage discovery route is missing from the API helper'
+grep -Fq 'jv_storage_get /v1/status' "${storage_api}" || fail 'mJust storage-plan variant status route is missing from the API helper'
+grep -Fq 'GET /v1/admin/storage' "${admin_discovery}" || fail 'Management Agent storage discovery route is missing'
+for forbidden in 'lsblk ' 'findmnt ' 'storage-common.sh' 'storage-common-base.sh' 'storage_system_disks' 'storage_show_devices' 'storage_is_vm' 'storage_is_hwe'; do
+    if grep -Fq "${forbidden}" "${storage_plan}"; then
+        fail "mJust storage-plan still performs direct host storage discovery: ${forbidden}"
+    fi
+done
+if grep -Fq 'Authorization:' "${storage_api}"; then
+    fail 'mJust storage API helper must not introduce a bearer token'
+fi
+
 grep -Fq '/usr/libexec/justvoxel/mjust/backup-storage backup' "${storage_provision}" || fail 'configured backup storage menu does not delegate to the API frontend'
 grep -Fq '/usr/libexec/justvoxel/mjust/backup-storage "${mode}"' "${storage_provision}" || fail 'configured local backup provisioning does not delegate to the API frontend'
 grep -Fq '/usr/libexec/justvoxel/mjust/backup-storage network' "${storage_provision}" || fail 'configured network backup storage does not delegate to the API frontend'
