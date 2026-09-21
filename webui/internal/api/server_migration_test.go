@@ -161,7 +161,6 @@ func TestServerMigrationDiscoveryRejectsUnknownResponseFields(t *testing.T) {
 	}
 }
 
-
 func TestServerMigrationClientMapsAuthorizationErrors(t *testing.T) {
 	for _, tc := range []struct {
 		status int
