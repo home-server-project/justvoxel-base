@@ -178,8 +178,12 @@ _a54_mount_network_target() {
         _a54_write_network_fstab "${source}" "${mountpoint}" cifs "${options}" || return 1
     fi
 
-    output="$(mount "${mountpoint}" 2>&1)"
+    local mount_output_file
+    mount_output_file="$(mktemp "${A53_TX_DIR}/.mount-output.XXXXXX")" || return 1
+    mount "${mountpoint}" >"${mount_output_file}" 2>&1
     rc=$?
+    output="$(cat -- "${mount_output_file}" 2>/dev/null || true)"
+    rm -f -- "${mount_output_file}"
     _a53_evidence_set_bounded backup_mount_output "${output}"
     if (( rc != 0 )); then
         _a53_evidence_set backup_mount_result failed
@@ -219,8 +223,12 @@ _a53_mount_target() {
         _a53_ensure_dir "${mountpoint}" 0755 || return 1
     fi
     _a53_write_local_fstab "${expected_uuid}" "${mountpoint}" "${filesystem}" || return 1
-    output="$(mount "${mountpoint}" 2>&1)"
+    local mount_output_file
+    mount_output_file="$(mktemp "${A53_TX_DIR}/.mount-output.XXXXXX")" || return 1
+    mount "${mountpoint}" >"${mount_output_file}" 2>&1
     rc=$?
+    output="$(cat -- "${mount_output_file}" 2>/dev/null || true)"
+    rm -f -- "${mount_output_file}"
     _a53_evidence_set_bounded "${role}_mount_output" "${output}"
     if (( rc != 0 )); then
         _a53_evidence_set "${role}_mount_result" failed
