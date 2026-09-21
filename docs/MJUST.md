@@ -157,13 +157,15 @@ The current direct storage operations are:
 - `mjust storage-free-space` — create a partition only in already-unallocated space
 - `mjust storage-network` — configure NFS or SMB/CIFS backup storage
 - `mjust storage-system` — use a normal directory on the system filesystem
-- `mjust storage-migrate` — move active Minecraft data to provisioned local storage
+- `mjust storage-migrate` — migrate active Minecraft data through the shared persistent Management API transaction
 
 Destructive storage actions require exact typed confirmations such as `ERASE /dev/...`, `FORMAT /dev/...`, or `CREATE PARTITION /dev/...`. A simple yes/no confirmation is not enough.
 
 JustVoxel protects detected system disks from whole-disk erase and does not automatically shrink existing filesystems or partitions.
 
-New local mounts created by mjust use filesystem UUIDs rather than temporary device names such as `/dev/sdb1`.
+New local mounts created by JustVoxel use filesystem UUIDs rather than temporary device names such as `/dev/sdb1`.
+
+Minecraft data migration is now API-owned: mjust only selects the Agent-discovered target, presents the reviewed plan, collects required confirmations, and monitors/reconnects to the persistent operation. Target provisioning, player safety, the cold backup, copy/verification, configuration switching, SELinux/runtime work, validation, and rollback are owned by the Management Agent and shared backend.
 
 See `STORAGE.md` for supported layouts, network storage, migration behavior, and storage safety rules.
 
