@@ -121,7 +121,7 @@ func runSetupStorageTransactionAction(parent context.Context, action string, tim
 	defer cancel()
 	output, err := runAdminSetupStorageTransactionHelper(ctx, action, payload)
 	if err != nil {
-		return response, fmt.Errorf("setup storage transaction helper failed: %w", err)
+		return response, newSetupHelperExecutionError("storage", action, err, output)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(output))
 	decoder.DisallowUnknownFields()
@@ -161,6 +161,9 @@ func executeSetupStorage(parent context.Context, store *operationStore, operatio
 		return err
 	}
 	validation, err := runSetupStorageTransactionAction(parent, "validate", setupStorageValidateTimeout, request)
+	if err != nil {
+		store.appendSetupHelperFailureBestEffort(operationID, "storage", "validate", err)
+	}
 	if err != nil || !validation.OK {
 		return finishSetupStorageWithoutMutation(store, operationID, validation, err)
 	}
@@ -169,6 +172,9 @@ func executeSetupStorage(parent context.Context, store *operationStore, operatio
 		return err
 	}
 	applied, err := runSetupStorageTransactionAction(parent, "apply", setupStorageApplyTimeout, request)
+	if err != nil {
+		store.appendSetupHelperFailureBestEffort(operationID, "storage", "apply", err)
+	}
 	if err != nil {
 		_, _ = store.transition(operationID, operationNeedsAttention, "storage_unknown", "Storage execution stopped without a trustworthy rollback result.")
 		return err
@@ -240,7 +246,11 @@ func rollbackSetupStorage(parent context.Context, store *operationStore, operati
 	if err != nil {
 		return response, err
 	}
-	return runSetupStorageTransactionAction(parent, "rollback", setupStorageRollbackTimeout, request)
+	response, err = runSetupStorageTransactionAction(parent, "rollback", setupStorageRollbackTimeout, request)
+	if err != nil {
+		store.appendSetupHelperFailureBestEffort(operationID, "storage", "rollback", err)
+	}
+	return response, err
 }
 
 func executeSetupLocalStorage(parent context.Context, store *operationStore, operationID string, plan *adminSetupNormalizedPlan) error {

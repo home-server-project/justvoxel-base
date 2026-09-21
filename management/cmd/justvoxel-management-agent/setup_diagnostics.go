@@ -24,8 +24,10 @@ const (
 )
 
 var (
-	setupDiagnosticIPv4Pattern = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
-	setupDiagnosticKeyPattern  = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$`)
+	setupDiagnosticIPv4Pattern         = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
+	setupDiagnosticHostnamePattern     = regexp.MustCompile(`(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,62})\.)+(?:[a-z]{2,63}|local|lan|home|internal)\b`)
+	setupDiagnosticInlineSecretPattern = regexp.MustCompile(`(?i)\b(password|secret|token|authorization|cookie|credential)\s*[:=]\s*[^\s]+`)
+	setupDiagnosticKeyPattern          = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$`)
 	runBootcStatusJSON         = func(ctx context.Context) ([]byte, error) {
 		return exec.CommandContext(ctx, "bootc", "status", "--json").CombinedOutput()
 	}
@@ -49,6 +51,48 @@ type setupDiagnosticEventRequest struct {
 type setupDiagnosticImageIdentity struct {
 	Reference string
 	Digest    string
+}
+
+type setupHelperExecutionError struct {
+	Component string
+	Action    string
+	Cause     error
+	Output    string
+}
+
+func (e *setupHelperExecutionError) Error() string {
+	if e == nil {
+		return "setup helper failed"
+	}
+	if e.Cause == nil {
+		return fmt.Sprintf("setup %s %s helper failed", e.Component, e.Action)
+	}
+	return fmt.Sprintf("setup %s %s helper failed: %v", e.Component, e.Action, e.Cause)
+}
+
+func (e *setupHelperExecutionError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
+func newSetupHelperExecutionError(component, action string, cause error, output []byte) error {
+	return &setupHelperExecutionError{
+		Component: component,
+		Action:    action,
+		Cause:     cause,
+		Output:    boundedSetupDiagnosticHelperOutput(output),
+	}
+}
+
+func boundedSetupDiagnosticHelperOutput(output []byte) string {
+	const max = 16 * 1024
+	value := strings.ToValidUTF8(string(output), "�")
+	if len(value) > max {
+		value = value[:max] + "…"
+	}
+	return value
 }
 
 func registerAdminSetupDiagnosticRoutes(mux *http.ServeMux, s *server) {
@@ -375,7 +419,37 @@ func (s *operationStore) appendSetupWorkerErrorBestEffort(operationID string, er
 	if s == nil || err == nil || !validOperationID(operationID) {
 		return
 	}
-	_ = s.appendSetupDiagnostic(operationID, "ERROR", "setup worker finished with an error", map[string]string{"error": err.Error()})
+	_ = s.appendSetupDiagnostic(operationID, "ERROR", "setup worker finished with an error", setupDiagnosticErrorValues(err))
+}
+
+func (s *operationStore) appendSetupHelperFailureBestEffort(operationID, component, action string, err error) {
+	if s == nil || err == nil || !validOperationID(operationID) {
+		return
+	}
+	values := setupDiagnosticErrorValues(err)
+	values["component"] = component
+	values["action"] = action
+	_ = s.appendSetupDiagnostic(operationID, "ERROR", "setup helper command failed", values)
+}
+
+func setupDiagnosticErrorValues(err error) map[string]string {
+	values := map[string]string{"error": err.Error()}
+	var helperErr *setupHelperExecutionError
+	if errors.As(err, &helperErr) && strings.TrimSpace(helperErr.Output) != "" {
+		values["helper_output"] = helperErr.Output
+	}
+	return values
+}
+
+func setupDiagnosticPlanningErrorValues(err *adminSetupPlanningError) map[string]string {
+	if err == nil {
+		return map[string]string{}
+	}
+	values := map[string]string{"error": err.message}
+	if strings.TrimSpace(err.detail) != "" {
+		values["helper_output"] = err.detail
+	}
+	return values
 }
 
 func setupDiagnosticPlanRequestValues(request adminSetupPlanRequest) map[string]string {
@@ -456,9 +530,11 @@ func sanitizeSetupDiagnosticValue(key, value, hostname string) string {
 func sanitizeSetupDiagnosticText(value, hostname string) string {
 	value = strings.ReplaceAll(value, "\r", " ")
 	value = strings.ReplaceAll(value, "\n", " ")
+	value = setupDiagnosticInlineSecretPattern.ReplaceAllString(value, "$1=<REDACTED>")
 	if hostname != "" {
 		value = replaceFold(value, hostname, "<HOSTNAME-REDACTED>")
 	}
+	value = setupDiagnosticHostnamePattern.ReplaceAllString(value, "<HOSTNAME-REDACTED>")
 	value = setupDiagnosticIPv4Pattern.ReplaceAllStringFunc(value, func(candidate string) string {
 		ip := net.ParseIP(candidate)
 		if ip != nil && ip.To4() != nil {

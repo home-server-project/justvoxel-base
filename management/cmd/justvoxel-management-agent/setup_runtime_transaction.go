@@ -117,7 +117,7 @@ func runSetupRuntimeTransactionAction(parent context.Context, action string, tim
 	defer cancel()
 	output, err := runAdminSetupRuntimeTransactionHelper(ctx, action, payload)
 	if err != nil {
-		return response, fmt.Errorf("setup runtime transaction helper failed: %w", err)
+		return response, newSetupHelperExecutionError("runtime", action, err, output)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(output))
 	decoder.DisallowUnknownFields()
@@ -159,6 +159,9 @@ func executeSetupTransaction(parent context.Context, store *operationStore, oper
 		return err
 	}
 	validated, err := runSetupRuntimeTransactionAction(parent, "validate", setupRuntimeValidateTimeout, request)
+	if err != nil {
+		store.appendSetupHelperFailureBestEffort(operationID, "runtime", "validate", err)
+	}
 	if err != nil || !validated.OK {
 		if err == nil {
 			err = errors.New(setupRuntimeFirstNonEmpty(validated.Error, "runtime preflight failed"))
@@ -169,6 +172,9 @@ func executeSetupTransaction(parent context.Context, store *operationStore, oper
 		return err
 	}
 	applied, err := runSetupRuntimeTransactionAction(parent, "apply", setupRuntimeApplyTimeout, request)
+	if err != nil {
+		store.appendSetupHelperFailureBestEffort(operationID, "runtime", "apply", err)
+	}
 	if err != nil || !applied.OK || !applied.Applied {
 		if err == nil {
 			err = errors.New(setupRuntimeFirstNonEmpty(applied.Error, "runtime activation failed"))
@@ -180,6 +186,9 @@ func executeSetupTransaction(parent context.Context, store *operationStore, oper
 		return err
 	}
 	verified, err := runSetupRuntimeTransactionAction(parent, "verify", setupRuntimeVerifyTimeout, request)
+	if err != nil {
+		store.appendSetupHelperFailureBestEffort(operationID, "runtime", "verify", err)
+	}
 	if err != nil || !verified.OK {
 		if err == nil {
 			err = errors.New(setupRuntimeFirstNonEmpty(verified.Error, "Minecraft runtime verification failed"))
@@ -190,6 +199,9 @@ func executeSetupTransaction(parent context.Context, store *operationStore, oper
 		return err
 	}
 	committed, err := runSetupRuntimeTransactionAction(parent, "commit", setupRuntimeCommitTimeout, request)
+	if err != nil {
+		store.appendSetupHelperFailureBestEffort(operationID, "runtime", "commit", err)
+	}
 	if err != nil || !committed.OK {
 		if err == nil {
 			err = errors.New(setupRuntimeFirstNonEmpty(committed.Error, "configured state could not be committed"))
@@ -215,6 +227,9 @@ func failSetupAfterStorage(parent context.Context, store *operationStore, operat
 	}
 	if runtimeRequest.OperationID != "" {
 		rolledRuntime, err := runSetupRuntimeTransactionAction(parent, "rollback", setupRuntimeRollbackTimeout, runtimeRequest)
+	if err != nil {
+		store.appendSetupHelperFailureBestEffort(operationID, "runtime", "rollback", err)
+	}
 		if err != nil || !rolledRuntime.OK {
 			_, _ = store.transition(operationID, operationNeedsAttention, "runtime_rollback", "Runtime rollback could not be confirmed; manual attention is required.")
 			return cause

@@ -118,3 +118,26 @@ func TestSetupDiagnosticFilesArePrivateAndUnknownIDsAreRejected(t *testing.T) {
 		t.Fatal("invalid diagnostic id unexpectedly accepted")
 	}
 }
+
+func TestSetupHelperFailureDetailIsSanitizedAndNotExposedByError(t *testing.T) {
+	originalBootc := runBootcStatusJSON
+	runBootcStatusJSON = func(context.Context) ([]byte, error) { return nil, errors.New("bootc unavailable") }
+	t.Cleanup(func() { runBootcStatusJSON = originalBootc })
+
+	store := openTestOperationStore(t)
+	store.diagnosticHostname = "private-vm-host"
+	id, err := store.beginSetupDiagnostic("webui")
+	if err != nil { t.Fatal(err) }
+	helperErr := newSetupHelperExecutionError("runtime", "verify", errors.New("exit status 1"), []byte("podman network connect failed on private-vm-host 192.168.0.59 via nas.private.example password=do-not-leak"))
+	if strings.Contains(helperErr.Error(), "192.168.0.59") || strings.Contains(helperErr.Error(), "do-not-leak") { t.Fatalf("helper Error() exposed diagnostic detail: %v", helperErr) }
+	store.appendSetupHelperFailureBestEffort(id, "runtime", "verify", helperErr)
+	data, err := store.readSetupDiagnostic(id)
+	if err != nil { t.Fatal(err) }
+	text := string(data)
+	for _, forbidden := range []string{"private-vm-host", "192.168.0.59", "nas.private.example", "do-not-leak"} {
+		if strings.Contains(strings.ToLower(text), strings.ToLower(forbidden)) { t.Fatalf("diagnostic helper output leaked %q: %s", forbidden, text) }
+	}
+	for _, want := range []string{"podman network connect failed", "<HOSTNAME-REDACTED>", "<IP-REDACTED>", "password=<REDACTED>"} {
+		if !strings.Contains(text, want) { t.Fatalf("diagnostic helper output missing %q: %s", want, text) }
+	}
+}

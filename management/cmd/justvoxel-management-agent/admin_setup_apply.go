@@ -83,6 +83,9 @@ func (s *server) adminSetupApply(w http.ResponseWriter, r *http.Request) {
 
 	plan, preflightErr := authoritativeAdminSetupPlan(r.Context(), request.Request)
 	if preflightErr != nil {
+		if validOperationID(diagnosticID) {
+			_ = s.operations.appendSetupDiagnostic(diagnosticID, "PLAN", "setup Apply revalidation unavailable", setupDiagnosticPlanningErrorValues(preflightErr))
+		}
 		writeAdminSetupApplyFailure(w, preflightErr.status, "preflight_unavailable", preflightErr.message)
 		return
 	}
@@ -166,7 +169,7 @@ func setupAlreadyConfiguredForApply(parent context.Context) (bool, *adminSetupPl
 	defer cancel()
 	output, err := runAdminDiscoveryHelper(ctx, "configuration")
 	if err != nil {
-		return false, &adminSetupPlanningError{status: http.StatusServiceUnavailable, message: "appliance configuration preflight is unavailable"}
+		return false, &adminSetupPlanningError{status: http.StatusServiceUnavailable, message: "appliance configuration preflight is unavailable", detail: boundedSetupDiagnosticHelperOutput(output)}
 	}
 	decoder := json.NewDecoder(bytes.NewReader(output))
 	decoder.DisallowUnknownFields()

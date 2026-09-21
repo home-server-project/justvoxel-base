@@ -234,6 +234,7 @@ func registerAdminSetupPlanRoutes(mux *http.ServeMux, s *server) {
 type adminSetupPlanningError struct {
 	status  int
 	message string
+	detail  string
 }
 
 func (e *adminSetupPlanningError) Error() string { return e.message }
@@ -254,7 +255,7 @@ func (s *server) adminSetupPlan(w http.ResponseWriter, r *http.Request) {
 	out, planningErr := authoritativeAdminSetupPlan(r.Context(), request)
 	if planningErr != nil {
 		if s.operations != nil && validOperationID(diagnosticID) {
-			_ = s.operations.appendSetupDiagnostic(diagnosticID, "PLAN", "setup planning unavailable", map[string]string{"error": planningErr.message})
+			_ = s.operations.appendSetupDiagnostic(diagnosticID, "PLAN", "setup planning unavailable", setupDiagnosticPlanningErrorValues(planningErr))
 		}
 		writeError(w, planningErr.status, planningErr.message)
 		return
@@ -289,10 +290,10 @@ func authoritativeAdminSetupPlan(parent context.Context, request adminSetupPlanR
 	defer cancel()
 	output, err := runAdminSetupPlanHelper(ctx, payload)
 	if err != nil {
-		return out, &adminSetupPlanningError{status: http.StatusServiceUnavailable, message: "first-run setup planning is unavailable"}
+		return out, &adminSetupPlanningError{status: http.StatusServiceUnavailable, message: "first-run setup planning is unavailable", detail: boundedSetupDiagnosticHelperOutput(output)}
 	}
 	if err := decodeAdminSetupPlanResponse(output, &out); err != nil {
-		return out, &adminSetupPlanningError{status: http.StatusInternalServerError, message: "first-run setup planner returned invalid data"}
+		return out, &adminSetupPlanningError{status: http.StatusInternalServerError, message: "first-run setup planner returned invalid data", detail: boundedSetupDiagnosticHelperOutput(output)}
 	}
 	if out.SchemaVersion != "v1" {
 		return out, &adminSetupPlanningError{status: http.StatusInternalServerError, message: "first-run setup planner returned an unsupported schema"}
