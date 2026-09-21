@@ -39,6 +39,13 @@ Recent WebUI storage work is implemented and now needs real-system validation:
   - Agent-discovered local migration targets
   - authoritative review, destructive/player confirmations, and plan re-validation
   - persistent migration progress, reconnect, rollback, and needs-attention recovery state
+- Server Migration
+  - Administrator-only Export, Import, and Recovery
+  - local/configured-backup/device/USB/NFS/SMB transport choices through Agent planning
+  - fresh-destination storage, ports, memory, timezone, backup schedule and retention review
+  - persistent progress/reconnect across Export, Import, and Recovery
+  - rollback, needs-attention handoff, and fresh-unconfigured Recovery
+  - no browser-side migration/storage/Minecraft execution engine and no browser file upload
 - First-run setup
   - Minecraft data-storage selection
   - backup-destination selection
@@ -63,7 +70,7 @@ Rebuild mJust around the same authoritative management layer already used by the
 - do not delete helpers merely because they currently live under `mjust/libexec`; helpers used by the Management Agent remain shared implementation until they are safely moved or rewritten
 - progressively move shared backend helpers out of the misleading mJust namespace after direct CLI callers have been removed
 
-The server-migration terminal rebuild is complete: Export, Import, and Recovery share the persistent Management API operation family, and their mJust commands are thin frontends over the same authoritative backend. Migration WebUI parity remains a separate follow-up.
+The server-migration terminal rebuild and WebUI parity are complete: Export, Import, and Recovery share one persistent Management API operation family, and both mJust and the Administrator WebUI are thin frontends over the same authoritative backend. Remaining P0 work for migration is real-system validation of transports, interruption/reconnect behavior, rollback, needs-attention Recovery, and fresh-unconfigured Recovery rather than another migration implementation.
 
 Management API gaps that still need shared implementations before the corresponding direct CLI paths can disappear include:
 

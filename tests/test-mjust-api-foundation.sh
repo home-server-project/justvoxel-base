@@ -59,6 +59,13 @@ migration_import_transaction_backend="${repo_root}/mjust/libexec/admin-migration
 admin_migration_import_plan="${repo_root}/management/cmd/justvoxel-management-agent/admin_migration_import_plan.go"
 admin_migration_import_apply="${repo_root}/management/cmd/justvoxel-management-agent/admin_migration_import_apply.go"
 migration_import_worker="${repo_root}/management/cmd/justvoxel-management-agent/migration_import_worker.go"
+webui_migration_api="${repo_root}/webui/internal/api/server_migration.go"
+webui_persistent_operations="${repo_root}/webui/internal/api/persistent_operations.go"
+webui_migration_page="${repo_root}/webui/internal/server/admin_server_migration_page.go"
+webui_migration_export_page="${repo_root}/webui/internal/server/admin_server_migration_export_page.go"
+webui_migration_import_page="${repo_root}/webui/internal/server/admin_server_migration_import_page.go"
+webui_migration_recovery_page="${repo_root}/webui/internal/server/admin_server_migration_recovery_page.go"
+webui_migration_progress="${repo_root}/webui/internal/server/static/server-migration-operation.js"
 admin_backup_storage="${repo_root}/management/cmd/justvoxel-management-agent/admin_backup_storage.go"
 admin_storage_provision="${repo_root}/management/cmd/justvoxel-management-agent/admin_storage_provision.go"
 admin_setup_plan="${repo_root}/management/cmd/justvoxel-management-agent/admin_setup_plan.go"
@@ -75,7 +82,7 @@ fail() {
     exit 1
 }
 
-for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${backup_storage}" "${backup_storage_api}" "${setup}" "${setup_api}" "${restore}" "${restore_api}" "${admin_restore}" "${admin_restore_apply}" "${restore_worker}" "${validate}" "${validate_backend}" "${storage_provision}" "${storage_plan}" "${storage_api}" "${data_migration}" "${data_migration_api}" "${data_migration_plan_backend}" "${data_migration_transaction_backend}" "${admin_data_migration_plan}" "${admin_data_migration_apply}" "${data_migration_worker}" "${migration_export}" "${migration_api}" "${migration_export_backend}" "${migration_export_plan_backend}" "${migration_export_transaction_backend}" "${admin_migration_export_plan}" "${admin_migration_export_apply}" "${migration_export_worker}" "${migration_recovery}" "${migration_recovery_backend}" "${migration_recovery_plan_backend}" "${migration_recovery_transaction_backend}" "${admin_migration_recovery}" "${admin_migration_recovery_apply}" "${migration_recovery_worker}" "${migration_import}" "${migration_import_backend}" "${migration_import_plan_backend}" "${migration_import_transaction_backend}" "${admin_migration_import_plan}" "${admin_migration_import_apply}" "${migration_import_worker}" "${admin_backup_storage}" "${admin_storage_provision}" "${admin_setup_plan}" "${admin_setup_apply}" "${admin_operations}" "${admin_validation}" "${admin_configuration}" "${admin_discovery}" "${operator_surfaces}" "${justfile}"; do
+for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${backup_storage}" "${backup_storage_api}" "${setup}" "${setup_api}" "${restore}" "${restore_api}" "${admin_restore}" "${admin_restore_apply}" "${restore_worker}" "${validate}" "${validate_backend}" "${storage_provision}" "${storage_plan}" "${storage_api}" "${data_migration}" "${data_migration_api}" "${data_migration_plan_backend}" "${data_migration_transaction_backend}" "${admin_data_migration_plan}" "${admin_data_migration_apply}" "${data_migration_worker}" "${migration_export}" "${migration_api}" "${migration_export_backend}" "${migration_export_plan_backend}" "${migration_export_transaction_backend}" "${admin_migration_export_plan}" "${admin_migration_export_apply}" "${migration_export_worker}" "${migration_recovery}" "${migration_recovery_backend}" "${migration_recovery_plan_backend}" "${migration_recovery_transaction_backend}" "${admin_migration_recovery}" "${admin_migration_recovery_apply}" "${migration_recovery_worker}" "${migration_import}" "${migration_import_backend}" "${migration_import_plan_backend}" "${migration_import_transaction_backend}" "${admin_migration_import_plan}" "${admin_migration_import_apply}" "${migration_import_worker}" "${webui_migration_api}" "${webui_persistent_operations}" "${webui_migration_page}" "${webui_migration_export_page}" "${webui_migration_import_page}" "${webui_migration_recovery_page}" "${webui_migration_progress}" "${admin_backup_storage}" "${admin_storage_provision}" "${admin_setup_plan}" "${admin_setup_apply}" "${admin_operations}" "${admin_validation}" "${admin_configuration}" "${admin_discovery}" "${operator_surfaces}" "${justfile}"; do
     [[ -f ${file} ]] || fail "missing mJust Management API file: ${file}"
 done
 
@@ -321,6 +328,40 @@ grep -Fq 'migration-import-backend' "${migration_import_transaction_backend}" ||
 grep -Fq 'jv_migration_api_result' "${repo_root}/mjust/libexec/migration-import-common.sh" || fail 'server migration Import backend does not report rollback safety to the Agent'
 bash -n "${migration_import_backend}" "${migration_import_plan_backend}" "${migration_import_transaction_backend}" || fail 'server migration Import shell source failed bash syntax validation'
 
+# Step 5B.5: both frontends must remain clients of the same server-migration API and operation family.
+for route in     '/v1/admin/migration/export'     '/v1/admin/migration/export/plan'     '/v1/admin/migration/export/apply'     '/v1/admin/migration/import'     '/v1/admin/migration/import/plan'     '/v1/admin/migration/import/apply'     '/v1/admin/migration/recovery'     '/v1/admin/migration/recovery/plan'     '/v1/admin/migration/recovery/apply'; do
+    grep -Fq ""${route}"" "${webui_migration_api}" || fail "WebUI server migration API route missing: ${route}"
+    grep -Fq "${route}" "${migration_api}" || fail "mJust server migration API route missing: ${route}"
+done
+grep -Fq '"/v1/admin/migration/current-operation"' "${webui_persistent_operations}" || fail 'WebUI server migration current-operation route is missing'
+grep -Fq '/v1/admin/migration/current-operation' "${migration_api}" || fail 'mJust server migration current-operation route is missing'
+grep -Fq 'AdminMigrationExportPlan' "${webui_migration_export_page}" || fail 'WebUI Export no longer plans through the Management API'
+grep -Fq 'AdminMigrationExportApply' "${webui_migration_export_page}" || fail 'WebUI Export no longer applies through the Management API'
+grep -Fq 'AdminMigrationImportPlan' "${webui_migration_import_page}" || fail 'WebUI Import no longer plans through the Management API'
+grep -Fq 'AdminMigrationImportApply' "${webui_migration_import_page}" || fail 'WebUI Import no longer applies through the Management API'
+grep -Fq 'AdminMigrationRecoveryPlan' "${webui_migration_recovery_page}" || fail 'WebUI Recovery no longer plans through the Management API'
+grep -Fq 'AdminMigrationRecoveryApply' "${webui_migration_recovery_page}" || fail 'WebUI Recovery no longer applies through the Management API'
+grep -Fq 'AdminCurrentMigrationOperation' "${webui_migration_page}" || fail 'WebUI migration hub lost persistent operation reconnect'
+
+for frontend in "${webui_migration_export_page}" "${webui_migration_import_page}" "${webui_migration_recovery_page}"; do
+    for forbidden in 'os/exec' 'exec.Command' 'systemctl ' 'podman ' 'rcon-cli' 'JV_MAINTENANCE_LOCK' 'migration-export-backend' 'migration-import-backend' 'migration-recover-backend' 'restore-runtime-validate' 'rm -rf' 'write_main_config' 'render_runtime' 'lsblk ' 'findmnt ' 'mkfs' 'parted ' 'wipefs ' 'storage-common.sh'; do
+        if grep -Fq "${forbidden}" "${frontend}"; then
+            fail "WebUI server migration frontend performs direct backend/safety work: ${frontend}: ${forbidden}"
+        fi
+    done
+done
+
+for state in queued validating running verifying rolling_back succeeded rolled_back needs_attention; do
+    grep -Fq ""${state}"" "${webui_migration_progress}" || fail "WebUI migration progress lost persistent state: ${state}"
+done
+for terminal in succeeded rolled_back needs_attention; do
+    grep -Fq "${terminal})" "${migration_api}" || fail "mJust migration monitor lost terminal state: ${terminal}"
+done
+for operation_type in migration_export migration_import migration_recovery; do
+    grep -Fq ""${operation_type}"" "${webui_migration_progress}" || fail "WebUI migration progress lost operation type: ${operation_type}"
+    grep -Fq "${operation_type}" "${migration_api}" || fail "mJust migration frontend lost operation type: ${operation_type}"
+done
+
 grep -Fq 'registerAdminBackupStorageRoutes' "${admin_backup_storage}" || fail 'Management Agent backup storage routes are missing'
 grep -Fq 'registerAdminStorageProvisionRoutes' "${admin_storage_provision}" || fail 'Management Agent storage provisioning routes are missing'
 
@@ -402,4 +443,4 @@ if grep -Fq 'Authorization:' "${validate}"; then
     fail 'mJust validate frontend must not introduce a bearer token'
 fi
 
-echo 'mJust Management API foundation, Players, Minecraft control, Status, Whitelist, Manual Backup, Logs, Configuration, Backup Storage, Minecraft Data Migration, Server Migration Export API, First-run Setup, Restore, and Validation migration checks passed.'
+echo 'mJust/WebUI Management API foundation, Players, Minecraft control, Status, Whitelist, Manual Backup, Logs, Configuration, Backup Storage, Minecraft Data Migration, complete Server Migration parity, First-run Setup, Restore, and Validation checks passed.'

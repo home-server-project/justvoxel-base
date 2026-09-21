@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -157,5 +158,28 @@ func TestServerMigrationDiscoveryRejectsUnknownResponseFields(t *testing.T) {
 	})}}
 	if _, err := client.AdminMigrationRecoveryDiscovery(context.Background(), "session-token"); err == nil {
 		t.Fatal("unknown migration response field unexpectedly accepted")
+	}
+}
+
+
+func TestServerMigrationClientMapsAuthorizationErrors(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		want   error
+	}{
+		{status: http.StatusUnauthorized, want: ErrUnauthorized},
+		{status: http.StatusForbidden, want: ErrPasswordChangeRequired},
+	} {
+		client := &Client{http: &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: tc.status,
+				Body:       io.NopCloser(strings.NewReader(`{"error":"denied"}`)),
+				Header:     make(http.Header),
+			}, nil
+		})}}
+		_, err := client.AdminMigrationRecoveryDiscovery(context.Background(), "session-token")
+		if !errors.Is(err, tc.want) {
+			t.Fatalf("status %d error = %v, want %v", tc.status, err, tc.want)
+		}
 	}
 }

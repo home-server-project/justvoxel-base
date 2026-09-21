@@ -15,6 +15,7 @@ const serverMigrationFingerprint = "sha256:ccccccccccccccccccccccccccccccccccccc
 type fakeServerMigrationAPI struct {
 	fakeAPI
 	role            string
+	sessionErr      error
 	exportDiscovery api.AdminMigrationExportDiscoveryResponse
 	importDiscovery api.AdminMigrationImportDiscoveryResponse
 	recovery        api.AdminMigrationRecoveryDiscoveryResponse
@@ -24,6 +25,9 @@ type fakeServerMigrationAPI struct {
 }
 
 func (f *fakeServerMigrationAPI) Session(_ context.Context, session string) (api.SessionInfo, error) {
+	if f.sessionErr != nil {
+		return api.SessionInfo{}, f.sessionErr
+	}
 	if session != "session-token" {
 		return api.SessionInfo{}, api.ErrUnauthorized
 	}
