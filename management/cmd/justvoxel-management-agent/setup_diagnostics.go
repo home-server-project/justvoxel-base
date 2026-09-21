@@ -26,7 +26,7 @@ const (
 var (
 	setupDiagnosticIPv4Pattern         = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
 	setupDiagnosticHostnamePattern     = regexp.MustCompile(`(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,62})\.)+(?:[a-z]{2,63}|local|lan|home|internal)\b`)
-	setupDiagnosticInlineSecretPattern = regexp.MustCompile(`(?i)\b(password|secret|token|authorization|cookie|credential)\s*[:=]\s*[^\s]+`)
+	setupDiagnosticInlineSecretPattern = regexp.MustCompile(`(?i)\b[a-z0-9_]*(password|secret|token|authorization|cookie|credential)[a-z0-9_]*\s*[:=]\s*[^\s]+`)
 	setupDiagnosticKeyPattern          = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$`)
 	runBootcStatusJSON = func(ctx context.Context) ([]byte, error) {
 		return exec.CommandContext(ctx, "bootc", "status", "--json").CombinedOutput()

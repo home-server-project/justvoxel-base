@@ -157,6 +157,7 @@ func executeSetupTransaction(parent context.Context, store *operationStore, oper
 	if _, err := store.updateProgress(operationID, operationRunning, "runtime_preflight", "Validating first-run Minecraft runtime activation."); err != nil {
 		return err
 	}
+	store.appendSetupRuntimeEvidenceBestEffort(operationID, "preflight", plan)
 	validated, err := runSetupRuntimeTransactionAction(parent, "validate", setupRuntimeValidateTimeout, request)
 	if err != nil {
 		store.appendSetupHelperFailureBestEffort(operationID, "runtime", "validate", err)
@@ -165,6 +166,7 @@ func executeSetupTransaction(parent context.Context, store *operationStore, oper
 		if err == nil {
 			err = errors.New(setupRuntimeFirstNonEmpty(validated.Error, "runtime preflight failed"))
 		}
+		store.appendSetupRuntimeFailureBundleBestEffort(operationID, "validate", plan, err)
 		return failSetupAfterStorage(parent, store, operationID, plan, request, err)
 	}
 	if _, err := store.updateProgress(operationID, operationRunning, "runtime_config", "Writing transactional Minecraft runtime configuration."); err != nil {
@@ -178,13 +180,17 @@ func executeSetupTransaction(parent context.Context, store *operationStore, oper
 		if err == nil {
 			err = errors.New(setupRuntimeFirstNonEmpty(applied.Error, "runtime activation failed"))
 		}
+		store.appendSetupRuntimeFailureBundleBestEffort(operationID, "apply", plan, err)
 		return failSetupAfterStorage(parent, store, operationID, plan, request, err)
 	}
+	store.appendSetupRuntimeEvidenceBestEffort(operationID, "configured", plan)
 
 	if _, err := store.transition(operationID, operationVerifying, "minecraft_verify", "Starting Minecraft and verifying runtime readiness."); err != nil {
 		return err
 	}
+	verifyStarted := time.Now()
 	verified, err := runSetupRuntimeTransactionAction(parent, "verify", setupRuntimeVerifyTimeout, request)
+	verifyElapsed := time.Since(verifyStarted)
 	if err != nil {
 		store.appendSetupHelperFailureBestEffort(operationID, "runtime", "verify", err)
 	}
@@ -192,8 +198,10 @@ func executeSetupTransaction(parent context.Context, store *operationStore, oper
 		if err == nil {
 			err = errors.New(setupRuntimeFirstNonEmpty(verified.Error, "Minecraft runtime verification failed"))
 		}
+		store.appendSetupRuntimeFailureBundleBestEffort(operationID, "verify", plan, err)
 		return failSetupAfterStorage(parent, store, operationID, plan, request, err)
 	}
+	store.appendSetupRuntimeVerificationBestEffort(operationID, plan, verifyElapsed)
 	if _, err := store.updateProgress(operationID, operationVerifying, "final_validation", "Final JustVoxel validation passed; committing configured state."); err != nil {
 		return err
 	}
@@ -205,8 +213,10 @@ func executeSetupTransaction(parent context.Context, store *operationStore, oper
 		if err == nil {
 			err = errors.New(setupRuntimeFirstNonEmpty(committed.Error, "configured state could not be committed"))
 		}
+		store.appendSetupRuntimeFailureBundleBestEffort(operationID, "commit", plan, err)
 		return failSetupAfterStorage(parent, store, operationID, plan, request, err)
 	}
+	store.appendSetupRuntimeEvidenceBestEffort(operationID, "committed", plan)
 	_, err = store.transition(operationID, operationSucceeded, "completed", "JustVoxel first-run setup completed successfully.")
 	return err
 }
@@ -230,15 +240,21 @@ func failSetupAfterStorage(parent context.Context, store *operationStore, operat
 		store.appendSetupHelperFailureBestEffort(operationID, "runtime", "rollback", err)
 	}
 		if err != nil || !rolledRuntime.OK {
+			if err == nil {
+				err = errors.New(setupRuntimeFirstNonEmpty(rolledRuntime.Error, "runtime rollback could not be confirmed"))
+			}
+			store.appendSetupRuntimeFailureBundleBestEffort(operationID, "rollback", plan, err)
 			_, _ = store.transition(operationID, operationNeedsAttention, "runtime_rollback", "Runtime rollback could not be confirmed; manual attention is required.")
 			return cause
 		}
+		store.appendSetupRuntimeEvidenceBestEffort(operationID, "runtime_rolled_back", plan)
 	}
 	rolledStorage, err := rollbackSetupStorage(parent, store, operationID, plan)
 	if err != nil || !rolledStorage.OK || rolledStorage.RollbackState != "succeeded" {
 		_, _ = store.transition(operationID, operationNeedsAttention, "storage_rollback", "Storage rollback could not be confirmed; manual attention is required.")
 		return cause
 	}
+	store.appendSetupRuntimeEvidenceBestEffort(operationID, "rollback_complete", plan)
 	_, _ = store.transition(operationID, operationRolledBack, "setup_rolled_back", "First-run changes were rolled back.")
 	return cause
 }

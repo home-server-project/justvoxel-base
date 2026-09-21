@@ -220,3 +220,107 @@ func TestSetupDiagnosticEnvironmentSnapshotIsPrivacySafe(t *testing.T) {
 		}
 	}
 }
+
+func TestSetupRuntimeFailureEvidenceCapturesPodmanWithoutLeakingIdentity(t *testing.T) {
+	originalBootc := runBootcStatusJSON
+	originalCommand := runSetupDiagnosticCommand
+	originalRead := readSetupDiagnosticFile
+	runBootcStatusJSON = func(context.Context) ([]byte, error) { return nil, errors.New("bootc unavailable") }
+	runSetupDiagnosticCommand = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		key := name + " " + strings.Join(args, " ")
+		switch key {
+		case "systemctl show minecraft.service --property=LoadState,ActiveState,SubState,Result,ExecMainStatus --no-pager":
+			return []byte("LoadState=loaded\nActiveState=failed\nSubState=failed\nResult=exit-code\nExecMainStatus=125\n"), nil
+		case "podman info --format {{.Host.NetworkBackend}}":
+			return []byte("netavark\n"), nil
+		case "podman network exists podman":
+			return nil, nil
+		case "podman network inspect podman --format {{.Name}}|{{.Driver}}|{{.NetworkInterface}}|{{.DNSEnabled}}":
+			return []byte("podman|bridge|podman0|true\n"), nil
+		case "podman container exists minecraft":
+			return nil, nil
+		case "podman inspect minecraft --format {{.State.Status}}":
+			return []byte("configured\n"), nil
+		case "podman inspect minecraft --format {{.State.ExitCode}}":
+			return []byte("125\n"), nil
+		case "podman inspect minecraft --format {{.Image}}":
+			return []byte("sha256:containerimage\n"), nil
+		case "podman inspect minecraft --format {{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}":
+			return []byte("podman\n"), nil
+		case "podman image exists docker.io/itzg/minecraft-server:latest":
+			return nil, nil
+		case "podman image inspect docker.io/itzg/minecraft-server:latest --format {{.Digest}}":
+			return []byte("sha256:registrydigest\n"), nil
+		case "podman image inspect docker.io/itzg/minecraft-server:latest --format {{.Id}}":
+			return []byte("sha256:localimage\n"), nil
+		case "firewall-cmd --permanent --query-port=25565/tcp":
+			return []byte("yes\n"), nil
+		case "firewall-cmd --permanent --query-port=19132/udp":
+			return []byte("yes\n"), nil
+		case "ls -Zd -- /var/lib/justvoxel/minecraft":
+			return []byte("system_u:object_r:container_file_t:s0 /var/lib/justvoxel/minecraft\n"), nil
+		case "systemctl is-enabled minecraft-backup.timer":
+			return []byte("enabled\n"), nil
+		case "systemctl is-active minecraft-backup.timer":
+			return []byte("inactive\n"), errors.New("inactive")
+		case "systemctl is-active network-online.target":
+			return []byte("active\n"), nil
+		case "nmcli -t -f CONNECTIVITY general":
+			return []byte("full\n"), nil
+		case "journalctl -u minecraft.service --no-pager -n 80 -o short-iso":
+			return []byte("podman failed to connect network at 192.168.0.59 on private-vm-host RCON_PASSWORD=supersecret\n"), nil
+		case "journalctl -k --no-pager -n 300 -o short-iso":
+			return []byte("kernel: avc: denied for private-vm-host 192.168.0.59\n"), nil
+		case "/usr/libexec/justvoxel/mjust/validate-backend ":
+			return []byte("FAIL: minecraft.service is not active\n"), errors.New("validation failed")
+		case "getent ahosts docker.io", "getent ahosts fill.papermc.io", "getent ahosts download.geysermc.org":
+			return []byte("203.0.113.10 STREAM example\n"), nil
+		default:
+			return nil, errors.New("unavailable: " + key)
+		}
+	}
+	readSetupDiagnosticFile = func(string) ([]byte, error) { return nil, os.ErrNotExist }
+	t.Cleanup(func() {
+		runBootcStatusJSON = originalBootc
+		runSetupDiagnosticCommand = originalCommand
+		readSetupDiagnosticFile = originalRead
+	})
+
+	store := openTestOperationStore(t)
+	store.diagnosticHostname = "private-vm-host"
+	id, err := store.beginSetupDiagnostic("webui")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := setupPlanForRuntimeTest(t)
+	store.appendSetupRuntimeFailureBundleBestEffort(id, "verify", plan, errors.New("Minecraft runtime verification failed"))
+	data, err := store.readSetupDiagnostic(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logText := string(data)
+	for _, want := range []string{
+		"FAILURE runtime failure evidence",
+		"podman_network_backend=\"netavark\"",
+		"podman_network_summary=\"podman|bridge|podman0|true\"",
+		"service_result=\"exit-code\"",
+		"service_exit_status=\"125\"",
+		"minecraft_image_digest=\"sha256:registrydigest\"",
+		"dns_docker_io=\"ok\"",
+		"container_networks=\"podman\"",
+		"container_file_t",
+		"<IP-REDACTED>",
+		"<HOSTNAME-REDACTED>",
+		"<REDACTED>",
+	} {
+		if !strings.Contains(logText, want) {
+			t.Fatalf("runtime failure evidence missing %q: %s", want, logText)
+		}
+	}
+	for _, forbidden := range []string{"192.168.0.59", "private-vm-host", "supersecret"} {
+		if strings.Contains(strings.ToLower(logText), strings.ToLower(forbidden)) {
+			t.Fatalf("runtime failure evidence leaked %q: %s", forbidden, logText)
+		}
+	}
+}
+
