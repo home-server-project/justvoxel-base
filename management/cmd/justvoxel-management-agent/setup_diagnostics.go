@@ -728,8 +728,7 @@ func collectSetupDiagnosticEnvironment() map[string]string {
 	}
 
 	if data, err := readSetupDiagnosticFile("/proc/meminfo"); err == nil {
-		for _, line := range strings.Split(string(data), "
-") {
+		for _, line := range strings.Split(string(data), "\n") {
 			fields := strings.Fields(line)
 			if len(fields) < 2 {
 				continue
@@ -772,8 +771,7 @@ func setupDiagnosticFirstLine(output []byte) string {
 	if value == "" {
 		return "<unavailable>"
 	}
-	if newline := strings.IndexByte(value, '
-'); newline >= 0 {
+	if newline := strings.IndexByte(value, '\n'); newline >= 0 {
 		value = value[:newline]
 	}
 	if len(value) > 512 {
