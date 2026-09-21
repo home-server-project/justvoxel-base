@@ -217,7 +217,7 @@ func TestServerImportUsesAgentSourceEntrySelectionAndManualFallback(t *testing.T
 		},
 		plan: api.AdminMigrationImportPlanResponse{
 			OK: false, SchemaVersion: "v1", Code: "source_selection_required",
-			Error: "Choose an Import archive or server directory from this source.",
+			Error:    "Choose an Import archive or server directory from this source.",
 			Warnings: []api.AdminMigrationWarning{}, Candidates: []api.AdminMigrationImportCandidate{},
 			SourceEntries: []api.AdminMigrationImportSourceEntry{{Path: "exports/server.tar.gz", Kind: "archive"}, {Path: "paper-server", Kind: "directory"}},
 		},
@@ -361,8 +361,8 @@ func TestServerImportSourceVersionAndMultipleRootPrompts(t *testing.T) {
 				},
 				plan: api.AdminMigrationImportPlanResponse{
 					OK: false, SchemaVersion: "v1", Code: tc.code, Error: "more input required",
-					Warnings: []api.AdminMigrationWarning{},
-					Candidates: []api.AdminMigrationImportCandidate{{RootRelative: "server-a", SourceType: "paper", Supported: true}, {RootRelative: "server-b", SourceType: "vanilla", Supported: true}},
+					Warnings:      []api.AdminMigrationWarning{},
+					Candidates:    []api.AdminMigrationImportCandidate{{RootRelative: "server-a", SourceType: "paper", Supported: true}, {RootRelative: "server-b", SourceType: "vanilla", Supported: true}},
 					SourceEntries: []api.AdminMigrationImportSourceEntry{},
 				},
 				planErr: &api.ResponseError{StatusCode: http.StatusBadRequest, Message: "more input required"},
