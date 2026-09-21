@@ -27,6 +27,7 @@ type migrationImportTransactionRequest struct {
     VanillaConfirmed bool `json:"vanilla_confirmed"`
     PluginsConfirmed bool `json:"plugins_confirmed"`
     OnlineModeConfirmed bool `json:"online_mode_confirmed"`
+    BackupSMBPassword string `json:"backup_smb_password,omitempty"`
 }
 type migrationImportTransactionEvent struct{Event string `json:"event"`;State string `json:"state,omitempty"`;Stage string `json:"stage,omitempty"`;Status string `json:"status"`;Outcome string `json:"outcome,omitempty"`}
 
@@ -52,7 +53,7 @@ func executeMigrationImportTransaction(parent context.Context,store *operationSt
     if operation.OperationType!=operationTypeMigrationImport||operation.PlanFingerprint==""{return errors.New("invalid server migration Import operation identity")}
     if !validAdminMigrationImportRequest(plan.Request)||plan.Context.SourceIdentity==""||plan.Context.DestinationIdentity==""{return markMigrationImportNeedsAttention(store,operationID,"invalid_execution_plan","Server migration Import execution data is incomplete; administrator attention is required.")}
     if _,err:=store.transition(operationID,operationValidating,"import_preflight","Revalidating the reviewed server migration Import before staging or changing Minecraft.");err!=nil{return err}
-    request:=migrationImportTransactionRequest{OperationID:operationID,PlanFingerprint:operation.PlanFingerprint,Request:plan.Request,Normalized:plan.Normalized,Context:plan.Context,Requirements:plan.Requirements,PlayersConfirmed:plan.PlayersConfirmed,EULAAccepted:plan.EULAAccepted,VanillaConfirmed:plan.VanillaConfirmed,PluginsConfirmed:plan.PluginsConfirmed,OnlineModeConfirmed:plan.OnlineModeConfirmed}
+    request:=migrationImportTransactionRequest{OperationID:operationID,PlanFingerprint:operation.PlanFingerprint,Request:plan.Request,Normalized:plan.Normalized,Context:plan.Context,Requirements:plan.Requirements,PlayersConfirmed:plan.PlayersConfirmed,EULAAccepted:plan.EULAAccepted,VanillaConfirmed:plan.VanillaConfirmed,PluginsConfirmed:plan.PluginsConfirmed,OnlineModeConfirmed:plan.OnlineModeConfirmed,BackupSMBPassword:plan.BackupSMBPassword}
     finalSeen:=false
     err=runAdminMigrationImportTransactionHelper(parent,request,func(event migrationImportTransactionEvent)error{
         switch event.Event{

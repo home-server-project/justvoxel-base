@@ -5,6 +5,7 @@ import (
     "errors"
     "io"
     "net/http"
+    "strings"
 )
 
 const adminMigrationImportApplyRequestLimit = 20 * 1024
@@ -18,6 +19,7 @@ type adminMigrationImportApplyRequest struct {
     VanillaConfirmed bool `json:"vanilla_confirmed"`
     PluginsConfirmed bool `json:"plugins_confirmed"`
     OnlineModeConfirmed bool `json:"online_mode_confirmed"`
+    BackupSMBPassword string `json:"backup_smb_password,omitempty"`
 }
 type adminMigrationImportApplyResponse struct {
     OK bool `json:"ok"`
@@ -36,6 +38,7 @@ type migrationImportExecutionPlan struct {
     VanillaConfirmed bool
     PluginsConfirmed bool
     OnlineModeConfirmed bool
+    BackupSMBPassword string
 }
 
 func (s *server) adminMigrationImportApply(w http.ResponseWriter, r *http.Request) {
@@ -64,6 +67,8 @@ func (s *server) adminMigrationImportApply(w http.ResponseWriter, r *http.Reques
     if req.VanillaConfirmationRequired&&!request.VanillaConfirmed { writeAdminMigrationImportApplyFailure(w,http.StatusBadRequest,"vanilla_confirmation_required","vanilla to Paper conversion requires explicit confirmation"); return }
     if req.PluginsConfirmationRequired&&!request.PluginsConfirmed { writeAdminMigrationImportApplyFailure(w,http.StatusBadRequest,"plugins_confirmation_required","external plugin execution requires explicit confirmation"); return }
     if req.OnlineModeConfirmationRequired&&!request.OnlineModeConfirmed { writeAdminMigrationImportApplyFailure(w,http.StatusBadRequest,"online_mode_confirmation_required","source online-mode=true requires explicit confirmation"); return }
+    if req.BackupSMBPasswordRequired&&request.BackupSMBPassword=="" { writeAdminMigrationImportApplyFailure(w,http.StatusBadRequest,"backup_smb_password_required","SMB backup password is required for this fresh Import destination"); return }
+    if !req.BackupSMBPasswordRequired&&request.BackupSMBPassword!="" { writeAdminMigrationImportApplyFailure(w,http.StatusBadRequest,"unexpected_backup_smb_password","SMB backup password is accepted only for a reviewed SMB backup destination"); return }
 
     operation,created,err:=s.operations.beginMigrationImport(request.PlanFingerprint)
     if err!=nil {
@@ -81,7 +86,7 @@ func (s *server) adminMigrationImportApply(w http.ResponseWriter, r *http.Reques
         startMigrationImportWorker(s,operation.OperationID,migrationImportExecutionPlan{
             Request:request.Request,Normalized:*plan.Normalized,Context:*plan.Context,Requirements:*plan.Requirements,
             PlayersConfirmed:request.PlayersConfirmed,EULAAccepted:request.EULAAccepted,VanillaConfirmed:request.VanillaConfirmed,
-            PluginsConfirmed:request.PluginsConfirmed,OnlineModeConfirmed:request.OnlineModeConfirmed,
+            PluginsConfirmed:request.PluginsConfirmed,OnlineModeConfirmed:request.OnlineModeConfirmed,BackupSMBPassword:request.BackupSMBPassword,
         })
     }
 }
@@ -90,6 +95,7 @@ func decodeAdminMigrationImportApplyRequest(w http.ResponseWriter,r *http.Reques
     if err:=d.Decode(target);err!=nil{writeAdminMigrationImportApplyFailure(w,http.StatusBadRequest,"invalid_request","invalid JSON request");return false}
     var trailing any; if err:=d.Decode(&trailing);err!=io.EOF{writeAdminMigrationImportApplyFailure(w,http.StatusBadRequest,"invalid_request","invalid JSON request");return false}
     if !validAdminMigrationImportRequest(target.Request){writeAdminMigrationImportApplyFailure(w,http.StatusBadRequest,"invalid_request","invalid server migration Import request");return false}
+    if len(target.BackupSMBPassword)>4096||strings.ContainsAny(target.BackupSMBPassword,"\r\n"){writeAdminMigrationImportApplyFailure(w,http.StatusBadRequest,"invalid_request","invalid SMB backup credential");return false}
     return true
 }
 func writeAdminMigrationImportApplyFailure(w http.ResponseWriter,status int,code,message string){writeJSON(w,status,adminMigrationImportApplyResponse{OK:false,Code:code,Error:message,Created:false})}
