@@ -542,7 +542,15 @@ func sanitizeSetupDiagnosticText(value, hostname string) string {
 	if hostname != "" {
 		value = replaceFold(value, hostname, "<HOSTNAME-REDACTED>")
 	}
-	value = setupDiagnosticHostnamePattern.ReplaceAllString(value, "<HOSTNAME-REDACTED>")
+	value = setupDiagnosticHostnamePattern.ReplaceAllStringFunc(value, func(candidate string) string {
+		lower := strings.ToLower(candidate)
+		for _, suffix := range []string{".service", ".timer", ".target", ".mount", ".socket", ".path", ".scope", ".slice", ".network", ".netdev"} {
+			if strings.HasSuffix(lower, suffix) {
+				return candidate
+			}
+		}
+		return "<HOSTNAME-REDACTED>"
+	})
 	value = setupDiagnosticIPv4Pattern.ReplaceAllStringFunc(value, func(candidate string) string {
 		ip := net.ParseIP(candidate)
 		if ip != nil && ip.To4() != nil {

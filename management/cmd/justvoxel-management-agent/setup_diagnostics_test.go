@@ -324,3 +324,14 @@ func TestSetupRuntimeFailureEvidenceCapturesPodmanWithoutLeakingIdentity(t *test
 	}
 }
 
+
+func TestSetupDiagnosticPreservesSystemdUnitNamesWhileRedactingHosts(t *testing.T) {
+	value := sanitizeSetupDiagnosticText("minecraft.service failed on private.example at 192.168.1.20", "")
+	if !strings.Contains(value, "minecraft.service") {
+		t.Fatalf("systemd unit name was redacted: %s", value)
+	}
+	if strings.Contains(value, "private.example") || strings.Contains(value, "192.168.1.20") {
+		t.Fatalf("network identity was not redacted: %s", value)
+	}
+}
+

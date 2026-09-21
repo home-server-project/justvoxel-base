@@ -210,3 +210,28 @@ func TestSetupRuntimeRequestExcludesSMBSecret(t *testing.T) {
 		t.Fatalf("runtime payload contains storage credential data: %s", payload)
 	}
 }
+
+func TestSetupRuntimeHelperEvidenceIsAccepted(t *testing.T) {
+	request := setupRuntimeTransactionRequest{
+		SchemaVersion:   operationSchemaVersion,
+		OperationID:     "12345678-1234-4123-8123-123456789abc",
+		PlanFingerprint: testSetupFingerprint,
+		Minecraft:       setupRuntimeMinecraft{MinecraftUID: 1000, MinecraftGID: 1000},
+	}
+	old := runAdminSetupRuntimeTransactionHelper
+	defer func() { runAdminSetupRuntimeTransactionHelper = old }()
+	runAdminSetupRuntimeTransactionHelper = func(_ context.Context, action string, _ []byte) ([]byte, error) {
+		if action != "verify" {
+			t.Fatalf("unexpected action %q", action)
+		}
+		return []byte(`{"ok":true,"applied":true,"phase":"runtime_verified","evidence":{"rcon_result":"ready","rcon_wait_seconds":"17","final_validation":"passed","final_validation_output":"OK: minecraft.service is active"}}`), nil
+	}
+	response, err := runSetupRuntimeTransactionAction(context.Background(), "verify", setupRuntimeVerifyTimeout, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Evidence["rcon_result"] != "ready" || response.Evidence["rcon_wait_seconds"] != "17" || response.Evidence["final_validation"] != "passed" {
+		t.Fatalf("unexpected helper evidence: %#v", response.Evidence)
+	}
+}
+

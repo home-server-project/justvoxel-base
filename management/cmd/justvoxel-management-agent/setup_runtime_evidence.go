@@ -11,6 +11,18 @@ import (
 
 const setupRuntimeDiagnosticImageRepo = "docker.io/itzg/minecraft-server"
 
+func (s *operationStore) appendSetupRuntimeHelperEvidenceBestEffort(operationID, action string, evidence map[string]string) {
+	if s == nil || !validOperationID(operationID) || len(evidence) == 0 {
+		return
+	}
+	values := make(map[string]string, len(evidence)+1)
+	values["action"] = action
+	for key, value := range evidence {
+		values[key] = value
+	}
+	_ = s.appendSetupDiagnostic(operationID, "RUNTIME", "runtime helper evidence", values)
+}
+
 func (s *operationStore) appendSetupRuntimeEvidenceBestEffort(operationID, phase string, plan *adminSetupNormalizedPlan) {
 	if s == nil || !validOperationID(operationID) {
 		return

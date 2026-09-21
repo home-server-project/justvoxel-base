@@ -76,10 +76,11 @@ type setupRuntimeTransactionRequest struct {
 }
 
 type setupRuntimeTransactionResponse struct {
-	OK      bool   `json:"ok"`
-	Applied bool   `json:"applied"`
-	Phase   string `json:"phase"`
-	Error   string `json:"error,omitempty"`
+	OK       bool              `json:"ok"`
+	Applied  bool              `json:"applied"`
+	Phase    string            `json:"phase"`
+	Error    string            `json:"error,omitempty"`
+	Evidence map[string]string `json:"evidence,omitempty"`
 }
 
 func setupRuntimeRequestForOperation(operation operationJournal, plan *adminSetupNormalizedPlan) (setupRuntimeTransactionRequest, error) {
@@ -159,6 +160,7 @@ func executeSetupTransaction(parent context.Context, store *operationStore, oper
 	}
 	store.appendSetupRuntimeEvidenceBestEffort(operationID, "preflight", plan)
 	validated, err := runSetupRuntimeTransactionAction(parent, "validate", setupRuntimeValidateTimeout, request)
+	store.appendSetupRuntimeHelperEvidenceBestEffort(operationID, "validate", validated.Evidence)
 	if err != nil {
 		store.appendSetupHelperFailureBestEffort(operationID, "runtime", "validate", err)
 	}
@@ -173,6 +175,7 @@ func executeSetupTransaction(parent context.Context, store *operationStore, oper
 		return err
 	}
 	applied, err := runSetupRuntimeTransactionAction(parent, "apply", setupRuntimeApplyTimeout, request)
+	store.appendSetupRuntimeHelperEvidenceBestEffort(operationID, "apply", applied.Evidence)
 	if err != nil {
 		store.appendSetupHelperFailureBestEffort(operationID, "runtime", "apply", err)
 	}
@@ -191,6 +194,7 @@ func executeSetupTransaction(parent context.Context, store *operationStore, oper
 	verifyStarted := time.Now()
 	verified, err := runSetupRuntimeTransactionAction(parent, "verify", setupRuntimeVerifyTimeout, request)
 	verifyElapsed := time.Since(verifyStarted)
+	store.appendSetupRuntimeHelperEvidenceBestEffort(operationID, "verify", verified.Evidence)
 	if err != nil {
 		store.appendSetupHelperFailureBestEffort(operationID, "runtime", "verify", err)
 	}
@@ -206,6 +210,7 @@ func executeSetupTransaction(parent context.Context, store *operationStore, oper
 		return err
 	}
 	committed, err := runSetupRuntimeTransactionAction(parent, "commit", setupRuntimeCommitTimeout, request)
+	store.appendSetupRuntimeHelperEvidenceBestEffort(operationID, "commit", committed.Evidence)
 	if err != nil {
 		store.appendSetupHelperFailureBestEffort(operationID, "runtime", "commit", err)
 	}
@@ -236,6 +241,7 @@ func failSetupAfterStorage(parent context.Context, store *operationStore, operat
 	}
 	if runtimeRequest.OperationID != "" {
 		rolledRuntime, err := runSetupRuntimeTransactionAction(parent, "rollback", setupRuntimeRollbackTimeout, runtimeRequest)
+		store.appendSetupRuntimeHelperEvidenceBestEffort(operationID, "rollback", rolledRuntime.Evidence)
 	if err != nil {
 		store.appendSetupHelperFailureBestEffort(operationID, "runtime", "rollback", err)
 	}
