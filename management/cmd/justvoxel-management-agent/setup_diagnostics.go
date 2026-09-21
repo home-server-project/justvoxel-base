@@ -28,9 +28,13 @@ var (
 	setupDiagnosticHostnamePattern     = regexp.MustCompile(`(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,62})\.)+(?:[a-z]{2,63}|local|lan|home|internal)\b`)
 	setupDiagnosticInlineSecretPattern = regexp.MustCompile(`(?i)\b(password|secret|token|authorization|cookie|credential)\s*[:=]\s*[^\s]+`)
 	setupDiagnosticKeyPattern          = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$`)
-	runBootcStatusJSON         = func(ctx context.Context) ([]byte, error) {
+	runBootcStatusJSON = func(ctx context.Context) ([]byte, error) {
 		return exec.CommandContext(ctx, "bootc", "status", "--json").CombinedOutput()
 	}
+	runSetupDiagnosticCommand = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		return exec.CommandContext(ctx, name, args...).CombinedOutput()
+	}
+	readSetupDiagnosticFile = os.ReadFile
 )
 
 type setupDiagnosticSessionRequest struct {
@@ -300,7 +304,11 @@ func (s *operationStore) createSetupDiagnosticLocked(id, interfaceName string) e
 		_ = file.Close()
 		return err
 	}
-	return file.Close()
+	if err := file.Close(); err != nil {
+		return err
+	}
+	_ = s.appendSetupDiagnosticLocked(id, "ENV", "setup environment snapshot", collectSetupDiagnosticEnvironment())
+	return nil
 }
 
 func (s *operationStore) bindSetupDiagnostic(sessionID, operationID, planFingerprint string) error {
@@ -685,4 +693,107 @@ func sanitizeSetupDiagnosticImageDigest(value string) string {
 		return "<unavailable>"
 	}
 	return value
+}
+
+
+func collectSetupDiagnosticEnvironment() map[string]string {
+	values := map[string]string{
+		"image_variant":    setupDiagnosticFileValue("/usr/lib/justvoxel/variant"),
+		"kernel":           setupDiagnosticCommandFirstLine("uname", "-r"),
+		"systemd":          setupDiagnosticCommandFirstLine("systemd", "--version"),
+		"podman":           setupDiagnosticCommandFirstLine("podman", "--version"),
+		"podman_scope":     "rootful",
+		"podman_network":   setupDiagnosticCommandFirstLine("podman", "info", "--format", "{{.Host.NetworkBackend}}"),
+		"selinux":          setupDiagnosticCommandFirstLine("getenforce"),
+		"firewalld":        setupDiagnosticCommandFirstLine("systemctl", "is-active", "firewalld.service"),
+		"network_manager":  setupDiagnosticCommandFirstLine("systemctl", "is-active", "NetworkManager.service"),
+		"runtime_class":    "unknown",
+		"virtualization":   "unknown",
+		"memory_total_mib": "",
+		"memory_avail_mib": "",
+	}
+
+	if container := setupDiagnosticCommandFirstLineWithSuccess("systemd-detect-virt", "--container"); container != "" {
+		values["runtime_class"] = "container"
+		values["virtualization"] = container
+	} else if vm := setupDiagnosticCommandFirstLineWithSuccess("systemd-detect-virt", "--vm"); vm != "" {
+		values["runtime_class"] = "virtual_machine"
+		values["virtualization"] = vm
+	} else if detected := setupDiagnosticCommandFirstLine("systemd-detect-virt"); detected == "none" {
+		values["runtime_class"] = "physical"
+		values["virtualization"] = "none"
+	} else if detected != "" && detected != "<unavailable>" {
+		values["runtime_class"] = "virtualized"
+		values["virtualization"] = detected
+	}
+
+	if data, err := readSetupDiagnosticFile("/proc/meminfo"); err == nil {
+		for _, line := range strings.Split(string(data), "
+") {
+			fields := strings.Fields(line)
+			if len(fields) < 2 {
+				continue
+			}
+			switch strings.TrimSuffix(fields[0], ":") {
+			case "MemTotal":
+				values["memory_total_mib"] = setupDiagnosticKiBToMiB(fields[1])
+			case "MemAvailable":
+				values["memory_avail_mib"] = setupDiagnosticKiBToMiB(fields[1])
+			}
+		}
+	}
+	for key, value := range values {
+		if strings.TrimSpace(value) == "" {
+			values[key] = "<unavailable>"
+		}
+	}
+	return values
+}
+
+func setupDiagnosticCommandFirstLine(name string, args ...string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	output, _ := runSetupDiagnosticCommand(ctx, name, args...)
+	return setupDiagnosticFirstLine(output)
+}
+
+func setupDiagnosticCommandFirstLineWithSuccess(name string, args ...string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	output, err := runSetupDiagnosticCommand(ctx, name, args...)
+	if err != nil {
+		return ""
+	}
+	return setupDiagnosticFirstLine(output)
+}
+
+func setupDiagnosticFirstLine(output []byte) string {
+	value := strings.TrimSpace(strings.ToValidUTF8(string(output), "�"))
+	if value == "" {
+		return "<unavailable>"
+	}
+	if newline := strings.IndexByte(value, '
+'); newline >= 0 {
+		value = value[:newline]
+	}
+	if len(value) > 512 {
+		value = value[:512] + "…"
+	}
+	return value
+}
+
+func setupDiagnosticFileValue(path string) string {
+	data, err := readSetupDiagnosticFile(path)
+	if err != nil {
+		return "<unavailable>"
+	}
+	return setupDiagnosticFirstLine(data)
+}
+
+func setupDiagnosticKiBToMiB(value string) string {
+	var kib uint64
+	if _, err := fmt.Sscanf(value, "%d", &kib); err != nil {
+		return "<unavailable>"
+	}
+	return fmt.Sprintf("%d", kib/1024)
 }

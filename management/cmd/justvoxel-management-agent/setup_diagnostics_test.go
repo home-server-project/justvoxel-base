@@ -141,3 +141,82 @@ func TestSetupHelperFailureDetailIsSanitizedAndNotExposedByError(t *testing.T) {
 		if !strings.Contains(text, want) { t.Fatalf("diagnostic helper output missing %q: %s", want, text) }
 	}
 }
+
+
+func TestSetupDiagnosticEnvironmentSnapshotIsPrivacySafe(t *testing.T) {
+	originalBootc := runBootcStatusJSON
+	originalCommand := runSetupDiagnosticCommand
+	originalRead := readSetupDiagnosticFile
+	runBootcStatusJSON = func(context.Context) ([]byte, error) {
+		return []byte(`{"status":{"booted":{"image":{"image":"ghcr.io/home-server-project/justvoxel-base:mjust-testing"},"imageDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}`), nil
+	}
+	runSetupDiagnosticCommand = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		key := name + " " + strings.Join(args, " ")
+		switch key {
+		case "uname -r":
+			return []byte("6.12.0-test\n"), nil
+		case "systemd --version":
+			return []byte("systemd 257\n+PAM\n"), nil
+		case "podman --version":
+			return []byte("podman version 5.8.4\n"), nil
+		case "podman info --format {{.Host.NetworkBackend}}":
+			return []byte("netavark\n"), nil
+		case "getenforce ":
+			return []byte("Enforcing\n"), nil
+		case "systemctl is-active firewalld.service":
+			return []byte("active\n"), nil
+		case "systemctl is-active NetworkManager.service":
+			return []byte("active\n"), nil
+		case "systemd-detect-virt --container":
+			return nil, errors.New("not a container")
+		case "systemd-detect-virt --vm":
+			return []byte("kvm\n"), nil
+		default:
+			return nil, errors.New("unexpected diagnostic command: " + key)
+		}
+	}
+	readSetupDiagnosticFile = func(path string) ([]byte, error) {
+		switch path {
+		case "/usr/lib/justvoxel/variant":
+			return []byte("justvoxel-vm\n"), nil
+		case "/proc/meminfo":
+			return []byte("MemTotal:       8388608 kB\nMemAvailable:   4194304 kB\n"), nil
+		default:
+			return nil, os.ErrNotExist
+		}
+	}
+	t.Cleanup(func() {
+		runBootcStatusJSON = originalBootc
+		runSetupDiagnosticCommand = originalCommand
+		readSetupDiagnosticFile = originalRead
+	})
+
+	store := openTestOperationStore(t)
+	id, err := store.beginSetupDiagnostic("webui")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := store.readSetupDiagnostic(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"ENV setup environment snapshot",
+		"image_variant=\"justvoxel-vm\"",
+		"runtime_class=\"virtual_machine\"",
+		"virtualization=\"kvm\"",
+		"kernel=\"6.12.0-test\"",
+		"podman=\"podman version 5.8.4\"",
+		"podman_network=\"netavark\"",
+		"selinux=\"Enforcing\"",
+		"firewalld=\"active\"",
+		"network_manager=\"active\"",
+		"memory_total_mib=\"8192\"",
+		"memory_avail_mib=\"4096\"",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("diagnostic environment snapshot missing %q: %s", want, text)
+		}
+	}
+}
