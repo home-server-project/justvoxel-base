@@ -13,15 +13,15 @@ import (
 
 type fakeServerMigrationImportAPI struct {
 	fakeServerMigrationAPI
-	storage     api.AdminStorageDiscovery
-	plan        api.AdminMigrationImportPlanResponse
-	planErr     error
-	planCalls   int
-	planReq     api.AdminMigrationImportRequest
-	apply       api.AdminMigrationApplyResponse
-	applyErr    error
-	applyCalls  int
-	applyReq    api.AdminMigrationImportApplyRequest
+	storage      api.AdminStorageDiscovery
+	plan         api.AdminMigrationImportPlanResponse
+	planErr      error
+	planCalls    int
+	planReq      api.AdminMigrationImportRequest
+	apply        api.AdminMigrationApplyResponse
+	applyErr     error
+	applyCalls   int
+	applyReq     api.AdminMigrationImportApplyRequest
 	storageCalls int
 }
 
