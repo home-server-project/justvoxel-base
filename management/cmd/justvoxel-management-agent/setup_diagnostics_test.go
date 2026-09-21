@@ -247,11 +247,11 @@ func TestSetupRuntimeFailureEvidenceCapturesPodmanWithoutLeakingIdentity(t *test
 			return []byte("sha256:containerimage\n"), nil
 		case "podman inspect minecraft --format {{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}":
 			return []byte("podman\n"), nil
-		case "podman image exists docker.io/itzg/minecraft-server:latest":
+		case "podman image exists docker.io/itzg/minecraft-server:stable":
 			return nil, nil
-		case "podman image inspect docker.io/itzg/minecraft-server:latest --format {{.Digest}}":
+		case "podman image inspect docker.io/itzg/minecraft-server:stable --format {{.Digest}}":
 			return []byte("sha256:registrydigest\n"), nil
-		case "podman image inspect docker.io/itzg/minecraft-server:latest --format {{.Id}}":
+		case "podman image inspect docker.io/itzg/minecraft-server:stable --format {{.Id}}":
 			return []byte("sha256:localimage\n"), nil
 		case "firewall-cmd --permanent --query-port=25565/tcp":
 			return []byte("yes\n"), nil
