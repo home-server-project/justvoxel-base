@@ -12,7 +12,8 @@ import_files=(
 )
 import_text="$(cat "${import_files[@]}")"
 grep -Fq 'interrupt-safety.sh' "${repo_root}/mjust/libexec/migration-import" || fail 'migration import does not load shared interruption safety'
-exporter="${repo_root}/mjust/libexec/migration-export"
+export_frontend="${repo_root}/mjust/libexec/migration-export"
+exporter="${repo_root}/mjust/libexec/migration-export-backend"
 recovery="${repo_root}/mjust/libexec/migration-recover"
 transport_files=(
     "${repo_root}/mjust/libexec/migration-transport.sh"
@@ -51,8 +52,9 @@ for text in \
     'mjust migration-recover'; do
     grep -Fq "${text}" <<< "${import_text}" || fail "import workflow invariant missing: ${text}"
 done
+grep -Fq 'exec /usr/libexec/justvoxel/mjust/migration-export-backend "$@"' "${export_frontend}" || fail 'migration export compatibility frontend does not delegate to the shared backend'
 for text in '.partial' 'verify-native' 'flock -n' 'jv_player_check_before_interrupt' 'sync -f' 'mv -- "${partial}"'; do
-    grep -Fq "${text}" "${exporter}" || fail "export workflow invariant missing: ${text}"
+    grep -Fq "${text}" "${exporter}" || fail "shared export backend invariant missing: ${text}"
 done
 for fs in ext4 xfs btrfs vfat exfat; do
     grep -Fq "${fs}" <<< "${transport_text}" || fail "temporary media allowlist missing ${fs}"
