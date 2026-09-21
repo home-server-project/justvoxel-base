@@ -304,6 +304,8 @@ grep -Fq 'POST /v1/admin/migration/import/apply' "${admin_migration_import_plan}
 grep -Fq 'authoritativeAdminMigrationImportPlan' "${admin_migration_import_apply}" || fail 'server migration Import apply does not re-run authoritative planning'
 grep -Fq 'adminMigrationImportTransactionHelper' "${migration_import_worker}" || fail 'server migration Import worker does not use the authoritative transaction backend'
 grep -Fq 'admin-migration-import-plan-json plan' "${migration_import_transaction_backend}" || fail 'server migration Import transaction does not revalidate the reviewed plan'
+grep -Fq 'migration-import-source.sh' "${migration_import_transaction_backend}" || fail 'server migration Import transaction does not use the shared source resolver'
+grep -Fq 'JV_MIGRATION_IMPORT_SOURCE_IDENTITY' "${migration_import_transaction_backend}" || fail 'server migration Import transaction does not revalidate source identity after remount'
 grep -Fq 'admin-setup-storage-transaction-json apply' "${migration_import_transaction_backend}" || fail 'fresh server migration Import does not use transactional Agent-owned storage preparation'
 grep -Fq 'JV_MIGRATION_API_DATA_MOUNT_POINT="$data_mount"' "${migration_import_transaction_backend}" || fail 'fresh Import backend does not receive the reviewed data mount'
 grep -Fq 'JV_MIGRATION_API_BACKUP_TYPE="$backup_type"' "${migration_import_transaction_backend}" || fail 'fresh Import backend does not receive the reviewed backup storage type'

@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 source /usr/libexec/justvoxel/mjust/common.sh
 source /usr/libexec/justvoxel/mjust/migration-common.sh
+source /usr/libexec/justvoxel/mjust/migration-import-source.sh
 require_root
 
 emit_progress(){ jq -cn --arg state "$1" --arg stage "$2" --arg status "$3" '{event:"progress",state:$state,stage:$stage,status:$status}'; }
@@ -45,7 +46,21 @@ fi
 [[ "$(jq -r '.context.destination_identity' <<< "$replan")" == "$expected_destination_identity" ]] || { emit_result rolled_back 'Import destination identity changed after review; no live Import was started.'; exit 0; }
 [[ "$(jq -S -c '.normalized' <<< "$replan")" == "$expected_normalized" ]] || { emit_result rolled_back 'Normalized Import plan changed after review; no live Import was started.'; exit 0; }
 
-source_path="$(jq -r '.normalized.source.path' <<< "$replan")"
+source_request="$(jq -c '.request.source | .kind=(.kind//"local")' <<< "$payload")"
+trap 'jv_migration_import_source_cleanup' EXIT
+set +e
+jv_migration_import_source_prepare "$source_request"
+source_prepare_rc=$?
+set -e
+if (( source_prepare_rc != 0 )); then
+    emit_result rolled_back 'The reviewed Import source could not be reopened safely; no live Import was started.'
+    exit 0
+fi
+source_path="$JV_MIGRATION_IMPORT_SOURCE_PATH"
+if [[ "$JV_MIGRATION_IMPORT_SOURCE_IDENTITY" != "$expected_source_identity" ]]; then
+    emit_result rolled_back 'Import source identity changed after review; no live Import was started.'
+    exit 0
+fi
 selected_root="$(jq -r '.normalized.source.selected_root' <<< "$replan")"
 source_version="$(jq -r '.normalized.source.minecraft_version' <<< "$replan")"
 mode="$(jq -r '.normalized.destination.mode' <<< "$replan")"
