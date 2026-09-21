@@ -245,6 +245,7 @@ if ! flock -n 9; then
 fi
 
 emit_progress running target_prepare 'Preparing the reviewed Minecraft data storage target.'
+target_prepared=yes
 case "${operation}" in
     erase_disk)
         storage_validate_disk "${device}" >/dev/null 2>&1
@@ -307,7 +308,6 @@ case "${operation}" in
         ;;
 esac
 
-target_prepared=yes
 new_mount="${STORAGE_MOUNT_POINT}"
 new_uuid="${STORAGE_EXPECTED_UUID}"
 new_source="${STORAGE_EXPECTED_SOURCE}"
@@ -343,10 +343,31 @@ if systemctl is-active --quiet minecraft.service; then
     fi
 fi
 
-emit_progress running cold_backup 'Creating and verifying the required pre-migration cold backup.'
 if [[ ${expected_minecraft_state} == running ]]; then
-    minecraft_stopped_by_migration=yes
+    emit_progress running minecraft_stop 'Stopping Minecraft through the player-aware graceful shutdown path.'
+    stop_mode=required
+    [[ ${players_confirmed} == true ]] && stop_mode=confirmed
+    set +e
+    JV_INTERRUPT_CONFIRMATION_MODE="${stop_mode}" \
+        jv_stop_minecraft_adaptive 'Migrate Minecraft data' >/dev/null 2>&1
+    stop_rc=$?
+    set -e
+    case "${stop_rc}" in
+        0)
+            minecraft_stopped_by_migration=yes
+            ;;
+        10)
+            echo 'ERROR: a player joined after migration review; interruption confirmation is required again.' >&2
+            exit 1
+            ;;
+        *)
+            echo 'ERROR: Minecraft could not be stopped safely for data migration.' >&2
+            exit 1
+            ;;
+    esac
 fi
+
+emit_progress running cold_backup 'Creating and verifying the required pre-migration cold backup.'
 JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 \
     /usr/libexec/justvoxel/minecraft-backup --leave-stopped >/dev/null 2>&1
 if systemctl is-active --quiet minecraft.service 2>/dev/null; then
