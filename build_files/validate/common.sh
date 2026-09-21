@@ -24,7 +24,7 @@ for cmd in \
     bootc podman skopeo nmcli nmtui resolvectl firewall-cmd sshd sudo just mjust fzf gum \
     tailscale netbird curl jq openssl tar gzip rsync ping dig traceroute nc tcpdump lsof \
     findmnt mountpoint flock mkfs.xfs mount.nfs mount.cifs lsblk blkid wipefs parted partprobe udevadm \
-    qemu-ga vmtoolsd iperf3; do
+    qemu-ga vmtoolsd iperf3 micro spf; do
     command -v "${cmd}" >/dev/null
 done
 
@@ -33,7 +33,7 @@ rpm -q \
     pam authselect authselect-libs libpwquality \
     podman skopeo just fzf gum container-selinux policycoreutils-python-utils selinux-policy-extra \
     util-linux xfsprogs parted iperf3 nfs-utils cifs-utils qemu-guest-agent open-vm-tools \
-    hyperv-daemons gssproxy zram-generator >/dev/null
+    hyperv-daemons gssproxy zram-generator micro superfile >/dev/null
 
 test -f /etc/pam.d/justvoxel
 grep -Fqx 'auth       include      system-auth' /etc/pam.d/justvoxel
@@ -58,6 +58,8 @@ grep -Fqx '[Daemon]' /etc/rpm-ostreed.conf
 grep -Eq '^[[:space:]]*LockLayering[[:space:]]*=[[:space:]]*true[[:space:]]*$' /etc/rpm-ostreed.conf
 
 semodule -l >/dev/null
+micro --version >/dev/null
+spf --version >/dev/null
 
 test "$(systemctl is-enabled NetworkManager.service)" = "enabled"
 test "$(systemctl is-enabled systemd-resolved.service)" = "enabled"
@@ -192,6 +194,7 @@ test -f /usr/share/justvoxel/mjust/justfile
 test -f /usr/libexec/justvoxel/mjust/storage-common.sh
 test -x /usr/libexec/justvoxel/mjust/welcome
 test -x /usr/libexec/justvoxel/mjust/status
+test -x /usr/libexec/justvoxel/mjust/files
 test -x /usr/libexec/justvoxel/mjust/storage-summary
 test -x /usr/libexec/justvoxel/mjust/web
 test -x /usr/libexec/justvoxel/mjust/web-status-json
@@ -207,6 +210,7 @@ if grep -Fq 'setup-advanced' <<<"${mjust_list}"; then
 fi
 grep -Fq 'status' <<<"${mjust_list}"
 grep -Fq 'status --details' <<<"${mjust_list}"
+grep -Fq 'files' <<<"${mjust_list}"
 grep -Fq 'web' <<<"${mjust_list}"
 grep -Fq 'web enable' <<<"${mjust_list}"
 grep -Fq 'password-reset' <<<"${mjust_list}"

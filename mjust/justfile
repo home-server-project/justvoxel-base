@@ -78,6 +78,9 @@ os-update:
 resources:
     @/usr/libexec/justvoxel/mjust/resources
 
+files:
+    @/usr/libexec/justvoxel/mjust/files
+
 reboot:
     @sudo /usr/libexec/justvoxel/mjust/system-power reboot
 

@@ -75,6 +75,8 @@ admin_validation="${repo_root}/management/cmd/justvoxel-management-agent/admin_v
 admin_configuration="${repo_root}/management/cmd/justvoxel-management-agent/admin_configuration.go"
 admin_discovery="${repo_root}/management/cmd/justvoxel-management-agent/admin_discovery.go"
 operator_surfaces="${repo_root}/management/cmd/justvoxel-management-agent/operator_surfaces.go"
+files="${repo_root}/mjust/libexec/files"
+menu="${repo_root}/mjust/libexec/menu"
 justfile="${repo_root}/mjust/justfile"
 
 fail() {
@@ -82,9 +84,15 @@ fail() {
     exit 1
 }
 
-for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${backup_storage}" "${backup_storage_api}" "${setup}" "${setup_api}" "${restore}" "${restore_api}" "${admin_restore}" "${admin_restore_apply}" "${restore_worker}" "${validate}" "${validate_backend}" "${storage_provision}" "${storage_plan}" "${storage_api}" "${data_migration}" "${data_migration_api}" "${data_migration_plan_backend}" "${data_migration_transaction_backend}" "${admin_data_migration_plan}" "${admin_data_migration_apply}" "${data_migration_worker}" "${migration_export}" "${migration_api}" "${migration_export_backend}" "${migration_export_plan_backend}" "${migration_export_transaction_backend}" "${admin_migration_export_plan}" "${admin_migration_export_apply}" "${migration_export_worker}" "${migration_recovery}" "${migration_recovery_backend}" "${migration_recovery_plan_backend}" "${migration_recovery_transaction_backend}" "${admin_migration_recovery}" "${admin_migration_recovery_apply}" "${migration_recovery_worker}" "${migration_import}" "${migration_import_backend}" "${migration_import_plan_backend}" "${migration_import_transaction_backend}" "${admin_migration_import_plan}" "${admin_migration_import_apply}" "${migration_import_worker}" "${webui_migration_api}" "${webui_persistent_operations}" "${webui_migration_page}" "${webui_migration_export_page}" "${webui_migration_import_page}" "${webui_migration_recovery_page}" "${webui_migration_progress}" "${admin_backup_storage}" "${admin_storage_provision}" "${admin_setup_plan}" "${admin_setup_apply}" "${admin_operations}" "${admin_validation}" "${admin_configuration}" "${admin_discovery}" "${operator_surfaces}" "${justfile}"; do
+for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${backup_storage}" "${backup_storage_api}" "${setup}" "${setup_api}" "${restore}" "${restore_api}" "${admin_restore}" "${admin_restore_apply}" "${restore_worker}" "${validate}" "${validate_backend}" "${storage_provision}" "${storage_plan}" "${storage_api}" "${data_migration}" "${data_migration_api}" "${data_migration_plan_backend}" "${data_migration_transaction_backend}" "${admin_data_migration_plan}" "${admin_data_migration_apply}" "${data_migration_worker}" "${migration_export}" "${migration_api}" "${migration_export_backend}" "${migration_export_plan_backend}" "${migration_export_transaction_backend}" "${admin_migration_export_plan}" "${admin_migration_export_apply}" "${migration_export_worker}" "${migration_recovery}" "${migration_recovery_backend}" "${migration_recovery_plan_backend}" "${migration_recovery_transaction_backend}" "${admin_migration_recovery}" "${admin_migration_recovery_apply}" "${migration_recovery_worker}" "${migration_import}" "${migration_import_backend}" "${migration_import_plan_backend}" "${migration_import_transaction_backend}" "${admin_migration_import_plan}" "${admin_migration_import_apply}" "${migration_import_worker}" "${webui_migration_api}" "${webui_persistent_operations}" "${webui_migration_page}" "${webui_migration_export_page}" "${webui_migration_import_page}" "${webui_migration_recovery_page}" "${webui_migration_progress}" "${admin_backup_storage}" "${admin_storage_provision}" "${admin_setup_plan}" "${admin_setup_apply}" "${admin_operations}" "${admin_validation}" "${admin_configuration}" "${admin_discovery}" "${operator_surfaces}" "${files}" "${menu}" "${justfile}"; do
     [[ -f ${file} ]] || fail "missing mJust Management API file: ${file}"
 done
+
+grep -Fq 'exec /usr/bin/spf' "${files}" || fail 'mJust files launcher does not exec Superfile'
+grep -Fq 'files:' "${justfile}" || fail 'mJust files recipe is missing'
+grep -Fq '/usr/libexec/justvoxel/mjust/files' "${justfile}" || fail 'mJust files recipe does not use the thin launcher'
+grep -Fq "'File browser'" "${menu}" || fail 'mJust System menu is missing File browser'
+grep -Fq '/usr/bin/mjust files' "${menu}" || fail 'mJust File browser does not use the files command'
 
 grep -Fq 'authSourceLocalRoot authSource = "local-root"' "${identity}" || fail 'local-root auth source is missing'
 grep -Fq 'func localRootAdministrator' "${authorization}" || fail 'local-root principal helper is missing'
