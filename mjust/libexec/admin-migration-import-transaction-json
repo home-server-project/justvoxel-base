@@ -28,7 +28,11 @@ vanilla_confirmed="$(jq -r '.vanilla_confirmed' <<< "$payload")"
 plugins_confirmed="$(jq -r '.plugins_confirmed' <<< "$payload")"
 online_confirmed="$(jq -r '.online_mode_confirmed' <<< "$payload")"
 backup_smb_password="$(jq -r '.backup_smb_password // ""' <<< "$payload")"
-[[ ${#backup_smb_password} -le 4096 && "$backup_smb_password" != *[[ "$operation_id" =~ ^[0-9a-f-]+$ && "$plan_fingerprint" =~ ^sha256:[0-9a-f]{64}$ ]] || { emit_result needs_attention 'Server migration Import operation identity was invalid.'; exit 0; }
+if (( ${#backup_smb_password} > 4096 )) || [[ "$backup_smb_password" == *$'\n'* || "$backup_smb_password" == *$'\r'* ]]; then
+    emit_result needs_attention 'Server migration Import SMB backup credential was invalid.'
+    exit 0
+fi
+[[ "$operation_id" =~ ^[0-9a-f-]+$ && "$plan_fingerprint" =~ ^sha256:[0-9a-f]{64}$ ]] || { emit_result needs_attention 'Server migration Import operation identity was invalid.'; exit 0; }
 
 emit_progress validating import_preflight 'Revalidating the reviewed server migration Import before staging or changing Minecraft.'
 replan="$(printf '%s\n' "$plan_request" | /usr/libexec/justvoxel/mjust/admin-migration-import-plan-json plan 2>/dev/null || true)"
