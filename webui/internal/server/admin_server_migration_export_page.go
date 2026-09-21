@@ -389,29 +389,57 @@ func (a *App) serverMigrationProgressStatus(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-func serverMigrationStageLabel(value string) string {
-	switch value {
-	case "queued":
+func serverMigrationStageLabel(operationType, value string) string {
+	if value == "queued" {
 		return "Waiting to start"
-	case "export_preflight":
-		return "Rechecking reviewed Export"
-	case "player_recheck":
-		return "Rechecking online players"
-	case "minecraft_stop":
-		return "Stopping Minecraft safely"
-	case "archive_integrity", "integrity_verification":
-		return "Verifying migration bundle"
-	case "export_failed":
-		return "Preparing safe Export recovery"
-	case "rollback":
-		return "Finalizing Export recovery state"
-	case "export_rolled_back":
-		return "Export rolled back"
-	case "export_needs_attention", "export_backend_interrupted", "export_backend_incomplete", "invalid_execution_plan", "interrupted":
-		return "Administrator attention required"
-	case "completed":
-		return "Complete"
-	default:
-		return friendlyMigrationToken(value)
 	}
+	if value == "completed" {
+		return "Complete"
+	}
+	if value == "player_recheck" {
+		return "Rechecking online players"
+	}
+	if value == "minecraft_stop" {
+		return "Stopping Minecraft safely"
+	}
+	if value == "invalid_execution_plan" || value == "interrupted" {
+		return "Administrator attention required"
+	}
+	switch operationType {
+	case "migration_export":
+		switch value {
+		case "export_preflight":
+			return "Rechecking reviewed Export"
+		case "archive_integrity", "integrity_verification":
+			return "Verifying migration bundle"
+		case "export_failed":
+			return "Preparing safe Export recovery"
+		case "rollback":
+			return "Finalizing Export recovery state"
+		case "export_rolled_back":
+			return "Export rolled back"
+		case "export_needs_attention", "export_backend_interrupted", "export_backend_incomplete":
+			return "Administrator attention required"
+		}
+	case "migration_import":
+		switch value {
+		case "import_preflight":
+			return "Rechecking reviewed Import"
+		case "import_storage":
+			return "Preparing fresh destination storage"
+		case "import_execute":
+			return "Importing Minecraft server data"
+		case "import_verify":
+			return "Validating imported Minecraft"
+		case "import_failed":
+			return "Preparing safe Import rollback"
+		case "rollback":
+			return "Finalizing Import rollback"
+		case "import_rolled_back":
+			return "Import rolled back"
+		case "import_needs_attention", "import_backend_interrupted", "import_backend_incomplete":
+			return "Administrator attention required"
+		}
+	}
+	return friendlyMigrationToken(value)
 }

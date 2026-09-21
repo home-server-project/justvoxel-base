@@ -100,6 +100,8 @@ func TestAuthenticatedTemplatesUseSharedHeader(t *testing.T) {
 		"server_migration.html",
 		"server_migration_export.html",
 		"server_migration_export_review.html",
+		"server_migration_import.html",
+		"server_migration_import_review.html",
 		"server_migration_progress.html",
 	} {
 		content, err := assets.ReadFile("templates/" + name)

@@ -19,6 +19,7 @@
     <p>Bring an exported JustVoxel server or supported Minecraft server directory into this appliance.</p>
     <div class="details"><strong>Available source types</strong><br><span class="muted">{{if .ImportSources}}{{.ImportSources}}{{else}}None reported{{end}}</span></div>
     <div class="details"><strong>Destination state</strong><br><span class="muted">{{if .Import.Configured}}Configured JustVoxel server{{else}}Fresh, unconfigured JustVoxel appliance{{end}}</span></div>
+    <div class="action-row"><a class="button-link" href="/settings/server-migration/import">Open Server Import</a></div>
   </section>
 
   <section class="panel">
@@ -33,6 +34,6 @@
     {{end}}
   </section>
 
-  <div class="notice">Server Export is available now. Guided Server Import and Recovery forms are added in the next WebUI migration slices. If a migration operation is already active, this page reconnects directly to its persistent progress record.</div>
+  <div class="notice">Server Export and Server Import are available now. Guided Recovery is added in the next WebUI migration slice. If a migration operation is already active, this page reconnects directly to its persistent progress record.</div>
   <p class="foot">WebUI {{.Version}} · Management API {{.ManagementAPI}}</p>
 </main></body></html>{{end}}

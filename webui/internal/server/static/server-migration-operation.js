@@ -41,17 +41,30 @@ document.addEventListener("DOMContentLoaded", () => {
     return text.charAt(0).toUpperCase() + text.slice(1);
   };
 
-  const stageLabel = (stage) => {
+  const stageLabel = (type, stage) => {
     if (stage === "queued") return "Waiting to start";
-    if (stage === "export_preflight") return "Rechecking reviewed Export";
+    if (stage === "completed") return "Complete";
     if (stage === "player_recheck") return "Rechecking online players";
     if (stage === "minecraft_stop") return "Stopping Minecraft safely";
-    if (stage === "archive_integrity" || stage === "integrity_verification") return "Verifying migration bundle";
-    if (stage === "export_failed") return "Preparing safe Export recovery";
-    if (stage === "rollback") return "Finalizing Export recovery state";
-    if (stage === "export_rolled_back") return "Export rolled back";
-    if (["export_needs_attention", "export_backend_interrupted", "export_backend_incomplete", "invalid_execution_plan", "interrupted"].includes(stage)) return "Administrator attention required";
-    if (stage === "completed") return "Complete";
+    if (["invalid_execution_plan", "interrupted"].includes(stage)) return "Administrator attention required";
+    if (type === "migration_export") {
+      if (stage === "export_preflight") return "Rechecking reviewed Export";
+      if (stage === "archive_integrity" || stage === "integrity_verification") return "Verifying migration bundle";
+      if (stage === "export_failed") return "Preparing safe Export recovery";
+      if (stage === "rollback") return "Finalizing Export recovery state";
+      if (stage === "export_rolled_back") return "Export rolled back";
+      if (["export_needs_attention", "export_backend_interrupted", "export_backend_incomplete"].includes(stage)) return "Administrator attention required";
+    }
+    if (type === "migration_import") {
+      if (stage === "import_preflight") return "Rechecking reviewed Import";
+      if (stage === "import_storage") return "Preparing fresh destination storage";
+      if (stage === "import_execute") return "Importing Minecraft server data";
+      if (stage === "import_verify") return "Validating imported Minecraft";
+      if (stage === "import_failed") return "Preparing safe Import rollback";
+      if (stage === "rollback") return "Finalizing Import rollback";
+      if (stage === "import_rolled_back") return "Import rolled back";
+      if (["import_needs_attention", "import_backend_interrupted", "import_backend_incomplete"].includes(stage)) return "Administrator attention required";
+    }
     return friendlyToken(stage);
   };
 
@@ -65,7 +78,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (nameText) nameText.textContent = operationName(operation.operation_type);
     if (statusText) statusText.textContent = operation.status || "Server migration is running.";
     if (stateBadge) stateBadge.textContent = stateLabel(operation.state);
-    if (stageText) stageText.textContent = stageLabel(operation.stage);
+    if (stageText) stageText.textContent = stageLabel(operation.operation_type, operation.stage);
 
     const succeeded = operation.state === "succeeded";
     const rolledBack = operation.state === "rolled_back";
