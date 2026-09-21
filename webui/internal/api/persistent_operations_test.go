@@ -78,6 +78,27 @@ func TestAdminCurrentSetupOperationSupportsNoCurrentOperation(t *testing.T) {
 	}
 }
 
+func TestAdminCurrentRestoreOperationSupportsNoCurrentOperation(t *testing.T) {
+	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/v1/admin/restore/current-operation" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"operation":null}`)),
+			Header:     make(http.Header),
+		}, nil
+	})}}
+
+	response, err := client.AdminCurrentRestoreOperation(context.Background(), "session-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Operation != nil {
+		t.Fatalf("operation = %#v, want nil", response.Operation)
+	}
+}
+
 func TestAdminOperationRejectsMalformedIDBeforeRequest(t *testing.T) {
 	called := false
 	client := &Client{http: &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {

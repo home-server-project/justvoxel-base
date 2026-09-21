@@ -1,0 +1,59 @@
+{{define "restore_review.html"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JustVoxel - Review Restore</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js" defer></script></head>
+<body class="role-administrator">{{template "app-header" .}}
+<main>
+  <div class="title-row"><div><p class="eyebrow">Administrator · destructive operation</p><h1>Review Restore</h1></div><span class="badge">{{.Identity.Username}}</span></div>
+  {{if .Error}}<div class="notice error"><strong>Restore cannot continue as submitted.</strong><br>{{.Error}}</div>{{end}}
+
+  {{if .Plan.Normalized}}
+  <section class="panel">
+    <p class="eyebrow">Selected backup</p>
+    <h2>{{.ModeTitle}}</h2>
+    <p>{{.Scope}}</p>
+    <div class="details">
+      <strong>{{.Plan.Normalized.CreatedAt}}</strong> · {{.Size}}<br>
+      <span class="muted">{{.Plan.Normalized.BackupID}}</span><br>
+      <span>Current configured version: <strong>{{.Plan.Normalized.Current.Version}}</strong> ({{.Plan.Normalized.Current.VersionMode}})</span><br>
+      {{if .Plan.Normalized.Metadata}}
+      <span>Backup Minecraft version: <strong>{{.Plan.Normalized.Metadata.Minecraft.ConfiguredVersion}}</strong> ({{.Plan.Normalized.Metadata.Minecraft.VersionMode}})</span><br>
+      {{else}}
+      <span>Backup Minecraft metadata: <strong>{{.Plan.Normalized.MetadataStatus}}</strong></span><br>
+      {{end}}
+      <span>Version relation: <strong>{{.Plan.Normalized.VersionRelation}}</strong></span>
+    </div>
+  </section>
+  {{end}}
+
+  {{if .Plan.Warnings}}
+  <section class="panel"><p class="eyebrow">Restore warnings</p>{{range .Plan.Warnings}}<div class="notice warning">{{.Message}}</div>{{end}}</section>
+  {{end}}
+
+  {{if and .Plan.OK .Plan.Requirements}}
+  <section class="panel">
+    <p class="eyebrow">Safety checks</p>
+    <p>Before live data is changed, the Management Agent will validate archive integrity, archive safety, backup identity, and staging capacity. Minecraft runtime validation and automatic rollback remain Agent-owned.</p>
+    {{if .Plan.Requirements.PlayersConfirmationRequired}}
+    <div class="notice warning"><strong>{{.Plan.Requirements.Online}} player(s) are online.</strong><br>
+      {{range .Plan.Requirements.Players}}{{.}}<br>{{end}}
+      Restore will use the player-aware graceful shutdown path before changing Minecraft data.
+    </div>
+    {{end}}
+  </section>
+
+  <form method="post" action="/settings/restore/apply">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="backup_id" value="{{.Request.BackupID}}">
+    <input type="hidden" name="mode" value="{{.Request.Mode}}">
+    <input type="hidden" name="plan_fingerprint" value="{{.Plan.PlanFingerprint}}">
+    {{if .Plan.Requirements.PlayersConfirmationRequired}}
+    <label><input type="checkbox" name="players_confirmed" value="yes"> I understand that the online players may be interrupted.</label>
+    {{end}}
+    <label for="restore-confirmation"><strong>Type RESTORE to continue</strong></label>
+    <input id="restore-confirmation" name="confirmation" autocomplete="off" required>
+    <div class="action-row"><button type="submit">Start Restore</button><a class="button-link secondary" href="/settings/restore">Cancel</a></div>
+  </form>
+  {{else}}
+  <div class="action-row"><a class="button-link secondary" href="/settings/restore">Choose another backup</a></div>
+  {{end}}
+  <p class="foot">WebUI {{.Version}} · Management API {{.ManagementAPI}}</p>
+</main></body></html>{{end}}

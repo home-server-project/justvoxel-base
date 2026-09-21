@@ -1,0 +1,18 @@
+{{define "restore_progress.html"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JustVoxel - Restore progress</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js" defer></script><script src="/static/restore-operation.js" defer></script></head>
+<body class="role-administrator">{{template "app-header" .}}
+<main>
+  <div class="title-row"><div><p class="eyebrow">Administrator · Restore</p><h1>Restore progress</h1></div><span class="badge" id="restore-operation-state">{{.StateLabel}}</span></div>
+  <section class="panel" data-restore-operation data-status-url="/api/restore/progress/{{.Operation.OperationID}}">
+    <p id="restore-operation-status">{{.Operation.Status}}</p>
+    <div class="details">Stage: <strong id="restore-operation-stage">{{.StageLabel}}</strong><br>Operation: <code>{{.Operation.OperationID}}</code></div>
+
+    <div class="notice" id="restore-reconnect-note" hidden><strong>Reconnecting to JustVoxel…</strong><br>Restore may still be running. Refreshing this page does not start another Restore.</div>
+    <div class="notice success" id="restore-operation-success" {{if ne .Operation.State "succeeded"}}hidden{{end}}><strong>Minecraft Restore completed successfully.</strong><br>The restored runtime passed validation.</div>
+    <div class="notice warning" id="restore-operation-rollback" {{if ne .Operation.State "rolled_back"}}hidden{{end}}><strong>Restore was rolled back safely.</strong><br>The restored runtime did not pass validation and the previous Minecraft data was restored.</div>
+    <div class="notice error" id="restore-operation-attention" {{if ne .Operation.State "needs_attention"}}hidden{{end}}><strong>Restore needs administrator attention.</strong><br>Do not start another Restore until the preserved recovery state is reviewed.</div>
+    <div class="action-row"><a class="button-link" id="restore-dashboard-link" href="/" {{if ne .Operation.State "succeeded"}}hidden{{end}}>Open dashboard</a><a class="button-link secondary" href="/settings/restore">Restore page</a></div>
+  </section>
+  <p class="muted">Progress is stored by the JustVoxel Management Agent. Closing, refreshing, or reopening this operation URL reconnects to the same Restore.</p>
+  <p class="foot">WebUI {{.Version}} · Management API {{.ManagementAPI}}</p>
+</main></body></html>{{end}}

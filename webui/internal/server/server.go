@@ -99,6 +99,7 @@ func (a *App) Handler() http.Handler {
 	a.registerAdminUsersRoutes(mux)
 	a.registerAdminDiscoveryPages(mux)
 	a.registerAdminValidationPages(mux)
+	a.registerAdminRestorePages(mux)
 	mux.HandleFunc("GET /api/dashboard-status", a.dashboardStatus)
 	mux.HandleFunc("POST /minecraft/start", a.minecraftAction("start"))
 	mux.HandleFunc("POST /minecraft/stop", a.minecraftAction("stop"))
