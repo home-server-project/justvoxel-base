@@ -110,17 +110,17 @@ These are intentionally early because they are relatively contained improvements
 - keep Podman/container access behind the security review already in progress
 - consider a custom JustVoxel frontend later only if the upstream WebUI becomes limiting
 
-### Superfile
+### Superfile - implemented
 
-- ship Superfile as the friendly CLI file manager
-- consume the existing verified `home-server-packages` package
-- make it easy to launch from `mjust`
+- shipped Superfile as the friendly CLI file manager
+- consume the verified `home-server-packages` RPM artifact in JustVoxel Base
+- expose it as `mjust files` and System -> File browser
 - keep it as a user convenience tool rather than a privileged WebUI file browser
 
-### Micro
+### Micro - implemented
 
-- ship Micro as the recommended friendly terminal text editor
-- preserve existing administrator/editor tools
+- shipped Micro from the native AlmaLinux package in JustVoxel Base
+- preserve Nano and existing administrator/editor tools
 - update Micro with the JustVoxel image rather than through an independent user-managed lifecycle
 
 ### Documentation source and local documentation
