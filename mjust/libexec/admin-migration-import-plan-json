@@ -1,0 +1,241 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/restore-common.sh
+source /usr/libexec/justvoxel/mjust/migration-common.sh
+require_root
+
+emit_error() {
+    local code="$1" message="$2" candidates="${3:-[]}"
+    jq -cn --arg code "$code" --arg error "$message" --argjson candidates "$candidates"         '{ok:false,schema_version:"v1",code:$code,error:$error,warnings:[],candidates:$candidates}'
+}
+warning_add() {
+    local current="$1" code="$2" message="$3"
+    jq -cn --argjson current "$current" --arg code "$code" --arg message "$message"         '$current + [{code:$code,message:$message}]'
+}
+configured_state() {
+    if [[ -r ${JV_CONFIG} && -e ${JV_QUADLET} ]]; then printf true; else printf false; fi
+}
+discover() {
+    local configured defaults java_port=25565 bedrock_port=19132 data_path=/var/lib/justvoxel/minecraft backup_path=/var/lib/justvoxel/backups
+    local java_memory container_memory timezone backup_keep=7 backup_daily_time=04:30 backup_automatic=true
+    configured="$(configured_state)"
+    if [[ ${configured} == true ]]; then
+        require_config
+        java_port="${JAVA_PORT}"
+        bedrock_port="${BEDROCK_PORT}"
+        data_path="${DATA_PATH}"
+        backup_path="${BACKUP_PATH}"
+        java_memory="${JAVA_MEMORY}"
+        container_memory="${CONTAINER_MEMORY}"
+        timezone="${TIMEZONE}"
+        backup_keep="${BACKUP_KEEP}"
+        if [[ ${BACKUP_TIMER_ENABLED:-yes} == yes ]]; then backup_automatic=true; else backup_automatic=false; fi
+    else
+        read -r java_memory container_memory < <(suggest_memory_values)
+        timezone="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
+        timezone="${timezone:-UTC}"
+    fi
+    jq -cn --argjson configured "$configured" --arg data_path "$data_path" --arg backup_path "$backup_path"         --arg java_memory "$java_memory" --arg container_memory "$container_memory" --arg timezone "$timezone"         --argjson java_port "$java_port" --argjson bedrock_port "$bedrock_port" --argjson backup_keep "$backup_keep"         --arg backup_daily_time "$backup_daily_time" --argjson backup_automatic "$backup_automatic"         '{ok:true,schema_version:"v1",configured:$configured,source_kinds:["local"],defaults:{data_path:$data_path,backup_path:$backup_path,java_memory:$java_memory,container_memory:$container_memory,timezone:$timezone,java_port:$java_port,bedrock_port:$bedrock_port,backup_keep:$backup_keep,backup_daily_time:$backup_daily_time,backup_automatic:$backup_automatic}}'
+}
+candidate_with_relative_roots() {
+    local detection="$1" base="$2"
+    jq -c --arg base "$base" '
+      .candidates |= map(
+        . as $c
+        | ($c.root | if . == $base then "" elif startswith($base + "/") then .[(($base|length)+1):] else . end) as $rel
+        | $c + {root_relative:$rel}
+      )
+    ' <<< "$detection"
+}
+plan() {
+    local request source selected_root supplied_version source_path source_identity source_info expanded is_native native_manifest=''
+    local temp staging detection_base detection candidates count selected source_class candidate_type props_online manifest_online online_state source_version
+    local source_game source_diff source_whitelist source_enforce source_max source_motd java_hint bedrock_hint source_bedrock_manifest
+    local source_geyser source_geyser_auth source_floodgate plugin_count plugin_names bedrock_enabled=false bedrock_managed=true
+    local configured warnings='[]' req_online=false req_vanilla=false req_plugins=false player_json minecraft_state=stopped online=0 players='[]' players_confirm=false
+    local java_port bedrock_port java_memory container_memory timezone backup_keep backup_daily backup_auto
+    local data_path backup_path minecraft_uid minecraft_gid image_tag backup_schedule config_identity='' destination_identity setup_request setup_plan setup_norm
+
+    request="$(cat)"
+    if ! jq -e '
+      type=="object" and ((keys-["source","destination"])|length==0) and
+      (.source|type=="object") and ((.source|keys)-["path","selected_root","source_version"]|length==0) and
+      (.source.path|type=="string") and ((.source.selected_root//"")|type=="string") and ((.source.source_version//"")|type=="string") and
+      (.destination|type=="object") and
+      ((.destination|keys)-["java_port","bedrock_port","java_memory","container_memory","timezone","backup_keep","backup_daily_time","backup_automatic"]|length==0) and
+      (.destination.java_port|type=="number") and (.destination.bedrock_port|type=="number") and
+      ((.destination.java_memory//"")|type=="string") and ((.destination.container_memory//"")|type=="string") and
+      ((.destination.timezone//"")|type=="string") and (.destination.backup_keep|type=="number") and
+      ((.destination.backup_daily_time//"")|type=="string") and (.destination.backup_automatic|type=="boolean")
+    ' >/dev/null 2>&1 <<< "$request"; then
+        emit_error invalid_request 'Invalid server migration Import planning request.'
+        return 0
+    fi
+
+    source="$(jq -c '.source' <<< "$request")"
+    source_path="$(jq -r '.path' <<< "$source")"
+    selected_root="$(jq -r '.selected_root // ""' <<< "$source")"
+    supplied_version="$(jq -r '.source_version // ""' <<< "$source")"
+    [[ ${source_path} == /* && ${source_path} != *$'\n'* && ${source_path} != *$'\r'* ]] || { emit_error invalid_source 'Import source must be an absolute local file or directory path.'; return 0; }
+    source_path="$(realpath -m -- "$source_path")"
+    [[ -e ${source_path} ]] || { emit_error missing_source 'Import source does not exist.'; return 0; }
+    jv_migration_validate_source_name "$source_path" >/dev/null 2>&1 || { emit_error incomplete_source 'Incomplete .partial migration artifacts cannot be imported.'; return 0; }
+
+    source_identity="$(jv_migration_source_identity "$source_path" 2>/dev/null || true)"
+    [[ -n ${source_identity} ]] || { emit_error invalid_source 'Import source identity could not be captured.'; return 0; }
+    source_info="$(/usr/libexec/justvoxel/mjust/migration-archive inspect "$source_path" 2>/dev/null)" || { emit_error invalid_source 'Import source could not be safely inspected.'; return 0; }
+    expanded="$(jq -r '.expandedBytes // 0' <<< "$source_info")"
+    is_native="$(jq -r '.nativeBundle // false' <<< "$source_info")"
+    if [[ ${is_native} == true ]]; then
+        native_manifest="$(/usr/libexec/justvoxel/mjust/migration-archive verify-native "$source_path" 2>/dev/null)" || { emit_error invalid_integrity 'Native JustVoxel migration bundle integrity verification failed.'; return 0; }
+    fi
+
+    if [[ -d ${source_path} ]]; then
+        detection_base="$source_path"
+        detection="$(/usr/libexec/justvoxel/mjust/migration-archive detect "$detection_base" 2>/dev/null)" || { emit_error detection_failed 'Minecraft server detection failed.'; return 0; }
+    else
+        temp="$(mktemp -d /var/tmp/justvoxel-import-plan.XXXXXX)"
+        trap 'rm -rf -- "${temp:-}"' RETURN
+        jv_migration_require_staging_space /var/tmp "$expanded" >/dev/null 2>&1 || { rm -rf -- "$temp"; trap - RETURN; emit_error planning_space 'System temporary storage does not have enough free space to inspect this archive safely.'; return 0; }
+        staging="$temp/source"
+        /usr/libexec/justvoxel/mjust/migration-archive extract "$source_path" "$staging" >/dev/null 2>&1 || { rm -rf -- "$temp"; trap - RETURN; emit_error extraction_failed 'Import archive could not be inspected safely.'; return 0; }
+        if [[ $(jv_migration_source_identity "$source_path") != "$source_identity" ]]; then rm -rf -- "$temp"; trap - RETURN; emit_error source_changed 'Import source changed while it was being inspected.'; return 0; fi
+        if [[ ${is_native} == true ]]; then detection_base="$staging/justvoxel-migration/server"; else detection_base="$staging"; fi
+        detection="$(/usr/libexec/justvoxel/mjust/migration-archive detect "$detection_base" 2>/dev/null)" || { rm -rf -- "$temp"; trap - RETURN; emit_error detection_failed 'Minecraft server detection failed.'; return 0; }
+    fi
+
+    detection="$(candidate_with_relative_roots "$detection" "$detection_base")"
+    candidates="$(jq -c '.candidates' <<< "$detection")"
+    count="$(jq -r 'length' <<< "$candidates")"
+    if (( count == 0 )); then [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error no_server 'No recognizable Minecraft server root was found.'; return 0; fi
+    if [[ -n ${selected_root} ]]; then
+        selected="$(jq -c --arg root "$selected_root" '.[] | select(.root_relative==$root)' <<< "$candidates" | head -n1)"
+        [[ -n ${selected} ]] || { [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error stale_root 'The selected Minecraft root no longer exists.' "$candidates"; return 0; }
+    elif (( count == 1 )); then
+        selected="$(jq -c '.[0]' <<< "$candidates")"
+        selected_root="$(jq -r '.root_relative' <<< "$selected")"
+    else
+        [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true
+        emit_error multiple_roots 'Multiple Minecraft server roots were found; choose exactly one.' "$candidates"
+        return 0
+    fi
+
+    candidate_type="$(jq -r '.sourceType' <<< "$selected")"
+    if [[ ${is_native} == true ]]; then source_class=justvoxel
+    elif [[ -f ${source_path} && $(basename -- "$source_path") == minecraft-*.tar.gz ]]; then source_class=justvoxel-backup
+    else source_class="$candidate_type"; fi
+    case "$candidate_type" in
+      paper|itzg-paper) ;;
+      vanilla) req_vanilla=true; warnings="$(warning_add "$warnings" vanilla_conversion 'Vanilla Minecraft data will be opened by Paper at the same reviewed Minecraft version.')" ;;
+      fabric|forge|neoforge|modded-unknown) [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error unsupported_source "Unsupported Minecraft source type: $candidate_type"; return 0 ;;
+      *) [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error unsupported_source 'Unrecognized Minecraft source type.'; return 0 ;;
+    esac
+
+    props_online="$(jq -r 'if .onlineMode==null then "unknown" else (.onlineMode|tostring) end' <<< "$selected")"
+    manifest_online=unknown
+    if [[ ${source_class} == justvoxel ]]; then manifest_online="$(jq -r 'if .minecraft.onlineMode==null then "unknown" else (.minecraft.onlineMode|tostring) end' <<< "$native_manifest")"; fi
+    online_state="$(jv_migration_online_mode_state "$manifest_online" "$props_online")"
+    case "$online_state" in
+      conflict) [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error identity_conflict 'Source metadata and server.properties disagree about online-mode.'; return 0 ;;
+      offline) [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error offline_mode 'Sources using online-mode=false are refused because player UUID identity would not be safely preserved.'; return 0 ;;
+      unknown) req_online=true; warnings="$(warning_add "$warnings" online_mode_unknown 'Source online-mode could not be proven automatically; the administrator must explicitly confirm it used online-mode=true.')" ;;
+    esac
+
+    source_version="$(jq -r '.minecraftVersion // empty' <<< "$selected")"
+    if [[ ${source_class} == justvoxel ]]; then
+        manifest_version="$(jq -r '.minecraft.version // empty' <<< "$native_manifest")"
+        [[ -n ${manifest_version} ]] || { [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error missing_version 'Native migration manifest does not contain an exact Minecraft version.'; return 0; }
+        if source_version="$(jv_migration_version_resolution "$manifest_version" "$source_version")"; then :; else [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error version_conflict 'Native manifest Minecraft version conflicts with staged server evidence.'; return 0; fi
+    fi
+    source_version="${source_version:-$supplied_version}"
+    [[ ${source_version} =~ ^[0-9]+([.][0-9]+){1,2}$ ]] || { [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error source_version_required 'An exact source Minecraft version is required.' "$candidates"; return 0; }
+    paper_version_has_stable_build "$source_version" >/dev/null 2>&1 || { [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error unsupported_version 'PaperMC did not confirm a stable build for the exact source Minecraft version.'; return 0; }
+
+    if [[ ${source_class} == justvoxel ]]; then
+        source_game="$(jq -r '.minecraft.gameMode // "survival"' <<< "$native_manifest")"
+        source_diff="$(jq -r '.minecraft.difficulty // "normal"' <<< "$native_manifest")"
+        source_whitelist="$(jq -r 'if .minecraft.whitelistEnabled==null then true else .minecraft.whitelistEnabled end' <<< "$native_manifest")"
+        source_enforce="$(jq -r 'if .minecraft.enforceWhitelist==null then true else .minecraft.enforceWhitelist end' <<< "$native_manifest")"
+        source_max="$(jq -r '.minecraft.maxPlayers // 10' <<< "$native_manifest")"
+        source_motd="$(jq -r '.minecraft.motd // "JustVoxel Java and Bedrock Server"' <<< "$native_manifest")"
+        java_hint="$(jq -r '.networkHints.javaPort // 25565' <<< "$native_manifest")"
+        bedrock_hint="$(jq -r '.networkHints.bedrockPort // 19132' <<< "$native_manifest")"
+        source_bedrock_manifest="$(jq -r 'if .bedrock.enabled==null then false else .bedrock.enabled end' <<< "$native_manifest")"
+    else
+        source_game="$(jq -r '.gameMode // "survival"' <<< "$selected")"
+        source_diff="$(jq -r '.difficulty // "normal"' <<< "$selected")"
+        source_whitelist="$(jq -r 'if .whitelistEnabled==null then true else .whitelistEnabled end' <<< "$selected")"
+        source_enforce="$(jq -r 'if .enforceWhitelist==null then true else .enforceWhitelist end' <<< "$selected")"
+        source_max="$(jq -r '.maxPlayers // 10' <<< "$selected")"
+        source_motd="$(jq -r '.motd // "JustVoxel Java and Bedrock Server"' <<< "$selected")"
+        java_hint="$(jq -r '.javaPortHint // 25565' <<< "$selected")"
+        bedrock_hint="$(jq -r '.bedrockPortHint // 19132' <<< "$selected")"
+        source_bedrock_manifest=false
+    fi
+    plugin_count="$(jq -r '.pluginJarCount // 0' <<< "$selected")"
+    if [[ ${source_class} != justvoxel && ${source_class} != justvoxel-backup && ${plugin_count} =~ ^[0-9]+$ ]] && (( plugin_count > 0 )); then req_plugins=true; warnings="$(warning_add "$warnings" external_plugins "This source contains $plugin_count plugin JAR(s), which are executable server code and will be preserved.")"; fi
+    source_geyser="$(jq -r '.geyserEnabled // false' <<< "$selected")"
+    source_geyser_auth="$(jq -r '.geyserAuthType // empty' <<< "$selected")"
+    source_floodgate="$(jq -r '.floodgateEnabled // false' <<< "$selected")"
+    if [[ ${source_bedrock_manifest} == true && ${source_geyser_auth} != floodgate ]]; then [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error bedrock_conflict 'Native manifest says Bedrock is enabled but staged Geyser is not using Floodgate authentication.'; return 0
+    elif [[ ${source_geyser} == true && ${source_floodgate} == true && ${source_geyser_auth} == floodgate ]]; then bedrock_enabled=true; else bedrock_enabled=false; fi
+    plugin_names="$(jq -r '.pluginJars[]? | ascii_downcase' <<< "$selected" 2>/dev/null || true)"
+    if [[ ${bedrock_enabled} == true ]] && grep -q geyser <<< "$plugin_names" && grep -q floodgate <<< "$plugin_names"; then bedrock_managed=false; else bedrock_managed=true; fi
+
+    configured="$(configured_state)"
+    java_port="$(jq -r '.destination.java_port' <<< "$request")"
+    bedrock_port="$(jq -r '.destination.bedrock_port' <<< "$request")"
+    java_memory="$(jq -r '.destination.java_memory // ""' <<< "$request")"
+    container_memory="$(jq -r '.destination.container_memory // ""' <<< "$request")"
+    timezone="$(jq -r '.destination.timezone // ""' <<< "$request")"
+    backup_keep="$(jq -r '.destination.backup_keep' <<< "$request")"
+    backup_daily="$(jq -r '.destination.backup_daily_time // ""' <<< "$request")"
+    backup_auto="$(jq -r '.destination.backup_automatic' <<< "$request")"
+
+    if [[ ${configured} == true ]]; then
+        require_config
+        /usr/libexec/justvoxel/mjust/validate-data-mount >/dev/null 2>&1 || { [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error destination_unavailable 'Configured Minecraft data storage could not be validated.'; return 0; }
+        jv_restore_validate_data_layout "$DATA_PATH" >/dev/null 2>&1 || { [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error destination_unavailable 'Configured Minecraft data layout could not be validated.'; return 0; }
+        [[ ${java_port} =~ ^[0-9]+$ ]] || java_port="$JAVA_PORT"
+        [[ ${bedrock_port} =~ ^[0-9]+$ ]] || bedrock_port="$BEDROCK_PORT"
+        validate_port "$java_port" && validate_port "$bedrock_port" || { [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error invalid_port 'Destination Minecraft port is invalid.'; return 0; }
+        jv_migration_check_candidate_port tcp "$java_port" "$JAVA_PORT" >/dev/null 2>&1 || { [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error port_conflict 'Destination Java TCP port is already in use.'; return 0; }
+        if [[ ${bedrock_enabled} == true ]]; then jv_migration_check_candidate_port udp "$bedrock_port" "$([[ ${BEDROCK_ENABLED} == yes ]] && printf '%s' "$BEDROCK_PORT" || true)" >/dev/null 2>&1 || { [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error port_conflict 'Destination Bedrock UDP port is already in use.'; return 0; }; fi
+        player_json="$(/usr/libexec/justvoxel/mjust/web-status-json players 2>/dev/null || true)"
+        if jq -e 'type=="object" and (.state|type=="string") and (.online|type=="number") and (.names|type=="array")' >/dev/null 2>&1 <<< "$player_json"; then
+            minecraft_state="$(jq -r '.state' <<< "$player_json")"; online="$(jq -r '.online' <<< "$player_json")"; players="$(jq -c '.names' <<< "$player_json")"
+        fi
+        [[ ${minecraft_state} == running || ${minecraft_state} == stopped ]] || { [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error player_status_unavailable 'Minecraft player status could not be checked safely.'; return 0; }
+        if [[ ${minecraft_state} == running && ${online} =~ ^[0-9]+$ ]] && (( online > 0 )); then players_confirm=true; fi
+        data_path="$DATA_PATH"; backup_path="$BACKUP_PATH"; java_memory="$JAVA_MEMORY"; container_memory="$CONTAINER_MEMORY"; timezone="$TIMEZONE"; image_tag="$MINECRAFT_IMAGE_TAG"; minecraft_uid="$MINECRAFT_UID"; minecraft_gid="$MINECRAFT_GID"; backup_keep="$BACKUP_KEEP"; backup_schedule="$BACKUP_SCHEDULE"
+        if [[ ${BACKUP_TIMER_ENABLED:-yes} == yes ]]; then backup_auto=true; else backup_auto=false; fi
+        config_identity="$(sha256sum "$JV_CONFIG" | awk '{print $1}')"
+        destination_identity="$(printf '%s\n%s\n' "$config_identity" "$(stat -Lc '%d:%i:%s:%Y' "$DATA_PATH")" | sha256sum | awk '{print $1}')"
+        mode=replace
+    else
+        [[ ${java_port} =~ ^[0-9]+$ && ${bedrock_port} =~ ^[0-9]+$ ]] || { [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error invalid_destination 'Fresh Import requires destination ports.'; return 0; }
+        setup_request="$(jq -cn --arg motd "$source_motd" --argjson max "$source_max" --argjson bedrock "$bedrock_enabled" --arg timezone "$timezone" --arg java_memory "$java_memory" --arg container_memory "$container_memory" --argjson java_port "$java_port" --argjson bedrock_port "$bedrock_port" --arg version "$source_version" --argjson backup_auto "$backup_auto" --arg backup_daily "$backup_daily" --argjson backup_keep "$backup_keep"           '{server:{motd:$motd,max_players:$max,bedrock_enabled:$bedrock,timezone:$timezone},minecraft:{java_memory:$java_memory,container_memory:$container_memory,java_port:$java_port,bedrock_port:$bedrock_port,image_tag:"stable",version_policy:"pinned",version:$version},storage:{type:"system",path:"/var/lib/justvoxel/minecraft",device:"",mount_point:""},backups:{automatic:$backup_auto,daily_time:$backup_daily,keep:$backup_keep,type:"system",path:"/var/lib/justvoxel/backups",device:"",mount_point:"",source:"",username:"",domain:""}}')"
+        setup_plan="$(printf '%s\n' "$setup_request" | /usr/libexec/justvoxel/mjust/admin-setup-plan-json 2>/dev/null || true)"
+        if ! jq -e '.ok==true and .normalized!=null' >/dev/null 2>&1 <<< "$setup_plan"; then
+            msg="$(jq -r '.error // "Fresh Import destination could not be validated."' <<< "$setup_plan" 2>/dev/null || echo 'Fresh Import destination could not be validated.')"
+            [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error invalid_destination "$msg"; return 0
+        fi
+        setup_norm="$(jq -c '.normalized' <<< "$setup_plan")"
+        data_path="$(jq -r '.storage.path' <<< "$setup_norm")"; backup_path="$(jq -r '.backups.path' <<< "$setup_norm")"; java_memory="$(jq -r '.minecraft.java_memory' <<< "$setup_norm")"; container_memory="$(jq -r '.minecraft.container_memory' <<< "$setup_norm")"; timezone="$(jq -r '.server.timezone' <<< "$setup_norm")"; image_tag="$(jq -r '.minecraft.image_tag' <<< "$setup_norm")"; minecraft_uid="$(jq -r '.minecraft.minecraft_uid' <<< "$setup_norm")"; minecraft_gid="$(jq -r '.minecraft.minecraft_gid' <<< "$setup_norm")"; backup_keep="$(jq -r '.backups.keep' <<< "$setup_norm")"; backup_schedule="$(jq -r '.backups.schedule' <<< "$setup_norm")"
+        destination_identity="$(printf '%s' "$setup_norm" | sha256sum | awk '{print $1}')"
+        mode=fresh
+    fi
+
+    normalized_source="$(jq -cn --arg path "$source_path" --arg root "$selected_root" --arg source_class "$source_class" --arg candidate_type "$candidate_type" --arg version "$source_version" --arg game_mode "$source_game" --arg difficulty "$source_diff" --arg motd "$source_motd" --argjson whitelist "$source_whitelist" --argjson enforce "$source_enforce" --argjson max "$source_max" --argjson plugins "$plugin_count" --argjson bedrock "$bedrock_enabled" --argjson managed "$bedrock_managed" --argjson java_hint "$java_hint" --argjson bedrock_hint "$bedrock_hint" --argjson expanded "$expanded"       '{path:$path,selected_root:$root,source_class:$source_class,candidate_type:$candidate_type,minecraft_version:$version,online_mode:"online",game_mode:$game_mode,difficulty:$difficulty,whitelist_enabled:$whitelist,enforce_whitelist:$enforce,max_players:$max,motd:$motd,plugin_count:$plugins,bedrock_enabled:$bedrock,bedrock_managed_plugins:$managed,java_port_hint:$java_hint,bedrock_port_hint:$bedrock_hint,expanded_bytes:$expanded}')"
+    normalized_destination="$(jq -cn --arg mode "$mode" --arg data_path "$data_path" --arg backup_path "$backup_path" --arg java_memory "$java_memory" --arg container_memory "$container_memory" --arg timezone "$timezone" --arg image_tag "$image_tag" --arg backup_schedule "$backup_schedule" --argjson java_port "$java_port" --argjson bedrock_port "$bedrock_port" --argjson uid "$minecraft_uid" --argjson gid "$minecraft_gid" --argjson backup_keep "$backup_keep" --argjson backup_auto "$backup_auto"       '{mode:$mode,data_path:$data_path,backup_path:$backup_path,java_port:$java_port,bedrock_port:$bedrock_port,java_memory:$java_memory,container_memory:$container_memory,timezone:$timezone,image_tag:$image_tag,minecraft_uid:$uid,minecraft_gid:$gid,backup_keep:$backup_keep,backup_schedule:$backup_schedule,backup_automatic:$backup_auto}')"
+    requirements="$(jq -cn --argjson players_required "$players_confirm" --arg minecraft_state "$minecraft_state" --argjson online "$online" --argjson players "$players" --argjson eula "$([[ ${configured} == false ]] && echo true || echo false)" --argjson vanilla "$req_vanilla" --argjson plugins "$req_plugins" --argjson online_confirm "$req_online"       '{import_confirmation_required:true,players_confirmation_required:$players_required,minecraft_state:$minecraft_state,online:$online,players:$players,eula_acceptance_required:$eula,vanilla_confirmation_required:$vanilla,plugins_confirmation_required:$plugins,online_mode_confirmation_required:$online_confirm,source_revalidation_on_apply:true,runtime_validation_required:true,rollback_required:true}')"
+    context="$(jq -cn --arg source_identity "$source_identity" --arg config_identity "$config_identity" --arg destination_identity "$destination_identity" '{source_identity:$source_identity,config_identity:$config_identity,destination_identity:$destination_identity}')"
+    [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true
+    jq -cn --argjson source "$normalized_source" --argjson destination "$normalized_destination" --argjson warnings "$warnings" --argjson requirements "$requirements" --argjson context "$context" --argjson candidates "$candidates"       '{ok:true,schema_version:"v1",normalized:{source:$source,destination:$destination},warnings:$warnings,requirements:$requirements,context:$context,candidates:$candidates}'
+}
+case "${1:-discover}" in
+  discover) discover ;;
+  plan) plan ;;
+  *) emit_error invalid_action 'Usage: admin-migration-import-plan-json {discover|plan}' ;;
+esac
