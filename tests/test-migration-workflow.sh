@@ -11,7 +11,10 @@ import_files=(
     "${repo_root}/mjust/libexec/migration-import-activate.sh"
 )
 import_text="$(cat "${import_files[@]}")"
-grep -Fq 'interrupt-safety.sh' "${repo_root}/mjust/libexec/migration-import" || fail 'migration import does not load shared interruption safety'
+import_frontend="${repo_root}/mjust/libexec/migration-import"
+import_backend="${repo_root}/mjust/libexec/migration-import-backend"
+grep -Fq 'exec /usr/libexec/justvoxel/mjust/migration-import-backend "$@"' "${import_frontend}" || fail 'migration import compatibility frontend does not delegate to the shared backend'
+grep -Fq 'interrupt-safety.sh' "${import_backend}" || fail 'shared migration import backend does not load interruption safety'
 export_frontend="${repo_root}/mjust/libexec/migration-export"
 exporter="${repo_root}/mjust/libexec/migration-export-backend"
 recovery="${repo_root}/mjust/libexec/migration-recover"
