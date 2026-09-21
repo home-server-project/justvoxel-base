@@ -102,8 +102,8 @@ if [[ ${JV_MIGRATION_EXPORT_MAINTENANCE_LOCK_HELD:-0} != 1 ]]; then
     fi
 fi
 
-server_reported=''
-geyser_reported=''
+server_reported="${JV_MIGRATION_EXPORT_SERVER_REPORTED:-}"
+geyser_reported="${JV_MIGRATION_EXPORT_GEYSER_REPORTED:-}"
 plugins_reported=''
 if systemctl is-active --quiet minecraft.service; then
     was_active=yes

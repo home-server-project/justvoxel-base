@@ -203,7 +203,11 @@ else
 fi
 [[ "$live_minecraft_state" == "$expected_minecraft_state" ]] || { failure_status='Minecraft service state changed after export review.'; exit 1; }
 
+server_reported=''
+geyser_reported=''
 if [[ "$live_minecraft_state" == running ]]; then
+    server_reported="$(podman exec minecraft rcon-cli 'version' 2>/dev/null | head -n1 || true)"
+    geyser_reported="$(podman exec minecraft rcon-cli 'geyser version' 2>/dev/null | head -n1 || true)"
     emit_progress running player_recheck 'Rechecking players immediately before the cold export.'
     stop_mode=required
     [[ "$players_confirmed" == true ]] && stop_mode=confirmed
@@ -220,6 +224,8 @@ fi
 
 emit_progress running exporting 'Creating and verifying the cold portable JustVoxel migration bundle.'
 JV_MIGRATION_EXPORT_MAINTENANCE_LOCK_HELD=1 \
+JV_MIGRATION_EXPORT_SERVER_REPORTED="$server_reported" \
+JV_MIGRATION_EXPORT_GEYSER_REPORTED="$geyser_reported" \
     /usr/libexec/justvoxel/mjust/migration-export-backend "$destination" >/dev/null
 
 if [[ "$restart_required" == yes ]]; then
