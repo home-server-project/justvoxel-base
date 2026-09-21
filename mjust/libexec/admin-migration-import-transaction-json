@@ -28,11 +28,12 @@ vanilla_confirmed="$(jq -r '.vanilla_confirmed' <<< "$payload")"
 plugins_confirmed="$(jq -r '.plugins_confirmed' <<< "$payload")"
 online_confirmed="$(jq -r '.online_mode_confirmed' <<< "$payload")"
 backup_smb_password="$(jq -r '.backup_smb_password // ""' <<< "$payload")"
-if (( ${#backup_smb_password} > 4096 )) || [[ "$backup_smb_password" == *$'\n'* || "$backup_smb_password" == *$'\r'* ]]; then
+if (( ${#backup_smb_password} > 4096 )); then
     emit_result needs_attention 'Server migration Import SMB backup credential was invalid.'
     exit 0
 fi
-[[ "$operation_id" =~ ^[0-9a-f-]+$ && "$plan_fingerprint" =~ ^sha256:[0-9a-f]{64}$ ]] || { emit_result needs_attention 'Server migration Import operation identity was invalid.'; exit 0; }
+case "$backup_smb_password" in
+    *[[ "$operation_id" =~ ^[0-9a-f-]+$ && "$plan_fingerprint" =~ ^sha256:[0-9a-f]{64}$ ]] || { emit_result needs_attention 'Server migration Import operation identity was invalid.'; exit 0; }
 
 emit_progress validating import_preflight 'Revalidating the reviewed server migration Import before staging or changing Minecraft.'
 replan="$(printf '%s\n' "$plan_request" | /usr/libexec/justvoxel/mjust/admin-migration-import-plan-json plan 2>/dev/null || true)"
@@ -72,7 +73,7 @@ backup_uuid="$(jq -r '.normalized.destination.backups.expected_uuid // ""' <<< "
 backup_source_expected="$(jq -r '.normalized.destination.backups.expected_source // ""' <<< "$replan")"
 
 if [[ "$mode" == fresh ]]; then
-    emit_progress running import_storage "Preparing and verifying the reviewed fresh Import storage through the Management Agent transaction backend."
+    emit_progress running import_storage 'Preparing and verifying the reviewed fresh Import storage through the Management Agent transaction backend.'
     storage_target="$(jq -c '.normalized.destination.storage | {type,path,device:(.device//""),parent_disk:(.parent_disk//""),filesystem:(.filesystem//""),uuid:(.uuid//""),mount_point:(.mount_point//""),expected_uuid:(.expected_uuid//""),expected_source:(.expected_source//"")}' <<< "$replan")"
     backup_target="$(jq -c '.normalized.destination.backups | {type,path,device:(.device//""),parent_disk:(.parent_disk//""),filesystem:(.filesystem//""),uuid:(.uuid//""),mount_point:(.mount_point//""),expected_uuid:(.expected_uuid//""),expected_source:(.expected_source//""),source:(.source//""),username:(.username//""),domain:(.domain//""),credentials_required:(.credentials_required//false)}' <<< "$replan")"
     storage_payload="$(jq -cn --arg op "$operation_id" --arg fp "$plan_fingerprint" --argjson storage "$storage_target" --argjson backups "$backup_target" --arg password "$backup_smb_password" '{schema_version:"v1",operation_id:$op,plan_fingerprint:$fp,storage:$storage,backups:$backups,smb_password:$password}')"
@@ -90,6 +91,7 @@ if [[ "$mode" == fresh ]]; then
 else
     unset backup_smb_password
 fi
+
 result_file="$JV_MIGRATION_RUN_ROOT/import-$operation_id.result"
 rm -f -- "$result_file" "$result_file.tmp."* 2>/dev/null || true
 emit_progress running import_execute 'Staging, activating, and validating the reviewed Minecraft server Import through the authoritative backend.'
@@ -125,7 +127,7 @@ else
     emit_result needs_attention 'Server migration Import ended without a complete safety result; inspect retained Import/Recovery state before continuing.'
 fi
 exit 0
-\n'* && "$backup_smb_password" != *[[ "$operation_id" =~ ^[0-9a-f-]+$ && "$plan_fingerprint" =~ ^sha256:[0-9a-f]{64}$ ]] || { emit_result needs_attention 'Server migration Import operation identity was invalid.'; exit 0; }
+\n'*|*[[ "$operation_id" =~ ^[0-9a-f-]+$ && "$plan_fingerprint" =~ ^sha256:[0-9a-f]{64}$ ]] || { emit_result needs_attention 'Server migration Import operation identity was invalid.'; exit 0; }
 
 emit_progress validating import_preflight 'Revalidating the reviewed server migration Import before staging or changing Minecraft.'
 replan="$(printf '%s\n' "$plan_request" | /usr/libexec/justvoxel/mjust/admin-migration-import-plan-json plan 2>/dev/null || true)"
@@ -191,7 +193,8 @@ else
     emit_result needs_attention 'Server migration Import ended without a complete safety result; inspect retained Import/Recovery state before continuing.'
 fi
 exit 0
-\r'* ]] || { emit_result needs_attention 'Server migration Import SMB backup credential was invalid.'; exit 0; }
+\r'*) emit_result needs_attention 'Server migration Import SMB backup credential was invalid.'; exit 0 ;;
+esac
 [[ "$operation_id" =~ ^[0-9a-f-]+$ && "$plan_fingerprint" =~ ^sha256:[0-9a-f]{64}$ ]] || { emit_result needs_attention 'Server migration Import operation identity was invalid.'; exit 0; }
 
 emit_progress validating import_preflight 'Revalidating the reviewed server migration Import before staging or changing Minecraft.'
