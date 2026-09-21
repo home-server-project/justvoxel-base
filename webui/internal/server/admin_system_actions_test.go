@@ -20,7 +20,7 @@ type fakeSystemActionsAPI struct {
 	actionResult     api.AdminSystemActionResponse
 	actionErr        error
 	actionCalls      int
-	action            string
+	action           string
 	playersConfirmed bool
 }
 
