@@ -115,6 +115,30 @@ trap on_exit EXIT INT TERM
 
 prepare_fresh_data_destination() {
     local choice rc
+    if [[ ${JV_MIGRATION_API_MODE:-0} == 1 ]]; then
+        DATA_PATH="${JV_MIGRATION_API_DATA_PATH:-}"
+        DATA_MOUNT_POINT="${JV_MIGRATION_API_DATA_MOUNT_POINT:-}"
+        DATA_EXPECTED_UUID="${JV_MIGRATION_API_DATA_EXPECTED_UUID:-}"
+        DATA_EXPECTED_SOURCE="${JV_MIGRATION_API_DATA_EXPECTED_SOURCE:-}"
+        [[ -n ${DATA_PATH} ]] || { echo 'ERROR: Management API import did not provide a data path.' >&2; return 1; }
+        DATA_PATH="$(realpath -m -- "${DATA_PATH}")"
+        validate_storage_path "${DATA_PATH}" || { echo 'ERROR: invalid Minecraft data path.' >&2; return 1; }
+        if [[ -n ${DATA_MOUNT_POINT} ]]; then
+            DATA_MOUNT_POINT="$(realpath -m -- "${DATA_MOUNT_POINT}")"
+            mountpoint -q -- "${DATA_MOUNT_POINT}" || { echo 'ERROR: reviewed Minecraft data mount is not active.' >&2; return 1; }
+            case "${DATA_PATH}/" in "${DATA_MOUNT_POINT}/"*) ;; *) echo 'ERROR: reviewed Minecraft data path is outside its mount.' >&2; return 1 ;; esac
+        fi
+        if [[ -e ${DATA_PATH} ]]; then
+            [[ -d ${DATA_PATH} && ! -L ${DATA_PATH} ]] || { echo 'ERROR: fresh DATA_PATH must be a real directory.' >&2; return 1; }
+            if find "${DATA_PATH}" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+                echo "ERROR: fresh import destination is not empty: ${DATA_PATH}" >&2
+                return 1
+            fi
+        else
+            install -d -m0750 -o root -g root "${DATA_PATH}"
+        fi
+        return 0
+    fi
     choice="$(jui_choose 'Destination Minecraft storage' \
         'Directory on the JustVoxel system filesystem' \
         'Dedicated/local disk or partition' \
@@ -156,6 +180,29 @@ prepare_fresh_data_destination() {
 
 prepare_fresh_backup_configuration() {
     local rc answer daily_time
+    if [[ ${JV_MIGRATION_API_MODE:-0} == 1 ]]; then
+        BACKUP_TYPE="${JV_MIGRATION_API_BACKUP_TYPE:-system}"
+        BACKUP_PATH="${JV_MIGRATION_API_BACKUP_PATH:-}"
+        BACKUP_MOUNT_POINT="${JV_MIGRATION_API_BACKUP_MOUNT_POINT:-}"
+        BACKUP_EXPECTED_UUID="${JV_MIGRATION_API_BACKUP_EXPECTED_UUID:-}"
+        BACKUP_EXPECTED_SOURCE="${JV_MIGRATION_API_BACKUP_EXPECTED_SOURCE:-}"
+        BACKUP_KEEP="${JV_MIGRATION_API_BACKUP_KEEP:-7}"
+        BACKUP_SCHEDULE="${JV_MIGRATION_API_BACKUP_SCHEDULE:-*-*-* 04:30:00}"
+        BACKUP_TIMER_ENABLED="${JV_MIGRATION_API_BACKUP_TIMER_ENABLED:-yes}"
+        [[ -n ${BACKUP_PATH} ]] || { echo 'ERROR: Management API import did not provide a backup path.' >&2; return 1; }
+        BACKUP_PATH="$(realpath -m -- "${BACKUP_PATH}")"
+        validate_storage_path "${BACKUP_PATH}" || { echo 'ERROR: invalid backup path.' >&2; return 1; }
+        [[ ${BACKUP_PATH} != "${DATA_PATH}" && ${BACKUP_PATH} != "${DATA_PATH}/"* ]] || { echo 'ERROR: backup path cannot be the Minecraft data directory or a child of it.' >&2; return 1; }
+        validate_positive_int "${BACKUP_KEEP}" || { echo 'ERROR: backup retention must be a positive integer.' >&2; return 1; }
+        [[ ${BACKUP_TIMER_ENABLED} == yes || ${BACKUP_TIMER_ENABLED} == no ]] || { echo 'ERROR: invalid backup timer state.' >&2; return 1; }
+        if [[ -n ${BACKUP_MOUNT_POINT} ]]; then
+            BACKUP_MOUNT_POINT="$(realpath -m -- "${BACKUP_MOUNT_POINT}")"
+            mountpoint -q -- "${BACKUP_MOUNT_POINT}" || { echo 'ERROR: reviewed backup mount is not active.' >&2; return 1; }
+            case "${BACKUP_PATH}/" in "${BACKUP_MOUNT_POINT}/"*) ;; *) echo 'ERROR: reviewed backup path is outside its mount.' >&2; return 1 ;; esac
+        fi
+        install -d -m0750 -o root -g root "${BACKUP_PATH}"
+        return 0
+    fi
     if storage_prepare_backup_interactive yes; then
         :
     else
@@ -190,6 +237,24 @@ select_candidate() {
     local -a labels=() candidates=()
     count="$(jq -r '.candidates | length' <<< "${detection}")"
     (( count > 0 )) || { echo 'ERROR: no recognizable Minecraft server root was found.' >&2; return 1; }
+    if [[ ${JV_MIGRATION_API_MODE:-0} == 1 ]]; then
+        local requested="${JV_MIGRATION_API_SELECTED_ROOT_REL:-}"
+        if (( count == 1 )) && [[ -z ${requested} ]]; then
+            jq -c '.candidates[0]' <<< "${detection}"
+            return 0
+        fi
+        [[ -n ${requested} ]] || { echo 'ERROR: multiple Minecraft roots were detected and no reviewed root was supplied.' >&2; return 1; }
+        for (( index=0; index<count; index++ )); do
+            candidate="$(jq -c ".candidates[${index}]" <<< "${detection}")"
+            root="$(jq -r '.root' <<< "${candidate}")"
+            if [[ "${root#${base}/}" == "${requested}" ]]; then
+                printf '%s' "${candidate}"
+                return 0
+            fi
+        done
+        echo 'ERROR: the reviewed Minecraft root no longer exists in staged source data.' >&2
+        return 1
+    fi
     if (( count == 1 )); then
         jq -c '.candidates[0]' <<< "${detection}"
         return 0
@@ -218,6 +283,10 @@ select_candidate() {
 
 prompt_source_online_mode() {
     local answer
+    if [[ ${JV_MIGRATION_API_MODE:-0} == 1 ]]; then
+        [[ ${JV_MIGRATION_API_ONLINE_MODE_CONFIRMED:-no} == yes ]]
+        return
+    fi
     echo
     echo 'JustVoxel could not determine the source Java online-mode setting.'
     echo 'Player UUID identity must not change during migration.'

@@ -14,7 +14,7 @@ if (( $# > 1 )); then
     echo 'Usage: migration-import [SOURCE]' >&2
     exit 2
 fi
-if ! jui_has_tty; then
+if [[ ${JV_MIGRATION_API_MODE:-0} != 1 ]] && ! jui_has_tty; then
     echo 'ERROR: import requires a controlling terminal for compatibility review and destructive confirmation.' >&2
     echo 'For SSH, allocate a terminal, for example: ssh -t <host> mjust import' >&2
     exit 1

@@ -8,14 +8,21 @@ if [[ ${configured} == yes ]] && systemctl is-active --quiet minecraft.service; 
     echo "${initial_players}"
     if ! grep -q 'There are 0 of' <<< "${initial_players}"; then
         echo 'Players are online. Import will use the normal graceful shutdown path.'
-        if jui_confirm 'Continue preparing this import?'; then players_override=yes; else echo 'Import cancelled.'; exit 0; fi
+        if [[ ${JV_MIGRATION_API_MODE:-0} == 1 ]]; then
+            [[ ${JV_MIGRATION_API_PLAYERS_CONFIRMED:-no} == yes ]] || { echo 'ERROR: players are online and interruption was not explicitly confirmed.' >&2; exit 1; }
+            players_override=yes
+        elif jui_confirm 'Continue preparing this import?'; then players_override=yes; else echo 'Import cancelled.'; exit 0; fi
     fi
 fi
 
 echo
-printf 'Type IMPORT to continue: ' >/dev/tty
-IFS= read -r confirmation </dev/tty
-[[ ${confirmation} == IMPORT ]] || { echo 'Import cancelled.'; exit 0; }
+if [[ ${JV_MIGRATION_API_MODE:-0} == 1 ]]; then
+    [[ ${JV_MIGRATION_API_IMPORT_CONFIRMED:-no} == yes ]] || { echo 'ERROR: destructive import activation was not explicitly confirmed.' >&2; exit 1; }
+else
+    printf 'Type IMPORT to continue: ' >/dev/tty
+    IFS= read -r confirmation </dev/tty
+    [[ ${confirmation} == IMPORT ]] || { echo 'Import cancelled.'; exit 0; }
+fi
 
 exec 9>"${JV_MAINTENANCE_LOCK}"
 if ! flock -n 9; then
@@ -42,7 +49,10 @@ if [[ ${configured} == yes && ${minecraft_was_active} == yes ]]; then
     [[ -n ${final_players} ]] || { echo 'ERROR: player state became unknown. Import cancelled before live data changed.' >&2; exit 1; }
     echo "${final_players}"
     if ! grep -q 'There are 0 of' <<< "${final_players}" && [[ ${players_override} != yes ]]; then
-        if ! jui_confirm 'A player joined. Continue with the normal graceful shutdown?'; then
+        if [[ ${JV_MIGRATION_API_MODE:-0} == 1 ]]; then
+            echo 'ERROR: a player joined after planning and interruption was not confirmed.' >&2
+            exit 1
+        elif ! jui_confirm 'A player joined. Continue with the normal graceful shutdown?'; then
             echo 'Import cancelled before live data changed.'
             exit 0
         fi

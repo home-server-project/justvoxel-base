@@ -15,6 +15,10 @@ import_frontend="${repo_root}/mjust/libexec/migration-import"
 import_backend="${repo_root}/mjust/libexec/migration-import-backend"
 grep -Fq 'exec /usr/libexec/justvoxel/mjust/migration-import-backend "$@"' "${import_frontend}" || fail 'migration import compatibility frontend does not delegate to the shared backend'
 grep -Fq 'interrupt-safety.sh' "${import_backend}" || fail 'shared migration import backend does not load interruption safety'
+grep -Fq 'JV_MIGRATION_API_MODE' "${import_backend}" || fail 'shared migration Import backend has no non-interactive Agent mode'
+for api_file in "${repo_root}/mjust/libexec/migration-import-common.sh" "${repo_root}/mjust/libexec/migration-import-plan-source.sh" "${repo_root}/mjust/libexec/migration-import-plan-destination.sh" "${repo_root}/mjust/libexec/migration-import-activate.sh"; do
+    grep -Fq 'JV_MIGRATION_API_MODE' "${api_file}" || fail "Import backend component lacks Agent-mode handling: ${api_file}"
+done
 export_frontend="${repo_root}/mjust/libexec/migration-export"
 exporter="${repo_root}/mjust/libexec/migration-export-backend"
 recovery="${repo_root}/mjust/libexec/migration-recover"
