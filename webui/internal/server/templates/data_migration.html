@@ -1,0 +1,89 @@
+{{define "data_migration.html"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JustVoxel - Minecraft data storage</title><link rel="stylesheet" href="/static/app.css"><link rel="stylesheet" href="/static/settings.css"><link rel="stylesheet" href="/static/storage.css"><script src="/static/app.js" defer></script></head>
+<body class="role-administrator">{{template "app-header" .}}
+<main>
+  <div class="title-row"><div><p class="eyebrow">Administrator · storage</p><h1>Minecraft data storage</h1></div><span class="badge">{{.Identity.Username}}</span></div>
+  <p class="muted">Move the active Minecraft data directory to another local disk or partition. The Management Agent owns target safety, backup, copy verification, configuration switching, runtime validation, and rollback.</p>
+  {{if .Error}}<div class="notice error"><strong>Migration cannot continue.</strong><br>{{.Error}}</div>{{end}}
+  <div class="notice warning"><strong>This is an appliance-level data migration.</strong><br>Review the exact target before starting. JustVoxel keeps the old Minecraft data after a successful migration until you verify normal gameplay and backups.</div>
+
+  <section class="panel details provision-choice">
+    <div class="section-heading"><div><p class="eyebrow">Option 1</p><h2>Dedicated disk or USB drive</h2></div><span class="badge">Entire disk</span></div>
+    <p>Use a safe whole disk discovered by the Management Agent. The selected disk will be erased and provisioned as XFS only after the exact Agent-provided confirmation phrase.</p>
+    {{if .WholeDisks}}
+      {{range .WholeDisks}}
+      <form class="settings-form" method="post" action="/settings/data-migration/review">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="operation" value="erase_disk"><input type="hidden" name="device" value="{{.Candidate.Path}}"><input type="hidden" name="size_gib" value="all">
+        <div class="details"><strong>{{if .Candidate.Model}}{{.Candidate.Model}} · {{end}}{{.Candidate.Path}}</strong><br><span class="muted">{{.Size}}{{if .Candidate.Transport}} · {{.Candidate.Transport}}{{end}}</span></div>
+        <div class="settings-grid two-column">
+          <label>Mount point<input name="mount_point" value="/var/mnt/justvoxel-data" required autocomplete="off"></label>
+          <label>Minecraft data directory<input name="path" value="/var/mnt/justvoxel-data/minecraft" required autocomplete="off"></label>
+        </div>
+        <div class="settings-submit-row"><button type="submit">Review this disk</button><span class="muted">Review does not modify storage.</span></div>
+      </form>
+      {{end}}
+    {{else}}<div class="notice">No safe unused whole disk is currently available.</div>{{end}}
+  </section>
+
+  <section class="panel details provision-choice">
+    <div class="section-heading"><div><p class="eyebrow">Option 2</p><h2>Existing filesystem</h2></div><span class="badge">No formatting</span></div>
+    <p>Use an existing XFS, ext4, or Btrfs partition. JustVoxel does not reformat this option.</p>
+    {{if .Partitions}}
+      {{range .Partitions}}
+      <form class="settings-form" method="post" action="/settings/data-migration/review">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="operation" value="use_partition"><input type="hidden" name="device" value="{{.Candidate.Path}}"><input type="hidden" name="size_gib" value="all">
+        <div class="details"><strong>{{.Candidate.Path}}</strong> · {{.Size}}{{if .Candidate.Filesystem}} · {{.Candidate.Filesystem}}{{end}}{{if .Candidate.Model}} · {{.Candidate.Model}}{{end}}{{if .Candidate.Mountpoint}}<br><span class="muted">Currently mounted at {{.Candidate.Mountpoint}}</span>{{end}}</div>
+        {{if .Candidate.Mountpoint}}
+        <input type="hidden" name="mount_point" value="{{.Candidate.Mountpoint}}">
+        <label>Minecraft data directory<input name="path" value="{{.Candidate.Mountpoint}}/minecraft" required autocomplete="off"><span class="field-help">Must remain inside the existing mount point shown above.</span></label>
+        {{else}}
+        <div class="settings-grid two-column">
+          <label>Mount point<input name="mount_point" value="/var/mnt/justvoxel-data" required autocomplete="off"></label>
+          <label>Minecraft data directory<input name="path" value="/var/mnt/justvoxel-data/minecraft" required autocomplete="off"></label>
+        </div>
+        {{end}}
+        <div class="settings-submit-row"><button type="submit">Review this filesystem</button><span class="muted">The Management Agent revalidates the filesystem before Apply.</span></div>
+      </form>
+      {{end}}
+    {{else}}<div class="notice">No supported existing filesystem is currently available.</div>{{end}}
+  </section>
+
+  <section class="panel details provision-choice">
+    <div class="section-heading"><div><p class="eyebrow">Option 3</p><h2>Blank partition</h2></div><span class="badge">Format selected partition</span></div>
+    <p>Format one Agent-discovered blank partition as XFS. Existing formatted filesystems are never silently reformatted.</p>
+    {{if .BlankPartitions}}
+      {{range .BlankPartitions}}
+      <form class="settings-form" method="post" action="/settings/data-migration/review">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="operation" value="format_partition"><input type="hidden" name="device" value="{{.Candidate.Path}}"><input type="hidden" name="size_gib" value="all">
+        <div class="details"><strong>{{.Candidate.Path}}</strong> · {{.Size}}{{if .Candidate.Model}} · {{.Candidate.Model}}{{end}}{{if .Candidate.SystemDisk}} · on system disk{{end}}</div>
+        <div class="settings-grid two-column">
+          <label>Mount point<input name="mount_point" value="/var/mnt/justvoxel-data" required autocomplete="off"></label>
+          <label>Minecraft data directory<input name="path" value="/var/mnt/justvoxel-data/minecraft" required autocomplete="off"></label>
+        </div>
+        <div class="settings-submit-row"><button type="submit">Review partition format</button><span class="muted">Formatting occurs only after exact typed confirmation.</span></div>
+      </form>
+      {{end}}
+    {{else}}<div class="notice">No writable blank partition is currently available.</div>{{end}}
+  </section>
+
+  <section class="panel details provision-choice">
+    <div class="section-heading"><div><p class="eyebrow">Option 4</p><h2>Already-unallocated disk space</h2></div><span class="badge">No shrinking</span></div>
+    <p>Create a new XFS partition only inside unallocated space already reported by the Management Agent. Existing partitions and filesystems are not resized.</p>
+    {{if .FreeSpaceDisks}}
+      {{range .FreeSpaceDisks}}
+      <form class="settings-form" method="post" action="/settings/data-migration/review">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="operation" value="create_partition"><input type="hidden" name="device" value="{{.Candidate.Path}}">
+        <div class="details"><strong>{{if .Candidate.Model}}{{.Candidate.Model}} · {{end}}{{.Candidate.Path}}</strong> · {{.Size}}{{if .Candidate.SystemDisk}} · system disk{{end}}</div>
+        <div class="settings-grid two-column">
+          <label>Partition size<input name="size_gib" value="all" required autocomplete="off"><span class="field-help">Use <code>all</code> for the reviewed free segment, or an integer GiB value.</span></label>
+          <label>Mount point<input name="mount_point" value="/var/mnt/justvoxel-data" required autocomplete="off"></label>
+        </div>
+        <label>Minecraft data directory<input name="path" value="/var/mnt/justvoxel-data/minecraft" required autocomplete="off"></label>
+        <div class="settings-submit-row"><button type="submit">Review new partition</button><span class="muted">Review shows the exact Agent-approved operation before anything changes.</span></div>
+      </form>
+      {{end}}
+    {{else}}<div class="notice">No disk currently has a safe unallocated segment available for this migration.</div>{{end}}
+  </section>
+
+  <p class="foot">WebUI {{.Version}} · Management API {{.ManagementAPI}}</p>
+</main></body></html>{{end}}
