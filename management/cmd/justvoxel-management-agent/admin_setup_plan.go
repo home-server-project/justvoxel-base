@@ -62,10 +62,11 @@ type adminSetupPlanBackupsRequest struct {
 }
 
 type adminSetupPlanRequest struct {
-	Server    adminSetupPlanServerRequest    `json:"server"`
-	Minecraft adminSetupPlanMinecraftRequest `json:"minecraft"`
-	Storage   adminSetupPlanStorageRequest   `json:"storage"`
-	Backups   adminSetupPlanBackupsRequest   `json:"backups"`
+	DiagnosticSessionID string                         `json:"diagnostic_session_id,omitempty"`
+	Server              adminSetupPlanServerRequest    `json:"server"`
+	Minecraft           adminSetupPlanMinecraftRequest `json:"minecraft"`
+	Storage             adminSetupPlanStorageRequest   `json:"storage"`
+	Backups             adminSetupPlanBackupsRequest   `json:"backups"`
 }
 
 type adminSetupPlanWarning struct {
@@ -246,10 +247,27 @@ func (s *server) adminSetupPlan(w http.ResponseWriter, r *http.Request) {
 	if !decodeAdminSetupPlanRequest(w, r, &request) {
 		return
 	}
+	diagnosticID := strings.TrimSpace(request.DiagnosticSessionID)
+	if s.operations != nil && validOperationID(diagnosticID) {
+		_ = s.operations.appendSetupDiagnostic(diagnosticID, "PLAN", "setup planning requested", setupDiagnosticPlanRequestValues(request))
+	}
 	out, planningErr := authoritativeAdminSetupPlan(r.Context(), request)
 	if planningErr != nil {
+		if s.operations != nil && validOperationID(diagnosticID) {
+			_ = s.operations.appendSetupDiagnostic(diagnosticID, "PLAN", "setup planning unavailable", map[string]string{"error": planningErr.message})
+		}
 		writeError(w, planningErr.status, planningErr.message)
 		return
+	}
+	if s.operations != nil && validOperationID(diagnosticID) {
+		values := setupDiagnosticNormalizedPlanValues(out.Normalized)
+		if values == nil {
+			values = map[string]string{}
+		}
+		values["plan_fingerprint"] = out.PlanFingerprint
+		values["result_code"] = out.Code
+		values["result_error"] = out.Error
+		_ = s.operations.appendSetupDiagnostic(diagnosticID, "PLAN", "authoritative setup plan completed", values)
 	}
 	if !out.OK {
 		writeJSON(w, http.StatusBadRequest, out)
@@ -260,7 +278,9 @@ func (s *server) adminSetupPlan(w http.ResponseWriter, r *http.Request) {
 
 func authoritativeAdminSetupPlan(parent context.Context, request adminSetupPlanRequest) (adminSetupPlanResponse, *adminSetupPlanningError) {
 	var out adminSetupPlanResponse
-	payload, err := json.Marshal(request)
+	helperRequest := request
+	helperRequest.DiagnosticSessionID = ""
+	payload, err := json.Marshal(helperRequest)
 	if err != nil {
 		return out, &adminSetupPlanningError{status: http.StatusInternalServerError, message: "first-run setup request could not be prepared"}
 	}

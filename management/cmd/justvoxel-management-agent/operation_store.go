@@ -78,9 +78,12 @@ type operationJournal struct {
 }
 
 type operationStore struct {
-	mu               sync.Mutex
-	baseDir          string
-	operationsDir    string
+	mu                 sync.Mutex
+	diagnosticMu       sync.Mutex
+	baseDir            string
+	operationsDir      string
+	setupLogsDir       string
+	diagnosticHostname string
 	lockFile         *os.File
 	restoreLockFile      *os.File
 	dataMigrationLockFile *os.File
@@ -102,12 +105,17 @@ func openOperationStore(baseDir string) (*operationStore, error) {
 		return nil, errors.New("operation state directory is required")
 	}
 	operationsDir := filepath.Join(baseDir, "operations")
+	setupLogsDir := filepath.Join(baseDir, "setup-logs")
 	if err := ensurePrivateDirectory(baseDir); err != nil {
 		return nil, err
 	}
 	if err := ensurePrivateDirectory(operationsDir); err != nil {
 		return nil, err
 	}
+	if err := ensurePrivateDirectory(setupLogsDir); err != nil {
+		return nil, err
+	}
+	hostname, _ := os.Hostname()
 	lockPath := filepath.Join(baseDir, "setup.lock")
 	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
@@ -160,6 +168,8 @@ func openOperationStore(baseDir string) (*operationStore, error) {
 	s := &operationStore{
 		baseDir:               baseDir,
 		operationsDir:         operationsDir,
+		setupLogsDir:          setupLogsDir,
+		diagnosticHostname:    strings.TrimSpace(hostname),
 		lockFile:              lockFile,
 		restoreLockFile:       restoreLockFile,
 		dataMigrationLockFile: dataMigrationLockFile,
@@ -902,6 +912,7 @@ func (s *operationStore) transition(id string, next operationState, stage, statu
 		return operationJournal{}, err
 	}
 	s.operations[id] = journal
+	s.appendSetupJournalDiagnosticBestEffort(journal)
 	if next == operationSucceeded || next == operationRolledBack {
 		switch journal.OperationType {
 		case operationTypeSetup:

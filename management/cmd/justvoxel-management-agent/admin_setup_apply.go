@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -14,10 +15,11 @@ import (
 const adminSetupApplyRequestLimit = 24 * 1024
 
 type adminSetupApplyRequest struct {
-	PlanFingerprint string                `json:"plan_fingerprint"`
-	Request         adminSetupPlanRequest `json:"request"`
-	SMBPassword     string                `json:"smb_password,omitempty"`
-	EULAAccepted    bool                  `json:"eula_accepted"`
+	DiagnosticSessionID string                `json:"diagnostic_session_id,omitempty"`
+	PlanFingerprint     string                `json:"plan_fingerprint"`
+	Request             adminSetupPlanRequest `json:"request"`
+	SMBPassword         string                `json:"smb_password,omitempty"`
+	EULAAccepted        bool                  `json:"eula_accepted"`
 }
 
 type adminSetupApplyResponse struct {
@@ -44,6 +46,17 @@ func (s *server) adminSetupApply(w http.ResponseWriter, r *http.Request) {
 	var request adminSetupApplyRequest
 	if !decodeAdminSetupApplyRequest(w, r, &request) {
 		return
+	}
+	diagnosticID := strings.TrimSpace(request.DiagnosticSessionID)
+	if diagnosticID == "" {
+		diagnosticID = strings.TrimSpace(request.Request.DiagnosticSessionID)
+	}
+	if s.operations != nil && validOperationID(diagnosticID) {
+		_ = s.operations.appendSetupDiagnostic(diagnosticID, "APPLY", "setup Apply requested", map[string]string{
+			"plan_fingerprint":     request.PlanFingerprint,
+			"eula_accepted":        fmt.Sprintf("%t", request.EULAAccepted),
+			"smb_password_present": fmt.Sprintf("%t", request.SMBPassword != ""),
+		})
 	}
 	if !operationFingerprintPattern.MatchString(request.PlanFingerprint) {
 		writeAdminSetupApplyFailure(w, http.StatusBadRequest, "invalid_plan_fingerprint", "invalid reviewed setup fingerprint")
@@ -105,7 +118,7 @@ func (s *server) adminSetupApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	operation, created, err := s.operations.beginSetup(request.PlanFingerprint)
+	operation, created, err := s.operations.beginSetupWithDiagnostic(request.PlanFingerprint, diagnosticID)
 	if err != nil {
 		if errors.Is(err, errSetupOperationBusy) || errors.Is(err, errSetupLockBusy) {
 			current, currentErr := s.operations.currentSetup()
@@ -125,6 +138,7 @@ func (s *server) adminSetupApply(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, status, adminSetupApplyResponse{OK: true, Created: created, Operation: &operation})
 	if created {
+		_ = s.operations.appendSetupDiagnostic(operation.OperationID, "PLAN", "reviewed normalized setup plan", setupDiagnosticNormalizedPlanValues(plan.Normalized))
 		secret := []byte(request.SMBPassword)
 		request.SMBPassword = ""
 		planCopy := *plan.Normalized

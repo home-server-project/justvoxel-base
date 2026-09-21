@@ -35,5 +35,6 @@ func (s *operationStore) updateProgress(id string, expected operationState, stag
 		return operationJournal{}, err
 	}
 	s.operations[id] = journal
+	s.appendSetupJournalDiagnosticBestEffort(journal)
 	return journal, nil
 }

@@ -103,6 +103,7 @@ func registerAdminDiscoveryRoutes(mux *http.ServeMux, s *server) {
 	registerAdminDataMigrationRoutes(mux, s)
 	registerAdminSetupPlanRoutes(mux, s)
 	registerAdminSetupApplyRoutes(mux, s)
+	registerAdminSetupDiagnosticRoutes(mux, s)
 	registerAdminOperationRoutes(mux, s)
 }
 
