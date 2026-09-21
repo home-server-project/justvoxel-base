@@ -194,6 +194,85 @@ Build on the storage support already available through `mjust` and the current W
 - verify transfers
 - handle mounting and safe unmounting through the appliance workflow
 
+### Diagnostics, log viewer, and privacy-controlled support reporting
+
+Build on the Setup Diagnostic Log foundation rather than creating a second logging system.
+
+Local diagnostics should remain Management-Agent owned and usable even when remote reporting is disabled. The WebUI and mJust should act only as frontends for viewing, downloading, retention, privacy settings, review, and submission.
+
+Provide four administrator-selectable diagnostic modes:
+
+- **Local only** - default. Collect supported diagnostics locally and never transmit them.
+- **Disabled** - do not retain supported diagnostic history. Clearly warn that future troubleshooting may require the user to reproduce the problem and collect information manually.
+- **Review before sending** - retain diagnostics locally and require the administrator to review the exact sanitized support report before each submission.
+- **Automatic reporting** - opt-in only. Before enabling it, show the administrator a representative sanitized report and require explicit confirmation. Allow switching back to any other mode at any time.
+
+Expose the same policy through WebUI and mJust, with the Management Agent as the single authority.
+
+Add a normal Diagnostics / Logs experience later:
+
+- browse retained Setup and operation diagnostics;
+- download human-readable logs;
+- show operation, component, stage, result, and timestamps;
+- allow administrator-controlled retention/cleanup;
+- preserve useful helper/runtime failure output;
+- keep privacy redaction centralized in the Management Agent.
+
+Do not send ordinary raw local logs directly to GitHub. Build a normalized **Support Report** from relevant local evidence.
+
+A remote Support Report should contain only information useful for reproducibility and regression analysis, such as:
+
+- JustVoxel version/build metadata;
+- booted bootc image reference including release/development channel or tag;
+- immutable booted image digest/ID;
+- intended JustVoxel image variant such as VM or HWE when that identity is available;
+- detected runtime environment class: physical hardware, virtual machine, container/nested environment, or unknown;
+- hypervisor/virtualization family when it can be determined reliably;
+- kernel/base operating-system version;
+- affected component and operation;
+- failure stage;
+- normalized error/signature;
+- bounded sanitized representative failure output;
+- first/last event timestamps relevant to the report.
+
+Runtime classification should be derived from normal operating-system/firmware virtualization signals rather than permanent hardware identity. It may use facilities such as virtualization detection and DMI/firmware hints, but diagnostic reporting must not include firmware serial numbers, motherboard UUIDs, MAC addresses, hostnames, IP addresses, or other stable hardware identifiers.
+
+Compare the **declared image variant** with the **detected runtime class**. A report should be able to identify cases such as a VM-oriented image running directly on physical hardware or an HWE image running in a VM. Treat that as a diagnostic mismatch/advisory, not an automatic root-cause conclusion.
+
+If remote reporting needs to distinguish many reports from one installation from the same failure across many installations, generate a random diagnostics installation identifier only when remote reporting is enabled. It must be independent of hardware identifiers, replaceable/resettable by the administrator, and used only for diagnostics aggregation.
+
+Use a dedicated diagnostics intake service between appliances and GitHub:
+
+- accept only versioned Support Report schemas;
+- validate and re-sanitize every submission server-side;
+- rate-limit abuse and malformed clients;
+- store individual reports outside Git;
+- fingerprint and aggregate equivalent failures;
+- count distinct reporting installations without exposing real user identity;
+- track first seen, last seen, affected image digests/tags, and recurrence across releases;
+- identify likely regressions such as a failure signature first appearing after a specific image/base transition;
+- avoid automatically blaming AlmaLinux, Podman, Minecraft, or JustVoxel until the evidence supports that conclusion.
+
+Do not embed GitHub credentials in the appliance.
+
+Use a narrowly-permissioned GitHub App as the bridge from the diagnostics service to GitHub. Prefer a separate diagnostics/triage repository rather than flooding the main product repository with raw reports.
+
+The GitHub-facing layer should create or update **aggregated incidents**, not one Issue per appliance report. One incident may represent many equivalent reports and should summarize information such as:
+
+- normalized failure signature;
+- affected component/stage;
+- number of reports;
+- number of distinct reporting installations;
+- first/last seen;
+- affected image references/digests;
+- image/runtime-class mismatches;
+- representative sanitized error;
+- whether the signature persists across multiple consecutive image builds.
+
+Define promotion rules so a single report can remain only in the collector while repeated or severe failures become actionable GitHub incidents.
+
+Keep AI optional and later. Initial redaction, schema validation, fingerprinting, aggregation, regression detection, counting, and GitHub issue maintenance should be deterministic. AI may later help summarize related incidents or suggest common root-cause areas, but it must not decide privacy boundaries or whether raw private data is safe to transmit.
+
 ### Notifications
 
 Add simple appliance notifications for useful failures or changes, such as:
