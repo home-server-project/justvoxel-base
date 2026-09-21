@@ -3,11 +3,12 @@ set -euo pipefail
 source /usr/libexec/justvoxel/mjust/common.sh
 source /usr/libexec/justvoxel/mjust/restore-common.sh
 source /usr/libexec/justvoxel/mjust/migration-common.sh
+source /usr/libexec/justvoxel/mjust/migration-import-source.sh
 require_root
 
 emit_error() {
-    local code="$1" message="$2" candidates="${3:-[]}"
-    jq -cn --arg code "$code" --arg error "$message" --argjson candidates "$candidates"         '{ok:false,schema_version:"v1",code:$code,error:$error,warnings:[],candidates:$candidates}'
+    local code="$1" message="$2" candidates="${3:-[]}" source_entries="${4:-[]}"
+    jq -cn --arg code "$code" --arg error "$message" --argjson candidates "$candidates" --argjson source_entries "$source_entries" '{ok:false,schema_version:"v1",code:$code,error:$error,warnings:[],candidates:$candidates,source_entries:$source_entries}'
 }
 warning_add() {
     local current="$1" code="$2" message="$3"
@@ -36,7 +37,7 @@ discover() {
         timezone="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
         timezone="${timezone:-UTC}"
     fi
-    jq -cn --argjson configured "$configured" --arg data_path "$data_path" --arg backup_path "$backup_path"         --arg java_memory "$java_memory" --arg container_memory "$container_memory" --arg timezone "$timezone"         --argjson java_port "$java_port" --argjson bedrock_port "$bedrock_port" --argjson backup_keep "$backup_keep"         --arg backup_daily_time "$backup_daily_time" --argjson backup_automatic "$backup_automatic"         '{ok:true,schema_version:"v1",configured:$configured,source_kinds:["local"],defaults:{data_path:$data_path,backup_path:$backup_path,java_memory:$java_memory,container_memory:$container_memory,timezone:$timezone,java_port:$java_port,bedrock_port:$bedrock_port,backup_keep:$backup_keep,backup_daily_time:$backup_daily_time,backup_automatic:$backup_automatic}}'
+    jq -cn --argjson configured "$configured" --arg data_path "$data_path" --arg backup_path "$backup_path"         --arg java_memory "$java_memory" --arg container_memory "$container_memory" --arg timezone "$timezone"         --argjson java_port "$java_port" --argjson bedrock_port "$bedrock_port" --argjson backup_keep "$backup_keep"         --arg backup_daily_time "$backup_daily_time" --argjson backup_automatic "$backup_automatic"         '{ok:true,schema_version:"v1",configured:$configured,source_kinds:["local","backup","device","nfs","smb"],defaults:{data_path:$data_path,backup_path:$backup_path,java_memory:$java_memory,container_memory:$container_memory,timezone:$timezone,java_port:$java_port,bedrock_port:$bedrock_port,backup_keep:$backup_keep,backup_daily_time:$backup_daily_time,backup_automatic:$backup_automatic}}'
 }
 candidate_with_relative_roots() {
     local detection="$1" base="$2"
@@ -60,8 +61,12 @@ plan() {
     request="$(cat)"
     if ! jq -e '
       type=="object" and ((keys-["source","destination"])|length==0) and
-      (.source|type=="object") and ((.source|keys)-["path","selected_root","source_version"]|length==0) and
-      (.source.path|type=="string") and ((.source.selected_root//"")|type=="string") and ((.source.source_version//"")|type=="string") and
+      (.source|type=="object") and ((.source|keys)-["kind","path","device","removable","source","username","domain","smb_password","selected_root","source_version"]|length==0) and
+      ((.source.kind//"local")|type=="string") and (.source.path|type=="string") and
+      ((.source.device//"")|type=="string") and ((.source.removable//false)|type=="boolean") and
+      ((.source.source//"")|type=="string") and ((.source.username//"")|type=="string") and
+      ((.source.domain//"")|type=="string") and ((.source.smb_password//"")|type=="string") and
+      ((.source.selected_root//"")|type=="string") and ((.source.source_version//"")|type=="string") and
       (.destination|type=="object") and
       ((.destination|keys)-["java_port","bedrock_port","java_memory","container_memory","timezone","backup_keep","backup_daily_time","backup_automatic","storage","backups"]|length==0) and
       (.destination.java_port|type=="number") and (.destination.bedrock_port|type=="number") and
@@ -74,17 +79,26 @@ plan() {
         return 0
     fi
 
-    source="$(jq -c '.source' <<< "$request")"
-    source_path="$(jq -r '.path' <<< "$source")"
+    source="$(jq -c '.source | .kind=(.kind//"local")' <<< "$request")"
+    source_kind="$(jq -r '.kind' <<< "$source")"
+    requested_source_path="$(jq -r '.path' <<< "$source")"
     selected_root="$(jq -r '.selected_root // ""' <<< "$source")"
     supplied_version="$(jq -r '.source_version // ""' <<< "$source")"
-    [[ ${source_path} == /* && ${source_path} != *$'\n'* && ${source_path} != *$'\r'* ]] || { emit_error invalid_source 'Import source must be an absolute local file or directory path.'; return 0; }
-    source_path="$(realpath -m -- "$source_path")"
-    [[ -e ${source_path} ]] || { emit_error missing_source 'Import source does not exist.'; return 0; }
-    jv_migration_validate_source_name "$source_path" >/dev/null 2>&1 || { emit_error incomplete_source 'Incomplete .partial migration artifacts cannot be imported.'; return 0; }
-
-    source_identity="$(jv_migration_source_identity "$source_path" 2>/dev/null || true)"
-    [[ -n ${source_identity} ]] || { emit_error invalid_source 'Import source identity could not be captured.'; return 0; }
+    set +e
+    jv_migration_import_source_prepare "$source"
+    prepare_rc=$?
+    set -e
+    if (( prepare_rc == 3 )); then
+        source_entries="$(jv_migration_import_source_entries_json "$JV_MIGRATION_IMPORT_SOURCE_BASE")"
+        emit_error source_selection_required 'Choose an Import archive or server directory from this source.' '[]' "$source_entries"
+        return 0
+    elif (( prepare_rc != 0 )); then
+        emit_error invalid_source 'Import source could not be prepared safely.'
+        return 0
+    fi
+    source_path="$JV_MIGRATION_IMPORT_SOURCE_PATH"
+    source_identity="$JV_MIGRATION_IMPORT_SOURCE_IDENTITY"
+    trap 'jv_migration_import_source_cleanup' EXIT
     source_info="$(/usr/libexec/justvoxel/mjust/migration-archive inspect "$source_path" 2>/dev/null)" || { emit_error invalid_source 'Import source could not be safely inspected.'; return 0; }
     expanded="$(jq -r '.expandedBytes // 0' <<< "$source_info")"
     is_native="$(jq -r '.nativeBundle // false' <<< "$source_info")"
@@ -101,7 +115,10 @@ plan() {
         jv_migration_require_staging_space /var/tmp "$expanded" >/dev/null 2>&1 || { rm -rf -- "$temp"; trap - RETURN; emit_error planning_space 'System temporary storage does not have enough free space to inspect this archive safely.'; return 0; }
         staging="$temp/source"
         /usr/libexec/justvoxel/mjust/migration-archive extract "$source_path" "$staging" >/dev/null 2>&1 || { rm -rf -- "$temp"; trap - RETURN; emit_error extraction_failed 'Import archive could not be inspected safely.'; return 0; }
-        if [[ $(jv_migration_source_identity "$source_path") != "$source_identity" ]]; then rm -rf -- "$temp"; trap - RETURN; emit_error source_changed 'Import source changed while it was being inspected.'; return 0; fi
+        current_transport_identity="$(jv_migration_import_transport_identity "$source" 2>/dev/null || true)"
+        current_content_identity="$(jv_migration_import_source_content_identity "$source_kind" "$source_path" 2>/dev/null || true)"
+        current_source_identity="$(printf '%s\n%s\n' "$current_transport_identity" "$current_content_identity" | sha256sum | awk '{print $1}')"
+        if [[ -z ${current_transport_identity} || -z ${current_content_identity} || ${current_source_identity} != "$source_identity" ]]; then rm -rf -- "$temp"; trap - RETURN; emit_error source_changed 'Import source changed while it was being inspected.'; return 0; fi
         if [[ ${is_native} == true ]]; then detection_base="$staging/justvoxel-migration/server"; else detection_base="$staging"; fi
         detection="$(/usr/libexec/justvoxel/mjust/migration-archive detect "$detection_base" 2>/dev/null)" || { rm -rf -- "$temp"; trap - RETURN; emit_error detection_failed 'Minecraft server detection failed.'; return 0; }
     fi
@@ -233,12 +250,12 @@ plan() {
         mode=fresh
     fi
 
-    normalized_source="$(jq -cn --arg path "$source_path" --arg root "$selected_root" --arg source_class "$source_class" --arg candidate_type "$candidate_type" --arg version "$source_version" --arg game_mode "$source_game" --arg difficulty "$source_diff" --arg motd "$source_motd" --argjson whitelist "$source_whitelist" --argjson enforce "$source_enforce" --argjson max "$source_max" --argjson plugins "$plugin_count" --argjson bedrock "$bedrock_enabled" --argjson managed "$bedrock_managed" --argjson java_hint "$java_hint" --argjson bedrock_hint "$bedrock_hint" --argjson expanded "$expanded"       '{path:$path,selected_root:$root,source_class:$source_class,candidate_type:$candidate_type,minecraft_version:$version,online_mode:"online",game_mode:$game_mode,difficulty:$difficulty,whitelist_enabled:$whitelist,enforce_whitelist:$enforce,max_players:$max,motd:$motd,plugin_count:$plugins,bedrock_enabled:$bedrock,bedrock_managed_plugins:$managed,java_port_hint:$java_hint,bedrock_port_hint:$bedrock_hint,expanded_bytes:$expanded}')"
+    normalized_source="$(jq -cn --arg path "$requested_source_path" --arg root "$selected_root" --arg source_class "$source_class" --arg candidate_type "$candidate_type" --arg version "$source_version" --arg game_mode "$source_game" --arg difficulty "$source_diff" --arg motd "$source_motd" --argjson whitelist "$source_whitelist" --argjson enforce "$source_enforce" --argjson max "$source_max" --argjson plugins "$plugin_count" --argjson bedrock "$bedrock_enabled" --argjson managed "$bedrock_managed" --argjson java_hint "$java_hint" --argjson bedrock_hint "$bedrock_hint" --argjson expanded "$expanded"       '{path:$path,selected_root:$root,source_class:$source_class,candidate_type:$candidate_type,minecraft_version:$version,online_mode:"online",game_mode:$game_mode,difficulty:$difficulty,whitelist_enabled:$whitelist,enforce_whitelist:$enforce,max_players:$max,motd:$motd,plugin_count:$plugins,bedrock_enabled:$bedrock,bedrock_managed_plugins:$managed,java_port_hint:$java_hint,bedrock_port_hint:$bedrock_hint,expanded_bytes:$expanded}')"
     normalized_destination="$(jq -cn --arg mode "$mode" --arg data_path "$data_path" --arg backup_path "$backup_path" --arg java_memory "$java_memory" --arg container_memory "$container_memory" --arg timezone "$timezone" --arg image_tag "$image_tag" --arg backup_schedule "$backup_schedule" --argjson java_port "$java_port" --argjson bedrock_port "$bedrock_port" --argjson uid "$minecraft_uid" --argjson gid "$minecraft_gid" --argjson backup_keep "$backup_keep" --argjson backup_auto "$backup_auto" --argjson storage "$storage_norm" --argjson backups "$backups_norm"       '{mode:$mode,data_path:$data_path,backup_path:$backup_path,java_port:$java_port,bedrock_port:$bedrock_port,java_memory:$java_memory,container_memory:$container_memory,timezone:$timezone,image_tag:$image_tag,minecraft_uid:$uid,minecraft_gid:$gid,backup_keep:$backup_keep,backup_schedule:$backup_schedule,backup_automatic:$backup_auto,storage:(if $mode=="fresh" then $storage else null end),backups:(if $mode=="fresh" then $backups else null end)}')"
     requirements="$(jq -cn --argjson players_required "$players_confirm" --arg minecraft_state "$minecraft_state" --argjson online "$online" --argjson players "$players" --argjson eula "$([[ ${configured} == false ]] && echo true || echo false)" --argjson vanilla "$req_vanilla" --argjson plugins "$req_plugins" --argjson online_confirm "$req_online" --argjson backup_smb "$backup_smb_required"       '{import_confirmation_required:true,players_confirmation_required:$players_required,minecraft_state:$minecraft_state,online:$online,players:$players,eula_acceptance_required:$eula,vanilla_confirmation_required:$vanilla,plugins_confirmation_required:$plugins,online_mode_confirmation_required:$online_confirm,source_revalidation_on_apply:true,runtime_validation_required:true,rollback_required:true,backup_smb_password_required:$backup_smb}')"
     context="$(jq -cn --arg source_identity "$source_identity" --arg config_identity "$config_identity" --arg destination_identity "$destination_identity" '{source_identity:$source_identity,config_identity:$config_identity,destination_identity:$destination_identity}')"
     [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true
-    jq -cn --argjson source "$normalized_source" --argjson destination "$normalized_destination" --argjson warnings "$warnings" --argjson requirements "$requirements" --argjson context "$context" --argjson candidates "$candidates"       '{ok:true,schema_version:"v1",normalized:{source:$source,destination:$destination},warnings:$warnings,requirements:$requirements,context:$context,candidates:$candidates}'
+    jq -cn --argjson source "$normalized_source" --argjson destination "$normalized_destination" --argjson warnings "$warnings" --argjson requirements "$requirements" --argjson context "$context" --argjson candidates "$candidates"       '{ok:true,schema_version:"v1",normalized:{source:$source,destination:$destination},warnings:$warnings,requirements:$requirements,context:$context,candidates:$candidates,source_entries:[]}'
 }
 case "${1:-discover}" in
   discover) discover ;;
