@@ -97,14 +97,14 @@ type AdminDataMigrationRequirements struct {
 }
 
 type AdminDataMigrationPlanResponse struct {
-	OK              bool                            `json:"ok"`
-	SchemaVersion   string                          `json:"schema_version"`
-	PlanFingerprint string                          `json:"plan_fingerprint,omitempty"`
-	Code            string                          `json:"code,omitempty"`
-	Error           string                          `json:"error,omitempty"`
+	OK              bool                              `json:"ok"`
+	SchemaVersion   string                            `json:"schema_version"`
+	PlanFingerprint string                            `json:"plan_fingerprint,omitempty"`
+	Code            string                            `json:"code,omitempty"`
+	Error           string                            `json:"error,omitempty"`
 	Normalized      *AdminDataMigrationPlanNormalized `json:"normalized,omitempty"`
-	Warnings        []AdminDataMigrationWarning     `json:"warnings"`
-	Requirements    *AdminDataMigrationRequirements `json:"requirements,omitempty"`
+	Warnings        []AdminDataMigrationWarning       `json:"warnings"`
+	Requirements    *AdminDataMigrationRequirements   `json:"requirements,omitempty"`
 }
 
 type AdminDataMigrationApplyRequest struct {

@@ -94,16 +94,16 @@ func (f *fakeDataMigrationAPI) AdminOperation(_ context.Context, session, id str
 
 func dataMigrationPagePlan(players, destructive bool) api.AdminDataMigrationPlanResponse {
 	requirements := &api.AdminDataMigrationRequirements{
-		MigrationConfirmationRequired: true,
+		MigrationConfirmationRequired:   true,
 		DestructiveConfirmationRequired: destructive,
-		PlayersConfirmationRequired: players,
-		MinecraftState: "running",
-		Online: 0,
-		Players: []string{},
-		ExactSpaceValidationOnApply: true,
-		ColdBackupRequired: true,
-		CopyVerificationRequired: true,
-		RuntimeValidationRequired: true,
+		PlayersConfirmationRequired:     players,
+		MinecraftState:                  "running",
+		Online:                          0,
+		Players:                         []string{},
+		ExactSpaceValidationOnApply:     true,
+		ColdBackupRequired:              true,
+		CopyVerificationRequired:        true,
+		RuntimeValidationRequired:       true,
 	}
 	if destructive {
 		requirements.ConfirmationPhrase = "ERASE /dev/vdb"
