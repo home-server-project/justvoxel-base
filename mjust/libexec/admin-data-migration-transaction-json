@@ -1,0 +1,404 @@
+#!/usr/bin/bash
+set -Eeuo pipefail
+
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/storage-common.sh
+source /usr/libexec/justvoxel/mjust/interrupt-safety.sh
+
+require_root
+
+recovery=''
+result_emitted=no
+target_prepared=no
+config_switched=no
+validated=no
+minecraft_stopped_by_migration=no
+expected_minecraft_state=''
+players_confirmed=false
+old_data=''
+old_mount=''
+old_uuid=''
+old_source=''
+new_data=''
+new_mount=''
+new_uuid=''
+new_source=''
+
+emit_progress() {
+    local state="$1" stage="$2" status="$3"
+    jq -cn --arg state "${state}" --arg stage "${stage}" --arg status "${status}" \
+        '{event:"progress",state:$state,stage:$stage,status:$status}'
+}
+
+emit_result() {
+    local outcome="$1" status="$2"
+    result_emitted=yes
+    jq -cn --arg outcome "${outcome}" --arg status "${status}" \
+        '{event:"result",outcome:$outcome,status:$status}'
+}
+
+write_recovery_state() {
+    local phase="$1"
+    [[ -n ${recovery} ]] || return 0
+    jq -cn \
+        --arg phase "${phase}" \
+        --arg old_data "${old_data}" \
+        --arg old_mount "${old_mount}" \
+        --arg old_uuid "${old_uuid}" \
+        --arg old_source "${old_source}" \
+        --arg new_data "${new_data}" \
+        --arg new_mount "${new_mount}" \
+        --arg new_uuid "${new_uuid}" \
+        --arg new_source "${new_source}" \
+        '{schema_version:"v1",phase:$phase,old:{data_path:$old_data,mount_point:$old_mount,expected_uuid:$old_uuid,expected_source:$old_source},new:{data_path:$new_data,mount_point:$new_mount,expected_uuid:$new_uuid,expected_source:$new_source}}' \
+        > "${recovery}/state.json.tmp"
+    chmod 0600 "${recovery}/state.json.tmp"
+    mv -f "${recovery}/state.json.tmp" "${recovery}/state.json"
+}
+
+query_online_players() {
+    local raw online
+    raw="$(jv_player_list_raw 2>/dev/null || true)"
+    [[ -n ${raw} ]] || return 1
+    online="$(jv_player_online_count "${raw}" 2>/dev/null || true)"
+    [[ ${online} =~ ^[0-9]+$ ]] || return 1
+    printf '%s' "${online}"
+}
+
+restart_original_if_required() {
+    if [[ ${expected_minecraft_state} != running ]]; then
+        return 0
+    fi
+    systemctl start minecraft.service >/dev/null 2>&1 || return 1
+    /usr/libexec/justvoxel/mjust/restore-runtime-validate >/dev/null 2>&1
+}
+
+rollback_config() {
+    local rollback_ok=yes
+
+    if systemctl is-active --quiet minecraft.service 2>/dev/null; then
+        systemctl stop minecraft.service >/dev/null 2>&1 || rollback_ok=no
+    fi
+
+    DATA_PATH="${old_data}"
+    DATA_MOUNT_POINT="${old_mount}"
+    DATA_EXPECTED_UUID="${old_uuid}"
+    DATA_EXPECTED_SOURCE="${old_source}"
+
+    write_main_config >/dev/null 2>&1 || rollback_ok=no
+    apply_data_selinux >/dev/null 2>&1 || rollback_ok=no
+    render_runtime >/dev/null 2>&1 || rollback_ok=no
+    /usr/libexec/justvoxel/mjust/validate-data-mount >/dev/null 2>&1 || rollback_ok=no
+
+    if [[ ${expected_minecraft_state} == running ]]; then
+        systemctl start minecraft.service >/dev/null 2>&1 || rollback_ok=no
+        /usr/libexec/justvoxel/mjust/restore-runtime-validate >/dev/null 2>&1 || rollback_ok=no
+    fi
+
+    if [[ ${rollback_ok} == yes ]]; then
+        config_switched=no
+        minecraft_stopped_by_migration=no
+        return 0
+    fi
+    return 1
+}
+
+on_exit() {
+    local rc=$?
+    local cleanup_ok=yes
+    trap - EXIT
+
+    if (( rc == 0 )); then
+        if [[ ${result_emitted} != yes ]]; then
+            emit_result needs_attention 'Minecraft data migration backend ended without a final safety result; administrator attention is required.'
+        fi
+        exit 0
+    fi
+
+    if [[ ${config_switched} == yes && ${validated} != yes ]]; then
+        emit_progress rolling_back rollback 'Migration validation failed; restoring the original Minecraft configuration and runtime.'
+        write_recovery_state rollback || true
+        if rollback_config; then
+            rm -rf -- "${recovery}" >/dev/null 2>&1 || true
+            emit_result rolled_back 'Minecraft data migration failed validation and the original configuration/runtime was restored. Reviewed target-storage changes may remain.'
+        else
+            write_recovery_state needs_attention || true
+            emit_result needs_attention 'Automatic Minecraft data migration rollback could not be fully validated; preserved recovery state requires administrator attention.'
+        fi
+        exit 0
+    fi
+
+    if [[ ${minecraft_stopped_by_migration} == yes ]] && ! systemctl is-active --quiet minecraft.service 2>/dev/null; then
+        restart_original_if_required || cleanup_ok=no
+    fi
+
+    if [[ ${cleanup_ok} == yes ]]; then
+        [[ -n ${recovery} ]] && rm -rf -- "${recovery}" >/dev/null 2>&1 || true
+        if [[ ${target_prepared} == yes ]]; then
+            emit_result rolled_back 'Minecraft data migration stopped before the live configuration changed. Original Minecraft data remains active; reviewed target-storage preparation may remain.'
+        else
+            emit_result rolled_back 'Minecraft data migration stopped safely before live Minecraft data or configuration changed.'
+        fi
+    else
+        write_recovery_state needs_attention || true
+        emit_result needs_attention 'Minecraft data migration stopped before configuration switch, but the original Minecraft runtime could not be confirmed. Preserved recovery state requires administrator attention.'
+    fi
+    exit 0
+}
+trap on_exit EXIT
+
+request="$(cat)"
+if ! jq -e '
+    type == "object"
+    and ((keys | sort) == ["config_identity","expected_minecraft_state","operation_id","plan_fingerprint","players_confirmed","request","target_identity"])
+    and (.operation_id | type == "string")
+    and (.plan_fingerprint | type == "string")
+    and (.target_identity | type == "string")
+    and (.config_identity | type == "string")
+    and (.expected_minecraft_state | type == "string")
+    and (.players_confirmed | type == "boolean")
+    and (.request | type == "object")
+' >/dev/null 2>&1 <<< "${request}"; then
+    echo 'ERROR: invalid Minecraft data migration transaction request.' >&2
+    exit 1
+fi
+
+operation_id="$(jq -r '.operation_id' <<< "${request}")"
+plan_fingerprint="$(jq -r '.plan_fingerprint' <<< "${request}")"
+selected_target_identity="$(jq -r '.target_identity' <<< "${request}")"
+selected_config_identity="$(jq -r '.config_identity' <<< "${request}")"
+expected_minecraft_state="$(jq -r '.expected_minecraft_state' <<< "${request}")"
+players_confirmed="$(jq -r '.players_confirmed' <<< "${request}")"
+migration_request="$(jq -c '.request' <<< "${request}")"
+
+[[ ${operation_id} =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] || {
+    echo 'ERROR: invalid Minecraft data migration operation id.' >&2
+    exit 1
+}
+[[ ${plan_fingerprint} =~ ^sha256:[0-9a-f]{64}$ ]] || {
+    echo 'ERROR: invalid Minecraft data migration plan fingerprint.' >&2
+    exit 1
+}
+[[ ${selected_target_identity} =~ ^[0-9a-f]{64}$ ]] || {
+    echo 'ERROR: invalid reviewed target identity.' >&2
+    exit 1
+}
+[[ ${selected_config_identity} =~ ^[0-9a-f]{64}$ ]] || {
+    echo 'ERROR: invalid reviewed configuration identity.' >&2
+    exit 1
+}
+case "${expected_minecraft_state}" in
+    running|stopped) ;;
+    *) echo 'ERROR: invalid reviewed Minecraft state.' >&2; exit 1 ;;
+esac
+
+require_config
+old_data="$(realpath -m -- "${DATA_PATH}")"
+old_mount="${DATA_MOUNT_POINT:-}"
+old_uuid="${DATA_EXPECTED_UUID:-}"
+old_source="${DATA_EXPECTED_SOURCE:-}"
+
+recovery="/var/lib/justvoxel/management/data-migration-${operation_id}"
+if [[ -e ${recovery} ]]; then
+    echo 'ERROR: preserved recovery state already exists for this migration operation.' >&2
+    exit 1
+fi
+install -d -m0700 -o root -g root "${recovery}"
+cp -a -- "${JV_CONFIG}" "${recovery}/justvoxel.conf.before"
+chmod 0600 "${recovery}/justvoxel.conf.before"
+
+emit_progress validating target_recheck 'Revalidating the reviewed migration target, configuration, capacity, and player state.'
+replan="$(printf '%s' "${migration_request}" | /usr/libexec/justvoxel/mjust/admin-data-migration-plan-json plan)"
+jq -e '.ok == true and .schema_version == "v1"' >/dev/null 2>&1 <<< "${replan}" || {
+    echo 'ERROR: reviewed Minecraft data migration no longer passes authoritative planning.' >&2
+    exit 1
+}
+[[ "$(jq -r '.context.target_identity' <<< "${replan}")" == "${selected_target_identity}" ]] || {
+    echo 'ERROR: migration target changed after review.' >&2
+    exit 1
+}
+[[ "$(jq -r '.context.config_identity' <<< "${replan}")" == "${selected_config_identity}" ]] || {
+    echo 'ERROR: JustVoxel configuration changed after migration review.' >&2
+    exit 1
+}
+[[ "$(jq -r '.requirements.minecraft_state' <<< "${replan}")" == "${expected_minecraft_state}" ]] || {
+    echo 'ERROR: Minecraft service state changed after migration review.' >&2
+    exit 1
+}
+if [[ "$(jq -r '.requirements.players_confirmation_required' <<< "${replan}")" == true && ${players_confirmed} != true ]]; then
+    echo 'ERROR: players are online and interruption confirmation was not provided.' >&2
+    exit 1
+fi
+
+operation="$(jq -r '.normalized.operation' <<< "${replan}")"
+device="$(jq -r '.normalized.device' <<< "${replan}")"
+new_mount="$(jq -r '.normalized.mount_point' <<< "${replan}")"
+new_data="$(jq -r '.normalized.path' <<< "${replan}")"
+free_start="$(jq -r '.normalized.free_start // empty' <<< "${replan}")"
+planned_end="$(jq -r '.normalized.planned_end // empty' <<< "${replan}")"
+data_bytes="$(jq -r '.normalized.data_bytes' <<< "${replan}")"
+
+exec 9>"${JV_MAINTENANCE_LOCK}"
+if ! flock -n 9; then
+    echo 'ERROR: another JustVoxel Minecraft maintenance operation is already running.' >&2
+    exit 1
+fi
+
+emit_progress running target_prepare 'Preparing the reviewed Minecraft data storage target.'
+case "${operation}" in
+    erase_disk)
+        storage_validate_disk "${device}" >/dev/null 2>&1
+        ! storage_disk_is_system "${device}"
+        ! storage_has_mounted_children "${device}"
+        wipefs -a -- "${device}" >/dev/null 2>&1
+        parted -s -a optimal -- "${device}" mklabel gpt >/dev/null 2>&1
+        parted -s -a optimal -- "${device}" mkpart primary xfs 1MiB 100% >/dev/null 2>&1
+        partprobe "${device}" >/dev/null 2>&1
+        udevadm settle >/dev/null 2>&1
+        target_partition="$(lsblk -nrpo NAME,TYPE "${device}" | awk '$2 == "part" {print $1; exit}')"
+        [[ -b ${target_partition} ]]
+        mkfs.xfs -f -L JUSTVOXEL_DATA "${target_partition}" >/dev/null 2>&1
+        storage_mount_local "${target_partition}" "${new_mount}" >/dev/null 2>&1
+        ;;
+    use_partition)
+        storage_validate_partition "${device}" >/dev/null 2>&1
+        current_mount="$(lsblk -nro MOUNTPOINT "${device}" 2>/dev/null | sed '/^$/d' | head -n1)"
+        current_fs="$(blkid -s TYPE -o value "${device}" 2>/dev/null || true)"
+        case "${current_fs}" in xfs|ext4|btrfs) ;; *) exit 1 ;; esac
+        if [[ -n ${current_mount} ]]; then
+            [[ "$(realpath -m -- "${current_mount}")" == "${new_mount}" ]]
+            storage_validate_mountpoint_path "${new_mount}" >/dev/null 2>&1
+            new_uuid="$(findmnt -n -o UUID --target "${new_mount}" 2>/dev/null || true)"
+            [[ -n ${new_uuid} ]]
+            storage_write_local_fstab "${new_uuid}" "${new_mount}" "${current_fs}" >/dev/null 2>&1
+            STORAGE_MOUNT_POINT="${new_mount}"
+            STORAGE_EXPECTED_UUID="${new_uuid}"
+            STORAGE_EXPECTED_SOURCE="$(findmnt -n -o SOURCE --target "${new_mount}" 2>/dev/null || true)"
+        else
+            storage_mount_local "${device}" "${new_mount}" >/dev/null 2>&1
+        fi
+        ;;
+    format_partition)
+        storage_validate_partition "${device}" >/dev/null 2>&1
+        [[ -z "$(blkid -s TYPE -o value "${device}" 2>/dev/null || true)" ]]
+        [[ -z "$(lsblk -nro MOUNTPOINT "${device}" 2>/dev/null | sed '/^$/d' | head -n1)" ]]
+        mkfs.xfs -f -L JUSTVOXEL_DATA "${device}" >/dev/null 2>&1
+        storage_mount_local "${device}" "${new_mount}" >/dev/null 2>&1
+        ;;
+    create_partition)
+        storage_validate_disk "${device}" >/dev/null 2>&1
+        [[ -n ${free_start} && -n ${planned_end} ]]
+        before="$(mktemp)"
+        after="$(mktemp)"
+        lsblk -nrpo NAME,TYPE "${device}" | awk '$2 == "part" {print $1}' | sort > "${before}"
+        parted -s -a optimal -- "${device}" mkpart primary xfs "${free_start}" "${planned_end}" >/dev/null 2>&1
+        partprobe "${device}" >/dev/null 2>&1
+        udevadm settle >/dev/null 2>&1
+        lsblk -nrpo NAME,TYPE "${device}" | awk '$2 == "part" {print $1}' | sort > "${after}"
+        target_partition="$(comm -13 "${before}" "${after}" | head -n1)"
+        rm -f "${before}" "${after}"
+        [[ -b ${target_partition} ]]
+        mkfs.xfs -f -L JUSTVOXEL_DATA "${target_partition}" >/dev/null 2>&1
+        storage_mount_local "${target_partition}" "${new_mount}" >/dev/null 2>&1
+        ;;
+    *)
+        echo 'ERROR: unsupported reviewed Minecraft data migration operation.' >&2
+        exit 1
+        ;;
+esac
+
+target_prepared=yes
+new_mount="${STORAGE_MOUNT_POINT}"
+new_uuid="${STORAGE_EXPECTED_UUID}"
+new_source="${STORAGE_EXPECTED_SOURCE}"
+[[ "$(realpath -m -- "${new_mount}")" == "$(jq -r '.normalized.mount_point' <<< "${replan}")" ]]
+case "${new_data}/" in
+    "${new_mount}/"*) ;;
+    *) echo 'ERROR: migration data path escaped the reviewed mount point.' >&2; exit 1 ;;
+esac
+if [[ -e ${new_data} ]] && find "${new_data}" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null | grep -q .; then
+    echo 'ERROR: migration target became non-empty before copy.' >&2
+    exit 1
+fi
+install -d -m0750 -o "${MINECRAFT_UID}" -g "${MINECRAFT_GID}" "${new_data}"
+write_recovery_state target_prepared
+
+emit_progress validating staging_space 'Checking exact free space on the prepared Minecraft data target.'
+available_bytes="$(df -B1 --output=avail "${new_mount}" 2>/dev/null | tail -n1 | tr -d ' ')"
+[[ ${available_bytes} =~ ^[0-9]+$ && ${data_bytes} =~ ^[0-9]+$ ]]
+(( available_bytes > data_bytes )) || {
+    echo 'ERROR: prepared migration target does not have enough free space.' >&2
+    exit 1
+}
+
+emit_progress running player_recheck 'Rechecking players immediately before the verified cold backup.'
+if systemctl is-active --quiet minecraft.service; then
+    final_online="$(query_online_players)" || {
+        echo 'ERROR: Minecraft player state became unavailable.' >&2
+        exit 1
+    }
+    if (( final_online > 0 )) && [[ ${players_confirmed} != true ]]; then
+        echo 'ERROR: a player joined after migration review and interruption was not confirmed.' >&2
+        exit 1
+    fi
+fi
+
+emit_progress running cold_backup 'Creating and verifying the required pre-migration cold backup.'
+if [[ ${expected_minecraft_state} == running ]]; then
+    minecraft_stopped_by_migration=yes
+fi
+JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 \
+    /usr/libexec/justvoxel/minecraft-backup --leave-stopped >/dev/null 2>&1
+if systemctl is-active --quiet minecraft.service 2>/dev/null; then
+    echo 'ERROR: Minecraft is still running after the pre-migration cold backup.' >&2
+    exit 1
+fi
+write_recovery_state backed_up
+
+emit_progress running copying 'Copying Minecraft data to the reviewed storage target.'
+rsync -aHAX --numeric-ids --delete "${old_data}/" "${new_data}/" >/dev/null 2>&1
+
+emit_progress running copy_verification 'Verifying the copied Minecraft data before configuration switch.'
+diff_output="$(rsync -aHAXn --numeric-ids --delete --itemize-changes "${old_data}/" "${new_data}/")"
+[[ -z ${diff_output} ]] || {
+    echo 'ERROR: migration copy verification found differences.' >&2
+    exit 1
+}
+
+[[ "$(sha256sum "${JV_CONFIG}" | awk '{print $1}')" == "${selected_config_identity}" ]] || {
+    echo 'ERROR: JustVoxel configuration changed while migration data was copied.' >&2
+    exit 1
+}
+
+/usr/libexec/justvoxel/mjust/validate-data-mount >/dev/null 2>&1
+write_recovery_state copied
+
+emit_progress running switching 'Switching JustVoxel to the verified Minecraft data copy.'
+DATA_PATH="${new_data}"
+DATA_MOUNT_POINT="${new_mount}"
+DATA_EXPECTED_UUID="${new_uuid}"
+DATA_EXPECTED_SOURCE="${new_source}"
+write_main_config >/dev/null 2>&1
+config_switched=yes
+write_recovery_state switched
+apply_data_selinux >/dev/null 2>&1
+render_runtime >/dev/null 2>&1
+/usr/libexec/justvoxel/mjust/validate-data-mount >/dev/null 2>&1
+
+if [[ ${expected_minecraft_state} == running ]]; then
+    emit_progress verifying minecraft_runtime 'Starting Minecraft and validating the migrated runtime.'
+    systemctl start minecraft.service >/dev/null 2>&1
+    /usr/libexec/justvoxel/mjust/restore-runtime-validate >/dev/null 2>&1
+    minecraft_stopped_by_migration=no
+else
+    emit_progress verifying migrated_storage 'Validating migrated storage while preserving the administrator-stopped Minecraft state.'
+    ! systemctl is-active --quiet minecraft.service 2>/dev/null
+    /usr/libexec/justvoxel/mjust/validate-data-mount >/dev/null 2>&1
+fi
+
+validated=yes
+write_recovery_state validated
+rm -rf -- "${recovery}"
+emit_result succeeded 'Minecraft data migration completed and validated successfully. The old Minecraft data was intentionally retained.'
+trap - EXIT
+exit 0
