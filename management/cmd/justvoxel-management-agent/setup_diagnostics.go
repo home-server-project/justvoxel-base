@@ -468,7 +468,7 @@ func sanitizeSetupDiagnosticText(value, hostname string) string {
 	})
 	fields := strings.Fields(value)
 	for i, field := range fields {
-		trimmed := strings.Trim(field, "[](),;<>\\"")
+		trimmed := strings.Trim(field, "[](),;<>\"")
 		if strings.Count(trimmed, ":") >= 2 && net.ParseIP(strings.Trim(trimmed, "[]")) != nil {
 			fields[i] = strings.Replace(field, trimmed, "<IP-REDACTED>", 1)
 		}
