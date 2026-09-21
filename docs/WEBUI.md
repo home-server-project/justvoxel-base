@@ -90,6 +90,16 @@ The page deliberately distinguishes three outcomes:
 
 For troubleshooting, the backend validation output is displayed without the WebUI independently reclassifying individual checks. The Validation page remains Administrator-only.
 
+## Minecraft data storage migration
+
+Administrator users can open **Storage & Backups -> Minecraft data storage** to move the active Minecraft persistent-data directory to another supported local disk or partition.
+
+The WebUI is a thin frontend over the same persistent Minecraft data migration Management API used by `mjust storage-migrate`. Candidate discovery, target safety, authoritative planning, plan fingerprinting, destructive confirmation requirements, player state, pre-migration cold backup, copy and verification, configuration switching, SELinux/runtime regeneration, validation, rollback, and recovery state remain owned by the Management Agent/shared backend.
+
+The browser shows Agent-discovered choices for a dedicated disk/USB device, an existing XFS/ext4/Btrfs filesystem, a blank partition, or already-unallocated disk space. Review displays the Agent warnings and requirements. A migration requires the explicit `MIGRATE` frontend confirmation; destructive target preparation additionally requires the exact phrase supplied by the Agent, and online-player interruption requires a separate confirmation when the Agent says it is needed.
+
+Migration runs as a persistent operation. Refreshing or reopening the migration entry point reconnects to the same operation. Successful migration retains the old Minecraft data for administrator verification; a validated rollback keeps the original configuration/runtime active; `needs_attention` preserves recovery state and prevents treating the migration as safely complete.
+
 ## Minecraft Restore
 
 Administrator users can open **Storage & Backups -> Restore** for the same two Restore modes exposed by mJust: world Restore and full Minecraft-data Restore.

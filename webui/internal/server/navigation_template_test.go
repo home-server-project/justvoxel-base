@@ -25,6 +25,7 @@ func TestGroupedHeaderNavigationUX(t *testing.T) {
 		`href="/operations#whitelist"`,
 		`href="/operations#minecraft-logs"`,
 		`href="/settings/storage"`,
+		`href="/settings/data-migration"`,
 		`href="/settings/backup-storage"`,
 		`href="/operations#manual-backup"`,
 		`href="/settings/restore"`,
@@ -92,6 +93,9 @@ func TestAuthenticatedTemplatesUseSharedHeader(t *testing.T) {
 		"restore.html",
 		"restore_review.html",
 		"restore_progress.html",
+		"data_migration.html",
+		"data_migration_review.html",
+		"data_migration_progress.html",
 	} {
 		content, err := assets.ReadFile("templates/" + name)
 		if err != nil {

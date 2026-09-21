@@ -1,0 +1,71 @@
+{{define "data_migration_review.html"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JustVoxel - Review Minecraft data migration</title><link rel="stylesheet" href="/static/app.css"><link rel="stylesheet" href="/static/settings.css"><link rel="stylesheet" href="/static/storage.css"><script src="/static/app.js" defer></script></head>
+<body class="role-administrator">{{template "app-header" .}}
+<main>
+  <div class="title-row"><div><p class="eyebrow">Administrator · data migration</p><h1>Review Minecraft data migration</h1></div><span class="badge">{{.Identity.Username}}</span></div>
+  {{if .Error}}<div class="notice error"><strong>Migration cannot continue as submitted.</strong><br>{{.Error}}</div>{{end}}
+
+  {{if .Plan.Normalized}}
+  <section class="panel details destructive-review">
+    <div class="section-heading"><div><p class="eyebrow">Reviewed target</p><h2>{{.OperationName}}</h2></div><span class="badge">Agent plan</span></div>
+    <dl>
+      <div><dt>Current Minecraft data</dt><dd><code>{{.Plan.Normalized.CurrentDataPath}}</code> · {{.DataSize}}</dd></div>
+      <div><dt>Target device</dt><dd><code>{{.Plan.Normalized.Device}}</code></dd></div>
+      {{if .Plan.Normalized.Model}}<div><dt>Model</dt><dd>{{.Plan.Normalized.Model}}</dd></div>{{end}}
+      {{if .Plan.Normalized.Transport}}<div><dt>Transport</dt><dd>{{.Plan.Normalized.Transport}}</dd></div>{{end}}
+      {{if .Plan.Normalized.Filesystem}}<div><dt>Filesystem</dt><dd>{{.Plan.Normalized.Filesystem}}</dd></div>{{end}}
+      <div><dt>Target mount point</dt><dd><code>{{.Plan.Normalized.MountPoint}}</code></dd></div>
+      <div><dt>New Minecraft data path</dt><dd><code>{{.Plan.Normalized.Path}}</code></dd></div>
+      {{if .Plan.Normalized.TargetCapacityBytes}}<div><dt>Reviewed capacity</dt><dd>{{.TargetSize}}</dd></div>{{end}}
+      {{if eq .Plan.Normalized.Operation "create_partition"}}<div><dt>Reviewed free range</dt><dd><code>{{.Plan.Normalized.FreeStart}}</code> → <code>{{.Plan.Normalized.FreeEnd}}</code></dd></div><div><dt>New partition end</dt><dd><code>{{.Plan.Normalized.PlannedEnd}}</code></dd></div>{{end}}
+    </dl>
+  </section>
+  {{end}}
+
+  {{if .Plan.Warnings}}
+  <section class="panel"><p class="eyebrow">Migration warnings</p>{{range .Plan.Warnings}}<div class="notice warning">{{.Message}}</div>{{end}}</section>
+  {{end}}
+
+  {{if and .Plan.OK .Plan.Requirements}}
+  <section class="panel">
+    <p class="eyebrow">Agent-owned safety sequence</p>
+    <p>The Management Agent will revalidate this exact target and current configuration before changing storage, hold the shared maintenance lock, create a verified cold backup, copy and verify the complete Minecraft data tree, switch configuration, restore SELinux/runtime state, and validate the migrated runtime. Failed runtime validation triggers rollback to the original configuration.</p>
+    <div class="notice"><strong>The old Minecraft data is retained after success.</strong><br>Remove it manually only after verifying gameplay and backups.</div>
+    {{if .Plan.Requirements.PlayersConfirmationRequired}}
+    <div class="notice warning"><strong>{{.Plan.Requirements.Online}} player(s) are online.</strong><br>{{range .Plan.Requirements.Players}}{{.}}<br>{{end}}Migration will use the normal player-aware graceful shutdown path.</div>
+    {{end}}
+  </section>
+
+  <form class="settings-form" method="post" action="/settings/data-migration/apply">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="operation" value="{{.Request.Operation}}">
+    <input type="hidden" name="device" value="{{.Request.Device}}">
+    <input type="hidden" name="mount_point" value="{{.Request.MountPoint}}">
+    <input type="hidden" name="path" value="{{.Request.Path}}">
+    <input type="hidden" name="size_gib" value="{{.Request.SizeGiB}}">
+    <input type="hidden" name="plan_fingerprint" value="{{.Plan.PlanFingerprint}}">
+
+    {{if .Plan.Requirements.PlayersConfirmationRequired}}
+    <label><input type="checkbox" name="players_confirmed" value="yes"> I understand that the online players may be interrupted during this migration.</label>
+    {{end}}
+
+    {{if .Plan.Requirements.DestructiveConfirmationRequired}}
+    <div class="confirmation-example confirmation-required">
+      <span>The Management Agent requires this exact storage confirmation:</span>
+      <code>{{.Plan.Requirements.ConfirmationPhrase}}</code>
+    </div>
+    <label>Destructive storage confirmation
+      <input name="destructive_confirmation" autocomplete="off" required spellcheck="false" placeholder="Type the highlighted phrase exactly">
+    </label>
+    {{end}}
+
+    <label><strong>Type MIGRATE to start this reviewed Minecraft data migration</strong>
+      <input name="migration_confirmation" autocomplete="off" required spellcheck="false">
+    </label>
+    <div class="action-row"><button type="submit">Start migration</button><a class="button-link secondary" href="/settings/data-migration">Cancel</a></div>
+  </form>
+  {{else}}
+  <div class="action-row"><a class="button-link secondary" href="/settings/data-migration">Choose another target</a></div>
+  {{end}}
+  <p class="foot">WebUI {{.Version}} · Management API {{.ManagementAPI}}</p>
+</main></body></html>{{end}}
