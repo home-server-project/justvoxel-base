@@ -84,6 +84,7 @@ plan() {
     requested_source_path="$(jq -r '.path' <<< "$source")"
     selected_root="$(jq -r '.selected_root // ""' <<< "$source")"
     supplied_version="$(jq -r '.source_version // ""' <<< "$source")"
+    trap 'jv_migration_import_source_cleanup' EXIT
     set +e
     jv_migration_import_source_prepare "$source"
     prepare_rc=$?
@@ -98,7 +99,6 @@ plan() {
     fi
     source_path="$JV_MIGRATION_IMPORT_SOURCE_PATH"
     source_identity="$JV_MIGRATION_IMPORT_SOURCE_IDENTITY"
-    trap 'jv_migration_import_source_cleanup' EXIT
     source_info="$(/usr/libexec/justvoxel/mjust/migration-archive inspect "$source_path" 2>/dev/null)" || { emit_error invalid_source 'Import source could not be safely inspected.'; return 0; }
     expanded="$(jq -r '.expandedBytes // 0' <<< "$source_info")"
     is_native="$(jq -r '.nativeBundle // false' <<< "$source_info")"
@@ -117,7 +117,7 @@ plan() {
         /usr/libexec/justvoxel/mjust/migration-archive extract "$source_path" "$staging" >/dev/null 2>&1 || { rm -rf -- "$temp"; trap - RETURN; emit_error extraction_failed 'Import archive could not be inspected safely.'; return 0; }
         current_transport_identity="$(jv_migration_import_transport_identity "$source" 2>/dev/null || true)"
         current_content_identity="$(jv_migration_import_source_content_identity "$source_kind" "$source_path" 2>/dev/null || true)"
-        current_source_identity="$(printf '%s\n%s\n' "$current_transport_identity" "$current_content_identity" | sha256sum | awk '{print $1}')"
+        current_source_identity="$(printf '%s\n%s\n%s\n' "$current_transport_identity" "$requested_source_path" "$current_content_identity" | sha256sum | awk '{print $1}')"
         if [[ -z ${current_transport_identity} || -z ${current_content_identity} || ${current_source_identity} != "$source_identity" ]]; then rm -rf -- "$temp"; trap - RETURN; emit_error source_changed 'Import source changed while it was being inspected.'; return 0; fi
         if [[ ${is_native} == true ]]; then detection_base="$staging/justvoxel-migration/server"; else detection_base="$staging"; fi
         detection="$(/usr/libexec/justvoxel/mjust/migration-archive detect "$detection_base" 2>/dev/null)" || { rm -rf -- "$temp"; trap - RETURN; emit_error detection_failed 'Minecraft server detection failed.'; return 0; }
