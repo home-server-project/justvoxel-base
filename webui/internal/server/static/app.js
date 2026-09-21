@@ -294,3 +294,234 @@ if (dashboard) {
   refreshDashboard();
   window.setInterval(refreshDashboard, 5000);
 }
+
+
+const systemPower = document.querySelector("[data-system-power]");
+const systemDialog = document.querySelector("[data-system-action-dialog]");
+if (systemPower && systemDialog) {
+  const csrfInput = document.querySelector("[data-system-actions-csrf]");
+  const menuError = systemPower.querySelector("[data-system-action-error]");
+  const firmwareButton = systemPower.querySelector('[data-system-action="firmware-reboot"]');
+  const actionButtons = Array.from(systemPower.querySelectorAll("[data-system-action]"));
+  const dialogTitle = systemDialog.querySelector("[data-system-action-title]");
+  const dialogMessage = systemDialog.querySelector("[data-system-action-message]");
+  const dialogPlayers = systemDialog.querySelector("[data-system-action-players]");
+  const dialogUpdate = systemDialog.querySelector("[data-system-action-update]");
+  const dialogError = systemDialog.querySelector("[data-system-action-dialog-error]");
+  const cancelButton = systemDialog.querySelector("[data-system-action-cancel]");
+  const confirmButton = systemDialog.querySelector("[data-system-action-confirm]");
+
+  let selectedAction = "";
+  let confirmPlayers = false;
+  let latestStatus = null;
+
+  const actionCopy = {
+    reboot: {
+      title: "Restart JustVoxel?",
+      message: "Minecraft will be stopped safely first when it is running. The server will then restart.",
+      confirm: "Restart",
+      working: "Restarting JustVoxel…",
+    },
+    poweroff: {
+      title: "Power off JustVoxel?",
+      message: "Minecraft will be stopped safely first when it is running. The server will then power off.",
+      confirm: "Power off",
+      working: "Powering off JustVoxel…",
+    },
+    "firmware-reboot": {
+      title: "Restart to UEFI/BIOS?",
+      message: "Minecraft will be stopped safely first. The server will restart into the physical machine's UEFI/BIOS setup.",
+      confirm: "Restart to UEFI/BIOS",
+      working: "Restarting to UEFI/BIOS…",
+    },
+  };
+
+  const setMenuAvailable = (available) => {
+    actionButtons.forEach((button) => {
+      button.disabled = !available;
+    });
+  };
+
+  const loadSystemActionsStatus = async () => {
+    setMenuAvailable(false);
+    if (menuError) menuError.hidden = true;
+    if (firmwareButton) firmwareButton.hidden = true;
+    try {
+      const response = await fetch("/api/system-actions", {
+        method: "GET",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (response.status === 401) {
+        window.location.assign("/login");
+        return false;
+      }
+      if (response.status === 403) {
+        systemPower.open = false;
+        return false;
+      }
+      if (!response.ok) throw new Error("status unavailable");
+      latestStatus = await response.json();
+      const firmwareAvailable =
+        latestStatus.variant === "hwe" &&
+        latestStatus.firmware &&
+        latestStatus.firmware.available === true;
+      if (firmwareButton) firmwareButton.hidden = !firmwareAvailable;
+      actionButtons.forEach((button) => {
+        button.disabled = button === firmwareButton && !firmwareAvailable;
+      });
+      return true;
+    } catch (_) {
+      if (menuError) menuError.hidden = false;
+      return false;
+    }
+  };
+
+  const resetDialog = () => {
+    confirmPlayers = false;
+    if (dialogPlayers) {
+      dialogPlayers.hidden = true;
+      dialogPlayers.replaceChildren();
+    }
+    if (dialogError) {
+      dialogError.hidden = true;
+      dialogError.textContent = "";
+    }
+    if (dialogUpdate) dialogUpdate.hidden = true;
+    if (cancelButton) cancelButton.hidden = false;
+    if (confirmButton) confirmButton.hidden = false;
+  };
+
+  const openConfirmation = (action) => {
+    const copy = actionCopy[action];
+    if (!copy) return;
+    selectedAction = action;
+    resetDialog();
+    if (dialogTitle) dialogTitle.textContent = copy.title;
+    if (dialogMessage) dialogMessage.textContent = copy.message;
+    if (confirmButton) {
+      confirmButton.textContent = copy.confirm;
+      confirmButton.disabled = false;
+    }
+    if (dialogUpdate) {
+      dialogUpdate.hidden = !(latestStatus && latestStatus.staged_update && action !== "poweroff");
+    }
+    systemPower.open = false;
+    systemDialog.showModal();
+  };
+
+  const showPlayerConfirmation = (result) => {
+    confirmPlayers = true;
+    const copy = actionCopy[selectedAction];
+    if (dialogTitle) dialogTitle.textContent = "Players are online";
+    if (dialogMessage) {
+      const count = Number(result.online || 0);
+      const noun = count === 1 ? "player is" : "players are";
+      dialogMessage.textContent =
+        String(count) + " " + noun + " online. Continue with the normal graceful shutdown warning and " + copy.confirm.toLowerCase() + "?";
+    }
+    if (dialogPlayers) {
+      dialogPlayers.replaceChildren();
+      (Array.isArray(result.players) ? result.players : []).forEach((name) => {
+        const chip = document.createElement("span");
+        chip.className = "player-chip";
+        chip.textContent = name;
+        dialogPlayers.appendChild(chip);
+      });
+      dialogPlayers.hidden = dialogPlayers.childElementCount === 0;
+    }
+    if (confirmButton) {
+      confirmButton.textContent = selectedAction === "poweroff" ? "Power off anyway" : "Restart anyway";
+      confirmButton.disabled = false;
+    }
+  };
+
+  const showActionError = (message) => {
+    if (dialogError) {
+      dialogError.textContent = message || "The system action was not accepted.";
+      dialogError.hidden = false;
+    }
+    if (cancelButton) cancelButton.hidden = false;
+    if (confirmButton) confirmButton.disabled = false;
+  };
+
+  const submitSystemAction = async () => {
+    const copy = actionCopy[selectedAction];
+    if (!copy || !csrfInput) return;
+    if (confirmButton) {
+      confirmButton.disabled = true;
+      confirmButton.textContent = "Working…";
+    }
+    if (dialogError) dialogError.hidden = true;
+
+    const body = new URLSearchParams();
+    body.set("csrf", csrfInput.value);
+    if (confirmPlayers) body.set("confirm_players", "yes");
+
+    try {
+      const response = await fetch("/api/system-actions/" + selectedAction, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: body.toString(),
+      });
+      if (response.status === 401) {
+        window.location.assign("/login");
+        return;
+      }
+      if (response.status === 403) {
+        window.location.assign("/password");
+        return;
+      }
+
+      let result = {};
+      try {
+        result = await response.json();
+      } catch (_) {
+        // A structured error is preferred, but the UI still fails safely.
+      }
+
+      if (response.ok && result.confirmation_required && result.reason === "players_online") {
+        showPlayerConfirmation(result);
+        return;
+      }
+      if (response.status === 202 && result.accepted) {
+        if (dialogTitle) dialogTitle.textContent = copy.working;
+        if (dialogMessage) dialogMessage.textContent = result.message || "The Management Agent accepted the system action.";
+        if (dialogPlayers) dialogPlayers.hidden = true;
+        if (dialogUpdate) dialogUpdate.hidden = true;
+        if (cancelButton) cancelButton.hidden = true;
+        if (confirmButton) confirmButton.hidden = true;
+        return;
+      }
+
+      showActionError(result.message || result.reason || "The system action was not accepted.");
+    } catch (_) {
+      showActionError("The system action service is unavailable. Nothing was submitted again automatically.");
+    }
+  };
+
+  systemPower.addEventListener("toggle", () => {
+    if (systemPower.open) loadSystemActionsStatus();
+  });
+
+  actionButtons.forEach((button) => {
+    button.addEventListener("click", () => openConfirmation(button.dataset.systemAction));
+  });
+
+  if (cancelButton) {
+    cancelButton.addEventListener("click", () => systemDialog.close());
+  }
+  if (confirmButton) {
+    confirmButton.addEventListener("click", submitSystemAction);
+  }
+
+  document.addEventListener("click", (event) => {
+    if (!systemPower.open || event.target.closest("[data-system-power]")) return;
+    systemPower.open = false;
+  });
+}
