@@ -4,9 +4,9 @@ JustVoxel keeps operating-system maintenance separate from Minecraft/container m
 
 Reboot, poweroff, and firmware/UEFI reboot use the same Management API architecture as other migrated appliance controls:
 
-`mJust / WebUI -> Management API -> Management Agent -> system action backend`
+`mJust -> Management API -> Management Agent -> system action backend`
 
-The terminal commands are presentation/confirmation frontends. Host power control, firmware capability checks, player-safety decisions, and final systemd actions are owned behind the Management API.
+The terminal commands are presentation/confirmation frontends. Host power control, firmware capability checks, player-safety decisions, and final systemd actions are owned behind the Management API. The WebUI does not expose these actions yet; its future System Actions surface must call this same API rather than reimplementing the policy.
 
 ## Commands
 
@@ -84,7 +84,7 @@ An ordinary reboot/poweroff does not force a Minecraft backup. If a bootc update
 
 The Agent owns the HWE/VM decision, EFI/systemd firmware-reboot capability check, best-effort DRM display state, player-safe Minecraft shutdown, and final firmware reboot request. The terminal only presents those results and asks for confirmation.
 
-The same capability/status endpoint is available to the future WebUI, so firmware support is not reimplemented separately there.
+The same capability/status endpoint is available to the future WebUI. The browser-facing label should use the more familiar **Restart to UEFI/BIOS** wording, while the Agent remains responsible for deciding whether that action exists. It is intended for supported HWE systems only and must not be offered on VM deployments.
 
 Display detection is advisory because KVM switches, EDID behavior, firmware and hardware can make Linux connector state imperfect.
 
