@@ -65,9 +65,10 @@ Management API gaps that still need shared implementations before the correspond
 - Minecraft update policy and execution
 - bootc status and operating-system updates
 - host reboot, poweroff, and firmware/UEFI operations
-- administrator validation
 - Start Over / reset workflows
 - WebUI lifecycle and recovery behavior
+
+Administrator validation is now unified: both mJust and WebUI consume the same Administrator Validation endpoint in the Management Agent, which runs the shared authoritative validation backend.
 
 ### Cross-interface validation
 
