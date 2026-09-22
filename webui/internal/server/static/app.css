@@ -171,3 +171,64 @@ body.role-administrator .control-power-actions.nav-admin-only{display:flex!impor
   .brand-mark[aria-current="page"]{background:transparent;box-shadow:none}
   .brand-mark strong{background:transparent;border:0;color:#245b3a}
 }
+
+
+/* Dashboard and Control Center refinement after first visual review. */
+#dashboard{max-width:1320px;padding-top:1rem;padding-bottom:1rem}
+#dashboard .title-row{align-items:center}
+#dashboard h1{margin:.12rem 0 .65rem;font-size:1.72rem}
+.dashboard-summary{grid-template-columns:repeat(5,minmax(0,1fr));gap:.7rem}
+.dashboard-summary .card{min-height:92px;padding:.9rem 1rem;box-shadow:none}
+.dashboard-summary .card span{margin-bottom:.28rem;font-size:.76rem}
+.dashboard-summary .card strong{font-size:1.08rem;line-height:1.25;overflow-wrap:anywhere}
+.dashboard-live-panels{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:.7rem;margin-top:.7rem}
+.dashboard-live-panels .control-panel,.dashboard-live-panels .players-panel{margin-top:0;min-height:145px;padding:1rem}
+.dashboard-live-panels .action-row{margin-top:.75rem}
+#dashboard .disclaimer{margin-top:.8rem}
+.about-shell{max-width:760px;padding-top:1.2rem}
+.about-panel{margin-top:.5rem;padding:1rem}
+
+.brand-mark{padding:.25rem .35rem;min-height:36px}
+.brand-mark strong{display:block;min-width:0;width:auto;height:auto;border:0;border-radius:0;background:transparent;color:#b9ebca;font-size:1rem;letter-spacing:.06em;line-height:1}
+.brand-mark .brand-name{display:none!important}
+.brand-link[aria-current="page"]{background:transparent;box-shadow:none}
+.brand-link:hover,.brand-link:focus-visible{background:transparent;transform:none}
+
+.control-center-trigger{min-height:40px;padding:.38rem .72rem}
+.control-center-icon{font-size:1.35rem;line-height:1}
+.control-center-panel{width:min(560px,calc(100vw - 1.5rem));padding:.7rem}
+.control-navigation{gap:.55rem;margin-top:.55rem}
+.control-section{padding:.55rem}
+.control-section-label{margin-bottom:.4rem}
+.control-tile-grid{gap:.38rem}
+.control-tile{display:flex!important;align-items:center;min-height:42px;padding:.55rem .65rem}
+.control-tile strong{font-size:.84rem}
+.control-tile span{display:none!important}
+.control-quick-actions{justify-content:space-between}
+.control-power-actions{gap:.45rem}
+.control-icon-button{display:inline-grid;place-items:center;width:42px;height:42px;min-height:42px!important;padding:0!important;border-radius:10px;font-size:1.25rem;line-height:1}
+.control-icon-button span{color:inherit!important;font-size:1.25rem;line-height:1}
+.control-session .nav-logout{margin-left:auto}
+.control-session .nav-logout .control-icon-button{font-size:1.05rem}
+
+@media(max-width:900px){
+  .dashboard-summary{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .dashboard-live-panels{grid-template-columns:1fr}
+}
+@media(max-width:600px){
+  #dashboard{padding-top:.7rem}
+  #dashboard h1{font-size:1.45rem}
+  .dashboard-summary{grid-template-columns:repeat(2,minmax(0,1fr));gap:.55rem}
+  .dashboard-summary .card{min-height:78px;padding:.7rem}
+  .dashboard-live-panels{gap:.55rem;margin-top:.55rem}
+  .dashboard-live-panels .control-panel,.dashboard-live-panels .players-panel{min-height:0;padding:.85rem}
+  .control-center-trigger{width:42px;height:42px}
+  .control-center-icon{font-size:1.45rem}
+  .control-center-panel{top:50px}
+}
+@media(max-width:390px){
+  .dashboard-summary{grid-template-columns:1fr 1fr}
+}
+@media(prefers-color-scheme:light){
+  .brand-mark strong{background:transparent;border:0;color:#245b3a}
+}
