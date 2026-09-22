@@ -105,6 +105,7 @@
         <div data-detail-uuid-row><dt>UUID</dt><dd><code data-detail-uuid></code></dd></div>
         <div data-detail-mount-row><dt>Mounted at</dt><dd><code data-detail-mount></code></dd></div>
         <div><dt>Mounted</dt><dd data-detail-mounted></dd></div>
+        <div data-detail-mount-type-row hidden><dt>Mount type</dt><dd data-detail-mount-type></dd></div>
         <div><dt>System protected</dt><dd data-detail-system></dd></div>
         <div><dt>Read only</dt><dd data-detail-readonly></dd></div>
       </dl>
@@ -113,8 +114,12 @@
         <details class="storage-action-menu" data-storage-action-menu>
           <summary aria-label="More partition actions">⋯</summary>
           <div class="storage-action-menu-popover">
-            <button type="button" data-storage-action="mount">Mount</button>
-            <button type="button" data-storage-action="unmount">Unmount</button>
+            <button type="button" data-storage-action="mount-for-now" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><path d="M12 8v5l3 2"></path></svg></span><span>Mount for now</span></button>
+            <button type="button" data-storage-action="mount-permanently" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5Z"></path><path d="M12 14v6"></path></svg></span><span>Mount permanently</span></button>
+            <button type="button" data-storage-action="make-permanent" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5Z"></path><path d="M12 14v6"></path></svg></span><span>Make permanent</span></button>
+            <button type="button" data-storage-action="mount-now" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5Z"></path><path d="M12 14v6"></path></svg></span><span>Mount now</span></button>
+            <button type="button" data-storage-action="unmount-for-now" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><path d="M12 8v5l3 2"></path></svg></span><span>Unmount for now</span></button>
+            <button type="button" data-storage-action="remove-permanent" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5Z"></path><path d="M12 14v6"></path></svg></span><span>Remove permanent mount</span></button>
             <button type="button" data-storage-minecraft-migrate hidden>Use for Minecraft data</button>
             <button class="storage-action-danger" type="button" data-storage-action="format">Format partition</button>
           </div>
