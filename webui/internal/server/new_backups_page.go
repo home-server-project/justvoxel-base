@@ -132,7 +132,6 @@ func (a *App) newBackupsNow(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/settings/new-backups?result=backup", http.StatusSeeOther)
 }
 
-
 func (a *App) newBackupsAutomaticPlan(w http.ResponseWriter, r *http.Request) {
 	session, client, identity, ok := a.newBackupsRequest(w, r, true)
 	if !ok {
