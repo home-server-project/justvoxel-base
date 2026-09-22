@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/static/app.css">
   <link rel="stylesheet" href="/static/new-backups.css">
   <script src="/static/app.js" defer></script>
+  <script src="/static/new-backups.js" defer></script>
 </head>
 <body class="role-administrator">
 {{template "app-header" .}}
@@ -23,12 +24,18 @@
     <div class="backup-library-summary">
       <div><span>Backups</span><strong>{{.BackupCount}}</strong></div>
       <div><span>Total size</span><strong>{{.TotalSize}}</strong></div>
+      <div><span>Selected</span><strong data-backup-selected-count>0</strong></div>
     </div>
-    <form method="post" action="/settings/new-backups/backup">
-      <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <button type="submit">Backup Now</button>
-    </form>
+    <div class="backup-command-actions">
+      <button class="danger" type="button" data-backup-delete-selected disabled>Delete selected</button>
+      <form method="post" action="/settings/new-backups/backup">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <button type="submit">Backup Now</button>
+      </form>
+    </div>
   </section>
+  <input type="hidden" value="{{.CSRF}}" data-backup-delete-csrf>
+  <p class="backup-delete-page-error" data-backup-delete-page-error hidden></p>
 
   <section class="backup-library-section">
     <div class="section-heading">
@@ -38,7 +45,8 @@
     {{if .Backups}}
     <div class="backup-file-grid" role="list">
       {{range .Backups}}
-      <article class="backup-file-card" role="listitem">
+      <label class="backup-file-card backup-file-selectable" role="listitem" data-backup-card>
+        <input class="backup-file-checkbox" type="checkbox" value="{{.ID}}" data-backup-select aria-label="Select {{.ID}}">
         <div class="backup-file-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24"><path d="M4 4h11l5 5v11H4z"></path><path d="M15 4v5h5"></path><path d="M8 14h8M8 17h6"></path></svg>
         </div>
@@ -54,7 +62,7 @@
         {{else}}
         <span class="backup-file-status backup-file-status-warning">Metadata invalid</span>
         {{end}}
-      </article>
+      </label>
       {{end}}
     </div>
     {{else}}
@@ -65,7 +73,27 @@
     {{end}}
   </section>
 
-  <p class="muted backup-library-note">This first preview only creates and displays backups. Delete, Restore, automatic schedule, retention and destination controls will be added in later steps.</p>
+  <p class="muted backup-library-note">This preview creates, displays and safely deletes backups. Restore, automatic schedule, retention and destination controls will be added in later steps.</p>
+
+  <dialog class="backup-delete-dialog" data-backup-delete-dialog>
+    <div class="backup-delete-dialog-card">
+      <div class="backup-delete-dialog-heading">
+        <div><p class="eyebrow">Delete backups</p><h2>Review deletion</h2></div>
+        <button class="backup-delete-dialog-close" type="button" data-backup-delete-close aria-label="Close backup deletion">×</button>
+      </div>
+      <p data-backup-delete-summary></p>
+      <div class="backup-delete-review-list" data-backup-delete-review-list></div>
+      <div class="backup-delete-warnings" data-backup-delete-warnings></div>
+      <label>Type exactly <code data-backup-delete-confirmation-phrase></code>
+        <input data-backup-delete-confirmation autocomplete="off" spellcheck="false">
+      </label>
+      <p class="backup-delete-dialog-error" data-backup-delete-dialog-error hidden></p>
+      <div class="action-row backup-delete-dialog-actions">
+        <button class="secondary" type="button" data-backup-delete-cancel>Cancel</button>
+        <button class="danger" type="button" data-backup-delete-apply>Delete backups</button>
+      </div>
+    </div>
+  </dialog>
 </main>
 </body>
 </html>{{end}}
