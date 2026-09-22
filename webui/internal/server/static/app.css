@@ -239,3 +239,67 @@ body.role-administrator .control-power-actions.nav-admin-only{display:flex!impor
 body.role-administrator .control-tile.nav-admin-only,
 body.role-administrator .control-tile.nav-operator-plus,
 body.role-operator .control-tile.nav-operator-plus{display:flex!important}
+
+
+/* Session and power icons with explicit hover/focus tooltips. */
+.control-icon-button{position:relative;overflow:visible}
+.control-action-icon{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
+.control-action-icon-firmware{width:23px;height:23px}
+.control-icon-button[data-tooltip]::after{
+  content:attr(data-tooltip);
+  position:absolute;
+  left:50%;
+  bottom:calc(100% + 9px);
+  z-index:120;
+  transform:translate(-50%,4px);
+  padding:.38rem .52rem;
+  border:1px solid #3a454e;
+  border-radius:7px;
+  background:#0d1114f2;
+  color:#eef1f4;
+  box-shadow:0 8px 24px #0008;
+  font-size:.72rem;
+  font-weight:650;
+  line-height:1.2;
+  white-space:nowrap;
+  opacity:0;
+  visibility:hidden;
+  pointer-events:none;
+  transition:opacity .12s ease,transform .12s ease,visibility .12s ease;
+}
+.control-icon-button[data-tooltip]::before{
+  content:"";
+  position:absolute;
+  left:50%;
+  bottom:calc(100% + 4px);
+  z-index:121;
+  width:8px;
+  height:8px;
+  transform:translateX(-50%) rotate(45deg);
+  border-right:1px solid #3a454e;
+  border-bottom:1px solid #3a454e;
+  background:#0d1114f2;
+  opacity:0;
+  visibility:hidden;
+  pointer-events:none;
+  transition:opacity .12s ease,visibility .12s ease;
+}
+.control-icon-button[data-tooltip]:hover::after,
+.control-icon-button[data-tooltip]:focus-visible::after{
+  opacity:1;
+  visibility:visible;
+  transform:translate(-50%,0);
+}
+.control-icon-button[data-tooltip]:hover::before,
+.control-icon-button[data-tooltip]:focus-visible::before{
+  opacity:1;
+  visibility:visible;
+}
+@media(max-width:600px){
+  .control-icon-button[data-tooltip]::after,
+  .control-icon-button[data-tooltip]::before{display:none}
+}
+@media(prefers-color-scheme:light){
+  .control-icon-button[data-tooltip]::after{background:#fff;color:#1a2025;border-color:#cbd4da;box-shadow:0 8px 24px #0002}
+  .control-icon-button[data-tooltip]::before{background:#fff;border-color:#cbd4da}
+}
