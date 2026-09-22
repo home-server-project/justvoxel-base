@@ -27,6 +27,12 @@ jobs:
           check-latest: true
           cache: false
 
+      - name: Show Step 4 formatting diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          gofmt -d webui/internal/server/new_backups_page.go || true
+
       - name: Run WebUI source and local artifact checks
         shell: bash
         run: |
