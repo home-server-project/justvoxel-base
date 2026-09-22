@@ -15,13 +15,14 @@
   <form class="nav-logout" method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Log out</button></form>
 </header>
 <main class="setup-shell">
-  <div class="title-row setup-title-row"><div><p class="eyebrow">First setup</p><h1>Review your JustVoxel setup</h1></div><span class="badge">Step 5 of 5</span></div>
+  <div class="title-row setup-title-row"><div><p class="eyebrow">First setup</p><h1>Review your JustVoxel setup</h1></div><span class="badge">Step 6 of 6</span></div>
   <ol class="setup-progress" aria-label="Setup progress">
     <li class="complete"><span class="setup-number">1</span><span>Server</span></li>
-    <li class="complete"><span class="setup-number">2</span><span>Minecraft</span></li>
-    <li class="complete"><span class="setup-number">3</span><span>Storage</span></li>
-    <li class="complete"><span class="setup-number">4</span><span>Backups</span></li>
-    <li class="active" aria-current="step"><span class="setup-number">5</span><span>Review</span></li>
+    <li class="complete"><span class="setup-number">2</span><span>Resources</span></li>
+    <li class="complete"><span class="setup-number">3</span><span>Minecraft</span></li>
+    <li class="complete"><span class="setup-number">4</span><span>Storage</span></li>
+    <li class="complete"><span class="setup-number">5</span><span>Backups</span></li>
+    <li class="active" aria-current="step"><span class="setup-number">6</span><span>Review</span></li>
   </ol>
 
   <section class="panel setup-step-panel">
@@ -29,7 +30,7 @@
     {{if .Error}}<div class="notice error"><strong>Setup needs attention</strong><br>{{.Error}}</div>{{end}}
 
     {{if .Plan.OK}}
-    <div class="notice setup-safe-note"><strong>Configuration validated.</strong><span>The values below are the authoritative review result, including the resolved Minecraft version and storage identities.</span></div>
+    <div class="setup-review-toolbar"><div class="notice setup-safe-note"><strong>Configuration validated.</strong><span>The values below are the authoritative review result.</span></div><a class="button-link secondary" href="/setup/review/configuration">Download configuration</a></div>
 
     <div class="setup-review-grid">
       <section class="setup-review-card">
