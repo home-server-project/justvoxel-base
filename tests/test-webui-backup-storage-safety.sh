@@ -23,4 +23,24 @@ grep -q 'POST /v1/admin/backup-storage/apply' "${agent}"
 grep -q 'chmod 0600 "${A31_SMB_CREDENTIALS}"' "${helper_apply}"
 grep -q "password is required when applying a new SMB mount" "${helper_apply}"
 
+# SMB mount diagnostics must preserve useful mount.cifs text without leaking
+# credential values or unbounded/multiline output.
+# shellcheck disable=SC1090
+source "${helper_apply}"
+diag="$(bounded_smb_mount_error 
+mount error(13): Permission denied\npassword=super-secret credentials=/etc/justvoxel/smb-backup.credentials')"
+[[ ${diag} == *'mount error(13): Permission denied'* ]] || { echo "SMB mount diagnostic lost the real error: ${diag}" >&2; exit 1; }
+[[ ${diag} != *'super-secret'* ]] || { echo 'SMB mount diagnostic leaked a password.' >&2; exit 1; }
+[[ ${diag} != *'/etc/justvoxel/smb-backup.credentials'* ]] || { echo 'SMB mount diagnostic leaked the credentials-file path.' >&2; exit 1; }
+[[ ${diag} != *
+\n'* && ${#diag} -le 512 ]] || { echo 'SMB mount diagnostic is not bounded to one line.' >&2; exit 1; }
+
+grep -Fq 'smb_mount_error="$(mount "${TARGET_MOUNT}" 2>&1)"' "${helper_apply}" || { echo 'A3.1 SMB mount stderr is still discarded.' >&2; exit 1; }
+grep -Fq 'bounded_smb_mount_error "${smb_mount_error}"' "${helper_apply}" || { echo 'A3.1 SMB mount failure does not use bounded diagnostics.' >&2; exit 1; }
+if grep -Fq 'mount "${TARGET_MOUNT}" >/dev/null 2>&1' "${helper_apply}"; then
+    echo 'A3.1 SMB mount failure still discards mount.cifs diagnostics.' >&2
+    exit 1
+fi
+grep -Fq 'vers=3.0' "${helper_apply}" || { echo 'Step 7 must not silently change the SMB dialect.' >&2; exit 1; }
+
 echo 'WebUI backup storage A3.1 safety checks passed.'
