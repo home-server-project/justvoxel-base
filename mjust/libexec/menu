@@ -8,22 +8,22 @@ configured=no
 
 preview() {
     case "${1:-}" in
-        setup) echo -e 'First setup\n\nConfigure Minecraft, memory, ports, Bedrock cross-play, storage and backups.' ;;
-        import) echo -e 'Import existing Minecraft server\n\nImport an existing JustVoxel, Paper or compatible server.' ;;
-        status) echo -e 'Status\n\nFriendly JustVoxel health dashboard. Advanced details are available separately.' ;;
-        players) echo -e 'Players\n\nShow the current Minecraft player list.' ;;
-        configure) echo -e 'Configure Minecraft\n\nChange supported Minecraft settings through guided menus.' ;;
-        whitelist) echo -e 'Whitelist\n\nAdd or remove Java Edition and Bedrock/Xbox players.' ;;
-        service) echo -e 'Start / Stop / Restart\n\nControl Minecraft safely.' ;;
-        backups) echo -e 'Backups\n\nCreate, restore and configure Minecraft backups.' ;;
-        migration) echo -e 'Migration\n\nExport, import or recover a server migration.' ;;
-        storage) echo -e 'Storage\n\nView storage and move Minecraft data. Device provisioning is under Advanced.' ;;
-        update) echo -e 'Update Minecraft\n\nCheck Minecraft/Paper and container image updates.' ;;
-        system) echo -e 'System\n\nView OS status and updates, resources, files, networking, reboot and power controls.\n\nSystem resources opens btop. Press q to return to JustVoxel. Esc opens the btop menu, and Ctrl-C also exits the monitor. File browser opens Superfile; press q to return to the System menu. Network opens the friendly Home Server Project manager or classic nmtui.' ;;
-        validate) echo -e 'Validation\n\nRun the complete JustVoxel deployment validation.' ;;
-        logs) echo -e 'Logs\n\nReadable recent Minecraft logs from the JustVoxel Management API.' ;;
-        advanced) echo -e 'Advanced\n\nDetailed status, storage device provisioning, welcome controls and reset tools.' ;;
-        exit) echo 'Exit the JustVoxel menu.' ;;
+        setup) echo -e 'First setup\nConfigure Minecraft, storage and backups for a new server.' ;;
+        import) echo -e 'Import existing Minecraft server\nBring an existing JustVoxel, Paper or compatible server into this appliance.' ;;
+        status) echo -e 'Status\nOverall JustVoxel and Minecraft health.' ;;
+        players) echo -e 'Players\nSee who is currently connected.' ;;
+        configure) echo -e 'Configure Minecraft\nChange gameplay, memory, ports and server settings.' ;;
+        whitelist) echo -e 'Whitelist\nManage Java and Bedrock players allowed to join.' ;;
+        service) echo -e 'Start / Stop / Restart\nSafely control the Minecraft server.' ;;
+        backups) echo -e 'Backups\nCreate, restore and configure automatic backups.' ;;
+        migration) echo -e 'Migration\nMove a server into or out of JustVoxel.' ;;
+        storage) echo -e 'Storage\nView storage and move Minecraft data.' ;;
+        update) echo -e 'Update Minecraft\nCheck and apply supported Minecraft updates.' ;;
+        system) echo -e 'System\nManage OS status, resources, files, networking and power.' ;;
+        validate) echo -e 'Validation\nCheck that the complete JustVoxel installation is healthy.' ;;
+        logs) echo -e 'Logs\nView recent Minecraft server activity and errors.' ;;
+        advanced) echo -e 'Advanced\nStorage provisioning, diagnostics and recovery tools.' ;;
+        exit) echo -e 'Exit\nExit the JustVoxel menu.' ;;
         *) echo 'Unknown menu item.' ;;
     esac
 }
@@ -257,14 +257,68 @@ advanced_menu() {
     esac
 }
 
+main_menu_profile() {
+    local cols="$1"
+    if (( cols >= 110 )); then
+        printf 'wide'
+    elif (( cols >= 80 )); then
+        printf 'standard'
+    else
+        printf 'narrow'
+    fi
+}
+
+main_menu_gap_enabled() {
+    local lines="$1" item_count="$2"
+    (( item_count > 0 && lines >= (item_count * 2 + 4) ))
+}
+
 select_rich() {
-    local rows selected
+    local rows selected profile cols lines item_count preview_height
+    local -a fzf_args
+
     if [[ ${configured} == yes ]]; then
         rows=$'status\tStatus\nplayers\tPlayers\nconfigure\tConfigure Minecraft\nservice\tStart / Stop / Restart\nwhitelist\tWhitelist\nbackups\tBackups\nmigration\tMigration\nstorage\tStorage\nupdate\tUpdate Minecraft\nsystem\tSystem\nvalidate\tValidation\nlogs\tLogs\nadvanced\tAdvanced\nexit\tExit'
     else
         rows=$'setup\tFirst setup\nimport\tImport existing Minecraft server\nstatus\tStatus\nstorage\tStorage\nsystem\tSystem\nexit\tExit'
     fi
-    selected="$(printf '%s\n' "${rows}" | fzf --delimiter=$'\t' --with-nth=2 --no-multi --layout=reverse --border --height=90% --prompt='JustVoxel > ' --preview='/usr/libexec/justvoxel/mjust/menu --preview {1}' --preview-window='right,55%,wrap,border-left' || true)"
+
+    cols="$(jui_terminal_cols)"
+    lines="$(jui_terminal_lines)"
+    profile="$(main_menu_profile "${cols}")"
+    item_count="$(printf '%s\n' "${rows}" | awk 'NF {count++} END {print count + 0}')"
+
+    fzf_args=(
+        --delimiter=$'\t'
+        --with-nth=2
+        --no-multi
+        --layout=reverse
+        --border
+        --height=100%
+        --info=hidden
+        --prompt='JustVoxel > '
+        --preview='/usr/libexec/justvoxel/mjust/menu --preview {1}'
+    )
+
+    if main_menu_gap_enabled "${lines}" "${item_count}"; then
+        fzf_args+=(--gap=1)
+    fi
+
+    case "${profile}" in
+        wide)
+            fzf_args+=(--preview-window='right,35%,wrap,border-left')
+            ;;
+        standard)
+            fzf_args+=(--preview-window='right,40%,wrap,border-left')
+            ;;
+        narrow)
+            preview_height=3
+            (( lines < 20 )) && preview_height=2
+            fzf_args+=(--preview-window="down,${preview_height},wrap,border-top")
+            ;;
+    esac
+
+    selected="$(printf '%s\n' "${rows}" | fzf "${fzf_args[@]}" || true)"
     [[ -n ${selected} ]] || { printf 'exit'; return 0; }
     printf '%s' "${selected%%$'\t'*}"
 }
@@ -286,7 +340,7 @@ select_compact() {
 
 while true; do
     [[ -e /etc/containers/systemd/minecraft.container ]] && configured=yes || configured=no
-    if jui_rich_supported; then action="$(select_rich)"; else action="$(select_compact)"; fi
+    if jui_is_interactive && command -v fzf >/dev/null 2>&1; then action="$(select_rich)"; else action="$(select_compact)"; fi
     echo
     case "${action}" in
         setup) run_and_pause /usr/bin/mjust setup || true ;;
