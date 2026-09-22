@@ -79,6 +79,21 @@ for id in setup status players configure service whitelist backups migration sto
     grep -Fq "${id})" "${menu}" || fail "menu preview/dispatch id missing: ${id}"
 done
 
+grep -Fq 'main_menu_profile()' "${menu}" || fail 'adaptive main-menu profile helper missing'
+grep -Fq 'main_menu_gap_enabled()' "${menu}" || fail 'adaptive main-menu gap helper missing'
+grep -Fq -- '--height=100%' "${menu}" || fail 'main menu must use the full available terminal height'
+grep -Fq -- '--info=hidden' "${menu}" || fail 'main menu should hide the fzf result counter'
+grep -Fq -- '--gap=1' "${menu}" || fail 'tall terminals must support visual gaps between menu entries'
+grep -Fq "right,35%,wrap,border-left" "${menu}" || fail 'wide main-menu preview geometry missing'
+grep -Fq "right,40%,wrap,border-left" "${menu}" || fail 'standard main-menu preview geometry missing'
+grep -Fq 'down,${preview_height},wrap,border-top' "${menu}" || fail 'narrow main-menu description placement missing'
+if grep -Fq -- '--height=90%' "${menu}" || grep -Fq 'right,55%' "${menu}"; then
+    fail 'legacy constrained main-menu geometry remains'
+fi
+grep -Fq 'Overall JustVoxel and Minecraft health.' "${menu}" || fail 'concise Status description missing'
+grep -Fq 'Manage OS status, resources, files, networking and power.' "${menu}" || fail 'concise System description missing'
+grep -Fq 'jui_is_interactive && command -v fzf' "${menu}" || fail 'interactive main menu must keep adaptive fzf descriptions available'
+
 if grep -Fq 'setup-advanced' "${menu}" || grep -Fq 'Advanced setup' "${menu}" || grep -Fq 'setup-advanced' "${justfile}"; then
     fail 'legacy Advanced Setup must not be exposed through the mJust menu or recipes'
 fi
