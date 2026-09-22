@@ -207,6 +207,48 @@ func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/setup", http.StatusSeeOther)
 }
 
+func (a *App) setupWizardSaveResources(w http.ResponseWriter, r *http.Request) {
+	session, client, identity, ok := a.setupWizardRequest(w, r, true)
+	if !ok {
+		return
+	}
+	draft, exists := firstRunSetupDrafts.get(a, session)
+	if !exists || !draft.Started {
+		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		return
+	}
+
+	draft.Minecraft.JavaMemory = strings.TrimSpace(r.FormValue("java_memory"))
+	draft.Minecraft.ContainerMemory = strings.TrimSpace(r.FormValue("container_memory"))
+
+	if r.FormValue("direction") == "back" {
+		draft.Minecraft.ResourcesComplete = false
+		draft.Minecraft.Complete = false
+		draft.CurrentStep = 1
+		firstRunSetupReviews.delete(a, session)
+		firstRunSetupDrafts.save(a, session, draft)
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "resource settings changed; user returned to Server", draft)
+		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		return
+	}
+	if err := validateSetupResources(draft.Minecraft, draft.Defaults); err != nil {
+		draft.Minecraft.ResourcesComplete = false
+		draft.Minecraft.Complete = false
+		firstRunSetupDrafts.save(a, session, draft)
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "resource settings rejected", draft)
+		w.WriteHeader(http.StatusBadRequest)
+		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
+		return
+	}
+	draft.Minecraft.ResourcesComplete = true
+	draft.Minecraft.Complete = false
+	draft.CurrentStep = 3
+	firstRunSetupReviews.delete(a, session)
+	firstRunSetupDrafts.save(a, session, draft)
+	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "resource settings saved", draft)
+	http.Redirect(w, r, "/setup", http.StatusSeeOther)
+}
+
 func (a *App) setupWizardSaveMinecraft(w http.ResponseWriter, r *http.Request) {
 	session, client, identity, ok := a.setupWizardRequest(w, r, true)
 	if !ok {
