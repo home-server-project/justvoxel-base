@@ -27,6 +27,12 @@ jobs:
           check-latest: true
           cache: false
 
+      - name: Show New Storage formatting diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          gofmt -d webui/internal/server/admin_discovery_page.go || true
+
       - name: Run WebUI source and local artifact checks
         shell: bash
         run: |
