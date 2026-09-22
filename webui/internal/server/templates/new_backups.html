@@ -79,6 +79,129 @@
     {{end}}
   </section>
 
+  <section class="backup-destination-section">
+    <div class="section-heading backup-destination-heading">
+      <div><p class="eyebrow">Backup destination</p><h2>Current location</h2></div>
+      {{if .Destination.Current.Status}}<span class="badge backup-destination-status">{{.Destination.Current.Status}}</span>{{end}}
+    </div>
+    {{if .Destination.Current.StatusDetail}}<p class="muted compact">{{.Destination.Current.StatusDetail}}</p>{{end}}
+    <dl class="backup-destination-summary">
+      <div><dt>Type</dt><dd>{{.Destination.Current.Type}}</dd></div>
+      <div><dt>Backup directory</dt><dd><code>{{.Destination.Current.Path}}</code></dd></div>
+      {{if .Destination.Current.MountPoint}}<div><dt>Mount point</dt><dd><code>{{.Destination.Current.MountPoint}}</code></dd></div>{{end}}
+      {{if .Destination.Current.ExpectedSource}}<div><dt>Source</dt><dd><code>{{.Destination.Current.ExpectedSource}}</code></dd></div>{{end}}
+      <div><dt>Available</dt><dd>{{.DestinationAvailable}}</dd></div>
+      <div><dt>Filesystem size</dt><dd>{{.DestinationFilesystemSize}}</dd></div>
+    </dl>
+    {{if .Destination.Current.SamePhysicalDisk}}<div class="notice warning backup-destination-warning"><strong>Same physical disk.</strong> These backups do not protect against failure of the disk that also stores Minecraft data.</div>{{end}}
+
+    <details class="backup-destination-change" {{if .DestinationPlan}}open{{end}}>
+      <summary>Change destination</summary>
+      <form class="backup-destination-form" method="post" action="/settings/new-backups/destination/plan" data-backup-destination-form>
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <label>Destination type
+          <select name="type" data-backup-destination-type>
+            <option value="system" {{if eq .DestinationForm.Type "system"}}selected{{end}}>Directory on this JustVoxel system</option>
+            <option value="partition" {{if eq .DestinationForm.Type "partition"}}selected{{end}}>Existing local partition / filesystem</option>
+            <option value="nfs" {{if eq .DestinationForm.Type "nfs"}}selected{{end}}>NFS share</option>
+            <option value="smb" {{if eq .DestinationForm.Type "smb"}}selected{{end}}>SMB / CIFS share</option>
+          </select>
+        </label>
+        <div class="backup-destination-kind" data-backup-destination-kind="system">
+          <label>Backup directory
+            <input name="path" data-backup-destination-path="system" value="{{if eq .DestinationForm.Type "system"}}{{.DestinationForm.Path}}{{end}}" placeholder="/var/lib/justvoxel/backups" autocomplete="off">
+          </label>
+        </div>
+        <div class="backup-destination-kind" data-backup-destination-kind="partition">
+          {{if .DestinationPartitions}}
+          <label>Local filesystem
+            <select name="device" data-backup-destination-device>
+              <option value="">Choose a filesystem</option>
+              {{range .DestinationPartitions}}<option value="{{.Path}}" data-mountpoint="{{.Mountpoint}}" {{if eq $.DestinationForm.Device .Path}}selected{{end}}>{{if .Model}}{{.Model}} · {{end}}{{.Path}} · {{.Filesystem}} · {{.Size}}{{if .Mountpoint}} · {{.Mountpoint}}{{end}}</option>{{end}}
+            </select>
+          </label>
+          <div class="backup-destination-grid">
+            <label>Mount point
+              <input name="mount_point" data-backup-destination-mount="partition" value="{{if eq .DestinationForm.Type "partition"}}{{.DestinationForm.MountPoint}}{{end}}" placeholder="/var/mnt/justvoxel-backup" autocomplete="off">
+            </label>
+            <label>Backup directory
+              <input name="path" data-backup-destination-path="partition" value="{{if eq .DestinationForm.Type "partition"}}{{.DestinationForm.Path}}{{end}}" placeholder="/var/mnt/justvoxel-backup/backups" autocomplete="off">
+            </label>
+          </div>
+          {{else}}<div class="notice">No existing writable XFS, ext4 or Btrfs partition is available for safe adoption.</div>{{end}}
+        </div>
+        <div class="backup-destination-kind" data-backup-destination-kind="nfs">
+          <div class="backup-destination-grid">
+            <label>NFS source
+              <input name="source" data-backup-destination-source="nfs" value="{{if eq .DestinationForm.Type "nfs"}}{{.DestinationForm.Source}}{{end}}" placeholder="nas.local:/volume/backups" autocomplete="off">
+            </label>
+            <label>Local mount point
+              <input name="mount_point" data-backup-destination-mount="nfs" value="{{if eq .DestinationForm.Type "nfs"}}{{.DestinationForm.MountPoint}}{{end}}" placeholder="/var/mnt/justvoxel-backup" autocomplete="off">
+            </label>
+          </div>
+          <label>Backup directory
+            <input name="path" data-backup-destination-path="nfs" value="{{if eq .DestinationForm.Type "nfs"}}{{.DestinationForm.Path}}{{end}}" placeholder="/var/mnt/justvoxel-backup/backups" autocomplete="off">
+          </label>
+        </div>
+        <div class="backup-destination-kind" data-backup-destination-kind="smb">
+          <div class="backup-destination-grid">
+            <label>SMB source
+              <input name="source" data-backup-destination-source="smb" value="{{if eq .DestinationForm.Type "smb"}}{{.DestinationForm.Source}}{{end}}" placeholder="//nas/backups" autocomplete="off">
+            </label>
+            <label>Local mount point
+              <input name="mount_point" data-backup-destination-mount="smb" value="{{if eq .DestinationForm.Type "smb"}}{{.DestinationForm.MountPoint}}{{end}}" placeholder="/var/mnt/justvoxel-backup" autocomplete="off">
+            </label>
+            <label>Username
+              <input name="username" value="{{if eq .DestinationForm.Type "smb"}}{{.DestinationForm.Username}}{{end}}" autocomplete="username">
+            </label>
+            <label>Domain / workgroup
+              <input name="domain" value="{{if eq .DestinationForm.Type "smb"}}{{.DestinationForm.Domain}}{{end}}" autocomplete="off">
+            </label>
+          </div>
+          <label>Backup directory
+            <input name="path" data-backup-destination-path="smb" value="{{if eq .DestinationForm.Type "smb"}}{{.DestinationForm.Path}}{{end}}" placeholder="/var/mnt/justvoxel-backup/backups" autocomplete="off">
+          </label>
+          <p class="muted compact">SMB password is requested only during Apply when the reviewed mount requires credentials.</p>
+        </div>
+        <div class="backup-destination-actions"><button type="submit">Review destination</button></div>
+      </form>
+
+      {{if .DestinationPlan}}
+      <div class="backup-destination-review">
+        <div class="section-heading"><div><p class="eyebrow">Review</p><h3>Proposed destination</h3></div>{{if .DestinationPlan.Changed}}<span class="badge">Change ready</span>{{else}}<span class="badge">Already current</span>{{end}}</div>
+        {{range .DestinationPlan.Warnings}}<div class="notice warning">{{.}}</div>{{end}}
+        <dl class="backup-destination-summary">
+          <div><dt>Type</dt><dd>{{.DestinationPlan.Proposed.Type}}</dd></div>
+          <div><dt>Backup directory</dt><dd><code>{{.DestinationPlan.Proposed.Path}}</code></dd></div>
+          {{if .DestinationPlan.Proposed.MountPoint}}<div><dt>Mount point</dt><dd><code>{{.DestinationPlan.Proposed.MountPoint}}</code></dd></div>{{end}}
+          {{if .DestinationPlan.Proposed.ExpectedSource}}<div><dt>Source</dt><dd><code>{{.DestinationPlan.Proposed.ExpectedSource}}</code></dd></div>{{end}}
+          <div><dt>Available</dt><dd>{{.ProposedDestinationAvailable}}</dd></div>
+          <div><dt>Filesystem size</dt><dd>{{.ProposedDestinationSize}}</dd></div>
+        </dl>
+        {{if .DestinationPlan.Changed}}
+        <form class="backup-destination-apply" method="post" action="/settings/new-backups/destination/apply">
+          <input type="hidden" name="csrf" value="{{.CSRF}}">
+          <input type="hidden" name="type" value="{{.DestinationPlan.Proposed.Type}}">
+          <input type="hidden" name="path" value="{{.DestinationPlan.Proposed.Path}}">
+          <input type="hidden" name="device" value="{{.DestinationPlan.Proposed.Device}}">
+          <input type="hidden" name="mount_point" value="{{.DestinationPlan.Proposed.MountPoint}}">
+          <input type="hidden" name="source" value="{{.DestinationPlan.Proposed.ExpectedSource}}">
+          <input type="hidden" name="username" value="{{.DestinationForm.Username}}">
+          <input type="hidden" name="domain" value="{{.DestinationForm.Domain}}">
+          {{if .DestinationPlan.Proposed.CredentialsNeeded}}
+          <label>SMB password
+            <input name="password" type="password" required autocomplete="current-password">
+            <span class="muted compact">Requested only now for the reviewed SMB destination.</span>
+          </label>
+          {{end}}
+          <div class="action-row"><button type="submit">Apply destination</button><a class="button-link secondary" href="/settings/new-backups">Cancel</a></div>
+        </form>
+        {{else}}<p class="muted compact">This destination already matches the current backup configuration.</p>{{end}}
+      </div>
+      {{end}}
+    </details>
+  </section>
+
   <section class="backup-library-section">
     <div class="section-heading">
       <div><p class="eyebrow">Backup library</p><h2>Existing backups</h2></div>
@@ -115,7 +238,7 @@
     {{end}}
   </section>
 
-  <p class="muted backup-library-note">This preview creates, displays, safely deletes and schedules backups. Restore and destination controls will be added in later steps.</p>
+  <p class="muted backup-library-note">This preview creates, displays, safely deletes, schedules and changes backup destinations. Restore will be added in the next step.</p>
 
   <dialog class="backup-delete-dialog" data-backup-delete-dialog>
     <div class="backup-delete-dialog-card">

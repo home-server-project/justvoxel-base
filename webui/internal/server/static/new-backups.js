@@ -172,4 +172,52 @@
       applyButton.textContent = originalLabel;
     }
   });
+
+  const destinationForm = document.querySelector("[data-backup-destination-form]");
+  if (destinationForm) {
+    const destinationType = destinationForm.querySelector("[data-backup-destination-type]");
+    const destinationKinds = [...destinationForm.querySelectorAll("[data-backup-destination-kind]")];
+    const destinationDevice = destinationForm.querySelector("[data-backup-destination-device]");
+    const destinationInput = (name, kind) => destinationForm.querySelector(`[data-backup-destination-${name}="${kind}"]`);
+
+    function updateDestinationPartition(force) {
+      if (!destinationDevice?.value) return;
+      const option = destinationDevice.selectedOptions[0];
+      const mount = destinationInput("mount", "partition");
+      const path = destinationInput("path", "partition");
+      const mountedAt = option?.dataset.mountpoint || "";
+      const targetMount = mountedAt || mount?.value || "/var/mnt/justvoxel-backup";
+      if (mount && (force || !mount.value)) mount.value = targetMount;
+      if (path && (force || !path.value)) path.value = targetMount.replace(/\/$/, "") + "/backups";
+    }
+
+    function updateDestinationNetwork(kind, force) {
+      const mount = destinationInput("mount", kind);
+      const path = destinationInput("path", kind);
+      if (mount && !mount.value) mount.value = "/var/mnt/justvoxel-backup";
+      if (path && (force || !path.value)) path.value = (mount?.value || "/var/mnt/justvoxel-backup").replace(/\/$/, "") + "/backups";
+    }
+
+    function showDestinationKind() {
+      const kind = destinationType?.value || "system";
+      destinationKinds.forEach((section) => {
+        const active = section.dataset.backupDestinationKind === kind;
+        section.hidden = !active;
+        section.querySelectorAll("input,select").forEach((input) => { input.disabled = !active; });
+      });
+      if (kind === "partition") updateDestinationPartition(false);
+      if (kind === "nfs" || kind === "smb") updateDestinationNetwork(kind, false);
+    }
+
+    destinationType?.addEventListener("change", () => {
+      showDestinationKind();
+      const kind = destinationType.value;
+      if (kind === "partition") updateDestinationPartition(true);
+      if (kind === "nfs" || kind === "smb") updateDestinationNetwork(kind, true);
+    });
+    destinationDevice?.addEventListener("change", () => updateDestinationPartition(true));
+    ["nfs", "smb"].forEach((kind) => destinationInput("mount", kind)?.addEventListener("change", () => updateDestinationNetwork(kind, true)));
+    showDestinationKind();
+  }
+
 })();
