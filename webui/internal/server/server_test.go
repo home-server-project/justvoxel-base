@@ -244,6 +244,12 @@ func TestDashboardRendersStatusPlayersAndControls(t *testing.T) {
 			t.Fatalf("missing %q in response", want)
 		}
 	}
+	if strings.Contains(body, "<h2>Appliance</h2>") {
+		t.Fatal("dashboard still renders the removed Appliance panel")
+	}
+	if strings.Contains(body, `id="minecraft-players-summary"`) {
+		t.Fatal("dashboard still renders the duplicate Players summary tile")
+	}
 }
 
 func TestAboutPageCarriesApplianceBuildInformation(t *testing.T) {
