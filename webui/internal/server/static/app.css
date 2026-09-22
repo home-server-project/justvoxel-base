@@ -232,3 +232,10 @@ body.role-administrator .control-power-actions.nav-admin-only{display:flex!impor
 @media(prefers-color-scheme:light){
   .brand-mark strong{background:transparent;border:0;color:#245b3a}
 }
+
+
+/* Preserve role visibility after Control Center tile display rules. */
+.control-tile.nav-admin-only,.control-tile.nav-operator-plus{display:none!important}
+body.role-administrator .control-tile.nav-admin-only,
+body.role-administrator .control-tile.nav-operator-plus,
+body.role-operator .control-tile.nav-operator-plus{display:flex!important}
