@@ -627,9 +627,9 @@ func (s *setupDraftStore) navigate(app *App, session, direction string) bool {
 	}
 	switch direction {
 	case "next":
-		// Steps 1-4 have real forms and cannot be skipped through the generic
+		// Steps 1-5 have real forms and cannot be skipped through the generic
 		// navigation endpoint. The validated Review has its own route.
-		if draft.CurrentStep <= 4 {
+		if draft.CurrentStep <= 5 {
 			return false
 		}
 	case "back":
