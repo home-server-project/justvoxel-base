@@ -19,7 +19,7 @@ preview() {
         migration) echo -e 'Migration\nMove a server into or out of JustVoxel.' ;;
         storage) echo -e 'Storage\nView storage and move Minecraft data.' ;;
         update) echo -e 'Update Minecraft\nCheck and apply supported Minecraft updates.' ;;
-        system) echo -e 'System\nManage OS status, resources, files, networking and power.' ;;
+        system) echo -e 'System\nManage OS status, resources, files, networking and power.\n\nSystem resources opens btop. Press q to return to JustVoxel. Ctrl-C also exits the monitor.' ;;
         validate) echo -e 'Validation\nCheck that the complete JustVoxel installation is healthy.' ;;
         logs) echo -e 'Logs\nView recent Minecraft server activity and errors.' ;;
         advanced) echo -e 'Advanced\nStorage provisioning, diagnostics and recovery tools.' ;;
