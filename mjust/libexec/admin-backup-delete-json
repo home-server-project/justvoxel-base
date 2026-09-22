@@ -1,0 +1,23 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+source /usr/libexec/justvoxel/mjust/admin-backup-delete-common.sh
+
+backup_delete_plan_json() {
+    backup_delete_collect_plan || return 0
+    jq -n --argjson proposed "${BACKUP_DELETE_PLAN_JSON}"         '{ok:true,proposed:$proposed,warnings:["Deleted backups cannot be restored by JustVoxel."],applied:false}'
+}
+
+action="${1:-plan}"
+case "${action}" in
+    plan)
+        backup_delete_plan_json
+        ;;
+    apply)
+        source /usr/libexec/justvoxel/mjust/admin-backup-delete-apply.sh
+        backup_delete_apply
+        ;;
+    *)
+        backup_delete_json_error 'Usage: admin-backup-delete-json {plan|apply}'
+        ;;
+esac
