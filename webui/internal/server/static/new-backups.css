@@ -157,3 +157,43 @@
 @media(max-width:760px){.backup-destination-summary{grid-template-columns:1fr 1fr}}
 @media(max-width:560px){.backup-destination-summary,.backup-destination-review .backup-destination-summary,.backup-destination-grid{grid-template-columns:1fr}.backup-destination-actions button{width:100%}}
 @media(prefers-color-scheme:light){.backup-destination-section{background:#fff;border-color:#d9dfe3}.backup-destination-summary>div{background:#f6f8f9;border-color:#d9dfe3}.backup-destination-change{border-color:#e2e7ea}.backup-destination-change>summary{color:#386b4d}.backup-destination-form,.backup-destination-review{background:#f6f8f9;border-color:#d9dfe3}}
+
+
+.backup-restore-progress,.backup-restore-review{margin-top:.8rem;padding:.9rem;border:1px solid #303942;border-radius:14px;background:#13191e}
+.backup-restore-progress h2,.backup-restore-review h2{margin:.05rem 0 0;font-size:1.1rem}
+.backup-restore-operation-details{display:flex;align-items:center;justify-content:space-between;gap:.7rem;margin:.55rem 0 .7rem;padding:.55rem .65rem;border:1px solid #303942;border-radius:9px;background:#171d22;font-size:.78rem}
+.backup-restore-operation-details span{color:#89959e}
+.backup-restore-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.45rem;margin:.65rem 0}
+.backup-restore-summary>div{min-width:0;padding:.55rem .6rem;border:1px solid #2d353d;border-radius:9px;background:#171d22}
+.backup-restore-summary dt{color:#89959e;font-size:.66rem;text-transform:uppercase;letter-spacing:.06em}
+.backup-restore-summary dd{min-width:0;margin:.18rem 0 0;font-size:.78rem;overflow:hidden;text-overflow:ellipsis}
+.backup-restore-summary code{white-space:nowrap}
+.backup-restore-safety{display:grid;gap:.2rem;margin:.65rem 0;padding:.65rem .7rem;border:1px solid #303942;border-radius:9px;background:#171d22;font-size:.78rem}
+.backup-restore-safety span{color:#aab5bd}
+.backup-restore-apply{display:grid;gap:.65rem;margin-top:.7rem}
+.backup-restore-player-confirm{display:flex;align-items:center;gap:.55rem}
+.backup-restore-player-confirm input{width:18px;height:18px;margin:0;accent-color:#68bd8e}
+
+.backup-restore-dialog{width:min(580px,calc(100% - 1.2rem));padding:0;border:1px solid #3b454e;border-radius:16px;background:#171d22;color:#eef1f4;box-shadow:0 30px 90px #000c}
+.backup-restore-dialog::backdrop{background:#050708b8;backdrop-filter:blur(4px)}
+.backup-restore-dialog-card{padding:1rem}
+.backup-restore-dialog-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;padding-bottom:.7rem;border-bottom:1px solid #2b333b}
+.backup-restore-dialog-heading h2{margin:.08rem 0 0;font-size:1.2rem}
+.backup-restore-dialog-close{display:grid;place-items:center;width:36px;height:36px;padding:0;border:1px solid #3a454e;border-radius:9px;background:#222a31;color:#eef1f4;font-size:1.45rem;line-height:1}
+.backup-restore-selected-name{overflow:hidden;margin:.7rem 0;font-size:.78rem;text-overflow:ellipsis}
+.backup-restore-mode{display:flex;align-items:flex-start;gap:.65rem;margin:.5rem 0;padding:.65rem;border:1px solid #303942;border-radius:9px;background:#10161a;cursor:pointer}
+.backup-restore-mode input{width:18px;height:18px;margin:.12rem 0 0;accent-color:#68bd8e}
+.backup-restore-mode span{display:grid;gap:.12rem}
+.backup-restore-mode small{color:#89959e}
+.backup-restore-dialog-actions{justify-content:flex-end}
+
+@media(max-width:760px){.backup-restore-summary{grid-template-columns:1fr 1fr}}
+@media(max-width:560px){.backup-restore-summary{grid-template-columns:1fr}.backup-restore-operation-details{align-items:flex-start;flex-direction:column}}
+@media(prefers-color-scheme:light){
+  .backup-restore-progress,.backup-restore-review{background:#fff;border-color:#d9dfe3}
+  .backup-restore-operation-details,.backup-restore-summary>div,.backup-restore-safety{background:#f6f8f9;border-color:#d9dfe3}
+  .backup-restore-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025;box-shadow:0 30px 90px #0003}
+  .backup-restore-dialog-heading{border-color:#e2e7ea}
+  .backup-restore-dialog-close{background:#f1f4f6;border-color:#cbd4da;color:#1a2025}
+  .backup-restore-mode{background:#f6f8f9;border-color:#d9dfe3}
+}

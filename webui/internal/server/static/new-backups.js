@@ -2,6 +2,8 @@
   const checkboxes = [...document.querySelectorAll("[data-backup-select]")];
   const selectedCount = document.querySelector("[data-backup-selected-count]");
   const deleteButton = document.querySelector("[data-backup-delete-selected]");
+  const restoreButton = document.querySelector("[data-backup-restore-selected]");
+  const restoreBusy = restoreButton?.dataset.restoreBusy === "1";
   const csrf = document.querySelector("[data-backup-delete-csrf]")?.value || "";
   const pageError = document.querySelector("[data-backup-delete-page-error]");
 
@@ -27,10 +29,31 @@
     const count = selectedIDs().length;
     if (selectedCount) selectedCount.textContent = String(count);
     if (deleteButton) deleteButton.disabled = count === 0;
+    if (restoreButton) restoreButton.disabled = count !== 1 || restoreBusy;
   }
 
   checkboxes.forEach((box) => box.addEventListener("change", updateSelection));
   updateSelection();
+
+  const restoreDialog = document.querySelector("[data-backup-restore-dialog]");
+  const restoreClose = restoreDialog?.querySelector("[data-backup-restore-close]");
+  const restoreCancel = restoreDialog?.querySelector("[data-backup-restore-cancel]");
+  const restoreID = restoreDialog?.querySelector("[data-backup-restore-id]");
+  const restoreName = restoreDialog?.querySelector("[data-backup-restore-name]");
+
+  function closeRestoreDialog() {
+    restoreDialog?.close();
+  }
+
+  restoreButton?.addEventListener("click", () => {
+    const ids = selectedIDs();
+    if (ids.length !== 1 || !restoreDialog || restoreBusy) return;
+    if (restoreID) restoreID.value = ids[0];
+    if (restoreName) restoreName.textContent = ids[0];
+    restoreDialog.showModal();
+  });
+  restoreClose?.addEventListener("click", closeRestoreDialog);
+  restoreCancel?.addEventListener("click", closeRestoreDialog);
 
   function showError(node, message) {
     if (!node) return;

@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/static/new-backups.css">
   <script src="/static/app.js" defer></script>
   <script src="/static/new-backups.js" defer></script>
+  <script src="/static/restore-operation.js" defer></script>
 </head>
 <body class="role-administrator">
 {{template "app-header" .}}
@@ -27,6 +28,7 @@
       <div><span>Selected</span><strong data-backup-selected-count>0</strong></div>
     </div>
     <div class="backup-command-actions">
+      <button type="button" data-backup-restore-selected data-restore-busy="{{if .RestoreOperation}}1{{else}}0{{end}}" disabled>Restore selected</button>
       <button class="danger" type="button" data-backup-delete-selected disabled>Delete selected</button>
       <form method="post" action="/settings/new-backups/backup">
         <input type="hidden" name="csrf" value="{{.CSRF}}">
@@ -36,6 +38,63 @@
   </section>
   <input type="hidden" value="{{.CSRF}}" data-backup-delete-csrf>
   <p class="backup-delete-page-error" data-backup-delete-page-error hidden></p>
+
+  {{if .RestoreOperation}}
+  <section class="backup-restore-progress">
+    <div class="section-heading">
+      <div><p class="eyebrow">Restore</p><h2>Restore progress</h2></div>
+      <span class="badge" id="restore-operation-state">{{.RestoreStateLabel}}</span>
+    </div>
+    <div data-restore-operation data-status-url="/api/restore/progress/{{.RestoreOperation.OperationID}}">
+      <p id="restore-operation-status">{{.RestoreOperation.Status}}</p>
+      <div class="backup-restore-operation-details">Stage: <strong id="restore-operation-stage">{{.RestoreStageLabel}}</strong><span>Operation <code>{{.RestoreOperation.OperationID}}</code></span></div>
+      <div class="notice" id="restore-reconnect-note" hidden><strong>Reconnecting to JustVoxel…</strong><br>Restore may still be running. Refreshing New Backups does not start another Restore.</div>
+      <div class="notice success" id="restore-operation-success" {{if ne .RestoreOperation.State "succeeded"}}hidden{{end}}><strong>Minecraft Restore completed successfully.</strong><br>The restored runtime passed validation.</div>
+      <div class="notice warning" id="restore-operation-rollback" {{if ne .RestoreOperation.State "rolled_back"}}hidden{{end}}><strong>Restore was rolled back safely.</strong><br>The restored runtime did not pass validation and the previous Minecraft data was restored.</div>
+      <div class="notice error" id="restore-operation-attention" {{if ne .RestoreOperation.State "needs_attention"}}hidden{{end}}><strong>Restore needs administrator attention.</strong><br>Do not start another Restore until the preserved recovery state is reviewed.</div>
+      <div class="action-row"><a class="button-link" id="restore-dashboard-link" href="/" {{if ne .RestoreOperation.State "succeeded"}}hidden{{end}}>Open dashboard</a><a class="button-link secondary" href="#backup-library">Backup library</a></div>
+    </div>
+  </section>
+  {{end}}
+
+  {{if or .RestorePlan .RestoreError}}
+  <section class="backup-restore-review">
+    <div class="section-heading"><div><p class="eyebrow">Restore review</p><h2>{{if .RestoreModeTitle}}{{.RestoreModeTitle}}{{else}}Review Restore{{end}}</h2></div><span class="badge">Destructive</span></div>
+    {{if .RestoreError}}<div class="notice error"><strong>Restore cannot continue as submitted.</strong><br>{{.RestoreError}}</div>{{end}}
+    {{if .RestorePlan.Normalized}}
+    <p>{{.RestoreScope}}</p>
+    <dl class="backup-restore-summary">
+      <div><dt>Backup</dt><dd><code>{{.RestorePlan.Normalized.BackupID}}</code></dd></div>
+      <div><dt>Created</dt><dd>{{.RestorePlan.Normalized.CreatedAt}}</dd></div>
+      <div><dt>Size</dt><dd>{{.RestoreSize}}</dd></div>
+      <div><dt>Current Minecraft</dt><dd>{{.RestorePlan.Normalized.Current.Version}} · {{.RestorePlan.Normalized.Current.VersionMode}}</dd></div>
+      {{if .RestorePlan.Normalized.Metadata}}<div><dt>Backup Minecraft</dt><dd>{{.RestorePlan.Normalized.Metadata.Minecraft.ConfiguredVersion}} · {{.RestorePlan.Normalized.Metadata.Minecraft.VersionMode}}</dd></div>{{else}}<div><dt>Backup metadata</dt><dd>{{.RestorePlan.Normalized.MetadataStatus}}</dd></div>{{end}}
+      <div><dt>Version relation</dt><dd>{{.RestorePlan.Normalized.VersionRelation}}</dd></div>
+    </dl>
+    {{end}}
+    {{range .RestorePlan.Warnings}}<div class="notice warning">{{.Message}}</div>{{end}}
+    {{if and .RestorePlan.OK .RestorePlan.Requirements}}
+    <div class="backup-restore-safety">
+      <strong>Safety checks remain Agent-owned.</strong>
+      <span>Before live data changes, JustVoxel revalidates the reviewed plan, archive integrity, archive safety, backup identity and staging capacity. Runtime validation and automatic rollback remain enabled.</span>
+    </div>
+    {{if .RestorePlan.Requirements.PlayersConfirmationRequired}}
+    <div class="notice warning"><strong>{{.RestorePlan.Requirements.Online}} player(s) are online.</strong><br>{{range .RestorePlan.Requirements.Players}}{{.}}<br>{{end}}Restore will use the player-aware graceful shutdown path.</div>
+    {{end}}
+    <form class="backup-restore-apply" method="post" action="/settings/new-backups/restore/apply">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <input type="hidden" name="backup_id" value="{{.RestoreRequest.BackupID}}">
+      <input type="hidden" name="mode" value="{{.RestoreRequest.Mode}}">
+      <input type="hidden" name="plan_fingerprint" value="{{.RestorePlan.PlanFingerprint}}">
+      {{if .RestorePlan.Requirements.PlayersConfirmationRequired}}<label class="backup-restore-player-confirm"><input type="checkbox" name="players_confirmed" value="yes"> I understand that the online players may be interrupted.</label>{{end}}
+      <label><strong>Type RESTORE to continue</strong>
+        <input name="confirmation" autocomplete="off" required>
+      </label>
+      <div class="action-row"><button class="danger" type="submit">Start Restore</button><a class="button-link secondary" href="/settings/new-backups">Cancel</a></div>
+    </form>
+    {{end}}
+  </section>
+  {{end}}
 
   <section class="backup-automatic-section">
     <div class="section-heading backup-automatic-heading">
@@ -202,7 +261,7 @@
     </details>
   </section>
 
-  <section class="backup-library-section">
+  <section class="backup-library-section" id="backup-library">
     <div class="section-heading">
       <div><p class="eyebrow">Backup library</p><h2>Existing backups</h2></div>
     </div>
@@ -238,7 +297,23 @@
     {{end}}
   </section>
 
-  <p class="muted backup-library-note">This preview creates, displays, safely deletes, schedules and changes backup destinations. Restore will be added in the next step.</p>
+  <p class="muted backup-library-note">New Backups now creates, displays, restores, safely deletes, schedules and changes backup destinations. Legacy backup pages remain available until the separate cleanup pass.</p>
+
+  <dialog class="backup-restore-dialog" data-backup-restore-dialog>
+    <form class="backup-restore-dialog-card" method="post" action="/settings/new-backups/restore/plan">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <input type="hidden" name="backup_id" data-backup-restore-id>
+      <div class="backup-restore-dialog-heading">
+        <div><p class="eyebrow">Restore backup</p><h2>Choose Restore scope</h2></div>
+        <button class="backup-restore-dialog-close" type="button" data-backup-restore-close aria-label="Close Restore">×</button>
+      </div>
+      <p class="backup-restore-selected-name">Selected: <code data-backup-restore-name></code></p>
+      <label class="backup-restore-mode"><input type="radio" name="mode" value="world" checked><span><strong>Restore world</strong><small>Replace the primary world plus its Nether and End world directories.</small></span></label>
+      <label class="backup-restore-mode"><input type="radio" name="mode" value="full"><span><strong>Restore full Minecraft data</strong><small>Replace the complete Minecraft persistent data directory, including plugins and Minecraft-side configuration.</small></span></label>
+      <p class="muted compact">Nothing changes during Review. The Management Agent will build the authoritative Restore plan before Apply.</p>
+      <div class="action-row backup-restore-dialog-actions"><button class="secondary" type="button" data-backup-restore-cancel>Cancel</button><button type="submit">Review Restore</button></div>
+    </form>
+  </dialog>
 
   <dialog class="backup-delete-dialog" data-backup-delete-dialog>
     <div class="backup-delete-dialog-card">
