@@ -239,9 +239,29 @@ func TestDashboardRendersStatusPlayersAndControls(t *testing.T) {
 		t.Fatalf("got %d", rr.Code)
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"Running", "2 / 10", "1.21.8", "Alex", "Steve", "10-test", "1.0.0", "/minecraft/start", "/minecraft/stop", "/minecraft/restart", `data-dashboard-status="/api/dashboard-status"`} {
+	for _, want := range []string{"Running", "2 / 10", "1.21.8", "Alex", "Steve", "/minecraft/start", "/minecraft/stop", "/minecraft/restart", `data-dashboard-status="/api/dashboard-status"`, "dashboard-summary", "dashboard-live-panels"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("missing %q in response", want)
+		}
+	}
+}
+
+func TestAboutPageCarriesApplianceBuildInformation(t *testing.T) {
+	app, err := New(&fakeAPI{}, Config{Version: "1.0.0", Commit: "abc123", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "http://example/about", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{"About", "10-test", "1.0.0", "v1", "abc123"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("about page missing %q", want)
 		}
 	}
 }
