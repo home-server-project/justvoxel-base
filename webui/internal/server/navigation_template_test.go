@@ -25,6 +25,7 @@ func TestControlCenterNavigationUX(t *testing.T) {
 		`href="/operations#whitelist"`,
 		`href="/operations#minecraft-logs"`,
 		`href="/settings/storage"`,
+		`href="/settings/new-storage"`,
 		`href="/settings/data-migration"`,
 		`href="/settings/backup-storage"`,
 		`href="/operations#manual-backup"`,
@@ -99,6 +100,7 @@ func TestAuthenticatedTemplatesUseSharedHeader(t *testing.T) {
 		"validation.html",
 		"server_settings.html",
 		"storage_settings.html",
+		"storage_browser.html",
 		"backup_storage.html",
 		"restore.html",
 		"restore_review.html",
@@ -203,5 +205,44 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 		if !strings.Contains(styles, want) {
 			t.Fatalf("compact dashboard styling missing %q", want)
 		}
+	}
+}
+
+func TestStorageBrowserInteractionContract(t *testing.T) {
+	templateContent, err := assets.ReadFile("templates/storage_browser.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(templateContent)
+	for _, want := range []string{
+		`data-storage-disk`,
+		`data-storage-partitions`,
+		`data-storage-partition`,
+		`data-storage-detail-dialog`,
+		`data-storage-detail-close`,
+		`storage-partition-swap`,
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("storage browser markup missing %q", want)
+		}
+	}
+
+	scriptContent, err := assets.ReadFile("static/storage-browser.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(scriptContent)
+	for _, want := range []string{
+		`dialog.showModal()`,
+		`closeButton?.addEventListener("click"`,
+		`event.preventDefault()`,
+		`button.setAttribute("aria-pressed"`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("storage browser behavior missing %q", want)
+		}
+	}
+	if strings.Contains(script, "dialog.close()") && !strings.Contains(script, "closeButton?.addEventListener") {
+		t.Fatal("storage detail dialog can close without explicit close control")
 	}
 }
