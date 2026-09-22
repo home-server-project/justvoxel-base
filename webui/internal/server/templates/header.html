@@ -1,63 +1,75 @@
 {{define "app-header"}}
-<header class="app-header">
-  <a class="brand-link" href="/" aria-label="JustVoxel dashboard"><strong>JustVoxel</strong><span>Minecraft Server Appliance</span></a>
-  <nav class="primary-nav" aria-label="Primary navigation">
-    <details class="nav-group" data-nav-group="server">
-      <summary class="nav-trigger">Server</summary>
-      <div class="nav-menu">
-        <span class="nav-section-label">Server</span>
-        <a href="/activity">Activity</a>
-        <a class="nav-admin-only" href="/settings/server">Minecraft settings</a>
-        <a class="nav-operator-plus" href="/operations#whitelist">Whitelist</a>
-        <a class="nav-operator-plus" href="/operations#minecraft-logs">Minecraft logs</a>
-      </div>
-    </details>
+<header class="app-header topbar">
+  <a class="brand-link brand-mark" href="/" aria-label="JustVoxel dashboard">
+    <strong>JV</strong><span class="brand-name">JustVoxel</span>
+  </a>
 
-    <details class="nav-group nav-operator-plus" data-nav-group="storage">
-      <summary class="nav-trigger">Storage &amp; Backups</summary>
-      <div class="nav-menu">
-        <span class="nav-section-label">Storage</span>
-        <a class="nav-admin-only" href="/settings/storage">Storage overview</a>
-        <a class="nav-admin-only" href="/settings/data-migration">Minecraft data storage</a>
-        <a class="nav-admin-only" href="/settings/backup-storage">Backup storage</a>
-        <a class="nav-admin-only" href="/settings/storage-provision">Advanced storage</a>
-        <span class="nav-section-label">Backups</span>
-        <a href="/operations#manual-backup">Create backup</a>
-        <a class="nav-admin-only" href="/settings/restore">Restore</a>
-        <span class="nav-section-label nav-admin-only">Migration</span>
-        <a class="nav-admin-only" href="/settings/server-migration">Server Migration</a>
-      </div>
-    </details>
+  <div class="topbar-clock" data-topbar-clock aria-label="Local time">--:--</div>
 
-    <details class="nav-group nav-admin-only" data-nav-group="administration">
-      <summary class="nav-trigger">Administration</summary>
-      <div class="nav-menu">
-        <span class="nav-section-label">Appliance</span>
-        <a href="/settings/activity">Admin activity</a>
-        <a href="/settings/validation">Validation</a>
-        <span class="nav-section-label">Accounts</span>
-        <a href="/settings/users">Users</a>
-        <a href="/settings/authentication">Authentication</a>
-        <a href="/password">Change password</a>
-      </div>
-    </details>
+  <details class="control-center" data-control-center>
+    <summary class="control-center-trigger" aria-label="Open Control Center">
+      <span class="control-center-icon" aria-hidden="true">⚙</span>
+      <span class="control-center-label">Control Center</span>
+    </summary>
 
-    <form class="nav-logout" method="post" action="/logout">
-      <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <button class="secondary" type="submit">Log out</button>
-    </form>
-
-    <details class="system-power nav-admin-only" data-system-power>
-      <summary class="system-power-button" aria-label="Power options" title="Power options"><span aria-hidden="true">⏻</span></summary>
-      <div class="system-power-menu" aria-label="System power options">
-        <span class="nav-section-label">System</span>
-        <button type="button" data-system-action="reboot" disabled>Restart</button>
-        <button type="button" data-system-action="firmware-reboot" hidden disabled>Restart to UEFI/BIOS</button>
-        <button class="system-power-danger" type="button" data-system-action="poweroff" disabled>Power off</button>
-        <p class="system-power-error" data-system-action-error hidden>System power controls are unavailable.</p>
+    <div class="control-center-panel">
+      <div class="control-center-heading">
+        <div><strong>JustVoxel</strong><span>Control Center</span></div>
       </div>
-    </details>
-  </nav>
+
+      <section class="control-section control-session">
+        <span class="control-section-label">Session &amp; power</span>
+        <div class="control-quick-actions">
+          <div class="control-power-actions nav-admin-only" data-system-power>
+            <button type="button" data-system-action="reboot" disabled>Restart</button>
+            <button type="button" data-system-action="firmware-reboot" hidden disabled>Restart to UEFI/BIOS</button>
+            <button class="system-power-danger" type="button" data-system-action="poweroff" disabled>Power off</button>
+            <p class="system-power-error" data-system-action-error hidden>System power controls are unavailable.</p>
+          </div>
+          <form class="nav-logout" method="post" action="/logout">
+            <input type="hidden" name="csrf" value="{{.CSRF}}">
+            <button class="secondary" type="submit">Log out</button>
+          </form>
+        </div>
+      </section>
+
+      <nav class="control-navigation" aria-label="JustVoxel navigation">
+        <section class="control-section">
+          <span class="control-section-label">Minecraft</span>
+          <div class="control-tile-grid">
+            <a class="control-tile" href="/activity"><strong>Activity</strong><span>Server events and status</span></a>
+            <a class="control-tile nav-admin-only" href="/settings/server"><strong>Minecraft settings</strong><span>Memory, ports and server options</span></a>
+            <a class="control-tile nav-operator-plus" href="/operations#whitelist"><strong>Whitelist</strong><span>Manage allowed players</span></a>
+            <a class="control-tile nav-operator-plus" href="/operations#minecraft-logs"><strong>Minecraft logs</strong><span>Recent server output</span></a>
+          </div>
+        </section>
+
+        <section class="control-section nav-operator-plus">
+          <span class="control-section-label">Storage &amp; Backups</span>
+          <div class="control-tile-grid">
+            <a class="control-tile nav-admin-only" href="/settings/storage"><strong>Storage overview</strong><span>Current data locations</span></a>
+            <a class="control-tile nav-admin-only" href="/settings/data-migration"><strong>Minecraft data</strong><span>Move server data safely</span></a>
+            <a class="control-tile nav-admin-only" href="/settings/backup-storage"><strong>Backup storage</strong><span>Destination and schedule</span></a>
+            <a class="control-tile" href="/operations#manual-backup"><strong>Create backup</strong><span>Run a backup now</span></a>
+            <a class="control-tile nav-admin-only" href="/settings/restore"><strong>Restore</strong><span>Restore from a backup</span></a>
+            <a class="control-tile nav-admin-only" href="/settings/server-migration"><strong>Server migration</strong><span>Export, import and recovery</span></a>
+            <a class="control-tile nav-admin-only" href="/settings/storage-provision"><strong>Advanced storage</strong><span>Provision storage devices</span></a>
+          </div>
+        </section>
+
+        <section class="control-section nav-admin-only">
+          <span class="control-section-label">JustVoxel</span>
+          <div class="control-tile-grid">
+            <a class="control-tile" href="/settings/validation"><strong>Validation</strong><span>Check appliance health</span></a>
+            <a class="control-tile" href="/settings/activity"><strong>Admin activity</strong><span>Administrative events</span></a>
+            <a class="control-tile" href="/settings/users"><strong>Users</strong><span>Accounts and roles</span></a>
+            <a class="control-tile" href="/settings/authentication"><strong>Authentication</strong><span>Login configuration</span></a>
+            <a class="control-tile" href="/password"><strong>Change password</strong><span>Update your password</span></a>
+          </div>
+        </section>
+      </nav>
+    </div>
+  </details>
 
   <input type="hidden" value="{{.CSRF}}" data-system-actions-csrf>
   <dialog class="system-action-dialog" data-system-action-dialog>
