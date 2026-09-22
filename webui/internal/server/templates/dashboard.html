@@ -38,15 +38,15 @@
   </section>
   {{end}}
 
-  <section class="grid">
+  <section class="grid dashboard-summary">
     <article class="card"><span>Minecraft</span><strong id="minecraft-state-summary">{{.Status.Minecraft.State}}</strong></article>
-    <article class="card"><span>Players</span><strong id="minecraft-players-summary">{{if .Status.Minecraft.Configured}}{{.Status.Minecraft.Players}} / {{.Status.Minecraft.MaxPlayers}}{{else}}Not configured{{end}}</strong></article>
     <article class="card"><span>Version</span><strong id="minecraft-version-summary">{{.Status.Minecraft.Version}}</strong></article>
     <article class="card"><span>System</span><strong id="system-health-summary">{{.Status.System.Health}}</strong></article>
     <article class="card"><span>IPv4</span><strong id="system-ipv4-summary">{{.Status.System.IPv4}}</strong></article>
     <article class="card"><span>Backup</span><strong id="backup-summary">{{if .Status.Backup.Enabled}}Enabled{{else}}Disabled{{end}}</strong></article>
   </section>
 
+  <div class="dashboard-live-panels">
   <section class="panel control-panel">
     <div class="section-heading">
       <div><p class="eyebrow">Minecraft</p><h2>Server control</h2></div>
@@ -91,16 +91,8 @@
     {{end}}
     </div>
   </section>
+  </div>
 
-  <section class="panel details">
-    <h2>Appliance</h2>
-    <dl>
-      <div><dt>JustVoxel</dt><dd>{{.Status.JustVoxel.Version}}</dd></div>
-      <div><dt>WebUI</dt><dd>{{.Version}}</dd></div>
-      <div><dt>Management API</dt><dd>{{.ManagementAPI}}</dd></div>
-      <div><dt>Source</dt><dd>{{.Commit}}</dd></div>
-    </dl>
-  </section>
   <p class="disclaimer">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</p>
 </main>
 </body>
