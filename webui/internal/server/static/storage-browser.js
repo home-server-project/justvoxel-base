@@ -8,7 +8,17 @@
   const protectedNote = detailDialog?.querySelector("[data-storage-protected-note]");
   const actionMenu = detailDialog?.querySelector("[data-storage-action-menu]");
   const actionButtons = [...document.querySelectorAll("[data-storage-action]")];
+  const migrateButton = detailDialog?.querySelector("[data-storage-minecraft-migrate]");
   const csrf = document.querySelector("[data-storage-action-csrf]")?.value || "";
+
+  const migrationDialog = document.querySelector("[data-storage-minecraft-dialog]");
+  const migrationClose = migrationDialog?.querySelector("[data-storage-minecraft-close]");
+  const migrationCancel = migrationDialog?.querySelector("[data-storage-minecraft-cancel]");
+  const migrationDevice = migrationDialog?.querySelector("[data-storage-minecraft-device]");
+  const migrationSelected = migrationDialog?.querySelector("[data-storage-minecraft-selected]");
+  const migrationMount = migrationDialog?.querySelector("[data-storage-minecraft-mount]");
+  const migrationMountNote = migrationDialog?.querySelector("[data-storage-minecraft-mount-note]");
+  const migrationPath = migrationDialog?.querySelector("[data-storage-minecraft-path]");
 
   const actionDialog = document.querySelector("[data-storage-action-dialog]");
   const actionClose = actionDialog?.querySelector("[data-storage-action-close]");
@@ -84,6 +94,7 @@
     if (protectedNote) protectedNote.hidden = !protectedPartition;
     if (protectedPartition) {
       if (actionMenu) actionMenu.open = false;
+      if (migrateButton) migrateButton.hidden = true;
       return;
     }
 
@@ -96,6 +107,7 @@
       if (action === "unmount") button.hidden = !mounted;
       if (action === "format") button.hidden = false;
     });
+    if (migrateButton) migrateButton.hidden = data.minecraftCandidate !== "Yes";
   }
 
   partitionButtons.forEach((button) => {
@@ -122,6 +134,43 @@
 
   detailClose?.addEventListener("click", () => detailDialog?.close());
   detailDialog?.addEventListener("cancel", (event) => event.preventDefault());
+
+  function minecraftDataPath(mountPoint) {
+    return (mountPoint || "/var/mnt/justvoxel-data").replace(/\/$/, "") + "/minecraft";
+  }
+
+  function closeMigrationDialog() {
+    migrationDialog?.close();
+  }
+
+  migrateButton?.addEventListener("click", () => {
+    if (!selectedPartition || selectedPartition.minecraftCandidate !== "Yes" || !migrationDialog) return;
+    if (actionMenu) actionMenu.open = false;
+    detailDialog?.close();
+
+    const existingMount = selectedPartition.minecraftMountPoint || "";
+    const mountPoint = existingMount || "/var/mnt/justvoxel-data";
+    if (migrationDevice) migrationDevice.value = selectedPartition.path || "";
+    if (migrationSelected) migrationSelected.textContent = selectedPartition.path || "";
+    if (migrationMount) {
+      migrationMount.value = mountPoint;
+      migrationMount.readOnly = Boolean(existingMount);
+    }
+    if (migrationMountNote) {
+      migrationMountNote.textContent = existingMount
+        ? "This filesystem is already mounted. The migration Review will verify this exact mount point."
+        : "This filesystem is not mounted. The migration backend can create a persistent UUID mount at this location.";
+    }
+    if (migrationPath) migrationPath.value = minecraftDataPath(mountPoint);
+    migrationDialog.showModal();
+    migrationPath?.focus();
+  });
+
+  migrationMount?.addEventListener("input", () => {
+    if (!migrationMount.readOnly && migrationPath) migrationPath.value = minecraftDataPath(migrationMount.value.trim());
+  });
+  migrationClose?.addEventListener("click", closeMigrationDialog);
+  migrationCancel?.addEventListener("click", closeMigrationDialog);
 
   function actionLabel(action) {
     if (action === "mount") return "Mount partition";

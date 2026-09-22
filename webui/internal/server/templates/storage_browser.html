@@ -17,6 +17,7 @@
     <span class="badge">{{.Identity.Username}}</span>
   </div>
   <p class="muted storage-browser-intro">Choose a physical disk to see the partitions inside it. Partition changes are reviewed before they are applied.</p>
+  {{if .MinecraftMigrationNote}}<div class="notice">{{.MinecraftMigrationNote}}</div>{{end}}
   <input type="hidden" value="{{.CSRF}}" data-storage-action-csrf>
 
   {{if .Disks}}
@@ -68,7 +69,9 @@
                   data-role="{{.Role}}"
                   data-mounted="{{if .Mounted}}Yes{{else}}No{{end}}"
                   data-system="{{if .System}}Yes{{else}}No{{end}}"
-                  data-readonly="{{if .ReadOnly}}Yes{{else}}No{{end}}">
+                  data-readonly="{{if .ReadOnly}}Yes{{else}}No{{end}}"
+                  data-minecraft-candidate="{{if .MinecraftCandidate}}Yes{{else}}No{{end}}"
+                  data-minecraft-mount-point="{{.MinecraftMountPoint}}">
             <span class="storage-partition-state">{{.Role}}</span>
             <strong>{{.Path}}</strong>
             <span>{{.Size}}{{if .Filesystem}} · {{.Filesystem}}{{end}}</span>
@@ -112,12 +115,40 @@
           <div class="storage-action-menu-popover">
             <button type="button" data-storage-action="mount">Mount</button>
             <button type="button" data-storage-action="unmount">Unmount</button>
+            <button type="button" data-storage-minecraft-migrate hidden>Use for Minecraft data</button>
             <button class="storage-action-danger" type="button" data-storage-action="format">Format partition</button>
           </div>
         </details>
       </div>
       <div class="notice storage-protected-note" data-storage-protected-note hidden>This partition is protected by JustVoxel. Storage actions are not available.</div>
     </div>
+  </dialog>
+
+  <dialog class="storage-action-dialog storage-minecraft-dialog" data-storage-minecraft-dialog>
+    <form class="storage-action-card" method="post" action="/settings/data-migration/review">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <input type="hidden" name="operation" value="use_partition">
+      <input type="hidden" name="device" data-storage-minecraft-device>
+      <input type="hidden" name="size_gib" value="all">
+      <div class="storage-detail-heading">
+        <div><p class="eyebrow">Minecraft data storage</p><h2>Use this filesystem</h2></div>
+        <button class="storage-dialog-close" type="button" data-storage-minecraft-close aria-label="Close Minecraft storage selection">×</button>
+      </div>
+      <p class="storage-minecraft-selected">Selected partition: <code data-storage-minecraft-selected></code></p>
+      <p class="muted">This starts the existing safe Minecraft data migration flow. Nothing changes until the Management Agent builds the Review plan and you explicitly apply it.</p>
+      <label>Mount point
+        <input name="mount_point" data-storage-minecraft-mount required autocomplete="off">
+      </label>
+      <p class="muted compact" data-storage-minecraft-mount-note></p>
+      <label>Minecraft data directory
+        <input name="path" data-storage-minecraft-path required autocomplete="off">
+      </label>
+      <p class="muted compact">The target directory must be empty. The existing migration backend revalidates the filesystem, capacity, players and current configuration before Apply.</p>
+      <div class="action-row storage-action-buttons">
+        <button class="secondary" type="button" data-storage-minecraft-cancel>Cancel</button>
+        <button type="submit">Review migration</button>
+      </div>
+    </form>
   </dialog>
 
   <dialog class="storage-action-dialog" data-storage-action-dialog>

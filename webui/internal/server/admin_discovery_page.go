@@ -227,7 +227,7 @@ func (a *App) storageBrowserPage(w http.ResponseWriter, r *http.Request) {
 		}
 		role := storageBrowserRole(device, configuration)
 		migrationCandidate, canMigrate := migrationCandidates[device.Path]
-		if role == "Minecraft" {
+		if strings.Contains(role, "Minecraft") || strings.Contains(role, "Backups") {
 			canMigrate = false
 		}
 		view := storageBrowserPartitionView{

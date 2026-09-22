@@ -100,3 +100,10 @@ button.storage-partition-card:hover,button.storage-partition-card:focus-visible{
   .storage-action-menu-popover .storage-action-danger:hover,.storage-action-menu-popover .storage-action-danger:focus-visible{background:#fff0eb}
   .storage-action-review{background:#f6f8f9;border-color:#d9dfe3}
 }
+
+
+.storage-minecraft-dialog .storage-action-card{display:grid;gap:.65rem}
+.storage-minecraft-dialog label{margin:0}
+.storage-minecraft-selected{margin:.15rem 0 0;font-size:.82rem}
+.storage-minecraft-selected code{overflow-wrap:anywhere}
+.storage-minecraft-dialog .compact{margin:-.35rem 0 0;font-size:.74rem}
