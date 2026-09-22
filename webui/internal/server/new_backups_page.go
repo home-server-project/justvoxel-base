@@ -387,8 +387,8 @@ func (a *App) renderNewBackupsPageState(w http.ResponseWriter, r *http.Request, 
 		BackupCount: len(views), TotalSize: humanBytes(totalBytes), Message: message, Error: pageError,
 		Automatic: automatic, AutomaticPlan: automaticPlan, Timezone: configuration.Minecraft.Timezone,
 		Destination: destination, DestinationForm: destinationForm, DestinationPlan: destinationPlan,
-		DestinationPartitions: partitions,
-		DestinationAvailable: formatOptionalBytes(destination.Current.AvailableBytes),
+		DestinationPartitions:     partitions,
+		DestinationAvailable:      formatOptionalBytes(destination.Current.AvailableBytes),
 		DestinationFilesystemSize: formatOptionalBytes(destination.Current.FilesystemBytes),
 	}
 	if destinationPlan != nil {
