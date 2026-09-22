@@ -13,7 +13,8 @@ func TestSystemPowerHeaderAndDialogUX(t *testing.T) {
 	markup := string(header)
 	for _, want := range []string{
 		"data-system-power",
-		"aria-label=\"Power options\"",
+		"data-control-center",
+		"control-power-actions",
 		"data-system-action=\"reboot\"",
 		">Restart</button>",
 		"data-system-action=\"poweroff\"",
@@ -35,8 +36,8 @@ func TestSystemPowerHeaderAndDialogUX(t *testing.T) {
 	}
 	css := string(styles)
 	for _, want := range []string{
-		".system-power-button",
-		".system-power-menu",
+		".control-power-actions",
+		".control-center-panel",
 		".system-action-dialog",
 		".system-action-dialog::backdrop",
 	} {
