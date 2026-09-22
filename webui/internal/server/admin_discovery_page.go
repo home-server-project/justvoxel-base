@@ -98,6 +98,7 @@ func (a *App) registerAdminDiscoveryPages(mux *http.ServeMux) {
 	mux.HandleFunc("GET /settings/new-storage", a.storageBrowserPage)
 	a.registerAdminBackupStoragePages(mux)
 	a.registerAdminStorageProvisionPages(mux)
+	a.registerStorageBrowserActionRoutes(mux)
 	a.registerSetupWizardRoutes(mux)
 	a.registerSetupWizardReviewRoutes(mux)
 }
