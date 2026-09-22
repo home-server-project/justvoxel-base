@@ -192,24 +192,24 @@ if [[ ${netbird_configured} == yes ]]; then
 fi
 
 if [[ ${output_mode} == issue ]]; then
-    # agetty translates \\e into ESC, preserving the interactive 256-color palette.
-    cyan='\\e[38;5;45m'
-    white='\\e[97m'
-    green='\\e[38;5;82m'
-    yellow='\\e[38;5;220m'
-    blue='\\e[38;5;75m'
-    dim='\\e[38;5;245m'
-    bold='\\e[1m'
-    reset='\\e[0m'
+    # agetty translates \e into ESC, preserving the interactive 256-color palette.
+    cyan='\e[38;5;45m'
+    white='\e[97m'
+    green='\e[38;5;82m'
+    yellow='\e[38;5;220m'
+    blue='\e[38;5;75m'
+    dim='\e[38;5;245m'
+    bold='\e[1m'
+    reset='\e[0m'
 elif [[ -t 1 && ${TERM:-dumb} != dumb ]]; then
-    cyan=$'\\033[38;5;45m'
-    white=$'\\033[97m'
-    green=$'\\033[38;5;82m'
-    yellow=$'\\033[38;5;220m'
-    blue=$'\\033[38;5;75m'
-    dim=$'\\033[38;5;245m'
-    bold=$'\\033[1m'
-    reset=$'\\033[0m'
+    cyan=$'\033[38;5;45m'
+    white=$'\033[97m'
+    green=$'\033[38;5;82m'
+    yellow=$'\033[38;5;220m'
+    blue=$'\033[38;5;75m'
+    dim=$'\033[38;5;245m'
+    bold=$'\033[1m'
+    reset=$'\033[0m'
 else
     cyan='' white='' green='' yellow='' blue='' dim='' bold='' reset=''
 fi

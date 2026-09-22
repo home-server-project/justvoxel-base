@@ -118,6 +118,10 @@ grep -Fq 'Minecraft:' "${issue_test}"
 grep -Fq 'Web interface:' "${issue_test}"
 grep -Fq 'Network:' "${issue_test}"
 grep -Fq '\e[38;5;45m' "${issue_test}"
+if grep -Fq '\\e[' "${issue_test}"; then
+    echo 'ERROR: pre-login console banner contains doubled literal \\e escapes.' >&2
+    exit 1
+fi
 if grep -Fq 'Common commands' "${issue_test}"; then
     echo 'ERROR: pre-login console banner must stop before Common commands.' >&2
     exit 1
@@ -136,6 +140,19 @@ test -f /etc/profile.d/90-justvoxel-motd.sh
 bash -n /etc/profile.d/90-justvoxel-motd.sh
 test -x /usr/libexec/justvoxel/motd
 bash -n /usr/libexec/justvoxel/motd
+
+# The interactive renderer must emit real ANSI ESC bytes, not literal \033 text.
+# util-linux script(1) provides a PTY so the MOTD follows its interactive color path.
+shell_test="$(mktemp)"
+trap 'rm -f "${shell_test}"' EXIT
+script -q -e -c '/usr/libexec/justvoxel/motd' /dev/null > "${shell_test}" 2>&1
+grep -q $'\033[38;5;45m' "${shell_test}"
+if grep -Fq '\033[' "${shell_test}"; then
+    echo 'ERROR: post-login welcome contains literal \033 escapes instead of ANSI ESC bytes.' >&2
+    exit 1
+fi
+rm -f "${shell_test}"
+trap - EXIT
 grep -Fq 'Minecraft Server Appliance' /usr/libexec/justvoxel/motd
 grep -Fq "justvoxel-hwe|hwe) variant='HWE'" /usr/libexec/justvoxel/motd
 grep -Fq "network_state='Not connected - use mjust net'" /usr/libexec/justvoxel/motd
