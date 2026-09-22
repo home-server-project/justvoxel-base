@@ -233,8 +233,8 @@ func TestStorageBrowserInteractionContract(t *testing.T) {
 	}
 	script := string(scriptContent)
 	for _, want := range []string{
-		`dialog.showModal()`,
-		`closeButton?.addEventListener("click"`,
+		`detailDialog.showModal()`,
+		`detailClose?.addEventListener("click"`,
 		`event.preventDefault()`,
 		`button.setAttribute("aria-pressed"`,
 	} {
@@ -242,7 +242,7 @@ func TestStorageBrowserInteractionContract(t *testing.T) {
 			t.Fatalf("storage browser behavior missing %q", want)
 		}
 	}
-	if strings.Contains(script, "dialog.close()") && !strings.Contains(script, "closeButton?.addEventListener") {
+	if strings.Contains(script, "detailDialog?.close()") && !strings.Contains(script, "detailClose?.addEventListener") {
 		t.Fatal("storage detail dialog can close without explicit close control")
 	}
 }
@@ -263,6 +263,62 @@ func TestStorageBrowserResponsiveStyling(t *testing.T) {
 	} {
 		if !strings.Contains(styles, want) {
 			t.Fatalf("storage browser responsive styling missing %q", want)
+		}
+	}
+}
+
+func TestStorageBrowserReviewedActionFlow(t *testing.T) {
+	templateContent, err := assets.ReadFile("templates/storage_browser.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(templateContent)
+	for _, want := range []string{
+		`data-storage-action-menu`,
+		`data-storage-action="mount"`,
+		`data-storage-action="unmount"`,
+		`data-storage-action="format"`,
+		`data-storage-action-dialog`,
+		`data-storage-action-review-button`,
+		`data-storage-action-apply-button`,
+		`data-storage-confirmation-phrase`,
+		`data-storage-protected-note`,
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("storage action markup missing %q", want)
+		}
+	}
+
+	scriptContent, err := assets.ReadFile("static/storage-browser.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(scriptContent)
+	for _, want := range []string{
+		`"/api/new-storage/actions/plan"`,
+		`"/api/new-storage/actions/apply"`,
+		`reviewedPlan.fingerprint`,
+		`data.system === "Yes"`,
+		`data.readonly === "Yes"`,
+		`window.location.reload()`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("storage action behavior missing %q", want)
+		}
+	}
+
+	cssContent, err := assets.ReadFile("static/storage-browser.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles := string(cssContent)
+	for _, want := range []string{
+		".storage-action-menu-popover",
+		".storage-action-dialog::backdrop",
+		".storage-action-danger",
+	} {
+		if !strings.Contains(styles, want) {
+			t.Fatalf("storage action styling missing %q", want)
 		}
 	}
 }
