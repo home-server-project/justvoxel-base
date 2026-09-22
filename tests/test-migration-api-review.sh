@@ -14,8 +14,8 @@ fake_client="${tmp}/api-client"
 cat > "${fake_client}" <<'EOF'
 #!/usr/bin/bash
 case "${FAKE_API_MODE:-}" in
-    expected)
-        printf '%s' '{"ok":false,"code":"multiple_roots","error":"Choose one.","candidates":[]}'
+    source_selection_required|multiple_roots|source_version_required)
+        printf '{"ok":false,"code":"%s","error":"Review input required."}' "${FAKE_API_MODE}"
         echo 'curl: (22) The requested URL returned error: 400' >&2
         exit 22
         ;;
@@ -44,18 +44,21 @@ JV_MIGRATION_API_CLIENT="${fake_client}"
 source "${repo_root}/mjust/libexec/migration-api.sh"
 
 run_review() {
-    local mode="$1" out_file="$2" err_file="$3" rc_file="$4" rc
+    local mode="$1" out_file="$2" err_file="$3" rc_file="$4" rc response
     set +e
-    FAKE_API_MODE="${mode}" jv_migration_post_review /v1/admin/migration/import/plan '{}' >"${out_file}" 2>"${err_file}"
+    response="$(FAKE_API_MODE="${mode}" jv_migration_post_review /v1/admin/migration/import/plan '{}' 2>"${err_file}")"
     rc=$?
     set -e
+    printf '%s' "${response}" > "${out_file}"
     printf '%s' "${rc}" > "${rc_file}"
 }
 
-run_review expected "${tmp}/expected.out" "${tmp}/expected.err" "${tmp}/expected.rc"
-[[ $(cat "${tmp}/expected.rc") == 22 ]] || fail 'expected review response lost curl status'
-jq -e '.code=="multiple_roots"' "${tmp}/expected.out" >/dev/null || fail 'expected review response body was lost'
-[[ ! -s "${tmp}/expected.err" ]] || fail 'expected interactive 400 leaked curl stderr'
+for code in source_selection_required multiple_roots source_version_required; do
+    run_review "${code}" "${tmp}/expected.out" "${tmp}/expected.err" "${tmp}/expected.rc"
+    [[ $(cat "${tmp}/expected.rc") == 22 ]] || fail "${code} review response lost curl status"
+    jq -e --arg code "${code}" '.code==$code' "${tmp}/expected.out" >/dev/null || fail "${code} review response body was lost"
+    [[ ! -s "${tmp}/expected.err" ]] || fail "${code} interactive 400 leaked curl stderr"
+done
 
 run_review unexpected "${tmp}/unexpected.out" "${tmp}/unexpected.err" "${tmp}/unexpected.rc"
 [[ $(cat "${tmp}/unexpected.rc") == 22 ]] || fail 'unexpected HTTP failure status changed'
