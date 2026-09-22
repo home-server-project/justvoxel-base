@@ -61,9 +61,9 @@
       {{range .AutomaticPlan.Warnings}}<div class="notice warning">{{.}}</div>{{end}}
       {{if .AutomaticPlan.Changes}}
       <div class="backup-automatic-change-list">
-        {{range .AutomaticPlan.Changes}}
-        <div class="backup-automatic-change"><strong>{{.Label}}</strong><span><code>{{.Before}}</code><span aria-hidden="true">→</span><code>{{.After}}</code></span></div>
-        {{end}}
+        <div class="backup-automatic-change"><strong>Automatic backups</strong><span>{{if .Automatic.Enabled}}Enabled{{else}}Off{{end}}</span></div>
+        <div class="backup-automatic-change"><strong>Daily time</strong><span>{{.Automatic.DailyTime}}{{if .Timezone}} · {{.Timezone}}{{end}}</span></div>
+        <div class="backup-automatic-change"><strong>Keep last</strong><span>{{.Automatic.Keep}} backups</span></div>
       </div>
       <form class="backup-automatic-apply" method="post" action="/settings/new-backups/automatic/apply">
         <input type="hidden" name="csrf" value="{{.CSRF}}">
