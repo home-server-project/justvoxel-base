@@ -1,0 +1,40 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/ui.sh
+
+if ! jui_is_interactive; then
+    cat <<'TEXT'
+JustVoxel network management requires an interactive terminal.
+
+Use:
+  mjust net
+
+For direct advanced Linux administration, nm-hsp and nmtui are also installed
+as normal host commands.
+TEXT
+    exit 0
+fi
+
+while true; do
+    echo
+    echo 'nm-hsp - Friendly network manager from Home Server Project'
+    echo '  Normal Ethernet, Wi-Fi and easy network troubleshooting.'
+    echo
+    echo 'nmtui - Classic NetworkManager interface'
+    echo '  Advanced/classic Linux networking configuration.'
+    echo
+
+    choice="$(jui_choose 'Network'         'Friendly network manager (nm-hsp)'         'Classic NetworkManager interface (nmtui)'         'Back')" || exit 0
+
+    case "${choice}" in
+        'Friendly network manager (nm-hsp)')
+            sudo /usr/bin/nm-hsp || true
+            ;;
+        'Classic NetworkManager interface (nmtui)')
+            sudo /usr/bin/nmtui || true
+            ;;
+        'Back')
+            exit 0
+            ;;
+    esac
+done
