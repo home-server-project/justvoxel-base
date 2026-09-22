@@ -1,6 +1,6 @@
 #!/usr/bin/bash
 
-readonly JV_MIGRATION_API_CLIENT=/usr/libexec/justvoxel/mjust/api-client
+readonly JV_MIGRATION_API_CLIENT="${JV_MIGRATION_API_CLIENT:-/usr/libexec/justvoxel/mjust/api-client}"
 
 jv_migration_api_error() {
     local response="${1:-}" fallback="${2:-Server migration request failed.}" message
@@ -31,8 +31,20 @@ jv_migration_operation() {
     jv_migration_get "/v1/admin/operations/${id}"
 }
 jv_migration_post_review() {
-    local path="$1" payload="$2" response rc
-    set +e; response="$(printf '%s\n' "${payload}" | "${JV_MIGRATION_API_CLIENT}" POST "${path}" --data)"; rc=$?; set -e
+    local path="$1" payload="$2" response rc stderr_file code
+    stderr_file="$(mktemp)"
+    set +e
+    response="$(printf '%s\n' "${payload}" | "${JV_MIGRATION_API_CLIENT}" POST "${path}" --data 2>"${stderr_file}")"
+    rc=$?
+    set -e
+    if (( rc != 0 )); then
+        code="$(jq -r '.code // empty' <<< "${response}" 2>/dev/null || true)"
+        case "${code}" in
+            source_selection_required|multiple_roots|source_version_required) ;;
+            *) cat "${stderr_file}" >&2 ;;
+        esac
+    fi
+    rm -f -- "${stderr_file}"
     printf '%s' "${response}"
     return "${rc}"
 }
