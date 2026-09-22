@@ -74,6 +74,7 @@ whitelist="${repo_root}/mjust/libexec/whitelist"
 justfile="${repo_root}/mjust/justfile"
 mjust_bin="${repo_root}/mjust/bin/mjust"
 storage_plan="${repo_root}/mjust/libexec/storage-plan"
+network="${repo_root}/mjust/libexec/network"
 
 for id in setup status players configure service whitelist backups migration storage update system validate logs advanced exit; do
     grep -Fq "${id})" "${menu}" || fail "menu preview/dispatch id missing: ${id}"
@@ -98,6 +99,16 @@ grep -Fq 'Storage devices / provisioning' "${menu}" || fail 'advanced storage pr
 grep -Fq '/backups' "${storage_ui}" || fail 'backup storage must default to a backups directory'
 
 grep -Fq 'System status & updates' "${menu}" || fail 'combined system status/update menu missing'
+grep -Fq "'File browser' 'Network' 'Reboot JustVoxel'" "${menu}" || fail 'Network must be placed inside the System menu after File browser'
+grep -Fq "'Network') /usr/bin/mjust net || true ;;" "${menu}" || fail 'System Network menu dispatch missing'
+grep -Fq 'net:' "${justfile}" || fail 'mjust net recipe missing'
+grep -Fq 'Friendly network manager from Home Server Project' "${network}" || fail 'nm-hsp friendly description missing'
+grep -Fq 'Normal Ethernet, Wi-Fi and easy network troubleshooting.' "${network}" || fail 'nm-hsp troubleshooting description missing'
+grep -Fq 'Classic NetworkManager interface' "${network}" || fail 'nmtui description missing'
+grep -Fq 'Advanced/classic Linux networking configuration.' "${network}" || fail 'nmtui advanced description missing'
+grep -Fq 'sudo /usr/bin/nm-hsp' "${network}" || fail 'network menu must launch nm-hsp'
+grep -Fq 'sudo /usr/bin/nmtui' "${network}" || fail 'network menu must launch nmtui'
+if grep -Eq '^(net-hsp|nmtui):' "${justfile}"; then fail 'separate mjust net-hsp/nmtui commands must not exist'; fi
 if grep -Fq "'Operating system status' 'Check / download OS update'" "${menu}"; then
     fail 'duplicate OS status/update menu entries remain'
 fi

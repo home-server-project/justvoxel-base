@@ -21,7 +21,7 @@ source /usr/lib/os-release
 [[ "${HOME_SERVER_BASE_UPSTREAM_CPE_NAME:-}" == cpe:/o:almalinux:* ]]
 
 for cmd in \
-    bootc podman skopeo nmcli nmtui resolvectl firewall-cmd sshd sudo just mjust fzf gum \
+    bootc podman skopeo nmcli nmtui nm-hsp resolvectl firewall-cmd sshd sudo just mjust fzf gum \
     tailscale netbird curl jq openssl tar gzip rsync ping dig traceroute nc tcpdump lsof \
     findmnt mountpoint flock mkfs.xfs mount.nfs mount.cifs lsblk blkid wipefs parted partprobe udevadm \
     qemu-ga vmtoolsd iperf3 micro spf; do
@@ -33,7 +33,7 @@ rpm -q \
     pam authselect authselect-libs libpwquality \
     podman skopeo just fzf gum container-selinux policycoreutils-python-utils selinux-policy-extra \
     util-linux xfsprogs parted iperf3 nfs-utils cifs-utils qemu-guest-agent open-vm-tools \
-    hyperv-daemons gssproxy zram-generator micro superfile >/dev/null
+    hyperv-daemons gssproxy zram-generator micro superfile nm-hsp >/dev/null
 
 test -f /etc/pam.d/justvoxel
 grep -Fqx 'auth       include      system-auth' /etc/pam.d/justvoxel
@@ -60,6 +60,12 @@ grep -Eq '^[[:space:]]*LockLayering[[:space:]]*=[[:space:]]*true[[:space:]]*$' /
 semodule -l >/dev/null
 micro --version >/dev/null
 spf --version >/dev/null
+if /usr/bin/nm-hsp --invalid-option >/tmp/nm-hsp-invalid.txt 2>&1; then
+    echo 'ERROR: nm-hsp accepted an invalid option.' >&2
+    exit 1
+fi
+grep -Fq 'usage: nm-hsp [--snapshot]' /tmp/nm-hsp-invalid.txt
+rm -f /tmp/nm-hsp-invalid.txt
 
 test "$(systemctl is-enabled NetworkManager.service)" = "enabled"
 test "$(systemctl is-enabled systemd-resolved.service)" = "enabled"
@@ -195,6 +201,7 @@ test -f /usr/libexec/justvoxel/mjust/storage-common.sh
 test -x /usr/libexec/justvoxel/mjust/welcome
 test -x /usr/libexec/justvoxel/mjust/status
 test -x /usr/libexec/justvoxel/mjust/files
+test -x /usr/libexec/justvoxel/mjust/network
 test -x /usr/libexec/justvoxel/mjust/storage-summary
 test -x /usr/libexec/justvoxel/mjust/web
 test -x /usr/libexec/justvoxel/mjust/web-status-json
@@ -211,6 +218,7 @@ fi
 grep -Fq 'status' <<<"${mjust_list}"
 grep -Fq 'status --details' <<<"${mjust_list}"
 grep -Fq 'files' <<<"${mjust_list}"
+grep -Fq 'net' <<<"${mjust_list}"
 grep -Fq 'web' <<<"${mjust_list}"
 grep -Fq 'web enable' <<<"${mjust_list}"
 grep -Fq 'password-reset' <<<"${mjust_list}"

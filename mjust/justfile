@@ -81,6 +81,9 @@ resources:
 files:
     @/usr/libexec/justvoxel/mjust/files
 
+net:
+    @/usr/libexec/justvoxel/mjust/network
+
 reboot:
     @sudo /usr/libexec/justvoxel/mjust/system-power reboot
 

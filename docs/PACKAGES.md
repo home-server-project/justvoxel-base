@@ -9,10 +9,13 @@ This document groups those packages by purpose so the package set is understanda
 JustVoxel includes the normal server networking tools needed for configuration, troubleshooting, and remote administration:
 
 - NetworkManager and `nmtui`
+- NetworkManager-HSP (`nm-hsp`) as the friendly Home Server Project terminal interface
 - systemd-resolved
 - firewalld
 - OpenSSH
 - common IP, DNS, routing, connectivity, packet-capture, and throughput tools
+
+The JustVoxel System → Network menu presents `nm-hsp` for normal Ethernet, Wi-Fi, and easy network troubleshooting, with `nmtui` retained as the classic advanced NetworkManager interface.
 
 This group includes tools such as `iproute`, `iputils`, `bind-utils`, `traceroute`, `nmap-ncat`, `tcpdump`, and `iperf3`.
 
