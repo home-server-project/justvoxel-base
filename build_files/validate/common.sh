@@ -23,7 +23,7 @@ source /usr/lib/os-release
 for cmd in \
     bootc podman skopeo nmcli nmtui nm-hsp resolvectl firewall-cmd sshd sudo just mjust fzf gum \
     tailscale netbird curl jq openssl tar gzip rsync ping dig traceroute nc tcpdump lsof \
-    findmnt mountpoint flock mkfs.xfs mount.nfs mount.cifs lsblk blkid wipefs parted partprobe udevadm \
+    findmnt mountpoint flock mkfs.xfs btrfs mount.nfs mount.cifs mount.ntfs-3g lsblk blkid wipefs parted partprobe udevadm \
     qemu-ga vmtoolsd iperf3 micro spf; do
     command -v "${cmd}" >/dev/null
 done
@@ -32,7 +32,7 @@ rpm -q \
     NetworkManager NetworkManager-tui systemd-resolved firewalld openssh-server sudo \
     pam authselect authselect-libs libpwquality \
     podman skopeo just fzf gum container-selinux policycoreutils-python-utils selinux-policy-extra \
-    util-linux xfsprogs parted iperf3 nfs-utils cifs-utils qemu-guest-agent open-vm-tools \
+    util-linux xfsprogs btrfs-progs ntfs-3g parted iperf3 nfs-utils cifs-utils qemu-guest-agent open-vm-tools \
     hyperv-daemons gssproxy zram-generator micro superfile nm-hsp >/dev/null
 
 test -f /etc/pam.d/justvoxel
