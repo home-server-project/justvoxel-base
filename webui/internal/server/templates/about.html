@@ -1,0 +1,28 @@
+{{define "about.html"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>JustVoxel - About</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body class="role-pending">
+{{template "app-header" .}}
+<main class="about-shell">
+  <div class="title-row">
+    <div><p class="eyebrow">JustVoxel</p><h1>About</h1></div>
+    <span class="badge">{{.Status.System.Variant}}</span>
+  </div>
+  <section class="panel details about-panel">
+    <dl>
+      <div><dt>JustVoxel</dt><dd>{{.Status.JustVoxel.Version}}</dd></div>
+      <div><dt>WebUI</dt><dd>{{.Version}}</dd></div>
+      <div><dt>Management API</dt><dd>{{.ManagementAPI}}</dd></div>
+      <div><dt>Source</dt><dd>{{.Commit}}</dd></div>
+    </dl>
+  </section>
+  <p class="disclaimer">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</p>
+</main>
+</body>
+</html>{{end}}
