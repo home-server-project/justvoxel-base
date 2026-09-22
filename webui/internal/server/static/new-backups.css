@@ -91,3 +91,42 @@
   .backup-delete-review-list{background:#f6f8f9;border-color:#d9dfe3}
   .backup-delete-review-item{border-color:#e2e7ea}
 }
+
+
+.backup-automatic-section{margin-top:.8rem;padding:.9rem;border:1px solid #303942;border-radius:14px;background:#13191e}
+.backup-automatic-heading{margin-bottom:.65rem}
+.backup-automatic-heading h2{margin:.05rem 0 0;font-size:1.1rem}
+.backup-automatic-form{display:grid;grid-template-columns:minmax(190px,1.25fr) minmax(150px,.8fr) minmax(130px,.7fr) auto;align-items:end;gap:.65rem}
+.backup-automatic-form label{margin:0}
+.backup-automatic-toggle{display:flex;align-items:center;gap:.55rem;min-height:42px;padding:.58rem .7rem;border:1px solid #303942;border-radius:9px;background:#171d22}
+.backup-automatic-toggle input{width:18px;height:18px;margin:0;accent-color:#68bd8e}
+.backup-automatic-form input[type="time"],.backup-automatic-form input[type="number"]{min-height:42px}
+.backup-automatic-form>button{min-height:42px;white-space:nowrap}
+.backup-automatic-section>.muted{margin:.65rem 0 0}
+.backup-automatic-review{margin-top:.75rem;padding:.75rem;border:1px solid #303942;border-radius:10px;background:#10161a}
+.backup-automatic-review h3{margin:.05rem 0 0;font-size:1rem}
+.backup-automatic-change-list{display:grid;gap:.35rem;margin-top:.55rem}
+.backup-automatic-change{display:flex;align-items:center;justify-content:space-between;gap:.8rem;padding:.45rem .1rem;border-bottom:1px solid #252d34;font-size:.78rem}
+.backup-automatic-change:last-child{border-bottom:0}
+.backup-automatic-change>span{display:flex;align-items:center;gap:.4rem;min-width:0}
+.backup-automatic-change code{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.backup-automatic-apply{margin-top:.7rem}
+.backup-automatic-apply .action-row{justify-content:flex-end}
+
+@media(max-width:850px){
+  .backup-automatic-form{grid-template-columns:1fr 1fr}
+  .backup-automatic-toggle{grid-column:1 / -1}
+}
+@media(max-width:520px){
+  .backup-automatic-form{grid-template-columns:1fr}
+  .backup-automatic-toggle{grid-column:auto}
+  .backup-automatic-form>button{width:100%}
+  .backup-automatic-change{align-items:flex-start;flex-direction:column}
+  .backup-automatic-change code{max-width:100%}
+}
+@media(prefers-color-scheme:light){
+  .backup-automatic-section{background:#fff;border-color:#d9dfe3}
+  .backup-automatic-toggle{background:#f6f8f9;border-color:#d9dfe3}
+  .backup-automatic-review{background:#f6f8f9;border-color:#d9dfe3}
+  .backup-automatic-change{border-color:#e2e7ea}
+}
