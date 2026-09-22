@@ -246,3 +246,22 @@ func TestStorageBrowserInteractionContract(t *testing.T) {
 		t.Fatal("storage detail dialog can close without explicit close control")
 	}
 }
+
+func TestStorageBrowserResponsiveStyling(t *testing.T) {
+	content, err := assets.ReadFile("static/storage-browser.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles := string(content)
+	for _, want := range []string{
+		".storage-disk-grid{display:grid",
+		".storage-partition-grid{display:grid",
+		".storage-detail-dialog::backdrop",
+		"@media(max-width:700px)",
+		"@media(max-width:420px)",
+	} {
+		if !strings.Contains(styles, want) {
+			t.Fatalf("storage browser responsive styling missing %q", want)
+		}
+	}
+}
