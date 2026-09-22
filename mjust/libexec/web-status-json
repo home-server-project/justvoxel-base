@@ -173,7 +173,7 @@ web_status() {
     local details="${1:-}" configured=no variant ipv4 failed_count system_state health hostname_value
     local host_uptime_s mem_kib minecraft_state service_active=no players=0 max_players=0 mc_version
     local java_port=0 bedrock=false bedrock_port=0 backup_enabled=false backup_last='None found' backup_next='Disabled'
-    local list_output version_output latest latest_log log_version network_interface gateway dns_servers default_route
+    local list_output latest latest_log log_version network_interface gateway dns_servers default_route
     local memory_current='Unknown' service_uptime_s=0 bedrock_state='Disabled' java_heap='Unknown' container_max='Unknown'
     local image_channel='Unknown' image_ref='Unknown' configured_version='Unknown' data_path='' backup_path=''
     local system_source system_mount system_available_kib system_used data_source='' data_mount='' data_available_kib='' data_used=''
@@ -260,8 +260,6 @@ web_status() {
                 players="${BASH_REMATCH[1]}"
                 max_players="${BASH_REMATCH[2]}"
             fi
-            version_output="$(podman exec minecraft rcon-cli 'version' 2>/dev/null | head -n1 || true)"
-            [[ -n ${version_output} ]] && mc_version="${version_output}"
             memory_current="$(podman stats --no-stream --format '{{.MemUsage}}' minecraft 2>/dev/null | head -n1 | awk -F/ '{gsub(/^[ \t]+|[ \t]+$/, "", $1); print $1}' || true)"
             [[ -n ${memory_current} ]] || memory_current='Unknown'
             active_us="$(systemctl show minecraft.service -p ActiveEnterTimestampMonotonic --value 2>/dev/null || true)"
