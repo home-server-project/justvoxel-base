@@ -645,7 +645,7 @@ func TestNewBackupsReconnectsToCurrentRestoreOperation(t *testing.T) {
 	operation := &api.PersistentOperation{
 		SchemaVersion: "v1", OperationID: restorePageOperationID, OperationType: "restore",
 		PlanFingerprint: restorePageFingerprint, State: "running", Stage: "staging",
-		Status: "Preparing verified Restore data on the Minecraft data filesystem.",
+		Status:    "Preparing verified Restore data on the Minecraft data filesystem.",
 		StartedAt: "2026-09-22T12:00:00Z", UpdatedAt: "2026-09-22T12:01:00Z",
 		Rollback: api.PersistentOperationRollback{State: "not_started"},
 	}
