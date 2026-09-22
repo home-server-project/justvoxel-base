@@ -1,0 +1,44 @@
+name: Validate common filesystem tools
+
+on:
+  pull_request:
+    branches: [testing]
+    paths:
+      - '.github/workflows/validate-storage-filesystems.yml'
+
+jobs:
+  validate:
+    name: Base filesystem package validation
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout validation branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Validate Base source declarations
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n build_files/build-common.sh
+          bash -n build_files/validate/common.sh
+          grep -Fq 'btrfs-progs \' build_files/packages.env
+          grep -Fq 'ntfs-3g \' build_files/packages.env
+          grep -Fq 'btrfs mount.nfs' build_files/build-common.sh
+          grep -Fq 'mount.ntfs-3g' build_files/build-common.sh
+          grep -Fq 'btrfs-progs ntfs-3g' build_files/validate/common.sh
+          grep -Fq 'mount.ntfs-3g' build_files/validate/common.sh
+
+      - name: Resolve and install packages on AlmaLinux 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm almalinux:10 bash -lc '
+            set -euo pipefail
+            dnf install -y dnf-plugins-core epel-release
+            dnf config-manager --set-enabled crb
+            dnf install -y btrfs-progs ntfs-3g
+            rpm -q btrfs-progs ntfs-3g
+            command -v btrfs
+            command -v mount.ntfs-3g
+          '
