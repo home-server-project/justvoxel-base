@@ -16,7 +16,8 @@
     <div><p class="eyebrow">Administrator · preview</p><h1>New Storage</h1></div>
     <span class="badge">{{.Identity.Username}}</span>
   </div>
-  <p class="muted storage-browser-intro">Choose a physical disk to see the partitions inside it. This preview is read-only while the new storage workflow is being built.</p>
+  <p class="muted storage-browser-intro">Choose a physical disk to see the partitions inside it. Partition changes are reviewed before they are applied.</p>
+  <input type="hidden" value="{{.CSRF}}" data-storage-action-csrf>
 
   {{if .Disks}}
   <section class="storage-disk-browser" aria-label="Physical disks">
@@ -104,8 +105,48 @@
         <div><dt>System protected</dt><dd data-detail-system></dd></div>
         <div><dt>Read only</dt><dd data-detail-readonly></dd></div>
       </dl>
-      <div class="storage-detail-actions-preview">
-        <span class="muted">Partition actions will appear here only after each operation is wired to a safe Management Agent API.</span>
+      <div class="storage-detail-actions" data-storage-detail-actions hidden>
+        <span class="muted">Partition actions</span>
+        <details class="storage-action-menu" data-storage-action-menu>
+          <summary aria-label="More partition actions">⋯</summary>
+          <div class="storage-action-menu-popover">
+            <button type="button" data-storage-action="mount">Mount</button>
+            <button type="button" data-storage-action="unmount">Unmount</button>
+            <button class="storage-action-danger" type="button" data-storage-action="format">Format partition</button>
+          </div>
+        </details>
+      </div>
+      <div class="notice storage-protected-note" data-storage-protected-note hidden>This partition is protected by JustVoxel. Storage actions are not available.</div>
+    </div>
+  </dialog>
+
+  <dialog class="storage-action-dialog" data-storage-action-dialog>
+    <div class="storage-action-card">
+      <div class="storage-detail-heading">
+        <div><p class="eyebrow">Storage action</p><h2 data-storage-action-title>Review action</h2></div>
+        <button class="storage-dialog-close" type="button" data-storage-action-close aria-label="Close storage action">×</button>
+      </div>
+      <p class="muted" data-storage-action-description></p>
+      <label class="storage-action-mount-field" data-storage-mount-field hidden>Mount point
+        <input data-storage-mount-input autocomplete="off" placeholder="/var/mnt/vdb1">
+      </label>
+      <div class="storage-action-review" data-storage-action-review hidden>
+        <dl>
+          <div><dt>Partition</dt><dd><code data-storage-review-device></code></dd></div>
+          <div><dt>Current role</dt><dd data-storage-review-role></dd></div>
+          <div><dt>Current filesystem</dt><dd data-storage-review-filesystem></dd></div>
+          <div data-storage-review-target-row><dt>After action</dt><dd data-storage-review-target></dd></div>
+        </dl>
+        <div class="storage-action-warnings" data-storage-action-warnings></div>
+        <label data-storage-confirmation-field hidden>Type exactly <code data-storage-confirmation-phrase></code>
+          <input data-storage-confirmation-input autocomplete="off" spellcheck="false">
+        </label>
+      </div>
+      <p class="storage-action-error" data-storage-action-error hidden></p>
+      <div class="action-row storage-action-buttons">
+        <button class="secondary" type="button" data-storage-action-cancel>Cancel</button>
+        <button type="button" data-storage-action-review-button>Review action</button>
+        <button class="danger" type="button" data-storage-action-apply-button hidden>Apply action</button>
       </div>
     </div>
   </dialog>
