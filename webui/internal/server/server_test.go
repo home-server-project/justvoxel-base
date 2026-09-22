@@ -60,6 +60,13 @@ func defaultPlayers() api.Players {
 	return api.Players{Configured: true, State: "running", Online: 2, Max: 10, Names: []string{"Alex", "Steve"}}
 }
 
+func (f *fakeAPI) Session(_ context.Context, session string) (api.SessionInfo, error) {
+	if session != "session-token" {
+		return api.SessionInfo{}, api.ErrUnauthorized
+	}
+	return api.SessionInfo{Username: "admin", Role: "administrator", AuthSource: "system"}, nil
+}
+
 func (f *fakeAPI) Status(_ context.Context, session string) (api.Status, error) {
 	if session != "session-token" {
 		return api.Status{}, api.ErrUnauthorized
