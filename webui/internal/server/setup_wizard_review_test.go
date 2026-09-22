@@ -335,7 +335,7 @@ func TestSetupReviewBackInvalidatesAcceptedReview(t *testing.T) {
 		t.Fatal("review/EULA state survived editing an earlier setup step")
 	}
 	draft, ok := firstRunSetupDrafts.get(app, "session-token")
-	if !ok || draft.CurrentStep != 4 {
+	if !ok || draft.CurrentStep != 5 {
 		t.Fatalf("review back did not return to backups: %#v", draft)
 	}
 }
