@@ -476,3 +476,21 @@ func TestNewBackupsAutomaticPolicyControls(t *testing.T) {
 		}
 	}
 }
+
+func TestNewBackupsAutomaticPolicyResponsiveLayout(t *testing.T) {
+	content, err := assets.ReadFile("static/new-backups.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles := string(content)
+	for _, want := range []string{
+		"@media(max-width:850px)",
+		".backup-automatic-form{grid-template-columns:1fr 1fr}",
+		"@media(max-width:520px)",
+		".backup-automatic-form{grid-template-columns:1fr}",
+	} {
+		if !strings.Contains(styles, want) {
+			t.Fatalf("New Backups automatic policy responsive styling missing %q", want)
+		}
+	}
+}
