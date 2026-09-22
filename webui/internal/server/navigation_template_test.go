@@ -344,7 +344,7 @@ func TestNewBackupsCompactLibraryLayout(t *testing.T) {
 	}
 	for _, forbidden := range []string{"/settings/new-backups/restore", `name="backup_schedule"`, `name="backup_destination"`} {
 		if strings.Contains(markup, forbidden) {
-			t.Fatalf("New Backups Step 1 unexpectedly exposes later-step control %q", forbidden)
+			t.Fatalf("New Backups unexpectedly exposes unimplemented control %q", forbidden)
 		}
 	}
 
@@ -430,6 +430,49 @@ func TestNewBackupsReviewedMultiDeleteFlow(t *testing.T) {
 	} {
 		if !strings.Contains(styles, want) {
 			t.Fatalf("New Backups delete styling missing %q", want)
+		}
+	}
+}
+
+func TestNewBackupsAutomaticPolicyControls(t *testing.T) {
+	templateContent, err := assets.ReadFile("templates/new_backups.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(templateContent)
+	for _, want := range []string{
+		`name="automatic_enabled"`,
+		`name="daily_time" type="time"`,
+		`name="backup_keep" type="number"`,
+		`/settings/new-backups/automatic/plan`,
+		`/settings/new-backups/automatic/apply`,
+		"After a successful backup, JustVoxel automatically removes older backups",
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("New Backups automatic policy UI missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		`name="backup_schedule"`,
+		"Systemd calendar format",
+	} {
+		if strings.Contains(markup, forbidden) {
+			t.Fatalf("New Backups exposed raw scheduler control %q", forbidden)
+		}
+	}
+
+	cssContent, err := assets.ReadFile("static/new-backups.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles := string(cssContent)
+	for _, want := range []string{
+		".backup-automatic-section",
+		".backup-automatic-form{display:grid",
+		"@media(max-width:520px)",
+	} {
+		if !strings.Contains(styles, want) {
+			t.Fatalf("New Backups automatic policy styling missing %q", want)
 		}
 	}
 }
