@@ -93,8 +93,8 @@ func (f *fakeNewBackupsAPI) AdminConfigurationPlan(_ context.Context, session st
 		return f.configurationPlan, f.configurationPlanErr
 	}
 	return api.AdminConfigurationChangeResponse{
-		OK: true,
-		Changes: []api.AdminConfigurationChange{},
+		OK:       true,
+		Changes:  []api.AdminConfigurationChange{},
 		Proposed: defaultNewBackupsConfiguration(),
 	}, nil
 }
