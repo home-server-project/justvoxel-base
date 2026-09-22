@@ -66,7 +66,7 @@ Rebuild mJust around the same authoritative management layer already used by the
 - keep the existing WebUI Bearer-session and Administrator / Operator / Viewer authorization model unchanged
 - do not grant the ordinary `voxel` account unrestricted direct access to the privileged management socket
 - migrate capabilities in small, independently verified steps instead of a single large rewrite
-- keep the normal `testing` branch as a read-only reference for the legacy mJust behavior while the new architecture is developed on `mjust-testing`
+- develop and validate the unified Management API / mJust architecture on `testing` before stable promotion
 - do not delete helpers merely because they currently live under `mjust/libexec`; helpers used by the Management Agent remain shared implementation until they are safely moved or rewritten
 - progressively move shared backend helpers out of the misleading mJust namespace after direct CLI callers have been removed
 

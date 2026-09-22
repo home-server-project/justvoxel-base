@@ -10,7 +10,7 @@ The interaction model is inspired by Universal Blue's `ujust` / `ugum` work in `
 
 JustVoxel remains a normal immutable AlmaLinux server underneath. Advanced administrators can still use normal Linux tools directly when they want deeper control.
 
-> JustVoxel is still under active development and remains under active validation before stable promotion. The unified Management API / mJust rebuild is being developed on `mjust-testing`; `testing` is retained as the read-only legacy reference during this migration.
+> JustVoxel is still under active development and remains under active validation before stable promotion. The unified Management API / mJust architecture and WebUI parity work are developed and validated on `testing`.
 
 ## How mjust is organized
 
@@ -288,7 +288,7 @@ See `MANAGEMENT.md` for how interactive mjust, direct commands, Web management, 
 
 ## Current development status
 
-The current unified Management API / mJust rebuild and recent WebUI parity work are implemented on `mjust-testing`. The `testing` branch remains the read-only reference for the legacy mJust behavior while the migration is completed.
+The current unified Management API / mJust rebuild and recent WebUI parity work are implemented on `testing`.
 
 The priority remains validation and hardening before stable promotion. Validation covers the shared appliance behavior, including VM-ready operation, destructive/failure-path storage testing, backup and restore, migration, network-storage failure handling, Minecraft updates, installation/first-boot behavior, and hardware-dependent paths when the required capability is available.
 

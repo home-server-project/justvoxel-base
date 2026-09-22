@@ -2,7 +2,7 @@ name: WebUI source
 
 on:
   pull_request:
-    branches: [testing, mjust-testing]
+    branches: [testing]
     paths:
       - 'webui/**'
       - 'build_files/build-webui.sh'

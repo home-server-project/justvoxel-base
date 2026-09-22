@@ -12,7 +12,7 @@ import (
 func TestSetupDiagnosticRedactsSecretsNetworkIdentityAndHostname(t *testing.T) {
 	originalBootc := runBootcStatusJSON
 	runBootcStatusJSON = func(context.Context) ([]byte, error) {
-		return []byte(`{"status":{"booted":{"image":{"image":"ghcr.io/home-server-project/justvoxel-base:mjust-testing"},"imageDigest":"sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"}}}`), nil
+		return []byte(`{"status":{"booted":{"image":{"image":"ghcr.io/home-server-project/justvoxel-base:testing"},"imageDigest":"sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"}}}`), nil
 	}
 	t.Cleanup(func() { runBootcStatusJSON = originalBootc })
 
@@ -41,7 +41,7 @@ func TestSetupDiagnosticRedactsSecretsNetworkIdentityAndHostname(t *testing.T) {
 	}
 	for _, want := range []string{
 		"<HOSTNAME-REDACTED>", "<IP-REDACTED>", "<REDACTED>",
-		"ghcr.io/home-server-project/justvoxel-base:mjust-testing",
+		"ghcr.io/home-server-project/justvoxel-base:testing",
 		"sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
 	} {
 		if !strings.Contains(text, want) {
@@ -148,7 +148,7 @@ func TestSetupDiagnosticEnvironmentSnapshotIsPrivacySafe(t *testing.T) {
 	originalCommand := runSetupDiagnosticCommand
 	originalRead := readSetupDiagnosticFile
 	runBootcStatusJSON = func(context.Context) ([]byte, error) {
-		return []byte(`{"status":{"booted":{"image":{"image":"ghcr.io/home-server-project/justvoxel-base:mjust-testing"},"imageDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}`), nil
+		return []byte(`{"status":{"booted":{"image":{"image":"ghcr.io/home-server-project/justvoxel-base:testing"},"imageDigest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}`), nil
 	}
 	runSetupDiagnosticCommand = func(_ context.Context, name string, args ...string) ([]byte, error) {
 		key := name + " " + strings.Join(args, " ")
