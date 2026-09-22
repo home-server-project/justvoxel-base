@@ -6,13 +6,15 @@
   <title>JustVoxel - First setup</title>
   <link rel="stylesheet" href="/static/app.css">
   <link rel="stylesheet" href="/static/setup.css">
+  <script src="/static/app.js" defer></script>
   <script src="/static/settings.js" defer></script>
   <script src="/static/setup-storage.js" defer></script>
 </head>
 <body class="role-administrator setup-body">
-<header class="setup-header">
-  <a class="brand-link" href="/setup" aria-current="page" aria-label="JustVoxel first setup"><strong>JustVoxel</strong><span>Minecraft Server Appliance</span></a>
-  <form class="nav-logout" method="post" action="/logout">
+<header class="setup-header topbar setup-topbar">
+  <a class="brand-link brand-mark" href="/setup" aria-current="page" aria-label="JustVoxel first setup"><strong>JV</strong><span class="brand-name">JustVoxel</span></a>
+  <div class="topbar-clock" data-topbar-clock aria-label="Local time">--:--</div>
+  <form class="nav-logout setup-topbar-logout" method="post" action="/logout">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <button class="secondary" type="submit">Log out</button>
   </form>
