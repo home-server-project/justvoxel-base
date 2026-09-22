@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-helper="${repo_root}/mjust/libexec/whitelist"
+helper="${repo_root}/mjust/libexec/whitelist-backend"
 tmp="$(mktemp -d)"
 trap 'rm -rf "${tmp}"' EXIT
 mkdir -p "${tmp}/bin" "${tmp}/libexec"
@@ -123,4 +123,4 @@ if (( after != before + 1 )); then
     exit 1
 fi
 
-echo 'Bedrock whitelist lifecycle tests passed.'
+echo 'Bedrock whitelist backend lifecycle tests passed.'

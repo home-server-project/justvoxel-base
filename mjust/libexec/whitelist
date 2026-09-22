@@ -1,149 +1,97 @@
 #!/usr/bin/bash
 set -euo pipefail
-JV_LIBEXEC_DIR="${JV_LIBEXEC_DIR:-/usr/libexec/justvoxel/mjust}"
-source "${JV_LIBEXEC_DIR}/common.sh"
-require_root
-require_config
+
+readonly api_client=/usr/libexec/justvoxel/mjust/api-client
+
+if (( EUID != 0 )); then
+    echo 'ERROR: this operation must run as root.' >&2
+    exit 1
+fi
 
 action="${1:-list}"
 name="${2:-}"
 
-if [[ ${action} == bedrock-enabled ]]; then
-    [[ ${BEDROCK_ENABLED} == yes ]]
-    exit $?
-fi
-
-[[ $(systemctl is-active minecraft.service 2>/dev/null || true) == active ]] || {
-    echo 'Minecraft must be running for whitelist changes.' >&2
-    exit 1
-}
-
-run_rcon() {
-    podman exec minecraft rcon-cli "$1"
+api_get() {
+    local path="$1" response rc
+    set +e
+    response="$("${api_client}" GET "${path}")"
+    rc=$?
+    set -e
+    if (( rc != 0 )); then
+        if jq -e 'type == "object" and (.error | type == "string")' <<<"${response}" >/dev/null 2>&1; then
+            printf 'ERROR: %s\n' "$(jq -r '.error' <<<"${response}")" >&2
+        else
+            echo 'ERROR: whitelist information is unavailable from the JustVoxel Management API.' >&2
+        fi
+        return 1
+    fi
+    printf '%s' "${response}"
 }
 
 whitelist_list() {
-    run_rcon 'whitelist list'
-}
-
-whitelist_has_player() {
-    local output="$1" target="$2" players player
-    players="${output#*:}"
-    [[ ${players} != "${output}" ]] || return 1
-    IFS=',' read -r -a entries <<< "${players}"
-    for player in "${entries[@]}"; do
-        player="${player#"${player%%[![:space:]]*}"}"
-        player="${player%"${player##*[![:space:]]}"}"
-        if [[ ${player,,} == ${target,,} ]]; then
-            return 0
-        fi
-    done
-    return 1
-}
-
-is_floodgate_uuid() {
-    [[ $1 =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]
-}
-
-bedrock_whitelist() {
-    local verb="$1" identity="$2" output status current after prefixed
-
-    identity="${identity#.}"
-    [[ -n ${identity} && ${identity} != *$'\n'* && ${identity} != *$'\r'* && ${#identity} -le 64 ]] || {
-        echo 'Invalid Bedrock/Xbox gamertag or Floodgate UUID.' >&2
+    local response output
+    response="$(api_get /v1/whitelist)" || return 1
+    if ! jq -e 'type == "object" and (.output | type == "string")' <<<"${response}" >/dev/null 2>&1; then
+        echo 'ERROR: JustVoxel Management API returned invalid whitelist information.' >&2
         return 1
-    }
-
-    if is_floodgate_uuid "${identity}"; then
-        set +e
-        output="$(run_rcon "fwhitelist ${verb} ${identity}" 2>&1)"
-        status=$?
-        set -e
-        if (( status != 0 )); then
-            [[ -n ${output} ]] && printf '%s\n' "${output}" >&2
-            return "${status}"
-        fi
-        [[ -n ${output} ]] && printf '%s\n' "${output}"
-        whitelist_list
-        return 0
     fi
+    output="$(jq -r '.output' <<<"${response}")"
+    [[ -n ${output} ]] && printf '%s\n' "${output}"
+}
 
-    prefixed=".${identity}"
-    current="$(whitelist_list)"
-
-    if [[ ${verb} == add ]] && whitelist_has_player "${current}" "${prefixed}"; then
-        echo "${identity} is already on the whitelist."
-        printf '%s\n' "${current}"
-        return 0
-    fi
-    if [[ ${verb} == remove ]] && ! whitelist_has_player "${current}" "${prefixed}"; then
-        echo "${identity} is not currently on the whitelist."
-        printf '%s\n' "${current}"
-        return 0
-    fi
-
-    if [[ ${verb} == remove ]]; then
-        run_rcon "whitelist remove ${prefixed}" >/dev/null
-        after="$(whitelist_list)"
-        if whitelist_has_player "${after}" "${prefixed}"; then
-            echo "Could not remove ${identity} from the Bedrock whitelist." >&2
-            return 1
-        fi
-        echo "Removed ${identity} from the whitelist."
-        printf '%s\n' "${after}"
-        return 0
-    fi
+whitelist_change() {
+    local platform="$1" verb="$2" player="$3" payload response rc message output
+    payload="$(jq -cn --arg platform "${platform}" --arg action "${verb}" --arg name "${player}"         '{platform:$platform,action:$action,name:$name}')"
 
     set +e
-    output="$(run_rcon "fwhitelist add ${identity}" 2>&1)"
-    status=$?
+    response="$(printf '%s\n' "${payload}" | "${api_client}" POST /v1/whitelist --data)"
+    rc=$?
     set -e
-    after="$(whitelist_list)"
-    if whitelist_has_player "${after}" "${prefixed}"; then
-        [[ -n ${output} ]] && printf '%s\n' "${output}"
-        printf '%s\n' "${after}"
-        return 0
-    fi
 
-    if [[ ${identity} =~ ^[A-Za-z0-9_]{1,32}$ ]]; then
-        set +e
-        output="$(run_rcon "whitelist add ${prefixed}" 2>&1)"
-        status=$?
-        set -e
-        after="$(whitelist_list)"
-        if whitelist_has_player "${after}" "${prefixed}"; then
-            echo "Added ${identity} to the whitelist using its known local Bedrock profile."
-            printf '%s\n' "${after}"
-            return 0
+    if (( rc != 0 )); then
+        if jq -e 'type == "object"' <<<"${response}" >/dev/null 2>&1; then
+            message="$(jq -r '.error // empty' <<<"${response}")"
+            if [[ -n ${message} ]]; then
+                printf 'ERROR: %s\n' "${message}" >&2
+                return 1
+            fi
         fi
+        echo 'ERROR: whitelist change failed through the JustVoxel Management API.' >&2
+        return 1
     fi
 
-    echo 'Floodgate could not resolve this Bedrock player and no known local Bedrock profile could be restored.' >&2
-    echo "Use the Xbox gamertag without the leading '.' after the player has joined through Geyser, or enter the player's Floodgate UUID." >&2
-    return 1
+    if ! jq -e 'type == "object" and (.output | type == "string")' <<<"${response}" >/dev/null 2>&1; then
+        echo 'ERROR: JustVoxel Management API returned invalid whitelist change information.' >&2
+        return 1
+    fi
+    output="$(jq -r '.output' <<<"${response}")"
+    [[ -n ${output} ]] && printf '%s\n' "${output}"
+}
+
+bedrock_enabled() {
+    local response
+    response="$(api_get /v1/status)" || return 1
+    jq -e '.minecraft.bedrock == true' <<<"${response}" >/dev/null 2>&1
 }
 
 case "${action}" in
     list)
+        (( $# <= 1 )) || { echo 'Usage: whitelist list' >&2; exit 2; }
         whitelist_list
         ;;
     add-java|remove-java)
-        [[ ${name} =~ ^[A-Za-z0-9_]{1,16}$ ]] || {
-            echo 'Java player name must contain only letters, numbers, or underscore and be at most 16 characters.' >&2
-            exit 1
-        }
+        (( $# == 2 )) || { echo "Usage: whitelist ${action} <name>" >&2; exit 2; }
         if [[ ${action} == add-java ]]; then verb=add; else verb=remove; fi
-        run_rcon "whitelist ${verb} ${name}"
-        whitelist_list
+        whitelist_change java "${verb}" "${name}"
         ;;
     add-bedrock|remove-bedrock)
-        if [[ ${BEDROCK_ENABLED} != yes ]]; then
-            echo 'Bedrock cross-play is disabled.'
-            echo 'Enable it from Configure Minecraft -> Other safe Minecraft settings, then try again.'
-            exit 0
-        fi
+        (( $# == 2 )) || { echo "Usage: whitelist ${action} <gamertag-or-floodgate-uuid>" >&2; exit 2; }
         if [[ ${action} == add-bedrock ]]; then verb=add; else verb=remove; fi
-        bedrock_whitelist "${verb}" "${name}"
+        whitelist_change bedrock "${verb}" "${name}"
+        ;;
+    bedrock-enabled)
+        (( $# == 1 )) || { echo 'Usage: whitelist bedrock-enabled' >&2; exit 2; }
+        bedrock_enabled
         ;;
     *)
         echo 'Usage: whitelist {list|add-java|remove-java|add-bedrock|remove-bedrock|bedrock-enabled} [name]' >&2

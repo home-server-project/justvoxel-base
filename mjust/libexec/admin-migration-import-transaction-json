@@ -1,0 +1,143 @@
+#!/usr/bin/bash
+set -Eeuo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/migration-common.sh
+source /usr/libexec/justvoxel/mjust/migration-import-source.sh
+require_root
+
+emit_progress(){ jq -cn --arg state "$1" --arg stage "$2" --arg status "$3" '{event:"progress",state:$state,stage:$stage,status:$status}'; }
+emit_result(){ jq -cn --arg outcome "$1" --arg status "$2" '{event:"result",outcome:$outcome,status:$status}'; }
+
+payload="$(cat)"
+if ! jq -e '
+ type=="object" and
+ ((keys-["operation_id","plan_fingerprint","request","normalized","context","requirements","players_confirmed","eula_accepted","vanilla_confirmed","plugins_confirmed","online_mode_confirmed","backup_smb_password"])|length==0) and
+ (.operation_id|type=="string") and (.plan_fingerprint|type=="string") and (.request|type=="object") and (.normalized|type=="object") and (.context|type=="object") and (.requirements|type=="object") and
+ (.players_confirmed|type=="boolean") and (.eula_accepted|type=="boolean") and (.vanilla_confirmed|type=="boolean") and (.plugins_confirmed|type=="boolean") and (.online_mode_confirmed|type=="boolean") and ((.backup_smb_password//"")|type=="string")
+' >/dev/null 2>&1 <<< "$payload"; then emit_result needs_attention 'Server migration Import execution request was invalid.'; exit 0; fi
+
+operation_id="$(jq -r '.operation_id' <<< "$payload")"
+plan_fingerprint="$(jq -r '.plan_fingerprint' <<< "$payload")"
+plan_request="$(jq -c '.request' <<< "$payload")"
+expected_normalized="$(jq -S -c '.normalized' <<< "$payload")"
+expected_source_identity="$(jq -r '.context.source_identity' <<< "$payload")"
+expected_config_identity="$(jq -r '.context.config_identity' <<< "$payload")"
+expected_destination_identity="$(jq -r '.context.destination_identity' <<< "$payload")"
+players_confirmed="$(jq -r '.players_confirmed' <<< "$payload")"
+eula_accepted="$(jq -r '.eula_accepted' <<< "$payload")"
+vanilla_confirmed="$(jq -r '.vanilla_confirmed' <<< "$payload")"
+plugins_confirmed="$(jq -r '.plugins_confirmed' <<< "$payload")"
+online_confirmed="$(jq -r '.online_mode_confirmed' <<< "$payload")"
+backup_smb_password="$(jq -r '.backup_smb_password // ""' <<< "$payload")"
+if (( ${#backup_smb_password} > 4096 )); then
+    emit_result needs_attention 'Server migration Import SMB backup credential was invalid.'
+    exit 0
+fi
+[[ "$operation_id" =~ ^[0-9a-f-]+$ && "$plan_fingerprint" =~ ^sha256:[0-9a-f]{64}$ ]] || { emit_result needs_attention 'Server migration Import operation identity was invalid.'; exit 0; }
+
+emit_progress validating import_preflight 'Revalidating the reviewed server migration Import before staging or changing Minecraft.'
+replan="$(printf '%s\n' "$plan_request" | /usr/libexec/justvoxel/mjust/admin-migration-import-plan-json plan 2>/dev/null || true)"
+if [[ "$(jq -r '.ok // false' <<< "$replan" 2>/dev/null)" != true ]]; then
+    emit_result rolled_back "$(jq -r '.error // "Server migration Import plan is no longer valid; no live Import was started."' <<< "$replan" 2>/dev/null || echo 'Server migration Import plan is no longer valid; no live Import was started.')"
+    exit 0
+fi
+[[ "$(jq -r '.context.source_identity' <<< "$replan")" == "$expected_source_identity" ]] || { emit_result rolled_back 'Import source changed after review; no live Import was started.'; exit 0; }
+[[ "$(jq -r '.context.config_identity' <<< "$replan")" == "$expected_config_identity" ]] || { emit_result rolled_back 'JustVoxel configuration changed after Import review; no live Import was started.'; exit 0; }
+[[ "$(jq -r '.context.destination_identity' <<< "$replan")" == "$expected_destination_identity" ]] || { emit_result rolled_back 'Import destination identity changed after review; no live Import was started.'; exit 0; }
+[[ "$(jq -S -c '.normalized' <<< "$replan")" == "$expected_normalized" ]] || { emit_result rolled_back 'Normalized Import plan changed after review; no live Import was started.'; exit 0; }
+
+source_request="$(jq -c '.request.source | .kind=(.kind//"local")' <<< "$payload")"
+trap 'jv_migration_import_source_cleanup' EXIT
+set +e
+jv_migration_import_source_prepare "$source_request"
+source_prepare_rc=$?
+set -e
+if (( source_prepare_rc != 0 )); then
+    emit_result rolled_back 'The reviewed Import source could not be reopened safely; no live Import was started.'
+    exit 0
+fi
+source_path="$JV_MIGRATION_IMPORT_SOURCE_PATH"
+if [[ "$JV_MIGRATION_IMPORT_SOURCE_IDENTITY" != "$expected_source_identity" ]]; then
+    emit_result rolled_back 'Import source identity changed after review; no live Import was started.'
+    exit 0
+fi
+selected_root="$(jq -r '.normalized.source.selected_root' <<< "$replan")"
+source_version="$(jq -r '.normalized.source.minecraft_version' <<< "$replan")"
+mode="$(jq -r '.normalized.destination.mode' <<< "$replan")"
+data_path="$(jq -r '.normalized.destination.data_path' <<< "$replan")"
+backup_path="$(jq -r '.normalized.destination.backup_path' <<< "$replan")"
+java_port="$(jq -r '.normalized.destination.java_port' <<< "$replan")"
+bedrock_port="$(jq -r '.normalized.destination.bedrock_port' <<< "$replan")"
+java_memory="$(jq -r '.normalized.destination.java_memory' <<< "$replan")"
+container_memory="$(jq -r '.normalized.destination.container_memory' <<< "$replan")"
+timezone="$(jq -r '.normalized.destination.timezone' <<< "$replan")"
+image_tag="$(jq -r '.normalized.destination.image_tag' <<< "$replan")"
+minecraft_uid="$(jq -r '.normalized.destination.minecraft_uid' <<< "$replan")"
+minecraft_gid="$(jq -r '.normalized.destination.minecraft_gid' <<< "$replan")"
+backup_keep="$(jq -r '.normalized.destination.backup_keep' <<< "$replan")"
+backup_schedule="$(jq -r '.normalized.destination.backup_schedule' <<< "$replan")"
+backup_auto="$(jq -r '.normalized.destination.backup_automatic' <<< "$replan")"
+storage_type="$(jq -r '.normalized.destination.storage.type // "system"' <<< "$replan")"
+data_mount="$(jq -r '.normalized.destination.storage.mount_point // ""' <<< "$replan")"
+data_uuid="$(jq -r '.normalized.destination.storage.expected_uuid // ""' <<< "$replan")"
+data_source="$(jq -r '.normalized.destination.storage.expected_source // ""' <<< "$replan")"
+backup_type="$(jq -r '.normalized.destination.backups.type // "system"' <<< "$replan")"
+backup_mount="$(jq -r '.normalized.destination.backups.mount_point // ""' <<< "$replan")"
+backup_uuid="$(jq -r '.normalized.destination.backups.expected_uuid // ""' <<< "$replan")"
+backup_source_expected="$(jq -r '.normalized.destination.backups.expected_source // ""' <<< "$replan")"
+
+if [[ "$mode" == fresh ]]; then
+    emit_progress running import_storage 'Preparing and verifying the reviewed fresh Import storage through the Management Agent transaction backend.'
+    storage_target="$(jq -c '.normalized.destination.storage | {type,path,device:(.device//""),parent_disk:(.parent_disk//""),filesystem:(.filesystem//""),uuid:(.uuid//""),mount_point:(.mount_point//""),expected_uuid:(.expected_uuid//""),expected_source:(.expected_source//"")}' <<< "$replan")"
+    backup_target="$(jq -c '.normalized.destination.backups | {type,path,device:(.device//""),parent_disk:(.parent_disk//""),filesystem:(.filesystem//""),uuid:(.uuid//""),mount_point:(.mount_point//""),expected_uuid:(.expected_uuid//""),expected_source:(.expected_source//""),source:(.source//""),username:(.username//""),domain:(.domain//""),credentials_required:(.credentials_required//false)}' <<< "$replan")"
+    storage_payload="$(jq -cn --arg op "$operation_id" --arg fp "$plan_fingerprint" --argjson storage "$storage_target" --argjson backups "$backup_target" --arg password "$backup_smb_password" '{schema_version:"v1",operation_id:$op,plan_fingerprint:$fp,storage:$storage,backups:$backups,smb_password:$password}')"
+    unset backup_smb_password
+    storage_result="$(printf '%s\n' "$storage_payload" | /usr/libexec/justvoxel/mjust/admin-setup-storage-transaction-json apply 2>/dev/null || true)"
+    unset storage_payload
+    if [[ "$(jq -r '.ok // false' <<< "$storage_result" 2>/dev/null)" != true || "$(jq -r '.applied // false' <<< "$storage_result" 2>/dev/null)" != true ]]; then
+        if [[ "$(jq -r '.rollback_result // ""' <<< "$storage_result" 2>/dev/null)" == needs_attention ]]; then
+            emit_result needs_attention 'Fresh Import storage preparation failed and its rollback could not be confirmed.'
+        else
+            emit_result rolled_back "$(jq -r '.error // "Fresh Import storage could not be prepared; no Minecraft Import was started."' <<< "$storage_result" 2>/dev/null || echo 'Fresh Import storage could not be prepared; no Minecraft Import was started.')"
+        fi
+        exit 0
+    fi
+else
+    unset backup_smb_password
+fi
+
+result_file="$JV_MIGRATION_RUN_ROOT/import-$operation_id.result"
+rm -f -- "$result_file" "$result_file.tmp."* 2>/dev/null || true
+emit_progress running import_execute 'Staging, activating, and validating the reviewed Minecraft server Import through the authoritative backend.'
+set +e
+JV_MIGRATION_API_MODE=1 JV_MIGRATION_API_RESULT_FILE="$result_file" JV_MIGRATION_API_SELECTED_ROOT_REL="$selected_root" JV_MIGRATION_API_SOURCE_VERSION="$source_version" JV_MIGRATION_API_ONLINE_MODE_CONFIRMED="$([[ "$online_confirmed" == true ]] && echo yes || echo no)" JV_MIGRATION_API_VANILLA_CONFIRMED="$([[ "$vanilla_confirmed" == true ]] && echo yes || echo no)" JV_MIGRATION_API_PLUGINS_CONFIRMED="$([[ "$plugins_confirmed" == true ]] && echo yes || echo no)" JV_MIGRATION_API_PLAYERS_CONFIRMED="$([[ "$players_confirmed" == true ]] && echo yes || echo no)" JV_MIGRATION_API_IMPORT_CONFIRMED=yes JV_MIGRATION_API_EULA_ACCEPTED="$([[ "$eula_accepted" == true ]] && echo yes || echo no)" JV_MIGRATION_API_JAVA_PORT="$java_port" JV_MIGRATION_API_BEDROCK_PORT="$bedrock_port" JV_MIGRATION_API_JAVA_MEMORY="$java_memory" JV_MIGRATION_API_CONTAINER_MEMORY="$container_memory" JV_MIGRATION_API_TIMEZONE="$timezone" JV_MIGRATION_API_IMAGE_TAG="$image_tag" JV_MIGRATION_API_MINECRAFT_UID="$minecraft_uid" JV_MIGRATION_API_MINECRAFT_GID="$minecraft_gid" JV_MIGRATION_API_DATA_PATH="$data_path" JV_MIGRATION_API_DATA_MOUNT_POINT="$data_mount" JV_MIGRATION_API_DATA_EXPECTED_UUID="$data_uuid" JV_MIGRATION_API_DATA_EXPECTED_SOURCE="$data_source" JV_MIGRATION_API_BACKUP_TYPE="$backup_type" JV_MIGRATION_API_BACKUP_PATH="$backup_path" JV_MIGRATION_API_BACKUP_MOUNT_POINT="$backup_mount" JV_MIGRATION_API_BACKUP_EXPECTED_UUID="$backup_uuid" JV_MIGRATION_API_BACKUP_EXPECTED_SOURCE="$backup_source_expected" JV_MIGRATION_API_BACKUP_KEEP="$backup_keep" JV_MIGRATION_API_BACKUP_SCHEDULE="$backup_schedule" JV_MIGRATION_API_BACKUP_TIMER_ENABLED="$([[ "$backup_auto" == true ]] && echo yes || echo no)"     /usr/libexec/justvoxel/mjust/migration-import-backend "$source_path" >/dev/null 2>&1
+backend_rc=$?
+set -e
+
+if [[ -r "$result_file" ]] && jq -e 'type=="object" and (.outcome|type=="string") and (.status|type=="string")' >/dev/null 2>&1 "$result_file"; then
+    outcome="$(jq -r '.outcome' "$result_file")"
+    status="$(jq -r '.status' "$result_file")"
+    rm -f -- "$result_file"
+    case "$outcome" in
+        succeeded)
+            emit_progress verifying import_verify 'Revalidating the imported Minecraft runtime after the Import transaction.'
+            if /usr/libexec/justvoxel/mjust/restore-runtime-validate >/dev/null 2>&1 && /usr/libexec/justvoxel/mjust/validate >/dev/null 2>&1; then emit_result succeeded "$status"; else emit_result needs_attention 'Imported data was activated but final runtime verification could not be reconfirmed; administrator attention is required.'; fi
+            ;;
+        rolled_back) emit_result rolled_back "$status" ;;
+        needs_attention) emit_result needs_attention "$status" ;;
+        *) emit_result needs_attention 'Server migration Import backend returned an unknown safety outcome.' ;;
+    esac
+    exit 0
+fi
+rm -f -- "$result_file"
+
+# A backend error before live activation leaves no result file. Re-plan: matching
+# identities prove the reviewed source/destination remain unchanged and no retained
+# rollback transaction was needed.
+postplan="$(printf '%s\n' "$plan_request" | /usr/libexec/justvoxel/mjust/admin-migration-import-plan-json plan 2>/dev/null || true)"
+if (( backend_rc != 0 )) && [[ "$(jq -r '.ok // false' <<< "$postplan" 2>/dev/null)" == true ]]    && [[ "$(jq -r '.context.source_identity' <<< "$postplan")" == "$expected_source_identity" ]]    && [[ "$(jq -r '.context.destination_identity' <<< "$postplan")" == "$expected_destination_identity" ]]; then
+    emit_result rolled_back 'Server migration Import stopped before live activation; the reviewed destination remains unchanged.'
+else
+    emit_result needs_attention 'Server migration Import ended without a complete safety result; inspect retained Import/Recovery state before continuing.'
+fi
+exit 0

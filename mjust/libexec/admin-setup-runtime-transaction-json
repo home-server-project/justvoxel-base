@@ -18,10 +18,33 @@ readonly A55_RUNTIME_FILES=(
 A55_REQUEST=''
 A55_OPERATION_ID=''
 A55_PLAN_FINGERPRINT=''
+A55_EVIDENCE='{}'
+
+_a55_evidence_set() {
+    local key="$1" value="$2"
+    A55_EVIDENCE="$(jq -c --arg key "${key}" --arg value "${value}" '. + {($key):$value}' <<< "${A55_EVIDENCE}")" || return 1
+}
+
+_a55_evidence_set_bounded() {
+    local key="$1" value="$2" max="${3:-12000}"
+    if (( ${#value} > max )); then
+        value="${value:0:max}…"
+    fi
+    _a55_evidence_set "${key}" "${value}"
+}
 
 _a55_json() {
-    local ok="$1" applied="$2" phase="$3" error="$4"
-    jq -n --argjson ok "${ok}" --argjson applied "${applied}" --arg phase "${phase}" --arg error "${error}"         '{ok:$ok,applied:$applied,phase:$phase} + (if $error == "" then {} else {error:$error} end)'
+    local ok="$1" applied="$2" phase="$3" error="$4" evidence="${5:-}"
+    [[ -n ${evidence} ]] || evidence='{}'
+    jq -n \
+        --argjson ok "${ok}" \
+        --argjson applied "${applied}" \
+        --arg phase "${phase}" \
+        --arg error "${error}" \
+        --argjson evidence "${evidence}" \
+        '{ok:$ok,applied:$applied,phase:$phase}
+         + (if $error == "" then {} else {error:$error} end)
+         + (if ($evidence|length) == 0 then {} else {evidence:$evidence} end)'
 }
 
 _a55_parse_request() {
@@ -185,31 +208,84 @@ _a55_apply_action() {
     fi
 
     write_main_config || return 1
+    _a55_evidence_set runtime_config_written yes || return 1
     _a55_apply_selinux || return 1
+    _a55_evidence_set selinux_data_label container_file_t || return 1
     render_runtime_files || return 1
+    _a55_evidence_set runtime_files_rendered yes || return 1
 
     firewall-cmd --permanent --add-port="${JAVA_PORT}/tcp" >/dev/null || return 1
+    _a55_evidence_set java_firewall_rule present || return 1
     if [[ ${BEDROCK_ENABLED} == yes ]]; then
         firewall-cmd --permanent --add-port="${BEDROCK_PORT}/udp" >/dev/null || return 1
+        _a55_evidence_set bedrock_firewall_rule present || return 1
     fi
     firewall-cmd --reload >/dev/null || return 1
-    _a55_json true true runtime_configured ''
+    _a55_evidence_set firewalld_reload ok || return 1
+    _a55_json true true runtime_configured '' "${A55_EVIDENCE}"
 }
 
 _a55_verify_action() {
     _a55_load_values
-    systemctl start minecraft.service || return 1
-    _a55_manifest_update '.runtime.minecraft_started = true' || return 1
-    wait_for_rcon 900 || return 1
-    podman exec minecraft rcon-cli version >/dev/null 2>&1 || return 1
-    if [[ ${BEDROCK_ENABLED} == yes ]]; then
-        configure_geyser_floodgate >/dev/null 2>&1 || return 1
-        podman exec minecraft rcon-cli 'geyser version' >/dev/null 2>&1 || return 1
+    local output rc rcon_started rcon_elapsed validation_output
+
+    output="$(systemctl start minecraft.service 2>&1)"
+    rc=$?
+    if (( rc != 0 )); then
+        _a55_evidence_set systemctl_start_result failed || return 1
+        _a55_evidence_set_bounded systemctl_start_output "${output}" || return 1
+        return 1
     fi
-    activate_backup_timer || return 1
+    _a55_evidence_set systemctl_start_result ok || return 1
+    _a55_evidence_set_bounded systemctl_start_output "${output}" || return 1
+    _a55_manifest_update '.runtime.minecraft_started = true' || return 1
+
+    rcon_started=${SECONDS}
+    if wait_for_rcon 900; then
+        rcon_elapsed=$((SECONDS - rcon_started))
+        _a55_evidence_set rcon_result ready || return 1
+        _a55_evidence_set rcon_wait_seconds "${rcon_elapsed}" || return 1
+    else
+        rcon_elapsed=$((SECONDS - rcon_started))
+        _a55_evidence_set rcon_result timeout || return 1
+        _a55_evidence_set rcon_wait_seconds "${rcon_elapsed}" || return 1
+        return 1
+    fi
+
+    output="$(podman exec minecraft rcon-cli version 2>&1)"
+    rc=$?
+    _a55_evidence_set minecraft_version_check "$([[ ${rc} -eq 0 ]] && printf ok || printf failed)" || return 1
+    _a55_evidence_set_bounded minecraft_version_output "${output}" || return 1
+    (( rc == 0 )) || return 1
+
+    if [[ ${BEDROCK_ENABLED} == yes ]]; then
+        output="$(configure_geyser_floodgate 2>&1)"
+        rc=$?
+        _a55_evidence_set geyser_floodgate_config "$([[ ${rc} -eq 0 ]] && printf ok || printf failed)" || return 1
+        _a55_evidence_set_bounded geyser_floodgate_output "${output}" || return 1
+        (( rc == 0 )) || return 1
+
+        output="$(podman exec minecraft rcon-cli 'geyser version' 2>&1)"
+        rc=$?
+        _a55_evidence_set geyser_version_check "$([[ ${rc} -eq 0 ]] && printf ok || printf failed)" || return 1
+        _a55_evidence_set_bounded geyser_version_output "${output}" || return 1
+        (( rc == 0 )) || return 1
+    fi
+
+    output="$(activate_backup_timer 2>&1)"
+    rc=$?
+    _a55_evidence_set backup_timer_activation "$([[ ${rc} -eq 0 ]] && printf ok || printf failed)" || return 1
+    _a55_evidence_set_bounded backup_timer_output "${output}" || return 1
+    (( rc == 0 )) || return 1
     _a55_manifest_update '.runtime.timer_activated = true' || return 1
-    /usr/libexec/justvoxel/mjust/validate >/dev/null 2>&1 || return 1
-    _a55_json true true runtime_verified ''
+
+    validation_output="$(/usr/libexec/justvoxel/mjust/validate-backend 2>&1)"
+    rc=$?
+    _a55_evidence_set final_validation "$([[ ${rc} -eq 0 ]] && printf passed || printf failed)" || return 1
+    _a55_evidence_set_bounded final_validation_output "${validation_output}" || return 1
+    (( rc == 0 )) || return 1
+
+    _a55_json true true runtime_verified '' "${A55_EVIDENCE}"
 }
 
 _a55_rollback_action() {
@@ -272,7 +348,7 @@ case "${action}" in
         if _a55_validate_runtime_inputs && _a55_apply_action; then :; else _a55_json false false runtime_config 'Runtime configuration could not be applied safely.'; fi
         ;;
     verify)
-        if _a55_verify_action; then :; else _a55_json false false runtime_verify 'Minecraft runtime verification failed.'; fi
+        if _a55_verify_action; then :; else _a55_json false false runtime_verify 'Minecraft runtime verification failed.' "${A55_EVIDENCE}"; fi
         ;;
     rollback)
         _a55_rollback_action

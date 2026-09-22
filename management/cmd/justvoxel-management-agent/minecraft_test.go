@@ -44,6 +44,12 @@ func authorizedRequest(method, target, body string) *http.Request {
 	return req
 }
 
+func localRootMinecraftRequest(method, target, body string) *http.Request {
+	req := httptest.NewRequest(method, target, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	return req.WithContext(context.WithValue(req.Context(), peerUIDKey{}, uint32(0)))
+}
+
 func TestPlayersRequiresAuthentication(t *testing.T) {
 	s := adminServerForTest()
 	called := false
@@ -82,6 +88,97 @@ func TestPlayersUsesAllowlistedHelperAndReturnsJSON(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), `"online":0`) || !strings.Contains(rr.Body.String(), `"names":[]`) {
 		t.Fatalf("unexpected player response: %s", rr.Body.String())
+	}
+}
+
+func TestLocalRootCanReadPlayersWithoutBearerSession(t *testing.T) {
+	s := &server{sessions: make(map[string]session)}
+	oldRunner := runWebHelper
+	runWebHelper = func(_ context.Context, args ...string) ([]byte, int, error) {
+		if len(args) != 1 || args[0] != "players" {
+			t.Fatalf("unexpected helper args: %#v", args)
+		}
+		return []byte(`{"configured":true,"state":"running","online":2,"max":10,"names":["Alex","Steve"]}`), 0, nil
+	}
+	defer func() { runWebHelper = oldRunner }()
+
+	req := requestWithPeerUID(http.MethodGet, "http://unix/v1/players", 0)
+	rr := httptest.NewRecorder()
+	s.players(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("local root Players request failed: %d %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"online":2`) || !strings.Contains(rr.Body.String(), `"Alex"`) {
+		t.Fatalf("unexpected local root Players response: %s", rr.Body.String())
+	}
+}
+
+func TestLocalRootCanControlMinecraftWithoutBearerSession(t *testing.T) {
+	s := &server{sessions: make(map[string]session)}
+	oldRunner := runWebHelper
+	defer func() { runWebHelper = oldRunner }()
+
+	tests := []struct {
+		action string
+		call   func(http.ResponseWriter, *http.Request)
+	}{
+		{action: "start", call: s.minecraftStart},
+		{action: "stop", call: s.minecraftStop},
+		{action: "restart", call: s.minecraftRestart},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.action, func(t *testing.T) {
+			runWebHelper = func(_ context.Context, args ...string) ([]byte, int, error) {
+				if len(args) != 1 || args[0] != tc.action {
+					t.Fatalf("unexpected helper args: %#v", args)
+				}
+				return []byte(`{"ok":true,"action":"` + tc.action + `","message":"accepted"}`), 0, nil
+			}
+			rr := httptest.NewRecorder()
+			tc.call(rr, localRootMinecraftRequest(http.MethodPost, "http://unix/v1/minecraft/"+tc.action, `{}`))
+			if rr.Code != http.StatusOK {
+				t.Fatalf("local root %s failed: %d %s", tc.action, rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestLocalRootRestartStillRequiresExplicitPlayerConfirmation(t *testing.T) {
+	s := &server{sessions: make(map[string]session)}
+	oldRunner := runWebHelper
+	defer func() { runWebHelper = oldRunner }()
+
+	callCount := 0
+	runWebHelper = func(_ context.Context, args ...string) ([]byte, int, error) {
+		callCount++
+		switch callCount {
+		case 1:
+			if len(args) != 1 || args[0] != "restart" {
+				t.Fatalf("unexpected initial helper args: %#v", args)
+			}
+			return []byte(`{"ok":false,"action":"restart","confirmation_required":true,"reason":"players_online","players":["Alex"],"online":1}`), 10, errors.New("confirmation required")
+		case 2:
+			if len(args) != 2 || args[0] != "restart" || args[1] != "--confirm-players" {
+				t.Fatalf("unexpected confirmed helper args: %#v", args)
+			}
+			return []byte(`{"ok":true,"action":"restart","message":"Minecraft restart requested."}`), 0, nil
+		default:
+			t.Fatalf("unexpected helper call %d", callCount)
+			return nil, 0, nil
+		}
+	}
+
+	rr := httptest.NewRecorder()
+	s.minecraftRestart(rr, localRootMinecraftRequest(http.MethodPost, "http://unix/v1/minecraft/restart", `{}`))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"confirmation_required":true`) {
+		t.Fatalf("local root restart did not require player confirmation: %d %s", rr.Code, rr.Body.String())
+	}
+
+	rr = httptest.NewRecorder()
+	s.minecraftRestart(rr, localRootMinecraftRequest(http.MethodPost, "http://unix/v1/minecraft/restart", `{"confirm_players":true}`))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"ok":true`) {
+		t.Fatalf("confirmed local root restart failed: %d %s", rr.Code, rr.Body.String())
 	}
 }
 

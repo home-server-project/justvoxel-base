@@ -9,6 +9,8 @@ elif (( $# > 0 )); then
     exit 2
 fi
 
+export LC_ALL=C
+
 pretty_name='JustVoxel'
 if [[ -r /etc/os-release ]]; then
     # shellcheck disable=SC1091
@@ -19,8 +21,7 @@ fi
 variant_id="$(cat /usr/lib/justvoxel/variant 2>/dev/null || true)"
 case "${variant_id}" in
     justvoxel-vm|vm) variant='VM' ;;
-    justvoxel-hwe|hwe) variant='HWE' ;;
-    justvoxel-baremetal|baremetal) variant='Bare Metal' ;;
+    justvoxel-hws|hws) variant='HWS' ;;
     *) variant='Unknown' ;;
 esac
 
@@ -28,38 +29,95 @@ host="$(cat /proc/sys/kernel/hostname 2>/dev/null || true)"
 host="${host%%.*}"
 [[ -n ${host} ]] || host='unknown'
 
-ipv4="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i == "src") {print $(i+1); exit}}')"
-if [[ -z ${ipv4} ]]; then
-    ipv4="$(ip -o -4 addr show scope global up 2>/dev/null | awk '{split($4,a,"/"); print a[1]; exit}')"
-fi
-[[ -n ${ipv4} ]] || ipv4='Not assigned'
+device_state() {
+    local device="$1" state
+    state="$(nmcli -g GENERAL.STATE device show "${device}" 2>/dev/null || true)"
+    printf '%s' "${state%% *}"
+}
 
-network_state='No Ethernet interface detected'
-mapfile -t ethernet_devices < <(nmcli -t -f DEVICE,TYPE device status 2>/dev/null | awk -F: '$2 == "ethernet" {print $1}')
-if (( ${#ethernet_devices[@]} > 0 )); then
-    ethernet_carrier=no
-    ethernet_connecting=no
-    ethernet_connected=no
+device_ipv4() {
+    local device="$1" address
+    address="$(nmcli -g IP4.ADDRESS device show "${device}" 2>/dev/null | head -n1 || true)"
+    address="${address%%/*}"
+    [[ ${address} =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || address=''
+    printf '%s' "${address}"
+}
 
-    for device in "${ethernet_devices[@]}"; do
-        carrier="$(nmcli -g GENERAL.CARRIER device show "${device}" 2>/dev/null || true)"
-        state="$(nmcli -g GENERAL.STATE device show "${device}" 2>/dev/null || true)"
-        state="${state%% *}"
-
-        [[ ${carrier} == on ]] && ethernet_carrier=yes
-        [[ ${state} == 100 ]] && ethernet_connected=yes
-        if [[ ${state} =~ ^[0-9]+$ ]] && (( state >= 40 && state < 100 )); then
-            ethernet_connecting=yes
-        fi
-    done
-
-    if [[ ${ipv4} != 'Not assigned' || ${ethernet_connected} == yes ]]; then
-        network_state='Ethernet connected'
-    elif [[ ${ethernet_carrier} == yes || ${ethernet_connecting} == yes ]]; then
-        network_state='Ethernet connected, obtaining address...'
-    else
-        network_state='Ethernet cable disconnected'
+wifi_ssid() {
+    local device="$1" ssid
+    ssid="$(nmcli -t --escape no -f IN-USE,SSID device wifi list ifname "${device}" 2>/dev/null \
+        | awk -F: '$1 == "*" {sub(/^[^:]*:/, ""); print; exit}' || true)"
+    if [[ -z ${ssid} || ${ssid} == '--' ]]; then
+        ssid="$(nmcli -g GENERAL.CONNECTION device show "${device}" 2>/dev/null || true)"
     fi
+    [[ ${ssid} != '--' ]] || ssid=''
+    printf '%s' "${ssid}"
+}
+
+mapfile -t ethernet_devices < <(nmcli -t -f DEVICE,TYPE device status 2>/dev/null | awk -F: '$2 == "ethernet" {print $1}')
+mapfile -t wifi_devices < <(nmcli -t -f DEVICE,TYPE device status 2>/dev/null | awk -F: '$2 == "wifi" {print $1}')
+
+ethernet_connected=no
+ethernet_connecting=no
+ethernet_ipv4=''
+for device in "${ethernet_devices[@]}"; do
+    state="$(device_state "${device}")"
+    carrier="$(nmcli -g GENERAL.CARRIER device show "${device}" 2>/dev/null || true)"
+
+    if [[ ${state} == 100 ]]; then
+        ethernet_connected=yes
+        [[ -n ${ethernet_ipv4} ]] || ethernet_ipv4="$(device_ipv4 "${device}")"
+    elif [[ ${state} =~ ^[0-9]+$ ]] && (( state >= 40 && state < 100 )); then
+        ethernet_connecting=yes
+    elif [[ ${carrier} == on ]]; then
+        ethernet_connecting=yes
+    fi
+done
+
+wifi_connected=no
+wifi_ipv4=''
+wifi_value=''
+for device in "${wifi_devices[@]}"; do
+    state="$(device_state "${device}")"
+    if [[ ${state} == 100 ]]; then
+        wifi_connected=yes
+        [[ -n ${wifi_ipv4} ]] || wifi_ipv4="$(device_ipv4 "${device}")"
+        if [[ -z ${wifi_value} ]]; then
+            ssid="$(wifi_ssid "${device}")"
+            if [[ -n ${ssid} ]]; then
+                wifi_value="${ssid} connected"
+            else
+                wifi_value='Connected'
+            fi
+        fi
+    fi
+done
+if (( ${#wifi_devices[@]} > 0 )) && [[ ${wifi_connected} != yes ]]; then
+    wifi_value='Not connected'
+fi
+
+ipv4='Not assigned'
+network_state='Not connected - use mjust net'
+network_has_address=no
+
+if [[ ${ethernet_connected} == yes ]]; then
+    if [[ -n ${ethernet_ipv4} ]]; then
+        ipv4="${ethernet_ipv4}"
+        network_state='Ethernet connected'
+        network_has_address=yes
+    else
+        network_state='Ethernet connected, obtaining address...'
+    fi
+elif [[ ${wifi_connected} == yes ]]; then
+    if [[ -n ${wifi_ipv4} ]]; then
+        ipv4="${wifi_ipv4}"
+        network_state='Wi-Fi connected'
+        network_has_address=yes
+    else
+        network_state='Wi-Fi connected, obtaining address...'
+    fi
+elif [[ ${ethernet_connecting} == yes ]]; then
+    network_state='Ethernet connected, obtaining address...'
 fi
 
 if [[ -f /etc/containers/systemd/minecraft.container ]]; then
@@ -76,10 +134,10 @@ if [[ ${host} != unknown ]]; then
 else
     web_browser='Waiting for hostname'
 fi
-if [[ ${ipv4} == 'Not assigned' ]]; then
-    web_direct='Waiting for network address'
-else
+if [[ ${network_has_address} == yes ]]; then
     web_direct="http://${ipv4}:8099"
+else
+    web_direct='Waiting for network address'
 fi
 web_enabled_marker=/var/lib/justvoxel/webui/enabled
 web_initialized_marker=/var/lib/justvoxel/webui/initialized
@@ -93,6 +151,43 @@ elif [[ -e ${web_enabled_marker} ]]; then
     web_state='Unavailable'
 elif [[ ! -e ${web_initialized_marker} ]]; then
     web_state='Starting...'
+fi
+
+if [[ ${web_state} == Ready && ${network_has_address} != yes ]]; then
+    web_state='Waiting for network'
+fi
+
+service_configured() {
+    local unit="$1"
+    systemctl is-active --quiet "${unit}" 2>/dev/null \
+        || systemctl is-enabled --quiet "${unit}" 2>/dev/null
+}
+
+tailscale_configured=no
+if [[ -s /var/lib/tailscale/tailscaled.state ]] || service_configured tailscaled.service; then
+    tailscale_configured=yes
+fi
+tailscale_value=''
+if [[ ${tailscale_configured} == yes ]]; then
+    tailscale_value="$(tailscale ip -4 2>/dev/null | head -n1 || true)"
+    [[ ${tailscale_value} =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || tailscale_value='Not connected'
+fi
+
+netbird_configured=no
+for path in /var/lib/netbird/default.json /etc/netbird/config.json /etc/netbird/config.yaml; do
+    if [[ -s ${path} ]]; then
+        netbird_configured=yes
+        break
+    fi
+done
+if [[ ${netbird_configured} != yes ]] && service_configured netbird.service; then
+    netbird_configured=yes
+fi
+netbird_value=''
+if [[ ${netbird_configured} == yes ]]; then
+    netbird_value="$(netbird status --ipv4 2>/dev/null | head -n1 || true)"
+    netbird_value="${netbird_value%%/*}"
+    [[ ${netbird_value} =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || netbird_value='Not connected'
 fi
 
 if [[ ${output_mode} == issue ]]; then
@@ -130,40 +225,52 @@ printf '%s%s====================================================%s\n\n' "${cyan}
 line 'System:' "${white}" "${pretty_name}"
 line 'Variant:' "${white}" "${variant}"
 line 'Host:' "${white}" "${host}"
-line 'Network:' "${white}" "${network_state}"
-line 'IPv4:' "${white}" "${ipv4}"
 line 'Minecraft:' "$([[ ${minecraft_state} == Configured ]] && printf '%s' "${green}" || printf '%s' "${yellow}")" "${minecraft_state}"
+
 printf '\n'
 line 'Web interface:' "$([[ ${web_state} == Ready ]] && printf '%s' "${green}" || printf '%s' "${yellow}")" "${web_state}"
-if [[ ${output_mode} == issue ]]; then
+if [[ ${web_state} == Ready ]]; then
     line 'Open in browser:' "${blue}" "${web_browser}"
     line 'Direct address:' "${blue}" "${web_direct}"
+elif [[ ${output_mode} != issue ]]; then
+    case "${web_state}" in
+        Disabled)
+            line 'Enable with:' "${green}" 'mjust web enable'
+            ;;
+        Unavailable)
+            line 'Check status:' "${green}" 'mjust web status'
+            ;;
+    esac
+fi
+
+printf '\n'
+line 'Network:' "$([[ ${network_has_address} == yes ]] && printf '%s' "${white}" || printf '%s' "${yellow}")" "${network_state}"
+if [[ ${network_has_address} == yes ]]; then
+    line 'IPv4:' "${white}" "${ipv4}"
+fi
+if (( ${#wifi_devices[@]} > 0 )); then
+    line 'Wi-Fi:' "$([[ ${wifi_connected} == yes ]] && printf '%s' "${white}" || printf '%s' "${yellow}")" "${wifi_value}"
+fi
+
+if [[ ${output_mode} == issue ]]; then
     printf '\n'
     exit 0
 fi
 
-case "${web_state}" in
-    Ready)
-        line 'Open in browser:' "${blue}" "${web_browser}"
-        line 'Direct address:' "${blue}" "${web_direct}"
-        ;;
-    Disabled)
-        line 'Enable with:' "${green}" 'mjust web enable'
-        ;;
-    Unavailable)
-        line 'Check status:' "${green}" 'mjust web status'
-        ;;
-esac
+if [[ ${tailscale_configured} == yes ]]; then
+    line 'Tailscale:' "$([[ ${tailscale_value} == 'Not connected' ]] && printf '%s' "${yellow}" || printf '%s' "${white}")" "${tailscale_value}"
+fi
+if [[ ${netbird_configured} == yes ]]; then
+    line 'NetBird:' "$([[ ${netbird_value} == 'Not connected' ]] && printf '%s' "${yellow}" || printf '%s' "${white}")" "${netbird_value}"
+fi
 
 printf '\n%s%sCommon commands%s\n' "${bold}" "${cyan}" "${reset}"
 if [[ ${needs_setup} == yes ]]; then
-    line 'Normal setup:' "${green}" 'mjust setup'
-    line 'Advanced setup:' "${green}" 'mjust setup-advanced'
+    line 'First setup:' "${green}" 'mjust setup'
 fi
 line 'Admin menu:' "${green}" 'mjust'
 line 'Server status:' "${green}" 'mjust status'
 line 'List commands:' "${green}" 'mjust --list'
-line 'Validate system:' "${green}" 'mjust validate'
 
 printf '\n%s%sLinks%s\n' "${bold}" "${cyan}" "${reset}"
 line 'Documentation:' "${blue}" 'https://github.com/home-server-project/justvoxel'

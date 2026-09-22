@@ -10,7 +10,6 @@ preview() {
     case "${1:-}" in
         setup) echo -e 'First setup\n\nConfigure Minecraft, memory, ports, Bedrock cross-play, storage and backups.' ;;
         import) echo -e 'Import existing Minecraft server\n\nImport an existing JustVoxel, Paper or compatible server.' ;;
-        setup-advanced) echo -e 'Advanced setup\n\nFirst setup with additional administrator controls.' ;;
         status) echo -e 'Status\n\nFriendly JustVoxel health dashboard. Advanced details are available separately.' ;;
         players) echo -e 'Players\n\nShow the current Minecraft player list.' ;;
         configure) echo -e 'Configure Minecraft\n\nChange supported Minecraft settings through guided menus.' ;;
@@ -20,9 +19,9 @@ preview() {
         migration) echo -e 'Migration\n\nExport, import or recover a server migration.' ;;
         storage) echo -e 'Storage\n\nView storage and move Minecraft data. Device provisioning is under Advanced.' ;;
         update) echo -e 'Update Minecraft\n\nCheck Minecraft/Paper and container image updates.' ;;
-        system) echo -e 'System\n\nView OS status and updates, resources, reboot and power controls.\n\nSystem resources opens btop. Press q to return to JustVoxel. Esc opens the btop menu, and Ctrl-C also exits the monitor.' ;;
+        system) echo -e 'System\n\nView OS status and updates, resources, files, networking, reboot and power controls.\n\nSystem resources opens btop. Press q to return to JustVoxel. Esc opens the btop menu, and Ctrl-C also exits the monitor. File browser opens Superfile; press q to return to the System menu. Network opens the friendly Home Server Project manager or classic nmtui.' ;;
         validate) echo -e 'Validation\n\nRun the complete JustVoxel deployment validation.' ;;
-        logs) echo -e 'Logs\n\nReadable Minecraft logs or the full systemd journal.' ;;
+        logs) echo -e 'Logs\n\nReadable recent Minecraft logs from the JustVoxel Management API.' ;;
         advanced) echo -e 'Advanced\n\nDetailed status, storage device provisioning, welcome controls and reset tools.' ;;
         exit) echo 'Exit the JustVoxel menu.' ;;
         *) echo 'Unknown menu item.' ;;
@@ -52,6 +51,7 @@ Use a direct command instead, for example:
   mjust update-minecraft
   mjust os-status
   mjust os-update
+  mjust files
   mjust web status
   mjust password-reset
   mjust logs
@@ -196,8 +196,8 @@ system_status_menu() {
 
 system_menu() {
     local choice
-    local -a options=('System status & updates' 'System resources' 'Reboot JustVoxel' 'Power off JustVoxel')
-    jv_variant_is_hwe && options+=('Firmware / UEFI setup')
+    local -a options=('System status & updates' 'System resources' 'File browser' 'Network' 'Reboot JustVoxel' 'Power off JustVoxel')
+    jv_variant_is_hws && options+=('Firmware / UEFI setup')
     options+=('Back')
 
     while true; do
@@ -205,21 +205,11 @@ system_menu() {
         case "${choice}" in
             'System status & updates') system_status_menu ;;
             'System resources') /usr/bin/mjust resources || true ;;
+            'File browser') /usr/bin/mjust files || true ;;
+            'Network') /usr/bin/mjust net || true ;;
             'Reboot JustVoxel') run_and_pause /usr/bin/mjust reboot || true ;;
             'Power off JustVoxel') run_and_pause /usr/bin/mjust poweroff || true ;;
             'Firmware / UEFI setup') run_and_pause /usr/bin/mjust firmware || true ;;
-            'Back') return 0 ;;
-        esac
-    done
-}
-
-logs_menu() {
-    local choice
-    while true; do
-        choice="$(jui_choose 'Logs' 'Minecraft logs' 'Advanced / full system log' 'Back')" || return 0
-        case "${choice}" in
-            'Minecraft logs') /usr/bin/mjust logs || true ;;
-            'Advanced / full system log') sudo /usr/libexec/justvoxel/mjust/logs --advanced || true ;;
             'Back') return 0 ;;
         esac
     done
@@ -249,13 +239,12 @@ advanced_storage_menu() {
 
 advanced_menu() {
     local -a options=('Detailed status' 'Storage devices / provisioning' 'Administrator password' 'Show login welcome' 'Hide login welcome' 'Enable login welcome' 'All mjust commands')
-    if [[ ${configured} == yes ]]; then options+=('Start over / reset Minecraft'); else options=('Advanced first setup' "${options[@]}"); fi
+    if [[ ${configured} == yes ]]; then options+=('Start over / reset Minecraft'); fi
     options+=('Back')
 
     local choice
     choice="$(jui_choose 'Advanced' "${options[@]}")" || return 0
     case "${choice}" in
-        'Advanced first setup') run_and_pause /usr/bin/mjust setup-advanced || true ;;
         'Detailed status') run_and_pause /usr/bin/mjust status --details || true ;;
         'Storage devices / provisioning') advanced_storage_menu ;;
         'Administrator password') run_and_pause /usr/bin/mjust password-reset || true ;;
@@ -273,7 +262,7 @@ select_rich() {
     if [[ ${configured} == yes ]]; then
         rows=$'status\tStatus\nplayers\tPlayers\nconfigure\tConfigure Minecraft\nservice\tStart / Stop / Restart\nwhitelist\tWhitelist\nbackups\tBackups\nmigration\tMigration\nstorage\tStorage\nupdate\tUpdate Minecraft\nsystem\tSystem\nvalidate\tValidation\nlogs\tLogs\nadvanced\tAdvanced\nexit\tExit'
     else
-        rows=$'setup\tFirst setup\nimport\tImport existing Minecraft server\nstatus\tStatus\nstorage\tStorage\nsystem\tSystem\nsetup-advanced\tAdvanced setup\nexit\tExit'
+        rows=$'setup\tFirst setup\nimport\tImport existing Minecraft server\nstatus\tStatus\nstorage\tStorage\nsystem\tSystem\nexit\tExit'
     fi
     selected="$(printf '%s\n' "${rows}" | fzf --delimiter=$'\t' --with-nth=2 --no-multi --layout=reverse --border --height=90% --prompt='JustVoxel > ' --preview='/usr/libexec/justvoxel/mjust/menu --preview {1}' --preview-window='right,55%,wrap,border-left' || true)"
     [[ -n ${selected} ]] || { printf 'exit'; return 0; }
@@ -290,8 +279,8 @@ select_compact() {
             'Validation') printf 'validate' ;; 'Logs') printf 'logs' ;; 'Advanced') printf 'advanced' ;; *) printf 'exit' ;;
         esac
     else
-        choice="$(jui_choose 'JustVoxel' 'First setup' 'Import existing Minecraft server' 'Status' 'Storage' 'System' 'Advanced setup' 'Exit')" || { printf 'exit'; return 0; }
-        case "${choice}" in 'First setup') printf 'setup' ;; 'Import existing Minecraft server') printf 'import' ;; 'Status') printf 'status' ;; 'Storage') printf 'storage' ;; 'System') printf 'system' ;; 'Advanced setup') printf 'setup-advanced' ;; *) printf 'exit' ;; esac
+        choice="$(jui_choose 'JustVoxel' 'First setup' 'Import existing Minecraft server' 'Status' 'Storage' 'System' 'Exit')" || { printf 'exit'; return 0; }
+        case "${choice}" in 'First setup') printf 'setup' ;; 'Import existing Minecraft server') printf 'import' ;; 'Status') printf 'status' ;; 'Storage') printf 'storage' ;; 'System') printf 'system' ;; *) printf 'exit' ;; esac
     fi
 }
 
@@ -302,7 +291,6 @@ while true; do
     case "${action}" in
         setup) run_and_pause /usr/bin/mjust setup || true ;;
         import) run_and_pause /usr/bin/mjust import || true ;;
-        setup-advanced) run_and_pause /usr/bin/mjust setup-advanced || true ;;
         status) run_and_pause /usr/bin/mjust status || true ;;
         players) run_and_pause /usr/bin/mjust players || true ;;
         configure) configure_menu ;;
@@ -314,7 +302,7 @@ while true; do
         update) run_and_pause /usr/bin/mjust update-minecraft || true ;;
         system) system_menu ;;
         validate) run_and_pause /usr/bin/mjust validate || true ;;
-        logs) logs_menu ;;
+        logs) /usr/bin/mjust logs || true ;;
         advanced) advanced_menu ;;
         exit) exit 0 ;;
         *) echo 'Unknown menu selection.' >&2 ;;

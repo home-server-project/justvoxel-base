@@ -10,7 +10,7 @@ The interaction model is inspired by Universal Blue's `ujust` / `ugum` work in `
 
 JustVoxel remains a normal immutable AlmaLinux server underneath. Advanced administrators can still use normal Linux tools directly when they want deeper control.
 
-> JustVoxel is still under active development on the `testing` branch and remains under active validation before stable promotion.
+> JustVoxel is still under active development and remains under active validation before stable promotion. The unified Management API / mJust architecture and WebUI parity work are developed and validated on `testing`.
 
 ## How mjust is organized
 
@@ -27,6 +27,7 @@ The main areas are:
 - Minecraft/Paper updates
 - operating-system maintenance
 - live system resources
+- friendly and advanced NetworkManager configuration
 - validation and logs
 - advanced/reset tools
 
@@ -39,8 +40,6 @@ Safety checks live in the command/workflow layer, not only in the menu. Using a 
 It collects the settings needed to bring the appliance online, including Minecraft data location, Java and container memory, Java and optional Bedrock ports, timezone, maximum players, server message, Minecraft container-image policy, Minecraft/Paper version policy, backup target and schedule, backup retention, and Minecraft EULA acceptance.
 
 The normal flow tries to keep Linux-specific details out of the way. Memory values are suggested from installed physical RAM, but the user can change them.
-
-`mjust setup-advanced` uses the same setup implementation and exposes additional controls such as custom Minecraft data UID/GID values and a raw systemd backup schedule.
 
 Setup refuses to silently overwrite an already-configured JustVoxel installation.
 
@@ -76,7 +75,9 @@ The normal commands are:
 
 Stop and restart are player-aware. When Minecraft is running, JustVoxel checks players through internal RCON before interruption. If player state cannot be confirmed, the operation fails closed instead of guessing.
 
-When players are online, the user must explicitly approve the interruption. JustVoxel then uses the configured graceful Minecraft shutdown path.
+When no players are online, JustVoxel skips the container's fixed 60-second announcement delay and completes the graceful stop immediately. When players are online and the interruption is approved, JustVoxel keeps the 60-second grace period and sends in-game countdown notices at 60, 30, 15, 10, 5, 4, 3, 2, and 1 seconds before shutdown.
+
+The same adaptive shutdown path is reused by host reboot/poweroff and disruptive Minecraft maintenance so those workflows do not independently implement player timing.
 
 ## Players and whitelist
 
@@ -110,7 +111,14 @@ JustVoxel provides two restore levels.
 
 `mjust restore-full` restores the complete backed-up Minecraft persistent-data directory, including plugins, plugin data, and Minecraft-side configuration.
 
-Restore uses archive validation, staging, player-aware shutdown, an exact `RESTORE` confirmation, a pre-restore safety copy, SELinux relabeling, and post-restore runtime validation. If the restored server fails validation, JustVoxel attempts to return to the preserved pre-restore state.
+The Restore command is a thin Management API frontend. Backup discovery,
+compatibility decisions, archive validation, staging, player-safety policy,
+shutdown, data switching, SELinux handling, runtime validation and rollback are
+owned by the Management Agent and shared Restore backend. The terminal keeps the
+human-facing selection and exact `RESTORE` confirmation.
+
+If the terminal disconnects during a Restore, running `mjust restore` again
+reconnects to the persistent Restore operation and resumes progress display.
 
 See `RESTORE.md` for the detailed recovery model and boundaries.
 
@@ -144,19 +152,21 @@ Run `mjust storage` to open the storage-management menu.
 
 The current direct storage operations are:
 
-- `mjust storage-plan` — read-only storage/device overview
+- `mjust storage-plan` — read-only storage/device overview from the shared Management API discovery
 - `mjust storage-disk` — provision a dedicated whole disk or USB device
 - `mjust storage-partition` — adopt/use an existing partition
 - `mjust storage-free-space` — create a partition only in already-unallocated space
 - `mjust storage-network` — configure NFS or SMB/CIFS backup storage
 - `mjust storage-system` — use a normal directory on the system filesystem
-- `mjust storage-migrate` — move active Minecraft data to provisioned local storage
+- `mjust storage-migrate` — migrate active Minecraft data through the shared persistent Management API transaction
 
 Destructive storage actions require exact typed confirmations such as `ERASE /dev/...`, `FORMAT /dev/...`, or `CREATE PARTITION /dev/...`. A simple yes/no confirmation is not enough.
 
 JustVoxel protects detected system disks from whole-disk erase and does not automatically shrink existing filesystems or partitions.
 
-New local mounts created by mjust use filesystem UUIDs rather than temporary device names such as `/dev/sdb1`.
+New local mounts created by JustVoxel use filesystem UUIDs rather than temporary device names such as `/dev/sdb1`.
+
+Minecraft data migration is now API-owned: mjust only selects the Agent-discovered target, presents the reviewed plan, collects required confirmations, and monitors/reconnects to the persistent operation. Target provisioning, player safety, the cold backup, copy/verification, configuration switching, SELinux/runtime work, validation, and rollback are owned by the Management Agent and shared backend.
 
 See `STORAGE.md` for supported layouts, network storage, migration behavior, and storage safety rules.
 
@@ -169,15 +179,18 @@ The current system-management commands are:
 - `mjust os-status` — friendly bootc deployment status
 - `mjust os-update` — check for a newer JustVoxel OS image and optionally download/stage it
 - `mjust resources` — open the live btop resource monitor
+- `mjust net` — open the System → Network chooser for nm-hsp or nmtui
 - `mjust reboot` — player-aware graceful reboot
 - `mjust poweroff` — player-aware graceful power off
 - `mjust firmware` — reboot into firmware/UEFI setup when supported on physical hardware
 
 Checking or downloading a bootc OS update does not stop Minecraft, create a backup, or reboot the appliance. The staged deployment is used on the next normal reboot.
 
-Reboot and poweroff use the same player-awareness policy as other disruptive Minecraft operations.
+`mjust net` keeps networking inside the System area. It presents **nm-hsp** as the friendly Home Server Project interface for normal Ethernet, Wi-Fi, and easy network troubleshooting, while retaining **nmtui** as the classic advanced NetworkManager interface. No separate `mjust net-hsp` or `mjust nmtui` commands are exposed.
 
-`mjust firmware` is available only when the running system supports the physical-hardware firmware workflow and refuses unsupported/VM use.
+Reboot, poweroff, and firmware reboot are thin frontends over the Management API. The Management Agent owns host capability checks, player-aware Minecraft shutdown, and the final system action, allowing the future WebUI to use the same implementation.
+
+`mjust firmware` is available only when the Agent reports that the running HWS system supports the physical-hardware firmware workflow and refuses unsupported/VM use.
 
 A JustVoxel-aware bootc rollback workflow is not implemented. It remains a future roadmap item; see `ROADMAP.md`.
 
@@ -191,9 +204,11 @@ It requires an interactive terminal. Inside btop, `q` exits directly back to the
 
 ## Logs
 
-`mjust logs` follows the Minecraft systemd journal for troubleshooting.
+`mjust logs` shows a bounded recent Minecraft log view through the JustVoxel Management API.
 
-It is separate from the friendly status dashboard and the stricter validation workflow.
+The old advanced/full-system journal mode is intentionally not exposed through mJust. Administrators who need lower-level journal inspection can use standard Linux tools such as `journalctl` directly.
+
+Logs remain separate from the friendly status dashboard and the stricter validation workflow.
 
 ## Validation
 
@@ -273,7 +288,7 @@ See `MANAGEMENT.md` for how interactive mjust, direct commands, Web management, 
 
 ## Current development status
 
-The management, backup/restore, storage, system-status/update, resource-monitoring, and power-control flows are implemented on `testing`.
+The current unified Management API / mJust rebuild and recent WebUI parity work are implemented on `testing`.
 
 The priority remains validation and hardening before stable promotion. Validation covers the shared appliance behavior, including VM-ready operation, destructive/failure-path storage testing, backup and restore, migration, network-storage failure handling, Minecraft updates, installation/first-boot behavior, and hardware-dependent paths when the required capability is available.
 

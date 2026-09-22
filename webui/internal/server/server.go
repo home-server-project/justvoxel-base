@@ -98,6 +98,11 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("POST /settings/authentication", a.authenticationChange)
 	a.registerAdminUsersRoutes(mux)
 	a.registerAdminDiscoveryPages(mux)
+	a.registerAdminValidationPages(mux)
+	a.registerAdminRestorePages(mux)
+	a.registerAdminDataMigrationPages(mux)
+	a.registerAdminServerMigrationPages(mux)
+	a.registerAdminSystemActionPages(mux)
 	mux.HandleFunc("GET /api/dashboard-status", a.dashboardStatus)
 	mux.HandleFunc("POST /minecraft/start", a.minecraftAction("start"))
 	mux.HandleFunc("POST /minecraft/stop", a.minecraftAction("stop"))
@@ -112,7 +117,7 @@ func (a *App) ListenAndServe(addr string) error {
 		Handler:           a.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      100 * time.Second,
+		WriteTimeout:      210 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 	return srv.ListenAndServe()

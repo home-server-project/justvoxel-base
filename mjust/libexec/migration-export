@@ -1,307 +1,72 @@
 #!/usr/bin/bash
-set -Eeuo pipefail
-source /usr/libexec/justvoxel/mjust/common.sh
+set -euo pipefail
 source /usr/libexec/justvoxel/mjust/ui.sh
-source /usr/libexec/justvoxel/mjust/backup-common.sh
-source /usr/libexec/justvoxel/mjust/interrupt-safety.sh
-source /usr/libexec/justvoxel/mjust/migration-common.sh
-source /usr/libexec/justvoxel/mjust/migration-transport.sh
-require_root
-require_config
+source /usr/libexec/justvoxel/mjust/migration-api.sh
+(( EUID == 0 )) || { echo "ERROR: mjust export must run through sudo/root." >&2; exit 1; }
+(( $# <= 1 )) || { echo "Usage: migration-export [DESTINATION]" >&2; exit 2; }
 
-if (( $# > 1 )); then
-    echo 'Usage: migration-export [DESTINATION]' >&2
-    exit 2
+current="$(jv_migration_current_operation)" || exit 1
+current_id="$(jq -r '.operation.operation_id // empty' <<< "${current}")"
+current_type="$(jq -r '.operation.operation_type // empty' <<< "${current}")"
+if [[ -n ${current_id} ]]; then
+    if [[ ${current_type} == migration_export ]]; then jv_migration_monitor_operation "${current_id}" migration_export "Server migration Export"; exit $?; fi
+    echo "ERROR: another server migration operation is already active: ${current_type}" >&2; exit 1
 fi
 
-was_active=no
-restart_required=no
-partial=''
-transport_started=no
-removable_owned=no
-
-cleanup() {
-    local rc=$?
-    trap - EXIT INT TERM
-    if [[ -n ${partial:-} && -f ${partial} ]]; then
-        rm -f -- "${partial}" || true
-    fi
-    if [[ ${restart_required} == yes ]]; then
-        echo 'Restarting Minecraft after interrupted/failed export.' >&2
-        systemctl start minecraft.service || rc=1
-        restart_required=no
-    fi
-    if [[ ${transport_started} == yes ]]; then
-        jv_migration_transport_cleanup || rc=1
-    fi
-    exit "${rc}"
-}
-trap cleanup EXIT INT TERM
-
-/usr/libexec/justvoxel/mjust/validate-data-mount
-[[ -d ${DATA_PATH} ]] || { echo "ERROR: Minecraft data directory does not exist: ${DATA_PATH}" >&2; exit 1; }
-
-stamp="$(date +%Y-%m-%d-%H%M%S)"
-filename="justvoxel-migration-${stamp}.tar.gz"
+discovery="$(jv_migration_export_discovery)" || exit 1
+filename="$(jq -r '.suggested_filename' <<< "${discovery}")"
+kind=''; path=''; device=''; removable=false; source_ref=''; username=''; domain=''
 if (( $# == 1 )); then
     requested="$1"
-    if [[ ${requested} == *.tar.gz ]]; then
-        jv_migration_ensure_export_dir "$(dirname -- "${requested}")"
-        JV_MIGRATION_DESTINATION="$(realpath -m -- "${requested}")"
-    else
-        jv_migration_ensure_export_dir "${requested}"
-        JV_MIGRATION_DESTINATION="$(realpath -m -- "${requested}/${filename}")"
-    fi
-    [[ ! -e ${JV_MIGRATION_DESTINATION} && ! -e ${JV_MIGRATION_DESTINATION}.partial ]] || {
-        echo "ERROR: export destination already exists: ${JV_MIGRATION_DESTINATION}" >&2
-        exit 1
-    }
+    if [[ ${requested} == *.tar.gz ]]; then path="$(realpath -m -- "$(dirname -- "${requested}")")"; filename="$(basename -- "${requested}")"; else path="$(realpath -m -- "${requested}")"; fi
+    kind=local
 else
-    jui_has_tty || {
-        echo 'ERROR: interactive export destination selection requires a controlling terminal.' >&2
-        exit 1
-    }
-    transport_started=yes
-    if jv_migration_prepare_export_destination yes "${filename}"; then
-        [[ ${JV_MIGRATION_MEDIA_REMOVABLE:-no} == yes && -n ${JV_MIGRATION_OWNED_MOUNT:-} ]] && removable_owned=yes
-    else
-        rc=$?
-        (( rc == 2 )) && { echo 'Export cancelled.'; exit 0; }
-        exit "${rc}"
-    fi
+    jui_has_tty || { echo "ERROR: interactive export destination selection requires a controlling terminal." >&2; exit 1; }
+    options=("Local directory")
+    [[ $(jq -r '.configured_backup_available' <<< "${discovery}") == true ]] && options+=("Configured backup storage")
+    [[ $(jq -r '.devices | length' <<< "${discovery}") -gt 0 ]] && options+=("Existing disk / USB filesystem")
+    options+=("NFS share" "SMB/CIFS share" "Back")
+    choice="$(jui_choose "Migration export destination" "${options[@]}")" || exit 0
+    case "${choice}" in
+        "Local directory") kind=local; path="$(jui_input "Export directory" "/var/tmp")" || exit 0; path="$(realpath -m -- "${path}")" ;;
+        "Configured backup storage") kind=backup ;;
+        "Existing disk / USB filesystem")
+            mapfile -t devices < <(jq -r '.devices[].path' <<< "${discovery}")
+            labels=(); for dev in "${devices[@]}"; do labels+=("$(jq -r --arg d "${dev}" '.devices[] | select(.path==$d) | "\(.path)  \(.filesystem)  \(.model)"' <<< "${discovery}")"); done
+            labels+=("Back"); selected="$(jui_choose "Migration media" "${labels[@]}")" || exit 0; [[ ${selected} == Back ]] && exit 0
+            for i in "${!devices[@]}"; do [[ ${selected} == "${labels[$i]}" ]] && { device="${devices[$i]}"; removable="$(jq -r --arg d "${device}" '.devices[] | select(.path==$d) | .removable' <<< "${discovery}")"; break; }; done
+            kind=device ;;
+        "NFS share") kind=nfs; source_ref="$(jui_input "NFS share (server:/export)")" || exit 0 ;;
+        "SMB/CIFS share") kind=smb; source_ref="$(jui_input "SMB share (//server/share)")" || exit 0; username="$(jui_input "SMB username")" || exit 0; domain="$(jui_input "SMB domain (optional)" "")" || exit 0 ;;
+        *) exit 0 ;;
+    esac
 fi
-
-source_info="$(/usr/libexec/justvoxel/mjust/migration-archive inspect "${DATA_PATH}")"
-source_bytes="$(jq -r '.expandedBytes' <<< "${source_info}")"
-source_members="$(jq -r '.members' <<< "${source_info}")"
-
-export_fstype="$(findmnt -n -o FSTYPE --target "$(dirname -- "${JV_MIGRATION_DESTINATION}")" 2>/dev/null || true)"
-if [[ ${export_fstype} == vfat ]] && (( source_bytes >= 4294967295 )); then
-    echo 'ERROR: FAT32/vfat has a 4 GiB minus 1 byte single-file limit.' >&2
-    echo "Minecraft data is already $(jv_migration_human_bytes "${source_bytes}") uncompressed, so JustVoxel cannot guarantee the migration bundle will fit." >&2
-    echo 'Use exFAT, ext4, XFS, another supported filesystem, or a network/local destination.' >&2
-    exit 1
-fi
-
-available="$(jv_migration_available_bytes "$(dirname -- "${JV_MIGRATION_DESTINATION}")")" || {
-    echo 'ERROR: could not determine export destination free space.' >&2
-    exit 1
-}
-if (( available < source_bytes + 64 * 1024 * 1024 )); then
-    echo 'ERROR: export destination does not have enough free space for a conservative preflight.' >&2
-    echo "Minecraft data: $(jv_migration_human_bytes "${source_bytes}")" >&2
-    echo "Available:      $(jv_migration_human_bytes "${available}")" >&2
-    exit 1
-fi
-
-exec 9>"${JV_MAINTENANCE_LOCK}"
-if ! flock -n 9; then
-    echo 'ERROR: another JustVoxel Minecraft maintenance operation is already running.' >&2
-    exit 1
-fi
-
-server_reported=''
-geyser_reported=''
-plugins_reported=''
-if systemctl is-active --quiet minecraft.service; then
-    was_active=yes
-    server_reported="$(podman exec minecraft rcon-cli 'version' 2>/dev/null | head -n1 || true)"
-    geyser_reported="$(podman exec minecraft rcon-cli 'geyser version' 2>/dev/null | head -n1 || true)"
-    plugins_reported="$(podman exec minecraft rcon-cli 'plugins' 2>/dev/null | head -n1 || true)"
-    jv_player_check_before_interrupt 'Export server' || { echo 'Export cancelled.'; exit 0; }
-    echo 'Stopping Minecraft through its configured graceful shutdown path.'
-    restart_required=yes
-    systemctl stop minecraft.service
-    if systemctl is-active --quiet minecraft.service; then
-        echo 'ERROR: Minecraft is still active; export will not start.' >&2
-        exit 1
-    fi
-else
-    echo 'Minecraft was already stopped; it will remain stopped after export.'
-fi
-
-# Reinspect after the cold stop so manifest counts match the captured data tree.
-source_info="$(/usr/libexec/justvoxel/mjust/migration-archive inspect "${DATA_PATH}")"
-source_bytes="$(jq -r '.expandedBytes' <<< "${source_info}")"
-source_members="$(jq -r '.members' <<< "${source_info}")"
-detection="$(/usr/libexec/justvoxel/mjust/migration-archive detect "${DATA_PATH}")"
-candidate_count="$(jq -r '.candidates | length' <<< "${detection}")"
-(( candidate_count == 1 )) || {
-    echo "ERROR: active JustVoxel data did not resolve to exactly one Minecraft server root (found ${candidate_count})." >&2
-    exit 1
-}
-candidate="$(jq -c '.candidates[0]' <<< "${detection}")"
-online_mode="$(jq -r '.onlineMode // empty' <<< "${candidate}")"
-[[ ${online_mode} == true ]] || {
-    echo 'ERROR: active JustVoxel server did not confirm online-mode=true; refusing to create a portable native bundle.' >&2
-    exit 1
-}
-
-configured_game_mode="${GAME_MODE:-survival}"
-configured_difficulty="${DIFFICULTY:-normal}"
-configured_whitelist="${WHITELIST_ENABLED:-yes}"
-configured_enforce="${ENFORCE_WHITELIST:-yes}"
-configured_bedrock_plugins="${BEDROCK_MANAGED_PLUGINS:-yes}"
-source_version="$(jq -r '.minecraftVersion // empty' <<< "${candidate}")"
-[[ -n ${source_version} ]] || {
-    if [[ ${MINECRAFT_VERSION_MODE} == pinned && ${MINECRAFT_VERSION} != LATEST ]]; then source_version="${MINECRAFT_VERSION}"; fi
-}
-[[ -n ${source_version} ]] || {
-    echo 'ERROR: exact Minecraft version could not be determined for the source server.' >&2
-    exit 1
-}
-
-image_ref="$(minecraft_image_ref)"
-image_digest="$(podman image inspect "${image_ref}" --format '{{.Digest}}' 2>/dev/null || true)"
-variant="$(cat /usr/lib/justvoxel/variant 2>/dev/null || true)"
-bootc_json="$(bootc status --json --format-version=1 2>/dev/null || true)"
-bootc_ref=''
-bootc_digest=''
-if jq -e '.apiVersion == "org.containers.bootc/v1"' >/dev/null 2>&1 <<< "${bootc_json}"; then
-    bootc_ref="$(jq -r '.status.booted.image.image.image // empty' <<< "${bootc_json}")"
-    bootc_digest="$(jq -r '.status.booted.image.imageDigest // empty' <<< "${bootc_json}")"
-fi
-
-install -d -m0700 -o root -g root "${JV_MIGRATION_RUN_ROOT}"
-manifest_tmp="$(mktemp "${JV_MIGRATION_RUN_ROOT}/manifest.XXXXXX.json")"
-chmod 0600 "${manifest_tmp}"
-trap 'rm -f -- "${manifest_tmp}" 2>/dev/null || true; cleanup' EXIT INT TERM
-
-created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-bundle_id="$(cat /proc/sys/kernel/random/uuid)"
-plugin_jars="$(jq -c '.pluginJars' <<< "${candidate}")"
-plugin_count="$(jq -r '.pluginJarCount' <<< "${candidate}")"
-floodgate_key_sha="$(jq -r '.floodgateKeySha256 // empty' <<< "${candidate}")"
-geyser_enabled="$(jq -r '.geyserEnabled' <<< "${candidate}")"
-floodgate_enabled="$(jq -r '.floodgateEnabled' <<< "${candidate}")"
-
-jq -n \
-    --arg schema "${JV_MIGRATION_SCHEMA}" \
-    --argjson schemaVersion "${JV_MIGRATION_SCHEMA_VERSION}" \
-    --arg createdAt "${created_at}" \
-    --arg bundleId "${bundle_id}" \
-    --arg variant "${variant}" \
-    --arg architecture "$(uname -m)" \
-    --arg bootcImage "${bootc_ref}" \
-    --arg bootcDigest "${bootc_digest}" \
-    --arg version "${source_version}" \
-    --arg reportedVersion "${server_reported}" \
-    --arg gameMode "${configured_game_mode}" \
-    --arg difficulty "${configured_difficulty}" \
-    --argjson whitelistEnabled "$([[ ${configured_whitelist} == yes ]] && echo true || echo false)" \
-    --argjson enforceWhitelist "$([[ ${configured_enforce} == yes ]] && echo true || echo false)" \
-    --arg maxPlayers "${MAX_PLAYERS}" \
-    --arg motd "${MOTD}" \
-    --arg javaPort "${JAVA_PORT}" \
-    --arg bedrockPort "${BEDROCK_PORT}" \
-    --argjson bedrockEnabled "$([[ ${BEDROCK_ENABLED} == yes ]] && echo true || echo false)" \
-    --arg geyserVersion "${geyser_reported}" \
-    --argjson geyserEnabled "${geyser_enabled}" \
-    --argjson floodgateEnabled "${floodgate_enabled}" \
-    --arg floodgateKeySha256 "${floodgate_key_sha}" \
-    --arg image "${image_ref}" \
-    --arg imageDigest "${image_digest}" \
-    --argjson pluginCount "${plugin_count}" \
-    --argjson pluginJars "${plugin_jars}" \
-    --argjson dataBytes "${source_bytes}" \
-    --argjson dataMembers "${source_members}" \
-    --argjson managedBedrockPlugins "$([[ ${configured_bedrock_plugins} == yes ]] && echo true || echo false)" \
-    '{
-        schema: $schema,
-        schemaVersion: $schemaVersion,
-        createdAt: $createdAt,
-        bundleId: $bundleId,
-        source: {
-            type: "justvoxel",
-            variant: (if $variant == "" then null else $variant end),
-            architecture: $architecture,
-            bootcImage: (if $bootcImage == "" then null else $bootcImage end),
-            bootcDigest: (if $bootcDigest == "" then null else $bootcDigest end)
-        },
-        minecraft: {
-            implementation: "paper",
-            version: $version,
-            reportedVersion: (if $reportedVersion == "" then null else $reportedVersion end),
-            onlineMode: true,
-            gameMode: $gameMode,
-            difficulty: $difficulty,
-            whitelistEnabled: $whitelistEnabled,
-            enforceWhitelist: $enforceWhitelist,
-            maxPlayers: ($maxPlayers | tonumber),
-            motd: $motd
-        },
-        networkHints: {
-            javaPort: ($javaPort | tonumber),
-            bedrockPort: ($bedrockPort | tonumber)
-        },
-        bedrock: {
-            enabled: $bedrockEnabled,
-            geyserEnabled: $geyserEnabled,
-            geyserVersion: (if $geyserVersion == "" then null else $geyserVersion end),
-            floodgateEnabled: $floodgateEnabled,
-            floodgateKeySha256: (if $floodgateKeySha256 == "" then null else $floodgateKeySha256 end),
-            managedPluginDownloads: $managedBedrockPlugins
-        },
-        container: {
-            image: $image,
-            digest: (if $imageDigest == "" then null else $imageDigest end)
-        },
-        plugins: {
-            count: $pluginCount,
-            jars: $pluginJars
-        },
-        data: {
-            root: "server",
-            bytes: $dataBytes,
-            members: $dataMembers
-        },
-        integrity: {
-            algorithm: "sha256",
-            index: "integrity/files.json",
-            authentication: false
-        }
-    }' > "${manifest_tmp}"
-
-partial="${JV_MIGRATION_DESTINATION}.partial"
-echo "Creating portable migration bundle: ${JV_MIGRATION_DESTINATION}"
-/usr/libexec/justvoxel/mjust/migration-archive create-native "${DATA_PATH}" "${manifest_tmp}" "${partial}"
-
-echo 'Verifying migration bundle structure and SHA-256 integrity.'
-/usr/libexec/justvoxel/mjust/migration-archive verify-native "${partial}" >/dev/null
-sync -f -- "${partial}" 2>/dev/null || sync
-mv -- "${partial}" "${JV_MIGRATION_DESTINATION}"
-partial=''
-sync -f -- "${JV_MIGRATION_DESTINATION}" 2>/dev/null || sync
-rm -f -- "${manifest_tmp}"
-manifest_tmp=''
-
-if [[ ${restart_required} == yes ]]; then
-    echo 'Starting Minecraft.'
-    systemctl start minecraft.service
-    restart_required=no
-    wait_for_rcon 900 || {
-        echo 'ERROR: export completed, but Minecraft did not become RCON-ready after restart.' >&2
-        exit 1
-    }
-fi
-
-size="$(stat -c '%s' "${JV_MIGRATION_DESTINATION}")"
-if [[ ${transport_started} == yes ]]; then
-    if [[ -n ${JV_MIGRATION_OWNED_MOUNT:-} ]]; then
-        sync
-    fi
-    jv_migration_transport_cleanup
-    transport_started=no
-fi
-
-trap - EXIT INT TERM
-
+request="$(jq -cn --arg kind "${kind}" --arg path "${path}" --arg device "${device}" --argjson removable "${removable}" --arg source "${source_ref}" --arg username "${username}" --arg domain "${domain}" --arg filename "${filename}" '{kind:$kind,path:$path,device:$device,removable:$removable,source:$source,username:$username,domain:$domain,filename:$filename}')"
+plan="$(jv_migration_export_plan "${request}")" || exit 1
+fingerprint="$(jq -r '.plan_fingerprint // empty' <<< "${plan}")"
+[[ -n ${fingerprint} ]] || { echo "ERROR: Export plan did not return a review fingerprint." >&2; exit 1; }
 echo
-echo 'Export completed successfully.'
-echo "File: ${JV_MIGRATION_DESTINATION}"
-echo "Size: $(jv_migration_human_bytes "${size}")"
-echo 'Integrity: SHA-256 file index verified (corruption detection; not source authentication).'
-if [[ ${removable_owned} == yes ]]; then
-    echo 'Device unmounted.'
-    echo 'It is safe to remove the USB device.'
+echo "Migration Export plan"
+echo "---------------------"
+echo "Target: $(jq -r '.normalized.target_display' <<< "${plan}")"
+echo "Minecraft data: $(jq -r '.normalized.data_path' <<< "${plan}")"
+while IFS= read -r warning; do [[ -n ${warning} ]] && echo "WARNING: ${warning}"; done < <(jq -r '.warnings[].message?' <<< "${plan}")
+players_confirmed=false
+if [[ $(jq -r '.requirements.players_confirmation_required' <<< "${plan}") == true ]]; then
+    jui_has_tty || { echo "ERROR: players are online and confirmation requires a terminal." >&2; exit 1; }
+    echo "Players online: $(jq -r '.requirements.players | join(", ")' <<< "${plan}")"
+    jui_confirm "Continue with the normal graceful shutdown path?" || { echo "Export cancelled."; exit 0; }
+    players_confirmed=true
 fi
+if (( $# == 0 )); then jui_confirm "Create this migration Export?" || { echo "Export cancelled."; exit 0; }; fi
+smb_password=''
+if [[ $(jq -r '.requirements.smb_password_required' <<< "${plan}") == true ]]; then
+    jui_has_tty || { echo "ERROR: SMB password requires a terminal." >&2; exit 1; }
+    printf "SMB password: " >/dev/tty; IFS= read -rs smb_password </dev/tty; echo >/dev/tty
+fi
+apply="$(jq -cn --arg fingerprint "${fingerprint}" --argjson request "${request}" --argjson players "${players_confirmed}" --arg password "${smb_password}" '{plan_fingerprint:$fingerprint,request:$request,export_confirmed:true,players_confirmed:$players,smb_password:$password}')"
+response="$(jv_migration_export_apply "${apply}")" || exit 1
+smb_password=""
+id="$(jq -r '.operation.operation_id // empty' <<< "${response}")"
+[[ -n ${id} ]] || { echo "ERROR: Management Agent did not return an Export operation." >&2; exit 1; }
+jv_migration_monitor_operation "${id}" migration_export "Server migration Export"

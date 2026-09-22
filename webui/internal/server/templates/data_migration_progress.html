@@ -1,0 +1,18 @@
+{{define "data_migration_progress.html"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JustVoxel - Minecraft data migration progress</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js" defer></script><script src="/static/data-migration-operation.js" defer></script></head>
+<body class="role-administrator">{{template "app-header" .}}
+<main>
+  <div class="title-row"><div><p class="eyebrow">Administrator · data migration</p><h1>Minecraft data migration</h1></div><span class="badge" id="data-migration-operation-state">{{.StateLabel}}</span></div>
+  <section class="panel" data-data-migration-operation data-status-url="/api/data-migration/progress/{{.Operation.OperationID}}">
+    <p id="data-migration-operation-status">{{.Operation.Status}}</p>
+    <div class="details">Stage: <strong id="data-migration-operation-stage">{{.StageLabel}}</strong><br>Operation: <code>{{.Operation.OperationID}}</code></div>
+
+    <div class="notice" id="data-migration-reconnect-note" hidden><strong>Reconnecting to JustVoxel…</strong><br>Migration may still be running. Refreshing this page does not start another migration.</div>
+    <div class="notice success" id="data-migration-operation-success" {{if ne .Operation.State "succeeded"}}hidden{{end}}><strong>Minecraft data migration completed successfully.</strong><br>The migrated storage/runtime passed validation. The old Minecraft data was intentionally retained.</div>
+    <div class="notice warning" id="data-migration-operation-rollback" {{if ne .Operation.State "rolled_back"}}hidden{{end}}><strong>Migration rolled back safely.</strong><br>The original Minecraft configuration/runtime remains active. Reviewed target-storage preparation may remain.</div>
+    <div class="notice error" id="data-migration-operation-attention" {{if ne .Operation.State "needs_attention"}}hidden{{end}}><strong>Migration needs administrator attention.</strong><br>Do not start another migration until the preserved recovery state is reviewed.</div>
+    <div class="action-row"><a class="button-link" id="data-migration-dashboard-link" href="/" {{if ne .Operation.State "succeeded"}}hidden{{end}}>Open dashboard</a><a class="button-link secondary" href="/settings/data-migration">Minecraft data storage</a></div>
+  </section>
+  <p class="muted">Progress is stored by the JustVoxel Management Agent. Closing, refreshing, or reopening this operation URL reconnects to the same migration.</p>
+  <p class="foot">WebUI {{.Version}} · Management API {{.ManagementAPI}}</p>
+</main></body></html>{{end}}

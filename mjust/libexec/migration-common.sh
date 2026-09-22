@@ -3,6 +3,43 @@
 readonly JV_MIGRATION_SCHEMA='org.justvoxel.migration'
 readonly JV_MIGRATION_SCHEMA_VERSION=1
 readonly JV_MIGRATION_RUN_ROOT=/run/justvoxel-migration
+readonly JV_MIGRATION_RECOVERY_ROOT=/var/lib/justvoxel/management/migration-recovery
+
+jv_migration_recovery_key() {
+    printf '%s' "$1" | sha256sum | awk '{print $1}'
+}
+
+jv_migration_register_recovery() {
+    local transaction="$1" canonical key tmp
+    canonical="$(realpath -m -- "${transaction}")"
+    [[ -d ${canonical} && ! -L ${canonical} && $(basename -- "${canonical}") == .justvoxel-import-* && -r ${canonical}/state ]] || return 1
+    install -d -m0700 -o root -g root "${JV_MIGRATION_RECOVERY_ROOT}"
+    key="$(jv_migration_recovery_key "${canonical}")"
+    tmp="$(mktemp "${JV_MIGRATION_RECOVERY_ROOT}/.recovery.XXXXXX")"
+    chmod 0600 "${tmp}"
+    printf '%s\n' "${canonical}" > "${tmp}"
+    mv -f -- "${tmp}" "${JV_MIGRATION_RECOVERY_ROOT}/${key}"
+}
+
+jv_migration_clear_recovery() {
+    local transaction="$1" canonical key
+    canonical="$(realpath -m -- "${transaction}")"
+    key="$(jv_migration_recovery_key "${canonical}")"
+    rm -f -- "${JV_MIGRATION_RECOVERY_ROOT}/${key}"
+}
+
+jv_migration_registered_recoveries() {
+    local record transaction canonical
+    [[ -d ${JV_MIGRATION_RECOVERY_ROOT} && ! -L ${JV_MIGRATION_RECOVERY_ROOT} ]] || return 0
+    while IFS= read -r -d '' record; do
+        [[ -f ${record} && ! -L ${record} ]] || continue
+        IFS= read -r transaction < "${record}" || continue
+        [[ ${transaction} == /* ]] || continue
+        canonical="$(realpath -m -- "${transaction}")"
+        [[ ${canonical} == "${transaction}" && -d ${canonical} && ! -L ${canonical} && $(basename -- "${canonical}") == .justvoxel-import-* && -r ${canonical}/state ]] || continue
+        printf '%s\n' "${canonical}"
+    done < <(find "${JV_MIGRATION_RECOVERY_ROOT}" -maxdepth 1 -type f -print0 2>/dev/null)
+}
 
 jv_migration_human_bytes() {
     numfmt --to=iec-i --suffix=B "$1" 2>/dev/null || printf '%s bytes' "$1"

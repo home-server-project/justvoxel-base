@@ -1,29 +1,79 @@
 #!/usr/bin/bash
 set -euo pipefail
-source /usr/libexec/justvoxel/mjust/common.sh
-source /usr/libexec/justvoxel/mjust/interrupt-safety.sh
-require_root
-require_config
+
+readonly api_client=/usr/libexec/justvoxel/mjust/api-client
+
+if (( EUID != 0 )); then
+    echo 'ERROR: this operation must run as root.' >&2
+    exit 1
+fi
 
 action="${1:-}"
-
 case "${action}" in
-    start)
-        systemctl start minecraft.service
-        echo 'Minecraft start requested.'
-        ;;
-    stop)
-        jv_player_check_before_interrupt 'Stop Minecraft'
-        systemctl stop minecraft.service
-        echo 'Minecraft stopped.'
-        ;;
-    restart)
-        jv_player_check_before_interrupt 'Restart Minecraft'
-        systemctl restart minecraft.service
-        echo 'Minecraft restarted.'
-        ;;
+    start|stop|restart) ;;
     *)
         echo 'Usage: service {start|stop|restart}' >&2
         exit 2
         ;;
 esac
+
+api_action() {
+    local confirm_players="${1:-false}" response rc message
+
+    set +e
+    response="$(printf '{"confirm_players":%s}\n' "${confirm_players}" | "${api_client}" POST "/v1/minecraft/${action}" --data)"
+    rc=$?
+    set -e
+
+    if (( rc != 0 )); then
+        if jq -e 'type == "object"' <<<"${response}" >/dev/null 2>&1; then
+            message="$(jq -r '.error // .message // empty' <<<"${response}")"
+            if [[ -n ${message} ]]; then
+                printf 'ERROR: %s\n' "${message}" >&2
+                return 1
+            fi
+        fi
+        echo "ERROR: Minecraft ${action} request failed through the JustVoxel Management API." >&2
+        return 1
+    fi
+
+    if ! jq -e 'type == "object"' <<<"${response}" >/dev/null 2>&1; then
+        echo 'ERROR: JustVoxel Management API returned invalid Minecraft control data.' >&2
+        return 1
+    fi
+
+    printf '%s' "${response}"
+}
+
+response="$(api_action false)"
+
+if [[ $(jq -r '.confirmation_required // false' <<<"${response}") == true ]]; then
+    names="$(jq -r '.players // [] | join(", ")' <<<"${response}")"
+    if [[ -n ${names} ]]; then
+        echo "Players online: ${names}"
+    else
+        online="$(jq -r '.online // 0' <<<"${response}")"
+        echo "Players online: ${online}"
+    fi
+
+    read -r -p "Players appear to be online. ${action^} Minecraft anyway? [y/N]: " answer
+    if [[ ${answer,,} != y && ${answer,,} != yes ]]; then
+        echo 'Cancelled.'
+        exit 0
+    fi
+
+    response="$(api_action true)"
+fi
+
+if [[ $(jq -r '.ok // false' <<<"${response}") != true ]]; then
+    message="$(jq -r '.message // .error // "Minecraft control request was not accepted."' <<<"${response}")"
+    printf 'ERROR: %s\n' "${message}" >&2
+    exit 1
+fi
+
+message="$(jq -r '.message // empty' <<<"${response}")"
+if [[ -n ${message} ]]; then
+    printf '%s\n' "${message}"
+else
+    printf 'Minecraft %s requested.\n' "${action}"
+fi

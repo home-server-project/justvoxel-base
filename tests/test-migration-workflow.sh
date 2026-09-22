@@ -11,8 +11,27 @@ import_files=(
     "${repo_root}/mjust/libexec/migration-import-activate.sh"
 )
 import_text="$(cat "${import_files[@]}")"
-exporter="${repo_root}/mjust/libexec/migration-export"
+import_frontend="${repo_root}/mjust/libexec/migration-import"
+import_backend="${repo_root}/mjust/libexec/migration-import-backend"
+grep -Fq 'migration-api.sh' "${import_frontend}" || fail 'migration Import frontend does not use the shared API helper'
+grep -Fq 'jv_migration_import_plan_review' "${import_frontend}" || fail 'migration Import frontend does not plan through the Agent'
+grep -Fq 'jv_migration_import_apply' "${import_frontend}" || fail 'migration Import frontend does not apply through the Agent'
+grep -Fq 'Attached disk / partition' "${import_frontend}" || fail 'migration Import attached-disk source choice missing'
+grep -Fq 'USB / removable storage' "${import_frontend}" || fail 'migration Import removable source choice missing'
+grep -Fq 'Configured JustVoxel backup storage' "${import_frontend}" || fail 'migration Import configured-backup source choice missing'
+grep -Fq 'Temporary NFS share' "${import_frontend}" || fail 'migration Import NFS source choice missing'
+grep -Fq 'Temporary SMB/CIFS share' "${import_frontend}" || fail 'migration Import SMB source choice missing'
+grep -Fq 'source_selection_required' "${import_frontend}" || fail 'migration Import transport source-entry review missing'
+grep -Fq 'jv_migration_monitor_operation' "${import_frontend}" || fail 'migration Import frontend does not monitor the persistent Agent operation'
+grep -Fq 'interrupt-safety.sh' "${import_backend}" || fail 'shared migration import backend does not load interruption safety'
+grep -Fq 'JV_MIGRATION_API_MODE' "${import_backend}" || fail 'shared migration Import backend has no non-interactive Agent mode'
+for api_file in "${repo_root}/mjust/libexec/migration-import-common.sh" "${repo_root}/mjust/libexec/migration-import-plan-source.sh" "${repo_root}/mjust/libexec/migration-import-plan-destination.sh" "${repo_root}/mjust/libexec/migration-import-activate.sh"; do
+    grep -Fq 'JV_MIGRATION_API_MODE' "${api_file}" || fail "Import backend component lacks Agent-mode handling: ${api_file}"
+done
+export_frontend="${repo_root}/mjust/libexec/migration-export"
+exporter="${repo_root}/mjust/libexec/migration-export-backend"
 recovery="${repo_root}/mjust/libexec/migration-recover"
+recovery_backend="${repo_root}/mjust/libexec/migration-recover-backend"
 transport_files=(
     "${repo_root}/mjust/libexec/migration-transport.sh"
     "${repo_root}/mjust/libexec/migration-transport-device.sh"
@@ -20,9 +39,10 @@ transport_files=(
     "${repo_root}/mjust/libexec/migration-transport-ui.sh"
 )
 transport_text="$(cat "${transport_files[@]}")"
+import_source_helper="${repo_root}/mjust/libexec/migration-import-source.sh"
 common="${repo_root}/mjust/libexec/common.sh"
 migration_common="${repo_root}/mjust/libexec/migration-common.sh"
-validate="${repo_root}/mjust/libexec/validate"
+validate_backend="${repo_root}/mjust/libexec/validate-backend"
 template="${repo_root}/templates/config/minecraft.env.in"
 menu="${repo_root}/mjust/libexec/menu"
 justfile="${repo_root}/mjust/justfile"
@@ -42,6 +62,7 @@ for text in \
     'jv_migration_assert_fresh_selinux_path' \
     'jv_migration_remove_fresh_selinux_rule' \
     'restore-runtime-validate' \
+    'jv_stop_minecraft_adaptive' \
     '/usr/libexec/justvoxel/mjust/validate' \
     'JUSTVOXEL_REGENERATE_RCON=1' \
     'online-mode=false' \
@@ -49,13 +70,20 @@ for text in \
     'mjust migration-recover'; do
     grep -Fq "${text}" <<< "${import_text}" || fail "import workflow invariant missing: ${text}"
 done
+grep -Fq 'migration-api.sh' "${export_frontend}" || fail 'migration Export frontend does not use shared API helper'
 for text in '.partial' 'verify-native' 'flock -n' 'jv_player_check_before_interrupt' 'sync -f' 'mv -- "${partial}"'; do
-    grep -Fq "${text}" "${exporter}" || fail "export workflow invariant missing: ${text}"
+    grep -Fq "${text}" "${exporter}" || fail "shared export backend invariant missing: ${text}"
 done
 for fs in ext4 xfs btrfs vfat exfat; do
     grep -Fq "${fs}" <<< "${transport_text}" || fail "temporary media allowlist missing ${fs}"
 done
 grep -Fq 'NTFS removable media is not supported' <<< "${transport_text}" || fail 'NTFS refusal is missing'
+grep -Fq 'jv_migration_import_source_prepare' "${import_source_helper}" || fail 'shared Import source resolver is missing'
+grep -Fq 'jv_migration_import_source_entries_json' "${import_source_helper}" || fail 'shared Import source candidate discovery is missing'
+grep -Fq 'jv_migration_import_source_cleanup' "${import_source_helper}" || fail 'shared Import source cleanup is missing'
+bash -n "${import_source_helper}" || fail 'shared Import source resolver failed bash syntax validation'
+grep -Fq 'source_kinds:["local","backup","device","nfs","smb"]' "${repo_root}/mjust/libexec/admin-migration-import-plan-json" || fail 'Import discovery does not advertise full source transport parity'
+grep -Fq 'JV_MIGRATION_IMPORT_SOURCE_IDENTITY' "${repo_root}/mjust/libexec/admin-migration-import-transaction-json" || fail 'Import execution does not revalidate remounted source identity'
 if grep -Fq 'storage_write_network_fstab' <<< "${transport_text}"; then fail 'temporary migration transport must not write fstab'; fi
 grep -Fq 'JV_MIGRATION_SMB_CREDENTIALS="${JV_MIGRATION_TRANSPORT_ROOT}/smb.credentials"' <<< "${transport_text}" || fail 'temporary SMB credentials are not under /run transport state'
 grep -Fq 'chmod 0600 "${JV_MIGRATION_SMB_CREDENTIALS}"' <<< "${transport_text}" || fail 'temporary SMB credentials are not mode 0600'
@@ -66,15 +94,19 @@ grep -Fq 'GAME_MODE="${GAME_MODE:-survival}"' "${common}" || fail 'backward-comp
 grep -Fq 'WHITELIST_ENABLED="${WHITELIST_ENABLED:-yes}"' "${common}" || fail 'backward-compatible whitelist default missing'
 grep -Fq 'JUSTVOXEL_REGENERATE_RCON' "${common}" || fail 'RCON regeneration support missing'
 
-grep -Fq 'critical-rollback|rolled-back' "${recovery}" || fail 'migration recovery must limit automatic finalization to completed rollback states'
-grep -Fq '/usr/libexec/justvoxel/mjust/restore-runtime-validate' "${recovery}" || fail 'migration recovery must validate the restored Minecraft runtime'
-grep -Fq 'FINALIZE ROLLBACK' "${recovery}" || fail 'migration recovery destructive confirmation missing'
-grep -Fq 'rm -rf -- "${transaction}"' "${recovery}" || fail 'migration recovery finalization cleanup missing'
+grep -Fq 'migration-api.sh' "${recovery}" || fail 'migration Recovery frontend does not use shared API helper'
+grep -Fq 'jv_migration_recovery_plan' "${recovery}" || fail 'migration Recovery frontend does not plan through the Agent'
+grep -Fq 'jv_migration_recovery_apply' "${recovery}" || fail 'migration Recovery frontend does not apply through the Agent'
+grep -Fq 'rolled-back-fresh' "${recovery_backend}" || fail 'fresh unconfigured rollback recovery is not supported'
+grep -Fq '/usr/libexec/justvoxel/mjust/restore-runtime-validate' "${recovery_backend}" || fail 'configured migration recovery must validate the restored Minecraft runtime'
+grep -Fq 'jv_migration_runtime_paths' "${recovery_backend}" || fail 'fresh migration recovery does not prove generated runtime files are absent'
+grep -Fq 'FINALIZE ROLLBACK' "${recovery_backend}" || fail 'migration recovery destructive confirmation missing'
+grep -Fq 'jv_migration_clear_recovery' "${recovery_backend}" || fail 'migration recovery registry cleanup missing'
 
-grep -Fq "warn '/dev/zram0 is not available" "${validate}" || fail 'missing advisory zram-disabled validation path'
-grep -Fq "warn 'zram0 is not active as swap" "${validate}" || fail 'missing advisory zram-inactive validation path'
-if grep -Fq "fail '/dev/zram0 is not available" "${validate}"; then fail 'zram absence must not be a fatal appliance validation failure'; fi
-if grep -Fq "fail 'zram0 is not active as swap" "${validate}"; then fail 'zram inactivity must not be a fatal appliance validation failure'; fi
+grep -Fq "warn '/dev/zram0 is not available" "${validate_backend}" || fail 'missing advisory zram-disabled validation path'
+grep -Fq "warn 'zram0 is not active as swap" "${validate_backend}" || fail 'missing advisory zram-inactive validation path'
+if grep -Fq "fail '/dev/zram0 is not available" "${validate_backend}"; then fail 'zram absence must not be a fatal appliance validation failure'; fi
+if grep -Fq "fail 'zram0 is not active as swap" "${validate_backend}"; then fail 'zram inactivity must not be a fatal appliance validation failure'; fi
 
 grep -Fq 'Migration' "${menu}" || fail 'Migration TUI missing'
 grep -Fq 'Import existing Minecraft server' "${menu}" || fail 'fresh-appliance import entry missing'

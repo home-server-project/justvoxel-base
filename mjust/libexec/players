@@ -1,34 +1,74 @@
 #!/usr/bin/bash
 set -euo pipefail
-source /usr/libexec/justvoxel/mjust/common.sh
-require_root
-require_config
 
-if ! systemctl is-active --quiet minecraft.service; then
-    echo 'Minecraft is stopped.'
-    echo 'Player information is unavailable until the server is running.'
-    exit 0
-fi
+readonly api_client=/usr/libexec/justvoxel/mjust/api-client
 
-players="$(podman exec minecraft rcon-cli 'list' 2>/dev/null || true)"
-if [[ -z ${players} ]]; then
-    echo 'Players: Unknown'
-    echo 'RCON player query failed.'
+if (( EUID != 0 )); then
+    echo 'ERROR: this operation must run as root.' >&2
     exit 1
 fi
 
-if [[ ${players} =~ There[[:space:]]are[[:space:]]([0-9]+)[[:space:]]of[[:space:]]a[[:space:]]max[[:space:]]of[[:space:]]([0-9]+)[[:space:]]players[[:space:]]online:?([[:space:]]*)(.*) ]]; then
-    online="${BASH_REMATCH[1]}"
-    maximum="${BASH_REMATCH[2]}"
-    names="${BASH_REMATCH[4]}"
-    echo "Players online: ${online} / ${maximum}"
-    if (( online == 0 )); then
-        echo 'No players are currently online.'
-    elif [[ -n ${names} ]]; then
-        echo "Online: ${names}"
+set +e
+response="$("${api_client}" GET /v1/players)"
+rc=$?
+set -e
+
+if (( rc != 0 )); then
+    if jq -e 'type == "object" and (.error | type == "string")' <<<"${response}" >/dev/null 2>&1; then
+        printf 'ERROR: %s\n' "$(jq -r '.error' <<<"${response}")" >&2
     else
-        echo "${players}"
+        echo 'ERROR: player information is unavailable from the JustVoxel Management API.' >&2
     fi
-else
-    echo "${players}"
+    exit 1
 fi
+
+if ! jq -e '
+    type == "object" and
+    (.configured | type == "boolean") and
+    (.state | type == "string") and
+    (.online | type == "number") and
+    (.max | type == "number") and
+    (.names | type == "array")
+' <<<"${response}" >/dev/null 2>&1; then
+    echo 'ERROR: JustVoxel Management API returned invalid player information.' >&2
+    exit 1
+fi
+
+configured="$(jq -r '.configured' <<<"${response}")"
+state="$(jq -r '.state' <<<"${response}")"
+online="$(jq -r '.online' <<<"${response}")"
+maximum="$(jq -r '.max' <<<"${response}")"
+
+if [[ ${configured} != true || ${state} == not_configured ]]; then
+    echo 'ERROR: JustVoxel has not been configured yet. Run: mjust setup' >&2
+    exit 1
+fi
+
+case "${state}" in
+    stopped)
+        echo 'Minecraft is stopped.'
+        echo 'Player information is unavailable until the server is running.'
+        ;;
+    unavailable)
+        echo 'Players: Unknown'
+        jq -r '.error // "Player information is unavailable."' <<<"${response}"
+        exit 1
+        ;;
+    running)
+        echo "Players online: ${online} / ${maximum}"
+        if (( online == 0 )); then
+            echo 'No players are currently online.'
+        else
+            names="$(jq -r '.names | join(", ")' <<<"${response}")"
+            if [[ -n ${names} ]]; then
+                echo "Online: ${names}"
+            else
+                echo 'Online player names are unavailable.'
+            fi
+        fi
+        ;;
+    *)
+        echo "ERROR: unsupported player state from JustVoxel Management API: ${state}" >&2
+        exit 1
+        ;;
+esac

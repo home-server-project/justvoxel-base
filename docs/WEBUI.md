@@ -76,6 +76,46 @@ In **System account** mode, recovery changes the real local `voxel` password usi
 
 In **Separate WebUI password** mode, recovery resets only the WebUI-local credential. The Linux `voxel` password is not modified.
 
+## System validation
+
+Administrator users can open **Administration -> Validation** to run the same authoritative appliance validation used by `mjust validate`.
+
+The WebUI calls `GET /v1/admin/validation` through the local Management API. It does not run systemd, Podman, RCON, firewall, storage, or other validation checks directly. The Management Agent executes the shared validation backend and returns its result.
+
+The page deliberately distinguishes three outcomes:
+
+- validation passed;
+- validation completed and the backend detected one or more problems;
+- the validation service/API was unavailable and no validation result was produced.
+
+For troubleshooting, the backend validation output is displayed without the WebUI independently reclassifying individual checks. The Validation page remains Administrator-only.
+
+## Minecraft data storage migration
+
+Administrator users can open **Storage & Backups -> Minecraft data storage** to move the active Minecraft persistent-data directory to another supported local disk or partition.
+
+The WebUI is a thin frontend over the same persistent Minecraft data migration Management API used by `mjust storage-migrate`. Candidate discovery, target safety, authoritative planning, plan fingerprinting, destructive confirmation requirements, player state, pre-migration cold backup, copy and verification, configuration switching, SELinux/runtime regeneration, validation, rollback, and recovery state remain owned by the Management Agent/shared backend.
+
+The browser shows Agent-discovered choices for a dedicated disk/USB device, an existing XFS/ext4/Btrfs filesystem, a blank partition, or already-unallocated disk space. Review displays the Agent warnings and requirements. A migration requires the explicit `MIGRATE` frontend confirmation; destructive target preparation additionally requires the exact phrase supplied by the Agent, and online-player interruption requires a separate confirmation when the Agent says it is needed.
+
+Migration runs as a persistent operation. Refreshing or reopening the migration entry point reconnects to the same operation. Successful migration retains the old Minecraft data for administrator verification; a validated rollback keeps the original configuration/runtime active; `needs_attention` preserves recovery state and prevents treating the migration as safely complete.
+
+## Minecraft Restore
+
+Administrator users can open **Storage & Backups -> Restore** for the same two Restore modes exposed by mJust: world Restore and full Minecraft-data Restore.
+
+The WebUI uses the existing Management API for completed-backup discovery, authoritative Restore planning, plan-fingerprint revalidation, apply, persistent operation tracking, runtime validation, and rollback. Compatibility and safety policy remain in the Management Agent/shared backend.
+
+The browser presents Agent warnings and confirmation requirements, requires the explicit destructive confirmation `RESTORE`, and requires a separate online-player interruption confirmation when the Agent says it is needed. Browser refresh or reconnect resumes the same persistent Restore operation.
+
+## System power controls
+
+Administrator users have a power control in the top-right WebUI header. It opens appliance-level actions for **Restart** and **Power off**. On supported physical HWS systems, the same menu also exposes **Restart to UEFI/BIOS**. VM deployments do not show that action.
+
+Selecting a power action first opens a centered confirmation dialog. The WebUI then submits the action through the existing System Actions API; it does not call systemd or firmware tools directly. If Minecraft players are online, the Management Agent returns its player-confirmation requirement and the dialog asks again before the existing graceful shutdown path is allowed to continue.
+
+The Agent remains authoritative for HWS/VM capability detection, player state, graceful Minecraft shutdown, firmware/UEFI availability, and final host action acceptance.
+
 ## Local behavior
 
 When Web management is enabled and healthy, the console/SSH welcome message reports `Web interface: Ready` and shows the friendly `hostname.local:8099` address plus the direct IPv4 address. The live health check takes precedence over bootstrap marker timing so a healthy listener is not reported as merely starting.

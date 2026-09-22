@@ -1,9 +1,11 @@
 #!/usr/bin/bash
 set -euo pipefail
-source /usr/libexec/justvoxel/mjust/common.sh
-source /usr/libexec/justvoxel/mjust/os-common.sh
-source /usr/libexec/justvoxel/mjust/interrupt-safety.sh
-require_root
+source /usr/libexec/justvoxel/mjust/system-actions-api.sh
+
+if (( EUID != 0 )); then
+    echo 'ERROR: this operation must run as root.' >&2
+    exit 1
+fi
 
 action="${1:-}"
 case "${action}" in
@@ -14,25 +16,26 @@ case "${action}" in
         ;;
 esac
 
-staged=no
-status_json="$(jv_bootc_status_json 2>/dev/null || true)"
-if [[ -n ${status_json} ]] && jv_bootc_validate_status_json "${status_json}" && jv_bootc_staged_exists "${status_json}"; then
-    staged=yes
+status="$(jv_system_actions_get)" || exit 1
+if ! jq -e '.ok == true and (.minecraft_state | type == "string") and (.staged_update | type == "boolean")' <<<"${status}" >/dev/null 2>&1; then
+    echo 'ERROR: JustVoxel Management API returned invalid system action status.' >&2
+    exit 1
 fi
 
-was_active=no
-if systemctl is-active --quiet minecraft.service 2>/dev/null; then
-    was_active=yes
-fi
-
-echo "$( [[ ${action} == reboot ]] && echo 'Reboot JustVoxel' || echo 'Power off JustVoxel' )"
-echo
-if [[ ${was_active} == yes ]]; then
-    echo 'Minecraft: Running'
+if [[ ${action} == reboot ]]; then
+    title='Reboot JustVoxel'
+    prompt='Continue with reboot?'
+    label='Reboot JustVoxel'
 else
-    echo 'Minecraft: Stopped'
+    title='Power off JustVoxel'
+    prompt='Continue with power off?'
+    label='Power off JustVoxel'
 fi
-if [[ ${staged} == yes ]]; then
+
+echo "${title}"
+echo
+printf 'Minecraft: %s\n' "$(jq -r '.minecraft_state' <<<"${status}" | sed 's/^./\U&/')"
+if [[ $(jq -r '.staged_update' <<<"${status}") == true ]]; then
     if [[ ${action} == reboot ]]; then
         echo 'OS update: Staged - the staged deployment will be used after this reboot.'
     else
@@ -43,26 +46,26 @@ else
 fi
 
 echo
-if [[ ${action} == reboot ]]; then
-    confirm 'Continue with reboot?' || { echo 'Reboot cancelled.'; exit 0; }
-    jv_stop_minecraft_for_system_action 'Reboot JustVoxel'
-    if ! systemctl reboot; then
-        echo 'ERROR: system reboot request failed.' >&2
-        if [[ ${was_active} == yes ]]; then
-            echo 'Restarting Minecraft because the host did not reboot.' >&2
-            systemctl start minecraft.service || true
-        fi
-        exit 1
-    fi
-else
-    confirm 'Continue with power off?' || { echo 'Power off cancelled.'; exit 0; }
-    jv_stop_minecraft_for_system_action 'Power off JustVoxel'
-    if ! systemctl poweroff; then
-        echo 'ERROR: system power-off request failed.' >&2
-        if [[ ${was_active} == yes ]]; then
-            echo 'Restarting Minecraft because the host did not power off.' >&2
-            systemctl start minecraft.service || true
-        fi
-        exit 1
-    fi
+read -r -p "${prompt} [y/N]: " answer
+if [[ ${answer,,} != y && ${answer,,} != yes ]]; then
+    echo 'Cancelled.'
+    exit 0
 fi
+
+response="$(jv_system_actions_apply "${action}" false)" || exit 1
+set +e
+response="$(jv_system_actions_handle_players "${action}" "${response}" "${label}")"
+rc=$?
+set -e
+if (( rc == 20 )); then
+    exit 0
+elif (( rc != 0 )); then
+    exit "${rc}"
+fi
+
+if [[ $(jq -r '.ok // false' <<<"${response}") != true || $(jq -r '.accepted // false' <<<"${response}") != true ]]; then
+    jv_system_actions_api_error "${response}" 'System action was not accepted.'
+    exit 1
+fi
+message="$(jq -r '.message // empty' <<<"${response}")"
+[[ -n ${message} ]] && echo "${message}"

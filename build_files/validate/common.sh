@@ -21,10 +21,10 @@ source /usr/lib/os-release
 [[ "${HOME_SERVER_BASE_UPSTREAM_CPE_NAME:-}" == cpe:/o:almalinux:* ]]
 
 for cmd in \
-    bootc podman skopeo nmcli nmtui resolvectl firewall-cmd sshd sudo just mjust fzf gum \
+    bootc podman skopeo nmcli nmtui nm-hsp resolvectl firewall-cmd sshd sudo just mjust fzf gum \
     tailscale netbird curl jq openssl tar gzip rsync ping dig traceroute nc tcpdump lsof \
     findmnt mountpoint flock mkfs.xfs mount.nfs mount.cifs lsblk blkid wipefs parted partprobe udevadm \
-    qemu-ga vmtoolsd iperf3; do
+    qemu-ga vmtoolsd iperf3 micro spf; do
     command -v "${cmd}" >/dev/null
 done
 
@@ -33,7 +33,7 @@ rpm -q \
     pam authselect authselect-libs libpwquality \
     podman skopeo just fzf gum container-selinux policycoreutils-python-utils selinux-policy-extra \
     util-linux xfsprogs parted iperf3 nfs-utils cifs-utils qemu-guest-agent open-vm-tools \
-    hyperv-daemons gssproxy zram-generator >/dev/null
+    hyperv-daemons gssproxy zram-generator micro superfile nm-hsp >/dev/null
 
 test -f /etc/pam.d/justvoxel
 grep -Fqx 'auth       include      system-auth' /etc/pam.d/justvoxel
@@ -58,6 +58,14 @@ grep -Fqx '[Daemon]' /etc/rpm-ostreed.conf
 grep -Eq '^[[:space:]]*LockLayering[[:space:]]*=[[:space:]]*true[[:space:]]*$' /etc/rpm-ostreed.conf
 
 semodule -l >/dev/null
+micro --version >/dev/null
+spf --version >/dev/null
+if /usr/bin/nm-hsp --invalid-option >/tmp/nm-hsp-invalid.txt 2>&1; then
+    echo 'ERROR: nm-hsp accepted an invalid option.' >&2
+    exit 1
+fi
+grep -Fq 'usage: nm-hsp [--snapshot]' /tmp/nm-hsp-invalid.txt
+rm -f /tmp/nm-hsp-invalid.txt
 
 test "$(systemctl is-enabled NetworkManager.service)" = "enabled"
 test "$(systemctl is-enabled systemd-resolved.service)" = "enabled"
@@ -99,20 +107,23 @@ test -x /usr/libexec/justvoxel/console-issue-refresh
 bash -n /usr/libexec/justvoxel/console-issue-refresh
 
 # Validate the renderer directly. Image-build containers do not run the WebUI
-# service, so the issue contract must not depend on WebUI being Ready.
+# service and may not have a usable network, so pre-login validation checks only
+# fields that are always meaningful in that environment.
 issue_test="$(mktemp)"
 trap 'rm -f "${issue_test}"' EXIT
 /usr/libexec/justvoxel/motd --issue > "${issue_test}"
 grep -Fq 'JUSTVOXEL' "${issue_test}"
 grep -Fq 'Variant:' "${issue_test}"
-grep -Fq 'Network:' "${issue_test}"
 grep -Fq 'Minecraft:' "${issue_test}"
 grep -Fq 'Web interface:' "${issue_test}"
-grep -Fq 'Open in browser:' "${issue_test}"
-grep -Fq 'Direct address:' "${issue_test}"
+grep -Fq 'Network:' "${issue_test}"
 grep -Fq '\e[38;5;45m' "${issue_test}"
 if grep -Fq 'Common commands' "${issue_test}"; then
     echo 'ERROR: pre-login console banner must stop before Common commands.' >&2
+    exit 1
+fi
+if grep -Eq 'Tailscale:|NetBird:' "${issue_test}"; then
+    echo 'ERROR: pre-login console banner must not expose overlay-network details.' >&2
     exit 1
 fi
 rm -f "${issue_test}"
@@ -126,14 +137,27 @@ bash -n /etc/profile.d/90-justvoxel-motd.sh
 test -x /usr/libexec/justvoxel/motd
 bash -n /usr/libexec/justvoxel/motd
 grep -Fq 'Minecraft Server Appliance' /usr/libexec/justvoxel/motd
-grep -Fq "justvoxel-hwe|hwe) variant='HWE'" /usr/libexec/justvoxel/motd
-grep -Fq "network_state='No Ethernet interface detected'" /usr/libexec/justvoxel/motd
+grep -Fq "justvoxel-hws|hws) variant='HWS'" /usr/libexec/justvoxel/motd
+grep -Fq "network_state='Not connected - use mjust net'" /usr/libexec/justvoxel/motd
+grep -Fq "network_state='Ethernet connected'" /usr/libexec/justvoxel/motd
 grep -Fq "network_state='Ethernet connected, obtaining address...'" /usr/libexec/justvoxel/motd
-grep -Fq "network_state='Ethernet cable disconnected'" /usr/libexec/justvoxel/motd
+grep -Fq "network_state='Wi-Fi connected'" /usr/libexec/justvoxel/motd
+grep -Fq "wifi_value='Not connected'" /usr/libexec/justvoxel/motd
 grep -Fq "line 'Network:'" /usr/libexec/justvoxel/motd
+grep -Fq "line 'Wi-Fi:'" /usr/libexec/justvoxel/motd
+grep -Fq "line 'Tailscale:'" /usr/libexec/justvoxel/motd
+grep -Fq "line 'NetBird:'" /usr/libexec/justvoxel/motd
 grep -Fq 'IPv4:' /usr/libexec/justvoxel/motd
 grep -Fq 'Web interface:' /usr/libexec/justvoxel/motd
-grep -Fq 'mjust setup-advanced' /usr/libexec/justvoxel/motd
+grep -Fq "line 'First setup:'" /usr/libexec/justvoxel/motd
+if grep -Fq "line 'Validate system:'" /usr/libexec/justvoxel/motd; then
+    echo 'ERROR: login guidance must not show the removed Validate system command.' >&2
+    exit 1
+fi
+if grep -Fq 'setup-advanced' /usr/libexec/justvoxel/motd; then
+    echo 'ERROR: login guidance must not expose the removed Advanced Setup path.' >&2
+    exit 1
+fi
 
 test -f /usr/lib/justvoxel/variant
 test -f /usr/lib/tmpfiles.d/justvoxel.conf
@@ -188,6 +212,8 @@ test -f /usr/share/justvoxel/mjust/justfile
 test -f /usr/libexec/justvoxel/mjust/storage-common.sh
 test -x /usr/libexec/justvoxel/mjust/welcome
 test -x /usr/libexec/justvoxel/mjust/status
+test -x /usr/libexec/justvoxel/mjust/files
+test -x /usr/libexec/justvoxel/mjust/network
 test -x /usr/libexec/justvoxel/mjust/storage-summary
 test -x /usr/libexec/justvoxel/mjust/web
 test -x /usr/libexec/justvoxel/mjust/web-status-json
@@ -197,9 +223,14 @@ for script in /usr/libexec/justvoxel/mjust/*; do
     bash -n "${script}"
 done
 mjust_list="$(/usr/bin/mjust --list)"
-grep -Fq 'setup-advanced' <<<"${mjust_list}"
+if grep -Fq 'setup-advanced' <<<"${mjust_list}"; then
+    echo 'ERROR: mjust command list must not expose the removed Advanced Setup path.' >&2
+    exit 1
+fi
 grep -Fq 'status' <<<"${mjust_list}"
 grep -Fq 'status --details' <<<"${mjust_list}"
+grep -Fq 'files' <<<"${mjust_list}"
+grep -Fq 'net' <<<"${mjust_list}"
 grep -Fq 'web' <<<"${mjust_list}"
 grep -Fq 'web enable' <<<"${mjust_list}"
 grep -Fq 'password-reset' <<<"${mjust_list}"

@@ -1,9 +1,8 @@
 #!/usr/bin/bash
-jv_migration_mount_nfs() {
-    local mode="$1" source options actual
+jv_migration_mount_nfs_noninteractive() {
+    local source="$1" mode="$2" options actual
     jv_migration_transport_begin
-    source="$(jui_input 'NFS source (server:/export)')" || return 2
-    [[ ${source} == *:* && ${source} != *' '* ]] || { echo 'ERROR: invalid NFS source.' >&2; return 1; }
+    [[ ${source} == *:* && ${source} != *' '* && ${source} != *$'\n'* && ${source} != *$'\r'* ]] || { echo 'ERROR: invalid NFS source.' >&2; return 1; }
     JV_MIGRATION_MEDIA_MOUNT="${JV_MIGRATION_TRANSPORT_ROOT}/nfs"
     install -d -m0700 -o root -g root "${JV_MIGRATION_MEDIA_MOUNT}"
     [[ ${mode} == import ]] && options='ro,nodev,nosuid,noexec' || options='rw,nodev,nosuid,noexec'
@@ -16,19 +15,17 @@ jv_migration_mount_nfs() {
     JV_MIGRATION_OWNED_MOUNT="${JV_MIGRATION_MEDIA_MOUNT}"
 }
 
-jv_migration_mount_smb() {
-    local mode="$1" source username password domain options actual
+jv_migration_mount_nfs() {
+    local mode="$1" source
+    source="$(jui_input 'NFS source (server:/export)')" || return 2
+    jv_migration_mount_nfs_noninteractive "${source}" "${mode}"
+}
+
+jv_migration_mount_smb_noninteractive() {
+    local source="$1" username="$2" password="$3" domain="$4" mode="$5" options actual
     jv_migration_transport_begin
-    source="$(jui_input 'SMB source (//server/share)')" || return 2
-    [[ ${source} == //*/* && ${source} != *' '* ]] || { echo 'ERROR: invalid SMB source.' >&2; return 1; }
-    username="$(jui_input 'SMB username')" || return 2
-    printf 'SMB password: ' >/dev/tty
-    IFS= read -r -s password </dev/tty
-    echo >/dev/tty
-    domain="$(jui_input 'SMB domain/workgroup (optional)')" || return 2
-    [[ -n ${username} && ${username} != *$'\n'* && ${username} != *$'\r'* \
-        && ${password} != *$'\n'* && ${password} != *$'\r'* \
-        && ${domain} != *$'\n'* && ${domain} != *$'\r'* ]] || {
+    [[ ${source} == //*/* && ${source} != *' '* && ${source} != *$'\n'* && ${source} != *$'\r'* ]] || { echo 'ERROR: invalid SMB source.' >&2; return 1; }
+    [[ -n ${username} && ${username} != *$'\n'* && ${username} != *$'\r'*         && ${password} != *$'\n'* && ${password} != *$'\r'*         && ${domain} != *$'\n'* && ${domain} != *$'\r'* ]] || {
         echo 'ERROR: SMB credentials are invalid.' >&2
         return 1
     }
@@ -54,4 +51,15 @@ jv_migration_mount_smb() {
     actual="$(findmnt -n -o SOURCE --target "${JV_MIGRATION_MEDIA_MOUNT}" 2>/dev/null || true)"
     [[ -n ${actual} ]] || { umount "${JV_MIGRATION_MEDIA_MOUNT}" || true; echo 'ERROR: SMB source identity could not be verified.' >&2; return 1; }
     JV_MIGRATION_OWNED_MOUNT="${JV_MIGRATION_MEDIA_MOUNT}"
+}
+
+jv_migration_mount_smb() {
+    local mode="$1" source username password domain
+    source="$(jui_input 'SMB source (//server/share)')" || return 2
+    username="$(jui_input 'SMB username')" || return 2
+    printf 'SMB password: ' >/dev/tty
+    IFS= read -r -s password </dev/tty
+    echo >/dev/tty
+    domain="$(jui_input 'SMB domain/workgroup (optional)')" || return 2
+    jv_migration_mount_smb_noninteractive "${source}" "${username}" "${password}" "${domain}" "${mode}"
 }

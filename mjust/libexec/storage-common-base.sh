@@ -16,8 +16,8 @@ storage_is_vm() {
     jv_variant_is_vm
 }
 
-storage_is_hwe() {
-    jv_variant_is_hwe
+storage_is_hws() {
+    jv_variant_is_hws
 }
 
 storage_system_disks() {

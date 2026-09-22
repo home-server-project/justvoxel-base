@@ -31,11 +31,10 @@ for value in 0 -1 abc 10.5; do if validate_positive_int "${value}"; then fail "i
 
 [[ $(jv_variant_kind justvoxel-vm) == vm ]] || fail 'JustVoxel VM variant kind is wrong'
 [[ $(jv_variant_name justvoxel-vm) == VM ]] || fail 'JustVoxel VM display name is wrong'
-[[ $(jv_variant_kind justvoxel-hwe) == hwe ]] || fail 'JustVoxel HWE variant kind is wrong'
-[[ $(jv_variant_name justvoxel-hwe) == HWE ]] || fail 'JustVoxel HWE display name is wrong'
-[[ $(jv_variant_kind justvoxel-baremetal) == hwe ]] || fail 'legacy Bare Metal variant must map to HWE'
-jv_variant_is_hwe justvoxel-hwe || fail 'HWE predicate rejected JustVoxel HWE'
-if jv_variant_is_hwe justvoxel-vm; then fail 'HWE predicate accepted JustVoxel VM'; fi
+[[ $(jv_variant_kind justvoxel-hws) == hws ]] || fail 'JustVoxel HWS variant kind is wrong'
+[[ $(jv_variant_name justvoxel-hws) == HWS ]] || fail 'JustVoxel HWS display name is wrong'
+jv_variant_is_hws justvoxel-hws || fail 'HWS predicate rejected JustVoxel HWS'
+if jv_variant_is_hws justvoxel-vm; then fail 'HWS predicate accepted JustVoxel VM'; fi
 
 [[ $(normalize_daily_backup_time '4:30') == '04:30' ]] || fail '4:30 should normalize to 04:30'
 [[ $(daily_backup_schedule_from_time '4:30') == '*-*-* 04:30:00' ]] || fail 'daily schedule rendering is incorrect'
@@ -74,10 +73,15 @@ whitelist="${repo_root}/mjust/libexec/whitelist"
 justfile="${repo_root}/mjust/justfile"
 mjust_bin="${repo_root}/mjust/bin/mjust"
 storage_plan="${repo_root}/mjust/libexec/storage-plan"
+network="${repo_root}/mjust/libexec/network"
 
-for id in setup setup-advanced status players configure service whitelist backups migration storage update system validate logs advanced exit; do
+for id in setup status players configure service whitelist backups migration storage update system validate logs advanced exit; do
     grep -Fq "${id})" "${menu}" || fail "menu preview/dispatch id missing: ${id}"
 done
+
+if grep -Fq 'setup-advanced' "${menu}" || grep -Fq 'Advanced setup' "${menu}" || grep -Fq 'setup-advanced' "${justfile}"; then
+    fail 'legacy Advanced Setup must not be exposed through the mJust menu or recipes'
+fi
 
 grep -Fq "jui_choose 'Safe configuration changes'" "${configure}" || fail 'Configure must use the interactive selector'
 grep -Fq "jui_choose 'Container image policy'" "${configure}" || fail 'container image policy must use the interactive selector'
@@ -87,28 +91,39 @@ grep -Fq 'Enable / disable Bedrock cross-play' "${configure}" || fail 'post-setu
 
 grep -Fq "'Show whitelist' 'Add player' 'Remove player' 'Back'" "${menu}" || fail 'friendly whitelist menu missing'
 grep -Fq 'bedrock-enabled' "${whitelist}" || fail 'whitelist Bedrock capability probe missing'
-grep -Fq 'Bedrock cross-play is disabled.' "${whitelist}" || fail 'friendly disabled-Bedrock message missing'
+grep -Fq 'Bedrock cross-play is disabled.' "${menu}" || fail 'friendly disabled-Bedrock message missing from the terminal menu'
 
 grep -Fq "'Storage overview' 'Move Minecraft data' 'Back'" "${menu}" || fail 'friendly storage menu missing'
 grep -Fq 'Storage devices / provisioning' "${menu}" || fail 'advanced storage provisioning entry missing'
 grep -Fq '/backups' "${storage_ui}" || fail 'backup storage must default to a backups directory'
 
 grep -Fq 'System status & updates' "${menu}" || fail 'combined system status/update menu missing'
+grep -Fq "'File browser' 'Network' 'Reboot JustVoxel'" "${menu}" || fail 'Network must be placed inside the System menu after File browser'
+grep -Fq "'Network') /usr/bin/mjust net || true ;;" "${menu}" || fail 'System Network menu dispatch missing'
+grep -Fq 'net:' "${justfile}" || fail 'mjust net recipe missing'
+grep -Fq 'Friendly network manager from Home Server Project' "${network}" || fail 'nm-hsp friendly description missing'
+grep -Fq 'Normal Ethernet, Wi-Fi and easy network troubleshooting.' "${network}" || fail 'nm-hsp troubleshooting description missing'
+grep -Fq 'Classic NetworkManager interface' "${network}" || fail 'nmtui description missing'
+grep -Fq 'Advanced/classic Linux networking configuration.' "${network}" || fail 'nmtui advanced description missing'
+grep -Fq 'sudo /usr/bin/nm-hsp' "${network}" || fail 'network menu must launch nm-hsp'
+grep -Fq 'sudo /usr/bin/nmtui' "${network}" || fail 'network menu must launch nmtui'
+if grep -Eq '^(net-hsp|nmtui):' "${justfile}"; then fail 'separate mjust net-hsp/nmtui commands must not exist'; fi
 if grep -Fq "'Operating system status' 'Check / download OS update'" "${menu}"; then
     fail 'duplicate OS status/update menu entries remain'
 fi
 
-grep -Fq "'Minecraft logs' 'Advanced / full system log' 'Back'" "${menu}" || fail 'simple/advanced logs submenu missing'
-grep -Fq -- '-o cat' "${logs}" || fail 'simple logs must use message-only journal output'
-grep -Fq -- '--advanced' "${logs}" || fail 'advanced logs mode missing'
+grep -Fq "logs) /usr/bin/mjust logs || true ;;" "${menu}" || fail 'Logs menu does not open the API-backed Minecraft log view directly'
+grep -Fq '/v1/logs/minecraft?limit=100&format=cat' "${logs}" || fail 'Minecraft logs must use the message-only Management API view'
+if grep -Fq -- '--advanced' "${logs}" || grep -Fq 'journalctl ' "${logs}" || grep -Fq 'Advanced / full system log' "${menu}"; then
+    fail 'legacy advanced/full-system logs remain exposed through mJust'
+fi
 
 grep -Fq 'Administrator password' "${menu}" || fail 'administrator password menu entry missing'
 grep -Fq '/usr/bin/mjust password-reset' "${menu}" || fail 'administrator password menu dispatch missing'
 grep -Fq 'password-reset:' "${justfile}" || fail 'top-level password-reset recipe missing'
 grep -Fq 'mjust status --details' "${mjust_bin}" || fail 'detailed status discovery missing from mjust --list'
 grep -Fq 'mjust web enable' "${mjust_bin}" || fail 'WebUI management discovery missing from mjust --list'
-grep -Fq 'HWE backup choices:' "${storage_plan}" || fail 'HWE storage guidance missing'
-if grep -Fq 'Bare Metal backup choices:' "${storage_plan}"; then fail 'obsolete Bare Metal storage wording remains'; fi
+grep -Fq 'HWS backup choices:' "${storage_plan}" || fail 'HWS storage guidance missing'
 
 grep -Fq 'All mjust commands' "${menu}" || fail 'advanced all-commands entry missing'
 grep -Fq '/usr/bin/mjust --list' "${menu}" || fail 'all-commands entry must use authoritative mjust --list output'

@@ -2,6 +2,34 @@
 
 JustVoxel provides two deliberately separate restore operations.
 
+## Management architecture
+
+Restore has one authoritative implementation behind the JustVoxel Management API.
+
+The terminal interface is a thin frontend: it discovers completed backups through
+the API, asks the Management Agent to plan the selected restore, presents the
+Agent's warnings and confirmation requirements, submits the reviewed plan, and
+displays persistent operation progress.
+
+The Management Agent owns restore safety and execution. It validates the
+configured backup source, archive identity and Minecraft compatibility, performs
+the destructive transaction through the shared restore backend, records progress,
+validates the restored runtime, and controls rollback/recovery state.
+
+Restore operations are persistent. If the terminal disconnects while a restore
+is running, rerunning `mjust restore` reconnects to the current Restore
+operation instead of starting a second transaction. The WebUI behaves the same
+way: opening the Restore page while an operation is active redirects to that
+operation, and refreshing the progress page continues monitoring it rather than
+starting another transaction.
+
+The WebUI Restore page uses this same Management API and backend. It discovers
+backups, requests the authoritative plan, presents the Agent's warnings and
+confirmation requirements, submits the reviewed fingerprint, and reconnects to
+the same persistent Restore operation after refresh or browser reconnect. The
+WebUI does not duplicate Restore compatibility, archive, storage, shutdown,
+runtime-validation, or rollback policy.
+
 ## Restore world
 
 ```text
@@ -52,7 +80,9 @@ Both restore modes:
 - never modify or delete the selected backup archive during restore.
 
 A previous incomplete restore transaction blocks another restore until an
-administrator reviews the preserved recovery state.
+administrator reviews the preserved recovery state. An interrupted persistent
+Restore operation is reported as needing administrator attention rather than
+being silently restarted.
 
 ## Backup metadata
 

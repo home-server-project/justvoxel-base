@@ -1,0 +1,26 @@
+{{define "validation.html"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JustVoxel - System validation</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js" defer></script></head>
+<body class="role-administrator">{{template "app-header" .}}
+<main>
+  <div class="title-row"><div><p class="eyebrow">Administrator · appliance</p><h1>System validation</h1></div><span class="badge">{{.Identity.Username}}</span></div>
+  <p class="muted">Read-only appliance validation through the same Management Agent and authoritative backend used by <code>mjust validate</code>.</p>
+
+  {{if .Unavailable}}
+  <div class="notice error"><strong>Validation service unavailable</strong><br>JustVoxel could not run validation right now. No validation result was produced.</div>
+  <div class="action-row"><a class="button-link secondary" href="/settings/validation">Try again</a></div>
+  {{else if .Result}}
+    {{if .Result.OK}}
+    <div class="notice success"><strong>Validation passed</strong><br>The authoritative validation backend completed without detecting a problem.</div>
+    {{else}}
+    <div class="notice error"><strong>Validation completed with detected problems</strong><br>The authoritative validation backend reported one or more problems. Review the details below.</div>
+    {{end}}
+    <section class="panel details">
+      <div class="section-heading"><div><p class="eyebrow">Authoritative result</p><h2>Validation details</h2></div><span class="badge">Backend result code: {{.Result.ExitCode}}</span></div>
+      <p class="muted">The output below is shown as returned by the Management Agent. WebUI does not rerun or reinterpret these checks.</p>
+      <pre class="log-box">{{.Result.Output}}</pre>
+    </section>
+    <div class="action-row"><a class="button-link secondary" href="/settings/validation">Run validation again</a></div>
+  {{end}}
+
+  <p class="foot">WebUI {{.Version}} · Management API {{.ManagementAPI}}</p>
+</main></body></html>{{end}}

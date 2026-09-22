@@ -1,0 +1,32 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/migration-common.sh
+require_root
+request="$(cat)"
+jq -e 'type=="object" and (.transaction|type=="string") and (.state_identity|type=="string")' >/dev/null <<< "${request}"
+transaction="$(jq -r '.transaction' <<< "${request}")"
+expected_identity="$(jq -r '.state_identity' <<< "${request}")"
+plan="$(printf '%s\n' "$(jq -cn --arg transaction "${transaction}" '{transaction:$transaction}')" | /usr/libexec/justvoxel/mjust/admin-migration-recovery-json plan)"
+[[ $(jq -r '.ok' <<< "${plan}") == true ]] || { echo "recovery plan is no longer valid" >&2; exit 1; }
+actual_identity="$(jq -r '.context.state_identity' <<< "${plan}")"
+[[ ${actual_identity} == "${expected_identity}" ]] || { echo "recovery state changed after review" >&2; exit 1; }
+phase="$(jq -r '.normalized.phase' <<< "${plan}")"
+printf '%s\n' '{"event":"progress","state":"validating","stage":"recovery_preflight","status":"Revalidating retained migration recovery state."}'
+case "${phase}" in
+    rolled-back|critical-rollback)
+        /usr/libexec/justvoxel/mjust/restore-runtime-validate
+        ;;
+    rolled-back-fresh)
+        while IFS= read -r path; do [[ ! -e ${path} && ! -L ${path} ]] || { echo "fresh recovery runtime state reappeared" >&2; exit 1; }; done < <(jv_migration_runtime_paths)
+        ! systemctl is-active --quiet minecraft.service 2>/dev/null || { echo "Minecraft became active during fresh recovery" >&2; exit 1; }
+        ;;
+    *) echo "unsupported recovery phase" >&2; exit 1 ;;
+esac
+printf '%s\n' '{"event":"progress","state":"running","stage":"recovery_finalize","status":"Removing retained migration recovery transaction."}'
+rm -rf -- "${transaction}"
+jv_migration_clear_recovery "${transaction}"
+printf '%s\n' '{"event":"progress","state":"verifying","stage":"recovery_verify","status":"Verifying recovery state was finalized."}'
+[[ ! -e ${transaction} ]] || { echo "recovery transaction still exists" >&2; exit 1; }
+if jv_migration_registered_recoveries | grep -Fxq -- "${transaction}"; then echo "recovery registry still references finalized transaction" >&2; exit 1; fi
+printf '%s\n' '{"event":"result","outcome":"succeeded","status":"Migration recovery finalized successfully."}'

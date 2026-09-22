@@ -114,7 +114,7 @@ approve_online_players() {
         return 0
     fi
     echo 'Players appear to be online.'
-    echo 'If you continue, the normal Minecraft stop path will announce the shutdown and wait 60 seconds before stopping.'
+    echo 'If you continue, Minecraft will use the player-aware 60-second in-game shutdown countdown.'
     if confirm 'Continue with maintenance anyway?'; then
         players_override=yes
         return 0
@@ -154,7 +154,7 @@ if [[ ${was_active} == yes ]]; then
     echo "${players}"
     if ! grep -q 'There are 0 of' <<< "${players}" && [[ ${players_override} != yes ]]; then
         echo 'A player joined after the first check.'
-        echo 'Continuing will use the normal 60-second shutdown warning.'
+        echo 'Continuing will use the player-aware 60-second in-game shutdown countdown.'
         if confirm 'Continue anyway?'; then
             players_override=yes
         else

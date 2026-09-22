@@ -1,0 +1,38 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+readonly api_client=/usr/libexec/justvoxel/mjust/api-client
+
+if (( EUID != 0 )); then
+    echo 'ERROR: this operation must run as root.' >&2
+    exit 1
+fi
+
+if (( $# > 0 )); then
+    echo 'Usage: mjust backup' >&2
+    exit 2
+fi
+
+set +e
+response="$("${api_client}" POST /v1/backups/manual)"
+rc=$?
+set -e
+
+if (( rc != 0 )); then
+    if jq -e 'type == "object"' <<<"${response}" >/dev/null 2>&1; then
+        message="$(jq -r '.error // .message // empty' <<<"${response}")"
+        if [[ -n ${message} ]]; then
+            printf 'ERROR: %s\n' "${message}" >&2
+            exit 1
+        fi
+    fi
+    echo 'ERROR: manual backup request failed through the JustVoxel Management API.' >&2
+    exit 1
+fi
+
+if ! jq -e 'type == "object" and (.ok == true) and (.message | type == "string")' <<<"${response}" >/dev/null 2>&1; then
+    echo 'ERROR: JustVoxel Management API returned invalid manual backup information.' >&2
+    exit 1
+fi
+
+jq -r '.message' <<<"${response}"

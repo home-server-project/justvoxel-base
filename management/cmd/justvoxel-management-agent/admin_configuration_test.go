@@ -3,11 +3,57 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+func TestLocalRootCanPlanAndApplyConfigurationWithoutBearerSession(t *testing.T) {
+	s := surfaceTestServer(t, roleViewer)
+	old := runAdminConfigurationHelper
+	defer func() { runAdminConfigurationHelper = old }()
+
+	calls := make([]string, 0, 2)
+	runAdminConfigurationHelper = func(_ context.Context, action string, request []byte) ([]byte, error) {
+		calls = append(calls, action)
+		if !strings.Contains(string(request), `"max_players":12`) {
+			t.Fatalf("local root request missing max_players: %s", request)
+		}
+		if action == "plan" {
+			return []byte(`{"ok":true,"changes":[{"field":"max_players","label":"Maximum players","before":"10","after":"12","restart_required":true}],"warnings":[],"restart_required":true,"memory_restart_required":false,"memory_remaining_mib":2048,"proposed":{"configured":true,"minecraft":{"max_players":12},"backup":{}},"applied":false,"confirmation_required":false,"online":0,"players":[],"restarted":false,"restart_deferred":false}`), nil
+		}
+		if action == "apply" {
+			return []byte(`{"ok":true,"changes":[{"field":"max_players","label":"Maximum players","before":"10","after":"12","restart_required":true}],"warnings":[],"restart_required":true,"memory_restart_required":false,"memory_remaining_mib":2048,"proposed":{"configured":true,"minecraft":{"max_players":12},"backup":{}},"applied":true,"confirmation_required":false,"online":0,"players":[],"restarted":false,"restart_deferred":true,"message":"Settings saved. Minecraft must be restarted later for the server changes to take effect."}`), nil
+		}
+		t.Fatalf("unexpected configuration action: %s", action)
+		return nil, nil
+	}
+
+	body := `{"java_memory":"4G","container_memory":"6G","java_port":25565,"bedrock_enabled":false,"bedrock_port":19132,"timezone":"UTC","max_players":12,"motd":"JustVoxel","image_tag":"stable","version_policy":"pinned","version":"1.21.8","backup_keep":7,"backup_schedule":"*-*-* 04:30:00","backup_timer_enabled":true,"confirm_players":false}`
+
+	req := requestWithPeerUID(http.MethodPost, "http://unix/v1/admin/configuration/plan", 0)
+	req.Body = io.NopCloser(strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.adminConfigurationPlan(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("local root configuration plan returned %d: %s", rr.Code, rr.Body.String())
+	}
+
+	req = requestWithPeerUID(http.MethodPost, "http://unix/v1/admin/configuration/apply", 0)
+	req.Body = io.NopCloser(strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	s.adminConfigurationApply(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("local root configuration apply returned %d: %s", rr.Code, rr.Body.String())
+	}
+	if len(calls) != 2 || calls[0] != "plan" || calls[1] != "apply" {
+		t.Fatalf("local root configuration helper calls = %#v", calls)
+	}
+}
 
 func TestAdminConfigurationChangeRequiresAdministrator(t *testing.T) {
 	old := runAdminConfigurationHelper

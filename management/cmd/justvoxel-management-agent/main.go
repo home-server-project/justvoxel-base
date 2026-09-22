@@ -198,14 +198,20 @@ func serve(socket string) error {
 	registerAdminActivityRoutes(mux, s)
 	registerAdminDiscoveryRoutes(mux, s)
 	registerAdminConfigurationRoutes(mux, s)
+	registerAdminValidationRoutes(mux, s)
+	registerAdminRestoreRoutes(mux, s)
+	registerAdminMigrationExportRoutes(mux, s)
+	registerAdminMigrationRecoveryRoutes(mux, s)
+	registerAdminMigrationImportRoutes(mux, s)
 	registerOperationalRoutes(mux, s)
 	registerMinecraftRoutes(mux, s)
+	registerAdminSystemActionRoutes(mux, s)
 
 	httpServer := &http.Server{
 		Handler:           s.requirePeer(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      30 * time.Second,
+		WriteTimeout:      210 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
 			uid, err := peerUID(c)
@@ -286,7 +292,11 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, statusHelper)
+	args := []string{}
+	if r.URL.Query().Get("details") == "1" {
+		args = append(args, "--details")
+	}
+	cmd := exec.CommandContext(ctx, statusHelper, args...)
 	output, err := cmd.Output()
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "status collection failed")
@@ -303,6 +313,9 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) authorize(r *http.Request, allowMustChange bool) (string, session, bool) {
+	if sess, ok := localRootAdministrator(r); ok {
+		return "", sess, true
+	}
 	header := r.Header.Get("Authorization")
 	if !strings.HasPrefix(header, "Bearer ") {
 		return "", session{}, false

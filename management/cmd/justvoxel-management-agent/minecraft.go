@@ -194,7 +194,7 @@ func (s *server) minecraftAction(w http.ResponseWriter, r *http.Request, action 
 }
 
 func executeMinecraftAction(parent context.Context, args []string) minecraftActionExecution {
-	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 180*time.Second)
 	defer cancel()
 	output, exitCode, runErr := runWebHelper(ctx, args...)
 	if !json.Valid(output) {

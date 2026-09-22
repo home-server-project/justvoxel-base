@@ -1,0 +1,182 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/os-common.sh
+source /usr/libexec/justvoxel/mjust/interrupt-safety.sh
+
+require_root
+
+collect_status() {
+    local variant efi=false firmware_available=false firmware_reason='' display_state=unknown
+    local staged_update=false os_status_available=false minecraft_state=stopped
+    local status_json='' status_file connector_state found_connector=no
+
+    variant="$(jv_variant_kind)"
+    [[ -d /sys/firmware/efi ]] && efi=true
+
+    if [[ ${variant} != hws ]]; then
+        firmware_reason=not_hws
+    elif [[ ${efi} != true ]]; then
+        firmware_reason=not_efi
+    elif systemctl reboot --firmware-setup --dry-run >/dev/null 2>&1; then
+        firmware_available=true
+    else
+        firmware_reason=unsupported
+    fi
+
+    if [[ ${variant} == hws ]]; then
+        for status_file in /sys/class/drm/card*-*/status; do
+            [[ -r ${status_file} ]] || continue
+            found_connector=yes
+            connector_state="$(cat "${status_file}" 2>/dev/null || true)"
+            if [[ ${connector_state} == connected ]]; then
+                display_state=connected
+                break
+            fi
+            display_state=disconnected
+        done
+        [[ ${found_connector} == yes ]] || display_state=unknown
+    fi
+
+    status_json="$(jv_bootc_status_json 2>/dev/null || true)"
+    if [[ -n ${status_json} ]] && jv_bootc_validate_status_json "${status_json}"; then
+        os_status_available=true
+        jv_bootc_staged_exists "${status_json}" && staged_update=true
+    fi
+
+    systemctl is-active --quiet minecraft.service 2>/dev/null && minecraft_state=running
+
+    jq -cn         --arg variant "${variant}"         --arg minecraft_state "${minecraft_state}"         --arg firmware_reason "${firmware_reason}"         --arg display_state "${display_state}"         --argjson efi "${efi}"         --argjson firmware_available "${firmware_available}"         --argjson staged_update "${staged_update}"         --argjson os_status_available "${os_status_available}"         '{
+            ok:true,
+            variant:$variant,
+            minecraft_state:$minecraft_state,
+            staged_update:$staged_update,
+            os_status_available:$os_status_available,
+            firmware:{
+                available:$firmware_available,
+                efi:$efi,
+                display_state:$display_state,
+                reason:$firmware_reason
+            }
+        }'
+}
+
+player_names_json() {
+    local raw="$1" names
+    names="${raw#*:}"
+    if [[ ${names} == "${raw}" ]]; then
+        printf '[]'
+        return
+    fi
+    printf '%s\n' "${names}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | jq -Rsc 'split("\n") | map(select(length > 0))'
+}
+
+emit_player_confirmation() {
+    local action="$1" raw="$2" online players
+    online="$(jv_player_online_count "${raw}" 2>/dev/null || printf '0')"
+    players="$(player_names_json "${raw}")"
+    jq -cn --arg action "${action}" --argjson online "${online}" --argjson players "${players}"         '{ok:false,action:$action,confirmation_required:true,reason:"players_online",online:$online,players:$players}'
+}
+
+emit_error() {
+    local action="$1" reason="$2" message="$3"
+    jq -cn --arg action "${action}" --arg reason "${reason}" --arg message "${message}"         '{ok:false,action:$action,reason:$reason,message:$message}'
+}
+
+queue_system_action() {
+    local action="$1"
+    case "${action}" in
+        reboot)
+            systemd-run --quiet --collect --unit=justvoxel-reboot --on-active=2s /usr/bin/systemctl reboot
+            ;;
+        poweroff)
+            systemd-run --quiet --collect --unit=justvoxel-poweroff --on-active=2s /usr/bin/systemctl poweroff
+            ;;
+        firmware-reboot)
+            systemd-run --quiet --collect --unit=justvoxel-firmware-reboot --on-active=2s /usr/bin/systemctl reboot --firmware-setup
+            ;;
+        *)
+            return 2
+            ;;
+    esac
+}
+
+apply_action() {
+    local action="$1" confirm_players="${2:-no}" label stop_mode=required status firmware_available was_active=no
+    local safety_output='' rc
+
+    status="$(collect_status)"
+    firmware_available="$(jq -r '.firmware.available' <<<"${status}")"
+
+    case "${action}" in
+        reboot)
+            label='Reboot JustVoxel'
+            ;;
+        poweroff)
+            label='Power off JustVoxel'
+            ;;
+        firmware-reboot)
+            label='Reboot into firmware / UEFI setup'
+            if [[ ${firmware_available} != true ]]; then
+                emit_error "${action}" "$(jq -r '.firmware.reason // "unavailable"' <<<"${status}")" 'Firmware / UEFI reboot is unavailable on this system.'
+                return 2
+            fi
+            ;;
+        *)
+            emit_error "${action}" invalid_action 'Unsupported system action.'
+            return 2
+            ;;
+    esac
+
+    [[ $(jq -r '.minecraft_state' <<<"${status}") == running ]] && was_active=yes
+    [[ ${confirm_players} == yes ]] && stop_mode=confirmed
+
+    if [[ ${was_active} == yes ]]; then
+        set +e
+        safety_output="$(JV_INTERRUPT_CONFIRMATION_MODE="${stop_mode}" jv_stop_minecraft_adaptive "${label}" 2>/dev/null)"
+        rc=$?
+        set -e
+        case "${rc}" in
+            0) ;;
+            10)
+                emit_player_confirmation "${action}" "${safety_output}"
+                return 10
+                ;;
+            *)
+                emit_error "${action}" minecraft_stop_failed 'Minecraft could not be stopped safely, so the system action was cancelled.'
+                return 3
+                ;;
+        esac
+    fi
+
+    if ! queue_system_action "${action}"; then
+        [[ ${was_active} == yes ]] && systemctl start minecraft.service >/dev/null 2>&1 || true
+        emit_error "${action}" action_failed 'System action could not be queued.'
+        return 4
+    fi
+
+    jq -cn --arg action "${action}" --arg message "${label} accepted."         '{ok:true,action:$action,accepted:true,message:$message}'
+}
+
+case "${1:-}" in
+    status)
+        [[ $# -eq 1 ]] || { echo 'Usage: admin-system-actions-json status' >&2; exit 2; }
+        collect_status
+        ;;
+    apply)
+        [[ $# -ge 2 && $# -le 3 ]] || { echo 'Usage: admin-system-actions-json apply ACTION [--confirm-players]' >&2; exit 2; }
+        confirm_players=no
+        if [[ ${3:-} == --confirm-players ]]; then
+            confirm_players=yes
+        elif [[ -n ${3:-} ]]; then
+            echo 'ERROR: invalid system-action option.' >&2
+            exit 2
+        fi
+        apply_action "$2" "${confirm_players}"
+        ;;
+    *)
+        echo 'Usage: admin-system-actions-json {status|apply ACTION [--confirm-players]}' >&2
+        exit 2
+        ;;
+esac

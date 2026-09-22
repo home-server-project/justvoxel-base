@@ -1,0 +1,79 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/migration-common.sh
+require_root
+
+configured=no
+data_parent=''
+if [[ -r ${JV_CONFIG} && -e ${JV_QUADLET} ]]; then
+    configured=yes
+    require_config
+    data_parent="$(dirname -- "${DATA_PATH}")"
+fi
+
+collect_transactions() {
+    {
+        jv_migration_registered_recoveries
+        if [[ ${configured} == yes ]]; then find "${data_parent}" -maxdepth 1 -type d -name '.justvoxel-import-*' -print 2>/dev/null || true; fi
+    } | sort -u
+}
+
+is_registered() { jv_migration_registered_recoveries | grep -Fxq -- "$1"; }
+
+summary_json() {
+    local transaction="$1" phase source_type updated_at mode=manual finalizable=false
+    [[ -d ${transaction} && ! -L ${transaction} && -r ${transaction}/state ]] || return 1
+    phase="$(sed -n 's/^phase=//p' "${transaction}/state" | head -n1)"
+    source_type="$(sed -n 's/^source_type=//p' "${transaction}/state" | head -n1)"
+    updated_at="$(sed -n 's/^updated_at=//p' "${transaction}/state" | head -n1)"
+    case "${phase}" in
+        rolled-back) mode=configured; [[ ${configured} == yes ]] && finalizable=true ;;
+        critical-rollback) mode=configured-attention; [[ ${configured} == yes ]] && finalizable=true ;;
+        rolled-back-fresh) mode=fresh-unconfigured; [[ ${configured} == no ]] && finalizable=true ;;
+    esac
+    jq -cn --arg transaction "${transaction}" --arg phase "${phase}" --arg source_type "${source_type}" --arg updated_at "${updated_at}" --arg mode "${mode}" --argjson finalizable "${finalizable}" '{transaction:$transaction,phase:$phase,source_type:$source_type,updated_at:$updated_at,mode:$mode,finalizable:$finalizable}'
+}
+
+discover() {
+    local items='[]' transaction item
+    while IFS= read -r transaction; do
+        [[ -n ${transaction} ]] || continue
+        item="$(summary_json "${transaction}" 2>/dev/null || true)"
+        [[ -n ${item} ]] && items="$(jq -cn --argjson current "${items}" --argjson item "${item}" '$current + [$item]')"
+    done < <(collect_transactions)
+    jq -cn --argjson configured "$([[ ${configured} == yes ]] && echo true || echo false)" --argjson transactions "${items}" '{ok:true,schema_version:"v1",configured:$configured,transactions:$transactions}'
+}
+
+plan() {
+    local request transaction allowed=no summary phase state_identity runtime=false unconfigured=false
+    request="$(cat)"
+    if ! jq -e 'type=="object" and ((keys-["transaction"])|length==0) and (.transaction|type=="string")' >/dev/null 2>&1 <<< "${request}"; then
+        jq -cn '{ok:false,schema_version:"v1",code:"invalid_request",error:"invalid migration recovery request",warnings:[]}'
+        return 0
+    fi
+    transaction="$(jq -r '.transaction' <<< "${request}")"
+    if [[ ${transaction} != /* || $(realpath -m -- "${transaction}") != "${transaction}" || $(basename -- "${transaction}") != .justvoxel-import-* ]]; then
+        jq -cn '{ok:false,schema_version:"v1",code:"invalid_transaction",error:"migration recovery transaction path is invalid",warnings:[]}'
+        return 0
+    fi
+    if is_registered "${transaction}"; then allowed=yes;
+    elif [[ ${configured} == yes ]]; then case "${transaction}/" in "${data_parent}/.justvoxel-import-"*) allowed=yes ;; esac; fi
+    if [[ ${allowed} != yes ]]; then
+        jq -cn '{ok:false,schema_version:"v1",code:"untrusted_transaction",error:"migration recovery transaction is not registered or within the configured data parent",warnings:[]}'
+        return 0
+    fi
+    summary="$(summary_json "${transaction}" 2>/dev/null || true)"
+    if [[ -z ${summary} ]]; then jq -cn '{ok:false,schema_version:"v1",code:"missing_transaction",error:"migration recovery transaction is unavailable",warnings:[]}'; return 0; fi
+    if [[ $(jq -r '.finalizable' <<< "${summary}") != true ]]; then jq -cn --argjson normalized "${summary}" '{ok:false,schema_version:"v1",code:"not_finalizable",error:"migration recovery state is not safely finalizable in the current appliance state",normalized:$normalized,warnings:[]}'; return 0; fi
+    phase="$(jq -r '.phase' <<< "${summary}")"
+    case "${phase}" in rolled-back|critical-rollback) runtime=true ;; rolled-back-fresh) unconfigured=true ;; esac
+    state_identity="$(sha256sum "${transaction}/state" | awk '{print $1}')"
+    jq -cn --argjson normalized "${summary}" --arg state_identity "${state_identity}" --argjson runtime "${runtime}" --argjson unconfigured "${unconfigured}" '{ok:true,schema_version:"v1",normalized:$normalized,warnings:[],requirements:{finalize_confirmation_required:true,runtime_validation_required:$runtime,unconfigured_validation_required:$unconfigured},context:{state_identity:$state_identity}}'
+}
+
+case "${1:-}" in
+    discover) discover ;;
+    plan) plan ;;
+    *) echo 'Usage: admin-migration-recovery-json {discover|plan}' >&2; exit 2 ;;
+esac

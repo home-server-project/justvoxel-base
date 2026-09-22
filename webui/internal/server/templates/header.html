@@ -18,10 +18,14 @@
       <div class="nav-menu">
         <span class="nav-section-label">Storage</span>
         <a class="nav-admin-only" href="/settings/storage">Storage overview</a>
+        <a class="nav-admin-only" href="/settings/data-migration">Minecraft data storage</a>
         <a class="nav-admin-only" href="/settings/backup-storage">Backup storage</a>
         <a class="nav-admin-only" href="/settings/storage-provision">Advanced storage</a>
         <span class="nav-section-label">Backups</span>
         <a href="/operations#manual-backup">Create backup</a>
+        <a class="nav-admin-only" href="/settings/restore">Restore</a>
+        <span class="nav-section-label nav-admin-only">Migration</span>
+        <a class="nav-admin-only" href="/settings/server-migration">Server Migration</a>
       </div>
     </details>
 
@@ -30,6 +34,7 @@
       <div class="nav-menu">
         <span class="nav-section-label">Appliance</span>
         <a href="/settings/activity">Admin activity</a>
+        <a href="/settings/validation">Validation</a>
         <span class="nav-section-label">Accounts</span>
         <a href="/settings/users">Users</a>
         <a href="/settings/authentication">Authentication</a>
@@ -41,6 +46,33 @@
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <button class="secondary" type="submit">Log out</button>
     </form>
+
+    <details class="system-power nav-admin-only" data-system-power>
+      <summary class="system-power-button" aria-label="Power options" title="Power options"><span aria-hidden="true">⏻</span></summary>
+      <div class="system-power-menu" aria-label="System power options">
+        <span class="nav-section-label">System</span>
+        <button type="button" data-system-action="reboot" disabled>Restart</button>
+        <button type="button" data-system-action="firmware-reboot" hidden disabled>Restart to UEFI/BIOS</button>
+        <button class="system-power-danger" type="button" data-system-action="poweroff" disabled>Power off</button>
+        <p class="system-power-error" data-system-action-error hidden>System power controls are unavailable.</p>
+      </div>
+    </details>
   </nav>
+
+  <input type="hidden" value="{{.CSRF}}" data-system-actions-csrf>
+  <dialog class="system-action-dialog" data-system-action-dialog>
+    <div class="system-action-dialog-content">
+      <p class="eyebrow">System power</p>
+      <h2 data-system-action-title>Confirm system action</h2>
+      <p data-system-action-message></p>
+      <div class="player-list" data-system-action-players hidden></div>
+      <div class="notice warning" data-system-action-update hidden>A staged JustVoxel OS update will be used after this restart.</div>
+      <p class="system-action-dialog-error" data-system-action-dialog-error hidden></p>
+      <div class="action-row">
+        <button class="secondary" type="button" data-system-action-cancel>Cancel</button>
+        <button class="danger" type="button" data-system-action-confirm>Continue</button>
+      </div>
+    </div>
+  </dialog>
 </header>
 {{end}}

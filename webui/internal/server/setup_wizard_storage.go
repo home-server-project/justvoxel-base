@@ -76,12 +76,14 @@ func (a *App) setupWizardSaveStorage(w http.ResponseWriter, r *http.Request) {
 		draft.Storage.Complete = false
 		draft.CurrentStep = 2
 		firstRunSetupDrafts.save(a, session, draft)
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "storage settings changed; user returned to Minecraft", draft)
 		http.Redirect(w, r, "/setup", http.StatusSeeOther)
 		return
 	}
 	if err := validateSetupStorage(draft.Storage, draft.Inventory, draft.Defaults); err != nil {
 		draft.Storage.Complete = false
 		firstRunSetupDrafts.save(a, session, draft)
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "storage settings rejected", draft)
 		w.WriteHeader(http.StatusBadRequest)
 		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
 		return
@@ -89,6 +91,7 @@ func (a *App) setupWizardSaveStorage(w http.ResponseWriter, r *http.Request) {
 	draft.Storage.Complete = true
 	draft.CurrentStep = 4
 	firstRunSetupDrafts.save(a, session, draft)
+	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "storage settings saved", draft)
 	http.Redirect(w, r, "/setup", http.StatusSeeOther)
 }
 
@@ -114,12 +117,14 @@ func (a *App) setupWizardSaveBackups(w http.ResponseWriter, r *http.Request) {
 		draft.Backups.Complete = false
 		draft.CurrentStep = 3
 		firstRunSetupDrafts.save(a, session, draft)
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "backup settings changed; user returned to Storage", draft)
 		http.Redirect(w, r, "/setup", http.StatusSeeOther)
 		return
 	}
 	if err := validateSetupBackups(draft.Backups, draft.Storage, draft.Inventory, draft.Defaults); err != nil {
 		draft.Backups.Complete = false
 		firstRunSetupDrafts.save(a, session, draft)
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "backup settings rejected", draft)
 		w.WriteHeader(http.StatusBadRequest)
 		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
 		return
@@ -127,6 +132,7 @@ func (a *App) setupWizardSaveBackups(w http.ResponseWriter, r *http.Request) {
 	draft.Backups.Complete = true
 	draft.CurrentStep = 5
 	firstRunSetupDrafts.save(a, session, draft)
+	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "backup settings saved; configuration ready for Review", draft)
 	http.Redirect(w, r, "/setup/review", http.StatusSeeOther)
 }
 

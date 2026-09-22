@@ -1,5 +1,19 @@
 # JustVoxel server migration
 
+## Shared Management API status
+
+Server migration **Export, Import, and Recovery** now share the authoritative Management API/backend. The Agent owns reviewed planning and fingerprints, the exclusive server-migration operation family, persistent operation tracking, player interruption requirements, source and destination revalidation, temporary local/configured-backup/device/NFS/SMB transport handling, transactional execution, verification, rollback state, and conservative restart/interruption recovery.
+
+Steps 5A.2 and 5B are complete. `mjust export`, `mjust import`, `mjust migration-recover`, and the Administrator WebUI Server Migration workflows are thin frontends over the same shared Management API. Import preserves the supported source choices and fresh-destination storage review without returning mount, storage, rollback, or Minecraft lifecycle authority to either frontend. Export, Import, Recovery, persistent operation state, reconnect behavior, and recovery handoff are shared through the Management Agent.
+
+### WebUI Server Migration
+
+Administrators can open **Storage & Backups → Server Migration** in the WebUI. Export, Import, and Recovery use the same Agent discovery, reviewed planning, fingerprints, Apply endpoints, persistent operation journal, rollback semantics, and needs-attention state used by `mjust`.
+
+The WebUI does not mount filesystems, manipulate Minecraft data, execute migration helpers, or implement storage policy directly. Temporary source SMB credentials are supplied only for the current planning or Apply request. Export SMB passwords and fresh-destination backup SMB passwords are Apply-only. They are not stored in reviewed plans, URLs, hidden persistent state, or the operation journal.
+
+Refreshing or reopening a migration reconnects to the current persistent Agent operation. If Import reaches `needs_attention`, the WebUI exposes the Agent-owned Recovery handoff. Fresh-unconfigured `rolled-back-fresh` recovery is supported. Browser file upload is intentionally outside migration v1; imported data must already be reachable through a supported local, configured-backup, device/USB, NFS, or SMB source.
+
 JustVoxel migration moves the **complete persistent Minecraft server state** to another JustVoxel installation. It is separate from normal JustVoxel Backup/Restore.
 
 - **Backup / Restore** protects the current appliance and uses its configured backup destination.
@@ -378,6 +392,16 @@ Original server restored and validated.
 If rollback itself cannot be validated, JustVoxel reports a **CRITICAL** state and retains all recovery evidence under the `.justvoxel-import-*` transaction directory. Do not delete that recovery directory until the appliance is recovered.
 
 For a fresh import failure, generated Minecraft runtime/firewall state is removed and the appliance returns to its previous unconfigured runtime state. Storage that the administrator explicitly provisioned is not reformatted or destroyed merely because the Minecraft import failed.
+
+## Guided migration recovery
+
+Use `mjust migration-recover` when an Import leaves retained rollback/recovery evidence or an interrupted persistent migration operation requires administrator attention.
+
+Recovery is owned by the Management Agent and uses the same exclusive server-migration operation family as Export and Import. The Agent discovers the retained Import recovery state, validates the expected configured or fresh-unconfigured destination state, requires the reviewed recovery confirmation, and removes retained transaction evidence only after the recovery state is safely finalized.
+
+Fresh Import rollback state is supported explicitly. A successful fresh rollback can leave a `rolled-back-fresh` transaction while the appliance is intentionally unconfigured; Recovery can validate and finalize that state without requiring a normal configured Minecraft destination.
+
+If the Management Agent or appliance restarts during an active migration operation, the persistent operation journal is preserved conservatively as requiring attention rather than assuming success or silently restarting destructive work.
 
 ## After migration
 

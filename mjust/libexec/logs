@@ -2,45 +2,51 @@
 set -euo pipefail
 source /usr/libexec/justvoxel/mjust/ui.sh
 
-mode=simple
-if [[ ${1:-} == --advanced ]]; then
-    mode=advanced
-    shift
-fi
+readonly api_client=/usr/libexec/justvoxel/mjust/api-client
+
 if (( $# > 0 )); then
-    echo 'Usage: logs [--advanced]' >&2
+    echo 'Usage: logs' >&2
     exit 2
 fi
 
-if [[ ${mode} == simple ]]; then
-    journal_args=(--no-pager -o cat -u minecraft.service -n 100)
-    title='Minecraft logs'
-else
-    journal_args=(--no-pager -u minecraft.service -n 200)
-    title='Minecraft logs - advanced systemd view'
+if (( EUID != 0 )); then
+    echo 'ERROR: this operation must run as root.' >&2
+    exit 1
 fi
+
+set +e
+response="$("${api_client}" GET '/v1/logs/minecraft?limit=100&format=cat')"
+rc=$?
+set -e
+
+if (( rc != 0 )); then
+    if jq -e 'type == "object" and (.error | type == "string")' <<<"${response}" >/dev/null 2>&1; then
+        printf 'ERROR: %s\n' "$(jq -r '.error' <<<"${response}")" >&2
+    else
+        echo 'ERROR: Minecraft logs are unavailable from the JustVoxel Management API.' >&2
+    fi
+    exit 1
+fi
+
+if ! jq -e 'type == "object" and (.lines | type == "array")' <<<"${response}" >/dev/null 2>&1; then
+    echo 'ERROR: JustVoxel Management API returned invalid Minecraft logs.' >&2
+    exit 1
+fi
+
+title='Minecraft logs'
+if jui_has_tty; then
+    printf '%s\n' "${title}"
+    printf '%*s\n' "${#title}" '' | tr ' ' '-'
+    echo 'Showing the latest 100 log lines.'
+    echo 'Press q or Esc to return to JustVoxel.'
+    echo
+fi
+
+jq -r '.lines[]' <<<"${response}"
 
 if ! jui_has_tty; then
-    exec journalctl "${journal_args[@]}"
+    exit 0
 fi
-
-printf '%s\n' "${title}"
-printf '%*s\n' "${#title}" '' | tr ' ' '-'
-echo 'Press q or Esc to return to JustVoxel. Ctrl-C also exits the log viewer.'
-echo
-
-journalctl "${journal_args[@]}" -f &
-log_pid=$!
-
-cleanup() {
-    local rc=$?
-    trap - EXIT INT TERM HUP
-    kill "${log_pid}" >/dev/null 2>&1 || true
-    wait "${log_pid}" 2>/dev/null || true
-    return "${rc}"
-}
-trap cleanup EXIT
-trap 'exit 0' INT TERM HUP
 
 while true; do
     key=''

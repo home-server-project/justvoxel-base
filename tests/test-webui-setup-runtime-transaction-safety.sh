@@ -30,7 +30,11 @@ grep -Fq 'activate_backup_timer' "${common}"
 grep -Fq 'render_runtime_files' "${runtime_helper}"
 grep -Fq 'activate_backup_timer' "${runtime_helper}"
 grep -Fq 'wait_for_rcon 900' "${runtime_helper}"
-grep -Fq '/usr/libexec/justvoxel/mjust/validate' "${runtime_helper}"
+grep -Fq '/usr/libexec/justvoxel/mjust/validate-backend' "${runtime_helper}"
+if grep -Fq '/usr/libexec/justvoxel/mjust/validate ' "${runtime_helper}"; then
+    echo 'A5.5 runtime transaction must not recurse through the mJust validation API frontend.' >&2
+    exit 1
+fi
 grep -Fq 'runtime_rollback' "${runner}"
 grep -Fq 'rollbackSetupStorage' "${runner}"
 grep -Fq 'MinecraftUID' "${runner}"
@@ -46,7 +50,15 @@ if grep -Eq 'exec\.Command(Context)?\([^,]+,[[:space:]]*request|/bin/(sh|bash)[[
     exit 1
 fi
 
-# Manual mjust setup must retain its existing wrapper behavior.
-grep -Fq 'render_runtime' "${repo_root}/mjust/libexec/setup"
+# Normal mjust setup is the single supported first-run setup path and uses the Management API.
+grep -Fq 'setup-api.sh' "${repo_root}/mjust/libexec/setup"
+if grep -Fq 'render_runtime' "${repo_root}/mjust/libexec/setup"; then
+    echo 'normal mJust setup must not render runtime files directly' >&2
+    exit 1
+fi
+if grep -Fq 'setup-legacy' "${repo_root}/mjust/libexec/setup" || grep -Fq -- '--advanced' "${repo_root}/mjust/libexec/setup"; then
+    echo 'normal mJust setup must not expose the legacy Advanced Setup path' >&2
+    exit 1
+fi
 
 echo 'WebUI first-run A5.5 runtime transaction safety checks passed.'

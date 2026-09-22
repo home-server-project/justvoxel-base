@@ -17,6 +17,10 @@ os_status="${repo_root}/mjust/libexec/os-status"
 os_update="${repo_root}/mjust/libexec/os-update"
 power="${repo_root}/mjust/libexec/system-power"
 firmware="${repo_root}/mjust/libexec/firmware"
+system_actions_api="${repo_root}/mjust/libexec/system-actions-api.sh"
+system_actions_backend="${repo_root}/mjust/libexec/admin-system-actions-json"
+system_actions_agent="${repo_root}/management/cmd/justvoxel-management-agent/admin_system_actions.go"
+management_main="${repo_root}/management/cmd/justvoxel-management-agent/main.go"
 menu="${repo_root}/mjust/libexec/menu"
 justfile="${repo_root}/mjust/justfile"
 service="${repo_root}/mjust/libexec/service"
@@ -33,16 +37,51 @@ if grep -Eq '^ProtectSystem=(full|strict)$' "${management_unit}"; then
     fail 'management service must not make /etc read-only while PAM system password changes are supported'
 fi
 
-grep -Fq 'jv_player_check_before_interrupt' "${service}" || fail 'Minecraft service control does not share interruption safety'
-grep -Fq 'systemctl reboot' "${power}" || fail 'reboot action missing'
-grep -Fq 'systemctl poweroff' "${power}" || fail 'poweroff action missing'
-grep -Fq 'systemctl reboot --firmware-setup' "${firmware}" || fail 'firmware reboot action missing'
-grep -Fq 'Firmware setup is available on JustVoxel HWE only.' "${firmware}" || fail 'VM firmware refusal missing'
-grep -Fq 'jv_variant_is_hwe' "${firmware}" || fail 'firmware must use canonical HWE detection'
-grep -Fq 'jv_variant_is_hwe' "${menu}" || fail 'System menu must use canonical HWE detection'
+grep -Fq '/v1/minecraft/' "${service}" || fail 'Minecraft service control must use the Management API'
+if grep -Eq 'systemctl |podman |rcon-cli|jv_player_check_before_interrupt' "${service}"; then
+    fail 'Minecraft service frontend must not perform direct system or player-safety operations'
+fi
+grep -Fq 'jv_stop_minecraft_adaptive' "${repo_root}/mjust/libexec/web-status-json" || fail 'Minecraft API backend does not use adaptive shutdown'
+grep -Fq 'jv_stop_minecraft_adaptive' "${repo_root}/runtime/minecraft-backup" || fail 'cold backup does not use adaptive shutdown'
+grep -Fq '/usr/libexec/justvoxel/mjust/service stop' "${repo_root}/mjust/libexec/start-over" || fail 'Start Over does not use the shared Minecraft stop path'
+grep -Fq 'system-actions-api.sh' "${power}" || fail 'system power frontend does not use the System Actions API helper'
+grep -Fq 'system-actions-api.sh' "${firmware}" || fail 'firmware frontend does not use the System Actions API helper'
+grep -Fq 'jv_system_actions_get' "${power}" || fail 'system power frontend does not read Agent capabilities'
+grep -Fq 'jv_system_actions_apply' "${power}" || fail 'system power frontend does not apply through the Agent'
+grep -Fq 'jv_system_actions_get' "${firmware}" || fail 'firmware frontend does not read Agent capabilities'
+grep -Fq 'jv_system_actions_apply firmware-reboot' "${firmware}" || fail 'firmware frontend does not apply through the Agent'
+for frontend in "${power}" "${firmware}"; do
+    for forbidden in 'systemctl ' 'systemd-run ' 'podman ' 'rcon-cli' 'bootc ' 'jv_stop_minecraft_' '/sys/firmware' '/sys/class/drm'; do
+        if grep -Fq "${forbidden}" "${frontend}"; then
+            fail "System action frontend still performs direct host/safety work: ${forbidden}"
+        fi
+    done
+done
 
-# Direct recipes remain authoritative even though the normal menu presents one
-# combined user workflow for OS status and updates.
+grep -Fq 'GET /v1/admin/system/actions' "${system_actions_agent}" || fail 'System Actions status route missing'
+grep -Fq 'POST /v1/admin/system/reboot' "${system_actions_agent}" || fail 'System reboot API route missing'
+grep -Fq 'POST /v1/admin/system/poweroff' "${system_actions_agent}" || fail 'System poweroff API route missing'
+grep -Fq 'POST /v1/admin/system/firmware-reboot' "${system_actions_agent}" || fail 'Firmware reboot API route missing'
+grep -Fq 'registerAdminSystemActionRoutes(mux, s)' "${management_main}" || fail 'System Actions routes are not registered'
+grep -Fq 'WriteTimeout:      210 * time.Second' "${management_main}" || fail 'Management API write timeout is too short for player countdown actions'
+
+grep -Fq '"${JV_SYSTEM_ACTIONS_API_CLIENT}" GET /v1/admin/system/actions' "${system_actions_api}" || fail 'System Actions frontend status endpoint missing'
+grep -Fq 'POST "/v1/admin/system/${action}" --data' "${system_actions_api}" || fail 'System Actions frontend apply endpoint missing'
+grep -Fq 'reboot|poweroff|firmware-reboot)' "${system_actions_api}" || fail 'System Actions frontend action allowlist missing'
+grep -Fq 'action_confirmed:true' "${system_actions_api}" || fail 'System Actions frontend explicit action confirmation missing'
+grep -Fq 'confirm_players:$players_confirmed' "${system_actions_api}" || fail 'System Actions player confirmation replay missing'
+
+grep -Fq 'jv_stop_minecraft_adaptive' "${system_actions_backend}" || fail 'System Actions backend does not use adaptive Minecraft shutdown'
+grep -Fq 'systemctl reboot --firmware-setup --dry-run' "${system_actions_backend}" || fail 'System Actions backend lost firmware capability validation'
+grep -Fq 'systemd-run --quiet --collect --unit=justvoxel-reboot --on-active=2s /usr/bin/systemctl reboot' "${system_actions_backend}" || fail 'System reboot backend action missing'
+grep -Fq 'systemd-run --quiet --collect --unit=justvoxel-poweroff --on-active=2s /usr/bin/systemctl poweroff' "${system_actions_backend}" || fail 'System poweroff backend action missing'
+grep -Fq 'systemd-run --quiet --collect --unit=justvoxel-firmware-reboot --on-active=2s /usr/bin/systemctl reboot --firmware-setup' "${system_actions_backend}" || fail 'Firmware reboot backend action missing'
+grep -Fq 'case "${action}" in' "${system_actions_backend}" || fail 'System Actions backend action allowlist missing'
+grep -Fq 'Firmware setup is available on JustVoxel HWS only.' "${firmware}" || fail 'VM firmware refusal missing'
+grep -Fq 'jv_variant_is_hws' "${menu}" || fail 'System menu must use canonical HWS detection'
+
+# Direct recipes remain supported entry points even though the normal menu
+# presents one combined user workflow for OS status and updates.
 for recipe in os-status os-update reboot poweroff firmware password-reset; do
     grep -Fq "${recipe}:" "${justfile}" || fail "missing recipe: ${recipe}"
 done

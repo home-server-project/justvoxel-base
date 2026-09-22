@@ -1,0 +1,41 @@
+{{define "restore.html"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JustVoxel - Restore Minecraft</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js" defer></script></head>
+<body class="role-administrator">{{template "app-header" .}}
+<main>
+  <div class="title-row"><div><p class="eyebrow">Administrator · backups</p><h1>Restore Minecraft</h1></div><span class="badge">{{.Identity.Username}}</span></div>
+  <p class="muted">Restore uses the same Management Agent, safety policy, validation, and rollback backend as <code>mjust restore</code>.</p>
+  {{if .Error}}<div class="notice error">{{.Error}}</div>{{end}}
+  {{if .Backups}}
+  <form method="get" action="/settings/restore/review">
+    <section class="panel">
+      <p class="eyebrow">Restore scope</p>
+      <label><input type="radio" name="mode" value="world" checked> <strong>Restore world</strong></label>
+      <p class="muted">Roll back the primary world, Nether/End worlds, and world-based player data while keeping current plugins and server configuration.</p>
+      <label><input type="radio" name="mode" value="full"> <strong>Restore full Minecraft data</strong></label>
+      <p class="muted">Replace the complete Minecraft persistent data directory, including worlds, plugins, plugin data, and Minecraft-side configuration.</p>
+    </section>
+
+    <section class="panel">
+      <p class="eyebrow">Completed backups</p>
+      {{range .Backups}}
+      <label class="details">
+        <input type="radio" name="backup_id" value="{{.Backup.ID}}" required>
+        <strong>{{.Backup.CreatedAt}}</strong> · {{.Size}}<br>
+        <span class="muted">{{.Backup.ID}}</span><br>
+        {{if eq .Backup.MetadataStatus "valid"}}
+          <span class="muted">Minecraft {{.Backup.Metadata.Minecraft.ConfiguredVersion}} · {{.Backup.Metadata.Minecraft.VersionMode}} policy</span>
+        {{else if eq .Backup.MetadataStatus "missing"}}
+          <span class="muted">metadata unavailable</span>
+        {{else}}
+          <span class="muted">metadata invalid</span>
+        {{end}}
+      </label>
+      {{end}}
+    </section>
+    <button type="submit">Review Restore</button>
+  </form>
+  {{else}}
+  <div class="notice"><strong>No completed JustVoxel Minecraft backups were found.</strong><br>Nothing can be restored until a completed backup is available.</div>
+  {{end}}
+  <p class="foot">WebUI {{.Version}} · Management API {{.ManagementAPI}}</p>
+</main></body></html>{{end}}

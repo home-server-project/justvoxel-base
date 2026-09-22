@@ -26,9 +26,48 @@ A54_CREDENTIALS_CHANGED=false
 A54_CREDENTIALS_MODE=''
 A54_CREDENTIALS_UID=''
 A54_CREDENTIALS_GID=''
+A53_EVIDENCE='{}'
+
+_a53_evidence_set() {
+    local key="$1" value="$2" updated
+    updated="$(jq -c --arg key "${key}" --arg value "${value}" '. + {($key):$value}' <<< "${A53_EVIDENCE}" 2>/dev/null)" || return 0
+    A53_EVIDENCE="${updated}"
+    return 0
+}
+
+_a53_evidence_set_bounded() {
+    local key="$1" value="$2" max="${3:-12000}"
+    if (( ${#value} > max )); then
+        value="${value:0:max}…"
+    fi
+    _a53_evidence_set "${key}" "${value}"
+    return 0
+}
+
+_a53_evidence_from_manifest() {
+    [[ -n ${A53_MANIFEST} && -f ${A53_MANIFEST} ]] || return 0
+    local phase fstab_changed credentials_changed mount_count directory_count rollback_state rollback_result
+    phase="$(jq -r '.phase // ""' "${A53_MANIFEST}" 2>/dev/null || true)"
+    fstab_changed="$(jq -r '.fstab_changed // false' "${A53_MANIFEST}" 2>/dev/null || true)"
+    credentials_changed="$(jq -r '.credentials_changed // false' "${A53_MANIFEST}" 2>/dev/null || true)"
+    mount_count="$(jq -r '(.mounts_by_transaction // []) | length' "${A53_MANIFEST}" 2>/dev/null || true)"
+    directory_count="$(jq -r '(.directories_created // []) | length' "${A53_MANIFEST}" 2>/dev/null || true)"
+    rollback_state="$(jq -r '.rollback.state // ""' "${A53_MANIFEST}" 2>/dev/null || true)"
+    rollback_result="$(jq -r '.rollback.result // ""' "${A53_MANIFEST}" 2>/dev/null || true)"
+    [[ -n ${phase} ]] && _a53_evidence_set transaction_phase "${phase}"
+    [[ -n ${fstab_changed} ]] && _a53_evidence_set fstab_changed "${fstab_changed}"
+    [[ -n ${credentials_changed} ]] && _a53_evidence_set credentials_changed "${credentials_changed}"
+    [[ -n ${mount_count} ]] && _a53_evidence_set transaction_mount_count "${mount_count}"
+    [[ -n ${directory_count} ]] && _a53_evidence_set created_directory_count "${directory_count}"
+    [[ -n ${rollback_state} ]] && _a53_evidence_set rollback_state "${rollback_state}"
+    [[ -n ${rollback_result} ]] && _a53_evidence_set rollback_result "${rollback_result}"
+    return 0
+}
 
 _a53_json() {
-    local ok="$1" applied="$2" phase="$3" rollback_state="$4" rollback_result="$5" error="$6"
+    local ok="$1" applied="$2" phase="$3" rollback_state="$4" rollback_result="$5" error="$6" evidence="${7:-}"
+    [[ -n ${evidence} ]] || evidence="${A53_EVIDENCE}"
+    [[ -n ${evidence} ]] || evidence='{}'
     jq -n \
         --argjson ok "${ok}" \
         --argjson applied "${applied}" \
@@ -36,7 +75,10 @@ _a53_json() {
         --arg rollback_state "${rollback_state}" \
         --arg rollback_result "${rollback_result}" \
         --arg error "${error}" \
-        '{ok:$ok,applied:$applied,phase:$phase,rollback_state:$rollback_state,rollback_result:$rollback_result} + (if $error == "" then {} else {error:$error} end)'
+        --argjson evidence "${evidence}" \
+        '{ok:$ok,applied:$applied,phase:$phase,rollback_state:$rollback_state,rollback_result:$rollback_result}
+         + (if $error == "" then {} else {error:$error} end)
+         + (if ($evidence|length) == 0 then {} else {evidence:$evidence} end)'
 }
 
 _a53_normalize_path() {

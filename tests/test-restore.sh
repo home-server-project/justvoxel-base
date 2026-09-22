@@ -2,6 +2,7 @@
 set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${repo_root}/mjust/libexec/restore-common.sh"
+source "${repo_root}/mjust/libexec/restore-discovery-common.sh"
 source "${repo_root}/mjust/libexec/backup-common.sh"
 
 fail(){ echo "FAIL: $*" >&2; exit 1; }
@@ -18,6 +19,37 @@ mapfile -t records < <(jv_restore_list_archives "${tmp}/backups")
 (( ${#records[@]} == 2 )) || fail 'restore discovery must include only completed archives'
 [[ ${records[0]} == *'minecraft-2026-09-15-043000.tar.gz' ]] || fail 'backups are not sorted newest first'
 [[ ${records[1]} == *'minecraft-2026-09-13-043000.tar.gz' ]] || fail 'older backup ordering is wrong'
+
+
+cat > "${tmp}/backups/minecraft-2026-09-13-043000.tar.gz.meta.json" <<'JSON'
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-09-13T08:30:00Z",
+  "minecraft": {
+    "versionMode": "pinned",
+    "configuredVersion": "26.1",
+    "serverReportedVersion": "Paper 26.1"
+  },
+  "bedrock": {
+    "enabled": false,
+    "geyserReportedVersion": null,
+    "floodgateConfigured": false
+  },
+  "justvoxel": {
+    "variant": "justvoxel-vm"
+  }
+}
+JSON
+touch "${tmp}/backups/minecraft-manual.tar.gz"
+discovery="$(jv_restore_discovery_json "${tmp}/backups")"
+[[ $(jq -r '.backups | length' <<< "${discovery}") == 2 ]] || fail 'API restore discovery must expose only canonical completed backups'
+[[ $(jq -r '.backups[0].id' <<< "${discovery}") == minecraft-2026-09-15-043000.tar.gz ]] || fail 'API restore discovery ordering is wrong'
+[[ $(jq -r '.backups[0].metadata_status' <<< "${discovery}") == invalid ]] || fail 'invalid restore metadata must be marked invalid'
+[[ $(jq -r '.backups[1].metadata_status' <<< "${discovery}") == valid ]] || fail 'valid restore metadata was not recognized'
+[[ $(jq -r '.backups[1].metadata.minecraft.configured_version' <<< "${discovery}") == 26.1 ]] || fail 'safe restore metadata summary is incomplete'
+if grep -Fq "${tmp}/backups" <<< "${discovery}"; then
+    fail 'API restore discovery must not expose backup filesystem paths'
+fi
 
 [[ $(jv_restore_version_relation pinned 26.1 pinned 26.2) == backup_older ]] || fail 'older backup version relation wrong'
 [[ $(jv_restore_version_relation pinned 26.2 pinned 26.2) == same ]] || fail 'same version relation wrong'
@@ -41,23 +73,92 @@ if jv_backup_validate_mount_identity >/dev/null 2>&1; then
     fail 'missing configured backup mount must fail closed'
 fi
 
+plan_helper="${repo_root}/mjust/libexec/admin-restore-plan-json"
+for text in \
+    'jv_backup_require_read_target' \
+    'validate-data-mount' \
+    'jv_restore_validate_data_layout' \
+    '.justvoxel-restore-*' \
+    'jv_restore_archive_identity' \
+    'web-status-json players' \
+    'backup_newer' \
+    'archive_integrity_validation_on_apply' \
+    'archive_safety_validation_on_apply' \
+    'staging_space_validation_on_apply'; do
+    grep -Fq "${text}" "${plan_helper}" || fail "Restore API plan safety behavior missing: ${text}"
+done
+if grep -Eq 'systemctl[[:space:]]+(stop|restart)[[:space:]]+minecraft|restore-archive[[:space:]]+extract-|chown[[:space:]]+-R|restorecon[[:space:]]+-R' "${plan_helper}"; then
+    fail 'Restore API planning helper must remain read-only'
+fi
+
+transaction_helper="${repo_root}/mjust/libexec/admin-restore-transaction-json"
+for text in \
+    'JV_MAINTENANCE_LOCK' \
+    'jv_backup_require_read_target' \
+    'jv_restore_archive_identity' \
+    'gzip -t' \
+    'restore-archive inspect' \
+    'jv_restore_require_space' \
+    'extract-full' \
+    'extract-world' \
+    'pre-restore' \
+    'failed-restored' \
+    'players_confirmed' \
+    'jv_stop_minecraft_adaptive' \
+    'chown -R' \
+    'apply_data_selinux' \
+    'restore-runtime-validate' \
+    'rolling_back' \
+    'needs_attention' \
+    'interrupt-safety.sh'; do
+    grep -Fq "${text}" "${transaction_helper}" || fail "Restore API transaction safety behavior missing: ${text}"
+done
+
 restore="${repo_root}/mjust/libexec/restore"
+restore_api="${repo_root}/mjust/libexec/restore-api.sh"
 backup="${repo_root}/runtime/minecraft-backup"
 menu="${repo_root}/mjust/libexec/menu"
 justfile="${repo_root}/mjust/justfile"
 
 for text in \
-    'Type RESTORE to continue:' \
-    'JV_MAINTENANCE_LOCK' \
-    'pre-restore' \
-    'failed-restored' \
-    'rollback_restore' \
-    'restore-runtime-validate' \
-    'jv_backup_require_read_target' \
-    'gzip -t' \
-    'apply_data_selinux'; do
-    grep -Fq "${text}" "${restore}" || fail "restore safety behavior missing: ${text}"
+    'restore-api.sh' \
+    'jv_restore_current_operation' \
+    'jv_restore_backups' \
+    'jv_restore_plan' \
+    'jv_restore_apply' \
+    'jv_restore_monitor_operation' \
+    '.requirements.players_confirmation_required' \
+    'Type RESTORE to continue:'; do
+    grep -Fq "${text}" "${restore}" || fail "mJust Restore API frontend behavior missing: ${text}"
 done
+
+grep -Fq 'jv_restore_get /v1/admin/restore/backups' "${restore_api}" || fail 'Restore frontend does not discover backups through the Management API'
+grep -Fq 'jv_restore_get /v1/admin/restore/current-operation' "${restore_api}" || fail 'Restore frontend cannot reconnect through the Management API'
+grep -Fq 'jv_restore_post /v1/admin/restore/plan' "${restore_api}" || fail 'Restore frontend does not plan through the Management API'
+grep -Fq 'jv_restore_post /v1/admin/restore/apply' "${restore_api}" || fail 'Restore frontend does not apply through the Management API'
+grep -Fq 'jv_restore_get "/v1/admin/operations/${id}"' "${restore_api}" || fail 'Restore frontend does not monitor persistent operations through the Management API'
+
+for forbidden in \
+    'JV_MAINTENANCE_LOCK' \
+    'jv_backup_require_read_target' \
+    'jv_restore_archive_identity' \
+    'gzip -t' \
+    'restore-archive' \
+    'restore-runtime-validate' \
+    'validate-data-mount' \
+    'apply_data_selinux' \
+    'systemctl ' \
+    'podman ' \
+    'rcon-cli' \
+    'chown ' \
+    'restorecon '; do
+    if grep -Fq "${forbidden}" "${restore}"; then
+        fail "mJust Restore frontend still performs direct backend/safety work: ${forbidden}"
+    fi
+done
+if grep -Fq 'Authorization:' "${restore_api}"; then
+    fail 'mJust Restore API helper must not introduce a bearer token'
+fi
 
 grep -Fq 'restore world' "${justfile}" || fail 'mjust restore world recipe missing'
 grep -Fq 'restore full' "${justfile}" || fail 'mjust restore-full recipe missing'
@@ -71,7 +172,7 @@ grep -Fq 'jv_backup_write_metadata' "${backup}" || fail 'backup metadata writer 
 grep -Fq 'rm -f -- "${minecraft_archives[index]}.meta.json"' "${backup}" || fail 'retention does not remove matching metadata sidecars'
 
 if grep -Eq '/etc/containers/systemd/minecraft\.container.*(cp|mv|tar)|bootc rollback' "${restore}"; then
-    fail 'Minecraft restore must not restore Quadlet or bootc deployment'
+    fail 'Minecraft Restore frontend must not restore Quadlet or bootc deployment'
 fi
 
 echo 'restore workflow regression tests passed.'

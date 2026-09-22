@@ -1,0 +1,61 @@
+{{define "server_migration_export_review.html"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JustVoxel - Review Server Export</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js" defer></script></head>
+<body class="role-administrator">{{template "app-header" .}}
+<main>
+  <div class="title-row"><div><p class="eyebrow">Administrator · migration</p><h1>Review Server Export</h1></div><span class="badge">{{.Identity.Username}}</span></div>
+  {{if .Error}}<div class="notice error"><strong>Server Export cannot continue as submitted.</strong><br>{{.Error}}</div>{{end}}
+
+  {{if .Plan.Normalized}}
+  <section class="panel">
+    <p class="eyebrow">Authoritative Agent plan</p>
+    <h2>{{.Plan.Normalized.TargetDisplay}}</h2>
+    <div class="details">
+      <strong>Destination type</strong><br><span class="muted">{{.Plan.Normalized.Kind}}</span><br><br>
+      <strong>Bundle filename</strong><br><span class="muted">{{.Plan.Normalized.Filename}}</span><br><br>
+      <strong>Minecraft data</strong><br><span class="muted">{{.Plan.Normalized.DataPath}} · {{.DataSize}}</span>
+      {{if .Plan.Normalized.TargetFilesystem}}<br><br><strong>Destination filesystem</strong><br><span class="muted">{{.Plan.Normalized.TargetFilesystem}}</span>{{end}}
+      {{if .AvailableSize}}<br><br><strong>Available destination space</strong><br><span class="muted">{{.AvailableSize}}</span>{{end}}
+    </div>
+  </section>
+  {{end}}
+
+  {{if .Plan.Warnings}}
+  <section class="panel"><p class="eyebrow">Export warnings</p>{{range .Plan.Warnings}}<div class="notice warning">{{.Message}}</div>{{end}}</section>
+  {{end}}
+
+  {{if and .Plan.OK .Plan.Requirements}}
+  <section class="panel">
+    <p class="eyebrow">Safety checks</p>
+    <p>The Management Agent will revalidate the reviewed destination, Minecraft runtime state, source identity, destination identity, and bundle integrity before and during execution.</p>
+    {{if .Plan.Requirements.PlayersConfirmationRequired}}
+    <div class="notice warning"><strong>{{.Plan.Requirements.Online}} player(s) are online.</strong><br>{{range .Plan.Requirements.Players}}{{.}}<br>{{end}}Server Export may briefly interrupt players while the Agent prepares the consistent migration snapshot.</div>
+    {{end}}
+    {{if .Plan.Requirements.SMBPasswordRequired}}
+    <div class="notice"><strong>SMB credential handling</strong><br>The password below is sent only with the final Apply request. It is not part of the reviewed plan, hidden state, URL, or persistent operation journal.</div>
+    {{end}}
+  </section>
+
+  <form method="post" action="/settings/server-migration/export/apply" autocomplete="off">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="kind" value="{{.Request.Kind}}">
+    <input type="hidden" name="path" value="{{.Request.Path}}">
+    <input type="hidden" name="device" value="{{.Request.Device}}">
+    <input type="hidden" name="source" value="{{.Request.Source}}">
+    <input type="hidden" name="username" value="{{.Request.Username}}">
+    <input type="hidden" name="domain" value="{{.Request.Domain}}">
+    <input type="hidden" name="filename" value="{{.Request.Filename}}">
+    <input type="hidden" name="plan_fingerprint" value="{{.Plan.PlanFingerprint}}">
+    {{if .Plan.Requirements.PlayersConfirmationRequired}}<label><input type="checkbox" name="players_confirmed" value="yes"> I understand that the online players may be interrupted.</label>{{end}}
+    {{if .Plan.Requirements.SMBPasswordRequired}}
+    <label for="server-export-smb-password"><strong>SMB password</strong></label>
+    <input id="server-export-smb-password" type="password" name="smb_password" autocomplete="off" required>
+    {{end}}
+    <label for="server-export-confirmation"><strong>Type EXPORT to continue</strong></label>
+    <input id="server-export-confirmation" name="export_confirmation" autocomplete="off" required>
+    <div class="action-row"><button type="submit">Start Server Export</button><a class="button-link secondary" href="/settings/server-migration/export">Cancel</a></div>
+  </form>
+  {{else}}
+  <div class="action-row"><a class="button-link secondary" href="/settings/server-migration/export">Choose another Export destination</a></div>
+  {{end}}
+  <p class="foot">WebUI {{.Version}} · Management API {{.ManagementAPI}}</p>
+</main></body></html>{{end}}

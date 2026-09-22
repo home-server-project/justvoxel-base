@@ -46,6 +46,7 @@
     </div>
 
     <div class="setup-operation-actions">
+      <a class="button-link" id="setup-diagnostic-log-link" href="/setup/progress/{{.Operation.OperationID}}/log" {{if and (ne .Operation.State "succeeded") (ne .Operation.State "rolled_back") (ne .Operation.State "needs_attention")}}hidden{{end}}>Download Setup Log</a>
       <a class="button-link" id="setup-dashboard-link" href="/" {{if ne .Operation.State "succeeded"}}hidden{{end}}>Open dashboard</a>
       <a class="button-link secondary" id="setup-review-link" href="/setup/review" {{if ne .Operation.State "rolled_back"}}hidden{{end}}>Return to Review</a>
     </div>

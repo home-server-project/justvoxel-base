@@ -8,14 +8,21 @@ if [[ ${configured} == yes ]] && systemctl is-active --quiet minecraft.service; 
     echo "${initial_players}"
     if ! grep -q 'There are 0 of' <<< "${initial_players}"; then
         echo 'Players are online. Import will use the normal graceful shutdown path.'
-        if jui_confirm 'Continue preparing this import?'; then players_override=yes; else echo 'Import cancelled.'; exit 0; fi
+        if [[ ${JV_MIGRATION_API_MODE:-0} == 1 ]]; then
+            [[ ${JV_MIGRATION_API_PLAYERS_CONFIRMED:-no} == yes ]] || { echo 'ERROR: players are online and interruption was not explicitly confirmed.' >&2; exit 1; }
+            players_override=yes
+        elif jui_confirm 'Continue preparing this import?'; then players_override=yes; else echo 'Import cancelled.'; exit 0; fi
     fi
 fi
 
 echo
-printf 'Type IMPORT to continue: ' >/dev/tty
-IFS= read -r confirmation </dev/tty
-[[ ${confirmation} == IMPORT ]] || { echo 'Import cancelled.'; exit 0; }
+if [[ ${JV_MIGRATION_API_MODE:-0} == 1 ]]; then
+    [[ ${JV_MIGRATION_API_IMPORT_CONFIRMED:-no} == yes ]] || { echo 'ERROR: destructive import activation was not explicitly confirmed.' >&2; exit 1; }
+else
+    printf 'Type IMPORT to continue: ' >/dev/tty
+    IFS= read -r confirmation </dev/tty
+    [[ ${confirmation} == IMPORT ]] || { echo 'Import cancelled.'; exit 0; }
+fi
 
 exec 9>"${JV_MAINTENANCE_LOCK}"
 if ! flock -n 9; then
@@ -42,15 +49,42 @@ if [[ ${configured} == yes && ${minecraft_was_active} == yes ]]; then
     [[ -n ${final_players} ]] || { echo 'ERROR: player state became unknown. Import cancelled before live data changed.' >&2; exit 1; }
     echo "${final_players}"
     if ! grep -q 'There are 0 of' <<< "${final_players}" && [[ ${players_override} != yes ]]; then
-        if ! jui_confirm 'A player joined. Continue with the normal graceful shutdown?'; then
+        if [[ ${JV_MIGRATION_API_MODE:-0} == 1 ]]; then
+            echo 'ERROR: a player joined after planning and interruption was not confirmed.' >&2
+            exit 1
+        elif ! jui_confirm 'A player joined. Continue with the normal graceful shutdown?'; then
             echo 'Import cancelled before live data changed.'
             exit 0
         fi
     fi
-    echo 'Stopping Minecraft through its configured graceful shutdown path.'
-    systemctl stop minecraft.service
+    echo 'Stopping Minecraft through the player-aware graceful shutdown path.'
+    stop_mode=required
+    [[ ${players_override} == yes ]] && stop_mode=confirmed
+    set +e
+    JV_INTERRUPT_CONFIRMATION_MODE="${stop_mode}" \
+        jv_stop_minecraft_adaptive 'Import Minecraft data'
+    stop_rc=$?
+    set -e
+    if (( stop_rc == 10 )); then
+        if [[ ${JV_MIGRATION_API_MODE:-0} == 1 && ${JV_MIGRATION_API_PLAYERS_CONFIRMED:-no} == yes ]]; then
+            set +e
+            JV_INTERRUPT_CONFIRMATION_MODE=confirmed \
+                jv_stop_minecraft_adaptive 'Import Minecraft data'
+            stop_rc=$?
+            set -e
+        elif [[ ${JV_MIGRATION_API_MODE:-0} != 1 ]] && jui_confirm 'A player joined after the final check. Continue with the 60-second shutdown countdown?'; then
+            set +e
+            JV_INTERRUPT_CONFIRMATION_MODE=confirmed \
+                jv_stop_minecraft_adaptive 'Import Minecraft data'
+            stop_rc=$?
+            set -e
+        fi
+    fi
+    if (( stop_rc != 0 )); then
+        echo 'ERROR: Minecraft could not be stopped safely. Live data was not changed.' >&2
+        exit 1
+    fi
     minecraft_stopped_by_import=yes
-    systemctl is-active --quiet minecraft.service && { echo 'ERROR: Minecraft is still running. Live data was not changed.' >&2; exit 1; }
 fi
 
 if [[ ${configured} == yes ]]; then /usr/libexec/justvoxel/mjust/validate-data-mount; fi
@@ -104,6 +138,7 @@ fi
 transaction=''
 live_modified=no
 minecraft_stopped_by_import=no
+jv_migration_api_result succeeded validated '' 'Server migration Import completed successfully and the imported Minecraft runtime validated.' || true
 
 removable_owned=no
 if [[ ${transport_started} == yes ]]; then

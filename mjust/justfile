@@ -6,9 +6,6 @@ default:
 setup:
     @sudo /usr/libexec/justvoxel/mjust/setup
 
-setup-advanced:
-    @sudo /usr/libexec/justvoxel/mjust/setup --advanced
-
 configure:
     @sudo /usr/libexec/justvoxel/mjust/configure
 
@@ -46,7 +43,7 @@ whitelist-remove-bedrock gamertag:
     @sudo /usr/libexec/justvoxel/mjust/whitelist remove-bedrock "{{gamertag}}"
 
 backup:
-    @sudo /usr/libexec/justvoxel/minecraft-backup
+    @sudo /usr/libexec/justvoxel/mjust/backup
 
 restore:
     @sudo /usr/libexec/justvoxel/mjust/restore world
@@ -80,6 +77,12 @@ os-update:
 
 resources:
     @/usr/libexec/justvoxel/mjust/resources
+
+files:
+    @/usr/libexec/justvoxel/mjust/files
+
+net:
+    @/usr/libexec/justvoxel/mjust/network
 
 reboot:
     @sudo /usr/libexec/justvoxel/mjust/system-power reboot
@@ -127,7 +130,7 @@ storage-system:
     @sudo /usr/libexec/justvoxel/mjust/storage-provision system
 
 storage-migrate:
-    @sudo /usr/libexec/justvoxel/mjust/storage-provision migrate
+    @sudo /usr/libexec/justvoxel/mjust/data-migration
 
 start-over:
     @sudo /usr/libexec/justvoxel/mjust/start-over

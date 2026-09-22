@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -64,6 +65,45 @@ func TestAdminSetupApplyRequiresAdministratorBeforePreflight(t *testing.T) {
 	}
 	if called {
 		t.Fatal("preflight ran for non-Administrator")
+	}
+}
+
+func TestLocalRootCanApplyFirstRunSetupWithoutBearerSession(t *testing.T) {
+	oldWorker := startSetupWorker
+	startSetupWorker = func(_ *server, _ string, _ adminSetupNormalizedPlan, secret []byte) { zeroBytes(secret) }
+	defer func() { startSetupWorker = oldWorker }()
+
+	s := surfaceTestServer(t, roleViewer)
+	store := openTestOperationStore(t)
+	attachTestOperationStore(t, s, store)
+
+	oldPlan := runAdminSetupPlanHelper
+	oldDiscovery := runAdminDiscoveryHelper
+	defer func() {
+		runAdminSetupPlanHelper = oldPlan
+		runAdminDiscoveryHelper = oldDiscovery
+	}()
+	runAdminSetupPlanHelper = func(_ context.Context, _ []byte) ([]byte, error) {
+		return []byte(validAdminSetupPlanResponse), nil
+	}
+	runAdminDiscoveryHelper = func(_ context.Context, action string) ([]byte, error) {
+		if action != "configuration" {
+			t.Fatalf("unexpected discovery action: %s", action)
+		}
+		return []byte(`{"configured":false,"minecraft":{},"backup":{}}`), nil
+	}
+
+	fingerprint := exactSetupApplyFingerprint(t)
+	req := requestWithPeerUID(http.MethodPost, "http://unix/v1/admin/setup/apply", 0)
+	req.Body = io.NopCloser(strings.NewReader(setupApplyBody(t, fingerprint)))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.adminSetupApply(rr, req)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("local-root setup apply returned %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"created":true`) || !strings.Contains(rr.Body.String(), `"operation_id"`) {
+		t.Fatalf("unexpected local-root setup apply response: %s", rr.Body.String())
 	}
 }
 

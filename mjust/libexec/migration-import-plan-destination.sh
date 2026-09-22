@@ -76,6 +76,15 @@ if [[ ${configured} == no ]]; then
     TIMEZONE="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
     TIMEZONE="${TIMEZONE:-UTC}"
     MINECRAFT_IMAGE_TAG=stable
+    if [[ ${JV_MIGRATION_API_MODE:-0} == 1 ]]; then
+        MINECRAFT_UID="${JV_MIGRATION_API_MINECRAFT_UID:-${MINECRAFT_UID}}"
+        MINECRAFT_GID="${JV_MIGRATION_API_MINECRAFT_GID:-${MINECRAFT_GID}}"
+        validate_nonroot_id "${MINECRAFT_UID}" && validate_nonroot_id "${MINECRAFT_GID}" || { echo 'ERROR: reviewed Minecraft runtime identity is invalid.' >&2; exit 1; }
+        JAVA_MEMORY="${JV_MIGRATION_API_JAVA_MEMORY:-${JAVA_MEMORY}}"
+        CONTAINER_MEMORY="${JV_MIGRATION_API_CONTAINER_MEMORY:-${CONTAINER_MEMORY}}"
+        TIMEZONE="${JV_MIGRATION_API_TIMEZONE:-${TIMEZONE}}"
+        MINECRAFT_IMAGE_TAG="${JV_MIGRATION_API_IMAGE_TAG:-stable}"
+    fi
 else
     # Destination ownership, memory, timezone, image channel and backup policy remain destination-specific.
     :
@@ -85,14 +94,22 @@ if [[ -n ${java_hint} && ${java_hint} =~ ^[0-9]+$ ]]; then
     echo "Source Java port hint: ${java_hint}/tcp"
 fi
 if [[ ${configured} == yes ]]; then default_java="${old_java}"; else default_java="${java_hint:-25565}"; fi
-JAVA_PORT="$(jui_input 'Destination Java host TCP port' "${default_java}")" || exit 1
+if [[ ${JV_MIGRATION_API_MODE:-0} == 1 ]]; then
+    JAVA_PORT="${JV_MIGRATION_API_JAVA_PORT:-${default_java}}"
+else
+    JAVA_PORT="$(jui_input 'Destination Java host TCP port' "${default_java}")" || exit 1
+fi
 validate_port "${JAVA_PORT}" || { echo 'ERROR: invalid Java port.' >&2; exit 1; }
 jv_migration_check_candidate_port tcp "${JAVA_PORT}" "${old_java}" || exit 1
 
 if [[ ${BEDROCK_ENABLED} == yes ]]; then
     [[ -n ${bedrock_hint} && ${bedrock_hint} =~ ^[0-9]+$ ]] && echo "Source Bedrock port hint: ${bedrock_hint}/udp"
     if [[ ${configured} == yes && ${old_bedrock_enabled} == yes ]]; then default_bedrock="${old_bedrock}"; else default_bedrock="${bedrock_hint:-19132}"; fi
-    BEDROCK_PORT="$(jui_input 'Destination Bedrock host UDP port' "${default_bedrock}")" || exit 1
+    if [[ ${JV_MIGRATION_API_MODE:-0} == 1 ]]; then
+        BEDROCK_PORT="${JV_MIGRATION_API_BEDROCK_PORT:-${default_bedrock}}"
+    else
+        BEDROCK_PORT="$(jui_input 'Destination Bedrock host UDP port' "${default_bedrock}")" || exit 1
+    fi
     validate_port "${BEDROCK_PORT}" || { echo 'ERROR: invalid Bedrock port.' >&2; exit 1; }
     jv_migration_check_candidate_port udp "${BEDROCK_PORT}" "$([[ ${old_bedrock_enabled} == yes ]] && printf '%s' "${old_bedrock}" || true)" || exit 1
 else
@@ -100,8 +117,10 @@ else
 fi
 
 if [[ ${configured} == no ]]; then
-    JAVA_MEMORY="$(jui_input 'Minecraft Java heap' "${JAVA_MEMORY}")" || exit 1
-    CONTAINER_MEMORY="$(jui_input 'Maximum total Minecraft memory' "${CONTAINER_MEMORY}")" || exit 1
+    if [[ ${JV_MIGRATION_API_MODE:-0} != 1 ]]; then
+        JAVA_MEMORY="$(jui_input 'Minecraft Java heap' "${JAVA_MEMORY}")" || exit 1
+        CONTAINER_MEMORY="$(jui_input 'Maximum total Minecraft memory' "${CONTAINER_MEMORY}")" || exit 1
+    fi
     validate_memory "${JAVA_MEMORY}" && validate_memory "${CONTAINER_MEMORY}" || { echo 'ERROR: invalid memory values.' >&2; exit 1; }
     (( $(memory_to_mib "${CONTAINER_MEMORY}") > $(memory_to_mib "${JAVA_MEMORY}") )) || { echo 'ERROR: container memory must be larger than Java heap.' >&2; exit 1; }
 
@@ -111,9 +130,13 @@ if [[ ${configured} == no ]]; then
     echo 'Minecraft EULA acceptance is required before JustVoxel can start the imported server.'
     echo 'The source eula.txt, if present, is NOT accepted as destination administrator consent.'
     echo 'Review: https://aka.ms/MinecraftEULA'
-    printf 'Type ACCEPT to confirm that you accept the Minecraft EULA: ' >/dev/tty
-    IFS= read -r eula_acceptance </dev/tty
-    [[ ${eula_acceptance} == ACCEPT ]] || { echo 'EULA not accepted. Imported data was not activated.'; exit 1; }
+    if [[ ${JV_MIGRATION_API_MODE:-0} == 1 ]]; then
+        [[ ${JV_MIGRATION_API_EULA_ACCEPTED:-no} == yes ]] || { echo 'ERROR: Minecraft EULA acceptance was not explicitly confirmed.' >&2; exit 1; }
+    else
+        printf 'Type ACCEPT to confirm that you accept the Minecraft EULA: ' >/dev/tty
+        IFS= read -r eula_acceptance </dev/tty
+        [[ ${eula_acceptance} == ACCEPT ]] || { echo 'EULA not accepted. Imported data was not activated.'; exit 1; }
+    fi
 fi
 
 # Confirm the destination container image policy is still available before live data changes.

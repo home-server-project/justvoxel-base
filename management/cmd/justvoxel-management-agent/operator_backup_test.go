@@ -21,6 +21,29 @@ func withBackupTestDependencies(t *testing.T) {
 	backupServiceState = func(context.Context) (string, error) { return "inactive", nil }
 }
 
+func TestLocalRootCanRequestManualBackupWithoutBearerSession(t *testing.T) {
+	withBackupTestDependencies(t)
+	s := &server{sessions: make(map[string]session)}
+	calls := 0
+	requestManualBackup = func(context.Context) error {
+		calls++
+		return nil
+	}
+
+	req := requestWithPeerUID(http.MethodPost, "http://unix/v1/backups/manual", 0)
+	rr := httptest.NewRecorder()
+	s.manualBackup(rr, req)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("local root manual backup returned %d: %s", rr.Code, rr.Body.String())
+	}
+	if calls != 1 {
+		t.Fatalf("local root backup service calls = %d, want 1", calls)
+	}
+	if !strings.Contains(rr.Body.String(), `"ok":true`) || !strings.Contains(rr.Body.String(), "Manual backup requested.") {
+		t.Fatalf("unexpected local root backup response: %s", rr.Body.String())
+	}
+}
+
 func TestOperatorManualBackupConsumesAllowanceAndCreatesNotification(t *testing.T) {
 	withBackupTestDependencies(t)
 	store, _ := openTestWebUIStore(t)

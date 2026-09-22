@@ -33,6 +33,7 @@ type setupProgressPageData struct {
 func (a *App) registerSetupWizardApplyRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /setup/review/apply", a.setupWizardReviewApply)
 	mux.HandleFunc("GET /setup/progress/{id}", a.setupWizardProgressPage)
+	mux.HandleFunc("GET /setup/progress/{id}/log", a.setupWizardDiagnosticDownload)
 	mux.HandleFunc("GET /api/setup/progress/{id}", a.setupWizardProgressStatus)
 }
 
@@ -107,10 +108,11 @@ func (a *App) setupWizardReviewApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := executor.AdminSetupApply(r.Context(), session, api.AdminSetupApplyRequest{
-		PlanFingerprint: state.Plan.PlanFingerprint,
-		Request:         state.Request,
-		SMBPassword:     smbPassword,
-		EULAAccepted:    true,
+		DiagnosticSessionID: state.Request.DiagnosticSessionID,
+		PlanFingerprint:     state.Plan.PlanFingerprint,
+		Request:             state.Request,
+		SMBPassword:         smbPassword,
+		EULAAccepted:        true,
 	})
 	smbPassword = ""
 	if err != nil {

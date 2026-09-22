@@ -18,6 +18,21 @@ dnf install -y epel-release curl
 read -r -a common_packages <<< "${JUSTVOXEL_COMMON_PACKAGES}"
 dnf install -y "${common_packages[@]}"
 
+superfile_rpm="$(find /ctx/superfile-rpms -maxdepth 1 -type f -name 'superfile-*.x86_64.rpm' -print -quit)"
+if [[ -z ${superfile_rpm} ]]; then
+    echo "ERROR: verified Superfile RPM artifact is missing."
+    exit 1
+fi
+dnf install -y "${superfile_rpm}"
+
+rpm_arch="$(uname -m)"
+nm_hsp_rpm="$(find /ctx/nm-hsp-rpms -maxdepth 1 -type f -name "nm-hsp-*.${rpm_arch}.rpm" -print -quit)"
+if [[ -z ${nm_hsp_rpm} ]]; then
+    echo "ERROR: verified nm-hsp RPM artifact is missing for ${rpm_arch}."
+    exit 1
+fi
+dnf install -y "${nm_hsp_rpm}"
+
 curl -fsSL \
     https://pkgs.tailscale.com/stable/rhel/10/tailscale.repo \
     -o /etc/yum.repos.d/tailscale.repo
@@ -88,11 +103,15 @@ install -m0755 /ctx/build_files/validate/common.sh /usr/libexec/justvoxel/health
 install -m0755 /ctx/build_files/validate/vm.sh /usr/libexec/justvoxel/health/vm
 
 for cmd in \
-    bootc podman skopeo nmcli nmtui resolvectl firewall-cmd sshd sudo just mjust \
+    bootc podman skopeo nmcli nmtui nm-hsp resolvectl firewall-cmd sshd sudo just mjust \
     tailscale netbird curl jq findmnt mountpoint flock mkfs.xfs mount.nfs mount.cifs \
-    lsblk blkid wipefs parted partprobe udevadm qemu-ga vmtoolsd iperf3 python3 btop; do
+    lsblk blkid wipefs parted partprobe udevadm qemu-ga vmtoolsd iperf3 micro spf python3 btop; do
     command -v "${cmd}"
 done
+
+rpm -q micro superfile nm-hsp
+micro --version
+spf --version
 
 bash -n /usr/libexec/justvoxel/minecraft-backup
 bash -n /usr/libexec/justvoxel/motd

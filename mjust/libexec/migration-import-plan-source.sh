@@ -89,7 +89,11 @@ case "${candidate_type}" in
         echo 'WARNING: vanilla Minecraft server detected.'
         echo 'JustVoxel runs Paper. The world can normally be opened by Paper at the same Minecraft version,'
         echo 'but this is a server-software conversion and is not identical to a Paper-to-Paper migration.'
-        jui_confirm 'Continue with vanilla -> Paper conversion?' || { echo 'Import cancelled.'; exit 0; }
+        if [[ ${JV_MIGRATION_API_MODE:-0} == 1 ]]; then
+            [[ ${JV_MIGRATION_API_VANILLA_CONFIRMED:-no} == yes ]] || { echo 'ERROR: vanilla to Paper conversion was not explicitly confirmed.' >&2; exit 1; }
+        else
+            jui_confirm 'Continue with vanilla -> Paper conversion?' || { echo 'Import cancelled.'; exit 0; }
+        fi
         ;;
     fabric|forge|neoforge|modded-unknown)
         echo "ERROR: unsupported Minecraft source type detected: ${candidate_type}" >&2
@@ -156,7 +160,12 @@ if [[ -z ${source_version} ]]; then
     echo
     echo 'The exact source Minecraft version could not be determined automatically.'
     echo 'Migration will not start this world on LATEST or guess a newer version.'
-    source_version="$(jui_input 'Exact source Minecraft version (example 1.21.8)')" || exit 1
+    if [[ ${JV_MIGRATION_API_MODE:-0} == 1 ]]; then
+        source_version="${JV_MIGRATION_API_SOURCE_VERSION:-}"
+        [[ -n ${source_version} ]] || { echo 'ERROR: exact source Minecraft version is required for this import.' >&2; exit 1; }
+    else
+        source_version="$(jui_input 'Exact source Minecraft version (example 1.21.8)')" || exit 1
+    fi
 fi
 [[ ${source_version} =~ ^[0-9]+([.][0-9]+){1,2}$ ]] || {
     echo "ERROR: source Minecraft version is not an exact supported version string: ${source_version}" >&2
@@ -181,5 +190,9 @@ if [[ ${source_class} != justvoxel && ${source_class} != justvoxel-backup && ${p
     echo "WARNING: this external server contains ${plugin_count} plugin JAR(s)."
     echo 'Minecraft plugins are executable server code and will run inside the Minecraft container.'
     echo 'JustVoxel will preserve them; it will not silently remove or disable them.'
-    jui_confirm 'Continue with these external plugins?' || { echo 'Import cancelled.'; exit 0; }
+    if [[ ${JV_MIGRATION_API_MODE:-0} == 1 ]]; then
+        [[ ${JV_MIGRATION_API_PLUGINS_CONFIRMED:-no} == yes ]] || { echo 'ERROR: external plugin execution was not explicitly confirmed.' >&2; exit 1; }
+    else
+        jui_confirm 'Continue with these external plugins?' || { echo 'Import cancelled.'; exit 0; }
+    fi
 fi

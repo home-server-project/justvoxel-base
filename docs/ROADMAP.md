@@ -35,6 +35,17 @@ Recent WebUI storage work is implemented and now needs real-system validation:
   - format a blank partition
   - create a partition from existing unallocated space
   - destructive review, confirmation, and re-validation
+- Minecraft data storage migration
+  - Agent-discovered local migration targets
+  - authoritative review, destructive/player confirmations, and plan re-validation
+  - persistent migration progress, reconnect, rollback, and needs-attention recovery state
+- Server Migration
+  - Administrator-only Export, Import, and Recovery
+  - local/configured-backup/device/USB/NFS/SMB transport choices through Agent planning
+  - fresh-destination storage, ports, memory, timezone, backup schedule and retention review
+  - persistent progress/reconnect across Export, Import, and Recovery
+  - rollback, needs-attention handoff, and fresh-unconfigured Recovery
+  - no browser-side migration/storage/Minecraft execution engine and no browser file upload
 - First-run setup
   - Minecraft data-storage selection
   - backup-destination selection
@@ -42,9 +53,37 @@ Recent WebUI storage work is implemented and now needs real-system validation:
 - transactional setup/apply path
   - including execution-time SMB credential handling
 
+### Unified Management API and mJust rebuild
+
+Rebuild mJust around the same authoritative management layer already used by the WebUI.
+
+- keep the JustVoxel Management Agent / Management API as the single appliance-management engine
+- treat WebUI and mJust as two frontends over that same engine
+- keep the new mJust intentionally thin: terminal navigation, user input, API calls, and presentation of results
+- do not recreate validation, safety policy, storage logic, Minecraft policy, or other business logic independently in mJust
+- use local console or SSH authentication plus `sudo` as the CLI administrative trust boundary
+- allow an explicitly authorized local UID 0 client to act as the Management API administrator without creating a second CLI login/session system
+- keep the existing WebUI Bearer-session and Administrator / Operator / Viewer authorization model unchanged
+- do not grant the ordinary `voxel` account unrestricted direct access to the privileged management socket
+- migrate capabilities in small, independently verified steps instead of a single large rewrite
+- develop and validate the unified Management API / mJust architecture on `testing` before stable promotion
+- do not delete helpers merely because they currently live under `mjust/libexec`; helpers used by the Management Agent remain shared implementation until they are safely moved or rewritten
+- progressively move shared backend helpers out of the misleading mJust namespace after direct CLI callers have been removed
+
+The server-migration terminal rebuild and WebUI parity are complete: Export, Import, and Recovery share one persistent Management API operation family, and both mJust and the Administrator WebUI are thin frontends over the same authoritative backend. Remaining P0 work for migration is real-system validation of transports, interruption/reconnect behavior, rollback, needs-attention Recovery, and fresh-unconfigured Recovery rather than another migration implementation.
+
+Management API gaps that still need shared implementations before the corresponding direct CLI paths can disappear include:
+
+- Minecraft update policy and execution
+- bootc status and operating-system updates
+- Start Over / reset workflows
+- WebUI lifecycle and recovery behavior
+
+Administrator validation is now unified: both mJust and WebUI consume the same Administrator Validation endpoint in the Management Agent, which runs the shared authoritative validation backend.
+
 ### Cross-interface validation
 
-Verify that CLI and WebUI remain consistent:
+Verify that CLI and WebUI remain consistent through shared Management API behavior rather than duplicated frontend business logic:
 
 - configuration made through one interface is correctly understood by the other
 - storage and backup state survives reboot
@@ -63,7 +102,7 @@ These are intentionally early because they are relatively contained improvements
 ### System Resources - Glances
 
 - package Glances through `home-server-packages`
-- consume it from JustVoxel Base so VM and HWE inherit the same feature
+- consume it from JustVoxel Base so VM and HWS inherit the same feature
 - use the existing Glances WebUI initially
 - ship a JustVoxel-owned default configuration
 - keep system-level configuration image-controlled rather than user-managed
@@ -71,30 +110,43 @@ These are intentionally early because they are relatively contained improvements
 - keep Podman/container access behind the security review already in progress
 - consider a custom JustVoxel frontend later only if the upstream WebUI becomes limiting
 
-### Superfile
+### Superfile - implemented
 
-- ship Superfile as the friendly CLI file manager
-- consume the existing verified `home-server-packages` package
-- make it easy to launch from `mjust`
+- shipped Superfile as the friendly CLI file manager
+- consume the verified `home-server-packages` RPM artifact in JustVoxel Base
+- expose it as `mjust files` and System -> File browser
 - keep it as a user convenience tool rather than a privileged WebUI file browser
 
-### Micro
+### Micro - implemented
 
-- ship Micro as the recommended friendly terminal text editor
-- preserve existing administrator/editor tools
+- shipped Micro from the native AlmaLinux package in JustVoxel Base
+- preserve Nano and existing administrator/editor tools
 - update Micro with the JustVoxel image rather than through an independent user-managed lifecycle
 
-### Local documentation - CLI
+### Documentation source and local documentation
 
-- use Glow to render the bundled Markdown documentation
+Create a dedicated documentation repository as the authoritative user-documentation source.
+
+- use `main` for approved, published documentation
+- use `draft` for active documentation work and incomplete updates
+- promote documentation from `draft` to `main` through a clean reviewed PR
+- keep retired or historical material in an excluded directory such as `archive/` or `retired/` rather than adding another permanent publication branch
+- have stable/public JustVoxel builds consume only approved documentation from `main`
+- resolve and record a specific documentation commit for each image build so the installed documentation is reproducible
+- exclude draft, retired, contributor-only, and other non-user-facing material from the appliance documentation payload
+
+For the CLI:
+
+- use Glow to render the bundled Markdown snapshot
 - provide an easy `mjust docs` entry point
-- keep the bundled Markdown files as the authoritative documentation source
 
-### Local documentation - WebUI
+For the WebUI:
 
-- use Material for MkDocs to present the same bundled documentation as a local readable site
-- expose it through Help / Documentation in the JustVoxel WebUI
+- use Material for MkDocs to present the same bundled snapshot as a local readable site
+- expose it through Help / Documentation
 - keep documentation matched to the installed bootc generation and available offline
+
+The future public website should present or link to the approved documentation from the same source repository so online and bundled documentation share one publication path.
 
 ### Minecraft server software choice
 
@@ -113,14 +165,24 @@ Keep the initial implementation within the existing single-server appliance mode
 
 ## P2 - Appliance workflow improvements
 
-### Player-aware maintenance
+### Public release and ISO distribution
 
-Improve the existing player-aware interruption flow:
+Create a dedicated public-release ISO repository separate from the customizable `justvoxel-iso` builder.
 
-- skip unnecessary delay when Minecraft is already stopped
-- avoid long warnings when no players are online
-- provide useful in-game countdown notices when players are online
-- avoid duplicated waiting between JustVoxel and the Minecraft container shutdown path
+- keep the existing customizable ISO repository for user-specific builds such as SSH-key, timezone, keyboard, and partition choices
+- use a separate public ISO repository only for official release media
+- build official media from stable/release JustVoxel images, not development/testing channels
+- publish two official x86-64 installers:
+  - JustVoxel VM for virtual machines and hypervisors
+  - JustVoxel HWS for physical hardware
+- refresh public installation media approximately monthly so the installer does not become unnecessarily stale as the underlying AlmaLinux/base image evolves
+- allow an additional on-demand public ISO build for important installer fixes, security changes, or significant user-facing functionality
+- do not rebuild public ISOs for every routine bootc image rebuild
+- use SourceForge as the planned public ISO hosting/mirror target and automate publication from GitHub Actions
+- make the current VM/HWS pair the primary public downloads
+- optionally retain one previous VM/HWS pair when storage availability makes it useful, without cluttering the main download experience
+- publish checksums and release metadata alongside the ISOs
+- provide a small public website, likely through GitHub Pages, with product information, screenshots, clear VM/HWS download choices, documentation, and source links
 
 ### USB backup workflow in WebUI
 
@@ -131,6 +193,85 @@ Build on the storage support already available through `mjust` and the current W
 - import backups from USB
 - verify transfers
 - handle mounting and safe unmounting through the appliance workflow
+
+### Diagnostics, log viewer, and privacy-controlled support reporting
+
+Build on the Setup Diagnostic Log foundation rather than creating a second logging system.
+
+Local diagnostics should remain Management-Agent owned and usable even when remote reporting is disabled. The WebUI and mJust should act only as frontends for viewing, downloading, retention, privacy settings, review, and submission.
+
+Provide four administrator-selectable diagnostic modes:
+
+- **Local only** - default. Collect supported diagnostics locally and never transmit them.
+- **Disabled** - do not retain supported diagnostic history. Clearly warn that future troubleshooting may require the user to reproduce the problem and collect information manually.
+- **Review before sending** - retain diagnostics locally and require the administrator to review the exact sanitized support report before each submission.
+- **Automatic reporting** - opt-in only. Before enabling it, show the administrator a representative sanitized report and require explicit confirmation. Allow switching back to any other mode at any time.
+
+Expose the same policy through WebUI and mJust, with the Management Agent as the single authority.
+
+Add a normal Diagnostics / Logs experience later:
+
+- browse retained Setup and operation diagnostics;
+- download human-readable logs;
+- show operation, component, stage, result, and timestamps;
+- allow administrator-controlled retention/cleanup;
+- preserve useful helper/runtime failure output;
+- keep privacy redaction centralized in the Management Agent.
+
+Do not send ordinary raw local logs directly to GitHub. Build a normalized **Support Report** from relevant local evidence.
+
+A remote Support Report should contain only information useful for reproducibility and regression analysis, such as:
+
+- JustVoxel version/build metadata;
+- booted bootc image reference including release/development channel or tag;
+- immutable booted image digest/ID;
+- intended JustVoxel image variant such as VM or HWS when that identity is available;
+- detected runtime environment class: physical hardware, virtual machine, container/nested environment, or unknown;
+- hypervisor/virtualization family when it can be determined reliably;
+- kernel/base operating-system version;
+- affected component and operation;
+- failure stage;
+- normalized error/signature;
+- bounded sanitized representative failure output;
+- first/last event timestamps relevant to the report.
+
+Runtime classification should be derived from normal operating-system/firmware virtualization signals rather than permanent hardware identity. It may use facilities such as virtualization detection and DMI/firmware hints, but diagnostic reporting must not include firmware serial numbers, motherboard UUIDs, MAC addresses, hostnames, IP addresses, or other stable hardware identifiers.
+
+Compare the **declared image variant** with the **detected runtime class**. A report should be able to identify cases such as a VM-oriented image running directly on physical hardware or an HWS image running in a VM. Treat that as a diagnostic mismatch/advisory, not an automatic root-cause conclusion.
+
+If remote reporting needs to distinguish many reports from one installation from the same failure across many installations, generate a random diagnostics installation identifier only when remote reporting is enabled. It must be independent of hardware identifiers, replaceable/resettable by the administrator, and used only for diagnostics aggregation.
+
+Use a dedicated diagnostics intake service between appliances and GitHub:
+
+- accept only versioned Support Report schemas;
+- validate and re-sanitize every submission server-side;
+- rate-limit abuse and malformed clients;
+- store individual reports outside Git;
+- fingerprint and aggregate equivalent failures;
+- count distinct reporting installations without exposing real user identity;
+- track first seen, last seen, affected image digests/tags, and recurrence across releases;
+- identify likely regressions such as a failure signature first appearing after a specific image/base transition;
+- avoid automatically blaming AlmaLinux, Podman, Minecraft, or JustVoxel until the evidence supports that conclusion.
+
+Do not embed GitHub credentials in the appliance.
+
+Use a narrowly-permissioned GitHub App as the bridge from the diagnostics service to GitHub. Prefer a separate diagnostics/triage repository rather than flooding the main product repository with raw reports.
+
+The GitHub-facing layer should create or update **aggregated incidents**, not one Issue per appliance report. One incident may represent many equivalent reports and should summarize information such as:
+
+- normalized failure signature;
+- affected component/stage;
+- number of reports;
+- number of distinct reporting installations;
+- first/last seen;
+- affected image references/digests;
+- image/runtime-class mismatches;
+- representative sanitized error;
+- whether the signature persists across multiple consecutive image builds.
+
+Define promotion rules so a single report can remain only in the collector while repeated or severe failures become actionable GitHub incidents.
+
+Keep AI optional and later. Initial redaction, schema validation, fingerprinting, aggregation, regression detection, counting, and GitHub issue maintenance should be deterministic. AI may later help summarize related incidents or suggest common root-cause areas, but it must not decide privacy boundaries or whether raw private data is safe to transmit.
 
 ### Notifications
 

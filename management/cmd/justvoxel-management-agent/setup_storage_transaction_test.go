@@ -250,3 +250,32 @@ func TestAdminSetupApplyDoesNotLaunchDuplicateWorker(t *testing.T) {
 		t.Fatalf("worker calls = %d, want exactly one", workerCalls)
 	}
 }
+
+
+func TestSetupStorageHelperResponseCarriesStructuredEvidence(t *testing.T) {
+	request := setupStorageTransactionRequest{
+		SchemaVersion:   operationSchemaVersion,
+		OperationID:     "12345678-1234-4123-8123-123456789abc",
+		PlanFingerprint: testSetupFingerprint,
+		Storage:         setupStorageTransactionTarget{Type: "system", Path: "/var/lib/justvoxel/minecraft"},
+		Backups:         setupStorageTransactionTarget{Type: "system", Path: "/var/lib/justvoxel/backups"},
+	}
+	old := runAdminSetupStorageTransactionHelper
+	defer func() { runAdminSetupStorageTransactionHelper = old }()
+	runAdminSetupStorageTransactionHelper = func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+		return []byte(`{"ok":true,"applied":true,"phase":"storage_verified","rollback_state":"not_started","rollback_result":"","evidence":{"data_write_probe":"passed","backup_write_probe":"passed","transaction_mount_count":"0"}}`), nil
+	}
+	response, err := runSetupStorageTransactionAction(context.Background(), "apply", setupStorageApplyTimeout, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]string{
+		"data_write_probe":        "passed",
+		"backup_write_probe":      "passed",
+		"transaction_mount_count": "0",
+	} {
+		if response.Evidence[key] != want {
+			t.Fatalf("evidence[%s] = %q, want %q", key, response.Evidence[key], want)
+		}
+	}
+}

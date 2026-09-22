@@ -1,0 +1,68 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+readonly socket="${JV_MANAGEMENT_SOCKET:-/run/justvoxel/management.sock}"
+
+usage() {
+    echo 'Usage: api-client METHOD /v1/path [--data]' >&2
+}
+
+if (( EUID != 0 )); then
+    echo 'ERROR: the mJust Management API client must run as root through sudo.' >&2
+    exit 1
+fi
+
+method="${1:-}"
+path="${2:-}"
+body_mode="${3:-}"
+
+case "${method}" in
+    GET|POST|PATCH|DELETE) ;;
+    *)
+        usage
+        exit 2
+        ;;
+esac
+
+if [[ ${path} != /v1/* || ${path} == *$'\n'* || ${path} == *$'\r'* ]]; then
+    echo 'ERROR: Management API path must begin with /v1/.' >&2
+    exit 2
+fi
+
+case "${body_mode}" in
+    '') ;;
+    --data) ;;
+    *)
+        usage
+        exit 2
+        ;;
+esac
+
+if (( $# > 3 )); then
+    usage
+    exit 2
+fi
+
+if [[ ! -S ${socket} ]]; then
+    echo "ERROR: JustVoxel Management API socket is unavailable: ${socket}" >&2
+    exit 1
+fi
+
+curl_args=(
+    --silent
+    --show-error
+    --fail-with-body
+    --connect-timeout 5
+    --unix-socket "${socket}"
+    --request "${method}"
+    --header 'Accept: application/json'
+)
+
+if [[ ${body_mode} == --data ]]; then
+    curl_args+=(
+        --header 'Content-Type: application/json'
+        --data-binary @-
+    )
+fi
+
+exec curl "${curl_args[@]}" "http://localhost${path}"

@@ -1,98 +1,88 @@
 #!/usr/bin/bash
 set -euo pipefail
-source /usr/libexec/justvoxel/mjust/common.sh
 source /usr/libexec/justvoxel/mjust/ui.sh
-require_root
-require_config
+source /usr/libexec/justvoxel/mjust/migration-api.sh
+(( EUID == 0 )) || { echo "ERROR: mjust migration-recover must run through sudo/root." >&2; exit 1; }
+(( $# <= 1 )) || { echo "Usage: migration-recover [TRANSACTION_DIR]" >&2; exit 2; }
 
-if (( $# > 1 )); then
-    echo 'Usage: migration-recover [TRANSACTION_DIR]' >&2
-    exit 2
+current="$(jv_migration_current_operation)" || exit 1
+current_id="$(jq -r '.operation.operation_id // empty' <<< "${current}")"
+current_type="$(jq -r '.operation.operation_type // empty' <<< "${current}")"
+if [[ -n ${current_id} ]]; then
+    if [[ ${current_type} == migration_recovery ]]; then
+        jv_migration_monitor_operation "${current_id}" migration_recovery "Server migration Recovery"
+        exit $?
+    fi
+    current_state="$(jq -r '.operation.state // empty' <<< "${current}")"
+    if [[ ${current_type} == migration_import && ${current_state} == needs_attention ]]; then
+        echo "The previous server migration Import needs attention."
+        echo "Recovery can take ownership of its retained rollback state after you review and confirm the transaction."
+    else
+        echo "ERROR: another server migration operation is already active: ${current_type}" >&2
+        exit 1
+    fi
 fi
 
-if ! jui_has_tty; then
-    echo 'ERROR: migration recovery requires a controlling terminal.' >&2
-    echo 'For SSH, allocate a terminal, for example: ssh -t <host> mjust migration-recover' >&2
-    exit 1
-fi
-
-data_parent="$(dirname -- "${DATA_PATH}")"
-transaction=''
-
+transaction=""
 if (( $# == 1 )); then
     transaction="$(realpath -m -- "$1")"
 else
-    mapfile -t transactions < <(find "${data_parent}" -maxdepth 1 -type d -name '.justvoxel-import-*' -print 2>/dev/null | sort)
-    case "${#transactions[@]}" in
+    discovery="$(jv_migration_recovery_discovery)" || exit 1
+    count="$(jq -r '.transactions | length' <<< "${discovery}")"
+    case "${count}" in
         0)
-            echo 'No retained migration recovery transaction was found.'
+            echo "No retained migration recovery transaction was found."
             exit 0
             ;;
-        1) transaction="${transactions[0]}" ;;
+        1)
+            transaction="$(jq -r '.transactions[0].transaction' <<< "${discovery}")"
+            ;;
         *)
+            jui_has_tty || { echo "ERROR: multiple recovery transactions exist; rerun from an interactive terminal or provide the transaction path." >&2; exit 1; }
+            mapfile -t transactions < <(jq -r '.transactions[].transaction' <<< "${discovery}")
             labels=()
-            for path in "${transactions[@]}"; do
-                labels+=("$(basename -- "${path}")")
+            for item in "${transactions[@]}"; do
+                labels+=("$(jq -r --arg p "${item}" '.transactions[] | select(.transaction==$p) | "\(.transaction)  [\(.phase), \(.mode)]"' <<< "${discovery}")")
             done
-            labels+=('Back')
-            selection="$(jui_choose 'Migration recovery transaction' "${labels[@]}")" || exit 0
-            [[ ${selection} == Back ]] && exit 0
-            for path in "${transactions[@]}"; do
-                [[ $(basename -- "${path}") == "${selection}" ]] && { transaction="${path}"; break; }
+            labels+=("Back")
+            selected="$(jui_choose "Migration recovery transaction" "${labels[@]}")" || exit 0
+            [[ ${selected} == Back ]] && exit 0
+            for i in "${!transactions[@]}"; do
+                [[ ${selected} == "${labels[$i]}" ]] && { transaction="${transactions[$i]}"; break; }
             done
             ;;
     esac
 fi
 
-case "${transaction}/" in
-    "${data_parent}/.justvoxel-import-"*) ;;
-    *)
-        echo "ERROR: transaction is outside the Minecraft data parent: ${transaction}" >&2
-        exit 1
-        ;;
-esac
-[[ -d ${transaction} && ! -L ${transaction} ]] || { echo "ERROR: recovery transaction does not exist: ${transaction}" >&2; exit 1; }
-[[ -r ${transaction}/state ]] || { echo 'ERROR: recovery transaction state file is missing.' >&2; exit 1; }
-
-phase="$(sed -n 's/^phase=//p' "${transaction}/state" | head -n1)"
-source_type="$(sed -n 's/^source_type=//p' "${transaction}/state" | head -n1)"
-updated_at="$(sed -n 's/^updated_at=//p' "${transaction}/state" | head -n1)"
-
-echo 'Migration recovery'
-echo '------------------'
-echo "Transaction: ${transaction}"
-echo "Phase:       ${phase:-unknown}"
-echo "Source type: ${source_type:-unknown}"
-echo "Updated:     ${updated_at:-unknown}"
-echo
-echo 'Retained recovery content:'
-for name in destination-state failed-import pre-import staging-source; do
-    [[ -e ${transaction}/${name} ]] && echo "  ${name}"
-done
-
-case "${phase}" in
-    critical-rollback|rolled-back)
-        ;;
-    *)
-        echo
-        echo 'This transaction is not confirmed as a completed rollback.' >&2
-        echo 'JustVoxel will not delete it automatically. Inspect/recover it manually before another import.' >&2
-        exit 1
-        ;;
-esac
+request="$(jq -cn --arg transaction "${transaction}" '{transaction:$transaction}')"
+plan="$(jv_migration_recovery_plan "${request}")" || exit 1
+fingerprint="$(jq -r '.plan_fingerprint // empty' <<< "${plan}")"
+[[ -n ${fingerprint} ]] || { echo "ERROR: Recovery plan did not return a review fingerprint." >&2; exit 1; }
 
 echo
-echo 'Validating the currently restored Minecraft server before finalizing recovery.'
-/usr/libexec/justvoxel/mjust/restore-runtime-validate
-
+echo "Migration Recovery"
+echo "------------------"
+echo "Transaction: $(jq -r '.normalized.transaction' <<< "${plan}")"
+echo "Phase:       $(jq -r '.normalized.phase' <<< "${plan}")"
+echo "Source type: $(jq -r '.normalized.source_type // "unknown"' <<< "${plan}")"
+echo "Mode:        $(jq -r '.normalized.mode' <<< "${plan}")"
+if [[ $(jq -r '.requirements.runtime_validation_required' <<< "${plan}") == true ]]; then
+    echo "Validation:  restored Minecraft runtime will be validated again before finalization"
+else
+    echo "Validation:  appliance must remain unconfigured and generated runtime state must stay absent"
+fi
 echo
-echo 'The current Minecraft runtime validated successfully.'
-echo 'Finalizing recovery will permanently delete the retained failed-import/staging transaction.'
-echo 'The currently running Minecraft data and configuration will NOT be deleted.'
-printf 'Type FINALIZE ROLLBACK to remove this recovery transaction: ' >/dev/tty
+echo "Finalizing recovery permanently removes the retained failed-import/staging transaction."
+if ! jui_has_tty; then
+    echo "ERROR: recovery finalization confirmation requires a controlling terminal." >&2
+    exit 1
+fi
+printf "Type FINALIZE ROLLBACK to remove this recovery transaction: " >/dev/tty
 IFS= read -r confirmation </dev/tty
-[[ ${confirmation} == 'FINALIZE ROLLBACK' ]] || { echo 'Recovery finalization cancelled.'; exit 0; }
+[[ ${confirmation} == "FINALIZE ROLLBACK" ]] || { echo "Recovery finalization cancelled."; exit 0; }
 
-rm -rf -- "${transaction}"
-echo 'Migration rollback recovery finalized.'
-echo 'The retained transaction was removed and a new import may now be started.'
+apply="$(jq -cn --arg fingerprint "${fingerprint}" --arg transaction "${transaction}" '{plan_fingerprint:$fingerprint,transaction:$transaction,finalize_confirmed:true}')"
+response="$(jv_migration_recovery_apply "${apply}")" || exit 1
+id="$(jq -r '.operation.operation_id // empty' <<< "${response}")"
+[[ -n ${id} ]] || { echo "ERROR: Management Agent did not return a Recovery operation." >&2; exit 1; }
+jv_migration_monitor_operation "${id}" migration_recovery "Server migration Recovery"

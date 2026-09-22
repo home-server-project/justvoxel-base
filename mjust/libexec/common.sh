@@ -27,7 +27,7 @@ jv_variant_kind() {
     [[ -n ${raw} ]] || raw="$(jv_variant_raw)"
     case "${raw}" in
         vm|justvoxel-vm) printf 'vm\n' ;;
-        hwe|justvoxel-hwe|baremetal|justvoxel-baremetal) printf 'hwe\n' ;;
+        hws|justvoxel-hws) printf 'hws\n' ;;
         *) printf 'unknown\n' ;;
     esac
 }
@@ -35,7 +35,7 @@ jv_variant_kind() {
 jv_variant_name() {
     case "$(jv_variant_kind "${1:-}")" in
         vm) printf 'VM\n' ;;
-        hwe) printf 'HWE\n' ;;
+        hws) printf 'HWS\n' ;;
         *) printf 'Unknown\n' ;;
     esac
 }
@@ -44,8 +44,8 @@ jv_variant_is_vm() {
     [[ $(jv_variant_kind "${1:-}") == vm ]]
 }
 
-jv_variant_is_hwe() {
-    [[ $(jv_variant_kind "${1:-}") == hwe ]]
+jv_variant_is_hws() {
+    [[ $(jv_variant_kind "${1:-}") == hws ]]
 }
 
 require_root() {

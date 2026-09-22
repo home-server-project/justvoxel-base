@@ -1,0 +1,188 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/ui.sh
+source /usr/libexec/justvoxel/mjust/backup-storage-api.sh
+
+if (( EUID != 0 )); then
+    echo 'ERROR: this operation must run as root.' >&2
+    exit 1
+fi
+
+choose_record() {
+    local title="$1"
+    shift
+    local -a records=("$@") labels=()
+    local record path detail choice
+    (( ${#records[@]} > 0 )) || return 1
+    for record in "${records[@]}"; do
+        IFS=$'\t' read -r path detail <<<"${record}"
+        labels+=("${path} - ${detail}")
+    done
+    choice="$(jui_choose "${title}" "${labels[@]}" 'Back')" || return 1
+    [[ ${choice} != Back ]] || return 1
+    for record in "${records[@]}"; do
+        IFS=$'\t' read -r path detail <<<"${record}"
+        if [[ ${choice} == "${path} - ${detail}" ]]; then
+            printf '%s\n' "${record}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+show_status() {
+    local response
+    response="$(jv_backup_storage_status)" || return 1
+    echo 'Backup storage'
+    echo
+    echo "Status: $(jq -r '.current.status // "Unknown"' <<<"${response}")"
+    echo "Detail: $(jq -r '.current.status_detail // "Unknown"' <<<"${response}")"
+    echo "Type: $(jq -r '.current.type // "Unknown"' <<<"${response}")"
+    echo "Path: $(jq -r '.current.path // "Unknown"' <<<"${response}")"
+    echo "Mount: $(jq -r 'if (.current.mount_point // "") == "" then "none" else .current.mount_point end' <<<"${response}")"
+    if [[ $(jq -r '.current.same_physical_disk // false' <<<"${response}") == true ]]; then
+        echo 'Notice: backup storage is on the same physical disk as Minecraft data.'
+    fi
+}
+
+system_target() {
+    local path payload
+    path="$(jui_input 'Backup directory' '/var/lib/justvoxel/backups')" || return 0
+    payload="$(jq -cn --arg path "${path}" '{type:"system",path:$path}')"
+    jv_backup_storage_apply_target "${payload}"
+}
+
+existing_partition() {
+    local discovery record device filesystem mountpoint default_mount path payload
+    local -a records=()
+    discovery="$(jv_backup_storage_discover)" || return 1
+    mapfile -t records < <(jq -r '
+        .devices[]
+        | select(.type == "part" and (.read_only == false) and (.system == false))
+        | select(.filesystem == "" or .filesystem == "xfs" or .filesystem == "ext4" or .filesystem == "btrfs")
+        | [.path, ((if .filesystem == "" then "blank" else .filesystem end) + (if (.model // "") == "" then "" else " - " + .model end))]
+        | @tsv
+    ' <<<"${discovery}")
+    if (( ${#records[@]} == 0 )); then
+        echo 'No safe local partition candidates are currently available.'
+        return 0
+    fi
+    record="$(choose_record 'Existing partition / filesystem' "${records[@]}")" || return 0
+    device="${record%%$'\t'*}"
+    filesystem="$(jq -r --arg device "${device}" '.devices[] | select(.path == $device) | .filesystem' <<<"${discovery}")"
+    mountpoint="$(jq -r --arg device "${device}" '.devices[] | select(.path == $device) | (.mountpoints[0] // "")' <<<"${discovery}")"
+
+    if [[ -z ${filesystem} ]]; then
+        default_mount='/var/mnt/justvoxel-backup'
+        mountpoint="$(jui_input 'Mount point' "${default_mount}")" || return 0
+        path="$(jui_input 'Backup directory on this storage' "${mountpoint}/backups")" || return 0
+        payload="$(jq -cn --arg device "${device}" --arg mount "${mountpoint}" --arg path "${path}"             '{operation:"format_partition",device:$device,mount_point:$mount,path:$path}')"
+        jv_backup_storage_apply_provision "${payload}"
+        return
+    fi
+
+    if [[ -z ${mountpoint} ]]; then
+        mountpoint="$(jui_input 'Mount point' '/var/mnt/justvoxel-backup')" || return 0
+    fi
+    path="$(jui_input 'Backup directory on this storage' "${mountpoint}/backups")" || return 0
+    payload="$(jq -cn --arg device "${device}" --arg mount "${mountpoint}" --arg path "${path}"         '{type:"partition",device:$device,mount_point:$mount,path:$path}')"
+    jv_backup_storage_apply_target "${payload}"
+}
+
+whole_disk() {
+    local discovery record device mountpoint path payload
+    local -a records=()
+    discovery="$(jv_backup_storage_provision_discover)" || return 1
+    mapfile -t records < <(jq -r '
+        .whole_disks[]
+        | [.path, ((.model // "unknown model") + " - " + ((.size_bytes / 1073741824 * 10 | floor) / 10 | tostring) + " GiB")]
+        | @tsv
+    ' <<<"${discovery}")
+    if (( ${#records[@]} == 0 )); then
+        echo 'No safe unused whole disk is currently available.'
+        return 0
+    fi
+    record="$(choose_record 'Dedicated disk / USB backup storage' "${records[@]}")" || return 0
+    device="${record%%$'\t'*}"
+    mountpoint="$(jui_input 'Mount point' '/var/mnt/justvoxel-backup')" || return 0
+    path="$(jui_input 'Backup directory on this storage' "${mountpoint}/backups")" || return 0
+    payload="$(jq -cn --arg device "${device}" --arg mount "${mountpoint}" --arg path "${path}"         '{operation:"erase_disk",device:$device,mount_point:$mount,path:$path}')"
+    jv_backup_storage_apply_provision "${payload}"
+}
+
+free_space() {
+    local discovery record device size_gib mountpoint path payload
+    local -a records=()
+    discovery="$(jv_backup_storage_provision_discover)" || return 1
+    mapfile -t records < <(jq -r '
+        .free_space_disks[]
+        | [.path, ((.model // "unknown model") + " - " + ((.free_bytes / 1073741824 * 10 | floor) / 10 | tostring) + " GiB free")]
+        | @tsv
+    ' <<<"${discovery}")
+    if (( ${#records[@]} == 0 )); then
+        echo 'No disk with at least 1 GiB of unallocated space is currently available.'
+        return 0
+    fi
+    record="$(choose_record 'Use unallocated disk space' "${records[@]}")" || return 0
+    device="${record%%$'\t'*}"
+    size_gib="$(jui_input 'Partition size in GiB, or all' 'all')" || return 0
+    if [[ ${size_gib} != all && ! ${size_gib} =~ ^[1-9][0-9]*$ ]]; then
+        echo 'ERROR: enter an integer GiB value or all.' >&2
+        return 1
+    fi
+    mountpoint="$(jui_input 'Mount point' '/var/mnt/justvoxel-backup')" || return 0
+    path="$(jui_input 'Backup directory on this storage' "${mountpoint}/backups")" || return 0
+    payload="$(jq -cn --arg device "${device}" --arg mount "${mountpoint}" --arg path "${path}" --arg size "${size_gib}"         '{operation:"create_partition",device:$device,mount_point:$mount,path:$path,size_gib:$size}')"
+    jv_backup_storage_apply_provision "${payload}"
+}
+
+network_target() {
+    local type source mountpoint path username='' password='' domain='' payload choice
+    choice="$(jui_choose 'Network backup type' 'NFS' 'SMB/CIFS' 'Back')" || return 0
+    case "${choice}" in
+        'Back') return 0 ;;
+        'NFS') type=nfs; source="$(jui_input 'NFS source (server:/export)' 'server:/export')" || return 0 ;;
+        'SMB/CIFS')
+            type=smb
+            source="$(jui_input 'SMB source (//server/share)' '//server/share')" || return 0
+            username="$(jui_input 'SMB username' '')" || return 0
+            read -r -s -p 'SMB password: ' password
+            echo
+            domain="$(jui_input 'SMB domain/workgroup (optional)' '')" || return 0
+            ;;
+    esac
+    mountpoint="$(jui_input 'Local mount point' '/var/mnt/justvoxel-backup')" || return 0
+    path="$(jui_input 'Backup directory on this storage' "${mountpoint}/backups")" || return 0
+    payload="$(jq -cn --arg type "${type}" --arg source "${source}" --arg mount "${mountpoint}" --arg path "${path}"         --arg username "${username}" --arg password "${password}" --arg domain "${domain}"         '{type:$type,source:$source,mount_point:$mount,path:$path,username:$username,password:$password,domain:$domain}')"
+    jv_backup_storage_apply_target "${payload}"
+}
+
+backup_storage_menu() {
+    local choice
+    while true; do
+        choice="$(jui_choose 'Backup storage'             'Current backup storage'             'Dedicated disk / USB backup storage'             'Existing partition / filesystem backup storage'             'Use unallocated disk space for backup storage'             'Network backup storage (NFS / SMB)'             'Directory on the system filesystem'             'Back')" || return 0
+        case "${choice}" in
+            'Current backup storage') show_status || true ;;
+            'Dedicated disk / USB backup storage') whole_disk || true ;;
+            'Existing partition / filesystem backup storage') existing_partition || true ;;
+            'Use unallocated disk space for backup storage') free_space || true ;;
+            'Network backup storage (NFS / SMB)') network_target || true ;;
+            'Directory on the system filesystem') system_target || true ;;
+            'Back') return 0 ;;
+        esac
+    done
+}
+
+case "${1:-menu}" in
+    menu|backup) backup_storage_menu ;;
+    status) show_status ;;
+    disk) whole_disk ;;
+    partition) existing_partition ;;
+    free) free_space ;;
+    network) network_target ;;
+    system) system_target ;;
+    *)
+        echo 'Usage: backup-storage {menu|backup|status|disk|partition|free|network|system}' >&2
+        exit 2
+        ;;
+esac

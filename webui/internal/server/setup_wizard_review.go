@@ -127,6 +127,7 @@ func (a *App) setupWizardReviewEULA(w http.ResponseWriter, r *http.Request) {
 	}
 	state.EULAAccepted = true
 	firstRunSetupReviews.save(a, session, state)
+	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "Minecraft EULA acceptance recorded", draft)
 	http.Redirect(w, r, "/setup/review", http.StatusSeeOther)
 }
 
@@ -146,6 +147,7 @@ func (a *App) setupWizardReviewBack(w http.ResponseWriter, r *http.Request) {
 	draft.CurrentStep = 4
 	firstRunSetupDrafts.save(a, session, draft)
 	firstRunSetupReviews.delete(a, session)
+	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "user returned from Review to Backups", draft)
 	http.Redirect(w, r, "/setup", http.StatusSeeOther)
 }
 
@@ -156,6 +158,9 @@ func (a *App) setupWizardReviewCancel(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.redirectCurrentSetupOperation(w, r, session, client) {
 		return
+	}
+	if draft, exists := firstRunSetupDrafts.get(a, session); exists {
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "WebUI setup cancelled from Review", draft)
 	}
 	firstRunSetupReviews.delete(a, session)
 	firstRunSetupDrafts.delete(a, session)
@@ -233,6 +238,7 @@ func setupPlanRequestFromDraft(draft setupDraft) (api.AdminSetupPlanRequest, err
 		return api.AdminSetupPlanRequest{}, errors.New("Backup retention must be a positive number.")
 	}
 	return api.AdminSetupPlanRequest{
+		DiagnosticSessionID: draft.DiagnosticSessionID,
 		Server: api.AdminSetupPlanServerRequest{
 			MOTD: draft.Server.MOTD, MaxPlayers: maxPlayers,
 			BedrockEnabled: draft.Server.BedrockEnabled, Timezone: draft.Server.Timezone,

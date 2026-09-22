@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -50,6 +51,36 @@ func TestAdminSetupPlanRequiresAdministratorBeforeHelper(t *testing.T) {
 	}
 	if called {
 		t.Fatal("first-run setup helper ran for non-Administrator")
+	}
+}
+
+func TestLocalRootCanPlanFirstRunSetupWithoutBearerSession(t *testing.T) {
+	s := surfaceTestServer(t, roleViewer)
+	old := runAdminSetupPlanHelper
+	defer func() { runAdminSetupPlanHelper = old }()
+
+	called := 0
+	runAdminSetupPlanHelper = func(_ context.Context, payload []byte) ([]byte, error) {
+		called++
+		if !strings.Contains(string(payload), `"version_policy":"recommended"`) {
+			t.Fatalf("unexpected local-root setup plan payload: %s", payload)
+		}
+		return []byte(validAdminSetupPlanResponse), nil
+	}
+
+	req := requestWithPeerUID(http.MethodPost, "http://unix/v1/admin/setup/plan", 0)
+	req.Body = io.NopCloser(strings.NewReader(validAdminSetupPlanRequest))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.adminSetupPlan(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("local-root setup plan returned %d: %s", rr.Code, rr.Body.String())
+	}
+	if called != 1 {
+		t.Fatalf("local-root setup plan helper calls = %d, want 1", called)
+	}
+	if !strings.Contains(rr.Body.String(), `"plan_fingerprint":"sha256:`) {
+		t.Fatalf("local-root setup plan missing fingerprint: %s", rr.Body.String())
 	}
 }
 

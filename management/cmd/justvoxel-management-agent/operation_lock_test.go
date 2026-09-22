@@ -22,3 +22,20 @@ func TestOperationStoreSetupLockIsRootOnly(t *testing.T) {
 		t.Fatalf("setup lock mode = %o, want 600", got)
 	}
 }
+
+func TestOperationStoreRestoreLockIsRootOnly(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "management")
+	store, err := openOperationStore(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.close()
+
+	info, err := os.Stat(filepath.Join(base, "restore.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("restore lock mode = %o, want 600", got)
+	}
+}

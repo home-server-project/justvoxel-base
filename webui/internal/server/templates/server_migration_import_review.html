@@ -1,0 +1,167 @@
+{{define "server_migration_import_review.html"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JustVoxel - Review Server Import</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js" defer></script></head>
+<body class="role-administrator">{{template "app-header" .}}
+<main>
+  <div class="title-row"><div><p class="eyebrow">Administrator · migration</p><h1>Review Server Import</h1></div><span class="badge">{{.Identity.Username}}</span></div>
+  {{if .Error}}<div class="notice error"><strong>Server Import needs attention.</strong><br>{{.Error}}</div>{{end}}
+  {{if .Prompt}}<div class="notice"><strong>More source information is required.</strong><br>{{.Prompt}}</div>{{end}}
+
+  {{if not .Plan.OK}}
+  <form method="post" action="/settings/server-migration/import/review" autocomplete="off">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="source_kind" value="{{.Request.Source.Kind}}">
+    <input type="hidden" name="local_path" value="{{.Request.Source.Path}}">
+    <input type="hidden" name="source_device" value="{{.Request.Source.Device}}">
+    <input type="hidden" name="source_remote" value="{{.Request.Source.Source}}">
+    <input type="hidden" name="source_username" value="{{.Request.Source.Username}}">
+    <input type="hidden" name="source_domain" value="{{.Request.Source.Domain}}">
+    {{if not .NeedsSourcePath}}<input type="hidden" name="source_path" value="{{.Request.Source.Path}}">{{end}}
+    {{if not .NeedsRoot}}<input type="hidden" name="selected_root" value="{{.Request.Source.SelectedRoot}}">{{end}}
+    {{if not .NeedsVersion}}<input type="hidden" name="source_version" value="{{.Request.Source.SourceVersion}}">{{end}}
+
+    <input type="hidden" name="java_port" value="{{.Request.Destination.JavaPort}}">
+    <input type="hidden" name="bedrock_port" value="{{.Request.Destination.BedrockPort}}">
+    <input type="hidden" name="java_memory" value="{{.Request.Destination.JavaMemory}}">
+    <input type="hidden" name="container_memory" value="{{.Request.Destination.ContainerMemory}}">
+    <input type="hidden" name="timezone" value="{{.Request.Destination.Timezone}}">
+    <input type="hidden" name="backup_keep" value="{{.Request.Destination.BackupKeep}}">
+    <input type="hidden" name="backup_daily_time" value="{{.Request.Destination.BackupDailyTime}}">
+    {{if .Request.Destination.BackupAutomatic}}<input type="hidden" name="backup_automatic" value="on">{{end}}
+    <input type="hidden" name="storage_type" value="{{.Request.Destination.Storage.Type}}">
+    <input type="hidden" name="data_path" value="{{.Request.Destination.Storage.Path}}">
+    <input type="hidden" name="data_device" value="{{.Request.Destination.Storage.Device}}">
+    <input type="hidden" name="data_mount_point" value="{{.Request.Destination.Storage.MountPoint}}">
+    <input type="hidden" name="backup_type" value="{{.Request.Destination.Backups.Type}}">
+    <input type="hidden" name="backup_path" value="{{.Request.Destination.Backups.Path}}">
+    <input type="hidden" name="backup_device" value="{{.Request.Destination.Backups.Device}}">
+    <input type="hidden" name="backup_mount_point" value="{{.Request.Destination.Backups.MountPoint}}">
+    <input type="hidden" name="backup_source" value="{{.Request.Destination.Backups.Source}}">
+    <input type="hidden" name="backup_username" value="{{.Request.Destination.Backups.Username}}">
+    <input type="hidden" name="backup_domain" value="{{.Request.Destination.Backups.Domain}}">
+
+    {{if .NeedsSourcePath}}
+    <section class="panel">
+      <p class="eyebrow">Agent-discovered source entries</p>
+      {{range .Plan.SourceEntries}}<label><input type="radio" name="source_path" value="{{.Path}}"> <strong>{{.Kind}}</strong> · <code>{{.Path}}</code></label>{{end}}
+      <label for="server-import-manual-path"><strong>Manual relative path fallback</strong></label>
+      <input id="server-import-manual-path" name="manual_path" placeholder="folder/server-or-archive.tar.gz" autocomplete="off">
+    </section>
+    {{end}}
+
+    {{if .NeedsRoot}}
+    <section class="panel">
+      <p class="eyebrow">Minecraft server roots</p>
+      {{range .Plan.Candidates}}<label><input type="radio" name="selected_root" value="{{.RootRelative}}"> <strong>{{.SourceType}}</strong> · <code>{{if .RootRelative}}{{.RootRelative}}{{else}}source root{{end}}</code>{{if .MinecraftVersion}} · Minecraft {{.MinecraftVersion}}{{end}}</label>{{end}}
+    </section>
+    {{end}}
+
+    {{if .NeedsVersion}}
+    <section class="panel">
+      <p class="eyebrow">Exact Minecraft version</p>
+      <label for="server-import-required-version"><strong>Source Minecraft version</strong></label>
+      <input id="server-import-required-version" name="source_version" value="{{.Request.Source.SourceVersion}}" placeholder="1.21.8" autocomplete="off" required>
+      <p class="muted">The Agent requires an exact version so it can verify a matching stable Paper build before Import.</p>
+    </section>
+    {{end}}
+
+    {{if .SourceSMB}}
+    <section class="panel">
+      <p class="eyebrow">Temporary source credential</p>
+      <label for="server-import-source-password-again"><strong>SMB source password</strong></label>
+      <input id="server-import-source-password-again" type="password" name="source_smb_password" autocomplete="off" required>
+      <p class="muted">Re-entered only for this planning request. It is not stored in this page.</p>
+    </section>
+    {{end}}
+
+    <div class="action-row"><button type="submit">Continue Agent review</button><a class="button-link secondary" href="/settings/server-migration/import">Start over</a></div>
+  </form>
+  {{else}}
+
+  {{if .Plan.Normalized}}
+  <section class="panel">
+    <p class="eyebrow">Authoritative source plan</p>
+    <h2>{{.Plan.Normalized.Source.SourceClass}} · Minecraft {{.Plan.Normalized.Source.MinecraftVersion}}</h2>
+    <div class="details">
+      <strong>Selected source</strong><br><span class="muted">{{.Plan.Normalized.Source.Path}}{{if .Plan.Normalized.Source.SelectedRoot}} · root {{.Plan.Normalized.Source.SelectedRoot}}{{end}}</span><br><br>
+      <strong>Server type</strong><br><span class="muted">{{.Plan.Normalized.Source.CandidateType}}</span><br><br>
+      <strong>Online identity</strong><br><span class="muted">{{.Plan.Normalized.Source.OnlineMode}}</span><br><br>
+      <strong>Imported data size</strong><br><span class="muted">{{.DataSize}}</span><br><br>
+      <strong>Game settings</strong><br><span class="muted">{{.Plan.Normalized.Source.GameMode}} · {{.Plan.Normalized.Source.Difficulty}} · max {{.Plan.Normalized.Source.MaxPlayers}} players</span><br><br>
+      <strong>Plugins detected</strong><br><span class="muted">{{.Plan.Normalized.Source.PluginCount}}</span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <p class="eyebrow">Authoritative destination plan</p>
+    <h2>{{if eq .Plan.Normalized.Destination.Mode "fresh"}}Fresh JustVoxel destination{{else}}Replace configured JustVoxel server{{end}}</h2>
+    <div class="details">
+      <strong>Minecraft data</strong><br><span class="muted">{{.Plan.Normalized.Destination.DataPath}}</span><br><br>
+      <strong>Backups</strong><br><span class="muted">{{.Plan.Normalized.Destination.BackupPath}} · keep {{.Plan.Normalized.Destination.BackupKeep}}{{if .Plan.Normalized.Destination.BackupAutomatic}} · {{.Plan.Normalized.Destination.BackupSchedule}}{{end}}</span><br><br>
+      <strong>Ports</strong><br><span class="muted">Java {{.Plan.Normalized.Destination.JavaPort}}/TCP{{if .Plan.Normalized.Source.BedrockEnabled}} · Bedrock {{.Plan.Normalized.Destination.BedrockPort}}/UDP{{end}}</span><br><br>
+      <strong>Memory / timezone</strong><br><span class="muted">{{.Plan.Normalized.Destination.JavaMemory}} heap · {{.Plan.Normalized.Destination.ContainerMemory}} maximum · {{.Plan.Normalized.Destination.Timezone}}</span>
+      {{if .Plan.Normalized.Destination.Storage}}<br><br><strong>Data storage</strong><br><span class="muted">{{.Plan.Normalized.Destination.Storage.Type}} · {{.Plan.Normalized.Destination.Storage.Path}}{{if .Plan.Normalized.Destination.Storage.Device}} · {{.Plan.Normalized.Destination.Storage.Device}}{{end}}{{if .StorageSize}} · {{.StorageSize}}{{end}}</span>{{end}}
+      {{if .Plan.Normalized.Destination.Backups}}<br><br><strong>Backup storage</strong><br><span class="muted">{{.Plan.Normalized.Destination.Backups.Type}} · {{.Plan.Normalized.Destination.Backups.Path}}{{if .Plan.Normalized.Destination.Backups.Source}} · {{.Plan.Normalized.Destination.Backups.Source}}{{end}}{{if .BackupSize}} · {{.BackupSize}}{{end}}</span>{{end}}
+    </div>
+  </section>
+  {{end}}
+
+  {{if .Plan.Warnings}}<section class="panel"><p class="eyebrow">Import warnings</p>{{range .Plan.Warnings}}<div class="notice warning">{{.Message}}</div>{{end}}</section>{{end}}
+
+  {{if .Plan.Requirements}}
+  <section class="panel">
+    <p class="eyebrow">Safety checks and confirmations</p>
+    <p>The Management Agent will revalidate the source and destination, preserve rollback state, execute the Import transaction, and validate the resulting Minecraft runtime before reporting success.</p>
+    {{if .Plan.Requirements.PlayersConfirmationRequired}}<div class="notice warning"><strong>{{.Plan.Requirements.Online}} player(s) are online.</strong><br>{{range .Plan.Requirements.Players}}{{.}}<br>{{end}}Import will use the player-aware interruption path.</div>{{end}}
+    {{if .Plan.Requirements.VanillaConfirmationRequired}}<div class="notice warning">This Vanilla source will be opened by Paper at the same reviewed Minecraft version.</div>{{end}}
+    {{if .Plan.Requirements.PluginsConfirmationRequired}}<div class="notice warning">This source contains external plugin JARs. Plugins are executable server code and will be preserved.</div>{{end}}
+    {{if .Plan.Requirements.OnlineModeConfirmationRequired}}<div class="notice warning">The Agent could not prove online-mode automatically. You must explicitly confirm the source used online-mode=true.</div>{{end}}
+    {{if .Plan.Requirements.BackupSMBPasswordRequired}}<div class="notice">The fresh destination uses SMB backup storage. Its password is requested only on the final Apply request and is not stored in this review or operation journal.</div>{{end}}
+  </section>
+
+  <form method="post" action="/settings/server-migration/import/apply" autocomplete="off">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="source_kind" value="{{.Request.Source.Kind}}">
+    <input type="hidden" name="local_path" value="{{.Request.Source.Path}}">
+    <input type="hidden" name="source_path" value="{{.Request.Source.Path}}">
+    <input type="hidden" name="source_device" value="{{.Request.Source.Device}}">
+    <input type="hidden" name="source_remote" value="{{.Request.Source.Source}}">
+    <input type="hidden" name="source_username" value="{{.Request.Source.Username}}">
+    <input type="hidden" name="source_domain" value="{{.Request.Source.Domain}}">
+    <input type="hidden" name="selected_root" value="{{.Request.Source.SelectedRoot}}">
+    <input type="hidden" name="source_version" value="{{.Request.Source.SourceVersion}}">
+    <input type="hidden" name="java_port" value="{{.Request.Destination.JavaPort}}">
+    <input type="hidden" name="bedrock_port" value="{{.Request.Destination.BedrockPort}}">
+    <input type="hidden" name="java_memory" value="{{.Request.Destination.JavaMemory}}">
+    <input type="hidden" name="container_memory" value="{{.Request.Destination.ContainerMemory}}">
+    <input type="hidden" name="timezone" value="{{.Request.Destination.Timezone}}">
+    <input type="hidden" name="backup_keep" value="{{.Request.Destination.BackupKeep}}">
+    <input type="hidden" name="backup_daily_time" value="{{.Request.Destination.BackupDailyTime}}">
+    {{if .Request.Destination.BackupAutomatic}}<input type="hidden" name="backup_automatic" value="on">{{end}}
+    <input type="hidden" name="storage_type" value="{{.Request.Destination.Storage.Type}}">
+    <input type="hidden" name="data_path" value="{{.Request.Destination.Storage.Path}}">
+    <input type="hidden" name="data_device" value="{{.Request.Destination.Storage.Device}}">
+    <input type="hidden" name="data_mount_point" value="{{.Request.Destination.Storage.MountPoint}}">
+    <input type="hidden" name="backup_type" value="{{.Request.Destination.Backups.Type}}">
+    <input type="hidden" name="backup_path" value="{{.Request.Destination.Backups.Path}}">
+    <input type="hidden" name="backup_device" value="{{.Request.Destination.Backups.Device}}">
+    <input type="hidden" name="backup_mount_point" value="{{.Request.Destination.Backups.MountPoint}}">
+    <input type="hidden" name="backup_source" value="{{.Request.Destination.Backups.Source}}">
+    <input type="hidden" name="backup_username" value="{{.Request.Destination.Backups.Username}}">
+    <input type="hidden" name="backup_domain" value="{{.Request.Destination.Backups.Domain}}">
+    <input type="hidden" name="plan_fingerprint" value="{{.Plan.PlanFingerprint}}">
+
+    {{if .SourceSMB}}<label for="server-import-source-password-apply"><strong>SMB source password</strong></label><input id="server-import-source-password-apply" type="password" name="source_smb_password" autocomplete="off" required><p class="muted">Used only to re-open and revalidate the reviewed source for this Apply request.</p>{{end}}
+    {{if .Plan.Requirements.BackupSMBPasswordRequired}}<label for="server-import-backup-password-apply"><strong>SMB backup password</strong></label><input id="server-import-backup-password-apply" type="password" name="backup_smb_password" autocomplete="off" required><p class="muted">Apply-only credential for the reviewed fresh backup destination.</p>{{end}}
+    {{if .Plan.Requirements.PlayersConfirmationRequired}}<label><input type="checkbox" name="players_confirmed" value="yes"> I understand that the online players may be interrupted.</label>{{end}}
+    {{if .Plan.Requirements.EULAAcceptanceRequired}}<label><input type="checkbox" name="eula_accepted" value="yes"> I accept the <a href="{{.EULAURL}}" target="_blank" rel="noopener noreferrer">Minecraft End User License Agreement</a> for this fresh destination.</label>{{end}}
+    {{if .Plan.Requirements.VanillaConfirmationRequired}}<label><input type="checkbox" name="vanilla_confirmed" value="yes"> I understand this Vanilla server will be opened by Paper at the reviewed Minecraft version.</label>{{end}}
+    {{if .Plan.Requirements.PluginsConfirmationRequired}}<label><input type="checkbox" name="plugins_confirmed" value="yes"> I understand the external plugin JARs are executable server code and will be preserved.</label>{{end}}
+    {{if .Plan.Requirements.OnlineModeConfirmationRequired}}<label><input type="checkbox" name="online_mode_confirmed" value="yes"> I confirm this source used online-mode=true and its online UUID identity should be preserved.</label>{{end}}
+    <label for="server-import-confirmation"><strong>Type IMPORT to continue</strong></label>
+    <input id="server-import-confirmation" name="import_confirmation" autocomplete="off" required>
+    <div class="action-row"><button type="submit">Start Server Import</button><a class="button-link secondary" href="/settings/server-migration/import">Cancel</a></div>
+  </form>
+  {{end}}
+  {{end}}
+  <p class="foot">WebUI {{.Version}} · Management API {{.ManagementAPI}}</p>
+</main></body></html>{{end}}
