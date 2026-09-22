@@ -21,6 +21,7 @@ prepare_plan() {
     PLAN_WARNINGS='[]'
 
     request="$(cat)"
+    REQUEST_JSON="${request}"
     jq -e 'type == "object"' >/dev/null 2>&1 <<< "${request}" || {
         json_error 'Invalid storage action request.'
         return 1
