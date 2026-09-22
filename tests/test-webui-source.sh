@@ -20,6 +20,13 @@ version="$(tr -d '[:space:]' < "${repo_root}/webui/VERSION")"
 
 echo "Checking JustVoxel WebUI ${version}"
 
+echo "Checking web-status-json syntax"
+bash -n "${repo_root}/mjust/libexec/web-status-json"
+if grep -Fq "rcon-cli 'version'" "${repo_root}/mjust/libexec/web-status-json"; then
+    echo 'ERROR: dashboard status helper still overwrites Minecraft version from raw RCON output.' >&2
+    exit 1
+fi
+
 cd "${repo_root}/webui"
 unformatted="$(gofmt -l .)"
 if [[ -n ${unformatted} ]]; then
