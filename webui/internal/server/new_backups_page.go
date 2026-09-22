@@ -14,6 +14,15 @@ type newBackupsAPI interface {
 	Session(ctx context.Context, session string) (api.SessionInfo, error)
 	ManualBackup(ctx context.Context, session string) (api.ManualBackupResponse, error)
 	AdminRestoreBackups(ctx context.Context, session string) (api.AdminRestoreBackupsResponse, error)
+	AdminConfiguration(ctx context.Context, session string) (api.AdminConfigurationDiscovery, error)
+	AdminConfigurationPlan(ctx context.Context, session string, request api.AdminConfigurationChangeRequest) (api.AdminConfigurationChangeResponse, error)
+	AdminConfigurationApply(ctx context.Context, session string, request api.AdminConfigurationChangeRequest) (api.AdminConfigurationChangeResponse, error)
+}
+
+type newBackupAutomaticForm struct {
+	Enabled   bool
+	DailyTime string
+	Keep      int
 }
 
 type newBackupView struct {
@@ -38,11 +47,16 @@ type newBackupsPageData struct {
 	TotalSize     string
 	Message       string
 	Error         string
+	Automatic     newBackupAutomaticForm
+	AutomaticPlan *api.AdminConfigurationChangeResponse
+	Timezone      string
 }
 
 func (a *App) registerNewBackupsPages(mux *http.ServeMux) {
 	mux.HandleFunc("GET /settings/new-backups", a.newBackupsPage)
 	mux.HandleFunc("POST /settings/new-backups/backup", a.newBackupsNow)
+	mux.HandleFunc("POST /settings/new-backups/automatic/plan", a.newBackupsAutomaticPlan)
+	mux.HandleFunc("POST /settings/new-backups/automatic/apply", a.newBackupsAutomaticApply)
 	a.registerNewBackupsDeleteRoutes(mux)
 }
 
