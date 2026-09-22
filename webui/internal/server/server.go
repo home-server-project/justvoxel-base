@@ -31,6 +31,10 @@ type API interface {
 	MinecraftAction(ctx context.Context, session, action string, confirmPlayers bool) (api.MinecraftActionResponse, error)
 }
 
+type sessionIdentityAPI interface {
+	Session(ctx context.Context, session string) (api.SessionInfo, error)
+}
+
 type Config struct {
 	Version        string
 	Commit         string
@@ -247,8 +251,19 @@ func (a *App) passwordChange(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) aboutPage(w http.ResponseWriter, r *http.Request) {
-	session, _, identity, ok := a.rolePageRequest(w, r)
+	session, ok := sessionFromRequest(r)
 	if !ok {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	identityClient, ok := a.api.(sessionIdentityAPI)
+	if !ok {
+		http.Error(w, "session information is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	identity, err := identityClient.Session(r.Context(), session)
+	if err != nil {
+		a.handleRolePageError(w, r, err)
 		return
 	}
 	status, err := a.api.Status(r.Context(), session)
