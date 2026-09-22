@@ -339,7 +339,7 @@ func (a *App) newBackupsRestoreApply(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := client.AdminRestoreApply(r.Context(), session, api.AdminRestoreApplyRequest{
 		PlanFingerprint: plan.PlanFingerprint,
-		Request: request, DestructiveConfirmed: true, PlayersConfirmed: playersConfirmed,
+		Request:         request, DestructiveConfirmed: true, PlayersConfirmed: playersConfirmed,
 	})
 	if err != nil {
 		a.renderNewBackupsPageWithRestore(w, r, session, client, identity, request, &plan, apiMessage(err, "Could not start Restore."))
