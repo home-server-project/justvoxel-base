@@ -1,0 +1,29 @@
+name: Step 2 storage mount validation
+
+on:
+  pull_request:
+    branches: [testing]
+    paths:
+      - '.github/workflows/validate-storage-mount-step2.yml'
+
+jobs:
+  javascript:
+    name: Storage browser JavaScript
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout validation branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Validate storage browser JavaScript
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check webui/internal/server/static/storage-browser.js
+          grep -Fq 'Mount for now' webui/internal/server/static/storage-browser.js
+          grep -Fq 'Mount permanently' webui/internal/server/static/storage-browser.js
+          grep -Fq 'Unmount for now' webui/internal/server/static/storage-browser.js
+          grep -Fq 'Remove permanent mount' webui/internal/server/static/storage-browser.js
+          ! grep -Fq 'current boot' webui/internal/server/static/storage-browser.js
+          ! grep -Fq 'persistent UUID mount' webui/internal/server/static/storage-browser.js
