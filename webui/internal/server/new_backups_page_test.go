@@ -15,8 +15,32 @@ type fakeNewBackupsAPI struct {
 	backups        api.AdminRestoreBackupsResponse
 	backupResult   api.ManualBackupResponse
 	backupErr      error
-	backupCalls    int
-	discoveryCalls int
+	backupCalls          int
+	discoveryCalls       int
+	configuration        api.AdminConfigurationDiscovery
+	configurationPlan    api.AdminConfigurationChangeResponse
+	configurationApply   api.AdminConfigurationChangeResponse
+	configurationPlanErr error
+	configurationApplyErr error
+	plannedConfiguration api.AdminConfigurationChangeRequest
+	appliedConfiguration api.AdminConfigurationChangeRequest
+	configurationPlanCalls int
+	configurationApplyCalls int
+}
+
+func defaultNewBackupsConfiguration() api.AdminConfigurationDiscovery {
+	return api.AdminConfigurationDiscovery{
+		Configured: true,
+		Minecraft: api.AdminMinecraftConfiguration{
+			JavaMemory: "4G", ContainerMemory: "6G", JavaPort: 25565,
+			BedrockEnabled: false, BedrockPort: 19132, Timezone: "UTC",
+			MaxPlayers: 10, MOTD: "JustVoxel", ImageTag: "stable",
+			VersionMode: "pinned", Version: "26.3",
+		},
+		Backup: api.AdminBackupConfiguration{
+			Keep: 7, Schedule: "*-*-* 04:30:00", TimerEnabled: true,
+		},
+	}
 }
 
 func (f *fakeNewBackupsAPI) Session(_ context.Context, session string) (api.SessionInfo, error) {
@@ -47,6 +71,44 @@ func (f *fakeNewBackupsAPI) AdminRestoreBackups(_ context.Context, session strin
 	}
 	f.discoveryCalls++
 	return f.backups, nil
+}
+
+func (f *fakeNewBackupsAPI) AdminConfiguration(_ context.Context, session string) (api.AdminConfigurationDiscovery, error) {
+	if session != "session-token" {
+		return api.AdminConfigurationDiscovery{}, api.ErrUnauthorized
+	}
+	if f.configuration.Configured {
+		return f.configuration, nil
+	}
+	return defaultNewBackupsConfiguration(), nil
+}
+
+func (f *fakeNewBackupsAPI) AdminConfigurationPlan(_ context.Context, session string, request api.AdminConfigurationChangeRequest) (api.AdminConfigurationChangeResponse, error) {
+	if session != "session-token" {
+		return api.AdminConfigurationChangeResponse{}, api.ErrUnauthorized
+	}
+	f.configurationPlanCalls++
+	f.plannedConfiguration = request
+	if f.configurationPlan.OK || f.configurationPlanErr != nil {
+		return f.configurationPlan, f.configurationPlanErr
+	}
+	return api.AdminConfigurationChangeResponse{
+		OK: true,
+		Changes: []api.AdminConfigurationChange{},
+		Proposed: defaultNewBackupsConfiguration(),
+	}, nil
+}
+
+func (f *fakeNewBackupsAPI) AdminConfigurationApply(_ context.Context, session string, request api.AdminConfigurationChangeRequest) (api.AdminConfigurationChangeResponse, error) {
+	if session != "session-token" {
+		return api.AdminConfigurationChangeResponse{}, api.ErrUnauthorized
+	}
+	f.configurationApplyCalls++
+	f.appliedConfiguration = request
+	if f.configurationApply.OK || f.configurationApplyErr != nil {
+		return f.configurationApply, f.configurationApplyErr
+	}
+	return api.AdminConfigurationChangeResponse{OK: true, Applied: true}, nil
 }
 
 func TestNewBackupsPageListsExistingBackups(t *testing.T) {
