@@ -52,7 +52,7 @@
     </form>
 
     {{else if eq .CurrentStep 2}}
-    <form method="post" action="/setup/minecraft" class="setup-form">
+    <form method="post" action="/setup/resources" class="setup-form">
       <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" id="max-players" value="{{.Server.MaxPlayers}}">
       <div class="setup-memory" data-memory-settings data-system-memory-mib="{{.Defaults.SystemMemoryMiB}}" data-min-reserve-mib="{{.Defaults.SystemReserveMinimumMiB}}" data-recommended-reserve-mib="{{.Defaults.SystemReserveRecommendedMiB}}">
         <div class="setup-memory-summary"><div><span>System memory</span><strong>{{.SystemMemory}} detected</strong></div><div><span>Recommended headroom</span><strong>{{.SystemReserveRecommended}}</strong></div><div><span>Minimum headroom</span><strong>{{.SystemReserveMinimum}}</strong></div></div>
@@ -62,6 +62,12 @@
         <div class="setup-form-grid"><label class="setup-field">Minecraft game memory<input id="java-memory" name="java_memory" value="{{.Minecraft.JavaMemory}}" autocomplete="off" placeholder="4G"><span class="field-help">Memory available directly to the Minecraft Java server. Technical name: Java heap.</span></label><label class="setup-field">Maximum Minecraft memory<input id="container-memory" name="container_memory" value="{{.Minecraft.ContainerMemory}}" autocomplete="off" placeholder="6G"><span class="field-help">Maximum for Minecraft, Java, plugins and runtime overhead. Technical name: container memory limit.</span></label></div>
         <div id="memory-status" class="memory-status" aria-live="polite"></div>
       </div>
+      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
+    </form>
+
+    {{else if eq .CurrentStep 3}}
+    <form method="post" action="/setup/minecraft" class="setup-form">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
       <div class="setup-form-grid setup-section-gap">
         <label class="setup-field">Minecraft Java port<input name="java_port" type="number" min="1" max="65535" value="{{.Minecraft.JavaPort}}" inputmode="numeric"><span class="field-help">Default: 25565/TCP.</span></label>
         <label class="setup-field">Bedrock UDP port<input name="bedrock_port" type="number" min="1" max="65535" value="{{.Minecraft.BedrockPort}}" inputmode="numeric"><span class="field-help">Default: 19132/UDP. Used only when Bedrock cross-play is enabled.</span></label>
@@ -75,7 +81,7 @@
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
     </form>
 
-    {{else if eq .CurrentStep 3}}
+    {{else if eq .CurrentStep 4}}
     <form method="post" action="/setup/storage" class="setup-form" data-setup-storage-form>
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <div class="setup-storage-summary"><strong>Storage configuration</strong><span>Choose where Minecraft worlds, plugins, configuration and runtime data will live. This step only records the choice; it does not mount, format or write anything.</span></div>
@@ -108,7 +114,7 @@
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
     </form>
 
-    {{else if eq .CurrentStep 4}}
+    {{else if eq .CurrentStep 5}}
     <form method="post" action="/setup/backups" class="setup-form" data-setup-backup-form>
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       {{if .SameDiskWarning}}<div class="notice warning"><strong>Same physical disk</strong><br>{{.SameDiskWarning}}</div>{{end}}
