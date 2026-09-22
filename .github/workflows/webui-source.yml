@@ -7,6 +7,9 @@ on:
       - 'webui/**'
       - 'build_files/build-webui.sh'
       - 'tests/test-webui-source.sh'
+      - 'tests/test-backup-delete-safety-source.sh'
+      - 'management/**'
+      - 'mjust/libexec/admin-backup-delete-*'
       - '.github/workflows/webui-source.yml'
 
 permissions:
@@ -26,6 +29,38 @@ jobs:
           go-version: '1.25.x'
           check-latest: true
           cache: false
+
+      - name: Install management source-test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libpam0g-dev libpwquality-dev
+
+      - name: Check backup deletion safety source
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tests/test-backup-delete-safety-source.sh
+
+      - name: Run Management Agent source checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          unformatted="$(gofmt -l \
+            management/cmd/justvoxel-management-agent/admin_backup_delete.go \
+            management/cmd/justvoxel-management-agent/admin_backup_delete_test.go)"
+          if [[ -n "${unformatted}" ]]; then
+            echo 'ERROR: New Backups Management Agent source is not gofmt-clean:' >&2
+            printf '%s\n' "${unformatted}" >&2
+            exit 1
+          fi
+          cd management
+          go mod download
+          CGO_ENABLED=1 go vet ./...
+          CGO_ENABLED=1 go test ./...
+          CGO_ENABLED=1 go build -trimpath -o /tmp/management-agent ./cmd/justvoxel-management-agent
+          /tmp/management-agent version
 
       - name: Run WebUI source and local artifact checks
         shell: bash
