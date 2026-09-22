@@ -1,0 +1,148 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+source /usr/libexec/justvoxel/mjust/admin-storage-actions-common.sh
+require_root
+storage_action_load_config
+
+json_error() {
+    jq -n --arg error "$1" '{ok:false,error:$error,warnings:[],applied:false}'
+}
+
+append_warning() {
+    local current="$1" message="$2"
+    jq -c --arg message "${message}" '. + [$message]' <<< "${current}"
+}
+
+prepare_plan() {
+    local request operation device requested_mountpoint
+    local filesystem uuid current_mountpoint role size fingerprint warnings='[]'
+    local confirmation='' destructive=false proposed_mountpoint='' target_filesystem=''
+
+    request="$(cat)"
+    jq -e 'type == "object"' >/dev/null 2>&1 <<< "${request}" || {
+        json_error 'Invalid storage action request.'
+        return 1
+    }
+
+    operation="$(jq -r '.operation // ""' <<< "${request}")"
+    device="$(storage_action_real_device "$(jq -r '.device // ""' <<< "${request}")")"
+    requested_mountpoint="$(jq -r '.mount_point // ""' <<< "${request}")"
+
+    [[ -n ${device} ]] || {
+        json_error 'Choose a storage partition.'
+        return 1
+    }
+    storage_action_validate_target "${device}" >/dev/null 2>&1 || {
+        json_error 'This partition is protected or unavailable for storage actions.'
+        return 1
+    }
+
+    filesystem="$(storage_action_filesystem "${device}")"
+    uuid="$(storage_action_uuid "${device}")"
+    current_mountpoint="$(storage_action_mountpoint "${device}")"
+    role="$(storage_action_role "${device}" "${filesystem}" "${uuid}" "${current_mountpoint}")"
+    size="$(storage_action_size_bytes "${device}")"
+    size="${size:-0}"
+    fingerprint="$(storage_action_fingerprint "${device}")"
+    [[ -n ${fingerprint} ]] || {
+        json_error 'Could not capture a stable partition fingerprint.'
+        return 1
+    }
+
+    case "${operation}" in
+        mount)
+            [[ -n ${filesystem} ]] || {
+                json_error 'This partition is not formatted. Format it before mounting.'
+                return 1
+            }
+            storage_action_supported_filesystem "${filesystem}" || {
+                json_error "Filesystem '${filesystem}' is not supported by the JustVoxel storage browser."
+                return 1
+            }
+            [[ -z ${current_mountpoint} ]] || {
+                json_error "This partition is already mounted at ${current_mountpoint}."
+                return 1
+            }
+            [[ -n ${requested_mountpoint} ]] || {
+                json_error 'Choose a mount point.'
+                return 1
+            }
+            requested_mountpoint="$(realpath -m -- "${requested_mountpoint}" 2>/dev/null || true)"
+            storage_action_validate_mountpoint "${requested_mountpoint}" >/dev/null 2>&1 || {
+                json_error 'Choose an unused, empty and non-critical mount point.'
+                return 1
+            }
+            proposed_mountpoint="${requested_mountpoint}"
+            target_filesystem="${filesystem}"
+            ;;
+        unmount)
+            [[ -n ${current_mountpoint} ]] || {
+                json_error 'This partition is not mounted.'
+                return 1
+            }
+            storage_mount_is_critical "${current_mountpoint}" && {
+                json_error 'Critical system mounts cannot be unmounted from JustVoxel.'
+                return 1
+            }
+            proposed_mountpoint="${current_mountpoint}"
+            target_filesystem="${filesystem}"
+            if [[ ${role} == *Minecraft* ]]; then
+                warnings="$(append_warning "${warnings}" 'Minecraft data is stored on this partition. Unmounting it may interrupt or stop the Minecraft server.')"
+            fi
+            if [[ ${role} == *Backups* ]]; then
+                warnings="$(append_warning "${warnings}" 'JustVoxel backups use this partition. Backups will fail while it is unmounted.')"
+            fi
+            ;;
+        format)
+            if [[ -n ${current_mountpoint} ]] && storage_mount_is_critical "${current_mountpoint}"; then
+                json_error 'Critical system mounts cannot be formatted.'
+                return 1
+            fi
+            destructive=true
+            confirmation="FORMAT ${device}"
+            target_filesystem=xfs
+            proposed_mountpoint=''
+            warnings="$(append_warning "${warnings}" 'Formatting permanently destroys all data on this partition and creates a new XFS filesystem.')"
+            if [[ -n ${current_mountpoint} ]]; then
+                warnings="$(append_warning "${warnings}" "This partition is currently mounted at ${current_mountpoint}. JustVoxel will unmount it before formatting.")"
+            fi
+            if [[ ${role} == *Minecraft* ]]; then
+                warnings="$(append_warning "${warnings}" 'Minecraft data is stored on this partition. Formatting it will permanently destroy that Minecraft data and leave the current server storage configuration invalid until you choose a new location.')"
+            fi
+            if [[ ${role} == *Backups* ]]; then
+                warnings="$(append_warning "${warnings}" 'JustVoxel backups are stored on this partition. Formatting it will permanently destroy those backups and leave the current backup destination invalid until you choose a new location.')"
+            fi
+            ;;
+        *)
+            json_error 'Choose Mount, Unmount, or Format.'
+            return 1
+            ;;
+    esac
+
+    PLAN_JSON="$(jq -n \
+        --arg operation "${operation}" \
+        --arg device "${device}" \
+        --arg filesystem "${filesystem}" \
+        --arg target_filesystem "${target_filesystem}" \
+        --arg uuid "${uuid}" \
+        --arg mount_point "${proposed_mountpoint}" \
+        --arg current_mount_point "${current_mountpoint}" \
+        --arg role "${role}" \
+        --arg confirmation "${confirmation}" \
+        --arg fingerprint "${fingerprint}" \
+        --argjson size_bytes "${size}" \
+        --argjson destructive "${destructive}" \
+        '{operation:$operation,device:$device,filesystem:$filesystem,target_filesystem:$target_filesystem,uuid:$uuid,mount_point:$mount_point,current_mount_point:$current_mount_point,role:$role,confirmation:$confirmation,fingerprint:$fingerprint,size_bytes:$size_bytes,destructive:$destructive}')"
+}
+
+plan_json() {
+    prepare_plan || return 0
+    jq -n --argjson proposed "${PLAN_JSON}" --argjson warnings "${warnings}" '{ok:true,proposed:$proposed,warnings:$warnings,applied:false}'
+}
+
+action="${1:-plan}"
+case "${action}" in
+    plan) plan_json ;;
+    *) json_error 'Usage: admin-storage-actions-json plan' ;;
+esac
