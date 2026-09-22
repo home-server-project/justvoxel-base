@@ -9,6 +9,7 @@ main="${repo_root}/management/cmd/justvoxel-management-agent/main.go"
 players="${repo_root}/mjust/libexec/players"
 service="${repo_root}/mjust/libexec/service"
 status="${repo_root}/mjust/libexec/status"
+web_status="${repo_root}/mjust/libexec/web-status-json"
 whitelist="${repo_root}/mjust/libexec/whitelist"
 whitelist_backend="${repo_root}/mjust/libexec/whitelist-backend"
 backup="${repo_root}/mjust/libexec/backup"
@@ -139,6 +140,10 @@ for forbidden in 'systemctl ' 'podman exec' 'podman stats' 'podman ps' 'podman c
         fail "mJust status still performs direct system inspection: ${forbidden}"
     fi
 done
+
+if grep -Fq "rcon-cli 'version'" "${web_status}"; then
+    fail 'dashboard status must not expose the raw formatted RCON version banner'
+fi
 
 grep -Fq '"${api_client}" GET "${path}"' "${whitelist}" || fail 'mJust whitelist GET helper does not use the Management API client'
 grep -Fq 'api_get /v1/whitelist' "${whitelist}" || fail 'mJust whitelist list does not use the Management API'
