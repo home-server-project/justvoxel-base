@@ -42,6 +42,7 @@ type newBackupsPageData struct {
 func (a *App) registerNewBackupsPages(mux *http.ServeMux) {
 	mux.HandleFunc("GET /settings/new-backups", a.newBackupsPage)
 	mux.HandleFunc("POST /settings/new-backups/backup", a.newBackupsNow)
+	a.registerNewBackupsDeleteRoutes(mux)
 }
 
 func (a *App) newBackupsRequest(w http.ResponseWriter, r *http.Request, requireCSRF bool) (string, newBackupsAPI, api.SessionInfo, bool) {
