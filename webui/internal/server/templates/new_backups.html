@@ -61,37 +61,39 @@
   <section class="backup-restore-review">
     <div class="section-heading"><div><p class="eyebrow">Restore review</p><h2>{{if .RestoreModeTitle}}{{.RestoreModeTitle}}{{else}}Review Restore{{end}}</h2></div><span class="badge">Destructive</span></div>
     {{if .RestoreError}}<div class="notice error"><strong>Restore cannot continue as submitted.</strong><br>{{.RestoreError}}</div>{{end}}
-    {{if .RestorePlan.Normalized}}
-    <p>{{.RestoreScope}}</p>
-    <dl class="backup-restore-summary">
-      <div><dt>Backup</dt><dd><code>{{.RestorePlan.Normalized.BackupID}}</code></dd></div>
-      <div><dt>Created</dt><dd>{{.RestorePlan.Normalized.CreatedAt}}</dd></div>
-      <div><dt>Size</dt><dd>{{.RestoreSize}}</dd></div>
-      <div><dt>Current Minecraft</dt><dd>{{.RestorePlan.Normalized.Current.Version}} · {{.RestorePlan.Normalized.Current.VersionMode}}</dd></div>
-      {{if .RestorePlan.Normalized.Metadata}}<div><dt>Backup Minecraft</dt><dd>{{.RestorePlan.Normalized.Metadata.Minecraft.ConfiguredVersion}} · {{.RestorePlan.Normalized.Metadata.Minecraft.VersionMode}}</dd></div>{{else}}<div><dt>Backup metadata</dt><dd>{{.RestorePlan.Normalized.MetadataStatus}}</dd></div>{{end}}
-      <div><dt>Version relation</dt><dd>{{.RestorePlan.Normalized.VersionRelation}}</dd></div>
-    </dl>
-    {{end}}
-    {{range .RestorePlan.Warnings}}<div class="notice warning">{{.Message}}</div>{{end}}
-    {{if and .RestorePlan.OK .RestorePlan.Requirements}}
-    <div class="backup-restore-safety">
-      <strong>Safety checks remain Agent-owned.</strong>
-      <span>Before live data changes, JustVoxel revalidates the reviewed plan, archive integrity, archive safety, backup identity and staging capacity. Runtime validation and automatic rollback remain enabled.</span>
-    </div>
-    {{if .RestorePlan.Requirements.PlayersConfirmationRequired}}
-    <div class="notice warning"><strong>{{.RestorePlan.Requirements.Online}} player(s) are online.</strong><br>{{range .RestorePlan.Requirements.Players}}{{.}}<br>{{end}}Restore will use the player-aware graceful shutdown path.</div>
-    {{end}}
-    <form class="backup-restore-apply" method="post" action="/settings/new-backups/restore/apply">
-      <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <input type="hidden" name="backup_id" value="{{.RestoreRequest.BackupID}}">
-      <input type="hidden" name="mode" value="{{.RestoreRequest.Mode}}">
-      <input type="hidden" name="plan_fingerprint" value="{{.RestorePlan.PlanFingerprint}}">
-      {{if .RestorePlan.Requirements.PlayersConfirmationRequired}}<label class="backup-restore-player-confirm"><input type="checkbox" name="players_confirmed" value="yes"> I understand that the online players may be interrupted.</label>{{end}}
-      <label><strong>Type RESTORE to continue</strong>
-        <input name="confirmation" autocomplete="off" required>
-      </label>
-      <div class="action-row"><button class="danger" type="submit">Start Restore</button><a class="button-link secondary" href="/settings/new-backups">Cancel</a></div>
-    </form>
+    {{if .RestorePlan}}
+      {{if .RestorePlan.Normalized}}
+      <p>{{.RestoreScope}}</p>
+      <dl class="backup-restore-summary">
+        <div><dt>Backup</dt><dd><code>{{.RestorePlan.Normalized.BackupID}}</code></dd></div>
+        <div><dt>Created</dt><dd>{{.RestorePlan.Normalized.CreatedAt}}</dd></div>
+        <div><dt>Size</dt><dd>{{.RestoreSize}}</dd></div>
+        <div><dt>Current Minecraft</dt><dd>{{.RestorePlan.Normalized.Current.Version}} · {{.RestorePlan.Normalized.Current.VersionMode}}</dd></div>
+        {{if .RestorePlan.Normalized.Metadata}}<div><dt>Backup Minecraft</dt><dd>{{.RestorePlan.Normalized.Metadata.Minecraft.ConfiguredVersion}} · {{.RestorePlan.Normalized.Metadata.Minecraft.VersionMode}}</dd></div>{{else}}<div><dt>Backup metadata</dt><dd>{{.RestorePlan.Normalized.MetadataStatus}}</dd></div>{{end}}
+        <div><dt>Version relation</dt><dd>{{.RestorePlan.Normalized.VersionRelation}}</dd></div>
+      </dl>
+      {{end}}
+      {{range .RestorePlan.Warnings}}<div class="notice warning">{{.Message}}</div>{{end}}
+      {{if and .RestorePlan.OK .RestorePlan.Requirements}}
+      <div class="backup-restore-safety">
+        <strong>Safety checks remain Agent-owned.</strong>
+        <span>Before live data changes, JustVoxel revalidates the reviewed plan, archive integrity, archive safety, backup identity and staging capacity. Runtime validation and automatic rollback remain enabled.</span>
+      </div>
+      {{if .RestorePlan.Requirements.PlayersConfirmationRequired}}
+      <div class="notice warning"><strong>{{.RestorePlan.Requirements.Online}} player(s) are online.</strong><br>{{range .RestorePlan.Requirements.Players}}{{.}}<br>{{end}}Restore will use the player-aware graceful shutdown path.</div>
+      {{end}}
+      <form class="backup-restore-apply" method="post" action="/settings/new-backups/restore/apply">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <input type="hidden" name="backup_id" value="{{.RestoreRequest.BackupID}}">
+        <input type="hidden" name="mode" value="{{.RestoreRequest.Mode}}">
+        <input type="hidden" name="plan_fingerprint" value="{{.RestorePlan.PlanFingerprint}}">
+        {{if .RestorePlan.Requirements.PlayersConfirmationRequired}}<label class="backup-restore-player-confirm"><input type="checkbox" name="players_confirmed" value="yes"> I understand that the online players may be interrupted.</label>{{end}}
+        <label><strong>Type RESTORE to continue</strong>
+          <input name="confirmation" autocomplete="off" required>
+        </label>
+        <div class="action-row"><button class="danger" type="submit">Start Restore</button><a class="button-link secondary" href="/settings/new-backups">Cancel</a></div>
+      </form>
+      {{end}}
     {{end}}
   </section>
   {{end}}
