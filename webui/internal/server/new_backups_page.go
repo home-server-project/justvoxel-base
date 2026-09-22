@@ -22,6 +22,10 @@ type newBackupsAPI interface {
 	AdminBackupStorageStatus(ctx context.Context, session string) (api.AdminBackupStorageResponse, error)
 	AdminBackupStoragePlan(ctx context.Context, session string, request api.AdminBackupStorageRequest) (api.AdminBackupStorageResponse, error)
 	AdminBackupStorageApply(ctx context.Context, session string, request api.AdminBackupStorageRequest) (api.AdminBackupStorageResponse, error)
+	AdminRestorePlan(ctx context.Context, session string, request api.AdminRestorePlanRequest) (api.AdminRestorePlanResponse, error)
+	AdminRestoreApply(ctx context.Context, session string, request api.AdminRestoreApplyRequest) (api.AdminRestoreApplyResponse, error)
+	AdminCurrentRestoreOperation(ctx context.Context, session string) (api.PersistentOperationResponse, error)
+	AdminOperation(ctx context.Context, session, id string) (api.PersistentOperationResponse, error)
 }
 
 type newBackupAutomaticForm struct {
@@ -63,6 +67,15 @@ type newBackupsPageData struct {
 	DestinationFilesystemSize    string
 	ProposedDestinationAvailable string
 	ProposedDestinationSize      string
+	RestoreRequest               api.AdminRestorePlanRequest
+	RestorePlan                  *api.AdminRestorePlanResponse
+	RestoreSize                  string
+	RestoreModeTitle             string
+	RestoreScope                 string
+	RestoreError                 string
+	RestoreOperation             *api.PersistentOperation
+	RestoreStateLabel            string
+	RestoreStageLabel            string
 }
 
 func (a *App) registerNewBackupsPages(mux *http.ServeMux) {
@@ -72,6 +85,8 @@ func (a *App) registerNewBackupsPages(mux *http.ServeMux) {
 	mux.HandleFunc("POST /settings/new-backups/automatic/apply", a.newBackupsAutomaticApply)
 	mux.HandleFunc("POST /settings/new-backups/destination/plan", a.newBackupsDestinationPlan)
 	mux.HandleFunc("POST /settings/new-backups/destination/apply", a.newBackupsDestinationApply)
+	mux.HandleFunc("POST /settings/new-backups/restore/plan", a.newBackupsRestorePlan)
+	mux.HandleFunc("POST /settings/new-backups/restore/apply", a.newBackupsRestoreApply)
 	a.registerNewBackupsDeleteRoutes(mux)
 }
 
@@ -124,6 +139,8 @@ func (a *App) newBackupsPage(w http.ResponseWriter, r *http.Request) {
 		message = "Automatic backup settings saved."
 	case "destination":
 		message = "Backup destination updated. New manual and automatic backups will use it."
+	case "restore":
+		message = "Restore started. Progress is shown below."
 	}
 	a.renderNewBackupsPage(w, r, session, client, identity, message, "")
 }
@@ -253,6 +270,88 @@ func (a *App) newBackupsDestinationApply(w http.ResponseWriter, r *http.Request)
 	http.Redirect(w, r, "/settings/new-backups?result=destination", http.StatusSeeOther)
 }
 
+func (a *App) newBackupsRestorePlan(w http.ResponseWriter, r *http.Request) {
+	session, client, identity, ok := a.newBackupsRequest(w, r, true)
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		a.renderNewBackupsPageWithRestore(w, r, session, client, identity, api.AdminRestorePlanRequest{}, nil, "Could not read the Restore request.")
+		return
+	}
+	request := api.AdminRestorePlanRequest{
+		BackupID: strings.TrimSpace(r.FormValue("backup_id")),
+		Mode:     strings.TrimSpace(r.FormValue("mode")),
+	}
+	if request.BackupID == "" || (request.Mode != "world" && request.Mode != "full") {
+		a.renderNewBackupsPageWithRestore(w, r, session, client, identity, request, nil, "Choose one backup and a Restore scope.")
+		return
+	}
+	plan, err := client.AdminRestorePlan(r.Context(), session, request)
+	if err != nil {
+		var responseErr *api.ResponseError
+		if errors.As(err, &responseErr) && responseErr.StatusCode == http.StatusBadRequest && plan.SchemaVersion != "" {
+			a.renderNewBackupsPageWithRestore(w, r, session, client, identity, request, &plan, apiMessage(err, "Restore planning was rejected."))
+			return
+		}
+		a.renderNewBackupsPageWithRestore(w, r, session, client, identity, request, nil, apiMessage(err, "Restore planning is unavailable."))
+		return
+	}
+	a.renderNewBackupsPageWithRestore(w, r, session, client, identity, request, &plan, "")
+}
+
+func (a *App) newBackupsRestoreApply(w http.ResponseWriter, r *http.Request) {
+	session, client, identity, ok := a.newBackupsRequest(w, r, true)
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		a.renderNewBackupsPageWithRestore(w, r, session, client, identity, api.AdminRestorePlanRequest{}, nil, "Could not read the Restore request.")
+		return
+	}
+	request := api.AdminRestorePlanRequest{
+		BackupID: strings.TrimSpace(r.FormValue("backup_id")),
+		Mode:     strings.TrimSpace(r.FormValue("mode")),
+	}
+	plan, err := client.AdminRestorePlan(r.Context(), session, request)
+	if err != nil {
+		var responseErr *api.ResponseError
+		if errors.As(err, &responseErr) && responseErr.StatusCode == http.StatusBadRequest && plan.SchemaVersion != "" {
+			a.renderNewBackupsPageWithRestore(w, r, session, client, identity, request, &plan, apiMessage(err, "Restore planning was rejected."))
+			return
+		}
+		a.renderNewBackupsPageWithRestore(w, r, session, client, identity, request, nil, apiMessage(err, "Restore planning is unavailable."))
+		return
+	}
+	submittedFingerprint := strings.TrimSpace(r.FormValue("plan_fingerprint"))
+	if submittedFingerprint == "" || submittedFingerprint != plan.PlanFingerprint {
+		a.renderNewBackupsPageWithRestore(w, r, session, client, identity, request, &plan, "This Restore changed since it was reviewed. Review the current plan before continuing.")
+		return
+	}
+	if strings.TrimSpace(r.FormValue("confirmation")) != "RESTORE" {
+		a.renderNewBackupsPageWithRestore(w, r, session, client, identity, request, &plan, "Type RESTORE exactly to confirm this destructive operation.")
+		return
+	}
+	playersConfirmed := r.FormValue("players_confirmed") == "yes"
+	if plan.Requirements != nil && plan.Requirements.PlayersConfirmationRequired && !playersConfirmed {
+		a.renderNewBackupsPageWithRestore(w, r, session, client, identity, request, &plan, "Confirm that the online players may be interrupted before starting Restore.")
+		return
+	}
+	result, err := client.AdminRestoreApply(r.Context(), session, api.AdminRestoreApplyRequest{
+		PlanFingerprint: plan.PlanFingerprint,
+		Request: request, DestructiveConfirmed: true, PlayersConfirmed: playersConfirmed,
+	})
+	if err != nil {
+		a.renderNewBackupsPageWithRestore(w, r, session, client, identity, request, &plan, apiMessage(err, "Could not start Restore."))
+		return
+	}
+	if !result.OK || result.Operation == nil || result.Operation.OperationType != "restore" {
+		a.renderNewBackupsPageWithRestore(w, r, session, client, identity, request, &plan, "Restore did not return a valid persistent operation.")
+		return
+	}
+	http.Redirect(w, r, "/settings/new-backups?result=restore&restore_operation="+result.Operation.OperationID, http.StatusSeeOther)
+}
+
 func parseNewBackupsAutomaticForm(r *http.Request) (newBackupAutomaticForm, error) {
 	var form newBackupAutomaticForm
 	if err := r.ParseForm(); err != nil {
@@ -304,18 +403,22 @@ func newBackupsPlanIsBackupOnly(plan api.AdminConfigurationChangeResponse) bool 
 }
 
 func (a *App) renderNewBackupsPage(w http.ResponseWriter, r *http.Request, session string, client newBackupsAPI, identity api.SessionInfo, message, pageError string) {
-	a.renderNewBackupsPageState(w, r, session, client, identity, message, pageError, nil, nil, nil, nil)
+	a.renderNewBackupsPageState(w, r, session, client, identity, message, pageError, nil, nil, nil, nil, nil, nil, "")
 }
 
 func (a *App) renderNewBackupsPageWithAutomatic(w http.ResponseWriter, r *http.Request, session string, client newBackupsAPI, identity api.SessionInfo, message, pageError string, automaticOverride *newBackupAutomaticForm, plan *api.AdminConfigurationChangeResponse) {
-	a.renderNewBackupsPageState(w, r, session, client, identity, message, pageError, automaticOverride, plan, nil, nil)
+	a.renderNewBackupsPageState(w, r, session, client, identity, message, pageError, automaticOverride, plan, nil, nil, nil, nil, "")
 }
 
 func (a *App) renderNewBackupsPageWithDestination(w http.ResponseWriter, r *http.Request, session string, client newBackupsAPI, identity api.SessionInfo, message, pageError string, destinationOverride *api.AdminBackupStorageRequest, plan *api.AdminBackupStorageResponse) {
-	a.renderNewBackupsPageState(w, r, session, client, identity, message, pageError, nil, nil, destinationOverride, plan)
+	a.renderNewBackupsPageState(w, r, session, client, identity, message, pageError, nil, nil, destinationOverride, plan, nil, nil, "")
 }
 
-func (a *App) renderNewBackupsPageState(w http.ResponseWriter, r *http.Request, session string, client newBackupsAPI, identity api.SessionInfo, message, pageError string, automaticOverride *newBackupAutomaticForm, automaticPlan *api.AdminConfigurationChangeResponse, destinationOverride *api.AdminBackupStorageRequest, destinationPlan *api.AdminBackupStorageResponse) {
+func (a *App) renderNewBackupsPageWithRestore(w http.ResponseWriter, r *http.Request, session string, client newBackupsAPI, identity api.SessionInfo, request api.AdminRestorePlanRequest, plan *api.AdminRestorePlanResponse, restoreError string) {
+	a.renderNewBackupsPageState(w, r, session, client, identity, "", "", nil, nil, nil, nil, &request, plan, restoreError)
+}
+
+func (a *App) renderNewBackupsPageState(w http.ResponseWriter, r *http.Request, session string, client newBackupsAPI, identity api.SessionInfo, message, pageError string, automaticOverride *newBackupAutomaticForm, automaticPlan *api.AdminConfigurationChangeResponse, destinationOverride *api.AdminBackupStorageRequest, destinationPlan *api.AdminBackupStorageResponse, restoreRequest *api.AdminRestorePlanRequest, restorePlan *api.AdminRestorePlanResponse, restoreError string) {
 	backups, err := client.AdminRestoreBackups(r.Context(), session)
 	if err != nil {
 		a.handleNewBackupsError(w, r, err)
@@ -360,6 +463,28 @@ func (a *App) renderNewBackupsPageState(w http.ResponseWriter, r *http.Request, 
 		destinationForm = *destinationOverride
 	}
 
+	var restoreOperation *api.PersistentOperation
+	requestedOperationID := strings.TrimSpace(r.URL.Query().Get("restore_operation"))
+	if requestedOperationID != "" {
+		operationResponse, err := client.AdminOperation(r.Context(), session, requestedOperationID)
+		if err != nil {
+			a.handleNewBackupsError(w, r, err)
+			return
+		}
+		if operationResponse.Operation != nil && operationResponse.Operation.OperationType == "restore" {
+			restoreOperation = operationResponse.Operation
+		}
+	} else {
+		operationResponse, err := client.AdminCurrentRestoreOperation(r.Context(), session)
+		if err != nil {
+			a.handleNewBackupsError(w, r, err)
+			return
+		}
+		if operationResponse.Operation != nil && operationResponse.Operation.OperationType == "restore" {
+			restoreOperation = operationResponse.Operation
+		}
+	}
+
 	views := make([]newBackupView, 0, len(backups.Backups))
 	var totalBytes uint64
 	for _, backup := range backups.Backups {
@@ -394,6 +519,23 @@ func (a *App) renderNewBackupsPageState(w http.ResponseWriter, r *http.Request, 
 	if destinationPlan != nil {
 		data.ProposedDestinationAvailable = formatOptionalBytes(destinationPlan.Proposed.AvailableBytes)
 		data.ProposedDestinationSize = formatOptionalBytes(destinationPlan.Proposed.FilesystemBytes)
+	}
+	if restoreRequest != nil {
+		data.RestoreRequest = *restoreRequest
+		data.RestoreModeTitle = restoreModeTitle(restoreRequest.Mode)
+		data.RestoreScope = restoreModeScope(restoreRequest.Mode)
+	}
+	if restorePlan != nil {
+		data.RestorePlan = restorePlan
+		if restorePlan.Normalized != nil {
+			data.RestoreSize = humanBytes(restorePlan.Normalized.SizeBytes)
+		}
+	}
+	data.RestoreError = restoreError
+	data.RestoreOperation = restoreOperation
+	if restoreOperation != nil {
+		data.RestoreStateLabel = restoreOperationStateLabel(restoreOperation.State)
+		data.RestoreStageLabel = restoreOperationStageLabel(restoreOperation.Stage)
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
