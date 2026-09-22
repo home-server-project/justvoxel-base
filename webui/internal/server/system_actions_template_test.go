@@ -37,6 +37,13 @@ func TestSystemPowerHeaderAndDialogUX(t *testing.T) {
 		}
 	}
 
+	if !strings.Contains(markup, `<rect x="8" y="9" width="8" height="8" rx="1"></rect>`) {
+		t.Fatal("custom UEFI firmware icon lost its microchip body")
+	}
+	if strings.Contains(markup, `title="Reboot to UEFI/BIOS"`) {
+		t.Fatal("system actions should use explicit custom tooltips instead of native title bubbles")
+	}
+
 	styles, err := assets.ReadFile("static/app.css")
 	if err != nil {
 		t.Fatal(err)
