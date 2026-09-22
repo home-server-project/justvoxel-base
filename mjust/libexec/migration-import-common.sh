@@ -103,14 +103,20 @@ rollback_import() {
 }
 
 on_exit() {
-    local rc=$?
+    local rc=$? preactivation_outcome=rolled_back
+    local preactivation_status='Server migration Import stopped before live activation; no Minecraft data was changed.'
     trap - EXIT INT TERM
     if (( rc != 0 )); then
         if [[ ${live_modified} == yes && ${validated} != yes && -n ${transaction:-} && -d ${transaction} ]]; then
             rollback_import || true
         elif [[ ${minecraft_stopped_by_import} == yes && ${live_modified} != yes && ${minecraft_was_active} == yes ]]; then
             echo 'Import failed before live data changed; restarting the previously running Minecraft server.' >&2
-            systemctl start minecraft.service || true
+            if systemctl start minecraft.service >/dev/null 2>&1; then
+                minecraft_stopped_by_import=no
+            else
+                preactivation_outcome=needs_attention
+                preactivation_status='Server migration Import failed before activation, but the previously running Minecraft server could not be restarted automatically.'
+            fi
         fi
     fi
     # Staging created before live activation is disposable. Preserve transaction
@@ -121,6 +127,9 @@ on_exit() {
     fi
     if [[ ${transport_started} == yes ]]; then
         jv_migration_transport_cleanup || true
+    fi
+    if (( rc != 0 )) && [[ ${live_modified} != yes && ${rollback_attempted} != yes ]]; then
+        jv_migration_api_result "${preactivation_outcome}" pre-activation '' "${preactivation_status}" || true
     fi
     exit "${rc}"
 }

@@ -52,7 +52,7 @@ func executeMigrationImportTransaction(parent context.Context,store *operationSt
     operation,err:=store.get(operationID);if err!=nil{return err}
     if operation.OperationType!=operationTypeMigrationImport||operation.PlanFingerprint==""{return errors.New("invalid server migration Import operation identity")}
     if !validAdminMigrationImportRequest(plan.Request)||plan.Context.SourceIdentity==""||plan.Context.DestinationIdentity==""{return markMigrationImportNeedsAttention(store,operationID,"invalid_execution_plan","Server migration Import execution data is incomplete; administrator attention is required.")}
-    if _,err:=store.transition(operationID,operationValidating,"import_preflight","Revalidating the reviewed server migration Import before staging or changing Minecraft.");err!=nil{return err}
+    if _,err:=store.transition(operationID,operationValidating,"import_preflight","Preparing the reviewed server migration Import for one bounded staging attempt before changing Minecraft.");err!=nil{return err}
     request:=migrationImportTransactionRequest{OperationID:operationID,PlanFingerprint:operation.PlanFingerprint,Request:plan.Request,Normalized:plan.Normalized,Context:plan.Context,Requirements:plan.Requirements,PlayersConfirmed:plan.PlayersConfirmed,EULAAccepted:plan.EULAAccepted,VanillaConfirmed:plan.VanillaConfirmed,PluginsConfirmed:plan.PluginsConfirmed,OnlineModeConfirmed:plan.OnlineModeConfirmed,BackupSMBPassword:plan.BackupSMBPassword}
     finalSeen:=false
     err=runAdminMigrationImportTransactionHelper(parent,request,func(event migrationImportTransactionEvent)error{

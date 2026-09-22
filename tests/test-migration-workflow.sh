@@ -84,6 +84,10 @@ grep -Fq 'jv_migration_import_source_cleanup' "${import_source_helper}" || fail 
 bash -n "${import_source_helper}" || fail 'shared Import source resolver failed bash syntax validation'
 grep -Fq 'source_kinds:["local","backup","device","nfs","smb"]' "${repo_root}/mjust/libexec/admin-migration-import-plan-json" || fail 'Import discovery does not advertise full source transport parity'
 grep -Fq 'JV_MIGRATION_IMPORT_SOURCE_IDENTITY' "${repo_root}/mjust/libexec/admin-migration-import-transaction-json" || fail 'Import execution does not revalidate remounted source identity'
+if grep -Fq 'admin-migration-import-plan-json plan' "${repo_root}/mjust/libexec/admin-migration-import-transaction-json"; then fail 'Import transaction must not re-plan the archive after Agent Apply review'; fi
+if grep -Fq 'postplan=' "${repo_root}/mjust/libexec/admin-migration-import-transaction-json"; then fail 'Import transaction must not post-failure re-plan or retry the archive'; fi
+if grep -Fq 'jv_migration_source_identity "${JV_MIGRATION_SOURCE}"' "${repo_root}/mjust/libexec/migration-import-activate.sh"; then fail 'Import activation must not re-read the original source after staging'; fi
+grep -Fq 'jv_migration_api_result "${preactivation_outcome}" pre-activation' "${repo_root}/mjust/libexec/migration-import-common.sh" || fail 'Import backend does not report bounded pre-activation failure directly'
 if grep -Fq 'storage_write_network_fstab' <<< "${transport_text}"; then fail 'temporary migration transport must not write fstab'; fi
 grep -Fq 'JV_MIGRATION_SMB_CREDENTIALS="${JV_MIGRATION_TRANSPORT_ROOT}/smb.credentials"' <<< "${transport_text}" || fail 'temporary SMB credentials are not under /run transport state'
 grep -Fq 'chmod 0600 "${JV_MIGRATION_SMB_CREDENTIALS}"' <<< "${transport_text}" || fail 'temporary SMB credentials are not mode 0600'

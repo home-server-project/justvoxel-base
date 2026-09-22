@@ -18,11 +18,8 @@ if ! jq -e '
 
 operation_id="$(jq -r '.operation_id' <<< "$payload")"
 plan_fingerprint="$(jq -r '.plan_fingerprint' <<< "$payload")"
-plan_request="$(jq -c '.request' <<< "$payload")"
-expected_normalized="$(jq -S -c '.normalized' <<< "$payload")"
+reviewed_normalized="$(jq -c '.normalized' <<< "$payload")"
 expected_source_identity="$(jq -r '.context.source_identity' <<< "$payload")"
-expected_config_identity="$(jq -r '.context.config_identity' <<< "$payload")"
-expected_destination_identity="$(jq -r '.context.destination_identity' <<< "$payload")"
 players_confirmed="$(jq -r '.players_confirmed' <<< "$payload")"
 eula_accepted="$(jq -r '.eula_accepted' <<< "$payload")"
 vanilla_confirmed="$(jq -r '.vanilla_confirmed' <<< "$payload")"
@@ -35,16 +32,8 @@ if (( ${#backup_smb_password} > 4096 )); then
 fi
 [[ "$operation_id" =~ ^[0-9a-f-]+$ && "$plan_fingerprint" =~ ^sha256:[0-9a-f]{64}$ ]] || { emit_result needs_attention 'Server migration Import operation identity was invalid.'; exit 0; }
 
-emit_progress validating import_preflight 'Revalidating the reviewed server migration Import before staging or changing Minecraft.'
-replan="$(printf '%s\n' "$plan_request" | /usr/libexec/justvoxel/mjust/admin-migration-import-plan-json plan 2>/dev/null || true)"
-if [[ "$(jq -r '.ok // false' <<< "$replan" 2>/dev/null)" != true ]]; then
-    emit_result rolled_back "$(jq -r '.error // "Server migration Import plan is no longer valid; no live Import was started."' <<< "$replan" 2>/dev/null || echo 'Server migration Import plan is no longer valid; no live Import was started.')"
-    exit 0
-fi
-[[ "$(jq -r '.context.source_identity' <<< "$replan")" == "$expected_source_identity" ]] || { emit_result rolled_back 'Import source changed after review; no live Import was started.'; exit 0; }
-[[ "$(jq -r '.context.config_identity' <<< "$replan")" == "$expected_config_identity" ]] || { emit_result rolled_back 'JustVoxel configuration changed after Import review; no live Import was started.'; exit 0; }
-[[ "$(jq -r '.context.destination_identity' <<< "$replan")" == "$expected_destination_identity" ]] || { emit_result rolled_back 'Import destination identity changed after review; no live Import was started.'; exit 0; }
-[[ "$(jq -S -c '.normalized' <<< "$replan")" == "$expected_normalized" ]] || { emit_result rolled_back 'Normalized Import plan changed after review; no live Import was started.'; exit 0; }
+[[ -n "$expected_source_identity" && "$expected_source_identity" != "null" ]] || { emit_result needs_attention 'Server migration Import source identity was missing from the reviewed execution plan.'; exit 0; }
+emit_progress validating import_preflight 'Preparing the reviewed server migration Import for one bounded staging attempt before changing Minecraft.'
 
 source_request="$(jq -c '.request.source | .kind=(.kind//"local")' <<< "$payload")"
 trap 'jv_migration_import_source_cleanup' EXIT
@@ -61,35 +50,35 @@ if [[ "$JV_MIGRATION_IMPORT_SOURCE_IDENTITY" != "$expected_source_identity" ]]; 
     emit_result rolled_back 'Import source identity changed after review; no live Import was started.'
     exit 0
 fi
-selected_root="$(jq -r '.normalized.source.selected_root' <<< "$replan")"
-source_version="$(jq -r '.normalized.source.minecraft_version' <<< "$replan")"
-mode="$(jq -r '.normalized.destination.mode' <<< "$replan")"
-data_path="$(jq -r '.normalized.destination.data_path' <<< "$replan")"
-backup_path="$(jq -r '.normalized.destination.backup_path' <<< "$replan")"
-java_port="$(jq -r '.normalized.destination.java_port' <<< "$replan")"
-bedrock_port="$(jq -r '.normalized.destination.bedrock_port' <<< "$replan")"
-java_memory="$(jq -r '.normalized.destination.java_memory' <<< "$replan")"
-container_memory="$(jq -r '.normalized.destination.container_memory' <<< "$replan")"
-timezone="$(jq -r '.normalized.destination.timezone' <<< "$replan")"
-image_tag="$(jq -r '.normalized.destination.image_tag' <<< "$replan")"
-minecraft_uid="$(jq -r '.normalized.destination.minecraft_uid' <<< "$replan")"
-minecraft_gid="$(jq -r '.normalized.destination.minecraft_gid' <<< "$replan")"
-backup_keep="$(jq -r '.normalized.destination.backup_keep' <<< "$replan")"
-backup_schedule="$(jq -r '.normalized.destination.backup_schedule' <<< "$replan")"
-backup_auto="$(jq -r '.normalized.destination.backup_automatic' <<< "$replan")"
-storage_type="$(jq -r '.normalized.destination.storage.type // "system"' <<< "$replan")"
-data_mount="$(jq -r '.normalized.destination.storage.mount_point // ""' <<< "$replan")"
-data_uuid="$(jq -r '.normalized.destination.storage.expected_uuid // ""' <<< "$replan")"
-data_source="$(jq -r '.normalized.destination.storage.expected_source // ""' <<< "$replan")"
-backup_type="$(jq -r '.normalized.destination.backups.type // "system"' <<< "$replan")"
-backup_mount="$(jq -r '.normalized.destination.backups.mount_point // ""' <<< "$replan")"
-backup_uuid="$(jq -r '.normalized.destination.backups.expected_uuid // ""' <<< "$replan")"
-backup_source_expected="$(jq -r '.normalized.destination.backups.expected_source // ""' <<< "$replan")"
+selected_root="$(jq -r '.source.selected_root' <<< "$reviewed_normalized")"
+source_version="$(jq -r '.source.minecraft_version' <<< "$reviewed_normalized")"
+mode="$(jq -r '.destination.mode' <<< "$reviewed_normalized")"
+data_path="$(jq -r '.destination.data_path' <<< "$reviewed_normalized")"
+backup_path="$(jq -r '.destination.backup_path' <<< "$reviewed_normalized")"
+java_port="$(jq -r '.destination.java_port' <<< "$reviewed_normalized")"
+bedrock_port="$(jq -r '.destination.bedrock_port' <<< "$reviewed_normalized")"
+java_memory="$(jq -r '.destination.java_memory' <<< "$reviewed_normalized")"
+container_memory="$(jq -r '.destination.container_memory' <<< "$reviewed_normalized")"
+timezone="$(jq -r '.destination.timezone' <<< "$reviewed_normalized")"
+image_tag="$(jq -r '.destination.image_tag' <<< "$reviewed_normalized")"
+minecraft_uid="$(jq -r '.destination.minecraft_uid' <<< "$reviewed_normalized")"
+minecraft_gid="$(jq -r '.destination.minecraft_gid' <<< "$reviewed_normalized")"
+backup_keep="$(jq -r '.destination.backup_keep' <<< "$reviewed_normalized")"
+backup_schedule="$(jq -r '.destination.backup_schedule' <<< "$reviewed_normalized")"
+backup_auto="$(jq -r '.destination.backup_automatic' <<< "$reviewed_normalized")"
+storage_type="$(jq -r '.destination.storage.type // "system"' <<< "$reviewed_normalized")"
+data_mount="$(jq -r '.destination.storage.mount_point // ""' <<< "$reviewed_normalized")"
+data_uuid="$(jq -r '.destination.storage.expected_uuid // ""' <<< "$reviewed_normalized")"
+data_source="$(jq -r '.destination.storage.expected_source // ""' <<< "$reviewed_normalized")"
+backup_type="$(jq -r '.destination.backups.type // "system"' <<< "$reviewed_normalized")"
+backup_mount="$(jq -r '.destination.backups.mount_point // ""' <<< "$reviewed_normalized")"
+backup_uuid="$(jq -r '.destination.backups.expected_uuid // ""' <<< "$reviewed_normalized")"
+backup_source_expected="$(jq -r '.destination.backups.expected_source // ""' <<< "$reviewed_normalized")"
 
 if [[ "$mode" == fresh ]]; then
     emit_progress running import_storage 'Preparing and verifying the reviewed fresh Import storage through the Management Agent transaction backend.'
-    storage_target="$(jq -c '.normalized.destination.storage | {type,path,device:(.device//""),parent_disk:(.parent_disk//""),filesystem:(.filesystem//""),uuid:(.uuid//""),mount_point:(.mount_point//""),expected_uuid:(.expected_uuid//""),expected_source:(.expected_source//"")}' <<< "$replan")"
-    backup_target="$(jq -c '.normalized.destination.backups | {type,path,device:(.device//""),parent_disk:(.parent_disk//""),filesystem:(.filesystem//""),uuid:(.uuid//""),mount_point:(.mount_point//""),expected_uuid:(.expected_uuid//""),expected_source:(.expected_source//""),source:(.source//""),username:(.username//""),domain:(.domain//""),credentials_required:(.credentials_required//false)}' <<< "$replan")"
+    storage_target="$(jq -c '.destination.storage | {type,path,device:(.device//""),parent_disk:(.parent_disk//""),filesystem:(.filesystem//""),uuid:(.uuid//""),mount_point:(.mount_point//""),expected_uuid:(.expected_uuid//""),expected_source:(.expected_source//"")}' <<< "$reviewed_normalized")"
+    backup_target="$(jq -c '.destination.backups | {type,path,device:(.device//""),parent_disk:(.parent_disk//""),filesystem:(.filesystem//""),uuid:(.uuid//""),mount_point:(.mount_point//""),expected_uuid:(.expected_uuid//""),expected_source:(.expected_source//""),source:(.source//""),username:(.username//""),domain:(.domain//""),credentials_required:(.credentials_required//false)}' <<< "$reviewed_normalized")"
     storage_payload="$(jq -cn --arg op "$operation_id" --arg fp "$plan_fingerprint" --argjson storage "$storage_target" --argjson backups "$backup_target" --arg password "$backup_smb_password" '{schema_version:"v1",operation_id:$op,plan_fingerprint:$fp,storage:$storage,backups:$backups,smb_password:$password}')"
     unset backup_smb_password
     storage_result="$(printf '%s\n' "$storage_payload" | /usr/libexec/justvoxel/mjust/admin-setup-storage-transaction-json apply 2>/dev/null || true)"
@@ -131,13 +120,11 @@ if [[ -r "$result_file" ]] && jq -e 'type=="object" and (.outcome|type=="string"
 fi
 rm -f -- "$result_file"
 
-# A backend error before live activation leaves no result file. Re-plan: matching
-# identities prove the reviewed source/destination remain unchanged and no retained
-# rollback transaction was needed.
-postplan="$(printf '%s\n' "$plan_request" | /usr/libexec/justvoxel/mjust/admin-migration-import-plan-json plan 2>/dev/null || true)"
-if (( backend_rc != 0 )) && [[ "$(jq -r '.ok // false' <<< "$postplan" 2>/dev/null)" == true ]]    && [[ "$(jq -r '.context.source_identity' <<< "$postplan")" == "$expected_source_identity" ]]    && [[ "$(jq -r '.context.destination_identity' <<< "$postplan")" == "$expected_destination_identity" ]]; then
-    emit_result rolled_back 'Server migration Import stopped before live activation; the reviewed destination remains unchanged.'
+# The backend must always return an explicit safety result. Do not re-plan or retry
+# the source here: a missing result is an incomplete transaction and requires attention.
+if (( backend_rc != 0 )); then
+    emit_result needs_attention 'Server migration Import backend failed without a complete safety result; inspect retained Import/Recovery state before continuing.'
 else
-    emit_result needs_attention 'Server migration Import ended without a complete safety result; inspect retained Import/Recovery state before continuing.'
+    emit_result needs_attention 'Server migration Import backend ended without a complete safety result; inspect retained Import/Recovery state before continuing.'
 fi
 exit 0

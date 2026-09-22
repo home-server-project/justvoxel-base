@@ -328,7 +328,8 @@ grep -Fq 'SMBPassword string' "${admin_migration_import_plan}" || fail 'Import M
 grep -Fq 'POST /v1/admin/migration/import/apply' "${admin_migration_import_plan}" || fail 'server migration Import apply route is missing'
 grep -Fq 'authoritativeAdminMigrationImportPlan' "${admin_migration_import_apply}" || fail 'server migration Import apply does not re-run authoritative planning'
 grep -Fq 'adminMigrationImportTransactionHelper' "${migration_import_worker}" || fail 'server migration Import worker does not use the authoritative transaction backend'
-grep -Fq 'admin-migration-import-plan-json plan' "${migration_import_transaction_backend}" || fail 'server migration Import transaction does not revalidate the reviewed plan'
+if grep -Fq 'admin-migration-import-plan-json plan' "${migration_import_transaction_backend}"; then fail 'server migration Import transaction must not redundantly re-plan the reviewed archive'; fi
+if grep -Fq 'postplan=' "${migration_import_transaction_backend}"; then fail 'server migration Import transaction must not retry planning after backend failure'; fi
 grep -Fq 'migration-import-source.sh' "${migration_import_transaction_backend}" || fail 'server migration Import transaction does not use the shared source resolver'
 grep -Fq 'JV_MIGRATION_IMPORT_SOURCE_IDENTITY' "${migration_import_transaction_backend}" || fail 'server migration Import transaction does not revalidate source identity after remount'
 grep -Fq 'admin-setup-storage-transaction-json apply' "${migration_import_transaction_backend}" || fail 'fresh server migration Import does not use transactional Agent-owned storage preparation'
@@ -339,6 +340,8 @@ grep -Fq 'JV_MIGRATION_API_MINECRAFT_UID' "${migration_import_transaction_backen
 grep -Fq 'JV_MIGRATION_API_MINECRAFT_GID' "${migration_import_transaction_backend}" || fail 'server migration Import transaction does not preserve the reviewed Minecraft GID'
 grep -Fq 'migration-import-backend' "${migration_import_transaction_backend}" || fail 'server migration Import transaction lost the preserved authoritative backend'
 grep -Fq 'jv_migration_api_result' "${repo_root}/mjust/libexec/migration-import-common.sh" || fail 'server migration Import backend does not report rollback safety to the Agent'
+grep -Fq 'jv_migration_api_result "${preactivation_outcome}" pre-activation' "${repo_root}/mjust/libexec/migration-import-common.sh" || fail 'server migration Import backend does not report pre-activation safety directly'
+if grep -Fq 'jv_migration_source_identity "${JV_MIGRATION_SOURCE}"' "${repo_root}/mjust/libexec/migration-import-activate.sh"; then fail 'server migration Import activation must use staged data without re-reading the original source'; fi
 bash -n "${migration_import_backend}" "${migration_import_plan_backend}" "${migration_import_transaction_backend}" || fail 'server migration Import shell source failed bash syntax validation'
 
 # Step 5B.5: both frontends must remain clients of the same server-migration API and operation family.

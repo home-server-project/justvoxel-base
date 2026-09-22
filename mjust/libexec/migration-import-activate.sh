@@ -30,12 +30,8 @@ if ! flock -n 9; then
     exit 1
 fi
 
-# The transport/source remained present through review; ensure it did not change.
-[[ -e ${JV_MIGRATION_SOURCE} ]] || { echo 'ERROR: migration source disappeared before activation.' >&2; exit 1; }
-[[ $(jv_migration_source_identity "${JV_MIGRATION_SOURCE}") == "${source_identity}" ]] || {
-    echo 'ERROR: migration source changed after verification. Refusing activation.' >&2
-    exit 1
-}
+# The source was already copied and validated into local transaction staging.
+# Activation uses staged data only; the original source is no longer consulted.
 
 if [[ ${configured} == no ]]; then
     jv_migration_assert_fresh_selinux_path "${DATA_PATH}"
