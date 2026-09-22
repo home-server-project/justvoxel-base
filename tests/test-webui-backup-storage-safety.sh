@@ -35,8 +35,8 @@ diag="$(bounded_smb_mount_error "$(printf 'mount error(13): Permission denied\np
 
 grep -Fq 'smb_mount_error="$(mount "${TARGET_MOUNT}" 2>&1)"' "${helper_apply}" || { echo 'A3.1 SMB mount stderr is still discarded.' >&2; exit 1; }
 grep -Fq 'bounded_smb_mount_error "${smb_mount_error}"' "${helper_apply}" || { echo 'A3.1 SMB mount failure does not use bounded diagnostics.' >&2; exit 1; }
-if grep -Fq 'mount "${TARGET_MOUNT}" >/dev/null 2>&1' "${helper_apply}"; then
-    echo 'A3.1 SMB mount failure still discards mount.cifs diagnostics.' >&2
+if grep -Fq "SMB share could not be mounted. Check the server, share, credentials, network, and permissions." "${helper_apply}"; then
+    echo 'A3.1 SMB mount failure still uses the generic discarded-diagnostic path.' >&2
     exit 1
 fi
 grep -Fq 'vers=3.0' "${helper_apply}" || { echo 'Step 7 must not silently change the SMB dialect.' >&2; exit 1; }
