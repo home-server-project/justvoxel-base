@@ -22,6 +22,24 @@ source_info="$(/usr/libexec/justvoxel/mjust/migration-archive inspect "${JV_MIGR
 expanded_bytes="$(jq -r '.expandedBytes' <<< "${source_info}")"
 is_native="$(jq -r '.nativeBundle' <<< "${source_info}")"
 
+# Capture the only source-side metadata needed after staging before copying begins.
+# After the post-copy identity check below, compatibility analysis must use only
+# the staged copy and these bounded captured values.
+source_is_file=no
+source_basename=''
+source_backup_meta_mode=''
+source_backup_meta_version=''
+if [[ -f ${JV_MIGRATION_SOURCE} ]]; then
+    source_is_file=yes
+    source_basename="$(basename -- "${JV_MIGRATION_SOURCE}")"
+    if [[ ${source_basename} == minecraft-*.tar.gz && -f "${JV_MIGRATION_SOURCE}.meta.json" ]]; then
+        if jq -e '.schemaVersion == 1' "${JV_MIGRATION_SOURCE}.meta.json" >/dev/null 2>&1; then
+            source_backup_meta_mode="$(jq -r '.minecraft.versionMode // "unknown"' "${JV_MIGRATION_SOURCE}.meta.json")"
+            source_backup_meta_version="$(jq -r '.minecraft.configuredVersion // empty' "${JV_MIGRATION_SOURCE}.meta.json")"
+        fi
+    fi
+fi
+
 native_manifest=''
 if [[ ${is_native} == true ]]; then
     echo 'Verifying native JustVoxel bundle SHA-256 integrity.'
@@ -63,6 +81,9 @@ if [[ $(jv_migration_source_identity "${JV_MIGRATION_SOURCE}") != "${source_iden
     exit 1
 fi
 
+# ORIGINAL SOURCE FILESYSTEM ACCESS ENDS HERE.
+# From this point through activation, the staged copy is authoritative. The
+# original SMB/NFS/device/local source may disappear without changing the Import.
 if [[ ${is_native} == true ]]; then
     detection_base="${staging_source}/justvoxel-migration/server"
     [[ -d ${detection_base} ]] || { echo 'ERROR: native bundle server directory is missing after extraction.' >&2; exit 1; }
@@ -74,7 +95,7 @@ else
     detection="$(/usr/libexec/justvoxel/mjust/migration-archive detect "${detection_base}")"
     selected="$(select_candidate "${detection}" "${detection_base}")" || { rc=$?; (( rc == 2 )) && { echo 'Import cancelled.'; exit 0; }; exit "${rc}"; }
     candidate_type="$(jq -r '.sourceType' <<< "${selected}")"
-    if [[ -f ${JV_MIGRATION_SOURCE} && $(basename -- "${JV_MIGRATION_SOURCE}") == minecraft-*.tar.gz ]]; then
+    if [[ ${source_is_file} == yes && ${source_basename} == minecraft-*.tar.gz ]]; then
         source_class=justvoxel-backup
     else
         source_class="${candidate_type}"
@@ -146,14 +167,9 @@ if [[ ${source_class} == justvoxel ]]; then
         echo "ERROR: native manifest Minecraft version (${manifest_version}) conflicts with staged server evidence (${source_version:-unknown})." >&2
         exit 1
     fi
-elif [[ ${source_class} == justvoxel-backup && -f ${JV_MIGRATION_SOURCE}.meta.json ]]; then
-    metadata="${JV_MIGRATION_SOURCE}.meta.json"
-    if jq -e '.schemaVersion == 1' "${metadata}" >/dev/null 2>&1; then
-        meta_mode="$(jq -r '.minecraft.versionMode // "unknown"' "${metadata}")"
-        meta_version="$(jq -r '.minecraft.configuredVersion // empty' "${metadata}")"
-        if [[ ${meta_mode} == pinned && -n ${meta_version} && ${meta_version} != LATEST ]]; then
-            source_version="${source_version:-${meta_version}}"
-        fi
+elif [[ ${source_class} == justvoxel-backup ]]; then
+    if [[ ${source_backup_meta_mode} == pinned && -n ${source_backup_meta_version} && ${source_backup_meta_version} != LATEST ]]; then
+        source_version="${source_version:-${source_backup_meta_version}}"
     fi
 fi
 if [[ -z ${source_version} ]]; then
