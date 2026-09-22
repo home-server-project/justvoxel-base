@@ -166,3 +166,42 @@ func TestSetupTemplatesUseThinTopbar(t *testing.T) {
 		}
 	}
 }
+
+func TestDashboardCompactResponsiveLayout(t *testing.T) {
+	content, err := assets.ReadFile("templates/dashboard.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(content)
+	for _, want := range []string{
+		"class=\"grid dashboard-summary\"",
+		"class=\"dashboard-live-panels\"",
+		"id=\"minecraft-version-summary\"",
+		"id=\"players-panel-count\"",
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("compact dashboard missing %q", want)
+		}
+	}
+	if strings.Contains(markup, `id="minecraft-players-summary"`) {
+		t.Fatal("dashboard contains duplicate Players summary tile")
+	}
+	if strings.Contains(markup, "<h2>Appliance</h2>") {
+		t.Fatal("dashboard contains oversized Appliance panel")
+	}
+
+	css, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles := string(css)
+	for _, want := range []string{
+		".dashboard-summary{grid-template-columns:repeat(5,minmax(0,1fr))",
+		".dashboard-live-panels{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)",
+		"@media(max-width:900px)",
+	} {
+		if !strings.Contains(styles, want) {
+			t.Fatalf("compact dashboard styling missing %q", want)
+		}
+	}
+}
