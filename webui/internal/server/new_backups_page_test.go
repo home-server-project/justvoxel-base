@@ -35,6 +35,16 @@ type fakeNewBackupsAPI struct {
 	destinationStatusCalls  int
 	destinationPlanCalls    int
 	destinationApplyCalls   int
+	restorePlanResult       api.AdminRestorePlanResponse
+	restorePlanErr          error
+	restoreApplyResult      api.AdminRestoreApplyResponse
+	restoreApplyErr         error
+	restorePlanRequest      api.AdminRestorePlanRequest
+	restoreApplyRequest     api.AdminRestoreApplyRequest
+	restorePlanCalls        int
+	restoreApplyCalls       int
+	currentRestoreOperation *api.PersistentOperation
+	restoreOperation        *api.PersistentOperation
 }
 
 func defaultNewBackupsConfiguration() api.AdminConfigurationDiscovery {
@@ -175,6 +185,49 @@ func (f *fakeNewBackupsAPI) AdminBackupStorageApply(_ context.Context, session s
 		return f.destinationApply, nil
 	}
 	return api.AdminBackupStorageResponse{OK: true, Changed: true, Applied: true, Proposed: api.AdminBackupStorageTarget{Type: request.Type, Path: request.Path}}, nil
+}
+
+func (f *fakeNewBackupsAPI) AdminRestorePlan(_ context.Context, session string, request api.AdminRestorePlanRequest) (api.AdminRestorePlanResponse, error) {
+	if session != "session-token" {
+		return api.AdminRestorePlanResponse{}, api.ErrUnauthorized
+	}
+	f.restorePlanCalls++
+	f.restorePlanRequest = request
+	if f.restorePlanResult.SchemaVersion != "" || f.restorePlanErr != nil {
+		return f.restorePlanResult, f.restorePlanErr
+	}
+	return restorePlan(false), nil
+}
+
+func (f *fakeNewBackupsAPI) AdminRestoreApply(_ context.Context, session string, request api.AdminRestoreApplyRequest) (api.AdminRestoreApplyResponse, error) {
+	if session != "session-token" {
+		return api.AdminRestoreApplyResponse{}, api.ErrUnauthorized
+	}
+	f.restoreApplyCalls++
+	f.restoreApplyRequest = request
+	return f.restoreApplyResult, f.restoreApplyErr
+}
+
+func (f *fakeNewBackupsAPI) AdminCurrentRestoreOperation(_ context.Context, session string) (api.PersistentOperationResponse, error) {
+	if session != "session-token" {
+		return api.PersistentOperationResponse{}, api.ErrUnauthorized
+	}
+	if f.currentRestoreOperation == nil {
+		return api.PersistentOperationResponse{}, nil
+	}
+	copy := *f.currentRestoreOperation
+	return api.PersistentOperationResponse{Operation: &copy}, nil
+}
+
+func (f *fakeNewBackupsAPI) AdminOperation(_ context.Context, session, id string) (api.PersistentOperationResponse, error) {
+	if session != "session-token" {
+		return api.PersistentOperationResponse{}, api.ErrUnauthorized
+	}
+	if f.restoreOperation == nil || f.restoreOperation.OperationID != id {
+		return api.PersistentOperationResponse{}, &api.ResponseError{StatusCode: http.StatusNotFound, Message: "operation not found"}
+	}
+	copy := *f.restoreOperation
+	return api.PersistentOperationResponse{Operation: &copy}, nil
 }
 
 func TestNewBackupsPageListsExistingBackups(t *testing.T) {
@@ -461,6 +514,155 @@ func TestNewBackupsDestinationApplyPassesPasswordOnlyAtApply(t *testing.T) {
 	}
 	if client.destinationApplyCalls != 1 || client.appliedDestination.Password != "secret-at-apply" {
 		t.Fatalf("destination apply request=%#v calls=%d", client.appliedDestination, client.destinationApplyCalls)
+	}
+}
+
+func TestNewBackupsPageOffersRestoreForSingleSelection(t *testing.T) {
+	client := &fakeNewBackupsAPI{backups: api.AdminRestoreBackupsResponse{Backups: []api.AdminRestoreBackup{{
+		ID: "minecraft-2026-09-22-120000.tar.gz", CreatedAt: "2026-09-22T16:00:00Z", SizeBytes: 1024, MetadataStatus: "missing",
+	}}}}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-backups", ""))
+	if page.Code != http.StatusOK {
+		t.Fatalf("new backups Restore page returned %d: %s", page.Code, page.Body.String())
+	}
+	for _, want := range []string{
+		"Restore selected", "Choose Restore scope", "Restore world", "Restore full Minecraft data",
+		"action=\"/settings/new-backups/restore/plan\"", "Nothing changes during Review",
+	} {
+		if !strings.Contains(page.Body.String(), want) {
+			t.Fatalf("New Backups Restore UI missing %q: %s", want, page.Body.String())
+		}
+	}
+}
+
+func TestNewBackupsRestorePlanShowsAuthoritativeReview(t *testing.T) {
+	client := &fakeNewBackupsAPI{restorePlanResult: restorePlan(true)}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := "csrf=csrf-token&backup_id=minecraft-2026-09-20-043000.tar.gz&mode=world"
+	page := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/settings/new-backups/restore/plan", body))
+	if page.Code != http.StatusOK {
+		t.Fatalf("New Backups Restore plan returned %d: %s", page.Code, page.Body.String())
+	}
+	if client.restorePlanCalls != 1 || client.restoreApplyCalls != 0 {
+		t.Fatalf("Restore plan calls=%d apply calls=%d", client.restorePlanCalls, client.restoreApplyCalls)
+	}
+	for _, want := range []string{
+		"Restore review", "Restore world", "This backup is older than the configured Minecraft version.",
+		"PlayerOne", "Type RESTORE to continue", "name=\"players_confirmed\"", "Safety checks remain Agent-owned.",
+		"action=\"/settings/new-backups/restore/apply\"",
+	} {
+		if !strings.Contains(page.Body.String(), want) {
+			t.Fatalf("New Backups Restore review missing %q: %s", want, page.Body.String())
+		}
+	}
+}
+
+func TestNewBackupsRestoreApplyRejectsStalePlanAndWrongConfirmation(t *testing.T) {
+	t.Run("stale plan", func(t *testing.T) {
+		client := &fakeNewBackupsAPI{restorePlanResult: restorePlan(false)}
+		app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := "csrf=csrf-token&backup_id=minecraft-2026-09-20-043000.tar.gz&mode=world&plan_fingerprint=sha256%3Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&confirmation=RESTORE"
+		page := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/settings/new-backups/restore/apply", body))
+		if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "changed since it was reviewed") {
+			t.Fatalf("stale Restore response=%d: %s", page.Code, page.Body.String())
+		}
+		if client.restoreApplyCalls != 0 {
+			t.Fatal("stale Restore reached Apply API")
+		}
+	})
+
+	t.Run("wrong confirmation", func(t *testing.T) {
+		client := &fakeNewBackupsAPI{restorePlanResult: restorePlan(false)}
+		app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := "csrf=csrf-token&backup_id=minecraft-2026-09-20-043000.tar.gz&mode=world&plan_fingerprint=" + restorePageFingerprint + "&confirmation=restore"
+		page := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/settings/new-backups/restore/apply", body))
+		if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Type RESTORE exactly") {
+			t.Fatalf("wrong Restore confirmation response=%d: %s", page.Code, page.Body.String())
+		}
+		if client.restoreApplyCalls != 0 {
+			t.Fatal("wrong Restore confirmation reached Apply API")
+		}
+	})
+}
+
+func TestNewBackupsRestoreApplyStartsAndShowsPersistentOperation(t *testing.T) {
+	operation := &api.PersistentOperation{
+		SchemaVersion: "v1", OperationID: restorePageOperationID, OperationType: "restore",
+		PlanFingerprint: restorePageFingerprint, State: "queued", Stage: "queued", Status: "Restore operation queued.",
+		StartedAt: "2026-09-22T12:00:00Z", UpdatedAt: "2026-09-22T12:00:00Z",
+		Rollback: api.PersistentOperationRollback{State: "not_started"},
+	}
+	client := &fakeNewBackupsAPI{
+		restorePlanResult:  restorePlan(true),
+		restoreApplyResult: api.AdminRestoreApplyResponse{OK: true, Created: true, Operation: operation},
+		restoreOperation:   operation,
+	}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := "csrf=csrf-token&backup_id=minecraft-2026-09-20-043000.tar.gz&mode=world&plan_fingerprint=" + restorePageFingerprint + "&confirmation=RESTORE&players_confirmed=yes"
+	page := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/settings/new-backups/restore/apply", body))
+	if page.Code != http.StatusSeeOther {
+		t.Fatalf("New Backups Restore apply returned %d: %s", page.Code, page.Body.String())
+	}
+	wantLocation := "/settings/new-backups?result=restore&restore_operation=" + restorePageOperationID
+	if page.Header().Get("Location") != wantLocation {
+		t.Fatalf("Restore redirect=%q want %q", page.Header().Get("Location"), wantLocation)
+	}
+	if client.restoreApplyCalls != 1 || !client.restoreApplyRequest.DestructiveConfirmed || !client.restoreApplyRequest.PlayersConfirmed {
+		t.Fatalf("unexpected Restore apply request: %#v calls=%d", client.restoreApplyRequest, client.restoreApplyCalls)
+	}
+
+	progress := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example"+wantLocation, ""))
+	if progress.Code != http.StatusOK {
+		t.Fatalf("New Backups Restore progress returned %d: %s", progress.Code, progress.Body.String())
+	}
+	for _, want := range []string{"Restore progress", "Queued", "Waiting to start", "/api/restore/progress/" + restorePageOperationID} {
+		if !strings.Contains(progress.Body.String(), want) {
+			t.Fatalf("New Backups Restore progress missing %q: %s", want, progress.Body.String())
+		}
+	}
+}
+
+func TestNewBackupsReconnectsToCurrentRestoreOperation(t *testing.T) {
+	operation := &api.PersistentOperation{
+		SchemaVersion: "v1", OperationID: restorePageOperationID, OperationType: "restore",
+		PlanFingerprint: restorePageFingerprint, State: "running", Stage: "staging",
+		Status: "Preparing verified Restore data on the Minecraft data filesystem.",
+		StartedAt: "2026-09-22T12:00:00Z", UpdatedAt: "2026-09-22T12:01:00Z",
+		Rollback: api.PersistentOperationRollback{State: "not_started"},
+	}
+	client := &fakeNewBackupsAPI{currentRestoreOperation: operation}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-backups", ""))
+	if page.Code != http.StatusOK {
+		t.Fatalf("New Backups current Restore returned %d: %s", page.Code, page.Body.String())
+	}
+	for _, want := range []string{"Restore progress", "Restoring", "Preparing Restore data", "data-restore-busy=\"1\""} {
+		if !strings.Contains(page.Body.String(), want) {
+			t.Fatalf("current Restore panel missing %q: %s", want, page.Body.String())
+		}
 	}
 }
 
