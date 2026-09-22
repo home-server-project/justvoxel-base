@@ -56,3 +56,47 @@ button.storage-partition-card:hover,button.storage-partition-card:focus-visible{
   .storage-detail-heading{border-color:#e2e7ea}
   .storage-dialog-close{background:#f1f4f6;border-color:#cbd4da;color:#1a2025}
 }
+
+
+.storage-detail-actions{display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin-top:.75rem;padding-top:.7rem;border-top:1px solid #2b333b}
+.storage-action-menu{position:relative}
+.storage-action-menu>summary{display:grid;place-items:center;width:38px;height:34px;border:1px solid #3a454e;border-radius:9px;background:#222a31;color:#eef1f4;cursor:pointer;list-style:none;font-size:1.25rem;font-weight:800;line-height:1}
+.storage-action-menu>summary::-webkit-details-marker{display:none}
+.storage-action-menu[open]>summary,.storage-action-menu>summary:hover,.storage-action-menu>summary:focus-visible{background:#313c46;border-color:#5c6b76}
+.storage-action-menu-popover{position:absolute;right:0;bottom:calc(100% + .45rem);z-index:10;display:grid;min-width:180px;padding:.4rem;border:1px solid #3a454e;border-radius:10px;background:#171d22;box-shadow:0 14px 36px #0008}
+.storage-action-menu-popover button{width:100%;padding:.58rem .65rem;border:0;border-radius:7px;background:transparent;color:#eef1f4;text-align:left;font-size:.82rem;font-weight:650}
+.storage-action-menu-popover button:hover,.storage-action-menu-popover button:focus-visible{background:#273039}
+.storage-action-menu-popover .storage-action-danger{color:#ffb29a}
+.storage-action-menu-popover .storage-action-danger:hover,.storage-action-menu-popover .storage-action-danger:focus-visible{background:#3a2420}
+.storage-protected-note{margin:.75rem 0 0;font-size:.8rem}
+
+.storage-action-dialog{width:min(540px,calc(100% - 1.4rem));max-height:min(86vh,760px);padding:0;border:1px solid #3b454e;border-radius:16px;background:#171d22;color:#eef1f4;box-shadow:0 30px 90px #000c}
+.storage-action-dialog::backdrop{background:#050708b8;backdrop-filter:blur(4px)}
+.storage-action-card{padding:1rem}
+.storage-action-card>p{line-height:1.45}
+.storage-action-mount-field{margin:.8rem 0}
+.storage-action-review{margin-top:.8rem;padding:.8rem;border:1px solid #303942;border-radius:10px;background:#10161a}
+.storage-action-review dl div{padding:.42rem 0}
+.storage-action-warnings{display:grid;gap:.45rem;margin-top:.7rem}
+.storage-action-warnings .notice{margin:0;font-size:.8rem}
+.storage-action-review label{margin:.75rem 0 0}
+.storage-action-review label code{display:inline-block;margin-left:.25rem;color:#ffbd9f}
+.storage-action-error{margin:.75rem 0 0;padding:.65rem .75rem;border:1px solid #a64c4c;border-radius:8px;background:#5b282833;color:#ffc1b8;font-size:.8rem}
+.storage-action-buttons{justify-content:flex-end}
+.storage-action-buttons button{min-width:105px}
+
+@media(max-width:520px){
+  .storage-action-menu-popover{position:fixed;left:.75rem;right:.75rem;bottom:1rem;min-width:0}
+  .storage-action-dialog{width:calc(100% - .8rem)}
+}
+@media(prefers-color-scheme:light){
+  .storage-detail-actions{border-color:#e2e7ea}
+  .storage-action-menu>summary{background:#f1f4f6;border-color:#cbd4da;color:#1a2025}
+  .storage-action-menu[open]>summary,.storage-action-menu>summary:hover,.storage-action-menu>summary:focus-visible{background:#e5eaed;border-color:#aab8c1}
+  .storage-action-menu-popover,.storage-action-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025;box-shadow:0 14px 36px #0003}
+  .storage-action-menu-popover button{color:#34414a}
+  .storage-action-menu-popover button:hover,.storage-action-menu-popover button:focus-visible{background:#eef2f4}
+  .storage-action-menu-popover .storage-action-danger{color:#a0442f}
+  .storage-action-menu-popover .storage-action-danger:hover,.storage-action-menu-popover .storage-action-danger:focus-visible{background:#fff0eb}
+  .storage-action-review{background:#f6f8f9;border-color:#d9dfe3}
+}
