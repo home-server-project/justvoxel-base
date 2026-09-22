@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/app.js" defer></script>
 </head>
-<body class="role-pending">
+<body class="role-{{.Identity.Role}}">
 {{template "app-header" .}}
 <main class="about-shell">
   <div class="title-row">
