@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
@@ -78,8 +79,18 @@ func (a *App) newBackupsPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	message := ""
-	if r.URL.Query().Get("result") == "backup" {
+	switch r.URL.Query().Get("result") {
+	case "backup":
 		message = "Backup started. It will appear in the library when the backup service finishes."
+	case "deleted":
+		count, _ := strconv.Atoi(r.URL.Query().Get("count"))
+		if count == 1 {
+			message = "1 backup deleted."
+		} else if count > 1 {
+			message = strconv.Itoa(count) + " backups deleted."
+		} else {
+			message = "Selected backups deleted."
+		}
 	}
 	a.renderNewBackupsPage(w, r, session, client, identity, message, "")
 }
