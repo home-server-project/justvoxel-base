@@ -94,7 +94,6 @@ func writeStorageBrowserActionJSON(w http.ResponseWriter, status int, result api
 	_ = json.NewEncoder(w).Encode(result)
 }
 
-
 func (a *App) storageBrowserMountStatus(w http.ResponseWriter, r *http.Request) {
 	session, _, _, ok := a.adminDiscoveryRequest(w, r)
 	if !ok {
