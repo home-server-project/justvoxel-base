@@ -21,14 +21,37 @@
         <span class="control-section-label">Session &amp; power</span>
         <div class="control-quick-actions">
           <div class="control-power-actions nav-admin-only" data-system-power>
-            <button class="control-icon-button" type="button" data-system-action="reboot" aria-label="Reboot" title="Reboot" disabled><span aria-hidden="true">↻</span></button>
-            <button class="control-icon-button" type="button" data-system-action="firmware-reboot" aria-label="Reboot to UEFI/BIOS" title="Reboot to UEFI/BIOS" hidden disabled><span aria-hidden="true">⟳</span></button>
-            <button class="control-icon-button system-power-danger" type="button" data-system-action="poweroff" aria-label="Power off" title="Power off" disabled><span aria-hidden="true">⏻</span></button>
+            <button class="control-icon-button" type="button" data-system-action="reboot" aria-label="Reboot" data-tooltip="Reboot" disabled>
+              <svg class="control-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M20 11a8 8 0 1 1-2.34-5.66L20 7"></path>
+                <path d="M20 3v4h-4"></path>
+              </svg>
+            </button>
+            <button class="control-icon-button" type="button" data-system-action="firmware-reboot" aria-label="Reboot to UEFI/BIOS" data-tooltip="Reboot to UEFI/BIOS" hidden disabled>
+              <svg class="control-action-icon control-action-icon-firmware" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 8a8 8 0 0 1 13-3"></path>
+                <path d="M18 2v4h-4"></path>
+                <rect x="8" y="9" width="8" height="8" rx="1"></rect>
+                <path d="M10 6v3M14 6v3M10 17v3M14 17v3M5 11h3M5 15h3M16 11h3M16 15h3"></path>
+              </svg>
+            </button>
+            <button class="control-icon-button system-power-danger" type="button" data-system-action="poweroff" aria-label="Power off" data-tooltip="Power off" disabled>
+              <svg class="control-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 3v9"></path>
+                <path d="M7.05 5.75a8 8 0 1 0 9.9 0"></path>
+              </svg>
+            </button>
             <p class="system-power-error" data-system-action-error hidden>System power controls are unavailable.</p>
           </div>
           <form class="nav-logout" method="post" action="/logout">
             <input type="hidden" name="csrf" value="{{.CSRF}}">
-            <button class="secondary control-icon-button" type="submit" aria-label="Log out" title="Log out"><span aria-hidden="true">🚪</span></button>
+            <button class="secondary control-icon-button" type="submit" aria-label="Log out" data-tooltip="Log out">
+              <svg class="control-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M10 4H5v16h5"></path>
+                <path d="M14 8l4 4-4 4"></path>
+                <path d="M18 12H8"></path>
+              </svg>
+            </button>
           </form>
         </div>
       </section>
