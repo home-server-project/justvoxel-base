@@ -18,6 +18,10 @@ type newBackupsAPI interface {
 	AdminConfiguration(ctx context.Context, session string) (api.AdminConfigurationDiscovery, error)
 	AdminConfigurationPlan(ctx context.Context, session string, request api.AdminConfigurationChangeRequest) (api.AdminConfigurationChangeResponse, error)
 	AdminConfigurationApply(ctx context.Context, session string, request api.AdminConfigurationChangeRequest) (api.AdminConfigurationChangeResponse, error)
+	AdminStorage(ctx context.Context, session string) (api.AdminStorageDiscovery, error)
+	AdminBackupStorageStatus(ctx context.Context, session string) (api.AdminBackupStorageResponse, error)
+	AdminBackupStoragePlan(ctx context.Context, session string, request api.AdminBackupStorageRequest) (api.AdminBackupStorageResponse, error)
+	AdminBackupStorageApply(ctx context.Context, session string, request api.AdminBackupStorageRequest) (api.AdminBackupStorageResponse, error)
 }
 
 type newBackupAutomaticForm struct {
@@ -48,9 +52,17 @@ type newBackupsPageData struct {
 	TotalSize     string
 	Message       string
 	Error         string
-	Automatic     newBackupAutomaticForm
-	AutomaticPlan *api.AdminConfigurationChangeResponse
-	Timezone      string
+	Automatic                    newBackupAutomaticForm
+	AutomaticPlan                *api.AdminConfigurationChangeResponse
+	Timezone                     string
+	Destination                  api.AdminBackupStorageResponse
+	DestinationForm              api.AdminBackupStorageRequest
+	DestinationPlan              *api.AdminBackupStorageResponse
+	DestinationPartitions        []backupPartitionView
+	DestinationAvailable         string
+	DestinationFilesystemSize    string
+	ProposedDestinationAvailable string
+	ProposedDestinationSize      string
 }
 
 func (a *App) registerNewBackupsPages(mux *http.ServeMux) {
@@ -58,6 +70,8 @@ func (a *App) registerNewBackupsPages(mux *http.ServeMux) {
 	mux.HandleFunc("POST /settings/new-backups/backup", a.newBackupsNow)
 	mux.HandleFunc("POST /settings/new-backups/automatic/plan", a.newBackupsAutomaticPlan)
 	mux.HandleFunc("POST /settings/new-backups/automatic/apply", a.newBackupsAutomaticApply)
+	mux.HandleFunc("POST /settings/new-backups/destination/plan", a.newBackupsDestinationPlan)
+	mux.HandleFunc("POST /settings/new-backups/destination/apply", a.newBackupsDestinationApply)
 	a.registerNewBackupsDeleteRoutes(mux)
 }
 
@@ -108,6 +122,8 @@ func (a *App) newBackupsPage(w http.ResponseWriter, r *http.Request) {
 		}
 	case "automatic":
 		message = "Automatic backup settings saved."
+	case "destination":
+		message = "Backup destination updated. New manual and automatic backups will use it."
 	}
 	a.renderNewBackupsPage(w, r, session, client, identity, message, "")
 }
@@ -197,6 +213,46 @@ func (a *App) newBackupsAutomaticApply(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/settings/new-backups?result=automatic", http.StatusSeeOther)
 }
 
+func (a *App) newBackupsDestinationPlan(w http.ResponseWriter, r *http.Request) {
+	session, client, identity, ok := a.newBackupsRequest(w, r, true)
+	if !ok {
+		return
+	}
+	request, err := parseBackupStorageForm(r, false)
+	if err != nil {
+		a.renderNewBackupsPageWithDestination(w, r, session, client, identity, "", err.Error(), &request, nil)
+		return
+	}
+	plan, err := client.AdminBackupStoragePlan(r.Context(), session, request)
+	if err != nil {
+		a.renderNewBackupsPageWithDestination(w, r, session, client, identity, "", apiMessage(err, "Could not validate this backup destination."), &request, nil)
+		return
+	}
+	a.renderNewBackupsPageWithDestination(w, r, session, client, identity, "", "", &request, &plan)
+}
+
+func (a *App) newBackupsDestinationApply(w http.ResponseWriter, r *http.Request) {
+	session, client, identity, ok := a.newBackupsRequest(w, r, true)
+	if !ok {
+		return
+	}
+	request, err := parseBackupStorageForm(r, true)
+	if err != nil {
+		a.renderNewBackupsPageWithDestination(w, r, session, client, identity, "", err.Error(), &request, nil)
+		return
+	}
+	result, err := client.AdminBackupStorageApply(r.Context(), session, request)
+	if err != nil {
+		a.renderNewBackupsPageWithDestination(w, r, session, client, identity, "", apiMessage(err, "Could not apply this backup destination."), &request, nil)
+		return
+	}
+	if !result.Applied {
+		a.renderNewBackupsPageWithDestination(w, r, session, client, identity, "", "Backup destination was not applied.", &request, &result)
+		return
+	}
+	http.Redirect(w, r, "/settings/new-backups?result=destination", http.StatusSeeOther)
+}
+
 func parseNewBackupsAutomaticForm(r *http.Request) (newBackupAutomaticForm, error) {
 	var form newBackupAutomaticForm
 	if err := r.ParseForm(); err != nil {
@@ -248,10 +304,18 @@ func newBackupsPlanIsBackupOnly(plan api.AdminConfigurationChangeResponse) bool 
 }
 
 func (a *App) renderNewBackupsPage(w http.ResponseWriter, r *http.Request, session string, client newBackupsAPI, identity api.SessionInfo, message, pageError string) {
-	a.renderNewBackupsPageWithAutomatic(w, r, session, client, identity, message, pageError, nil, nil)
+	a.renderNewBackupsPageState(w, r, session, client, identity, message, pageError, nil, nil, nil, nil)
 }
 
 func (a *App) renderNewBackupsPageWithAutomatic(w http.ResponseWriter, r *http.Request, session string, client newBackupsAPI, identity api.SessionInfo, message, pageError string, automaticOverride *newBackupAutomaticForm, plan *api.AdminConfigurationChangeResponse) {
+	a.renderNewBackupsPageState(w, r, session, client, identity, message, pageError, automaticOverride, plan, nil, nil)
+}
+
+func (a *App) renderNewBackupsPageWithDestination(w http.ResponseWriter, r *http.Request, session string, client newBackupsAPI, identity api.SessionInfo, message, pageError string, destinationOverride *api.AdminBackupStorageRequest, plan *api.AdminBackupStorageResponse) {
+	a.renderNewBackupsPageState(w, r, session, client, identity, message, pageError, nil, nil, destinationOverride, plan)
+}
+
+func (a *App) renderNewBackupsPageState(w http.ResponseWriter, r *http.Request, session string, client newBackupsAPI, identity api.SessionInfo, message, pageError string, automaticOverride *newBackupAutomaticForm, automaticPlan *api.AdminConfigurationChangeResponse, destinationOverride *api.AdminBackupStorageRequest, destinationPlan *api.AdminBackupStorageResponse) {
 	backups, err := client.AdminRestoreBackups(r.Context(), session)
 	if err != nil {
 		a.handleNewBackupsError(w, r, err)
@@ -273,6 +337,27 @@ func (a *App) renderNewBackupsPageWithAutomatic(w http.ResponseWriter, r *http.R
 	}
 	if automaticOverride != nil {
 		automatic = *automaticOverride
+	}
+
+	destination := api.AdminBackupStorageResponse{}
+	destinationForm := api.AdminBackupStorageRequest{}
+	partitions := []backupPartitionView{}
+	if configuration.Configured {
+		storage, err := client.AdminStorage(r.Context(), session)
+		if err != nil {
+			a.handleNewBackupsError(w, r, err)
+			return
+		}
+		destination, err = client.AdminBackupStorageStatus(r.Context(), session)
+		if err != nil {
+			a.handleNewBackupsError(w, r, err)
+			return
+		}
+		destinationForm = backupStorageFormFromCurrent(destination.Current)
+		partitions = safeBackupPartitions(storage)
+	}
+	if destinationOverride != nil {
+		destinationForm = *destinationOverride
 	}
 
 	views := make([]newBackupView, 0, len(backups.Backups))
@@ -300,7 +385,15 @@ func (a *App) renderNewBackupsPageWithAutomatic(w http.ResponseWriter, r *http.R
 		Title: "New Backups", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
 		CSRF: csrfFromRequest(r), Identity: identity, Backups: views,
 		BackupCount: len(views), TotalSize: humanBytes(totalBytes), Message: message, Error: pageError,
-		Automatic: automatic, AutomaticPlan: plan, Timezone: configuration.Minecraft.Timezone,
+		Automatic: automatic, AutomaticPlan: automaticPlan, Timezone: configuration.Minecraft.Timezone,
+		Destination: destination, DestinationForm: destinationForm, DestinationPlan: destinationPlan,
+		DestinationPartitions: partitions,
+		DestinationAvailable: formatOptionalBytes(destination.Current.AvailableBytes),
+		DestinationFilesystemSize: formatOptionalBytes(destination.Current.FilesystemBytes),
+	}
+	if destinationPlan != nil {
+		data.ProposedDestinationAvailable = formatOptionalBytes(destinationPlan.Proposed.AvailableBytes)
+		data.ProposedDestinationSize = formatOptionalBytes(destinationPlan.Proposed.FilesystemBytes)
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
