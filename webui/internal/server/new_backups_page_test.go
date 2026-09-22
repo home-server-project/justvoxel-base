@@ -209,3 +209,36 @@ func TestNewBackupsBackupNowRejectsBadCSRF(t *testing.T) {
 		t.Fatalf("manual backup API ran after CSRF rejection: %d", client.backupCalls)
 	}
 }
+
+func TestNewBackupsPageShowsAutomaticPolicy(t *testing.T) {
+	client := &fakeNewBackupsAPI{}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-backups", ""))
+	if page.Code != http.StatusOK {
+		t.Fatalf("new backups page returned %d: %s", page.Code, page.Body.String())
+	}
+	body := page.Body.String()
+	for _, want := range []string{"Schedule &amp; retention", "Enable automatic backups", "value=\"04:30\"", "value=\"7\"", "UTC"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("automatic backup panel missing %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "*-*-* 04:30:00") {
+		t.Fatal("New Backups exposed the raw systemd calendar string")
+	}
+}
+
+func TestBackupDailyTimeFromSchedule(t *testing.T) {
+	if got, ok := backupDailyTimeFromSchedule("*-*-* 04:30:00"); !ok || got != "04:30" {
+		t.Fatalf("daily schedule parsed as %q, %v", got, ok)
+	}
+	for _, schedule := range []string{"hourly", "*-*-* 04:30:15", "Mon *-*-* 04:30:00"} {
+		if got, ok := backupDailyTimeFromSchedule(schedule); ok || got != "" {
+			t.Fatalf("unsupported schedule %q parsed as %q, %v", schedule, got, ok)
+		}
+	}
+}
