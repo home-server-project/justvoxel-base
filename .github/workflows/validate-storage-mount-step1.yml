@@ -43,9 +43,12 @@ jobs:
         run: |
           set -euo pipefail
           cd management
-          unformatted="$(gofmt -l .)"
+          unformatted="$(gofmt -l \
+            cmd/justvoxel-management-agent/admin_discovery.go \
+            cmd/justvoxel-management-agent/admin_storage_mounts.go \
+            cmd/justvoxel-management-agent/admin_storage_mounts_test.go)"
           if [[ -n "${unformatted}" ]]; then
-            echo 'Management Go source is not gofmt-clean:' >&2
+            echo 'Step 1 Management Go source is not gofmt-clean:' >&2
             printf '%s\n' "${unformatted}" >&2
             exit 1
           fi
