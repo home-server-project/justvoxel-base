@@ -5,21 +5,19 @@ import (
 	"testing"
 )
 
-func TestGroupedHeaderNavigationUX(t *testing.T) {
+func TestControlCenterNavigationUX(t *testing.T) {
 	header, err := assets.ReadFile("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
 	markup := string(header)
 	for _, want := range []string{
-		`class="brand-link" href="/"`,
+		`class="brand-link brand-mark" href="/"`,
 		`aria-label="JustVoxel dashboard"`,
-		`data-nav-group="server"`,
-		`>Server</summary>`,
-		`data-nav-group="storage"`,
-		`>Storage &amp; Backups</summary>`,
-		`data-nav-group="administration"`,
-		`>Administration</summary>`,
+		`data-topbar-clock`,
+		`data-control-center`,
+		`>Control Center</span>`,
+		`data-system-power`,
 		`href="/activity"`,
 		`href="/settings/server"`,
 		`href="/operations#whitelist"`,
@@ -38,7 +36,7 @@ func TestGroupedHeaderNavigationUX(t *testing.T) {
 		`class="nav-logout"`,
 	} {
 		if !strings.Contains(markup, want) {
-			t.Fatalf("grouped header missing %q", want)
+			t.Fatalf("Control Center header missing %q", want)
 		}
 	}
 
@@ -48,16 +46,17 @@ func TestGroupedHeaderNavigationUX(t *testing.T) {
 	}
 	styles := string(css)
 	for _, want := range []string{
-		`.nav-group`,
-		`.nav-trigger:hover`,
-		`.nav-menu`,
+		`.topbar`,
+		`.control-center-panel`,
+		`.control-tile-grid`,
 		`.nav-admin-only,.nav-operator-plus{display:none!important}`,
 		`body.role-administrator .nav-admin-only`,
 		`body.role-operator .nav-operator-plus`,
+		`position:fixed;top:50px`,
 		`:focus-visible`,
 	} {
 		if !strings.Contains(styles, want) {
-			t.Fatalf("grouped navigation styling missing %q", want)
+			t.Fatalf("Control Center styling missing %q", want)
 		}
 	}
 
@@ -67,13 +66,14 @@ func TestGroupedHeaderNavigationUX(t *testing.T) {
 	}
 	behavior := string(script)
 	for _, want := range []string{
-		`document.querySelectorAll(".nav-group")`,
-		`other.open = false`,
+		`document.querySelector("[data-control-center]")`,
+		`document.querySelector("[data-topbar-clock]")`,
+		`Intl.DateTimeFormat`,
+		`controlCenter.open = false`,
 		`event.key !== "Escape"`,
-		`data-nav-group`,
 	} {
 		if !strings.Contains(behavior, want) {
-			t.Fatalf("grouped navigation behavior missing %q", want)
+			t.Fatalf("Control Center behavior missing %q", want)
 		}
 	}
 }
@@ -115,7 +115,7 @@ func TestAuthenticatedTemplatesUseSharedHeader(t *testing.T) {
 			t.Fatalf("%s does not use shared appliance header", name)
 		}
 		if !strings.Contains(markup, `/static/app.js`) {
-			t.Fatalf("%s does not load grouped navigation behavior", name)
+			t.Fatalf("%s does not load shared navigation behavior", name)
 		}
 	}
 }
