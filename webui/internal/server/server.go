@@ -114,6 +114,7 @@ func (a *App) Handler() http.Handler {
 	a.registerAdminDiscoveryPages(mux)
 	a.registerAdminValidationPages(mux)
 	a.registerAdminRestorePages(mux)
+	a.registerNewBackupsPages(mux)
 	a.registerAdminDataMigrationPages(mux)
 	a.registerAdminServerMigrationPages(mux)
 	a.registerAdminSystemActionPages(mux)
