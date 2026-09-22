@@ -70,6 +70,16 @@ type dashboardSnapshot struct {
 	Players api.Players `json:"players"`
 }
 
+type aboutPageData struct {
+	Title         string
+	Version       string
+	Commit        string
+	ManagementAPI string
+	CSRF          string
+	Identity      api.SessionInfo
+	Status        api.Status
+}
+
 func New(client API, cfg Config) (*App, error) {
 	if cfg.ExternalScheme == "" {
 		cfg.ExternalScheme = "http"
@@ -237,26 +247,22 @@ func (a *App) passwordChange(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) aboutPage(w http.ResponseWriter, r *http.Request) {
-	if mustChange(r) {
-		http.Redirect(w, r, "/password", http.StatusSeeOther)
-		return
-	}
-	session, ok := sessionFromRequest(r)
+	session, _, identity, ok := a.rolePageRequest(w, r)
 	if !ok {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
 	status, err := a.api.Status(r.Context(), session)
 	if err != nil {
-		a.handleDashboardError(w, r, err)
+		a.handleRolePageError(w, r, err)
 		return
 	}
-	a.render(w, "about.html", pageData{
+	a.renderAbout(w, aboutPageData{
 		Title:         "About",
 		Version:       a.config.Version,
 		Commit:        a.config.Commit,
 		ManagementAPI: a.config.ManagementAPI,
 		CSRF:          csrfFromRequest(r),
+		Identity:      identity,
 		Status:        status,
 	})
 }
@@ -463,6 +469,14 @@ func actionProgress(action string) string {
 		return "Restarting…"
 	default:
 		return "Working…"
+	}
+}
+
+func (a *App) renderAbout(w http.ResponseWriter, data aboutPageData) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := a.templates.ExecuteTemplate(w, "about.html", data); err != nil {
+		http.Error(w, "render error", http.StatusInternalServerError)
 	}
 }
 
