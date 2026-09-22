@@ -1,0 +1,60 @@
+name: Step 1 storage mount validation
+
+on:
+  pull_request:
+    branches: [testing]
+    paths:
+      - '.github/workflows/validate-storage-mount-step1.yml'
+
+jobs:
+  source:
+    name: Focused source validation
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout validation branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Go
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6
+        with:
+          go-version: '1.25.x'
+          check-latest: true
+          cache: false
+
+      - name: Install management source-test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libpam0g-dev libpwquality-dev
+
+      - name: Validate storage mount source
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tests/test-storage-mount-persistence-safety-source.sh
+          bash tests/test-storage-action-safety-source.sh
+          bash tests/test-webui-storage-provision-safety.sh
+
+      - name: Validate management agent
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd management
+          unformatted="$(gofmt -l .)"
+          if [[ -n "${unformatted}" ]]; then
+            echo 'Management Go source is not gofmt-clean:' >&2
+            printf '%s\n' "${unformatted}" >&2
+            exit 1
+          fi
+          go mod download
+          CGO_ENABLED=1 go vet ./...
+          CGO_ENABLED=1 go test ./...
+
+      - name: Validate WebUI source regression surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tests/test-webui-source.sh "$(git rev-parse HEAD)"
