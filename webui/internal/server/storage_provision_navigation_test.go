@@ -19,7 +19,7 @@ func TestAdvancedStorageNavigation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	markup := string(page)
+	markup = string(page)
 	for _, want := range []string{`{{template "app-header" .}}`, `/static/app.js`, `/static/storage-provision.js`} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("advanced storage page missing shared navigation element %q", want)
