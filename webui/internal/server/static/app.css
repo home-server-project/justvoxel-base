@@ -68,3 +68,106 @@ body.role-administrator .control-power-actions.nav-admin-only{display:flex!impor
   .control-tile:hover,.control-tile:focus-visible{background:#eef6f1;border-color:#9fc9ae;color:#1f5c3b}
   .control-power-actions .system-power-danger{background:#fff0eb;border-color:#e0b2a5;color:#8b3f29}
 }
+
+
+/* UX polish: dense dashboard, unframed JV home mark, clearer Control Center. */
+.brand-mark,
+.brand-mark:hover,
+.brand-mark:focus-visible,
+.brand-mark[aria-current="page"]{
+  margin:0;
+  padding:.2rem .25rem;
+  min-height:38px;
+  border:0;
+  border-radius:0;
+  background:transparent;
+  box-shadow:none;
+  transform:none;
+}
+.brand-mark strong{
+  min-width:0;
+  height:auto;
+  border:0;
+  border-radius:0;
+  background:transparent;
+  color:#b9ebca;
+  font-size:1rem;
+  letter-spacing:.05em;
+}
+.control-center-icon{font-size:1.4rem;line-height:1}
+.control-center-trigger{min-height:40px;padding:.38rem .72rem}
+.control-icon-button{
+  display:grid;
+  place-items:center;
+  width:42px;
+  height:42px;
+  min-height:42px!important;
+  padding:0!important;
+  border-radius:10px;
+  font-size:1.35rem!important;
+  line-height:1;
+}
+.control-session .nav-logout{margin-left:auto}
+.control-tile{
+  display:flex!important;
+  align-items:center;
+  min-height:42px;
+  padding:.58rem .7rem;
+}
+.control-tile strong{font-size:.88rem;line-height:1.2}
+.control-tile span{display:none!important}
+
+#dashboard{padding-top:.9rem}
+#dashboard .title-row h1{margin-bottom:.65rem}
+.dashboard-summary{
+  grid-template-columns:repeat(5,minmax(0,1fr));
+  gap:.7rem;
+}
+.dashboard-summary .card{
+  min-width:0;
+  padding:.8rem .9rem;
+  box-shadow:none;
+}
+.dashboard-summary .card span{margin-bottom:.25rem;font-size:.78rem}
+.dashboard-summary .card strong{
+  display:block;
+  min-width:0;
+  font-size:1.12rem;
+  line-height:1.25;
+  overflow-wrap:anywhere;
+}
+.dashboard-live-panels{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:.7rem;
+  margin-top:.7rem;
+}
+.dashboard-live-panels .control-panel,
+.dashboard-live-panels .players-panel{
+  min-width:0;
+  margin-top:0;
+  padding:1rem;
+}
+.dashboard-live-panels .action-row{margin-top:.7rem}
+#dashboard .disclaimer{margin-top:.8rem}
+
+@media(max-width:900px){
+  .dashboard-summary{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .dashboard-live-panels{grid-template-columns:1fr}
+}
+@media(max-width:600px){
+  #dashboard{padding-top:.7rem}
+  .dashboard-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .dashboard-live-panels{grid-template-columns:1fr}
+  .control-center-icon{font-size:1.5rem}
+}
+@media(max-width:380px){
+  .dashboard-summary{grid-template-columns:1fr}
+}
+@media(prefers-color-scheme:light){
+  .brand-mark,
+  .brand-mark:hover,
+  .brand-mark:focus-visible,
+  .brand-mark[aria-current="page"]{background:transparent;box-shadow:none}
+  .brand-mark strong{background:transparent;border:0;color:#245b3a}
+}
