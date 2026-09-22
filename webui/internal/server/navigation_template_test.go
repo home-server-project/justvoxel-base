@@ -333,16 +333,20 @@ func TestNewBackupsCompactLibraryLayout(t *testing.T) {
 	markup := string(templateContent)
 	for _, want := range []string{
 		"Backup Now",
+		"Restore selected",
 		"backup-command-bar",
 		"backup-file-grid",
 		"backup-file-card",
 		"/settings/new-backups/backup",
+		"/settings/new-backups/restore/plan",
+		"/settings/new-backups/restore/apply",
+		"/static/restore-operation.js",
 	} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("New Backups template missing %q", want)
 		}
 	}
-	for _, forbidden := range []string{"/settings/new-backups/restore", `name="backup_schedule"`, `name="backup_destination"`} {
+	for _, forbidden := range []string{`name="backup_schedule"`, `name="backup_destination"`} {
 		if strings.Contains(markup, forbidden) {
 			t.Fatalf("New Backups unexpectedly exposes unimplemented control %q", forbidden)
 		}
