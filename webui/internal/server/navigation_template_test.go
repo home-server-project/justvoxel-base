@@ -277,8 +277,12 @@ func TestStorageBrowserReviewedActionFlow(t *testing.T) {
 	markup := string(templateContent)
 	for _, want := range []string{
 		`data-storage-action-menu`,
-		`data-storage-action="mount"`,
-		`data-storage-action="unmount"`,
+		`data-storage-action="mount-for-now"`,
+		`data-storage-action="mount-permanently"`,
+		`data-storage-action="make-permanent"`,
+		`data-storage-action="mount-now"`,
+		`data-storage-action="unmount-for-now"`,
+		`data-storage-action="remove-permanent"`,
 		`data-storage-action="format"`,
 		`data-storage-action-dialog`,
 		`data-storage-action-review-button`,
@@ -297,8 +301,9 @@ func TestStorageBrowserReviewedActionFlow(t *testing.T) {
 	}
 	script := string(scriptContent)
 	for _, want := range []string{
-		`"/api/new-storage/actions/plan"`,
-		`"/api/new-storage/actions/apply"`,
+		`"/api/new-storage/" + request.family + "/" + phase`,
+		`family: "actions"`,
+		`family: "mounts"`,
 		`reviewedPlan.fingerprint`,
 		`data.system === "Yes"`,
 		`data.readonly === "Yes"`,
