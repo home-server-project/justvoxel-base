@@ -75,21 +75,8 @@ jv_migration_import_transport_identity() {
     esac
 }
 
-jv_migration_import_source_content_identity() {
-    local kind="$1" path="$2"
-    if [[ ${kind} == local ]]; then
-        jv_migration_source_identity "${path}"
-    elif [[ -f ${path} ]]; then
-        sha256sum -- "${path}" | awk '{print "filesha256:"$1}'
-    elif [[ -d ${path} ]]; then
-        stat -Lc '%s:%Y' -- "${path}" | sha256sum | awk '{print "dirmeta256:"$1}'
-    else
-        return 1
-    fi
-}
-
 jv_migration_import_source_prepare() {
-    local source_json="$1" kind relative device removable source username password domain base transport_identity content_identity
+    local source_json="$1" kind relative device removable source username password domain base transport_identity
     kind="$(jq -r '.kind // "local"' <<< "${source_json}")"
     relative="$(jq -r '.path // ""' <<< "${source_json}")"
     JV_MIGRATION_IMPORT_SOURCE_KIND="${kind}"
@@ -142,6 +129,7 @@ jv_migration_import_source_prepare() {
 
     jv_migration_validate_source_name "${JV_MIGRATION_IMPORT_SOURCE_PATH}" >/dev/null 2>&1 || return 1
     transport_identity="$(jv_migration_import_transport_identity "${source_json}")" || return 1
-    content_identity="$(jv_migration_import_source_content_identity "${kind}" "${JV_MIGRATION_IMPORT_SOURCE_PATH}")" || return 1
-    JV_MIGRATION_IMPORT_SOURCE_IDENTITY="$(printf '%s\n%s\n%s\n' "${transport_identity}" "${relative}" "${content_identity}" | sha256sum | awk '{print $1}')"
+    # Import identity represents the reviewed source location, not ownership of
+    # the user's file contents. The staged copy is validated independently.
+    JV_MIGRATION_IMPORT_SOURCE_IDENTITY="$(printf '%s\n%s\n' "${transport_identity}" "${relative}" | sha256sum | awk '{print $1}')"
 }

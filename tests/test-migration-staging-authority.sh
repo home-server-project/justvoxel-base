@@ -18,9 +18,11 @@ pre_stage="$(head -n "${boundary}" "${source_plan}")"
 post_stage="$(tail -n "+$((boundary + 1))" "${source_plan}")"
 
 grep -Fq 'migration-archive extract "${JV_MIGRATION_SOURCE}" "${staging_source}"' <<< "${pre_stage}" || fail 'Import no longer stages the reviewed source locally'
-grep -Fq 'jv_migration_source_identity "${JV_MIGRATION_SOURCE}"' <<< "${pre_stage}" || fail 'Import lost the bounded post-copy source identity check'
+if grep -Fq 'jv_migration_source_identity "${JV_MIGRATION_SOURCE}"' <<< "${pre_stage}"; then fail 'Import still re-checks user-owned source contents after staging'; fi
 grep -Fq 'source_backup_meta_mode=' <<< "${pre_stage}" || fail 'JustVoxel backup metadata is not captured before staging authority changes'
 grep -Fq 'source_backup_meta_version=' <<< "${pre_stage}" || fail 'JustVoxel backup version metadata is not captured before staging authority changes'
+grep -Fq 'jv_migration_transport_cleanup' <<< "${post_stage}" || fail 'JustVoxel-managed source transport is not released after staging'
+grep -Fq 'transport_started=no' <<< "${post_stage}" || fail 'Import transport state is not cleared after staged handoff'
 
 if grep -Fq 'JV_MIGRATION_SOURCE' <<< "${post_stage}"; then
     fail 'Import still reads or depends on the original source after local staging becomes authoritative'

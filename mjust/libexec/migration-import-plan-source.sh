@@ -17,7 +17,6 @@ else
 fi
 
 jv_migration_validate_source_name "${JV_MIGRATION_SOURCE}" || exit 1
-source_identity="$(jv_migration_source_identity "${JV_MIGRATION_SOURCE}")"
 source_info="$(/usr/libexec/justvoxel/mjust/migration-archive inspect "${JV_MIGRATION_SOURCE}")" || exit 1
 expanded_bytes="$(jq -r '.expandedBytes' <<< "${source_info}")"
 is_native="$(jq -r '.nativeBundle' <<< "${source_info}")"
@@ -76,14 +75,14 @@ jv_migration_write_state "${transaction}" staging "${JV_MIGRATION_SOURCE}" unkno
 staging_source="${transaction}/staging-source"
 echo 'Copying and validating the source into migration staging.'
 /usr/libexec/justvoxel/mjust/migration-archive extract "${JV_MIGRATION_SOURCE}" "${staging_source}"
-if [[ $(jv_migration_source_identity "${JV_MIGRATION_SOURCE}") != "${source_identity}" ]]; then
-    echo 'ERROR: migration source changed while it was being staged.' >&2
-    exit 1
-fi
 
 # ORIGINAL SOURCE FILESYSTEM ACCESS ENDS HERE.
-# From this point through activation, the staged copy is authoritative. The
-# original SMB/NFS/device/local source may disappear without changing the Import.
+# The original archive belongs to the user. JustVoxel does not move, delete,
+# retain, or re-check it after staging. Validation continues against staged data.
+if [[ ${transport_started} == yes ]]; then
+    jv_migration_transport_cleanup
+    transport_started=no
+fi
 if [[ ${is_native} == true ]]; then
     detection_base="${staging_source}/justvoxel-migration/server"
     [[ -d ${detection_base} ]] || { echo 'ERROR: native bundle server directory is missing after extraction.' >&2; exit 1; }
