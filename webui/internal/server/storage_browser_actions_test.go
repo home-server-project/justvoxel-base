@@ -156,7 +156,6 @@ func TestStorageBrowserActionsRejectOperatorAndBadCSRF(t *testing.T) {
 	}
 }
 
-
 func TestStorageBrowserMountStatusReportsPermanentState(t *testing.T) {
 	client := &fakeStorageActionAPI{
 		mountStatus: api.AdminStorageMountResponse{
@@ -258,7 +257,6 @@ func TestStorageBrowserPermanentMountRejectsOperatorAndBadCSRF(t *testing.T) {
 		t.Fatal("permanent mount apply API ran after CSRF rejection")
 	}
 }
-
 
 func TestStorageBrowserMountUXUsesHumanWording(t *testing.T) {
 	js, err := assets.ReadFile("static/storage-browser.js")
