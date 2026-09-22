@@ -27,8 +27,7 @@ grep -q "password is required when applying a new SMB mount" "${helper_apply}"
 # credential values or unbounded/multiline output.
 # shellcheck disable=SC1090
 source "${helper_apply}"
-diag="$(bounded_smb_mount_error 
-mount error(13): Permission denied\npassword=super-secret credentials=/etc/justvoxel/smb-backup.credentials')"
+diag="$(bounded_smb_mount_error "$(printf 'mount error(13): Permission denied\npassword=super-secret credentials=/etc/justvoxel/smb-backup.credentials')")"
 [[ ${diag} == *'mount error(13): Permission denied'* ]] || { echo "SMB mount diagnostic lost the real error: ${diag}" >&2; exit 1; }
 [[ ${diag} != *'super-secret'* ]] || { echo 'SMB mount diagnostic leaked a password.' >&2; exit 1; }
 [[ ${diag} != *'/etc/justvoxel/smb-backup.credentials'* ]] || { echo 'SMB mount diagnostic leaked the credentials-file path.' >&2; exit 1; }
