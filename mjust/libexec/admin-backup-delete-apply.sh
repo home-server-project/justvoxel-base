@@ -13,6 +13,11 @@ backup_delete_apply() {
         return 0
     fi
 
+    [[ -w ${minecraft_backup_path} ]] || {
+        backup_delete_json_error 'The configured backup directory is not writable. Nothing was deleted.'
+        return 0
+    }
+
     backup_delete_collect_plan <<< "${request}" || return 0
 
     submitted_fingerprint="$(jq -r '.fingerprint // ""' <<< "${request}")"
