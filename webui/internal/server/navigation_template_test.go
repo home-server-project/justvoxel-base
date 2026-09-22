@@ -33,6 +33,7 @@ func TestControlCenterNavigationUX(t *testing.T) {
 		`href="/settings/users"`,
 		`href="/settings/authentication"`,
 		`href="/password"`,
+		`href="/about"`,
 		`class="nav-logout"`,
 	} {
 		if !strings.Contains(markup, want) {
@@ -81,6 +82,7 @@ func TestControlCenterNavigationUX(t *testing.T) {
 func TestAuthenticatedTemplatesUseSharedHeader(t *testing.T) {
 	for _, name := range []string{
 		"dashboard.html",
+		"about.html",
 		"operations.html",
 		"activity.html",
 		"admin_activity.html",
