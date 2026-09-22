@@ -11,20 +11,20 @@ import (
 
 type fakeNewBackupsAPI struct {
 	fakeAPI
-	role           string
-	backups        api.AdminRestoreBackupsResponse
-	backupResult   api.ManualBackupResponse
-	backupErr      error
-	backupCalls          int
-	discoveryCalls       int
-	configuration        api.AdminConfigurationDiscovery
-	configurationPlan    api.AdminConfigurationChangeResponse
-	configurationApply   api.AdminConfigurationChangeResponse
-	configurationPlanErr error
-	configurationApplyErr error
-	plannedConfiguration api.AdminConfigurationChangeRequest
-	appliedConfiguration api.AdminConfigurationChangeRequest
-	configurationPlanCalls int
+	role                    string
+	backups                 api.AdminRestoreBackupsResponse
+	backupResult            api.ManualBackupResponse
+	backupErr               error
+	backupCalls             int
+	discoveryCalls          int
+	configuration           api.AdminConfigurationDiscovery
+	configurationPlan       api.AdminConfigurationChangeResponse
+	configurationApply      api.AdminConfigurationChangeResponse
+	configurationPlanErr    error
+	configurationApplyErr   error
+	plannedConfiguration    api.AdminConfigurationChangeRequest
+	appliedConfiguration    api.AdminConfigurationChangeRequest
+	configurationPlanCalls  int
 	configurationApplyCalls int
 }
 
@@ -222,7 +222,7 @@ func TestNewBackupsPageShowsAutomaticPolicy(t *testing.T) {
 		t.Fatalf("new backups page returned %d: %s", page.Code, page.Body.String())
 	}
 	body := page.Body.String()
-	for _, want := range []string{"Schedule &amp; retention", "Enable automatic backups", "value=\"04:30\"", "value=\"7\"", "UTC"} {
+	for _, want := range []string{"Schedule & retention", "Enable automatic backups", "value=\"04:30\"", "value=\"7\"", "UTC"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("automatic backup panel missing %q: %s", want, body)
 		}
