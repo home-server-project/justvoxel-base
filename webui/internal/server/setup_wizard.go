@@ -37,14 +37,15 @@ type setupServerDraft struct {
 }
 
 type setupMinecraftDraft struct {
-	JavaMemory      string
-	ContainerMemory string
-	JavaPort        string
-	BedrockPort     string
-	ImageTag        string
-	VersionPolicy   string
-	Version         string
-	Complete        bool
+	JavaMemory       string
+	ContainerMemory  string
+	JavaPort         string
+	BedrockPort      string
+	ImageTag         string
+	VersionPolicy    string
+	Version          string
+	ResourcesComplete bool
+	Complete         bool
 }
 
 type setupDraft struct {
@@ -103,16 +104,18 @@ type setupWizardPageData struct {
 
 var setupWizardSteps = []setupWizardStepView{
 	{Number: 1, Name: "Server", Description: "Choose the server welcome message, player limit, Bedrock cross-play and timezone."},
-	{Number: 2, Name: "Minecraft", Description: "Choose Minecraft memory, ports, container channel and version."},
-	{Number: 3, Name: "Storage", Description: "Choose where Minecraft worlds, configuration and server data will live."},
-	{Number: 4, Name: "Backups", Description: "Choose backup location, retention and automatic backup schedule."},
-	{Number: 5, Name: "Review", Description: "The complete setup plan and Minecraft EULA acceptance will be reviewed here before any changes are applied."},
+	{Number: 2, Name: "Resources", Description: "Choose how much system memory Minecraft may use."},
+	{Number: 3, Name: "Minecraft", Description: "Choose ports, release channel and Minecraft version policy."},
+	{Number: 4, Name: "Storage", Description: "Choose where Minecraft worlds, configuration and server data will live."},
+	{Number: 5, Name: "Backups", Description: "Choose backup location, retention and automatic backup schedule."},
+	{Number: 6, Name: "Review", Description: "Review the final setup plan and accept the Minecraft EULA before anything is applied."},
 }
 
 func (a *App) registerSetupWizardRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /setup", a.setupWizardPage)
 	mux.HandleFunc("POST /setup/start", a.setupWizardStart)
 	mux.HandleFunc("POST /setup/server", a.setupWizardSaveServer)
+	mux.HandleFunc("POST /setup/resources", a.setupWizardSaveResources)
 	mux.HandleFunc("POST /setup/minecraft", a.setupWizardSaveMinecraft)
 	mux.HandleFunc("POST /setup/navigate", a.setupWizardNavigate)
 	mux.HandleFunc("POST /setup/cancel", a.setupWizardCancel)
@@ -130,10 +133,10 @@ func (a *App) setupWizardPage(w http.ResponseWriter, r *http.Request) {
 	draft, exists := firstRunSetupDrafts.get(a, session)
 	if !exists {
 		draft = setupDraft{}
-	} else if draft.Started && draft.CurrentStep == 5 {
+	} else if draft.Started && draft.CurrentStep == 6 {
 		http.Redirect(w, r, "/setup/review", http.StatusSeeOther)
 		return
-	} else if draft.Started && (draft.CurrentStep == 3 || draft.CurrentStep == 4) {
+	} else if draft.Started && (draft.CurrentStep == 4 || draft.CurrentStep == 5) {
 		storage, err := client.AdminStorage(r.Context(), session)
 		if err != nil {
 			a.handleAdminDiscoveryError(w, r, err)
@@ -215,22 +218,18 @@ func (a *App) setupWizardSaveMinecraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	draft.Minecraft = setupMinecraftDraft{
-		JavaMemory:      strings.TrimSpace(r.FormValue("java_memory")),
-		ContainerMemory: strings.TrimSpace(r.FormValue("container_memory")),
-		JavaPort:        strings.TrimSpace(r.FormValue("java_port")),
-		BedrockPort:     strings.TrimSpace(r.FormValue("bedrock_port")),
-		ImageTag:        strings.TrimSpace(r.FormValue("image_tag")),
-		VersionPolicy:   strings.TrimSpace(r.FormValue("version_policy")),
-		Version:         strings.TrimSpace(r.FormValue("version")),
-	}
+	draft.Minecraft.JavaPort = strings.TrimSpace(r.FormValue("java_port"))
+	draft.Minecraft.BedrockPort = strings.TrimSpace(r.FormValue("bedrock_port"))
+	draft.Minecraft.ImageTag = strings.TrimSpace(r.FormValue("image_tag"))
+	draft.Minecraft.VersionPolicy = strings.TrimSpace(r.FormValue("version_policy"))
+	draft.Minecraft.Version = strings.TrimSpace(r.FormValue("version"))
 
 	if r.FormValue("direction") == "back" {
 		draft.Minecraft.Complete = false
-		draft.CurrentStep = 1
+		draft.CurrentStep = 2
 		firstRunSetupReviews.delete(a, session)
 		firstRunSetupDrafts.save(a, session, draft)
-		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "Minecraft settings changed; user returned to Server", draft)
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "Minecraft settings changed; user returned to Resources", draft)
 		http.Redirect(w, r, "/setup", http.StatusSeeOther)
 		return
 	}
@@ -242,6 +241,7 @@ func (a *App) setupWizardSaveMinecraft(w http.ResponseWriter, r *http.Request) {
 		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
 		return
 	}
+	draft.Minecraft.ResourcesComplete = true
 	draft.Minecraft.Complete = true
 	if draft.Minecraft.VersionPolicy == "latest" {
 		draft.Minecraft.Version = "LATEST"
@@ -249,7 +249,7 @@ func (a *App) setupWizardSaveMinecraft(w http.ResponseWriter, r *http.Request) {
 	if draft.Minecraft.VersionPolicy == "recommended" {
 		draft.Minecraft.Version = ""
 	}
-	draft.CurrentStep = 3
+	draft.CurrentStep = 4
 	firstRunSetupReviews.delete(a, session)
 	firstRunSetupDrafts.save(a, session, draft)
 	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "Minecraft settings saved", draft)
@@ -461,7 +461,7 @@ func validateSetupServer(server setupServerDraft) error {
 	return nil
 }
 
-func validateSetupMinecraft(minecraft setupMinecraftDraft, defaults api.AdminSetupDefaults) error {
+func validateSetupResources(minecraft setupMinecraftDraft, defaults api.AdminSetupDefaults) error {
 	javaMiB, ok := setupMemoryMiB(minecraft.JavaMemory)
 	if !ok {
 		return errors.New("Minecraft game memory must use a size such as 4G or 4096M.")
@@ -475,6 +475,13 @@ func validateSetupMinecraft(minecraft setupMinecraftDraft, defaults api.AdminSet
 	}
 	if defaults.SystemMemoryMiB > 0 && containerMiB >= defaults.SystemMemoryMiB {
 		return errors.New("Maximum Minecraft memory must leave some memory available for JustVoxel and system services.")
+	}
+	return nil
+}
+
+func validateSetupMinecraft(minecraft setupMinecraftDraft, defaults api.AdminSetupDefaults) error {
+	if err := validateSetupResources(minecraft, defaults); err != nil {
+		return err
 	}
 	if _, err := parseSetupPort(minecraft.JavaPort, "Minecraft Java port"); err != nil {
 		return err
