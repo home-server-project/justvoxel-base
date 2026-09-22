@@ -15,6 +15,7 @@ func TestSystemPowerHeaderAndDialogUX(t *testing.T) {
 		"data-system-power",
 		"data-control-center",
 		"control-power-actions",
+		"control-icon-button",
 		"data-system-action=\"reboot\"",
 		"aria-label=\"Reboot\"",
 		"data-system-action=\"poweroff\"",
@@ -60,6 +61,7 @@ func TestSystemPowerHeaderAndDialogUX(t *testing.T) {
 		"systemDialog.showModal()",
 		"body.set(\"confirm_players\", \"yes\")",
 		"fetch(\"/api/system-actions/\" + selectedAction",
+		"Reboot JustVoxel?",
 	} {
 		if !strings.Contains(js, want) {
 			t.Fatalf("system power behavior missing %q", want)
