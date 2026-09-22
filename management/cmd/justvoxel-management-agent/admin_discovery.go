@@ -101,6 +101,7 @@ func registerAdminDiscoveryRoutes(mux *http.ServeMux, s *server) {
 	registerAdminBackupStorageRoutes(mux, s)
 	registerAdminStorageProvisionRoutes(mux, s)
 	registerAdminStorageActionRoutes(mux, s)
+	registerAdminStorageMountRoutes(mux, s)
 	registerAdminDataMigrationRoutes(mux, s)
 	registerAdminSetupPlanRoutes(mux, s)
 	registerAdminSetupApplyRoutes(mux, s)
