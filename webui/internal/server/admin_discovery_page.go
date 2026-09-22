@@ -211,7 +211,7 @@ func (a *App) storageBrowserPage(w http.ResponseWriter, r *http.Request) {
 				Transport: device.Transport, ReadOnly: device.ReadOnly, System: device.System,
 			},
 			Role: role, Mounted: len(device.Mountpoints) > 0, Formatted: device.Filesystem != "",
-			Swap: device.Filesystem == "swap",
+			Swap:        device.Filesystem == "swap",
 			Interactive: device.Filesystem != "swap",
 		}
 		disks[index].Partitions = append(disks[index].Partitions, view)
