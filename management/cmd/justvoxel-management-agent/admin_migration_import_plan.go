@@ -79,7 +79,23 @@ type adminMigrationImportCandidate struct {
     RootRelative string `json:"root_relative"`
     SourceType string `json:"sourceType"`
     Supported bool `json:"supported"`
+    LevelName string `json:"levelName,omitempty"`
     MinecraftVersion string `json:"minecraftVersion,omitempty"`
+    OnlineMode *bool `json:"onlineMode,omitempty"`
+    GameMode string `json:"gameMode,omitempty"`
+    Difficulty string `json:"difficulty,omitempty"`
+    WhitelistEnabled *bool `json:"whitelistEnabled,omitempty"`
+    EnforceWhitelist *bool `json:"enforceWhitelist,omitempty"`
+    MaxPlayers string `json:"maxPlayers,omitempty"`
+    MOTD string `json:"motd,omitempty"`
+    JavaPortHint string `json:"javaPortHint,omitempty"`
+    PluginJarCount int `json:"pluginJarCount,omitempty"`
+    PluginJars []string `json:"pluginJars,omitempty"`
+    GeyserEnabled bool `json:"geyserEnabled,omitempty"`
+    GeyserAuthType string `json:"geyserAuthType,omitempty"`
+    BedrockPortHint int `json:"bedrockPortHint,omitempty"`
+    FloodgateEnabled bool `json:"floodgateEnabled,omitempty"`
+    FloodgateKeySHA256 string `json:"floodgateKeySha256,omitempty"`
 }
 type adminMigrationImportSourceNormalized struct {
     Path string `json:"path"`
