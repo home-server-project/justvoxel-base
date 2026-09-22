@@ -17,6 +17,10 @@ type adminDiscoveryAPI interface {
 	AdminSetupDefaults(ctx context.Context, session string) (api.AdminSetupDefaults, error)
 }
 
+type storageBrowserMigrationDiscoveryAPI interface {
+	AdminDataMigrationDiscovery(ctx context.Context, session string) (api.AdminDataMigrationDiscoveryResponse, error)
+}
+
 type serverSettingsPageData struct {
 	Title                    string
 	Version                  string
@@ -63,11 +67,13 @@ type storageSettingsPageData struct {
 
 type storageBrowserPartitionView struct {
 	storageDeviceView
-	Role        string
-	Mounted     bool
-	Formatted   bool
-	Swap        bool
-	Interactive bool
+	Role                    string
+	Mounted                 bool
+	Formatted               bool
+	Swap                    bool
+	Interactive             bool
+	MinecraftCandidate      bool
+	MinecraftMountPoint     string
 }
 
 type storageBrowserDiskView struct {
@@ -81,13 +87,14 @@ type storageBrowserDiskView struct {
 }
 
 type storageBrowserPageData struct {
-	Title         string
-	Version       string
-	ManagementAPI string
-	CSRF          string
-	Identity      api.SessionInfo
-	Configuration api.AdminConfigurationDiscovery
-	Disks         []storageBrowserDiskView
+	Title                  string
+	Version                string
+	ManagementAPI          string
+	CSRF                   string
+	Identity               api.SessionInfo
+	Configuration          api.AdminConfigurationDiscovery
+	Disks                  []storageBrowserDiskView
+	MinecraftMigrationNote string
 }
 
 func (a *App) registerAdminDiscoveryPages(mux *http.ServeMux) {
@@ -183,6 +190,21 @@ func (a *App) storageBrowserPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	migrationCandidates := make(map[string]api.AdminDataMigrationCandidate)
+	migrationNote := ""
+	if migrationClient, ok := any(client).(storageBrowserMigrationDiscoveryAPI); ok {
+		discovery, err := migrationClient.AdminDataMigrationDiscovery(r.Context(), session)
+		if err != nil {
+			migrationNote = "Minecraft storage assignment is temporarily unavailable. Other storage actions are still available."
+		} else {
+			for _, candidate := range discovery.Partitions {
+				migrationCandidates[candidate.Path] = candidate
+			}
+		}
+	} else {
+		migrationNote = "Minecraft storage assignment is unavailable in this WebUI build."
+	}
+
 	disks := make([]storageBrowserDiskView, 0)
 	diskIndex := make(map[string]int)
 	for _, device := range storage.Devices {
@@ -204,6 +226,10 @@ func (a *App) storageBrowserPage(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		role := storageBrowserRole(device, configuration)
+		migrationCandidate, canMigrate := migrationCandidates[device.Path]
+		if role == "Minecraft" {
+			canMigrate = false
+		}
 		view := storageBrowserPartitionView{
 			storageDeviceView: storageDeviceView{
 				Name: device.Name, Path: device.Path, Parent: device.Parent, Type: device.Type,
@@ -212,8 +238,10 @@ func (a *App) storageBrowserPage(w http.ResponseWriter, r *http.Request) {
 				Transport: device.Transport, ReadOnly: device.ReadOnly, System: device.System,
 			},
 			Role: role, Mounted: len(device.Mountpoints) > 0, Formatted: device.Filesystem != "",
-			Swap:        device.Filesystem == "swap",
-			Interactive: device.Filesystem != "swap",
+			Swap:                device.Filesystem == "swap",
+			Interactive:         device.Filesystem != "swap",
+			MinecraftCandidate:  canMigrate,
+			MinecraftMountPoint: migrationCandidate.Mountpoint,
 		}
 		disks[index].Partitions = append(disks[index].Partitions, view)
 	}
@@ -221,6 +249,7 @@ func (a *App) storageBrowserPage(w http.ResponseWriter, r *http.Request) {
 	a.renderAdminDiscovery(w, "storage_browser.html", storageBrowserPageData{
 		Title: "New Storage", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
 		CSRF: csrfFromRequest(r), Identity: identity, Configuration: configuration, Disks: disks,
+		MinecraftMigrationNote: migrationNote,
 	})
 }
 
