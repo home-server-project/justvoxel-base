@@ -14,6 +14,8 @@ result_emitted=no
 restart_required=no
 transport_started=no
 destination=''
+staging_dir=''
+staged_bundle=''
 failure_status='Server migration export did not complete.'
 
 emit_progress() {
@@ -33,6 +35,12 @@ cleanup() {
 
     if [[ -n "$destination" && -f "$destination.partial" ]]; then
         rm -f -- "$destination.partial" || safe=no
+    fi
+    if [[ -n "$staged_bundle" ]]; then
+        rm -f -- "$staged_bundle" "$staged_bundle.partial" 2>/dev/null || safe=no
+    fi
+    if [[ -n "$staging_dir" && -d "$staging_dir" ]]; then
+        rmdir -- "$staging_dir" 2>/dev/null || safe=no
     fi
 
     if [[ "$restart_required" == yes ]]; then
@@ -114,6 +122,17 @@ username="$(jq -r '.username // ""' <<< "$plan_request")"
 domain="$(jq -r '.domain // ""' <<< "$plan_request")"
 filename="$(jq -r '.filename' <<< "$plan_request")"
 data_bytes="$(jq -r '.normalized.data_bytes' <<< "$replan")"
+data_path="$(jq -r '.normalized.data_path' <<< "$replan")"
+data_parent="$(dirname -- "$data_path")"
+
+[[ -d "$data_parent" && ! -L "$data_parent" ]] || { failure_status='Minecraft data parent is unavailable for local export staging.'; exit 1; }
+staging_dir="$data_parent/.justvoxel-export-$operation_id"
+[[ ! -e "$staging_dir" ]] || { failure_status='An earlier local export staging directory still exists.'; exit 1; }
+local_available="$(jv_migration_available_bytes "$data_parent")" || { failure_status='Local export staging free space could not be measured.'; exit 1; }
+local_required=$((data_bytes + 64 * 1024 * 1024))
+(( local_available >= local_required )) || { failure_status='Local storage does not have enough free space to stage the cold export before final transfer.'; exit 1; }
+install -d -m0700 -o root -g root "$staging_dir"
+staged_bundle="$staging_dir/$filename"
 
 emit_progress running target_prepare 'Preparing the reviewed server migration export target.'
 
@@ -222,21 +241,43 @@ if [[ "$live_minecraft_state" == running ]]; then
     esac
 fi
 
-emit_progress running exporting 'Creating and verifying the cold portable JustVoxel migration bundle.'
+# COLD EXPORT DOWNTIME STARTS HERE.
+emit_progress running exporting 'Creating and verifying the cold portable JustVoxel migration bundle on local staging.'
 JV_MIGRATION_EXPORT_MAINTENANCE_LOCK_HELD=1 \
 JV_MIGRATION_EXPORT_SERVER_REPORTED="$server_reported" \
 JV_MIGRATION_EXPORT_GEYSER_REPORTED="$geyser_reported" \
-    /usr/libexec/justvoxel/mjust/migration-export-backend "$destination" >/dev/null
+    /usr/libexec/justvoxel/mjust/migration-export-backend "$staged_bundle" >/dev/null
+[[ -f "$staged_bundle" ]] || { failure_status='Local cold export staging did not produce the reviewed migration bundle.'; exit 1; }
 
 if [[ "$restart_required" == yes ]]; then
-    emit_progress running minecraft_restart 'Restarting Minecraft after the cold export.'
+    emit_progress running minecraft_restart 'Restarting Minecraft immediately after the local cold export.'
     systemctl start minecraft.service
     restart_required=no
-    emit_progress verifying minecraft_runtime 'Validating Minecraft after the export.'
+    emit_progress verifying minecraft_runtime 'Validating Minecraft before final export transfer.'
     /usr/libexec/justvoxel/mjust/restore-runtime-validate >/dev/null
 else
-    emit_progress verifying export_complete 'Verifying the completed server migration export.'
+    emit_progress verifying minecraft_runtime 'Minecraft was already stopped; local cold export staging is complete.'
 fi
+# COLD EXPORT DOWNTIME ENDS HERE.
+
+# FINAL TARGET TRANSFER STARTS HERE.
+staged_size="$(stat -Lc '%s' "$staged_bundle" 2>/dev/null || true)"
+[[ "$staged_size" =~ ^[0-9]+$ && "$staged_size" -gt 0 ]] || { failure_status='Locally staged migration bundle size could not be verified.'; exit 1; }
+[[ ! -e "$destination" && ! -e "$destination.partial" ]] || { failure_status='Reviewed export destination appeared before final transfer.'; exit 1; }
+available="$(jv_migration_available_bytes "$target_root")" || { failure_status='Export target free space could not be rechecked before final transfer.'; exit 1; }
+(( available >= staged_size + 64 * 1024 * 1024 )) || { failure_status='Export target no longer has enough free space for the verified migration bundle.'; exit 1; }
+
+emit_progress verifying target_transfer 'Minecraft runtime is healthy; copying the verified migration bundle to the reviewed destination.'
+cp --reflink=auto --sparse=always -- "$staged_bundle" "$destination.partial"
+sync -f -- "$destination.partial" 2>/dev/null || sync
+/usr/libexec/justvoxel/mjust/migration-archive verify-native "$destination.partial" >/dev/null
+mv -- "$destination.partial" "$destination"
+sync -f -- "$destination" 2>/dev/null || sync
+
+rm -f -- "$staged_bundle"
+staged_bundle=''
+rmdir -- "$staging_dir"
+staging_dir=''
 
 if [[ "$transport_started" == yes ]]; then
     sync
@@ -244,6 +285,7 @@ if [[ "$transport_started" == yes ]]; then
     transport_started=no
 fi
 
+emit_progress verifying export_complete 'Verified migration bundle transferred successfully; Minecraft runtime is healthy.'
 emit_result succeeded 'Server migration export completed successfully and the prior Minecraft runtime state is healthy.'
 trap - EXIT INT TERM
 exit 0
