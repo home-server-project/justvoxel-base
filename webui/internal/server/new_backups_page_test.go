@@ -242,3 +242,44 @@ func TestBackupDailyTimeFromSchedule(t *testing.T) {
 		}
 	}
 }
+
+func TestNewBackupsAutomaticPlanPreservesMinecraftConfiguration(t *testing.T) {
+	client := &fakeNewBackupsAPI{
+		configurationPlan: api.AdminConfigurationChangeResponse{
+			OK: true,
+			Changes: []api.AdminConfigurationChange{
+				{Field: "backup_schedule", Label: "Automatic backup schedule", Before: "*-*-* 04:30:00", After: "*-*-* 05:15:00"},
+				{Field: "backup_keep", Label: "Backups retained", Before: "7", After: "12"},
+			},
+		},
+	}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := "csrf=csrf-token&automatic_enabled=on&daily_time=05%3A15&backup_keep=12"
+	page := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/settings/new-backups/automatic/plan", body))
+	if page.Code != http.StatusOK {
+		t.Fatalf("automatic plan returned %d: %s", page.Code, page.Body.String())
+	}
+	if client.configurationPlanCalls != 1 {
+		t.Fatalf("configuration plan calls = %d, want 1", client.configurationPlanCalls)
+	}
+	request := client.plannedConfiguration
+	if request.BackupKeep != 12 || request.BackupSchedule != "*-*-* 05:15:00" || !request.BackupTimerEnabled {
+		t.Fatalf("unexpected automatic backup request: %#v", request)
+	}
+	if request.JavaMemory != "4G" || request.ContainerMemory != "6G" || request.JavaPort != 25565 ||
+		request.Timezone != "UTC" || request.MaxPlayers != 10 || request.Version != "26.3" {
+		t.Fatalf("automatic backup plan did not preserve Minecraft configuration: %#v", request)
+	}
+	for _, want := range []string{"Automatic backup changes", "05:15", "12 backups"} {
+		if !strings.Contains(page.Body.String(), want) {
+			t.Fatalf("automatic review missing %q: %s", want, page.Body.String())
+		}
+	}
+	if strings.Contains(page.Body.String(), "*-*-* 05:15:00") {
+		t.Fatal("automatic review exposed the raw systemd calendar string")
+	}
+}
