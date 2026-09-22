@@ -1,0 +1,71 @@
+{{define "new_backups.html"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>JustVoxel - New Backups</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/new-backups.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body class="role-administrator">
+{{template "app-header" .}}
+<main class="new-backups-shell">
+  <div class="title-row">
+    <div><p class="eyebrow">Administrator · preview</p><h1>New Backups</h1></div>
+    <span class="badge">{{.Identity.Username}}</span>
+  </div>
+
+  {{if .Message}}<div class="notice success">{{.Message}}</div>{{end}}
+  {{if .Error}}<div class="notice error">{{.Error}}</div>{{end}}
+
+  <section class="backup-command-bar" aria-label="Backup controls">
+    <div class="backup-library-summary">
+      <div><span>Backups</span><strong>{{.BackupCount}}</strong></div>
+      <div><span>Total size</span><strong>{{.TotalSize}}</strong></div>
+    </div>
+    <form method="post" action="/settings/new-backups/backup">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <button type="submit">Backup Now</button>
+    </form>
+  </section>
+
+  <section class="backup-library-section">
+    <div class="section-heading">
+      <div><p class="eyebrow">Backup library</p><h2>Existing backups</h2></div>
+    </div>
+
+    {{if .Backups}}
+    <div class="backup-file-grid" role="list">
+      {{range .Backups}}
+      <article class="backup-file-card" role="listitem">
+        <div class="backup-file-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M4 4h11l5 5v11H4z"></path><path d="M15 4v5h5"></path><path d="M8 14h8M8 17h6"></path></svg>
+        </div>
+        <div class="backup-file-copy">
+          <strong title="{{.ID}}">{{.ID}}</strong>
+          <span>{{.CreatedLabel}}</span>
+          <small>{{.Size}}{{if .Version}} · Minecraft {{.Version}}{{end}}{{if .Bedrock}} · Bedrock{{end}}{{if .Variant}} · {{.Variant}}{{end}}</small>
+        </div>
+        {{if eq .MetadataStatus "valid"}}
+        <span class="backup-file-status">Ready</span>
+        {{else if eq .MetadataStatus "missing"}}
+        <span class="backup-file-status backup-file-status-warning">Metadata missing</span>
+        {{else}}
+        <span class="backup-file-status backup-file-status-warning">Metadata invalid</span>
+        {{end}}
+      </article>
+      {{end}}
+    </div>
+    {{else}}
+    <div class="backup-library-empty">
+      <strong>No backups yet</strong>
+      <span>Create the first backup with Backup Now.</span>
+    </div>
+    {{end}}
+  </section>
+
+  <p class="muted backup-library-note">This first preview only creates and displays backups. Delete, Restore, automatic schedule, retention and destination controls will be added in later steps.</p>
+</main>
+</body>
+</html>{{end}}
