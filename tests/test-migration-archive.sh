@@ -107,6 +107,20 @@ PY
 for item in "${tmp}/paper.tar" "${tmp}/paper.tgz" "${tmp}/paper.zip"; do
     "${archive}" inspect "${item}" >/dev/null || fail "supported archive rejected: ${item}"
 done
+
+# Realistic itzg/minecraft-server Paper export: the server root is /data inside
+# the archive, matching the common container volume layout used for migration.
+mkdir -p "${tmp}/itzg-container"
+make_paper "${tmp}/itzg-container/data" itzg true 1.21.8
+tar -C "${tmp}/itzg-container" -czf "${tmp}/itzg-data.tar.gz" data
+"${archive}" inspect "${tmp}/itzg-data.tar.gz" >/dev/null || fail 'itzg /data tar.gz inspection failed'
+rm -rf "${tmp}/itzg-stage"
+"${archive}" extract "${tmp}/itzg-data.tar.gz" "${tmp}/itzg-stage"
+detected="$("${archive}" detect "${tmp}/itzg-stage")"
+[[ $(jq -r '.candidates | length' <<< "${detected}") == 1 ]] || fail 'itzg /data tar.gz did not produce exactly one Paper candidate'
+[[ $(jq -r '.candidates[0].root' <<< "${detected}") == "${tmp}/itzg-stage/data" ]] || fail 'itzg /data tar.gz candidate root is wrong'
+[[ $(jq -r '.candidates[0].sourceType' <<< "${detected}") == itzg-paper ]] || fail 'itzg /data tar.gz classification is wrong'
+[[ $(jq -r '.candidates[0].minecraftVersion' <<< "${detected}") == 1.21.8 ]] || fail 'itzg /data tar.gz Minecraft version detection is wrong'
 rm -rf "${tmp}/zip-stage"
 "${archive}" extract "${tmp}/paper.zip" "${tmp}/zip-stage"
 [[ -f ${tmp}/zip-stage/paper/world/level.dat ]] || fail 'ZIP extraction missed world data'
