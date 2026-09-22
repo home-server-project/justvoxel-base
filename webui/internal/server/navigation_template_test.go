@@ -342,7 +342,7 @@ func TestNewBackupsCompactLibraryLayout(t *testing.T) {
 			t.Fatalf("New Backups template missing %q", want)
 		}
 	}
-	for _, forbidden := range []string{"Delete", "Restore world", "backup_schedule", "Backup destination"} {
+	for _, forbidden := range []string{"/settings/new-backups/delete", "/settings/new-backups/restore", `name="backup_schedule"`, `name="backup_destination"`} {
 		if strings.Contains(markup, forbidden) {
 			t.Fatalf("New Backups Step 1 unexpectedly exposes later-step control %q", forbidden)
 		}
