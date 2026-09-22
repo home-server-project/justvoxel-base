@@ -296,6 +296,57 @@ if (dashboard) {
 }
 
 
+
+
+const controlCenter = document.querySelector("[data-control-center]");
+const topbarClock = document.querySelector("[data-topbar-clock]");
+if (topbarClock) {
+  const updateTopbarClock = () => {
+    const now = new Date();
+    topbarClock.textContent = new Intl.DateTimeFormat([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(now);
+    topbarClock.title = new Intl.DateTimeFormat([], {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(now);
+  };
+  updateTopbarClock();
+  window.setInterval(updateTopbarClock, 30000);
+}
+
+if (controlCenter) {
+  const brand = document.querySelector(".brand-link");
+  if (brand) {
+    if (window.location.pathname === "/") brand.setAttribute("aria-current", "page");
+    else brand.removeAttribute("aria-current");
+  }
+
+  document.querySelectorAll(".control-tile").forEach((link) => {
+    const target = new URL(link.href, window.location.origin);
+    const samePath = target.pathname === window.location.pathname;
+    const sameHash = !target.hash || target.hash === window.location.hash;
+    if (samePath && sameHash) link.setAttribute("aria-current", "page");
+  });
+
+  document.addEventListener("click", (event) => {
+    if (!controlCenter.open || event.target.closest("[data-control-center]")) return;
+    controlCenter.open = false;
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !controlCenter.open) return;
+    controlCenter.open = false;
+    const trigger = controlCenter.querySelector(".control-center-trigger");
+    if (trigger) trigger.focus();
+  });
+}
+
 const systemPower = document.querySelector("[data-system-power]");
 const systemDialog = document.querySelector("[data-system-action-dialog]");
 if (systemPower && systemDialog) {
@@ -358,7 +409,7 @@ if (systemPower && systemDialog) {
         return false;
       }
       if (response.status === 403) {
-        systemPower.open = false;
+        if (controlCenter) controlCenter.open = false;
         return false;
       }
       if (!response.ok) throw new Error("status unavailable");
@@ -407,7 +458,7 @@ if (systemPower && systemDialog) {
     if (dialogUpdate) {
       dialogUpdate.hidden = !(latestStatus && latestStatus.staged_update && action !== "poweroff");
     }
-    systemPower.open = false;
+    if (controlCenter) controlCenter.open = false;
     systemDialog.showModal();
   };
 
@@ -505,9 +556,13 @@ if (systemPower && systemDialog) {
     }
   };
 
-  systemPower.addEventListener("toggle", () => {
-    if (systemPower.open) loadSystemActionsStatus();
-  });
+  if (controlCenter) {
+    controlCenter.addEventListener("toggle", () => {
+      if (controlCenter.open) loadSystemActionsStatus();
+    });
+  } else {
+    loadSystemActionsStatus();
+  }
 
   actionButtons.forEach((button) => {
     button.addEventListener("click", () => openConfirmation(button.dataset.systemAction));
@@ -522,6 +577,6 @@ if (systemPower && systemDialog) {
 
   document.addEventListener("click", (event) => {
     if (!systemPower.open || event.target.closest("[data-system-power]")) return;
-    systemPower.open = false;
+    if (controlCenter) controlCenter.open = false;
   });
 }
