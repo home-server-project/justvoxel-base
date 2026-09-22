@@ -368,10 +368,10 @@ if (systemPower && systemDialog) {
 
   const actionCopy = {
     reboot: {
-      title: "Restart JustVoxel?",
-      message: "Minecraft will be stopped safely first when it is running. The server will then restart.",
-      confirm: "Restart",
-      working: "Restarting JustVoxel…",
+      title: "Reboot JustVoxel?",
+      message: "Minecraft will be stopped safely first when it is running. The server will then reboot.",
+      confirm: "Reboot",
+      working: "Rebooting JustVoxel…",
     },
     poweroff: {
       title: "Power off JustVoxel?",
@@ -380,10 +380,10 @@ if (systemPower && systemDialog) {
       working: "Powering off JustVoxel…",
     },
     "firmware-reboot": {
-      title: "Restart to UEFI/BIOS?",
-      message: "Minecraft will be stopped safely first. The server will restart into the physical machine's UEFI/BIOS setup.",
-      confirm: "Restart to UEFI/BIOS",
-      working: "Restarting to UEFI/BIOS…",
+      title: "Reboot to UEFI/BIOS?",
+      message: "Minecraft will be stopped safely first. The server will reboot into the physical machine's UEFI/BIOS setup.",
+      confirm: "Reboot to UEFI/BIOS",
+      working: "Rebooting to UEFI/BIOS…",
     },
   };
 
@@ -483,7 +483,7 @@ if (systemPower && systemDialog) {
       dialogPlayers.hidden = dialogPlayers.childElementCount === 0;
     }
     if (confirmButton) {
-      confirmButton.textContent = selectedAction === "poweroff" ? "Power off anyway" : "Restart anyway";
+      confirmButton.textContent = selectedAction === "poweroff" ? "Power off anyway" : "Reboot anyway";
       confirmButton.disabled = false;
     }
   };
