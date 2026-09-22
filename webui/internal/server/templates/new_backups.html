@@ -37,6 +37,48 @@
   <input type="hidden" value="{{.CSRF}}" data-backup-delete-csrf>
   <p class="backup-delete-page-error" data-backup-delete-page-error hidden></p>
 
+  <section class="backup-automatic-section">
+    <div class="section-heading backup-automatic-heading">
+      <div><p class="eyebrow">Automatic backups</p><h2>Schedule & retention</h2></div>
+      <span class="badge">{{if .Automatic.Enabled}}Enabled{{else}}Off{{end}}</span>
+    </div>
+    <form class="backup-automatic-form" method="post" action="/settings/new-backups/automatic/plan">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <label class="backup-automatic-toggle"><input name="automatic_enabled" type="checkbox" {{if .Automatic.Enabled}}checked{{end}}> Enable automatic backups</label>
+      <label>Daily time
+        <input name="daily_time" type="time" step="60" value="{{.Automatic.DailyTime}}" required>
+      </label>
+      <label>Keep last
+        <input name="backup_keep" type="number" min="1" step="1" value="{{.Automatic.Keep}}" required>
+      </label>
+      <button type="submit">Review settings</button>
+    </form>
+    <p class="muted compact">Daily time uses {{if .Timezone}}{{.Timezone}}{{else}}the appliance timezone{{end}}. After a successful backup, JustVoxel automatically removes older backups beyond the Keep last value.</p>
+
+    {{if .AutomaticPlan}}
+    <div class="backup-automatic-review">
+      <div class="section-heading"><div><p class="eyebrow">Review</p><h3>Automatic backup changes</h3></div></div>
+      {{range .AutomaticPlan.Warnings}}<div class="notice warning">{{.}}</div>{{end}}
+      {{if .AutomaticPlan.Changes}}
+      <div class="backup-automatic-change-list">
+        {{range .AutomaticPlan.Changes}}
+        <div class="backup-automatic-change"><strong>{{.Label}}</strong><span><code>{{.Before}}</code><span aria-hidden="true">→</span><code>{{.After}}</code></span></div>
+        {{end}}
+      </div>
+      <form class="backup-automatic-apply" method="post" action="/settings/new-backups/automatic/apply">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        {{if .Automatic.Enabled}}<input type="hidden" name="automatic_enabled" value="on">{{end}}
+        <input type="hidden" name="daily_time" value="{{.Automatic.DailyTime}}">
+        <input type="hidden" name="backup_keep" value="{{.Automatic.Keep}}">
+        <div class="action-row"><button type="submit">Apply settings</button><a class="button-link secondary" href="/settings/new-backups">Cancel</a></div>
+      </form>
+      {{else}}
+      <p class="muted compact">No automatic backup changes were detected.</p>
+      {{end}}
+    </div>
+    {{end}}
+  </section>
+
   <section class="backup-library-section">
     <div class="section-heading">
       <div><p class="eyebrow">Backup library</p><h2>Existing backups</h2></div>
@@ -73,7 +115,7 @@
     {{end}}
   </section>
 
-  <p class="muted backup-library-note">This preview creates, displays and safely deletes backups. Restore, automatic schedule, retention and destination controls will be added in later steps.</p>
+  <p class="muted backup-library-note">This preview creates, displays, safely deletes and schedules backups. Restore and destination controls will be added in later steps.</p>
 
   <dialog class="backup-delete-dialog" data-backup-delete-dialog>
     <div class="backup-delete-dialog-card">
