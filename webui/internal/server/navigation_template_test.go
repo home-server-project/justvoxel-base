@@ -363,3 +363,21 @@ func TestNewBackupsCompactLibraryLayout(t *testing.T) {
 		}
 	}
 }
+
+func TestNewBackupsMobileLibraryStaysSingleColumn(t *testing.T) {
+	content, err := assets.ReadFile("static/new-backups.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles := string(content)
+	for _, want := range []string{
+		"@media(max-width:700px)",
+		".backup-file-grid{grid-template-columns:1fr}",
+		".backup-file-status-warning",
+		".backup-command-bar{align-items:stretch;flex-direction:column}",
+	} {
+		if !strings.Contains(styles, want) {
+			t.Fatalf("New Backups mobile styling missing %q", want)
+		}
+	}
+}
