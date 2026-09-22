@@ -56,7 +56,7 @@ func TestNewBackupsPageListsExistingBackups(t *testing.T) {
 			SizeBytes: 1024 * 1024 * 512, MetadataStatus: "valid",
 			Metadata: &api.AdminRestoreBackupMetadata{
 				Minecraft: api.AdminRestoreMetadataMinecraft{ConfiguredVersion: "26.3"},
-				Bedrock: api.AdminRestoreMetadataBedrock{Enabled: true},
+				Bedrock:   api.AdminRestoreMetadataBedrock{Enabled: true},
 				JustVoxel: api.AdminRestoreMetadataJustVoxel{Variant: "VM"},
 			},
 		},
