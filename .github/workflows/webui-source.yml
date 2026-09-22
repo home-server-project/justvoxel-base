@@ -48,9 +48,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          unformatted="$(gofmt -l management)"
+          unformatted="$(gofmt -l \
+            management/cmd/justvoxel-management-agent/admin_storage_actions.go \
+            management/cmd/justvoxel-management-agent/admin_storage_actions_test.go)"
           if [[ -n "${unformatted}" ]]; then
-            echo 'ERROR: Management Agent Go source is not gofmt-clean:' >&2
+            echo 'ERROR: New Storage Management Agent source is not gofmt-clean:' >&2
             printf '%s\n' "${unformatted}" >&2
             exit 1
           fi
