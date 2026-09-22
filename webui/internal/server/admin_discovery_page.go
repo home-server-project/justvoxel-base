@@ -37,6 +37,7 @@ type serverSettingsPageData struct {
 type storageDeviceView struct {
 	Name        string
 	Path        string
+	Parent      string
 	Type        string
 	Size        string
 	Filesystem  string
@@ -60,11 +61,41 @@ type storageSettingsPageData struct {
 	Devices       []storageDeviceView
 }
 
+type storageBrowserPartitionView struct {
+	storageDeviceView
+	Role        string
+	Mounted     bool
+	Formatted   bool
+	Swap        bool
+	Interactive bool
+}
+
+type storageBrowserDiskView struct {
+	Name       string
+	Path       string
+	Size       string
+	Model      string
+	Transport  string
+	System     bool
+	Partitions []storageBrowserPartitionView
+}
+
+type storageBrowserPageData struct {
+	Title         string
+	Version       string
+	ManagementAPI string
+	CSRF          string
+	Identity      api.SessionInfo
+	Configuration api.AdminConfigurationDiscovery
+	Disks         []storageBrowserDiskView
+}
+
 func (a *App) registerAdminDiscoveryPages(mux *http.ServeMux) {
 	mux.HandleFunc("GET /settings/server", a.serverSettingsPage)
 	mux.HandleFunc("POST /settings/server/plan", a.serverSettingsPlan)
 	mux.HandleFunc("POST /settings/server/apply", a.serverSettingsApply)
 	mux.HandleFunc("GET /settings/storage", a.storageSettingsPage)
+	mux.HandleFunc("GET /settings/new-storage", a.storageBrowserPage)
 	a.registerAdminBackupStoragePages(mux)
 	a.registerAdminStorageProvisionPages(mux)
 	a.registerSetupWizardRoutes(mux)
@@ -122,7 +153,7 @@ func (a *App) storageSettingsPage(w http.ResponseWriter, r *http.Request) {
 	devices := make([]storageDeviceView, 0, len(storage.Devices))
 	for _, device := range storage.Devices {
 		devices = append(devices, storageDeviceView{
-			Name: device.Name, Path: device.Path, Type: device.Type, Size: humanBytes(device.SizeBytes),
+			Name: device.Name, Path: device.Path, Parent: device.Parent, Type: device.Type, Size: humanBytes(device.SizeBytes),
 			Filesystem: device.Filesystem, Label: device.Label, UUID: device.UUID,
 			Mountpoints: strings.Join(device.Mountpoints, ", "), Model: device.Model, Transport: device.Transport,
 			ReadOnly: device.ReadOnly, System: device.System,
@@ -133,6 +164,106 @@ func (a *App) storageSettingsPage(w http.ResponseWriter, r *http.Request) {
 		CSRF: csrfFromRequest(r), Identity: identity, Configuration: configuration,
 		SystemDisks: storage.SystemDisks, Devices: devices,
 	})
+}
+
+func (a *App) storageBrowserPage(w http.ResponseWriter, r *http.Request) {
+	session, client, identity, ok := a.adminDiscoveryRequest(w, r)
+	if !ok {
+		return
+	}
+	configuration, err := client.AdminConfiguration(r.Context(), session)
+	if err != nil {
+		a.handleAdminDiscoveryError(w, r, err)
+		return
+	}
+	storage, err := client.AdminStorage(r.Context(), session)
+	if err != nil {
+		a.handleAdminDiscoveryError(w, r, err)
+		return
+	}
+
+	disks := make([]storageBrowserDiskView, 0)
+	diskIndex := make(map[string]int)
+	for _, device := range storage.Devices {
+		if device.Type != "disk" {
+			continue
+		}
+		diskIndex[device.Name] = len(disks)
+		disks = append(disks, storageBrowserDiskView{
+			Name: device.Name, Path: device.Path, Size: humanBytes(device.SizeBytes),
+			Model: device.Model, Transport: device.Transport, System: device.System,
+		})
+	}
+	for _, device := range storage.Devices {
+		if device.Type != "part" {
+			continue
+		}
+		index, exists := diskIndex[device.Parent]
+		if !exists {
+			continue
+		}
+		role := storageBrowserRole(device, configuration)
+		view := storageBrowserPartitionView{
+			storageDeviceView: storageDeviceView{
+				Name: device.Name, Path: device.Path, Parent: device.Parent, Type: device.Type,
+				Size: humanBytes(device.SizeBytes), Filesystem: device.Filesystem, Label: device.Label,
+				UUID: device.UUID, Mountpoints: strings.Join(device.Mountpoints, ", "), Model: device.Model,
+				Transport: device.Transport, ReadOnly: device.ReadOnly, System: device.System,
+			},
+			Role: role, Mounted: len(device.Mountpoints) > 0, Formatted: device.Filesystem != "",
+			Swap: device.Filesystem == "swap",
+			Interactive: device.Filesystem != "swap",
+		}
+		disks[index].Partitions = append(disks[index].Partitions, view)
+	}
+
+	a.renderAdminDiscovery(w, "storage_browser.html", storageBrowserPageData{
+		Title: "New Storage", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
+		CSRF: csrfFromRequest(r), Identity: identity, Configuration: configuration, Disks: disks,
+	})
+}
+
+func storageBrowserRole(device api.AdminStorageDevice, configuration api.AdminConfigurationDiscovery) string {
+	if device.Filesystem == "swap" {
+		return "Swap"
+	}
+	if device.System {
+		return "System"
+	}
+	roles := make([]string, 0, 2)
+	if configuration.Configured {
+		if storageDeviceMatchesConfiguration(device, configuration.Minecraft.DataExpectedUUID, configuration.Minecraft.DataMountPoint, configuration.Minecraft.DataPath) {
+			roles = append(roles, "Minecraft")
+		}
+		if storageDeviceMatchesConfiguration(device, configuration.Backup.ExpectedUUID, configuration.Backup.MountPoint, configuration.Backup.Path) {
+			roles = append(roles, "Backups")
+		}
+	}
+	if len(roles) > 0 {
+		return strings.Join(roles, " + ")
+	}
+	if device.Filesystem == "" {
+		return "Not formatted"
+	}
+	if len(device.Mountpoints) > 0 {
+		return "Mounted"
+	}
+	return "Available"
+}
+
+func storageDeviceMatchesConfiguration(device api.AdminStorageDevice, expectedUUID, expectedMountPoint, configuredPath string) bool {
+	if expectedUUID != "" && device.UUID != "" && device.UUID == expectedUUID {
+		return true
+	}
+	for _, mountpoint := range device.Mountpoints {
+		if expectedMountPoint != "" && mountpoint == expectedMountPoint {
+			return true
+		}
+		if mountpoint != "" && configuredPath != "" && (configuredPath == mountpoint || strings.HasPrefix(configuredPath, strings.TrimRight(mountpoint, "/")+"/")) {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *App) adminDiscoveryRequest(w http.ResponseWriter, r *http.Request) (string, adminDiscoveryAPI, api.SessionInfo, bool) {
