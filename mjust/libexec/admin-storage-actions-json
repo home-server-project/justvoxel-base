@@ -16,8 +16,9 @@ append_warning() {
 
 prepare_plan() {
     local request operation device requested_mountpoint
-    local filesystem uuid current_mountpoint role size fingerprint warnings='[]'
+    local filesystem uuid current_mountpoint role size fingerprint
     local confirmation='' destructive=false proposed_mountpoint='' target_filesystem=''
+    PLAN_WARNINGS='[]'
 
     request="$(cat)"
     jq -e 'type == "object"' >/dev/null 2>&1 <<< "${request}" || {
@@ -88,10 +89,10 @@ prepare_plan() {
             proposed_mountpoint="${current_mountpoint}"
             target_filesystem="${filesystem}"
             if [[ ${role} == *Minecraft* ]]; then
-                warnings="$(append_warning "${warnings}" 'Minecraft data is stored on this partition. Unmounting it may interrupt or stop the Minecraft server.')"
+                PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'Minecraft data is stored on this partition. Unmounting it may interrupt or stop the Minecraft server.')"
             fi
             if [[ ${role} == *Backups* ]]; then
-                warnings="$(append_warning "${warnings}" 'JustVoxel backups use this partition. Backups will fail while it is unmounted.')"
+                PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'JustVoxel backups use this partition. Backups will fail while it is unmounted.')"
             fi
             ;;
         format)
@@ -103,15 +104,15 @@ prepare_plan() {
             confirmation="FORMAT ${device}"
             target_filesystem=xfs
             proposed_mountpoint=''
-            warnings="$(append_warning "${warnings}" 'Formatting permanently destroys all data on this partition and creates a new XFS filesystem.')"
+            PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'Formatting permanently destroys all data on this partition and creates a new XFS filesystem.')"
             if [[ -n ${current_mountpoint} ]]; then
-                warnings="$(append_warning "${warnings}" "This partition is currently mounted at ${current_mountpoint}. JustVoxel will unmount it before formatting.")"
+                PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" "This partition is currently mounted at ${current_mountpoint}. JustVoxel will unmount it before formatting.")"
             fi
             if [[ ${role} == *Minecraft* ]]; then
-                warnings="$(append_warning "${warnings}" 'Minecraft data is stored on this partition. Formatting it will permanently destroy that Minecraft data and leave the current server storage configuration invalid until you choose a new location.')"
+                PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'Minecraft data is stored on this partition. Formatting it will permanently destroy that Minecraft data and leave the current server storage configuration invalid until you choose a new location.')"
             fi
             if [[ ${role} == *Backups* ]]; then
-                warnings="$(append_warning "${warnings}" 'JustVoxel backups are stored on this partition. Formatting it will permanently destroy those backups and leave the current backup destination invalid until you choose a new location.')"
+                PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'JustVoxel backups are stored on this partition. Formatting it will permanently destroy those backups and leave the current backup destination invalid until you choose a new location.')"
             fi
             ;;
         *)
@@ -138,7 +139,7 @@ prepare_plan() {
 
 plan_json() {
     prepare_plan || return 0
-    jq -n --argjson proposed "${PLAN_JSON}" --argjson warnings "${warnings}" '{ok:true,proposed:$proposed,warnings:$warnings,applied:false}'
+    jq -n --argjson proposed "${PLAN_JSON}" --argjson warnings "${PLAN_WARNINGS}" '{ok:true,proposed:$proposed,warnings:$warnings,applied:false}'
 }
 
 action="${1:-plan}"
