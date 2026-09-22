@@ -37,7 +37,7 @@ func TestControlCenterNavigationUX(t *testing.T) {
 		`href="/password"`,
 		`href="/about"`,
 		`class="nav-logout"`,
-		`aria-label="Log out" title="Log out"`,
+		`aria-label="Log out" data-tooltip="Log out"`,
 	} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("Control Center header missing %q", want)
