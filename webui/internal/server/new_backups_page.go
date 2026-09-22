@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
@@ -105,6 +106,8 @@ func (a *App) newBackupsPage(w http.ResponseWriter, r *http.Request) {
 		} else {
 			message = "Selected backups deleted."
 		}
+	case "automatic":
+		message = "Automatic backup settings saved."
 	}
 	a.renderNewBackupsPage(w, r, session, client, identity, message, "")
 }
@@ -129,12 +132,150 @@ func (a *App) newBackupsNow(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/settings/new-backups?result=backup", http.StatusSeeOther)
 }
 
+
+func (a *App) newBackupsAutomaticPlan(w http.ResponseWriter, r *http.Request) {
+	session, client, identity, ok := a.newBackupsRequest(w, r, true)
+	if !ok {
+		return
+	}
+	form, err := parseNewBackupsAutomaticForm(r)
+	if err != nil {
+		a.renderNewBackupsPageWithAutomatic(w, r, session, client, identity, "", err.Error(), &form, nil)
+		return
+	}
+	configuration, err := client.AdminConfiguration(r.Context(), session)
+	if err != nil {
+		a.handleNewBackupsError(w, r, err)
+		return
+	}
+	request := newBackupsAutomaticConfigurationRequest(configuration, form)
+	plan, err := client.AdminConfigurationPlan(r.Context(), session, request)
+	if err != nil {
+		a.renderNewBackupsPageWithAutomatic(w, r, session, client, identity, "", apiMessage(err, "Could not validate automatic backup settings."), &form, nil)
+		return
+	}
+	if !newBackupsPlanIsBackupOnly(plan) {
+		a.renderNewBackupsPageWithAutomatic(w, r, session, client, identity, "", "Configuration changed unexpectedly. Reload New Backups and try again.", &form, nil)
+		return
+	}
+	a.renderNewBackupsPageWithAutomatic(w, r, session, client, identity, "", "", &form, &plan)
+}
+
+func (a *App) newBackupsAutomaticApply(w http.ResponseWriter, r *http.Request) {
+	session, client, identity, ok := a.newBackupsRequest(w, r, true)
+	if !ok {
+		return
+	}
+	form, err := parseNewBackupsAutomaticForm(r)
+	if err != nil {
+		a.renderNewBackupsPageWithAutomatic(w, r, session, client, identity, "", err.Error(), &form, nil)
+		return
+	}
+	configuration, err := client.AdminConfiguration(r.Context(), session)
+	if err != nil {
+		a.handleNewBackupsError(w, r, err)
+		return
+	}
+	request := newBackupsAutomaticConfigurationRequest(configuration, form)
+	plan, err := client.AdminConfigurationPlan(r.Context(), session, request)
+	if err != nil {
+		a.renderNewBackupsPageWithAutomatic(w, r, session, client, identity, "", apiMessage(err, "Could not revalidate automatic backup settings."), &form, nil)
+		return
+	}
+	if !newBackupsPlanIsBackupOnly(plan) {
+		a.renderNewBackupsPageWithAutomatic(w, r, session, client, identity, "", "Configuration changed unexpectedly. Nothing was applied. Reload New Backups and try again.", &form, nil)
+		return
+	}
+	result, err := client.AdminConfigurationApply(r.Context(), session, request)
+	if err != nil {
+		a.renderNewBackupsPageWithAutomatic(w, r, session, client, identity, "", apiMessage(err, "Could not apply automatic backup settings."), &form, &plan)
+		return
+	}
+	if !result.Applied {
+		a.renderNewBackupsPageWithAutomatic(w, r, session, client, identity, "", "Automatic backup settings were not applied.", &form, &plan)
+		return
+	}
+	http.Redirect(w, r, "/settings/new-backups?result=automatic", http.StatusSeeOther)
+}
+
+func parseNewBackupsAutomaticForm(r *http.Request) (newBackupAutomaticForm, error) {
+	var form newBackupAutomaticForm
+	if err := r.ParseForm(); err != nil {
+		return form, errors.New("Could not read automatic backup settings.")
+	}
+	form.Enabled = r.FormValue("automatic_enabled") == "on"
+	form.DailyTime = strings.TrimSpace(r.FormValue("daily_time"))
+	form.Keep, _ = strconv.Atoi(strings.TrimSpace(r.FormValue("backup_keep")))
+	if form.Keep <= 0 {
+		return form, errors.New("Keep last backups must be a positive number.")
+	}
+	if _, err := time.Parse("15:04", form.DailyTime); err != nil {
+		return form, errors.New("Daily backup time must be a valid 24-hour time.")
+	}
+	return form, nil
+}
+
+func newBackupsAutomaticConfigurationRequest(configuration api.AdminConfigurationDiscovery, form newBackupAutomaticForm) api.AdminConfigurationChangeRequest {
+	request := configurationRequestFromDiscovery(configuration)
+	request.BackupKeep = form.Keep
+	request.BackupSchedule = "*-*-* " + form.DailyTime + ":00"
+	request.BackupTimerEnabled = form.Enabled
+	return request
+}
+
+func backupDailyTimeFromSchedule(schedule string) (string, bool) {
+	const prefix = "*-*-* "
+	value := strings.TrimSpace(schedule)
+	if !strings.HasPrefix(value, prefix) {
+		return "", false
+	}
+	clock := strings.TrimPrefix(value, prefix)
+	parsed, err := time.Parse("15:04:05", clock)
+	if err != nil || parsed.Second() != 0 {
+		return "", false
+	}
+	return parsed.Format("15:04"), true
+}
+
+func newBackupsPlanIsBackupOnly(plan api.AdminConfigurationChangeResponse) bool {
+	for _, change := range plan.Changes {
+		switch change.Field {
+		case "backup_keep", "backup_schedule", "backup_timer_enabled":
+		default:
+			return false
+		}
+	}
+	return !plan.RestartRequired && !plan.MemoryRestartRequired && !plan.ConfirmationRequired
+}
+
 func (a *App) renderNewBackupsPage(w http.ResponseWriter, r *http.Request, session string, client newBackupsAPI, identity api.SessionInfo, message, pageError string) {
+	a.renderNewBackupsPageWithAutomatic(w, r, session, client, identity, message, pageError, nil, nil)
+}
+
+func (a *App) renderNewBackupsPageWithAutomatic(w http.ResponseWriter, r *http.Request, session string, client newBackupsAPI, identity api.SessionInfo, message, pageError string, automaticOverride *newBackupAutomaticForm, plan *api.AdminConfigurationChangeResponse) {
 	backups, err := client.AdminRestoreBackups(r.Context(), session)
 	if err != nil {
 		a.handleNewBackupsError(w, r, err)
 		return
 	}
+	configuration, err := client.AdminConfiguration(r.Context(), session)
+	if err != nil {
+		a.handleNewBackupsError(w, r, err)
+		return
+	}
+	automatic := newBackupAutomaticForm{
+		Enabled: configuration.Backup.TimerEnabled,
+		Keep:    configuration.Backup.Keep,
+	}
+	if dailyTime, ok := backupDailyTimeFromSchedule(configuration.Backup.Schedule); ok {
+		automatic.DailyTime = dailyTime
+	} else if pageError == "" {
+		pageError = "The current automatic backup schedule is not a simple daily schedule. Change it from Minecraft Settings before editing it here."
+	}
+	if automaticOverride != nil {
+		automatic = *automaticOverride
+	}
+
 	views := make([]newBackupView, 0, len(backups.Backups))
 	var totalBytes uint64
 	for _, backup := range backups.Backups {
@@ -160,6 +301,7 @@ func (a *App) renderNewBackupsPage(w http.ResponseWriter, r *http.Request, sessi
 		Title: "New Backups", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
 		CSRF: csrfFromRequest(r), Identity: identity, Backups: views,
 		BackupCount: len(views), TotalSize: humanBytes(totalBytes), Message: message, Error: pageError,
+		Automatic: automatic, AutomaticPlan: plan, Timezone: configuration.Minecraft.Timezone,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
