@@ -136,3 +136,24 @@ func TestOperationsExposeStableNavigationAnchors(t *testing.T) {
 		}
 	}
 }
+
+func TestSetupTemplatesUseThinTopbar(t *testing.T) {
+	for _, name := range []string{"setup_wizard.html", "setup_review.html", "setup_progress.html"} {
+		content, err := assets.ReadFile("templates/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		markup := string(content)
+		for _, want := range []string{
+			`class="setup-header topbar setup-topbar"`,
+			`class="brand-link brand-mark"`,
+			`<strong>JV</strong>`,
+			`data-topbar-clock`,
+			`/static/app.js`,
+		} {
+			if !strings.Contains(markup, want) {
+				t.Fatalf("%s thin setup topbar missing %q", name, want)
+			}
+		}
+	}
+}
