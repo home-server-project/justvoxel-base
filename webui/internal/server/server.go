@@ -104,6 +104,7 @@ func (a *App) Handler() http.Handler {
 	a.registerAdminServerMigrationPages(mux)
 	a.registerAdminSystemActionPages(mux)
 	mux.HandleFunc("GET /api/dashboard-status", a.dashboardStatus)
+	mux.HandleFunc("GET /about", a.aboutPage)
 	mux.HandleFunc("POST /minecraft/start", a.minecraftAction("start"))
 	mux.HandleFunc("POST /minecraft/stop", a.minecraftAction("stop"))
 	mux.HandleFunc("POST /minecraft/restart", a.minecraftAction("restart"))
@@ -233,6 +234,31 @@ func (a *App) passwordChange(w http.ResponseWriter, r *http.Request) {
 	}
 	a.clearSessionCookies(w)
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
+}
+
+func (a *App) aboutPage(w http.ResponseWriter, r *http.Request) {
+	if mustChange(r) {
+		http.Redirect(w, r, "/password", http.StatusSeeOther)
+		return
+	}
+	session, ok := sessionFromRequest(r)
+	if !ok {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	status, err := a.api.Status(r.Context(), session)
+	if err != nil {
+		a.handleDashboardError(w, r, err)
+		return
+	}
+	a.render(w, "about.html", pageData{
+		Title:         "About",
+		Version:       a.config.Version,
+		Commit:        a.config.Commit,
+		ManagementAPI: a.config.ManagementAPI,
+		CSRF:          csrfFromRequest(r),
+		Status:        status,
+	})
 }
 
 func (a *App) dashboard(w http.ResponseWriter, r *http.Request) {
