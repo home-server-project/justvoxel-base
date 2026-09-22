@@ -37,15 +37,15 @@ type setupServerDraft struct {
 }
 
 type setupMinecraftDraft struct {
-	JavaMemory       string
-	ContainerMemory  string
-	JavaPort         string
-	BedrockPort      string
-	ImageTag         string
-	VersionPolicy    string
-	Version          string
+	JavaMemory        string
+	ContainerMemory   string
+	JavaPort          string
+	BedrockPort       string
+	ImageTag          string
+	VersionPolicy     string
+	Version           string
 	ResourcesComplete bool
-	Complete         bool
+	Complete          bool
 }
 
 type setupDraft struct {
