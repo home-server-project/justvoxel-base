@@ -164,7 +164,7 @@ func TestDiscoveryPagesRejectOperatorBeforePrivilegedDiscovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"/settings/server", "/settings/storage"} {
+	for _, path := range []string{"/settings/server", "/settings/storage", "/settings/new-storage"} {
 		rr := httptest.NewRecorder()
 		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example"+path, ""))
 		if rr.Code != http.StatusForbidden {
@@ -173,5 +173,55 @@ func TestDiscoveryPagesRejectOperatorBeforePrivilegedDiscovery(t *testing.T) {
 	}
 	if client.configurationHit != 0 || client.storageHit != 0 || client.defaultsHit != 0 {
 		t.Fatalf("privileged discovery ran for operator: configuration=%d storage=%d defaults=%d", client.configurationHit, client.storageHit, client.defaultsHit)
+	}
+}
+
+func TestNewStorageBrowserGroupsDisksAndPartitions(t *testing.T) {
+	client := &fakeDiscoveryAPI{}
+	client.configuration.Configured = true
+	client.configuration.Minecraft.DataPath = "/var/mnt/data/minecraft"
+	client.configuration.Minecraft.DataMountPoint = "/var/mnt/data"
+	client.configuration.Minecraft.DataExpectedUUID = "minecraft-uuid"
+	client.configuration.Backup.Path = "/var/mnt/backups/justvoxel"
+	client.configuration.Backup.MountPoint = "/var/mnt/backups"
+	client.configuration.Backup.ExpectedUUID = "backup-uuid"
+	client.storage.Devices = []api.AdminStorageDevice{
+		{Name: "vda", Path: "/dev/vda", Type: "disk", SizeBytes: 100 * 1024 * 1024 * 1024, Model: "System Disk", Transport: "virtio", System: true},
+		{Name: "vda1", Path: "/dev/vda1", Parent: "vda", Type: "part", SizeBytes: 1024 * 1024 * 1024, Filesystem: "xfs", UUID: "system-uuid", Mountpoints: []string{"/"}, System: true},
+		{Name: "vda2", Path: "/dev/vda2", Parent: "vda", Type: "part", SizeBytes: 8 * 1024 * 1024 * 1024, Filesystem: "swap", UUID: "swap-uuid", System: true},
+		{Name: "vdb", Path: "/dev/vdb", Type: "disk", SizeBytes: 500 * 1024 * 1024 * 1024, Model: "Data Disk", Transport: "virtio"},
+		{Name: "vdb1", Path: "/dev/vdb1", Parent: "vdb", Type: "part", SizeBytes: 300 * 1024 * 1024 * 1024, Filesystem: "xfs", UUID: "minecraft-uuid", Mountpoints: []string{"/var/mnt/data"}},
+		{Name: "vdb2", Path: "/dev/vdb2", Parent: "vdb", Type: "part", SizeBytes: 200 * 1024 * 1024 * 1024},
+	}
+
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil { t.Fatal(err) }
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-storage", ""))
+	if rr.Code != http.StatusOK { t.Fatalf("new storage returned %d: %s", rr.Code, rr.Body.String()) }
+	body := rr.Body.String()
+	for _, want := range []string{"New Storage", "System Disk", "Data Disk", "data-storage-disk=\"vda\"", "data-storage-partitions=\"vdb\"", "/dev/vdb1", "Minecraft", "/dev/vdb2", "Not formatted", "storage-partition-card storage-partition-swap", "data-storage-detail-dialog", "data-storage-detail-close", "/static/storage-browser.js"} {
+		if !strings.Contains(body, want) { t.Fatalf("new storage browser missing %q: %s", want, body) }
+	}
+	if strings.Contains(body, "data-path=\"/dev/vda2\"") { t.Fatal("swap partition is interactive") }
+}
+
+func TestStorageBrowserRoleClassification(t *testing.T) {
+	configuration := api.AdminConfigurationDiscovery{Configured: true}
+	configuration.Minecraft.DataExpectedUUID = "minecraft-uuid"
+	configuration.Backup.ExpectedUUID = "backup-uuid"
+	cases := []struct { name string; device api.AdminStorageDevice; want string }{
+		{name: "swap", device: api.AdminStorageDevice{Filesystem: "swap"}, want: "Swap"},
+		{name: "system", device: api.AdminStorageDevice{System: true, Filesystem: "xfs"}, want: "System"},
+		{name: "minecraft", device: api.AdminStorageDevice{Filesystem: "xfs", UUID: "minecraft-uuid"}, want: "Minecraft"},
+		{name: "backup", device: api.AdminStorageDevice{Filesystem: "xfs", UUID: "backup-uuid"}, want: "Backups"},
+		{name: "blank", device: api.AdminStorageDevice{}, want: "Not formatted"},
+		{name: "mounted", device: api.AdminStorageDevice{Filesystem: "xfs", Mountpoints: []string{"/var/mnt/data"}}, want: "Mounted"},
+		{name: "available", device: api.AdminStorageDevice{Filesystem: "xfs"}, want: "Available"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := storageBrowserRole(tc.device, configuration); got != tc.want { t.Fatalf("storageBrowserRole() = %q, want %q", got, tc.want) }
+		})
 	}
 }
