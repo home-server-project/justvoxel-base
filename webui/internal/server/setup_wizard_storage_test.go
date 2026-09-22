@@ -44,6 +44,9 @@ func advanceToStorage(t *testing.T, app *App) {
 	if rr := saveServerStep(t, app, validServerValues()); rr.Code != http.StatusSeeOther {
 		t.Fatalf("server save returned %d: %s", rr.Code, rr.Body.String())
 	}
+	if rr := saveResourcesStep(t, app, validResourceValues()); rr.Code != http.StatusSeeOther {
+		t.Fatalf("resources save returned %d: %s", rr.Code, rr.Body.String())
+	}
 	if rr := saveMinecraftStep(t, app, validMinecraftValues()); rr.Code != http.StatusSeeOther {
 		t.Fatalf("Minecraft save returned %d: %s", rr.Code, rr.Body.String())
 	}
@@ -64,7 +67,7 @@ func TestSetupWizardStorageStepShowsOnlySafeExistingFilesystems(t *testing.T) {
 	}
 	body := page.Body.String()
 	for _, want := range []string{
-		"Step 3 of 5", "Use JustVoxel system storage", "Use an existing local filesystem", "/dev/vda4", "/dev/vdb1", "Samsung SSD", "ext4", "Advanced Storage", "/static/setup-storage.js",
+		"Step 4 of 6", "Use JustVoxel system storage", "Use an existing local filesystem", "/dev/vda4", "/dev/vdb1", "Samsung SSD", "ext4", "Advanced Storage", "/static/setup-storage.js",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("storage page missing %q: %s", want, body)
@@ -112,7 +115,7 @@ func TestSetupWizardStorageStepValidatesAndAdvances(t *testing.T) {
 		t.Fatalf("valid storage step returned %d %q: %s", rr.Code, rr.Header().Get("Location"), rr.Body.String())
 	}
 	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Step 4 of 5") || !strings.Contains(page.Body.String(), "Backup destination") {
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Step 5 of 6") || !strings.Contains(page.Body.String(), "Backup destination") {
 		t.Fatalf("storage step did not advance to backups: %d %s", page.Code, page.Body.String())
 	}
 }
@@ -165,7 +168,7 @@ func TestSetupWizardBackupStepSupportsLocalNFSAndSMBWithoutPasswordDraft(t *test
 		t.Fatalf("SMB backup draft returned %d %q: %s", rr.Code, rr.Header().Get("Location"), rr.Body.String())
 	}
 	draft, ok := firstRunSetupDrafts.get(app, "session-token")
-	if !ok || draft.CurrentStep != 5 || draft.Backups.Type != "smb" || draft.Backups.Source != "//nas/backups" || draft.Backups.Username != "minecraft" {
+	if !ok || draft.CurrentStep != 6 || draft.Backups.Type != "smb" || draft.Backups.Source != "//nas/backups" || draft.Backups.Username != "minecraft" {
 		t.Fatalf("SMB backup draft was not preserved: %#v", draft)
 	}
 	if strings.Contains(strings.ToLower(fmt.Sprintf("%#v", draft.Backups)), "password") {
@@ -221,7 +224,7 @@ func TestSetupWizardStorageAndBackupBackPreserveDraft(t *testing.T) {
 		t.Fatalf("backup back returned %d: %s", back.Code, back.Body.String())
 	}
 	storagePage := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-	for _, want := range []string{"Step 3 of 5", "/dev/vda4", "/var/mnt/justvoxel-data/minecraft"} {
+	for _, want := range []string{"Step 4 of 6", "/dev/vda4", "/var/mnt/justvoxel-data/minecraft"} {
 		if !strings.Contains(storagePage.Body.String(), want) {
 			t.Fatalf("storage draft lost %q: %s", want, storagePage.Body.String())
 		}
