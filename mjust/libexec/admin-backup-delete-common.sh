@@ -31,7 +31,7 @@ backup_delete_archive_path() {
 backup_delete_metadata_path() {
     local archive="$1" metadata root real
     metadata="${archive}.meta.json"
-    [[ -e ${metadata} ]] || return 0
+    [[ -e ${metadata} || -L ${metadata} ]] || return 0
     [[ -f ${metadata} && ! -L ${metadata} ]] || return 1
     root="$(readlink -f -- "${minecraft_backup_path}" 2>/dev/null || true)"
     real="$(readlink -f -- "${metadata}" 2>/dev/null || true)"
@@ -63,7 +63,7 @@ backup_delete_collect_plan() {
             return 1
         }
         metadata="$(backup_delete_metadata_path "${archive}" || true)"
-        if [[ -e ${archive}.meta.json && -z ${metadata} ]]; then
+        if [[ ( -e ${archive}.meta.json || -L ${archive}.meta.json ) && -z ${metadata} ]]; then
             backup_delete_json_error "Metadata for backup '${id}' is unsafe to delete."
             return 1
         fi
