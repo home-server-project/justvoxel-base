@@ -21,6 +21,12 @@ type fakeDiscoveryAPI struct {
 	defaultsHit      int
 }
 
+type fakeStorageBrowserMigrationAPI struct {
+	fakeDiscoveryAPI
+	migration      api.AdminDataMigrationDiscoveryResponse
+	migrationCalls int
+}
+
 func (f *fakeDiscoveryAPI) Session(_ context.Context, session string) (api.SessionInfo, error) {
 	if session != "session-token" {
 		return api.SessionInfo{}, api.ErrUnauthorized
@@ -54,6 +60,14 @@ func (f *fakeDiscoveryAPI) AdminSetupDefaults(_ context.Context, session string)
 	}
 	f.defaultsHit++
 	return f.defaults, nil
+}
+
+func (f *fakeStorageBrowserMigrationAPI) AdminDataMigrationDiscovery(_ context.Context, session string) (api.AdminDataMigrationDiscoveryResponse, error) {
+	if session != "session-token" {
+		return api.AdminDataMigrationDiscoveryResponse{}, api.ErrUnauthorized
+	}
+	f.migrationCalls++
+	return f.migration, nil
 }
 
 func TestServerSettingsShowsCurrentConfiguration(t *testing.T) {
@@ -211,6 +225,84 @@ func TestNewStorageBrowserGroupsDisksAndPartitions(t *testing.T) {
 	}
 	if strings.Contains(body, "data-path=\"/dev/vda2\"") {
 		t.Fatal("swap partition is interactive")
+	}
+}
+
+func TestNewStorageUsesAgentApprovedMinecraftMigrationCandidates(t *testing.T) {
+	client := &fakeStorageBrowserMigrationAPI{}
+	client.configuration.Configured = true
+	client.configuration.Minecraft.DataPath = "/var/mnt/minecraft/minecraft"
+	client.configuration.Minecraft.DataMountPoint = "/var/mnt/minecraft"
+	client.configuration.Minecraft.DataExpectedUUID = "minecraft-uuid"
+	client.configuration.Backup.Path = "/var/mnt/backups/justvoxel"
+	client.configuration.Backup.MountPoint = "/var/mnt/backups"
+	client.configuration.Backup.ExpectedUUID = "backup-uuid"
+	client.storage.Devices = []api.AdminStorageDevice{
+		{Name: "vdb", Path: "/dev/vdb", Type: "disk", SizeBytes: 800 * 1024 * 1024 * 1024, Model: "Data Disk", Transport: "virtio"},
+		{Name: "vdb1", Path: "/dev/vdb1", Parent: "vdb", Type: "part", SizeBytes: 200 * 1024 * 1024 * 1024, Filesystem: "xfs", UUID: "minecraft-uuid", Mountpoints: []string{"/var/mnt/minecraft"}},
+		{Name: "vdb2", Path: "/dev/vdb2", Parent: "vdb", Type: "part", SizeBytes: 200 * 1024 * 1024 * 1024, Filesystem: "xfs", UUID: "target-uuid"},
+		{Name: "vdb3", Path: "/dev/vdb3", Parent: "vdb", Type: "part", SizeBytes: 200 * 1024 * 1024 * 1024, Filesystem: "xfs", UUID: "backup-uuid", Mountpoints: []string{"/var/mnt/backups"}},
+		{Name: "vdb4", Path: "/dev/vdb4", Parent: "vdb", Type: "part", SizeBytes: 100 * 1024 * 1024 * 1024, Filesystem: "xfs", UUID: "not-approved"},
+		{Name: "vdb5", Path: "/dev/vdb5", Parent: "vdb", Type: "part", SizeBytes: 100 * 1024 * 1024 * 1024, Filesystem: "ext4", UUID: "mounted-target", Mountpoints: []string{"/var/mnt/fast"}},
+	}
+	client.migration = api.AdminDataMigrationDiscoveryResponse{
+		OK: true, SchemaVersion: "v1",
+		Partitions: []api.AdminDataMigrationCandidate{
+			{Path: "/dev/vdb1", Filesystem: "xfs", Mountpoint: "/var/mnt/minecraft", SizeBytes: 200 * 1024 * 1024 * 1024},
+			{Path: "/dev/vdb2", Filesystem: "xfs", SizeBytes: 200 * 1024 * 1024 * 1024},
+			{Path: "/dev/vdb3", Filesystem: "xfs", Mountpoint: "/var/mnt/backups", SizeBytes: 200 * 1024 * 1024 * 1024},
+			{Path: "/dev/vdb5", Filesystem: "ext4", Mountpoint: "/var/mnt/fast", SizeBytes: 100 * 1024 * 1024 * 1024},
+		},
+	}
+
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-storage", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("new storage returned %d: %s", rr.Code, rr.Body.String())
+	}
+	if client.migrationCalls != 1 {
+		t.Fatalf("migration discovery calls = %d, want 1", client.migrationCalls)
+	}
+
+	body := rr.Body.String()
+	partitionMarkup := func(path string) string {
+		marker := `data-path="` + path + `"`
+		start := strings.Index(body, marker)
+		if start < 0 {
+			t.Fatalf("partition %s missing from New Storage: %s", path, body)
+		}
+		end := strings.Index(body[start:], "</button>")
+		if end < 0 {
+			t.Fatalf("partition %s button is incomplete", path)
+		}
+		return body[start : start+end]
+	}
+
+	if !strings.Contains(partitionMarkup("/dev/vdb2"), `data-minecraft-candidate="Yes"`) {
+		t.Fatal("Agent-approved unmounted filesystem was not offered for Minecraft migration")
+	}
+	mounted := partitionMarkup("/dev/vdb5")
+	if !strings.Contains(mounted, `data-minecraft-candidate="Yes"`) || !strings.Contains(mounted, `data-minecraft-mount-point="/var/mnt/fast"`) {
+		t.Fatalf("Agent-approved mounted filesystem lost migration mount identity: %s", mounted)
+	}
+	for _, path := range []string{"/dev/vdb1", "/dev/vdb3", "/dev/vdb4"} {
+		if !strings.Contains(partitionMarkup(path), `data-minecraft-candidate="No"`) {
+			t.Fatalf("%s should not be offered by the New Storage Minecraft shortcut", path)
+		}
+	}
+	for _, want := range []string{
+		"Use for Minecraft data",
+		`action="/settings/data-migration/review"`,
+		`name="operation" value="use_partition"`,
+		"Review migration",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("New Storage Minecraft migration handoff missing %q: %s", want, body)
+		}
 	}
 }
 

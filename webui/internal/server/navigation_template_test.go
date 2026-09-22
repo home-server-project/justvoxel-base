@@ -325,6 +325,51 @@ func TestStorageBrowserReviewedActionFlow(t *testing.T) {
 	}
 }
 
+func TestStorageBrowserMinecraftMigrationHandoff(t *testing.T) {
+	templateContent, err := assets.ReadFile("templates/storage_browser.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(templateContent)
+	for _, want := range []string{
+		`data-minecraft-candidate=`,
+		`data-storage-minecraft-migrate`,
+		`data-storage-minecraft-dialog`,
+		`action="/settings/data-migration/review"`,
+		`name="operation" value="use_partition"`,
+		`name="size_gib" value="all"`,
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("New Storage Minecraft migration handoff missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		`name="operation" value="erase_disk"`,
+		`name="operation" value="format_partition"`,
+		`name="operation" value="create_partition"`,
+	} {
+		if strings.Contains(markup, forbidden) {
+			t.Fatalf("New Storage unexpectedly exposes deferred destructive migration operation %q", forbidden)
+		}
+	}
+
+	scriptContent, err := assets.ReadFile("static/storage-browser.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(scriptContent)
+	for _, want := range []string{
+		`selectedPartition.minecraftCandidate !== "Yes"`,
+		`migrationMount.readOnly = Boolean(existingMount)`,
+		`"/var/mnt/justvoxel-data"`,
+		`migrationDialog.showModal()`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("New Storage Minecraft migration behavior missing %q", want)
+		}
+	}
+}
+
 func TestNewBackupsCompactLibraryLayout(t *testing.T) {
 	templateContent, err := assets.ReadFile("templates/new_backups.html")
 	if err != nil {
