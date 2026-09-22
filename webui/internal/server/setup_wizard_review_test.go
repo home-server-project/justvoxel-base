@@ -69,6 +69,9 @@ func advanceSetupToReview(t *testing.T, app *App) {
 	if rr := saveServerStep(t, app, validServerValues()); rr.Code != http.StatusSeeOther {
 		t.Fatalf("server save returned %d: %s", rr.Code, rr.Body.String())
 	}
+	if rr := saveResourcesStep(t, app, validResourceValues()); rr.Code != http.StatusSeeOther {
+		t.Fatalf("resources save returned %d: %s", rr.Code, rr.Body.String())
+	}
 	if rr := saveMinecraftStep(t, app, validMinecraftValues()); rr.Code != http.StatusSeeOther {
 		t.Fatalf("Minecraft save returned %d: %s", rr.Code, rr.Body.String())
 	}
@@ -116,7 +119,7 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 		"Recommended version", "/var/lib/justvoxel/minecraft", "/var/lib/justvoxel/backups",
 		"same_physical_disk", "Minecraft End User License Agreement", "https://www.minecraft.net/eula",
 		"Apply this exact validated plan using JustVoxel's transactional setup engine", "/static/setup-review.css", "/static/setup-operation.js",
-		`name="plan_fingerprint" value="` + setupReviewFingerprint + `"`, "Validated plan:", "01234567…",
+		`name="plan_fingerprint" value="` + setupReviewFingerprint + `"`, "Validated plan:", "01234567…", "Download configuration",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("review missing %q: %s", want, body)
@@ -130,6 +133,34 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 	}
 	if strings.Contains(body, `type="password"`) || strings.Contains(body, `name="backup_password"`) {
 		t.Fatal("review rendered a password field")
+	}
+}
+
+func TestSetupReviewConfigurationDownloadExcludesSecrets(t *testing.T) {
+	client := setupReviewClient()
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer firstRunSetupReviews.delete(app, "session-token")
+	advanceSetupToReview(t, app)
+
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review/configuration", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("configuration download returned %d: %s", rr.Code, rr.Body.String())
+	}
+	if disposition := rr.Header().Get("Content-Disposition"); !strings.Contains(disposition, "justvoxel-setup.txt") {
+		t.Fatalf("configuration download disposition = %q", disposition)
+	}
+	body := rr.Body.String()
+	for _, want := range []string{"JustVoxel setup configuration", "Normalized Family Server", "Minecraft version: 1.21.8", "/var/lib/justvoxel/backups", "Passwords and other secrets are never included"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("configuration snapshot missing %q: %s", want, body)
+		}
+	}
+	if strings.Contains(strings.ToLower(body), "password:") {
+		t.Fatalf("configuration snapshot contains a password field: %s", body)
 	}
 }
 
