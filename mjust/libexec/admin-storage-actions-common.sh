@@ -89,8 +89,14 @@ storage_action_role() {
     fi
 
     if (( ${#roles[@]} > 0 )); then
-        local joined
-        joined="$(IFS=' + '; printf '%s' "${roles[*]}")"
+        local joined=''
+        local item
+        for item in "${roles[@]}"; do
+            if [[ -n ${joined} ]]; then
+                joined+=" + "
+            fi
+            joined+="${item}"
+        done
         printf '%s\n' "${joined}"
     elif [[ -z ${filesystem} ]]; then
         printf 'Not formatted\n'
@@ -103,6 +109,10 @@ storage_action_role() {
 
 storage_action_validate_target() {
     local device="$1" filesystem
+    storage_require_identified_system_disk >/dev/null 2>&1 || {
+        echo 'ERROR: JustVoxel could not identify the system disk safely.' >&2
+        return 1
+    }
     storage_validate_partition "${device}" >/dev/null 2>&1 || {
         echo 'ERROR: target must be a writable partition.' >&2
         return 1
