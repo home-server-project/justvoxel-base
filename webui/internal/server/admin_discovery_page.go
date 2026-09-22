@@ -67,13 +67,13 @@ type storageSettingsPageData struct {
 
 type storageBrowserPartitionView struct {
 	storageDeviceView
-	Role                    string
-	Mounted                 bool
-	Formatted               bool
-	Swap                    bool
-	Interactive             bool
-	MinecraftCandidate      bool
-	MinecraftMountPoint     string
+	Role                string
+	Mounted             bool
+	Formatted           bool
+	Swap                bool
+	Interactive         bool
+	MinecraftCandidate  bool
+	MinecraftMountPoint string
 }
 
 type storageBrowserDiskView struct {
