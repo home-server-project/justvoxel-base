@@ -55,6 +55,7 @@ type setupReviewPageData struct {
 
 func (a *App) registerSetupWizardReviewRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /setup/review", a.setupWizardReviewPage)
+	mux.HandleFunc("GET /setup/review/configuration", a.setupWizardReviewConfiguration)
 	mux.HandleFunc("POST /setup/review/eula", a.setupWizardReviewEULA)
 	mux.HandleFunc("POST /setup/review/back", a.setupWizardReviewBack)
 	mux.HandleFunc("POST /setup/review/cancel", a.setupWizardReviewCancel)
@@ -88,6 +89,85 @@ func (a *App) setupWizardReviewPage(w http.ResponseWriter, r *http.Request) {
 	a.renderSetupReview(w, identity, state, csrfFromRequest(r), "")
 }
 
+func (a *App) setupWizardReviewConfiguration(w http.ResponseWriter, r *http.Request) {
+	session, client, _, ok := a.setupWizardRequest(w, r, false)
+	if !ok {
+		return
+	}
+	draft, exists := firstRunSetupDrafts.get(a, session)
+	if !exists || !setupDraftReadyForReview(draft) {
+		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		return
+	}
+	state, err, status, ready := a.setupReviewState(r.Context(), session, client, draft)
+	if !ready {
+		http.Error(w, setupReviewErrorMessage(err), status)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"justvoxel-setup.txt\"")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write([]byte(setupConfigurationSnapshot(state.Plan)))
+}
+
+func setupConfigurationSnapshot(plan api.AdminSetupPlanResponse) string {
+	var b strings.Builder
+	b.WriteString("JustVoxel setup configuration\n")
+	b.WriteString("Validated plan: " + shortSetupPlanReference(plan.PlanFingerprint) + "\n\n")
+
+	b.WriteString("Server\n")
+	b.WriteString("Welcome message: " + plan.Normalized.Server.MOTD + "\n")
+	b.WriteString("Maximum players: " + strconv.Itoa(plan.Normalized.Server.MaxPlayers) + "\n")
+	if plan.Normalized.Server.BedrockEnabled {
+		b.WriteString("Bedrock cross-play: Enabled\n")
+	} else {
+		b.WriteString("Bedrock cross-play: Disabled\n")
+	}
+	b.WriteString("Timezone: " + plan.Normalized.Server.Timezone + "\n\n")
+
+	b.WriteString("Minecraft\n")
+	b.WriteString("Game memory: " + plan.Normalized.Minecraft.JavaMemory + "\n")
+	b.WriteString("Maximum memory: " + plan.Normalized.Minecraft.ContainerMemory + "\n")
+	b.WriteString("Java port: " + strconv.Itoa(plan.Normalized.Minecraft.JavaPort) + "/TCP\n")
+	if plan.Normalized.Server.BedrockEnabled {
+		b.WriteString("Bedrock port: " + strconv.Itoa(plan.Normalized.Minecraft.BedrockPort) + "/UDP\n")
+	}
+	b.WriteString("Container tag: " + plan.Normalized.Minecraft.ImageTag + "\n")
+	b.WriteString("Minecraft version: " + plan.Normalized.Minecraft.Version + "\n\n")
+
+	b.WriteString("Storage\n")
+	b.WriteString("Minecraft data: " + plan.Normalized.Storage.Path + "\n")
+	if plan.Normalized.Storage.Device != "" {
+		b.WriteString("Device: " + plan.Normalized.Storage.Device + "\n")
+	}
+	if plan.Normalized.Storage.MountPoint != "" {
+		b.WriteString("Mount point: " + plan.Normalized.Storage.MountPoint + "\n")
+	}
+	b.WriteString("\nBackups\n")
+	if plan.Normalized.Backups.Automatic {
+		b.WriteString("Automatic backups: Enabled\n")
+		b.WriteString("Daily time: " + plan.Normalized.Backups.DailyTime + "\n")
+	} else {
+		b.WriteString("Automatic backups: Disabled\n")
+	}
+	b.WriteString("Backups to keep: " + strconv.Itoa(plan.Normalized.Backups.Keep) + "\n")
+	b.WriteString("Backup directory: " + plan.Normalized.Backups.Path + "\n")
+	if plan.Normalized.Backups.Source != "" {
+		b.WriteString("Network source: " + plan.Normalized.Backups.Source + "\n")
+	}
+	if plan.Normalized.Backups.MountPoint != "" {
+		b.WriteString("Mount point: " + plan.Normalized.Backups.MountPoint + "\n")
+	}
+	if len(plan.Warnings) > 0 {
+		b.WriteString("\nWarnings\n")
+		for _, warning := range plan.Warnings {
+			b.WriteString("- " + warning.Message + "\n")
+		}
+	}
+	b.WriteString("\nThis snapshot contains configuration values only. Passwords and other secrets are never included.\n")
+	return b.String()
+}
 func (a *App) setupWizardReviewEULA(w http.ResponseWriter, r *http.Request) {
 	session, client, identity, ok := a.setupWizardRequest(w, r, true)
 	if !ok {
