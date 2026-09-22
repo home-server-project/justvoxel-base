@@ -17,7 +17,7 @@ func TestAdminSystemActionsStatusPreservesFirmwareCapability(t *testing.T) {
 		if r.Header.Get("Authorization") != "Bearer session-token" {
 			t.Fatalf("unexpected authorization header %q", r.Header.Get("Authorization"))
 		}
-		body := `{"ok":true,"variant":"hwe","minecraft_state":"running","staged_update":true,"os_status_available":true,"firmware":{"available":true,"efi":true,"display_state":"connected"}}`
+		body := `{"ok":true,"variant":"hws","minecraft_state":"running","staged_update":true,"os_status_available":true,"firmware":{"available":true,"efi":true,"display_state":"connected"}}`
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
 	})}}
 
@@ -25,7 +25,7 @@ func TestAdminSystemActionsStatusPreservesFirmwareCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !status.OK || status.Variant != "hwe" || !status.Firmware.Available || !status.Firmware.EFI {
+	if !status.OK || status.Variant != "hws" || !status.Firmware.Available || !status.Firmware.EFI {
 		t.Fatalf("unexpected system action status: %#v", status)
 	}
 }

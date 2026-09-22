@@ -210,7 +210,7 @@ grep -Fq 'jv_storage_status' "${storage_plan}" || fail 'mJust storage-plan does 
 grep -Fq 'jv_storage_get /v1/admin/storage' "${storage_api}" || fail 'mJust storage discovery route is missing from the API helper'
 grep -Fq 'jv_storage_get /v1/status' "${storage_api}" || fail 'mJust storage-plan variant status route is missing from the API helper'
 grep -Fq 'GET /v1/admin/storage' "${admin_discovery}" || fail 'Management Agent storage discovery route is missing'
-for forbidden in 'lsblk ' 'findmnt ' 'storage-common.sh' 'storage-common-base.sh' 'storage_system_disks' 'storage_show_devices' 'storage_is_vm' 'storage_is_hwe'; do
+for forbidden in 'lsblk ' 'findmnt ' 'storage-common.sh' 'storage-common-base.sh' 'storage_system_disks' 'storage_show_devices' 'storage_is_vm' 'storage_is_hws'; do
     if grep -Fq "${forbidden}" "${storage_plan}"; then
         fail "mJust storage-plan still performs direct host storage discovery: ${forbidden}"
     fi

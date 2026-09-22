@@ -364,7 +364,7 @@ if (systemPower && systemDialog) {
       if (!response.ok) throw new Error("status unavailable");
       latestStatus = await response.json();
       const firmwareAvailable =
-        latestStatus.variant === "hwe" &&
+        latestStatus.variant === "hws" &&
         latestStatus.firmware &&
         latestStatus.firmware.available === true;
       if (firmwareButton) firmwareButton.hidden = !firmwareAvailable;

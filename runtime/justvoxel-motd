@@ -21,8 +21,7 @@ fi
 variant_id="$(cat /usr/lib/justvoxel/variant 2>/dev/null || true)"
 case "${variant_id}" in
     justvoxel-vm|vm) variant='VM' ;;
-    justvoxel-hwe|hwe) variant='HWE' ;;
-    justvoxel-baremetal|baremetal) variant='Bare Metal' ;;
+    justvoxel-hws|hws) variant='HWS' ;;
     *) variant='Unknown' ;;
 esac
 

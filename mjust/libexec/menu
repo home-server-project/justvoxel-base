@@ -197,7 +197,7 @@ system_status_menu() {
 system_menu() {
     local choice
     local -a options=('System status & updates' 'System resources' 'File browser' 'Network' 'Reboot JustVoxel' 'Power off JustVoxel')
-    jv_variant_is_hwe && options+=('Firmware / UEFI setup')
+    jv_variant_is_hws && options+=('Firmware / UEFI setup')
     options+=('Back')
 
     while true; do

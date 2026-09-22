@@ -86,7 +86,7 @@ func (s *server) adminSystemActionsStatus(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "system action status returned invalid data")
 		return
 	}
-	if status.Variant != "vm" && status.Variant != "hwe" && status.Variant != "unknown" {
+	if status.Variant != "vm" && status.Variant != "hws" && status.Variant != "unknown" {
 		writeError(w, http.StatusInternalServerError, "system action status returned invalid variant data")
 		return
 	}

@@ -16,8 +16,8 @@ fi
 if [[ $(jq -r '.firmware.available' <<<"${status}") != true ]]; then
     reason="$(jq -r '.firmware.reason // "unavailable"' <<<"${status}")"
     case "${reason}" in
-        not_hwe)
-            echo 'Firmware setup is available on JustVoxel HWE only.'
+        not_hws)
+            echo 'Firmware setup is available on JustVoxel HWS only.'
             echo 'For a JustVoxel VM, manage firmware/UEFI through the hypervisor.'
             ;;
         not_efi)

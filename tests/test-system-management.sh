@@ -77,8 +77,8 @@ grep -Fq 'systemd-run --quiet --collect --unit=justvoxel-reboot --on-active=2s /
 grep -Fq 'systemd-run --quiet --collect --unit=justvoxel-poweroff --on-active=2s /usr/bin/systemctl poweroff' "${system_actions_backend}" || fail 'System poweroff backend action missing'
 grep -Fq 'systemd-run --quiet --collect --unit=justvoxel-firmware-reboot --on-active=2s /usr/bin/systemctl reboot --firmware-setup' "${system_actions_backend}" || fail 'Firmware reboot backend action missing'
 grep -Fq 'case "${action}" in' "${system_actions_backend}" || fail 'System Actions backend action allowlist missing'
-grep -Fq 'Firmware setup is available on JustVoxel HWE only.' "${firmware}" || fail 'VM firmware refusal missing'
-grep -Fq 'jv_variant_is_hwe' "${menu}" || fail 'System menu must use canonical HWE detection'
+grep -Fq 'Firmware setup is available on JustVoxel HWS only.' "${firmware}" || fail 'VM firmware refusal missing'
+grep -Fq 'jv_variant_is_hws' "${menu}" || fail 'System menu must use canonical HWS detection'
 
 # Direct recipes remain supported entry points even though the normal menu
 # presents one combined user workflow for OS status and updates.

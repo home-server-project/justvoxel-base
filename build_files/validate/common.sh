@@ -137,7 +137,7 @@ bash -n /etc/profile.d/90-justvoxel-motd.sh
 test -x /usr/libexec/justvoxel/motd
 bash -n /usr/libexec/justvoxel/motd
 grep -Fq 'Minecraft Server Appliance' /usr/libexec/justvoxel/motd
-grep -Fq "justvoxel-hwe|hwe) variant='HWE'" /usr/libexec/justvoxel/motd
+grep -Fq "justvoxel-hws|hws) variant='HWS'" /usr/libexec/justvoxel/motd
 grep -Fq "network_state='Not connected - use mjust net'" /usr/libexec/justvoxel/motd
 grep -Fq "network_state='Ethernet connected'" /usr/libexec/justvoxel/motd
 grep -Fq "network_state='Ethernet connected, obtaining address...'" /usr/libexec/justvoxel/motd

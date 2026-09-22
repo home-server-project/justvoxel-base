@@ -31,11 +31,10 @@ for value in 0 -1 abc 10.5; do if validate_positive_int "${value}"; then fail "i
 
 [[ $(jv_variant_kind justvoxel-vm) == vm ]] || fail 'JustVoxel VM variant kind is wrong'
 [[ $(jv_variant_name justvoxel-vm) == VM ]] || fail 'JustVoxel VM display name is wrong'
-[[ $(jv_variant_kind justvoxel-hwe) == hwe ]] || fail 'JustVoxel HWE variant kind is wrong'
-[[ $(jv_variant_name justvoxel-hwe) == HWE ]] || fail 'JustVoxel HWE display name is wrong'
-[[ $(jv_variant_kind justvoxel-baremetal) == hwe ]] || fail 'legacy Bare Metal variant must map to HWE'
-jv_variant_is_hwe justvoxel-hwe || fail 'HWE predicate rejected JustVoxel HWE'
-if jv_variant_is_hwe justvoxel-vm; then fail 'HWE predicate accepted JustVoxel VM'; fi
+[[ $(jv_variant_kind justvoxel-hws) == hws ]] || fail 'JustVoxel HWS variant kind is wrong'
+[[ $(jv_variant_name justvoxel-hws) == HWS ]] || fail 'JustVoxel HWS display name is wrong'
+jv_variant_is_hws justvoxel-hws || fail 'HWS predicate rejected JustVoxel HWS'
+if jv_variant_is_hws justvoxel-vm; then fail 'HWS predicate accepted JustVoxel VM'; fi
 
 [[ $(normalize_daily_backup_time '4:30') == '04:30' ]] || fail '4:30 should normalize to 04:30'
 [[ $(daily_backup_schedule_from_time '4:30') == '*-*-* 04:30:00' ]] || fail 'daily schedule rendering is incorrect'
@@ -124,8 +123,7 @@ grep -Fq '/usr/bin/mjust password-reset' "${menu}" || fail 'administrator passwo
 grep -Fq 'password-reset:' "${justfile}" || fail 'top-level password-reset recipe missing'
 grep -Fq 'mjust status --details' "${mjust_bin}" || fail 'detailed status discovery missing from mjust --list'
 grep -Fq 'mjust web enable' "${mjust_bin}" || fail 'WebUI management discovery missing from mjust --list'
-grep -Fq 'HWE backup choices:' "${storage_plan}" || fail 'HWE storage guidance missing'
-if grep -Fq 'Bare Metal backup choices:' "${storage_plan}"; then fail 'obsolete Bare Metal storage wording remains'; fi
+grep -Fq 'HWS backup choices:' "${storage_plan}" || fail 'HWS storage guidance missing'
 
 grep -Fq 'All mjust commands' "${menu}" || fail 'advanced all-commands entry missing'
 grep -Fq '/usr/bin/mjust --list' "${menu}" || fail 'all-commands entry must use authoritative mjust --list output'

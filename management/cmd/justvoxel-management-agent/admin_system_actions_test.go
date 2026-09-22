@@ -36,7 +36,7 @@ func TestAdminSystemActionsStatusAllowsLocalRoot(t *testing.T) {
 		if len(args) != 1 || args[0] != "status" {
 			t.Fatalf("unexpected status helper args: %#v", args)
 		}
-		return []byte(`{"ok":true,"variant":"vm","minecraft_state":"running","staged_update":true,"os_status_available":true,"firmware":{"available":false,"efi":true,"display_state":"unknown","reason":"not_hwe"}}`), 0, nil
+		return []byte(`{"ok":true,"variant":"vm","minecraft_state":"running","staged_update":true,"os_status_available":true,"firmware":{"available":false,"efi":true,"display_state":"unknown","reason":"not_hws"}}`), 0, nil
 	}
 
 	s := &server{sessions: make(map[string]session)}
@@ -116,7 +116,7 @@ func TestAdminFirmwareRebootUnavailableIsConflict(t *testing.T) {
 		if len(args) != 2 || args[0] != "apply" || args[1] != "firmware-reboot" {
 			t.Fatalf("unexpected firmware helper args: %#v", args)
 		}
-		return []byte(`{"ok":false,"action":"firmware-reboot","reason":"not_hwe","message":"Firmware / UEFI reboot is unavailable on this system."}`), 2, errors.New("not available")
+		return []byte(`{"ok":false,"action":"firmware-reboot","reason":"not_hws","message":"Firmware / UEFI reboot is unavailable on this system."}`), 2, errors.New("not available")
 	}
 
 	s := adminServerForTest()
@@ -163,7 +163,7 @@ func TestAdminSystemActionsStatusRejectsMalformedBackendData(t *testing.T) {
 	old := runAdminSystemActionHelper
 	defer func() { runAdminSystemActionHelper = old }()
 	runAdminSystemActionHelper = func(_ context.Context, _ ...string) ([]byte, int, error) {
-		return []byte(`{"ok":true,"variant":"hwe","minecraft_state":"mystery","staged_update":false,"os_status_available":true,"firmware":{"available":true,"efi":true,"display_state":"connected"}}`), 0, nil
+		return []byte(`{"ok":true,"variant":"hws","minecraft_state":"mystery","staged_update":false,"os_status_available":true,"firmware":{"available":true,"efi":true,"display_state":"connected"}}`), 0, nil
 	}
 
 	s := adminServerForTest()

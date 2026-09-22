@@ -53,9 +53,9 @@ func (f *fakeSystemActionsAPI) AdminSystemAction(_ context.Context, session, act
 	return f.actionResult, f.actionErr
 }
 
-func TestSystemActionsStatusIsAdministratorOnlyAndPreservesHWECapability(t *testing.T) {
+func TestSystemActionsStatusIsAdministratorOnlyAndPreservesHWSCapability(t *testing.T) {
 	client := &fakeSystemActionsAPI{status: api.AdminSystemActionsStatus{
-		OK: true, Variant: "hwe", MinecraftState: "running",
+		OK: true, Variant: "hws", MinecraftState: "running",
 		Firmware: api.AdminSystemFirmwareStatus{Available: true, EFI: true, DisplayState: "connected"},
 	}}
 	app, err := New(client, Config{ManagementAPI: "v1"})
@@ -73,7 +73,7 @@ func TestSystemActionsStatusIsAdministratorOnlyAndPreservesHWECapability(t *test
 	if err := json.Unmarshal(rr.Body.Bytes(), &status); err != nil {
 		t.Fatal(err)
 	}
-	if status.Variant != "hwe" || !status.Firmware.Available {
+	if status.Variant != "hws" || !status.Firmware.Available {
 		t.Fatalf("unexpected system action status: %#v", status)
 	}
 

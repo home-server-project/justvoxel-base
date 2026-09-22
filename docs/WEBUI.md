@@ -110,11 +110,11 @@ The browser presents Agent warnings and confirmation requirements, requires the 
 
 ## System power controls
 
-Administrator users have a power control in the top-right WebUI header. It opens appliance-level actions for **Restart** and **Power off**. On supported physical HWE systems, the same menu also exposes **Restart to UEFI/BIOS**. VM deployments do not show that action.
+Administrator users have a power control in the top-right WebUI header. It opens appliance-level actions for **Restart** and **Power off**. On supported physical HWS systems, the same menu also exposes **Restart to UEFI/BIOS**. VM deployments do not show that action.
 
 Selecting a power action first opens a centered confirmation dialog. The WebUI then submits the action through the existing System Actions API; it does not call systemd or firmware tools directly. If Minecraft players are online, the Management Agent returns its player-confirmation requirement and the dialog asks again before the existing graceful shutdown path is allowed to continue.
 
-The Agent remains authoritative for HWE/VM capability detection, player state, graceful Minecraft shutdown, firmware/UEFI availability, and final host action acceptance.
+The Agent remains authoritative for HWS/VM capability detection, player state, graceful Minecraft shutdown, firmware/UEFI availability, and final host action acceptance.
 
 ## Local behavior
 

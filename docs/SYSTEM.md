@@ -82,9 +82,9 @@ An ordinary reboot/poweroff does not force a Minecraft backup. If a bootc update
 
 `mjust firmware` is a thin frontend over the same System Actions API and is intended only for supported physical-hardware deployments. VM or otherwise unsupported environments refuse the operation and direct the administrator to the platform/hypervisor controls.
 
-The Agent owns the HWE/VM decision, EFI/systemd firmware-reboot capability check, best-effort DRM display state, player-safe Minecraft shutdown, and final firmware reboot request. The terminal only presents those results and asks for confirmation.
+The Agent owns the HWS/VM decision, EFI/systemd firmware-reboot capability check, best-effort DRM display state, player-safe Minecraft shutdown, and final firmware reboot request. The terminal only presents those results and asks for confirmation.
 
-The WebUI uses the same capability/status endpoint. Its browser-facing label is **Restart to UEFI/BIOS**. The control is shown only when the Agent reports supported HWE firmware capability, so VM deployments never offer the UEFI/BIOS action.
+The WebUI uses the same capability/status endpoint. Its browser-facing label is **Restart to UEFI/BIOS**. The control is shown only when the Agent reports supported HWS firmware capability, so VM deployments never offer the UEFI/BIOS action.
 
 Display detection is advisory because KVM switches, EDID behavior, firmware and hardware can make Linux connector state imperfect.
 

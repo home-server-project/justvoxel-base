@@ -52,7 +52,7 @@ func TestSystemPowerHeaderAndDialogUX(t *testing.T) {
 	js := string(script)
 	for _, want := range []string{
 		"fetch(\"/api/system-actions\"",
-		"latestStatus.variant === \"hwe\"",
+		"latestStatus.variant === \"hws\"",
 		"latestStatus.firmware.available === true",
 		"systemDialog.showModal()",
 		"body.set(\"confirm_players\", \"yes\")",

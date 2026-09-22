@@ -190,7 +190,7 @@ Checking or downloading a bootc OS update does not stop Minecraft, create a back
 
 Reboot, poweroff, and firmware reboot are thin frontends over the Management API. The Management Agent owns host capability checks, player-aware Minecraft shutdown, and the final system action, allowing the future WebUI to use the same implementation.
 
-`mjust firmware` is available only when the Agent reports that the running HWE system supports the physical-hardware firmware workflow and refuses unsupported/VM use.
+`mjust firmware` is available only when the Agent reports that the running HWS system supports the physical-hardware firmware workflow and refuses unsupported/VM use.
 
 A JustVoxel-aware bootc rollback workflow is not implemented. It remains a future roadmap item; see `ROADMAP.md`.
 

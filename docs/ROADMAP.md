@@ -102,7 +102,7 @@ These are intentionally early because they are relatively contained improvements
 ### System Resources - Glances
 
 - package Glances through `home-server-packages`
-- consume it from JustVoxel Base so VM and HWE inherit the same feature
+- consume it from JustVoxel Base so VM and HWS inherit the same feature
 - use the existing Glances WebUI initially
 - ship a JustVoxel-owned default configuration
 - keep system-level configuration image-controlled rather than user-managed
@@ -174,15 +174,15 @@ Create a dedicated public-release ISO repository separate from the customizable 
 - build official media from stable/release JustVoxel images, not development/testing channels
 - publish two official x86-64 installers:
   - JustVoxel VM for virtual machines and hypervisors
-  - JustVoxel HWE for physical hardware
+  - JustVoxel HWS for physical hardware
 - refresh public installation media approximately monthly so the installer does not become unnecessarily stale as the underlying AlmaLinux/base image evolves
 - allow an additional on-demand public ISO build for important installer fixes, security changes, or significant user-facing functionality
 - do not rebuild public ISOs for every routine bootc image rebuild
 - use SourceForge as the planned public ISO hosting/mirror target and automate publication from GitHub Actions
-- make the current VM/HWE pair the primary public downloads
-- optionally retain one previous VM/HWE pair when storage availability makes it useful, without cluttering the main download experience
+- make the current VM/HWS pair the primary public downloads
+- optionally retain one previous VM/HWS pair when storage availability makes it useful, without cluttering the main download experience
 - publish checksums and release metadata alongside the ISOs
-- provide a small public website, likely through GitHub Pages, with product information, screenshots, clear VM/HWE download choices, documentation, and source links
+- provide a small public website, likely through GitHub Pages, with product information, screenshots, clear VM/HWS download choices, documentation, and source links
 
 ### USB backup workflow in WebUI
 
@@ -225,7 +225,7 @@ A remote Support Report should contain only information useful for reproducibili
 - JustVoxel version/build metadata;
 - booted bootc image reference including release/development channel or tag;
 - immutable booted image digest/ID;
-- intended JustVoxel image variant such as VM or HWE when that identity is available;
+- intended JustVoxel image variant such as VM or HWS when that identity is available;
 - detected runtime environment class: physical hardware, virtual machine, container/nested environment, or unknown;
 - hypervisor/virtualization family when it can be determined reliably;
 - kernel/base operating-system version;
@@ -237,7 +237,7 @@ A remote Support Report should contain only information useful for reproducibili
 
 Runtime classification should be derived from normal operating-system/firmware virtualization signals rather than permanent hardware identity. It may use facilities such as virtualization detection and DMI/firmware hints, but diagnostic reporting must not include firmware serial numbers, motherboard UUIDs, MAC addresses, hostnames, IP addresses, or other stable hardware identifiers.
 
-Compare the **declared image variant** with the **detected runtime class**. A report should be able to identify cases such as a VM-oriented image running directly on physical hardware or an HWE image running in a VM. Treat that as a diagnostic mismatch/advisory, not an automatic root-cause conclusion.
+Compare the **declared image variant** with the **detected runtime class**. A report should be able to identify cases such as a VM-oriented image running directly on physical hardware or an HWS image running in a VM. Treat that as a diagnostic mismatch/advisory, not an automatic root-cause conclusion.
 
 If remote reporting needs to distinguish many reports from one installation from the same failure across many installations, generate a random diagnostics installation identifier only when remote reporting is enabled. It must be independent of hardware identifiers, replaceable/resettable by the administrator, and used only for diagnostics aggregation.
 

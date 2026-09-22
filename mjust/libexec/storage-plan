@@ -87,8 +87,8 @@ case "${variant_key}" in
             echo "Secondary disk(s) visible: ${secondary}"
         fi
         ;;
-    hwe)
-        echo 'HWE backup choices:'
+    hws)
+        echo 'HWS backup choices:'
         echo '  - dedicated internal disk'
         echo '  - external USB disk/stick (provisioned like any other dedicated disk)'
         echo '  - existing filesystem/partition'

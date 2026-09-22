@@ -47,8 +47,7 @@ if grep -Fq 'df -Pk --output=' "${collector}"; then
 fi
 
 grep -Fq 'jv_variant_name' "${collector}" || fail 'Agent status collector must use canonical variant normalization'
-grep -Fq 'justvoxel-hwe' "${common}" || fail 'JustVoxel HWE variant normalization missing'
-grep -Fq 'justvoxel-baremetal' "${common}" || fail 'legacy Bare Metal compatibility missing'
+grep -Fq 'justvoxel-hws' "${common}" || fail 'JustVoxel HWS variant normalization missing'
 grep -Fq 'c_good=' "${status}" || fail 'healthy status color missing'
 grep -Fq 'c_warn=' "${status}" || fail 'warning status color missing'
 grep -Fq 'c_bad=' "${status}" || fail 'failure status color missing'

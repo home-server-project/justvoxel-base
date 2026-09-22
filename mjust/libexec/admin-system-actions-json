@@ -15,8 +15,8 @@ collect_status() {
     variant="$(jv_variant_kind)"
     [[ -d /sys/firmware/efi ]] && efi=true
 
-    if [[ ${variant} != hwe ]]; then
-        firmware_reason=not_hwe
+    if [[ ${variant} != hws ]]; then
+        firmware_reason=not_hws
     elif [[ ${efi} != true ]]; then
         firmware_reason=not_efi
     elif systemctl reboot --firmware-setup --dry-run >/dev/null 2>&1; then
@@ -25,7 +25,7 @@ collect_status() {
         firmware_reason=unsupported
     fi
 
-    if [[ ${variant} == hwe ]]; then
+    if [[ ${variant} == hws ]]; then
         for status_file in /sys/class/drm/card*-*/status; do
             [[ -r ${status_file} ]] || continue
             found_connector=yes
