@@ -42,16 +42,16 @@ type newBackupView struct {
 }
 
 type newBackupsPageData struct {
-	Title         string
-	Version       string
-	ManagementAPI string
-	CSRF          string
-	Identity      api.SessionInfo
-	Backups       []newBackupView
-	BackupCount   int
-	TotalSize     string
-	Message       string
-	Error         string
+	Title                        string
+	Version                      string
+	ManagementAPI                string
+	CSRF                         string
+	Identity                     api.SessionInfo
+	Backups                      []newBackupView
+	BackupCount                  int
+	TotalSize                    string
+	Message                      string
+	Error                        string
 	Automatic                    newBackupAutomaticForm
 	AutomaticPlan                *api.AdminConfigurationChangeResponse
 	Timezone                     string

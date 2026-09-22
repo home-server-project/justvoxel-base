@@ -26,6 +26,15 @@ type fakeNewBackupsAPI struct {
 	appliedConfiguration    api.AdminConfigurationChangeRequest
 	configurationPlanCalls  int
 	configurationApplyCalls int
+	storage                 api.AdminStorageDiscovery
+	destinationStatus       api.AdminBackupStorageResponse
+	destinationPlan         api.AdminBackupStorageResponse
+	destinationApply        api.AdminBackupStorageResponse
+	plannedDestination      api.AdminBackupStorageRequest
+	appliedDestination      api.AdminBackupStorageRequest
+	destinationStatusCalls  int
+	destinationPlanCalls    int
+	destinationApplyCalls   int
 }
 
 func defaultNewBackupsConfiguration() api.AdminConfigurationDiscovery {
@@ -109,6 +118,63 @@ func (f *fakeNewBackupsAPI) AdminConfigurationApply(_ context.Context, session s
 		return f.configurationApply, f.configurationApplyErr
 	}
 	return api.AdminConfigurationChangeResponse{OK: true, Applied: true}, nil
+}
+
+func (f *fakeNewBackupsAPI) AdminStorage(_ context.Context, session string) (api.AdminStorageDiscovery, error) {
+	if session != "session-token" {
+		return api.AdminStorageDiscovery{}, api.ErrUnauthorized
+	}
+	if len(f.storage.Devices) > 0 || len(f.storage.SystemDisks) > 0 {
+		return f.storage, nil
+	}
+	return api.AdminStorageDiscovery{
+		SystemDisks: []string{"/dev/vda"},
+		Devices: []api.AdminStorageDevice{
+			{Name: "vda1", Path: "/dev/vda1", Parent: "vda", Type: "part", SizeBytes: 20 * 1024 * 1024 * 1024, Filesystem: "xfs", Mountpoints: []string{"/"}, System: true},
+			{Name: "vdb1", Path: "/dev/vdb1", Parent: "vdb", Type: "part", SizeBytes: 100 * 1024 * 1024 * 1024, Filesystem: "xfs", Label: "BACKUP", UUID: "backup-uuid", Mountpoints: []string{"/var/mnt/backup"}, Model: "Virtual Disk"},
+			{Name: "vdc1", Path: "/dev/vdc1", Parent: "vdc", Type: "part", SizeBytes: 50 * 1024 * 1024 * 1024, Filesystem: "", Model: "Blank Disk"},
+		},
+	}, nil
+}
+
+func (f *fakeNewBackupsAPI) AdminBackupStorageStatus(_ context.Context, session string) (api.AdminBackupStorageResponse, error) {
+	if session != "session-token" {
+		return api.AdminBackupStorageResponse{}, api.ErrUnauthorized
+	}
+	f.destinationStatusCalls++
+	if f.destinationStatus.OK {
+		return f.destinationStatus, nil
+	}
+	return api.AdminBackupStorageResponse{OK: true, Current: api.AdminBackupStorageTarget{
+		Status: "ready", StatusDetail: "Backup destination is ready.", Type: "system", Path: "/var/lib/justvoxel/backups",
+		AvailableBytes: 40 * 1024 * 1024 * 1024, FilesystemBytes: 80 * 1024 * 1024 * 1024, SamePhysicalDisk: true,
+	}}, nil
+}
+
+func (f *fakeNewBackupsAPI) AdminBackupStoragePlan(_ context.Context, session string, request api.AdminBackupStorageRequest) (api.AdminBackupStorageResponse, error) {
+	if session != "session-token" {
+		return api.AdminBackupStorageResponse{}, api.ErrUnauthorized
+	}
+	f.destinationPlanCalls++
+	f.plannedDestination = request
+	if f.destinationPlan.OK {
+		return f.destinationPlan, nil
+	}
+	return api.AdminBackupStorageResponse{OK: true, Changed: true, Proposed: api.AdminBackupStorageTarget{
+		Type: request.Type, Path: request.Path, MountPoint: request.MountPoint, ExpectedSource: request.Source,
+	}}, nil
+}
+
+func (f *fakeNewBackupsAPI) AdminBackupStorageApply(_ context.Context, session string, request api.AdminBackupStorageRequest) (api.AdminBackupStorageResponse, error) {
+	if session != "session-token" {
+		return api.AdminBackupStorageResponse{}, api.ErrUnauthorized
+	}
+	f.destinationApplyCalls++
+	f.appliedDestination = request
+	if f.destinationApply.OK {
+		return f.destinationApply, nil
+	}
+	return api.AdminBackupStorageResponse{OK: true, Changed: true, Applied: true, Proposed: api.AdminBackupStorageTarget{Type: request.Type, Path: request.Path}}, nil
 }
 
 func TestNewBackupsPageListsExistingBackups(t *testing.T) {
@@ -311,6 +377,90 @@ func TestNewBackupsAutomaticApplyRevalidatesAndApplies(t *testing.T) {
 	if client.appliedConfiguration.BackupTimerEnabled || client.appliedConfiguration.BackupKeep != 5 ||
 		client.appliedConfiguration.BackupSchedule != "*-*-* 03:45:00" {
 		t.Fatalf("unexpected applied automatic backup request: %#v", client.appliedConfiguration)
+	}
+}
+
+func TestNewBackupsPageShowsCompactBackupDestination(t *testing.T) {
+	client := &fakeNewBackupsAPI{}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-backups", ""))
+	if page.Code != http.StatusOK {
+		t.Fatalf("new backups destination page returned %d: %s", page.Code, page.Body.String())
+	}
+	body := page.Body.String()
+	for _, want := range []string{
+		"Backup destination", "Backup destination is ready.", "/var/lib/justvoxel/backups", "40.0 GiB", "80.0 GiB",
+		"Same physical disk", "Change destination", "Directory on this JustVoxel system",
+		"Existing local partition / filesystem", "NFS share", "SMB / CIFS share", "/dev/vdb1", "Virtual Disk",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("backup destination panel missing %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "/dev/vda1") || strings.Contains(body, "/dev/vdc1") {
+		t.Fatalf("unsafe or unformatted partition offered by New Backups: %s", body)
+	}
+	if client.destinationStatusCalls != 1 {
+		t.Fatalf("destination status calls = %d, want 1", client.destinationStatusCalls)
+	}
+}
+
+func TestNewBackupsDestinationPlanKeepsSMBPasswordOutOfReview(t *testing.T) {
+	client := &fakeNewBackupsAPI{
+		destinationPlan: api.AdminBackupStorageResponse{OK: true, Changed: true, Proposed: api.AdminBackupStorageTarget{
+			Type: "smb", Path: "/var/mnt/justvoxel-backup/backups", MountPoint: "/var/mnt/justvoxel-backup",
+			ExpectedSource: "//nas/backups", AvailableBytes: 60 * 1024 * 1024 * 1024,
+			FilesystemBytes: 100 * 1024 * 1024 * 1024, CredentialsNeeded: true,
+		}},
+	}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := "csrf=csrf-token&type=smb&path=%2Fvar%2Fmnt%2Fjustvoxel-backup%2Fbackups&mount_point=%2Fvar%2Fmnt%2Fjustvoxel-backup&source=%2F%2Fnas%2Fbackups&username=backup-user&domain=HOME&password=do-not-review"
+	page := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/settings/new-backups/destination/plan", body))
+	if page.Code != http.StatusOK {
+		t.Fatalf("destination plan returned %d: %s", page.Code, page.Body.String())
+	}
+	if client.destinationPlanCalls != 1 || client.destinationApplyCalls != 0 {
+		t.Fatalf("destination plan calls=%d apply calls=%d", client.destinationPlanCalls, client.destinationApplyCalls)
+	}
+	if client.plannedDestination.Password != "" {
+		t.Fatalf("SMB password reached destination Review: %q", client.plannedDestination.Password)
+	}
+	for _, want := range []string{"Proposed destination", "//nas/backups", "60.0 GiB", "SMB password", "Apply destination"} {
+		if !strings.Contains(page.Body.String(), want) {
+			t.Fatalf("destination review missing %q: %s", want, page.Body.String())
+		}
+	}
+	if strings.Contains(page.Body.String(), "do-not-review") {
+		t.Fatal("SMB password leaked into New Backups destination review")
+	}
+}
+
+func TestNewBackupsDestinationApplyPassesPasswordOnlyAtApply(t *testing.T) {
+	client := &fakeNewBackupsAPI{
+		destinationApply: api.AdminBackupStorageResponse{OK: true, Changed: true, Applied: true, Proposed: api.AdminBackupStorageTarget{
+			Type: "smb", Path: "/var/mnt/justvoxel-backup/backups",
+		}},
+	}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := "csrf=csrf-token&type=smb&path=%2Fvar%2Fmnt%2Fjustvoxel-backup%2Fbackups&mount_point=%2Fvar%2Fmnt%2Fjustvoxel-backup&source=%2F%2Fnas%2Fbackups&username=backup-user&domain=HOME&password=secret-at-apply"
+	page := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/settings/new-backups/destination/apply", body))
+	if page.Code != http.StatusSeeOther || page.Header().Get("Location") != "/settings/new-backups?result=destination" {
+		t.Fatalf("destination apply returned %d %q: %s", page.Code, page.Header().Get("Location"), page.Body.String())
+	}
+	if client.destinationApplyCalls != 1 || client.appliedDestination.Password != "secret-at-apply" {
+		t.Fatalf("destination apply request=%#v calls=%d", client.appliedDestination, client.destinationApplyCalls)
 	}
 }
 
