@@ -31,8 +31,7 @@ diag="$(bounded_smb_mount_error "$(printf 'mount error(13): Permission denied\np
 [[ ${diag} == *'mount error(13): Permission denied'* ]] || { echo "SMB mount diagnostic lost the real error: ${diag}" >&2; exit 1; }
 [[ ${diag} != *'super-secret'* ]] || { echo 'SMB mount diagnostic leaked a password.' >&2; exit 1; }
 [[ ${diag} != *'/etc/justvoxel/smb-backup.credentials'* ]] || { echo 'SMB mount diagnostic leaked the credentials-file path.' >&2; exit 1; }
-[[ ${diag} != *
-\n'* && ${#diag} -le 512 ]] || { echo 'SMB mount diagnostic is not bounded to one line.' >&2; exit 1; }
+[[ $(printf '%s' "${diag}" | wc -l) -eq 0 && ${#diag} -le 512 ]] || { echo 'SMB mount diagnostic is not bounded to one line.' >&2; exit 1; }
 
 grep -Fq 'smb_mount_error="$(mount "${TARGET_MOUNT}" 2>&1)"' "${helper_apply}" || { echo 'A3.1 SMB mount stderr is still discarded.' >&2; exit 1; }
 grep -Fq 'bounded_smb_mount_error "${smb_mount_error}"' "${helper_apply}" || { echo 'A3.1 SMB mount failure does not use bounded diagnostics.' >&2; exit 1; }
