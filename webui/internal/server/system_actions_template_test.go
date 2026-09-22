@@ -41,6 +41,9 @@ func TestSystemPowerHeaderAndDialogUX(t *testing.T) {
 		".control-power-actions",
 		".control-center-panel",
 		".control-icon-button",
+		".control-action-icon",
+		".control-icon-button[data-tooltip]::after",
+		".control-icon-button[data-tooltip]:focus-visible::after",
 		".system-action-dialog",
 		".system-action-dialog::backdrop",
 	} {
