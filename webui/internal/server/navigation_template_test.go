@@ -14,11 +14,13 @@ func TestControlCenterNavigationUX(t *testing.T) {
 	for _, want := range []string{
 		`class="brand-link brand-mark" href="/"`,
 		`aria-label="JustVoxel dashboard"`,
+		`<strong>JV</strong>`,
 		`data-topbar-clock`,
 		`data-control-center`,
 		`>Control Center</span>`,
 		`data-system-power`,
 		`href="/activity"`,
+		`title="Server events and status"`,
 		`href="/settings/server"`,
 		`href="/operations#whitelist"`,
 		`href="/operations#minecraft-logs"`,
@@ -35,10 +37,14 @@ func TestControlCenterNavigationUX(t *testing.T) {
 		`href="/password"`,
 		`href="/about"`,
 		`class="nav-logout"`,
+		`aria-label="Log out" title="Log out"`,
 	} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("Control Center header missing %q", want)
 		}
+	}
+	if strings.Contains(markup, `class="brand-name"`) {
+		t.Fatal("brand still includes the long JustVoxel label")
 	}
 
 	css, err := assets.ReadFile("static/app.css")
@@ -51,6 +57,7 @@ func TestControlCenterNavigationUX(t *testing.T) {
 		`.control-center-panel`,
 		`.control-tile-grid`,
 		`.nav-admin-only,.nav-operator-plus{display:none!important}`,
+		`.control-tile.nav-admin-only,.control-tile.nav-operator-plus{display:none!important}`,
 		`body.role-administrator .nav-admin-only`,
 		`body.role-operator .nav-operator-plus`,
 		`position:fixed;top:50px`,
@@ -82,6 +89,7 @@ func TestControlCenterNavigationUX(t *testing.T) {
 func TestAuthenticatedTemplatesUseSharedHeader(t *testing.T) {
 	for _, name := range []string{
 		"dashboard.html",
+		"about.html",
 		"about.html",
 		"operations.html",
 		"activity.html",
