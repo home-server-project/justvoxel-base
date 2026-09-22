@@ -194,7 +194,8 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 	}
 	styles := string(css)
 	for _, want := range []string{
-		"repeat(auto-fit,minmax(min(100%,460px),1fr))",
+		"repeat(auto-fit,minmax(min(100%,240px),1fr))",
+		"setup-review-toolbar",
 		"white-space:nowrap",
 		"overflow-x:auto",
 		"grid-template-columns:minmax(0,1fr) auto",
