@@ -192,3 +192,104 @@ func TestAdminMigrationExportApplyRequiresPlayerConfirmation(t *testing.T) {
 		t.Fatalf("players status = %d: %s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestAdminMigrationExportApplyAcceptsLiveMeasurementDrift(t *testing.T) {
+	var reviewed adminMigrationExportHelperResponse
+	if err := decodeAdminMigrationExportJSON([]byte(validMigrationExportPlanHelper), &reviewed); err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := adminMigrationExportPlanFingerprint(reviewed.SchemaVersion, reviewed.Normalized, reviewed.Requirements, reviewed.Context)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var current adminMigrationExportHelperResponse
+	if err := decodeAdminMigrationExportJSON([]byte(validMigrationExportPlanHelper), &current); err != nil {
+		t.Fatal(err)
+	}
+	current.Normalized.DataBytes += 8192
+	current.Normalized.TargetAvailableBytes -= 8192
+	current.Normalized.TargetFilesystem = "btrfs"
+	current.Requirements.MinecraftState = "stopped"
+	payload, err := json.Marshal(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oldPlan := runAdminMigrationExportPlanHelper
+	defer func() { runAdminMigrationExportPlanHelper = oldPlan }()
+	runAdminMigrationExportPlanHelper = func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+		return payload, nil
+	}
+
+	oldWorker := startMigrationExportWorker
+	defer func() { startMigrationExportWorker = oldWorker }()
+	workerCalls := 0
+	startMigrationExportWorker = func(_ *server, _ string, plan migrationExportExecutionPlan) {
+		workerCalls++
+		if plan.ExpectedMinecraftState != "stopped" {
+			t.Fatalf("worker received stale Minecraft state: %#v", plan)
+		}
+	}
+
+	s := surfaceTestServer(t, roleAdministrator)
+	attachTestOperationStore(t, s, openTestOperationStore(t))
+	rr := httptest.NewRecorder()
+	s.adminMigrationExportApply(rr, surfaceRequest(
+		http.MethodPost,
+		"/v1/admin/migration/export/apply",
+		migrationExportApplyBody(t, fingerprint, true, false, ""),
+	))
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("live drift status = %d: %s", rr.Code, rr.Body.String())
+	}
+	if workerCalls != 1 {
+		t.Fatalf("worker calls = %d, want 1", workerCalls)
+	}
+}
+
+func TestAdminMigrationExportApplyRechecksPlayersWithoutStalePlan(t *testing.T) {
+	var reviewed adminMigrationExportHelperResponse
+	if err := decodeAdminMigrationExportJSON([]byte(validMigrationExportPlanHelper), &reviewed); err != nil {
+		t.Fatal(err)
+	}
+	fingerprint, err := adminMigrationExportPlanFingerprint(reviewed.SchemaVersion, reviewed.Normalized, reviewed.Requirements, reviewed.Context)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var current adminMigrationExportHelperResponse
+	if err := decodeAdminMigrationExportJSON([]byte(validMigrationExportPlanHelper), &current); err != nil {
+		t.Fatal(err)
+	}
+	current.Requirements.PlayersConfirmationRequired = true
+	current.Requirements.Online = 1
+	current.Requirements.Players = []string{"PlayerJoinedAfterReview"}
+	payload, err := json.Marshal(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oldPlan := runAdminMigrationExportPlanHelper
+	defer func() { runAdminMigrationExportPlanHelper = oldPlan }()
+	runAdminMigrationExportPlanHelper = func(_ context.Context, _ string, _ []byte) ([]byte, error) {
+		return payload, nil
+	}
+
+	s := surfaceTestServer(t, roleAdministrator)
+	attachTestOperationStore(t, s, openTestOperationStore(t))
+	rr := httptest.NewRecorder()
+	s.adminMigrationExportApply(rr, surfaceRequest(
+		http.MethodPost,
+		"/v1/admin/migration/export/apply",
+		migrationExportApplyBody(t, fingerprint, true, false, ""),
+	))
+	if rr.Code != http.StatusBadRequest ||
+		!strings.Contains(rr.Body.String(), `"code":"players_confirmation_required"`) {
+		t.Fatalf("player drift status = %d: %s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), `"code":"stale_plan"`) {
+		t.Fatalf("live player change incorrectly invalidated reviewed export: %s", rr.Body.String())
+	}
+}
+

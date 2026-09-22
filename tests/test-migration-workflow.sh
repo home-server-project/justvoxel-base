@@ -71,6 +71,10 @@ for text in \
     grep -Fq "${text}" <<< "${import_text}" || fail "import workflow invariant missing: ${text}"
 done
 grep -Fq 'migration-api.sh' "${export_frontend}" || fail 'migration Export frontend does not use shared API helper'
+grep -Fq "stat -Lc 'local:%d:%i'" "${repo_root}/mjust/libexec/admin-migration-export-plan-json" || fail 'Export local target identity still depends on mutable directory metadata'
+grep -Fq "stat -Lc '%d:%i' \"\$DATA_PATH\"" "${repo_root}/mjust/libexec/admin-migration-export-plan-json" || fail 'Export data identity still depends on mutable world size/mtime'
+if grep -Fq "local:%d:%i:%Y" "${repo_root}/mjust/libexec/admin-migration-export-plan-json"; then fail 'Export local target identity includes mutable mtime'; fi
+if grep -Fq "%d:%i:%s:%Y" "${repo_root}/mjust/libexec/admin-migration-export-plan-json"; then fail 'Export data identity includes mutable size/mtime'; fi
 for text in '.partial' 'verify-native' 'flock -n' 'jv_player_check_before_interrupt' 'sync -f' 'mv -- "${partial}"'; do
     grep -Fq "${text}" "${exporter}" || fail "shared export backend invariant missing: ${text}"
 done

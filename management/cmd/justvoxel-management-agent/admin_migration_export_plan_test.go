@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-const validMigrationExportPlanHelper = `{"ok":true,"schema_version":"v1","normalized":{"kind":"local","path":"/var/lib/justvoxel/exports","device":"","removable":false,"source":"","username":"","domain":"","filename":"justvoxel-migration-test.tar.gz","target_display":"/var/lib/justvoxel/exports/justvoxel-migration-test.tar.gz","target_filesystem":"xfs","data_path":"/var/lib/justvoxel/minecraft","data_bytes":2147483648,"target_available_bytes":8589934592},"warnings":[{"code":"cold_export","message":"Cold export."}],"requirements":{"export_confirmation_required":true,"players_confirmation_required":false,"minecraft_state":"running","online":0,"players":[],"smb_password_required":false,"target_validation_on_apply":true,"integrity_validation_required":true,"runtime_validation_required":true},"context":{"config_identity":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","data_identity":"1:2:3:4","target_identity":"local:5:6:7"}}`
+const validMigrationExportPlanHelper = `{"ok":true,"schema_version":"v1","normalized":{"kind":"local","path":"/var/lib/justvoxel/exports","device":"","removable":false,"source":"","username":"","domain":"","filename":"justvoxel-migration-test.tar.gz","target_display":"/var/lib/justvoxel/exports/justvoxel-migration-test.tar.gz","target_filesystem":"xfs","data_path":"/var/lib/justvoxel/minecraft","data_bytes":2147483648,"target_available_bytes":8589934592},"warnings":[{"code":"cold_export","message":"Cold export."}],"requirements":{"export_confirmation_required":true,"players_confirmation_required":false,"minecraft_state":"running","online":0,"players":[],"smb_password_required":false,"target_validation_on_apply":true,"integrity_validation_required":true,"runtime_validation_required":true},"context":{"config_identity":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","data_identity":"1:2","target_identity":"local:5:6"}}`
 
 func testMigrationExportRequest() adminMigrationExportTargetRequest {
 	return adminMigrationExportTargetRequest{
@@ -135,3 +135,50 @@ func TestMigrationExportFingerprintChangesWithTargetIdentity(t *testing.T) {
 		t.Fatal("export plan fingerprint did not change when target identity changed")
 	}
 }
+
+func TestMigrationExportFingerprintIgnoresLiveMeasurements(t *testing.T) {
+	var helper adminMigrationExportHelperResponse
+	if err := decodeAdminMigrationExportJSON([]byte(validMigrationExportPlanHelper), &helper); err != nil {
+		t.Fatal(err)
+	}
+	first, err := adminMigrationExportPlanFingerprint(helper.SchemaVersion, helper.Normalized, helper.Requirements, helper.Context)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	helper.Normalized.DataBytes += 4096
+	helper.Normalized.TargetAvailableBytes -= 4096
+	helper.Normalized.TargetFilesystem = "btrfs"
+	helper.Requirements.MinecraftState = "stopped"
+	helper.Requirements.PlayersConfirmationRequired = true
+	helper.Requirements.Online = 2
+	helper.Requirements.Players = []string{"PlayerOne", "PlayerTwo"}
+
+	second, err := adminMigrationExportPlanFingerprint(helper.SchemaVersion, helper.Normalized, helper.Requirements, helper.Context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatalf("live export measurements changed reviewed fingerprint: %s != %s", first, second)
+	}
+}
+
+func TestMigrationExportFingerprintChangesWithStableSourceIdentity(t *testing.T) {
+	var helper adminMigrationExportHelperResponse
+	if err := decodeAdminMigrationExportJSON([]byte(validMigrationExportPlanHelper), &helper); err != nil {
+		t.Fatal(err)
+	}
+	first, err := adminMigrationExportPlanFingerprint(helper.SchemaVersion, helper.Normalized, helper.Requirements, helper.Context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	helper.Context.DataIdentity = "1:999"
+	second, err := adminMigrationExportPlanFingerprint(helper.SchemaVersion, helper.Normalized, helper.Requirements, helper.Context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatal("export plan fingerprint did not change when stable Minecraft data identity changed")
+	}
+}
+

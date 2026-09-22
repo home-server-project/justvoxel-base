@@ -128,11 +128,32 @@ type adminMigrationExportPlanResponse struct {
 	Context         *adminMigrationExportContext      `json:"-"`
 }
 
+type adminMigrationExportFingerprintIntent struct {
+	Kind          string `json:"kind"`
+	Path          string `json:"path"`
+	Device        string `json:"device"`
+	Removable     bool   `json:"removable"`
+	Source        string `json:"source"`
+	Username      string `json:"username"`
+	Domain        string `json:"domain"`
+	Filename      string `json:"filename"`
+	TargetDisplay string `json:"target_display"`
+	DataPath      string `json:"data_path"`
+}
+
+type adminMigrationExportFingerprintSafety struct {
+	ExportConfirmationRequired  bool `json:"export_confirmation_required"`
+	SMBPasswordRequired         bool `json:"smb_password_required"`
+	TargetValidationOnApply     bool `json:"target_validation_on_apply"`
+	IntegrityValidationRequired bool `json:"integrity_validation_required"`
+	RuntimeValidationRequired   bool `json:"runtime_validation_required"`
+}
+
 type adminMigrationExportFingerprintPayload struct {
-	SchemaVersion string                           `json:"schema_version"`
-	Normalized    adminMigrationExportNormalized   `json:"normalized"`
-	Requirements  adminMigrationExportRequirements `json:"requirements"`
-	Context       adminMigrationExportContext      `json:"context"`
+	SchemaVersion string                                `json:"schema_version"`
+	Intent        adminMigrationExportFingerprintIntent `json:"intent"`
+	Safety        adminMigrationExportFingerprintSafety `json:"safety"`
+	Context       adminMigrationExportContext           `json:"context"`
 }
 
 type adminMigrationExportPlanningError struct {
@@ -301,9 +322,26 @@ func adminMigrationExportPlanFingerprint(schemaVersion string, normalized *admin
 	}
 	payload, err := json.Marshal(adminMigrationExportFingerprintPayload{
 		SchemaVersion: schemaVersion,
-		Normalized:    *normalized,
-		Requirements:  *requirements,
-		Context:       *context,
+		Intent: adminMigrationExportFingerprintIntent{
+			Kind:          normalized.Kind,
+			Path:          normalized.Path,
+			Device:        normalized.Device,
+			Removable:     normalized.Removable,
+			Source:        normalized.Source,
+			Username:      normalized.Username,
+			Domain:        normalized.Domain,
+			Filename:      normalized.Filename,
+			TargetDisplay: normalized.TargetDisplay,
+			DataPath:      normalized.DataPath,
+		},
+		Safety: adminMigrationExportFingerprintSafety{
+			ExportConfirmationRequired:  requirements.ExportConfirmationRequired,
+			SMBPasswordRequired:         requirements.SMBPasswordRequired,
+			TargetValidationOnApply:     requirements.TargetValidationOnApply,
+			IntegrityValidationRequired: requirements.IntegrityValidationRequired,
+			RuntimeValidationRequired:   requirements.RuntimeValidationRequired,
+		},
+		Context: *context,
 	})
 	if err != nil {
 		return "", err

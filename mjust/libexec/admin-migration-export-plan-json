@@ -146,7 +146,7 @@ plan() {
             parent="$normalized_path"
             while [[ ! -e "$parent" && "$parent" != / ]]; do parent="$(dirname -- "$parent")"; done
             [[ -d "$parent" ]] || { emit_error invalid_target 'Local export parent directory is unavailable.'; return 0; }
-            target_identity_value="$(stat -Lc 'local:%d:%i:%Y' "$parent" 2>/dev/null || true)"
+            target_identity_value="$(stat -Lc 'local:%d:%i' "$parent" 2>/dev/null || true)"
             target_available="$(df -B1 --output=avail -- "$parent" 2>/dev/null | tail -n1 | tr -d ' ' || true)"
             target_display="$normalized_path/$filename"
             target_fstype="$(findmnt -n -o FSTYPE --target "$parent" 2>/dev/null || true)"
@@ -231,7 +231,7 @@ plan() {
     if [[ "$state" == running && "$online" =~ ^[0-9]+$ ]] && (( online > 0 )); then players_confirmation=true; fi
 
     config_identity="$(sha256sum "$JV_CONFIG" | awk '{print $1}')"
-    data_identity="$(stat -Lc '%d:%i:%s:%Y' "$DATA_PATH" 2>/dev/null || true)"
+    data_identity="$(stat -Lc '%d:%i' "$DATA_PATH" 2>/dev/null || true)"
     [[ -n "$config_identity" && -n "$data_identity" ]] || { emit_error data_unavailable 'Export source identity could not be captured safely.'; return 0; }
 
     warnings="$(append_warning "$warnings" cold_export 'Export creates a cold portable bundle. If Minecraft is running, it is stopped through the normal player-aware graceful shutdown path and restarted afterward.')"
