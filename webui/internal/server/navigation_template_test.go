@@ -28,6 +28,7 @@ func TestControlCenterNavigationUX(t *testing.T) {
 		`href="/settings/new-storage"`,
 		`href="/settings/data-migration"`,
 		`href="/settings/backup-storage"`,
+		`href="/settings/new-backups"`,
 		`href="/operations#manual-backup"`,
 		`href="/settings/restore"`,
 		`href="/settings/server-migration"`,
@@ -102,6 +103,7 @@ func TestAuthenticatedTemplatesUseSharedHeader(t *testing.T) {
 		"storage_settings.html",
 		"storage_browser.html",
 		"backup_storage.html",
+		"new_backups.html",
 		"restore.html",
 		"restore_review.html",
 		"restore_progress.html",
@@ -319,6 +321,45 @@ func TestStorageBrowserReviewedActionFlow(t *testing.T) {
 	} {
 		if !strings.Contains(styles, want) {
 			t.Fatalf("storage action styling missing %q", want)
+		}
+	}
+}
+
+func TestNewBackupsCompactLibraryLayout(t *testing.T) {
+	templateContent, err := assets.ReadFile("templates/new_backups.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(templateContent)
+	for _, want := range []string{
+		"Backup Now",
+		"backup-command-bar",
+		"backup-file-grid",
+		"backup-file-card",
+		"/settings/new-backups/backup",
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("New Backups template missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"Delete", "Restore world", "backup_schedule", "Backup destination"} {
+		if strings.Contains(markup, forbidden) {
+			t.Fatalf("New Backups Step 1 unexpectedly exposes later-step control %q", forbidden)
+		}
+	}
+
+	cssContent, err := assets.ReadFile("static/new-backups.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles := string(cssContent)
+	for _, want := range []string{
+		".backup-command-bar",
+		".backup-file-grid{display:grid",
+		"@media(max-width:700px)",
+	} {
+		if !strings.Contains(styles, want) {
+			t.Fatalf("New Backups styling missing %q", want)
 		}
 	}
 }
