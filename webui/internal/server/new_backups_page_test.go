@@ -283,3 +283,75 @@ func TestNewBackupsAutomaticPlanPreservesMinecraftConfiguration(t *testing.T) {
 		t.Fatal("automatic review exposed the raw systemd calendar string")
 	}
 }
+
+func TestNewBackupsAutomaticApplyRevalidatesAndApplies(t *testing.T) {
+	client := &fakeNewBackupsAPI{
+		configurationPlan: api.AdminConfigurationChangeResponse{
+			OK: true,
+			Changes: []api.AdminConfigurationChange{
+				{Field: "backup_timer_enabled", Label: "Automatic backups", Before: "yes", After: "no"},
+				{Field: "backup_keep", Label: "Backups retained", Before: "7", After: "5"},
+			},
+		},
+		configurationApply: api.AdminConfigurationChangeResponse{OK: true, Applied: true},
+	}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := "csrf=csrf-token&daily_time=03%3A45&backup_keep=5"
+	page := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/settings/new-backups/automatic/apply", body))
+	if page.Code != http.StatusSeeOther || page.Header().Get("Location") != "/settings/new-backups?result=automatic" {
+		t.Fatalf("automatic apply returned %d %q: %s", page.Code, page.Header().Get("Location"), page.Body.String())
+	}
+	if client.configurationPlanCalls != 1 || client.configurationApplyCalls != 1 {
+		t.Fatalf("plan calls=%d apply calls=%d", client.configurationPlanCalls, client.configurationApplyCalls)
+	}
+	if client.appliedConfiguration.BackupTimerEnabled || client.appliedConfiguration.BackupKeep != 5 ||
+		client.appliedConfiguration.BackupSchedule != "*-*-* 03:45:00" {
+		t.Fatalf("unexpected applied automatic backup request: %#v", client.appliedConfiguration)
+	}
+}
+
+func TestNewBackupsAutomaticRejectsInvalidOrUnrelatedChanges(t *testing.T) {
+	t.Run("invalid daily time", func(t *testing.T) {
+		client := &fakeNewBackupsAPI{}
+		app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := "csrf=csrf-token&automatic_enabled=on&daily_time=25%3A99&backup_keep=7"
+		page := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/settings/new-backups/automatic/plan", body))
+		if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "valid 24-hour time") {
+			t.Fatalf("invalid daily time response = %d: %s", page.Code, page.Body.String())
+		}
+		if client.configurationPlanCalls != 0 {
+			t.Fatal("invalid daily time reached configuration plan API")
+		}
+	})
+
+	t.Run("unexpected Minecraft change", func(t *testing.T) {
+		client := &fakeNewBackupsAPI{
+			configurationPlan: api.AdminConfigurationChangeResponse{
+				OK: true,
+				Changes: []api.AdminConfigurationChange{
+					{Field: "motd", Label: "Server welcome message", Before: "Old", After: "New", RestartRequired: true},
+				},
+				RestartRequired: true,
+			},
+		}
+		app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := "csrf=csrf-token&automatic_enabled=on&daily_time=04%3A30&backup_keep=7"
+		page := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/settings/new-backups/automatic/apply", body))
+		if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Configuration changed unexpectedly") {
+			t.Fatalf("unexpected-change response = %d: %s", page.Code, page.Body.String())
+		}
+		if client.configurationApplyCalls != 0 {
+			t.Fatal("unexpected non-backup change reached configuration apply API")
+		}
+	})
+}
