@@ -144,7 +144,7 @@ func (a *App) setupWizardReviewBack(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/setup", http.StatusSeeOther)
 		return
 	}
-	draft.CurrentStep = 4
+	draft.CurrentStep = 5
 	firstRunSetupDrafts.save(a, session, draft)
 	firstRunSetupReviews.delete(a, session)
 	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "user returned from Review to Backups", draft)
@@ -217,7 +217,7 @@ func shortSetupPlanReference(value string) string {
 }
 
 func setupDraftReadyForReview(draft setupDraft) bool {
-	return draft.Started && draft.CurrentStep == 5 && draft.Server.Complete && draft.Minecraft.Complete && draft.Storage.Complete && draft.Backups.Complete
+	return draft.Started && draft.CurrentStep == 6 && draft.Server.Complete && draft.Minecraft.ResourcesComplete && draft.Minecraft.Complete && draft.Storage.Complete && draft.Backups.Complete
 }
 
 func setupPlanRequestFromDraft(draft setupDraft) (api.AdminSetupPlanRequest, error) {
