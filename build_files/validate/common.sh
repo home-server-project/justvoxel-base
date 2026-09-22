@@ -107,20 +107,23 @@ test -x /usr/libexec/justvoxel/console-issue-refresh
 bash -n /usr/libexec/justvoxel/console-issue-refresh
 
 # Validate the renderer directly. Image-build containers do not run the WebUI
-# service, so the issue contract must not depend on WebUI being Ready.
+# service and may not have a usable network, so pre-login validation checks only
+# fields that are always meaningful in that environment.
 issue_test="$(mktemp)"
 trap 'rm -f "${issue_test}"' EXIT
 /usr/libexec/justvoxel/motd --issue > "${issue_test}"
 grep -Fq 'JUSTVOXEL' "${issue_test}"
 grep -Fq 'Variant:' "${issue_test}"
-grep -Fq 'Network:' "${issue_test}"
 grep -Fq 'Minecraft:' "${issue_test}"
 grep -Fq 'Web interface:' "${issue_test}"
-grep -Fq 'Open in browser:' "${issue_test}"
-grep -Fq 'Direct address:' "${issue_test}"
+grep -Fq 'Network:' "${issue_test}"
 grep -Fq '\e[38;5;45m' "${issue_test}"
 if grep -Fq 'Common commands' "${issue_test}"; then
     echo 'ERROR: pre-login console banner must stop before Common commands.' >&2
+    exit 1
+fi
+if grep -Eq 'Tailscale:|NetBird:' "${issue_test}"; then
+    echo 'ERROR: pre-login console banner must not expose overlay-network details.' >&2
     exit 1
 fi
 rm -f "${issue_test}"
@@ -135,13 +138,22 @@ test -x /usr/libexec/justvoxel/motd
 bash -n /usr/libexec/justvoxel/motd
 grep -Fq 'Minecraft Server Appliance' /usr/libexec/justvoxel/motd
 grep -Fq "justvoxel-hwe|hwe) variant='HWE'" /usr/libexec/justvoxel/motd
-grep -Fq "network_state='No Ethernet interface detected'" /usr/libexec/justvoxel/motd
+grep -Fq "network_state='Not connected - use mjust net'" /usr/libexec/justvoxel/motd
+grep -Fq "network_state='Ethernet connected'" /usr/libexec/justvoxel/motd
 grep -Fq "network_state='Ethernet connected, obtaining address...'" /usr/libexec/justvoxel/motd
-grep -Fq "network_state='Ethernet cable disconnected'" /usr/libexec/justvoxel/motd
+grep -Fq "network_state='Wi-Fi connected'" /usr/libexec/justvoxel/motd
+grep -Fq "wifi_value='Not connected'" /usr/libexec/justvoxel/motd
 grep -Fq "line 'Network:'" /usr/libexec/justvoxel/motd
+grep -Fq "line 'Wi-Fi:'" /usr/libexec/justvoxel/motd
+grep -Fq "line 'Tailscale:'" /usr/libexec/justvoxel/motd
+grep -Fq "line 'NetBird:'" /usr/libexec/justvoxel/motd
 grep -Fq 'IPv4:' /usr/libexec/justvoxel/motd
 grep -Fq 'Web interface:' /usr/libexec/justvoxel/motd
 grep -Fq "line 'First setup:'" /usr/libexec/justvoxel/motd
+if grep -Fq "line 'Validate system:'" /usr/libexec/justvoxel/motd; then
+    echo 'ERROR: login guidance must not show the removed Validate system command.' >&2
+    exit 1
+fi
 if grep -Fq 'setup-advanced' /usr/libexec/justvoxel/motd; then
     echo 'ERROR: login guidance must not expose the removed Advanced Setup path.' >&2
     exit 1
