@@ -2,6 +2,7 @@
 set -euo pipefail
 
 source /usr/libexec/justvoxel/mjust/admin-storage-actions-common.sh
+source /usr/libexec/justvoxel/mjust/admin-storage-actions-apply.sh
 require_root
 storage_action_load_config
 
@@ -146,5 +147,6 @@ plan_json() {
 action="${1:-plan}"
 case "${action}" in
     plan) plan_json ;;
-    *) json_error 'Usage: admin-storage-actions-json plan' ;;
+    apply) storage_action_apply_json ;;
+    *) json_error 'Usage: admin-storage-actions-json {plan|apply}' ;;
 esac
