@@ -29,7 +29,7 @@
     <div class="setup-terminal-note"><span>Prefer the terminal?</span><code>mjust setup</code><small>Available from a local console or SSH.</small></div>
   </section>
   {{else}}
-  <div class="title-row setup-title-row"><div><p class="eyebrow">First setup</p><h1>Set up JustVoxel</h1></div><span class="badge">Step {{.CurrentStep}} of 5</span></div>
+  <div class="title-row setup-title-row"><div><p class="eyebrow">First setup</p><h1>Set up JustVoxel</h1></div><span class="badge">Step {{.CurrentStep}} of {{len .Steps}}</span></div>
   <ol class="setup-progress" aria-label="Setup progress">{{range .Steps}}<li class="{{if .Active}}active{{end}} {{if .Complete}}complete{{end}}" {{if .Active}}aria-current="step"{{end}}><span class="setup-number">{{.Number}}</span><span>{{.Name}}</span></li>{{end}}</ol>
 
   <section class="panel setup-step-panel">
