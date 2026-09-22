@@ -195,22 +195,34 @@ func TestNewStorageBrowserGroupsDisksAndPartitions(t *testing.T) {
 	}
 
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	rr := httptest.NewRecorder()
 	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-storage", ""))
-	if rr.Code != http.StatusOK { t.Fatalf("new storage returned %d: %s", rr.Code, rr.Body.String()) }
+	if rr.Code != http.StatusOK {
+		t.Fatalf("new storage returned %d: %s", rr.Code, rr.Body.String())
+	}
 	body := rr.Body.String()
 	for _, want := range []string{"New Storage", "System Disk", "Data Disk", "data-storage-disk=\"vda\"", "data-storage-partitions=\"vdb\"", "/dev/vdb1", "Minecraft", "/dev/vdb2", "Not formatted", "storage-partition-card storage-partition-swap", "data-storage-detail-dialog", "data-storage-detail-close", "/static/storage-browser.js"} {
-		if !strings.Contains(body, want) { t.Fatalf("new storage browser missing %q: %s", want, body) }
+		if !strings.Contains(body, want) {
+			t.Fatalf("new storage browser missing %q: %s", want, body)
+		}
 	}
-	if strings.Contains(body, "data-path=\"/dev/vda2\"") { t.Fatal("swap partition is interactive") }
+	if strings.Contains(body, "data-path=\"/dev/vda2\"") {
+		t.Fatal("swap partition is interactive")
+	}
 }
 
 func TestStorageBrowserRoleClassification(t *testing.T) {
 	configuration := api.AdminConfigurationDiscovery{Configured: true}
 	configuration.Minecraft.DataExpectedUUID = "minecraft-uuid"
 	configuration.Backup.ExpectedUUID = "backup-uuid"
-	cases := []struct { name string; device api.AdminStorageDevice; want string }{
+	cases := []struct {
+		name   string
+		device api.AdminStorageDevice
+		want   string
+	}{
 		{name: "swap", device: api.AdminStorageDevice{Filesystem: "swap"}, want: "Swap"},
 		{name: "system", device: api.AdminStorageDevice{System: true, Filesystem: "xfs"}, want: "System"},
 		{name: "minecraft", device: api.AdminStorageDevice{Filesystem: "xfs", UUID: "minecraft-uuid"}, want: "Minecraft"},
@@ -221,7 +233,9 @@ func TestStorageBrowserRoleClassification(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := storageBrowserRole(tc.device, configuration); got != tc.want { t.Fatalf("storageBrowserRole() = %q, want %q", got, tc.want) }
+			if got := storageBrowserRole(tc.device, configuration); got != tc.want {
+				t.Fatalf("storageBrowserRole() = %q, want %q", got, tc.want)
+			}
 		})
 	}
 }
