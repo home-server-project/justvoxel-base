@@ -373,6 +373,7 @@ func TestNewBackupsMobileLibraryStaysSingleColumn(t *testing.T) {
 	for _, want := range []string{
 		"@media(max-width:700px)",
 		".backup-file-grid{grid-template-columns:1fr}",
+		".backup-file-status-warning",
 		".backup-command-bar{align-items:stretch;flex-direction:column}",
 	} {
 		if !strings.Contains(styles, want) {
