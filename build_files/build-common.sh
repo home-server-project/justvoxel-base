@@ -104,7 +104,7 @@ install -m0755 /ctx/build_files/validate/vm.sh /usr/libexec/justvoxel/health/vm
 
 for cmd in \
     bootc podman skopeo nmcli nmtui nm-hsp resolvectl firewall-cmd sshd sudo just mjust \
-    tailscale netbird curl jq findmnt mountpoint flock mkfs.xfs mount.nfs mount.cifs umount \
+    tailscale netbird curl jq findmnt mountpoint flock mkfs.xfs btrfs mount.nfs mount.cifs mount.ntfs-3g umount \
     lsblk blkid wipefs parted partprobe udevadm qemu-ga vmtoolsd iperf3 micro spf python3 btop; do
     command -v "${cmd}"
 done
