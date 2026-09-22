@@ -90,7 +90,6 @@ func TestAuthenticatedTemplatesUseSharedHeader(t *testing.T) {
 	for _, name := range []string{
 		"dashboard.html",
 		"about.html",
-		"about.html",
 		"operations.html",
 		"activity.html",
 		"admin_activity.html",
