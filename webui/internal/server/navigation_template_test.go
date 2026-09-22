@@ -381,3 +381,55 @@ func TestNewBackupsMobileLibraryStaysSingleColumn(t *testing.T) {
 		}
 	}
 }
+
+func TestNewBackupsReviewedMultiDeleteFlow(t *testing.T) {
+	templateContent, err := assets.ReadFile("templates/new_backups.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(templateContent)
+	for _, want := range []string{
+		`data-backup-select`,
+		`data-backup-delete-selected`,
+		`data-backup-delete-dialog`,
+		`data-backup-delete-confirmation-phrase`,
+		`/static/new-backups.js`,
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("New Backups delete UI missing %q", want)
+		}
+	}
+
+	scriptContent, err := assets.ReadFile("static/new-backups.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(scriptContent)
+	for _, want := range []string{
+		`"/api/new-backups/delete/plan"`,
+		`"/api/new-backups/delete/apply"`,
+		`reviewedPlan.fingerprint`,
+		`reviewedPlan.confirmation`,
+		`ids.forEach((id) => body.append("backup_id", id))`,
+		`window.location.assign("/settings/new-backups?result=deleted&count="`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("New Backups delete behavior missing %q", want)
+		}
+	}
+
+	cssContent, err := assets.ReadFile("static/new-backups.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles := string(cssContent)
+	for _, want := range []string{
+		".backup-file-selectable:has(.backup-file-checkbox:checked)",
+		".backup-delete-dialog::backdrop",
+		".backup-delete-review-list",
+	} {
+		if !strings.Contains(styles, want) {
+			t.Fatalf("New Backups delete styling missing %q", want)
+		}
+	}
+}
