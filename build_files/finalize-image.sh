@@ -4,7 +4,7 @@ set -ouex pipefail
 : "${IMAGE_REPOSITORY:?IMAGE_REPOSITORY must be set}"
 : "${IMAGE_PRETTY_NAME:?IMAGE_PRETTY_NAME must be set}"
 : "${IMAGE_VARIANT:?IMAGE_VARIANT must be set}"
-: "${IMAGE_VARIANT_ID:?IMAGE_VARIANT_ID must be set}"
+: "${IMAGE_VARIANT_:?IMAGE_VARIANT_ must be set}"
 
 IMAGE_ADDITIONAL_TRUST_REPOSITORIES="${IMAGE_ADDITIONAL_TRUST_REPOSITORIES:-}"
 trust_repositories=("${IMAGE_REPOSITORY}")
@@ -19,33 +19,33 @@ OS_RELEASE_ETC=/etc/os-release
 [[ -r "${OS_RELEASE_USR}" ]]
 # shellcheck disable=SC1090
 source "${OS_RELEASE_USR}"
-BASE_ID="${ID:-}"
+BASE_="${:-}"
 BASE_PRETTY_NAME="${PRETTY_NAME:-}"
-BASE_VERSION_ID="${VERSION_ID:-}"
-BASE_PLATFORM_ID="${PLATFORM_ID:-}"
+BASE_VERSION_="${VERSION_:-}"
+BASE_PLATFORM_="${PLATFORM_:-}"
 BASE_CPE_NAME="${CPE_NAME:-}"
 BASE_PROFILE="${HOME_SERVER_BASE_PROFILE:-}"
 BASE_CHANNEL="${HOME_SERVER_BASE_CHANNEL:-}"
-UPSTREAM_ID="${HOME_SERVER_BASE_UPSTREAM_ID:-}"
+UPSTREAM_="${HOME_SERVER_BASE_UPSTREAM_:-}"
 UPSTREAM_PRETTY_NAME="${HOME_SERVER_BASE_UPSTREAM_PRETTY_NAME:-}"
-UPSTREAM_VERSION_ID="${HOME_SERVER_BASE_UPSTREAM_VERSION_ID:-}"
-UPSTREAM_PLATFORM_ID="${HOME_SERVER_BASE_UPSTREAM_PLATFORM_ID:-}"
+UPSTREAM_VERSION_="${HOME_SERVER_BASE_UPSTREAM_VERSION_:-}"
+UPSTREAM_PLATFORM_="${HOME_SERVER_BASE_UPSTREAM_PLATFORM_:-}"
 UPSTREAM_CPE_NAME="${HOME_SERVER_BASE_UPSTREAM_CPE_NAME:-}"
 
-[[ "${BASE_ID}" == "home-server-base" ]] || {
-    echo "ERROR: expected Home Server Base parent ID, got '${BASE_ID}'." >&2
+[[ "${BASE_}" == "home-server-base" ]] || {
+    echo "ERROR: expected Home Server Base parent , got '${BASE_}'." >&2
     exit 1
 }
 [[ "${BASE_PRETTY_NAME}" == "Home Server Base 10" ]] || {
     echo "ERROR: expected Home Server Base 10 parent, got '${BASE_PRETTY_NAME}'." >&2
     exit 1
 }
-[[ "${BASE_VERSION_ID%%.*}" == "10" ]] || {
-    echo "ERROR: expected Home Server Base major version 10, got '${BASE_VERSION_ID}'." >&2
+[[ "${BASE_VERSION_%%.*}" == "10" ]] || {
+    echo "ERROR: expected Home Server Base major version 10, got '${BASE_VERSION_}'." >&2
     exit 1
 }
-[[ "${BASE_PLATFORM_ID}" == "platform:el10" ]] || {
-    echo "ERROR: expected platform:el10, got '${BASE_PLATFORM_ID}'." >&2
+[[ "${BASE_PLATFORM_}" == "platform:el10" ]] || {
+    echo "ERROR: expected platform:el10, got '${BASE_PLATFORM_}'." >&2
     exit 1
 }
 [[ "${BASE_CPE_NAME}" == "cpe:/o:home-server-project:home-server-base:10" ]] || {
@@ -60,20 +60,20 @@ UPSTREAM_CPE_NAME="${HOME_SERVER_BASE_UPSTREAM_CPE_NAME:-}"
     echo "ERROR: JustVoxel must consume Home Server Base stable, got '${BASE_CHANNEL}'." >&2
     exit 1
 }
-[[ "${UPSTREAM_ID}" == "almalinux" ]] || {
-    echo "ERROR: Home Server Base upstream ID is not AlmaLinux." >&2
+[[ "${UPSTREAM_}" == "almalinux" ]] || {
+    echo "ERROR: Home Server Base upstream  is not AlmaLinux." >&2
     exit 1
 }
-[[ "${UPSTREAM_VERSION_ID%%.*}" == "10" ]] || {
-    echo "ERROR: Home Server Base upstream VERSION_ID is not AlmaLinux 10." >&2
+[[ "${UPSTREAM_VERSION_%%.*}" == "10" ]] || {
+    echo "ERROR: Home Server Base upstream VERSION_ is not AlmaLinux 10." >&2
     exit 1
 }
-[[ "${UPSTREAM_PLATFORM_ID}" == "platform:el10" ]] || {
-    echo "ERROR: Home Server Base upstream PLATFORM_ID is not platform:el10." >&2
+[[ "${UPSTREAM_PLATFORM_}" == "platform:el10" ]] || {
+    echo "ERROR: Home Server Base upstream PLATFORM_ is not platform:el10." >&2
     exit 1
 }
 [[ "${UPSTREAM_CPE_NAME}" == cpe:/o:almalinux:* ]] || {
-    echo "ERROR: Home Server Base upstream CPE does not identify AlmaLinux." >&2
+    echo "ERROR: Home Server Base upstream CPE does not entify AlmaLinux." >&2
     exit 1
 }
 
@@ -99,12 +99,12 @@ osr_unset() {
 
 osr_set NAME "JustVoxel"
 osr_set PRETTY_NAME "${IMAGE_PRETTY_NAME}"
-osr_set ID "justvoxel"
-osr_set ID_LIKE "almalinux rhel centos fedora"
-osr_set VERSION "${BASE_VERSION_ID}"
+osr_set  "justvoxel"
+osr_set _LIKE "almalinux rhel centos fedora"
+osr_set VERSION "${BASE_VERSION_}"
 osr_set VARIANT "${IMAGE_VARIANT}"
-osr_set VARIANT_ID "${IMAGE_VARIANT_ID}"
-osr_set IMAGE_ID "${IMAGE_VARIANT_ID}"
+osr_set VARIANT_ "${IMAGE_VARIANT_}"
+osr_set IMAGE_ "${IMAGE_VARIANT_}"
 osr_set IMAGE_VERSION "10"
 osr_set HOME_URL "https://github.com/home-server-project/justvoxel"
 osr_set DOCUMENTATION_URL "https://github.com/home-server-project/justvoxel-base/tree/main/docs"
@@ -113,10 +113,10 @@ osr_set BUG_REPORT_URL "https://github.com/home-server-project/justvoxel/issues"
 osr_set VENDOR_NAME "Home Server Project"
 osr_set VENDOR_URL "https://github.com/home-server-project"
 osr_set CPE_NAME "cpe:/o:home-server-project:justvoxel:10"
-osr_set JUSTVOXEL_BASE_ID "${BASE_ID}"
+osr_set JUSTVOXEL_BASE_ "${BASE_}"
 osr_set JUSTVOXEL_BASE_PRETTY_NAME "${BASE_PRETTY_NAME}"
-osr_set JUSTVOXEL_BASE_VERSION_ID "${BASE_VERSION_ID}"
-osr_set JUSTVOXEL_BASE_PLATFORM_ID "${BASE_PLATFORM_ID}"
+osr_set JUSTVOXEL_BASE_VERSION_ "${BASE_VERSION_}"
+osr_set JUSTVOXEL_BASE_PLATFORM_ "${BASE_PLATFORM_}"
 osr_set JUSTVOXEL_BASE_CPE_NAME "${BASE_CPE_NAME}"
 osr_set JUSTVOXEL_BASE_PROFILE "${BASE_PROFILE}"
 osr_set JUSTVOXEL_BASE_CHANNEL "${BASE_CHANNEL}"
@@ -127,19 +127,24 @@ done
 chmod 0644 "${OS_RELEASE_FILES[@]}"
 
 install -d -m0755 /usr/lib/justvoxel
-printf '%s\n' "${IMAGE_VARIANT_ID}" > /usr/lib/justvoxel/variant
+printf '%s\n' "${IMAGE_VARIANT_}" > /usr/lib/justvoxel/variant
 chmod 0644 /usr/lib/justvoxel/variant
 
 # External repositories are composition inputs only. Immutable hosts must not
 # accidentally drift through ad-hoc package installation.
+for repo_file in /etc/yum.repos.d/epel*.repo; do
+    [[ -e "${repo_file}" ]] || continue
+    sed -Ei 's/^[[:space:]]*enabled[[:space:]]*=[[:space:]]*1[[:space:]]*$/enabled=0/' "${repo_file}"
+done
 
+# Fail the build if EPEL remains enabled.
 if dnf repolist --enabled | grep -Eiq 'epel'; then
     echo "ERROR: an external package repository remains enabled in the final image."
     dnf repolist --enabled
     exit 1
 fi
 
-# /var is persistent machine state in bootc and image-provided /var content is
+# /var is persistent machine state in bootc and image-proved /var content is
 # only populated on the initial deployment. Required runtime directories must
 # therefore be recreated declaratively (tmpfiles.d/StateDirectory), not relied
 # upon as package payload in the image. Remove obvious build-only state first,
@@ -150,7 +155,7 @@ rm -rf /var/cache/* /var/log/* /var/tmp/* /var/lib/dnf /var/lib/rpm-state
 bootc container lint
 
 # Keep only the minimal bootc /var skeleton in the immutable image. Runtime
-# state is recreated by the declarative rules validated above.
+# state is recreated by the declarative rules valated above.
 rm -rf /var
 install -d -m0755 /var
 install -d -m1777 /var/tmp
