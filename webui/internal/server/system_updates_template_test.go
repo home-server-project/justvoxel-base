@@ -22,6 +22,12 @@ func TestSystemUpdateControlCenterDialogUX(t *testing.T) {
 		"data-system-update-state",
 		"data-system-update-button",
 		"data-system-update-csrf",
+		"data-system-update-reboot",
+		"data-system-update-backup",
+		"data-system-update-quick",
+		"data-system-update-reboot-button",
+		">Back up Minecraft before reboot</strong>",
+		">Quick reboot</strong>",
 	} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("system update dialog markup missing %q", want)
@@ -40,6 +46,8 @@ func TestSystemUpdateControlCenterDialogUX(t *testing.T) {
 		"width:100vw",
 		".system-update-deployment-grid",
 		".system-update-close",
+		".system-update-reboot-panel",
+		".system-update-option",
 	} {
 		if !strings.Contains(css, want) {
 			t.Fatalf("system update responsive styling missing %q", want)
@@ -56,8 +64,12 @@ func TestSystemUpdateControlCenterDialogUX(t *testing.T) {
 		"systemUpdateDialog.showModal()",
 		"event.target === systemUpdateDialog",
 		"systemUpdateDialog.close()",
-		"Update staged — restart required",
+		"Update staged — reboot required",
 		"Updating…",
+		"fetch(\"/api/system-updates/reboot\"",
+		"Player warning: 10 seconds",
+		"Confirm reboot",
+		"Creating Minecraft backup…",
 	} {
 		if !strings.Contains(js, want) {
 			t.Fatalf("system update behavior missing %q", want)
