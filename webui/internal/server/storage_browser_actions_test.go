@@ -285,7 +285,6 @@ func TestStorageBrowserMountUXUsesHumanWording(t *testing.T) {
 	}
 }
 
-
 func TestStorageBrowserPortableFilesystemPolicy(t *testing.T) {
 	template, err := assets.ReadFile("templates/storage_browser.html")
 	if err != nil {
