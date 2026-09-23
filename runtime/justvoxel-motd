@@ -252,16 +252,16 @@ if (( ${#wifi_devices[@]} > 0 )); then
     line 'Wi-Fi:' "$([[ ${wifi_connected} == yes ]] && printf '%s' "${white}" || printf '%s' "${yellow}")" "${wifi_value}"
 fi
 
-if [[ ${output_mode} == issue ]]; then
-    printf '\n'
-    exit 0
-fi
-
 if [[ ${tailscale_configured} == yes ]]; then
     line 'Tailscale:' "$([[ ${tailscale_value} == 'Not connected' ]] && printf '%s' "${yellow}" || printf '%s' "${white}")" "${tailscale_value}"
 fi
 if [[ ${netbird_configured} == yes ]]; then
     line 'NetBird:' "$([[ ${netbird_value} == 'Not connected' ]] && printf '%s' "${yellow}" || printf '%s' "${white}")" "${netbird_value}"
+fi
+
+if [[ ${output_mode} == issue ]]; then
+    printf '\n'
+    exit 0
 fi
 
 printf '\n%s%sCommon commands%s\n' "${bold}" "${cyan}" "${reset}"
