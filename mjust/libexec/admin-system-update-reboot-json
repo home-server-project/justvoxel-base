@@ -16,9 +16,7 @@ player_names_json() {
         printf '[]'
         return
     fi
-    printf '%s
-' "${names}" | tr ',' '
-' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | jq -Rsc 'split("\n") | map(select(length > 0))'
+    printf '%s\\n' "${names}" | tr ',' '\\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | jq -Rsc 'split("\n") | map(select(length > 0))'
 }
 
 emit_state() {
@@ -53,7 +51,7 @@ request_reboot() {
         shift
     done
 
-    if systemctl is-active --quiet "${unit_name}.service" 2>/dev/null || systemctl is-activating --quiet "${unit_name}.service" 2>/dev/null; then
+    if systemctl is-active --quiet "${unit_name}.service" 2>/dev/null; then
         emit_error workflow_active 'A system update reboot workflow is already running.'
         return 2
     fi
