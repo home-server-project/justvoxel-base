@@ -103,9 +103,8 @@ queue_system_action() {
 }
 
 apply_action() {
-    local action="$1" confirm_players="${2:-no}" backup_minecraft="${3:-no}" warning_seconds="${4:-60}"
-    local label stop_mode=required status firmware_available was_active=no
-    local safety_output='' rc backup_rc=0
+    local action="$1" confirm_players="${2:-no}" label stop_mode=required status firmware_available was_active=no
+    local safety_output='' rc
 
     status="$(collect_status)"
     firmware_available="$(jq -r '.firmware.available' <<<"${status}")"
@@ -113,10 +112,6 @@ apply_action() {
     case "${action}" in
         reboot)
             label='Reboot JustVoxel'
-            if [[ ${warning_seconds} != 60 && ${warning_seconds} != 10 ]]; then
-                emit_error "${action}" invalid_warning 'Reboot warning must be 60 or 10 seconds.'
-                return 2
-            fi
             ;;
         poweroff)
             label='Power off JustVoxel'
@@ -139,7 +134,7 @@ apply_action() {
 
     if [[ ${was_active} == yes ]]; then
         set +e
-        safety_output="$(JV_INTERRUPT_CONFIRMATION_MODE="${stop_mode}" JV_INTERRUPT_WARNING_SECONDS="${warning_seconds}" jv_stop_minecraft_adaptive "${label}" 2>/dev/null)"
+        safety_output="$(JV_INTERRUPT_CONFIRMATION_MODE="${stop_mode}" jv_stop_minecraft_adaptive "${label}" 2>/dev/null)"
         rc=$?
         set -e
         case "${rc}" in
@@ -153,18 +148,6 @@ apply_action() {
                 return 3
                 ;;
         esac
-    fi
-
-    if [[ ${action} == reboot && ${backup_minecraft} == yes ]]; then
-        set +e
-        /usr/libexec/justvoxel/minecraft-backup --leave-stopped >/dev/null 2>&1
-        backup_rc=$?
-        set -e
-        if (( backup_rc != 0 )); then
-            [[ ${was_active} == yes ]] && systemctl start minecraft.service >/dev/null 2>&1 || true
-            emit_error "${action}" backup_failed 'Minecraft backup failed. Reboot was cancelled; retry the backup or reboot without it.'
-            return 5
-        fi
     fi
 
     if ! queue_system_action "${action}"; then
@@ -182,41 +165,18 @@ case "${1:-}" in
         collect_status
         ;;
     apply)
-        [[ $# -ge 2 && $# -le 5 ]] || { echo 'Usage: admin-system-actions-json apply ACTION [--confirm-players] [--backup-minecraft] [--warning-seconds=10|60]' >&2; exit 2; }
-        action="$2"
+        [[ $# -ge 2 && $# -le 3 ]] || { echo 'Usage: admin-system-actions-json apply ACTION [--confirm-players]' >&2; exit 2; }
         confirm_players=no
-        backup_minecraft=no
-        warning_seconds=60
-        shift 2
-        while (( $# > 0 )); do
-            case "$1" in
-                --confirm-players)
-                    confirm_players=yes
-                    ;;
-                --backup-minecraft)
-                    backup_minecraft=yes
-                    ;;
-                --warning-seconds=10)
-                    warning_seconds=10
-                    ;;
-                --warning-seconds=60)
-                    warning_seconds=60
-                    ;;
-                *)
-                    echo 'ERROR: invalid system-action option.' >&2
-                    exit 2
-                    ;;
-            esac
-            shift
-        done
-        if [[ "$action" != reboot && ( "${backup_minecraft}" == yes || "${warning_seconds}" != 60 ) ]]; then
-            echo 'ERROR: backup and warning overrides are supported for reboot only.' >&2
+        if [[ ${3:-} == --confirm-players ]]; then
+            confirm_players=yes
+        elif [[ -n ${3:-} ]]; then
+            echo 'ERROR: invalid system-action option.' >&2
             exit 2
         fi
-        apply_action "${action}" "${confirm_players}" "${backup_minecraft}" "${warning_seconds}"
+        apply_action "$2" "${confirm_players}"
         ;;
     *)
-        echo 'Usage: admin-system-actions-json {status|apply ACTION [--confirm-players] [--backup-minecraft] [--warning-seconds=10|60]}' >&2
+        echo 'Usage: admin-system-actions-json {status|apply ACTION [--confirm-players]}' >&2
         exit 2
         ;;
 esac
