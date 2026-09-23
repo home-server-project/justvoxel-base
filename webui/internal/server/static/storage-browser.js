@@ -88,7 +88,19 @@
   }
 
   function normalizedFilesystem(data) {
-    return data.filesystem && data.filesystem !== "Not formatted" ? data.filesystem : "";
+    return (data.filesystem || "").trim();
+  }
+
+  function filesystemDisplay(filesystem) {
+    const value = (filesystem || "").toLowerCase();
+    if (value === "xfs") return "XFS";
+    if (value === "ext4") return "ext4";
+    if (value === "btrfs") return "Btrfs";
+    if (value === "ntfs" || value === "ntfs-3g") return "NTFS";
+    if (value === "vfat" || value === "fat" || value === "fat32") return "FAT / FAT32";
+    if (value === "exfat") return "exFAT";
+    if (!value) return "Not formatted";
+    return filesystem || "Unknown";
   }
 
   function showStorageAction(action, visible) {
@@ -112,11 +124,15 @@
     if (migrateButton) migrateButton.hidden = data.minecraftCandidate !== "Yes";
 
     const filesystem = normalizedFilesystem(data);
-    const supportedMount = ["xfs", "ext4", "btrfs"].includes(filesystem.toLowerCase());
-    if (!supportedMount) {
+    const filesystemKey = filesystem.toLowerCase();
+    const mountable = ["xfs", "ext4", "btrfs", "ntfs", "vfat", "exfat"].includes(filesystemKey);
+    const managedLinux = ["xfs", "ext4", "btrfs"].includes(filesystemKey);
+
+    if (!filesystem) {
       showStorageAction("format", true);
       return;
     }
+    if (!mountable) return;
 
     const mounted = status ? Boolean(status.mounted) : data.mounted === "Yes";
     const persistence = status?.persistence || "";
@@ -141,7 +157,7 @@
     }
 
     if (persistence === "none") {
-      showStorageAction("format", true);
+      showStorageAction("format", managedLinux);
       setOptional(detail.mountTypeRow, detail.mountType, mounted ? "For now" : "Not mounted");
       if (mounted) {
         showStorageAction("unmount-for-now", true);
@@ -159,8 +175,8 @@
 
   async function loadMountStatus(data) {
     const filesystem = normalizedFilesystem(data);
-    const supportedMount = ["xfs", "ext4", "btrfs"].includes(filesystem.toLowerCase());
-    if (!supportedMount || data.system === "Yes" || data.readonly === "Yes") return;
+    const mountable = ["xfs", "ext4", "btrfs", "ntfs", "vfat", "exfat"].includes(filesystem.toLowerCase());
+    if (!mountable || data.system === "Yes" || data.readonly === "Yes") return;
 
     const selectedPath = data.path || "";
     try {
@@ -192,7 +208,7 @@
       if (detail.role) detail.role.textContent = data.role || "Partition";
       if (detail.path) detail.path.textContent = data.path || "";
       if (detail.size) detail.size.textContent = data.size || "Unknown";
-      if (detail.filesystem) detail.filesystem.textContent = data.filesystem || "Unknown";
+      if (detail.filesystem) detail.filesystem.textContent = data.filesystemDisplay || filesystemDisplay(data.filesystem);
       if (detail.mounted) detail.mounted.textContent = data.mounted || "No";
       if (detail.system) detail.system.textContent = data.system || "No";
       if (detail.readonly) detail.readonly.textContent = data.readonly || "No";
@@ -397,7 +413,7 @@
       if (reviewPanel) reviewPanel.hidden = false;
       if (reviewDevice) reviewDevice.textContent = reviewedPlan.device || selectedPartition.path;
       if (reviewRole) reviewRole.textContent = reviewedPlan.role || selectedPartition.role || "Available";
-      if (reviewFilesystem) reviewFilesystem.textContent = reviewedPlan.filesystem || "Not formatted";
+      if (reviewFilesystem) reviewFilesystem.textContent = filesystemDisplay(reviewedPlan.filesystem);
       if (reviewTarget) reviewTarget.textContent = targetDescription(reviewedPlan);
       if (reviewTargetRow) reviewTargetRow.hidden = false;
       renderWarnings(payload.warnings);
