@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -44,5 +45,51 @@ func TestAdminSystemUpdatePostsOrdinaryUpdateRequest(t *testing.T) {
 	}
 	if status.Message != "JustVoxel OS is current." || status.RebootRequired {
 		t.Fatalf("unexpected update response: %#v", status)
+	}
+}
+
+
+func TestAdminSystemUpdateRebootSendsSelectedOptions(t *testing.T) {
+	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPost || r.URL.Path != adminSystemUpdateRebootPath {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		var request adminSystemUpdateRebootRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if !request.ActionConfirmed || !request.ConfirmPlayers || !request.BackupMinecraft || request.WarningSeconds != 10 {
+			t.Fatalf("unexpected reboot request: %#v", request)
+		}
+		body := `{"ok":true,"state":"queued","accepted":true,"warning_seconds":10,"backup_minecraft":true}`
+		return &http.Response{StatusCode: http.StatusAccepted, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})}}
+
+	result, err := client.AdminSystemUpdateReboot(context.Background(), "session-token", AdminSystemUpdateRebootOptions{
+		ConfirmPlayers: true, BackupMinecraft: true, WarningSeconds: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Accepted || result.WarningSeconds != 10 || !result.BackupMinecraft {
+		t.Fatalf("unexpected reboot response: %#v", result)
+	}
+}
+
+func TestAdminSystemUpdateRebootStatusReadsCountdown(t *testing.T) {
+	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodGet || r.URL.Path != adminSystemUpdateRebootPath {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		body := `{"ok":true,"state":"countdown","deadline_unix":1234,"online":2,"warning_seconds":60}`
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})}}
+
+	result, err := client.AdminSystemUpdateRebootStatus(context.Background(), "session-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.State != "countdown" || result.DeadlineUnix != 1234 || result.WarningSeconds != 60 {
+		t.Fatalf("unexpected reboot status: %#v", result)
 	}
 }
