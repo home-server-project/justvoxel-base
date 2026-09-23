@@ -58,6 +58,7 @@ systemctl enable systemd-resolved.service
 systemctl enable firewalld.service 2>/dev/null || true
 systemctl enable sshd.service 2>/dev/null || true
 systemctl enable justvoxel-web-bootstrap.service
+systemctl enable justvoxel-minecraft-shutdown-guard.service
 
 install -d -m0755 /usr/share/doc/justvoxel
 cp -avf /ctx/docs/. /usr/share/doc/justvoxel/
@@ -104,7 +105,7 @@ install -m0755 /ctx/build_files/validate/vm.sh /usr/libexec/justvoxel/health/vm
 
 for cmd in \
     bootc podman skopeo nmcli nmtui nm-hsp resolvectl firewall-cmd sshd sudo just mjust \
-    tailscale netbird curl jq findmnt mountpoint flock mkfs.xfs btrfs mount.nfs mount.cifs mount.ntfs-3g umount \
+    tailscale netbird curl jq findmnt mountpoint flock timeout mkfs.xfs btrfs mount.nfs mount.cifs mount.ntfs-3g umount \
     lsblk blkid wipefs parted partprobe udevadm qemu-ga vmtoolsd iperf3 micro spf python3 btop; do
     command -v "${cmd}"
 done

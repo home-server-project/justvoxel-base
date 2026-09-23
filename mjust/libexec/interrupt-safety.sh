@@ -168,6 +168,36 @@ jv_stop_minecraft_adaptive() {
     jv_wait_minecraft_stopped
 }
 
+jv_prepare_minecraft_for_host_shutdown() {
+    local players online
+
+    if ! systemctl is-active --quiet minecraft.service 2>/dev/null; then
+        return 0
+    fi
+
+    players="$(timeout 5s podman exec minecraft rcon-cli 'list' 2>/dev/null || true)"
+    if [[ -z ${players} ]]; then
+        echo 'WARNING: could not confirm Minecraft player status during host shutdown; preserving the normal container shutdown delay.' >&2
+        return 0
+    fi
+    online="$(jv_player_online_count "${players}" 2>/dev/null || true)"
+    if [[ ! ${online} =~ ^[0-9]+$ ]]; then
+        echo 'WARNING: could not parse Minecraft player status during host shutdown; preserving the normal container shutdown delay.' >&2
+        return 0
+    fi
+
+    if (( online > 0 )); then
+        echo "Minecraft has ${online} player(s) online; preserving the configured shutdown announcement delay."
+        return 0
+    fi
+
+    echo 'Minecraft has no players online; bypassing the container shutdown announcement delay.'
+    if ! podman kill --signal SIGUSR1 minecraft >/dev/null 2>&1; then
+        echo 'WARNING: could not bypass the Minecraft shutdown announcement delay; normal graceful shutdown will continue.' >&2
+    fi
+    return 0
+}
+
 jv_stop_minecraft_for_system_action() {
     local action="${1:-continue}"
     if ! systemctl is-active --quiet minecraft.service 2>/dev/null; then

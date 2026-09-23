@@ -1,0 +1,15 @@
+[Unit]
+Description=JustVoxel Minecraft host shutdown guard
+Documentation=https://github.com/home-server-project/justvoxel
+After=minecraft.service
+Before=shutdown.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/true
+ExecStop=/usr/libexec/justvoxel/mjust/host-shutdown-guard
+RemainAfterExit=yes
+TimeoutStopSec=10s
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,12 @@
+#!/usr/bin/bash
+set -u
+
+source /usr/libexec/justvoxel/mjust/interrupt-safety.sh
+
+state="$(systemctl is-system-running 2>/dev/null || true)"
+if [[ ${state} != stopping ]]; then
+    exit 0
+fi
+
+jv_prepare_minecraft_for_host_shutdown
+exit 0

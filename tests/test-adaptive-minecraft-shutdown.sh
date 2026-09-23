@@ -83,4 +83,60 @@ for seconds in 30 15 10 5 4 3 2 1; do
 done
 
 rm -f /tmp/jv-player-required.out
+
+calls=''
+running=yes
+timeout(){
+    calls+=" timeout:$*"
+    shift
+    "$@"
+}
+podman(){
+    calls+=" podman:$*"
+    if [[ $1 == exec && ${3:-} == rcon-cli && ${4:-} == list ]]; then
+        printf 'There are 0 of a max of 20 players online:\n'
+        return 0
+    fi
+    if [[ $1 == kill && ${2:-} == --signal && ${3:-} == SIGUSR1 && ${4:-} == minecraft ]]; then
+        return 0
+    fi
+    return 1
+}
+jv_prepare_minecraft_for_host_shutdown || fail 'zero-player host-shutdown preparation failed'
+[[ ${calls} == *'timeout:5s podman exec minecraft rcon-cli list'* ]] || fail 'host-shutdown preparation did not bound the RCON query'
+[[ ${calls} == *'podman:kill --signal SIGUSR1 minecraft'* ]] || fail 'zero-player host shutdown did not bypass the announcement delay'
+
+calls=''
+podman(){
+    calls+=" podman:$*"
+    if [[ $1 == exec && ${3:-} == rcon-cli && ${4:-} == list ]]; then
+        printf 'There are 2 of a max of 20 players online: Steve, Alex\n'
+        return 0
+    fi
+    return 1
+}
+jv_prepare_minecraft_for_host_shutdown || fail 'online-player host-shutdown preparation failed'
+[[ ${calls} != *'podman:kill --signal SIGUSR1 minecraft'* ]] || fail 'online-player host shutdown bypassed the configured countdown'
+
+calls=''
+podman(){
+    calls+=" podman:$*"
+    if [[ $1 == exec && ${3:-} == rcon-cli && ${4:-} == list ]]; then
+        return 1
+    fi
+    return 1
+}
+jv_prepare_minecraft_for_host_shutdown >/tmp/jv-host-shutdown-unknown.out 2>&1 || fail 'unknown-player host-shutdown preparation must fail open to normal graceful stop'
+[[ ${calls} != *'podman:kill --signal SIGUSR1 minecraft'* ]] || fail 'unknown player state bypassed the configured countdown'
+grep -Fq 'preserving the normal container shutdown delay' /tmp/jv-host-shutdown-unknown.out || fail 'unknown player state did not explain the fallback'
+
+guard_unit="${repo_root}/system_files/usr/lib/systemd/system/justvoxel-minecraft-shutdown-guard.service"
+guard_script="${repo_root}/mjust/libexec/host-shutdown-guard"
+grep -Fqx 'After=minecraft.service' "${guard_unit}" || fail 'shutdown guard is not ordered after minecraft.service for reverse shutdown ordering'
+grep -Fqx 'ExecStop=/usr/libexec/justvoxel/mjust/host-shutdown-guard' "${guard_unit}" || fail 'shutdown guard ExecStop is not wired to the helper'
+grep -Fqx 'WantedBy=multi-user.target' "${guard_unit}" || fail 'shutdown guard is not enabled from multi-user.target'
+grep -Fq 'systemctl is-system-running' "${guard_script}" || fail 'shutdown guard does not distinguish host shutdown from manual service stop'
+grep -Fq 'jv_prepare_minecraft_for_host_shutdown' "${guard_script}" || fail 'shutdown guard does not call the adaptive host-shutdown helper'
+
+rm -f /tmp/jv-host-shutdown-unknown.out
 echo 'adaptive Minecraft shutdown tests passed.'

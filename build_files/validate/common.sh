@@ -23,7 +23,7 @@ source /usr/lib/os-release
 for cmd in \
     bootc podman skopeo nmcli nmtui nm-hsp resolvectl firewall-cmd sshd sudo just mjust fzf gum \
     tailscale netbird curl jq openssl tar gzip rsync ping dig traceroute nc tcpdump lsof \
-    findmnt mountpoint flock mkfs.xfs btrfs mount.nfs mount.cifs mount.ntfs-3g lsblk blkid wipefs parted partprobe udevadm \
+    findmnt mountpoint flock timeout mkfs.xfs btrfs mount.nfs mount.cifs mount.ntfs-3g lsblk blkid wipefs parted partprobe udevadm \
     qemu-ga vmtoolsd iperf3 micro spf; do
     command -v "${cmd}" >/dev/null
 done
@@ -82,6 +82,7 @@ test "$(systemctl is-enabled systemd-resolved.service)" = "enabled"
 test "$(systemctl is-enabled firewalld.service)" = "enabled"
 test "$(systemctl is-enabled sshd.service)" = "enabled"
 test "$(systemctl is-enabled justvoxel-web-bootstrap.service)" = "enabled"
+test "$(systemctl is-enabled justvoxel-minecraft-shutdown-guard.service)" = "enabled"
 [[ "$(systemctl is-enabled justvoxel-webui.service 2>/dev/null || true)" != "enabled" ]]
 [[ "$(systemctl is-enabled justvoxel-management.service 2>/dev/null || true)" != "enabled" ]]
 [[ "$(systemctl is-enabled tailscaled.service 2>/dev/null || true)" != "enabled" ]]
@@ -177,6 +178,9 @@ grep -Fqx 'u rpc 32 "Rpcbind Daemon" /var/lib/rpcbind -' /usr/lib/sysusers.d/jus
 test -f /usr/lib/sysusers.d/justvoxel-web.conf
 grep -Fq 'u justvoxel-web ' /usr/lib/sysusers.d/justvoxel-web.conf
 test -f /usr/lib/tmpfiles.d/justvoxel-web.conf
+test -f /usr/lib/systemd/system/justvoxel-minecraft-shutdown-guard.service
+grep -Fqx 'After=minecraft.service' /usr/lib/systemd/system/justvoxel-minecraft-shutdown-guard.service
+grep -Fqx 'ExecStop=/usr/libexec/justvoxel/mjust/host-shutdown-guard' /usr/lib/systemd/system/justvoxel-minecraft-shutdown-guard.service
 test -f /usr/lib/systemd/system/justvoxel-management.service
 test -f /usr/lib/systemd/system/justvoxel-webui.service
 test -f /usr/lib/systemd/system/justvoxel-web-bootstrap.service
@@ -228,6 +232,7 @@ test -x /usr/libexec/justvoxel/mjust/storage-summary
 test -x /usr/libexec/justvoxel/mjust/web
 test -x /usr/libexec/justvoxel/mjust/web-status-json
 test -x /usr/libexec/justvoxel/mjust/ui.sh
+test -x /usr/libexec/justvoxel/mjust/host-shutdown-guard
 for script in /usr/libexec/justvoxel/mjust/*; do
     [[ -f "${script}" ]] || continue
     bash -n "${script}"
