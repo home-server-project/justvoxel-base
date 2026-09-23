@@ -13,11 +13,15 @@ type adminSystemUpdatesAPI interface {
 	Session(ctx context.Context, session string) (api.SessionInfo, error)
 	AdminSystemUpdateStatus(ctx context.Context, session string) (api.AdminSystemUpdateStatus, error)
 	AdminSystemUpdate(ctx context.Context, session string) (api.AdminSystemUpdateStatus, error)
+	AdminSystemUpdateRebootStatus(ctx context.Context, session string) (api.AdminSystemUpdateRebootStatus, error)
+	AdminSystemUpdateReboot(ctx context.Context, session string, options api.AdminSystemUpdateRebootOptions) (api.AdminSystemUpdateRebootStatus, error)
 }
 
 func (a *App) registerAdminSystemUpdatePages(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/system-updates", a.systemUpdateStatus)
 	mux.HandleFunc("POST /api/system-updates", a.systemUpdateApply)
+	mux.HandleFunc("GET /api/system-updates/reboot", a.systemUpdateRebootStatus)
+	mux.HandleFunc("POST /api/system-updates/reboot", a.systemUpdateReboot)
 }
 
 func (a *App) systemUpdateStatus(w http.ResponseWriter, r *http.Request) {
@@ -44,6 +48,53 @@ func (a *App) systemUpdateApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeSystemUpdateJSON(w, http.StatusOK, status)
+}
+
+func (a *App) systemUpdateRebootStatus(w http.ResponseWriter, r *http.Request) {
+	session, client, ok := a.systemUpdateRequest(w, r, false)
+	if !ok {
+		return
+	}
+	status, err := client.AdminSystemUpdateRebootStatus(r.Context(), session)
+	if err != nil {
+		a.handleSystemUpdateAPIError(w, err)
+		return
+	}
+	writeSystemUpdateJSON(w, http.StatusOK, status)
+}
+
+func (a *App) systemUpdateReboot(w http.ResponseWriter, r *http.Request) {
+	session, client, ok := a.systemUpdateRequest(w, r, true)
+	if !ok {
+		return
+	}
+	warningSeconds := 60
+	if r.FormValue("quick_reboot") == "yes" {
+		warningSeconds = 10
+	}
+	result, err := client.AdminSystemUpdateReboot(r.Context(), session, api.AdminSystemUpdateRebootOptions{
+		ConfirmPlayers:  r.FormValue("confirm_players") == "yes",
+		BackupMinecraft: r.FormValue("backup_minecraft") == "yes",
+		WarningSeconds:  warningSeconds,
+	})
+	if err != nil {
+		var responseErr *api.ResponseError
+		if errors.As(err, &responseErr) {
+			status := responseErr.StatusCode
+			if status < 400 || status > 599 {
+				status = http.StatusBadGateway
+			}
+			writeSystemUpdateJSON(w, status, result)
+			return
+		}
+		a.handleSystemUpdateAPIError(w, err)
+		return
+	}
+	status := http.StatusOK
+	if result.Accepted {
+		status = http.StatusAccepted
+	}
+	writeSystemUpdateJSON(w, status, result)
 }
 
 func (a *App) systemUpdateRequest(w http.ResponseWriter, r *http.Request, requireCSRF bool) (string, adminSystemUpdatesAPI, bool) {

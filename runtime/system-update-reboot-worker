@@ -1,0 +1,65 @@
+#!/usr/bin/bash
+set -Eeuo pipefail
+
+source /usr/libexec/justvoxel/mjust/interrupt-safety.sh
+
+readonly state_file="/run/justvoxel/system-update-reboot.json"
+backup_minecraft="${JV_UPDATE_REBOOT_BACKUP:-no}"
+warning_seconds="${JV_UPDATE_REBOOT_WARNING_SECONDS:-60}"
+was_active="${JV_UPDATE_REBOOT_WAS_ACTIVE:-no}"
+
+write_state() {
+    local state="$1" message="$2" deadline="${3:-0}" online="${4:-0}" reason="${5:-}"
+    install -d -m0755 /run/justvoxel
+    jq -cn         --arg state "${state}"         --arg message "${message}"         --arg reason "${reason}"         --argjson deadline "${deadline}"         --argjson online "${online}"         --argjson warning "${warning_seconds}"         --argjson backup "$([[ ${backup_minecraft} == yes ]] && echo true || echo false)"         '{ok:true,state:$state,accepted:true,confirmation_required:false,message:$message,reason:$reason,deadline_unix:$deadline,online:$online,warning_seconds:$warning,backup_minecraft:$backup}' > "${state_file}.tmp"
+    mv -f "${state_file}.tmp" "${state_file}"
+}
+
+restart_minecraft_if_needed() {
+    if [[ ${was_active} == yes ]] && ! systemctl is-active --quiet minecraft.service 2>/dev/null; then
+        systemctl start minecraft.service >/dev/null 2>&1 || true
+    fi
+}
+
+if [[ ${warning_seconds} != 60 && ${warning_seconds} != 10 ]]; then
+    write_state failed 'Invalid reboot warning configuration.' 0 0 invalid_warning
+    exit 2
+fi
+
+if [[ ${was_active} == yes ]] && systemctl is-active --quiet minecraft.service 2>/dev/null; then
+    players="$(jv_player_list_raw 2>/dev/null || true)"
+    online="$(jv_player_online_count "${players}" 2>/dev/null || true)"
+    if [[ ! ${online} =~ ^[0-9]+$ ]]; then
+        write_state failed 'Could not confirm Minecraft player status through RCON.' 0 0 player_status_unavailable
+        exit 3
+    fi
+
+    if (( online > 0 )); then
+        deadline=$(( $(date +%s) + warning_seconds ))
+        write_state countdown "Minecraft players are online. Rebooting after the player warning." "${deadline}" "${online}"
+    else
+        write_state stopping 'No players are online. Stopping Minecraft now.' 0 0
+    fi
+
+    if ! JV_INTERRUPT_CONFIRMATION_MODE=confirmed JV_INTERRUPT_WARNING_SECONDS="${warning_seconds}"         jv_stop_minecraft_adaptive 'Reboot JustVoxel'; then
+        write_state failed 'Minecraft could not be stopped safely. Reboot was cancelled.' 0 "${online}" minecraft_stop_failed
+        restart_minecraft_if_needed
+        exit 4
+    fi
+fi
+
+if [[ ${backup_minecraft} == yes ]]; then
+    write_state backup 'Creating Minecraft backup before reboot.' 0 0
+    if ! /usr/libexec/justvoxel/minecraft-backup --leave-stopped; then
+        restart_minecraft_if_needed
+        write_state backup_failed 'Minecraft backup failed. Reboot was cancelled. You can retry or reboot without backup.' 0 0 backup_failed
+        exit 5
+    fi
+fi
+
+write_state rebooting 'Rebooting JustVoxel.' 0 0
+if ! systemctl reboot; then
+    restart_minecraft_if_needed
+    write_state failed 'The host reboot request failed.' 0 0 reboot_failed
+    exit 6
+fi

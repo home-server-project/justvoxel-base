@@ -6,7 +6,7 @@ Operating-system status/update plus reboot, poweroff, and firmware/UEFI reboot u
 
 `mJust / WebUI -> Management API -> Management Agent -> bootc / system action backend`
 
-For OS maintenance, mJust is now a thin API frontend. The Management Agent owns bootc status collection and `bootc upgrade`. WebUI integration for OS updates is a separate later stage. Host power control, firmware capability checks, player-safety decisions, and final systemd actions remain owned behind the Management API.
+For OS maintenance, mJust is a thin API frontend. The Management Agent owns bootc status collection and `bootc upgrade`. The WebUI uses the same Management API for OS updates and the update-specific reboot workflow. Host power control, firmware capability checks, player-safety decisions, and final systemd actions remain owned behind the Management API.
 
 ## Commands
 
@@ -34,6 +34,17 @@ If a newer image exists, bootc pulls and stages it. If the running image is alre
 Running the OS update does not reboot the host, stop Minecraft, query players, or create a Minecraft backup. The running system continues unchanged. A staged deployment is used after the next normal reboot.
 
 The WebUI exposes the same operation from **Control Center -> System Update**. It opens a compact centered dialog on desktop and uses the phone viewport on small screens. The dialog reads status and requests updates through the Management API; it does not execute bootc directly.
+
+When an update is staged, the same dialog offers one **Reboot** action with two optional choices:
+
+- **Back up Minecraft before reboot** — runs the existing verified cold Minecraft backup after Minecraft has stopped. This is a Minecraft-data backup only; JustVoxel does not require a separate system backup.
+- **Quick reboot** — uses a 10-second player warning instead of the normal 60 seconds.
+
+Both options are off by default. If no players are online, Minecraft is stopped immediately through the existing adaptive shutdown path. If players are online, the administrator confirms the interruption and the dialog shows the remaining countdown. The normal mode keeps the existing 60-second warning; Quick reboot uses 10 seconds.
+
+The update-specific reboot runs in a detached worker, so closing the browser dialog does not cancel an in-progress shutdown or backup. If the optional Minecraft backup fails, the reboot is cancelled and Minecraft is restarted when it had been running before the workflow. The administrator can then retry the backup or turn the backup option off and use the same **Reboot** button.
+
+The existing Control Center **Reboot**, **Power off**, and firmware/UEFI reboot actions are unchanged by this workflow and continue to use their existing normal player-aware behavior.
 
 There is intentionally no separate `mjust os-apply` command. Reboot is the normal bootc apply boundary.
 
@@ -78,7 +89,7 @@ The Agent exposes system-action capability/status data and requires explicit con
 
 Accepted host actions are queued with a short delay so the API can return a final accepted response before the machine goes down.
 
-An ordinary reboot/poweroff does not force a Minecraft backup. If a bootc update is staged, the next boot uses it normally.
+An ordinary reboot/poweroff does not force a Minecraft backup and keeps the normal 60-second warning when players are online. The 10-second Quick reboot option exists only in **Control Center -> System Update**. If a bootc update is staged, the next boot uses it normally.
 
 ## Firmware / UEFI
 

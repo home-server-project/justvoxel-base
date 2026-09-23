@@ -594,13 +594,160 @@ if (systemUpdateOpen && systemUpdateDialog) {
   const state = systemUpdateDialog.querySelector("[data-system-update-state]");
   const error = systemUpdateDialog.querySelector("[data-system-update-error]");
   const updateButton = systemUpdateDialog.querySelector("[data-system-update-button]");
+  const rebootPanel = systemUpdateDialog.querySelector("[data-system-update-reboot]");
+  const backupToggle = systemUpdateDialog.querySelector("[data-system-update-backup]");
+  const quickToggle = systemUpdateDialog.querySelector("[data-system-update-quick]");
+  const warningText = systemUpdateDialog.querySelector("[data-system-update-warning]");
+  const rebootPlayers = systemUpdateDialog.querySelector("[data-system-update-reboot-players]");
+  const rebootProgress = systemUpdateDialog.querySelector("[data-system-update-reboot-progress]");
+  const rebootCountdown = systemUpdateDialog.querySelector("[data-system-update-countdown]");
+  const rebootMessage = systemUpdateDialog.querySelector("[data-system-update-reboot-message]");
+  const rebootButton = systemUpdateDialog.querySelector("[data-system-update-reboot-button]");
 
   let updating = false;
   let latestStatus = null;
+  let pendingPlayerConfirmation = false;
+  let rebootWorkflowActive = false;
+  let rebootPollTimer = null;
+  let countdownTimer = null;
 
   const deploymentVersion = (deployment, fallback) => {
     if (!deployment) return fallback;
     return deployment.version || "Deployment";
+  };
+
+  const clearRebootTimers = () => {
+    if (rebootPollTimer) {
+      window.clearTimeout(rebootPollTimer);
+      rebootPollTimer = null;
+    }
+    if (countdownTimer) {
+      window.clearInterval(countdownTimer);
+      countdownTimer = null;
+    }
+  };
+
+  const updateWarningText = () => {
+    if (!warningText) return;
+    warningText.textContent = quickToggle && quickToggle.checked
+      ? "Player warning: 10 seconds"
+      : "Player warning: 60 seconds";
+  };
+
+  const showRebootPlayers = (result) => {
+    if (!rebootPlayers) return;
+    const players = Array.isArray(result.players) ? result.players.filter(Boolean) : [];
+    const count = Number(result.online || players.length || 0);
+    const names = players.length ? " — " + players.join(", ") : "";
+    rebootPlayers.textContent = count + " player" + (count === 1 ? "" : "s") + " online" + names + ". Press Reboot again to confirm.";
+    rebootPlayers.hidden = false;
+  };
+
+  const hideRebootPlayers = () => {
+    if (!rebootPlayers) return;
+    rebootPlayers.hidden = true;
+    rebootPlayers.textContent = "";
+  };
+
+  const setRebootControlsDisabled = (disabled) => {
+    if (backupToggle) backupToggle.disabled = disabled;
+    if (quickToggle) quickToggle.disabled = disabled;
+    if (rebootButton) rebootButton.disabled = disabled;
+  };
+
+  const resetPlayerConfirmation = () => {
+    if (rebootWorkflowActive) return;
+    pendingPlayerConfirmation = false;
+    hideRebootPlayers();
+    if (rebootButton) rebootButton.textContent = "Reboot";
+  };
+
+  const startVisibleCountdown = (deadlineUnix) => {
+    if (!rebootCountdown) return;
+    if (countdownTimer) window.clearInterval(countdownTimer);
+    const tick = () => {
+      const remaining = Math.max(0, Number(deadlineUnix || 0) - Math.floor(Date.now() / 1000));
+      rebootCountdown.textContent = String(remaining);
+      if (remaining <= 0 && countdownTimer) {
+        window.clearInterval(countdownTimer);
+        countdownTimer = null;
+      }
+    };
+    tick();
+    countdownTimer = window.setInterval(tick, 250);
+  };
+
+  const renderRebootStatus = (result) => {
+    if (!result || !result.state) return;
+
+    if (result.confirmation_required) {
+      rebootWorkflowActive = false;
+      pendingPlayerConfirmation = true;
+      showRebootPlayers(result);
+      if (rebootProgress) rebootProgress.hidden = true;
+      setRebootControlsDisabled(false);
+      if (rebootButton) {
+        rebootButton.disabled = false;
+        rebootButton.textContent = "Confirm reboot";
+      }
+      return;
+    }
+
+    const activeStates = new Set(["queued", "countdown", "stopping", "backup", "rebooting"]);
+    rebootWorkflowActive = activeStates.has(result.state);
+
+    if (result.state === "idle") {
+      pendingPlayerConfirmation = false;
+      if (rebootProgress) rebootProgress.hidden = true;
+      hideRebootPlayers();
+      setRebootControlsDisabled(false);
+      if (rebootButton) rebootButton.textContent = "Reboot";
+      return;
+    }
+
+    if (result.state === "backup_failed" || result.state === "failed") {
+      rebootWorkflowActive = false;
+      pendingPlayerConfirmation = false;
+      clearRebootTimers();
+      hideRebootPlayers();
+      if (rebootProgress) rebootProgress.hidden = true;
+      setRebootControlsDisabled(false);
+      if (rebootButton) rebootButton.textContent = "Reboot";
+      if (error) {
+        error.textContent = result.message || "Reboot was cancelled.";
+        error.hidden = false;
+      }
+      return;
+    }
+
+    if (rebootWorkflowActive) {
+      pendingPlayerConfirmation = false;
+      hideRebootPlayers();
+      setRebootControlsDisabled(true);
+      if (updateButton) updateButton.disabled = true;
+      if (rebootProgress) rebootProgress.hidden = false;
+      if (rebootButton) rebootButton.textContent = "Rebooting…";
+
+      if (result.state === "countdown") {
+        if (rebootMessage) {
+          const warning = Number(result.warning_seconds || 60);
+          rebootMessage.textContent = "Player warning in progress (" + warning + " seconds).";
+        }
+        startVisibleCountdown(result.deadline_unix);
+      } else {
+        if (countdownTimer) {
+          window.clearInterval(countdownTimer);
+          countdownTimer = null;
+        }
+        if (rebootCountdown) rebootCountdown.textContent = "";
+        if (rebootMessage) {
+          if (result.state === "queued") rebootMessage.textContent = "Preparing reboot…";
+          if (result.state === "stopping") rebootMessage.textContent = "Stopping Minecraft…";
+          if (result.state === "backup") rebootMessage.textContent = "Creating Minecraft backup…";
+          if (result.state === "rebooting") rebootMessage.textContent = "Rebooting JustVoxel…";
+        }
+      }
+    }
   };
 
   const renderSystemUpdate = (status) => {
@@ -614,10 +761,19 @@ if (systemUpdateOpen && systemUpdateDialog) {
       if (status.read_only) {
         state.textContent = "System updates are unavailable on this read-only deployment.";
       } else if (status.reboot_required) {
-        state.textContent = "Update staged — restart required.";
+        state.textContent = "Update staged — reboot required.";
       } else {
         state.textContent = status.message || "JustVoxel is current.";
       }
+    }
+
+    if (rebootPanel) rebootPanel.hidden = !status.reboot_required;
+    if (!status.reboot_required) {
+      rebootWorkflowActive = false;
+      pendingPlayerConfirmation = false;
+      clearRebootTimers();
+      hideRebootPlayers();
+      if (rebootProgress) rebootProgress.hidden = true;
     }
 
     if (error) {
@@ -625,7 +781,7 @@ if (systemUpdateOpen && systemUpdateDialog) {
       error.textContent = "";
     }
     if (updateButton) {
-      updateButton.disabled = Boolean(status.read_only) || updating;
+      updateButton.disabled = Boolean(status.read_only) || updating || rebootWorkflowActive;
     }
   };
 
@@ -635,7 +791,7 @@ if (systemUpdateOpen && systemUpdateDialog) {
       error.hidden = false;
     }
     if (state) state.textContent = "System update unavailable.";
-    if (updateButton) updateButton.disabled = updating;
+    if (updateButton) updateButton.disabled = updating || rebootWorkflowActive;
   };
 
   const readResponse = async (response) => {
@@ -658,6 +814,30 @@ if (systemUpdateOpen && systemUpdateDialog) {
     return false;
   };
 
+  const pollRebootStatus = async () => {
+    if (!latestStatus || !latestStatus.reboot_required || !systemUpdateDialog.open) return;
+    try {
+      const response = await fetch("/api/system-updates/reboot", {
+        method: "GET",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (handleAuthResponse(response)) return;
+      const result = await readResponse(response);
+      if (response.ok) {
+        renderRebootStatus(result);
+        if (rebootWorkflowActive) {
+          rebootPollTimer = window.setTimeout(pollRebootStatus, 1000);
+        }
+      }
+    } catch (_) {
+      if (rebootWorkflowActive) {
+        rebootPollTimer = window.setTimeout(pollRebootStatus, 1000);
+      }
+    }
+  };
+
   const loadSystemUpdate = async () => {
     if (state) state.textContent = "Loading system update status…";
     if (error) error.hidden = true;
@@ -676,13 +856,16 @@ if (systemUpdateOpen && systemUpdateDialog) {
         return;
       }
       renderSystemUpdate(result);
+      if (result.reboot_required) {
+        await pollRebootStatus();
+      }
     } catch (_) {
       showSystemUpdateError("System update service is unavailable.");
     }
   };
 
   const applySystemUpdate = async () => {
-    if (updating || !csrfInput || !updateButton) return;
+    if (updating || rebootWorkflowActive || !csrfInput || !updateButton) return;
     updating = true;
     updateButton.disabled = true;
     updateButton.classList.add("is-busy");
@@ -711,6 +894,9 @@ if (systemUpdateOpen && systemUpdateDialog) {
         return;
       }
       renderSystemUpdate(result);
+      if (result.reboot_required) {
+        await pollRebootStatus();
+      }
     } catch (_) {
       showSystemUpdateError("System update service is unavailable. Nothing was submitted again automatically.");
     } finally {
@@ -718,20 +904,79 @@ if (systemUpdateOpen && systemUpdateDialog) {
       updateButton.classList.remove("is-busy");
       updateButton.removeAttribute("aria-busy");
       updateButton.textContent = "Update system";
-      updateButton.disabled = Boolean(latestStatus && latestStatus.read_only);
+      updateButton.disabled = Boolean(latestStatus && latestStatus.read_only) || rebootWorkflowActive;
+    }
+  };
+
+  const requestUpdateReboot = async () => {
+    if (rebootWorkflowActive || !csrfInput || !rebootButton) return;
+    rebootButton.disabled = true;
+    rebootButton.textContent = "Checking…";
+    if (error) error.hidden = true;
+
+    const body = new URLSearchParams();
+    body.set("csrf", csrfInput.value);
+    if (backupToggle && backupToggle.checked) body.set("backup_minecraft", "yes");
+    if (quickToggle && quickToggle.checked) body.set("quick_reboot", "yes");
+    if (pendingPlayerConfirmation) body.set("confirm_players", "yes");
+
+    try {
+      const response = await fetch("/api/system-updates/reboot", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: body.toString(),
+      });
+      if (handleAuthResponse(response)) return;
+      const result = await readResponse(response);
+      if (result.confirmation_required) {
+        renderRebootStatus(result);
+        return;
+      }
+      if (!response.ok) {
+        renderRebootStatus(result);
+        if (error && error.hidden) {
+          error.textContent = result.message || result.error || "Reboot workflow could not be started.";
+          error.hidden = false;
+        }
+        return;
+      }
+      renderRebootStatus(result);
+      if (result.accepted) {
+        rebootPollTimer = window.setTimeout(pollRebootStatus, 250);
+      }
+    } catch (_) {
+      rebootWorkflowActive = false;
+      setRebootControlsDisabled(false);
+      rebootButton.textContent = "Reboot";
+      if (error) {
+        error.textContent = "Reboot workflow could not be started.";
+        error.hidden = false;
+      }
     }
   };
 
   systemUpdateOpen.addEventListener("click", () => {
     if (controlCenter) controlCenter.open = false;
     systemUpdateDialog.showModal();
+    updateWarningText();
     loadSystemUpdate();
   });
 
   closeButton?.addEventListener("click", () => systemUpdateDialog.close());
   updateButton?.addEventListener("click", applySystemUpdate);
+  rebootButton?.addEventListener("click", requestUpdateReboot);
+  quickToggle?.addEventListener("change", () => {
+    updateWarningText();
+    resetPlayerConfirmation();
+  });
+  backupToggle?.addEventListener("change", resetPlayerConfirmation);
 
   systemUpdateDialog.addEventListener("click", (event) => {
     if (event.target === systemUpdateDialog) systemUpdateDialog.close();
   });
+  systemUpdateDialog.addEventListener("close", clearRebootTimers);
 }

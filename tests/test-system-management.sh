@@ -22,6 +22,11 @@ system_update_api="${repo_root}/mjust/libexec/system-update-api.sh"
 system_actions_backend="${repo_root}/mjust/libexec/admin-system-actions-json"
 system_actions_agent="${repo_root}/management/cmd/justvoxel-management-agent/admin_system_actions.go"
 system_update_agent="${repo_root}/management/cmd/justvoxel-management-agent/admin_system_updates.go"
+system_update_reboot_agent="${repo_root}/management/cmd/justvoxel-management-agent/admin_system_update_reboot.go"
+system_update_reboot_helper="${repo_root}/mjust/libexec/admin-system-update-reboot-json"
+system_update_reboot_worker="${repo_root}/runtime/system-update-reboot-worker"
+interrupt_safety="${repo_root}/mjust/libexec/interrupt-safety.sh"
+build_common="${repo_root}/build_files/build-common.sh"
 management_main="${repo_root}/management/cmd/justvoxel-management-agent/main.go"
 menu="${repo_root}/mjust/libexec/menu"
 justfile="${repo_root}/mjust/justfile"
@@ -77,6 +82,9 @@ grep -Fq 'POST /v1/admin/system/poweroff' "${system_actions_agent}" || fail 'Sys
 grep -Fq 'POST /v1/admin/system/firmware-reboot' "${system_actions_agent}" || fail 'Firmware reboot API route missing'
 grep -Fq 'registerAdminSystemActionRoutes(mux, s)' "${management_main}" || fail 'System Actions routes are not registered'
 grep -Fq 'registerAdminSystemUpdateRoutes(mux, s)' "${management_main}" || fail 'System Update routes are not registered'
+grep -Fq 'registerAdminSystemUpdateRebootRoutes(mux, s)' "${management_main}" || fail 'System Update reboot routes are not registered'
+grep -Fq 'GET /v1/admin/system/update-reboot' "${system_update_reboot_agent}" || fail 'System Update reboot status route missing'
+grep -Fq 'POST /v1/admin/system/update-reboot' "${system_update_reboot_agent}" || fail 'System Update reboot request route missing'
 grep -Fq 'WriteTimeout:      20 * time.Minute' "${management_main}" || fail 'Management API write timeout is too short for system update pulls'
 
 grep -Fq '"${JV_SYSTEM_ACTIONS_API_CLIENT}" GET /v1/admin/system/actions' "${system_actions_api}" || fail 'System Actions frontend status endpoint missing'
@@ -91,6 +99,21 @@ grep -Fq 'systemd-run --quiet --collect --unit=justvoxel-reboot --on-active=2s /
 grep -Fq 'systemd-run --quiet --collect --unit=justvoxel-poweroff --on-active=2s /usr/bin/systemctl poweroff' "${system_actions_backend}" || fail 'System poweroff backend action missing'
 grep -Fq 'systemd-run --quiet --collect --unit=justvoxel-firmware-reboot --on-active=2s /usr/bin/systemctl reboot --firmware-setup' "${system_actions_backend}" || fail 'Firmware reboot backend action missing'
 grep -Fq 'case "${action}" in' "${system_actions_backend}" || fail 'System Actions backend action allowlist missing'
+if grep -Eq -- '--backup-minecraft|--warning-seconds' "${system_actions_backend}"; then
+    fail 'Existing Control Center power backend must remain on the normal reboot behavior'
+fi
+
+grep -Fq 'JV_INTERRUPT_WARNING_SECONDS:-60' "${interrupt_safety}" || fail 'Normal player warning must remain 60 seconds by default'
+grep -Fq 'warning_seconds}" == 10' "${interrupt_safety}" || fail 'Quick reboot 10-second warning path missing'
+grep -Fq -- '--backup-minecraft' "${system_update_reboot_helper}" || fail 'Update reboot helper backup option missing'
+grep -Fq -- '--warning-seconds=10' "${system_update_reboot_helper}" || fail 'Update reboot helper quick-warning option missing'
+grep -Fq 'systemd-run --quiet --collect --unit="${unit_name}"' "${system_update_reboot_helper}" || fail 'Update reboot helper must queue the detached worker'
+grep -Fq 'minecraft-backup --leave-stopped' "${system_update_reboot_worker}" || fail 'Update reboot worker must use the existing verified cold backup'
+grep -Fq 'backup_failed' "${system_update_reboot_worker}" || fail 'Update reboot worker must report backup failure'
+grep -Fq 'restart_minecraft_if_needed' "${system_update_reboot_worker}" || fail 'Update reboot worker must recover Minecraft after failure'
+grep -Fq 'systemctl reboot' "${system_update_reboot_worker}" || fail 'Update reboot worker reboot action missing'
+grep -Fq 'system-update-reboot-worker /usr/libexec/justvoxel/system-update-reboot-worker' "${build_common}" || fail 'Update reboot worker is not installed in the Base image'
+
 grep -Fq 'Firmware setup is available on JustVoxel HWS only.' "${firmware}" || fail 'VM firmware refusal missing'
 grep -Fq 'jv_variant_is_hws' "${menu}" || fail 'System menu must use canonical HWS detection'
 
