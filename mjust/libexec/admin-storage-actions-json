@@ -59,7 +59,7 @@ prepare_plan() {
                 json_error 'This partition is not formatted. Format it before mounting.'
                 return 1
             }
-            storage_action_supported_filesystem "${filesystem}" || {
+            storage_action_mountable_filesystem "${filesystem}" || {
                 json_error "Filesystem '${filesystem}' is not supported by the JustVoxel storage browser."
                 return 1
             }
@@ -98,6 +98,10 @@ prepare_plan() {
             fi
             ;;
         format)
+            if [[ -n ${filesystem} ]] && ! storage_action_managed_filesystem "${filesystem}"; then
+                json_error 'This filesystem can be mounted, but JustVoxel does not reformat this filesystem type.'
+                return 1
+            fi
             if [[ -n ${current_mountpoint} ]] && storage_mount_is_critical "${current_mountpoint}"; then
                 json_error 'Critical system mounts cannot be formatted.'
                 return 1
