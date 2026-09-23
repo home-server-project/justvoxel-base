@@ -233,7 +233,7 @@ func (a *App) storageBrowserPage(w http.ResponseWriter, r *http.Request) {
 		disks = append(disks, storageBrowserDiskView{
 			Name: device.Name, Path: device.Path, Size: humanBytes(device.SizeBytes),
 			Model: device.Model, Transport: device.Transport,
-			System: device.System || listedSystemDisk || systemDiskNames[device.Name] || storageBrowserLooksSystem(device),
+			System:             device.System || listedSystemDisk || systemDiskNames[device.Name] || storageBrowserLooksSystem(device),
 			MinecraftWholeDisk: migrationWholeDisks[device.Path],
 		})
 	}
