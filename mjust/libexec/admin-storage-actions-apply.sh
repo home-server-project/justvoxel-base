@@ -3,7 +3,7 @@
 storage_action_apply_json() {
     local submitted_fingerprint submitted_confirmation
     local operation device mountpoint current_mountpoint expected_confirmation
-    local filesystem uuid mounted_after result_role size
+    local filesystem uuid mounted_after result_role size actual_uuid
 
     prepare_plan || return 0
 
@@ -27,7 +27,8 @@ storage_action_apply_json() {
     case "${operation}" in
         mount)
             install -d -m0755 -o root -g root "${mountpoint}"
-            if ! mount -o noatime -- "${device}" "${mountpoint}"; then
+            filesystem="$(storage_action_filesystem "${device}")"
+            if ! storage_action_mount_device "${device}" "${mountpoint}" "${filesystem}"; then
                 json_error 'Mount failed. Nothing else was changed.'
                 return 0
             fi
@@ -62,6 +63,12 @@ storage_action_apply_json() {
         mount)
             [[ -n ${mounted_after} ]] || {
                 json_error 'Mount command completed, but the partition is not mounted.'
+                return 0
+            }
+            actual_uuid="$(findmnt -n -o UUID --target "${mounted_after}" 2>/dev/null || true)"
+            [[ -n ${uuid} && ${actual_uuid} == "${uuid}" ]] || {
+                umount -- "${mounted_after}" >/dev/null 2>&1 || true
+                json_error 'The mounted filesystem did not match the reviewed filesystem.'
                 return 0
             }
             ;;
