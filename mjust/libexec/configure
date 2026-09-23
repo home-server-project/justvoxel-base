@@ -161,11 +161,11 @@ case "${1:-menu}" in
 esac
 
 while true; do
-    choice="$(jui_choose 'Safe configuration changes'         'Show current configuration'         'Change maximum players'         'Change memory limits'         'Change Java/Bedrock host ports'         'Enable / disable Bedrock cross-play'         'Change server welcome message (MOTD)'         'Change backup schedule/timer'         'Change storage / migrate Minecraft data'         'Change container image or Minecraft version policy'         'Back')" || exit 0
+    choice="$(jui_choose 'Configure Minecraft'         'Show current configuration'         'Maximum players'         'Change memory limits'         'Change Java/Bedrock host ports'         'Enable / disable Bedrock cross-play'         'Change server welcome message (MOTD)'         'Change backup schedule/timer'         'Change storage / migrate Minecraft data'         'Change container image or Minecraft version policy'         'Back')" || exit 0
 
     case "${choice}" in
         'Show current configuration') show_configuration ;;
-        'Change maximum players') exec /usr/libexec/justvoxel/mjust/configure-max-players ;;
+        'Maximum players') /usr/libexec/justvoxel/mjust/configure-max-players || true; refresh_configuration ;;
         'Change memory limits') configure_memory || true ;;
         'Change Java/Bedrock host ports') configure_ports || true ;;
         'Enable / disable Bedrock cross-play') configure_bedrock || true ;;
