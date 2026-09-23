@@ -2,10 +2,8 @@ ARG HOME_SERVER_BASE_IMAGE=ghcr.io/home-server-project/home-server-base-10:stabl
 ARG JUSTVOXEL_BASE_REPOSITORY=ghcr.io/home-server-project/justvoxel-base
 ARG JUSTVOXEL_VM_REPOSITORY=ghcr.io/home-server-project/justvoxel-vm
 ARG SUPERFILE_PACKAGE_IMAGE=ghcr.io/home-server-project/superfile:stable
-ARG NM_HSP_PACKAGE_IMAGE=ghcr.io/home-server-project/nm-hsp:stable
 
 FROM ${SUPERFILE_PACKAGE_IMAGE} AS superfile-package
-FROM ${NM_HSP_PACKAGE_IMAGE} AS nm-hsp-package
 
 FROM scratch AS ctx
 COPY build_files /build_files
@@ -16,7 +14,6 @@ COPY templates /templates
 COPY runtime /runtime
 COPY mjust /mjust
 COPY --from=superfile-package /rpms /superfile-rpms
-COPY --from=nm-hsp-package /rpms /nm-hsp-rpms
 COPY cosign.pub /cosign.pub
 
 FROM ${HOME_SERVER_BASE_IMAGE} AS justvoxel-base
