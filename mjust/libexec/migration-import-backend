@@ -37,6 +37,18 @@ minecraft_stopped_by_import=no
 had_existing_data=no
 rollback_attempted=no
 
+# The Management Agent may have mounted SMB/NFS/device media before launching
+# the backend. Carry only that owned transport state into this process so it can
+# be released immediately after local staging. Existing administrator mounts
+# have an empty owned-mount value and are never unmounted by JustVoxel.
+if [[ ${JV_MIGRATION_API_SOURCE_TRANSPORT_STARTED:-no} == yes ]]; then
+    transport_started=yes
+    JV_MIGRATION_TRANSPORT_ROOT="${JV_MIGRATION_API_SOURCE_TRANSPORT_ROOT:-}"
+    JV_MIGRATION_OWNED_MOUNT="${JV_MIGRATION_API_SOURCE_OWNED_MOUNT:-}"
+    JV_MIGRATION_MEDIA_MOUNT="${JV_MIGRATION_API_SOURCE_MEDIA_MOUNT:-}"
+    JV_MIGRATION_SMB_CREDENTIALS="${JV_MIGRATION_API_SOURCE_SMB_CREDENTIALS:-}"
+fi
+
 old_java=''
 old_bedrock_enabled=no
 old_bedrock='19132'

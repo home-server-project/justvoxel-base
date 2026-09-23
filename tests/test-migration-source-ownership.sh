@@ -19,4 +19,11 @@ if grep -Fq 'migration source changed while it was being staged' "${plan}"; then
     fail 'Import still treats post-read changes to the original user file as JustVoxel state'
 fi
 
+transaction="${repo_root}/mjust/libexec/admin-migration-import-transaction-json"
+backend="${repo_root}/mjust/libexec/migration-import-backend"
+grep -Fq 'JV_MIGRATION_API_SOURCE_TRANSPORT_STARTED="$transport_started"' "${transaction}" || fail 'Agent transaction does not hand owned source transport to the staging backend'
+grep -Fq 'JV_MIGRATION_API_SOURCE_OWNED_MOUNT=' "${transaction}" || fail 'Agent transaction does not hand the owned mount to the staging backend'
+grep -Fq 'JV_MIGRATION_API_SOURCE_TRANSPORT_STARTED:-no' "${backend}" || fail 'staging backend does not restore owned transport state'
+grep -Fq 'JV_MIGRATION_OWNED_MOUNT="${JV_MIGRATION_API_SOURCE_OWNED_MOUNT:-}"' "${backend}" || fail 'staging backend cannot release the JustVoxel-owned source mount'
+
 echo 'migration source ownership checks passed.'
