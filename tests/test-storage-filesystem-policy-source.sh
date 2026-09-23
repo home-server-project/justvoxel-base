@@ -21,16 +21,21 @@ grep -Fq 'storage_action_managed_filesystem()' "${common}"
 grep -Fq 'xfs|ext4|btrfs) return 0' "${common}"
 grep -Fq 'storage_action_managed_filesystem "$1"' "${common}"
 
-for existing_path in "${actions}" "${mounts}"; do
-    grep -Fq 'storage_action_supported_filesystem' "${existing_path}" || {
-        echo "ERROR: Step 1 must not change existing mount behavior yet: ${existing_path}" >&2
+for mount_path in "${actions}" "${mounts}"; do
+    grep -Fq 'storage_action_mountable_filesystem' "${mount_path}" || {
+        echo "ERROR: generic mount path is not using the expanded mountable-filesystem policy: ${mount_path}" >&2
         exit 1
     }
-    if grep -Fq 'storage_action_mountable_filesystem' "${existing_path}"; then
-        echo "ERROR: Step 1 must not wire the expanded mountable policy into runtime behavior yet: ${existing_path}" >&2
-        exit 1
-    fi
 done
+
+grep -Fq 'storage_action_mount_type()' "${common}"
+grep -Fq "ntfs) printf 'ntfs-3g" "${common}"
+grep -Fq 'storage_action_mount_options()' "${common}"
+grep -Fq 'windows_names' "${common}"
+grep -Fq 'fmask=0133,dmask=0022' "${common}"
+grep -Fq 'utf8=1' "${common}"
+grep -Fq 'storage_action_mount_device()' "${common}"
+grep -Fq 'storage_action_managed_filesystem "${filesystem}"' "${actions}"
 
 grep -Fq 'xfs|ext4|btrfs' "${backup}"
 grep -Fq 'xfs|ext4|btrfs' "${migration}"
@@ -49,4 +54,4 @@ grep -Fq "'*/kernel/fs/fat/fat.ko*'" "${health}"
 grep -Fq "'*/kernel/fs/fat/vfat.ko*'" "${health}"
 grep -Fq "'*/kernel/fs/exfat/exfat.ko*'" "${health}"
 
-echo 'Storage filesystem capability and policy source checks passed.'
+echo 'Storage filesystem mount behavior and policy source checks passed.'

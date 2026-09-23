@@ -25,9 +25,11 @@ storage_mount_passno() {
 }
 
 storage_mount_fstab_line() {
-    local uuid="$1" mountpoint="$2" filesystem="$3"
-    printf 'UUID=%s %s %s noatime,nofail,x-systemd.device-timeout=10s 0 %s\n' \
-        "${uuid}" "${mountpoint}" "${filesystem}" "$(storage_mount_passno "${filesystem}")"
+    local uuid="$1" mountpoint="$2" filesystem="$3" mount_type mount_options
+    mount_type="$(storage_action_mount_type "${filesystem}")" || return 1
+    mount_options="$(storage_action_mount_options "${filesystem}")" || return 1
+    printf 'UUID=%s %s %s %s,nofail,x-systemd.device-timeout=10s 0 %s\n' \
+        "${uuid}" "${mountpoint}" "${mount_type}" "${mount_options}" "$(storage_mount_passno "${filesystem}")"
 }
 
 storage_mount_state_path() {
@@ -156,8 +158,8 @@ prepare_plan() {
     }
 
     filesystem="$(storage_action_filesystem "${device}")"
-    storage_action_supported_filesystem "${filesystem}" || {
-        json_error 'This partition needs a supported XFS, ext4, or Btrfs filesystem.'
+    storage_action_mountable_filesystem "${filesystem}" || {
+        json_error 'This partition does not use a filesystem supported for mounting.'
         return 1
     }
     uuid="$(storage_action_uuid "${device}")"
@@ -298,7 +300,7 @@ status_json() {
     device="$(storage_action_real_device "$(jq -r '.device' <<< "${request}")")"
     storage_action_validate_target "${device}" >/dev/null 2>&1 || { json_error 'This partition is protected or unavailable for permanent mounting.'; return 0; }
     filesystem="$(storage_action_filesystem "${device}")"
-    storage_action_supported_filesystem "${filesystem}" || { json_error 'This partition does not use a supported filesystem.'; return 0; }
+    storage_action_mountable_filesystem "${filesystem}" || { json_error 'This partition does not use a filesystem supported for mounting.'; return 0; }
     uuid="$(storage_action_uuid "${device}")"
     [[ -n ${uuid} ]] || { json_error 'This filesystem does not have a usable UUID.'; return 0; }
     current="$(storage_action_mountpoint "${device}")"

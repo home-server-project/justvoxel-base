@@ -9,10 +9,12 @@ bash -n "${helper}"
 
 for required in \
     'storage_action_validate_target' \
-    'storage_action_supported_filesystem' \
+    'storage_action_mountable_filesystem' \
     'storage_mount_fingerprint' \
     'changed after Review. Nothing was changed.' \
-    'UUID=%s %s %s noatime,nofail,x-systemd.device-timeout=10s' \
+    'storage_action_mount_type' \
+    'storage_action_mount_options' \
+    'nofail,x-systemd.device-timeout=10s' \
     '/etc/justvoxel/storage-mounts' \
     'configured outside JustVoxel. JustVoxel will not replace it.' \
     'was not created by JustVoxel, so JustVoxel will not remove it.' \

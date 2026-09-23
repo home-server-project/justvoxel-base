@@ -26,6 +26,22 @@ grep -Fq 'confirmation="FORMAT ${device}"' "${planner}" || {
     echo 'ERROR: destructive partition formatting lost exact typed confirmation.' >&2
     exit 1
 }
+grep -Fq 'storage_action_mountable_filesystem "${filesystem}"' "${planner}" || {
+    echo 'ERROR: generic mount planning is not using the expanded mountable-filesystem policy.' >&2
+    exit 1
+}
+grep -Fq 'storage_action_managed_filesystem "${filesystem}"' "${planner}" || {
+    echo 'ERROR: format planning lost the managed-filesystem boundary.' >&2
+    exit 1
+}
+grep -Fq 'storage_action_mount_device "${device}" "${mountpoint}" "${filesystem}"' "${apply}" || {
+    echo 'ERROR: temporary mount apply is not using filesystem-specific mount behavior.' >&2
+    exit 1
+}
+grep -Fq 'mounted filesystem did not match the reviewed filesystem' "${apply}" || {
+    echo 'ERROR: temporary mount apply lost post-mount identity verification.' >&2
+    exit 1
+}
 grep -Fq 'submitted_fingerprint' "${apply}" || {
     echo 'ERROR: storage apply lost reviewed device fingerprint verification.' >&2
     exit 1
