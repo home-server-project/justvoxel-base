@@ -49,11 +49,24 @@ storage_action_size_bytes() {
     lsblk -bdnro SIZE "$1" 2>/dev/null | head -n1
 }
 
-storage_action_supported_filesystem() {
+storage_action_mountable_filesystem() {
+    case "$1" in
+        xfs|ext4|btrfs|ntfs|vfat|exfat) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+storage_action_managed_filesystem() {
     case "$1" in
         xfs|ext4|btrfs) return 0 ;;
         *) return 1 ;;
     esac
+}
+
+# Compatibility alias for existing storage-management paths.
+# Step 2 will opt generic mount operations into storage_action_mountable_filesystem.
+storage_action_supported_filesystem() {
+    storage_action_managed_filesystem "$1"
 }
 
 storage_action_path_on_mount() {
