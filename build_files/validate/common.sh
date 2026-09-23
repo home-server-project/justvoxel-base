@@ -28,6 +28,16 @@ for cmd in \
     command -v "${cmd}" >/dev/null
 done
 
+for filesystem_module in \
+    '*/kernel/fs/fat/fat.ko*' \
+    '*/kernel/fs/fat/vfat.ko*' \
+    '*/kernel/fs/exfat/exfat.ko*'; do
+    if ! find /usr/lib/modules -type f -path "${filesystem_module}" -print -quit | grep -q .; then
+        echo "ERROR: required filesystem kernel module is missing: ${filesystem_module}" >&2
+        exit 1
+    fi
+done
+
 rpm -q \
     NetworkManager NetworkManager-tui systemd-resolved firewalld openssh-server sudo \
     pam authselect authselect-libs libpwquality \
