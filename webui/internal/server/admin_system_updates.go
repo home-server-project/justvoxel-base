@@ -50,8 +50,6 @@ func (a *App) systemUpdateApply(w http.ResponseWriter, r *http.Request) {
 	writeSystemUpdateJSON(w, http.StatusOK, status)
 }
 
-
-
 func (a *App) systemUpdateRebootStatus(w http.ResponseWriter, r *http.Request) {
 	session, client, ok := a.systemUpdateRequest(w, r, false)
 	if !ok {
