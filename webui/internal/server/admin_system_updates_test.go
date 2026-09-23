@@ -13,10 +13,13 @@ import (
 
 type fakeSystemUpdatesAPI struct {
 	fakeAPI
-	role        string
-	status      api.AdminSystemUpdateStatus
-	statusCalls int
-	updateCalls int
+	role          string
+	status        api.AdminSystemUpdateStatus
+	statusCalls   int
+	updateCalls   int
+	rebootStatus  api.AdminSystemUpdateRebootStatus
+	rebootCalls   int
+	rebootOptions api.AdminSystemUpdateRebootOptions
 }
 
 func (f *fakeSystemUpdatesAPI) Session(_ context.Context, session string) (api.SessionInfo, error) {
@@ -44,6 +47,22 @@ func (f *fakeSystemUpdatesAPI) AdminSystemUpdate(_ context.Context, session stri
 	}
 	f.updateCalls++
 	return f.status, nil
+}
+
+func (f *fakeSystemUpdatesAPI) AdminSystemUpdateRebootStatus(_ context.Context, session string) (api.AdminSystemUpdateRebootStatus, error) {
+	if session != "session-token" {
+		return api.AdminSystemUpdateRebootStatus{}, api.ErrUnauthorized
+	}
+	return f.rebootStatus, nil
+}
+
+func (f *fakeSystemUpdatesAPI) AdminSystemUpdateReboot(_ context.Context, session string, options api.AdminSystemUpdateRebootOptions) (api.AdminSystemUpdateRebootStatus, error) {
+	if session != "session-token" {
+		return api.AdminSystemUpdateRebootStatus{}, api.ErrUnauthorized
+	}
+	f.rebootCalls++
+	f.rebootOptions = options
+	return f.rebootStatus, nil
 }
 
 func systemUpdateFixture() api.AdminSystemUpdateStatus {
@@ -130,6 +149,54 @@ func TestSystemUpdateForwardsApprovedRequest(t *testing.T) {
 	}
 	if client.updateCalls != 1 {
 		t.Fatalf("system update calls = %d, want 1", client.updateCalls)
+	}
+}
+
+func TestSystemUpdateRebootForwardsBackupQuickAndPlayerConfirmation(t *testing.T) {
+	client := &fakeSystemUpdatesAPI{
+		status: systemUpdateFixture(),
+		rebootStatus: api.AdminSystemUpdateRebootStatus{
+			OK: true, State: "queued", Accepted: true, WarningSeconds: 10, BackupMinecraft: true,
+		},
+	}
+	app, err := New(client, Config{ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := authenticatedSystemUpdateRequest(
+		http.MethodPost,
+		"http://example/api/system-updates/reboot",
+		"csrf=token&backup_minecraft=yes&quick_reboot=yes&confirm_players=yes",
+	)
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("update reboot returned %d: %s", rr.Code, rr.Body.String())
+	}
+	if client.rebootCalls != 1 {
+		t.Fatalf("update reboot calls = %d, want 1", client.rebootCalls)
+	}
+	if !client.rebootOptions.BackupMinecraft || !client.rebootOptions.ConfirmPlayers || client.rebootOptions.WarningSeconds != 10 {
+		t.Fatalf("unexpected reboot options: %#v", client.rebootOptions)
+	}
+}
+
+func TestSystemUpdateRebootRequiresCSRF(t *testing.T) {
+	client := &fakeSystemUpdatesAPI{status: systemUpdateFixture()}
+	app, err := New(client, Config{ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "http://example/api/system-updates/reboot", strings.NewReader(""))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("missing reboot CSRF returned %d, want 403", rr.Code)
+	}
+	if client.rebootCalls != 0 {
+		t.Fatalf("update reboot reached Agent without CSRF; calls=%d", client.rebootCalls)
 	}
 }
 
