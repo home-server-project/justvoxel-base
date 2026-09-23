@@ -102,7 +102,7 @@ done
 
 grep -Fq 'system)' "${menu}" || fail 'System menu dispatch missing'
 grep -Fq "'System status & updates'" "${menu}" || fail 'combined System status/update entry missing'
-grep -Fq "jui_choose 'System status & updates' 'Check for updates' 'Back'" "${menu}" || fail 'combined System status/update submenu missing'
+grep -Fq "jui_choose 'System status & updates' 'Update system' 'Back'" "${menu}" || fail 'combined System status/update submenu missing'
 grep -Fq '/usr/bin/mjust os-status' "${menu}" || fail 'combined System view does not show OS status'
 grep -Fq '/usr/bin/mjust os-update' "${menu}" || fail 'combined System view does not expose update check'
 if grep -Fq "'Operating system status'" "${menu}" || grep -Fq "'Check / download OS update'" "${menu}"; then

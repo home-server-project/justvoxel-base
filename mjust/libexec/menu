@@ -178,9 +178,9 @@ system_status_menu() {
     while true; do
         /usr/bin/mjust os-status || true
         echo
-        choice="$(jui_choose 'System status & updates' 'Check for updates' 'Back')" || return 0
+        choice="$(jui_choose 'System status & updates' 'Update system' 'Back')" || return 0
         case "${choice}" in
-            'Check for updates') run_and_pause /usr/bin/mjust os-update || true ;;
+            'Update system') run_and_pause /usr/bin/mjust os-update || true ;;
             'Back') return 0 ;;
         esac
     done
