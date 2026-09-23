@@ -48,7 +48,6 @@ func TestAdminSystemUpdatePostsOrdinaryUpdateRequest(t *testing.T) {
 	}
 }
 
-
 func TestAdminSystemUpdateRebootSendsSelectedOptions(t *testing.T) {
 	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.Method != http.MethodPost || r.URL.Path != adminSystemUpdateRebootPath {
