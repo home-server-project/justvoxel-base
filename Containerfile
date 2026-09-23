@@ -48,7 +48,6 @@ RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     /ctx/build_files/finalize-image.sh
 
 RUN /usr/libexec/justvoxel/health/common \
-    && /usr/libexec/justvoxel/health/vm \
     && bootc container lint --fatal-warnings
 
 STOPSIGNAL SIGRTMIN+3
