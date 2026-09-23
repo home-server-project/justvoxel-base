@@ -2,14 +2,32 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+base="${repo_root}/mjust/libexec/storage-common-base.sh"
+discovery="${repo_root}/mjust/libexec/admin-discovery-json"
 common="${repo_root}/mjust/libexec/admin-storage-actions-common.sh"
 planner="${repo_root}/mjust/libexec/admin-storage-actions-json"
 apply="${repo_root}/mjust/libexec/admin-storage-actions-apply.sh"
 
-for script in "${common}" "${planner}" "${apply}"; do
+for script in "${base}" "${discovery}" "${common}" "${planner}" "${apply}"; do
     bash -n "${script}"
 done
 
+grep -Fq 'storage_target_block_device' "${base}" || {
+    echo 'ERROR: system-disk detection lost bootc/OSTree block-device resolution.' >&2
+    exit 1
+}
+grep -Fq 'source="${source%%' "${base}" || {
+    echo 'ERROR: system-disk detection no longer strips findmnt subpath notation.' >&2
+    exit 1
+}
+grep -Fq 'MAJ:MIN' "${base}" || {
+    echo 'ERROR: system-disk detection lost major:minor fallback identity.' >&2
+    exit 1
+}
+grep -Fq 'startswith("zram")' "${discovery}" || {
+    echo 'ERROR: storage discovery can expose zram as physical storage.' >&2
+    exit 1
+}
 grep -Fq 'storage_require_identified_system_disk' "${common}" || {
     echo 'ERROR: generic storage actions must fail closed when the system disk cannot be identified.' >&2
     exit 1

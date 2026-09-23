@@ -285,6 +285,28 @@ func TestStorageBrowserMountUXUsesHumanWording(t *testing.T) {
 	}
 }
 
+func TestStorageBrowserActionMenuClosesWithDialogAndOutsideClick(t *testing.T) {
+	js, err := assets.ReadFile("static/storage-browser.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(js)
+	for _, want := range []string{
+		"function closeActionMenu()",
+		"detailDialog?.addEventListener(\"close\", closeActionMenu)",
+		"detailDialog?.addEventListener(\"cancel\", closeActionMenu)",
+		"document.addEventListener(\"pointerdown\"",
+		"if (!actionMenu.contains(event.target)) closeActionMenu()",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("storage action-menu lifecycle missing %q", want)
+		}
+	}
+	if strings.Contains(source, "detailDialog?.addEventListener(\"cancel\", (event) => event.preventDefault())") {
+		t.Fatal("Escape is still prevented from closing the partition dialog")
+	}
+}
+
 func TestStorageBrowserPortableFilesystemPolicy(t *testing.T) {
 	template, err := assets.ReadFile("templates/storage_browser.html")
 	if err != nil {

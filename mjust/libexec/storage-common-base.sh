@@ -20,12 +20,30 @@ storage_is_hws() {
     jv_variant_is_hws
 }
 
-storage_system_disks() {
-    local target source real
-    for target in / /boot /boot/efi /var; do
-        source="$(findmnt -n -o SOURCE --target "${target}" 2>/dev/null || true)"
-        [[ ${source} == /dev/* ]] || continue
+storage_target_block_device() {
+    local target="$1" source real majmin
+    source="$(findmnt -n -o SOURCE --target "${target}" 2>/dev/null || true)"
+    if [[ ${source} == /dev/* ]]; then
+        # findmnt may report an OSTree/bind subpath as /dev/xxx[/path].
+        source="${source%%\[*}"
         real="$(readlink -f -- "${source}" 2>/dev/null || true)"
+        if [[ -n ${real} && -b ${real} ]]; then
+            printf '%s\n' "${real}"
+            return 0
+        fi
+    fi
+
+    # Fall back to the mounted filesystem's major:minor identity for
+    # bootc/OSTree layouts where SOURCE is not a plain /dev path.
+    majmin="$(findmnt -n -o MAJ:MIN --target "${target}" 2>/dev/null || true)"
+    [[ -n ${majmin} ]] || return 0
+    lsblk -nrpo NAME,MAJ:MIN 2>/dev/null | awk -v id="${majmin}" '$2 == id {print $1; exit}'
+}
+
+storage_system_disks() {
+    local target real
+    for target in / /boot /boot/efi /var /etc /sysroot; do
+        real="$(storage_target_block_device "${target}")"
         [[ -n ${real} ]] || continue
         lsblk -s -npo NAME,TYPE "${real}" 2>/dev/null \
             | awk '$2 == "disk" {print $1}'

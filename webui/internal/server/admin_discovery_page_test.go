@@ -199,10 +199,12 @@ func TestNewStorageBrowserGroupsDisksAndPartitions(t *testing.T) {
 	client.configuration.Backup.Path = "/var/mnt/backups/justvoxel"
 	client.configuration.Backup.MountPoint = "/var/mnt/backups"
 	client.configuration.Backup.ExpectedUUID = "backup-uuid"
+	client.storage.SystemDisks = []string{"/dev/vda"}
 	client.storage.Devices = []api.AdminStorageDevice{
+		{Name: "zram0", Path: "/dev/zram0", Type: "disk", SizeBytes: 4 * 1024 * 1024 * 1024},
 		{Name: "vda", Path: "/dev/vda", Type: "disk", SizeBytes: 100 * 1024 * 1024 * 1024, Model: "System Disk", Transport: "virtio", System: true},
-		{Name: "vda1", Path: "/dev/vda1", Parent: "vda", Type: "part", SizeBytes: 1024 * 1024 * 1024, Filesystem: "xfs", UUID: "system-uuid", Mountpoints: []string{"/"}, System: true},
-		{Name: "vda2", Path: "/dev/vda2", Parent: "vda", Type: "part", SizeBytes: 8 * 1024 * 1024 * 1024, Filesystem: "swap", UUID: "swap-uuid", System: true},
+		{Name: "vda1", Path: "/dev/vda1", Parent: "vda", Type: "part", SizeBytes: 1024 * 1024 * 1024, Filesystem: "xfs", UUID: "system-uuid", Mountpoints: []string{"/var/lib/containers/storage/overlay", "/var", "/sysroot/ostree/deploy/default/var"}},
+		{Name: "vda2", Path: "/dev/vda2", Parent: "vda", Type: "part", SizeBytes: 8 * 1024 * 1024 * 1024, Filesystem: "swap", UUID: "swap-uuid"},
 		{Name: "vdb", Path: "/dev/vdb", Type: "disk", SizeBytes: 500 * 1024 * 1024 * 1024, Model: "Data Disk", Transport: "virtio"},
 		{Name: "vdb1", Path: "/dev/vdb1", Parent: "vdb", Type: "part", SizeBytes: 300 * 1024 * 1024 * 1024, Filesystem: "xfs", UUID: "minecraft-uuid", Mountpoints: []string{"/var/mnt/data"}},
 		{Name: "vdb2", Path: "/dev/vdb2", Parent: "vdb", Type: "part", SizeBytes: 200 * 1024 * 1024 * 1024},
@@ -226,6 +228,24 @@ func TestNewStorageBrowserGroupsDisksAndPartitions(t *testing.T) {
 	if strings.Contains(body, "data-path=\"/dev/vda2\"") {
 		t.Fatal("swap partition is interactive")
 	}
+	if strings.Contains(body, "/dev/zram0") {
+		t.Fatal("zram was exposed as physical storage")
+	}
+	if strings.Contains(body, "/sysroot/ostree") || strings.Contains(body, "/var/lib/containers/storage/overlay") {
+		t.Fatal("system partition leaked internal bootc/OSTree mount paths")
+	}
+	start := strings.Index(body, `data-path="/dev/vda1"`)
+	if start < 0 {
+		t.Fatal("system partition /dev/vda1 missing")
+	}
+	end := strings.Index(body[start:], "</button>")
+	if end < 0 {
+		t.Fatal("system partition button is incomplete")
+	}
+	systemPartition := body[start : start+end]
+	if !strings.Contains(systemPartition, `data-system="Yes"`) || !strings.Contains(systemPartition, "System partition") {
+		t.Fatalf("partition did not inherit system protection from parent disk: %s", systemPartition)
+	}
 }
 
 func TestNewStorageUsesAgentApprovedMinecraftMigrationCandidates(t *testing.T) {
@@ -244,9 +264,13 @@ func TestNewStorageUsesAgentApprovedMinecraftMigrationCandidates(t *testing.T) {
 		{Name: "vdb3", Path: "/dev/vdb3", Parent: "vdb", Type: "part", SizeBytes: 200 * 1024 * 1024 * 1024, Filesystem: "xfs", UUID: "backup-uuid", Mountpoints: []string{"/var/mnt/backups"}},
 		{Name: "vdb4", Path: "/dev/vdb4", Parent: "vdb", Type: "part", SizeBytes: 100 * 1024 * 1024 * 1024, Filesystem: "xfs", UUID: "not-approved"},
 		{Name: "vdb5", Path: "/dev/vdb5", Parent: "vdb", Type: "part", SizeBytes: 100 * 1024 * 1024 * 1024, Filesystem: "ext4", UUID: "mounted-target", Mountpoints: []string{"/var/mnt/fast"}},
+		{Name: "vdc", Path: "/dev/vdc", Type: "disk", SizeBytes: 10 * 1024 * 1024 * 1024, Model: "Empty Disk", Transport: "virtio"},
 	}
 	client.migration = api.AdminDataMigrationDiscoveryResponse{
 		OK: true, SchemaVersion: "v1",
+		WholeDisks: []api.AdminDataMigrationCandidate{
+			{Path: "/dev/vdc", SizeBytes: 10 * 1024 * 1024 * 1024, Model: "Empty Disk", Transport: "virtio"},
+		},
 		Partitions: []api.AdminDataMigrationCandidate{
 			{Path: "/dev/vdb1", Filesystem: "xfs", Mountpoint: "/var/mnt/minecraft", SizeBytes: 200 * 1024 * 1024 * 1024},
 			{Path: "/dev/vdb2", Filesystem: "xfs", SizeBytes: 200 * 1024 * 1024 * 1024},
@@ -298,6 +322,10 @@ func TestNewStorageUsesAgentApprovedMinecraftMigrationCandidates(t *testing.T) {
 		"Use for Minecraft data",
 		`action="/settings/data-migration/review"`,
 		`name="operation" value="use_partition"`,
+		`name="operation" value="erase_disk"`,
+		`name="device" value="/dev/vdc"`,
+		"Prepare for backups",
+		"Nothing is erased until Review and the exact confirmation step.",
 		"Review migration",
 	} {
 		if !strings.Contains(body, want) {

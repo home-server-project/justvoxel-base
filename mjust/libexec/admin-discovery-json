@@ -98,7 +98,7 @@ storage_json() {
     if [[ -n ${system_lines} ]]; then
         systems="$(printf '%s\n' "${system_lines}" | jq -R -s 'split("\n") | map(select(length > 0))')"
     fi
-    devices="$(jq '[.blockdevices[] | {
+    devices="$(jq '[.blockdevices[] | select(((.name // "") | startswith("zram")) | not) | {
         name:(.name // ""), path:(.path // ""), parent:(.pkname // ""), type:(.type // ""),
         size_bytes:(.size // 0), filesystem:(.fstype // ""), label:(.label // ""), uuid:(.uuid // ""),
         mountpoints:((.mountpoints // []) | map(select(. != null))),

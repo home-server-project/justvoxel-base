@@ -27,6 +27,11 @@ button.storage-partition-card:hover,button.storage-partition-card:focus-visible{
 .storage-partition-state{justify-self:start;padding:.2rem .45rem;border-radius:999px;background:#25382e;color:#b9ebca;font-size:.62rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase}
 .storage-partition-swap{opacity:.7;cursor:default}
 .storage-partition-swap .storage-partition-state{background:#252b31;color:#b7c1c8}
+.storage-empty-disk{margin:0}
+.storage-empty-disk p{margin:.45rem 0 0}
+.storage-empty-actions{display:flex;flex-wrap:wrap;align-items:center;gap:.55rem;margin-top:.7rem}
+.storage-empty-actions form{margin:0}
+.storage-empty-disk .compact{font-size:.72rem}
 
 .storage-detail-dialog{width:min(560px,calc(100% - 1.4rem));max-height:min(82vh,760px);padding:0;border:1px solid #3b454e;border-radius:16px;background:#171d22;color:#eef1f4;box-shadow:0 28px 80px #000b}
 .storage-detail-dialog::backdrop{background:#050708a8;backdrop-filter:blur(3px)}

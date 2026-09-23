@@ -78,13 +78,14 @@ type storageBrowserPartitionView struct {
 }
 
 type storageBrowserDiskView struct {
-	Name       string
-	Path       string
-	Size       string
-	Model      string
-	Transport  string
-	System     bool
-	Partitions []storageBrowserPartitionView
+	Name               string
+	Path               string
+	Size               string
+	Model              string
+	Transport           string
+	System              bool
+	MinecraftWholeDisk bool
+	Partitions         []storageBrowserPartitionView
 }
 
 type storageBrowserPageData struct {
@@ -192,6 +193,7 @@ func (a *App) storageBrowserPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	migrationCandidates := make(map[string]api.AdminDataMigrationCandidate)
+	migrationWholeDisks := make(map[string]bool)
 	migrationNote := ""
 	if migrationClient, ok := any(client).(storageBrowserMigrationDiscoveryAPI); ok {
 		discovery, err := migrationClient.AdminDataMigrationDiscovery(r.Context(), session)
@@ -201,21 +203,31 @@ func (a *App) storageBrowserPage(w http.ResponseWriter, r *http.Request) {
 			for _, candidate := range discovery.Partitions {
 				migrationCandidates[candidate.Path] = candidate
 			}
+			for _, candidate := range discovery.WholeDisks {
+				migrationWholeDisks[candidate.Path] = true
+			}
 		}
 	} else {
 		migrationNote = "Minecraft storage assignment is unavailable in this WebUI build."
 	}
 
+	systemDisks := make(map[string]struct{}, len(storage.SystemDisks))
+	for _, path := range storage.SystemDisks {
+		systemDisks[path] = struct{}{}
+	}
+
 	disks := make([]storageBrowserDiskView, 0)
 	diskIndex := make(map[string]int)
 	for _, device := range storage.Devices {
-		if device.Type != "disk" {
+		if device.Type != "disk" || strings.HasPrefix(strings.ToLower(device.Name), "zram") {
 			continue
 		}
+		_, listedSystemDisk := systemDisks[device.Path]
 		diskIndex[device.Name] = len(disks)
 		disks = append(disks, storageBrowserDiskView{
 			Name: device.Name, Path: device.Path, Size: humanBytes(device.SizeBytes),
-			Model: device.Model, Transport: device.Transport, System: device.System,
+			Model: device.Model, Transport: device.Transport, System: device.System || listedSystemDisk,
+			MinecraftWholeDisk: migrationWholeDisks[device.Path],
 		})
 	}
 	for _, device := range storage.Devices {
@@ -226,7 +238,10 @@ func (a *App) storageBrowserPage(w http.ResponseWriter, r *http.Request) {
 		if !exists {
 			continue
 		}
-		role := storageBrowserRole(device, configuration)
+		systemPartition := device.System || disks[index].System
+		roleDevice := device
+		roleDevice.System = systemPartition
+		role := storageBrowserRole(roleDevice, configuration)
 		migrationCandidate, canMigrate := migrationCandidates[device.Path]
 		if strings.Contains(role, "Minecraft") || strings.Contains(role, "Backups") {
 			canMigrate = false
@@ -236,7 +251,7 @@ func (a *App) storageBrowserPage(w http.ResponseWriter, r *http.Request) {
 				Name: device.Name, Path: device.Path, Parent: device.Parent, Type: device.Type,
 				Size: humanBytes(device.SizeBytes), Filesystem: device.Filesystem, Label: device.Label,
 				UUID: device.UUID, Mountpoints: strings.Join(device.Mountpoints, ", "), Model: device.Model,
-				Transport: device.Transport, ReadOnly: device.ReadOnly, System: device.System,
+				Transport: device.Transport, ReadOnly: device.ReadOnly, System: systemPartition,
 			},
 			FilesystemDisplay: storageBrowserFilesystemDisplay(device.Filesystem),
 			Role:              role, Mounted: len(device.Mountpoints) > 0, Formatted: device.Filesystem != "",

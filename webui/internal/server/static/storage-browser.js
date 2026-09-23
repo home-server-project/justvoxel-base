@@ -53,6 +53,7 @@
     uuidRow: detailDialog?.querySelector("[data-detail-uuid-row]"),
     mount: detailDialog?.querySelector("[data-detail-mount]"),
     mountRow: detailDialog?.querySelector("[data-detail-mount-row]"),
+    mountLabel: detailDialog?.querySelector("[data-detail-mount-label]"),
     mounted: detailDialog?.querySelector("[data-detail-mounted]"),
     mountType: detailDialog?.querySelector("[data-detail-mount-type]"),
     mountTypeRow: detailDialog?.querySelector("[data-detail-mount-type-row]"),
@@ -65,7 +66,12 @@
   let selectedAction = "";
   let reviewedPlan = null;
 
+  function closeActionMenu() {
+    if (actionMenu) actionMenu.open = false;
+  }
+
   function selectDisk(name) {
+    closeActionMenu();
     diskButtons.forEach((button) => {
       const selected = button.dataset.storageDisk === name;
       button.classList.toggle("is-selected", selected);
@@ -116,7 +122,7 @@
     setOptional(detail.mountTypeRow, detail.mountType, "");
 
     if (protectedPartition) {
-      if (actionMenu) actionMenu.open = false;
+      closeActionMenu();
       if (migrateButton) migrateButton.hidden = true;
       return;
     }
@@ -202,6 +208,7 @@
     button.addEventListener("click", () => {
       if (!detailDialog) return;
       const data = button.dataset;
+      closeActionMenu();
       selectedPartition = { ...data };
       selectedMountStatus = null;
       if (detail.title) detail.title.textContent = data.path || "Partition";
@@ -214,7 +221,8 @@
       if (detail.readonly) detail.readonly.textContent = data.readonly || "No";
       setOptional(detail.labelRow, detail.label, data.label);
       setOptional(detail.uuidRow, detail.uuid, data.uuid);
-      setOptional(detail.mountRow, detail.mount, data.mountpoints);
+      if (detail.mountLabel) detail.mountLabel.textContent = data.system === "Yes" ? "Storage" : "Mounted at";
+      setOptional(detail.mountRow, detail.mount, data.system === "Yes" ? "System partition" : data.mountpoints);
       configurePartitionActions(selectedPartition, null);
       detailDialog.showModal();
       detailClose?.focus();
@@ -222,8 +230,18 @@
     });
   });
 
-  detailClose?.addEventListener("click", () => detailDialog?.close());
-  detailDialog?.addEventListener("cancel", (event) => event.preventDefault());
+  function closeDetailDialog() {
+    closeActionMenu();
+    detailDialog?.close();
+  }
+
+  detailClose?.addEventListener("click", closeDetailDialog);
+  detailDialog?.addEventListener("close", closeActionMenu);
+  detailDialog?.addEventListener("cancel", closeActionMenu);
+  document.addEventListener("pointerdown", (event) => {
+    if (!actionMenu?.open) return;
+    if (!actionMenu.contains(event.target)) closeActionMenu();
+  });
 
   function minecraftDataPath(mountPoint) {
     return (mountPoint || "/var/mnt/justvoxel-data").replace(/\/$/, "") + "/minecraft";
@@ -235,7 +253,7 @@
 
   migrateButton?.addEventListener("click", () => {
     if (!selectedPartition || selectedPartition.minecraftCandidate !== "Yes" || !migrationDialog) return;
-    if (actionMenu) actionMenu.open = false;
+    closeActionMenu();
     detailDialog?.close();
 
     const existingMount = selectedPartition.minecraftMountPoint || "";
@@ -341,7 +359,7 @@
   actionButtons.forEach((button) => {
     button.addEventListener("click", () => {
       if (!selectedPartition || !actionDialog) return;
-      if (actionMenu) actionMenu.open = false;
+      closeActionMenu();
       resetActionDialog(button.dataset.storageAction);
       actionDialog.showModal();
       if (selectedAction === "mount-for-now" || selectedAction === "mount-permanently") mountInput?.focus();

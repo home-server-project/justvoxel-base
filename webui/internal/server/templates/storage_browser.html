@@ -66,7 +66,7 @@
                   data-filesystem-display="{{.FilesystemDisplay}}"
                   data-label="{{.Label}}"
                   data-uuid="{{.UUID}}"
-                  data-mountpoints="{{.Mountpoints}}"
+                  data-mountpoints="{{if .System}}System partition{{else}}{{.Mountpoints}}{{end}}"
                   data-role="{{.Role}}"
                   data-mounted="{{if .Mounted}}Yes{{else}}No{{end}}"
                   data-system="{{if .System}}Yes{{else}}No{{end}}"
@@ -76,13 +76,31 @@
             <span class="storage-partition-state">{{.Role}}</span>
             <strong>{{.Path}}</strong>
             <span>{{.Size}}{{if .Filesystem}} · {{.FilesystemDisplay}}{{end}}</span>
-            {{if .Mountpoints}}<small>{{.Mountpoints}}</small>{{else if not .Formatted}}<small>Not formatted</small>{{else}}<small>Not mounted</small>{{end}}
+            {{if .System}}<small>System partition</small>{{else if .Mountpoints}}<small>{{.Mountpoints}}</small>{{else if not .Formatted}}<small>Not formatted</small>{{else}}<small>Not mounted</small>{{end}}
           </button>
           {{end}}
         {{end}}
       </div>
       {{else}}
-      <div class="notice">No partitions were reported on this disk.</div>
+      <div class="notice storage-empty-disk">
+        <strong>Empty disk</strong>
+        <p class="muted">No partitions are present yet. Choose what JustVoxel should use this disk for.</p>
+        <div class="storage-empty-actions">
+          {{if .MinecraftWholeDisk}}
+          <form method="post" action="/settings/data-migration/review">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}">
+            <input type="hidden" name="operation" value="erase_disk">
+            <input type="hidden" name="device" value="{{.Path}}">
+            <input type="hidden" name="size_gib" value="all">
+            <input type="hidden" name="mount_point" value="/var/mnt/justvoxel-data">
+            <input type="hidden" name="path" value="/var/mnt/justvoxel-data/minecraft">
+            <button type="submit">Use for Minecraft data</button>
+          </form>
+          {{end}}
+          {{if not .System}}<a class="button-link secondary" href="/settings/storage-provision">Prepare for backups</a>{{end}}
+        </div>
+        <p class="muted compact">Nothing is erased until Review and the exact confirmation step.</p>
+      </div>
       {{end}}
     </div>
     {{end}}
@@ -104,7 +122,7 @@
         <div><dt>Filesystem</dt><dd data-detail-filesystem></dd></div>
         <div data-detail-label-row><dt>Label</dt><dd data-detail-label></dd></div>
         <div data-detail-uuid-row><dt>UUID</dt><dd><code data-detail-uuid></code></dd></div>
-        <div data-detail-mount-row><dt>Mounted at</dt><dd><code data-detail-mount></code></dd></div>
+        <div data-detail-mount-row><dt data-detail-mount-label>Mounted at</dt><dd><code data-detail-mount></code></dd></div>
         <div><dt>Mounted</dt><dd data-detail-mounted></dd></div>
         <div data-detail-mount-type-row hidden><dt>Mount type</dt><dd data-detail-mount-type></dd></div>
         <div><dt>System protected</dt><dd data-detail-system></dd></div>
