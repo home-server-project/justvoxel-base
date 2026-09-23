@@ -22,7 +22,7 @@ source /usr/lib/os-release
 
 for cmd in \
     bootc podman skopeo nmcli nmtui nm-hsp resolvectl firewall-cmd sshd sudo just mjust fzf gum \
-    tailscale netbird curl jq openssl tar gzip rsync ping dig traceroute nc tcpdump lsof \
+    tailscale curl jq openssl tar gzip rsync ping dig traceroute nc tcpdump lsof \
     findmnt mountpoint flock timeout mkfs.xfs btrfs mount.nfs mount.cifs mount.ntfs-3g lsblk blkid wipefs parted partprobe udevadm \
     qemu-ga vmtoolsd iperf3 micro spf; do
     command -v "${cmd}" >/dev/null
@@ -86,7 +86,6 @@ test "$(systemctl is-enabled justvoxel-minecraft-shutdown-guard.service)" = "ena
 [[ "$(systemctl is-enabled justvoxel-webui.service 2>/dev/null || true)" != "enabled" ]]
 [[ "$(systemctl is-enabled justvoxel-management.service 2>/dev/null || true)" != "enabled" ]]
 [[ "$(systemctl is-enabled tailscaled.service 2>/dev/null || true)" != "enabled" ]]
-[[ "$(systemctl is-enabled netbird.service 2>/dev/null || true)" != "enabled" ]]
 
 for forbidden in cockpit-system cockpit-files cockpit-podman cockpit-storaged cockpit-machines libvirt-daemon-kvm qemu-kvm virt-install; do
     if rpm -q "${forbidden}" >/dev/null 2>&1; then
