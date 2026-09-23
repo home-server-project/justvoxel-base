@@ -331,3 +331,23 @@ func TestStorageBrowserRoleClassification(t *testing.T) {
 		})
 	}
 }
+
+func TestStorageBrowserFilesystemDisplayNames(t *testing.T) {
+	cases := map[string]string{
+		"xfs":     "XFS",
+		"ext4":    "ext4",
+		"btrfs":   "Btrfs",
+		"ntfs":    "NTFS",
+		"ntfs-3g": "NTFS",
+		"vfat":    "FAT / FAT32",
+		"fat":     "FAT / FAT32",
+		"fat32":   "FAT / FAT32",
+		"exfat":   "exFAT",
+		"":        "Not formatted",
+	}
+	for filesystem, want := range cases {
+		if got := storageBrowserFilesystemDisplay(filesystem); got != want {
+			t.Fatalf("storageBrowserFilesystemDisplay(%q) = %q, want %q", filesystem, got, want)
+		}
+	}
+}
