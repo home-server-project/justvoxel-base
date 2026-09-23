@@ -70,7 +70,6 @@ grep -Fqx "management-api=${webui_api}" <<<"${webui_version_output}"
 
 install -d -m0755 /usr/libexec/justvoxel/health
 install -m0755 /ctx/build_files/validate/common.sh /usr/libexec/justvoxel/health/common
-install -m0755 /ctx/build_files/validate/vm.sh /usr/libexec/justvoxel/health/vm
 
 for cmd in \
     bootc podman skopeo just mjust fzf gum \
