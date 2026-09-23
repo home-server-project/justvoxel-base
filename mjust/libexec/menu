@@ -85,15 +85,7 @@ service_menu() {
 }
 
 configure_menu() {
-    local choice
-    while true; do
-        choice="$(jui_choose 'Configure Minecraft' 'Maximum players' 'Other safe Minecraft settings' 'Back')" || return 0
-        case "${choice}" in
-            'Maximum players') run_and_pause /usr/bin/mjust configure-max-players || true ;;
-            'Other safe Minecraft settings') run_and_pause /usr/bin/mjust configure || true ;;
-            'Back') return 0 ;;
-        esac
-    done
+    sudo /usr/libexec/justvoxel/mjust/configure || true
 }
 
 bedrock_enabled() {
@@ -145,8 +137,8 @@ backup_menu() {
             'Create backup now') run_and_pause /usr/bin/mjust backup || true ;;
             'Restore world') run_and_pause /usr/bin/mjust restore || true ;;
             'Restore full Minecraft data') run_and_pause /usr/bin/mjust restore-full || true ;;
-            'Automatic backup settings') run_and_pause sudo /usr/libexec/justvoxel/mjust/configure backup || true ;;
-            'Backup storage location') run_and_pause sudo /usr/libexec/justvoxel/mjust/storage-provision backup || true ;;
+            'Automatic backup settings') sudo /usr/libexec/justvoxel/mjust/configure backup || true ;;
+            'Backup storage location') sudo /usr/libexec/justvoxel/mjust/storage-provision backup || true ;;
             'Back') return 0 ;;
         esac
     done
@@ -257,22 +249,6 @@ advanced_menu() {
     esac
 }
 
-main_menu_profile() {
-    local cols="$1"
-    if (( cols >= 110 )); then
-        printf 'wide'
-    elif (( cols >= 80 )); then
-        printf 'standard'
-    else
-        printf 'narrow'
-    fi
-}
-
-main_menu_gap_enabled() {
-    local lines="$1" item_count="$2"
-    (( item_count > 0 && lines >= (item_count * 2 + 4) ))
-}
-
 select_rich() {
     local rows selected profile cols lines item_count preview_height
     local -a fzf_args
@@ -285,7 +261,7 @@ select_rich() {
 
     cols="$(jui_terminal_cols)"
     lines="$(jui_terminal_lines)"
-    profile="$(main_menu_profile "${cols}")"
+    profile="$(jui_menu_profile "${cols}")"
     item_count="$(printf '%s\n' "${rows}" | awk 'NF {count++} END {print count + 0}')"
 
     fzf_args=(
@@ -300,7 +276,7 @@ select_rich() {
         --preview='/usr/libexec/justvoxel/mjust/menu --preview {1}'
     )
 
-    if main_menu_gap_enabled "${lines}" "${item_count}"; then
+    if jui_menu_gap_enabled "${lines}" "${item_count}"; then
         fzf_args+=(--gap=1)
     fi
 
