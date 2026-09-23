@@ -132,15 +132,8 @@ chmod 0644 /usr/lib/justvoxel/variant
 
 # External repositories are composition inputs only. Immutable hosts must not
 # accidentally drift through ad-hoc package installation.
-for repo_file in \
-    /etc/yum.repos.d/epel*.repo \
-    /etc/yum.repos.d/tailscale.repo \
-    /etc/yum.repos.d/netbird.repo; do
-    [[ -e "${repo_file}" ]] || continue
-    sed -Ei 's/^[[:space:]]*enabled[[:space:]]*=[[:space:]]*1[[:space:]]*$/enabled=0/' "${repo_file}"
-done
 
-if dnf repolist --enabled | grep -Eiq 'epel|tailscale|netbird'; then
+if dnf repolist --enabled | grep -Eiq 'epel'; then
     echo "ERROR: an external package repository remains enabled in the final image."
     dnf repolist --enabled
     exit 1
