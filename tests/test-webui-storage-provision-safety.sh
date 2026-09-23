@@ -13,7 +13,8 @@ for required in \
     'is_system_disk "${DEVICE}"' \
     'currently unallocated space' \
     'wipefs -a' \
-    'mkfs.xfs' \
+    'storage_mkfs_xfs JV_BACKUP' \
+    'storage_create_partition "${DEVICE}"' \
     'parted -s -a optimal'; do
     grep -Fq -- "${required}" "${helper}" || {
         echo "missing advanced-storage safety invariant: ${required}" >&2
