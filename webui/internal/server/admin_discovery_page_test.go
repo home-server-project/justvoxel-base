@@ -148,6 +148,7 @@ func TestStorageSettingsShowsHumanReadableInventory(t *testing.T) {
 	client.configuration.Configured = true
 	client.configuration.Minecraft.DataPath = "/var/lib/justvoxel/minecraft"
 	client.configuration.Backup.Path = "/var/mnt/backup/justvoxel"
+	client.storage.SystemDisks = []string{"/dev/vda"}
 	client.storage.Devices = []api.AdminStorageDevice{{
 		Name: "vdb1", Path: "/dev/vdb1", Type: "part", SizeBytes: 1073741824,
 		Filesystem: "xfs", Label: "BACKUP", UUID: "uuid-123", Mountpoints: []string{"/var/mnt/backup"},
