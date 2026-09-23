@@ -67,6 +67,7 @@ type storageSettingsPageData struct {
 
 type storageBrowserPartitionView struct {
 	storageDeviceView
+	FilesystemDisplay   string
 	Role                string
 	Mounted             bool
 	Formatted           bool
@@ -237,6 +238,7 @@ func (a *App) storageBrowserPage(w http.ResponseWriter, r *http.Request) {
 				UUID: device.UUID, Mountpoints: strings.Join(device.Mountpoints, ", "), Model: device.Model,
 				Transport: device.Transport, ReadOnly: device.ReadOnly, System: device.System,
 			},
+			FilesystemDisplay: storageBrowserFilesystemDisplay(device.Filesystem),
 			Role: role, Mounted: len(device.Mountpoints) > 0, Formatted: device.Filesystem != "",
 			Swap:                device.Filesystem == "swap",
 			Interactive:         device.Filesystem != "swap",
@@ -251,6 +253,29 @@ func (a *App) storageBrowserPage(w http.ResponseWriter, r *http.Request) {
 		CSRF: csrfFromRequest(r), Identity: identity, Configuration: configuration, Disks: disks,
 		MinecraftMigrationNote: migrationNote,
 	})
+}
+
+func storageBrowserFilesystemDisplay(filesystem string) string {
+	switch strings.ToLower(strings.TrimSpace(filesystem)) {
+	case "xfs":
+		return "XFS"
+	case "ext4":
+		return "ext4"
+	case "btrfs":
+		return "Btrfs"
+	case "ntfs", "ntfs-3g":
+		return "NTFS"
+	case "vfat", "fat", "fat32":
+		return "FAT / FAT32"
+	case "exfat":
+		return "exFAT"
+	case "swap":
+		return "Swap"
+	case "":
+		return "Not formatted"
+	default:
+		return filesystem
+	}
 }
 
 func storageBrowserRole(device api.AdminStorageDevice, configuration api.AdminConfigurationDiscovery) string {
