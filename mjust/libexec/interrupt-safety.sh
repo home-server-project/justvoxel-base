@@ -48,7 +48,7 @@ jv_begin_minecraft_stop() {
     fi
 }
 
-jv_bypass_empty_server_shutdown_delay() {
+jv_bypass_container_shutdown_delay() {
     local attempt
     for attempt in 1 2 3 4 5; do
         if podman kill --signal SIGUSR1 minecraft >/dev/null 2>&1; then
@@ -64,9 +64,30 @@ jv_bypass_empty_server_shutdown_delay() {
     return 0
 }
 
+jv_bypass_empty_server_shutdown_delay() {
+    jv_bypass_container_shutdown_delay
+}
+
 jv_countdown_online_server_shutdown() {
-    local previous=60 next delay
-    for next in 30 15 10 5 4 3 2 1; do
+    local warning_seconds="${JV_INTERRUPT_WARNING_SECONDS:-60}" previous next delay
+    local -a announcements
+
+    case "${warning_seconds}" in
+        60)
+            announcements=(30 15 10 5 4 3 2 1)
+            ;;
+        10)
+            announcements=(5 4 3 2 1)
+            jv_minecraft_announce_shutdown 10
+            ;;
+        *)
+            echo "ERROR: unsupported Minecraft interruption warning: ${warning_seconds} seconds." >&2
+            return 2
+            ;;
+    esac
+
+    previous="${warning_seconds}"
+    for next in "${announcements[@]}"; do
         delay=$((previous - next))
         sleep "${delay}"
         if ! jv_minecraft_still_running; then
@@ -77,6 +98,9 @@ jv_countdown_online_server_shutdown() {
     done
 
     sleep 1
+    if [[ ${warning_seconds} == 10 ]] && jv_minecraft_still_running; then
+        jv_bypass_container_shutdown_delay
+    fi
     jv_wait_minecraft_stopped
 }
 
