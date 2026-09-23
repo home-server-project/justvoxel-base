@@ -1,27 +1,43 @@
 #!/usr/bin/bash
 set -euo pipefail
 source /usr/libexec/justvoxel/mjust/common.sh
-source /usr/libexec/justvoxel/mjust/os-common.sh
+source /usr/libexec/justvoxel/mjust/system-update-api.sh
 require_root
 
-status_json="$(jv_bootc_status_json 2>/dev/null || true)"
-if [[ -z ${status_json} ]] || ! jv_bootc_validate_status_json "${status_json}"; then
-    echo 'ERROR: could not read bootc deployment status.' >&2
+response="$(jv_system_update_get)"
+if ! jq -e 'type == "object" and (.ok == true) and (.running | type == "object") and (.running.digest | type == "string" and length > 0)' <<<"${response}" >/dev/null 2>&1; then
+    echo 'ERROR: JustVoxel Management API returned invalid system update status.' >&2
     exit 1
 fi
 
+print_deployment() {
+    local key="$1" title="$2" entry image version digest
+    entry="$(jq -c --arg key "${key}" '.[$key] // null' <<<"${response}")"
+    echo "${title}"
+    if [[ ${entry} == null ]]; then
+        echo '  None'
+        return
+    fi
+    image="$(jq -r '.image // empty' <<<"${entry}")"
+    version="$(jq -r '.version // empty' <<<"${entry}")"
+    digest="$(jq -r '.digest // empty' <<<"${entry}")"
+    [[ -n ${image} ]] && echo "  Image:   ${image}"
+    [[ -n ${version} ]] && echo "  Version: ${version}"
+    echo "  Digest:  ${digest}"
+}
+
 printf 'JustVoxel operating system\n'
 printf '%s\n\n' '--------------------------'
-jv_bootc_print_entry "${status_json}" booted 'Running image'
+print_deployment running 'Running image'
 echo
-jv_bootc_print_entry "${status_json}" staged 'Staged update'
-if jv_bootc_staged_exists "${status_json}"; then
+print_deployment staged 'Staged update'
+if [[ $(jq -r '.reboot_required // false' <<<"${response}") == true ]]; then
     echo '  State:   Ready for the next reboot'
 fi
 echo
-jv_bootc_print_entry "${status_json}" rollback 'Rollback image'
+print_deployment rollback 'Rollback image'
 
-if [[ $(jv_bootc_read_only "${status_json}") == true ]]; then
+if [[ $(jq -r '.read_only // false' <<<"${response}") == true ]]; then
     echo
     echo 'OS updates: unavailable because this bootc system is read-only.'
 fi
