@@ -580,3 +580,158 @@ if (systemPower && systemDialog) {
     if (controlCenter) controlCenter.open = false;
   });
 }
+
+
+const systemUpdateOpen = document.querySelector("[data-system-update-open]");
+const systemUpdateDialog = document.querySelector("[data-system-update-dialog]");
+if (systemUpdateOpen && systemUpdateDialog) {
+  const csrfInput = document.querySelector("[data-system-update-csrf]");
+  const closeButton = systemUpdateDialog.querySelector("[data-system-update-close]");
+  const runningValue = systemUpdateDialog.querySelector("[data-system-update-running]");
+  const runningImage = systemUpdateDialog.querySelector("[data-system-update-running-image]");
+  const stagedValue = systemUpdateDialog.querySelector("[data-system-update-staged]");
+  const stagedImage = systemUpdateDialog.querySelector("[data-system-update-staged-image]");
+  const state = systemUpdateDialog.querySelector("[data-system-update-state]");
+  const error = systemUpdateDialog.querySelector("[data-system-update-error]");
+  const updateButton = systemUpdateDialog.querySelector("[data-system-update-button]");
+
+  let updating = false;
+  let latestStatus = null;
+
+  const deploymentVersion = (deployment, fallback) => {
+    if (!deployment) return fallback;
+    return deployment.version || "Deployment";
+  };
+
+  const renderSystemUpdate = (status) => {
+    latestStatus = status;
+    if (runningValue) runningValue.textContent = deploymentVersion(status.running, "Unavailable");
+    if (runningImage) runningImage.textContent = status.running && status.running.image ? status.running.image : "";
+    if (stagedValue) stagedValue.textContent = deploymentVersion(status.staged, "None");
+    if (stagedImage) stagedImage.textContent = status.staged && status.staged.image ? status.staged.image : "";
+
+    if (state) {
+      if (status.read_only) {
+        state.textContent = "System updates are unavailable on this read-only deployment.";
+      } else if (status.reboot_required) {
+        state.textContent = "Update staged — restart required.";
+      } else {
+        state.textContent = status.message || "JustVoxel is current.";
+      }
+    }
+
+    if (error) {
+      error.hidden = true;
+      error.textContent = "";
+    }
+    if (updateButton) {
+      updateButton.disabled = Boolean(status.read_only) || updating;
+    }
+  };
+
+  const showSystemUpdateError = (message) => {
+    if (error) {
+      error.textContent = message || "System update information is unavailable.";
+      error.hidden = false;
+    }
+    if (state) state.textContent = "System update unavailable.";
+    if (updateButton) updateButton.disabled = updating;
+  };
+
+  const readResponse = async (response) => {
+    try {
+      return await response.json();
+    } catch (_) {
+      return {};
+    }
+  };
+
+  const handleAuthResponse = (response) => {
+    if (response.status === 401) {
+      window.location.assign("/login");
+      return true;
+    }
+    if (response.status === 403) {
+      window.location.assign("/password");
+      return true;
+    }
+    return false;
+  };
+
+  const loadSystemUpdate = async () => {
+    if (state) state.textContent = "Loading system update status…";
+    if (error) error.hidden = true;
+    if (updateButton) updateButton.disabled = true;
+    try {
+      const response = await fetch("/api/system-updates", {
+        method: "GET",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (handleAuthResponse(response)) return;
+      const result = await readResponse(response);
+      if (!response.ok) {
+        showSystemUpdateError(result.error || "System update status is unavailable.");
+        return;
+      }
+      renderSystemUpdate(result);
+    } catch (_) {
+      showSystemUpdateError("System update service is unavailable.");
+    }
+  };
+
+  const applySystemUpdate = async () => {
+    if (updating || !csrfInput || !updateButton) return;
+    updating = true;
+    updateButton.disabled = true;
+    updateButton.classList.add("is-busy");
+    updateButton.setAttribute("aria-busy", "true");
+    updateButton.textContent = "Updating…";
+    if (state) state.textContent = "Updating JustVoxel… Minecraft keeps running.";
+    if (error) error.hidden = true;
+
+    const body = new URLSearchParams();
+    body.set("csrf", csrfInput.value);
+
+    try {
+      const response = await fetch("/api/system-updates", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: body.toString(),
+      });
+      if (handleAuthResponse(response)) return;
+      const result = await readResponse(response);
+      if (!response.ok) {
+        showSystemUpdateError(result.error || "System update failed.");
+        return;
+      }
+      renderSystemUpdate(result);
+    } catch (_) {
+      showSystemUpdateError("System update service is unavailable. Nothing was submitted again automatically.");
+    } finally {
+      updating = false;
+      updateButton.classList.remove("is-busy");
+      updateButton.removeAttribute("aria-busy");
+      updateButton.textContent = "Update system";
+      updateButton.disabled = Boolean(latestStatus && latestStatus.read_only);
+    }
+  };
+
+  systemUpdateOpen.addEventListener("click", () => {
+    if (controlCenter) controlCenter.open = false;
+    systemUpdateDialog.showModal();
+    loadSystemUpdate();
+  });
+
+  closeButton?.addEventListener("click", () => systemUpdateDialog.close());
+  updateButton?.addEventListener("click", applySystemUpdate);
+
+  systemUpdateDialog.addEventListener("click", (event) => {
+    if (event.target === systemUpdateDialog) systemUpdateDialog.close();
+  });
+}

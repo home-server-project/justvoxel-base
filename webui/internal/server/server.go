@@ -118,6 +118,7 @@ func (a *App) Handler() http.Handler {
 	a.registerAdminDataMigrationPages(mux)
 	a.registerAdminServerMigrationPages(mux)
 	a.registerAdminSystemActionPages(mux)
+	a.registerAdminSystemUpdatePages(mux)
 	mux.HandleFunc("GET /api/dashboard-status", a.dashboardStatus)
 	mux.HandleFunc("GET /about", a.aboutPage)
 	mux.HandleFunc("POST /minecraft/start", a.minecraftAction("start"))
@@ -133,7 +134,7 @@ func (a *App) ListenAndServe(addr string) error {
 		Handler:           a.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      210 * time.Second,
+		WriteTimeout:      20 * time.Minute,
 		IdleTimeout:       60 * time.Second,
 	}
 	return srv.ListenAndServe()

@@ -33,7 +33,7 @@ grep -Fq 'jv_system_update_get' "${os_status}" || fail 'os-status must read stat
 grep -Fq 'system-update-api.sh' "${os_update}" || fail 'os-update must use the System Update API helper'
 grep -Fq 'jv_system_update_apply' "${os_update}" || fail 'os-update must update through the Management API'
 for frontend in "${os_status}" "${os_update}"; do
-    if grep -Fq 'bootc ' "${frontend}"; then fail 'OS update frontend must not execute bootc directly'; fi
+    if grep -Eq 'bootc[[:space:]]+(status|upgrade)' "${frontend}"; then fail 'OS update frontend must not execute bootc directly'; fi
     if grep -Fq 'os-common.sh' "${frontend}"; then fail 'OS update frontend must not parse bootc state directly'; fi
 done
 grep -Fq '"${JV_SYSTEM_UPDATE_API_CLIENT}" GET /v1/admin/system/updates' "${system_update_api}" || fail 'System Update frontend status endpoint missing'

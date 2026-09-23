@@ -33,6 +33,8 @@ If a newer image exists, bootc pulls and stages it. If the running image is alre
 
 Running the OS update does not reboot the host, stop Minecraft, query players, or create a Minecraft backup. The running system continues unchanged. A staged deployment is used after the next normal reboot.
 
+The WebUI exposes the same operation from **Control Center -> System Update**. It opens a compact centered dialog on desktop and uses the phone viewport on small screens. The dialog reads status and requests updates through the Management API; it does not execute bootc directly.
+
 There is intentionally no separate `mjust os-apply` command. Reboot is the normal bootc apply boundary.
 
 ## rpm-ostree package layering
