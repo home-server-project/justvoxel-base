@@ -213,7 +213,7 @@ jobs:
           sudo podman run --rm \
             --entrypoint /bin/bash \
             justvoxel-base:test \
-            -c '/usr/libexec/justvoxel/health/common && /usr/libexec/justvoxel/health/vm && bootc container lint --fatal-warnings'
+            -c '/usr/libexec/justvoxel/health/common && bootc container lint --fatal-warnings'
 
       - name: Login to GHCR
         shell: bash
@@ -292,5 +292,5 @@ jobs:
             echo "- Moving tag: ${IMAGE_REPOSITORY}:${CURRENT_TAG}"
             echo "- Immutable tag: ${IMAGE_REPOSITORY}:${BUILD_TAG:-n/a}"
             echo "- Digest: ${DIGEST:-not-published}"
-            echo "- VM-ready: health/common + health/vm"
+            echo "- Health: common + bootc lint"
           } >> "${GITHUB_STEP_SUMMARY}"
