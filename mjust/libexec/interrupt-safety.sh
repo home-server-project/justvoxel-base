@@ -70,14 +70,14 @@ jv_bypass_empty_server_shutdown_delay() {
 
 jv_countdown_online_server_shutdown() {
     local warning_seconds="${JV_INTERRUPT_WARNING_SECONDS:-60}" previous next delay
-    local -a announcements
+    local -a warning_points
 
     case "${warning_seconds}" in
         60)
-            announcements=(30 15 10 5 4 3 2 1)
+            warning_points=(30 15 10 5 4 3 2 1)
             ;;
         10)
-            announcements=(5 4 3 2 1)
+            warning_points=(5 4 3 2 1)
             jv_minecraft_announce_shutdown 10
             ;;
         *)
@@ -87,7 +87,7 @@ jv_countdown_online_server_shutdown() {
     esac
 
     previous="${warning_seconds}"
-    for next in "${announcements[@]}"; do
+    for next in "${warning_points[@]}"; do
         delay=$((previous - next))
         sleep "${delay}"
         if ! jv_minecraft_still_running; then
