@@ -34,5 +34,8 @@ jobs:
             dnf config-manager --set-enabled crb
             dnf install -y ntfs-3g
             command -v mount.ntfs-3g
-            mount.ntfs-3g --help >/dev/null
+            mount.ntfs-3g --help >/tmp/ntfs-help.txt 2>&1 || true
+            grep -Fq "windows_names" /tmp/ntfs-help.txt
+            grep -Fq "fmask=" /tmp/ntfs-help.txt
+            grep -Fq "dmask=" /tmp/ntfs-help.txt
           '
