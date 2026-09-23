@@ -287,6 +287,14 @@ func TestStorageBrowserMountUXUsesHumanWording(t *testing.T) {
 
 
 func TestStorageBrowserPortableFilesystemPolicy(t *testing.T) {
+	template, err := assets.ReadFile("templates/storage_browser.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(template), "data-filesystem-display=") {
+		t.Fatal("storage browser template does not carry the friendly filesystem display name")
+	}
+
 	js, err := assets.ReadFile("static/storage-browser.js")
 	if err != nil {
 		t.Fatal(err)
