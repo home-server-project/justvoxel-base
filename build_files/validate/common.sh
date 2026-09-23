@@ -22,7 +22,7 @@ source /usr/lib/os-release
 
 for cmd in \
     bootc podman skopeo nmcli nmtui nm-hsp resolvectl firewall-cmd sshd sudo just mjust fzf gum \
-    tailscale curl jq openssl tar gzip rsync ping dig traceroute nc tcpdump lsof \
+    curl jq openssl tar gzip rsync ping dig traceroute nc tcpdump lsof \
     findmnt mountpoint flock timeout mkfs.xfs btrfs mount.nfs mount.cifs mount.ntfs-3g lsblk blkid wipefs parted partprobe udevadm \
     qemu-ga vmtoolsd iperf3 micro spf; do
     command -v "${cmd}" >/dev/null
