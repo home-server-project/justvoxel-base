@@ -63,8 +63,43 @@ storage_action_managed_filesystem() {
     esac
 }
 
-# Compatibility alias for existing storage-management paths.
-# Step 2 will opt generic mount operations into storage_action_mountable_filesystem.
+storage_action_mount_type() {
+    case "$1" in
+        ntfs) printf 'ntfs-3g\n' ;;
+        xfs|ext4|btrfs|vfat|exfat) printf '%s\n' "$1" ;;
+        *) return 1 ;;
+    esac
+}
+
+storage_action_mount_options() {
+    case "$1" in
+        xfs|ext4|btrfs)
+            printf 'noatime\n'
+            ;;
+        ntfs)
+            printf 'rw,noatime,uid=0,gid=0,fmask=0133,dmask=0022,windows_names\n'
+            ;;
+        vfat)
+            printf 'rw,noatime,uid=0,gid=0,fmask=0133,dmask=0022,utf8=1\n'
+            ;;
+        exfat)
+            printf 'rw,noatime,uid=0,gid=0,fmask=0133,dmask=0022\n'
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+storage_action_mount_device() {
+    local device="$1" mountpoint="$2" filesystem="$3" mount_type mount_options
+    mount_type="$(storage_action_mount_type "${filesystem}")" || return 1
+    mount_options="$(storage_action_mount_options "${filesystem}")" || return 1
+    mount -t "${mount_type}" -o "${mount_options}" -- "${device}" "${mountpoint}"
+}
+
+# Compatibility alias for storage-management paths that intentionally remain
+# restricted to Linux-native managed filesystems.
 storage_action_supported_filesystem() {
     storage_action_managed_filesystem "$1"
 }
