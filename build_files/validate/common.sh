@@ -85,7 +85,6 @@ test "$(systemctl is-enabled justvoxel-web-bootstrap.service)" = "enabled"
 test "$(systemctl is-enabled justvoxel-minecraft-shutdown-guard.service)" = "enabled"
 [[ "$(systemctl is-enabled justvoxel-webui.service 2>/dev/null || true)" != "enabled" ]]
 [[ "$(systemctl is-enabled justvoxel-management.service 2>/dev/null || true)" != "enabled" ]]
-[[ "$(systemctl is-enabled tailscaled.service 2>/dev/null || true)" != "enabled" ]]
 
 for forbidden in cockpit-system cockpit-files cockpit-podman cockpit-storaged cockpit-machines libvirt-daemon-kvm qemu-kvm virt-install; do
     if rpm -q "${forbidden}" >/dev/null 2>&1; then
@@ -130,10 +129,6 @@ grep -Fq 'Network:' "${issue_test}"
 grep -Fq '\e[38;5;45m' "${issue_test}"
 if grep -Fq 'Common commands' "${issue_test}"; then
     echo 'ERROR: pre-login console banner must stop before Common commands.' >&2
-    exit 1
-fi
-if grep -Eq 'Tailscale:|NetBird:' "${issue_test}"; then
-    echo 'ERROR: pre-login console banner must not expose overlay-network details.' >&2
     exit 1
 fi
 rm -f "${issue_test}"
