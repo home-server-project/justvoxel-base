@@ -82,6 +82,39 @@ for seconds in 30 15 10 5 4 3 2 1; do
     [[ ${announcements} == *"Server shutting down in ${seconds} "* ]] || fail "missing ${seconds}-second shutdown announcement"
 done
 
+calls=''
+announcements=''
+running=yes
+podman(){
+    calls+=" podman:$*"
+    if [[ $1 == ps ]]; then
+        [[ ${running} == yes ]] && printf 'minecraft\n'
+        return 0
+    fi
+    if [[ $1 == kill && ${2:-} == --signal && ${3:-} == SIGUSR1 && ${4:-} == minecraft ]]; then
+        running=no
+        return 0
+    fi
+    if [[ $1 == exec && ${3:-} == rcon-cli && ${4:-} == list ]]; then
+        printf 'There are 1 of a max of 20 players online: Steve\n'
+        return 0
+    fi
+    if [[ $1 == exec && ${3:-} == rcon-cli ]]; then
+        announcements+="|${4:-}"
+        return 0
+    fi
+    return 1
+}
+jv_minecraft_still_running(){
+    [[ ${running} == yes ]]
+}
+JV_INTERRUPT_CONFIRMATION_MODE=confirmed JV_INTERRUPT_WARNING_SECONDS=10 jv_stop_minecraft_adaptive 'Reboot JustVoxel' || fail 'quick online-player stop failed'
+for seconds in 10 5 4 3 2 1; do
+    [[ ${announcements} == *"Server shutting down in ${seconds} "* ]] || fail "quick reboot missing ${seconds}-second shutdown announcement"
+done
+[[ ${announcements} != *'Server shutting down in 30 '* ]] || fail 'quick reboot unexpectedly used the normal 30-second warning'
+[[ ${calls} == *'podman:kill --signal SIGUSR1 minecraft'* ]] || fail 'quick reboot did not bypass remaining container shutdown delay after 10-second warning'
+
 rm -f /tmp/jv-player-required.out
 
 calls=''
