@@ -239,7 +239,7 @@ func (a *App) storageBrowserPage(w http.ResponseWriter, r *http.Request) {
 				Transport: device.Transport, ReadOnly: device.ReadOnly, System: device.System,
 			},
 			FilesystemDisplay: storageBrowserFilesystemDisplay(device.Filesystem),
-			Role: role, Mounted: len(device.Mountpoints) > 0, Formatted: device.Filesystem != "",
+			Role:              role, Mounted: len(device.Mountpoints) > 0, Formatted: device.Filesystem != "",
 			Swap:                device.Filesystem == "swap",
 			Interactive:         device.Filesystem != "swap",
 			MinecraftCandidate:  canMigrate,
