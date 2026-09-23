@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	adminSystemUpdatesPath    = "/v1/admin/system/updates"
+	adminSystemUpdatesPath      = "/v1/admin/system/updates"
 	adminSystemUpdateRebootPath = "/v1/admin/system/update-reboot"
 )
 
@@ -95,7 +95,6 @@ func decodeAdminSystemUpdateStatus(reader io.Reader, target *AdminSystemUpdateSt
 	return nil
 }
 
-
 type AdminSystemUpdateRebootOptions struct {
 	ConfirmPlayers  bool
 	BackupMinecraft bool
@@ -160,9 +159,9 @@ func (c *Client) AdminSystemUpdateReboot(ctx context.Context, session string, op
 	}
 	payload, err := json.Marshal(adminSystemUpdateRebootRequest{
 		ActionConfirmed: true,
-		ConfirmPlayers: options.ConfirmPlayers,
+		ConfirmPlayers:  options.ConfirmPlayers,
 		BackupMinecraft: options.BackupMinecraft,
-		WarningSeconds: options.WarningSeconds,
+		WarningSeconds:  options.WarningSeconds,
 	})
 	if err != nil {
 		return out, err
