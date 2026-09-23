@@ -16,7 +16,7 @@ player_names_json() {
         printf '[]'
         return
     fi
-    printf '%s\\n' "${names}" | tr ',' '\\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | jq -Rsc 'split("\n") | map(select(length > 0))'
+    printf '%s\n' "${names}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | jq -Rsc 'split("\n") | map(select(length > 0))'
 }
 
 emit_state() {
