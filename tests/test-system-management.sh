@@ -18,18 +18,31 @@ os_update="${repo_root}/mjust/libexec/os-update"
 power="${repo_root}/mjust/libexec/system-power"
 firmware="${repo_root}/mjust/libexec/firmware"
 system_actions_api="${repo_root}/mjust/libexec/system-actions-api.sh"
+system_update_api="${repo_root}/mjust/libexec/system-update-api.sh"
 system_actions_backend="${repo_root}/mjust/libexec/admin-system-actions-json"
 system_actions_agent="${repo_root}/management/cmd/justvoxel-management-agent/admin_system_actions.go"
+system_update_agent="${repo_root}/management/cmd/justvoxel-management-agent/admin_system_updates.go"
 management_main="${repo_root}/management/cmd/justvoxel-management-agent/main.go"
 menu="${repo_root}/mjust/libexec/menu"
 justfile="${repo_root}/mjust/justfile"
 service="${repo_root}/mjust/libexec/service"
 management_unit="${repo_root}/system_files/usr/lib/systemd/system/justvoxel-management.service"
 
-grep -Fq 'bootc upgrade --check' "${os_update}" || fail 'os-update must check first'
-grep -Eq '^[[:space:]]*bootc upgrade[[:space:]]*$' "${os_update}" || fail 'os-update must stage with ordinary bootc upgrade'
-if grep -Eq -- '--download-only|--apply' "${os_update}"; then fail 'os-update must not use download-only/apply'; fi
-grep -Fq 'does not reboot the appliance' "${os_update}" || fail 'os-update must state non-disruptive behavior'
+grep -Fq 'system-update-api.sh' "${os_status}" || fail 'os-status must use the System Update API helper'
+grep -Fq 'jv_system_update_get' "${os_status}" || fail 'os-status must read status through the Management API'
+grep -Fq 'system-update-api.sh' "${os_update}" || fail 'os-update must use the System Update API helper'
+grep -Fq 'jv_system_update_apply' "${os_update}" || fail 'os-update must update through the Management API'
+for frontend in "${os_status}" "${os_update}"; do
+    if grep -Fq 'bootc ' "${frontend}"; then fail 'OS update frontend must not execute bootc directly'; fi
+    if grep -Fq 'os-common.sh' "${frontend}"; then fail 'OS update frontend must not parse bootc state directly'; fi
+done
+grep -Fq '"${JV_SYSTEM_UPDATE_API_CLIENT}" GET /v1/admin/system/updates' "${system_update_api}" || fail 'System Update frontend status endpoint missing'
+grep -Fq '"${JV_SYSTEM_UPDATE_API_CLIENT}" POST /v1/admin/system/updates' "${system_update_api}" || fail 'System Update frontend update endpoint missing'
+grep -Fq 'GET /v1/admin/system/updates' "${system_update_agent}" || fail 'System Update status route missing'
+grep -Fq 'POST /v1/admin/system/updates' "${system_update_agent}" || fail 'System Update apply route missing'
+grep -Fq 'exec.CommandContext(ctx, "bootc", "status", "--json", "--format-version=1")' "${system_update_agent}" || fail 'System Update backend bootc status command missing'
+grep -Fq 'exec.CommandContext(ctx, "bootc", "upgrade")' "${system_update_agent}" || fail 'System Update backend ordinary bootc upgrade command missing'
+if grep -Eq -- '--check|--download-only|--from-downloaded|--apply' "${system_update_agent}"; then fail 'System Update backend contains an unwanted bootc pre-check/apply mode'; fi
 grep -Fq 'JustVoxel operating system' "${os_status}" || fail 'OS status summary missing'
 
 grep -Fq 'ProtectSystem=true' "${management_unit}" || fail 'management service must keep /etc writable for PAM system password changes'
@@ -63,7 +76,8 @@ grep -Fq 'POST /v1/admin/system/reboot' "${system_actions_agent}" || fail 'Syste
 grep -Fq 'POST /v1/admin/system/poweroff' "${system_actions_agent}" || fail 'System poweroff API route missing'
 grep -Fq 'POST /v1/admin/system/firmware-reboot' "${system_actions_agent}" || fail 'Firmware reboot API route missing'
 grep -Fq 'registerAdminSystemActionRoutes(mux, s)' "${management_main}" || fail 'System Actions routes are not registered'
-grep -Fq 'WriteTimeout:      210 * time.Second' "${management_main}" || fail 'Management API write timeout is too short for player countdown actions'
+grep -Fq 'registerAdminSystemUpdateRoutes(mux, s)' "${management_main}" || fail 'System Update routes are not registered'
+grep -Fq 'WriteTimeout:      20 * time.Minute' "${management_main}" || fail 'Management API write timeout is too short for system update pulls'
 
 grep -Fq '"${JV_SYSTEM_ACTIONS_API_CLIENT}" GET /v1/admin/system/actions' "${system_actions_api}" || fail 'System Actions frontend status endpoint missing'
 grep -Fq 'POST "/v1/admin/system/${action}" --data' "${system_actions_api}" || fail 'System Actions frontend apply endpoint missing'
@@ -88,7 +102,7 @@ done
 
 grep -Fq 'system)' "${menu}" || fail 'System menu dispatch missing'
 grep -Fq "'System status & updates'" "${menu}" || fail 'combined System status/update entry missing'
-grep -Fq "jui_choose 'System status & updates' 'Check for updates' 'Back'" "${menu}" || fail 'combined System status/update submenu missing'
+grep -Fq "jui_choose 'System status & updates' 'Update system' 'Back'" "${menu}" || fail 'combined System status/update submenu missing'
 grep -Fq '/usr/bin/mjust os-status' "${menu}" || fail 'combined System view does not show OS status'
 grep -Fq '/usr/bin/mjust os-update' "${menu}" || fail 'combined System view does not expose update check'
 if grep -Fq "'Operating system status'" "${menu}" || grep -Fq "'Check / download OS update'" "${menu}"; then

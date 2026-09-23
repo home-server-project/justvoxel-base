@@ -60,6 +60,8 @@ type server struct {
 	store      *webUIStore
 	operations *operationStore
 
+	systemUpdateMu sync.Mutex
+
 	mu       sync.Mutex
 	sessions map[string]session
 	failures []time.Time
@@ -207,12 +209,13 @@ func serve(socket string) error {
 	registerOperationalRoutes(mux, s)
 	registerMinecraftRoutes(mux, s)
 	registerAdminSystemActionRoutes(mux, s)
+	registerAdminSystemUpdateRoutes(mux, s)
 
 	httpServer := &http.Server{
 		Handler:           s.requirePeer(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      210 * time.Second,
+		WriteTimeout:      20 * time.Minute,
 		IdleTimeout:       60 * time.Second,
 		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
 			uid, err := peerUID(c)

@@ -2,16 +2,16 @@
 
 JustVoxel keeps operating-system maintenance separate from Minecraft/container maintenance.
 
-Reboot, poweroff, and firmware/UEFI reboot use the same Management API architecture as other migrated appliance controls:
+Operating-system status/update plus reboot, poweroff, and firmware/UEFI reboot use the same Management API architecture as other migrated appliance controls:
 
-`mJust / WebUI -> Management API -> Management Agent -> system action backend`
+`mJust / WebUI -> Management API -> Management Agent -> bootc / system action backend`
 
-The terminal commands and WebUI power control are presentation/confirmation frontends. Host power control, firmware capability checks, player-safety decisions, and final systemd actions are owned behind the Management API.
+For OS maintenance, mJust is now a thin API frontend. The Management Agent owns bootc status collection and `bootc upgrade`. WebUI integration for OS updates is a separate later stage. Host power control, firmware capability checks, player-safety decisions, and final systemd actions remain owned behind the Management API.
 
 ## Commands
 
 - `mjust os-status` — friendly bootc deployment status
-- `mjust os-update` — check for a newer OS image and optionally download/stage it
+- `mjust os-update` — run the JustVoxel OS update through the Management API; a newer image is pulled/staged when available
 - `mjust resources` — open the live btop system resource monitor
 - `mjust reboot` — player-aware graceful reboot
 - `mjust poweroff` — player-aware graceful power off
@@ -21,17 +21,17 @@ All commands are also reachable from `mjust` -> **System**.
 
 ## OS status
 
-`mjust os-status` reads `bootc status --json --format-version=1` and translates bootc deployment state into Running image, Staged update, and Rollback image.
+`mjust os-status` is a thin Management API client. The Management Agent runs `bootc status --json --format-version=1` and returns Running image, Staged update, Rollback image, read-only state, and whether a reboot is required.
 
-The command is read-only.
+The command is read-only and does not execute bootc directly.
 
 ## OS update
 
-`mjust os-update` first runs `bootc upgrade --check` so the available update metadata is refreshed even when another deployment is already staged.
+`mjust os-update` is a thin Management API client. The Management Agent runs ordinary `bootc upgrade` directly; there is no separate pre-check step.
 
-When a newer image is available, the administrator is asked whether to download and stage it. Approval runs ordinary `bootc upgrade`.
+If a newer image exists, bootc pulls and stages it. If the running image is already current, the command simply reports that state.
 
-Downloading/staging an OS image does not reboot the host, stop Minecraft, query players, or create a Minecraft backup. The running system continues unchanged. The staged deployment is used after the next normal reboot.
+Running the OS update does not reboot the host, stop Minecraft, query players, or create a Minecraft backup. The running system continues unchanged. A staged deployment is used after the next normal reboot.
 
 There is intentionally no separate `mjust os-apply` command. Reboot is the normal bootc apply boundary.
 
@@ -39,7 +39,7 @@ There is intentionally no separate `mjust os-apply` command. Reboot is the norma
 
 JustVoxel disables rpm-ostree package layering by default through `/etc/rpm-ostreed.conf` with `LockLayering=true`. This keeps deployed systems aligned with the tested appliance image instead of allowing local package overlays, package overrides, or other mutations of the base OSTree deployment.
 
-This does not disable JustVoxel system updates. `mjust os-update` and `bootc upgrade` continue to check, download, and stage newer JustVoxel images normally.
+This does not disable JustVoxel system updates. `mjust os-update` and `bootc upgrade` continue to pull and stage newer JustVoxel images normally.
 
 An administrator with root access can deliberately override the policy when local layering is required by changing `LockLayering=false` in `/etc/rpm-ostreed.conf` and running `sudo rpm-ostree reload`. A system with local layering enabled is a locally customized deployment rather than the default JustVoxel appliance state.
 

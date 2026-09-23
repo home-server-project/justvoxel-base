@@ -177,14 +177,16 @@ JustVoxel keeps operating-system maintenance separate from Minecraft container m
 The current system-management commands are:
 
 - `mjust os-status` — friendly bootc deployment status
-- `mjust os-update` — check for a newer JustVoxel OS image and optionally download/stage it
+- `mjust os-update` — run the JustVoxel OS update through the Management API; a newer image is pulled/staged when available
 - `mjust resources` — open the live btop resource monitor
 - `mjust net` — open the System → Network chooser for nm-hsp or nmtui
 - `mjust reboot` — player-aware graceful reboot
 - `mjust poweroff` — player-aware graceful power off
 - `mjust firmware` — reboot into firmware/UEFI setup when supported on physical hardware
 
-Checking or downloading a bootc OS update does not stop Minecraft, create a backup, or reboot the appliance. The staged deployment is used on the next normal reboot.
+`mjust os-status` and `mjust os-update` are thin Management API frontends. The Management Agent owns `bootc status` and ordinary `bootc upgrade`; mJust does not execute bootc directly for these workflows.
+
+Running a bootc OS update does not stop Minecraft, create a backup, or reboot the appliance. A staged deployment is used on the next normal reboot.
 
 `mjust net` keeps networking inside the System area. It presents **nm-hsp** as the friendly Home Server Project interface for normal Ethernet, Wi-Fi, and easy network troubleshooting, while retaining **nmtui** as the classic advanced NetworkManager interface. No separate `mjust net-hsp` or `mjust nmtui` commands are exposed.
 

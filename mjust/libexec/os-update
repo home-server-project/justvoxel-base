@@ -1,102 +1,24 @@
 #!/usr/bin/bash
 set -euo pipefail
 source /usr/libexec/justvoxel/mjust/common.sh
-source /usr/libexec/justvoxel/mjust/os-common.sh
+source /usr/libexec/justvoxel/mjust/system-update-api.sh
 require_root
 
-confirm_default_yes() {
-    local prompt="$1" answer
-    read -r -p "${prompt} [Y/n]: " answer
-    [[ -z ${answer} || ${answer,,} == y || ${answer,,} == yes ]]
-}
-
-before="$(jv_bootc_status_json 2>/dev/null || true)"
-if [[ -z ${before} ]] || ! jv_bootc_validate_status_json "${before}"; then
-    echo 'ERROR: could not read bootc deployment status.' >&2
-    exit 1
-fi
-if [[ $(jv_bootc_read_only "${before}") == true ]]; then
-    echo 'ERROR: this bootc system is read-only; OS updates are unavailable.' >&2
+echo 'Updating JustVoxel OS...'
+response="$(jv_system_update_apply)"
+if ! jq -e 'type == "object" and (.ok == true) and (.running | type == "object") and (.reboot_required | type == "boolean")' <<<"${response}" >/dev/null 2>&1; then
+    echo 'ERROR: JustVoxel Management API returned invalid system update information.' >&2
     exit 1
 fi
 
-booted_digest="$(jv_bootc_entry_digest "${before}" booted)"
-[[ -n ${booted_digest} ]] || {
-    echo 'ERROR: could not determine the running bootc image digest.' >&2
-    exit 1
-}
+message="$(jq -r '.message // empty' <<<"${response}")"
+[[ -n ${message} ]] && echo "${message}"
 
-echo 'Checking for JustVoxel OS updates...'
-bootc upgrade --check
-
-after_check="$(jv_bootc_status_json 2>/dev/null || true)"
-if [[ -z ${after_check} ]] || ! jv_bootc_validate_status_json "${after_check}"; then
-    echo 'ERROR: bootc update check completed but deployment status could not be read.' >&2
-    exit 1
-fi
-
-cached_digest="$(jv_bootc_cached_digest "${after_check}")"
-cached_version="$(jv_bootc_cached_version "${after_check}")"
-cached_ref="$(jv_bootc_cached_ref "${after_check}")"
-staged_digest="$(jv_bootc_entry_digest "${after_check}" staged)"
-staged_version="$(jv_bootc_entry_version "${after_check}" staged)"
-
-if [[ -z ${cached_digest} || ${cached_digest} == "${booted_digest}" ]]; then
-    echo
-    echo 'JustVoxel OS is current according to the latest bootc check.'
-    if [[ -n ${staged_digest} && ${staged_digest} != "${booted_digest}" ]]; then
-        echo "A previously staged OS update remains ready for reboot${staged_version:+: ${staged_version}}."
-    fi
-    exit 0
-fi
-
-if [[ -n ${staged_digest} && ${staged_digest} == "${cached_digest}" ]]; then
-    echo
-    echo 'The newest available JustVoxel OS update is already staged.'
-    [[ -n ${cached_version} ]] && echo "Version: ${cached_version}"
-    echo "Digest:  ${cached_digest}"
-    echo 'Reboot whenever convenient to use the staged deployment.'
-    exit 0
-fi
-
-echo
-echo 'JustVoxel OS update available'
-[[ -n ${cached_ref} ]] && echo "Image:   ${cached_ref}"
-[[ -n ${cached_version} ]] && echo "Version: ${cached_version}"
-echo "Digest:  ${cached_digest}"
-if [[ -n ${staged_digest} && ${staged_digest} != "${cached_digest}" ]]; then
-    echo
-    echo 'A different/older OS update is already staged.'
+if [[ $(jq -r '.reboot_required' <<<"${response}") == true ]]; then
+    staged_version="$(jq -r '.staged.version // empty' <<<"${response}")"
+    staged_digest="$(jq -r '.staged.digest // empty' <<<"${response}")"
     [[ -n ${staged_version} ]] && echo "Staged version: ${staged_version}"
-    echo "Staged digest:  ${staged_digest}"
+    [[ -n ${staged_digest} ]] && echo "Staged digest:  ${staged_digest}"
+    echo 'Minecraft continues running normally.'
+    echo 'The staged OS deployment will be used after the next reboot.'
 fi
-
-echo
-echo 'Downloading/staging the OS update does not reboot the appliance,'
-echo 'stop Minecraft, query players, or create a Minecraft backup.'
-if ! confirm_default_yes 'Download and stage this JustVoxel OS update?'; then
-    echo 'OS update download cancelled.'
-    exit 0
-fi
-
-bootc upgrade
-
-after_upgrade="$(jv_bootc_status_json 2>/dev/null || true)"
-if [[ -z ${after_upgrade} ]] || ! jv_bootc_validate_status_json "${after_upgrade}"; then
-    echo 'ERROR: bootc upgrade completed but deployment status could not be verified.' >&2
-    exit 1
-fi
-
-new_staged_digest="$(jv_bootc_entry_digest "${after_upgrade}" staged)"
-new_staged_version="$(jv_bootc_entry_version "${after_upgrade}" staged)"
-if [[ -z ${new_staged_digest} || ${new_staged_digest} == "${booted_digest}" ]]; then
-    echo 'ERROR: no newer staged bootc deployment is visible after the upgrade.' >&2
-    exit 1
-fi
-
-echo
-echo 'JustVoxel OS update downloaded and staged successfully.'
-[[ -n ${new_staged_version} ]] && echo "Staged version: ${new_staged_version}"
-echo "Staged digest:  ${new_staged_digest}"
-echo 'Minecraft continues running normally.'
-echo 'The staged OS deployment will be used after the next reboot.'
