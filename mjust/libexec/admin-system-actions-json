@@ -183,6 +183,7 @@ case "${1:-}" in
         ;;
     apply)
         [[ $# -ge 2 && $# -le 5 ]] || { echo 'Usage: admin-system-actions-json apply ACTION [--confirm-players] [--backup-minecraft] [--warning-seconds=10|60]' >&2; exit 2; }
+        action="$2"
         confirm_players=no
         backup_minecraft=no
         warning_seconds=60
