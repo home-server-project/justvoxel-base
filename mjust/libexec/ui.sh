@@ -46,23 +46,63 @@ jui_backend() {
     fi
 }
 
+jui_menu_backend() {
+    if ! jui_has_tty; then
+        printf 'none'
+    elif command -v fzf >/dev/null 2>&1; then
+        printf 'fzf'
+    elif command -v gum >/dev/null 2>&1; then
+        printf 'gum'
+    else
+        printf 'bash'
+    fi
+}
+
+jui_menu_profile() {
+    local cols="$1"
+    if (( cols >= 110 )); then
+        printf 'wide'
+    elif (( cols >= 80 )); then
+        printf 'standard'
+    else
+        printf 'narrow'
+    fi
+}
+
+jui_menu_gap_enabled() {
+    local lines="$1" item_count="$2"
+    (( item_count > 0 && lines >= (item_count * 2 + 4) ))
+}
+
 jui_choose() {
     local prompt="$1"
     shift
     local -a options=("$@")
-    local backend selected index choice
+    local -a fzf_args
+    local backend selected index choice lines item_count
 
     (( ${#options[@]} > 0 )) || return 2
-    backend="$(jui_backend)"
+    backend="$(jui_menu_backend)"
 
     case "${backend}" in
+        fzf)
+            lines="$(jui_terminal_lines)"
+            item_count="${#options[@]}"
+            fzf_args=(
+                --height=100%
+                --layout=reverse
+                --border
+                --info=hidden
+                --prompt="${prompt} > "
+                --no-multi
+            )
+            if jui_menu_gap_enabled "${lines}" "${item_count}"; then
+                fzf_args+=(--gap=1)
+            fi
+            printf '%s\n' "${options[@]}" | fzf "${fzf_args[@]}"
+            ;;
         gum)
             gum choose --header "${prompt}" "${options[@]}" </dev/tty
-            ;;
-        fzf)
-            printf '%s\n' "${options[@]}" \
-                | fzf --height='~45%' --layout=reverse --border \
-                    --prompt="${prompt} > " --no-multi
             ;;
         bash)
             printf '%s\n' "${prompt}" >/dev/tty
