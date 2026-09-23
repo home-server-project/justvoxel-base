@@ -82,8 +82,8 @@ type storageBrowserDiskView struct {
 	Path               string
 	Size               string
 	Model              string
-	Transport           string
-	System              bool
+	Transport          string
+	System             bool
 	MinecraftWholeDisk bool
 	Partitions         []storageBrowserPartitionView
 }
