@@ -210,6 +210,7 @@ func serve(socket string) error {
 	registerMinecraftRoutes(mux, s)
 	registerAdminSystemActionRoutes(mux, s)
 	registerAdminSystemUpdateRoutes(mux, s)
+	registerAdminSystemUpdateRebootRoutes(mux, s)
 
 	httpServer := &http.Server{
 		Handler:           s.requirePeer(mux),
