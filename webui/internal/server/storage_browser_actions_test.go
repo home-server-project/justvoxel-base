@@ -258,6 +258,16 @@ func TestStorageBrowserPermanentMountRejectsOperatorAndBadCSRF(t *testing.T) {
 	}
 }
 
+func TestStorageBrowserHiddenStateOverridesComponentDisplayRules(t *testing.T) {
+	css, err := assets.ReadFile("static/storage-browser.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(css), ".storage-browser-shell [hidden]{display:none!important}") {
+		t.Fatal("storage browser hidden state can be overridden by component display rules")
+	}
+}
+
 func TestStorageBrowserMountUXUsesHumanWording(t *testing.T) {
 	js, err := assets.ReadFile("static/storage-browser.js")
 	if err != nil {
