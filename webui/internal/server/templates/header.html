@@ -125,6 +125,35 @@
         </div>
         <p class="system-update-state" data-system-update-state>Loading system update status…</p>
         <p class="system-update-error" data-system-update-error hidden></p>
+
+        <section class="system-update-reboot-panel" data-system-update-reboot hidden>
+          <div class="system-update-reboot-heading">
+            <strong>Reboot to apply update</strong>
+            <small>Minecraft is stopped through the normal player-aware shutdown path.</small>
+          </div>
+
+          <label class="system-update-option">
+            <input type="checkbox" data-system-update-backup>
+            <span><strong>Back up Minecraft before reboot</strong><small>Optional cold backup. Reboot is cancelled if the backup fails.</small></span>
+          </label>
+
+          <label class="system-update-option">
+            <input type="checkbox" data-system-update-quick>
+            <span><strong>Quick reboot</strong><small>Use a 10-second player warning instead of the normal 60 seconds.</small></span>
+          </label>
+
+          <p class="system-update-warning" data-system-update-warning>Player warning: 60 seconds</p>
+          <div class="system-update-reboot-players" data-system-update-reboot-players hidden></div>
+          <div class="system-update-reboot-progress" data-system-update-reboot-progress hidden>
+            <strong data-system-update-countdown></strong>
+            <span data-system-update-reboot-message></span>
+          </div>
+
+          <div class="system-update-reboot-action">
+            <button type="button" data-system-update-reboot-button>Reboot</button>
+          </div>
+        </section>
+
         <div class="system-update-actions">
           <button type="button" data-system-update-button disabled>Update system</button>
         </div>
