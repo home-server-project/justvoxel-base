@@ -103,7 +103,7 @@ podman(){
     return 1
 }
 jv_prepare_minecraft_for_host_shutdown || fail 'zero-player host-shutdown preparation failed'
-[[ ${calls} == *'timeout:5s podman exec minecraft rcon-cli list'* ]] || fail 'host-shutdown preparation did not bound the RCON query'
+grep -Fq "timeout 5s podman exec minecraft rcon-cli 'list'" "${repo_root}/mjust/libexec/interrupt-safety.sh" || fail 'host-shutdown preparation did not bound the RCON query'
 [[ ${calls} == *'podman:kill --signal SIGUSR1 minecraft'* ]] || fail 'zero-player host shutdown did not bypass the announcement delay'
 
 calls=''
