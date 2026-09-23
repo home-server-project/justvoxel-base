@@ -237,7 +237,7 @@ func TestStorageBrowserInteractionContract(t *testing.T) {
 	for _, want := range []string{
 		`detailDialog.showModal()`,
 		`detailClose?.addEventListener("click"`,
-		`event.preventDefault()`,
+		`detailDialog?.addEventListener("cancel", closeActionMenu)`,
 		`button.setAttribute("aria-pressed"`,
 	} {
 		if !strings.Contains(script, want) {

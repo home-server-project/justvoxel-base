@@ -7,7 +7,7 @@
   {{if .Error}}<div class="notice error"><strong>Migration cannot continue.</strong><br>{{.Error}}</div>{{end}}
   <div class="notice warning"><strong>This is an appliance-level data migration.</strong><br>Review the exact target before starting. JustVoxel keeps the old Minecraft data after a successful migration until you verify normal gameplay and backups.</div>
 
-  <section class="panel details provision-choice">
+  <section class="panel details provision-choice" id="dedicated-disk">
     <div class="section-heading"><div><p class="eyebrow">Option 1</p><h2>Dedicated disk or USB drive</h2></div><span class="badge">Entire disk</span></div>
     <p>Use a safe whole disk discovered by the Management Agent. The selected disk will be erased and provisioned as XFS only after the exact Agent-provided confirmation phrase.</p>
     {{if .WholeDisks}}
