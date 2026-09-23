@@ -1,0 +1,28 @@
+name: Validate filesystem WebUI Step 3
+
+on:
+  pull_request:
+    branches: [testing]
+    paths:
+      - '.github/workflows/validate-filesystem-webui-step3.yml'
+
+jobs:
+  javascript:
+    name: Portable filesystem WebUI JavaScript
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout validation branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Validate storage browser JavaScript
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check webui/internal/server/static/storage-browser.js
+          grep -Fq '["xfs", "ext4", "btrfs", "ntfs", "vfat", "exfat"]' webui/internal/server/static/storage-browser.js
+          grep -Fq 'showStorageAction("format", managedLinux)' webui/internal/server/static/storage-browser.js
+          grep -Fq 'FAT / FAT32' webui/internal/server/static/storage-browser.js
+          grep -Fq 'exFAT' webui/internal/server/static/storage-browser.js
+          grep -Fq 'NTFS' webui/internal/server/static/storage-browser.js
