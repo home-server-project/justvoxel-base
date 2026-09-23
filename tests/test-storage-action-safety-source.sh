@@ -7,11 +7,45 @@ discovery="${repo_root}/mjust/libexec/admin-discovery-json"
 common="${repo_root}/mjust/libexec/admin-storage-actions-common.sh"
 planner="${repo_root}/mjust/libexec/admin-storage-actions-json"
 apply="${repo_root}/mjust/libexec/admin-storage-actions-apply.sh"
+provision="${repo_root}/mjust/libexec/admin-storage-provision-json"
+migration_transaction="${repo_root}/mjust/libexec/admin-data-migration-transaction-json"
 
-for script in "${base}" "${discovery}" "${common}" "${planner}" "${apply}"; do
+for script in "${base}" "${discovery}" "${common}" "${planner}" "${apply}" "${provision}" "${migration_transaction}"; do
     bash -n "${script}"
 done
 
+grep -Fq 'storage_mountpoint_is_system' "${base}" || {
+    echo 'ERROR: shared system-mount classification is missing.' >&2
+    exit 1
+}
+grep -Fq 'startsWith("/sysroot/")' "${base}" && {
+    echo 'ERROR: invalid jq spelling in system-mount detection.' >&2
+    exit 1
+}
+grep -Fq 'startswith("/sysroot/")' "${base}" || {
+    echo 'ERROR: bootc/OSTree /sysroot mount detection is missing.' >&2
+    exit 1
+}
+grep -Fq 'storage_create_partition' "${base}" || {
+    echo 'ERROR: shared partition creation helper is missing.' >&2
+    exit 1
+}
+grep -Fq 'mkpart justvoxel' "${base}" || {
+    echo 'ERROR: GPT partition creation no longer uses a GPT partition name.' >&2
+    exit 1
+}
+if grep -Fq 'mkpart primary xfs' "${base}" "${provision}" "${migration_transaction}"; then
+    echo 'ERROR: invalid duplicated mkpart primary xfs command remains.' >&2
+    exit 1
+fi
+grep -Fq 'storage_create_partition "${DEVICE}"' "${provision}" || {
+    echo 'ERROR: backup provisioning does not use shared partition creation.' >&2
+    exit 1
+}
+grep -Fq 'storage_create_partition "${device}"' "${migration_transaction}" || {
+    echo 'ERROR: Minecraft migration does not use shared partition creation.' >&2
+    exit 1
+}
 grep -Fq 'storage_target_block_device' "${base}" || {
     echo 'ERROR: system-disk detection lost bootc/OSTree block-device resolution.' >&2
     exit 1

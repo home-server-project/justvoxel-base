@@ -253,7 +253,7 @@ case "${operation}" in
         ! storage_has_mounted_children "${device}"
         wipefs -a -- "${device}" >/dev/null 2>&1
         parted -s -a optimal -- "${device}" mklabel gpt >/dev/null 2>&1
-        parted -s -a optimal -- "${device}" mkpart primary xfs 1MiB 100% >/dev/null 2>&1
+        storage_create_partition "${device}" 1MiB 100% >/dev/null 2>&1
         partprobe "${device}" >/dev/null 2>&1
         udevadm settle >/dev/null 2>&1
         target_partition="$(lsblk -nrpo NAME,TYPE "${device}" | awk '$2 == "part" {print $1; exit}')"
@@ -292,7 +292,7 @@ case "${operation}" in
         before="$(mktemp)"
         after="$(mktemp)"
         lsblk -nrpo NAME,TYPE "${device}" | awk '$2 == "part" {print $1}' | sort > "${before}"
-        parted -s -a optimal -- "${device}" mkpart primary xfs "${free_start}" "${planned_end}" >/dev/null 2>&1
+        storage_create_partition "${device}" "${free_start}" "${planned_end}" >/dev/null 2>&1
         partprobe "${device}" >/dev/null 2>&1
         udevadm settle >/dev/null 2>&1
         lsblk -nrpo NAME,TYPE "${device}" | awk '$2 == "part" {print $1}' | sort > "${after}"

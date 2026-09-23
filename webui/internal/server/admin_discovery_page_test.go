@@ -148,7 +148,6 @@ func TestStorageSettingsShowsHumanReadableInventory(t *testing.T) {
 	client.configuration.Configured = true
 	client.configuration.Minecraft.DataPath = "/var/lib/justvoxel/minecraft"
 	client.configuration.Backup.Path = "/var/mnt/backup/justvoxel"
-	client.storage.SystemDisks = []string{"/dev/vda"}
 	client.storage.Devices = []api.AdminStorageDevice{{
 		Name: "vdb1", Path: "/dev/vdb1", Type: "part", SizeBytes: 1073741824,
 		Filesystem: "xfs", Label: "BACKUP", UUID: "uuid-123", Mountpoints: []string{"/var/mnt/backup"},
@@ -202,7 +201,7 @@ func TestNewStorageBrowserGroupsDisksAndPartitions(t *testing.T) {
 	client.storage.SystemDisks = []string{"/dev/vda"}
 	client.storage.Devices = []api.AdminStorageDevice{
 		{Name: "zram0", Path: "/dev/zram0", Type: "disk", SizeBytes: 4 * 1024 * 1024 * 1024},
-		{Name: "vda", Path: "/dev/vda", Type: "disk", SizeBytes: 100 * 1024 * 1024 * 1024, Model: "System Disk", Transport: "virtio", System: true},
+		{Name: "vda", Path: "/dev/vda", Type: "disk", SizeBytes: 100 * 1024 * 1024 * 1024, Model: "System Disk", Transport: "virtio"},
 		{Name: "vda1", Path: "/dev/vda1", Parent: "vda", Type: "part", SizeBytes: 1024 * 1024 * 1024, Filesystem: "xfs", UUID: "system-uuid", Mountpoints: []string{"/var/lib/containers/storage/overlay", "/var", "/sysroot/ostree/deploy/default/var"}},
 		{Name: "vda2", Path: "/dev/vda2", Parent: "vda", Type: "part", SizeBytes: 8 * 1024 * 1024 * 1024, Filesystem: "swap", UUID: "swap-uuid"},
 		{Name: "vdb", Path: "/dev/vdb", Type: "disk", SizeBytes: 500 * 1024 * 1024 * 1024, Model: "Data Disk", Transport: "virtio"},
@@ -322,7 +321,9 @@ func TestNewStorageUsesAgentApprovedMinecraftMigrationCandidates(t *testing.T) {
 		"Use for Minecraft data",
 		`action="/settings/data-migration/review"`,
 		`name="operation" value="use_partition"`,
-		`href="/settings/data-migration#dedicated-disk"`,
+		`data-storage-whole-purpose="minecraft"`,
+		`data-storage-whole-purpose="backups"`,
+		`data-storage-whole-device="/dev/vdc"`,
 		"Prepare for backups",
 		"Nothing is erased until Review and the exact confirmation step.",
 		"Review migration",
@@ -343,7 +344,7 @@ func TestStorageBrowserRoleClassification(t *testing.T) {
 		want   string
 	}{
 		{name: "swap", device: api.AdminStorageDevice{Filesystem: "swap"}, want: "Swap"},
-		{name: "system", device: api.AdminStorageDevice{System: true, Filesystem: "xfs"}, want: "System"},
+		{name: "system", device: api.AdminStorageDevice{System: true, Filesystem: "xfs"}, want: "System partition"},
 		{name: "minecraft", device: api.AdminStorageDevice{Filesystem: "xfs", UUID: "minecraft-uuid"}, want: "Minecraft"},
 		{name: "backup", device: api.AdminStorageDevice{Filesystem: "xfs", UUID: "backup-uuid"}, want: "Backups"},
 		{name: "blank", device: api.AdminStorageDevice{}, want: "Not formatted"},

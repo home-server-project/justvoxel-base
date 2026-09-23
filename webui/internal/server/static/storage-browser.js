@@ -11,6 +11,29 @@
   const migrateButton = detailDialog?.querySelector("[data-storage-minecraft-migrate]");
   const csrf = document.querySelector("[data-storage-action-csrf]")?.value || "";
 
+  const wholeDiskButtons = [...document.querySelectorAll("[data-storage-whole-disk]")];
+  const wholeDiskDialog = document.querySelector("[data-storage-whole-disk-dialog]");
+  const wholeDiskClose = wholeDiskDialog?.querySelector("[data-storage-whole-close]");
+  const wholeDiskCancel = wholeDiskDialog?.querySelector("[data-storage-whole-cancel]");
+  const wholeDiskTitle = wholeDiskDialog?.querySelector("[data-storage-whole-title]");
+  const wholeDiskDescription = wholeDiskDialog?.querySelector("[data-storage-whole-description]");
+  const wholeDiskDevice = wholeDiskDialog?.querySelector("[data-storage-whole-device-label]");
+  const wholeDiskSize = wholeDiskDialog?.querySelector("[data-storage-whole-size-label]");
+  const wholeDiskPlanRow = wholeDiskDialog?.querySelector("[data-storage-whole-plan-row]");
+  const wholeDiskAfter = wholeDiskDialog?.querySelector("[data-storage-whole-after]");
+  const wholeDiskMountRow = wholeDiskDialog?.querySelector("[data-storage-whole-mount-row]");
+  const wholeDiskMount = wholeDiskDialog?.querySelector("[data-storage-whole-mount]");
+  const wholeDiskWarnings = wholeDiskDialog?.querySelector("[data-storage-whole-warnings]");
+  const wholeDiskPlayersField = wholeDiskDialog?.querySelector("[data-storage-whole-players-field]");
+  const wholeDiskPlayers = wholeDiskDialog?.querySelector("[data-storage-whole-players]");
+  const wholeDiskPlayersNote = wholeDiskDialog?.querySelector("[data-storage-whole-players-note]");
+  const wholeDiskConfirmationField = wholeDiskDialog?.querySelector("[data-storage-whole-confirmation-field]");
+  const wholeDiskConfirmationPhrase = wholeDiskDialog?.querySelector("[data-storage-whole-confirmation-phrase]");
+  const wholeDiskConfirmation = wholeDiskDialog?.querySelector("[data-storage-whole-confirmation]");
+  const wholeDiskError = wholeDiskDialog?.querySelector("[data-storage-whole-error]");
+  const wholeDiskReview = wholeDiskDialog?.querySelector("[data-storage-whole-review]");
+  const wholeDiskApply = wholeDiskDialog?.querySelector("[data-storage-whole-apply]");
+
   const migrationDialog = document.querySelector("[data-storage-minecraft-dialog]");
   const migrationClose = migrationDialog?.querySelector("[data-storage-minecraft-close]");
   const migrationCancel = migrationDialog?.querySelector("[data-storage-minecraft-cancel]");
@@ -65,6 +88,8 @@
   let selectedMountStatus = null;
   let selectedAction = "";
   let reviewedPlan = null;
+  let selectedWholeDisk = null;
+  let reviewedWholeDisk = null;
 
   function closeActionMenu() {
     if (actionMenu) actionMenu.open = false;
@@ -221,8 +246,8 @@
       if (detail.readonly) detail.readonly.textContent = data.readonly || "No";
       setOptional(detail.labelRow, detail.label, data.label);
       setOptional(detail.uuidRow, detail.uuid, data.uuid);
-      if (detail.mountLabel) detail.mountLabel.textContent = data.system === "Yes" ? "Storage" : "Mounted at";
-      setOptional(detail.mountRow, detail.mount, data.system === "Yes" ? "System partition" : data.mountpoints);
+      if (detail.mountLabel) detail.mountLabel.textContent = "Mounted at";
+      setOptional(detail.mountRow, detail.mount, data.system === "Yes" ? "" : data.mountpoints);
       configurePartitionActions(selectedPartition, null);
       detailDialog.showModal();
       detailClose?.focus();
@@ -241,6 +266,143 @@
   document.addEventListener("pointerdown", (event) => {
     if (!actionMenu?.open) return;
     if (!actionMenu.contains(event.target)) closeActionMenu();
+  });
+
+  function renderWholeDiskWarnings(warnings) {
+    if (!wholeDiskWarnings) return;
+    wholeDiskWarnings.replaceChildren();
+    (warnings || []).forEach((message) => {
+      const notice = document.createElement("div");
+      notice.className = "notice warning";
+      notice.textContent = message;
+      wholeDiskWarnings.appendChild(notice);
+    });
+  }
+
+  function resetWholeDiskDialog(button) {
+    selectedWholeDisk = {
+      purpose: button.dataset.storageWholePurpose || "",
+      device: button.dataset.storageWholeDevice || "",
+      size: button.dataset.storageWholeSize || "",
+    };
+    reviewedWholeDisk = null;
+    const minecraft = selectedWholeDisk.purpose === "minecraft";
+    if (wholeDiskTitle) wholeDiskTitle.textContent = minecraft ? "Use this disk for Minecraft data" : "Use this disk for backups";
+    if (wholeDiskDescription) {
+      wholeDiskDescription.textContent = minecraft
+        ? "JustVoxel will review this whole disk, then safely migrate Minecraft data onto a new XFS filesystem."
+        : "JustVoxel will review this whole disk, then create and activate a new XFS backup filesystem.";
+    }
+    if (wholeDiskDevice) wholeDiskDevice.textContent = selectedWholeDisk.device;
+    if (wholeDiskSize) wholeDiskSize.textContent = selectedWholeDisk.size;
+    if (wholeDiskPlanRow) wholeDiskPlanRow.hidden = true;
+    if (wholeDiskMountRow) wholeDiskMountRow.hidden = true;
+    renderWholeDiskWarnings([]);
+    if (wholeDiskPlayersField) wholeDiskPlayersField.hidden = true;
+    if (wholeDiskPlayers) wholeDiskPlayers.checked = false;
+    if (wholeDiskPlayersNote) wholeDiskPlayersNote.textContent = "";
+    if (wholeDiskConfirmationField) wholeDiskConfirmationField.hidden = true;
+    if (wholeDiskConfirmationPhrase) wholeDiskConfirmationPhrase.textContent = "";
+    if (wholeDiskConfirmation) wholeDiskConfirmation.value = "";
+    if (wholeDiskError) { wholeDiskError.hidden = true; wholeDiskError.textContent = ""; }
+    if (wholeDiskReview) { wholeDiskReview.hidden = false; wholeDiskReview.disabled = false; wholeDiskReview.textContent = "Review action"; }
+    if (wholeDiskApply) { wholeDiskApply.hidden = true; wholeDiskApply.disabled = false; wholeDiskApply.textContent = "Apply destructive action"; }
+  }
+
+  async function postWholeDisk(phase) {
+    const body = new URLSearchParams();
+    body.set("csrf", csrf);
+    body.set("purpose", selectedWholeDisk?.purpose || "");
+    body.set("device", selectedWholeDisk?.device || "");
+    if (reviewedWholeDisk?.fingerprint) body.set("fingerprint", reviewedWholeDisk.fingerprint);
+    if (wholeDiskConfirmation?.value) body.set("confirmation", wholeDiskConfirmation.value);
+    if (wholeDiskPlayers?.checked) body.set("players_confirmed", "yes");
+    const response = await fetch("/api/new-storage/whole-disk/" + phase, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+      credentials: "same-origin",
+    });
+    let payload = null;
+    try { payload = await response.json(); } catch (_) { payload = null; }
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || "Disk preparation could not be completed.");
+    return payload;
+  }
+
+  wholeDiskButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!wholeDiskDialog) return;
+      resetWholeDiskDialog(button);
+      wholeDiskDialog.showModal();
+      wholeDiskReview?.focus();
+    });
+  });
+
+  function closeWholeDiskDialog() {
+    wholeDiskDialog?.close();
+  }
+  wholeDiskClose?.addEventListener("click", closeWholeDiskDialog);
+  wholeDiskCancel?.addEventListener("click", closeWholeDiskDialog);
+
+  wholeDiskReview?.addEventListener("click", async () => {
+    if (!selectedWholeDisk) return;
+    if (wholeDiskError) { wholeDiskError.hidden = true; wholeDiskError.textContent = ""; }
+    wholeDiskReview.disabled = true;
+    wholeDiskReview.textContent = "Reviewing…";
+    try {
+      const payload = await postWholeDisk("plan");
+      reviewedWholeDisk = payload;
+      if (wholeDiskAfter) wholeDiskAfter.textContent = payload.purpose === "minecraft" ? "Minecraft data on a new XFS filesystem" : "Backups on a new XFS filesystem";
+      if (wholeDiskPlanRow) wholeDiskPlanRow.hidden = false;
+      if (wholeDiskMount) wholeDiskMount.textContent = payload.mount_point || "";
+      if (wholeDiskMountRow) wholeDiskMountRow.hidden = !payload.mount_point;
+      renderWholeDiskWarnings(payload.warnings);
+      const needsPlayers = Boolean(payload.players_confirmation_required);
+      if (wholeDiskPlayersField) wholeDiskPlayersField.hidden = !needsPlayers;
+      if (wholeDiskPlayersNote) {
+        const names = (payload.players || []).join(", ");
+        wholeDiskPlayersNote.textContent = needsPlayers ? (names ? " Online: " + names : " Players are online.") : "";
+      }
+      const confirmation = payload.confirmation || "";
+      if (wholeDiskConfirmationField) wholeDiskConfirmationField.hidden = !confirmation;
+      if (wholeDiskConfirmationPhrase) wholeDiskConfirmationPhrase.textContent = confirmation;
+      if (wholeDiskConfirmation) wholeDiskConfirmation.value = "";
+      wholeDiskReview.hidden = true;
+      if (wholeDiskApply) wholeDiskApply.hidden = false;
+      if (confirmation) wholeDiskConfirmation?.focus();
+      else wholeDiskApply?.focus();
+    } catch (error) {
+      if (wholeDiskError) { wholeDiskError.textContent = error.message; wholeDiskError.hidden = false; }
+    } finally {
+      wholeDiskReview.disabled = false;
+      wholeDiskReview.textContent = "Review action";
+    }
+  });
+
+  wholeDiskApply?.addEventListener("click", async () => {
+    if (!reviewedWholeDisk) return;
+    if (wholeDiskError) { wholeDiskError.hidden = true; wholeDiskError.textContent = ""; }
+    if (reviewedWholeDisk.confirmation && wholeDiskConfirmation?.value !== reviewedWholeDisk.confirmation) {
+      if (wholeDiskError) { wholeDiskError.textContent = "Type the confirmation phrase exactly before applying."; wholeDiskError.hidden = false; }
+      wholeDiskConfirmation?.focus();
+      return;
+    }
+    if (reviewedWholeDisk.players_confirmation_required && !wholeDiskPlayers?.checked) {
+      if (wholeDiskError) { wholeDiskError.textContent = "Confirm that online players may be interrupted before applying."; wholeDiskError.hidden = false; }
+      wholeDiskPlayers?.focus();
+      return;
+    }
+    wholeDiskApply.disabled = true;
+    wholeDiskApply.textContent = "Applying…";
+    try {
+      const payload = await postWholeDisk("apply");
+      if (payload.redirect) window.location.assign(payload.redirect);
+      else window.location.reload();
+    } catch (error) {
+      if (wholeDiskError) { wholeDiskError.textContent = error.message; wholeDiskError.hidden = false; }
+      wholeDiskApply.disabled = false;
+      wholeDiskApply.textContent = "Apply destructive action";
+    }
   });
 
   function minecraftDataPath(mountPoint) {

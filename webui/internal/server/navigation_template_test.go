@@ -222,6 +222,8 @@ func TestStorageBrowserInteractionContract(t *testing.T) {
 		`data-storage-partition`,
 		`data-storage-detail-dialog`,
 		`data-storage-detail-close`,
+		`data-storage-whole-disk`,
+		`data-storage-whole-disk-dialog`,
 		`storage-partition-swap`,
 	} {
 		if !strings.Contains(markup, want) {
@@ -238,6 +240,7 @@ func TestStorageBrowserInteractionContract(t *testing.T) {
 		`detailDialog.showModal()`,
 		`detailClose?.addEventListener("click"`,
 		`detailDialog?.addEventListener("cancel", closeActionMenu)`,
+		`"/api/new-storage/whole-disk/" + phase`,
 		`button.setAttribute("aria-pressed"`,
 	} {
 		if !strings.Contains(script, want) {

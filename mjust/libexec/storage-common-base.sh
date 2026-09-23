@@ -40,10 +40,41 @@ storage_target_block_device() {
     lsblk -nrpo NAME,MAJ:MIN 2>/dev/null | awk -v id="${majmin}" '$2 == id {print $1; exit}'
 }
 
+storage_mountpoint_is_system() {
+    case "$1" in
+        /|/boot|/boot/*|/var|/var/tmp|/var/lib/containers|/var/lib/containers/*|/etc|/etc/*|/sysroot|/sysroot/*)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 storage_system_disks() {
     local target real
-    for target in / /boot /boot/efi /var /etc /sysroot; do
-        real="$(storage_target_block_device "${target}")"
+    {
+        for target in / /boot /boot/efi /var /etc /sysroot; do
+            real="$(storage_target_block_device "${target}")"
+            [[ -n ${real} ]] || continue
+            printf '%s\n' "${real}"
+        done
+
+        lsblk -J -p -o PATH,TYPE,MOUNTPOINTS 2>/dev/null \
+            | jq -r '
+                .. | objects
+                | select(.path? and ((.mountpoints // []) | type == "array"))
+                | select(any(.mountpoints[]?;
+                    . == "/" or
+                    . == "/boot" or startswith("/boot/") or
+                    . == "/var" or . == "/var/tmp" or
+                    . == "/var/lib/containers" or startswith("/var/lib/containers/") or
+                    . == "/etc" or startswith("/etc/") or
+                    . == "/sysroot" or startswith("/sysroot/")
+                  ))
+                | .path
+              ' 2>/dev/null || true
+    } | while IFS= read -r real; do
         [[ -n ${real} ]] || continue
         lsblk -s -npo NAME,TYPE "${real}" 2>/dev/null \
             | awk '$2 == "disk" {print $1}'
@@ -99,15 +130,33 @@ storage_validate_partition() {
     }
 }
 
+storage_partition_table_type() {
+    parted -s -m "$1" print 2>/dev/null | awk -F: 'NR == 2 {print $6}'
+}
+
+storage_create_partition() {
+    local disk="$1" start="$2" end="$3" table
+    table="$(storage_partition_table_type "${disk}")"
+    case "${table}" in
+        gpt)
+            parted -s -a optimal -- "${disk}" mkpart justvoxel "${start}" "${end}"
+            ;;
+        msdos)
+            parted -s -a optimal -- "${disk}" mkpart primary "${start}" "${end}"
+            ;;
+        *)
+            echo "ERROR: unsupported partition table '${table:-unknown}' on ${disk}" >&2
+            return 1
+            ;;
+    esac
+}
+
 storage_has_mounted_children() {
     lsblk -nrpo MOUNTPOINT "$1" 2>/dev/null | sed '/^$/d' | grep -q .
 }
 
 storage_mount_is_critical() {
-    case "$1" in
-        /|/boot|/boot/efi|/var) return 0 ;;
-        *) return 1 ;;
-    esac
+    storage_mountpoint_is_system "$1"
 }
 
 storage_confirm_phrase() {
@@ -272,7 +321,7 @@ storage_prepare_whole_disk() {
 
     wipefs -a -- "${disk}"
     parted -s -a optimal -- "${disk}" mklabel gpt
-    parted -s -a optimal -- "${disk}" mkpart primary xfs 1MiB 100%
+    storage_create_partition "${disk}" 1MiB 100%
     partprobe "${disk}"
     udevadm settle
     partition="$(lsblk -nrpo NAME,TYPE "${disk}" | awk '$2 == "part" {print $1; exit}')"
@@ -390,7 +439,7 @@ storage_prepare_free_partition() {
     before="$(mktemp)"
     after="$(mktemp)"
     lsblk -nrpo NAME,TYPE "${disk}" | awk '$2 == "part" {print $1}' | sort > "${before}"
-    parted -s -a optimal -- "${disk}" mkpart primary xfs "${start}" "${part_end}"
+    storage_create_partition "${disk}" "${start}" "${part_end}"
     partprobe "${disk}"
     udevadm settle
     lsblk -nrpo NAME,TYPE "${disk}" | awk '$2 == "part" {print $1}' | sort > "${after}"

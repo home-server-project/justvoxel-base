@@ -285,6 +285,34 @@ func TestStorageBrowserMountUXUsesHumanWording(t *testing.T) {
 	}
 }
 
+func TestStorageBrowserWholeDiskFlowStaysInsideNewStorage(t *testing.T) {
+	templateContent, err := assets.ReadFile("templates/storage_browser.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(templateContent)
+	for _, want := range []string{
+		`data-storage-whole-purpose="minecraft"`,
+		`data-storage-whole-purpose="backups"`,
+		`data-storage-whole-disk-dialog`,
+		`data-storage-whole-review`,
+		`data-storage-whole-apply`,
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("whole-disk New Storage flow missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		`href="/settings/storage-provision"`,
+		`href="/settings/data-migration#dedicated-disk"`,
+		`name="operation" value="erase_disk"`,
+	} {
+		if strings.Contains(markup, forbidden) {
+			t.Fatalf("New Storage still exposes redirect/destructive form %q", forbidden)
+		}
+	}
+}
+
 func TestStorageBrowserActionMenuClosesWithDialogAndOutsideClick(t *testing.T) {
 	js, err := assets.ReadFile("static/storage-browser.js")
 	if err != nil {

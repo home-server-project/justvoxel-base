@@ -215,6 +215,12 @@ func (a *App) storageBrowserPage(w http.ResponseWriter, r *http.Request) {
 	for _, path := range storage.SystemDisks {
 		systemDisks[path] = struct{}{}
 	}
+	systemDiskNames := make(map[string]bool)
+	for _, device := range storage.Devices {
+		if device.Type == "part" && storageBrowserLooksSystem(device) {
+			systemDiskNames[device.Parent] = true
+		}
+	}
 
 	disks := make([]storageBrowserDiskView, 0)
 	diskIndex := make(map[string]int)
@@ -226,7 +232,8 @@ func (a *App) storageBrowserPage(w http.ResponseWriter, r *http.Request) {
 		diskIndex[device.Name] = len(disks)
 		disks = append(disks, storageBrowserDiskView{
 			Name: device.Name, Path: device.Path, Size: humanBytes(device.SizeBytes),
-			Model: device.Model, Transport: device.Transport, System: device.System || listedSystemDisk,
+			Model: device.Model, Transport: device.Transport,
+			System: device.System || listedSystemDisk || systemDiskNames[device.Name] || storageBrowserLooksSystem(device),
 			MinecraftWholeDisk: migrationWholeDisks[device.Path],
 		})
 	}
@@ -238,7 +245,7 @@ func (a *App) storageBrowserPage(w http.ResponseWriter, r *http.Request) {
 		if !exists {
 			continue
 		}
-		systemPartition := device.System || disks[index].System
+		systemPartition := device.System || disks[index].System || storageBrowserLooksSystem(device)
 		roleDevice := device
 		roleDevice.System = systemPartition
 		role := storageBrowserRole(roleDevice, configuration)
@@ -270,6 +277,26 @@ func (a *App) storageBrowserPage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func storageBrowserLooksSystem(device api.AdminStorageDevice) bool {
+	for _, mountpoint := range device.Mountpoints {
+		switch {
+		case mountpoint == "/",
+			mountpoint == "/boot",
+			strings.HasPrefix(mountpoint, "/boot/"),
+			mountpoint == "/var",
+			mountpoint == "/var/tmp",
+			mountpoint == "/var/lib/containers",
+			strings.HasPrefix(mountpoint, "/var/lib/containers/"),
+			mountpoint == "/etc",
+			strings.HasPrefix(mountpoint, "/etc/"),
+			mountpoint == "/sysroot",
+			strings.HasPrefix(mountpoint, "/sysroot/"):
+			return true
+		}
+	}
+	return false
+}
+
 func storageBrowserFilesystemDisplay(filesystem string) string {
 	switch strings.ToLower(strings.TrimSpace(filesystem)) {
 	case "xfs":
@@ -298,7 +325,7 @@ func storageBrowserRole(device api.AdminStorageDevice, configuration api.AdminCo
 		return "Swap"
 	}
 	if device.System {
-		return "System"
+		return "System partition"
 	}
 	roles := make([]string, 0, 2)
 	if configuration.Configured {

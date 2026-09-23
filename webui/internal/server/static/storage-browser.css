@@ -115,3 +115,7 @@ button.storage-partition-card:hover,button.storage-partition-card:focus-visible{
 .storage-minecraft-selected{margin:.15rem 0 0;font-size:.82rem}
 .storage-minecraft-selected code{overflow-wrap:anywhere}
 .storage-minecraft-dialog .compact{margin:-.35rem 0 0;font-size:.74rem}
+
+.storage-whole-player-confirmation{display:flex;flex-wrap:wrap;align-items:center;gap:.45rem}
+.storage-whole-player-confirmation input{width:auto}
+.storage-whole-player-confirmation .compact{flex-basis:100%}

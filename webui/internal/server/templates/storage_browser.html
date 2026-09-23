@@ -87,9 +87,9 @@
         <p class="muted">No partitions are present yet. Choose what JustVoxel should use this disk for.</p>
         <div class="storage-empty-actions">
           {{if .MinecraftWholeDisk}}
-          <a class="button-link" href="/settings/data-migration#dedicated-disk">Use for Minecraft data</a>
+          <button type="button" data-storage-whole-disk data-storage-whole-purpose="minecraft" data-storage-whole-device="{{.Path}}" data-storage-whole-size="{{.Size}}">Use for Minecraft data</button>
           {{end}}
-          {{if not .System}}<a class="button-link secondary" href="/settings/storage-provision">Prepare for backups</a>{{end}}
+          {{if not .System}}<button class="secondary" type="button" data-storage-whole-disk data-storage-whole-purpose="backups" data-storage-whole-device="{{.Path}}" data-storage-whole-size="{{.Size}}">Prepare for backups</button>{{end}}
         </div>
         <p class="muted compact">Nothing is erased until Review and the exact confirmation step.</p>
       </div>
@@ -137,6 +137,37 @@
         </details>
       </div>
       <div class="notice storage-protected-note" data-storage-protected-note hidden>This partition is protected by JustVoxel. Storage actions are not available.</div>
+    </div>
+  </dialog>
+
+  <dialog class="storage-action-dialog" data-storage-whole-disk-dialog>
+    <div class="storage-action-card">
+      <div class="storage-detail-heading">
+        <div><p class="eyebrow">New storage</p><h2 data-storage-whole-title>Prepare this disk</h2></div>
+        <button class="storage-dialog-close" type="button" data-storage-whole-close aria-label="Close disk preparation">×</button>
+      </div>
+      <p class="muted" data-storage-whole-description></p>
+      <dl class="storage-action-review">
+        <div><dt>Disk</dt><dd><code data-storage-whole-device-label></code></dd></div>
+        <div><dt>Size</dt><dd data-storage-whole-size-label></dd></div>
+        <div data-storage-whole-plan-row hidden><dt>After</dt><dd data-storage-whole-after></dd></div>
+        <div data-storage-whole-mount-row hidden><dt>Mount point</dt><dd><code data-storage-whole-mount></code></dd></div>
+      </dl>
+      <div class="storage-action-warnings" data-storage-whole-warnings></div>
+      <label class="storage-whole-player-confirmation" data-storage-whole-players-field hidden>
+        <input type="checkbox" data-storage-whole-players>
+        Continue even though players are currently online.
+        <span class="muted compact" data-storage-whole-players-note></span>
+      </label>
+      <label data-storage-whole-confirmation-field hidden>Type exactly <code data-storage-whole-confirmation-phrase></code>
+        <input data-storage-whole-confirmation autocomplete="off" spellcheck="false">
+      </label>
+      <p class="storage-action-error" data-storage-whole-error hidden></p>
+      <div class="action-row storage-action-buttons">
+        <button class="secondary" type="button" data-storage-whole-cancel>Cancel</button>
+        <button type="button" data-storage-whole-review>Review action</button>
+        <button class="danger" type="button" data-storage-whole-apply hidden>Apply destructive action</button>
+      </div>
     </div>
   </dialog>
 

@@ -318,7 +318,7 @@ apply_json() {
         erase_disk)
             if ! wipefs -a -- "${DEVICE}" >/dev/null 2>&1 \
                 || ! parted -s -a optimal -- "${DEVICE}" mklabel gpt >/dev/null 2>&1 \
-                || ! parted -s -a optimal -- "${DEVICE}" mkpart primary xfs 1MiB 100% >/dev/null 2>&1 \
+                || ! storage_create_partition "${DEVICE}" 1MiB 100% >/dev/null 2>&1 \
                 || ! partprobe "${DEVICE}" >/dev/null 2>&1 \
                 || ! udevadm settle >/dev/null 2>&1; then
                 json_error 'Whole-disk provisioning failed after the destructive operation began. Inspect the selected disk before retrying.'
@@ -337,7 +337,7 @@ apply_json() {
         create_partition)
             before="$(mktemp)"; after="$(mktemp)"
             lsblk -nrpo NAME,TYPE "${DEVICE}" | awk '$2 == "part" {print $1}' | sort > "${before}"
-            if ! parted -s -a optimal -- "${DEVICE}" mkpart primary xfs "${FREE_START}" "${PLANNED_END}" >/dev/null 2>&1 \
+            if ! storage_create_partition "${DEVICE}" "${FREE_START}" "${PLANNED_END}" >/dev/null 2>&1 \
                 || ! partprobe "${DEVICE}" >/dev/null 2>&1 \
                 || ! udevadm settle >/dev/null 2>&1; then
                 rm -f "${before}" "${after}"
