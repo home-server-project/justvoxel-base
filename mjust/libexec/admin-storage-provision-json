@@ -326,12 +326,12 @@ apply_json() {
             fi
             partition="$(lsblk -nrpo NAME,TYPE "${DEVICE}" | awk '$2 == "part" {print $1; exit}')"
             [[ -b ${partition} ]] || { json_error 'The new partition did not appear after whole-disk provisioning.'; return 0; }
-            mkfs.xfs -f -L JUSTVOXEL_BACKUP "${partition}" >/dev/null 2>&1 || { json_error 'The disk was repartitioned, but creating the XFS filesystem failed. Inspect the disk before retrying.'; return 0; }
+            storage_mkfs_xfs JV_BACKUP "${partition}" >/dev/null 2>&1 || { json_error 'The disk was repartitioned, but creating the XFS filesystem failed. Inspect the disk before retrying.'; return 0; }
             storage_type=disk
             ;;
         format_partition)
             partition="${DEVICE}"
-            mkfs.xfs -f -L JUSTVOXEL_BACKUP "${partition}" >/dev/null 2>&1 || { json_error 'Formatting the selected partition failed. Inspect the partition before retrying.'; return 0; }
+            storage_mkfs_xfs JV_BACKUP "${partition}" >/dev/null 2>&1 || { json_error 'Formatting the selected partition failed. Inspect the partition before retrying.'; return 0; }
             storage_type=partition
             ;;
         create_partition)
@@ -348,7 +348,7 @@ apply_json() {
             partition="$(comm -13 "${before}" "${after}" | head -n1)"
             rm -f "${before}" "${after}"
             [[ -b ${partition} ]] || { json_error 'The new partition could not be identified safely. Inspect the disk before retrying.'; return 0; }
-            mkfs.xfs -f -L JUSTVOXEL_BACKUP "${partition}" >/dev/null 2>&1 || { json_error 'The partition was created, but creating the XFS filesystem failed. Inspect the partition before retrying.'; return 0; }
+            storage_mkfs_xfs JV_BACKUP "${partition}" >/dev/null 2>&1 || { json_error 'The partition was created, but creating the XFS filesystem failed. Inspect the partition before retrying.'; return 0; }
             storage_type=partition
             ;;
     esac

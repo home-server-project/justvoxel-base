@@ -151,6 +151,15 @@ storage_create_partition() {
     esac
 }
 
+storage_mkfs_xfs() {
+    local label="$1" device="$2"
+    if (( ${#label} > 12 )); then
+        echo "ERROR: XFS label '${label}' is longer than the 12-character XFS limit." >&2
+        return 1
+    fi
+    mkfs.xfs -f -L "${label}" "${device}"
+}
+
 storage_has_mounted_children() {
     lsblk -nrpo MOUNTPOINT "$1" 2>/dev/null | sed '/^$/d' | grep -q .
 }
@@ -328,13 +337,13 @@ storage_prepare_whole_disk() {
     [[ -b ${partition} ]] || { echo 'ERROR: new partition did not appear.' >&2; return 1; }
 
     if [[ ${purpose} == data ]]; then
-        label=JUSTVOXEL_DATA
+        label=JV_DATA
         default_mount=/var/mnt/justvoxel-data
     else
-        label=JUSTVOXEL_BACKUP
+        label=JV_BACKUP
         default_mount=/var/mnt/justvoxel-backup
     fi
-    mkfs.xfs -f -L "${label}" "${partition}"
+    storage_mkfs_xfs "${label}" "${partition}"
     STORAGE_MOUNT_POINT="$(prompt_default 'Mount point' "${default_mount}")"
     STORAGE_MOUNT_POINT="$(realpath -m -- "${STORAGE_MOUNT_POINT}")"
     storage_mount_local "${partition}" "${STORAGE_MOUNT_POINT}"
@@ -358,7 +367,7 @@ storage_prepare_existing_partition() {
     if [[ -z ${fstype} ]]; then
         echo "Partition ${partition} has no detected filesystem."
         storage_confirm_phrase "FORMAT ${partition}" || { echo 'Cancelled.'; return 1; }
-        mkfs.xfs -f -L JUSTVOXEL_STORAGE "${partition}"
+        storage_mkfs_xfs JV_STORAGE "${partition}"
         fstype=xfs
     fi
 
@@ -448,13 +457,13 @@ storage_prepare_free_partition() {
     [[ -b ${partition} ]] || { echo 'ERROR: new partition could not be identified safely.' >&2; return 1; }
 
     if [[ ${purpose} == data ]]; then
-        label=JUSTVOXEL_DATA
+        label=JV_DATA
         default_mount=/var/mnt/justvoxel-data
     else
-        label=JUSTVOXEL_BACKUP
+        label=JV_BACKUP
         default_mount=/var/mnt/justvoxel-backup
     fi
-    mkfs.xfs -f -L "${label}" "${partition}"
+    storage_mkfs_xfs "${label}" "${partition}"
     STORAGE_MOUNT_POINT="$(prompt_default 'Mount point' "${default_mount}")"
     STORAGE_MOUNT_POINT="$(realpath -m -- "${STORAGE_MOUNT_POINT}")"
     storage_mount_local "${partition}" "${STORAGE_MOUNT_POINT}"

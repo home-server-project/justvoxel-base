@@ -258,7 +258,7 @@ case "${operation}" in
         udevadm settle >/dev/null 2>&1
         target_partition="$(lsblk -nrpo NAME,TYPE "${device}" | awk '$2 == "part" {print $1; exit}')"
         [[ -b ${target_partition} ]]
-        mkfs.xfs -f -L JUSTVOXEL_DATA "${target_partition}" >/dev/null 2>&1
+        storage_mkfs_xfs JV_DATA "${target_partition}" >/dev/null 2>&1
         storage_mount_local "${target_partition}" "${new_mount}" >/dev/null 2>&1
         ;;
     use_partition)
@@ -283,7 +283,7 @@ case "${operation}" in
         storage_validate_partition "${device}" >/dev/null 2>&1
         [[ -z "$(blkid -s TYPE -o value "${device}" 2>/dev/null || true)" ]]
         [[ -z "$(lsblk -nro MOUNTPOINT "${device}" 2>/dev/null | sed '/^$/d' | head -n1)" ]]
-        mkfs.xfs -f -L JUSTVOXEL_DATA "${device}" >/dev/null 2>&1
+        storage_mkfs_xfs JV_DATA "${device}" >/dev/null 2>&1
         storage_mount_local "${device}" "${new_mount}" >/dev/null 2>&1
         ;;
     create_partition)
@@ -299,7 +299,7 @@ case "${operation}" in
         target_partition="$(comm -13 "${before}" "${after}" | head -n1)"
         rm -f "${before}" "${after}"
         [[ -b ${target_partition} ]]
-        mkfs.xfs -f -L JUSTVOXEL_DATA "${target_partition}" >/dev/null 2>&1
+        storage_mkfs_xfs JV_DATA "${target_partition}" >/dev/null 2>&1
         storage_mount_local "${target_partition}" "${new_mount}" >/dev/null 2>&1
         ;;
     *)

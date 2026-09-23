@@ -46,6 +46,35 @@ grep -Fq 'storage_create_partition "${device}"' "${migration_transaction}" || {
     echo 'ERROR: Minecraft migration does not use shared partition creation.' >&2
     exit 1
 }
+
+grep -Fq 'if (( ${#label} > 12 )); then' "${base}" || {
+    echo 'ERROR: XFS label length guard is missing from shared storage formatting.' >&2
+    exit 1
+}
+for invalid_label in JUSTVOXEL_BACKUP JUSTVOXEL_DATA JUSTVOXEL_STORAGE; do
+    if grep -Fq "${invalid_label}" "${base}" "${provision}" "${migration_transaction}"; then
+        echo "ERROR: overlong XFS label remains: ${invalid_label}" >&2
+        exit 1
+    fi
+done
+for valid_label in JV_BACKUP JV_DATA JV_STORAGE; do
+    if (( ${#valid_label} > 12 )); then
+        echo "ERROR: XFS label exceeds 12 characters: ${valid_label}" >&2
+        exit 1
+    fi
+done
+if grep -Fq 'mkfs.xfs' "${provision}" "${migration_transaction}"; then
+    echo 'ERROR: storage provisioning bypasses the shared XFS label-length guard.' >&2
+    exit 1
+fi
+grep -Fq 'storage_mkfs_xfs JV_BACKUP' "${provision}" || {
+    echo 'ERROR: backup provisioning is not using the validated short XFS label.' >&2
+    exit 1
+}
+grep -Fq 'storage_mkfs_xfs JV_DATA' "${migration_transaction}" || {
+    echo 'ERROR: Minecraft migration is not using the validated short XFS label.' >&2
+    exit 1
+}
 grep -Fq 'storage_target_block_device' "${base}" || {
     echo 'ERROR: system-disk detection lost bootc/OSTree block-device resolution.' >&2
     exit 1
