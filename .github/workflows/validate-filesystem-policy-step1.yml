@@ -24,12 +24,13 @@ jobs:
           bash tests/test-storage-action-safety-source.sh
           bash tests/test-storage-mount-persistence-safety-source.sh
 
-      - name: Validate parent kernel FAT and exFAT capability
+      - name: Validate AlmaLinux 10 FAT and exFAT kernel capability
         shell: bash
         run: |
           set -euo pipefail
-          docker run --rm ghcr.io/home-server-project/home-server-base-10:stable bash -lc '
+          docker run --rm almalinux:10 bash -lc '
             set -euo pipefail
+            dnf install -y kernel-core kernel-modules-core
             compgen -G "/usr/lib/modules/*/kernel/fs/fat/fat.ko*" >/dev/null
             compgen -G "/usr/lib/modules/*/kernel/fs/fat/vfat.ko*" >/dev/null
             compgen -G "/usr/lib/modules/*/kernel/fs/exfat/exfat.ko*" >/dev/null
