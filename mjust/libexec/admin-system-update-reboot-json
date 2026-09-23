@@ -1,0 +1,104 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/interrupt-safety.sh
+require_root
+
+readonly state_file="/run/justvoxel/system-update-reboot.json"
+readonly worker="/usr/libexec/justvoxel/system-update-reboot-worker"
+readonly unit_name="justvoxel-update-reboot"
+
+player_names_json() {
+    local raw="$1" names
+    names="${raw#*:}"
+    if [[ ${names} == "${raw}" ]]; then
+        printf '[]'
+        return
+    fi
+    printf '%s
+' "${names}" | tr ',' '
+' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | jq -Rsc 'split("\n") | map(select(length > 0))'
+}
+
+emit_state() {
+    if [[ -r ${state_file} ]] && jq -e 'type == "object" and (.ok == true) and (.state | type == "string")' "${state_file}" >/dev/null 2>&1; then
+        cat "${state_file}"
+        return
+    fi
+    jq -cn '{ok:true,state:"idle",accepted:false,confirmation_required:false}'
+}
+
+emit_error() {
+    local reason="$1" message="$2"
+    jq -cn --arg reason "${reason}" --arg message "${message}" '{ok:false,state:"failed",accepted:false,confirmation_required:false,reason:$reason,message:$message}'
+}
+
+request_reboot() {
+    local confirm_players=no backup_minecraft=no warning_seconds=60
+    local was_active=no players='' online=0 players_json='[]'
+
+    shift
+    while (( $# > 0 )); do
+        case "$1" in
+            --confirm-players) confirm_players=yes ;;
+            --backup-minecraft) backup_minecraft=yes ;;
+            --warning-seconds=10) warning_seconds=10 ;;
+            --warning-seconds=60) warning_seconds=60 ;;
+            *)
+                emit_error invalid_option 'Invalid system update reboot option.'
+                return 2
+                ;;
+        esac
+        shift
+    done
+
+    if systemctl is-active --quiet "${unit_name}.service" 2>/dev/null || systemctl is-activating --quiet "${unit_name}.service" 2>/dev/null; then
+        emit_error workflow_active 'A system update reboot workflow is already running.'
+        return 2
+    fi
+
+    if systemctl is-active --quiet minecraft.service 2>/dev/null; then
+        was_active=yes
+        players="$(jv_player_list_raw 2>/dev/null || true)"
+        if [[ -z ${players} ]]; then
+            emit_error player_status_unavailable 'Could not confirm Minecraft player status through RCON.'
+            return 3
+        fi
+        online="$(jv_player_online_count "${players}" 2>/dev/null || true)"
+        if [[ ! ${online} =~ ^[0-9]+$ ]]; then
+            emit_error player_status_unavailable 'Could not parse Minecraft player status through RCON.'
+            return 3
+        fi
+        players_json="$(player_names_json "${players}")"
+        if (( online > 0 )) && [[ ${confirm_players} != yes ]]; then
+            jq -cn --argjson online "${online}" --argjson players "${players_json}" --argjson warning "${warning_seconds}" --argjson backup "$([[ ${backup_minecraft} == yes ]] && echo true || echo false)"                 '{ok:false,state:"confirmation_required",accepted:false,confirmation_required:true,reason:"players_online",online:$online,players:$players,warning_seconds:$warning,backup_minecraft:$backup}'
+            return 10
+        fi
+    fi
+
+    install -d -m0755 /run/justvoxel
+    jq -cn --argjson warning "${warning_seconds}" --argjson backup "$([[ ${backup_minecraft} == yes ]] && echo true || echo false)"         '{ok:true,state:"queued",accepted:true,confirmation_required:false,warning_seconds:$warning,backup_minecraft:$backup}' > "${state_file}.tmp"
+    mv -f "${state_file}.tmp" "${state_file}"
+
+    if ! systemd-run --quiet --collect --unit="${unit_name}"         --setenv="JV_UPDATE_REBOOT_BACKUP=${backup_minecraft}"         --setenv="JV_UPDATE_REBOOT_WARNING_SECONDS=${warning_seconds}"         --setenv="JV_UPDATE_REBOOT_WAS_ACTIVE=${was_active}"         "${worker}"; then
+        emit_error action_failed 'System update reboot workflow could not be started.'
+        return 4
+    fi
+
+    jq -cn --argjson warning "${warning_seconds}" --argjson backup "$([[ ${backup_minecraft} == yes ]] && echo true || echo false)"         '{ok:true,state:"queued",accepted:true,confirmation_required:false,warning_seconds:$warning,backup_minecraft:$backup,message:"Reboot workflow started."}'
+}
+
+case "${1:-}" in
+    status)
+        [[ $# -eq 1 ]] || { echo 'Usage: admin-system-update-reboot-json status' >&2; exit 2; }
+        emit_state
+        ;;
+    request)
+        request_reboot "$@"
+        ;;
+    *)
+        echo 'Usage: admin-system-update-reboot-json {status|request [--confirm-players] [--backup-minecraft] [--warning-seconds=10|60]}' >&2
+        exit 2
+        ;;
+esac
