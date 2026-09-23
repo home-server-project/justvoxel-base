@@ -85,6 +85,7 @@
         <section class="control-section nav-admin-only">
           <span class="control-section-label">JustVoxel</span>
           <div class="control-tile-grid">
+            <button class="control-tile nav-admin-only" type="button" data-system-update-open title="Update the JustVoxel operating system"><strong>System Update</strong></button>
             <a class="control-tile" href="/settings/validation" title="Check appliance health"><strong>Validation</strong></a>
             <a class="control-tile" href="/settings/activity" title="Administrative events"><strong>Admin activity</strong></a>
             <a class="control-tile" href="/settings/users" title="Accounts and roles"><strong>Users</strong></a>
@@ -98,6 +99,39 @@
   </details>
 
   <input type="hidden" value="{{.CSRF}}" data-system-actions-csrf>
+  <input type="hidden" value="{{.CSRF}}" data-system-update-csrf>
+
+  <dialog class="system-update-dialog" data-system-update-dialog>
+    <div class="system-update-dialog-shell">
+      <div class="system-update-dialog-header">
+        <div>
+          <p class="eyebrow">JustVoxel</p>
+          <h2>System Update</h2>
+        </div>
+        <button class="system-update-close" type="button" data-system-update-close aria-label="Close system update">&times;</button>
+      </div>
+      <div class="system-update-dialog-body">
+        <div class="system-update-deployment-grid">
+          <section class="system-update-deployment">
+            <span>Running</span>
+            <strong data-system-update-running>Loading…</strong>
+            <small data-system-update-running-image></small>
+          </section>
+          <section class="system-update-deployment">
+            <span>Staged update</span>
+            <strong data-system-update-staged>Loading…</strong>
+            <small data-system-update-staged-image></small>
+          </section>
+        </div>
+        <p class="system-update-state" data-system-update-state>Loading system update status…</p>
+        <p class="system-update-error" data-system-update-error hidden></p>
+        <div class="system-update-actions">
+          <button type="button" data-system-update-button disabled>Update system</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
   <dialog class="system-action-dialog" data-system-action-dialog>
     <div class="system-action-dialog-content">
       <p class="eyebrow">System power</p>
