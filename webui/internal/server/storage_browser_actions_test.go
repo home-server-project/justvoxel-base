@@ -284,3 +284,27 @@ func TestStorageBrowserMountUXUsesHumanWording(t *testing.T) {
 		}
 	}
 }
+
+
+func TestStorageBrowserPortableFilesystemPolicy(t *testing.T) {
+	js, err := assets.ReadFile("static/storage-browser.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(js)
+	for _, want := range []string{
+		"[\"xfs\", \"ext4\", \"btrfs\", \"ntfs\", \"vfat\", \"exfat\"]",
+		"[\"xfs\", \"ext4\", \"btrfs\"]",
+		"FAT / FAT32",
+		"exFAT",
+		"NTFS",
+		"showStorageAction(\"format\", managedLinux)",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("storage browser portable-filesystem policy missing %q", want)
+		}
+	}
+	if strings.Contains(source, "showStorageAction(\"format\", true);\n      setOptional(detail.mountTypeRow") {
+		t.Fatal("portable filesystems can still expose Format through the generic mounted-filesystem path")
+	}
+}
