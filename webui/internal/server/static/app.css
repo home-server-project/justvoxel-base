@@ -342,3 +342,30 @@ body.role-operator .control-tile.nav-operator-plus{display:flex!important}
   .system-update-close:hover,.system-update-close:focus-visible{background:#e4eaed;border-color:#aebbc4;color:#1a2025}
   .system-update-state{color:#44515a}
 }
+
+.system-update-reboot-panel{margin-top:1rem;padding:.85rem;border:1px solid #303942;border-radius:11px;background:#11171b}
+.system-update-reboot-heading{display:grid;gap:.18rem;margin-bottom:.7rem}
+.system-update-reboot-heading strong{font-size:.96rem}
+.system-update-reboot-heading small,.system-update-option small{color:#89959e;line-height:1.35}
+.system-update-option{display:flex;align-items:flex-start;gap:.65rem;padding:.62rem 0;border-top:1px solid #293139;cursor:pointer}
+.system-update-option input{flex:0 0 auto;margin-top:.18rem;width:17px;height:17px}
+.system-update-option span{display:grid;gap:.14rem;min-width:0}
+.system-update-option strong{font-size:.88rem}
+.system-update-warning{margin:.55rem 0 0;color:#aab5bc;font-size:.8rem}
+.system-update-reboot-players{margin-top:.65rem;padding:.62rem .7rem;border:1px solid #725f34;border-radius:8px;background:#4c3f1f55;color:#f2dfaa;font-size:.84rem;line-height:1.4}
+.system-update-reboot-progress{display:flex;align-items:center;gap:.7rem;margin-top:.7rem;padding:.7rem;border:1px solid #375747;border-radius:8px;background:#1c302655}
+.system-update-reboot-progress strong{min-width:2.3rem;font-size:1.5rem;line-height:1;text-align:center}
+.system-update-reboot-progress span{font-size:.86rem;line-height:1.35}
+.system-update-reboot-action{display:flex;justify-content:flex-end;margin-top:.75rem}
+.system-update-reboot-action button{min-width:112px}
+.system-update-option input:disabled+span{opacity:.58}
+@media(max-width:600px){
+  .system-update-reboot-action button{width:100%;min-height:46px}
+}
+@media(prefers-color-scheme:light){
+  .system-update-reboot-panel{background:#f7f9fa;border-color:#d9dfe3}
+  .system-update-option{border-color:#e0e5e8}
+  .system-update-warning{color:#5f6d76}
+  .system-update-reboot-players{background:#fff7df;border-color:#dfc97b;color:#6f581b}
+  .system-update-reboot-progress{background:#edf7f1;border-color:#a9cbb8}
+}
