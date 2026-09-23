@@ -16,6 +16,14 @@ jobs:
       - name: Checkout validation branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      - name: Show Go formatting diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          gofmt -d webui/internal/server/admin_discovery_page.go
+          gofmt -d webui/internal/server/admin_discovery_page_test.go
+          gofmt -d webui/internal/server/storage_browser_actions_test.go
+
       - name: Validate storage browser JavaScript
         shell: bash
         run: |
