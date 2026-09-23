@@ -3,8 +3,6 @@ set -ouex pipefail
 
 source /ctx/build_files/packages.env
 : "${JUSTVOXEL_COMMON_PACKAGES:?JUSTVOXEL_COMMON_PACKAGES must be set}"
-: "${TAILSCALE_PACKAGE:?TAILSCALE_PACKAGE must be set}"
-: "${NETBIRD_PACKAGE:?NETBIRD_PACKAGE must be set}"
 
 cp -avf /ctx/system_files/. /
 install -m0440 /ctx/system_files/etc/sudoers.d/justvoxel-pwfeedback /etc/sudoers.d/justvoxel-pwfeedback
@@ -32,26 +30,6 @@ if [[ -z ${nm_hsp_rpm} ]]; then
     exit 1
 fi
 dnf install -y "${nm_hsp_rpm}"
-
-curl -fsSL \
-    https://pkgs.tailscale.com/stable/rhel/10/tailscale.repo \
-    -o /etc/yum.repos.d/tailscale.repo
-sed -ri 's/^enabled=1/enabled=0/' /etc/yum.repos.d/tailscale.repo || true
-dnf --enablerepo=tailscale-stable install -y "${TAILSCALE_PACKAGE}"
-systemctl disable tailscaled.service 2>/dev/null || true
-
-cat > /etc/yum.repos.d/netbird.repo <<'REPO'
-[netbird]
-name=NetBird
-baseurl=https://pkgs.netbird.io/yum/
-enabled=0
-gpgcheck=1
-gpgkey=https://pkgs.netbird.io/yum/repodata/repomd.xml.key
-repo_gpgcheck=1
-REPO
-
-dnf --setopt=tsflags=noscripts --enablerepo=netbird install -y "${NETBIRD_PACKAGE}"
-systemctl disable netbird.service 2>/dev/null || true
 
 systemctl enable NetworkManager.service 2>/dev/null || true
 systemctl enable systemd-resolved.service
@@ -105,7 +83,7 @@ install -m0755 /ctx/build_files/validate/vm.sh /usr/libexec/justvoxel/health/vm
 
 for cmd in \
     bootc podman skopeo nmcli nmtui nm-hsp resolvectl firewall-cmd sshd sudo just mjust \
-    tailscale netbird curl jq findmnt mountpoint flock timeout mkfs.xfs btrfs mount.nfs mount.cifs mount.ntfs-3g umount \
+    curl jq findmnt mountpoint flock timeout mkfs.xfs btrfs mount.nfs mount.cifs mount.ntfs-3g umount \
     lsblk blkid wipefs parted partprobe udevadm qemu-ga vmtoolsd iperf3 micro spf python3 btop; do
     command -v "${cmd}"
 done
