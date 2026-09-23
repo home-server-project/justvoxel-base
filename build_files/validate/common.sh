@@ -21,10 +21,10 @@ source /usr/lib/os-release
 [[ "${HOME_SERVER_BASE_UPSTREAM_CPE_NAME:-}" == cpe:/o:almalinux:* ]]
 
 for cmd in \
-    bootc podman skopeo nmcli nmtui nm-hsp resolvectl firewall-cmd sshd sudo just mjust fzf gum \
-    curl jq openssl tar gzip rsync ping dig traceroute nc tcpdump lsof \
+    bootc podman skopeo just mjust fzf gum btop \
+    tar gzip less ip python3 ping \
     findmnt mountpoint flock timeout mkfs.xfs btrfs mount.nfs mount.cifs mount.ntfs-3g lsblk blkid wipefs parted partprobe udevadm \
-    qemu-ga vmtoolsd iperf3 micro spf; do
+    spf; do
     command -v "${cmd}" >/dev/null
 done
 
@@ -39,11 +39,10 @@ for filesystem_module in \
 done
 
 rpm -q \
-    NetworkManager NetworkManager-tui systemd-resolved firewalld openssh-server sudo \
     pam authselect authselect-libs libpwquality \
-    podman skopeo just fzf gum container-selinux policycoreutils-python-utils selinux-policy-extra \
-    util-linux xfsprogs btrfs-progs ntfs-3g parted iperf3 nfs-utils cifs-utils qemu-guest-agent open-vm-tools \
-    hyperv-daemons gssproxy zram-generator micro superfile nm-hsp >/dev/null
+    podman skopeo container-selinux ca-certificates python3 tar gzip less iproute util-linux xfsprogs \
+    just fzf gum btop iputils btrfs-progs ntfs-3g parted nfs-utils cifs-utils \
+    gssproxy zram-generator superfile >/dev/null
 
 test -f /etc/pam.d/justvoxel
 grep -Fqx 'auth       include      system-auth' /etc/pam.d/justvoxel
