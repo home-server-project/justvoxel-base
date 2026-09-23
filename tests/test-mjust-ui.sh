@@ -79,8 +79,11 @@ for id in setup status players configure service whitelist backups migration sto
     grep -Fq "${id})" "${menu}" || fail "menu preview/dispatch id missing: ${id}"
 done
 
-grep -Fq 'main_menu_profile()' "${menu}" || fail 'adaptive main-menu profile helper missing'
-grep -Fq 'main_menu_gap_enabled()' "${menu}" || fail 'adaptive main-menu gap helper missing'
+grep -Fq 'jui_menu_profile()' "${repo_root}/mjust/libexec/ui.sh" || fail 'shared adaptive menu profile helper missing'
+grep -Fq 'jui_menu_gap_enabled()' "${repo_root}/mjust/libexec/ui.sh" || fail 'shared adaptive menu gap helper missing'
+if grep -Fq 'main_menu_profile()' "${menu}" || grep -Fq 'main_menu_gap_enabled()' "${menu}"; then
+    fail 'main menu still duplicates adaptive menu sizing helpers'
+fi
 grep -Fq -- '--height=100%' "${menu}" || fail 'main menu must use the full available terminal height'
 grep -Fq -- '--info=hidden' "${menu}" || fail 'main menu should hide the fzf result counter'
 grep -Fq -- '--gap=1' "${menu}" || fail 'tall terminals must support visual gaps between menu entries'
@@ -93,12 +96,21 @@ fi
 grep -Fq 'Overall JustVoxel and Minecraft health.' "${menu}" || fail 'concise Status description missing'
 grep -Fq 'Manage OS status, resources, files, networking and power.' "${menu}" || fail 'concise System description missing'
 grep -Fq 'jui_is_interactive && command -v fzf' "${menu}" || fail 'interactive main menu must keep adaptive fzf descriptions available'
+grep -Fq 'jui_menu_backend()' "${repo_root}/mjust/libexec/ui.sh" || fail 'shared menu backend selector missing'
+grep -Fq "elif command -v fzf" "${repo_root}/mjust/libexec/ui.sh" || fail 'fzf menu backend missing'
+grep -Fq -- '--height=100%' "${repo_root}/mjust/libexec/ui.sh" || fail 'submenus must use full terminal height'
+grep -Fq -- '--info=hidden' "${repo_root}/mjust/libexec/ui.sh" || fail 'submenus should hide the fzf result counter'
+grep -Fq -- '--gap=1' "${repo_root}/mjust/libexec/ui.sh" || fail 'submenus must support adaptive visual gaps'
+grep -Fq "'Automatic backup settings') sudo /usr/libexec/justvoxel/mjust/configure backup || true ;;" "${menu}" || fail 'backup schedule submenu must return directly without run_and_pause'
+grep -Fq "'Backup storage location') sudo /usr/libexec/justvoxel/mjust/storage-provision backup || true ;;" "${menu}" || fail 'backup storage submenu must return directly without run_and_pause'
 
 if grep -Fq 'setup-advanced' "${menu}" || grep -Fq 'Advanced setup' "${menu}" || grep -Fq 'setup-advanced' "${justfile}"; then
     fail 'legacy Advanced Setup must not be exposed through the mJust menu or recipes'
 fi
 
-grep -Fq "jui_choose 'Safe configuration changes'" "${configure}" || fail 'Configure must use the interactive selector'
+grep -Fq "jui_choose 'Configure Minecraft'" "${configure}" || fail 'Configure must use the flattened interactive selector'
+grep -Fq "'Show current configuration'         'Maximum players'         'Change memory limits'" "${configure}" || fail 'Configure flattened menu entries missing'
+if grep -Fq "'Other safe Minecraft settings'" "${menu}"; then fail 'legacy Configure intermediate submenu remains'; fi
 grep -Fq "jui_choose 'Container image policy'" "${configure}" || fail 'container image policy must use the interactive selector'
 grep -Fq "jui_choose 'Minecraft version policy'" "${configure}" || fail 'Minecraft version policy must use the interactive selector'
 grep -Fq "'Back'" "${configure}" || fail 'Configure nested menus must expose Back navigation'
