@@ -62,7 +62,8 @@
                   data-name="{{.Name}}"
                   data-path="{{.Path}}"
                   data-size="{{.Size}}"
-                  data-filesystem="{{if .Filesystem}}{{.Filesystem}}{{else}}Not formatted{{end}}"
+                  data-filesystem="{{.Filesystem}}"
+                  data-filesystem-display="{{.FilesystemDisplay}}"
                   data-label="{{.Label}}"
                   data-uuid="{{.UUID}}"
                   data-mountpoints="{{.Mountpoints}}"
@@ -74,7 +75,7 @@
                   data-minecraft-mount-point="{{.MinecraftMountPoint}}">
             <span class="storage-partition-state">{{.Role}}</span>
             <strong>{{.Path}}</strong>
-            <span>{{.Size}}{{if .Filesystem}} · {{.Filesystem}}{{end}}</span>
+            <span>{{.Size}}{{if .Filesystem}} · {{.FilesystemDisplay}}{{end}}</span>
             {{if .Mountpoints}}<small>{{.Mountpoints}}</small>{{else if not .Formatted}}<small>Not formatted</small>{{else}}<small>Not mounted</small>{{end}}
           </button>
           {{end}}
