@@ -113,10 +113,18 @@ func openOperationStore(baseDir string) (*operationStore, error) {
 	}
 	operationsDir := filepath.Join(logsDir, "operations")
 	setupLogsDir := filepath.Join(logsDir, "setup-logs")
-	if err := migrateLegacyManagementLogDirectory(filepath.Join(baseDir, "operations"), operationsDir); err != nil {
+	legacyOperationsDir := filepath.Join(baseDir, "operations")
+	legacySetupLogsDir := filepath.Join(baseDir, "setup-logs")
+	if err := validateLegacyManagementLogDirectoryMigration(legacyOperationsDir, operationsDir); err != nil {
+		return nil, fmt.Errorf("preflight operation journal migration: %w", err)
+	}
+	if err := validateLegacyManagementLogDirectoryMigration(legacySetupLogsDir, setupLogsDir); err != nil {
+		return nil, fmt.Errorf("preflight setup log migration: %w", err)
+	}
+	if err := migrateLegacyManagementLogDirectory(legacyOperationsDir, operationsDir); err != nil {
 		return nil, fmt.Errorf("migrate operation journals: %w", err)
 	}
-	if err := migrateLegacyManagementLogDirectory(filepath.Join(baseDir, "setup-logs"), setupLogsDir); err != nil {
+	if err := migrateLegacyManagementLogDirectory(legacySetupLogsDir, setupLogsDir); err != nil {
 		return nil, fmt.Errorf("migrate setup logs: %w", err)
 	}
 	if err := ensurePrivateDirectory(operationsDir); err != nil {
@@ -195,6 +203,40 @@ func openOperationStore(baseDir string) (*operationStore, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+func validateLegacyManagementLogDirectoryMigration(legacyPath, currentPath string) error {
+	legacyInfo, legacyErr := os.Lstat(legacyPath)
+	if legacyErr != nil && !errors.Is(legacyErr, os.ErrNotExist) {
+		return legacyErr
+	}
+	currentInfo, currentErr := os.Lstat(currentPath)
+	if currentErr != nil && !errors.Is(currentErr, os.ErrNotExist) {
+		return currentErr
+	}
+
+	if legacyErr == nil && (legacyInfo.Mode()&os.ModeSymlink != 0 || !legacyInfo.IsDir()) {
+		return fmt.Errorf("legacy path %s is not a directory", legacyPath)
+	}
+	if currentErr == nil && (currentInfo.Mode()&os.ModeSymlink != 0 || !currentInfo.IsDir()) {
+		return fmt.Errorf("current path %s is not a directory", currentPath)
+	}
+	if legacyErr != nil || currentErr != nil {
+		return nil
+	}
+
+	legacyEntries, err := os.ReadDir(legacyPath)
+	if err != nil {
+		return fmt.Errorf("read legacy directory %s: %w", legacyPath, err)
+	}
+	currentEntries, err := os.ReadDir(currentPath)
+	if err != nil {
+		return fmt.Errorf("read current directory %s: %w", currentPath, err)
+	}
+	if len(legacyEntries) > 0 && len(currentEntries) > 0 {
+		return fmt.Errorf("both legacy path %s and current path %s contain data", legacyPath, currentPath)
+	}
+	return nil
 }
 
 func migrateLegacyManagementLogDirectory(legacyPath, currentPath string) error {
