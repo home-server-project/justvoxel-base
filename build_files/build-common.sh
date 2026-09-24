@@ -82,9 +82,10 @@ install -m0755 /ctx/build_files/validate/common.sh /usr/libexec/justvoxel/health
 for cmd in \
     bootc podman skopeo just mjust fzf gum \
     findmnt mountpoint flock timeout mkfs.xfs btrfs mount.nfs mount.cifs mount.ntfs-3g umount \
-    lsblk blkid wipefs parted partprobe udevadm spf python3 btop glances; do
+    lsblk blkid wipefs parted partprobe udevadm spf python3 btop; do
     command -v "${cmd}"
 done
+command -v glances
 
 rpm -q superfile glances
 spf --version
