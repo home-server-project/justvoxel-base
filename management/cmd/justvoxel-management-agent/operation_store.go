@@ -104,10 +104,20 @@ func openOperationStore(baseDir string) (*operationStore, error) {
 	if baseDir == "" {
 		return nil, errors.New("operation state directory is required")
 	}
-	operationsDir := filepath.Join(baseDir, "operations")
-	setupLogsDir := filepath.Join(baseDir, "setup-logs")
 	if err := ensurePrivateDirectory(baseDir); err != nil {
 		return nil, err
+	}
+	logsDir := filepath.Join(baseDir, "logs")
+	if err := ensurePrivateDirectory(logsDir); err != nil {
+		return nil, err
+	}
+	operationsDir := filepath.Join(logsDir, "operations")
+	setupLogsDir := filepath.Join(logsDir, "setup-logs")
+	if err := migrateLegacyManagementLogDirectory(filepath.Join(baseDir, "operations"), operationsDir); err != nil {
+		return nil, fmt.Errorf("migrate operation journals: %w", err)
+	}
+	if err := migrateLegacyManagementLogDirectory(filepath.Join(baseDir, "setup-logs"), setupLogsDir); err != nil {
+		return nil, fmt.Errorf("migrate setup logs: %w", err)
 	}
 	if err := ensurePrivateDirectory(operationsDir); err != nil {
 		return nil, err
@@ -185,6 +195,62 @@ func openOperationStore(baseDir string) (*operationStore, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+func migrateLegacyManagementLogDirectory(legacyPath, currentPath string) error {
+	legacyInfo, legacyErr := os.Lstat(legacyPath)
+	if legacyErr != nil && !errors.Is(legacyErr, os.ErrNotExist) {
+		return legacyErr
+	}
+	currentInfo, currentErr := os.Lstat(currentPath)
+	if currentErr != nil && !errors.Is(currentErr, os.ErrNotExist) {
+		return currentErr
+	}
+
+	legacyExists := legacyErr == nil
+	currentExists := currentErr == nil
+
+	if legacyExists && (legacyInfo.Mode()&os.ModeSymlink != 0 || !legacyInfo.IsDir()) {
+		return fmt.Errorf("legacy path %s is not a directory", legacyPath)
+	}
+	if currentExists && (currentInfo.Mode()&os.ModeSymlink != 0 || !currentInfo.IsDir()) {
+		return fmt.Errorf("current path %s is not a directory", currentPath)
+	}
+	if !legacyExists {
+		return nil
+	}
+	if !currentExists {
+		if err := os.Rename(legacyPath, currentPath); err != nil {
+			return fmt.Errorf("move %s to %s: %w", legacyPath, currentPath, err)
+		}
+		return nil
+	}
+
+	legacyEntries, err := os.ReadDir(legacyPath)
+	if err != nil {
+		return fmt.Errorf("read legacy directory %s: %w", legacyPath, err)
+	}
+	currentEntries, err := os.ReadDir(currentPath)
+	if err != nil {
+		return fmt.Errorf("read current directory %s: %w", currentPath, err)
+	}
+	if len(legacyEntries) > 0 && len(currentEntries) > 0 {
+		return fmt.Errorf("both legacy path %s and current path %s contain data", legacyPath, currentPath)
+	}
+	if len(legacyEntries) == 0 {
+		if err := os.Remove(legacyPath); err != nil {
+			return fmt.Errorf("remove empty legacy directory %s: %w", legacyPath, err)
+		}
+		return nil
+	}
+
+	if err := os.Remove(currentPath); err != nil {
+		return fmt.Errorf("remove empty current directory %s: %w", currentPath, err)
+	}
+	if err := os.Rename(legacyPath, currentPath); err != nil {
+		return fmt.Errorf("move %s to %s: %w", legacyPath, currentPath, err)
+	}
+	return nil
 }
 
 func ensurePrivateDirectory(path string) error {
