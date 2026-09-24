@@ -1,15 +1,15 @@
 #!/usr/bin/bash
 
 jv_backup_load_config() {
-    local config_file="${1:-/etc/justvoxel/minecraft-backup.env}"
+    local backup_config_file="${1:-/etc/justvoxel/minecraft-backup.env}"
 
-    if [[ ! -r ${config_file} ]]; then
-        echo "ERROR: backup configuration is missing: ${config_file}" >&2
+    if [[ ! -r ${backup_config_file} ]]; then
+        echo "ERROR: backup configuration is missing: ${backup_config_file}" >&2
         return 1
     fi
 
     # shellcheck disable=SC1090
-    source "${config_file}"
+    source "${backup_config_file}"
 
     : "${MINECRAFT_DATA_PATH:?MINECRAFT_DATA_PATH must be configured}"
     : "${MINECRAFT_BACKUP_PATH:?MINECRAFT_BACKUP_PATH must be configured}"

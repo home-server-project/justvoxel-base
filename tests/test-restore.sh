@@ -65,6 +65,10 @@ BACKUP_MOUNT_POINT=
 BACKUP_EXPECTED_UUID=
 BACKUP_EXPECTED_SOURCE=
 EOF2
+(
+    readonly config_file="${tmp}/backup.env"
+    jv_backup_load_config "${config_file}"
+) || fail 'backup config loader must not collide with a readonly caller variable'
 jv_backup_load_config "${tmp}/backup.env"
 jv_backup_require_read_target || fail 'ordinary readable system backup path rejected'
 
