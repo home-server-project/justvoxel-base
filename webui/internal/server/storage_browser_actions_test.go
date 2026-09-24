@@ -389,7 +389,7 @@ func TestStorageBrowserActionMenuClosesWithDialogAndOutsideClick(t *testing.T) {
 		"function closeActionMenu()",
 		"detailDialog?.addEventListener(\"close\", closeActionMenu)",
 		"detailDialog?.addEventListener(\"cancel\", closeActionMenu)",
-		"document.addEventListener(\"pointerdown\"",
+		"root.addEventListener(\"pointerdown\"",
 		"if (!actionMenu.contains(event.target)) closeActionMenu()",
 	} {
 		if !strings.Contains(source, want) {
