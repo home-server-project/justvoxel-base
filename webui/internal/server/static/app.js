@@ -1393,6 +1393,222 @@ if (storageOpen && storageDialog) {
   restoreStorageWhenRoleKnown();
 }
 
+const backupsOpen = document.querySelector("[data-backups-open]");
+const backupsDialog = document.querySelector("[data-backups-workspace-dialog]");
+if (backupsOpen && backupsDialog) {
+  const closeButton = backupsDialog.querySelector("[data-backups-close]");
+  const refreshButton = backupsDialog.querySelector("[data-backups-refresh]");
+  const state = backupsDialog.querySelector("[data-backups-state]");
+  const content = backupsDialog.querySelector("[data-backups-workspace-content]");
+  let currentURL = "/settings/new-backups";
+  let loadSequence = 0;
+
+  const loadBackupsScript = async (src, ready) => {
+    if (ready()) return;
+    let script = document.querySelector(`script[src="${src}"]`);
+    await new Promise((resolve, reject) => {
+      if (ready()) {
+        resolve();
+        return;
+      }
+      if (!script) {
+        script = document.createElement("script");
+        script.src = src;
+        script.defer = true;
+        document.head.appendChild(script);
+      }
+      script.addEventListener("load", resolve, { once: true });
+      script.addEventListener("error", reject, { once: true });
+    });
+  };
+
+  const ensureBackupsAssets = async () => {
+    if (!document.querySelector('link[href="/static/new-backups.css"]')) {
+      const stylesheet = document.createElement("link");
+      stylesheet.rel = "stylesheet";
+      stylesheet.href = "/static/new-backups.css";
+      document.head.appendChild(stylesheet);
+    }
+    await loadBackupsScript("/static/new-backups.js", () => Boolean(window.JustVoxelNewBackups?.init));
+    await loadBackupsScript("/static/restore-operation.js", () => Boolean(window.JustVoxelRestoreOperation?.init));
+  };
+
+  const extractBackupsRoot = (markup) => {
+    const parsed = new DOMParser().parseFromString(markup, "text/html");
+    const main = parsed.querySelector("main.new-backups-shell");
+    if (!main) return null;
+    const root = document.createElement("div");
+    root.className = "new-backups-shell backups-workspace-content";
+    root.dataset.backupsWorkspaceRoot = "true";
+    root.innerHTML = main.innerHTML;
+    root.querySelector(".title-row")?.remove();
+    root.querySelector(".backup-library-note")?.remove();
+    return root;
+  };
+
+  const renderBackupsMarkup = (markup) => {
+    if (!content) throw new Error("Backups workspace is unavailable.");
+    const root = extractBackupsRoot(markup);
+    if (!root) throw new Error("Backups response could not be rendered.");
+    content.replaceChildren(root);
+
+    const handleSubmit = async (event) => {
+      const form = event.target.closest("form");
+      if (!form || !root.contains(form)) return;
+      const action = new URL(form.getAttribute("action") || currentURL, window.location.href);
+      if (action.origin !== window.location.origin || !action.pathname.startsWith("/settings/new-backups")) return;
+
+      event.preventDefault();
+      const reviewDialog = form.closest("[data-backup-review-dialog]");
+      const reviewClose = reviewDialog?.querySelector("[data-backup-workflow-review-close]");
+      const submitter = event.submitter;
+      if (reviewDialog) reviewDialog.dataset.busy = "true";
+      if (reviewClose) reviewClose.disabled = true;
+      if (submitter) submitter.disabled = true;
+      if (state) state.textContent = "Working…";
+
+      try {
+        const body = new URLSearchParams();
+        new FormData(form).forEach((value, key) => body.append(key, String(value)));
+        const response = await fetch(action.pathname + action.search, {
+          method: (form.method || "POST").toUpperCase(),
+          credentials: "same-origin",
+          headers: {
+            Accept: "text/html",
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: body.toString(),
+          cache: "no-store",
+          redirect: "follow",
+        });
+
+        if (response.redirected) {
+          const target = new URL(response.url);
+          if (target.pathname === "/login" || target.pathname === "/password") {
+            window.location.assign(target.pathname + target.search);
+            return;
+          }
+          if (target.origin === window.location.origin && target.pathname === "/settings/new-backups") {
+            currentURL = target.pathname + target.search;
+          }
+        }
+
+        const responseMarkup = await response.text();
+        renderBackupsMarkup(responseMarkup);
+        if (state) state.textContent = "";
+      } catch (error) {
+        if (reviewDialog) reviewDialog.dataset.busy = "false";
+        if (reviewClose) reviewClose.disabled = false;
+        if (submitter) submitter.disabled = false;
+        if (state) state.textContent = error?.message || "Backup operation could not be completed.";
+      }
+    };
+
+    const handleClick = async (event) => {
+      const link = event.target.closest("a");
+      if (!link || !root.contains(link)) return;
+      const href = link.getAttribute("href") || "";
+
+      if (href === "#backup-library") {
+        event.preventDefault();
+        root.querySelector("#backup-library")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+      if (href === "/" && link.id === "restore-dashboard-link") {
+        event.preventDefault();
+        workspaceWindow?.close();
+        return;
+      }
+      if (href.startsWith("/settings/new-backups")) {
+        event.preventDefault();
+        await loadBackups(href);
+      }
+    };
+
+    root.addEventListener("submit", handleSubmit);
+    root.addEventListener("click", handleClick);
+    window.JustVoxelNewBackups?.init(root);
+    window.JustVoxelRestoreOperation?.init(root);
+  };
+
+  const loadBackups = async (url = currentURL) => {
+    const sequence = ++loadSequence;
+    if (state) state.textContent = "Loading backups…";
+    if (refreshButton) refreshButton.disabled = true;
+    try {
+      await ensureBackupsAssets();
+      const response = await fetch(url, {
+        method: "GET",
+        credentials: "same-origin",
+        headers: { Accept: "text/html" },
+        cache: "no-store",
+        redirect: "follow",
+      });
+      if (response.redirected) {
+        const target = new URL(response.url);
+        if (target.pathname === "/login" || target.pathname === "/password") {
+          window.location.assign(target.pathname + target.search);
+          return;
+        }
+      }
+      if (response.status === 401) {
+        window.location.assign("/login");
+        return;
+      }
+      if (response.status === 403) throw new Error("Administrator access required.");
+
+      const markup = await response.text();
+      if (sequence !== loadSequence) return;
+      const responseURL = new URL(response.url);
+      if (responseURL.origin === window.location.origin && responseURL.pathname === "/settings/new-backups") {
+        currentURL = responseURL.pathname + responseURL.search;
+      } else {
+        currentURL = url;
+      }
+      renderBackupsMarkup(markup);
+      if (state) state.textContent = "";
+    } catch (error) {
+      if (sequence !== loadSequence) return;
+      if (content) content.replaceChildren();
+      if (state) state.textContent = error?.message || "Backups are unavailable.";
+    } finally {
+      if (sequence === loadSequence && refreshButton) refreshButton.disabled = false;
+    }
+  };
+
+  const workspaceWindow = setupWorkspaceWindow(backupsDialog, { onOpen: () => loadBackups(currentURL) });
+
+  window.JustVoxelBackupsWorkspace = {
+    reload: async (url = "/settings/new-backups") => {
+      currentURL = url;
+      await loadBackups(url);
+    },
+  };
+
+  backupsOpen.addEventListener("click", () => {
+    if (controlCenter) controlCenter.open = false;
+    workspaceWindow?.open();
+  });
+  closeButton?.addEventListener("click", () => workspaceWindow?.close());
+  refreshButton?.addEventListener("click", () => loadBackups(currentURL));
+
+  const restoreBackupsWhenRoleKnown = () => {
+    if (!readWorkspaceWindowState("backups").open) return;
+    if (document.body.classList.contains("role-administrator")) {
+      workspaceWindow?.open();
+      return;
+    }
+    if (!document.body.classList.contains("role-pending")) return;
+    const observer = new MutationObserver(() => {
+      if (document.body.classList.contains("role-pending")) return;
+      observer.disconnect();
+      if (document.body.classList.contains("role-administrator")) workspaceWindow?.open();
+    });
+    observer.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+  };
+  restoreBackupsWhenRoleKnown();
+}
+
 const systemMonitorOpen = document.querySelector("[data-system-monitor-open]");
 const systemMonitorDialog = document.querySelector("[data-system-monitor-dialog]");
 if (systemMonitorOpen && systemMonitorDialog) {

@@ -197,3 +197,14 @@
   .backup-restore-dialog-close{background:#f1f4f6;border-color:#cbd4da;color:#1a2025}
   .backup-restore-mode{background:#f6f8f9;border-color:#d9dfe3}
 }
+
+
+/* Temporary review dialogs used by the Backups workspace. */
+.backup-workflow-review-dialog{width:min(780px,calc(100vw - 1rem));max-height:calc(100dvh - 1rem);padding:0;overflow:hidden;border:1px solid #3b454e;border-radius:16px;background:#171d22;color:#eef1f4;box-shadow:0 30px 90px #000c}
+.backup-workflow-review-dialog::backdrop{background:#050708b8;backdrop-filter:blur(4px)}
+.backup-workflow-review-card{position:relative;max-height:calc(100dvh - 1rem);overflow:auto;padding:1rem}
+.backup-workflow-review-close{position:sticky;top:0;float:right;z-index:2;display:grid;place-items:center;width:36px;height:36px;margin:0 0 .4rem .7rem;padding:0;border:1px solid #3a454e;border-radius:9px;background:#222a31;color:#eef1f4;font-size:1.45rem;line-height:1}
+.backup-workflow-review-close:hover:not(:disabled),.backup-workflow-review-close:focus-visible{background:#313c46;border-color:#5c6b76}
+.backup-workflow-review-dialog .backup-restore-review,.backup-workflow-review-dialog .backup-automatic-review,.backup-workflow-review-dialog .backup-destination-review{clear:both;margin:0;border:0;background:transparent;padding:0}
+@media(max-width:560px){.backup-workflow-review-dialog{width:calc(100vw - .5rem);max-height:calc(100dvh - .5rem);border-radius:12px}.backup-workflow-review-card{max-height:calc(100dvh - .5rem);padding:.8rem}}
+@media(prefers-color-scheme:light){.backup-workflow-review-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025;box-shadow:0 30px 90px #0003}.backup-workflow-review-close{background:#f1f4f6;border-color:#cbd4da;color:#1a2025}}

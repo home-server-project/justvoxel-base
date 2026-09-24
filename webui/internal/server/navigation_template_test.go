@@ -27,10 +27,9 @@ func TestControlCenterNavigationUX(t *testing.T) {
 		`data-storage-open`,
 		`<strong>Storage</strong>`,
 		`href="/settings/data-migration"`,
-		`href="/settings/backup-storage"`,
-		`href="/settings/new-backups"`,
-		`href="/operations#manual-backup"`,
-		`href="/settings/restore"`,
+		`data-backups-open`,
+		`<strong>Backups</strong>`,
+		`class="control-tile nav-operator-only" href="/operations#manual-backup"`,
 		`href="/settings/server-migration"`,
 		`href="/settings/activity"`,
 		`href="/settings/validation"`,
@@ -49,6 +48,16 @@ func TestControlCenterNavigationUX(t *testing.T) {
 		t.Fatal("brand still includes the long JustVoxel label")
 	}
 
+	for _, old := range []string{
+		`href="/settings/backup-storage"`,
+		`href="/settings/new-backups"`,
+		`href="/settings/restore"`,
+	} {
+		if strings.Contains(markup, old) {
+			t.Fatalf("Control Center still exposes legacy backup navigation %q", old)
+		}
+	}
+
 	css, err := assets.ReadFile("static/app.css")
 	if err != nil {
 		t.Fatal(err)
@@ -58,8 +67,8 @@ func TestControlCenterNavigationUX(t *testing.T) {
 		`.topbar`,
 		`.control-center-panel`,
 		`.control-tile-grid`,
-		`.nav-admin-only,.nav-operator-plus{display:none!important}`,
-		`.control-tile.nav-admin-only,.control-tile.nav-operator-plus{display:none!important}`,
+		`.nav-admin-only,.nav-operator-plus,.nav-operator-only{display:none!important}`,
+		`.control-tile.nav-admin-only,.control-tile.nav-operator-plus,.control-tile.nav-operator-only{display:none!important}`,
 		`body.role-administrator .nav-admin-only`,
 		`body.role-operator .nav-operator-plus`,
 		`position:fixed;top:50px`,

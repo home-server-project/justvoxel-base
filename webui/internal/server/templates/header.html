@@ -72,10 +72,8 @@
           <div class="control-tile-grid">
             <button class="control-tile nav-admin-only" type="button" data-storage-open title="Disks, partitions, mounts and external USB storage"><strong>Storage</strong></button>
             <a class="control-tile nav-admin-only" href="/settings/data-migration" title="Move server data safely"><strong>Minecraft data</strong></a>
-            <a class="control-tile nav-admin-only" href="/settings/backup-storage" title="Destination and schedule"><strong>Backup storage</strong></a>
-            <a class="control-tile nav-admin-only" href="/settings/new-backups" title="Preview the new unified backup library"><strong>New Backups</strong></a>
-            <a class="control-tile" href="/operations#manual-backup" title="Run a backup now"><strong>Create backup</strong></a>
-            <a class="control-tile nav-admin-only" href="/settings/restore" title="Restore from a backup"><strong>Restore</strong></a>
+            <button class="control-tile nav-admin-only" type="button" data-backups-open title="Create, schedule, restore and manage backups"><strong>Backups</strong></button>
+            <a class="control-tile nav-operator-only" href="/operations#manual-backup" title="Run a backup now"><strong>Create backup</strong></a>
             <a class="control-tile nav-admin-only" href="/settings/server-migration" title="Export, import and recovery"><strong>Server migration</strong></a>
             <a class="control-tile nav-admin-only" href="/settings/storage-provision" title="Provision storage devices"><strong>Advanced storage</strong></a>
           </div>
@@ -224,6 +222,25 @@
       <div class="storage-workspace-body">
         <p class="storage-workspace-state" data-storage-state>Storage is loaded when this window opens.</p>
         <div data-storage-workspace-content></div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="workspace-window backups-workspace-dialog" data-workspace-window="backups" data-backups-workspace-dialog aria-labelledby="backups-workspace-title">
+    <div class="backups-workspace-shell">
+      <div class="backups-workspace-header" data-workspace-drag-handle>
+        <div>
+          <p class="eyebrow">JustVoxel</p>
+          <h2 id="backups-workspace-title">Backups</h2>
+        </div>
+        <div class="backups-workspace-header-actions">
+          <button class="system-monitor-header-button" type="button" data-backups-refresh aria-label="Refresh backups" title="Refresh backups">↻</button>
+          <button class="system-monitor-header-button" type="button" data-backups-close aria-label="Close backups">&times;</button>
+        </div>
+      </div>
+      <div class="backups-workspace-body">
+        <p class="backups-workspace-state" data-backups-state>Backups are loaded when this window opens.</p>
+        <div data-backups-workspace-content></div>
       </div>
     </div>
   </dialog>
