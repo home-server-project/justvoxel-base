@@ -96,6 +96,9 @@ type storageBrowserPageData struct {
 	Identity               api.SessionInfo
 	Configuration          api.AdminConfigurationDiscovery
 	Disks                  []storageBrowserDiskView
+	InternalDisks          []storageBrowserDiskView
+	ExternalDisks          []storageBrowserDiskView
+	SelectedDisk           string
 	MinecraftMigrationNote string
 }
 
@@ -105,6 +108,7 @@ func (a *App) registerAdminDiscoveryPages(mux *http.ServeMux) {
 	mux.HandleFunc("POST /settings/server/apply", a.serverSettingsApply)
 	mux.HandleFunc("GET /settings/storage", a.storageSettingsPage)
 	mux.HandleFunc("GET /settings/new-storage", a.storageBrowserPage)
+	mux.HandleFunc("GET /workspace/storage", a.storageBrowserWindow)
 	a.registerAdminBackupStoragePages(mux)
 	a.registerAdminStorageProvisionPages(mux)
 	a.registerStorageBrowserActionRoutes(mux)
@@ -181,22 +185,46 @@ func (a *App) storageBrowserPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	configuration, err := client.AdminConfiguration(r.Context(), session)
+	data, err := a.buildStorageBrowserPageData(r.Context(), session, client, identity, csrfFromRequest(r))
 	if err != nil {
 		a.handleAdminDiscoveryError(w, r, err)
 		return
 	}
-	storage, err := client.AdminStorage(r.Context(), session)
+	a.renderAdminDiscovery(w, "storage_browser.html", data)
+}
+
+func (a *App) storageBrowserWindow(w http.ResponseWriter, r *http.Request) {
+	session, client, identity, ok := a.adminDiscoveryRequest(w, r)
+	if !ok {
+		return
+	}
+	data, err := a.buildStorageBrowserPageData(r.Context(), session, client, identity, csrfFromRequest(r))
 	if err != nil {
 		a.handleAdminDiscoveryError(w, r, err)
 		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := a.templates.ExecuteTemplate(w, "storage_browser_content", data); err != nil {
+		http.Error(w, "render error", http.StatusInternalServerError)
+	}
+}
+
+func (a *App) buildStorageBrowserPageData(ctx context.Context, session string, client adminDiscoveryAPI, identity api.SessionInfo, csrf string) (storageBrowserPageData, error) {
+	configuration, err := client.AdminConfiguration(ctx, session)
+	if err != nil {
+		return storageBrowserPageData{}, err
+	}
+	storage, err := client.AdminStorage(ctx, session)
+	if err != nil {
+		return storageBrowserPageData{}, err
 	}
 
 	migrationCandidates := make(map[string]api.AdminDataMigrationCandidate)
 	migrationWholeDisks := make(map[string]bool)
 	migrationNote := ""
 	if migrationClient, ok := any(client).(storageBrowserMigrationDiscoveryAPI); ok {
-		discovery, err := migrationClient.AdminDataMigrationDiscovery(r.Context(), session)
+		discovery, err := migrationClient.AdminDataMigrationDiscovery(ctx, session)
 		if err != nil {
 			migrationNote = "Minecraft storage assignment is temporarily unavailable. Other storage actions are still available."
 		} else {
@@ -270,11 +298,28 @@ func (a *App) storageBrowserPage(w http.ResponseWriter, r *http.Request) {
 		disks[index].Partitions = append(disks[index].Partitions, view)
 	}
 
-	a.renderAdminDiscovery(w, "storage_browser.html", storageBrowserPageData{
-		Title: "New Storage", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
-		CSRF: csrfFromRequest(r), Identity: identity, Configuration: configuration, Disks: disks,
+	internalDisks := make([]storageBrowserDiskView, 0, len(disks))
+	externalDisks := make([]storageBrowserDiskView, 0)
+	for _, disk := range disks {
+		if strings.EqualFold(strings.TrimSpace(disk.Transport), "usb") {
+			externalDisks = append(externalDisks, disk)
+			continue
+		}
+		internalDisks = append(internalDisks, disk)
+	}
+	selectedDisk := ""
+	if len(internalDisks) > 0 {
+		selectedDisk = internalDisks[0].Name
+	} else if len(externalDisks) > 0 {
+		selectedDisk = externalDisks[0].Name
+	}
+
+	return storageBrowserPageData{
+		Title: "Storage", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
+		CSRF: csrf, Identity: identity, Configuration: configuration, Disks: disks,
+		InternalDisks: internalDisks, ExternalDisks: externalDisks, SelectedDisk: selectedDisk,
 		MinecraftMigrationNote: migrationNote,
-	})
+	}, nil
 }
 
 func storageBrowserLooksSystem(device api.AdminStorageDevice) bool {

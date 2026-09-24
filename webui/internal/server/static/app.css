@@ -437,3 +437,15 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 @media(max-width:700px){.system-monitor-dialog{inset:52px .25rem .25rem .25rem!important;width:auto!important;height:auto!important;min-width:0;min-height:0;max-width:none;max-height:none;resize:none;border-radius:12px}.system-monitor-grid{grid-template-columns:1fr}.system-monitor-card-wide{grid-column:auto}.system-monitor-header{padding:.85rem .9rem .7rem;cursor:default;touch-action:auto}.system-monitor-profile,.system-monitor-body{padding:.8rem .9rem}}
 @media(max-width:420px){.system-monitor-profile-grid{grid-template-columns:1fr 1fr}}
 @media(prefers-color-scheme:light){.system-monitor-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025}.system-monitor-header,.system-monitor-profile{border-color:#d9dfe3}.system-monitor-header-button{background:#eef2f4;border-color:#cbd4da;color:#34414a}.system-monitor-profile{background:#f7f9fa}.system-monitor-card{background:#f7f9fa;border-color:#d9dfe3}.system-monitor-table th,.system-monitor-table td{border-color:#e2e7ea}}
+
+/* Storage workspace window. Storage browser content/actions keep their dedicated stylesheet. */
+.storage-workspace-dialog{width:min(1080px,calc(100vw - 1rem));height:min(760px,calc(100dvh - 1rem));min-width:min(560px,calc(100vw - 1rem));min-height:360px;max-width:calc(100vw - 1rem);max-height:calc(100dvh - 1rem);padding:0;overflow:hidden;resize:both;border:1px solid #3b454e;border-radius:16px;background:#171d22;color:#eef1f4;box-shadow:0 28px 80px #000b}
+.storage-workspace-shell{display:flex;flex-direction:column;height:100%;min-height:0}
+.storage-workspace-header{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;padding:1rem 1.1rem .8rem;border-bottom:1px solid #303942;cursor:move;touch-action:none;user-select:none}
+.storage-workspace-header h2{margin:.1rem 0 0;font-size:1.25rem}
+.storage-workspace-header-actions{display:flex;gap:.45rem}
+.storage-workspace-body{flex:1;min-height:0;overflow:auto;padding:1rem 1.1rem 1.1rem}
+.storage-workspace-state{margin:0;color:#9ca7b0;font-size:.8rem}
+.storage-workspace-state:empty{display:none}
+@media(max-width:700px){.storage-workspace-dialog{inset:52px .25rem .25rem .25rem!important;width:auto!important;height:auto!important;min-width:0;min-height:0;max-width:none;max-height:none;resize:none;border-radius:12px}.storage-workspace-header{padding:.85rem .9rem .7rem;cursor:default;touch-action:auto}.storage-workspace-body{padding:.8rem .9rem}}
+@media(prefers-color-scheme:light){.storage-workspace-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025}.storage-workspace-header{border-color:#d9dfe3}}

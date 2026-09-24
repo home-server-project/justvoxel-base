@@ -178,7 +178,7 @@ func TestDiscoveryPagesRejectOperatorBeforePrivilegedDiscovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"/settings/server", "/settings/storage", "/settings/new-storage"} {
+	for _, path := range []string{"/settings/server", "/settings/storage", "/settings/new-storage", "/workspace/storage"} {
 		rr := httptest.NewRecorder()
 		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example"+path, ""))
 		if rr.Code != http.StatusForbidden {
@@ -208,6 +208,8 @@ func TestNewStorageBrowserGroupsDisksAndPartitions(t *testing.T) {
 		{Name: "vdb", Path: "/dev/vdb", Type: "disk", SizeBytes: 500 * 1024 * 1024 * 1024, Model: "Data Disk", Transport: "virtio"},
 		{Name: "vdb1", Path: "/dev/vdb1", Parent: "vdb", Type: "part", SizeBytes: 300 * 1024 * 1024 * 1024, Filesystem: "xfs", UUID: "minecraft-uuid", Mountpoints: []string{"/var/mnt/data"}},
 		{Name: "vdb2", Path: "/dev/vdb2", Parent: "vdb", Type: "part", SizeBytes: 200 * 1024 * 1024 * 1024},
+		{Name: "sdc", Path: "/dev/sdc", Type: "disk", SizeBytes: 64 * 1024 * 1024 * 1024, Model: "USB Backup", Transport: "usb"},
+		{Name: "sdc1", Path: "/dev/sdc1", Parent: "sdc", Type: "part", SizeBytes: 64 * 1024 * 1024 * 1024, Filesystem: "exfat", UUID: "usb-uuid"},
 	}
 
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
@@ -220,7 +222,7 @@ func TestNewStorageBrowserGroupsDisksAndPartitions(t *testing.T) {
 		t.Fatalf("new storage returned %d: %s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"New Storage", "System Disk", "Data Disk", "data-storage-disk=\"vda\"", "data-storage-partitions=\"vdb\"", "/dev/vdb1", "Minecraft", "/dev/vdb2", "Not formatted", "storage-partition-card storage-partition-swap", "data-storage-detail-dialog", "data-storage-detail-close", "/static/storage-browser.js"} {
+	for _, want := range []string{"Storage", "Internal drives", "USB drives", "System Disk", "Data Disk", "USB Backup", "data-storage-disk=\"vda\"", "data-storage-disk=\"sdc\"", "data-storage-partitions=\"vdb\"", "data-storage-partitions=\"sdc\"", "/dev/vdb1", "Minecraft", "/dev/vdb2", "Not formatted", "storage-partition-card storage-partition-swap", "data-storage-detail-dialog", "data-storage-detail-close", "/static/storage-browser.js"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("new storage browser missing %q: %s", want, body)
 		}
@@ -332,6 +334,33 @@ func TestNewStorageUsesAgentApprovedMinecraftMigrationCandidates(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("New Storage Minecraft migration handoff missing %q: %s", want, body)
 		}
+	}
+}
+
+func TestStorageWorkspaceFragmentUsesSameBrowserAndUSBGrouping(t *testing.T) {
+	client := &fakeDiscoveryAPI{}
+	client.storage.Devices = []api.AdminStorageDevice{
+		{Name: "vda", Path: "/dev/vda", Type: "disk", SizeBytes: 100 * 1024 * 1024 * 1024, Model: "Internal", Transport: "virtio"},
+		{Name: "sdb", Path: "/dev/sdb", Type: "disk", SizeBytes: 32 * 1024 * 1024 * 1024, Model: "Thumb Drive", Transport: "usb"},
+		{Name: "sdb1", Path: "/dev/sdb1", Parent: "sdb", Type: "part", SizeBytes: 32 * 1024 * 1024 * 1024, Filesystem: "exfat", UUID: "thumb-uuid"},
+	}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/storage", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("storage workspace returned %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{"data-storage-browser-root", "Internal drives", "USB drives", "Thumb Drive", "data-storage-disk=\"sdb\"", "data-storage-partitions=\"sdb\""} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("storage workspace missing %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "<html") || strings.Contains(body, "data-control-center") {
+		t.Fatal("storage workspace endpoint returned a full page instead of the reusable browser fragment")
 	}
 }
 

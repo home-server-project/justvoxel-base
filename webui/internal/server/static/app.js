@@ -1282,6 +1282,7 @@ const setupWorkspaceWindow = (element, options = {}) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
+  if (document.querySelector("dialog:modal")) return;
   const openWindows = Array.from(workspaceWindows).filter((element) => element.open);
   if (openWindows.length === 0) return;
   openWindows.sort((a, b) => Number(b.style.zIndex || 0) - Number(a.style.zIndex || 0));
@@ -1291,6 +1292,106 @@ document.addEventListener("keydown", (event) => {
 window.addEventListener("resize", () => {
   workspaceWindows.forEach((element) => clampWorkspaceWindow(element));
 });
+
+const storageOpen = document.querySelector("[data-storage-open]");
+const storageDialog = document.querySelector("[data-storage-workspace-dialog]");
+if (storageOpen && storageDialog) {
+  const closeButton = storageDialog.querySelector("[data-storage-close]");
+  const refreshButton = storageDialog.querySelector("[data-storage-refresh]");
+  const state = storageDialog.querySelector("[data-storage-state]");
+  const content = storageDialog.querySelector("[data-storage-workspace-content]");
+  let loadSequence = 0;
+
+  const ensureStorageBrowserAssets = async () => {
+    let stylesheet = document.querySelector('link[href="/static/storage-browser.css"]');
+    if (!stylesheet) {
+      stylesheet = document.createElement("link");
+      stylesheet.rel = "stylesheet";
+      stylesheet.href = "/static/storage-browser.css";
+      document.head.appendChild(stylesheet);
+    }
+
+    if (window.JustVoxelStorageBrowser?.init) return;
+    let script = document.querySelector('script[src="/static/storage-browser.js"]');
+    await new Promise((resolve, reject) => {
+      if (window.JustVoxelStorageBrowser?.init) {
+        resolve();
+        return;
+      }
+      if (!script) {
+        script = document.createElement("script");
+        script.src = "/static/storage-browser.js";
+        script.defer = true;
+        document.head.appendChild(script);
+      }
+      script.addEventListener("load", resolve, { once: true });
+      script.addEventListener("error", reject, { once: true });
+    });
+  };
+
+  const loadStorage = async () => {
+    const sequence = ++loadSequence;
+    if (state) state.textContent = "Loading storage…";
+    if (refreshButton) refreshButton.disabled = true;
+    try {
+      await ensureStorageBrowserAssets();
+      const response = await fetch("/workspace/storage", {
+        method: "GET",
+        credentials: "same-origin",
+        headers: { Accept: "text/html" },
+        cache: "no-store",
+      });
+      if (response.redirected && new URL(response.url).pathname === "/login") {
+        window.location.assign("/login");
+        return;
+      }
+      if (response.status === 401) {
+        window.location.assign("/login");
+        return;
+      }
+      if (response.status === 403) throw new Error("Administrator access required.");
+      if (!response.ok) throw new Error("Storage discovery is unavailable.");
+      const markup = await response.text();
+      if (sequence !== loadSequence || !content) return;
+      content.innerHTML = markup;
+      const root = content.querySelector("[data-storage-browser-root]");
+      if (!root || !window.JustVoxelStorageBrowser?.init) throw new Error("Storage browser could not be initialized.");
+      window.JustVoxelStorageBrowser.init(root);
+      if (state) state.textContent = "";
+    } catch (error) {
+      if (sequence !== loadSequence) return;
+      if (content) content.replaceChildren();
+      if (state) state.textContent = error?.message || "Storage discovery is unavailable.";
+    } finally {
+      if (sequence === loadSequence && refreshButton) refreshButton.disabled = false;
+    }
+  };
+
+  const workspaceWindow = setupWorkspaceWindow(storageDialog, { onOpen: loadStorage });
+
+  storageOpen.addEventListener("click", () => {
+    if (controlCenter) controlCenter.open = false;
+    workspaceWindow?.open();
+  });
+  closeButton?.addEventListener("click", () => workspaceWindow?.close());
+  refreshButton?.addEventListener("click", loadStorage);
+
+  const restoreStorageWhenRoleKnown = () => {
+    if (!readWorkspaceWindowState("storage").open) return;
+    if (document.body.classList.contains("role-administrator")) {
+      workspaceWindow?.open();
+      return;
+    }
+    if (!document.body.classList.contains("role-pending")) return;
+    const observer = new MutationObserver(() => {
+      if (document.body.classList.contains("role-pending")) return;
+      observer.disconnect();
+      if (document.body.classList.contains("role-administrator")) workspaceWindow?.open();
+    });
+    observer.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+  };
+  restoreStorageWhenRoleKnown();
+}
 
 const systemMonitorOpen = document.querySelector("[data-system-monitor-open]");
 const systemMonitorDialog = document.querySelector("[data-system-monitor-dialog]");

@@ -1,18 +1,22 @@
 (() => {
-  const diskButtons = [...document.querySelectorAll("[data-storage-disk]")];
-  const diskPanels = [...document.querySelectorAll("[data-storage-partitions]")];
-  const partitionButtons = [...document.querySelectorAll("[data-storage-partition]")];
-  const detailDialog = document.querySelector("[data-storage-detail-dialog]");
+  function initStorageBrowser(root = document) {
+    if (!root) return;
+    if (root.dataset?.storageBrowserInitialized === "true") return;
+    if (root.dataset) root.dataset.storageBrowserInitialized = "true";
+  const diskButtons = [...root.querySelectorAll("[data-storage-disk]")];
+  const diskPanels = [...root.querySelectorAll("[data-storage-partitions]")];
+  const partitionButtons = [...root.querySelectorAll("[data-storage-partition]")];
+  const detailDialog = root.querySelector("[data-storage-detail-dialog]");
   const detailClose = detailDialog?.querySelector("[data-storage-detail-close]");
   const detailActions = detailDialog?.querySelector("[data-storage-detail-actions]");
   const protectedNote = detailDialog?.querySelector("[data-storage-protected-note]");
   const actionMenu = detailDialog?.querySelector("[data-storage-action-menu]");
-  const actionButtons = [...document.querySelectorAll("[data-storage-action]")];
+  const actionButtons = [...root.querySelectorAll("[data-storage-action]")];
   const migrateButton = detailDialog?.querySelector("[data-storage-minecraft-migrate]");
-  const csrf = document.querySelector("[data-storage-action-csrf]")?.value || "";
+  const csrf = root.querySelector("[data-storage-action-csrf]")?.value || "";
 
-  const wholeDiskButtons = [...document.querySelectorAll("[data-storage-whole-disk]")];
-  const wholeDiskDialog = document.querySelector("[data-storage-whole-disk-dialog]");
+  const wholeDiskButtons = [...root.querySelectorAll("[data-storage-whole-disk]")];
+  const wholeDiskDialog = root.querySelector("[data-storage-whole-disk-dialog]");
   const wholeDiskClose = wholeDiskDialog?.querySelector("[data-storage-whole-close]");
   const wholeDiskCancel = wholeDiskDialog?.querySelector("[data-storage-whole-cancel]");
   const wholeDiskTitle = wholeDiskDialog?.querySelector("[data-storage-whole-title]");
@@ -38,7 +42,7 @@
   const wholeDiskReview = wholeDiskDialog?.querySelector("[data-storage-whole-review]");
   const wholeDiskApply = wholeDiskDialog?.querySelector("[data-storage-whole-apply]");
 
-  const migrationDialog = document.querySelector("[data-storage-minecraft-dialog]");
+  const migrationDialog = root.querySelector("[data-storage-minecraft-dialog]");
   const migrationClose = migrationDialog?.querySelector("[data-storage-minecraft-close]");
   const migrationCancel = migrationDialog?.querySelector("[data-storage-minecraft-cancel]");
   const migrationDevice = migrationDialog?.querySelector("[data-storage-minecraft-device]");
@@ -47,7 +51,7 @@
   const migrationMountNote = migrationDialog?.querySelector("[data-storage-minecraft-mount-note]");
   const migrationPath = migrationDialog?.querySelector("[data-storage-minecraft-path]");
 
-  const actionDialog = document.querySelector("[data-storage-action-dialog]");
+  const actionDialog = root.querySelector("[data-storage-action-dialog]");
   const actionClose = actionDialog?.querySelector("[data-storage-action-close]");
   const actionCancel = actionDialog?.querySelector("[data-storage-action-cancel]");
   const actionTitle = actionDialog?.querySelector("[data-storage-action-title]");
@@ -98,6 +102,8 @@
   let reviewedPlan = null;
   let selectedWholeDisk = null;
   let reviewedWholeDisk = null;
+  let wholeDiskApplying = false;
+  let actionApplying = false;
 
   function closeActionMenu() {
     if (actionMenu) actionMenu.open = false;
@@ -269,9 +275,10 @@
   }
 
   detailClose?.addEventListener("click", closeDetailDialog);
+  detailDialog?.addEventListener("click", (event) => { if (event.target === detailDialog) closeDetailDialog(); });
   detailDialog?.addEventListener("close", closeActionMenu);
   detailDialog?.addEventListener("cancel", closeActionMenu);
-  document.addEventListener("pointerdown", (event) => {
+  root.addEventListener("pointerdown", (event) => {
     if (!actionMenu?.open) return;
     if (!actionMenu.contains(event.target)) closeActionMenu();
   });
@@ -381,10 +388,13 @@
   });
 
   function closeWholeDiskDialog() {
+    if (wholeDiskApplying) return;
     wholeDiskDialog?.close();
   }
   wholeDiskClose?.addEventListener("click", closeWholeDiskDialog);
   wholeDiskCancel?.addEventListener("click", closeWholeDiskDialog);
+  wholeDiskDialog?.addEventListener("click", (event) => { if (event.target === wholeDiskDialog) closeWholeDiskDialog(); });
+  wholeDiskDialog?.addEventListener("cancel", (event) => { if (wholeDiskApplying) event.preventDefault(); });
 
   wholeDiskReview?.addEventListener("click", async () => {
     if (!selectedWholeDisk) return;
@@ -472,14 +482,20 @@
       wholeDiskPlayers?.focus();
       return;
     }
+    wholeDiskApplying = true;
     wholeDiskApply.disabled = true;
+    if (wholeDiskClose) wholeDiskClose.disabled = true;
+    if (wholeDiskCancel) wholeDiskCancel.disabled = true;
     wholeDiskApply.textContent = "Applying…";
     try {
       const payload = await postWholeDisk("apply");
       if (payload.redirect) window.location.assign(payload.redirect);
       else window.location.reload();
     } catch (error) {
+      wholeDiskApplying = false;
       if (wholeDiskError) { wholeDiskError.textContent = error.message; wholeDiskError.hidden = false; }
+      if (wholeDiskClose) wholeDiskClose.disabled = false;
+      if (wholeDiskCancel) wholeDiskCancel.disabled = false;
       wholeDiskApply.disabled = false;
       wholeDiskApply.textContent = "Apply destructive action";
     }
@@ -521,6 +537,7 @@
   });
   migrationClose?.addEventListener("click", closeMigrationDialog);
   migrationCancel?.addEventListener("click", closeMigrationDialog);
+  migrationDialog?.addEventListener("click", (event) => { if (event.target === migrationDialog) closeMigrationDialog(); });
 
   function actionLabel(action) {
     if (action === "mount-for-now") return "Mount for now";
@@ -617,10 +634,13 @@
   });
 
   function closeActionDialog() {
+    if (actionApplying) return;
     actionDialog?.close();
   }
   actionClose?.addEventListener("click", closeActionDialog);
   actionCancel?.addEventListener("click", closeActionDialog);
+  actionDialog?.addEventListener("click", (event) => { if (event.target === actionDialog) closeActionDialog(); });
+  actionDialog?.addEventListener("cancel", (event) => { if (actionApplying) event.preventDefault(); });
 
   async function postAction(phase, extra) {
     const request = actionRequest();
@@ -743,7 +763,10 @@
       return;
     }
     const entered = expected && confirmationReady ? expected : "";
+    actionApplying = true;
     applyButton.disabled = true;
+    if (actionClose) actionClose.disabled = true;
+    if (actionCancel) actionCancel.disabled = true;
     applyButton.textContent = "Applying…";
     try {
       await postAction("apply", {
@@ -752,9 +775,17 @@
       });
       window.location.reload();
     } catch (error) {
+      actionApplying = false;
       if (actionError) { actionError.textContent = error.message; actionError.hidden = false; }
+      if (actionClose) actionClose.disabled = false;
+      if (actionCancel) actionCancel.disabled = false;
       applyButton.disabled = false;
       applyButton.textContent = reviewedPlan.destructive ? "Apply destructive action" : "Apply action";
     }
   });
+  }
+
+  window.JustVoxelStorageBrowser = { init: initStorageBrowser };
+  const initialStorageBrowser = document.querySelector("[data-storage-browser-root]");
+  if (initialStorageBrowser) initStorageBrowser(initialStorageBrowser);
 })();

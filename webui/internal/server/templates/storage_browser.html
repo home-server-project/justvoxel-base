@@ -1,31 +1,19 @@
-{{define "storage_browser.html"}}<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>JustVoxel - New Storage</title>
-  <link rel="stylesheet" href="/static/app.css">
-  <link rel="stylesheet" href="/static/storage-browser.css">
-  <script src="/static/app.js" defer></script>
-  <script src="/static/storage-browser.js" defer></script>
-</head>
-<body class="role-administrator">
-{{template "app-header" .}}
-<main class="storage-browser-shell">
-  <div class="title-row">
-    <div><p class="eyebrow">Administrator · preview</p><h1>New Storage</h1></div>
-    <span class="badge">{{.Identity.Username}}</span>
-  </div>
+{{define "storage_browser_content"}}
+<div class="storage-browser-shell storage-browser-content" data-storage-browser-root>
   <p class="muted storage-browser-intro">Choose a physical disk to see the partitions inside it. Partition changes are reviewed before they are applied.</p>
   {{if .MinecraftMigrationNote}}<div class="notice">{{.MinecraftMigrationNote}}</div>{{end}}
   <input type="hidden" value="{{.CSRF}}" data-storage-action-csrf>
 
-  {{if .Disks}}
-  <section class="storage-disk-browser" aria-label="Physical disks">
+  <section class="storage-drive-section" aria-label="Internal drives">
+    <div class="storage-drive-section-heading">
+      <div><p class="eyebrow">Storage</p><h3>Internal drives</h3></div>
+      <span class="badge">{{len .InternalDisks}}</span>
+    </div>
+    {{if .InternalDisks}}
     <div class="storage-disk-grid" role="list">
-      {{range $index, $disk := .Disks}}
-      <button class="storage-disk-card{{if eq $index 0}} is-selected{{end}}" type="button" role="listitem"
-              data-storage-disk="{{.Name}}" aria-pressed="{{if eq $index 0}}true{{else}}false{{end}}">
+      {{range .InternalDisks}}
+      <button class="storage-disk-card{{if eq $.SelectedDisk .Name}} is-selected{{end}}" type="button" role="listitem"
+              data-storage-disk="{{.Name}}" aria-pressed="{{if eq $.SelectedDisk .Name}}true{{else}}false{{end}}">
         <span class="storage-disk-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M7 15h.01M17 15h.01M7 9h10"></path></svg>
         </span>
@@ -37,13 +25,43 @@
       </button>
       {{end}}
     </div>
+    {{else}}
+    <p class="muted storage-drive-empty">No internal physical drives were reported.</p>
+    {{end}}
   </section>
 
+  <section class="storage-drive-section storage-external-section" aria-label="External USB drives">
+    <div class="storage-drive-section-heading">
+      <div><p class="eyebrow">External</p><h3>USB drives</h3></div>
+      <span class="badge">{{len .ExternalDisks}}</span>
+    </div>
+    {{if .ExternalDisks}}
+    <div class="storage-disk-grid" role="list">
+      {{range .ExternalDisks}}
+      <button class="storage-disk-card storage-disk-card-external{{if eq $.SelectedDisk .Name}} is-selected{{end}}" type="button" role="listitem"
+              data-storage-disk="{{.Name}}" aria-pressed="{{if eq $.SelectedDisk .Name}}true{{else}}false{{end}}">
+        <span class="storage-disk-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M9 3h6v5h2v9H7V8h2z"></path><path d="M11 3v3M13 3v3M9 20h6"></path></svg>
+        </span>
+        <span class="storage-disk-copy">
+          <strong>{{if .Model}}{{.Model}}{{else}}{{.Path}}{{end}}</strong>
+          <span>{{.Size}} · USB</span>
+          <small><code>{{.Path}}</code>{{if .System}} · System disk{{end}}</small>
+        </span>
+      </button>
+      {{end}}
+    </div>
+    {{else}}
+    <p class="muted storage-drive-empty">No USB storage detected.</p>
+    {{end}}
+  </section>
+
+  {{if .Disks}}
   <section class="storage-partition-browser" aria-live="polite">
-    {{range $index, $disk := .Disks}}
-    <div class="storage-partition-group" data-storage-partitions="{{.Name}}" {{if ne $index 0}}hidden{{end}}>
+    {{range .Disks}}
+    <div class="storage-partition-group" data-storage-partitions="{{.Name}}" {{if ne $.SelectedDisk .Name}}hidden{{end}}>
       <div class="section-heading storage-selected-heading">
-        <div><p class="eyebrow">Selected disk</p><h2>{{if .Model}}{{.Model}}{{else}}{{.Path}}{{end}}</h2></div>
+        <div><p class="eyebrow">Selected drive</p><h2>{{if .Model}}{{.Model}}{{else}}{{.Path}}{{end}}</h2></div>
         <span class="badge">{{.Size}}</span>
       </div>
 
@@ -100,7 +118,6 @@
   {{else}}
   <div class="notice">No physical disks were reported by the Management Agent.</div>
   {{end}}
-
   <dialog class="storage-detail-dialog" data-storage-detail-dialog>
     <div class="storage-detail-card">
       <div class="storage-detail-heading">
@@ -246,6 +263,29 @@
       </div>
     </div>
   </dialog>
+
+</div>
+{{end}}
+
+{{define "storage_browser.html"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>JustVoxel - Storage</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/storage-browser.css">
+  <script src="/static/app.js" defer></script>
+  <script src="/static/storage-browser.js" defer></script>
+</head>
+<body class="role-administrator">
+{{template "app-header" .}}
+<main>
+  <div class="title-row">
+    <div><p class="eyebrow">Administrator · fallback page</p><h1>Storage</h1></div>
+    <span class="badge">{{.Identity.Username}}</span>
+  </div>
+  {{template "storage_browser_content" .}}
 </main>
 </body>
 </html>{{end}}

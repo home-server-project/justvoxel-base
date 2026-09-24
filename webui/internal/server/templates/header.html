@@ -70,8 +70,7 @@
         <section class="control-section nav-operator-plus">
           <span class="control-section-label">Storage &amp; Backups</span>
           <div class="control-tile-grid">
-            <a class="control-tile nav-admin-only" href="/settings/storage" title="Current data locations"><strong>Storage overview</strong></a>
-            <a class="control-tile nav-admin-only" href="/settings/new-storage" title="Preview the new disk and partition browser"><strong>New Storage</strong></a>
+            <button class="control-tile nav-admin-only" type="button" data-storage-open title="Disks, partitions, mounts and external USB storage"><strong>Storage</strong></button>
             <a class="control-tile nav-admin-only" href="/settings/data-migration" title="Move server data safely"><strong>Minecraft data</strong></a>
             <a class="control-tile nav-admin-only" href="/settings/backup-storage" title="Destination and schedule"><strong>Backup storage</strong></a>
             <a class="control-tile nav-admin-only" href="/settings/new-backups" title="Preview the new unified backup library"><strong>New Backups</strong></a>
@@ -206,6 +205,25 @@
           <section class="system-monitor-card system-monitor-card-wide" data-monitor-card="sensors"><span>Sensors</span><div class="system-monitor-table" data-monitor-sensors></div></section>
           <section class="system-monitor-card system-monitor-card-wide" data-monitor-card="alerts"><span>Alerts</span><div class="system-monitor-table" data-monitor-alerts></div></section>
         </div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="workspace-window storage-workspace-dialog" data-workspace-window="storage" data-storage-workspace-dialog aria-labelledby="storage-workspace-title">
+    <div class="storage-workspace-shell">
+      <div class="storage-workspace-header" data-workspace-drag-handle>
+        <div>
+          <p class="eyebrow">JustVoxel</p>
+          <h2 id="storage-workspace-title">Storage</h2>
+        </div>
+        <div class="storage-workspace-header-actions">
+          <button class="system-monitor-header-button" type="button" data-storage-refresh aria-label="Refresh storage" title="Refresh storage">↻</button>
+          <button class="system-monitor-header-button" type="button" data-storage-close aria-label="Close storage">&times;</button>
+        </div>
+      </div>
+      <div class="storage-workspace-body">
+        <p class="storage-workspace-state" data-storage-state>Storage is loaded when this window opens.</p>
+        <div data-storage-workspace-content></div>
       </div>
     </div>
   </dialog>

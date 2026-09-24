@@ -1,11 +1,19 @@
 .storage-browser-shell [hidden]{display:none!important}
 .storage-browser-shell{max-width:1280px;padding-top:1rem}
-.storage-browser-intro{margin-top:-.25rem}
+.storage-browser-content{max-width:none;padding-top:0}
+.storage-browser-intro{margin:0 0 .85rem}
+.storage-drive-section{margin-top:.85rem}
+.storage-drive-section:first-of-type{margin-top:0}
+.storage-drive-section-heading{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:.5rem}
+.storage-drive-section-heading h3{margin:.05rem 0 0;font-size:.96rem}
+.storage-drive-empty{margin:.35rem 0 0;padding:.65rem .75rem;border:1px dashed #303942;border-radius:10px;background:#10161a;font-size:.8rem}
+.storage-external-section{padding-top:.8rem;border-top:1px solid #293139}
 .storage-disk-browser{margin-top:1rem}
 .storage-disk-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.7rem}
 .storage-disk-card{display:flex;align-items:center;gap:.8rem;min-width:0;padding:.85rem 1rem;border:1px solid #303942;border-radius:12px;background:#171d22;color:#eef1f4;text-align:left;cursor:pointer;transition:border-color .14s ease,background-color .14s ease,transform .14s ease}
 .storage-disk-card:hover,.storage-disk-card:focus-visible{border-color:#4f8b69;background:#1d2a23;transform:translateY(-1px)}
 .storage-disk-card.is-selected{border-color:#68bd8e;background:#203128;box-shadow:inset 0 0 0 1px #315940}
+.storage-disk-card-external .storage-disk-icon{color:#8ad4a9}
 .storage-disk-icon{display:grid;place-items:center;flex:0 0 38px;width:38px;height:38px;border-radius:10px;background:#10161a}
 .storage-disk-icon svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .storage-disk-copy{display:grid;min-width:0;gap:.08rem}
@@ -55,6 +63,8 @@ button.storage-partition-card:hover,button.storage-partition-card:focus-visible{
   .storage-partition-grid{grid-template-columns:1fr}
 }
 @media(prefers-color-scheme:light){
+  .storage-drive-empty{background:#f7f9fa;border-color:#d9dfe3}
+  .storage-external-section{border-color:#e2e7ea}
   .storage-disk-card,.storage-partition-card,.storage-partition-group,.storage-detail-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025}
   .storage-disk-card:hover,.storage-disk-card:focus-visible,button.storage-partition-card:hover,button.storage-partition-card:focus-visible{background:#eef6f1;border-color:#9fc9ae}
   .storage-disk-card.is-selected{background:#e3f1e8;border-color:#86b99a;box-shadow:inset 0 0 0 1px #b5d3c0}
