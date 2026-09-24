@@ -99,6 +99,44 @@
     </div>
   </details>
 
+  <section class="quick-look" data-quick-look aria-label="Quick Look">
+    <div class="quick-look-panel" id="quick-look-panel" data-quick-look-panel>
+      <div class="quick-look-grid">
+        <article class="quick-look-tile">
+          <div class="quick-look-tile-heading">
+            <span>Minecraft</span>
+            <details class="quick-look-actions nav-operator-plus" data-quick-look-actions>
+              <summary aria-label="Minecraft actions" title="Minecraft actions">⋯</summary>
+              <div class="quick-look-action-menu">
+                <form method="post" action="/minecraft/start" class="action-form role-admin-or-operator" data-progress="Starting…" data-minecraft-action="start">
+                  <input type="hidden" name="csrf" value="{{.CSRF}}">
+                  <button type="submit">Start</button>
+                </form>
+                <form method="post" action="/minecraft/stop" class="action-form role-admin" data-progress="Stopping…" data-minecraft-action="stop">
+                  <input type="hidden" name="csrf" value="{{.CSRF}}">
+                  <button type="submit">Stop</button>
+                </form>
+                <form method="post" action="/minecraft/restart" class="action-form role-admin-or-operator" data-progress="Restarting…" data-minecraft-action="restart">
+                  <input type="hidden" name="csrf" value="{{.CSRF}}">
+                  <button type="submit">Restart</button>
+                </form>
+              </div>
+            </details>
+          </div>
+          <strong data-quick-look-minecraft>—</strong>
+        </article>
+        <article class="quick-look-tile"><span>Version</span><strong data-quick-look-version>—</strong></article>
+        <article class="quick-look-tile"><span>Players</span><strong data-quick-look-players>—</strong></article>
+        <article class="quick-look-tile"><span>System</span><strong data-quick-look-system>—</strong></article>
+        <article class="quick-look-tile"><span>IPv4</span><strong data-quick-look-ipv4>—</strong></article>
+        <article class="quick-look-tile"><span>Backup</span><strong data-quick-look-backup>—</strong></article>
+      </div>
+    </div>
+    <button class="quick-look-handle" type="button" data-quick-look-toggle aria-expanded="false" aria-controls="quick-look-panel" aria-label="Toggle Quick Look">
+      <span aria-hidden="true">⌄</span>
+    </button>
+  </section>
+
   <input type="hidden" value="{{.CSRF}}" data-system-actions-csrf>
   <input type="hidden" value="{{.CSRF}}" data-system-update-csrf>
 

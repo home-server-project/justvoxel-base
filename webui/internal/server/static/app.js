@@ -298,6 +298,148 @@ if (dashboard) {
 
 
 
+const quickLook = document.querySelector("[data-quick-look]");
+const quickLookToggle = document.querySelector("[data-quick-look-toggle]");
+if (quickLook && quickLookToggle) {
+  const identityURL = "/api/session-info";
+  const statusURL = "/api/dashboard-status";
+  const actionMenus = Array.from(quickLook.querySelectorAll("[data-quick-look-actions]"));
+  let identity = null;
+  let refreshTimer = null;
+
+  const stateKey = (username) => `justvoxel-quick-look-v1:${encodeURIComponent(username)}`;
+
+  const setOpen = (open, persist = true) => {
+    quickLook.classList.toggle("is-open", open);
+    quickLookToggle.setAttribute("aria-expanded", open ? "true" : "false");
+    if (identity?.role === "administrator" && persist) {
+      try {
+        window.localStorage.setItem(stateKey(identity.username), open ? "open" : "closed");
+      } catch (_) {
+        // Drawer state persistence is optional.
+      }
+    }
+    if (open) {
+      refreshQuickLook();
+      if (!refreshTimer) refreshTimer = window.setInterval(refreshQuickLook, 5000);
+    } else if (refreshTimer) {
+      window.clearInterval(refreshTimer);
+      refreshTimer = null;
+    }
+  };
+
+  const setValue = (selector, value) => {
+    const node = quickLook.querySelector(selector);
+    if (node) node.textContent = value || "—";
+  };
+
+  const setActionAvailability = (status) => {
+    const running = status?.minecraft?.state === "Running";
+    quickLook.querySelectorAll("[data-minecraft-action]").forEach((form) => {
+      const button = form.querySelector('button[type="submit"]');
+      if (!button) return;
+      const action = form.dataset.minecraftAction;
+      button.disabled = action === "start"
+        ? !status.minecraft.configured || running
+        : !running;
+    });
+  };
+
+  const renderQuickLook = (snapshot) => {
+    const status = snapshot?.status || {};
+    const minecraft = status.minecraft || {};
+    const players = snapshot?.players || {};
+    const system = status.system || {};
+    const backup = status.backup || {};
+
+    setValue("[data-quick-look-minecraft]", minecraft.state);
+    setValue("[data-quick-look-version]", minecraft.version);
+    setValue(
+      "[data-quick-look-players]",
+      minecraft.configured ? `${players.online ?? 0} / ${players.max ?? minecraft.max_players ?? "—"}` : "Not configured",
+    );
+    setValue("[data-quick-look-system]", system.health);
+    setValue("[data-quick-look-ipv4]", system.ipv4);
+    setValue("[data-quick-look-backup]", backup.enabled ? "Enabled" : "Disabled");
+    setActionAvailability(status);
+  };
+
+  async function refreshQuickLook() {
+    try {
+      const response = await fetch(statusURL, {
+        method: "GET",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (response.status === 401) {
+        window.location.assign("/login");
+        return;
+      }
+      if (response.status === 403) {
+        window.location.assign("/password");
+        return;
+      }
+      if (!response.ok) return;
+      renderQuickLook(await response.json());
+    } catch (_) {
+      // Keep the last values and retry on the next refresh.
+    }
+  }
+
+  const loadQuickLookIdentity = async () => {
+    try {
+      const response = await fetch(identityURL, {
+        method: "GET",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (response.status === 401) {
+        window.location.assign("/login");
+        return;
+      }
+      if (!response.ok) return;
+
+      const result = await response.json();
+      const role = String(result.role || "").toLowerCase();
+      const username = String(result.username || "");
+      if (!username || !["administrator", "operator", "viewer"].includes(role)) return;
+
+      identity = { username, role };
+      document.body.classList.remove("role-pending");
+      document.body.classList.add(`role-${role}`);
+
+      if (role === "viewer" || role === "operator") {
+        setOpen(true, false);
+        return;
+      }
+
+      let saved = "closed";
+      try {
+        saved = window.localStorage.getItem(stateKey(username)) || "closed";
+      } catch (_) {
+        saved = "closed";
+      }
+      setOpen(saved === "open", false);
+    } catch (_) {
+      // Keep role-gated controls closed if identity cannot be loaded.
+    }
+  };
+
+  quickLookToggle.addEventListener("click", () => {
+    setOpen(!quickLook.classList.contains("is-open"));
+  });
+
+  document.addEventListener("click", (event) => {
+    actionMenus.forEach((menu) => {
+      if (menu.open && !menu.contains(event.target)) menu.open = false;
+    });
+  });
+
+  loadQuickLookIdentity();
+}
+
 const controlCenter = document.querySelector("[data-control-center]");
 const topbarClock = document.querySelector("[data-topbar-clock]");
 if (topbarClock) {
