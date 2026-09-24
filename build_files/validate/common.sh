@@ -119,7 +119,7 @@ bash -n /usr/libexec/justvoxel/console-issue-refresh
 # fields that are always meaningful in that environment.
 issue_test="$(mktemp)"
 trap 'rm -f "${issue_test}"' EXIT
-/usr/libexec/justvoxel/motd --issue > "${issue_test}"
+timeout 5s /usr/libexec/justvoxel/motd --issue > "${issue_test}"
 grep -Fq 'JUSTVOXEL' "${issue_test}"
 grep -Fq 'Variant:' "${issue_test}"
 grep -Fq 'Minecraft:' "${issue_test}"
@@ -138,6 +138,10 @@ test -r /run/justvoxel/issue
 rm -rf /run/justvoxel
 test -f /etc/profile.d/90-justvoxel-motd.sh
 bash -n /etc/profile.d/90-justvoxel-motd.sh
+grep -Fq 'timeout 3s /usr/libexec/justvoxel/motd || true' /etc/profile.d/90-justvoxel-motd.sh
+grep -Fq 'timeout 1s nmcli' /usr/libexec/justvoxel/motd
+grep -Fq 'timeout 1s tailscale ip -4' /usr/libexec/justvoxel/motd
+grep -Fq 'timeout 1s netbird status --ipv4' /usr/libexec/justvoxel/motd
 test -x /usr/libexec/justvoxel/motd
 bash -n /usr/libexec/justvoxel/motd
 grep -Fq 'Minecraft Server Appliance' /usr/libexec/justvoxel/motd

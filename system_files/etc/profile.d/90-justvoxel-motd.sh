@@ -8,7 +8,7 @@ case "$-" in
             if [ -d "${HOME:-}" ] \
                 && [ ! -e "${HOME}/.config/justvoxel/no-welcome" ] \
                 && [ -x /usr/libexec/justvoxel/motd ]; then
-                /usr/libexec/justvoxel/motd
+                timeout 3s /usr/libexec/justvoxel/motd || true
             fi
         fi
         ;;
