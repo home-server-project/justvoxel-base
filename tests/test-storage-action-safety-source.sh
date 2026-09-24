@@ -82,7 +82,7 @@ grep -Fq 'storage_mkfs_xfs JV_STORAGE "${device}"' "${apply}" || {
 if grep -Fq 'mkfs.xfs' "${apply}"; then
     echo 'ERROR: generic partition formatting bypasses the shared XFS label-length guard.' >&2
     exit 1
-}
+fi
 grep -Fq 'storage_target_block_device' "${base}" || {
     echo 'ERROR: system-disk detection lost bootc/OSTree block-device resolution.' >&2
     exit 1
