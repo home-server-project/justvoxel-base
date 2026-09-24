@@ -234,7 +234,7 @@ jobs:
               trap cleanup_glances EXIT
               ready=0
               for _ in $(seq 1 20); do
-                  if python3 -c 'import json, urllib.request; payload=json.load(urllib.request.urlopen("http://127.0.0.1:61208/api/4/all", timeout=1)); assert isinstance(payload, dict) and "cpu" in payload and "mem" in payload'; then
+                  if curl -fsS --max-time 1 http://127.0.0.1:61208/api/4/all | jq -e "has(\"cpu\") and has(\"mem\")" >/dev/null; then
                       ready=1
                       break
                   fi
