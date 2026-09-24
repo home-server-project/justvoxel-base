@@ -103,12 +103,12 @@
   <input type="hidden" value="{{.CSRF}}" data-system-update-csrf>
 
 
-  <dialog class="system-monitor-dialog" data-system-monitor-dialog>
+  <dialog class="workspace-window system-monitor-dialog" data-workspace-window="system-monitor" data-system-monitor-dialog aria-labelledby="system-monitor-title">
     <div class="system-monitor-shell">
-      <div class="system-monitor-header">
+      <div class="system-monitor-header" data-workspace-drag-handle>
         <div>
           <p class="eyebrow">JustVoxel</p>
-          <h2>System Monitor</h2>
+          <h2 id="system-monitor-title">System Monitor</h2>
         </div>
         <div class="system-monitor-header-actions">
           <button class="system-monitor-header-button" type="button" data-system-monitor-profile-toggle aria-label="Configure monitor" title="Configure monitor">⚙</button>

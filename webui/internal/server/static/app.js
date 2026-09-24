@@ -982,6 +982,174 @@ if (systemUpdateOpen && systemUpdateDialog) {
 }
 
 
+const workspaceWindows = new Set();
+let workspaceWindowZ = 120;
+const workspaceCompactQuery = window.matchMedia("(max-width: 700px)");
+
+const workspaceWindowStateKey = (id) => `justvoxel-workspace-window-v1:${id}`;
+
+const readWorkspaceWindowState = (id) => {
+  try {
+    return JSON.parse(window.localStorage.getItem(workspaceWindowStateKey(id)) || "{}");
+  } catch (_) {
+    return {};
+  }
+};
+
+const writeWorkspaceWindowState = (id, patch) => {
+  try {
+    const current = readWorkspaceWindowState(id);
+    window.localStorage.setItem(workspaceWindowStateKey(id), JSON.stringify({ ...current, ...patch }));
+  } catch (_) {
+    // Layout persistence is optional. The window still works without browser storage.
+  }
+};
+
+const workspaceTopInset = () => {
+  const topbar = document.querySelector(".topbar");
+  return Math.max(8, Math.round((topbar?.getBoundingClientRect().bottom || 0) + 8));
+};
+
+const clampWorkspaceWindow = (element) => {
+  if (!element.open || workspaceCompactQuery.matches) return;
+  const rect = element.getBoundingClientRect();
+  const minTop = workspaceTopInset();
+  const left = Math.min(Math.max(rect.left, 8), Math.max(8, window.innerWidth - rect.width - 8));
+  const top = Math.min(Math.max(rect.top, minTop), Math.max(minTop, window.innerHeight - rect.height - 8));
+  element.style.left = Math.round(left) + "px";
+  element.style.top = Math.round(top) + "px";
+};
+
+const setupWorkspaceWindow = (element, options = {}) => {
+  const id = element.dataset.workspaceWindow;
+  if (!id) return null;
+
+  workspaceWindows.add(element);
+  const dragHandle = element.querySelector("[data-workspace-drag-handle]");
+  let resizeSaveTimer = null;
+
+  const bringToFront = () => {
+    workspaceWindowZ += 1;
+    element.style.zIndex = String(workspaceWindowZ);
+  };
+
+  const persistGeometry = () => {
+    if (!element.open || workspaceCompactQuery.matches) return;
+    const rect = element.getBoundingClientRect();
+    writeWorkspaceWindowState(id, {
+      left: Math.round(rect.left),
+      top: Math.round(rect.top),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+    });
+  };
+
+  const applySavedGeometry = () => {
+    if (workspaceCompactQuery.matches) return;
+    const saved = readWorkspaceWindowState(id);
+    if (Number.isFinite(saved.width) && saved.width > 0) element.style.width = saved.width + "px";
+    if (Number.isFinite(saved.height) && saved.height > 0) element.style.height = saved.height + "px";
+    if (Number.isFinite(saved.left)) element.style.left = saved.left + "px";
+    if (Number.isFinite(saved.top)) element.style.top = saved.top + "px";
+
+    window.requestAnimationFrame(() => {
+      if (!Number.isFinite(saved.left) || !Number.isFinite(saved.top)) {
+        const rect = element.getBoundingClientRect();
+        element.style.left = Math.max(8, Math.round((window.innerWidth - rect.width) / 2)) + "px";
+        element.style.top = Math.max(workspaceTopInset(), Math.round((window.innerHeight - rect.height) / 2)) + "px";
+      }
+      clampWorkspaceWindow(element);
+      persistGeometry();
+    });
+  };
+
+  const open = () => {
+    if (!element.open) element.show();
+    bringToFront();
+    applySavedGeometry();
+    writeWorkspaceWindowState(id, { open: true });
+    options.onOpen?.();
+  };
+
+  const close = () => {
+    if (element.open) element.close();
+  };
+
+  element.addEventListener("pointerdown", bringToFront);
+
+  if (dragHandle) {
+    dragHandle.addEventListener("pointerdown", (event) => {
+      if (workspaceCompactQuery.matches) return;
+      if (event.button !== 0) return;
+      if (event.target.closest("button,a,input,select,label")) return;
+
+      bringToFront();
+      const rect = element.getBoundingClientRect();
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const startLeft = rect.left;
+      const startTop = rect.top;
+      const minTop = workspaceTopInset();
+
+      event.preventDefault();
+      dragHandle.setPointerCapture(event.pointerId);
+
+      const move = (moveEvent) => {
+        const left = Math.min(
+          Math.max(startLeft + moveEvent.clientX - startX, 8),
+          Math.max(8, window.innerWidth - rect.width - 8),
+        );
+        const top = Math.min(
+          Math.max(startTop + moveEvent.clientY - startY, minTop),
+          Math.max(minTop, window.innerHeight - rect.height - 8),
+        );
+        element.style.left = Math.round(left) + "px";
+        element.style.top = Math.round(top) + "px";
+      };
+
+      const finish = () => {
+        dragHandle.removeEventListener("pointermove", move);
+        dragHandle.removeEventListener("pointerup", finish);
+        dragHandle.removeEventListener("pointercancel", finish);
+        persistGeometry();
+      };
+
+      dragHandle.addEventListener("pointermove", move);
+      dragHandle.addEventListener("pointerup", finish);
+      dragHandle.addEventListener("pointercancel", finish);
+    });
+  }
+
+  const resizeObserver = new ResizeObserver(() => {
+    if (!element.open || workspaceCompactQuery.matches) return;
+    window.clearTimeout(resizeSaveTimer);
+    resizeSaveTimer = window.setTimeout(() => {
+      clampWorkspaceWindow(element);
+      persistGeometry();
+    }, 120);
+  });
+  resizeObserver.observe(element);
+
+  element.addEventListener("close", () => {
+    writeWorkspaceWindowState(id, { open: false });
+    options.onClose?.();
+  });
+
+  return { open, close, bringToFront, id };
+};
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  const openWindows = Array.from(workspaceWindows).filter((element) => element.open);
+  if (openWindows.length === 0) return;
+  openWindows.sort((a, b) => Number(b.style.zIndex || 0) - Number(a.style.zIndex || 0));
+  openWindows[0].close();
+});
+
+window.addEventListener("resize", () => {
+  workspaceWindows.forEach((element) => clampWorkspaceWindow(element));
+});
+
 const systemMonitorOpen = document.querySelector("[data-system-monitor-open]");
 const systemMonitorDialog = document.querySelector("[data-system-monitor-dialog]");
 if (systemMonitorOpen && systemMonitorDialog) {
@@ -1015,7 +1183,6 @@ if (systemMonitorOpen && systemMonitorDialog) {
     profileInputs.forEach((input) => { input.checked = profile[input.dataset.monitorProfile] !== false; });
     if (processCount) processCount.value = String(profile.processCount || 10);
     cards.forEach((card) => { card.hidden = profile[card.dataset.monitorCard] === false; });
-    systemMonitorDialog.style.removeProperty("--system-monitor-width");
   };
   const fixed = (value, digits = 1) => {
     const parsed = Number(value);
@@ -1145,18 +1312,26 @@ if (systemMonitorOpen && systemMonitorDialog) {
     }
   };
   const stopRefresh = () => { if (refreshTimer) window.clearInterval(refreshTimer); refreshTimer = null; };
-  const openMonitor = () => {
-    readProfile(); syncProfile();
+  const startRefresh = () => {
+    readProfile();
+    syncProfile();
     if (profilePanel) profilePanel.hidden = true;
-    if (controlCenter) controlCenter.open = false;
-    systemMonitorDialog.showModal();
-    refreshMonitor(); stopRefresh();
+    refreshMonitor();
+    stopRefresh();
     refreshTimer = window.setInterval(refreshMonitor, 2000);
   };
-  systemMonitorOpen.addEventListener("click", openMonitor);
-  if (closeButton) closeButton.addEventListener("click", () => systemMonitorDialog.close());
-  systemMonitorDialog.addEventListener("close", stopRefresh);
-  systemMonitorDialog.addEventListener("click", (event) => { if (event.target === systemMonitorDialog) systemMonitorDialog.close(); });
+
+  const workspaceWindow = setupWorkspaceWindow(systemMonitorDialog, {
+    onOpen: startRefresh,
+    onClose: stopRefresh,
+  });
+
+  systemMonitorOpen.addEventListener("click", () => {
+    if (controlCenter) controlCenter.open = false;
+    workspaceWindow?.open();
+  });
+  if (closeButton) closeButton.addEventListener("click", () => workspaceWindow?.close());
+
   if (profileToggle && profilePanel) profileToggle.addEventListener("click", () => { profilePanel.hidden = !profilePanel.hidden; });
   profileInputs.forEach((input) => input.addEventListener("change", () => {
     profile[input.dataset.monitorProfile] = input.checked; saveProfile(); syncProfile();
@@ -1167,4 +1342,20 @@ if (systemMonitorOpen && systemMonitorDialog) {
   if (resetButton) resetButton.addEventListener("click", () => {
     profile = { ...defaultProfile }; saveProfile(); syncProfile(); refreshMonitor();
   });
+
+  const restoreWhenRoleKnown = () => {
+    if (!readWorkspaceWindowState("system-monitor").open) return;
+    if (document.body.classList.contains("role-administrator")) {
+      workspaceWindow?.open();
+      return;
+    }
+    if (!document.body.classList.contains("role-pending")) return;
+    const observer = new MutationObserver(() => {
+      if (document.body.classList.contains("role-pending")) return;
+      observer.disconnect();
+      if (document.body.classList.contains("role-administrator")) workspaceWindow?.open();
+    });
+    observer.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+  };
+  restoreWhenRoleKnown();
 }
