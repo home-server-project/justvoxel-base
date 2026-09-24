@@ -67,20 +67,14 @@ enable_web() {
     install -d -m0700 "${state_dir}"
     "${agent}" bootstrap >/dev/null
     systemctl enable --now "${agent_service}" >/dev/null
-    if ! systemctl enable --now "${monitor_service}" >/dev/null; then
+    if ! systemctl enable --now "${web_service}" >/dev/null; then
         systemctl disable --now "${agent_service}" >/dev/null 2>&1 || true
         firewall_close
         rm -f "${enabled_marker}"
         return 1
     fi
-    if ! systemctl enable --now "${web_service}" >/dev/null; then
-        systemctl disable --now "${monitor_service}" "${agent_service}" >/dev/null 2>&1 || true
-        firewall_close
-        rm -f "${enabled_marker}"
-        return 1
-    fi
     if ! wait_for_web_healthy; then
-        systemctl disable --now "${web_service}" "${monitor_service}" "${agent_service}" >/dev/null 2>&1 || true
+        systemctl disable --now "${web_service}" "${agent_service}" >/dev/null 2>&1 || true
         firewall_close
         rm -f "${enabled_marker}"
         echo 'ERROR: WebUI health check failed; listener was not exposed.' >&2
@@ -93,7 +87,7 @@ enable_web() {
 
 disable_web() {
     firewall_close
-    systemctl disable --now "${web_service}" "${monitor_service}" "${agent_service}" >/dev/null 2>&1 || true
+    systemctl disable --now "${web_service}" "${agent_service}" >/dev/null 2>&1 || true
     rm -f "${enabled_marker}"
 }
 

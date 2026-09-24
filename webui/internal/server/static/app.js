@@ -997,7 +997,7 @@ if (systemMonitorOpen && systemMonitorDialog) {
   const profileKey = "justvoxel-system-monitor-profile-v1";
   const defaultProfile = {
     system: true, cpu: true, memory: true, load: true, filesystem: true,
-    diskio: true, network: true, processes: true, containers: true, sensors: true,
+    diskio: true, network: true, processes: true, containers: true, sensors: true, alerts: true,
     processCount: 10,
   };
   let profile = { ...defaultProfile };
@@ -1015,9 +1015,7 @@ if (systemMonitorOpen && systemMonitorDialog) {
     profileInputs.forEach((input) => { input.checked = profile[input.dataset.monitorProfile] !== false; });
     if (processCount) processCount.value = String(profile.processCount || 10);
     cards.forEach((card) => { card.hidden = profile[card.dataset.monitorCard] === false; });
-    const visible = cards.filter((card) => !card.hidden).length;
-    const width = visible >= 6 ? 1120 : visible >= 3 ? 760 : 430;
-    systemMonitorDialog.style.setProperty("--system-monitor-width", width + "px");
+    systemMonitorDialog.style.removeProperty("--system-monitor-width");
   };
   const fixed = (value, digits = 1) => {
     const parsed = Number(value);
@@ -1085,14 +1083,14 @@ if (systemMonitorOpen && systemMonitorDialog) {
   const renderMonitor = (data) => {
     const system = data.system || {}, uptime = data.uptime || {}, cpu = data.cpu || {};
     const mem = data.mem || {}, swap = data.memswap || {}, load = data.load || {};
-    setText("[data-monitor-system-host]", system.hostname || system.hr_name || "JustVoxel");
+    setText("[data-monitor-system-host]", "JustVoxel");
     renderLines("[data-monitor-system-lines]", [
-      ["OS", system.os_name || system.platform || system.linux_distro],
-      ["Kernel", system.os_version || system.kernel_version],
+      ["Hostname", system.hostname],
+      ["Kernel", system.os_version],
       ["Uptime", typeof uptime === "string" ? uptime : uptime.value],
     ]);
     setText("[data-monitor-cpu-total]", percent(cpu.total));
-    renderLines("[data-monitor-cpu-lines]", [["User", percent(cpu.user)], ["System", percent(cpu.system)], ["I/O wait", percent(cpu.iowait)], ["Idle", percent(cpu.idle)]]);
+    renderLines("[data-monitor-cpu-lines]", [["Cores", cpu.cpucore], ["User", percent(cpu.user)], ["System", percent(cpu.system)], ["I/O wait", percent(cpu.iowait)], ["Idle", percent(cpu.idle)]]);
     setText("[data-monitor-memory-main]", percent(mem.percent));
     renderLines("[data-monitor-memory-lines]", [["Used", bytes(mem.used)], ["Available", bytes(mem.available)], ["Total", bytes(mem.total)], ["Swap", swap.total ? bytes(swap.used) + " / " + bytes(swap.total) : "Not used"]]);
     setText("[data-monitor-load-main]", fixed(load.min1) + " / " + fixed(load.min5) + " / " + fixed(load.min15));
@@ -1122,6 +1120,16 @@ if (systemMonitorOpen && systemMonitorDialog) {
       {label:"Sensor", render:(row)=>row.label || row.name},
       {label:"Value", render:(row)=>row.value === undefined || row.value === null ? "—" : String(row.value) + (row.unit || "")}
     ]);
+    const alerts = (Array.isArray(data.alert) ? data.alert : []).filter((row) => row && (row.end === undefined || row.end === null || Number(row.end) < 0));
+    const alertsCard = systemMonitorDialog.querySelector('[data-monitor-card="alerts"]');
+    if (alertsCard) alertsCard.hidden = profile.alerts === false || alerts.length === 0;
+    if (alerts.length > 0) {
+      renderTable("[data-monitor-alerts]", alerts, [
+        {label:"State", render:(row)=>row.state},
+        {label:"Type", render:(row)=>row.type},
+        {label:"Message", render:(row)=>row.global_msg || row.desc || "Active alert"}
+      ]);
+    }
     if (state) state.textContent = "Live resources · refresh every 2 seconds";
     if (error) error.hidden = true;
   };

@@ -3,7 +3,7 @@ Description=JustVoxel WebUI
 Documentation=https://github.com/home-server-project/justvoxel-webui
 Requires=justvoxel-management.service
 After=network-online.target justvoxel-management.service
-Wants=network-online.target
+Wants=network-online.target justvoxel-glances.service
 
 [Service]
 Type=simple

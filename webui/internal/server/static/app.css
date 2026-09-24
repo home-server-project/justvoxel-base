@@ -372,7 +372,7 @@ body.role-operator .control-tile.nav-operator-plus{display:flex!important}
 
 
 /* JustVoxel System Monitor powered by the loopback-only Glances API. */
-.system-monitor-dialog{--system-monitor-width:1120px;width:min(var(--system-monitor-width),calc(100vw - 2rem));max-width:calc(100vw - 2rem);max-height:calc(100dvh - 2rem);padding:0;overflow:hidden;border:1px solid #3b454e;border-radius:16px;background:#171d22;color:#eef1f4;box-shadow:0 28px 80px #000b}
+.system-monitor-dialog{width:fit-content;min-width:min(360px,calc(100vw - 2rem));max-width:calc(100vw - 2rem);max-height:calc(100dvh - 2rem);padding:0;overflow:hidden;border:1px solid #3b454e;border-radius:16px;background:#171d22;color:#eef1f4;box-shadow:0 28px 80px #000b}
 .system-monitor-dialog::backdrop{background:#050708a8;backdrop-filter:blur(3px)}
 .system-monitor-shell{display:flex;flex-direction:column;max-height:inherit}
 .system-monitor-header{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;padding:1rem 1.1rem .8rem;border-bottom:1px solid #303942}
@@ -389,11 +389,11 @@ body.role-operator .control-tile.nav-operator-plus{display:flex!important}
 .system-monitor-body{overflow:auto;padding:1rem 1.1rem 1.1rem}
 .system-monitor-state{margin:0 0 .75rem;color:#9ca7b0;font-size:.8rem}
 .system-monitor-error{margin:0 0 .75rem;padding:.65rem .75rem;border:1px solid #a64c4c;border-radius:8px;background:#5b282833;color:#ffc1b8}
-.system-monitor-grid{display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));gap:.7rem}
+.system-monitor-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.7rem;width:fit-content;max-width:100%}
 .system-monitor-card{min-width:0;padding:.8rem;border:1px solid #303942;border-radius:11px;background:#13191e}
 .system-monitor-card>span{display:block;margin-bottom:.35rem;color:#89959e;font-size:.7rem;font-weight:800;letter-spacing:.07em;text-transform:uppercase}
 .system-monitor-card>strong{display:block;margin-bottom:.35rem;font-size:1.22rem}
-.system-monitor-card-wide{grid-column:span 2}
+.system-monitor-card-wide{grid-column:1/-1}
 .system-monitor-lines{display:grid;gap:.22rem}
 .system-monitor-lines>div{display:flex;justify-content:space-between;gap:1rem;font-size:.8rem}
 .system-monitor-lines span{color:#89959e}.system-monitor-lines strong{font-weight:650;text-align:right}

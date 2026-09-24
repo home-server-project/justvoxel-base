@@ -187,6 +187,15 @@ test -f /etc/glances/glances.conf
 grep -Fq -- '--bind 127.0.0.1 --port 61208' /usr/lib/systemd/system/justvoxel-glances.service
 grep -Fq -- '--disable-webui' /usr/lib/systemd/system/justvoxel-glances.service
 grep -Fqx 'podman_sock=unix:///run/podman/podman.sock' /etc/glances/glances.conf
+grep -Fq 'Wants=network-online.target justvoxel-glances.service' /usr/lib/systemd/system/justvoxel-webui.service
+if grep -Fq 'Requires=justvoxel-glances.service' /usr/lib/systemd/system/justvoxel-webui.service; then
+    echo 'ERROR: System Monitor must not be a hard WebUI dependency.' >&2
+    exit 1
+fi
+if grep -Fq 'systemctl enable --now "${monitor_service}"' /usr/libexec/justvoxel/mjust/web; then
+    echo 'ERROR: mjust web must not control the Glances lifecycle.' >&2
+    exit 1
+fi
 test -f /usr/lib/firewalld/services/justvoxel-web.xml
 grep -Fqx 'User=justvoxel-web' /usr/lib/systemd/system/justvoxel-webui.service
 grep -Fqx 'User=root' /usr/lib/systemd/system/justvoxel-management.service
