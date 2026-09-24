@@ -44,10 +44,12 @@ done
 grep -Fq '"${JV_SYSTEM_UPDATE_API_CLIENT}" GET /v1/admin/system/updates' "${system_update_api}" || fail 'System Update frontend status endpoint missing'
 grep -Fq '"${JV_SYSTEM_UPDATE_API_CLIENT}" POST /v1/admin/system/updates' "${system_update_api}" || fail 'System Update frontend update endpoint missing'
 grep -Fq 'GET /v1/admin/system/updates' "${system_update_agent}" || fail 'System Update status route missing'
+grep -Fq 'POST /v1/admin/system/updates/check' "${system_update_agent}" || fail 'System Update fresh-check route missing'
 grep -Fq 'POST /v1/admin/system/updates' "${system_update_agent}" || fail 'System Update apply route missing'
 grep -Fq 'exec.CommandContext(ctx, "bootc", "status", "--json", "--format-version=1")' "${system_update_agent}" || fail 'System Update backend bootc status command missing'
+grep -Fq 'exec.CommandContext(ctx, "bootc", "upgrade", "--check")' "${system_update_agent}" || fail 'System Update backend fresh registry check missing'
 grep -Fq 'exec.CommandContext(ctx, "bootc", "upgrade")' "${system_update_agent}" || fail 'System Update backend ordinary bootc upgrade command missing'
-if grep -Eq -- '--check|--download-only|--from-downloaded|--apply' "${system_update_agent}"; then fail 'System Update backend contains an unwanted bootc pre-check/apply mode'; fi
+if grep -Eq -- '--download-only|--from-downloaded|--apply' "${system_update_agent}"; then fail 'System Update backend contains an unwanted bootc download/apply mode'; fi
 grep -Fq 'JustVoxel operating system' "${os_status}" || fail 'OS status summary missing'
 
 grep -Fq 'ProtectSystem=true' "${management_unit}" || fail 'management service must keep /etc writable for PAM system password changes'
