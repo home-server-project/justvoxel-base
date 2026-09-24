@@ -99,6 +99,25 @@ Administrator/runtime configuration lives under `/etc`, including:
 
 Persistent application and management state lives under `/var`.
 
+Management journals and human-readable diagnostic logs use one persistent hierarchy:
+
+```text
+/var/lib/justvoxel/management/
+├── logs/
+│   ├── operations/
+│   └── setup-logs/
+├── setup.lock
+├── restore.lock
+├── data-migration.lock
+└── server-migration.lock
+```
+
+Operation journals are stored as JSON under `/var/lib/justvoxel/management/logs/operations/`. Setup diagnostic logs are stored under `/var/lib/justvoxel/management/logs/setup-logs/` and remain available through the existing downloadable setup-log API.
+
+Future management logs intended for diagnostics, support, or a built-in log/document viewer should use `/var/lib/justvoxel/management/logs/<feature>/`. Runtime coordination files such as lock files remain directly under `/var/lib/justvoxel/management/`.
+
+On Management Agent startup, legacy `management/operations/` and `management/setup-logs/` directories are migrated into the `logs/` hierarchy without overwriting existing data. If both a legacy directory and its new destination already contain data, startup fails safely instead of merging or deleting either copy.
+
 Bootc image updates may update the immutable implementation, but JustVoxel does not silently replace the active administrator configuration in `/etc` as part of an ordinary image update.
 
 ## Manual edits and generated files
