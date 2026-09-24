@@ -52,7 +52,7 @@ grep -Fq 'if (( ${#label} > 12 )); then' "${base}" || {
     exit 1
 }
 for invalid_label in JUSTVOXEL_BACKUP JUSTVOXEL_DATA JUSTVOXEL_STORAGE; do
-    if grep -Fq "${invalid_label}" "${base}" "${provision}" "${migration_transaction}"; then
+    if grep -Fq "${invalid_label}" "${base}" "${apply}" "${provision}" "${migration_transaction}"; then
         echo "ERROR: overlong XFS label remains: ${invalid_label}" >&2
         exit 1
     fi
@@ -73,6 +73,14 @@ grep -Fq 'storage_mkfs_xfs JV_BACKUP' "${provision}" || {
 }
 grep -Fq 'storage_mkfs_xfs JV_DATA' "${migration_transaction}" || {
     echo 'ERROR: Minecraft migration is not using the validated short XFS label.' >&2
+    exit 1
+}
+grep -Fq 'storage_mkfs_xfs JV_STORAGE "${device}"' "${apply}" || {
+    echo 'ERROR: generic partition formatting is not using the validated short XFS label.' >&2
+    exit 1
+}
+if grep -Fq 'mkfs.xfs' "${apply}"; then
+    echo 'ERROR: generic partition formatting bypasses the shared XFS label-length guard.' >&2
     exit 1
 }
 grep -Fq 'storage_target_block_device' "${base}" || {

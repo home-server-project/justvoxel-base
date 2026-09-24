@@ -44,7 +44,7 @@ storage_action_apply_json() {
                 json_error 'The partition is still in use and could not be unmounted. It was not formatted.'
                 return 0
             fi
-            if ! mkfs.xfs -f -L JUSTVOXEL_STORAGE "${device}" >/dev/null 2>&1; then
+            if ! storage_mkfs_xfs JV_STORAGE "${device}" >/dev/null 2>&1; then
                 json_error 'Formatting failed. Inspect the partition before retrying.'
                 return 0
             fi
