@@ -104,7 +104,7 @@ if grep -Eq -- '--backup-minecraft|--warning-seconds' "${system_actions_backend}
 fi
 
 grep -Fq 'JV_INTERRUPT_WARNING_SECONDS:-60' "${interrupt_safety}" || fail 'Normal player warning must remain 60 seconds by default'
-grep -Fq 'warning_seconds}" == 10' "${interrupt_safety}" || fail 'Quick reboot 10-second warning path missing'
+grep -Fq 'warning_seconds} == 10' "${interrupt_safety}" || fail 'Quick reboot 10-second warning path missing'
 grep -Fq -- '--backup-minecraft' "${system_update_reboot_helper}" || fail 'Update reboot helper backup option missing'
 grep -Fq -- '--warning-seconds=10' "${system_update_reboot_helper}" || fail 'Update reboot helper quick-warning option missing'
 grep -Fq 'systemd-run --quiet --collect --unit="${unit_name}"' "${system_update_reboot_helper}" || fail 'Update reboot helper must queue the detached worker'
