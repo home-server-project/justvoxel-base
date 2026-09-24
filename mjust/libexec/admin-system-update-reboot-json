@@ -80,6 +80,8 @@ request_reboot() {
     mv -f "${state_file}.tmp" "${state_file}"
 
     if ! systemd-run --quiet --collect --unit="${unit_name}"         --setenv="JV_UPDATE_REBOOT_BACKUP=${backup_minecraft}"         --setenv="JV_UPDATE_REBOOT_WARNING_SECONDS=${warning_seconds}"         --setenv="JV_UPDATE_REBOOT_WAS_ACTIVE=${was_active}"         "${worker}"; then
+        jq -cn '{ok:true,state:"failed",accepted:false,confirmation_required:false,reason:"action_failed",message:"System update reboot workflow could not be started."}' > "${state_file}.tmp"
+        mv -f "${state_file}.tmp" "${state_file}"
         emit_error action_failed 'System update reboot workflow could not be started.'
         return 4
     fi
