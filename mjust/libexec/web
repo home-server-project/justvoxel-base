@@ -8,6 +8,7 @@ readonly auth_mode_file=${state_dir}/auth-mode.json
 readonly agent=/usr/libexec/justvoxel/management-agent
 readonly web_service=justvoxel-webui.service
 readonly agent_service=justvoxel-management.service
+readonly monitor_service=justvoxel-glances.service
 readonly firewall_service=justvoxel-web
 readonly port=8099
 
@@ -66,14 +67,20 @@ enable_web() {
     install -d -m0700 "${state_dir}"
     "${agent}" bootstrap >/dev/null
     systemctl enable --now "${agent_service}" >/dev/null
-    if ! systemctl enable --now "${web_service}" >/dev/null; then
+    if ! systemctl enable --now "${monitor_service}" >/dev/null; then
         systemctl disable --now "${agent_service}" >/dev/null 2>&1 || true
         firewall_close
         rm -f "${enabled_marker}"
         return 1
     fi
+    if ! systemctl enable --now "${web_service}" >/dev/null; then
+        systemctl disable --now "${monitor_service}" "${agent_service}" >/dev/null 2>&1 || true
+        firewall_close
+        rm -f "${enabled_marker}"
+        return 1
+    fi
     if ! wait_for_web_healthy; then
-        systemctl disable --now "${web_service}" "${agent_service}" >/dev/null 2>&1 || true
+        systemctl disable --now "${web_service}" "${monitor_service}" "${agent_service}" >/dev/null 2>&1 || true
         firewall_close
         rm -f "${enabled_marker}"
         echo 'ERROR: WebUI health check failed; listener was not exposed.' >&2
@@ -86,7 +93,7 @@ enable_web() {
 
 disable_web() {
     firewall_close
-    systemctl disable --now "${web_service}" "${agent_service}" >/dev/null 2>&1 || true
+    systemctl disable --now "${web_service}" "${monitor_service}" "${agent_service}" >/dev/null 2>&1 || true
     rm -f "${enabled_marker}"
 }
 
@@ -108,6 +115,7 @@ status_web() {
     printf '  Enabled:        %s\n' "$( [[ -e ${enabled_marker} ]] && echo yes || echo no )"
     printf '  Web service:    %s\n' "$(systemctl is-active "${web_service}" 2>/dev/null || true)"
     printf '  Agent service:  %s\n' "$(systemctl is-active "${agent_service}" 2>/dev/null || true)"
+    printf '  System monitor: %s\n' "$(systemctl is-active "${monitor_service}" 2>/dev/null || true)"
     printf '  Address:        %s\n' "${address}"
     printf '  WebUI version:  %s\n' "${version}"
     printf '  Source commit:  %s\n' "${source}"

@@ -85,6 +85,7 @@
         <section class="control-section nav-admin-only">
           <span class="control-section-label">JustVoxel</span>
           <div class="control-tile-grid">
+            <button class="control-tile nav-admin-only" type="button" data-system-monitor-open title="Live CPU, memory, storage, network, processes and containers"><strong>System Monitor</strong></button>
             <button class="control-tile nav-admin-only" type="button" data-system-update-open title="Update the JustVoxel operating system"><strong>System Update</strong></button>
             <a class="control-tile" href="/settings/validation" title="Check appliance health"><strong>Validation</strong></a>
             <a class="control-tile" href="/settings/activity" title="Administrative events"><strong>Admin activity</strong></a>
@@ -100,6 +101,63 @@
 
   <input type="hidden" value="{{.CSRF}}" data-system-actions-csrf>
   <input type="hidden" value="{{.CSRF}}" data-system-update-csrf>
+
+
+  <dialog class="system-monitor-dialog" data-system-monitor-dialog>
+    <div class="system-monitor-shell">
+      <div class="system-monitor-header">
+        <div>
+          <p class="eyebrow">JustVoxel</p>
+          <h2>System Monitor</h2>
+        </div>
+        <div class="system-monitor-header-actions">
+          <button class="system-monitor-header-button" type="button" data-system-monitor-profile-toggle aria-label="Configure monitor" title="Configure monitor">⚙</button>
+          <button class="system-monitor-header-button" type="button" data-system-monitor-close aria-label="Close system monitor">&times;</button>
+        </div>
+      </div>
+
+      <section class="system-monitor-profile" data-system-monitor-profile hidden>
+        <strong>Visible sections</strong>
+        <div class="system-monitor-profile-grid">
+          <label><input type="checkbox" data-monitor-profile="system"> System</label>
+          <label><input type="checkbox" data-monitor-profile="cpu"> CPU</label>
+          <label><input type="checkbox" data-monitor-profile="memory"> Memory</label>
+          <label><input type="checkbox" data-monitor-profile="load"> Load</label>
+          <label><input type="checkbox" data-monitor-profile="filesystem"> Filesystems</label>
+          <label><input type="checkbox" data-monitor-profile="diskio"> Disk I/O</label>
+          <label><input type="checkbox" data-monitor-profile="network"> Network</label>
+          <label><input type="checkbox" data-monitor-profile="processes"> Processes</label>
+          <label><input type="checkbox" data-monitor-profile="containers"> Containers</label>
+          <label><input type="checkbox" data-monitor-profile="sensors"> Sensors</label>
+        </div>
+        <label class="system-monitor-process-count">Top processes
+          <select data-monitor-process-count>
+            <option value="5">5</option>
+            <option value="10">10</option>
+            <option value="20">20</option>
+          </select>
+        </label>
+        <button class="secondary" type="button" data-system-monitor-reset>Reset default</button>
+      </section>
+
+      <div class="system-monitor-body">
+        <p class="system-monitor-state" data-system-monitor-state>Loading system resources…</p>
+        <p class="system-monitor-error" data-system-monitor-error hidden></p>
+        <div class="system-monitor-grid" data-system-monitor-grid>
+          <section class="system-monitor-card" data-monitor-card="system"><span>System</span><strong data-monitor-system-host>—</strong><div class="system-monitor-lines" data-monitor-system-lines></div></section>
+          <section class="system-monitor-card" data-monitor-card="cpu"><span>CPU</span><strong data-monitor-cpu-total>—</strong><div class="system-monitor-lines" data-monitor-cpu-lines></div></section>
+          <section class="system-monitor-card" data-monitor-card="memory"><span>Memory</span><strong data-monitor-memory-main>—</strong><div class="system-monitor-lines" data-monitor-memory-lines></div></section>
+          <section class="system-monitor-card" data-monitor-card="load"><span>Load</span><strong data-monitor-load-main>—</strong><div class="system-monitor-lines" data-monitor-load-lines></div></section>
+          <section class="system-monitor-card system-monitor-card-wide" data-monitor-card="filesystem"><span>Filesystems</span><div class="system-monitor-table" data-monitor-filesystem></div></section>
+          <section class="system-monitor-card system-monitor-card-wide" data-monitor-card="diskio"><span>Disk I/O</span><div class="system-monitor-table" data-monitor-diskio></div></section>
+          <section class="system-monitor-card system-monitor-card-wide" data-monitor-card="network"><span>Network</span><div class="system-monitor-table" data-monitor-network></div></section>
+          <section class="system-monitor-card system-monitor-card-wide" data-monitor-card="processes"><span>Processes</span><div class="system-monitor-table" data-monitor-processes></div></section>
+          <section class="system-monitor-card system-monitor-card-wide" data-monitor-card="containers"><span>Containers</span><div class="system-monitor-table" data-monitor-containers></div></section>
+          <section class="system-monitor-card system-monitor-card-wide" data-monitor-card="sensors"><span>Sensors</span><div class="system-monitor-table" data-monitor-sensors></div></section>
+        </div>
+      </div>
+    </div>
+  </dialog>
 
   <dialog class="system-update-dialog" data-system-update-dialog>
     <div class="system-update-dialog-shell">

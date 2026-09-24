@@ -2,8 +2,10 @@ ARG HOME_SERVER_BASE_IMAGE=ghcr.io/home-server-project/home-server-base-10:stabl
 ARG JUSTVOXEL_BASE_REPOSITORY=ghcr.io/home-server-project/justvoxel-base
 ARG JUSTVOXEL_VM_REPOSITORY=ghcr.io/home-server-project/justvoxel-vm
 ARG SUPERFILE_PACKAGE_IMAGE=ghcr.io/home-server-project/superfile:stable
+ARG GLANCES_PACKAGE_IMAGE=ghcr.io/home-server-project/glances:stable
 
 FROM ${SUPERFILE_PACKAGE_IMAGE} AS superfile-package
+FROM ${GLANCES_PACKAGE_IMAGE} AS glances-package
 
 FROM scratch AS ctx
 COPY build_files /build_files
@@ -14,6 +16,7 @@ COPY templates /templates
 COPY runtime /runtime
 COPY mjust /mjust
 COPY --from=superfile-package /rpms /superfile-rpms
+COPY --from=glances-package /rpms /glances-rpms
 COPY cosign.pub /cosign.pub
 
 FROM ${HOME_SERVER_BASE_IMAGE} AS justvoxel-base

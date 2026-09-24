@@ -119,6 +119,7 @@ func (a *App) Handler() http.Handler {
 	a.registerAdminServerMigrationPages(mux)
 	a.registerAdminSystemActionPages(mux)
 	a.registerAdminSystemUpdatePages(mux)
+	a.registerSystemMonitorRoutes(mux)
 	mux.HandleFunc("GET /api/dashboard-status", a.dashboardStatus)
 	mux.HandleFunc("GET /about", a.aboutPage)
 	mux.HandleFunc("POST /minecraft/start", a.minecraftAction("start"))

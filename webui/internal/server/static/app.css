@@ -369,3 +369,39 @@ body.role-operator .control-tile.nav-operator-plus{display:flex!important}
   .system-update-reboot-players{background:#fff7df;border-color:#dfc97b;color:#6f581b}
   .system-update-reboot-progress{background:#edf7f1;border-color:#a9cbb8}
 }
+
+
+/* JustVoxel System Monitor powered by the loopback-only Glances API. */
+.system-monitor-dialog{--system-monitor-width:1120px;width:min(var(--system-monitor-width),calc(100vw - 2rem));max-width:calc(100vw - 2rem);max-height:calc(100dvh - 2rem);padding:0;overflow:hidden;border:1px solid #3b454e;border-radius:16px;background:#171d22;color:#eef1f4;box-shadow:0 28px 80px #000b}
+.system-monitor-dialog::backdrop{background:#050708a8;backdrop-filter:blur(3px)}
+.system-monitor-shell{display:flex;flex-direction:column;max-height:inherit}
+.system-monitor-header{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;padding:1rem 1.1rem .8rem;border-bottom:1px solid #303942}
+.system-monitor-header h2{margin:.1rem 0 0;font-size:1.25rem}
+.system-monitor-header-actions{display:flex;gap:.45rem}
+.system-monitor-header-button{display:grid;place-items:center;width:36px;height:36px;padding:0;border:1px solid #3b454e;border-radius:10px;background:#232b31;color:#dce7e0;font-size:1.25rem;line-height:1}
+.system-monitor-header-button:hover,.system-monitor-header-button:focus-visible{background:#303941;border-color:#52616d;color:#fff}
+.system-monitor-profile{padding:.8rem 1.1rem;border-bottom:1px solid #303942;background:#11171b}
+.system-monitor-profile-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.2rem .8rem;margin:.55rem 0}
+.system-monitor-profile label{display:flex;align-items:center;gap:.45rem;margin:.2rem 0;font-size:.84rem}
+.system-monitor-profile input{width:auto;margin:0}
+.system-monitor-process-count{max-width:180px}
+.system-monitor-process-count select{margin-top:.2rem}
+.system-monitor-body{overflow:auto;padding:1rem 1.1rem 1.1rem}
+.system-monitor-state{margin:0 0 .75rem;color:#9ca7b0;font-size:.8rem}
+.system-monitor-error{margin:0 0 .75rem;padding:.65rem .75rem;border:1px solid #a64c4c;border-radius:8px;background:#5b282833;color:#ffc1b8}
+.system-monitor-grid{display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));gap:.7rem}
+.system-monitor-card{min-width:0;padding:.8rem;border:1px solid #303942;border-radius:11px;background:#13191e}
+.system-monitor-card>span{display:block;margin-bottom:.35rem;color:#89959e;font-size:.7rem;font-weight:800;letter-spacing:.07em;text-transform:uppercase}
+.system-monitor-card>strong{display:block;margin-bottom:.35rem;font-size:1.22rem}
+.system-monitor-card-wide{grid-column:span 2}
+.system-monitor-lines{display:grid;gap:.22rem}
+.system-monitor-lines>div{display:flex;justify-content:space-between;gap:1rem;font-size:.8rem}
+.system-monitor-lines span{color:#89959e}.system-monitor-lines strong{font-weight:650;text-align:right}
+.system-monitor-table{max-width:100%;overflow:auto}
+.system-monitor-table table{width:100%;border-collapse:collapse;font-size:.78rem}
+.system-monitor-table th,.system-monitor-table td{padding:.38rem .42rem;border-bottom:1px solid #283038;text-align:left;white-space:nowrap}
+.system-monitor-table th{color:#89959e;font-size:.68rem;letter-spacing:.04em;text-transform:uppercase}
+.system-monitor-card[hidden]{display:none}
+@media(max-width:700px){.system-monitor-dialog{width:calc(100vw - 1rem);max-width:calc(100vw - 1rem);max-height:calc(100dvh - 1rem)}.system-monitor-grid{grid-template-columns:1fr}.system-monitor-card-wide{grid-column:auto}.system-monitor-header{padding:.85rem .9rem .7rem}.system-monitor-profile,.system-monitor-body{padding:.8rem .9rem}}
+@media(max-width:420px){.system-monitor-dialog{width:calc(100vw - .5rem);max-width:calc(100vw - .5rem);max-height:calc(100dvh - .5rem);border-radius:12px}.system-monitor-profile-grid{grid-template-columns:1fr 1fr}}
+@media(prefers-color-scheme:light){.system-monitor-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025}.system-monitor-dialog::backdrop{background:#1f29334d}.system-monitor-header,.system-monitor-profile{border-color:#d9dfe3}.system-monitor-header-button{background:#eef2f4;border-color:#cbd4da;color:#34414a}.system-monitor-profile{background:#f7f9fa}.system-monitor-card{background:#f7f9fa;border-color:#d9dfe3}.system-monitor-table th,.system-monitor-table td{border-color:#e2e7ea}}
