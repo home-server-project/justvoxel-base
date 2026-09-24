@@ -246,6 +246,7 @@ jobs:
               fi
               cleanup_glances
               trap - EXIT
+              rm -f /tmp/glances-runtime.log /tmp/glances-root.log
               bootc container lint --fatal-warnings
             '
 
