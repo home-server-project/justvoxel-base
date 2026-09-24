@@ -18,6 +18,7 @@ func TestControlCenterNavigationUX(t *testing.T) {
 		`data-topbar-clock`,
 		`data-control-center`,
 		`>Control Center</span>`,
+		`<span class="control-section-label">Temporary</span>`,
 		`data-system-power`,
 		`href="/activity"`,
 		`title="Server events and status"`,
@@ -46,6 +47,20 @@ func TestControlCenterNavigationUX(t *testing.T) {
 	}
 	if strings.Contains(markup, `class="brand-name"`) {
 		t.Fatal("brand still includes the long JustVoxel label")
+	}
+
+	temporary := strings.Index(markup, `<span class="control-section-label">Temporary</span>`)
+	minecraft := strings.Index(markup, `<span class="control-section-label">Minecraft</span>`)
+	if temporary < 0 || minecraft < 0 || temporary > minecraft {
+		t.Fatal("Temporary Control Center section must appear before Minecraft")
+	}
+	for _, item := range []string{"data-system-monitor-open", "data-storage-open", "data-backups-open"} {
+		if strings.Count(markup, item) != 1 {
+			t.Fatalf("temporary workspace item %q must appear exactly once", item)
+		}
+	}
+	if strings.Contains(markup, `<span class="control-section-label">Monitoring</span>`) {
+		t.Fatal("obsolete Monitoring section still exists")
 	}
 
 	for _, old := range []string{

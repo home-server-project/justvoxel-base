@@ -58,6 +58,15 @@
 
       <nav class="control-navigation" aria-label="JustVoxel navigation">
         <section class="control-section">
+          <span class="control-section-label">Temporary</span>
+          <div class="control-tile-grid">
+            <button class="control-tile" type="button" data-system-monitor-open title="Live CPU, memory, storage, network, processes and containers"><strong>System Monitor</strong></button>
+            <button class="control-tile nav-admin-only" type="button" data-storage-open title="Disks, partitions, mounts and external USB storage"><strong>Storage</strong></button>
+            <button class="control-tile nav-admin-only" type="button" data-backups-open title="Create, schedule, restore and manage backups"><strong>Backups</strong></button>
+          </div>
+        </section>
+
+        <section class="control-section">
           <span class="control-section-label">Minecraft</span>
           <div class="control-tile-grid">
             <a class="control-tile" href="/activity" title="Server events and status"><strong>Activity</strong></a>
@@ -70,19 +79,10 @@
         <section class="control-section nav-operator-plus">
           <span class="control-section-label">Storage &amp; Backups</span>
           <div class="control-tile-grid">
-            <button class="control-tile nav-admin-only" type="button" data-storage-open title="Disks, partitions, mounts and external USB storage"><strong>Storage</strong></button>
             <a class="control-tile nav-admin-only" href="/settings/data-migration" title="Move server data safely"><strong>Minecraft data</strong></a>
-            <button class="control-tile nav-admin-only" type="button" data-backups-open title="Create, schedule, restore and manage backups"><strong>Backups</strong></button>
             <a class="control-tile nav-operator-only" href="/operations#manual-backup" title="Run a backup now"><strong>Create backup</strong></a>
             <a class="control-tile nav-admin-only" href="/settings/server-migration" title="Export, import and recovery"><strong>Server migration</strong></a>
             <a class="control-tile nav-admin-only" href="/settings/storage-provision" title="Provision storage devices"><strong>Advanced storage</strong></a>
-          </div>
-        </section>
-
-        <section class="control-section">
-          <span class="control-section-label">Monitoring</span>
-          <div class="control-tile-grid">
-            <button class="control-tile" type="button" data-system-monitor-open title="Live CPU, memory, storage, network, processes and containers"><strong>System Monitor</strong></button>
           </div>
         </section>
 
