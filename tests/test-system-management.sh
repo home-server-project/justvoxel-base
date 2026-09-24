@@ -108,6 +108,7 @@ grep -Fq '[[ ${warning_seconds} == 10 ]]' "${interrupt_safety}" || fail 'Quick r
 grep -Fq -- '--backup-minecraft' "${system_update_reboot_helper}" || fail 'Update reboot helper backup option missing'
 grep -Fq -- '--warning-seconds=10' "${system_update_reboot_helper}" || fail 'Update reboot helper quick-warning option missing'
 grep -Fq 'systemd-run --quiet --collect --unit="${unit_name}"' "${system_update_reboot_helper}" || fail 'Update reboot helper must queue the detached worker'
+grep -Fq 'state:"failed",accepted:false,confirmation_required:false,reason:"action_failed"' "${system_update_reboot_helper}" || fail 'Update reboot helper must persist worker-start failure state'
 grep -Fq 'minecraft-backup --leave-stopped' "${system_update_reboot_worker}" || fail 'Update reboot worker must use the existing verified cold backup'
 grep -Fq 'backup_failed' "${system_update_reboot_worker}" || fail 'Update reboot worker must report backup failure'
 grep -Fq 'restart_minecraft_if_needed' "${system_update_reboot_worker}" || fail 'Update reboot worker must recover Minecraft after failure'
