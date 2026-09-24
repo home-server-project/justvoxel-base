@@ -206,6 +206,7 @@ func TestWebUIStoreFoundationTablesExist(t *testing.T) {
 		"operator_global_state",
 		"audit_events",
 		"notifications",
+		"system_monitor_profile",
 		"schema_migrations",
 	} {
 		var name string

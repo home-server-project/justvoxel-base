@@ -405,6 +405,8 @@ body.role-operator .control-tile.nav-operator-plus{display:flex!important}
 .system-monitor-header{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;padding:1rem 1.1rem .8rem;border-bottom:1px solid #303942;cursor:move;touch-action:none;user-select:none}
 .system-monitor-header h2{margin:.1rem 0 0;font-size:1.25rem}
 .system-monitor-header-actions{display:flex;gap:.45rem}
+.system-monitor-admin-only{display:none!important}
+body.role-administrator .system-monitor-admin-only{display:grid!important}
 .system-monitor-header-button{display:grid;place-items:center;width:36px;height:36px;padding:0;border:1px solid #3b454e;border-radius:10px;background:#232b31;color:#dce7e0;font-size:1.25rem;line-height:1}
 .system-monitor-header-button:hover,.system-monitor-header-button:focus-visible{background:#303941;border-color:#52616d;color:#fff}
 .system-monitor-profile{padding:.8rem 1.1rem;border-bottom:1px solid #303942;background:#11171b}
@@ -413,6 +415,9 @@ body.role-operator .control-tile.nav-operator-plus{display:flex!important}
 .system-monitor-profile input{width:auto;margin:0}
 .system-monitor-process-count{max-width:180px}
 .system-monitor-process-count select{margin-top:.2rem}
+.system-monitor-profile-actions{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap;margin-top:.7rem}
+.system-monitor-profile-actions button{min-height:36px;padding:.5rem .75rem}
+.system-monitor-profile-status{color:#89959e;font-size:.78rem}
 .system-monitor-body{flex:1;min-height:0;overflow:auto;padding:1rem 1.1rem 1.1rem}
 .system-monitor-state{margin:0 0 .75rem;color:#9ca7b0;font-size:.8rem}
 .system-monitor-error{margin:0 0 .75rem;padding:.65rem .75rem;border:1px solid #a64c4c;border-radius:8px;background:#5b282833;color:#ffc1b8}

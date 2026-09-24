@@ -1299,32 +1299,82 @@ if (systemMonitorOpen && systemMonitorDialog) {
   const profileToggle = systemMonitorDialog.querySelector("[data-system-monitor-profile-toggle]");
   const profilePanel = systemMonitorDialog.querySelector("[data-system-monitor-profile]");
   const resetButton = systemMonitorDialog.querySelector("[data-system-monitor-reset]");
+  const saveButton = systemMonitorDialog.querySelector("[data-system-monitor-save]");
+  const profileStatus = systemMonitorDialog.querySelector("[data-system-monitor-profile-status]");
+  const profileCSRF = document.querySelector("[data-system-monitor-csrf]");
   const processCount = systemMonitorDialog.querySelector("[data-monitor-process-count]");
   const state = systemMonitorDialog.querySelector("[data-system-monitor-state]");
   const error = systemMonitorDialog.querySelector("[data-system-monitor-error]");
   const cards = Array.from(systemMonitorDialog.querySelectorAll("[data-monitor-card]"));
   const profileInputs = Array.from(systemMonitorDialog.querySelectorAll("[data-monitor-profile]"));
-  const profileKey = "justvoxel-system-monitor-profile-v1";
   const defaultProfile = {
     system: true, cpu: true, memory: true, load: true, filesystem: true,
     diskio: true, network: true, processes: true, containers: true, sensors: true, alerts: true,
-    processCount: 10,
+    process_count: 10,
   };
   let profile = { ...defaultProfile };
   let refreshTimer = null;
 
-  const readProfile = () => {
-    try {
-      profile = { ...defaultProfile, ...JSON.parse(window.localStorage.getItem(profileKey) || "{}") };
-    } catch (_) {
-      profile = { ...defaultProfile };
-    }
-  };
-  const saveProfile = () => window.localStorage.setItem(profileKey, JSON.stringify(profile));
   const syncProfile = () => {
     profileInputs.forEach((input) => { input.checked = profile[input.dataset.monitorProfile] !== false; });
-    if (processCount) processCount.value = String(profile.processCount || 10);
+    if (processCount) processCount.value = String(profile.process_count || 10);
     cards.forEach((card) => { card.hidden = profile[card.dataset.monitorCard] === false; });
+  };
+
+  const loadProfile = async () => {
+    try {
+      const response = await fetch("/api/system-monitor/profile", {
+        method: "GET",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (response.status === 401) {
+        window.location.assign("/login");
+        return;
+      }
+      if (!response.ok) throw new Error("profile unavailable");
+      profile = { ...defaultProfile, ...(await response.json()) };
+      if (profileStatus) profileStatus.textContent = "";
+    } catch (_) {
+      profile = { ...defaultProfile };
+      if (profileStatus) profileStatus.textContent = "Using default profile";
+    }
+    syncProfile();
+  };
+
+  const saveProfile = async () => {
+    if (!saveButton || !profileCSRF) return;
+    const body = new URLSearchParams({ csrf: profileCSRF.value });
+    [
+      "system", "cpu", "memory", "load", "filesystem", "diskio",
+      "network", "processes", "containers", "sensors", "alerts",
+    ].forEach((key) => body.set(key, profile[key] === false ? "false" : "true"));
+    body.set("process_count", String(profile.process_count || 10));
+
+    saveButton.disabled = true;
+    if (profileStatus) profileStatus.textContent = "Saving…";
+    try {
+      const response = await fetch("/api/system-monitor/profile", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+      });
+      if (response.status === 401) {
+        window.location.assign("/login");
+        return;
+      }
+      if (!response.ok) throw new Error("save failed");
+      profile = { ...defaultProfile, ...(await response.json()) };
+      syncProfile();
+      refreshMonitor();
+      if (profileStatus) profileStatus.textContent = "Saved";
+    } catch (_) {
+      if (profileStatus) profileStatus.textContent = "Could not save";
+    } finally {
+      saveButton.disabled = false;
+    }
   };
   const fixed = (value, digits = 1) => {
     const parsed = Number(value);
@@ -1415,7 +1465,7 @@ if (systemMonitorOpen && systemMonitorDialog) {
       {label:"Interface", render:(row)=>row.interface_name || row.name}, {label:"RX", render:(row)=>rate(row.bytes_recv_rate_per_sec)}, {label:"TX", render:(row)=>rate(row.bytes_sent_rate_per_sec)}
     ]);
     const processes = (Array.isArray(data.processlist) ? data.processlist : []).slice()
-      .sort((a,b)=>Number(b.cpu_percent || 0)-Number(a.cpu_percent || 0)).slice(0, Number(profile.processCount || 10));
+      .sort((a,b)=>Number(b.cpu_percent || 0)-Number(a.cpu_percent || 0)).slice(0, Number(profile.process_count || 10));
     renderTable("[data-monitor-processes]", processes, [
       {label:"Process", render:(row)=>row.name}, {label:"CPU", render:(row)=>percent(row.cpu_percent)}, {label:"Memory", render:(row)=>percent(row.memory_percent)}
     ]);
@@ -1454,10 +1504,9 @@ if (systemMonitorOpen && systemMonitorDialog) {
     }
   };
   const stopRefresh = () => { if (refreshTimer) window.clearInterval(refreshTimer); refreshTimer = null; };
-  const startRefresh = () => {
-    readProfile();
-    syncProfile();
+  const startRefresh = async () => {
     if (profilePanel) profilePanel.hidden = true;
+    await loadProfile();
     refreshMonitor();
     stopRefresh();
     refreshTimer = window.setInterval(refreshMonitor, 2000);
@@ -1474,16 +1523,27 @@ if (systemMonitorOpen && systemMonitorDialog) {
   });
   if (closeButton) closeButton.addEventListener("click", () => workspaceWindow?.close());
 
-  if (profileToggle && profilePanel) profileToggle.addEventListener("click", () => { profilePanel.hidden = !profilePanel.hidden; });
+  if (profileToggle && profilePanel) profileToggle.addEventListener("click", () => {
+    profilePanel.hidden = !profilePanel.hidden;
+    if (profileStatus) profileStatus.textContent = "";
+  });
   profileInputs.forEach((input) => input.addEventListener("change", () => {
-    profile[input.dataset.monitorProfile] = input.checked; saveProfile(); syncProfile();
+    profile[input.dataset.monitorProfile] = input.checked;
+    syncProfile();
+    if (profileStatus) profileStatus.textContent = "Not saved";
   }));
   if (processCount) processCount.addEventListener("change", () => {
-    profile.processCount = Number(processCount.value); saveProfile(); refreshMonitor();
+    profile.process_count = Number(processCount.value);
+    refreshMonitor();
+    if (profileStatus) profileStatus.textContent = "Not saved";
   });
   if (resetButton) resetButton.addEventListener("click", () => {
-    profile = { ...defaultProfile }; saveProfile(); syncProfile(); refreshMonitor();
+    profile = { ...defaultProfile };
+    syncProfile();
+    refreshMonitor();
+    if (profileStatus) profileStatus.textContent = "Not saved";
   });
+  if (saveButton) saveButton.addEventListener("click", saveProfile);
 
   const restoreWhenRoleKnown = () => {
     if (!readWorkspaceWindowState("system-monitor").open) return;

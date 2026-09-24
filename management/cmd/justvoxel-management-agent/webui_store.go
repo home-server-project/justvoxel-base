@@ -114,6 +114,22 @@ var webUIStoreMigrations = []webUIStoreMigration{
 			`CREATE INDEX notifications_open_idx ON notifications(resolved_at, created_at DESC, id DESC)`,
 		},
 	},
+	{
+		version: 2,
+		name:    "system_monitor_profile",
+		statements: []string{
+			`CREATE TABLE system_monitor_profile (
+				id INTEGER PRIMARY KEY CHECK (id = 1),
+				profile_json TEXT NOT NULL,
+				updated_at TEXT NOT NULL
+			)`,
+			`INSERT INTO system_monitor_profile(id, profile_json, updated_at) VALUES(
+				1,
+				'{"system":true,"cpu":true,"memory":true,"load":true,"filesystem":true,"diskio":true,"network":true,"processes":true,"containers":true,"sensors":true,"alerts":true,"process_count":10}',
+				'1970-01-01T00:00:00Z'
+			)`,
+		},
+	},
 }
 
 func openWebUIStore(path string) (*webUIStore, error) {

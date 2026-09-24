@@ -82,10 +82,16 @@
           </div>
         </section>
 
+        <section class="control-section">
+          <span class="control-section-label">Monitoring</span>
+          <div class="control-tile-grid">
+            <button class="control-tile" type="button" data-system-monitor-open title="Live CPU, memory, storage, network, processes and containers"><strong>System Monitor</strong></button>
+          </div>
+        </section>
+
         <section class="control-section nav-admin-only">
           <span class="control-section-label">JustVoxel</span>
           <div class="control-tile-grid">
-            <button class="control-tile nav-admin-only" type="button" data-system-monitor-open title="Live CPU, memory, storage, network, processes and containers"><strong>System Monitor</strong></button>
             <button class="control-tile nav-admin-only" type="button" data-system-update-open title="Update the JustVoxel operating system"><strong>System Update</strong></button>
             <a class="control-tile" href="/settings/validation" title="Check appliance health"><strong>Validation</strong></a>
             <a class="control-tile" href="/settings/activity" title="Administrative events"><strong>Admin activity</strong></a>
@@ -139,6 +145,7 @@
 
   <input type="hidden" value="{{.CSRF}}" data-system-actions-csrf>
   <input type="hidden" value="{{.CSRF}}" data-system-update-csrf>
+  <input type="hidden" value="{{.CSRF}}" data-system-monitor-csrf>
 
 
   <dialog class="workspace-window system-monitor-dialog" data-workspace-window="system-monitor" data-system-monitor-dialog aria-labelledby="system-monitor-title">
@@ -149,7 +156,7 @@
           <h2 id="system-monitor-title">System Monitor</h2>
         </div>
         <div class="system-monitor-header-actions">
-          <button class="system-monitor-header-button" type="button" data-system-monitor-profile-toggle aria-label="Configure monitor" title="Configure monitor">⚙</button>
+          <button class="system-monitor-header-button system-monitor-admin-only" type="button" data-system-monitor-profile-toggle aria-label="Configure monitor" title="Configure monitor">⚙</button>
           <button class="system-monitor-header-button" type="button" data-system-monitor-close aria-label="Close system monitor">&times;</button>
         </div>
       </div>
@@ -176,7 +183,11 @@
             <option value="20">20</option>
           </select>
         </label>
-        <button class="secondary" type="button" data-system-monitor-reset>Reset default</button>
+        <div class="system-monitor-profile-actions">
+          <button class="secondary" type="button" data-system-monitor-reset>Reset default</button>
+          <button type="button" data-system-monitor-save>Save</button>
+          <span class="system-monitor-profile-status" data-system-monitor-profile-status></span>
+        </div>
       </section>
 
       <div class="system-monitor-body">
