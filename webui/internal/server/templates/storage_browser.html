@@ -159,9 +159,18 @@
         Continue even though players are currently online.
         <span class="muted compact" data-storage-whole-players-note></span>
       </label>
-      <label data-storage-whole-confirmation-field hidden>Type exactly <code data-storage-whole-confirmation-phrase></code>
-        <input data-storage-whole-confirmation autocomplete="off" spellcheck="false">
-      </label>
+      <div class="storage-confirmation" data-storage-whole-confirmation-field hidden>
+        <p class="storage-confirm-selected">Selected disk: <strong data-storage-whole-confirmation-summary></strong></p>
+        <div class="storage-confirm-slider" data-storage-whole-confirm-slider-shell style="--confirm-progress:0">
+          <span class="storage-confirm-slider-text" data-storage-whole-confirm-slider-text>Slide to confirm erasing</span>
+          <span class="storage-confirm-slider-thumb" aria-hidden="true">→</span>
+          <input type="range" min="0" max="100" step="1" value="0" data-storage-whole-confirm-slider aria-label="Slide to confirm erasing this disk">
+        </div>
+        <label class="storage-confirm-toggle-row" data-storage-whole-confirm-toggle-row hidden>
+          <span class="storage-confirm-toggle-callout">Confirm <span class="storage-confirm-toggle-arrow" aria-hidden="true">→</span></span>
+          <input class="storage-confirm-toggle" type="checkbox" data-storage-whole-confirm-toggle aria-label="Confirm destructive disk action">
+        </label>
+      </div>
       <p class="storage-action-error" data-storage-whole-error hidden></p>
       <div class="action-row storage-action-buttons">
         <button class="secondary" type="button" data-storage-whole-cancel>Cancel</button>
@@ -216,9 +225,18 @@
           <div data-storage-review-target-row><dt>After action</dt><dd data-storage-review-target></dd></div>
         </dl>
         <div class="storage-action-warnings" data-storage-action-warnings></div>
-        <label data-storage-confirmation-field hidden>Type exactly <code data-storage-confirmation-phrase></code>
-          <input data-storage-confirmation-input autocomplete="off" spellcheck="false">
-        </label>
+        <div class="storage-confirmation" data-storage-confirmation-field hidden>
+          <p class="storage-confirm-selected">Selected partition: <strong data-storage-confirmation-summary></strong></p>
+          <div class="storage-confirm-slider" data-storage-confirm-slider-shell style="--confirm-progress:0">
+            <span class="storage-confirm-slider-text" data-storage-confirm-slider-text>Slide to confirm formatting</span>
+            <span class="storage-confirm-slider-thumb" aria-hidden="true">→</span>
+            <input type="range" min="0" max="100" step="1" value="0" data-storage-confirm-slider aria-label="Slide to confirm formatting this partition">
+          </div>
+          <label class="storage-confirm-toggle-row" data-storage-confirm-toggle-row hidden>
+            <span class="storage-confirm-toggle-callout">Confirm <span class="storage-confirm-toggle-arrow" aria-hidden="true">→</span></span>
+            <input class="storage-confirm-toggle" type="checkbox" data-storage-confirm-toggle aria-label="Confirm destructive partition action">
+          </label>
+        </div>
       </div>
       <p class="storage-action-error" data-storage-action-error hidden></p>
       <div class="action-row storage-action-buttons">

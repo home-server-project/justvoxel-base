@@ -290,7 +290,8 @@ func TestStorageBrowserReviewedActionFlow(t *testing.T) {
 		`data-storage-action-dialog`,
 		`data-storage-action-review-button`,
 		`data-storage-action-apply-button`,
-		`data-storage-confirmation-phrase`,
+		`data-storage-confirm-slider`,
+		`data-storage-confirm-toggle`,
 		`data-storage-protected-note`,
 	} {
 		if !strings.Contains(markup, want) {

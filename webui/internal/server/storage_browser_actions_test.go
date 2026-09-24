@@ -323,6 +323,62 @@ func TestStorageBrowserWholeDiskFlowStaysInsideNewStorage(t *testing.T) {
 	}
 }
 
+func TestStorageBrowserDestructiveConfirmationUsesSliderAndToggle(t *testing.T) {
+	templateContent, err := assets.ReadFile("templates/storage_browser.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(templateContent)
+	for _, want := range []string{
+		`data-storage-confirm-slider`,
+		`data-storage-confirm-toggle`,
+		`data-storage-whole-confirm-slider`,
+		`data-storage-whole-confirm-toggle`,
+		`storage-confirm-toggle-callout`,
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("destructive confirmation markup missing %q", want)
+		}
+	}
+	if strings.Contains(markup, "Type exactly") {
+		t.Fatal("New Storage still asks users to type destructive confirmation phrases")
+	}
+
+	js, err := assets.ReadFile("static/storage-browser.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(js)
+	for _, want := range []string{
+		"Slide fully to the right, then switch Confirm on before applying.",
+		"body.set(\"confirmation\", reviewedWholeDisk.confirmation)",
+		"const entered = expected && confirmationReady ? expected : \"\"",
+		"confirmToggle?.addEventListener(\"change\", updateActionApplyState)",
+		"wholeDiskConfirmToggle?.addEventListener(\"change\", updateWholeDiskApplyState)",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("destructive confirmation behavior missing %q", want)
+		}
+	}
+
+	css, err := assets.ReadFile("static/storage-browser.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles := string(css)
+	for _, want := range []string{
+		".storage-confirm-slider",
+		".storage-confirm-slider.is-armed",
+		".storage-confirm-toggle-callout",
+		"font-size:1.08rem",
+		".storage-confirm-toggle-arrow",
+	} {
+		if !strings.Contains(styles, want) {
+			t.Fatalf("destructive confirmation styling missing %q", want)
+		}
+	}
+}
+
 func TestStorageBrowserActionMenuClosesWithDialogAndOutsideClick(t *testing.T) {
 	js, err := assets.ReadFile("static/storage-browser.js")
 	if err != nil {

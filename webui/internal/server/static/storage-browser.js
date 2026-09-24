@@ -28,8 +28,12 @@
   const wholeDiskPlayers = wholeDiskDialog?.querySelector("[data-storage-whole-players]");
   const wholeDiskPlayersNote = wholeDiskDialog?.querySelector("[data-storage-whole-players-note]");
   const wholeDiskConfirmationField = wholeDiskDialog?.querySelector("[data-storage-whole-confirmation-field]");
-  const wholeDiskConfirmationPhrase = wholeDiskDialog?.querySelector("[data-storage-whole-confirmation-phrase]");
-  const wholeDiskConfirmation = wholeDiskDialog?.querySelector("[data-storage-whole-confirmation]");
+  const wholeDiskConfirmationSummary = wholeDiskDialog?.querySelector("[data-storage-whole-confirmation-summary]");
+  const wholeDiskConfirmSliderShell = wholeDiskDialog?.querySelector("[data-storage-whole-confirm-slider-shell]");
+  const wholeDiskConfirmSliderText = wholeDiskDialog?.querySelector("[data-storage-whole-confirm-slider-text]");
+  const wholeDiskConfirmSlider = wholeDiskDialog?.querySelector("[data-storage-whole-confirm-slider]");
+  const wholeDiskConfirmToggleRow = wholeDiskDialog?.querySelector("[data-storage-whole-confirm-toggle-row]");
+  const wholeDiskConfirmToggle = wholeDiskDialog?.querySelector("[data-storage-whole-confirm-toggle]");
   const wholeDiskError = wholeDiskDialog?.querySelector("[data-storage-whole-error]");
   const wholeDiskReview = wholeDiskDialog?.querySelector("[data-storage-whole-review]");
   const wholeDiskApply = wholeDiskDialog?.querySelector("[data-storage-whole-apply]");
@@ -58,8 +62,12 @@
   const reviewTarget = actionDialog?.querySelector("[data-storage-review-target]");
   const warningBox = actionDialog?.querySelector("[data-storage-action-warnings]");
   const confirmationField = actionDialog?.querySelector("[data-storage-confirmation-field]");
-  const confirmationPhrase = actionDialog?.querySelector("[data-storage-confirmation-phrase]");
-  const confirmationInput = actionDialog?.querySelector("[data-storage-confirmation-input]");
+  const confirmationSummary = actionDialog?.querySelector("[data-storage-confirmation-summary]");
+  const confirmSliderShell = actionDialog?.querySelector("[data-storage-confirm-slider-shell]");
+  const confirmSliderText = actionDialog?.querySelector("[data-storage-confirm-slider-text]");
+  const confirmSlider = actionDialog?.querySelector("[data-storage-confirm-slider]");
+  const confirmToggleRow = actionDialog?.querySelector("[data-storage-confirm-toggle-row]");
+  const confirmToggle = actionDialog?.querySelector("[data-storage-confirm-toggle]");
   const actionError = actionDialog?.querySelector("[data-storage-action-error]");
   const reviewButton = actionDialog?.querySelector("[data-storage-action-review-button]");
   const applyButton = actionDialog?.querySelector("[data-storage-action-apply-button]");
@@ -268,6 +276,26 @@
     if (!actionMenu.contains(event.target)) closeActionMenu();
   });
 
+  function confirmationSliderArmed(slider, shell, text, armedText, idleText) {
+    const value = Number(slider?.value || 0);
+    const progress = Math.max(0, Math.min(100, value));
+    shell?.style.setProperty("--confirm-progress", String(progress / 100));
+    const armed = progress >= 100;
+    shell?.classList.toggle("is-armed", armed);
+    if (text) text.textContent = armed ? armedText : idleText;
+    slider?.setAttribute("aria-valuetext", armed ? "Ready for final confirmation" : progress + " percent");
+    return armed;
+  }
+
+  function resetConfirmationControl(field, summary, slider, shell, text, toggleRow, toggle, idleText) {
+    if (field) field.hidden = true;
+    if (summary) summary.textContent = "";
+    if (slider) slider.value = "0";
+    if (toggle) toggle.checked = false;
+    if (toggleRow) toggleRow.hidden = true;
+    confirmationSliderArmed(slider, shell, text, "", idleText);
+  }
+
   function renderWholeDiskWarnings(warnings) {
     if (!wholeDiskWarnings) return;
     wholeDiskWarnings.replaceChildren();
@@ -301,9 +329,16 @@
     if (wholeDiskPlayersField) wholeDiskPlayersField.hidden = true;
     if (wholeDiskPlayers) wholeDiskPlayers.checked = false;
     if (wholeDiskPlayersNote) wholeDiskPlayersNote.textContent = "";
-    if (wholeDiskConfirmationField) wholeDiskConfirmationField.hidden = true;
-    if (wholeDiskConfirmationPhrase) wholeDiskConfirmationPhrase.textContent = "";
-    if (wholeDiskConfirmation) wholeDiskConfirmation.value = "";
+    resetConfirmationControl(
+      wholeDiskConfirmationField,
+      wholeDiskConfirmationSummary,
+      wholeDiskConfirmSlider,
+      wholeDiskConfirmSliderShell,
+      wholeDiskConfirmSliderText,
+      wholeDiskConfirmToggleRow,
+      wholeDiskConfirmToggle,
+      "Slide to confirm erasing",
+    );
     if (wholeDiskError) { wholeDiskError.hidden = true; wholeDiskError.textContent = ""; }
     if (wholeDiskReview) { wholeDiskReview.hidden = false; wholeDiskReview.disabled = false; wholeDiskReview.textContent = "Review action"; }
     if (wholeDiskApply) { wholeDiskApply.hidden = true; wholeDiskApply.disabled = false; wholeDiskApply.textContent = "Apply destructive action"; }
@@ -315,7 +350,14 @@
     body.set("purpose", selectedWholeDisk?.purpose || "");
     body.set("device", selectedWholeDisk?.device || "");
     if (reviewedWholeDisk?.fingerprint) body.set("fingerprint", reviewedWholeDisk.fingerprint);
-    if (wholeDiskConfirmation?.value) body.set("confirmation", wholeDiskConfirmation.value);
+    if (
+      phase === "apply" &&
+      reviewedWholeDisk?.confirmation &&
+      Number(wholeDiskConfirmSlider?.value || 0) >= 100 &&
+      wholeDiskConfirmToggle?.checked
+    ) {
+      body.set("confirmation", reviewedWholeDisk.confirmation);
+    }
     if (wholeDiskPlayers?.checked) body.set("players_confirmed", "yes");
     const response = await fetch("/api/new-storage/whole-disk/" + phase, {
       method: "POST",
@@ -364,12 +406,26 @@
         wholeDiskPlayersNote.textContent = needsPlayers ? (names ? " Online: " + names : " Players are online.") : "";
       }
       const confirmation = payload.confirmation || "";
+      const destructiveSummary = (payload.device || selectedWholeDisk.device) + " will be erased";
+      resetConfirmationControl(
+        wholeDiskConfirmationField,
+        wholeDiskConfirmationSummary,
+        wholeDiskConfirmSlider,
+        wholeDiskConfirmSliderShell,
+        wholeDiskConfirmSliderText,
+        wholeDiskConfirmToggleRow,
+        wholeDiskConfirmToggle,
+        "Slide to confirm erasing",
+      );
+      if (wholeDiskConfirmationSummary) wholeDiskConfirmationSummary.textContent = destructiveSummary;
       if (wholeDiskConfirmationField) wholeDiskConfirmationField.hidden = !confirmation;
-      if (wholeDiskConfirmationPhrase) wholeDiskConfirmationPhrase.textContent = confirmation;
-      if (wholeDiskConfirmation) wholeDiskConfirmation.value = "";
       wholeDiskReview.hidden = true;
-      if (wholeDiskApply) wholeDiskApply.hidden = false;
-      if (confirmation) wholeDiskConfirmation?.focus();
+      if (wholeDiskApply) {
+        wholeDiskApply.hidden = false;
+        wholeDiskApply.disabled = Boolean(confirmation) || Boolean(payload.players_confirmation_required);
+      }
+      if (confirmation) wholeDiskConfirmSlider?.focus();
+      else if (payload.players_confirmation_required) wholeDiskPlayers?.focus();
       else wholeDiskApply?.focus();
     } catch (error) {
       if (wholeDiskError) { wholeDiskError.textContent = error.message; wholeDiskError.hidden = false; }
@@ -379,12 +435,36 @@
     }
   });
 
+  function updateWholeDiskApplyState() {
+    if (!wholeDiskApply || !reviewedWholeDisk) return;
+    const needsConfirmation = Boolean(reviewedWholeDisk.confirmation);
+    const sliderArmed = confirmationSliderArmed(
+      wholeDiskConfirmSlider,
+      wholeDiskConfirmSliderShell,
+      wholeDiskConfirmSliderText,
+      (reviewedWholeDisk.device || selectedWholeDisk?.device || "Selected disk") + " will be erased",
+      "Slide to confirm erasing",
+    );
+    if (wholeDiskConfirmToggleRow) wholeDiskConfirmToggleRow.hidden = !needsConfirmation || !sliderArmed;
+    if (!sliderArmed && wholeDiskConfirmToggle) wholeDiskConfirmToggle.checked = false;
+    const confirmationReady = !needsConfirmation || (sliderArmed && Boolean(wholeDiskConfirmToggle?.checked));
+    const playersReady = !reviewedWholeDisk.players_confirmation_required || Boolean(wholeDiskPlayers?.checked);
+    wholeDiskApply.disabled = !(confirmationReady && playersReady);
+  }
+
+  wholeDiskConfirmSlider?.addEventListener("input", updateWholeDiskApplyState);
+  wholeDiskConfirmToggle?.addEventListener("change", updateWholeDiskApplyState);
+  wholeDiskPlayers?.addEventListener("change", updateWholeDiskApplyState);
+
   wholeDiskApply?.addEventListener("click", async () => {
     if (!reviewedWholeDisk) return;
     if (wholeDiskError) { wholeDiskError.hidden = true; wholeDiskError.textContent = ""; }
-    if (reviewedWholeDisk.confirmation && wholeDiskConfirmation?.value !== reviewedWholeDisk.confirmation) {
-      if (wholeDiskError) { wholeDiskError.textContent = "Type the confirmation phrase exactly before applying."; wholeDiskError.hidden = false; }
-      wholeDiskConfirmation?.focus();
+    if (
+      reviewedWholeDisk.confirmation &&
+      (Number(wholeDiskConfirmSlider?.value || 0) < 100 || !wholeDiskConfirmToggle?.checked)
+    ) {
+      if (wholeDiskError) { wholeDiskError.textContent = "Slide fully to the right, then switch Confirm on before applying."; wholeDiskError.hidden = false; }
+      wholeDiskConfirmSlider?.focus();
       return;
     }
     if (reviewedWholeDisk.players_confirmation_required && !wholeDiskPlayers?.checked) {
@@ -510,9 +590,16 @@
     if (mountInput) mountInput.value = asksForMountPoint ? defaultMountPoint(selectedPartition || {}) : "";
     if (reviewPanel) reviewPanel.hidden = true;
     if (warningBox) warningBox.replaceChildren();
-    if (confirmationField) confirmationField.hidden = true;
-    if (confirmationPhrase) confirmationPhrase.textContent = "";
-    if (confirmationInput) confirmationInput.value = "";
+    resetConfirmationControl(
+      confirmationField,
+      confirmationSummary,
+      confirmSlider,
+      confirmSliderShell,
+      confirmSliderText,
+      confirmToggleRow,
+      confirmToggle,
+      "Slide to confirm formatting",
+    );
     if (actionError) { actionError.hidden = true; actionError.textContent = ""; }
     if (reviewButton) { reviewButton.hidden = false; reviewButton.disabled = false; reviewButton.textContent = "Review action"; }
     if (applyButton) { applyButton.hidden = true; applyButton.disabled = false; applyButton.textContent = "Apply action"; }
@@ -598,12 +685,26 @@
       if (reviewTargetRow) reviewTargetRow.hidden = false;
       renderWarnings(payload.warnings);
       const needsConfirmation = Boolean(reviewedPlan.confirmation);
+      const destructiveSummary = (reviewedPlan.device || selectedPartition.path) + " will be formatted";
+      resetConfirmationControl(
+        confirmationField,
+        confirmationSummary,
+        confirmSlider,
+        confirmSliderShell,
+        confirmSliderText,
+        confirmToggleRow,
+        confirmToggle,
+        "Slide to confirm formatting",
+      );
+      if (confirmationSummary) confirmationSummary.textContent = destructiveSummary;
       if (confirmationField) confirmationField.hidden = !needsConfirmation;
-      if (confirmationPhrase) confirmationPhrase.textContent = reviewedPlan.confirmation || "";
-      if (confirmationInput) confirmationInput.value = "";
       reviewButton.hidden = true;
-      if (applyButton) { applyButton.hidden = false; applyButton.textContent = reviewedPlan.destructive ? "Apply destructive action" : "Apply action"; }
-      if (needsConfirmation) confirmationInput?.focus();
+      if (applyButton) {
+        applyButton.hidden = false;
+        applyButton.disabled = needsConfirmation;
+        applyButton.textContent = reviewedPlan.destructive ? "Apply destructive action" : "Apply action";
+      }
+      if (needsConfirmation) confirmSlider?.focus();
       else applyButton?.focus();
     } catch (error) {
       if (actionError) { actionError.textContent = error.message; actionError.hidden = false; }
@@ -613,16 +714,35 @@
     }
   });
 
+  function updateActionApplyState() {
+    if (!applyButton || !reviewedPlan) return;
+    const needsConfirmation = Boolean(reviewedPlan.confirmation);
+    const sliderArmed = confirmationSliderArmed(
+      confirmSlider,
+      confirmSliderShell,
+      confirmSliderText,
+      (reviewedPlan.device || selectedPartition?.path || "Selected partition") + " will be formatted",
+      "Slide to confirm formatting",
+    );
+    if (confirmToggleRow) confirmToggleRow.hidden = !needsConfirmation || !sliderArmed;
+    if (!sliderArmed && confirmToggle) confirmToggle.checked = false;
+    applyButton.disabled = needsConfirmation && !(sliderArmed && Boolean(confirmToggle?.checked));
+  }
+
+  confirmSlider?.addEventListener("input", updateActionApplyState);
+  confirmToggle?.addEventListener("change", updateActionApplyState);
+
   applyButton?.addEventListener("click", async () => {
     if (!reviewedPlan) return;
     if (actionError) { actionError.hidden = true; actionError.textContent = ""; }
     const expected = reviewedPlan.confirmation || "";
-    const entered = confirmationInput?.value || "";
-    if (expected && entered !== expected) {
-      if (actionError) { actionError.textContent = "Type the confirmation phrase exactly before applying."; actionError.hidden = false; }
-      confirmationInput?.focus();
+    const confirmationReady = Number(confirmSlider?.value || 0) >= 100 && Boolean(confirmToggle?.checked);
+    if (expected && !confirmationReady) {
+      if (actionError) { actionError.textContent = "Slide fully to the right, then switch Confirm on before applying."; actionError.hidden = false; }
+      confirmSlider?.focus();
       return;
     }
+    const entered = expected && confirmationReady ? expected : "";
     applyButton.disabled = true;
     applyButton.textContent = "Applying…";
     try {
