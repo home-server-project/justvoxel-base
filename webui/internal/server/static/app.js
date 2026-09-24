@@ -724,19 +724,25 @@ if (systemPower && systemDialog) {
 }
 
 
-const systemUpdateOpen = document.querySelector("[data-system-update-open]");
-const systemUpdateDialog = document.querySelector("[data-system-update-dialog]");
-if (systemUpdateOpen && systemUpdateDialog) {
+const initSystemUpdateWorkspace = () => {
+  const systemUpdateOpen = document.querySelector("[data-system-update-open]");
+  const systemUpdateDialog = document.querySelector("[data-system-update-dialog]");
+  if (!systemUpdateOpen || !systemUpdateDialog) return;
+
   const csrfInput = document.querySelector("[data-system-update-csrf]");
   const closeButton = systemUpdateDialog.querySelector("[data-system-update-close]");
+  const refreshButton = systemUpdateDialog.querySelector("[data-system-update-refresh]");
   const runningValue = systemUpdateDialog.querySelector("[data-system-update-running]");
   const runningImage = systemUpdateDialog.querySelector("[data-system-update-running-image]");
   const stagedValue = systemUpdateDialog.querySelector("[data-system-update-staged]");
   const stagedImage = systemUpdateDialog.querySelector("[data-system-update-staged-image]");
+  const availableValue = systemUpdateDialog.querySelector("[data-system-update-available]");
+  const availableImage = systemUpdateDialog.querySelector("[data-system-update-available-image]");
   const state = systemUpdateDialog.querySelector("[data-system-update-state]");
   const error = systemUpdateDialog.querySelector("[data-system-update-error]");
   const updateButton = systemUpdateDialog.querySelector("[data-system-update-button]");
   const rebootPanel = systemUpdateDialog.querySelector("[data-system-update-reboot]");
+  const rebootTitle = systemUpdateDialog.querySelector("[data-system-update-reboot-title]");
   const backupToggle = systemUpdateDialog.querySelector("[data-system-update-backup]");
   const quickToggle = systemUpdateDialog.querySelector("[data-system-update-quick]");
   const warningText = systemUpdateDialog.querySelector("[data-system-update-warning]");
@@ -747,15 +753,28 @@ if (systemUpdateOpen && systemUpdateDialog) {
   const rebootButton = systemUpdateDialog.querySelector("[data-system-update-reboot-button]");
 
   let updating = false;
+  let checking = false;
   let latestStatus = null;
   let pendingPlayerConfirmation = false;
   let rebootWorkflowActive = false;
   let rebootPollTimer = null;
   let countdownTimer = null;
+  let checkSequence = 0;
 
   const deploymentVersion = (deployment, fallback) => {
     if (!deployment) return fallback;
-    return deployment.version || "Deployment";
+    return deployment.version || fallback || "Deployment";
+  };
+
+  const deploymentDetail = (deployment) => {
+    if (!deployment) return "";
+    const parts = [];
+    if (deployment.image) parts.push(deployment.image);
+    if (deployment.digest) {
+      const digest = String(deployment.digest);
+      parts.push(digest.length > 24 ? digest.slice(0, 19) + "…" : digest);
+    }
+    return parts.join(" · ");
   };
 
   const clearRebootTimers = () => {
@@ -776,12 +795,16 @@ if (systemUpdateOpen && systemUpdateDialog) {
       : "Player warning: 60 seconds";
   };
 
+  const freshUpdateAvailable = () => latestStatus?.check_state === "update_available";
+
+  const baseRebootLabel = () => freshUpdateAvailable() ? "Update & reboot" : "Reboot into update";
+
   const showRebootPlayers = (result) => {
     if (!rebootPlayers) return;
     const players = Array.isArray(result.players) ? result.players.filter(Boolean) : [];
     const count = Number(result.online || players.length || 0);
     const names = players.length ? " — " + players.join(", ") : "";
-    rebootPlayers.textContent = count + " player" + (count === 1 ? "" : "s") + " online" + names + ". Press Reboot again to confirm.";
+    rebootPlayers.textContent = count + " player" + (count === 1 ? "" : "s") + " online" + names + ". Press again to confirm.";
     rebootPlayers.hidden = false;
   };
 
@@ -791,17 +814,26 @@ if (systemUpdateOpen && systemUpdateDialog) {
     rebootPlayers.textContent = "";
   };
 
-  const setRebootControlsDisabled = (disabled) => {
-    if (backupToggle) backupToggle.disabled = disabled;
-    if (quickToggle) quickToggle.disabled = disabled;
-    if (rebootButton) rebootButton.disabled = disabled;
+  const syncActionAvailability = () => {
+    const readOnly = Boolean(latestStatus?.read_only);
+    const checkState = latestStatus?.check_state || "";
+    const canStage = !readOnly && !checking && !updating && !rebootWorkflowActive &&
+      (checkState === "update_available" || checkState === "unknown");
+    if (updateButton) updateButton.disabled = !canStage;
+    if (refreshButton) refreshButton.disabled = checking || updating || rebootWorkflowActive;
+    if (backupToggle) backupToggle.disabled = checking || updating || rebootWorkflowActive;
+    if (quickToggle) quickToggle.disabled = checking || updating || rebootWorkflowActive;
+    if (rebootButton) {
+      rebootButton.disabled = checking || updating || rebootWorkflowActive ||
+        (!freshUpdateAvailable() && !Boolean(latestStatus?.reboot_required));
+    }
   };
 
   const resetPlayerConfirmation = () => {
     if (rebootWorkflowActive) return;
     pendingPlayerConfirmation = false;
     hideRebootPlayers();
-    if (rebootButton) rebootButton.textContent = "Reboot";
+    if (rebootButton) rebootButton.textContent = baseRebootLabel();
   };
 
   const startVisibleCountdown = (deadlineUnix) => {
@@ -827,7 +859,7 @@ if (systemUpdateOpen && systemUpdateDialog) {
       pendingPlayerConfirmation = true;
       showRebootPlayers(result);
       if (rebootProgress) rebootProgress.hidden = true;
-      setRebootControlsDisabled(false);
+      syncActionAvailability();
       if (rebootButton) {
         rebootButton.disabled = false;
         rebootButton.textContent = "Confirm reboot";
@@ -842,8 +874,8 @@ if (systemUpdateOpen && systemUpdateDialog) {
       pendingPlayerConfirmation = false;
       if (rebootProgress) rebootProgress.hidden = true;
       hideRebootPlayers();
-      setRebootControlsDisabled(false);
-      if (rebootButton) rebootButton.textContent = "Reboot";
+      if (rebootButton) rebootButton.textContent = baseRebootLabel();
+      syncActionAvailability();
       return;
     }
 
@@ -853,20 +885,19 @@ if (systemUpdateOpen && systemUpdateDialog) {
       clearRebootTimers();
       hideRebootPlayers();
       if (rebootProgress) rebootProgress.hidden = true;
-      setRebootControlsDisabled(false);
-      if (rebootButton) rebootButton.textContent = "Reboot";
+      if (rebootButton) rebootButton.textContent = baseRebootLabel();
       if (error) {
         error.textContent = result.message || "Reboot was cancelled.";
         error.hidden = false;
       }
+      syncActionAvailability();
       return;
     }
 
     if (rebootWorkflowActive) {
       pendingPlayerConfirmation = false;
       hideRebootPlayers();
-      setRebootControlsDisabled(true);
-      if (updateButton) updateButton.disabled = true;
+      syncActionAvailability();
       if (rebootProgress) rebootProgress.hidden = false;
       if (rebootButton) rebootButton.textContent = "Rebooting…";
 
@@ -895,45 +926,69 @@ if (systemUpdateOpen && systemUpdateDialog) {
   const renderSystemUpdate = (status) => {
     latestStatus = status;
     if (runningValue) runningValue.textContent = deploymentVersion(status.running, "Unavailable");
-    if (runningImage) runningImage.textContent = status.running && status.running.image ? status.running.image : "";
+    if (runningImage) runningImage.textContent = deploymentDetail(status.running);
     if (stagedValue) stagedValue.textContent = deploymentVersion(status.staged, "None");
-    if (stagedImage) stagedImage.textContent = status.staged && status.staged.image ? status.staged.image : "";
+    if (stagedImage) stagedImage.textContent = deploymentDetail(status.staged);
+
+    if (availableValue) {
+      if (!status.checked) {
+        availableValue.textContent = checking ? "Checking…" : "Not checked";
+      } else if (status.check_state === "update_available") {
+        availableValue.textContent = deploymentVersion(status.available, "New image available");
+      } else if (status.check_state === "staged_current") {
+        availableValue.textContent = "Already staged";
+      } else if (status.check_state === "current") {
+        availableValue.textContent = "No newer image";
+      } else {
+        availableValue.textContent = "Unknown";
+      }
+    }
+    if (availableImage) {
+      availableImage.textContent = status.checked && status.check_state === "update_available"
+        ? deploymentDetail(status.available)
+        : "";
+    }
 
     if (state) {
       if (status.read_only) {
         state.textContent = "System updates are unavailable on this read-only deployment.";
+      } else if (status.checked) {
+        state.textContent = status.message || "Registry check complete.";
       } else if (status.reboot_required) {
-        state.textContent = "Update staged — reboot required.";
+        state.textContent = "An update is staged. Checking the registry for anything newer…";
       } else {
-        state.textContent = status.message || "JustVoxel is current.";
+        state.textContent = checking ? "Checking the registry for updates…" : "Ready to check for updates.";
       }
     }
 
-    if (rebootPanel) rebootPanel.hidden = !status.reboot_required;
-    if (!status.reboot_required) {
+    const showReboot = Boolean(status.reboot_required) || status.check_state === "update_available";
+    if (rebootPanel) rebootPanel.hidden = !showReboot;
+    if (rebootTitle) rebootTitle.textContent = freshUpdateAvailable() ? "Update and reboot" : "Reboot to apply staged update";
+    if (!status.reboot_required && !freshUpdateAvailable()) {
       rebootWorkflowActive = false;
       pendingPlayerConfirmation = false;
       clearRebootTimers();
       hideRebootPlayers();
       if (rebootProgress) rebootProgress.hidden = true;
     }
+    if (rebootButton && !pendingPlayerConfirmation && !rebootWorkflowActive) {
+      rebootButton.textContent = baseRebootLabel();
+    }
 
     if (error) {
       error.hidden = true;
       error.textContent = "";
     }
-    if (updateButton) {
-      updateButton.disabled = Boolean(status.read_only) || updating || rebootWorkflowActive;
-    }
+    syncActionAvailability();
   };
 
-  const showSystemUpdateError = (message) => {
+  const showSystemUpdateError = (message, preserveState = false) => {
     if (error) {
       error.textContent = message || "System update information is unavailable.";
       error.hidden = false;
     }
-    if (state) state.textContent = "System update unavailable.";
-    if (updateButton) updateButton.disabled = updating || rebootWorkflowActive;
+    if (state && !preserveState) state.textContent = "System update unavailable.";
+    syncActionAvailability();
   };
 
   const readResponse = async (response) => {
@@ -980,47 +1035,48 @@ if (systemUpdateOpen && systemUpdateDialog) {
     }
   };
 
-  const loadSystemUpdate = async () => {
-    if (state) state.textContent = "Loading system update status…";
-    if (error) error.hidden = true;
-    if (updateButton) updateButton.disabled = true;
-    try {
-      const response = await fetch("/api/system-updates", {
-        method: "GET",
-        credentials: "same-origin",
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      });
-      if (handleAuthResponse(response)) return;
-      const result = await readResponse(response);
-      if (!response.ok) {
-        showSystemUpdateError(result.error || "System update status is unavailable.");
-        return;
-      }
-      renderSystemUpdate(result);
-      if (result.reboot_required) {
-        await pollRebootStatus();
-      }
-    } catch (_) {
-      showSystemUpdateError("System update service is unavailable.");
-    }
+  const loadLocalSystemUpdateStatus = async () => {
+    const response = await fetch("/api/system-updates", {
+      method: "GET",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (handleAuthResponse(response)) return null;
+    const result = await readResponse(response);
+    if (!response.ok) throw new Error(result.error || "System update status is unavailable.");
+    renderSystemUpdate(result);
+    if (result.reboot_required) await pollRebootStatus();
+    return result;
   };
 
-  const applySystemUpdate = async () => {
-    if (updating || rebootWorkflowActive || !csrfInput || !updateButton) return;
-    updating = true;
-    updateButton.disabled = true;
-    updateButton.classList.add("is-busy");
-    updateButton.setAttribute("aria-busy", "true");
-    updateButton.textContent = "Updating…";
-    if (state) state.textContent = "Updating JustVoxel… Minecraft keeps running.";
+  const checkSystemUpdate = async () => {
+    const sequence = ++checkSequence;
+    checking = true;
     if (error) error.hidden = true;
-
-    const body = new URLSearchParams();
-    body.set("csrf", csrfInput.value);
+    if (availableValue) availableValue.textContent = "Checking…";
+    if (availableImage) availableImage.textContent = "";
+    if (state) state.textContent = "Checking the registry for updates…";
+    syncActionAvailability();
 
     try {
-      const response = await fetch("/api/system-updates", {
+      const local = await loadLocalSystemUpdateStatus();
+      if (!local || sequence !== checkSequence) return;
+      if (local.read_only) {
+        if (availableValue) availableValue.textContent = "Unavailable";
+        return;
+      }
+      if (!csrfInput) throw new Error("Update check is unavailable.");
+
+      if (state) {
+        state.textContent = local.reboot_required
+          ? "An update is staged. Checking the registry for anything newer…"
+          : "Checking the registry for updates…";
+      }
+      if (availableValue) availableValue.textContent = "Checking…";
+
+      const body = new URLSearchParams({ csrf: csrfInput.value });
+      const response = await fetch("/api/system-updates/check", {
         method: "POST",
         credentials: "same-origin",
         headers: {
@@ -1028,30 +1084,39 @@ if (systemUpdateOpen && systemUpdateDialog) {
           "Content-Type": "application/x-www-form-urlencoded",
         },
         body: body.toString(),
+        cache: "no-store",
       });
       if (handleAuthResponse(response)) return;
       const result = await readResponse(response);
-      if (!response.ok) {
-        showSystemUpdateError(result.error || "System update failed.");
-        return;
-      }
+      if (!response.ok) throw new Error(result.error || "Registry update check failed.");
+      if (sequence !== checkSequence) return;
       renderSystemUpdate(result);
-      if (result.reboot_required) {
-        await pollRebootStatus();
+      if (result.reboot_required) await pollRebootStatus();
+    } catch (caught) {
+      if (sequence !== checkSequence) return;
+      if (availableValue) availableValue.textContent = "Check failed";
+      if (availableImage) availableImage.textContent = "";
+      if (state) {
+        state.textContent = latestStatus?.reboot_required
+          ? "Staged update shown. Registry freshness could not be verified."
+          : "Running deployment shown. Registry freshness could not be verified.";
       }
-    } catch (_) {
-      showSystemUpdateError("System update service is unavailable. Nothing was submitted again automatically.");
+      showSystemUpdateError(caught?.message || "Could not check the registry for updates.", true);
     } finally {
-      updating = false;
-      updateButton.classList.remove("is-busy");
-      updateButton.removeAttribute("aria-busy");
-      updateButton.textContent = "Update system";
-      updateButton.disabled = Boolean(latestStatus && latestStatus.read_only) || rebootWorkflowActive;
+      if (sequence === checkSequence) {
+        checking = false;
+        syncActionAvailability();
+      }
     }
   };
 
   const requestUpdateReboot = async () => {
-    if (rebootWorkflowActive || !csrfInput || !rebootButton) return;
+    if (freshUpdateAvailable() && !updating) {
+      await applySystemUpdate(true);
+      return;
+    }
+    if (rebootWorkflowActive || updating || checking || !csrfInput || !rebootButton) return;
+
     rebootButton.disabled = true;
     rebootButton.textContent = "Checking…";
     if (error) error.hidden = true;
@@ -1087,29 +1152,87 @@ if (systemUpdateOpen && systemUpdateDialog) {
         return;
       }
       renderRebootStatus(result);
-      if (result.accepted) {
-        rebootPollTimer = window.setTimeout(pollRebootStatus, 250);
-      }
+      if (result.accepted) rebootPollTimer = window.setTimeout(pollRebootStatus, 250);
     } catch (_) {
       rebootWorkflowActive = false;
-      setRebootControlsDisabled(false);
-      rebootButton.textContent = "Reboot";
+      if (rebootButton) rebootButton.textContent = baseRebootLabel();
       if (error) {
         error.textContent = "Reboot workflow could not be started.";
         error.hidden = false;
       }
+      syncActionAvailability();
     }
   };
 
-  systemUpdateOpen.addEventListener("click", () => {
-    if (controlCenter) controlCenter.open = false;
-    systemUpdateDialog.showModal();
-    updateWarningText();
-    loadSystemUpdate();
+  const applySystemUpdate = async (rebootAfter = false) => {
+    if (updating || checking || rebootWorkflowActive || !csrfInput || !updateButton) return;
+    updating = true;
+    updateButton.disabled = true;
+    updateButton.classList.add("is-busy");
+    updateButton.setAttribute("aria-busy", "true");
+    updateButton.textContent = rebootAfter ? "Downloading…" : "Downloading…";
+    if (rebootButton) rebootButton.disabled = true;
+    if (state) state.textContent = "Downloading and staging the latest JustVoxel image… Minecraft keeps running.";
+    if (error) error.hidden = true;
+    syncActionAvailability();
+
+    const body = new URLSearchParams({ csrf: csrfInput.value });
+    try {
+      const response = await fetch("/api/system-updates", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: body.toString(),
+      });
+      if (handleAuthResponse(response)) return;
+      const result = await readResponse(response);
+      if (!response.ok) {
+        showSystemUpdateError(result.error || "System update failed.");
+        return;
+      }
+      renderSystemUpdate(result);
+      if (result.reboot_required) {
+        await pollRebootStatus();
+        if (rebootAfter) {
+          updating = false;
+          syncActionAvailability();
+          await requestUpdateReboot();
+        }
+      }
+    } catch (_) {
+      showSystemUpdateError("System update service is unavailable. Nothing was submitted again automatically.");
+    } finally {
+      updating = false;
+      updateButton.classList.remove("is-busy");
+      updateButton.removeAttribute("aria-busy");
+      updateButton.textContent = "Download & stage";
+      syncActionAvailability();
+    }
+  };
+
+  const workspaceWindow = setupWorkspaceWindow(systemUpdateDialog, {
+    onOpen: () => {
+      updateWarningText();
+      checkSystemUpdate();
+    },
+    onClose: () => {
+      checkSequence += 1;
+      checking = false;
+      clearRebootTimers();
+    },
   });
 
-  closeButton?.addEventListener("click", () => systemUpdateDialog.close());
-  updateButton?.addEventListener("click", applySystemUpdate);
+  systemUpdateOpen.addEventListener("click", () => {
+    if (controlCenter) controlCenter.open = false;
+    workspaceWindow?.open();
+  });
+
+  closeButton?.addEventListener("click", () => workspaceWindow?.close());
+  refreshButton?.addEventListener("click", checkSystemUpdate);
+  updateButton?.addEventListener("click", () => applySystemUpdate(false));
   rebootButton?.addEventListener("click", requestUpdateReboot);
   quickToggle?.addEventListener("change", () => {
     updateWarningText();
@@ -1117,12 +1240,22 @@ if (systemUpdateOpen && systemUpdateDialog) {
   });
   backupToggle?.addEventListener("change", resetPlayerConfirmation);
 
-  systemUpdateDialog.addEventListener("click", (event) => {
-    if (event.target === systemUpdateDialog) systemUpdateDialog.close();
-  });
-  systemUpdateDialog.addEventListener("close", clearRebootTimers);
-}
-
+  const restoreSystemUpdateWhenRoleKnown = () => {
+    if (!readWorkspaceWindowState("system-update").open) return;
+    if (document.body.classList.contains("role-administrator")) {
+      workspaceWindow?.open();
+      return;
+    }
+    if (!document.body.classList.contains("role-pending")) return;
+    const observer = new MutationObserver(() => {
+      if (document.body.classList.contains("role-pending")) return;
+      observer.disconnect();
+      if (document.body.classList.contains("role-administrator")) workspaceWindow?.open();
+    });
+    observer.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+  };
+  restoreSystemUpdateWhenRoleKnown();
+};
 
 const workspaceWindows = new Set();
 let workspaceWindowZ = 120;
@@ -1292,6 +1425,8 @@ document.addEventListener("keydown", (event) => {
 window.addEventListener("resize", () => {
   workspaceWindows.forEach((element) => clampWorkspaceWindow(element));
 });
+
+initSystemUpdateWorkspace();
 
 const storageOpen = document.querySelector("[data-storage-open]");
 const storageDialog = document.querySelector("[data-storage-workspace-dialog]");

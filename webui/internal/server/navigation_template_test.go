@@ -54,7 +54,7 @@ func TestControlCenterNavigationUX(t *testing.T) {
 	if temporary < 0 || minecraft < 0 || temporary > minecraft {
 		t.Fatal("Temporary Control Center section must appear before Minecraft")
 	}
-	for _, item := range []string{"data-system-monitor-open", "data-storage-open", "data-backups-open"} {
+	for _, item := range []string{"data-system-monitor-open", "data-storage-open", "data-backups-open", "data-system-update-open"} {
 		if strings.Count(markup, item) != 1 {
 			t.Fatalf("temporary workspace item %q must appear exactly once", item)
 		}

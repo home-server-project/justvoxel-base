@@ -12,6 +12,7 @@ import (
 type adminSystemUpdatesAPI interface {
 	Session(ctx context.Context, session string) (api.SessionInfo, error)
 	AdminSystemUpdateStatus(ctx context.Context, session string) (api.AdminSystemUpdateStatus, error)
+	AdminSystemUpdateCheck(ctx context.Context, session string) (api.AdminSystemUpdateStatus, error)
 	AdminSystemUpdate(ctx context.Context, session string) (api.AdminSystemUpdateStatus, error)
 	AdminSystemUpdateRebootStatus(ctx context.Context, session string) (api.AdminSystemUpdateRebootStatus, error)
 	AdminSystemUpdateReboot(ctx context.Context, session string, options api.AdminSystemUpdateRebootOptions) (api.AdminSystemUpdateRebootStatus, error)
@@ -19,6 +20,7 @@ type adminSystemUpdatesAPI interface {
 
 func (a *App) registerAdminSystemUpdatePages(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/system-updates", a.systemUpdateStatus)
+	mux.HandleFunc("POST /api/system-updates/check", a.systemUpdateCheck)
 	mux.HandleFunc("POST /api/system-updates", a.systemUpdateApply)
 	mux.HandleFunc("GET /api/system-updates/reboot", a.systemUpdateRebootStatus)
 	mux.HandleFunc("POST /api/system-updates/reboot", a.systemUpdateReboot)
@@ -30,6 +32,19 @@ func (a *App) systemUpdateStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status, err := client.AdminSystemUpdateStatus(r.Context(), session)
+	if err != nil {
+		a.handleSystemUpdateAPIError(w, err)
+		return
+	}
+	writeSystemUpdateJSON(w, http.StatusOK, status)
+}
+
+func (a *App) systemUpdateCheck(w http.ResponseWriter, r *http.Request) {
+	session, client, ok := a.systemUpdateRequest(w, r, true)
+	if !ok {
+		return
+	}
+	status, err := client.AdminSystemUpdateCheck(r.Context(), session)
 	if err != nil {
 		a.handleSystemUpdateAPIError(w, err)
 		return

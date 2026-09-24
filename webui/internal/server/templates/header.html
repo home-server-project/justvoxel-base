@@ -63,6 +63,7 @@
             <button class="control-tile" type="button" data-system-monitor-open title="Live CPU, memory, storage, network, processes and containers"><strong>System Monitor</strong></button>
             <button class="control-tile nav-admin-only" type="button" data-storage-open title="Disks, partitions, mounts and external USB storage"><strong>Storage</strong></button>
             <button class="control-tile nav-admin-only" type="button" data-backups-open title="Create, schedule, restore and manage backups"><strong>Backups</strong></button>
+            <button class="control-tile nav-admin-only" type="button" data-system-update-open title="Update the JustVoxel operating system"><strong>System Update</strong></button>
           </div>
         </section>
 
@@ -89,7 +90,6 @@
         <section class="control-section nav-admin-only">
           <span class="control-section-label">JustVoxel</span>
           <div class="control-tile-grid">
-            <button class="control-tile nav-admin-only" type="button" data-system-update-open title="Update the JustVoxel operating system"><strong>System Update</strong></button>
             <a class="control-tile" href="/settings/validation" title="Check appliance health"><strong>Validation</strong></a>
             <a class="control-tile" href="/settings/activity" title="Administrative events"><strong>Admin activity</strong></a>
             <a class="control-tile" href="/settings/users" title="Accounts and roles"><strong>Users</strong></a>
@@ -245,14 +245,17 @@
     </div>
   </dialog>
 
-  <dialog class="system-update-dialog" data-system-update-dialog>
+  <dialog class="workspace-window system-update-dialog" data-workspace-window="system-update" data-system-update-dialog aria-labelledby="system-update-title">
     <div class="system-update-dialog-shell">
-      <div class="system-update-dialog-header">
+      <div class="system-update-dialog-header" data-workspace-drag-handle>
         <div>
           <p class="eyebrow">JustVoxel</p>
-          <h2>System Update</h2>
+          <h2 id="system-update-title">System Update</h2>
         </div>
-        <button class="system-update-close" type="button" data-system-update-close aria-label="Close system update">&times;</button>
+        <div class="system-update-header-actions">
+          <button class="system-monitor-header-button" type="button" data-system-update-refresh aria-label="Check for updates" title="Check for updates">↻</button>
+          <button class="system-monitor-header-button" type="button" data-system-update-close aria-label="Close system update">&times;</button>
+        </div>
       </div>
       <div class="system-update-dialog-body">
         <div class="system-update-deployment-grid">
@@ -262,9 +265,14 @@
             <small data-system-update-running-image></small>
           </section>
           <section class="system-update-deployment">
-            <span>Staged update</span>
+            <span>Staged</span>
             <strong data-system-update-staged>Loading…</strong>
             <small data-system-update-staged-image></small>
+          </section>
+          <section class="system-update-deployment">
+            <span>Available now</span>
+            <strong data-system-update-available>Checking…</strong>
+            <small data-system-update-available-image></small>
           </section>
         </div>
         <p class="system-update-state" data-system-update-state>Loading system update status…</p>
@@ -272,7 +280,7 @@
 
         <section class="system-update-reboot-panel" data-system-update-reboot hidden>
           <div class="system-update-reboot-heading">
-            <strong>Reboot to apply update</strong>
+            <strong data-system-update-reboot-title>Reboot to apply update</strong>
             <small>Minecraft is stopped through the normal player-aware shutdown path.</small>
           </div>
 
@@ -294,12 +302,12 @@
           </div>
 
           <div class="system-update-reboot-action">
-            <button type="button" data-system-update-reboot-button>Reboot</button>
+            <button type="button" data-system-update-reboot-button>Reboot into update</button>
           </div>
         </section>
 
         <div class="system-update-actions">
-          <button type="button" data-system-update-button disabled>Update system</button>
+          <button type="button" data-system-update-button disabled>Download &amp; stage</button>
         </div>
       </div>
     </div>

@@ -13,11 +13,13 @@ import (
 
 const (
 	adminSystemUpdatesPath      = "/v1/admin/system/updates"
+	adminSystemUpdateCheckPath  = "/v1/admin/system/updates/check"
 	adminSystemUpdateRebootPath = "/v1/admin/system/update-reboot"
 )
 
 var (
 	adminSystemUpdateStatusTimeout = 15 * time.Second
+	adminSystemUpdateCheckTimeout  = 3 * time.Minute
 	adminSystemUpdateTimeout       = 16 * time.Minute
 )
 
@@ -31,8 +33,11 @@ type AdminSystemUpdateStatus struct {
 	OK             bool                         `json:"ok"`
 	ReadOnly       bool                         `json:"read_only"`
 	RebootRequired bool                         `json:"reboot_required"`
+	Checked        bool                         `json:"checked,omitempty"`
+	CheckState     string                       `json:"check_state,omitempty"`
 	Running        AdminSystemUpdateDeployment  `json:"running"`
 	Staged         *AdminSystemUpdateDeployment `json:"staged,omitempty"`
+	Available      *AdminSystemUpdateDeployment `json:"available,omitempty"`
 	Rollback       *AdminSystemUpdateDeployment `json:"rollback,omitempty"`
 	Message        string                       `json:"message,omitempty"`
 }
@@ -41,13 +46,21 @@ func (c *Client) AdminSystemUpdateStatus(ctx context.Context, session string) (A
 	return c.adminSystemUpdateRequest(ctx, session, http.MethodGet, adminSystemUpdateStatusTimeout)
 }
 
+func (c *Client) AdminSystemUpdateCheck(ctx context.Context, session string) (AdminSystemUpdateStatus, error) {
+	return c.adminSystemUpdateRequestPath(ctx, session, http.MethodPost, adminSystemUpdateCheckPath, adminSystemUpdateCheckTimeout)
+}
+
 func (c *Client) AdminSystemUpdate(ctx context.Context, session string) (AdminSystemUpdateStatus, error) {
 	return c.adminSystemUpdateRequest(ctx, session, http.MethodPost, adminSystemUpdateTimeout)
 }
 
 func (c *Client) adminSystemUpdateRequest(ctx context.Context, session, method string, timeout time.Duration) (AdminSystemUpdateStatus, error) {
+	return c.adminSystemUpdateRequestPath(ctx, session, method, adminSystemUpdatesPath, timeout)
+}
+
+func (c *Client) adminSystemUpdateRequestPath(ctx context.Context, session, method, path string, timeout time.Duration) (AdminSystemUpdateStatus, error) {
 	var out AdminSystemUpdateStatus
-	req, err := http.NewRequestWithContext(ctx, method, "http://unix"+adminSystemUpdatesPath, nil)
+	req, err := http.NewRequestWithContext(ctx, method, "http://unix"+path, nil)
 	if err != nil {
 		return out, err
 	}

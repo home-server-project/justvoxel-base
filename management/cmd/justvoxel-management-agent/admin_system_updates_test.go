@@ -53,6 +53,125 @@ func TestAdminSystemUpdateStatusAllowsLocalRoot(t *testing.T) {
 	}
 }
 
+func TestAdminSystemUpdateCheckRunsAgainstRegistryWithStagedDeployment(t *testing.T) {
+	oldStatus := runBootcStatus
+	oldCheck := runBootcUpgradeCheck
+	defer func() {
+		runBootcStatus = oldStatus
+		runBootcUpgradeCheck = oldCheck
+	}()
+
+	statusCalls := 0
+	runBootcStatus = func(_ context.Context) ([]byte, error) {
+		statusCalls++
+		return []byte(bootcStatusStagedFixture), nil
+	}
+	checkCalls := 0
+	runBootcUpgradeCheck = func(_ context.Context) ([]byte, error) {
+		checkCalls++
+		return []byte("Total new layers: 4     Size: 120 MB\nRemoved layers:   2     Size: 80 MB\nAdded layers:     4     Size: 120 MB\n"), nil
+	}
+
+	s := adminServerForTest()
+	rr := httptest.NewRecorder()
+	s.adminSystemUpdateCheck(rr, authorizedRequest(http.MethodPost, "http://unix/v1/admin/system/updates/check", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("system update check = %d: %s", rr.Code, rr.Body.String())
+	}
+	if checkCalls != 1 {
+		t.Fatalf("bootc upgrade --check calls = %d, want 1", checkCalls)
+	}
+	if statusCalls != 2 {
+		t.Fatalf("bootc status calls = %d, want 2", statusCalls)
+	}
+	for _, want := range []string{`"checked":true`, `"check_state":"update_available"`, `"reboot_required":true`, "newer JustVoxel image is available than the currently staged update"} {
+		if !strings.Contains(rr.Body.String(), want) {
+			t.Fatalf("system update check response missing %q: %s", want, rr.Body.String())
+		}
+	}
+}
+
+func TestAdminSystemUpdateCheckRecognizesLatestImageAlreadyStaged(t *testing.T) {
+	oldStatus := runBootcStatus
+	oldCheck := runBootcUpgradeCheck
+	defer func() {
+		runBootcStatus = oldStatus
+		runBootcUpgradeCheck = oldCheck
+	}()
+	runBootcStatus = func(_ context.Context) ([]byte, error) {
+		return []byte(bootcStatusStagedFixture), nil
+	}
+	runBootcUpgradeCheck = func(_ context.Context) ([]byte, error) {
+		return []byte("Update already staged. To apply update run `bootc update --apply`"), nil
+	}
+
+	s := adminServerForTest()
+	rr := httptest.NewRecorder()
+	s.adminSystemUpdateCheck(rr, authorizedRequest(http.MethodPost, "http://unix/v1/admin/system/updates/check", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("system update check = %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"check_state":"staged_current"`) {
+		t.Fatalf("latest staged update was not recognized: %s", rr.Body.String())
+	}
+}
+
+func TestAdminSystemUpdateCheckTreatsMatchingStagedDigestAsCurrent(t *testing.T) {
+	oldStatus := runBootcStatus
+	oldCheck := runBootcUpgradeCheck
+	defer func() {
+		runBootcStatus = oldStatus
+		runBootcUpgradeCheck = oldCheck
+	}()
+	runBootcStatus = func(_ context.Context) ([]byte, error) {
+		return []byte(bootcStatusStagedFixture), nil
+	}
+	runBootcUpgradeCheck = func(_ context.Context) ([]byte, error) {
+		return []byte("Update available for: ostree-image-signed:docker://ghcr.io/home-server-project/justvoxel-vm:testing\n  Version: 11\n  Digest: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"), nil
+	}
+
+	s := adminServerForTest()
+	rr := httptest.NewRecorder()
+	s.adminSystemUpdateCheck(rr, authorizedRequest(http.MethodPost, "http://unix/v1/admin/system/updates/check", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("system update check = %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"check_state":"staged_current"`) {
+		t.Fatalf("matching staged digest should be current: %s", rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "newer JustVoxel image is available than the currently staged update") {
+		t.Fatalf("matching staged digest was misclassified as newer: %s", rr.Body.String())
+	}
+}
+
+func TestOperatorCannotCheckSystemUpdate(t *testing.T) {
+	oldStatus := runBootcStatus
+	oldCheck := runBootcUpgradeCheck
+	defer func() {
+		runBootcStatus = oldStatus
+		runBootcUpgradeCheck = oldCheck
+	}()
+	called := false
+	runBootcStatus = func(_ context.Context) ([]byte, error) {
+		called = true
+		return []byte(bootcStatusCurrentFixture), nil
+	}
+	runBootcUpgradeCheck = func(_ context.Context) ([]byte, error) {
+		called = true
+		return nil, nil
+	}
+
+	s := roleServerForTest(roleOperator)
+	rr := httptest.NewRecorder()
+	s.adminSystemUpdateCheck(rr, authorizedRequest(http.MethodPost, "http://unix/v1/admin/system/updates/check", ""))
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("operator update check = %d, want 403", rr.Code)
+	}
+	if called {
+		t.Fatal("bootc command ran for forbidden operator update check")
+	}
+}
+
 func TestAdminSystemUpdateRunsUpgradeAndReturnsStagedStatus(t *testing.T) {
 	oldStatus := runBootcStatus
 	oldUpgrade := runBootcUpgrade
@@ -84,7 +203,7 @@ func TestAdminSystemUpdateRunsUpgradeAndReturnsStagedStatus(t *testing.T) {
 	if upgradeCalls != 1 {
 		t.Fatalf("bootc upgrade calls = %d, want 1", upgradeCalls)
 	}
-	if !strings.Contains(rr.Body.String(), `"reboot_required":true`) || !strings.Contains(rr.Body.String(), "update is staged") {
+	if !strings.Contains(rr.Body.String(), `"reboot_required":true`) || !strings.Contains(rr.Body.String(), `"check_state":"staged_current"`) || !strings.Contains(rr.Body.String(), "downloaded and staged") {
 		t.Fatalf("unexpected update response: %s", rr.Body.String())
 	}
 }
@@ -109,7 +228,7 @@ func TestAdminSystemUpdateCurrentImageReturnsCurrent(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("current system update = %d: %s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), `"reboot_required":false`) || !strings.Contains(rr.Body.String(), "OS is current") {
+	if !strings.Contains(rr.Body.String(), `"reboot_required":false`) || !strings.Contains(rr.Body.String(), `"check_state":"current"`) || !strings.Contains(rr.Body.String(), "up to date") {
 		t.Fatalf("unexpected current response: %s", rr.Body.String())
 	}
 }

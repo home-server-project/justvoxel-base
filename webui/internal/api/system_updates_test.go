@@ -30,6 +30,24 @@ func TestAdminSystemUpdateStatusReadsDeploymentState(t *testing.T) {
 	}
 }
 
+func TestAdminSystemUpdateCheckPostsFreshRegistryCheck(t *testing.T) {
+	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPost || r.URL.Path != adminSystemUpdateCheckPath {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		body := `{"ok":true,"read_only":false,"reboot_required":true,"checked":true,"check_state":"update_available","running":{"version":"10","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"staged":{"version":"11","digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"available":{"version":"12","digest":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"},"message":"A newer JustVoxel image is available than the currently staged update."}`
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})}}
+
+	status, err := client.AdminSystemUpdateCheck(context.Background(), "session-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.Checked || status.CheckState != "update_available" || status.Available == nil || status.Available.Version != "12" {
+		t.Fatalf("unexpected update-check response: %#v", status)
+	}
+}
+
 func TestAdminSystemUpdatePostsOrdinaryUpdateRequest(t *testing.T) {
 	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.Method != http.MethodPost || r.URL.Path != adminSystemUpdatesPath {
