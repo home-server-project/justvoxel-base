@@ -21,7 +21,7 @@ source /usr/lib/os-release
 [[ "${HOME_SERVER_BASE_UPSTREAM_CPE_NAME:-}" == cpe:/o:almalinux:* ]]
 
 for cmd in \
-    bootc podman skopeo just mjust fzf gum btop \
+    bootc podman skopeo just mjust fzf gum btop glances \
     tar gzip less ip python3 ping \
     findmnt mountpoint flock timeout mkfs.xfs btrfs mount.nfs mount.cifs mount.ntfs-3g lsblk blkid wipefs parted partprobe udevadm \
     spf; do
@@ -42,7 +42,7 @@ rpm -q \
     pam authselect authselect-libs libpwquality \
     podman skopeo container-selinux ca-certificates python3 tar gzip less iproute util-linux xfsprogs \
     just fzf gum btop iputils btrfs-progs ntfs-3g parted nfs-utils cifs-utils \
-    gssproxy zram-generator superfile >/dev/null
+    gssproxy zram-generator superfile glances >/dev/null
 
 test -f /etc/pam.d/justvoxel
 grep -Fqx 'auth       include      system-auth' /etc/pam.d/justvoxel
@@ -84,6 +84,7 @@ test "$(systemctl is-enabled justvoxel-web-bootstrap.service)" = "enabled"
 test "$(systemctl is-enabled justvoxel-minecraft-shutdown-guard.service)" = "enabled"
 [[ "$(systemctl is-enabled justvoxel-webui.service 2>/dev/null || true)" != "enabled" ]]
 [[ "$(systemctl is-enabled justvoxel-management.service 2>/dev/null || true)" != "enabled" ]]
+[[ "$(systemctl is-enabled justvoxel-glances.service 2>/dev/null || true)" != "enabled" ]]
 
 for forbidden in cockpit-system cockpit-files cockpit-podman cockpit-storaged cockpit-machines libvirt-daemon-kvm qemu-kvm virt-install; do
     if rpm -q "${forbidden}" >/dev/null 2>&1; then
@@ -181,6 +182,11 @@ grep -Fqx 'ExecStop=/usr/libexec/justvoxel/mjust/host-shutdown-guard' /usr/lib/s
 test -f /usr/lib/systemd/system/justvoxel-management.service
 test -f /usr/lib/systemd/system/justvoxel-webui.service
 test -f /usr/lib/systemd/system/justvoxel-web-bootstrap.service
+test -f /usr/lib/systemd/system/justvoxel-glances.service
+test -f /etc/glances/glances.conf
+grep -Fq -- '--bind 127.0.0.1 --port 61208' /usr/lib/systemd/system/justvoxel-glances.service
+grep -Fq -- '--disable-webui' /usr/lib/systemd/system/justvoxel-glances.service
+grep -Fqx 'podman_sock=unix:///run/podman/podman.sock' /etc/glances/glances.conf
 test -f /usr/lib/firewalld/services/justvoxel-web.xml
 grep -Fqx 'User=justvoxel-web' /usr/lib/systemd/system/justvoxel-webui.service
 grep -Fqx 'User=root' /usr/lib/systemd/system/justvoxel-management.service

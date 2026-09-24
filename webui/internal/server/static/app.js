@@ -980,3 +980,183 @@ if (systemUpdateOpen && systemUpdateDialog) {
   });
   systemUpdateDialog.addEventListener("close", clearRebootTimers);
 }
+
+
+const systemMonitorOpen = document.querySelector("[data-system-monitor-open]");
+const systemMonitorDialog = document.querySelector("[data-system-monitor-dialog]");
+if (systemMonitorOpen && systemMonitorDialog) {
+  const closeButton = systemMonitorDialog.querySelector("[data-system-monitor-close]");
+  const profileToggle = systemMonitorDialog.querySelector("[data-system-monitor-profile-toggle]");
+  const profilePanel = systemMonitorDialog.querySelector("[data-system-monitor-profile]");
+  const resetButton = systemMonitorDialog.querySelector("[data-system-monitor-reset]");
+  const processCount = systemMonitorDialog.querySelector("[data-monitor-process-count]");
+  const state = systemMonitorDialog.querySelector("[data-system-monitor-state]");
+  const error = systemMonitorDialog.querySelector("[data-system-monitor-error]");
+  const cards = Array.from(systemMonitorDialog.querySelectorAll("[data-monitor-card]"));
+  const profileInputs = Array.from(systemMonitorDialog.querySelectorAll("[data-monitor-profile]"));
+  const profileKey = "justvoxel-system-monitor-profile-v1";
+  const defaultProfile = {
+    system: true, cpu: true, memory: true, load: true, filesystem: true,
+    diskio: true, network: true, processes: true, containers: true, sensors: true,
+    processCount: 10,
+  };
+  let profile = { ...defaultProfile };
+  let refreshTimer = null;
+
+  const readProfile = () => {
+    try {
+      profile = { ...defaultProfile, ...JSON.parse(window.localStorage.getItem(profileKey) || "{}") };
+    } catch (_) {
+      profile = { ...defaultProfile };
+    }
+  };
+  const saveProfile = () => window.localStorage.setItem(profileKey, JSON.stringify(profile));
+  const syncProfile = () => {
+    profileInputs.forEach((input) => { input.checked = profile[input.dataset.monitorProfile] !== false; });
+    if (processCount) processCount.value = String(profile.processCount || 10);
+    cards.forEach((card) => { card.hidden = profile[card.dataset.monitorCard] === false; });
+    const visible = cards.filter((card) => !card.hidden).length;
+    const width = visible >= 6 ? 1120 : visible >= 3 ? 760 : 430;
+    systemMonitorDialog.style.setProperty("--system-monitor-width", width + "px");
+  };
+  const fixed = (value, digits = 1) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed.toFixed(digits) : "—";
+  };
+  const percent = (value) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed.toFixed(1) + "%" : "—";
+  };
+  const bytes = (value) => {
+    let parsed = Number(value);
+    if (!Number.isFinite(parsed)) return "—";
+    const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let index = 0;
+    while (Math.abs(parsed) >= 1024 && index < units.length - 1) { parsed /= 1024; index += 1; }
+    return parsed.toFixed(index === 0 ? 0 : 1) + " " + units[index];
+  };
+  const rate = (value) => {
+    const rendered = bytes(value);
+    return rendered === "—" ? rendered : rendered + "/s";
+  };
+  const setText = (selector, value) => {
+    const node = systemMonitorDialog.querySelector(selector);
+    if (node) node.textContent = value;
+  };
+  const renderLines = (selector, entries) => {
+    const node = systemMonitorDialog.querySelector(selector);
+    if (!node) return;
+    node.replaceChildren();
+    entries.filter((entry) => entry[1] !== undefined && entry[1] !== null && entry[1] !== "—").forEach(([label, value]) => {
+      const row = document.createElement("div");
+      const key = document.createElement("span");
+      const val = document.createElement("strong");
+      key.textContent = label; val.textContent = String(value);
+      row.append(key, val); node.appendChild(row);
+    });
+  };
+  const renderTable = (selector, rows, columns) => {
+    const node = systemMonitorDialog.querySelector(selector);
+    if (!node) return;
+    node.replaceChildren();
+    if (!Array.isArray(rows) || rows.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "muted compact"; empty.textContent = "No data";
+      node.appendChild(empty); return;
+    }
+    const table = document.createElement("table");
+    const head = document.createElement("thead");
+    const headRow = document.createElement("tr");
+    columns.forEach((column) => { const th = document.createElement("th"); th.textContent = column.label; headRow.appendChild(th); });
+    head.appendChild(headRow);
+    const body = document.createElement("tbody");
+    rows.forEach((row) => {
+      const tr = document.createElement("tr");
+      columns.forEach((column) => {
+        const td = document.createElement("td");
+        const value = column.render(row);
+        td.textContent = value === undefined || value === null || value === "" ? "—" : String(value);
+        tr.appendChild(td);
+      });
+      body.appendChild(tr);
+    });
+    table.append(head, body); node.appendChild(table);
+  };
+  const renderMonitor = (data) => {
+    const system = data.system || {}, uptime = data.uptime || {}, cpu = data.cpu || {};
+    const mem = data.mem || {}, swap = data.memswap || {}, load = data.load || {};
+    setText("[data-monitor-system-host]", system.hostname || system.hr_name || "JustVoxel");
+    renderLines("[data-monitor-system-lines]", [
+      ["OS", system.os_name || system.platform || system.linux_distro],
+      ["Kernel", system.os_version || system.kernel_version],
+      ["Uptime", typeof uptime === "string" ? uptime : uptime.value],
+    ]);
+    setText("[data-monitor-cpu-total]", percent(cpu.total));
+    renderLines("[data-monitor-cpu-lines]", [["User", percent(cpu.user)], ["System", percent(cpu.system)], ["I/O wait", percent(cpu.iowait)], ["Idle", percent(cpu.idle)]]);
+    setText("[data-monitor-memory-main]", percent(mem.percent));
+    renderLines("[data-monitor-memory-lines]", [["Used", bytes(mem.used)], ["Available", bytes(mem.available)], ["Total", bytes(mem.total)], ["Swap", swap.total ? bytes(swap.used) + " / " + bytes(swap.total) : "Not used"]]);
+    setText("[data-monitor-load-main]", fixed(load.min1) + " / " + fixed(load.min5) + " / " + fixed(load.min15));
+    renderLines("[data-monitor-load-lines]", [["1 minute", fixed(load.min1)], ["5 minutes", fixed(load.min5)], ["15 minutes", fixed(load.min15)]]);
+    renderTable("[data-monitor-filesystem]", Array.isArray(data.fs) ? data.fs : [], [
+      {label:"Mount", render:(row)=>row.mnt_point || row.mountpoint || row.device_name},
+      {label:"Used", render:(row)=>percent(row.percent)}, {label:"Free", render:(row)=>bytes(row.free)}, {label:"Size", render:(row)=>bytes(row.size)}
+    ]);
+    renderTable("[data-monitor-diskio]", Array.isArray(data.diskio) ? data.diskio : [], [
+      {label:"Disk", render:(row)=>row.disk_name || row.name}, {label:"Read", render:(row)=>rate(row.read_bytes_rate_per_sec)}, {label:"Write", render:(row)=>rate(row.write_bytes_rate_per_sec)}
+    ]);
+    renderTable("[data-monitor-network]", Array.isArray(data.network) ? data.network : [], [
+      {label:"Interface", render:(row)=>row.interface_name || row.name}, {label:"RX", render:(row)=>rate(row.bytes_recv_rate_per_sec)}, {label:"TX", render:(row)=>rate(row.bytes_sent_rate_per_sec)}
+    ]);
+    const processes = (Array.isArray(data.processlist) ? data.processlist : []).slice()
+      .sort((a,b)=>Number(b.cpu_percent || 0)-Number(a.cpu_percent || 0)).slice(0, Number(profile.processCount || 10));
+    renderTable("[data-monitor-processes]", processes, [
+      {label:"Process", render:(row)=>row.name}, {label:"CPU", render:(row)=>percent(row.cpu_percent)}, {label:"Memory", render:(row)=>percent(row.memory_percent)}
+    ]);
+    renderTable("[data-monitor-containers]", Array.isArray(data.containers) ? data.containers : [], [
+      {label:"Container", render:(row)=>row.name}, {label:"Status", render:(row)=>row.status},
+      {label:"CPU", render:(row)=>percent(row.cpu_percent ?? (row.cpu && row.cpu.total))},
+      {label:"Memory", render:(row)=>bytes(row.memory_usage ?? (row.memory && row.memory.usage))},
+      {label:"Limit", render:(row)=>bytes(row.memory_limit ?? (row.memory && row.memory.limit))}
+    ]);
+    renderTable("[data-monitor-sensors]", Array.isArray(data.sensors) ? data.sensors : [], [
+      {label:"Sensor", render:(row)=>row.label || row.name},
+      {label:"Value", render:(row)=>row.value === undefined || row.value === null ? "—" : String(row.value) + (row.unit || "")}
+    ]);
+    if (state) state.textContent = "Live resources · refresh every 2 seconds";
+    if (error) error.hidden = true;
+  };
+  const refreshMonitor = async () => {
+    try {
+      const response = await fetch("/api/system-monitor", {method:"GET", credentials:"same-origin", headers:{Accept:"application/json"}, cache:"no-store"});
+      if (response.status === 401) { window.location.assign("/login"); return; }
+      if (!response.ok) throw new Error("monitor unavailable");
+      renderMonitor(await response.json());
+    } catch (_) {
+      if (state) state.textContent = "System Monitor unavailable";
+      if (error) { error.textContent = "Glances is not responding yet."; error.hidden = false; }
+    }
+  };
+  const stopRefresh = () => { if (refreshTimer) window.clearInterval(refreshTimer); refreshTimer = null; };
+  const openMonitor = () => {
+    readProfile(); syncProfile();
+    if (profilePanel) profilePanel.hidden = true;
+    if (controlCenter) controlCenter.open = false;
+    systemMonitorDialog.showModal();
+    refreshMonitor(); stopRefresh();
+    refreshTimer = window.setInterval(refreshMonitor, 2000);
+  };
+  systemMonitorOpen.addEventListener("click", openMonitor);
+  if (closeButton) closeButton.addEventListener("click", () => systemMonitorDialog.close());
+  systemMonitorDialog.addEventListener("close", stopRefresh);
+  systemMonitorDialog.addEventListener("click", (event) => { if (event.target === systemMonitorDialog) systemMonitorDialog.close(); });
+  if (profileToggle && profilePanel) profileToggle.addEventListener("click", () => { profilePanel.hidden = !profilePanel.hidden; });
+  profileInputs.forEach((input) => input.addEventListener("change", () => {
+    profile[input.dataset.monitorProfile] = input.checked; saveProfile(); syncProfile();
+  }));
+  if (processCount) processCount.addEventListener("change", () => {
+    profile.processCount = Number(processCount.value); saveProfile(); refreshMonitor();
+  });
+  if (resetButton) resetButton.addEventListener("click", () => {
+    profile = { ...defaultProfile }; saveProfile(); syncProfile(); refreshMonitor();
+  });
+}

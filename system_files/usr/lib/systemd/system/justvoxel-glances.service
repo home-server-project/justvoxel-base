@@ -1,0 +1,15 @@
+[Unit]
+Description=JustVoxel System Monitor (Glances)
+Documentation=https://github.com/nicolargo/glances
+Wants=podman.socket
+After=local-fs.target podman.socket
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/glances -w --disable-webui --bind 127.0.0.1 --port 61208 --config /etc/glances/glances.conf
+Restart=on-failure
+RestartSec=2s
+
+[Install]
+WantedBy=multi-user.target

@@ -22,6 +22,13 @@ if [[ -z ${superfile_rpm} ]]; then
 fi
 dnf install -y "${superfile_rpm}"
 
+glances_rpm="$(find /ctx/glances-rpms -maxdepth 1 -type f -name 'glances-*.noarch.rpm' -print -quit)"
+if [[ -z ${glances_rpm} ]]; then
+    echo "ERROR: verified Glances RPM artifact is missing."
+    exit 1
+fi
+dnf install -y "${glances_rpm}"
+
 systemctl enable NetworkManager.service 2>/dev/null || true
 systemctl enable systemd-resolved.service
 systemctl enable firewalld.service 2>/dev/null || true
@@ -75,12 +82,13 @@ install -m0755 /ctx/build_files/validate/common.sh /usr/libexec/justvoxel/health
 for cmd in \
     bootc podman skopeo just mjust fzf gum \
     findmnt mountpoint flock timeout mkfs.xfs btrfs mount.nfs mount.cifs mount.ntfs-3g umount \
-    lsblk blkid wipefs parted partprobe udevadm spf python3 btop; do
+    lsblk blkid wipefs parted partprobe udevadm spf python3 btop glances; do
     command -v "${cmd}"
 done
 
-rpm -q superfile
+rpm -q superfile glances
 spf --version
+glances --version
 
 bash -n /usr/libexec/justvoxel/minecraft-backup
 bash -n /usr/libexec/justvoxel/system-update-reboot-worker
