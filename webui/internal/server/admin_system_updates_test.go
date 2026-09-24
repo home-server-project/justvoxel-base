@@ -130,9 +130,9 @@ func TestSystemUpdateCheckIsAdministratorOnlyAndForwardsRequest(t *testing.T) {
 	client.status.Checked = true
 	client.status.CheckState = "update_available"
 	client.status.Available = &api.AdminSystemUpdateDeployment{
-		Image: "ghcr.io/home-server-project/justvoxel-vm:testing",
+		Image:   "ghcr.io/home-server-project/justvoxel-vm:testing",
 		Version: "12",
-		Digest: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+		Digest:  "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
 	}
 	app, err := New(client, Config{ManagementAPI: "v1"})
 	if err != nil {
