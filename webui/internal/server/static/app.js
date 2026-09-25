@@ -1327,7 +1327,10 @@ const initSystemUpdateWorkspace = () => {
     workspaceWindow?.open();
   });
 
-  closeButton?.addEventListener("click", () => workspaceWindow?.close());
+  closeButton?.addEventListener("click", () => {
+    clearResetPoll();
+    workspaceWindow?.close();
+  });
   refreshButton?.addEventListener("click", checkSystemUpdate);
   updateButton?.addEventListener("click", () => applySystemUpdate(false));
   rebootButton?.addEventListener("click", requestUpdateReboot);
@@ -3041,7 +3044,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   const state = systemWorkspaceDialog.querySelector("[data-system-state]");
   const content = systemWorkspaceDialog.querySelector("[data-system-workspace-content]");
   const tabs = Array.from(systemWorkspaceDialog.querySelectorAll("[data-system-tab]"));
-  const administratorTabs = new Set(["health", "users", "security"]);
+  const administratorTabs = new Set(["health", "users", "security", "reset"]);
   const upsTabButton = systemWorkspaceDialog.querySelector("[data-system-ups-tab]");
   const upsCSRF = document.querySelector("[data-system-ups-csrf]");
   const systemWorkspaceCSRF = document.querySelector("[data-system-workspace-csrf]")?.value || "";
@@ -3051,6 +3054,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   let currentTab = "health";
   let initialized = false;
   let loadSequence = 0;
+  let resetPollTimer = 0;
 
   const systemHandleAuth = (response) => {
     if (response.redirected) {
@@ -3668,6 +3672,358 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     showPane(securityPane);
   };
 
+  const clearResetPoll = () => {
+    if (resetPollTimer) window.clearTimeout(resetPollTimer);
+    resetPollTimer = 0;
+  };
+
+  const systemResetList = (title, items, kind = "") => {
+    const box = document.createElement("section");
+    box.className = "system-reset-impact " + kind;
+    const heading = document.createElement("h4");
+    heading.textContent = title;
+    const list = document.createElement("ul");
+    items.forEach((item) => {
+      const row = document.createElement("li");
+      row.textContent = item;
+      list.appendChild(row);
+    });
+    box.append(heading, list);
+    return box;
+  };
+
+  const systemResetOperationLabel = (operation) => {
+    if (!operation) return "Working";
+    if (operation.state === "queued") return "Queued";
+    if (operation.state === "validating") return "Validating";
+    if (operation.state === "running") return "Resetting";
+    if (operation.state === "verifying") return "Verifying";
+    if (operation.state === "succeeded") return "Complete";
+    if (operation.state === "needs_attention") return "Needs attention";
+    if (operation.state === "rolled_back") return "Rolled back";
+    return "Working";
+  };
+
+  const renderResetOperation = (operation) => {
+    clearResetPoll();
+    if (!content || !operation) return;
+    const root = document.createElement("div");
+    root.className = "system-reset-view";
+
+    const built = systemPanel(
+      operation.operation_type === "factory_reset" ? "Full Factory Reset" : "Reset Minecraft",
+      systemResetOperationLabel(operation)
+    );
+    built.panel.classList.add("system-reset-progress");
+    const badge = document.createElement("span");
+    badge.className = "badge";
+    badge.textContent = systemResetOperationLabel(operation);
+    built.heading.appendChild(badge);
+
+    const status = document.createElement("p");
+    status.className = "system-reset-progress-status";
+    status.textContent = operation.status || "Reset operation is running.";
+    const stage = document.createElement("p");
+    stage.className = "muted compact";
+    stage.textContent = "Stage: " + String(operation.stage || "working").replaceAll("_", " ");
+    built.panel.append(status, stage);
+
+    if (operation.operation_type === "factory_reset") {
+      const note = document.createElement("div");
+      note.className = "notice warning";
+      note.textContent = "When Full Factory Reset completes, this WebUI session will be signed out and the voxel password must be changed on the next sign-in.";
+      built.panel.appendChild(note);
+    }
+
+    root.appendChild(built.panel);
+    content.replaceChildren(root);
+
+    const terminal = ["succeeded", "needs_attention", "rolled_back"].includes(operation.state);
+    if (terminal) {
+      if (state) state.textContent = operation.status || systemResetOperationLabel(operation);
+      return;
+    }
+
+    resetPollTimer = window.setTimeout(async () => {
+      if (currentTab !== "reset" || !content?.isConnected) return;
+      try {
+        const payload = await systemFetchJSON("/api/system/workspace/reset/operations/" + operation.operation_id);
+        if (payload?.operation) renderResetOperation(payload.operation);
+      } catch (error) {
+        if (state) state.textContent = error?.message || "Reset progress is temporarily unavailable.";
+        resetPollTimer = window.setTimeout(() => renderReset(++loadSequence), 2500);
+      }
+    }, 1800);
+  };
+
+  const resetCurrentOperation = async () => {
+    const factory = await systemFetchJSON("/api/system/workspace/reset/factory/current");
+    if (factory?.operation) return factory.operation;
+    const minecraft = await systemFetchJSON("/api/system/workspace/reset/minecraft/current");
+    return minecraft?.operation || null;
+  };
+
+  const resetImpactFromPlan = (mode, plan) => {
+    const remove = [];
+    const keep = [];
+
+    if (mode === "minecraft") {
+      remove.push("Current Minecraft container and runtime configuration.");
+      if (plan.data_action === "delete") remove.push("Minecraft world/data on appliance-owned internal storage.");
+      else keep.push("Minecraft data outside appliance-owned internal storage.");
+      keep.push("All backup archives.");
+      keep.push("Current login password and WebUI accounts.");
+      keep.push("Storage partitions, filesystems, mounts, and host configuration.");
+      keep.push("USB, external, NFS, and SMB data.");
+    } else {
+      remove.push("Current Minecraft container and runtime configuration.");
+      if (plan.data_action === "delete") remove.push("Minecraft world/data on appliance-owned internal storage.");
+      else if (plan.data_action === "preserve") keep.push("Minecraft data outside appliance-owned internal storage.");
+      if (plan.backup_action === "delete") remove.push("Backup archives on appliance-owned internal storage.");
+      else if (plan.backup_action === "preserve") keep.push("Backup archives on USB, external, or network storage.");
+      remove.push("Local JustVoxel configuration backups.");
+      remove.push("Additional WebUI users, notifications, history, and local authentication state.");
+      remove.push("Current WebUI sessions; the voxel system password will be marked for mandatory change.");
+      keep.push("USB, external, NFS, and SMB data.");
+      keep.push("Storage partitions, filesystems, mounts, and /etc/fstab.");
+      keep.push("Network configuration, SSH configuration, and the JustVoxel OS image.");
+    }
+    return { remove, keep };
+  };
+
+  const renderResetPlan = (mode, plan) => {
+    clearResetPoll();
+    if (!content) return;
+    const root = document.createElement("div");
+    root.className = "system-reset-view";
+    const title = mode === "factory" ? "Full Factory Reset" : "Reset Minecraft";
+    const built = systemPanel("Review reset", title);
+    built.panel.classList.add("system-reset-review");
+
+    const description = document.createElement("p");
+    description.className = "muted compact";
+    description.textContent = mode === "factory"
+      ? "This resets JustVoxel-owned local state. External and network storage are never erased."
+      : "This removes the current Minecraft installation while preserving backups, accounts, and storage layout.";
+    built.panel.appendChild(description);
+
+    const impact = resetImpactFromPlan(mode, plan);
+    const impactGrid = document.createElement("div");
+    impactGrid.className = "system-reset-impact-grid";
+    impactGrid.append(
+      systemResetList("Will remove", impact.remove, "danger"),
+      systemResetList("Will keep", impact.keep, "safe")
+    );
+    built.panel.appendChild(impactGrid);
+
+    if (Array.isArray(plan.warnings) && plan.warnings.length) {
+      const warning = document.createElement("div");
+      warning.className = "notice warning";
+      warning.textContent = plan.warnings.join(" ");
+      built.panel.appendChild(warning);
+    }
+
+    const online = Number(plan.players_online || 0);
+    let playersConfirm = null;
+    if (online > 0) {
+      const players = document.createElement("div");
+      players.className = "notice warning";
+      const names = Array.isArray(plan.players) && plan.players.length ? " (" + plan.players.join(", ") + ")" : "";
+      players.textContent = String(online) + " player(s) are online" + names + ". Reset will disconnect them.";
+      built.panel.appendChild(players);
+
+      const playerLabel = document.createElement("label");
+      playerLabel.className = "system-reset-check";
+      playersConfirm = document.createElement("input");
+      playersConfirm.type = "checkbox";
+      const copy = document.createElement("span");
+      copy.textContent = "I understand the online players will be disconnected.";
+      playerLabel.append(playersConfirm, copy);
+      built.panel.appendChild(playerLabel);
+    }
+
+    let password = null;
+    if (mode === "factory") {
+      const passwordLabel = document.createElement("label");
+      passwordLabel.className = "system-reset-password";
+      passwordLabel.textContent = "Current voxel system password";
+      password = document.createElement("input");
+      password.type = "password";
+      password.autocomplete = "current-password";
+      password.required = true;
+      passwordLabel.appendChild(password);
+      const help = document.createElement("small");
+      help.className = "muted";
+      help.textContent = "Required even when WebUI currently uses a separate browser password.";
+      passwordLabel.appendChild(help);
+      built.panel.appendChild(passwordLabel);
+    }
+
+    const arm = document.createElement("div");
+    arm.className = "system-reset-arm";
+    const armTitle = document.createElement("strong");
+    armTitle.textContent = "Slide all the way right to arm this reset";
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.min = "0";
+    slider.max = "100";
+    slider.step = "1";
+    slider.value = "0";
+    slider.setAttribute("aria-label", "Slide to arm reset");
+    const armedText = document.createElement("span");
+    armedText.className = "muted";
+    armedText.textContent = "Not armed";
+    arm.append(armTitle, slider, armedText);
+    built.panel.appendChild(arm);
+
+    const finalLabel = document.createElement("label");
+    finalLabel.className = "system-reset-check";
+    const finalConfirm = document.createElement("input");
+    finalConfirm.type = "checkbox";
+    finalConfirm.disabled = true;
+    const finalCopy = document.createElement("span");
+    finalCopy.textContent = mode === "factory"
+      ? "I understand Full Factory Reset is destructive to appliance-owned local data."
+      : "I understand the current Minecraft server and internal Minecraft data will be removed.";
+    finalLabel.append(finalConfirm, finalCopy);
+    built.panel.appendChild(finalLabel);
+
+    const actions = document.createElement("div");
+    actions.className = "system-reset-actions";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "secondary";
+    cancel.textContent = "Cancel";
+    const apply = document.createElement("button");
+    apply.type = "button";
+    apply.className = "danger";
+    apply.textContent = mode === "factory" ? "Full Factory Reset" : "Reset Minecraft";
+    apply.disabled = true;
+    actions.append(cancel, apply);
+    built.panel.appendChild(actions);
+
+    const syncApply = () => {
+      const armed = Number(slider.value) >= 100;
+      arm.classList.toggle("is-armed", armed);
+      armedText.textContent = armed ? "Armed" : "Not armed";
+      finalConfirm.disabled = !armed;
+      if (!armed) finalConfirm.checked = false;
+      const playersOK = !playersConfirm || playersConfirm.checked;
+      const passwordOK = !password || password.value.length > 0;
+      apply.disabled = !(armed && finalConfirm.checked && playersOK && passwordOK);
+    };
+
+    slider.addEventListener("input", syncApply);
+    finalConfirm.addEventListener("change", syncApply);
+    playersConfirm?.addEventListener("change", syncApply);
+    password?.addEventListener("input", syncApply);
+    cancel.addEventListener("click", () => renderResetChoices());
+
+    apply.addEventListener("click", async () => {
+      apply.disabled = true;
+      cancel.disabled = true;
+      slider.disabled = true;
+      finalConfirm.disabled = true;
+      if (playersConfirm) playersConfirm.disabled = true;
+      if (password) password.disabled = true;
+      if (state) state.textContent = "Starting reset…";
+      try {
+        const fields = {
+          plan_fingerprint: plan.plan_fingerprint,
+          confirm_players: online > 0 ? "yes" : "no",
+        };
+        if (password) fields.system_password = password.value;
+        const endpoint = mode === "factory"
+          ? "/api/system/workspace/reset/factory/apply"
+          : "/api/system/workspace/reset/minecraft/apply";
+        const result = await systemPostForm(endpoint, fields);
+        if (password) password.value = "";
+        if (!result?.operation) throw new Error("Reset operation did not start.");
+        renderResetOperation(result.operation);
+      } catch (error) {
+        if (password) password.value = "";
+        if (state) state.textContent = error?.message || "Reset could not start.";
+        cancel.disabled = false;
+        slider.disabled = false;
+        if (playersConfirm) playersConfirm.disabled = false;
+        if (password) password.disabled = false;
+        syncApply();
+      }
+    });
+
+    root.appendChild(built.panel);
+    content.replaceChildren(root);
+    syncApply();
+  };
+
+  const planReset = async (mode) => {
+    if (state) state.textContent = "Checking current reset impact…";
+    try {
+      const endpoint = mode === "factory"
+        ? "/api/system/workspace/reset/factory/plan"
+        : "/api/system/workspace/reset/minecraft/plan";
+      const plan = await systemPostForm(endpoint);
+      if (!plan) return;
+      renderResetPlan(mode, plan);
+      if (state) state.textContent = "";
+    } catch (error) {
+      if (state) state.textContent = error?.message || "Reset could not be planned.";
+    }
+  };
+
+  const renderResetChoices = () => {
+    clearResetPoll();
+    if (!content) return;
+    const root = document.createElement("div");
+    root.className = "system-reset-view";
+
+    const intro = document.createElement("div");
+    intro.className = "system-reset-intro";
+    const title = document.createElement("h3");
+    title.textContent = "Start over safely";
+    const copy = document.createElement("p");
+    copy.className = "muted compact";
+    copy.textContent = "Choose how much JustVoxel should reset. External, USB, NFS, and SMB storage are never erased by Full Factory Reset.";
+    intro.append(title, copy);
+    root.appendChild(intro);
+
+    const choices = document.createElement("div");
+    choices.className = "system-reset-choices";
+
+    const minecraft = document.createElement("button");
+    minecraft.type = "button";
+    minecraft.className = "system-reset-choice";
+    minecraft.innerHTML =
+      '<strong>Reset Minecraft</strong>' +
+      '<span>Remove the current Minecraft server and internal Minecraft data.</span>' +
+      '<small>Keeps backups, login/password, WebUI users, and storage layout.</small>';
+    minecraft.addEventListener("click", () => planReset("minecraft"));
+
+    const factory = document.createElement("button");
+    factory.type = "button";
+    factory.className = "system-reset-choice danger";
+    factory.innerHTML =
+      '<strong>Full Factory Reset</strong>' +
+      '<span>Return JustVoxel-owned local state to first-use condition.</span>' +
+      '<small>Deletes local Minecraft, local backups, WebUI users/history, and resets authentication. External/network storage stays untouched.</small>';
+    factory.addEventListener("click", () => planReset("factory"));
+
+    choices.append(minecraft, factory);
+    root.appendChild(choices);
+    content.replaceChildren(root);
+  };
+
+  const renderReset = async (sequence) => {
+    clearResetPoll();
+    const operation = await resetCurrentOperation();
+    if (sequence !== loadSequence || currentTab !== "reset") return;
+    if (operation) {
+      renderResetOperation(operation);
+      return;
+    }
+    renderResetChoices();
+  };
+
   const renderAbout = async (sequence) => {
     const payload = await systemFetchJSON("/api/system/workspace/about");
     if (!payload || sequence !== loadSequence || !content) return;
@@ -3954,6 +4310,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       else if (currentTab === "history") await renderHistory(sequence);
       else if (currentTab === "users") await renderUsers(sequence);
       else if (currentTab === "security") await renderSecurity(sequence);
+      else if (currentTab === "reset") await renderReset(sequence);
       else if (currentTab === "ups") await loadUPS(sequence);
       else await renderAbout(sequence);
       if (sequence === loadSequence && state) state.textContent = "";
@@ -3971,6 +4328,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     if (!user) return;
     if (administratorTabs.has(tab) && user.role !== "administrator") return;
     if (tab === "ups" && !upsAvailable) return;
+    if (currentTab === "reset" && tab !== "reset") clearResetPoll();
     currentTab = tab;
     syncSystemTabs();
     loadCurrentSystemTab();
