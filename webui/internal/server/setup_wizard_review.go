@@ -26,6 +26,8 @@ type setupReviewState struct {
 	Plan           api.AdminSetupPlanResponse
 	EULAAccepted   bool
 	DraftUpdatedAt time.Time
+	SetupMode      string
+	ServerType     string
 }
 
 type setupReviewStore struct {
@@ -271,7 +273,10 @@ func (a *App) setupReviewState(ctx context.Context, session string, client admin
 		return setupReviewState{}, errors.New("setup planning is unavailable"), http.StatusServiceUnavailable, false
 	}
 	plan, err := planner.AdminSetupPlan(ctx, session, request)
-	state := setupReviewState{Request: request, Plan: plan, DraftUpdatedAt: draft.UpdatedAt}
+	state := setupReviewState{
+		Request: request, Plan: plan, DraftUpdatedAt: draft.UpdatedAt,
+		SetupMode: draft.Mode, ServerType: draft.Minecraft.ServerType,
+	}
 	if err != nil {
 		if errors.Is(err, api.ErrUnauthorized) {
 			return state, err, http.StatusUnauthorized, false
@@ -367,7 +372,7 @@ func setupReviewErrorMessage(err error) string {
 func (a *App) renderSetupReview(w http.ResponseWriter, identity api.SessionInfo, state setupReviewState, csrf, errorMessage string) {
 	plan := state.Plan
 	data := setupReviewPageData{
-		Title: "Review setup", SetupMode: draft.Mode, ServerTypeLabel: setupServerTypeLabel(draft.Minecraft.ServerType),
+		Title: "Review setup", SetupMode: state.SetupMode, ServerTypeLabel: setupServerTypeLabel(state.ServerType),
 		Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
 		CSRF: csrf, Identity: identity, Plan: plan, Error: errorMessage,
 		EULAAccepted: state.EULAAccepted, EULAURL: minecraftEULAURL,
