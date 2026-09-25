@@ -10,9 +10,14 @@ import (
 )
 
 type fakeNetworkClient struct {
-	snapshot networking.Snapshot
-	networks []networking.WiFiNetwork
-	scanned  string
+	snapshot        networking.Snapshot
+	networks        []networking.WiFiNetwork
+	scanned         string
+	checkpoint      networking.Checkpoint
+	checkpointError error
+	destroyed       networking.Checkpoint
+	rollbackResults map[string]networking.RollbackResult
+	rolledBack      networking.Checkpoint
 }
 
 func (f *fakeNetworkClient) Close() error { return nil }
@@ -25,6 +30,38 @@ func (f *fakeNetworkClient) WiFiNetworks(_ context.Context, iface string) ([]net
 func (f *fakeNetworkClient) RequestWiFiScan(_ context.Context, iface string) error {
 	f.scanned = iface
 	return nil
+}
+func (f *fakeNetworkClient) CreateCheckpoint(_ context.Context, interfaces []string, timeout uint32) (networking.Checkpoint, error) {
+	if f.checkpointError != nil {
+		return networking.Checkpoint{}, f.checkpointError
+	}
+	if f.checkpoint.Handle != "" {
+		return f.checkpoint, nil
+	}
+	devices := make([]networking.CheckpointDevice, 0, len(interfaces))
+	for _, interfaceName := range interfaces {
+		devices = append(devices, networking.CheckpointDevice{Interface: interfaceName, Handle: "/device/" + interfaceName})
+	}
+	return networking.Checkpoint{
+		Handle:                 "/checkpoint/1",
+		Devices:                devices,
+		RollbackTimeoutSeconds: timeout,
+	}, nil
+}
+func (f *fakeNetworkClient) DestroyCheckpoint(_ context.Context, checkpoint networking.Checkpoint) error {
+	f.destroyed = checkpoint
+	return nil
+}
+func (f *fakeNetworkClient) RollbackCheckpoint(_ context.Context, checkpoint networking.Checkpoint) (map[string]networking.RollbackResult, error) {
+	f.rolledBack = checkpoint
+	if f.rollbackResults != nil {
+		return f.rollbackResults, nil
+	}
+	results := make(map[string]networking.RollbackResult, len(checkpoint.Devices))
+	for _, device := range checkpoint.Devices {
+		results[device.Interface] = networking.RollbackResultOK
+	}
+	return results, nil
 }
 
 func TestNetworkSnapshotViewUsesStableNames(t *testing.T) {
