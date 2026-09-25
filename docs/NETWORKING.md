@@ -30,7 +30,15 @@ The browser never talks to D-Bus directly and never receives raw D-Bus object pa
 
 The Management Agent owns the JustVoxel networking backend under `management/internal/networking`. That package talks directly to `org.freedesktop.NetworkManager` on the system D-Bus using `github.com/godbus/dbus/v5`.
 
-The first implementation checkpoint is intentionally read-only except for requesting a Wi-Fi scan. It provides:
+The networking work is split into independent checkpoints.
+
+### Backend foundation
+
+The Management Agent owns the direct NetworkManager D-Bus implementation and normalized appliance model. This layer remains independent from both the browser UI and `nm-hsp`.
+
+### Read-only WebUI workspace
+
+The Management API and WebUI now expose the read-only network experience, with Wi-Fi scan as the only operation that asks NetworkManager to refresh runtime state. It provides:
 
 - NetworkManager version, overall state, and connectivity state
 - networking and Wi-Fi radio state
@@ -42,7 +50,7 @@ The first implementation checkpoint is intentionally read-only except for reques
 - nearby Wi-Fi networks and security classification
 - explicit Wi-Fi scan requests
 
-No Management API routes or WebUI controls are added in this checkpoint. Those are layered on top in later checkpoints.
+This checkpoint does not connect or disconnect networks, toggle radios, change IP/DNS/gateway/MTU settings, modify autoconnect, forget profiles, or run repairs. Those configuration-changing actions require later checkpoints and the safety model described below.
 
 ## Stable identifiers
 
