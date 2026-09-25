@@ -96,6 +96,7 @@ type WiFiNetwork struct {
 	MaxBitrateKbps uint32
 	Security       WiFiSecurity
 	KeyManagement  string
+	ProfileUUID    string
 	Hidden         bool
 	Known          bool
 	Active         bool
