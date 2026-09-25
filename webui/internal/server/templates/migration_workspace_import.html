@@ -1,0 +1,134 @@
+{{define "migration_workspace_import.html"}}<div class="migration-workspace-content" data-migration-workspace-root>
+<p class="muted">Choose a source and destination settings. The Management Agent performs source discovery, Minecraft detection, storage planning, safety checks, transactional execution, validation, and rollback.</p>
+  {{if .Error}}<div class="notice error"><strong>Server Import cannot continue as submitted.</strong><br>{{.Error}}</div>{{end}}
+
+  <form method="post" action="/workspace/migration/import/review" autocomplete="off" data-server-import-form>
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <section class="panel">
+      <p class="eyebrow">Import source</p>
+      <label for="server-import-source-kind"><strong>Where is the server to import?</strong></label>
+      <select id="server-import-source-kind" name="source_kind" data-server-import-source-kind required>
+        <option value="">Choose a source</option>
+        {{if .Local}}<option value="local">Local / server path</option>{{end}}
+        {{if .Backup}}<option value="backup">Configured JustVoxel backup storage</option>{{end}}
+        {{if .Device}}<option value="device">Attached disk / partition / USB media</option>{{end}}
+        {{if .NFS}}<option value="nfs">Temporary NFS</option>{{end}}
+        {{if .SMB}}<option value="smb">Temporary SMB / CIFS</option>{{end}}
+      </select>
+
+      <div data-server-import-source="local" hidden>
+        <label for="server-import-local-path"><strong>Absolute archive or server-directory path</strong></label>
+        <input id="server-import-local-path" name="local_path" placeholder="/var/mnt/storage/server-export.tar.gz" autocomplete="off">
+      </div>
+
+      <div data-server-import-source="backup" hidden>
+        <label for="server-import-backup-path"><strong>Relative archive or server-directory path <span class="muted">optional</span></strong></label>
+        <input id="server-import-backup-path" name="source_path" placeholder="minecraft-2026-09-21.tar.gz" autocomplete="off">
+        <p class="muted">Leave this blank and the Agent will discover importable archives and server directories from configured backup storage.</p>
+      </div>
+
+      <div data-server-import-source="device" hidden>
+        <label for="server-import-device"><strong>Attached source</strong></label>
+        <select id="server-import-device" name="source_device">
+          <option value="">Choose an Agent-discovered disk, partition, or removable source</option>
+          {{range .SourceDevices}}<option value="{{.Device.Path}}">{{.Device.Path}} · {{.Size}}{{if .Device.Model}} · {{.Device.Model}}{{end}}{{if .Device.Filesystem}} · {{.Device.Filesystem}}{{end}}{{if .Device.Removable}} · removable{{end}}</option>{{end}}
+        </select>
+        <label for="server-import-device-path"><strong>Relative archive or server-directory path <span class="muted">optional</span></strong></label>
+        <input id="server-import-device-path" name="source_path" autocomplete="off">
+        <p class="muted">Leave the relative path blank to let the Agent discover importable entries after safely mounting the selected media.</p>
+      </div>
+
+      <div data-server-import-source="nfs" hidden>
+        <label for="server-import-nfs-source"><strong>Temporary NFS source</strong></label>
+        <input id="server-import-nfs-source" name="source_remote" placeholder="nas:/exports/migrations" autocomplete="off">
+        <label for="server-import-nfs-path"><strong>Relative archive or server-directory path <span class="muted">optional</span></strong></label>
+        <input id="server-import-nfs-path" name="source_path" autocomplete="off">
+        <p class="muted">Leave the relative path blank to browse Agent-discovered entries from the temporary NFS mount.</p>
+      </div>
+
+      <div data-server-import-source="smb" hidden>
+        <label for="server-import-smb-source"><strong>Temporary SMB / CIFS share</strong></label>
+        <input id="server-import-smb-source" name="source_remote" placeholder="//nas/migrations" autocomplete="off">
+        <label for="server-import-smb-user"><strong>SMB username</strong></label>
+        <input id="server-import-smb-user" name="source_username" autocomplete="off">
+        <label for="server-import-smb-domain">SMB domain <span class="muted">optional</span></label>
+        <input id="server-import-smb-domain" name="source_domain" autocomplete="off">
+        <label for="server-import-smb-password"><strong>SMB source password</strong></label>
+        <input id="server-import-smb-password" type="password" name="source_smb_password" autocomplete="off">
+        <label for="server-import-smb-path"><strong>Relative archive or server-directory path <span class="muted">optional</span></strong></label>
+        <input id="server-import-smb-path" name="source_path" autocomplete="off">
+        <div class="notice">The source password is used only for the current planning or Apply request so the Agent can inspect/reopen the share. It is never placed in the reviewed plan, hidden fields, URL, or persistent operation journal.</div>
+      </div>
+
+      <label for="server-import-source-version"><strong>Exact Minecraft version <span class="muted">only if autodetection cannot determine it</span></strong></label>
+      <input id="server-import-source-version" name="source_version" placeholder="1.21.8" autocomplete="off">
+      <p class="muted">The Agent will normally detect this. If exact version evidence is missing, it will ask for the value during review.</p>
+    </section>
+
+    {{if .Discovery.Configured}}
+    <section class="panel">
+      <p class="eyebrow">Destination</p>
+      <h2>Replace the configured JustVoxel server</h2>
+      <p>The existing destination storage, memory, timezone, backup policy, and current host ports remain destination-specific. The Agent will review and protect the current runtime before replacement.</p>
+    </section>
+    {{else}}
+    <section class="panel">
+      <p class="eyebrow">Fresh destination</p>
+      <h2>Configure this unconfigured JustVoxel appliance</h2>
+      <div class="admin-form-grid">
+        <label>Minecraft Java port<input name="java_port" value="{{.Discovery.Defaults.JavaPort}}" inputmode="numeric" required></label>
+        <label>Bedrock UDP port<input name="bedrock_port" value="{{.Discovery.Defaults.BedrockPort}}" inputmode="numeric" required></label>
+        <label>Minecraft game memory<input name="java_memory" value="{{.Discovery.Defaults.JavaMemory}}" required></label>
+        <label>Maximum Minecraft memory<input name="container_memory" value="{{.Discovery.Defaults.ContainerMemory}}" required></label>
+        <label>Timezone<input name="timezone" value="{{.Discovery.Defaults.Timezone}}" required></label>
+        <label>Backups to keep<input name="backup_keep" value="{{.Discovery.Defaults.BackupKeep}}" inputmode="numeric" required></label>
+        <label>Daily backup time<input name="backup_daily_time" value="{{.Discovery.Defaults.BackupDailyTime}}" required></label>
+      </div>
+      <label><input type="checkbox" name="backup_automatic" {{if .Discovery.Defaults.BackupAutomatic}}checked{{end}}> Enable automatic daily backups</label>
+
+      <h3>Minecraft data storage</h3>
+      <label for="server-import-storage-type">Storage type</label>
+      <select id="server-import-storage-type" name="storage_type" data-server-import-storage-kind>
+        <option value="system">JustVoxel system storage</option>
+        <option value="partition">Existing local filesystem / partition</option>
+      </select>
+      <div data-server-import-storage="system"><div class="notice">Minecraft data will use <code>{{.Discovery.Defaults.DataPath}}</code>.</div></div>
+      <div data-server-import-storage="partition" hidden>
+        <label>Filesystem<select name="data_device"><option value="">Choose a safe filesystem</option>{{range .Filesystems}}<option value="{{.Path}}">{{.Path}} · {{.Size}} · {{.Filesystem}}{{if .Model}} · {{.Model}}{{end}}</option>{{end}}</select></label>
+        <label>Mount point<input name="data_mount_point" placeholder="/var/mnt/justvoxel-data" autocomplete="off"></label>
+        <label>Minecraft data directory<input name="data_path" placeholder="/var/mnt/justvoxel-data/minecraft" autocomplete="off"></label>
+      </div>
+
+      <h3>Backup storage</h3>
+      <label for="server-import-backup-type">Backup destination</label>
+      <select id="server-import-backup-type" name="backup_type" data-server-import-backup-kind>
+        <option value="system">JustVoxel system storage</option>
+        <option value="partition">Existing local filesystem / partition</option>
+        <option value="nfs">NFS share</option>
+        <option value="smb">SMB / CIFS share</option>
+      </select>
+      <div data-server-import-backup="system"><div class="notice">Backups will use <code>{{.Discovery.Defaults.BackupPath}}</code>.</div></div>
+      <div data-server-import-backup="partition" hidden>
+        <label>Filesystem<select name="backup_device"><option value="">Choose a safe filesystem</option>{{range .Filesystems}}<option value="{{.Path}}">{{.Path}} · {{.Size}} · {{.Filesystem}}{{if .Model}} · {{.Model}}{{end}}</option>{{end}}</select></label>
+        <label>Mount point<input name="backup_mount_point" placeholder="/var/mnt/justvoxel-backups" autocomplete="off"></label>
+        <label>Backup directory<input name="backup_path" placeholder="/var/mnt/justvoxel-backups/minecraft" autocomplete="off"></label>
+      </div>
+      <div data-server-import-backup="nfs" hidden>
+        <label>NFS source<input name="backup_source" placeholder="nas:/exports/justvoxel" autocomplete="off"></label>
+        <label>Local mount point<input name="backup_mount_point" placeholder="/var/mnt/justvoxel-backups" autocomplete="off"></label>
+        <label>Backup directory<input name="backup_path" placeholder="/var/mnt/justvoxel-backups/minecraft" autocomplete="off"></label>
+      </div>
+      <div data-server-import-backup="smb" hidden>
+        <label>SMB source<input name="backup_source" placeholder="//nas/justvoxel" autocomplete="off"></label>
+        <label>SMB username<input name="backup_username" autocomplete="off"></label>
+        <label>SMB domain <span class="muted">optional</span><input name="backup_domain" autocomplete="off"></label>
+        <label>Local mount point<input name="backup_mount_point" placeholder="/var/mnt/justvoxel-backups" autocomplete="off"></label>
+        <label>Backup directory<input name="backup_path" placeholder="/var/mnt/justvoxel-backups/minecraft" autocomplete="off"></label>
+        <div class="notice"><strong>No backup SMB password is collected during planning.</strong><br>If the Agent validates this destination, the password is requested only on the final Apply form.</div>
+      </div>
+    </section>
+    {{end}}
+
+    <div class="action-row"><button type="submit">Inspect and review Server Import</button><a class="button-link secondary" href="/workspace/migration">Cancel</a></div>
+  </form>
+</div>{{end}}

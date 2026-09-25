@@ -1,0 +1,65 @@
+{{define "migration_workspace_export.html"}}<div class="migration-workspace-content" data-migration-workspace-root>
+<p class="muted">Create a complete migration bundle using the Management Agent. The Agent validates the selected destination, Minecraft runtime state, online players, integrity requirements, and the final Apply request.</p>
+  {{if .Error}}<div class="notice error"><strong>Server Export cannot continue as submitted.</strong><br>{{.Error}}</div>{{end}}
+
+  <form method="post" action="/workspace/migration/export/review" data-server-export-form>
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <section class="panel">
+      <p class="eyebrow">Destination</p>
+      <label for="server-export-kind"><strong>Where should the migration bundle be written?</strong></label>
+      <select id="server-export-kind" name="kind" data-server-export-kind required>
+        <option value="">Choose a destination</option>
+        {{if .LocalAvailable}}<option value="local">Local / server path</option>{{end}}
+        {{if .BackupAvailable}}<option value="backup">Configured backup storage</option>{{end}}
+        {{if .DeviceAvailable}}<option value="device">Attached disk / partition / USB media</option>{{end}}
+        {{if .NFSAvailable}}<option value="nfs">Temporary NFS</option>{{end}}
+        {{if .SMBAvailable}}<option value="smb">Temporary SMB / CIFS</option>{{end}}
+      </select>
+
+      <div data-server-export-fields="local" hidden>
+        <label for="server-export-path"><strong>Local / server destination directory</strong></label>
+        <input id="server-export-path" name="path" placeholder="/var/mnt/storage/migrations" autocomplete="off">
+        <p class="muted">Use an absolute path that already exists or is valid for the Management Agent to validate.</p>
+      </div>
+
+      <div data-server-export-fields="backup" hidden>
+        <div class="notice">The Agent will use the currently configured JustVoxel backup storage. No browser-side storage logic is used.</div>
+      </div>
+
+      <div data-server-export-fields="device" hidden>
+        <label for="server-export-device"><strong>Attached destination</strong></label>
+        <select id="server-export-device" name="device">
+          <option value="">Choose an Agent-discovered device or partition</option>
+          {{if .AttachedDevices}}<optgroup label="Attached disks and partitions">{{range .AttachedDevices}}<option value="{{.Device.Path}}">{{.Device.Path}} · {{.Size}}{{if .Device.Model}} · {{.Device.Model}}{{end}}{{if .Device.Filesystem}} · {{.Device.Filesystem}}{{end}}</option>{{end}}</optgroup>{{end}}
+          {{if .RemovableDevices}}<optgroup label="USB / removable media">{{range .RemovableDevices}}<option value="{{.Device.Path}}">{{.Device.Path}} · {{.Size}}{{if .Device.Model}} · {{.Device.Model}}{{end}}{{if .Device.Filesystem}} · {{.Device.Filesystem}}{{end}}</option>{{end}}</optgroup>{{end}}
+        </select>
+        <p class="muted">Only devices reported by the Management Agent can be reviewed. The Agent decides how the destination is validated and mounted.</p>
+      </div>
+
+      <div data-server-export-fields="nfs" hidden>
+        <label for="server-export-nfs-source"><strong>Temporary NFS source</strong></label>
+        <input id="server-export-nfs-source" name="source" placeholder="nas:/exports/migrations" autocomplete="off">
+        <p class="muted">The Management Agent performs the temporary mount, validation, export, and cleanup.</p>
+      </div>
+
+      <div data-server-export-fields="smb" hidden>
+        <label for="server-export-smb-source"><strong>Temporary SMB / CIFS share</strong></label>
+        <input id="server-export-smb-source" name="source" placeholder="//nas/migrations" autocomplete="off">
+        <label for="server-export-smb-user"><strong>SMB username</strong></label>
+        <input id="server-export-smb-user" name="username" autocomplete="off">
+        <label for="server-export-smb-domain">SMB domain <span class="muted">optional</span></label>
+        <input id="server-export-smb-domain" name="domain" autocomplete="off">
+        <div class="notice"><strong>No SMB password is collected on this page.</strong><br>The password is requested only after the Agent has produced the reviewed plan, immediately before Apply.</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <p class="eyebrow">Bundle name</p>
+      <label for="server-export-filename"><strong>Migration bundle filename</strong></label>
+      <input id="server-export-filename" name="filename" value="{{.Discovery.SuggestedFilename}}" autocomplete="off" required>
+      <p class="muted">The Management Agent supplied this suggested filename. You may change it before planning.</p>
+    </section>
+
+    <div class="action-row"><button type="submit">Review Server Export</button><a class="button-link secondary" href="/workspace/migration">Cancel</a></div>
+  </form>
+</div>{{end}}
