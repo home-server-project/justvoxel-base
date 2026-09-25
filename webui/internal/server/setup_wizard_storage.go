@@ -416,7 +416,7 @@ func setupBackupDiskViews(storage api.AdminStorageDiscovery) []setupStorageDiskV
 			Name: device.Name, Path: device.Path, Size: humanBytes(device.SizeBytes),
 			Model: strings.TrimSpace(device.Model), Transport: strings.TrimSpace(device.Transport),
 			SystemDisk: device.System || listedSystem || storageBrowserLooksSystem(device),
-			External: setupDeviceIsExternal(storage, device),
+			External:   setupDeviceIsExternal(storage, device),
 		})
 		diskByName[device.Name] = index
 		diskByPath[device.Path] = index
