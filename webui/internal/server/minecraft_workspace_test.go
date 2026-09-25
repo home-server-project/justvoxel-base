@@ -208,3 +208,44 @@ func TestMinecraftWorkspaceOperatorWhitelistAndLogsAreNativeJSON(t *testing.T) {
 		t.Fatalf("logs status=%d body=%s", rr.Code, rr.Body.String())
 	}
 }
+
+
+func TestMinecraftWorkspaceClientDoesNotRenderLegacyPages(t *testing.T) {
+	sourceBytes, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(sourceBytes)
+	start := strings.Index(source, `const minecraftOpen = document.querySelector("[data-minecraft-open]");`)
+	end := strings.Index(source, `const systemWorkspaceOpen = document.querySelector("[data-system-open]");`)
+	if start < 0 || end <= start {
+		t.Fatal("Minecraft workspace source block not found")
+	}
+	block := source[start:end]
+
+	for _, forbidden := range []string{"/settings/server", "/operations", "DOMParser", "settings.css", "settings.js"} {
+		if strings.Contains(block, forbidden) {
+			t.Fatalf("Minecraft workspace still depends on legacy rendering path %q", forbidden)
+		}
+	}
+	for _, required := range []string{
+		"/api/dashboard-status",
+		"/api/minecraft/workspace/settings",
+		"/api/minecraft/workspace/settings/plan",
+		"/api/minecraft/workspace/settings/apply",
+		"/api/minecraft/workspace/whitelist",
+		"/api/minecraft/workspace/logs",
+	} {
+		if !strings.Contains(block, required) {
+			t.Fatalf("Minecraft workspace missing native endpoint %q", required)
+		}
+	}
+
+	headerBytes, err := assets.ReadFile("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(headerBytes), "data-minecraft-workspace-csrf") {
+		t.Fatal("Minecraft workspace is missing its explicit CSRF source")
+	}
+}

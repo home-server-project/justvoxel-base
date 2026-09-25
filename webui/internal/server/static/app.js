@@ -2452,181 +2452,72 @@ if (minecraftOpen && minecraftDialog) {
   const state = minecraftDialog.querySelector("[data-minecraft-state]");
   const content = minecraftDialog.querySelector("[data-minecraft-workspace-content]");
   const tabs = Array.from(minecraftDialog.querySelectorAll("[data-minecraft-tab]"));
-  let currentTab = "overview";
+  const csrf = document.querySelector("[data-minecraft-workspace-csrf]")?.value || "";
   const settingsTabs = new Set(["memory", "players", "crossplay", "version"]);
+  let currentTab = "overview";
   let loadSequence = 0;
 
-  const ensureStylesheet = (href) => {
-    if (document.querySelector(`link[href="${href}"]`)) return;
-    const stylesheet = document.createElement("link");
-    stylesheet.rel = "stylesheet";
-    stylesheet.href = href;
-    document.head.appendChild(stylesheet);
+  const messageNode = (value, className = "muted compact") => {
+    const node = document.createElement("p");
+    node.className = className;
+    node.textContent = value;
+    return node;
   };
 
-  const handleWorkspaceAuth = (response) => {
-    if (response.redirected) {
-      const target = new URL(response.url);
-      if (target.pathname === "/login" || target.pathname === "/password") {
-        window.location.assign(target.pathname + target.search);
-        return true;
-      }
+  const noticeNode = (value, kind = "success") => {
+    const node = document.createElement("div");
+    node.className = "notice " + kind;
+    node.textContent = value;
+    return node;
+  };
+
+  const requestWorkspaceJSON = async (url, options = {}) => {
+    const response = await fetch(url, {
+      credentials: "same-origin",
+      cache: "no-store",
+      ...options,
+      headers: {
+        Accept: "application/json",
+        ...(options.headers || {}),
+      },
+    });
+    let payload = {};
+    try {
+      payload = await response.json();
+    } catch (_) {
+      payload = {};
     }
     if (response.status === 401) {
       window.location.assign("/login");
-      return true;
+      return null;
     }
-    return false;
-  };
-
-  const namespaceIDs = (root, prefix) => {
-    const replacements = new Map();
-    root.querySelectorAll("[id]").forEach((element) => {
-      const oldID = element.id;
-      const newID = prefix + oldID;
-      replacements.set(oldID, newID);
-      element.id = newID;
-    });
-    for (const attribute of ["for", "aria-controls", "aria-labelledby", "aria-describedby"]) {
-      root.querySelectorAll(`[${attribute}]`).forEach((element) => {
-        const tokens = String(element.getAttribute(attribute) || "").split(/\s+/).filter(Boolean);
-        element.setAttribute(attribute, tokens.map((token) => replacements.get(token) || token).join(" "));
-      });
-    }
-  };
-
-  const messageNode = (textValue) => {
-    const p = document.createElement("p");
-    p.className = "muted compact";
-    p.textContent = textValue;
-    return p;
-  };
-
-  const initSettingsForm = (root) => {
-    const form = root.querySelector("form.settings-form");
-    if (!form) return;
-
-    const memoryPanel = form.querySelector("[data-memory-settings]");
-    if (memoryPanel) {
-      const gameMemory = form.querySelector('[name="java_memory"]');
-      const maxMemory = form.querySelector('[name="container_memory"]');
-      const maxPlayers = form.querySelector('[name="max_players"]');
-      const memoryStatus = memoryPanel.querySelector(".memory-status");
-      const buttons = Array.from(memoryPanel.querySelectorAll("[data-memory-preset]"));
-      const totalMiB = Number(memoryPanel.dataset.systemMemoryMib || 0);
-      const minimumReserveMiB = Number(memoryPanel.dataset.minReserveMib || 1024);
-      const recommendedReserveMiB = Number(memoryPanel.dataset.recommendedReserveMib || 2048);
-      let activePreset = "";
-
-      const parseMemoryMiB = (value) => {
-        const match = String(value || "").trim().match(/^([1-9][0-9]*)([mMgG])$/);
-        if (!match) return 0;
-        const amount = Number(match[1]);
-        return match[2].toUpperCase() === "G" ? amount * 1024 : amount;
-      };
-      const memoryValue = (mib) => mib % 1024 === 0 ? `${mib / 1024}G` : `${mib}M`;
-      const formatRemaining = (mib) => mib >= 1024
-        ? `${(mib / 1024).toFixed(mib % 1024 === 0 ? 0 : 1)} GB`
-        : `${Math.max(0, Math.round(mib))} MB`;
-      const markPreset = (name) => {
-        activePreset = name;
-        buttons.forEach((button) => button.classList.toggle("is-selected", button.dataset.memoryPreset === name));
-      };
-      const updateStatus = () => {
-        if (!memoryStatus || !maxMemory) return;
-        const maximumMiB = parseMemoryMiB(maxMemory.value);
-        memoryStatus.classList.remove("warning", "danger");
-        if (!totalMiB) {
-          memoryStatus.textContent = "System memory could not be detected. JustVoxel will validate the values again before Apply.";
-          memoryStatus.classList.add("warning");
-          return;
-        }
-        if (!maximumMiB) {
-          memoryStatus.textContent = "Enter memory as a size such as 6G or 6144M.";
-          memoryStatus.classList.add("warning");
-          return;
-        }
-        const remaining = totalMiB - maximumMiB;
-        if (remaining < minimumReserveMiB) {
-          memoryStatus.textContent = `Not enough memory remains outside Minecraft: about ${formatRemaining(remaining)}. Reduce Maximum Minecraft memory before continuing.`;
-          memoryStatus.classList.add("danger");
-        } else if (remaining < recommendedReserveMiB) {
-          memoryStatus.textContent = `Tight memory configuration: about ${formatRemaining(remaining)} remains outside Minecraft.`;
-          memoryStatus.classList.add("warning");
-        } else {
-          memoryStatus.textContent = `Memory remaining outside Minecraft: about ${formatRemaining(remaining)}.`;
-        }
-      };
-      const applyPreset = (name) => {
-        if (name === "custom") {
-          markPreset("custom");
-          gameMemory?.focus();
-          updateStatus();
-          return;
-        }
-        if (!gameMemory || !maxMemory || !maxPlayers) return;
-        const players = Math.max(1, Number(maxPlayers.value || 10));
-        const playerGroups = Math.max(1, Math.ceil(players / 10));
-        const playerExtra = Math.min(Math.max(playerGroups - 1, 0), 4);
-        const totalGiB = totalMiB > 0 ? totalMiB / 1024 : 8;
-        let baseRecommended;
-        if (totalGiB < 6) baseRecommended = 2;
-        else baseRecommended = Math.max(4, Math.min(8, Math.floor((totalGiB - 2) / 2)));
-        const recommendedHeap = Math.min(12, baseRecommended + playerExtra);
-        let heapGiB = recommendedHeap;
-        if (name === "light") heapGiB = Math.max(2, recommendedHeap - 2);
-        if (name === "high") heapGiB = Math.min(14, recommendedHeap + 2);
-        let maximumGiB = heapGiB + (heapGiB >= 4 ? 2 : 1);
-        if (totalMiB > 0) {
-          const reserveMiB = name === "high" ? minimumReserveMiB : recommendedReserveMiB;
-          const allowedMaximumGiB = Math.floor(Math.max(0, totalMiB - reserveMiB) / 1024);
-          if (allowedMaximumGiB >= 2 && maximumGiB > allowedMaximumGiB) {
-            maximumGiB = allowedMaximumGiB;
-            heapGiB = Math.max(1, Math.min(heapGiB, maximumGiB - 1));
-          }
-        }
-        gameMemory.value = memoryValue(heapGiB * 1024);
-        maxMemory.value = memoryValue(maximumGiB * 1024);
-        markPreset(name);
-        updateStatus();
-      };
-
-      buttons.forEach((button) => button.addEventListener("click", () => applyPreset(button.dataset.memoryPreset)));
-      [gameMemory, maxMemory].forEach((input) => input?.addEventListener("input", () => {
-        if (activePreset && activePreset !== "custom") markPreset("custom");
-        updateStatus();
-      }));
-      maxPlayers?.addEventListener("change", () => {
-        if (activePreset && activePreset !== "custom") applyPreset(activePreset);
-      });
-      updateStatus();
-    }
-  };
-
-  const renderOverview = async (sequence) => {
-    const response = await fetch("/api/dashboard-status", {
-      method: "GET",
-      credentials: "same-origin",
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-    });
-    if (handleWorkspaceAuth(response)) return;
-    if (response.status === 403) {
+    if (response.status === 403 && String(payload.error || "").toLowerCase().includes("password")) {
       window.location.assign("/password");
-      return;
+      return null;
     }
-    if (!response.ok) throw new Error("Minecraft status is unavailable.");
-    const snapshot = await response.json();
-    if (sequence !== loadSequence || !content) return;
+    if (!response.ok) {
+      throw new Error(payload.error || "Minecraft operation could not be completed.");
+    }
+    return payload;
+  };
+
+  const renderOverview = async (sequence, message = "") => {
+    const snapshot = await requestWorkspaceJSON("/api/dashboard-status");
+    if (!snapshot || sequence !== loadSequence || !content) return;
 
     const minecraft = snapshot?.status?.minecraft || {};
     const players = snapshot?.players || {};
     const root = document.createElement("div");
     root.className = "minecraft-overview-compact";
+    if (message) root.appendChild(noticeNode(message));
 
     const grid = document.createElement("div");
     grid.className = "minecraft-overview-grid";
-    [["Status", minecraft.state || "—"], ["Version", minecraft.version || "—"], ["Players", minecraft.configured ? `${players.online ?? 0} / ${players.max ?? minecraft.max_players ?? "—"}` : "Not configured"]].forEach(([label, value]) => {
+    [
+      ["Status", minecraft.state || "—"],
+      ["Version", minecraft.version || "—"],
+      ["Players", minecraft.configured ? `${players.online ?? 0} / ${players.max ?? minecraft.max_players ?? "—"}` : "Not configured"],
+    ].forEach(([label, value]) => {
       const card = document.createElement("article");
       card.className = "minecraft-overview-card";
       const labelNode = document.createElement("span");
@@ -2640,9 +2531,9 @@ if (minecraftOpen && minecraftDialog) {
 
     const playerLine = document.createElement("div");
     playerLine.className = "minecraft-overview-playerline";
-    const label = document.createElement("strong");
-    label.textContent = "Online";
-    playerLine.appendChild(label);
+    const playerLabel = document.createElement("strong");
+    playerLabel.textContent = "Online";
+    playerLine.appendChild(playerLabel);
     if (!minecraft.configured || players.state === "not_configured") playerLine.appendChild(messageNode("Minecraft is not configured yet."));
     else if (players.state === "stopped") playerLine.appendChild(messageNode("Minecraft is stopped."));
     else if (players.state === "unavailable") playerLine.appendChild(messageNode(players.error || "Player information is temporarily unavailable."));
@@ -2657,129 +2548,449 @@ if (minecraftOpen && minecraftDialog) {
         list.appendChild(chip);
       });
       playerLine.appendChild(list);
-    } else playerLine.appendChild(messageNode(`${players.online ?? 0} players online.`));
+    } else {
+      playerLine.appendChild(messageNode(`${players.online ?? 0} players online.`));
+    }
     root.appendChild(playerLine);
     content.replaceChildren(root);
   };
 
-  const renderSettingsMarkup = (markup, view = currentTab) => {
-    if (!content) return;
-    const parsed = new DOMParser().parseFromString(markup, "text/html");
-    const sourceForm = parsed.querySelector("form.settings-form");
-    const root = document.createElement("div");
-    parsed.querySelectorAll("main > .notice.success, main > .notice.error").forEach((notice) => root.appendChild(notice.cloneNode(true)));
+  const formatRemainingMemory = (mib) => {
+    if (mib >= 1024) return `${(mib / 1024).toFixed(mib % 1024 === 0 ? 0 : 1)} GB`;
+    return `${Math.max(0, Math.round(mib))} MB`;
+  };
 
-    if (!sourceForm) {
-      const unavailable = parsed.querySelector("main > .notice");
-      if (unavailable) root.appendChild(unavailable.cloneNode(true));
-      else root.appendChild(messageNode("Minecraft settings are unavailable."));
-      namespaceIDs(root, "minecraft-workspace-");
-      content.replaceChildren(root);
+  const initNativeMemoryControls = (root, defaults) => {
+    const gameMemory = root.querySelector('[name="java_memory"]');
+    const maxMemory = root.querySelector('[name="container_memory"]');
+    const maxPlayers = Number(root.dataset.maxPlayers || 10);
+    const memoryStatus = root.querySelector("[data-minecraft-memory-status]");
+    const buttons = Array.from(root.querySelectorAll("[data-minecraft-memory-preset]"));
+    const totalMiB = Number(defaults?.system_memory_mib || 0);
+    const minimumReserveMiB = Number(defaults?.system_reserve_minimum_mib || 1024);
+    const recommendedReserveMiB = Number(defaults?.system_reserve_recommended_mib || 2048);
+    let activePreset = "";
+
+    const parseMemoryMiB = (value) => {
+      const match = String(value || "").trim().match(/^([1-9][0-9]*)([mMgG])$/);
+      if (!match) return 0;
+      const amount = Number(match[1]);
+      return match[2].toUpperCase() === "G" ? amount * 1024 : amount;
+    };
+    const memoryValue = (mib) => mib % 1024 === 0 ? `${mib / 1024}G` : `${mib}M`;
+    const markPreset = (name) => {
+      activePreset = name;
+      buttons.forEach((button) => button.classList.toggle("is-selected", button.dataset.minecraftMemoryPreset === name));
+    };
+    const updateStatus = () => {
+      if (!memoryStatus || !maxMemory) return;
+      const maximumMiB = parseMemoryMiB(maxMemory.value);
+      memoryStatus.classList.remove("warning", "danger");
+      if (!totalMiB) {
+        memoryStatus.textContent = "System memory could not be detected. JustVoxel will validate again before Apply.";
+        memoryStatus.classList.add("warning");
+        return;
+      }
+      if (!maximumMiB) {
+        memoryStatus.textContent = "Enter memory as a size such as 6G or 6144M.";
+        memoryStatus.classList.add("warning");
+        return;
+      }
+      const remaining = totalMiB - maximumMiB;
+      if (remaining < minimumReserveMiB) {
+        memoryStatus.textContent = `Not enough memory remains outside Minecraft: about ${formatRemainingMemory(remaining)}. Reduce Maximum Minecraft memory before continuing.`;
+        memoryStatus.classList.add("danger");
+      } else if (remaining < recommendedReserveMiB) {
+        memoryStatus.textContent = `Tight memory configuration: about ${formatRemainingMemory(remaining)} remains outside Minecraft.`;
+        memoryStatus.classList.add("warning");
+      } else {
+        memoryStatus.textContent = `Memory remaining outside Minecraft: about ${formatRemainingMemory(remaining)}.`;
+      }
+    };
+    const applyPreset = (name) => {
+      if (name === "custom") {
+        markPreset("custom");
+        gameMemory?.focus();
+        updateStatus();
+        return;
+      }
+      if (!gameMemory || !maxMemory) return;
+      const playerGroups = Math.max(1, Math.ceil(Math.max(1, maxPlayers) / 10));
+      const playerExtra = Math.min(Math.max(playerGroups - 1, 0), 4);
+      const totalGiB = totalMiB > 0 ? totalMiB / 1024 : 8;
+      let baseRecommended = totalGiB < 6 ? 2 : Math.max(4, Math.min(8, Math.floor((totalGiB - 2) / 2)));
+      const recommendedHeap = Math.min(12, baseRecommended + playerExtra);
+      let heapGiB = recommendedHeap;
+      if (name === "light") heapGiB = Math.max(2, recommendedHeap - 2);
+      if (name === "high") heapGiB = Math.min(14, recommendedHeap + 2);
+      let maximumGiB = heapGiB + (heapGiB >= 4 ? 2 : 1);
+      if (totalMiB > 0) {
+        const reserveMiB = name === "high" ? minimumReserveMiB : recommendedReserveMiB;
+        const allowedMaximumGiB = Math.floor(Math.max(0, totalMiB - reserveMiB) / 1024);
+        if (allowedMaximumGiB >= 2 && maximumGiB > allowedMaximumGiB) {
+          maximumGiB = allowedMaximumGiB;
+          heapGiB = Math.max(1, Math.min(heapGiB, maximumGiB - 1));
+        }
+      }
+      gameMemory.value = memoryValue(heapGiB * 1024);
+      maxMemory.value = memoryValue(maximumGiB * 1024);
+      markPreset(name);
+      updateStatus();
+    };
+
+    buttons.forEach((button) => button.addEventListener("click", () => applyPreset(button.dataset.minecraftMemoryPreset)));
+    [gameMemory, maxMemory].forEach((input) => input?.addEventListener("input", () => {
+      if (activePreset && activePreset !== "custom") markPreset("custom");
+      updateStatus();
+    }));
+    updateStatus();
+  };
+
+  const syncVersionPolicy = (root) => {
+    const policy = root.querySelector('[name="version_policy"]');
+    const version = root.querySelector('[name="version"]');
+    const field = root.querySelector("[data-minecraft-version-field]");
+    if (!policy || !version || !field) return;
+    const sync = () => {
+      const pinned = policy.value === "pinned";
+      field.hidden = !pinned;
+      version.required = pinned;
+      version.readOnly = !pinned;
+      if (policy.value === "latest") version.value = "LATEST";
+      if (policy.value === "recommended") version.value = "";
+    };
+    policy.addEventListener("change", sync);
+    sync();
+  };
+
+  const buildSettingsForm = (tab, payload, message = "") => {
+    const minecraft = payload?.minecraft || {};
+    const defaults = payload?.defaults || {};
+    const root = document.createElement("div");
+    root.className = "minecraft-native-settings";
+    if (message) root.appendChild(noticeNode(message));
+
+    if (!payload?.configured) {
+      root.appendChild(noticeNode("Minecraft is not configured yet. Use first-run setup to configure this appliance.", "warning"));
+      return root;
+    }
+
+    const section = document.createElement("section");
+    section.className = "panel details minecraft-workspace-section";
+    const form = document.createElement("form");
+    form.className = "minecraft-native-form";
+    form.dataset.minecraftSettingsTab = tab;
+
+    if (tab === "memory") {
+      section.innerHTML = `
+        <div class="section-heading"><div><p class="eyebrow">Memory</p><h2>Minecraft memory</h2></div></div>
+        <p class="muted compact">Choose a starting point or enter exact memory values. JustVoxel validates system headroom before applying.</p>
+        <div class="minecraft-native-presets" role="group" aria-label="Memory starting points">
+          <button type="button" class="secondary" data-minecraft-memory-preset="light">Light</button>
+          <button type="button" class="secondary" data-minecraft-memory-preset="recommended">Recommended</button>
+          <button type="button" class="secondary" data-minecraft-memory-preset="high">High memory</button>
+          <button type="button" class="secondary" data-minecraft-memory-preset="custom">Custom</button>
+        </div>
+        <div class="minecraft-native-grid">
+          <label>Minecraft game memory<input name="java_memory" required autocomplete="off"><span class="minecraft-native-help">Memory available directly to the Java server, for example 4G or 6144M.</span></label>
+          <label>Maximum Minecraft memory<input name="container_memory" required autocomplete="off"><span class="minecraft-native-help">Maximum for the complete Minecraft process including runtime overhead.</span></label>
+        </div>
+        <div class="minecraft-native-memory-status" data-minecraft-memory-status></div>`;
+      section.dataset.maxPlayers = String(minecraft.max_players || defaults.max_players || 10);
+      section.querySelector('[name="java_memory"]').value = minecraft.java_memory || "";
+      section.querySelector('[name="container_memory"]').value = minecraft.container_memory || "";
+      form.appendChild(section);
+      initNativeMemoryControls(section, defaults);
+    } else if (tab === "players") {
+      section.innerHTML = `
+        <div class="section-heading"><div><p class="eyebrow">Server</p><h2>Players & identity</h2></div></div>
+        <div class="minecraft-native-grid">
+          <label>Maximum players<input name="max_players" type="number" min="1" step="1" required></label>
+          <label>Server welcome message (MOTD)<input name="motd" required></label>
+          <label>Timezone<input name="timezone" required autocomplete="off"><span class="minecraft-native-help">IANA timezone such as America/Toronto or Europe/Kyiv.</span></label>
+        </div>`;
+      section.querySelector('[name="max_players"]').value = String(minecraft.max_players || 10);
+      section.querySelector('[name="motd"]').value = minecraft.motd || "";
+      section.querySelector('[name="timezone"]').value = minecraft.timezone || "";
+      form.appendChild(section);
+    } else if (tab === "crossplay") {
+      section.innerHTML = `
+        <div class="section-heading"><div><p class="eyebrow">Network</p><h2>Java & Bedrock</h2></div></div>
+        <div class="minecraft-native-grid">
+          <label>Minecraft Java port<input name="java_port" type="number" min="1" max="65535" required></label>
+          <label>Bedrock UDP port<input name="bedrock_port" type="number" min="1" max="65535" required></label>
+        </div>
+        <label class="minecraft-native-toggle"><input name="bedrock_enabled" type="checkbox"> Enable Bedrock cross-play</label>
+        <p class="muted compact">Port and Bedrock changes update the appliance firewall when applied. Minecraft is not restarted automatically for these non-memory changes.</p>`;
+      section.querySelector('[name="java_port"]').value = String(minecraft.java_port || 25565);
+      section.querySelector('[name="bedrock_port"]').value = String(minecraft.bedrock_port || 19132);
+      section.querySelector('[name="bedrock_enabled"]').checked = Boolean(minecraft.bedrock_enabled);
+      form.appendChild(section);
+    } else if (tab === "version") {
+      section.innerHTML = `
+        <div class="section-heading"><div><p class="eyebrow">Software</p><h2>Minecraft version policy</h2></div></div>
+        <div class="minecraft-native-grid">
+          <label>Minecraft container channel or tag<input name="image_tag" required autocomplete="off"><span class="minecraft-native-help">stable, latest, or an exact upstream image tag.</span></label>
+          <label>Version policy<select name="version_policy"><option value="pinned">Pinned exact Minecraft version</option><option value="recommended">Resolve newest stable Paper-supported version now</option><option value="latest">LATEST when Minecraft starts</option></select></label>
+          <label data-minecraft-version-field>Exact Minecraft version<input name="version" autocomplete="off"><span class="minecraft-native-help">Used when the policy is Pinned.</span></label>
+        </div>`;
+      section.querySelector('[name="image_tag"]').value = minecraft.image_tag || "stable";
+      section.querySelector('[name="version_policy"]').value = minecraft.version_mode || "pinned";
+      section.querySelector('[name="version"]').value = minecraft.version || "";
+      form.appendChild(section);
+      syncVersionPolicy(section);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "minecraft-native-actions";
+    const reviewButton = document.createElement("button");
+    reviewButton.type = "submit";
+    reviewButton.textContent = "Review changes";
+    const note = document.createElement("span");
+    note.className = "muted";
+    note.textContent = "Nothing changes until Review and Apply.";
+    actions.append(note, reviewButton);
+    form.appendChild(actions);
+    root.appendChild(form);
+    return root;
+  };
+
+  const settingsParams = (form) => {
+    const params = new URLSearchParams();
+    new FormData(form).forEach((value, key) => params.append(key, String(value)));
+    params.set("csrf", csrf);
+    params.set("tab", form.dataset.minecraftSettingsTab || "");
+    return params;
+  };
+
+  const renderSettingsReview = (root, plan, params) => {
+    root.querySelector("[data-minecraft-native-review]")?.remove();
+    const review = document.createElement("section");
+    review.className = "panel details minecraft-native-review";
+    review.dataset.minecraftNativeReview = "true";
+
+    const heading = document.createElement("div");
+    heading.className = "section-heading";
+    const headingText = document.createElement("div");
+    const eyebrow = document.createElement("p");
+    eyebrow.className = "eyebrow";
+    eyebrow.textContent = "Review";
+    const title = document.createElement("h2");
+    title.textContent = "Proposed changes";
+    headingText.append(eyebrow, title);
+    heading.appendChild(headingText);
+    if (plan.restart_required) {
+      const badge = document.createElement("span");
+      badge.className = "badge";
+      badge.textContent = "Restart required";
+      heading.appendChild(badge);
+    }
+    review.appendChild(heading);
+
+    (plan.warnings || []).forEach((warning) => review.appendChild(noticeNode(warning, "warning")));
+
+    const changes = Array.isArray(plan.changes) ? plan.changes : [];
+    if (changes.length === 0) {
+      review.appendChild(messageNode("No configuration changes were detected."));
+      root.appendChild(review);
       return;
     }
 
-    const backupKeep = sourceForm.querySelector('[name="backup_keep"]');
-    const backupSchedule = sourceForm.querySelector('[name="backup_schedule"]');
-    const backupTimer = sourceForm.querySelector('[name="backup_timer_enabled"]');
-    const preservedBackup = { keep: backupKeep?.value || "", schedule: backupSchedule?.value || "", timerEnabled: Boolean(backupTimer?.checked) };
-
-    const form = sourceForm.cloneNode(true);
-    form.classList.add("minecraft-workspace-section", "minecraft-settings-split");
-    form.querySelector('[name="backup_keep"]')?.closest("section")?.remove();
-
-    const sectionView = (section) => {
-      const heading = section.querySelector(".section-heading h2")?.textContent.trim() || "";
-      if (heading === "Minecraft memory") return "memory";
-      if (heading === "Players & identity") return "players";
-      if (heading === "Java & Bedrock") return "crossplay";
-      if (heading === "Minecraft version policy") return "version";
-      return "";
-    };
-    Array.from(form.querySelectorAll("section")).forEach((section) => {
-      const target = sectionView(section);
-      if (!target) { section.remove(); return; }
-      section.dataset.minecraftSettingsSection = target;
-      section.hidden = target !== view;
+    const changeList = document.createElement("div");
+    changeList.className = "minecraft-native-change-list";
+    changes.forEach((change) => {
+      const row = document.createElement("div");
+      row.className = "minecraft-native-change-row";
+      const label = document.createElement("div");
+      const strong = document.createElement("strong");
+      strong.textContent = change.label || change.field || "Setting";
+      label.appendChild(strong);
+      if (change.restart_required) label.appendChild(messageNode("Minecraft restart required.", "muted"));
+      const values = document.createElement("div");
+      const before = document.createElement("code");
+      before.textContent = change.before || "—";
+      const arrow = document.createElement("span");
+      arrow.textContent = "→";
+      const after = document.createElement("code");
+      after.textContent = change.after || "—";
+      values.append(before, arrow, after);
+      row.append(label, values);
+      changeList.appendChild(row);
     });
+    review.appendChild(changeList);
 
-    const addHidden = (name, value) => {
-      if (!value) return;
-      const input = document.createElement("input");
-      input.type = "hidden";
-      input.name = name;
-      input.value = value;
-      form.appendChild(input);
-    };
-    addHidden("backup_keep", preservedBackup.keep);
-    addHidden("backup_schedule", preservedBackup.schedule);
-    if (preservedBackup.timerEnabled) addHidden("backup_timer_enabled", "on");
+    if (Number.isFinite(Number(plan.memory_remaining_mib)) && Number(plan.memory_remaining_mib) > 0) {
+      review.appendChild(messageNode(`Memory remaining outside Minecraft after the configured maximum: ${plan.memory_remaining_mib} MiB.`));
+    }
 
-    root.appendChild(form);
-    const review = parsed.querySelector("#review");
-    if (review) root.appendChild(review.cloneNode(true));
-    namespaceIDs(root, "minecraft-workspace-");
+    if (plan.confirmation_required) {
+      const names = Array.isArray(plan.players) && plan.players.length ? " Connected: " + plan.players.join(", ") + "." : "";
+      review.appendChild(noticeNode(`Players are online. Applying these changes requires a Minecraft restart and will disconnect ${plan.online || 0} player(s).${names}`, "warning"));
+    } else if (plan.memory_restart_required) {
+      review.appendChild(noticeNode("Minecraft will restart automatically for these memory changes after JustVoxel checks for online players.", "warning"));
+    } else if (plan.restart_required) {
+      review.appendChild(noticeNode("The new settings will be saved, but Minecraft will not restart automatically for these non-memory changes.", "warning"));
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "minecraft-native-actions";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "secondary";
+    cancel.textContent = "Cancel review";
+    cancel.addEventListener("click", () => review.remove());
+    const apply = document.createElement("button");
+    apply.type = "button";
+    apply.textContent = plan.confirmation_required ? "Restart Minecraft and apply" : "Apply changes";
+    actions.append(cancel, apply);
+    review.appendChild(actions);
+    root.appendChild(review);
+
+    apply.addEventListener("click", async () => {
+      apply.disabled = true;
+      cancel.disabled = true;
+      if (state) state.textContent = plan.memory_restart_required ? "Applying and restarting Minecraft…" : "Applying…";
+      try {
+        const applyParams = new URLSearchParams(params);
+        if (plan.confirmation_required) applyParams.set("confirm_players", "yes");
+        const result = await requestWorkspaceJSON("/api/minecraft/workspace/settings/apply", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: applyParams.toString(),
+        });
+        if (!result) return;
+        if (result.confirmation_required && !result.applied) {
+          if (state) state.textContent = "Player confirmation required.";
+          renderSettingsReview(root, result, params);
+          return;
+        }
+        if (!result.applied) throw new Error(result.error || "Minecraft settings were not applied.");
+        let savedMessage = result.message || "Minecraft settings saved.";
+        if (result.restarted) savedMessage = "Minecraft settings saved and Minecraft restarted.";
+        else if (result.restart_deferred) savedMessage = "Minecraft settings saved. Restart remains pending.";
+        await loadCurrentTab(savedMessage);
+      } catch (error) {
+        if (state) state.textContent = error?.message || "Minecraft settings could not be applied.";
+        apply.disabled = false;
+        cancel.disabled = false;
+      }
+    });
+  };
+
+  const renderSettingsTab = async (sequence, message = "") => {
+    const payload = await requestWorkspaceJSON("/api/minecraft/workspace/settings");
+    if (!payload || sequence !== loadSequence || !content) return;
+    const root = buildSettingsForm(currentTab, payload, message);
     content.replaceChildren(root);
-    initSettingsForm(root);
-  };
-
-  const loadSettings = async (sequence, url = "/settings/server") => {
-    ensureStylesheet("/static/settings.css");
-    const response = await fetch(url, {
-      method: "GET",
-      credentials: "same-origin",
-      headers: { Accept: "text/html" },
-      cache: "no-store",
-      redirect: "follow",
+    const form = root.querySelector("[data-minecraft-settings-tab]");
+    form?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const submitter = event.submitter;
+      if (submitter) submitter.disabled = true;
+      if (state) state.textContent = "Reviewing…";
+      try {
+        const params = settingsParams(form);
+        const plan = await requestWorkspaceJSON("/api/minecraft/workspace/settings/plan", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: params.toString(),
+        });
+        if (!plan) return;
+        renderSettingsReview(root, plan, params);
+        if (state) state.textContent = "";
+      } catch (error) {
+        if (state) state.textContent = error?.message || "Minecraft settings could not be reviewed.";
+      } finally {
+        if (submitter) submitter.disabled = false;
+      }
     });
-    if (handleWorkspaceAuth(response)) return;
-    if (response.status === 403) throw new Error("Administrator access required.");
-    const markup = await response.text();
-    if (sequence !== loadSequence) return;
-    renderSettingsMarkup(markup, currentTab);
   };
 
-  const renderOperationsMarkup = (markup, sectionID) => {
-    if (!content) return;
-    const parsed = new DOMParser().parseFromString(markup, "text/html");
-    const source = parsed.querySelector(sectionID);
-    if (!source) throw new Error("Minecraft operation view is unavailable.");
+  const renderWhitelist = async (sequence, message = "") => {
+    const payload = await requestWorkspaceJSON("/api/minecraft/workspace/whitelist");
+    if (!payload || sequence !== loadSequence || !content) return;
     const root = document.createElement("div");
-    parsed.querySelectorAll("main > .notice.success, main > .notice.error").forEach((notice) => {
-      root.appendChild(notice.cloneNode(true));
-    });
-    const section = source.cloneNode(true);
-    section.classList.add("minecraft-workspace-section");
+    root.className = "minecraft-native-operations";
+    if (message) root.appendChild(noticeNode(message));
+
+    const section = document.createElement("section");
+    section.className = "panel details minecraft-workspace-section";
+    section.innerHTML = `
+      <div class="section-heading"><div><p class="eyebrow">Minecraft</p><h2>Whitelist</h2></div></div>
+      <pre class="log-box" data-minecraft-native-whitelist></pre>
+      <form class="minecraft-native-form" data-minecraft-native-whitelist-form>
+        <div class="minecraft-native-grid">
+          <label>Platform<select name="platform"><option value="java">Java</option><option value="bedrock">Bedrock</option></select></label>
+          <label>Action<select name="action"><option value="add">Add</option><option value="remove">Remove</option></select></label>
+          <label>Player name, Xbox gamertag, or Floodgate UUID<input name="name" required maxlength="64" autocomplete="off"></label>
+        </div>
+        <p class="muted compact">For Bedrock, use the Xbox gamertag without the leading dot. If Floodgate cannot resolve it, use the player's Floodgate UUID.</p>
+        <div class="minecraft-native-actions"><button type="submit">Apply whitelist change</button></div>
+      </form>`;
+    section.querySelector("[data-minecraft-native-whitelist]").textContent = payload.output || "No whitelist information available.";
     root.appendChild(section);
-    namespaceIDs(root, "minecraft-workspace-");
+    content.replaceChildren(root);
+
+    const form = section.querySelector("[data-minecraft-native-whitelist-form]");
+    form?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const submitter = event.submitter;
+      if (submitter) submitter.disabled = true;
+      if (state) state.textContent = "Updating whitelist…";
+      try {
+        const params = new URLSearchParams();
+        new FormData(form).forEach((value, key) => params.append(key, String(value)));
+        params.set("csrf", csrf);
+        const result = await requestWorkspaceJSON("/api/minecraft/workspace/whitelist", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: params.toString(),
+        });
+        if (!result) return;
+        await loadCurrentTab(result.message || "Whitelist updated.");
+      } catch (error) {
+        if (state) state.textContent = error?.message || "Whitelist change could not be completed.";
+        if (submitter) submitter.disabled = false;
+      }
+    });
+  };
+
+  const renderLogs = async (sequence, message = "") => {
+    const payload = await requestWorkspaceJSON("/api/minecraft/workspace/logs");
+    if (!payload || sequence !== loadSequence || !content) return;
+    const root = document.createElement("div");
+    if (message) root.appendChild(noticeNode(message));
+    const section = document.createElement("section");
+    section.className = "panel details minecraft-workspace-section";
+    const heading = document.createElement("div");
+    heading.className = "section-heading";
+    const headingText = document.createElement("div");
+    const eyebrow = document.createElement("p");
+    eyebrow.className = "eyebrow";
+    eyebrow.textContent = "Diagnostics";
+    const title = document.createElement("h2");
+    title.textContent = "Recent Minecraft logs";
+    headingText.append(eyebrow, title);
+    heading.appendChild(headingText);
+    const pre = document.createElement("pre");
+    pre.className = "log-box";
+    pre.textContent = Array.isArray(payload.lines) && payload.lines.length ? payload.lines.join("\n") : "No recent log lines available.";
+    section.append(heading, pre);
+    root.appendChild(section);
     content.replaceChildren(root);
   };
 
-  const loadOperationsSection = async (sequence, sectionID, url = "/operations") => {
-    const response = await fetch(url, {
-      method: "GET",
-      credentials: "same-origin",
-      headers: { Accept: "text/html" },
-      cache: "no-store",
-      redirect: "follow",
-    });
-    if (handleWorkspaceAuth(response)) return;
-    if (response.status === 403) throw new Error("Operator or Administrator access required.");
-    const markup = await response.text();
-    if (sequence !== loadSequence) return;
-    renderOperationsMarkup(markup, sectionID);
-  };
-
-  const loadCurrentTab = async () => {
+  async function loadCurrentTab(message = "") {
     const sequence = ++loadSequence;
     if (state) state.textContent = "Loading…";
     if (refreshButton) refreshButton.disabled = true;
     if (content) content.replaceChildren();
     try {
-      if (settingsTabs.has(currentTab)) await loadSettings(sequence);
-      else if (currentTab === "whitelist") await loadOperationsSection(sequence, "#whitelist");
-      else if (currentTab === "logs") await loadOperationsSection(sequence, "#minecraft-logs");
-      else await renderOverview(sequence);
-      if (sequence === loadSequence && state) state.textContent = "";
+      if (settingsTabs.has(currentTab)) await renderSettingsTab(sequence, message);
+      else if (currentTab === "whitelist") await renderWhitelist(sequence, message);
+      else if (currentTab === "logs") await renderLogs(sequence, message);
+      else await renderOverview(sequence, message);
+      if (sequence === loadSequence && state?.textContent === "Loading…") state.textContent = "";
     } catch (error) {
       if (sequence !== loadSequence) return;
       if (content) content.replaceChildren();
@@ -2787,7 +2998,7 @@ if (minecraftOpen && minecraftDialog) {
     } finally {
       if (sequence === loadSequence && refreshButton) refreshButton.disabled = false;
     }
-  };
+  }
 
   const selectTab = (tab) => {
     currentTab = tab;
@@ -2795,69 +3006,14 @@ if (minecraftOpen && minecraftDialog) {
     loadCurrentTab();
   };
 
-  const submitWorkspaceForm = async (form, submitter) => {
-    const action = new URL(form.getAttribute("action") || window.location.href, window.location.href);
-    const allowedSettings = action.pathname === "/settings/server/plan" || action.pathname === "/settings/server/apply";
-    const allowedWhitelist = action.pathname === "/operations/whitelist";
-    if (!allowedSettings && !allowedWhitelist) return false;
-
-    if (submitter) submitter.disabled = true;
-    if (state) state.textContent = "Working…";
-    const body = new URLSearchParams();
-    new FormData(form).forEach((value, key) => body.append(key, String(value)));
-
-    try {
-      const response = await fetch(action.pathname + action.search, {
-        method: (form.method || "POST").toUpperCase(),
-        credentials: "same-origin",
-        headers: {
-          Accept: "text/html",
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: body.toString(),
-        cache: "no-store",
-        redirect: "follow",
-      });
-      if (handleWorkspaceAuth(response)) return true;
-      const markup = await response.text();
-      if (allowedSettings) renderSettingsMarkup(markup, currentTab);
-      else renderOperationsMarkup(markup, "#whitelist");
-      if (state) state.textContent = "";
-    } catch (error) {
-      if (state) state.textContent = error?.message || "Minecraft operation could not be completed.";
-    } finally {
-      if (submitter && submitter.isConnected) submitter.disabled = false;
-    }
-    return true;
-  };
-
-  content?.addEventListener("submit", async (event) => {
-    const form = event.target.closest("form");
-    if (!form || !content.contains(form)) return;
-    const action = new URL(form.getAttribute("action") || window.location.href, window.location.href);
-    if (!["/settings/server/plan", "/settings/server/apply", "/operations/whitelist"].includes(action.pathname)) return;
-    event.preventDefault();
-    await submitWorkspaceForm(form, event.submitter);
-  });
-
-  content?.addEventListener("click", (event) => {
-    const link = event.target.closest("a");
-    if (!link || !content.contains(link)) return;
-    const href = link.getAttribute("href") || "";
-    if (href === "/settings/server" || href.startsWith("/settings/server?")) {
-      event.preventDefault();
-      selectTab(settingsTabs.has(currentTab) ? currentTab : "memory");
-    }
-  });
-
-  const workspaceWindow = setupWorkspaceWindow(minecraftDialog, { onOpen: loadCurrentTab });
+  const workspaceWindow = setupWorkspaceWindow(minecraftDialog, { onOpen: () => loadCurrentTab() });
 
   minecraftOpen.addEventListener("click", () => {
     if (controlCenter) controlCenter.open = false;
     workspaceWindow?.open();
   });
   closeButton?.addEventListener("click", () => workspaceWindow?.close());
-  refreshButton?.addEventListener("click", loadCurrentTab);
+  refreshButton?.addEventListener("click", () => loadCurrentTab());
   tabs.forEach((button) => button.addEventListener("click", () => selectTab(button.dataset.minecraftTab)));
 
   if (readWorkspaceWindowState("minecraft").open) workspaceWindow?.open();
