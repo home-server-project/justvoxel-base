@@ -100,6 +100,7 @@ type setupWizardPageData struct {
 	Backups                  setupBackupDraft
 	Filesystems              []setupFilesystemView
 	StorageDisks             []setupStorageDiskView
+	BackupDisks              []setupStorageDiskView
 	ExternalStorageCount     int
 	SameDiskWarning          string
 	Defaults                 api.AdminSetupDefaults
@@ -513,8 +514,8 @@ func (a *App) renderSetupWizard(w http.ResponseWriter, identity api.SessionInfo,
 		CSRF: csrf, Identity: identity, Started: draft.Started, CurrentStep: draft.CurrentStep,
 		Current: current, Steps: steps, Error: errorMessage,
 		Server: draft.Server, Minecraft: draft.Minecraft, Storage: draft.Storage, Backups: draft.Backups,
-		Filesystems: setupFilesystemViews(draft.Inventory), StorageDisks: storageDisks, ExternalStorageCount: externalStorageCount,
-		SameDiskWarning: setupSameDiskWarning(draft), Defaults: draft.Defaults,
+		Filesystems: setupFilesystemViews(draft.Inventory), StorageDisks: storageDisks, BackupDisks: setupBackupDiskViews(draft.Inventory),
+		ExternalStorageCount: externalStorageCount, SameDiskWarning: setupSameDiskWarning(draft), Defaults: draft.Defaults,
 		SystemMemory:             formatMemoryMiB(draft.Defaults.SystemMemoryMiB),
 		SystemReserveMinimum:     formatMemoryMiB(draft.Defaults.SystemReserveMinimumMiB),
 		SystemReserveRecommended: formatMemoryMiB(draft.Defaults.SystemReserveRecommendedMiB),
