@@ -91,7 +91,7 @@ func validMinecraftValues() url.Values {
 	}
 }
 
-func TestSetupWizardShowsWelcomeForUnconfiguredAdministrator(t *testing.T) {
+func TestSetupWizardShowsRecommendedAndAdvancedChoices(t *testing.T) {
 	client := setupWizardClient()
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
 	if err != nil {
@@ -105,14 +105,69 @@ func TestSetupWizardShowsWelcomeForUnconfiguredAdministrator(t *testing.T) {
 	}
 	body := rr.Body.String()
 	for _, want := range []string{
-		"Welcome to JustVoxel", "Start setup", "Safe to explore", "Server", "Minecraft", "Storage", "Backups", "Review", "mjust setup", "setup-terminal-note",
+		"Set up your Minecraft server", "Recommended setup", "Advanced setup", "Paper", "Purpur", "Vanilla",
+		"Use recommended setup", "Start advanced setup", "You can change these settings later", "mjust setup", "setup-terminal-note",
 	} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("setup welcome missing %q: %s", want, body)
+			t.Fatalf("setup entry missing %q: %s", want, body)
+		}
+	}
+	for _, want := range []string{`value="purpur" disabled`, `value="vanilla" disabled`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("setup placeholder missing %q: %s", want, body)
 		}
 	}
 	if client.configurationHit != 1 {
 		t.Fatalf("configuration discovery calls = %d, want 1", client.configurationHit)
+	}
+}
+
+func TestRecommendedSetupBuildsReadyPaperDraftAndJumpsToReview(t *testing.T) {
+	client := setupWizardClient()
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer firstRunSetupReviews.delete(app, "session-token")
+
+	values := url.Values{"csrf": {"csrf-token"}, "server_type": {"paper"}}
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recommended", values.Encode()))
+	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/setup/review" {
+		t.Fatalf("recommended setup returned %d %q: %s", rr.Code, rr.Header().Get("Location"), rr.Body.String())
+	}
+
+	draft, ok := firstRunSetupDrafts.get(app, "session-token")
+	if !ok {
+		t.Fatal("recommended setup did not create a draft")
+	}
+	if draft.Mode != "recommended" || draft.Minecraft.ServerType != "paper" {
+		t.Fatalf("recommended draft mode=%q server_type=%q", draft.Mode, draft.Minecraft.ServerType)
+	}
+	if !draft.Server.BedrockEnabled {
+		t.Fatal("recommended Paper setup did not enable Bedrock by default")
+	}
+	if draft.Storage.Type != "system" || draft.Backups.Type != "system" {
+		t.Fatalf("recommended storage=%q backups=%q, want system/system", draft.Storage.Type, draft.Backups.Type)
+	}
+	if !setupDraftReadyForReview(draft) {
+		t.Fatalf("recommended draft is not ready for Review: %#v", draft)
+	}
+}
+
+func TestRecommendedSetupRejectsPlaceholderServerTypes(t *testing.T) {
+	for _, serverType := range []string{"purpur", "vanilla"} {
+		client := setupWizardClient()
+		app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		values := url.Values{"csrf": {"csrf-token"}, "server_type": {serverType}}
+		rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recommended", values.Encode()))
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("%s placeholder returned %d, want 400", serverType, rr.Code)
+		}
+		firstRunSetupDrafts.delete(app, "session-token")
 	}
 }
 
