@@ -400,31 +400,7 @@ func (s *operationStore) loadAndRecover() error {
 		if operationIsCurrent(journal.State) {
 			switch journal.OperationType {
 			case operationTypeSetup:
-				if activeFactoryReset != "" {
-		if activeMinecraftReset != "" || activeSetup != "" || activeRestore != "" || activeDataMigration != "" || activeMigration != "" {
-			return errors.New("active factory reset conflicts with another persistent operation")
-		}
-		if err := s.acquireMinecraftResetLocks(); err != nil {
-			return err
-		}
-		journal := s.operations[activeFactoryReset]
-		if operationInterruptedByRestart(journal.State) {
-			now := s.now().UTC().Format(time.RFC3339Nano)
-			journal.State = operationNeedsAttention
-			journal.Stage = "interrupted"
-			journal.Status = "Full factory reset was interrupted before completion. Review appliance state before continuing."
-			journal.UpdatedAt = now
-			journal.InterruptedAt = now
-			if err := s.persist(journal); err != nil {
-				_ = s.releaseMinecraftResetLocks()
-				return err
-			}
-			s.operations[journal.OperationID] = journal
-		}
-		s.currentFactoryResetID = activeFactoryReset
-	}
-
-	if activeSetup != "" {
+				if activeSetup != "" {
 					return errors.New("multiple active setup operation journals require attention")
 				}
 				activeSetup = journal.OperationID
@@ -480,6 +456,30 @@ func (s *operationStore) loadAndRecover() error {
 			s.operations[journal.OperationID] = journal
 		}
 		s.currentMinecraftResetID = activeMinecraftReset
+	}
+
+	if activeFactoryReset != "" {
+		if activeMinecraftReset != "" || activeSetup != "" || activeRestore != "" || activeDataMigration != "" || activeMigration != "" {
+			return errors.New("active factory reset conflicts with another persistent operation")
+		}
+		if err := s.acquireMinecraftResetLocks(); err != nil {
+			return err
+		}
+		journal := s.operations[activeFactoryReset]
+		if operationInterruptedByRestart(journal.State) {
+			now := s.now().UTC().Format(time.RFC3339Nano)
+			journal.State = operationNeedsAttention
+			journal.Stage = "interrupted"
+			journal.Status = "Full factory reset was interrupted before completion. Review appliance state before continuing."
+			journal.UpdatedAt = now
+			journal.InterruptedAt = now
+			if err := s.persist(journal); err != nil {
+				_ = s.releaseMinecraftResetLocks()
+				return err
+			}
+			s.operations[journal.OperationID] = journal
+		}
+		s.currentFactoryResetID = activeFactoryReset
 	}
 
 	if activeSetup != "" {
