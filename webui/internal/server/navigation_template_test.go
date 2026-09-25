@@ -54,7 +54,7 @@ func TestControlCenterNavigationUX(t *testing.T) {
 	if temporary < 0 || minecraft < 0 || temporary > minecraft {
 		t.Fatal("Temporary Control Center section must appear before Minecraft")
 	}
-	for _, item := range []string{"data-system-monitor-open", "data-storage-open", "data-backups-open", "data-system-update-open"} {
+	for _, item := range []string{"data-minecraft-open", "data-system-monitor-open", "data-storage-open", "data-backups-open", "data-system-update-open"} {
 		if strings.Count(markup, item) != 1 {
 			t.Fatalf("temporary workspace item %q must appear exactly once", item)
 		}
@@ -108,6 +108,53 @@ func TestControlCenterNavigationUX(t *testing.T) {
 	} {
 		if !strings.Contains(behavior, want) {
 			t.Fatalf("Control Center behavior missing %q", want)
+		}
+	}
+}
+
+func TestMinecraftWorkspaceMigrationContract(t *testing.T) {
+	header, err := assets.ReadFile("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(header)
+
+	temporary := strings.Index(markup, `<span class="control-section-label">Temporary</span>`)
+	minecraftSection := strings.Index(markup, `<span class="control-section-label">Minecraft</span>`)
+	minecraftTile := strings.Index(markup, `data-minecraft-open`)
+	if temporary < 0 || minecraftSection < 0 || minecraftTile < temporary || minecraftTile > minecraftSection {
+		t.Fatal("new Minecraft workspace tile must live only in the Temporary section")
+	}
+
+	for _, want := range []string{
+		`data-workspace-window="minecraft"`,
+		`data-minecraft-tab="overview"`,
+		`data-minecraft-tab="settings"`,
+		`data-minecraft-tab="whitelist"`,
+		`data-minecraft-tab="logs"`,
+		`href="/settings/server"`,
+		`href="/operations#whitelist"`,
+		`href="/operations#minecraft-logs"`,
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("Minecraft workspace migration contract missing %q", want)
+		}
+	}
+
+	script, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	behavior := string(script)
+	for _, want := range []string{
+		`document.querySelector("[data-minecraft-open]")`,
+		`fetch("/api/dashboard-status"`,
+		`url = "/settings/server"`,
+		`url = "/operations"`,
+		`form.querySelector('[name="backup_keep"]')?.closest("section")?.remove()`,
+	} {
+		if !strings.Contains(behavior, want) {
+			t.Fatalf("Minecraft workspace behavior missing %q", want)
 		}
 	}
 }

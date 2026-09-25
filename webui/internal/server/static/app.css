@@ -453,3 +453,32 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .backups-workspace-content>.title-row,.backups-workspace-content>.backup-library-note{display:none}
 @media(max-width:700px){.backups-workspace-dialog{inset:52px .25rem .25rem .25rem!important;width:auto!important;height:auto!important;min-width:0;min-height:0;max-width:none;max-height:none;resize:none;border-radius:12px}.backups-workspace-header{padding:.85rem .9rem .7rem;cursor:default;touch-action:auto}.backups-workspace-body{padding:.8rem .9rem}}
 @media(prefers-color-scheme:light){.backups-workspace-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025}.backups-workspace-header{border-color:#d9dfe3}}
+
+
+/* Minecraft workspace window. Legacy Minecraft pages remain available during migration. */
+.minecraft-workspace-dialog{width:min(980px,calc(100vw - 1rem));height:min(760px,calc(100dvh - 1rem));min-width:min(580px,calc(100vw - 1rem));min-height:420px;max-width:calc(100vw - 1rem);max-height:calc(100dvh - 1rem);padding:0;overflow:hidden;resize:both;border:1px solid #3b454e;border-radius:16px;background:#171d22;color:#eef1f4;box-shadow:0 28px 80px #000b}
+.minecraft-workspace-shell{display:flex;flex-direction:column;height:100%;min-height:0}
+.minecraft-workspace-header{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;padding:1rem 1.1rem .8rem;border-bottom:1px solid #303942;cursor:move;touch-action:none;user-select:none}
+.minecraft-workspace-header h2{margin:.1rem 0 0;font-size:1.25rem}
+.minecraft-workspace-header-actions{display:flex;gap:.45rem}
+.minecraft-workspace-tabs{display:flex;gap:.35rem;padding:.65rem 1.1rem;border-bottom:1px solid #303942;background:#11171b;overflow-x:auto}
+.minecraft-workspace-tabs button{min-height:36px;padding:.5rem .8rem;border:1px solid transparent;border-radius:9px;background:transparent;color:#aeb8c0;font-weight:700;white-space:nowrap}
+.minecraft-workspace-tabs button:hover,.minecraft-workspace-tabs button:focus-visible{background:#232b31;color:#fff}
+.minecraft-workspace-tabs button[aria-selected="true"]{border-color:#496454;background:#25382e;color:#c8f2d7}
+.minecraft-workspace-body{flex:1;min-height:0;overflow:auto;padding:1rem 1.1rem 1.1rem;overscroll-behavior:contain}
+.minecraft-workspace-state{margin:0 0 .75rem;color:#9ca7b0;font-size:.8rem}
+.minecraft-workspace-state:empty{display:none}
+.minecraft-workspace-content{max-width:none}
+.minecraft-overview-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.7rem;margin-bottom:1rem}
+.minecraft-overview-card{min-width:0;padding:.85rem;border:1px solid #303942;border-radius:11px;background:#13191e}
+.minecraft-overview-card span{display:block;margin-bottom:.3rem;color:#89959e;font-size:.72rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase}
+.minecraft-overview-card strong{display:block;overflow-wrap:anywhere;font-size:1.05rem}
+.minecraft-overview-players{padding:.9rem;border:1px solid #303942;border-radius:11px;background:#13191e}
+.minecraft-overview-players h3{margin:0 0 .7rem;font-size:1rem}
+.minecraft-workspace-section{margin:0}
+.minecraft-workspace-content .settings-form{margin:0}
+.minecraft-workspace-content .settings-form>.panel:first-of-type{margin-top:0}
+.minecraft-workspace-content .review-panel{margin-top:1rem}
+.minecraft-workspace-content .log-box{max-height:430px;overflow:auto}
+@media(max-width:700px){.minecraft-workspace-dialog{inset:52px .25rem .25rem .25rem!important;width:auto!important;height:auto!important;min-width:0;min-height:0;max-width:none;max-height:none;resize:none;border-radius:12px}.minecraft-workspace-header{padding:.85rem .9rem .7rem;cursor:default;touch-action:auto}.minecraft-workspace-tabs{padding:.55rem .9rem}.minecraft-workspace-body{padding:.8rem .9rem}.minecraft-overview-grid{grid-template-columns:1fr}}
+@media(prefers-color-scheme:light){.minecraft-workspace-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025}.minecraft-workspace-header,.minecraft-workspace-tabs{border-color:#d9dfe3}.minecraft-workspace-tabs{background:#f7f9fa}.minecraft-workspace-tabs button{color:#56636c}.minecraft-workspace-tabs button:hover,.minecraft-workspace-tabs button:focus-visible{background:#e9eef1;color:#1a2025}.minecraft-workspace-tabs button[aria-selected="true"]{background:#e3f1e8;border-color:#86b99a;color:#184c31}.minecraft-overview-card,.minecraft-overview-players{background:#f7f9fa;border-color:#d9dfe3}}

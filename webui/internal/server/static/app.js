@@ -2013,3 +2013,430 @@ if (systemMonitorOpen && systemMonitorDialog) {
   };
   restoreWhenRoleKnown();
 }
+
+
+const minecraftOpen = document.querySelector("[data-minecraft-open]");
+const minecraftDialog = document.querySelector("[data-minecraft-workspace-dialog]");
+if (minecraftOpen && minecraftDialog) {
+  const closeButton = minecraftDialog.querySelector("[data-minecraft-close]");
+  const refreshButton = minecraftDialog.querySelector("[data-minecraft-refresh]");
+  const state = minecraftDialog.querySelector("[data-minecraft-state]");
+  const content = minecraftDialog.querySelector("[data-minecraft-workspace-content]");
+  const tabs = Array.from(minecraftDialog.querySelectorAll("[data-minecraft-tab]"));
+  let currentTab = "overview";
+  let loadSequence = 0;
+
+  const ensureStylesheet = (href) => {
+    if (document.querySelector(`link[href="${href}"]`)) return;
+    const stylesheet = document.createElement("link");
+    stylesheet.rel = "stylesheet";
+    stylesheet.href = href;
+    document.head.appendChild(stylesheet);
+  };
+
+  const handleWorkspaceAuth = (response) => {
+    if (response.redirected) {
+      const target = new URL(response.url);
+      if (target.pathname === "/login" || target.pathname === "/password") {
+        window.location.assign(target.pathname + target.search);
+        return true;
+      }
+    }
+    if (response.status === 401) {
+      window.location.assign("/login");
+      return true;
+    }
+    return false;
+  };
+
+  const namespaceIDs = (root, prefix) => {
+    const replacements = new Map();
+    root.querySelectorAll("[id]").forEach((element) => {
+      const oldID = element.id;
+      const newID = prefix + oldID;
+      replacements.set(oldID, newID);
+      element.id = newID;
+    });
+    for (const attribute of ["for", "aria-controls", "aria-labelledby", "aria-describedby"]) {
+      root.querySelectorAll(`[${attribute}]`).forEach((element) => {
+        const tokens = String(element.getAttribute(attribute) || "").split(/\s+/).filter(Boolean);
+        element.setAttribute(attribute, tokens.map((token) => replacements.get(token) || token).join(" "));
+      });
+    }
+  };
+
+  const messageNode = (textValue) => {
+    const p = document.createElement("p");
+    p.className = "muted compact";
+    p.textContent = textValue;
+    return p;
+  };
+
+  const initSettingsForm = (root) => {
+    const form = root.querySelector("form.settings-form");
+    if (!form) return;
+
+    const memoryPanel = form.querySelector("[data-memory-settings]");
+    if (memoryPanel) {
+      const gameMemory = form.querySelector('[name="java_memory"]');
+      const maxMemory = form.querySelector('[name="container_memory"]');
+      const maxPlayers = form.querySelector('[name="max_players"]');
+      const memoryStatus = memoryPanel.querySelector(".memory-status");
+      const buttons = Array.from(memoryPanel.querySelectorAll("[data-memory-preset]"));
+      const totalMiB = Number(memoryPanel.dataset.systemMemoryMib || 0);
+      const minimumReserveMiB = Number(memoryPanel.dataset.minReserveMib || 1024);
+      const recommendedReserveMiB = Number(memoryPanel.dataset.recommendedReserveMib || 2048);
+      let activePreset = "";
+
+      const parseMemoryMiB = (value) => {
+        const match = String(value || "").trim().match(/^([1-9][0-9]*)([mMgG])$/);
+        if (!match) return 0;
+        const amount = Number(match[1]);
+        return match[2].toUpperCase() === "G" ? amount * 1024 : amount;
+      };
+      const memoryValue = (mib) => mib % 1024 === 0 ? `${mib / 1024}G` : `${mib}M`;
+      const formatRemaining = (mib) => mib >= 1024
+        ? `${(mib / 1024).toFixed(mib % 1024 === 0 ? 0 : 1)} GB`
+        : `${Math.max(0, Math.round(mib))} MB`;
+      const markPreset = (name) => {
+        activePreset = name;
+        buttons.forEach((button) => button.classList.toggle("is-selected", button.dataset.memoryPreset === name));
+      };
+      const updateStatus = () => {
+        if (!memoryStatus || !maxMemory) return;
+        const maximumMiB = parseMemoryMiB(maxMemory.value);
+        memoryStatus.classList.remove("warning", "danger");
+        if (!totalMiB) {
+          memoryStatus.textContent = "System memory could not be detected. JustVoxel will validate the values again before Apply.";
+          memoryStatus.classList.add("warning");
+          return;
+        }
+        if (!maximumMiB) {
+          memoryStatus.textContent = "Enter memory as a size such as 6G or 6144M.";
+          memoryStatus.classList.add("warning");
+          return;
+        }
+        const remaining = totalMiB - maximumMiB;
+        if (remaining < minimumReserveMiB) {
+          memoryStatus.textContent = `Not enough memory remains outside Minecraft: about ${formatRemaining(remaining)}. Reduce Maximum Minecraft memory before continuing.`;
+          memoryStatus.classList.add("danger");
+        } else if (remaining < recommendedReserveMiB) {
+          memoryStatus.textContent = `Tight memory configuration: about ${formatRemaining(remaining)} remains outside Minecraft.`;
+          memoryStatus.classList.add("warning");
+        } else {
+          memoryStatus.textContent = `Memory remaining outside Minecraft: about ${formatRemaining(remaining)}.`;
+        }
+      };
+      const applyPreset = (name) => {
+        if (name === "custom") {
+          markPreset("custom");
+          gameMemory?.focus();
+          updateStatus();
+          return;
+        }
+        if (!gameMemory || !maxMemory || !maxPlayers) return;
+        const players = Math.max(1, Number(maxPlayers.value || 10));
+        const playerGroups = Math.max(1, Math.ceil(players / 10));
+        const playerExtra = Math.min(Math.max(playerGroups - 1, 0), 4);
+        const totalGiB = totalMiB > 0 ? totalMiB / 1024 : 8;
+        let baseRecommended;
+        if (totalGiB < 6) baseRecommended = 2;
+        else baseRecommended = Math.max(4, Math.min(8, Math.floor((totalGiB - 2) / 2)));
+        const recommendedHeap = Math.min(12, baseRecommended + playerExtra);
+        let heapGiB = recommendedHeap;
+        if (name === "light") heapGiB = Math.max(2, recommendedHeap - 2);
+        if (name === "high") heapGiB = Math.min(14, recommendedHeap + 2);
+        let maximumGiB = heapGiB + (heapGiB >= 4 ? 2 : 1);
+        if (totalMiB > 0) {
+          const reserveMiB = name === "high" ? minimumReserveMiB : recommendedReserveMiB;
+          const allowedMaximumGiB = Math.floor(Math.max(0, totalMiB - reserveMiB) / 1024);
+          if (allowedMaximumGiB >= 2 && maximumGiB > allowedMaximumGiB) {
+            maximumGiB = allowedMaximumGiB;
+            heapGiB = Math.max(1, Math.min(heapGiB, maximumGiB - 1));
+          }
+        }
+        gameMemory.value = memoryValue(heapGiB * 1024);
+        maxMemory.value = memoryValue(maximumGiB * 1024);
+        markPreset(name);
+        updateStatus();
+      };
+
+      buttons.forEach((button) => button.addEventListener("click", () => applyPreset(button.dataset.memoryPreset)));
+      [gameMemory, maxMemory].forEach((input) => input?.addEventListener("input", () => {
+        if (activePreset && activePreset !== "custom") markPreset("custom");
+        updateStatus();
+      }));
+      maxPlayers?.addEventListener("change", () => {
+        if (activePreset && activePreset !== "custom") applyPreset(activePreset);
+      });
+      updateStatus();
+    }
+  };
+
+  const renderOverview = async (sequence) => {
+    const response = await fetch("/api/dashboard-status", {
+      method: "GET",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (handleWorkspaceAuth(response)) return;
+    if (response.status === 403) {
+      window.location.assign("/password");
+      return;
+    }
+    if (!response.ok) throw new Error("Minecraft status is unavailable.");
+    const snapshot = await response.json();
+    if (sequence !== loadSequence || !content) return;
+
+    const minecraft = snapshot?.status?.minecraft || {};
+    const players = snapshot?.players || {};
+    const root = document.createElement("div");
+
+    const grid = document.createElement("div");
+    grid.className = "minecraft-overview-grid";
+    const cards = [
+      ["Status", minecraft.state || "—"],
+      ["Version", minecraft.version || "—"],
+      ["Players", minecraft.configured ? `${players.online ?? 0} / ${players.max ?? minecraft.max_players ?? "—"}` : "Not configured"],
+    ];
+    cards.forEach(([label, value]) => {
+      const card = document.createElement("article");
+      card.className = "minecraft-overview-card";
+      const labelNode = document.createElement("span");
+      labelNode.textContent = label;
+      const valueNode = document.createElement("strong");
+      valueNode.textContent = value;
+      card.append(labelNode, valueNode);
+      grid.appendChild(card);
+    });
+    root.appendChild(grid);
+
+    const playersPanel = document.createElement("section");
+    playersPanel.className = "minecraft-overview-players";
+    const heading = document.createElement("h3");
+    heading.textContent = "Online players";
+    playersPanel.appendChild(heading);
+
+    if (!minecraft.configured || players.state === "not_configured") {
+      playersPanel.appendChild(messageNode("Minecraft is not configured yet."));
+    } else if (players.state === "stopped") {
+      playersPanel.appendChild(messageNode("Minecraft is stopped. Player information will appear when the server is running."));
+    } else if (players.state === "unavailable") {
+      playersPanel.appendChild(messageNode(players.error || "Player information is temporarily unavailable."));
+    } else if ((players.online ?? 0) === 0) {
+      playersPanel.appendChild(messageNode("No players online."));
+    } else if (Array.isArray(players.names) && players.names.length > 0) {
+      const list = document.createElement("div");
+      list.className = "player-list";
+      players.names.forEach((name) => {
+        const chip = document.createElement("span");
+        chip.className = "player-chip";
+        chip.textContent = name;
+        list.appendChild(chip);
+      });
+      playersPanel.appendChild(list);
+    } else {
+      playersPanel.appendChild(messageNode(`${players.online ?? 0} players online.`));
+    }
+    root.appendChild(playersPanel);
+    content.replaceChildren(root);
+  };
+
+  const renderSettingsMarkup = (markup) => {
+    if (!content) return;
+    const parsed = new DOMParser().parseFromString(markup, "text/html");
+    const sourceForm = parsed.querySelector("form.settings-form");
+    const root = document.createElement("div");
+
+    parsed.querySelectorAll("main > .notice.success, main > .notice.error").forEach((notice) => {
+      root.appendChild(notice.cloneNode(true));
+    });
+
+    if (!sourceForm) {
+      const unavailable = parsed.querySelector("main > .notice");
+      if (unavailable) root.appendChild(unavailable.cloneNode(true));
+      else root.appendChild(messageNode("Minecraft settings are unavailable."));
+      namespaceIDs(root, "minecraft-workspace-");
+      content.replaceChildren(root);
+      return;
+    }
+
+    const backupKeep = sourceForm.querySelector('[name="backup_keep"]');
+    const backupSchedule = sourceForm.querySelector('[name="backup_schedule"]');
+    const backupTimer = sourceForm.querySelector('[name="backup_timer_enabled"]');
+    const preservedBackup = {
+      keep: backupKeep?.value || "",
+      schedule: backupSchedule?.value || "",
+      timerEnabled: Boolean(backupTimer?.checked),
+    };
+
+    const form = sourceForm.cloneNode(true);
+    form.classList.add("minecraft-workspace-section");
+    form.querySelector('[name="backup_keep"]')?.closest("section")?.remove();
+    Array.from(form.querySelectorAll("section")).forEach((section) => {
+      const heading = section.querySelector(".section-heading h2");
+      if (heading?.textContent.trim() === "Read-only context") section.remove();
+    });
+
+    const addHidden = (name, value) => {
+      if (!value) return;
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = name;
+      input.value = value;
+      form.appendChild(input);
+    };
+    addHidden("backup_keep", preservedBackup.keep);
+    addHidden("backup_schedule", preservedBackup.schedule);
+    if (preservedBackup.timerEnabled) addHidden("backup_timer_enabled", "on");
+
+    root.appendChild(form);
+    const review = parsed.querySelector("#review");
+    if (review) root.appendChild(review.cloneNode(true));
+
+    namespaceIDs(root, "minecraft-workspace-");
+    content.replaceChildren(root);
+    initSettingsForm(root);
+  };
+
+  const loadSettings = async (sequence, url = "/settings/server") => {
+    ensureStylesheet("/static/settings.css");
+    const response = await fetch(url, {
+      method: "GET",
+      credentials: "same-origin",
+      headers: { Accept: "text/html" },
+      cache: "no-store",
+      redirect: "follow",
+    });
+    if (handleWorkspaceAuth(response)) return;
+    if (response.status === 403) throw new Error("Administrator access required.");
+    const markup = await response.text();
+    if (sequence !== loadSequence) return;
+    renderSettingsMarkup(markup);
+  };
+
+  const renderOperationsMarkup = (markup, sectionID) => {
+    if (!content) return;
+    const parsed = new DOMParser().parseFromString(markup, "text/html");
+    const source = parsed.querySelector(sectionID);
+    if (!source) throw new Error("Minecraft operation view is unavailable.");
+    const root = document.createElement("div");
+    parsed.querySelectorAll("main > .notice.success, main > .notice.error").forEach((notice) => {
+      root.appendChild(notice.cloneNode(true));
+    });
+    const section = source.cloneNode(true);
+    section.classList.add("minecraft-workspace-section");
+    root.appendChild(section);
+    namespaceIDs(root, "minecraft-workspace-");
+    content.replaceChildren(root);
+  };
+
+  const loadOperationsSection = async (sequence, sectionID, url = "/operations") => {
+    const response = await fetch(url, {
+      method: "GET",
+      credentials: "same-origin",
+      headers: { Accept: "text/html" },
+      cache: "no-store",
+      redirect: "follow",
+    });
+    if (handleWorkspaceAuth(response)) return;
+    if (response.status === 403) throw new Error("Operator or Administrator access required.");
+    const markup = await response.text();
+    if (sequence !== loadSequence) return;
+    renderOperationsMarkup(markup, sectionID);
+  };
+
+  const loadCurrentTab = async () => {
+    const sequence = ++loadSequence;
+    if (state) state.textContent = "Loading…";
+    if (refreshButton) refreshButton.disabled = true;
+    if (content) content.replaceChildren();
+    try {
+      if (currentTab === "settings") await loadSettings(sequence);
+      else if (currentTab === "whitelist") await loadOperationsSection(sequence, "#whitelist");
+      else if (currentTab === "logs") await loadOperationsSection(sequence, "#minecraft-logs");
+      else await renderOverview(sequence);
+      if (sequence === loadSequence && state) state.textContent = "";
+    } catch (error) {
+      if (sequence !== loadSequence) return;
+      if (content) content.replaceChildren();
+      if (state) state.textContent = error?.message || "Minecraft workspace is unavailable.";
+    } finally {
+      if (sequence === loadSequence && refreshButton) refreshButton.disabled = false;
+    }
+  };
+
+  const selectTab = (tab) => {
+    currentTab = tab;
+    tabs.forEach((button) => button.setAttribute("aria-selected", button.dataset.minecraftTab === tab ? "true" : "false"));
+    loadCurrentTab();
+  };
+
+  const submitWorkspaceForm = async (form, submitter) => {
+    const action = new URL(form.getAttribute("action") || window.location.href, window.location.href);
+    const allowedSettings = action.pathname === "/settings/server/plan" || action.pathname === "/settings/server/apply";
+    const allowedWhitelist = action.pathname === "/operations/whitelist";
+    if (!allowedSettings && !allowedWhitelist) return false;
+
+    if (submitter) submitter.disabled = true;
+    if (state) state.textContent = "Working…";
+    const body = new URLSearchParams();
+    new FormData(form).forEach((value, key) => body.append(key, String(value)));
+
+    try {
+      const response = await fetch(action.pathname + action.search, {
+        method: (form.method || "POST").toUpperCase(),
+        credentials: "same-origin",
+        headers: {
+          Accept: "text/html",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: body.toString(),
+        cache: "no-store",
+        redirect: "follow",
+      });
+      if (handleWorkspaceAuth(response)) return true;
+      const markup = await response.text();
+      if (allowedSettings) renderSettingsMarkup(markup);
+      else renderOperationsMarkup(markup, "#whitelist");
+      if (state) state.textContent = "";
+    } catch (error) {
+      if (state) state.textContent = error?.message || "Minecraft operation could not be completed.";
+    } finally {
+      if (submitter && submitter.isConnected) submitter.disabled = false;
+    }
+    return true;
+  };
+
+  content?.addEventListener("submit", async (event) => {
+    const form = event.target.closest("form");
+    if (!form || !content.contains(form)) return;
+    const action = new URL(form.getAttribute("action") || window.location.href, window.location.href);
+    if (!["/settings/server/plan", "/settings/server/apply", "/operations/whitelist"].includes(action.pathname)) return;
+    event.preventDefault();
+    await submitWorkspaceForm(form, event.submitter);
+  });
+
+  content?.addEventListener("click", (event) => {
+    const link = event.target.closest("a");
+    if (!link || !content.contains(link)) return;
+    const href = link.getAttribute("href") || "";
+    if (href === "/settings/server" || href.startsWith("/settings/server?")) {
+      event.preventDefault();
+      selectTab("settings");
+    }
+  });
+
+  const workspaceWindow = setupWorkspaceWindow(minecraftDialog, { onOpen: loadCurrentTab });
+
+  minecraftOpen.addEventListener("click", () => {
+    if (controlCenter) controlCenter.open = false;
+    workspaceWindow?.open();
+  });
+  closeButton?.addEventListener("click", () => workspaceWindow?.close());
+  refreshButton?.addEventListener("click", loadCurrentTab);
+  tabs.forEach((button) => button.addEventListener("click", () => selectTab(button.dataset.minecraftTab)));
+
+  if (readWorkspaceWindowState("minecraft").open) workspaceWindow?.open();
+}
