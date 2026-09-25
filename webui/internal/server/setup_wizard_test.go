@@ -43,6 +43,15 @@ func saveServerStep(t *testing.T, app *App, values url.Values) *httptest.Respons
 	return httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/server", values.Encode()))
 }
 
+func saveConnectionsStep(t *testing.T, app *App, values url.Values) *httptest.ResponseRecorder {
+	t.Helper()
+	if values == nil {
+		values = url.Values{}
+	}
+	values.Set("csrf", "csrf-token")
+	return httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/connections", values.Encode()))
+}
+
 func saveResourcesStep(t *testing.T, app *App, values url.Values) *httptest.ResponseRecorder {
 	t.Helper()
 	if values == nil {
@@ -63,10 +72,19 @@ func saveMinecraftStep(t *testing.T, app *App, values url.Values) *httptest.Resp
 
 func validServerValues() url.Values {
 	return url.Values{
-		"motd":            {"Family Minecraft"},
-		"max_players":     {"20"},
+		"server_type": {"paper"},
+		"motd":        {"Family Minecraft"},
+		"max_players": {"20"},
+		"timezone":    {"America/Toronto"},
+	}
+}
+
+func validConnectionValues() url.Values {
+	return url.Values{
 		"bedrock_enabled": {"on"},
-		"timezone":        {"America/Toronto"},
+		"java_port":       {"25565"},
+		"bedrock_port":    {"19132"},
+		"direction":       {"next"},
 	}
 }
 
@@ -185,7 +203,7 @@ func TestSetupWizardStartsWithFriendlyServerDefaults(t *testing.T) {
 		t.Fatalf("server step returned %d: %s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"Step 1 of 6", "Server name / welcome message", "Family", "Maximum players", "Bedrock cross-play", "America/Toronto", "Technical name: MOTD", `list="timezone-options"`, `id="timezone-options"`, `value="UTC"`} {
+	for _, want := range []string{"Step 1 of 7", "Server name / welcome message", "Family", "Maximum players", "Server software", "Paper", "America/Toronto", "Technical name: MOTD", "data-timezone-search", "data-timezone-results", "data-timezone-value=\"UTC\""} {
 		if want == "Family" {
 			continue
 		}
@@ -245,8 +263,8 @@ func TestSetupWizardUsesCompactAlignedActions(t *testing.T) {
 			t.Fatalf("setup template still contains old action label %q", oldLabel)
 		}
 	}
-	if strings.Count(markup, ">Continue</button>") != 5 {
-		t.Fatalf("setup template Continue button count = %d, want 5", strings.Count(markup, ">Continue</button>"))
+	if strings.Count(markup, ">Continue</button>") != 6 {
+		t.Fatalf("setup template Continue button count = %d, want 6", strings.Count(markup, ">Continue</button>"))
 	}
 }
 
@@ -274,7 +292,17 @@ func TestSetupWizardServerStepValidatesAndPersistsChoices(t *testing.T) {
 	}
 	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	body := page.Body.String()
-	for _, want := range []string{"Step 2 of 6", "Resources", "Minecraft game memory", "Technical name: Java heap", "Maximum Minecraft memory", "container memory limit", "8.0 GiB detected", "2.0 GiB", "1.0 GiB", "20-player limit", "Recommended", "High memory", "/static/settings.js"} {
+	for _, want := range []string{"Step 2 of 7", "Connections", "Enable Bedrock cross-play", "Minecraft Java port", "Bedrock UDP port", "25565", "19132"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("Resources step missing %q: %s", want, body)
+		}
+	}
+	if rr := saveConnectionsStep(t, app, validConnectionValues()); rr.Code != http.StatusSeeOther {
+		t.Fatalf("connections save returned %d: %s", rr.Code, rr.Body.String())
+	}
+	page = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
+	body = page.Body.String()
+	for _, want := range []string{"Step 3 of 7", "Resources", "Minecraft game memory", "Technical name: Java heap", "Maximum Minecraft memory", "container memory limit", "8.0 GiB detected", "2.0 GiB", "1.0 GiB", "20-player limit", "Recommended", "High memory", "/static/settings.js"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("Resources step missing %q: %s", want, body)
 		}
@@ -284,7 +312,7 @@ func TestSetupWizardServerStepValidatesAndPersistsChoices(t *testing.T) {
 	}
 	page = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	body = page.Body.String()
-	for _, want := range []string{"Step 3 of 6", "Minecraft container release channel", "Stable (recommended)", "Latest", "Custom", `id="image-tag"`, `value="stable"`, "Recommended version", "Always newest version", "Specific version", `id="specific-version-field"`, "Bedrock compatibility is checked before setup."} {
+	for _, want := range []string{"Step 4 of 7", "Minecraft container release channel", "Stable (recommended)", "Latest", "Custom", `id="image-tag"`, `value="stable"`, "Recommended version", "Always newest version", "Specific version", `id="specific-version-field"`, "Bedrock compatibility is checked before setup."} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("Minecraft step missing %q: %s", want, body)
 		}
@@ -326,6 +354,9 @@ func TestSetupWizardSpecificVersionRequiresExplicitValue(t *testing.T) {
 	if rr := saveServerStep(t, app, validServerValues()); rr.Code != http.StatusSeeOther {
 		t.Fatalf("server save returned %d", rr.Code)
 	}
+	if rr := saveConnectionsStep(t, app, validConnectionValues()); rr.Code != http.StatusSeeOther {
+		t.Fatalf("connections save returned %d", rr.Code)
+	}
 	if rr := saveResourcesStep(t, app, validResourceValues()); rr.Code != http.StatusSeeOther {
 		t.Fatalf("resources save returned %d", rr.Code)
 	}
@@ -350,6 +381,9 @@ func TestSetupWizardMinecraftStepAdvancesOnlyAfterValidation(t *testing.T) {
 	if rr := saveServerStep(t, app, validServerValues()); rr.Code != http.StatusSeeOther {
 		t.Fatalf("server save returned %d", rr.Code)
 	}
+	if rr := saveConnectionsStep(t, app, validConnectionValues()); rr.Code != http.StatusSeeOther {
+		t.Fatalf("connections save returned %d", rr.Code)
+	}
 
 	bad := validResourceValues()
 	bad.Set("container_memory", "4G")
@@ -358,7 +392,7 @@ func TestSetupWizardMinecraftStepAdvancesOnlyAfterValidation(t *testing.T) {
 		t.Fatalf("invalid memory was not rejected: %d %s", rr.Code, rr.Body.String())
 	}
 	draft, _ := firstRunSetupDrafts.get(app, "session-token")
-	if draft.CurrentStep != 2 {
+	if draft.CurrentStep != 3 {
 		t.Fatalf("invalid Resources form advanced to step %d", draft.CurrentStep)
 	}
 
@@ -370,7 +404,7 @@ func TestSetupWizardMinecraftStepAdvancesOnlyAfterValidation(t *testing.T) {
 		t.Fatalf("valid Resources form returned %d %q: %s", rr.Code, rr.Header().Get("Location"), rr.Body.String())
 	}
 	minecraftPage := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-	if minecraftPage.Code != http.StatusOK || !strings.Contains(minecraftPage.Body.String(), "Step 3 of 6") || !strings.Contains(minecraftPage.Body.String(), "Minecraft container release channel") {
+	if minecraftPage.Code != http.StatusOK || !strings.Contains(minecraftPage.Body.String(), "Step 4 of 7") || !strings.Contains(minecraftPage.Body.String(), "Minecraft container release channel") {
 		t.Fatalf("Resources step did not advance to Minecraft: %d %s", minecraftPage.Code, minecraftPage.Body.String())
 	}
 
@@ -379,7 +413,7 @@ func TestSetupWizardMinecraftStepAdvancesOnlyAfterValidation(t *testing.T) {
 		t.Fatalf("valid Minecraft form returned %d %q: %s", rr.Code, rr.Header().Get("Location"), rr.Body.String())
 	}
 	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Step 4 of 6") || !strings.Contains(page.Body.String(), "Storage configuration") {
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Step 5 of 7") || !strings.Contains(page.Body.String(), "Storage configuration") {
 		t.Fatalf("Minecraft step did not advance to storage: %d %s", page.Code, page.Body.String())
 	}
 }
@@ -393,6 +427,7 @@ func TestSetupWizardMinecraftBackPreservesUnsavedValues(t *testing.T) {
 	defer firstRunSetupDrafts.delete(app, "session-token")
 	startSetup(t, app)
 	_ = saveServerStep(t, app, validServerValues())
+	_ = saveConnectionsStep(t, app, validConnectionValues())
 	resources := validResourceValues()
 	resources.Set("java_memory", "5G")
 	resources.Set("container_memory", "7G")
@@ -406,7 +441,7 @@ func TestSetupWizardMinecraftBackPreservesUnsavedValues(t *testing.T) {
 		t.Fatalf("Minecraft back returned %d: %s", back.Code, back.Body.String())
 	}
 	resourcesPage := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-	for _, want := range []string{"Step 2 of 6", `value="5G"`, `value="7G"`} {
+	for _, want := range []string{"Step 3 of 7", `value="5G"`, `value="7G"`} {
 		if !strings.Contains(resourcesPage.Body.String(), want) {
 			t.Fatalf("Resources draft lost %q: %s", want, resourcesPage.Body.String())
 		}
@@ -457,7 +492,7 @@ func TestSetupWizardCancelDiscardsDraft(t *testing.T) {
 	if welcome.Code != http.StatusOK || !strings.Contains(welcome.Body.String(), "Set up your Minecraft server") {
 		t.Fatalf("cancel did not discard draft: %d %s", welcome.Code, welcome.Body.String())
 	}
-	if strings.Contains(welcome.Body.String(), "Step 1 of 6") {
+	if strings.Contains(welcome.Body.String(), "Step 1 of 7") {
 		t.Fatal("cancelled draft still rendered as active setup")
 	}
 }
