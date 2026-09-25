@@ -38,20 +38,20 @@ type NetworkWireless struct {
 }
 
 type NetworkDevice struct {
-	Interface             string              `json:"interface"`
-	IPInterface           string              `json:"ip_interface,omitempty"`
-	Kind                  string              `json:"kind"`
-	State                 string              `json:"state"`
-	Managed               bool                `json:"managed"`
-	HardwareAddress       string              `json:"hardware_address,omitempty"`
-	MTU                   uint32              `json:"mtu"`
-	Carrier               *bool               `json:"carrier,omitempty"`
-	SpeedMbps             uint32              `json:"speed_mbps,omitempty"`
-	IPv4                  NetworkIPConfig     `json:"ipv4"`
-	IPv6                  NetworkIPConfig     `json:"ipv6"`
-	ActiveConnection      *NetworkProfile     `json:"active_connection,omitempty"`
-	AvailableProfileUUIDs []string            `json:"available_profile_uuids"`
-	Wireless              *NetworkWireless    `json:"wireless,omitempty"`
+	Interface             string           `json:"interface"`
+	IPInterface           string           `json:"ip_interface,omitempty"`
+	Kind                  string           `json:"kind"`
+	State                 string           `json:"state"`
+	Managed               bool             `json:"managed"`
+	HardwareAddress       string           `json:"hardware_address,omitempty"`
+	MTU                   uint32           `json:"mtu"`
+	Carrier               *bool            `json:"carrier,omitempty"`
+	SpeedMbps             uint32           `json:"speed_mbps,omitempty"`
+	IPv4                  NetworkIPConfig  `json:"ipv4"`
+	IPv6                  NetworkIPConfig  `json:"ipv6"`
+	ActiveConnection      *NetworkProfile  `json:"active_connection,omitempty"`
+	AvailableProfileUUIDs []string         `json:"available_profile_uuids"`
+	Wireless              *NetworkWireless `json:"wireless,omitempty"`
 }
 
 type NetworkStatus struct {
