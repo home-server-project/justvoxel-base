@@ -12,11 +12,23 @@ import (
 
 type fakeNetworkAPI struct {
 	*fakeAPI
-	scanned            string
-	checkpointCreated  api.NetworkCheckpoint
-	checkpointID       string
-	checkpointConfirmed string
+	role                 string
+	scanned              string
+	checkpointCreated    api.NetworkCheckpoint
+	checkpointID         string
+	checkpointConfirmed  string
 	checkpointRolledBack string
+}
+
+func (f *fakeNetworkAPI) Session(_ context.Context, session string) (api.SessionInfo, error) {
+	if session != "session-token" {
+		return api.SessionInfo{}, api.ErrUnauthorized
+	}
+	role := f.role
+	if role == "" {
+		role = "administrator"
+	}
+	return api.SessionInfo{Username: "admin", Role: role, AuthSource: "system"}, nil
 }
 
 func (f *fakeNetworkAPI) NetworkStatus(_ context.Context, session string) (api.NetworkStatus, error) {
@@ -223,18 +235,36 @@ func TestNetworkCheckpointProxyLifecycle(t *testing.T) {
 }
 
 func TestNetworkCheckpointProxyRequiresAdministratorAndCSRF(t *testing.T) {
-	fake := &fakeNetworkAPI{fakeAPI: &fakeAPI{}}
-	app, err := New(fake, Config{Version: "1.0.0", ManagementAPI: "v1", ExternalScheme: "http"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	t.Run("csrf", func(t *testing.T) {
+		fake := &fakeNetworkAPI{fakeAPI: &fakeAPI{}}
+		app, err := New(fake, Config{Version: "1.0.0", ManagementAPI: "v1", ExternalScheme: "http"})
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	request := httptest.NewRequest(http.MethodPost, "http://example/api/network/checkpoints", strings.NewReader("interface=enp1s0"))
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	request.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
-	response := httptest.NewRecorder()
-	app.Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusForbidden {
-		t.Fatalf("missing CSRF status = %d", response.Code)
-	}
+		request := httptest.NewRequest(http.MethodPost, "http://example/api/network/checkpoints", strings.NewReader("interface=enp1s0"))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+		response := httptest.NewRecorder()
+		app.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusForbidden {
+			t.Fatalf("missing CSRF status = %d", response.Code)
+		}
+	})
+
+	t.Run("administrator role", func(t *testing.T) {
+		fake := &fakeNetworkAPI{fakeAPI: &fakeAPI{}, role: "operator"}
+		app, err := New(fake, Config{Version: "1.0.0", ManagementAPI: "v1", ExternalScheme: "http"})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		request := httptest.NewRequest(http.MethodGet, "http://example/api/network/checkpoints/opaque-checkpoint", nil)
+		request.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+		response := httptest.NewRecorder()
+		app.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusForbidden {
+			t.Fatalf("operator checkpoint status = %d, body %s", response.Code, response.Body.String())
+		}
+	})
 }
