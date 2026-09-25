@@ -62,6 +62,9 @@ type server struct {
 
 	systemUpdateMu sync.Mutex
 
+	networkMu           sync.Mutex
+	networkTransactions map[string]networkCheckpointTransaction
+
 	mu       sync.Mutex
 	sessions map[string]session
 	failures []time.Time
@@ -185,7 +188,13 @@ func serve(socket string) error {
 		return err
 	}
 
-	s := &server{webUID: uint32(uid64), store: store, operations: operations, sessions: make(map[string]session)}
+	s := &server{
+		webUID:              uint32(uid64),
+		store:               store,
+		operations:          operations,
+		networkTransactions: make(map[string]networkCheckpointTransaction),
+		sessions:            make(map[string]session),
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/auth/login", s.providerLogin)
 	mux.HandleFunc("POST /v1/auth/logout", s.logout)
