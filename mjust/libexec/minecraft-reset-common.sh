@@ -1,6 +1,6 @@
 #!/usr/bin/bash
 
-jv_reset_data_scope() {
+jv_reset_path_scope() {
     local data_path="$1" source fstype transport parent
 
     if [[ -z ${data_path} || ${data_path} == / || ${data_path} == /var || ${data_path} == /var/lib ]]; then
@@ -46,6 +46,10 @@ jv_reset_data_scope() {
     fi
 
     printf 'unknown\n'
+}
+
+jv_reset_data_scope() {
+    jv_reset_path_scope "$1"
 }
 
 jv_reset_backup_nested_in_data() {
