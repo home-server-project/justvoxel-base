@@ -11,12 +11,9 @@ import (
 )
 
 type adminDataMigrationAPI interface {
+	dataMigrationOrchestrationAPI
 	Session(ctx context.Context, session string) (api.SessionInfo, error)
 	AdminDataMigrationDiscovery(ctx context.Context, session string) (api.AdminDataMigrationDiscoveryResponse, error)
-	AdminDataMigrationPlan(ctx context.Context, session string, request api.AdminDataMigrationPlanRequest) (api.AdminDataMigrationPlanResponse, error)
-	AdminDataMigrationApply(ctx context.Context, session string, request api.AdminDataMigrationApplyRequest) (api.AdminDataMigrationApplyResponse, error)
-	AdminCurrentDataMigrationOperation(ctx context.Context, session string) (api.PersistentOperationResponse, error)
-	AdminOperation(ctx context.Context, session, id string) (api.PersistentOperationResponse, error)
 }
 
 type dataMigrationCandidateView struct {
@@ -136,14 +133,9 @@ func (a *App) dataMigrationReview(w http.ResponseWriter, r *http.Request) {
 		a.renderDataMigrationPageError(w, r, identity, client, session, err.Error())
 		return
 	}
-	plan, err := client.AdminDataMigrationPlan(r.Context(), session, request)
+	plan, err := dataMigrationPlanReviewed(r.Context(), client, session, request)
 	if err != nil {
-		var responseErr *api.ResponseError
-		if errors.As(err, &responseErr) && responseErr.StatusCode == http.StatusBadRequest && plan.SchemaVersion != "" {
-			a.renderDataMigrationReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), apiMessage(err, "Minecraft data migration planning was rejected."))
-			return
-		}
-		a.handleDataMigrationRequestError(w, r, err, "Minecraft data migration planning is unavailable.")
+		a.renderDataMigrationReview(w, dataMigrationErrorStatus(err), identity, request, plan, csrfFromRequest(r), dataMigrationErrorMessage(err, "Minecraft data migration planning is unavailable."))
 		return
 	}
 	a.renderDataMigrationReview(w, http.StatusOK, identity, request, plan, csrfFromRequest(r), "")
@@ -160,56 +152,17 @@ func (a *App) dataMigrationApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	plan, err := client.AdminDataMigrationPlan(r.Context(), session, request)
-	if err != nil {
-		var responseErr *api.ResponseError
-		if errors.As(err, &responseErr) && responseErr.StatusCode == http.StatusBadRequest && plan.SchemaVersion != "" {
-			a.renderDataMigrationReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), apiMessage(err, "Minecraft data migration planning was rejected."))
-			return
-		}
-		a.handleDataMigrationRequestError(w, r, err, "Minecraft data migration planning is unavailable.")
-		return
-	}
-
-	submittedFingerprint := strings.TrimSpace(r.FormValue("plan_fingerprint"))
-	if submittedFingerprint == "" || submittedFingerprint != plan.PlanFingerprint {
-		a.renderDataMigrationReview(w, http.StatusConflict, identity, request, plan, csrfFromRequest(r), "This migration plan changed since it was reviewed. Review the current target again before continuing.")
-		return
-	}
-	if strings.TrimSpace(r.FormValue("migration_confirmation")) != "MIGRATE" {
-		a.renderDataMigrationReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), "Type MIGRATE exactly to confirm this Minecraft data migration.")
-		return
-	}
-
-	playersConfirmed := r.FormValue("players_confirmed") == "yes"
-	if plan.Requirements != nil && plan.Requirements.PlayersConfirmationRequired && !playersConfirmed {
-		a.renderDataMigrationReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), "Confirm that the online players may be interrupted before starting migration.")
-		return
-	}
-
-	destructiveConfirmation := strings.TrimSpace(r.FormValue("destructive_confirmation"))
-	if plan.Requirements != nil && plan.Requirements.DestructiveConfirmationRequired &&
-		destructiveConfirmation != plan.Requirements.ConfirmationPhrase {
-		a.renderDataMigrationReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), "The destructive storage confirmation does not match the exact phrase provided by the Management Agent.")
-		return
-	}
-
-	result, err := client.AdminDataMigrationApply(r.Context(), session, api.AdminDataMigrationApplyRequest{
-		PlanFingerprint:    plan.PlanFingerprint,
-		Request:            request,
-		MigrationConfirmed: true,
-		Confirmation:       destructiveConfirmation,
-		PlayersConfirmed:   playersConfirmed,
+	plan, operation, err := dataMigrationApplyReviewed(r.Context(), client, session, request, dataMigrationApplyProof{
+		PlanFingerprint:    strings.TrimSpace(r.FormValue("plan_fingerprint")),
+		MigrationConfirmed: strings.TrimSpace(r.FormValue("migration_confirmation")) == "MIGRATE",
+		Confirmation:       strings.TrimSpace(r.FormValue("destructive_confirmation")),
+		PlayersConfirmed:   r.FormValue("players_confirmed") == "yes",
 	})
 	if err != nil {
-		a.renderDataMigrationReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), apiMessage(err, "Could not start Minecraft data migration."))
+		a.renderDataMigrationReview(w, dataMigrationErrorStatus(err), identity, request, plan, csrfFromRequest(r), dataMigrationErrorMessage(err, "Could not start Minecraft data migration."))
 		return
 	}
-	if !result.OK || result.Operation == nil || result.Operation.OperationType != "data_migration" {
-		a.renderDataMigrationReview(w, http.StatusBadGateway, identity, request, plan, csrfFromRequest(r), "Minecraft data migration did not return a valid persistent operation.")
-		return
-	}
-	http.Redirect(w, r, "/settings/data-migration/progress/"+result.Operation.OperationID, http.StatusSeeOther)
+	http.Redirect(w, r, "/settings/data-migration/progress/"+operation.OperationID, http.StatusSeeOther)
 }
 
 func (a *App) dataMigrationProgressPage(w http.ResponseWriter, r *http.Request) {
@@ -217,13 +170,9 @@ func (a *App) dataMigrationProgressPage(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	response, err := client.AdminOperation(r.Context(), session, r.PathValue("id"))
+	operation, err := dataMigrationOperation(r.Context(), client, session, r.PathValue("id"))
 	if err != nil {
 		a.handleDataMigrationProgressError(w, r, err)
-		return
-	}
-	if response.Operation == nil || response.Operation.OperationType != "data_migration" {
-		http.Error(w, "Minecraft data migration operation not found", http.StatusNotFound)
 		return
 	}
 	a.renderDataMigration(w, "data_migration_progress.html", http.StatusOK, dataMigrationProgressPageData{
@@ -232,9 +181,9 @@ func (a *App) dataMigrationProgressPage(w http.ResponseWriter, r *http.Request) 
 		ManagementAPI: a.config.ManagementAPI,
 		CSRF:          csrfFromRequest(r),
 		Identity:      identity,
-		Operation:     *response.Operation,
-		StateLabel:    dataMigrationOperationStateLabel(response.Operation.State),
-		StageLabel:    dataMigrationOperationStageLabel(response.Operation.Stage),
+		Operation:     *operation,
+		StateLabel:    dataMigrationOperationStateLabel(operation.State),
+		StageLabel:    dataMigrationOperationStageLabel(operation.Stage),
 	})
 }
 
@@ -267,15 +216,12 @@ func (a *App) dataMigrationProgressStatus(w http.ResponseWriter, r *http.Request
 		http.Error(w, "Administrator access required", http.StatusForbidden)
 		return
 	}
-	response, err := client.AdminOperation(r.Context(), session, r.PathValue("id"))
+	operation, err := dataMigrationOperation(r.Context(), client, session, r.PathValue("id"))
 	if err != nil {
 		a.handleDataMigrationProgressAPIError(w, err)
 		return
 	}
-	if response.Operation == nil || response.Operation.OperationType != "data_migration" {
-		http.Error(w, "Minecraft data migration operation not found", http.StatusNotFound)
-		return
-	}
+	response := api.PersistentOperationResponse{Operation: operation}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
@@ -284,19 +230,15 @@ func (a *App) dataMigrationProgressStatus(w http.ResponseWriter, r *http.Request
 }
 
 func (a *App) redirectCurrentDataMigrationOperation(w http.ResponseWriter, r *http.Request, session string, client adminDataMigrationAPI) bool {
-	response, err := client.AdminCurrentDataMigrationOperation(r.Context(), session)
+	operation, err := dataMigrationCurrentOperation(r.Context(), client, session)
 	if err != nil {
 		a.handleDataMigrationRequestError(w, r, err, "Minecraft data migration operation status is unavailable.")
 		return true
 	}
-	if response.Operation == nil {
+	if operation == nil {
 		return false
 	}
-	if response.Operation.OperationType != "data_migration" {
-		http.Error(w, "Minecraft data migration operation status is invalid", http.StatusBadGateway)
-		return true
-	}
-	http.Redirect(w, r, "/settings/data-migration/progress/"+response.Operation.OperationID, http.StatusSeeOther)
+	http.Redirect(w, r, "/settings/data-migration/progress/"+operation.OperationID, http.StatusSeeOther)
 	return true
 }
 
