@@ -151,12 +151,13 @@ func TestMinecraftWorkspaceMigrationContract(t *testing.T) {
 	behavior := string(script)
 	for _, want := range []string{
 		`document.querySelector("[data-minecraft-open]")`,
-		`fetch("/api/dashboard-status"`,
-		`url = "/settings/server"`,
-		`url = "/operations"`,
-		`form.querySelector('[name="backup_keep"]')?.closest("section")?.remove()`,
+		`requestWorkspaceJSON("/api/dashboard-status")`,
+		`"/api/minecraft/workspace/settings"`,
+		`"/api/minecraft/workspace/settings/plan"`,
+		`"/api/minecraft/workspace/settings/apply"`,
+		`"/api/minecraft/workspace/whitelist"`,
+		`"/api/minecraft/workspace/logs"`,
 		`const settingsTabs = new Set(["memory", "players", "crossplay", "version"])`,
-		`if (heading === "Java & Bedrock") return "crossplay"`,
 	} {
 		if !strings.Contains(behavior, want) {
 			t.Fatalf("Minecraft workspace behavior missing %q", want)
