@@ -80,16 +80,37 @@
     {{if eq .CurrentStep 1}}
     <form method="post" action="/setup/server" class="setup-form">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <fieldset class="setup-server-types setup-server-types-compact">
+        <legend>Server software</legend>
+        <label class="setup-server-type is-available"><input type="radio" name="server_type" value="paper" {{if or (eq .Minecraft.ServerType "") (eq .Minecraft.ServerType "paper")}}checked{{end}}><span><strong>Paper</strong><small>Supported now · plugins and Bedrock cross-play.</small></span></label>
+        <label class="setup-server-type is-placeholder" aria-disabled="true"><input type="radio" name="server_type" value="purpur" disabled><span><strong>Purpur</strong><small>Coming next.</small></span></label>
+        <label class="setup-server-type is-placeholder" aria-disabled="true"><input type="radio" name="server_type" value="vanilla" disabled><span><strong>Vanilla</strong><small>Coming next.</small></span></label>
+      </fieldset>
       <div class="setup-form-grid">
         <label class="setup-field setup-field-wide">Server name / welcome message<input name="motd" value="{{.Server.MOTD}}" autocomplete="off" placeholder="JustVoxel Java and Bedrock Server"><span class="field-help">Shown to players in the Minecraft server list. Technical name: MOTD.</span></label>
-        <label class="setup-field">Maximum players<input name="max_players" type="number" min="1" step="1" value="{{.Server.MaxPlayers}}" inputmode="numeric"><span class="field-help">Used for the player limit and to improve the memory recommendations on the next step.</span></label>
-        <label class="setup-field">Timezone<input id="timezone" name="timezone" list="timezone-options" value="{{.Server.Timezone}}" autocomplete="off" placeholder="Search, for example America/Toronto"><datalist id="timezone-options">{{range .Timezones}}<option value="{{.}}"></option>{{end}}</datalist><span class="field-help">Start typing a city or region and choose a timezone from the suggestions, for example <code>America/Toronto</code> or <code>UTC</code>.</span></label>
+        <label class="setup-field">Maximum players<input name="max_players" type="number" min="1" step="1" value="{{.Server.MaxPlayers}}" inputmode="numeric"><span class="field-help">Used for the player limit and memory recommendations.</span></label>
+        <label class="setup-field setup-timezone-field">Timezone
+          <input id="timezone" name="timezone" value="{{.Server.Timezone}}" autocomplete="off" placeholder="Type Toronto, Warsaw, Amsterdam…" data-timezone-search aria-autocomplete="list" aria-controls="timezone-results" aria-expanded="false">
+          <div class="setup-timezone-results" id="timezone-results" data-timezone-results role="listbox" hidden></div>
+          <span class="field-help">Type a nearby major city. JustVoxel searches the local system timezone database; no Internet service is required.</span>
+        </label>
+        <div data-timezone-options hidden>{{range .Timezones}}<span data-timezone-value="{{.}}"></span>{{end}}</div>
       </div>
-      <label class="setup-choice"><input type="checkbox" name="bedrock_enabled" {{if .Server.BedrockEnabled}}checked{{end}}><span><strong>Enable Bedrock cross-play</strong><small>Allow supported Bedrock clients to join through Geyser/Floodgate. You can change this later.</small></span></label>
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button type="submit">Continue</button></div></div>
     </form>
 
     {{else if eq .CurrentStep 2}}
+    <form method="post" action="/setup/connections" class="setup-form" data-setup-connections>
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <label class="setup-choice"><input type="checkbox" name="bedrock_enabled" data-bedrock-toggle {{if .Server.BedrockEnabled}}checked{{end}}><span><strong>Enable Bedrock cross-play</strong><small>Allow supported Bedrock clients to join through Geyser/Floodgate. Compatibility is checked before Apply.</small></span></label>
+      <div class="setup-form-grid">
+        <label class="setup-field">Minecraft Java port<input name="java_port" type="number" min="1" max="65535" value="{{.Minecraft.JavaPort}}" inputmode="numeric"><span class="field-help">Default: 25565/TCP.</span></label>
+        <label class="setup-field" data-bedrock-port-field>Bedrock UDP port<input name="bedrock_port" type="number" min="1" max="65535" value="{{.Minecraft.BedrockPort}}" inputmode="numeric"><span class="field-help">Default: 19132/UDP. Used only when Bedrock cross-play is enabled.</span></label>
+      </div>
+      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
+    </form>
+
+    {{else if eq .CurrentStep 3}}
     <form method="post" action="/setup/resources" class="setup-form">
       <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" id="max-players" value="{{.Server.MaxPlayers}}">
       <div class="setup-memory" data-memory-settings data-system-memory-mib="{{.Defaults.SystemMemoryMiB}}" data-min-reserve-mib="{{.Defaults.SystemReserveMinimumMiB}}" data-recommended-reserve-mib="{{.Defaults.SystemReserveRecommendedMiB}}">
@@ -103,12 +124,10 @@
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
     </form>
 
-    {{else if eq .CurrentStep 3}}
+    {{else if eq .CurrentStep 4}}
     <form method="post" action="/setup/minecraft" class="setup-form">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <div class="setup-form-grid setup-section-gap">
-        <label class="setup-field">Minecraft Java port<input name="java_port" type="number" min="1" max="65535" value="{{.Minecraft.JavaPort}}" inputmode="numeric"><span class="field-help">Default: 25565/TCP.</span></label>
-        <label class="setup-field">Bedrock UDP port<input name="bedrock_port" type="number" min="1" max="65535" value="{{.Minecraft.BedrockPort}}" inputmode="numeric"><span class="field-help">Default: 19132/UDP. Used only when Bedrock cross-play is enabled.</span></label>
         <label class="setup-field">Minecraft container release channel<select id="image-channel" data-current-tag="{{.Minecraft.ImageTag}}"><option value="stable" {{if eq .Minecraft.ImageTag "stable"}}selected{{end}}>Stable (recommended)</option><option value="latest" {{if eq .Minecraft.ImageTag "latest"}}selected{{end}}>Latest</option><option value="custom" {{if and (ne .Minecraft.ImageTag "stable") (ne .Minecraft.ImageTag "latest")}}selected{{end}}>Custom</option></select><span class="field-help">Stable is recommended for most servers. Latest follows the newest container release. Custom lets advanced users choose another supported tag.</span></label>
         <label id="custom-image-tag-field" class="setup-field" {{if or (eq .Minecraft.ImageTag "stable") (eq .Minecraft.ImageTag "latest")}}hidden{{end}}>Custom container tag<input id="custom-image-tag" value="{{if and (ne .Minecraft.ImageTag "stable") (ne .Minecraft.ImageTag "latest")}}{{.Minecraft.ImageTag}}{{end}}" autocomplete="off" placeholder="Enter a supported container tag"><span class="field-help">Advanced option. Use an upstream tag only when you know you need it.</span></label>
         <input id="image-tag" name="image_tag" type="hidden" value="{{.Minecraft.ImageTag}}">
@@ -119,7 +138,7 @@
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
     </form>
 
-    {{else if eq .CurrentStep 4}}
+    {{else if eq .CurrentStep 5}}
     <form method="post" action="/setup/storage" class="setup-form" data-setup-storage-form>
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <div class="setup-storage-summary"><strong>Storage configuration</strong><span>Choose where Minecraft worlds, plugins, configuration and runtime data will live. This step only records the choice; it does not mount, format or write anything.</span></div>
@@ -152,7 +171,7 @@
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
     </form>
 
-    {{else if eq .CurrentStep 5}}
+    {{else if eq .CurrentStep 6}}
     <form method="post" action="/setup/backups" class="setup-form" data-setup-backup-form>
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       {{if .SameDiskWarning}}<div class="notice warning"><strong>Same physical disk</strong><br>{{.SameDiskWarning}}</div>{{end}}
