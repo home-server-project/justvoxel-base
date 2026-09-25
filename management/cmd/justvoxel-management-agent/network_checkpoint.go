@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -17,7 +18,12 @@ const (
 	maxNetworkCheckpointTimeout     = 300
 )
 
-var networkNow = time.Now
+var (
+	networkNow                   = time.Now
+	errNetworkCheckpointOverlap  = errors.New("one or more interfaces are already protected by another network transaction")
+	errNetworkCheckpointInactive = errors.New("network checkpoint is not active")
+	errNetworkCheckpointBusy     = errors.New("network checkpoint operation is already in progress")
+)
 
 type networkCheckpointTransaction struct {
 	ID         string
@@ -25,6 +31,7 @@ type networkCheckpointTransaction struct {
 	Interfaces []string
 	CreatedAt  time.Time
 	ExpiresAt  time.Time
+	Busy       bool
 }
 
 type networkCheckpointView struct {
@@ -80,13 +87,15 @@ func (s *server) networkCheckpointCreate(w http.ResponseWriter, r *http.Request)
 	transaction, err := s.beginNetworkCheckpoint(r.Context(), interfaces, timeout)
 	if err != nil {
 		status := http.StatusServiceUnavailable
-		if strings.Contains(err.Error(), "already protected by another network transaction") {
+		message := "network checkpoint could not be created"
+		if errors.Is(err, errNetworkCheckpointOverlap) {
 			status = http.StatusConflict
+			message = errNetworkCheckpointOverlap.Error()
 		}
 		if s.store != nil {
 			_ = s.store.recordAuditEvent(actor, "network_checkpoint_create", strings.Join(interfaces, ","), false, err.Error())
 		}
-		writeError(w, status, err.Error())
+		writeError(w, status, message)
 		return
 	}
 	if s.store != nil {
@@ -119,11 +128,17 @@ func (s *server) networkCheckpointConfirm(w http.ResponseWriter, r *http.Request
 		return
 	}
 	id := strings.TrimSpace(r.PathValue("id"))
-	transaction, ok := s.activeNetworkCheckpoint(id)
-	if !ok {
-		writeError(w, http.StatusNotFound, "network checkpoint is not active")
+	transaction, err := s.claimNetworkCheckpoint(id)
+	if err != nil {
+		writeNetworkCheckpointClaimError(w, err)
 		return
 	}
+	finished := false
+	defer func() {
+		if !finished {
+			s.releaseNetworkCheckpoint(id)
+		}
+	}()
 
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
@@ -142,6 +157,7 @@ func (s *server) networkCheckpointConfirm(w http.ResponseWriter, r *http.Request
 		return
 	}
 	s.removeNetworkCheckpoint(id)
+	finished = true
 	if s.store != nil {
 		_ = s.store.recordAuditEvent(actor, "network_checkpoint_confirm", id, true, strings.Join(transaction.Interfaces, ","))
 	}
@@ -158,11 +174,17 @@ func (s *server) networkCheckpointRollback(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	id := strings.TrimSpace(r.PathValue("id"))
-	transaction, ok := s.activeNetworkCheckpoint(id)
-	if !ok {
-		writeError(w, http.StatusNotFound, "network checkpoint is not active")
+	transaction, err := s.claimNetworkCheckpoint(id)
+	if err != nil {
+		writeNetworkCheckpointClaimError(w, err)
 		return
 	}
+	finished := false
+	defer func() {
+		if !finished {
+			s.releaseNetworkCheckpoint(id)
+		}
+	}()
 
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 	defer cancel()
@@ -182,6 +204,7 @@ func (s *server) networkCheckpointRollback(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	s.removeNetworkCheckpoint(id)
+	finished = true
 
 	items := make([]networkCheckpointRollbackDeviceView, 0, len(transaction.Interfaces))
 	success := true
@@ -222,7 +245,7 @@ func (s *server) beginNetworkCheckpoint(ctx context.Context, interfaces []string
 	s.cleanupExpiredNetworkCheckpointsLocked(now)
 	for _, transaction := range s.networkTransactions {
 		if networkInterfacesOverlap(transaction.Interfaces, interfaces) {
-			return networkCheckpointTransaction{}, errorsNewNetworkOverlap()
+			return networkCheckpointTransaction{}, errNetworkCheckpointOverlap
 		}
 	}
 
@@ -261,10 +284,51 @@ func (s *server) activeNetworkCheckpoint(id string) (networkCheckpointTransactio
 	return transaction, ok
 }
 
+func (s *server) claimNetworkCheckpoint(id string) (networkCheckpointTransaction, error) {
+	if id == "" {
+		return networkCheckpointTransaction{}, errNetworkCheckpointInactive
+	}
+	s.networkMu.Lock()
+	defer s.networkMu.Unlock()
+	s.cleanupExpiredNetworkCheckpointsLocked(networkNow().UTC())
+	transaction, ok := s.networkTransactions[id]
+	if !ok {
+		return networkCheckpointTransaction{}, errNetworkCheckpointInactive
+	}
+	if transaction.Busy {
+		return networkCheckpointTransaction{}, errNetworkCheckpointBusy
+	}
+	transaction.Busy = true
+	s.networkTransactions[id] = transaction
+	return transaction, nil
+}
+
+func (s *server) releaseNetworkCheckpoint(id string) {
+	s.networkMu.Lock()
+	defer s.networkMu.Unlock()
+	transaction, ok := s.networkTransactions[id]
+	if !ok {
+		return
+	}
+	transaction.Busy = false
+	s.networkTransactions[id] = transaction
+}
+
 func (s *server) removeNetworkCheckpoint(id string) {
 	s.networkMu.Lock()
 	delete(s.networkTransactions, id)
 	s.networkMu.Unlock()
+}
+
+func writeNetworkCheckpointClaimError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errNetworkCheckpointInactive):
+		writeError(w, http.StatusNotFound, errNetworkCheckpointInactive.Error())
+	case errors.Is(err, errNetworkCheckpointBusy):
+		writeError(w, http.StatusConflict, errNetworkCheckpointBusy.Error())
+	default:
+		writeError(w, http.StatusServiceUnavailable, "network checkpoint is unavailable")
+	}
 }
 
 func (s *server) cleanupExpiredNetworkCheckpointsLocked(now time.Time) {
@@ -324,10 +388,6 @@ func networkInterfacesOverlap(left, right []string) bool {
 		}
 	}
 	return false
-}
-
-func errorsNewNetworkOverlap() error {
-	return fmt.Errorf("one or more interfaces are already protected by another network transaction")
 }
 
 func networkCheckpointToView(transaction networkCheckpointTransaction) networkCheckpointView {
