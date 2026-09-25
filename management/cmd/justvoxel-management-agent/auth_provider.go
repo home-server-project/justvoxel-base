@@ -92,6 +92,19 @@ func validAuthMode(mode authMode) bool {
 	return mode == authModeSystem || mode == authModeSeparate
 }
 
+func resetAuthenticationStateForFactoryReset() error {
+	if err := setAuthMode(authModeSystem); err != nil {
+		return fmt.Errorf("restore System authentication mode: %w", err)
+	}
+	if err := os.Remove(localAuthPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove separate WebUI administrator credential: %w", err)
+	}
+	if err := os.Remove(authModePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove explicit authentication mode state: %w", err)
+	}
+	return nil
+}
+
 // writeLocalAdministrator creates or replaces only the WebUI-local voxel
 // administrator record. The versioned account-list format intentionally leaves
 // room for future WebUI-only Operator/Viewer identities without creating Linux
