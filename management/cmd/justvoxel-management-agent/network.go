@@ -13,6 +13,9 @@ type networkClient interface {
 	Snapshot(context.Context) (networking.Snapshot, error)
 	WiFiNetworks(context.Context, string) ([]networking.WiFiNetwork, error)
 	RequestWiFiScan(context.Context, string) error
+	CreateCheckpoint(context.Context, []string, uint32) (networking.Checkpoint, error)
+	DestroyCheckpoint(context.Context, networking.Checkpoint) error
+	RollbackCheckpoint(context.Context, networking.Checkpoint) (map[string]networking.RollbackResult, error)
 }
 
 var openNetworkClient = func(ctx context.Context) (networkClient, error) {
@@ -94,6 +97,7 @@ func registerNetworkRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("GET /v1/network", s.networkStatus)
 	mux.HandleFunc("GET /v1/network/wifi/{interface}/networks", s.networkWiFiNetworks)
 	mux.HandleFunc("POST /v1/network/wifi/{interface}/scan", s.networkWiFiScan)
+	registerNetworkCheckpointRoutes(mux, s)
 }
 
 func (s *server) networkStatus(w http.ResponseWriter, r *http.Request) {
