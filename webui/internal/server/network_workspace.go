@@ -248,13 +248,13 @@ func (a *App) networkWiFiConnectChange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	request := api.NetworkWiFiConnectRequest{
-		CheckpointID: strings.TrimSpace(r.FormValue("checkpoint_id")),
-		ProfileUUID:  strings.TrimSpace(r.FormValue("profile_uuid")),
-		SSID:         r.FormValue("ssid"),
-		BSSID:        strings.TrimSpace(r.FormValue("bssid")),
+		CheckpointID:  strings.TrimSpace(r.FormValue("checkpoint_id")),
+		ProfileUUID:   strings.TrimSpace(r.FormValue("profile_uuid")),
+		SSID:          r.FormValue("ssid"),
+		BSSID:         strings.TrimSpace(r.FormValue("bssid")),
 		KeyManagement: strings.TrimSpace(r.FormValue("key_management")),
-		Password:     r.FormValue("password"),
-		Hidden:       r.FormValue("hidden") == "true",
+		Password:      r.FormValue("password"),
+		Hidden:        r.FormValue("hidden") == "true",
 	}
 	result, err := client.ConnectWiFi(r.Context(), session, r.PathValue("interface"), request)
 	request.Password = ""
