@@ -154,8 +154,8 @@ func TestResetCurrentOperationPaths(t *testing.T) {
 				}
 				return &http.Response{
 					StatusCode: http.StatusOK,
-					Body: io.NopCloser(strings.NewReader(`{"operation":null}`)),
-					Header: make(http.Header),
+					Body:       io.NopCloser(strings.NewReader(`{"operation":null}`)),
+					Header:     make(http.Header),
 				}, nil
 			})}}
 			response, err := tc.call(client)
