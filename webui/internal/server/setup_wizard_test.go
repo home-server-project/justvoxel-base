@@ -460,13 +460,16 @@ func TestConfiguredApplianceCannotEnterFirstRunWizard(t *testing.T) {
 	}
 }
 
-func TestDashboardIncludesFirstRunRedirectForUnconfiguredAdministrator(t *testing.T) {
+func TestDashboardIncludesNonBlockingFirstRunChoiceForUnconfiguredAdministrator(t *testing.T) {
 	dashboard, err := assets.ReadFile("templates/dashboard.html")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(dashboard), `/static/first-run.js`) {
-		t.Fatal("dashboard does not load first-run detection")
+	dashboardContent := string(dashboard)
+	for _, want := range []string{`/static/first-run.js`, `data-first-run-choice`, `data-minecraft-setup-invitation`} {
+		if !strings.Contains(dashboardContent, want) {
+			t.Fatalf("dashboard first-run flow missing %q", want)
+		}
 	}
 
 	script, err := assets.ReadFile("static/first-run.js")
@@ -474,9 +477,12 @@ func TestDashboardIncludesFirstRunRedirectForUnconfiguredAdministrator(t *testin
 		t.Fatal(err)
 	}
 	content := string(script)
-	for _, want := range []string{`role !== "administrator"`, `configured !== false`, `window.location.replace("/setup")`} {
+	if strings.Contains(content, `window.location.replace("/setup")`) {
+		t.Fatal("first-run flow still forces an unconfigured Administrator into setup")
+	}
+	for _, want := range []string{`role !== "administrator"`, `configured === true`, `showChoice()`, `showInvitation()`} {
 		if !strings.Contains(content, want) {
-			t.Fatalf("first-run redirect missing %q", want)
+			t.Fatalf("first-run Workspace flow missing %q", want)
 		}
 	}
 }
