@@ -216,3 +216,81 @@ func TestWebUIStoreFoundationTablesExist(t *testing.T) {
 		}
 	}
 }
+
+
+func TestWebUIStoreFactoryResetReturnsUserStateToDefaults(t *testing.T) {
+	store, _ := openTestWebUIStore(t)
+	base := time.Date(2026, time.September, 25, 20, 30, 0, 0, time.UTC)
+	store.now = func() time.Time { return base }
+
+	user, err := store.createWebUser("Alex", webUserRoleOperator, "operator-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(
+		`INSERT INTO audit_events(occurred_at, actor_username, actor_role, action, target, success, context)
+		 VALUES(?, 'voxel', 'administrator', 'test', 'factory-reset', 1, '')`,
+		formatWebUIStoreTime(base),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(
+		`INSERT INTO notifications(created_at, kind, user_id, title, message)
+		 VALUES(?, 'test', ?, 'notice', 'message')`,
+		formatWebUIStoreTime(base),
+		user.ID,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(
+		`UPDATE operator_global_state SET last_restart_at = ?, last_backup_at = ?, updated_at = ? WHERE id = 1`,
+		formatWebUIStoreTime(base), formatWebUIStoreTime(base), formatWebUIStoreTime(base),
+	); err != nil {
+		t.Fatal(err)
+	}
+	changed := defaultSystemMonitorProfile()
+	changed.ProcessCount = 20
+	changed.Alerts = false
+	if err := store.writeSystemMonitorProfile(changed); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.resetFactoryState(); err != nil {
+		t.Fatal(err)
+	}
+
+	users, err := store.listWebUsers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(users) != 0 {
+		t.Fatalf("factory reset left WebUI users: %#v", users)
+	}
+	for _, table := range []string{"operator_usage", "audit_events", "notifications"} {
+		var count int
+		if err := store.db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("factory reset left %d rows in %s", count, table)
+		}
+	}
+
+	var restartAt, backupAt sql.NullString
+	if err := store.db.QueryRow(
+		`SELECT last_restart_at, last_backup_at FROM operator_global_state WHERE id = 1`,
+	).Scan(&restartAt, &backupAt); err != nil {
+		t.Fatal(err)
+	}
+	if restartAt.Valid || backupAt.Valid {
+		t.Fatalf("factory reset left operator global timestamps: restart=%v backup=%v", restartAt, backupAt)
+	}
+
+	profile, err := store.readSystemMonitorProfile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile != defaultSystemMonitorProfile() {
+		t.Fatalf("factory reset monitor profile = %#v, want default %#v", profile, defaultSystemMonitorProfile())
+	}
+}
