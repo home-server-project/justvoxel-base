@@ -5,6 +5,36 @@ import (
 	"testing"
 )
 
+func TestFirstRunConfiguredStateOverridesExploreInvitation(t *testing.T) {
+	scriptSource, err := assets.ReadFile("static/first-run.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(scriptSource)
+	configured := strings.Index(script, "if (configured === true)")
+	explored := strings.Index(script, "let explored = false")
+	if configured < 0 || explored < 0 || configured > explored {
+		t.Fatalf("configured state must be handled before Explore-first preference")
+	}
+	for _, want := range []string{
+		"hideFirstRunUI()",
+		"window.localStorage.removeItem(exploreStorageKey)",
+		"stopRefreshTimer()",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("configured first-run cleanup missing %q", want)
+		}
+	}
+
+	templateSource, err := assets.ReadFile("templates/dashboard.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(templateSource), "data-minecraft-setup-invitation hidden") {
+		t.Fatal("Workspace setup invitation must be hidden until first-run state says it is needed")
+	}
+}
+
 func TestFirstRunWorkspaceChoiceIsNonBlockingAndConfigurationDriven(t *testing.T) {
 	templateSource, err := assets.ReadFile("templates/dashboard.html")
 	if err != nil {
