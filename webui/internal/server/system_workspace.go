@@ -20,7 +20,7 @@ type systemWorkspaceHistoryResponse struct {
 	Role          string                    `json:"role"`
 	Username      string                    `json:"username"`
 	Notifications []api.Notification        `json:"notifications,omitempty"`
-	Audit         []api.AuditEvent           `json:"audit,omitempty"`
+	Audit         []api.AuditEvent          `json:"audit,omitempty"`
 	Events        []api.PublicActivityEvent `json:"events,omitempty"`
 }
 
