@@ -17,15 +17,16 @@
   <form class="nav-logout setup-topbar-logout" method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Log out</button></form>
 </header>
 <main class="setup-shell">
-  <div class="title-row setup-title-row"><div><p class="eyebrow">First setup</p><h1>Review your JustVoxel setup</h1></div><span class="badge">{{if eq .SetupMode "recommended"}}Recommended setup{{else}}Step 6 of 6{{end}}</span></div>
+  <div class="title-row setup-title-row"><div><p class="eyebrow">First setup</p><h1>Review your JustVoxel setup</h1></div><span class="badge">{{if eq .SetupMode "recommended"}}Recommended setup{{else}}Step 7 of 7{{end}}</span></div>
   {{if ne .SetupMode "recommended"}}
   <ol class="setup-progress" aria-label="Setup progress">
     <li class="complete"><span class="setup-number">1</span><span>Server</span></li>
-    <li class="complete"><span class="setup-number">2</span><span>Resources</span></li>
-    <li class="complete"><span class="setup-number">3</span><span>Minecraft</span></li>
-    <li class="complete"><span class="setup-number">4</span><span>Storage</span></li>
-    <li class="complete"><span class="setup-number">5</span><span>Backups</span></li>
-    <li class="active" aria-current="step"><span class="setup-number">6</span><span>Review</span></li>
+    <li class="complete"><span class="setup-number">2</span><span>Connections</span></li>
+    <li class="complete"><span class="setup-number">3</span><span>Resources</span></li>
+    <li class="complete"><span class="setup-number">4</span><span>Version</span></li>
+    <li class="complete"><span class="setup-number">5</span><span>Storage</span></li>
+    <li class="complete"><span class="setup-number">6</span><span>Backups</span></li>
+    <li class="active" aria-current="step"><span class="setup-number">7</span><span>Review</span></li>
   </ol>
   {{end}}
 
