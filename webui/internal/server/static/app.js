@@ -1327,10 +1327,7 @@ const initSystemUpdateWorkspace = () => {
     workspaceWindow?.open();
   });
 
-  closeButton?.addEventListener("click", () => {
-    clearResetPoll();
-    workspaceWindow?.close();
-  });
+  closeButton?.addEventListener("click", () => workspaceWindow?.close());
   refreshButton?.addEventListener("click", checkSystemUpdate);
   updateButton?.addEventListener("click", () => applySystemUpdate(false));
   rebootButton?.addEventListener("click", requestUpdateReboot);
@@ -4365,7 +4362,10 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     if (controlCenter) controlCenter.open = false;
     workspaceWindow?.open();
   });
-  closeButton?.addEventListener("click", () => workspaceWindow?.close());
+  closeButton?.addEventListener("click", () => {
+    clearResetPoll();
+    workspaceWindow?.close();
+  });
   refreshButton?.addEventListener("click", loadCurrentSystemTab);
   tabs.forEach((button) => button.addEventListener("click", () => selectSystemTab(button.dataset.systemTab)));
 
