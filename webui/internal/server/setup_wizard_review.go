@@ -131,9 +131,6 @@ func setupConfigurationSnapshot(plan api.AdminSetupPlanResponse) string {
 	b.WriteString("Timezone: " + plan.Normalized.Server.Timezone + "\n\n")
 
 	b.WriteString("Minecraft\n")
-	if draft.Minecraft.ServerType != "" {
-		b.WriteString("Server software: " + setupServerTypeLabel(draft.Minecraft.ServerType) + "\n")
-	}
 	b.WriteString("Game memory: " + plan.Normalized.Minecraft.JavaMemory + "\n")
 	b.WriteString("Maximum memory: " + plan.Normalized.Minecraft.ContainerMemory + "\n")
 	b.WriteString("Java port: " + strconv.Itoa(plan.Normalized.Minecraft.JavaPort) + "/TCP\n")
