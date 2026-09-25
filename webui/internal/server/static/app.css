@@ -482,3 +482,25 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .minecraft-workspace-content .log-box{max-height:430px;overflow:auto}
 @media(max-width:700px){.minecraft-workspace-dialog{inset:52px .25rem .25rem .25rem!important;width:auto!important;height:auto!important;min-width:0;min-height:0;max-width:none;max-height:none;resize:none;border-radius:12px}.minecraft-workspace-header{padding:.85rem .9rem .7rem;cursor:default;touch-action:auto}.minecraft-workspace-tabs{padding:.55rem .9rem}.minecraft-workspace-body{padding:.8rem .9rem}.minecraft-overview-grid{grid-template-columns:1fr}}
 @media(prefers-color-scheme:light){.minecraft-workspace-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025}.minecraft-workspace-header,.minecraft-workspace-tabs{border-color:#d9dfe3}.minecraft-workspace-tabs{background:#f7f9fa}.minecraft-workspace-tabs button{color:#56636c}.minecraft-workspace-tabs button:hover,.minecraft-workspace-tabs button:focus-visible{background:#e9eef1;color:#1a2025}.minecraft-workspace-tabs button[aria-selected="true"]{background:#e3f1e8;border-color:#86b99a;color:#184c31}.minecraft-overview-card,.minecraft-overview-players{background:#f7f9fa;border-color:#d9dfe3}}
+
+
+/* System workspace window. Legacy System pages remain available during migration. */
+.system-workspace-dialog{width:min(980px,calc(100vw - 1rem));height:min(760px,calc(100dvh - 1rem));min-width:min(580px,calc(100vw - 1rem));min-height:420px;max-width:calc(100vw - 1rem);max-height:calc(100dvh - 1rem);padding:0;overflow:hidden;resize:both;border:1px solid #3b454e;border-radius:16px;background:#171d22;color:#eef1f4;box-shadow:0 28px 80px #000b}
+.system-workspace-shell{display:flex;flex-direction:column;height:100%;min-height:0}
+.system-workspace-header{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;padding:1rem 1.1rem .8rem;border-bottom:1px solid #303942;cursor:move;touch-action:none;user-select:none}
+.system-workspace-header h2{margin:.1rem 0 0;font-size:1.25rem}
+.system-workspace-header-actions{display:flex;gap:.45rem}
+.system-workspace-tabs{display:flex;gap:.35rem;padding:.65rem 1.1rem;border-bottom:1px solid #303942;background:#11171b;overflow-x:auto}
+.system-workspace-tabs button{min-height:36px;padding:.5rem .8rem;border:1px solid transparent;border-radius:9px;background:transparent;color:#aeb8c0;font-weight:700;white-space:nowrap}
+.system-workspace-tabs button:hover,.system-workspace-tabs button:focus-visible{background:#232b31;color:#fff}
+.system-workspace-tabs button[aria-selected="true"]{border-color:#496454;background:#25382e;color:#c8f2d7}
+.system-workspace-body{flex:1;min-height:0;overflow:auto;padding:1rem 1.1rem 1.1rem;overscroll-behavior:contain}
+.system-workspace-state{margin:0 0 .75rem;color:#9ca7b0;font-size:.8rem}
+.system-workspace-state:empty{display:none}
+.system-workspace-content{max-width:none}
+.system-workspace-content>.panel:first-child,.system-workspace-content>.notice:first-child{margin-top:0}
+.system-workspace-content .settings-panel{max-width:none;margin:0 0 1rem}
+.system-security-grid{display:grid;gap:1rem}
+.system-about-variant{display:flex;justify-content:flex-end;margin-bottom:.65rem}
+@media(max-width:700px){.system-workspace-dialog{inset:52px .25rem .25rem .25rem!important;width:auto!important;height:auto!important;min-width:0;min-height:0;max-width:none;max-height:none;resize:none;border-radius:12px}.system-workspace-header{padding:.85rem .9rem .7rem;cursor:default;touch-action:auto}.system-workspace-tabs{padding:.55rem .9rem}.system-workspace-body{padding:.8rem .9rem}}
+@media(prefers-color-scheme:light){.system-workspace-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025}.system-workspace-header,.system-workspace-tabs{border-color:#d9dfe3}.system-workspace-tabs{background:#f7f9fa}.system-workspace-tabs button{color:#56636c}.system-workspace-tabs button:hover,.system-workspace-tabs button:focus-visible{background:#e9eef1;color:#1a2025}.system-workspace-tabs button[aria-selected="true"]{background:#e3f1e8;border-color:#86b99a;color:#184c31}}

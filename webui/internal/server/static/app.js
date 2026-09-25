@@ -2440,3 +2440,409 @@ if (minecraftOpen && minecraftDialog) {
 
   if (readWorkspaceWindowState("minecraft").open) workspaceWindow?.open();
 }
+
+
+const systemWorkspaceOpen = document.querySelector("[data-system-open]");
+const systemWorkspaceDialog = document.querySelector("[data-system-workspace-dialog]");
+if (systemWorkspaceOpen && systemWorkspaceDialog) {
+  const closeButton = systemWorkspaceDialog.querySelector("[data-system-close]");
+  const refreshButton = systemWorkspaceDialog.querySelector("[data-system-refresh]");
+  const state = systemWorkspaceDialog.querySelector("[data-system-state]");
+  const content = systemWorkspaceDialog.querySelector("[data-system-workspace-content]");
+  const tabs = Array.from(systemWorkspaceDialog.querySelectorAll("[data-system-tab]"));
+  const administratorTabs = new Set(["health", "users", "security"]);
+  let identity = null;
+  let currentTab = "health";
+  let initialized = false;
+  let loadSequence = 0;
+
+  const systemHandleAuth = (response) => {
+    if (response.redirected) {
+      const target = new URL(response.url);
+      if (target.pathname === "/login" || target.pathname === "/password") {
+        window.location.assign(target.pathname + target.search);
+        return true;
+      }
+    }
+    if (response.status === 401) {
+      window.location.assign("/login");
+      return true;
+    }
+    return false;
+  };
+
+  const systemFetchPage = async (url, options = {}) => {
+    const response = await fetch(url, {
+      method: options.method || "GET",
+      credentials: "same-origin",
+      headers: options.headers || { Accept: "text/html" },
+      body: options.body,
+      cache: "no-store",
+      redirect: "follow",
+    });
+    if (systemHandleAuth(response)) return null;
+    return response;
+  };
+
+  const systemNamespaceIDs = (root, prefix) => {
+    const replacements = new Map();
+    root.querySelectorAll("[id]").forEach((element) => {
+      const oldID = element.id;
+      const newID = prefix + oldID;
+      replacements.set(oldID, newID);
+      element.id = newID;
+    });
+    for (const attribute of ["for", "aria-controls", "aria-labelledby", "aria-describedby"]) {
+      root.querySelectorAll(`[${attribute}]`).forEach((element) => {
+        const tokens = String(element.getAttribute(attribute) || "").split(/\s+/).filter(Boolean);
+        element.setAttribute(attribute, tokens.map((token) => replacements.get(token) || token).join(" "));
+      });
+    }
+  };
+
+  const systemReplaceText = (root, replacements) => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach((node) => {
+      let value = node.nodeValue || "";
+      replacements.forEach(([before, after]) => {
+        value = value.split(before).join(after);
+      });
+      node.nodeValue = value;
+    });
+  };
+
+  const loadIdentity = async () => {
+    if (identity) return identity;
+    const response = await fetch("/api/session-info", {
+      method: "GET",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (systemHandleAuth(response)) return null;
+    if (!response.ok) throw new Error("Session information is unavailable.");
+    const result = await response.json();
+    const role = String(result.role || "").toLowerCase();
+    const username = String(result.username || "");
+    if (!username || !["administrator", "operator", "viewer"].includes(role)) {
+      throw new Error("Session role is unavailable.");
+    }
+    identity = { username, role };
+    document.body.classList.remove("role-pending");
+    document.body.classList.add(`role-${role}`);
+    return identity;
+  };
+
+  const syncSystemTabs = () => {
+    tabs.forEach((button) => {
+      button.setAttribute("aria-selected", button.dataset.systemTab === currentTab ? "true" : "false");
+    });
+  };
+
+  const parsePage = (markup) => new DOMParser().parseFromString(markup, "text/html");
+
+  const cloneNotices = (parsed, root) => {
+    parsed.querySelectorAll("main > .notice.success, main > .notice.error, main > .alert").forEach((notice) => {
+      root.appendChild(notice.cloneNode(true));
+    });
+  };
+
+  const renderHealthMarkup = (markup) => {
+    if (!content) return;
+    const parsed = parsePage(markup);
+    const root = document.createElement("div");
+    parsed.querySelectorAll("main > .notice, main > .panel, main > .action-row").forEach((node) => {
+      root.appendChild(node.cloneNode(true));
+    });
+    if (!root.children.length) throw new Error("System health result is unavailable.");
+    systemReplaceText(root, [
+      ["Validation service unavailable", "System health check unavailable"],
+      ["JustVoxel could not run validation right now. No validation result was produced.", "JustVoxel could not check system health right now. No result was produced."],
+      ["Validation passed", "System health check passed"],
+      ["The authoritative validation backend completed without detecting a problem.", "JustVoxel completed the health check without detecting a problem."],
+      ["Validation completed with detected problems", "System health check found problems"],
+      ["The authoritative validation backend reported one or more problems. Review the details below.", "JustVoxel reported one or more problems. Review the details below."],
+      ["Authoritative result", "System health"],
+      ["Validation details", "Health check details"],
+      ["The output below is shown as returned by the Management Agent. WebUI does not rerun or reinterpret these checks.", "Detailed result from the JustVoxel health checker."],
+      ["Run validation again", "Check again"],
+      ["Try again", "Check again"],
+    ]);
+    systemNamespaceIDs(root, "system-health-");
+    content.replaceChildren(root);
+  };
+
+  const loadHealth = async (sequence) => {
+    const response = await systemFetchPage("/settings/validation");
+    if (!response) return;
+    if (response.status === 403) throw new Error("Administrator access required.");
+    if (!response.ok) throw new Error("System health check is unavailable.");
+    const markup = await response.text();
+    if (sequence !== loadSequence) return;
+    renderHealthMarkup(markup);
+  };
+
+  const renderHistoryMarkup = (markup, administrator) => {
+    if (!content) return;
+    const parsed = parsePage(markup);
+    const root = document.createElement("div");
+    cloneNotices(parsed, root);
+    parsed.querySelectorAll("main > section.panel.details").forEach((section) => {
+      root.appendChild(section.cloneNode(true));
+    });
+    if (!root.children.length) throw new Error("System history is unavailable.");
+    if (administrator) {
+      systemReplaceText(root, [
+        ["Recent appliance actions", "Detailed history"],
+        ["Audit", "Administrator history"],
+      ]);
+    }
+    systemNamespaceIDs(root, "system-history-");
+    content.replaceChildren(root);
+  };
+
+  const loadHistory = async (sequence) => {
+    const user = await loadIdentity();
+    if (!user) return;
+    const url = user.role === "administrator" ? "/settings/activity" : "/activity";
+    const response = await systemFetchPage(url);
+    if (!response) return;
+    if (!response.ok) throw new Error("System history is unavailable.");
+    const markup = await response.text();
+    if (sequence !== loadSequence) return;
+    renderHistoryMarkup(markup, user.role === "administrator");
+  };
+
+  const renderUsersMarkup = (markup) => {
+    if (!content) return;
+    const parsed = parsePage(markup);
+    const root = document.createElement("div");
+    cloneNotices(parsed, root);
+    parsed.querySelectorAll("main > section.panel.details").forEach((section) => {
+      root.appendChild(section.cloneNode(true));
+    });
+    if (!root.children.length) throw new Error("Users are unavailable.");
+    systemNamespaceIDs(root, "system-users-");
+    content.replaceChildren(root);
+  };
+
+  const loadUsers = async (sequence) => {
+    const response = await systemFetchPage("/settings/users");
+    if (!response) return;
+    if (response.status === 403) throw new Error("Administrator access required.");
+    if (!response.ok) throw new Error("Users are unavailable.");
+    const markup = await response.text();
+    if (sequence !== loadSequence) return;
+    renderUsersMarkup(markup);
+  };
+
+  const securitySection = (markup, prefix, heading) => {
+    const parsed = parsePage(markup);
+    const source = parsed.querySelector("main .settings-panel");
+    if (!source) return null;
+    const section = source.cloneNode(true);
+    section.querySelectorAll(".foot").forEach((node) => node.remove());
+    const title = section.querySelector("h1");
+    if (title) title.textContent = heading;
+    systemNamespaceIDs(section, prefix);
+    return section;
+  };
+
+  const renderSecurityMarkup = (authenticationMarkup, passwordMarkup) => {
+    if (!content) return;
+    const root = document.createElement("div");
+    root.className = "system-security-grid";
+    const authentication = securitySection(authenticationMarkup, "system-security-auth-", "Authentication");
+    const password = securitySection(passwordMarkup, "system-security-password-", "Password");
+    if (authentication) root.appendChild(authentication);
+    if (password) root.appendChild(password);
+    if (!root.children.length) throw new Error("Security settings are unavailable.");
+    content.replaceChildren(root);
+  };
+
+  const fetchSecurityPages = async () => {
+    const [authenticationResponse, passwordResponse] = await Promise.all([
+      systemFetchPage("/settings/authentication"),
+      systemFetchPage("/password"),
+    ]);
+    if (!authenticationResponse || !passwordResponse) return null;
+    if (authenticationResponse.status === 403 || passwordResponse.status === 403) {
+      throw new Error("Administrator access required.");
+    }
+    if (!authenticationResponse.ok || !passwordResponse.ok) {
+      throw new Error("Security settings are unavailable.");
+    }
+    return {
+      authentication: await authenticationResponse.text(),
+      password: await passwordResponse.text(),
+    };
+  };
+
+  const loadSecurity = async (sequence) => {
+    const pages = await fetchSecurityPages();
+    if (!pages || sequence !== loadSequence) return;
+    renderSecurityMarkup(pages.authentication, pages.password);
+  };
+
+  const renderAboutMarkup = (markup) => {
+    if (!content) return;
+    const parsed = parsePage(markup);
+    const root = document.createElement("div");
+    const badge = parsed.querySelector("main.about-shell .title-row .badge");
+    if (badge) {
+      const heading = document.createElement("div");
+      heading.className = "system-about-variant";
+      heading.appendChild(badge.cloneNode(true));
+      root.appendChild(heading);
+    }
+    const panel = parsed.querySelector("main.about-shell .about-panel");
+    if (panel) root.appendChild(panel.cloneNode(true));
+    const disclaimer = parsed.querySelector("main.about-shell .disclaimer");
+    if (disclaimer) root.appendChild(disclaimer.cloneNode(true));
+    if (!root.children.length) throw new Error("About information is unavailable.");
+    systemNamespaceIDs(root, "system-about-");
+    content.replaceChildren(root);
+  };
+
+  const loadAbout = async (sequence) => {
+    const response = await systemFetchPage("/about");
+    if (!response) return;
+    if (!response.ok) throw new Error("About information is unavailable.");
+    const markup = await response.text();
+    if (sequence !== loadSequence) return;
+    renderAboutMarkup(markup);
+  };
+
+  const loadCurrentSystemTab = async () => {
+    const sequence = ++loadSequence;
+    if (state) state.textContent = "Loading…";
+    if (refreshButton) refreshButton.disabled = true;
+    if (content) content.replaceChildren();
+
+    try {
+      const user = await loadIdentity();
+      if (!user) return;
+      if (administratorTabs.has(currentTab) && user.role !== "administrator") {
+        currentTab = "history";
+        syncSystemTabs();
+      }
+      if (currentTab === "health") await loadHealth(sequence);
+      else if (currentTab === "history") await loadHistory(sequence);
+      else if (currentTab === "users") await loadUsers(sequence);
+      else if (currentTab === "security") await loadSecurity(sequence);
+      else await loadAbout(sequence);
+      if (sequence === loadSequence && state) state.textContent = "";
+    } catch (error) {
+      if (sequence !== loadSequence) return;
+      if (content) content.replaceChildren();
+      if (state) state.textContent = error?.message || "System workspace is unavailable.";
+    } finally {
+      if (sequence === loadSequence && refreshButton) refreshButton.disabled = false;
+    }
+  };
+
+  const selectSystemTab = async (tab) => {
+    const user = await loadIdentity();
+    if (!user) return;
+    if (administratorTabs.has(tab) && user.role !== "administrator") return;
+    currentTab = tab;
+    syncSystemTabs();
+    loadCurrentSystemTab();
+  };
+
+  const submitSystemForm = async (form, kind) => {
+    const action = new URL(form.getAttribute("action") || window.location.href, window.location.href);
+    const body = new URLSearchParams();
+    new FormData(form).forEach((value, key) => body.append(key, String(value)));
+    const submitter = form.querySelector('button[type="submit"],input[type="submit"]');
+    if (submitter) submitter.disabled = true;
+    if (state) state.textContent = "Working…";
+
+    try {
+      const response = await systemFetchPage(action.pathname + action.search, {
+        method: (form.method || "POST").toUpperCase(),
+        headers: {
+          Accept: "text/html",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: body.toString(),
+      });
+      if (!response) return;
+      const markup = await response.text();
+
+      if (kind === "history") {
+        renderHistoryMarkup(markup, true);
+      } else if (kind === "users") {
+        renderUsersMarkup(markup);
+      } else if (kind === "security-auth") {
+        const passwordResponse = await systemFetchPage("/password");
+        if (!passwordResponse) return;
+        renderSecurityMarkup(markup, await passwordResponse.text());
+      } else if (kind === "security-password") {
+        const authenticationResponse = await systemFetchPage("/settings/authentication");
+        if (!authenticationResponse) return;
+        renderSecurityMarkup(await authenticationResponse.text(), markup);
+      }
+      if (state) state.textContent = response.ok ? "" : "The request was rejected. Review the message below.";
+    } catch (error) {
+      if (state) state.textContent = error?.message || "System operation could not be completed.";
+    } finally {
+      if (submitter && submitter.isConnected) submitter.disabled = false;
+    }
+  };
+
+  content?.addEventListener("submit", async (event) => {
+    const form = event.target.closest("form");
+    if (!form || !content.contains(form)) return;
+    const action = new URL(form.getAttribute("action") || window.location.href, window.location.href);
+
+    let kind = "";
+    if (action.pathname.startsWith("/settings/activity/notifications/")) kind = "history";
+    else if (action.pathname.startsWith("/settings/users/")) kind = "users";
+    else if (action.pathname === "/settings/authentication") kind = "security-auth";
+    else if (action.pathname === "/password") kind = "security-password";
+    if (!kind) return;
+
+    event.preventDefault();
+    await submitSystemForm(form, kind);
+  });
+
+  content?.addEventListener("click", (event) => {
+    const link = event.target.closest("a");
+    if (!link || !content.contains(link)) return;
+    const href = link.getAttribute("href") || "";
+    if (href === "/settings/validation" || href.startsWith("/settings/validation?")) {
+      event.preventDefault();
+      selectSystemTab("health");
+    }
+  });
+
+  const workspaceWindow = setupWorkspaceWindow(systemWorkspaceDialog, {
+    onOpen: async () => {
+      try {
+        const user = await loadIdentity();
+        if (!user) return;
+        if (!initialized) {
+          initialized = true;
+          currentTab = user.role === "administrator" ? "health" : "history";
+          syncSystemTabs();
+        }
+        loadCurrentSystemTab();
+      } catch (error) {
+        if (state) state.textContent = error?.message || "System workspace is unavailable.";
+      }
+    },
+  });
+
+  systemWorkspaceOpen.addEventListener("click", () => {
+    if (controlCenter) controlCenter.open = false;
+    workspaceWindow?.open();
+  });
+  closeButton?.addEventListener("click", () => workspaceWindow?.close());
+  refreshButton?.addEventListener("click", loadCurrentSystemTab);
+  tabs.forEach((button) => button.addEventListener("click", () => selectSystemTab(button.dataset.systemTab)));
+
+  if (readWorkspaceWindowState("system").open) workspaceWindow?.open();
+}

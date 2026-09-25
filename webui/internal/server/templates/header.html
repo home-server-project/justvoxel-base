@@ -61,6 +61,7 @@
           <span class="control-section-label">Temporary</span>
           <div class="control-tile-grid">
             <button class="control-tile" type="button" data-minecraft-open title="Minecraft overview, settings, whitelist and logs"><strong>Minecraft</strong></button>
+            <button class="control-tile" type="button" data-system-open title="System health, history, users, security and version information"><strong>System</strong></button>
             <button class="control-tile" type="button" data-system-monitor-open title="Live CPU, memory, storage, network, processes and containers"><strong>System Monitor</strong></button>
             <button class="control-tile nav-admin-only" type="button" data-storage-open title="Disks, partitions, mounts and external USB storage"><strong>Storage</strong></button>
             <button class="control-tile nav-admin-only" type="button" data-backups-open title="Create, schedule, restore and manage backups"><strong>Backups</strong></button>
@@ -145,6 +146,32 @@
   <input type="hidden" value="{{.CSRF}}" data-system-update-csrf>
   <input type="hidden" value="{{.CSRF}}" data-system-monitor-csrf>
 
+
+  <dialog class="workspace-window system-workspace-dialog" data-workspace-window="system" data-system-workspace-dialog aria-labelledby="system-workspace-title">
+    <div class="system-workspace-shell">
+      <div class="system-workspace-header" data-workspace-drag-handle>
+        <div>
+          <p class="eyebrow">JustVoxel</p>
+          <h2 id="system-workspace-title">System</h2>
+        </div>
+        <div class="system-workspace-header-actions">
+          <button class="system-monitor-header-button" type="button" data-system-refresh aria-label="Refresh System" title="Refresh System">↻</button>
+          <button class="system-monitor-header-button" type="button" data-system-close aria-label="Close System">&times;</button>
+        </div>
+      </div>
+      <nav class="system-workspace-tabs" aria-label="System workspace">
+        <button class="nav-admin-only" type="button" data-system-tab="health" aria-selected="true">Health</button>
+        <button type="button" data-system-tab="history" aria-selected="false">History</button>
+        <button class="nav-admin-only" type="button" data-system-tab="users" aria-selected="false">Users</button>
+        <button class="nav-admin-only" type="button" data-system-tab="security" aria-selected="false">Security</button>
+        <button type="button" data-system-tab="about" aria-selected="false">About</button>
+      </nav>
+      <div class="system-workspace-body">
+        <p class="system-workspace-state" data-system-state>Choose a section.</p>
+        <div class="system-workspace-content" data-system-workspace-content></div>
+      </div>
+    </div>
+  </dialog>
 
   <dialog class="workspace-window minecraft-workspace-dialog" data-workspace-window="minecraft" data-minecraft-workspace-dialog aria-labelledby="minecraft-workspace-title">
     <div class="minecraft-workspace-shell">

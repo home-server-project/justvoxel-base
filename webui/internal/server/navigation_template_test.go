@@ -54,7 +54,7 @@ func TestControlCenterNavigationUX(t *testing.T) {
 	if temporary < 0 || minecraft < 0 || temporary > minecraft {
 		t.Fatal("Temporary Control Center section must appear before Minecraft")
 	}
-	for _, item := range []string{"data-minecraft-open", "data-system-monitor-open", "data-storage-open", "data-backups-open", "data-system-update-open"} {
+	for _, item := range []string{"data-minecraft-open", "data-system-open", "data-system-monitor-open", "data-storage-open", "data-backups-open", "data-system-update-open"} {
 		if strings.Count(markup, item) != 1 {
 			t.Fatalf("temporary workspace item %q must appear exactly once", item)
 		}
@@ -155,6 +155,60 @@ func TestMinecraftWorkspaceMigrationContract(t *testing.T) {
 	} {
 		if !strings.Contains(behavior, want) {
 			t.Fatalf("Minecraft workspace behavior missing %q", want)
+		}
+	}
+}
+
+func TestSystemWorkspaceMigrationContract(t *testing.T) {
+	header, err := assets.ReadFile("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(header)
+
+	temporary := strings.Index(markup, `<span class="control-section-label">Temporary</span>`)
+	minecraftSection := strings.Index(markup, `<span class="control-section-label">Minecraft</span>`)
+	systemTile := strings.Index(markup, `data-system-open`)
+	if temporary < 0 || minecraftSection < 0 || systemTile < temporary || systemTile > minecraftSection {
+		t.Fatal("new System workspace tile must live only in the Temporary section")
+	}
+
+	for _, want := range []string{
+		`data-workspace-window="system"`,
+		`data-system-tab="health"`,
+		`data-system-tab="history"`,
+		`data-system-tab="users"`,
+		`data-system-tab="security"`,
+		`data-system-tab="about"`,
+		`href="/settings/validation"`,
+		`href="/settings/activity"`,
+		`href="/settings/users"`,
+		`href="/settings/authentication"`,
+		`href="/password"`,
+		`href="/about"`,
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("System workspace migration contract missing %q", want)
+		}
+	}
+
+	script, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	behavior := string(script)
+	for _, want := range []string{
+		`document.querySelector("[data-system-open]")`,
+		`systemFetchPage("/settings/validation")`,
+		`user.role === "administrator" ? "/settings/activity" : "/activity"`,
+		`systemFetchPage("/settings/users")`,
+		`systemFetchPage("/settings/authentication")`,
+		`systemFetchPage("/password")`,
+		`systemFetchPage("/about")`,
+		`["Validation passed", "System health check passed"]`,
+	} {
+		if !strings.Contains(behavior, want) {
+			t.Fatalf("System workspace behavior missing %q", want)
 		}
 	}
 }
