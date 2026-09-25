@@ -88,6 +88,96 @@ func TestSnapshotUsesDirectNetworkManagerDBus(t *testing.T) {
 	}
 }
 
+func TestCheckpointLifecycleUsesNetworkManagerDBus(t *testing.T) {
+	var createdDevices []dbus.ObjectPath
+	var createdTimeout uint32
+	var createdFlags uint32
+	var destroyed dbus.ObjectPath
+	var rolledBack dbus.ObjectPath
+
+	client := &Client{call: func(_ context.Context, path dbus.ObjectPath, method string, args ...any) *dbus.Call {
+		switch method {
+		case managerInterface + ".GetDeviceByIpIface":
+			interfaceName, _ := args[0].(string)
+			return dbusCall(dbus.ObjectPath("/org/freedesktop/NetworkManager/Devices/" + interfaceName))
+		case managerInterface + ".CheckpointCreate":
+			createdDevices, _ = args[0].([]dbus.ObjectPath)
+			createdTimeout, _ = args[1].(uint32)
+			createdFlags, _ = args[2].(uint32)
+			return dbusCall(dbus.ObjectPath("/org/freedesktop/NetworkManager/Checkpoint/1"))
+		case managerInterface + ".CheckpointDestroy":
+			destroyed, _ = args[0].(dbus.ObjectPath)
+			return dbusCall()
+		case managerInterface + ".CheckpointRollback":
+			rolledBack, _ = args[0].(dbus.ObjectPath)
+			return dbusCall(map[string]uint32{
+				"/org/freedesktop/NetworkManager/Devices/enp1s0": 0,
+			})
+		default:
+			return &dbus.Call{Err: os.ErrInvalid}
+		}
+	}}
+
+	checkpoint, err := client.CreateCheckpoint(context.Background(), []string{"enp1s0"}, 90)
+	if err != nil {
+		t.Fatalf("CreateCheckpoint() error = %v", err)
+	}
+	if checkpoint.Handle != "/org/freedesktop/NetworkManager/Checkpoint/1" || checkpoint.RollbackTimeoutSeconds != 90 {
+		t.Fatalf("unexpected checkpoint: %+v", checkpoint)
+	}
+	if len(createdDevices) != 1 || string(createdDevices[0]) != "/org/freedesktop/NetworkManager/Devices/enp1s0" {
+		t.Fatalf("unexpected checkpoint devices: %+v", createdDevices)
+	}
+	if createdTimeout != 90 || createdFlags != 0 {
+		t.Fatalf("CheckpointCreate args timeout=%d flags=%d", createdTimeout, createdFlags)
+	}
+
+	results, err := client.RollbackCheckpoint(context.Background(), checkpoint)
+	if err != nil {
+		t.Fatalf("RollbackCheckpoint() error = %v", err)
+	}
+	if results["enp1s0"] != RollbackResultOK {
+		t.Fatalf("unexpected rollback results: %+v", results)
+	}
+	if rolledBack != dbus.ObjectPath(checkpoint.Handle) {
+		t.Fatalf("rollback used %q, want %q", rolledBack, checkpoint.Handle)
+	}
+
+	if err := client.DestroyCheckpoint(context.Background(), checkpoint); err != nil {
+		t.Fatalf("DestroyCheckpoint() error = %v", err)
+	}
+	if destroyed != dbus.ObjectPath(checkpoint.Handle) {
+		t.Fatalf("destroy used %q, want %q", destroyed, checkpoint.Handle)
+	}
+}
+
+func TestCreateCheckpointRequiresExplicitInterfacesAndTimeout(t *testing.T) {
+	client := &Client{call: func(_ context.Context, _ dbus.ObjectPath, _ string, _ ...any) *dbus.Call {
+		return &dbus.Call{Err: os.ErrInvalid}
+	}}
+	if _, err := client.CreateCheckpoint(context.Background(), nil, 90); err == nil {
+		t.Fatal("CreateCheckpoint() accepted all-device checkpoint")
+	}
+	if _, err := client.CreateCheckpoint(context.Background(), []string{"enp1s0"}, 0); err == nil {
+		t.Fatal("CreateCheckpoint() accepted infinite rollback timeout")
+	}
+}
+
+func TestRollbackResultName(t *testing.T) {
+	tests := map[uint32]RollbackResult{
+		0:   RollbackResultOK,
+		1:   RollbackResultNoDevice,
+		2:   RollbackResultDeviceUnmanaged,
+		3:   RollbackResultFailed,
+		999: RollbackResultUnknown,
+	}
+	for value, want := range tests {
+		if got := rollbackResultName(value); got != want {
+			t.Fatalf("rollbackResultName(%d) = %q, want %q", value, got, want)
+		}
+	}
+}
+
 func TestManagementModuleHasNoNMHSPDependency(t *testing.T) {
 	_, currentFile, _, ok := runtime.Caller(0)
 	if !ok {
