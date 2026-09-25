@@ -102,7 +102,7 @@ func TestStorageMinecraftMigrationApplyReplansAndReturnsPersistentOperation(t *t
 	operation := &api.PersistentOperation{
 		SchemaVersion: "v1", OperationID: storageMigrationOperationID, OperationType: "data_migration",
 		PlanFingerprint: storageMigrationFingerprint, State: "queued", Stage: "queued",
-		Status: "Minecraft data migration operation queued.",
+		Status:   "Minecraft data migration operation queued.",
 		Rollback: api.PersistentOperationRollback{State: "not_started"},
 	}
 	client := &fakeStorageMinecraftMigrationAPI{
