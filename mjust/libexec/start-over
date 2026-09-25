@@ -1,6 +1,7 @@
 #!/usr/bin/bash
 set -euo pipefail
 source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/minecraft-reset-common.sh
 source /usr/libexec/justvoxel/mjust/ui.sh
 require_root
 require_config
@@ -126,23 +127,11 @@ if [[ ${save_config} == yes ]]; then
     mv -f -- "${partial}" "${config_backup}"
 fi
 
-systemctl disable --now minecraft-backup.timer >/dev/null 2>&1 || true
-
 if [[ ${container_action} == remove ]] && podman container exists minecraft 2>/dev/null; then
     podman rm minecraft >/dev/null
 fi
 
-firewall-cmd --permanent --remove-port="${java_port}/tcp" >/dev/null 2>&1 || true
-if [[ ${bedrock_enabled} == yes ]]; then
-    firewall-cmd --permanent --remove-port="${bedrock_port}/udp" >/dev/null 2>&1 || true
-fi
-firewall-cmd --reload >/dev/null 2>&1 || true
-
-rm -f -- "${JV_QUADLET}" "${JV_BACKUP_SERVICE}" "${JV_BACKUP_TIMER}"
-rm -rf -- "${JV_CONFIG_DIR}"
-rm -f -- "${JV_PREVIOUS_IMAGE_STATE}"
-systemctl daemon-reload
-systemctl reset-failed minecraft.service minecraft-backup.service minecraft-backup.timer >/dev/null 2>&1 || true
+jv_reset_remove_active_configuration "${java_port}" "${bedrock_enabled}" "${bedrock_port}"
 
 echo
 echo 'JustVoxel Minecraft configuration has been removed.'
