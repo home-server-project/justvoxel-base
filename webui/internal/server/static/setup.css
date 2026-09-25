@@ -41,3 +41,26 @@
 @media(prefers-color-scheme:light){
   .setup-step-actions{background:#fffffff2;border-color:#d9dfe3;box-shadow:0 10px 28px #0002}
 }
+
+
+/* Recommended-vs-Advanced first-run entry. */
+.setup-entry{max-width:980px}
+.setup-mode-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,.75fr);gap:.9rem;margin-top:1rem}
+.setup-mode-card{display:flex;min-width:0;flex-direction:column;padding:1.1rem;border:1px solid #303942;border-radius:14px;background:#10161a}
+.setup-mode-card h2{margin:.15rem 0 .4rem}
+.setup-mode-card p{margin:0 0 .9rem;color:#9ca7b0;line-height:1.45}
+.setup-mode-card form{margin-top:auto}
+.setup-mode-kicker{color:#89959e;font-size:.68rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase}
+.setup-mode-recommended{border-color:#4f8b69;background:linear-gradient(145deg,#17271e,#101b15)}
+.setup-mode-recommended .setup-mode-kicker{color:#9be0b7}
+.setup-server-types{display:grid;gap:.55rem;margin:0 0 .85rem;padding:0;border:0}
+.setup-server-types legend{margin-bottom:.5rem;color:#c8d0d6;font-size:.82rem;font-weight:800}
+.setup-server-type{display:flex;align-items:flex-start;gap:.65rem;margin:0;padding:.7rem;border:1px solid #303942;border-radius:10px;background:#13191e;cursor:pointer}
+.setup-server-type input{width:auto;margin:.18rem 0 0}
+.setup-server-type span{display:grid;gap:.14rem}
+.setup-server-type small{color:#89959e;line-height:1.35}
+.setup-server-type.is-available:has(input:checked){border-color:#4f8b69;background:#25382e}
+.setup-server-type.is-placeholder{opacity:.55;cursor:not-allowed}
+.setup-recommended-form>button,.setup-mode-advanced form>button{width:100%;margin-top:.15rem}
+@media(max-width:760px){.setup-mode-grid{grid-template-columns:1fr}.setup-mode-card{padding:.9rem}}
+@media(prefers-color-scheme:light){.setup-mode-card{background:#fff;border-color:#d9dfe3}.setup-mode-card p,.setup-server-type small{color:#66727c}.setup-mode-recommended{background:linear-gradient(145deg,#edf8f1,#f7fbf8);border-color:#86b99a}.setup-mode-recommended .setup-mode-kicker{color:#2f7049}.setup-server-type{background:#f7f9fa;border-color:#d9dfe3}.setup-server-type.is-available:has(input:checked){background:#e3f1e8;border-color:#86b99a}.setup-server-types legend{color:#34414a}}
