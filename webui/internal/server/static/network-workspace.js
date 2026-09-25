@@ -21,6 +21,7 @@
   let loadSequence = 0;
   let currentSnapshot = null;
   let currentNetworks = new Map();
+  let currentCheckpoint = null;
   let connectionDraft = null;
   let checkpointTimer = null;
   let recoveryTimer = null;
@@ -278,6 +279,7 @@
       : "Rollback timeout reached. Checking network state…";
     if (seconds === 0) {
       clearStoredCheckpoint();
+      currentCheckpoint = null;
       if (checkpointTimer) window.clearInterval(checkpointTimer);
       checkpointTimer = null;
       scheduleRecovery();
@@ -593,11 +595,12 @@
     return panel;
   };
 
-  const renderNetwork = (checkpoint = null) => {
+  const renderNetwork = (checkpoint = currentCheckpoint) => {
     if (!currentSnapshot) return;
+    currentCheckpoint = checkpoint || null;
     const root = document.createElement("div");
     root.className = "network-workspace-view";
-    if (checkpoint) root.appendChild(renderCheckpoint(checkpoint));
+    if (currentCheckpoint) root.appendChild(renderCheckpoint(currentCheckpoint));
     root.appendChild(renderOverview(currentSnapshot));
 
     const devices = document.createElement("section");
@@ -623,7 +626,7 @@
     if (connectPanel) root.appendChild(connectPanel);
 
     content.replaceChildren(root);
-    if (checkpoint) startCheckpointCountdown();
+    if (currentCheckpoint) startCheckpointCountdown();
   };
 
   const resumeCheckpoint = async () => {
@@ -661,7 +664,8 @@
         currentNetworks.set(device.interface, networks);
       }
 
-      renderNetwork(checkpoint);
+      currentCheckpoint = checkpoint;
+      renderNetwork();
       state.textContent = "";
     } catch (error) {
       if (sequence !== loadSequence) return;
@@ -798,6 +802,7 @@
     try {
       await postForm("/api/network/checkpoints/" + escapePath(id) + "/confirm");
       clearStoredCheckpoint();
+      currentCheckpoint = null;
       await loadNetwork();
     } catch (error) {
       state.textContent = error?.message || "Network settings could not be confirmed.";
@@ -811,6 +816,7 @@
     try {
       await rollbackStoredCheckpoint(id);
       clearStoredCheckpoint();
+      currentCheckpoint = null;
       connectionDraft = null;
       scheduleRecovery();
     } catch (error) {
@@ -860,10 +866,7 @@
         security: join.dataset.security || "",
         hidden: false,
       };
-      renderNetwork(content.querySelector("[data-network-checkpoint-banner]") ? {
-        id: content.querySelector("[data-network-checkpoint-banner]").dataset.networkCheckpointBanner,
-        expires_at: content.querySelector("[data-network-checkpoint-countdown]")?.dataset.networkCheckpointCountdown || "",
-      } : null);
+      renderNetwork();
       content.querySelector("[data-network-connect-panel]")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
       return;
     }
