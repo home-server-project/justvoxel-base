@@ -145,10 +145,13 @@ func (c *Client) WiFiNetworks(ctx context.Context, interfaceName string) ([]WiFi
 	if err != nil {
 		return nil, err
 	}
-	known := make(map[string]bool)
+	known := make(map[string]string)
 	for _, profile := range profiles {
 		if profile.Type == "802-11-wireless" && profile.SSID != "" {
-			known[profile.SSID+"\x00"+profile.KeyManagement] = true
+			key := profile.SSID + "\x00" + profile.KeyManagement
+			if _, exists := known[key]; !exists {
+				known[key] = profile.UUID
+			}
 		}
 	}
 
@@ -171,10 +174,11 @@ func (c *Client) WiFiNetworks(ctx context.Context, interfaceName string) ([]WiFi
 			FrequencyMHz:   uint32Value(props, "Frequency"),
 			MaxBitrateKbps: uint32Value(props, "MaxBitrate"),
 			Security:       security,
-			KeyManagement:  keyManagement,
-			Hidden:         ssid == "",
-			Known:          known[ssid+"\x00"+keyManagement],
-			Active:         validObjectPath(activeAP) && accessPoint == activeAP,
+			KeyManagement: keyManagement,
+			ProfileUUID:   known[ssid+"\x00"+keyManagement],
+			Hidden:        ssid == "",
+			Known:         known[ssid+"\x00"+keyManagement] != "",
+			Active:        validObjectPath(activeAP) && accessPoint == activeAP,
 		}
 		key := ssid + "\x00" + string(security)
 		if ssid == "" {
