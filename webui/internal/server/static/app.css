@@ -518,6 +518,13 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 @media(max-width:700px){.minecraft-native-grid{grid-template-columns:1fr}.minecraft-native-change-row{display:block}.minecraft-native-change-row>div:last-child{margin-top:.45rem;justify-content:flex-start;text-align:left;flex-wrap:wrap}.minecraft-native-presets button{flex:1 1 42%}}
 @media(prefers-color-scheme:light){.minecraft-native-help{color:#66727c}.minecraft-native-presets button.is-selected{background:#e3f1e8;border-color:#86b99a;color:#184c31}.minecraft-native-memory-status{background:#eef7f1;border-color:#a7ccb5}.minecraft-native-memory-status.warning{background:#fff7e8;border-color:#d7b16e}.minecraft-native-memory-status.danger{background:#fff0f0;border-color:#d58a8a}.minecraft-native-change-row{border-color:#e2e7ea}}
 
+.system-workspace-content .admin-form-grid{margin-top:.4rem}
+.system-workspace-content .user-actions-grid>button{width:100%;align-self:end}
+.system-workspace-content .system-security-pane{padding:.2rem 0}
+.system-workspace-content .system-security-pane button[type="submit"]{justify-self:end}
+.system-workspace-content .event-row>button{flex:0 0 auto}
+.system-workspace-content .about-panel{margin-top:0}
+
 /* System workspace window. Legacy System pages remain available during migration. */
 .system-workspace-dialog{width:min(980px,calc(100vw - 1rem));height:min(760px,calc(100dvh - 1rem));min-width:min(580px,calc(100vw - 1rem));min-height:420px;max-width:calc(100vw - 1rem);max-height:calc(100dvh - 1rem);padding:0;overflow:hidden;resize:both;border:1px solid #3b454e;border-radius:16px;background:#171d22;color:#eef1f4;box-shadow:0 28px 80px #000b}
 .system-workspace-shell{display:flex;flex-direction:column;height:100%;min-height:0}

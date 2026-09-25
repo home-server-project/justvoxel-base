@@ -3031,6 +3031,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   const administratorTabs = new Set(["health", "users", "security"]);
   const upsTabButton = systemWorkspaceDialog.querySelector("[data-system-ups-tab]");
   const upsCSRF = document.querySelector("[data-system-ups-csrf]");
+  const systemWorkspaceCSRF = document.querySelector("[data-system-workspace-csrf]")?.value || "";
   let identity = null;
   let upsAvailable = false;
   let securityPane = "authentication";
@@ -3123,154 +3124,401 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     });
   };
 
-  const parsePage = (markup) => new DOMParser().parseFromString(markup, "text/html");
-
-  const cloneNotices = (parsed, root) => {
-    parsed.querySelectorAll("main > .notice.success, main > .notice.error, main > .alert").forEach((notice) => {
-      root.appendChild(notice.cloneNode(true));
+  const systemFetchJSON = async (url, options = {}) => {
+    const response = await fetch(url, {
+      credentials: "same-origin",
+      cache: "no-store",
+      ...options,
+      headers: {
+        Accept: "application/json",
+        ...(options.headers || {}),
+      },
     });
+    if (response.status === 401) {
+      window.location.assign("/login");
+      return null;
+    }
+    let payload = {};
+    try {
+      payload = await response.json();
+    } catch (_) {
+      payload = {};
+    }
+    if (response.status === 403 && String(payload.error || "").toLowerCase().includes("password change")) {
+      window.location.assign("/password");
+      return null;
+    }
+    if (!response.ok) {
+      throw new Error(payload.error || "System operation could not be completed.");
+    }
+    return payload;
   };
 
-  const renderHealthMarkup = (markup) => {
-    if (!content) return;
-    const parsed = parsePage(markup);
+  const systemNotice = (message, kind = "success") => {
+    const node = document.createElement("div");
+    node.className = "notice " + kind;
+    node.textContent = message;
+    return node;
+  };
+
+  const systemPanel = (eyebrowText, titleText) => {
+    const panel = document.createElement("section");
+    panel.className = "panel details";
+    const heading = document.createElement("div");
+    heading.className = "section-heading";
+    const wrap = document.createElement("div");
+    const eyebrow = document.createElement("p");
+    eyebrow.className = "eyebrow";
+    eyebrow.textContent = eyebrowText;
+    const title = document.createElement("h2");
+    title.textContent = titleText;
+    wrap.append(eyebrow, title);
+    heading.appendChild(wrap);
+    panel.appendChild(heading);
+    return { panel, heading };
+  };
+
+  const renderHealth = async (sequence) => {
+    const payload = await systemFetchJSON("/api/system/workspace/health");
+    if (!payload || sequence !== loadSequence || !content) return;
     const root = document.createElement("div");
     root.className = "system-health-view";
-    parsed.querySelectorAll("main > .notice, main > .panel, main > .action-row").forEach((node) => {
-      root.appendChild(node.cloneNode(true));
-    });
-    if (!root.children.length) throw new Error("System health result is unavailable.");
-    systemReplaceText(root, [
-      ["Validation service unavailable", "System health check unavailable"],
-      ["JustVoxel could not run validation right now. No validation result was produced.", "JustVoxel could not check system health right now. No result was produced."],
-      ["Validation passed", "System health check passed"],
-      ["The authoritative validation backend completed without detecting a problem.", "JustVoxel completed the health check without detecting a problem."],
-      ["Validation completed with detected problems", "System health check found problems"],
-      ["The authoritative validation backend reported one or more problems. Review the details below.", "JustVoxel reported one or more problems. Review the details below."],
-      ["Authoritative result", "System health"],
-      ["Validation details", "Health check details"],
-      ["The output below is shown as returned by the Management Agent. WebUI does not rerun or reinterpret these checks.", "Detailed result from the JustVoxel health checker."],
-      ["Run validation again", "Check again"],
-      ["Try again", "Check again"],
-    ]);
-    systemNamespaceIDs(root, "system-health-");
+    const result = payload.result || {};
+    root.appendChild(systemNotice(
+      result.ok ? "System health check passed." : "System health check found problems.",
+      result.ok ? "success" : "error"
+    ));
+    const built = systemPanel("System health", "Health check details");
+    const pre = document.createElement("pre");
+    pre.className = "log-box";
+    pre.textContent = result.output || "No detailed health output was returned.";
+    built.panel.appendChild(pre);
+    root.appendChild(built.panel);
     content.replaceChildren(root);
   };
 
-  const loadHealth = async (sequence) => {
-    const response = await systemFetchPage("/settings/validation");
-    if (!response) return;
-    if (response.status === 403) throw new Error("Administrator access required.");
-    if (!response.ok) throw new Error("System health check is unavailable.");
-    const markup = await response.text();
-    if (sequence !== loadSequence) return;
-    renderHealthMarkup(markup);
-  };
-
-  const renderHistoryMarkup = (markup, administrator) => {
-    if (!content) return;
-    const parsed = parsePage(markup);
+  const renderHistory = async (sequence, message = "") => {
+    const payload = await systemFetchJSON("/api/system/workspace/history");
+    if (!payload || sequence !== loadSequence || !content) return;
     const root = document.createElement("div");
-    cloneNotices(parsed, root);
-    parsed.querySelectorAll("main > section.panel.details").forEach((section) => {
-      root.appendChild(section.cloneNode(true));
-    });
-    if (!root.children.length) throw new Error("System history is unavailable.");
-    if (administrator) {
-      systemReplaceText(root, [
-        ["Recent appliance actions", "Detailed history"],
-        ["Audit", "Administrator history"],
-      ]);
+    if (message) root.appendChild(systemNotice(message));
+
+    if (payload.role === "administrator") {
+      const notificationsPanel = systemPanel("Action required", "Open notifications").panel;
+      const notifications = Array.isArray(payload.notifications) ? payload.notifications : [];
+      if (!notifications.length) {
+        const empty = document.createElement("p");
+        empty.className = "muted";
+        empty.textContent = "Nothing currently requires Administrator action.";
+        notificationsPanel.appendChild(empty);
+      } else {
+        notifications.forEach((item) => {
+          const row = document.createElement("div");
+          row.className = "event-row";
+          const info = document.createElement("div");
+          const title = document.createElement("strong");
+          title.textContent = item.title || "Notification";
+          const messageNode = document.createElement("span");
+          messageNode.textContent = item.message || "";
+          const date = document.createElement("span");
+          date.textContent = item.created_at || "";
+          info.append(title, messageNode, date);
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "secondary";
+          button.textContent = "Resolve";
+          button.addEventListener("click", async () => {
+            button.disabled = true;
+            try {
+              const body = new URLSearchParams({ csrf: systemWorkspaceCSRF });
+              const result = await systemFetchJSON("/api/system/workspace/history/notifications/" + item.id + "/resolve", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: body.toString(),
+              });
+              if (result) await renderHistory(++loadSequence, result.message || "Notification resolved.");
+            } catch (error) {
+              if (state) state.textContent = error?.message || "Notification could not be resolved.";
+              button.disabled = false;
+            }
+          });
+          row.append(info, button);
+          notificationsPanel.appendChild(row);
+        });
+      }
+      root.appendChild(notificationsPanel);
+
+      const auditPanel = systemPanel("Administrator history", "Detailed history").panel;
+      const events = Array.isArray(payload.audit) ? payload.audit : [];
+      if (!events.length) {
+        const empty = document.createElement("p");
+        empty.className = "muted";
+        empty.textContent = "No audit events yet.";
+        auditPanel.appendChild(empty);
+      } else {
+        const list = document.createElement("div");
+        list.className = "event-list";
+        events.forEach((event) => {
+          const row = document.createElement("div");
+          row.className = "event-row";
+          const info = document.createElement("div");
+          const action = document.createElement("strong");
+          action.textContent = event.action || "Action";
+          const meta = document.createElement("span");
+          meta.textContent = [event.occurred_at, event.actor_username, event.actor_role].filter(Boolean).join(" · ");
+          info.append(action, meta);
+          if (event.target) {
+            const target = document.createElement("span");
+            target.textContent = "Target: " + event.target;
+            info.appendChild(target);
+          }
+          if (event.context) {
+            const context = document.createElement("span");
+            context.textContent = event.context;
+            info.appendChild(context);
+          }
+          const badge = document.createElement("span");
+          badge.className = "badge";
+          badge.textContent = event.success ? "Success" : "Failed";
+          row.append(info, badge);
+          list.appendChild(row);
+        });
+        auditPanel.appendChild(list);
+      }
+      root.appendChild(auditPanel);
+    } else {
+      const activityPanel = systemPanel("Activity", "Recent appliance actions").panel;
+      const events = Array.isArray(payload.events) ? payload.events : [];
+      if (!events.length) {
+        const empty = document.createElement("p");
+        empty.className = "muted";
+        empty.textContent = "No recorded activity yet.";
+        activityPanel.appendChild(empty);
+      } else {
+        const list = document.createElement("div");
+        list.className = "event-list";
+        events.forEach((event) => {
+          const row = document.createElement("div");
+          row.className = "event-row";
+          const info = document.createElement("div");
+          const action = document.createElement("strong");
+          action.textContent = event.action || "Action";
+          const date = document.createElement("span");
+          date.textContent = event.occurred_at || "";
+          info.append(action, date);
+          const badge = document.createElement("span");
+          badge.className = "badge";
+          badge.textContent = event.success ? "Success" : "Failed";
+          row.append(info, badge);
+          list.appendChild(row);
+        });
+        activityPanel.appendChild(list);
+      }
+      root.appendChild(activityPanel);
     }
-    systemNamespaceIDs(root, "system-history-");
+
     content.replaceChildren(root);
   };
 
-  const loadHistory = async (sequence) => {
-    const user = await loadIdentity();
-    if (!user) return;
-    const url = user.role === "administrator" ? "/settings/activity" : "/activity";
-    const response = await systemFetchPage(url);
-    if (!response) return;
-    if (!response.ok) throw new Error("System history is unavailable.");
-    const markup = await response.text();
-    if (sequence !== loadSequence) return;
-    renderHistoryMarkup(markup, user.role === "administrator");
+  const systemPostForm = async (url, fields = {}) => {
+    const body = new URLSearchParams({ csrf: systemWorkspaceCSRF });
+    Object.entries(fields).forEach(([key, value]) => body.set(key, String(value ?? "")));
+    return systemFetchJSON(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    });
   };
 
-  const renderUsersMarkup = (markup) => {
-    if (!content) return;
-    const parsed = parsePage(markup);
+  const renderUsers = async (sequence, message = "") => {
+    const payload = await systemFetchJSON("/api/system/workspace/users");
+    if (!payload || sequence !== loadSequence || !content) return;
     const root = document.createElement("div");
-    cloneNotices(parsed, root);
-    parsed.querySelectorAll("main > section.panel.details").forEach((section) => {
-      root.appendChild(section.cloneNode(true));
+    if (message) root.appendChild(systemNotice(message));
+
+    const primary = systemPanel("Primary administrator", payload.primary_administrator || "voxel").panel;
+    const primaryText = document.createElement("p");
+    primaryText.className = "muted compact";
+    primaryText.textContent = "Permanent system administrator. This account cannot be deleted, disabled, or demoted here.";
+    primary.appendChild(primaryText);
+    root.appendChild(primary);
+
+    const create = systemPanel("New WebUI account", "Create user").panel;
+    const createForm = document.createElement("form");
+    createForm.className = "admin-form-grid";
+    createForm.innerHTML =
+      '<label>Username<input name="username" required maxlength="64" autocomplete="off"></label>' +
+      '<label>Role<select name="role" required><option value="operator">Operator</option><option value="viewer">Viewer</option></select></label>' +
+      '<label>Password<input type="password" name="password" required autocomplete="new-password"></label>' +
+      '<label>Confirm password<input type="password" name="confirm_password" required autocomplete="new-password"></label>' +
+      '<div class="form-actions"><button type="submit">Create user</button></div>';
+    createForm.querySelectorAll('input[type="password"]').forEach((input) => {
+      input.minLength = Number(payload.minimum_password_len || 8);
     });
-    if (!root.children.length) throw new Error("Users are unavailable.");
-    systemNamespaceIDs(root, "system-users-");
-    content.replaceChildren(root);
-  };
-
-  const loadUsers = async (sequence) => {
-    const response = await systemFetchPage("/settings/users");
-    if (!response) return;
-    if (response.status === 403) throw new Error("Administrator access required.");
-    if (!response.ok) throw new Error("Users are unavailable.");
-    const markup = await response.text();
-    if (sequence !== loadSequence) return;
-    renderUsersMarkup(markup);
-  };
-
-  const compactSecurityRequirements = (root) => {
-    root.querySelectorAll("p.muted").forEach((paragraph) => {
-      const textValue = paragraph.textContent.trim();
-      if (!textValue.startsWith("Password requirements:")) return;
-      paragraph.textContent = textValue.split(" A stronger")[0];
+    createForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const submit = event.submitter;
+      if (submit) submit.disabled = true;
+      const data = Object.fromEntries(new FormData(createForm).entries());
+      try {
+        const result = await systemPostForm("/api/system/workspace/users/create", data);
+        if (result) await renderUsers(++loadSequence, result.message || "WebUI user created.");
+      } catch (error) {
+        if (state) state.textContent = error?.message || "Could not create WebUI user.";
+        if (submit) submit.disabled = false;
+      }
     });
-  };
+    create.appendChild(createForm);
+    root.appendChild(create);
 
-  const buildSecurityPane = (markup, kind) => {
-    const parsed = parsePage(markup);
-    const panel = parsed.querySelector("main .settings-panel");
-    const form = panel?.querySelector("form");
-    if (!panel || !form) return null;
-    const pane = document.createElement("section");
-    pane.className = "system-security-pane";
-    pane.dataset.systemSecurityPane = kind;
-    panel.querySelectorAll(":scope > .alert, :scope > .notice").forEach((notice) => pane.appendChild(notice.cloneNode(true)));
-    const heading = document.createElement("div");
-    heading.className = "system-security-pane-heading";
-    const title = document.createElement("h3");
-    title.textContent = kind === "authentication" ? "Authentication" : "Password";
-    const description = document.createElement("p");
-    description.className = "muted compact";
-    description.textContent = kind === "authentication"
-      ? "Choose whether WebUI uses the voxel system password or its own separate password."
-      : "Change the password used by the current WebUI authentication mode.";
-    heading.append(title, description);
-    pane.appendChild(heading);
-    if (kind === "authentication") {
-      const status = document.createElement("div");
-      status.className = "system-security-status";
-      const paragraphs = Array.from(panel.querySelectorAll(":scope > p"));
-      [paragraphs.find((node) => node.textContent.includes("Administrator:")), paragraphs.find((node) => node.textContent.includes("Mode:"))].filter(Boolean).forEach((node) => {
-        const item = document.createElement("span");
-        item.textContent = node.textContent.trim();
-        status.appendChild(item);
+    const listPanel = systemPanel("WebUI identities", "Operators and Viewers").panel;
+    const users = Array.isArray(payload.users) ? payload.users : [];
+    if (!users.length) {
+      const empty = document.createElement("p");
+      empty.className = "muted compact";
+      empty.textContent = "No Operator or Viewer accounts exist yet.";
+      listPanel.appendChild(empty);
+    } else {
+      const list = document.createElement("div");
+      list.className = "user-list";
+      users.forEach((user) => {
+        const card = document.createElement("article");
+        card.className = "user-card";
+
+        const heading = document.createElement("div");
+        heading.className = "user-card-heading";
+        const identityWrap = document.createElement("div");
+        const username = document.createElement("strong");
+        username.textContent = user.username || "User";
+        const enabled = document.createElement("span");
+        enabled.className = "muted";
+        enabled.textContent = user.enabled ? "Enabled" : "Disabled";
+        identityWrap.append(username, enabled);
+        const roleBadge = document.createElement("span");
+        roleBadge.className = "badge";
+        roleBadge.textContent = user.role || "viewer";
+        heading.append(identityWrap, roleBadge);
+        card.appendChild(heading);
+
+        const quota = document.createElement("div");
+        quota.className = "quota-grid";
+        [["Restart allowance", user.restart_used, user.restart_limit], ["Backup allowance", user.backup_used, user.backup_limit]].forEach(([label, used, limit]) => {
+          const box = document.createElement("div");
+          box.className = "quota-box";
+          const labelNode = document.createElement("span");
+          labelNode.textContent = label;
+          const valueNode = document.createElement("strong");
+          valueNode.textContent = String(used ?? 0) + " / " + String(limit ?? 0);
+          box.append(labelNode, valueNode);
+          quota.appendChild(box);
+        });
+        card.appendChild(quota);
+
+        const actions = document.createElement("div");
+        actions.className = "user-actions-grid";
+
+        const roleForm = document.createElement("form");
+        roleForm.innerHTML = '<label>Role<select name="role"><option value="operator">Operator</option><option value="viewer">Viewer</option></select></label><button class="secondary" type="submit">Save role</button>';
+        roleForm.querySelector("select").value = user.role || "viewer";
+        roleForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const result = await systemPostForm("/api/system/workspace/users/" + user.id + "/role", {
+            role: roleForm.querySelector("select").value,
+          });
+          if (result) await renderUsers(++loadSequence, result.message || "WebUI user updated.");
+        });
+        actions.appendChild(roleForm);
+
+        const enabledButton = document.createElement("button");
+        enabledButton.type = "button";
+        enabledButton.className = "secondary";
+        enabledButton.textContent = user.enabled ? "Disable" : "Enable";
+        enabledButton.addEventListener("click", async () => {
+          enabledButton.disabled = true;
+          const result = await systemPostForm("/api/system/workspace/users/" + user.id + "/enabled", { enabled: !user.enabled });
+          if (result) await renderUsers(++loadSequence, result.message || "WebUI user updated.");
+        });
+        actions.appendChild(enabledButton);
+
+        const restartButton = document.createElement("button");
+        restartButton.type = "button";
+        restartButton.className = "secondary";
+        restartButton.textContent = "Reset restart allowance";
+        restartButton.disabled = Number(user.restart_used || 0) === 0;
+        restartButton.addEventListener("click", async () => {
+          const result = await systemPostForm("/api/system/workspace/users/" + user.id + "/restart-allowance/reset");
+          if (result) await renderUsers(++loadSequence, result.message || "Restart allowance reset.");
+        });
+        actions.appendChild(restartButton);
+
+        const backupButton = document.createElement("button");
+        backupButton.type = "button";
+        backupButton.className = "secondary";
+        backupButton.textContent = "Reset backup allowance";
+        backupButton.disabled = Number(user.backup_used || 0) === 0;
+        backupButton.addEventListener("click", async () => {
+          const result = await systemPostForm("/api/system/workspace/users/" + user.id + "/backup-allowance/reset");
+          if (result) await renderUsers(++loadSequence, result.message || "Backup allowance reset.");
+        });
+        actions.appendChild(backupButton);
+        card.appendChild(actions);
+
+        const passwordDetails = document.createElement("details");
+        passwordDetails.className = "user-details";
+        const passwordSummary = document.createElement("summary");
+        passwordSummary.textContent = "Change password";
+        const passwordForm = document.createElement("form");
+        passwordForm.className = "admin-form-grid compact-form";
+        passwordForm.innerHTML =
+          '<label>New password<input type="password" name="password" required autocomplete="new-password"></label>' +
+          '<label>Confirm password<input type="password" name="confirm_password" required autocomplete="new-password"></label>' +
+          '<div class="form-actions"><button class="secondary" type="submit">Change password</button></div>';
+        passwordForm.querySelectorAll('input[type="password"]').forEach((input) => {
+          input.minLength = Number(payload.minimum_password_len || 8);
+        });
+        passwordForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const data = Object.fromEntries(new FormData(passwordForm).entries());
+          const result = await systemPostForm("/api/system/workspace/users/" + user.id + "/password", data);
+          if (result) await renderUsers(++loadSequence, result.message || "WebUI user password changed.");
+        });
+        passwordDetails.append(passwordSummary, passwordForm);
+        card.appendChild(passwordDetails);
+
+        const deleteDetails = document.createElement("details");
+        deleteDetails.className = "user-details danger-zone";
+        const deleteSummary = document.createElement("summary");
+        deleteSummary.textContent = "Delete account";
+        const deleteText = document.createElement("p");
+        deleteText.className = "muted compact";
+        deleteText.textContent = "Deleting this WebUI identity also removes its saved Operator quota history.";
+        const deleteButton = document.createElement("button");
+        deleteButton.type = "button";
+        deleteButton.className = "danger";
+        deleteButton.textContent = "Delete " + (user.username || "account");
+        deleteButton.addEventListener("click", async () => {
+          deleteButton.disabled = true;
+          const result = await systemPostForm("/api/system/workspace/users/" + user.id + "/delete");
+          if (result) await renderUsers(++loadSequence, result.message || "WebUI user deleted.");
+        });
+        deleteDetails.append(deleteSummary, deleteText, deleteButton);
+        card.appendChild(deleteDetails);
+
+        list.appendChild(card);
       });
-      if (status.children.length) pane.appendChild(status);
+      listPanel.appendChild(list);
     }
-    const clonedForm = form.cloneNode(true);
-    clonedForm.classList.add("system-security-form");
-    compactSecurityRequirements(clonedForm);
-    pane.appendChild(clonedForm);
-    return pane;
+    root.appendChild(listPanel);
+    content.replaceChildren(root);
   };
 
-  const renderSecurityMarkup = (authenticationMarkup, passwordMarkup) => {
-    if (!content) return;
+  const renderSecurity = async (sequence, message = "") => {
+    const payload = await systemFetchJSON("/api/system/workspace/security");
+    if (!payload || sequence !== loadSequence || !content) return;
     const root = document.createElement("div");
     root.className = "system-security-view";
+    if (message) root.appendChild(systemNotice(message));
+
     const switcher = document.createElement("div");
     switcher.className = "system-security-switcher";
     switcher.setAttribute("role", "tablist");
@@ -3283,73 +3531,161 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       switcher.appendChild(button);
     });
     root.appendChild(switcher);
-    const authentication = buildSecurityPane(authenticationMarkup, "authentication");
-    const password = buildSecurityPane(passwordMarkup, "password");
-    if (authentication) root.appendChild(authentication);
-    if (password) root.appendChild(password);
-    if (!authentication && !password) throw new Error("Security settings are unavailable.");
+
+    const authPane = document.createElement("section");
+    authPane.className = "system-security-pane";
+    authPane.dataset.systemSecurityPane = "authentication";
+    const authHeading = document.createElement("div");
+    authHeading.className = "system-security-pane-heading";
+    const authTitle = document.createElement("h3");
+    authTitle.textContent = "Authentication";
+    const authDescription = document.createElement("p");
+    authDescription.className = "muted compact";
+    authDescription.textContent = "Choose whether WebUI uses the voxel system password or its own separate password.";
+    authHeading.append(authTitle, authDescription);
+    authPane.appendChild(authHeading);
+
+    const authStatus = document.createElement("div");
+    authStatus.className = "system-security-status";
+    const admin = document.createElement("span");
+    admin.textContent = "Administrator: " + (payload.username || "voxel");
+    const mode = document.createElement("span");
+    mode.textContent = "Mode: " + (payload.mode === "system" ? "System account" : "Separate WebUI password");
+    authStatus.append(admin, mode);
+    authPane.appendChild(authStatus);
+
+    const authForm = document.createElement("form");
+    authForm.className = "system-security-form";
+    if (payload.mode === "system") {
+      authForm.innerHTML =
+        '<input type="hidden" name="mode" value="separate">' +
+        '<label>Current system password<input type="password" name="system_password" autocomplete="current-password" required></label>' +
+        '<label>New WebUI password<input type="password" name="new_web_password" autocomplete="new-password" required></label>' +
+        '<label>Confirm WebUI password<input type="password" name="confirm_web_password" autocomplete="new-password" required></label>' +
+        '<p class="muted compact">The new browser password will be separate from Linux, SSH, and the local console.</p>' +
+        '<button type="submit">Switch to Separate WebUI password</button>';
+      authForm.querySelectorAll('input[name="new_web_password"],input[name="confirm_web_password"]').forEach((input) => {
+        input.minLength = Number(payload.minimum_password_len || 8);
+      });
+    } else {
+      authForm.innerHTML =
+        '<input type="hidden" name="mode" value="system">' +
+        '<label>System password<input type="password" name="system_password" autocomplete="current-password" required></label>' +
+        '<p class="muted compact">After switching, the real voxel system password will sign in to WebUI.</p>' +
+        '<button type="submit">Switch to System account</button>';
+    }
+    authForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const submit = event.submitter;
+      if (submit) submit.disabled = true;
+      try {
+        const data = Object.fromEntries(new FormData(authForm).entries());
+        const result = await systemPostForm("/api/system/workspace/security/authentication", data);
+        if (!result) return;
+        if (result.reauthenticate) {
+          window.location.assign("/login?message=auth-mode-changed");
+          return;
+        }
+        await renderSecurity(++loadSequence, result.message || "Authentication mode changed.");
+      } catch (error) {
+        if (state) state.textContent = error?.message || "Authentication mode change was rejected.";
+        if (submit) submit.disabled = false;
+      }
+    });
+    authPane.appendChild(authForm);
+    root.appendChild(authPane);
+
+    const passwordPane = document.createElement("section");
+    passwordPane.className = "system-security-pane";
+    passwordPane.dataset.systemSecurityPane = "password";
+    const passwordHeading = document.createElement("div");
+    passwordHeading.className = "system-security-pane-heading";
+    const passwordTitle = document.createElement("h3");
+    passwordTitle.textContent = "Password";
+    const passwordDescription = document.createElement("p");
+    passwordDescription.className = "muted compact";
+    passwordDescription.textContent = "Change the password used by the current WebUI authentication mode.";
+    passwordHeading.append(passwordTitle, passwordDescription);
+    passwordPane.appendChild(passwordHeading);
+
+    const passwordForm = document.createElement("form");
+    passwordForm.className = "system-security-form";
+    passwordForm.innerHTML =
+      '<label>Current password<input type="password" name="current_password" autocomplete="current-password" required></label>' +
+      '<label>New password<input type="password" name="new_password" autocomplete="new-password" required></label>' +
+      '<label>Confirm new password<input type="password" name="confirm_password" autocomplete="new-password" required></label>' +
+      '<p class="muted compact">Use at least ' + String(payload.minimum_password_len || 8) + ' characters and follow the host password policy.</p>' +
+      '<button type="submit">Change password</button>';
+    passwordForm.querySelectorAll('input[name="new_password"],input[name="confirm_password"]').forEach((input) => {
+      input.minLength = Number(payload.minimum_password_len || 8);
+    });
+    passwordForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const submit = event.submitter;
+      if (submit) submit.disabled = true;
+      try {
+        const data = Object.fromEntries(new FormData(passwordForm).entries());
+        const result = await systemPostForm("/api/system/workspace/security/password", data);
+        if (!result) return;
+        if (result.reauthenticate) {
+          window.location.assign("/login?message=password-changed");
+          return;
+        }
+      } catch (error) {
+        if (state) state.textContent = error?.message || "Password change was rejected.";
+        if (submit) submit.disabled = false;
+      }
+    });
+    passwordPane.appendChild(passwordForm);
+    root.appendChild(passwordPane);
+
     const showPane = (kind) => {
       securityPane = kind;
-      root.querySelectorAll("[data-system-security-choice]").forEach((button) => button.setAttribute("aria-selected", button.dataset.systemSecurityChoice === kind ? "true" : "false"));
-      root.querySelectorAll("[data-system-security-pane]").forEach((pane) => { pane.hidden = pane.dataset.systemSecurityPane !== kind; });
+      root.querySelectorAll("[data-system-security-choice]").forEach((button) => {
+        button.setAttribute("aria-selected", button.dataset.systemSecurityChoice === kind ? "true" : "false");
+      });
+      root.querySelectorAll("[data-system-security-pane]").forEach((pane) => {
+        pane.hidden = pane.dataset.systemSecurityPane !== kind;
+      });
     };
-    root.querySelectorAll("[data-system-security-choice]").forEach((button) => button.addEventListener("click", () => showPane(button.dataset.systemSecurityChoice)));
-    systemNamespaceIDs(root, "system-security-");
+    root.querySelectorAll("[data-system-security-choice]").forEach((button) => {
+      button.addEventListener("click", () => showPane(button.dataset.systemSecurityChoice));
+    });
     content.replaceChildren(root);
     showPane(securityPane);
   };
 
-  const fetchSecurityPages = async () => {
-    const [authenticationResponse, passwordResponse] = await Promise.all([
-      systemFetchPage("/settings/authentication"),
-      systemFetchPage("/password"),
-    ]);
-    if (!authenticationResponse || !passwordResponse) return null;
-    if (authenticationResponse.status === 403 || passwordResponse.status === 403) {
-      throw new Error("Administrator access required.");
-    }
-    if (!authenticationResponse.ok || !passwordResponse.ok) {
-      throw new Error("Security settings are unavailable.");
-    }
-    return {
-      authentication: await authenticationResponse.text(),
-      password: await passwordResponse.text(),
-    };
-  };
-
-  const loadSecurity = async (sequence) => {
-    const pages = await fetchSecurityPages();
-    if (!pages || sequence !== loadSequence) return;
-    renderSecurityMarkup(pages.authentication, pages.password);
-  };
-
-  const renderAboutMarkup = (markup) => {
-    if (!content) return;
-    const parsed = parsePage(markup);
+  const renderAbout = async (sequence) => {
+    const payload = await systemFetchJSON("/api/system/workspace/about");
+    if (!payload || sequence !== loadSequence || !content) return;
     const root = document.createElement("div");
-    const badge = parsed.querySelector("main.about-shell .title-row .badge");
-    if (badge) {
-      const heading = document.createElement("div");
-      heading.className = "system-about-variant";
-      heading.appendChild(badge.cloneNode(true));
-      root.appendChild(heading);
-    }
-    const panel = parsed.querySelector("main.about-shell .about-panel");
-    if (panel) root.appendChild(panel.cloneNode(true));
-    const disclaimer = parsed.querySelector("main.about-shell .disclaimer");
-    if (disclaimer) root.appendChild(disclaimer.cloneNode(true));
-    if (!root.children.length) throw new Error("About information is unavailable.");
-    systemNamespaceIDs(root, "system-about-");
+    const built = systemPanel("JustVoxel", "About");
+    const badge = document.createElement("span");
+    badge.className = "badge";
+    badge.textContent = payload.variant || "Unknown";
+    built.heading.appendChild(badge);
+    const list = document.createElement("dl");
+    [
+      ["JustVoxel", payload.justvoxel || "—"],
+      ["WebUI", payload.webui || "—"],
+      ["Management API", payload.management_api || "—"],
+      ["Source", payload.commit || "—"],
+      ["Signed in as", (payload.username || "—") + " (" + (payload.role || "—") + ")"],
+    ].forEach(([label, value]) => {
+      const row = document.createElement("div");
+      const dt = document.createElement("dt");
+      dt.textContent = label;
+      const dd = document.createElement("dd");
+      dd.textContent = value;
+      row.append(dt, dd);
+      list.appendChild(row);
+    });
+    built.panel.appendChild(list);
+    const disclaimer = document.createElement("p");
+    disclaimer.className = "disclaimer";
+    disclaimer.textContent = "NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.";
+    root.append(built.panel, disclaimer);
     content.replaceChildren(root);
-  };
-
-  const loadAbout = async (sequence) => {
-    const response = await systemFetchPage("/about");
-    if (!response) return;
-    if (!response.ok) throw new Error("About information is unavailable.");
-    const markup = await response.text();
-    if (sequence !== loadSequence) return;
-    renderAboutMarkup(markup);
   };
 
   const systemUPSStateLabel = (value) => {
@@ -3601,12 +3937,12 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         currentTab = "history";
         syncSystemTabs();
       }
-      if (currentTab === "health") await loadHealth(sequence);
-      else if (currentTab === "history") await loadHistory(sequence);
-      else if (currentTab === "users") await loadUsers(sequence);
-      else if (currentTab === "security") await loadSecurity(sequence);
+      if (currentTab === "health") await renderHealth(sequence);
+      else if (currentTab === "history") await renderHistory(sequence);
+      else if (currentTab === "users") await renderUsers(sequence);
+      else if (currentTab === "security") await renderSecurity(sequence);
       else if (currentTab === "ups") await loadUPS(sequence);
-      else await loadAbout(sequence);
+      else await renderAbout(sequence);
       if (sequence === loadSequence && state) state.textContent = "";
     } catch (error) {
       if (sequence !== loadSequence) return;
@@ -3627,79 +3963,13 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     loadCurrentSystemTab();
   };
 
-  const submitSystemForm = async (form, kind) => {
-    const action = new URL(form.getAttribute("action") || window.location.href, window.location.href);
-    const body = new URLSearchParams();
-    new FormData(form).forEach((value, key) => body.append(key, String(value)));
-    const submitter = form.querySelector('button[type="submit"],input[type="submit"]');
-    if (submitter) submitter.disabled = true;
-    if (state) state.textContent = "Working…";
-
-    try {
-      const response = await systemFetchPage(action.pathname + action.search, {
-        method: (form.method || "POST").toUpperCase(),
-        headers: {
-          Accept: "text/html",
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: body.toString(),
-      });
-      if (!response) return;
-      const markup = await response.text();
-
-      if (kind === "history") {
-        renderHistoryMarkup(markup, true);
-      } else if (kind === "users") {
-        renderUsersMarkup(markup);
-      } else if (kind === "security-auth") {
-        securityPane = "authentication";
-        const passwordResponse = await systemFetchPage("/password");
-        if (!passwordResponse) return;
-        renderSecurityMarkup(markup, await passwordResponse.text());
-      } else if (kind === "security-password") {
-        securityPane = "password";
-        const authenticationResponse = await systemFetchPage("/settings/authentication");
-        if (!authenticationResponse) return;
-        renderSecurityMarkup(await authenticationResponse.text(), markup);
-      }
-      if (state) state.textContent = response.ok ? "" : "The request was rejected. Review the message below.";
-    } catch (error) {
-      if (state) state.textContent = error?.message || "System operation could not be completed.";
-    } finally {
-      if (submitter && submitter.isConnected) submitter.disabled = false;
-    }
-  };
-
   content?.addEventListener("submit", async (event) => {
     const form = event.target.closest("form");
     if (!form || !content.contains(form)) return;
     const action = new URL(form.getAttribute("action") || window.location.href, window.location.href);
-
-    if (action.pathname === "/api/ups/source") {
-      event.preventDefault();
-      await submitUPSSource(form);
-      return;
-    }
-
-    let kind = "";
-    if (action.pathname.startsWith("/settings/activity/notifications/")) kind = "history";
-    else if (action.pathname.startsWith("/settings/users/")) kind = "users";
-    else if (action.pathname === "/settings/authentication") kind = "security-auth";
-    else if (action.pathname === "/password") kind = "security-password";
-    if (!kind) return;
-
+    if (action.pathname !== "/api/ups/source") return;
     event.preventDefault();
-    await submitSystemForm(form, kind);
-  });
-
-  content?.addEventListener("click", (event) => {
-    const link = event.target.closest("a");
-    if (!link || !content.contains(link)) return;
-    const href = link.getAttribute("href") || "";
-    if (href === "/settings/validation" || href.startsWith("/settings/validation?")) {
-      event.preventDefault();
-      selectSystemTab("health");
-    }
+    await submitUPSSource(form);
   });
 
   const workspaceWindow = setupWorkspaceWindow(systemWorkspaceDialog, {
