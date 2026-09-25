@@ -167,7 +167,7 @@ func TestStorageMinecraftMigrationCurrentReconnectsPersistentOperation(t *testin
 	operation := &api.PersistentOperation{
 		SchemaVersion: "v1", OperationID: storageMigrationOperationID, OperationType: "data_migration",
 		PlanFingerprint: storageMigrationFingerprint, State: "running", Stage: "copying",
-		Status: "Copying Minecraft data to the reviewed storage target.",
+		Status:   "Copying Minecraft data to the reviewed storage target.",
 		Rollback: api.PersistentOperationRollback{State: "not_started"},
 	}
 	client := &fakeStorageMinecraftMigrationAPI{current: operation}
