@@ -289,10 +289,6 @@
       if (selectedPath) selectedPath.textContent = backupPath(targetMount);
     }
 
-    function networkField(selector, kind) {
-      return backupForm.querySelector(selector + '[data-setup-network-' + kind + ']');
-    }
-
     function syncNetworkFields(kind) {
       if (kind !== 'nfs' && kind !== 'smb') return;
       const sourceInput = backupForm.querySelector('[data-setup-network-source="' + kind + '"]');
