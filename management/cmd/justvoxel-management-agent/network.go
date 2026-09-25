@@ -46,20 +46,20 @@ type networkWirelessView struct {
 }
 
 type networkDeviceView struct {
-	Interface             string                 `json:"interface"`
-	IPInterface           string                 `json:"ip_interface,omitempty"`
-	Kind                  string                 `json:"kind"`
-	State                 string                 `json:"state"`
-	Managed               bool                   `json:"managed"`
-	HardwareAddress       string                 `json:"hardware_address,omitempty"`
-	MTU                   uint32                 `json:"mtu"`
-	Carrier               *bool                  `json:"carrier,omitempty"`
-	SpeedMbps             uint32                 `json:"speed_mbps,omitempty"`
-	IPv4                  networkIPConfigView    `json:"ipv4"`
-	IPv6                  networkIPConfigView    `json:"ipv6"`
-	ActiveConnection      *networkProfileView    `json:"active_connection,omitempty"`
-	AvailableProfileUUIDs []string               `json:"available_profile_uuids"`
-	Wireless              *networkWirelessView   `json:"wireless,omitempty"`
+	Interface             string               `json:"interface"`
+	IPInterface           string               `json:"ip_interface,omitempty"`
+	Kind                  string               `json:"kind"`
+	State                 string               `json:"state"`
+	Managed               bool                 `json:"managed"`
+	HardwareAddress       string               `json:"hardware_address,omitempty"`
+	MTU                   uint32               `json:"mtu"`
+	Carrier               *bool                `json:"carrier,omitempty"`
+	SpeedMbps             uint32               `json:"speed_mbps,omitempty"`
+	IPv4                  networkIPConfigView  `json:"ipv4"`
+	IPv6                  networkIPConfigView  `json:"ipv6"`
+	ActiveConnection      *networkProfileView  `json:"active_connection,omitempty"`
+	AvailableProfileUUIDs []string             `json:"available_profile_uuids"`
+	Wireless              *networkWirelessView `json:"wireless,omitempty"`
 }
 
 type networkStatusView struct {
