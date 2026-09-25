@@ -48,9 +48,9 @@ type storageBrowserWholeDiskResponse struct {
 	PlayersConfirmationRequired bool     `json:"players_confirmation_required,omitempty"`
 	Online                      int      `json:"online,omitempty"`
 	Players                     []string `json:"players,omitempty"`
-	Applied                     bool                     `json:"applied,omitempty"`
-	Redirect                    string                   `json:"redirect,omitempty"`
-	Operation                   *api.PersistentOperation `json:"operation,omitempty"`
+	Applied                     bool     `json:"applied,omitempty"`
+	Redirect                    string   `json:"redirect,omitempty"`
+	OperationID                 string   `json:"operation_id,omitempty"`
 }
 
 func (a *App) registerStorageBrowserActionRoutes(mux *http.ServeMux) {
@@ -217,7 +217,7 @@ func (a *App) storageBrowserWholeDiskChange(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	response.Applied = true
-	response.Operation = result.Operation
+	response.OperationID = result.Operation.OperationID
 	writeStorageBrowserWholeDiskJSON(w, http.StatusOK, response)
 }
 

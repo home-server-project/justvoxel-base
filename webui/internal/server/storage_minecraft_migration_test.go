@@ -106,7 +106,7 @@ func TestStorageMinecraftMigrationApplyReplansAndReturnsPersistentOperation(t *t
 		Rollback: api.PersistentOperationRollback{State: "not_started"},
 	}
 	client := &fakeStorageMinecraftMigrationAPI{
-		plan: storageMigrationPlan(),
+		plan:  storageMigrationPlan(),
 		apply: api.AdminDataMigrationApplyResponse{OK: true, Created: true, Operation: operation},
 	}
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})

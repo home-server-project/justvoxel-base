@@ -576,13 +576,19 @@
     wholeDiskApply.textContent = "Applying…";
     try {
       const payload = await postWholeDisk("apply");
-      if (payload.operation) {
+      if (payload.operation_id) {
         wholeDiskApplying = false;
         if (wholeDiskClose) wholeDiskClose.disabled = false;
         if (wholeDiskCancel) wholeDiskCancel.disabled = false;
         wholeDiskDialog?.close();
         if (migrationDialog && !migrationDialog.open) migrationDialog.showModal();
-        showMigrationProgress(payload.operation);
+        showMigrationProgress({
+          operation_type: "data_migration",
+          operation_id: payload.operation_id,
+          state: "queued",
+          stage: "queued",
+          status: "Minecraft data migration operation queued.",
+        });
       } else if (payload.redirect) {
         window.location.assign(payload.redirect);
       } else {
