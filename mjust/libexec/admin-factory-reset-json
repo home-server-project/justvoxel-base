@@ -1,0 +1,197 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/minecraft-reset-common.sh
+
+require_root
+
+action="${1:-}"
+case "${action}" in
+    plan|apply) ;;
+    *)
+        echo '{"ok":false,"error":"unsupported factory reset action"}'
+        exit 2
+        ;;
+esac
+
+configured=false
+data_path=''
+data_scope='none'
+data_action='none'
+backup_path=''
+backup_scope='none'
+backup_action='none'
+java_port=''
+bedrock_enabled='no'
+bedrock_port=''
+warnings=()
+
+if [[ -r ${JV_CONFIG} ]]; then
+    configured=true
+    # shellcheck disable=SC1090
+    source "${JV_CONFIG}"
+
+    data_path="${DATA_PATH}"
+    backup_path="${BACKUP_PATH}"
+    java_port="${JAVA_PORT}"
+    bedrock_enabled="${BEDROCK_ENABLED}"
+    bedrock_port="${BEDROCK_PORT}"
+
+    data_scope="$(jv_reset_path_scope "${data_path}")"
+    case "${data_scope}" in
+        internal) data_action=delete ;;
+        network|external|unknown)
+            data_action=preserve
+            warnings+=("Minecraft data is outside appliance-owned internal storage and will be preserved.")
+            ;;
+        unsafe)
+            jq -n '{ok:false,code:"unsafe_data_path",error:"Minecraft data path is unsafe to reset."}'
+            exit 4
+            ;;
+        *)
+            jq -n '{ok:false,code:"invalid_data_scope",error:"Minecraft data scope could not be classified safely."}'
+            exit 4
+            ;;
+    esac
+
+    backup_scope="$(jv_reset_path_scope "${backup_path}")"
+    case "${backup_scope}" in
+        internal) backup_action=delete ;;
+        network|external|unknown)
+            backup_action=preserve
+            warnings+=("Backup storage is external or not appliance-owned and will be preserved.")
+            ;;
+        unsafe)
+            jq -n '{ok:false,code:"unsafe_backup_path",error:"Backup path is unsafe to reset."}'
+            exit 4
+            ;;
+        *)
+            jq -n '{ok:false,code:"invalid_backup_scope",error:"Backup storage scope could not be classified safely."}'
+            exit 4
+            ;;
+    esac
+fi
+
+players_json='{"configured":false,"state":"not_configured","online":0,"max":0,"names":[]}'
+if [[ ${configured} == true ]]; then
+    if status_json="$(/usr/libexec/justvoxel/mjust/web-status-json players 2>/dev/null)"; then
+        if jq -e 'type=="object" and (.online|type=="number") and (.names|type=="array")' <<<"${status_json}" >/dev/null 2>&1; then
+            players_json="${status_json}"
+        else
+            warnings+=("Player status could not be validated during factory reset planning.")
+        fi
+    else
+        warnings+=("Player status could not be validated during factory reset planning.")
+    fi
+fi
+
+emit_plan() {
+    local warnings_json
+    warnings_json="$(printf '%s\n' "${warnings[@]-}" | jq -Rsc 'split("\n") | map(select(length>0))')"
+    jq -n \
+        --argjson configured "${configured}" \
+        --arg data_path "${data_path}" \
+        --arg data_scope "${data_scope}" \
+        --arg data_action "${data_action}" \
+        --arg backup_path "${backup_path}" \
+        --arg backup_scope "${backup_scope}" \
+        --arg backup_action "${backup_action}" \
+        --argjson players "${players_json}" \
+        --argjson warnings "${warnings_json}" \
+        '{
+          ok:true,
+          schema_version:"v1",
+          mode:"factory",
+          minecraft_configured:$configured,
+          data_path:$data_path,
+          data_scope:$data_scope,
+          data_action:$data_action,
+          backup_path:$backup_path,
+          backup_scope:$backup_scope,
+          backup_action:$backup_action,
+          config_backups_action:"delete",
+          storage_layout_action:"preserve",
+          external_storage_action:"preserve",
+          network_storage_action:"preserve",
+          authentication_action:"reset_to_system",
+          webui_users_action:"delete",
+          password_action:"expire",
+          sessions_action:"invalidate",
+          players_online:($players.online // 0),
+          players:($players.names // []),
+          warnings:$warnings
+        }'
+}
+
+if [[ ${action} == plan ]]; then
+    emit_plan
+    exit 0
+fi
+
+confirm_players="${2:-}"
+if [[ ${confirm_players} != --confirm-players ]]; then
+    jq -n '{ok:false,code:"confirmation_required",error:"Full factory reset Apply requires explicit player interruption confirmation."}'
+    exit 4
+fi
+
+if [[ ${configured} == true ]] && systemctl is-active --quiet minecraft.service 2>/dev/null; then
+    set +e
+    stop_output="$(/usr/libexec/justvoxel/mjust/web-status-json stop --confirm-players 2>/dev/null)"
+    stop_rc=$?
+    set -e
+    if (( stop_rc != 0 )) || ! jq -e '.ok == true' <<<"${stop_output}" >/dev/null 2>&1; then
+        jq -n '{ok:false,code:"minecraft_stop_failed",error:"Minecraft could not be stopped safely. Factory reset did not continue."}'
+        exit 5
+    fi
+fi
+
+if podman container exists minecraft 2>/dev/null; then
+    podman rm minecraft >/dev/null
+fi
+
+if [[ ${data_action} == delete ]]; then
+    jv_reset_delete_tree_same_filesystem "${data_path}" 'Minecraft data'
+fi
+if [[ ${backup_action} == delete ]]; then
+    jv_reset_delete_tree_same_filesystem "${backup_path}" 'local backup data'
+fi
+
+config_backup_dir=/var/lib/justvoxel/config-backups
+jv_reset_delete_tree_same_filesystem "${config_backup_dir}" 'JustVoxel configuration backups'
+
+if [[ ${configured} == true ]]; then
+    jv_reset_remove_active_configuration "${java_port}" "${bedrock_enabled}" "${bedrock_port}"
+else
+    systemctl disable --now minecraft-backup.timer >/dev/null 2>&1 || true
+    rm -f -- "${JV_QUADLET}" "${JV_BACKUP_SERVICE}" "${JV_BACKUP_TIMER}" "${JV_PREVIOUS_IMAGE_STATE}"
+    rm -rf -- "${JV_CONFIG_DIR}"
+    systemctl daemon-reload
+    systemctl reset-failed minecraft.service minecraft-backup.service minecraft-backup.timer >/dev/null 2>&1 || true
+fi
+
+jq -n \
+    --argjson configured "${configured}" \
+    --arg data_path "${data_path}" \
+    --arg data_scope "${data_scope}" \
+    --arg data_action "${data_action}" \
+    --arg backup_path "${backup_path}" \
+    --arg backup_scope "${backup_scope}" \
+    --arg backup_action "${backup_action}" \
+    '{
+      ok:true,
+      schema_version:"v1",
+      mode:"factory",
+      minecraft_was_configured:$configured,
+      data_path:$data_path,
+      data_scope:$data_scope,
+      data_action:$data_action,
+      backup_path:$backup_path,
+      backup_scope:$backup_scope,
+      backup_action:$backup_action,
+      config_backups_action:"delete",
+      storage_layout_action:"preserve",
+      external_storage_action:"preserve",
+      network_storage_action:"preserve",
+      message:"Local JustVoxel runtime state was cleared."
+    }'
