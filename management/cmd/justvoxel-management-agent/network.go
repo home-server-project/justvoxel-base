@@ -72,9 +72,22 @@ type networkStatusView struct {
 	Profiles          []networkProfileView `json:"profiles"`
 }
 
+type networkWiFiNetworkView struct {
+	SSID           string `json:"ssid"`
+	BSSID          string `json:"bssid,omitempty"`
+	Strength       uint8  `json:"strength"`
+	FrequencyMHz   uint32 `json:"frequency_mhz,omitempty"`
+	MaxBitrateKbps uint32 `json:"max_bitrate_kbps,omitempty"`
+	Security       string `json:"security"`
+	KeyManagement  string `json:"key_management,omitempty"`
+	Hidden         bool   `json:"hidden"`
+	Known          bool   `json:"known"`
+	Active         bool   `json:"active"`
+}
+
 type networkWiFiView struct {
 	Interface string                   `json:"interface"`
-	Networks  []networking.WiFiNetwork `json:"networks"`
+	Networks  []networkWiFiNetworkView `json:"networks"`
 }
 
 func registerNetworkRoutes(mux *http.ServeMux, s *server) {
@@ -125,10 +138,22 @@ func (s *server) networkWiFiNetworks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "Wi-Fi status is unavailable")
 		return
 	}
-	if networks == nil {
-		networks = []networking.WiFiNetwork{}
+	items := make([]networkWiFiNetworkView, 0, len(networks))
+	for _, network := range networks {
+		items = append(items, networkWiFiNetworkView{
+			SSID:           network.SSID,
+			BSSID:          network.BSSID,
+			Strength:       network.Strength,
+			FrequencyMHz:   network.FrequencyMHz,
+			MaxBitrateKbps: network.MaxBitrateKbps,
+			Security:       string(network.Security),
+			KeyManagement:  network.KeyManagement,
+			Hidden:         network.Hidden,
+			Known:          network.Known,
+			Active:         network.Active,
+		})
 	}
-	writeJSON(w, http.StatusOK, networkWiFiView{Interface: interfaceName, Networks: networks})
+	writeJSON(w, http.StatusOK, networkWiFiView{Interface: interfaceName, Networks: items})
 }
 
 func (s *server) networkWiFiScan(w http.ResponseWriter, r *http.Request) {
