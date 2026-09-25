@@ -119,6 +119,7 @@ func (a *App) Handler() http.Handler {
 	a.registerNewBackupsDeleteRoutes(mux)
 	a.registerAdminDataMigrationPages(mux)
 	a.registerAdminServerMigrationPages(mux)
+	a.registerAdminMigrationWorkspacePages(mux)
 	a.registerAdminSystemActionPages(mux)
 	a.registerAdminSystemUpdatePages(mux)
 	a.registerSystemMonitorRoutes(mux)
