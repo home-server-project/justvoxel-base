@@ -339,8 +339,9 @@ func TestNewStorageUsesAgentApprovedMinecraftMigrationCandidates(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Use for Minecraft data",
-		`action="/settings/data-migration/review"`,
-		`name="operation" value="use_partition"`,
+		`data-storage-minecraft-review`,
+		`data-storage-minecraft-apply`,
+		`data-storage-minecraft-progress`,
 		`data-storage-whole-purpose="minecraft"`,
 		`data-storage-whole-purpose="backups"`,
 		`data-storage-whole-device="/dev/vdc"`,
@@ -351,6 +352,9 @@ func TestNewStorageUsesAgentApprovedMinecraftMigrationCandidates(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("New Storage Minecraft migration handoff missing %q: %s", want, body)
 		}
+	}
+	if strings.Contains(body, "/settings/data-migration") {
+		t.Fatal("New Storage still renders a legacy Data Migration page handoff")
 	}
 }
 
