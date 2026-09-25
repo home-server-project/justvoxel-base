@@ -27,7 +27,8 @@ grep -Fq 'jv_reset_remove_active_configuration "${JAVA_PORT}" "${BEDROCK_ENABLED
 grep -Fq 'nfs|nfs4|cifs|smb3)' "${common}"
 grep -Fq 'if [[ ${transport,,} == usb ]]' "${common}"
 grep -Fq 'jv_reset_backup_nested_in_data' "${common}"
-grep -Fq 'find "${data_path}" -xdev -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +' "${common}"
+grep -Fq 'jv_reset_nested_mounts' "${common}"
+grep -Fq 'find "${root}" -xdev -mindepth 1 -delete' "${common}"
 
 if grep -Eq 'rm[[:space:]]+-rf[[:space:]]+--?[[:space:]]*"?\$\{?BACKUP_PATH' "${helper}" "${common}"; then
     echo 'ERROR: Minecraft reset must not delete backup storage.' >&2
