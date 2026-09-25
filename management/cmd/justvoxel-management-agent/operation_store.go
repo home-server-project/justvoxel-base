@@ -370,6 +370,7 @@ func (s *operationStore) loadAndRecover() error {
 	activeDataMigration := ""
 	activeMinecraftReset := ""
 	activeMigration := ""
+
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
@@ -395,31 +396,7 @@ func (s *operationStore) loadAndRecover() error {
 		if operationIsCurrent(journal.State) {
 			switch journal.OperationType {
 			case operationTypeSetup:
-				if activeMinecraftReset != "" {
-		if activeSetup != "" || activeRestore != "" || activeDataMigration != "" || activeMigration != "" {
-			return errors.New("active Minecraft reset conflicts with another persistent operation")
-		}
-		if err := s.acquireMinecraftResetLocks(); err != nil {
-			return err
-		}
-		journal := s.operations[activeMinecraftReset]
-		if operationInterruptedByRestart(journal.State) {
-			now := s.now().UTC().Format(time.RFC3339Nano)
-			journal.State = operationNeedsAttention
-			journal.Stage = "interrupted"
-			journal.Status = "Minecraft reset was interrupted before completion. Review appliance state before continuing."
-			journal.UpdatedAt = now
-			journal.InterruptedAt = now
-			if err := s.persist(journal); err != nil {
-				_ = s.releaseMinecraftResetLocks()
-				return err
-			}
-			s.operations[journal.OperationID] = journal
-		}
-		s.currentMinecraftResetID = activeMinecraftReset
-	}
-
-	if activeSetup != "" {
+				if activeSetup != "" {
 					return errors.New("multiple active setup operation journals require attention")
 				}
 				activeSetup = journal.OperationID
@@ -446,6 +423,30 @@ func (s *operationStore) loadAndRecover() error {
 			}
 		}
 		s.operations[journal.OperationID] = journal
+	}
+
+	if activeMinecraftReset != "" {
+		if activeSetup != "" || activeRestore != "" || activeDataMigration != "" || activeMigration != "" {
+			return errors.New("active Minecraft reset conflicts with another persistent operation")
+		}
+		if err := s.acquireMinecraftResetLocks(); err != nil {
+			return err
+		}
+		journal := s.operations[activeMinecraftReset]
+		if operationInterruptedByRestart(journal.State) {
+			now := s.now().UTC().Format(time.RFC3339Nano)
+			journal.State = operationNeedsAttention
+			journal.Stage = "interrupted"
+			journal.Status = "Minecraft reset was interrupted before completion. Review appliance state before continuing."
+			journal.UpdatedAt = now
+			journal.InterruptedAt = now
+			if err := s.persist(journal); err != nil {
+				_ = s.releaseMinecraftResetLocks()
+				return err
+			}
+			s.operations[journal.OperationID] = journal
+		}
+		s.currentMinecraftResetID = activeMinecraftReset
 	}
 
 	if activeSetup != "" {
