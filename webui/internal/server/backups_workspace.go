@@ -345,7 +345,7 @@ func (a *App) backupsWorkspaceRestoreApply(w http.ResponseWriter, r *http.Reques
 	}
 	result, err := client.AdminRestoreApply(r.Context(), session, api.AdminRestoreApplyRequest{
 		PlanFingerprint: plan.PlanFingerprint,
-		Request: request, DestructiveConfirmed: true, PlayersConfirmed: playersConfirmed,
+		Request:         request, DestructiveConfirmed: true, PlayersConfirmed: playersConfirmed,
 	})
 	if err != nil {
 		a.renderBackupsWorkspace(w, r, session, client, identity, "", "", nil, nil, nil, nil, &request, &plan, apiMessage(err, "Could not start Restore."))
@@ -486,8 +486,8 @@ func (a *App) buildBackupsWorkspaceData(
 		BackupCount: len(views), TotalSize: humanBytes(totalBytes), Message: message, Error: pageError,
 		Automatic: automatic, AutomaticPlan: automaticPlan, Timezone: configuration.Minecraft.Timezone,
 		Destination: destination, DestinationForm: destinationForm, DestinationPlan: destinationPlan,
-		DestinationPartitions: partitions,
-		DestinationAvailable: backupsWorkspaceFormatOptionalBytes(destination.Current.AvailableBytes),
+		DestinationPartitions:     partitions,
+		DestinationAvailable:      backupsWorkspaceFormatOptionalBytes(destination.Current.AvailableBytes),
 		DestinationFilesystemSize: backupsWorkspaceFormatOptionalBytes(destination.Current.FilesystemBytes),
 		RestoreError: restoreError, RestoreOperation: restoreOperation,
 	}
