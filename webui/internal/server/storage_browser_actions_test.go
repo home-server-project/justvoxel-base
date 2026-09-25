@@ -499,7 +499,6 @@ func TestStorageBrowserCreatePartitionUXUsesNativeUnallocatedSpaceFlow(t *testin
 	}
 }
 
-
 type fakeStorageWholeDiskMigrationAPI struct {
 	fakeDiscoveryAPI
 	plan         api.AdminDataMigrationPlanResponse

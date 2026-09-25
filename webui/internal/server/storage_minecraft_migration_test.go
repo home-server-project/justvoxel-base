@@ -163,7 +163,6 @@ func TestStorageMinecraftMigrationSourceHasNoLegacyPageDependency(t *testing.T) 
 	}
 }
 
-
 func TestStorageMinecraftMigrationCurrentReconnectsPersistentOperation(t *testing.T) {
 	operation := &api.PersistentOperation{
 		SchemaVersion: "v1", OperationID: storageMigrationOperationID, OperationType: "data_migration",
