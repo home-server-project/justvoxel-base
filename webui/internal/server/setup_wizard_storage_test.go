@@ -18,6 +18,7 @@ func setupWizardStorageClient() *fakeDiscoveryAPI {
 	client.defaults.BackupDailyTime = "04:30"
 	client.storage.SystemDisks = []string{"/dev/vda"}
 	client.storage.Devices = []api.AdminStorageDevice{
+		{Name: "vda", Path: "/dev/vda", Type: "disk", SizeBytes: 128 * 1024 * 1024 * 1024, Model: "System Disk", Transport: "virtio", System: true},
 		{
 			Name: "vda1", Path: "/dev/vda1", Parent: "vda", Type: "part", SizeBytes: 32 * 1024 * 1024 * 1024,
 			Filesystem: "xfs", UUID: "root-uuid", Mountpoints: []string{"/"}, Model: "System Disk", System: true,
@@ -26,15 +27,26 @@ func setupWizardStorageClient() *fakeDiscoveryAPI {
 			Name: "vda4", Path: "/dev/vda4", Parent: "vda", Type: "part", SizeBytes: 90 * 1024 * 1024 * 1024,
 			Filesystem: "xfs", Label: "LOCAL", UUID: "local-uuid", Model: "System Disk", System: true,
 		},
+		{Name: "vdb", Path: "/dev/vdb", Type: "disk", SizeBytes: 700 * 1024 * 1024 * 1024, Model: "Samsung SSD", Transport: "sata"},
 		{
 			Name: "vdb1", Path: "/dev/vdb1", Parent: "vdb", Type: "part", SizeBytes: 500 * 1024 * 1024 * 1024,
 			Filesystem: "ext4", Label: "DATA", UUID: "data-uuid", Mountpoints: []string{"/srv/data"}, Model: "Samsung SSD", Transport: "sata",
 		},
+		{Name: "vdb2", Path: "/dev/vdb2", Parent: "vdb", Type: "part", SizeBytes: 50 * 1024 * 1024 * 1024, Model: "Samsung SSD", Transport: "sata"},
+		{Name: "vdc", Path: "/dev/vdc", Type: "disk", SizeBytes: 100 * 1024 * 1024 * 1024, Model: "Old Disk", Transport: "sata"},
 		{
 			Name: "vdc1", Path: "/dev/vdc1", Parent: "vdc", Type: "part", SizeBytes: 100 * 1024 * 1024 * 1024,
-			Filesystem: "ntfs", Label: "UNSUPPORTED", UUID: "ntfs-uuid", Model: "Old Disk",
+			Filesystem: "ntfs", Label: "UNSUPPORTED", UUID: "ntfs-uuid", Model: "Old Disk", Transport: "sata",
+		},
+		{Name: "vdd", Path: "/dev/vdd", Type: "disk", SizeBytes: 256 * 1024 * 1024 * 1024, Model: "USB SSD", Transport: "usb"},
+		{
+			Name: "vdd1", Path: "/dev/vdd1", Parent: "vdd", Type: "part", SizeBytes: 256 * 1024 * 1024 * 1024,
+			Filesystem: "xfs", Label: "USB", UUID: "usb-uuid", Model: "USB SSD",
 		},
 	}
+	client.storage.FreeSpaces = []api.AdminStorageFreeSpace{{
+		Device: "/dev/vdb", Start: "563201MiB", End: "716800MiB", SizeBytes: 150 * 1024 * 1024 * 1024,
+	}}
 	return client
 }
 
