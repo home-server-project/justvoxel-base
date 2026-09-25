@@ -115,6 +115,40 @@ func TestSetupWizardStorageRejectsUSBFilesystemEvenWhenPostedDirectly(t *testing
 		t.Fatalf("USB Minecraft storage was not rejected: %d %s", rr.Code, rr.Body.String())
 	}
 }
+func TestSetupWizardStorageUsesSharedReviewedStorageActions(t *testing.T) {
+	template, err := assets.ReadFile("templates/setup_wizard.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(template)
+	for _, want := range []string{
+		"data-setup-storage-prepare=\"format\"",
+		"data-setup-storage-prepare=\"create_partition\"",
+		"data-setup-storage-confirm-slider",
+		"data-setup-storage-confirm-toggle",
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("setup Storage shared action UI missing %q", want)
+		}
+	}
+
+	script, err := assets.ReadFile("static/setup-storage.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(script)
+	for _, want := range []string{
+		"fetch(\'/api/new-storage/actions/\' + phase",
+		"body.set(\'fingerprint\', reviewed?.proposed?.fingerprint || \'\')",
+		"body.set(\'confirmation\', reviewed?.proposed?.confirmation || \'\')",
+		"operation === \'create_partition\' ? \'all\'",
+		"window.location.reload()",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("setup Storage shared action behavior missing %q", want)
+		}
+	}
+}
 func TestSetupWizardStorageStepValidatesAndAdvances(t *testing.T) {
 	client := setupWizardStorageClient()
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
