@@ -69,6 +69,9 @@ func advanceSetupToReview(t *testing.T, app *App) {
 	if rr := saveServerStep(t, app, validServerValues()); rr.Code != http.StatusSeeOther {
 		t.Fatalf("server save returned %d: %s", rr.Code, rr.Body.String())
 	}
+	if rr := saveConnectionsStep(t, app, validConnectionValues()); rr.Code != http.StatusSeeOther {
+		t.Fatalf("connections save returned %d: %s", rr.Code, rr.Body.String())
+	}
 	if rr := saveResourcesStep(t, app, validResourceValues()); rr.Code != http.StatusSeeOther {
 		t.Fatalf("resources save returned %d: %s", rr.Code, rr.Body.String())
 	}
@@ -335,7 +338,7 @@ func TestSetupReviewBackInvalidatesAcceptedReview(t *testing.T) {
 		t.Fatal("review/EULA state survived editing an earlier setup step")
 	}
 	draft, ok := firstRunSetupDrafts.get(app, "session-token")
-	if !ok || draft.CurrentStep != 5 {
+	if !ok || draft.CurrentStep != 6 {
 		t.Fatalf("review back did not return to backups: %#v", draft)
 	}
 }
