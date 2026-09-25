@@ -49,6 +49,35 @@ type setupFilesystemView struct {
 	SystemDisk bool
 }
 
+type setupStoragePartitionView struct {
+	Path       string
+	Size       string
+	Filesystem string
+	Label      string
+	Mountpoint string
+	Formatted  bool
+	SystemDisk bool
+}
+
+type setupStorageFreeSpaceView struct {
+	Device    string
+	Start     string
+	End       string
+	Size      string
+	SizeBytes uint64
+}
+
+type setupStorageDiskView struct {
+	Name       string
+	Path       string
+	Size       string
+	Model      string
+	Transport  string
+	SystemDisk bool
+	Partitions []setupStoragePartitionView
+	FreeSpaces []setupStorageFreeSpaceView
+}
+
 func (a *App) registerSetupWizardStorageRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /setup/storage", a.setupWizardSaveStorage)
 	mux.HandleFunc("POST /setup/backups", a.setupWizardSaveBackups)
@@ -196,9 +225,9 @@ func validateSetupStorage(storage setupStorageDraft, inventory api.AdminStorageD
 			return errors.New("System storage uses the standard JustVoxel Minecraft data directory.")
 		}
 	case "partition":
-		device, ok := safeSetupDevice(inventory, storage.Device)
+		device, ok := safeSetupMinecraftDevice(inventory, storage.Device)
 		if !ok {
-			return errors.New("Choose one of the safe existing XFS, ext4, or Btrfs filesystems shown by JustVoxel.")
+			return errors.New("Choose one of the safe internal XFS, ext4, or Btrfs filesystems shown by JustVoxel.")
 		}
 		mount, err := validateSetupLocalMount(storage.MountPoint, device)
 		if err != nil {
@@ -297,6 +326,118 @@ func setupFilesystemViews(storage api.AdminStorageDiscovery) []setupFilesystemVi
 		})
 	}
 	return out
+}
+
+func setupStorageDiskViews(storage api.AdminStorageDiscovery) ([]setupStorageDiskView, int) {
+	systemDisks := make(map[string]struct{}, len(storage.SystemDisks))
+	for _, path := range storage.SystemDisks {
+		systemDisks[path] = struct{}{}
+	}
+
+	disks := make([]setupStorageDiskView, 0)
+	diskByName := make(map[string]int)
+	diskByPath := make(map[string]int)
+	externalCount := 0
+
+	for _, device := range storage.Devices {
+		if device.Type != "disk" || strings.HasPrefix(strings.ToLower(device.Name), "zram") {
+			continue
+		}
+		if setupDeviceIsExternal(storage, device) {
+			externalCount++
+			continue
+		}
+		_, listedSystem := systemDisks[device.Path]
+		index := len(disks)
+		disks = append(disks, setupStorageDiskView{
+			Name: device.Name, Path: device.Path, Size: humanBytes(device.SizeBytes),
+			Model: strings.TrimSpace(device.Model), Transport: strings.TrimSpace(device.Transport),
+			SystemDisk: device.System || listedSystem || storageBrowserLooksSystem(device),
+		})
+		diskByName[device.Name] = index
+		diskByPath[device.Path] = index
+	}
+
+	for _, device := range storage.Devices {
+		if device.Type != "part" || setupDeviceIsExternal(storage, device) {
+			continue
+		}
+		index, exists := diskByName[device.Parent]
+		if !exists {
+			continue
+		}
+		formatted := safeSetupDeviceValue(device)
+		blank := safeSetupBlankMinecraftDeviceValue(storage, device)
+		if !formatted && !blank {
+			continue
+		}
+		mountpoint := ""
+		if len(device.Mountpoints) > 0 {
+			mountpoint = device.Mountpoints[0]
+		}
+		disks[index].Partitions = append(disks[index].Partitions, setupStoragePartitionView{
+			Path: device.Path, Size: humanBytes(device.SizeBytes), Filesystem: device.Filesystem,
+			Label: device.Label, Mountpoint: mountpoint, Formatted: formatted,
+			SystemDisk: disks[index].SystemDisk,
+		})
+	}
+
+	for _, free := range storage.FreeSpaces {
+		index, exists := diskByPath[free.Device]
+		if !exists || free.SizeBytes < 1024*1024*1024 {
+			continue
+		}
+		disks[index].FreeSpaces = append(disks[index].FreeSpaces, setupStorageFreeSpaceView{
+			Device: free.Device, Start: free.Start, End: free.End,
+			Size: humanBytes(free.SizeBytes), SizeBytes: free.SizeBytes,
+		})
+	}
+
+	return disks, externalCount
+}
+
+func setupDeviceIsExternal(storage api.AdminStorageDiscovery, device api.AdminStorageDevice) bool {
+	transport := strings.ToLower(strings.TrimSpace(device.Transport))
+	if transport == "usb" {
+		return true
+	}
+	if transport != "" || device.Parent == "" {
+		return false
+	}
+	for _, candidate := range storage.Devices {
+		if candidate.Type != "disk" {
+			continue
+		}
+		if candidate.Name == device.Parent || candidate.Path == device.Parent || candidate.Path == "/dev/"+device.Parent {
+			return strings.EqualFold(strings.TrimSpace(candidate.Transport), "usb")
+		}
+	}
+	return false
+}
+
+func safeSetupMinecraftDevice(storage api.AdminStorageDiscovery, path string) (api.AdminStorageDevice, bool) {
+	for _, device := range storage.Devices {
+		if device.Path == path && safeSetupMinecraftDeviceValue(storage, device) {
+			return device, true
+		}
+	}
+	return api.AdminStorageDevice{}, false
+}
+
+func safeSetupMinecraftDeviceValue(storage api.AdminStorageDiscovery, device api.AdminStorageDevice) bool {
+	return !setupDeviceIsExternal(storage, device) && safeSetupDeviceValue(device)
+}
+
+func safeSetupBlankMinecraftDeviceValue(storage api.AdminStorageDiscovery, device api.AdminStorageDevice) bool {
+	if setupDeviceIsExternal(storage, device) || device.Type != "part" || device.ReadOnly || device.Filesystem != "" {
+		return false
+	}
+	for _, mountpoint := range device.Mountpoints {
+		if strings.TrimSpace(mountpoint) != "" {
+			return false
+		}
+	}
+	return true
 }
 
 func safeSetupDevice(storage api.AdminStorageDiscovery, path string) (api.AdminStorageDevice, bool) {
