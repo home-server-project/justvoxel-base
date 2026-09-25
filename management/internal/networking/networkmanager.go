@@ -205,6 +205,115 @@ func (c *Client) WiFiNetworks(ctx context.Context, interfaceName string) ([]WiFi
 	return networks, nil
 }
 
+// CreateCheckpoint asks NetworkManager to preserve the current state of the
+// explicitly named devices. The returned D-Bus handle is internal to the
+// Management Agent and must not cross the appliance API boundary.
+func (c *Client) CreateCheckpoint(ctx context.Context, interfaces []string, rollbackTimeoutSeconds uint32) (Checkpoint, error) {
+	if err := c.ready(); err != nil {
+		return Checkpoint{}, err
+	}
+	if rollbackTimeoutSeconds == 0 {
+		return Checkpoint{}, errors.New("checkpoint rollback timeout must be greater than zero")
+	}
+	if len(interfaces) == 0 {
+		return Checkpoint{}, errors.New("at least one network interface is required")
+	}
+
+	seen := make(map[string]struct{}, len(interfaces))
+	devices := make([]CheckpointDevice, 0, len(interfaces))
+	paths := make([]dbus.ObjectPath, 0, len(interfaces))
+	for _, raw := range interfaces {
+		interfaceName := strings.TrimSpace(raw)
+		if interfaceName == "" {
+			return Checkpoint{}, errors.New("network interface is required")
+		}
+		if _, ok := seen[interfaceName]; ok {
+			continue
+		}
+		seen[interfaceName] = struct{}{}
+
+		path, err := c.devicePath(ctx, interfaceName)
+		if err != nil {
+			return Checkpoint{}, err
+		}
+		paths = append(paths, path)
+		devices = append(devices, CheckpointDevice{Interface: interfaceName, Handle: string(path)})
+	}
+	sort.Slice(devices, func(i, j int) bool {
+		return devices[i].Interface < devices[j].Interface
+	})
+
+	var checkpointPath dbus.ObjectPath
+	if err := c.call(
+		ctx,
+		managerPath,
+		managerInterface+".CheckpointCreate",
+		paths,
+		rollbackTimeoutSeconds,
+		uint32(0),
+	).Store(&checkpointPath); err != nil {
+		return Checkpoint{}, fmt.Errorf("create NetworkManager checkpoint: %w", err)
+	}
+	if !validObjectPath(checkpointPath) {
+		return Checkpoint{}, errors.New("NetworkManager returned an invalid checkpoint")
+	}
+	return Checkpoint{
+		Handle:                 string(checkpointPath),
+		Devices:                devices,
+		RollbackTimeoutSeconds: rollbackTimeoutSeconds,
+	}, nil
+}
+
+// DestroyCheckpoint confirms the current networking state by destroying the
+// rollback checkpoint before its timeout expires.
+func (c *Client) DestroyCheckpoint(ctx context.Context, checkpoint Checkpoint) error {
+	if err := c.ready(); err != nil {
+		return err
+	}
+	path := dbus.ObjectPath(strings.TrimSpace(checkpoint.Handle))
+	if !validObjectPath(path) {
+		return errors.New("invalid NetworkManager checkpoint")
+	}
+	if err := c.call(ctx, managerPath, managerInterface+".CheckpointDestroy", path).Err; err != nil {
+		return fmt.Errorf("destroy NetworkManager checkpoint: %w", err)
+	}
+	return nil
+}
+
+// RollbackCheckpoint restores the checkpoint immediately. Results are keyed by
+// appliance interface name so raw D-Bus paths never escape the backend.
+func (c *Client) RollbackCheckpoint(ctx context.Context, checkpoint Checkpoint) (map[string]RollbackResult, error) {
+	if err := c.ready(); err != nil {
+		return nil, err
+	}
+	path := dbus.ObjectPath(strings.TrimSpace(checkpoint.Handle))
+	if !validObjectPath(path) {
+		return nil, errors.New("invalid NetworkManager checkpoint")
+	}
+
+	var raw map[string]uint32
+	if err := c.call(ctx, managerPath, managerInterface+".CheckpointRollback", path).Store(&raw); err != nil {
+		return nil, fmt.Errorf("rollback NetworkManager checkpoint: %w", err)
+	}
+
+	interfaceByHandle := make(map[string]string, len(checkpoint.Devices))
+	for _, device := range checkpoint.Devices {
+		interfaceByHandle[device.Handle] = device.Interface
+	}
+	results := make(map[string]RollbackResult, len(checkpoint.Devices))
+	for handle, result := range raw {
+		if interfaceName, ok := interfaceByHandle[handle]; ok {
+			results[interfaceName] = rollbackResultName(result)
+		}
+	}
+	for _, device := range checkpoint.Devices {
+		if _, ok := results[device.Interface]; !ok {
+			results[device.Interface] = RollbackResultUnknown
+		}
+	}
+	return results, nil
+}
+
 // RequestWiFiScan asks NetworkManager to refresh its access-point list.
 func (c *Client) RequestWiFiScan(ctx context.Context, interfaceName string) error {
 	path, err := c.devicePath(ctx, interfaceName)
