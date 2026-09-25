@@ -339,13 +339,19 @@ func TestSetupWizardUsesCompactAlignedActions(t *testing.T) {
 	}
 }
 
-func TestSetupWizardAdvancedStorageKeepsReturnContext(t *testing.T) {
+func TestSetupWizardStorageNoLongerLeavesFirstRunForAdvancedStorage(t *testing.T) {
 	content, err := assets.ReadFile("templates/setup_wizard.html")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(content), `href="/settings/storage-provision?from=setup">Advanced Storage</a>`) {
-		t.Fatal("first-run Advanced Storage link does not preserve setup return context")
+	markup := string(content)
+	if strings.Contains(markup, "/settings/storage-provision?from=setup") {
+		t.Fatal("first-run Storage still leaves the wizard for legacy Advanced Storage")
+	}
+	for _, want := range []string{"Use another internal disk", "data-setup-storage-prepare=\"format\"", "data-setup-storage-prepare=\"create_partition\""} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("first-run Storage replacement missing %q", want)
+		}
 	}
 }
 func TestSetupWizardServerStepValidatesAndPersistsChoices(t *testing.T) {
@@ -484,7 +490,7 @@ func TestSetupWizardMinecraftStepAdvancesOnlyAfterValidation(t *testing.T) {
 		t.Fatalf("valid Minecraft form returned %d %q: %s", rr.Code, rr.Header().Get("Location"), rr.Body.String())
 	}
 	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Step 5 of 7") || !strings.Contains(page.Body.String(), "Storage configuration") {
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Step 5 of 7") || !strings.Contains(page.Body.String(), "Use another internal disk") {
 		t.Fatalf("Minecraft step did not advance to storage: %d %s", page.Code, page.Body.String())
 	}
 }
