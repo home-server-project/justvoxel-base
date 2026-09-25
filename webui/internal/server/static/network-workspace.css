@@ -76,3 +76,43 @@
   .network-badge.good{background:#e3f1e8;border-color:#86b99a;color:#184c31}
   .network-badge.danger{background:#fff0f0;border-color:#d58a8a;color:#7f3333}
 }
+
+.network-inline-actions{display:flex;align-items:center;justify-content:flex-end;gap:.4rem;flex-wrap:wrap}
+.network-action-button{min-height:32px;padding:.38rem .65rem;font-size:.74rem}
+.network-wifi-row-actions{display:flex;align-items:center;justify-content:flex-end;gap:.4rem;flex-wrap:wrap;flex-shrink:0}
+.network-wifi-unavailable{color:#7f8b94;font-size:.7rem;font-weight:700}
+.network-checkpoint-banner{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.85rem .95rem;border:1px solid #b18a3e;border-radius:13px;background:#332a18}
+.network-checkpoint-banner>div:first-child{display:grid;gap:.2rem}
+.network-checkpoint-banner strong{font-size:.9rem;color:#ffe0a0}
+.network-checkpoint-banner span{color:#d5c092;font-size:.75rem}
+.network-checkpoint-banner>div:last-child{display:flex;gap:.45rem;flex-wrap:wrap}
+.network-connect-panel{display:grid!important;gap:.75rem;padding:.9rem;border:1px solid #3b4852;border-radius:13px;background:#12191e}
+.network-connect-panel>div:first-child{display:grid;gap:.18rem}
+.network-connect-panel>div:first-child>span{color:#89959e;font-size:.72rem}
+.network-connect-panel form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem}
+.network-connect-panel label{display:grid;gap:.3rem;color:#aeb8bf;font-size:.76rem;font-weight:700}
+.network-connect-panel input,.network-connect-panel select{width:100%;min-height:38px;margin:0;padding:.48rem .58rem;border:1px solid #3b454e;border-radius:8px;background:#0f1519;color:#eef1f4}
+.network-connect-password{grid-column:1/-1}
+.network-connect-hint{grid-column:1/-1;color:#89959e;font-size:.7rem;line-height:1.4}
+.network-connect-actions{grid-column:1/-1;display:flex;justify-content:flex-end;gap:.45rem}
+.network-saved-row>div:first-child{min-width:0}
+.network-saved-row>div:first-child strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.network-saved-row>div:first-child span{display:block;margin-top:.12rem;color:#89959e;font-size:.72rem}
+
+@media(max-width:700px){
+  .network-checkpoint-banner{align-items:flex-start;flex-direction:column}
+  .network-checkpoint-banner>div:last-child{width:100%}
+  .network-checkpoint-banner button{flex:1}
+  .network-wifi-row{align-items:flex-start}
+  .network-wifi-row-actions{max-width:45%}
+  .network-connect-panel form{grid-template-columns:1fr}
+  .network-connect-password,.network-connect-hint,.network-connect-actions{grid-column:1}
+}
+
+@media(prefers-color-scheme:light){
+  .network-checkpoint-banner{background:#fff6df;border-color:#d2ae61}
+  .network-checkpoint-banner strong{color:#62460d}
+  .network-checkpoint-banner span{color:#7a6336}
+  .network-connect-panel{background:#f7f9fa;border-color:#d9dfe3}
+  .network-connect-panel input,.network-connect-panel select{background:#fff;border-color:#cbd4da;color:#1a2025}
+}
