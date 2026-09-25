@@ -1,4 +1,11 @@
 (() => {
+  if (!document.querySelector('link[href="/static/network-workspace.css"]')) {
+    const stylesheet = document.createElement("link");
+    stylesheet.rel = "stylesheet";
+    stylesheet.href = "/static/network-workspace.css";
+    document.head.appendChild(stylesheet);
+  }
+
   const openButton = document.querySelector("[data-network-open]");
   const dialog = document.querySelector("[data-network-workspace-dialog]");
   if (!openButton || !dialog || typeof setupWorkspaceWindow !== "function") return;
