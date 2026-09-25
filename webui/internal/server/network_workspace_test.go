@@ -43,7 +43,7 @@ func (f *fakeNetworkAPI) WiFiNetworks(_ context.Context, session, interfaceName 
 	}
 	return api.WiFiNetworksResponse{
 		Interface: interfaceName,
-		Networks: []api.WiFiNetwork{{SSID: "Home WiFi", Strength: 84, Security: "wpa-personal"}},
+		Networks:  []api.WiFiNetwork{{SSID: "Home WiFi", Strength: 84, Security: "wpa-personal"}},
 	}, nil
 }
 
