@@ -46,7 +46,7 @@
       if (type) type.value = 'system';
       if (device) device.value = '';
       if (mount) mount.value = '';
-      if (path) path.value = '/var/lib/justvoxel/minecraft';
+      if (path) path.value = systemButton?.dataset.systemPath || '/var/lib/justvoxel/minecraft';
       existingButtons.forEach((button) => button.classList.remove('is-selected'));
       if (selectedBox) selectedBox.hidden = true;
       setPanels('system');
