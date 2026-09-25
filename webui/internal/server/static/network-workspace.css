@@ -1,0 +1,78 @@
+.network-workspace-dialog{
+  width:min(900px,calc(100vw - 1rem));
+  height:min(760px,calc(100dvh - 1rem));
+  min-width:min(520px,calc(100vw - 1rem));
+  min-height:420px;
+  max-width:calc(100vw - 1rem);
+  max-height:calc(100dvh - 1rem);
+  padding:0;
+  overflow:hidden;
+  resize:both;
+  border:1px solid #3b454e;
+  border-radius:16px;
+  background:#171d22;
+  color:#eef1f4;
+  box-shadow:0 28px 80px #000b
+}
+.network-workspace-shell{display:flex;flex-direction:column;height:100%;min-height:0}
+.network-workspace-header{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;padding:1rem 1.1rem .8rem;border-bottom:1px solid #303942;cursor:move;touch-action:none;user-select:none}
+.network-workspace-header h2{margin:.1rem 0 0;font-size:1.25rem}
+.network-workspace-header-actions{display:flex;gap:.45rem}
+.network-workspace-body{flex:1;min-height:0;overflow:auto;padding:1rem 1.1rem 1.1rem;overscroll-behavior:contain}
+.network-workspace-state{margin:0 0 .75rem;color:#9ca7b0;font-size:.8rem}
+.network-workspace-state:empty{display:none}
+.network-workspace-view{display:grid;gap:.8rem}
+.network-overview{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1rem;border:1px solid #365444;border-radius:14px;background:#16231c}
+.network-overview-primary{display:grid;gap:.2rem}
+.network-overview-primary strong{font-size:1.15rem}
+.network-overview-primary span{color:#9ca7b0;font-size:.78rem}
+.network-overview-status{display:flex;justify-content:flex-end;gap:.4rem;flex-wrap:wrap}
+.network-badge{display:inline-flex;align-items:center;min-height:28px;padding:.28rem .55rem;border:1px solid #3b454e;border-radius:999px;background:#20282e;color:#d5dde3;font-size:.72rem;font-weight:700;text-transform:capitalize}
+.network-badge.good{border-color:#4f8b69;background:#20382b;color:#c8f2d7}
+.network-badge.danger{border-color:#8c4f4a;background:#3a2423;color:#ffc5bd}
+.network-badge.muted{color:#929da5}
+.network-devices{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:.8rem}
+.network-device-card,.network-wifi-section,.network-saved{padding:.9rem;border:1px solid #303942;border-radius:13px;background:#13191e}
+.network-device-heading,.network-section-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:.8rem}
+.network-device-heading>div,.network-section-heading>div{display:grid;gap:.18rem}
+.network-device-kind,.network-section-heading span{color:#89959e;font-size:.68rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase}
+.network-device-heading strong{font-size:1.02rem}
+.network-device-summary{display:grid;gap:.35rem;margin-top:.75rem}
+.network-detail-row{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;font-size:.8rem}
+.network-detail-row>span{color:#89959e}
+.network-detail-row>strong{max-width:68%;font-weight:650;text-align:right;overflow-wrap:anywhere}
+.network-device-details{margin-top:.75rem;border-top:1px solid #283038;padding-top:.65rem}
+.network-device-details summary,.network-saved summary{cursor:pointer;color:#b8c3ca;font-size:.78rem;font-weight:700}
+.network-detail-grid{display:grid;gap:.38rem;margin-top:.65rem}
+.network-section-heading h3{margin:0;font-size:1rem}
+.network-scan-button{min-height:34px;padding:.42rem .7rem}
+.network-wifi-list,.network-saved-list{display:grid;gap:.35rem;margin-top:.7rem}
+.network-wifi-row,.network-saved-row{display:flex;align-items:center;justify-content:space-between;gap:.8rem;padding:.62rem .7rem;border:1px solid #283038;border-radius:10px;background:#10161a}
+.network-wifi-row.active{border-color:#4f8b69;background:#18271f}
+.network-wifi-row>div,.network-saved-row{min-width:0}
+.network-wifi-row strong,.network-saved-row strong{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.86rem}
+.network-wifi-row span:not(.network-badge),.network-saved-row span{display:block;margin-top:.12rem;color:#89959e;font-size:.72rem}
+.network-empty{margin:.7rem 0 0;color:#89959e;font-size:.8rem}
+.network-saved{padding:.75rem .9rem}
+
+@media(max-width:700px){
+  .network-workspace-dialog{inset:52px .25rem .25rem .25rem!important;width:auto!important;height:auto!important;min-width:0;min-height:0;max-width:none;max-height:none;resize:none;border-radius:12px}
+  .network-workspace-header{padding:.85rem .9rem .7rem;cursor:default;touch-action:auto}
+  .network-workspace-body{padding:.8rem .9rem}
+  .network-overview{align-items:flex-start;flex-direction:column}
+  .network-overview-status{justify-content:flex-start}
+  .network-devices{grid-template-columns:1fr}
+}
+
+@media(prefers-color-scheme:light){
+  .network-workspace-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025}
+  .network-workspace-header{border-color:#d9dfe3}
+  .network-overview{background:#eef7f1;border-color:#a7ccb5}
+  .network-device-card,.network-wifi-section,.network-saved{background:#f7f9fa;border-color:#d9dfe3}
+  .network-device-details{border-color:#e2e7ea}
+  .network-wifi-row,.network-saved-row{background:#fff;border-color:#e2e7ea}
+  .network-wifi-row.active{background:#edf7f1;border-color:#86b99a}
+  .network-badge{background:#eef2f4;border-color:#cbd4da;color:#34414a}
+  .network-badge.good{background:#e3f1e8;border-color:#86b99a;color:#184c31}
+  .network-badge.danger{background:#fff0f0;border-color:#d58a8a;color:#7f3333}
+}
