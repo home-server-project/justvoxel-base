@@ -1075,6 +1075,7 @@
     try {
       const payload = await migrationJSON("/api/new-storage/minecraft-data/current");
       if (payload?.operation) {
+        if (migrationDialog && !migrationDialog.open) migrationDialog.showModal();
         showMigrationProgress(payload.operation);
         return true;
       }
@@ -1198,6 +1199,8 @@
   migrationRefresh?.addEventListener("click", () => window.location.reload());
   migrationDialog?.addEventListener("click", (event) => { if (event.target === migrationDialog) closeMigrationDialog(); });
   migrationDialog?.addEventListener("cancel", (event) => { if (migrationApplying) event.preventDefault(); else stopMigrationPolling(); });
+
+  void showCurrentMigrationIfAny();
 
   function actionLabel(action) {
     if (action === "mount-for-now") return "Mount for now";
