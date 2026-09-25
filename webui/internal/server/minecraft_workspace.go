@@ -24,10 +24,10 @@ type minecraftWorkspaceOperationsAPI interface {
 }
 
 type minecraftWorkspaceSettingsResponse struct {
-	OK            bool                            `json:"ok"`
-	Configured    bool                            `json:"configured"`
-	Minecraft     api.AdminMinecraftConfiguration `json:"minecraft"`
-	Defaults      api.AdminSetupDefaults          `json:"defaults"`
+	OK         bool                            `json:"ok"`
+	Configured bool                            `json:"configured"`
+	Minecraft  api.AdminMinecraftConfiguration `json:"minecraft"`
+	Defaults   api.AdminSetupDefaults          `json:"defaults"`
 }
 
 type minecraftWorkspaceTextResponse struct {

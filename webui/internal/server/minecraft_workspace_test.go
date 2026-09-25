@@ -209,7 +209,6 @@ func TestMinecraftWorkspaceOperatorWhitelistAndLogsAreNativeJSON(t *testing.T) {
 	}
 }
 
-
 func TestMinecraftWorkspaceClientDoesNotRenderLegacyPages(t *testing.T) {
 	sourceBytes, err := assets.ReadFile("static/app.js")
 	if err != nil {
