@@ -288,30 +288,82 @@
   </dialog>
 
   <dialog class="storage-action-dialog storage-minecraft-dialog" data-storage-minecraft-dialog>
-    <form class="storage-action-card" method="post" action="/settings/data-migration/review">
-      <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <input type="hidden" name="operation" value="use_partition">
-      <input type="hidden" name="device" data-storage-minecraft-device>
-      <input type="hidden" name="size_gib" value="all">
+    <div class="storage-action-card">
       <div class="storage-detail-heading">
-        <div><p class="eyebrow">Minecraft data storage</p><h2>Use this filesystem</h2></div>
+        <div><p class="eyebrow">Minecraft data storage</p><h2 data-storage-minecraft-title>Use this filesystem</h2></div>
         <button class="storage-dialog-close" type="button" data-storage-minecraft-close aria-label="Close Minecraft storage selection">×</button>
       </div>
-      <p class="storage-minecraft-selected">Selected partition: <code data-storage-minecraft-selected></code></p>
-      <p class="muted">This starts the existing safe Minecraft data migration flow. Nothing changes until the Management Agent builds the Review plan and you explicitly apply it.</p>
-      <label>Mount point
-        <input name="mount_point" data-storage-minecraft-mount required autocomplete="off">
-      </label>
-      <p class="muted compact" data-storage-minecraft-mount-note></p>
-      <label>Minecraft data directory
-        <input name="path" data-storage-minecraft-path required autocomplete="off">
-      </label>
-      <p class="muted compact">The target directory must be empty. The existing migration backend revalidates the filesystem, capacity, players and current configuration before Apply.</p>
-      <div class="action-row storage-action-buttons">
-        <button class="secondary" type="button" data-storage-minecraft-cancel>Cancel</button>
-        <button type="submit">Review migration</button>
+
+      <div data-storage-minecraft-setup>
+        <input type="hidden" value="" data-storage-minecraft-device>
+        <p class="storage-minecraft-selected">Selected partition: <code data-storage-minecraft-selected></code></p>
+        <p class="muted">Nothing changes until the Management Agent builds the Review plan and you explicitly apply it.</p>
+        <label>Mount point
+          <input data-storage-minecraft-mount required autocomplete="off">
+        </label>
+        <p class="muted compact" data-storage-minecraft-mount-note></p>
+        <label>Minecraft data directory
+          <input data-storage-minecraft-path required autocomplete="off">
+        </label>
+        <p class="muted compact">The target directory must be empty. Apply revalidates the filesystem, capacity, players and current configuration before migration starts.</p>
+        <p class="storage-action-error" data-storage-minecraft-error hidden></p>
+        <div class="action-row storage-action-buttons">
+          <button class="secondary" type="button" data-storage-minecraft-cancel>Cancel</button>
+          <button type="button" data-storage-minecraft-review>Review migration</button>
+        </div>
       </div>
-    </form>
+
+      <div data-storage-minecraft-review-panel hidden>
+        <dl class="storage-action-review">
+          <div><dt>Current Minecraft data</dt><dd><code data-storage-minecraft-current-path></code></dd></div>
+          <div><dt>Target device</dt><dd><code data-storage-minecraft-review-device></code></dd></div>
+          <div><dt>Filesystem</dt><dd data-storage-minecraft-review-filesystem></dd></div>
+          <div><dt>Target mount point</dt><dd><code data-storage-minecraft-review-mount></code></dd></div>
+          <div><dt>New Minecraft data path</dt><dd><code data-storage-minecraft-review-path></code></dd></div>
+          <div><dt>Reviewed capacity</dt><dd data-storage-minecraft-review-capacity></dd></div>
+        </dl>
+        <div class="storage-action-warnings" data-storage-minecraft-warnings></div>
+        <label class="storage-whole-player-confirmation" data-storage-minecraft-players-field hidden>
+          <input type="checkbox" data-storage-minecraft-players>
+          Continue even though players are currently online.
+          <span class="muted compact" data-storage-minecraft-players-note></span>
+        </label>
+        <div data-storage-minecraft-destructive-field hidden>
+          <div class="confirmation-example confirmation-required">
+            <span>The Management Agent requires this exact storage confirmation:</span>
+            <code data-storage-minecraft-destructive-phrase></code>
+          </div>
+          <label>Destructive storage confirmation
+            <input data-storage-minecraft-destructive autocomplete="off" spellcheck="false">
+          </label>
+        </div>
+        <label><strong>Type MIGRATE to start this reviewed Minecraft data migration</strong>
+          <input data-storage-minecraft-confirmation autocomplete="off" spellcheck="false">
+        </label>
+        <p class="storage-action-error" data-storage-minecraft-review-error hidden></p>
+        <div class="action-row storage-action-buttons">
+          <button class="secondary" type="button" data-storage-minecraft-back>Back</button>
+          <button type="button" data-storage-minecraft-apply disabled>Start migration</button>
+        </div>
+      </div>
+
+      <div data-storage-minecraft-progress hidden>
+        <div class="storage-minecraft-progress-heading">
+          <span class="badge" data-storage-minecraft-progress-state>Working</span>
+          <strong data-storage-minecraft-progress-stage>Preparing migration</strong>
+        </div>
+        <p data-storage-minecraft-progress-status>Minecraft data migration is running.</p>
+        <div class="details">Operation: <code data-storage-minecraft-progress-id></code></div>
+        <div class="notice" data-storage-minecraft-reconnect hidden><strong>Reconnecting to JustVoxel…</strong><br>Migration may still be running. Closing this dialog does not start another migration.</div>
+        <div class="notice success" data-storage-minecraft-success hidden><strong>Minecraft data migration completed successfully.</strong><br>The migrated storage/runtime passed validation. The old Minecraft data was intentionally retained.</div>
+        <div class="notice warning" data-storage-minecraft-rollback hidden><strong>Migration rolled back safely.</strong><br>The original Minecraft configuration/runtime remains active.</div>
+        <div class="notice error" data-storage-minecraft-attention hidden><strong>Migration needs administrator attention.</strong><br>Do not start another migration until the preserved recovery state is reviewed.</div>
+        <div class="action-row storage-action-buttons">
+          <button class="secondary" type="button" data-storage-minecraft-progress-close>Close</button>
+          <button type="button" data-storage-minecraft-refresh hidden>Refresh Storage</button>
+        </div>
+      </div>
+    </div>
   </dialog>
 
   <dialog class="storage-action-dialog" data-storage-action-dialog>
