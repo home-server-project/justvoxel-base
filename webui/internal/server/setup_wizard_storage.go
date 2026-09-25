@@ -74,9 +74,9 @@ func (a *App) setupWizardSaveStorage(w http.ResponseWriter, r *http.Request) {
 
 	if r.FormValue("direction") == "back" {
 		draft.Storage.Complete = false
-		draft.CurrentStep = 3
+		draft.CurrentStep = 4
 		firstRunSetupDrafts.save(a, session, draft)
-		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "storage settings changed; user returned to Minecraft", draft)
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "storage settings changed; user returned to Version", draft)
 		http.Redirect(w, r, "/setup", http.StatusSeeOther)
 		return
 	}
@@ -89,7 +89,7 @@ func (a *App) setupWizardSaveStorage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	draft.Storage.Complete = true
-	draft.CurrentStep = 5
+	draft.CurrentStep = 6
 	firstRunSetupDrafts.save(a, session, draft)
 	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "storage settings saved", draft)
 	http.Redirect(w, r, "/setup", http.StatusSeeOther)
@@ -115,7 +115,7 @@ func (a *App) setupWizardSaveBackups(w http.ResponseWriter, r *http.Request) {
 
 	if r.FormValue("direction") == "back" {
 		draft.Backups.Complete = false
-		draft.CurrentStep = 4
+		draft.CurrentStep = 5
 		firstRunSetupDrafts.save(a, session, draft)
 		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "backup settings changed; user returned to Storage", draft)
 		http.Redirect(w, r, "/setup", http.StatusSeeOther)
@@ -130,7 +130,7 @@ func (a *App) setupWizardSaveBackups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	draft.Backups.Complete = true
-	draft.CurrentStep = 6
+	draft.CurrentStep = 7
 	firstRunSetupDrafts.save(a, session, draft)
 	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "backup settings saved; configuration ready for Review", draft)
 	http.Redirect(w, r, "/setup/review", http.StatusSeeOther)
