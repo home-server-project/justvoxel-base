@@ -21,13 +21,49 @@
 </header>
 <main class="setup-shell">
   {{if not .Started}}
-  <section class="panel setup-welcome">
-    <p class="eyebrow">First setup</p>
-    <h1>Welcome to JustVoxel</h1>
-    <p class="setup-lead">Your Minecraft server has not been configured yet. This guided setup will collect the server, Minecraft, storage and backup choices before anything is applied.</p>
-    <div class="notice setup-safe-note"><strong>Safe to explore.</strong><span>Moving through setup does not change Minecraft or storage. The final configuration will be reviewed before it can be applied.</span></div>
-    <ol class="setup-overview" aria-label="Setup steps">{{range .Steps}}<li><span class="setup-number">{{.Number}}</span><div><strong>{{.Name}}</strong><span>{{.Description}}</span></div></li>{{end}}</ol>
-    <div class="setup-actions"><form method="post" action="/setup/start"><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit">Start setup</button></form></div>
+  <section class="panel setup-welcome setup-entry">
+    <p class="eyebrow">Minecraft setup</p>
+    <h1>Set up your Minecraft server</h1>
+    <p class="setup-lead">Use recommended defaults to get running quickly, or choose Advanced setup to customize Minecraft, storage and backups before anything is applied.</p>
+    <div class="notice setup-safe-note"><strong>You can change these settings later.</strong><span>After setup, Minecraft settings, storage, backups and other options remain available from the JustVoxel Control Center.</span></div>
+
+    <div class="setup-mode-grid">
+      <section class="setup-mode-card setup-mode-recommended">
+        <span class="setup-mode-kicker">Fast path</span>
+        <h2>Recommended setup</h2>
+        <p>JustVoxel chooses safe defaults for memory, ports, system storage, automatic backups, timezone and Minecraft version.</p>
+        <form method="post" action="/setup/recommended" class="setup-recommended-form">
+          <input type="hidden" name="csrf" value="{{.CSRF}}">
+          <fieldset class="setup-server-types">
+            <legend>Choose server software</legend>
+            <label class="setup-server-type is-available">
+              <input type="radio" name="server_type" value="paper" checked>
+              <span><strong>Paper</strong><small>Recommended · plugins · Bedrock cross-play enabled by default when supported.</small></span>
+            </label>
+            <label class="setup-server-type is-placeholder" aria-disabled="true">
+              <input type="radio" name="server_type" value="purpur" disabled>
+              <span><strong>Purpur</strong><small>Coming next · placeholder only in this cycle.</small></span>
+            </label>
+            <label class="setup-server-type is-placeholder" aria-disabled="true">
+              <input type="radio" name="server_type" value="vanilla" disabled>
+              <span><strong>Vanilla</strong><small>Coming next · placeholder only in this cycle.</small></span>
+            </label>
+          </fieldset>
+          <button type="submit">Use recommended setup</button>
+        </form>
+      </section>
+
+      <section class="setup-mode-card setup-mode-advanced">
+        <span class="setup-mode-kicker">Custom path</span>
+        <h2>Advanced setup</h2>
+        <p>Walk through the full guided setup and choose resources, ports, version policy, storage and backup destination yourself.</p>
+        <form method="post" action="/setup/start">
+          <input type="hidden" name="csrf" value="{{.CSRF}}">
+          <button class="secondary" type="submit">Start advanced setup</button>
+        </form>
+      </section>
+    </div>
+
     <div class="setup-terminal-note"><span>Prefer the terminal?</span><code>mjust setup</code><small>Available from a local console or SSH.</small></div>
   </section>
   {{else}}
