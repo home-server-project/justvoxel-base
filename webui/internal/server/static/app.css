@@ -504,3 +504,32 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .system-about-variant{display:flex;justify-content:flex-end;margin-bottom:.65rem}
 @media(max-width:700px){.system-workspace-dialog{inset:52px .25rem .25rem .25rem!important;width:auto!important;height:auto!important;min-width:0;min-height:0;max-width:none;max-height:none;resize:none;border-radius:12px}.system-workspace-header{padding:.85rem .9rem .7rem;cursor:default;touch-action:auto}.system-workspace-tabs{padding:.55rem .9rem}.system-workspace-body{padding:.8rem .9rem}}
 @media(prefers-color-scheme:light){.system-workspace-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025}.system-workspace-header,.system-workspace-tabs{border-color:#d9dfe3}.system-workspace-tabs{background:#f7f9fa}.system-workspace-tabs button{color:#56636c}.system-workspace-tabs button:hover,.system-workspace-tabs button:focus-visible{background:#e9eef1;color:#1a2025}.system-workspace-tabs button[aria-selected="true"]{background:#e3f1e8;border-color:#86b99a;color:#184c31}}
+
+
+/* UPS monitoring inside the shared System workspace. */
+.system-ups-overview{display:grid;gap:1rem}
+.system-ups-source{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.7rem .8rem;border:1px solid #303942;border-radius:10px;background:#11171b}
+.system-ups-source span{color:#9ca7b0;font-size:.78rem;text-transform:uppercase;letter-spacing:.04em}
+.system-ups-notice{margin:0}
+.system-ups-device-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.8rem}
+.system-ups-card{padding:.9rem;border:1px solid #303942;border-radius:12px;background:#11171b}
+.system-ups-card-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:.75rem;margin-bottom:.8rem}
+.system-ups-card-heading h3{margin:0;font-size:1rem}
+.system-ups-card-heading small{display:block;margin-top:.15rem;color:#87939c}
+.system-ups-status{padding:.25rem .5rem;border-radius:999px;background:#2b3339;color:#d7dde1;font-size:.75rem;font-weight:800;white-space:nowrap}
+.system-ups-status-online{background:#21402d;color:#c9f4d7}
+.system-ups-status-on_battery{background:#554718;color:#fff1a8}
+.system-ups-status-low_battery{background:#5a2525;color:#ffd1d1}
+.system-ups-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.55rem}
+.system-ups-metric{min-width:0;padding:.55rem;border-radius:9px;background:#1c242a}
+.system-ups-metric span{display:block;color:#94a0a8;font-size:.72rem}
+.system-ups-metric strong{display:block;margin-top:.12rem;font-size:.9rem;overflow-wrap:anywhere}
+.system-ups-source-panel{padding:.9rem;border:1px solid #303942;border-radius:12px}
+.system-ups-source-panel h3{margin:0 0 .25rem}
+.system-ups-source-panel p{margin:.15rem 0 .8rem;color:#aab4bb}
+.system-ups-source-form{display:grid;grid-template-columns:1.2fr 1.7fr .7fr auto;gap:.65rem;align-items:end}
+.system-ups-source-form label{display:grid;gap:.3rem;color:#aeb8c0;font-size:.78rem;font-weight:700}
+.system-ups-source-form input,.system-ups-source-form select{min-height:38px;padding:.45rem .55rem;border:1px solid #3a454d;border-radius:8px;background:#11171b;color:#eef1f4}
+@media(max-width:800px){.system-ups-source-form{grid-template-columns:1fr 1fr}.system-ups-source-form button{align-self:end}}
+@media(max-width:560px){.system-ups-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.system-ups-source-form{grid-template-columns:1fr}.system-ups-source{align-items:flex-start;flex-direction:column;gap:.2rem}}
+@media(prefers-color-scheme:light){.system-ups-source,.system-ups-card,.system-ups-metric{background:#f7f9fa;border-color:#d9dfe3}.system-ups-source-panel{border-color:#d9dfe3}.system-ups-source-form input,.system-ups-source-form select{background:#fff;border-color:#cbd3d8;color:#1a2025}.system-ups-source-panel p,.system-ups-source-form label{color:#5c6870}}

@@ -145,6 +145,7 @@
   <input type="hidden" value="{{.CSRF}}" data-system-actions-csrf>
   <input type="hidden" value="{{.CSRF}}" data-system-update-csrf>
   <input type="hidden" value="{{.CSRF}}" data-system-monitor-csrf>
+  <input type="hidden" value="{{.CSRF}}" data-system-ups-csrf>
 
 
   <dialog class="workspace-window system-workspace-dialog" data-workspace-window="system" data-system-workspace-dialog aria-labelledby="system-workspace-title">
@@ -165,6 +166,7 @@
         <button class="nav-admin-only" type="button" data-system-tab="users" aria-selected="false">Users</button>
         <button class="nav-admin-only" type="button" data-system-tab="security" aria-selected="false">Security</button>
         <button type="button" data-system-tab="about" aria-selected="false">About</button>
+        <button type="button" data-system-tab="ups" data-system-ups-tab aria-selected="false" hidden>UPS</button>
       </nav>
       <div class="system-workspace-body">
         <p class="system-workspace-state" data-system-state>Choose a section.</p>

@@ -212,6 +212,7 @@ func serve(socket string) error {
 	registerAdminSystemUpdateRoutes(mux, s)
 	registerAdminSystemUpdateRebootRoutes(mux, s)
 	registerSystemMonitorProfileRoutes(mux, s)
+	registerUPSRoutes(mux, s)
 
 	httpServer := &http.Server{
 		Handler:           s.requirePeer(mux),

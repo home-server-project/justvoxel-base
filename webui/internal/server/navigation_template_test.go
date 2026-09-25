@@ -180,6 +180,8 @@ func TestSystemWorkspaceMigrationContract(t *testing.T) {
 		`data-system-tab="users"`,
 		`data-system-tab="security"`,
 		`data-system-tab="about"`,
+		`data-system-tab="ups"`,
+		`data-system-ups-tab`,
 		`href="/settings/validation"`,
 		`href="/settings/activity"`,
 		`href="/settings/users"`,
@@ -205,6 +207,8 @@ func TestSystemWorkspaceMigrationContract(t *testing.T) {
 		`systemFetchPage("/settings/authentication")`,
 		`systemFetchPage("/password")`,
 		`systemFetchPage("/about")`,
+		`fetch("/api/ups"`,
+		`action.pathname === "/api/ups/source"`,
 		`["Validation passed", "System health check passed"]`,
 	} {
 		if !strings.Contains(behavior, want) {

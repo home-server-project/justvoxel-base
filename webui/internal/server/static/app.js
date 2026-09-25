@@ -2451,7 +2451,10 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   const content = systemWorkspaceDialog.querySelector("[data-system-workspace-content]");
   const tabs = Array.from(systemWorkspaceDialog.querySelectorAll("[data-system-tab]"));
   const administratorTabs = new Set(["health", "users", "security"]);
+  const upsTabButton = systemWorkspaceDialog.querySelector("[data-system-ups-tab]");
+  const upsCSRF = document.querySelector("[data-system-ups-csrf]");
   let identity = null;
+  let upsAvailable = false;
   let currentTab = "health";
   let initialized = false;
   let loadSequence = 0;
@@ -2715,6 +2718,242 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     renderAboutMarkup(markup);
   };
 
+  const systemUPSStateLabel = (value) => {
+    const labels = {
+      online: "Online",
+      on_battery: "On battery",
+      low_battery: "Low battery",
+      bypass: "Bypass",
+      unknown: "Unknown",
+    };
+    return labels[value] || "Unknown";
+  };
+
+  const systemUPSNumber = (value, suffix = "") => {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
+    const number = Number(value);
+    const digits = Math.abs(number % 1) > 0.001 ? 1 : 0;
+    return number.toFixed(digits) + suffix;
+  };
+
+  const systemUPSRuntime = (seconds) => {
+    if (seconds === null || seconds === undefined || Number(seconds) < 0) return "—";
+    const total = Math.round(Number(seconds));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    if (hours > 0) return hours + "h " + String(minutes).padStart(2, "0") + "m";
+    return minutes + "m";
+  };
+
+  const systemUPSMetric = (label, value) => {
+    const item = document.createElement("div");
+    item.className = "system-ups-metric";
+    const name = document.createElement("span");
+    name.textContent = label;
+    const data = document.createElement("strong");
+    data.textContent = value;
+    item.append(name, data);
+    return item;
+  };
+
+  const renderUPSMarkup = (snapshot, user) => {
+    if (!content) return;
+    const root = document.createElement("div");
+    root.className = "system-ups-overview";
+
+    const sourceBar = document.createElement("div");
+    sourceBar.className = "system-ups-source";
+    const sourceLabel = document.createElement("span");
+    sourceLabel.textContent = "Source";
+    const sourceValue = document.createElement("strong");
+    sourceValue.textContent = snapshot.source?.mode === "remote"
+      ? (snapshot.source.host + ":" + snapshot.source.port)
+      : "This machine";
+    sourceBar.append(sourceLabel, sourceValue);
+    root.appendChild(sourceBar);
+
+    if (snapshot.message) {
+      const notice = document.createElement("div");
+      notice.className = "notice system-ups-notice";
+      notice.textContent = snapshot.message;
+      root.appendChild(notice);
+    }
+
+    if (Array.isArray(snapshot.devices) && snapshot.devices.length > 0) {
+      const grid = document.createElement("div");
+      grid.className = "system-ups-device-grid";
+      snapshot.devices.forEach((device) => {
+        const card = document.createElement("section");
+        card.className = "system-ups-card";
+
+        const heading = document.createElement("div");
+        heading.className = "system-ups-card-heading";
+        const titleWrap = document.createElement("div");
+        const title = document.createElement("h3");
+        title.textContent = device.display_name || device.name || "UPS";
+        const technical = document.createElement("small");
+        technical.textContent = device.name || "";
+        titleWrap.append(title, technical);
+        const status = document.createElement("span");
+        status.className = "system-ups-status system-ups-status-" + String(device.state || "unknown");
+        status.textContent = systemUPSStateLabel(device.state);
+        heading.append(titleWrap, status);
+
+        const metrics = document.createElement("div");
+        metrics.className = "system-ups-metrics";
+        metrics.append(
+          systemUPSMetric("Battery", systemUPSNumber(device.battery_charge, "%")),
+          systemUPSMetric("Runtime", systemUPSRuntime(device.battery_runtime_seconds)),
+          systemUPSMetric("Load", systemUPSNumber(device.load_percent, "%")),
+          systemUPSMetric("Input", systemUPSNumber(device.input_voltage, " V")),
+          systemUPSMetric("Output", systemUPSNumber(device.output_voltage, " V")),
+          systemUPSMetric("Input frequency", systemUPSNumber(device.input_frequency, " Hz")),
+          systemUPSMetric("Output frequency", systemUPSNumber(device.output_frequency, " Hz")),
+          systemUPSMetric("Battery voltage", systemUPSNumber(device.battery_voltage, " V")),
+          systemUPSMetric("Temperature", systemUPSNumber(device.temperature, " °C"))
+        );
+        card.append(heading, metrics);
+        grid.appendChild(card);
+      });
+      root.appendChild(grid);
+    }
+
+    if (user?.role === "administrator") {
+      const panel = document.createElement("section");
+      panel.className = "system-ups-source-panel";
+      const heading = document.createElement("h3");
+      heading.textContent = "Monitoring source";
+      const help = document.createElement("p");
+      help.textContent = "Read a UPS connected to this HWS machine, or monitor a NUT server on another machine.";
+
+      const form = document.createElement("form");
+      form.method = "post";
+      form.action = "/api/ups/source";
+      form.className = "system-ups-source-form";
+
+      const csrf = document.createElement("input");
+      csrf.type = "hidden";
+      csrf.name = "csrf";
+      csrf.value = upsCSRF?.value || "";
+
+      const modeLabel = document.createElement("label");
+      modeLabel.textContent = "Source";
+      const mode = document.createElement("select");
+      mode.name = "mode";
+      const localOption = document.createElement("option");
+      localOption.value = "local";
+      localOption.textContent = "UPS connected to this machine";
+      const remoteOption = document.createElement("option");
+      remoteOption.value = "remote";
+      remoteOption.textContent = "UPS on another machine";
+      mode.append(localOption, remoteOption);
+      mode.value = snapshot.source?.mode === "remote" ? "remote" : "local";
+      modeLabel.appendChild(mode);
+
+      const hostLabel = document.createElement("label");
+      hostLabel.textContent = "NUT server";
+      const host = document.createElement("input");
+      host.name = "host";
+      host.type = "text";
+      host.autocomplete = "off";
+      host.placeholder = "192.168.0.51 or blackbox.lan";
+      host.value = snapshot.source?.host || "";
+      hostLabel.appendChild(host);
+
+      const portLabel = document.createElement("label");
+      portLabel.textContent = "Port";
+      const port = document.createElement("input");
+      port.name = "port";
+      port.type = "number";
+      port.min = "1";
+      port.max = "65535";
+      port.value = String(snapshot.source?.port || 3493);
+      portLabel.appendChild(port);
+
+      const save = document.createElement("button");
+      save.type = "submit";
+      save.className = "button primary";
+      save.textContent = "Save and verify";
+
+      const syncRemoteFields = () => {
+        const remote = mode.value === "remote";
+        host.disabled = !remote;
+        port.disabled = !remote;
+        host.required = remote;
+      };
+      mode.addEventListener("change", syncRemoteFields);
+      syncRemoteFields();
+
+      form.append(csrf, modeLabel, hostLabel, portLabel, save);
+      panel.append(heading, help, form);
+      root.appendChild(panel);
+    }
+
+    content.replaceChildren(root);
+  };
+
+  const fetchUPSStatus = async () => {
+    const response = await fetch("/api/ups", {
+      method: "GET",
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (systemHandleAuth(response)) return null;
+    if (!response.ok) throw new Error("UPS monitoring is unavailable.");
+    return response.json();
+  };
+
+  const refreshUPSCapability = async () => {
+    const snapshot = await fetchUPSStatus();
+    if (!snapshot) return null;
+    upsAvailable = Boolean(snapshot.available);
+    if (upsTabButton) upsTabButton.hidden = !upsAvailable;
+    if (!upsAvailable && currentTab === "ups") {
+      currentTab = identity?.role === "administrator" ? "health" : "history";
+      syncSystemTabs();
+    }
+    return snapshot;
+  };
+
+  const loadUPS = async (sequence) => {
+    const snapshot = await fetchUPSStatus();
+    if (!snapshot || sequence !== loadSequence) return;
+    upsAvailable = Boolean(snapshot.available);
+    if (upsTabButton) upsTabButton.hidden = !upsAvailable;
+    if (!upsAvailable) throw new Error("UPS monitoring is unavailable on this JustVoxel variant.");
+    renderUPSMarkup(snapshot, await loadIdentity());
+  };
+
+  const submitUPSSource = async (form) => {
+    const body = new URLSearchParams();
+    new FormData(form).forEach((value, key) => body.append(key, String(value)));
+    const submitter = form.querySelector('button[type="submit"]');
+    if (submitter) submitter.disabled = true;
+    if (state) state.textContent = "Verifying NUT source…";
+    try {
+      const response = await systemFetchPage("/api/ups/source", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: body.toString(),
+      });
+      if (!response) return;
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "UPS source could not be saved.");
+      upsAvailable = Boolean(result.available);
+      if (upsTabButton) upsTabButton.hidden = !upsAvailable;
+      renderUPSMarkup(result, await loadIdentity());
+      if (state) state.textContent = "";
+    } catch (error) {
+      if (state) state.textContent = error?.message || "UPS source could not be saved.";
+    } finally {
+      if (submitter && submitter.isConnected) submitter.disabled = false;
+    }
+  };
+
   const loadCurrentSystemTab = async () => {
     const sequence = ++loadSequence;
     if (state) state.textContent = "Loading…";
@@ -2732,6 +2971,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       else if (currentTab === "history") await loadHistory(sequence);
       else if (currentTab === "users") await loadUsers(sequence);
       else if (currentTab === "security") await loadSecurity(sequence);
+      else if (currentTab === "ups") await loadUPS(sequence);
       else await loadAbout(sequence);
       if (sequence === loadSequence && state) state.textContent = "";
     } catch (error) {
@@ -2747,6 +2987,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     const user = await loadIdentity();
     if (!user) return;
     if (administratorTabs.has(tab) && user.role !== "administrator") return;
+    if (tab === "ups" && !upsAvailable) return;
     currentTab = tab;
     syncSystemTabs();
     loadCurrentSystemTab();
@@ -2798,6 +3039,12 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     if (!form || !content.contains(form)) return;
     const action = new URL(form.getAttribute("action") || window.location.href, window.location.href);
 
+    if (action.pathname === "/api/ups/source") {
+      event.preventDefault();
+      await submitUPSSource(form);
+      return;
+    }
+
     let kind = "";
     if (action.pathname.startsWith("/settings/activity/notifications/")) kind = "history";
     else if (action.pathname.startsWith("/settings/users/")) kind = "users";
@@ -2824,6 +3071,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       try {
         const user = await loadIdentity();
         if (!user) return;
+        await refreshUPSCapability();
         if (!initialized) {
           initialized = true;
           currentTab = user.role === "administrator" ? "health" : "history";
