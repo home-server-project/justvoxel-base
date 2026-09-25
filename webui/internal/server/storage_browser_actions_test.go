@@ -498,3 +498,94 @@ func TestStorageBrowserCreatePartitionUXUsesNativeUnallocatedSpaceFlow(t *testin
 		}
 	}
 }
+
+
+type fakeStorageWholeDiskMigrationAPI struct {
+	fakeDiscoveryAPI
+	plan         api.AdminDataMigrationPlanResponse
+	apply        api.AdminDataMigrationApplyResponse
+	planCalls    int
+	applyCalls   int
+	planned      api.AdminDataMigrationPlanRequest
+	applyRequest api.AdminDataMigrationApplyRequest
+}
+
+func (f *fakeStorageWholeDiskMigrationAPI) AdminDataMigrationPlan(_ context.Context, session string, request api.AdminDataMigrationPlanRequest) (api.AdminDataMigrationPlanResponse, error) {
+	if session != "session-token" {
+		return api.AdminDataMigrationPlanResponse{}, api.ErrUnauthorized
+	}
+	f.planCalls++
+	f.planned = request
+	return f.plan, nil
+}
+
+func (f *fakeStorageWholeDiskMigrationAPI) AdminDataMigrationApply(_ context.Context, session string, request api.AdminDataMigrationApplyRequest) (api.AdminDataMigrationApplyResponse, error) {
+	if session != "session-token" {
+		return api.AdminDataMigrationApplyResponse{}, api.ErrUnauthorized
+	}
+	f.applyCalls++
+	f.applyRequest = request
+	return f.apply, nil
+}
+
+func wholeDiskStorageMigrationPlan() api.AdminDataMigrationPlanResponse {
+	return api.AdminDataMigrationPlanResponse{
+		OK: true, SchemaVersion: "v1", PlanFingerprint: "whole-disk-fingerprint",
+		Normalized: &api.AdminDataMigrationPlanNormalized{
+			Operation: "erase_disk", Device: "/dev/vdb", Model: "Data Disk", Transport: "virtio",
+			Filesystem: "xfs", MountPoint: "/var/mnt/justvoxel-data", Path: "/var/mnt/justvoxel-data/minecraft",
+			SizeGiB: "all", SizeBytes: 10737418240, DataBytes: 2147483648, TargetCapacityBytes: 10737418240,
+			CurrentDataPath: "/var/lib/justvoxel/minecraft",
+		},
+		Warnings: []api.AdminDataMigrationWarning{{Code: "destructive", Message: "This disk will be erased."}},
+		Requirements: &api.AdminDataMigrationRequirements{
+			MigrationConfirmationRequired: true, DestructiveConfirmationRequired: true,
+			ConfirmationPhrase: "ERASE /dev/vdb", Players: []string{},
+			ExactSpaceValidationOnApply: true, ColdBackupRequired: true,
+			CopyVerificationRequired: true, RuntimeValidationRequired: true,
+		},
+	}
+}
+
+func TestStorageBrowserWholeDiskMinecraftUsesSharedReviewedMigration(t *testing.T) {
+	client := &fakeStorageWholeDiskMigrationAPI{plan: wholeDiskStorageMigrationPlan()}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := "csrf=csrf-token&purpose=minecraft&device=%2Fdev%2Fvdb"
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/api/new-storage/whole-disk/plan", body))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("whole-disk Minecraft plan status=%d: %s", rr.Code, rr.Body.String())
+	}
+	if client.planCalls != 1 || client.applyCalls != 0 {
+		t.Fatalf("whole-disk plan calls=%d apply calls=%d", client.planCalls, client.applyCalls)
+	}
+	for _, want := range []string{"whole-disk-fingerprint", "ERASE /dev/vdb", "This disk will be erased."} {
+		if !strings.Contains(rr.Body.String(), want) {
+			t.Fatalf("whole-disk Minecraft plan missing %q: %s", want, rr.Body.String())
+		}
+	}
+
+	operation := &api.PersistentOperation{
+		SchemaVersion: "v1", OperationID: storageMigrationOperationID, OperationType: "data_migration",
+		PlanFingerprint: "whole-disk-fingerprint", State: "queued", Stage: "queued",
+		Rollback: api.PersistentOperationRollback{State: "not_started"},
+	}
+	client.apply = api.AdminDataMigrationApplyResponse{OK: true, Created: true, Operation: operation}
+	body = "csrf=csrf-token&purpose=minecraft&device=%2Fdev%2Fvdb&fingerprint=whole-disk-fingerprint&confirmation=ERASE+%2Fdev%2Fvdb"
+	rr = httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/api/new-storage/whole-disk/apply", body))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("whole-disk Minecraft apply status=%d: %s", rr.Code, rr.Body.String())
+	}
+	if client.planCalls != 2 || client.applyCalls != 1 {
+		t.Fatalf("whole-disk apply must re-plan once; plan=%d apply=%d", client.planCalls, client.applyCalls)
+	}
+	if client.applyRequest.PlanFingerprint != "whole-disk-fingerprint" || !client.applyRequest.MigrationConfirmed || client.applyRequest.Confirmation != "ERASE /dev/vdb" {
+		t.Fatalf("whole-disk reviewed evidence lost: %#v", client.applyRequest)
+	}
+	if !strings.Contains(rr.Body.String(), storageMigrationOperationID) {
+		t.Fatalf("whole-disk apply did not return persistent operation id: %s", rr.Body.String())
+	}
+}

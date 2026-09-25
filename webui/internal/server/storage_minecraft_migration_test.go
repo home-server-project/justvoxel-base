@@ -154,9 +154,80 @@ func TestStorageMinecraftMigrationSourceHasNoLegacyPageDependency(t *testing.T) 
 		"/api/new-storage/minecraft-data/apply",
 		"/api/new-storage/minecraft-data/progress/",
 		"showMigrationProgress(payload.operation)",
+		"void showCurrentMigrationIfAny();",
+		"if (migrationDialog && !migrationDialog.open) migrationDialog.showModal();",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("native Storage Minecraft migration behavior missing %q", want)
+		}
+	}
+}
+
+
+func TestStorageMinecraftMigrationCurrentReconnectsPersistentOperation(t *testing.T) {
+	operation := &api.PersistentOperation{
+		SchemaVersion: "v1", OperationID: storageMigrationOperationID, OperationType: "data_migration",
+		PlanFingerprint: storageMigrationFingerprint, State: "running", Stage: "copying",
+		Status: "Copying Minecraft data to the reviewed storage target.",
+		Rollback: api.PersistentOperationRollback{State: "not_started"},
+	}
+	client := &fakeStorageMinecraftMigrationAPI{current: operation}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/api/new-storage/minecraft-data/current", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("current Storage migration status=%d: %s", rr.Code, rr.Body.String())
+	}
+	for _, want := range []string{storageMigrationOperationID, "copying", "Copying Minecraft data"} {
+		if !strings.Contains(rr.Body.String(), want) {
+			t.Fatalf("current Storage migration response missing %q: %s", want, rr.Body.String())
+		}
+	}
+}
+
+func TestStorageMinecraftMigrationPlanReconnectsInsteadOfStartingSecondOperation(t *testing.T) {
+	operation := &api.PersistentOperation{
+		SchemaVersion: "v1", OperationID: storageMigrationOperationID, OperationType: "data_migration",
+		State: "running", Stage: "copying", Rollback: api.PersistentOperationRollback{State: "not_started"},
+	}
+	client := &fakeStorageMinecraftMigrationAPI{current: operation, plan: storageMigrationPlan()}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := "csrf=csrf-token&operation=use_partition&device=%2Fdev%2Fvdb1&mount_point=%2Fvar%2Fmnt%2Fjustvoxel-data&path=%2Fvar%2Fmnt%2Fjustvoxel-data%2Fminecraft&size_gib=all"
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/api/new-storage/minecraft-data/plan", body))
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("active Storage migration plan status=%d: %s", rr.Code, rr.Body.String())
+	}
+	if client.planCalls != 0 || client.applyCalls != 0 {
+		t.Fatalf("new migration planning ran while persistent operation was active: plan=%d apply=%d", client.planCalls, client.applyCalls)
+	}
+	if !strings.Contains(rr.Body.String(), storageMigrationOperationID) {
+		t.Fatalf("active persistent operation was not returned for reconnect: %s", rr.Body.String())
+	}
+}
+
+func TestStorageMinecraftMigrationProgressUsesPersistentOperationJournal(t *testing.T) {
+	operation := &api.PersistentOperation{
+		SchemaVersion: "v1", OperationID: storageMigrationOperationID, OperationType: "data_migration",
+		State: "verifying", Stage: "minecraft_runtime", Status: "Validating migrated Minecraft runtime.",
+		Rollback: api.PersistentOperationRollback{State: "not_started"},
+	}
+	client := &fakeStorageMinecraftMigrationAPI{operation: operation}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/api/new-storage/minecraft-data/progress/"+storageMigrationOperationID, ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Storage migration progress status=%d: %s", rr.Code, rr.Body.String())
+	}
+	for _, want := range []string{storageMigrationOperationID, "minecraft_runtime", "Validating migrated Minecraft runtime."} {
+		if !strings.Contains(rr.Body.String(), want) {
+			t.Fatalf("Storage migration progress missing %q: %s", want, rr.Body.String())
 		}
 	}
 }
