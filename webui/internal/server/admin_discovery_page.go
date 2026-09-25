@@ -39,19 +39,22 @@ type serverSettingsPageData struct {
 }
 
 type storageDeviceView struct {
-	Name        string
-	Path        string
-	Parent      string
-	Type        string
-	Size        string
-	Filesystem  string
-	Label       string
-	UUID        string
-	Mountpoints string
-	Model       string
-	Transport   string
-	ReadOnly    bool
-	System      bool
+	Name                 string
+	Path                 string
+	Parent               string
+	Type                 string
+	Size                 string
+	Filesystem           string
+	Label                string
+	UUID                 string
+	Mountpoints          string
+	Model                string
+	Transport            string
+	ReadOnly             bool
+	System               bool
+	FilesystemUsed       string
+	FilesystemFree       string
+	FilesystemUsageKnown bool
 }
 
 type storageSettingsPageData struct {
@@ -77,6 +80,14 @@ type storageBrowserPartitionView struct {
 	MinecraftMountPoint string
 }
 
+type storageBrowserFreeSpaceView struct {
+	Device    string
+	Start     string
+	End       string
+	Size      string
+	SizeBytes uint64
+}
+
 type storageBrowserDiskView struct {
 	Name               string
 	Path               string
@@ -86,6 +97,7 @@ type storageBrowserDiskView struct {
 	System             bool
 	MinecraftWholeDisk bool
 	Partitions         []storageBrowserPartitionView
+	FreeSpaces         []storageBrowserFreeSpaceView
 }
 
 type storageBrowserPageData struct {
@@ -252,12 +264,14 @@ func (a *App) buildStorageBrowserPageData(ctx context.Context, session string, c
 
 	disks := make([]storageBrowserDiskView, 0)
 	diskIndex := make(map[string]int)
+	diskPathIndex := make(map[string]int)
 	for _, device := range storage.Devices {
 		if device.Type != "disk" || strings.HasPrefix(strings.ToLower(device.Name), "zram") {
 			continue
 		}
 		_, listedSystemDisk := systemDisks[device.Path]
 		diskIndex[device.Name] = len(disks)
+		diskPathIndex[device.Path] = len(disks)
 		disks = append(disks, storageBrowserDiskView{
 			Name: device.Name, Path: device.Path, Size: humanBytes(device.SizeBytes),
 			Model: device.Model, Transport: device.Transport,
@@ -273,7 +287,7 @@ func (a *App) buildStorageBrowserPageData(ctx context.Context, session string, c
 		if !exists {
 			continue
 		}
-		systemPartition := device.System || disks[index].System || storageBrowserLooksSystem(device)
+		systemPartition := device.System || storageBrowserLooksSystem(device)
 		roleDevice := device
 		roleDevice.System = systemPartition
 		role := storageBrowserRole(roleDevice, configuration)
@@ -287,6 +301,8 @@ func (a *App) buildStorageBrowserPageData(ctx context.Context, session string, c
 				Size: humanBytes(device.SizeBytes), Filesystem: device.Filesystem, Label: device.Label,
 				UUID: device.UUID, Mountpoints: strings.Join(device.Mountpoints, ", "), Model: device.Model,
 				Transport: device.Transport, ReadOnly: device.ReadOnly, System: systemPartition,
+				FilesystemUsed: humanBytes(device.FilesystemUsedBytes), FilesystemFree: humanBytes(device.FilesystemFreeBytes),
+				FilesystemUsageKnown: device.FilesystemUsageKnown,
 			},
 			FilesystemDisplay: storageBrowserFilesystemDisplay(device.Filesystem),
 			Role:              role, Mounted: len(device.Mountpoints) > 0, Formatted: device.Filesystem != "",
@@ -296,6 +312,16 @@ func (a *App) buildStorageBrowserPageData(ctx context.Context, session string, c
 			MinecraftMountPoint: migrationCandidate.Mountpoint,
 		}
 		disks[index].Partitions = append(disks[index].Partitions, view)
+	}
+	for _, free := range storage.FreeSpaces {
+		index, exists := diskPathIndex[free.Device]
+		if !exists {
+			continue
+		}
+		disks[index].FreeSpaces = append(disks[index].FreeSpaces, storageBrowserFreeSpaceView{
+			Device: free.Device, Start: free.Start, End: free.End,
+			Size: humanBytes(free.SizeBytes), SizeBytes: free.SizeBytes,
+		})
 	}
 
 	internalDisks := make([]storageBrowserDiskView, 0, len(disks))

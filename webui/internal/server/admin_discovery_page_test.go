@@ -205,11 +205,16 @@ func TestNewStorageBrowserGroupsDisksAndPartitions(t *testing.T) {
 		{Name: "vda", Path: "/dev/vda", Type: "disk", SizeBytes: 100 * 1024 * 1024 * 1024, Model: "System Disk", Transport: "virtio"},
 		{Name: "vda1", Path: "/dev/vda1", Parent: "vda", Type: "part", SizeBytes: 1024 * 1024 * 1024, Filesystem: "xfs", UUID: "system-uuid", Mountpoints: []string{"/var/lib/containers/storage/overlay", "/var", "/sysroot/ostree/deploy/default/var"}},
 		{Name: "vda2", Path: "/dev/vda2", Parent: "vda", Type: "part", SizeBytes: 8 * 1024 * 1024 * 1024, Filesystem: "swap", UUID: "swap-uuid"},
+		{Name: "vda3", Path: "/dev/vda3", Parent: "vda", Type: "part", SizeBytes: 20 * 1024 * 1024 * 1024, Filesystem: "xfs", UUID: "extra-uuid"},
 		{Name: "vdb", Path: "/dev/vdb", Type: "disk", SizeBytes: 500 * 1024 * 1024 * 1024, Model: "Data Disk", Transport: "virtio"},
-		{Name: "vdb1", Path: "/dev/vdb1", Parent: "vdb", Type: "part", SizeBytes: 300 * 1024 * 1024 * 1024, Filesystem: "xfs", UUID: "minecraft-uuid", Mountpoints: []string{"/var/mnt/data"}},
+		{Name: "vdb1", Path: "/dev/vdb1", Parent: "vdb", Type: "part", SizeBytes: 300 * 1024 * 1024 * 1024, Filesystem: "xfs", UUID: "minecraft-uuid", Mountpoints: []string{"/var/mnt/data"}, FilesystemUsedBytes: 180 * 1024 * 1024 * 1024, FilesystemFreeBytes: 120 * 1024 * 1024 * 1024, FilesystemUsageKnown: true},
 		{Name: "vdb2", Path: "/dev/vdb2", Parent: "vdb", Type: "part", SizeBytes: 200 * 1024 * 1024 * 1024},
 		{Name: "sdc", Path: "/dev/sdc", Type: "disk", SizeBytes: 64 * 1024 * 1024 * 1024, Model: "USB Backup", Transport: "usb"},
 		{Name: "sdc1", Path: "/dev/sdc1", Parent: "sdc", Type: "part", SizeBytes: 64 * 1024 * 1024 * 1024, Filesystem: "exfat", UUID: "usb-uuid"},
+	}
+	client.storage.FreeSpaces = []api.AdminStorageFreeSpace{
+		{Device: "/dev/vda", Start: "29697MiB", End: "102400MiB", SizeBytes: 70 * 1024 * 1024 * 1024},
+		{Device: "/dev/vdb", Start: "512001MiB", End: "614400MiB", SizeBytes: 100 * 1024 * 1024 * 1024},
 	}
 
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
@@ -222,7 +227,7 @@ func TestNewStorageBrowserGroupsDisksAndPartitions(t *testing.T) {
 		t.Fatalf("new storage returned %d: %s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"Storage", "Internal drives", "USB drives", "System Disk", "Data Disk", "USB Backup", "data-storage-disk=\"vda\"", "data-storage-disk=\"sdc\"", "data-storage-partitions=\"vdb\"", "data-storage-partitions=\"sdc\"", "/dev/vdb1", "Minecraft", "/dev/vdb2", "Not formatted", "storage-partition-card storage-partition-swap", "data-storage-detail-dialog", "data-storage-detail-close", "/static/storage-browser.js"} {
+	for _, want := range []string{"Storage", "Internal drives", "USB drives", "System Disk", "Data Disk", "USB Backup", "data-storage-disk=\"vda\"", "data-storage-disk=\"sdc\"", "data-storage-partitions=\"vdb\"", "data-storage-partitions=\"sdc\"", "/dev/vdb1", "Minecraft", "/dev/vdb2", "Not formatted", "storage-partition-card storage-partition-swap", "data-storage-detail-dialog", "data-storage-detail-close", "data-storage-free-space", "data-storage-create-dialog", "data-filesystem-usage-known=\"Yes\"", "120.0 GiB", "/static/storage-browser.js"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("new storage browser missing %q: %s", want, body)
 		}
@@ -246,7 +251,19 @@ func TestNewStorageBrowserGroupsDisksAndPartitions(t *testing.T) {
 	}
 	systemPartition := body[start : start+end]
 	if !strings.Contains(systemPartition, `data-system="Yes"`) || !strings.Contains(systemPartition, "System partition") {
-		t.Fatalf("partition did not inherit system protection from parent disk: %s", systemPartition)
+		t.Fatalf("active system partition was not protected: %s", systemPartition)
+	}
+	extraStart := strings.Index(body, `data-path="/dev/vda3"`)
+	if extraStart < 0 {
+		t.Fatal("non-system partition on system disk missing")
+	}
+	extraEnd := strings.Index(body[extraStart:], "</button>")
+	if extraEnd < 0 {
+		t.Fatal("non-system partition button is incomplete")
+	}
+	extraPartition := body[extraStart : extraStart+extraEnd]
+	if !strings.Contains(extraPartition, `data-system="No"`) {
+		t.Fatalf("non-system partition on the system disk was incorrectly protected: %s", extraPartition)
 	}
 }
 

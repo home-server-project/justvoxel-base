@@ -6,6 +6,7 @@
   const diskButtons = [...root.querySelectorAll("[data-storage-disk]")];
   const diskPanels = [...root.querySelectorAll("[data-storage-partitions]")];
   const partitionButtons = [...root.querySelectorAll("[data-storage-partition]")];
+  const freeSpaceButtons = [...root.querySelectorAll("[data-storage-free-space]")];
   const detailDialog = root.querySelector("[data-storage-detail-dialog]");
   const detailClose = detailDialog?.querySelector("[data-storage-detail-close]");
   const detailActions = detailDialog?.querySelector("[data-storage-detail-actions]");
@@ -76,11 +77,44 @@
   const reviewButton = actionDialog?.querySelector("[data-storage-action-review-button]");
   const applyButton = actionDialog?.querySelector("[data-storage-action-apply-button]");
 
+  const freeDetailDialog = root.querySelector("[data-storage-free-detail-dialog]");
+  const freeDetailClose = freeDetailDialog?.querySelector("[data-storage-free-detail-close]");
+  const freeDetailDevice = freeDetailDialog?.querySelector("[data-storage-free-device]");
+  const freeDetailSize = freeDetailDialog?.querySelector("[data-storage-free-size]");
+  const freeActionMenu = freeDetailDialog?.querySelector("[data-storage-free-action-menu]");
+  const createPartitionButton = freeDetailDialog?.querySelector("[data-storage-create-partition]");
+
+  const createDialog = root.querySelector("[data-storage-create-dialog]");
+  const createClose = createDialog?.querySelector("[data-storage-create-close]");
+  const createCancel = createDialog?.querySelector("[data-storage-create-cancel]");
+  const createDevice = createDialog?.querySelector("[data-storage-create-device]");
+  const createAvailable = createDialog?.querySelector("[data-storage-create-available]");
+  const createUseAll = createDialog?.querySelector("[data-storage-create-all]");
+  const createSize = createDialog?.querySelector("[data-storage-create-size]");
+  const createReviewPanel = createDialog?.querySelector("[data-storage-create-review-panel]");
+  const createAfter = createDialog?.querySelector("[data-storage-create-after]");
+  const createWarnings = createDialog?.querySelector("[data-storage-create-warnings]");
+  const createConfirmationField = createDialog?.querySelector("[data-storage-create-confirmation-field]");
+  const createConfirmationSummary = createDialog?.querySelector("[data-storage-create-confirmation-summary]");
+  const createConfirmSliderShell = createDialog?.querySelector("[data-storage-create-confirm-slider-shell]");
+  const createConfirmSliderText = createDialog?.querySelector("[data-storage-create-confirm-slider-text]");
+  const createConfirmSlider = createDialog?.querySelector("[data-storage-create-confirm-slider]");
+  const createConfirmToggleRow = createDialog?.querySelector("[data-storage-create-confirm-toggle-row]");
+  const createConfirmToggle = createDialog?.querySelector("[data-storage-create-confirm-toggle]");
+  const createError = createDialog?.querySelector("[data-storage-create-error]");
+  const createReview = createDialog?.querySelector("[data-storage-create-review]");
+  const createApply = createDialog?.querySelector("[data-storage-create-apply]");
+
   const detail = {
     title: detailDialog?.querySelector("[data-detail-title]"),
     role: detailDialog?.querySelector("[data-detail-role]"),
     path: detailDialog?.querySelector("[data-detail-path]"),
     size: detailDialog?.querySelector("[data-detail-size]"),
+    used: detailDialog?.querySelector("[data-detail-used]"),
+    usedRow: detailDialog?.querySelector("[data-detail-used-row]"),
+    free: detailDialog?.querySelector("[data-detail-free]"),
+    freeRow: detailDialog?.querySelector("[data-detail-free-row]"),
+    usageUnavailableRow: detailDialog?.querySelector("[data-detail-usage-unavailable-row]"),
     filesystem: detailDialog?.querySelector("[data-detail-filesystem]"),
     label: detailDialog?.querySelector("[data-detail-label]"),
     labelRow: detailDialog?.querySelector("[data-detail-label-row]"),
@@ -102,15 +136,23 @@
   let reviewedPlan = null;
   let selectedWholeDisk = null;
   let reviewedWholeDisk = null;
+  let selectedFreeSpace = null;
+  let reviewedCreatePartition = null;
   let wholeDiskApplying = false;
   let actionApplying = false;
+  let createApplying = false;
 
   function closeActionMenu() {
     if (actionMenu) actionMenu.open = false;
   }
 
+  function closeFreeActionMenu() {
+    if (freeActionMenu) freeActionMenu.open = false;
+  }
+
   function selectDisk(name) {
     closeActionMenu();
+    closeFreeActionMenu();
     diskButtons.forEach((button) => {
       const selected = button.dataset.storageDisk === name;
       button.classList.toggle("is-selected", selected);
@@ -254,6 +296,12 @@
       if (detail.role) detail.role.textContent = data.role || "Partition";
       if (detail.path) detail.path.textContent = data.path || "";
       if (detail.size) detail.size.textContent = data.size || "Unknown";
+      const usageKnown = data.filesystemUsageKnown === "Yes";
+      if (detail.usedRow) detail.usedRow.hidden = !usageKnown;
+      if (detail.freeRow) detail.freeRow.hidden = !usageKnown;
+      if (detail.usageUnavailableRow) detail.usageUnavailableRow.hidden = usageKnown || !data.filesystem;
+      if (detail.used) detail.used.textContent = usageKnown ? (data.filesystemUsed || "Unknown") : "";
+      if (detail.free) detail.free.textContent = usageKnown ? (data.filesystemFree || "Unknown") : "";
       if (detail.filesystem) detail.filesystem.textContent = data.filesystemDisplay || filesystemDisplay(data.filesystem);
       if (detail.mounted) detail.mounted.textContent = data.mounted || "No";
       if (detail.system) detail.system.textContent = data.system || "No";
@@ -279,8 +327,10 @@
   detailDialog?.addEventListener("close", closeActionMenu);
   detailDialog?.addEventListener("cancel", closeActionMenu);
   root.addEventListener("pointerdown", (event) => {
-    if (!actionMenu?.open) return;
-    if (!actionMenu.contains(event.target)) closeActionMenu();
+    if (actionMenu?.open) {
+      if (!actionMenu.contains(event.target)) closeActionMenu();
+    }
+    if (freeActionMenu?.open && !freeActionMenu.contains(event.target)) closeFreeActionMenu();
   });
 
   function confirmationSliderArmed(slider, shell, text, armedText, idleText) {
@@ -498,6 +548,265 @@
       if (wholeDiskCancel) wholeDiskCancel.disabled = false;
       wholeDiskApply.disabled = false;
       wholeDiskApply.textContent = "Apply destructive action";
+    }
+  });
+
+
+  freeSpaceButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!freeDetailDialog) return;
+      closeActionMenu();
+      closeFreeActionMenu();
+      selectedFreeSpace = { ...button.dataset };
+      reviewedCreatePartition = null;
+      if (freeDetailDevice) freeDetailDevice.textContent = selectedFreeSpace.device || "";
+      if (freeDetailSize) freeDetailSize.textContent = selectedFreeSpace.size || "Unknown";
+      freeDetailDialog.showModal();
+      freeDetailClose?.focus();
+    });
+  });
+
+  function closeFreeDetailDialog() {
+    closeFreeActionMenu();
+    freeDetailDialog?.close();
+  }
+
+  freeDetailClose?.addEventListener("click", closeFreeDetailDialog);
+  freeDetailDialog?.addEventListener("click", (event) => { if (event.target === freeDetailDialog) closeFreeDetailDialog(); });
+  freeDetailDialog?.addEventListener("close", closeFreeActionMenu);
+  freeDetailDialog?.addEventListener("cancel", closeFreeActionMenu);
+
+  function renderCreateWarnings(warnings) {
+    if (!createWarnings) return;
+    createWarnings.replaceChildren();
+    (warnings || []).forEach((message) => {
+      const notice = document.createElement("div");
+      notice.className = "notice warning";
+      notice.textContent = message;
+      createWarnings.appendChild(notice);
+    });
+  }
+
+  function resetCreateReviewState() {
+    reviewedCreatePartition = null;
+    if (createReviewPanel) createReviewPanel.hidden = true;
+    renderCreateWarnings([]);
+    resetConfirmationControl(
+      createConfirmationField,
+      createConfirmationSummary,
+      createConfirmSlider,
+      createConfirmSliderShell,
+      createConfirmSliderText,
+      createConfirmToggleRow,
+      createConfirmToggle,
+      "Slide to confirm partition creation",
+    );
+    if (createReview) {
+      createReview.hidden = false;
+      createReview.disabled = false;
+      createReview.textContent = "Review action";
+    }
+    if (createApply) {
+      createApply.hidden = true;
+      createApply.disabled = false;
+      createApply.textContent = "Apply destructive action";
+    }
+  }
+
+  function resetCreateDialog() {
+    if (!selectedFreeSpace) return;
+    if (createDevice) createDevice.textContent = selectedFreeSpace.device || "";
+    if (createAvailable) createAvailable.textContent = selectedFreeSpace.size || "Unknown";
+    if (createUseAll) createUseAll.checked = true;
+    if (createSize) {
+      createSize.value = "";
+      createSize.disabled = true;
+      const availableGiB = Math.floor(Number(selectedFreeSpace.sizeBytes || 0) / (1024 * 1024 * 1024));
+      if (availableGiB > 0) createSize.max = String(availableGiB);
+      else createSize.removeAttribute("max");
+    }
+    if (createError) {
+      createError.hidden = true;
+      createError.textContent = "";
+    }
+    resetCreateReviewState();
+  }
+
+  function createSizeGiB() {
+    if (createUseAll?.checked) return "all";
+    const value = Number(createSize?.value || 0);
+    if (!Number.isInteger(value) || value < 1) return "";
+    return String(value);
+  }
+
+  createUseAll?.addEventListener("change", () => {
+    if (createSize) {
+      createSize.disabled = Boolean(createUseAll.checked);
+      if (!createUseAll.checked) createSize.focus();
+    }
+    resetCreateReviewState();
+  });
+  createSize?.addEventListener("input", resetCreateReviewState);
+
+  createPartitionButton?.addEventListener("click", () => {
+    if (!selectedFreeSpace || !createDialog) return;
+    closeFreeActionMenu();
+    freeDetailDialog?.close();
+    resetCreateDialog();
+    createDialog.showModal();
+    createReview?.focus();
+  });
+
+  function closeCreateDialog() {
+    if (createApplying) return;
+    createDialog?.close();
+  }
+
+  createClose?.addEventListener("click", closeCreateDialog);
+  createCancel?.addEventListener("click", closeCreateDialog);
+  createDialog?.addEventListener("click", (event) => { if (event.target === createDialog) closeCreateDialog(); });
+  createDialog?.addEventListener("cancel", (event) => { if (createApplying) event.preventDefault(); });
+
+  async function postCreatePartition(phase) {
+    const sizeGiB = createSizeGiB();
+    if (!sizeGiB) throw new Error("Enter a whole-number partition size in GiB.");
+    const body = new URLSearchParams();
+    body.set("csrf", csrf);
+    body.set("operation", "create_partition");
+    body.set("device", selectedFreeSpace?.device || "");
+    body.set("free_start", selectedFreeSpace?.start || "");
+    body.set("size_gib", sizeGiB);
+    if (reviewedCreatePartition?.fingerprint) body.set("fingerprint", reviewedCreatePartition.fingerprint);
+    if (
+      phase === "apply" &&
+      reviewedCreatePartition?.confirmation &&
+      Number(createConfirmSlider?.value || 0) >= 100 &&
+      createConfirmToggle?.checked
+    ) {
+      body.set("confirmation", reviewedCreatePartition.confirmation);
+    }
+
+    const response = await fetch("/api/new-storage/actions/" + phase, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+      credentials: "same-origin",
+    });
+    let payload = null;
+    try { payload = await response.json(); } catch (_) { payload = null; }
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || "Partition creation could not be completed.");
+    return payload;
+  }
+
+  createReview?.addEventListener("click", async () => {
+    if (!selectedFreeSpace) return;
+    if (createError) {
+      createError.hidden = true;
+      createError.textContent = "";
+    }
+    createReview.disabled = true;
+    createReview.textContent = "Reviewing…";
+    try {
+      const payload = await postCreatePartition("plan");
+      reviewedCreatePartition = payload.proposed || null;
+      if (!reviewedCreatePartition) throw new Error("Partition creation returned an incomplete plan.");
+      if (createReviewPanel) createReviewPanel.hidden = false;
+      const requested = createSizeGiB();
+      const plannedSize = requested === "all" ? (selectedFreeSpace.size || "available space") : requested + " GiB";
+      if (createAfter) createAfter.textContent = "New " + plannedSize + " XFS partition";
+      renderCreateWarnings(payload.warnings);
+      const confirmation = reviewedCreatePartition.confirmation || "";
+      resetConfirmationControl(
+        createConfirmationField,
+        createConfirmationSummary,
+        createConfirmSlider,
+        createConfirmSliderShell,
+        createConfirmSliderText,
+        createConfirmToggleRow,
+        createConfirmToggle,
+        "Slide to confirm partition creation",
+      );
+      if (createConfirmationSummary) {
+        createConfirmationSummary.textContent =
+          (reviewedCreatePartition.device || selectedFreeSpace.device || "Selected disk") +
+          " will get a new " + plannedSize + " XFS partition";
+      }
+      if (createConfirmationField) createConfirmationField.hidden = !confirmation;
+      createReview.hidden = true;
+      if (createApply) {
+        createApply.hidden = false;
+        createApply.disabled = Boolean(confirmation);
+      }
+      if (confirmation) createConfirmSlider?.focus();
+      else createApply?.focus();
+    } catch (error) {
+      if (createError) {
+        createError.textContent = error.message;
+        createError.hidden = false;
+      }
+    } finally {
+      createReview.disabled = false;
+      createReview.textContent = "Review action";
+    }
+  });
+
+  function updateCreateApplyState() {
+    if (!createApply || !reviewedCreatePartition) return;
+    const needsConfirmation = Boolean(reviewedCreatePartition.confirmation);
+    const requested = createSizeGiB();
+    const plannedSize = requested === "all" ? (selectedFreeSpace?.size || "available space") : requested + " GiB";
+    const sliderArmed = confirmationSliderArmed(
+      createConfirmSlider,
+      createConfirmSliderShell,
+      createConfirmSliderText,
+      (reviewedCreatePartition.device || selectedFreeSpace?.device || "Selected disk") +
+        " will get a new " + plannedSize + " XFS partition",
+      "Slide to confirm partition creation",
+    );
+    if (createConfirmToggleRow) createConfirmToggleRow.hidden = !needsConfirmation || !sliderArmed;
+    if (!sliderArmed && createConfirmToggle) createConfirmToggle.checked = false;
+    createApply.disabled = needsConfirmation && !(sliderArmed && Boolean(createConfirmToggle?.checked));
+  }
+
+  createConfirmSlider?.addEventListener("input", updateCreateApplyState);
+  createConfirmToggle?.addEventListener("change", updateCreateApplyState);
+
+  createApply?.addEventListener("click", async () => {
+    if (!reviewedCreatePartition) return;
+    if (createError) {
+      createError.hidden = true;
+      createError.textContent = "";
+    }
+    if (
+      reviewedCreatePartition.confirmation &&
+      (Number(createConfirmSlider?.value || 0) < 100 || !createConfirmToggle?.checked)
+    ) {
+      if (createError) {
+        createError.textContent = "Slide fully to the right, then switch Confirm on before applying.";
+        createError.hidden = false;
+      }
+      createConfirmSlider?.focus();
+      return;
+    }
+
+    createApplying = true;
+    createApply.disabled = true;
+    if (createClose) createClose.disabled = true;
+    if (createCancel) createCancel.disabled = true;
+    createApply.textContent = "Applying…";
+    try {
+      await postCreatePartition("apply");
+      window.location.reload();
+    } catch (error) {
+      createApplying = false;
+      if (createError) {
+        createError.textContent = error.message;
+        createError.hidden = false;
+      }
+      if (createClose) createClose.disabled = false;
+      if (createCancel) createCancel.disabled = false;
+      createApply.disabled = false;
+      createApply.textContent = "Apply destructive action";
     }
   });
 

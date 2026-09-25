@@ -106,6 +106,34 @@ func TestStorageBrowserActionPlanUsesSelectedPartition(t *testing.T) {
 	}
 }
 
+
+func TestStorageBrowserCreatePartitionPlanCarriesSizeAndFreeSegment(t *testing.T) {
+	client := &fakeStorageActionAPI{}
+	client.plan = api.AdminStorageActionResponse{
+		OK: true,
+		Proposed: api.AdminStorageActionPlan{
+			Operation: "create_partition", Device: "/dev/vda", TargetFilesystem: "xfs",
+			SizeGiB: "55", FreeStart: "102401MiB", FreeEnd: "204800MiB", PlannedEnd: "158721.00MiB",
+			Confirmation: "CREATE PARTITION /dev/vda", Fingerprint: "layout123", Destructive: true,
+		},
+	}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := "csrf=csrf-token&operation=create_partition&device=%2Fdev%2Fvda&free_start=102401MiB&size_gib=55"
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/api/new-storage/actions/plan", body))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("create partition plan returned %d: %s", rr.Code, rr.Body.String())
+	}
+	if client.planCalls != 1 {
+		t.Fatalf("plan calls=%d, want 1", client.planCalls)
+	}
+	if client.planned.Operation != "create_partition" || client.planned.Device != "/dev/vda" || client.planned.FreeStart != "102401MiB" || client.planned.SizeGiB != "55" {
+		t.Fatalf("create partition request lost selected free-space geometry: %#v", client.planned)
+	}
+}
+
 func TestStorageBrowserActionApplyCarriesReviewedEvidence(t *testing.T) {
 	client := &fakeStorageActionAPI{}
 	client.apply = api.AdminStorageActionResponse{
@@ -429,5 +457,45 @@ func TestStorageBrowserPortableFilesystemPolicy(t *testing.T) {
 	}
 	if strings.Contains(source, "showStorageAction(\"format\", true);\n      setOptional(detail.mountTypeRow") {
 		t.Fatal("portable filesystems can still expose Format through the generic mounted-filesystem path")
+	}
+}
+
+func TestStorageBrowserCreatePartitionUXUsesNativeUnallocatedSpaceFlow(t *testing.T) {
+	templateContent, err := assets.ReadFile("templates/storage_browser.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(templateContent)
+	for _, want := range []string{
+		"data-storage-free-space",
+		"data-storage-free-action-menu",
+		"data-storage-create-partition",
+		"data-storage-create-all",
+		"data-storage-create-size",
+		"data-storage-create-confirm-slider",
+		"data-storage-create-confirm-toggle",
+		"Create and format partition",
+		"Unavailable while unmounted",
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("create-partition Storage UX missing %q", want)
+		}
+	}
+
+	js, err := assets.ReadFile("static/storage-browser.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(js)
+	for _, want := range []string{
+		`body.set("operation", "create_partition")`,
+		`body.set("free_start", selectedFreeSpace?.start || "")`,
+		`body.set("size_gib", sizeGiB)`,
+		"Slide to confirm partition creation",
+		"createConfirmToggle?.addEventListener",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("create-partition Storage behavior missing %q", want)
+		}
 	}
 }

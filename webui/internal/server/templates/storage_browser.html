@@ -65,7 +65,7 @@
         <span class="badge">{{.Size}}</span>
       </div>
 
-      {{if .Partitions}}
+      {{if or .Partitions .FreeSpaces}}
       <div class="storage-partition-grid">
         {{range .Partitions}}
           {{if .Swap}}
@@ -90,7 +90,10 @@
                   data-system="{{if .System}}Yes{{else}}No{{end}}"
                   data-readonly="{{if .ReadOnly}}Yes{{else}}No{{end}}"
                   data-minecraft-candidate="{{if .MinecraftCandidate}}Yes{{else}}No{{end}}"
-                  data-minecraft-mount-point="{{.MinecraftMountPoint}}">
+                  data-minecraft-mount-point="{{.MinecraftMountPoint}}"
+                  data-filesystem-usage-known="{{if .FilesystemUsageKnown}}Yes{{else}}No{{end}}"
+                  data-filesystem-used="{{.FilesystemUsed}}"
+                  data-filesystem-free="{{.FilesystemFree}}">
             <span class="storage-partition-state">{{.Role}}</span>
             <strong>{{.Path}}</strong>
             <span>{{.Size}}{{if .Filesystem}} · {{.FilesystemDisplay}}{{end}}</span>
@@ -98,8 +101,23 @@
           </button>
           {{end}}
         {{end}}
+        {{range .FreeSpaces}}
+        <button class="storage-partition-card storage-free-space-card" type="button"
+                data-storage-free-space
+                data-device="{{.Device}}"
+                data-start="{{.Start}}"
+                data-end="{{.End}}"
+                data-size="{{.Size}}"
+                data-size-bytes="{{.SizeBytes}}">
+          <span class="storage-partition-state">Unallocated</span>
+          <strong>Unallocated space</strong>
+          <span>{{.Size}}</span>
+          <small>Available for a new partition</small>
+        </button>
+        {{end}}
       </div>
-      {{else}}
+      {{end}}
+      {{if not .Partitions}}
       <div class="notice storage-empty-disk">
         <strong>Empty disk</strong>
         <p class="muted">No partitions are present yet. Choose what JustVoxel should use this disk for.</p>
@@ -128,6 +146,9 @@
       <dl class="storage-detail-list">
         <div><dt>Device</dt><dd><code data-detail-path></code></dd></div>
         <div><dt>Size</dt><dd data-detail-size></dd></div>
+        <div data-detail-used-row hidden><dt>Used</dt><dd data-detail-used></dd></div>
+        <div data-detail-free-row hidden><dt>Free</dt><dd data-detail-free></dd></div>
+        <div data-detail-usage-unavailable-row hidden><dt>Free</dt><dd>Unavailable while unmounted</dd></div>
         <div><dt>Filesystem</dt><dd data-detail-filesystem></dd></div>
         <div data-detail-label-row><dt>Label</dt><dd data-detail-label></dd></div>
         <div data-detail-uuid-row><dt>UUID</dt><dd><code data-detail-uuid></code></dd></div>
@@ -154,6 +175,75 @@
         </details>
       </div>
       <div class="notice storage-protected-note" data-storage-protected-note hidden>This partition is protected by JustVoxel. Storage actions are not available.</div>
+    </div>
+  </dialog>
+
+  <dialog class="storage-detail-dialog" data-storage-free-detail-dialog>
+    <div class="storage-detail-card">
+      <div class="storage-detail-heading">
+        <div><p class="eyebrow">Disk layout</p><h2>Unallocated space</h2></div>
+        <button class="storage-dialog-close" type="button" data-storage-free-detail-close aria-label="Close unallocated space details">×</button>
+      </div>
+      <div class="storage-detail-role">Available</div>
+      <dl class="storage-detail-list">
+        <div><dt>Disk</dt><dd><code data-storage-free-device></code></dd></div>
+        <div><dt>Available</dt><dd data-storage-free-size></dd></div>
+      </dl>
+      <div class="storage-detail-actions">
+        <span class="muted">Space actions</span>
+        <details class="storage-action-menu" data-storage-free-action-menu>
+          <summary aria-label="More unallocated-space actions">⋯</summary>
+          <div class="storage-action-menu-popover">
+            <button type="button" data-storage-create-partition>Create partition</button>
+          </div>
+        </details>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="storage-action-dialog" data-storage-create-dialog>
+    <div class="storage-action-card">
+      <div class="storage-detail-heading">
+        <div><p class="eyebrow">New partition</p><h2>Create and format partition</h2></div>
+        <button class="storage-dialog-close" type="button" data-storage-create-close aria-label="Close partition creation">×</button>
+      </div>
+      <p class="muted">JustVoxel will create one partition inside this unallocated space and format that exact new partition as XFS.</p>
+      <dl class="storage-action-review">
+        <div><dt>Disk</dt><dd><code data-storage-create-device></code></dd></div>
+        <div><dt>Available</dt><dd data-storage-create-available></dd></div>
+      </dl>
+      <label class="storage-option-toggle-row">
+        <span><strong>Use all available space</strong><small>Use the complete selected unallocated segment.</small></span>
+        <input class="storage-option-toggle" type="checkbox" checked data-storage-create-all aria-label="Use all available unallocated space">
+      </label>
+      <label>Partition size (GiB)
+        <input type="number" min="1" step="1" inputmode="numeric" data-storage-create-size disabled>
+        <span class="muted compact">Turn off “Use all available space” to choose a smaller whole-GiB size.</span>
+      </label>
+      <div data-storage-create-review-panel hidden>
+        <dl class="storage-action-review">
+          <div><dt>After action</dt><dd data-storage-create-after></dd></div>
+        </dl>
+        <div class="storage-action-warnings" data-storage-create-warnings></div>
+        <div class="storage-confirmation" data-storage-create-confirmation-field hidden>
+          <p class="storage-confirm-selected">Selected space: <strong data-storage-create-confirmation-summary></strong></p>
+          <div class="storage-confirm-slider" data-storage-create-confirm-slider-shell style="--confirm-progress:0">
+            <span class="storage-confirm-slider-text" data-storage-create-confirm-slider-text>Slide to confirm partition creation</span>
+            <span class="storage-confirm-slider-thumb" aria-hidden="true">&gt;</span>
+            <input type="range" min="0" max="100" step="1" value="0" data-storage-create-confirm-slider aria-label="Slide to confirm creating and formatting this partition">
+          </div>
+          <label class="storage-confirm-toggle-row" data-storage-create-confirm-toggle-row hidden>
+            <span class="storage-confirm-toggle-callout">Confirm <span class="storage-confirm-toggle-arrow" aria-hidden="true">&gt;</span></span>
+            <input class="storage-confirm-toggle" type="checkbox" data-storage-create-confirm-toggle aria-label="Confirm partition creation">
+          </label>
+        </div>
+      </div>
+      <p class="storage-action-error" data-storage-create-error hidden></p>
+      <div class="action-row storage-action-buttons">
+        <button class="secondary" type="button" data-storage-create-cancel>Cancel</button>
+        <button type="button" data-storage-create-review>Review action</button>
+        <button class="danger" type="button" data-storage-create-apply hidden>Apply destructive action</button>
+      </div>
     </div>
   </dialog>
 
