@@ -65,16 +65,16 @@ type NetworkStatus struct {
 }
 
 type WiFiNetwork struct {
-	SSID           string `json:"SSID"`
-	BSSID          string `json:"BSSID"`
-	Strength       uint8  `json:"Strength"`
-	FrequencyMHz   uint32 `json:"FrequencyMHz"`
-	MaxBitrateKbps uint32 `json:"MaxBitrateKbps"`
-	Security       string `json:"Security"`
-	KeyManagement  string `json:"KeyManagement"`
-	Hidden         bool   `json:"Hidden"`
-	Known          bool   `json:"Known"`
-	Active         bool   `json:"Active"`
+	SSID           string `json:"ssid"`
+	BSSID          string `json:"bssid"`
+	Strength       uint8  `json:"strength"`
+	FrequencyMHz   uint32 `json:"frequency_mhz"`
+	MaxBitrateKbps uint32 `json:"max_bitrate_kbps"`
+	Security       string `json:"security"`
+	KeyManagement  string `json:"key_management"`
+	Hidden         bool   `json:"hidden"`
+	Known          bool   `json:"known"`
+	Active         bool   `json:"active"`
 }
 
 type WiFiNetworksResponse struct {
