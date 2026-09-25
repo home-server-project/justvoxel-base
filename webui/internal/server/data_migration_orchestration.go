@@ -8,11 +8,19 @@ import (
 	"github.com/home-server-project/justvoxel-webui/internal/api"
 )
 
-type dataMigrationOrchestrationAPI interface {
+type dataMigrationPlanApplyAPI interface {
 	AdminDataMigrationPlan(ctx context.Context, session string, request api.AdminDataMigrationPlanRequest) (api.AdminDataMigrationPlanResponse, error)
 	AdminDataMigrationApply(ctx context.Context, session string, request api.AdminDataMigrationApplyRequest) (api.AdminDataMigrationApplyResponse, error)
+}
+
+type dataMigrationOperationAPI interface {
 	AdminCurrentDataMigrationOperation(ctx context.Context, session string) (api.PersistentOperationResponse, error)
 	AdminOperation(ctx context.Context, session, id string) (api.PersistentOperationResponse, error)
+}
+
+type dataMigrationOrchestrationAPI interface {
+	dataMigrationPlanApplyAPI
+	dataMigrationOperationAPI
 }
 
 type dataMigrationApplyProof struct {
@@ -32,7 +40,7 @@ func (e *dataMigrationOrchestrationError) Error() string {
 	return e.Message
 }
 
-func dataMigrationPlanReviewed(ctx context.Context, client dataMigrationOrchestrationAPI, session string, request api.AdminDataMigrationPlanRequest) (api.AdminDataMigrationPlanResponse, error) {
+func dataMigrationPlanReviewed(ctx context.Context, client dataMigrationPlanApplyAPI, session string, request api.AdminDataMigrationPlanRequest) (api.AdminDataMigrationPlanResponse, error) {
 	plan, err := client.AdminDataMigrationPlan(ctx, session, request)
 	if err != nil {
 		return plan, &dataMigrationOrchestrationError{
@@ -51,7 +59,7 @@ func dataMigrationPlanReviewed(ctx context.Context, client dataMigrationOrchestr
 	return plan, nil
 }
 
-func dataMigrationApplyReviewed(ctx context.Context, client dataMigrationOrchestrationAPI, session string, request api.AdminDataMigrationPlanRequest, proof dataMigrationApplyProof) (api.AdminDataMigrationPlanResponse, *api.PersistentOperation, error) {
+func dataMigrationApplyReviewed(ctx context.Context, client dataMigrationPlanApplyAPI, session string, request api.AdminDataMigrationPlanRequest, proof dataMigrationApplyProof) (api.AdminDataMigrationPlanResponse, *api.PersistentOperation, error) {
 	plan, err := dataMigrationPlanReviewed(ctx, client, session, request)
 	if err != nil {
 		return plan, nil, err
@@ -66,7 +74,7 @@ func dataMigrationApplyReviewed(ctx context.Context, client dataMigrationOrchest
 	if !proof.MigrationConfirmed {
 		return plan, nil, &dataMigrationOrchestrationError{
 			StatusCode: http.StatusBadRequest,
-			Message:    "Confirm this reviewed Minecraft data migration before starting it.",
+			Message:    "Type MIGRATE exactly to confirm this Minecraft data migration.",
 			Plan:       plan,
 		}
 	}
@@ -108,7 +116,7 @@ func dataMigrationApplyReviewed(ctx context.Context, client dataMigrationOrchest
 	return plan, result.Operation, nil
 }
 
-func dataMigrationCurrentOperation(ctx context.Context, client dataMigrationOrchestrationAPI, session string) (*api.PersistentOperation, error) {
+func dataMigrationCurrentOperation(ctx context.Context, client dataMigrationOperationAPI, session string) (*api.PersistentOperation, error) {
 	response, err := client.AdminCurrentDataMigrationOperation(ctx, session)
 	if err != nil {
 		return nil, err
@@ -125,7 +133,7 @@ func dataMigrationCurrentOperation(ctx context.Context, client dataMigrationOrch
 	return response.Operation, nil
 }
 
-func dataMigrationOperation(ctx context.Context, client dataMigrationOrchestrationAPI, session, id string) (*api.PersistentOperation, error) {
+func dataMigrationOperation(ctx context.Context, client dataMigrationOperationAPI, session, id string) (*api.PersistentOperation, error) {
 	response, err := client.AdminOperation(ctx, session, id)
 	if err != nil {
 		return nil, err
