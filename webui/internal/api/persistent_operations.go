@@ -55,6 +55,14 @@ func (c *Client) AdminCurrentDataMigrationOperation(ctx context.Context, session
 	return c.getPersistentOperation(ctx, session, "/v1/admin/data-migration/current-operation")
 }
 
+func (c *Client) AdminCurrentMinecraftResetOperation(ctx context.Context, session string) (PersistentOperationResponse, error) {
+	return c.getPersistentOperation(ctx, session, "/v1/admin/reset/minecraft/current-operation")
+}
+
+func (c *Client) AdminCurrentFactoryResetOperation(ctx context.Context, session string) (PersistentOperationResponse, error) {
+	return c.getPersistentOperation(ctx, session, "/v1/admin/reset/factory/current-operation")
+}
+
 func (c *Client) AdminCurrentMigrationOperation(ctx context.Context, session string) (PersistentOperationResponse, error) {
 	return c.getPersistentOperation(ctx, session, "/v1/admin/migration/current-operation")
 }
