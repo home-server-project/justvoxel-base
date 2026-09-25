@@ -74,6 +74,7 @@ type setupStorageDiskView struct {
 	Model      string
 	Transport  string
 	SystemDisk bool
+	External   bool
 	Partitions []setupStoragePartitionView
 	FreeSpaces []setupStorageFreeSpaceView
 }
@@ -394,6 +395,80 @@ func setupStorageDiskViews(storage api.AdminStorageDiscovery) ([]setupStorageDis
 	}
 
 	return disks, externalCount
+}
+
+func setupBackupDiskViews(storage api.AdminStorageDiscovery) []setupStorageDiskView {
+	systemDisks := make(map[string]struct{}, len(storage.SystemDisks))
+	for _, path := range storage.SystemDisks {
+		systemDisks[path] = struct{}{}
+	}
+
+	disks := make([]setupStorageDiskView, 0)
+	diskByName := make(map[string]int)
+	diskByPath := make(map[string]int)
+	for _, device := range storage.Devices {
+		if device.Type != "disk" || strings.HasPrefix(strings.ToLower(device.Name), "zram") {
+			continue
+		}
+		_, listedSystem := systemDisks[device.Path]
+		index := len(disks)
+		disks = append(disks, setupStorageDiskView{
+			Name: device.Name, Path: device.Path, Size: humanBytes(device.SizeBytes),
+			Model: strings.TrimSpace(device.Model), Transport: strings.TrimSpace(device.Transport),
+			SystemDisk: device.System || listedSystem || storageBrowserLooksSystem(device),
+			External: setupDeviceIsExternal(storage, device),
+		})
+		diskByName[device.Name] = index
+		diskByPath[device.Path] = index
+	}
+
+	for _, device := range storage.Devices {
+		if device.Type != "part" {
+			continue
+		}
+		index, exists := diskByName[device.Parent]
+		if !exists {
+			continue
+		}
+		formatted := safeSetupDeviceValue(device)
+		blank := safeSetupBlankBackupDeviceValue(device)
+		if !formatted && !blank {
+			continue
+		}
+		mountpoint := ""
+		if len(device.Mountpoints) > 0 {
+			mountpoint = device.Mountpoints[0]
+		}
+		disks[index].Partitions = append(disks[index].Partitions, setupStoragePartitionView{
+			Path: device.Path, Size: humanBytes(device.SizeBytes), Filesystem: device.Filesystem,
+			Label: device.Label, Mountpoint: mountpoint, Formatted: formatted,
+			SystemDisk: disks[index].SystemDisk,
+		})
+	}
+
+	for _, free := range storage.FreeSpaces {
+		index, exists := diskByPath[free.Device]
+		if !exists || free.SizeBytes < 1024*1024*1024 {
+			continue
+		}
+		disks[index].FreeSpaces = append(disks[index].FreeSpaces, setupStorageFreeSpaceView{
+			Device: free.Device, Start: free.Start, End: free.End,
+			Size: humanBytes(free.SizeBytes), SizeBytes: free.SizeBytes,
+		})
+	}
+	return disks
+}
+
+func safeSetupBlankBackupDeviceValue(device api.AdminStorageDevice) bool {
+	if device.Type != "part" || device.ReadOnly || device.Filesystem != "" {
+		return false
+	}
+	for _, mountpoint := range device.Mountpoints {
+		if strings.TrimSpace(mountpoint) != "" {
+			return false
+		}
+	}
+	return true
 }
 
 func setupDeviceIsExternal(storage api.AdminStorageDiscovery, device api.AdminStorageDevice) bool {
