@@ -249,3 +249,28 @@ func TestForcedPasswordPageRemainsStandaloneRoute(t *testing.T) {
 		t.Fatalf("forced password page no longer renders the existing standalone form: %s", body)
 	}
 }
+
+func TestSystemWorkspaceAuthenticationWrongSystemPasswordStaysInPane(t *testing.T) {
+	fake := newAuthFlowAPI()
+	fake.changeErr = api.ErrUnauthorized
+	app, err := New(fake, Config{ExternalScheme: "http"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	form := "csrf=token&mode=system&system_password=wrong"
+	req := httptest.NewRequest(http.MethodPost, "http://example/api/system/workspace/security/authentication", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "null")
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+	req.AddCookie(&http.Cookie{Name: csrfCookie, Value: "token"})
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("wrong system password status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "System password is incorrect.") {
+		t.Fatalf("wrong system password did not remain an in-pane validation error: %s", rr.Body.String())
+	}
+}

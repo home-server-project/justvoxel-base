@@ -387,6 +387,10 @@ func (a *App) systemWorkspaceAuthenticationChange(w http.ResponseWriter, r *http
 		return
 	}
 	result, err := client.ChangeAuthMode(r.Context(), session, change)
+	if errors.Is(err, api.ErrUnauthorized) {
+		writeSystemWorkspaceError(w, http.StatusBadRequest, "System password is incorrect.")
+		return
+	}
 	if err != nil {
 		a.writeSystemWorkspaceAPIError(w, err, "Authentication mode change was rejected.")
 		return
