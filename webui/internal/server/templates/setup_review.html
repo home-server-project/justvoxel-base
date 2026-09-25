@@ -38,7 +38,32 @@
     {{if .Plan.OK}}
     <div class="setup-review-toolbar"><div class="notice setup-safe-note"><strong>Configuration validated.</strong><span>The values below are the authoritative review result.</span></div><a class="button-link secondary" href="/setup/review/configuration">Download configuration</a></div>
 
-    <div class="setup-review-grid">
+    <div class="setup-review-summary" aria-label="Setup summary">
+      <section class="setup-review-summary-card">
+        <span>Minecraft</span>
+        <strong>{{if .ServerTypeLabel}}{{.ServerTypeLabel}} · {{end}}{{.Plan.Normalized.Minecraft.Version}}</strong>
+        <small>{{.VersionLabel}}</small>
+      </section>
+      <section class="setup-review-summary-card">
+        <span>Players</span>
+        <strong>{{.Plan.Normalized.Server.MaxPlayers}} max</strong>
+        <small>Bedrock {{if .Plan.Normalized.Server.BedrockEnabled}}enabled{{else}}disabled{{end}} · Java {{.Plan.Normalized.Minecraft.JavaPort}}/TCP</small>
+      </section>
+      <section class="setup-review-summary-card">
+        <span>Minecraft storage</span>
+        <strong>{{.StorageLabel}}</strong>
+        <small><code>{{.Plan.Normalized.Storage.Path}}</code></small>
+      </section>
+      <section class="setup-review-summary-card">
+        <span>Backups</span>
+        <strong>{{.BackupLabel}}</strong>
+        <small>{{if .Plan.Normalized.Backups.Automatic}}Daily {{.Plan.Normalized.Backups.DailyTime}} · keep {{.Plan.Normalized.Backups.Keep}}{{else}}Automatic backups off · keep {{.Plan.Normalized.Backups.Keep}}{{end}}</small>
+      </section>
+    </div>
+
+    <details class="setup-review-details">
+      <summary><span>Technical details</span><small>Memory, ports, filesystem identity, mount points and resolved settings</small></summary>
+      <div class="setup-review-grid">
       <section class="setup-review-card">
         <h2>Server</h2>
         <dl class="setup-review-list">
@@ -91,7 +116,8 @@
           {{if .Plan.Normalized.Backups.Username}}<div><dt>Username</dt><dd>{{.Plan.Normalized.Backups.Username}}{{if .Plan.Normalized.Backups.Domain}} · {{.Plan.Normalized.Backups.Domain}}{{end}}</dd></div>{{end}}
         </dl>
       </section>
-    </div>
+      </div>
+    </details>
 
     {{if .Plan.Warnings}}
     <section class="setup-review-warnings" aria-label="Setup warnings">
