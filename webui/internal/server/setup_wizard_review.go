@@ -37,6 +37,8 @@ var firstRunSetupReviews = setupReviewStore{reviews: make(map[setupDraftKey]setu
 
 type setupReviewPageData struct {
 	Title              string
+	SetupMode          string
+	ServerTypeLabel    string
 	Version            string
 	ManagementAPI      string
 	CSRF               string
@@ -127,6 +129,9 @@ func setupConfigurationSnapshot(plan api.AdminSetupPlanResponse) string {
 	b.WriteString("Timezone: " + plan.Normalized.Server.Timezone + "\n\n")
 
 	b.WriteString("Minecraft\n")
+	if draft.Minecraft.ServerType != "" {
+		b.WriteString("Server software: " + setupServerTypeLabel(draft.Minecraft.ServerType) + "\n")
+	}
 	b.WriteString("Game memory: " + plan.Normalized.Minecraft.JavaMemory + "\n")
 	b.WriteString("Maximum memory: " + plan.Normalized.Minecraft.ContainerMemory + "\n")
 	b.WriteString("Java port: " + strconv.Itoa(plan.Normalized.Minecraft.JavaPort) + "/TCP\n")
@@ -224,9 +229,15 @@ func (a *App) setupWizardReviewBack(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/setup", http.StatusSeeOther)
 		return
 	}
+	firstRunSetupReviews.delete(a, session)
+	if draft.Mode == "recommended" {
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "user returned from recommended Review to setup choice", draft)
+		firstRunSetupDrafts.delete(a, session)
+		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		return
+	}
 	draft.CurrentStep = 5
 	firstRunSetupDrafts.save(a, session, draft)
-	firstRunSetupReviews.delete(a, session)
 	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "user returned from Review to Backups", draft)
 	http.Redirect(w, r, "/setup", http.StatusSeeOther)
 }
@@ -356,7 +367,8 @@ func setupReviewErrorMessage(err error) string {
 func (a *App) renderSetupReview(w http.ResponseWriter, identity api.SessionInfo, state setupReviewState, csrf, errorMessage string) {
 	plan := state.Plan
 	data := setupReviewPageData{
-		Title: "Review setup", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
+		Title: "Review setup", SetupMode: draft.Mode, ServerTypeLabel: setupServerTypeLabel(draft.Minecraft.ServerType),
+		Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
 		CSRF: csrf, Identity: identity, Plan: plan, Error: errorMessage,
 		EULAAccepted: state.EULAAccepted, EULAURL: minecraftEULAURL,
 		StorageLabel:       setupStorageTypeLabel(plan.Normalized.Storage.Type),
@@ -371,6 +383,19 @@ func (a *App) renderSetupReview(w http.ResponseWriter, identity api.SessionInfo,
 		data.BackupSize = humanBytes(plan.Normalized.Backups.SizeBytes)
 	}
 	a.renderAdminDiscovery(w, "setup_review.html", data)
+}
+
+func setupServerTypeLabel(value string) string {
+	switch value {
+	case "paper", "":
+		return "Paper"
+	case "purpur":
+		return "Purpur"
+	case "vanilla":
+		return "Vanilla"
+	default:
+		return value
+	}
 }
 
 func setupStorageTypeLabel(value string) string {
