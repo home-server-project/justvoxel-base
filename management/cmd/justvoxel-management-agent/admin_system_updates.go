@@ -224,6 +224,34 @@ func finalizeAdminSystemUpdateCheck(status adminSystemUpdateStatus, output strin
 	return status
 }
 
+func sanitizeBootcCheckFailure(output []byte) string {
+	text := strings.TrimSpace(string(output))
+	if text == "" {
+		return ""
+	}
+	lines := strings.Split(text, "\n")
+	clean := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		line = strings.Join(strings.Fields(line), " ")
+		if len(line) > 240 {
+			line = line[:240] + "…"
+		}
+		clean = append(clean, line)
+		if len(clean) >= 4 {
+			break
+		}
+	}
+	result := strings.Join(clean, " · ")
+	if len(result) > 700 {
+		result = result[:700] + "…"
+	}
+	return result
+}
+
 func (s *server) adminSystemUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	actor, ok := s.requireAdministrator(w, r)
 	if !ok {
@@ -251,10 +279,14 @@ func (s *server) adminSystemUpdateCheck(w http.ResponseWriter, r *http.Request) 
 	output, err := runBootcUpgradeCheck(checkCtx)
 	checkCancel()
 	if err != nil {
-		if s.store != nil {
-			_ = s.store.recordAuditEvent(actor, "system_update_check", "host", false, "bootc update check failed")
+		message := "bootc update check failed"
+		if detail := sanitizeBootcCheckFailure(output); detail != "" {
+			message += ": " + detail
 		}
-		writeError(w, http.StatusServiceUnavailable, "bootc update check failed")
+		if s.store != nil {
+			_ = s.store.recordAuditEvent(actor, "system_update_check", "host", false, message)
+		}
+		writeError(w, http.StatusServiceUnavailable, message)
 		return
 	}
 

@@ -144,6 +144,45 @@ func TestAdminSystemUpdateCheckTreatsMatchingStagedDigestAsCurrent(t *testing.T)
 	}
 }
 
+func TestParseBootcUpgradeCheckMatchesVersionlessOutput(t *testing.T) {
+	output := "Update available for: docker://ghcr.io/home-server-project/justvoxel-base:testing\n" +
+		"  Digest: sha256:125d8fd678c43eabb2ce398fd0df7d6cc365cc57513f9a7476c8b415822cb11c\n" +
+		"Total new layers: 128   Size: 682.5 MB\n" +
+		"Removed layers:   3     Size: 123.4 MB\n" +
+		"Added layers:     3     Size: 123.4 MB\n"
+	state, available := parseBootcUpgradeCheck(output)
+	if state != "update_available" {
+		t.Fatalf("state = %q, want update_available", state)
+	}
+	if available == nil || available.Digest != "sha256:125d8fd678c43eabb2ce398fd0df7d6cc365cc57513f9a7476c8b415822cb11c" {
+		t.Fatalf("unexpected parsed deployment: %#v", available)
+	}
+}
+
+func TestAdminSystemUpdateCheckReturnsBootcFailureDetail(t *testing.T) {
+	oldStatus := runBootcStatus
+	oldCheck := runBootcUpgradeCheck
+	defer func() {
+		runBootcStatus = oldStatus
+		runBootcUpgradeCheck = oldCheck
+	}()
+	runBootcStatus = func(_ context.Context) ([]byte, error) {
+		return []byte(bootcStatusCurrentFixture), nil
+	}
+	runBootcUpgradeCheck = func(_ context.Context) ([]byte, error) {
+		return []byte("error: registry access denied\ncaused by: example failure\n"), errors.New("exit status 1")
+	}
+	s := adminServerForTest()
+	rr := httptest.NewRecorder()
+	s.adminSystemUpdateCheck(rr, authorizedRequest(http.MethodPost, "http://unix/v1/admin/system/updates/check", ""))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("system update check = %d, want 503: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "registry access denied") || !strings.Contains(rr.Body.String(), "example failure") {
+		t.Fatalf("bootc failure detail was lost: %s", rr.Body.String())
+	}
+}
+
 func TestOperatorCannotCheckSystemUpdate(t *testing.T) {
 	oldStatus := runBootcStatus
 	oldCheck := runBootcUpgradeCheck

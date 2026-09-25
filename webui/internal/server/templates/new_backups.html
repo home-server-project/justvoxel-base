@@ -21,21 +21,59 @@
   {{if .Message}}<div class="notice success">{{.Message}}</div>{{end}}
   {{if .Error}}<div class="notice error">{{.Error}}</div>{{end}}
 
-  <section class="backup-command-bar" aria-label="Backup controls">
-    <div class="backup-library-summary">
-      <div><span>Backups</span><strong>{{.BackupCount}}</strong></div>
-      <div><span>Total size</span><strong>{{.TotalSize}}</strong></div>
-      <div><span>Selected</span><strong data-backup-selected-count>0</strong></div>
+  <section class="backup-library-section" id="backup-library">
+    <div class="section-heading">
+      <div><p class="eyebrow">Backup library</p><h2>Existing backups</h2></div>
     </div>
-    <div class="backup-command-actions">
-      <button type="button" data-backup-restore-selected data-restore-busy="{{if .RestoreOperation}}1{{else}}0{{end}}" disabled>Restore selected</button>
-      <button class="danger" type="button" data-backup-delete-selected disabled>Delete selected</button>
-      <form method="post" action="/settings/new-backups/backup">
-        <input type="hidden" name="csrf" value="{{.CSRF}}">
-        <button type="submit">Backup Now</button>
-      </form>
+
+    {{if .Backups}}
+    <div class="backup-file-grid" role="list">
+      {{range .Backups}}
+      <label class="backup-file-card backup-file-selectable" role="listitem" data-backup-card>
+        <input class="backup-file-checkbox" type="checkbox" value="{{.ID}}" data-backup-select aria-label="Select {{.ID}}">
+        <div class="backup-file-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M4 4h11l5 5v11H4z"></path><path d="M15 4v5h5"></path><path d="M8 14h8M8 17h6"></path></svg>
+        </div>
+        <div class="backup-file-copy">
+          <strong title="{{.ID}}">{{.ID}}</strong>
+          <span>{{.CreatedLabel}}</span>
+          <small>{{.Size}}{{if .Version}} · Minecraft {{.Version}}{{end}}{{if .Bedrock}} · Bedrock{{end}}{{if .Variant}} · {{.Variant}}{{end}}</small>
+        </div>
+        {{if eq .MetadataStatus "valid"}}
+        <span class="backup-file-status">Ready</span>
+        {{else if eq .MetadataStatus "missing"}}
+        <span class="backup-file-status backup-file-status-warning">Metadata missing</span>
+        {{else}}
+        <span class="backup-file-status backup-file-status-warning">Metadata invalid</span>
+        {{end}}
+      </label>
+      {{end}}
     </div>
+    {{else}}
+    <div class="backup-library-empty">
+      <strong>No backups yet</strong>
+      <span>Create the first backup with Backup Now.</span>
+    </div>
+    {{end}}
+
+    <section class="backup-command-bar" aria-label="Backup controls">
+      <div class="backup-library-summary">
+        <div><span>Backups</span><strong>{{.BackupCount}}</strong></div>
+        <div><span>Total size</span><strong>{{.TotalSize}}</strong></div>
+        <div><span>Selected</span><strong data-backup-selected-count>0</strong></div>
+      </div>
+      <div class="backup-command-actions">
+        <button type="button" data-backup-restore-selected data-restore-busy="{{if .RestoreOperation}}1{{else}}0{{end}}" disabled>Restore selected</button>
+        <button class="danger" type="button" data-backup-delete-selected disabled>Delete selected</button>
+        <form method="post" action="/settings/new-backups/backup">
+          <input type="hidden" name="csrf" value="{{.CSRF}}">
+          <button type="submit">Backup Now</button>
+        </form>
+      </div>
+    </section>
   </section>
+
+
   <input type="hidden" value="{{.CSRF}}" data-backup-delete-csrf>
   <p class="backup-delete-page-error" data-backup-delete-page-error hidden></p>
 
@@ -263,41 +301,7 @@
     </details>
   </section>
 
-  <section class="backup-library-section" id="backup-library">
-    <div class="section-heading">
-      <div><p class="eyebrow">Backup library</p><h2>Existing backups</h2></div>
-    </div>
 
-    {{if .Backups}}
-    <div class="backup-file-grid" role="list">
-      {{range .Backups}}
-      <label class="backup-file-card backup-file-selectable" role="listitem" data-backup-card>
-        <input class="backup-file-checkbox" type="checkbox" value="{{.ID}}" data-backup-select aria-label="Select {{.ID}}">
-        <div class="backup-file-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24"><path d="M4 4h11l5 5v11H4z"></path><path d="M15 4v5h5"></path><path d="M8 14h8M8 17h6"></path></svg>
-        </div>
-        <div class="backup-file-copy">
-          <strong title="{{.ID}}">{{.ID}}</strong>
-          <span>{{.CreatedLabel}}</span>
-          <small>{{.Size}}{{if .Version}} · Minecraft {{.Version}}{{end}}{{if .Bedrock}} · Bedrock{{end}}{{if .Variant}} · {{.Variant}}{{end}}</small>
-        </div>
-        {{if eq .MetadataStatus "valid"}}
-        <span class="backup-file-status">Ready</span>
-        {{else if eq .MetadataStatus "missing"}}
-        <span class="backup-file-status backup-file-status-warning">Metadata missing</span>
-        {{else}}
-        <span class="backup-file-status backup-file-status-warning">Metadata invalid</span>
-        {{end}}
-      </label>
-      {{end}}
-    </div>
-    {{else}}
-    <div class="backup-library-empty">
-      <strong>No backups yet</strong>
-      <span>Create the first backup with Backup Now.</span>
-    </div>
-    {{end}}
-  </section>
 
   <p class="muted backup-library-note">New Backups now creates, displays, restores, safely deletes, schedules and changes backup destinations. Legacy backup pages remain available until the separate cleanup pass.</p>
 

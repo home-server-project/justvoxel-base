@@ -306,6 +306,13 @@ if (quickLook && quickLookToggle) {
   const actionMenus = Array.from(quickLook.querySelectorAll("[data-quick-look-actions]"));
   let identity = null;
   let refreshTimer = null;
+  const topbar = document.querySelector(".topbar");
+
+  const syncQuickLookTop = () => {
+    quickLook.style.top = Math.round(topbar?.getBoundingClientRect().height || 48) + "px";
+  };
+  syncQuickLookTop();
+  window.addEventListener("resize", syncQuickLookTop);
 
   const stateKey = (username) => `justvoxel-quick-look-v1:${encodeURIComponent(username)}`;
 
@@ -925,7 +932,7 @@ const initSystemUpdateWorkspace = () => {
 
   const renderSystemUpdate = (status) => {
     latestStatus = status;
-    if (runningValue) runningValue.textContent = deploymentVersion(status.running, "Unavailable");
+    if (runningValue) runningValue.textContent = deploymentVersion(status.running, "Current image");
     if (runningImage) runningImage.textContent = deploymentDetail(status.running);
     if (stagedValue) stagedValue.textContent = deploymentVersion(status.staged, "None");
     if (stagedImage) stagedImage.textContent = deploymentDetail(status.staged);
@@ -1301,6 +1308,7 @@ const setupWorkspaceWindow = (element, options = {}) => {
 
   workspaceWindows.add(element);
   const dragHandle = element.querySelector("[data-workspace-drag-handle]");
+  const resizeHandle = element.querySelector("[data-workspace-resize-handle]");
   let resizeSaveTimer = null;
 
   const bringToFront = () => {
@@ -1395,7 +1403,40 @@ const setupWorkspaceWindow = (element, options = {}) => {
     });
   }
 
-  const resizeObserver = new ResizeObserver(() => {
+  if (resizeHandle) {
+    resizeHandle.addEventListener("pointerdown", (event) => {
+      if (workspaceCompactQuery.matches || event.button !== 0) return;
+      bringToFront();
+      const rect = element.getBoundingClientRect();
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const startWidth = rect.width;
+      const startHeight = rect.height;
+      const computed = window.getComputedStyle(element);
+      const minWidth = Number.parseFloat(computed.minWidth) || 360;
+      const minHeight = Number.parseFloat(computed.minHeight) || 260;
+      const maxWidth = Math.max(minWidth, window.innerWidth - rect.left - 8);
+      const maxHeight = Math.max(minHeight, window.innerHeight - rect.top - 8);
+      event.preventDefault();
+      resizeHandle.setPointerCapture(event.pointerId);
+      const move = (moveEvent) => {
+        element.style.width = Math.round(Math.min(maxWidth, Math.max(minWidth, startWidth + moveEvent.clientX - startX))) + "px";
+        element.style.height = Math.round(Math.min(maxHeight, Math.max(minHeight, startHeight + moveEvent.clientY - startY))) + "px";
+      };
+      const finish = () => {
+        resizeHandle.removeEventListener("pointermove", move);
+        resizeHandle.removeEventListener("pointerup", finish);
+        resizeHandle.removeEventListener("pointercancel", finish);
+        clampWorkspaceWindow(element);
+        persistGeometry();
+      };
+      resizeHandle.addEventListener("pointermove", move);
+      resizeHandle.addEventListener("pointerup", finish);
+      resizeHandle.addEventListener("pointercancel", finish);
+    });
+  }
+
+    const resizeObserver = new ResizeObserver(() => {
     if (!element.open || workspaceCompactQuery.matches) return;
     window.clearTimeout(resizeSaveTimer);
     resizeSaveTimer = window.setTimeout(() => {
@@ -2024,6 +2065,7 @@ if (minecraftOpen && minecraftDialog) {
   const content = minecraftDialog.querySelector("[data-minecraft-workspace-content]");
   const tabs = Array.from(minecraftDialog.querySelectorAll("[data-minecraft-tab]"));
   let currentTab = "overview";
+  const settingsTabs = new Set(["memory", "players", "version"]);
   let loadSequence = 0;
 
   const ensureStylesheet = (href) => {
@@ -2192,15 +2234,11 @@ if (minecraftOpen && minecraftDialog) {
     const minecraft = snapshot?.status?.minecraft || {};
     const players = snapshot?.players || {};
     const root = document.createElement("div");
+    root.className = "minecraft-overview-compact";
 
     const grid = document.createElement("div");
     grid.className = "minecraft-overview-grid";
-    const cards = [
-      ["Status", minecraft.state || "—"],
-      ["Version", minecraft.version || "—"],
-      ["Players", minecraft.configured ? `${players.online ?? 0} / ${players.max ?? minecraft.max_players ?? "—"}` : "Not configured"],
-    ];
-    cards.forEach(([label, value]) => {
+    [["Status", minecraft.state || "—"], ["Version", minecraft.version || "—"], ["Players", minecraft.configured ? `${players.online ?? 0} / ${players.max ?? minecraft.max_players ?? "—"}` : "Not configured"]].forEach(([label, value]) => {
       const card = document.createElement("article");
       card.className = "minecraft-overview-card";
       const labelNode = document.createElement("span");
@@ -2212,21 +2250,16 @@ if (minecraftOpen && minecraftDialog) {
     });
     root.appendChild(grid);
 
-    const playersPanel = document.createElement("section");
-    playersPanel.className = "minecraft-overview-players";
-    const heading = document.createElement("h3");
-    heading.textContent = "Online players";
-    playersPanel.appendChild(heading);
-
-    if (!minecraft.configured || players.state === "not_configured") {
-      playersPanel.appendChild(messageNode("Minecraft is not configured yet."));
-    } else if (players.state === "stopped") {
-      playersPanel.appendChild(messageNode("Minecraft is stopped. Player information will appear when the server is running."));
-    } else if (players.state === "unavailable") {
-      playersPanel.appendChild(messageNode(players.error || "Player information is temporarily unavailable."));
-    } else if ((players.online ?? 0) === 0) {
-      playersPanel.appendChild(messageNode("No players online."));
-    } else if (Array.isArray(players.names) && players.names.length > 0) {
+    const playerLine = document.createElement("div");
+    playerLine.className = "minecraft-overview-playerline";
+    const label = document.createElement("strong");
+    label.textContent = "Online";
+    playerLine.appendChild(label);
+    if (!minecraft.configured || players.state === "not_configured") playerLine.appendChild(messageNode("Minecraft is not configured yet."));
+    else if (players.state === "stopped") playerLine.appendChild(messageNode("Minecraft is stopped."));
+    else if (players.state === "unavailable") playerLine.appendChild(messageNode(players.error || "Player information is temporarily unavailable."));
+    else if ((players.online ?? 0) === 0) playerLine.appendChild(messageNode("No players online."));
+    else if (Array.isArray(players.names) && players.names.length > 0) {
       const list = document.createElement("div");
       list.className = "player-list";
       players.names.forEach((name) => {
@@ -2235,23 +2268,18 @@ if (minecraftOpen && minecraftDialog) {
         chip.textContent = name;
         list.appendChild(chip);
       });
-      playersPanel.appendChild(list);
-    } else {
-      playersPanel.appendChild(messageNode(`${players.online ?? 0} players online.`));
-    }
-    root.appendChild(playersPanel);
+      playerLine.appendChild(list);
+    } else playerLine.appendChild(messageNode(`${players.online ?? 0} players online.`));
+    root.appendChild(playerLine);
     content.replaceChildren(root);
   };
 
-  const renderSettingsMarkup = (markup) => {
+  const renderSettingsMarkup = (markup, view = currentTab) => {
     if (!content) return;
     const parsed = new DOMParser().parseFromString(markup, "text/html");
     const sourceForm = parsed.querySelector("form.settings-form");
     const root = document.createElement("div");
-
-    parsed.querySelectorAll("main > .notice.success, main > .notice.error").forEach((notice) => {
-      root.appendChild(notice.cloneNode(true));
-    });
+    parsed.querySelectorAll("main > .notice.success, main > .notice.error").forEach((notice) => root.appendChild(notice.cloneNode(true)));
 
     if (!sourceForm) {
       const unavailable = parsed.querySelector("main > .notice");
@@ -2265,18 +2293,24 @@ if (minecraftOpen && minecraftDialog) {
     const backupKeep = sourceForm.querySelector('[name="backup_keep"]');
     const backupSchedule = sourceForm.querySelector('[name="backup_schedule"]');
     const backupTimer = sourceForm.querySelector('[name="backup_timer_enabled"]');
-    const preservedBackup = {
-      keep: backupKeep?.value || "",
-      schedule: backupSchedule?.value || "",
-      timerEnabled: Boolean(backupTimer?.checked),
-    };
+    const preservedBackup = { keep: backupKeep?.value || "", schedule: backupSchedule?.value || "", timerEnabled: Boolean(backupTimer?.checked) };
 
     const form = sourceForm.cloneNode(true);
-    form.classList.add("minecraft-workspace-section");
+    form.classList.add("minecraft-workspace-section", "minecraft-settings-split");
     form.querySelector('[name="backup_keep"]')?.closest("section")?.remove();
+
+    const sectionView = (section) => {
+      const heading = section.querySelector(".section-heading h2")?.textContent.trim() || "";
+      if (heading === "Minecraft memory") return "memory";
+      if (heading === "Players & identity" || heading === "Java & Bedrock") return "players";
+      if (heading === "Minecraft version policy") return "version";
+      return "";
+    };
     Array.from(form.querySelectorAll("section")).forEach((section) => {
-      const heading = section.querySelector(".section-heading h2");
-      if (heading?.textContent.trim() === "Read-only context") section.remove();
+      const target = sectionView(section);
+      if (!target) { section.remove(); return; }
+      section.dataset.minecraftSettingsSection = target;
+      section.hidden = target !== view;
     });
 
     const addHidden = (name, value) => {
@@ -2294,13 +2328,12 @@ if (minecraftOpen && minecraftDialog) {
     root.appendChild(form);
     const review = parsed.querySelector("#review");
     if (review) root.appendChild(review.cloneNode(true));
-
     namespaceIDs(root, "minecraft-workspace-");
     content.replaceChildren(root);
     initSettingsForm(root);
   };
 
-  const loadSettings = async (sequence, url = "/settings/server") => {
+  const loadSettings = async (sequence, url = "/settings/server") => {  const loadSettings = async (sequence, url = "/settings/server") => {
     ensureStylesheet("/static/settings.css");
     const response = await fetch(url, {
       method: "GET",
@@ -2313,7 +2346,7 @@ if (minecraftOpen && minecraftDialog) {
     if (response.status === 403) throw new Error("Administrator access required.");
     const markup = await response.text();
     if (sequence !== loadSequence) return;
-    renderSettingsMarkup(markup);
+    renderSettingsMarkup(markup, currentTab);
   };
 
   const renderOperationsMarkup = (markup, sectionID) => {
@@ -2353,7 +2386,7 @@ if (minecraftOpen && minecraftDialog) {
     if (refreshButton) refreshButton.disabled = true;
     if (content) content.replaceChildren();
     try {
-      if (currentTab === "settings") await loadSettings(sequence);
+      if (settingsTabs.has(currentTab)) await loadSettings(sequence);
       else if (currentTab === "whitelist") await loadOperationsSection(sequence, "#whitelist");
       else if (currentTab === "logs") await loadOperationsSection(sequence, "#minecraft-logs");
       else await renderOverview(sequence);
@@ -2398,7 +2431,7 @@ if (minecraftOpen && minecraftDialog) {
       });
       if (handleWorkspaceAuth(response)) return true;
       const markup = await response.text();
-      if (allowedSettings) renderSettingsMarkup(markup);
+      if (allowedSettings) renderSettingsMarkup(markup, currentTab);
       else renderOperationsMarkup(markup, "#whitelist");
       if (state) state.textContent = "";
     } catch (error) {
@@ -2424,7 +2457,7 @@ if (minecraftOpen && minecraftDialog) {
     const href = link.getAttribute("href") || "";
     if (href === "/settings/server" || href.startsWith("/settings/server?")) {
       event.preventDefault();
-      selectTab("settings");
+      selectTab(settingsTabs.has(currentTab) ? currentTab : "memory");
     }
   });
 
@@ -2455,6 +2488,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   const upsCSRF = document.querySelector("[data-system-ups-csrf]");
   let identity = null;
   let upsAvailable = false;
+  let securityPane = "authentication";
   let currentTab = "health";
   let initialized = false;
   let loadSequence = 0;
@@ -2556,6 +2590,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     if (!content) return;
     const parsed = parsePage(markup);
     const root = document.createElement("div");
+    root.className = "system-health-view";
     parsed.querySelectorAll("main > .notice, main > .panel, main > .action-row").forEach((node) => {
       root.appendChild(node.cloneNode(true));
     });
@@ -2641,31 +2676,85 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     renderUsersMarkup(markup);
   };
 
-  const securitySection = (markup, prefix, heading) => {
+  const compactSecurityRequirements = (root) => {
+    root.querySelectorAll("p.muted").forEach((paragraph) => {
+      const textValue = paragraph.textContent.trim();
+      if (!textValue.startsWith("Password requirements:")) return;
+      paragraph.textContent = textValue.split(" A stronger")[0];
+    });
+  };
+
+  const buildSecurityPane = (markup, kind) => {
     const parsed = parsePage(markup);
-    const source = parsed.querySelector("main .settings-panel");
-    if (!source) return null;
-    const section = source.cloneNode(true);
-    section.querySelectorAll(".foot").forEach((node) => node.remove());
-    const title = section.querySelector("h1");
-    if (title) title.textContent = heading;
-    systemNamespaceIDs(section, prefix);
-    return section;
+    const panel = parsed.querySelector("main .settings-panel");
+    const form = panel?.querySelector("form");
+    if (!panel || !form) return null;
+    const pane = document.createElement("section");
+    pane.className = "system-security-pane";
+    pane.dataset.systemSecurityPane = kind;
+    panel.querySelectorAll(":scope > .alert, :scope > .notice").forEach((notice) => pane.appendChild(notice.cloneNode(true)));
+    const heading = document.createElement("div");
+    heading.className = "system-security-pane-heading";
+    const title = document.createElement("h3");
+    title.textContent = kind === "authentication" ? "Authentication" : "Password";
+    const description = document.createElement("p");
+    description.className = "muted compact";
+    description.textContent = kind === "authentication"
+      ? "Choose whether WebUI uses the voxel system password or its own separate password."
+      : "Change the password used by the current WebUI authentication mode.";
+    heading.append(title, description);
+    pane.appendChild(heading);
+    if (kind === "authentication") {
+      const status = document.createElement("div");
+      status.className = "system-security-status";
+      const paragraphs = Array.from(panel.querySelectorAll(":scope > p"));
+      [paragraphs.find((node) => node.textContent.includes("Administrator:")), paragraphs.find((node) => node.textContent.includes("Mode:"))].filter(Boolean).forEach((node) => {
+        const item = document.createElement("span");
+        item.textContent = node.textContent.trim();
+        status.appendChild(item);
+      });
+      if (status.children.length) pane.appendChild(status);
+    }
+    const clonedForm = form.cloneNode(true);
+    clonedForm.classList.add("system-security-form");
+    compactSecurityRequirements(clonedForm);
+    pane.appendChild(clonedForm);
+    return pane;
   };
 
   const renderSecurityMarkup = (authenticationMarkup, passwordMarkup) => {
     if (!content) return;
     const root = document.createElement("div");
-    root.className = "system-security-grid";
-    const authentication = securitySection(authenticationMarkup, "system-security-auth-", "Authentication");
-    const password = securitySection(passwordMarkup, "system-security-password-", "Password");
+    root.className = "system-security-view";
+    const switcher = document.createElement("div");
+    switcher.className = "system-security-switcher";
+    switcher.setAttribute("role", "tablist");
+    ["authentication", "password"].forEach((kind) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.systemSecurityChoice = kind;
+      button.textContent = kind === "authentication" ? "Authentication" : "Password";
+      button.setAttribute("aria-selected", securityPane === kind ? "true" : "false");
+      switcher.appendChild(button);
+    });
+    root.appendChild(switcher);
+    const authentication = buildSecurityPane(authenticationMarkup, "authentication");
+    const password = buildSecurityPane(passwordMarkup, "password");
     if (authentication) root.appendChild(authentication);
     if (password) root.appendChild(password);
-    if (!root.children.length) throw new Error("Security settings are unavailable.");
+    if (!authentication && !password) throw new Error("Security settings are unavailable.");
+    const showPane = (kind) => {
+      securityPane = kind;
+      root.querySelectorAll("[data-system-security-choice]").forEach((button) => button.setAttribute("aria-selected", button.dataset.systemSecurityChoice === kind ? "true" : "false"));
+      root.querySelectorAll("[data-system-security-pane]").forEach((pane) => { pane.hidden = pane.dataset.systemSecurityPane !== kind; });
+    };
+    root.querySelectorAll("[data-system-security-choice]").forEach((button) => button.addEventListener("click", () => showPane(button.dataset.systemSecurityChoice)));
+    systemNamespaceIDs(root, "system-security-");
     content.replaceChildren(root);
+    showPane(securityPane);
   };
 
-  const fetchSecurityPages = async () => {
+  const fetchSecurityPages = async () => {  const fetchSecurityPages = async () => {
     const [authenticationResponse, passwordResponse] = await Promise.all([
       systemFetchPage("/settings/authentication"),
       systemFetchPage("/password"),
@@ -3018,10 +3107,12 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       } else if (kind === "users") {
         renderUsersMarkup(markup);
       } else if (kind === "security-auth") {
+        securityPane = "authentication";
         const passwordResponse = await systemFetchPage("/password");
         if (!passwordResponse) return;
         renderSecurityMarkup(markup, await passwordResponse.text());
       } else if (kind === "security-password") {
+        securityPane = "password";
         const authenticationResponse = await systemFetchPage("/settings/authentication");
         if (!authenticationResponse) return;
         renderSecurityMarkup(await authenticationResponse.text(), markup);

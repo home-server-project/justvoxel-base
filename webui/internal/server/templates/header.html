@@ -103,6 +103,7 @@
       </nav>
     </div>
   </details>
+</header>
 
   <section class="quick-look" data-quick-look aria-label="Quick Look">
     <div class="quick-look-panel" id="quick-look-panel" data-quick-look-panel>
@@ -189,9 +190,11 @@
       </div>
       <nav class="minecraft-workspace-tabs" aria-label="Minecraft workspace">
         <button type="button" data-minecraft-tab="overview" aria-selected="true">Overview</button>
-        <button class="nav-admin-only" type="button" data-minecraft-tab="settings" aria-selected="false">Settings</button>
+        <button class="nav-admin-only" type="button" data-minecraft-tab="memory" aria-selected="false">Memory</button>
+        <button class="nav-admin-only" type="button" data-minecraft-tab="players" aria-selected="false">Players</button>
         <button class="nav-operator-plus" type="button" data-minecraft-tab="whitelist" aria-selected="false">Whitelist</button>
         <button class="nav-operator-plus" type="button" data-minecraft-tab="logs" aria-selected="false">Logs</button>
+        <button class="nav-admin-only" type="button" data-minecraft-tab="version" aria-selected="false">Version</button>
       </nav>
       <div class="minecraft-workspace-body">
         <p class="minecraft-workspace-state" data-minecraft-state>Choose a section.</p>
@@ -259,6 +262,7 @@
           <section class="system-monitor-card system-monitor-card-wide" data-monitor-card="alerts"><span>Alerts</span><div class="system-monitor-table" data-monitor-alerts></div></section>
         </div>
       </div>
+      <div class="workspace-resize-grip" data-workspace-resize-handle aria-hidden="true"></div>
     </div>
   </dialog>
 
@@ -382,5 +386,4 @@
       </div>
     </div>
   </dialog>
-</header>
 {{end}}

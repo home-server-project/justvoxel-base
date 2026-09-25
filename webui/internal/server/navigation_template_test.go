@@ -129,7 +129,9 @@ func TestMinecraftWorkspaceMigrationContract(t *testing.T) {
 	for _, want := range []string{
 		`data-workspace-window="minecraft"`,
 		`data-minecraft-tab="overview"`,
-		`data-minecraft-tab="settings"`,
+		`data-minecraft-tab="memory"`,
+		`data-minecraft-tab="players"`,
+		`data-minecraft-tab="version"`,
 		`data-minecraft-tab="whitelist"`,
 		`data-minecraft-tab="logs"`,
 		`href="/settings/server"`,
@@ -152,6 +154,7 @@ func TestMinecraftWorkspaceMigrationContract(t *testing.T) {
 		`url = "/settings/server"`,
 		`url = "/operations"`,
 		`form.querySelector('[name="backup_keep"]')?.closest("section")?.remove()`,
+		`const settingsTabs = new Set(["memory", "players", "version"])`,
 	} {
 		if !strings.Contains(behavior, want) {
 			t.Fatalf("Minecraft workspace behavior missing %q", want)
@@ -214,6 +217,58 @@ func TestSystemWorkspaceMigrationContract(t *testing.T) {
 		if !strings.Contains(behavior, want) {
 			t.Fatalf("System workspace behavior missing %q", want)
 		}
+	}
+}
+
+func TestWorkspaceCleanupLayoutContract(t *testing.T) {
+	header, err := assets.ReadFile("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(header)
+	headerClose := strings.Index(markup, "</header>")
+	quickLook := strings.Index(markup, `class="quick-look"`)
+	systemMonitor := strings.Index(markup, `data-workspace-window="system-monitor"`)
+	if headerClose < 0 || quickLook < 0 || systemMonitor < 0 || headerClose > quickLook || headerClose > systemMonitor {
+		t.Fatal("topbar must close before Quick Look and workspace windows")
+	}
+	if !strings.Contains(markup, `data-workspace-resize-handle`) {
+		t.Fatal("System Monitor is missing the visible resize grip")
+	}
+	styles, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{".quick-look{position:fixed", ".workspace-resize-grip", ".system-security-switcher", ".system-health-view"} {
+		if !strings.Contains(string(styles), want) {
+			t.Fatalf("workspace cleanup CSS missing %q", want)
+		}
+	}
+}
+
+func TestBackupsLibraryLeadsWorkspaceAndOwnsActions(t *testing.T) {
+	content, err := assets.ReadFile("templates/new_backups.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(content)
+	library := strings.Index(markup, `class="backup-library-section"`)
+	automatic := strings.Index(markup, `class="backup-automatic-section"`)
+	destination := strings.Index(markup, `class="backup-destination-section"`)
+	if library < 0 || automatic < 0 || destination < 0 || !(library < automatic && automatic < destination) {
+		t.Fatal("Backup library must be the first main Backups section")
+	}
+	command := strings.Index(markup, `class="backup-command-bar"`)
+	files := strings.Index(markup, `class="backup-file-grid"`)
+	if command < library || (files >= 0 && command < files) || command > automatic {
+		t.Fatal("Backup controls must live inside Backup library below the backup files")
+	}
+	styles, err := assets.ReadFile("static/new-backups.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(styles), ".backup-destination-change>summary{display:flex") {
+		t.Fatal("Change destination must be a normal right-aligned action button")
 	}
 }
 
