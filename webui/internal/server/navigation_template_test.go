@@ -735,9 +735,11 @@ func TestNewBackupsReviewedMultiDeleteFlow(t *testing.T) {
 		`reviewedPlan.fingerprint`,
 		`reviewedPlan.confirmation`,
 		`ids.forEach((id) => body.append("backup_id", id))`,
-		`const url = "/settings/new-backups?result=deleted&count="`,
+		`const workspaceURL = "/workspace/backups?result=deleted&count="`,
+		`const pageURL = "/settings/new-backups?result=deleted&count="`,
 		`window.JustVoxelBackupsWorkspace?.reload`,
-		`await window.JustVoxelBackupsWorkspace.reload(url)`,
+		`await window.JustVoxelBackupsWorkspace.reload(workspaceURL)`,
+		`window.location.assign(pageURL)`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("New Backups delete behavior missing %q", want)
