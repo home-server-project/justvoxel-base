@@ -139,35 +139,128 @@
     </form>
 
     {{else if eq .CurrentStep 5}}
-    <form method="post" action="/setup/storage" class="setup-form" data-setup-storage-form>
+    <form method="post" action="/setup/storage" class="setup-form" data-setup-storage-form data-csrf="{{.CSRF}}">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <div class="setup-storage-summary"><strong>Storage configuration</strong><span>Choose where Minecraft worlds, plugins, configuration and runtime data will live. This step only records the choice; it does not mount, format or write anything.</span></div>
-      <label class="setup-field">Minecraft data storage
-        <select id="setup-storage-type" name="storage_type">
-          <option value="system" {{if eq .Storage.Type "system"}}selected{{end}}>Use JustVoxel system storage</option>
-          <option value="partition" {{if eq .Storage.Type "partition"}}selected{{end}}>Use an existing local filesystem</option>
-        </select>
-      </label>
-      <div data-setup-storage-kind="system">
-        <div class="setup-target-card"><strong>JustVoxel system storage</strong><span><code>{{.Defaults.DataPath}}</code></span><small>Simple default for a home server. No extra disk or mount configuration is required.</small></div>
-        <input type="hidden" name="storage_path" value="{{.Defaults.DataPath}}" data-setup-field-kind="system">
+      <input type="hidden" name="storage_type" value="{{.Storage.Type}}" data-setup-storage-type>
+      <input type="hidden" name="storage_device" value="{{.Storage.Device}}" data-setup-storage-device>
+      <input type="hidden" name="storage_mount_point" value="{{.Storage.MountPoint}}" data-setup-storage-mount>
+      <input type="hidden" name="storage_path" value="{{.Storage.Path}}" data-setup-storage-path>
+
+      <div class="setup-storage-choice-grid">
+        <button class="setup-storage-choice{{if eq .Storage.Type "system"}} is-selected{{end}}" type="button" data-setup-storage-system>
+          <span class="setup-storage-choice-kicker">Simple</span>
+          <strong>Use system storage</strong>
+          <small>Store Minecraft at <code>{{.Defaults.DataPath}}</code>. No disk preparation is required.</small>
+        </button>
+        <button class="setup-storage-choice{{if eq .Storage.Type "partition"}} is-selected{{end}}" type="button" data-setup-storage-internal>
+          <span class="setup-storage-choice-kicker">Custom</span>
+          <strong>Use another internal disk</strong>
+          <small>Choose an existing Linux filesystem, format a blank partition, or create one in unallocated space.</small>
+        </button>
       </div>
-      <div data-setup-storage-kind="partition" hidden>
-        {{if .Filesystems}}
-        <label class="setup-field">Existing filesystem
-          <select id="setup-storage-device" name="storage_device" data-setup-field-kind="partition">
-            <option value="">Choose a filesystem</option>
-            {{range .Filesystems}}<option value="{{.Path}}" data-mountpoint="{{.Mountpoint}}" {{if eq $.Storage.Device .Path}}selected{{end}}>{{.Model}} · {{.Path}} · {{.Size}} · {{.Filesystem}}{{if .Label}} · {{.Label}}{{end}}{{if .SystemDisk}} · on system disk{{end}}</option>{{end}}
-          </select>
-          <span class="field-help">Only writable XFS, ext4 and Btrfs partitions are shown. Root, boot, EFI and <code>/var</code> are excluded.</span>
-        </label>
-        <div class="setup-form-grid">
-          <label class="setup-field">Mount point<input name="storage_mount_point" value="{{.Storage.MountPoint}}" data-setup-field-kind="partition" data-default="/var/mnt/justvoxel-data" autocomplete="off" placeholder="/var/mnt/justvoxel-data"><span class="field-help">If already mounted, use its current mount point.</span></label>
-          <label class="setup-field">Minecraft data directory<input name="storage_path" value="{{.Storage.Path}}" data-setup-field-kind="partition" autocomplete="off" placeholder="/var/mnt/justvoxel-data/minecraft"><span class="field-help">Must be inside the selected filesystem mount point.</span></label>
+
+      <section data-setup-storage-system-panel {{if ne .Storage.Type "system"}}hidden{{end}}>
+        <div class="setup-target-card">
+          <strong>JustVoxel system storage</strong>
+          <span><code>{{.Defaults.DataPath}}</code></span>
+          <small>This is the recommended first-run choice. You can migrate Minecraft data later from Control Center.</small>
         </div>
-        {{else}}<div class="notice">No safe existing XFS, ext4 or Btrfs filesystem is currently available.</div>{{end}}
-      </div>
-      <div class="notice setup-advanced-note"><strong>Need to prepare a new disk?</strong><span>Disk erase, formatting and partition creation stay outside this normal first-run form. <a href="/settings/storage-provision?from=setup">Advanced Storage</a> uses the separate typed-confirmation safety workflow; <code>mjust setup</code> remains available from the terminal as well.</span></div>
+      </section>
+
+      <section class="setup-storage-browser" data-setup-storage-internal-panel {{if ne .Storage.Type "partition"}}hidden{{end}}>
+        <div class="setup-storage-browser-heading">
+          <div><strong>Internal disks</strong><span>Only internal storage is offered for live Minecraft data.</span></div>
+          <span class="badge">{{len .StorageDisks}}</span>
+        </div>
+
+        {{if .StorageDisks}}
+        <div class="setup-storage-disk-list">
+          {{range .StorageDisks}}
+          <article class="setup-storage-disk">
+            <div class="setup-storage-disk-heading">
+              <div><strong>{{if .Model}}{{.Model}}{{else}}{{.Name}}{{end}}</strong><span><code>{{.Path}}</code> · {{.Size}}{{if .SystemDisk}} · System disk{{end}}</span></div>
+            </div>
+            {{if or .Partitions .FreeSpaces}}
+            <div class="setup-storage-layout">
+              {{range .Partitions}}
+                {{if .Formatted}}
+                <button class="setup-storage-segment setup-storage-existing{{if eq $.Storage.Device .Path}} is-selected{{end}}" type="button"
+                        data-setup-existing-partition
+                        data-device="{{.Path}}"
+                        data-mountpoint="{{.Mountpoint}}">
+                  <span class="setup-storage-segment-state">Ready</span>
+                  <strong>{{.Path}}</strong>
+                  <span>{{.Size}} · {{.Filesystem}}{{if .Label}} · {{.Label}}{{end}}</span>
+                  <small>{{if .Mountpoint}}{{.Mountpoint}}{{else}}Will use /var/mnt/justvoxel-data{{end}}</small>
+                </button>
+                {{else}}
+                <button class="setup-storage-segment setup-storage-prepare" type="button"
+                        data-setup-storage-prepare="format"
+                        data-device="{{.Path}}"
+                        data-size="{{.Size}}">
+                  <span class="setup-storage-segment-state">Blank</span>
+                  <strong>{{.Path}}</strong>
+                  <span>{{.Size}}</span>
+                  <small>Format as XFS for Minecraft</small>
+                </button>
+                {{end}}
+              {{end}}
+              {{range .FreeSpaces}}
+              <button class="setup-storage-segment setup-storage-prepare" type="button"
+                      data-setup-storage-prepare="create_partition"
+                      data-device="{{.Device}}"
+                      data-free-start="{{.Start}}"
+                      data-size="{{.Size}}">
+                <span class="setup-storage-segment-state">Unallocated</span>
+                <strong>{{.Size}} free</strong>
+                <span>{{.Start}} → {{.End}}</span>
+                <small>Create one XFS partition using this free space</small>
+              </button>
+              {{end}}
+            </div>
+            {{else}}
+            <div class="notice compact">No usable existing filesystem or unallocated segment was reported on this disk.</div>
+            {{end}}
+          </article>
+          {{end}}
+        </div>
+        {{else}}
+        <div class="notice">No internal disk with a usable Minecraft storage target was reported.</div>
+        {{end}}
+
+        {{if gt .ExternalStorageCount 0}}
+        <div class="notice setup-storage-external-note"><strong>External drives are not offered for Minecraft data.</strong><span>{{.ExternalStorageCount}} USB/external disk{{if ne .ExternalStorageCount 1}}s were{{else}} was{{end}} detected. External storage remains appropriate for backups and will be available on the Backup step.</span></div>
+        {{end}}
+
+        <div class="setup-storage-selected" data-setup-storage-selected {{if ne .Storage.Type "partition"}}hidden{{end}}>
+          <span>Selected Minecraft storage</span>
+          <strong data-setup-storage-selected-device>{{if .Storage.Device}}{{.Storage.Device}}{{else}}Choose a ready filesystem above{{end}}</strong>
+          <small data-setup-storage-selected-path>{{if .Storage.Path}}{{.Storage.Path}}{{end}}</small>
+        </div>
+      </section>
+
+      <section class="setup-storage-action-review" data-setup-storage-action-review hidden>
+        <div class="setup-storage-action-heading">
+          <div><span class="setup-storage-choice-kicker">Review storage action</span><strong data-setup-storage-action-title>Prepare storage</strong></div>
+          <button class="secondary" type="button" data-setup-storage-action-close>Close</button>
+        </div>
+        <dl class="setup-storage-action-details">
+          <div><dt>Target</dt><dd><code data-setup-storage-action-device></code></dd></div>
+          <div><dt>Result</dt><dd data-setup-storage-action-result></dd></div>
+        </dl>
+        <div data-setup-storage-action-warnings></div>
+        <div class="setup-storage-confirm">
+          <p>Review the target above, then slide fully to the right and confirm.</p>
+          <input type="range" min="0" max="100" step="1" value="0" data-setup-storage-confirm-slider aria-label="Slide to confirm storage preparation">
+          <label><input type="checkbox" data-setup-storage-confirm-toggle disabled> Confirm this reviewed storage action</label>
+        </div>
+        <p class="notice error" data-setup-storage-action-error hidden></p>
+        <div class="setup-storage-action-buttons">
+          <button class="secondary" type="button" data-setup-storage-action-back>Back</button>
+          <button type="button" data-setup-storage-action-apply disabled>Apply reviewed action</button>
+        </div>
+      </section>
+
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
     </form>
 
