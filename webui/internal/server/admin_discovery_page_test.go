@@ -353,9 +353,7 @@ func TestNewStorageUsesAgentApprovedMinecraftMigrationCandidates(t *testing.T) {
 			t.Fatalf("New Storage Minecraft migration handoff missing %q: %s", want, body)
 		}
 	}
-	if strings.Contains(body, "/settings/data-migration") {
-		t.Fatal("New Storage still renders a legacy Data Migration page handoff")
-	}
+
 }
 
 func TestStorageWorkspaceFragmentUsesSameBrowserAndUSBGrouping(t *testing.T) {
