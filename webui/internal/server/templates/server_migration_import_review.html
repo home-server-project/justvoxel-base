@@ -65,7 +65,7 @@
     {{end}}
 
     {{if .SourceSMB}}
-    <section class="panel">
+    <section class="panel" data-migration-source-password-repeat>
       <p class="eyebrow">Temporary source credential</p>
       <label for="server-import-source-password-again"><strong>SMB source password</strong></label>
       <input id="server-import-source-password-again" type="password" name="source_smb_password" autocomplete="off" required>
@@ -150,7 +150,7 @@
     <input type="hidden" name="backup_domain" value="{{.Request.Destination.Backups.Domain}}">
     <input type="hidden" name="plan_fingerprint" value="{{.Plan.PlanFingerprint}}">
 
-    {{if .SourceSMB}}<label for="server-import-source-password-apply"><strong>SMB source password</strong></label><input id="server-import-source-password-apply" type="password" name="source_smb_password" autocomplete="off" required><p class="muted">Used only to re-open and revalidate the reviewed source for this Apply request.</p>{{end}}
+    {{if .SourceSMB}}<div data-migration-source-password-repeat><label for="server-import-source-password-apply"><strong>SMB source password</strong></label><input id="server-import-source-password-apply" type="password" name="source_smb_password" autocomplete="off" required><p class="muted">Used only to re-open and revalidate the reviewed source for this Apply request.</p></div>{{end}}
     {{if .Plan.Requirements.BackupSMBPasswordRequired}}<label for="server-import-backup-password-apply"><strong>SMB backup password</strong></label><input id="server-import-backup-password-apply" type="password" name="backup_smb_password" autocomplete="off" required><p class="muted">Apply-only credential for the reviewed fresh backup destination.</p>{{end}}
     {{if .Plan.Requirements.PlayersConfirmationRequired}}<label><input type="checkbox" name="players_confirmed" value="yes"> I understand that the online players may be interrupted.</label>{{end}}
     {{if .Plan.Requirements.EULAAcceptanceRequired}}<label><input type="checkbox" name="eula_accepted" value="yes"> I accept the <a href="{{.EULAURL}}" target="_blank" rel="noopener noreferrer">Minecraft End User License Agreement</a> for this fresh destination.</label>{{end}}

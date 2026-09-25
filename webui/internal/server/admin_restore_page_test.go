@@ -154,7 +154,7 @@ func TestRestoreReviewShowsAuthoritativeWarningsAndConfirmations(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Review Restore", "This backup is older than the configured Minecraft version.", "PlayerOne",
-		"Type RESTORE", "name=\"players_confirmed\"", "Current configured version", "26.3",
+		"data-destructive-confirmation", `data-confirm-value="RESTORE"`, "data-destructive-submit", "name=\"players_confirmed\"", "Current configured version", "26.3",
 	} {
 		if !strings.Contains(page.Body.String(), want) {
 			t.Fatalf("restore review missing %q: %s", want, page.Body.String())

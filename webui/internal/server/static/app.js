@@ -1,3 +1,73 @@
+
+const enhancePasswordFields = (root = document) => {
+  root.querySelectorAll('input[type="password"]:not([data-password-reveal-ready])').forEach((input) => {
+    input.dataset.passwordRevealReady = "true";
+    const shell = document.createElement("span");
+    shell.className = "password-field-shell";
+    input.parentNode.insertBefore(shell, input);
+    shell.appendChild(input);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "password-reveal-button";
+    button.setAttribute("aria-label", "Show password");
+    button.setAttribute("title", "Show password");
+    button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path><circle cx="12" cy="12" r="2.8"></circle></svg>';
+    button.addEventListener("click", () => {
+      const showing = input.type === "text";
+      input.type = showing ? "password" : "text";
+      button.classList.toggle("is-showing", !showing);
+      button.setAttribute("aria-label", showing ? "Show password" : "Hide password");
+      button.setAttribute("title", showing ? "Show password" : "Hide password");
+    });
+    shell.appendChild(button);
+  });
+};
+
+const initDestructiveConfirmations = (root = document) => {
+  root.querySelectorAll("[data-destructive-confirmation]:not([data-destructive-ready])").forEach((control) => {
+    control.dataset.destructiveReady = "true";
+    const slider = control.querySelector("[data-destructive-slider]");
+    const shell = control.querySelector("[data-destructive-slider-shell]");
+    const text = control.querySelector("[data-destructive-slider-text]");
+    const toggleRow = control.querySelector("[data-destructive-toggle-row]");
+    const toggle = control.querySelector("[data-destructive-toggle]");
+    const value = control.querySelector("[data-destructive-value]");
+    const button = control.closest("form")?.querySelector("[data-destructive-submit]") || control.parentElement?.querySelector("[data-destructive-submit]");
+    const idleText = control.dataset.destructiveIdle || "Slide to confirm";
+
+    const sync = () => {
+      const progress = Math.max(0, Math.min(100, Number(slider?.value || 0)));
+      shell?.style.setProperty("--confirm-progress", String(progress / 100));
+      const armed = progress >= 100;
+      shell?.classList.toggle("is-armed", armed);
+      if (text) text.textContent = armed ? (control.dataset.destructiveArmed || "Ready to confirm") : idleText;
+      if (toggleRow) toggleRow.hidden = !armed;
+      if (!armed && toggle) toggle.checked = false;
+      const confirmed = armed && Boolean(toggle?.checked);
+      if (value) value.value = confirmed ? (control.dataset.confirmValue || "") : "";
+      if (button) button.disabled = !confirmed;
+      slider?.setAttribute("aria-valuetext", armed ? "Ready for final confirmation" : progress + " percent");
+    };
+    slider?.addEventListener("input", sync);
+    slider?.addEventListener("change", sync);
+    toggle?.addEventListener("change", sync);
+    control._justVoxelDestructiveSync = sync;
+    sync();
+  });
+};
+
+const initializeSharedWebUIControls = (root = document) => {
+  enhancePasswordFields(root);
+  initDestructiveConfirmations(root);
+};
+initializeSharedWebUIControls(document);
+new MutationObserver((mutations) => {
+  mutations.forEach((mutation) => mutation.addedNodes.forEach((node) => {
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    initializeSharedWebUIControls(node);
+  }));
+}).observe(document.documentElement, { childList: true, subtree: true });
+
 document.addEventListener("submit", (event) => {
   const form = event.target.closest(".action-form");
   if (!form) return;
@@ -248,6 +318,16 @@ if (dashboard) {
     text("minecraft-version-summary", status.minecraft.version);
     text("system-health-summary", status.system.health);
     text("system-ipv4-summary", status.system.ipv4);
+    const overlaySummary = document.getElementById("system-overlay-summary");
+    if (overlaySummary) {
+      overlaySummary.replaceChildren();
+      [["Tailscale", status.system.tailscale], ["NetBird", status.system.netbird]].forEach(([label, value]) => {
+        if (!value) return;
+        const line = document.createElement("span");
+        line.textContent = label + ": " + value;
+        overlaySummary.appendChild(line);
+      });
+    }
     text("backup-summary", status.backup.enabled ? "Enabled" : "Disabled");
 
     renderPlayers(players);
@@ -367,6 +447,16 @@ if (quickLook && quickLookToggle) {
     );
     setValue("[data-quick-look-system]", system.health);
     setValue("[data-quick-look-ipv4]", system.ipv4);
+    const overlays = quickLook.querySelector("[data-quick-look-overlays]");
+    if (overlays) {
+      overlays.replaceChildren();
+      [["Tailscale", system.tailscale], ["NetBird", system.netbird]].forEach(([label, value]) => {
+        if (!value) return;
+        const line = document.createElement("span");
+        line.textContent = label + ": " + value;
+        overlays.appendChild(line);
+      });
+    }
     setValue("[data-quick-look-backup]", backup.enabled ? "Enabled" : "Disabled");
     setActionAvailability(status);
   };
@@ -1268,7 +1358,7 @@ const workspaceWindows = new Set();
 let workspaceWindowZ = 120;
 const workspaceCompactQuery = window.matchMedia("(max-width: 700px)");
 
-const workspaceWindowStateKey = (id) => `justvoxel-workspace-window-v1:${id}`;
+const workspaceWindowStateKey = (id) => `justvoxel-workspace-window-${id === "system-monitor" ? "v2" : "v1"}:${id}`;
 
 const readWorkspaceWindowState = (id) => {
   try {
@@ -1646,6 +1736,16 @@ if (backupsOpen && backupsDialog) {
       try {
         const body = new URLSearchParams();
         new FormData(form).forEach((value, key) => body.append(key, String(value)));
+        const sourceKind = body.get("source_kind") || "";
+        const submittedSourcePassword = body.get("source_smb_password") || "";
+        if (sourceKind === "smb") {
+          if (submittedSourcePassword) migrationSourceSMBPassword = submittedSourcePassword;
+          else if (migrationSourceSMBPassword) body.set("source_smb_password", migrationSourceSMBPassword);
+        } else {
+          migrationSourceSMBPassword = "";
+          body.delete("source_smb_password");
+        }
+        form.querySelectorAll('input[name="source_smb_password"]').forEach((input) => { input.value = ""; });
         const response = await fetch(action.pathname + action.search, {
           method: (form.method || "POST").toUpperCase(),
           credentials: "same-origin",
@@ -1802,6 +1902,7 @@ if (migrationOpen && migrationDialog) {
   let currentTab = "export";
   let currentURL = tabURLs.export;
   let loadSequence = 0;
+  let migrationSourceSMBPassword = "";
 
   const loadMigrationScript = async (src, ready) => {
     if (ready()) return;
@@ -1889,6 +1990,16 @@ if (migrationOpen && migrationDialog) {
     currentURL = renderedURL.pathname + renderedURL.search;
     currentTab = inferMigrationTab(responseURL, root);
     syncMigrationTabs();
+
+    if (currentTab === "import") {
+      const sourceEntries = Array.from(root.querySelectorAll('input[type="radio"][name="source_path"]'));
+      if (sourceEntries.length === 1) sourceEntries[0].checked = true;
+      const roots = Array.from(root.querySelectorAll('input[type="radio"][name="selected_root"]'));
+      if (roots.length === 1) roots[0].checked = true;
+      if (migrationSourceSMBPassword) {
+        root.querySelectorAll("[data-migration-source-password-repeat]").forEach((node) => node.remove());
+      }
+    }
     content.replaceChildren(root);
 
     root.addEventListener("submit", async (event) => {
@@ -1924,6 +2035,7 @@ if (migrationOpen && migrationDialog) {
           throw new Error("Migration operation could not be completed.");
         }
         renderMigrationMarkup(responseMarkup, response.url || action.pathname);
+        if ((response.url || "").includes("/server-migration/progress/")) migrationSourceSMBPassword = "";
         if (state) state.textContent = "";
       } catch (error) {
         if (submitter && submitter.isConnected) submitter.disabled = false;
@@ -1943,7 +2055,10 @@ if (migrationOpen && migrationDialog) {
       if (!href.startsWith("/settings/server-migration")) return;
       event.preventDefault();
       if (href === "/settings/server-migration") await loadMigrationEntry();
-      else await loadMigration(href);
+      else {
+        if (href === "/settings/server-migration/import") migrationSourceSMBPassword = "";
+        await loadMigration(href);
+      }
     });
 
     initializeMigrationRoot(root);
@@ -2019,7 +2134,10 @@ if (migrationOpen && migrationDialog) {
     }
   };
 
-  const workspaceWindow = setupWorkspaceWindow(migrationDialog, { onOpen: loadMigrationEntry });
+  const workspaceWindow = setupWorkspaceWindow(migrationDialog, {
+    onOpen: loadMigrationEntry,
+    onClose: () => { migrationSourceSMBPassword = ""; },
+  });
 
   migrationOpen.addEventListener("click", () => {
     if (controlCenter) controlCenter.open = false;
@@ -2029,7 +2147,9 @@ if (migrationOpen && migrationDialog) {
   refreshButton?.addEventListener("click", () => loadMigration(currentURL));
   tabs.forEach((button) => {
     button.addEventListener("click", async () => {
-      currentTab = button.dataset.migrationTab;
+      const nextTab = button.dataset.migrationTab;
+      if (currentTab === "import" && nextTab !== "import") migrationSourceSMBPassword = "";
+      currentTab = nextTab;
       currentURL = tabURLs[currentTab];
       syncMigrationTabs();
       await loadMigration(currentURL);
@@ -2333,7 +2453,7 @@ if (minecraftOpen && minecraftDialog) {
   const content = minecraftDialog.querySelector("[data-minecraft-workspace-content]");
   const tabs = Array.from(minecraftDialog.querySelectorAll("[data-minecraft-tab]"));
   let currentTab = "overview";
-  const settingsTabs = new Set(["memory", "players", "version"]);
+  const settingsTabs = new Set(["memory", "players", "crossplay", "version"]);
   let loadSequence = 0;
 
   const ensureStylesheet = (href) => {
@@ -2570,7 +2690,8 @@ if (minecraftOpen && minecraftDialog) {
     const sectionView = (section) => {
       const heading = section.querySelector(".section-heading h2")?.textContent.trim() || "";
       if (heading === "Minecraft memory") return "memory";
-      if (heading === "Players & identity" || heading === "Java & Bedrock") return "players";
+      if (heading === "Players & identity") return "players";
+      if (heading === "Java & Bedrock") return "crossplay";
       if (heading === "Minecraft version policy") return "version";
       return "";
     };

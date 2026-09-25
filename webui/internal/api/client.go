@@ -29,9 +29,11 @@ type LoginResponse struct {
 
 type Status struct {
 	System struct {
-		Variant string `json:"variant"`
-		Health  string `json:"health"`
-		IPv4    string `json:"ipv4"`
+		Variant   string `json:"variant"`
+		Health    string `json:"health"`
+		IPv4      string `json:"ipv4"`
+		Tailscale string `json:"tailscale,omitempty"`
+		NetBird   string `json:"netbird,omitempty"`
 	} `json:"system"`
 	Minecraft struct {
 		Configured  bool   `json:"configured"`

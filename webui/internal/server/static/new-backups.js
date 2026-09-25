@@ -19,8 +19,10 @@
     const summary = dialog?.querySelector("[data-backup-delete-summary]");
     const reviewList = dialog?.querySelector("[data-backup-delete-review-list]");
     const warnings = dialog?.querySelector("[data-backup-delete-warnings]");
-    const phrase = dialog?.querySelector("[data-backup-delete-confirmation-phrase]");
+    const confirmationControl = dialog?.querySelector("[data-backup-delete-confirmation-control]");
     const confirmation = dialog?.querySelector("[data-backup-delete-confirmation]");
+    const confirmationSlider = dialog?.querySelector("[data-destructive-slider]");
+    const confirmationToggle = dialog?.querySelector("[data-destructive-toggle]");
     const dialogError = dialog?.querySelector("[data-backup-delete-dialog-error]");
 
     let reviewedPlan = null;
@@ -141,8 +143,11 @@
           warnings.appendChild(notice);
         });
       }
-      if (phrase) phrase.textContent = reviewedPlan.confirmation || "";
+      if (confirmationControl) confirmationControl.dataset.confirmValue = reviewedPlan.confirmation || "";
       if (confirmation) confirmation.value = "";
+      if (confirmationSlider) confirmationSlider.value = "0";
+      if (confirmationToggle) confirmationToggle.checked = false;
+      confirmationControl?._justVoxelDestructiveSync?.();
       clearError(dialogError);
     }
 
@@ -159,7 +164,7 @@
         reviewedIDs = [...ids];
         renderPlan(payload);
         dialog.showModal();
-        confirmation?.focus();
+        confirmationSlider?.focus();
       } catch (error) {
         showError(pageError, error.message);
       } finally {
@@ -189,8 +194,8 @@
       if (!reviewedPlan || reviewedIDs.length === 0) return;
       const entered = confirmation?.value || "";
       if (entered !== reviewedPlan.confirmation) {
-        showError(dialogError, "Type the confirmation phrase exactly before deleting.");
-        confirmation?.focus();
+        showError(dialogError, "Slide fully and use the Confirm toggle before deleting.");
+        confirmationSlider?.focus();
         return;
       }
 

@@ -133,6 +133,7 @@ func TestMinecraftWorkspaceMigrationContract(t *testing.T) {
 		`data-minecraft-tab="players"`,
 		`data-minecraft-tab="version"`,
 		`data-minecraft-tab="whitelist"`,
+		`data-minecraft-tab="crossplay"`,
 		`data-minecraft-tab="logs"`,
 		`href="/settings/server"`,
 		`href="/operations#whitelist"`,
@@ -154,7 +155,8 @@ func TestMinecraftWorkspaceMigrationContract(t *testing.T) {
 		`url = "/settings/server"`,
 		`url = "/operations"`,
 		`form.querySelector('[name="backup_keep"]')?.closest("section")?.remove()`,
-		`const settingsTabs = new Set(["memory", "players", "version"])`,
+		`const settingsTabs = new Set(["memory", "players", "crossplay", "version"])`,
+		`if (heading === "Java & Bedrock") return "crossplay"`,
 	} {
 		if !strings.Contains(behavior, want) {
 			t.Fatalf("Minecraft workspace behavior missing %q", want)
@@ -239,7 +241,7 @@ func TestWorkspaceCleanupLayoutContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{".quick-look{position:fixed", ".workspace-resize-grip", ".system-security-switcher", ".system-health-view"} {
+	for _, want := range []string{".quick-look{position:fixed", ".workspace-resize-grip", ".system-security-switcher", ".system-health-view", ".password-field-shell", ".password-reveal-button", ".destructive-confirm-slider", "min-width:min(620px"} {
 		if !strings.Contains(string(styles), want) {
 			t.Fatalf("workspace cleanup CSS missing %q", want)
 		}
@@ -269,6 +271,15 @@ func TestBackupsLibraryLeadsWorkspaceAndOwnsActions(t *testing.T) {
 	}
 	if !strings.Contains(string(styles), ".backup-destination-change>summary{display:flex") {
 		t.Fatal("Change destination must be a normal right-aligned action button")
+	}
+
+	for _, want := range []string{"data-backup-delete-confirmation-control", "data-destructive-slider", "data-destructive-toggle", "data-destructive-submit"} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("Backups destructive confirmation UI missing %q", want)
+		}
+	}
+	if strings.Contains(markup, "Type exactly") || strings.Contains(markup, "Type RESTORE to continue") {
+		t.Fatal("Backups workspace still requires typed destructive confirmation phrases")
 	}
 }
 
@@ -304,6 +315,8 @@ func TestMigrationWorkspaceKeepsLegacyRoutesAndUsesWorkspaceShell(t *testing.T) 
 		`window.JustVoxelServerMigrationExport?.init(root)`,
 		`window.JustVoxelServerMigrationImport?.init(root)`,
 		`window.JustVoxelServerMigrationOperation?.init(root)`,
+		`let migrationSourceSMBPassword = ""`,
+		`root.querySelectorAll("[data-migration-source-password-repeat]")`,
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("Migration workspace behavior missing %q", want)

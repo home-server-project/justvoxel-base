@@ -590,3 +590,60 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .migration-workspace-content .admin-form-grid{gap:.65rem}
 @media(max-width:700px){.migration-workspace-dialog{inset:52px .25rem .25rem .25rem!important;width:auto!important;height:auto!important;min-width:0;min-height:0;max-width:none;max-height:none;resize:none;border-radius:12px}.migration-workspace-header{padding:.85rem .9rem .7rem;cursor:default;touch-action:auto}.migration-workspace-tabs{padding:.55rem .9rem}.migration-workspace-body{padding:.8rem .9rem}}
 @media(prefers-color-scheme:light){.migration-workspace-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025}.migration-workspace-header,.migration-workspace-tabs{border-color:#d9dfe3}.migration-workspace-tabs{background:#f7f9fa}.migration-workspace-tabs button{color:#56636c}.migration-workspace-tabs button:hover,.migration-workspace-tabs button:focus-visible{background:#e9eef1;color:#1a2025}.migration-workspace-tabs button[aria-selected="true"]{background:#e3f1e8;border-color:#86b99a;color:#184c31}.migration-workspace-content form>.action-row:last-of-type{background:#fff}}
+
+
+/* Shared compact workspace chrome. */
+.system-update-dialog-header,.system-monitor-header,.storage-workspace-header,.backups-workspace-header,.minecraft-workspace-header,.system-workspace-header,.migration-workspace-header{align-items:center;padding:.48rem .7rem;min-height:52px}
+.system-update-dialog-header>div:first-child,.system-monitor-header>div:first-child,.storage-workspace-header>div:first-child,.backups-workspace-header>div:first-child,.minecraft-workspace-header>div:first-child,.system-workspace-header>div:first-child,.migration-workspace-header>div:first-child{display:flex;align-items:baseline;gap:.38rem;min-width:0}
+.system-update-dialog-header .eyebrow,.system-monitor-header .eyebrow,.storage-workspace-header .eyebrow,.backups-workspace-header .eyebrow,.minecraft-workspace-header .eyebrow,.system-workspace-header .eyebrow,.migration-workspace-header .eyebrow{margin:0;white-space:nowrap}
+.system-update-dialog-header .eyebrow::after,.system-monitor-header .eyebrow::after,.storage-workspace-header .eyebrow::after,.backups-workspace-header .eyebrow::after,.minecraft-workspace-header .eyebrow::after,.system-workspace-header .eyebrow::after,.migration-workspace-header .eyebrow::after{content:" ·"}
+.system-update-dialog-header h2,.system-monitor-header h2,.storage-workspace-header h2,.backups-workspace-header h2,.minecraft-workspace-header h2,.system-workspace-header h2,.migration-workspace-header h2{margin:0;font-size:1.05rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.system-update-dialog-header .system-monitor-header-button,.system-monitor-header .system-monitor-header-button,.storage-workspace-header .system-monitor-header-button,.backups-workspace-header .system-monitor-header-button,.minecraft-workspace-header .system-monitor-header-button,.system-workspace-header .system-monitor-header-button,.migration-workspace-header .system-monitor-header-button{width:32px;height:32px;border-radius:8px;font-size:1.08rem}
+
+/* Network overlay addresses in the IPv4 tile. */
+.network-overlay-list{display:grid!important;gap:.08rem;margin-top:.35rem;color:#8f9ba4;font-size:.68rem;line-height:1.25}
+.network-overlay-list:empty{display:none!important}
+.network-overlay-list span{display:block;margin:0!important;font-size:inherit!important;color:inherit!important}
+
+/* Password reveal is applied to every password input, including dynamically loaded workspace forms. */
+.password-field-shell{position:relative;display:block;width:100%}
+.password-field-shell>input{padding-right:3rem}
+.password-reveal-button{position:absolute;right:.36rem;top:50%;display:grid;place-items:center;width:34px;height:34px;padding:0;transform:translateY(-42%);border:1px solid transparent;border-radius:7px;background:transparent;color:#9ca7b0}
+.password-reveal-button:hover,.password-reveal-button:focus-visible,.password-reveal-button.is-showing{background:#252e35;border-color:#3d4750;color:#eef1f4}
+.password-reveal-button svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8}
+
+/* Shared destructive slide + final toggle confirmation. */
+.destructive-confirmation{margin-top:.8rem;padding-top:.75rem;border-top:1px solid #303942}
+.destructive-confirm-slider{--confirm-progress:0;position:relative;height:54px;border:1px solid #4a5862;border-radius:14px;background:#10161a;overflow:hidden;transition:border-color .16s ease,background-color .16s ease,box-shadow .16s ease}
+.destructive-confirm-slider:focus-within{box-shadow:0 0 0 2px #80caa055}
+.destructive-confirm-slider-text{position:absolute;inset:0;display:grid;place-items:center;padding:0 62px;color:#aab5bd;font-size:.84rem;font-weight:700;opacity:.32;transition:color .16s ease,opacity .16s ease,font-weight .16s ease}
+.destructive-confirm-slider-thumb{position:absolute;top:3px;left:calc(3px + (100% - 54px) * var(--confirm-progress));display:grid;place-items:center;width:48px;height:48px;border:1px solid #89959e;border-radius:11px;background:linear-gradient(145deg,#d8dee3,#aeb8c0);color:#172027;font-size:1.5rem;font-weight:950;box-shadow:inset 0 1px #ffffff88,0 2px 8px #0005;transition:left .08s linear,background-color .16s ease,color .16s ease}
+.destructive-confirm-slider input[type="range"]{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:.001;cursor:ew-resize}
+.destructive-confirm-slider.is-armed{border-color:#ff5f56;background:#3b1719;box-shadow:0 0 0 1px #ff5f5644}
+.destructive-confirm-slider.is-armed .destructive-confirm-slider-text{color:#ff6b61;opacity:1;font-weight:850}
+.destructive-confirm-slider.is-armed .destructive-confirm-slider-thumb{background:#ea554d;color:#fff}
+.destructive-confirm-toggle-row{display:flex;align-items:center;justify-content:flex-end;gap:.7rem;margin:.6rem 0 0}
+.destructive-confirm-toggle-callout{display:inline-flex;align-items:center;color:#eef1f4;font-size:1.02rem;font-weight:850}
+.destructive-confirm-toggle-callout::before{content:">";margin-right:.45rem;color:#aeb8c0;font-size:1.2rem;font-weight:950}
+.destructive-confirm-toggle{appearance:none;width:50px;height:28px;margin:0;border:1px solid #4a5862;border-radius:999px;background:radial-gradient(circle at 13px 50%,#f2f5f7 0 9px,transparent 10px),#303942;cursor:pointer}
+.destructive-confirm-toggle:checked{border-color:#ff5f56;background:radial-gradient(circle at calc(100% - 13px) 50%,#fff 0 9px,transparent 10px),#e6534b;box-shadow:0 0 0 1px #ff5f5644}
+
+/* System Monitor desktop geometry v2: useful multi-column minimum and a catchable resize grip. */
+.system-monitor-dialog{min-width:min(620px,calc(100vw - 1rem));width:min(860px,calc(100vw - 1rem))}
+.system-monitor-grid{grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
+.workspace-resize-grip{right:2px;bottom:2px;width:38px;height:38px;border-radius:0 0 14px 0;background:linear-gradient(135deg,transparent 52%,#52616d55 53%,#52616d55 58%,transparent 59%,transparent 68%,#788690aa 69%,#788690aa 74%,transparent 75%)}
+.workspace-resize-grip::before,.workspace-resize-grip::after{display:none}
+@media(max-width:700px){.system-monitor-dialog{min-width:0}.workspace-resize-grip{display:none}}
+
+/* Light-mode shared controls. */
+@media(prefers-color-scheme:light){
+  .password-reveal-button:hover,.password-reveal-button:focus-visible,.password-reveal-button.is-showing{background:#eef2f4;border-color:#cbd4da;color:#26313a}
+  .destructive-confirmation{border-color:#e2e7ea}
+  .destructive-confirm-slider{background:#f5f7f8;border-color:#c5d0d7}
+  .destructive-confirm-slider-text{color:#64747f}
+  .destructive-confirm-slider-thumb{background:linear-gradient(145deg,#eef1f3,#c6ced4);color:#23303a;border-color:#aab6be}
+  .destructive-confirm-slider.is-armed{background:#fff1ef;border-color:#c94e45}
+  .destructive-confirm-slider.is-armed .destructive-confirm-slider-text{color:#b63f37}
+  .destructive-confirm-slider.is-armed .destructive-confirm-slider-thumb{background:#d64c43;color:#fff}
+  .destructive-confirm-toggle-callout{color:#26313a}
+}

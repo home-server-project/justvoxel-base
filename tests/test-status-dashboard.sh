@@ -47,6 +47,9 @@ if grep -Fq 'df -Pk --output=' "${collector}"; then
 fi
 
 grep -Fq 'jv_variant_name' "${collector}" || fail 'Agent status collector must use canonical variant normalization'
+grep -Fq 'tailscale ip -4' "${collector}" || fail 'status dashboard must expose configured Tailscale IPv4'
+grep -Fq 'netbird status --ipv4' "${collector}" || fail 'status dashboard must expose configured NetBird IPv4'
+grep -Fq 'tailscale:$tailscale,netbird:$netbird' "${collector}" || fail 'status JSON is missing overlay-network fields'
 grep -Fq 'justvoxel-hws' "${common}" || fail 'JustVoxel HWS variant normalization missing'
 grep -Fq 'c_good=' "${status}" || fail 'healthy status color missing'
 grep -Fq 'c_warn=' "${status}" || fail 'warning status color missing'

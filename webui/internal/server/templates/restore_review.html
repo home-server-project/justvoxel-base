@@ -48,9 +48,16 @@
     {{if .Plan.Requirements.PlayersConfirmationRequired}}
     <label><input type="checkbox" name="players_confirmed" value="yes"> I understand that the online players may be interrupted.</label>
     {{end}}
-    <label for="restore-confirmation"><strong>Type RESTORE to continue</strong></label>
-    <input id="restore-confirmation" name="confirmation" autocomplete="off" required>
-    <div class="action-row"><button type="submit">Start Restore</button><a class="button-link secondary" href="/settings/restore">Cancel</a></div>
+    <div class="destructive-confirmation" data-destructive-confirmation data-confirm-value="RESTORE" data-destructive-idle="Slide to confirm restore" data-destructive-armed="Restore armed">
+      <input id="restore-confirmation" type="hidden" name="confirmation" data-destructive-value>
+      <div class="destructive-confirm-slider" data-destructive-slider-shell>
+        <span class="destructive-confirm-slider-text" data-destructive-slider-text>Slide to confirm restore</span>
+        <span class="destructive-confirm-slider-thumb" aria-hidden="true">&gt;</span>
+        <input type="range" min="0" max="100" step="1" value="0" data-destructive-slider aria-label="Slide to confirm restore">
+      </div>
+      <label class="destructive-confirm-toggle-row" data-destructive-toggle-row hidden><span class="destructive-confirm-toggle-callout">Confirm &gt;</span><input class="destructive-confirm-toggle" type="checkbox" data-destructive-toggle aria-label="Confirm restore"></label>
+    </div>
+    <div class="action-row"><button type="submit" data-destructive-submit disabled>Start Restore</button><a class="button-link secondary" href="/settings/restore">Cancel</a></div>
   </form>
   {{else}}
   <div class="action-row"><a class="button-link secondary" href="/settings/restore">Choose another backup</a></div>

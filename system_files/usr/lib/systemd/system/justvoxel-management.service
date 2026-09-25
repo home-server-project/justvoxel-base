@@ -22,7 +22,10 @@ ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
 ProtectControlGroups=yes
-RestrictSUIDSGID=yes
+# bootc uses openat2() while resolving /run,/etc,/usr/lib ostree auth files.
+# RestrictSUIDSGID=yes blocks openat2 with ENOSYS under systemd seccomp, so keep
+# this one restriction disabled while retaining the other Management Agent hardening.
+RestrictSUIDSGID=no
 LockPersonality=yes
 RestrictRealtime=yes
 SystemCallArchitectures=native

@@ -42,7 +42,7 @@
     <article class="card"><span>Minecraft</span><strong id="minecraft-state-summary">{{.Status.Minecraft.State}}</strong></article>
     <article class="card"><span>Version</span><strong id="minecraft-version-summary">{{.Status.Minecraft.Version}}</strong></article>
     <article class="card"><span>System</span><strong id="system-health-summary">{{.Status.System.Health}}</strong></article>
-    <article class="card"><span>IPv4</span><strong id="system-ipv4-summary">{{.Status.System.IPv4}}</strong></article>
+    <article class="card network-summary-card"><span>IPv4</span><strong id="system-ipv4-summary">{{.Status.System.IPv4}}</strong><small class="network-overlay-list" id="system-overlay-summary">{{if .Status.System.Tailscale}}<span data-overlay="tailscale">Tailscale: {{.Status.System.Tailscale}}</span>{{end}}{{if .Status.System.NetBird}}<span data-overlay="netbird">NetBird: {{.Status.System.NetBird}}</span>{{end}}</small></article>
     <article class="card"><span>Backup</span><strong id="backup-summary">{{if .Status.Backup.Enabled}}Enabled{{else}}Disabled{{end}}</strong></article>
   </section>
 

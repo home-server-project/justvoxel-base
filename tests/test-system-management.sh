@@ -53,8 +53,12 @@ if grep -Eq -- '--download-only|--from-downloaded|--apply' "${system_update_agen
 grep -Fq 'JustVoxel operating system' "${os_status}" || fail 'OS status summary missing'
 
 grep -Fq 'ProtectSystem=true' "${management_unit}" || fail 'management service must keep /etc writable for PAM system password changes'
-if grep -Eq '^ProtectSystem=(full|strict)$' "${management_unit}"; then
+if grep -Fqx 'ProtectSystem=full' "${management_unit}" || grep -Fqx 'ProtectSystem=strict' "${management_unit}"; then
     fail 'management service must not make /etc read-only while PAM system password changes are supported'
+fi
+grep -Fqx 'RestrictSUIDSGID=no' "${management_unit}" || fail 'management service must allow bootc openat2 authfile lookup'
+if grep -Fqx 'RestrictSUIDSGID=yes' "${management_unit}"; then
+    fail 'RestrictSUIDSGID=yes breaks bootc openat2 authfile lookup with ENOSYS'
 fi
 
 grep -Fq '/v1/minecraft/' "${service}" || fail 'Minecraft service control must use the Management API'

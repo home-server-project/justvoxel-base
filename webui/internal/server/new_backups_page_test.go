@@ -557,7 +557,7 @@ func TestNewBackupsRestorePlanShowsAuthoritativeReview(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Restore review", "Restore world", "This backup is older than the configured Minecraft version.",
-		"PlayerOne", "Type RESTORE to continue", "name=\"players_confirmed\"", "Safety checks remain Agent-owned.",
+		"PlayerOne", "data-destructive-confirmation", "Slide to confirm restore", "data-destructive-submit", "name=\"players_confirmed\"", "Safety checks remain Agent-owned.",
 		"action=\"/settings/new-backups/restore/apply\"",
 	} {
 		if !strings.Contains(page.Body.String(), want) {
