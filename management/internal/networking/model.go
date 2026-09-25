@@ -101,6 +101,31 @@ type WiFiNetwork struct {
 	Active         bool
 }
 
+// CheckpointDevice maps one appliance interface to NetworkManager's internal
+// checkpoint device handle. The handle never crosses the Management API.
+type CheckpointDevice struct {
+	Interface string
+	Handle    string
+}
+
+// Checkpoint is an internal handle for a NetworkManager safety checkpoint.
+type Checkpoint struct {
+	Handle                 string
+	Devices                []CheckpointDevice
+	RollbackTimeoutSeconds uint32
+}
+
+// RollbackResult is the normalized NetworkManager rollback result for a device.
+type RollbackResult string
+
+const (
+	RollbackResultOK              RollbackResult = "ok"
+	RollbackResultNoDevice        RollbackResult = "no-device"
+	RollbackResultDeviceUnmanaged RollbackResult = "device-unmanaged"
+	RollbackResultFailed          RollbackResult = "failed"
+	RollbackResultUnknown         RollbackResult = "unknown"
+)
+
 // DeviceStateName converts NetworkManager's numeric device state to a stable API name.
 func DeviceStateName(state uint32) string {
 	switch state {
@@ -146,6 +171,22 @@ func ConnectivityName(state uint32) string {
 		return "full"
 	default:
 		return "unknown"
+	}
+}
+
+
+func rollbackResultName(result uint32) RollbackResult {
+	switch result {
+	case 0:
+		return RollbackResultOK
+	case 1:
+		return RollbackResultNoDevice
+	case 2:
+		return RollbackResultDeviceUnmanaged
+	case 3:
+		return RollbackResultFailed
+	default:
+		return RollbackResultUnknown
 	}
 }
 
