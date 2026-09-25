@@ -184,7 +184,7 @@ func TestSetupWizardStorageStepValidatesAndAdvances(t *testing.T) {
 		t.Fatalf("valid storage step returned %d %q: %s", rr.Code, rr.Header().Get("Location"), rr.Body.String())
 	}
 	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Step 6 of 7") || !strings.Contains(page.Body.String(), "Backup destination") {
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Step 6 of 7") || !strings.Contains(page.Body.String(), "Internal or USB drive") {
 		t.Fatalf("storage step did not advance to backups: %d %s", page.Code, page.Body.String())
 	}
 }
@@ -210,7 +210,7 @@ func TestSetupWizardBackupStepSupportsLocalNFSAndSMBWithoutPasswordDraft(t *test
 
 	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	body := page.Body.String()
-	for _, want := range []string{"Automatic backups", "04:30", "JustVoxel system storage", "Existing local filesystem", "NFS share", "SMB / CIFS share", "Password is not stored in this setup draft", "same physical system disk"} {
+	for _, want := range []string{"Automatic backups", "04:30", "System storage", "Internal or USB drive", "NFS share", "SMB share", "Password stays out of this draft", "same physical system disk", "USB SSD", "External / USB"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("backup page missing %q: %s", want, body)
 		}
@@ -242,6 +242,67 @@ func TestSetupWizardBackupStepSupportsLocalNFSAndSMBWithoutPasswordDraft(t *test
 	}
 	if strings.Contains(strings.ToLower(fmt.Sprintf("%#v", draft.Backups)), "password") {
 		t.Fatal("backup draft unexpectedly contains a password field")
+	}
+}
+
+func TestSetupWizardBackupAllowsExternalUSBFilesystem(t *testing.T) {
+	client := setupWizardStorageClient()
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstRunSetupDrafts.delete(app, "session-token")
+	advanceToStorage(t, app)
+
+	storage := url.Values{"csrf": {"csrf-token"}, "storage_type": {"system"}, "storage_path": {"/var/lib/justvoxel/minecraft"}, "direction": {"next"}}
+	_ = httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/storage", storage.Encode()))
+
+	usb := url.Values{
+		"csrf": {"csrf-token"}, "backup_automatic": {"on"}, "backup_daily_time": {"04:30"}, "backup_keep": {"7"},
+		"backup_type": {"partition"}, "backup_device": {"/dev/vdd1"}, "backup_mount_point": {"/var/mnt/justvoxel-backup"},
+		"backup_path": {"/var/mnt/justvoxel-backup/backups"}, "direction": {"next"},
+	}
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/backups", usb.Encode()))
+	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/setup/review" {
+		t.Fatalf("USB backup filesystem was not accepted: %d %q %s", rr.Code, rr.Header().Get("Location"), rr.Body.String())
+	}
+	draft, ok := firstRunSetupDrafts.get(app, "session-token")
+	if !ok || draft.Backups.Type != "partition" || draft.Backups.Device != "/dev/vdd1" {
+		t.Fatalf("USB backup draft was not preserved: %#v", draft)
+	}
+}
+
+func TestSetupWizardBackupUsesSharedReviewedStorageActions(t *testing.T) {
+	template, err := assets.ReadFile("templates/setup_wizard.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(template)
+	for _, want := range []string{
+		"data-setup-backup-prepare=\"format\"",
+		"data-setup-backup-prepare=\"create_partition\"",
+		"data-setup-backup-confirm-slider",
+		"data-setup-backup-confirm-toggle",
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("setup Backup shared action UI missing %q", want)
+		}
+	}
+
+	script, err := assets.ReadFile("static/setup-storage.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(script)
+	for _, want := range []string{
+		"fetch('/api/new-storage/actions/' + phase",
+		"body.set('fingerprint', reviewed?.proposed?.fingerprint || '')",
+		"body.set('confirmation', reviewed?.proposed?.confirmation || '')",
+		"justvoxel.setup.backup.resume",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("setup Backup shared action behavior missing %q", want)
+		}
 	}
 }
 
