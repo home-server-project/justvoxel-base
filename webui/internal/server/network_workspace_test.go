@@ -22,9 +22,9 @@ type fakeNetworkAPI struct {
 	radioCheckpoint      string
 	wifiConnectInterface string
 	wifiConnectRequest   api.NetworkWiFiConnectRequest
-	wifiDisconnected     string
+	wifiDisconnected          string
 	wifiDisconnectCheckpoint string
-	wifiForgotten        string
+	wifiForgotten             string
 }
 
 func (f *fakeNetworkAPI) Session(_ context.Context, session string) (api.SessionInfo, error) {
