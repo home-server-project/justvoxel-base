@@ -33,7 +33,7 @@ func (a *App) newBackupsDeleteAction(w http.ResponseWriter, r *http.Request, app
 		writeNewBackupsDeleteJSON(w, http.StatusForbidden, api.AdminBackupDeleteResponse{OK: false, Error: "invalid CSRF token"})
 		return
 	}
-	session, client, _, ok := a.newBackupsRequest(w, r, false)
+	session, client, _, ok := a.backupsWorkspaceRequest(w, r, false)
 	if !ok {
 		return
 	}

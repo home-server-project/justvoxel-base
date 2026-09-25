@@ -87,7 +87,6 @@ func (a *App) registerNewBackupsPages(mux *http.ServeMux) {
 	mux.HandleFunc("POST /settings/new-backups/destination/apply", a.newBackupsDestinationApply)
 	mux.HandleFunc("POST /settings/new-backups/restore/plan", a.newBackupsRestorePlan)
 	mux.HandleFunc("POST /settings/new-backups/restore/apply", a.newBackupsRestoreApply)
-	a.registerNewBackupsDeleteRoutes(mux)
 }
 
 func (a *App) newBackupsRequest(w http.ResponseWriter, r *http.Request, requireCSRF bool) (string, newBackupsAPI, api.SessionInfo, bool) {

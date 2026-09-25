@@ -1,0 +1,334 @@
+{{define "backups_workspace.html"}}<div class="new-backups-shell backups-workspace-content" data-backups-workspace-root>
+  {{if .Message}}<div class="notice success">{{.Message}}</div>{{end}}
+  {{if .Error}}<div class="notice error">{{.Error}}</div>{{end}}
+
+  <section class="backup-library-section" id="backup-library">
+    <div class="section-heading">
+      <div><p class="eyebrow">Backup library</p><h2>Existing backups</h2></div>
+    </div>
+
+    {{if .Backups}}
+    <div class="backup-file-grid" role="list">
+      {{range .Backups}}
+      <label class="backup-file-card backup-file-selectable" role="listitem" data-backup-card>
+        <input class="backup-file-checkbox" type="checkbox" value="{{.ID}}" data-backup-select aria-label="Select {{.ID}}">
+        <div class="backup-file-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M4 4h11l5 5v11H4z"></path><path d="M15 4v5h5"></path><path d="M8 14h8M8 17h6"></path></svg>
+        </div>
+        <div class="backup-file-copy">
+          <strong title="{{.ID}}">{{.ID}}</strong>
+          <span>{{.CreatedLabel}}</span>
+          <small>{{.Size}}{{if .Version}} · Minecraft {{.Version}}{{end}}{{if .Bedrock}} · Bedrock{{end}}{{if .Variant}} · {{.Variant}}{{end}}</small>
+        </div>
+        {{if eq .MetadataStatus "valid"}}
+        <span class="backup-file-status">Ready</span>
+        {{else if eq .MetadataStatus "missing"}}
+        <span class="backup-file-status backup-file-status-warning">Metadata missing</span>
+        {{else}}
+        <span class="backup-file-status backup-file-status-warning">Metadata invalid</span>
+        {{end}}
+      </label>
+      {{end}}
+    </div>
+    {{else}}
+    <div class="backup-library-empty">
+      <strong>No backups yet</strong>
+      <span>Create the first backup with Backup Now.</span>
+    </div>
+    {{end}}
+
+    <section class="backup-command-bar" aria-label="Backup controls">
+      <div class="backup-library-summary">
+        <div><span>Backups</span><strong>{{.BackupCount}}</strong></div>
+        <div><span>Total size</span><strong>{{.TotalSize}}</strong></div>
+        <div><span>Selected</span><strong data-backup-selected-count>0</strong></div>
+      </div>
+      <div class="backup-command-actions">
+        <button type="button" data-backup-restore-selected data-restore-busy="{{if .RestoreOperation}}1{{else}}0{{end}}" disabled>Restore selected</button>
+        <button class="danger" type="button" data-backup-delete-selected disabled>Delete selected</button>
+        <form method="post" action="/workspace/backups/backup">
+          <input type="hidden" name="csrf" value="{{.CSRF}}">
+          <button type="submit">Backup Now</button>
+        </form>
+      </div>
+    </section>
+  </section>
+
+
+  <input type="hidden" value="{{.CSRF}}" data-backup-delete-csrf>
+  <p class="backup-delete-page-error" data-backup-delete-page-error hidden></p>
+
+  {{if .RestoreOperation}}
+  <section class="backup-restore-progress">
+    <div class="section-heading">
+      <div><p class="eyebrow">Restore</p><h2>Restore progress</h2></div>
+      <span class="badge" id="restore-operation-state">{{.RestoreStateLabel}}</span>
+    </div>
+    <div data-restore-operation data-status-url="/api/restore/progress/{{.RestoreOperation.OperationID}}">
+      <p id="restore-operation-status">{{.RestoreOperation.Status}}</p>
+      <div class="backup-restore-operation-details">Stage: <strong id="restore-operation-stage">{{.RestoreStageLabel}}</strong><span>Operation <code>{{.RestoreOperation.OperationID}}</code></span></div>
+      <div class="notice" id="restore-reconnect-note" hidden><strong>Reconnecting to JustVoxel…</strong><br>Restore may still be running. Refreshing New Backups does not start another Restore.</div>
+      <div class="notice success" id="restore-operation-success" {{if ne .RestoreOperation.State "succeeded"}}hidden{{end}}><strong>Minecraft Restore completed successfully.</strong><br>The restored runtime passed validation.</div>
+      <div class="notice warning" id="restore-operation-rollback" {{if ne .RestoreOperation.State "rolled_back"}}hidden{{end}}><strong>Restore was rolled back safely.</strong><br>The restored runtime did not pass validation and the previous Minecraft data was restored.</div>
+      <div class="notice error" id="restore-operation-attention" {{if ne .RestoreOperation.State "needs_attention"}}hidden{{end}}><strong>Restore needs administrator attention.</strong><br>Do not start another Restore until the preserved recovery state is reviewed.</div>
+      <div class="action-row"><a class="button-link" id="restore-dashboard-link" href="/" {{if ne .RestoreOperation.State "succeeded"}}hidden{{end}}>Open dashboard</a><a class="button-link secondary" href="#backup-library">Backup library</a></div>
+    </div>
+  </section>
+  {{end}}
+
+  {{if or .RestorePlan .RestoreError}}
+  <section class="backup-restore-review">
+    <div class="section-heading"><div><p class="eyebrow">Restore review</p><h2>{{if .RestoreModeTitle}}{{.RestoreModeTitle}}{{else}}Review Restore{{end}}</h2></div><span class="badge">Destructive</span></div>
+    {{if .RestoreError}}<div class="notice error"><strong>Restore cannot continue as submitted.</strong><br>{{.RestoreError}}</div>{{end}}
+    {{if .RestorePlan}}
+      {{if .RestorePlan.Normalized}}
+      <p>{{.RestoreScope}}</p>
+      <dl class="backup-restore-summary">
+        <div><dt>Backup</dt><dd><code>{{.RestorePlan.Normalized.BackupID}}</code></dd></div>
+        <div><dt>Created</dt><dd>{{.RestorePlan.Normalized.CreatedAt}}</dd></div>
+        <div><dt>Size</dt><dd>{{.RestoreSize}}</dd></div>
+        <div><dt>Current Minecraft</dt><dd>{{.RestorePlan.Normalized.Current.Version}} · {{.RestorePlan.Normalized.Current.VersionMode}}</dd></div>
+        {{if .RestorePlan.Normalized.Metadata}}<div><dt>Backup Minecraft</dt><dd>{{.RestorePlan.Normalized.Metadata.Minecraft.ConfiguredVersion}} · {{.RestorePlan.Normalized.Metadata.Minecraft.VersionMode}}</dd></div>{{else}}<div><dt>Backup metadata</dt><dd>{{.RestorePlan.Normalized.MetadataStatus}}</dd></div>{{end}}
+        <div><dt>Version relation</dt><dd>{{.RestorePlan.Normalized.VersionRelation}}</dd></div>
+      </dl>
+      {{end}}
+      {{range .RestorePlan.Warnings}}<div class="notice warning">{{.Message}}</div>{{end}}
+      {{if and .RestorePlan.OK .RestorePlan.Requirements}}
+      <div class="backup-restore-safety">
+        <strong>Safety checks remain Agent-owned.</strong>
+        <span>Before live data changes, JustVoxel revalidates the reviewed plan, archive integrity, archive safety, backup identity and staging capacity. Runtime validation and automatic rollback remain enabled.</span>
+      </div>
+      {{if .RestorePlan.Requirements.PlayersConfirmationRequired}}
+      <div class="notice warning"><strong>{{.RestorePlan.Requirements.Online}} player(s) are online.</strong><br>{{range .RestorePlan.Requirements.Players}}{{.}}<br>{{end}}Restore will use the player-aware graceful shutdown path.</div>
+      {{end}}
+      <form class="backup-restore-apply" method="post" action="/workspace/backups/restore/apply">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <input type="hidden" name="backup_id" value="{{.RestoreRequest.BackupID}}">
+        <input type="hidden" name="mode" value="{{.RestoreRequest.Mode}}">
+        <input type="hidden" name="plan_fingerprint" value="{{.RestorePlan.PlanFingerprint}}">
+        {{if .RestorePlan.Requirements.PlayersConfirmationRequired}}<label class="backup-restore-player-confirm"><input type="checkbox" name="players_confirmed" value="yes"> I understand that the online players may be interrupted.</label>{{end}}
+        <div class="destructive-confirmation" data-destructive-confirmation data-confirm-value="RESTORE" data-destructive-idle="Slide to confirm restore" data-destructive-armed="Restore armed">
+          <input type="hidden" name="confirmation" data-destructive-value>
+          <div class="destructive-confirm-slider" data-destructive-slider-shell>
+            <span class="destructive-confirm-slider-text" data-destructive-slider-text>Slide to confirm restore</span>
+            <span class="destructive-confirm-slider-thumb" aria-hidden="true">&gt;</span>
+            <input type="range" min="0" max="100" step="1" value="0" data-destructive-slider aria-label="Slide to confirm restore">
+          </div>
+          <label class="destructive-confirm-toggle-row" data-destructive-toggle-row hidden><span class="destructive-confirm-toggle-callout">Confirm &gt;</span><input class="destructive-confirm-toggle" type="checkbox" data-destructive-toggle aria-label="Confirm restore"></label>
+        </div>
+        <div class="action-row"><button class="danger" type="submit" data-destructive-submit disabled>Start Restore</button><a class="button-link secondary" href="/workspace/backups">Cancel</a></div>
+      </form>
+      {{end}}
+    {{end}}
+  </section>
+  {{end}}
+
+  <section class="backup-automatic-section">
+    <div class="section-heading backup-automatic-heading">
+      <div><p class="eyebrow">Automatic backups</p><h2>Schedule & retention</h2></div>
+      <span class="badge">{{if .Automatic.Enabled}}Enabled{{else}}Off{{end}}</span>
+    </div>
+    <form class="backup-automatic-form" method="post" action="/workspace/backups/automatic/plan">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <label class="backup-automatic-toggle"><input name="automatic_enabled" type="checkbox" {{if .Automatic.Enabled}}checked{{end}}> Enable automatic backups</label>
+      <label>Daily time
+        <input name="daily_time" type="time" step="60" value="{{.Automatic.DailyTime}}" required>
+      </label>
+      <label>Keep last
+        <input name="backup_keep" type="number" min="1" step="1" value="{{.Automatic.Keep}}" required>
+      </label>
+      <button type="submit">Review settings</button>
+    </form>
+    <p class="muted compact">Daily time uses {{if .Timezone}}{{.Timezone}}{{else}}the appliance timezone{{end}}. After a successful backup, JustVoxel automatically removes older backups beyond the Keep last value.</p>
+
+    {{if .AutomaticPlan}}
+    <div class="backup-automatic-review">
+      <div class="section-heading"><div><p class="eyebrow">Review</p><h3>Automatic backup changes</h3></div></div>
+      {{range .AutomaticPlan.Warnings}}<div class="notice warning">{{.}}</div>{{end}}
+      {{if .AutomaticPlan.Changes}}
+      <div class="backup-automatic-change-list">
+        <div class="backup-automatic-change"><strong>Automatic backups</strong><span>{{if .Automatic.Enabled}}Enabled{{else}}Off{{end}}</span></div>
+        <div class="backup-automatic-change"><strong>Daily time</strong><span>{{.Automatic.DailyTime}}{{if .Timezone}} · {{.Timezone}}{{end}}</span></div>
+        <div class="backup-automatic-change"><strong>Keep last</strong><span>{{.Automatic.Keep}} backups</span></div>
+      </div>
+      <form class="backup-automatic-apply" method="post" action="/workspace/backups/automatic/apply">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        {{if .Automatic.Enabled}}<input type="hidden" name="automatic_enabled" value="on">{{end}}
+        <input type="hidden" name="daily_time" value="{{.Automatic.DailyTime}}">
+        <input type="hidden" name="backup_keep" value="{{.Automatic.Keep}}">
+        <div class="action-row"><button type="submit">Apply settings</button><a class="button-link secondary" href="/workspace/backups">Cancel</a></div>
+      </form>
+      {{else}}
+      <p class="muted compact">No automatic backup changes were detected.</p>
+      {{end}}
+    </div>
+    {{end}}
+  </section>
+
+  <section class="backup-destination-section">
+    <div class="section-heading backup-destination-heading">
+      <div><p class="eyebrow">Backup destination</p><h2>Current location</h2></div>
+      {{if .Destination.Current.Status}}<span class="badge backup-destination-status">{{.Destination.Current.Status}}</span>{{end}}
+    </div>
+    {{if .Destination.Current.StatusDetail}}<p class="muted compact">{{.Destination.Current.StatusDetail}}</p>{{end}}
+    <dl class="backup-destination-summary">
+      <div><dt>Type</dt><dd>{{.Destination.Current.Type}}</dd></div>
+      <div><dt>Backup directory</dt><dd><code>{{.Destination.Current.Path}}</code></dd></div>
+      {{if .Destination.Current.MountPoint}}<div><dt>Mount point</dt><dd><code>{{.Destination.Current.MountPoint}}</code></dd></div>{{end}}
+      {{if .Destination.Current.ExpectedSource}}<div><dt>Source</dt><dd><code>{{.Destination.Current.ExpectedSource}}</code></dd></div>{{end}}
+      <div><dt>Available</dt><dd>{{.DestinationAvailable}}</dd></div>
+      <div><dt>Filesystem size</dt><dd>{{.DestinationFilesystemSize}}</dd></div>
+    </dl>
+    {{if .Destination.Current.SamePhysicalDisk}}<div class="notice warning backup-destination-warning"><strong>Same physical disk.</strong> These backups do not protect against failure of the disk that also stores Minecraft data.</div>{{end}}
+
+    <details class="backup-destination-change" {{if .DestinationPlan}}open{{end}}>
+      <summary>Change destination</summary>
+      <form class="backup-destination-form" method="post" action="/workspace/backups/destination/plan" data-backup-destination-form>
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <label>Destination type
+          <select name="type" data-backup-destination-type>
+            <option value="system" {{if eq .DestinationForm.Type "system"}}selected{{end}}>Directory on this JustVoxel system</option>
+            <option value="partition" {{if eq .DestinationForm.Type "partition"}}selected{{end}}>Existing local partition / filesystem</option>
+            <option value="nfs" {{if eq .DestinationForm.Type "nfs"}}selected{{end}}>NFS share</option>
+            <option value="smb" {{if eq .DestinationForm.Type "smb"}}selected{{end}}>SMB / CIFS share</option>
+          </select>
+        </label>
+        <div class="backup-destination-kind" data-backup-destination-kind="system">
+          <label>Backup directory
+            <input name="path" data-backup-destination-path="system" value="{{if eq .DestinationForm.Type "system"}}{{.DestinationForm.Path}}{{end}}" placeholder="/var/lib/justvoxel/backups" autocomplete="off">
+          </label>
+        </div>
+        <div class="backup-destination-kind" data-backup-destination-kind="partition">
+          {{if .DestinationPartitions}}
+          <label>Local filesystem
+            <select name="device" data-backup-destination-device>
+              <option value="">Choose a filesystem</option>
+              {{range .DestinationPartitions}}<option value="{{.Path}}" data-mountpoint="{{.Mountpoint}}" {{if eq $.DestinationForm.Device .Path}}selected{{end}}>{{if .Model}}{{.Model}} · {{end}}{{.Path}} · {{.Filesystem}} · {{.Size}}{{if .Mountpoint}} · {{.Mountpoint}}{{end}}</option>{{end}}
+            </select>
+          </label>
+          <div class="backup-destination-grid">
+            <label>Mount point
+              <input name="mount_point" data-backup-destination-mount="partition" value="{{if eq .DestinationForm.Type "partition"}}{{.DestinationForm.MountPoint}}{{end}}" placeholder="/var/mnt/justvoxel-backup" autocomplete="off">
+            </label>
+            <label>Backup directory
+              <input name="path" data-backup-destination-path="partition" value="{{if eq .DestinationForm.Type "partition"}}{{.DestinationForm.Path}}{{end}}" placeholder="/var/mnt/justvoxel-backup/backups" autocomplete="off">
+            </label>
+          </div>
+          {{else}}<div class="notice">No existing writable XFS, ext4 or Btrfs partition is available for safe adoption.</div>{{end}}
+        </div>
+        <div class="backup-destination-kind" data-backup-destination-kind="nfs">
+          <div class="backup-destination-grid">
+            <label>NFS source
+              <input name="source" data-backup-destination-source="nfs" value="{{if eq .DestinationForm.Type "nfs"}}{{.DestinationForm.Source}}{{end}}" placeholder="nas.local:/volume/backups" autocomplete="off">
+            </label>
+            <label>Local mount point
+              <input name="mount_point" data-backup-destination-mount="nfs" value="{{if eq .DestinationForm.Type "nfs"}}{{.DestinationForm.MountPoint}}{{end}}" placeholder="/var/mnt/justvoxel-backup" autocomplete="off">
+            </label>
+          </div>
+          <label>Backup directory
+            <input name="path" data-backup-destination-path="nfs" value="{{if eq .DestinationForm.Type "nfs"}}{{.DestinationForm.Path}}{{end}}" placeholder="/var/mnt/justvoxel-backup/backups" autocomplete="off">
+          </label>
+        </div>
+        <div class="backup-destination-kind" data-backup-destination-kind="smb">
+          <div class="backup-destination-grid">
+            <label>SMB source
+              <input name="source" data-backup-destination-source="smb" value="{{if eq .DestinationForm.Type "smb"}}{{.DestinationForm.Source}}{{end}}" placeholder="//nas/backups" autocomplete="off">
+            </label>
+            <label>Local mount point
+              <input name="mount_point" data-backup-destination-mount="smb" value="{{if eq .DestinationForm.Type "smb"}}{{.DestinationForm.MountPoint}}{{end}}" placeholder="/var/mnt/justvoxel-backup" autocomplete="off">
+            </label>
+            <label>Username
+              <input name="username" value="{{if eq .DestinationForm.Type "smb"}}{{.DestinationForm.Username}}{{end}}" autocomplete="username">
+            </label>
+            <label>Domain / workgroup
+              <input name="domain" value="{{if eq .DestinationForm.Type "smb"}}{{.DestinationForm.Domain}}{{end}}" autocomplete="off">
+            </label>
+          </div>
+          <label>Backup directory
+            <input name="path" data-backup-destination-path="smb" value="{{if eq .DestinationForm.Type "smb"}}{{.DestinationForm.Path}}{{end}}" placeholder="/var/mnt/justvoxel-backup/backups" autocomplete="off">
+          </label>
+          <p class="muted compact">SMB password is requested only during Apply when the reviewed mount requires credentials.</p>
+        </div>
+        <div class="backup-destination-actions"><button type="submit">Review destination</button></div>
+      </form>
+
+      {{if .DestinationPlan}}
+      <div class="backup-destination-review">
+        <div class="section-heading"><div><p class="eyebrow">Review</p><h3>Proposed destination</h3></div>{{if .DestinationPlan.Changed}}<span class="badge">Change ready</span>{{else}}<span class="badge">Already current</span>{{end}}</div>
+        {{range .DestinationPlan.Warnings}}<div class="notice warning">{{.}}</div>{{end}}
+        <dl class="backup-destination-summary">
+          <div><dt>Type</dt><dd>{{.DestinationPlan.Proposed.Type}}</dd></div>
+          <div><dt>Backup directory</dt><dd><code>{{.DestinationPlan.Proposed.Path}}</code></dd></div>
+          {{if .DestinationPlan.Proposed.MountPoint}}<div><dt>Mount point</dt><dd><code>{{.DestinationPlan.Proposed.MountPoint}}</code></dd></div>{{end}}
+          {{if .DestinationPlan.Proposed.ExpectedSource}}<div><dt>Source</dt><dd><code>{{.DestinationPlan.Proposed.ExpectedSource}}</code></dd></div>{{end}}
+          <div><dt>Available</dt><dd>{{.ProposedDestinationAvailable}}</dd></div>
+          <div><dt>Filesystem size</dt><dd>{{.ProposedDestinationSize}}</dd></div>
+        </dl>
+        {{if .DestinationPlan.Changed}}
+        <form class="backup-destination-apply" method="post" action="/workspace/backups/destination/apply">
+          <input type="hidden" name="csrf" value="{{.CSRF}}">
+          <input type="hidden" name="type" value="{{.DestinationPlan.Proposed.Type}}">
+          <input type="hidden" name="path" value="{{.DestinationPlan.Proposed.Path}}">
+          <input type="hidden" name="device" value="{{.DestinationPlan.Proposed.Device}}">
+          <input type="hidden" name="mount_point" value="{{.DestinationPlan.Proposed.MountPoint}}">
+          <input type="hidden" name="source" value="{{.DestinationPlan.Proposed.ExpectedSource}}">
+          <input type="hidden" name="username" value="{{.DestinationForm.Username}}">
+          <input type="hidden" name="domain" value="{{.DestinationForm.Domain}}">
+          {{if .DestinationPlan.Proposed.CredentialsNeeded}}
+          <label>SMB password
+            <input name="password" type="password" required autocomplete="current-password">
+            <span class="muted compact">Requested only now for the reviewed SMB destination.</span>
+          </label>
+          {{end}}
+          <div class="action-row"><button type="submit">Apply destination</button><a class="button-link secondary" href="/workspace/backups">Cancel</a></div>
+        </form>
+        {{else}}<p class="muted compact">This destination already matches the current backup configuration.</p>{{end}}
+      </div>
+      {{end}}
+    </details>
+  </section>
+
+
+
+  <dialog class="backup-restore-dialog" data-backup-restore-dialog>
+    <form class="backup-restore-dialog-card" method="post" action="/workspace/backups/restore/plan">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <input type="hidden" name="backup_id" data-backup-restore-id>
+      <div class="backup-restore-dialog-heading">
+        <div><p class="eyebrow">Restore backup</p><h2>Choose Restore scope</h2></div>
+        <button class="backup-restore-dialog-close" type="button" data-backup-restore-close aria-label="Close Restore">×</button>
+      </div>
+      <p class="backup-restore-selected-name">Selected: <code data-backup-restore-name></code></p>
+      <label class="backup-restore-mode"><input type="radio" name="mode" value="world" checked><span><strong>Restore world</strong><small>Replace the primary world plus its Nether and End world directories.</small></span></label>
+      <label class="backup-restore-mode"><input type="radio" name="mode" value="full"><span><strong>Restore full Minecraft data</strong><small>Replace the complete Minecraft persistent data directory, including plugins and Minecraft-side configuration.</small></span></label>
+      <p class="muted compact">Nothing changes during Review. The Management Agent will build the authoritative Restore plan before Apply.</p>
+      <div class="action-row backup-restore-dialog-actions"><button class="secondary" type="button" data-backup-restore-cancel>Cancel</button><button type="submit">Review Restore</button></div>
+    </form>
+  </dialog>
+
+  <dialog class="backup-delete-dialog" data-backup-delete-dialog>
+    <div class="backup-delete-dialog-card">
+      <div class="backup-delete-dialog-heading">
+        <div><p class="eyebrow">Delete backups</p><h2>Review deletion</h2></div>
+        <button class="backup-delete-dialog-close" type="button" data-backup-delete-close aria-label="Close backup deletion">×</button>
+      </div>
+      <p data-backup-delete-summary></p>
+      <div class="backup-delete-review-list" data-backup-delete-review-list></div>
+      <div class="backup-delete-warnings" data-backup-delete-warnings></div>
+      <div class="destructive-confirmation" data-destructive-confirmation data-backup-delete-confirmation-control data-destructive-idle="Slide to confirm deletion" data-destructive-armed="Deletion armed">
+        <input type="hidden" data-backup-delete-confirmation data-destructive-value>
+        <div class="destructive-confirm-slider" data-destructive-slider-shell>
+          <span class="destructive-confirm-slider-text" data-destructive-slider-text>Slide to confirm deletion</span>
+          <span class="destructive-confirm-slider-thumb" aria-hidden="true">&gt;</span>
+          <input type="range" min="0" max="100" step="1" value="0" data-destructive-slider aria-label="Slide to confirm deletion">
+        </div>
+        <label class="destructive-confirm-toggle-row" data-destructive-toggle-row hidden><span class="destructive-confirm-toggle-callout">Confirm &gt;</span><input class="destructive-confirm-toggle" type="checkbox" data-destructive-toggle aria-label="Confirm backup deletion"></label>
+      </div>
+      <p class="backup-delete-dialog-error" data-backup-delete-dialog-error hidden></p>
+      <div class="action-row backup-delete-dialog-actions">
+        <button class="secondary" type="button" data-backup-delete-cancel>Cancel</button>
+        <button class="danger" type="button" data-backup-delete-apply data-destructive-submit disabled>Delete backups</button>
+      </div>
+    </div>
+  </dialog>
+</div>{{end}}
