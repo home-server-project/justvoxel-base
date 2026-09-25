@@ -118,7 +118,7 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 	}
 	body := rr.Body.String()
 	for _, want := range []string{
-		"Review your JustVoxel setup", "Configuration validated.", "Normalized Family Server", "20", "1.21.8",
+		"Review your JustVoxel setup", "Step 7 of 7", "Connections", "Version", "Configuration validated.", "Normalized Family Server", "20", "1.21.8",
 		"Recommended version", "/var/lib/justvoxel/minecraft", "/var/lib/justvoxel/backups",
 		"same_physical_disk", "Minecraft End User License Agreement", "https://www.minecraft.net/eula",
 		"Apply this exact validated plan using JustVoxel's transactional setup engine", "/static/setup-review.css", "/static/setup-operation.js",
