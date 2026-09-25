@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -9,6 +10,28 @@ import (
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
 )
+
+type systemWorkspaceValidationAPI interface {
+	AdminValidation(ctx context.Context, session string) (api.AdminValidationResponse, error)
+}
+
+type systemWorkspaceHistoryAPI interface {
+	Activity(ctx context.Context, session string, limit int) (api.PublicActivityResponse, error)
+	AdminAudit(ctx context.Context, session string, limit int) (api.AuditResponse, error)
+	AdminNotifications(ctx context.Context, session string, openOnly bool) (api.NotificationsResponse, error)
+	AdminResolveNotification(ctx context.Context, session string, id int64) error
+}
+
+type systemWorkspaceUsersAPI interface {
+	AdminUsers(ctx context.Context, session string) (api.AdminUsersResponse, error)
+	AdminCreateUser(ctx context.Context, session, username, role, password string) (api.AdminUser, error)
+	AdminSetUserRole(ctx context.Context, session string, id int64, role string) (api.AdminUser, error)
+	AdminSetUserEnabled(ctx context.Context, session string, id int64, enabled bool) (api.AdminUser, error)
+	AdminSetUserPassword(ctx context.Context, session string, id int64, password string) error
+	AdminDeleteUser(ctx context.Context, session string, id int64) error
+	AdminResetRestartAllowance(ctx context.Context, session string, id int64) (api.AdminUser, error)
+	AdminResetBackupAllowance(ctx context.Context, session string, id int64) (api.AdminUser, error)
+}
 
 type systemWorkspaceHealthResponse struct {
 	OK     bool                        `json:"ok"`
@@ -114,7 +137,7 @@ func (a *App) systemWorkspaceHealth(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	client, ok := a.api.(adminValidationAPI)
+	client, ok := a.api.(systemWorkspaceValidationAPI)
 	if !ok {
 		writeSystemWorkspaceError(w, http.StatusServiceUnavailable, "System health check is unavailable.")
 		return
@@ -132,7 +155,7 @@ func (a *App) systemWorkspaceHistory(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	client, ok := a.api.(rolePagesAPI)
+	client, ok := a.api.(systemWorkspaceHistoryAPI)
 	if !ok {
 		writeSystemWorkspaceError(w, http.StatusServiceUnavailable, "System history is unavailable.")
 		return
@@ -171,7 +194,7 @@ func (a *App) systemWorkspaceResolveNotification(w http.ResponseWriter, r *http.
 	if !ok {
 		return
 	}
-	client, ok := a.api.(rolePagesAPI)
+	client, ok := a.api.(systemWorkspaceHistoryAPI)
 	if !ok {
 		writeSystemWorkspaceError(w, http.StatusServiceUnavailable, "Administrator notifications are unavailable.")
 		return
@@ -193,7 +216,7 @@ func (a *App) systemWorkspaceUsers(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	client, ok := a.api.(adminUsersAPI)
+	client, ok := a.api.(systemWorkspaceUsersAPI)
 	if !ok {
 		writeSystemWorkspaceError(w, http.StatusServiceUnavailable, "User management is unavailable.")
 		return
@@ -307,7 +330,7 @@ func (a *App) systemWorkspaceResetBackupAllowance(w http.ResponseWriter, r *http
 	writeSystemWorkspaceJSON(w, http.StatusOK, systemWorkspaceMutationResponse{OK: true, Message: "Backup allowance reset."})
 }
 
-func (a *App) systemWorkspaceUsersMutation(w http.ResponseWriter, r *http.Request) (string, adminUsersAPI, bool) {
+func (a *App) systemWorkspaceUsersMutation(w http.ResponseWriter, r *http.Request) (string, systemWorkspaceUsersAPI, bool) {
 	if !a.validCSRF(r) {
 		writeSystemWorkspaceError(w, http.StatusForbidden, "Invalid CSRF token.")
 		return "", nil, false
@@ -316,7 +339,7 @@ func (a *App) systemWorkspaceUsersMutation(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return "", nil, false
 	}
-	client, ok := a.api.(adminUsersAPI)
+	client, ok := a.api.(systemWorkspaceUsersAPI)
 	if !ok {
 		writeSystemWorkspaceError(w, http.StatusServiceUnavailable, "User management is unavailable.")
 		return "", nil, false
@@ -324,7 +347,7 @@ func (a *App) systemWorkspaceUsersMutation(w http.ResponseWriter, r *http.Reques
 	return session, client, true
 }
 
-func (a *App) systemWorkspaceUserMutation(w http.ResponseWriter, r *http.Request) (string, adminUsersAPI, int64, bool) {
+func (a *App) systemWorkspaceUserMutation(w http.ResponseWriter, r *http.Request) (string, systemWorkspaceUsersAPI, int64, bool) {
 	session, client, ok := a.systemWorkspaceUsersMutation(w, r)
 	if !ok {
 		return "", nil, 0, false
