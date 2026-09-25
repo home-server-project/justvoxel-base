@@ -33,6 +33,7 @@ func TestSystemWorkspaceDoesNotDependOnLegacyPageInterfaces(t *testing.T) {
 		"type systemWorkspaceValidationAPI interface",
 		"type systemWorkspaceHistoryAPI interface",
 		"type systemWorkspaceUsersAPI interface",
+		"type systemWorkspaceResetAPI interface",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("System Workspace missing neutral API contract %q", want)
