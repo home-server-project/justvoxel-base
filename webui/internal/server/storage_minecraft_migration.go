@@ -11,11 +11,8 @@ import (
 )
 
 type storageMinecraftMigrationAPI interface {
+	dataMigrationOrchestrationAPI
 	Session(ctx context.Context, session string) (api.SessionInfo, error)
-	AdminDataMigrationPlan(ctx context.Context, session string, request api.AdminDataMigrationPlanRequest) (api.AdminDataMigrationPlanResponse, error)
-	AdminDataMigrationApply(ctx context.Context, session string, request api.AdminDataMigrationApplyRequest) (api.AdminDataMigrationApplyResponse, error)
-	AdminCurrentDataMigrationOperation(ctx context.Context, session string) (api.PersistentOperationResponse, error)
-	AdminOperation(ctx context.Context, session, id string) (api.PersistentOperationResponse, error)
 }
 
 type storageMinecraftMigrationResponse struct {
@@ -57,16 +54,12 @@ func (a *App) storageMinecraftMigrationCurrent(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
-	result, err := client.AdminCurrentDataMigrationOperation(r.Context(), session)
+	operation, err := dataMigrationCurrentOperation(r.Context(), client, session)
 	if err != nil {
 		a.writeStorageMinecraftMigrationError(w, err, "Minecraft data migration operation status is unavailable.")
 		return
 	}
-	if result.Operation != nil && result.Operation.OperationType != "data_migration" {
-		writeStorageMinecraftMigrationJSON(w, http.StatusBadGateway, storageMinecraftMigrationResponse{OK: false, Error: "Minecraft data migration operation status is invalid."})
-		return
-	}
-	writeStorageMinecraftMigrationJSON(w, http.StatusOK, storageMinecraftMigrationResponse{OK: true, Operation: result.Operation})
+	writeStorageMinecraftMigrationJSON(w, http.StatusOK, storageMinecraftMigrationResponse{OK: true, Operation: operation})
 }
 
 func (a *App) storageMinecraftMigrationPlan(w http.ResponseWriter, r *http.Request) {
@@ -78,12 +71,12 @@ func (a *App) storageMinecraftMigrationPlan(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	if current, err := client.AdminCurrentDataMigrationOperation(r.Context(), session); err != nil {
+	if current, err := dataMigrationCurrentOperation(r.Context(), client, session); err != nil {
 		a.writeStorageMinecraftMigrationError(w, err, "Minecraft data migration operation status is unavailable.")
 		return
-	} else if current.Operation != nil {
+	} else if current != nil {
 		writeStorageMinecraftMigrationJSON(w, http.StatusConflict, storageMinecraftMigrationResponse{
-			OK: false, Error: "A Minecraft data migration is already active.", Operation: current.Operation,
+			OK: false, Error: "A Minecraft data migration is already active.", Operation: current,
 		})
 		return
 	}
@@ -93,17 +86,10 @@ func (a *App) storageMinecraftMigrationPlan(w http.ResponseWriter, r *http.Reque
 		writeStorageMinecraftMigrationJSON(w, http.StatusBadRequest, storageMinecraftMigrationResponse{OK: false, Error: err.Error()})
 		return
 	}
-	plan, err := client.AdminDataMigrationPlan(r.Context(), session, request)
+	plan, err := dataMigrationPlanReviewed(r.Context(), client, session, request)
 	if err != nil {
-		status := storageBrowserErrorStatus(err)
-		writeStorageMinecraftMigrationJSON(w, status, storageMinecraftMigrationResponse{
-			OK: false, Error: apiMessage(err, "Minecraft data migration planning failed."), Plan: &plan,
-		})
-		return
-	}
-	if !plan.OK || plan.Normalized == nil || plan.Requirements == nil {
-		writeStorageMinecraftMigrationJSON(w, http.StatusBadGateway, storageMinecraftMigrationResponse{
-			OK: false, Error: "Minecraft data migration returned an incomplete Review plan.", Plan: &plan,
+		writeStorageMinecraftMigrationJSON(w, dataMigrationErrorStatus(err), storageMinecraftMigrationResponse{
+			OK: false, Error: dataMigrationErrorMessage(err, "Minecraft data migration planning failed."), Plan: &plan,
 		})
 		return
 	}
@@ -125,65 +111,19 @@ func (a *App) storageMinecraftMigrationApply(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	plan, err := client.AdminDataMigrationPlan(r.Context(), session, request)
-	if err != nil {
-		writeStorageMinecraftMigrationJSON(w, storageBrowserErrorStatus(err), storageMinecraftMigrationResponse{
-			OK: false, Error: apiMessage(err, "Minecraft data migration planning failed."), Plan: &plan,
-		})
-		return
-	}
-
-	fingerprint := strings.TrimSpace(r.FormValue("plan_fingerprint"))
-	if fingerprint == "" || fingerprint != plan.PlanFingerprint {
-		writeStorageMinecraftMigrationJSON(w, http.StatusConflict, storageMinecraftMigrationResponse{
-			OK: false, Error: "This migration changed since Review. Review the current target again.", Plan: &plan,
-		})
-		return
-	}
-	if strings.TrimSpace(r.FormValue("migration_confirmation")) != "MIGRATE" {
-		writeStorageMinecraftMigrationJSON(w, http.StatusBadRequest, storageMinecraftMigrationResponse{
-			OK: false, Error: "Type MIGRATE exactly to start this reviewed Minecraft data migration.", Plan: &plan,
-		})
-		return
-	}
-
-	playersConfirmed := r.FormValue("players_confirmed") == "yes"
-	destructiveConfirmation := strings.TrimSpace(r.FormValue("destructive_confirmation"))
-	if plan.Requirements != nil {
-		if plan.Requirements.PlayersConfirmationRequired && !playersConfirmed {
-			writeStorageMinecraftMigrationJSON(w, http.StatusBadRequest, storageMinecraftMigrationResponse{
-				OK: false, Error: "Confirm that online players may be interrupted before starting migration.", Plan: &plan,
-			})
-			return
-		}
-		if plan.Requirements.DestructiveConfirmationRequired && destructiveConfirmation != plan.Requirements.ConfirmationPhrase {
-			writeStorageMinecraftMigrationJSON(w, http.StatusBadRequest, storageMinecraftMigrationResponse{
-				OK: false, Error: "The destructive storage confirmation does not match the exact reviewed phrase.", Plan: &plan,
-			})
-			return
-		}
-	}
-
-	result, err := client.AdminDataMigrationApply(r.Context(), session, api.AdminDataMigrationApplyRequest{
-		PlanFingerprint:    plan.PlanFingerprint,
-		Request:            request,
-		MigrationConfirmed: true,
-		Confirmation:       destructiveConfirmation,
-		PlayersConfirmed:   playersConfirmed,
+	plan, operation, err := dataMigrationApplyReviewed(r.Context(), client, session, request, dataMigrationApplyProof{
+		PlanFingerprint:    strings.TrimSpace(r.FormValue("plan_fingerprint")),
+		MigrationConfirmed: strings.TrimSpace(r.FormValue("migration_confirmation")) == "MIGRATE",
+		Confirmation:       strings.TrimSpace(r.FormValue("destructive_confirmation")),
+		PlayersConfirmed:   r.FormValue("players_confirmed") == "yes",
 	})
 	if err != nil {
-		writeStorageMinecraftMigrationJSON(w, storageBrowserErrorStatus(err), storageMinecraftMigrationResponse{
-			OK: false, Error: apiMessage(err, "Could not start Minecraft data migration."), Plan: &plan,
+		writeStorageMinecraftMigrationJSON(w, dataMigrationErrorStatus(err), storageMinecraftMigrationResponse{
+			OK: false, Error: dataMigrationErrorMessage(err, "Could not start Minecraft data migration."), Plan: &plan,
 		})
 		return
 	}
-	if !result.OK || result.Operation == nil || result.Operation.OperationType != "data_migration" {
-		writeStorageMinecraftMigrationJSON(w, http.StatusBadGateway, storageMinecraftMigrationResponse{
-			OK: false, Error: "Minecraft data migration did not return a valid persistent operation.",
-		})
-		return
-	}
-	writeStorageMinecraftMigrationJSON(w, http.StatusOK, storageMinecraftMigrationResponse{OK: true, Operation: result.Operation})
+	writeStorageMinecraftMigrationJSON(w, http.StatusOK, storageMinecraftMigrationResponse{OK: true, Operation: operation})
 }
 
 func (a *App) storageMinecraftMigrationProgress(w http.ResponseWriter, r *http.Request) {
@@ -191,16 +131,12 @@ func (a *App) storageMinecraftMigrationProgress(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
-	result, err := client.AdminOperation(r.Context(), session, r.PathValue("id"))
+	operation, err := dataMigrationOperation(r.Context(), client, session, r.PathValue("id"))
 	if err != nil {
 		a.writeStorageMinecraftMigrationError(w, err, "Minecraft data migration operation status is unavailable.")
 		return
 	}
-	if result.Operation == nil || result.Operation.OperationType != "data_migration" {
-		writeStorageMinecraftMigrationJSON(w, http.StatusNotFound, storageMinecraftMigrationResponse{OK: false, Error: "Minecraft data migration operation not found."})
-		return
-	}
-	writeStorageMinecraftMigrationJSON(w, http.StatusOK, storageMinecraftMigrationResponse{OK: true, Operation: result.Operation})
+	writeStorageMinecraftMigrationJSON(w, http.StatusOK, storageMinecraftMigrationResponse{OK: true, Operation: operation})
 }
 
 func storageMinecraftMigrationRequest(r *http.Request) (api.AdminDataMigrationPlanRequest, error) {
