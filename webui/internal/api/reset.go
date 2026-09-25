@@ -21,8 +21,8 @@ const (
 )
 
 var (
-	adminResetPlanTimeout         = 30 * time.Second
-	adminResetApplyTimeout        = 45 * time.Second
+	adminResetPlanTimeout        = 30 * time.Second
+	adminResetApplyTimeout       = 45 * time.Second
 	adminResetFingerprintPattern = regexp.MustCompile("^sha256:[0-9a-f]{64}$")
 )
 
