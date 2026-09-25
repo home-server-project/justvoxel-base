@@ -57,24 +57,47 @@ jv_reset_backup_nested_in_data() {
     esac
 }
 
+jv_reset_nested_mounts() {
+    local root="$1" target
+    while IFS= read -r target; do
+        [[ -n ${target} ]] || continue
+        case "${target}/" in
+            "${root%/}/"*) printf '%s\n' "${target}" ;;
+        esac
+    done < <(findmnt -rn -o TARGET 2>/dev/null || true)
+}
+
+jv_reset_delete_tree_same_filesystem() {
+    local root="$1" label="$2" nested
+
+    [[ -n ${root} && ${root} != / && ${root} != /var && ${root} != /var/lib ]] || {
+        echo "ERROR: refusing unsafe ${label} path." >&2
+        return 1
+    }
+    [[ ! -L ${root} ]] || {
+        echo "ERROR: refusing to delete ${label} through a symbolic link." >&2
+        return 1
+    }
+    [[ -d ${root} ]] || return 0
+
+    nested="$(jv_reset_nested_mounts "${root}")"
+    if [[ -n ${nested} ]]; then
+        echo "ERROR: refusing to delete ${label} while nested mounts are present:" >&2
+        printf '  %s\n' ${nested} >&2
+        return 1
+    fi
+
+    find "${root}" -xdev -mindepth 1 -delete
+}
+
 jv_reset_delete_internal_data() {
     local data_path="$1" backup_path="$2"
 
-    [[ -n ${data_path} && ${data_path} != / && ${data_path} != /var && ${data_path} != /var/lib ]] || {
-        echo 'ERROR: refusing unsafe Minecraft data path.' >&2
-        return 1
-    }
-    [[ ! -L ${data_path} ]] || {
-        echo 'ERROR: refusing to delete Minecraft data through a symbolic link.' >&2
-        return 1
-    }
     if jv_reset_backup_nested_in_data "${data_path}" "${backup_path}"; then
         echo 'ERROR: backup path is inside the Minecraft data path; move backups before resetting Minecraft.' >&2
         return 1
     fi
-    [[ -d ${data_path} ]] || return 0
-
-    find "${data_path}" -xdev -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+    jv_reset_delete_tree_same_filesystem "${data_path}" 'Minecraft data'
 }
 
 jv_reset_remove_active_configuration() {
