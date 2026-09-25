@@ -231,6 +231,58 @@ func TestSetupProgressPageAndJSONTrackSamePersistentOperation(t *testing.T) {
 	}
 }
 
+func TestSetupProgressRefreshDoesNotStartAnotherApply(t *testing.T) {
+	client := setupExecutionClient()
+	client.operation = &api.PersistentOperation{
+		SchemaVersion: "v1", OperationID: setupExecutionOperationID, OperationType: "setup",
+		PlanFingerprint: setupReviewFingerprint, State: "running", Stage: "runtime_config",
+		Status: "Writing transactional Minecraft runtime configuration.",
+		StartedAt: "2026-09-20T12:00:00Z", UpdatedAt: "2026-09-20T12:01:00Z",
+		Rollback: api.PersistentOperationRollback{State: "not_started"},
+	}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for range 2 {
+		page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/progress/"+setupExecutionOperationID, ""))
+		if page.Code != http.StatusOK {
+			t.Fatalf("progress refresh returned %d: %s", page.Code, page.Body.String())
+		}
+		status := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/api/setup/progress/"+setupExecutionOperationID, ""))
+		if status.Code != http.StatusOK {
+			t.Fatalf("progress status refresh returned %d: %s", status.Code, status.Body.String())
+		}
+	}
+	if client.applyCalls != 0 {
+		t.Fatalf("refreshing persistent setup progress started Apply %d times", client.applyCalls)
+	}
+}
+
+func TestSetupReviewResumesCurrentPersistentOperation(t *testing.T) {
+	client := setupExecutionClient()
+	client.current = &api.PersistentOperation{
+		SchemaVersion: "v1", OperationID: setupExecutionOperationID, OperationType: "setup",
+		PlanFingerprint: setupReviewFingerprint, State: "verifying", Stage: "minecraft_verify",
+		Status: "Starting Minecraft and verifying runtime readiness.",
+		StartedAt: "2026-09-20T12:00:00Z", UpdatedAt: "2026-09-20T12:02:00Z",
+		Rollback: api.PersistentOperationRollback{State: "not_started"},
+	}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
+	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/setup/progress/"+setupExecutionOperationID {
+		t.Fatalf("active setup Review did not reconnect to persistent operation: %d %q", rr.Code, rr.Header().Get("Location"))
+	}
+	if client.applyCalls != 0 {
+		t.Fatalf("reconnecting from Review started Apply %d times", client.applyCalls)
+	}
+}
+
 func TestSetupEntryResumesCurrentPersistentOperation(t *testing.T) {
 	client := setupExecutionClient()
 	client.current = &api.PersistentOperation{
