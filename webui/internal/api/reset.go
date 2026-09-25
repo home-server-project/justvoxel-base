@@ -23,29 +23,7 @@ const (
 var (
 	adminResetPlanTimeout         = 30 * time.Second
 	adminResetApplyTimeout        = 45 * time.Second
-	adminResetFingerprintPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}package api
-
-import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-	"net/http"
-	"regexp"
-	"strings"
-	"time"
-)
-
-const (
-	adminMinecraftResetPlanPath  = "/v1/admin/reset/minecraft/plan"
-	adminMinecraftResetApplyPath = "/v1/admin/reset/minecraft/apply"
-	adminFactoryResetPlanPath    = "/v1/admin/reset/factory/plan"
-	adminFactoryResetApplyPath   = "/v1/admin/reset/factory/apply"
-)
-
-)
+	adminResetFingerprintPattern = regexp.MustCompile("^sha256:[0-9a-f]{64}$")
 )
 
 type AdminResetPlanResponse struct {
