@@ -4,8 +4,10 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -521,22 +523,31 @@ func (a *App) renderSetupWizard(w http.ResponseWriter, identity api.SessionInfo,
 
 func setupTimezoneOptions(current string) []string {
 	zones := map[string]struct{}{"UTC": {}}
-	for _, path := range []string{"/usr/share/zoneinfo/zone1970.tab", "/usr/share/zoneinfo/zone.tab"} {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
+	root := "/usr/share/zoneinfo"
+	_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
 		}
-		for _, line := range strings.Split(string(data), "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" || strings.HasPrefix(line, "#") {
-				continue
-			}
-			fields := strings.Fields(line)
-			if len(fields) >= 3 && setupTimezonePattern.MatchString(fields[2]) {
-				zones[fields[2]] = struct{}{}
-			}
+		relative, err := filepath.Rel(root, path)
+		if err != nil || relative == "." {
+			return nil
 		}
-	}
+		relative = filepath.ToSlash(relative)
+		if entry.IsDir() {
+			if relative == "posix" || relative == "right" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		switch relative {
+		case "iso3166.tab", "leap-seconds.list", "leapseconds", "localtime", "posixrules", "tzdata.zi", "zone.tab", "zone1970.tab":
+			return nil
+		}
+		if setupTimezonePattern.MatchString(relative) && !strings.Contains(relative, "..") {
+			zones[relative] = struct{}{}
+		}
+		return nil
+	})
 	if current = strings.TrimSpace(current); current != "" && setupTimezonePattern.MatchString(current) {
 		zones[current] = struct{}{}
 	}
@@ -632,6 +643,12 @@ func validateSetupServer(server setupServerDraft) error {
 	}
 	if !setupTimezonePattern.MatchString(server.Timezone) || strings.Contains(server.Timezone, "..") || strings.HasPrefix(server.Timezone, "/") {
 		return errors.New("Timezone must look like UTC or America/Toronto.")
+	}
+	if server.Timezone != "UTC" {
+		info, err := os.Stat(filepath.Join("/usr/share/zoneinfo", server.Timezone))
+		if err != nil || info.IsDir() {
+			return errors.New("Choose a timezone from the JustVoxel timezone suggestions.")
+		}
 	}
 	return nil
 }
