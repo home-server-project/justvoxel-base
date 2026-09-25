@@ -1898,9 +1898,9 @@ if (migrationOpen && migrationDialog) {
   const content = migrationDialog.querySelector("[data-migration-workspace-content]");
   const tabs = Array.from(migrationDialog.querySelectorAll("[data-migration-tab]"));
   const tabURLs = {
-    export: "/settings/server-migration/export",
-    import: "/settings/server-migration/import",
-    recovery: "/settings/server-migration/recovery",
+    export: "/workspace/migration/export",
+    import: "/workspace/migration/import",
+    recovery: "/workspace/migration/recovery",
   };
   let currentTab = "export";
   let currentURL = tabURLs.export;
@@ -1940,9 +1940,9 @@ if (migrationOpen && migrationDialog) {
 
   const inferMigrationTab = (url, root = null) => {
     const pathname = new URL(url, window.location.href).pathname;
-    if (pathname.includes("/server-migration/export")) return "export";
-    if (pathname.includes("/server-migration/import")) return "import";
-    if (pathname.includes("/server-migration/recovery")) return "recovery";
+    if (pathname.includes("/migration/export")) return "export";
+    if (pathname.includes("/migration/import")) return "import";
+    if (pathname.includes("/migration/recovery")) return "recovery";
     const operationName = root?.querySelector("#server-migration-operation-name")?.textContent || "";
     if (operationName.includes("Export")) return "export";
     if (operationName.includes("Import")) return "import";
@@ -1951,19 +1951,12 @@ if (migrationOpen && migrationDialog) {
   };
 
   const extractMigrationRoot = (markup) => {
-    const parsed = new DOMParser().parseFromString(markup, "text/html");
-    const main = parsed.querySelector("main");
-    if (!main) return null;
-    const root = document.createElement("div");
-    root.className = "migration-workspace-content";
-    root.dataset.migrationWorkspaceRoot = "true";
-    root.innerHTML = main.innerHTML;
-    root.querySelector(".title-row")?.remove();
-    root.querySelector(".foot")?.remove();
-    return root;
+    const shell = document.createElement("div");
+    shell.innerHTML = markup;
+    return shell.querySelector("[data-migration-workspace-root]");
   };
 
-  const handleMigrationAuth = (response) => {
+  const handleMigrationAuth = async (response) => {
     if (response.redirected) {
       const target = new URL(response.url);
       if (target.pathname === "/login" || target.pathname === "/password") {
@@ -1974,6 +1967,13 @@ if (migrationOpen && migrationDialog) {
     if (response.status === 401) {
       window.location.assign("/login");
       return true;
+    }
+    if (response.status === 403) {
+      const message = await response.clone().text();
+      if (message.toLowerCase().includes("password change")) {
+        window.location.assign("/password");
+        return true;
+      }
     }
     return false;
   };
@@ -2009,7 +2009,7 @@ if (migrationOpen && migrationDialog) {
       const form = event.target.closest("form");
       if (!form || !root.contains(form)) return;
       const action = new URL(form.getAttribute("action") || currentURL, window.location.href);
-      if (action.origin !== window.location.origin || !action.pathname.startsWith("/settings/server-migration")) return;
+      if (action.origin !== window.location.origin || !action.pathname.startsWith("/workspace/migration")) return;
 
       event.preventDefault();
       const submitter = event.submitter;
@@ -2040,15 +2040,15 @@ if (migrationOpen && migrationDialog) {
           cache: "no-store",
           redirect: "follow",
         });
-        if (handleMigrationAuth(response)) return;
+        if (await handleMigrationAuth(response)) return;
         if (response.status === 403) throw new Error("Administrator access required.");
 
         const responseMarkup = await response.text();
-        if (!response.ok && !responseMarkup.includes("<main")) {
+        if (!response.ok && !responseMarkup.includes("data-migration-workspace-root")) {
           throw new Error("Migration operation could not be completed.");
         }
         renderMigrationMarkup(responseMarkup, response.url || action.pathname);
-        if ((response.url || "").includes("/server-migration/progress/")) migrationSourceSMBPassword = "";
+        if ((response.url || "").includes("/migration/progress/")) migrationSourceSMBPassword = "";
         if (state) state.textContent = "";
       } catch (error) {
         if (submitter && submitter.isConnected) submitter.disabled = false;
@@ -2065,11 +2065,11 @@ if (migrationOpen && migrationDialog) {
         workspaceWindow?.close();
         return;
       }
-      if (!href.startsWith("/settings/server-migration")) return;
+      if (!href.startsWith("/workspace/migration")) return;
       event.preventDefault();
-      if (href === "/settings/server-migration") await loadMigrationEntry();
+      if (href === "/workspace/migration") await loadMigrationEntry();
       else {
-        if (href === "/settings/server-migration/import") migrationSourceSMBPassword = "";
+        if (href === "/workspace/migration/import") migrationSourceSMBPassword = "";
         await loadMigration(href);
       }
     });
@@ -2090,12 +2090,12 @@ if (migrationOpen && migrationDialog) {
         cache: "no-store",
         redirect: "follow",
       });
-      if (handleMigrationAuth(response)) return;
+      if (await handleMigrationAuth(response)) return;
       if (response.status === 403) throw new Error("Administrator access required.");
       if (!response.ok) throw new Error("Migration is unavailable.");
 
       const finalURL = new URL(response.url || url, window.location.href);
-      if (finalURL.pathname === "/settings/server-migration") {
+      if (finalURL.pathname === "/workspace/migration") {
         await loadMigration(tabURLs[currentTab]);
         return;
       }
@@ -2118,20 +2118,20 @@ if (migrationOpen && migrationDialog) {
     if (refreshButton) refreshButton.disabled = true;
     try {
       await ensureMigrationAssets();
-      const response = await fetch("/settings/server-migration", {
+      const response = await fetch("/workspace/migration", {
         method: "GET",
         credentials: "same-origin",
         headers: { Accept: "text/html" },
         cache: "no-store",
         redirect: "follow",
       });
-      if (handleMigrationAuth(response)) return;
+      if (await handleMigrationAuth(response)) return;
       if (response.status === 403) throw new Error("Administrator access required.");
       if (!response.ok) throw new Error("Migration is unavailable.");
       const finalURL = new URL(response.url, window.location.href);
       if (sequence !== loadSequence) return;
 
-      if (finalURL.pathname !== "/settings/server-migration") {
+      if (finalURL.pathname !== "/workspace/migration") {
         const markup = await response.text();
         renderMigrationMarkup(markup, finalURL.href);
         if (state) state.textContent = "";

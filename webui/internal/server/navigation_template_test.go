@@ -301,7 +301,7 @@ func TestBackupsLibraryLeadsWorkspaceAndOwnsActions(t *testing.T) {
 	}
 }
 
-func TestMigrationWorkspaceKeepsLegacyRoutesAndUsesWorkspaceShell(t *testing.T) {
+func TestMigrationWorkspaceKeepsLegacyCardButUsesIndependentWorkspaceRoutes(t *testing.T) {
 	header, err := assets.ReadFile("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
@@ -327,23 +327,58 @@ func TestMigrationWorkspaceKeepsLegacyRoutesAndUsesWorkspaceShell(t *testing.T) 
 	source := string(script)
 	migrationStart := strings.Index(source, `const migrationOpen = document.querySelector("[data-migration-open]")`)
 	monitorStart := strings.Index(source, `const systemMonitorOpen = document.querySelector("[data-system-monitor-open]")`)
-	passwordReplay := strings.Index(source, `const sourceKind = body.get("source_kind") || ""`)
-	if migrationStart < 0 || monitorStart < 0 || passwordReplay < migrationStart || passwordReplay > monitorStart {
+	if migrationStart < 0 || monitorStart <= migrationStart {
+		t.Fatal("Migration workspace source block missing")
+	}
+	block := source[migrationStart:monitorStart]
+	if !strings.Contains(block, `const sourceKind = body.get("source_kind") || ""`) {
 		t.Fatal("Migration SMB password replay must remain scoped to the Migration workspace")
 	}
 	for _, want := range []string{
 		`document.querySelector("[data-migration-open]")`,
-		`"/settings/server-migration/export"`,
-		`"/settings/server-migration/import"`,
-		`"/settings/server-migration/recovery"`,
+		`"/workspace/migration/export"`,
+		`"/workspace/migration/import"`,
+		`"/workspace/migration/recovery"`,
 		`window.JustVoxelServerMigrationExport?.init(root)`,
 		`window.JustVoxelServerMigrationImport?.init(root)`,
 		`window.JustVoxelServerMigrationOperation?.init(root)`,
 		`let migrationSourceSMBPassword = ""`,
 		`root.querySelectorAll("[data-migration-source-password-repeat]")`,
+		`data-migration-workspace-root`,
 	} {
-		if !strings.Contains(source, want) {
+		if !strings.Contains(block, want) {
 			t.Fatalf("Migration workspace behavior missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		`/settings/server-migration`,
+		`new DOMParser()`,
+	} {
+		if strings.Contains(block, forbidden) {
+			t.Fatalf("Migration workspace still depends on legacy rendering %q", forbidden)
+		}
+	}
+
+	for _, name := range []string{
+		"migration_workspace.html",
+		"migration_workspace_export.html",
+		"migration_workspace_export_review.html",
+		"migration_workspace_import.html",
+		"migration_workspace_import_review.html",
+		"migration_workspace_recovery.html",
+		"migration_workspace_recovery_review.html",
+		"migration_workspace_progress.html",
+	} {
+		templateBytes, err := assets.ReadFile("templates/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		template := string(templateBytes)
+		if !strings.Contains(template, "data-migration-workspace-root") {
+			t.Fatalf("Migration workspace fragment %s is missing its workspace root", name)
+		}
+		if strings.Contains(template, "/settings/server-migration") {
+			t.Fatalf("Migration workspace fragment %s still references legacy routes", name)
 		}
 	}
 }
