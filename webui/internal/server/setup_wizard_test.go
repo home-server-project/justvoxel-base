@@ -454,7 +454,7 @@ func TestSetupWizardCancelDiscardsDraft(t *testing.T) {
 	}
 
 	welcome := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-	if welcome.Code != http.StatusOK || !strings.Contains(welcome.Body.String(), "Welcome to JustVoxel") {
+	if welcome.Code != http.StatusOK || !strings.Contains(welcome.Body.String(), "Set up your Minecraft server") {
 		t.Fatalf("cancel did not discard draft: %d %s", welcome.Code, welcome.Body.String())
 	}
 	if strings.Contains(welcome.Body.String(), "Step 1 of 6") {
