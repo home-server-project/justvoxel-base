@@ -72,6 +72,7 @@ type WiFiNetwork struct {
 	MaxBitrateKbps uint32 `json:"max_bitrate_kbps"`
 	Security       string `json:"security"`
 	KeyManagement  string `json:"key_management"`
+	ProfileUUID    string `json:"profile_uuid,omitempty"`
 	Hidden         bool   `json:"hidden"`
 	Known          bool   `json:"known"`
 	Active         bool   `json:"active"`
@@ -100,6 +101,24 @@ type NetworkCheckpointRollback struct {
 	OK      bool                              `json:"ok"`
 	ID      string                            `json:"id"`
 	Results []NetworkCheckpointRollbackDevice `json:"results"`
+}
+
+type NetworkWiFiMutation struct {
+	OK          bool               `json:"ok"`
+	Action      string             `json:"action"`
+	Interface   string             `json:"interface,omitempty"`
+	ProfileUUID string             `json:"profile_uuid,omitempty"`
+	Checkpoint *NetworkCheckpoint `json:"checkpoint,omitempty"`
+}
+
+type NetworkWiFiConnectRequest struct {
+	CheckpointID string
+	ProfileUUID  string
+	SSID         string
+	BSSID        string
+	KeyManagement string
+	Password     string
+	Hidden       bool
 }
 
 func (c *Client) NetworkStatus(ctx context.Context, session string) (NetworkStatus, error) {
@@ -145,6 +164,51 @@ func (c *Client) ConfirmNetworkCheckpoint(ctx context.Context, session, id strin
 func (c *Client) RollbackNetworkCheckpoint(ctx context.Context, session, id string) (NetworkCheckpointRollback, error) {
 	var out NetworkCheckpointRollback
 	path := "/v1/admin/network/checkpoints/" + url.PathEscape(id) + "/rollback"
+	err := c.do(ctx, http.MethodPost, path, session, nil, &out)
+	return out, err
+}
+
+func (c *Client) SetWiFiRadio(ctx context.Context, session string, enabled bool, checkpointID string) (NetworkWiFiMutation, error) {
+	var out NetworkWiFiMutation
+	body := map[string]any{
+		"enabled": enabled,
+	}
+	if checkpointID != "" {
+		body["checkpoint_id"] = checkpointID
+	}
+	err := c.do(ctx, http.MethodPost, "/v1/admin/network/wifi/radio", session, body, &out)
+	return out, err
+}
+
+func (c *Client) ConnectWiFi(ctx context.Context, session, interfaceName string, request NetworkWiFiConnectRequest) (NetworkWiFiMutation, error) {
+	var out NetworkWiFiMutation
+	body := map[string]any{
+		"checkpoint_id": request.CheckpointID,
+	}
+	if request.ProfileUUID != "" {
+		body["profile_uuid"] = request.ProfileUUID
+	} else {
+		body["ssid"] = request.SSID
+		body["bssid"] = request.BSSID
+		body["key_management"] = request.KeyManagement
+		body["password"] = request.Password
+		body["hidden"] = request.Hidden
+	}
+	path := "/v1/admin/network/wifi/" + url.PathEscape(interfaceName) + "/connect"
+	err := c.do(ctx, http.MethodPost, path, session, body, &out)
+	return out, err
+}
+
+func (c *Client) DisconnectWiFi(ctx context.Context, session, interfaceName, checkpointID string) (NetworkWiFiMutation, error) {
+	var out NetworkWiFiMutation
+	path := "/v1/admin/network/wifi/" + url.PathEscape(interfaceName) + "/disconnect"
+	err := c.do(ctx, http.MethodPost, path, session, map[string]string{"checkpoint_id": checkpointID}, &out)
+	return out, err
+}
+
+func (c *Client) ForgetWiFiProfile(ctx context.Context, session, profileUUID string) (NetworkWiFiMutation, error) {
+	var out NetworkWiFiMutation
+	path := "/v1/admin/network/wifi/profiles/" + url.PathEscape(profileUUID) + "/forget"
 	err := c.do(ctx, http.MethodPost, path, session, nil, &out)
 	return out, err
 }
