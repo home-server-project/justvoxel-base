@@ -207,18 +207,35 @@ func TestSystemWorkspaceMigrationContract(t *testing.T) {
 	behavior := string(script)
 	for _, want := range []string{
 		`document.querySelector("[data-system-open]")`,
+		`"/api/system/workspace/health"`,
+		`"/api/system/workspace/history"`,
+		`"/api/system/workspace/users"`,
+		`"/api/system/workspace/security"`,
+		`"/api/system/workspace/about"`,
+		`fetch("/api/ups"`,
+		`action.pathname !== "/api/ups/source"`,
+		`data-system-workspace-csrf`,
+	} {
+		if !strings.Contains(behavior, want) && !strings.Contains(markup, want) {
+			t.Fatalf("System workspace behavior missing %q", want)
+		}
+	}
+
+	systemStart := strings.Index(behavior, `const systemWorkspaceOpen = document.querySelector("[data-system-open]")`)
+	if systemStart < 0 {
+		t.Fatal("System workspace source block missing")
+	}
+	systemBlock := behavior[systemStart:]
+	for _, forbidden := range []string{
+		`new DOMParser()`,
 		`systemFetchPage("/settings/validation")`,
-		`user.role === "administrator" ? "/settings/activity" : "/activity"`,
+		`"/settings/activity"`,
 		`systemFetchPage("/settings/users")`,
 		`systemFetchPage("/settings/authentication")`,
-		`systemFetchPage("/password")`,
 		`systemFetchPage("/about")`,
-		`fetch("/api/ups"`,
-		`action.pathname === "/api/ups/source"`,
-		`["Validation passed", "System health check passed"]`,
 	} {
-		if !strings.Contains(behavior, want) {
-			t.Fatalf("System workspace behavior missing %q", want)
+		if strings.Contains(systemBlock, forbidden) {
+			t.Fatalf("System workspace still depends on legacy rendering path %q", forbidden)
 		}
 	}
 }

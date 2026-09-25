@@ -212,3 +212,41 @@ func TestAuthenticationModeChangeRejectsMissingCSRF(t *testing.T) {
 		t.Fatal("mode change reached API without CSRF")
 	}
 }
+
+
+func TestSystemWorkspaceAPIsRespectForcedPasswordChangeBoundary(t *testing.T) {
+	app, err := New(newAuthFlowAPI(), Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "http://example/api/system/workspace/about", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+	req.AddCookie(&http.Cookie{Name: mustChangeCookie, Value: "1"})
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected forced password-change boundary, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "Password change required") {
+		t.Fatalf("forced password-change boundary is not explicit: %s", rr.Body.String())
+	}
+}
+
+func TestForcedPasswordPageRemainsStandaloneRoute(t *testing.T) {
+	app, err := New(newAuthFlowAPI(), Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "http://example/password", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+	req.AddCookie(&http.Cookie{Name: mustChangeCookie, Value: "1"})
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("forced password page status=%d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "Change administrator password") || !strings.Contains(body, "action=\"/password\"") {
+		t.Fatalf("forced password page no longer renders the existing standalone form: %s", body)
+	}
+}
