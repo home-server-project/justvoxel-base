@@ -65,6 +65,7 @@
             <button class="control-tile" type="button" data-system-monitor-open title="Live CPU, memory, storage, network, processes and containers"><strong>System Monitor</strong></button>
             <button class="control-tile nav-admin-only" type="button" data-storage-open title="Disks, partitions, mounts and external USB storage"><strong>Storage</strong></button>
             <button class="control-tile nav-admin-only" type="button" data-backups-open title="Create, schedule, restore and manage backups"><strong>Backups</strong></button>
+            <button class="control-tile nav-admin-only" type="button" data-migration-open title="Export, import and recover a JustVoxel server"><strong>Migration</strong></button>
             <button class="control-tile nav-admin-only" type="button" data-system-update-open title="Update the JustVoxel operating system"><strong>System Update</strong></button>
           </div>
         </section>
@@ -300,6 +301,30 @@
       <div class="backups-workspace-body">
         <p class="backups-workspace-state" data-backups-state>Backups are loaded when this window opens.</p>
         <div data-backups-workspace-content></div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="workspace-window migration-workspace-dialog" data-workspace-window="migration" data-migration-workspace-dialog aria-labelledby="migration-workspace-title">
+    <div class="migration-workspace-shell">
+      <div class="migration-workspace-header" data-workspace-drag-handle>
+        <div>
+          <p class="eyebrow">JustVoxel</p>
+          <h2 id="migration-workspace-title">Server Migration</h2>
+        </div>
+        <div class="migration-workspace-header-actions">
+          <button class="system-monitor-header-button" type="button" data-migration-refresh aria-label="Refresh migration" title="Refresh migration">↻</button>
+          <button class="system-monitor-header-button" type="button" data-migration-close aria-label="Close migration">&times;</button>
+        </div>
+      </div>
+      <nav class="migration-workspace-tabs" aria-label="Server Migration workspace">
+        <button type="button" data-migration-tab="export" aria-selected="true">Export</button>
+        <button type="button" data-migration-tab="import" aria-selected="false">Import</button>
+        <button type="button" data-migration-tab="recovery" aria-selected="false">Recovery</button>
+      </nav>
+      <div class="migration-workspace-body">
+        <p class="migration-workspace-state" data-migration-state>Migration is loaded when this window opens.</p>
+        <div data-migration-workspace-content></div>
       </div>
     </div>
   </dialog>

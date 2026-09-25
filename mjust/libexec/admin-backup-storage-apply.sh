@@ -27,7 +27,7 @@ apply_json() {
         return 0
     fi
 
-    local current proposed config_backup fstab_backup credentials_backup
+    local current proposed config_backup fstab_backup credentials_backup credentials_new=''
     local fstab_existed=no credentials_existed=no mounted_by_us=no credentials_changed=no
     local old_backup_type old_backup_path old_backup_mount old_backup_uuid old_backup_source
     current="$(current_status_json | jq '.current')"
@@ -60,6 +60,10 @@ apply_json() {
     old_backup_source="${BACKUP_EXPECTED_SOURCE}"
 
     rollback() {
+        if [[ -n ${credentials_new:-} ]]; then
+            rm -f -- "${credentials_new}" >/dev/null 2>&1 || true
+            credentials_new=''
+        fi
         if [[ ${mounted_by_us} == yes && -n ${TARGET_MOUNT} ]]; then
             umount -- "${TARGET_MOUNT}" >/dev/null 2>&1 || true
         fi
@@ -102,14 +106,28 @@ apply_json() {
     elif [[ ${TARGET_TYPE} == smb && ${TARGET_ALREADY_MOUNTED} != true ]]; then
         install -d -m0755 -o root -g root "${TARGET_MOUNT}" || { rollback; json_error 'Could not create the SMB mount point.'; return 0; }
         install -d -m0700 -o root -g root /etc/justvoxel || { rollback; json_error 'Could not prepare secure SMB credential storage.'; return 0; }
+        if [[ -e ${A31_SMB_CREDENTIALS} || -L ${A31_SMB_CREDENTIALS} ]]; then
+            if [[ ! -f ${A31_SMB_CREDENTIALS} || -L ${A31_SMB_CREDENTIALS} ]]; then
+                rollback
+                json_error 'Existing SMB credential path is not a safe regular file.'
+                return 0
+            fi
+        fi
+        credentials_new="$(mktemp /etc/justvoxel/.smb-backup.credentials.new.XXXXXX 2>/dev/null)" || {
+            rollback
+            json_error 'Could not create secure SMB credential storage in /etc/justvoxel.'
+            return 0
+        }
         umask 077
         {
             printf 'username=%s\n' "${TARGET_USERNAME}"
             printf 'password=%s\n' "${TARGET_PASSWORD}"
             [[ -n ${TARGET_DOMAIN} ]] && printf 'domain=%s\n' "${TARGET_DOMAIN}"
-        } > "${A31_SMB_CREDENTIALS}" || { rollback; json_error 'Could not save SMB credentials securely.'; return 0; }
-        chown root:root "${A31_SMB_CREDENTIALS}" >/dev/null 2>&1 || { rollback; json_error 'Could not secure SMB credentials.'; return 0; }
-        chmod 0600 "${A31_SMB_CREDENTIALS}" || { rollback; json_error 'Could not secure SMB credentials.'; return 0; }
+        } > "${credentials_new}" || { rollback; json_error 'Could not write temporary SMB credentials securely.'; return 0; }
+        chown root:root "${credentials_new}" >/dev/null 2>&1 || { rollback; json_error 'Could not set SMB credential ownership.'; return 0; }
+        chmod 0600 "${credentials_new}" || { rollback; json_error 'Could not set SMB credential permissions.'; return 0; }
+        mv -fT -- "${credentials_new}" "${A31_SMB_CREDENTIALS}" || { rollback; json_error 'Could not install SMB credentials securely.'; return 0; }
+        credentials_new=''
         credentials_changed=yes
         storage_remove_fstab_mountpoint "${TARGET_MOUNT}" >/dev/null 2>&1 || { rollback; json_error 'Could not update SMB mount configuration.'; return 0; }
         printf '%s %s cifs credentials=%s,vers=3.0,rw,_netdev,nofail,x-systemd.mount-timeout=20s,uid=0,gid=0,file_mode=0600,dir_mode=0700 0 0\n' "${TARGET_SOURCE}" "${TARGET_MOUNT}" "${A31_SMB_CREDENTIALS}" >> "${A31_FSTAB}" || { rollback; json_error 'Could not update SMB mount configuration.'; return 0; }

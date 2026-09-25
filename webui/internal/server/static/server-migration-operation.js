@@ -1,17 +1,18 @@
-document.addEventListener("DOMContentLoaded", () => {
-  const panel = document.querySelector("[data-server-migration-operation]");
-  if (!panel) return;
+function initServerMigrationOperation(root = document) {
+  const panel = root.querySelector("[data-server-migration-operation]");
+  if (!panel || panel.dataset.serverMigrationOperationInitialized === "true") return;
+  panel.dataset.serverMigrationOperationInitialized = "true";
 
   const statusURL = panel.dataset.statusUrl;
-  const statusText = document.getElementById("server-migration-operation-status");
-  const stateBadge = document.getElementById("server-migration-operation-state");
-  const stageText = document.getElementById("server-migration-operation-stage");
-  const nameText = document.getElementById("server-migration-operation-name");
-  const reconnectNote = document.getElementById("server-migration-reconnect-note");
-  const successNote = document.getElementById("server-migration-operation-success");
-  const rollbackNote = document.getElementById("server-migration-operation-rollback");
-  const attentionNote = document.getElementById("server-migration-operation-attention");
-  const dashboardLink = document.getElementById("server-migration-dashboard-link");
+  const statusText = root.querySelector("#server-migration-operation-status");
+  const stateBadge = root.querySelector("#server-migration-operation-state");
+  const stageText = root.querySelector("#server-migration-operation-stage");
+  const nameText = root.querySelector("#server-migration-operation-name");
+  const reconnectNote = root.querySelector("#server-migration-reconnect-note");
+  const successNote = root.querySelector("#server-migration-operation-success");
+  const rollbackNote = root.querySelector("#server-migration-operation-rollback");
+  const attentionNote = root.querySelector("#server-migration-operation-attention");
+  const dashboardLink = root.querySelector("#server-migration-dashboard-link");
   let failures = 0;
   let finished = false;
 
@@ -98,7 +99,7 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   const poll = async () => {
-    if (finished) return;
+    if (finished || !panel.isConnected) return;
     try {
       const response = await fetch(statusURL, {
         method: "GET",
@@ -121,8 +122,15 @@ document.addEventListener("DOMContentLoaded", () => {
       failures += 1;
       if (failures >= 2 && reconnectNote) reconnectNote.hidden = false;
     }
-    if (!finished) window.setTimeout(poll, 2500);
+    if (!finished && panel.isConnected) window.setTimeout(poll, 2500);
   };
 
   poll();
-});
+}
+
+window.JustVoxelServerMigrationOperation = { init: initServerMigrationOperation };
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", () => initServerMigrationOperation(document), { once: true });
+} else {
+  initServerMigrationOperation(document);
+}

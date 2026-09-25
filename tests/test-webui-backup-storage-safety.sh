@@ -20,7 +20,10 @@ grep -q 'admin-backup-storage-json' "${agent}"
 grep -q 'GET /v1/admin/backup-storage' "${agent}"
 grep -q 'POST /v1/admin/backup-storage/plan' "${agent}"
 grep -q 'POST /v1/admin/backup-storage/apply' "${agent}"
-grep -q 'chmod 0600 "${A31_SMB_CREDENTIALS}"' "${helper_apply}"
+grep -Fq 'credentials_new="$(mktemp /etc/justvoxel/.smb-backup.credentials.new.XXXXXX 2>/dev/null)"' "${helper_apply}"
+grep -Fq 'chmod 0600 "${credentials_new}"' "${helper_apply}"
+grep -Fq 'mv -fT -- "${credentials_new}" "${A31_SMB_CREDENTIALS}"' "${helper_apply}"
+grep -Fq "Existing SMB credential path is not a safe regular file." "${helper_apply}"
 grep -q "password is required when applying a new SMB mount" "${helper_apply}"
 
 # SMB mount diagnostics must preserve useful mount.cifs text without leaking

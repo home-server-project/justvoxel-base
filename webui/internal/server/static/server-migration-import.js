@@ -1,6 +1,7 @@
-document.addEventListener("DOMContentLoaded", () => {
-  const form = document.querySelector("[data-server-import-form]");
-  if (!form) return;
+function initServerMigrationImport(root = document) {
+  const form = root.querySelector("[data-server-import-form]");
+  if (!form || form.dataset.serverMigrationImportInitialized === "true") return;
+  form.dataset.serverMigrationImportInitialized = "true";
 
   const sourceKind = form.querySelector("[data-server-import-source-kind]");
   const sourceGroups = Array.from(form.querySelectorAll("[data-server-import-source]"));
@@ -33,4 +34,11 @@ document.addEventListener("DOMContentLoaded", () => {
     backupKind.addEventListener("change", () => switchGroups(backupKind, backupGroups, "serverImportBackup"));
     switchGroups(backupKind, backupGroups, "serverImportBackup");
   }
-});
+}
+
+window.JustVoxelServerMigrationImport = { init: initServerMigrationImport };
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", () => initServerMigrationImport(document), { once: true });
+} else {
+  initServerMigrationImport(document);
+}

@@ -563,3 +563,30 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 @media(max-width:800px){.system-ups-source-form{grid-template-columns:1fr 1fr}.system-ups-source-form button{align-self:end}}
 @media(max-width:560px){.system-ups-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.system-ups-source-form{grid-template-columns:1fr}.system-ups-source{align-items:flex-start;flex-direction:column;gap:.2rem}}
 @media(prefers-color-scheme:light){.system-ups-source,.system-ups-card,.system-ups-metric{background:#f7f9fa;border-color:#d9dfe3}.system-ups-source-panel{border-color:#d9dfe3}.system-ups-source-form input,.system-ups-source-form select{background:#fff;border-color:#cbd3d8;color:#1a2025}.system-ups-source-panel p,.system-ups-source-form label{color:#5c6870}}
+
+
+/* Server Migration workspace. Legacy routes remain available as fallback pages. */
+.migration-workspace-dialog{width:min(1040px,calc(100vw - 1rem));height:min(780px,calc(100dvh - 1rem));min-width:min(600px,calc(100vw - 1rem));min-height:420px;max-width:calc(100vw - 1rem);max-height:calc(100dvh - 1rem);padding:0;overflow:hidden;resize:both;border:1px solid #3b454e;border-radius:16px;background:#171d22;color:#eef1f4;box-shadow:0 28px 80px #000b}
+.migration-workspace-shell{display:flex;flex-direction:column;height:100%;min-height:0}
+.migration-workspace-header{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;padding:1rem 1.1rem .8rem;border-bottom:1px solid #303942;cursor:move;touch-action:none;user-select:none}
+.migration-workspace-header h2{margin:.1rem 0 0;font-size:1.25rem}
+.migration-workspace-header-actions{display:flex;gap:.45rem}
+.migration-workspace-tabs{display:flex;gap:.35rem;padding:.65rem 1.1rem;border-bottom:1px solid #303942;background:#11171b;overflow-x:auto}
+.migration-workspace-tabs button{min-height:36px;padding:.5rem .8rem;border:1px solid transparent;border-radius:9px;background:transparent;color:#aeb8c0;font-weight:700;white-space:nowrap}
+.migration-workspace-tabs button:hover,.migration-workspace-tabs button:focus-visible{background:#232b31;color:#fff}
+.migration-workspace-tabs button[aria-selected="true"]{border-color:#496454;background:#25382e;color:#c8f2d7}
+.migration-workspace-body{display:flex;flex:1;min-height:0;flex-direction:column;overflow:hidden;padding:1rem 1.1rem 1.1rem}
+.migration-workspace-state{flex:0 0 auto;margin:0 0 .65rem;color:#9ca7b0;font-size:.8rem}
+.migration-workspace-state:empty{display:none}
+.migration-workspace-body>[data-migration-workspace-content]{flex:1;min-height:0;overflow:auto}
+.migration-workspace-content{max-width:none!important;margin:0!important;padding:0!important}
+.migration-workspace-content>.title-row,.migration-workspace-content>.foot{display:none}
+.migration-workspace-content>.muted:first-child{margin:.1rem 0 .65rem}
+.migration-workspace-content .panel{margin:.65rem 0;padding:.85rem}
+.migration-workspace-content .panel:first-of-type{margin-top:0}
+.migration-workspace-content .details{margin:.55rem 0}
+.migration-workspace-content .action-row{justify-content:flex-end;margin-top:.65rem}
+.migration-workspace-content form>.action-row:last-of-type{position:sticky;bottom:0;padding:.55rem 0;background:#171d22;z-index:2}
+.migration-workspace-content .admin-form-grid{gap:.65rem}
+@media(max-width:700px){.migration-workspace-dialog{inset:52px .25rem .25rem .25rem!important;width:auto!important;height:auto!important;min-width:0;min-height:0;max-width:none;max-height:none;resize:none;border-radius:12px}.migration-workspace-header{padding:.85rem .9rem .7rem;cursor:default;touch-action:auto}.migration-workspace-tabs{padding:.55rem .9rem}.migration-workspace-body{padding:.8rem .9rem}}
+@media(prefers-color-scheme:light){.migration-workspace-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025}.migration-workspace-header,.migration-workspace-tabs{border-color:#d9dfe3}.migration-workspace-tabs{background:#f7f9fa}.migration-workspace-tabs button{color:#56636c}.migration-workspace-tabs button:hover,.migration-workspace-tabs button:focus-visible{background:#e9eef1;color:#1a2025}.migration-workspace-tabs button[aria-selected="true"]{background:#e3f1e8;border-color:#86b99a;color:#184c31}.migration-workspace-content form>.action-row:last-of-type{background:#fff}}

@@ -54,7 +54,7 @@ func TestControlCenterNavigationUX(t *testing.T) {
 	if temporary < 0 || minecraft < 0 || temporary > minecraft {
 		t.Fatal("Temporary Control Center section must appear before Minecraft")
 	}
-	for _, item := range []string{"data-minecraft-open", "data-system-open", "data-system-monitor-open", "data-storage-open", "data-backups-open", "data-system-update-open"} {
+	for _, item := range []string{"data-minecraft-open", "data-system-open", "data-system-monitor-open", "data-storage-open", "data-backups-open", "data-migration-open", "data-system-update-open"} {
 		if strings.Count(markup, item) != 1 {
 			t.Fatalf("temporary workspace item %q must appear exactly once", item)
 		}
@@ -269,6 +269,45 @@ func TestBackupsLibraryLeadsWorkspaceAndOwnsActions(t *testing.T) {
 	}
 	if !strings.Contains(string(styles), ".backup-destination-change>summary{display:flex") {
 		t.Fatal("Change destination must be a normal right-aligned action button")
+	}
+}
+
+func TestMigrationWorkspaceKeepsLegacyRoutesAndUsesWorkspaceShell(t *testing.T) {
+	header, err := assets.ReadFile("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(header)
+	for _, want := range []string{
+		"data-migration-open",
+		`data-workspace-window="migration"`,
+		`data-migration-tab="export"`,
+		`data-migration-tab="import"`,
+		`data-migration-tab="recovery"`,
+		`href="/settings/server-migration"`,
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("Migration workspace markup missing %q", want)
+		}
+	}
+
+	script, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(script)
+	for _, want := range []string{
+		`document.querySelector("[data-migration-open]")`,
+		`"/settings/server-migration/export"`,
+		`"/settings/server-migration/import"`,
+		`"/settings/server-migration/recovery"`,
+		`window.JustVoxelServerMigrationExport?.init(root)`,
+		`window.JustVoxelServerMigrationImport?.init(root)`,
+		`window.JustVoxelServerMigrationOperation?.init(root)`,
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("Migration workspace behavior missing %q", want)
+		}
 	}
 }
 

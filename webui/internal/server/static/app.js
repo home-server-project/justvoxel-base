@@ -1785,6 +1785,274 @@ if (backupsOpen && backupsDialog) {
   restoreBackupsWhenRoleKnown();
 }
 
+
+const migrationOpen = document.querySelector("[data-migration-open]");
+const migrationDialog = document.querySelector("[data-migration-workspace-dialog]");
+if (migrationOpen && migrationDialog) {
+  const closeButton = migrationDialog.querySelector("[data-migration-close]");
+  const refreshButton = migrationDialog.querySelector("[data-migration-refresh]");
+  const state = migrationDialog.querySelector("[data-migration-state]");
+  const content = migrationDialog.querySelector("[data-migration-workspace-content]");
+  const tabs = Array.from(migrationDialog.querySelectorAll("[data-migration-tab]"));
+  const tabURLs = {
+    export: "/settings/server-migration/export",
+    import: "/settings/server-migration/import",
+    recovery: "/settings/server-migration/recovery",
+  };
+  let currentTab = "export";
+  let currentURL = tabURLs.export;
+  let loadSequence = 0;
+
+  const loadMigrationScript = async (src, ready) => {
+    if (ready()) return;
+    let script = document.querySelector('script[src="' + src + '"]');
+    await new Promise((resolve, reject) => {
+      if (ready()) {
+        resolve();
+        return;
+      }
+      if (!script) {
+        script = document.createElement("script");
+        script.src = src;
+        script.defer = true;
+        document.head.appendChild(script);
+      }
+      script.addEventListener("load", resolve, { once: true });
+      script.addEventListener("error", reject, { once: true });
+    });
+  };
+
+  const ensureMigrationAssets = async () => {
+    await loadMigrationScript("/static/server-migration-export.js", () => Boolean(window.JustVoxelServerMigrationExport?.init));
+    await loadMigrationScript("/static/server-migration-import.js", () => Boolean(window.JustVoxelServerMigrationImport?.init));
+    await loadMigrationScript("/static/server-migration-operation.js", () => Boolean(window.JustVoxelServerMigrationOperation?.init));
+  };
+
+  const syncMigrationTabs = () => {
+    tabs.forEach((button) => {
+      button.setAttribute("aria-selected", button.dataset.migrationTab === currentTab ? "true" : "false");
+    });
+  };
+
+  const inferMigrationTab = (url, root = null) => {
+    const pathname = new URL(url, window.location.href).pathname;
+    if (pathname.includes("/server-migration/export")) return "export";
+    if (pathname.includes("/server-migration/import")) return "import";
+    if (pathname.includes("/server-migration/recovery")) return "recovery";
+    const operationName = root?.querySelector("#server-migration-operation-name")?.textContent || "";
+    if (operationName.includes("Export")) return "export";
+    if (operationName.includes("Import")) return "import";
+    if (operationName.includes("Recovery")) return "recovery";
+    return currentTab;
+  };
+
+  const extractMigrationRoot = (markup) => {
+    const parsed = new DOMParser().parseFromString(markup, "text/html");
+    const main = parsed.querySelector("main");
+    if (!main) return null;
+    const root = document.createElement("div");
+    root.className = "migration-workspace-content";
+    root.dataset.migrationWorkspaceRoot = "true";
+    root.innerHTML = main.innerHTML;
+    root.querySelector(".title-row")?.remove();
+    root.querySelector(".foot")?.remove();
+    return root;
+  };
+
+  const handleMigrationAuth = (response) => {
+    if (response.redirected) {
+      const target = new URL(response.url);
+      if (target.pathname === "/login" || target.pathname === "/password") {
+        window.location.assign(target.pathname + target.search);
+        return true;
+      }
+    }
+    if (response.status === 401) {
+      window.location.assign("/login");
+      return true;
+    }
+    return false;
+  };
+
+  const initializeMigrationRoot = (root) => {
+    window.JustVoxelServerMigrationExport?.init(root);
+    window.JustVoxelServerMigrationImport?.init(root);
+    window.JustVoxelServerMigrationOperation?.init(root);
+  };
+
+  const renderMigrationMarkup = (markup, responseURL) => {
+    if (!content) throw new Error("Migration workspace is unavailable.");
+    const root = extractMigrationRoot(markup);
+    if (!root) throw new Error("Migration response could not be rendered.");
+
+    const renderedURL = new URL(responseURL, window.location.href);
+    currentURL = renderedURL.pathname + renderedURL.search;
+    currentTab = inferMigrationTab(responseURL, root);
+    syncMigrationTabs();
+    content.replaceChildren(root);
+
+    root.addEventListener("submit", async (event) => {
+      const form = event.target.closest("form");
+      if (!form || !root.contains(form)) return;
+      const action = new URL(form.getAttribute("action") || currentURL, window.location.href);
+      if (action.origin !== window.location.origin || !action.pathname.startsWith("/settings/server-migration")) return;
+
+      event.preventDefault();
+      const submitter = event.submitter;
+      if (submitter) submitter.disabled = true;
+      if (state) state.textContent = "Working…";
+
+      try {
+        const body = new URLSearchParams();
+        new FormData(form).forEach((value, key) => body.append(key, String(value)));
+        const response = await fetch(action.pathname + action.search, {
+          method: (form.method || "POST").toUpperCase(),
+          credentials: "same-origin",
+          headers: {
+            Accept: "text/html",
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: body.toString(),
+          cache: "no-store",
+          redirect: "follow",
+        });
+        if (handleMigrationAuth(response)) return;
+        if (response.status === 403) throw new Error("Administrator access required.");
+
+        const responseMarkup = await response.text();
+        if (!response.ok && !responseMarkup.includes("<main")) {
+          throw new Error("Migration operation could not be completed.");
+        }
+        renderMigrationMarkup(responseMarkup, response.url || action.pathname);
+        if (state) state.textContent = "";
+      } catch (error) {
+        if (submitter && submitter.isConnected) submitter.disabled = false;
+        if (state) state.textContent = error?.message || "Migration operation could not be completed.";
+      }
+    });
+
+    root.addEventListener("click", async (event) => {
+      const link = event.target.closest("a");
+      if (!link || !root.contains(link)) return;
+      const href = link.getAttribute("href") || "";
+      if (href === "/") {
+        event.preventDefault();
+        workspaceWindow?.close();
+        return;
+      }
+      if (!href.startsWith("/settings/server-migration")) return;
+      event.preventDefault();
+      if (href === "/settings/server-migration") await loadMigrationEntry();
+      else await loadMigration(href);
+    });
+
+    initializeMigrationRoot(root);
+  };
+
+  const loadMigration = async (url = currentURL) => {
+    const sequence = ++loadSequence;
+    if (state) state.textContent = "Loading migration…";
+    if (refreshButton) refreshButton.disabled = true;
+    try {
+      await ensureMigrationAssets();
+      const response = await fetch(url, {
+        method: "GET",
+        credentials: "same-origin",
+        headers: { Accept: "text/html" },
+        cache: "no-store",
+        redirect: "follow",
+      });
+      if (handleMigrationAuth(response)) return;
+      if (response.status === 403) throw new Error("Administrator access required.");
+      if (!response.ok) throw new Error("Migration is unavailable.");
+
+      const finalURL = new URL(response.url || url, window.location.href);
+      if (finalURL.pathname === "/settings/server-migration") {
+        await loadMigration(tabURLs[currentTab]);
+        return;
+      }
+      const markup = await response.text();
+      if (sequence !== loadSequence) return;
+      renderMigrationMarkup(markup, finalURL.href);
+      if (state) state.textContent = "";
+    } catch (error) {
+      if (sequence !== loadSequence) return;
+      if (content) content.replaceChildren();
+      if (state) state.textContent = error?.message || "Migration is unavailable.";
+    } finally {
+      if (sequence === loadSequence && refreshButton) refreshButton.disabled = false;
+    }
+  };
+
+  const loadMigrationEntry = async () => {
+    const sequence = ++loadSequence;
+    if (state) state.textContent = "Loading migration…";
+    if (refreshButton) refreshButton.disabled = true;
+    try {
+      await ensureMigrationAssets();
+      const response = await fetch("/settings/server-migration", {
+        method: "GET",
+        credentials: "same-origin",
+        headers: { Accept: "text/html" },
+        cache: "no-store",
+        redirect: "follow",
+      });
+      if (handleMigrationAuth(response)) return;
+      if (response.status === 403) throw new Error("Administrator access required.");
+      if (!response.ok) throw new Error("Migration is unavailable.");
+      const finalURL = new URL(response.url, window.location.href);
+      if (sequence !== loadSequence) return;
+
+      if (finalURL.pathname !== "/settings/server-migration") {
+        const markup = await response.text();
+        renderMigrationMarkup(markup, finalURL.href);
+        if (state) state.textContent = "";
+        return;
+      }
+      await loadMigration(tabURLs[currentTab]);
+    } catch (error) {
+      if (sequence !== loadSequence) return;
+      if (content) content.replaceChildren();
+      if (state) state.textContent = error?.message || "Migration is unavailable.";
+    } finally {
+      if (sequence === loadSequence && refreshButton) refreshButton.disabled = false;
+    }
+  };
+
+  const workspaceWindow = setupWorkspaceWindow(migrationDialog, { onOpen: loadMigrationEntry });
+
+  migrationOpen.addEventListener("click", () => {
+    if (controlCenter) controlCenter.open = false;
+    workspaceWindow?.open();
+  });
+  closeButton?.addEventListener("click", () => workspaceWindow?.close());
+  refreshButton?.addEventListener("click", () => loadMigration(currentURL));
+  tabs.forEach((button) => {
+    button.addEventListener("click", async () => {
+      currentTab = button.dataset.migrationTab;
+      currentURL = tabURLs[currentTab];
+      syncMigrationTabs();
+      await loadMigration(currentURL);
+    });
+  });
+
+  const restoreMigrationWhenRoleKnown = () => {
+    if (!readWorkspaceWindowState("migration").open) return;
+    if (document.body.classList.contains("role-administrator")) {
+      workspaceWindow?.open();
+      return;
+    }
+    if (!document.body.classList.contains("role-pending")) return;
+    const observer = new MutationObserver(() => {
+      if (document.body.classList.contains("role-pending")) return;
+      observer.disconnect();
+      if (document.body.classList.contains("role-administrator")) workspaceWindow?.open();
+    });
+    observer.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+  };
+  restoreMigrationWhenRoleKnown();
+}
+
 const systemMonitorOpen = document.querySelector("[data-system-monitor-open]");
 const systemMonitorDialog = document.querySelector("[data-system-monitor-dialog]");
 if (systemMonitorOpen && systemMonitorDialog) {
