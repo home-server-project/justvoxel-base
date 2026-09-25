@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -276,6 +277,64 @@ func (s *webUIStore) close() error {
 		return nil
 	}
 	return s.db.Close()
+}
+
+func (s *webUIStore) resetFactoryState() error {
+	if s == nil || s.db == nil {
+		return errors.New("WebUI store is unavailable")
+	}
+	profile, err := json.Marshal(defaultSystemMonitorProfile())
+	if err != nil {
+		return fmt.Errorf("encode default system monitor profile: %w", err)
+	}
+	now := formatWebUIStoreTime(s.now())
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin WebUI factory reset: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	for _, statement := range []string{
+		`DELETE FROM notifications`,
+		`DELETE FROM audit_events`,
+		`DELETE FROM operator_usage`,
+		`DELETE FROM web_users`,
+	} {
+		if _, err := tx.Exec(statement); err != nil {
+			return fmt.Errorf("reset WebUI factory state: %w", err)
+		}
+	}
+	result, err := tx.Exec(
+		`UPDATE operator_global_state SET last_restart_at = NULL, last_backup_at = NULL, updated_at = ? WHERE id = 1`,
+		now,
+	)
+	if err != nil {
+		return fmt.Errorf("reset operator global state: %w", err)
+	}
+	if count, err := result.RowsAffected(); err != nil || count != 1 {
+		if err != nil {
+			return fmt.Errorf("read operator global reset result: %w", err)
+		}
+		return errors.New("operator global state row is missing")
+	}
+	result, err = tx.Exec(
+		`UPDATE system_monitor_profile SET profile_json = ?, updated_at = ? WHERE id = 1`,
+		string(profile),
+		now,
+	)
+	if err != nil {
+		return fmt.Errorf("reset system monitor profile: %w", err)
+	}
+	if count, err := result.RowsAffected(); err != nil || count != 1 {
+		if err != nil {
+			return fmt.Errorf("read system monitor reset result: %w", err)
+		}
+		return errors.New("system monitor profile row is missing")
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit WebUI factory reset: %w", err)
+	}
+	return nil
 }
 
 func (s *webUIStore) createWebUser(username string, role webUserRole, password string) (webUser, error) {
