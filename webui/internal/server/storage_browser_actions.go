@@ -28,8 +28,7 @@ type adminStorageWholeDiskProvisionAPI interface {
 }
 
 type adminStorageWholeDiskMigrationAPI interface {
-	AdminDataMigrationPlan(ctx context.Context, session string, request api.AdminDataMigrationPlanRequest) (api.AdminDataMigrationPlanResponse, error)
-	AdminDataMigrationApply(ctx context.Context, session string, request api.AdminDataMigrationApplyRequest) (api.AdminDataMigrationApplyResponse, error)
+	dataMigrationPlanApplyAPI
 }
 
 type storageBrowserWholeDiskResponse struct {
@@ -155,15 +154,27 @@ func (a *App) storageBrowserWholeDiskChange(w http.ResponseWriter, r *http.Reque
 		Path:       "/var/mnt/justvoxel-data/minecraft",
 		SizeGiB:    "all",
 	}
-	plan, err := client.AdminDataMigrationPlan(r.Context(), session, request)
+
+	var plan api.AdminDataMigrationPlanResponse
+	var operation *api.PersistentOperation
+	var err error
+	if apply {
+		plan, operation, err = dataMigrationApplyReviewed(r.Context(), client, session, request, dataMigrationApplyProof{
+			PlanFingerprint:    strings.TrimSpace(r.FormValue("fingerprint")),
+			MigrationConfirmed: true,
+			Confirmation:       r.FormValue("confirmation"),
+			PlayersConfirmed:   r.FormValue("players_confirmed") == "yes",
+		})
+	} else {
+		plan, err = dataMigrationPlanReviewed(r.Context(), client, session, request)
+	}
 	if err != nil {
-		writeStorageBrowserWholeDiskJSON(w, storageBrowserErrorStatus(err), storageBrowserWholeDiskResponse{OK: false, Error: apiMessage(err, "Minecraft disk preparation failed")})
+		writeStorageBrowserWholeDiskJSON(w, dataMigrationErrorStatus(err), storageBrowserWholeDiskResponse{
+			OK: false, Error: dataMigrationErrorMessage(err, "Minecraft disk preparation failed"),
+		})
 		return
 	}
-	if plan.Normalized == nil {
-		writeStorageBrowserWholeDiskJSON(w, http.StatusBadGateway, storageBrowserWholeDiskResponse{OK: false, Error: "Minecraft disk preparation returned an incomplete plan"})
-		return
-	}
+
 	warnings := make([]string, 0, len(plan.Warnings))
 	for _, warning := range plan.Warnings {
 		warnings = append(warnings, warning.Message)
@@ -180,44 +191,10 @@ func (a *App) storageBrowserWholeDiskChange(w http.ResponseWriter, r *http.Reque
 		response.Online = plan.Requirements.Online
 		response.Players = plan.Requirements.Players
 	}
-	if !apply {
-		writeStorageBrowserWholeDiskJSON(w, http.StatusOK, response)
-		return
+	if apply {
+		response.Applied = true
+		response.OperationID = operation.OperationID
 	}
-	fingerprint := strings.TrimSpace(r.FormValue("fingerprint"))
-	if fingerprint == "" || fingerprint != plan.PlanFingerprint {
-		writeStorageBrowserWholeDiskJSON(w, http.StatusConflict, storageBrowserWholeDiskResponse{OK: false, Error: "This disk changed since Review. Review it again before applying."})
-		return
-	}
-	confirmation := r.FormValue("confirmation")
-	playersConfirmed := r.FormValue("players_confirmed") == "yes"
-	if plan.Requirements != nil {
-		if plan.Requirements.DestructiveConfirmationRequired && confirmation != plan.Requirements.ConfirmationPhrase {
-			writeStorageBrowserWholeDiskJSON(w, http.StatusBadRequest, storageBrowserWholeDiskResponse{OK: false, Error: "The destructive confirmation does not match the reviewed disk."})
-			return
-		}
-		if plan.Requirements.PlayersConfirmationRequired && !playersConfirmed {
-			writeStorageBrowserWholeDiskJSON(w, http.StatusBadRequest, storageBrowserWholeDiskResponse{OK: false, Error: "Confirm that online players may be interrupted before applying."})
-			return
-		}
-	}
-	result, err := client.AdminDataMigrationApply(r.Context(), session, api.AdminDataMigrationApplyRequest{
-		PlanFingerprint:    plan.PlanFingerprint,
-		Request:            request,
-		MigrationConfirmed: true,
-		Confirmation:       confirmation,
-		PlayersConfirmed:   playersConfirmed,
-	})
-	if err != nil {
-		writeStorageBrowserWholeDiskJSON(w, storageBrowserErrorStatus(err), storageBrowserWholeDiskResponse{OK: false, Error: apiMessage(err, "Minecraft disk preparation could not start")})
-		return
-	}
-	if !result.OK || result.Operation == nil || result.Operation.OperationType != "data_migration" {
-		writeStorageBrowserWholeDiskJSON(w, http.StatusBadGateway, storageBrowserWholeDiskResponse{OK: false, Error: "Minecraft disk preparation did not return a valid migration operation"})
-		return
-	}
-	response.Applied = true
-	response.OperationID = result.Operation.OperationID
 	writeStorageBrowserWholeDiskJSON(w, http.StatusOK, response)
 }
 
