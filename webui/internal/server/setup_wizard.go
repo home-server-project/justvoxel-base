@@ -37,6 +37,7 @@ type setupServerDraft struct {
 }
 
 type setupMinecraftDraft struct {
+	ServerType        string
 	JavaMemory        string
 	ContainerMemory   string
 	JavaPort          string
@@ -50,6 +51,7 @@ type setupMinecraftDraft struct {
 
 type setupDraft struct {
 	Started             bool
+	Mode                string
 	CurrentStep         int
 	DiagnosticSessionID string
 	Server              setupServerDraft
@@ -114,6 +116,7 @@ var setupWizardSteps = []setupWizardStepView{
 func (a *App) registerSetupWizardRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /setup", a.setupWizardPage)
 	mux.HandleFunc("POST /setup/start", a.setupWizardStart)
+	mux.HandleFunc("POST /setup/recommended", a.setupWizardRecommended)
 	mux.HandleFunc("POST /setup/server", a.setupWizardSaveServer)
 	mux.HandleFunc("POST /setup/resources", a.setupWizardSaveResources)
 	mux.HandleFunc("POST /setup/minecraft", a.setupWizardSaveMinecraft)
@@ -167,11 +170,85 @@ func (a *App) setupWizardStart(w http.ResponseWriter, r *http.Request) {
 	firstRunSetupReviews.delete(a, session)
 	firstRunSetupDrafts.start(a, session, normalizedSetupDefaults(defaults), storage)
 	if draft, exists := firstRunSetupDrafts.get(a, session); exists {
+		draft.Mode = "advanced"
 		draft.DiagnosticSessionID = diagnosticID
 		firstRunSetupDrafts.save(a, session, draft)
 		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "initial WebUI setup defaults loaded", draft)
 	}
 	http.Redirect(w, r, "/setup", http.StatusSeeOther)
+}
+
+func (a *App) setupWizardRecommended(w http.ResponseWriter, r *http.Request) {
+	session, client, _, ok := a.setupWizardRequest(w, r, true)
+	if !ok {
+		return
+	}
+	serverType := strings.ToLower(strings.TrimSpace(r.FormValue("server_type")))
+	if serverType != "paper" {
+		http.Error(w, "selected Minecraft server type is not available yet", http.StatusBadRequest)
+		return
+	}
+
+	diagnosticID := a.beginSetupDiagnosticBestEffort(r.Context(), client, session)
+	defaults, err := client.AdminSetupDefaults(r.Context(), session)
+	if err != nil {
+		a.handleAdminDiscoveryError(w, r, err)
+		return
+	}
+	storage, err := client.AdminStorage(r.Context(), session)
+	if err != nil {
+		a.handleAdminDiscoveryError(w, r, err)
+		return
+	}
+
+	firstRunSetupReviews.delete(a, session)
+	firstRunSetupDrafts.start(a, session, normalizedSetupDefaults(defaults), storage)
+	draft, exists := firstRunSetupDrafts.get(a, session)
+	if !exists {
+		http.Error(w, "could not create setup draft", http.StatusInternalServerError)
+		return
+	}
+
+	draft.Mode = "recommended"
+	draft.DiagnosticSessionID = diagnosticID
+	draft.Minecraft.ServerType = serverType
+	draft.Server.BedrockEnabled = recommendedServerSupportsBedrock(serverType)
+	draft.Server.Complete = true
+	draft.Minecraft.ResourcesComplete = true
+	draft.Minecraft.Complete = true
+	draft.Storage.Complete = true
+	draft.Backups.Complete = true
+	draft.CurrentStep = 6
+
+	if err := validateSetupServer(draft.Server); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := validateSetupMinecraft(draft.Minecraft, draft.Defaults); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := validateSetupStorage(draft.Storage, draft.Inventory, draft.Defaults); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := validateSetupBackups(draft.Backups, draft.Storage, draft.Inventory, draft.Defaults); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	firstRunSetupDrafts.save(a, session, draft)
+	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "recommended WebUI setup defaults accepted", draft)
+	http.Redirect(w, r, "/setup/review", http.StatusSeeOther)
+}
+
+func recommendedServerSupportsBedrock(serverType string) bool {
+	switch serverType {
+	case "paper":
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
@@ -481,6 +558,7 @@ func draftFromSetupDefaults(defaults api.AdminSetupDefaults, inventory api.Admin
 			BedrockEnabled: defaults.BedrockEnabled, Timezone: defaults.Timezone,
 		},
 		Minecraft: setupMinecraftDraft{
+			ServerType: "paper",
 			JavaMemory: defaults.JavaMemory, ContainerMemory: defaults.ContainerMemory,
 			JavaPort: strconv.Itoa(defaults.JavaPort), BedrockPort: strconv.Itoa(defaults.BedrockPort),
 			ImageTag: defaults.ImageTag, VersionPolicy: policy, Version: version,
