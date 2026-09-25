@@ -236,7 +236,7 @@ func TestSetupProgressRefreshDoesNotStartAnotherApply(t *testing.T) {
 	client.operation = &api.PersistentOperation{
 		SchemaVersion: "v1", OperationID: setupExecutionOperationID, OperationType: "setup",
 		PlanFingerprint: setupReviewFingerprint, State: "running", Stage: "runtime_config",
-		Status: "Writing transactional Minecraft runtime configuration.",
+		Status:    "Writing transactional Minecraft runtime configuration.",
 		StartedAt: "2026-09-20T12:00:00Z", UpdatedAt: "2026-09-20T12:01:00Z",
 		Rollback: api.PersistentOperationRollback{State: "not_started"},
 	}
@@ -265,7 +265,7 @@ func TestSetupReviewResumesCurrentPersistentOperation(t *testing.T) {
 	client.current = &api.PersistentOperation{
 		SchemaVersion: "v1", OperationID: setupExecutionOperationID, OperationType: "setup",
 		PlanFingerprint: setupReviewFingerprint, State: "verifying", Stage: "minecraft_verify",
-		Status: "Starting Minecraft and verifying runtime readiness.",
+		Status:    "Starting Minecraft and verifying runtime readiness.",
 		StartedAt: "2026-09-20T12:00:00Z", UpdatedAt: "2026-09-20T12:02:00Z",
 		Rollback: api.PersistentOperationRollback{State: "not_started"},
 	}
