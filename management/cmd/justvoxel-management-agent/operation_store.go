@@ -1025,6 +1025,9 @@ func (s *operationStore) beginMinecraftReset(planFingerprint string) (operationJ
 		}
 		return operationJournal{}, false, errMinecraftResetOperationBusy
 	}
+	if s.currentFactoryResetID != "" {
+		return operationJournal{}, false, errMinecraftResetOperationBusy
+	}
 	if s.currentSetupID != "" || s.currentRestoreID != "" || s.currentDataMigrationID != "" || s.currentMigrationID != "" {
 		return operationJournal{}, false, errMinecraftResetOperationBusy
 	}
