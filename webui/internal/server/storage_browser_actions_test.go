@@ -106,7 +106,6 @@ func TestStorageBrowserActionPlanUsesSelectedPartition(t *testing.T) {
 	}
 }
 
-
 func TestStorageBrowserCreatePartitionPlanCarriesSizeAndFreeSegment(t *testing.T) {
 	client := &fakeStorageActionAPI{}
 	client.plan = api.AdminStorageActionResponse{
