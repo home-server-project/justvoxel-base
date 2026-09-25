@@ -676,3 +676,29 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
   .destructive-confirm-slider.is-armed .destructive-confirm-slider-thumb{background:#d64c43;color:#fff}
   .destructive-confirm-toggle-callout{color:#26313a}
 }
+
+
+/* First-run Minecraft setup entry: choice overlay plus non-blocking Workspace invitation. */
+.first-run-choice[hidden],.minecraft-setup-invitation[hidden]{display:none!important}
+.first-run-choice{position:fixed;inset:0;z-index:200;display:grid;place-items:center;padding:1rem;background:#050708b8;backdrop-filter:blur(6px)}
+.first-run-choice-panel{width:min(760px,100%);padding:1.5rem;border:1px solid #3b454e;border-radius:18px;background:#171d22;color:#eef1f4;box-shadow:0 30px 90px #000c}
+.first-run-choice-panel h1{margin:.2rem 0 .55rem}
+.first-run-choice-lead{margin:0 0 1.15rem;color:#aab4bc;line-height:1.5}
+.first-run-choice-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.9rem}
+.first-run-choice-card{display:flex;min-height:190px;flex-direction:column;align-items:flex-start;justify-content:flex-start;gap:.5rem;padding:1.15rem;border:1px solid #303942;border-radius:15px;background:#11171b;color:#eef1f4;text-align:left;text-decoration:none;box-shadow:none;transition:transform .16s ease,border-color .16s ease,background-color .16s ease,box-shadow .16s ease}
+.first-run-choice-card:hover,.first-run-choice-card:focus-visible{transform:translateY(-2px);border-color:#66737d;background:#182027;box-shadow:0 14px 34px #0005;color:#fff}
+.first-run-choice-card strong{font-size:1.22rem}
+.first-run-choice-card small{color:#9ca7b0;line-height:1.45}
+.first-run-card-kicker{font-size:.7rem;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:#94a0a9!important}
+.first-run-setup-card{position:relative;overflow:hidden;border-color:#4f8b69;background:linear-gradient(135deg,#1c3528,#183024);color:#d8f6e3}
+.first-run-setup-card::after,.minecraft-setup-invitation::after{content:"";position:absolute;inset:-35% -55%;background:linear-gradient(115deg,transparent 38%,#ffffff24 49%,#ffffff42 52%,transparent 63%);transform:translateX(-55%);animation:setup-invite-shimmer 4.8s ease-in-out infinite;pointer-events:none}
+.first-run-setup-card .first-run-card-kicker{color:#9be0b7!important}
+.minecraft-setup-invitation{position:relative;display:grid;gap:.18rem;width:min(600px,100%);margin:0 auto .85rem;padding:1rem 1.1rem;overflow:hidden;border:1px solid #4f8b69;border-radius:15px;background:linear-gradient(135deg,#1c3528,#183024);color:#d8f6e3;box-shadow:0 10px 30px #0004;text-decoration:none;transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease}
+.minecraft-setup-invitation:hover,.minecraft-setup-invitation:focus-visible{transform:translateY(-2px);border-color:#78c99d;box-shadow:0 16px 38px #0006;color:#effff5}
+.minecraft-setup-invitation-kicker{font-size:.68rem;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:#9be0b7!important}
+.minecraft-setup-invitation strong{font-size:1.16rem}
+.minecraft-setup-invitation small{color:#b7c9bf;line-height:1.4}
+@keyframes setup-invite-shimmer{0%,68%{transform:translateX(-55%)}88%,100%{transform:translateX(55%)}}
+@media(max-width:650px){.first-run-choice-grid{grid-template-columns:1fr}.first-run-choice-card{min-height:150px}.first-run-choice-panel{padding:1rem}}
+@media(prefers-reduced-motion:reduce){.first-run-setup-card::after,.minecraft-setup-invitation::after{animation:none;display:none}.first-run-choice-card,.minecraft-setup-invitation{transition:none}}
+@media(prefers-color-scheme:light){.first-run-choice{background:#dce3e8c7}.first-run-choice-panel{background:#fff;border-color:#d9dfe3;color:#1a2025}.first-run-choice-lead,.first-run-choice-card small{color:#65727b}.first-run-choice-card{background:#f7f9fa;border-color:#d9dfe3;color:#1a2025}.first-run-choice-card:hover,.first-run-choice-card:focus-visible{background:#eef2f4;border-color:#aab7c0;color:#1a2025}.first-run-setup-card,.minecraft-setup-invitation{background:linear-gradient(135deg,#e7f5ec,#dff0e6);border-color:#86b99a;color:#184c31}.first-run-setup-card .first-run-card-kicker,.minecraft-setup-invitation-kicker{color:#2f7049!important}.minecraft-setup-invitation small{color:#4f6b5a}}
