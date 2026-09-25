@@ -27,7 +27,7 @@ func TestFactoryResetPlanAndApplyClientContract(t *testing.T) {
 			}
 			return &http.Response{
 				StatusCode: http.StatusOK,
-				Body: io.NopCloser(strings.NewReader(`{
+				Body:       io.NopCloser(strings.NewReader(`{
 				  "ok":true,
 				  "schema_version":"v1",
 				  "mode":"factory",
@@ -66,7 +66,7 @@ func TestFactoryResetPlanAndApplyClientContract(t *testing.T) {
 			}
 			return &http.Response{
 				StatusCode: http.StatusAccepted,
-				Body: io.NopCloser(strings.NewReader(`{
+				Body:       io.NopCloser(strings.NewReader(`{
 				  "ok":true,
 				  "created":true,
 				  "operation":{
@@ -100,8 +100,8 @@ func TestFactoryResetPlanAndApplyClientContract(t *testing.T) {
 
 	applied, err := client.AdminFactoryResetApply(context.Background(), "session-token", AdminFactoryResetApplyRequest{
 		PlanFingerprint: resetTestFingerprint,
-		ConfirmPlayers: true,
-		SystemPassword: "system-secret",
+		ConfirmPlayers:  true,
+		SystemPassword:  "system-secret",
 	})
 	if err != nil {
 		t.Fatal(err)
