@@ -212,11 +212,12 @@
           confirmation: entered,
         });
         const deleted = Number(payload.deleted || reviewedPlan.count || 0);
-        const url = "/settings/new-backups?result=deleted&count=" + encodeURIComponent(String(deleted));
+        const workspaceURL = "/workspace/backups?result=deleted&count=" + encodeURIComponent(String(deleted));
+        const pageURL = "/settings/new-backups?result=deleted&count=" + encodeURIComponent(String(deleted));
         if (window.JustVoxelBackupsWorkspace?.reload) {
-          await window.JustVoxelBackupsWorkspace.reload(url);
+          await window.JustVoxelBackupsWorkspace.reload(workspaceURL);
         } else {
-          window.location.assign(url);
+          window.location.assign(pageURL);
         }
       } catch (error) {
         deleteApplying = false;

@@ -1666,7 +1666,7 @@ if (backupsOpen && backupsDialog) {
   const refreshButton = backupsDialog.querySelector("[data-backups-refresh]");
   const state = backupsDialog.querySelector("[data-backups-state]");
   const content = backupsDialog.querySelector("[data-backups-workspace-content]");
-  let currentURL = "/settings/new-backups";
+  let currentURL = "/workspace/backups";
   let loadSequence = 0;
 
   const loadBackupsScript = async (src, ready) => {
@@ -1699,30 +1699,17 @@ if (backupsOpen && backupsDialog) {
     await loadBackupsScript("/static/restore-operation.js", () => Boolean(window.JustVoxelRestoreOperation?.init));
   };
 
-  const extractBackupsRoot = (markup) => {
-    const parsed = new DOMParser().parseFromString(markup, "text/html");
-    const main = parsed.querySelector("main.new-backups-shell");
-    if (!main) return null;
-    const root = document.createElement("div");
-    root.className = "new-backups-shell backups-workspace-content";
-    root.dataset.backupsWorkspaceRoot = "true";
-    root.innerHTML = main.innerHTML;
-    root.querySelector(".title-row")?.remove();
-    root.querySelector(".backup-library-note")?.remove();
-    return root;
-  };
-
   const renderBackupsMarkup = (markup) => {
     if (!content) throw new Error("Backups workspace is unavailable.");
-    const root = extractBackupsRoot(markup);
+    content.innerHTML = markup;
+    const root = content.querySelector("[data-backups-workspace-root]");
     if (!root) throw new Error("Backups response could not be rendered.");
-    content.replaceChildren(root);
 
     const handleSubmit = async (event) => {
       const form = event.target.closest("form");
       if (!form || !root.contains(form)) return;
       const action = new URL(form.getAttribute("action") || currentURL, window.location.href);
-      if (action.origin !== window.location.origin || !action.pathname.startsWith("/settings/new-backups")) return;
+      if (action.origin !== window.location.origin || !action.pathname.startsWith("/workspace/backups")) return;
 
       event.preventDefault();
       const reviewDialog = form.closest("[data-backup-review-dialog]");
@@ -1754,9 +1741,26 @@ if (backupsOpen && backupsDialog) {
             window.location.assign(target.pathname + target.search);
             return;
           }
-          if (target.origin === window.location.origin && target.pathname === "/settings/new-backups") {
+          if (target.origin === window.location.origin && target.pathname === "/workspace/backups") {
             currentURL = target.pathname + target.search;
           }
+        }
+
+        if (response.status === 401) {
+          window.location.assign("/login");
+          return;
+        }
+        if (response.status === 403) {
+          const message = await response.text();
+          if (message.toLowerCase().includes("password change")) {
+            window.location.assign("/password");
+            return;
+          }
+          throw new Error("Administrator access required.");
+        }
+        if (!response.ok) {
+          const message = await response.text();
+          throw new Error(message.trim() || "Backup operation could not be completed.");
         }
 
         const responseMarkup = await response.text();
@@ -1785,7 +1789,7 @@ if (backupsOpen && backupsDialog) {
         workspaceWindow?.close();
         return;
       }
-      if (href.startsWith("/settings/new-backups")) {
+      if (href.startsWith("/workspace/backups")) {
         event.preventDefault();
         await loadBackups(href);
       }
@@ -1810,6 +1814,7 @@ if (backupsOpen && backupsDialog) {
         cache: "no-store",
         redirect: "follow",
       });
+
       if (response.redirected) {
         const target = new URL(response.url);
         if (target.pathname === "/login" || target.pathname === "/password") {
@@ -1821,12 +1826,20 @@ if (backupsOpen && backupsDialog) {
         window.location.assign("/login");
         return;
       }
-      if (response.status === 403) throw new Error("Administrator access required.");
+      if (response.status === 403) {
+        const message = await response.text();
+        if (message.toLowerCase().includes("password change")) {
+          window.location.assign("/password");
+          return;
+        }
+        throw new Error("Administrator access required.");
+      }
+      if (!response.ok) throw new Error("Backups are unavailable.");
 
       const markup = await response.text();
       if (sequence !== loadSequence) return;
       const responseURL = new URL(response.url);
-      if (responseURL.origin === window.location.origin && responseURL.pathname === "/settings/new-backups") {
+      if (responseURL.origin === window.location.origin && responseURL.pathname === "/workspace/backups") {
         currentURL = responseURL.pathname + responseURL.search;
       } else {
         currentURL = url;
@@ -1845,7 +1858,7 @@ if (backupsOpen && backupsDialog) {
   const workspaceWindow = setupWorkspaceWindow(backupsDialog, { onOpen: () => loadBackups(currentURL) });
 
   window.JustVoxelBackupsWorkspace = {
-    reload: async (url = "/settings/new-backups") => {
+    reload: async (url = "/workspace/backups") => {
       currentURL = url;
       await loadBackups(url);
     },
