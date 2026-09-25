@@ -82,6 +82,26 @@ type WiFiNetworksResponse struct {
 	Networks  []WiFiNetwork `json:"networks"`
 }
 
+type NetworkCheckpoint struct {
+	ID                     string   `json:"id"`
+	Status                 string   `json:"status"`
+	Interfaces             []string `json:"interfaces"`
+	RollbackTimeoutSeconds uint32   `json:"rollback_timeout_seconds"`
+	CreatedAt              string   `json:"created_at"`
+	ExpiresAt              string   `json:"expires_at"`
+}
+
+type NetworkCheckpointRollbackDevice struct {
+	Interface string `json:"interface"`
+	Result    string `json:"result"`
+}
+
+type NetworkCheckpointRollback struct {
+	OK      bool                              `json:"ok"`
+	ID      string                            `json:"id"`
+	Results []NetworkCheckpointRollbackDevice `json:"results"`
+}
+
 func (c *Client) NetworkStatus(ctx context.Context, session string) (NetworkStatus, error) {
 	var out NetworkStatus
 	err := c.do(ctx, http.MethodGet, "/v1/network", session, nil, &out)
@@ -98,4 +118,33 @@ func (c *Client) WiFiNetworks(ctx context.Context, session, interfaceName string
 func (c *Client) RequestWiFiScan(ctx context.Context, session, interfaceName string) error {
 	path := "/v1/network/wifi/" + url.PathEscape(interfaceName) + "/scan"
 	return c.do(ctx, http.MethodPost, path, session, nil, nil)
+}
+
+func (c *Client) CreateNetworkCheckpoint(ctx context.Context, session string, interfaces []string, timeout uint32) (NetworkCheckpoint, error) {
+	var out NetworkCheckpoint
+	body := map[string]any{
+		"interfaces":               interfaces,
+		"rollback_timeout_seconds": timeout,
+	}
+	err := c.do(ctx, http.MethodPost, "/v1/admin/network/checkpoints", session, body, &out)
+	return out, err
+}
+
+func (c *Client) NetworkCheckpoint(ctx context.Context, session, id string) (NetworkCheckpoint, error) {
+	var out NetworkCheckpoint
+	path := "/v1/admin/network/checkpoints/" + url.PathEscape(id)
+	err := c.do(ctx, http.MethodGet, path, session, nil, &out)
+	return out, err
+}
+
+func (c *Client) ConfirmNetworkCheckpoint(ctx context.Context, session, id string) error {
+	path := "/v1/admin/network/checkpoints/" + url.PathEscape(id) + "/confirm"
+	return c.do(ctx, http.MethodPost, path, session, nil, nil)
+}
+
+func (c *Client) RollbackNetworkCheckpoint(ctx context.Context, session, id string) (NetworkCheckpointRollback, error) {
+	var out NetworkCheckpointRollback
+	path := "/v1/admin/network/checkpoints/" + url.PathEscape(id) + "/rollback"
+	err := c.do(ctx, http.MethodPost, path, session, nil, &out)
+	return out, err
 }
