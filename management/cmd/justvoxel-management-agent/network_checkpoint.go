@@ -241,8 +241,7 @@ func (s *server) beginNetworkCheckpoint(ctx context.Context, interfaces []string
 
 	s.networkMu.Lock()
 	defer s.networkMu.Unlock()
-	now := networkNow().UTC()
-	s.cleanupExpiredNetworkCheckpointsLocked(now)
+	s.cleanupExpiredNetworkCheckpointsLocked(networkNow().UTC())
 	for _, transaction := range s.networkTransactions {
 		if networkInterfacesOverlap(transaction.Interfaces, interfaces) {
 			return networkCheckpointTransaction{}, errNetworkCheckpointOverlap
@@ -259,12 +258,13 @@ func (s *server) beginNetworkCheckpoint(ctx context.Context, interfaces []string
 	if err != nil {
 		return networkCheckpointTransaction{}, fmt.Errorf("create network checkpoint: %w", err)
 	}
+	createdAt := networkNow().UTC()
 	transaction := networkCheckpointTransaction{
 		ID:         id,
 		Checkpoint: checkpoint,
 		Interfaces: append([]string(nil), interfaces...),
-		CreatedAt:  now,
-		ExpiresAt:  now.Add(time.Duration(timeout) * time.Second),
+		CreatedAt:  createdAt,
+		ExpiresAt:  createdAt.Add(time.Duration(timeout) * time.Second),
 	}
 	if s.networkTransactions == nil {
 		s.networkTransactions = make(map[string]networkCheckpointTransaction)
