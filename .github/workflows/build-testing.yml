@@ -65,6 +65,15 @@ jobs:
             bash "${test_script}"
           done
 
+      - name: Check WebUI JavaScript syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          for script in webui/internal/server/static/*.js; do
+            [[ -f "${script}" ]] || continue
+            node --check "${script}"
+          done
+
       - name: Build and test management agent source
         shell: bash
         run: |

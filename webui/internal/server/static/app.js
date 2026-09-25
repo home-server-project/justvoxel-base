@@ -2601,7 +2601,7 @@ if (minecraftOpen && minecraftDialog) {
     initSettingsForm(root);
   };
 
-  const loadSettings = async (sequence, url = "/settings/server") => {  const loadSettings = async (sequence, url = "/settings/server") => {
+  const loadSettings = async (sequence, url = "/settings/server") => {
     ensureStylesheet("/static/settings.css");
     const response = await fetch(url, {
       method: "GET",
