@@ -18,6 +18,13 @@ type fakeNetworkClient struct {
 	destroyed       networking.Checkpoint
 	rollbackResults map[string]networking.RollbackResult
 	rolledBack      networking.Checkpoint
+	wirelessEnabled *bool
+	activated       string
+	disconnected    string
+	forgotten       string
+	connected       networking.WiFiConnectRequest
+	connectResult   networking.WiFiConnectResult
+	connectError    error
 }
 
 func (f *fakeNetworkClient) Close() error { return nil }
@@ -30,6 +37,32 @@ func (f *fakeNetworkClient) WiFiNetworks(_ context.Context, iface string) ([]net
 func (f *fakeNetworkClient) RequestWiFiScan(_ context.Context, iface string) error {
 	f.scanned = iface
 	return nil
+}
+func (f *fakeNetworkClient) SetWirelessEnabled(_ context.Context, enabled bool) error {
+	f.wirelessEnabled = &enabled
+	return nil
+}
+func (f *fakeNetworkClient) ActivateWiFiProfile(_ context.Context, iface, profileUUID string) error {
+	f.activated = iface + ":" + profileUUID
+	return nil
+}
+func (f *fakeNetworkClient) DisconnectWiFi(_ context.Context, iface string) error {
+	f.disconnected = iface
+	return nil
+}
+func (f *fakeNetworkClient) ForgetWiFiProfile(_ context.Context, profileUUID string) error {
+	f.forgotten = profileUUID
+	return nil
+}
+func (f *fakeNetworkClient) ConnectWiFi(_ context.Context, request networking.WiFiConnectRequest) (networking.WiFiConnectResult, error) {
+	f.connected = request
+	if f.connectError != nil {
+		return networking.WiFiConnectResult{}, f.connectError
+	}
+	if f.connectResult.ProfileUUID != "" {
+		return f.connectResult, nil
+	}
+	return networking.WiFiConnectResult{ProfileUUID: "new-profile-uuid"}, nil
 }
 func (f *fakeNetworkClient) CreateCheckpoint(_ context.Context, interfaces []string, timeout uint32) (networking.Checkpoint, error) {
 	if f.checkpointError != nil {
