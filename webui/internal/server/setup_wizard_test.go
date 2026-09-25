@@ -219,6 +219,77 @@ func TestSetupWizardStartsWithFriendlyServerDefaults(t *testing.T) {
 	}
 }
 
+func TestSetupWizardTimezoneSearchUsesLocalDatabaseWithoutDatalist(t *testing.T) {
+	client := setupWizardClient()
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstRunSetupDrafts.delete(app, "session-token")
+	startSetup(t, app)
+
+	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
+	body := page.Body.String()
+	if strings.Contains(body, "<datalist") || strings.Contains(body, "list=\"timezone-options\"") {
+		t.Fatal("advanced setup still uses the browser timezone datalist")
+	}
+	for _, want := range []string{"data-timezone-search", "data-timezone-results", "Toronto, Warsaw, Amsterdam", "no Internet service is required"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("timezone search UI missing %q: %s", want, body)
+		}
+	}
+
+	script, err := assets.ReadFile("static/settings.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"data-timezone-value", "scoreZone", "cityLabel", "ArrowDown", "chooseTimezone"} {
+		if !strings.Contains(string(script), want) {
+			t.Fatalf("timezone search behavior missing %q", want)
+		}
+	}
+
+	invalid := validServerValues()
+	invalid.Set("timezone", "Mars/Olympus")
+	rr := saveServerStep(t, app, invalid)
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "Choose a timezone from the JustVoxel timezone suggestions") {
+		t.Fatalf("unknown timezone was not rejected: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSetupWizardConnectionsValidateBeforeResources(t *testing.T) {
+	client := setupWizardClient()
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstRunSetupDrafts.delete(app, "session-token")
+	startSetup(t, app)
+	if rr := saveServerStep(t, app, validServerValues()); rr.Code != http.StatusSeeOther {
+		t.Fatalf("server save returned %d", rr.Code)
+	}
+
+	bad := validConnectionValues()
+	bad.Set("java_port", "70000")
+	rr := saveConnectionsStep(t, app, bad)
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "Minecraft Java port must be between 1 and 65535") {
+		t.Fatalf("invalid Java port was not rejected: %d %s", rr.Code, rr.Body.String())
+	}
+	draft, _ := firstRunSetupDrafts.get(app, "session-token")
+	if draft.CurrentStep != 2 {
+		t.Fatalf("invalid Connections form advanced to step %d", draft.CurrentStep)
+	}
+
+	rr = saveConnectionsStep(t, app, validConnectionValues())
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("valid Connections form returned %d: %s", rr.Code, rr.Body.String())
+	}
+	resources := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
+	if resources.Code != http.StatusOK || !strings.Contains(resources.Body.String(), "Step 3 of 7") || !strings.Contains(resources.Body.String(), "Minecraft game memory") {
+		t.Fatalf("Connections did not advance to Resources: %d %s", resources.Code, resources.Body.String())
+	}
+}
+
 func TestSetupWizardUsesCompactAlignedActions(t *testing.T) {
 	client := setupWizardClient()
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
