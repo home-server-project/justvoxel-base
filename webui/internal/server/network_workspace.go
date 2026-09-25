@@ -19,6 +19,10 @@ type networkAPI interface {
 	NetworkCheckpoint(ctx context.Context, session, id string) (api.NetworkCheckpoint, error)
 	ConfirmNetworkCheckpoint(ctx context.Context, session, id string) error
 	RollbackNetworkCheckpoint(ctx context.Context, session, id string) (api.NetworkCheckpointRollback, error)
+	SetWiFiRadio(ctx context.Context, session string, enabled bool, checkpointID string) (api.NetworkWiFiMutation, error)
+	ConnectWiFi(ctx context.Context, session, interfaceName string, request api.NetworkWiFiConnectRequest) (api.NetworkWiFiMutation, error)
+	DisconnectWiFi(ctx context.Context, session, interfaceName, checkpointID string) (api.NetworkWiFiMutation, error)
+	ForgetWiFiProfile(ctx context.Context, session, profileUUID string) (api.NetworkWiFiMutation, error)
 }
 
 func (a *App) registerNetworkWorkspaceRoutes(mux *http.ServeMux) {
@@ -29,6 +33,10 @@ func (a *App) registerNetworkWorkspaceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/network/checkpoints/{id}", a.networkCheckpointStatus)
 	mux.HandleFunc("POST /api/network/checkpoints/{id}/confirm", a.networkCheckpointConfirm)
 	mux.HandleFunc("POST /api/network/checkpoints/{id}/rollback", a.networkCheckpointRollback)
+	mux.HandleFunc("POST /api/network/wifi/radio", a.networkWiFiRadioChange)
+	mux.HandleFunc("POST /api/network/wifi/{interface}/connect", a.networkWiFiConnectChange)
+	mux.HandleFunc("POST /api/network/wifi/{interface}/disconnect", a.networkWiFiDisconnectChange)
+	mux.HandleFunc("POST /api/network/wifi/profiles/{uuid}/forget", a.networkWiFiForgetChange)
 }
 
 func (a *App) networkStatus(w http.ResponseWriter, r *http.Request) {
@@ -185,6 +193,122 @@ func (a *App) networkCheckpointRollback(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	result, err := client.RollbackNetworkCheckpoint(r.Context(), session, r.PathValue("id"))
+	if !a.handleNetworkAPIError(w, err) {
+		return
+	}
+	writeNetworkWebJSON(w, http.StatusOK, result)
+}
+
+func (a *App) networkWiFiRadioChange(w http.ResponseWriter, r *http.Request) {
+	if !a.validCSRF(r) {
+		writeNetworkWebError(w, http.StatusForbidden, "invalid CSRF token")
+		return
+	}
+	session, ok := a.networkAdministratorSession(w, r)
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		writeNetworkWebError(w, http.StatusBadRequest, "invalid Wi-Fi request")
+		return
+	}
+	enabled, err := strconv.ParseBool(strings.TrimSpace(r.FormValue("enabled")))
+	if err != nil {
+		writeNetworkWebError(w, http.StatusBadRequest, "invalid Wi-Fi radio state")
+		return
+	}
+	client, ok := a.api.(networkAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, "Network service unavailable")
+		return
+	}
+	result, err := client.SetWiFiRadio(r.Context(), session, enabled, strings.TrimSpace(r.FormValue("checkpoint_id")))
+	if !a.handleNetworkAPIError(w, err) {
+		return
+	}
+	writeNetworkWebJSON(w, http.StatusOK, result)
+}
+
+func (a *App) networkWiFiConnectChange(w http.ResponseWriter, r *http.Request) {
+	if !a.validCSRF(r) {
+		writeNetworkWebError(w, http.StatusForbidden, "invalid CSRF token")
+		return
+	}
+	session, ok := a.networkAdministratorSession(w, r)
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		writeNetworkWebError(w, http.StatusBadRequest, "invalid Wi-Fi request")
+		return
+	}
+	client, ok := a.api.(networkAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, "Network service unavailable")
+		return
+	}
+	request := api.NetworkWiFiConnectRequest{
+		CheckpointID: strings.TrimSpace(r.FormValue("checkpoint_id")),
+		ProfileUUID:  strings.TrimSpace(r.FormValue("profile_uuid")),
+		SSID:         r.FormValue("ssid"),
+		BSSID:        strings.TrimSpace(r.FormValue("bssid")),
+		KeyManagement: strings.TrimSpace(r.FormValue("key_management")),
+		Password:     r.FormValue("password"),
+		Hidden:       r.FormValue("hidden") == "true",
+	}
+	result, err := client.ConnectWiFi(r.Context(), session, r.PathValue("interface"), request)
+	request.Password = ""
+	if !a.handleNetworkAPIError(w, err) {
+		return
+	}
+	writeNetworkWebJSON(w, http.StatusOK, result)
+}
+
+func (a *App) networkWiFiDisconnectChange(w http.ResponseWriter, r *http.Request) {
+	if !a.validCSRF(r) {
+		writeNetworkWebError(w, http.StatusForbidden, "invalid CSRF token")
+		return
+	}
+	session, ok := a.networkAdministratorSession(w, r)
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		writeNetworkWebError(w, http.StatusBadRequest, "invalid Wi-Fi request")
+		return
+	}
+	client, ok := a.api.(networkAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, "Network service unavailable")
+		return
+	}
+	result, err := client.DisconnectWiFi(
+		r.Context(),
+		session,
+		r.PathValue("interface"),
+		strings.TrimSpace(r.FormValue("checkpoint_id")),
+	)
+	if !a.handleNetworkAPIError(w, err) {
+		return
+	}
+	writeNetworkWebJSON(w, http.StatusOK, result)
+}
+
+func (a *App) networkWiFiForgetChange(w http.ResponseWriter, r *http.Request) {
+	if !a.validCSRF(r) {
+		writeNetworkWebError(w, http.StatusForbidden, "invalid CSRF token")
+		return
+	}
+	session, ok := a.networkAdministratorSession(w, r)
+	if !ok {
+		return
+	}
+	client, ok := a.api.(networkAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, "Network service unavailable")
+		return
+	}
+	result, err := client.ForgetWiFiProfile(r.Context(), session, r.PathValue("uuid"))
 	if !a.handleNetworkAPIError(w, err) {
 		return
 	}
