@@ -307,6 +307,12 @@ func TestMigrationWorkspaceKeepsLegacyRoutesAndUsesWorkspaceShell(t *testing.T) 
 		t.Fatal(err)
 	}
 	source := string(script)
+	migrationStart := strings.Index(source, `const migrationOpen = document.querySelector("[data-migration-open]")`)
+	monitorStart := strings.Index(source, `const systemMonitorOpen = document.querySelector("[data-system-monitor-open]")`)
+	passwordReplay := strings.Index(source, `const sourceKind = body.get("source_kind") || ""`)
+	if migrationStart < 0 || monitorStart < 0 || passwordReplay < migrationStart || passwordReplay > monitorStart {
+		t.Fatal("Migration SMB password replay must remain scoped to the Migration workspace")
+	}
 	for _, want := range []string{
 		`document.querySelector("[data-migration-open]")`,
 		`"/settings/server-migration/export"`,

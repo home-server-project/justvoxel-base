@@ -1736,16 +1736,6 @@ if (backupsOpen && backupsDialog) {
       try {
         const body = new URLSearchParams();
         new FormData(form).forEach((value, key) => body.append(key, String(value)));
-        const sourceKind = body.get("source_kind") || "";
-        const submittedSourcePassword = body.get("source_smb_password") || "";
-        if (sourceKind === "smb") {
-          if (submittedSourcePassword) migrationSourceSMBPassword = submittedSourcePassword;
-          else if (migrationSourceSMBPassword) body.set("source_smb_password", migrationSourceSMBPassword);
-        } else {
-          migrationSourceSMBPassword = "";
-          body.delete("source_smb_password");
-        }
-        form.querySelectorAll('input[name="source_smb_password"]').forEach((input) => { input.value = ""; });
         const response = await fetch(action.pathname + action.search, {
           method: (form.method || "POST").toUpperCase(),
           credentials: "same-origin",
@@ -2016,6 +2006,16 @@ if (migrationOpen && migrationDialog) {
       try {
         const body = new URLSearchParams();
         new FormData(form).forEach((value, key) => body.append(key, String(value)));
+        const sourceKind = body.get("source_kind") || "";
+        const submittedSourcePassword = body.get("source_smb_password") || "";
+        if (sourceKind === "smb") {
+          if (submittedSourcePassword) migrationSourceSMBPassword = submittedSourcePassword;
+          else if (migrationSourceSMBPassword) body.set("source_smb_password", migrationSourceSMBPassword);
+        } else {
+          migrationSourceSMBPassword = "";
+          body.delete("source_smb_password");
+        }
+        form.querySelectorAll('input[name="source_smb_password"]').forEach((input) => { input.value = ""; });
         const response = await fetch(action.pathname + action.search, {
           method: (form.method || "POST").toUpperCase(),
           credentials: "same-origin",
