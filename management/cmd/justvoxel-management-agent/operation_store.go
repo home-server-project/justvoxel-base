@@ -22,6 +22,7 @@ const (
 	operationTypeSetup         = "setup"
 	operationTypeRestore       = "restore"
 	operationTypeDataMigration = "data_migration"
+	operationTypeMinecraftReset = "minecraft_reset"
 	operationTypeMigrationExport = "migration_export"
 	operationTypeMigrationImport = "migration_import"
 	operationTypeMigrationRecovery = "migration_recovery"
@@ -53,6 +54,7 @@ var (
 	errRestoreLockBusy           = errors.New("restore operation lock is already held")
 	errDataMigrationOperationBusy = errors.New("another data migration operation is already active")
 	errDataMigrationLockBusy      = errors.New("data migration operation lock is already held")
+	errMinecraftResetOperationBusy = errors.New("another operation prevents Minecraft reset")
 	errMigrationOperationBusy     = errors.New("another server migration operation is already active")
 	errMigrationLockBusy          = errors.New("server migration operation lock is already held")
 )
@@ -95,6 +97,7 @@ type operationStore struct {
 	currentSetupID       string
 	currentRestoreID     string
 	currentDataMigrationID string
+	currentMinecraftResetID string
 	currentMigrationID     string
 	operations       map[string]operationJournal
 	now              func() time.Time
@@ -365,6 +368,7 @@ func (s *operationStore) loadAndRecover() error {
 	activeSetup := ""
 	activeRestore := ""
 	activeDataMigration := ""
+	activeMinecraftReset := ""
 	activeMigration := ""
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
@@ -391,7 +395,31 @@ func (s *operationStore) loadAndRecover() error {
 		if operationIsCurrent(journal.State) {
 			switch journal.OperationType {
 			case operationTypeSetup:
-				if activeSetup != "" {
+				if activeMinecraftReset != "" {
+		if activeSetup != "" || activeRestore != "" || activeDataMigration != "" || activeMigration != "" {
+			return errors.New("active Minecraft reset conflicts with another persistent operation")
+		}
+		if err := s.acquireMinecraftResetLocks(); err != nil {
+			return err
+		}
+		journal := s.operations[activeMinecraftReset]
+		if operationInterruptedByRestart(journal.State) {
+			now := s.now().UTC().Format(time.RFC3339Nano)
+			journal.State = operationNeedsAttention
+			journal.Stage = "interrupted"
+			journal.Status = "Minecraft reset was interrupted before completion. Review appliance state before continuing."
+			journal.UpdatedAt = now
+			journal.InterruptedAt = now
+			if err := s.persist(journal); err != nil {
+				_ = s.releaseMinecraftResetLocks()
+				return err
+			}
+			s.operations[journal.OperationID] = journal
+		}
+		s.currentMinecraftResetID = activeMinecraftReset
+	}
+
+	if activeSetup != "" {
 					return errors.New("multiple active setup operation journals require attention")
 				}
 				activeSetup = journal.OperationID
@@ -405,6 +433,11 @@ func (s *operationStore) loadAndRecover() error {
 					return errors.New("multiple active data migration operation journals require attention")
 				}
 				activeDataMigration = journal.OperationID
+			case operationTypeMinecraftReset:
+				if activeMinecraftReset != "" {
+					return errors.New("multiple active Minecraft reset operation journals require attention")
+				}
+				activeMinecraftReset = journal.OperationID
 			case operationTypeMigrationExport, operationTypeMigrationImport, operationTypeMigrationRecovery:
 				if activeMigration != "" {
 					return errors.New("multiple active server migration operation journals require attention")
@@ -559,7 +592,7 @@ func validateOperationJournal(journal operationJournal) error {
 	if !validOperationID(journal.OperationID) {
 		return errors.New("invalid operation id")
 	}
-	if journal.OperationType != operationTypeSetup && journal.OperationType != operationTypeRestore && journal.OperationType != operationTypeDataMigration && journal.OperationType != operationTypeMigrationExport && journal.OperationType != operationTypeMigrationImport && journal.OperationType != operationTypeMigrationRecovery {
+	if journal.OperationType != operationTypeSetup && journal.OperationType != operationTypeRestore && journal.OperationType != operationTypeDataMigration && journal.OperationType != operationTypeMinecraftReset && journal.OperationType != operationTypeMigrationExport && journal.OperationType != operationTypeMigrationImport && journal.OperationType != operationTypeMigrationRecovery {
 		return errors.New("unsupported operation type")
 	}
 	if !operationFingerprintPattern.MatchString(journal.PlanFingerprint) {
@@ -621,6 +654,9 @@ func (s *operationStore) beginSetup(planFingerprint string) (operationJournal, b
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if s.currentMinecraftResetID != "" {
+		return operationJournal{}, false, errMinecraftResetOperationBusy
+	}
 	if s.currentSetupID != "" {
 		current := s.operations[s.currentSetupID]
 		if current.PlanFingerprint == planFingerprint {
@@ -667,6 +703,9 @@ func (s *operationStore) beginRestore(planFingerprint string) (operationJournal,
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if s.currentMinecraftResetID != "" {
+		return operationJournal{}, false, errMinecraftResetOperationBusy
+	}
 	if s.currentRestoreID != "" {
 		current := s.operations[s.currentRestoreID]
 		if current.PlanFingerprint == planFingerprint {
@@ -713,6 +752,9 @@ func (s *operationStore) beginDataMigration(planFingerprint string) (operationJo
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if s.currentMinecraftResetID != "" {
+		return operationJournal{}, false, errMinecraftResetOperationBusy
+	}
 	if s.currentDataMigrationID != "" {
 		current := s.operations[s.currentDataMigrationID]
 		if current.PlanFingerprint == planFingerprint {
@@ -758,6 +800,9 @@ func (s *operationStore) beginMigrationExport(planFingerprint string) (operation
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if s.currentMinecraftResetID != "" {
+		return operationJournal{}, false, errMinecraftResetOperationBusy
+	}
 	if s.currentMigrationID != "" {
 		current := s.operations[s.currentMigrationID]
 		if current.PlanFingerprint == planFingerprint && current.OperationType == operationTypeMigrationExport {
@@ -803,6 +848,9 @@ func (s *operationStore) beginMigrationImport(planFingerprint string) (operation
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if s.currentMinecraftResetID != "" {
+		return operationJournal{}, false, errMinecraftResetOperationBusy
+	}
 	if s.currentMigrationID != "" {
 		current := s.operations[s.currentMigrationID]
 		if current.PlanFingerprint == planFingerprint && current.OperationType == operationTypeMigrationImport {
@@ -849,6 +897,9 @@ func (s *operationStore) beginMigrationRecovery(planFingerprint string) (operati
 	defer s.mu.Unlock()
 
 	var handedOff *operationJournal
+	if s.currentMinecraftResetID != "" {
+		return operationJournal{}, false, errMinecraftResetOperationBusy
+	}
 	if s.currentMigrationID != "" {
 		current := s.operations[s.currentMigrationID]
 		if current.PlanFingerprint == planFingerprint && current.OperationType == operationTypeMigrationRecovery {
@@ -908,6 +959,62 @@ func (s *operationStore) beginMigrationRecovery(planFingerprint string) (operati
 	s.currentMigrationID = id
 	return journal, true, nil
 }
+func (s *operationStore) beginMinecraftReset(planFingerprint string) (operationJournal, bool, error) {
+	if !operationFingerprintPattern.MatchString(planFingerprint) {
+		return operationJournal{}, false, errors.New("invalid Minecraft reset plan fingerprint")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.currentMinecraftResetID != "" {
+		current := s.operations[s.currentMinecraftResetID]
+		if current.PlanFingerprint == planFingerprint {
+			return current, false, nil
+		}
+		return operationJournal{}, false, errMinecraftResetOperationBusy
+	}
+	if s.currentSetupID != "" || s.currentRestoreID != "" || s.currentDataMigrationID != "" || s.currentMigrationID != "" {
+		return operationJournal{}, false, errMinecraftResetOperationBusy
+	}
+	if err := s.acquireMinecraftResetLocks(); err != nil {
+		return operationJournal{}, false, err
+	}
+
+	id, err := newOperationID()
+	if err != nil {
+		_ = s.releaseMinecraftResetLocks()
+		return operationJournal{}, false, err
+	}
+	now := s.now().UTC().Format(time.RFC3339Nano)
+	journal := operationJournal{
+		SchemaVersion: operationSchemaVersion, OperationID: id, OperationType: operationTypeMinecraftReset,
+		PlanFingerprint: planFingerprint, State: operationQueued, Stage: "queued",
+		Status: "Minecraft reset operation queued.", StartedAt: now, UpdatedAt: now,
+		Rollback: operationRollback{State: "not_started"},
+	}
+	if err := s.persist(journal); err != nil {
+		_ = s.releaseMinecraftResetLocks()
+		return operationJournal{}, false, err
+	}
+	s.operations[id] = journal
+	s.currentMinecraftResetID = id
+	return journal, true, nil
+}
+
+func (s *operationStore) currentMinecraftReset() (*operationJournal, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.currentMinecraftResetID == "" {
+		return nil, nil
+	}
+	journal, ok := s.operations[s.currentMinecraftResetID]
+	if !ok {
+		return nil, errors.New("current Minecraft reset operation journal is missing")
+	}
+	copy := journal
+	return &copy, nil
+}
+
 func (s *operationStore) get(id string) (operationJournal, error) {
 	if !validOperationID(id) {
 		return operationJournal{}, errOperationNotFound
@@ -1038,6 +1145,11 @@ func (s *operationStore) transition(id string, next operationState, stage, statu
 			if err := s.releaseDataMigrationLock(); err != nil {
 				return operationJournal{}, err
 			}
+		case operationTypeMinecraftReset:
+			s.currentMinecraftResetID = ""
+			if err := s.releaseMinecraftResetLocks(); err != nil {
+				return operationJournal{}, err
+			}
 		case operationTypeMigrationExport, operationTypeMigrationImport, operationTypeMigrationRecovery:
 			s.currentMigrationID = ""
 			if err := s.releaseMigrationLock(); err != nil {
@@ -1065,6 +1177,45 @@ func operationTransitionAllowed(current, next operationState) bool {
 	default:
 		return false
 	}
+}
+
+func (s *operationStore) acquireMinecraftResetLocks() error {
+	if err := s.acquireSetupLock(); err != nil {
+		return err
+	}
+	if err := s.acquireRestoreLock(); err != nil {
+		_ = s.releaseSetupLock()
+		return err
+	}
+	if err := s.acquireDataMigrationLock(); err != nil {
+		_ = s.releaseRestoreLock()
+		_ = s.releaseSetupLock()
+		return err
+	}
+	if err := s.acquireMigrationLock(); err != nil {
+		_ = s.releaseDataMigrationLock()
+		_ = s.releaseRestoreLock()
+		_ = s.releaseSetupLock()
+		return err
+	}
+	return nil
+}
+
+func (s *operationStore) releaseMinecraftResetLocks() error {
+	var firstErr error
+	if err := s.releaseMigrationLock(); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	if err := s.releaseDataMigrationLock(); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	if err := s.releaseRestoreLock(); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	if err := s.releaseSetupLock(); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	return firstErr
 }
 
 func (s *operationStore) acquireSetupLock() error {
