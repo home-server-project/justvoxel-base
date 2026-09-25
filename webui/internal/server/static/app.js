@@ -2754,7 +2754,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     showPane(securityPane);
   };
 
-  const fetchSecurityPages = async () => {  const fetchSecurityPages = async () => {
+  const fetchSecurityPages = async () => {
     const [authenticationResponse, passwordResponse] = await Promise.all([
       systemFetchPage("/settings/authentication"),
       systemFetchPage("/password"),
