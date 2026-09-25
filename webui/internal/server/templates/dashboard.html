@@ -11,6 +11,31 @@
 <body class="role-pending">
 {{template "app-header" .}}
 <main id="dashboard" data-dashboard-status="/api/dashboard-status" data-session-info="/api/session-info" data-pending-action="{{.PendingAction}}">
+  <section class="first-run-choice" data-first-run-choice hidden aria-labelledby="first-run-choice-title">
+    <div class="first-run-choice-panel">
+      <p class="eyebrow">Welcome to JustVoxel</p>
+      <h1 id="first-run-choice-title">What would you like to do first?</h1>
+      <p class="first-run-choice-lead">Minecraft is not configured yet. You can set it up now or explore JustVoxel first.</p>
+      <div class="first-run-choice-grid">
+        <button class="first-run-choice-card first-run-explore-card" type="button" data-first-run-explore>
+          <span class="first-run-card-kicker">Explore first</span>
+          <strong>Look around JustVoxel</strong>
+          <small>Open the Workspace, Control Center and system tools. Minecraft setup will stay available when you are ready.</small>
+        </button>
+        <a class="first-run-choice-card first-run-setup-card" href="/setup" data-first-run-setup>
+          <span class="first-run-card-kicker">Recommended</span>
+          <strong>Set up Minecraft</strong>
+          <small>Start the guided Minecraft server setup now.</small>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <a class="minecraft-setup-invitation" href="/setup" data-minecraft-setup-invitation hidden>
+    <span class="minecraft-setup-invitation-kicker">Minecraft is not configured</span>
+    <strong>Set up your Minecraft server</strong>
+    <small>Start setup when you are ready. You can continue exploring JustVoxel until then.</small>
+  </a>
   <div class="title-row">
     <div><p class="eyebrow">Dashboard · <span id="session-role">loading role</span></p><h1>Server overview</h1></div>
     <span class="badge">{{.Status.System.Variant}}</span>
