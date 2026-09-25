@@ -18,6 +18,13 @@ type fakeNetworkAPI struct {
 	checkpointID         string
 	checkpointConfirmed  string
 	checkpointRolledBack string
+	radioEnabled         *bool
+	radioCheckpoint      string
+	wifiConnectInterface string
+	wifiConnectRequest   api.NetworkWiFiConnectRequest
+	wifiDisconnected     string
+	wifiDisconnectCheckpoint string
+	wifiForgotten        string
 }
 
 func (f *fakeNetworkAPI) Session(_ context.Context, session string) (api.SessionInfo, error) {
@@ -115,6 +122,52 @@ func (f *fakeNetworkAPI) RollbackNetworkCheckpoint(_ context.Context, session, i
 		ID:      id,
 		Results: []api.NetworkCheckpointRollbackDevice{{Interface: "enp1s0", Result: "ok"}},
 	}, nil
+}
+
+func (f *fakeNetworkAPI) SetWiFiRadio(_ context.Context, session string, enabled bool, checkpointID string) (api.NetworkWiFiMutation, error) {
+	if session != "session-token" {
+		return api.NetworkWiFiMutation{}, api.ErrUnauthorized
+	}
+	f.radioEnabled = &enabled
+	f.radioCheckpoint = checkpointID
+	return api.NetworkWiFiMutation{OK: true, Action: "radio"}, nil
+}
+
+func (f *fakeNetworkAPI) ConnectWiFi(_ context.Context, session, interfaceName string, request api.NetworkWiFiConnectRequest) (api.NetworkWiFiMutation, error) {
+	if session != "session-token" {
+		return api.NetworkWiFiMutation{}, api.ErrUnauthorized
+	}
+	f.wifiConnectInterface = interfaceName
+	f.wifiConnectRequest = request
+	return api.NetworkWiFiMutation{
+		OK: true,
+		Action: "connect-new",
+		Interface: interfaceName,
+		ProfileUUID: "new-profile",
+		Checkpoint: &api.NetworkCheckpoint{ID: request.CheckpointID, Status: "pending"},
+	}, nil
+}
+
+func (f *fakeNetworkAPI) DisconnectWiFi(_ context.Context, session, interfaceName, checkpointID string) (api.NetworkWiFiMutation, error) {
+	if session != "session-token" {
+		return api.NetworkWiFiMutation{}, api.ErrUnauthorized
+	}
+	f.wifiDisconnected = interfaceName
+	f.wifiDisconnectCheckpoint = checkpointID
+	return api.NetworkWiFiMutation{
+		OK: true,
+		Action: "disconnect",
+		Interface: interfaceName,
+		Checkpoint: &api.NetworkCheckpoint{ID: checkpointID, Status: "pending"},
+	}, nil
+}
+
+func (f *fakeNetworkAPI) ForgetWiFiProfile(_ context.Context, session, profileUUID string) (api.NetworkWiFiMutation, error) {
+	if session != "session-token" {
+		return api.NetworkWiFiMutation{}, api.ErrUnauthorized
+	}
+	f.wifiForgotten = profileUUID
+	return api.NetworkWiFiMutation{OK: true, Action: "forget", ProfileUUID: profileUUID}, nil
 }
 
 func TestNetworkWorkspaceStatusProxy(t *testing.T) {
@@ -267,4 +320,40 @@ func TestNetworkCheckpointProxyRequiresAdministratorAndCSRF(t *testing.T) {
 			t.Fatalf("operator checkpoint status = %d, body %s", response.Code, response.Body.String())
 		}
 	})
+}
+
+func TestNetworkWiFiMutationProxyUsesCheckpointAndCSRF(t *testing.T) {
+	fake := &fakeNetworkAPI{fakeAPI: &fakeAPI{}}
+	app, err := New(fake, Config{Version: "1.0.0", ManagementAPI: "v1", ExternalScheme: "http"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	form := strings.NewReader("csrf=token&checkpoint_id=checkpoint-1&ssid=Home+WiFi&bssid=AA%3ABB%3ACC%3ADD%3AEE%3AFF&key_management=wpa-psk&password=password123")
+	req := httptest.NewRequest(http.MethodPost, "http://example/api/network/wifi/wlp2s0/connect", form)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+	req.AddCookie(&http.Cookie{Name: csrfCookie, Value: "token"})
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("connect status = %d, body %s", rr.Code, rr.Body.String())
+	}
+	if fake.wifiConnectInterface != "wlp2s0" ||
+		fake.wifiConnectRequest.CheckpointID != "checkpoint-1" ||
+		fake.wifiConnectRequest.SSID != "Home WiFi" ||
+		fake.wifiConnectRequest.Password != "password123" {
+		t.Fatalf("unexpected connect proxy: interface=%q request=%+v", fake.wifiConnectInterface, fake.wifiConnectRequest)
+	}
+
+	radio := strings.NewReader("csrf=token&enabled=false&checkpoint_id=checkpoint-2")
+	radioReq := httptest.NewRequest(http.MethodPost, "http://example/api/network/wifi/radio", radio)
+	radioReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	radioReq.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+	radioReq.AddCookie(&http.Cookie{Name: csrfCookie, Value: "token"})
+	radioRR := httptest.NewRecorder()
+	app.Handler().ServeHTTP(radioRR, radioReq)
+	if radioRR.Code != http.StatusOK || fake.radioEnabled == nil || *fake.radioEnabled || fake.radioCheckpoint != "checkpoint-2" {
+		t.Fatalf("unexpected radio proxy: status=%d enabled=%v checkpoint=%q", radioRR.Code, fake.radioEnabled, fake.radioCheckpoint)
+	}
 }
