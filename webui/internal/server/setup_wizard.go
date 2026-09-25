@@ -655,7 +655,10 @@ func validateSetupResources(minecraft setupMinecraftDraft, defaults api.AdminSet
 }
 
 func validateSetupConnections(minecraft setupMinecraftDraft) error {
-	if err := validateSetupConnections(minecraft); err != nil {
+	if _, err := parseSetupPort(minecraft.JavaPort, "Minecraft Java port"); err != nil {
+		return err
+	}
+	if _, err := parseSetupPort(minecraft.BedrockPort, "Bedrock UDP port"); err != nil {
 		return err
 	}
 	return nil
@@ -665,10 +668,7 @@ func validateSetupMinecraft(minecraft setupMinecraftDraft, defaults api.AdminSet
 	if err := validateSetupResources(minecraft, defaults); err != nil {
 		return err
 	}
-	if _, err := parseSetupPort(minecraft.JavaPort, "Minecraft Java port"); err != nil {
-		return err
-	}
-	if _, err := parseSetupPort(minecraft.BedrockPort, "Bedrock UDP port"); err != nil {
+	if err := validateSetupConnections(minecraft); err != nil {
 		return err
 	}
 	if !setupImageTagPattern.MatchString(minecraft.ImageTag) {
