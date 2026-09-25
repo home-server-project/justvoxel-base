@@ -175,3 +175,9 @@ button.storage-partition-card:hover,button.storage-partition-card:focus-visible{
 .storage-option-toggle{appearance:none;width:50px;height:28px;margin:0;border:1px solid #4a5862;border-radius:999px;background:radial-gradient(circle at 13px 50%,#f2f5f7 0 9px,transparent 10px),#303942;cursor:pointer;transition:background .16s ease,border-color .16s ease,box-shadow .16s ease}
 .storage-option-toggle:checked{border-color:#5bb98b;background:radial-gradient(circle at calc(100% - 13px) 50%,#fff 0 9px,transparent 10px),#3b966d;box-shadow:0 0 0 1px #5bb98b44}
 .storage-option-toggle:focus-visible{outline:2px solid #80caa0;outline-offset:2px}
+
+.storage-minecraft-progress-heading{display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin-bottom:.45rem}
+.storage-minecraft-progress-heading strong{font-size:.95rem}
+.storage-minecraft-dialog [data-storage-minecraft-progress] .details{margin:.65rem 0}
+.storage-minecraft-dialog [data-storage-minecraft-review-panel]{display:grid;gap:.7rem}
+.storage-minecraft-dialog [data-storage-minecraft-progress]{display:grid;gap:.7rem}
