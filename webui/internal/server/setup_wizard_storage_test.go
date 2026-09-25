@@ -67,7 +67,7 @@ func advanceToStorage(t *testing.T, app *App) {
 	}
 }
 
-func TestSetupWizardStorageStepShowsOnlySafeExistingFilesystems(t *testing.T) {
+func TestSetupWizardStorageStepShowsInternalDiskBrowserAndExcludesUSB(t *testing.T) {
 	client := setupWizardStorageClient()
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
 	if err != nil {
@@ -82,19 +82,39 @@ func TestSetupWizardStorageStepShowsOnlySafeExistingFilesystems(t *testing.T) {
 	}
 	body := page.Body.String()
 	for _, want := range []string{
-		"Step 5 of 7", "Use JustVoxel system storage", "Use an existing local filesystem", "/dev/vda4", "/dev/vdb1", "Samsung SSD", "ext4", "Advanced Storage", "/static/setup-storage.js",
+		"Step 5 of 7", "Use system storage", "Use another internal disk", "/dev/vda4", "/dev/vdb1", "/dev/vdb2",
+		"Samsung SSD", "ext4", "Unallocated", "Create one XFS partition using this free space",
+		"External drives are not offered for Minecraft data", "/static/setup-storage.js",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("storage page missing %q: %s", want, body)
 		}
 	}
-	for _, forbidden := range []string{"/dev/vda1", "/dev/vdc1", "UNSUPPORTED"} {
+	for _, forbidden := range []string{"/dev/vda1", "/dev/vdc1", "UNSUPPORTED", "/dev/vdd1", "USB SSD"} {
 		if strings.Contains(body, forbidden) {
-			t.Fatalf("unsafe filesystem %q was offered: %s", forbidden, body)
+			t.Fatalf("unsafe or external filesystem %q was offered: %s", forbidden, body)
 		}
 	}
 }
 
+func TestSetupWizardStorageRejectsUSBFilesystemEvenWhenPostedDirectly(t *testing.T) {
+	client := setupWizardStorageClient()
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstRunSetupDrafts.delete(app, "session-token")
+	advanceToStorage(t, app)
+
+	values := url.Values{
+		"csrf": {"csrf-token"}, "storage_type": {"partition"}, "storage_device": {"/dev/vdd1"},
+		"storage_mount_point": {"/var/mnt/justvoxel-data"}, "storage_path": {"/var/mnt/justvoxel-data/minecraft"}, "direction": {"next"},
+	}
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/storage", values.Encode()))
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "safe internal XFS, ext4, or Btrfs") {
+		t.Fatalf("USB Minecraft storage was not rejected: %d %s", rr.Code, rr.Body.String())
+	}
+}
 func TestSetupWizardStorageStepValidatesAndAdvances(t *testing.T) {
 	client := setupWizardStorageClient()
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
