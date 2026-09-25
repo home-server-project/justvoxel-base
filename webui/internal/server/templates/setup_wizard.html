@@ -265,28 +265,157 @@
     </form>
 
     {{else if eq .CurrentStep 6}}
-    <form method="post" action="/setup/backups" class="setup-form" data-setup-backup-form>
+    <form method="post" action="/setup/backups" class="setup-form" data-setup-backup-form data-csrf="{{.CSRF}}">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      {{if .SameDiskWarning}}<div class="notice warning"><strong>Same physical disk</strong><br>{{.SameDiskWarning}}</div>{{end}}
-      <label class="setup-choice"><input type="checkbox" name="backup_automatic" {{if .Backups.Automatic}}checked{{end}}><span><strong>Automatic backups</strong><small>Run scheduled backups automatically. You can still create manual backups later.</small></span></label>
-      <div class="setup-form-grid">
-        <label class="setup-field">Daily backup time<input name="backup_daily_time" type="time" value="{{.Backups.DailyTime}}"><span class="field-help">Used when automatic backups are enabled.</span></label>
-        <label class="setup-field">Backups to keep<input name="backup_keep" type="number" min="1" step="1" value="{{.Backups.Keep}}" inputmode="numeric"><span class="field-help">Older automatic backups are removed after this retention count.</span></label>
+      <input type="hidden" name="backup_type" value="{{.Backups.Type}}" data-setup-backup-type>
+      <input type="hidden" name="backup_device" value="{{.Backups.Device}}" data-setup-backup-device>
+      <input type="hidden" name="backup_mount_point" value="{{.Backups.MountPoint}}" data-setup-backup-mount>
+      <input type="hidden" name="backup_path" value="{{.Backups.Path}}" data-setup-backup-path>
+      <input type="hidden" name="backup_source" value="{{.Backups.Source}}" data-setup-backup-source>
+      <input type="hidden" name="backup_username" value="{{.Backups.Username}}" data-setup-backup-username>
+      <input type="hidden" name="backup_domain" value="{{.Backups.Domain}}" data-setup-backup-domain>
+
+      <div class="setup-backup-topline">
+        <label class="setup-choice setup-backup-automatic"><input type="checkbox" name="backup_automatic" {{if .Backups.Automatic}}checked{{end}}><span><strong>Automatic backups</strong><small>Run backups on schedule. Manual backups remain available later.</small></span></label>
+        <div class="setup-backup-schedule">
+          <label class="setup-field">Daily time<input name="backup_daily_time" type="time" value="{{.Backups.DailyTime}}"></label>
+          <label class="setup-field">Keep<input name="backup_keep" type="number" min="1" step="1" value="{{.Backups.Keep}}" inputmode="numeric"></label>
+        </div>
       </div>
-      <label class="setup-field">Backup destination
-        <select id="setup-backup-type" name="backup_type">
-          <option value="system" {{if eq .Backups.Type "system"}}selected{{end}}>JustVoxel system storage</option>
-          <option value="partition" {{if eq .Backups.Type "partition"}}selected{{end}}>Existing local filesystem</option>
-          <option value="nfs" {{if eq .Backups.Type "nfs"}}selected{{end}}>NFS share</option>
-          <option value="smb" {{if eq .Backups.Type "smb"}}selected{{end}}>SMB / CIFS share</option>
-        </select>
-      </label>
-      <div data-setup-backup-kind="system"><div class="setup-target-card"><strong>JustVoxel system backup directory</strong><span><code>{{.Defaults.BackupPath}}</code></span><small>Convenient, but normally on the same physical system disk as Minecraft data.</small></div><input type="hidden" name="backup_path" value="{{.Defaults.BackupPath}}" data-setup-backup-field="system"></div>
-      <div data-setup-backup-kind="partition" hidden>
-        {{if .Filesystems}}
-        <label class="setup-field">Existing filesystem<select id="setup-backup-device" name="backup_device" data-setup-backup-field="partition"><option value="">Choose a filesystem</option>{{range .Filesystems}}<option value="{{.Path}}" data-mountpoint="{{.Mountpoint}}" {{if eq $.Backups.Device .Path}}selected{{end}}>{{.Model}} · {{.Path}} · {{.Size}} · {{.Filesystem}}{{if .Label}} · {{.Label}}{{end}}{{if .SystemDisk}} · on system disk{{end}}</option>{{end}}</select></label>
-        <div class="setup-form-grid"><label class="setup-field">Mount point<input name="backup_mount_point" value="{{.Backups.MountPoint}}" data-setup-backup-field="partition" data-default="/var/mnt/justvoxel-backup" autocomplete="off" placeholder="/var/mnt/justvoxel-backup"></label><label class="setup-field">Backup directory<input name="backup_path" value="{{.Backups.Path}}" data-setup-backup-field="partition" autocomplete="off" placeholder="/var/mnt/justvoxel-backup/backups"></label></div>
-        {{else}}<div class="notice">No safe existing local filesystem is currently available.</div>{{end}}
+
+      {{if .SameDiskWarning}}<div class="notice warning"><strong>Backup resilience</strong><br>{{.SameDiskWarning}}</div>{{end}}
+
+      <div class="setup-backup-choice-grid">
+        <button class="setup-backup-choice{{if eq .Backups.Type "system"}} is-selected{{end}}" type="button" data-setup-backup-choice="system" data-system-path="{{.Defaults.BackupPath}}">
+          <span class="setup-storage-choice-kicker">Simple</span>
+          <strong>System storage</strong>
+          <small>Use <code>{{.Defaults.BackupPath}}</code>. Fastest setup, but usually the same physical disk as Minecraft.</small>
+        </button>
+        <button class="setup-backup-choice{{if eq .Backups.Type "partition"}} is-selected{{end}}" type="button" data-setup-backup-choice="partition">
+          <span class="setup-storage-choice-kicker">Local disk</span>
+          <strong>Internal or USB drive</strong>
+          <small>Use an existing filesystem, blank partition, or unallocated space on a local backup disk.</small>
+        </button>
+        <button class="setup-backup-choice{{if eq .Backups.Type "nfs"}} is-selected{{end}}" type="button" data-setup-backup-choice="nfs">
+          <span class="setup-storage-choice-kicker">Network</span>
+          <strong>NFS share</strong>
+          <small>Back up to a NAS or Linux/Unix file server using NFS.</small>
+        </button>
+        <button class="setup-backup-choice{{if eq .Backups.Type "smb"}} is-selected{{end}}" type="button" data-setup-backup-choice="smb">
+          <span class="setup-storage-choice-kicker">Network</span>
+          <strong>SMB share</strong>
+          <small>Back up to Windows, Samba, or a NAS using SMB/CIFS.</small>
+        </button>
+      </div>
+
+      <section data-setup-backup-panel="system" {{if ne .Backups.Type "system"}}hidden{{end}}>
+        <div class="setup-target-card"><strong>JustVoxel system backup directory</strong><span><code>{{.Defaults.BackupPath}}</code></span><small>Convenient for quick recovery from accidental file changes, but it does not protect against failure of the system disk.</small></div>
+      </section>
+
+      <section class="setup-storage-browser" data-setup-backup-panel="partition" {{if ne .Backups.Type "partition"}}hidden{{end}}>
+        <div class="setup-storage-browser-heading"><div><strong>Local backup disks</strong><span>Internal and USB/external storage are both allowed for backups.</span></div><span class="badge">{{len .BackupDisks}}</span></div>
+        {{if .BackupDisks}}
+        <div class="setup-storage-disk-list">
+          {{range .BackupDisks}}
+          <article class="setup-storage-disk">
+            <div class="setup-storage-disk-heading">
+              <div><strong>{{if .Model}}{{.Model}}{{else}}{{.Name}}{{end}}</strong><span><code>{{.Path}}</code> · {{.Size}}{{if .External}} · External / USB{{else}} · Internal{{end}}{{if .SystemDisk}} · System disk{{end}}</span></div>
+            </div>
+            {{if or .Partitions .FreeSpaces}}
+            <div class="setup-storage-layout">
+              {{range .Partitions}}
+                {{if .Formatted}}
+                <button class="setup-storage-segment setup-backup-existing{{if eq $.Backups.Device .Path}} is-selected{{end}}" type="button"
+                        data-setup-backup-existing
+                        data-device="{{.Path}}"
+                        data-mountpoint="{{.Mountpoint}}">
+                  <span class="setup-storage-segment-state">Ready</span>
+                  <strong>{{.Path}}</strong>
+                  <span>{{.Size}} · {{.Filesystem}}{{if .Label}} · {{.Label}}{{end}}</span>
+                  <small>{{if .Mountpoint}}{{.Mountpoint}}{{else}}Will use /var/mnt/justvoxel-backup{{end}}</small>
+                </button>
+                {{else}}
+                <button class="setup-storage-segment setup-storage-prepare" type="button"
+                        data-setup-backup-prepare="format"
+                        data-device="{{.Path}}">
+                  <span class="setup-storage-segment-state">Blank</span>
+                  <strong>{{.Path}}</strong>
+                  <span>{{.Size}}</span>
+                  <small>Format as XFS for backups</small>
+                </button>
+                {{end}}
+              {{end}}
+              {{range .FreeSpaces}}
+              <button class="setup-storage-segment setup-storage-prepare" type="button"
+                      data-setup-backup-prepare="create_partition"
+                      data-device="{{.Device}}"
+                      data-free-start="{{.Start}}">
+                <span class="setup-storage-segment-state">Unallocated</span>
+                <strong>{{.Size}} free</strong>
+                <span>{{.Start}} → {{.End}}</span>
+                <small>Create one XFS backup partition using this free space</small>
+              </button>
+              {{end}}
+            </div>
+            {{else}}<div class="notice compact">No usable existing filesystem or unallocated segment was reported on this disk.</div>{{end}}
+          </article>
+          {{end}}
+        </div>
+        {{else}}<div class="notice">No local backup disk with a usable target was reported.</div>{{end}}
+        <div class="setup-storage-selected" data-setup-backup-selected {{if ne .Backups.Type "partition"}}hidden{{end}}>
+          <span>Selected backup storage</span>
+          <strong data-setup-backup-selected-device>{{if .Backups.Device}}{{.Backups.Device}}{{else}}Choose a ready filesystem above{{end}}</strong>
+          <small data-setup-backup-selected-path>{{if .Backups.Path}}{{.Backups.Path}}{{end}}</small>
+        </div>
+      </section>
+
+      <section data-setup-backup-panel="nfs" {{if ne .Backups.Type "nfs"}}hidden{{end}}>
+        <div class="setup-network-backup-card">
+          <label class="setup-field setup-field-wide">NFS source<input data-setup-network-source="nfs" value="{{if eq .Backups.Type "nfs"}}{{.Backups.Source}}{{end}}" autocomplete="off" placeholder="nas:/volume/backups"><span class="field-help">Use <code>server:/export</code>.</span></label>
+          <div class="setup-form-grid">
+            <label class="setup-field">Local mount point<input data-setup-network-mount="nfs" value="{{if eq .Backups.Type "nfs"}}{{.Backups.MountPoint}}{{end}}" autocomplete="off" placeholder="/var/mnt/justvoxel-backup"></label>
+            <label class="setup-field">Backup directory<input data-setup-network-path="nfs" value="{{if eq .Backups.Type "nfs"}}{{.Backups.Path}}{{end}}" autocomplete="off" placeholder="/var/mnt/justvoxel-backup/backups"></label>
+          </div>
+          <div class="notice compact">The final Setup review verifies the share definition. Setup Apply validates the expected NFS source before backups use it.</div>
+        </div>
+      </section>
+
+      <section data-setup-backup-panel="smb" {{if ne .Backups.Type "smb"}}hidden{{end}}>
+        <div class="setup-network-backup-card">
+          <label class="setup-field setup-field-wide">SMB share<input data-setup-network-source="smb" value="{{if eq .Backups.Type "smb"}}{{.Backups.Source}}{{end}}" autocomplete="off" placeholder="//nas/backups"><span class="field-help">Use <code>//server/share</code>.</span></label>
+          <div class="setup-form-grid">
+            <label class="setup-field">Username<input data-setup-smb-username value="{{if eq .Backups.Type "smb"}}{{.Backups.Username}}{{end}}" autocomplete="username"></label>
+            <label class="setup-field">Domain / workgroup <span class="muted">optional</span><input data-setup-smb-domain value="{{if eq .Backups.Type "smb"}}{{.Backups.Domain}}{{end}}" autocomplete="off"></label>
+            <label class="setup-field">Local mount point<input data-setup-network-mount="smb" value="{{if eq .Backups.Type "smb"}}{{.Backups.MountPoint}}{{end}}" autocomplete="off" placeholder="/var/mnt/justvoxel-backup"></label>
+            <label class="setup-field">Backup directory<input data-setup-network-path="smb" value="{{if eq .Backups.Type "smb"}}{{.Backups.Path}}{{end}}" autocomplete="off" placeholder="/var/mnt/justvoxel-backup/backups"></label>
+          </div>
+          <div class="notice setup-secret-note"><strong>Password stays out of this draft.</strong><span>JustVoxel requests the SMB password only at final Apply and stores credentials root-only when required.</span></div>
+        </div>
+      </section>
+
+      <section class="setup-storage-action-review" data-setup-backup-action-review hidden>
+        <div class="setup-storage-action-heading">
+          <div><span class="setup-storage-choice-kicker">Review backup disk action</span><strong data-setup-backup-action-title>Prepare backup storage</strong></div>
+          <button class="secondary" type="button" data-setup-backup-action-close>Close</button>
+        </div>
+        <dl class="setup-storage-action-details">
+          <div><dt>Target</dt><dd><code data-setup-backup-action-device></code></dd></div>
+          <div><dt>Result</dt><dd data-setup-backup-action-result></dd></div>
+        </dl>
+        <div data-setup-backup-action-warnings></div>
+        <div class="setup-storage-confirm">
+          <p>Review the target above, then slide fully to the right and confirm.</p>
+          <input type="range" min="0" max="100" step="1" value="0" data-setup-backup-confirm-slider aria-label="Slide to confirm backup storage preparation">
+          <label><input type="checkbox" data-setup-backup-confirm-toggle disabled> Confirm this reviewed storage action</label>
+        </div>
+        <p class="notice error" data-setup-backup-action-error hidden></p>
+        <div class="setup-storage-action-buttons"><button class="secondary" type="button" data-setup-backup-action-back>Back</button><button type="button" data-setup-backup-action-apply disabled>Apply reviewed action</button></div>
+      </section>
+
+      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
+    </form>
+
+    {{else}}<div class="notice">No safe existing local filesystem is currently available.</div>{{end}}
       </div>
       <div data-setup-backup-kind="nfs" hidden><div class="setup-form-grid"><label class="setup-field setup-field-wide">NFS source<input name="backup_source" value="{{.Backups.Source}}" data-setup-backup-field="nfs" autocomplete="off" placeholder="nas:/volume/backups"><span class="field-help">Use <code>server:/export</code>.</span></label><label class="setup-field">Local mount point<input name="backup_mount_point" value="{{.Backups.MountPoint}}" data-setup-backup-field="nfs" data-default="/var/mnt/justvoxel-backup" autocomplete="off" placeholder="/var/mnt/justvoxel-backup"></label><label class="setup-field">Backup directory<input name="backup_path" value="{{.Backups.Path}}" data-setup-backup-field="nfs" autocomplete="off" placeholder="/var/mnt/justvoxel-backup/backups"></label></div><div class="notice">Network backups depend on the NFS server being reachable. The final setup will validate the expected share before it is used.</div></div>
       <div data-setup-backup-kind="smb" hidden><div class="setup-form-grid"><label class="setup-field setup-field-wide">SMB share<input name="backup_source" value="{{.Backups.Source}}" data-setup-backup-field="smb" autocomplete="off" placeholder="//nas/backups"><span class="field-help">Use <code>//server/share</code>.</span></label><label class="setup-field">Username<input name="backup_username" value="{{.Backups.Username}}" data-setup-backup-field="smb" autocomplete="username"></label><label class="setup-field">Domain / workgroup <span class="muted">optional</span><input name="backup_domain" value="{{.Backups.Domain}}" data-setup-backup-field="smb" autocomplete="off"></label><label class="setup-field">Local mount point<input name="backup_mount_point" value="{{.Backups.MountPoint}}" data-setup-backup-field="smb" data-default="/var/mnt/justvoxel-backup" autocomplete="off" placeholder="/var/mnt/justvoxel-backup"></label><label class="setup-field">Backup directory<input name="backup_path" value="{{.Backups.Path}}" data-setup-backup-field="smb" autocomplete="off" placeholder="/var/mnt/justvoxel-backup/backups"></label></div><div class="notice setup-secret-note"><strong>Password is not stored in this setup draft.</strong><span>JustVoxel will request the SMB password only when the final setup is actually applied. It will not be shown again or placed in browser URLs/logs.</span></div></div>
