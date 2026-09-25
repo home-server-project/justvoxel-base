@@ -17,7 +17,8 @@
   <form class="nav-logout setup-topbar-logout" method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Log out</button></form>
 </header>
 <main class="setup-shell">
-  <div class="title-row setup-title-row"><div><p class="eyebrow">First setup</p><h1>Review your JustVoxel setup</h1></div><span class="badge">Step 6 of 6</span></div>
+  <div class="title-row setup-title-row"><div><p class="eyebrow">First setup</p><h1>Review your JustVoxel setup</h1></div><span class="badge">{{if eq .SetupMode "recommended"}}Recommended setup{{else}}Step 6 of 6{{end}}</span></div>
+  {{if ne .SetupMode "recommended"}}
   <ol class="setup-progress" aria-label="Setup progress">
     <li class="complete"><span class="setup-number">1</span><span>Server</span></li>
     <li class="complete"><span class="setup-number">2</span><span>Resources</span></li>
@@ -26,8 +27,10 @@
     <li class="complete"><span class="setup-number">5</span><span>Backups</span></li>
     <li class="active" aria-current="step"><span class="setup-number">6</span><span>Review</span></li>
   </ol>
+  {{end}}
 
   <section class="panel setup-step-panel">
+    {{if eq .SetupMode "recommended"}}<div class="notice setup-safe-note"><strong>Recommended defaults selected.</strong><span>JustVoxel filled the normal appliance defaults automatically. You can change these settings later from Control Center.</span></div>{{end}}
     <p class="setup-lead">This page shows the configuration normalized and validated by the JustVoxel Management Agent. Nothing has been applied yet.</p>
     {{if .Error}}<div class="notice error"><strong>Setup needs attention</strong><br>{{.Error}}</div>{{end}}
 
@@ -48,6 +51,7 @@
       <section class="setup-review-card">
         <h2>Minecraft</h2>
         <dl class="setup-review-list">
+          {{if .ServerTypeLabel}}<div><dt>Server software</dt><dd><strong>{{.ServerTypeLabel}}</strong></dd></div>{{end}}
           <div><dt>Game memory</dt><dd>{{.Plan.Normalized.Minecraft.JavaMemory}} <small>Java heap</small></dd></div>
           <div><dt>Maximum Minecraft memory</dt><dd>{{.Plan.Normalized.Minecraft.ContainerMemory}} <small>container limit</small></dd></div>
           <div><dt>Java port</dt><dd>{{.Plan.Normalized.Minecraft.JavaPort}}/TCP</dd></div>
