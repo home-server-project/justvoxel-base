@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -144,6 +145,34 @@ func TestNetworkCheckpointTimeoutValidationAndExpiry(t *testing.T) {
 	now = now.Add(31 * time.Second)
 	if _, ok := s.activeNetworkCheckpoint(transaction.ID); ok {
 		t.Fatal("expired checkpoint remained active")
+	}
+}
+
+func TestNetworkCheckpointClaimRejectsConcurrentTerminalAction(t *testing.T) {
+	fake := &fakeNetworkClient{}
+	previousOpen := openNetworkClient
+	previousNow := networkNow
+	openNetworkClient = func(context.Context) (networkClient, error) { return fake, nil }
+	networkNow = func() time.Time { return time.Date(2026, 9, 25, 22, 0, 0, 0, time.UTC) }
+	t.Cleanup(func() {
+		openNetworkClient = previousOpen
+		networkNow = previousNow
+	})
+
+	s := &server{networkTransactions: make(map[string]networkCheckpointTransaction)}
+	transaction, err := s.beginNetworkCheckpoint(context.Background(), []string{"enp1s0"}, 90)
+	if err != nil {
+		t.Fatalf("beginNetworkCheckpoint() error = %v", err)
+	}
+	if _, err := s.claimNetworkCheckpoint(transaction.ID); err != nil {
+		t.Fatalf("first claim error = %v", err)
+	}
+	if _, err := s.claimNetworkCheckpoint(transaction.ID); !errors.Is(err, errNetworkCheckpointBusy) {
+		t.Fatalf("second claim error = %v, want busy", err)
+	}
+	s.releaseNetworkCheckpoint(transaction.ID)
+	if _, err := s.claimNetworkCheckpoint(transaction.ID); err != nil {
+		t.Fatalf("claim after release error = %v", err)
 	}
 }
 
