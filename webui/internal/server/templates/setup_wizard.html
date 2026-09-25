@@ -147,7 +147,7 @@
       <input type="hidden" name="storage_path" value="{{.Storage.Path}}" data-setup-storage-path>
 
       <div class="setup-storage-choice-grid">
-        <button class="setup-storage-choice{{if eq .Storage.Type "system"}} is-selected{{end}}" type="button" data-setup-storage-system>
+        <button class="setup-storage-choice{{if eq .Storage.Type "system"}} is-selected{{end}}" type="button" data-setup-storage-system data-system-path="{{.Defaults.DataPath}}">
           <span class="setup-storage-choice-kicker">Simple</span>
           <strong>Use system storage</strong>
           <small>Store Minecraft at <code>{{.Defaults.DataPath}}</code>. No disk preparation is required.</small>
