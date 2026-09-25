@@ -13,6 +13,11 @@ type networkClient interface {
 	Snapshot(context.Context) (networking.Snapshot, error)
 	WiFiNetworks(context.Context, string) ([]networking.WiFiNetwork, error)
 	RequestWiFiScan(context.Context, string) error
+	SetWirelessEnabled(context.Context, bool) error
+	ActivateWiFiProfile(context.Context, string, string) error
+	DisconnectWiFi(context.Context, string) error
+	ForgetWiFiProfile(context.Context, string) error
+	ConnectWiFi(context.Context, networking.WiFiConnectRequest) (networking.WiFiConnectResult, error)
 	CreateCheckpoint(context.Context, []string, uint32) (networking.Checkpoint, error)
 	DestroyCheckpoint(context.Context, networking.Checkpoint) error
 	RollbackCheckpoint(context.Context, networking.Checkpoint) (map[string]networking.RollbackResult, error)
@@ -83,6 +88,7 @@ type networkWiFiNetworkView struct {
 	MaxBitrateKbps uint32 `json:"max_bitrate_kbps,omitempty"`
 	Security       string `json:"security"`
 	KeyManagement  string `json:"key_management,omitempty"`
+	ProfileUUID    string `json:"profile_uuid,omitempty"`
 	Hidden         bool   `json:"hidden"`
 	Known          bool   `json:"known"`
 	Active         bool   `json:"active"`
@@ -98,6 +104,7 @@ func registerNetworkRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("GET /v1/network/wifi/{interface}/networks", s.networkWiFiNetworks)
 	mux.HandleFunc("POST /v1/network/wifi/{interface}/scan", s.networkWiFiScan)
 	registerNetworkCheckpointRoutes(mux, s)
+	registerNetworkWiFiActionRoutes(mux, s)
 }
 
 func (s *server) networkStatus(w http.ResponseWriter, r *http.Request) {
@@ -152,6 +159,7 @@ func (s *server) networkWiFiNetworks(w http.ResponseWriter, r *http.Request) {
 			MaxBitrateKbps: network.MaxBitrateKbps,
 			Security:       string(network.Security),
 			KeyManagement:  network.KeyManagement,
+			ProfileUUID:    network.ProfileUUID,
 			Hidden:         network.Hidden,
 			Known:          network.Known,
 			Active:         network.Active,
