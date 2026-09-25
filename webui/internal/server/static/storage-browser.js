@@ -45,12 +45,45 @@
 
   const migrationDialog = root.querySelector("[data-storage-minecraft-dialog]");
   const migrationClose = migrationDialog?.querySelector("[data-storage-minecraft-close]");
+  const migrationTitle = migrationDialog?.querySelector("[data-storage-minecraft-title]");
+  const migrationSetup = migrationDialog?.querySelector("[data-storage-minecraft-setup]");
   const migrationCancel = migrationDialog?.querySelector("[data-storage-minecraft-cancel]");
+  const migrationReview = migrationDialog?.querySelector("[data-storage-minecraft-review]");
   const migrationDevice = migrationDialog?.querySelector("[data-storage-minecraft-device]");
   const migrationSelected = migrationDialog?.querySelector("[data-storage-minecraft-selected]");
   const migrationMount = migrationDialog?.querySelector("[data-storage-minecraft-mount]");
   const migrationMountNote = migrationDialog?.querySelector("[data-storage-minecraft-mount-note]");
   const migrationPath = migrationDialog?.querySelector("[data-storage-minecraft-path]");
+  const migrationError = migrationDialog?.querySelector("[data-storage-minecraft-error]");
+  const migrationReviewPanel = migrationDialog?.querySelector("[data-storage-minecraft-review-panel]");
+  const migrationCurrentPath = migrationDialog?.querySelector("[data-storage-minecraft-current-path]");
+  const migrationReviewDevice = migrationDialog?.querySelector("[data-storage-minecraft-review-device]");
+  const migrationReviewFilesystem = migrationDialog?.querySelector("[data-storage-minecraft-review-filesystem]");
+  const migrationReviewMount = migrationDialog?.querySelector("[data-storage-minecraft-review-mount]");
+  const migrationReviewPath = migrationDialog?.querySelector("[data-storage-minecraft-review-path]");
+  const migrationReviewCapacity = migrationDialog?.querySelector("[data-storage-minecraft-review-capacity]");
+  const migrationWarnings = migrationDialog?.querySelector("[data-storage-minecraft-warnings]");
+  const migrationPlayersField = migrationDialog?.querySelector("[data-storage-minecraft-players-field]");
+  const migrationPlayers = migrationDialog?.querySelector("[data-storage-minecraft-players]");
+  const migrationPlayersNote = migrationDialog?.querySelector("[data-storage-minecraft-players-note]");
+  const migrationDestructiveField = migrationDialog?.querySelector("[data-storage-minecraft-destructive-field]");
+  const migrationDestructivePhrase = migrationDialog?.querySelector("[data-storage-minecraft-destructive-phrase]");
+  const migrationDestructive = migrationDialog?.querySelector("[data-storage-minecraft-destructive]");
+  const migrationConfirmation = migrationDialog?.querySelector("[data-storage-minecraft-confirmation]");
+  const migrationReviewError = migrationDialog?.querySelector("[data-storage-minecraft-review-error]");
+  const migrationBack = migrationDialog?.querySelector("[data-storage-minecraft-back]");
+  const migrationApply = migrationDialog?.querySelector("[data-storage-minecraft-apply]");
+  const migrationProgress = migrationDialog?.querySelector("[data-storage-minecraft-progress]");
+  const migrationProgressState = migrationDialog?.querySelector("[data-storage-minecraft-progress-state]");
+  const migrationProgressStage = migrationDialog?.querySelector("[data-storage-minecraft-progress-stage]");
+  const migrationProgressStatus = migrationDialog?.querySelector("[data-storage-minecraft-progress-status]");
+  const migrationProgressID = migrationDialog?.querySelector("[data-storage-minecraft-progress-id]");
+  const migrationReconnect = migrationDialog?.querySelector("[data-storage-minecraft-reconnect]");
+  const migrationSuccess = migrationDialog?.querySelector("[data-storage-minecraft-success]");
+  const migrationRollback = migrationDialog?.querySelector("[data-storage-minecraft-rollback]");
+  const migrationAttention = migrationDialog?.querySelector("[data-storage-minecraft-attention]");
+  const migrationProgressClose = migrationDialog?.querySelector("[data-storage-minecraft-progress-close]");
+  const migrationRefresh = migrationDialog?.querySelector("[data-storage-minecraft-refresh]");
 
   const actionDialog = root.querySelector("[data-storage-action-dialog]");
   const actionClose = actionDialog?.querySelector("[data-storage-action-close]");
@@ -141,6 +174,10 @@
   let wholeDiskApplying = false;
   let actionApplying = false;
   let createApplying = false;
+  let reviewedMigrationPlan = null;
+  let migrationApplying = false;
+  let migrationPollTimer = null;
+  let migrationPollFailures = 0;
 
   function closeActionMenu() {
     if (actionMenu) actionMenu.open = false;
@@ -539,8 +576,18 @@
     wholeDiskApply.textContent = "Applying…";
     try {
       const payload = await postWholeDisk("apply");
-      if (payload.redirect) window.location.assign(payload.redirect);
-      else window.location.reload();
+      if (payload.operation) {
+        wholeDiskApplying = false;
+        if (wholeDiskClose) wholeDiskClose.disabled = false;
+        if (wholeDiskCancel) wholeDiskCancel.disabled = false;
+        wholeDiskDialog?.close();
+        if (migrationDialog && !migrationDialog.open) migrationDialog.showModal();
+        showMigrationProgress(payload.operation);
+      } else if (payload.redirect) {
+        window.location.assign(payload.redirect);
+      } else {
+        window.location.reload();
+      }
     } catch (error) {
       wholeDiskApplying = false;
       if (wholeDiskError) { wholeDiskError.textContent = error.message; wholeDiskError.hidden = false; }
@@ -814,14 +861,237 @@
     return (mountPoint || "/var/mnt/justvoxel-data").replace(/\/$/, "") + "/minecraft";
   }
 
+  function migrationBytes(value) {
+    const bytes = Number(value || 0);
+    if (!Number.isFinite(bytes) || bytes <= 0) return "Unknown";
+    const gib = bytes / (1024 * 1024 * 1024);
+    if (gib >= 1) return gib.toFixed(gib >= 10 ? 1 : 2) + " GiB";
+    return (bytes / (1024 * 1024)).toFixed(0) + " MiB";
+  }
+
+  function migrationStateLabel(state) {
+    if (state === "queued") return "Queued";
+    if (state === "validating") return "Validating";
+    if (state === "running") return "Migrating";
+    if (state === "verifying") return "Runtime validation";
+    if (state === "failed") return "Recovering";
+    if (state === "rolling_back") return "Rolling back";
+    if (state === "rolled_back") return "Rolled back";
+    if (state === "needs_attention") return "Needs attention";
+    if (state === "succeeded") return "Complete";
+    return "Working";
+  }
+
+  function migrationStageLabel(stage) {
+    if (stage === "queued") return "Waiting to start";
+    if (stage === "migration_preflight" || stage === "target_recheck") return "Checking reviewed migration";
+    if (stage === "target_prepare") return "Preparing target storage";
+    if (stage === "staging_space") return "Checking free space";
+    if (stage === "player_recheck") return "Rechecking players";
+    if (stage === "minecraft_stop") return "Stopping Minecraft safely";
+    if (stage === "cold_backup") return "Creating verified backup";
+    if (stage === "copying") return "Copying Minecraft data";
+    if (stage === "copy_verification") return "Verifying copied data";
+    if (stage === "switching") return "Switching Minecraft data storage";
+    if (stage === "minecraft_runtime") return "Validating migrated Minecraft";
+    if (stage === "migrated_storage") return "Validating migrated storage";
+    if (stage === "migration_failed") return "Preparing recovery";
+    if (stage === "rollback") return "Restoring previous configuration";
+    if (stage === "migration_rolled_back") return "Rolled back";
+    if (["migration_needs_attention","migration_backend_interrupted","migration_backend_incomplete","invalid_execution_plan","interrupted"].includes(stage)) return "Administrator attention required";
+    if (stage === "completed") return "Complete";
+    return "Working";
+  }
+
+  function migrationTerminal(state) {
+    return ["succeeded", "rolled_back", "needs_attention"].includes(state);
+  }
+
+  function stopMigrationPolling() {
+    if (migrationPollTimer) window.clearTimeout(migrationPollTimer);
+    migrationPollTimer = null;
+  }
+
+  async function migrationJSON(url, options = {}) {
+    const response = await fetch(url, {
+      credentials: "same-origin",
+      cache: "no-store",
+      ...options,
+      headers: {
+        Accept: "application/json",
+        ...(options.headers || {}),
+      },
+    });
+    let payload = {};
+    try { payload = await response.json(); } catch (_) { payload = {}; }
+    if (response.status === 401) {
+      window.location.assign("/login");
+      return null;
+    }
+    if (response.status === 403 && String(payload.error || "").toLowerCase().includes("password change")) {
+      window.location.assign("/password");
+      return null;
+    }
+    if (!response.ok || !payload?.ok) {
+      const error = new Error(payload?.error || "Minecraft data migration could not be completed.");
+      error.payload = payload;
+      error.status = response.status;
+      throw error;
+    }
+    return payload;
+  }
+
+  function migrationRequestBody() {
+    const body = new URLSearchParams();
+    body.set("csrf", csrf);
+    body.set("operation", "use_partition");
+    body.set("device", migrationDevice?.value || "");
+    body.set("mount_point", migrationMount?.value.trim() || "");
+    body.set("path", migrationPath?.value.trim() || "");
+    body.set("size_gib", "all");
+    return body;
+  }
+
+  function resetMigrationDialog() {
+    stopMigrationPolling();
+    reviewedMigrationPlan = null;
+    migrationApplying = false;
+    migrationPollFailures = 0;
+    if (migrationTitle) migrationTitle.textContent = "Use this filesystem";
+    if (migrationSetup) migrationSetup.hidden = false;
+    if (migrationReviewPanel) migrationReviewPanel.hidden = true;
+    if (migrationProgress) migrationProgress.hidden = true;
+    if (migrationError) { migrationError.hidden = true; migrationError.textContent = ""; }
+    if (migrationReviewError) { migrationReviewError.hidden = true; migrationReviewError.textContent = ""; }
+    if (migrationWarnings) migrationWarnings.replaceChildren();
+    if (migrationPlayersField) migrationPlayersField.hidden = true;
+    if (migrationPlayers) migrationPlayers.checked = false;
+    if (migrationPlayersNote) migrationPlayersNote.textContent = "";
+    if (migrationDestructiveField) migrationDestructiveField.hidden = true;
+    if (migrationDestructivePhrase) migrationDestructivePhrase.textContent = "";
+    if (migrationDestructive) migrationDestructive.value = "";
+    if (migrationConfirmation) migrationConfirmation.value = "";
+    if (migrationApply) migrationApply.disabled = true;
+    if (migrationRefresh) migrationRefresh.hidden = true;
+  }
+
+  function renderMigrationWarnings(warnings) {
+    if (!migrationWarnings) return;
+    migrationWarnings.replaceChildren();
+    (warnings || []).forEach((warning) => {
+      const notice = document.createElement("div");
+      notice.className = "notice warning";
+      notice.textContent = warning.message || warning.Message || String(warning);
+      migrationWarnings.appendChild(notice);
+    });
+  }
+
+  function updateMigrationApplyState() {
+    if (!migrationApply || !reviewedMigrationPlan) return;
+    const requirements = reviewedMigrationPlan.requirements || {};
+    const migrateReady = (migrationConfirmation?.value.trim() || "") === "MIGRATE";
+    const playersReady = !requirements.players_confirmation_required || Boolean(migrationPlayers?.checked);
+    const phrase = requirements.confirmation_phrase || "";
+    const destructiveReady = !requirements.destructive_confirmation_required || (migrationDestructive?.value.trim() || "") === phrase;
+    migrationApply.disabled = !(migrateReady && playersReady && destructiveReady);
+  }
+
+  function renderMigrationPlan(plan) {
+    reviewedMigrationPlan = plan;
+    const normalized = plan.normalized || {};
+    const requirements = plan.requirements || {};
+    if (migrationSetup) migrationSetup.hidden = true;
+    if (migrationReviewPanel) migrationReviewPanel.hidden = false;
+    if (migrationProgress) migrationProgress.hidden = true;
+    if (migrationTitle) migrationTitle.textContent = "Review Minecraft data migration";
+    if (migrationCurrentPath) migrationCurrentPath.textContent = normalized.current_data_path || "Unknown";
+    if (migrationReviewDevice) migrationReviewDevice.textContent = normalized.device || "";
+    if (migrationReviewFilesystem) migrationReviewFilesystem.textContent = normalized.filesystem || "Unknown";
+    if (migrationReviewMount) migrationReviewMount.textContent = normalized.mount_point || "";
+    if (migrationReviewPath) migrationReviewPath.textContent = normalized.path || "";
+    if (migrationReviewCapacity) migrationReviewCapacity.textContent = migrationBytes(normalized.target_capacity_bytes);
+    renderMigrationWarnings(plan.warnings);
+    const playersRequired = Boolean(requirements.players_confirmation_required);
+    if (migrationPlayersField) migrationPlayersField.hidden = !playersRequired;
+    if (migrationPlayers) migrationPlayers.checked = false;
+    if (migrationPlayersNote) {
+      const names = (requirements.players || []).join(", ");
+      migrationPlayersNote.textContent = playersRequired ? (names ? "Online: " + names : String(requirements.online || 0) + " player(s) online.") : "";
+    }
+    const destructiveRequired = Boolean(requirements.destructive_confirmation_required);
+    if (migrationDestructiveField) migrationDestructiveField.hidden = !destructiveRequired;
+    if (migrationDestructivePhrase) migrationDestructivePhrase.textContent = requirements.confirmation_phrase || "";
+    if (migrationDestructive) migrationDestructive.value = "";
+    if (migrationConfirmation) migrationConfirmation.value = "";
+    if (migrationReviewError) { migrationReviewError.hidden = true; migrationReviewError.textContent = ""; }
+    updateMigrationApplyState();
+    migrationConfirmation?.focus();
+  }
+
+  function showMigrationProgress(operation) {
+    if (!operation || operation.operation_type !== "data_migration") return;
+    reviewedMigrationPlan = null;
+    if (migrationSetup) migrationSetup.hidden = true;
+    if (migrationReviewPanel) migrationReviewPanel.hidden = true;
+    if (migrationProgress) migrationProgress.hidden = false;
+    if (migrationTitle) migrationTitle.textContent = "Minecraft data migration";
+    if (migrationProgressState) migrationProgressState.textContent = migrationStateLabel(operation.state);
+    if (migrationProgressStage) migrationProgressStage.textContent = migrationStageLabel(operation.stage);
+    if (migrationProgressStatus) migrationProgressStatus.textContent = operation.status || "Minecraft data migration is running.";
+    if (migrationProgressID) migrationProgressID.textContent = operation.operation_id || "";
+    if (migrationReconnect) migrationReconnect.hidden = true;
+    if (migrationSuccess) migrationSuccess.hidden = operation.state !== "succeeded";
+    if (migrationRollback) migrationRollback.hidden = operation.state !== "rolled_back";
+    if (migrationAttention) migrationAttention.hidden = operation.state !== "needs_attention";
+    const terminal = migrationTerminal(operation.state);
+    if (migrationRefresh) migrationRefresh.hidden = !terminal;
+    stopMigrationPolling();
+    if (!terminal && operation.operation_id) {
+      migrationPollFailures = 0;
+      migrationPollTimer = window.setTimeout(() => pollMigrationProgress(operation.operation_id), 2500);
+    }
+  }
+
+  async function pollMigrationProgress(operationID) {
+    try {
+      const payload = await migrationJSON("/api/new-storage/minecraft-data/progress/" + encodeURIComponent(operationID));
+      if (!payload) return;
+      migrationPollFailures = 0;
+      showMigrationProgress(payload.operation);
+    } catch (_) {
+      migrationPollFailures += 1;
+      if (migrationPollFailures >= 2 && migrationReconnect) migrationReconnect.hidden = false;
+      migrationPollTimer = window.setTimeout(() => pollMigrationProgress(operationID), 2500);
+    }
+  }
+
+  async function showCurrentMigrationIfAny() {
+    try {
+      const payload = await migrationJSON("/api/new-storage/minecraft-data/current");
+      if (payload?.operation) {
+        showMigrationProgress(payload.operation);
+        return true;
+      }
+    } catch (error) {
+      if (migrationError) {
+        migrationError.textContent = error.message;
+        migrationError.hidden = false;
+      }
+    }
+    return false;
+  }
+
   function closeMigrationDialog() {
+    if (migrationApplying) return;
+    stopMigrationPolling();
     migrationDialog?.close();
   }
 
-  migrateButton?.addEventListener("click", () => {
+  migrateButton?.addEventListener("click", async () => {
     if (!selectedPartition || selectedPartition.minecraftCandidate !== "Yes" || !migrationDialog) return;
     closeActionMenu();
     detailDialog?.close();
+    resetMigrationDialog();
 
     const existingMount = selectedPartition.minecraftMountPoint || "";
     const mountPoint = existingMount || "/var/mnt/justvoxel-data";
@@ -833,20 +1103,95 @@
     }
     if (migrationMountNote) {
       migrationMountNote.textContent = existingMount
-        ? "This filesystem is already mounted. The migration Review will verify this exact mount point."
+        ? "This filesystem is already mounted. Review will verify this exact mount point."
         : "This filesystem is not mounted. The migration backend can create a permanent mount at this location.";
     }
     if (migrationPath) migrationPath.value = minecraftDataPath(mountPoint);
     migrationDialog.showModal();
-    migrationPath?.focus();
+    const active = await showCurrentMigrationIfAny();
+    if (!active) migrationPath?.focus();
+  });
+
+  migrationReview?.addEventListener("click", async () => {
+    if (migrationError) { migrationError.hidden = true; migrationError.textContent = ""; }
+    migrationReview.disabled = true;
+    migrationReview.textContent = "Reviewing…";
+    try {
+      const body = migrationRequestBody();
+      const payload = await migrationJSON("/api/new-storage/minecraft-data/plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+      });
+      if (payload?.plan) renderMigrationPlan(payload.plan);
+    } catch (error) {
+      if (error.payload?.operation) {
+        showMigrationProgress(error.payload.operation);
+      } else if (migrationError) {
+        migrationError.textContent = error.message;
+        migrationError.hidden = false;
+      }
+    } finally {
+      migrationReview.disabled = false;
+      migrationReview.textContent = "Review migration";
+    }
+  });
+
+  migrationApply?.addEventListener("click", async () => {
+    if (!reviewedMigrationPlan || migrationApplying) return;
+    updateMigrationApplyState();
+    if (migrationApply.disabled) return;
+    migrationApplying = true;
+    migrationApply.disabled = true;
+    if (migrationClose) migrationClose.disabled = true;
+    if (migrationBack) migrationBack.disabled = true;
+    migrationApply.textContent = "Starting…";
+    try {
+      const body = migrationRequestBody();
+      body.set("plan_fingerprint", reviewedMigrationPlan.plan_fingerprint || "");
+      body.set("migration_confirmation", migrationConfirmation?.value.trim() || "");
+      if (migrationPlayers?.checked) body.set("players_confirmed", "yes");
+      if (!(migrationDestructiveField?.hidden)) body.set("destructive_confirmation", migrationDestructive?.value.trim() || "");
+      const payload = await migrationJSON("/api/new-storage/minecraft-data/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+      });
+      if (payload?.operation) showMigrationProgress(payload.operation);
+    } catch (error) {
+      if (error.payload?.plan) renderMigrationPlan(error.payload.plan);
+      if (migrationReviewError) {
+        migrationReviewError.textContent = error.message;
+        migrationReviewError.hidden = false;
+      }
+    } finally {
+      migrationApplying = false;
+      if (migrationClose) migrationClose.disabled = false;
+      if (migrationBack) migrationBack.disabled = false;
+      migrationApply.textContent = "Start migration";
+      updateMigrationApplyState();
+    }
   });
 
   migrationMount?.addEventListener("input", () => {
     if (!migrationMount.readOnly && migrationPath) migrationPath.value = minecraftDataPath(migrationMount.value.trim());
   });
+  migrationConfirmation?.addEventListener("input", updateMigrationApplyState);
+  migrationDestructive?.addEventListener("input", updateMigrationApplyState);
+  migrationPlayers?.addEventListener("change", updateMigrationApplyState);
+  migrationBack?.addEventListener("click", () => {
+    reviewedMigrationPlan = null;
+    if (migrationSetup) migrationSetup.hidden = false;
+    if (migrationReviewPanel) migrationReviewPanel.hidden = true;
+    if (migrationTitle) migrationTitle.textContent = "Use this filesystem";
+    migrationPath?.focus();
+  });
   migrationClose?.addEventListener("click", closeMigrationDialog);
   migrationCancel?.addEventListener("click", closeMigrationDialog);
+  migrationProgressClose?.addEventListener("click", closeMigrationDialog);
+  migrationRefresh?.addEventListener("click", () => window.location.reload());
   migrationDialog?.addEventListener("click", (event) => { if (event.target === migrationDialog) closeMigrationDialog(); });
+  migrationDialog?.addEventListener("cancel", (event) => { if (migrationApplying) event.preventDefault(); else stopMigrationPolling(); });
 
   function actionLabel(action) {
     if (action === "mount-for-now") return "Mount for now";
