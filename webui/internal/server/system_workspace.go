@@ -16,11 +16,11 @@ type systemWorkspaceHealthResponse struct {
 }
 
 type systemWorkspaceHistoryResponse struct {
-	OK            bool                     `json:"ok"`
-	Role          string                   `json:"role"`
-	Username      string                   `json:"username"`
-	Notifications []api.Notification       `json:"notifications,omitempty"`
-	Audit         []api.AuditEvent          `json:"audit,omitempty"`
+	OK            bool                      `json:"ok"`
+	Role          string                    `json:"role"`
+	Username      string                    `json:"username"`
+	Notifications []api.Notification        `json:"notifications,omitempty"`
+	Audit         []api.AuditEvent           `json:"audit,omitempty"`
 	Events        []api.PublicActivityEvent `json:"events,omitempty"`
 }
 

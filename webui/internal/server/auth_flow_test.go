@@ -213,7 +213,6 @@ func TestAuthenticationModeChangeRejectsMissingCSRF(t *testing.T) {
 	}
 }
 
-
 func TestSystemWorkspaceAPIsRespectForcedPasswordChangeBoundary(t *testing.T) {
 	app, err := New(newAuthFlowAPI(), Config{Version: "test", ManagementAPI: "v1"})
 	if err != nil {
