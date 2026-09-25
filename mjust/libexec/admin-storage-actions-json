@@ -16,9 +16,10 @@ append_warning() {
 }
 
 prepare_plan() {
-    local request operation device requested_mountpoint
-    local filesystem uuid current_mountpoint role size fingerprint
+    local request operation device requested_mountpoint requested_size_gib requested_free_start
+    local filesystem='' uuid='' current_mountpoint='' role='' size=0 fingerprint
     local confirmation='' destructive=false proposed_mountpoint='' target_filesystem=''
+    local table free_line='' free_start='' free_end='' free_size='' free_mib=0 planned_end='' planned_mib=0
     PLAN_WARNINGS='[]'
 
     request="$(cat)"
@@ -31,71 +32,105 @@ prepare_plan() {
     operation="$(jq -r '.operation // ""' <<< "${request}")"
     device="$(storage_action_real_device "$(jq -r '.device // ""' <<< "${request}")")"
     requested_mountpoint="$(jq -r '.mount_point // ""' <<< "${request}")"
+    requested_size_gib="$(jq -r '.size_gib // "all"' <<< "${request}")"
+    requested_free_start="$(jq -r '.free_start // ""' <<< "${request}")"
 
     [[ -n ${device} ]] || {
-        json_error 'Choose a storage partition.'
-        return 1
-    }
-    storage_action_validate_target "${device}" >/dev/null 2>&1 || {
-        json_error 'This partition is protected or unavailable for storage actions.'
+        json_error 'Choose a storage target.'
         return 1
     }
 
-    filesystem="$(storage_action_filesystem "${device}")"
-    uuid="$(storage_action_uuid "${device}")"
-    current_mountpoint="$(storage_action_mountpoint "${device}")"
-    role="$(storage_action_role "${device}" "${filesystem}" "${uuid}" "${current_mountpoint}")"
-    size="$(storage_action_size_bytes "${device}")"
-    size="${size:-0}"
+    if [[ ${operation} == create_partition ]]; then
+        storage_require_identified_system_disk >/dev/null 2>&1 || {
+            json_error 'JustVoxel could not identify the system disk safely.'
+            return 1
+        }
+        storage_validate_disk "${device}" >/dev/null 2>&1 || {
+            json_error 'The selected disk is not available for partition creation.'
+            return 1
+        }
+        table="$(storage_partition_table_type "${device}" 2>/dev/null || true)"
+        [[ -n ${table} && ${table} != unknown ]] || {
+            json_error 'The selected disk has no usable partition table.'
+            return 1
+        }
+        [[ -n ${requested_free_start} ]] || {
+            json_error 'Choose an unallocated disk segment.'
+            return 1
+        }
+        free_line="$(parted -s -m "${device}" unit MiB print free 2>/dev/null | awk -F: -v wanted="${requested_free_start}" '$5 == "free;" && $2 == wanted {print; exit}' || true)"
+        [[ -n ${free_line} ]] || {
+            json_error 'The selected unallocated space changed. Refresh Storage and choose it again.'
+            return 1
+        }
+        IFS=: read -r _ free_start free_end free_size _ <<< "${free_line}"
+        free_size="${free_size%MiB}"
+        awk -v n="${free_size}" 'BEGIN {exit !(n >= 1024)}' || {
+            json_error 'The selected unallocated space is smaller than 1 GiB.'
+            return 1
+        }
+        free_mib="$(awk -v n="${free_size}" 'BEGIN {printf "%.0f", n}')"
+        if [[ ${requested_size_gib} == all ]]; then
+            planned_end="${free_end}"
+            planned_mib="${free_mib}"
+        elif [[ ${requested_size_gib} =~ ^[1-9][0-9]*$ ]]; then
+            (( requested_size_gib * 1024 <= free_mib )) || {
+                json_error 'The requested partition is larger than the selected unallocated space.'
+                return 1
+            }
+            planned_mib=$((requested_size_gib * 1024))
+            planned_end="$(awk -v s="${free_start%MiB}" -v m="${planned_mib}" 'BEGIN {printf "%.2fMiB", s + m}')"
+        else
+            json_error 'Partition size must be a whole number of GiB or all available space.'
+            return 1
+        fi
+
+        role='Unallocated'
+        size=$((planned_mib * 1024 * 1024))
+        destructive=true
+        confirmation="CREATE PARTITION ${device}"
+        target_filesystem=xfs
+        PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'JustVoxel will create and format one new XFS partition only inside the selected unallocated space. Existing partitions are not resized.')"
+        if storage_disk_is_system "${device}"; then
+            PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'This unallocated space is on the JustVoxel system disk. Existing system partitions will not be resized or reformatted.')"
+        fi
+    else
+        storage_action_validate_target "${device}" >/dev/null 2>&1 || {
+            json_error 'This partition is protected or unavailable for storage actions.'
+            return 1
+        }
+        filesystem="$(storage_action_filesystem "${device}")"
+        uuid="$(storage_action_uuid "${device}")"
+        current_mountpoint="$(storage_action_mountpoint "${device}")"
+        role="$(storage_action_role "${device}" "${filesystem}" "${uuid}" "${current_mountpoint}")"
+        size="$(storage_action_size_bytes "${device}")"
+        size="${size:-0}"
+    fi
+
     fingerprint="$(storage_action_fingerprint "${device}")"
     [[ -n ${fingerprint} ]] || {
-        json_error 'Could not capture a stable partition fingerprint.'
+        json_error 'Could not capture a stable storage fingerprint.'
         return 1
     }
 
     case "${operation}" in
         mount)
-            [[ -n ${filesystem} ]] || {
-                json_error 'This partition is not formatted. Format it before mounting.'
-                return 1
-            }
-            storage_action_mountable_filesystem "${filesystem}" || {
-                json_error "Filesystem '${filesystem}' is not supported by the JustVoxel storage browser."
-                return 1
-            }
-            [[ -z ${current_mountpoint} ]] || {
-                json_error "This partition is already mounted at ${current_mountpoint}."
-                return 1
-            }
-            [[ -n ${requested_mountpoint} ]] || {
-                json_error 'Choose a mount point.'
-                return 1
-            }
+            [[ -n ${filesystem} ]] || { json_error 'This partition is not formatted. Format it before mounting.'; return 1; }
+            storage_action_mountable_filesystem "${filesystem}" || { json_error "Filesystem '${filesystem}' is not supported by the JustVoxel storage browser."; return 1; }
+            [[ -z ${current_mountpoint} ]] || { json_error "This partition is already mounted at ${current_mountpoint}."; return 1; }
+            [[ -n ${requested_mountpoint} ]] || { json_error 'Choose a mount point.'; return 1; }
             requested_mountpoint="$(realpath -m -- "${requested_mountpoint}" 2>/dev/null || true)"
-            storage_action_validate_mountpoint "${requested_mountpoint}" >/dev/null 2>&1 || {
-                json_error 'Choose an unused, empty and non-critical mount point.'
-                return 1
-            }
+            storage_action_validate_mountpoint "${requested_mountpoint}" >/dev/null 2>&1 || { json_error 'Choose an unused, empty and non-critical mount point.'; return 1; }
             proposed_mountpoint="${requested_mountpoint}"
             target_filesystem="${filesystem}"
             ;;
         unmount)
-            [[ -n ${current_mountpoint} ]] || {
-                json_error 'This partition is not mounted.'
-                return 1
-            }
-            storage_mount_is_critical "${current_mountpoint}" && {
-                json_error 'Critical system mounts cannot be unmounted from JustVoxel.'
-                return 1
-            }
+            [[ -n ${current_mountpoint} ]] || { json_error 'This partition is not mounted.'; return 1; }
+            storage_mount_is_critical "${current_mountpoint}" && { json_error 'Critical system mounts cannot be unmounted from JustVoxel.'; return 1; }
             proposed_mountpoint="${current_mountpoint}"
             target_filesystem="${filesystem}"
-            if [[ ${role} == *Minecraft* ]]; then
-                PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'Minecraft data is stored on this partition. Unmounting it may interrupt or stop the Minecraft server.')"
-            fi
-            if [[ ${role} == *Backups* ]]; then
-                PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'JustVoxel backups use this partition. Backups will fail while it is unmounted.')"
-            fi
+            if [[ ${role} == *Minecraft* ]]; then PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'Minecraft data is stored on this partition. Unmounting it may interrupt or stop the Minecraft server.')"; fi
+            if [[ ${role} == *Backups* ]]; then PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'JustVoxel backups use this partition. Backups will fail while it is unmounted.')"; fi
             ;;
         format)
             if [[ -n ${filesystem} ]] && ! storage_action_managed_filesystem "${filesystem}"; then
@@ -109,20 +144,15 @@ prepare_plan() {
             destructive=true
             confirmation="FORMAT ${device}"
             target_filesystem=xfs
-            proposed_mountpoint=''
             PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'Formatting permanently destroys all data on this partition and creates a new XFS filesystem.')"
-            if [[ -n ${current_mountpoint} ]]; then
-                PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" "This partition is currently mounted at ${current_mountpoint}. JustVoxel will unmount it before formatting.")"
-            fi
-            if [[ ${role} == *Minecraft* ]]; then
-                PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'Minecraft data is stored on this partition. Formatting it will permanently destroy that Minecraft data and leave the current server storage configuration invalid until you choose a new location.')"
-            fi
-            if [[ ${role} == *Backups* ]]; then
-                PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'JustVoxel backups are stored on this partition. Formatting it will permanently destroy those backups and leave the current backup destination invalid until you choose a new location.')"
-            fi
+            if [[ -n ${current_mountpoint} ]]; then PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" "This partition is currently mounted at ${current_mountpoint}. JustVoxel will unmount it before formatting.")"; fi
+            if [[ ${role} == *Minecraft* ]]; then PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'Minecraft data is stored on this partition. Formatting it will permanently destroy that Minecraft data and leave the current server storage configuration invalid until you choose a new location.')"; fi
+            if [[ ${role} == *Backups* ]]; then PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'JustVoxel backups are stored on this partition. Formatting it will permanently destroy those backups and leave the current backup destination invalid until you choose a new location.')"; fi
+            ;;
+        create_partition)
             ;;
         *)
-            json_error 'Choose Mount, Unmount, or Format.'
+            json_error 'Choose Mount, Unmount, Format, or Create partition.'
             return 1
             ;;
     esac
@@ -138,9 +168,13 @@ prepare_plan() {
         --arg role "${role}" \
         --arg confirmation "${confirmation}" \
         --arg fingerprint "${fingerprint}" \
+        --arg size_gib "${requested_size_gib}" \
+        --arg free_start "${free_start}" \
+        --arg free_end "${free_end}" \
+        --arg planned_end "${planned_end}" \
         --argjson size_bytes "${size}" \
         --argjson destructive "${destructive}" \
-        '{operation:$operation,device:$device,filesystem:$filesystem,target_filesystem:$target_filesystem,uuid:$uuid,mount_point:$mount_point,current_mount_point:$current_mount_point,role:$role,confirmation:$confirmation,fingerprint:$fingerprint,size_bytes:$size_bytes,destructive:$destructive}')"
+        '{operation:$operation,device:$device,filesystem:$filesystem,target_filesystem:$target_filesystem,uuid:$uuid,mount_point:$mount_point,current_mount_point:$current_mount_point,role:$role,confirmation:$confirmation,fingerprint:$fingerprint,size_gib:$size_gib,free_start:$free_start,free_end:$free_end,planned_end:$planned_end,size_bytes:$size_bytes,destructive:$destructive}')"
 }
 
 plan_json() {

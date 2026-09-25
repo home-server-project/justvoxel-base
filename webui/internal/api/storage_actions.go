@@ -13,6 +13,8 @@ type AdminStorageActionRequest struct {
 	Operation    string `json:"operation"`
 	Device       string `json:"device"`
 	MountPoint   string `json:"mount_point,omitempty"`
+	SizeGiB      string `json:"size_gib,omitempty"`
+	FreeStart    string `json:"free_start,omitempty"`
 	Confirmation string `json:"confirmation,omitempty"`
 	Fingerprint  string `json:"fingerprint,omitempty"`
 }
@@ -28,6 +30,11 @@ type AdminStorageActionPlan struct {
 	Role              string `json:"role,omitempty"`
 	Confirmation      string `json:"confirmation,omitempty"`
 	Fingerprint       string `json:"fingerprint"`
+	SizeGiB           string `json:"size_gib,omitempty"`
+	FreeStart         string `json:"free_start,omitempty"`
+	FreeEnd           string `json:"free_end,omitempty"`
+	PlannedEnd        string `json:"planned_end,omitempty"`
+	CreatedDevice     string `json:"created_device,omitempty"`
 	SizeBytes         uint64 `json:"size_bytes,omitempty"`
 	Destructive       bool   `json:"destructive,omitempty"`
 }

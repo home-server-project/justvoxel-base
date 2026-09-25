@@ -268,6 +268,8 @@ func (a *App) storageBrowserAction(w http.ResponseWriter, r *http.Request, apply
 		Operation:    strings.TrimSpace(r.FormValue("operation")),
 		Device:       strings.TrimSpace(r.FormValue("device")),
 		MountPoint:   strings.TrimSpace(r.FormValue("mount_point")),
+		SizeGiB:      strings.TrimSpace(r.FormValue("size_gib")),
+		FreeStart:    strings.TrimSpace(r.FormValue("free_start")),
 		Confirmation: r.FormValue("confirmation"),
 		Fingerprint:  strings.TrimSpace(r.FormValue("fingerprint")),
 	}

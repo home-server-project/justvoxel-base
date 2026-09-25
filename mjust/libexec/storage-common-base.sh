@@ -81,6 +81,33 @@ storage_system_disks() {
     done | sort -u
 }
 
+storage_system_partitions() {
+    local target real
+    {
+        for target in / /boot /boot/efi /var /etc /sysroot; do
+            real="$(storage_target_block_device "${target}")"
+            [[ -n ${real} ]] || continue
+            lsblk -s -npo NAME,TYPE "${real}" 2>/dev/null \
+                | awk '$2 == "part" {print $1}'
+        done
+
+        lsblk -J -p -o PATH,TYPE,MOUNTPOINTS 2>/dev/null \
+            | jq -r '
+                .. | objects
+                | select(.path? and .type? == "part" and ((.mountpoints // []) | type == "array"))
+                | select(any(.mountpoints[]?;
+                    . == "/" or
+                    . == "/boot" or startswith("/boot/") or
+                    . == "/var" or . == "/var/tmp" or
+                    . == "/var/lib/containers" or startswith("/var/lib/containers/") or
+                    . == "/etc" or startswith("/etc/") or
+                    . == "/sysroot" or startswith("/sysroot/")
+                  ))
+                | .path
+              ' 2>/dev/null || true
+    } | sort -u
+}
+
 storage_show_devices() {
     echo 'Detected block storage:'
     lsblk -e7 -o NAME,PATH,TYPE,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINTS,MODEL,TRAN,RO

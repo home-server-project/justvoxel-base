@@ -91,15 +91,20 @@ configuration_json() {
 }
 
 storage_json() {
-    local raw devices systems system_lines enriched device_json mountpoint stats
+    local raw devices systems system_parts system_lines system_part_lines enriched device_json mountpoint stats
     local fs_size fs_used fs_free usage_known free_spaces disk table record
     local free_start free_end free_size free_size_mib free_size_bytes free_item
 
     raw="$(lsblk -J -b -e7 -l -o NAME,PATH,PKNAME,TYPE,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINTS,MODEL,TRAN,RO)"
     systems='[]'
+    system_parts='[]'
     system_lines="$(storage_system_disks || true)"
     if [[ -n ${system_lines} ]]; then
         systems="$(printf '%s\n' "${system_lines}" | jq -R -s 'split("\n") | map(select(length > 0))')"
+    fi
+    system_part_lines="$(storage_system_partitions || true)"
+    if [[ -n ${system_part_lines} ]]; then
+        system_parts="$(printf '%s\n' "${system_part_lines}" | jq -R -s 'split("\n") | map(select(length > 0))')"
     fi
 
     devices="$(jq '[.blockdevices[] | select(((.name // "") | startswith("zram")) | not) | {
@@ -109,8 +114,13 @@ storage_json() {
         model:((.model // "") | gsub("^[[:space:]]+|[[:space:]]+$"; "")),
         transport:(.tran // ""), read_only:((.ro // false) == true or (.ro // 0) == 1)
     }]' <<< "${raw}")"
-    devices="$(jq --argjson systems "${systems}" '[.[] as $d | $d + {
-        system:(($systems | index($d.path)) != null or (($d.parent | length) > 0 and (($systems | index("/dev/" + $d.parent)) != null)))
+    devices="$(jq --argjson systems "${systems}" --argjson system_parts "${system_parts}" '[.[] as $d | $d + {
+        system:(if $d.type == "disk"
+            then (($systems | index($d.path)) != null)
+            elif $d.type == "part"
+            then (($system_parts | index($d.path)) != null)
+            else false
+        end)
     }]' <<< "${devices}")"
 
     enriched='[]'

@@ -26,11 +26,16 @@ storage_action_parent_disk() {
 }
 
 storage_action_is_system_partition() {
-    local device parent
+    local device requested system_partition real
     device="$1"
-    parent="$(storage_action_parent_disk "${device}" || true)"
-    [[ -n ${parent} ]] || return 1
-    storage_disk_is_system "${parent}"
+    requested="$(storage_action_real_device "${device}")"
+    [[ -n ${requested} ]] || return 1
+    while IFS= read -r system_partition; do
+        [[ -n ${system_partition} ]] || continue
+        real="$(storage_action_real_device "${system_partition}")"
+        [[ -n ${real} && ${requested} == "${real}" ]] && return 0
+    done < <(storage_system_partitions)
+    return 1
 }
 
 storage_action_mountpoint() {
@@ -197,10 +202,14 @@ storage_action_validate_mountpoint() {
 }
 
 storage_action_fingerprint() {
-    local device="$1"
+    local device="$1" type
+    type="$(lsblk -dnro TYPE "${device}" 2>/dev/null || true)"
     {
         printf 'device=%s\n' "$(storage_action_real_device "${device}")"
         lsblk -b -P -o PATH,PKNAME,TYPE,SIZE,FSTYPE,UUID,PARTUUID,MOUNTPOINTS,START,RO,MODEL,SERIAL,WWN,TRAN "${device}" 2>/dev/null || true
         blkid "${device}" 2>/dev/null || true
+        if [[ ${type} == disk ]]; then
+            parted -s -m "${device}" unit MiB print free 2>/dev/null || true
+        fi
     } | sha256sum | awk '{print $1}'
 }
