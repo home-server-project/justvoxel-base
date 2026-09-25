@@ -139,6 +139,40 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 	}
 }
 
+func TestRecommendedAndAdvancedModesUseSameAuthoritativePlanRequest(t *testing.T) {
+	client := setupWizardClient()
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer firstRunSetupReviews.delete(app, "session-token")
+
+	values := url.Values{"csrf": {"csrf-token"}, "server_type": {"paper"}}
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recommended", values.Encode()))
+	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/setup/review" {
+		t.Fatalf("recommended setup returned %d %q: %s", rr.Code, rr.Header().Get("Location"), rr.Body.String())
+	}
+	recommended, ok := firstRunSetupDrafts.get(app, "session-token")
+	if !ok {
+		t.Fatal("recommended setup draft missing")
+	}
+	advanced := recommended
+	advanced.Mode = "advanced"
+
+	recommendedRequest, err := setupPlanRequestFromDraft(recommended)
+	if err != nil {
+		t.Fatal(err)
+	}
+	advancedRequest, err := setupPlanRequestFromDraft(advanced)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recommendedRequest != advancedRequest {
+		t.Fatalf("setup mode changed authoritative Agent plan request:\nrecommended=%#v\nadvanced=%#v", recommendedRequest, advancedRequest)
+	}
+}
+
 func TestSetupReviewConfigurationDownloadExcludesSecrets(t *testing.T) {
 	client := setupReviewClient()
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
@@ -182,7 +216,7 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 		t.Fatalf("review returned %d: %s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"Cancel setup", ">Back</button>", "setup-execution-copy"} {
+	for _, want := range []string{"Cancel setup", ">Back</button>", "setup-execution-copy", "setup-review-summary", "Technical details", "<details class=\"setup-review-details\""} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("review layout missing %q: %s", want, body)
 		}
@@ -202,6 +236,9 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 		"white-space:nowrap",
 		"overflow-x:auto",
 		"grid-template-columns:minmax(0,1fr) auto",
+		".setup-review-summary",
+		"grid-template-columns:repeat(4,minmax(0,1fr))",
+		".setup-review-details",
 	} {
 		if !strings.Contains(styles, want) {
 			t.Fatalf("responsive review CSS missing %q", want)
