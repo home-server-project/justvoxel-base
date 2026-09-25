@@ -25,6 +25,7 @@ type fakeNetworkClient struct {
 	connected       networking.WiFiConnectRequest
 	connectResult   networking.WiFiConnectResult
 	connectError    error
+	forgetError     error
 }
 
 func (f *fakeNetworkClient) Close() error { return nil }
@@ -52,7 +53,7 @@ func (f *fakeNetworkClient) DisconnectWiFi(_ context.Context, iface string) erro
 }
 func (f *fakeNetworkClient) ForgetWiFiProfile(_ context.Context, profileUUID string) error {
 	f.forgotten = profileUUID
-	return nil
+	return f.forgetError
 }
 func (f *fakeNetworkClient) ConnectWiFi(_ context.Context, request networking.WiFiConnectRequest) (networking.WiFiConnectResult, error) {
 	f.connected = request
