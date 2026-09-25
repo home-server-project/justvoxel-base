@@ -14,6 +14,7 @@ func registerAdminOperationRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("GET /v1/admin/setup/current-operation", s.adminCurrentSetupOperation)
 	mux.HandleFunc("GET /v1/admin/restore/current-operation", s.adminCurrentRestoreOperation)
 	mux.HandleFunc("GET /v1/admin/data-migration/current-operation", s.adminCurrentDataMigrationOperation)
+	mux.HandleFunc("GET /v1/admin/reset/minecraft/current-operation", s.adminCurrentMinecraftResetOperation)
 	mux.HandleFunc("GET /v1/admin/migration/current-operation", s.adminCurrentMigrationOperation)
 }
 
@@ -85,6 +86,22 @@ func (s *server) adminCurrentDataMigrationOperation(w http.ResponseWriter, r *ht
 	operation, err := s.operations.currentDataMigration()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "current data migration operation could not be read")
+		return
+	}
+	writeJSON(w, http.StatusOK, adminOperationResponse{Operation: operation})
+}
+
+func (s *server) adminCurrentMinecraftResetOperation(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdministrator(w, r); !ok {
+		return
+	}
+	if s.operations == nil {
+		writeError(w, http.StatusServiceUnavailable, "operation status is unavailable")
+		return
+	}
+	operation, err := s.operations.currentMinecraftReset()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "current Minecraft reset operation could not be read")
 		return
 	}
 	writeJSON(w, http.StatusOK, adminOperationResponse{Operation: operation})
