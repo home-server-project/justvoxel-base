@@ -33,6 +33,16 @@ type systemWorkspaceUsersAPI interface {
 	AdminResetBackupAllowance(ctx context.Context, session string, id int64) (api.AdminUser, error)
 }
 
+type systemWorkspaceResetAPI interface {
+	AdminMinecraftResetPlan(ctx context.Context, session string) (api.AdminResetPlanResponse, error)
+	AdminFactoryResetPlan(ctx context.Context, session string) (api.AdminResetPlanResponse, error)
+	AdminMinecraftResetApply(ctx context.Context, session string, request api.AdminMinecraftResetApplyRequest) (api.AdminResetApplyResponse, error)
+	AdminFactoryResetApply(ctx context.Context, session string, request api.AdminFactoryResetApplyRequest) (api.AdminResetApplyResponse, error)
+	AdminCurrentMinecraftResetOperation(ctx context.Context, session string) (api.PersistentOperationResponse, error)
+	AdminCurrentFactoryResetOperation(ctx context.Context, session string) (api.PersistentOperationResponse, error)
+	AdminOperation(ctx context.Context, session, id string) (api.PersistentOperationResponse, error)
+}
+
 type systemWorkspaceHealthResponse struct {
 	OK     bool                        `json:"ok"`
 	Result api.AdminValidationResponse `json:"result"`
@@ -100,6 +110,13 @@ func (a *App) registerSystemWorkspaceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/system/workspace/security", a.systemWorkspaceSecurity)
 	mux.HandleFunc("POST /api/system/workspace/security/authentication", a.systemWorkspaceAuthenticationChange)
 	mux.HandleFunc("POST /api/system/workspace/security/password", a.systemWorkspacePasswordChange)
+	mux.HandleFunc("POST /api/system/workspace/reset/minecraft/plan", a.systemWorkspaceMinecraftResetPlan)
+	mux.HandleFunc("POST /api/system/workspace/reset/minecraft/apply", a.systemWorkspaceMinecraftResetApply)
+	mux.HandleFunc("GET /api/system/workspace/reset/minecraft/current", a.systemWorkspaceMinecraftResetCurrent)
+	mux.HandleFunc("POST /api/system/workspace/reset/factory/plan", a.systemWorkspaceFactoryResetPlan)
+	mux.HandleFunc("POST /api/system/workspace/reset/factory/apply", a.systemWorkspaceFactoryResetApply)
+	mux.HandleFunc("GET /api/system/workspace/reset/factory/current", a.systemWorkspaceFactoryResetCurrent)
+	mux.HandleFunc("GET /api/system/workspace/reset/operations/{id}", a.systemWorkspaceResetOperation)
 	mux.HandleFunc("GET /api/system/workspace/about", a.systemWorkspaceAbout)
 }
 
@@ -456,6 +473,131 @@ func (a *App) systemWorkspacePasswordChange(w http.ResponseWriter, r *http.Reque
 	}
 	a.clearSessionCookies(w)
 	writeSystemWorkspaceJSON(w, http.StatusOK, systemWorkspaceMutationResponse{OK: true, Message: "Password changed.", Reauthenticate: true})
+}
+
+func (a *App) systemWorkspaceResetClient(w http.ResponseWriter, r *http.Request, mutation bool) (string, systemWorkspaceResetAPI, bool) {
+	if mutation && !a.validCSRF(r) {
+		writeSystemWorkspaceError(w, http.StatusForbidden, "Invalid CSRF token.")
+		return "", nil, false
+	}
+	session, _, ok := a.systemWorkspaceIdentity(w, r, "administrator")
+	if !ok {
+		return "", nil, false
+	}
+	client, ok := a.api.(systemWorkspaceResetAPI)
+	if !ok {
+		writeSystemWorkspaceError(w, http.StatusServiceUnavailable, "Reset operations are unavailable.")
+		return "", nil, false
+	}
+	return session, client, true
+}
+
+func (a *App) systemWorkspaceMinecraftResetPlan(w http.ResponseWriter, r *http.Request) {
+	session, client, ok := a.systemWorkspaceResetClient(w, r, true)
+	if !ok {
+		return
+	}
+	result, err := client.AdminMinecraftResetPlan(r.Context(), session)
+	if err != nil {
+		a.writeSystemWorkspaceAPIError(w, err, "Minecraft reset could not be planned.")
+		return
+	}
+	writeSystemWorkspaceJSON(w, http.StatusOK, result)
+}
+
+func (a *App) systemWorkspaceFactoryResetPlan(w http.ResponseWriter, r *http.Request) {
+	session, client, ok := a.systemWorkspaceResetClient(w, r, true)
+	if !ok {
+		return
+	}
+	result, err := client.AdminFactoryResetPlan(r.Context(), session)
+	if err != nil {
+		a.writeSystemWorkspaceAPIError(w, err, "Full factory reset could not be planned.")
+		return
+	}
+	writeSystemWorkspaceJSON(w, http.StatusOK, result)
+}
+
+func (a *App) systemWorkspaceMinecraftResetApply(w http.ResponseWriter, r *http.Request) {
+	session, client, ok := a.systemWorkspaceResetClient(w, r, true)
+	if !ok {
+		return
+	}
+	result, err := client.AdminMinecraftResetApply(r.Context(), session, api.AdminMinecraftResetApplyRequest{
+		PlanFingerprint: r.FormValue("plan_fingerprint"),
+		ConfirmPlayers:  r.FormValue("confirm_players") == "yes",
+	})
+	if err != nil {
+		a.writeSystemWorkspaceAPIError(w, err, "Minecraft reset could not start.")
+		return
+	}
+	writeSystemWorkspaceJSON(w, http.StatusAccepted, result)
+}
+
+func (a *App) systemWorkspaceFactoryResetApply(w http.ResponseWriter, r *http.Request) {
+	session, client, ok := a.systemWorkspaceResetClient(w, r, true)
+	if !ok {
+		return
+	}
+	password := r.FormValue("system_password")
+	if strings.TrimSpace(password) == "" {
+		writeSystemWorkspaceError(w, http.StatusBadRequest, "Current voxel system password is required.")
+		return
+	}
+	result, err := client.AdminFactoryResetApply(r.Context(), session, api.AdminFactoryResetApplyRequest{
+		PlanFingerprint: r.FormValue("plan_fingerprint"),
+		ConfirmPlayers:  r.FormValue("confirm_players") == "yes",
+		SystemPassword:  password,
+	})
+	password = ""
+	if err != nil {
+		a.writeSystemWorkspaceAPIError(w, err, "Full factory reset could not start.")
+		return
+	}
+	writeSystemWorkspaceJSON(w, http.StatusAccepted, result)
+}
+
+func (a *App) systemWorkspaceMinecraftResetCurrent(w http.ResponseWriter, r *http.Request) {
+	session, client, ok := a.systemWorkspaceResetClient(w, r, false)
+	if !ok {
+		return
+	}
+	result, err := client.AdminCurrentMinecraftResetOperation(r.Context(), session)
+	if err != nil {
+		a.writeSystemWorkspaceAPIError(w, err, "Minecraft reset status is unavailable.")
+		return
+	}
+	writeSystemWorkspaceJSON(w, http.StatusOK, result)
+}
+
+func (a *App) systemWorkspaceFactoryResetCurrent(w http.ResponseWriter, r *http.Request) {
+	session, client, ok := a.systemWorkspaceResetClient(w, r, false)
+	if !ok {
+		return
+	}
+	result, err := client.AdminCurrentFactoryResetOperation(r.Context(), session)
+	if err != nil {
+		a.writeSystemWorkspaceAPIError(w, err, "Factory reset status is unavailable.")
+		return
+	}
+	writeSystemWorkspaceJSON(w, http.StatusOK, result)
+}
+
+func (a *App) systemWorkspaceResetOperation(w http.ResponseWriter, r *http.Request) {
+	session, client, ok := a.systemWorkspaceResetClient(w, r, false)
+	if !ok {
+		return
+	}
+	result, err := client.AdminOperation(r.Context(), session, r.PathValue("id"))
+	if err != nil {
+		a.writeSystemWorkspaceAPIError(w, err, "Reset operation status is unavailable.")
+		return
+	}
+	if result.Operation != nil && result.Operation.OperationType != "minecraft_reset" && result.Operation.OperationType != "factory_reset" {
+		writeSystemWorkspaceError(w, http.StatusNotFound, "Reset operation was not found.")
+		return
+	}
+	writeSystemWorkspaceJSON(w, http.StatusOK, result)
 }
 
 func (a *App) systemWorkspaceAbout(w http.ResponseWriter, r *http.Request) {
