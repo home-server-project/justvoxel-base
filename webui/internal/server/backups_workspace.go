@@ -489,7 +489,7 @@ func (a *App) buildBackupsWorkspaceData(
 		DestinationPartitions:     partitions,
 		DestinationAvailable:      backupsWorkspaceFormatOptionalBytes(destination.Current.AvailableBytes),
 		DestinationFilesystemSize: backupsWorkspaceFormatOptionalBytes(destination.Current.FilesystemBytes),
-		RestoreError: restoreError, RestoreOperation: restoreOperation,
+		RestoreError:              restoreError, RestoreOperation: restoreOperation,
 	}
 	if destinationPlan != nil {
 		data.ProposedDestinationAvailable = backupsWorkspaceFormatOptionalBytes(destinationPlan.Proposed.AvailableBytes)
