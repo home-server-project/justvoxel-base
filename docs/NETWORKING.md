@@ -52,6 +52,33 @@ The Management API and WebUI now expose the read-only network experience, with W
 
 This checkpoint does not connect or disconnect networks, toggle radios, change IP/DNS/gateway/MTU settings, modify autoconnect, forget profiles, or run repairs. Those configuration-changing actions require later checkpoints and the safety model described below.
 
+### Checkpoint safety layer
+
+The Management Agent now implements the NetworkManager checkpoint transaction layer that future disruptive network mutations must use.
+
+The Management API exposes administrator-only checkpoint lifecycle endpoints for:
+
+- creating a checkpoint for explicit interface names
+- reading active checkpoint metadata
+- confirming the new state by destroying the checkpoint
+- rolling back immediately and reporting per-interface rollback results
+
+The unprivileged WebUI has matching proxy endpoints, but Step 3 intentionally adds no visible checkpoint controls. Future mutation screens will use this transaction layer behind the normal user experience.
+
+Checkpoint behavior is deliberately conservative:
+
+- the default automatic rollback timeout is 90 seconds
+- accepted timeouts are 30 through 300 seconds
+- a zero timeout from the WebUI/API means use the 90-second JustVoxel default, never an infinite checkpoint
+- at least one explicit interface is required; JustVoxel does not create an all-device checkpoint
+- JustVoxel uses NetworkManager checkpoint flags value 0, so it does not destroy external checkpoints or opt into overlapping checkpoints
+- overlapping JustVoxel transactions on the same interface are rejected
+- confirm and rollback terminal actions are serialized so concurrent requests cannot race
+- NetworkManager D-Bus checkpoint object paths remain inside the Management Agent; browser/API clients receive an opaque random transaction ID
+- transaction creation, confirmation, and rollback are written to the existing audit log
+
+The in-memory JustVoxel transaction map is intentionally not authoritative for rollback safety. NetworkManager owns the actual checkpoint and its automatic rollback timer. If the Management Agent restarts while a checkpoint is pending, the opaque JustVoxel transaction ID is lost and cannot be confirmed afterward, but NetworkManager still retains the checkpoint and automatically rolls it back when its timeout expires. This fails toward restoring connectivity rather than keeping an unconfirmed network change.
+
 ## Stable identifiers
 
 D-Bus object paths are runtime implementation details and can change.
@@ -87,9 +114,9 @@ No browser Polkit agent, sudo bridge, shell wrapper, or additional privileged da
 
 ## Safe configuration changes
 
-Potentially disruptive network changes must use NetworkManager checkpoints before they are exposed through the WebUI.
+Potentially disruptive network changes must use the implemented NetworkManager checkpoint layer before they are exposed through the WebUI.
 
-The intended transaction is:
+The intended mutation transaction is:
 
 1. Create a NetworkManager checkpoint for the affected device or devices.
 2. Apply the requested configuration.
