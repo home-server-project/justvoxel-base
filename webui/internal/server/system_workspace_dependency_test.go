@@ -1,12 +1,19 @@
 package server
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestSystemWorkspaceDoesNotDependOnLegacyPageInterfaces(t *testing.T) {
-	source, err := assets.ReadFile("system_workspace.go")
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not locate System Workspace dependency test source")
+	}
+	source, err := os.ReadFile(filepath.Join(filepath.Dir(filename), "system_workspace.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
