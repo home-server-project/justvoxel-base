@@ -138,10 +138,10 @@ func TestSetupWizardStorageUsesSharedReviewedStorageActions(t *testing.T) {
 	}
 	content := string(script)
 	for _, want := range []string{
-		"fetch(\'/api/new-storage/actions/\' + phase",
-		"body.set(\'fingerprint\', reviewed?.proposed?.fingerprint || \'\')",
-		"body.set(\'confirmation\', reviewed?.proposed?.confirmation || \'\')",
-		"operation === \'create_partition\' ? \'all\'",
+		"fetch('/api/new-storage/actions/' + phase",
+		"body.set('fingerprint', reviewed?.proposed?.fingerprint || '')",
+		"body.set('confirmation', reviewed?.proposed?.confirmation || '')",
+		"operation === 'create_partition' ? 'all'",
 		"window.location.reload()",
 	} {
 		if !strings.Contains(content, want) {
