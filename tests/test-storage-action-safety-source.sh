@@ -99,6 +99,14 @@ grep -Fq 'startswith("zram")' "${discovery}" || {
     echo 'ERROR: storage discovery can expose zram as physical storage.' >&2
     exit 1
 }
+grep -Fq 'filesystem_usage_known' "${discovery}" || {
+    echo 'ERROR: storage discovery no longer reports mounted filesystem capacity.' >&2
+    exit 1
+}
+grep -Fq 'free_spaces' "${discovery}" || {
+    echo 'ERROR: storage discovery no longer reports unallocated disk segments.' >&2
+    exit 1
+}
 grep -Fq 'storage_require_identified_system_disk' "${common}" || {
     echo 'ERROR: generic storage actions must fail closed when the system disk cannot be identified.' >&2
     exit 1

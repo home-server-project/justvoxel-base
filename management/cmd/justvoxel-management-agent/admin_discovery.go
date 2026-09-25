@@ -54,24 +54,36 @@ type adminConfigurationDiscovery struct {
 }
 
 type adminStorageDevice struct {
-	Name        string   `json:"name"`
-	Path        string   `json:"path"`
-	Parent      string   `json:"parent"`
-	Type        string   `json:"type"`
-	SizeBytes   uint64   `json:"size_bytes"`
-	Filesystem  string   `json:"filesystem"`
-	Label       string   `json:"label"`
-	UUID        string   `json:"uuid"`
-	Mountpoints []string `json:"mountpoints"`
-	Model       string   `json:"model"`
-	Transport   string   `json:"transport"`
-	ReadOnly    bool     `json:"read_only"`
-	System      bool     `json:"system"`
+	Name                 string   `json:"name"`
+	Path                 string   `json:"path"`
+	Parent               string   `json:"parent"`
+	Type                 string   `json:"type"`
+	SizeBytes            uint64   `json:"size_bytes"`
+	Filesystem           string   `json:"filesystem"`
+	Label                string   `json:"label"`
+	UUID                 string   `json:"uuid"`
+	Mountpoints          []string `json:"mountpoints"`
+	Model                string   `json:"model"`
+	Transport            string   `json:"transport"`
+	ReadOnly             bool     `json:"read_only"`
+	System               bool     `json:"system"`
+	FilesystemSizeBytes  uint64   `json:"filesystem_size_bytes,omitempty"`
+	FilesystemUsedBytes  uint64   `json:"filesystem_used_bytes,omitempty"`
+	FilesystemFreeBytes  uint64   `json:"filesystem_free_bytes,omitempty"`
+	FilesystemUsageKnown bool     `json:"filesystem_usage_known,omitempty"`
+}
+
+type adminStorageFreeSpace struct {
+	Device    string `json:"device"`
+	Start     string `json:"start"`
+	End       string `json:"end"`
+	SizeBytes uint64 `json:"size_bytes"`
 }
 
 type adminStorageDiscovery struct {
-	SystemDisks []string             `json:"system_disks"`
-	Devices     []adminStorageDevice `json:"devices"`
+	SystemDisks []string                `json:"system_disks"`
+	Devices     []adminStorageDevice    `json:"devices"`
+	FreeSpaces  []adminStorageFreeSpace `json:"free_spaces"`
 }
 
 type adminSetupDefaults struct {
@@ -133,6 +145,9 @@ func (s *server) adminStorage(w http.ResponseWriter, r *http.Request) {
 	}
 	if out.Devices == nil {
 		out.Devices = []adminStorageDevice{}
+	}
+	if out.FreeSpaces == nil {
+		out.FreeSpaces = []adminStorageFreeSpace{}
 	}
 	for i := range out.Devices {
 		if out.Devices[i].Mountpoints == nil {

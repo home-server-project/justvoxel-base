@@ -91,13 +91,17 @@ configuration_json() {
 }
 
 storage_json() {
-    local raw devices systems system_lines
+    local raw devices systems system_lines enriched device_json mountpoint stats
+    local fs_size fs_used fs_free usage_known free_spaces disk table record
+    local free_start free_end free_size free_size_mib free_size_bytes free_item
+
     raw="$(lsblk -J -b -e7 -l -o NAME,PATH,PKNAME,TYPE,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINTS,MODEL,TRAN,RO)"
     systems='[]'
     system_lines="$(storage_system_disks || true)"
     if [[ -n ${system_lines} ]]; then
         systems="$(printf '%s\n' "${system_lines}" | jq -R -s 'split("\n") | map(select(length > 0))')"
     fi
+
     devices="$(jq '[.blockdevices[] | select(((.name // "") | startswith("zram")) | not) | {
         name:(.name // ""), path:(.path // ""), parent:(.pkname // ""), type:(.type // ""),
         size_bytes:(.size // 0), filesystem:(.fstype // ""), label:(.label // ""), uuid:(.uuid // ""),
@@ -108,7 +112,63 @@ storage_json() {
     devices="$(jq --argjson systems "${systems}" '[.[] as $d | $d + {
         system:(($systems | index($d.path)) != null or (($d.parent | length) > 0 and (($systems | index("/dev/" + $d.parent)) != null)))
     }]' <<< "${devices}")"
-    jq -n --argjson system_disks "${systems}" --argjson devices "${devices}" '{system_disks:$system_disks,devices:$devices}'
+
+    enriched='[]'
+    while IFS= read -r device_json; do
+        mountpoint="$(jq -r '.mountpoints[0] // ""' <<< "${device_json}")"
+        fs_size=0
+        fs_used=0
+        fs_free=0
+        usage_known=false
+        if [[ -n ${mountpoint} ]]; then
+            stats="$(df -B1 --output=size,used,avail -- "${mountpoint}" 2>/dev/null | awk 'NR == 2 {print $1 " " $2 " " $3}' || true)"
+            if [[ ${stats} =~ ^[0-9]+[[:space:]][0-9]+[[:space:]][0-9]+$ ]]; then
+                read -r fs_size fs_used fs_free <<< "${stats}"
+                usage_known=true
+            fi
+        fi
+        device_json="$(jq \
+            --argjson filesystem_size_bytes "${fs_size}" \
+            --argjson filesystem_used_bytes "${fs_used}" \
+            --argjson filesystem_free_bytes "${fs_free}" \
+            --argjson filesystem_usage_known "${usage_known}" \
+            '. + {
+                filesystem_size_bytes:$filesystem_size_bytes,
+                filesystem_used_bytes:$filesystem_used_bytes,
+                filesystem_free_bytes:$filesystem_free_bytes,
+                filesystem_usage_known:$filesystem_usage_known
+            }' <<< "${device_json}")"
+        enriched="$(jq --argjson item "${device_json}" '. + [$item]' <<< "${enriched}")"
+    done < <(jq -c '.[]' <<< "${devices}")
+    devices="${enriched}"
+
+    free_spaces='[]'
+    while IFS= read -r disk; do
+        [[ -n ${disk} ]] || continue
+        storage_validate_disk "${disk}" >/dev/null 2>&1 || continue
+        table="$(storage_partition_table_type "${disk}" 2>/dev/null || true)"
+        [[ -n ${table} && ${table} != unknown ]] || continue
+        while IFS= read -r record; do
+            [[ -n ${record} ]] || continue
+            IFS=: read -r _ free_start free_end free_size _ <<< "${record}"
+            free_size_mib="${free_size%MiB}"
+            awk -v n="${free_size_mib:-0}" 'BEGIN {exit !(n >= 1024)}' || continue
+            free_size_bytes="$(awk -v n="${free_size_mib}" 'BEGIN {printf "%.0f", n * 1048576}')"
+            free_item="$(jq -n \
+                --arg device "${disk}" \
+                --arg start "${free_start}" \
+                --arg end "${free_end}" \
+                --argjson size_bytes "${free_size_bytes}" \
+                '{device:$device,start:$start,end:$end,size_bytes:$size_bytes}')"
+            free_spaces="$(jq --argjson item "${free_item}" '. + [$item]' <<< "${free_spaces}")"
+        done < <(parted -s -m "${disk}" unit MiB print free 2>/dev/null | awk -F: '$5 == "free;" {print}')
+    done < <(jq -r '.[] | select(.type == "disk") | .path' <<< "${devices}")
+
+    jq -n \
+        --argjson system_disks "${systems}" \
+        --argjson devices "${devices}" \
+        --argjson free_spaces "${free_spaces}" \
+        '{system_disks:$system_disks,devices:$devices,free_spaces:$free_spaces}'
 }
 
 setup_defaults_json() {

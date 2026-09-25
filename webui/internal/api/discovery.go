@@ -45,24 +45,36 @@ type AdminConfigurationDiscovery struct {
 }
 
 type AdminStorageDevice struct {
-	Name        string   `json:"name"`
-	Path        string   `json:"path"`
-	Parent      string   `json:"parent"`
-	Type        string   `json:"type"`
-	SizeBytes   uint64   `json:"size_bytes"`
-	Filesystem  string   `json:"filesystem"`
-	Label       string   `json:"label"`
-	UUID        string   `json:"uuid"`
-	Mountpoints []string `json:"mountpoints"`
-	Model       string   `json:"model"`
-	Transport   string   `json:"transport"`
-	ReadOnly    bool     `json:"read_only"`
-	System      bool     `json:"system"`
+	Name                 string   `json:"name"`
+	Path                 string   `json:"path"`
+	Parent               string   `json:"parent"`
+	Type                 string   `json:"type"`
+	SizeBytes            uint64   `json:"size_bytes"`
+	Filesystem           string   `json:"filesystem"`
+	Label                string   `json:"label"`
+	UUID                 string   `json:"uuid"`
+	Mountpoints          []string `json:"mountpoints"`
+	Model                string   `json:"model"`
+	Transport            string   `json:"transport"`
+	ReadOnly             bool     `json:"read_only"`
+	System               bool     `json:"system"`
+	FilesystemSizeBytes  uint64   `json:"filesystem_size_bytes,omitempty"`
+	FilesystemUsedBytes  uint64   `json:"filesystem_used_bytes,omitempty"`
+	FilesystemFreeBytes  uint64   `json:"filesystem_free_bytes,omitempty"`
+	FilesystemUsageKnown bool     `json:"filesystem_usage_known,omitempty"`
+}
+
+type AdminStorageFreeSpace struct {
+	Device    string `json:"device"`
+	Start     string `json:"start"`
+	End       string `json:"end"`
+	SizeBytes uint64 `json:"size_bytes"`
 }
 
 type AdminStorageDiscovery struct {
-	SystemDisks []string             `json:"system_disks"`
-	Devices     []AdminStorageDevice `json:"devices"`
+	SystemDisks []string                `json:"system_disks"`
+	Devices     []AdminStorageDevice    `json:"devices"`
+	FreeSpaces  []AdminStorageFreeSpace `json:"free_spaces"`
 }
 
 type AdminSetupDefaults struct {
