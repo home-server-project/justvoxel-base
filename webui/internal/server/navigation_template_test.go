@@ -692,12 +692,18 @@ func TestNewBackupsReviewedMultiDeleteFlow(t *testing.T) {
 		`data-backup-select`,
 		`data-backup-delete-selected`,
 		`data-backup-delete-dialog`,
-		`data-backup-delete-confirmation-phrase`,
+		`data-backup-delete-confirmation-control`,
+		`data-destructive-slider`,
+		`data-destructive-toggle`,
+		`data-destructive-submit`,
 		`/static/new-backups.js`,
 	} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("New Backups delete UI missing %q", want)
 		}
+	}
+	if strings.Contains(markup, "data-backup-delete-confirmation-phrase") || strings.Contains(markup, "Type exactly") {
+		t.Fatal("New Backups delete UI still contains the retired typed-confirmation flow")
 	}
 
 	scriptContent, err := assets.ReadFile("static/new-backups.js")
