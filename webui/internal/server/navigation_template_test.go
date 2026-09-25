@@ -639,22 +639,16 @@ func TestStorageBrowserMinecraftMigrationHandoff(t *testing.T) {
 		`data-minecraft-candidate=`,
 		`data-storage-minecraft-migrate`,
 		`data-storage-minecraft-dialog`,
-		`action="/settings/data-migration/review"`,
-		`name="operation" value="use_partition"`,
-		`name="size_gib" value="all"`,
+		`data-storage-minecraft-review`,
+		`data-storage-minecraft-apply`,
+		`data-storage-minecraft-progress`,
 	} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("New Storage Minecraft migration handoff missing %q", want)
 		}
 	}
-	for _, forbidden := range []string{
-		`name="operation" value="erase_disk"`,
-		`name="operation" value="format_partition"`,
-		`name="operation" value="create_partition"`,
-	} {
-		if strings.Contains(markup, forbidden) {
-			t.Fatalf("New Storage unexpectedly exposes deferred destructive migration operation %q", forbidden)
-		}
+	if strings.Contains(markup, "/settings/data-migration") {
+		t.Fatal("New Storage still posts Minecraft migration to the legacy Data Migration page")
 	}
 
 	scriptContent, err := assets.ReadFile("static/storage-browser.js")
@@ -667,10 +661,17 @@ func TestStorageBrowserMinecraftMigrationHandoff(t *testing.T) {
 		`migrationMount.readOnly = Boolean(existingMount)`,
 		`"/var/mnt/justvoxel-data"`,
 		`migrationDialog.showModal()`,
+		`"/api/new-storage/minecraft-data/plan"`,
+		`"/api/new-storage/minecraft-data/apply"`,
+		`"/api/new-storage/minecraft-data/progress/"`,
+		`showMigrationProgress(payload.operation)`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("New Storage Minecraft migration behavior missing %q", want)
 		}
+	}
+	if strings.Contains(script, "/settings/data-migration") {
+		t.Fatal("New Storage JavaScript still depends on the legacy Data Migration page")
 	}
 }
 
