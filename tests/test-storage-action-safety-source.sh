@@ -115,12 +115,32 @@ grep -Fq 'storage_action_is_system_partition' "${common}" || {
     echo 'ERROR: generic storage actions lost system-partition protection.' >&2
     exit 1
 }
+grep -Fq 'storage_system_partitions' "${base}" || {
+    echo 'ERROR: exact active system-partition discovery is missing.' >&2
+    exit 1
+}
 grep -Fq 'swap partitions are not managed from the storage browser' "${common}" || {
     echo 'ERROR: generic storage actions lost swap protection.' >&2
     exit 1
 }
 grep -Fq 'confirmation="FORMAT ${device}"' "${planner}" || {
     echo 'ERROR: destructive partition formatting lost exact typed confirmation.' >&2
+    exit 1
+}
+grep -Fq 'confirmation="CREATE PARTITION ${device}"' "${planner}" || {
+    echo 'ERROR: partition creation lost exact reviewed confirmation.' >&2
+    exit 1
+}
+grep -Fq 'storage_create_partition "${device}" "${free_start}" "${planned_end}"' "${apply}" || {
+    echo 'ERROR: Storage partition creation is not bound to reviewed free-space geometry.' >&2
+    exit 1
+}
+grep -Fq 'comm -13 "${before}" "${after}"' "${apply}" || {
+    echo 'ERROR: Storage partition creation no longer identifies the exact new partition.' >&2
+    exit 1
+}
+grep -Fq 'storage_mkfs_xfs JV_STORAGE "${partition}"' "${apply}" || {
+    echo 'ERROR: Storage partition creation does not format the exact new partition as XFS.' >&2
     exit 1
 }
 grep -Fq 'storage_action_mountable_filesystem "${filesystem}"' "${planner}" || {

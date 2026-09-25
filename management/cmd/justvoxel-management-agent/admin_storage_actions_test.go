@@ -78,3 +78,33 @@ func TestAdminStorageActionApplyReturnsBoundedFailure(t *testing.T) {
 		t.Fatalf("bounded safety failure missing: %s", rr.Body.String())
 	}
 }
+
+func TestAdminStorageActionPlanCarriesCreatePartitionGeometry(t *testing.T) {
+	s := surfaceTestServer(t, roleAdministrator)
+	old := runAdminStorageActionsHelper
+	defer func() { runAdminStorageActionsHelper = old }()
+
+	runAdminStorageActionsHelper = func(_ context.Context, action string, request []byte) ([]byte, error) {
+		if action != "plan" {
+			t.Fatalf("action = %q, want plan", action)
+		}
+		body := string(request)
+		for _, want := range []string{`"operation":"create_partition"`, `"device":"/dev/vda"`, `"size_gib":"55"`, `"free_start":"102401MiB"`} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("create partition request missing %q: %s", want, body)
+			}
+		}
+		return []byte(`{"ok":true,"warnings":[],"proposed":{"operation":"create_partition","device":"/dev/vda","target_filesystem":"xfs","size_gib":"55","free_start":"102401MiB","free_end":"204800MiB","planned_end":"158721.00MiB","confirmation":"CREATE PARTITION /dev/vda","fingerprint":"layout123","destructive":true},"applied":false}`), nil
+	}
+
+	rr := httptest.NewRecorder()
+	s.adminStorageActionPlan(rr, surfaceRequest(http.MethodPost, "/v1/admin/storage-actions/plan", `{"operation":"create_partition","device":"/dev/vda","size_gib":"55","free_start":"102401MiB"}`))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("plan status = %d: %s", rr.Code, rr.Body.String())
+	}
+	for _, want := range []string{"CREATE PARTITION /dev/vda", "layout123", "102401MiB"} {
+		if !strings.Contains(rr.Body.String(), want) {
+			t.Fatalf("plan response missing %q: %s", want, rr.Body.String())
+		}
+	}
+}
