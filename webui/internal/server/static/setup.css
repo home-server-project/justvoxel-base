@@ -118,3 +118,21 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
 .setup-storage-action-buttons{display:flex;justify-content:flex-end;gap:.55rem}
 @media(max-width:760px){.setup-storage-choice-grid,.setup-storage-action-details{grid-template-columns:1fr}.setup-storage-layout{grid-template-columns:1fr}.setup-storage-disk-list{max-height:none}}
 @media(prefers-color-scheme:light){.setup-storage-choice,.setup-storage-disk,.setup-storage-segment,.setup-storage-action-details>div{background:#fff;border-color:#d9dfe3;color:#1a2025}.setup-storage-choice:hover,.setup-storage-choice:focus-visible,button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{background:#eef6f1;border-color:#9fc9ae}.setup-storage-choice.is-selected,.setup-storage-segment.is-selected{background:#e3f1e8;border-color:#86b99a}.setup-storage-choice small,.setup-storage-browser-heading span,.setup-storage-disk-heading span,.setup-storage-segment>span:not(.setup-storage-segment-state),.setup-storage-segment small{color:#66727c}.setup-storage-selected{background:#eef7f1;border-color:#a7ccb5}.setup-storage-action-review{background:#fff8eb;border-color:#d7b16e}}
+
+
+/* First-run Backups: compact destination chooser. */
+.setup-backup-topline{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(260px,.65fr);gap:.75rem;align-items:stretch}
+.setup-backup-automatic{margin:0}
+.setup-backup-schedule{display:grid;grid-template-columns:minmax(0,1fr) minmax(90px,.45fr);gap:.65rem;padding:.65rem .8rem;border:1px solid #303942;border-radius:10px;background:#10161a}
+.setup-backup-schedule .setup-field{margin:0}
+.setup-backup-choice-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.6rem}
+.setup-backup-choice{display:grid;align-content:start;gap:.25rem;min-height:108px;padding:.8rem;border:1px solid #303942;border-radius:11px;background:#13191e;color:#eef1f4;text-align:left}
+.setup-backup-choice:hover,.setup-backup-choice:focus-visible{border-color:#4f8b69;background:#1d2a23}
+.setup-backup-choice.is-selected{border-color:#68bd8e;background:#203128;box-shadow:inset 0 0 0 1px #315940}
+.setup-backup-choice small{color:#89959e;line-height:1.35}
+.setup-backup-choice code{overflow-wrap:anywhere}
+.setup-network-backup-card{display:grid;gap:.45rem;padding:.85rem;border:1px solid #303942;border-radius:12px;background:#10161a}
+@media(max-width:920px){.setup-backup-choice-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:760px){.setup-backup-topline{grid-template-columns:1fr}.setup-backup-schedule{grid-template-columns:1fr 1fr}}
+@media(max-width:520px){.setup-backup-choice-grid,.setup-backup-schedule{grid-template-columns:1fr}}
+@media(prefers-color-scheme:light){.setup-backup-schedule,.setup-backup-choice,.setup-network-backup-card{background:#fff;border-color:#d9dfe3;color:#1a2025}.setup-backup-choice:hover,.setup-backup-choice:focus-visible{background:#eef6f1;border-color:#9fc9ae}.setup-backup-choice.is-selected{background:#e3f1e8;border-color:#86b99a}.setup-backup-choice small{color:#66727c}}
