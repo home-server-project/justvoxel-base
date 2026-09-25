@@ -111,8 +111,8 @@ func (f *fakeNetworkAPI) RollbackNetworkCheckpoint(_ context.Context, session, i
 	}
 	f.checkpointRolledBack = id
 	return api.NetworkCheckpointRollback{
-		OK: true,
-		ID: id,
+		OK:      true,
+		ID:      id,
 		Results: []api.NetworkCheckpointRollbackDevice{{Interface: "enp1s0", Result: "ok"}},
 	}, nil
 }
