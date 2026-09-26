@@ -269,3 +269,65 @@ func TestExecuteMinecraftResetCompletesPersistentOperation(t *testing.T) {
 		t.Fatalf("reset remained current after success: %#v err=%v", current, err)
 	}
 }
+
+func TestAdminMinecraftResetApplyRetriesNeedsAttentionOperation(t *testing.T) {
+	oldHelper := runAdminMinecraftResetHelper
+	defer func() { runAdminMinecraftResetHelper = oldHelper }()
+	runAdminMinecraftResetHelper = func(_ context.Context, _ ...string) ([]byte, error) {
+		return []byte(validMinecraftResetPlanHelper), nil
+	}
+
+	oldWorker := startMinecraftResetWorker
+	defer func() { startMinecraftResetWorker = oldWorker }()
+	workerCalls := 0
+	var workerOperationID string
+	startMinecraftResetWorker = func(_ *server, operationID, fingerprint string, _ session) {
+		workerCalls++
+		workerOperationID = operationID
+		if fingerprint != exactMinecraftResetFingerprint(t) {
+			t.Fatalf("worker fingerprint = %q", fingerprint)
+		}
+	}
+
+	s := surfaceTestServer(t, roleAdministrator)
+	store := openTestOperationStore(t)
+	attachTestOperationStore(t, s, store)
+	fingerprint := exactMinecraftResetFingerprint(t)
+	operation, _, err := store.beginMinecraftReset(fingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.transition(operation.OperationID, operationNeedsAttention, "reset_failed", "Minecraft reset stopped before completion."); err != nil {
+		t.Fatal(err)
+	}
+
+	body, err := json.Marshal(adminMinecraftResetApplyRequest{PlanFingerprint: fingerprint})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	s.adminMinecraftResetApply(rr, surfaceRequest(http.MethodPost, "/v1/admin/reset/minecraft/apply", string(body)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("retry status = %d: %s", rr.Code, rr.Body.String())
+	}
+	var response adminMinecraftResetApplyResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if !response.OK || response.Created || response.Operation == nil ||
+		response.Operation.OperationID != operation.OperationID ||
+		response.Operation.State != operationQueued ||
+		response.Operation.Stage != "queued" {
+		t.Fatalf("unexpected retry response: %#v", response)
+	}
+	if workerCalls != 1 || workerOperationID != operation.OperationID {
+		t.Fatalf("retry worker calls=%d operation=%q, want one call for %q", workerCalls, workerOperationID, operation.OperationID)
+	}
+	current, err := store.currentMinecraftReset()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current == nil || current.OperationID != operation.OperationID || current.State != operationQueued {
+		t.Fatalf("retry did not requeue current operation: %#v", current)
+	}
+}

@@ -197,3 +197,50 @@ func TestCurrentMinecraftResetOperationAPIRequiresAdministratorAndAllowsLocalRoo
 		t.Fatalf("local-root current reset operation = %d: %s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestOperationStoreMinecraftResetNeedsAttentionCanBeRetried(t *testing.T) {
+	store := openTestOperationStore(t)
+	operation, _, err := store.beginMinecraftReset(testMinecraftResetFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.transition(operation.OperationID, operationValidating, "validating", "Revalidating Minecraft reset plan."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.transition(operation.OperationID, operationRunning, "resetting", "Removing Minecraft state."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.transition(operation.OperationID, operationNeedsAttention, "reset_failed", "Minecraft reset stopped before completion."); err != nil {
+		t.Fatal(err)
+	}
+
+	newFingerprint := "sha256:abababababababababababababababababababababababababababababababab"
+	retried, err := store.retryMinecraftReset(operation.OperationID, newFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retried.OperationID != operation.OperationID || retried.PlanFingerprint != newFingerprint ||
+		retried.State != operationQueued || retried.Stage != "queued" ||
+		retried.Status != "Minecraft reset retry queued." ||
+		retried.FinishedAt != "" || retried.InterruptedAt != "" {
+		t.Fatalf("unexpected retried Minecraft reset journal: %#v", retried)
+	}
+	current, err := store.currentMinecraftReset()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current == nil || current.OperationID != operation.OperationID || current.State != operationQueued {
+		t.Fatalf("retried Minecraft reset did not remain current: %#v", current)
+	}
+}
+
+func TestOperationStoreMinecraftResetRetryRequiresNeedsAttention(t *testing.T) {
+	store := openTestOperationStore(t)
+	operation, _, err := store.beginMinecraftReset(testMinecraftResetFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.retryMinecraftReset(operation.OperationID, testMinecraftResetFingerprint); err == nil {
+		t.Fatal("queued Minecraft reset unexpectedly accepted for retry")
+	}
+}

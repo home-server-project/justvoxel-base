@@ -128,13 +128,17 @@ func (s *server) adminMinecraftResetApply(w http.ResponseWriter, r *http.Request
 		writeAdminMinecraftResetApplyFailure(w, http.StatusInternalServerError, "operation_status_failed", "current Minecraft reset operation could not be read", nil)
 		return
 	}
+	retrying := false
 	if current != nil {
-		if current.PlanFingerprint == request.PlanFingerprint {
+		if current.State == operationNeedsAttention {
+			retrying = true
+		} else if current.PlanFingerprint == request.PlanFingerprint {
 			writeJSON(w, http.StatusOK, adminMinecraftResetApplyResponse{OK: true, Created: false, Operation: current})
 			return
+		} else {
+			writeAdminMinecraftResetApplyFailure(w, http.StatusConflict, "reset_busy", "another Minecraft reset operation is already active", nil)
+			return
 		}
-		writeAdminMinecraftResetApplyFailure(w, http.StatusConflict, "reset_busy", "another Minecraft reset operation is already active", nil)
-		return
 	}
 
 	plan, status := authoritativeAdminMinecraftResetPlan(r.Context())
@@ -151,7 +155,13 @@ func (s *server) adminMinecraftResetApply(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	operation, created, err := s.operations.beginMinecraftReset(plan.PlanFingerprint)
+	var operation operationJournal
+	created := false
+	if retrying {
+		operation, err = s.operations.retryMinecraftReset(current.OperationID, plan.PlanFingerprint)
+	} else {
+		operation, created, err = s.operations.beginMinecraftReset(plan.PlanFingerprint)
+	}
 	if err != nil {
 		if errors.Is(err, errMinecraftResetOperationBusy) ||
 			errors.Is(err, errSetupLockBusy) ||
@@ -170,7 +180,7 @@ func (s *server) adminMinecraftResetApply(w http.ResponseWriter, r *http.Request
 		statusCode = http.StatusOK
 	}
 	writeJSON(w, statusCode, adminMinecraftResetApplyResponse{OK: true, Created: created, Operation: &operation})
-	if created {
+	if created || retrying {
 		startMinecraftResetWorker(s, operation.OperationID, plan.PlanFingerprint, actor)
 	}
 }
@@ -333,7 +343,14 @@ func executeMinecraftReset(ctx context.Context, s *server, operationID, expected
 	output, runErr := runAdminMinecraftResetHelper(ctx, "apply", "--confirm-players")
 	var applied adminMinecraftResetHelperApplyResponse
 	if decodeErr := decodeAdminMinecraftResetApplyResponse(output, &applied); decodeErr != nil || runErr != nil || !applied.OK {
-		_, _ = s.operations.transition(operationID, operationNeedsAttention, "reset_failed", "Minecraft reset did not complete. Review appliance state before retrying.")
+		status := "Minecraft reset did not complete. Review appliance state before retrying."
+		if strings.TrimSpace(applied.Error) != "" {
+			status = "Minecraft reset stopped: " + strings.TrimSpace(applied.Error)
+			if len(status) > 512 {
+				status = status[:512]
+			}
+		}
+		_, _ = s.operations.transition(operationID, operationNeedsAttention, "reset_failed", status)
 		if decodeErr != nil {
 			return decodeErr
 		}

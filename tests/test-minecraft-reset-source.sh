@@ -23,6 +23,14 @@ grep -Fq 'authentication_action:"preserve"' "${helper}"
 grep -Fq 'webui_users_action:"preserve"' "${helper}"
 grep -Fq 'jv_reset_delete_internal_data "${DATA_PATH}" "${BACKUP_PATH}"' "${helper}"
 grep -Fq 'jv_reset_remove_active_configuration "${JAVA_PORT}" "${BEDROCK_ENABLED}" "${BEDROCK_PORT}"' "${helper}"
+grep -Fq 'podman rm --force --ignore minecraft' "${helper}"
+grep -Fq 'minecraft_reset_fail "container_cleanup_failed"' "${helper}"
+grep -Fq 'minecraft_reset_fail "data_cleanup_failed"' "${helper}"
+grep -Fq 'minecraft_reset_fail "configuration_cleanup_failed"' "${helper}"
+if grep -Fq 'podman rm minecraft' "${helper}"; then
+    echo 'ERROR: Minecraft reset must not use race-prone plain podman rm.' >&2
+    exit 1
+fi
 
 grep -Fq 'nfs|nfs4|cifs|smb3)' "${common}"
 grep -Fq 'if [[ ${transport,,} == usb ]]' "${common}"
@@ -43,5 +51,7 @@ grep -Fq 'source /usr/libexec/justvoxel/mjust/minecraft-reset-common.sh' "${star
 grep -Fq 'operationTypeMinecraftReset = "minecraft_reset"' "${operations}"
 grep -Fq 'POST /v1/admin/reset/minecraft/plan' "${agent}"
 grep -Fq 'POST /v1/admin/reset/minecraft/apply' "${agent}"
+grep -Fq 'retryMinecraftReset' "${agent}"
+grep -Fq 'func (s *operationStore) retryMinecraftReset' "${operations}"
 
 echo 'Minecraft reset source contract OK'
