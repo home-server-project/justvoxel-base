@@ -505,3 +505,51 @@ func TestOperationStatusAPIMalformedUnknownAndEmptyCurrent(t *testing.T) {
 		t.Fatalf("empty current operation = %d: %q", rr.Code, rr.Body.String())
 	}
 }
+
+
+func TestFactoryResetNeedsAttentionCanBeResolvedWithoutRetry(t *testing.T) {
+	store := openTestOperationStore(t)
+	fingerprint := testSetupFingerprint
+
+	operation, created, err := store.beginFactoryReset(fingerprint)
+	if err != nil || !created {
+		t.Fatalf("begin factory reset: created=%t err=%v", created, err)
+	}
+	if _, err := store.transition(operation.OperationID, operationNeedsAttention, "reset_failed", "Factory reset stopped before completion."); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := store.beginRestore(fingerprint); !errors.Is(err, errFactoryResetOperationBusy) {
+		t.Fatalf("Restore was not blocked before resolution: %v", err)
+	}
+
+	resolved, err := store.resolveFactoryReset(operation.OperationID, "Current server state kept.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.State != operationResolved || resolved.Stage != "resolved" || resolved.FinishedAt == "" {
+		t.Fatalf("unexpected resolved journal: %#v", resolved)
+	}
+	if current, err := store.currentFactoryReset(); err != nil || current != nil {
+		t.Fatalf("factory reset remained current after resolution: %#v err=%v", current, err)
+	}
+
+	restore, created, err := store.beginRestore(fingerprint)
+	if err != nil || !created || restore.OperationType != operationTypeRestore {
+		t.Fatalf("Restore remained blocked after resolution: created=%t operation=%#v err=%v", created, restore, err)
+	}
+}
+
+func TestFactoryResetResolutionRequiresNeedsAttention(t *testing.T) {
+	store := openTestOperationStore(t)
+	operation, _, err := store.beginFactoryReset(testSetupFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.resolveFactoryReset(operation.OperationID, "Keep current server."); err == nil {
+		t.Fatal("queued factory reset unexpectedly resolved")
+	}
+	if current, err := store.currentFactoryReset(); err != nil || current == nil || current.OperationID != operation.OperationID {
+		t.Fatalf("factory reset current state changed after rejected resolution: %#v err=%v", current, err)
+	}
+}

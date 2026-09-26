@@ -168,3 +168,51 @@ func TestResetCurrentOperationPaths(t *testing.T) {
 		})
 	}
 }
+
+func TestFactoryResetResolveClientContract(t *testing.T) {
+	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPost || r.URL.Path != adminFactoryResetResolvePath {
+			t.Fatalf("unexpected resolve request %s %s", r.Method, r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer session-token" {
+			t.Fatalf("missing bearer session: %q", r.Header.Get("Authorization"))
+		}
+		var request struct {
+			OperationID      string `json:"operation_id"`
+			KeepCurrentState bool   `json:"keep_current_state"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if request.OperationID != resetTestOperationID || !request.KeepCurrentState {
+			t.Fatalf("unexpected factory reset resolve request: %#v", request)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body: io.NopCloser(strings.NewReader(`{
+			  "operation":{
+			    "schema_version":"v1",
+			    "operation_id":"` + resetTestOperationID + `",
+			    "operation_type":"factory_reset",
+			    "plan_fingerprint":"` + resetTestFingerprint + `",
+			    "state":"resolved",
+			    "stage":"resolved",
+			    "status":"Current server state kept.",
+			    "started_at":"2026-09-25T20:00:00Z",
+			    "updated_at":"2026-09-25T20:05:00Z",
+			    "finished_at":"2026-09-25T20:05:00Z",
+			    "rollback":{"state":"not_started"}
+			  }
+			}`)),
+			Header: make(http.Header),
+		}, nil
+	})}}
+
+	response, err := client.AdminFactoryResetResolve(context.Background(), "session-token", resetTestOperationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Operation == nil || response.Operation.State != "resolved" || response.Operation.OperationType != "factory_reset" {
+		t.Fatalf("unexpected factory reset resolve response: %#v", response)
+	}
+}

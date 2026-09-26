@@ -400,3 +400,61 @@ func TestExecuteFactoryResetReturnsToFreshFirstUseState(t *testing.T) {
 		t.Fatalf("factory reset did not invalidate login state: sessions=%d failures=%d lock=%v", len(s.sessions), len(s.failures), s.lockTill)
 	}
 }
+
+
+func TestAdminFactoryResetResolveKeepsCurrentStateAndReleasesLocks(t *testing.T) {
+	s := surfaceTestServer(t, roleAdministrator)
+	store := openTestOperationStore(t)
+	attachTestOperationStore(t, s, store)
+
+	operation, _, err := store.beginFactoryReset(exactFactoryResetFingerprint(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.transition(operation.OperationID, operationNeedsAttention, "reset_failed", "Factory reset stopped before completion."); err != nil {
+		t.Fatal(err)
+	}
+
+	body, err := json.Marshal(adminFactoryResetResolveRequest{OperationID: operation.OperationID, KeepCurrentState: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	s.adminFactoryResetResolve(rr, surfaceRequest(http.MethodPost, "/v1/admin/reset/factory/resolve", string(body)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("resolve status=%d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"state":"resolved"`) {
+		t.Fatalf("resolve response did not report resolved state: %s", rr.Body.String())
+	}
+	if current, err := store.currentFactoryReset(); err != nil || current != nil {
+		t.Fatalf("factory reset remained current after resolve: %#v err=%v", current, err)
+	}
+	if _, _, err := store.beginMigrationExport(testSetupFingerprint); err != nil {
+		t.Fatalf("migration lock remained held after resolve: %v", err)
+	}
+}
+
+func TestAdminFactoryResetResolveRequiresExplicitKeepCurrentState(t *testing.T) {
+	s := surfaceTestServer(t, roleAdministrator)
+	store := openTestOperationStore(t)
+	attachTestOperationStore(t, s, store)
+
+	operation, _, err := store.beginFactoryReset(exactFactoryResetFingerprint(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.transition(operation.OperationID, operationNeedsAttention, "reset_failed", "Factory reset stopped before completion."); err != nil {
+		t.Fatal(err)
+	}
+
+	body, _ := json.Marshal(adminFactoryResetResolveRequest{OperationID: operation.OperationID})
+	rr := httptest.NewRecorder()
+	s.adminFactoryResetResolve(rr, surfaceRequest(http.MethodPost, "/v1/admin/reset/factory/resolve", string(body)))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("missing keep-current confirmation status=%d: %s", rr.Code, rr.Body.String())
+	}
+	if current, err := store.currentFactoryReset(); err != nil || current == nil {
+		t.Fatalf("failed reset was released without explicit confirmation: %#v err=%v", current, err)
+	}
+}

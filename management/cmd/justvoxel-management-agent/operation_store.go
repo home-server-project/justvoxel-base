@@ -41,6 +41,7 @@ const (
 	operationRollingBack    operationState = "rolling_back"
 	operationRolledBack     operationState = "rolled_back"
 	operationNeedsAttention operationState = "needs_attention"
+	operationResolved       operationState = "resolved"
 )
 
 var (
@@ -657,7 +658,7 @@ func validOperationID(value string) bool {
 func validOperationState(state operationState) bool {
 	switch state {
 	case operationQueued, operationValidating, operationRunning, operationVerifying, operationSucceeded,
-		operationFailed, operationRollingBack, operationRolledBack, operationNeedsAttention:
+		operationFailed, operationRollingBack, operationRolledBack, operationNeedsAttention, operationResolved:
 		return true
 	default:
 		return false
@@ -669,7 +670,7 @@ func validOperationStatus(value string) bool {
 }
 
 func operationIsCurrent(state operationState) bool {
-	return state != operationSucceeded && state != operationRolledBack
+	return state != operationSucceeded && state != operationRolledBack && state != operationResolved
 }
 
 func operationInterruptedByRestart(state operationState) bool {
@@ -1156,6 +1157,23 @@ func (s *operationStore) retryFactoryReset(id, planFingerprint string) (operatio
 	return journal, nil
 }
 
+func (s *operationStore) resolveFactoryReset(id, status string) (operationJournal, error) {
+	if !validOperationID(id) || !validOperationStatus(status) {
+		return operationJournal{}, errors.New("invalid factory reset resolution")
+	}
+	current, err := s.currentFactoryReset()
+	if err != nil {
+		return operationJournal{}, err
+	}
+	if current == nil || current.OperationID != id {
+		return operationJournal{}, errOperationNotFound
+	}
+	if current.OperationType != operationTypeFactoryReset || current.State != operationNeedsAttention {
+		return operationJournal{}, errors.New("factory reset is not resolvable")
+	}
+	return s.transition(id, operationResolved, "resolved", status)
+}
+
 func (s *operationStore) get(id string) (operationJournal, error) {
 	if !validOperationID(id) {
 		return operationJournal{}, errOperationNotFound
@@ -1261,7 +1279,7 @@ func (s *operationStore) transition(id string, next operationState, stage, statu
 		journal.Rollback.State = "succeeded"
 		journal.Rollback.Result = "rolled_back"
 	}
-	if next == operationSucceeded || next == operationRolledBack {
+	if next == operationSucceeded || next == operationRolledBack || next == operationResolved {
 		journal.FinishedAt = journal.UpdatedAt
 	}
 	if err := s.persist(journal); err != nil {
@@ -1269,7 +1287,7 @@ func (s *operationStore) transition(id string, next operationState, stage, statu
 	}
 	s.operations[id] = journal
 	s.appendSetupJournalDiagnosticBestEffort(journal)
-	if next == operationSucceeded || next == operationRolledBack {
+	if next == operationSucceeded || next == operationRolledBack || next == operationResolved {
 		switch journal.OperationType {
 		case operationTypeSetup:
 			s.currentSetupID = ""
@@ -1320,6 +1338,8 @@ func operationTransitionAllowed(current, next operationState) bool {
 		return next == operationRollingBack || next == operationNeedsAttention
 	case operationRollingBack:
 		return next == operationRolledBack || next == operationNeedsAttention
+	case operationNeedsAttention:
+		return next == operationResolved
 	default:
 		return false
 	}
