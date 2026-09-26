@@ -229,7 +229,7 @@ func parseServerMigrationExportForm(r *http.Request, discovery api.AdminMigratio
 			}
 		}
 		if !found {
-			return api.AdminMigrationExportTargetRequest{}, errors.New("choose an attached disk or removable-media destination reported by the Management Agent")
+			return api.AdminMigrationExportTargetRequest{}, errors.New("choose an attached disk or removable-media destination reported by JustVoxel")
 		}
 	case "nfs":
 		request.Source = strings.TrimSpace(r.FormValue("source"))
