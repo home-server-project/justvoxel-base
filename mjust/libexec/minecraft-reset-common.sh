@@ -62,11 +62,13 @@ jv_reset_backup_nested_in_data() {
 }
 
 jv_reset_nested_mounts() {
-    local root="$1" target
+    local root="$1" target normalized_root
+    normalized_root="${root%/}"
     while IFS= read -r target; do
         [[ -n ${target} ]] || continue
-        case "${target}/" in
-            "${root%/}/"*) printf '%s\n' "${target}" ;;
+        [[ ${target%/} != "${normalized_root}" ]] || continue
+        case "${target%/}/" in
+            "${normalized_root}/"*) printf '%s\n' "${target}" ;;
         esac
     done < <(findmnt -rn -o TARGET 2>/dev/null || true)
 }

@@ -85,6 +85,36 @@ func TestOperationStoreFactoryResetNeedsAttentionCanBeRetried(t *testing.T) {
 	}
 }
 
+func TestRetriedFactoryResetCompletionAllowsRestore(t *testing.T) {
+	store := openTestOperationStore(t)
+	journal, _, err := store.beginFactoryReset(testFactoryResetFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.transition(journal.OperationID, operationNeedsAttention, "reset_failed", "Factory reset stopped."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.retryFactoryReset(journal.OperationID, testFactoryResetFingerprint); err != nil {
+		t.Fatal(err)
+	}
+	for _, tr := range []struct {
+		state operationState
+		stage string
+	}{
+		{operationValidating, "validating"},
+		{operationRunning, "resetting_runtime"},
+		{operationVerifying, "verifying"},
+		{operationSucceeded, "complete"},
+	} {
+		if _, err := store.transition(journal.OperationID, tr.state, tr.stage, "Factory reset progress."); err != nil {
+			t.Fatalf("transition to %s: %v", tr.state, err)
+		}
+	}
+	if _, created, err := store.beginRestore("sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"); err != nil || !created {
+		t.Fatalf("Restore remained blocked after retried Factory Reset completed: created=%t err=%v", created, err)
+	}
+}
+
 func TestOperationStoreFactoryResetCannotStartDuringOtherOperation(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -130,9 +130,15 @@ if [[ ${action} == plan ]]; then
 fi
 
 confirm_players="${2:-}"
+
+factory_reset_fail() {
+    local code="$1" message="$2" rc="${3:-5}"
+    jq -n --arg code "${code}" --arg error "${message}" '{ok:false,code:$code,error:$error}'
+    exit "${rc}"
+}
+
 if [[ ${confirm_players} != --confirm-players ]]; then
-    jq -n '{ok:false,code:"confirmation_required",error:"Full factory reset Apply requires explicit player interruption confirmation."}'
-    exit 4
+    factory_reset_fail "confirmation_required" "Full factory reset Apply requires explicit player interruption confirmation." 4
 fi
 
 if [[ ${configured} == true ]] && systemctl is-active --quiet minecraft.service 2>/dev/null; then
@@ -141,33 +147,51 @@ if [[ ${configured} == true ]] && systemctl is-active --quiet minecraft.service 
     stop_rc=$?
     set -e
     if (( stop_rc != 0 )) || ! jq -e '.ok == true' <<<"${stop_output}" >/dev/null 2>&1; then
-        jq -n '{ok:false,code:"minecraft_stop_failed",error:"Minecraft could not be stopped safely. Factory reset did not continue."}'
-        exit 5
+        factory_reset_fail "minecraft_stop_failed" "Minecraft could not be stopped safely. Factory reset did not continue."
     fi
 fi
 
-if podman container exists minecraft 2>/dev/null; then
-    podman rm minecraft >/dev/null
+# Quadlet/systemd stop and Podman container removal are asynchronous enough that a
+# plain 'podman rm' can race the final container state. Force+ignore makes this
+# retry-safe for running, stopped, or already-removed containers.
+if ! podman rm --force --ignore minecraft >/dev/null 2>&1; then
+    factory_reset_fail "container_cleanup_failed" "Minecraft container cleanup failed. Retry Full Factory Reset after reviewing the container state."
 fi
 
 if [[ ${data_action} == delete ]]; then
-    jv_reset_delete_tree_same_filesystem "${data_path}" 'Minecraft data'
+    if ! cleanup_error="$(jv_reset_delete_tree_same_filesystem "${data_path}" 'Minecraft data' 2>&1)"; then
+        factory_reset_fail "data_cleanup_failed" "Minecraft data cleanup failed: ${cleanup_error:-unknown cleanup error}"
+    fi
 fi
 if [[ ${backup_action} == delete ]]; then
-    jv_reset_delete_tree_same_filesystem "${backup_path}" 'local backup data'
+    if ! cleanup_error="$(jv_reset_delete_tree_same_filesystem "${backup_path}" 'local backup data' 2>&1)"; then
+        factory_reset_fail "backup_cleanup_failed" "Local backup cleanup failed: ${cleanup_error:-unknown cleanup error}"
+    fi
 fi
 
 config_backup_dir=/var/lib/justvoxel/config-backups
-jv_reset_delete_tree_same_filesystem "${config_backup_dir}" 'JustVoxel configuration backups'
+if ! cleanup_error="$(jv_reset_delete_tree_same_filesystem "${config_backup_dir}" 'JustVoxel configuration backups' 2>&1)"; then
+    factory_reset_fail "config_backup_cleanup_failed" "JustVoxel configuration backup cleanup failed: ${cleanup_error:-unknown cleanup error}"
+fi
 
 if [[ ${configured} == true ]]; then
-    jv_reset_remove_active_configuration "${java_port}" "${bedrock_enabled}" "${bedrock_port}"
+    if ! jv_reset_remove_active_configuration "${java_port}" "${bedrock_enabled}" "${bedrock_port}"; then
+        factory_reset_fail "configuration_cleanup_failed" "JustVoxel runtime configuration could not be removed completely."
+    fi
 else
     systemctl disable --now minecraft-backup.timer >/dev/null 2>&1 || true
     rm -f -- "${JV_QUADLET}" "${JV_BACKUP_SERVICE}" "${JV_BACKUP_TIMER}" "${JV_PREVIOUS_IMAGE_STATE}"
     rm -rf -- "${JV_CONFIG_DIR}"
-    systemctl daemon-reload
+    if ! systemctl daemon-reload; then
+        factory_reset_fail "configuration_cleanup_failed" "systemd could not reload after JustVoxel runtime configuration cleanup."
+    fi
     systemctl reset-failed minecraft.service minecraft-backup.service minecraft-backup.timer >/dev/null 2>&1 || true
+fi
+
+if podman container exists minecraft >/dev/null 2>&1 ||
+   systemctl is-active --quiet minecraft.service 2>/dev/null ||
+   [[ -e ${JV_CONFIG} || -e ${JV_QUADLET} || -e ${JV_BACKUP_SERVICE} || -e ${JV_BACKUP_TIMER} ]]; then
+    factory_reset_fail "runtime_cleanup_incomplete" "Full factory reset stopped because appliance-owned Minecraft runtime state is still present after cleanup."
 fi
 
 jq -n \
