@@ -3730,6 +3730,17 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       note.className = "notice warning";
       note.textContent = "When Full Factory Reset completes, this WebUI session will be signed out and the voxel password must be changed on the next sign-in.";
       built.panel.appendChild(note);
+      if (operation.state === "needs_attention") {
+        const actions = document.createElement("div");
+        actions.className = "system-reset-actions";
+        const retry = document.createElement("button");
+        retry.type = "button";
+        retry.className = "danger";
+        retry.textContent = "Review and retry Factory Reset";
+        retry.addEventListener("click", () => planReset("factory"));
+        actions.appendChild(retry);
+        built.panel.appendChild(actions);
+      }
     }
 
     root.appendChild(built.panel);
