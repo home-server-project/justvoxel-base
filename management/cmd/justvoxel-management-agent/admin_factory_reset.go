@@ -154,13 +154,17 @@ func (s *server) adminFactoryResetApply(w http.ResponseWriter, r *http.Request) 
 		writeAdminFactoryResetApplyFailure(w, http.StatusInternalServerError, "operation_status_failed", "current factory reset operation could not be read", nil)
 		return
 	}
+	retrying := false
 	if current != nil {
-		if current.PlanFingerprint == request.PlanFingerprint {
+		if current.State == operationNeedsAttention {
+			retrying = true
+		} else if current.PlanFingerprint == request.PlanFingerprint {
 			writeJSON(w, http.StatusOK, adminFactoryResetApplyResponse{OK: true, Created: false, Operation: current})
 			return
+		} else {
+			writeAdminFactoryResetApplyFailure(w, http.StatusConflict, "reset_busy", "another full factory reset operation is already active", nil)
+			return
 		}
-		writeAdminFactoryResetApplyFailure(w, http.StatusConflict, "reset_busy", "another full factory reset operation is already active", nil)
-		return
 	}
 
 	if strings.TrimSpace(request.SystemPassword) == "" {
@@ -192,7 +196,13 @@ func (s *server) adminFactoryResetApply(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	operation, created, err := s.operations.beginFactoryReset(plan.PlanFingerprint)
+	var operation operationJournal
+	created := false
+	if retrying {
+		operation, err = s.operations.retryFactoryReset(current.OperationID, plan.PlanFingerprint)
+	} else {
+		operation, created, err = s.operations.beginFactoryReset(plan.PlanFingerprint)
+	}
 	if err != nil {
 		if errors.Is(err, errFactoryResetOperationBusy) ||
 			errors.Is(err, errMinecraftResetOperationBusy) ||
@@ -212,7 +222,7 @@ func (s *server) adminFactoryResetApply(w http.ResponseWriter, r *http.Request) 
 		statusCode = http.StatusOK
 	}
 	writeJSON(w, statusCode, adminFactoryResetApplyResponse{OK: true, Created: created, Operation: &operation})
-	if created {
+	if created || retrying {
 		startFactoryResetWorker(s, operation.OperationID, plan.PlanFingerprint)
 	}
 }
@@ -394,7 +404,14 @@ func executeFactoryReset(ctx context.Context, s *server, operationID, expectedFi
 	output, runErr := runAdminFactoryResetHelper(ctx, "apply", "--confirm-players")
 	var applied adminFactoryResetHelperApplyResponse
 	if decodeErr := decodeAdminFactoryResetApplyResponse(output, &applied); decodeErr != nil || runErr != nil || !applied.OK {
-		_, _ = s.operations.transition(operationID, operationNeedsAttention, "reset_failed", "Full factory reset did not complete local runtime cleanup. Review appliance state before retrying.")
+		status := "Full factory reset did not complete local runtime cleanup. Review appliance state before retrying."
+		if strings.TrimSpace(applied.Error) != "" {
+			status = "Factory reset stopped: " + strings.TrimSpace(applied.Error)
+			if len(status) > 512 {
+				status = status[:512]
+			}
+		}
+		_, _ = s.operations.transition(operationID, operationNeedsAttention, "reset_failed", status)
 		if decodeErr != nil {
 			return decodeErr
 		}
