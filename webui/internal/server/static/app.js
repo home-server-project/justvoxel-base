@@ -1897,6 +1897,7 @@ if (migrationOpen && migrationDialog) {
   const state = migrationDialog.querySelector("[data-migration-state]");
   const content = migrationDialog.querySelector("[data-migration-workspace-content]");
   const tabs = Array.from(migrationDialog.querySelectorAll("[data-migration-tab]"));
+  const recoveryTab = tabs.find((button) => button.dataset.migrationTab === "recovery");
   const tabURLs = {
     export: "/workspace/migration/export",
     import: "/workspace/migration/import",
@@ -1936,6 +1937,17 @@ if (migrationOpen && migrationDialog) {
     tabs.forEach((button) => {
       button.setAttribute("aria-selected", button.dataset.migrationTab === currentTab ? "true" : "false");
     });
+  };
+
+  const syncMigrationRecoveryAvailability = (root) => {
+    if (!recoveryTab || !root) return;
+    const available = root.dataset.migrationRecoveryAvailable === "true";
+    recoveryTab.hidden = !available;
+    if (!available && currentTab === "recovery") {
+      currentTab = "export";
+      currentURL = tabURLs.export;
+      syncMigrationTabs();
+    }
   };
 
   const inferMigrationTab = (url, root = null) => {
@@ -2137,6 +2149,9 @@ if (migrationOpen && migrationDialog) {
         if (state) state.textContent = "";
         return;
       }
+      const entryMarkup = await response.text();
+      const entryRoot = extractMigrationRoot(entryMarkup);
+      if (entryRoot) syncMigrationRecoveryAvailability(entryRoot);
       await loadMigration(tabURLs[currentTab]);
     } catch (error) {
       if (sequence !== loadSequence) return;
