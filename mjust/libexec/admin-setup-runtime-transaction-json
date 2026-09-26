@@ -185,10 +185,21 @@ _a55_record_initial_state() {
 }
 
 _a55_apply_selinux() {
-    local escaped context
+    local escaped context mount_context
     escaped="$(path_regex_escape "${DATA_PATH}")"
     if semanage fcontext -a -t container_file_t "${escaped}(/.*)?" >/dev/null 2>&1; then
         _a55_manifest_update '.runtime.selinux_rule_added = true' || return 1
+    fi
+    # A freshly mounted XFS root can still be unlabeled_t. Relabel only that
+    # root to its policy default before traversing the Minecraft directory;
+    # the sibling backup directory must keep its own labeling.
+    if [[ -n ${DATA_MOUNT_POINT} && ${DATA_PATH} == "${DATA_MOUNT_POINT}/"* ]]; then
+        mount_context="$(ls -Zd "${DATA_MOUNT_POINT}" 2>/dev/null)" || return 1
+        if [[ ${mount_context} == *:unlabeled_t:* ]]; then
+            restorecon -F "${DATA_MOUNT_POINT}" >/dev/null 2>&1 || return 1
+            mount_context="$(ls -Zd "${DATA_MOUNT_POINT}" 2>/dev/null)" || return 1
+            [[ ${mount_context} != *:unlabeled_t:* ]] || return 1
+        fi
     fi
     restorecon -RF "${DATA_PATH}" >/dev/null 2>&1 || return 1
     context="$(ls -Zd "${DATA_PATH}" 2>/dev/null || true)"

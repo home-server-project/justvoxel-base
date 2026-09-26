@@ -127,11 +127,7 @@
     {{if .Plan.Requirements.SMBPasswordRequired}}<div class="notice setup-secret-note"><strong>SMB password required during execution.</strong><span>The password is not stored in this setup draft or review. JustVoxel will request it only when the setup transaction is actually started.</span></div>{{end}}
     {{if .Plan.Requirements.NetworkBackupValidationOnApply}}<div class="notice"><strong>Network backup validation happens during execution.</strong><br>The configured network source will be mounted and verified before JustVoxel uses it. Planning does not mount the share.</div>{{end}}
 
-    <form id="setup-apply-form" class="setup-execution-placeholder" method="post" action="/setup/review/apply" data-setup-apply data-eula-accepted="{{.EULAAccepted}}" data-smb-required="{{.Plan.Requirements.SMBPasswordRequired}}">
-      <div class="setup-execution-copy">
-        <strong>Configure JustVoxel</strong>
-        <span>Apply this validated plan. Progress remains available if the browser disconnects.</span>
-      </div>
+    <form id="setup-apply-form" method="post" action="/setup/review/apply" data-setup-apply data-eula-accepted="{{.EULAAccepted}}" data-smb-required="{{.Plan.Requirements.SMBPasswordRequired}}">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <input type="hidden" name="plan_fingerprint" value="{{.Plan.PlanFingerprint}}">
     </form>
@@ -153,6 +149,7 @@
     </dialog>
     {{end}}
 
+    {{if .Plan.OK}}<div class="setup-review-ready" role="status"><strong>Ready to configure</strong><span>Your setup is validated and ready to apply.</span></div>{{end}}
     <div class="setup-actions setup-actions-split">
       <form method="post" action="/setup/review/cancel"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Cancel setup</button></form>
       <div class="setup-step-navigation"><form method="post" action="/setup/review/back"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Back</button></form>{{if .Plan.OK}}<button type="submit" form="setup-apply-form" data-setup-configure>Configure JustVoxel</button>{{end}}</div>

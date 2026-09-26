@@ -121,7 +121,7 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 		"Review your JustVoxel setup", "Step 7 of 7", "Connections", "Version", "Configuration validated.", "Normalized Family Server", "20", "1.21.8",
 		"Recommended version", "/var/lib/justvoxel/minecraft", "/var/lib/justvoxel/backups",
 		"Backups are on the same disk", "If this disk fails, both Minecraft and its backups could be lost.", "Minecraft End User License Agreement", "https://www.minecraft.net/eula",
-		"Apply this validated plan", "/static/setup-review.css", "/static/setup-operation.js",
+		"Ready to configure", "Your setup is validated and ready to apply.", "/static/setup-review.css", "/static/setup-operation.js",
 		`name="plan_fingerprint" value="` + setupReviewFingerprint + `"`, "Download configuration", "data-setup-eula-dialog", "Accept and continue",
 	} {
 		if !strings.Contains(body, want) {
@@ -235,13 +235,19 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 		t.Fatalf("review returned %d: %s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"Cancel setup", ">Back</button>", "setup-execution-copy", "setup-review-summary", "Technical details", "<details class=\"setup-review-details\""} {
+	for _, want := range []string{"Cancel setup", ">Back</button>", "setup-review-ready", "setup-review-summary", "Technical details", "<details class=\"setup-review-details\"", "<h2>Server</h2>", "<h2>Minecraft</h2>", "<h2>Storage</h2>", "<h2>Backups</h2>"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("review layout missing %q: %s", want, body)
 		}
 	}
 	if strings.Contains(body, "Back to backups") {
 		t.Fatal("review still uses the old Back to backups label")
+	}
+	if strings.Contains(body, "setup-execution-placeholder") || strings.Contains(body, "Apply this validated plan") {
+		t.Fatal("review still renders the redundant Configure presentation")
+	}
+	if strings.Count(body, ">Configure JustVoxel</button>") != 1 || strings.Index(body, "setup-review-ready") > strings.Index(body, "setup-actions setup-actions-split") {
+		t.Fatal("readiness message must precede the sole bottom Configure button")
 	}
 
 	css, err := assets.ReadFile("static/setup-review.css")
@@ -258,6 +264,9 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 		".setup-review-summary",
 		"grid-template-columns:repeat(4,minmax(0,1fr))",
 		".setup-review-details",
+		".setup-review-details[open]>summary::after",
+		".setup-review-details:not([open])>.setup-review-grid{display:none}",
+		".setup-review-details[open]>.setup-review-grid{display:grid}",
 	} {
 		if !strings.Contains(styles, want) {
 			t.Fatalf("responsive review CSS missing %q", want)
@@ -272,6 +281,16 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 		if !strings.Contains(string(setupCSS), want) {
 			t.Fatalf("responsive setup CSS missing %q", want)
 		}
+	}
+	if !strings.Contains(string(setupCSS), ".setup-body .setup-wizard-panel{height:clamp(") || strings.Contains(string(setupCSS), ".setup-body .setup-step-panel{height:") {
+		t.Fatal("fixed setup height must apply only to editing wizard panels")
+	}
+	progress, err := assets.ReadFile("templates/setup_progress.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(progress), "setup-operation-panel") || strings.Contains(string(progress), "setup-wizard-panel") || strings.Contains(body, "setup-wizard-panel") {
+		t.Fatal("Review and operation results must use content-sized panels")
 	}
 }
 func TestSetupReviewExplainsDisabledBedrockCompatibility(t *testing.T) {
