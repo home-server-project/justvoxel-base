@@ -1907,6 +1907,69 @@ if (migrationOpen && migrationDialog) {
   let currentURL = tabURLs.export;
   let loadSequence = 0;
   let migrationSourceSMBPassword = "";
+  let migrationExportSMBPassword = "";
+
+  const requestMigrationSMBPassword = (purpose) => new Promise((resolve) => {
+    const dialog = document.createElement("dialog");
+    dialog.className = "system-action-dialog";
+    dialog.setAttribute("aria-label", "SMB credentials");
+    const shell = document.createElement("div");
+    shell.className = "system-action-dialog-content";
+    const title = document.createElement("h2");
+    title.textContent = "SMB password";
+    const copy = document.createElement("p");
+    copy.textContent = purpose === "import"
+      ? "Enter the SMB password so JustVoxel can inspect and reopen this Import source."
+      : "Enter the SMB password so JustVoxel can write the reviewed Export.";
+    const label = document.createElement("label");
+    label.textContent = "SMB password";
+    const input = document.createElement("input");
+    input.type = "password";
+    input.autocomplete = "off";
+    input.required = true;
+    label.appendChild(input);
+    const actions = document.createElement("div");
+    actions.className = "action-row";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "secondary";
+    cancel.textContent = "Cancel";
+    const use = document.createElement("button");
+    use.type = "button";
+    use.textContent = "Continue";
+    actions.append(cancel, use);
+    shell.append(title, copy, label, actions);
+    dialog.appendChild(shell);
+    document.body.appendChild(dialog);
+    initializeSharedWebUIControls(dialog);
+
+    const finish = (value) => {
+      input.value = "";
+      if (dialog.open) dialog.close();
+      dialog.remove();
+      resolve(value);
+    };
+    cancel.addEventListener("click", () => finish(null), { once: true });
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      finish(null);
+    }, { once: true });
+    use.addEventListener("click", () => {
+      if (!input.value) {
+        input.focus();
+        return;
+      }
+      finish(input.value);
+    }, { once: true });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        use.click();
+      }
+    });
+    dialog.showModal();
+    input.focus();
+  });
 
   const loadMigrationScript = async (src, ready) => {
     if (ready()) return;
@@ -2032,15 +2095,36 @@ if (migrationOpen && migrationDialog) {
         const body = new URLSearchParams();
         new FormData(form).forEach((value, key) => body.append(key, String(value)));
         const sourceKind = body.get("source_kind") || "";
-        const submittedSourcePassword = body.get("source_smb_password") || "";
+        const exportKind = body.get("kind") || "";
         if (sourceKind === "smb") {
-          if (submittedSourcePassword) migrationSourceSMBPassword = submittedSourcePassword;
-          else if (migrationSourceSMBPassword) body.set("source_smb_password", migrationSourceSMBPassword);
-        } else {
+          if (!migrationSourceSMBPassword) {
+            const password = await requestMigrationSMBPassword("import");
+            if (password === null) {
+              if (submitter) submitter.disabled = false;
+              if (state) state.textContent = "";
+              return;
+            }
+            migrationSourceSMBPassword = password;
+          }
+          body.set("source_smb_password", migrationSourceSMBPassword);
+        } else if (sourceKind) {
           migrationSourceSMBPassword = "";
           body.delete("source_smb_password");
         }
-        form.querySelectorAll('input[name="source_smb_password"]').forEach((input) => { input.value = ""; });
+
+        if (exportKind === "smb" && action.pathname.endsWith("/export/apply")) {
+          if (!migrationExportSMBPassword) {
+            const password = await requestMigrationSMBPassword("export");
+            if (password === null) {
+              if (submitter) submitter.disabled = false;
+              if (state) state.textContent = "";
+              return;
+            }
+            migrationExportSMBPassword = password;
+          }
+          body.set("smb_password", migrationExportSMBPassword);
+        }
+        form.querySelectorAll('input[name="source_smb_password"],input[name="smb_password"]').forEach((input) => { input.value = ""; });
         const response = await fetch(action.pathname + action.search, {
           method: (form.method || "POST").toUpperCase(),
           credentials: "same-origin",
@@ -2060,7 +2144,10 @@ if (migrationOpen && migrationDialog) {
           throw new Error("Migration operation could not be completed.");
         }
         renderMigrationMarkup(responseMarkup, response.url || action.pathname);
-        if ((response.url || "").includes("/migration/progress/")) migrationSourceSMBPassword = "";
+        if ((response.url || "").includes("/migration/progress/")) {
+          migrationSourceSMBPassword = "";
+          migrationExportSMBPassword = "";
+        }
         if (state) state.textContent = "";
       } catch (error) {
         if (submitter && submitter.isConnected) submitter.disabled = false;
@@ -2164,7 +2251,10 @@ if (migrationOpen && migrationDialog) {
 
   const workspaceWindow = setupWorkspaceWindow(migrationDialog, {
     onOpen: loadMigrationEntry,
-    onClose: () => { migrationSourceSMBPassword = ""; },
+    onClose: () => {
+      migrationSourceSMBPassword = "";
+      migrationExportSMBPassword = "";
+    },
   });
 
   migrationOpen.addEventListener("click", () => {
@@ -2177,6 +2267,7 @@ if (migrationOpen && migrationDialog) {
     button.addEventListener("click", async () => {
       const nextTab = button.dataset.migrationTab;
       if (currentTab === "import" && nextTab !== "import") migrationSourceSMBPassword = "";
+      if (currentTab === "export" && nextTab !== "export") migrationExportSMBPassword = "";
       currentTab = nextTab;
       currentURL = tabURLs[currentTab];
       syncMigrationTabs();
