@@ -2099,6 +2099,73 @@ if (migrationOpen && migrationDialog) {
     }
     content.replaceChildren(root);
 
+    const attachFailedResetRecovery = async () => {
+      if (!root.textContent.includes("Full Factory Reset")) return;
+      const csrf = root.querySelector('input[name="csrf"]')?.value || "";
+      if (!csrf) return;
+      try {
+        const statusResponse = await fetch("/api/system/workspace/reset/factory/current", {
+          method: "GET",
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
+        if (await handleMigrationAuth(statusResponse) || !statusResponse.ok) return;
+        const status = await statusResponse.json();
+        const operation = status?.operation;
+        if (!operation || operation.operation_type !== "factory_reset" || operation.state !== "needs_attention") return;
+
+        const target = root.querySelector(".notice.error");
+        if (!target || root.querySelector("[data-migration-reset-recovery]")) return;
+        const recovery = document.createElement("div");
+        recovery.className = "notice warning";
+        recovery.dataset.migrationResetRecovery = "true";
+        recovery.innerHTML = "<strong>A previous Full Factory Reset stopped before completion.</strong><br>Keep the current server data, release the blocked operation, and review this migration again.";
+        const actions = document.createElement("div");
+        actions.className = "action-row";
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "secondary";
+        button.textContent = "Keep current server and review again";
+        actions.appendChild(button);
+        recovery.appendChild(actions);
+        target.insertAdjacentElement("afterend", recovery);
+
+        button.addEventListener("click", async () => {
+          button.disabled = true;
+          setMigrationBusy("Resolving previous failed Factory Reset…");
+          const body = new URLSearchParams({
+            csrf,
+            operation_id: operation.operation_id,
+            keep_current_state: "yes",
+          });
+          try {
+            const response = await fetch("/api/system/workspace/reset/factory/resolve", {
+              method: "POST",
+              credentials: "same-origin",
+              headers: {
+                Accept: "application/json",
+                "Content-Type": "application/x-www-form-urlencoded",
+              },
+              body: body.toString(),
+              cache: "no-store",
+            });
+            if (await handleMigrationAuth(response)) return;
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(result.error || "Failed Factory Reset could not be resolved.");
+            setMigrationBusy("Previous failed Factory Reset resolved. Reloading migration…", "info");
+            await loadMigration(tabURLs[currentTab]);
+          } catch (error) {
+            button.disabled = false;
+            setMigrationBusy(error?.message || "Failed Factory Reset could not be resolved.", "error");
+          }
+        });
+      } catch (_) {
+        // Leave the original exact blocker visible if recovery status cannot be loaded.
+      }
+    };
+    void attachFailedResetRecovery();
+
     root.addEventListener("submit", async (event) => {
       const form = event.target.closest("form");
       if (!form || !root.contains(form)) return;

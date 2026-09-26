@@ -128,3 +128,22 @@ func TestMigrationWorkspaceStatusAndChoiceStyling(t *testing.T) {
 		t.Fatal("migration errors are not rendered through the framed error state")
 	}
 }
+
+
+func TestMigrationWorkspaceOffersDirectFailedResetRecovery(t *testing.T) {
+	script, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(script)
+	for _, want := range []string{
+		`fetch("/api/system/workspace/reset/factory/current"`,
+		`fetch("/api/system/workspace/reset/factory/resolve"`,
+		"Keep current server and review again",
+		"Resolving previous failed Factory Reset…",
+	} {
+		if !strings.Contains(js, want) {
+			t.Fatalf("migration failed-reset recovery missing %q", want)
+		}
+	}
+}
