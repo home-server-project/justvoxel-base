@@ -125,6 +125,52 @@ func TestNetworkWiFiRadioOffRequiresCheckpointForAllWiFiDevices(t *testing.T) {
 	}
 }
 
+func TestNetworkWiFiExplicitRollbackRemovesNewProfile(t *testing.T) {
+	fake := &fakeNetworkClient{connectResult: networking.WiFiConnectResult{ProfileUUID: "new-profile"}}
+	previousOpen := openNetworkClient
+	previousNow := networkNow
+	openNetworkClient = func(context.Context) (networkClient, error) { return fake, nil }
+	networkNow = func() time.Time { return time.Date(2026, 9, 25, 23, 30, 0, 0, time.UTC) }
+	t.Cleanup(func() {
+		openNetworkClient = previousOpen
+		networkNow = previousNow
+	})
+
+	s := &server{networkTransactions: make(map[string]networkCheckpointTransaction)}
+	transaction, err := s.beginNetworkCheckpoint(context.Background(), []string{"wlp2s0"}, 90)
+	if err != nil {
+		t.Fatalf("beginNetworkCheckpoint() error = %v", err)
+	}
+	mux := http.NewServeMux()
+	registerNetworkRoutes(mux, s)
+
+	connectBody, _ := json.Marshal(map[string]any{
+		"checkpoint_id":  transaction.ID,
+		"ssid":           "Home WiFi",
+		"bssid":          "AA:BB:CC:DD:EE:FF",
+		"key_management": "wpa-psk",
+		"password":       "password123",
+	})
+	connectRequest := httptest.NewRequest(http.MethodPost, "/v1/admin/network/wifi/wlp2s0/connect", bytes.NewReader(connectBody))
+	connectRequest = connectRequest.WithContext(context.WithValue(connectRequest.Context(), peerUIDKey{}, uint32(0)))
+	connectResponse := httptest.NewRecorder()
+	mux.ServeHTTP(connectResponse, connectRequest)
+	if connectResponse.Code != http.StatusOK {
+		t.Fatalf("connect status = %d, body %s", connectResponse.Code, connectResponse.Body.String())
+	}
+
+	rollbackRequest := httptest.NewRequest(http.MethodPost, "/v1/admin/network/checkpoints/"+transaction.ID+"/rollback", nil)
+	rollbackRequest = rollbackRequest.WithContext(context.WithValue(rollbackRequest.Context(), peerUIDKey{}, uint32(0)))
+	rollbackResponse := httptest.NewRecorder()
+	mux.ServeHTTP(rollbackResponse, rollbackRequest)
+	if rollbackResponse.Code != http.StatusOK {
+		t.Fatalf("rollback status = %d, body %s", rollbackResponse.Code, rollbackResponse.Body.String())
+	}
+	if fake.forgotten != "new-profile" {
+		t.Fatalf("rollback forgot profile %q, want new-profile", fake.forgotten)
+	}
+}
+
 func TestNetworkWiFiForgetRejectsActiveProfile(t *testing.T) {
 	fake := &fakeNetworkClient{forgetError: networking.ErrWiFiProfileActive}
 	previousOpen := openNetworkClient
