@@ -18,6 +18,27 @@ readonly JV_ITZG_IMAGES_URL=https://raw.githubusercontent.com/itzg/docker-minecr
 readonly JV_GEYSER_VERSIONS_URL=https://raw.githubusercontent.com/GeyserMC/GeyserWebsite/refs/heads/master/src/data/versions.json
 readonly JV_PAPER_USER_AGENT='JustVoxel/0.1 (https://github.com/home-server-project/justvoxel)'
 
+# Resolve one identity for an exact mount point. Repeated identical rows are
+# harmless; conflicting rows or a missing identity must never pass validation.
+jv_exact_mount_identity() {
+    local field="$1" mountpoint="$2" target value identity='' saw_target=false
+    case "${field}" in UUID|SOURCE) ;; *) return 1 ;; esac
+    while IFS= read -r target; do
+        [[ ${target} == "${mountpoint}" ]] || return 1
+        saw_target=true
+    done < <(findmnt -rn -o TARGET --mountpoint "${mountpoint}" 2>/dev/null)
+    [[ ${saw_target} == true ]] || return 1
+    while IFS= read -r value; do
+        [[ -n ${value} ]] || return 1
+        if [[ -n ${identity} && ${identity} != "${value}" ]]; then
+            return 1
+        fi
+        identity="${value}"
+    done < <(findmnt -rn -o "${field}" --mountpoint "${mountpoint}" 2>/dev/null)
+    [[ -n ${identity} ]] || return 1
+    printf '%s\n' "${identity}"
+}
+
 jv_variant_raw() {
     cat /usr/lib/justvoxel/variant 2>/dev/null || printf 'unknown\n'
 }
@@ -348,9 +369,9 @@ capture_backup_mount_identity() {
         echo "ERROR: selected backup mount is not mounted: ${BACKUP_MOUNT_POINT}" >&2
         return 1
     fi
-    BACKUP_EXPECTED_SOURCE="$(findmnt -n -o SOURCE --target "${BACKUP_MOUNT_POINT}" 2>/dev/null || true)"
+    BACKUP_EXPECTED_SOURCE="$(jv_exact_mount_identity SOURCE "${BACKUP_MOUNT_POINT}" 2>/dev/null || true)"
     if [[ ${BACKUP_TYPE} == disk || ${BACKUP_TYPE} == partition ]]; then
-        BACKUP_EXPECTED_UUID="$(findmnt -n -o UUID --target "${BACKUP_MOUNT_POINT}" 2>/dev/null || true)"
+        BACKUP_EXPECTED_UUID="$(jv_exact_mount_identity UUID "${BACKUP_MOUNT_POINT}" 2>/dev/null || true)"
         if [[ -z ${BACKUP_EXPECTED_UUID} ]]; then
             echo 'ERROR: could not determine a filesystem UUID for the selected local backup mount.' >&2
             return 1

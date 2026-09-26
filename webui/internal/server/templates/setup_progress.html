@@ -23,7 +23,7 @@
     data-setup-operation
     data-status-url="/api/setup/progress/{{.Operation.OperationID}}"
     data-operation-id="{{.Operation.OperationID}}"
-    data-initial-state="{{.Operation.State}}" data-initial-stage="{{.Operation.Stage}}" data-started-at="{{.Operation.StartedAt}}">
+    data-initial-state="{{.Operation.State}}" data-initial-stage="{{.Operation.Stage}}" data-started-at="{{.Operation.StartedAt}}" data-finished-at="{{.Operation.FinishedAt}}">
     <div class="setup-operation-icon" aria-hidden="true"></div>
     <ol class="setup-operation-stages" aria-label="Setup stages">
       <li data-setup-stage>Storage</li><li data-setup-stage>Configuration</li><li data-setup-stage>Minecraft</li><li data-setup-stage>Verification</li><li data-setup-stage>Complete</li>
@@ -56,8 +56,10 @@
     <div class="setup-operation-actions">
       <a class="button-link secondary" id="setup-diagnostic-log-view" href="/setup/progress/{{.Operation.OperationID}}/log/view" target="_blank" rel="noopener noreferrer" {{if and (ne .Operation.State "succeeded") (ne .Operation.State "rolled_back") (ne .Operation.State "needs_attention")}}hidden{{end}}>View setup log</a>
       <a class="button-link setup-log-download" id="setup-diagnostic-log-link" href="/setup/progress/{{.Operation.OperationID}}/log" {{if and (ne .Operation.State "succeeded") (ne .Operation.State "rolled_back") (ne .Operation.State "needs_attention")}}hidden{{end}}>Download Setup Log</a>
-      <a class="button-link" id="setup-dashboard-link" href="/" {{if ne .Operation.State "succeeded"}}hidden{{end}}>Open dashboard</a>
+      <a class="button-link" id="setup-dashboard-link" href="/" {{if and (ne .Operation.State "succeeded") (ne .Operation.State "rolled_back") (ne .Operation.State "needs_attention")}}hidden{{end}}>Open Dashboard</a>
       <a class="button-link secondary" id="setup-review-link" href="/setup/review" {{if ne .Operation.State "rolled_back"}}hidden{{end}}>Return to Review</a>
+      <form method="post" action="/setup/start" id="setup-start-over-form" {{if ne .Operation.State "rolled_back"}}hidden{{end}}><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit">Start setup over</button></form>
+      <span class="setup-configure-disabled" id="setup-start-over-disabled" role="group" aria-disabled="true" tabindex="0" aria-describedby="setup-start-over-help" {{if ne .Operation.State "needs_attention"}}hidden{{end}}><button type="button" disabled aria-describedby="setup-start-over-help">Start setup over</button><span class="setup-configure-tooltip" id="setup-start-over-help" role="tooltip">Resolve the recovery issue before starting setup again.</span></span>
     </div>
   </section>
 

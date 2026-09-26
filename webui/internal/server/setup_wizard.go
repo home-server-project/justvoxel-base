@@ -166,6 +166,9 @@ func (a *App) setupWizardStart(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if a.redirectCurrentSetupOperation(w, r, session, client) {
+		return
+	}
 	diagnosticID := a.beginSetupDiagnosticBestEffort(r.Context(), client, session)
 	defaults, err := client.AdminSetupDefaults(r.Context(), session)
 	if err != nil {

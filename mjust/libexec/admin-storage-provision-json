@@ -359,8 +359,8 @@ apply_json() {
     fi
 
     local uuid source size
-    uuid="$(findmnt -n -o UUID --target "${MOUNT_POINT}" 2>/dev/null || true)"
-    source="$(findmnt -n -o SOURCE --target "${MOUNT_POINT}" 2>/dev/null || true)"
+    uuid="$(jv_exact_mount_identity UUID "${MOUNT_POINT}" 2>/dev/null || true)"
+    source="$(jv_exact_mount_identity SOURCE "${MOUNT_POINT}" 2>/dev/null || true)"
     size="$(size_for "${partition}")"; size="${size:-0}"
     jq -n \
         --argjson proposed "${PLAN_JSON}" \

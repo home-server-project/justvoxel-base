@@ -363,7 +363,7 @@ apply_json() {
                 mount -- "${mountpoint}" >/dev/null 2>&1 || { restore >/dev/null 2>&1 || true; rm -f -- "${fstab_snapshot}" "${state_snapshot}"; json_error 'The filesystem could not be mounted. The previous configuration was restored.'; return 0; }
                 mounted_by_us=true
             fi
-            actual_uuid="$(findmnt -n -o UUID --target "${mountpoint}" 2>/dev/null || true)"
+            actual_uuid="$(jv_exact_mount_identity UUID "${mountpoint}" 2>/dev/null || true)"
             [[ ${actual_uuid} == "${uuid}" ]] || { restore >/dev/null 2>&1 || true; rm -f -- "${fstab_snapshot}" "${state_snapshot}"; json_error 'The mounted filesystem did not match the reviewed filesystem. The previous configuration was restored.'; return 0; }
             rm -f -- "${fstab_snapshot}" "${state_snapshot}"
             jq -n --argjson proposed "${PLAN_JSON}" --argjson warnings "${PLAN_WARNINGS}" '{ok:true,proposed:($proposed + {persistence:"justvoxel",current_mount_point:$proposed.mount_point,mounted:true}),warnings:$warnings,applied:true,mount_point_removed:false}'
@@ -371,7 +371,7 @@ apply_json() {
         remove)
             if [[ -n ${current} ]]; then
                 was_mounted=true
-                actual_uuid="$(findmnt -n -o UUID --target "${mountpoint}" 2>/dev/null || true)"
+                actual_uuid="$(jv_exact_mount_identity UUID "${mountpoint}" 2>/dev/null || true)"
                 [[ ${actual_uuid} == "${uuid}" ]] || { rm -f -- "${fstab_snapshot}" "${state_snapshot}"; json_error 'The mounted filesystem no longer matches the reviewed filesystem. Nothing was changed.'; return 0; }
                 umount -- "${mountpoint}" >/dev/null 2>&1 || { rm -f -- "${fstab_snapshot}" "${state_snapshot}"; json_error 'The filesystem is still in use and could not be unmounted. Its permanent mount was left unchanged.'; return 0; }
             fi

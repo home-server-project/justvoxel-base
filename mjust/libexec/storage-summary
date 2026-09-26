@@ -9,11 +9,11 @@ fs_key() {
 }
 
 fs_source() {
-    findmnt -n -o SOURCE --target "$1" 2>/dev/null || printf 'Unknown'
+    findmnt -n --first-only -o SOURCE --target "$1" 2>/dev/null || printf 'Unknown'
 }
 
 fs_target() {
-    findmnt -n -o TARGET --target "$1" 2>/dev/null || printf 'Unknown'
+    findmnt -n --first-only -o TARGET --target "$1" 2>/dev/null || printf 'Unknown'
 }
 
 fs_usage_line() {

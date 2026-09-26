@@ -145,11 +145,11 @@ if [[ -n ${BACKUP_MOUNT_POINT} ]]; then
         fail "backup mount is missing: ${BACKUP_MOUNT_POINT}"
     fi
     if [[ -n ${BACKUP_EXPECTED_UUID} ]]; then
-        actual_uuid="$(findmnt -n -o UUID --target "${BACKUP_MOUNT_POINT}" 2>/dev/null || true)"
+        actual_uuid="$(jv_exact_mount_identity UUID "${BACKUP_MOUNT_POINT}" 2>/dev/null || true)"
         [[ ${actual_uuid} == "${BACKUP_EXPECTED_UUID}" ]] && pass 'backup filesystem UUID matches' || fail 'backup filesystem UUID does not match configuration'
     fi
     if [[ -n ${BACKUP_EXPECTED_SOURCE} ]]; then
-        actual_source="$(findmnt -n -o SOURCE --target "${BACKUP_MOUNT_POINT}" 2>/dev/null || true)"
+        actual_source="$(jv_exact_mount_identity SOURCE "${BACKUP_MOUNT_POINT}" 2>/dev/null || true)"
         [[ ${actual_source} == "${BACKUP_EXPECTED_SOURCE}" ]] && pass 'backup mount source matches' || fail 'backup mount source does not match configuration'
     fi
 fi

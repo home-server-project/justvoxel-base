@@ -273,6 +273,92 @@ func TestSetupProgressPageAndJSONTrackSamePersistentOperation(t *testing.T) {
 	}
 }
 
+func TestSetupProgressTerminalActions(t *testing.T) {
+	for _, tc := range []struct {
+		state   string
+		visible []string
+		hidden  []string
+	}{
+		{"succeeded", []string{`id="setup-dashboard-link" href="/"`, `id="setup-diagnostic-log-view"`, `id="setup-diagnostic-log-link"`}, []string{`id="setup-start-over-form" hidden`, `id="setup-start-over-disabled" role="group" aria-disabled="true" tabindex="0" aria-describedby="setup-start-over-help" hidden`}},
+		{"rolled_back", []string{`id="setup-dashboard-link" href="/"`, `id="setup-review-link" href="/setup/review"`, `id="setup-start-over-form"`, `action="/setup/start"`}, []string{`id="setup-start-over-disabled" role="group" aria-disabled="true" tabindex="0" aria-describedby="setup-start-over-help" hidden`}},
+		{"needs_attention", []string{`id="setup-dashboard-link" href="/"`, `id="setup-start-over-disabled" role="group"`, `Resolve the recovery issue before starting setup again.`}, []string{`id="setup-start-over-form" hidden`, `id="setup-review-link" href="/setup/review" hidden`}},
+	} {
+		t.Run(tc.state, func(t *testing.T) {
+			client := setupExecutionClient()
+			client.operation = &api.PersistentOperation{SchemaVersion: "v1", OperationID: setupExecutionOperationID, OperationType: "setup", State: tc.state, StartedAt: "2026-09-20T12:00:00Z", FinishedAt: "2026-09-20T12:01:00Z"}
+			app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/progress/"+setupExecutionOperationID, ""))
+			if page.Code != http.StatusOK {
+				t.Fatalf("progress status %d: %s", page.Code, page.Body.String())
+			}
+			body := page.Body.String()
+			for _, want := range tc.visible {
+				if !strings.Contains(body, want) {
+					t.Fatalf("missing %q", want)
+				}
+			}
+			for _, want := range tc.hidden {
+				if !strings.Contains(body, want) {
+					t.Fatalf("missing hidden state %q", want)
+				}
+			}
+		})
+	}
+}
+
+func TestSetupElapsedTimerSource(t *testing.T) {
+	js, err := assets.ReadFile("static/setup-operation.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(js)
+	for _, want := range []string{`window.setInterval(renderElapsed, 1000)`, `window.clearInterval(elapsedInterval)`, `minutes === 0 ?`, `remainder === 0 ?`, `padStart(2, "0")`, `operation.started_at`, `operation.finished_at`} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("elapsed timer missing %q", want)
+		}
+	}
+}
+
+func TestRolledBackSetupCanStartFreshDraft(t *testing.T) {
+	client := setupExecutionClient()
+	client.current = &api.PersistentOperation{OperationID: setupExecutionOperationID, OperationType: "setup", State: "rolled_back"}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstRunSetupDrafts.delete(app, "session-token")
+	start := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/start", "csrf=csrf-token"))
+	if start.Code != http.StatusSeeOther || start.Header().Get("Location") != "/setup" {
+		t.Fatalf("start over returned %d %q", start.Code, start.Header().Get("Location"))
+	}
+	wizard := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
+	if wizard.Code != http.StatusOK || !strings.Contains(wizard.Body.String(), "Step 1 of 7") {
+		t.Fatalf("fresh draft unavailable: %d", wizard.Code)
+	}
+	if client.applyCalls != 0 {
+		t.Fatal("starting a fresh draft launched another setup operation")
+	}
+}
+
+func TestNeedsAttentionSetupCannotStartFreshDraft(t *testing.T) {
+	client := setupExecutionClient()
+	client.current = &api.PersistentOperation{OperationID: setupExecutionOperationID, OperationType: "setup", State: "needs_attention"}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/start", "csrf=csrf-token"))
+	if start.Code != http.StatusSeeOther || start.Header().Get("Location") != "/setup/progress/"+setupExecutionOperationID {
+		t.Fatalf("recovery lock was bypassed: %d %q", start.Code, start.Header().Get("Location"))
+	}
+	if client.applyCalls != 0 {
+		t.Fatal("recovery lock launched another setup operation")
+	}
+}
+
 func TestSetupProgressRefreshDoesNotStartAnotherApply(t *testing.T) {
 	client := setupExecutionClient()
 	client.operation = &api.PersistentOperation{

@@ -154,7 +154,7 @@ validate_local_target() {
         mountpoint="$(normalize_path "${mounted}")"
         [[ -n ${mountpoint} ]] || return 14
         [[ $(normalize_path "${requested_mount}") == "${mountpoint}" ]] || return 15
-        actual_source="$(findmnt -n -o SOURCE --target "${mountpoint}" 2>/dev/null || true)"
+        actual_source="$(jv_exact_mount_identity SOURCE "${mountpoint}" 2>/dev/null || true)"
     else
         mountpoint="$(normalize_path "${requested_mount}")"
         [[ -n ${mountpoint} ]] || return 14

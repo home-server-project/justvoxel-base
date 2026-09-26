@@ -94,8 +94,8 @@ current_status_json() {
             status=unavailable
             detail='Expected backup mount is not mounted.'
         else
-            actual_source="$(findmnt -n -o SOURCE --target "${BACKUP_MOUNT_POINT}" 2>/dev/null || true)"
-            actual_uuid="$(findmnt -n -o UUID --target "${BACKUP_MOUNT_POINT}" 2>/dev/null || true)"
+            actual_source="$(jv_exact_mount_identity SOURCE "${BACKUP_MOUNT_POINT}" 2>/dev/null || true)"
+            actual_uuid="$(jv_exact_mount_identity UUID "${BACKUP_MOUNT_POINT}" 2>/dev/null || true)"
             if [[ -n ${BACKUP_EXPECTED_SOURCE} && ${actual_source} != "${BACKUP_EXPECTED_SOURCE}" ]]; then
                 status=source-mismatch
                 detail='Mounted backup source does not match the configured source.'
@@ -243,9 +243,9 @@ validate_request() {
                 storage_mount_is_critical "${mounted}" && { json_error 'JustVoxel will not use a critical system mount as backup storage.'; return 1; }
                 TARGET_MOUNT="${mounted}"
                 TARGET_ALREADY_MOUNTED=true
-                actual_uuid="$(findmnt -n -o UUID --target "${TARGET_MOUNT}" 2>/dev/null || true)"
+                actual_uuid="$(jv_exact_mount_identity UUID "${TARGET_MOUNT}" 2>/dev/null || true)"
                 [[ ${actual_uuid} == "${TARGET_UUID}" ]] || { json_error 'Mounted filesystem identity could not be verified.'; return 1; }
-                TARGET_EXPECTED_SOURCE="$(findmnt -n -o SOURCE --target "${TARGET_MOUNT}" 2>/dev/null || true)"
+                TARGET_EXPECTED_SOURCE="$(jv_exact_mount_identity SOURCE "${TARGET_MOUNT}" 2>/dev/null || true)"
             else
                 [[ -n ${TARGET_MOUNT} ]] || { json_error 'Choose a mount point for the unmounted filesystem.'; return 1; }
                 storage_validate_mountpoint_path "${TARGET_MOUNT}" >/dev/null 2>&1 || { json_error 'The requested mount point is not safe for JustVoxel storage.'; return 1; }
@@ -271,7 +271,7 @@ validate_request() {
             storage_validate_mountpoint_path "${TARGET_MOUNT}" >/dev/null 2>&1 || { json_error 'The requested NFS mount point is not safe.'; return 1; }
             path_within_mount "${TARGET_PATH}" "${TARGET_MOUNT}" || { json_error 'Backup directory must be inside the NFS mount point.'; return 1; }
             if mountpoint -q -- "${TARGET_MOUNT}"; then
-                actual_source="$(findmnt -n -o SOURCE --target "${TARGET_MOUNT}" 2>/dev/null || true)"
+                actual_source="$(jv_exact_mount_identity SOURCE "${TARGET_MOUNT}" 2>/dev/null || true)"
                 [[ ${actual_source} == "${TARGET_SOURCE}" ]] || { json_error 'The requested NFS mount point is already occupied by a different source.'; return 1; }
                 TARGET_ALREADY_MOUNTED=true
                 TARGET_EXPECTED_SOURCE="${actual_source}"
@@ -286,7 +286,7 @@ validate_request() {
             storage_validate_mountpoint_path "${TARGET_MOUNT}" >/dev/null 2>&1 || { json_error 'The requested SMB mount point is not safe.'; return 1; }
             path_within_mount "${TARGET_PATH}" "${TARGET_MOUNT}" || { json_error 'Backup directory must be inside the SMB mount point.'; return 1; }
             if mountpoint -q -- "${TARGET_MOUNT}"; then
-                actual_source="$(findmnt -n -o SOURCE --target "${TARGET_MOUNT}" 2>/dev/null || true)"
+                actual_source="$(jv_exact_mount_identity SOURCE "${TARGET_MOUNT}" 2>/dev/null || true)"
                 [[ ${actual_source} == "${TARGET_SOURCE}" ]] || { json_error 'The requested SMB mount point is already occupied by a different source.'; return 1; }
                 TARGET_ALREADY_MOUNTED=true
                 TARGET_EXPECTED_SOURCE="${actual_source}"

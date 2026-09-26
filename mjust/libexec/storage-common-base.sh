@@ -285,14 +285,14 @@ storage_mount_local() {
         return 1
     fi
     mountpoint -q -- "${mountpoint}" || { echo "ERROR: mount failed: ${mountpoint}" >&2; return 1; }
-    actual_uuid="$(findmnt -n -o UUID --target "${mountpoint}" 2>/dev/null || true)"
+    actual_uuid="$(jv_exact_mount_identity UUID "${mountpoint}" 2>/dev/null || true)"
     [[ ${actual_uuid} == "${uuid}" ]] || {
         echo "ERROR: mounted UUID mismatch at ${mountpoint}" >&2
         return 1
     }
     STORAGE_MOUNT_POINT="${mountpoint}"
     STORAGE_EXPECTED_UUID="${uuid}"
-    STORAGE_EXPECTED_SOURCE="$(findmnt -n -o SOURCE --target "${mountpoint}")"
+    STORAGE_EXPECTED_SOURCE="$(jv_exact_mount_identity SOURCE "${mountpoint}")"
 }
 
 storage_target_path() {
@@ -405,8 +405,8 @@ storage_prepare_existing_partition() {
 
     if [[ -n ${mounted} ]]; then
         STORAGE_MOUNT_POINT="$(realpath -m -- "${mounted}")"
-        STORAGE_EXPECTED_UUID="$(findmnt -n -o UUID --target "${STORAGE_MOUNT_POINT}" 2>/dev/null || true)"
-        STORAGE_EXPECTED_SOURCE="$(findmnt -n -o SOURCE --target "${STORAGE_MOUNT_POINT}" 2>/dev/null || true)"
+        STORAGE_EXPECTED_UUID="$(jv_exact_mount_identity UUID "${STORAGE_MOUNT_POINT}" 2>/dev/null || true)"
+        STORAGE_EXPECTED_SOURCE="$(jv_exact_mount_identity SOURCE "${STORAGE_MOUNT_POINT}" 2>/dev/null || true)"
         [[ -n ${STORAGE_EXPECTED_UUID} ]] || { echo 'ERROR: mounted local filesystem has no UUID.' >&2; return 1; }
         storage_validate_mountpoint_path "${STORAGE_MOUNT_POINT}"
         storage_write_local_fstab "${STORAGE_EXPECTED_UUID}" "${STORAGE_MOUNT_POINT}" "${fstype}"
@@ -513,7 +513,7 @@ storage_prepare_nfs() {
         return 1
     fi
     mountpoint -q -- "${mountpoint}" || { echo 'ERROR: NFS mount failed.' >&2; return 1; }
-    actual_source="$(findmnt -n -o SOURCE --target "${mountpoint}" 2>/dev/null || true)"
+    actual_source="$(jv_exact_mount_identity SOURCE "${mountpoint}" 2>/dev/null || true)"
     [[ -n ${actual_source} ]] || { echo 'ERROR: NFS source could not be verified.' >&2; return 1; }
     STORAGE_TYPE=nfs
     STORAGE_MOUNT_POINT="${mountpoint}"
@@ -557,7 +557,7 @@ storage_prepare_smb() {
         return 1
     fi
     mountpoint -q -- "${mountpoint}" || { echo 'ERROR: SMB mount failed.' >&2; return 1; }
-    actual_source="$(findmnt -n -o SOURCE --target "${mountpoint}" 2>/dev/null || true)"
+    actual_source="$(jv_exact_mount_identity SOURCE "${mountpoint}" 2>/dev/null || true)"
     [[ -n ${actual_source} ]] || { echo 'ERROR: SMB source could not be verified.' >&2; return 1; }
     STORAGE_TYPE=smb
     STORAGE_MOUNT_POINT="${mountpoint}"

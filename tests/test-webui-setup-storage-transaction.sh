@@ -2,6 +2,8 @@
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "${repo_root}/mjust/libexec/common.sh"
+set +e
 # shellcheck disable=SC1091
 source "${repo_root}/mjust/libexec/admin-setup-storage-transaction-common.sh"
 # shellcheck disable=SC1091
@@ -66,6 +68,7 @@ CURRENT_FS=xfs
 CURRENT_UUID=11111111-2222-3333-4444-555555555555
 PROBE_FAIL_PATH=''
 MOUNT_SOURCE="$FAKE_PART"
+DUPLICATE_IDENTITY=0
 
 lsblk(){
     local args="$*"
@@ -120,18 +123,20 @@ blkid(){
 }
 
 findmnt(){
-    local out=''
+    local out='' exact=0
     while (( $# )); do
         case "$1" in
             -o) out="$2"; shift 2 ;;
             --target) shift 2 ;;
+            --mountpoint) exact=1; shift 2 ;;
             *) shift ;;
         esac
     done
     case "$out" in
         TARGET,FSTYPE) printf '/var ext4\n' ;;
-        UUID) (( MOUNTED == 1 )) && printf '%s\n' "$CURRENT_UUID" ;;
-        SOURCE) (( MOUNTED == 1 )) && printf '%s\n' "$MOUNT_SOURCE" ;;
+        TARGET) if (( MOUNTED == 1 && exact == 1 )); then printf '%s\n' "$MOUNT"; (( DUPLICATE_IDENTITY == 0 )) || printf '%s\n' "$MOUNT"; fi ;;
+        UUID) if (( MOUNTED == 1 )); then printf '%s\n' "$CURRENT_UUID"; (( DUPLICATE_IDENTITY == 0 )) || printf '%s\n' "$CURRENT_UUID"; fi ;;
+        SOURCE) if (( MOUNTED == 1 )); then printf '%s\n' "$MOUNT_SOURCE"; (( DUPLICATE_IDENTITY == 0 )) || printf '%s\n' "$MOUNT_SOURCE"; fi ;;
     esac
 }
 
@@ -239,10 +244,12 @@ bad_req="$(jq --arg mount "$TMP/second-mount" '.backups.mount_point=$mount | .ba
 run_action a53_validate_action "$bad_req"
 jq -e '(.ok|not) and .phase=="storage_preflight"' >/dev/null <<< "$ACTION_OUT" || fail 'same UUID with competing mounts was accepted'
 [[ ! -e $A53_TRANSACTION_ROOT/22222222-2222-4222-8222-222222222222/smb.credentials.before ]] || fail 'local transaction created unnecessary SMB credential snapshot'
+DUPLICATE_IDENTITY=1
 reset_runtime
 run_action a53_rollback_action "$req"
 out="$ACTION_OUT"
-jq -e '.ok and .rollback_state=="succeeded"' >/dev/null <<< "$out" || fail "partition rollback: $out"
+jq -e '.ok and .rollback_state=="succeeded"' >/dev/null <<< "$out" || fail "duplicate identical mount identity blocked rollback: $out"
+DUPLICATE_IDENTITY=0
 [[ $MOUNTED -eq 0 ]] || fail 'rollback did not unmount owned mount'
 cmp -s "$A53_FSTAB" "$TMP/fstab.expected" || fail 'rollback did not restore exact fstab bytes'
 [[ $(stat -c '%a' "$A53_FSTAB") == 640 ]] || fail 'rollback did not restore fstab mode'
@@ -376,6 +383,21 @@ jq -e '(.ok|not) and .rollback_state=="failed" and .rollback_result=="needs_atte
 cp "$TMP/fstab.expected" "$A53_FSTAB"
 rm -f "$A54_SMB_CREDENTIALS"
 rmdir "$(dirname "$A54_SMB_CREDENTIALS")" 2>/dev/null || true
+
+# A genuinely different mounted source must block rollback before unmounting.
+MOUNTED=0
+MOUNT_CALLS=0
+MOUNT_SOURCE="$FAKE_PART"
+req="$(make_partition_request 77777777-7777-4777-8777-777777777777)"
+run_action a53_apply_action "$req"
+jq -e '.ok and .applied' >/dev/null <<< "$ACTION_OUT" || fail "source mismatch setup apply: $ACTION_OUT"
+MOUNT_SOURCE=/dev/different-partition
+reset_runtime
+run_action a53_rollback_action "$req"
+out="$ACTION_OUT"
+jq -e '(.ok|not) and .rollback_state=="failed" and .rollback_result=="needs_attention"' >/dev/null <<< "$out" || fail "different mount source was accepted: $out"
+[[ $MOUNTED -eq 1 ]] || fail 'different mount source was unmounted'
+MOUNT_SOURCE="$FAKE_PART"
 
 # Concurrent fstab change must block explicit rollback and preserve recovery evidence.
 MOUNTED=0

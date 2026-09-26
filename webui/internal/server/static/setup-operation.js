@@ -75,6 +75,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const attentionNote = document.getElementById("setup-operation-attention");
   const dashboardLink = document.getElementById("setup-dashboard-link");
   const reviewLink = document.getElementById("setup-review-link");
+  const startOverForm = document.getElementById("setup-start-over-form");
+  const disabledStartOver = document.getElementById("setup-start-over-disabled");
   const diagnosticLogLink = document.getElementById("setup-diagnostic-log-link");
   const diagnosticLogView = document.getElementById("setup-diagnostic-log-view");
   const stages = Array.from(panel.querySelectorAll("[data-setup-stage]"));
@@ -83,6 +85,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   let failures = 0;
   let finished = false;
+  let elapsedInterval = null;
+  let startedAt = NaN;
+  let finalElapsed = null;
 
   const stateLabel = (state) => {
     if (state === "queued") return "Queued";
@@ -143,15 +148,17 @@ document.addEventListener("DOMContentLoaded", () => {
     if (verifyNote) verifyNote.hidden = operation.stage !== "minecraft_verify" || recovering || succeeded;
   };
 
-  const renderElapsed = (operation) => {
+  const renderElapsed = () => {
     if (!elapsed) return;
-    const started = Date.parse(operation.started_at || "");
-    if (!Number.isFinite(started) || started > Date.now()) {
+    if (!Number.isFinite(startedAt)) {
       elapsed.hidden = true;
       return;
     }
-    const minutes = Math.floor((Date.now() - started) / 60000);
-    elapsed.textContent = `Elapsed since setup started: ${minutes} min`;
+    const seconds = finalElapsed ?? Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    const minutes = Math.floor(seconds / 60);
+    const remainder = seconds % 60;
+    const formatted = minutes === 0 ? `${seconds} sec` : remainder === 0 ? `${minutes} min` : `${minutes} min ${String(remainder).padStart(2, "0")} sec`;
+    elapsed.textContent = `Elapsed since setup started: ${formatted}`;
     elapsed.hidden = false;
   };
 
@@ -163,7 +170,16 @@ document.addEventListener("DOMContentLoaded", () => {
     if (stateBadge) stateBadge.textContent = stateLabel(operation.state);
     if (stageText) stageText.textContent = operation.state === "rolled_back" ? "Rolled back" : stageLabel(operation.stage);
     renderStages(operation);
-    renderElapsed(operation);
+    const parsedStart = Date.parse(operation.started_at || "");
+    if (Number.isFinite(parsedStart)) startedAt = parsedStart;
+    if (terminalState(operation.state)) {
+      const finishedAt = Date.parse(operation.finished_at || "");
+      finalElapsed = Number.isFinite(startedAt) ? Math.max(0, Math.floor(((Number.isFinite(finishedAt) ? finishedAt : Date.now()) - startedAt) / 1000)) : null;
+      if (elapsedInterval !== null) { window.clearInterval(elapsedInterval); elapsedInterval = null; }
+    } else if (elapsedInterval === null) {
+      elapsedInterval = window.setInterval(renderElapsed, 1000);
+    }
+    renderElapsed();
 
     const succeeded = operation.state === "succeeded";
     const rolledBack = operation.state === "rolled_back";
@@ -171,8 +187,10 @@ document.addEventListener("DOMContentLoaded", () => {
     if (successNote) successNote.hidden = !succeeded;
     if (rollbackNote) rollbackNote.hidden = !rolledBack;
     if (attentionNote) attentionNote.hidden = !needsAttention;
-    if (dashboardLink) dashboardLink.hidden = !succeeded;
+    if (dashboardLink) dashboardLink.hidden = !terminalState(operation.state);
     if (reviewLink) reviewLink.hidden = !rolledBack;
+    if (startOverForm) startOverForm.hidden = !rolledBack;
+    if (disabledStartOver) disabledStartOver.hidden = !needsAttention;
     if (diagnosticLogLink) diagnosticLogLink.hidden = !terminalState(operation.state);
     if (diagnosticLogView) diagnosticLogView.hidden = !terminalState(operation.state);
 
@@ -187,6 +205,7 @@ document.addEventListener("DOMContentLoaded", () => {
     state: panel.dataset.initialState,
     stage: panel.dataset.initialStage,
     started_at: panel.dataset.startedAt,
+    finished_at: panel.dataset.finishedAt,
     status: statusText?.textContent,
   });
 

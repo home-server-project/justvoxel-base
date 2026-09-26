@@ -238,7 +238,7 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 		t.Fatalf("review returned %d: %s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"Cancel setup", ">Back</button>", "setup-review-panel", "setup-review-content", "setup-step-actions setup-actions-split", "setup-review-summary", "Technical details", "<details class=\"setup-review-details\"", "<h2>Server</h2>", "<h2>Minecraft</h2>", "<h2>Storage</h2>", "<h2>Backups</h2>"} {
+	for _, want := range []string{"Cancel setup", ">Back</button>", "setup-review-panel", "setup-review-content", "setup-step-actions setup-actions-split", "setup-review-technical", "Technical details", "setup-review-table", "<h3>Server</h3>", "<h3>Minecraft</h3>", "<h3>Storage</h3>", "<h3>Backups</h3>"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("review layout missing %q: %s", want, body)
 		}
@@ -259,23 +259,19 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 	}
 	styles := string(css)
 	for _, want := range []string{
-		"repeat(auto-fit,minmax(min(100%,240px),1fr))",
 		"setup-review-toolbar",
 		"white-space:nowrap",
-		"overflow-x:auto",
-		"grid-template-columns:minmax(0,1fr) auto",
-		".setup-review-summary",
-		"grid-template-columns:repeat(4,minmax(0,1fr))",
-		".setup-review-details",
-		".setup-review-details[open]>summary::after",
-		".setup-review-details:not([open])>.setup-review-grid{display:none}",
-		".setup-review-details[open]>.setup-review-grid{display:grid}",
-		".setup-review-content{flex:1;min-height:0;overflow-y:auto",
+		".setup-review-table{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}",
+		".setup-review-content{flex:1;min-height:0;overflow:visible}",
 		".setup-review-panel>.setup-step-actions",
 	} {
 		if !strings.Contains(styles, want) {
 			t.Fatalf("responsive review CSS missing %q", want)
 		}
+	}
+
+	if strings.Contains(body, "<details") || strings.Contains(styles, "setup-review-details") || strings.Contains(styles, "overflow-y:auto") {
+		t.Fatal("Review must remain fully visible without internal scrolling or collapsed details")
 	}
 
 	setupCSS, err := assets.ReadFile("static/setup.css")
@@ -355,7 +351,7 @@ func TestSetupReviewExplainsDisabledBedrockCompatibility(t *testing.T) {
 		t.Fatalf("review returned %d: %s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"Bedrock cross-play</dt><dd>Disabled", "Bedrock cross-play unavailable", "currently supports Minecraft 26.2", "Come back later and check again"} {
+	for _, want := range []string{"20 players · Bedrock Off · <code>America/Toronto</code>", "Bedrock cross-play unavailable", "currently supports Minecraft 26.2", "while this setup uses 26.3", "Come back later and check again"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("Bedrock compatibility review missing %q: %s", want, body)
 		}

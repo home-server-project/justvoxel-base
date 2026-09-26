@@ -72,8 +72,8 @@ storage_prepare_existing_partition() {
     if [[ -n ${mounted} ]]; then
         STORAGE_MOUNT_POINT="$(realpath -m -- "${mounted}")"
         storage_validate_mountpoint_path "${STORAGE_MOUNT_POINT}"
-        STORAGE_EXPECTED_UUID="$(findmnt -n -o UUID --target "${STORAGE_MOUNT_POINT}" 2>/dev/null || true)"
-        STORAGE_EXPECTED_SOURCE="$(findmnt -n -o SOURCE --target "${STORAGE_MOUNT_POINT}" 2>/dev/null || true)"
+        STORAGE_EXPECTED_UUID="$(jv_exact_mount_identity UUID "${STORAGE_MOUNT_POINT}" 2>/dev/null || true)"
+        STORAGE_EXPECTED_SOURCE="$(jv_exact_mount_identity SOURCE "${STORAGE_MOUNT_POINT}" 2>/dev/null || true)"
         [[ -n ${STORAGE_EXPECTED_UUID} ]] || {
             echo 'ERROR: mounted local filesystem has no UUID.' >&2
             return 1
@@ -102,7 +102,7 @@ storage_prepare_nfs() {
     storage_validate_mountpoint_path "${mountpoint}"
 
     if mountpoint -q -- "${mountpoint}"; then
-        actual_source="$(findmnt -n -o SOURCE --target "${mountpoint}" 2>/dev/null || true)"
+        actual_source="$(jv_exact_mount_identity SOURCE "${mountpoint}" 2>/dev/null || true)"
         [[ ${actual_source} == "${source}" ]] || {
             echo "ERROR: ${mountpoint} is already mounted from ${actual_source:-unknown}, not ${source}." >&2
             return 1
@@ -116,7 +116,7 @@ storage_prepare_nfs() {
             echo 'ERROR: NFS mount failed.' >&2
             return 1
         fi
-        actual_source="$(findmnt -n -o SOURCE --target "${mountpoint}" 2>/dev/null || true)"
+        actual_source="$(jv_exact_mount_identity SOURCE "${mountpoint}" 2>/dev/null || true)"
     fi
     [[ -n ${actual_source} ]] || { echo 'ERROR: NFS source could not be verified.' >&2; return 1; }
     STORAGE_TYPE=nfs
@@ -135,7 +135,7 @@ storage_prepare_smb() {
     storage_validate_mountpoint_path "${mountpoint}"
 
     if mountpoint -q -- "${mountpoint}"; then
-        actual_source="$(findmnt -n -o SOURCE --target "${mountpoint}" 2>/dev/null || true)"
+        actual_source="$(jv_exact_mount_identity SOURCE "${mountpoint}" 2>/dev/null || true)"
         [[ ${actual_source} == "${source}" ]] || {
             echo "ERROR: ${mountpoint} is already mounted from ${actual_source:-unknown}, not ${source}." >&2
             return 1
@@ -171,7 +171,7 @@ storage_prepare_smb() {
             echo 'ERROR: SMB mount failed.' >&2
             return 1
         fi
-        actual_source="$(findmnt -n -o SOURCE --target "${mountpoint}" 2>/dev/null || true)"
+        actual_source="$(jv_exact_mount_identity SOURCE "${mountpoint}" 2>/dev/null || true)"
     fi
     [[ -n ${actual_source} ]] || { echo 'ERROR: SMB source could not be verified.' >&2; return 1; }
     STORAGE_TYPE=smb

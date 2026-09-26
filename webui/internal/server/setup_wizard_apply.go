@@ -47,6 +47,9 @@ func (a *App) redirectCurrentSetupOperation(w http.ResponseWriter, r *http.Reque
 	if err != nil || response.Operation == nil {
 		return false
 	}
+	if response.Operation.State == "rolled_back" {
+		return false
+	}
 	http.Redirect(w, r, "/setup/progress/"+response.Operation.OperationID, http.StatusSeeOther)
 	return true
 }

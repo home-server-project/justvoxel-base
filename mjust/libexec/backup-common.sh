@@ -1,5 +1,9 @@
 #!/usr/bin/bash
 
+if ! declare -F jv_exact_mount_identity >/dev/null; then
+    source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
+fi
+
 jv_backup_load_config() {
     local backup_config_file="${1:-/etc/justvoxel/minecraft-backup.env}"
 
@@ -78,7 +82,7 @@ jv_backup_validate_mount_identity() {
 
     if [[ -n ${BACKUP_EXPECTED_UUID:-} ]]; then
         local actual_uuid
-        actual_uuid="$(findmnt -n -o UUID --target "${backup_mount_point}" 2>/dev/null || true)"
+        actual_uuid="$(jv_exact_mount_identity UUID "${backup_mount_point}" 2>/dev/null || true)"
         if [[ ${actual_uuid} != "${BACKUP_EXPECTED_UUID}" ]]; then
             echo "ERROR: backup mount UUID mismatch; expected ${BACKUP_EXPECTED_UUID}, got ${actual_uuid:-unknown}." >&2
             return 1
@@ -87,7 +91,7 @@ jv_backup_validate_mount_identity() {
 
     if [[ -n ${BACKUP_EXPECTED_SOURCE:-} ]]; then
         local actual_source
-        actual_source="$(findmnt -n -o SOURCE --target "${backup_mount_point}" 2>/dev/null || true)"
+        actual_source="$(jv_exact_mount_identity SOURCE "${backup_mount_point}" 2>/dev/null || true)"
         if [[ ${actual_source} != "${BACKUP_EXPECTED_SOURCE}" ]]; then
             echo "ERROR: backup mount source mismatch; expected ${BACKUP_EXPECTED_SOURCE}, got ${actual_source:-unknown}." >&2
             return 1

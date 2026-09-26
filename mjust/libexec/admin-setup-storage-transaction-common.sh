@@ -268,8 +268,8 @@ _a53_validate_partition_target() {
     if [[ -n ${mounted} ]]; then
         mounted="$(_a53_normalize_path "${mounted}")"
         [[ ${mounted} == "${normalized_mount}" ]] || return 1
-        actual_uuid="$(findmnt -n -o UUID --target "${normalized_mount}" 2>/dev/null || true)"
-        actual_source="$(findmnt -n -o SOURCE --target "${normalized_mount}" 2>/dev/null || true)"
+        actual_uuid="$(jv_exact_mount_identity UUID "${normalized_mount}" 2>/dev/null || true)"
+        actual_source="$(jv_exact_mount_identity SOURCE "${normalized_mount}" 2>/dev/null || true)"
         [[ ${actual_uuid} == "${expected_uuid}" ]] || return 1
         if [[ -n ${expected_source} && ${actual_source} != "${expected_source}" ]]; then
             return 1
@@ -313,7 +313,7 @@ _a54_validate_network_target() {
     esac
 
     if mountpoint -q -- "${mountpoint}"; then
-        actual_source="$(findmnt -n -o SOURCE --target "${mountpoint}" 2>/dev/null || true)"
+        actual_source="$(jv_exact_mount_identity SOURCE "${mountpoint}" 2>/dev/null || true)"
         [[ ${actual_source} == "${source}" ]] || return 1
     fi
     return 0

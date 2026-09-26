@@ -137,6 +137,45 @@ factory_reset_fail() {
     exit "${rc}"
 }
 
+factory_reset_managed_mounts() {
+    local fstab=/etc/fstab point source live unit tmp changed=false
+    local -a points=(/var/mnt/justvoxel-data /var/mnt/justvoxel-backup)
+    [[ -n ${DATA_MOUNT_POINT:-} ]] && points+=("${DATA_MOUNT_POINT}")
+    [[ -n ${BACKUP_MOUNT_POINT:-} ]] && points+=("${BACKUP_MOUNT_POINT}")
+    mapfile -t points < <(printf '%s\n' "${points[@]}" | sort -u | awk '{print length($0), $0}' | sort -rn | cut -d' ' -f2-)
+    [[ -f ${fstab} && ! -L ${fstab} ]] || return 1
+    for point in "${points[@]}"; do
+        [[ ${point} == /* && ${point} != / && ${point} != *[[:space:]]* ]] || return 1
+        unit="$(systemd-escape --path --suffix=mount "${point}")" || return 1
+        source="$(awk -v mp="${point}" '$0 !~ /^[[:space:]]*#/ && NF >= 2 && $2 == mp {print $1}' "${fstab}")"
+        if [[ -n ${source} ]]; then
+            [[ ${source} != *$'\n'* ]] || return 1
+            if mountpoint -q -- "${point}"; then
+                if [[ ${source} == UUID=* ]]; then
+                    live="$(jv_exact_mount_identity UUID "${point}")" || return 1
+                    [[ ${live} == "${source#UUID=}" ]] || return 1
+                else
+                    live="$(jv_exact_mount_identity SOURCE "${point}")" || return 1
+                    [[ ${live} == "${source}" ]] || return 1
+                fi
+                umount -- "${point}" || return 1
+            fi
+            tmp="$(mktemp /etc/.fstab.justvoxel-reset.XXXXXX)" || return 1
+            if ! awk -v mp="${point}" '$0 ~ /^[[:space:]]*#/ || NF < 2 || $2 != mp {print}' "${fstab}" > "${tmp}" ||
+               ! chmod --reference="${fstab}" "${tmp}" || ! chown --reference="${fstab}" "${tmp}" ||
+               ! cat -- "${tmp}" > "${fstab}"; then
+                rm -f -- "${tmp}"
+                return 1
+            fi
+            rm -f -- "${tmp}"
+            changed=true
+            systemctl daemon-reload || return 1
+        fi
+        systemctl reset-failed "${unit}" >/dev/null 2>&1 || true
+    done
+    [[ ${changed} == false ]] || systemctl daemon-reload
+}
+
 if [[ ${confirm_players} != --confirm-players ]]; then
     factory_reset_fail "confirmation_required" "Full factory reset Apply requires explicit player interruption confirmation." 4
 fi
@@ -165,6 +204,10 @@ if [[ ${backup_action} == delete ]]; then
     if ! cleanup_error="$(jv_reset_delete_tree_same_filesystem "${backup_path}" 'local backup data' 2>&1)"; then
         factory_reset_fail "backup_cleanup_failed" "Local backup cleanup failed: ${cleanup_error:-unknown cleanup error}"
     fi
+fi
+
+if ! factory_reset_managed_mounts; then
+    factory_reset_fail "mount_cleanup_failed" "JustVoxel-managed mount entries could not be cleaned safely. Review mount identity and /etc/fstab before retrying."
 fi
 
 config_backup_dir=/var/lib/justvoxel/config-backups

@@ -92,8 +92,8 @@ apply_json() {
         systemctl daemon-reload >/dev/null 2>&1 || { rollback; json_error 'Could not reload mount configuration.'; return 0; }
         mount "${TARGET_MOUNT}" >/dev/null 2>&1 || { rollback; json_error 'The selected local filesystem could not be mounted.'; return 0; }
         mounted_by_us=yes
-        [[ $(findmnt -n -o UUID --target "${TARGET_MOUNT}" 2>/dev/null || true) == "${TARGET_UUID}" ]] || { rollback; json_error 'Mounted filesystem identity did not match the selected partition.'; return 0; }
-        TARGET_EXPECTED_SOURCE="$(findmnt -n -o SOURCE --target "${TARGET_MOUNT}" 2>/dev/null || true)"
+        [[ $(jv_exact_mount_identity UUID "${TARGET_MOUNT}" 2>/dev/null || true) == "${TARGET_UUID}" ]] || { rollback; json_error 'Mounted filesystem identity did not match the selected partition.'; return 0; }
+        TARGET_EXPECTED_SOURCE="$(jv_exact_mount_identity SOURCE "${TARGET_MOUNT}" 2>/dev/null || true)"
     elif [[ ${TARGET_TYPE} == nfs && ${TARGET_ALREADY_MOUNTED} != true ]]; then
         install -d -m0755 -o root -g root "${TARGET_MOUNT}" || { rollback; json_error 'Could not create the NFS mount point.'; return 0; }
         storage_remove_fstab_mountpoint "${TARGET_MOUNT}" >/dev/null 2>&1 || { rollback; json_error 'Could not update NFS mount configuration.'; return 0; }
@@ -101,7 +101,7 @@ apply_json() {
         systemctl daemon-reload >/dev/null 2>&1 || { rollback; json_error 'Could not reload NFS mount configuration.'; return 0; }
         mount "${TARGET_MOUNT}" >/dev/null 2>&1 || { rollback; json_error 'NFS share could not be mounted. Check the server, export, network, and permissions.'; return 0; }
         mounted_by_us=yes
-        TARGET_EXPECTED_SOURCE="$(findmnt -n -o SOURCE --target "${TARGET_MOUNT}" 2>/dev/null || true)"
+        TARGET_EXPECTED_SOURCE="$(jv_exact_mount_identity SOURCE "${TARGET_MOUNT}" 2>/dev/null || true)"
         [[ ${TARGET_EXPECTED_SOURCE} == "${TARGET_SOURCE}" ]] || { rollback; json_error 'Mounted NFS source did not match the requested share.'; return 0; }
     elif [[ ${TARGET_TYPE} == smb && ${TARGET_ALREADY_MOUNTED} != true ]]; then
         install -d -m0755 -o root -g root "${TARGET_MOUNT}" || { rollback; json_error 'Could not create the SMB mount point.'; return 0; }
@@ -142,7 +142,7 @@ apply_json() {
             return 0
         fi
         mounted_by_us=yes
-        TARGET_EXPECTED_SOURCE="$(findmnt -n -o SOURCE --target "${TARGET_MOUNT}" 2>/dev/null || true)"
+        TARGET_EXPECTED_SOURCE="$(jv_exact_mount_identity SOURCE "${TARGET_MOUNT}" 2>/dev/null || true)"
         [[ ${TARGET_EXPECTED_SOURCE} == "${TARGET_SOURCE}" ]] || { rollback; json_error 'Mounted SMB source did not match the requested share.'; return 0; }
     fi
 

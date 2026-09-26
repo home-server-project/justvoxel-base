@@ -45,10 +45,13 @@ grep -Fq 'runtime_cleanup_incomplete' "${helper}"
     }
 )
 
-if grep -Eq 'umount|wipefs|parted|sgdisk|mkfs\.' "${helper}" "${common}"; then
-    echo 'ERROR: Full Factory Reset must not alter mounts, partitions, or filesystems.' >&2
+if grep -Eq 'wipefs|parted|sgdisk|mkfs\.' "${helper}" "${common}"; then
+    echo 'ERROR: Full Factory Reset must not alter partitions or filesystems.' >&2
     exit 1
 fi
+for required in 'DATA_MOUNT_POINT' 'BACKUP_MOUNT_POINT' '/var/mnt/justvoxel-data' '/var/mnt/justvoxel-backup' 'jv_exact_mount_identity UUID' 'jv_exact_mount_identity SOURCE' 'systemd-escape --path --suffix=mount' 'systemctl daemon-reload' 'systemctl reset-failed' 'factory_reset_managed_mounts'; do
+    grep -Fq "${required}" "${helper}" || { echo "ERROR: missing managed mount cleanup: ${required}" >&2; exit 1; }
+done
 if grep -Eq 'rm[[:space:]]+-rf.*(nfs|smb|cifs|network|external|usb)' "${helper}" "${common}"; then
     echo 'ERROR: Full Factory Reset contains an external/network recursive delete path.' >&2
     exit 1

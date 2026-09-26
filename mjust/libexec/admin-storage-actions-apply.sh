@@ -99,7 +99,7 @@ storage_action_apply_json() {
                 json_error 'Mount command completed, but the partition is not mounted.'
                 return 0
             }
-            actual_uuid="$(findmnt -n -o UUID --target "${mounted_after}" 2>/dev/null || true)"
+            actual_uuid="$(jv_exact_mount_identity UUID "${mounted_after}" 2>/dev/null || true)"
             [[ -n ${uuid} && ${actual_uuid} == "${uuid}" ]] || {
                 umount -- "${mounted_after}" >/dev/null 2>&1 || true
                 json_error 'The mounted filesystem did not match the reviewed filesystem.'

@@ -16,7 +16,7 @@ case "${DATA_PATH}/" in
 esac
 
 if [[ -n ${DATA_EXPECTED_UUID:-} ]]; then
-    actual_uuid="$(findmnt -n -o UUID --target "${DATA_MOUNT_POINT}" 2>/dev/null || true)"
+    actual_uuid="$(jv_exact_mount_identity UUID "${DATA_MOUNT_POINT}" 2>/dev/null || true)"
     [[ ${actual_uuid} == "${DATA_EXPECTED_UUID}" ]] || {
         echo 'ERROR: Minecraft data filesystem UUID does not match configuration.' >&2
         exit 1
@@ -24,7 +24,7 @@ if [[ -n ${DATA_EXPECTED_UUID:-} ]]; then
 fi
 
 if [[ -n ${DATA_EXPECTED_SOURCE:-} ]]; then
-    actual_source="$(findmnt -n -o SOURCE --target "${DATA_MOUNT_POINT}" 2>/dev/null || true)"
+    actual_source="$(jv_exact_mount_identity SOURCE "${DATA_MOUNT_POINT}" 2>/dev/null || true)"
     [[ ${actual_source} == "${DATA_EXPECTED_SOURCE}" ]] || {
         echo 'ERROR: Minecraft data mount source does not match configuration.' >&2
         exit 1
