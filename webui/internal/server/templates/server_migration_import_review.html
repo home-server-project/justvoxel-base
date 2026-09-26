@@ -41,7 +41,7 @@
 
     {{if .NeedsSourcePath}}
     <section class="panel">
-      <p class="eyebrow">Agent-discovered source entries</p>
+      <p class="eyebrow">JustVoxel-discovered source entries</p>
       {{range .Plan.SourceEntries}}<label><input type="radio" name="source_path" value="{{.Path}}"> <strong>{{.Kind}}</strong> · <code>{{.Path}}</code></label>{{end}}
       <label for="server-import-manual-path"><strong>Manual relative path fallback</strong></label>
       <input id="server-import-manual-path" name="manual_path" placeholder="folder/server-or-archive.tar.gz" autocomplete="off">
@@ -60,7 +60,7 @@
       <p class="eyebrow">Exact Minecraft version</p>
       <label for="server-import-required-version"><strong>Source Minecraft version</strong></label>
       <input id="server-import-required-version" name="source_version" value="{{.Request.Source.SourceVersion}}" placeholder="1.21.8" autocomplete="off" required>
-      <p class="muted">The Agent requires an exact version so it can verify a matching stable Paper build before Import.</p>
+      <p class="muted">JustVoxel requires an exact version so it can verify a matching stable Paper build before Import.</p>
     </section>
     {{end}}
 
@@ -73,7 +73,7 @@
     </section>
     {{end}}
 
-    <div class="action-row"><button type="submit">Continue Agent review</button><a class="button-link secondary" href="/settings/server-migration/import">Start over</a></div>
+    <div class="action-row"><button type="submit">Continue review</button><a class="button-link secondary" href="/settings/server-migration/import">Start over</a></div>
   </form>
   {{else}}
 
@@ -110,11 +110,11 @@
   {{if .Plan.Requirements}}
   <section class="panel">
     <p class="eyebrow">Safety checks and confirmations</p>
-    <p>The Management Agent will revalidate the source and destination, preserve rollback state, execute the Import transaction, and validate the resulting Minecraft runtime before reporting success.</p>
+    <p>The JustVoxel will revalidate the source and destination, preserve rollback state, execute the Import transaction, and validate the resulting Minecraft runtime before reporting success.</p>
     {{if .Plan.Requirements.PlayersConfirmationRequired}}<div class="notice warning"><strong>{{.Plan.Requirements.Online}} player(s) are online.</strong><br>{{range .Plan.Requirements.Players}}{{.}}<br>{{end}}Import will use the player-aware interruption path.</div>{{end}}
     {{if .Plan.Requirements.VanillaConfirmationRequired}}<div class="notice warning">This Vanilla source will be opened by Paper at the same reviewed Minecraft version.</div>{{end}}
     {{if .Plan.Requirements.PluginsConfirmationRequired}}<div class="notice warning">This source contains external plugin JARs. Plugins are executable server code and will be preserved.</div>{{end}}
-    {{if .Plan.Requirements.OnlineModeConfirmationRequired}}<div class="notice warning">The Agent could not prove online-mode automatically. You must explicitly confirm the source used online-mode=true.</div>{{end}}
+    {{if .Plan.Requirements.OnlineModeConfirmationRequired}}<div class="notice warning">JustVoxel could not prove online-mode automatically. You must explicitly confirm the source used online-mode=true.</div>{{end}}
     {{if .Plan.Requirements.BackupSMBPasswordRequired}}<div class="notice">The fresh destination uses SMB backup storage. Its password is requested only on the final Apply request and is not stored in this review or operation journal.</div>{{end}}
   </section>
 
