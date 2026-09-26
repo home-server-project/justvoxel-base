@@ -29,7 +29,18 @@
     </section>
     {{end}}
   {{else}}
-    <section class="panel"><div class="notice">No retained migration recovery transaction is currently reported by the JustVoxel.</div></section>
+    <section class="panel">
+      <div class="notice">No retained migration recovery transaction is currently reported by the JustVoxel.</div>
+      {{if .CanKeepCurrent}}
+      <div class="notice warning"><strong>The failed Import has no retained Recovery transaction.</strong><br>Keeping the current server first revalidates the running Minecraft and JustVoxel state. Nothing is deleted and the failed Import is not retried.</div>
+      <form method="post" action="/settings/server-migration/recovery/resolve">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <input type="hidden" name="operation_id" value="{{.ImportOperationID}}">
+        <input type="hidden" name="keep_current_state" value="yes">
+        <div class="action-row"><button type="submit">Keep current server and continue</button></div>
+      </form>
+      {{end}}
+    </section>
   {{end}}
 
   <div class="action-row"><a class="button-link secondary" href="/settings/server-migration">Back to Server Migration</a></div>
