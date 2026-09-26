@@ -59,6 +59,9 @@ function initServerMigrationImport(root = document) {
     switchGroups(backupKind, backupGroups, "serverImportBackup");
   }
 
+  const workspaceManaged = Boolean(form.closest("[data-migration-workspace-root]"));
+  if (workspaceManaged) return;
+
   form.addEventListener("submit", async (event) => {
     const selectedKind = form.querySelector("[data-server-import-source-kind]")?.value || form.querySelector('input[name="source_kind"]')?.value || "";
     const needsSMB = selectedKind === "smb" || form.dataset.serverImportRequireSmb === "true";

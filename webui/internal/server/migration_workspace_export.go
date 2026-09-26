@@ -237,11 +237,24 @@ func parseMigrationWorkspaceExportForm(r *http.Request, discovery api.AdminMigra
 			return api.AdminMigrationExportTargetRequest{}, errors.New("enter the temporary NFS source as server:/export/path")
 		}
 	case "smb":
-		request.Source = strings.TrimSpace(r.FormValue("source"))
+		rawLocation := strings.TrimSpace(r.FormValue("source"))
+		shareRoot, embeddedFolder, splitErr := splitMigrationSMBLocation(rawLocation)
+		if splitErr != nil {
+			return api.AdminMigrationExportTargetRequest{}, splitErr
+		}
+		reviewedFolder := strings.TrimSpace(r.FormValue("path"))
+		if embeddedFolder != "" && reviewedFolder != "" && embeddedFolder != reviewedFolder {
+			return api.AdminMigrationExportTargetRequest{}, errors.New("the SMB destination folder changed; review the destination again")
+		}
+		if reviewedFolder == "" {
+			reviewedFolder = embeddedFolder
+		}
+		request.Source = shareRoot
+		request.Path = reviewedFolder
 		request.Username = strings.TrimSpace(r.FormValue("username"))
 		request.Domain = strings.TrimSpace(r.FormValue("domain"))
-		if !strings.HasPrefix(request.Source, "//") || request.Username == "" {
-			return api.AdminMigrationExportTargetRequest{}, errors.New("enter the SMB share as //server/share and provide the SMB username")
+		if request.Username == "" {
+			return api.AdminMigrationExportTargetRequest{}, errors.New("enter the SMB username")
 		}
 	default:
 		return api.AdminMigrationExportTargetRequest{}, errors.New("unsupported Server Export destination type")

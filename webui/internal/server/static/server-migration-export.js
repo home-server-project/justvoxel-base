@@ -45,6 +45,9 @@ function initServerMigrationExport(root = document) {
     render();
   }
 
+  const workspaceManaged = Boolean(form.closest("[data-migration-workspace-root]"));
+  if (workspaceManaged) return;
+
   form.addEventListener("submit", async (event) => {
     if (form.dataset.serverExportRequireSmb !== "true" || form.dataset.serverExportCredentialReady === "true") return;
     event.preventDefault();

@@ -72,6 +72,12 @@ func (s *server) adminMigrationImportApply(w http.ResponseWriter, r *http.Reques
 
     operation,created,err:=s.operations.beginMigrationImport(request.PlanFingerprint)
     if err!=nil {
+        if errors.Is(err,errFactoryResetOperationBusy) {
+            writeAdminMigrationImportApplyFailure(w,http.StatusConflict,"factory_reset_needs_attention","Resolve the failed Full Factory Reset by keeping the current server, or retry the reset, before Server Import can start"); return
+        }
+        if errors.Is(err,errMinecraftResetOperationBusy) {
+            writeAdminMigrationImportApplyFailure(w,http.StatusConflict,"minecraft_reset_busy","Reset Minecraft must finish before Server Import can start"); return
+        }
         if errors.Is(err,errMigrationOperationBusy)||errors.Is(err,errMigrationLockBusy) {
             current,currentErr:=s.operations.currentMigration()
             if currentErr==nil&&current!=nil&&current.OperationType==operationTypeMigrationImport&&current.PlanFingerprint==request.PlanFingerprint { writeJSON(w,http.StatusOK,adminMigrationImportApplyResponse{OK:true,Created:false,Operation:current}); return }

@@ -224,7 +224,24 @@ func (a *App) handleServerMigrationRequestError(w http.ResponseWriter, r *http.R
 		a.handleServerMigrationAuthError(w, r, err)
 		return
 	}
-	http.Error(w, fallback, http.StatusBadGateway)
+	var responseErr *api.ResponseError
+	if errors.As(err, &responseErr) {
+		message := strings.TrimSpace(responseErr.Message)
+		if message == "" {
+			message = fallback
+		}
+		status := responseErr.StatusCode
+		if status < 400 || status > 599 {
+			status = http.StatusBadGateway
+		}
+		http.Error(w, message, status)
+		return
+	}
+	message := fallback
+	if detail := strings.TrimSpace(err.Error()); detail != "" {
+		message += " " + detail
+	}
+	http.Error(w, message, http.StatusBadGateway)
 }
 
 func (a *App) renderServerMigration(w http.ResponseWriter, templateName string, status int, data any) {
