@@ -3,7 +3,7 @@
 <body class="role-administrator">{{template "app-header" .}}
 <main>
   <div class="title-row"><div><p class="eyebrow">Administrator · migration</p><h1>Server Import</h1></div><span class="badge">{{.Identity.Username}}</span></div>
-  <p class="muted">Choose a source and destination settings. The Management Agent performs source discovery, Minecraft detection, storage planning, safety checks, transactional execution, validation, and rollback.</p>
+  <p class="muted">Choose a source and destination settings. The JustVoxel performs source discovery, Minecraft detection, storage planning, safety checks, transactional execution, validation, and rollback.</p>
   {{if .Error}}<div class="notice error"><strong>Server Import cannot continue as submitted.</strong><br>{{.Error}}</div>{{end}}
 
   <form method="post" action="/settings/server-migration/import/review" autocomplete="off" data-server-import-form>
@@ -28,18 +28,18 @@
       <div data-server-import-source="backup" hidden>
         <label for="server-import-backup-path"><strong>Relative archive or server-directory path <span class="muted">optional</span></strong></label>
         <input id="server-import-backup-path" name="source_path" placeholder="minecraft-2026-09-21.tar.gz" autocomplete="off">
-        <p class="muted">Leave this blank and the Agent will discover importable archives and server directories from configured backup storage.</p>
+        <p class="muted">Leave this blank and JustVoxel will discover importable archives and server directories from configured backup storage.</p>
       </div>
 
       <div data-server-import-source="device" hidden>
         <label for="server-import-device"><strong>Attached source</strong></label>
         <select id="server-import-device" name="source_device">
-          <option value="">Choose an Agent-discovered disk, partition, or removable source</option>
+          <option value="">Choose an JustVoxel-discovered disk, partition, or removable source</option>
           {{range .SourceDevices}}<option value="{{.Device.Path}}">{{.Device.Path}} · {{.Size}}{{if .Device.Model}} · {{.Device.Model}}{{end}}{{if .Device.Filesystem}} · {{.Device.Filesystem}}{{end}}{{if .Device.Removable}} · removable{{end}}</option>{{end}}
         </select>
         <label for="server-import-device-path"><strong>Relative archive or server-directory path <span class="muted">optional</span></strong></label>
         <input id="server-import-device-path" name="source_path" autocomplete="off">
-        <p class="muted">Leave the relative path blank to let the Agent discover importable entries after safely mounting the selected media.</p>
+        <p class="muted">Leave the relative path blank to let JustVoxel discover importable entries after safely mounting the selected media.</p>
       </div>
 
       <div data-server-import-source="nfs" hidden>
@@ -47,7 +47,7 @@
         <input id="server-import-nfs-source" name="source_remote" placeholder="nas:/exports/migrations" autocomplete="off">
         <label for="server-import-nfs-path"><strong>Relative archive or server-directory path <span class="muted">optional</span></strong></label>
         <input id="server-import-nfs-path" name="source_path" autocomplete="off">
-        <p class="muted">Leave the relative path blank to browse Agent-discovered entries from the temporary NFS mount.</p>
+        <p class="muted">Leave the relative path blank to browse JustVoxel-discovered entries from the temporary NFS mount.</p>
       </div>
 
       <div data-server-import-source="smb" hidden>
@@ -61,19 +61,19 @@
         <input id="server-import-smb-password" type="password" name="source_smb_password" autocomplete="off">
         <label for="server-import-smb-path"><strong>Relative archive or server-directory path <span class="muted">optional</span></strong></label>
         <input id="server-import-smb-path" name="source_path" autocomplete="off">
-        <div class="notice">The source password is used only for the current planning or Apply request so the Agent can inspect/reopen the share. It is never placed in the reviewed plan, hidden fields, URL, or persistent operation journal.</div>
+        <div class="notice">The source password is used only for the current planning or Apply request so JustVoxel can inspect/reopen the share. It is never placed in the reviewed plan, hidden fields, URL, or persistent operation journal.</div>
       </div>
 
       <label for="server-import-source-version"><strong>Exact Minecraft version <span class="muted">only if autodetection cannot determine it</span></strong></label>
       <input id="server-import-source-version" name="source_version" placeholder="1.21.8" autocomplete="off">
-      <p class="muted">The Agent will normally detect this. If exact version evidence is missing, it will ask for the value during review.</p>
+      <p class="muted">JustVoxel will normally detect this. If exact version evidence is missing, it will ask for the value during review.</p>
     </section>
 
     {{if .Discovery.Configured}}
     <section class="panel">
       <p class="eyebrow">Destination</p>
       <h2>Replace the configured JustVoxel server</h2>
-      <p>The existing destination storage, memory, timezone, backup policy, and current host ports remain destination-specific. The Agent will review and protect the current runtime before replacement.</p>
+      <p>The existing destination storage, memory, timezone, backup policy, and current host ports remain destination-specific. JustVoxel will review and protect the current runtime before replacement.</p>
     </section>
     {{else}}
     <section class="panel">
@@ -128,7 +128,7 @@
         <label>SMB domain <span class="muted">optional</span><input name="backup_domain" autocomplete="off"></label>
         <label>Local mount point<input name="backup_mount_point" placeholder="/var/mnt/justvoxel-backups" autocomplete="off"></label>
         <label>Backup directory<input name="backup_path" placeholder="/var/mnt/justvoxel-backups/minecraft" autocomplete="off"></label>
-        <div class="notice"><strong>No backup SMB password is collected during planning.</strong><br>If the Agent validates this destination, the password is requested only on the final Apply form.</div>
+        <div class="notice"><strong>No backup SMB password is collected during planning.</strong><br>If JustVoxel validates this destination, the password is requested only on the final Apply form.</div>
       </div>
     </section>
     {{end}}
