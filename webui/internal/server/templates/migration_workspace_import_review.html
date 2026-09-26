@@ -36,18 +36,24 @@
     <input type="hidden" name="backup_domain" value="{{.Request.Destination.Backups.Domain}}">
 
     {{if .NeedsSourcePath}}
-    <section class="panel">
-      <p class="eyebrow">JustVoxel-discovered source entries</p>
-      {{range .Plan.SourceEntries}}<label><input type="radio" name="source_path" value="{{.Path}}"> <strong>{{.Kind}}</strong> · <code>{{.Path}}</code></label>{{end}}
-      <label for="server-import-manual-path"><strong>Manual relative path fallback</strong></label>
-      <input id="server-import-manual-path" name="manual_path" placeholder="folder/server-or-archive.tar.gz" autocomplete="off">
+    <section class="panel migration-source-picker">
+      <p class="eyebrow">Backups and servers found here</p>
+      <p class="muted compact">Choose what you want to import. JustVoxel found these entries automatically.</p>
+      <div class="migration-choice-list">
+        {{range .Plan.SourceEntries}}<label class="migration-choice"><input type="radio" name="source_path" value="{{.Path}}"><span><strong>{{if eq .Kind "archive"}}Backup archive{{else}}Server folder{{end}}</strong><small>{{.Path}}</small></span></label>{{end}}
+      </div>
+      <details class="migration-advanced">
+        <summary>Advanced: enter a path manually</summary>
+        <label for="server-import-manual-path"><strong>Path inside this source</strong></label>
+        <input id="server-import-manual-path" name="manual_path" placeholder="folder/server-or-archive.tar.gz" autocomplete="off">
+      </details>
     </section>
     {{end}}
 
     {{if .NeedsRoot}}
     <section class="panel">
       <p class="eyebrow">Minecraft server roots</p>
-      {{range .Plan.Candidates}}<label><input type="radio" name="selected_root" value="{{.RootRelative}}"> <strong>{{.SourceType}}</strong> · <code>{{if .RootRelative}}{{.RootRelative}}{{else}}source root{{end}}</code>{{if .MinecraftVersion}} · Minecraft {{.MinecraftVersion}}{{end}}</label>{{end}}
+      <div class="migration-choice-list">{{range .Plan.Candidates}}<label class="migration-choice"><input type="radio" name="selected_root" value="{{.RootRelative}}"><span><strong>{{.SourceType}}{{if .MinecraftVersion}} · Minecraft {{.MinecraftVersion}}{{end}}</strong><small>{{if .RootRelative}}{{.RootRelative}}{{else}}Source root{{end}}</small></span></label>{{end}}</div>
     </section>
     {{end}}
 
@@ -66,31 +72,33 @@
   {{else}}
 
   {{if .Plan.Normalized}}
+  <div class="migration-review-grid">
   <section class="panel">
     <p class="eyebrow">Reviewed source plan</p>
     <h2>{{.Plan.Normalized.Source.SourceClass}} · Minecraft {{.Plan.Normalized.Source.MinecraftVersion}}</h2>
-    <div class="details">
-      <strong>Selected source</strong><br><span class="muted">{{.Plan.Normalized.Source.Path}}{{if .Plan.Normalized.Source.SelectedRoot}} · root {{.Plan.Normalized.Source.SelectedRoot}}{{end}}</span><br><br>
-      <strong>Server type</strong><br><span class="muted">{{.Plan.Normalized.Source.CandidateType}}</span><br><br>
-      <strong>Online identity</strong><br><span class="muted">{{.Plan.Normalized.Source.OnlineMode}}</span><br><br>
-      <strong>Imported data size</strong><br><span class="muted">{{.DataSize}}</span><br><br>
-      <strong>Game settings</strong><br><span class="muted">{{.Plan.Normalized.Source.GameMode}} · {{.Plan.Normalized.Source.Difficulty}} · max {{.Plan.Normalized.Source.MaxPlayers}} players</span><br><br>
-      <strong>Plugins detected</strong><br><span class="muted">{{.Plan.Normalized.Source.PluginCount}}</span>
+    <div class="migration-facts">
+      <div><strong>Selected source</strong><span>{{.Plan.Normalized.Source.Path}}{{if .Plan.Normalized.Source.SelectedRoot}} · root {{.Plan.Normalized.Source.SelectedRoot}}{{end}}</span></div>
+      <div><strong>Server type</strong><span>{{.Plan.Normalized.Source.CandidateType}}</span></div>
+      <div><strong>Online identity</strong><span>{{.Plan.Normalized.Source.OnlineMode}}</span></div>
+      <div><strong>Imported data</strong><span>{{.DataSize}}</span></div>
+      <div><strong>Game settings</strong><span>{{.Plan.Normalized.Source.GameMode}} · {{.Plan.Normalized.Source.Difficulty}} · max {{.Plan.Normalized.Source.MaxPlayers}}</span></div>
+      <div><strong>Plugins</strong><span>{{.Plan.Normalized.Source.PluginCount}}</span></div>
     </div>
   </section>
 
   <section class="panel">
     <p class="eyebrow">Reviewed destination plan</p>
     <h2>{{if eq .Plan.Normalized.Destination.Mode "fresh"}}Fresh JustVoxel destination{{else}}Replace configured JustVoxel server{{end}}</h2>
-    <div class="details">
-      <strong>Minecraft data</strong><br><span class="muted">{{.Plan.Normalized.Destination.DataPath}}</span><br><br>
-      <strong>Backups</strong><br><span class="muted">{{.Plan.Normalized.Destination.BackupPath}} · keep {{.Plan.Normalized.Destination.BackupKeep}}{{if .Plan.Normalized.Destination.BackupAutomatic}} · {{.Plan.Normalized.Destination.BackupSchedule}}{{end}}</span><br><br>
-      <strong>Ports</strong><br><span class="muted">Java {{.Plan.Normalized.Destination.JavaPort}}/TCP{{if .Plan.Normalized.Source.BedrockEnabled}} · Bedrock {{.Plan.Normalized.Destination.BedrockPort}}/UDP{{end}}</span><br><br>
-      <strong>Memory / timezone</strong><br><span class="muted">{{.Plan.Normalized.Destination.JavaMemory}} heap · {{.Plan.Normalized.Destination.ContainerMemory}} maximum · {{.Plan.Normalized.Destination.Timezone}}</span>
-      {{if .Plan.Normalized.Destination.Storage}}<br><br><strong>Data storage</strong><br><span class="muted">{{.Plan.Normalized.Destination.Storage.Type}} · {{.Plan.Normalized.Destination.Storage.Path}}{{if .Plan.Normalized.Destination.Storage.Device}} · {{.Plan.Normalized.Destination.Storage.Device}}{{end}}{{if .StorageSize}} · {{.StorageSize}}{{end}}</span>{{end}}
-      {{if .Plan.Normalized.Destination.Backups}}<br><br><strong>Backup storage</strong><br><span class="muted">{{.Plan.Normalized.Destination.Backups.Type}} · {{.Plan.Normalized.Destination.Backups.Path}}{{if .Plan.Normalized.Destination.Backups.Source}} · {{.Plan.Normalized.Destination.Backups.Source}}{{end}}{{if .BackupSize}} · {{.BackupSize}}{{end}}</span>{{end}}
+    <div class="migration-facts">
+      <div><strong>Minecraft data</strong><span>{{.Plan.Normalized.Destination.DataPath}}</span></div>
+      <div><strong>Backups</strong><span>{{.Plan.Normalized.Destination.BackupPath}} · keep {{.Plan.Normalized.Destination.BackupKeep}}{{if .Plan.Normalized.Destination.BackupAutomatic}} · {{.Plan.Normalized.Destination.BackupSchedule}}{{end}}</span></div>
+      <div><strong>Ports</strong><span>Java {{.Plan.Normalized.Destination.JavaPort}}/TCP{{if .Plan.Normalized.Source.BedrockEnabled}} · Bedrock {{.Plan.Normalized.Destination.BedrockPort}}/UDP{{end}}</span></div>
+      <div><strong>Memory / timezone</strong><span>{{.Plan.Normalized.Destination.JavaMemory}} heap · {{.Plan.Normalized.Destination.ContainerMemory}} max · {{.Plan.Normalized.Destination.Timezone}}</span></div>
+      {{if .Plan.Normalized.Destination.Storage}}<div><strong>Data storage</strong><span>{{.Plan.Normalized.Destination.Storage.Type}} · {{.Plan.Normalized.Destination.Storage.Path}}{{if .Plan.Normalized.Destination.Storage.Device}} · {{.Plan.Normalized.Destination.Storage.Device}}{{end}}{{if .StorageSize}} · {{.StorageSize}}{{end}}</span></div>{{end}}
+      {{if .Plan.Normalized.Destination.Backups}}<div><strong>Backup storage</strong><span>{{.Plan.Normalized.Destination.Backups.Type}} · {{.Plan.Normalized.Destination.Backups.Path}}{{if .Plan.Normalized.Destination.Backups.Source}} · {{.Plan.Normalized.Destination.Backups.Source}}{{end}}{{if .BackupSize}} · {{.BackupSize}}{{end}}</span></div>{{end}}
     </div>
   </section>
+  </div>
   {{end}}
 
   {{if .Plan.Warnings}}<section class="panel"><p class="eyebrow">Import warnings</p>{{range .Plan.Warnings}}<div class="notice warning">{{.Message}}</div>{{end}}</section>{{end}}
