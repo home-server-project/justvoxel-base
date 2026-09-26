@@ -20,6 +20,7 @@ const (
 	adminMigrationImportPath        = "/v1/admin/migration/import"
 	adminMigrationImportPlanPath    = "/v1/admin/migration/import/plan"
 	adminMigrationImportApplyPath   = "/v1/admin/migration/import/apply"
+	adminMigrationImportResolvePath = "/v1/admin/migration/import/resolve"
 	adminMigrationRecoveryPath      = "/v1/admin/migration/recovery"
 	adminMigrationRecoveryPlanPath  = "/v1/admin/migration/recovery/plan"
 	adminMigrationRecoveryApplyPath = "/v1/admin/migration/recovery/apply"
@@ -272,6 +273,16 @@ type AdminMigrationImportPlanResponse struct {
 	SourceEntries   []AdminMigrationImportSourceEntry `json:"source_entries"`
 }
 
+type AdminMigrationImportResolveRequest struct {
+	OperationID      string `json:"operation_id"`
+	KeepCurrentState bool   `json:"keep_current_state"`
+}
+
+type AdminMigrationImportResolveResponse struct {
+	Operation *PersistentOperation `json:"operation,omitempty"`
+	Error     string               `json:"error,omitempty"`
+}
+
 type AdminMigrationImportApplyRequest struct {
 	PlanFingerprint     string                      `json:"plan_fingerprint"`
 	Request             AdminMigrationImportRequest `json:"request"`
@@ -398,6 +409,23 @@ func (c *Client) AdminMigrationImportPlan(ctx context.Context, session string, r
 
 func (c *Client) AdminMigrationImportApply(ctx context.Context, session string, request AdminMigrationImportApplyRequest) (AdminMigrationApplyResponse, error) {
 	return c.adminMigrationApply(ctx, adminMigrationImportApplyPath, session, request, request.PlanFingerprint, "migration_import")
+}
+
+func (c *Client) AdminMigrationImportResolve(ctx context.Context, session string, request AdminMigrationImportResolveRequest) (AdminMigrationImportResolveResponse, error) {
+	var out AdminMigrationImportResolveResponse
+	status, err := c.serverMigrationJSON(ctx, http.MethodPost, adminMigrationImportResolvePath, session, request, &out, adminMigrationApplyTimeout,
+		http.StatusOK, http.StatusBadRequest, http.StatusConflict, http.StatusNotFound)
+	if err != nil {
+		return out, err
+	}
+	if status != http.StatusOK {
+		return out, &ResponseError{StatusCode: status, Message: serverMigrationMessage(out.Error, "Failed Server Import could not be resolved")}
+	}
+	if out.Operation == nil || !persistentOperationIDPattern.MatchString(out.Operation.OperationID) ||
+		out.Operation.OperationType != "migration_import" || out.Operation.State != "resolved" {
+		return out, errors.New("management API returned invalid server migration Import resolution")
+	}
+	return out, nil
 }
 
 func (c *Client) AdminMigrationRecoveryDiscovery(ctx context.Context, session string) (AdminMigrationRecoveryDiscoveryResponse, error) {
