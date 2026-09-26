@@ -659,6 +659,13 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .migration-workspace-content .action-row{justify-content:flex-end;margin-top:.65rem}
 .migration-workspace-content form>.action-row:last-of-type{position:sticky;bottom:0;padding:.55rem 0;background:#171d22;z-index:2}
 .migration-workspace-content .admin-form-grid{gap:.65rem}
+.migration-workspace-content label{margin:.45rem 0}
+.migration-workspace-content input,.migration-workspace-content select{padding:.55rem .65rem;margin-top:.22rem}
+.migration-workspace-content .notice{margin:.45rem 0}
+.migration-workspace-content .details{font-size:.88rem;line-height:1.35}
+.migration-workspace-content h2{font-size:1.05rem;margin:.08rem 0 .35rem}
+.migration-workspace-content p{line-height:1.4}
+.migration-workspace-content .destructive-confirmation{margin-top:.6rem;padding-top:.6rem}
 @media(max-width:700px){.migration-workspace-dialog{inset:52px .25rem .25rem .25rem!important;width:auto!important;height:auto!important;min-width:0;min-height:0;max-width:none;max-height:none;resize:none;border-radius:12px}.migration-workspace-header{padding:.85rem .9rem .7rem;cursor:default;touch-action:auto}.migration-workspace-tabs{padding:.55rem .9rem}.migration-workspace-body{padding:.8rem .9rem}}
 @media(prefers-color-scheme:light){.migration-workspace-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025}.migration-workspace-header,.migration-workspace-tabs{border-color:#d9dfe3}.migration-workspace-tabs{background:#f7f9fa}.migration-workspace-tabs button{color:#56636c}.migration-workspace-tabs button:hover,.migration-workspace-tabs button:focus-visible{background:#e9eef1;color:#1a2025}.migration-workspace-tabs button[aria-selected="true"]{background:#e3f1e8;border-color:#86b99a;color:#184c31}.migration-workspace-content form>.action-row:last-of-type{background:#fff}}
 
