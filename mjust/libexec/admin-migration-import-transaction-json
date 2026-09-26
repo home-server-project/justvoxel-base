@@ -5,8 +5,20 @@ source /usr/libexec/justvoxel/mjust/migration-common.sh
 source /usr/libexec/justvoxel/mjust/migration-import-source.sh
 require_root
 
-emit_progress(){ jq -cn --arg state "$1" --arg stage "$2" --arg status "$3" '{event:"progress",state:$state,stage:$stage,status:$status}'; }
-emit_result(){ jq -cn --arg outcome "$1" --arg status "$2" '{event:"result",outcome:$outcome,status:$status}'; }
+final_result_emitted=no
+current_stage=initializing
+emit_progress(){ current_stage="$2"; jq -cn --arg state "$1" --arg stage "$2" --arg status "$3" '{event:"progress",state:$state,stage:$stage,status:$status}'; }
+emit_result(){ final_result_emitted=yes; jq -cn --arg outcome "$1" --arg status "$2" '{event:"result",outcome:$outcome,status:$status}'; }
+transaction_exit(){
+    local rc=$?
+    trap - EXIT
+    jv_migration_import_source_cleanup >/dev/null 2>&1 || true
+    if (( rc != 0 )) && [[ ${final_result_emitted} != yes ]]; then
+        jq -cn --arg outcome needs_attention --arg status "Server migration Import stopped unexpectedly during ${current_stage}; no automatic retry was attempted and retained state requires review." '{event:"result",outcome:$outcome,status:$status}'
+    fi
+    exit "${rc}"
+}
+trap transaction_exit EXIT
 
 payload="$(cat)"
 if ! jq -e '
@@ -36,7 +48,6 @@ fi
 emit_progress validating import_preflight 'Preparing the reviewed server migration Import for one bounded staging attempt before changing Minecraft.'
 
 source_request="$(jq -c '.request.source | .kind=(.kind//"local")' <<< "$payload")"
-trap 'jv_migration_import_source_cleanup' EXIT
 set +e
 jv_migration_import_source_prepare "$source_request"
 source_prepare_rc=$?

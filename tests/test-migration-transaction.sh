@@ -119,4 +119,13 @@ jv_migration_transport_cleanup
 grep -Fq "${tmp}/transport-root/mount" "${tmp}/umount.log" || fail 'owned temporary mount was not unmounted'
 PATH="${old_path}"; export PATH
 
+transaction_api="${repo_root}/mjust/libexec/admin-migration-import-transaction-json"
+for text in \
+    'final_result_emitted=no' \
+    'current_stage=initializing' \
+    'transaction_exit()' \
+    'no automatic retry was attempted and retained state requires review.'; do
+    grep -Fq "${text}" "${transaction_api}" || fail "migration Import transaction diagnostics missing: ${text}"
+done
+
 echo 'migration transaction, rollback and transport cleanup tests passed.'

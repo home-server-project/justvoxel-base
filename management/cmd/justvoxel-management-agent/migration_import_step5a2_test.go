@@ -175,3 +175,31 @@ func TestMigrationImportWorkerPersistentOutcomes(t *testing.T) {
         })
     }
 }
+
+
+func TestMigrationImportWorkerKeepsFinalSafetyResultWhenHelperExitsNonzero(t *testing.T) {
+	store := openTestOperationStore(t)
+	op, _, err := store.beginMigrationImport(testMigrationImportFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := runAdminMigrationImportTransactionHelper
+	runAdminMigrationImportTransactionHelper = func(_ context.Context, _ migrationImportTransactionRequest, handle func(migrationImportTransactionEvent) error) error {
+		if err := handle(migrationImportTransactionEvent{Event: "result", Outcome: "rolled_back", Status: "Original server restored and validated."}); err != nil {
+			return err
+		}
+		return errors.New("exit status 1")
+	}
+	defer func() { runAdminMigrationImportTransactionHelper = old }()
+
+	if err := executeMigrationImportTransaction(context.Background(), store, op.OperationID, step5A2ExecutionPlan()); err != nil {
+		t.Fatalf("final safety result was overwritten by helper exit: %v", err)
+	}
+	final, err := store.get(op.OperationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final.State != operationRolledBack || final.Status != "Original server restored and validated." {
+		t.Fatalf("final journal = %#v", final)
+	}
+}
