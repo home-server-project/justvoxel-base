@@ -171,6 +171,7 @@ func (s *server) networkWiFiConnect(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		profileUUID = result.ProfileUUID
+		s.addNetworkCreatedProfile(transaction.ID, profileUUID)
 	}
 
 	if s.store != nil {
