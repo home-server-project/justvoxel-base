@@ -88,10 +88,10 @@ ls() {
 }
 _a55_apply_selinux
 [[ ${a55_mount_labeled} == true && ${a55_data_labeled} == true ]] || { echo 'fresh XFS mount root or Minecraft directory was not labeled' >&2; exit 1; }
-[[ ${a55_calls[0]} == 'rule:-a -t container_file_t /var/mnt/justvoxel-data/minecraft(/.*)?' ]]
-[[ ${a55_calls[1]} == 'manifest:.runtime.selinux_rule_added = true' ]]
-[[ ${a55_calls[2]} == 'restore:-F /var/mnt/justvoxel-data' ]]
-[[ ${a55_calls[3]} == 'restore:-RF /var/mnt/justvoxel-data/minecraft' ]]
+[[ ${a55_calls[0]-} == 'rule:fcontext -a -t container_file_t /var/mnt/justvoxel-data/minecraft(/.*)?' ]] || { echo 'SELinux fcontext rule was not added for Minecraft data' >&2; exit 1; }
+[[ ${a55_calls[1]-} == 'manifest:.runtime.selinux_rule_added = true' ]] || { echo 'SELinux rule addition was not recorded in the manifest' >&2; exit 1; }
+[[ ${a55_calls[2]-} == 'restore:-F /var/mnt/justvoxel-data' ]] || { echo 'SELinux mount root was not relabeled first' >&2; exit 1; }
+[[ ${a55_calls[3]-} == 'restore:-RF /var/mnt/justvoxel-data/minecraft' ]] || { echo 'SELinux Minecraft data directory was not relabeled after the mount root' >&2; exit 1; }
 [[ ${#a55_calls[@]} == 4 ]] || { echo 'SELinux relabel touched the shared backup directory or another path' >&2; exit 1; }
 
 # System storage has no external mount root to relabel.
@@ -104,7 +104,7 @@ restorecon() {
     a55_data_labeled=true
 }
 _a55_apply_selinux
-[[ ${a55_calls[2]} == 'restore:-RF /var/lib/justvoxel/minecraft' && ${#a55_calls[@]} == 3 ]]
+[[ ${a55_calls[2]-} == 'restore:-RF /var/lib/justvoxel/minecraft' && ${#a55_calls[@]} == 3 ]] || { echo 'SELinux system storage relabel call sequence was incorrect' >&2; exit 1; }
 grep -Fq 'if [[ ${selinux_added} == true ]]; then' "${runtime_helper}"
 grep -Fq 'semanage fcontext -d "${escaped}(/.*)?"' "${runtime_helper}"
 
