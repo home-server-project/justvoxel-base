@@ -450,7 +450,6 @@ func actionRequest(target, form string) *http.Request {
 	return req
 }
 
-
 type fakeDashboardOperationAPI struct {
 	fakeAPI
 	migration *api.PersistentOperation
@@ -470,10 +469,10 @@ func (f *fakeDashboardOperationAPI) AdminCurrentFactoryResetOperation(_ context.
 
 func TestDashboardSurfacesMigrationNeedsAttention(t *testing.T) {
 	client := &fakeDashboardOperationAPI{migration: &api.PersistentOperation{
-		OperationID: "f75ce69d-e30d-4ea4-b402-ba301a8098fb",
+		OperationID:   "f75ce69d-e30d-4ea4-b402-ba301a8098fb",
 		OperationType: "migration_import",
-		State: "needs_attention",
-		Status: "Server migration Import backend stopped unexpectedly; preserved Import or runtime state requires administrator attention.",
+		State:         "needs_attention",
+		Status:        "Server migration Import backend stopped unexpectedly; preserved Import or runtime state requires administrator attention.",
 	}}
 	app, err := New(client, Config{Version: "1.0.0", ManagementAPI: "v1"})
 	if err != nil {
