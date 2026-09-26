@@ -26,12 +26,13 @@ var (
 )
 
 type networkCheckpointTransaction struct {
-	ID         string
-	Checkpoint networking.Checkpoint
-	Interfaces []string
-	CreatedAt  time.Time
-	ExpiresAt  time.Time
-	Busy       bool
+	ID                  string
+	Checkpoint          networking.Checkpoint
+	Interfaces          []string
+	CreatedProfileUUIDs []string
+	CreatedAt           time.Time
+	ExpiresAt           time.Time
+	Busy                bool
 }
 
 type networkCheckpointView struct {
@@ -203,11 +204,17 @@ func (s *server) networkCheckpointRollback(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusServiceUnavailable, "network checkpoint could not be rolled back")
 		return
 	}
+	cleanupOK := true
+	for _, profileUUID := range transaction.CreatedProfileUUIDs {
+		if err := client.ForgetWiFiProfile(ctx, profileUUID); err != nil {
+			cleanupOK = false
+		}
+	}
 	s.removeNetworkCheckpoint(id)
 	finished = true
 
 	items := make([]networkCheckpointRollbackDeviceView, 0, len(transaction.Interfaces))
-	success := true
+	success := cleanupOK
 	for _, interfaceName := range transaction.Interfaces {
 		result := results[interfaceName]
 		if result == "" {
@@ -311,6 +318,26 @@ func (s *server) releaseNetworkCheckpoint(id string) {
 		return
 	}
 	transaction.Busy = false
+	s.networkTransactions[id] = transaction
+}
+
+func (s *server) addNetworkCreatedProfile(id, profileUUID string) {
+	profileUUID = strings.TrimSpace(profileUUID)
+	if id == "" || profileUUID == "" {
+		return
+	}
+	s.networkMu.Lock()
+	defer s.networkMu.Unlock()
+	transaction, ok := s.networkTransactions[id]
+	if !ok {
+		return
+	}
+	for _, existing := range transaction.CreatedProfileUUIDs {
+		if existing == profileUUID {
+			return
+		}
+	}
+	transaction.CreatedProfileUUIDs = append(transaction.CreatedProfileUUIDs, profileUUID)
 	s.networkTransactions[id] = transaction
 }
 
