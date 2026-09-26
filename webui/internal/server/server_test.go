@@ -233,7 +233,7 @@ func TestFirstLoginRequiresPasswordChange(t *testing.T) {
 	}
 }
 
-func TestDashboardRendersStatusPlayersAndControls(t *testing.T) {
+func TestDashboardUsesWorkspaceControlsAndQuickLook(t *testing.T) {
 	app, err := New(&fakeAPI{}, Config{Version: "1.0.0", Commit: "abc123", ManagementAPI: "v1"})
 	if err != nil {
 		t.Fatal(err)
@@ -246,7 +246,7 @@ func TestDashboardRendersStatusPlayersAndControls(t *testing.T) {
 		t.Fatalf("got %d", rr.Code)
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"Running", "2 / 10", "1.21.8", "Alex", "Steve", "/minecraft/start", "/minecraft/stop", "/minecraft/restart", `data-dashboard-status="/api/dashboard-status"`, "dashboard-summary", "dashboard-live-panels", "dashboard-attention"} {
+	for _, want := range []string{`data-quick-look`, `data-quick-look-minecraft`, `data-quick-look-players`, `data-workspace-window="minecraft"`, "/minecraft/start", "/minecraft/stop", "/minecraft/restart", `data-dashboard-status="/api/dashboard-status"`, `data-configured="true"`, "dashboard-attention"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("missing %q in response", want)
 		}
@@ -256,6 +256,39 @@ func TestDashboardRendersStatusPlayersAndControls(t *testing.T) {
 	}
 	if strings.Contains(body, `id="minecraft-players-summary"`) {
 		t.Fatal("dashboard still renders the duplicate Players summary tile")
+	}
+	if strings.Contains(body, `dashboard-summary`) {
+		t.Fatal("dashboard still renders the legacy summary strip")
+	}
+	if strings.Contains(body, "Server control") || strings.Contains(body, "Online now") {
+		t.Fatal("dashboard still renders legacy control or player cards")
+	}
+}
+
+func TestUnconfiguredDashboardShowsSetupWithoutLivePanels(t *testing.T) {
+	status := defaultStatus()
+	status.Minecraft.Configured = false
+	status.Minecraft.State = "Not configured"
+	app, err := New(&fakeAPI{statusResult: status, playersResult: api.Players{State: "not_configured"}}, Config{ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("dashboard returned %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{`data-dashboard-setup-area`, `href="/setup"`, "Minecraft is not configured", "Set up your Minecraft server", "Start setup when you are ready"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("setup invitation missing %q", want)
+		}
+	}
+	if !strings.Contains(body, `data-configured="false"`) || strings.Contains(body, `data-dashboard-live-panels`) {
+		t.Fatal("unconfigured dashboard contains legacy live panels")
+	}
+	if strings.Contains(body, `dashboard-summary`) {
+		t.Fatal("legacy summary strip remains")
 	}
 }
 
@@ -267,7 +300,7 @@ func TestAboutPageCarriesApplianceBuildInformation(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://example/about", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
 	rr := httptest.NewRecorder()
-	app.Handler().ServeHTTP(rr, req)
+	app.aboutPage(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -355,11 +388,16 @@ func TestDashboardShowsNotConfiguredExplicitly(t *testing.T) {
 		t.Fatalf("got %d", rr.Code)
 	}
 	body := rr.Body.String()
-	if strings.Count(body, "Not configured") < 2 {
-		t.Fatalf("expected explicit not-configured states, got: %s", body)
+	for _, want := range []string{`data-dashboard-setup-area`, `href="/setup"`, "Minecraft is not configured", "Set up your Minecraft server", `data-quick-look`, `data-backups-workspace-dialog`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("unconfigured dashboard missing %q", want)
+		}
 	}
-	if !strings.Contains(body, "mjust setup") {
-		t.Fatal("missing setup guidance for unconfigured appliance")
+	if !strings.Contains(body, `data-configured="false"`) || strings.Contains(body, `data-dashboard-live-panels`) {
+		t.Fatal("unconfigured dashboard still contains legacy panels")
+	}
+	if strings.Contains(body, "dashboard-summary") {
+		t.Fatal("unconfigured dashboard still shows legacy summary cards")
 	}
 }
 

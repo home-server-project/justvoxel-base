@@ -25,7 +25,7 @@
     </section>
     {{end}}
   {{else}}
-    <section class="panel">
+    <section class="panel migration-recovery-empty">
       <div class="notice">No retained migration recovery transaction is currently reported by the JustVoxel.</div>
       {{if .CanKeepCurrent}}
       <div class="notice warning"><strong>The failed Import has no retained Recovery transaction.</strong><br>Keeping the current server first revalidates the running Minecraft and JustVoxel state. Nothing is deleted and the failed Import is not retried.</div>

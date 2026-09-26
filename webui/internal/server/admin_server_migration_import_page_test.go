@@ -188,7 +188,7 @@ func TestServerImportPageShowsSourcesAndFreshDestinationWithoutUpload(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	page := httptestResponse(app, importWebRequest(http.MethodGet, "http://example/settings/server-migration/import", nil))
+	page := legacyPageTestResponse(app, importWebRequest(http.MethodGet, "http://example/settings/server-migration/import", nil))
 	if page.Code != http.StatusOK {
 		t.Fatalf("Server Import page returned %d: %s", page.Code, page.Body.String())
 	}

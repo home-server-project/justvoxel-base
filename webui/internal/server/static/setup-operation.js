@@ -1,11 +1,63 @@
 document.addEventListener("DOMContentLoaded", () => {
   const applyForm = document.querySelector("[data-setup-apply]");
   if (applyForm) {
-    applyForm.addEventListener("submit", () => {
-      const button = applyForm.querySelector('button[type="submit"]');
-      if (button) {
-        button.disabled = true;
-        button.textContent = "Starting setup…";
+    const eulaDialog = document.querySelector("[data-setup-eula-dialog]");
+    const passwordDialog = document.querySelector("[data-setup-password-dialog]");
+    const password = passwordDialog?.querySelector("[data-setup-password]");
+    const configure = document.querySelector("[data-setup-configure]");
+    let passwordConfirmed = false;
+    let submitting = false;
+
+    configure?.addEventListener("click", (event) => {
+      if (applyForm.dataset.smbRequired === "true" && !passwordConfirmed) {
+        event.preventDefault();
+        if (passwordDialog && !passwordDialog.open) passwordDialog.showModal();
+      } else if (applyForm.dataset.eulaAccepted !== "true") {
+        event.preventDefault();
+        if (eulaDialog && !eulaDialog.open) eulaDialog.showModal();
+      }
+    });
+    passwordDialog?.querySelector("[data-setup-password-cancel]")?.addEventListener("click", () => passwordDialog.close());
+    passwordDialog?.addEventListener("close", () => {
+      if (!passwordConfirmed && password) password.value = "";
+    });
+    const continueWithPassword = () => {
+      if (!password?.reportValidity()) return;
+      passwordConfirmed = true;
+      passwordDialog.close();
+      if (applyForm.dataset.eulaAccepted !== "true" && eulaDialog && !eulaDialog.open) eulaDialog.showModal();
+      else applyForm.requestSubmit(configure);
+    };
+    passwordDialog?.querySelector("[data-setup-password-continue]")?.addEventListener("click", continueWithPassword);
+    password?.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" || event.isComposing) return;
+      event.preventDefault();
+      continueWithPassword();
+    });
+    eulaDialog?.querySelectorAll("[data-setup-eula-cancel], [data-setup-eula-decline]").forEach((button) => {
+      button.addEventListener("click", () => eulaDialog.close());
+    });
+    eulaDialog?.addEventListener("close", () => {
+      if (!submitting) {
+        passwordConfirmed = false;
+        if (password) password.value = "";
+      }
+    });
+    applyForm.addEventListener("submit", (event) => {
+      if (applyForm.dataset.smbRequired === "true" && !passwordConfirmed) {
+        event.preventDefault();
+        if (passwordDialog && !passwordDialog.open) passwordDialog.showModal();
+        return;
+      }
+      if (applyForm.dataset.eulaAccepted !== "true" && event.submitter?.dataset.setupEulaAccept === undefined) {
+        event.preventDefault();
+        if (eulaDialog && !eulaDialog.open) eulaDialog.showModal();
+        return;
+      }
+      submitting = true;
+      if (configure) {
+        configure.disabled = true;
+        configure.textContent = "Starting setup…";
       }
     });
   }
@@ -24,6 +76,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const dashboardLink = document.getElementById("setup-dashboard-link");
   const reviewLink = document.getElementById("setup-review-link");
   const diagnosticLogLink = document.getElementById("setup-diagnostic-log-link");
+  const diagnosticLogView = document.getElementById("setup-diagnostic-log-view");
+  const stages = Array.from(panel.querySelectorAll("[data-setup-stage]"));
+  const verifyNote = document.getElementById("setup-minecraft-verify-note");
+  const elapsed = document.getElementById("setup-operation-elapsed");
 
   let failures = 0;
   let finished = false;
@@ -48,7 +104,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (stage === "storage_verified") return "Storage ready";
     if (stage === "runtime_preflight") return "Checking Minecraft configuration";
     if (stage === "runtime_config") return "Writing Minecraft configuration";
-    if (stage === "minecraft_verify") return "Starting and checking Minecraft";
+    if (stage === "minecraft_verify") return "Starting Minecraft";
     if (stage === "final_validation") return "Final validation";
     if (stage === "completed") return "Complete";
     if (stage === "setup_failed") return "Preparing recovery";
@@ -61,13 +117,53 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const terminalState = (state) => ["succeeded", "rolled_back", "needs_attention"].includes(state);
 
+  const visibleStage = (stage) => {
+    if (["storage_preflight", "storage_snapshot", "storage_verified"].includes(stage)) return 0;
+    if (["runtime_preflight", "runtime_config"].includes(stage)) return 1;
+    if (stage === "minecraft_verify") return 2;
+    if (stage === "final_validation") return 3;
+    if (stage === "completed") return 4;
+    return -1;
+  };
+
+  const renderStages = (operation) => {
+    const succeeded = operation.state === "succeeded";
+    const recovering = ["failed", "rolling_back", "rolled_back", "needs_attention"].includes(operation.state);
+    const current = visibleStage(operation.stage);
+    stages.forEach((item, index) => {
+      const complete = succeeded || (!recovering && current >= 0 && index < current);
+      const active = !succeeded && !recovering && index === current;
+      item.classList.toggle("is-complete", complete);
+      item.classList.toggle("is-current", active);
+      item.classList.toggle("is-pending", !complete && !active && !recovering);
+      item.classList.toggle("is-rolled-back", operation.state === "rolled_back");
+      if (active) item.setAttribute("aria-current", "step");
+      else item.removeAttribute("aria-current");
+    });
+    if (verifyNote) verifyNote.hidden = operation.stage !== "minecraft_verify" || recovering || succeeded;
+  };
+
+  const renderElapsed = (operation) => {
+    if (!elapsed) return;
+    const started = Date.parse(operation.started_at || "");
+    if (!Number.isFinite(started) || started > Date.now()) {
+      elapsed.hidden = true;
+      return;
+    }
+    const minutes = Math.floor((Date.now() - started) / 60000);
+    elapsed.textContent = `Elapsed since setup started: ${minutes} min`;
+    elapsed.hidden = false;
+  };
+
   const render = (operation) => {
     if (!operation) return;
     failures = 0;
     if (reconnectNote) reconnectNote.hidden = true;
     if (statusText) statusText.textContent = operation.status || "Setup is running.";
     if (stateBadge) stateBadge.textContent = stateLabel(operation.state);
-    if (stageText) stageText.textContent = stageLabel(operation.stage);
+    if (stageText) stageText.textContent = operation.state === "rolled_back" ? "Rolled back" : stageLabel(operation.stage);
+    renderStages(operation);
+    renderElapsed(operation);
 
     const succeeded = operation.state === "succeeded";
     const rolledBack = operation.state === "rolled_back";
@@ -78,12 +174,21 @@ document.addEventListener("DOMContentLoaded", () => {
     if (dashboardLink) dashboardLink.hidden = !succeeded;
     if (reviewLink) reviewLink.hidden = !rolledBack;
     if (diagnosticLogLink) diagnosticLogLink.hidden = !terminalState(operation.state);
+    if (diagnosticLogView) diagnosticLogView.hidden = !terminalState(operation.state);
 
     if (terminalState(operation.state)) {
       finished = true;
       panel.classList.add("is-finished");
+      panel.classList.toggle("is-rolled-back", rolledBack);
     }
   };
+
+  render({
+    state: panel.dataset.initialState,
+    stage: panel.dataset.initialStage,
+    started_at: panel.dataset.startedAt,
+    status: statusText?.textContent,
+  });
 
   const poll = async () => {
     if (finished) return;

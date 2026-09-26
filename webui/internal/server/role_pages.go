@@ -63,8 +63,8 @@ func (a *App) registerRolePages(mux *http.ServeMux) {
 	mux.HandleFunc("GET /operations", a.operationsPage)
 	mux.HandleFunc("POST /operations/backup", a.operationsBackup)
 	mux.HandleFunc("POST /operations/whitelist", a.operationsWhitelist)
-	mux.HandleFunc("GET /activity", a.activityPage)
-	mux.HandleFunc("GET /settings/activity", a.adminActivityPage)
+	mux.HandleFunc("GET /activity", a.legacyWorkspaceRedirect("", "system", "history"))
+	mux.HandleFunc("GET /settings/activity", a.legacyWorkspaceRedirect("administrator", "system", "history"))
 	mux.HandleFunc("POST /settings/activity/notifications/{id}/resolve", a.adminResolveNotification)
 }
 
@@ -87,6 +87,20 @@ func (a *App) operationsPage(w http.ResponseWriter, r *http.Request) {
 	}
 	if identity.Role != "administrator" && identity.Role != "operator" {
 		http.Error(w, "Operator or Administrator access required", http.StatusForbidden)
+		return
+	}
+	if identity.Role == "administrator" {
+		// Operators still use this page for manual backups until that action has
+		// an operator workspace surface.
+		if r.URL.Query().Get("result") == "backup" {
+			a.legacyWorkspaceRedirect("administrator", "backups", "")(w, r)
+		} else {
+			tab := "overview"
+			if r.URL.Query().Get("result") == "whitelist" {
+				tab = "whitelist"
+			}
+			a.legacyWorkspaceRedirect("administrator", "minecraft", tab)(w, r)
+		}
 		return
 	}
 	a.renderOperations(w, a.operationsData(r.Context(), session, client, identity, csrfFromRequest(r), operationResultMessage(r.URL.Query().Get("result")), ""))

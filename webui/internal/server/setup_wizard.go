@@ -56,6 +56,7 @@ type setupDraft struct {
 	Started             bool
 	Mode                string
 	CurrentStep         int
+	HighestStep         int
 	DiagnosticSessionID string
 	Server              setupServerDraft
 	Minecraft           setupMinecraftDraft
@@ -79,6 +80,7 @@ type setupWizardStepView struct {
 	Description string
 	Active      bool
 	Complete    bool
+	Visited     bool
 }
 
 type setupWizardPageData struct {
@@ -441,17 +443,26 @@ func (a *App) setupWizardNavigate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	direction := r.FormValue("direction")
-	if direction != "next" && direction != "back" {
+	if direction != "next" && direction != "back" && direction != "jump" {
 		http.Error(w, "invalid setup navigation", http.StatusBadRequest)
 		return
 	}
-	if !firstRunSetupDrafts.navigate(a, session, direction) {
-		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+	target, _ := strconv.Atoi(r.FormValue("step"))
+	if !firstRunSetupDrafts.navigateTo(a, session, direction, target) {
+		if direction != "jump" {
+			http.Redirect(w, r, "/setup", http.StatusSeeOther)
+			return
+		}
+		http.Error(w, "setup step has not been visited", http.StatusBadRequest)
 		return
 	}
 	firstRunSetupReviews.delete(a, session)
 	if draft, exists := firstRunSetupDrafts.get(a, session); exists {
 		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "wizard navigation changed", draft)
+		if draft.CurrentStep == 7 {
+			http.Redirect(w, r, "/setup/review", http.StatusSeeOther)
+			return
+		}
 	}
 	http.Redirect(w, r, "/setup", http.StatusSeeOther)
 }
@@ -503,6 +514,7 @@ func (a *App) renderSetupWizard(w http.ResponseWriter, identity api.SessionInfo,
 		for i := range steps {
 			steps[i].Active = steps[i].Number == draft.CurrentStep
 			steps[i].Complete = steps[i].Number < draft.CurrentStep
+			steps[i].Visited = steps[i].Number <= draft.HighestStep
 			if steps[i].Active {
 				current = steps[i]
 			}
@@ -623,7 +635,7 @@ func draftFromSetupDefaults(defaults api.AdminSetupDefaults, inventory api.Admin
 		version = "LATEST"
 	}
 	return setupDraft{
-		Started: true, CurrentStep: 1, Defaults: defaults, Inventory: inventory,
+		Started: true, CurrentStep: 1, HighestStep: 1, Defaults: defaults, Inventory: inventory,
 		Server: setupServerDraft{
 			MOTD: defaults.MOTD, MaxPlayers: strconv.Itoa(defaults.MaxPlayers),
 			BedrockEnabled: defaults.BedrockEnabled, Timezone: defaults.Timezone,
@@ -773,11 +785,21 @@ func (s *setupDraftStore) save(app *App, session string, draft setupDraft) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.pruneLocked(now)
+	if previous, ok := s.drafts[key]; ok && previous.HighestStep > draft.HighestStep {
+		draft.HighestStep = previous.HighestStep
+	}
+	if draft.CurrentStep > draft.HighestStep {
+		draft.HighestStep = draft.CurrentStep
+	}
 	draft.UpdatedAt = now
 	s.drafts[key] = draft
 }
 
 func (s *setupDraftStore) navigate(app *App, session, direction string) bool {
+	return s.navigateTo(app, session, direction, 0)
+}
+
+func (s *setupDraftStore) navigateTo(app *App, session, direction string, target int) bool {
 	now := time.Now()
 	key := setupKey(app, session)
 	s.mu.Lock()
@@ -798,6 +820,13 @@ func (s *setupDraftStore) navigate(app *App, session, direction string) bool {
 		if draft.CurrentStep > 1 {
 			draft.CurrentStep--
 		}
+	case "jump":
+		if target < 1 || target > draft.HighestStep || target > len(setupWizardSteps) {
+			return false
+		}
+		draft.CurrentStep = target
+	default:
+		return false
 	}
 	draft.UpdatedAt = now
 	s.drafts[key] = draft

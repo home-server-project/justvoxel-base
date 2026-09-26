@@ -142,6 +142,11 @@ func (a *App) setupWizardSaveBackups(w http.ResponseWriter, r *http.Request) {
 	}
 	draft.Inventory = storage
 	draft.Backups = parseSetupBackupForm(r, draft.Defaults)
+	if draft.Storage.Type == "partition" && draft.Backups.Type == "partition" && draft.Storage.Device == draft.Backups.Device {
+		// One filesystem has one persistent mount; keep the two directories separate.
+		draft.Backups.MountPoint = draft.Storage.MountPoint
+		draft.Backups.Path = strings.TrimRight(draft.Storage.MountPoint, "/") + "/backups"
+	}
 
 	if r.FormValue("direction") == "back" {
 		draft.Backups.Complete = false
@@ -226,6 +231,9 @@ func validateSetupStorage(storage setupStorageDraft, inventory api.AdminStorageD
 			return errors.New("System storage uses the standard JustVoxel Minecraft data directory.")
 		}
 	case "partition":
+		if storage.Device == "" {
+			return errors.New("Choose a partition before continuing.")
+		}
 		device, ok := safeSetupMinecraftDevice(inventory, storage.Device)
 		if !ok {
 			return errors.New("Choose one of the safe internal XFS, ext4, or Btrfs filesystems shown by JustVoxel.")
@@ -259,6 +267,9 @@ func validateSetupBackups(backups setupBackupDraft, data setupStorageDraft, inve
 			return errors.New("System backup storage uses the standard JustVoxel backup directory.")
 		}
 	case "partition":
+		if backups.Device == "" {
+			return errors.New("Choose a partition before continuing.")
+		}
 		device, ok := safeSetupDevice(inventory, backups.Device)
 		if !ok {
 			return errors.New("Choose one of the safe existing XFS, ext4, or Btrfs filesystems shown by JustVoxel.")
@@ -394,7 +405,17 @@ func setupStorageDiskViews(storage api.AdminStorageDiscovery) ([]setupStorageDis
 		})
 	}
 
-	return disks, externalCount
+	return actionableSetupDisks(disks), externalCount
+}
+
+func actionableSetupDisks(disks []setupStorageDiskView) []setupStorageDiskView {
+	out := disks[:0]
+	for _, disk := range disks {
+		if len(disk.Partitions) > 0 || len(disk.FreeSpaces) > 0 {
+			out = append(out, disk)
+		}
+	}
+	return out
 }
 
 func setupBackupDiskViews(storage api.AdminStorageDiscovery) []setupStorageDiskView {
@@ -456,7 +477,7 @@ func setupBackupDiskViews(storage api.AdminStorageDiscovery) []setupStorageDiskV
 			Size: humanBytes(free.SizeBytes), SizeBytes: free.SizeBytes,
 		})
 	}
-	return disks
+	return actionableSetupDisks(disks)
 }
 
 func safeSetupBlankBackupDeviceValue(device api.AdminStorageDevice) bool {
@@ -633,8 +654,8 @@ func setupSameDiskWarning(draft setupDraft) string {
 	if draft.Storage.Type == "partition" && draft.Backups.Type == "partition" {
 		dataDevice, dataOK := safeSetupDevice(draft.Inventory, draft.Storage.Device)
 		backupDevice, backupOK := safeSetupDevice(draft.Inventory, draft.Backups.Device)
-		if dataOK && backupOK && setupPhysicalDiskKey(dataDevice) != "" && setupPhysicalDiskKey(dataDevice) == setupPhysicalDiskKey(backupDevice) {
-			return "Minecraft data and backups are on partitions of the same physical disk. This is a weaker failure boundary than a separate disk or NAS."
+		if dataOK && backupOK && dataDevice.System && backupDevice.System && setupPhysicalDiskKey(dataDevice) != "" && setupPhysicalDiskKey(dataDevice) == setupPhysicalDiskKey(backupDevice) {
+			return "Minecraft data and backups are on partitions of the same physical system disk. This helps with accidental file loss, but it does not protect against failure of that disk."
 		}
 	}
 	return ""

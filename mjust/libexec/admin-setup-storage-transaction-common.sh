@@ -108,7 +108,7 @@ _a53_parent_disk() {
     local real
     real="$(readlink -f -- "$1" 2>/dev/null || true)"
     [[ -n ${real} ]] || return 0
-    lsblk -s -npo NAME,TYPE "${real}" 2>/dev/null | awk '$2 == "disk" {print $1; exit}'
+    lsblk -s -nrpo NAME,TYPE "${real}" 2>/dev/null | awk '$2 == "disk" {print $1; exit}'
 }
 
 _a53_file_sha256() {
@@ -340,6 +340,15 @@ _a53_validate_all() {
     backups="$(jq -c '.backups' <<< "${A53_REQUEST}")"
     _a53_validate_target data "${storage}" || return $?
     _a53_validate_target backup "${backups}" || return $?
+    if [[ $(jq -r '.type' <<< "${storage}") == partition && $(jq -r '.type' <<< "${backups}") == partition ]]; then
+        local data_uuid backup_uuid data_mount backup_mount
+        data_uuid="$(jq -r '.expected_uuid' <<< "${storage}")"
+        backup_uuid="$(jq -r '.expected_uuid' <<< "${backups}")"
+        data_mount="$(jq -r '.mount_point' <<< "${storage}")"
+        backup_mount="$(jq -r '.mount_point' <<< "${backups}")"
+        [[ ${data_uuid} == "${backup_uuid}" && ${data_mount} == "${backup_mount}" && $(jq -r '.device' <<< "${storage}") == "$(jq -r '.device' <<< "${backups}")" ||
+           ${data_uuid} != "${backup_uuid}" && ${data_mount} != "${backup_mount}" ]] || return 1
+    fi
     storage_path="$(_a53_normalize_path "$(jq -r '.path' <<< "${storage}")")"
     backup_path="$(_a53_normalize_path "$(jq -r '.path' <<< "${backups}")")"
     _a53_paths_overlap "${storage_path}" "${backup_path}" && return 1

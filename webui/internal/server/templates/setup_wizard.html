@@ -25,7 +25,7 @@
     <p class="eyebrow">Minecraft setup</p>
     <h1>Set up your Minecraft server</h1>
     <p class="setup-lead">Use recommended defaults to get running quickly, or choose Advanced setup to customize Minecraft, storage and backups before anything is applied.</p>
-    <div class="notice setup-safe-note"><strong>You can change these settings later.</strong><span>After setup, Minecraft settings, storage, backups and other options remain available from the JustVoxel Control Center.</span></div>
+    <p class="field-help">You can change these settings later from the JustVoxel Control Center.</p>
 
     <div class="setup-mode-grid">
       <section class="setup-mode-card setup-mode-recommended">
@@ -64,17 +64,15 @@
       </section>
     </div>
 
-    <div class="setup-terminal-note"><span>Prefer the terminal?</span><code>mjust setup</code><small>Available from a local console or SSH.</small></div>
+    <div class="setup-terminal-note"><span>Prefer the terminal?</span><code>mjust setup</code><small>Available from a local console or SSH.</small><a class="button-link secondary setup-dashboard-exit" href="/">Back to dashboard</a></div>
   </section>
   {{else}}
-  <div class="title-row setup-title-row"><div><p class="eyebrow">First setup</p><h1>Set up JustVoxel</h1></div><span class="badge">Step {{.CurrentStep}} of {{len .Steps}}</span></div>
-  <ol class="setup-progress" aria-label="Setup progress">{{range .Steps}}<li class="{{if .Active}}active{{end}} {{if .Complete}}complete{{end}}" {{if .Active}}aria-current="step"{{end}}><span class="setup-number">{{.Number}}</span><span>{{.Name}}</span></li>{{end}}</ol>
+  <div class="title-row setup-title-row"><div><h1>Set up JustVoxel</h1></div><span class="badge">Step {{.CurrentStep}} of {{len .Steps}}</span></div>
+  <ol class="setup-progress" aria-label="Setup progress">{{range .Steps}}<li class="{{if .Active}}active{{end}} {{if .Complete}}complete{{end}}" {{if .Active}}aria-current="step"{{end}}>{{if .Visited}}<form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="{{.Number}}"><button type="submit"><span class="setup-number">{{.Number}}</span><span>{{.Name}}</span></button></form>{{else}}<span class="setup-number">{{.Number}}</span><span>{{.Name}}</span>{{end}}</li>{{end}}</ol>
 
-  <section class="panel setup-step-panel">
-    <p class="eyebrow">Step {{.Current.Number}}</p>
+  <section class="panel setup-step-panel setup-wizard-panel">
     <h2>{{.Current.Name}}</h2>
     <p class="setup-lead">{{.Current.Description}}</p>
-    <div class="notice setup-safe-note"><strong>No changes have been applied.</strong><span>This wizard stores only a temporary draft for your current Administrator session. Refreshing keeps your choices; Cancel discards the draft.</span></div>
     {{if .Error}}<div class="notice error">{{.Error}}</div>{{end}}
 
     {{if eq .CurrentStep 1}}
@@ -115,9 +113,9 @@
       <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" id="max-players" value="{{.Server.MaxPlayers}}">
       <div class="setup-memory" data-memory-settings data-system-memory-mib="{{.Defaults.SystemMemoryMiB}}" data-min-reserve-mib="{{.Defaults.SystemReserveMinimumMiB}}" data-recommended-reserve-mib="{{.Defaults.SystemReserveRecommendedMiB}}">
         <div class="setup-memory-summary"><div><span>System memory</span><strong>{{.SystemMemory}} detected</strong></div><div><span>Recommended headroom</span><strong>{{.SystemReserveRecommended}}</strong></div><div><span>Minimum headroom</span><strong>{{.SystemReserveMinimum}}</strong></div></div>
-        <p class="field-help">JustVoxel itself typically uses roughly 0.6–1.0 GiB during normal operation. Memory left outside Minecraft is not reserved; Linux can use it for filesystem cache, backups, updates, management services and temporary workload spikes.</p>
+        <p class="field-help">JustVoxel typically uses 0.6–1.0 GiB. Memory outside Minecraft remains available for Linux, cache, backups, updates and temporary spikes.</p>
         <div class="memory-presets" aria-label="Minecraft memory presets"><button type="button" class="secondary" data-memory-preset="light">Light</button><button type="button" data-memory-preset="recommended">Recommended</button><button type="button" class="secondary" data-memory-preset="high">High memory</button><button type="button" class="secondary" data-memory-preset="custom">Custom</button></div>
-        <p class="field-help">Presets balance Minecraft memory with sensible system headroom and your {{.Server.MaxPlayers}}-player limit. Each additional block of 10 players can raise the suggested Minecraft memory, while automatic presets stay capped to avoid oversized Java heaps.</p>
+        <p class="field-help">Presets account for headroom and your {{.Server.MaxPlayers}}-player limit; larger limits may need more memory.</p>
         <div class="setup-form-grid"><label class="setup-field">Minecraft game memory<input id="java-memory" name="java_memory" value="{{.Minecraft.JavaMemory}}" autocomplete="off" placeholder="4G"><span class="field-help">Memory available directly to the Minecraft Java server. Technical name: Java heap.</span></label><label class="setup-field">Maximum Minecraft memory<input id="container-memory" name="container_memory" value="{{.Minecraft.ContainerMemory}}" autocomplete="off" placeholder="6G"><span class="field-help">Maximum for Minecraft, Java, plugins and runtime overhead. Technical name: container memory limit.</span></label></div>
         <div id="memory-status" class="memory-status" aria-live="polite"></div>
       </div>
@@ -133,7 +131,7 @@
         <input id="image-tag" name="image_tag" type="hidden" value="{{.Minecraft.ImageTag}}">
         <label class="setup-field">Minecraft version<select id="version-policy" name="version_policy"><option value="recommended" {{if eq .Minecraft.VersionPolicy "recommended"}}selected{{end}}>Recommended version</option><option value="latest" {{if eq .Minecraft.VersionPolicy "latest"}}selected{{end}}>Always newest version</option><option value="pinned" {{if eq .Minecraft.VersionPolicy "pinned"}}selected{{end}}>Specific version</option></select><span class="field-help">Recommended version chooses a stable Paper-backed Minecraft version. When Bedrock cross-play is enabled, JustVoxel prefers the newest version currently supported by Geyser/Floodgate.</span></label>
         <label id="specific-version-field" class="setup-field setup-field-wide" {{if ne .Minecraft.VersionPolicy "pinned"}}hidden{{end}}>Specific Minecraft version<input id="minecraft-version" name="version" value="{{.Minecraft.Version}}" autocomplete="off" placeholder="26.2"><span class="field-help">Use an exact Minecraft version when you need one. JustVoxel verifies Paper and Bedrock compatibility during Review.</span></label>
-        {{if .Server.BedrockEnabled}}<div class="notice setup-field-wide"><strong>Bedrock compatibility is checked before setup.</strong><br>If the selected Minecraft version is newer than Geyser/Floodgate currently supports, Java server setup can continue but Bedrock cross-play will be turned off and Geyser/Floodgate will not be installed. Come back later and check again after support catches up.</div>{{end}}
+        {{if .Server.BedrockEnabled}}<div class="notice setup-field-wide"><strong>Bedrock compatibility is checked during Review.</strong> If this version is too new for Geyser/Floodgate, Java setup can continue with cross-play disabled. You can check again when support is available.</div>{{end}}
       </div>
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
     </form>
@@ -163,19 +161,20 @@
         <div class="setup-target-card">
           <strong>JustVoxel system storage</strong>
           <span><code>{{.Defaults.DataPath}}</code></span>
-          <small>This is the recommended first-run choice. You can migrate Minecraft data later from Control Center.</small>
+          <small>Recommended. You can migrate Minecraft data later.</small>
         </div>
       </section>
 
       <section class="setup-storage-browser" data-setup-storage-internal-panel {{if ne .Storage.Type "partition"}}hidden{{end}}>
+        <div class="setup-browser-intro"><div class="setup-partition-instruction"><strong>Choose partition</strong><span>Select a ready filesystem or prepare a blank partition.</span></div>
         <div class="setup-storage-browser-heading">
           <div><strong>Internal disks</strong><span>Only internal storage is offered for live Minecraft data.</span></div>
           <span class="badge">{{len .StorageDisks}}</span>
-        </div>
+        </div></div>
 
         {{if .StorageDisks}}
         <div class="setup-storage-disk-list">
-          {{range .StorageDisks}}
+          {{range .StorageDisks}}{{$disk := .}}
           <article class="setup-storage-disk">
             <div class="setup-storage-disk-heading">
               <div><strong>{{if .Model}}{{.Model}}{{else}}{{.Name}}{{end}}</strong><span><code>{{.Path}}</code> · {{.Size}}{{if .SystemDisk}} · System disk{{end}}</span></div>
@@ -188,8 +187,8 @@
                         data-setup-existing-partition
                         data-device="{{.Path}}"
                         data-mountpoint="{{.Mountpoint}}">
-                  <span class="setup-storage-segment-state">Ready</span>
-                  <strong>{{.Path}}</strong>
+                  <span class="setup-storage-segment-state">{{if eq $.Storage.Device .Path}}Selected{{else}}Ready{{end}}</span>
+                  <strong>{{$disk.Name}} · {{.Path}}</strong>
                   <span>{{.Size}} · {{.Filesystem}}{{if .Label}} · {{.Label}}{{end}}</span>
                   <small>{{if .Mountpoint}}{{.Mountpoint}}{{else}}Will use /var/mnt/justvoxel-data{{end}}</small>
                 </button>
@@ -231,12 +230,6 @@
         {{if gt .ExternalStorageCount 0}}
         <div class="notice setup-storage-external-note"><strong>External drives are not offered for Minecraft data.</strong><span>{{.ExternalStorageCount}} USB/external disk{{if ne .ExternalStorageCount 1}}s were{{else}} was{{end}} detected. External storage remains appropriate for backups and will be available on the Backup step.</span></div>
         {{end}}
-
-        <div class="setup-storage-selected" data-setup-storage-selected {{if ne .Storage.Type "partition"}}hidden{{end}}>
-          <span>Selected Minecraft storage</span>
-          <strong data-setup-storage-selected-device>{{if .Storage.Device}}{{.Storage.Device}}{{else}}Choose a ready filesystem above{{end}}</strong>
-          <small data-setup-storage-selected-path>{{if .Storage.Path}}{{.Storage.Path}}{{end}}</small>
-        </div>
       </section>
 
       <section class="setup-storage-action-review" data-setup-storage-action-review hidden>
@@ -265,7 +258,7 @@
     </form>
 
     {{else if eq .CurrentStep 6}}
-    <form method="post" action="/setup/backups" class="setup-form" data-setup-backup-form data-csrf="{{.CSRF}}">
+    <form method="post" action="/setup/backups" class="setup-form" data-setup-backup-form data-csrf="{{.CSRF}}" data-data-device="{{.Storage.Device}}" data-data-mount="{{.Storage.MountPoint}}">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <input type="hidden" name="backup_type" value="{{.Backups.Type}}" data-setup-backup-type>
       <input type="hidden" name="backup_device" value="{{.Backups.Device}}" data-setup-backup-device>
@@ -283,13 +276,11 @@
         </div>
       </div>
 
-      {{if .SameDiskWarning}}<div class="notice warning"><strong>Backup resilience</strong><br>{{.SameDiskWarning}}</div>{{end}}
-
       <div class="setup-backup-choice-grid">
         <button class="setup-backup-choice{{if eq .Backups.Type "system"}} is-selected{{end}}" type="button" data-setup-backup-choice="system" data-system-path="{{.Defaults.BackupPath}}">
           <span class="setup-storage-choice-kicker">Simple</span>
           <strong>System storage</strong>
-          <small>Use <code>{{.Defaults.BackupPath}}</code>. Fastest setup, but usually the same physical disk as Minecraft.</small>
+          <small>Use the standard JustVoxel backup directory.</small>
         </button>
         <button class="setup-backup-choice{{if eq .Backups.Type "partition"}} is-selected{{end}}" type="button" data-setup-backup-choice="partition">
           <span class="setup-storage-choice-kicker">Local disk</span>
@@ -309,14 +300,15 @@
       </div>
 
       <section data-setup-backup-panel="system" {{if ne .Backups.Type "system"}}hidden{{end}}>
-        <div class="setup-target-card"><strong>JustVoxel system backup directory</strong><span><code>{{.Defaults.BackupPath}}</code></span><small>Convenient for quick recovery from accidental file changes, but it does not protect against failure of the system disk.</small></div>
+        <div class="setup-target-card"><strong>JustVoxel system backup directory</strong><span><code>{{.Defaults.BackupPath}}</code></span></div>
       </section>
 
       <section class="setup-storage-browser" data-setup-backup-panel="partition" {{if ne .Backups.Type "partition"}}hidden{{end}}>
-        <div class="setup-storage-browser-heading"><div><strong>Local backup disks</strong><span>Internal and USB/external storage are both allowed for backups.</span></div><span class="badge">{{len .BackupDisks}}</span></div>
+        <div class="setup-browser-intro"><div class="setup-partition-instruction"><strong>Choose partition</strong><span>Select a ready filesystem or prepare a blank partition.</span></div>
+        <div class="setup-storage-browser-heading"><div><strong>Local backup disks</strong><span>Internal and USB/external storage are both allowed for backups.</span></div><span class="badge">{{len .BackupDisks}}</span></div></div>
         {{if .BackupDisks}}
         <div class="setup-storage-disk-list">
-          {{range .BackupDisks}}
+          {{range .BackupDisks}}{{$disk := .}}
           <article class="setup-storage-disk">
             <div class="setup-storage-disk-heading">
               <div><strong>{{if .Model}}{{.Model}}{{else}}{{.Name}}{{end}}</strong><span><code>{{.Path}}</code> · {{.Size}}{{if .External}} · External / USB{{else}} · Internal{{end}}{{if .SystemDisk}} · System disk{{end}}</span></div>
@@ -328,11 +320,11 @@
                 <button class="setup-storage-segment setup-backup-existing{{if eq $.Backups.Device .Path}} is-selected{{end}}" type="button"
                         data-setup-backup-existing
                         data-device="{{.Path}}"
-                        data-mountpoint="{{.Mountpoint}}">
-                  <span class="setup-storage-segment-state">Ready</span>
-                  <strong>{{.Path}}</strong>
+                        data-mountpoint="{{if eq $.Storage.Device .Path}}{{$.Storage.MountPoint}}{{else}}{{.Mountpoint}}{{end}}">
+                  <span class="setup-storage-segment-state">{{if eq $.Backups.Device .Path}}Selected{{else}}Ready{{end}}</span>
+                  <strong>{{$disk.Name}} · {{.Path}}</strong>
                   <span>{{.Size}} · {{.Filesystem}}{{if .Label}} · {{.Label}}{{end}}</span>
-                  <small>{{if .Mountpoint}}{{.Mountpoint}}{{else}}Will use /var/mnt/justvoxel-backup{{end}}</small>
+                  <small>{{if eq $.Storage.Device .Path}}{{$.Storage.MountPoint}}{{else}}{{if .Mountpoint}}{{.Mountpoint}}{{else}}/var/mnt/justvoxel-backup{{end}}{{end}}</small>
                 </button>
                 {{else}}
                 <button class="setup-storage-segment setup-storage-prepare" type="button"
@@ -362,11 +354,6 @@
           {{end}}
         </div>
         {{else}}<div class="notice">No local backup disk with a usable target was reported.</div>{{end}}
-        <div class="setup-storage-selected" data-setup-backup-selected {{if ne .Backups.Type "partition"}}hidden{{end}}>
-          <span>Selected backup storage</span>
-          <strong data-setup-backup-selected-device>{{if .Backups.Device}}{{.Backups.Device}}{{else}}Choose a ready filesystem above{{end}}</strong>
-          <small data-setup-backup-selected-path>{{if .Backups.Path}}{{.Backups.Path}}{{end}}</small>
-        </div>
       </section>
 
       <section data-setup-backup-panel="nfs" {{if ne .Backups.Type "nfs"}}hidden{{end}}>
@@ -376,7 +363,7 @@
             <label class="setup-field">Local mount point<input data-setup-network-mount="nfs" value="{{if eq .Backups.Type "nfs"}}{{.Backups.MountPoint}}{{end}}" autocomplete="off" placeholder="/var/mnt/justvoxel-backup"></label>
             <label class="setup-field">Backup directory<input data-setup-network-path="nfs" value="{{if eq .Backups.Type "nfs"}}{{.Backups.Path}}{{end}}" autocomplete="off" placeholder="/var/mnt/justvoxel-backup/backups"></label>
           </div>
-          <div class="notice compact">The final Setup review verifies the share definition. Setup Apply validates the expected NFS source before backups use it.</div>
+          <div class="notice compact">JustVoxel verifies the NFS source during setup before using it.</div>
         </div>
       </section>
 
@@ -389,9 +376,11 @@
             <label class="setup-field">Local mount point<input data-setup-network-mount="smb" value="{{if eq .Backups.Type "smb"}}{{.Backups.MountPoint}}{{end}}" autocomplete="off" placeholder="/var/mnt/justvoxel-backup"></label>
             <label class="setup-field">Backup directory<input data-setup-network-path="smb" value="{{if eq .Backups.Type "smb"}}{{.Backups.Path}}{{end}}" autocomplete="off" placeholder="/var/mnt/justvoxel-backup/backups"></label>
           </div>
-          <div class="notice setup-secret-note"><strong>Password stays out of this draft.</strong><span>JustVoxel requests the SMB password only at final Apply and stores credentials root-only when required.</span></div>
+          <div class="setup-secret-inline">Password will be requested when setup starts.</div>
         </div>
       </section>
+
+      {{if .SameDiskWarning}}<div class="setup-backup-resilience setup-disk-warning" role="note" data-setup-same-disk-warning><strong>Backups are on the same disk</strong><span>If this disk fails, both Minecraft and its backups could be lost.</span></div>{{end}}
 
       <section class="setup-storage-action-review" data-setup-backup-action-review hidden>
         <div class="setup-storage-action-heading">
@@ -417,12 +406,12 @@
 
     {{else}}
     <div class="setup-placeholder"><strong>Review configuration</strong><span>Server, Minecraft, storage and backup choices are now stored only in this Administrator-session draft. A4.4 adds the complete human-readable review, EULA acceptance and validated setup plan. Nothing can be applied yet.</span></div>
-    {{if .SameDiskWarning}}<div class="notice warning"><strong>Backup resilience warning</strong><br>{{.SameDiskWarning}}</div>{{end}}
+    {{if .SameDiskWarning}}<div class="setup-backup-resilience setup-disk-warning" role="note"><strong>Backups are on the same disk</strong><span>If this disk fails, both Minecraft and its backups could be lost.</span></div>{{end}}
     {{end}}
 
   </section>
   {{end}}
-  <p class="disclaimer">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</p>
+  <footer class="setup-footer disclaimer">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT. <a href="https://github.com/home-server-project/justvoxel" target="_blank" rel="noopener noreferrer">JustVoxel on GitHub</a></footer>
 </main>
 </body>
 </html>{{end}}

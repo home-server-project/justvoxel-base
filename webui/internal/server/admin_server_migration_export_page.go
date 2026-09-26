@@ -52,7 +52,7 @@ type serverMigrationExportReviewPageData struct {
 }
 
 func (a *App) registerAdminServerExportPages(mux *http.ServeMux) {
-	mux.HandleFunc("GET /settings/server-migration/export", a.serverMigrationExportPage)
+	mux.HandleFunc("GET /settings/server-migration/export", a.legacyWorkspaceRedirect("administrator", "migration", "export"))
 	mux.HandleFunc("POST /settings/server-migration/export/review", a.serverMigrationExportReview)
 	mux.HandleFunc("POST /settings/server-migration/export/apply", a.serverMigrationExportApply)
 	mux.HandleFunc("GET /api/server-migration/progress/{id}", a.serverMigrationProgressStatus)

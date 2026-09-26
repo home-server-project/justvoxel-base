@@ -23,11 +23,13 @@ grep -Fq 'authentication_action:"preserve"' "${helper}"
 grep -Fq 'webui_users_action:"preserve"' "${helper}"
 grep -Fq 'jv_reset_delete_internal_data "${DATA_PATH}" "${BACKUP_PATH}"' "${helper}"
 grep -Fq 'jv_reset_remove_active_configuration "${JAVA_PORT}" "${BEDROCK_ENABLED}" "${BEDROCK_PORT}"' "${helper}"
-grep -Fq 'podman rm --force --ignore minecraft' "${helper}"
+grep -Fq 'jv_reset_remove_minecraft_container' "${helper}"
+grep -Fq 'podman rm --force --ignore minecraft' "${common}"
+grep -Fq 'podman container exists minecraft' "${common}"
 grep -Fq 'minecraft_reset_fail "container_cleanup_failed"' "${helper}"
 grep -Fq 'minecraft_reset_fail "data_cleanup_failed"' "${helper}"
 grep -Fq 'minecraft_reset_fail "configuration_cleanup_failed"' "${helper}"
-if grep -Fq 'podman rm minecraft' "${helper}"; then
+if grep -Fq 'podman rm minecraft' "${helper}" "${common}"; then
     echo 'ERROR: Minecraft reset must not use race-prone plain podman rm.' >&2
     exit 1
 fi

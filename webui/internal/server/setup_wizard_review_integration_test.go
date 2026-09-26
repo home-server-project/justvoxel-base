@@ -90,10 +90,11 @@ func TestSetupReviewExecutionSurfaceKeepsSMBSecretTransientAndManagementAPIPriva
 	body := rr.Body.String()
 	for _, want := range []string{
 		`action="/setup/review/apply"`,
-		`type="password" name="smb_password"`,
+		`type="password" name="smb_password" form="setup-apply-form" required maxlength="4096" autocomplete="off"`,
+		`data-setup-password-dialog`,
 		"SMB password required during execution",
 		"It is not stored in the setup draft or operation journal.",
-		`<button type="submit" disabled>Configure JustVoxel</button>`,
+		`data-eula-accepted="false"`, `data-setup-eula-dialog`, `data-setup-eula-accept`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("review execution surface missing %q: %s", want, body)

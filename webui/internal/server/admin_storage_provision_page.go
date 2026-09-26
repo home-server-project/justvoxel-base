@@ -46,7 +46,7 @@ type storageProvisionPageData struct {
 }
 
 func (a *App) registerAdminStorageProvisionPages(mux *http.ServeMux) {
-	mux.HandleFunc("GET /settings/storage-provision", a.storageProvisionPage)
+	mux.HandleFunc("GET /settings/storage-provision", a.legacyWorkspaceRedirect("administrator", "storage", ""))
 	mux.HandleFunc("POST /settings/storage-provision/plan", a.storageProvisionPlan)
 	mux.HandleFunc("POST /settings/storage-provision/apply", a.storageProvisionApply)
 }

@@ -81,7 +81,7 @@ func TestAdminUsersPageShowsPrimaryAdminAndWebUsers(t *testing.T) {
 		t.Fatal(err)
 	}
 	rr := httptest.NewRecorder()
-	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/users", ""))
+	legacyPageTestServe(app, rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/users", ""))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("users page returned %d: %s", rr.Code, rr.Body.String())
 	}

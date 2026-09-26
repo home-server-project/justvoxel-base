@@ -32,7 +32,7 @@
   };
 
   const applyFirstRunState = () => {
-    if (role !== "administrator" || configured === undefined) {
+    if (configured === undefined) {
       hideFirstRunUI();
       return;
     }
@@ -48,6 +48,11 @@
       return;
     }
 
+    if (role !== "administrator") {
+      showInvitation();
+      return;
+    }
+
     let explored = false;
     try {
       explored = window.localStorage.getItem(exploreStorageKey) === "true";
@@ -55,7 +60,7 @@
       // Fall back to showing the choice when browser storage is unavailable.
     }
 
-    if (explored) showInvitation();
+    if (explored || new URLSearchParams(window.location.search).has("workspace")) showInvitation();
     else showChoice();
 
     if (!refreshTimer) {

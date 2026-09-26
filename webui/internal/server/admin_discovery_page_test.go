@@ -102,7 +102,7 @@ func TestServerSettingsShowsCurrentConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	rr := httptest.NewRecorder()
-	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/server", ""))
+	legacyPageTestServe(app, rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/server", ""))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("server settings returned %d: %s", rr.Code, rr.Body.String())
 	}
@@ -132,7 +132,7 @@ func TestServerSettingsSupportsUnconfiguredAppliance(t *testing.T) {
 		t.Fatal(err)
 	}
 	rr := httptest.NewRecorder()
-	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/server", ""))
+	legacyPageTestServe(app, rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/server", ""))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("unconfigured settings returned %d: %s", rr.Code, rr.Body.String())
 	}
@@ -160,7 +160,7 @@ func TestStorageSettingsShowsHumanReadableInventory(t *testing.T) {
 		t.Fatal(err)
 	}
 	rr := httptest.NewRecorder()
-	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/storage", ""))
+	legacyPageTestServe(app, rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/storage", ""))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("storage settings returned %d: %s", rr.Code, rr.Body.String())
 	}
@@ -222,7 +222,7 @@ func TestNewStorageBrowserGroupsDisksAndPartitions(t *testing.T) {
 		t.Fatal(err)
 	}
 	rr := httptest.NewRecorder()
-	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-storage", ""))
+	legacyPageTestServe(app, rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-storage", ""))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("new storage returned %d: %s", rr.Code, rr.Body.String())
 	}
@@ -303,7 +303,7 @@ func TestNewStorageUsesAgentApprovedMinecraftMigrationCandidates(t *testing.T) {
 		t.Fatal(err)
 	}
 	rr := httptest.NewRecorder()
-	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-storage", ""))
+	legacyPageTestServe(app, rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-storage", ""))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("new storage returned %d: %s", rr.Code, rr.Body.String())
 	}

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -389,7 +390,7 @@ func TestSetupWizardServerStepValidatesAndPersistsChoices(t *testing.T) {
 	}
 	page = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	body = page.Body.String()
-	for _, want := range []string{"Step 4 of 7", "Minecraft container release channel", "Stable (recommended)", "Latest", "Custom", `id="image-tag"`, `value="stable"`, "Recommended version", "Always newest version", "Specific version", `id="specific-version-field"`, "Bedrock compatibility is checked before setup."} {
+	for _, want := range []string{"Step 4 of 7", "Minecraft container release channel", "Stable (recommended)", "Latest", "Custom", `id="image-tag"`, `value="stable"`, "Recommended version", "Always newest version", "Specific version", `id="specific-version-field"`, "Bedrock compatibility is checked during Review."} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("Minecraft step missing %q: %s", want, body)
 		}
@@ -650,6 +651,33 @@ func TestDashboardIncludesNonBlockingFirstRunChoiceForUnconfiguredAdministrator(
 	for _, want := range []string{`role !== "administrator"`, `configured === true`, `showChoice()`, `showInvitation()`} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("first-run Workspace flow missing %q", want)
+		}
+	}
+}
+
+func TestSetupWizardVisitedStepNavigation(t *testing.T) {
+	client := setupWizardClient()
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstRunSetupDrafts.delete(app, "session-token")
+	startSetup(t, app)
+	if rr := saveServerStep(t, app, validServerValues()); rr.Code != http.StatusSeeOther {
+		t.Fatal(rr.Code)
+	}
+	if rr := saveConnectionsStep(t, app, validConnectionValues()); rr.Code != http.StatusSeeOther {
+		t.Fatal(rr.Code)
+	}
+	for _, step := range []struct{ target, status, current int }{{1, http.StatusSeeOther, 1}, {3, http.StatusSeeOther, 3}, {4, http.StatusBadRequest, 3}} {
+		body := fmt.Sprintf("csrf=csrf-token&direction=jump&step=%d", step.target)
+		rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/navigate", body))
+		if rr.Code != step.status {
+			t.Fatalf("jump to %d returned %d", step.target, rr.Code)
+		}
+		draft, _ := firstRunSetupDrafts.get(app, "session-token")
+		if draft.CurrentStep != step.current || draft.HighestStep != 3 {
+			t.Fatalf("jump to %d changed visited steps: %#v", step.target, draft)
 		}
 	}
 }

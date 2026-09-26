@@ -103,7 +103,7 @@ func TestServerMigrationHubIsAdministratorOnlyAndShowsSharedWorkflows(t *testing
 		t.Fatal(err)
 	}
 
-	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/server-migration", ""))
+	page := legacyPageTestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/server-migration", ""))
 	if page.Code != http.StatusOK {
 		t.Fatalf("Server Migration page returned %d: %s", page.Code, page.Body.String())
 	}
@@ -120,7 +120,7 @@ func TestServerMigrationHubIsAdministratorOnlyAndShowsSharedWorkflows(t *testing
 	}
 
 	client.role = "operator"
-	denied := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/server-migration", ""))
+	denied := legacyPageTestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/server-migration", ""))
 	if denied.Code != http.StatusForbidden {
 		t.Fatalf("operator Server Migration page status = %d, want 403", denied.Code)
 	}
@@ -142,7 +142,7 @@ func TestServerMigrationHubReconnectsToCurrentMigrationOperation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	entry := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/server-migration", ""))
+	entry := legacyPageTestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/server-migration", ""))
 	if entry.Code != http.StatusSeeOther || entry.Header().Get("Location") != "/settings/server-migration/progress/"+serverMigrationOperationID {
 		t.Fatalf("Server Migration entry did not reconnect: %d %q", entry.Code, entry.Header().Get("Location"))
 	}

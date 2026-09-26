@@ -17,26 +17,25 @@
   <form class="nav-logout setup-topbar-logout" method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Log out</button></form>
 </header>
 <main class="setup-shell">
-  <div class="title-row setup-title-row"><div><p class="eyebrow">First setup</p><h1>Review your JustVoxel setup</h1></div><span class="badge">{{if eq .SetupMode "recommended"}}Recommended setup{{else}}Step 7 of 7{{end}}</span></div>
+  <div class="title-row setup-title-row"><div><h1>Review your JustVoxel setup</h1></div><span class="badge">{{if eq .SetupMode "recommended"}}Recommended setup{{else}}Step 7 of 7{{end}}</span></div>
   {{if ne .SetupMode "recommended"}}
   <ol class="setup-progress" aria-label="Setup progress">
-    <li class="complete"><span class="setup-number">1</span><span>Server</span></li>
-    <li class="complete"><span class="setup-number">2</span><span>Connections</span></li>
-    <li class="complete"><span class="setup-number">3</span><span>Resources</span></li>
-    <li class="complete"><span class="setup-number">4</span><span>Version</span></li>
-    <li class="complete"><span class="setup-number">5</span><span>Storage</span></li>
-    <li class="complete"><span class="setup-number">6</span><span>Backups</span></li>
+    <li class="complete"><form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="1"><button type="submit"><span class="setup-number">1</span><span>Server</span></button></form></li>
+    <li class="complete"><form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="2"><button type="submit"><span class="setup-number">2</span><span>Connections</span></button></form></li>
+    <li class="complete"><form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="3"><button type="submit"><span class="setup-number">3</span><span>Resources</span></button></form></li>
+    <li class="complete"><form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="4"><button type="submit"><span class="setup-number">4</span><span>Version</span></button></form></li>
+    <li class="complete"><form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="5"><button type="submit"><span class="setup-number">5</span><span>Storage</span></button></form></li>
+    <li class="complete"><form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="6"><button type="submit"><span class="setup-number">6</span><span>Backups</span></button></form></li>
     <li class="active" aria-current="step"><span class="setup-number">7</span><span>Review</span></li>
   </ol>
   {{end}}
 
-  <section class="panel setup-step-panel">
-    {{if eq .SetupMode "recommended"}}<div class="notice setup-safe-note"><strong>Recommended defaults selected.</strong><span>JustVoxel filled the normal appliance defaults automatically. You can change these settings later from Control Center.</span></div>{{end}}
-    <p class="setup-lead">This page shows the configuration normalized and validated by the JustVoxel Management Agent. Nothing has been applied yet.</p>
+  <section class="panel setup-step-panel setup-review-panel">
+    <p class="setup-lead">Review the configuration validated by JustVoxel. Nothing has been applied yet.</p>
     {{if .Error}}<div class="notice error"><strong>Setup needs attention</strong><br>{{.Error}}</div>{{end}}
 
     {{if .Plan.OK}}
-    <div class="setup-review-toolbar"><div class="notice setup-safe-note"><strong>Configuration validated.</strong><span>The values below are the authoritative review result.</span></div><a class="button-link secondary" href="/setup/review/configuration">Download configuration</a></div>
+    <div class="setup-review-toolbar"><strong>Configuration validated.</strong><a class="button-link secondary" href="/setup/review/configuration">Download configuration</a></div>
 
     <div class="setup-review-summary" aria-label="Setup summary">
       <section class="setup-review-summary-card">
@@ -121,50 +120,45 @@
 
     {{if .Plan.Warnings}}
     <section class="setup-review-warnings" aria-label="Setup warnings">
-      <h2>Warnings</h2>
-      {{range .Plan.Warnings}}<div class="notice warning"><strong>{{if eq .Code "bedrock_version_unsupported"}}Bedrock cross-play unavailable{{else if eq .Code "bedrock_compatibility_unavailable"}}Bedrock compatibility could not be checked{{else if eq .Code "bedrock_moving_version"}}Bedrock compatibility may change{{else}}{{.Code}}{{end}}</strong><br>{{.Message}}</div>{{end}}
+      {{range .Plan.Warnings}}<div class="setup-backup-resilience setup-disk-warning" role="note"><strong>{{if eq .Code "same_physical_disk"}}Backups are on the same disk{{else if eq .Code "bedrock_version_unsupported"}}Bedrock cross-play unavailable{{else if eq .Code "bedrock_compatibility_unavailable"}}Bedrock compatibility could not be checked{{else if eq .Code "bedrock_moving_version"}}Bedrock compatibility may change{{else}}Setup needs attention{{end}}</strong><span>{{if eq .Code "same_physical_disk"}}If this disk fails, both Minecraft and its backups could be lost.{{else}}{{.Message}}{{end}}</span></div>{{end}}
     </section>
     {{end}}
 
     {{if .Plan.Requirements.SMBPasswordRequired}}<div class="notice setup-secret-note"><strong>SMB password required during execution.</strong><span>The password is not stored in this setup draft or review. JustVoxel will request it only when the setup transaction is actually started.</span></div>{{end}}
     {{if .Plan.Requirements.NetworkBackupValidationOnApply}}<div class="notice"><strong>Network backup validation happens during execution.</strong><br>The configured network source will be mounted and verified before JustVoxel uses it. Planning does not mount the share.</div>{{end}}
 
-    <section class="setup-eula-card">
-      <h2>Minecraft EULA</h2>
-      <p>Running a Minecraft server requires agreement to the Minecraft End User License Agreement. <a href="{{.EULAURL}}" target="_blank" rel="noopener noreferrer">Read the official Minecraft EULA</a>.</p>
-      <form method="post" action="/setup/review/eula">
-        <input type="hidden" name="csrf" value="{{.CSRF}}">
-        <input type="hidden" name="plan_fingerprint" value="{{.Plan.PlanFingerprint}}">
-        <label class="setup-choice setup-eula-choice"><input type="checkbox" name="eula_accepted" {{if .EULAAccepted}}checked{{end}}><span><strong>I agree to the Minecraft End User License Agreement</strong><small>This records acceptance only for the exact validated plan shown on this page. It does not configure or start Minecraft.</small></span></label>
-        <div class="setup-primary-action"><button type="submit">{{if .EULAAccepted}}EULA accepted{{else}}Accept EULA{{end}}</button></div>
-      </form>
-      {{if .EULAAccepted}}<div class="notice setup-safe-note"><strong>Ready for the next phase.</strong><span>Configuration is validated and EULA acceptance is bound to this exact reviewed plan.</span></div>{{end}}
-    </section>
-
-    {{if .ShortPlanReference}}<p class="muted compact">Validated plan: <code>{{.ShortPlanReference}}</code></p>{{end}}
-    <form class="setup-execution-placeholder" method="post" action="/setup/review/apply" data-setup-apply>
+    <form id="setup-apply-form" class="setup-execution-placeholder" method="post" action="/setup/review/apply" data-setup-apply data-eula-accepted="{{.EULAAccepted}}" data-smb-required="{{.Plan.Requirements.SMBPasswordRequired}}">
       <div class="setup-execution-copy">
         <strong>Configure JustVoxel</strong>
-        <span>Apply this exact validated plan using JustVoxel's transactional setup engine. Progress and rollback status will remain available if the browser temporarily loses connection.</span>
-        {{if .Plan.Requirements.SMBPasswordRequired}}
-        <label class="setup-secret-input">SMB password
-          <input type="password" name="smb_password" required maxlength="4096" autocomplete="off" {{if not .EULAAccepted}}disabled{{end}}>
-          <small>Used only while mounting and validating the reviewed SMB backup destination. It is not stored in the setup draft or operation journal.</small>
-        </label>
-        {{end}}
+        <span>Apply this validated plan. Progress remains available if the browser disconnects.</span>
       </div>
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <input type="hidden" name="plan_fingerprint" value="{{.Plan.PlanFingerprint}}">
-      <button type="submit" {{if not .EULAAccepted}}disabled{{end}}>Configure JustVoxel</button>
     </form>
+    {{if .Plan.Requirements.SMBPasswordRequired}}<dialog class="setup-eula-dialog" data-setup-password-dialog aria-labelledby="setup-password-title">
+      <h2 id="setup-password-title">SMB password</h2>
+      <p>Enter the password for the reviewed backup share. It is not stored in the setup draft or operation journal.</p>
+      <label class="setup-secret-input">SMB password<input type="password" name="smb_password" form="setup-apply-form" required maxlength="4096" autocomplete="off" data-setup-password></label>
+      <div class="setup-eula-actions"><button type="button" class="secondary" data-setup-password-cancel>Cancel</button><button type="button" data-setup-password-continue>Continue</button></div>
+    </dialog>{{end}}
+    <dialog class="setup-eula-dialog" data-setup-eula-dialog aria-labelledby="setup-eula-title">
+      <h2 id="setup-eula-title">Minecraft EULA</h2>
+      <p>Running Minecraft requires accepting the Minecraft End User License Agreement. <a href="{{.EULAURL}}" target="_blank" rel="noopener noreferrer">Read the official Minecraft EULA</a>.</p>
+      <p>Acceptance applies only to this validated setup plan.</p>
+      <div class="setup-eula-actions">
+        <button type="button" class="secondary" data-setup-eula-cancel>Cancel</button>
+        <button type="button" class="secondary" data-setup-eula-decline>Decline</button>
+        <button type="submit" form="setup-apply-form" name="eula_accepted" value="on" data-setup-eula-accept>Accept and continue</button>
+      </div>
+    </dialog>
     {{end}}
 
     <div class="setup-actions setup-actions-split">
       <form method="post" action="/setup/review/cancel"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Cancel setup</button></form>
-      <form method="post" action="/setup/review/back"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Back</button></form>
+      <div class="setup-step-navigation"><form method="post" action="/setup/review/back"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Back</button></form>{{if .Plan.OK}}<button type="submit" form="setup-apply-form" data-setup-configure>Configure JustVoxel</button>{{end}}</div>
     </div>
   </section>
-  <p class="disclaimer">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</p>
+  <footer class="setup-footer disclaimer">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT. <a href="https://github.com/home-server-project/justvoxel" target="_blank" rel="noopener noreferrer">JustVoxel on GitHub</a></footer>
 </main>
 </body>
 </html>{{end}}

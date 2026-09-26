@@ -16,3 +16,42 @@
 @media(max-width:900px){.setup-review-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:560px){.setup-review-summary{grid-template-columns:1fr}.setup-review-details>summary{align-items:flex-start;flex-direction:column}.setup-review-details>summary small{text-align:left}}
 @media(prefers-color-scheme:light){.setup-review-summary-card,.setup-review-details{background:#fff;border-color:#d9dfe3}.setup-review-details[open]>summary{border-color:#e2e7ea}.setup-review-summary-card>span,.setup-review-summary-card>small,.setup-review-details>summary small{color:#66727c}}
+
+/* Compact review, EULA dialog, and persistent setup stages. */
+.setup-review-toolbar{margin:.25rem 0 .4rem}
+.setup-review-summary{margin:.45rem 0;gap:.45rem}
+.setup-review-summary-card{padding:.55rem .65rem}
+.setup-review-details{margin:.45rem 0}
+.setup-review-details>summary{padding:.5rem .65rem}
+.setup-review-warnings{margin:.5rem 0}
+.setup-review-warnings h2{margin:0 0 .25rem;font-size:1rem}
+.setup-review-warnings .notice{margin:.25rem 0;padding:.5rem .65rem}
+.setup-execution-placeholder{margin-top:.5rem;padding:.65rem .75rem;gap:.65rem}
+.setup-execution-copy{gap:.2rem}
+.setup-actions{margin-top:.55rem}
+.setup-eula-dialog{width:min(520px,calc(100vw - 2rem));max-height:calc(100vh - 2rem);padding:1.2rem;border:1px solid #4f8b69;border-radius:14px;background:#171d22;color:#eef1f4;box-shadow:0 25px 70px #000a}
+.setup-eula-dialog::backdrop{background:#050708b3}
+.setup-eula-dialog h2{margin:0 0 .5rem}
+.setup-eula-dialog p{line-height:1.5}
+.setup-eula-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:.5rem;margin-top:1rem}
+.setup-eula-dialog button:focus-visible{outline:2px solid #78c99d;outline-offset:2px}
+.setup-operation-panel{gap:.55rem}
+.setup-operation-icon{width:26px;height:26px;border-width:3px}
+.setup-operation-stages{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.4rem;list-style:none;margin:0;padding:0}
+.setup-operation-stages li{min-width:0;padding:.55rem .4rem;border:1px solid #303942;border-radius:9px;background:#151b20;color:#89959e;text-align:center;font-size:.82rem;font-weight:700}
+.setup-operation-stages li.is-complete{border-color:#4f8b69;background:#203128;color:#b9ebca}
+.setup-operation-stages li.is-current{border-color:#78b892;background:#25382e;color:#e2f8ea;box-shadow:inset 0 0 0 1px #4f8b69}
+.setup-operation-panel>.setup-lead{margin:.1rem 0;line-height:1.4}
+.setup-operation-details>div{padding:.55rem .65rem}
+.setup-verify-note{margin:0}
+@media(max-width:760px){.setup-operation-stages{grid-template-columns:repeat(5,minmax(0,1fr))}.setup-operation-stages li{padding:.4rem .2rem;font-size:.68rem}.setup-eula-actions{justify-content:stretch}.setup-eula-actions button{flex:1 1 auto}}
+@media(prefers-color-scheme:light){.setup-eula-dialog{background:#fff;color:#1a2025;border-color:#86b99a}.setup-operation-stages li{background:#fff;border-color:#d9dfe3;color:#66727c}.setup-operation-stages li.is-complete{background:#e3f1e8;border-color:#86b99a;color:#184c31}.setup-operation-stages li.is-current{background:#e3f1e8;border-color:#4f8b69;color:#184c31}}
+.setup-operation-stages li.is-rolled-back{border-color:#b96767;background:#422626;color:#ffe0e0}
+.setup-operation-panel.is-rolled-back .setup-operation-icon{border-color:#b96767;border-top-color:#b96767;animation:none}
+@media(prefers-color-scheme:light){.setup-operation-stages li.is-rolled-back{border-color:#b96767;background:#fff0f0;color:#7d2727}}
+.setup-log-download{background:#587fb8;color:#fff}
+.setup-log-download:hover,.setup-log-download:focus-visible{background:#7299d1;color:#fff}
+.setup-review-panel{display:flex;flex-direction:column}
+.setup-review-panel>.setup-actions-split{position:sticky;bottom:0;z-index:3;margin-top:auto;padding:.55rem .65rem;border:1px solid #303942;border-radius:10px;background:#151a1ff2;backdrop-filter:blur(8px)}
+.setup-review-panel>.setup-actions-split .setup-step-navigation form{margin:0}
+@media(prefers-color-scheme:light){.setup-review-panel>.setup-actions-split{background:#fffffff2;border-color:#d9dfe3}}

@@ -30,8 +30,8 @@ func TestFirstRunConfiguredStateOverridesExploreInvitation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(templateSource), "data-minecraft-setup-invitation hidden") {
-		t.Fatal("Workspace setup invitation must be hidden until first-run state says it is needed")
+	if !strings.Contains(string(templateSource), `data-dashboard-setup-area {{if .Status.Minecraft.Configured}}hidden{{end}}`) {
+		t.Fatal("Workspace setup invitation must follow the configured state")
 	}
 }
 

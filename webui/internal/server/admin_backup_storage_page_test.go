@@ -72,7 +72,7 @@ func TestBackupStoragePageShowsSafeChoicesAndClearDestructiveGuidance(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/backup-storage", ""))
+	rr := legacyPageTestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/backup-storage", ""))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("backup storage page returned %d: %s", rr.Code, rr.Body.String())
 	}

@@ -251,7 +251,7 @@ func TestNewBackupsPageListsExistingBackups(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-backups", ""))
+	page := legacyPageTestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-backups", ""))
 	if page.Code != http.StatusOK {
 		t.Fatalf("new backups page returned %d: %s", page.Code, page.Body.String())
 	}
@@ -283,7 +283,7 @@ func TestNewBackupsPageIsAdministratorOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-backups", ""))
+	page := legacyPageTestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-backups", ""))
 	if page.Code != http.StatusForbidden {
 		t.Fatalf("operator new backups page status = %d, want 403", page.Code)
 	}
@@ -307,7 +307,7 @@ func TestNewBackupsBackupNowUsesExistingManualBackupAPI(t *testing.T) {
 		t.Fatalf("manual backup calls = %d, want 1", client.backupCalls)
 	}
 
-	resultPage := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-backups?result=backup", ""))
+	resultPage := legacyPageTestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-backups?result=backup", ""))
 	if resultPage.Code != http.StatusOK || !strings.Contains(resultPage.Body.String(), "Backup started. It will appear in the library when the backup service finishes.") {
 		t.Fatalf("backup result page returned %d: %s", resultPage.Code, resultPage.Body.String())
 	}
@@ -336,7 +336,7 @@ func TestNewBackupsPageShowsAutomaticPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-backups", ""))
+	page := legacyPageTestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-backups", ""))
 	if page.Code != http.StatusOK {
 		t.Fatalf("new backups page returned %d: %s", page.Code, page.Body.String())
 	}
@@ -440,7 +440,7 @@ func TestNewBackupsPageShowsCompactBackupDestination(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-backups", ""))
+	page := legacyPageTestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-backups", ""))
 	if page.Code != http.StatusOK {
 		t.Fatalf("new backups destination page returned %d: %s", page.Code, page.Body.String())
 	}
@@ -526,7 +526,7 @@ func TestNewBackupsPageOffersRestoreForSingleSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-backups", ""))
+	page := legacyPageTestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-backups", ""))
 	if page.Code != http.StatusOK {
 		t.Fatalf("new backups Restore page returned %d: %s", page.Code, page.Body.String())
 	}
@@ -622,15 +622,21 @@ func TestNewBackupsRestoreApplyStartsAndShowsPersistentOperation(t *testing.T) {
 	if page.Code != http.StatusSeeOther {
 		t.Fatalf("New Backups Restore apply returned %d: %s", page.Code, page.Body.String())
 	}
-	wantLocation := "/settings/new-backups?result=restore&restore_operation=" + restorePageOperationID
-	if page.Header().Get("Location") != wantLocation {
-		t.Fatalf("Restore redirect=%q want %q", page.Header().Get("Location"), wantLocation)
+	legacyLocation := "/settings/new-backups?result=restore&restore_operation=" + restorePageOperationID
+	if page.Header().Get("Location") != legacyLocation {
+		t.Fatalf("Restore redirect=%q want %q", page.Header().Get("Location"), legacyLocation)
 	}
 	if client.restoreApplyCalls != 1 || !client.restoreApplyRequest.DestructiveConfirmed || !client.restoreApplyRequest.PlayersConfirmed {
 		t.Fatalf("unexpected Restore apply request: %#v calls=%d", client.restoreApplyRequest, client.restoreApplyCalls)
 	}
 
-	progress := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example"+wantLocation, ""))
+	redirect := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example"+legacyLocation, ""))
+	wantDashboard := "/?restore_operation=" + restorePageOperationID + "&result=restore&workspace=backups"
+	if redirect.Code != http.StatusSeeOther || redirect.Header().Get("Location") != wantDashboard {
+		t.Fatalf("Restore workspace redirect=%d %q, want %q", redirect.Code, redirect.Header().Get("Location"), wantDashboard)
+	}
+
+	progress := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/backups?restore_operation="+restorePageOperationID, ""))
 	if progress.Code != http.StatusOK {
 		t.Fatalf("New Backups Restore progress returned %d: %s", progress.Code, progress.Body.String())
 	}
@@ -655,7 +661,7 @@ func TestNewBackupsReconnectsToCurrentRestoreOperation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-backups", ""))
+	page := legacyPageTestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-backups", ""))
 	if page.Code != http.StatusOK {
 		t.Fatalf("New Backups current Restore returned %d: %s", page.Code, page.Body.String())
 	}

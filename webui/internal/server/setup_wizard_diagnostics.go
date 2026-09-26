@@ -98,7 +98,13 @@ func (a *App) setupWizardDiagnosticDownload(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"justvoxel-setup-%s.log\"", id))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "sandbox")
+	if r.URL.Path == "/setup/progress/"+id+"/log/view" {
+		w.Header().Set("Content-Disposition", "inline")
+	} else {
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"justvoxel-setup-%s.log\"", id))
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)

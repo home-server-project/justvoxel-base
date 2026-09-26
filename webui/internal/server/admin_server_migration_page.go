@@ -45,7 +45,7 @@ type serverMigrationProgressPageData struct {
 }
 
 func (a *App) registerAdminServerMigrationPages(mux *http.ServeMux) {
-	mux.HandleFunc("GET /settings/server-migration", a.serverMigrationPage)
+	mux.HandleFunc("GET /settings/server-migration", a.legacyWorkspaceRedirect("administrator", "migration", "export"))
 	mux.HandleFunc("GET /settings/server-migration/progress/{id}", a.serverMigrationProgressPage)
 	a.registerAdminServerExportPages(mux)
 	a.registerAdminServerImportPages(mux)

@@ -52,7 +52,7 @@ func TestAdvancedStorageShowsSafeCandidateGroups(t *testing.T) {
 		t.Fatal(err)
 	}
 	rr := httptest.NewRecorder()
-	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/storage-provision", ""))
+	legacyPageTestServe(app, rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/storage-provision", ""))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("advanced storage returned %d: %s", rr.Code, rr.Body.String())
 	}
@@ -76,7 +76,7 @@ func TestAdvancedStorageFreshApplianceReturnsToSetup(t *testing.T) {
 		t.Fatal(err)
 	}
 	rr := httptest.NewRecorder()
-	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/storage-provision?from=setup", ""))
+	legacyPageTestServe(app, rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/storage-provision?from=setup", ""))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("advanced storage returned %d: %s", rr.Code, rr.Body.String())
 	}

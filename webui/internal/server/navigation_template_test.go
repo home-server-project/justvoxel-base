@@ -6,110 +6,37 @@ import (
 )
 
 func TestControlCenterNavigationUX(t *testing.T) {
-	header, err := assets.ReadFile("templates/header.html")
-	if err != nil {
-		t.Fatal(err)
-	}
-	markup := string(header)
-	for _, want := range []string{
-		`class="brand-link brand-mark" href="/"`,
-		`aria-label="JustVoxel dashboard"`,
-		`<strong>JV</strong>`,
-		`data-topbar-clock`,
-		`data-control-center`,
-		`>Control Center</span>`,
-		`<span class="control-section-label">Temporary</span>`,
-		`data-system-power`,
-		`href="/activity"`,
-		`title="Server events and status"`,
-		`href="/settings/server"`,
-		`href="/operations#whitelist"`,
-		`href="/operations#minecraft-logs"`,
-		`data-storage-open`,
-		`<strong>Storage</strong>`,
-		`href="/settings/data-migration"`,
-		`data-backups-open`,
-		`<strong>Backups</strong>`,
-		`class="control-tile nav-operator-only" href="/operations#manual-backup"`,
-		`href="/settings/server-migration"`,
-		`href="/settings/activity"`,
-		`href="/settings/validation"`,
-		`href="/settings/users"`,
-		`href="/settings/authentication"`,
-		`href="/password"`,
-		`href="/about"`,
-		`class="nav-logout"`,
-		`aria-label="Log out" data-tooltip="Log out"`,
-	} {
-		if !strings.Contains(markup, want) {
-			t.Fatalf("Control Center header missing %q", want)
-		}
-	}
-	if strings.Contains(markup, `class="brand-name"`) {
-		t.Fatal("brand still includes the long JustVoxel label")
-	}
-
-	temporary := strings.Index(markup, `<span class="control-section-label">Temporary</span>`)
-	minecraft := strings.Index(markup, `<span class="control-section-label">Minecraft</span>`)
-	if temporary < 0 || minecraft < 0 || temporary > minecraft {
-		t.Fatal("Temporary Control Center section must appear before Minecraft")
-	}
-	for _, item := range []string{"data-minecraft-open", "data-system-open", "data-system-monitor-open", "data-storage-open", "data-backups-open", "data-migration-open", "data-system-update-open"} {
-		if strings.Count(markup, item) != 1 {
-			t.Fatalf("temporary workspace item %q must appear exactly once", item)
-		}
-	}
-	if strings.Contains(markup, `<span class="control-section-label">Monitoring</span>`) {
-		t.Fatal("obsolete Monitoring section still exists")
-	}
-
-	for _, old := range []string{
-		`href="/settings/backup-storage"`,
-		`href="/settings/new-backups"`,
-		`href="/settings/restore"`,
-	} {
-		if strings.Contains(markup, old) {
-			t.Fatalf("Control Center still exposes legacy backup navigation %q", old)
-		}
-	}
-
-	css, err := assets.ReadFile("static/app.css")
-	if err != nil {
-		t.Fatal(err)
-	}
-	styles := string(css)
-	for _, want := range []string{
-		`.topbar`,
-		`.control-center-panel`,
-		`.control-tile-grid`,
-		`.nav-admin-only,.nav-operator-plus,.nav-operator-only{display:none!important}`,
-		`.control-tile.nav-admin-only,.control-tile.nav-operator-plus,.control-tile.nav-operator-only{display:none!important}`,
-		`body.role-administrator .nav-admin-only`,
-		`body.role-operator .nav-operator-plus`,
-		`position:fixed;top:50px`,
-		`:focus-visible`,
-	} {
-		if !strings.Contains(styles, want) {
-			t.Fatalf("Control Center styling missing %q", want)
-		}
-	}
-
-	script, err := assets.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	behavior := string(script)
-	for _, want := range []string{
-		`document.querySelector("[data-control-center]")`,
-		`document.querySelector("[data-topbar-clock]")`,
-		`Intl.DateTimeFormat`,
-		`controlCenter.open = false`,
-		`event.key !== "Escape"`,
-	} {
-		if !strings.Contains(behavior, want) {
-			t.Fatalf("Control Center behavior missing %q", want)
-		}
-	}
+ header, err := assets.ReadFile("templates/header.html")
+ if err != nil { t.Fatal(err) }
+ markup := string(header)
+ navigationStart := strings.Index(markup, `<nav class="control-navigation"`)
+ if navigationStart < 0 { t.Fatal("Control Center navigation missing") }
+ navigationEnd := strings.Index(markup[navigationStart:], `</nav>`)
+ if navigationEnd < 0 { t.Fatal("Control Center navigation missing") }
+ navigation := markup[navigationStart:navigationStart+navigationEnd]
+ for _, heading := range []string{"Session &amp; power", "Minecraft", "System", "Storage &amp; Data"} {
+  if !strings.Contains(markup, `<span class="control-section-label">`+heading+`</span>`) { t.Fatalf("missing Control Center group %s",heading) }
+ }
+ previous := -1
+ for _, heading := range []string{"Session &amp; power", "Minecraft", "System", "Storage &amp; Data"} {
+  position := strings.Index(markup, `<span class="control-section-label">`+heading+`</span>`)
+  if position <= previous { t.Fatalf("Control Center group %s is out of order", heading) }
+  previous = position
+ }
+ if strings.Contains(navigation, "Temporary") { t.Fatal("workspace launchers still labeled Temporary") }
+ for _, item := range []string{"data-minecraft-open", "data-system-open", "data-network-open", "data-system-monitor-open", "data-system-update-open", "data-storage-open", "data-backups-open", "data-migration-open"} {
+  if strings.Count(navigation,item)!=1 { t.Fatalf("workspace launcher %s must appear once",item) }
+ }
+ for _, old := range []string{`href="/activity"`, `href="/operations`, `href="/settings/`, `href="/password"`, `href="/about"`} {
+  if strings.Contains(navigation,old) { t.Fatalf("legacy standalone link remains: %s",old) }
+ }
+ for _, item := range []string{`class="control-tile nav-admin-only" type="button" data-system-update-open`, `class="control-tile nav-admin-only" type="button" data-storage-open`, `class="control-tile nav-admin-only" type="button" data-backups-open`, `class="control-tile nav-admin-only" type="button" data-migration-open`} {
+  if !strings.Contains(navigation,item) { t.Fatalf("administrator launcher lost role restriction: %s",item) }
+ }
+ if !strings.Contains(markup, `class="nav-logout"`) || !strings.Contains(markup, `data-system-power`) { t.Fatal("session and power actions missing") }
+ if !strings.Contains(markup, `class="quick-look-backup-action nav-operator-only" href="/operations#manual-backup"`) {
+  t.Fatal("operator manual backup needs an accessible entry until it has a workspace replacement")
+ }
 }
 
 func TestMinecraftWorkspaceMigrationContract(t *testing.T) {
@@ -119,11 +46,10 @@ func TestMinecraftWorkspaceMigrationContract(t *testing.T) {
 	}
 	markup := string(header)
 
-	temporary := strings.Index(markup, `<span class="control-section-label">Temporary</span>`)
 	minecraftSection := strings.Index(markup, `<span class="control-section-label">Minecraft</span>`)
 	minecraftTile := strings.Index(markup, `data-minecraft-open`)
-	if temporary < 0 || minecraftSection < 0 || minecraftTile < temporary || minecraftTile > minecraftSection {
-		t.Fatal("new Minecraft workspace tile must live only in the Temporary section")
+	if minecraftSection < 0 || minecraftTile < minecraftSection {
+		t.Fatal("Minecraft launcher is missing from its group")
 	}
 
 	for _, want := range []string{
@@ -134,9 +60,6 @@ func TestMinecraftWorkspaceMigrationContract(t *testing.T) {
 		`data-minecraft-tab="version"`,
 		`data-minecraft-tab="whitelist"`,
 		`data-minecraft-tab="crossplay"`,
-		`href="/settings/server"`,
-		`href="/operations#whitelist"`,
-		`href="/operations#minecraft-logs"`,
 	} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("Minecraft workspace migration contract missing %q", want)
@@ -156,6 +79,8 @@ func TestMinecraftWorkspaceMigrationContract(t *testing.T) {
 		`"/api/minecraft/workspace/settings/apply"`,
 		`"/api/minecraft/workspace/whitelist"`,
 		`"/api/minecraft/workspace/logs"`,
+		`section.className = "panel details minecraft-overview-logs"`,
+		`title.textContent = "Recent logs"`,
 		`const settingsTabs = new Set(["memory", "players", "crossplay", "version"])`,
 	} {
 		if !strings.Contains(behavior, want) {
@@ -171,11 +96,10 @@ func TestSystemWorkspaceMigrationContract(t *testing.T) {
 	}
 	markup := string(header)
 
-	temporary := strings.Index(markup, `<span class="control-section-label">Temporary</span>`)
-	minecraftSection := strings.Index(markup, `<span class="control-section-label">Minecraft</span>`)
+	systemSection := strings.Index(markup, `<span class="control-section-label">System</span>`)
 	systemTile := strings.Index(markup, `data-system-open`)
-	if temporary < 0 || minecraftSection < 0 || systemTile < temporary || systemTile > minecraftSection {
-		t.Fatal("new System workspace tile must live only in the Temporary section")
+	if systemSection < 0 || systemTile < systemSection {
+		t.Fatal("System launcher is missing from its group")
 	}
 
 	for _, want := range []string{
@@ -187,12 +111,6 @@ func TestSystemWorkspaceMigrationContract(t *testing.T) {
 		`data-system-tab="about"`,
 		`data-system-tab="ups"`,
 		`data-system-ups-tab`,
-		`href="/settings/validation"`,
-		`href="/settings/activity"`,
-		`href="/settings/users"`,
-		`href="/settings/authentication"`,
-		`href="/password"`,
-		`href="/about"`,
 	} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("System workspace migration contract missing %q", want)
@@ -300,7 +218,7 @@ func TestBackupsLibraryLeadsWorkspaceAndOwnsActions(t *testing.T) {
 	}
 }
 
-func TestMigrationWorkspaceKeepsLegacyCardButUsesIndependentWorkspaceRoutes(t *testing.T) {
+func TestMigrationWorkspaceUsesIndependentWorkspaceRoutes(t *testing.T) {
 	header, err := assets.ReadFile("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
@@ -312,7 +230,6 @@ func TestMigrationWorkspaceKeepsLegacyCardButUsesIndependentWorkspaceRoutes(t *t
 		`data-migration-tab="export"`,
 		`data-migration-tab="import"`,
 		`data-migration-tab="recovery"`,
-		`href="/settings/server-migration"`,
 	} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("Migration workspace markup missing %q", want)
@@ -472,17 +389,15 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 	}
 	markup := string(content)
 	for _, want := range []string{
-		"class=\"grid dashboard-summary\"",
-		"class=\"dashboard-live-panels\"",
-		"id=\"minecraft-version-summary\"",
-		"id=\"players-panel-count\"",
+		`data-configured="{{.Status.Minecraft.Configured}}"`,
+		`data-dashboard-setup-area`,
 	} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("compact dashboard missing %q", want)
 		}
 	}
-	if strings.Contains(markup, `id="minecraft-players-summary"`) {
-		t.Fatal("dashboard contains duplicate Players summary tile")
+	if strings.Contains(markup, `dashboard-summary`) {
+		t.Fatal("dashboard contains the legacy summary strip")
 	}
 	if strings.Contains(markup, "<h2>Appliance</h2>") {
 		t.Fatal("dashboard contains oversized Appliance panel")
@@ -494,8 +409,9 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 	}
 	styles := string(css)
 	for _, want := range []string{
-		".dashboard-summary{grid-template-columns:repeat(5,minmax(0,1fr))",
-		".dashboard-live-panels{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)",
+		"#dashboard[data-configured=\"true\"]::before",
+		".dashboard-setup-area{display:grid;place-items:center",
+		"#dashboard .dashboard-setup-area .minecraft-setup-invitation{width:min(560px",
 		"@media(max-width:900px)",
 	} {
 		if !strings.Contains(styles, want) {

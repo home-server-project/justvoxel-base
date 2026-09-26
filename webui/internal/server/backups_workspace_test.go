@@ -17,7 +17,7 @@ func TestBackupsWorkspaceOwnsUnifiedBackupTools(t *testing.T) {
 		"data-backups-workspace-dialog",
 		"data-backups-refresh",
 		"data-backups-workspace-content",
-		`class="control-tile nav-operator-only" href="/operations#manual-backup"`,
+		`class="quick-look-backup-action nav-operator-only" href="/operations#manual-backup"`,
 	} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("Backups workspace markup missing %q", want)

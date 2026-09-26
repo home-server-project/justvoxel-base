@@ -122,7 +122,7 @@ func TestRestorePageListsBackupsAndIsAdministratorOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/restore", ""))
+	page := legacyPageTestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/restore", ""))
 	if page.Code != http.StatusOK {
 		t.Fatalf("restore page returned %d: %s", page.Code, page.Body.String())
 	}
@@ -133,7 +133,7 @@ func TestRestorePageListsBackupsAndIsAdministratorOnly(t *testing.T) {
 	}
 
 	client.role = "operator"
-	denied := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/restore", ""))
+	denied := legacyPageTestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/restore", ""))
 	if denied.Code != http.StatusForbidden {
 		t.Fatalf("operator restore page status = %d, want 403", denied.Code)
 	}
@@ -219,7 +219,7 @@ func TestRestoreEntryReconnectsToCurrentOperationAndProgressUsesSameJournal(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/restore", ""))
+	entry := legacyPageTestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/restore", ""))
 	if entry.Code != http.StatusSeeOther || entry.Header().Get("Location") != "/settings/restore/progress/"+restorePageOperationID {
 		t.Fatalf("Restore entry did not reconnect: %d %q", entry.Code, entry.Header().Get("Location"))
 	}

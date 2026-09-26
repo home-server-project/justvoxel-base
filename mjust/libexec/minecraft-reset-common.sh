@@ -1,5 +1,19 @@
 #!/usr/bin/bash
 
+jv_reset_remove_minecraft_container() {
+    if podman rm --force --ignore minecraft >/dev/null 2>&1; then
+        return 0
+    fi
+
+    # Podman may report a removal error after the container has already gone.
+    # Only exit status 1 from `exists` confirms absence; other errors fail closed.
+    if podman container exists minecraft >/dev/null 2>&1; then
+        return 1
+    else
+        [[ $? -eq 1 ]]
+    fi
+}
+
 jv_reset_path_scope() {
     local data_path="$1" source fstype transport parent
 

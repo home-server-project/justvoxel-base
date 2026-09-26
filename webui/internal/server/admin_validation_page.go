@@ -24,7 +24,7 @@ type adminValidationPageData struct {
 }
 
 func (a *App) registerAdminValidationPages(mux *http.ServeMux) {
-	mux.HandleFunc("GET /settings/validation", a.adminValidationPage)
+	mux.HandleFunc("GET /settings/validation", a.legacyWorkspaceRedirect("administrator", "system", "health"))
 }
 
 func (a *App) adminValidationPage(w http.ResponseWriter, r *http.Request) {

@@ -49,7 +49,7 @@ func TestAdminValidationPageShowsPassedResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	rr := httptest.NewRecorder()
-	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/validation", ""))
+	legacyPageTestServe(app, rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/validation", ""))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("validation page returned %d: %s", rr.Code, rr.Body.String())
 	}
@@ -69,7 +69,7 @@ func TestAdminValidationPageShowsDetectedProblemsWithoutReinterpretingOutput(t *
 		t.Fatal(err)
 	}
 	rr := httptest.NewRecorder()
-	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/validation", ""))
+	legacyPageTestServe(app, rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/validation", ""))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("validation problems page returned %d: %s", rr.Code, rr.Body.String())
 	}
@@ -87,7 +87,7 @@ func TestAdminValidationPageKeepsUnavailableSeparateFromValidationFailure(t *tes
 		t.Fatal(err)
 	}
 	rr := httptest.NewRecorder()
-	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/validation", ""))
+	legacyPageTestServe(app, rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/validation", ""))
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Fatalf("validation unavailable page returned %d: %s", rr.Code, rr.Body.String())
 	}
@@ -111,7 +111,7 @@ func TestAdminValidationPageRejectsOperatorBeforeValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	rr := httptest.NewRecorder()
-	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/validation", ""))
+	legacyPageTestServe(app, rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/validation", ""))
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("operator validation page status = %d, want 403", rr.Code)
 	}

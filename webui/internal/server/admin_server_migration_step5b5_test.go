@@ -25,7 +25,7 @@ func TestServerMigrationAuthenticationAndPasswordChangeHandling(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/server-migration", ""))
+			page := legacyPageTestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/server-migration", ""))
 			if page.Code != http.StatusSeeOther || page.Header().Get("Location") != tc.location {
 				t.Fatalf("migration auth response = %d %q, want redirect to %q", page.Code, page.Header().Get("Location"), tc.location)
 			}

@@ -138,7 +138,11 @@ func migrationRequest(method, target, form string) *http.Request {
 
 func migrationResponse(app *App, req *http.Request) *httptest.ResponseRecorder {
 	rr := httptest.NewRecorder()
-	app.Handler().ServeHTTP(rr, req)
+	if req.Method == http.MethodGet && req.URL.Path == "/settings/data-migration" {
+		app.dataMigrationPage(rr, req)
+	} else {
+		app.Handler().ServeHTTP(rr, req)
+	}
 	return rr
 }
 

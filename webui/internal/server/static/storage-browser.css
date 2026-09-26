@@ -181,3 +181,9 @@ button.storage-partition-card:hover,button.storage-partition-card:focus-visible{
 .storage-minecraft-dialog [data-storage-minecraft-progress] .details{margin:.65rem 0}
 .storage-minecraft-dialog [data-storage-minecraft-review-panel]{display:grid;gap:.7rem}
 .storage-minecraft-dialog [data-storage-minecraft-progress]{display:grid;gap:.7rem}
+/* The selected disk card above already identifies this partition group. */
+.storage-partition-group{padding:0;border:0;background:transparent}
+.storage-selected-heading{display:none}
+.storage-partition-grid{gap:.4rem}
+.storage-partition-card{min-height:0;padding:.55rem .7rem}
+@media(prefers-color-scheme:light){.storage-partition-group{background:transparent;border:0}}

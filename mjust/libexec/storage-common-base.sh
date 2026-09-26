@@ -76,7 +76,7 @@ storage_system_disks() {
               ' 2>/dev/null || true
     } | while IFS= read -r real; do
         [[ -n ${real} ]] || continue
-        lsblk -s -npo NAME,TYPE "${real}" 2>/dev/null \
+        lsblk -s -nrpo NAME,TYPE "${real}" 2>/dev/null \
             | awk '$2 == "disk" {print $1}'
     done | sort -u
 }
@@ -87,7 +87,7 @@ storage_system_partitions() {
         for target in / /boot /boot/efi /var /etc /sysroot; do
             real="$(storage_target_block_device "${target}")"
             [[ -n ${real} ]] || continue
-            lsblk -s -npo NAME,TYPE "${real}" 2>/dev/null \
+            lsblk -s -nrpo NAME,TYPE "${real}" 2>/dev/null \
                 | awk '$2 == "part" {print $1}'
         done
 

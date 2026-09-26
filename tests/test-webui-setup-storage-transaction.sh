@@ -70,7 +70,11 @@ MOUNT_SOURCE="$FAKE_PART"
 lsblk(){
     local args="$*"
     if [[ "$args" == *'NAME,TYPE'* ]]; then
-        printf '%s part\n%s disk\n' "$FAKE_PART" "$FAKE_DISK"
+        if [[ "$args" == '-s -nrpo NAME,TYPE '* ]]; then
+            printf '%s part\n%s disk\n' "$FAKE_PART" "$FAKE_DISK"
+        else
+            printf '%s part\n└─%s disk\n' "$FAKE_PART" "$FAKE_DISK"
+        fi
         return 0
     fi
     if [[ "$args" == *'MOUNTPOINT'* ]]; then
@@ -79,6 +83,25 @@ lsblk(){
     fi
     return 0
 }
+
+[[ $(lsblk -s -npo NAME,TYPE "$FAKE_PART") == *'└─'* ]] || fail 'test fixture did not reproduce tree-formatted lsblk output'
+[[ $(_a53_parent_disk "$FAKE_PART") == "$FAKE_DISK" ]] || fail 'parent disk parser retained lsblk tree decoration'
+[[ -e $(_a53_parent_disk "$FAKE_PART") ]] || fail 'parent disk parser did not return a usable path'
+vm_parent="$(
+    readlink(){ printf '/dev/vdb1\n'; }
+    lsblk(){
+        if [[ " $* " == *' -nrpo '* ]]; then
+            printf '/dev/vdb1 part\n/dev/vdb disk\n'
+        else
+            printf '/dev/vdb1 part\n└─/dev/vdb disk\n'
+        fi
+    }
+    _a53_parent_disk /dev/vdb1
+)"
+[[ ${vm_parent} == /dev/vdb ]] || fail "VM-style parent was not a clean /dev path: ${vm_parent}"
+for parent_source in admin-setup-plan-json admin-setup-storage-transaction-common.sh storage-common-base.sh; do
+    grep -Fq 'lsblk -s -nrpo NAME,TYPE' "${repo_root}/mjust/libexec/${parent_source}" || fail "${parent_source} still uses tree-formatted parent lookup"
+done
 
 blkid(){
     local key=''
@@ -211,6 +234,10 @@ out="$ACTION_OUT"
 jq -e '.ok and .applied' >/dev/null <<< "$out" || fail "partition apply: $out"
 [[ $MOUNTED -eq 1 && $MOUNT_CALLS -eq 1 ]] || fail "mount count/state $MOUNT_CALLS/$MOUNTED"
 [[ $(grep -c "UUID=$CURRENT_UUID $MOUNT xfs" "$A53_FSTAB") -eq 1 ]] || fail 'expected exactly one UUID fstab entry'
+[[ -d $MOUNT/minecraft && -d $MOUNT/backups ]] || fail 'shared filesystem did not get separate data and backup directories'
+bad_req="$(jq --arg mount "$TMP/second-mount" '.backups.mount_point=$mount | .backups.path=($mount+"/backups")' <<< "$req")"
+run_action a53_validate_action "$bad_req"
+jq -e '(.ok|not) and .phase=="storage_preflight"' >/dev/null <<< "$ACTION_OUT" || fail 'same UUID with competing mounts was accepted'
 [[ ! -e $A53_TRANSACTION_ROOT/22222222-2222-4222-8222-222222222222/smb.credentials.before ]] || fail 'local transaction created unnecessary SMB credential snapshot'
 reset_runtime
 run_action a53_rollback_action "$req"

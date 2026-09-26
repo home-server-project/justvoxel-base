@@ -1,5 +1,5 @@
 {{define "migration_workspace_import.html"}}<div class="migration-workspace-content" data-migration-workspace-root>
-<p class="muted">Choose the source. JustVoxel discovers the Minecraft server, reviews the destination, validates safety, and performs the Import transaction with rollback protection.</p>
+<p class="muted migration-workspace-helper">Choose a source. JustVoxel discovers the server, reviews the destination and runs a validated Import with rollback protection.</p>
   {{if .Error}}<div class="notice error"><strong>Server Import cannot continue as submitted.</strong><br>{{.Error}}</div>{{end}}
 
   <form method="post" action="/workspace/migration/import/review" autocomplete="off" data-server-import-form>
@@ -44,20 +44,18 @@
         <label for="server-import-smb-source"><strong>Network folder</strong></label>
         <input id="server-import-smb-source" name="source_remote" placeholder="//server/share or //server/share/folder" autocomplete="off">
         <p class="muted">Paste the network folder you would normally use. JustVoxel handles the SMB share and any folder below it automatically.</p>
-        <label for="server-import-smb-user"><strong>SMB username</strong></label>
-        <input id="server-import-smb-user" name="source_username" autocomplete="off">
-        <label for="server-import-smb-domain">SMB domain <span class="muted">optional</span></label>
-        <input id="server-import-smb-domain" name="source_domain" autocomplete="off">
-        <div class="notice">JustVoxel will request the SMB password when it inspects this network folder. The password stays only in this open browser workspace and is not placed in the reviewed plan, URL, or persistent operation journal.</div>
+        <div class="migration-smb-fields"><div><label for="server-import-smb-user"><strong>SMB username</strong></label><input id="server-import-smb-user" name="source_username" autocomplete="off"></div>
+        <div><label for="server-import-smb-domain">SMB domain <span class="muted">optional</span></label><input id="server-import-smb-domain" name="source_domain" autocomplete="off"></div></div>
+        <div class="notice migration-workspace-helper">SMB password is requested during inspection. It stays in this open browser workspace and is excluded from the plan, URL and operation journal.</div>
       </div>
 
     </section>
 
     {{if .Discovery.Configured}}
-    <section class="panel">
+    <section class="panel migration-destination-helper">
       <p class="eyebrow">Destination</p>
       <h2>Replace the configured JustVoxel server</h2>
-      <p>The existing destination storage, memory, timezone, backup policy, and current host ports remain destination-specific. JustVoxel will review and protect the current runtime before replacement.</p>
+      <p>Current storage, memory, timezone, backups and ports stay destination specific. JustVoxel reviews and protects the running server before replacement.</p>
     </section>
     {{else}}
     <section class="panel">

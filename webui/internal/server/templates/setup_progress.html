@@ -17,14 +17,20 @@
   <form class="nav-logout setup-topbar-logout" method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Log out</button></form>
 </header>
 <main class="setup-shell">
-  <div class="title-row setup-title-row"><div><p class="eyebrow">First setup</p><h1>Configuring JustVoxel</h1></div><span class="badge" id="setup-operation-state">{{.StateLabel}}</span></div>
+  <div class="title-row setup-title-row"><div><h1>Configuring JustVoxel</h1></div><span class="badge" id="setup-operation-state">{{.StateLabel}}</span></div>
 
   <section class="panel setup-step-panel setup-operation-panel"
     data-setup-operation
     data-status-url="/api/setup/progress/{{.Operation.OperationID}}"
-    data-operation-id="{{.Operation.OperationID}}">
+    data-operation-id="{{.Operation.OperationID}}"
+    data-initial-state="{{.Operation.State}}" data-initial-stage="{{.Operation.Stage}}" data-started-at="{{.Operation.StartedAt}}">
     <div class="setup-operation-icon" aria-hidden="true"></div>
+    <ol class="setup-operation-stages" aria-label="Setup stages">
+      <li data-setup-stage>Storage</li><li data-setup-stage>Configuration</li><li data-setup-stage>Minecraft</li><li data-setup-stage>Verification</li><li data-setup-stage>Complete</li>
+    </ol>
     <p class="setup-lead" id="setup-operation-status">{{.Operation.Status}}</p>
+    <p class="muted compact" id="setup-operation-elapsed" hidden></p>
+    <div class="notice setup-verify-note" id="setup-minecraft-verify-note" {{if ne .Operation.Stage "minecraft_verify"}}hidden{{end}}><strong>Starting Minecraft</strong><br>Downloading and initializing Minecraft components. Initial setup can take several minutes and may retry temporary download failures automatically.</div>
     <div class="setup-operation-details">
       <div><span>Stage</span><strong id="setup-operation-stage">{{.StageLabel}}</strong></div>
       <div><span>Operation</span><code>{{.Operation.OperationID}}</code></div>
@@ -48,14 +54,15 @@
     </div>
 
     <div class="setup-operation-actions">
-      <a class="button-link" id="setup-diagnostic-log-link" href="/setup/progress/{{.Operation.OperationID}}/log" {{if and (ne .Operation.State "succeeded") (ne .Operation.State "rolled_back") (ne .Operation.State "needs_attention")}}hidden{{end}}>Download Setup Log</a>
+      <a class="button-link secondary" id="setup-diagnostic-log-view" href="/setup/progress/{{.Operation.OperationID}}/log/view" target="_blank" rel="noopener noreferrer" {{if and (ne .Operation.State "succeeded") (ne .Operation.State "rolled_back") (ne .Operation.State "needs_attention")}}hidden{{end}}>View setup log</a>
+      <a class="button-link setup-log-download" id="setup-diagnostic-log-link" href="/setup/progress/{{.Operation.OperationID}}/log" {{if and (ne .Operation.State "succeeded") (ne .Operation.State "rolled_back") (ne .Operation.State "needs_attention")}}hidden{{end}}>Download Setup Log</a>
       <a class="button-link" id="setup-dashboard-link" href="/" {{if ne .Operation.State "succeeded"}}hidden{{end}}>Open dashboard</a>
       <a class="button-link secondary" id="setup-review-link" href="/setup/review" {{if ne .Operation.State "rolled_back"}}hidden{{end}}>Return to Review</a>
     </div>
   </section>
 
-  <p class="muted compact">Progress is stored by the JustVoxel Management Agent. Refreshing or reopening this operation URL does not start setup again.</p>
-  <p class="disclaimer">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</p>
+  <p class="muted compact">Setup progress is stored by JustVoxel. Refreshing or reopening this page will not restart setup.</p>
+  <footer class="setup-footer disclaimer">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT. <a href="https://github.com/home-server-project/justvoxel" target="_blank" rel="noopener noreferrer">JustVoxel on GitHub</a></footer>
 </main>
 </body>
 </html>{{end}}

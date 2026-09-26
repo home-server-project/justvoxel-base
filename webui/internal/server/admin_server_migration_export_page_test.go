@@ -114,7 +114,7 @@ func TestServerExportPageShowsAgentDestinationsAndSeparatesRemovableMedia(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	page := httptestResponse(app, exportWebRequest(http.MethodGet, "http://example/settings/server-migration/export", nil))
+	page := legacyPageTestResponse(app, exportWebRequest(http.MethodGet, "http://example/settings/server-migration/export", nil))
 	if page.Code != http.StatusOK {
 		t.Fatalf("Server Export page returned %d: %s", page.Code, page.Body.String())
 	}

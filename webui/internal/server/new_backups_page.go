@@ -79,7 +79,7 @@ type newBackupsPageData struct {
 }
 
 func (a *App) registerNewBackupsPages(mux *http.ServeMux) {
-	mux.HandleFunc("GET /settings/new-backups", a.newBackupsPage)
+	mux.HandleFunc("GET /settings/new-backups", a.legacyWorkspaceRedirect("administrator", "backups", ""))
 	mux.HandleFunc("POST /settings/new-backups/backup", a.newBackupsNow)
 	mux.HandleFunc("POST /settings/new-backups/automatic/plan", a.newBackupsAutomaticPlan)
 	mux.HandleFunc("POST /settings/new-backups/automatic/apply", a.newBackupsAutomaticApply)

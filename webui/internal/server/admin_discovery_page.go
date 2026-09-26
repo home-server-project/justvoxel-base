@@ -115,11 +115,11 @@ type storageBrowserPageData struct {
 }
 
 func (a *App) registerAdminDiscoveryPages(mux *http.ServeMux) {
-	mux.HandleFunc("GET /settings/server", a.serverSettingsPage)
+	mux.HandleFunc("GET /settings/server", a.legacyWorkspaceRedirect("administrator", "minecraft", "memory"))
 	mux.HandleFunc("POST /settings/server/plan", a.serverSettingsPlan)
 	mux.HandleFunc("POST /settings/server/apply", a.serverSettingsApply)
-	mux.HandleFunc("GET /settings/storage", a.storageSettingsPage)
-	mux.HandleFunc("GET /settings/new-storage", a.storageBrowserPage)
+	mux.HandleFunc("GET /settings/storage", a.legacyWorkspaceRedirect("administrator", "storage", ""))
+	mux.HandleFunc("GET /settings/new-storage", a.legacyWorkspaceRedirect("administrator", "storage", ""))
 	mux.HandleFunc("GET /workspace/storage", a.storageBrowserWindow)
 	a.registerAdminBackupStoragePages(mux)
 	a.registerAdminStorageProvisionPages(mux)

@@ -59,5 +59,17 @@ grep -Fq 'AdminCurrentMinecraftResetOperation' "${operations}"
 grep -Fq '.system-reset-choices' "${styles}"
 grep -Fq '.system-reset-impact-grid' "${styles}"
 grep -Fq '.system-reset-arm.is-armed' "${styles}"
+grep -Fq '.topbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;min-height:48px;gap:.65rem;padding:.35rem .75rem;position:sticky;top:0;z-index:1000}' "${styles}"
+grep -Fq 'const workspaceWindowZMax = 900;' "${script}"
+grep -Fq 'if (workspaceWindowZ >= workspaceWindowZMax)' "${script}"
+
+if ! awk '/z-index:[0-9]+/ && ! /\.topbar\{/ {line=$0; while (match(line, /z-index:[0-9]+/)) {level=substr(line, RSTART+8, RLENGTH-8)+0; if (level >= 1000) exit 1; line=substr(line, RSTART+RLENGTH)}}' "${styles}"; then
+    echo 'ERROR: normal WebUI CSS entered the reserved Control Center layer.' >&2
+    exit 1
+fi
+if ! awk '/\.topbar\{.*z-index:1000/{topbar=1000} /\.first-run-choice\{/{if (match($0, /z-index:[0-9]+/)) {level=substr($0, RSTART+8, RLENGTH-8)+0; if (level >= topbar) exit 1}} END {if (!topbar) exit 1}' "${styles}"; then
+    echo 'ERROR: first-run overlay must stay below Control Center.' >&2
+    exit 1
+fi
 
 echo 'System Factory Reset workspace source contract OK'

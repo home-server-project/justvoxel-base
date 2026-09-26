@@ -89,7 +89,7 @@ func TestMigrationRecoveryPageShowsOnlyAgentFinalizableActions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	page := httptestResponse(app, recoveryWebRequest(http.MethodGet, "http://example/settings/server-migration/recovery", nil))
+	page := legacyPageTestResponse(app, recoveryWebRequest(http.MethodGet, "http://example/settings/server-migration/recovery", nil))
 	if page.Code != http.StatusOK {
 		t.Fatalf("Migration Recovery page returned %d: %s", page.Code, page.Body.String())
 	}
@@ -197,7 +197,7 @@ func TestMigrationRecoveryCanTakeOverImportNeedsAttentionAndStartPersistentOpera
 		t.Fatal(err)
 	}
 
-	entry := httptestResponse(app, recoveryWebRequest(http.MethodGet, "http://example/settings/server-migration/recovery", nil))
+	entry := legacyPageTestResponse(app, recoveryWebRequest(http.MethodGet, "http://example/settings/server-migration/recovery", nil))
 	if entry.Code != http.StatusOK || !strings.Contains(entry.Body.String(), "previous Server Import still needs attention") {
 		t.Fatalf("Recovery entry from needs-attention Import returned %d: %s", entry.Code, entry.Body.String())
 	}
@@ -279,7 +279,7 @@ func TestMigrationRecoveryOffersKeepCurrentForOrphanedImport(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	entry := httptestResponse(app, recoveryWebRequest(http.MethodGet, "http://example/settings/server-migration/recovery", nil))
+	entry := legacyPageTestResponse(app, recoveryWebRequest(http.MethodGet, "http://example/settings/server-migration/recovery", nil))
 	if entry.Code != http.StatusOK {
 		t.Fatalf("orphaned Import Recovery page returned %d: %s", entry.Code, entry.Body.String())
 	}

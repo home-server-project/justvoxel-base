@@ -80,8 +80,9 @@ func TestSetupReviewConfigureActionRequiresAcceptedEULA(t *testing.T) {
 	body := page.Body.String()
 	for _, want := range []string{
 		`action="/setup/review/apply"`,
-		`<button type="submit" disabled>Configure JustVoxel</button>`,
-		"Progress and rollback status will remain available",
+		`data-eula-accepted="false"`,
+		`data-setup-eula-dialog`,
+		`name="eula_accepted" value="on"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("pre-EULA review missing %q: %s", want, body)
@@ -91,8 +92,8 @@ func TestSetupReviewConfigureActionRequiresAcceptedEULA(t *testing.T) {
 	acceptSetupEULA(t, app)
 	page = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
 	body = page.Body.String()
-	if strings.Contains(body, `<button type="submit" disabled>Configure JustVoxel</button>`) {
-		t.Fatalf("Configure JustVoxel remained disabled after EULA acceptance: %s", body)
+	if !strings.Contains(body, `data-eula-accepted="true"`) {
+		t.Fatalf("Configure state did not reflect EULA acceptance: %s", body)
 	}
 	if !strings.Contains(body, ">Configure JustVoxel</button>") {
 		t.Fatalf("enabled Configure JustVoxel button missing: %s", body)
@@ -113,6 +114,14 @@ func TestSetupReviewRequestsSMBPasswordOnlyAtExecution(t *testing.T) {
 	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
 	if !strings.Contains(page.Body.String(), `name="smb_password"`) || !strings.Contains(page.Body.String(), "It is not stored in the setup draft or operation journal.") {
 		t.Fatalf("SMB execution secret control missing: %s", page.Body.String())
+	}
+	applyStart := strings.Index(page.Body.String(), `id="setup-apply-form"`)
+	if applyStart < 0 {
+		t.Fatal("review Apply form missing")
+	}
+	applyEnd := strings.Index(page.Body.String()[applyStart:], `</form>`)
+	if applyEnd < 0 || !strings.Contains(page.Body.String(), `data-setup-password-dialog`) || strings.Contains(page.Body.String()[applyStart:applyStart+applyEnd], `name="smb_password"`) {
+		t.Fatal("SMB password must be requested in the modal after Review")
 	}
 
 	client.plan.Requirements.SMBPasswordRequired = false
@@ -187,6 +196,38 @@ func TestSetupReviewApplyDoesNotMutateBeforeEULA(t *testing.T) {
 	}
 }
 
+func TestSetupReviewAcceptAndContinueBindsEULAToCurrentPlan(t *testing.T) {
+	client := setupExecutionClient()
+	client.applyResponse = api.AdminSetupApplyResponse{OK: true, Created: true, Operation: &api.PersistentOperation{OperationID: setupExecutionOperationID}}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer firstRunSetupReviews.delete(app, "session-token")
+	advanceSetupToReview(t, app)
+	_ = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
+	stale := url.Values{"csrf": {"csrf-token"}, "plan_fingerprint": {"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, "eula_accepted": {"on"}}
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/review/apply", stale.Encode()))
+	if rr.Code != http.StatusConflict || client.applyCalls != 0 {
+		t.Fatalf("stale EULA started setup: %d, calls=%d", rr.Code, client.applyCalls)
+	}
+	state, _ := firstRunSetupReviews.get(app, "session-token")
+	if state.EULAAccepted {
+		t.Fatal("stale plan retained EULA acceptance")
+	}
+
+	current := url.Values{"csrf": {"csrf-token"}, "plan_fingerprint": {setupReviewFingerprint}, "eula_accepted": {"on"}}
+	rr = httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/review/apply", current.Encode()))
+	if rr.Code != http.StatusSeeOther || client.applyCalls != 1 || !client.applyRequest.EULAAccepted {
+		t.Fatalf("accept and continue failed: %d, calls=%d", rr.Code, client.applyCalls)
+	}
+	state, _ = firstRunSetupReviews.get(app, "session-token")
+	if !state.EULAAccepted {
+		t.Fatal("current plan EULA acceptance was not recorded")
+	}
+}
+
 func TestSetupProgressPageAndJSONTrackSamePersistentOperation(t *testing.T) {
 	client := setupExecutionClient()
 	client.operation = &api.PersistentOperation{
@@ -211,7 +252,8 @@ func TestSetupProgressPageAndJSONTrackSamePersistentOperation(t *testing.T) {
 		"/api/setup/progress/" + setupExecutionOperationID,
 		"/static/setup-operation.js",
 		"Reconnecting to JustVoxel",
-		"Refreshing or reopening this operation URL does not start setup again.",
+		"Refreshing or reopening this page will not restart setup.",
+		`aria-label="Setup stages"`, `data-setup-stage`, `data-started-at="2026-09-20T12:00:00Z"`,
 	} {
 		if !strings.Contains(page.Body.String(), want) {
 			t.Fatalf("progress page missing %q: %s", want, page.Body.String())

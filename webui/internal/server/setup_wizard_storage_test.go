@@ -50,6 +50,32 @@ func setupWizardStorageClient() *fakeDiscoveryAPI {
 	return client
 }
 
+func TestSetupSameDiskWarningOnlyForSystemDisk(t *testing.T) {
+	client := setupWizardStorageClient()
+	draft := setupDraft{Inventory: client.storage}
+	for index := range draft.Inventory.Devices {
+		if draft.Inventory.Devices[index].Path == "/dev/vdb2" {
+			draft.Inventory.Devices[index].Filesystem = "xfs"
+			draft.Inventory.Devices[index].UUID = "second-data-uuid"
+		}
+	}
+	draft.Storage.Type = "partition"
+	draft.Storage.Device = "/dev/vdb1"
+	draft.Backups.Type = "partition"
+	draft.Backups.Device = "/dev/vdb2"
+	if warning := setupSameDiskWarning(draft); warning != "" {
+		t.Fatalf("non-system disk warning = %q", warning)
+	}
+	draft.Inventory.Devices = append(draft.Inventory.Devices, api.AdminStorageDevice{
+		Name: "vda5", Path: "/dev/vda5", Parent: "vda", Type: "part", Filesystem: "xfs", UUID: "second-system-uuid", System: true,
+	})
+	draft.Storage.Device = "/dev/vda5"
+	draft.Backups.Device = "/dev/vda4"
+	if warning := setupSameDiskWarning(draft); !strings.Contains(warning, "system disk") {
+		t.Fatalf("system disk warning = %q", warning)
+	}
+}
+
 func advanceToStorage(t *testing.T, app *App) {
 	t.Helper()
 	startSetup(t, app)
@@ -113,6 +139,48 @@ func TestSetupWizardStorageRejectsUSBFilesystemEvenWhenPostedDirectly(t *testing
 	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/storage", values.Encode()))
 	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "safe internal XFS, ext4, or Btrfs") {
 		t.Fatalf("USB Minecraft storage was not rejected: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSetupWizardStorageMissingPartitionKeepsInternalMode(t *testing.T) {
+	client := setupWizardStorageClient()
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstRunSetupDrafts.delete(app, "session-token")
+	advanceToStorage(t, app)
+	values := url.Values{"csrf": {"csrf-token"}, "storage_type": {"partition"}, "direction": {"next"}}
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/storage", values.Encode()))
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "Choose a partition before continuing.") || !strings.Contains(rr.Body.String(), `data-setup-storage-internal-panel`) {
+		t.Fatalf("missing storage partition did not keep chooser: %d %s", rr.Code, rr.Body.String())
+	}
+	draft, _ := firstRunSetupDrafts.get(app, "session-token")
+	if draft.Storage.Type != "partition" || draft.Storage.Device != "" || draft.CurrentStep != 5 {
+		t.Fatalf("storage mode changed after validation error: %#v", draft.Storage)
+	}
+}
+
+func TestSetupWizardBackupMissingPartitionKeepsLocalMode(t *testing.T) {
+	client := setupWizardStorageClient()
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstRunSetupDrafts.delete(app, "session-token")
+	advanceToStorage(t, app)
+	storage := url.Values{"csrf": {"csrf-token"}, "storage_type": {"system"}, "direction": {"next"}}
+	if rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/storage", storage.Encode())); rr.Code != http.StatusSeeOther {
+		t.Fatalf("storage save: %d", rr.Code)
+	}
+	values := url.Values{"csrf": {"csrf-token"}, "backup_type": {"partition"}, "backup_keep": {"7"}, "backup_automatic": {"on"}, "backup_daily_time": {"04:30"}, "direction": {"next"}}
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/backups", values.Encode()))
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "Choose a partition before continuing.") || !strings.Contains(rr.Body.String(), `data-setup-backup-panel="partition"`) {
+		t.Fatalf("missing backup partition did not keep chooser: %d %s", rr.Code, rr.Body.String())
+	}
+	draft, _ := firstRunSetupDrafts.get(app, "session-token")
+	if draft.Backups.Type != "partition" || draft.Backups.Device != "" || draft.CurrentStep != 6 {
+		t.Fatalf("backup mode changed after validation error: %#v", draft.Backups)
 	}
 }
 func TestSetupWizardStorageUsesSharedReviewedStorageActions(t *testing.T) {
@@ -210,7 +278,7 @@ func TestSetupWizardBackupStepSupportsLocalNFSAndSMBWithoutPasswordDraft(t *test
 
 	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	body := page.Body.String()
-	for _, want := range []string{"Automatic backups", "04:30", "System storage", "Internal or USB drive", "NFS share", "SMB share", "Password stays out of this draft", "same physical system disk", "USB SSD", "External / USB"} {
+	for _, want := range []string{"Automatic backups", "04:30", "System storage", "Internal or USB drive", "NFS share", "SMB share", "Password will be requested when setup starts.", `data-setup-same-disk-warning`, "Backups are on the same disk", "If this disk fails, both Minecraft and its backups could be lost.", "USB SSD", "External / USB"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("backup page missing %q: %s", want, body)
 		}
@@ -367,5 +435,33 @@ func TestSetupWizardStorageAndBackupBackPreserveDraft(t *testing.T) {
 		if !strings.Contains(backupPage.Body.String(), want) {
 			t.Fatalf("backup draft lost %q: %s", want, backupPage.Body.String())
 		}
+	}
+}
+
+func TestSetupBackupSharedAndIndependentPartitionMounts(t *testing.T) {
+	for _, tc := range []struct{ name, device, mount, wantMount, wantPath string }{
+		{"shared", "/dev/vdb1", "/var/mnt/justvoxel-backup", "/srv/data", "/srv/data/backups"},
+		{"independent", "/dev/vda4", "/var/mnt/justvoxel-backup", "/var/mnt/justvoxel-backup", "/var/mnt/justvoxel-backup/backups"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app, err := New(setupWizardStorageClient(), Config{Version: "test", ManagementAPI: "v1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer firstRunSetupDrafts.delete(app, "session-token")
+			advanceToStorage(t, app)
+			storage := url.Values{"csrf": {"csrf-token"}, "storage_type": {"partition"}, "storage_device": {"/dev/vdb1"}, "storage_mount_point": {"/srv/data"}, "storage_path": {"/srv/data/minecraft"}, "direction": {"next"}}
+			if rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/storage", storage.Encode())); rr.Code != http.StatusSeeOther {
+				t.Fatalf("storage: %d %s", rr.Code, rr.Body.String())
+			}
+			backup := url.Values{"csrf": {"csrf-token"}, "backup_type": {"partition"}, "backup_device": {tc.device}, "backup_mount_point": {tc.mount}, "backup_path": {tc.mount + "/backups"}, "backup_keep": {"7"}, "backup_daily_time": {"04:30"}, "direction": {"next"}}
+			if rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/backups", backup.Encode())); rr.Code != http.StatusSeeOther {
+				t.Fatalf("backup: %d %s", rr.Code, rr.Body.String())
+			}
+			draft, _ := firstRunSetupDrafts.get(app, "session-token")
+			if draft.Backups.MountPoint != tc.wantMount || draft.Backups.Path != tc.wantPath || setupPathsOverlap(draft.Storage.Path, draft.Backups.Path) {
+				t.Fatalf("invalid mount layout: %#v %#v", draft.Storage, draft.Backups)
+			}
+		})
 	}
 }

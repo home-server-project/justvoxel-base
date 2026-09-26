@@ -120,9 +120,9 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 	for _, want := range []string{
 		"Review your JustVoxel setup", "Step 7 of 7", "Connections", "Version", "Configuration validated.", "Normalized Family Server", "20", "1.21.8",
 		"Recommended version", "/var/lib/justvoxel/minecraft", "/var/lib/justvoxel/backups",
-		"same_physical_disk", "Minecraft End User License Agreement", "https://www.minecraft.net/eula",
-		"Apply this exact validated plan using JustVoxel's transactional setup engine", "/static/setup-review.css", "/static/setup-operation.js",
-		`name="plan_fingerprint" value="` + setupReviewFingerprint + `"`, "Validated plan:", "01234567…", "Download configuration",
+		"Backups are on the same disk", "If this disk fails, both Minecraft and its backups could be lost.", "Minecraft End User License Agreement", "https://www.minecraft.net/eula",
+		"Apply this validated plan", "/static/setup-review.css", "/static/setup-operation.js",
+		`name="plan_fingerprint" value="` + setupReviewFingerprint + `"`, "Download configuration", "data-setup-eula-dialog", "Accept and continue",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("review missing %q: %s", want, body)
@@ -136,6 +136,25 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 	}
 	if strings.Contains(body, `type="password"`) || strings.Contains(body, `name="backup_password"`) {
 		t.Fatal("review rendered a password field")
+	}
+	for _, forbidden := range []string{"setup-eula-card", "Validated plan: <code>", "Management Agent"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("review exposed %q", forbidden)
+		}
+	}
+}
+
+func TestFirstRunTemplatesUseUserFacingWording(t *testing.T) {
+	for _, name := range []string{"setup_wizard.html", "setup_review.html", "setup_progress.html"} {
+		t.Run(name, func(t *testing.T) {
+			markup, err := assets.ReadFile("templates/" + name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(markup), "Management Agent") {
+				t.Fatal("first-run page exposes Management Agent terminology")
+			}
+		})
 	}
 }
 
@@ -304,8 +323,8 @@ func TestSetupReviewEULAMustBeExplicitAndIsBoundToReviewedPlan(t *testing.T) {
 		t.Fatalf("EULA acceptance returned %d %q: %s", accepted.Code, accepted.Header().Get("Location"), accepted.Body.String())
 	}
 	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
-	if !strings.Contains(page.Body.String(), "EULA accepted") || !strings.Contains(page.Body.String(), "Ready for the next phase") {
-		t.Fatalf("accepted EULA state not shown: %s", page.Body.String())
+	if !strings.Contains(page.Body.String(), `data-eula-accepted="true"`) {
+		t.Fatalf("accepted EULA state not bound to review: %s", page.Body.String())
 	}
 	if client.planHit != 1 {
 		t.Fatalf("validated plan was needlessly recomputed %d times", client.planHit)

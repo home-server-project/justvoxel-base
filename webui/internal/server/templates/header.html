@@ -58,48 +58,28 @@
 
       <nav class="control-navigation" aria-label="JustVoxel navigation">
         <section class="control-section">
-          <span class="control-section-label">Temporary</span>
+          <span class="control-section-label">Minecraft</span>
           <div class="control-tile-grid">
             <button class="control-tile" type="button" data-minecraft-open title="Minecraft overview, settings, whitelist and logs"><strong>Minecraft</strong></button>
+          </div>
+        </section>
+
+        <section class="control-section">
+          <span class="control-section-label">System</span>
+          <div class="control-tile-grid">
             <button class="control-tile" type="button" data-system-open title="System health, history, users, security and version information"><strong>System</strong></button>
             <button class="control-tile" type="button" data-network-open title="Ethernet, Wi-Fi and current network status"><strong>Network</strong></button>
             <button class="control-tile" type="button" data-system-monitor-open title="Live CPU, memory, storage, network, processes and containers"><strong>System Monitor</strong></button>
-            <button class="control-tile nav-admin-only" type="button" data-storage-open title="Disks, partitions, mounts and external USB storage"><strong>Storage</strong></button>
-            <button class="control-tile nav-admin-only" type="button" data-backups-open title="Create, schedule, restore and manage backups"><strong>Backups</strong></button>
-            <button class="control-tile nav-admin-only" type="button" data-migration-open title="Export, import and recover a JustVoxel server"><strong>Migration</strong></button>
             <button class="control-tile nav-admin-only" type="button" data-system-update-open title="Update the JustVoxel operating system"><strong>System Update</strong></button>
           </div>
         </section>
 
         <section class="control-section">
-          <span class="control-section-label">Minecraft</span>
+          <span class="control-section-label">Storage &amp; Data</span>
           <div class="control-tile-grid">
-            <a class="control-tile" href="/activity" title="Server events and status"><strong>Activity</strong></a>
-            <a class="control-tile nav-admin-only" href="/settings/server" title="Memory, ports and server options"><strong>Minecraft settings</strong></a>
-            <a class="control-tile nav-operator-plus" href="/operations#whitelist" title="Manage allowed players"><strong>Whitelist</strong></a>
-            <a class="control-tile nav-operator-plus" href="/operations#minecraft-logs" title="Recent server output"><strong>Minecraft logs</strong></a>
-          </div>
-        </section>
-
-        <section class="control-section nav-operator-plus">
-          <span class="control-section-label">Storage &amp; Backups</span>
-          <div class="control-tile-grid">
-            <a class="control-tile nav-admin-only" href="/settings/data-migration" title="Move server data safely"><strong>Minecraft data</strong></a>
-            <a class="control-tile nav-operator-only" href="/operations#manual-backup" title="Run a backup now"><strong>Create backup</strong></a>
-            <a class="control-tile nav-admin-only" href="/settings/server-migration" title="Export, import and recovery"><strong>Server migration</strong></a>
-            <a class="control-tile nav-admin-only" href="/settings/storage-provision" title="Provision storage devices"><strong>Advanced storage</strong></a>
-          </div>
-        </section>
-
-        <section class="control-section nav-admin-only">
-          <span class="control-section-label">JustVoxel</span>
-          <div class="control-tile-grid">
-            <a class="control-tile" href="/settings/validation" title="Check appliance health"><strong>Validation</strong></a>
-            <a class="control-tile" href="/settings/activity" title="Administrative events"><strong>Admin activity</strong></a>
-            <a class="control-tile" href="/settings/users" title="Accounts and roles"><strong>Users</strong></a>
-            <a class="control-tile" href="/settings/authentication" title="Login configuration"><strong>Authentication</strong></a>
-            <a class="control-tile" href="/password" title="Update your password"><strong>Change password</strong></a>
-            <a class="control-tile" href="/about" title="JustVoxel version and build information"><strong>About</strong></a>
+            <button class="control-tile nav-admin-only" type="button" data-storage-open title="Disks, partitions, mounts and external USB storage"><strong>Storage</strong></button>
+            <button class="control-tile nav-admin-only" type="button" data-backups-open title="Create, schedule, restore and manage backups"><strong>Backups</strong></button>
+            <button class="control-tile nav-admin-only" type="button" data-migration-open title="Export, import and recover a JustVoxel server"><strong>Migration</strong></button>
           </div>
         </section>
       </nav>
@@ -136,8 +116,8 @@
         <article class="quick-look-tile"><span>Version</span><strong data-quick-look-version>—</strong></article>
         <article class="quick-look-tile"><span>Players</span><strong data-quick-look-players>—</strong></article>
         <article class="quick-look-tile"><span>System</span><strong data-quick-look-system>—</strong></article>
-        <article class="quick-look-tile quick-look-network-tile"><span>IPv4</span><strong data-quick-look-ipv4>—</strong><small class="network-overlay-list" data-quick-look-overlays></small></article>
-        <article class="quick-look-tile"><span>Backup</span><strong data-quick-look-backup>—</strong></article>
+        <article class="quick-look-tile quick-look-network-tile"><div class="quick-look-network-row"><span>IPv4</span><strong data-quick-look-ipv4>—</strong></div><div class="network-overlay-list" data-quick-look-overlays></div></article>
+        <article class="quick-look-tile"><div class="quick-look-tile-heading"><span>Backup</span><a class="quick-look-backup-action nav-operator-only" href="/operations#manual-backup">Create backup</a></div><strong data-quick-look-backup>—</strong></article>
       </div>
     </div>
     <button class="quick-look-handle" type="button" data-quick-look-toggle aria-expanded="false" aria-controls="quick-look-panel" aria-label="Toggle Quick Look">

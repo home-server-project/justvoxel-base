@@ -60,6 +60,10 @@
       if (mount) mount.value = selectedMount;
       if (path) path.value = minecraftPath(selectedMount);
       existingButtons.forEach((candidate) => candidate.classList.toggle('is-selected', candidate === button));
+      existingButtons.forEach((candidate) => {
+        const badge = candidate.querySelector('.setup-storage-segment-state');
+        if (badge) badge.textContent = candidate === button ? 'Selected' : 'Ready';
+      });
       if (selectedBox) selectedBox.hidden = false;
       if (selectedDevice) selectedDevice.textContent = selectedDeviceValue;
       if (selectedPath) selectedPath.textContent = minecraftPath(selectedMount);
@@ -68,15 +72,12 @@
 
     function chooseInternal() {
       setPanels('partition');
-      if (type?.value === 'system') {
-        type.value = '';
-        device.value = '';
-        mount.value = '';
-        path.value = '';
-        if (selectedBox) selectedBox.hidden = false;
-        if (selectedDevice) selectedDevice.textContent = 'Choose a ready filesystem above';
-        if (selectedPath) selectedPath.textContent = '';
-      }
+      if (type) type.value = 'partition';
+      if (device) device.value = '';
+      if (mount) mount.value = '';
+      if (path) path.value = '';
+      existingButtons.forEach((button) => button.classList.remove('is-selected'));
+      if (selectedBox) selectedBox.hidden = true;
     }
 
     function resetReview() {
@@ -208,6 +209,7 @@
       setPanels('partition');
       const current = existingButtons.find((button) => button.dataset.device === device?.value);
       if (current) selectExisting(current);
+      else if (selectedBox) selectedBox.hidden = true;
     } else {
       selectSystem();
     }
@@ -230,6 +232,9 @@
     const selectedBox = backupForm.querySelector('[data-setup-backup-selected]');
     const selectedDevice = backupForm.querySelector('[data-setup-backup-selected-device]');
     const selectedPath = backupForm.querySelector('[data-setup-backup-selected-path]');
+    const sameDiskWarning = backupForm.querySelector('[data-setup-same-disk-warning]');
+    const warningType = type?.value;
+    const warningDevice = device?.value;
 
     const review = backupForm.querySelector('[data-setup-backup-action-review]');
     const reviewTitle = backupForm.querySelector('[data-setup-backup-action-title]');
@@ -261,7 +266,9 @@
         panel.hidden = panel.dataset.setupBackupPanel !== kind;
       });
       if (kind !== 'partition') clearLocalSelection();
+      else if (selectedBox) selectedBox.hidden = !device?.value;
       syncNetworkFields(kind);
+      if (sameDiskWarning) sameDiskWarning.hidden = kind !== warningType || (kind === 'partition' && device?.value !== warningDevice);
     }
 
     function selectSystem(choice) {
@@ -275,8 +282,9 @@
 
     function selectExisting(button) {
       showKind('partition');
-      const targetMount = button.dataset.mountpoint || '/var/mnt/justvoxel-backup';
       const targetDevice = button.dataset.device || '';
+      const targetMount = targetDevice === backupForm.dataset.dataDevice && backupForm.dataset.dataMount
+        ? backupForm.dataset.dataMount : (button.dataset.mountpoint || '/var/mnt/justvoxel-backup');
       if (device) device.value = targetDevice;
       if (mount) mount.value = targetMount;
       if (path) path.value = backupPath(targetMount);
@@ -284,9 +292,14 @@
       if (username) username.value = '';
       if (domain) domain.value = '';
       existingButtons.forEach((candidate) => candidate.classList.toggle('is-selected', candidate === button));
+      existingButtons.forEach((candidate) => {
+        const badge = candidate.querySelector('.setup-storage-segment-state');
+        if (badge) badge.textContent = candidate === button ? 'Selected' : 'Ready';
+      });
       if (selectedBox) selectedBox.hidden = false;
       if (selectedDevice) selectedDevice.textContent = targetDevice;
       if (selectedPath) selectedPath.textContent = backupPath(targetMount);
+      if (sameDiskWarning) sameDiskWarning.hidden = targetDevice !== warningDevice;
     }
 
     function syncNetworkFields(kind) {
@@ -436,7 +449,10 @@
         showKind(kind);
         if (kind === 'partition') {
           if (type) type.value = 'partition';
-          if (selectedBox) selectedBox.hidden = !device?.value;
+          if (!device?.value) {
+            if (mount) mount.value = '';
+            if (path) path.value = '';
+          }
         }
       });
     });
@@ -474,6 +490,7 @@
       showKind('partition');
       const current = existingButtons.find((button) => button.dataset.device === device?.value);
       if (current) selectExisting(current);
+      else if (selectedBox) selectedBox.hidden = true;
     } else if (type?.value === 'nfs' || type?.value === 'smb') {
       showKind(type.value);
     } else {

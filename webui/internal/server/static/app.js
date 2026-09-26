@@ -224,54 +224,6 @@ if (dashboard) {
     });
   };
 
-  const renderPlayers = (players) => {
-    const count = document.getElementById("players-panel-count");
-    if (count) {
-      count.textContent = players.configured ? `${players.online} / ${players.max}` : "";
-    }
-
-    const body = document.getElementById("players-panel-body");
-    if (!body) return;
-    body.replaceChildren();
-
-    const message = (value) => {
-      const p = document.createElement("p");
-      p.className = "muted compact";
-      p.textContent = value;
-      body.appendChild(p);
-    };
-
-    if (players.state === "not_configured") {
-      message("Minecraft is not configured yet.");
-      return;
-    }
-    if (players.state === "stopped") {
-      message("Minecraft is stopped. Player information will appear when the server is running.");
-      return;
-    }
-    if (players.state === "unavailable") {
-      message(players.error || "Player information is temporarily unavailable.");
-      return;
-    }
-    if (players.online === 0) {
-      message("No players online.");
-      return;
-    }
-    if (Array.isArray(players.names) && players.names.length > 0) {
-      const list = document.createElement("div");
-      list.className = "player-list";
-      players.names.forEach((name) => {
-        const chip = document.createElement("span");
-        chip.className = "player-chip";
-        chip.textContent = name;
-        list.appendChild(chip);
-      });
-      body.appendChild(list);
-      return;
-    }
-    message(`${players.online} players online.`);
-  };
-
   const updatePendingState = (status, players) => {
     if (!pendingAction) return;
 
@@ -325,30 +277,13 @@ if (dashboard) {
     const { status, players, attention } = snapshot;
     updatePendingState(status, players);
     renderDashboardAttention(attention || null);
+    const setupArea = document.querySelector("[data-dashboard-setup-area]");
+    if (setupArea) setupArea.hidden = Boolean(status.minecraft.configured);
+    dashboard.dataset.configured = String(Boolean(status.minecraft.configured));
 
     const displayedState = pendingAction ? actionProgress(pendingAction) : status.minecraft.state;
-    text("minecraft-state-summary", displayedState);
     text("minecraft-control-state", displayedState);
-    text(
-      "minecraft-players-summary",
-      status.minecraft.configured ? `${players.online} / ${players.max}` : "Not configured",
-    );
-    text("minecraft-version-summary", status.minecraft.version);
-    text("system-health-summary", status.system.health);
-    text("system-ipv4-summary", status.system.ipv4);
-    const overlaySummary = document.getElementById("system-overlay-summary");
-    if (overlaySummary) {
-      overlaySummary.replaceChildren();
-      [["Tailscale", status.system.tailscale], ["NetBird", status.system.netbird]].forEach(([label, value]) => {
-        if (!value) return;
-        const line = document.createElement("span");
-        line.textContent = label + ": " + value;
-        overlaySummary.appendChild(line);
-      });
-    }
-    text("backup-summary", status.backup.enabled ? "Enabled" : "Disabled");
 
-    renderPlayers(players);
     setButtons(status);
 
     if (!pendingAction && window.location.search.includes("result=")) {
@@ -391,6 +326,12 @@ if (dashboard) {
   loadRole();
   refreshDashboard();
   window.setInterval(refreshDashboard, 5000);
+  if (window.matchMedia("(pointer: fine) and (prefers-reduced-motion: no-preference)").matches) {
+    dashboard.addEventListener("pointermove", (event) => {
+      dashboard.style.setProperty("--voxel-x", `${Math.round(event.clientX / window.innerWidth * 100)}%`);
+      dashboard.style.setProperty("--voxel-y", `${Math.round((event.clientY - 48) / Math.max(1, window.innerHeight - 48) * 100)}%`);
+    });
+  }
 }
 
 
@@ -404,6 +345,7 @@ if (quickLook && quickLookToggle) {
   const actionMenus = Array.from(quickLook.querySelectorAll("[data-quick-look-actions]"));
   let identity = null;
   let refreshTimer = null;
+  let lastMonitorData = null;
   const topbar = document.querySelector(".topbar");
 
   const syncQuickLookTop = () => {
@@ -471,7 +413,11 @@ if (quickLook && quickLookToggle) {
       [["Tailscale", system.tailscale], ["NetBird", system.netbird]].forEach(([label, value]) => {
         if (!value) return;
         const line = document.createElement("span");
-        line.textContent = label + ": " + value;
+        const name = document.createElement("span");
+        name.textContent = label;
+        const address = document.createElement("strong");
+        address.textContent = value;
+        line.append(name, address);
         overlays.appendChild(line);
       });
     }
@@ -1374,6 +1320,8 @@ const initSystemUpdateWorkspace = () => {
 
 const workspaceWindows = new Set();
 let workspaceWindowZ = 120;
+// Keep workspace windows below the Control Center's reserved topbar layer (1000).
+const workspaceWindowZMax = 900;
 const workspaceCompactQuery = window.matchMedia("(max-width: 700px)");
 
 const workspaceWindowStateKey = (id) => `justvoxel-workspace-window-${id === "system-monitor" ? "v2" : "v1"}:${id}`;
@@ -1420,6 +1368,12 @@ const setupWorkspaceWindow = (element, options = {}) => {
   let resizeSaveTimer = null;
 
   const bringToFront = () => {
+    if (workspaceWindowZ >= workspaceWindowZMax) {
+      const ordered = Array.from(workspaceWindows).filter((window) => window.open)
+        .sort((a, b) => Number(a.style.zIndex || 0) - Number(b.style.zIndex || 0));
+      workspaceWindowZ = 120;
+      ordered.forEach((window) => { window.style.zIndex = String(++workspaceWindowZ); });
+    }
     workspaceWindowZ += 1;
     element.style.zIndex = String(workspaceWindowZ);
   };
@@ -1684,7 +1638,14 @@ if (backupsOpen && backupsDialog) {
   const refreshButton = backupsDialog.querySelector("[data-backups-refresh]");
   const state = backupsDialog.querySelector("[data-backups-state]");
   const content = backupsDialog.querySelector("[data-backups-workspace-content]");
-  let currentURL = "/workspace/backups";
+  const backupsDestination = new URLSearchParams(window.location.search);
+  const backupParams = new URLSearchParams();
+  if (backupsDestination.get("workspace") === "backups") {
+    for (const key of ["result", "count", "restore_operation"]) {
+      if (backupsDestination.has(key)) backupParams.set(key, backupsDestination.get(key));
+    }
+  }
+  let currentURL = "/workspace/backups" + (backupParams.size ? "?" + backupParams : "");
   let loadSequence = 0;
 
   const loadBackupsScript = async (src, ready) => {
@@ -1921,8 +1882,10 @@ if (migrationOpen && migrationDialog) {
     import: "/workspace/migration/import",
     recovery: "/workspace/migration/recovery",
   };
-  let currentTab = "export";
-  let currentURL = tabURLs.export;
+  const migrationDestination = new URLSearchParams(window.location.search);
+  const requestedMigrationTab = migrationDestination.get("workspace") === "migration" ? migrationDestination.get("tab") : "";
+  let currentTab = Object.hasOwn(tabURLs, requestedMigrationTab) ? requestedMigrationTab : "export";
+  let currentURL = tabURLs[currentTab];
   let loadSequence = 0;
   let migrationSourceSMBPassword = "";
   let migrationExportSMBPassword = "";
@@ -2334,6 +2297,7 @@ if (migrationOpen && migrationDialog) {
   };
 
   const loadMigrationEntry = async () => {
+    syncMigrationTabs();
     const sequence = ++loadSequence;
     migrationLoadController?.abort();
     const loadController = new AbortController();
@@ -2501,6 +2465,7 @@ if (systemMonitorOpen && systemMonitorDialog) {
       syncProfile();
       refreshMonitor();
       if (profileStatus) profileStatus.textContent = "Saved";
+      if (profilePanel) profilePanel.hidden = true;
     } catch (_) {
       if (profileStatus) profileStatus.textContent = "Could not save";
     } finally {
@@ -2595,9 +2560,10 @@ if (systemMonitorOpen && systemMonitorDialog) {
     renderTable("[data-monitor-network]", Array.isArray(data.network) ? data.network : [], [
       {label:"Interface", render:(row)=>row.interface_name || row.name}, {label:"RX", render:(row)=>rate(row.bytes_recv_rate_per_sec)}, {label:"TX", render:(row)=>rate(row.bytes_sent_rate_per_sec)}
     ]);
-    const processes = (Array.isArray(data.processlist) ? data.processlist : []).slice()
-      .sort((a,b)=>Number(b.cpu_percent || 0)-Number(a.cpu_percent || 0)).slice(0, Number(profile.process_count || 10));
-    renderTable("[data-monitor-processes]", processes, [
+    const processLimit = [5, 10, 20].includes(Number(profile.process_count)) ? Number(profile.process_count) : 10;
+    const processes = (Array.isArray(data.processlist) ? data.processlist : [])
+      .slice().sort((a,b)=>Number(b.cpu_percent || 0)-Number(a.cpu_percent || 0));
+    renderTable("[data-monitor-processes]", processes.slice(0, processLimit), [
       {label:"Process", render:(row)=>row.name}, {label:"CPU", render:(row)=>percent(row.cpu_percent)}, {label:"Memory", render:(row)=>percent(row.memory_percent)}
     ]);
     renderTable("[data-monitor-containers]", Array.isArray(data.containers) ? data.containers : [], [
@@ -2623,12 +2589,15 @@ if (systemMonitorOpen && systemMonitorDialog) {
     if (state) state.textContent = "Live resources · refresh every 2 seconds";
     if (error) error.hidden = true;
   };
+  let monitorRequest = 0;
   const refreshMonitor = async () => {
+    const request = ++monitorRequest;
     try {
       const response = await fetch("/api/system-monitor", {method:"GET", credentials:"same-origin", headers:{Accept:"application/json"}, cache:"no-store"});
       if (response.status === 401) { window.location.assign("/login"); return; }
       if (!response.ok) throw new Error("monitor unavailable");
-      renderMonitor(await response.json());
+      const data = await response.json();
+      if (request === monitorRequest) { lastMonitorData = data; renderMonitor(data); }
     } catch (_) {
       if (state) state.textContent = "System Monitor unavailable";
       if (error) { error.textContent = "Glances is not responding yet."; error.hidden = false; }
@@ -2658,6 +2627,11 @@ if (systemMonitorOpen && systemMonitorDialog) {
     profilePanel.hidden = !profilePanel.hidden;
     if (profileStatus) profileStatus.textContent = "";
   });
+  document.addEventListener("pointerdown", (event) => {
+    if (profilePanel?.hidden || !systemMonitorDialog.open) return;
+    if (profilePanel.contains(event.target) || profileToggle?.contains(event.target)) return;
+    profilePanel.hidden = true;
+  });
   profileInputs.forEach((input) => input.addEventListener("change", () => {
     profile[input.dataset.monitorProfile] = input.checked;
     syncProfile();
@@ -2665,7 +2639,7 @@ if (systemMonitorOpen && systemMonitorDialog) {
   }));
   if (processCount) processCount.addEventListener("change", () => {
     profile.process_count = Number(processCount.value);
-    refreshMonitor();
+    if (lastMonitorData) renderMonitor(lastMonitorData);
     if (profileStatus) profileStatus.textContent = "Not saved";
   });
   if (resetButton) resetButton.addEventListener("click", () => {
@@ -2766,7 +2740,8 @@ if (minecraftOpen && minecraftDialog) {
     [
       ["Status", minecraft.state || "—"],
       ["Version", minecraft.version || "—"],
-      ["Players", minecraft.configured ? `${players.online ?? 0} / ${players.max ?? minecraft.max_players ?? "—"}` : "Not configured"],
+      ["Players", minecraft.configured ? (players.max ?? minecraft.max_players ?? "—") : "Not configured"],
+      ["Online", minecraft.configured ? (players.online ?? 0) : "—"],
     ].forEach(([label, value]) => {
       const card = document.createElement("article");
       card.className = "minecraft-overview-card";
@@ -4682,7 +4657,11 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         await refreshUPSCapability();
         if (!initialized) {
           initialized = true;
+          const target = new URLSearchParams(window.location.search);
+          const requested = target.get("workspace") === "system" ? target.get("tab") : "";
           currentTab = user.role === "administrator" ? "health" : "history";
+          if (["health", "history", "users", "security", "reset", "about"].includes(requested) &&
+              (!administratorTabs.has(requested) || user.role === "administrator")) currentTab = requested;
           syncSystemTabs();
         }
         loadCurrentSystemTab();
@@ -4704,4 +4683,51 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   tabs.forEach((button) => button.addEventListener("click", () => selectSystemTab(button.dataset.systemTab)));
 
   if (readWorkspaceWindowState("system").open) workspaceWindow?.open();
+}
+
+// Bookmarked standalone pages land on the matching dashboard workspace.
+if (dashboard) {
+  const destination = new URLSearchParams(window.location.search);
+  let workspace = destination.get("workspace");
+  if (workspace === "minecraft" && window.location.hash === "#manual-backup") workspace = "backups";
+  const launchers = {
+    minecraft: "[data-minecraft-open]",
+    system: "[data-system-open]",
+    storage: "[data-storage-open]",
+    backups: "[data-backups-open]",
+    migration: "[data-migration-open]",
+  };
+  if (Object.hasOwn(launchers, workspace)) {
+    const launch = () => {
+      if (document.body.classList.contains("role-pending")) return false;
+      const button = document.querySelector(launchers[workspace]);
+      if (!button || button.classList.contains("nav-admin-only") && !document.body.classList.contains("role-administrator")) return true;
+      button.click();
+      let tab = destination.get("tab") || "";
+      if (workspace === "minecraft") {
+        if (window.location.hash === "#whitelist") tab = "whitelist";
+        if (window.location.hash === "#minecraft-logs") tab = "overview";
+      }
+      const allowedTabs = {
+        minecraft: ["overview", "memory", "players", "whitelist", "crossplay", "version"],
+        system: ["health", "history", "users", "security", "reset", "ups", "about"],
+        migration: ["export", "import", "recovery"],
+      };
+      if (workspace !== "migration" && allowedTabs[workspace]?.includes(tab)) {
+        const tabButton = document.querySelector(`[data-${workspace}-tab="${tab}"]`);
+        const isAdmin = document.body.classList.contains("role-administrator");
+        const isOperator = document.body.classList.contains("role-operator");
+        if (tabButton && (!tabButton.classList.contains("nav-admin-only") || isAdmin) &&
+            (!tabButton.classList.contains("nav-operator-plus") || isAdmin || isOperator)) tabButton.click();
+      }
+      return true;
+    };
+    if (!launch()) {
+      const observer = new MutationObserver(() => {
+        if (!launch()) return;
+        observer.disconnect();
+      });
+      observer.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+    }
+  }
 }

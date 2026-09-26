@@ -60,7 +60,7 @@ type dataMigrationProgressPageData struct {
 }
 
 func (a *App) registerAdminDataMigrationPages(mux *http.ServeMux) {
-	mux.HandleFunc("GET /settings/data-migration", a.dataMigrationPage)
+	mux.HandleFunc("GET /settings/data-migration", a.legacyWorkspaceRedirect("administrator", "storage", ""))
 	mux.HandleFunc("POST /settings/data-migration/review", a.dataMigrationReview)
 	mux.HandleFunc("POST /settings/data-migration/apply", a.dataMigrationApply)
 	mux.HandleFunc("GET /settings/data-migration/progress/{id}", a.dataMigrationProgressPage)

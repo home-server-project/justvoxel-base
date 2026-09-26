@@ -1,5 +1,5 @@
 {{define "migration_workspace_export.html"}}<div class="migration-workspace-content" data-migration-workspace-root>
-<p class="muted">Create a complete migration bundle. JustVoxel validates the destination, Minecraft state, online players, integrity requirements, and the final action.</p>
+<p class="muted migration-workspace-helper">Create a complete migration bundle. JustVoxel reviews the destination, players, integrity and final action.</p>
   {{if .Error}}<div class="notice error"><strong>Server Export cannot continue as submitted.</strong><br>{{.Error}}</div>{{end}}
 
   <form method="post" action="/workspace/migration/export/review" data-server-export-form>
@@ -46,11 +46,9 @@
         <label for="server-export-smb-source"><strong>Network folder</strong></label>
         <input id="server-export-smb-source" name="source" placeholder="//server/share or //server/share/folder" autocomplete="off">
         <p class="muted">Paste the destination network folder you would normally use. JustVoxel handles the SMB share and any folder below it automatically.</p>
-        <label for="server-export-smb-user"><strong>SMB username</strong></label>
-        <input id="server-export-smb-user" name="username" autocomplete="off">
-        <label for="server-export-smb-domain">SMB domain <span class="muted">optional</span></label>
-        <input id="server-export-smb-domain" name="domain" autocomplete="off">
-        <div class="notice">JustVoxel will request the SMB password only when it is needed to write to this network folder. It is not stored in the reviewed plan or operation journal.</div>
+        <div class="migration-smb-fields"><div><label for="server-export-smb-user"><strong>SMB username</strong></label><input id="server-export-smb-user" name="username" autocomplete="off"></div>
+        <div><label for="server-export-smb-domain">SMB domain <span class="muted">optional</span></label><input id="server-export-smb-domain" name="domain" autocomplete="off"></div></div>
+        <div class="notice migration-workspace-helper">SMB password is requested when needed to write the bundle. It is excluded from the reviewed plan and operation journal.</div>
       </div>
     </section>
 

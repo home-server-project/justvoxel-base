@@ -61,7 +61,7 @@ type restoreProgressPageData struct {
 }
 
 func (a *App) registerAdminRestorePages(mux *http.ServeMux) {
-	mux.HandleFunc("GET /settings/restore", a.restorePage)
+	mux.HandleFunc("GET /settings/restore", a.legacyWorkspaceRedirect("administrator", "backups", ""))
 	mux.HandleFunc("GET /settings/restore/review", a.restoreReviewPage)
 	mux.HandleFunc("POST /settings/restore/apply", a.restoreApply)
 	mux.HandleFunc("GET /settings/restore/progress/{id}", a.restoreProgressPage)

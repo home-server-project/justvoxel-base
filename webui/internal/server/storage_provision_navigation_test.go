@@ -11,8 +11,8 @@ func TestAdvancedStorageNavigation(t *testing.T) {
 		t.Fatal(err)
 	}
 	markup := string(header)
-	if !strings.Contains(markup, `href="/settings/storage-provision"`) || !strings.Contains(markup, "<strong>Advanced storage</strong>") {
-		t.Fatal("Control Center does not link to Advanced storage")
+	if !strings.Contains(markup, `data-storage-open`) || !strings.Contains(markup, "<strong>Storage</strong>") || strings.Contains(markup, `href="/settings/storage-provision"`) {
+		t.Fatal("Control Center must launch the Storage workspace")
 	}
 
 	page, err := assets.ReadFile("templates/storage_provision.html")

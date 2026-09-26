@@ -93,7 +93,7 @@ func TestMinecraftSettingsUsesUserFriendlyMemoryControls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/server", ""))
+	rr := legacyPageTestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/server", ""))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("settings page returned %d: %s", rr.Code, rr.Body.String())
 	}
@@ -264,4 +264,47 @@ func httptestResponse(app *App, request *http.Request) *httptest.ResponseRecorde
 	rr := httptest.NewRecorder()
 	app.Handler().ServeHTTP(rr, request)
 	return rr
+}
+
+// Tests for the retained operation handlers call them directly now that their
+// public GET routes lead to workspaces.
+func legacyPageTestResponse(app *App, request *http.Request) *httptest.ResponseRecorder {
+	rr := httptest.NewRecorder()
+	legacyPageTestServe(app, rr, request)
+	return rr
+}
+
+func legacyPageTestServe(app *App, rr *httptest.ResponseRecorder, request *http.Request) {
+	switch request.URL.Path {
+	case "/settings/server":
+		app.serverSettingsPage(rr, request)
+	case "/settings/storage":
+		app.storageSettingsPage(rr, request)
+	case "/settings/new-storage":
+		app.storageBrowserPage(rr, request)
+	case "/settings/validation":
+		app.adminValidationPage(rr, request)
+	case "/settings/users":
+		app.adminUsersPage(rr, request)
+	case "/settings/storage-provision":
+		app.storageProvisionPage(rr, request)
+	case "/settings/new-backups":
+		app.newBackupsPage(rr, request)
+	case "/settings/backup-storage":
+		app.backupStoragePage(rr, request)
+	case "/settings/restore":
+		app.restorePage(rr, request)
+	case "/settings/server-migration":
+		app.serverMigrationPage(rr, request)
+	case "/settings/server-migration/export":
+		app.serverMigrationExportPage(rr, request)
+	case "/settings/server-migration/import":
+		app.serverMigrationImportPage(rr, request)
+	case "/settings/server-migration/recovery":
+		app.serverMigrationRecoveryPage(rr, request)
+	case "/settings/data-migration":
+		app.dataMigrationPage(rr, request)
+	default:
+		app.Handler().ServeHTTP(rr, request)
+	}
 }

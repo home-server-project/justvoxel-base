@@ -34,6 +34,7 @@ func (a *App) registerSetupWizardApplyRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /setup/review/apply", a.setupWizardReviewApply)
 	mux.HandleFunc("GET /setup/progress/{id}", a.setupWizardProgressPage)
 	mux.HandleFunc("GET /setup/progress/{id}/log", a.setupWizardDiagnosticDownload)
+	mux.HandleFunc("GET /setup/progress/{id}/log/view", a.setupWizardDiagnosticDownload)
 	mux.HandleFunc("GET /api/setup/progress/{id}", a.setupWizardProgressStatus)
 }
 
@@ -71,17 +72,22 @@ func (a *App) setupWizardReviewApply(w http.ResponseWriter, r *http.Request) {
 		a.renderSetupReview(w, identity, state, csrfFromRequest(r), setupReviewErrorMessage(planErr))
 		return
 	}
-	if !state.EULAAccepted {
-		w.WriteHeader(http.StatusBadRequest)
-		a.renderSetupReview(w, identity, state, csrfFromRequest(r), "Accept the Minecraft End User License Agreement before configuring JustVoxel.")
-		return
-	}
 	if submitted := r.FormValue("plan_fingerprint"); submitted == "" || submitted != state.Plan.PlanFingerprint {
 		state.EULAAccepted = false
 		firstRunSetupReviews.save(a, session, state)
 		w.WriteHeader(http.StatusConflict)
 		a.renderSetupReview(w, identity, state, csrfFromRequest(r), "Setup changed since it was reviewed. Review the updated configuration before continuing.")
 		return
+	}
+	if !state.EULAAccepted {
+		if r.FormValue("eula_accepted") != "on" {
+			w.WriteHeader(http.StatusBadRequest)
+			a.renderSetupReview(w, identity, state, csrfFromRequest(r), "Accept the Minecraft End User License Agreement before configuring JustVoxel.")
+			return
+		}
+		state.EULAAccepted = true
+		firstRunSetupReviews.save(a, session, state)
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "Minecraft EULA acceptance recorded", draft)
 	}
 
 	smbPassword := r.FormValue("smb_password")
@@ -277,7 +283,7 @@ func setupOperationStageLabel(stage string) string {
 	case "runtime_config":
 		return "Writing Minecraft configuration"
 	case "minecraft_verify":
-		return "Starting and checking Minecraft"
+		return "Starting Minecraft"
 	case "final_validation":
 		return "Final validation"
 	case "completed":

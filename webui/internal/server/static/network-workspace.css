@@ -116,3 +116,15 @@
   .network-connect-panel{background:#f7f9fa;border-color:#d9dfe3}
   .network-connect-panel input,.network-connect-panel select{background:#fff;border-color:#cbd4da;color:#1a2025}
 }
+/* Compact lanes shared with the other workspaces. */
+.network-workspace-body{padding:.65rem .75rem}
+.network-workspace-view{gap:.5rem}
+.network-overview,.network-device-card,.network-wifi-section,.network-saved{padding:.6rem .75rem}
+.network-overview-version{margin:.25rem 0 0;font-size:.72rem}
+.network-devices{grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:.5rem}
+.network-device-summary{gap:.2rem;margin-top:.4rem}
+.network-detail-row{gap:.45rem}
+.network-detail-row>strong{max-width:62%}
+.network-device-details{margin-top:.45rem;padding-top:.4rem}
+.network-wifi-list,.network-saved-list{margin-top:.4rem}
+.network-wifi-row,.network-saved-row{padding:.45rem .55rem}

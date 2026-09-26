@@ -45,7 +45,7 @@ parent_disk() {
     device="$1"
     real="$(readlink -f -- "${device}" 2>/dev/null || true)"
     [[ -n ${real} ]] || return 0
-    lsblk -s -npo NAME,TYPE "${real}" 2>/dev/null | awk '$2 == "disk" {print $1; exit}'
+    lsblk -s -nrpo NAME,TYPE "${real}" 2>/dev/null | awk '$2 == "disk" {print $1; exit}'
 }
 
 device_metadata_json() {
@@ -476,6 +476,17 @@ esac
 
 normalized_storage_path="$(jq -r '.path' <<< "${storage_json}")"
 normalized_backup_path="$(jq -r '.path' <<< "${backup_json}")"
+if [[ ${storage_type} == partition && ${backup_type} == partition ]]; then
+    storage_uuid="$(jq -r '.uuid' <<< "${storage_json}")"
+    backup_uuid="$(jq -r '.uuid' <<< "${backup_json}")"
+    storage_planned_mount="$(jq -r '.mount_point' <<< "${storage_json}")"
+    backup_planned_mount="$(jq -r '.mount_point' <<< "${backup_json}")"
+    if [[ ${storage_uuid} == "${backup_uuid}" && ( ${storage_planned_mount} != "${backup_planned_mount}" || ${storage_device} != "${backup_device}" ) ]] ||
+       [[ ${storage_uuid} != "${backup_uuid}" && ${storage_planned_mount} == "${backup_planned_mount}" ]]; then
+        json_error 'Each filesystem needs one distinct mount point; shared data and backups must use separate directories inside that mount.' invalid_storage_layout
+        exit 0
+    fi
+fi
 if paths_overlap "${normalized_storage_path}" "${normalized_backup_path}"; then
     json_error 'Minecraft data and backups cannot use the same directory or contain one another.' invalid_storage_layout
     exit 0

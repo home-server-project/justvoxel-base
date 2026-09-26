@@ -55,7 +55,7 @@ type serverMigrationImportReviewPageData struct {
 }
 
 func (a *App) registerAdminServerImportPages(mux *http.ServeMux) {
-	mux.HandleFunc("GET /settings/server-migration/import", a.serverMigrationImportPage)
+	mux.HandleFunc("GET /settings/server-migration/import", a.legacyWorkspaceRedirect("administrator", "migration", "import"))
 	mux.HandleFunc("POST /settings/server-migration/import/review", a.serverMigrationImportReview)
 	mux.HandleFunc("POST /settings/server-migration/import/apply", a.serverMigrationImportApply)
 }

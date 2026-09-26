@@ -104,10 +104,8 @@ if systemctl is-active --quiet minecraft.service 2>/dev/null; then
     fi
 fi
 
-# Quadlet/systemd stop and Podman container removal are asynchronous enough that a
-# plain 'podman rm' can race the final container state. Force+ignore makes this
-# retry-safe for running, stopped, or already-removed containers.
-if ! podman rm --force --ignore minecraft >/dev/null 2>&1; then
+# Quadlet/systemd removal can finish even when Podman reports a removal error.
+if ! jv_reset_remove_minecraft_container; then
     minecraft_reset_fail "container_cleanup_failed" "Minecraft container cleanup failed. Retry Reset Minecraft after reviewing the container state."
 fi
 

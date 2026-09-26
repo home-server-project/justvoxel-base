@@ -50,7 +50,7 @@ type serverMigrationRecoveryReviewPageData struct {
 }
 
 func (a *App) registerAdminServerRecoveryPages(mux *http.ServeMux) {
-	mux.HandleFunc("GET /settings/server-migration/recovery", a.serverMigrationRecoveryPage)
+	mux.HandleFunc("GET /settings/server-migration/recovery", a.legacyWorkspaceRedirect("administrator", "migration", "recovery"))
 	mux.HandleFunc("POST /settings/server-migration/recovery/review", a.serverMigrationRecoveryReview)
 	mux.HandleFunc("POST /settings/server-migration/recovery/apply", a.serverMigrationRecoveryApply)
 	mux.HandleFunc("POST /settings/server-migration/recovery/resolve", a.serverMigrationRecoveryResolve)

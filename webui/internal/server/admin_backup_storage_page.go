@@ -48,7 +48,7 @@ type backupStoragePageData struct {
 }
 
 func (a *App) registerAdminBackupStoragePages(mux *http.ServeMux) {
-	mux.HandleFunc("GET /settings/backup-storage", a.backupStoragePage)
+	mux.HandleFunc("GET /settings/backup-storage", a.legacyWorkspaceRedirect("administrator", "backups", ""))
 	mux.HandleFunc("POST /settings/backup-storage/plan", a.backupStoragePlan)
 	mux.HandleFunc("POST /settings/backup-storage/apply", a.backupStorageApply)
 }

@@ -38,23 +38,22 @@ type setupReviewStore struct {
 var firstRunSetupReviews = setupReviewStore{reviews: make(map[setupDraftKey]setupReviewState)}
 
 type setupReviewPageData struct {
-	Title              string
-	SetupMode          string
-	ServerTypeLabel    string
-	Version            string
-	ManagementAPI      string
-	CSRF               string
-	Identity           api.SessionInfo
-	Plan               api.AdminSetupPlanResponse
-	Error              string
-	EULAAccepted       bool
-	EULAURL            string
-	StorageLabel       string
-	StorageSize        string
-	BackupLabel        string
-	BackupSize         string
-	VersionLabel       string
-	ShortPlanReference string
+	Title           string
+	SetupMode       string
+	ServerTypeLabel string
+	Version         string
+	ManagementAPI   string
+	CSRF            string
+	Identity        api.SessionInfo
+	Plan            api.AdminSetupPlanResponse
+	Error           string
+	EULAAccepted    bool
+	EULAURL         string
+	StorageLabel    string
+	StorageSize     string
+	BackupLabel     string
+	BackupSize      string
+	VersionLabel    string
 }
 
 func (a *App) registerSetupWizardReviewRoutes(mux *http.ServeMux) {
@@ -373,10 +372,9 @@ func (a *App) renderSetupReview(w http.ResponseWriter, identity api.SessionInfo,
 		Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
 		CSRF: csrf, Identity: identity, Plan: plan, Error: errorMessage,
 		EULAAccepted: state.EULAAccepted, EULAURL: minecraftEULAURL,
-		StorageLabel:       setupStorageTypeLabel(plan.Normalized.Storage.Type),
-		BackupLabel:        setupBackupTypeLabel(plan.Normalized.Backups.Type),
-		VersionLabel:       setupVersionPolicyLabel(plan.Normalized.Minecraft.RequestedVersionPolicy),
-		ShortPlanReference: shortSetupPlanReference(plan.PlanFingerprint),
+		StorageLabel: setupStorageTypeLabel(plan.Normalized.Storage.Type),
+		BackupLabel:  setupBackupTypeLabel(plan.Normalized.Backups.Type),
+		VersionLabel: setupVersionPolicyLabel(plan.Normalized.Minecraft.RequestedVersionPolicy),
 	}
 	if plan.Normalized.Storage.SizeBytes > 0 {
 		data.StorageSize = humanBytes(plan.Normalized.Storage.SizeBytes)

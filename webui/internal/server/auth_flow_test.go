@@ -85,7 +85,7 @@ func TestPasswordPageShowsPlainLanguageRequirements(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "http://example/password", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
-	app.Handler().ServeHTTP(rr, req)
+	app.providerPasswordPage(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -116,7 +116,7 @@ func TestAuthenticationSettingsShowsSystemMode(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "http://example/settings/authentication", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
-	app.Handler().ServeHTTP(rr, req)
+	app.authenticationPage(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("got %d: %s", rr.Code, rr.Body.String())
 	}

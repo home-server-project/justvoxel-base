@@ -36,7 +36,7 @@ type usersPageData struct {
 }
 
 func (a *App) registerAdminUsersRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /settings/users", a.adminUsersPage)
+	mux.HandleFunc("GET /settings/users", a.legacyWorkspaceRedirect("administrator", "system", "users"))
 	mux.HandleFunc("POST /settings/users/create", a.adminCreateUser)
 	mux.HandleFunc("POST /settings/users/{id}/role", a.adminSetUserRole)
 	mux.HandleFunc("POST /settings/users/{id}/enabled", a.adminSetUserEnabled)
