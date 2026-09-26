@@ -85,6 +85,8 @@ func TestBackupsWorkspaceUsesIndependentWorkspaceRoutes(t *testing.T) {
 		`action="/workspace/backups/restore/plan"`,
 		`action="/workspace/backups/restore/resolve-reset"`,
 		`Keep current server and continue Restore`,
+		`Retry Restore review`,
+		`Player status is temporarily unavailable.`,
 	} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("native Backups fragment missing route %q", want)

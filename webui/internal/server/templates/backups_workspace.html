@@ -80,6 +80,15 @@
   <section class="backup-restore-review">
     <div class="section-heading"><div><p class="eyebrow">Restore review</p><h2>{{if .RestoreModeTitle}}{{.RestoreModeTitle}}{{else}}Review Restore{{end}}</h2></div><span class="badge">Destructive</span></div>
     {{if .RestoreError}}<div class="notice error"><strong>Restore cannot continue as submitted.</strong><br>{{.RestoreError}}</div>{{end}}
+    {{if .RestoreRetryAvailable}}
+    <form method="post" action="/workspace/backups/restore/plan" class="backup-restore-retry">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <input type="hidden" name="backup_id" value="{{.RestoreRequest.BackupID}}">
+      <input type="hidden" name="mode" value="{{.RestoreRequest.Mode}}">
+      <div class="notice"><strong>Player status is temporarily unavailable.</strong><br>Restore stays blocked until JustVoxel can confirm whether anyone is online. No backup data has been changed.</div>
+      <div class="action-row"><button type="submit" class="secondary">Retry Restore review</button></div>
+    </form>
+    {{end}}
     {{if .RestoreBlockedResetID}}
     <form method="post" action="/workspace/backups/restore/resolve-reset" class="backup-restore-reset-recovery">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
