@@ -3,7 +3,7 @@
 <body class="role-administrator">{{template "app-header" .}}
 <main>
   <div class="title-row"><div><p class="eyebrow">Administrator · migration</p><h1>Server Migration</h1></div><span class="badge">{{.Identity.Username}}</span></div>
-  <p class="muted">Move a complete Minecraft server between JustVoxel appliances through the same authoritative Management Agent used by <code>mjust</code>. WebUI supplies navigation and reviewed choices; migration policy and execution remain in the Agent.</p>
+  <p class="muted">Move a complete Minecraft server between JustVoxel appliances through the same authoritative JustVoxel used by <code>mjust</code>. WebUI supplies navigation and reviewed choices; migration policy and execution remain in JustVoxel.</p>
 
   <section class="panel">
     <div class="section-heading"><div><p class="eyebrow">Export</p><h2>Export this server</h2></div><span class="badge">Available</span></div>
@@ -24,7 +24,7 @@
 
   <section class="panel">
     <div class="section-heading"><div><p class="eyebrow">Recovery</p><h2>Migration Recovery</h2></div>{{if .Recovery.Transactions}}<span class="badge">Attention available</span>{{else}}<span class="badge">No retained recovery</span>{{end}}</div>
-    <p>Finalize retained Import rollback or recovery evidence through the Management Agent.</p>
+    <p>Finalize retained Import rollback or recovery evidence through the JustVoxel.</p>
     {{if .Recovery.Transactions}}
       {{range .Recovery.Transactions}}
       <div class="details"><strong>{{.Mode}}</strong> · {{.Phase}}<br><span class="muted">Updated {{.UpdatedAt}}{{if .Finalizable}} · ready for reviewed recovery{{end}}</span></div>
@@ -35,6 +35,6 @@
     <div class="action-row"><a class="button-link" href="/settings/server-migration/recovery">Open Migration Recovery</a></div>
   </section>
 
-  <div class="notice">Server Export, Server Import, and guided Migration Recovery are available through the same Management Agent authority. If a migration operation is already active, this page reconnects directly to its persistent progress record.</div>
+  <div class="notice">Server Export, Server Import, and guided Migration Recovery are available through the same JustVoxel authority. If a migration operation is already active, this page reconnects directly to its persistent progress record.</div>
   <p class="foot">WebUI {{.Version}} · Management API {{.ManagementAPI}}</p>
 </main></body></html>{{end}}
