@@ -174,11 +174,11 @@ func (c *Client) WiFiNetworks(ctx context.Context, interfaceName string) ([]WiFi
 			FrequencyMHz:   uint32Value(props, "Frequency"),
 			MaxBitrateKbps: uint32Value(props, "MaxBitrate"),
 			Security:       security,
-			KeyManagement: keyManagement,
-			ProfileUUID:   known[ssid+"\x00"+keyManagement],
-			Hidden:        ssid == "",
-			Known:         known[ssid+"\x00"+keyManagement] != "",
-			Active:        validObjectPath(activeAP) && accessPoint == activeAP,
+			KeyManagement:  keyManagement,
+			ProfileUUID:    known[ssid+"\x00"+keyManagement],
+			Hidden:         ssid == "",
+			Known:          known[ssid+"\x00"+keyManagement] != "",
+			Active:         validObjectPath(activeAP) && accessPoint == activeAP,
 		}
 		key := ssid + "\x00" + string(security)
 		if ssid == "" {
