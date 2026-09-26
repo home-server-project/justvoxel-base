@@ -181,29 +181,7 @@ _a55_record_initial_state() {
     if [[ ${BEDROCK_ENABLED} == yes ]]; then
         firewall-cmd --permanent --query-port="${BEDROCK_PORT}/udp" >/dev/null 2>&1 && bedrock_open=true
     fi
-    _a55_manifest_update ".runtime = {java_firewall_preexisting:${java_open},bedrock_firewall_preexisting:${bedrock_open},selinux_rule_added:false,minecraft_started:false,timer_activated:false,marker:true}" || return 1
-}
-
-_a55_apply_selinux() {
-    local escaped context mount_context
-    escaped="$(path_regex_escape "${DATA_PATH}")"
-    if semanage fcontext -a -t container_file_t "${escaped}(/.*)?" >/dev/null 2>&1; then
-        _a55_manifest_update '.runtime.selinux_rule_added = true' || return 1
-    fi
-    # A freshly mounted XFS root can still be unlabeled_t. Relabel only that
-    # root to its policy default before traversing the Minecraft directory;
-    # the sibling backup directory must keep its own labeling.
-    if [[ -n ${DATA_MOUNT_POINT} && ${DATA_PATH} == "${DATA_MOUNT_POINT}/"* ]]; then
-        mount_context="$(ls -Zd "${DATA_MOUNT_POINT}" 2>/dev/null)" || return 1
-        if [[ ${mount_context} == *:unlabeled_t:* ]]; then
-            restorecon -F "${DATA_MOUNT_POINT}" >/dev/null 2>&1 || return 1
-            mount_context="$(ls -Zd "${DATA_MOUNT_POINT}" 2>/dev/null)" || return 1
-            [[ ${mount_context} != *:unlabeled_t:* ]] || return 1
-        fi
-    fi
-    restorecon -RF "${DATA_PATH}" >/dev/null 2>&1 || return 1
-    context="$(ls -Zd "${DATA_PATH}" 2>/dev/null || true)"
-    grep -q 'container_file_t' <<< "${context}" || return 1
+    _a55_manifest_update ".runtime = {java_firewall_preexisting:${java_open},bedrock_firewall_preexisting:${bedrock_open},minecraft_started:false,timer_activated:false,marker:true}" || return 1
 }
 
 _a55_apply_action() {
@@ -220,8 +198,6 @@ _a55_apply_action() {
 
     write_main_config || return 1
     _a55_evidence_set runtime_config_written yes || return 1
-    _a55_apply_selinux || return 1
-    _a55_evidence_set selinux_data_label container_file_t || return 1
     render_runtime_files || return 1
     _a55_evidence_set runtime_files_rendered yes || return 1
 
@@ -301,10 +277,9 @@ _a55_verify_action() {
 
 _a55_rollback_action() {
     _a55_load_values
-    local failure=0 java_pre=false bedrock_pre=false selinux_added=false
+    local failure=0 java_pre=false bedrock_pre=false
     java_pre="$(jq -r '.runtime.java_firewall_preexisting // false' "${A53_MANIFEST}")"
     bedrock_pre="$(jq -r '.runtime.bedrock_firewall_preexisting // false' "${A53_MANIFEST}")"
-    selinux_added="$(jq -r '.runtime.selinux_rule_added // false' "${A53_MANIFEST}")"
 
     systemctl disable --now minecraft-backup.timer >/dev/null 2>&1 || true
     if systemctl is-active --quiet minecraft-backup.timer 2>/dev/null; then failure=1; fi
@@ -324,12 +299,6 @@ _a55_rollback_action() {
     fi
     firewall-cmd --reload >/dev/null 2>&1 || failure=1
 
-    if [[ ${selinux_added} == true ]]; then
-        local escaped
-        escaped="$(path_regex_escape "${DATA_PATH}")"
-        semanage fcontext -d "${escaped}(/.*)?" >/dev/null 2>&1 || failure=1
-        restorecon -RF "${DATA_PATH}" >/dev/null 2>&1 || failure=1
-    fi
     rm -f -- "${A55_SETUP_MARKER}" || failure=1
     if (( failure != 0 )); then
         _a55_json false false runtime_rollback 'Runtime rollback could not be completed safely.'

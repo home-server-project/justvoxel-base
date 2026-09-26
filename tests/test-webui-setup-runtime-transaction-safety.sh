@@ -50,63 +50,25 @@ if grep -Eq 'exec\.Command(Context)?\([^,]+,[[:space:]]*request|/bin/(sh|bash)[[
     exit 1
 fi
 
-# Exercise the runtime SELinux step with a newly mounted, unlabeled XFS root.
-# Mocks keep the contract check independent of host SELinux state.
-eval "$(sed -n '/^_a55_apply_selinux() {/,/^}/p' "${runtime_helper}")"
-DATA_MOUNT_POINT=/var/mnt/justvoxel-data
-DATA_PATH=/var/mnt/justvoxel-data/minecraft
-a55_mount_labeled=false
-a55_data_labeled=false
-a55_calls=()
-path_regex_escape() { printf '%s' "$1"; }
-semanage() { a55_calls+=("rule:$*"); }
-_a55_manifest_update() { a55_calls+=("manifest:$*"); }
-restorecon() {
-    a55_calls+=("restore:$*")
-    case "$*" in
-        '-F /var/mnt/justvoxel-data') a55_mount_labeled=true ;;
-        '-RF /var/mnt/justvoxel-data/minecraft')
-            [[ ${a55_mount_labeled} == true ]] || return 1
-            a55_data_labeled=true ;;
-        *) return 1 ;;
-    esac
-}
-ls() {
-    [[ $1 == -Zd ]] || return 1
-    if [[ $2 == "${DATA_MOUNT_POINT}" ]]; then
-        if [[ ${a55_mount_labeled} == true ]]; then
-            printf 'system_u:object_r:mnt_t:s0 %s\n' "$2"
-        else
-            printf 'system_u:object_r:unlabeled_t:s0 %s\n' "$2"
-        fi
-    elif [[ $2 == "${DATA_PATH}" ]]; then
-        [[ ${a55_data_labeled} == true ]] || return 1
-        printf 'system_u:object_r:container_file_t:s0 %s\n' "$2"
-    else
-        return 1
-    fi
-}
-_a55_apply_selinux
-[[ ${a55_mount_labeled} == true && ${a55_data_labeled} == true ]] || { echo 'fresh XFS mount root or Minecraft directory was not labeled' >&2; exit 1; }
-[[ ${a55_calls[0]-} == 'rule:fcontext -a -t container_file_t /var/mnt/justvoxel-data/minecraft(/.*)?' ]] || { echo 'SELinux fcontext rule was not added for Minecraft data' >&2; exit 1; }
-[[ ${a55_calls[1]-} == 'manifest:.runtime.selinux_rule_added = true' ]] || { echo 'SELinux rule addition was not recorded in the manifest' >&2; exit 1; }
-[[ ${a55_calls[2]-} == 'restore:-F /var/mnt/justvoxel-data' ]] || { echo 'SELinux mount root was not relabeled first' >&2; exit 1; }
-[[ ${a55_calls[3]-} == 'restore:-RF /var/mnt/justvoxel-data/minecraft' ]] || { echo 'SELinux Minecraft data directory was not relabeled after the mount root' >&2; exit 1; }
-[[ ${#a55_calls[@]} == 4 ]] || { echo 'SELinux relabel touched the shared backup directory or another path' >&2; exit 1; }
-
-# System storage has no external mount root to relabel.
-DATA_MOUNT_POINT=''
-DATA_PATH=/var/lib/justvoxel/minecraft
-a55_calls=()
-restorecon() {
-    a55_calls+=("restore:$*")
-    [[ $* == '-RF /var/lib/justvoxel/minecraft' ]] || return 1
-    a55_data_labeled=true
-}
-_a55_apply_selinux
-[[ ${a55_calls[2]-} == 'restore:-RF /var/lib/justvoxel/minecraft' && ${#a55_calls[@]} == 3 ]] || { echo 'SELinux system storage relabel call sequence was incorrect' >&2; exit 1; }
-grep -Fq 'if [[ ${selinux_added} == true ]]; then' "${runtime_helper}"
-grep -Fq 'semanage fcontext -d "${escaped}(/.*)?"' "${runtime_helper}"
+# Podman relabels only Minecraft DATA_PATH when the Quadlet starts, for both
+# system storage and an external partition shared with host-managed backups.
+grep -Fq 'Volume=@@DATA_PATH@@:/data:Z' "${repo_root}/templates/quadlets/minecraft.container.in"
+grep -Fq 'DATA_PATH="$(jq -r '\''.storage.path'\'' <<< "${A55_REQUEST}")"' "${runtime_helper}"
+grep -Fq 'BACKUP_PATH="$(jq -r '\''.backups.path'\'' <<< "${A55_REQUEST}")"' "${runtime_helper}"
+grep -Fq 'if [[ -n ${DATA_MOUNT_POINT} ]]; then mountpoint -q -- "${DATA_MOUNT_POINT}" || return 1; fi' "${runtime_helper}"
+grep -Fq 'if [[ -n ${BACKUP_MOUNT_POINT} ]]; then mountpoint -q -- "${BACKUP_MOUNT_POINT}" || return 1; fi' "${runtime_helper}"
+if grep -Eq '_a55_apply_selinux|selinux_rule_added|selinux_data_label|semanage fcontext|restorecon|container_file_t' "${runtime_helper}"; then
+    echo 'first-run runtime transaction still manually manages SELinux labeling' >&2
+    exit 1
+fi
+grep -Fq 'output="$(systemctl start minecraft.service 2>&1)"' "${runtime_helper}"
+grep -Fq 'validation_output="$(/usr/libexec/justvoxel/mjust/validate-backend 2>&1)"' "${runtime_helper}"
+render_line="$(grep -nF '    render_runtime_files || return 1' "${runtime_helper}" | cut -d: -f1)"
+start_line="$(grep -nF '    output="$(systemctl start minecraft.service 2>&1)"' "${runtime_helper}" | cut -d: -f1)"
+validation_line="$(grep -nF '    validation_output="$(/usr/libexec/justvoxel/mjust/validate-backend 2>&1)"' "${runtime_helper}" | cut -d: -f1)"
+[[ -n ${render_line} && -n ${start_line} && -n ${validation_line} && ${render_line} -lt ${start_line} && ${start_line} -lt ${validation_line} ]] || { echo 'runtime render, service start, and final validation are out of order' >&2; exit 1; }
+grep -Fq 'if grep -q '\''container_file_t'\'' <<< "${data_context}"; then' "${repo_root}/mjust/libexec/validate-backend"
+grep -Fq 'fail "Minecraft data is not labeled container_file_t:' "${repo_root}/mjust/libexec/validate-backend"
 
 # Normal mjust setup is the single supported first-run setup path and uses the Management API.
 grep -Fq 'setup-api.sh' "${repo_root}/mjust/libexec/setup"

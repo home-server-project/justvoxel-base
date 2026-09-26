@@ -95,8 +95,8 @@ func TestSetupReviewConfigureActionRequiresAcceptedEULA(t *testing.T) {
 	if !strings.Contains(body, `data-eula-accepted="true"`) {
 		t.Fatalf("Configure state did not reflect EULA acceptance: %s", body)
 	}
-	if !strings.Contains(body, ">Configure JustVoxel</button>") {
-		t.Fatalf("enabled Configure JustVoxel button missing: %s", body)
+	if !strings.Contains(body, `<button type="submit" form="setup-apply-form" data-setup-configure>Configure JustVoxel</button>`) || strings.Contains(body, "setup-configure-disabled") {
+		t.Fatalf("enabled primary Configure JustVoxel button missing: %s", body)
 	}
 }
 

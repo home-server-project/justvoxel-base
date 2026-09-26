@@ -121,7 +121,7 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 		"Review your JustVoxel setup", "Step 7 of 7", "Connections", "Version", "Configuration validated.", "Normalized Family Server", "20", "1.21.8",
 		"Recommended version", "/var/lib/justvoxel/minecraft", "/var/lib/justvoxel/backups",
 		"Backups are on the same disk", "If this disk fails, both Minecraft and its backups could be lost.", "Minecraft End User License Agreement", "https://www.minecraft.net/eula",
-		"Ready to configure", "Your setup is validated and ready to apply.", "/static/setup-review.css", "/static/setup-operation.js",
+		"/static/setup-review.css", "/static/setup-operation.js",
 		`name="plan_fingerprint" value="` + setupReviewFingerprint + `"`, "Download configuration", "data-setup-eula-dialog", "Accept and continue",
 	} {
 		if !strings.Contains(body, want) {
@@ -136,6 +136,9 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 	}
 	if strings.Contains(body, `type="password"`) || strings.Contains(body, `name="backup_password"`) {
 		t.Fatal("review rendered a password field")
+	}
+	if strings.Contains(body, "Ready to configure") || strings.Contains(body, "Your setup is validated and ready to apply.") {
+		t.Fatal("review still renders the removed readiness message")
 	}
 	for _, forbidden := range []string{"setup-eula-card", "Validated plan: <code>", "Management Agent"} {
 		if strings.Contains(body, forbidden) {
@@ -235,7 +238,7 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 		t.Fatalf("review returned %d: %s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"Cancel setup", ">Back</button>", "setup-review-ready", "setup-review-summary", "Technical details", "<details class=\"setup-review-details\"", "<h2>Server</h2>", "<h2>Minecraft</h2>", "<h2>Storage</h2>", "<h2>Backups</h2>"} {
+	for _, want := range []string{"Cancel setup", ">Back</button>", "setup-review-panel", "setup-review-content", "setup-step-actions setup-actions-split", "setup-review-summary", "Technical details", "<details class=\"setup-review-details\"", "<h2>Server</h2>", "<h2>Minecraft</h2>", "<h2>Storage</h2>", "<h2>Backups</h2>"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("review layout missing %q: %s", want, body)
 		}
@@ -246,8 +249,8 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 	if strings.Contains(body, "setup-execution-placeholder") || strings.Contains(body, "Apply this validated plan") {
 		t.Fatal("review still renders the redundant Configure presentation")
 	}
-	if strings.Count(body, ">Configure JustVoxel</button>") != 1 || strings.Index(body, "setup-review-ready") > strings.Index(body, "setup-actions setup-actions-split") {
-		t.Fatal("readiness message must precede the sole bottom Configure button")
+	if strings.Count(body, ">Configure JustVoxel</button>") != 1 || strings.Contains(body, "Ready to configure") {
+		t.Fatal("review must show one Configure button without a readiness message")
 	}
 
 	css, err := assets.ReadFile("static/setup-review.css")
@@ -267,6 +270,8 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 		".setup-review-details[open]>summary::after",
 		".setup-review-details:not([open])>.setup-review-grid{display:none}",
 		".setup-review-details[open]>.setup-review-grid{display:grid}",
+		".setup-review-content{flex:1;min-height:0;overflow-y:auto",
+		".setup-review-panel>.setup-step-actions",
 	} {
 		if !strings.Contains(styles, want) {
 			t.Fatalf("responsive review CSS missing %q", want)
@@ -282,15 +287,51 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 			t.Fatalf("responsive setup CSS missing %q", want)
 		}
 	}
-	if !strings.Contains(string(setupCSS), ".setup-body .setup-wizard-panel{height:clamp(") || strings.Contains(string(setupCSS), ".setup-body .setup-step-panel{height:") {
-		t.Fatal("fixed setup height must apply only to editing wizard panels")
+	if !strings.Contains(string(setupCSS), ".setup-body .setup-wizard-panel,.setup-body .setup-review-panel{height:clamp(") || strings.Contains(string(setupCSS), ".setup-body .setup-step-panel{height:") || strings.Contains(string(setupCSS), ".setup-body .setup-operation-panel{height:") {
+		t.Fatal("fixed setup height must apply only to wizard and Review panels")
 	}
 	progress, err := assets.ReadFile("templates/setup_progress.html")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(progress), "setup-operation-panel") || strings.Contains(string(progress), "setup-wizard-panel") || strings.Contains(body, "setup-wizard-panel") {
-		t.Fatal("Review and operation results must use content-sized panels")
+	if !strings.Contains(string(progress), "setup-operation-panel") || strings.Contains(string(progress), "setup-wizard-panel") || strings.Contains(string(progress), "setup-review-panel") {
+		t.Fatal("operation and result pages must remain content-sized")
+	}
+}
+
+func TestSetupReviewConfigureButtonDisabledForInvalidPlan(t *testing.T) {
+	client := setupReviewClient()
+	client.plan.OK = false
+	client.plan.Error = "Setup needs attention."
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer firstRunSetupReviews.delete(app, "session-token")
+	advanceSetupToReview(t, app)
+
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("invalid review returned %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{`class="setup-configure-disabled" role="group" aria-disabled="true" tabindex="0" aria-describedby="setup-configure-help"`, `<button type="button" disabled aria-describedby="setup-configure-help">Configure JustVoxel</button>`, `<span class="setup-configure-tooltip" id="setup-configure-help" role="tooltip">Setup is not ready. Resolve the items above first.</span>`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("invalid review missing %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, `form="setup-apply-form" data-setup-configure`) || strings.Contains(body, `id="setup-apply-form"`) || strings.Count(body, ">Configure JustVoxel</button>") != 1 {
+		t.Fatal("invalid review must not expose a working Configure action")
+	}
+	css, err := assets.ReadFile("static/setup-review.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{".setup-configure-disabled button:disabled{background:#495158", ".setup-configure-disabled:hover .setup-configure-tooltip,.setup-configure-disabled:focus-visible .setup-configure-tooltip{visibility:visible"} {
+		if !strings.Contains(string(css), want) {
+			t.Fatalf("disabled Configure styling missing %q", want)
+		}
 	}
 }
 func TestSetupReviewExplainsDisabledBedrockCompatibility(t *testing.T) {

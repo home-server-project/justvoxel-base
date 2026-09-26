@@ -209,7 +209,7 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
 /* Stable wizard frame and a real page footer. */
 .setup-body{display:flex;flex-direction:column;min-height:100dvh}
 .setup-shell{display:flex;flex:1;flex-direction:column;width:min(1180px,100%);min-height:0;padding-bottom:1rem}
-.setup-body .setup-wizard-panel{height:clamp(520px,calc(100dvh - 215px),760px);min-height:0;overflow:auto;overscroll-behavior:contain}
+.setup-body .setup-wizard-panel,.setup-body .setup-review-panel{height:clamp(520px,calc(100dvh - 215px),760px);min-height:0;overflow:auto;overscroll-behavior:contain}
 .setup-body .setup-step-panel .setup-form{display:flex;flex-direction:column;min-height:calc(100% - 4.6rem)}
 .setup-body .setup-step-panel .setup-form>.setup-step-actions{position:sticky;bottom:0;z-index:4;margin-top:auto;background:#151a1ff2;backdrop-filter:blur(8px)}
 .setup-footer{margin-top:auto;padding-top:1rem;text-align:center;line-height:1.5}
@@ -222,7 +222,7 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
 .setup-backup-resilience{display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;margin:-.05rem 0;padding:.4rem .6rem;border:1px solid #92713f;border-radius:9px;background:#6a4b202b;color:#e6d6b7;font-size:.76rem;line-height:1.35}
 .setup-backup-resilience strong{white-space:nowrap;color:#f0c785}
 .setup-backup-resilience[hidden]{display:none}
-@media(max-width:760px){.setup-body .setup-wizard-panel{height:calc(100dvh - 185px);min-height:430px}.setup-browser-intro{grid-template-columns:1fr}.setup-body .setup-step-panel .setup-form{display:block}.setup-body .setup-step-panel .setup-form>.setup-step-actions{margin-top:.7rem}}
+@media(max-width:760px){.setup-body .setup-wizard-panel,.setup-body .setup-review-panel{height:calc(100dvh - 185px);min-height:430px}.setup-browser-intro{grid-template-columns:1fr}.setup-body .setup-step-panel .setup-form{display:block}.setup-body .setup-step-panel .setup-form>.setup-step-actions{margin-top:.7rem}}
 @media(prefers-color-scheme:light){.setup-body .setup-step-panel .setup-form>.setup-step-actions{background:#fffffff2}.setup-partition-instruction,.setup-storage-browser-heading{background:#eef7f1;border-color:#a7ccb5}.setup-partition-instruction strong{color:#245b3a}.setup-backup-resilience{background:#fff7e8;color:#6a522a;border-color:#d7b16e}.setup-backup-resilience strong{color:#73511d}}
 
 /* Keep the wizard frame and action row stable while using its available width. */

@@ -31,6 +31,7 @@
   {{end}}
 
   <section class="panel setup-step-panel setup-review-panel">
+    <div class="setup-review-content">
     <p class="setup-lead">Review the configuration validated by JustVoxel. Nothing has been applied yet.</p>
     {{if .Error}}<div class="notice error"><strong>Setup needs attention</strong><br>{{.Error}}</div>{{end}}
 
@@ -148,11 +149,11 @@
       </div>
     </dialog>
     {{end}}
+    </div>
 
-    {{if .Plan.OK}}<div class="setup-review-ready" role="status"><strong>Ready to configure</strong><span>Your setup is validated and ready to apply.</span></div>{{end}}
-    <div class="setup-actions setup-actions-split">
+    <div class="setup-step-actions setup-actions-split">
       <form method="post" action="/setup/review/cancel"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Cancel setup</button></form>
-      <div class="setup-step-navigation"><form method="post" action="/setup/review/back"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Back</button></form>{{if .Plan.OK}}<button type="submit" form="setup-apply-form" data-setup-configure>Configure JustVoxel</button>{{end}}</div>
+      <div class="setup-step-navigation"><form method="post" action="/setup/review/back"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Back</button></form>{{if .Plan.OK}}<button type="submit" form="setup-apply-form" data-setup-configure>Configure JustVoxel</button>{{else}}<span class="setup-configure-disabled" role="group" aria-disabled="true" tabindex="0" aria-describedby="setup-configure-help"><button type="button" disabled aria-describedby="setup-configure-help">Configure JustVoxel</button><span class="setup-configure-tooltip" id="setup-configure-help" role="tooltip">Setup is not ready. Resolve the items above first.</span></span>{{end}}</div>
     </div>
   </section>
   <footer class="setup-footer disclaimer">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT. <a href="https://github.com/home-server-project/justvoxel" target="_blank" rel="noopener noreferrer">JustVoxel on GitHub</a></footer>
