@@ -25,6 +25,9 @@ grep -Fq 'printf '\''%s\n%s\n'\'' "$current_transport_identity" "$requested_sour
 
 transaction="${repo_root}/mjust/libexec/admin-migration-import-transaction-json"
 backend="${repo_root}/mjust/libexec/migration-import-backend"
+grep -Fq 'transport_started=no' "${transaction}" || fail 'Agent transaction does not initialize source transport ownership'
+grep -Fq 'if [[ -n ${JV_MIGRATION_OWNED_MOUNT:-} ]]; then' "${transaction}" || fail 'Agent transaction does not derive source transport ownership from the owned mount'
+grep -Fq 'transport_started=yes' "${transaction}" || fail 'Agent transaction does not mark temporary source mounts as owned'
 grep -Fq 'JV_MIGRATION_API_SOURCE_TRANSPORT_STARTED="$transport_started"' "${transaction}" || fail 'Agent transaction does not hand owned source transport to the staging backend'
 grep -Fq 'JV_MIGRATION_API_SOURCE_OWNED_MOUNT=' "${transaction}" || fail 'Agent transaction does not hand the owned mount to the staging backend'
 grep -Fq 'JV_MIGRATION_API_SOURCE_TRANSPORT_STARTED:-no' "${backend}" || fail 'staging backend does not restore owned transport state'

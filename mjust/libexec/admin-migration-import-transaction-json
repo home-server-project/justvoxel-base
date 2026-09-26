@@ -61,6 +61,10 @@ if [[ "$JV_MIGRATION_IMPORT_SOURCE_IDENTITY" != "$expected_source_identity" ]]; 
     emit_result rolled_back 'Import source identity changed after review; no live Import was started.'
     exit 0
 fi
+transport_started=no
+if [[ -n ${JV_MIGRATION_OWNED_MOUNT:-} ]]; then
+    transport_started=yes
+fi
 selected_root="$(jq -r '.source.selected_root' <<< "$reviewed_normalized")"
 source_version="$(jq -r '.source.minecraft_version' <<< "$reviewed_normalized")"
 mode="$(jq -r '.destination.mode' <<< "$reviewed_normalized")"
