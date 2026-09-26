@@ -480,12 +480,15 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .minecraft-overview-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.5rem;margin:0}
 .minecraft-overview-card{min-width:0;padding:.58rem .68rem;border:1px solid #303942;border-radius:10px;background:#13191e}
 .minecraft-overview-card span{display:block;margin-bottom:.18rem;color:#89959e;font-size:.66rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase}
-.minecraft-overview-card strong{display:block;overflow-wrap:anywhere;font-size:.96rem}
+.minecraft-overview-card strong{display:block;overflow-wrap:anywhere;font-size:1.08rem}
 .minecraft-overview-playerline{display:flex;align-items:center;gap:.6rem;min-height:40px;padding:.5rem .65rem;border:1px solid #303942;border-radius:10px;background:#13191e}
 .minecraft-overview-playerline>strong{flex:0 0 auto;font-size:.78rem}
 .minecraft-overview-playerline>.muted{margin:0}
 .minecraft-overview-playerline .player-list{margin:0}
 .minecraft-workspace-section{margin:0}
+.minecraft-overview-logs{margin:0;padding:.75rem}
+.minecraft-overview-logs h2{margin:.05rem 0 0;font-size:1rem}
+.minecraft-overview-logs .log-box{max-height:250px;margin-top:.55rem}
 .minecraft-workspace-content .settings-form{margin:0}
 .minecraft-workspace-content .settings-form>.panel:first-of-type{margin-top:0}
 .minecraft-workspace-content .review-panel{margin-top:1rem}
