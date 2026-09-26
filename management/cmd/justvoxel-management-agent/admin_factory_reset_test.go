@@ -95,6 +95,9 @@ func TestFactoryResetStorageActionsPreserveExternalAndNetwork(t *testing.T) {
 }
 
 func TestAdminFactoryResetApplyRequiresRealSystemPasswordBeforePlanning(t *testing.T) {
+	oldReadMode := readAuthMode
+	defer func() { readAuthMode = oldReadMode }()
+	readAuthMode = func() (authMode, error) { return authModeSeparate, nil }
 	oldAuth := systemAuthenticate
 	defer func() { systemAuthenticate = oldAuth }()
 	systemAuthenticate = func(username, password string) (systemauth.AuthResult, error) {
@@ -129,6 +132,39 @@ func TestAdminFactoryResetApplyRequiresRealSystemPasswordBeforePlanning(t *testi
 	}
 	if current, err := store.currentFactoryReset(); err != nil || current != nil {
 		t.Fatalf("factory reset operation created without valid system password: %#v err=%v", current, err)
+	}
+}
+
+func TestAdminFactoryResetApplySystemModeDoesNotRequireDuplicatePassword(t *testing.T) {
+	oldReadMode := readAuthMode
+	defer func() { readAuthMode = oldReadMode }()
+	readAuthMode = func() (authMode, error) { return authModeSystem, nil }
+
+	oldAuth := systemAuthenticate
+	defer func() { systemAuthenticate = oldAuth }()
+	systemAuthenticate = func(string, string) (systemauth.AuthResult, error) {
+		t.Fatal("system password authentication must not run in System WebUI mode")
+		return systemauth.AuthResult{}, nil
+	}
+
+	oldHelper := runAdminFactoryResetHelper
+	defer func() { runAdminFactoryResetHelper = oldHelper }()
+	runAdminFactoryResetHelper = func(_ context.Context, _ ...string) ([]byte, error) {
+		return []byte(validFactoryResetPlanHelper), nil
+	}
+
+	oldWorker := startFactoryResetWorker
+	defer func() { startFactoryResetWorker = oldWorker }()
+	startFactoryResetWorker = func(_ *server, _ string, _ string) {}
+
+	s := surfaceTestServer(t, roleAdministrator)
+	store := openTestOperationStore(t)
+	attachTestOperationStore(t, s, store)
+	body, _ := json.Marshal(adminFactoryResetApplyRequest{PlanFingerprint: exactFactoryResetFingerprint(t)})
+	rr := httptest.NewRecorder()
+	s.adminFactoryResetApply(rr, surfaceRequest(http.MethodPost, "/v1/admin/reset/factory/apply", string(body)))
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("system-mode factory reset status=%d: %s", rr.Code, rr.Body.String())
 	}
 }
 
