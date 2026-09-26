@@ -1911,12 +1911,13 @@ if (migrationOpen && migrationDialog) {
   let migrationLoadController = null;
   let migrationSubmitController = null;
 
-  const setMigrationBusy = (message = "") => {
+  const setMigrationBusy = (message = "", kind = "busy") => {
     if (state) {
       state.textContent = message;
-      state.classList.toggle("is-busy", Boolean(message));
+      state.classList.remove("is-busy", "is-error", "is-info");
+      if (message) state.classList.add(kind === "error" ? "is-error" : kind === "info" ? "is-info" : "is-busy");
     }
-    migrationDialog.classList.toggle("is-busy", Boolean(message));
+    migrationDialog.classList.toggle("is-busy", Boolean(message) && kind === "busy");
   };
 
   const abortMigrationRequests = () => {
@@ -2176,9 +2177,7 @@ if (migrationOpen && migrationDialog) {
       } catch (error) {
         if (error?.name === "AbortError") return;
         if (submitter && submitter.isConnected) submitter.disabled = false;
-        setMigrationBusy(error?.message || "Migration operation could not be completed.");
-        state?.classList.remove("is-busy");
-        migrationDialog.classList.remove("is-busy");
+        setMigrationBusy(error?.message || "Migration operation could not be completed.", "error");
       } finally {
         if (migrationSubmitController === submitController) migrationSubmitController = null;
       }
