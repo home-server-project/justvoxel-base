@@ -140,11 +140,11 @@ func (f *fakeNetworkAPI) ConnectWiFi(_ context.Context, session, interfaceName s
 	f.wifiConnectInterface = interfaceName
 	f.wifiConnectRequest = request
 	return api.NetworkWiFiMutation{
-		OK: true,
-		Action: "connect-new",
-		Interface: interfaceName,
+		OK:          true,
+		Action:      "connect-new",
+		Interface:   interfaceName,
 		ProfileUUID: "new-profile",
-		Checkpoint: &api.NetworkCheckpoint{ID: request.CheckpointID, Status: "pending"},
+		Checkpoint:  &api.NetworkCheckpoint{ID: request.CheckpointID, Status: "pending"},
 	}, nil
 }
 
@@ -155,9 +155,9 @@ func (f *fakeNetworkAPI) DisconnectWiFi(_ context.Context, session, interfaceNam
 	f.wifiDisconnected = interfaceName
 	f.wifiDisconnectCheckpoint = checkpointID
 	return api.NetworkWiFiMutation{
-		OK: true,
-		Action: "disconnect",
-		Interface: interfaceName,
+		OK:         true,
+		Action:     "disconnect",
+		Interface:  interfaceName,
 		Checkpoint: &api.NetworkCheckpoint{ID: checkpointID, Status: "pending"},
 	}, nil
 }
