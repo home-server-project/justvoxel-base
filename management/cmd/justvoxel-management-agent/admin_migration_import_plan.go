@@ -190,6 +190,7 @@ func registerAdminMigrationImportRoutes(mux *http.ServeMux, s *server) {
     mux.HandleFunc("GET /v1/admin/migration/import", s.adminMigrationImportDiscover)
     mux.HandleFunc("POST /v1/admin/migration/import/plan", s.adminMigrationImportPlan)
     mux.HandleFunc("POST /v1/admin/migration/import/apply", s.adminMigrationImportApply)
+    mux.HandleFunc("POST /v1/admin/migration/import/resolve", s.adminMigrationImportResolve)
 }
 func (s *server) adminMigrationImportDiscover(w http.ResponseWriter, r *http.Request) {
     if _, ok := s.requireAdministrator(w, r); !ok { return }
