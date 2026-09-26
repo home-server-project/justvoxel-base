@@ -80,6 +80,16 @@
   <section class="backup-restore-review">
     <div class="section-heading"><div><p class="eyebrow">Restore review</p><h2>{{if .RestoreModeTitle}}{{.RestoreModeTitle}}{{else}}Review Restore{{end}}</h2></div><span class="badge">Destructive</span></div>
     {{if .RestoreError}}<div class="notice error"><strong>Restore cannot continue as submitted.</strong><br>{{.RestoreError}}</div>{{end}}
+    {{if .RestoreBlockedResetID}}
+    <form method="post" action="/workspace/backups/restore/resolve-reset" class="backup-restore-reset-recovery">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <input type="hidden" name="operation_id" value="{{.RestoreBlockedResetID}}">
+      <input type="hidden" name="backup_id" value="{{.RestoreRequest.BackupID}}">
+      <input type="hidden" name="mode" value="{{.RestoreRequest.Mode}}">
+      <div class="notice warning"><strong>A previous Full Factory Reset stopped before completion.</strong><br>Keep the current server data, release the blocked operation, and return directly to this Restore review.</div>
+      <div class="action-row"><button type="submit" class="secondary">Keep current server and continue Restore</button></div>
+    </form>
+    {{end}}
     {{if .RestorePlan}}
       {{if .RestorePlan.Normalized}}
       <p>{{.RestoreScope}}</p>
