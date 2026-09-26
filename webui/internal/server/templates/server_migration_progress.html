@@ -8,11 +8,11 @@
     <div class="details">Stage: <strong id="server-migration-operation-stage">{{.StageLabel}}</strong><br>Operation: <code>{{.Operation.OperationID}}</code></div>
 
     <div class="notice" id="server-migration-reconnect-note" hidden><strong>Reconnecting to JustVoxel…</strong><br>The migration operation may still be running. Refreshing or reopening this page does not start another operation.</div>
-    <div class="notice success" id="server-migration-operation-success" {{if ne .Operation.State "succeeded"}}hidden{{end}}><strong>Server migration operation completed successfully.</strong><br>The Management Agent finished its validation and verification sequence.</div>
-    <div class="notice warning" id="server-migration-operation-rollback" {{if ne .Operation.State "rolled_back"}}hidden{{end}}><strong>Server migration operation was rolled back safely.</strong><br>The Management Agent preserved or restored the safe state required by the operation.</div>
+    <div class="notice success" id="server-migration-operation-success" {{if ne .Operation.State "succeeded"}}hidden{{end}}><strong>Server migration operation completed successfully.</strong><br>The JustVoxel finished its validation and verification sequence.</div>
+    <div class="notice warning" id="server-migration-operation-rollback" {{if ne .Operation.State "rolled_back"}}hidden{{end}}><strong>Server migration operation was rolled back safely.</strong><br>The JustVoxel preserved or restored the safe state required by the operation.</div>
     <div class="notice error" id="server-migration-operation-attention" {{if ne .Operation.State "needs_attention"}}hidden{{end}}><strong>Server migration needs administrator attention.</strong><br>Do not start another migration until the preserved operation or recovery state is reviewed.</div>
     <div class="action-row">{{if .CanReviewRecovery}}<a class="button-link" href="/settings/server-migration/recovery">Review Migration Recovery</a>{{end}}<a class="button-link" id="server-migration-dashboard-link" href="/" {{if ne .Operation.State "succeeded"}}hidden{{end}}>Open dashboard</a><a class="button-link secondary" href="/settings/server-migration">Server Migration</a></div>
   </section>
-  <p class="muted">Progress is stored by the JustVoxel Management Agent. Closing, refreshing, or reopening this operation URL reconnects to the same persistent migration operation.</p>
+  <p class="muted">Progress is stored by the JustVoxel. Closing, refreshing, or reopening this operation URL reconnects to the same persistent migration operation.</p>
   <p class="foot">WebUI {{.Version}} · Management API {{.ManagementAPI}}</p>
 </main></body></html>{{end}}
