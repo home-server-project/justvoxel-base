@@ -4037,6 +4037,21 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         actions.append(keep, retry);
         built.panel.appendChild(actions);
       }
+    } else if (operation.state === "needs_attention") {
+      const recovery = document.createElement("div");
+      recovery.className = "notice warning";
+      recovery.innerHTML = "<strong>Minecraft Reset stopped before completion.</strong><br>Review the reset impact and retry the same persistent operation.";
+      built.panel.appendChild(recovery);
+
+      const actions = document.createElement("div");
+      actions.className = "system-reset-actions";
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "danger";
+      retry.textContent = "Retry Reset Minecraft";
+      retry.addEventListener("click", () => planReset("minecraft"));
+      actions.appendChild(retry);
+      built.panel.appendChild(actions);
     }
 
     root.appendChild(built.panel);
