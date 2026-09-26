@@ -22,11 +22,12 @@
 .network-workspace-state{margin:0 0 .75rem;color:#9ca7b0;font-size:.8rem}
 .network-workspace-state:empty{display:none}
 .network-workspace-view{display:grid;gap:.8rem}
-.network-overview{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1rem;border:1px solid #365444;border-radius:14px;background:#16231c}
-.network-overview-primary{display:grid;gap:.2rem}
-.network-overview-primary strong{font-size:1.15rem}
-.network-overview-primary span{color:#9ca7b0;font-size:.78rem}
+.network-overview{margin-top:0}
+.network-overview .section-heading{align-items:flex-start}
+.network-overview-primary{display:grid;gap:.15rem}
+.network-overview-primary h2{margin:0;font-size:1.15rem}
 .network-overview-status{display:flex;justify-content:flex-end;gap:.4rem;flex-wrap:wrap}
+.network-overview-version{margin:.55rem 0 0}
 .network-badge{display:inline-flex;align-items:center;min-height:28px;padding:.28rem .55rem;border:1px solid #3b454e;border-radius:999px;background:#20282e;color:#d5dde3;font-size:.72rem;font-weight:700;text-transform:capitalize}
 .network-badge.good{border-color:#4f8b69;background:#20382b;color:#c8f2d7}
 .network-badge.danger{border-color:#8c4f4a;background:#3a2423;color:#ffc5bd}
@@ -59,7 +60,7 @@
   .network-workspace-dialog{inset:52px .25rem .25rem .25rem!important;width:auto!important;height:auto!important;min-width:0;min-height:0;max-width:none;max-height:none;resize:none;border-radius:12px}
   .network-workspace-header{padding:.85rem .9rem .7rem;cursor:default;touch-action:auto}
   .network-workspace-body{padding:.8rem .9rem}
-  .network-overview{align-items:flex-start;flex-direction:column}
+  .network-overview .section-heading{align-items:flex-start;flex-direction:column}
   .network-overview-status{justify-content:flex-start}
   .network-devices{grid-template-columns:1fr}
 }
@@ -67,7 +68,6 @@
 @media(prefers-color-scheme:light){
   .network-workspace-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025}
   .network-workspace-header{border-color:#d9dfe3}
-  .network-overview{background:#eef7f1;border-color:#a7ccb5}
   .network-device-card,.network-wifi-section,.network-saved{background:#f7f9fa;border-color:#d9dfe3}
   .network-device-details{border-color:#e2e7ea}
   .network-wifi-row,.network-saved-row{background:#fff;border-color:#e2e7ea}
