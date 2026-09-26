@@ -12,19 +12,19 @@ import (
 
 type fakeNetworkAPI struct {
 	*fakeAPI
-	role                 string
-	scanned              string
-	checkpointCreated    api.NetworkCheckpoint
-	checkpointID         string
-	checkpointConfirmed  string
-	checkpointRolledBack string
-	radioEnabled         *bool
-	radioCheckpoint      string
-	wifiConnectInterface string
-	wifiConnectRequest   api.NetworkWiFiConnectRequest
-	wifiDisconnected          string
+	role                     string
+	scanned                  string
+	checkpointCreated        api.NetworkCheckpoint
+	checkpointID             string
+	checkpointConfirmed      string
+	checkpointRolledBack     string
+	radioEnabled             *bool
+	radioCheckpoint          string
+	wifiConnectInterface     string
+	wifiConnectRequest       api.NetworkWiFiConnectRequest
+	wifiDisconnected         string
 	wifiDisconnectCheckpoint string
-	wifiForgotten             string
+	wifiForgotten            string
 }
 
 func (f *fakeNetworkAPI) Session(_ context.Context, session string) (api.SessionInfo, error) {
