@@ -233,7 +233,7 @@ func TestServerImportUsesAgentSourceEntrySelectionAndManualFallback(t *testing.T
 	if page.Code != http.StatusOK {
 		t.Fatalf("source selection page returned %d: %s", page.Code, page.Body.String())
 	}
-	for _, want := range []string{"exports/server.tar.gz", "paper-server", "Manual relative path fallback", "Continue Agent review"} {
+	for _, want := range []string{"exports/server.tar.gz", "paper-server", "Manual relative path fallback", "Continue review"} {
 		if !strings.Contains(page.Body.String(), want) {
 			t.Fatalf("source selection page missing %q: %s", want, page.Body.String())
 		}

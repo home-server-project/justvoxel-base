@@ -51,7 +51,7 @@ func TestSystemUpdateWorkspaceUX(t *testing.T) {
 		".system-update-dialog-header{display:flex",
 		"cursor:move",
 		".system-update-deployment-grid",
-		"grid-template-columns:repeat(auto-fit,minmax(155px,1fr))",
+		"grid-template-columns:1fr",
 		".system-update-reboot-panel",
 		".system-update-option",
 		"@media(max-width:700px)",

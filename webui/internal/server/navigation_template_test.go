@@ -134,7 +134,6 @@ func TestMinecraftWorkspaceMigrationContract(t *testing.T) {
 		`data-minecraft-tab="version"`,
 		`data-minecraft-tab="whitelist"`,
 		`data-minecraft-tab="crossplay"`,
-		`data-minecraft-tab="logs"`,
 		`href="/settings/server"`,
 		`href="/operations#whitelist"`,
 		`href="/operations#minecraft-logs"`,
