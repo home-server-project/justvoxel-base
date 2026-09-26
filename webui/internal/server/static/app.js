@@ -3868,33 +3868,37 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     }
 
     const arm = document.createElement("div");
-    arm.className = "system-reset-arm";
-    const armTitle = document.createElement("strong");
-    armTitle.textContent = "Slide all the way right to arm this reset";
+    arm.className = "destructive-confirmation";
+    const sliderShell = document.createElement("div");
+    sliderShell.className = "destructive-confirm-slider";
+    const armedText = document.createElement("span");
+    armedText.className = "destructive-confirm-slider-text";
+    armedText.textContent = "Slide to confirm reset";
+    const thumb = document.createElement("span");
+    thumb.className = "destructive-confirm-slider-thumb";
+    thumb.setAttribute("aria-hidden", "true");
+    thumb.textContent = ">";
     const slider = document.createElement("input");
     slider.type = "range";
     slider.min = "0";
     slider.max = "100";
     slider.step = "1";
     slider.value = "0";
-    slider.setAttribute("aria-label", "Slide to arm reset");
-    const armedText = document.createElement("span");
-    armedText.className = "muted";
-    armedText.textContent = "Not armed";
-    arm.append(armTitle, slider, armedText);
-    built.panel.appendChild(arm);
+    slider.setAttribute("aria-label", "Slide to confirm reset");
+    sliderShell.append(armedText, thumb, slider);
 
     const finalLabel = document.createElement("label");
-    finalLabel.className = "system-reset-check";
-    const finalConfirm = document.createElement("input");
-    finalConfirm.type = "checkbox";
-    finalConfirm.disabled = true;
+    finalLabel.className = "destructive-confirm-toggle-row";
+    finalLabel.hidden = true;
     const finalCopy = document.createElement("span");
-    finalCopy.textContent = mode === "factory"
-      ? "I understand Full Factory Reset is destructive to appliance-owned local data."
-      : "I understand the current Minecraft server and internal Minecraft data will be removed.";
-    finalLabel.append(finalConfirm, finalCopy);
-    built.panel.appendChild(finalLabel);
+    finalCopy.className = "destructive-confirm-toggle-callout";
+    finalCopy.textContent = "Confirm >";
+    const finalConfirm = document.createElement("input");
+    finalConfirm.className = "destructive-confirm-toggle";
+    finalConfirm.type = "checkbox";
+    finalLabel.append(finalCopy, finalConfirm);
+    arm.append(sliderShell, finalLabel);
+    built.panel.appendChild(arm);
 
     const actions = document.createElement("div");
     actions.className = "system-reset-actions";
@@ -3911,10 +3915,12 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     built.panel.appendChild(actions);
 
     const syncApply = () => {
-      const armed = Number(slider.value) >= 100;
-      arm.classList.toggle("is-armed", armed);
-      armedText.textContent = armed ? "Armed" : "Not armed";
-      finalConfirm.disabled = !armed;
+      const progress = Math.max(0, Math.min(100, Number(slider.value || 0)));
+      sliderShell.style.setProperty("--confirm-progress", String(progress / 100));
+      const armed = progress >= 100;
+      sliderShell.classList.toggle("is-armed", armed);
+      armedText.textContent = armed ? "Reset armed" : "Slide to confirm reset";
+      finalLabel.hidden = !armed;
       if (!armed) finalConfirm.checked = false;
       const playersOK = !playersConfirm || playersConfirm.checked;
       const passwordOK = !password || password.value.length > 0;
