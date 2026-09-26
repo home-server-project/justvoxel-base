@@ -124,6 +124,7 @@ func (a *App) Handler() http.Handler {
 	a.registerAdminSystemUpdatePages(mux)
 	a.registerSystemMonitorRoutes(mux)
 	a.registerUPSRoutes(mux)
+	a.registerNetworkWorkspaceRoutes(mux)
 	a.registerMinecraftWorkspaceRoutes(mux)
 	a.registerSystemWorkspaceRoutes(mux)
 	mux.HandleFunc("GET /api/dashboard-status", a.dashboardStatus)

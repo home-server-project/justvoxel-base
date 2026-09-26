@@ -62,6 +62,7 @@
           <div class="control-tile-grid">
             <button class="control-tile" type="button" data-minecraft-open title="Minecraft overview, settings, whitelist and logs"><strong>Minecraft</strong></button>
             <button class="control-tile" type="button" data-system-open title="System health, history, users, security and version information"><strong>System</strong></button>
+            <button class="control-tile" type="button" data-network-open title="Ethernet, Wi-Fi and current network status"><strong>Network</strong></button>
             <button class="control-tile" type="button" data-system-monitor-open title="Live CPU, memory, storage, network, processes and containers"><strong>System Monitor</strong></button>
             <button class="control-tile nav-admin-only" type="button" data-storage-open title="Disks, partitions, mounts and external USB storage"><strong>Storage</strong></button>
             <button class="control-tile nav-admin-only" type="button" data-backups-open title="Create, schedule, restore and manage backups"><strong>Backups</strong></button>
@@ -150,7 +151,27 @@
   <input type="hidden" value="{{.CSRF}}" data-system-update-csrf>
   <input type="hidden" value="{{.CSRF}}" data-system-monitor-csrf>
   <input type="hidden" value="{{.CSRF}}" data-system-ups-csrf>
+  <input type="hidden" value="{{.CSRF}}" data-network-csrf>
 
+  <dialog class="workspace-window network-workspace-dialog" data-workspace-window="network" data-network-workspace-dialog aria-labelledby="network-workspace-title">
+    <div class="network-workspace-shell">
+      <div class="network-workspace-header" data-workspace-drag-handle>
+        <div>
+          <p class="eyebrow">JustVoxel</p>
+          <h2 id="network-workspace-title">Network</h2>
+        </div>
+        <div class="network-workspace-header-actions">
+          <button class="system-monitor-header-button" type="button" data-network-refresh aria-label="Refresh network" title="Refresh network">↻</button>
+          <button class="system-monitor-header-button" type="button" data-network-close aria-label="Close network">&times;</button>
+        </div>
+      </div>
+      <div class="network-workspace-body">
+        <p class="network-workspace-state" data-network-state>Network status is loaded when this window opens.</p>
+        <div class="network-workspace-content" data-network-content></div>
+      </div>
+      <div class="workspace-resize-grip" data-workspace-resize-handle aria-hidden="true"></div>
+    </div>
+  </dialog>
 
   <dialog class="workspace-window system-workspace-dialog" data-workspace-window="system" data-system-workspace-dialog aria-labelledby="system-workspace-title">
     <div class="system-workspace-shell">
@@ -415,4 +436,5 @@
       </div>
     </div>
   </dialog>
+  <script src="/static/network-workspace.js" defer></script>
 {{end}}
