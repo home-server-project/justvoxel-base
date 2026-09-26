@@ -19,10 +19,10 @@
 
     {{if .Plan.Requirements}}
     <section class="panel">
-      <p class="eyebrow">What the Agent will validate</p>
+      <p class="eyebrow">What JustVoxel will validate</p>
       <div class="notice"><strong>This finalization does not rerun the failed Import and does not copy or replace Minecraft server data.</strong><br>It confirms the reviewed post-rollback safety state and removes retained recovery evidence only after validation succeeds.</div>
-      {{if .Plan.Requirements.RuntimeValidationRequired}}<p>The Management Agent will validate the current JustVoxel runtime before the retained recovery transaction is removed.</p>{{end}}
-      {{if .Plan.Requirements.UnconfiguredValidationRequired}}<p>The Management Agent will verify that fresh-Import runtime files remain absent and Minecraft is inactive before the retained recovery transaction is removed.</p>{{end}}
+      {{if .Plan.Requirements.RuntimeValidationRequired}}<p>The JustVoxel will validate the current JustVoxel runtime before the retained recovery transaction is removed.</p>{{end}}
+      {{if .Plan.Requirements.UnconfiguredValidationRequired}}<p>The JustVoxel will verify that fresh-Import runtime files remain absent and Minecraft is inactive before the retained recovery transaction is removed.</p>{{end}}
       <p class="muted">The Recovery transaction is re-planned and its state identity is checked again when Apply starts. If the retained state changed, finalization is refused.</p>
     </section>
     {{end}}
@@ -36,7 +36,7 @@
       <div class="action-row"><button type="submit">Finalize Migration Recovery</button><a class="button-link secondary" href="/workspace/migration/recovery">Cancel</a></div>
     </form>
   {{else}}
-    <section class="panel"><div class="notice error">{{if .Plan.Error}}{{.Plan.Error}}{{else}}The Management Agent did not approve this retained Recovery state for finalization.{{end}}</div></section>
+    <section class="panel"><div class="notice error">{{if .Plan.Error}}{{.Plan.Error}}{{else}}The JustVoxel did not approve this retained Recovery state for finalization.{{end}}</div></section>
     <div class="action-row"><a class="button-link secondary" href="/workspace/migration/recovery">Back to Migration Recovery</a></div>
   {{end}}
 </div>{{end}}
