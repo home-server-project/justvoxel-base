@@ -108,7 +108,7 @@ type NetworkWiFiMutation struct {
 	Action      string             `json:"action"`
 	Interface   string             `json:"interface,omitempty"`
 	ProfileUUID string             `json:"profile_uuid,omitempty"`
-	Checkpoint *NetworkCheckpoint `json:"checkpoint,omitempty"`
+	Checkpoint  *NetworkCheckpoint `json:"checkpoint,omitempty"`
 }
 
 type NetworkWiFiConnectRequest struct {
