@@ -100,7 +100,6 @@ func TestMigrationWorkspaceExportPreservesSMBFolderAcrossReviewApply(t *testing.
 	}
 }
 
-
 func TestMigrationWorkspaceStatusAndChoiceStyling(t *testing.T) {
 	styles, err := assets.ReadFile("static/app.css")
 	if err != nil {
@@ -128,7 +127,6 @@ func TestMigrationWorkspaceStatusAndChoiceStyling(t *testing.T) {
 		t.Fatal("migration errors are not rendered through the framed error state")
 	}
 }
-
 
 func TestMigrationWorkspaceOffersDirectFailedResetRecovery(t *testing.T) {
 	script, err := assets.ReadFile("static/app.js")

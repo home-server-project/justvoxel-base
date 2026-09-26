@@ -183,7 +183,6 @@ func TestServerMigrationClientMapsAuthorizationErrors(t *testing.T) {
 	}
 }
 
-
 func TestServerMigrationImportPlanAcceptsRichPaperCandidate(t *testing.T) {
 	const fingerprint = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	body := `{"ok":true,"schema_version":"v1","plan_fingerprint":"` + fingerprint + `","warnings":[],"source_entries":[],"candidates":[{"root":"/tmp/source/minecraft","root_relative":"minecraft","sourceType":"itzg-paper","supported":true,"levelName":"world","minecraftVersion":"26.2","onlineMode":true,"gameMode":"survival","difficulty":"normal","whitelistEnabled":true,"enforceWhitelist":true,"maxPlayers":"10","motd":"JustVoxel","javaPortHint":"25565","pluginJarCount":3,"pluginJars":["Geyser-Spigot.jar","ViaVersion.jar","floodgate-spigot.jar"],"geyserEnabled":true,"geyserAuthType":"floodgate","bedrockPortHint":19132,"floodgateEnabled":true,"floodgateKeySha256":"abc"}]}`
