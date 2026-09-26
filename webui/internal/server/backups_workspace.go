@@ -11,6 +11,11 @@ import (
 	"github.com/home-server-project/justvoxel-webui/internal/api"
 )
 
+type backupsWorkspaceFactoryResetRecoveryAPI interface {
+	AdminCurrentFactoryResetOperation(ctx context.Context, session string) (api.PersistentOperationResponse, error)
+	AdminFactoryResetResolve(ctx context.Context, session, operationID string) (api.PersistentOperationResponse, error)
+}
+
 type backupsWorkspaceAPI interface {
 	Session(ctx context.Context, session string) (api.SessionInfo, error)
 	ManualBackup(ctx context.Context, session string) (api.ManualBackupResponse, error)
@@ -80,6 +85,7 @@ type backupsWorkspaceData struct {
 	RestoreOperation             *api.PersistentOperation
 	RestoreStateLabel            string
 	RestoreStageLabel            string
+	RestoreBlockedResetID        string
 }
 
 func (a *App) registerBackupsWorkspaceRoutes(mux *http.ServeMux) {
@@ -91,6 +97,7 @@ func (a *App) registerBackupsWorkspaceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /workspace/backups/destination/apply", a.backupsWorkspaceDestinationApply)
 	mux.HandleFunc("POST /workspace/backups/restore/plan", a.backupsWorkspaceRestorePlan)
 	mux.HandleFunc("POST /workspace/backups/restore/apply", a.backupsWorkspaceRestoreApply)
+	mux.HandleFunc("POST /workspace/backups/restore/resolve-reset", a.backupsWorkspaceRestoreResolveReset)
 }
 
 func (a *App) backupsWorkspaceRequest(w http.ResponseWriter, r *http.Request, requireCSRF bool) (string, backupsWorkspaceAPI, api.SessionInfo, bool) {
@@ -358,6 +365,42 @@ func (a *App) backupsWorkspaceRestoreApply(w http.ResponseWriter, r *http.Reques
 	http.Redirect(w, r, "/workspace/backups?result=restore&restore_operation="+result.Operation.OperationID, http.StatusSeeOther)
 }
 
+func (a *App) backupsWorkspaceRestoreResolveReset(w http.ResponseWriter, r *http.Request) {
+	session, client, identity, ok := a.backupsWorkspaceRequest(w, r, true)
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		a.renderBackupsWorkspace(w, r, session, client, identity, "", "", nil, nil, nil, nil, nil, nil, "Could not read the Restore recovery request.")
+		return
+	}
+	operationID := strings.TrimSpace(r.FormValue("operation_id"))
+	request := api.AdminRestorePlanRequest{
+		BackupID: strings.TrimSpace(r.FormValue("backup_id")),
+		Mode:     strings.TrimSpace(r.FormValue("mode")),
+	}
+	recovery, ok := any(client).(backupsWorkspaceFactoryResetRecoveryAPI)
+	if !ok || operationID == "" {
+		a.renderBackupsWorkspace(w, r, session, client, identity, "", "", nil, nil, nil, nil, &request, nil, "Failed Factory Reset recovery is unavailable.")
+		return
+	}
+	current, err := recovery.AdminCurrentFactoryResetOperation(r.Context(), session)
+	if err != nil || current.Operation == nil || current.Operation.OperationID != operationID || current.Operation.OperationType != "factory_reset" || current.Operation.State != "needs_attention" {
+		a.renderBackupsWorkspace(w, r, session, client, identity, "", "", nil, nil, nil, nil, &request, nil, "The failed Factory Reset is no longer waiting for recovery. Review Restore again.")
+		return
+	}
+	if _, err := recovery.AdminFactoryResetResolve(r.Context(), session, operationID); err != nil {
+		a.renderBackupsWorkspace(w, r, session, client, identity, "", "", nil, nil, nil, nil, &request, nil, apiMessage(err, "Failed Factory Reset could not be resolved."))
+		return
+	}
+	plan, err := client.AdminRestorePlan(r.Context(), session, request)
+	if err != nil {
+		a.renderBackupsWorkspace(w, r, session, client, identity, "", "", nil, nil, nil, nil, &request, nil, apiMessage(err, "Restore planning is unavailable after resolving the failed reset."))
+		return
+	}
+	a.renderBackupsWorkspace(w, r, session, client, identity, "Previous failed Factory Reset was resolved without deleting current data. Review Restore and continue.", "", nil, nil, nil, nil, &request, &plan, "")
+}
+
 func (a *App) renderBackupsWorkspace(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -490,6 +533,14 @@ func (a *App) buildBackupsWorkspaceData(
 		DestinationAvailable:      backupsWorkspaceFormatOptionalBytes(destination.Current.AvailableBytes),
 		DestinationFilesystemSize: backupsWorkspaceFormatOptionalBytes(destination.Current.FilesystemBytes),
 		RestoreError:              restoreError, RestoreOperation: restoreOperation,
+	}
+	if restoreError != "" {
+		if recovery, ok := any(client).(backupsWorkspaceFactoryResetRecoveryAPI); ok {
+			if current, err := recovery.AdminCurrentFactoryResetOperation(r.Context(), session); err == nil && current.Operation != nil &&
+				current.Operation.OperationType == "factory_reset" && current.Operation.State == "needs_attention" {
+				data.RestoreBlockedResetID = current.Operation.OperationID
+			}
+		}
 	}
 	if destinationPlan != nil {
 		data.ProposedDestinationAvailable = backupsWorkspaceFormatOptionalBytes(destinationPlan.Proposed.AvailableBytes)

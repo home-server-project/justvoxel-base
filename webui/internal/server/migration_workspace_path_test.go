@@ -99,3 +99,49 @@ func TestMigrationWorkspaceExportPreservesSMBFolderAcrossReviewApply(t *testing.
 		t.Fatalf("SMB Export folder changed across review/apply: first=%#v second=%#v", parsed, reparsed)
 	}
 }
+
+func TestMigrationWorkspaceStatusAndChoiceStyling(t *testing.T) {
+	styles, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(styles)
+	for _, want := range []string{
+		".migration-workspace-state.is-error",
+		".migration-workspace-state.is-info",
+		".migration-choice:has(input:checked)",
+		".migration-choice input[type=\"radio\"]{position:absolute!important",
+		"opacity:0",
+	} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("migration workspace styling missing %q", want)
+		}
+	}
+
+	script, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(script)
+	if !strings.Contains(js, `setMigrationBusy(error?.message || "Migration operation could not be completed.", "error")`) {
+		t.Fatal("migration errors are not rendered through the framed error state")
+	}
+}
+
+func TestMigrationWorkspaceOffersDirectFailedResetRecovery(t *testing.T) {
+	script, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(script)
+	for _, want := range []string{
+		`fetch("/api/system/workspace/reset/factory/current"`,
+		`fetch("/api/system/workspace/reset/factory/resolve"`,
+		"Keep current server and review again",
+		"Resolving previous failed Factory Reset…",
+	} {
+		if !strings.Contains(js, want) {
+			t.Fatalf("migration failed-reset recovery missing %q", want)
+		}
+	}
+}

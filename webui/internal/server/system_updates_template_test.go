@@ -31,6 +31,7 @@ func TestSystemUpdateWorkspaceUX(t *testing.T) {
 		"data-system-update-backup",
 		"data-system-update-quick",
 		"data-system-update-reboot-button",
+		"class=\"secondary system-update-reboot-button\"",
 		">Back up Minecraft before reboot</strong>",
 		">Quick reboot</strong>",
 	} {
@@ -78,6 +79,7 @@ func TestSystemUpdateWorkspaceUX(t *testing.T) {
 		`latestStatus?.check_state === "update_available"`,
 		"await applySystemUpdate(true)",
 		`updateButton.textContent = "Download & stage"`,
+		`status.staged ? deploymentVersion(status.staged, "Staged image") : "None"`,
 		"fetch(\"/api/system-updates/reboot\"",
 		"Player warning: 10 seconds",
 		"Confirm reboot",

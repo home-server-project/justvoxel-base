@@ -182,3 +182,30 @@ func TestServerMigrationClientMapsAuthorizationErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestServerMigrationImportPlanAcceptsRichPaperCandidate(t *testing.T) {
+	const fingerprint = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	body := `{"ok":true,"schema_version":"v1","plan_fingerprint":"` + fingerprint + `","warnings":[],"source_entries":[],"candidates":[{"root":"/tmp/source/minecraft","root_relative":"minecraft","sourceType":"itzg-paper","supported":true,"levelName":"world","minecraftVersion":"26.2","onlineMode":true,"gameMode":"survival","difficulty":"normal","whitelistEnabled":true,"enforceWhitelist":true,"maxPlayers":"10","motd":"JustVoxel","javaPortHint":"25565","pluginJarCount":3,"pluginJars":["Geyser-Spigot.jar","ViaVersion.jar","floodgate-spigot.jar"],"geyserEnabled":true,"geyserAuthType":"floodgate","bedrockPortHint":19132,"floodgateEnabled":true,"floodgateKeySha256":"abc"}]}`
+
+	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPost || r.URL.Path != adminMigrationImportPlanPath {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})}}
+
+	plan, err := client.AdminMigrationImportPlan(context.Background(), "session-token", AdminMigrationImportRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Candidates) != 1 {
+		t.Fatalf("candidate count = %d, want 1", len(plan.Candidates))
+	}
+	candidate := plan.Candidates[0]
+	if candidate.LevelName != "world" || candidate.MinecraftVersion != "26.2" || candidate.PluginJarCount != 3 || !candidate.GeyserEnabled || !candidate.FloodgateEnabled {
+		t.Fatalf("rich candidate was not preserved: %+v", candidate)
+	}
+	if candidate.OnlineMode == nil || !*candidate.OnlineMode || candidate.WhitelistEnabled == nil || !*candidate.WhitelistEnabled || candidate.EnforceWhitelist == nil || !*candidate.EnforceWhitelist {
+		t.Fatalf("candidate boolean metadata was not preserved: %+v", candidate)
+	}
+}
