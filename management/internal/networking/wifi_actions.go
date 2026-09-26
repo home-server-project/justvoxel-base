@@ -156,7 +156,7 @@ func (c *Client) ConnectWiFi(ctx context.Context, request WiFiConnectRequest) (W
 		return WiFiConnectResult{}, redactSecretError(fmt.Errorf("connect to Wi-Fi: %w", callErr), request.Password)
 	}
 	if !validObjectPath(profilePath) || !validObjectPath(activePath) {
-		return WiFiConnectResult{}, errors.New("NetworkManager returned an invalid Wi-Fi activation")
+		return WiFiConnectResult{ProfileUUID: uuid}, errors.New("NetworkManager returned an invalid Wi-Fi activation")
 	}
 	return WiFiConnectResult{ProfileUUID: uuid}, nil
 }
