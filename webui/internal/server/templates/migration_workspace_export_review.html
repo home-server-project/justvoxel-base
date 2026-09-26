@@ -42,10 +42,6 @@
     <input type="hidden" name="filename" value="{{.Request.Filename}}">
     <input type="hidden" name="plan_fingerprint" value="{{.Plan.PlanFingerprint}}">
     {{if .Plan.Requirements.PlayersConfirmationRequired}}<label><input type="checkbox" name="players_confirmed" value="yes"> I understand that the online players may be interrupted.</label>{{end}}
-    {{if .Plan.Requirements.SMBPasswordRequired}}
-    <label for="server-export-smb-password"><strong>SMB password</strong></label>
-    <input id="server-export-smb-password" type="password" name="smb_password" autocomplete="off" required>
-    {{end}}
     <div class="destructive-confirmation" data-destructive-confirmation data-confirm-value="EXPORT" data-destructive-idle="Slide to confirm Export" data-destructive-armed="Export armed">
       <input type="hidden" name="export_confirmation" data-destructive-value>
       <div class="destructive-confirm-slider" data-destructive-slider-shell>
