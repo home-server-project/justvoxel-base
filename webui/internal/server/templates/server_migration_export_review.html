@@ -31,7 +31,7 @@
     <div class="notice warning"><strong>{{.Plan.Requirements.Online}} player(s) are online.</strong><br>{{range .Plan.Requirements.Players}}{{.}}<br>{{end}}Server Export may briefly interrupt players while JustVoxel prepares the consistent migration snapshot.</div>
     {{end}}
     {{if .Plan.Requirements.SMBPasswordRequired}}
-    <div class="notice"><strong>SMB credential handling</strong><br>The password below is sent only with the final Apply request. It is not part of the reviewed plan, hidden state, URL, or persistent operation journal.</div>
+    <div class="notice"><strong>SMB credential handling</strong><br>JustVoxel requests the SMB password only when you start the reviewed Export. It is sent only with that Apply request and is not part of the reviewed plan, hidden state, URL, or persistent operation journal.</div>
     {{end}}
   </section>
 

@@ -157,7 +157,7 @@ func (a *App) serverMigrationExportApply(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if strings.TrimSpace(r.FormValue("export_confirmation")) != "EXPORT" {
-		a.renderServerMigrationExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), "Type EXPORT exactly to confirm this Server Export.")
+		a.renderServerMigrationExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), "Complete the Export confirmation slider before starting this Server Export.")
 		return
 	}
 	playersConfirmed := r.FormValue("players_confirmed") == "yes"
