@@ -12,14 +12,14 @@ import (
 
 type fakeServerMigrationRecoveryAPI struct {
 	fakeServerMigrationAPI
-	plan       api.AdminMigrationRecoveryPlanResponse
-	planErr    error
-	planCalls  int
-	planReq    api.AdminMigrationRecoveryPlanRequest
-	apply      api.AdminMigrationApplyResponse
-	applyErr   error
-	applyCalls int
-	applyReq   api.AdminMigrationRecoveryApplyRequest
+	plan         api.AdminMigrationRecoveryPlanResponse
+	planErr      error
+	planCalls    int
+	planReq      api.AdminMigrationRecoveryPlanRequest
+	apply        api.AdminMigrationApplyResponse
+	applyErr     error
+	applyCalls   int
+	applyReq     api.AdminMigrationRecoveryApplyRequest
 	resolve      api.AdminMigrationImportResolveResponse
 	resolveErr   error
 	resolveCalls int
@@ -256,7 +256,6 @@ func TestImportNeedsAttentionProgressLinksDirectlyToMigrationRecovery(t *testing
 	}
 }
 
-
 func TestMigrationRecoveryOffersKeepCurrentForOrphanedImport(t *testing.T) {
 	current := &api.PersistentOperation{
 		SchemaVersion: "v1", OperationID: "34567891-1234-4abc-8def-123456789abc", OperationType: "migration_import",
@@ -267,7 +266,7 @@ func TestMigrationRecoveryOffersKeepCurrentForOrphanedImport(t *testing.T) {
 	client := &fakeServerMigrationRecoveryAPI{
 		fakeServerMigrationAPI: fakeServerMigrationAPI{
 			recovery: api.AdminMigrationRecoveryDiscoveryResponse{OK: true, SchemaVersion: "v1", Configured: true, Transactions: []api.AdminMigrationRecoverySummary{}},
-			current: current,
+			current:  current,
 		},
 		resolve: api.AdminMigrationImportResolveResponse{Operation: &api.PersistentOperation{
 			SchemaVersion: "v1", OperationID: current.OperationID, OperationType: "migration_import",
@@ -291,8 +290,8 @@ func TestMigrationRecoveryOffersKeepCurrentForOrphanedImport(t *testing.T) {
 	}
 
 	values := url.Values{
-		"csrf": {"csrf-token"},
-		"operation_id": {current.OperationID},
+		"csrf":               {"csrf-token"},
+		"operation_id":       {current.OperationID},
 		"keep_current_state": {"yes"},
 	}
 	result := httptestResponse(app, recoveryWebRequest(http.MethodPost, "http://example/settings/server-migration/recovery/resolve", values))
