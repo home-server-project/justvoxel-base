@@ -6,37 +6,57 @@ import (
 )
 
 func TestControlCenterNavigationUX(t *testing.T) {
- header, err := assets.ReadFile("templates/header.html")
- if err != nil { t.Fatal(err) }
- markup := string(header)
- navigationStart := strings.Index(markup, `<nav class="control-navigation"`)
- if navigationStart < 0 { t.Fatal("Control Center navigation missing") }
- navigationEnd := strings.Index(markup[navigationStart:], `</nav>`)
- if navigationEnd < 0 { t.Fatal("Control Center navigation missing") }
- navigation := markup[navigationStart:navigationStart+navigationEnd]
- for _, heading := range []string{"Session &amp; power", "Minecraft", "System", "Storage &amp; Data"} {
-  if !strings.Contains(markup, `<span class="control-section-label">`+heading+`</span>`) { t.Fatalf("missing Control Center group %s",heading) }
- }
- previous := -1
- for _, heading := range []string{"Session &amp; power", "Minecraft", "System", "Storage &amp; Data"} {
-  position := strings.Index(markup, `<span class="control-section-label">`+heading+`</span>`)
-  if position <= previous { t.Fatalf("Control Center group %s is out of order", heading) }
-  previous = position
- }
- if strings.Contains(navigation, "Temporary") { t.Fatal("workspace launchers still labeled Temporary") }
- for _, item := range []string{"data-minecraft-open", "data-system-open", "data-network-open", "data-system-monitor-open", "data-system-update-open", "data-storage-open", "data-backups-open", "data-migration-open"} {
-  if strings.Count(navigation,item)!=1 { t.Fatalf("workspace launcher %s must appear once",item) }
- }
- for _, old := range []string{`href="/activity"`, `href="/operations`, `href="/settings/`, `href="/password"`, `href="/about"`} {
-  if strings.Contains(navigation,old) { t.Fatalf("legacy standalone link remains: %s",old) }
- }
- for _, item := range []string{`class="control-tile nav-admin-only" type="button" data-system-update-open`, `class="control-tile nav-admin-only" type="button" data-storage-open`, `class="control-tile nav-admin-only" type="button" data-backups-open`, `class="control-tile nav-admin-only" type="button" data-migration-open`} {
-  if !strings.Contains(navigation,item) { t.Fatalf("administrator launcher lost role restriction: %s",item) }
- }
- if !strings.Contains(markup, `class="nav-logout"`) || !strings.Contains(markup, `data-system-power`) { t.Fatal("session and power actions missing") }
- if !strings.Contains(markup, `class="quick-look-backup-action nav-operator-only" href="/operations#manual-backup"`) {
-  t.Fatal("operator manual backup needs an accessible entry until it has a workspace replacement")
- }
+	header, err := assets.ReadFile("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(header)
+	navigationStart := strings.Index(markup, `<nav class="control-navigation"`)
+	if navigationStart < 0 {
+		t.Fatal("Control Center navigation missing")
+	}
+	navigationEnd := strings.Index(markup[navigationStart:], `</nav>`)
+	if navigationEnd < 0 {
+		t.Fatal("Control Center navigation missing")
+	}
+	navigation := markup[navigationStart : navigationStart+navigationEnd]
+	for _, heading := range []string{"Session &amp; power", "Minecraft", "System", "Storage &amp; Data"} {
+		if !strings.Contains(markup, `<span class="control-section-label">`+heading+`</span>`) {
+			t.Fatalf("missing Control Center group %s", heading)
+		}
+	}
+	previous := -1
+	for _, heading := range []string{"Session &amp; power", "Minecraft", "System", "Storage &amp; Data"} {
+		position := strings.Index(markup, `<span class="control-section-label">`+heading+`</span>`)
+		if position <= previous {
+			t.Fatalf("Control Center group %s is out of order", heading)
+		}
+		previous = position
+	}
+	if strings.Contains(navigation, "Temporary") {
+		t.Fatal("workspace launchers still labeled Temporary")
+	}
+	for _, item := range []string{"data-minecraft-open", "data-system-open", "data-network-open", "data-system-monitor-open", "data-system-update-open", "data-storage-open", "data-backups-open", "data-migration-open"} {
+		if strings.Count(navigation, item) != 1 {
+			t.Fatalf("workspace launcher %s must appear once", item)
+		}
+	}
+	for _, old := range []string{`href="/activity"`, `href="/operations`, `href="/settings/`, `href="/password"`, `href="/about"`} {
+		if strings.Contains(navigation, old) {
+			t.Fatalf("legacy standalone link remains: %s", old)
+		}
+	}
+	for _, item := range []string{`class="control-tile nav-admin-only" type="button" data-system-update-open`, `class="control-tile nav-admin-only" type="button" data-storage-open`, `class="control-tile nav-admin-only" type="button" data-backups-open`, `class="control-tile nav-admin-only" type="button" data-migration-open`} {
+		if !strings.Contains(navigation, item) {
+			t.Fatalf("administrator launcher lost role restriction: %s", item)
+		}
+	}
+	if !strings.Contains(markup, `class="nav-logout"`) || !strings.Contains(markup, `data-system-power`) {
+		t.Fatal("session and power actions missing")
+	}
+	if !strings.Contains(markup, `class="quick-look-backup-action nav-operator-only" href="/operations#manual-backup"`) {
+		t.Fatal("operator manual backup needs an accessible entry until it has a workspace replacement")
+	}
 }
 
 func TestMinecraftWorkspaceMigrationContract(t *testing.T) {
