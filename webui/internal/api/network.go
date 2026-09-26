@@ -114,8 +114,8 @@ type NetworkWiFiMutation struct {
 type NetworkWiFiConnectRequest struct {
 	CheckpointID  string
 	ProfileUUID   string
-	SSID           string
-	BSSID          string
+	SSID          string
+	BSSID         string
 	KeyManagement string
 	Password      string
 	Hidden        bool
