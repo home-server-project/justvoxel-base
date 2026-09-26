@@ -43,6 +43,11 @@
 
   {{if .Message}}<div class="notice success">{{.Message}}</div>{{end}}
   {{if .Error}}<div class="notice error">{{.Error}}</div>{{end}}
+  <div class="notice error dashboard-attention" id="dashboard-attention" {{if not .Attention}}hidden{{end}}>
+    <strong id="dashboard-attention-title">{{if .Attention}}{{.Attention.Title}}{{end}}</strong>
+    <span id="dashboard-attention-status">{{if .Attention}}{{.Attention.Status}}{{end}}</span>
+    <a class="button-link secondary" id="dashboard-attention-action" href="{{if .Attention}}{{.Attention.Action}}{{else}}#{{end}}" {{if or (not .Attention) (not .Attention.Action)}}hidden{{end}}>{{if .Attention}}{{.Attention.Label}}{{end}}</a>
+  </div>
 
   {{if .ConfirmAction}}
   <section class="panel confirmation {{if eq .ConfirmAction "stop"}}role-admin{{else}}role-admin-or-operator{{end}}">

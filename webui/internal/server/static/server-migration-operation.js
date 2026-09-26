@@ -13,6 +13,7 @@ function initServerMigrationOperation(root = document) {
   const rollbackNote = root.querySelector("#server-migration-operation-rollback");
   const attentionNote = root.querySelector("#server-migration-operation-attention");
   const dashboardLink = root.querySelector("#server-migration-dashboard-link");
+  const recoveryLink = root.querySelector("#server-migration-recovery-link");
   let failures = 0;
   let finished = false;
 
@@ -95,6 +96,7 @@ function initServerMigrationOperation(root = document) {
     if (rollbackNote) rollbackNote.hidden = !rolledBack;
     if (attentionNote) attentionNote.hidden = !needsAttention;
     if (dashboardLink) dashboardLink.hidden = !succeeded;
+    if (recoveryLink) recoveryLink.hidden = !(needsAttention && operation.operation_type === "migration_import");
     if (terminalState(operation.state)) finished = true;
   };
 

@@ -86,6 +86,7 @@ type backupsWorkspaceData struct {
 	RestoreStateLabel            string
 	RestoreStageLabel            string
 	RestoreBlockedResetID        string
+	RestoreRetryAvailable        bool
 }
 
 func (a *App) registerBackupsWorkspaceRoutes(mux *http.ServeMux) {
@@ -534,7 +535,7 @@ func (a *App) buildBackupsWorkspaceData(
 		DestinationFilesystemSize: backupsWorkspaceFormatOptionalBytes(destination.Current.FilesystemBytes),
 		RestoreError:              restoreError, RestoreOperation: restoreOperation,
 	}
-	if restoreError != "" {
+	if restoreError != "" && strings.Contains(restoreError, "Full Factory Reset") {
 		if recovery, ok := any(client).(backupsWorkspaceFactoryResetRecoveryAPI); ok {
 			if current, err := recovery.AdminCurrentFactoryResetOperation(r.Context(), session); err == nil && current.Operation != nil &&
 				current.Operation.OperationType == "factory_reset" && current.Operation.State == "needs_attention" {
@@ -542,6 +543,7 @@ func (a *App) buildBackupsWorkspaceData(
 			}
 		}
 	}
+	data.RestoreRetryAvailable = restoreError != "" && strings.Contains(restoreError, "player status could not be checked safely")
 	if destinationPlan != nil {
 		data.ProposedDestinationAvailable = backupsWorkspaceFormatOptionalBytes(destinationPlan.Proposed.AvailableBytes)
 		data.ProposedDestinationSize = backupsWorkspaceFormatOptionalBytes(destinationPlan.Proposed.FilesystemBytes)

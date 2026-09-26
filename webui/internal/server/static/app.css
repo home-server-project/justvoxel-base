@@ -660,6 +660,7 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .migration-workspace-body>[data-migration-workspace-content]{flex:1;min-height:0;overflow:auto}
 .migration-workspace-content{max-width:none!important;margin:0!important;padding:0!important}
 .migration-workspace-content>.title-row,.migration-workspace-content>.foot{display:none}
+.migration-workspace-content [hidden]{display:none!important}
 .migration-workspace-content>.muted:first-child{margin:.1rem 0 .65rem}
 .migration-workspace-content .panel{margin:.65rem 0;padding:.85rem}
 .migration-workspace-content .panel:first-of-type{margin-top:0}

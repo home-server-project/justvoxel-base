@@ -62,7 +62,11 @@ func executeMigrationImportTransaction(parent context.Context,store *operationSt
         default:return errors.New("server migration Import helper returned an unsupported event")
         }
     })
-    if err!=nil{_ = markMigrationImportNeedsAttention(store,operationID,"import_backend_interrupted","Server migration Import backend stopped unexpectedly; preserved Import or runtime state requires administrator attention.");return err}
+    if err!=nil{
+        if finalSeen{return nil}
+        _ = markMigrationImportNeedsAttention(store,operationID,"import_backend_interrupted","Server migration Import backend stopped unexpectedly before a final safety result; retained Import or runtime state requires administrator attention.")
+        return err
+    }
     if !finalSeen{err:=errors.New("server migration Import helper ended without a final result");_ = markMigrationImportNeedsAttention(store,operationID,"import_backend_incomplete","Server migration Import backend ended without a final safety result; administrator attention is required.");return err}
     return nil
 }

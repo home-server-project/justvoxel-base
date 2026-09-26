@@ -111,6 +111,7 @@ func TestMigrationWorkspaceStatusAndChoiceStyling(t *testing.T) {
 		".migration-workspace-state.is-info",
 		".migration-choice:has(input:checked)",
 		".migration-choice input[type=\"radio\"]{position:absolute!important",
+		".migration-workspace-content [hidden]{display:none!important}",
 		"opacity:0",
 	} {
 		if !strings.Contains(css, want) {
@@ -125,6 +126,20 @@ func TestMigrationWorkspaceStatusAndChoiceStyling(t *testing.T) {
 	js := string(script)
 	if !strings.Contains(js, `setMigrationBusy(error?.message || "Migration operation could not be completed.", "error")`) {
 		t.Fatal("migration errors are not rendered through the framed error state")
+	}
+	operationScript, err := assets.ReadFile("static/server-migration-operation.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	operationJS := string(operationScript)
+	for _, want := range []string{
+		`root.querySelector("#server-migration-recovery-link")`,
+		`recoveryLink.hidden = !(needsAttention && operation.operation_type === "migration_import")`,
+		`dashboardLink.hidden = !succeeded`,
+	} {
+		if !strings.Contains(operationJS, want) {
+			t.Fatalf("migration operation behavior missing %q", want)
+		}
 	}
 }
 

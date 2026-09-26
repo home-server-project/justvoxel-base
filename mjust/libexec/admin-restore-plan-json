@@ -110,27 +110,26 @@ if [[ ${metadata_status} == valid ]]; then
 fi
 relation="$(jv_restore_version_relation "${backup_version_mode}" "${backup_version}" "${MINECRAFT_VERSION_MODE}" "${MINECRAFT_VERSION}")"
 
-players_json="$(/usr/libexec/justvoxel/mjust/web-status-json players 2>/dev/null)" || {
-    emit_plan_error player_status_unavailable 'Minecraft player status could not be checked safely.'
-    exit 0
-}
-if ! jq -e '
-    type == "object"
-    and (.state | type == "string")
-    and (.online | type == "number")
-    and (.names | type == "array")
-' >/dev/null 2>&1 <<< "${players_json}"; then
-    emit_plan_error player_status_unavailable 'Minecraft player status could not be checked safely.'
+players_json=''
+player_state=''
+for player_status_attempt in 1 2 3; do
+    players_json="$(/usr/libexec/justvoxel/mjust/web-status-json players 2>/dev/null || true)"
+    if jq -e '
+        type == "object"
+        and (.state | type == "string")
+        and (.online | type == "number")
+        and (.names | type == "array")
+        and (.state == "running" or .state == "stopped")
+    ' >/dev/null 2>&1 <<< "${players_json}"; then
+        player_state="$(jq -r '.state' <<< "${players_json}")"
+        break
+    fi
+    (( player_status_attempt < 3 )) && sleep 1
+done
+if [[ ${player_state} != running && ${player_state} != stopped ]]; then
+    emit_plan_error player_status_unavailable 'Minecraft player status could not be checked safely. Wait a few seconds and retry Restore.'
     exit 0
 fi
-player_state="$(jq -r '.state' <<< "${players_json}")"
-case "${player_state}" in
-    running|stopped) ;;
-    *)
-        emit_plan_error player_status_unavailable 'Minecraft player status could not be checked safely.'
-        exit 0
-        ;;
-esac
 online="$(jq -r '.online' <<< "${players_json}")"
 players="$(jq -c '.names' <<< "${players_json}")"
 players_confirmation_required=false

@@ -85,6 +85,8 @@ for text in \
     '.justvoxel-restore-*' \
     'jv_restore_archive_identity' \
     'web-status-json players' \
+    'for player_status_attempt in 1 2 3' \
+    'Wait a few seconds and retry Restore.' \
     'backup_newer' \
     'archive_integrity_validation_on_apply' \
     'archive_safety_validation_on_apply' \
