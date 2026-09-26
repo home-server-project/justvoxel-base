@@ -23,7 +23,7 @@ var adminFactoryResetPlanTimeout = 20 * time.Second
 var adminFactoryResetWorkerTimeout = 5 * time.Minute
 
 var runAdminFactoryResetHelper = func(ctx context.Context, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, adminFactoryResetHelper, args...).CombinedOutput()
+	return exec.CommandContext(ctx, adminFactoryResetHelper, args...).Output()
 }
 
 var resetFactoryAuthenticationState = resetAuthenticationStateForFactoryReset
@@ -63,6 +63,11 @@ type adminFactoryResetApplyRequest struct {
 	PlanFingerprint string `json:"plan_fingerprint"`
 	ConfirmPlayers  bool   `json:"confirm_players"`
 	SystemPassword  string `json:"system_password"`
+}
+
+type adminFactoryResetResolveRequest struct {
+	OperationID      string `json:"operation_id"`
+	KeepCurrentState bool   `json:"keep_current_state"`
 }
 
 type adminFactoryResetApplyResponse struct {
@@ -117,6 +122,7 @@ type factoryResetFingerprintPayload struct {
 func registerAdminFactoryResetRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("POST /v1/admin/reset/factory/plan", s.adminFactoryResetPlan)
 	mux.HandleFunc("POST /v1/admin/reset/factory/apply", s.adminFactoryResetApply)
+	mux.HandleFunc("POST /v1/admin/reset/factory/resolve", s.adminFactoryResetResolve)
 }
 
 func (s *server) adminFactoryResetPlan(w http.ResponseWriter, r *http.Request) {
@@ -129,6 +135,46 @@ func (s *server) adminFactoryResetPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, plan)
+}
+
+func (s *server) adminFactoryResetResolve(w http.ResponseWriter, r *http.Request) {
+	actor, ok := s.requireAdministrator(w, r)
+	if !ok {
+		return
+	}
+	if s.operations == nil {
+		writeError(w, http.StatusServiceUnavailable, "factory reset operation tracking is unavailable")
+		return
+	}
+	var request adminFactoryResetResolveRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8*1024))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid factory reset resolution request")
+		return
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		writeError(w, http.StatusBadRequest, "invalid factory reset resolution request")
+		return
+	}
+	if !request.KeepCurrentState {
+		writeError(w, http.StatusBadRequest, "explicit keep-current-state confirmation is required")
+		return
+	}
+	operation, err := s.operations.resolveFactoryReset(request.OperationID, "Failed Full Factory Reset was resolved without retrying; current server state was kept unchanged.")
+	if err != nil {
+		if errors.Is(err, errOperationNotFound) {
+			writeError(w, http.StatusNotFound, "factory reset operation was not found")
+			return
+		}
+		writeError(w, http.StatusConflict, "factory reset operation cannot be resolved in its current state")
+		return
+	}
+	if s.store != nil {
+		_ = s.store.recordAuditEvent(actor, "factory_reset_resolve", operation.OperationID, true, "Failed Full Factory Reset resolved without destructive retry")
+	}
+	writeJSON(w, http.StatusOK, adminOperationResponse{Operation: &operation})
 }
 
 func (s *server) adminFactoryResetApply(w http.ResponseWriter, r *http.Request) {

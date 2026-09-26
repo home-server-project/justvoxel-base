@@ -1,0 +1,69 @@
+name: PR full source verification
+
+on:
+  pull_request:
+    branches: [testing]
+
+permissions:
+  contents: read
+
+jobs:
+  source-tests:
+    name: Shell and management source tests
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Go
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6
+        with:
+          go-version: '1.25.x'
+          check-latest: true
+          cache: false
+
+      - name: Install PAM source-test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libpam0g-dev libpwquality-dev
+
+      - name: Run shell and mjust regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for script in \
+            build_files/*.sh \
+            build_files/validate/*.sh \
+            mjust/bin/mjust \
+            mjust/libexec/* \
+            runtime/* \
+            tests/*.sh; do
+            [[ -f "${script}" ]] || continue
+            bash -n "${script}"
+          done
+          for test_script in tests/test-*.sh; do
+            [[ -f "${test_script}" ]] || continue
+            bash "${test_script}"
+          done
+
+      - name: Check WebUI JavaScript syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          for script in webui/internal/server/static/*.js; do
+            [[ -f "${script}" ]] || continue
+            node --check "${script}"
+          done
+
+      - name: Build and test management agent source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd management
+          go mod download
+          CGO_ENABLED=1 go vet ./...
+          CGO_ENABLED=1 go test ./...
+          CGO_ENABLED=1 go build -trimpath -o /tmp/management-agent ./cmd/justvoxel-management-agent
+          /tmp/management-agent version

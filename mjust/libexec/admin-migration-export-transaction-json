@@ -188,6 +188,14 @@ case "$kind" in
         [[ -n "$actual" ]] || { failure_status='Temporary SMB export target identity could not be verified.'; exit 1; }
         JV_MIGRATION_OWNED_MOUNT="$JV_MIGRATION_MEDIA_MOUNT"
         target_root="$JV_MIGRATION_MEDIA_MOUNT"
+        if [[ -n "$path" ]]; then
+            [[ "$path" != /* && "$path" != */ && "$path" != *$'\n'* && "$path" != *$'\r'* ]] || { failure_status='Reviewed SMB destination folder is invalid.'; exit 1; }
+            case "/$path/" in
+                *"/../"*|*"/./"*|*"//"*) failure_status='Reviewed SMB destination folder is invalid.'; exit 1 ;;
+            esac
+            target_root="$JV_MIGRATION_MEDIA_MOUNT/$path"
+            install -d -m0700 -o root -g root "$target_root" || { failure_status='Reviewed SMB destination folder could not be created.'; exit 1; }
+        fi
         ;;
     *)
         failure_status='Reviewed export target kind is unsupported.'

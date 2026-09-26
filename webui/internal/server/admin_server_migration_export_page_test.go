@@ -282,3 +282,30 @@ func TestServerMigrationProgressEndpointReconnectsToExportJournal(t *testing.T) 
 		t.Fatalf("unexpected Server Migration progress response: %#v", response)
 	}
 }
+
+func TestServerExportSMBNormalNetworkFolderIsSplitAndPreserved(t *testing.T) {
+	client := &fakeServerMigrationExportAPI{
+		fakeServerMigrationAPI: fakeServerMigrationAPI{exportDiscovery: exportDiscoveryFixture()},
+		plan:                   exportPlanFixture("smb", false),
+	}
+	client.plan.Normalized.Path = "TEMP"
+	client.plan.Normalized.TargetDisplay = "//192.168.0.50/storage/TEMP/justvoxel-migration-test.tar.gz"
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := url.Values{
+		"csrf": {"csrf-token"}, "kind": {"smb"}, "source": {"//192.168.0.50/storage/TEMP"},
+		"username": {"iegor"}, "filename": {"justvoxel-migration-test.tar.gz"},
+	}
+	page := httptestResponse(app, exportWebRequest(http.MethodPost, "http://example/settings/server-migration/export/review", values))
+	if page.Code != http.StatusOK {
+		t.Fatalf("SMB folder Export review returned %d: %s", page.Code, page.Body.String())
+	}
+	if client.planReq.Source != "//192.168.0.50/storage" || client.planReq.Path != "TEMP" {
+		t.Fatalf("normal SMB folder was not split internally: %#v", client.planReq)
+	}
+	if !strings.Contains(page.Body.String(), `name="path" value="TEMP"`) {
+		t.Fatalf("review did not preserve SMB subfolder: %s", page.Body.String())
+	}
+}

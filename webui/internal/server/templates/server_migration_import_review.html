@@ -40,11 +40,17 @@
     <input type="hidden" name="backup_domain" value="{{.Request.Destination.Backups.Domain}}">
 
     {{if .NeedsSourcePath}}
-    <section class="panel">
-      <p class="eyebrow">JustVoxel-discovered source entries</p>
-      {{range .Plan.SourceEntries}}<label><input type="radio" name="source_path" value="{{.Path}}"> <strong>{{.Kind}}</strong> · <code>{{.Path}}</code></label>{{end}}
-      <label for="server-import-manual-path"><strong>Manual relative path fallback</strong></label>
-      <input id="server-import-manual-path" name="manual_path" placeholder="folder/server-or-archive.tar.gz" autocomplete="off">
+    <section class="panel migration-source-picker">
+      <p class="eyebrow">Backups and servers found here</p>
+      <p class="muted compact">Choose what you want to import. JustVoxel found these entries automatically.</p>
+      <div class="migration-choice-list">
+        {{range .Plan.SourceEntries}}<label class="migration-choice"><input type="radio" name="source_path" value="{{.Path}}"><span><strong>{{if eq .Kind "archive"}}Backup archive{{else}}Server folder{{end}}</strong><small>{{.Path}}</small></span></label>{{end}}
+      </div>
+      <details class="migration-advanced">
+        <summary>Advanced: enter a path manually</summary>
+        <label for="server-import-manual-path"><strong>Path inside this source</strong></label>
+        <input id="server-import-manual-path" name="manual_path" placeholder="folder/server-or-archive.tar.gz" autocomplete="off">
+      </details>
     </section>
     {{end}}
 

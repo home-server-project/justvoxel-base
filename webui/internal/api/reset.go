@@ -18,6 +18,7 @@ const (
 	adminMinecraftResetApplyPath = "/v1/admin/reset/minecraft/apply"
 	adminFactoryResetPlanPath    = "/v1/admin/reset/factory/plan"
 	adminFactoryResetApplyPath   = "/v1/admin/reset/factory/apply"
+	adminFactoryResetResolvePath = "/v1/admin/reset/factory/resolve"
 )
 
 var (
@@ -93,6 +94,45 @@ func (c *Client) AdminFactoryResetApply(ctx context.Context, session string, req
 		return AdminResetApplyResponse{}, errors.New("invalid factory reset request")
 	}
 	return c.adminResetApply(ctx, session, adminFactoryResetApplyPath, request, "factory_reset")
+}
+
+func (c *Client) AdminFactoryResetResolve(ctx context.Context, session, operationID string) (PersistentOperationResponse, error) {
+	var out PersistentOperationResponse
+	if !persistentOperationIDPattern.MatchString(operationID) {
+		return out, errors.New("invalid factory reset operation id")
+	}
+	data, err := json.Marshal(map[string]any{"operation_id": operationID, "keep_current_state": true})
+	if err != nil {
+		return out, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://unix"+adminFactoryResetResolvePath, bytes.NewReader(data))
+	if err != nil {
+		return out, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+session)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return out, fmt.Errorf("management API unavailable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		return out, ErrUnauthorized
+	}
+	if resp.StatusCode == http.StatusForbidden {
+		return out, ErrPasswordChangeRequired
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return out, readResponseError(resp)
+	}
+	if err := decodePersistentOperationResponse(resp.Body, &out); err != nil {
+		return out, fmt.Errorf("management API returned invalid factory reset resolution response: %w", err)
+	}
+	if out.Operation == nil || out.Operation.OperationType != "factory_reset" || out.Operation.State != "resolved" {
+		return out, errors.New("management API returned unsupported factory reset resolution")
+	}
+	return out, nil
 }
 
 func (c *Client) adminResetPlan(ctx context.Context, session, path, mode string) (AdminResetPlanResponse, error) {

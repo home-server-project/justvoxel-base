@@ -51,7 +51,7 @@ candidate_with_relative_roots() {
 }
 plan() {
     local request source selected_root supplied_version source_path source_identity source_info expanded is_native native_manifest=''
-    local temp staging detection_base detection candidates count selected source_class candidate_type props_online manifest_online online_state source_version
+    local temp staging detection_base detection candidates count selected source_class candidate_type props_online manifest_online online_state source_version source_entries
     local source_game source_diff source_whitelist source_enforce source_max source_motd java_hint bedrock_hint source_bedrock_manifest
     local source_geyser source_geyser_auth source_floodgate plugin_count plugin_names bedrock_enabled=false bedrock_managed=true
     local configured warnings='[]' req_online=false req_vanilla=false req_plugins=false player_json minecraft_state=stopped online=0 players='[]' players_confirm=false
@@ -125,7 +125,24 @@ plan() {
     detection="$(candidate_with_relative_roots "$detection" "$detection_base")"
     candidates="$(jq -c '.candidates' <<< "$detection")"
     count="$(jq -r 'length' <<< "$candidates")"
-    if (( count == 0 )); then [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error no_server 'No recognizable Minecraft server root was found.'; return 0; fi
+    if (( count == 0 )); then
+        if [[ -d ${source_path} && -n ${JV_MIGRATION_IMPORT_SOURCE_BASE:-} ]]; then
+            source_entries="$(jv_migration_import_source_entries_json "$source_path")"
+            if [[ -n ${requested_source_path} ]]; then
+                source_entries="$(jq -c --arg prefix "${requested_source_path%/}" 'map(.path = (if .path=="." then $prefix else $prefix + "/" + .path end))' <<< "$source_entries")"
+            fi
+            if jq -e 'length > 0' >/dev/null 2>&1 <<< "$source_entries"; then
+                [[ -n ${temp:-} ]] && rm -rf -- "$temp"
+                trap - RETURN 2>/dev/null || true
+                emit_error source_selection_required 'Choose an Import archive or server directory from this location.' '[]' "$source_entries"
+                return 0
+            fi
+        fi
+        [[ -n ${temp:-} ]] && rm -rf -- "$temp"
+        trap - RETURN 2>/dev/null || true
+        emit_error no_server 'No recognizable Minecraft server root or importable backup was found.'
+        return 0
+    fi
     if [[ -n ${selected_root} ]]; then
         selected="$(jq -c --arg root "$selected_root" '.[] | select(.root_relative==$root)' <<< "$candidates" | head -n1)"
         [[ -n ${selected} ]] || { [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error stale_root 'The selected Minecraft root no longer exists.' "$candidates"; return 0; }

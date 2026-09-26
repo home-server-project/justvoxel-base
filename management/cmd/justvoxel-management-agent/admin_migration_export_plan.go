@@ -30,7 +30,7 @@ var runAdminMigrationExportPlanHelper = func(ctx context.Context, action string,
 	if len(request) > 0 {
 		cmd.Stdin = bytes.NewReader(request)
 	}
-	return cmd.CombinedOutput()
+	return cmd.Output()
 }
 
 type adminMigrationExportTargetRequest struct {
@@ -285,6 +285,10 @@ func validateSuccessfulAdminMigrationExportPlan(request adminMigrationExportTarg
 		if !strings.HasPrefix(n.Path, "/") {
 			return errors.New("configured backup export path is invalid")
 		}
+	case "smb":
+		if n.Path != request.Path {
+			return errors.New("SMB export folder mismatch")
+		}
 	default:
 		if n.Path != "" {
 			return errors.New("unexpected export path")
@@ -350,6 +354,21 @@ func adminMigrationExportPlanFingerprint(schemaVersion string, normalized *admin
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
+func validMigrationRelativeFolder(value string) bool {
+	if value == "" {
+		return true
+	}
+	if strings.HasPrefix(value, "/") || strings.HasSuffix(value, "/") {
+		return false
+	}
+	for _, part := range strings.Split(value, "/") {
+		if part == "" || part == "." || part == ".." {
+			return false
+		}
+	}
+	return true
+}
+
 func validAdminMigrationExportTargetRequest(request adminMigrationExportTargetRequest) bool {
 	if !migrationExportFilenamePattern.MatchString(request.Filename) || len(request.Filename) > 160 {
 		return false
@@ -369,7 +388,7 @@ func validAdminMigrationExportTargetRequest(request adminMigrationExportTargetRe
 	case "nfs":
 		return request.Path == "" && request.Device == "" && request.Source != "" && request.Username == "" && request.Domain == ""
 	case "smb":
-		return request.Path == "" && request.Device == "" && request.Source != "" && request.Username != ""
+		return validMigrationRelativeFolder(request.Path) && request.Device == "" && request.Source != "" && request.Username != ""
 	default:
 		return false
 	}

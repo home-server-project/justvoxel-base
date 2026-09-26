@@ -195,8 +195,22 @@ plan() {
                 return 0
             }
             [[ -n "$username" ]] || { emit_error invalid_credentials 'SMB username is required.'; return 0; }
-            target_identity_value="smb:$(printf '%s\n%s\n%s\n' "$source" "$username" "$domain" | sha256sum | awk '{print $1}')"
-            target_display="$source/$filename"
+            if [[ -n "$path" ]]; then
+                [[ "$path" != /* && "$path" != */ && "$path" != *$'\n'* && "$path" != *$'\r'* ]] || {
+                    emit_error invalid_target 'SMB destination folder is invalid.'
+                    return 0
+                }
+                case "/$path/" in
+                    *"/../"*|*"/./"*|*"//"*) emit_error invalid_target 'SMB destination folder is invalid.'; return 0 ;;
+                esac
+            fi
+            normalized_path="$path"
+            target_identity_value="smb:$(printf '%s\n%s\n%s\n%s\n' "$source" "$username" "$domain" "$normalized_path" | sha256sum | awk '{print $1}')"
+            if [[ -n "$normalized_path" ]]; then
+                target_display="$source/$normalized_path/$filename"
+            else
+                target_display="$source/$filename"
+            fi
             warnings="$(append_warning "$warnings" temporary_network 'JustVoxel will mount this SMB destination temporarily using an Apply-only credential. No persistent fstab entry is created.')"
             ;;
         *)

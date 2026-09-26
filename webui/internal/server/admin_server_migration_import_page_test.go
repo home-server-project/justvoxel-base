@@ -233,7 +233,7 @@ func TestServerImportUsesAgentSourceEntrySelectionAndManualFallback(t *testing.T
 	if page.Code != http.StatusOK {
 		t.Fatalf("source selection page returned %d: %s", page.Code, page.Body.String())
 	}
-	for _, want := range []string{"exports/server.tar.gz", "paper-server", "Manual relative path fallback", "Continue review"} {
+	for _, want := range []string{"exports/server.tar.gz", "paper-server", "Advanced: enter a path manually", "Continue review"} {
 		if !strings.Contains(page.Body.String(), want) {
 			t.Fatalf("source selection page missing %q: %s", want, page.Body.String())
 		}
@@ -379,5 +379,29 @@ func TestServerImportSourceVersionAndMultipleRootPrompts(t *testing.T) {
 				t.Fatalf("%s prompt returned %d: %s", tc.code, page.Code, page.Body.String())
 			}
 		})
+	}
+}
+
+func TestServerImportSMBNormalNetworkFolderIsSplitInternally(t *testing.T) {
+	client := &fakeServerMigrationImportAPI{
+		fakeServerMigrationAPI: fakeServerMigrationAPI{
+			exportDiscovery: importMediaFixture(),
+			importDiscovery: importDiscoveryFixture(true),
+		},
+		plan: successfulImportPlan("replace"),
+	}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := configuredImportRequestValues("smb")
+	values.Set("source_remote", "//192.168.0.50/storage/TEMP")
+	values.Del("source_path")
+	page := httptestResponse(app, importWebRequest(http.MethodPost, "http://example/settings/server-migration/import/review", values))
+	if page.Code != http.StatusOK {
+		t.Fatalf("SMB folder Import review returned %d: %s", page.Code, page.Body.String())
+	}
+	if client.planReq.Source.Source != "//192.168.0.50/storage" || client.planReq.Source.Path != "TEMP" {
+		t.Fatalf("normal SMB folder was not split internally: %#v", client.planReq.Source)
 	}
 }

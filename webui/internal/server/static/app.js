@@ -1908,6 +1908,24 @@ if (migrationOpen && migrationDialog) {
   let loadSequence = 0;
   let migrationSourceSMBPassword = "";
   let migrationExportSMBPassword = "";
+  let migrationLoadController = null;
+  let migrationSubmitController = null;
+
+  const setMigrationBusy = (message = "") => {
+    if (state) {
+      state.textContent = message;
+      state.classList.toggle("is-busy", Boolean(message));
+    }
+    migrationDialog.classList.toggle("is-busy", Boolean(message));
+  };
+
+  const abortMigrationRequests = () => {
+    migrationLoadController?.abort();
+    migrationSubmitController?.abort();
+    migrationLoadController = null;
+    migrationSubmitController = null;
+    setMigrationBusy("");
+  };
 
   const requestMigrationSMBPassword = (purpose) => new Promise((resolve) => {
     const dialog = document.createElement("dialog");
@@ -2087,9 +2105,13 @@ if (migrationOpen && migrationDialog) {
       if (action.origin !== window.location.origin || !action.pathname.startsWith("/workspace/migration")) return;
 
       event.preventDefault();
+      migrationSubmitController?.abort();
+      const submitController = new AbortController();
+      migrationSubmitController = submitController;
       const submitter = event.submitter;
       if (submitter) submitter.disabled = true;
-      if (state) state.textContent = "Working…";
+      const isReview = action.pathname.endsWith("/review");
+      setMigrationBusy(isReview ? "Inspecting source and building review…" : "Starting reviewed migration…");
 
       try {
         const body = new URLSearchParams();
@@ -2101,7 +2123,7 @@ if (migrationOpen && migrationDialog) {
             const password = await requestMigrationSMBPassword("import");
             if (password === null) {
               if (submitter) submitter.disabled = false;
-              if (state) state.textContent = "";
+              setMigrationBusy("");
               return;
             }
             migrationSourceSMBPassword = password;
@@ -2117,7 +2139,7 @@ if (migrationOpen && migrationDialog) {
             const password = await requestMigrationSMBPassword("export");
             if (password === null) {
               if (submitter) submitter.disabled = false;
-              if (state) state.textContent = "";
+              setMigrationBusy("");
               return;
             }
             migrationExportSMBPassword = password;
@@ -2135,23 +2157,30 @@ if (migrationOpen && migrationDialog) {
           body: body.toString(),
           cache: "no-store",
           redirect: "follow",
+          signal: submitController.signal,
         });
         if (await handleMigrationAuth(response)) return;
         if (response.status === 403) throw new Error("Administrator access required.");
 
         const responseMarkup = await response.text();
         if (!response.ok && !responseMarkup.includes("data-migration-workspace-root")) {
-          throw new Error("Migration operation could not be completed.");
+          const detail = responseMarkup.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+          throw new Error(detail || `Migration request failed (HTTP ${response.status}).`);
         }
         renderMigrationMarkup(responseMarkup, response.url || action.pathname);
         if ((response.url || "").includes("/migration/progress/")) {
           migrationSourceSMBPassword = "";
           migrationExportSMBPassword = "";
         }
-        if (state) state.textContent = "";
+        setMigrationBusy("");
       } catch (error) {
+        if (error?.name === "AbortError") return;
         if (submitter && submitter.isConnected) submitter.disabled = false;
-        if (state) state.textContent = error?.message || "Migration operation could not be completed.";
+        setMigrationBusy(error?.message || "Migration operation could not be completed.");
+        state?.classList.remove("is-busy");
+        migrationDialog.classList.remove("is-busy");
+      } finally {
+        if (migrationSubmitController === submitController) migrationSubmitController = null;
       }
     });
 
@@ -2166,6 +2195,8 @@ if (migrationOpen && migrationDialog) {
       }
       if (!href.startsWith("/workspace/migration")) return;
       event.preventDefault();
+      migrationSubmitController?.abort();
+      migrationSubmitController = null;
       if (href === "/workspace/migration") await loadMigrationEntry();
       else {
         if (href === "/workspace/migration/import") migrationSourceSMBPassword = "";
@@ -2178,7 +2209,10 @@ if (migrationOpen && migrationDialog) {
 
   const loadMigration = async (url = currentURL) => {
     const sequence = ++loadSequence;
-    if (state) state.textContent = "Loading migration…";
+    migrationLoadController?.abort();
+    const loadController = new AbortController();
+    migrationLoadController = loadController;
+    setMigrationBusy("Loading migration…");
     if (refreshButton) refreshButton.disabled = true;
     try {
       await ensureMigrationAssets();
@@ -2188,6 +2222,7 @@ if (migrationOpen && migrationDialog) {
         headers: { Accept: "text/html" },
         cache: "no-store",
         redirect: "follow",
+        signal: loadController.signal,
       });
       if (await handleMigrationAuth(response)) return;
       if (response.status === 403) throw new Error("Administrator access required.");
@@ -2201,19 +2236,25 @@ if (migrationOpen && migrationDialog) {
       const markup = await response.text();
       if (sequence !== loadSequence) return;
       renderMigrationMarkup(markup, finalURL.href);
-      if (state) state.textContent = "";
+      setMigrationBusy("");
     } catch (error) {
-      if (sequence !== loadSequence) return;
+      if (error?.name === "AbortError" || sequence !== loadSequence) return;
       if (content) content.replaceChildren();
-      if (state) state.textContent = error?.message || "Migration is unavailable.";
+      setMigrationBusy(error?.message || "Migration is unavailable.");
+      state?.classList.remove("is-busy");
+      migrationDialog.classList.remove("is-busy");
     } finally {
+      if (migrationLoadController === loadController) migrationLoadController = null;
       if (sequence === loadSequence && refreshButton) refreshButton.disabled = false;
     }
   };
 
   const loadMigrationEntry = async () => {
     const sequence = ++loadSequence;
-    if (state) state.textContent = "Loading migration…";
+    migrationLoadController?.abort();
+    const loadController = new AbortController();
+    migrationLoadController = loadController;
+    setMigrationBusy("Loading migration…");
     if (refreshButton) refreshButton.disabled = true;
     try {
       await ensureMigrationAssets();
@@ -2223,6 +2264,7 @@ if (migrationOpen && migrationDialog) {
         headers: { Accept: "text/html" },
         cache: "no-store",
         redirect: "follow",
+        signal: loadController.signal,
       });
       if (await handleMigrationAuth(response)) return;
       if (response.status === 403) throw new Error("Administrator access required.");
@@ -2233,7 +2275,7 @@ if (migrationOpen && migrationDialog) {
       if (finalURL.pathname !== "/workspace/migration") {
         const markup = await response.text();
         renderMigrationMarkup(markup, finalURL.href);
-        if (state) state.textContent = "";
+        setMigrationBusy("");
         return;
       }
       const entryMarkup = await response.text();
@@ -2241,10 +2283,13 @@ if (migrationOpen && migrationDialog) {
       if (entryRoot) syncMigrationRecoveryAvailability(entryRoot);
       await loadMigration(tabURLs[currentTab]);
     } catch (error) {
-      if (sequence !== loadSequence) return;
+      if (error?.name === "AbortError" || sequence !== loadSequence) return;
       if (content) content.replaceChildren();
-      if (state) state.textContent = error?.message || "Migration is unavailable.";
+      setMigrationBusy(error?.message || "Migration is unavailable.");
+      state?.classList.remove("is-busy");
+      migrationDialog.classList.remove("is-busy");
     } finally {
+      if (migrationLoadController === loadController) migrationLoadController = null;
       if (sequence === loadSequence && refreshButton) refreshButton.disabled = false;
     }
   };
@@ -2252,6 +2297,7 @@ if (migrationOpen && migrationDialog) {
   const workspaceWindow = setupWorkspaceWindow(migrationDialog, {
     onOpen: loadMigrationEntry,
     onClose: () => {
+      abortMigrationRequests();
       migrationSourceSMBPassword = "";
       migrationExportSMBPassword = "";
     },
@@ -2265,6 +2311,7 @@ if (migrationOpen && migrationDialog) {
   refreshButton?.addEventListener("click", () => loadMigration(currentURL));
   tabs.forEach((button) => {
     button.addEventListener("click", async () => {
+      abortMigrationRequests();
       const nextTab = button.dataset.migrationTab;
       if (currentTab === "import" && nextTab !== "import") migrationSourceSMBPassword = "";
       if (currentTab === "export" && nextTab !== "export") migrationExportSMBPassword = "";
@@ -2908,6 +2955,8 @@ if (minecraftOpen && minecraftDialog) {
 
   const renderSettingsReview = (root, plan, params) => {
     root.querySelector("[data-minecraft-native-review]")?.remove();
+    const settingsForm = root.querySelector("[data-minecraft-settings-tab]");
+    if (settingsForm) settingsForm.hidden = false;
     const review = document.createElement("section");
     review.className = "panel details minecraft-native-review";
     review.dataset.minecraftNativeReview = "true";
@@ -2939,6 +2988,7 @@ if (minecraftOpen && minecraftDialog) {
       return;
     }
 
+    if (settingsForm) settingsForm.hidden = true;
     const changeList = document.createElement("div");
     changeList.className = "minecraft-native-change-list";
     changes.forEach((change) => {
@@ -2981,13 +3031,16 @@ if (minecraftOpen && minecraftDialog) {
     cancel.type = "button";
     cancel.className = "secondary";
     cancel.textContent = "Cancel review";
-    cancel.addEventListener("click", () => review.remove());
+    cancel.addEventListener("click", () => {
+      review.remove();
+      if (settingsForm) settingsForm.hidden = false;
+    });
     const apply = document.createElement("button");
     apply.type = "button";
     apply.textContent = plan.confirmation_required ? "Restart Minecraft and apply" : "Apply changes";
     actions.append(cancel, apply);
     review.appendChild(actions);
-    root.appendChild(review);
+    root.prepend(review);
 
     apply.addEventListener("click", async () => {
       apply.disabled = true;
@@ -3827,6 +3880,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     if (operation.state === "verifying") return "Verifying";
     if (operation.state === "succeeded") return "Complete";
     if (operation.state === "needs_attention") return "Needs attention";
+    if (operation.state === "resolved") return "Resolved";
     if (operation.state === "rolled_back") return "Rolled back";
     return "Working";
   };
@@ -3861,14 +3915,42 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       note.textContent = "When Full Factory Reset completes, this WebUI session will be signed out and the voxel password must be changed on the next sign-in.";
       built.panel.appendChild(note);
       if (operation.state === "needs_attention") {
+        const recovery = document.createElement("div");
+        recovery.className = "notice warning";
+        recovery.innerHTML = "<strong>Factory Reset stopped before completion.</strong><br>You can keep the server exactly as it is now and release the blocked Restore/Migration operations, or review and retry the destructive reset.";
+        built.panel.appendChild(recovery);
+
         const actions = document.createElement("div");
         actions.className = "system-reset-actions";
+        const keep = document.createElement("button");
+        keep.type = "button";
+        keep.className = "secondary";
+        keep.textContent = "Keep current server";
+        keep.addEventListener("click", async () => {
+          if (!window.confirm("Keep the current server state and release the failed Factory Reset lock? This does not delete data or retry the reset.")) return;
+          keep.disabled = true;
+          retry.disabled = true;
+          if (state) state.textContent = "Resolving failed Factory Reset…";
+          try {
+            const result = await systemPostForm("/api/system/workspace/reset/factory/resolve", {
+              operation_id: operation.operation_id,
+              keep_current_state: "yes",
+            });
+            if (result?.operation) renderResetOperation(result.operation);
+            else await renderReset(++loadSequence);
+          } catch (error) {
+            if (state) state.textContent = error?.message || "Failed Factory Reset could not be resolved.";
+            keep.disabled = false;
+            retry.disabled = false;
+          }
+        });
+
         const retry = document.createElement("button");
         retry.type = "button";
         retry.className = "danger";
         retry.textContent = "Review and retry Factory Reset";
         retry.addEventListener("click", () => planReset("factory"));
-        actions.appendChild(retry);
+        actions.append(keep, retry);
         built.panel.appendChild(actions);
       }
     }
@@ -3876,7 +3958,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     root.appendChild(built.panel);
     content.replaceChildren(root);
 
-    const terminal = ["succeeded", "needs_attention", "rolled_back"].includes(operation.state);
+    const terminal = ["succeeded", "needs_attention", "resolved", "rolled_back"].includes(operation.state);
     if (terminal) {
       if (state) state.textContent = operation.status || systemResetOperationLabel(operation);
       return;

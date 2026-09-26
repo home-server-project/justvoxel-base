@@ -47,8 +47,9 @@
       </div>
 
       <div data-server-export-fields="smb" hidden>
-        <label for="server-export-smb-source"><strong>Temporary SMB / CIFS share</strong></label>
-        <input id="server-export-smb-source" name="source" placeholder="//nas/migrations" autocomplete="off">
+        <label for="server-export-smb-source"><strong>Network folder</strong></label>
+        <input id="server-export-smb-source" name="source" placeholder="//server/share or //server/share/folder" autocomplete="off">
+        <p class="muted">Paste the destination network folder you normally use. JustVoxel handles the share and folders below it automatically.</p>
         <label for="server-export-smb-user"><strong>SMB username</strong></label>
         <input id="server-export-smb-user" name="username" autocomplete="off">
         <label for="server-export-smb-domain">SMB domain <span class="muted">optional</span></label>

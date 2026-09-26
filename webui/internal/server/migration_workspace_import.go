@@ -300,16 +300,24 @@ func parseMigrationWorkspaceImportForm(r *http.Request, discovery api.AdminMigra
 			return api.AdminMigrationImportRequest{}, errors.New("enter the temporary NFS source as server:/export/path")
 		}
 	case "smb":
+		rawLocation := strings.TrimSpace(r.FormValue("source_remote"))
+		shareRoot, embeddedPath, splitErr := splitMigrationSMBLocation(rawLocation)
+		if splitErr != nil {
+			return api.AdminMigrationImportRequest{}, splitErr
+		}
+		if relativePath == "" {
+			relativePath = embeddedPath
+		}
 		source.Path = relativePath
-		source.Source = strings.TrimSpace(r.FormValue("source_remote"))
+		source.Source = shareRoot
 		source.Username = strings.TrimSpace(r.FormValue("source_username"))
 		source.Domain = strings.TrimSpace(r.FormValue("source_domain"))
 		source.SMBPassword = r.FormValue("source_smb_password")
-		if !strings.HasPrefix(source.Source, "//") || source.Username == "" {
-			return api.AdminMigrationImportRequest{}, errors.New("enter the SMB source as //server/share and provide the SMB username")
+		if source.Username == "" {
+			return api.AdminMigrationImportRequest{}, errors.New("enter the SMB username")
 		}
 		if source.SMBPassword == "" {
-			return api.AdminMigrationImportRequest{}, errors.New("enter the SMB source password so JustVoxel can inspect this source")
+			return api.AdminMigrationImportRequest{}, errors.New("enter the SMB password so JustVoxel can inspect this location")
 		}
 	default:
 		return api.AdminMigrationImportRequest{}, errors.New("unsupported Server Import source type")
@@ -465,7 +473,7 @@ func migrationWorkspaceImportPlanNeedsInput(code string) bool {
 func migrationWorkspaceImportPrompt(plan api.AdminMigrationImportPlanResponse) string {
 	switch plan.Code {
 	case "source_selection_required":
-		return "Choose an JustVoxel-discovered archive or server directory, or enter a safe relative path manually."
+		return "Choose one of the backups or server folders JustVoxel found in this location."
 	case "multiple_roots", "stale_root":
 		return "Choose exactly one Minecraft server root detected by JustVoxel."
 	case "source_version_required":

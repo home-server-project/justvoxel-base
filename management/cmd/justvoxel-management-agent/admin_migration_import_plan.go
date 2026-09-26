@@ -20,7 +20,7 @@ var adminMigrationImportPlanTimeout = 10 * time.Minute
 var runAdminMigrationImportPlanHelper = func(ctx context.Context, action string, request []byte) ([]byte, error) {
     cmd := exec.CommandContext(ctx, adminMigrationImportPlanHelper, action)
     if len(request) > 0 { cmd.Stdin = bytes.NewReader(request) }
-    return cmd.CombinedOutput()
+    return cmd.Output()
 }
 
 type adminMigrationImportSourceRequest struct {

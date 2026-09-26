@@ -5,12 +5,12 @@
   <section class="panel">
     <p class="eyebrow">Reviewed Export plan</p>
     <h2>{{.Plan.Normalized.TargetDisplay}}</h2>
-    <div class="details">
-      <strong>Destination type</strong><br><span class="muted">{{.Plan.Normalized.Kind}}</span><br><br>
-      <strong>Bundle filename</strong><br><span class="muted">{{.Plan.Normalized.Filename}}</span><br><br>
-      <strong>Minecraft data</strong><br><span class="muted">{{.Plan.Normalized.DataPath}} · {{.DataSize}}</span>
-      {{if .Plan.Normalized.TargetFilesystem}}<br><br><strong>Destination filesystem</strong><br><span class="muted">{{.Plan.Normalized.TargetFilesystem}}</span>{{end}}
-      {{if .AvailableSize}}<br><br><strong>Available destination space</strong><br><span class="muted">{{.AvailableSize}}</span>{{end}}
+    <div class="migration-facts">
+      <div><strong>Destination type</strong><span>{{.Plan.Normalized.Kind}}</span></div>
+      <div><strong>Bundle filename</strong><span>{{.Plan.Normalized.Filename}}</span></div>
+      <div><strong>Minecraft data</strong><span>{{.Plan.Normalized.DataPath}} · {{.DataSize}}</span></div>
+      {{if .Plan.Normalized.TargetFilesystem}}<div><strong>Filesystem</strong><span>{{.Plan.Normalized.TargetFilesystem}}</span></div>{{end}}
+      {{if .AvailableSize}}<div><strong>Available space</strong><span>{{.AvailableSize}}</span></div>{{end}}
     </div>
   </section>
   {{end}}

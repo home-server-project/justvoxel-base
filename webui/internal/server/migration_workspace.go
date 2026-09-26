@@ -18,6 +18,32 @@ type adminMigrationWorkspaceAPI interface {
 	AdminOperation(ctx context.Context, session, id string) (api.PersistentOperationResponse, error)
 }
 
+func splitMigrationSMBLocation(raw string) (string, string, error) {
+	raw = strings.TrimSpace(strings.ReplaceAll(raw, "\\", "/"))
+	raw = strings.TrimRight(raw, "/")
+	if !strings.HasPrefix(raw, "//") {
+		return "", "", errors.New("enter the SMB location as //server/share or //server/share/folder")
+	}
+	parts := strings.Split(strings.TrimPrefix(raw, "//"), "/")
+	if len(parts) < 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return "", "", errors.New("enter the SMB location as //server/share or //server/share/folder")
+	}
+	server := strings.TrimSpace(parts[0])
+	share := strings.TrimSpace(parts[1])
+	clean := make([]string, 0, len(parts)-2)
+	for _, part := range parts[2:] {
+		part = strings.TrimSpace(part)
+		if part == "" || part == "." {
+			continue
+		}
+		if part == ".." {
+			return "", "", errors.New("SMB folder path cannot contain ..")
+		}
+		clean = append(clean, part)
+	}
+	return "//" + server + "/" + share, strings.Join(clean, "/"), nil
+}
+
 type migrationWorkspacePageData struct {
 	Title         string
 	Version       string
@@ -228,7 +254,24 @@ func (a *App) handleMigrationWorkspaceRequestError(w http.ResponseWriter, r *htt
 		a.handleMigrationWorkspaceAuthError(w, r, err)
 		return
 	}
-	http.Error(w, fallback, http.StatusBadGateway)
+	var responseErr *api.ResponseError
+	if errors.As(err, &responseErr) {
+		message := strings.TrimSpace(responseErr.Message)
+		if message == "" {
+			message = fallback
+		}
+		status := responseErr.StatusCode
+		if status < 400 || status > 599 {
+			status = http.StatusBadGateway
+		}
+		http.Error(w, message, status)
+		return
+	}
+	message := fallback
+	if detail := strings.TrimSpace(err.Error()); detail != "" {
+		message += " " + detail
+	}
+	http.Error(w, message, http.StatusBadGateway)
 }
 
 func (a *App) renderMigrationWorkspace(w http.ResponseWriter, templateName string, status int, data any) {

@@ -38,6 +38,7 @@ type systemWorkspaceResetAPI interface {
 	AdminFactoryResetPlan(ctx context.Context, session string) (api.AdminResetPlanResponse, error)
 	AdminMinecraftResetApply(ctx context.Context, session string, request api.AdminMinecraftResetApplyRequest) (api.AdminResetApplyResponse, error)
 	AdminFactoryResetApply(ctx context.Context, session string, request api.AdminFactoryResetApplyRequest) (api.AdminResetApplyResponse, error)
+	AdminFactoryResetResolve(ctx context.Context, session, operationID string) (api.PersistentOperationResponse, error)
 	AdminCurrentMinecraftResetOperation(ctx context.Context, session string) (api.PersistentOperationResponse, error)
 	AdminCurrentFactoryResetOperation(ctx context.Context, session string) (api.PersistentOperationResponse, error)
 	AdminOperation(ctx context.Context, session, id string) (api.PersistentOperationResponse, error)
@@ -115,6 +116,7 @@ func (a *App) registerSystemWorkspaceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/system/workspace/reset/minecraft/current", a.systemWorkspaceMinecraftResetCurrent)
 	mux.HandleFunc("POST /api/system/workspace/reset/factory/plan", a.systemWorkspaceFactoryResetPlan)
 	mux.HandleFunc("POST /api/system/workspace/reset/factory/apply", a.systemWorkspaceFactoryResetApply)
+	mux.HandleFunc("POST /api/system/workspace/reset/factory/resolve", a.systemWorkspaceFactoryResetResolve)
 	mux.HandleFunc("GET /api/system/workspace/reset/factory/current", a.systemWorkspaceFactoryResetCurrent)
 	mux.HandleFunc("GET /api/system/workspace/reset/operations/{id}", a.systemWorkspaceResetOperation)
 	mux.HandleFunc("GET /api/system/workspace/about", a.systemWorkspaceAbout)
@@ -551,6 +553,28 @@ func (a *App) systemWorkspaceFactoryResetApply(w http.ResponseWriter, r *http.Re
 		return
 	}
 	writeSystemWorkspaceJSON(w, http.StatusAccepted, result)
+}
+
+func (a *App) systemWorkspaceFactoryResetResolve(w http.ResponseWriter, r *http.Request) {
+	if !a.validCSRF(r) {
+		writeSystemWorkspaceError(w, http.StatusForbidden, "Invalid CSRF token.")
+		return
+	}
+	session, client, ok := a.systemWorkspaceResetClient(w, r, true)
+	if !ok {
+		return
+	}
+	operationID := strings.TrimSpace(r.FormValue("operation_id"))
+	if operationID == "" || r.FormValue("keep_current_state") != "yes" {
+		writeSystemWorkspaceError(w, http.StatusBadRequest, "Confirm that the current server state should be kept without retrying Factory Reset.")
+		return
+	}
+	result, err := client.AdminFactoryResetResolve(r.Context(), session, operationID)
+	if err != nil {
+		a.writeSystemWorkspaceAPIError(w, err, "Failed Factory Reset could not be resolved.")
+		return
+	}
+	writeSystemWorkspaceJSON(w, http.StatusOK, result)
 }
 
 func (a *App) systemWorkspaceMinecraftResetCurrent(w http.ResponseWriter, r *http.Request) {
