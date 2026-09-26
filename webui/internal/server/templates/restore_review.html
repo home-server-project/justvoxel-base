@@ -31,7 +31,7 @@
   {{if and .Plan.OK .Plan.Requirements}}
   <section class="panel">
     <p class="eyebrow">Safety checks</p>
-    <p>Before live data is changed, the Management Agent will validate archive integrity, archive safety, backup identity, and staging capacity. Minecraft runtime validation and automatic rollback remain Agent-owned.</p>
+    <p>Before live data is changed, the JustVoxel will validate archive integrity, archive safety, backup identity, and staging capacity. Minecraft runtime validation and automatic rollback remain enabled.</p>
     {{if .Plan.Requirements.PlayersConfirmationRequired}}
     <div class="notice warning"><strong>{{.Plan.Requirements.Online}} player(s) are online.</strong><br>
       {{range .Plan.Requirements.Players}}{{.}}<br>{{end}}
