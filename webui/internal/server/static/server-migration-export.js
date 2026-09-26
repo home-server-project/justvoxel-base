@@ -29,21 +29,21 @@ function initServerMigrationExport(root = document) {
 
   const kind = form.querySelector("[data-server-export-kind]");
   const groups = Array.from(form.querySelectorAll("[data-server-export-fields]"));
-  if (!kind) return;
 
-  const render = () => {
-    const selected = kind.value;
-    groups.forEach((group) => {
-      const active = group.dataset.serverExportFields === selected;
-      group.hidden = !active;
-      group.querySelectorAll("input, select").forEach((field) => {
-        field.disabled = !active;
+  if (kind) {
+    const render = () => {
+      const selected = kind.value;
+      groups.forEach((group) => {
+        const active = group.dataset.serverExportFields === selected;
+        group.hidden = !active;
+        group.querySelectorAll("input, select").forEach((field) => {
+          field.disabled = !active;
+        });
       });
-    });
-  };
-
-  kind.addEventListener("change", render);
-  render();
+    };
+    kind.addEventListener("change", render);
+    render();
+  }
 
   form.addEventListener("submit", async (event) => {
     if (form.dataset.serverExportRequireSmb !== "true" || form.dataset.serverExportCredentialReady === "true") return;
