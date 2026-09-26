@@ -1897,6 +1897,7 @@ if (migrationOpen && migrationDialog) {
   const state = migrationDialog.querySelector("[data-migration-state]");
   const content = migrationDialog.querySelector("[data-migration-workspace-content]");
   const tabs = Array.from(migrationDialog.querySelectorAll("[data-migration-tab]"));
+  const recoveryTab = tabs.find((button) => button.dataset.migrationTab === "recovery");
   const tabURLs = {
     export: "/workspace/migration/export",
     import: "/workspace/migration/import",
@@ -1906,6 +1907,69 @@ if (migrationOpen && migrationDialog) {
   let currentURL = tabURLs.export;
   let loadSequence = 0;
   let migrationSourceSMBPassword = "";
+  let migrationExportSMBPassword = "";
+
+  const requestMigrationSMBPassword = (purpose) => new Promise((resolve) => {
+    const dialog = document.createElement("dialog");
+    dialog.className = "system-action-dialog";
+    dialog.setAttribute("aria-label", "SMB credentials");
+    const shell = document.createElement("div");
+    shell.className = "system-action-dialog-content";
+    const title = document.createElement("h2");
+    title.textContent = "SMB password";
+    const copy = document.createElement("p");
+    copy.textContent = purpose === "import"
+      ? "Enter the SMB password so JustVoxel can inspect and reopen this Import source."
+      : "Enter the SMB password so JustVoxel can write the reviewed Export.";
+    const label = document.createElement("label");
+    label.textContent = "SMB password";
+    const input = document.createElement("input");
+    input.type = "password";
+    input.autocomplete = "off";
+    input.required = true;
+    label.appendChild(input);
+    const actions = document.createElement("div");
+    actions.className = "action-row";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "secondary";
+    cancel.textContent = "Cancel";
+    const use = document.createElement("button");
+    use.type = "button";
+    use.textContent = "Continue";
+    actions.append(cancel, use);
+    shell.append(title, copy, label, actions);
+    dialog.appendChild(shell);
+    document.body.appendChild(dialog);
+    initializeSharedWebUIControls(dialog);
+
+    const finish = (value) => {
+      input.value = "";
+      if (dialog.open) dialog.close();
+      dialog.remove();
+      resolve(value);
+    };
+    cancel.addEventListener("click", () => finish(null), { once: true });
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      finish(null);
+    }, { once: true });
+    use.addEventListener("click", () => {
+      if (!input.value) {
+        input.focus();
+        return;
+      }
+      finish(input.value);
+    }, { once: true });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        use.click();
+      }
+    });
+    dialog.showModal();
+    input.focus();
+  });
 
   const loadMigrationScript = async (src, ready) => {
     if (ready()) return;
@@ -1936,6 +2000,17 @@ if (migrationOpen && migrationDialog) {
     tabs.forEach((button) => {
       button.setAttribute("aria-selected", button.dataset.migrationTab === currentTab ? "true" : "false");
     });
+  };
+
+  const syncMigrationRecoveryAvailability = (root) => {
+    if (!recoveryTab || !root) return;
+    const available = root.dataset.migrationRecoveryAvailable === "true";
+    recoveryTab.hidden = !available;
+    if (!available && currentTab === "recovery") {
+      currentTab = "export";
+      currentURL = tabURLs.export;
+      syncMigrationTabs();
+    }
   };
 
   const inferMigrationTab = (url, root = null) => {
@@ -2020,15 +2095,36 @@ if (migrationOpen && migrationDialog) {
         const body = new URLSearchParams();
         new FormData(form).forEach((value, key) => body.append(key, String(value)));
         const sourceKind = body.get("source_kind") || "";
-        const submittedSourcePassword = body.get("source_smb_password") || "";
+        const exportKind = body.get("kind") || "";
         if (sourceKind === "smb") {
-          if (submittedSourcePassword) migrationSourceSMBPassword = submittedSourcePassword;
-          else if (migrationSourceSMBPassword) body.set("source_smb_password", migrationSourceSMBPassword);
-        } else {
+          if (!migrationSourceSMBPassword) {
+            const password = await requestMigrationSMBPassword("import");
+            if (password === null) {
+              if (submitter) submitter.disabled = false;
+              if (state) state.textContent = "";
+              return;
+            }
+            migrationSourceSMBPassword = password;
+          }
+          body.set("source_smb_password", migrationSourceSMBPassword);
+        } else if (sourceKind) {
           migrationSourceSMBPassword = "";
           body.delete("source_smb_password");
         }
-        form.querySelectorAll('input[name="source_smb_password"]').forEach((input) => { input.value = ""; });
+
+        if (exportKind === "smb" && action.pathname.endsWith("/export/apply")) {
+          if (!migrationExportSMBPassword) {
+            const password = await requestMigrationSMBPassword("export");
+            if (password === null) {
+              if (submitter) submitter.disabled = false;
+              if (state) state.textContent = "";
+              return;
+            }
+            migrationExportSMBPassword = password;
+          }
+          body.set("smb_password", migrationExportSMBPassword);
+        }
+        form.querySelectorAll('input[name="source_smb_password"],input[name="smb_password"]').forEach((input) => { input.value = ""; });
         const response = await fetch(action.pathname + action.search, {
           method: (form.method || "POST").toUpperCase(),
           credentials: "same-origin",
@@ -2048,7 +2144,10 @@ if (migrationOpen && migrationDialog) {
           throw new Error("Migration operation could not be completed.");
         }
         renderMigrationMarkup(responseMarkup, response.url || action.pathname);
-        if ((response.url || "").includes("/migration/progress/")) migrationSourceSMBPassword = "";
+        if ((response.url || "").includes("/migration/progress/")) {
+          migrationSourceSMBPassword = "";
+          migrationExportSMBPassword = "";
+        }
         if (state) state.textContent = "";
       } catch (error) {
         if (submitter && submitter.isConnected) submitter.disabled = false;
@@ -2137,6 +2236,9 @@ if (migrationOpen && migrationDialog) {
         if (state) state.textContent = "";
         return;
       }
+      const entryMarkup = await response.text();
+      const entryRoot = extractMigrationRoot(entryMarkup);
+      if (entryRoot) syncMigrationRecoveryAvailability(entryRoot);
       await loadMigration(tabURLs[currentTab]);
     } catch (error) {
       if (sequence !== loadSequence) return;
@@ -2149,7 +2251,10 @@ if (migrationOpen && migrationDialog) {
 
   const workspaceWindow = setupWorkspaceWindow(migrationDialog, {
     onOpen: loadMigrationEntry,
-    onClose: () => { migrationSourceSMBPassword = ""; },
+    onClose: () => {
+      migrationSourceSMBPassword = "";
+      migrationExportSMBPassword = "";
+    },
   });
 
   migrationOpen.addEventListener("click", () => {
@@ -2162,6 +2267,7 @@ if (migrationOpen && migrationDialog) {
     button.addEventListener("click", async () => {
       const nextTab = button.dataset.migrationTab;
       if (currentTab === "import" && nextTab !== "import") migrationSourceSMBPassword = "";
+      if (currentTab === "export" && nextTab !== "export") migrationExportSMBPassword = "";
       currentTab = nextTab;
       currentURL = tabURLs[currentTab];
       syncMigrationTabs();
@@ -2565,6 +2671,30 @@ if (minecraftOpen && minecraftDialog) {
       playerLine.appendChild(messageNode(`${players.online ?? 0} players online.`));
     }
     root.appendChild(playerLine);
+
+    const canViewLogs = document.body.classList.contains("role-administrator") || document.body.classList.contains("role-operator");
+    if (canViewLogs) {
+      const logs = await requestWorkspaceJSON("/api/minecraft/workspace/logs");
+      if (!logs || sequence !== loadSequence || !content) return;
+      const section = document.createElement("section");
+      section.className = "panel details minecraft-overview-logs";
+      const heading = document.createElement("div");
+      heading.className = "section-heading";
+      const headingText = document.createElement("div");
+      const eyebrow = document.createElement("p");
+      eyebrow.className = "eyebrow";
+      eyebrow.textContent = "Diagnostics";
+      const title = document.createElement("h2");
+      title.textContent = "Recent logs";
+      headingText.append(eyebrow, title);
+      heading.appendChild(headingText);
+      const pre = document.createElement("pre");
+      pre.className = "log-box";
+      pre.textContent = Array.isArray(logs.lines) && logs.lines.length ? logs.lines.join("\n") : "No recent log lines available.";
+      section.append(heading, pre);
+      root.appendChild(section);
+    }
+
     content.replaceChildren(root);
   };
 
@@ -3730,6 +3860,17 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       note.className = "notice warning";
       note.textContent = "When Full Factory Reset completes, this WebUI session will be signed out and the voxel password must be changed on the next sign-in.";
       built.panel.appendChild(note);
+      if (operation.state === "needs_attention") {
+        const actions = document.createElement("div");
+        actions.className = "system-reset-actions";
+        const retry = document.createElement("button");
+        retry.type = "button";
+        retry.className = "danger";
+        retry.textContent = "Review and retry Factory Reset";
+        retry.addEventListener("click", () => planReset("factory"));
+        actions.appendChild(retry);
+        built.panel.appendChild(actions);
+      }
     }
 
     root.appendChild(built.panel);
@@ -3788,7 +3929,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     return { remove, keep };
   };
 
-  const renderResetPlan = (mode, plan) => {
+  const renderResetPlan = (mode, plan, requireSystemPassword = false) => {
     clearResetPoll();
     if (!content) return;
     const root = document.createElement("div");
@@ -3840,7 +3981,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     }
 
     let password = null;
-    if (mode === "factory") {
+    if (mode === "factory" && requireSystemPassword) {
       const passwordLabel = document.createElement("label");
       passwordLabel.className = "system-reset-password";
       passwordLabel.textContent = "Current voxel system password";
@@ -3851,39 +3992,43 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       passwordLabel.appendChild(password);
       const help = document.createElement("small");
       help.className = "muted";
-      help.textContent = "Required even when WebUI currently uses a separate browser password.";
+      help.textContent = "Required because WebUI is using a separate browser password.";
       passwordLabel.appendChild(help);
       built.panel.appendChild(passwordLabel);
     }
 
     const arm = document.createElement("div");
-    arm.className = "system-reset-arm";
-    const armTitle = document.createElement("strong");
-    armTitle.textContent = "Slide all the way right to arm this reset";
+    arm.className = "destructive-confirmation";
+    const sliderShell = document.createElement("div");
+    sliderShell.className = "destructive-confirm-slider";
+    const armedText = document.createElement("span");
+    armedText.className = "destructive-confirm-slider-text";
+    armedText.textContent = "Slide to confirm reset";
+    const thumb = document.createElement("span");
+    thumb.className = "destructive-confirm-slider-thumb";
+    thumb.setAttribute("aria-hidden", "true");
+    thumb.textContent = ">";
     const slider = document.createElement("input");
     slider.type = "range";
     slider.min = "0";
     slider.max = "100";
     slider.step = "1";
     slider.value = "0";
-    slider.setAttribute("aria-label", "Slide to arm reset");
-    const armedText = document.createElement("span");
-    armedText.className = "muted";
-    armedText.textContent = "Not armed";
-    arm.append(armTitle, slider, armedText);
-    built.panel.appendChild(arm);
+    slider.setAttribute("aria-label", "Slide to confirm reset");
+    sliderShell.append(armedText, thumb, slider);
 
     const finalLabel = document.createElement("label");
-    finalLabel.className = "system-reset-check";
-    const finalConfirm = document.createElement("input");
-    finalConfirm.type = "checkbox";
-    finalConfirm.disabled = true;
+    finalLabel.className = "destructive-confirm-toggle-row";
+    finalLabel.hidden = true;
     const finalCopy = document.createElement("span");
-    finalCopy.textContent = mode === "factory"
-      ? "I understand Full Factory Reset is destructive to appliance-owned local data."
-      : "I understand the current Minecraft server and internal Minecraft data will be removed.";
-    finalLabel.append(finalConfirm, finalCopy);
-    built.panel.appendChild(finalLabel);
+    finalCopy.className = "destructive-confirm-toggle-callout";
+    finalCopy.textContent = "Confirm >";
+    const finalConfirm = document.createElement("input");
+    finalConfirm.className = "destructive-confirm-toggle";
+    finalConfirm.type = "checkbox";
+    finalLabel.append(finalCopy, finalConfirm);
+    arm.append(sliderShell, finalLabel);
+    built.panel.appendChild(arm);
 
     const actions = document.createElement("div");
     actions.className = "system-reset-actions";
@@ -3900,10 +4045,12 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     built.panel.appendChild(actions);
 
     const syncApply = () => {
-      const armed = Number(slider.value) >= 100;
-      arm.classList.toggle("is-armed", armed);
-      armedText.textContent = armed ? "Armed" : "Not armed";
-      finalConfirm.disabled = !armed;
+      const progress = Math.max(0, Math.min(100, Number(slider.value || 0)));
+      sliderShell.style.setProperty("--confirm-progress", String(progress / 100));
+      const armed = progress >= 100;
+      sliderShell.classList.toggle("is-armed", armed);
+      armedText.textContent = armed ? "Reset armed" : "Slide to confirm reset";
+      finalLabel.hidden = !armed;
       if (!armed) finalConfirm.checked = false;
       const playersOK = !playersConfirm || playersConfirm.checked;
       const passwordOK = !password || password.value.length > 0;
@@ -3961,7 +4108,13 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         : "/api/system/workspace/reset/minecraft/plan";
       const plan = await systemPostForm(endpoint);
       if (!plan) return;
-      renderResetPlan(mode, plan);
+      let requireSystemPassword = false;
+      if (mode === "factory") {
+        const security = await systemFetchJSON("/api/system/workspace/security");
+        if (!security) return;
+        requireSystemPassword = security.mode === "separate";
+      }
+      renderResetPlan(mode, plan, requireSystemPassword);
       if (state) state.textContent = "";
     } catch (error) {
       if (state) state.textContent = error?.message || "Reset could not be planned.";

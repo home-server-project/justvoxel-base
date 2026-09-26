@@ -1,5 +1,5 @@
-{{define "migration_workspace.html"}}<div class="migration-workspace-content" data-migration-workspace-root>
-<p class="muted">Move a complete Minecraft server between JustVoxel appliances through the same authoritative Management Agent used by <code>mjust</code>. WebUI supplies navigation and reviewed choices; migration policy and execution remain in the Agent.</p>
+{{define "migration_workspace.html"}}<div class="migration-workspace-content" data-migration-workspace-root data-migration-recovery-available="{{if .Recovery.Transactions}}true{{else}}false{{end}}">
+<p class="muted">Move a complete Minecraft server between JustVoxel appliances. JustVoxel validates each reviewed choice and performs migration safely.</p>
 
   <section class="panel">
     <div class="section-heading"><div><p class="eyebrow">Export</p><h2>Export this server</h2></div><span class="badge">Available</span></div>
@@ -20,7 +20,7 @@
 
   <section class="panel">
     <div class="section-heading"><div><p class="eyebrow">Recovery</p><h2>Migration Recovery</h2></div>{{if .Recovery.Transactions}}<span class="badge">Attention available</span>{{else}}<span class="badge">No retained recovery</span>{{end}}</div>
-    <p>Finalize retained Import rollback or recovery evidence through the Management Agent.</p>
+    <p>Finalize retained Import rollback or recovery state when a previous Import needs attention.</p>
     {{if .Recovery.Transactions}}
       {{range .Recovery.Transactions}}
       <div class="details"><strong>{{.Mode}}</strong> · {{.Phase}}<br><span class="muted">Updated {{.UpdatedAt}}{{if .Finalizable}} · ready for reviewed recovery{{end}}</span></div>
@@ -31,5 +31,5 @@
     <div class="action-row"><a class="button-link" href="/workspace/migration/recovery">Open Migration Recovery</a></div>
   </section>
 
-  <div class="notice">Server Export, Server Import, and guided Migration Recovery are available through the same Management Agent authority. If a migration operation is already active, this page reconnects directly to its persistent progress record.</div>
+  <div class="notice">Server Export and Server Import use the same JustVoxel safety checks. If a migration operation is already active, this page reconnects directly to its persistent progress record.</div>
 </div>{{end}}

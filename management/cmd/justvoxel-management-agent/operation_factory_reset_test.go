@@ -64,6 +64,27 @@ func TestOperationStoreFactoryResetIsIdempotentAndBlocksOtherOperations(t *testi
 	}
 }
 
+func TestOperationStoreFactoryResetNeedsAttentionCanBeRetried(t *testing.T) {
+	store := openTestOperationStore(t)
+	operation, created, err := store.beginFactoryReset(testFactoryResetFingerprint)
+	if err != nil || !created {
+		t.Fatalf("begin factory reset: created=%t err=%v", created, err)
+	}
+	if _, err := store.transition(operation.OperationID, operationNeedsAttention, "reset_failed", "Factory reset stopped."); err != nil {
+		t.Fatal(err)
+	}
+	retried, err := store.retryFactoryReset(operation.OperationID, testFactoryResetFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retried.State != operationQueued || retried.Stage != "queued" || retried.Status != "Full factory reset retry queued." {
+		t.Fatalf("unexpected retried factory reset: %#v", retried)
+	}
+	if current, err := store.currentFactoryReset(); err != nil || current == nil || current.OperationID != operation.OperationID {
+		t.Fatalf("retried factory reset is not current: %#v err=%v", current, err)
+	}
+}
+
 func TestOperationStoreFactoryResetCannotStartDuringOtherOperation(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -151,7 +151,7 @@ func TestServerExportReviewUsesAuthoritativePlanAndPlayerWarning(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Review Server Export", "/srv/migrations/justvoxel-migration-test.tar.gz", "2.0 GiB", "10.0 GiB",
-		"Online players will be interrupted", "PlayerOne", "Type EXPORT", "Management Agent will revalidate",
+		"Online players will be interrupted", "PlayerOne", "Type EXPORT", "JustVoxel will revalidate",
 	} {
 		if !strings.Contains(page.Body.String(), want) {
 			t.Fatalf("Server Export review missing %q: %s", want, page.Body.String())

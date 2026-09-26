@@ -1,7 +1,7 @@
 {{define "migration_workspace_recovery.html"}}<div class="migration-workspace-content" data-migration-workspace-root>
-<p class="muted">Review retained Server Import rollback or recovery state reported by the Management Agent. Recovery finalization validates the safe post-rollback state first, then removes the retained recovery transaction and its registry reference.</p>
+<p class="muted">Review retained Server Import rollback or recovery state reported by the JustVoxel. Recovery finalization validates the safe post-rollback state first, then removes the retained recovery transaction and its registry reference.</p>
   {{if .Error}}<div class="notice error"><strong>Migration Recovery cannot continue as submitted.</strong><br>{{.Error}}</div>{{end}}
-  {{if .ImportNeedsAttention}}<div class="notice warning"><strong>The previous Server Import still needs attention.</strong><br>A reviewed Recovery operation may take over that persistent migration journal. The Management Agent performs the handoff only after it accepts the current Recovery plan.</div>{{end}}
+  {{if .ImportNeedsAttention}}<div class="notice warning"><strong>The previous Server Import still needs attention.</strong><br>A reviewed Recovery operation may take over that persistent migration journal. The JustVoxel performs the handoff only after it accepts the current Recovery plan.</div>{{end}}
 
   {{if .Transactions}}
     {{range .Transactions}}
@@ -25,7 +25,7 @@
     </section>
     {{end}}
   {{else}}
-    <section class="panel"><div class="notice">No retained migration recovery transaction is currently reported by the Management Agent.</div></section>
+    <section class="panel"><div class="notice">No retained migration recovery transaction is currently reported by the JustVoxel.</div></section>
   {{end}}
 
   <div class="action-row"><a class="button-link secondary" href="/workspace/migration">Back to Server Migration</a></div>

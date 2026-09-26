@@ -89,7 +89,7 @@ func (c *Client) AdminMinecraftResetApply(ctx context.Context, session string, r
 }
 
 func (c *Client) AdminFactoryResetApply(ctx context.Context, session string, request AdminFactoryResetApplyRequest) (AdminResetApplyResponse, error) {
-	if !adminResetFingerprintPattern.MatchString(request.PlanFingerprint) || strings.TrimSpace(request.SystemPassword) == "" {
+	if !adminResetFingerprintPattern.MatchString(request.PlanFingerprint) {
 		return AdminResetApplyResponse{}, errors.New("invalid factory reset request")
 	}
 	return c.adminResetApply(ctx, session, adminFactoryResetApplyPath, request, "factory_reset")

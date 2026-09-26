@@ -37,7 +37,7 @@
 
     {{if .NeedsSourcePath}}
     <section class="panel">
-      <p class="eyebrow">Agent-discovered source entries</p>
+      <p class="eyebrow">JustVoxel-discovered source entries</p>
       {{range .Plan.SourceEntries}}<label><input type="radio" name="source_path" value="{{.Path}}"> <strong>{{.Kind}}</strong> · <code>{{.Path}}</code></label>{{end}}
       <label for="server-import-manual-path"><strong>Manual relative path fallback</strong></label>
       <input id="server-import-manual-path" name="manual_path" placeholder="folder/server-or-archive.tar.gz" autocomplete="off">
@@ -56,26 +56,18 @@
       <p class="eyebrow">Exact Minecraft version</p>
       <label for="server-import-required-version"><strong>Source Minecraft version</strong></label>
       <input id="server-import-required-version" name="source_version" value="{{.Request.Source.SourceVersion}}" placeholder="1.21.8" autocomplete="off" required>
-      <p class="muted">The Agent requires an exact version so it can verify a matching stable Paper build before Import.</p>
+      <p class="muted">JustVoxel requires an exact version only because autodetection could not prove it, so it can verify a matching stable Paper build before Import.</p>
     </section>
     {{end}}
 
-    {{if .SourceSMB}}
-    <section class="panel" data-migration-source-password-repeat>
-      <p class="eyebrow">Temporary source credential</p>
-      <label for="server-import-source-password-again"><strong>SMB source password</strong></label>
-      <input id="server-import-source-password-again" type="password" name="source_smb_password" autocomplete="off" required>
-      <p class="muted">Re-entered only for this planning request. It is not stored in this page.</p>
-    </section>
-    {{end}}
 
-    <div class="action-row"><button type="submit">Continue Agent review</button><a class="button-link secondary" href="/workspace/migration/import">Start over</a></div>
+    <div class="action-row"><button type="submit">Continue review</button><a class="button-link secondary" href="/workspace/migration/import">Start over</a></div>
   </form>
   {{else}}
 
   {{if .Plan.Normalized}}
   <section class="panel">
-    <p class="eyebrow">Authoritative source plan</p>
+    <p class="eyebrow">Reviewed source plan</p>
     <h2>{{.Plan.Normalized.Source.SourceClass}} · Minecraft {{.Plan.Normalized.Source.MinecraftVersion}}</h2>
     <div class="details">
       <strong>Selected source</strong><br><span class="muted">{{.Plan.Normalized.Source.Path}}{{if .Plan.Normalized.Source.SelectedRoot}} · root {{.Plan.Normalized.Source.SelectedRoot}}{{end}}</span><br><br>
@@ -88,7 +80,7 @@
   </section>
 
   <section class="panel">
-    <p class="eyebrow">Authoritative destination plan</p>
+    <p class="eyebrow">Reviewed destination plan</p>
     <h2>{{if eq .Plan.Normalized.Destination.Mode "fresh"}}Fresh JustVoxel destination{{else}}Replace configured JustVoxel server{{end}}</h2>
     <div class="details">
       <strong>Minecraft data</strong><br><span class="muted">{{.Plan.Normalized.Destination.DataPath}}</span><br><br>
@@ -106,11 +98,11 @@
   {{if .Plan.Requirements}}
   <section class="panel">
     <p class="eyebrow">Safety checks and confirmations</p>
-    <p>The Management Agent will revalidate the source and destination, preserve rollback state, execute the Import transaction, and validate the resulting Minecraft runtime before reporting success.</p>
+    <p>JustVoxel will revalidate the source and destination, preserve rollback state, execute the Import transaction, and validate the resulting Minecraft runtime before reporting success.</p>
     {{if .Plan.Requirements.PlayersConfirmationRequired}}<div class="notice warning"><strong>{{.Plan.Requirements.Online}} player(s) are online.</strong><br>{{range .Plan.Requirements.Players}}{{.}}<br>{{end}}Import will use the player-aware interruption path.</div>{{end}}
     {{if .Plan.Requirements.VanillaConfirmationRequired}}<div class="notice warning">This Vanilla source will be opened by Paper at the same reviewed Minecraft version.</div>{{end}}
     {{if .Plan.Requirements.PluginsConfirmationRequired}}<div class="notice warning">This source contains external plugin JARs. Plugins are executable server code and will be preserved.</div>{{end}}
-    {{if .Plan.Requirements.OnlineModeConfirmationRequired}}<div class="notice warning">The Agent could not prove online-mode automatically. You must explicitly confirm the source used online-mode=true.</div>{{end}}
+    {{if .Plan.Requirements.OnlineModeConfirmationRequired}}<div class="notice warning">JustVoxel could not prove online-mode automatically. You must explicitly confirm the source used online-mode=true.</div>{{end}}
     {{if .Plan.Requirements.BackupSMBPasswordRequired}}<div class="notice">The fresh destination uses SMB backup storage. Its password is requested only on the final Apply request and is not stored in this review or operation journal.</div>{{end}}
   </section>
 
@@ -146,16 +138,22 @@
     <input type="hidden" name="backup_domain" value="{{.Request.Destination.Backups.Domain}}">
     <input type="hidden" name="plan_fingerprint" value="{{.Plan.PlanFingerprint}}">
 
-    {{if .SourceSMB}}<div data-migration-source-password-repeat><label for="server-import-source-password-apply"><strong>SMB source password</strong></label><input id="server-import-source-password-apply" type="password" name="source_smb_password" autocomplete="off" required><p class="muted">Used only to re-open and revalidate the reviewed source for this Apply request.</p></div>{{end}}
     {{if .Plan.Requirements.BackupSMBPasswordRequired}}<label for="server-import-backup-password-apply"><strong>SMB backup password</strong></label><input id="server-import-backup-password-apply" type="password" name="backup_smb_password" autocomplete="off" required><p class="muted">Apply-only credential for the reviewed fresh backup destination.</p>{{end}}
     {{if .Plan.Requirements.PlayersConfirmationRequired}}<label><input type="checkbox" name="players_confirmed" value="yes"> I understand that the online players may be interrupted.</label>{{end}}
     {{if .Plan.Requirements.EULAAcceptanceRequired}}<label><input type="checkbox" name="eula_accepted" value="yes"> I accept the <a href="{{.EULAURL}}" target="_blank" rel="noopener noreferrer">Minecraft End User License Agreement</a> for this fresh destination.</label>{{end}}
     {{if .Plan.Requirements.VanillaConfirmationRequired}}<label><input type="checkbox" name="vanilla_confirmed" value="yes"> I understand this Vanilla server will be opened by Paper at the reviewed Minecraft version.</label>{{end}}
     {{if .Plan.Requirements.PluginsConfirmationRequired}}<label><input type="checkbox" name="plugins_confirmed" value="yes"> I understand the external plugin JARs are executable server code and will be preserved.</label>{{end}}
     {{if .Plan.Requirements.OnlineModeConfirmationRequired}}<label><input type="checkbox" name="online_mode_confirmed" value="yes"> I confirm this source used online-mode=true and its online UUID identity should be preserved.</label>{{end}}
-    <label for="server-import-confirmation"><strong>Type IMPORT to continue</strong></label>
-    <input id="server-import-confirmation" name="import_confirmation" autocomplete="off" required>
-    <div class="action-row"><button type="submit">Start Server Import</button><a class="button-link secondary" href="/workspace/migration/import">Cancel</a></div>
+    <div class="destructive-confirmation" data-destructive-confirmation data-confirm-value="IMPORT" data-destructive-idle="Slide to confirm Import" data-destructive-armed="Import armed">
+      <input type="hidden" name="import_confirmation" data-destructive-value>
+      <div class="destructive-confirm-slider" data-destructive-slider-shell>
+        <span class="destructive-confirm-slider-text" data-destructive-slider-text>Slide to confirm Import</span>
+        <span class="destructive-confirm-slider-thumb" aria-hidden="true">&gt;</span>
+        <input type="range" min="0" max="100" step="1" value="0" data-destructive-slider aria-label="Slide to confirm Server Import">
+      </div>
+      <label class="destructive-confirm-toggle-row" data-destructive-toggle-row hidden><span class="destructive-confirm-toggle-callout">Confirm &gt;</span><input class="destructive-confirm-toggle" type="checkbox" data-destructive-toggle aria-label="Confirm Server Import"></label>
+    </div>
+    <div class="action-row"><a class="button-link secondary" href="/workspace/migration/import">Cancel</a><button type="submit" data-destructive-submit disabled>Start Server Import</button></div>
   </form>
   {{end}}
   {{end}}

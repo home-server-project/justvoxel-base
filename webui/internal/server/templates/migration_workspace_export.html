@@ -1,5 +1,5 @@
 {{define "migration_workspace_export.html"}}<div class="migration-workspace-content" data-migration-workspace-root>
-<p class="muted">Create a complete migration bundle using the Management Agent. The Agent validates the selected destination, Minecraft runtime state, online players, integrity requirements, and the final Apply request.</p>
+<p class="muted">Create a complete migration bundle. JustVoxel validates the destination, Minecraft state, online players, integrity requirements, and the final action.</p>
   {{if .Error}}<div class="notice error"><strong>Server Export cannot continue as submitted.</strong><br>{{.Error}}</div>{{end}}
 
   <form method="post" action="/workspace/migration/export/review" data-server-export-form>
@@ -19,27 +19,27 @@
       <div data-server-export-fields="local" hidden>
         <label for="server-export-path"><strong>Local / server destination directory</strong></label>
         <input id="server-export-path" name="path" placeholder="/var/mnt/storage/migrations" autocomplete="off">
-        <p class="muted">Use an absolute path that already exists or is valid for the Management Agent to validate.</p>
+        <p class="muted">Use an absolute path that already exists or can be validated by JustVoxel.</p>
       </div>
 
       <div data-server-export-fields="backup" hidden>
-        <div class="notice">The Agent will use the currently configured JustVoxel backup storage. No browser-side storage logic is used.</div>
+        <div class="notice">JustVoxel will use the currently configured backup storage.</div>
       </div>
 
       <div data-server-export-fields="device" hidden>
         <label for="server-export-device"><strong>Attached destination</strong></label>
         <select id="server-export-device" name="device">
-          <option value="">Choose an Agent-discovered device or partition</option>
+          <option value="">Choose a JustVoxel-discovered device or partition</option>
           {{if .AttachedDevices}}<optgroup label="Attached disks and partitions">{{range .AttachedDevices}}<option value="{{.Device.Path}}">{{.Device.Path}} · {{.Size}}{{if .Device.Model}} · {{.Device.Model}}{{end}}{{if .Device.Filesystem}} · {{.Device.Filesystem}}{{end}}</option>{{end}}</optgroup>{{end}}
           {{if .RemovableDevices}}<optgroup label="USB / removable media">{{range .RemovableDevices}}<option value="{{.Device.Path}}">{{.Device.Path}} · {{.Size}}{{if .Device.Model}} · {{.Device.Model}}{{end}}{{if .Device.Filesystem}} · {{.Device.Filesystem}}{{end}}</option>{{end}}</optgroup>{{end}}
         </select>
-        <p class="muted">Only devices reported by the Management Agent can be reviewed. The Agent decides how the destination is validated and mounted.</p>
+        <p class="muted">Only devices reported by JustVoxel can be reviewed. JustVoxel validates and mounts the selected destination.</p>
       </div>
 
       <div data-server-export-fields="nfs" hidden>
         <label for="server-export-nfs-source"><strong>Temporary NFS source</strong></label>
         <input id="server-export-nfs-source" name="source" placeholder="nas:/exports/migrations" autocomplete="off">
-        <p class="muted">The Management Agent performs the temporary mount, validation, export, and cleanup.</p>
+        <p class="muted">JustVoxel performs the temporary mount, validation, export, and cleanup.</p>
       </div>
 
       <div data-server-export-fields="smb" hidden>
@@ -49,7 +49,7 @@
         <input id="server-export-smb-user" name="username" autocomplete="off">
         <label for="server-export-smb-domain">SMB domain <span class="muted">optional</span></label>
         <input id="server-export-smb-domain" name="domain" autocomplete="off">
-        <div class="notice"><strong>No SMB password is collected on this page.</strong><br>The password is requested only after the Agent has produced the reviewed plan, immediately before Apply.</div>
+        <div class="notice">JustVoxel will request the SMB password only when it is needed to start the reviewed Export. It is not stored in the reviewed plan or operation journal.</div>
       </div>
     </section>
 
@@ -57,7 +57,7 @@
       <p class="eyebrow">Bundle name</p>
       <label for="server-export-filename"><strong>Migration bundle filename</strong></label>
       <input id="server-export-filename" name="filename" value="{{.Discovery.SuggestedFilename}}" autocomplete="off" required>
-      <p class="muted">The Management Agent supplied this suggested filename. You may change it before planning.</p>
+      <p class="muted">JustVoxel supplied this suggested filename. You may change it before review.</p>
     </section>
 
     <div class="action-row"><button type="submit">Review Server Export</button><a class="button-link secondary" href="/workspace/migration">Cancel</a></div>

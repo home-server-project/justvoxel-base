@@ -31,7 +31,7 @@
   {{if and .Plan.OK .Plan.Requirements}}
   <section class="panel">
     <p class="eyebrow">Safety checks</p>
-    <p>Before live data is changed, the Management Agent will validate archive integrity, archive safety, backup identity, and staging capacity. Minecraft runtime validation and automatic rollback remain Agent-owned.</p>
+    <p>Before live data is changed, the JustVoxel will validate archive integrity, archive safety, backup identity, and staging capacity. Minecraft runtime validation and automatic rollback remain enabled.</p>
     {{if .Plan.Requirements.PlayersConfirmationRequired}}
     <div class="notice warning"><strong>{{.Plan.Requirements.Online}} player(s) are online.</strong><br>
       {{range .Plan.Requirements.Players}}{{.}}<br>{{end}}
@@ -57,7 +57,7 @@
       </div>
       <label class="destructive-confirm-toggle-row" data-destructive-toggle-row hidden><span class="destructive-confirm-toggle-callout">Confirm &gt;</span><input class="destructive-confirm-toggle" type="checkbox" data-destructive-toggle aria-label="Confirm restore"></label>
     </div>
-    <div class="action-row"><button type="submit" data-destructive-submit disabled>Start Restore</button><a class="button-link secondary" href="/settings/restore">Cancel</a></div>
+    <div class="action-row"><a class="button-link secondary" href="/settings/restore">Cancel</a><button type="submit" data-destructive-submit disabled>Start Restore</button></div>
   </form>
   {{else}}
   <div class="action-row"><a class="button-link secondary" href="/settings/restore">Choose another backup</a></div>

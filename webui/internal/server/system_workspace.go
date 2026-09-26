@@ -540,10 +540,6 @@ func (a *App) systemWorkspaceFactoryResetApply(w http.ResponseWriter, r *http.Re
 		return
 	}
 	password := r.FormValue("system_password")
-	if strings.TrimSpace(password) == "" {
-		writeSystemWorkspaceError(w, http.StatusBadRequest, "Current voxel system password is required.")
-		return
-	}
 	result, err := client.AdminFactoryResetApply(r.Context(), session, api.AdminFactoryResetApplyRequest{
 		PlanFingerprint: r.FormValue("plan_fingerprint"),
 		ConfirmPlayers:  r.FormValue("confirm_players") == "yes",
