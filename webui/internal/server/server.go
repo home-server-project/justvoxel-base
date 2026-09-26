@@ -50,6 +50,20 @@ type App struct {
 	static    http.Handler
 }
 
+type dashboardAttention struct {
+	Title  string `json:"title"`
+	Status string `json:"status"`
+	Action string `json:"action,omitempty"`
+	Label  string `json:"label,omitempty"`
+}
+
+type dashboardOperationAPI interface {
+	Session(ctx context.Context, session string) (api.SessionInfo, error)
+	AdminCurrentMigrationOperation(ctx context.Context, session string) (api.PersistentOperationResponse, error)
+	AdminCurrentRestoreOperation(ctx context.Context, session string) (api.PersistentOperationResponse, error)
+	AdminCurrentFactoryResetOperation(ctx context.Context, session string) (api.PersistentOperationResponse, error)
+}
+
 type pageData struct {
 	Title            string
 	Version          string
@@ -67,11 +81,13 @@ type pageData struct {
 	ConfirmProgress  string
 	ConfirmOnline    int
 	ConfirmPlayers   []string
+	Attention        *dashboardAttention
 }
 
 type dashboardSnapshot struct {
-	Status  api.Status  `json:"status"`
-	Players api.Players `json:"players"`
+	Status    api.Status          `json:"status"`
+	Players   api.Players         `json:"players"`
+	Attention *dashboardAttention `json:"attention,omitempty"`
 }
 
 type aboutPageData struct {
@@ -343,7 +359,7 @@ func (a *App) dashboardStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(dashboardSnapshot{Status: data.Status, Players: data.Players}); err != nil {
+	if err := json.NewEncoder(w).Encode(dashboardSnapshot{Status: data.Status, Players: data.Players, Attention: data.Attention}); err != nil {
 		http.Error(w, "could not encode dashboard status", http.StatusInternalServerError)
 	}
 }
@@ -416,7 +432,7 @@ func (a *App) dashboardData(ctx context.Context, session, csrf string) (pageData
 		}
 		players = api.Players{Configured: status.Minecraft.Configured, State: "unavailable", Max: status.Minecraft.MaxPlayers, Error: "Player information is temporarily unavailable."}
 	}
-	return pageData{
+	data := pageData{
 		Title:         "Dashboard",
 		Version:       a.config.Version,
 		Commit:        a.config.Commit,
@@ -424,7 +440,46 @@ func (a *App) dashboardData(ctx context.Context, session, csrf string) (pageData
 		CSRF:          csrf,
 		Status:        status,
 		Players:       players,
-	}, nil
+	}
+	if operations, ok := a.api.(dashboardOperationAPI); ok {
+		identity, identityErr := operations.Session(ctx, session)
+		if identityErr == nil && identity.Role == "administrator" {
+			data.Attention = dashboardCurrentAttention(ctx, operations, session)
+		}
+	}
+	return data, nil
+}
+
+func dashboardCurrentAttention(ctx context.Context, operations dashboardOperationAPI, session string) *dashboardAttention {
+	if current, err := operations.AdminCurrentMigrationOperation(ctx, session); err == nil && current.Operation != nil && current.Operation.State == "needs_attention" {
+		action := "/workspace/migration"
+		label := "Open Server Migration"
+		if current.Operation.OperationType == "migration_import" {
+			action = "/workspace/migration/recovery"
+			label = "Review Migration Recovery"
+		}
+		return &dashboardAttention{
+			Title:  "Server Migration needs attention",
+			Status: current.Operation.Status,
+			Action: action,
+			Label:  label,
+		}
+	}
+	if current, err := operations.AdminCurrentRestoreOperation(ctx, session); err == nil && current.Operation != nil && current.Operation.State == "needs_attention" {
+		return &dashboardAttention{
+			Title:  "Restore needs attention",
+			Status: current.Operation.Status,
+			Action: "/workspace/backups?restore_operation=" + current.Operation.OperationID,
+			Label:  "Review Restore",
+		}
+	}
+	if current, err := operations.AdminCurrentFactoryResetOperation(ctx, session); err == nil && current.Operation != nil && current.Operation.State == "needs_attention" {
+		return &dashboardAttention{
+			Title:  "Full Factory Reset needs attention",
+			Status: current.Operation.Status,
+		}
+	}
+	return nil
 }
 
 func (a *App) handleDashboardError(w http.ResponseWriter, r *http.Request, err error) {

@@ -304,9 +304,27 @@ if (dashboard) {
     }
   };
 
+  const renderDashboardAttention = (attention) => {
+    const panel = document.getElementById("dashboard-attention");
+    const title = document.getElementById("dashboard-attention-title");
+    const status = document.getElementById("dashboard-attention-status");
+    const action = document.getElementById("dashboard-attention-action");
+    if (!panel) return;
+    panel.hidden = !attention;
+    if (!attention) return;
+    if (title) title.textContent = attention.title || "Administrator attention required";
+    if (status) status.textContent = attention.status || "";
+    if (action) {
+      action.hidden = !attention.action;
+      action.href = attention.action || "#";
+      action.textContent = attention.label || "Review";
+    }
+  };
+
   const renderDashboard = (snapshot) => {
-    const { status, players } = snapshot;
+    const { status, players, attention } = snapshot;
     updatePendingState(status, players);
+    renderDashboardAttention(attention || null);
 
     const displayedState = pendingAction ? actionProgress(pendingAction) : status.minecraft.state;
     text("minecraft-state-summary", displayedState);

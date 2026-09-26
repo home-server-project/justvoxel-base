@@ -246,7 +246,7 @@ func TestDashboardRendersStatusPlayersAndControls(t *testing.T) {
 		t.Fatalf("got %d", rr.Code)
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"Running", "2 / 10", "1.21.8", "Alex", "Steve", "/minecraft/start", "/minecraft/stop", "/minecraft/restart", `data-dashboard-status="/api/dashboard-status"`, "dashboard-summary", "dashboard-live-panels"} {
+	for _, want := range []string{"Running", "2 / 10", "1.21.8", "Alex", "Steve", "/minecraft/start", "/minecraft/stop", "/minecraft/restart", `data-dashboard-status="/api/dashboard-status"`, "dashboard-summary", "dashboard-live-panels", "dashboard-attention"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("missing %q in response", want)
 		}
@@ -448,4 +448,47 @@ func actionRequest(target, form string) *http.Request {
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
 	req.AddCookie(&http.Cookie{Name: csrfCookie, Value: "token"})
 	return req
+}
+
+
+type fakeDashboardOperationAPI struct {
+	fakeAPI
+	migration *api.PersistentOperation
+	restore   *api.PersistentOperation
+	reset     *api.PersistentOperation
+}
+
+func (f *fakeDashboardOperationAPI) AdminCurrentMigrationOperation(_ context.Context, _ string) (api.PersistentOperationResponse, error) {
+	return api.PersistentOperationResponse{Operation: f.migration}, nil
+}
+func (f *fakeDashboardOperationAPI) AdminCurrentRestoreOperation(_ context.Context, _ string) (api.PersistentOperationResponse, error) {
+	return api.PersistentOperationResponse{Operation: f.restore}, nil
+}
+func (f *fakeDashboardOperationAPI) AdminCurrentFactoryResetOperation(_ context.Context, _ string) (api.PersistentOperationResponse, error) {
+	return api.PersistentOperationResponse{Operation: f.reset}, nil
+}
+
+func TestDashboardSurfacesMigrationNeedsAttention(t *testing.T) {
+	client := &fakeDashboardOperationAPI{migration: &api.PersistentOperation{
+		OperationID: "f75ce69d-e30d-4ea4-b402-ba301a8098fb",
+		OperationType: "migration_import",
+		State: "needs_attention",
+		Status: "Server migration Import backend stopped unexpectedly; preserved Import or runtime state requires administrator attention.",
+	}}
+	app, err := New(client, Config{Version: "1.0.0", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "http://example/", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("dashboard returned %d: %s", rr.Code, rr.Body.String())
+	}
+	for _, want := range []string{"Server Migration needs attention", "Review Migration Recovery", "/workspace/migration/recovery"} {
+		if !strings.Contains(rr.Body.String(), want) {
+			t.Fatalf("dashboard attention missing %q: %s", want, rr.Body.String())
+		}
+	}
 }
