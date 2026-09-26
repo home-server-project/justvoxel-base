@@ -158,6 +158,9 @@ func (s *server) networkWiFiConnect(w http.ResponseWriter, r *http.Request) {
 			Hidden:        request.Hidden,
 		})
 		secret.Clear()
+		if result.ProfileUUID != "" {
+			s.addNetworkCreatedProfile(transaction.ID, result.ProfileUUID)
+		}
 		if err != nil {
 			s.rollbackFailedNetworkMutation(ctx, client, transaction)
 			if s.store != nil {
@@ -171,7 +174,6 @@ func (s *server) networkWiFiConnect(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		profileUUID = result.ProfileUUID
-		s.addNetworkCreatedProfile(transaction.ID, profileUUID)
 	}
 
 	if s.store != nil {
