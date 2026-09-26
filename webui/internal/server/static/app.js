@@ -781,7 +781,7 @@ if (systemPower && systemDialog) {
       }
       if (response.status === 202 && result.accepted) {
         if (dialogTitle) dialogTitle.textContent = copy.working;
-        if (dialogMessage) dialogMessage.textContent = result.message || "The Management Agent accepted the system action.";
+        if (dialogMessage) dialogMessage.textContent = result.message || "JustVoxel accepted the system action.";
         if (dialogPlayers) dialogPlayers.hidden = true;
         if (dialogUpdate) dialogUpdate.hidden = true;
         if (cancelButton) cancelButton.hidden = true;
