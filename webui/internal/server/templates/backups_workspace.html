@@ -95,7 +95,7 @@
       {{range .RestorePlan.Warnings}}<div class="notice warning">{{.Message}}</div>{{end}}
       {{if and .RestorePlan.OK .RestorePlan.Requirements}}
       <div class="backup-restore-safety">
-        <strong>Safety checks remain Agent-owned.</strong>
+        <strong>JustVoxel safety checks</strong>
         <span>Before live data changes, JustVoxel revalidates the reviewed plan, archive integrity, archive safety, backup identity and staging capacity. Runtime validation and automatic rollback remain enabled.</span>
       </div>
       {{if .RestorePlan.Requirements.PlayersConfirmationRequired}}
@@ -116,7 +116,7 @@
           </div>
           <label class="destructive-confirm-toggle-row" data-destructive-toggle-row hidden><span class="destructive-confirm-toggle-callout">Confirm &gt;</span><input class="destructive-confirm-toggle" type="checkbox" data-destructive-toggle aria-label="Confirm restore"></label>
         </div>
-        <div class="action-row"><button class="danger" type="submit" data-destructive-submit disabled>Start Restore</button><a class="button-link secondary" href="/workspace/backups">Cancel</a></div>
+        <div class="action-row"><a class="button-link secondary" href="/workspace/backups">Cancel</a><button class="danger" type="submit" data-destructive-submit disabled>Start Restore</button></div>
       </form>
       {{end}}
     {{end}}
