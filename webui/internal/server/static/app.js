@@ -1024,7 +1024,7 @@ const initSystemUpdateWorkspace = () => {
     latestStatus = status;
     if (runningValue) runningValue.textContent = deploymentVersion(status.running, "Current image");
     if (runningImage) runningImage.textContent = deploymentDetail(status.running);
-    if (stagedValue) stagedValue.textContent = deploymentVersion(status.staged, "None");
+    if (stagedValue) stagedValue.textContent = status.staged ? deploymentVersion(status.staged, "Staged image") : "None";
     if (stagedImage) stagedImage.textContent = deploymentDetail(status.staged);
 
     if (availableValue) {
