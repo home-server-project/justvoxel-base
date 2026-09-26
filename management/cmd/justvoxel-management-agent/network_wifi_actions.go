@@ -19,7 +19,7 @@ type networkWiFiMutationView struct {
 	Action      string                 `json:"action"`
 	Interface   string                 `json:"interface,omitempty"`
 	ProfileUUID string                 `json:"profile_uuid,omitempty"`
-	Checkpoint *networkCheckpointView `json:"checkpoint,omitempty"`
+	Checkpoint  *networkCheckpointView `json:"checkpoint,omitempty"`
 }
 
 func registerNetworkWiFiActionRoutes(mux *http.ServeMux, s *server) {
@@ -106,13 +106,13 @@ func (s *server) networkWiFiConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	interfaceName := strings.TrimSpace(r.PathValue("interface"))
 	var request struct {
-		CheckpointID string `json:"checkpoint_id"`
-		ProfileUUID  string `json:"profile_uuid,omitempty"`
-		SSID         string `json:"ssid,omitempty"`
-		BSSID        string `json:"bssid,omitempty"`
+		CheckpointID  string `json:"checkpoint_id"`
+		ProfileUUID   string `json:"profile_uuid,omitempty"`
+		SSID          string `json:"ssid,omitempty"`
+		BSSID         string `json:"bssid,omitempty"`
 		KeyManagement string `json:"key_management,omitempty"`
-		Password     string `json:"password,omitempty"`
-		Hidden       bool   `json:"hidden,omitempty"`
+		Password      string `json:"password,omitempty"`
+		Hidden        bool   `json:"hidden,omitempty"`
 	}
 	if !decodeJSON(w, r, &request) {
 		return
