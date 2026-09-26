@@ -199,41 +199,56 @@
 
   const renderOverview = (snapshot) => {
     const section = document.createElement("section");
-    section.className = "network-overview";
+    section.className = "panel details network-overview";
+
+    const heading = document.createElement("div");
+    heading.className = "section-heading";
 
     const primary = document.createElement("div");
     primary.className = "network-overview-primary";
+    const eyebrow = document.createElement("p");
+    eyebrow.className = "eyebrow";
+    eyebrow.textContent = "Connectivity";
+
     const connectivity = snapshot.connectivity || "unknown";
-    const title = document.createElement("strong");
+    const title = document.createElement("h2");
     title.textContent =
       connectivity === "full" ? "Internet connected" :
       connectivity === "limited" ? "Limited connectivity" :
       connectivity === "portal" ? "Sign-in network detected" :
       connectivity === "none" ? "No internet connection" :
       "Network status unknown";
-    const subtitle = document.createElement("span");
-    subtitle.textContent = "NetworkManager " + (snapshot.version || "unknown version");
-    primary.append(title, subtitle);
+    primary.append(eyebrow, title);
 
     const status = document.createElement("div");
     status.className = "network-overview-status";
     status.append(
       badge(label(snapshot.state), snapshot.state?.startsWith("connected") ? "good" : ""),
-      badge(snapshot.networking_enabled ? "Networking on" : "Networking off", snapshot.networking_enabled ? "good" : "danger"),
-      badge(snapshot.wireless_enabled ? "Wi-Fi on" : "Wi-Fi off", snapshot.wireless_enabled ? "" : "muted")
+      badge(snapshot.networking_enabled ? "Networking on" : "Networking off", snapshot.networking_enabled ? "good" : "danger")
     );
 
     const wifiDevices = (snapshot.devices || []).filter((device) => device.kind === "wifi");
     if (wifiDevices.length) {
+      status.appendChild(
+        badge(snapshot.wireless_enabled ? "Wi-Fi on" : "Wi-Fi off", snapshot.wireless_enabled ? "" : "muted")
+      );
       const toggle = actionButton(
         snapshot.wireless_enabled ? "Turn Wi-Fi off" : "Turn Wi-Fi on",
         "networkWifiRadio",
         snapshot.wireless_enabled ? "off" : "on"
       );
       status.appendChild(toggle);
+    } else {
+      status.appendChild(badge("Wi-Fi not available", "muted"));
     }
 
-    section.append(primary, status);
+    heading.append(primary, status);
+
+    const subtitle = document.createElement("p");
+    subtitle.className = "state-text network-overview-version";
+    subtitle.textContent = "NetworkManager " + (snapshot.version || "unknown version");
+
+    section.append(heading, subtitle);
     return section;
   };
 
