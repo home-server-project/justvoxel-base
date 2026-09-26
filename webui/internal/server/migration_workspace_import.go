@@ -160,7 +160,7 @@ func (a *App) migrationWorkspaceImportApply(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if strings.TrimSpace(r.FormValue("import_confirmation")) != "IMPORT" {
-		a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", "Type IMPORT exactly to confirm this Server Import.")
+		a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", "Complete the Import confirmation slider before starting this Server Import.")
 		return
 	}
 	requirements := plan.Requirements
