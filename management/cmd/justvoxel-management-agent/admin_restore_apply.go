@@ -95,6 +95,10 @@ func (s *server) adminRestoreApply(w http.ResponseWriter, r *http.Request) {
 
 	operation, created, err := s.operations.beginRestore(request.PlanFingerprint)
 	if err != nil {
+		if errors.Is(err, errFactoryResetOperationBusy) {
+			writeAdminRestoreApplyFailure(w, http.StatusConflict, "factory_reset_needs_attention", "Full Factory Reset must be completed or retried before Restore can start")
+			return
+		}
 		if errors.Is(err, errRestoreOperationBusy) || errors.Is(err, errRestoreLockBusy) {
 			current, currentErr := s.operations.currentRestore()
 			if currentErr == nil && current != nil && current.PlanFingerprint == request.PlanFingerprint {
