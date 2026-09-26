@@ -23,11 +23,11 @@ func exactRestoreApplyFingerprint(t *testing.T) string {
 	return fingerprint
 }
 
-func restoreApplyBody(t *testing.T, fingerprint string, destructive, players bool) string {
+func restoreApplyBodyForMode(t *testing.T, fingerprint, mode string, destructive, players bool) string {
 	t.Helper()
 	body, err := json.Marshal(adminRestoreApplyRequest{
 		PlanFingerprint: fingerprint,
-		Request: adminRestorePlanRequest{BackupID: "minecraft-2026-09-20-043000.tar.gz", Mode: "world"},
+		Request: adminRestorePlanRequest{BackupID: "minecraft-2026-09-20-043000.tar.gz", Mode: mode},
 		DestructiveConfirmed: destructive,
 		PlayersConfirmed: players,
 	})
@@ -35,6 +35,11 @@ func restoreApplyBody(t *testing.T, fingerprint string, destructive, players boo
 		t.Fatal(err)
 	}
 	return string(body)
+}
+
+func restoreApplyBody(t *testing.T, fingerprint string, destructive, players bool) string {
+	t.Helper()
+	return restoreApplyBodyForMode(t, fingerprint, "world", destructive, players)
 }
 
 func TestAdminRestoreApplyExactReviewedPlanCreatesQueuedOperation(t *testing.T) {
@@ -76,6 +81,50 @@ func TestAdminRestoreApplyExactReviewedPlanCreatesQueuedOperation(t *testing.T) 
 	}
 	if workerCalls != 1 {
 		t.Fatalf("worker calls = %d, want 1", workerCalls)
+	}
+}
+
+func TestAdminRestoreApplyAcceptsReviewedWorldAndFullModes(t *testing.T) {
+	for _, mode := range []string{"world", "full"} {
+		t.Run(mode, func(t *testing.T) {
+			payload := validRestorePlanHelper
+			if mode == "full" {
+				payload = strings.Replace(payload, "\"mode\":\"world\"", "\"mode\":\"full\"", 1)
+			}
+			var helper adminRestorePlanHelperResponse
+			if err := decodeAdminRestorePlanHelperResponse([]byte(payload), &helper); err != nil {
+				t.Fatal(err)
+			}
+			fingerprint, err := adminRestorePlanFingerprint(helper.SchemaVersion, helper.Normalized, helper.Requirements, helper.Context)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			oldPlan := runAdminRestorePlanHelper
+			oldWorker := startRestoreWorker
+			defer func() {
+				runAdminRestorePlanHelper = oldPlan
+				startRestoreWorker = oldWorker
+			}()
+			runAdminRestorePlanHelper = func(_ context.Context, _ []byte) ([]byte, error) {
+				return []byte(payload), nil
+			}
+			workerMode := ""
+			startRestoreWorker = func(_ *server, _ string, plan restoreExecutionPlan) {
+				workerMode = plan.Mode
+			}
+
+			s := surfaceTestServer(t, roleAdministrator)
+			attachTestOperationStore(t, s, openTestOperationStore(t))
+			rr := httptest.NewRecorder()
+			s.adminRestoreApply(rr, surfaceRequest(http.MethodPost, "/v1/admin/restore/apply", restoreApplyBodyForMode(t, fingerprint, mode, true, false)))
+			if rr.Code != http.StatusAccepted {
+				t.Fatalf("%s Restore status = %d: %s", mode, rr.Code, rr.Body.String())
+			}
+			if workerMode != mode {
+				t.Fatalf("%s Restore worker mode = %q", mode, workerMode)
+			}
+		})
 	}
 }
 

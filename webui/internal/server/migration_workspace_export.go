@@ -157,7 +157,7 @@ func (a *App) migrationWorkspaceExportApply(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if strings.TrimSpace(r.FormValue("export_confirmation")) != "EXPORT" {
-		a.renderMigrationWorkspaceExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), "Type EXPORT exactly to confirm this Server Export.")
+		a.renderMigrationWorkspaceExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), "Complete the Export confirmation slider before starting this Server Export.")
 		return
 	}
 	playersConfirmed := r.FormValue("players_confirmed") == "yes"
@@ -229,7 +229,7 @@ func parseMigrationWorkspaceExportForm(r *http.Request, discovery api.AdminMigra
 			}
 		}
 		if !found {
-			return api.AdminMigrationExportTargetRequest{}, errors.New("choose an attached disk or removable-media destination reported by the Management Agent")
+			return api.AdminMigrationExportTargetRequest{}, errors.New("choose an attached disk or removable-media destination reported by JustVoxel")
 		}
 	case "nfs":
 		request.Source = strings.TrimSpace(r.FormValue("source"))

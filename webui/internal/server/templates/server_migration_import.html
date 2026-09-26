@@ -26,9 +26,8 @@
       </div>
 
       <div data-server-import-source="backup" hidden>
-        <label for="server-import-backup-path"><strong>Relative archive or server-directory path <span class="muted">optional</span></strong></label>
-        <input id="server-import-backup-path" name="source_path" placeholder="minecraft-2026-09-21.tar.gz" autocomplete="off">
-        <p class="muted">Leave this blank and JustVoxel will discover importable archives and server directories from configured backup storage.</p>
+        <p class="muted">JustVoxel will discover importable archives and server directories from configured backup storage.</p>
+
       </div>
 
       <div data-server-import-source="device" hidden>
@@ -37,17 +36,13 @@
           <option value="">Choose an JustVoxel-discovered disk, partition, or removable source</option>
           {{range .SourceDevices}}<option value="{{.Device.Path}}">{{.Device.Path}} · {{.Size}}{{if .Device.Model}} · {{.Device.Model}}{{end}}{{if .Device.Filesystem}} · {{.Device.Filesystem}}{{end}}{{if .Device.Removable}} · removable{{end}}</option>{{end}}
         </select>
-        <label for="server-import-device-path"><strong>Relative archive or server-directory path <span class="muted">optional</span></strong></label>
-        <input id="server-import-device-path" name="source_path" autocomplete="off">
-        <p class="muted">Leave the relative path blank to let JustVoxel discover importable entries after safely mounting the selected media.</p>
+
       </div>
 
       <div data-server-import-source="nfs" hidden>
         <label for="server-import-nfs-source"><strong>Temporary NFS source</strong></label>
         <input id="server-import-nfs-source" name="source_remote" placeholder="nas:/exports/migrations" autocomplete="off">
-        <label for="server-import-nfs-path"><strong>Relative archive or server-directory path <span class="muted">optional</span></strong></label>
-        <input id="server-import-nfs-path" name="source_path" autocomplete="off">
-        <p class="muted">Leave the relative path blank to browse JustVoxel-discovered entries from the temporary NFS mount.</p>
+
       </div>
 
       <div data-server-import-source="smb" hidden>
@@ -57,16 +52,10 @@
         <input id="server-import-smb-user" name="source_username" autocomplete="off">
         <label for="server-import-smb-domain">SMB domain <span class="muted">optional</span></label>
         <input id="server-import-smb-domain" name="source_domain" autocomplete="off">
-        <label for="server-import-smb-password"><strong>SMB source password</strong></label>
-        <input id="server-import-smb-password" type="password" name="source_smb_password" autocomplete="off">
-        <label for="server-import-smb-path"><strong>Relative archive or server-directory path <span class="muted">optional</span></strong></label>
-        <input id="server-import-smb-path" name="source_path" autocomplete="off">
-        <div class="notice">The source password is used only for the current planning or Apply request so JustVoxel can inspect/reopen the share. It is never placed in the reviewed plan, hidden fields, URL, or persistent operation journal.</div>
+
       </div>
 
-      <label for="server-import-source-version"><strong>Exact Minecraft version <span class="muted">only if autodetection cannot determine it</span></strong></label>
-      <input id="server-import-source-version" name="source_version" placeholder="1.21.8" autocomplete="off">
-      <p class="muted">JustVoxel will normally detect this. If exact version evidence is missing, it will ask for the value during review.</p>
+
     </section>
 
     {{if .Discovery.Configured}}

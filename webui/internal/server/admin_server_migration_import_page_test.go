@@ -264,7 +264,7 @@ func TestServerImportReviewShowsAuthoritativeConfirmations(t *testing.T) {
 	for _, want := range []string{
 		"Authoritative source plan", "Minecraft 1.21.8", "Fresh JustVoxel destination",
 		"PlayerOne", "Minecraft End User License Agreement", "Vanilla server will be opened by Paper",
-		"external plugin JARs", "online-mode=true", "Type IMPORT",
+		"external plugin JARs", "online-mode=true", "Slide to confirm Import",
 	} {
 		if !strings.Contains(page.Body.String(), want) {
 			t.Fatalf("Server Import review missing %q: %s", want, page.Body.String())
@@ -295,8 +295,11 @@ func TestServerImportSMBSourcePasswordIsNeverEchoedIntoReview(t *testing.T) {
 	if strings.Contains(page.Body.String(), "source-secret") {
 		t.Fatal("SMB source password was echoed into reviewed HTML")
 	}
-	if !strings.Contains(page.Body.String(), `name="source_smb_password"`) || !strings.Contains(page.Body.String(), `type="password"`) {
-		t.Fatal("SMB source password re-entry is missing from final Apply review")
+	if strings.Contains(page.Body.String(), `name="source_smb_password"`) {
+		t.Fatal("SMB source password must not be embedded in final Apply review")
+	}
+	if !strings.Contains(page.Body.String(), "JustVoxel will request the source password only when you start this reviewed Import") {
+		t.Fatal("SMB transient source credential guidance is missing from final Apply review")
 	}
 	if client.planReq.Source.SMBPassword != "source-secret" {
 		t.Fatal("SMB source password was not supplied ephemerally to Agent planning")

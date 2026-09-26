@@ -151,7 +151,7 @@ func TestServerExportReviewUsesAuthoritativePlanAndPlayerWarning(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Review Server Export", "/srv/migrations/justvoxel-migration-test.tar.gz", "2.0 GiB", "10.0 GiB",
-		"Online players will be interrupted", "PlayerOne", "Type EXPORT", "JustVoxel will revalidate",
+		"Online players will be interrupted", "PlayerOne", "Slide to confirm Export", "JustVoxel will revalidate",
 	} {
 		if !strings.Contains(page.Body.String(), want) {
 			t.Fatalf("Server Export review missing %q: %s", want, page.Body.String())
@@ -183,8 +183,11 @@ func TestServerExportSMBPasswordAppearsOnlyOnApplyReviewAndIsNotEchoed(t *testin
 	if page.Code != http.StatusOK {
 		t.Fatalf("SMB Server Export review returned %d: %s", page.Code, page.Body.String())
 	}
-	if !strings.Contains(page.Body.String(), `type="password" name="smb_password"`) || !strings.Contains(page.Body.String(), `autocomplete="off"`) {
-		t.Fatalf("SMB Apply-only password input missing: %s", page.Body.String())
+	if strings.Contains(page.Body.String(), `name="smb_password"`) {
+		t.Fatalf("SMB password must not be embedded in reviewed HTML: %s", page.Body.String())
+	}
+	if !strings.Contains(page.Body.String(), "JustVoxel will request the password only when you start this reviewed Export") {
+		t.Fatalf("SMB transient credential guidance missing: %s", page.Body.String())
 	}
 	if strings.Contains(page.Body.String(), "must-not-enter-planning") {
 		t.Fatal("SMB password value was echoed into reviewed HTML")

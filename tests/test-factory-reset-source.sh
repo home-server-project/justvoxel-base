@@ -24,6 +24,24 @@ grep -Fq 'storage_layout_action:"preserve"' "${helper}"
 grep -Fq 'config_backups_action:"delete"' "${helper}"
 grep -Fq 'jv_reset_delete_tree_same_filesystem "${backup_path}"' "${helper}"
 grep -Fq 'jv_reset_delete_tree_same_filesystem "${config_backup_dir}"' "${helper}"
+grep -Fq 'podman rm --force --ignore minecraft' "${helper}"
+grep -Fq 'container_cleanup_failed' "${helper}"
+grep -Fq 'data_cleanup_failed' "${helper}"
+grep -Fq 'backup_cleanup_failed' "${helper}"
+grep -Fq 'configuration_cleanup_failed' "${helper}"
+grep -Fq 'runtime_cleanup_incomplete' "${helper}"
+
+(
+    source "${common}"
+    findmnt() {
+        printf '%s\n' '/var/mnt/justvoxel-data' '/var/mnt/justvoxel-data/nested' '/var/mnt/other'
+    }
+    nested="$(jv_reset_nested_mounts /var/mnt/justvoxel-data)"
+    [[ "${nested}" == '/var/mnt/justvoxel-data/nested' ]] || {
+        echo "ERROR: reset root mountpoint was incorrectly treated as a nested mount: ${nested}" >&2
+        exit 1
+    }
+)
 
 if grep -Eq 'umount|wipefs|parted|sgdisk|mkfs\.' "${helper}" "${common}"; then
     echo 'ERROR: Full Factory Reset must not alter mounts, partitions, or filesystems.' >&2

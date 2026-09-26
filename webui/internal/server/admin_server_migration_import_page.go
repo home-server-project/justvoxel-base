@@ -160,7 +160,7 @@ func (a *App) serverMigrationImportApply(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if strings.TrimSpace(r.FormValue("import_confirmation")) != "IMPORT" {
-		a.renderServerMigrationImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", "Type IMPORT exactly to confirm this Server Import.")
+		a.renderServerMigrationImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", "Complete the Import confirmation slider before starting this Server Import.")
 		return
 	}
 	requirements := plan.Requirements
@@ -291,7 +291,7 @@ func parseServerMigrationImportForm(r *http.Request, discovery api.AdminMigratio
 			}
 		}
 		if !found {
-			return api.AdminMigrationImportRequest{}, errors.New("choose an attached disk, partition, or removable source reported by the Management Agent")
+			return api.AdminMigrationImportRequest{}, errors.New("choose an attached disk, partition, or removable source reported by JustVoxel")
 		}
 	case "nfs":
 		source.Path = relativePath
@@ -309,7 +309,7 @@ func parseServerMigrationImportForm(r *http.Request, discovery api.AdminMigratio
 			return api.AdminMigrationImportRequest{}, errors.New("enter the SMB source as //server/share and provide the SMB username")
 		}
 		if source.SMBPassword == "" {
-			return api.AdminMigrationImportRequest{}, errors.New("enter the SMB source password so the Management Agent can inspect this source")
+			return api.AdminMigrationImportRequest{}, errors.New("enter the SMB source password so JustVoxel can inspect this source")
 		}
 	default:
 		return api.AdminMigrationImportRequest{}, errors.New("unsupported Server Import source type")
@@ -465,11 +465,11 @@ func serverMigrationImportPlanNeedsInput(code string) bool {
 func serverMigrationImportPrompt(plan api.AdminMigrationImportPlanResponse) string {
 	switch plan.Code {
 	case "source_selection_required":
-		return "Choose an Agent-discovered archive or server directory, or enter a safe relative path manually."
+		return "Choose an JustVoxel-discovered archive or server directory, or enter a safe relative path manually."
 	case "multiple_roots", "stale_root":
-		return "Choose exactly one Minecraft server root detected by the Management Agent."
+		return "Choose exactly one Minecraft server root detected by JustVoxel."
 	case "source_version_required":
-		return "Enter the exact Minecraft version used by this source so the Agent can validate a matching stable Paper build."
+		return "Enter the exact Minecraft version used by this source so JustVoxel can validate a matching stable Paper build."
 	default:
 		return ""
 	}
