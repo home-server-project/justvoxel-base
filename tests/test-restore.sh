@@ -10,6 +10,7 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "${tmp}"' EXIT
 
 mkdir -p "${tmp}/backups" "${tmp}/data"
+jv_restore_require_space "${tmp}/data" 1 || fail 'restore staging-space check failed on a writable temporary filesystem'
 touch -d '2026-09-13 04:30:00' "${tmp}/backups/minecraft-2026-09-13-043000.tar.gz"
 touch -d '2026-09-15 04:30:00' "${tmp}/backups/minecraft-2026-09-15-043000.tar.gz"
 touch -d '2026-09-16 04:30:00' "${tmp}/backups/minecraft-2026-09-16-043000.tar.gz.partial"

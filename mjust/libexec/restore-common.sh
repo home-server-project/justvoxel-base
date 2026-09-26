@@ -68,7 +68,7 @@ jv_restore_validate_data_layout() {
 
 jv_restore_require_space() {
     local path="$1" content_bytes="$2" available required
-    available="$(df -PB1 --output=avail -- "${path}" 2>/dev/null | tail -n1 | tr -d ' ')"
+    available="$(df -B1 --output=avail -- "${path}" 2>/dev/null | tail -n1 | tr -d ' ')"
     [[ ${available} =~ ^[0-9]+$ ]] || {
         echo 'ERROR: could not determine free space for restore staging.' >&2
         return 1

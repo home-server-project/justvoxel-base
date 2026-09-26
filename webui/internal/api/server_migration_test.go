@@ -125,6 +125,16 @@ func TestServerMigrationPlanAndApplyClientPaths(t *testing.T) {
 			},
 		},
 		{
+			name:   "import resolve",
+			path:   adminMigrationImportResolvePath,
+			status: http.StatusOK,
+			body:   `{"operation":{"schema_version":"v1","operation_id":"` + operationID + `","operation_type":"migration_import","plan_fingerprint":"` + fingerprint + `","state":"resolved","stage":"resolved","status":"Current server kept.","started_at":"x","updated_at":"x","finished_at":"x","rollback":{"state":"not_started"}}}`,
+			call: func(client *Client) error {
+				_, err := client.AdminMigrationImportResolve(context.Background(), "session-token", AdminMigrationImportResolveRequest{OperationID: operationID, KeepCurrentState: true})
+				return err
+			},
+		},
+		{
 			name:   "recovery apply",
 			path:   adminMigrationRecoveryApplyPath,
 			status: http.StatusAccepted,

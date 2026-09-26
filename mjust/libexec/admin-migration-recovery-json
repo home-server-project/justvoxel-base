@@ -45,6 +45,38 @@ discover() {
     jq -cn --argjson configured "$([[ ${configured} == yes ]] && echo true || echo false)" --argjson transactions "${items}" '{ok:true,schema_version:"v1",configured:$configured,transactions:$transactions}'
 }
 
+resolve_check() {
+    local retained=''
+
+    if [[ ${configured} != yes ]]; then
+        jq -cn '{ok:false,schema_version:"v1",safe_to_resolve:false,code:"runtime_not_configured",error:"The current configured Minecraft runtime is unavailable, so the failed Import cannot be dismissed safely."}'
+        return 0
+    fi
+
+    retained="$(find "${data_parent}" -maxdepth 1 -name '.justvoxel-import-*' -print -quit 2>/dev/null || true)"
+    if [[ -n ${retained} ]]; then
+        jq -cn '{ok:false,schema_version:"v1",safe_to_resolve:false,code:"retained_transaction",error:"Retained Import transaction state still exists and must be reviewed through Migration Recovery."}'
+        return 0
+    fi
+
+    if [[ -d ${JV_MIGRATION_RECOVERY_ROOT} ]] && find "${JV_MIGRATION_RECOVERY_ROOT}" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null | grep -q .; then
+        jq -cn '{ok:false,schema_version:"v1",safe_to_resolve:false,code:"retained_registry",error:"Migration Recovery registry state still exists and must be reviewed before dismissing the failed Import."}'
+        return 0
+    fi
+
+    if ! /usr/libexec/justvoxel/mjust/restore-runtime-validate >/dev/null 2>&1; then
+        jq -cn '{ok:false,schema_version:"v1",safe_to_resolve:false,code:"runtime_validation_failed",error:"The current Minecraft runtime did not pass validation. The failed Import remains locked for administrator review."}'
+        return 0
+    fi
+
+    if ! /usr/libexec/justvoxel/mjust/validate-backend >/dev/null 2>&1; then
+        jq -cn '{ok:false,schema_version:"v1",safe_to_resolve:false,code:"appliance_validation_failed",error:"The current JustVoxel appliance did not pass validation. The failed Import remains locked for administrator review."}'
+        return 0
+    fi
+
+    jq -cn '{ok:true,schema_version:"v1",safe_to_resolve:true}'
+}
+
 plan() {
     local request transaction allowed=no summary phase state_identity runtime=false unconfigured=false
     request="$(cat)"
@@ -74,6 +106,7 @@ plan() {
 
 case "${1:-}" in
     discover) discover ;;
+    resolve-check) resolve_check ;;
     plan) plan ;;
-    *) echo 'Usage: admin-migration-recovery-json {discover|plan}' >&2; exit 2 ;;
+    *) echo 'Usage: admin-migration-recovery-json {discover|resolve-check|plan}' >&2; exit 2 ;;
 esac

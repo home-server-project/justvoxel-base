@@ -12,14 +12,18 @@ import (
 
 type fakeServerMigrationRecoveryAPI struct {
 	fakeServerMigrationAPI
-	plan       api.AdminMigrationRecoveryPlanResponse
-	planErr    error
-	planCalls  int
-	planReq    api.AdminMigrationRecoveryPlanRequest
-	apply      api.AdminMigrationApplyResponse
-	applyErr   error
-	applyCalls int
-	applyReq   api.AdminMigrationRecoveryApplyRequest
+	plan         api.AdminMigrationRecoveryPlanResponse
+	planErr      error
+	planCalls    int
+	planReq      api.AdminMigrationRecoveryPlanRequest
+	apply        api.AdminMigrationApplyResponse
+	applyErr     error
+	applyCalls   int
+	applyReq     api.AdminMigrationRecoveryApplyRequest
+	resolve      api.AdminMigrationImportResolveResponse
+	resolveErr   error
+	resolveCalls int
+	resolveReq   api.AdminMigrationImportResolveRequest
 }
 
 func (f *fakeServerMigrationRecoveryAPI) AdminMigrationRecoveryPlan(_ context.Context, session string, request api.AdminMigrationRecoveryPlanRequest) (api.AdminMigrationRecoveryPlanResponse, error) {
@@ -38,6 +42,15 @@ func (f *fakeServerMigrationRecoveryAPI) AdminMigrationRecoveryApply(_ context.C
 	f.applyCalls++
 	f.applyReq = request
 	return f.apply, f.applyErr
+}
+
+func (f *fakeServerMigrationRecoveryAPI) AdminMigrationImportResolve(_ context.Context, session string, request api.AdminMigrationImportResolveRequest) (api.AdminMigrationImportResolveResponse, error) {
+	if session != "session-token" {
+		return api.AdminMigrationImportResolveResponse{}, api.ErrUnauthorized
+	}
+	f.resolveCalls++
+	f.resolveReq = request
+	return f.resolve, f.resolveErr
 }
 
 func recoveryDiscoveryFixture() api.AdminMigrationRecoveryDiscoveryResponse {
@@ -240,5 +253,52 @@ func TestImportNeedsAttentionProgressLinksDirectlyToMigrationRecovery(t *testing
 	page := httptestResponse(app, recoveryWebRequest(http.MethodGet, "http://example/settings/server-migration/progress/"+serverMigrationOperationID, nil))
 	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "href=\"/settings/server-migration/recovery\"") || !strings.Contains(page.Body.String(), "Review Migration Recovery") {
 		t.Fatalf("needs-attention Import progress did not expose Recovery handoff: %d %s", page.Code, page.Body.String())
+	}
+}
+
+func TestMigrationRecoveryOffersKeepCurrentForOrphanedImport(t *testing.T) {
+	current := &api.PersistentOperation{
+		SchemaVersion: "v1", OperationID: "34567891-1234-4abc-8def-123456789abc", OperationType: "migration_import",
+		PlanFingerprint: serverMigrationFingerprint, State: "needs_attention", Stage: "import_backend_interrupted",
+		Status: "Import backend stopped before a retained transaction was created.", StartedAt: "x", UpdatedAt: "x",
+		Rollback: api.PersistentOperationRollback{State: "not_started"},
+	}
+	client := &fakeServerMigrationRecoveryAPI{
+		fakeServerMigrationAPI: fakeServerMigrationAPI{
+			recovery: api.AdminMigrationRecoveryDiscoveryResponse{OK: true, SchemaVersion: "v1", Configured: true, Transactions: []api.AdminMigrationRecoverySummary{}},
+			current:  current,
+		},
+		resolve: api.AdminMigrationImportResolveResponse{Operation: &api.PersistentOperation{
+			SchemaVersion: "v1", OperationID: current.OperationID, OperationType: "migration_import",
+			PlanFingerprint: serverMigrationFingerprint, State: "resolved", Stage: "resolved", Status: "Current server kept.",
+			StartedAt: "x", UpdatedAt: "x", FinishedAt: "x", Rollback: api.PersistentOperationRollback{State: "not_started"},
+		}},
+	}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entry := httptestResponse(app, recoveryWebRequest(http.MethodGet, "http://example/settings/server-migration/recovery", nil))
+	if entry.Code != http.StatusOK {
+		t.Fatalf("orphaned Import Recovery page returned %d: %s", entry.Code, entry.Body.String())
+	}
+	for _, want := range []string{"No retained migration recovery transaction", "Keep current server and continue", "/settings/server-migration/recovery/resolve"} {
+		if !strings.Contains(entry.Body.String(), want) {
+			t.Fatalf("orphaned Import Recovery page missing %q: %s", want, entry.Body.String())
+		}
+	}
+
+	values := url.Values{
+		"csrf":               {"csrf-token"},
+		"operation_id":       {current.OperationID},
+		"keep_current_state": {"yes"},
+	}
+	result := httptestResponse(app, recoveryWebRequest(http.MethodPost, "http://example/settings/server-migration/recovery/resolve", values))
+	if result.Code != http.StatusSeeOther || result.Header().Get("Location") != "/settings/server-migration" {
+		t.Fatalf("orphaned Import resolve returned %d %q: %s", result.Code, result.Header().Get("Location"), result.Body.String())
+	}
+	if client.resolveCalls != 1 || client.resolveReq.OperationID != current.OperationID || !client.resolveReq.KeepCurrentState {
+		t.Fatalf("unexpected Import resolve request: calls=%d request=%#v", client.resolveCalls, client.resolveReq)
 	}
 }

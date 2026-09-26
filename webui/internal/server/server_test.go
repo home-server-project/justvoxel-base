@@ -485,9 +485,12 @@ func TestDashboardSurfacesMigrationNeedsAttention(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("dashboard returned %d: %s", rr.Code, rr.Body.String())
 	}
-	for _, want := range []string{"Server Migration needs attention", "Review Migration Recovery", "/workspace/migration/recovery"} {
+	for _, want := range []string{"Server Migration needs attention", "Review Migration Recovery", "/settings/server-migration/recovery"} {
 		if !strings.Contains(rr.Body.String(), want) {
 			t.Fatalf("dashboard attention missing %q: %s", want, rr.Body.String())
 		}
+	}
+	if strings.Contains(rr.Body.String(), "/workspace/migration/recovery") {
+		t.Fatalf("dashboard must not navigate directly to a workspace fragment: %s", rr.Body.String())
 	}
 }

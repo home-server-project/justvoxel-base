@@ -100,3 +100,32 @@ func TestOperationStoreRecoveryTakesOwnershipOfNeedsAttentionImport(t *testing.T
 		t.Fatalf("current migration = %#v, want Recovery %s", current, recovery.OperationID)
 	}
 }
+
+
+func TestOperationStoreResolvesNeedsAttentionImportAndReleasesMigrationLock(t *testing.T) {
+	store := openTestOperationStore(t)
+	imp, _, err := store.beginMigrationImport(testMigrationImportFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.transition(imp.OperationID, operationValidating, "import_preflight", "Checking Import."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.transition(imp.OperationID, operationNeedsAttention, "import_attention", "Import requires review."); err != nil {
+		t.Fatal(err)
+	}
+
+	resolved, err := store.resolveMigrationImport(imp.OperationID, "Failed Server Import was dismissed after the current runtime passed validation and no retained recovery state remained.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.State != operationResolved || resolved.Stage != "resolved" {
+		t.Fatalf("resolved Import = %#v", resolved)
+	}
+	if current, err := store.currentMigration(); err != nil || current != nil {
+		t.Fatalf("Import remained current after resolve: %#v err=%v", current, err)
+	}
+	if _, _, err := store.beginMigrationExport(testMigrationExportFingerprint); err != nil {
+		t.Fatalf("migration lock remained held after resolving Import: %v", err)
+	}
+}

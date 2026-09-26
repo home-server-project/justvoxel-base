@@ -455,7 +455,7 @@ func dashboardCurrentAttention(ctx context.Context, operations dashboardOperatio
 		action := "/workspace/migration"
 		label := "Open Server Migration"
 		if current.Operation.OperationType == "migration_import" {
-			action = "/workspace/migration/recovery"
+			action = "/settings/server-migration/recovery"
 			label = "Review Migration Recovery"
 		}
 		return &dashboardAttention{

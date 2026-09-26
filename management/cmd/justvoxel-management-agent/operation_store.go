@@ -1174,6 +1174,23 @@ func (s *operationStore) resolveFactoryReset(id, status string) (operationJourna
 	return s.transition(id, operationResolved, "resolved", status)
 }
 
+func (s *operationStore) resolveMigrationImport(id, status string) (operationJournal, error) {
+	if !validOperationID(id) || !validOperationStatus(status) {
+		return operationJournal{}, errors.New("invalid server migration Import resolution")
+	}
+	current, err := s.currentMigration()
+	if err != nil {
+		return operationJournal{}, err
+	}
+	if current == nil || current.OperationID != id {
+		return operationJournal{}, errOperationNotFound
+	}
+	if current.OperationType != operationTypeMigrationImport || current.State != operationNeedsAttention {
+		return operationJournal{}, errors.New("server migration Import is not resolvable")
+	}
+	return s.transition(id, operationResolved, "resolved", status)
+}
+
 func (s *operationStore) get(id string) (operationJournal, error) {
 	if !validOperationID(id) {
 		return operationJournal{}, errOperationNotFound
