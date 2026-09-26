@@ -167,18 +167,25 @@ func (s *server) adminFactoryResetApply(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	if strings.TrimSpace(request.SystemPassword) == "" {
-		writeAdminFactoryResetApplyFailure(w, http.StatusBadRequest, "system_password_required", "current voxel system password is required", nil)
+	authMode, err := readAuthMode()
+	if err != nil {
+		writeAdminFactoryResetApplyFailure(w, http.StatusServiceUnavailable, "auth_mode_unavailable", "authentication mode is unavailable", nil)
 		return
 	}
-	if _, err := systemAuthenticate(systemAdminUsername, request.SystemPassword); err != nil {
-		request.SystemPassword = ""
-		if errors.Is(err, systemauth.ErrInvalidCredentials) {
-			writeAdminFactoryResetApplyFailure(w, http.StatusUnauthorized, "system_password_incorrect", "current voxel system password is incorrect", nil)
+	if authMode == authModeSeparate {
+		if strings.TrimSpace(request.SystemPassword) == "" {
+			writeAdminFactoryResetApplyFailure(w, http.StatusBadRequest, "system_password_required", "current voxel system password is required while WebUI uses a separate password", nil)
 			return
 		}
-		writeAdminFactoryResetApplyFailure(w, http.StatusForbidden, "system_account_unavailable", "voxel system account authentication failed", nil)
-		return
+		if _, err := systemAuthenticate(systemAdminUsername, request.SystemPassword); err != nil {
+			request.SystemPassword = ""
+			if errors.Is(err, systemauth.ErrInvalidCredentials) {
+				writeAdminFactoryResetApplyFailure(w, http.StatusUnauthorized, "system_password_incorrect", "current voxel system password is incorrect", nil)
+				return
+			}
+			writeAdminFactoryResetApplyFailure(w, http.StatusForbidden, "system_account_unavailable", "voxel system account authentication failed", nil)
+			return
+		}
 	}
 	request.SystemPassword = ""
 
