@@ -18,6 +18,10 @@ grep -Fq 'The original archive belongs to the user.' "${plan}" || fail 'Import s
 if grep -Fq 'migration source changed while it was being staged' "${plan}"; then
     fail 'Import still treats post-read changes to the original user file as JustVoxel state'
 fi
+if grep -Fq 'jv_migration_import_source_content_identity' "${repo_root}/mjust/libexec/admin-migration-import-plan-json"; then
+    fail 'Import planner still calls the removed content-identity helper'
+fi
+grep -Fq 'printf '\''%s\\n%s\\n'\'' "$current_transport_identity" "$requested_source_path"' "${repo_root}/mjust/libexec/admin-migration-import-plan-json" || fail 'Import planner no longer rebuilds the reviewed source-location identity consistently'
 
 transaction="${repo_root}/mjust/libexec/admin-migration-import-transaction-json"
 backend="${repo_root}/mjust/libexec/migration-import-backend"
