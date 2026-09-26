@@ -79,6 +79,35 @@ Checkpoint behavior is deliberately conservative:
 
 The in-memory JustVoxel transaction map is intentionally not authoritative for rollback safety. NetworkManager owns the actual checkpoint and its automatic rollback timer. If the Management Agent restarts while a checkpoint is pending, the opaque JustVoxel transaction ID is lost and cannot be confirmed afterward, but NetworkManager still retains the checkpoint and automatically rolls it back when its timeout expires. This fails toward restoring connectivity rather than keeping an unconfirmed network change.
 
+### Wi-Fi management
+
+Step 4 adds administrator-only Wi-Fi mutations through the same independent JustVoxel backend:
+
+- turn the NetworkManager Wi-Fi radio on
+- turn the Wi-Fi radio off behind a checkpoint that covers all Wi-Fi interfaces
+- connect an existing saved Wi-Fi profile by NetworkManager UUID
+- create and activate a new Open, OWE, WPA/WPA2 Personal, or WPA3 Personal profile
+- join a hidden Open, OWE, WPA/WPA2 Personal, or WPA3 Personal network
+- disconnect a Wi-Fi interface
+- forget an inactive saved Wi-Fi profile
+
+New WEP and Enterprise credential entry are intentionally unsupported. A previously saved Enterprise profile can still be activated because no new credential is collected by JustVoxel.
+
+Potentially disruptive Wi-Fi actions use this sequence:
+
+1. The browser asks the Management Agent to create the checkpoint first.
+2. The browser stores the opaque JustVoxel transaction ID in session storage.
+3. Only after the checkpoint is armed does the browser request the Wi-Fi mutation.
+4. The workspace shows a "Keep settings" / "Revert now" banner with the rollback countdown.
+5. The pending transaction is recovered after a page reload while the browser session remains available.
+6. "Keep settings" destroys the checkpoint.
+7. "Revert now" rolls back immediately.
+8. If the browser loses connectivity and cannot confirm, NetworkManager rolls back automatically at the timeout.
+
+For a newly created Wi-Fi profile, JustVoxel records the new profile UUID in the pending transaction. An explicit JustVoxel rollback first asks NetworkManager to restore connectivity and then deletes that newly created profile. The conservative NetworkManager checkpoint flags remain value 0. Therefore an unattended NetworkManager timeout can restore connectivity while leaving the newly created saved profile behind; JustVoxel deliberately accepts that non-disruptive residue rather than enabling a broad checkpoint flag that could delete unrelated profiles created by another tool during the same window.
+
+An active profile cannot be forgotten directly. The administrator must disconnect it, confirm the disconnected state, and then forget it. This prevents a "forget" action from deleting the profile that NetworkManager would need for rollback.
+
 ## Stable identifiers
 
 D-Bus object paths are runtime implementation details and can change.
@@ -94,13 +123,16 @@ The backend resolves those identifiers to current NetworkManager objects immedia
 
 Read-only status uses NetworkManager's normal settings and runtime interfaces and does not call `GetSecrets`.
 
-When Wi-Fi connection creation is added later, a submitted password must be treated as short-lived request data:
+A submitted Wi-Fi password is treated as short-lived request data:
 
 - never place it in command-line arguments
 - never log it
 - never return it in API responses
 - never store an application-side copy
 - pass it directly to NetworkManager over D-Bus
+- clear the mutable JustVoxel secret buffer after the D-Bus call and remove the PSK from the temporary settings map
+
+NetworkManager requires a Go string at the D-Bus boundary, so JustVoxel does not claim that every runtime string copy can be cryptographically erased.
 
 The existing WebUI transport is plain HTTP on the trusted LAN by default. That is a separate transport-security decision: keeping secrets out of the Management Agent does not encrypt the browser-to-WebUI hop.
 
