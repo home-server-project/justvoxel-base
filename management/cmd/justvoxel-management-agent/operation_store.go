@@ -1126,6 +1126,36 @@ func (s *operationStore) currentFactoryReset() (*operationJournal, error) {
 	return &copy, nil
 }
 
+func (s *operationStore) retryFactoryReset(id, planFingerprint string) (operationJournal, error) {
+	if !validOperationID(id) || !operationFingerprintPattern.MatchString(planFingerprint) {
+		return operationJournal{}, errors.New("invalid factory reset retry")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.currentFactoryResetID != id {
+		return operationJournal{}, errOperationNotFound
+	}
+	journal, ok := s.operations[id]
+	if !ok {
+		return operationJournal{}, errOperationNotFound
+	}
+	if journal.OperationType != operationTypeFactoryReset || journal.State != operationNeedsAttention {
+		return operationJournal{}, errors.New("factory reset is not retryable")
+	}
+	journal.PlanFingerprint = planFingerprint
+	journal.State = operationQueued
+	journal.Stage = "queued"
+	journal.Status = "Full factory reset retry queued."
+	journal.UpdatedAt = s.now().UTC().Format(time.RFC3339Nano)
+	journal.FinishedAt = ""
+	journal.InterruptedAt = ""
+	if err := s.persist(journal); err != nil {
+		return operationJournal{}, err
+	}
+	s.operations[id] = journal
+	return journal, nil
+}
+
 func (s *operationStore) get(id string) (operationJournal, error) {
 	if !validOperationID(id) {
 		return operationJournal{}, errOperationNotFound
