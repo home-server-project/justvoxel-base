@@ -2565,6 +2565,30 @@ if (minecraftOpen && minecraftDialog) {
       playerLine.appendChild(messageNode(`${players.online ?? 0} players online.`));
     }
     root.appendChild(playerLine);
+
+    const canViewLogs = document.body.classList.contains("role-administrator") || document.body.classList.contains("role-operator");
+    if (canViewLogs) {
+      const logs = await requestWorkspaceJSON("/api/minecraft/workspace/logs");
+      if (!logs || sequence !== loadSequence || !content) return;
+      const section = document.createElement("section");
+      section.className = "panel details minecraft-overview-logs";
+      const heading = document.createElement("div");
+      heading.className = "section-heading";
+      const headingText = document.createElement("div");
+      const eyebrow = document.createElement("p");
+      eyebrow.className = "eyebrow";
+      eyebrow.textContent = "Diagnostics";
+      const title = document.createElement("h2");
+      title.textContent = "Recent logs";
+      headingText.append(eyebrow, title);
+      heading.appendChild(headingText);
+      const pre = document.createElement("pre");
+      pre.className = "log-box";
+      pre.textContent = Array.isArray(logs.lines) && logs.lines.length ? logs.lines.join("\n") : "No recent log lines available.";
+      section.append(heading, pre);
+      root.appendChild(section);
+    }
+
     content.replaceChildren(root);
   };
 
