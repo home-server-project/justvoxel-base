@@ -3799,7 +3799,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     return { remove, keep };
   };
 
-  const renderResetPlan = (mode, plan) => {
+  const renderResetPlan = (mode, plan, requireSystemPassword = false) => {
     clearResetPoll();
     if (!content) return;
     const root = document.createElement("div");
@@ -3851,7 +3851,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     }
 
     let password = null;
-    if (mode === "factory") {
+    if (mode === "factory" && requireSystemPassword) {
       const passwordLabel = document.createElement("label");
       passwordLabel.className = "system-reset-password";
       passwordLabel.textContent = "Current voxel system password";
@@ -3862,7 +3862,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       passwordLabel.appendChild(password);
       const help = document.createElement("small");
       help.className = "muted";
-      help.textContent = "Required even when WebUI currently uses a separate browser password.";
+      help.textContent = "Required because WebUI is using a separate browser password.";
       passwordLabel.appendChild(help);
       built.panel.appendChild(passwordLabel);
     }
@@ -3972,7 +3972,13 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         : "/api/system/workspace/reset/minecraft/plan";
       const plan = await systemPostForm(endpoint);
       if (!plan) return;
-      renderResetPlan(mode, plan);
+      let requireSystemPassword = false;
+      if (mode === "factory") {
+        const security = await systemFetchJSON("/api/system/workspace/security");
+        if (!security) return;
+        requireSystemPassword = security.mode === "separate";
+      }
+      renderResetPlan(mode, plan, requireSystemPassword);
       if (state) state.textContent = "";
     } catch (error) {
       if (state) state.textContent = error?.message || "Reset could not be planned.";
