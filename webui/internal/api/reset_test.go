@@ -13,6 +13,34 @@ import (
 const resetTestFingerprint = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
 const resetTestOperationID = "12345678-1234-4123-8123-123456789abc"
 
+func TestFactoryResetPasswordClientKeepsHostPolicyErrorAndAcceptsCompletion(t *testing.T) {
+	calls := 0
+	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if r.Method != http.MethodPost || r.URL.Path != adminFactoryResetPasswordPath || r.Header.Get("Authorization") != "Bearer session-token" {
+			t.Fatalf("unexpected password endpoint request: %s %s", r.Method, r.URL.Path)
+		}
+		var request map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if request["operation_id"] != resetTestOperationID || request["current_password"] != "old-secret" || request["new_password"] != "new-secret" {
+			t.Fatal("password request fields were not forwarded")
+		}
+		if calls == 1 {
+			return &http.Response{StatusCode: http.StatusBadRequest, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"error":"host policy rejected password"}`))}, nil
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"operation":{"operation_id":"` + resetTestOperationID + `","operation_type":"factory_reset","state":"succeeded"}}`))}, nil
+	})}}
+	if _, err := client.AdminFactoryResetPassword(context.Background(), "session-token", resetTestOperationID, "old-secret", "new-secret"); err == nil || !strings.Contains(err.Error(), "host policy rejected password") {
+		t.Fatalf("host policy reason was lost: %v", err)
+	}
+	response, err := client.AdminFactoryResetPassword(context.Background(), "session-token", resetTestOperationID, "old-secret", "new-secret")
+	if err != nil || response.Operation == nil || response.Operation.State != "succeeded" {
+		t.Fatalf("completion response: %#v %v", response, err)
+	}
+}
+
 func TestFactoryResetPlanAndApplyClientContract(t *testing.T) {
 	call := 0
 	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -45,7 +73,7 @@ func TestFactoryResetPlanAndApplyClientContract(t *testing.T) {
 				  "network_storage_action":"preserve",
 				  "authentication_action":"reset_to_system",
 				  "webui_users_action":"delete",
-				  "password_action":"expire",
+				  "password_action":"replace",
 				  "sessions_action":"invalidate",
 				  "players_online":0,
 				  "players":[],

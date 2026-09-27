@@ -197,6 +197,8 @@ The Management Agent authenticates the submitted credential once through PAM, de
 
 System password changes are performed through PAM and change the real Linux `voxel` credential. A successful password change invalidates active WebUI sessions.
 
+Full Factory Reset keeps its persistent operation active after runtime and local identity cleanup. It returns authentication to System mode, then waits for the administrator to replace the real `voxel` password through PAM. The existing administrator session remains available for this final step. The operation completes and invalidates WebUI sessions only after the new password authenticates and the old password is rejected. A browser refresh or management service restart preserves the waiting step.
+
 The optional **Separate WebUI password** provider uses a WebUI-local Argon2 credential for the `voxel` browser identity. It is a separate provider, not password synchronization. Switching providers requires confirmation with the real system password and invalidates all WebUI sessions.
 
 Persistent WebUI authentication state is stored under `/var/lib/justvoxel/webui`. A missing authentication-mode state means System account mode, which keeps ordinary bootc updates/rebases safe for already-configured machines.

@@ -28,35 +28,31 @@ var runAdminFactoryResetHelper = func(ctx context.Context, args ...string) ([]by
 
 var resetFactoryAuthenticationState = resetAuthenticationStateForFactoryReset
 
-var expireSystemAdministratorPassword = func(ctx context.Context) error {
-	return exec.CommandContext(ctx, "/usr/bin/chage", "-d", "0", systemAdminUsername).Run()
-}
-
 type adminFactoryResetPlanResponse struct {
-	OK                   bool     `json:"ok"`
-	SchemaVersion        string   `json:"schema_version,omitempty"`
-	Mode                 string   `json:"mode,omitempty"`
-	PlanFingerprint      string   `json:"plan_fingerprint,omitempty"`
-	Code                 string   `json:"code,omitempty"`
-	Error                string   `json:"error,omitempty"`
-	MinecraftConfigured  bool     `json:"minecraft_configured"`
-	DataPath             string   `json:"data_path,omitempty"`
-	DataScope            string   `json:"data_scope,omitempty"`
-	DataAction           string   `json:"data_action,omitempty"`
-	BackupPath           string   `json:"backup_path,omitempty"`
-	BackupScope          string   `json:"backup_scope,omitempty"`
-	BackupAction         string   `json:"backup_action,omitempty"`
-	ConfigBackupsAction  string   `json:"config_backups_action,omitempty"`
-	StorageLayoutAction  string   `json:"storage_layout_action,omitempty"`
-	ExternalStorageAction string  `json:"external_storage_action,omitempty"`
-	NetworkStorageAction string   `json:"network_storage_action,omitempty"`
-	AuthenticationAction string   `json:"authentication_action,omitempty"`
-	WebUIUsersAction     string   `json:"webui_users_action,omitempty"`
-	PasswordAction       string   `json:"password_action,omitempty"`
-	SessionsAction       string   `json:"sessions_action,omitempty"`
-	PlayersOnline        int      `json:"players_online,omitempty"`
-	Players              []string `json:"players"`
-	Warnings             []string `json:"warnings"`
+	OK                    bool     `json:"ok"`
+	SchemaVersion         string   `json:"schema_version,omitempty"`
+	Mode                  string   `json:"mode,omitempty"`
+	PlanFingerprint       string   `json:"plan_fingerprint,omitempty"`
+	Code                  string   `json:"code,omitempty"`
+	Error                 string   `json:"error,omitempty"`
+	MinecraftConfigured   bool     `json:"minecraft_configured"`
+	DataPath              string   `json:"data_path,omitempty"`
+	DataScope             string   `json:"data_scope,omitempty"`
+	DataAction            string   `json:"data_action,omitempty"`
+	BackupPath            string   `json:"backup_path,omitempty"`
+	BackupScope           string   `json:"backup_scope,omitempty"`
+	BackupAction          string   `json:"backup_action,omitempty"`
+	ConfigBackupsAction   string   `json:"config_backups_action,omitempty"`
+	StorageLayoutAction   string   `json:"storage_layout_action,omitempty"`
+	ExternalStorageAction string   `json:"external_storage_action,omitempty"`
+	NetworkStorageAction  string   `json:"network_storage_action,omitempty"`
+	AuthenticationAction  string   `json:"authentication_action,omitempty"`
+	WebUIUsersAction      string   `json:"webui_users_action,omitempty"`
+	PasswordAction        string   `json:"password_action,omitempty"`
+	SessionsAction        string   `json:"sessions_action,omitempty"`
+	PlayersOnline         int      `json:"players_online,omitempty"`
+	Players               []string `json:"players"`
+	Warnings              []string `json:"warnings"`
 }
 
 type adminFactoryResetApplyRequest struct {
@@ -70,6 +66,12 @@ type adminFactoryResetResolveRequest struct {
 	KeepCurrentState bool   `json:"keep_current_state"`
 }
 
+type adminFactoryResetPasswordRequest struct {
+	OperationID     string `json:"operation_id"`
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
 type adminFactoryResetApplyResponse struct {
 	OK        bool              `json:"ok"`
 	Code      string            `json:"code,omitempty"`
@@ -80,23 +82,23 @@ type adminFactoryResetApplyResponse struct {
 }
 
 type adminFactoryResetHelperApplyResponse struct {
-	OK                    bool   `json:"ok"`
-	SchemaVersion         string `json:"schema_version,omitempty"`
-	Mode                  string `json:"mode,omitempty"`
-	Code                  string `json:"code,omitempty"`
-	Error                 string `json:"error,omitempty"`
-	MinecraftWasConfigured bool  `json:"minecraft_was_configured"`
-	DataPath              string `json:"data_path,omitempty"`
-	DataScope             string `json:"data_scope,omitempty"`
-	DataAction            string `json:"data_action,omitempty"`
-	BackupPath            string `json:"backup_path,omitempty"`
-	BackupScope           string `json:"backup_scope,omitempty"`
-	BackupAction          string `json:"backup_action,omitempty"`
-	ConfigBackupsAction   string `json:"config_backups_action,omitempty"`
-	StorageLayoutAction   string `json:"storage_layout_action,omitempty"`
-	ExternalStorageAction string `json:"external_storage_action,omitempty"`
-	NetworkStorageAction  string `json:"network_storage_action,omitempty"`
-	Message               string `json:"message,omitempty"`
+	OK                     bool   `json:"ok"`
+	SchemaVersion          string `json:"schema_version,omitempty"`
+	Mode                   string `json:"mode,omitempty"`
+	Code                   string `json:"code,omitempty"`
+	Error                  string `json:"error,omitempty"`
+	MinecraftWasConfigured bool   `json:"minecraft_was_configured"`
+	DataPath               string `json:"data_path,omitempty"`
+	DataScope              string `json:"data_scope,omitempty"`
+	DataAction             string `json:"data_action,omitempty"`
+	BackupPath             string `json:"backup_path,omitempty"`
+	BackupScope            string `json:"backup_scope,omitempty"`
+	BackupAction           string `json:"backup_action,omitempty"`
+	ConfigBackupsAction    string `json:"config_backups_action,omitempty"`
+	StorageLayoutAction    string `json:"storage_layout_action,omitempty"`
+	ExternalStorageAction  string `json:"external_storage_action,omitempty"`
+	NetworkStorageAction   string `json:"network_storage_action,omitempty"`
+	Message                string `json:"message,omitempty"`
 }
 
 type factoryResetFingerprintPayload struct {
@@ -113,7 +115,7 @@ type factoryResetFingerprintPayload struct {
 	StorageLayoutAction   string `json:"storage_layout_action"`
 	ExternalStorageAction string `json:"external_storage_action"`
 	NetworkStorageAction  string `json:"network_storage_action"`
-	AuthenticationAction string `json:"authentication_action"`
+	AuthenticationAction  string `json:"authentication_action"`
 	WebUIUsersAction      string `json:"webui_users_action"`
 	PasswordAction        string `json:"password_action"`
 	SessionsAction        string `json:"sessions_action"`
@@ -123,6 +125,86 @@ func registerAdminFactoryResetRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("POST /v1/admin/reset/factory/plan", s.adminFactoryResetPlan)
 	mux.HandleFunc("POST /v1/admin/reset/factory/apply", s.adminFactoryResetApply)
 	mux.HandleFunc("POST /v1/admin/reset/factory/resolve", s.adminFactoryResetResolve)
+	mux.HandleFunc("POST /v1/admin/reset/factory/password", s.adminFactoryResetPassword)
+}
+
+func (s *server) adminFactoryResetPassword(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdministrator(w, r); !ok {
+		return
+	}
+	s.factoryResetPasswordMu.Lock()
+	defer s.factoryResetPasswordMu.Unlock()
+	var request adminFactoryResetPasswordRequest
+	if !decodeJSON(w, r, &request) {
+		return
+	}
+	if s.operations == nil || !validOperationID(request.OperationID) {
+		writeError(w, http.StatusBadRequest, "invalid factory reset operation")
+		return
+	}
+	current, err := s.operations.currentFactoryReset()
+	if err != nil || current == nil || current.OperationID != request.OperationID ||
+		current.OperationType != operationTypeFactoryReset || current.State != operationAwaitingPassword ||
+		(current.Stage != "awaiting_password" && current.Stage != "changing_password") {
+		writeError(w, http.StatusConflict, "factory reset is not awaiting an administrator password")
+		return
+	}
+	mode, err := readAuthMode()
+	if err != nil || mode != authModeSystem {
+		writeError(w, http.StatusConflict, "System authentication mode is required to finish factory reset")
+		return
+	}
+	if request.CurrentPassword == "" || request.NewPassword == "" || request.CurrentPassword == request.NewPassword {
+		writeError(w, http.StatusBadRequest, "current and different new passwords are required")
+		return
+	}
+	_, oldErr := systemAuthenticate(systemAdminUsername, request.CurrentPassword)
+	if oldErr == nil {
+		if err := systemValidatePass(systemAdminUsername, request.CurrentPassword, request.NewPassword); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if _, err := s.operations.updateProgress(request.OperationID, operationAwaitingPassword, "changing_password", "Replacing and verifying the system administrator password."); err != nil {
+			writeError(w, http.StatusInternalServerError, "factory reset password step could not be recorded")
+			return
+		}
+		if err := changeAdministratorPassword(authModeSystem, request.CurrentPassword, request.NewPassword); err != nil {
+			_, currentErr := systemAuthenticate(systemAdminUsername, request.CurrentPassword)
+			if currentErr == nil {
+				_, _ = s.operations.updateProgress(request.OperationID, operationAwaitingPassword, "awaiting_password", "Set a new voxel system administrator password to complete Full Factory Reset.")
+			}
+			if errors.Is(err, systemauth.ErrInvalidCredentials) {
+				writeError(w, http.StatusBadRequest, "current password is incorrect")
+			} else if errors.Is(err, systemauth.ErrAccountUnavailable) {
+				writeError(w, http.StatusForbidden, "system account is unavailable")
+			} else {
+				writeError(w, http.StatusBadRequest, err.Error())
+			}
+			return
+		}
+	} else {
+		if current.Stage != "changing_password" || !errors.Is(oldErr, systemauth.ErrInvalidCredentials) {
+			writeError(w, http.StatusBadRequest, "current password is incorrect")
+			return
+		}
+	}
+	verifiedNew, err := systemAuthenticate(systemAdminUsername, request.NewPassword)
+	if err != nil || verifiedNew.PasswordChangeRequired {
+		writeError(w, http.StatusConflict, "new system password could not be verified; factory reset remains incomplete")
+		return
+	}
+	if _, err := systemAuthenticate(systemAdminUsername, request.CurrentPassword); !errors.Is(err, systemauth.ErrInvalidCredentials) {
+		writeError(w, http.StatusConflict, "old system password is still accepted; factory reset remains incomplete")
+		return
+	}
+	operation, err := s.operations.transition(request.OperationID, operationSucceeded, "complete", "Full factory reset completed with a new system administrator password.")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "factory reset completion could not be recorded; retry the password step")
+		return
+	}
+	s.invalidateSessions()
+	s.clearFailures()
+	writeJSON(w, http.StatusOK, adminOperationResponse{Operation: &operation})
 }
 
 func (s *server) adminFactoryResetPlan(w http.ResponseWriter, r *http.Request) {
@@ -347,7 +429,7 @@ func validateAdminFactoryResetPlan(plan adminFactoryResetPlanResponse) error {
 		plan.NetworkStorageAction != "preserve" ||
 		plan.AuthenticationAction != "reset_to_system" ||
 		plan.WebUIUsersAction != "delete" ||
-		plan.PasswordAction != "expire" ||
+		plan.PasswordAction != "replace" ||
 		plan.SessionsAction != "invalidate" {
 		return errors.New("factory reset preservation contract changed")
 	}
@@ -370,23 +452,23 @@ func validFactoryResetStorageAction(scope, action string) bool {
 
 func factoryResetPlanFingerprint(plan adminFactoryResetPlanResponse) (string, error) {
 	payload, err := json.Marshal(factoryResetFingerprintPayload{
-		SchemaVersion: plan.SchemaVersion,
-		Mode: plan.Mode,
-		MinecraftConfigured: plan.MinecraftConfigured,
-		DataPath: plan.DataPath,
-		DataScope: plan.DataScope,
-		DataAction: plan.DataAction,
-		BackupPath: plan.BackupPath,
-		BackupScope: plan.BackupScope,
-		BackupAction: plan.BackupAction,
-		ConfigBackupsAction: plan.ConfigBackupsAction,
-		StorageLayoutAction: plan.StorageLayoutAction,
+		SchemaVersion:         plan.SchemaVersion,
+		Mode:                  plan.Mode,
+		MinecraftConfigured:   plan.MinecraftConfigured,
+		DataPath:              plan.DataPath,
+		DataScope:             plan.DataScope,
+		DataAction:            plan.DataAction,
+		BackupPath:            plan.BackupPath,
+		BackupScope:           plan.BackupScope,
+		BackupAction:          plan.BackupAction,
+		ConfigBackupsAction:   plan.ConfigBackupsAction,
+		StorageLayoutAction:   plan.StorageLayoutAction,
 		ExternalStorageAction: plan.ExternalStorageAction,
-		NetworkStorageAction: plan.NetworkStorageAction,
-		AuthenticationAction: plan.AuthenticationAction,
-		WebUIUsersAction: plan.WebUIUsersAction,
-		PasswordAction: plan.PasswordAction,
-		SessionsAction: plan.SessionsAction,
+		NetworkStorageAction:  plan.NetworkStorageAction,
+		AuthenticationAction:  plan.AuthenticationAction,
+		WebUIUsersAction:      plan.WebUIUsersAction,
+		PasswordAction:        plan.PasswordAction,
+		SessionsAction:        plan.SessionsAction,
 	})
 	if err != nil {
 		return "", err
@@ -485,19 +567,14 @@ func executeFactoryReset(ctx context.Context, s *server, operationID, expectedFi
 		_, _ = s.operations.transition(operationID, operationNeedsAttention, "identity_failed", "WebUI identity storage is unavailable after local runtime cleanup.")
 		return errors.New("WebUI identity store is unavailable")
 	}
-	if err := s.store.resetFactoryState(); err != nil {
-		_, _ = s.operations.transition(operationID, operationNeedsAttention, "identity_failed", "WebUI identity state could not be reset completely.")
-		return err
-	}
 	if err := resetFactoryAuthenticationState(); err != nil {
 		_, _ = s.operations.transition(operationID, operationNeedsAttention, "identity_failed", "Authentication state could not be returned to System mode.")
 		return err
 	}
-	if err := expireSystemAdministratorPassword(ctx); err != nil {
-		_, _ = s.operations.transition(operationID, operationNeedsAttention, "password_expire_failed", "System administrator password could not be marked for mandatory change.")
+	if err := s.store.resetFactoryState(); err != nil {
+		_, _ = s.operations.transition(operationID, operationNeedsAttention, "identity_failed", "WebUI identity state could not be reset completely.")
 		return err
 	}
-
 	if _, err := s.operations.transition(operationID, operationVerifying, "verifying", "Verifying fresh JustVoxel first-use state."); err != nil {
 		return err
 	}
@@ -526,11 +603,9 @@ func executeFactoryReset(ctx context.Context, s *server, operationID, expectedFi
 		return errors.New("WebUI users remain after full factory reset")
 	}
 
-	if _, err := s.operations.transition(operationID, operationSucceeded, "complete", "Full factory reset completed. Sign in with the voxel system account to set a new password."); err != nil {
+	if _, err := s.operations.transition(operationID, operationAwaitingPassword, "awaiting_password", "Set a new voxel system administrator password to complete Full Factory Reset."); err != nil {
 		return err
 	}
-	s.invalidateSessions()
-	s.clearFailures()
 	return nil
 }
 

@@ -116,7 +116,7 @@ emit_plan() {
           network_storage_action:"preserve",
           authentication_action:"reset_to_system",
           webui_users_action:"delete",
-          password_action:"expire",
+          password_action:"replace",
           sessions_action:"invalidate",
           players_online:($players.online // 0),
           players:($players.names // []),

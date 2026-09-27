@@ -17,31 +17,32 @@ import (
 )
 
 const (
-	operationSchemaVersion = "v1"
-	operationStateDir      = "/var/lib/justvoxel/management"
-	operationTypeSetup         = "setup"
-	operationTypeRestore       = "restore"
-	operationTypeDataMigration = "data_migration"
-	operationTypeMinecraftReset = "minecraft_reset"
-	operationTypeFactoryReset   = "factory_reset"
-	operationTypeMigrationExport = "migration_export"
-	operationTypeMigrationImport = "migration_import"
+	operationSchemaVersion         = "v1"
+	operationStateDir              = "/var/lib/justvoxel/management"
+	operationTypeSetup             = "setup"
+	operationTypeRestore           = "restore"
+	operationTypeDataMigration     = "data_migration"
+	operationTypeMinecraftReset    = "minecraft_reset"
+	operationTypeFactoryReset      = "factory_reset"
+	operationTypeMigrationExport   = "migration_export"
+	operationTypeMigrationImport   = "migration_import"
 	operationTypeMigrationRecovery = "migration_recovery"
 )
 
 type operationState string
 
 const (
-	operationQueued         operationState = "queued"
-	operationValidating     operationState = "validating"
-	operationRunning        operationState = "running"
-	operationVerifying      operationState = "verifying"
-	operationSucceeded      operationState = "succeeded"
-	operationFailed         operationState = "failed"
-	operationRollingBack    operationState = "rolling_back"
-	operationRolledBack     operationState = "rolled_back"
-	operationNeedsAttention operationState = "needs_attention"
-	operationResolved       operationState = "resolved"
+	operationQueued           operationState = "queued"
+	operationValidating       operationState = "validating"
+	operationRunning          operationState = "running"
+	operationVerifying        operationState = "verifying"
+	operationAwaitingPassword operationState = "awaiting_password"
+	operationSucceeded        operationState = "succeeded"
+	operationFailed           operationState = "failed"
+	operationRollingBack      operationState = "rolling_back"
+	operationRolledBack       operationState = "rolled_back"
+	operationNeedsAttention   operationState = "needs_attention"
+	operationResolved         operationState = "resolved"
 )
 
 var (
@@ -49,17 +50,17 @@ var (
 	operationFingerprintPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 	operationStagePattern       = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
-	errOperationNotFound    = errors.New("operation not found")
-	errSetupOperationBusy   = errors.New("another setup operation is already active")
-	errSetupLockBusy        = errors.New("setup operation lock is already held")
-	errRestoreOperationBusy      = errors.New("another restore operation is already active")
-	errRestoreLockBusy           = errors.New("restore operation lock is already held")
-	errDataMigrationOperationBusy = errors.New("another data migration operation is already active")
-	errDataMigrationLockBusy      = errors.New("data migration operation lock is already held")
+	errOperationNotFound           = errors.New("operation not found")
+	errSetupOperationBusy          = errors.New("another setup operation is already active")
+	errSetupLockBusy               = errors.New("setup operation lock is already held")
+	errRestoreOperationBusy        = errors.New("another restore operation is already active")
+	errRestoreLockBusy             = errors.New("restore operation lock is already held")
+	errDataMigrationOperationBusy  = errors.New("another data migration operation is already active")
+	errDataMigrationLockBusy       = errors.New("data migration operation lock is already held")
 	errMinecraftResetOperationBusy = errors.New("another operation prevents Minecraft reset")
 	errFactoryResetOperationBusy   = errors.New("another operation prevents full factory reset")
-	errMigrationOperationBusy     = errors.New("another server migration operation is already active")
-	errMigrationLockBusy          = errors.New("server migration operation lock is already held")
+	errMigrationOperationBusy      = errors.New("another server migration operation is already active")
+	errMigrationLockBusy           = errors.New("server migration operation lock is already held")
 )
 
 type operationRollback struct {
@@ -83,29 +84,29 @@ type operationJournal struct {
 }
 
 type operationStore struct {
-	mu                 sync.Mutex
-	diagnosticMu       sync.Mutex
-	baseDir            string
-	operationsDir      string
-	setupLogsDir       string
-	logsDir            string
-	diagnosticHostname string
-	lockFile         *os.File
-	restoreLockFile      *os.File
-	dataMigrationLockFile *os.File
-	migrationLockFile     *os.File
-	setupLockHeld        bool
-	restoreLockHeld      bool
-	dataMigrationLockHeld bool
-	migrationLockHeld     bool
-	currentSetupID       string
-	currentRestoreID     string
-	currentDataMigrationID string
+	mu                      sync.Mutex
+	diagnosticMu            sync.Mutex
+	baseDir                 string
+	operationsDir           string
+	setupLogsDir            string
+	logsDir                 string
+	diagnosticHostname      string
+	lockFile                *os.File
+	restoreLockFile         *os.File
+	dataMigrationLockFile   *os.File
+	migrationLockFile       *os.File
+	setupLockHeld           bool
+	restoreLockHeld         bool
+	dataMigrationLockHeld   bool
+	migrationLockHeld       bool
+	currentSetupID          string
+	currentRestoreID        string
+	currentDataMigrationID  string
 	currentMinecraftResetID string
 	currentFactoryResetID   string
-	currentMigrationID     string
-	operations       map[string]operationJournal
-	now              func() time.Time
+	currentMigrationID      string
+	operations              map[string]operationJournal
+	now                     func() time.Time
 }
 
 func openOperationStore(baseDir string) (*operationStore, error) {
@@ -683,7 +684,7 @@ func validOperationID(value string) bool {
 
 func validOperationState(state operationState) bool {
 	switch state {
-	case operationQueued, operationValidating, operationRunning, operationVerifying, operationSucceeded,
+	case operationQueued, operationValidating, operationRunning, operationVerifying, operationAwaitingPassword, operationSucceeded,
 		operationFailed, operationRollingBack, operationRolledBack, operationNeedsAttention, operationResolved:
 		return true
 	default:
@@ -759,7 +760,6 @@ func (s *operationStore) beginSetup(planFingerprint string) (operationJournal, b
 	return journal, true, nil
 }
 
-
 func (s *operationStore) beginRestore(planFingerprint string) (operationJournal, bool, error) {
 	if !operationFingerprintPattern.MatchString(planFingerprint) {
 		return operationJournal{}, false, errors.New("invalid restore plan fingerprint")
@@ -810,7 +810,6 @@ func (s *operationStore) beginRestore(planFingerprint string) (operationJournal,
 	s.currentRestoreID = id
 	return journal, true, nil
 }
-
 
 func (s *operationStore) beginDataMigration(planFingerprint string) (operationJournal, bool, error) {
 	if !operationFingerprintPattern.MatchString(planFingerprint) {
@@ -1023,7 +1022,7 @@ func (s *operationStore) beginMigrationRecovery(planFingerprint string) (operati
 		return operationJournal{}, false, err
 	}
 	now := s.now().UTC().Format(time.RFC3339Nano)
-	journal := operationJournal{SchemaVersion:operationSchemaVersion, OperationID:id, OperationType:operationTypeMigrationRecovery, PlanFingerprint:planFingerprint, State:operationQueued, Stage:"queued", Status:"Server migration recovery operation queued.", StartedAt:now, UpdatedAt:now, Rollback:operationRollback{State:"not_started"}}
+	journal := operationJournal{SchemaVersion: operationSchemaVersion, OperationID: id, OperationType: operationTypeMigrationRecovery, PlanFingerprint: planFingerprint, State: operationQueued, Stage: "queued", Status: "Server migration recovery operation queued.", StartedAt: now, UpdatedAt: now, Rollback: operationRollback{State: "not_started"}}
 	if err := s.persist(journal); err != nil {
 		if handedOff != nil {
 			_ = s.persist(*handedOff)
@@ -1274,7 +1273,6 @@ func (s *operationStore) currentSetup() (*operationJournal, error) {
 	return &copy, nil
 }
 
-
 func (s *operationStore) currentRestore() (*operationJournal, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1288,7 +1286,6 @@ func (s *operationStore) currentRestore() (*operationJournal, error) {
 	copy := journal
 	return &copy, nil
 }
-
 
 func (s *operationStore) currentDataMigration() (*operationJournal, error) {
 	s.mu.Lock()
@@ -1339,6 +1336,10 @@ func (s *operationStore) transition(id string, next operationState, stage, statu
 		return operationJournal{}, errOperationNotFound
 	}
 	setupRecovery := journal.OperationType == operationTypeSetup && journal.State == operationNeedsAttention && journal.Stage == "storage_rollback" && next == operationRollingBack && stage == "storage_recovery"
+	if journal.OperationType == operationTypeFactoryReset && next == operationSucceeded &&
+		(journal.State != operationAwaitingPassword || journal.Stage != "changing_password") {
+		return operationJournal{}, errors.New("factory reset requires password replacement before completion")
+	}
 	if !setupRecovery && !operationTransitionAllowed(journal.State, next) {
 		return operationJournal{}, fmt.Errorf("invalid operation transition %s -> %s", journal.State, next)
 	}
@@ -1413,7 +1414,9 @@ func operationTransitionAllowed(current, next operationState) bool {
 	case operationRunning:
 		return next == operationVerifying || next == operationFailed || next == operationNeedsAttention
 	case operationVerifying:
-		return next == operationSucceeded || next == operationFailed || next == operationNeedsAttention
+		return next == operationSucceeded || next == operationAwaitingPassword || next == operationFailed || next == operationNeedsAttention
+	case operationAwaitingPassword:
+		return next == operationSucceeded || next == operationNeedsAttention
 	case operationFailed:
 		return next == operationRollingBack || next == operationNeedsAttention
 	case operationRollingBack:
@@ -1489,7 +1492,6 @@ func (s *operationStore) releaseSetupLock() error {
 	return nil
 }
 
-
 func (s *operationStore) acquireRestoreLock() error {
 	if s.restoreLockHeld {
 		return nil
@@ -1520,7 +1522,6 @@ func (s *operationStore) releaseRestoreLock() error {
 	s.restoreLockHeld = false
 	return nil
 }
-
 
 func (s *operationStore) acquireDataMigrationLock() error {
 	if s.dataMigrationLockHeld {

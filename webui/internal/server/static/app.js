@@ -1345,9 +1345,12 @@ const workspaceCompactQuery = window.matchMedia("(max-width: 700px)");
 
 const workspaceWindowStateKey = (id) => `justvoxel-workspace-window-${id === "system-monitor" ? "v2" : "v1"}:${id}`;
 
+const workspaceRestoreAllowed = () => !["/login", "/password"].includes(window.location.pathname) && !document.querySelector("[data-credential-boundary]");
+
 const readWorkspaceWindowState = (id) => {
   try {
-    return JSON.parse(window.localStorage.getItem(workspaceWindowStateKey(id)) || "{}");
+    const saved = JSON.parse(window.localStorage.getItem(workspaceWindowStateKey(id)) || "{}");
+    return workspaceRestoreAllowed() ? saved : { ...saved, open: false };
   } catch (_) {
     return {};
   }
@@ -4098,6 +4101,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     if (operation.state === "validating") return "Validating";
     if (operation.state === "running") return "Resetting";
     if (operation.state === "verifying") return "Verifying";
+    if (operation.state === "awaiting_password") return "Set password";
     if (operation.state === "succeeded") return "Complete";
     if (operation.state === "needs_attention") return "Needs attention";
     if (operation.state === "resolved") return "Resolved";
@@ -4136,10 +4140,52 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     built.panel.append(status, stage);
 
     if (operation.operation_type === "factory_reset") {
-      const note = document.createElement("div");
-      note.className = "notice warning";
-      note.textContent = "When Full Factory Reset completes, this WebUI session will be signed out and the voxel password must be changed on the next sign-in.";
-      built.panel.appendChild(note);
+      if (operation.state === "awaiting_password") {
+        const heading = document.createElement("h3");
+        heading.textContent = "Set administrator password";
+        const help = document.createElement("p");
+        help.textContent = "Set the real voxel system password used by WebUI, the local console, and SSH password login when enabled.";
+        const form = document.createElement("form");
+        form.className = "system-security-form";
+        form.innerHTML =
+          '<label>Current password<input type="password" name="current_password" autocomplete="current-password" required></label>' +
+          '<label>New password<input type="password" name="new_password" autocomplete="new-password" required></label>' +
+          '<label>Confirm new password<input type="password" name="confirm_password" autocomplete="new-password" required></label>' +
+          '<p class="muted compact" data-reset-password-policy>The host system password policy applies.</p>' +
+          '<button type="submit">Set administrator password</button>';
+        void systemFetchJSON("/api/system/workspace/security").then((security) => {
+          if (!security || !form.isConnected) return;
+          const minimum = Number(security.minimum_password_len || 8);
+          form.querySelectorAll('input[name="new_password"],input[name="confirm_password"]').forEach((input) => {
+            input.minLength = minimum;
+          });
+          form.querySelector("[data-reset-password-policy]").textContent =
+            "Use at least " + String(minimum) + " characters and follow the host password policy.";
+        }).catch(() => {});
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const submit = form.querySelector('button[type="submit"]');
+          const fields = Object.fromEntries(new FormData(form).entries());
+          if (fields.new_password !== fields.confirm_password) {
+            if (state) state.textContent = "New passwords must match.";
+            return;
+          }
+          submit.disabled = true;
+          try {
+            const result = await systemPostForm("/api/system/workspace/reset/factory/password", {
+              operation_id: operation.operation_id, ...fields,
+            });
+            form.reset();
+            if (result?.operation?.state !== "succeeded") throw new Error("Factory Reset did not complete.");
+            window.location.assign("/login");
+          } catch (error) {
+            form.reset();
+            if (state) state.textContent = error?.message || "System password change was rejected.";
+            submit.disabled = false;
+          }
+        });
+        built.panel.append(heading, help, form);
+      }
       if (operation.state === "needs_attention") {
         const recovery = document.createElement("div");
         recovery.className = "notice warning";
@@ -4199,7 +4245,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     root.appendChild(built.panel);
     content.replaceChildren(root);
 
-    const terminal = ["succeeded", "needs_attention", "resolved", "rolled_back"].includes(operation.state);
+    const terminal = ["succeeded", "needs_attention", "resolved", "rolled_back", "awaiting_password"].includes(operation.state);
     if (terminal) {
       if (state) state.textContent = operation.status || systemResetOperationLabel(operation);
       return;
@@ -4244,7 +4290,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       else if (plan.backup_action === "preserve") keep.push("Backup archives on USB, external, or network storage.");
       remove.push("Local JustVoxel configuration backups.");
       remove.push("Additional WebUI users, notifications, history, and local authentication state.");
-      remove.push("Current WebUI sessions; the voxel system password will be marked for mandatory change.");
+      remove.push("Current WebUI sessions after a new voxel system password is set and verified.");
       keep.push("USB, external, NFS, and SMB data.");
       remove.push("JustVoxel-managed mounts and /etc/fstab entries are reset; storage data is not erased by removing these entries.");
       keep.push("Storage partitions, filesystems, and unrelated administrator /etc/fstab entries.");
@@ -4856,6 +4902,14 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
           currentTab = user.role === "administrator" ? "health" : "history";
           if (["health", "history", "users", "security", "logs", "reset", "about"].includes(requested) &&
               (!administratorTabs.has(requested) || user.role === "administrator")) currentTab = requested;
+          if (user.role === "administrator" && !requested) {
+            try {
+              const pending = await systemFetchJSON("/api/system/workspace/reset/factory/current");
+              if (pending?.operation?.state === "awaiting_password") currentTab = "reset";
+            } catch (_) {
+              // The other System tabs remain available if reset status cannot be read.
+            }
+          }
           syncSystemTabs();
         }
         loadCurrentSystemTab();
