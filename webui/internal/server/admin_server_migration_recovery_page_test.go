@@ -162,7 +162,7 @@ func TestMigrationRecoveryApplyRejectsStaleReviewBeforeAgentApply(t *testing.T) 
 	}
 	values := url.Values{
 		"csrf": {"csrf-token"}, "transaction": {transaction},
-		"plan_fingerprint":      {"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		"plan_fingerprint":  {"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 		"cleanup_confirmed": {"yes"},
 	}
 	page := httptestResponse(app, recoveryWebRequest(http.MethodPost, "http://example/settings/server-migration/recovery/apply", values))
@@ -178,10 +178,12 @@ func TestMigrationRecoveryRequiresExplicitCleanupConfirmation(t *testing.T) {
 	transaction := "/var/lib/justvoxel/.justvoxel-import-safe"
 	client := &fakeServerMigrationRecoveryAPI{
 		fakeServerMigrationAPI: fakeServerMigrationAPI{recovery: recoveryDiscoveryFixture()},
-		plan: recoveryPlanFixture(transaction, "rolled-back", "configured"),
+		plan:                   recoveryPlanFixture(transaction, "rolled-back", "configured"),
 	}
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	values := url.Values{"csrf": {"csrf-token"}, "transaction": {transaction}, "plan_fingerprint": {serverMigrationFingerprint}}
 	page := httptestResponse(app, recoveryWebRequest(http.MethodPost, "http://example/settings/server-migration/recovery/apply", values))
 	if page.Code != http.StatusBadRequest || client.planCalls != 1 || client.applyCalls != 0 {
@@ -193,10 +195,12 @@ func TestMigrationRecoveryNeedsAttentionDoesNotClaimDataSafe(t *testing.T) {
 	transaction := "/var/lib/justvoxel/.justvoxel-import-critical"
 	client := &fakeServerMigrationRecoveryAPI{
 		fakeServerMigrationAPI: fakeServerMigrationAPI{recovery: recoveryDiscoveryFixture()},
-		plan: recoveryPlanFixture(transaction, "critical-rollback", "configured-attention"),
+		plan:                   recoveryPlanFixture(transaction, "critical-rollback", "configured-attention"),
 	}
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	values := url.Values{"csrf": {"csrf-token"}, "transaction": {transaction}}
 	page := httptestResponse(app, recoveryWebRequest(http.MethodPost, "http://example/settings/server-migration/recovery/review", values))
 	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Server Import needs attention") || strings.Contains(page.Body.String(), "Your server data is safe") {

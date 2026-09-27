@@ -249,7 +249,9 @@ func TestSetupWizardTimezoneSearchUsesLocalDatabaseWithoutDatalist(t *testing.T)
 			t.Fatalf("timezone search behavior missing %q", want)
 		}
 	}
-	if !strings.Contains(body, "/static/timezone-search.js") { t.Fatal("Setup does not load the shared city search") }
+	if !strings.Contains(body, "/static/timezone-search.js") {
+		t.Fatal("Setup does not load the shared city search")
+	}
 
 	invalid := validServerValues()
 	invalid.Set("timezone", "Mars/Olympus")

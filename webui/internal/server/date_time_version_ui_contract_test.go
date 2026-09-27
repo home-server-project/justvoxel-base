@@ -10,7 +10,9 @@ import (
 func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 	read := func(name string) string {
 		data, err := os.ReadFile(filepath.Join(name))
-		if err != nil { t.Fatal(err) }
+		if err != nil {
+			t.Fatal(err)
+		}
 		return string(data)
 	}
 	header := read("templates/header.html")
@@ -19,9 +21,13 @@ func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 		`data-date-time-manual`, `data-version-open`, `data-version-workspace-dialog`,
 		`data-version-tab="software"`, `data-version-tab="minecraft"`, `Minecraft Settings`,
 	} {
-		if !strings.Contains(header, want) { t.Fatalf("header missing %q", want) }
+		if !strings.Contains(header, want) {
+			t.Fatalf("header missing %q", want)
+		}
 	}
-	if strings.Contains(header, `data-minecraft-tab="version"`) { t.Fatal("Version remains inside Minecraft Settings") }
+	if strings.Contains(header, `data-minecraft-tab="version"`) {
+		t.Fatal("Version remains inside Minecraft Settings")
+	}
 	search := read("static/timezone-search.js")
 	setup := read("static/settings.js")
 	date := read("static/date-time.js")
@@ -29,11 +35,15 @@ func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 		t.Fatal("Setup and Date & Time do not share the city search")
 	}
 	for _, want := range []string{"date.disabled = automatic.checked", "time.disabled = automatic.checked", "/api/system/workspace/date-time", "csrf"} {
-		if !strings.Contains(date, want) { t.Fatalf("Date & Time missing %q", want) }
+		if !strings.Contains(date, want) {
+			t.Fatalf("Date & Time missing %q", want)
+		}
 	}
 	version := read("static/version-workspace.js")
 	for _, want := range []string{"Paper", "Purpur", "Vanilla", "Coming soon", "Installed", "Available", "Recommended", "Latest", "Specific version", "Geyser/Floodgate", "/api/minecraft/workspace/settings/plan", "/api/minecraft/workspace/settings/apply", "compatibility_blocked"} {
-		if !strings.Contains(version, want) { t.Fatalf("Version missing %q", want) }
+		if !strings.Contains(version, want) {
+			t.Fatalf("Version missing %q", want)
+		}
 	}
 	for _, want := range []string{
 		`recommended: "Recommended", latest: "Latest", pinned: "Specific version"`,
@@ -46,14 +56,22 @@ func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 		`form.elements.version.required = policy === "pinned"`,
 		`line("Available", candidate.available), line("Will use", candidate.selected_candidate)`,
 	} {
-		if !strings.Contains(version, want) { t.Fatalf("Version policy contract missing %q", want) }
+		if !strings.Contains(version, want) {
+			t.Fatalf("Version policy contract missing %q", want)
+		}
 	}
 	if strings.Contains(version, `minecraft.version_mode === "latest" ? "latest" : "pinned"`) {
 		t.Fatal("Recommended policy initializes as Specific version")
 	}
 	css := read("static/app.css")
-	if !strings.Contains(css, ".version-workspace-dialog{position:absolute") || !strings.Contains(css, "max-height:none") || strings.Contains(css, ".version-workspace-body{overflow:auto") { t.Fatal("Version content must use natural height") }
+	if !strings.Contains(css, ".version-workspace-dialog{position:absolute") || !strings.Contains(css, "max-height:none") || strings.Contains(css, ".version-workspace-body{overflow:auto") {
+		t.Fatal("Version content must use natural height")
+	}
 	app := read("static/app.js")
-	if strings.Contains(app, `<label>Timezone<input name="timezone"`) { t.Fatal("Minecraft Players still edits timezone") }
-	if !strings.Contains(app, "data-crossplay-compatibility") { t.Fatal("Cross-play compatibility missing") }
+	if strings.Contains(app, `<label>Timezone<input name="timezone"`) {
+		t.Fatal("Minecraft Players still edits timezone")
+	}
+	if !strings.Contains(app, "data-crossplay-compatibility") {
+		t.Fatal("Cross-play compatibility missing")
+	}
 }

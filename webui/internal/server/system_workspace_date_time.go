@@ -15,11 +15,19 @@ type systemDateTimeAPI interface {
 
 func (a *App) systemWorkspaceDateTime(w http.ResponseWriter, r *http.Request) {
 	session, _, ok := a.systemWorkspaceIdentity(w, r, "administrator")
-	if !ok { return }
+	if !ok {
+		return
+	}
 	client, ok := a.api.(systemDateTimeAPI)
-	if !ok { writeSystemWorkspaceError(w, http.StatusServiceUnavailable, "Date and time controls are unavailable."); return }
+	if !ok {
+		writeSystemWorkspaceError(w, http.StatusServiceUnavailable, "Date and time controls are unavailable.")
+		return
+	}
 	state, err := client.AdminDateTime(r.Context(), session)
-	if err != nil { a.writeSystemWorkspaceAPIError(w, err, "Date and time are unavailable."); return }
+	if err != nil {
+		a.writeSystemWorkspaceAPIError(w, err, "Date and time are unavailable.")
+		return
+	}
 	writeSystemWorkspaceJSON(w, http.StatusOK, struct {
 		api.AdminDateTimeState
 		Timezones []string `json:"timezones"`
@@ -27,15 +35,31 @@ func (a *App) systemWorkspaceDateTime(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) systemWorkspaceDateTimeApply(w http.ResponseWriter, r *http.Request) {
-	if !a.validCSRF(r) { writeSystemWorkspaceError(w, http.StatusForbidden, "Invalid CSRF token."); return }
+	if !a.validCSRF(r) {
+		writeSystemWorkspaceError(w, http.StatusForbidden, "Invalid CSRF token.")
+		return
+	}
 	session, _, ok := a.systemWorkspaceIdentity(w, r, "administrator")
-	if !ok { return }
+	if !ok {
+		return
+	}
 	client, ok := a.api.(systemDateTimeAPI)
-	if !ok { writeSystemWorkspaceError(w, http.StatusServiceUnavailable, "Date and time controls are unavailable."); return }
-	if err := r.ParseForm(); err != nil { writeSystemWorkspaceError(w, http.StatusBadRequest, "Could not read date and time settings."); return }
+	if !ok {
+		writeSystemWorkspaceError(w, http.StatusServiceUnavailable, "Date and time controls are unavailable.")
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		writeSystemWorkspaceError(w, http.StatusBadRequest, "Could not read date and time settings.")
+		return
+	}
 	request := api.AdminDateTimeChange{Timezone: strings.TrimSpace(r.FormValue("timezone")), Automatic: r.FormValue("automatic") == "on"}
-	if !request.Automatic { request.Date, request.Time = r.FormValue("date"), r.FormValue("time") }
+	if !request.Automatic {
+		request.Date, request.Time = r.FormValue("date"), r.FormValue("time")
+	}
 	state, err := client.AdminDateTimeApply(r.Context(), session, request)
-	if err != nil { a.writeSystemWorkspaceAPIError(w, err, "Date and time could not be changed."); return }
+	if err != nil {
+		a.writeSystemWorkspaceAPIError(w, err, "Date and time could not be changed.")
+		return
+	}
 	writeSystemWorkspaceJSON(w, http.StatusOK, state)
 }
