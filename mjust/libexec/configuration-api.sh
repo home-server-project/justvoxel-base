@@ -66,6 +66,7 @@ jv_config_payload() {
         image_tag:.minecraft.image_tag,
         version_policy:.minecraft.version_mode,
         version:.minecraft.version,
+        game_mode:.minecraft.game_mode,
         backup_keep:.backup.keep,
         backup_schedule:.backup.schedule,
         backup_timer_enabled:.backup.timer_enabled,

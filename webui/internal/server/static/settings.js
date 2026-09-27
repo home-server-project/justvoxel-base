@@ -125,15 +125,50 @@ const versionPolicy = document.getElementById("version-policy");
 const versionInput = document.getElementById("minecraft-version");
 const specificVersionField = document.getElementById("specific-version-field");
 if (versionPolicy && versionInput && specificVersionField) {
+  const form = versionPolicy.closest("form");
+  const preview = document.getElementById("setup-version-preview");
+  const next = form?.querySelector('button[name="direction"][value="next"]');
+  let sequence = 0;
+  let timer;
+  const channelLabel = (channel) => ({ STABLE: "Stable", BETA: "Beta", ALPHA: "Alpha" })[channel] || "Pre-release";
+  const show = (status, policy) => {
+    const rows = [];
+    if (status.selected_candidate) rows.push(`${policy === "latest" ? "Will install now" : "Will install"}: ${status.selected_candidate}`);
+    if (status.available) rows.push(`Newest available: ${status.available}${status.available_channel && status.available_channel !== "STABLE" ? ` · ${channelLabel(status.available_channel)}` : ""}`);
+    if (status.crossplay_enabled && status.geyser_supported_version && (status.geyser_supported_version !== status.selected_candidate || status.available !== status.selected_candidate)) rows.push(`Bedrock-supported version: ${status.geyser_supported_version}`);
+    if (policy === "recommended" && status.crossplay_enabled && status.selected_candidate && status.available !== status.selected_candidate) rows.push("This version keeps Bedrock players compatible.");
+    if (policy === "latest") rows.push("Latest follows newer Minecraft server versions when available.");
+    if (status.candidate_channel && status.candidate_channel !== "STABLE") rows.push(`Paper release: ${channelLabel(status.candidate_channel)}. This is a pre-release server build.`);
+    if (status.crossplay_enabled && !status.crossplay_compatible && status.selected_candidate) rows.push("This version is not currently compatible with Bedrock cross-play. Choose Recommended, choose a compatible Specific version, or turn off Bedrock to continue.");
+    if (!status.selected_candidate) rows.push(status.reason || "No usable server build was found for this version.");
+    preview.replaceChildren(...rows.map((value) => { const p = document.createElement("p"); p.textContent = value; return p; }));
+    next.disabled = !status.selected_candidate || (status.crossplay_enabled && !status.crossplay_compatible);
+  };
+  const refresh = async () => {
+    const ticket = ++sequence;
+    next.disabled = true;
+    preview.textContent = "Checking available versions…";
+    const policy = versionPolicy.value;
+    const version = policy === "pinned" ? versionInput.value.trim() : "";
+    if (policy === "pinned" && !version) { preview.textContent = "Enter a Minecraft version to check availability."; return; }
+    try {
+      const response = await fetch("/setup/version-preview?" + new URLSearchParams({ policy, version }), { credentials: "same-origin", cache: "no-store" });
+      if (!response.ok) throw new Error();
+      const status = await response.json();
+      if (ticket === sequence) show(status, policy);
+    } catch (_) { if (ticket === sequence) preview.textContent = "Version information is unavailable. Try again before continuing."; }
+  };
   const updateVersionHelp = () => {
     const specific = versionPolicy.value === "pinned";
     specificVersionField.hidden = !specific;
     versionInput.required = specific;
     versionInput.readOnly = !specific;
-    if (versionPolicy.value === "latest") versionInput.value = "LATEST";
-    if (versionPolicy.value === "recommended") versionInput.value = "";
+    if (!specific) versionInput.value = "";
+    refresh();
   };
   versionPolicy.addEventListener("change", updateVersionHelp);
+  versionInput.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(refresh, 300); });
+  form?.addEventListener("submit", (event) => { if (event.submitter?.value === "next" && next.disabled) event.preventDefault(); });
   updateVersionHelp();
 }
 

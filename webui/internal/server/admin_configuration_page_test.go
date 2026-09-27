@@ -81,9 +81,34 @@ func settingsFormValues() url.Values {
 		"image_tag":            {"stable"},
 		"version_policy":       {"pinned"},
 		"version":              {"1.21.8"},
+		"game_mode":            {"survival"},
 		"backup_keep":          {"7"},
 		"backup_schedule":      {"*-*-* 04:30:00"},
 		"backup_timer_enabled": {"on"},
+	}
+}
+
+func TestGameModeSettingsRequestPreservesVersion(t *testing.T) {
+	client := configuredSettingsFake()
+	request := configurationRequestFromDiscovery(client.configuration)
+	if request.GameMode != "survival" || request.VersionPolicy != "pinned" || request.Version != "1.21.8" || request.ImageTag != "stable" {
+		t.Fatalf("discovered settings lost game mode or version: %#v", request)
+	}
+	values := settingsFormValues()
+	values.Set("game_mode", "creative")
+	r := httptest.NewRequest(http.MethodPost, "/settings/server/plan", strings.NewReader(values.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	parsed, err := parseServerSettingsForm(r)
+	if err != nil || parsed.GameMode != "creative" || parsed.VersionPolicy != "pinned" || parsed.Version != "1.21.8" || parsed.ImageTag != "stable" {
+		t.Fatalf("game mode form lost version settings: %#v, %v", parsed, err)
+	}
+	values.Set("game_mode", "adventure")
+	values.Set("version", "1.21.9")
+	r = httptest.NewRequest(http.MethodPost, "/settings/server/plan", strings.NewReader(values.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	parsed, err = parseServerSettingsForm(r)
+	if err != nil || parsed.GameMode != "adventure" || parsed.Version != "1.21.9" {
+		t.Fatalf("version form lost game mode: %#v, %v", parsed, err)
 	}
 }
 
@@ -114,7 +139,7 @@ func TestMinecraftSettingsPlanShowsReviewWithoutApplying(t *testing.T) {
 	request := api.AdminConfigurationChangeRequest{
 		JavaMemory: "4G", ContainerMemory: "6G", JavaPort: 25565, BedrockEnabled: true, BedrockPort: 19132,
 		Timezone: "America/Toronto", MaxPlayers: 20, MOTD: "Family Minecraft", ImageTag: "stable",
-		VersionPolicy: "pinned", Version: "1.21.8", BackupKeep: 7, BackupSchedule: "*-*-* 04:30:00", BackupTimerEnabled: true,
+		VersionPolicy: "pinned", Version: "1.21.8", GameMode: "survival", BackupKeep: 7, BackupSchedule: "*-*-* 04:30:00", BackupTimerEnabled: true,
 	}
 	client.planResponse = api.AdminConfigurationChangeResponse{
 		OK: true, RestartRequired: true, MemoryRemainingMiB: 2048,

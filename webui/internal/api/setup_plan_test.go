@@ -22,6 +22,7 @@ func setupPlanTestRequest() AdminSetupPlanRequest {
 			Timezone:       "America/Toronto",
 		},
 		Minecraft: AdminSetupPlanMinecraftRequest{
+			GameMode:        "creative",
 			JavaMemory:      "6G",
 			ContainerMemory: "8G",
 			JavaPort:        25565,
@@ -73,6 +74,7 @@ func TestAdminSetupPlanClientContract(t *testing.T) {
 			`"java_memory":"6G"`,
 			`"container_memory":"8G"`,
 			`"version_policy":"recommended"`,
+			`"game_mode":"creative"`,
 			`"device":"/dev/vdb1"`,
 			`"type":"smb"`,
 			`"source":"//nas/minecraft-backups"`,
@@ -94,7 +96,7 @@ func TestAdminSetupPlanClientContract(t *testing.T) {
 				"plan_fingerprint":"` + setupPlanTestFingerprint + `",
 				"normalized":{
 					"server":{"motd":"Family Minecraft","max_players":10,"bedrock_enabled":true,"timezone":"America/Toronto"},
-					"minecraft":{"java_memory":"6G","container_memory":"8G","java_port":25565,"bedrock_port":19132,"image_tag":"stable","requested_version_policy":"recommended","version_policy":"pinned","version":"1.21.8","system_memory_mib":16384,"system_reserve_mib":8192,"minecraft_uid":1000,"minecraft_gid":1000},
+					"minecraft":{"java_memory":"6G","container_memory":"8G","java_port":25565,"bedrock_port":19132,"image_tag":"stable","requested_version_policy":"recommended","version_policy":"recommended","version":"1.21.8","game_mode":"creative","system_memory_mib":16384,"system_reserve_mib":8192,"minecraft_uid":1000,"minecraft_gid":1000},
 					"storage":{"type":"partition","path":"/var/mnt/justvoxel-data/minecraft","device":"/dev/vdb1","parent_disk":"/dev/vdb","model":"Virtual Disk","transport":"virtio","size_bytes":10737418240,"filesystem":"xfs","uuid":"data-uuid","mount_point":"/var/mnt/justvoxel-data","expected_uuid":"data-uuid","expected_source":"","mounted_at":"","source":"","system_disk":false,"purpose":"data"},
 					"backups":{"type":"smb","path":"/var/mnt/justvoxel-backup/backups","device":"","parent_disk":"","model":"","transport":"","size_bytes":0,"filesystem":"","uuid":"","mount_point":"/var/mnt/justvoxel-backup","expected_uuid":"","expected_source":"//nas/minecraft-backups","mounted_at":"","source":"//nas/minecraft-backups","system_disk":false,"purpose":"","username":"backup-user","domain":"HOME","credentials_required":true,"automatic":true,"daily_time":"04:30","schedule":"*-*-* 04:30:00","keep":7}
 				},
@@ -115,7 +117,10 @@ func TestAdminSetupPlanClientContract(t *testing.T) {
 	if plan.PlanFingerprint != setupPlanTestFingerprint {
 		t.Fatalf("fingerprint = %q, want %q", plan.PlanFingerprint, setupPlanTestFingerprint)
 	}
-	if plan.Normalized.Minecraft.VersionPolicy != "pinned" || plan.Normalized.Minecraft.Version != "1.21.8" {
+	if plan.Normalized.Minecraft.GameMode != "creative" {
+		t.Fatalf("normalized game mode = %q", plan.Normalized.Minecraft.GameMode)
+	}
+	if plan.Normalized.Minecraft.VersionPolicy != "recommended" || plan.Normalized.Minecraft.Version != "1.21.8" {
 		t.Fatalf("normalized Minecraft policy not preserved: %#v", plan.Normalized.Minecraft)
 	}
 	if plan.Normalized.Minecraft.MinecraftUID != 1000 || plan.Normalized.Minecraft.MinecraftGID != 1000 {

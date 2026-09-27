@@ -50,6 +50,7 @@
         <section><h3>Minecraft</h3>
           <p><span class="review-label">Type:</span> {{.ServerTypeLabel}}</p>
           <p><span class="review-label">Version:</span> {{.Plan.Normalized.Minecraft.Version}} {{.VersionLabel}}</p>
+          <p><span class="review-label">Game mode:</span> {{.GameModeLabel}}</p>
           <p><span class="review-label">Memory:</span> {{.Plan.Normalized.Minecraft.JavaMemory}} heap / {{.Plan.Normalized.Minecraft.ContainerMemory}} container</p>
           <p><span class="review-label">Ports:</span> {{.Plan.Normalized.Minecraft.JavaPort}}/TCP{{if .Plan.Normalized.Server.BedrockEnabled}}, {{.Plan.Normalized.Minecraft.BedrockPort}}/UDP{{end}}</p>
           <p><span class="review-label">Image:</span> <code>{{.Plan.Normalized.Minecraft.ImageTag}}</code></p>
@@ -81,7 +82,7 @@
 
     {{if .Plan.Warnings}}
     <section class="setup-review-warnings" aria-label="Setup warnings">
-      {{range .Plan.Warnings}}<div class="setup-backup-resilience setup-disk-warning" role="note"><strong>{{if eq .Code "same_physical_disk"}}Backups are on the same disk{{else if eq .Code "bedrock_version_unsupported"}}Bedrock cross-play unavailable{{else if eq .Code "bedrock_compatibility_unavailable"}}Bedrock compatibility could not be checked{{else if eq .Code "bedrock_moving_version"}}Bedrock compatibility may change{{else}}Setup needs attention{{end}}</strong><span>{{if eq .Code "same_physical_disk"}}If this disk fails, both Minecraft and its backups could be lost.{{else}}{{.Message}}{{end}}</span></div>{{end}}
+      {{range .Plan.Warnings}}<div class="setup-backup-resilience setup-disk-warning" role="note"><strong>{{if eq .Code "same_physical_disk"}}Backups are on the same disk{{else if eq .Code "bedrock_version_unsupported"}}Bedrock cross-play unavailable{{else if eq .Code "bedrock_compatibility_unavailable"}}Bedrock compatibility could not be checked{{else}}Setup needs attention{{end}}</strong><span>{{if eq .Code "same_physical_disk"}}If this disk fails, both Minecraft and its backups could be lost.{{else}}{{.Message}}{{end}}</span></div>{{end}}
     </section>
     {{end}}
 
@@ -116,7 +117,7 @@
       <div class="setup-step-navigation"><form method="post" action="/setup/review/back"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Back</button></form>{{if .Plan.OK}}<button type="submit" form="setup-apply-form" data-setup-configure>Configure JustVoxel</button>{{else}}<span class="setup-configure-disabled" role="group" aria-disabled="true" tabindex="0" aria-describedby="setup-configure-help"><button type="button" disabled aria-describedby="setup-configure-help">Configure JustVoxel</button><span class="setup-configure-tooltip" id="setup-configure-help" role="tooltip">Setup is not ready. Resolve the items above first.</span></span>{{end}}</div>
     </div>
   </section>
-  <footer class="setup-footer disclaimer">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT. <a href="https://github.com/home-server-project/justvoxel" target="_blank" rel="noopener noreferrer">JustVoxel on GitHub</a></footer>
+  {{template "project-footer" .}}
 </main>
 </body>
 </html>{{end}}

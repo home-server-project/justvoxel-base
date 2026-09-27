@@ -86,6 +86,9 @@ func TestAdminConfigurationSupportsConfiguredAndUnconfiguredStates(t *testing.T)
 		if !strings.Contains(rr.Body.String(), want) {
 			t.Fatalf("response missing %s: %s", want, rr.Body.String())
 		}
+		if wantConfigured && !strings.Contains(rr.Body.String(), `"game_mode":"survival"`) {
+			t.Fatalf("configured game mode missing from discovery: %s", rr.Body.String())
+		}
 	}
 }
 

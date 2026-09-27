@@ -54,6 +54,7 @@ type setupReviewPageData struct {
 	BackupLabel     string
 	BackupSize      string
 	VersionLabel    string
+	GameModeLabel   string
 }
 
 func (a *App) registerSetupWizardReviewRoutes(mux *http.ServeMux) {
@@ -130,6 +131,7 @@ func setupConfigurationSnapshot(plan api.AdminSetupPlanResponse) string {
 	b.WriteString("Timezone: " + plan.Normalized.Server.Timezone + "\n\n")
 
 	b.WriteString("Minecraft\n")
+	b.WriteString("Game mode: " + setupGameModeLabel(plan.Normalized.Minecraft.GameMode) + "\n")
 	b.WriteString("Game memory: " + plan.Normalized.Minecraft.JavaMemory + "\n")
 	b.WriteString("Maximum memory: " + plan.Normalized.Minecraft.ContainerMemory + "\n")
 	b.WriteString("Java port: " + strconv.Itoa(plan.Normalized.Minecraft.JavaPort) + "/TCP\n")
@@ -338,7 +340,7 @@ func setupPlanRequestFromDraft(draft setupDraft) (api.AdminSetupPlanRequest, err
 		Minecraft: api.AdminSetupPlanMinecraftRequest{
 			JavaMemory: draft.Minecraft.JavaMemory, ContainerMemory: draft.Minecraft.ContainerMemory,
 			JavaPort: javaPort, BedrockPort: bedrockPort, ImageTag: draft.Minecraft.ImageTag,
-			VersionPolicy: draft.Minecraft.VersionPolicy, Version: draft.Minecraft.Version,
+			VersionPolicy: draft.Minecraft.VersionPolicy, Version: draft.Minecraft.Version, GameMode: draft.Minecraft.GameMode,
 		},
 		Storage: api.AdminSetupPlanStorageRequest{
 			Type: draft.Storage.Type, Path: draft.Storage.Path, Device: draft.Storage.Device, MountPoint: draft.Storage.MountPoint,
@@ -372,9 +374,10 @@ func (a *App) renderSetupReview(w http.ResponseWriter, identity api.SessionInfo,
 		Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
 		CSRF: csrf, Identity: identity, Plan: plan, Error: errorMessage,
 		EULAAccepted: state.EULAAccepted, EULAURL: minecraftEULAURL,
-		StorageLabel: setupStorageTypeLabel(plan.Normalized.Storage.Type),
-		BackupLabel:  setupBackupTypeLabel(plan.Normalized.Backups.Type),
-		VersionLabel: setupVersionPolicyLabel(plan.Normalized.Minecraft.RequestedVersionPolicy),
+		StorageLabel:  setupStorageTypeLabel(plan.Normalized.Storage.Type),
+		BackupLabel:   setupBackupTypeLabel(plan.Normalized.Backups.Type),
+		VersionLabel:  setupVersionPolicyLabel(plan.Normalized.Minecraft.RequestedVersionPolicy),
+		GameModeLabel: setupGameModeLabel(plan.Normalized.Minecraft.GameMode),
 	}
 	if plan.Normalized.Storage.SizeBytes > 0 {
 		data.StorageSize = humanBytes(plan.Normalized.Storage.SizeBytes)
@@ -383,6 +386,20 @@ func (a *App) renderSetupReview(w http.ResponseWriter, identity api.SessionInfo,
 		data.BackupSize = humanBytes(plan.Normalized.Backups.SizeBytes)
 	}
 	a.renderAdminDiscovery(w, "setup_review.html", data)
+}
+
+func setupGameModeLabel(mode string) string {
+	switch mode {
+	case "survival":
+		return "Survival"
+	case "creative":
+		return "Creative"
+	case "adventure":
+		return "Adventure"
+	case "spectator":
+		return "Spectator"
+	}
+	return mode
 }
 
 func setupServerTypeLabel(value string) string {
@@ -427,11 +444,11 @@ func setupBackupTypeLabel(value string) string {
 func setupVersionPolicyLabel(value string) string {
 	switch value {
 	case "recommended":
-		return "Recommended version"
+		return "· Recommended"
 	case "latest":
-		return "Always newest version"
+		return "· Latest"
 	case "pinned":
-		return "Specific version"
+		return "· Specific"
 	default:
 		return value
 	}

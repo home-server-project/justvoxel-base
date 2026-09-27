@@ -60,7 +60,7 @@ _a55_parse_request() {
       (.storage|type == "object") and
       (.backups|type == "object") and
       ((.server|keys) - ["motd","max_players","bedrock_enabled","timezone"] | length == 0) and
-      ((.minecraft|keys) - ["java_memory","container_memory","java_port","bedrock_port","image_tag","version_policy","version","minecraft_uid","minecraft_gid"] | length == 0) and
+      ((.minecraft|keys) - ["java_memory","container_memory","java_port","bedrock_port","image_tag","version_policy","version","game_mode","minecraft_uid","minecraft_gid"] | length == 0) and
       ((.storage|keys) - ["type","path","mount_point","expected_uuid","expected_source"] | length == 0) and
       ((.backups|keys) - ["type","path","mount_point","expected_uuid","expected_source","automatic","schedule","keep"] | length == 0) and
       (.server.motd|type == "string") and
@@ -74,6 +74,8 @@ _a55_parse_request() {
       (.minecraft.image_tag|type == "string") and
       (.minecraft.version_policy|type == "string") and
       (.minecraft.version|type == "string") and
+      (.minecraft.game_mode|type == "string") and
+      (.minecraft.game_mode == "survival" or .minecraft.game_mode == "creative" or .minecraft.game_mode == "adventure" or .minecraft.game_mode == "spectator") and
       (.minecraft.minecraft_uid|type == "number") and
       (.minecraft.minecraft_gid|type == "number") and
       (.storage.type|type == "string") and
@@ -134,7 +136,7 @@ _a55_load_values() {
     TIMEZONE="$(jq -r '.server.timezone' <<< "${A55_REQUEST}")"
     MAX_PLAYERS="$(jq -r '.server.max_players' <<< "${A55_REQUEST}")"
     MOTD="$(jq -r '.server.motd' <<< "${A55_REQUEST}")"
-    GAME_MODE=survival
+    GAME_MODE="$(jq -r '.minecraft.game_mode' <<< "${A55_REQUEST}")"
     DIFFICULTY=normal
     WHITELIST_ENABLED=yes
     ENFORCE_WHITELIST=yes
@@ -151,8 +153,9 @@ _a55_validate_runtime_inputs() {
     validate_simple_text "${MOTD}" || return 1
     [[ -e /usr/share/zoneinfo/${TIMEZONE} ]] || return 1
     [[ ${MINECRAFT_IMAGE_TAG} =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || return 1
-    [[ ${MINECRAFT_VERSION_MODE} == pinned || ${MINECRAFT_VERSION_MODE} == latest ]] || return 1
+    [[ ${MINECRAFT_VERSION_MODE} == pinned || ${MINECRAFT_VERSION_MODE} == recommended || ${MINECRAFT_VERSION_MODE} == latest ]] || return 1
     [[ -n ${MINECRAFT_VERSION} ]] || return 1
+    validate_game_mode "${GAME_MODE}" || return 1
     [[ -d ${DATA_PATH} && -w ${BACKUP_PATH} ]] || return 1
     if [[ -n ${DATA_MOUNT_POINT} ]]; then mountpoint -q -- "${DATA_MOUNT_POINT}" || return 1; fi
     if [[ -n ${BACKUP_MOUNT_POINT} ]]; then mountpoint -q -- "${BACKUP_MOUNT_POINT}" || return 1; fi

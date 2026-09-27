@@ -32,6 +32,7 @@ type adminSetupPlanServerRequest struct {
 }
 
 type adminSetupPlanMinecraftRequest struct {
+	GameMode        string `json:"game_mode"`
 	JavaMemory      string `json:"java_memory"`
 	ContainerMemory string `json:"container_memory"`
 	JavaPort        int    `json:"java_port"`
@@ -82,6 +83,7 @@ type adminSetupPlanServer struct {
 }
 
 type adminSetupPlanMinecraft struct {
+	GameMode               string `json:"game_mode"`
 	JavaMemory             string `json:"java_memory"`
 	ContainerMemory        string `json:"container_memory"`
 	JavaPort               int    `json:"java_port"`
@@ -165,6 +167,7 @@ type adminSetupPlanResponse struct {
 }
 
 type adminSetupFingerprintMinecraft struct {
+	GameMode               string `json:"game_mode"`
 	JavaMemory             string `json:"java_memory"`
 	ContainerMemory        string `json:"container_memory"`
 	JavaPort               int    `json:"java_port"`
@@ -305,7 +308,7 @@ func authoritativeAdminSetupPlan(parent context.Context, request adminSetupPlanR
 		out.Error = boundedSetupPlanError(out.Error)
 		return out, nil
 	}
-	if out.Normalized == nil || out.Requirements == nil || out.Normalized.Minecraft.VersionPolicy == "" || out.Normalized.Minecraft.MinecraftUID == 0 || out.Normalized.Minecraft.MinecraftGID == 0 || out.Normalized.Storage.Type == "" || out.Normalized.Backups.Type == "" {
+	if out.Normalized == nil || out.Requirements == nil || out.Normalized.Minecraft.VersionPolicy == "" || !validSetupGameMode(out.Normalized.Minecraft.GameMode) || out.Normalized.Minecraft.MinecraftUID == 0 || out.Normalized.Minecraft.MinecraftGID == 0 || out.Normalized.Storage.Type == "" || out.Normalized.Backups.Type == "" {
 		return out, &adminSetupPlanningError{status: http.StatusInternalServerError, message: "first-run setup planner returned incomplete data"}
 	}
 	fingerprint, err := adminSetupPlanFingerprint(out.SchemaVersion, out.Normalized, out.Requirements)
@@ -325,6 +328,7 @@ func adminSetupPlanFingerprint(schemaVersion string, normalized *adminSetupNorma
 		Normalized: adminSetupFingerprintNormalized{
 			Server: normalized.Server,
 			Minecraft: adminSetupFingerprintMinecraft{
+				GameMode:   normalized.Minecraft.GameMode,
 				JavaMemory: normalized.Minecraft.JavaMemory, ContainerMemory: normalized.Minecraft.ContainerMemory,
 				JavaPort: normalized.Minecraft.JavaPort, BedrockPort: normalized.Minecraft.BedrockPort,
 				ImageTag: normalized.Minecraft.ImageTag, RequestedVersionPolicy: normalized.Minecraft.RequestedVersionPolicy,
@@ -357,6 +361,14 @@ func adminSetupPlanFingerprint(schemaVersion string, normalized *adminSetupNorma
 	}
 	sum := sha256.Sum256(payload)
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+func validSetupGameMode(mode string) bool {
+	switch mode {
+	case "survival", "creative", "adventure", "spectator":
+		return true
+	}
+	return false
 }
 
 func decodeAdminSetupPlanRequest(w http.ResponseWriter, r *http.Request, target *adminSetupPlanRequest) bool {

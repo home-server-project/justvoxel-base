@@ -18,6 +18,24 @@ bash -n "${common}"
 bash -n "${discovery}"
 bash -n "${planner}"
 
+# A stopping container may answer RCON while its systemd unit is deactivating.
+source "${common}"
+mock_service_state=active
+mock_rcon_state=ready
+systemctl() {
+    [[ $# -eq 3 && $1 == is-active && $2 == --quiet && $3 == minecraft.service && ${mock_service_state} == active ]]
+}
+podman() {
+    [[ $# -eq 4 && $1 == exec && $2 == minecraft && $3 == rcon-cli && $4 == list && ${mock_rcon_state} == ready ]]
+}
+sleep() { :; }
+wait_for_rcon 1 || { echo 'active service with working RCON was not ready' >&2; exit 1; }
+mock_service_state=deactivating
+if wait_for_rcon 1; then
+    echo 'deactivating service with working RCON was incorrectly ready' >&2
+    exit 1
+fi
+
 grep -Fq 'eula_accepted' "${apply}"
 grep -Fq 'startSetupWorker' "${apply}"
 grep -Fq 'context.WithTimeout(context.Background(), setupWorkerTimeout)' "${worker}"
@@ -39,6 +57,10 @@ grep -Fq 'runtime_rollback' "${runner}"
 grep -Fq 'rollbackSetupStorage' "${runner}"
 grep -Fq 'MinecraftUID' "${runner}"
 grep -Fq 'minecraft_uid' "${planner}"
+grep -Fq 'GAME_MODE="$(jq -r '\''.minecraft.game_mode'\'' <<< "${A55_REQUEST}")"' "${runtime_helper}"
+grep -Fq 'validate_game_mode "${GAME_MODE}"' "${runtime_helper}"
+grep -Fq 'shell_quote_assignment GAME_MODE "${GAME_MODE:-survival}"' "${common}"
+grep -Fq 'MODE=@@GAME_MODE@@' "${repo_root}/templates/config/minecraft.env.in"
 
 if grep -Eq 'smb_password|SMBPassword|password[[:space:]]*:' "${runtime_helper}" "${runner}"; then
     echo 'A5.5 runtime transaction must not contain the SMB execution secret.' >&2

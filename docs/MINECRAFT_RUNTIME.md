@@ -4,7 +4,7 @@ JustVoxel ships immutable runtime templates based on the hardware-verified Home 
 
 `mjust setup` copies and renders those templates into administrator-owned files under `/etc`. Minecraft runs only from the local rendered Quadlet in `/etc/containers/systemd/minecraft.container`; it never runs directly from `/usr/share/justvoxel/templates`.
 
-The runtime uses `docker.io/itzg/minecraft-server` with Paper and optional Geyser/Floodgate cross-play, plus ViaVersion. The image tag is administrator-configurable: JustVoxel offers upstream `stable`, upstream `latest`, or a validated custom/exact tag. The Minecraft/Paper game version is a separate setting and can be pinned to a stable Paper-supported version or intentionally set to `LATEST`.
+The runtime uses `docker.io/itzg/minecraft-server` with Paper and optional Geyser/Floodgate cross-play, plus ViaVersion. The image tag is administrator-configurable: JustVoxel offers upstream `stable`, upstream `latest`, or a validated custom/exact tag. The Minecraft game version is a separate setting: Recommended uses an exact stable version, Latest follows newer versions, and Specific uses an exact version with a usable Paper build. Setup keeps the chosen policy and the resolved version separately. At runtime, Latest renders `VERSION=LATEST`; a non-stable Paper build uses `PAPER_CHANNEL=experimental`.
 
 Changing or restarting a service does not itself refresh a moving container tag from the registry. `mjust update-minecraft` explicitly checks and pulls the configured tag when its remote digest changes. If the game version uses `VERSION=LATEST`, however, the container can download a newer Minecraft release during startup; mjust warns about that behavior when the policy is selected.
 

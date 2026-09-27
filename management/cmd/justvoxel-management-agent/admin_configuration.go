@@ -11,6 +11,7 @@ import (
 )
 
 type adminConfigurationChangeRequest struct {
+	GameMode           string `json:"game_mode"`
 	JavaMemory         string `json:"java_memory"`
 	ContainerMemory    string `json:"container_memory"`
 	JavaPort           int    `json:"java_port"`

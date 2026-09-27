@@ -2976,9 +2976,16 @@ if (minecraftOpen && minecraftDialog) {
         <div class="minecraft-native-grid">
           <label>Maximum players<input name="max_players" type="number" min="1" step="1" required></label>
           <label>Server welcome message (MOTD)<input name="motd" required></label>
+          <label>Game mode<select name="game_mode" required>
+            <option value="survival">Survival</option>
+            <option value="creative">Creative</option>
+            <option value="adventure">Adventure</option>
+            <option value="spectator">Spectator</option>
+          </select></label>
         </div>`;
       section.querySelector('[name="max_players"]').value = String(minecraft.max_players || 10);
       section.querySelector('[name="motd"]').value = minecraft.motd || "";
+      section.querySelector('[name="game_mode"]').value = minecraft.game_mode || "survival";
       form.appendChild(section);
     } else if (tab === "crossplay") {
       section.innerHTML = `

@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -39,6 +41,7 @@ type setupServerDraft struct {
 }
 
 type setupMinecraftDraft struct {
+	GameMode            string
 	ServerType          string
 	JavaMemory          string
 	ContainerMemory     string
@@ -130,9 +133,39 @@ func (a *App) registerSetupWizardRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /setup/connections", a.setupWizardSaveConnections)
 	mux.HandleFunc("POST /setup/resources", a.setupWizardSaveResources)
 	mux.HandleFunc("POST /setup/minecraft", a.setupWizardSaveMinecraft)
+	mux.HandleFunc("GET /setup/version-preview", a.setupWizardVersionPreview)
 	mux.HandleFunc("POST /setup/navigate", a.setupWizardNavigate)
 	mux.HandleFunc("POST /setup/cancel", a.setupWizardCancel)
 	a.registerSetupWizardStorageRoutes(mux)
+}
+
+type setupVersionPreviewAPI interface {
+	AdminSetupVersionPreview(context.Context, string, string, string, bool) (api.AdminVersionStatus, error)
+}
+
+func (a *App) setupWizardVersionPreview(w http.ResponseWriter, r *http.Request) {
+	session, _, _, ok := a.setupWizardRequest(w, r, false)
+	if !ok {
+		return
+	}
+	draft, exists := firstRunSetupDrafts.get(a, session)
+	if !exists || !draft.Started || draft.CurrentStep != 4 {
+		http.Error(w, "Version setup is unavailable", http.StatusConflict)
+		return
+	}
+	client, ok := a.api.(setupVersionPreviewAPI)
+	if !ok {
+		http.Error(w, "Version information is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	status, err := client.AdminSetupVersionPreview(r.Context(), session, r.URL.Query().Get("policy"), r.URL.Query().Get("version"), draft.Server.BedrockEnabled)
+	if err != nil {
+		http.Error(w, "Version information is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	json.NewEncoder(w).Encode(status)
 }
 
 func (a *App) setupWizardPage(w http.ResponseWriter, r *http.Request) {
@@ -292,6 +325,7 @@ func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	draft.Minecraft.ServerType = serverType
+	draft.Minecraft.GameMode = r.FormValue("game_mode")
 	draft.Server.MOTD = strings.TrimSpace(r.FormValue("motd"))
 	draft.Server.MaxPlayers = strings.TrimSpace(r.FormValue("max_players"))
 	draft.Server.Timezone = strings.TrimSpace(r.FormValue("timezone"))
@@ -301,6 +335,13 @@ func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
 		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "server settings rejected", draft)
 		w.WriteHeader(http.StatusBadRequest)
 		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
+		return
+	}
+	if !validSetupGameMode(draft.Minecraft.GameMode) {
+		draft.Server.Complete = false
+		firstRunSetupDrafts.save(a, session, draft)
+		w.WriteHeader(http.StatusBadRequest)
+		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), "Choose a valid game mode.")
 		return
 	}
 	draft.Server.Complete = true
@@ -427,10 +468,7 @@ func (a *App) setupWizardSaveMinecraft(w http.ResponseWriter, r *http.Request) {
 	}
 	draft.Minecraft.ResourcesComplete = true
 	draft.Minecraft.Complete = true
-	if draft.Minecraft.VersionPolicy == "latest" {
-		draft.Minecraft.Version = "LATEST"
-	}
-	if draft.Minecraft.VersionPolicy == "recommended" {
+	if draft.Minecraft.VersionPolicy != "pinned" {
 		draft.Minecraft.Version = ""
 	}
 	draft.CurrentStep = 5
@@ -649,7 +687,7 @@ func draftFromSetupDefaults(defaults api.AdminSetupDefaults, inventory api.Admin
 			ServerType: "paper",
 			JavaMemory: defaults.JavaMemory, ContainerMemory: defaults.ContainerMemory,
 			JavaPort: strconv.Itoa(defaults.JavaPort), BedrockPort: strconv.Itoa(defaults.BedrockPort),
-			ImageTag: defaults.ImageTag, VersionPolicy: policy, Version: version,
+			ImageTag: defaults.ImageTag, VersionPolicy: policy, Version: version, GameMode: "survival",
 		},
 		Storage: initialSetupStorageDraft(defaults),
 		Backups: initialSetupBackupDraft(defaults),
@@ -703,7 +741,18 @@ func validateSetupConnections(minecraft setupMinecraftDraft) error {
 	return nil
 }
 
+func validSetupGameMode(mode string) bool {
+	switch mode {
+	case "survival", "creative", "adventure", "spectator":
+		return true
+	}
+	return false
+}
+
 func validateSetupMinecraft(minecraft setupMinecraftDraft, defaults api.AdminSetupDefaults) error {
+	if !validSetupGameMode(minecraft.GameMode) {
+		return errors.New("Choose a valid game mode.")
+	}
 	if err := validateSetupResources(minecraft, defaults); err != nil {
 		return err
 	}
@@ -717,7 +766,7 @@ func validateSetupMinecraft(minecraft setupMinecraftDraft, defaults api.AdminSet
 	case "recommended":
 		// A4.4 resolves and validates the newest stable Paper-backed version.
 	case "latest":
-		// LATEST intentionally follows the container's moving Minecraft release.
+		// The planner resolves an exact preview; runtime keeps this policy moving.
 	case "pinned":
 		if minecraft.Version == "" || minecraft.Version == "LATEST" || !setupVersionPattern.MatchString(minecraft.Version) {
 			return errors.New("Specific Minecraft version is invalid.")

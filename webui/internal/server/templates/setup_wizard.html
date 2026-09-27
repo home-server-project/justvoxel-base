@@ -87,6 +87,7 @@
       </fieldset>
       <div class="setup-form-grid">
         <label class="setup-field setup-field-wide">Server name / welcome message<input name="motd" value="{{.Server.MOTD}}" autocomplete="off" placeholder="JustVoxel Java and Bedrock Server"><span class="field-help">Shown to players in the Minecraft server list. Technical name: MOTD.</span></label>
+        <label class="setup-field">Game mode<select name="game_mode" required><option value="survival" {{if eq .Minecraft.GameMode "survival"}}selected{{end}}>Survival</option><option value="creative" {{if eq .Minecraft.GameMode "creative"}}selected{{end}}>Creative</option><option value="adventure" {{if eq .Minecraft.GameMode "adventure"}}selected{{end}}>Adventure</option><option value="spectator" {{if eq .Minecraft.GameMode "spectator"}}selected{{end}}>Spectator</option></select></label>
         <label class="setup-field">Maximum players<input name="max_players" type="number" min="1" step="1" value="{{.Server.MaxPlayers}}" inputmode="numeric"><span class="field-help">Used for the player limit and memory recommendations.</span></label>
         <label class="setup-field setup-timezone-field">Timezone
           <input id="timezone" name="timezone" value="{{.Server.Timezone}}" autocomplete="off" placeholder="Type Toronto, Warsaw, Amsterdam…" data-timezone-search aria-autocomplete="list" aria-controls="timezone-results" aria-expanded="false">
@@ -127,14 +128,14 @@
     <form method="post" action="/setup/minecraft" class="setup-form">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <div class="setup-form-grid setup-section-gap">
-        <label class="setup-field">Minecraft container release channel<select id="image-channel" data-current-tag="{{.Minecraft.ImageTag}}"><option value="stable" {{if eq .Minecraft.ImageTag "stable"}}selected{{end}}>Stable (recommended)</option><option value="latest" {{if eq .Minecraft.ImageTag "latest"}}selected{{end}}>Latest</option><option value="custom" {{if and (ne .Minecraft.ImageTag "stable") (ne .Minecraft.ImageTag "latest")}}selected{{end}}>Custom</option></select><span class="field-help">Stable is recommended for most servers. Latest follows the newest container release. Custom lets advanced users choose another supported tag.</span></label>
+        <label class="setup-field">Container updates<select id="image-channel" data-current-tag="{{.Minecraft.ImageTag}}"><option value="stable" {{if eq .Minecraft.ImageTag "stable"}}selected{{end}}>Stable (recommended)</option><option value="latest" {{if eq .Minecraft.ImageTag "latest"}}selected{{end}}>Latest</option><option value="custom" {{if and (ne .Minecraft.ImageTag "stable") (ne .Minecraft.ImageTag "latest")}}selected{{end}}>Custom</option></select><span class="field-help">Controls server container software updates. This does not choose the Minecraft game version below.</span></label>
         <label id="custom-image-tag-field" class="setup-field" {{if or (eq .Minecraft.ImageTag "stable") (eq .Minecraft.ImageTag "latest")}}hidden{{end}}>Custom container tag<input id="custom-image-tag" value="{{if and (ne .Minecraft.ImageTag "stable") (ne .Minecraft.ImageTag "latest")}}{{.Minecraft.ImageTag}}{{end}}" autocomplete="off" placeholder="Enter a supported container tag"><span class="field-help">Advanced option. Use an upstream tag only when you know you need it.</span></label>
         <input id="image-tag" name="image_tag" type="hidden" value="{{.Minecraft.ImageTag}}">
-        <label class="setup-field">Minecraft version<select id="version-policy" name="version_policy"><option value="recommended" {{if eq .Minecraft.VersionPolicy "recommended"}}selected{{end}}>Recommended version</option><option value="latest" {{if eq .Minecraft.VersionPolicy "latest"}}selected{{end}}>Always newest version</option><option value="pinned" {{if eq .Minecraft.VersionPolicy "pinned"}}selected{{end}}>Specific version</option></select><span class="field-help">Recommended version chooses a stable Paper-backed Minecraft version. When Bedrock cross-play is enabled, JustVoxel prefers the newest version currently supported by Geyser/Floodgate.</span></label>
-        <label id="specific-version-field" class="setup-field setup-field-wide" {{if ne .Minecraft.VersionPolicy "pinned"}}hidden{{end}}>Specific Minecraft version<input id="minecraft-version" name="version" value="{{.Minecraft.Version}}" autocomplete="off" placeholder="26.2"><span class="field-help">Use an exact Minecraft version when you need one. JustVoxel verifies Paper and Bedrock compatibility during Review.</span></label>
-        {{if .Server.BedrockEnabled}}<div class="notice setup-field-wide"><strong>Bedrock compatibility is checked during Review.</strong> If this version is too new for Geyser/Floodgate, Java setup can continue with cross-play disabled. You can check again when support is available.</div>{{end}}
+        <label class="setup-field">Minecraft version<select id="version-policy" name="version_policy"><option value="recommended" {{if eq .Minecraft.VersionPolicy "recommended"}}selected{{end}}>Recommended</option><option value="latest" {{if eq .Minecraft.VersionPolicy "latest"}}selected{{end}}>Latest</option><option value="pinned" {{if eq .Minecraft.VersionPolicy "pinned"}}selected{{end}}>Specific version</option></select><span class="field-help">Recommended uses the newest stable server version. Latest follows newer server versions when available.</span></label>
+        <label id="specific-version-field" class="setup-field setup-field-wide" {{if ne .Minecraft.VersionPolicy "pinned"}}hidden{{end}}>Specific Minecraft version<input id="minecraft-version" name="version" value="{{.Minecraft.Version}}" autocomplete="off"><span class="field-help">Choose an exact version. Available pre-release builds can also be used.</span></label>
+        <div class="setup-field-wide" id="setup-version-preview" role="status" aria-live="polite">Checking available versions…</div>
       </div>
-      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
+      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next" disabled>Continue</button></div></div>
     </form>
 
     {{else if eq .CurrentStep 5}}
@@ -412,7 +413,7 @@
 
   </section>
   {{end}}
-  <footer class="setup-footer disclaimer">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT. <a href="https://github.com/home-server-project/justvoxel" target="_blank" rel="noopener noreferrer">JustVoxel on GitHub</a></footer>
+  {{template "project-footer" .}}
 </main>
 </body>
 </html>{{end}}

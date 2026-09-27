@@ -93,15 +93,15 @@ else
 fi
 
 case "${MINECRAFT_VERSION_MODE}" in
-    pinned)
+    pinned|recommended)
         if [[ ${MINECRAFT_VERSION} == LATEST ]] || grep -Fq 'VERSION=LATEST' "${JV_MC_ENV}" 2>/dev/null; then
-            fail 'Minecraft version policy says pinned but runtime uses LATEST'
+            fail "Minecraft ${MINECRAFT_VERSION_MODE} version policy requires an exact version, but runtime uses LATEST"
         else
-            pass "Minecraft game version is pinned to ${MINECRAFT_VERSION}"
+            pass "Minecraft ${MINECRAFT_VERSION_MODE} game version is ${MINECRAFT_VERSION}"
         fi
         ;;
     latest)
-        if [[ ${MINECRAFT_VERSION} == LATEST ]] && grep -Fqx 'VERSION=LATEST' "${JV_MC_ENV}" 2>/dev/null; then
+        if grep -Fqx 'VERSION=LATEST' "${JV_MC_ENV}" 2>/dev/null; then
             pass 'Minecraft game version intentionally follows the LATEST release channel'
         else
             fail 'Minecraft version policy says latest but runtime is not VERSION=LATEST'

@@ -15,6 +15,7 @@ if (versionLauncher && versionDialog) {
   };
   const statusURL = (policy = "", version = "") => "/api/version/workspace/status?" + new URLSearchParams({ policy, version });
   const policyLabel = (policy) => ({ recommended: "Recommended", latest: "Latest", pinned: "Specific version" })[policy] || "Unknown";
+  const releaseLabel = (channel) => ({ STABLE: "Stable", BETA: "Beta", ALPHA: "Alpha" })[channel] || "Pre-release";
   const line = (label, value) => {
     const row = document.createElement("div");
     const name = document.createElement("span");
@@ -39,7 +40,9 @@ if (versionLauncher && versionDialog) {
     if (plan.changes?.length) {
       plan.changes.forEach((change) => {
         const item = document.createElement("p");
-        item.textContent = `${change.label || change.field}: ${change.before || "—"} → ${change.after || "—"}`;
+        const before = change.before === "LATEST" ? "Follows new versions" : change.before || "—";
+        const after = change.field === "version" && change.after === "LATEST" ? status?.selected_candidate || "Unavailable" : change.after || "—";
+        item.textContent = `${change.label || change.field}: ${before} → ${after}`;
         review.appendChild(item);
       });
     } else {
@@ -162,7 +165,7 @@ if (versionLauncher && versionDialog) {
         const panel = card("Minecraft Version");
         const grid = document.createElement("div");
         grid.className = "version-status-grid";
-        grid.append(line("Installed", status.installed || "Not detected"), line("Available", status.available), line("Recommended", status.recommended), line("Configured", status.configured_version), line("Server software", status.server_software || "Paper"), line("Container channel", status.image_tag), line("Version policy", policyLabel(minecraft.version_mode)), line("Update", status.update_available ? "Available" : "No update confirmed"));
+        grid.append(line("Installed", status.installed || "Not detected"), line("Newest available", status.available ? `${status.available} · ${releaseLabel(status.available_channel)}` : "Unavailable"), line("Recommended", status.recommended), line("Configured", status.configured_version === "LATEST" ? "Follows new versions" : status.configured_version), line("Server software", status.server_software || "Paper"), line("Container channel", status.image_tag), line("Version policy", policyLabel(minecraft.version_mode)), line("Update", status.update_available ? "Available" : "No update confirmed"));
         panel.appendChild(grid);
         const compatibility = document.createElement("p");
         compatibility.className = status.crossplay_enabled && !status.crossplay_compatible ? "notice warning" : "muted compact";
@@ -183,7 +186,7 @@ if (versionLauncher && versionDialog) {
           try {
             const candidate = await request(statusURL(policy, policy === "pinned" ? form.elements.version.value.trim() : ""));
             if (!preview.isConnected) return;
-            preview.replaceChildren(line("Available", candidate.available), line("Will use", candidate.selected_candidate), line("Paper", candidate.paper_supported ? "Supported" : "Unknown"), line("Geyser/Floodgate", candidate.crossplay_enabled ? candidate.crossplay_compatible ? `Compatible with ${candidate.selected_candidate}` : "Not compatible" : "Cross-play off"));
+            preview.replaceChildren(line("Newest available", candidate.available ? `${candidate.available} · ${releaseLabel(candidate.available_channel)}` : "Unavailable"), line(policy === "latest" ? "Will install now" : "Will install", candidate.selected_candidate), line("Paper release", candidate.candidate_channel ? releaseLabel(candidate.candidate_channel) : "Unknown"), line("Geyser/Floodgate", candidate.crossplay_enabled ? candidate.crossplay_compatible ? `Compatible with ${candidate.selected_candidate}` : "Not compatible" : "Cross-play off"));
           } catch (_) { preview.textContent = "Available version and compatibility could not be confirmed."; }
         };
         form.elements.policy.addEventListener("change", sync);

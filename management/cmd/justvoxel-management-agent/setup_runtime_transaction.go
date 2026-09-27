@@ -35,6 +35,7 @@ type setupRuntimeServer struct {
 }
 
 type setupRuntimeMinecraft struct {
+	GameMode        string `json:"game_mode"`
 	JavaMemory      string `json:"java_memory"`
 	ContainerMemory string `json:"container_memory"`
 	JavaPort        int    `json:"java_port"`
@@ -66,13 +67,13 @@ type setupRuntimeBackups struct {
 }
 
 type setupRuntimeTransactionRequest struct {
-	SchemaVersion   string                         `json:"schema_version"`
-	OperationID     string                         `json:"operation_id"`
-	PlanFingerprint string                         `json:"plan_fingerprint"`
-	Server          setupRuntimeServer             `json:"server"`
-	Minecraft       setupRuntimeMinecraft          `json:"minecraft"`
-	Storage         setupRuntimeStorage            `json:"storage"`
-	Backups         setupRuntimeBackups            `json:"backups"`
+	SchemaVersion   string                `json:"schema_version"`
+	OperationID     string                `json:"operation_id"`
+	PlanFingerprint string                `json:"plan_fingerprint"`
+	Server          setupRuntimeServer    `json:"server"`
+	Minecraft       setupRuntimeMinecraft `json:"minecraft"`
+	Storage         setupRuntimeStorage   `json:"storage"`
+	Backups         setupRuntimeBackups   `json:"backups"`
 }
 
 type setupRuntimeTransactionResponse struct {
@@ -95,10 +96,10 @@ func setupRuntimeRequestForOperation(operation operationJournal, plan *adminSetu
 	}
 	return setupRuntimeTransactionRequest{
 		SchemaVersion: operationSchemaVersion, OperationID: operation.OperationID, PlanFingerprint: operation.PlanFingerprint,
-		Server: setupRuntimeServer{MOTD: plan.Server.MOTD, MaxPlayers: plan.Server.MaxPlayers, BedrockEnabled: plan.Server.BedrockEnabled, Timezone: plan.Server.Timezone},
-		Minecraft: setupRuntimeMinecraft{JavaMemory: plan.Minecraft.JavaMemory, ContainerMemory: plan.Minecraft.ContainerMemory, JavaPort: plan.Minecraft.JavaPort, BedrockPort: plan.Minecraft.BedrockPort, ImageTag: plan.Minecraft.ImageTag, VersionPolicy: plan.Minecraft.VersionPolicy, Version: plan.Minecraft.Version, MinecraftUID: plan.Minecraft.MinecraftUID, MinecraftGID: plan.Minecraft.MinecraftGID},
-		Storage: setupRuntimeStorage{Type: plan.Storage.Type, Path: plan.Storage.Path, MountPoint: plan.Storage.MountPoint, ExpectedUUID: plan.Storage.ExpectedUUID, ExpectedSource: plan.Storage.ExpectedSource},
-		Backups: setupRuntimeBackups{Type: plan.Backups.Type, Path: plan.Backups.Path, MountPoint: plan.Backups.MountPoint, ExpectedUUID: plan.Backups.ExpectedUUID, ExpectedSource: plan.Backups.ExpectedSource, Automatic: plan.Backups.Automatic, Schedule: plan.Backups.Schedule, Keep: plan.Backups.Keep},
+		Server:    setupRuntimeServer{MOTD: plan.Server.MOTD, MaxPlayers: plan.Server.MaxPlayers, BedrockEnabled: plan.Server.BedrockEnabled, Timezone: plan.Server.Timezone},
+		Minecraft: setupRuntimeMinecraft{GameMode: plan.Minecraft.GameMode, JavaMemory: plan.Minecraft.JavaMemory, ContainerMemory: plan.Minecraft.ContainerMemory, JavaPort: plan.Minecraft.JavaPort, BedrockPort: plan.Minecraft.BedrockPort, ImageTag: plan.Minecraft.ImageTag, VersionPolicy: plan.Minecraft.VersionPolicy, Version: plan.Minecraft.Version, MinecraftUID: plan.Minecraft.MinecraftUID, MinecraftGID: plan.Minecraft.MinecraftGID},
+		Storage:   setupRuntimeStorage{Type: plan.Storage.Type, Path: plan.Storage.Path, MountPoint: plan.Storage.MountPoint, ExpectedUUID: plan.Storage.ExpectedUUID, ExpectedSource: plan.Storage.ExpectedSource},
+		Backups:   setupRuntimeBackups{Type: plan.Backups.Type, Path: plan.Backups.Path, MountPoint: plan.Backups.MountPoint, ExpectedUUID: plan.Backups.ExpectedUUID, ExpectedSource: plan.Backups.ExpectedSource, Automatic: plan.Backups.Automatic, Schedule: plan.Backups.Schedule, Keep: plan.Backups.Keep},
 	}, nil
 }
 
@@ -243,9 +244,9 @@ func failSetupAfterStorage(parent context.Context, store *operationStore, operat
 	if runtimeRequest.OperationID != "" {
 		rolledRuntime, err := runSetupRuntimeTransactionAction(parent, "rollback", setupRuntimeRollbackTimeout, runtimeRequest)
 		store.appendSetupRuntimeHelperEvidenceBestEffort(operationID, "rollback", rolledRuntime.Evidence)
-	if err != nil {
-		store.appendSetupHelperFailureBestEffort(operationID, "runtime", "rollback", err)
-	}
+		if err != nil {
+			store.appendSetupHelperFailureBestEffort(operationID, "runtime", "rollback", err)
+		}
 		if err != nil || !rolledRuntime.OK {
 			if err == nil {
 				err = errors.New(setupRuntimeFirstNonEmpty(rolledRuntime.Error, "runtime rollback could not be confirmed"))

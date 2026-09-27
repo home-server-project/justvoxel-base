@@ -770,20 +770,17 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .quick-look-network-row>span,.network-overlay-list>span>span{color:#89959e!important;font-size:.66rem!important;font-weight:800;text-transform:uppercase;letter-spacing:.02em}
 .quick-look-network-row>strong,.network-overlay-list>span>strong{min-width:0;overflow-wrap:anywhere;color:#eef1f4;font-size:.8rem;font-weight:700;white-space:normal}
 .quick-look-network-tile .network-overlay-list{gap:.13rem;margin-top:.13rem}
-#dashboard{position:relative;isolation:isolate;min-height:calc(100dvh - 48px)}
+#dashboard{position:relative;isolation:isolate;display:flex;flex-direction:column;min-height:calc(100dvh - 48px)}
 #dashboard[data-configured="true"]::before{content:"";position:fixed;inset:48px 0 0;z-index:-1;pointer-events:none;background:radial-gradient(circle at var(--voxel-x,50%) var(--voxel-y,30%),#2d58443a,transparent 48%),linear-gradient(30deg,transparent 47.5%,#52745c18 48% 50%,transparent 50.5%) 0 0/112px 64px,linear-gradient(150deg,transparent 47.5%,#52745c18 48% 50%,transparent 50.5%) 0 0/112px 64px,linear-gradient(90deg,transparent 49%,#33554012 50%,transparent 51%) 0 0/112px 64px,linear-gradient(145deg,#142019,#0e1518 65%,#18231e)}
-#dashboard[data-configured="true"]{padding-bottom:4.5rem}
-#dashboard[data-configured="true"] .dashboard-footer{position:absolute;bottom:.5rem;left:1.25rem;right:1.25rem}
-#dashboard .dashboard-footer{margin-top:.8rem;color:#79838b;font-size:.72rem}
-#dashboard .dashboard-footer .disclaimer{margin:0}
-.project-links{display:flex;flex-wrap:wrap;align-items:center;gap:.15rem .45rem;margin-top:.3rem}
+.project-footer{margin-top:auto;padding-top:1rem;color:#79838b;font-size:.72rem}
+.project-footer .disclaimer{margin:.35rem 0 0}
+.project-links{display:flex;flex-wrap:wrap;align-items:center;gap:.15rem .45rem}
 .project-links a{color:#9ca7b0;text-decoration:underline;text-underline-offset:2px}
 .project-links a:hover,.project-links a:focus-visible{color:#8ad4a9}
 .about-project{margin-top:.8rem;padding-top:.8rem;border-top:1px solid #2b333b}
 .about-project h2,.about-project h3{margin:0 0 .25rem;font-size:1rem}
 .about-project dd{word-break:normal;overflow-wrap:anywhere}
 @media(prefers-color-scheme:light){.project-links a{color:#52616b}.project-links a:hover,.project-links a:focus-visible{color:#245b3a}.about-project{border-color:#e2e7ea}}
-@media(max-width:600px){#dashboard[data-configured="true"]{padding-bottom:6rem}}
 #dashboard .dashboard-setup-area .minecraft-setup-invitation{width:min(560px,calc(100vw - 2rem))}
 #dashboard .minecraft-setup-invitation small span{display:block}
 @media(max-width:900px){.quick-look-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
@@ -842,11 +839,12 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .version-software-choice small{color:#aeb8c0}.version-status-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.4rem}
 .version-status-grid>div{display:grid;gap:.15rem;padding:.55rem;border:1px solid #303942;border-radius:8px}.version-status-grid span{color:#aeb8c0;font-size:.75rem}
 .version-workspace-body .action-row{justify-content:flex-end}.version-workspace-body .admin-form-grid{gap:.55rem}
-.topbar-time{display:flex;align-items:center;justify-self:center;gap:.3rem}.topbar-time [data-topbar-timezone]{font-size:.76rem;color:#aeb8c0}.topbar-time button{padding:.15rem .45rem;min-height:28px}
+.topbar-time{display:flex;align-items:center;justify-self:center;gap:.2rem}.topbar-time .topbar-time-utility{display:grid;place-items:center;width:20px;height:20px;min-height:0;padding:0;border:1px solid transparent;border-radius:5px;background:transparent;color:#9ca7b0;font-size:1rem;line-height:1}.topbar-time-utility:hover,.topbar-time-utility:focus-visible{border-color:#4f8b69;background:#25382e;color:#c8f2d7}.topbar-time-utility:focus-visible{outline:2px solid #78c99d;outline-offset:2px}
 .date-time-dialog{overflow:visible}.date-time-dialog .setup-timezone-field{position:relative;display:block}.date-time-dialog .setup-timezone-results{position:absolute;top:100%;left:0;right:0;z-index:30;max-height:220px;overflow:auto;padding:.3rem;border:1px solid #3b454e;border-radius:9px;background:#171d22}
 .date-time-dialog .setup-timezone-results[hidden]{display:none}.date-time-dialog .setup-timezone-option{display:grid;width:100%;gap:.1rem;padding:.4rem;text-align:left;background:transparent;color:inherit}.date-time-dialog .setup-timezone-option small{color:#aeb8c0}
+.date-time-automatic{display:flex;align-items:center;justify-content:space-between;gap:1rem}.date-time-switch{appearance:none;flex:none;width:2.25rem;height:1.3rem;margin:0;padding:0;border:1px solid #59646d;border-radius:999px;background:#59646d;cursor:pointer;transition:background .15s ease,border-color .15s ease}.date-time-switch::before{content:"";display:block;width:.9rem;height:.9rem;margin:.13rem;border-radius:50%;background:#fff;box-shadow:0 1px 3px #0005;transition:transform .15s ease}.date-time-switch:checked{border-color:#4f9e6e;background:#4f9e6e}.date-time-switch:checked::before{transform:translateX(.95rem)}.date-time-switch:focus-visible{outline:2px solid #78c99d;outline-offset:3px}
 .date-time-manual{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}.date-time-manual input:disabled{opacity:.5}
-@media(max-width:700px){.version-workspace-dialog{inset:52px .25rem .25rem .25rem!important;width:auto!important;min-width:0;resize:none}.version-software-choices{grid-template-columns:1fr}.topbar-time [data-topbar-timezone]{display:none}}
+@media(max-width:700px){.version-workspace-dialog{inset:52px .25rem .25rem .25rem!important;width:auto!important;min-width:0;resize:none}.version-software-choices{grid-template-columns:1fr}}
 @media(prefers-color-scheme:light){.version-workspace-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025}.version-workspace-tabs,.version-software-choice{background:#f7f9fa;border-color:#d9dfe3}.version-software-choice.is-current{background:#e3f1e8}.date-time-dialog .setup-timezone-results{background:#fff}}
 .migration-workspace-dialog{width:min(1280px,calc(100vw - 2rem));min-width:min(1000px,calc(100vw - 2rem));height:auto}
 .migration-workspace-content .migration-smb-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.7rem}

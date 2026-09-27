@@ -125,18 +125,18 @@ configure_image_version() {
         'custom / exact tag') new_tag="$(jui_input 'Container image tag' "${current_tag}")" || return 0 ;;
     esac
 
-    version_choice="$(jui_choose 'Minecraft version policy'         "Keep current: ${current_mode} (${current_version})"         'Pin newest stable Paper-supported Minecraft version'         'LATEST - resolve newest Minecraft/Paper release when Minecraft starts'         'Pin another exact stable Paper-supported version'         'Back')" || return 0
+    version_choice="$(jui_choose 'Minecraft version policy'         "Keep current: ${current_mode} (${current_version})"         'Recommended - newest stable server version'         'Latest - follow newer server versions'         'Choose another exact Minecraft version'         'Back')" || return 0
     case "${version_choice}" in
         'Back') return 0 ;;
-        'Pin newest stable Paper-supported Minecraft version')
+        'Recommended - newest stable server version')
             new_mode=recommended
             ;;
-        'LATEST - resolve newest Minecraft/Paper release when Minecraft starts')
+        'Latest - follow newer server versions')
             new_mode=latest
             new_version=LATEST
-            echo 'WARNING: the game/Paper version may update when Minecraft starts, even without pulling a newer Podman image.'
+            echo 'Latest follows newer Minecraft server versions when available.'
             ;;
-        'Pin another exact stable Paper-supported version')
+        'Choose another exact Minecraft version')
             new_mode=pinned
             new_version="$(jui_input 'Exact Minecraft version' "${current_version}")" || return 0
             ;;

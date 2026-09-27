@@ -45,6 +45,14 @@
           <input name="motd" value="{{.Form.MOTD}}" required>
           <span class="field-help">The one-line server description players see in their Minecraft server list.</span>
         </label>
+        <label>Game mode
+          <select name="game_mode" required>
+            <option value="survival" {{if eq .Form.GameMode "survival"}}selected{{end}}>Survival</option>
+            <option value="creative" {{if eq .Form.GameMode "creative"}}selected{{end}}>Creative</option>
+            <option value="adventure" {{if eq .Form.GameMode "adventure"}}selected{{end}}>Adventure</option>
+            <option value="spectator" {{if eq .Form.GameMode "spectator"}}selected{{end}}>Spectator</option>
+          </select>
+        </label>
         <label>Timezone
           <input name="timezone" value="{{.Form.Timezone}}" required autocomplete="off">
           <span class="field-help">IANA timezone, for example <code>America/Toronto</code> or <code>Europe/Kyiv</code>.</span>
@@ -111,7 +119,6 @@
       <dl>
         <div><dt>Minecraft data</dt><dd><code>{{.Configuration.Minecraft.DataPath}}</code></dd></div>
         <div><dt>Backup directory</dt><dd><code>{{.Configuration.Backup.Path}}</code></dd></div>
-        <div><dt>Game mode</dt><dd>{{.Configuration.Minecraft.GameMode}}</dd></div>
         <div><dt>Difficulty</dt><dd>{{.Configuration.Minecraft.Difficulty}}</dd></div>
         <div><dt>Whitelist</dt><dd>{{if .Configuration.Minecraft.WhitelistEnabled}}Enabled{{else}}Disabled{{end}}{{if .Configuration.Minecraft.EnforceWhitelist}} · enforced{{end}}</dd></div>
       </dl>
@@ -139,7 +146,7 @@
         <input type="hidden" name="java_memory" value="{{.Plan.Proposed.Minecraft.JavaMemory}}"><input type="hidden" name="container_memory" value="{{.Plan.Proposed.Minecraft.ContainerMemory}}">
         <input type="hidden" name="max_players" value="{{.Plan.Proposed.Minecraft.MaxPlayers}}"><input type="hidden" name="motd" value="{{.Plan.Proposed.Minecraft.MOTD}}"><input type="hidden" name="timezone" value="{{.Plan.Proposed.Minecraft.Timezone}}">
         <input type="hidden" name="java_port" value="{{.Plan.Proposed.Minecraft.JavaPort}}"><input type="hidden" name="bedrock_port" value="{{.Plan.Proposed.Minecraft.BedrockPort}}">{{if .Plan.Proposed.Minecraft.BedrockEnabled}}<input type="hidden" name="bedrock_enabled" value="on">{{end}}
-        <input type="hidden" name="image_tag" value="{{.Plan.Proposed.Minecraft.ImageTag}}"><input type="hidden" name="version_policy" value="{{.Plan.Proposed.Minecraft.VersionMode}}"><input type="hidden" name="version" value="{{.Plan.Proposed.Minecraft.Version}}">
+        <input type="hidden" name="image_tag" value="{{.Plan.Proposed.Minecraft.ImageTag}}"><input type="hidden" name="version_policy" value="{{.Plan.Proposed.Minecraft.VersionMode}}"><input type="hidden" name="version" value="{{.Plan.Proposed.Minecraft.Version}}"><input type="hidden" name="game_mode" value="{{.Plan.Proposed.Minecraft.GameMode}}">
         <input type="hidden" name="backup_keep" value="{{.Plan.Proposed.Backup.Keep}}"><input type="hidden" name="backup_schedule" value="{{.Plan.Proposed.Backup.Schedule}}">{{if .Plan.Proposed.Backup.TimerEnabled}}<input type="hidden" name="backup_timer_enabled" value="on">{{end}}
         {{if .Plan.ConfirmationRequired}}<input type="hidden" name="confirm_players" value="yes">{{end}}
         <div class="action-row"><button type="submit">{{if .Plan.ConfirmationRequired}}Restart Minecraft and apply{{else}}Apply changes{{end}}</button><a class="button-link secondary" href="/settings/server">Cancel</a></div>

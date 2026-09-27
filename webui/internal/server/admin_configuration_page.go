@@ -148,7 +148,7 @@ func configurationRequestFromDiscovery(configuration api.AdminConfigurationDisco
 		BedrockPort: configuration.Minecraft.BedrockPort, Timezone: configuration.Minecraft.Timezone,
 		MaxPlayers: configuration.Minecraft.MaxPlayers, MOTD: configuration.Minecraft.MOTD,
 		ImageTag: configuration.Minecraft.ImageTag, VersionPolicy: configuration.Minecraft.VersionMode,
-		Version: configuration.Minecraft.Version, BackupKeep: configuration.Backup.Keep,
+		Version: configuration.Minecraft.Version, GameMode: configuration.Minecraft.GameMode, BackupKeep: configuration.Backup.Keep,
 		BackupSchedule: configuration.Backup.Schedule, BackupTimerEnabled: configuration.Backup.TimerEnabled,
 	}
 }
@@ -165,6 +165,7 @@ func parseServerSettingsForm(r *http.Request) (api.AdminConfigurationChangeReque
 	out.ImageTag = strings.TrimSpace(r.FormValue("image_tag"))
 	out.VersionPolicy = strings.TrimSpace(r.FormValue("version_policy"))
 	out.Version = strings.TrimSpace(r.FormValue("version"))
+	out.GameMode = r.FormValue("game_mode")
 	out.BackupSchedule = strings.TrimSpace(r.FormValue("backup_schedule"))
 	out.BedrockEnabled = r.FormValue("bedrock_enabled") == "on"
 	out.BackupTimerEnabled = r.FormValue("backup_timer_enabled") == "on"

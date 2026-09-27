@@ -80,6 +80,7 @@ func configuredMinecraftWorkspaceAPI() *fakeMinecraftWorkspaceAPI {
 	client.configuration.Minecraft.Timezone = "America/Toronto"
 	client.configuration.Minecraft.MaxPlayers = 10
 	client.configuration.Minecraft.MOTD = "JustVoxel"
+	client.configuration.Minecraft.GameMode = "survival"
 	client.configuration.Minecraft.ImageTag = "stable"
 	client.configuration.Minecraft.VersionMode = "pinned"
 	client.configuration.Minecraft.Version = "1.21.8"
@@ -103,7 +104,7 @@ func TestMinecraftWorkspaceSettingsUsesNativeJSONDiscovery(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("settings status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	for _, want := range []string{`"configured":true`, `"java_memory":"4G"`, `"max_players":10`, `"system_memory_mib":16384`} {
+	for _, want := range []string{`"configured":true`, `"java_memory":"4G"`, `"max_players":10`, `"game_mode":"survival"`, `"system_memory_mib":16384`} {
 		if !strings.Contains(rr.Body.String(), want) {
 			t.Fatalf("settings response missing %q: %s", want, rr.Body.String())
 		}
@@ -155,6 +156,73 @@ func TestMinecraftWorkspaceCrossplayPlanCanDisableBedrockWithoutChangingOtherTab
 	}
 	if client.planned.JavaMemory != "4G" || client.planned.ImageTag != "stable" || client.planned.MaxPlayers != 10 {
 		t.Fatalf("cross-play update changed unrelated fields: %#v", client.planned)
+	}
+}
+
+func TestMinecraftWorkspacePlayersGameModePlanAndApplyPreserveConfiguration(t *testing.T) {
+	client := configuredMinecraftWorkspaceAPI()
+	client.planResult = api.AdminConfigurationChangeResponse{
+		OK:              true,
+		Changes:         []api.AdminConfigurationChange{{Field: "game_mode", Label: "Game mode", Before: "Survival", After: "Creative", RestartRequired: true}},
+		RestartRequired: true,
+	}
+	client.applyResult = api.AdminConfigurationChangeResponse{OK: true, Applied: true, RestartRequired: true, RestartDeferred: true}
+	app, err := New(client, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := "csrf=csrf-token&tab=players&max_players=12&motd=Creative+world&game_mode=creative"
+	for _, path := range []string{"plan", "apply"} {
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "http://example/api/minecraft/workspace/settings/"+path, body))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", path, rr.Code, rr.Body.String())
+		}
+		request := client.planned
+		if path == "apply" {
+			request = client.applied
+		}
+		if request.MaxPlayers != 12 || request.MOTD != "Creative world" || request.GameMode != "creative" {
+			t.Fatalf("%s players fields: %#v", path, request)
+		}
+		if request.VersionPolicy != "pinned" || request.Version != "1.21.8" || request.ImageTag != "stable" ||
+			request.JavaMemory != "4G" || request.ContainerMemory != "6G" || request.JavaPort != 25565 ||
+			!request.BedrockEnabled || request.BedrockPort != 19132 || request.Timezone != "America/Toronto" ||
+			request.BackupKeep != 7 || request.BackupSchedule != "*-*-* 04:30:00" || !request.BackupTimerEnabled {
+			t.Fatalf("%s changed unrelated settings: %#v", path, request)
+		}
+		if request.ConfirmPlayers {
+			t.Fatalf("%s requested player confirmation for a deferred restart", path)
+		}
+		if path == "plan" {
+			for _, want := range []string{`"label":"Game mode"`, `"before":"Survival"`, `"after":"Creative"`, `"restart_required":true`, `"memory_restart_required":false`, `"confirmation_required":false`} {
+				if !strings.Contains(rr.Body.String(), want) {
+					t.Fatalf("plan response missing %q: %s", want, rr.Body.String())
+				}
+			}
+		} else {
+			for _, want := range []string{`"restart_deferred":true`, `"restarted":false`} {
+				if !strings.Contains(rr.Body.String(), want) {
+					t.Fatalf("apply response missing %q: %s", want, rr.Body.String())
+				}
+			}
+		}
+	}
+}
+
+func TestMinecraftWorkspacePlayersRejectsInvalidGameMode(t *testing.T) {
+	client := configuredMinecraftWorkspaceAPI()
+	app, err := New(client, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"", "hardcore", "CREATIVE"} {
+		body := "csrf=csrf-token&tab=players&max_players=10&motd=JustVoxel&game_mode=" + mode
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "http://example/api/minecraft/workspace/settings/plan", body))
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("mode %q status=%d body=%s", mode, rr.Code, rr.Body.String())
+		}
 	}
 }
 
@@ -246,5 +314,51 @@ func TestMinecraftWorkspaceClientDoesNotRenderLegacyPages(t *testing.T) {
 	}
 	if !strings.Contains(string(headerBytes), "data-minecraft-workspace-csrf") {
 		t.Fatal("Minecraft workspace is missing its explicit CSRF source")
+	}
+}
+
+func TestMinecraftWorkspacePlayersTabRendersGameModeAndDeferredReview(t *testing.T) {
+	headerBytes, err := assets.ReadFile("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(headerBytes), `data-minecraft-tab="players"`) {
+		t.Fatal("Minecraft Settings is missing its Players tab")
+	}
+	sourceBytes, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(sourceBytes)
+	start := strings.Index(source, `} else if (tab === "players") {`)
+	end := strings.Index(source[start+1:], `} else if (tab === "crossplay") {`)
+	if start < 0 || end < 0 {
+		t.Fatal("Minecraft Players form block not found")
+	}
+	players := source[start : start+1+end]
+	for _, want := range []string{
+		`<label>Game mode<select name="game_mode" required>`,
+		`<option value="survival">Survival</option>`,
+		`<option value="creative">Creative</option>`,
+		`<option value="adventure">Adventure</option>`,
+		`<option value="spectator">Spectator</option>`,
+		`section.querySelector('[name="game_mode"]').value = minecraft.game_mode`,
+		`form.appendChild(section)`,
+	} {
+		if !strings.Contains(players, want) {
+			t.Fatalf("Minecraft Players form missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		`new FormData(form).forEach((value, key) => params.append(key, String(value)))`,
+		`change.label || change.field`,
+		`change.before || "—"`,
+		`change.after || "—"`,
+		`The new settings will be saved, but Minecraft will not restart automatically for these non-memory changes.`,
+		`Minecraft settings saved. Restart remains pending.`,
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("Minecraft review or apply flow missing %q", want)
+		}
 	}
 }

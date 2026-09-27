@@ -225,11 +225,11 @@ configuration_change_json() {
     local old_java_port="${JAVA_PORT}" old_bedrock_enabled="${BEDROCK_ENABLED}" old_bedrock_port="${BEDROCK_PORT}"
     local old_java_memory="${JAVA_MEMORY}" old_container_memory="${CONTAINER_MEMORY}" old_timezone="${TIMEZONE}"
     local old_max_players="${MAX_PLAYERS}" old_motd="${MOTD}" old_image_tag="${MINECRAFT_IMAGE_TAG}"
-    local old_version_mode="${MINECRAFT_VERSION_MODE}" old_version="${MINECRAFT_VERSION}"
+    local old_version_mode="${MINECRAFT_VERSION_MODE}" old_version="${MINECRAFT_VERSION}" old_game_mode="${GAME_MODE}"
     local old_backup_keep="${BACKUP_KEEP}" old_backup_schedule="${BACKUP_SCHEDULE}" old_backup_timer_enabled="${BACKUP_TIMER_ENABLED}"
 
     local new_java_memory new_container_memory new_java_port new_bedrock_enabled_json new_bedrock_enabled new_bedrock_port
-    local new_timezone new_max_players new_motd new_image_tag new_version_policy new_version
+    local new_timezone new_max_players new_motd new_image_tag new_version_policy new_version new_game_mode
     local new_backup_keep new_backup_schedule new_backup_timer_enabled_json new_backup_timer_enabled
     local confirm_players_json confirm_players
 
@@ -244,6 +244,11 @@ configuration_change_json() {
     new_image_tag="$(jq -r '.image_tag // ""' <<< "${request}")"
     new_version_policy="$(jq -r '.version_policy // ""' <<< "${request}")"
     new_version="$(jq -r '.version // ""' <<< "${request}")"
+    new_game_mode="$(jq -r '.game_mode // ""' <<< "${request}")"
+    if ! jq -e '(.game_mode|type == "string") and (.game_mode == "survival" or .game_mode == "creative" or .game_mode == "adventure" or .game_mode == "spectator")' >/dev/null 2>&1 <<< "${request}"; then
+        jq -n '{ok:false,error:"Game mode is invalid."}'
+        return 0
+    fi
     new_backup_keep="$(jq -r '.backup_keep // 0' <<< "${request}")"
     new_backup_schedule="$(jq -r '.backup_schedule // ""' <<< "${request}")"
     new_backup_timer_enabled_json="$(jq -r '.backup_timer_enabled // false' <<< "${request}")"
@@ -308,25 +313,31 @@ configuration_change_json() {
         fi
     fi
 
+    if ! validate_game_mode "${new_game_mode}"; then
+        jq -n '{ok:false,error:"Game mode is invalid."}'
+        return 0
+    fi
+
     case "${new_version_policy}" in
         latest)
             new_version=LATEST
             ;;
         recommended)
-            local recommended_geyser_version=''
-            if [[ ${new_bedrock_enabled} == yes ]]; then
-                recommended_geyser_version="$(resolve_geyser_supported_java_version || true)"
+            if [[ ${old_version_mode} != recommended || ${new_version} != "${old_version}" ]]; then
+                local recommended_geyser_version=''
+                if [[ ${new_bedrock_enabled} == yes ]]; then
+                    recommended_geyser_version="$(resolve_geyser_supported_java_version || true)"
+                fi
+                if [[ -n ${recommended_geyser_version} ]] && paper_version_has_stable_build "${recommended_geyser_version}"; then
+                    new_version="${recommended_geyser_version}"
+                else
+                    new_version="$(resolve_latest_stable_paper_version || true)"
+                fi
+                if [[ -z ${new_version} ]]; then
+                    jq -n '{ok:false,error:"Could not resolve the newest Minecraft version with a stable Paper build."}'
+                    return 0
+                fi
             fi
-            if [[ -n ${recommended_geyser_version} ]] && paper_version_has_stable_build "${recommended_geyser_version}"; then
-                new_version="${recommended_geyser_version}"
-            else
-                new_version="$(resolve_latest_stable_paper_version || true)"
-            fi
-            if [[ -z ${new_version} ]]; then
-                jq -n '{ok:false,error:"Could not resolve the newest Minecraft version with a stable Paper build."}'
-                return 0
-            fi
-            new_version_policy=pinned
             ;;
         pinned)
             if [[ -z ${new_version} || ${new_version} == LATEST || ! ${new_version} =~ ^[0-9A-Za-z._-]+$ ]]; then
@@ -334,8 +345,8 @@ configuration_change_json() {
                 return 0
             fi
             if [[ ${old_version_mode} != pinned || ${new_version} != "${old_version}" ]]; then
-                if ! paper_version_has_stable_build "${new_version}"; then
-                    jq -n '{ok:false,error:"PaperMC did not confirm a stable build for that Minecraft version."}'
+                if ! paper_version_build_channel "${new_version}" >/dev/null; then
+                    jq -n '{ok:false,error:"PaperMC did not confirm a usable build for that Minecraft version."}'
                     return 0
                 fi
             fi
@@ -359,7 +370,7 @@ configuration_change_json() {
     if [[ ${new_bedrock_enabled} == yes && ( ${new_version} != "${old_version}" || ${new_version_policy} != "${old_version_mode}" || ${old_bedrock_enabled} != yes ) ]]; then
         local compatible_candidate="${new_version}" geyser_supported_version=''
         if [[ ${compatible_candidate} == LATEST ]]; then
-            compatible_candidate="$(resolve_latest_stable_paper_version || true)"
+            compatible_candidate="$(resolve_latest_available_paper_version || true)"
         fi
         geyser_supported_version="$(resolve_geyser_supported_java_version || true)"
         if [[ -z ${compatible_candidate} || -z ${geyser_supported_version} ]] || ! bedrock_crossplay_supports_version "${compatible_candidate}" "${geyser_supported_version}"; then
@@ -389,6 +400,9 @@ configuration_change_json() {
     add_change image_tag 'Minecraft container channel/tag' "${old_image_tag}" "${new_image_tag}" true
     add_change version_policy 'Minecraft version policy' "${old_version_mode}" "${new_version_policy}" true
     add_change version 'Minecraft version' "${old_version}" "${new_version}" true
+    if [[ ${old_game_mode} != "${new_game_mode}" ]]; then
+        add_change game_mode 'Game mode' "${old_game_mode^}" "${new_game_mode^}" true
+    fi
     add_change backup_keep 'Backups retained' "${old_backup_keep}" "${new_backup_keep}" false
     add_change backup_schedule 'Automatic backup schedule' "${old_backup_schedule}" "${new_backup_schedule}" false
     add_change backup_timer_enabled 'Automatic backups' "${old_backup_timer_enabled}" "${new_backup_timer_enabled}" false
@@ -413,6 +427,7 @@ configuration_change_json() {
     MINECRAFT_IMAGE_TAG="${new_image_tag}"
     MINECRAFT_VERSION_MODE="${new_version_policy}"
     MINECRAFT_VERSION="${new_version}"
+    GAME_MODE="${new_game_mode}"
     BACKUP_KEEP="${new_backup_keep}"
     BACKUP_SCHEDULE="${new_backup_schedule}"
     BACKUP_TIMER_ENABLED="${new_backup_timer_enabled}"

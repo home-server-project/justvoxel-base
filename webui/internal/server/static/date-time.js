@@ -20,7 +20,6 @@ if (dateTimeOpen && dateTimeDialog) {
     warning.hidden = automatic.checked;
   };
   const updateClockZone = (zone) => {
-    document.querySelector("[data-topbar-timezone]").textContent = zone;
     const clock = document.querySelector("[data-topbar-clock]");
     if (clock) clock.dataset.systemTimezone = zone;
     window.dispatchEvent(new Event("justvoxel-timezone"));

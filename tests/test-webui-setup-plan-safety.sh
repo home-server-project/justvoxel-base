@@ -45,14 +45,26 @@ grep -Fq 'Root, boot, EFI, and /var filesystems cannot be selected' "${helper}"
 grep -Fq 'Minecraft data and backups cannot use the same directory' "${helper}"
 grep -Fq 'same_physical_disk' "${helper}"
 grep -Fq 'resolve_latest_stable_paper_version' "${helper}"
-grep -Fq 'PaperMC did not confirm a stable build' "${helper}"
+grep -Fq 'PaperMC did not confirm a usable build' "${helper}"
 grep -Fq 'JustVoxel is already configured' "${helper}"
+grep -Fq 'validate_game_mode "${game_mode}"' "${helper}"
+grep -Fq 'game_mode:$game_mode' "${helper}"
 
 # Network-backed first-run plans delegate mount-point safety to the shared
 # storage validator. Safe non-critical mount points must return success while
 # critical and malformed paths remain rejected.
 # shellcheck disable=SC1091
 source "${repo_root}/mjust/libexec/common.sh"
+
+for mode in survival creative adventure spectator; do
+    validate_game_mode "${mode}" || { echo "valid game mode rejected: ${mode}" >&2; exit 1; }
+done
+for mode in '' hardcore $'creative\n' 'survival; exit'; do
+    if validate_game_mode "${mode}"; then
+        echo "invalid game mode accepted: ${mode}" >&2
+        exit 1
+    fi
+done
 
 geyser_fixture='{"java":{"supported":"26.2"}}'
 [[ $(geyser_supported_java_version_from_json "${geyser_fixture}") == 26.2 ]] || {
@@ -74,9 +86,13 @@ fi
 
 grep -Fq 'resolve_geyser_supported_java_version' "${helper}"
 grep -Fq 'version="${geyser_supported_version}"' "${helper}"
-grep -Fq 'bedrock_enabled=false' "${helper}"
+if grep -Fq 'bedrock_enabled=false' "${helper}"; then
+    echo 'Setup planner must not silently turn off Bedrock.' >&2
+    exit 1
+fi
+grep -Fq 'bedrock_crossplay_supports_version "${bedrock_compatibility_version}" "${geyser_supported_version}"' "${helper}"
+grep -Fq 'json_error "Minecraft ${bedrock_compatibility_version} is not currently compatible' "${helper}"
 grep -Fq 'bedrock_version_unsupported' "${helper}"
-grep -Fq 'Come back later and check again' "${helper}"
 
 # shellcheck disable=SC1091
 source "${repo_root}/mjust/libexec/storage-common-base.sh"

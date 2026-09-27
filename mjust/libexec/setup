@@ -75,6 +75,8 @@ echo
 
 motd="$(jui_input 'Server welcome message (MOTD)' "$(jq -r '.motd' <<<"${defaults}")")" || exit 0
 max_players="$(jui_input 'Maximum players' "$(jq -r '.max_players' <<<"${defaults}")")" || exit 0
+game_mode_choice="$(jui_choose 'Game mode' Survival Creative Adventure Spectator)" || exit 0
+game_mode="${game_mode_choice,,}"
 [[ ${max_players} =~ ^[1-9][0-9]*$ ]] || { echo 'ERROR: maximum players must be a positive integer.' >&2; exit 1; }
 
 bedrock_choice="$(jui_choose 'Bedrock cross-play' 'Enable Bedrock cross-play' 'Disable Bedrock cross-play')" || exit 0
@@ -95,10 +97,10 @@ case "${image_choice}" in
     *) image_tag="$(jui_input 'Container image tag' "$(jq -r '.image_tag' <<<"${defaults}")")" || exit 0 ;;
 esac
 
-version_choice="$(jui_choose 'Minecraft game version'     'Recommended - newest stable Paper version, pinned'     'Latest - check newest version when Minecraft starts'     'Specific version')" || exit 0
+version_choice="$(jui_choose 'Minecraft game version'     'Recommended - newest stable server version'     'Latest - follow newer server versions'     'Specific version')" || exit 0
 case "${version_choice}" in
-    'Recommended - newest stable Paper version, pinned') version_policy=recommended; version='' ;;
-    'Latest - check newest version when Minecraft starts') version_policy=latest; version=LATEST ;;
+    'Recommended - newest stable server version') version_policy=recommended; version='' ;;
+    'Latest - follow newer server versions') version_policy=latest; version='' ;;
     *) version_policy=pinned; version="$(jui_input 'Exact Minecraft version' '')" || exit 0 ;;
 esac
 jv_setup_diagnostic_event "${diagnostic_id}" 'Minecraft settings collected' "$(jq -cn --arg java_memory "${java_memory}" --arg container_memory "${container_memory}" --arg java_port "${java_port}" --arg bedrock_port "${bedrock_port}" --arg minecraft_image "${image_tag}" --arg version_policy "${version_policy}" --arg minecraft_version "${version}" '{java_memory:$java_memory,container_memory:$container_memory,java_port:$java_port,bedrock_port:$bedrock_port,minecraft_image:$minecraft_image,version_policy:$version_policy,minecraft_version:$minecraft_version}')"
@@ -157,9 +159,9 @@ backup_daily_time="$(jui_input 'Daily backup time' "$(jq -r '.backup_daily_time'
 automatic_choice="$(jui_choose 'Automatic daily backups' 'Enable automatic backups' 'Disable automatic backups')" || exit 0
 if [[ ${automatic_choice} == 'Enable automatic backups' ]]; then backup_automatic=true; else backup_automatic=false; fi
 
-request="$(jq -cn     --arg motd "${motd}" --argjson max_players "${max_players}" --argjson bedrock_enabled "${bedrock_enabled}" --arg timezone "${timezone}"     --arg java_memory "${java_memory}" --arg container_memory "${container_memory}" --argjson java_port "${java_port}" --argjson bedrock_port "${bedrock_port}"     --arg image_tag "${image_tag}" --arg version_policy "${version_policy}" --arg version "${version}"     --arg storage_type "${storage_type}" --arg storage_path "${storage_path}" --arg storage_device "${storage_device}" --arg storage_mount "${storage_mount}"     --argjson backup_automatic "${backup_automatic}" --arg backup_time "${backup_daily_time}" --argjson backup_keep "${backup_keep}"     --arg backup_type "${backup_type}" --arg backup_path "${backup_path}" --arg backup_device "${backup_device}" --arg backup_mount "${backup_mount}"     --arg backup_source "${backup_source}" --arg backup_username "${backup_username}" --arg backup_domain "${backup_domain}"     '{
+request="$(jq -cn     --arg motd "${motd}" --argjson max_players "${max_players}" --argjson bedrock_enabled "${bedrock_enabled}" --arg timezone "${timezone}"     --arg java_memory "${java_memory}" --arg container_memory "${container_memory}" --argjson java_port "${java_port}" --argjson bedrock_port "${bedrock_port}"     --arg image_tag "${image_tag}" --arg version_policy "${version_policy}" --arg version "${version}" --arg game_mode "${game_mode}"     --arg storage_type "${storage_type}" --arg storage_path "${storage_path}" --arg storage_device "${storage_device}" --arg storage_mount "${storage_mount}"     --argjson backup_automatic "${backup_automatic}" --arg backup_time "${backup_daily_time}" --argjson backup_keep "${backup_keep}"     --arg backup_type "${backup_type}" --arg backup_path "${backup_path}" --arg backup_device "${backup_device}" --arg backup_mount "${backup_mount}"     --arg backup_source "${backup_source}" --arg backup_username "${backup_username}" --arg backup_domain "${backup_domain}"     '{
       server:{motd:$motd,max_players:$max_players,bedrock_enabled:$bedrock_enabled,timezone:$timezone},
-      minecraft:{java_memory:$java_memory,container_memory:$container_memory,java_port:$java_port,bedrock_port:$bedrock_port,image_tag:$image_tag,version_policy:$version_policy,version:$version},
+      minecraft:{java_memory:$java_memory,container_memory:$container_memory,java_port:$java_port,bedrock_port:$bedrock_port,image_tag:$image_tag,version_policy:$version_policy,version:$version,game_mode:$game_mode},
       storage:{type:$storage_type,path:$storage_path,device:$storage_device,mount_point:$storage_mount},
       backups:{automatic:$backup_automatic,daily_time:$backup_time,keep:$backup_keep,type:$backup_type,path:$backup_path,device:$backup_device,mount_point:$backup_mount,source:$backup_source,username:$backup_username,domain:$backup_domain}
     }')"
@@ -188,6 +190,7 @@ echo 'Reviewed configuration:'
 echo "  Minecraft data: $(jq -r '.normalized.storage.path' <<<"${plan}")"
 echo "  Container image: docker.io/itzg/minecraft-server:$(jq -r '.normalized.minecraft.image_tag' <<<"${plan}")"
 echo "  Minecraft version: $(jq -r '.normalized.minecraft.version_policy + " (" + .normalized.minecraft.version + ")"' <<<"${plan}")"
+echo "  Game mode: $(jq -r '.normalized.minecraft.game_mode' <<<"${plan}")"
 echo "  Java heap / maximum memory: $(jq -r '.normalized.minecraft.java_memory + " / " + .normalized.minecraft.container_memory' <<<"${plan}")"
 echo "  Java port: $(jq -r '.normalized.minecraft.java_port' <<<"${plan}")/tcp"
 if [[ $(jq -r '.normalized.server.bedrock_enabled' <<<"${plan}") == true ]]; then

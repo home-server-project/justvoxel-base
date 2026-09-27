@@ -246,6 +246,13 @@ validate_simple_text() {
     [[ ${value} != *$'\n'* && ${value} != *$'\r'* ]]
 }
 
+validate_game_mode() {
+    case "${1:-}" in
+        survival|creative|adventure|spectator) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 shell_quote_assignment() {
     local key="$1" value="$2"
     printf '%s=' "${key}"
@@ -404,18 +411,43 @@ paper_version_has_stable_build() {
     if jq -e '.ok == false' <<< "${builds}" >/dev/null 2>&1; then
         return 1
     fi
-    jq -e 'map(select(.channel == "STABLE")) | length > 0' <<< "${builds}" >/dev/null
+    jq -e 'any(.[]; .channel == "STABLE" and (.downloads."server:default".url // "") != "")' <<< "${builds}" >/dev/null
+}
+
+# Print the release channel of a downloadable Paper server build.
+paper_version_build_channel() {
+    local version="$1" builds
+    [[ ${version} =~ ^[0-9A-Za-z._-]+$ ]] || return 1
+    builds="$(curl -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
+        "https://fill.papermc.io/v3/projects/paper/versions/${version}/builds" 2>/dev/null)" || return 1
+    jq -er '[.[] | select((.downloads."server:default".url // "") != "")]
+        | (map(select(.channel == "STABLE")) | .[0]) // .[0]
+        | .channel | select(type == "string" and length > 0)' <<< "${builds}" 2>/dev/null
+}
+
+resolve_latest_available_paper_version() {
+    local project versions version
+    project="$(curl -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" https://fill.papermc.io/v3/projects/paper 2>/dev/null)" || return 1
+    versions="$(jq -r '.versions[][]' <<< "${project}")"
+    while IFS= read -r version; do
+        [[ -n ${version} ]] || continue
+        if paper_version_build_channel "${version}" >/dev/null; then
+            printf '%s' "${version}"
+            return 0
+        fi
+    done <<< "${versions}"
+    return 1
 }
 
 resolve_latest_stable_paper_version() {
     local project versions version builds
     project="$(curl -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" https://fill.papermc.io/v3/projects/paper 2>/dev/null)" || return 1
-    versions="$(jq -r '.versions | to_entries[] | .value[]' <<< "${project}" | sort -V -r)"
+    versions="$(jq -r '.versions[][]' <<< "${project}")"
     while IFS= read -r version; do
         [[ -n ${version} ]] || continue
         builds="$(curl -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
             "https://fill.papermc.io/v3/projects/paper/versions/${version}/builds" 2>/dev/null)" || continue
-        if jq -e 'map(select(.channel == "STABLE")) | length > 0' <<< "${builds}" >/dev/null; then
+        if jq -e 'any(.[]; .channel == "STABLE" and (.downloads."server:default".url // "") != "")' <<< "${builds}" >/dev/null; then
             printf '%s' "${version}"
             return 0
         fi
@@ -428,7 +460,7 @@ render_runtime_files() {
     install -d -m0700 -o root -g root "${JV_CONFIG_DIR}"
     install -d -m0755 -o root -g root /etc/containers/systemd
 
-    local rcon_password env_tmp quadlet_tmp backup_tmp service_tmp timer_tmp image_ref
+    local rcon_password env_tmp quadlet_tmp backup_tmp service_tmp timer_tmp image_ref runtime_version paper_channel build_channel
     if [[ ${JUSTVOXEL_REGENERATE_RCON:-0} == 1 ]]; then
         rcon_password="$(openssl rand -hex 24)"
     elif [[ -r ${JV_MC_ENV} ]]; then
@@ -438,10 +470,25 @@ render_runtime_files() {
     fi
     [[ -n ${rcon_password} ]] || rcon_password="$(openssl rand -hex 24)"
 
+    runtime_version="${MINECRAFT_VERSION}"
+    paper_channel=default
+    if [[ ${MINECRAFT_VERSION_MODE} == latest ]]; then
+        runtime_version=LATEST
+        paper_channel=experimental
+    elif [[ ${MINECRAFT_VERSION_MODE} == pinned ]] &&
+        ! grep -Fqx "VERSION=${MINECRAFT_VERSION}" "${JV_MC_ENV}" 2>/dev/null; then
+        build_channel="$(paper_version_build_channel "${MINECRAFT_VERSION}")" || return 1
+        if [[ ${build_channel} != STABLE ]]; then
+            paper_channel=experimental
+        fi
+    elif [[ ${MINECRAFT_VERSION_MODE} == pinned ]] && grep -Fqx 'PAPER_CHANNEL=experimental' "${JV_MC_ENV}" 2>/dev/null; then
+        paper_channel=experimental
+    fi
     env_tmp="$(mktemp "${JV_CONFIG_DIR}/.minecraft.env.XXXXXX")"
     cp "${JV_TEMPLATE_ROOT}/config/minecraft.env.in" "${env_tmp}"
     replace_token "${env_tmp}" EULA TRUE
-    replace_token "${env_tmp}" MINECRAFT_VERSION "${MINECRAFT_VERSION}"
+    replace_token "${env_tmp}" MINECRAFT_VERSION "${runtime_version}"
+    replace_token "${env_tmp}" PAPER_CHANNEL "${paper_channel}"
     replace_token "${env_tmp}" MINECRAFT_UID "${MINECRAFT_UID}"
     replace_token "${env_tmp}" MINECRAFT_GID "${MINECRAFT_GID}"
     replace_token "${env_tmp}" TIMEZONE "$(systemd_env_escape "${TIMEZONE}")"
@@ -549,7 +596,9 @@ update_firewall_ports() {
 wait_for_rcon() {
     local timeout="${1:-900}" elapsed=0
     while (( elapsed < timeout )); do
-        if podman exec minecraft rcon-cli 'list' >/dev/null 2>&1; then
+        # A stopping container can still answer RCON; check the unit after the probe.
+        if podman exec minecraft rcon-cli 'list' >/dev/null 2>&1 &&
+            systemctl is-active --quiet minecraft.service; then
             return 0
         fi
         sleep 5

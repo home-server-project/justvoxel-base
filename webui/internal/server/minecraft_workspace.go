@@ -183,6 +183,12 @@ func minecraftWorkspaceConfigurationRequest(r *http.Request, current api.AdminCo
 		if request.MOTD == "" {
 			return request, errors.New("Server welcome message is required.")
 		}
+		request.GameMode = r.FormValue("game_mode")
+		switch request.GameMode {
+		case "survival", "creative", "adventure", "spectator":
+		default:
+			return request, errors.New("Choose a valid Minecraft game mode.")
+		}
 	case "crossplay":
 		javaPort, err := parsePositiveFormInt(r.FormValue("java_port"), "Minecraft Java port")
 		if err != nil {

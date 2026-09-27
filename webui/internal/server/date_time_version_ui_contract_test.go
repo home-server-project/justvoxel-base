@@ -49,12 +49,12 @@ func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 		`recommended: "Recommended", latest: "Latest", pinned: "Specific version"`,
 		`includes(minecraft.version_mode) ? minecraft.version_mode : "recommended"`,
 		`line("Installed", status.installed || "Not detected")`,
-		`line("Available", status.available), line("Recommended", status.recommended)`,
-		`line("Configured", status.configured_version)`,
+		`line("Newest available", status.available ?`,
+		`line("Configured", status.configured_version === "LATEST" ?`,
 		`line("Version policy", policyLabel(minecraft.version_mode))`,
 		`form.querySelector("[data-version-specific]").hidden = policy !== "pinned"`,
 		`form.elements.version.required = policy === "pinned"`,
-		`line("Available", candidate.available), line("Will use", candidate.selected_candidate)`,
+		`line(policy === "latest" ? "Will install now" : "Will install", candidate.selected_candidate)`,
 	} {
 		if !strings.Contains(version, want) {
 			t.Fatalf("Version policy contract missing %q", want)

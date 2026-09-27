@@ -76,7 +76,41 @@ func validServerValues() url.Values {
 		"server_type": {"paper"},
 		"motd":        {"Family Minecraft"},
 		"max_players": {"20"},
+		"game_mode":   {"survival"},
 		"timezone":    {"America/Toronto"},
+	}
+}
+
+func TestSetupGameModeDefaultAndSelection(t *testing.T) {
+	client := setupWizardClient()
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstRunSetupDrafts.delete(app, "session-token")
+	startSetup(t, app)
+	draft, ok := firstRunSetupDrafts.get(app, "session-token")
+	if !ok || draft.Minecraft.GameMode != "survival" {
+		t.Fatalf("default game mode = %q", draft.Minecraft.GameMode)
+	}
+	values := validServerValues()
+	values.Set("game_mode", "creative")
+	if rr := saveServerStep(t, app, values); rr.Code != http.StatusSeeOther {
+		t.Fatalf("Creative selection returned %d: %s", rr.Code, rr.Body.String())
+	}
+	draft, _ = firstRunSetupDrafts.get(app, "session-token")
+	if draft.Minecraft.GameMode != "creative" {
+		t.Fatalf("selected game mode = %q", draft.Minecraft.GameMode)
+	}
+	for _, mode := range []string{"survival", "creative", "adventure", "spectator"} {
+		if !validSetupGameMode(mode) {
+			t.Fatalf("valid game mode %q rejected", mode)
+		}
+	}
+	for _, mode := range []string{"", "hardcore", "creative\n", "survival; exit"} {
+		if validSetupGameMode(mode) {
+			t.Fatalf("invalid game mode %q accepted", mode)
+		}
 	}
 }
 
@@ -393,7 +427,7 @@ func TestSetupWizardServerStepValidatesAndPersistsChoices(t *testing.T) {
 	}
 	page = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	body = page.Body.String()
-	for _, want := range []string{"Step 4 of 7", "Minecraft container release channel", "Stable (recommended)", "Latest", "Custom", `id="image-tag"`, `value="stable"`, "Recommended version", "Always newest version", "Specific version", `id="specific-version-field"`, "Bedrock compatibility is checked during Review."} {
+	for _, want := range []string{"Step 4 of 7", "Container updates", "Stable (recommended)", "Latest", "Custom", "This does not choose the Minecraft game version below.", `id="image-tag"`, `value="stable"`, "Recommended", "Specific version", `id="specific-version-field"`, `id="setup-version-preview"`, "/static/settings.js"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("Minecraft step missing %q: %s", want, body)
 		}
@@ -485,7 +519,7 @@ func TestSetupWizardMinecraftStepAdvancesOnlyAfterValidation(t *testing.T) {
 		t.Fatalf("valid Resources form returned %d %q: %s", rr.Code, rr.Header().Get("Location"), rr.Body.String())
 	}
 	minecraftPage := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-	if minecraftPage.Code != http.StatusOK || !strings.Contains(minecraftPage.Body.String(), "Step 4 of 7") || !strings.Contains(minecraftPage.Body.String(), "Minecraft container release channel") {
+	if minecraftPage.Code != http.StatusOK || !strings.Contains(minecraftPage.Body.String(), "Step 4 of 7") || !strings.Contains(minecraftPage.Body.String(), "Container updates") {
 		t.Fatalf("Resources step did not advance to Minecraft: %d %s", minecraftPage.Code, minecraftPage.Body.String())
 	}
 

@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,7 +14,7 @@ import (
 
 const validAdminSetupPlanRequest = `{
   "server":{"motd":"Family server","max_players":10,"bedrock_enabled":true,"timezone":"America/Toronto"},
-  "minecraft":{"java_memory":"4G","container_memory":"6G","java_port":25565,"bedrock_port":19132,"image_tag":"stable","version_policy":"recommended","version":""},
+  "minecraft":{"java_memory":"4G","container_memory":"6G","java_port":25565,"bedrock_port":19132,"image_tag":"stable","version_policy":"recommended","version":"","game_mode":"survival"},
   "storage":{"type":"system","path":"/var/lib/justvoxel/minecraft","device":"","mount_point":""},
   "backups":{"automatic":true,"daily_time":"04:30","keep":7,"type":"system","path":"/var/lib/justvoxel/backups","device":"","mount_point":"","source":"","username":"","domain":""}
 }`
@@ -24,13 +24,58 @@ const validAdminSetupPlanResponse = `{
   "schema_version":"v1",
   "normalized":{
     "server":{"motd":"Family server","max_players":10,"bedrock_enabled":true,"timezone":"America/Toronto"},
-    "minecraft":{"java_memory":"4G","container_memory":"6G","java_port":25565,"bedrock_port":19132,"image_tag":"stable","requested_version_policy":"recommended","version_policy":"pinned","version":"1.21.8","system_memory_mib":8192,"system_reserve_mib":2048,"minecraft_uid":1000,"minecraft_gid":1000},
+    "minecraft":{"java_memory":"4G","container_memory":"6G","java_port":25565,"bedrock_port":19132,"image_tag":"stable","requested_version_policy":"recommended","version_policy":"recommended","version":"1.21.8","game_mode":"survival","system_memory_mib":8192,"system_reserve_mib":2048,"minecraft_uid":1000,"minecraft_gid":1000},
     "storage":{"type":"system","path":"/var/lib/justvoxel/minecraft","model":"JustVoxel system storage","system_disk":true},
     "backups":{"type":"system","path":"/var/lib/justvoxel/backups","model":"JustVoxel system storage","system_disk":true,"credentials_required":false,"automatic":true,"daily_time":"04:30","schedule":"*-*-* 04:30:00","keep":7}
   },
   "warnings":[{"code":"same_physical_disk","message":"Minecraft data and backups use JustVoxel system storage."}],
   "requirements":{"smb_password_required":false,"network_backup_validation_on_apply":false}
 }`
+
+func TestSetupGameModeValidationAndPlanIdentity(t *testing.T) {
+	for _, mode := range []string{"survival", "creative", "adventure", "spectator"} {
+		if !validSetupGameMode(mode) {
+			t.Fatalf("valid mode %q rejected", mode)
+		}
+	}
+	for _, mode := range []string{"", "hardcore", "creative\n", "survival; echo x"} {
+		if validSetupGameMode(mode) {
+			t.Fatalf("invalid mode %q accepted", mode)
+		}
+	}
+	var plan adminSetupPlanResponse
+	if err := json.Unmarshal([]byte(validAdminSetupPlanResponse), &plan); err != nil {
+		t.Fatal(err)
+	}
+	before, err := adminSetupPlanFingerprint("v1", plan.Normalized, plan.Requirements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.Normalized.Minecraft.GameMode = "creative"
+	after, err := adminSetupPlanFingerprint("v1", plan.Normalized, plan.Requirements)
+	if err != nil || before == after {
+		t.Fatalf("game mode did not change plan identity: %q %q %v", before, after, err)
+	}
+}
+
+func TestSetupCreativePlanCarriesIntoRuntimeRequest(t *testing.T) {
+	var plan adminSetupPlanResponse
+	if err := json.Unmarshal([]byte(validAdminSetupPlanResponse), &plan); err != nil {
+		t.Fatal(err)
+	}
+	plan.Normalized.Minecraft.GameMode = "creative"
+	request, err := setupRuntimeRequestForOperation(operationJournal{
+		OperationType:   operationTypeSetup,
+		OperationID:     "12345678-1234-4123-8123-123456789abc",
+		PlanFingerprint: testSetupFingerprint,
+	}, plan.Normalized)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.Minecraft.GameMode != "creative" || request.Minecraft.VersionPolicy != "recommended" || request.Minecraft.Version != "1.21.8" {
+		t.Fatalf("runtime request lost game mode or version: %#v", request.Minecraft)
+	}
+}
 
 func TestAdminSetupPlanRequiresAdministratorBeforeHelper(t *testing.T) {
 	old := runAdminSetupPlanHelper
@@ -107,7 +152,7 @@ func TestAdminSetupPlanReturnsStructuredNormalizedPlan(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("plan status = %d: %s", rr.Code, rr.Body.String())
 	}
-	for _, want := range []string{`"schema_version":"v1"`, `"plan_fingerprint":"sha256:`, `"version_policy":"pinned"`, `"same_physical_disk"`, `"smb_password_required":false`} {
+	for _, want := range []string{`"schema_version":"v1"`, `"plan_fingerprint":"sha256:`, `"version_policy":"recommended"`, `"same_physical_disk"`, `"smb_password_required":false`} {
 		if !strings.Contains(rr.Body.String(), want) {
 			t.Fatalf("plan response missing %s: %s", want, rr.Body.String())
 		}

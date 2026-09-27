@@ -9,8 +9,10 @@ cat > "${fixture_dir}/common.sh" <<'EOF'
 require_root() { :; }
 require_config() { :; }
 resolve_latest_stable_paper_version() { printf '26.3'; }
+resolve_latest_available_paper_version() { printf '26.3'; }
 resolve_geyser_supported_java_version() { printf '26.2'; }
 paper_version_has_stable_build() { [[ $1 == 26.2 || $1 == 26.3 ]]; }
+paper_version_build_channel() { [[ $1 == 26.2 || $1 == 26.3 ]] && printf STABLE; }
 bedrock_crossplay_supports_version() { [[ -n $1 && $1 == "$2" ]]; }
 EOF
 sed "s|^source /usr/libexec/justvoxel/mjust/common.sh$|source ${fixture_dir}/common.sh|" \

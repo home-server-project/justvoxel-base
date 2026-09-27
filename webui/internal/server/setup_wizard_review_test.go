@@ -44,8 +44,9 @@ func setupReviewClient() *fakeSetupPlanningAPI {
 					BedrockEnabled: true, Timezone: "America/Toronto",
 				},
 				Minecraft: api.AdminSetupPlanMinecraft{
+					GameMode:   "survival",
 					JavaMemory: "4G", ContainerMemory: "6G", JavaPort: 25565, BedrockPort: 19132,
-					ImageTag: "stable", RequestedVersionPolicy: "recommended", VersionPolicy: "pinned", Version: "1.21.8",
+					ImageTag: "stable", RequestedVersionPolicy: "recommended", VersionPolicy: "recommended", Version: "1.21.8",
 					SystemMemoryMiB: 8192, SystemReserveMiB: 2048,
 				},
 				Storage: api.AdminSetupPlanStorage{
@@ -119,7 +120,7 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 	body := rr.Body.String()
 	for _, want := range []string{
 		"Review your JustVoxel setup", "Step 7 of 7", "Connections", "Version", "Configuration validated.", "Normalized Family Server", "20", "1.21.8",
-		"Recommended version", "/var/lib/justvoxel/minecraft", "/var/lib/justvoxel/backups",
+		"· Recommended", "Game mode:</span> Survival", "/var/lib/justvoxel/minecraft", "/var/lib/justvoxel/backups",
 		"Backups are on the same disk", "If this disk fails, both Minecraft and its backups could be lost.", "Minecraft End User License Agreement", "https://www.minecraft.net/eula",
 		"/static/setup-review.css", "/static/setup-operation.js",
 		`name="plan_fingerprint" value="` + setupReviewFingerprint + `"`, "Download configuration", "data-setup-eula-dialog", "Accept and continue",
@@ -131,7 +132,7 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 	if client.planHit != 1 {
 		t.Fatalf("setup planner calls = %d, want 1", client.planHit)
 	}
-	if client.lastRequest.Server.MOTD != "Family Minecraft" || client.lastRequest.Minecraft.VersionPolicy != "recommended" {
+	if client.lastRequest.Server.MOTD != "Family Minecraft" || client.lastRequest.Minecraft.VersionPolicy != "recommended" || client.lastRequest.Minecraft.GameMode != "survival" {
 		t.Fatalf("review planner did not receive draft values: %#v", client.lastRequest)
 	}
 	if strings.Contains(body, `type="password"`) || strings.Contains(body, `name="backup_password"`) {
@@ -144,6 +145,26 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("review exposed %q", forbidden)
 		}
+	}
+}
+
+func TestSetupReviewLatestShowsResolvedVersion(t *testing.T) {
+	client := setupReviewClient()
+	client.plan.Normalized.Minecraft.RequestedVersionPolicy = "latest"
+	client.plan.Normalized.Minecraft.VersionPolicy = "latest"
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer firstRunSetupReviews.delete(app, "session-token")
+	advanceSetupToReview(t, app)
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("review returned %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "1.21.8 · Latest") || strings.Contains(rr.Body.String(), "Version: LATEST") {
+		t.Fatalf("review did not show the exact Latest candidate: %s", rr.Body.String())
 	}
 }
 
@@ -213,7 +234,7 @@ func TestSetupReviewConfigurationDownloadExcludesSecrets(t *testing.T) {
 		t.Fatalf("configuration download disposition = %q", disposition)
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"JustVoxel setup configuration", "Normalized Family Server", "Minecraft version: 1.21.8", "/var/lib/justvoxel/backups", "Passwords and other secrets are never included"} {
+	for _, want := range []string{"JustVoxel setup configuration", "Normalized Family Server", "Minecraft version: 1.21.8", "Game mode: Survival", "/var/lib/justvoxel/backups", "Passwords and other secrets are never included"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("configuration snapshot missing %q: %s", want, body)
 		}
@@ -278,13 +299,43 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"max-width:1180px", ".setup-step-actions", "@media(max-width:850px)"} {
-		if !strings.Contains(string(setupCSS), want) {
+	setupStyles := string(setupCSS)
+	for _, want := range []string{
+		"max-width:1180px", ".setup-step-actions", "@media(max-width:850px)",
+		".setup-body{display:flex;flex-direction:column;min-height:100dvh}",
+		".setup-shell{display:flex;flex:1;flex-direction:column",
+		".setup-shell>.project-footer",
+		".setup-body .setup-wizard-panel,.setup-body .setup-review-panel{height:auto;min-height:0;overflow:visible}",
+		".setup-body .setup-wizard-panel .setup-form{flex:1;min-height:0;margin:0;gap:.42rem;overflow:visible}",
+	} {
+		if !strings.Contains(setupStyles, want) {
 			t.Fatalf("responsive setup CSS missing %q", want)
 		}
 	}
-	if !strings.Contains(string(setupCSS), ".setup-body .setup-wizard-panel,.setup-body .setup-review-panel{height:clamp(") || strings.Contains(string(setupCSS), ".setup-body .setup-step-panel{height:") || strings.Contains(string(setupCSS), ".setup-body .setup-operation-panel{height:") {
-		t.Fatal("fixed setup height must apply only to wizard and Review panels")
+	if strings.Contains(setupStyles, ".setup-body .setup-step-panel{height:") || strings.Contains(setupStyles, ".setup-body .setup-operation-panel{height:") {
+		t.Fatal("operation and result pages must remain content-sized")
+	}
+	for _, stylesheet := range []string{setupStyles, styles} {
+		for _, rule := range strings.Split(stylesheet, "}") {
+			open := strings.LastIndex(rule, "{")
+			if open < 0 {
+				continue
+			}
+			declarations := rule[open+1:]
+			for _, selector := range strings.Split(rule[:open], ",") {
+				selector = strings.TrimSpace(selector)
+				if !strings.HasSuffix(selector, ".setup-wizard-panel") && !strings.HasSuffix(selector, ".setup-review-panel") &&
+					!strings.HasSuffix(selector, ".setup-review-content") && !strings.HasSuffix(selector, ".setup-step-panel .setup-form") &&
+					!strings.HasSuffix(selector, ".setup-wizard-panel .setup-form") && !strings.HasSuffix(selector, ".setup-review-panel .setup-form") {
+					continue
+				}
+				if strings.Contains(declarations, "height:clamp(") || strings.Contains(declarations, "height:calc(100dvh") ||
+					strings.Contains(declarations, "overflow-y:auto") || strings.Contains(declarations, "overscroll-behavior:contain") ||
+					strings.Contains(declarations, "overscroll-behavior-y:contain") {
+					t.Fatalf("setup panel or form has fixed height or internal scrolling: %s{%s}", selector, declarations)
+				}
+			}
+		}
 	}
 	progress, err := assets.ReadFile("templates/setup_progress.html")
 	if err != nil {
@@ -330,14 +381,8 @@ func TestSetupReviewConfigureButtonDisabledForInvalidPlan(t *testing.T) {
 		}
 	}
 }
-func TestSetupReviewExplainsDisabledBedrockCompatibility(t *testing.T) {
+func TestSetupReviewKeepsCompatibleRecommendedBedrockEnabled(t *testing.T) {
 	client := setupReviewClient()
-	client.plan.Normalized.Server.BedrockEnabled = false
-	client.plan.Normalized.Minecraft.Version = "26.3"
-	client.plan.Warnings = append(client.plan.Warnings, api.AdminSetupPlanWarning{
-		Code:    "bedrock_version_unsupported",
-		Message: "Bedrock cross-play was turned off because Geyser/Floodgate currently supports Minecraft 26.2, while this setup uses 26.3. Geyser/Floodgate will not be installed, and Java server setup can continue. Come back later and check again after Geyser/Floodgate adds support for this Minecraft version.",
-	})
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
 	if err != nil {
 		t.Fatal(err)
@@ -353,15 +398,12 @@ func TestSetupReviewExplainsDisabledBedrockCompatibility(t *testing.T) {
 	body := rr.Body.String()
 	for _, want := range []string{
 		`<p><span class="review-label">Players:</span> 20</p>`,
-		`<p><span class="review-label">Bedrock:</span> Off</p>`,
+		`<p><span class="review-label">Bedrock:</span> On</p>`,
 		`<p><span class="review-label">Timezone:</span> <code>America/Toronto</code></p>`,
-		"Bedrock cross-play unavailable",
-		"currently supports Minecraft 26.2",
-		"while this setup uses 26.3",
-		"Come back later and check again",
+		"1.21.8 · Recommended",
 	} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("Bedrock compatibility review missing %q: %s", want, body)
+			t.Fatalf("compatible Bedrock review missing %q: %s", want, body)
 		}
 	}
 }
