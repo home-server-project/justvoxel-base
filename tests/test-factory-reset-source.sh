@@ -60,9 +60,7 @@ fi
 grep -Fq 'SystemPassword  string' "${agent}"
 grep -Fq 'systemAuthenticate(systemAdminUsername, request.SystemPassword)' "${agent}"
 grep -Fq 'request.SystemPassword = ""' "${agent}"
-grep -Fq 'changeAdministratorPassword(authModeSystem, request.CurrentPassword, request.NewPassword)' "${agent}"
-grep -Fq 'operationAwaitingPassword' "${agent}"
-! grep -Fq '/usr/bin/chage' "${agent}"
+grep -Fq '"/usr/bin/chage", "-d", "0", systemAdminUsername' "${agent}"
 grep -Fq 'resetFactoryAuthenticationState()' "${agent}"
 grep -Fq 's.store.resetFactoryState()' "${agent}"
 grep -Fq 's.invalidateSessions()' "${agent}"
@@ -70,7 +68,6 @@ grep -Eq '^[[:space:]]*operationTypeFactoryReset[[:space:]]*=[[:space:]]*"factor
 grep -Fq 'POST /v1/admin/reset/factory/plan' "${agent}"
 grep -Fq 'POST /v1/admin/reset/factory/apply' "${agent}"
 grep -Fq 'POST /v1/admin/reset/factory/resolve' "${agent}"
-grep -Fq 'POST /v1/admin/reset/factory/password' "${agent}"
 grep -Eq '^[[:space:]]*operationResolved[[:space:]]+operationState[[:space:]]*=[[:space:]]*"resolved"[[:space:]]*$' "${operations}"
 grep -Fq 'return state != operationSucceeded && state != operationRolledBack && state != operationResolved' "${operations}"
 

@@ -210,3 +210,44 @@
 .backup-workflow-review-dialog .backup-restore-review,.backup-workflow-review-dialog .backup-automatic-review,.backup-workflow-review-dialog .backup-destination-review{clear:both;margin:0;border:0;background:transparent;padding:0}
 @media(max-width:560px){.backup-workflow-review-dialog{width:calc(100vw - .5rem);max-height:calc(100dvh - .5rem);border-radius:12px}.backup-workflow-review-card{max-height:calc(100dvh - .5rem);padding:.8rem}}
 @media(prefers-color-scheme:light){.backup-workflow-review-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025;box-shadow:0 30px 90px #0003}.backup-workflow-review-close{background:#f1f4f6;border-color:#cbd4da;color:#1a2025}}
+
+/* Compact workspace sections while keeping review and destructive controls visible. */
+.backups-workspace-content{container-type:inline-size;min-width:0}
+.backups-workspace-content :is(.backup-library-section,.backup-automatic-section,.backup-destination-section,.backup-restore-review,.backup-restore-progress){margin:.45rem 0;padding:.6rem .7rem}
+.backups-workspace-content :is(.backup-library-section,.backup-automatic-section,.backup-destination-section) .section-heading{margin-bottom:.35rem}
+.backups-workspace-content :is(.backup-library-section,.backup-automatic-section,.backup-destination-section) .section-heading>div:first-child{display:flex;align-items:baseline;gap:.4rem;flex-wrap:wrap}
+.backups-workspace-content :is(.backup-library-section,.backup-automatic-section,.backup-destination-section) .eyebrow{margin:0}
+.backups-workspace-content :is(.backup-library-section,.backup-automatic-section,.backup-destination-section) h2{margin:0;font-size:1rem}
+.backups-workspace-content .backup-file-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,310px),1fr));gap:.4rem;max-height:210px;overflow-y:auto;overscroll-behavior:contain;padding-right:.2rem}
+.backups-workspace-content .backup-file-card{grid-template-columns:18px 30px minmax(0,1fr) auto;gap:.45rem;min-height:56px;padding:.4rem .5rem}
+.backups-workspace-content .backup-file-copy :is(strong,span,small){white-space:normal;overflow-wrap:anywhere}
+.backups-workspace-content .backup-file-icon{width:30px;height:30px}
+.backups-workspace-content .backup-file-icon svg{width:18px;height:18px}
+.backups-workspace-content .backup-library-empty{min-height:62px;padding:.45rem}
+.backups-workspace-content .backup-command-bar{gap:.6rem;margin-top:.45rem;padding-top:.45rem}
+.backups-workspace-content .backup-library-summary{gap:.85rem}
+.backups-workspace-content .backup-command-actions{gap:.4rem;flex-wrap:wrap;justify-content:flex-end}
+.backups-workspace-content .backup-automatic-form{grid-template-columns:minmax(200px,1.4fr) minmax(150px,.8fr) minmax(120px,.7fr) auto;gap:.5rem}
+.backups-workspace-content .backup-automatic-toggle,.backups-workspace-content .backup-automatic-form input[type="time"],.backups-workspace-content .backup-automatic-form input[type="number"],.backups-workspace-content .backup-automatic-form>button{min-height:38px}
+.backups-workspace-content .backup-automatic-section>.muted{margin:.4rem 0 0;line-height:1.35}
+.backups-workspace-content .backup-destination-section>.compact{margin:.25rem 0}
+.backups-workspace-content .backup-destination-summary{grid-template-columns:repeat(auto-fit,minmax(min(100%,170px),1fr));gap:.35rem;margin:.4rem 0 0}
+.backups-workspace-content .backup-destination-summary>div{padding:.4rem .5rem}
+.backups-workspace-content .backup-destination-summary :is(dd,code){white-space:normal;overflow-wrap:anywhere}
+.backups-workspace-content .backup-destination-change{margin-top:.45rem;padding-top:.45rem}
+.backups-workspace-content .backup-destination-form{max-height:min(50dvh,460px);overflow-y:auto;overscroll-behavior:contain}
+.backups-workspace-content .backup-restore-summary{grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr))}
+.backups-workspace-content .backup-restore-review .backup-restore-summary{max-height:35dvh;overflow-y:auto;overscroll-behavior:contain}
+.backup-restore-dialog,.backup-delete-dialog{max-height:min(86dvh,760px);overflow-y:auto}
+.backup-restore-dialog-card,.backup-delete-dialog-card{padding:.8rem}
+@container (max-width:800px){
+  .backup-automatic-form{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+  .backup-automatic-toggle{grid-column:auto}
+}
+@container (max-width:560px){
+  .backup-command-bar{align-items:stretch;flex-direction:column}
+  .backup-command-actions{justify-content:stretch}
+  .backup-file-card{grid-template-columns:18px 30px minmax(0,1fr)!important}
+  .backup-file-status{grid-column:3;justify-self:start}
+}
+@container (max-width:430px){.backup-automatic-form{grid-template-columns:1fr!important}.backup-destination-grid{grid-template-columns:1fr}}

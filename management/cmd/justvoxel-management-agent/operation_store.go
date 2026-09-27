@@ -36,7 +36,6 @@ const (
 	operationValidating       operationState = "validating"
 	operationRunning          operationState = "running"
 	operationVerifying        operationState = "verifying"
-	operationAwaitingPassword operationState = "awaiting_password"
 	operationSucceeded        operationState = "succeeded"
 	operationFailed           operationState = "failed"
 	operationRollingBack      operationState = "rolling_back"
@@ -684,7 +683,7 @@ func validOperationID(value string) bool {
 
 func validOperationState(state operationState) bool {
 	switch state {
-	case operationQueued, operationValidating, operationRunning, operationVerifying, operationAwaitingPassword, operationSucceeded,
+	case operationQueued, operationValidating, operationRunning, operationVerifying, operationSucceeded,
 		operationFailed, operationRollingBack, operationRolledBack, operationNeedsAttention, operationResolved:
 		return true
 	default:
@@ -1336,10 +1335,6 @@ func (s *operationStore) transition(id string, next operationState, stage, statu
 		return operationJournal{}, errOperationNotFound
 	}
 	setupRecovery := journal.OperationType == operationTypeSetup && journal.State == operationNeedsAttention && journal.Stage == "storage_rollback" && next == operationRollingBack && stage == "storage_recovery"
-	if journal.OperationType == operationTypeFactoryReset && next == operationSucceeded &&
-		(journal.State != operationAwaitingPassword || journal.Stage != "changing_password") {
-		return operationJournal{}, errors.New("factory reset requires password replacement before completion")
-	}
 	if !setupRecovery && !operationTransitionAllowed(journal.State, next) {
 		return operationJournal{}, fmt.Errorf("invalid operation transition %s -> %s", journal.State, next)
 	}
@@ -1414,9 +1409,7 @@ func operationTransitionAllowed(current, next operationState) bool {
 	case operationRunning:
 		return next == operationVerifying || next == operationFailed || next == operationNeedsAttention
 	case operationVerifying:
-		return next == operationSucceeded || next == operationAwaitingPassword || next == operationFailed || next == operationNeedsAttention
-	case operationAwaitingPassword:
-		return next == operationSucceeded || next == operationNeedsAttention
+		return next == operationSucceeded || next == operationFailed || next == operationNeedsAttention
 	case operationFailed:
 		return next == operationRollingBack || next == operationNeedsAttention
 	case operationRollingBack:

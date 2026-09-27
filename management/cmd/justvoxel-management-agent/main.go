@@ -60,8 +60,7 @@ type server struct {
 	store      *webUIStore
 	operations *operationStore
 
-	systemUpdateMu         sync.Mutex
-	factoryResetPasswordMu sync.Mutex
+	systemUpdateMu sync.Mutex
 
 	networkMu           sync.Mutex
 	networkTransactions map[string]networkCheckpointTransaction

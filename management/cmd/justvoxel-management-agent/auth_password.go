@@ -11,17 +11,6 @@ func (s *server) providerChangePassword(w http.ResponseWriter, r *http.Request) 
 	if _, ok := s.requireAdministratorCredentialPath(w, r); !ok {
 		return
 	}
-	if s.operations != nil {
-		current, err := s.operations.currentFactoryReset()
-		if err != nil {
-			writeError(w, http.StatusServiceUnavailable, "factory reset state is unavailable")
-			return
-		}
-		if current != nil && current.State == operationAwaitingPassword {
-			writeError(w, http.StatusConflict, "finish the Factory Reset password step in System first")
-			return
-		}
-	}
 
 	var request struct {
 		CurrentPassword string `json:"current_password"`

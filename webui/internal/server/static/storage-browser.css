@@ -187,3 +187,40 @@ button.storage-partition-card:hover,button.storage-partition-card:focus-visible{
 .storage-partition-grid{gap:.4rem}
 .storage-partition-card{min-height:0;padding:.55rem .7rem}
 @media(prefers-color-scheme:light){.storage-partition-group{background:transparent;border:0}}
+
+/* Keep device selection and the selected disk in the same FHD workspace. */
+.storage-browser-shell{max-width:none;padding-top:0;min-width:0}
+.storage-browser-intro{margin-bottom:.55rem;line-height:1.4}
+.storage-drive-section{margin-top:.55rem}
+.storage-drive-section-heading{margin-bottom:.35rem}
+.storage-drive-section-heading>div{display:flex;align-items:baseline;gap:.4rem;flex-wrap:wrap}
+.storage-drive-section-heading .eyebrow{margin:0}
+.storage-external-section{padding-top:.55rem}
+.storage-disk-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr));gap:.45rem;max-height:174px;overflow-y:auto;overscroll-behavior:contain;padding-right:.2rem}
+.storage-disk-card{gap:.55rem;min-height:58px;padding:.45rem .6rem}
+.storage-disk-copy :is(strong,span,small){white-space:normal;overflow-wrap:anywhere}
+.storage-disk-icon{flex-basis:32px;width:32px;height:32px}
+.storage-disk-icon svg{width:20px;height:20px}
+.storage-partition-browser{margin-top:.65rem;padding-top:.55rem;border-top:1px solid var(--jv-border,#303942)}
+.storage-partition-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,190px),1fr));gap:.4rem;max-height:290px;overflow-y:auto;overscroll-behavior:contain;padding-right:.2rem}
+.storage-partition-card{min-height:0;padding:.5rem .65rem;gap:.12rem}
+.storage-partition-state{padding:.15rem .4rem}
+.storage-drive-empty{padding:.45rem .6rem}
+.storage-detail-dialog,.storage-action-dialog{overflow-y:auto;max-height:min(86dvh,760px)}
+.storage-detail-card,.storage-action-card{padding:.8rem}
+.storage-detail-heading{padding-bottom:.5rem}
+.storage-detail-heading h2{font-size:1.1rem}
+.storage-detail-role{margin:.55rem 0 .3rem}
+.storage-detail-list{max-height:min(38dvh,340px);overflow-y:auto}
+.storage-detail-list div{padding:.35rem 0}
+.storage-detail-actions-preview{margin-top:.5rem;padding:.5rem .6rem}
+.storage-detail-actions{margin-top:.5rem;padding-top:.5rem}
+.storage-action-review{margin-top:.55rem;padding:.6rem}
+.storage-action-review dl div{padding:.3rem 0}
+.storage-action-warnings{max-height:30dvh;overflow-y:auto;overscroll-behavior:contain}
+.storage-action-card>p{margin:.55rem 0}
+.storage-minecraft-dialog .storage-action-card{gap:.5rem}
+@media(max-width:700px){
+  .storage-disk-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,210px),1fr))}
+  .storage-partition-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,165px),1fr))}
+}

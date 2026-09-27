@@ -473,20 +473,10 @@ func dashboardCurrentAttention(ctx context.Context, operations dashboardOperatio
 			Label:  "Review Restore",
 		}
 	}
-	if current, err := operations.AdminCurrentFactoryResetOperation(ctx, session); err == nil && current.Operation != nil {
-		if current.Operation.State == "awaiting_password" {
-			return &dashboardAttention{
-				Title:  "Set administrator password to finish Full Factory Reset",
-				Status: current.Operation.Status,
-				Action: "/?workspace=system&tab=reset",
-				Label:  "Set password",
-			}
-		}
-		if current.Operation.State == "needs_attention" {
-			return &dashboardAttention{
-				Title:  "Full Factory Reset needs attention",
-				Status: current.Operation.Status,
-			}
+	if current, err := operations.AdminCurrentFactoryResetOperation(ctx, session); err == nil && current.Operation != nil && current.Operation.State == "needs_attention" {
+		return &dashboardAttention{
+			Title:  "Full Factory Reset needs attention",
+			Status: current.Operation.Status,
 		}
 	}
 	return nil

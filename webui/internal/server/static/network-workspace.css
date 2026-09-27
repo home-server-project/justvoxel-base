@@ -128,3 +128,59 @@
 .network-device-details{margin-top:.45rem;padding-top:.4rem}
 .network-wifi-list,.network-saved-list{margin-top:.4rem}
 .network-wifi-row,.network-saved-row{padding:.45rem .55rem}
+
+/* Prompt 4B: use the shared top-panel-aware workspace area and bound dynamic lists. */
+.network-workspace-dialog{
+  width:min(1180px,calc(100vw - 1rem));
+  height:min(760px,var(--jv-workspace-height));
+  max-height:var(--jv-workspace-height);
+  border-color:var(--jv-border-strong);
+  border-radius:var(--jv-radius-window);
+  background:var(--jv-surface);
+  color:var(--jv-text)
+}
+.network-workspace-header{align-items:center;min-height:48px;padding:var(--jv-space-sm) var(--jv-workspace-edge);border-color:var(--jv-border)}
+.network-workspace-header>div:first-child{display:flex;align-items:baseline;gap:.38rem;min-width:0}
+.network-workspace-header .eyebrow{margin:0;white-space:nowrap}
+.network-workspace-header .eyebrow::after{content:" ·"}
+.network-workspace-header h2{margin:0;font-size:1.05rem}
+.network-workspace-header-actions{align-items:center;gap:var(--jv-space-xs)}
+.network-workspace-header .system-monitor-header-button{width:32px;height:32px;border-radius:8px;font-size:1.08rem}
+.network-workspace-body{min-width:0;padding:var(--jv-workspace-edge);overscroll-behavior:contain}
+.network-workspace-view{grid-template-columns:repeat(2,minmax(0,1fr));gap:.55rem;align-content:start;min-width:0}
+.network-workspace-view>.network-overview,.network-workspace-view>.network-devices,.network-workspace-view>.network-checkpoint-banner,.network-workspace-view>.network-connect-panel{grid-column:1/-1}
+.network-workspace-view>.network-checkpoint-banner{position:sticky;top:0;z-index:3;box-shadow:0 4px 12px #0005}
+.network-overview{margin:0!important;padding:.55rem .7rem}
+.network-overview .section-heading{align-items:center;margin:0}
+.network-overview-primary .eyebrow{margin:0}
+.network-overview-primary h2{font-size:1.05rem}
+.network-overview-version{margin:.2rem 0 0}
+.network-devices{grid-template-columns:repeat(2,minmax(0,1fr));gap:.55rem;min-width:0}
+.network-device-card,.network-wifi-section,.network-saved{min-width:0;padding:.55rem .7rem}
+.network-device-summary{gap:.16rem;margin-top:.3rem}
+.network-device-details{margin-top:.35rem;padding-top:.35rem}
+.network-device-details[open] .network-detail-grid{max-height:190px;overflow:auto;overscroll-behavior:contain;padding-right:.25rem}
+.network-detail-grid{gap:.25rem;margin-top:.4rem}
+.network-wifi-section,.network-saved{align-self:start}
+.network-wifi-list,.network-saved-list{max-height:205px;min-height:0;overflow:auto;overscroll-behavior:contain;align-content:start;padding-right:.2rem}
+.network-wifi-row,.network-saved-row{min-width:0;padding:.38rem .5rem;gap:.45rem}
+.network-wifi-row>div:first-child,.network-saved-row>div:first-child{min-width:0}
+.network-checkpoint-banner{padding:.6rem .75rem}
+.network-connect-panel{gap:.45rem;padding:.6rem .75rem}
+.network-connect-panel form{gap:.45rem .7rem}
+.network-connect-panel label{margin:0}
+.network-connect-panel input,.network-connect-panel select{margin:0;min-height:36px}
+.network-connect-password{grid-column:auto}
+.network-connect-hint{margin:0}
+@media(max-width:760px){
+  .network-workspace-view{grid-template-columns:1fr}
+  .network-workspace-view>*{grid-column:1/-1}
+  .network-devices{grid-template-columns:1fr}
+  .network-workspace-header{cursor:default;touch-action:auto}
+}
+@media(max-width:700px){
+  .network-workspace-dialog{height:auto}
+  .network-workspace-body{padding:var(--jv-workspace-edge)}
+  .network-overview .section-heading{align-items:flex-start}
+  .network-connect-password{grid-column:1}
+}

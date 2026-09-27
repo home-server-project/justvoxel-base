@@ -39,7 +39,6 @@ type systemWorkspaceResetAPI interface {
 	AdminMinecraftResetApply(ctx context.Context, session string, request api.AdminMinecraftResetApplyRequest) (api.AdminResetApplyResponse, error)
 	AdminFactoryResetApply(ctx context.Context, session string, request api.AdminFactoryResetApplyRequest) (api.AdminResetApplyResponse, error)
 	AdminFactoryResetResolve(ctx context.Context, session, operationID string) (api.PersistentOperationResponse, error)
-	AdminFactoryResetPassword(ctx context.Context, session, operationID, currentPassword, newPassword string) (api.PersistentOperationResponse, error)
 	AdminCurrentMinecraftResetOperation(ctx context.Context, session string) (api.PersistentOperationResponse, error)
 	AdminCurrentFactoryResetOperation(ctx context.Context, session string) (api.PersistentOperationResponse, error)
 	AdminOperation(ctx context.Context, session, id string) (api.PersistentOperationResponse, error)
@@ -122,7 +121,6 @@ func (a *App) registerSystemWorkspaceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/system/workspace/reset/factory/plan", a.systemWorkspaceFactoryResetPlan)
 	mux.HandleFunc("POST /api/system/workspace/reset/factory/apply", a.systemWorkspaceFactoryResetApply)
 	mux.HandleFunc("POST /api/system/workspace/reset/factory/resolve", a.systemWorkspaceFactoryResetResolve)
-	mux.HandleFunc("POST /api/system/workspace/reset/factory/password", a.systemWorkspaceFactoryResetPassword)
 	mux.HandleFunc("GET /api/system/workspace/reset/factory/current", a.systemWorkspaceFactoryResetCurrent)
 	mux.HandleFunc("GET /api/system/workspace/reset/operations/{id}", a.systemWorkspaceResetOperation)
 	mux.HandleFunc("GET /api/system/workspace/about", a.systemWorkspaceAbout)
@@ -580,26 +578,6 @@ func (a *App) systemWorkspaceFactoryResetResolve(w http.ResponseWriter, r *http.
 		a.writeSystemWorkspaceAPIError(w, err, "Failed Factory Reset could not be resolved.")
 		return
 	}
-	writeSystemWorkspaceJSON(w, http.StatusOK, result)
-}
-
-func (a *App) systemWorkspaceFactoryResetPassword(w http.ResponseWriter, r *http.Request) {
-	session, client, ok := a.systemWorkspaceResetClient(w, r, true)
-	if !ok {
-		return
-	}
-	currentPassword := r.FormValue("current_password")
-	newPassword := r.FormValue("new_password")
-	if newPassword == "" || newPassword != r.FormValue("confirm_password") {
-		writeSystemWorkspaceError(w, http.StatusBadRequest, "New passwords must match.")
-		return
-	}
-	result, err := client.AdminFactoryResetPassword(r.Context(), session, strings.TrimSpace(r.FormValue("operation_id")), currentPassword, newPassword)
-	if err != nil {
-		a.writeSystemWorkspaceAPIError(w, err, "System password change was rejected.")
-		return
-	}
-	a.clearSessionCookies(w)
 	writeSystemWorkspaceJSON(w, http.StatusOK, result)
 }
 

@@ -14,12 +14,11 @@ import (
 )
 
 const (
-	adminMinecraftResetPlanPath   = "/v1/admin/reset/minecraft/plan"
-	adminMinecraftResetApplyPath  = "/v1/admin/reset/minecraft/apply"
-	adminFactoryResetPlanPath     = "/v1/admin/reset/factory/plan"
-	adminFactoryResetApplyPath    = "/v1/admin/reset/factory/apply"
-	adminFactoryResetResolvePath  = "/v1/admin/reset/factory/resolve"
-	adminFactoryResetPasswordPath = "/v1/admin/reset/factory/password"
+	adminMinecraftResetPlanPath  = "/v1/admin/reset/minecraft/plan"
+	adminMinecraftResetApplyPath = "/v1/admin/reset/minecraft/apply"
+	adminFactoryResetPlanPath    = "/v1/admin/reset/factory/plan"
+	adminFactoryResetApplyPath   = "/v1/admin/reset/factory/apply"
+	adminFactoryResetResolvePath = "/v1/admin/reset/factory/resolve"
 )
 
 var (
@@ -132,23 +131,6 @@ func (c *Client) AdminFactoryResetResolve(ctx context.Context, session, operatio
 	}
 	if out.Operation == nil || out.Operation.OperationType != "factory_reset" || out.Operation.State != "resolved" {
 		return out, errors.New("management API returned unsupported factory reset resolution")
-	}
-	return out, nil
-}
-
-func (c *Client) AdminFactoryResetPassword(ctx context.Context, session, operationID, currentPassword, newPassword string) (PersistentOperationResponse, error) {
-	var out PersistentOperationResponse
-	if !persistentOperationIDPattern.MatchString(operationID) {
-		return out, errors.New("invalid factory reset operation id")
-	}
-	err := c.do(ctx, http.MethodPost, adminFactoryResetPasswordPath, session, map[string]string{
-		"operation_id": operationID, "current_password": currentPassword, "new_password": newPassword,
-	}, &out)
-	if err != nil {
-		return out, err
-	}
-	if out.Operation == nil || out.Operation.OperationID != operationID || out.Operation.OperationType != "factory_reset" || out.Operation.State != "succeeded" {
-		return out, errors.New("management API returned unsupported factory reset password response")
 	}
 	return out, nil
 }

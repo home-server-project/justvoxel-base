@@ -9,41 +9,6 @@ import (
 	"testing"
 )
 
-func TestFactoryResetPasswordStageSurvivesOperationStoreRestart(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "management")
-	store, err := openOperationStore(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	op, _, err := store.beginFactoryReset(testFactoryResetFingerprint)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, step := range []struct {
-		state operationState
-		stage string
-	}{
-		{operationValidating, "validating"}, {operationRunning, "resetting_runtime"},
-		{operationVerifying, "verifying"}, {operationAwaitingPassword, "awaiting_password"},
-	} {
-		if _, err := store.transition(op.OperationID, step.state, step.stage, "Reset in progress."); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := store.close(); err != nil {
-		t.Fatal(err)
-	}
-	reopened, err := openOperationStore(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = reopened.close() }()
-	current, err := reopened.currentFactoryReset()
-	if err != nil || current == nil || current.State != operationAwaitingPassword || current.Stage != "awaiting_password" {
-		t.Fatalf("password step lost after restart: %#v %v", current, err)
-	}
-}
-
 const testFactoryResetFingerprint = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 
 func TestOperationStoreFactoryResetIsIdempotentAndBlocksOtherOperations(t *testing.T) {
@@ -139,17 +104,11 @@ func TestRetriedFactoryResetCompletionAllowsRestore(t *testing.T) {
 		{operationValidating, "validating"},
 		{operationRunning, "resetting_runtime"},
 		{operationVerifying, "verifying"},
-		{operationAwaitingPassword, "awaiting_password"},
+		{operationSucceeded, "complete"},
 	} {
 		if _, err := store.transition(journal.OperationID, tr.state, tr.stage, "Factory reset progress."); err != nil {
 			t.Fatalf("transition to %s: %v", tr.state, err)
 		}
-	}
-	if _, err := store.updateProgress(journal.OperationID, operationAwaitingPassword, "changing_password", "Password replacement in progress."); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.transition(journal.OperationID, operationSucceeded, "complete", "Factory reset complete."); err != nil {
-		t.Fatal(err)
 	}
 	if _, created, err := store.beginRestore("sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"); err != nil || !created {
 		t.Fatalf("Restore remained blocked after retried Factory Reset completed: created=%t err=%v", created, err)
@@ -265,17 +224,11 @@ func TestCompletedFactoryResetReleasesAllOperationLocks(t *testing.T) {
 		{operationValidating, "validating", "Revalidating full factory reset plan."},
 		{operationRunning, "resetting_runtime", "Removing appliance-owned state."},
 		{operationVerifying, "verifying", "Verifying fresh first-use state."},
-		{operationAwaitingPassword, "awaiting_password", "Awaiting password replacement."},
+		{operationSucceeded, "complete", "Full factory reset completed."},
 	} {
 		if _, err := store.transition(journal.OperationID, tr.state, tr.stage, tr.status); err != nil {
 			t.Fatalf("transition to %s: %v", tr.state, err)
 		}
-	}
-	if _, err := store.updateProgress(journal.OperationID, operationAwaitingPassword, "changing_password", "Password replacement in progress."); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.transition(journal.OperationID, operationSucceeded, "complete", "Full factory reset completed."); err != nil {
-		t.Fatal(err)
 	}
 	if current, err := store.currentFactoryReset(); err != nil || current != nil {
 		t.Fatalf("current after success = %#v err=%v", current, err)

@@ -6,8 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +13,7 @@ import (
 	"github.com/home-server-project/justvoxel/management/internal/systemauth"
 )
 
-const validFactoryResetPlanHelper = `{"ok":true,"schema_version":"v1","mode":"factory","minecraft_configured":true,"data_path":"/var/lib/justvoxel/minecraft","data_scope":"internal","data_action":"delete","backup_path":"/var/lib/justvoxel/backups","backup_scope":"internal","backup_action":"delete","config_backups_action":"delete","storage_layout_action":"preserve","external_storage_action":"preserve","network_storage_action":"preserve","authentication_action":"reset_to_system","webui_users_action":"delete","password_action":"replace","sessions_action":"invalidate","players_online":0,"players":[],"warnings":[]}`
+const validFactoryResetPlanHelper = `{"ok":true,"schema_version":"v1","mode":"factory","minecraft_configured":true,"data_path":"/var/lib/justvoxel/minecraft","data_scope":"internal","data_action":"delete","backup_path":"/var/lib/justvoxel/backups","backup_scope":"internal","backup_action":"delete","config_backups_action":"delete","storage_layout_action":"preserve","external_storage_action":"preserve","network_storage_action":"preserve","authentication_action":"reset_to_system","webui_users_action":"delete","password_action":"expire","sessions_action":"invalidate","players_online":0,"players":[],"warnings":[]}`
 
 func exactFactoryResetFingerprint(t *testing.T) string {
 	t.Helper()
@@ -28,180 +26,6 @@ func exactFactoryResetFingerprint(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return fingerprint
-}
-
-func TestFactoryResetPasswordRequiresRealReplacementBeforeCompletion(t *testing.T) {
-	oldMode, oldAuth := readAuthMode, systemAuthenticate
-	oldValidate, oldChange := systemValidatePass, systemChangePassword
-	defer func() {
-		readAuthMode, systemAuthenticate = oldMode, oldAuth
-		systemValidatePass, systemChangePassword = oldValidate, oldChange
-	}()
-	readAuthMode = func() (authMode, error) { return authModeSystem, nil }
-	s := surfaceTestServer(t, roleAdministrator)
-	store := openTestOperationStore(t)
-	attachTestOperationStore(t, s, store)
-	op, _, err := store.beginFactoryReset(testFactoryResetFingerprint)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, step := range []struct {
-		state operationState
-		stage string
-	}{
-		{operationValidating, "validating"}, {operationRunning, "resetting_runtime"},
-		{operationVerifying, "verifying"},
-	} {
-		if _, err := store.transition(op.OperationID, step.state, step.stage, "Reset in progress."); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := store.transition(op.OperationID, operationSucceeded, "complete", "Completed."); err == nil {
-		t.Fatal("factory reset completed before password replacement")
-	}
-	if _, err := store.transition(op.OperationID, operationAwaitingPassword, "awaiting_password", "Set a new password."); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.transition(op.OperationID, operationSucceeded, "complete", "Completed."); err == nil {
-		t.Fatal("factory reset completed while still awaiting password")
-	}
-	active := "old-secret"
-	systemAuthenticate = func(_, password string) (systemauth.AuthResult, error) {
-		if password == active {
-			return systemauth.AuthResult{PasswordChangeRequired: password == "old-secret"}, nil
-		}
-		return systemauth.AuthResult{}, systemauth.ErrInvalidCredentials
-	}
-	systemValidatePass = func(_, _, password string) error {
-		if password == "rejected-secret" {
-			return errors.New("host policy rejected password")
-		}
-		return nil
-	}
-	changes := 0
-	systemChangePassword = func(_, current, next string) error {
-		changes++
-		if current != active {
-			return systemauth.ErrInvalidCredentials
-		}
-		active = next
-		return nil
-	}
-	s.failures = []time.Time{time.Now()}
-	s.lockTill = time.Now().Add(time.Minute)
-	request := func(current, next string) *httptest.ResponseRecorder {
-		t.Helper()
-		body, err := json.Marshal(adminFactoryResetPasswordRequest{OperationID: op.OperationID, CurrentPassword: current, NewPassword: next})
-		if err != nil {
-			t.Fatal(err)
-		}
-		rr := httptest.NewRecorder()
-		s.adminFactoryResetPassword(rr, surfaceRequest(http.MethodPost, "/v1/admin/reset/factory/password", string(body)))
-		return rr
-	}
-	if rr := request("wrong-secret", "new-secret"); rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "current password is incorrect") {
-		t.Fatalf("wrong current password: %d %s", rr.Code, rr.Body.String())
-	}
-	if rr := request("old-secret", "rejected-secret"); rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "host policy rejected password") {
-		t.Fatalf("host policy: %d %s", rr.Code, rr.Body.String())
-	}
-	if changes != 0 || len(s.sessions) == 0 {
-		t.Fatal("rejected password changed credential or invalidated sessions")
-	}
-	if rr := request("old-secret", "new-secret"); rr.Code != http.StatusOK {
-		t.Fatalf("replacement: %d %s", rr.Code, rr.Body.String())
-	}
-	if changes != 1 || active != "new-secret" {
-		t.Fatal("PAM-backed change path was not invoked")
-	}
-	finished, err := store.get(op.OperationID)
-	if err != nil || finished.State != operationSucceeded || finished.Stage != "complete" {
-		t.Fatalf("operation did not complete: %#v %v", finished, err)
-	}
-	journal, err := json.Marshal(finished)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(journal), "old-secret") || strings.Contains(string(journal), "new-secret") {
-		t.Fatal("operation journal contains a password")
-	}
-	persisted, err := os.ReadFile(filepath.Join(store.operationsDir, op.OperationID+".json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(persisted), "old-secret") || strings.Contains(string(persisted), "new-secret") {
-		t.Fatal("persisted operation journal contains a password")
-	}
-	if len(s.sessions) != 0 || len(s.failures) != 0 || !s.lockTill.IsZero() {
-		t.Fatal("sessions or failures remained after credential replacement")
-	}
-}
-
-func TestFactoryResetPasswordVerificationFailuresKeepOperationActive(t *testing.T) {
-	oldMode, oldAuth := readAuthMode, systemAuthenticate
-	oldValidate, oldChange := systemValidatePass, systemChangePassword
-	defer func() {
-		readAuthMode, systemAuthenticate = oldMode, oldAuth
-		systemValidatePass, systemChangePassword = oldValidate, oldChange
-	}()
-	readAuthMode = func() (authMode, error) { return authModeSystem, nil }
-	systemValidatePass = func(_, _, _ string) error { return nil }
-	for _, test := range []struct {
-		name       string
-		acceptsOld bool
-		acceptsNew bool
-	}{
-		{"new credential rejected", false, false},
-		{"old credential still accepted", true, true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			s := surfaceTestServer(t, roleAdministrator)
-			store := openTestOperationStore(t)
-			attachTestOperationStore(t, s, store)
-			op, _, err := store.beginFactoryReset(testFactoryResetFingerprint)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, step := range []struct {
-				state operationState
-				stage string
-			}{
-				{operationValidating, "validating"}, {operationRunning, "resetting_runtime"},
-				{operationVerifying, "verifying"}, {operationAwaitingPassword, "awaiting_password"},
-			} {
-				if _, err := store.transition(op.OperationID, step.state, step.stage, "Reset in progress."); err != nil {
-					t.Fatal(err)
-				}
-			}
-			changed := false
-			systemAuthenticate = func(_, password string) (systemauth.AuthResult, error) {
-				if password == "old-secret" && (!changed || test.acceptsOld) {
-					return systemauth.AuthResult{}, nil
-				}
-				if password == "new-secret" && changed && test.acceptsNew {
-					return systemauth.AuthResult{}, nil
-				}
-				return systemauth.AuthResult{}, systemauth.ErrInvalidCredentials
-			}
-			systemChangePassword = func(_, _, _ string) error { changed = true; return nil }
-			body, err := json.Marshal(adminFactoryResetPasswordRequest{OperationID: op.OperationID, CurrentPassword: "old-secret", NewPassword: "new-secret"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			rr := httptest.NewRecorder()
-			s.adminFactoryResetPassword(rr, surfaceRequest(http.MethodPost, "/v1/admin/reset/factory/password", string(body)))
-			if rr.Code != http.StatusConflict {
-				t.Fatalf("verification status = %d: %s", rr.Code, rr.Body.String())
-			}
-			current, err := store.currentFactoryReset()
-			if err != nil || current == nil || current.State != operationAwaitingPassword || current.FinishedAt != "" {
-				t.Fatalf("verification failure completed reset: %#v %v", current, err)
-			}
-			if len(s.sessions) == 0 {
-				t.Fatal("verification failure invalidated administrator session")
-			}
-		})
-	}
 }
 
 func TestAdminFactoryResetPlanComputesFingerprintAndPreservesExternalStorage(t *testing.T) {
@@ -229,7 +53,7 @@ func TestAdminFactoryResetPlanComputesFingerprintAndPreservesExternalStorage(t *
 		"\"external_storage_action\":\"preserve\"",
 		"\"network_storage_action\":\"preserve\"",
 		"\"authentication_action\":\"reset_to_system\"",
-		"\"password_action\":\"replace\"",
+		"\"password_action\":\"expire\"",
 		"\"sessions_action\":\"invalidate\"",
 	} {
 		if !strings.Contains(body, want) {
@@ -502,11 +326,17 @@ func TestExecuteFactoryResetReturnsToFreshFirstUseState(t *testing.T) {
 
 	oldResetAuth := resetFactoryAuthenticationState
 	defer func() { resetFactoryAuthenticationState = oldResetAuth }()
+	oldExpire := expireSystemAdministratorPassword
+	defer func() { expireSystemAdministratorPassword = oldExpire }()
 	oldReadMode := readAuthMode
 	defer func() { readAuthMode = oldReadMode }()
-	order := make([]string, 0, 1)
+	order := make([]string, 0, 2)
 	resetFactoryAuthenticationState = func() error {
 		order = append(order, "auth")
+		return nil
+	}
+	expireSystemAdministratorPassword = func(context.Context) error {
+		order = append(order, "expire")
 		return nil
 	}
 	readAuthMode = func() (authMode, error) {
@@ -550,14 +380,14 @@ func TestExecuteFactoryResetReturnsToFreshFirstUseState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if finished.State != operationAwaitingPassword || finished.Stage != "awaiting_password" || finished.FinishedAt != "" {
-		t.Fatalf("factory reset did not await password replacement: %#v", finished)
+	if finished.State != operationSucceeded || finished.Stage != "complete" || finished.FinishedAt == "" {
+		t.Fatalf("factory reset operation did not complete: %#v", finished)
 	}
-	if current, err := store.currentFactoryReset(); err != nil || current == nil {
-		t.Fatalf("factory reset was not current while awaiting password: %#v err=%v", current, err)
+	if current, err := store.currentFactoryReset(); err != nil || current != nil {
+		t.Fatalf("factory reset remained current after success: %#v err=%v", current, err)
 	}
-	if strings.Join(order, ",") != "auth" {
-		t.Fatalf("identity reset order = %q, want auth", strings.Join(order, ","))
+	if strings.Join(order, ",") != "auth,expire" {
+		t.Fatalf("identity reset order = %q, want auth,expire", strings.Join(order, ","))
 	}
 	users, err := s.store.listWebUsers()
 	if err != nil {
@@ -566,10 +396,11 @@ func TestExecuteFactoryResetReturnsToFreshFirstUseState(t *testing.T) {
 	if len(users) != 0 {
 		t.Fatalf("factory reset left WebUI users: %#v", users)
 	}
-	if len(s.sessions) == 0 || len(s.failures) == 0 || s.lockTill.IsZero() {
-		t.Fatalf("factory reset invalidated login state before password replacement: sessions=%d failures=%d lock=%v", len(s.sessions), len(s.failures), s.lockTill)
+	if len(s.sessions) != 0 || len(s.failures) != 0 || !s.lockTill.IsZero() {
+		t.Fatalf("factory reset did not invalidate login state: sessions=%d failures=%d lock=%v", len(s.sessions), len(s.failures), s.lockTill)
 	}
 }
+
 
 func TestAdminFactoryResetResolveKeepsCurrentStateAndReleasesLocks(t *testing.T) {
 	s := surfaceTestServer(t, roleAdministrator)

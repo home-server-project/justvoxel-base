@@ -23,25 +23,6 @@ func TestCredentialPagesIgnorePersistedWorkspaceOpenState(t *testing.T) {
 	}
 }
 
-func TestFactoryResetPasswordStepKeepsPolicyErrorsAndRedirectsOnSuccess(t *testing.T) {
-	source, err := assets.ReadFile("static/app.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	script := string(source)
-	for _, required := range []string{
-		`operation.state === "awaiting_password"`,
-		`/api/system/workspace/reset/factory/password`,
-		`if (result?.operation?.state !== "succeeded")`,
-		`window.location.assign("/login")`,
-		`state.textContent = error?.message || "System password change was rejected."`,
-	} {
-		if !strings.Contains(script, required) {
-			t.Fatalf("factory reset password step missing %q", required)
-		}
-	}
-}
-
 func TestFirstRunConfiguredStateOverridesExploreInvitation(t *testing.T) {
 	scriptSource, err := assets.ReadFile("static/first-run.js")
 	if err != nil {
@@ -156,13 +137,12 @@ func TestMinecraftResetReopensExistingFirstRunChoice(t *testing.T) {
 	if strings.Index(reset, "workspaceWindow?.close()") > strings.Index(reset, `window.dispatchEvent(new Event("justvoxel:minecraft-reset-complete"))`) {
 		t.Fatal("Reset workspace must close before the Welcome choice reopens")
 	}
-	if strings.Contains(reset, "window.location.reload()") {
+	if strings.Contains(reset, "window.location.reload()") || strings.Contains(reset, "window.location.assign(") {
 		t.Fatal("Minecraft Reset handoff must retain the current page and session")
 	}
 	if !strings.Contains(reset, `if (operation.operation_type === "factory_reset")`) ||
-		!strings.Contains(reset, `operation.state === "awaiting_password"`) ||
-		!strings.Contains(reset, "Set administrator password") {
-		t.Fatal("Full Factory Reset must await administrator password replacement")
+		!strings.Contains(reset, "this WebUI session will be signed out") {
+		t.Fatal("Full Factory Reset session warning must remain separate")
 	}
 	if !strings.Contains(app, `window.location.assign(target.pathname + target.search)`) ||
 		!strings.Contains(app, `window.location.assign("/login")`) {

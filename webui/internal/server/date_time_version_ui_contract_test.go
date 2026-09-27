@@ -64,10 +64,34 @@ func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 		t.Fatal("Recommended policy initializes as Specific version")
 	}
 	css := read("static/app.css")
-	if !strings.Contains(css, ".version-workspace-dialog{position:absolute") || !strings.Contains(css, "max-height:none") || strings.Contains(css, ".version-workspace-body{overflow:auto") {
-		t.Fatal("Version content must use natural height")
+	for _, want := range []string{
+		`[hidden]{display:none!important}`,
+		`.version-workspace-dialog{position:absolute`,
+		`height:min(720px,calc(100dvh - 76px))`,
+		`max-height:calc(100dvh - 76px)`,
+		`.version-workspace-shell{display:flex;flex-direction:column;height:100%;min-height:0`,
+		`.version-workspace-header{display:flex;flex:none`,
+		`.version-workspace-tabs{display:flex;flex:none`,
+		`.version-workspace-body{flex:1;min-height:0;min-width:0;overflow-y:auto;overflow-x:hidden`,
+	} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("bounded Version workspace missing %q", want)
+		}
+	}
+	versionDialogCSS := strings.SplitN(strings.SplitN(css, ".version-workspace-dialog{", 2)[1], "}", 2)[0]
+	if strings.Contains(versionDialogCSS, "height:auto") || strings.Contains(versionDialogCSS, "max-height:none") || strings.Contains(versionDialogCSS, "overflow:visible") {
+		t.Fatal("Version workspace must keep bounded outer geometry")
 	}
 	app := read("static/app.js")
+	if strings.Contains(app, `id !== "migration" && id !== "version"`) || !strings.Contains(app, `if (Number.isFinite(saved.height) && saved.height > 0) element.style.height = saved.height + "px";`) {
+		t.Fatal("Version must restore its saved height when switching tabs")
+	}
+	if !strings.Contains(version, `form.querySelector("[data-version-custom]").hidden = channel.value !== "custom"`) {
+		t.Fatal("Version custom tag must follow channel visibility")
+	}
+	if !strings.Contains(version, `tabs.forEach((tab) => tab.addEventListener("click", () => { currentTab = tab.dataset.versionTab;`) || strings.Contains(version, `versionDialog.style.height`) {
+		t.Fatal("Version tab switching must keep the workspace height")
+	}
 	if strings.Contains(app, `<label>Timezone<input name="timezone"`) {
 		t.Fatal("Minecraft Players still edits timezone")
 	}
