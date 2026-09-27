@@ -50,7 +50,7 @@ if grep -Eq 'umount|wipefs|parted|sgdisk|mkfs\.' "${helper}" "${common}"; then
 fi
 
 grep -Fq 'source /usr/libexec/justvoxel/mjust/minecraft-reset-common.sh' "${start_over}"
-grep -Fq 'operationTypeMinecraftReset = "minecraft_reset"' "${operations}"
+grep -Eq '^[[:space:]]*operationTypeMinecraftReset[[:space:]]*=[[:space:]]*"minecraft_reset"[[:space:]]*$' "${operations}"
 grep -Fq 'POST /v1/admin/reset/minecraft/plan' "${agent}"
 grep -Fq 'POST /v1/admin/reset/minecraft/apply' "${agent}"
 grep -Fq 'retryMinecraftReset' "${agent}"
