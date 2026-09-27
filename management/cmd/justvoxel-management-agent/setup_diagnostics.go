@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -392,18 +393,24 @@ func (s *operationStore) readSetupDiagnostic(id string) ([]byte, error) {
 	}
 	s.diagnosticMu.Lock()
 	defer s.diagnosticMu.Unlock()
+	if err := validatePrivateDiagnosticDirectory(s.setupLogsDir); err != nil { return nil, err }
 	path := s.setupDiagnosticPath(id)
-	info, err := os.Lstat(path)
+	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
 	if err != nil {
 		return nil, err
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+	file := os.NewFile(uintptr(fd), path)
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil { return nil, err }
+	ownership, owned := info.Sys().(*syscall.Stat_t)
+	if !info.Mode().IsRegular() || !owned || ownership.Uid != uint32(os.Geteuid()) {
 		return nil, errors.New("setup diagnostic log is not a regular file")
 	}
 	if info.Size() > 4*1024*1024 {
 		return nil, errors.New("setup diagnostic log is too large")
 	}
-	return os.ReadFile(path)
+	return io.ReadAll(io.LimitReader(file, 4*1024*1024+1))
 }
 
 func (s *operationStore) setupDiagnosticPath(id string) string {

@@ -98,6 +98,8 @@ type systemWorkspaceErrorResponse struct {
 
 func (a *App) registerSystemWorkspaceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/system/workspace/health", a.systemWorkspaceHealth)
+	mux.HandleFunc("GET /api/system/workspace/logs", a.systemWorkspaceLogs)
+	mux.HandleFunc("GET /api/system/workspace/logs/{category}/{id}", a.systemWorkspaceLog)
 	mux.HandleFunc("GET /api/system/workspace/history", a.systemWorkspaceHistory)
 	mux.HandleFunc("POST /api/system/workspace/history/notifications/{id}/resolve", a.systemWorkspaceResolveNotification)
 	mux.HandleFunc("GET /api/system/workspace/users", a.systemWorkspaceUsers)

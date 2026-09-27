@@ -88,6 +88,7 @@ type operationStore struct {
 	baseDir            string
 	operationsDir      string
 	setupLogsDir       string
+	operationLogsDir   string
 	diagnosticHostname string
 	lockFile         *os.File
 	restoreLockFile      *os.File
@@ -120,6 +121,7 @@ func openOperationStore(baseDir string) (*operationStore, error) {
 	}
 	operationsDir := filepath.Join(logsDir, "operations")
 	setupLogsDir := filepath.Join(logsDir, "setup-logs")
+	operationLogsDir := filepath.Join(logsDir, "operation-logs")
 	legacyOperationsDir := filepath.Join(baseDir, "operations")
 	legacySetupLogsDir := filepath.Join(baseDir, "setup-logs")
 	if err := validateLegacyManagementLogDirectoryMigration(legacyOperationsDir, operationsDir); err != nil {
@@ -138,6 +140,9 @@ func openOperationStore(baseDir string) (*operationStore, error) {
 		return nil, err
 	}
 	if err := ensurePrivateDirectory(setupLogsDir); err != nil {
+		return nil, err
+	}
+	if err := ensurePrivateDirectory(operationLogsDir); err != nil {
 		return nil, err
 	}
 	hostname, _ := os.Hostname()
@@ -194,6 +199,7 @@ func openOperationStore(baseDir string) (*operationStore, error) {
 		baseDir:               baseDir,
 		operationsDir:         operationsDir,
 		setupLogsDir:          setupLogsDir,
+		operationLogsDir:      operationLogsDir,
 		diagnosticHostname:    strings.TrimSpace(hostname),
 		lockFile:              lockFile,
 		restoreLockFile:       restoreLockFile,
@@ -305,6 +311,10 @@ func migrateLegacyManagementLogDirectory(legacyPath, currentPath string) error {
 func ensurePrivateDirectory(path string) error {
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		return fmt.Errorf("create operation state directory %s: %w", path, err)
+	}
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("unsafe operation state directory %s", path)
 	}
 	if err := os.Chmod(path, 0o700); err != nil {
 		return fmt.Errorf("protect operation state directory %s: %w", path, err)
@@ -1348,6 +1358,7 @@ func (s *operationStore) transition(id string, next operationState, stage, statu
 	}
 	s.operations[id] = journal
 	s.appendSetupJournalDiagnosticBestEffort(journal)
+	s.appendOperationJournalDiagnosticBestEffort(journal)
 	if next == operationSucceeded || next == operationRolledBack || next == operationResolved {
 		switch journal.OperationType {
 		case operationTypeSetup:

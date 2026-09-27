@@ -85,6 +85,7 @@ func (s *server) adminMigrationImportApply(w http.ResponseWriter, r *http.Reques
         }
         writeAdminMigrationImportApplyFailure(w,http.StatusInternalServerError,"operation_create_failed","server migration Import operation could not be created"); return
     }
+    if created { _ = s.operations.appendOperationDiagnostic(operation.OperationID, operationTypeMigrationImport, "APPLY", "reviewed Import accepted", map[string]string{"operation_id": operation.OperationID}) }
     if s.store!=nil { _=s.store.recordAuditEvent(actor,"migration_import",plan.Normalized.Source.Path,true,"Server migration Import operation accepted") }
     status:=http.StatusAccepted; if !created { status=http.StatusOK }
     writeJSON(w,status,adminMigrationImportApplyResponse{OK:true,Created:created,Operation:&operation})

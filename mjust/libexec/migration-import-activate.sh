@@ -86,6 +86,7 @@ fi
 if [[ ${configured} == yes ]]; then /usr/libexec/justvoxel/mjust/validate-data-mount; fi
 jv_migration_write_state "${transaction}" switching "${JV_MIGRATION_SOURCE}" "${source_class}"
 live_modified=yes
+echo 'Activating staged Minecraft data.'
 jv_migration_activate_data "${transaction}" "${DATA_PATH}" "${staged_server}" "${had_existing_data}"
 
 chown -R "${MINECRAFT_UID}:${MINECRAFT_GID}" "${DATA_PATH}"
@@ -94,6 +95,7 @@ chown -R "${MINECRAFT_UID}:${MINECRAFT_GID}" "${DATA_PATH}"
 # only portable/source-derived settings while destination-specific settings remain local.
 write_main_config
 apply_data_selinux
+echo 'Generating the imported Minecraft runtime.'
 JUSTVOXEL_REGENERATE_RCON=1 render_runtime
 if [[ ${configured} == yes ]]; then
     jv_migration_apply_candidate_firewall "${old_java}" "${old_bedrock_enabled}" "${old_bedrock}"
@@ -104,6 +106,7 @@ jv_migration_write_state "${transaction}" imported-active "${JV_MIGRATION_SOURCE
 
 echo 'Starting imported Minecraft server.'
 systemctl start minecraft.service
+echo 'Validating the imported Minecraft server.'
 jv_migration_write_state "${transaction}" validating "${JV_MIGRATION_SOURCE}" "${source_class}"
 /usr/libexec/justvoxel/mjust/restore-runtime-validate
 

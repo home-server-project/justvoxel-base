@@ -118,6 +118,7 @@ func registerAdminDiscoveryRoutes(mux *http.ServeMux, s *server) {
 	registerAdminSetupPlanRoutes(mux, s)
 	registerAdminSetupApplyRoutes(mux, s)
 	registerAdminSetupDiagnosticRoutes(mux, s)
+	registerAdminDiagnosticLogRoutes(mux, s)
 	registerAdminOperationRoutes(mux, s)
 }
 

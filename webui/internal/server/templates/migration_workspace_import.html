@@ -1,5 +1,5 @@
 {{define "migration_workspace_import.html"}}<div class="migration-workspace-content" data-migration-workspace-root>
-<p class="muted migration-workspace-helper">Choose a source. JustVoxel discovers the server, reviews the destination and runs a validated Import with rollback protection.</p>
+<p class="migration-workspace-helper"><strong>Choose a source. JustVoxel discovers the server, reviews the destination and runs a validated Import with rollback protection.</strong></p>
   {{if .Error}}<div class="notice error"><strong>Server Import cannot continue as submitted.</strong><br>{{.Error}}</div>{{end}}
 
   <form method="post" action="/workspace/migration/import/review" autocomplete="off" data-server-import-form>

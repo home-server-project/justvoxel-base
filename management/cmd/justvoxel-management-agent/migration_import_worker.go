@@ -9,6 +9,7 @@ import (
     "io"
     "log"
     "os/exec"
+    "strings"
     "time"
 )
 
@@ -31,10 +32,40 @@ type migrationImportTransactionRequest struct {
 }
 type migrationImportTransactionEvent struct{Event string `json:"event"`;State string `json:"state,omitempty"`;Stage string `json:"stage,omitempty"`;Status string `json:"status"`;Outcome string `json:"outcome,omitempty"`}
 
+type migrationImportDiagnosticContextKey struct{}
+type migrationImportDiagnosticContext struct { store *operationStore; id string; secrets []string }
+type boundedMigrationDiagnostic struct { bytes []byte; truncated bool }
+func (b *boundedMigrationDiagnostic) Write(data []byte) (int, error) {
+    const limit = 32 * 1024
+    count := len(data)
+    if len(data) >= limit { b.bytes = append(b.bytes[:0], data[len(data)-limit:]...); b.truncated = true; return count, nil }
+    if len(b.bytes)+len(data) > limit { b.bytes = append(b.bytes[:0], b.bytes[len(b.bytes)+len(data)-limit:]...); b.truncated = true }
+    b.bytes = append(b.bytes, data...)
+    return count, nil
+}
+func (d *migrationImportDiagnosticContext) recordOutput(output boundedMigrationDiagnostic) {
+    if d == nil || len(output.bytes) == 0 { return }
+    value := strings.ToValidUTF8(string(output.bytes), "�")
+    if output.truncated {
+        if newline := strings.IndexByte(value, '\n'); newline >= 0 { value = value[newline+1:] }
+    }
+    for _, secret := range d.secrets { if secret != "" { value = strings.ReplaceAll(value, secret, "<REDACTED>") } }
+    for _, line := range strings.Split(value, "\n") {
+        if strings.TrimSpace(line) == "" { continue }
+        if operationDiagnosticSensitivePattern.MatchString(line) { line = "<sensitive backend detail redacted>" }
+        if len(line) > 2048 { line = "…" + line[len(line)-2048:] }
+        _ = d.store.appendOperationDiagnostic(d.id, operationTypeMigrationImport, "BACKEND", "backend output", map[string]string{"line": line})
+    }
+    if output.truncated { _ = d.store.appendOperationDiagnostic(d.id, operationTypeMigrationImport, "BACKEND", "backend output truncated at 32 KiB", nil) }
+}
+
 var runAdminMigrationImportTransactionHelper=func(ctx context.Context,request migrationImportTransactionRequest,handle func(migrationImportTransactionEvent)error)error{
     payload,err:=json.Marshal(request);if err!=nil{return err}
     cmd:=exec.CommandContext(ctx,adminMigrationImportTransactionHelper);cmd.Stdin=bytes.NewReader(payload)
-    stdout,err:=cmd.StdoutPipe();if err!=nil{return err};cmd.Stderr=io.Discard
+    stdout,err:=cmd.StdoutPipe();if err!=nil{return err}
+    var diagnostic boundedMigrationDiagnostic
+    cmd.Stderr=&diagnostic
+    if details,ok:=ctx.Value(migrationImportDiagnosticContextKey{}).(*migrationImportDiagnosticContext);ok { defer func(){ details.recordOutput(diagnostic) }() }
     if err:=cmd.Start();err!=nil{return err}
     scanner:=bufio.NewScanner(stdout);scanner.Buffer(make([]byte,1024),64*1024)
     for scanner.Scan(){
@@ -55,7 +86,9 @@ func executeMigrationImportTransaction(parent context.Context,store *operationSt
     if _,err:=store.transition(operationID,operationValidating,"import_preflight","Preparing the reviewed server migration Import for one bounded staging attempt before changing Minecraft.");err!=nil{return err}
     request:=migrationImportTransactionRequest{OperationID:operationID,PlanFingerprint:operation.PlanFingerprint,Request:plan.Request,Normalized:plan.Normalized,Context:plan.Context,Requirements:plan.Requirements,PlayersConfirmed:plan.PlayersConfirmed,EULAAccepted:plan.EULAAccepted,VanillaConfirmed:plan.VanillaConfirmed,PluginsConfirmed:plan.PluginsConfirmed,OnlineModeConfirmed:plan.OnlineModeConfirmed,BackupSMBPassword:plan.BackupSMBPassword}
     finalSeen:=false
+    parent=context.WithValue(parent,migrationImportDiagnosticContextKey{},&migrationImportDiagnosticContext{store:store,id:operationID,secrets:[]string{plan.Request.Source.SMBPassword,plan.BackupSMBPassword}})
     err=runAdminMigrationImportTransactionHelper(parent,request,func(event migrationImportTransactionEvent)error{
+        _ = store.appendOperationDiagnostic(operationID, operationTypeMigrationImport, "LIFECYCLE", event.Event, map[string]string{"state":event.State,"stage":event.Stage,"status":event.Status,"outcome":event.Outcome})
         switch event.Event{
         case "progress":return applyMigrationImportProgress(store,operationID,event)
         case "result":if finalSeen{return errors.New("server migration Import helper returned multiple final results")};finalSeen=true;return applyMigrationImportResult(store,operationID,event)
@@ -63,6 +96,7 @@ func executeMigrationImportTransaction(parent context.Context,store *operationSt
         }
     })
     if err!=nil{
+        _ = store.appendOperationDiagnostic(operationID, operationTypeMigrationImport, "ERROR", "Import helper stopped", map[string]string{"error":err.Error()})
         if finalSeen{return nil}
         _ = markMigrationImportNeedsAttention(store,operationID,"import_backend_interrupted","Server migration Import backend stopped unexpectedly before a final safety result; retained Import or runtime state requires administrator attention.")
         return err

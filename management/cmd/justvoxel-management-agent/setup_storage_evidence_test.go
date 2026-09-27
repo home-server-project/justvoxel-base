@@ -16,8 +16,12 @@ func TestSetupStorageEvidenceDoesNotExposeExpectedIdentity(t *testing.T) {
 		switch key {
 		case "findmnt -n -o FSTYPE --target /var/lib/justvoxel/minecraft":
 			return []byte("xfs\n"), nil
-		case "findmnt -n -o UUID --target /var/lib/justvoxel/minecraft":
-			return []byte("private-uuid\n"), nil
+		case "findmnt -rn -o TARGET --target /var/lib/justvoxel/minecraft", "findmnt -rn -o TARGET --mountpoint /var/lib/justvoxel/minecraft":
+			return []byte("/var/lib/justvoxel/minecraft\n/var/lib/justvoxel/minecraft\n"), nil
+		case "findmnt -rn -o UUID --mountpoint /var/lib/justvoxel/minecraft":
+			return []byte("private-uuid\nprivate-uuid\n"), nil
+		case "findmnt -rn -o SOURCE --mountpoint /var/lib/justvoxel/minecraft":
+			return []byte("/dev/vdb1\n/dev/vdb1\n"), nil
 		case "df -Pm --output=size,avail -- /var/lib/justvoxel/minecraft":
 			return []byte("1M-blocks Available\n102400 51200\n"), nil
 		case "stat -c %a:%u:%g -- /var/lib/justvoxel/minecraft":
@@ -30,9 +34,12 @@ func TestSetupStorageEvidenceDoesNotExposeExpectedIdentity(t *testing.T) {
 	}
 	t.Cleanup(func() { runSetupDiagnosticCommand = originalCommand })
 
-	values := setupStorageTargetEvidence("data", "/var/lib/justvoxel/minecraft", "", "private-uuid", "")
+	values := setupStorageTargetEvidence("data", "/var/lib/justvoxel/minecraft", "", "private-uuid", "/dev/vdb1")
 	if values["data_uuid_match"] != "yes" {
 		t.Fatalf("uuid match = %q, want yes", values["data_uuid_match"])
+	}
+	if values["data_source_match"] != "yes" {
+		t.Fatalf("source match = %q, want yes", values["data_source_match"])
 	}
 	if values["data_filesystem"] != "xfs" {
 		t.Fatalf("filesystem = %q, want xfs", values["data_filesystem"])
@@ -41,7 +48,7 @@ func TestSetupStorageEvidenceDoesNotExposeExpectedIdentity(t *testing.T) {
 		t.Fatalf("available MiB = %q, want 51200", values["data_available_mib"])
 	}
 	for key, value := range values {
-		if strings.Contains(value, "private-uuid") {
+		if strings.Contains(value, "private-uuid") || strings.Contains(value, "/dev/vdb1") {
 			t.Fatalf("%s leaked raw storage identity: %q", key, value)
 		}
 	}
@@ -89,5 +96,23 @@ func TestSetupStorageManifestEvidenceSummarizesWithoutRawValues(t *testing.T) {
 				t.Fatalf("%s leaked raw manifest data %q: %q", key, forbidden, value)
 			}
 		}
+	}
+}
+
+func TestSetupDiagnosticExactMountIdentityRejectsConflictingRows(t *testing.T) {
+	originalCommand := runSetupDiagnosticCommand
+	runSetupDiagnosticCommand = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		key := name + " " + strings.Join(args, " ")
+		switch key {
+		case "findmnt -rn -o TARGET --target /var/lib/justvoxel/minecraft", "findmnt -rn -o TARGET --mountpoint /var/lib/justvoxel/minecraft":
+			return []byte("/var/lib/justvoxel/minecraft\n/var/lib/justvoxel/minecraft\n"), nil
+		case "findmnt -rn -o UUID --mountpoint /var/lib/justvoxel/minecraft":
+			return []byte("uuid-one\nuuid-two\n"), nil
+		}
+		return nil, errors.New("unexpected command")
+	}
+	t.Cleanup(func() { runSetupDiagnosticCommand = originalCommand })
+	if _, err := setupDiagnosticExactMountIdentity("UUID", "/var/lib/justvoxel/minecraft"); err == nil {
+		t.Fatal("conflicting exact mount UUID rows were accepted")
 	}
 }

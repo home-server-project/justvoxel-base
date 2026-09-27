@@ -20,6 +20,21 @@ const enhancePasswordFields = (root = document) => {
       button.setAttribute("title", showing ? "Show password" : "Hide password");
     });
     shell.appendChild(button);
+    if (input.autocomplete === "new-password" && !/confirm/i.test(input.name)) {
+      const strength = document.createElement("span");
+      strength.className = "password-strength is-unacceptable";
+      strength.setAttribute("role", "status");
+      strength.textContent = "Strength: Not acceptable";
+      shell.after(strength);
+      input.addEventListener("input", () => {
+        const value = input.value;
+        const classes = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^a-zA-Z0-9]/].filter((pattern) => pattern.test(value)).length;
+        const minimum = Math.max(8, input.minLength > 0 ? input.minLength : 8);
+        const level = value.length < minimum || classes < 2 ? "unacceptable" : value.length >= 12 && classes >= 3 ? "strong" : "acceptable";
+        strength.className = "password-strength is-" + level;
+        strength.textContent = "Strength: " + (level === "unacceptable" ? "Not acceptable" : level === "strong" ? "Strong" : "Acceptable");
+      });
+    }
   });
 };
 
@@ -3283,7 +3298,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   const state = systemWorkspaceDialog.querySelector("[data-system-state]");
   const content = systemWorkspaceDialog.querySelector("[data-system-workspace-content]");
   const tabs = Array.from(systemWorkspaceDialog.querySelectorAll("[data-system-tab]"));
-  const administratorTabs = new Set(["health", "users", "security", "reset"]);
+  const administratorTabs = new Set(["health", "users", "security", "logs", "reset"]);
   const upsTabButton = systemWorkspaceDialog.querySelector("[data-system-ups-tab]");
   const upsCSRF = document.querySelector("[data-system-ups-csrf]");
   const systemWorkspaceCSRF = document.querySelector("[data-system-workspace-csrf]")?.value || "";
@@ -3584,6 +3599,67 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: body.toString(),
     });
+  };
+
+  const renderLogs = async (sequence) => {
+    const payload = await systemFetchJSON("/api/system/workspace/logs");
+    if (!payload || sequence !== loadSequence || !content) return;
+    const root = document.createElement("div");
+    root.className = "system-logs-layout";
+    const list = document.createElement("div");
+    list.className = "system-logs-list";
+    const reader = document.createElement("section");
+    reader.className = "panel system-logs-reader";
+    const heading = document.createElement("h3");
+    heading.textContent = "Diagnostic log";
+    const download = document.createElement("a");
+    download.className = "button-link secondary";
+    download.textContent = "Download log";
+    download.hidden = true;
+    const documentText = document.createElement("pre");
+    documentText.textContent = "Select a log to read it here.";
+    reader.append(heading, download, documentText);
+    const logs = Array.isArray(payload.logs) ? payload.logs : [];
+    if (!logs.length) {
+      const empty = document.createElement("p");
+      empty.className = "muted";
+      empty.textContent = "No retained diagnostic logs are available.";
+      list.appendChild(empty);
+    }
+    logs.forEach((entry) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "system-log-entry secondary";
+      const type = entry.operation_type || (entry.category === "setup" ? "Setup" : "Operation");
+      const title = document.createElement("strong");
+      title.textContent = type.replaceAll("_", " ");
+      const meta = document.createElement("span");
+      meta.textContent = [entry.state || "", entry.timestamp || ""].filter(Boolean).join(" · ");
+      const id = document.createElement("code");
+      id.textContent = entry.operation_id || entry.log_id;
+      button.append(title, meta, id);
+      button.addEventListener("click", async () => {
+        const url = "/api/system/workspace/logs/" + encodeURIComponent(entry.category) + "/" + encodeURIComponent(entry.log_id);
+        heading.textContent = title.textContent;
+        documentText.textContent = "Loading log…";
+        download.hidden = true;
+        try {
+          const response = await fetch(url, { credentials: "same-origin", cache: "no-store", headers: { Accept: "text/plain" } });
+          if (systemHandleAuth(response)) return;
+          if (!response.ok) throw new Error("Diagnostic log is unavailable.");
+          const data = await response.text();
+          if (sequence !== loadSequence) return;
+          documentText.textContent = data;
+          download.href = url + "?download=1";
+          download.hidden = false;
+        } catch (error) {
+          documentText.textContent = error?.message || "Diagnostic log is unavailable.";
+        }
+      });
+      list.appendChild(button);
+    });
+    root.append(list, reader);
+    content.replaceChildren(root);
   };
 
   const renderUsers = async (sequence, message = "") => {
@@ -4079,7 +4155,8 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       remove.push("Additional WebUI users, notifications, history, and local authentication state.");
       remove.push("Current WebUI sessions; the voxel system password will be marked for mandatory change.");
       keep.push("USB, external, NFS, and SMB data.");
-      keep.push("Storage partitions, filesystems, mounts, and /etc/fstab.");
+      remove.push("JustVoxel-managed mounts and /etc/fstab entries are reset; storage data is not erased by removing these entries.");
+      keep.push("Storage partitions, filesystems, and unrelated administrator /etc/fstab entries.");
       keep.push("Network configuration, SSH configuration, and the JustVoxel OS image.");
     }
     return { remove, keep };
@@ -4616,6 +4693,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       else if (currentTab === "history") await renderHistory(sequence);
       else if (currentTab === "users") await renderUsers(sequence);
       else if (currentTab === "security") await renderSecurity(sequence);
+      else if (currentTab === "logs") await renderLogs(sequence);
       else if (currentTab === "reset") await renderReset(sequence);
       else if (currentTab === "ups") await loadUPS(sequence);
       else await renderAbout(sequence);
@@ -4660,7 +4738,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
           const target = new URLSearchParams(window.location.search);
           const requested = target.get("workspace") === "system" ? target.get("tab") : "";
           currentTab = user.role === "administrator" ? "health" : "history";
-          if (["health", "history", "users", "security", "reset", "about"].includes(requested) &&
+          if (["health", "history", "users", "security", "logs", "reset", "about"].includes(requested) &&
               (!administratorTabs.has(requested) || user.role === "administrator")) currentTab = requested;
           syncSystemTabs();
         }

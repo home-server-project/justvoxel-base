@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -117,8 +118,8 @@ func setupStorageTargetEvidence(prefix, path, mountPoint, expectedUUID, expected
 
 	if expectedUUID != "" {
 		values[prefix+"_uuid_match"] = "unavailable"
-		if output, err := setupDiagnosticRunCommand(4*time.Second, "findmnt", "-n", "-o", "UUID", "--target", target); err == nil {
-			if strings.TrimSpace(string(output)) == expectedUUID {
+		if identity, err := setupDiagnosticExactMountIdentity("UUID", target); err == nil {
+			if identity == expectedUUID {
 				values[prefix+"_uuid_match"] = "yes"
 			} else {
 				values[prefix+"_uuid_match"] = "no"
@@ -128,8 +129,8 @@ func setupStorageTargetEvidence(prefix, path, mountPoint, expectedUUID, expected
 
 	if expectedSource != "" {
 		values[prefix+"_source_match"] = "unavailable"
-		if output, err := setupDiagnosticRunCommand(4*time.Second, "findmnt", "-n", "-o", "SOURCE", "--target", target); err == nil {
-			if strings.TrimSpace(string(output)) == expectedSource {
+		if identity, err := setupDiagnosticExactMountIdentity("SOURCE", target); err == nil {
+			if identity == expectedSource {
 				values[prefix+"_source_match"] = "yes"
 			} else {
 				values[prefix+"_source_match"] = "no"
@@ -137,6 +138,51 @@ func setupStorageTargetEvidence(prefix, path, mountPoint, expectedUUID, expected
 		}
 	}
 	return values
+}
+
+// Match the exact mount, and accept duplicate findmnt rows only when they agree.
+func setupDiagnosticExactMountIdentity(field, target string) (string, error) {
+	if field != "UUID" && field != "SOURCE" {
+		return "", errors.New("invalid mount identity field")
+	}
+	output, err := setupDiagnosticRunCommand(4*time.Second, "findmnt", "-rn", "-o", "TARGET", "--target", target)
+	if err != nil {
+		return "", err
+	}
+	mountPoint := ""
+	for _, row := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if row == "" || (mountPoint != "" && row != mountPoint) {
+			return "", errors.New("ambiguous mount target")
+		}
+		mountPoint = row
+	}
+	if mountPoint == "" {
+		return "", errors.New("mount target unavailable")
+	}
+	output, err = setupDiagnosticRunCommand(4*time.Second, "findmnt", "-rn", "-o", "TARGET", "--mountpoint", mountPoint)
+	if err != nil {
+		return "", err
+	}
+	for _, row := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if row != mountPoint {
+			return "", errors.New("mount target mismatch")
+		}
+	}
+	output, err = setupDiagnosticRunCommand(4*time.Second, "findmnt", "-rn", "-o", field, "--mountpoint", mountPoint)
+	if err != nil {
+		return "", err
+	}
+	identity := ""
+	for _, row := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if row == "" || (identity != "" && row != identity) {
+			return "", errors.New("conflicting mount identity")
+		}
+		identity = row
+	}
+	if identity == "" {
+		return "", errors.New("mount identity unavailable")
+	}
+	return identity, nil
 }
 
 func setupStorageManifestEvidence(operationID string) map[string]string {

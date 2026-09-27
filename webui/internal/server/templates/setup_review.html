@@ -42,20 +42,39 @@
       <h2>Technical details</h2>
       <div class="setup-review-table">
         <section><h3>Server</h3>
-          <p>{{.Plan.Normalized.Server.MaxPlayers}} players · Bedrock {{if .Plan.Normalized.Server.BedrockEnabled}}On{{else}}Off{{end}} · <code>{{.Plan.Normalized.Server.Timezone}}</code></p>
-          <p>MOTD: {{.Plan.Normalized.Server.MOTD}}</p>
+          <p><span class="review-label">Players:</span> {{.Plan.Normalized.Server.MaxPlayers}}</p>
+          <p><span class="review-label">Bedrock:</span> {{if .Plan.Normalized.Server.BedrockEnabled}}On{{else}}Off{{end}}</p>
+          <p><span class="review-label">Timezone:</span> <code>{{.Plan.Normalized.Server.Timezone}}</code></p>
+          <p><span class="review-label">MOTD:</span> {{.Plan.Normalized.Server.MOTD}}</p>
         </section>
         <section><h3>Minecraft</h3>
-          <p>{{if .ServerTypeLabel}}{{.ServerTypeLabel}} {{end}}{{.Plan.Normalized.Minecraft.Version}} · {{.Plan.Normalized.Minecraft.JavaMemory}} heap / {{.Plan.Normalized.Minecraft.ContainerMemory}} container · <code>{{.Plan.Normalized.Minecraft.ImageTag}}</code></p>
-          <p>{{.Plan.Normalized.Minecraft.JavaPort}}/TCP{{if .Plan.Normalized.Server.BedrockEnabled}} · {{.Plan.Normalized.Minecraft.BedrockPort}}/UDP{{end}} · {{.VersionLabel}}</p>
+          <p><span class="review-label">Type:</span> {{.ServerTypeLabel}}</p>
+          <p><span class="review-label">Version:</span> {{.Plan.Normalized.Minecraft.Version}} {{.VersionLabel}}</p>
+          <p><span class="review-label">Memory:</span> {{.Plan.Normalized.Minecraft.JavaMemory}} heap / {{.Plan.Normalized.Minecraft.ContainerMemory}} container</p>
+          <p><span class="review-label">Ports:</span> {{.Plan.Normalized.Minecraft.JavaPort}}/TCP{{if .Plan.Normalized.Server.BedrockEnabled}}, {{.Plan.Normalized.Minecraft.BedrockPort}}/UDP{{end}}</p>
+          <p><span class="review-label">Image:</span> <code>{{.Plan.Normalized.Minecraft.ImageTag}}</code></p>
         </section>
         <section><h3>Storage</h3>
-          <p>{{.StorageLabel}}{{if .Plan.Normalized.Storage.Device}} · <code>{{.Plan.Normalized.Storage.Device}}</code>{{end}}{{if .Plan.Normalized.Storage.Filesystem}} · {{.Plan.Normalized.Storage.Filesystem}}{{end}}{{if .StorageSize}} · {{.StorageSize}}{{end}}</p>
-          <p><code>{{.Plan.Normalized.Storage.Path}}</code>{{if .Plan.Normalized.Storage.UUID}} · UUID <code>{{.Plan.Normalized.Storage.UUID}}</code>{{end}}{{if .Plan.Normalized.Storage.MountPoint}} · mount <code>{{.Plan.Normalized.Storage.MountPoint}}</code>{{end}}</p>
+          <p><span class="review-label">Type:</span> {{.StorageLabel}}</p>
+          {{if .Plan.Normalized.Storage.Device}}<p><span class="review-label">Device:</span> <code>{{.Plan.Normalized.Storage.Device}}</code></p>{{end}}
+          {{if .Plan.Normalized.Storage.Filesystem}}<p><span class="review-label">Filesystem:</span> {{.Plan.Normalized.Storage.Filesystem}}</p>{{end}}
+          {{if .StorageSize}}<p><span class="review-label">Size:</span> {{.StorageSize}}</p>{{end}}
+          <p><span class="review-label">Path:</span> <code>{{.Plan.Normalized.Storage.Path}}</code></p>
+          {{if .Plan.Normalized.Storage.UUID}}<p><span class="review-label">UUID:</span> <code>{{.Plan.Normalized.Storage.UUID}}</code></p>{{end}}
+          {{if .Plan.Normalized.Storage.MountPoint}}<p><span class="review-label">Mount:</span> <code>{{.Plan.Normalized.Storage.MountPoint}}</code></p>{{end}}
         </section>
         <section><h3>Backups</h3>
-          <p>{{.BackupLabel}}{{if .Plan.Normalized.Backups.Device}} · <code>{{.Plan.Normalized.Backups.Device}}</code>{{end}}{{if .Plan.Normalized.Backups.Filesystem}} · {{.Plan.Normalized.Backups.Filesystem}}{{end}}{{if .BackupSize}} · {{.BackupSize}}{{end}} · {{if .Plan.Normalized.Backups.Automatic}}Daily {{.Plan.Normalized.Backups.DailyTime}}{{else}}Automatic off{{end}} · keep {{.Plan.Normalized.Backups.Keep}}</p>
-          <p><code>{{.Plan.Normalized.Backups.Path}}</code>{{if .Plan.Normalized.Backups.UUID}} · UUID <code>{{.Plan.Normalized.Backups.UUID}}</code>{{end}}{{if .Plan.Normalized.Backups.Source}} · <code>{{.Plan.Normalized.Backups.Source}}</code>{{end}}{{if .Plan.Normalized.Backups.MountPoint}} · mount <code>{{.Plan.Normalized.Backups.MountPoint}}</code>{{end}}{{if .Plan.Normalized.Backups.Username}} · {{.Plan.Normalized.Backups.Username}}{{if .Plan.Normalized.Backups.Domain}} / {{.Plan.Normalized.Backups.Domain}}{{end}}{{end}}</p>
+          <p><span class="review-label">Destination:</span> {{.BackupLabel}}</p>
+          <p><span class="review-label">Schedule:</span> {{if .Plan.Normalized.Backups.Automatic}}Daily {{.Plan.Normalized.Backups.DailyTime}}{{else}}Automatic off{{end}}</p>
+          <p><span class="review-label">Retention:</span> Keep {{.Plan.Normalized.Backups.Keep}}</p>
+          {{if .Plan.Normalized.Backups.Device}}<p><span class="review-label">Device:</span> <code>{{.Plan.Normalized.Backups.Device}}</code></p>{{end}}
+          {{if .Plan.Normalized.Backups.Filesystem}}<p><span class="review-label">Filesystem:</span> {{.Plan.Normalized.Backups.Filesystem}}</p>{{end}}
+          {{if .BackupSize}}<p><span class="review-label">Size:</span> {{.BackupSize}}</p>{{end}}
+          <p><span class="review-label">Path:</span> <code>{{.Plan.Normalized.Backups.Path}}</code></p>
+          {{if .Plan.Normalized.Backups.UUID}}<p><span class="review-label">UUID:</span> <code>{{.Plan.Normalized.Backups.UUID}}</code></p>{{end}}
+          {{if .Plan.Normalized.Backups.Source}}<p><span class="review-label">Source:</span> <code>{{.Plan.Normalized.Backups.Source}}</code></p>{{end}}
+          {{if .Plan.Normalized.Backups.MountPoint}}<p><span class="review-label">Mount:</span> <code>{{.Plan.Normalized.Backups.MountPoint}}</code></p>{{end}}
+          {{if .Plan.Normalized.Backups.Username}}<p><span class="review-label">Account:</span> {{.Plan.Normalized.Backups.Username}}{{if .Plan.Normalized.Backups.Domain}} / {{.Plan.Normalized.Backups.Domain}}{{end}}</p>{{end}}
         </section>
       </div>
     </section>

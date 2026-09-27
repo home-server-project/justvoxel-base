@@ -105,16 +105,20 @@ Management journals and human-readable diagnostic logs use one persistent hierar
 /var/lib/justvoxel/management/
 ├── logs/
 │   ├── operations/
-│   └── setup-logs/
+│   ├── setup-logs/
+│   └── operation-logs/
+│       └── <operation-type>/<operation-id>.log
 ├── setup.lock
 ├── restore.lock
 ├── data-migration.lock
 └── server-migration.lock
 ```
 
-Operation journals are stored as JSON under `/var/lib/justvoxel/management/logs/operations/`. Setup diagnostic logs are stored under `/var/lib/justvoxel/management/logs/setup-logs/` and remain available through the existing downloadable setup-log API.
+Operation journals are stored as JSON under `/var/lib/justvoxel/management/logs/operations/`. Setup diagnostic logs are stored under `/var/lib/justvoxel/management/logs/setup-logs/` and remain available through the existing downloadable setup-log API. Human-readable operation diagnostics use private files under `logs/operation-logs/<operation-type>/`, named by persistent operation ID. Server Import captures bounded, redacted backend output alongside its lifecycle and rollback evidence.
 
-Future management logs intended for diagnostics, support, or a built-in log/document viewer should use `/var/lib/justvoxel/management/logs/<feature>/`. Runtime coordination files such as lock files remain directly under `/var/lib/justvoxel/management/`.
+Administrators can read and download retained setup and operation diagnostics in System → Logs. The WebUI reads these files only through the Management API's allowlisted `/v1/admin/logs` endpoints; it does not accept filesystem paths. The viewer is local to the appliance and does not send reports externally.
+
+Future management logs intended for diagnostics or support should use the same `/var/lib/justvoxel/management/logs/` hierarchy. Runtime coordination files such as lock files remain directly under `/var/lib/justvoxel/management/`.
 
 On Management Agent startup, legacy `management/operations/` and `management/setup-logs/` directories are migrated into the `logs/` hierarchy without overwriting existing data. If both a legacy directory and its new destination already contain data, startup fails safely instead of merging or deleting either copy.
 

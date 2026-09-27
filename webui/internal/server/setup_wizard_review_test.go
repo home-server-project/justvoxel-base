@@ -351,7 +351,15 @@ func TestSetupReviewExplainsDisabledBedrockCompatibility(t *testing.T) {
 		t.Fatalf("review returned %d: %s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"20 players · Bedrock Off · <code>America/Toronto</code>", "Bedrock cross-play unavailable", "currently supports Minecraft 26.2", "while this setup uses 26.3", "Come back later and check again"} {
+	for _, want := range []string{
+		`<p><span class="review-label">Players:</span> 20</p>`,
+		`<p><span class="review-label">Bedrock:</span> Off</p>`,
+		`<p><span class="review-label">Timezone:</span> <code>America/Toronto</code></p>`,
+		"Bedrock cross-play unavailable",
+		"currently supports Minecraft 26.2",
+		"while this setup uses 26.3",
+		"Come back later and check again",
+	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("Bedrock compatibility review missing %q: %s", want, body)
 		}
