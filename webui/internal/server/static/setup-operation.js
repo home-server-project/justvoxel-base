@@ -76,6 +76,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const dashboardLink = document.getElementById("setup-dashboard-link");
   const reviewLink = document.getElementById("setup-review-link");
   const startOverForm = document.getElementById("setup-start-over-form");
+  const recoverForm = document.getElementById("setup-recover-form");
   const disabledStartOver = document.getElementById("setup-start-over-disabled");
   const diagnosticLogLink = document.getElementById("setup-diagnostic-log-link");
   const diagnosticLogView = document.getElementById("setup-diagnostic-log-view");
@@ -115,6 +116,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (stage === "setup_failed") return "Preparing recovery";
     if (stage === "runtime_rollback") return "Restoring Minecraft configuration";
     if (stage === "storage_rollback") return "Restoring storage changes";
+    if (stage === "storage_recovery") return "Retrying storage recovery";
     if (stage === "setup_rolled_back") return "Rolled back";
     if (stage === "interrupted") return "Interrupted";
     return "Working";
@@ -190,6 +192,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (dashboardLink) dashboardLink.hidden = !terminalState(operation.state);
     if (reviewLink) reviewLink.hidden = !rolledBack;
     if (startOverForm) startOverForm.hidden = !rolledBack;
+    if (recoverForm) recoverForm.hidden = !(needsAttention && operation.stage === "storage_rollback");
     if (disabledStartOver) disabledStartOver.hidden = !needsAttention;
     if (diagnosticLogLink) diagnosticLogLink.hidden = !terminalState(operation.state);
     if (diagnosticLogView) diagnosticLogView.hidden = !terminalState(operation.state);

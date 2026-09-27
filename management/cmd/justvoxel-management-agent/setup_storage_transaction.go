@@ -142,6 +142,29 @@ func runSetupStorageTransactionAction(parent context.Context, action string, tim
 	return response, nil
 }
 
+func runSetupStorageRecoveryAction(parent context.Context, request []byte) (setupStorageTransactionResponse, error) {
+	var response setupStorageTransactionResponse
+	ctx, cancel := context.WithTimeout(parent, setupStorageRollbackTimeout)
+	defer cancel()
+	output, err := runAdminSetupStorageTransactionHelper(ctx, "recover", request)
+	if err != nil {
+		return response, newSetupHelperExecutionError("storage", "recover", err, output)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(output))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&response); err != nil {
+		return response, errors.New("setup storage recovery helper returned invalid data")
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF || response.Phase == "" || response.RollbackState == "" {
+		return response, errors.New("setup storage recovery helper returned invalid data")
+	}
+	if len(response.Error) > 512 || bytes.ContainsAny([]byte(response.Error), "\r\n") {
+		response.Error = "storage recovery failed"
+	}
+	return response, nil
+}
+
 func executeSetupStorage(parent context.Context, store *operationStore, operationID string, plan *adminSetupNormalizedPlan, smbPassword string) error {
 	if store == nil {
 		return errors.New("operation store is unavailable")

@@ -32,6 +32,7 @@ type adminSetupApplyResponse struct {
 
 func registerAdminSetupApplyRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("POST /v1/admin/setup/apply", s.adminSetupApply)
+	mux.HandleFunc("POST /v1/admin/setup/recover", s.adminSetupRecover)
 }
 
 func (s *server) adminSetupApply(w http.ResponseWriter, r *http.Request) {

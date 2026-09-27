@@ -13,5 +13,6 @@ case "${action}" in
     validate) a53_validate_action ;;
     apply) a53_apply_action ;;
     rollback) a53_rollback_action ;;
-    *) _a53_json false false invalid_action not_started no_changes 'Usage: admin-setup-storage-transaction-json {validate|apply|rollback}' ;;
+    recover) a53_recover_action ;;
+    *) _a53_json false false invalid_action not_started no_changes 'Usage: admin-setup-storage-transaction-json {validate|apply|rollback|recover}' ;;
 esac

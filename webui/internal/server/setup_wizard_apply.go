@@ -15,6 +15,7 @@ var setupOperationIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9
 
 type setupExecutionAPI interface {
 	AdminSetupApply(ctx context.Context, session string, request api.AdminSetupApplyRequest) (api.AdminSetupApplyResponse, error)
+	AdminSetupRecover(ctx context.Context, session, operationID string) (api.PersistentOperationResponse, error)
 	AdminOperation(ctx context.Context, session, id string) (api.PersistentOperationResponse, error)
 	AdminCurrentSetupOperation(ctx context.Context, session string) (api.PersistentOperationResponse, error)
 }
@@ -32,10 +33,42 @@ type setupProgressPageData struct {
 
 func (a *App) registerSetupWizardApplyRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /setup/review/apply", a.setupWizardReviewApply)
+	mux.HandleFunc("POST /setup/recover", a.setupWizardRecover)
 	mux.HandleFunc("GET /setup/progress/{id}", a.setupWizardProgressPage)
 	mux.HandleFunc("GET /setup/progress/{id}/log", a.setupWizardDiagnosticDownload)
 	mux.HandleFunc("GET /setup/progress/{id}/log/view", a.setupWizardDiagnosticDownload)
 	mux.HandleFunc("GET /api/setup/progress/{id}", a.setupWizardProgressStatus)
+}
+
+func (a *App) setupWizardRecover(w http.ResponseWriter, r *http.Request) {
+	session, client, _, ok := a.setupWizardRequest(w, r, true)
+	if !ok {
+		return
+	}
+	id := r.FormValue("operation_id")
+	if !setupOperationIDPattern.MatchString(id) {
+		http.Error(w, "invalid setup operation", http.StatusBadRequest)
+		return
+	}
+	executor, ok := client.(setupExecutionAPI)
+	if !ok {
+		http.Error(w, "setup recovery is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	current, err := executor.AdminCurrentSetupOperation(r.Context(), session)
+	if err != nil {
+		a.handleSetupProgressError(w, r, err)
+		return
+	}
+	if current.Operation == nil || current.Operation.OperationID != id || current.Operation.State != "needs_attention" || current.Operation.Stage != "storage_rollback" {
+		http.Error(w, "setup recovery is unavailable in the current state", http.StatusConflict)
+		return
+	}
+	if _, err := executor.AdminSetupRecover(r.Context(), session, id); err != nil {
+		a.handleSetupProgressError(w, r, err)
+		return
+	}
+	http.Redirect(w, r, "/setup/progress/"+id, http.StatusSeeOther)
 }
 
 func (a *App) redirectCurrentSetupOperation(w http.ResponseWriter, r *http.Request, session string, client adminDiscoveryAPI) bool {
@@ -297,6 +330,8 @@ func setupOperationStageLabel(stage string) string {
 		return "Restoring Minecraft configuration"
 	case "storage_rollback":
 		return "Restoring storage changes"
+	case "storage_recovery":
+		return "Retrying storage recovery"
 	case "setup_rolled_back":
 		return "Rolled back"
 	case "interrupted":

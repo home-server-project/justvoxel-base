@@ -54,6 +54,8 @@ Selecting **Configure JustVoxel** requests an SMB password in a modal when the b
 
 The progress page follows the persistent setup operation through Storage, Configuration, Minecraft, Verification, and Complete. During Minecraft startup it explains that downloads and initialization can take several minutes. Refreshing or reopening the page reconnects to the same operation.
 
+If setup needs attention during storage rollback, the Administrator can select **Retry recovery** on that operation's progress page. The Management Agent checks the preserved storage transaction before restoring any remaining changes. **Start setup over** stays disabled until recovery succeeds and the operation reaches **Rolled back**. Other attention stages do not offer this retry.
+
 ## Password policy
 
 JustVoxel does not impose its own uppercase/lowercase/digit/symbol formula or a separate hard-coded password length.

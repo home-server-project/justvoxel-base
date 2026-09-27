@@ -490,9 +490,17 @@ func (s *operationStore) loadAndRecover() error {
 		journal := s.operations[activeSetup]
 		if operationInterruptedByRestart(journal.State) {
 			now := s.now().UTC().Format(time.RFC3339Nano)
+			interruptedStorageRecovery := journal.State == operationRollingBack && journal.Stage == "storage_recovery"
 			journal.State = operationNeedsAttention
-			journal.Stage = "interrupted"
-			journal.Status = "Setup was interrupted before completion."
+			if interruptedStorageRecovery {
+				journal.Stage = "storage_rollback"
+				journal.Status = "Storage recovery was interrupted; retry recovery from the preserved transaction."
+				journal.Rollback.State = "failed"
+				journal.Rollback.Result = "needs_attention"
+			} else {
+				journal.Stage = "interrupted"
+				journal.Status = "Setup was interrupted before completion."
+			}
 			journal.UpdatedAt = now
 			journal.InterruptedAt = now
 			if err := s.persist(journal); err != nil {
@@ -1312,9 +1320,11 @@ func (s *operationStore) transition(id string, next operationState, stage, statu
 	if !ok {
 		return operationJournal{}, errOperationNotFound
 	}
-	if !operationTransitionAllowed(journal.State, next) {
+	setupRecovery := journal.OperationType == operationTypeSetup && journal.State == operationNeedsAttention && journal.Stage == "storage_rollback" && next == operationRollingBack && stage == "storage_recovery"
+	if !setupRecovery && !operationTransitionAllowed(journal.State, next) {
 		return operationJournal{}, fmt.Errorf("invalid operation transition %s -> %s", journal.State, next)
 	}
+	recoveryFailed := journal.OperationType == operationTypeSetup && journal.State == operationRollingBack && journal.Stage == "storage_recovery" && next == operationNeedsAttention && stage == "storage_rollback"
 	journal.State = next
 	journal.Stage = stage
 	journal.Status = status
@@ -1325,6 +1335,10 @@ func (s *operationStore) transition(id string, next operationState, stage, statu
 	if next == operationRolledBack {
 		journal.Rollback.State = "succeeded"
 		journal.Rollback.Result = "rolled_back"
+	}
+	if recoveryFailed {
+		journal.Rollback.State = "failed"
+		journal.Rollback.Result = "needs_attention"
 	}
 	if next == operationSucceeded || next == operationRolledBack || next == operationResolved {
 		journal.FinishedAt = journal.UpdatedAt

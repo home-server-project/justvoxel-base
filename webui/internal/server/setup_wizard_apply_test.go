@@ -19,8 +19,19 @@ type fakeSetupExecutionAPI struct {
 	applyErr      error
 	applyRequest  api.AdminSetupApplyRequest
 	applyCalls    int
+	recoverCalls  int
+	recoverID     string
 	current       *api.PersistentOperation
 	operation     *api.PersistentOperation
+}
+
+func (f *fakeSetupExecutionAPI) AdminSetupRecover(_ context.Context, session, id string) (api.PersistentOperationResponse, error) {
+	if session != "session-token" {
+		return api.PersistentOperationResponse{}, api.ErrUnauthorized
+	}
+	f.recoverCalls++
+	f.recoverID = id
+	return api.PersistentOperationResponse{Operation: f.operation}, nil
 }
 
 func setupExecutionClient() *fakeSetupExecutionAPI {
@@ -304,6 +315,46 @@ func TestSetupProgressTerminalActions(t *testing.T) {
 				if !strings.Contains(body, want) {
 					t.Fatalf("missing hidden state %q", want)
 				}
+			}
+		})
+	}
+}
+
+func TestSetupRecoveryActionOnlyAtStorageRollback(t *testing.T) {
+	for _, tc := range []struct {
+		state, stage string
+		available    bool
+	}{
+		{"needs_attention", "storage_rollback", true},
+		{"needs_attention", "runtime_rollback", false},
+		{"rolled_back", "setup_rolled_back", false},
+	} {
+		t.Run(tc.state+"_"+tc.stage, func(t *testing.T) {
+			client := setupExecutionClient()
+			client.operation = &api.PersistentOperation{OperationID: setupExecutionOperationID, OperationType: "setup", State: tc.state, Stage: tc.stage}
+			client.current = client.operation
+			app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/progress/"+setupExecutionOperationID, ""))
+			if page.Code != http.StatusOK {
+				t.Fatalf("page status = %d", page.Code)
+			}
+			form := `id="setup-recover-form"`
+			if !tc.available {
+				form += " hidden"
+			}
+			if !strings.Contains(page.Body.String(), form) {
+				t.Fatalf("recovery action visibility incorrect: %s", page.Body.String())
+			}
+			post := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recover", "csrf=csrf-token&operation_id="+setupExecutionOperationID))
+			if tc.available {
+				if post.Code != http.StatusSeeOther || post.Header().Get("Location") != "/setup/progress/"+setupExecutionOperationID || client.recoverCalls != 1 || client.recoverID != setupExecutionOperationID {
+					t.Fatalf("recovery POST = %d, calls = %d", post.Code, client.recoverCalls)
+				}
+			} else if post.Code != http.StatusConflict || client.recoverCalls != 0 {
+				t.Fatalf("unavailable recovery POST = %d, calls = %d", post.Code, client.recoverCalls)
 			}
 		})
 	}
