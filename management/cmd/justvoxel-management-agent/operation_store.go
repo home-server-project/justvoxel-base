@@ -32,16 +32,17 @@ const (
 type operationState string
 
 const (
-	operationQueued           operationState = "queued"
-	operationValidating       operationState = "validating"
-	operationRunning          operationState = "running"
-	operationVerifying        operationState = "verifying"
-	operationSucceeded        operationState = "succeeded"
-	operationFailed           operationState = "failed"
-	operationRollingBack      operationState = "rolling_back"
-	operationRolledBack       operationState = "rolled_back"
-	operationNeedsAttention   operationState = "needs_attention"
-	operationResolved         operationState = "resolved"
+	operationQueued                         operationState = "queued"
+	operationValidating                     operationState = "validating"
+	operationRunning                        operationState = "running"
+	operationVerifying                      operationState = "verifying"
+	operationSucceeded                      operationState = "succeeded"
+	operationFailed                         operationState = "failed"
+	operationRollingBack                    operationState = "rolling_back"
+	operationRolledBack                     operationState = "rolled_back"
+	operationNeedsAttention                 operationState = "needs_attention"
+	operationResolved                       operationState = "resolved"
+	legacyFactoryResetAwaitingPasswordState operationState = "awaiting_password"
 )
 
 var (
@@ -416,6 +417,17 @@ func (s *operationStore) loadAndRecover() error {
 		if err := os.Chmod(path, 0o600); err != nil {
 			return fmt.Errorf("protect operation journal %s: %w", entry.Name(), err)
 		}
+		if legacyFactoryResetPasswordJournal(journal) {
+			now := s.now().UTC().Format(time.RFC3339Nano)
+			journal.State = operationNeedsAttention
+			journal.Stage = "interrupted"
+			journal.Status = "Full factory reset used the retired password-finalization flow. Retry Full Factory Reset to finish safely."
+			journal.UpdatedAt = now
+			journal.InterruptedAt = now
+			if err := s.persist(journal); err != nil {
+				return fmt.Errorf("migrate legacy factory reset password journal %s: %w", entry.Name(), err)
+			}
+		}
 		if operationIsCurrent(journal.State) {
 			switch journal.OperationType {
 			case operationTypeSetup:
@@ -640,10 +652,23 @@ func readOperationJournal(path string) (operationJournal, error) {
 		}
 		return operationJournal{}, err
 	}
-	if err := validateOperationJournal(journal); err != nil {
+	if err := validateOperationJournalForLoad(journal); err != nil {
 		return operationJournal{}, err
 	}
 	return journal, nil
+}
+
+func validateOperationJournalForLoad(journal operationJournal) error {
+	if legacyFactoryResetPasswordJournal(journal) {
+		journal.State = operationNeedsAttention
+	}
+	return validateOperationJournal(journal)
+}
+
+func legacyFactoryResetPasswordJournal(journal operationJournal) bool {
+	return journal.OperationType == operationTypeFactoryReset &&
+		journal.State == legacyFactoryResetAwaitingPasswordState &&
+		(journal.Stage == "awaiting_password" || journal.Stage == "changing_password")
 }
 
 func validateOperationJournal(journal operationJournal) error {

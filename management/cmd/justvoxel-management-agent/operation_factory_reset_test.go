@@ -1,15 +1,114 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
 const testFactoryResetFingerprint = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+
+func writeLegacyFactoryResetPasswordJournal(t *testing.T, base, id, stage string, state operationState) string {
+	t.Helper()
+	operationsDir := filepath.Join(base, "logs", "operations")
+	if err := os.MkdirAll(operationsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	journal := operationJournal{
+		SchemaVersion:   operationSchemaVersion,
+		OperationID:     id,
+		OperationType:   operationTypeFactoryReset,
+		PlanFingerprint: testFactoryResetFingerprint,
+		State:           state,
+		Stage:           stage,
+		Status:          "Set a new voxel system administrator password to complete Full Factory Reset.",
+		StartedAt:       "2026-09-27T17:31:22.332275915Z",
+		UpdatedAt:       "2026-09-27T17:32:33.182918157Z",
+		Rollback:        operationRollback{State: "not_started"},
+	}
+	data, err := json.MarshalIndent(journal, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = append(data, '\n')
+	path := filepath.Join(operationsDir, id+".json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestOperationStoreMigratesLegacyFactoryResetPasswordStates(t *testing.T) {
+	for _, stage := range []string{"awaiting_password", "changing_password"} {
+		t.Run(stage, func(t *testing.T) {
+			base := filepath.Join(t.TempDir(), "management")
+			id := "da9989d8-80f4-43ab-8571-af63383f4b82"
+			path := writeLegacyFactoryResetPasswordJournal(t, base, id, stage, legacyFactoryResetAwaitingPasswordState)
+
+			store, err := openOperationStore(base)
+			if err != nil {
+				t.Fatalf("open operation store with legacy Factory Reset journal: %v", err)
+			}
+			defer store.close()
+
+			current, err := store.currentFactoryReset()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if current == nil || current.OperationID != id {
+				t.Fatalf("current Factory Reset = %#v, want %s", current, id)
+			}
+			if current.State != operationNeedsAttention || current.Stage != "interrupted" || current.InterruptedAt == "" {
+				t.Fatalf("legacy Factory Reset journal was not migrated conservatively: %#v", current)
+			}
+			if !strings.Contains(current.Status, "retired password-finalization flow") {
+				t.Fatalf("legacy migration status = %q", current.Status)
+			}
+
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var persisted operationJournal
+			if err := json.Unmarshal(data, &persisted); err != nil {
+				t.Fatal(err)
+			}
+			if err := validateOperationJournal(persisted); err != nil {
+				t.Fatalf("migrated journal is not a valid current journal: %v", err)
+			}
+			if persisted.State != operationNeedsAttention || persisted.Stage != "interrupted" || persisted.InterruptedAt == "" {
+				t.Fatalf("migrated journal was not persisted: %#v", persisted)
+			}
+
+			retried, err := store.retryFactoryReset(id, testFactoryResetFingerprint)
+			if err != nil {
+				t.Fatalf("retry migrated Factory Reset: %v", err)
+			}
+			if retried.State != operationQueued || retried.Stage != "queued" {
+				t.Fatalf("migrated Factory Reset was not retryable: %#v", retried)
+			}
+		})
+	}
+}
+
+func TestOperationStoreRejectsUnknownLegacyFactoryResetState(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "management")
+	id := "da9989d8-80f4-43ab-8571-af63383f4b82"
+	writeLegacyFactoryResetPasswordJournal(t, base, id, "awaiting_password", operationState("unknown_legacy_state"))
+
+	store, err := openOperationStore(base)
+	if store != nil {
+		_ = store.close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "invalid operation state") {
+		t.Fatalf("unknown legacy state error = %v, want invalid operation state", err)
+	}
+}
 
 func TestOperationStoreFactoryResetIsIdempotentAndBlocksOtherOperations(t *testing.T) {
 	store := openTestOperationStore(t)
