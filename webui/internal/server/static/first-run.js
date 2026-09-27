@@ -9,6 +9,7 @@
   let role = "";
   let configured;
   let refreshTimer = 0;
+  let resetWelcome = false;
 
   const stopRefreshTimer = () => {
     if (!refreshTimer) return;
@@ -60,7 +61,7 @@
       // Fall back to showing the choice when browser storage is unavailable.
     }
 
-    if (explored || new URLSearchParams(window.location.search).has("workspace")) showInvitation();
+    if (explored || (!resetWelcome && new URLSearchParams(window.location.search).has("workspace"))) showInvitation();
     else showChoice();
 
     if (!refreshTimer) {
@@ -111,6 +112,17 @@
       // The invitation still appears for this page load when storage is unavailable.
     }
     showInvitation();
+  });
+
+  window.addEventListener("justvoxel:minecraft-reset-complete", () => {
+    try {
+      window.localStorage.removeItem(exploreStorageKey);
+    } catch (_) {
+      // Fall back to showing the choice when browser storage is unavailable.
+    }
+    resetWelcome = true;
+    if (!role) void loadRole();
+    void loadConfigurationState();
   });
 
   void Promise.all([loadRole(), loadConfigurationState()]);

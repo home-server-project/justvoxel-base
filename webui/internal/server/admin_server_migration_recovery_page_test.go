@@ -94,15 +94,14 @@ func TestMigrationRecoveryPageShowsOnlyAgentFinalizableActions(t *testing.T) {
 		t.Fatalf("Migration Recovery page returned %d: %s", page.Code, page.Body.String())
 	}
 	for _, want := range []string{
-		"Migration Recovery", "Configured server rollback", "Configured rollback requiring attention",
-		"Critical rollback retained", "/var/lib/justvoxel/.justvoxel-import-safe",
-		"not safely finalizable in the current appliance state",
+		"Migration Recovery", "The failed Import was rolled back", "Your original Minecraft server was restored",
+		"Server Import needs attention", "Cleanup is unavailable",
 	} {
 		if !strings.Contains(page.Body.String(), want) {
 			t.Fatalf("Migration Recovery page missing %q: %s", want, page.Body.String())
 		}
 	}
-	if got := strings.Count(page.Body.String(), "Review finalization"); got != 2 {
+	if got := strings.Count(page.Body.String(), "Clean Up Recovery Files"); got != 2 {
 		t.Fatalf("finalizable Recovery actions = %d, want 2", got)
 	}
 }
@@ -123,8 +122,8 @@ func TestMigrationRecoveryReviewUsesAuthoritativeValidationRequirements(t *testi
 		t.Fatalf("Migration Recovery review returned %d: %s", page.Code, page.Body.String())
 	}
 	for _, want := range []string{
-		"Review Migration Recovery", "Configured server rollback", "Rolled back", transaction,
-		"validate the current JustVoxel runtime", "does not rerun the failed Import", "Type FINALIZE",
+		"Your original server was restored", "Your server data is safe",
+		"Clean Up Recovery Files", "Clean up recovery files?", "cleanup_confirmed",
 	} {
 		if !strings.Contains(page.Body.String(), want) {
 			t.Fatalf("Migration Recovery review missing %q: %s", want, page.Body.String())
@@ -143,7 +142,7 @@ func TestMigrationRecoveryRejectsNonFinalizableDiscoveryStateBeforePlanning(t *t
 	}
 	values := url.Values{"csrf": {"csrf-token"}, "transaction": {"/var/lib/justvoxel/.justvoxel-import-manual"}}
 	page := httptestResponse(app, recoveryWebRequest(http.MethodPost, "http://example/settings/server-migration/recovery/review", values))
-	if page.Code != http.StatusBadRequest || !strings.Contains(page.Body.String(), "not safely finalizable") {
+	if page.Code != http.StatusBadRequest || !strings.Contains(page.Body.String(), "cannot safely clean up") {
 		t.Fatalf("non-finalizable Recovery returned %d: %s", page.Code, page.Body.String())
 	}
 	if client.planCalls != 0 {
@@ -164,7 +163,7 @@ func TestMigrationRecoveryApplyRejectsStaleReviewBeforeAgentApply(t *testing.T) 
 	values := url.Values{
 		"csrf": {"csrf-token"}, "transaction": {transaction},
 		"plan_fingerprint":      {"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
-		"finalize_confirmation": {"FINALIZE"},
+		"cleanup_confirmed": {"yes"},
 	}
 	page := httptestResponse(app, recoveryWebRequest(http.MethodPost, "http://example/settings/server-migration/recovery/apply", values))
 	if page.Code != http.StatusConflict || !strings.Contains(page.Body.String(), "changed since it was reviewed") {
@@ -172,6 +171,36 @@ func TestMigrationRecoveryApplyRejectsStaleReviewBeforeAgentApply(t *testing.T) 
 	}
 	if client.applyCalls != 0 {
 		t.Fatalf("Recovery Apply called for stale plan: %d", client.applyCalls)
+	}
+}
+
+func TestMigrationRecoveryRequiresExplicitCleanupConfirmation(t *testing.T) {
+	transaction := "/var/lib/justvoxel/.justvoxel-import-safe"
+	client := &fakeServerMigrationRecoveryAPI{
+		fakeServerMigrationAPI: fakeServerMigrationAPI{recovery: recoveryDiscoveryFixture()},
+		plan: recoveryPlanFixture(transaction, "rolled-back", "configured"),
+	}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil { t.Fatal(err) }
+	values := url.Values{"csrf": {"csrf-token"}, "transaction": {transaction}, "plan_fingerprint": {serverMigrationFingerprint}}
+	page := httptestResponse(app, recoveryWebRequest(http.MethodPost, "http://example/settings/server-migration/recovery/apply", values))
+	if page.Code != http.StatusBadRequest || client.planCalls != 1 || client.applyCalls != 0 {
+		t.Fatalf("unconfirmed cleanup: status=%d plan=%d apply=%d", page.Code, client.planCalls, client.applyCalls)
+	}
+}
+
+func TestMigrationRecoveryNeedsAttentionDoesNotClaimDataSafe(t *testing.T) {
+	transaction := "/var/lib/justvoxel/.justvoxel-import-critical"
+	client := &fakeServerMigrationRecoveryAPI{
+		fakeServerMigrationAPI: fakeServerMigrationAPI{recovery: recoveryDiscoveryFixture()},
+		plan: recoveryPlanFixture(transaction, "critical-rollback", "configured-attention"),
+	}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil { t.Fatal(err) }
+	values := url.Values{"csrf": {"csrf-token"}, "transaction": {transaction}}
+	page := httptestResponse(app, recoveryWebRequest(http.MethodPost, "http://example/settings/server-migration/recovery/review", values))
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Server Import needs attention") || strings.Contains(page.Body.String(), "Your server data is safe") {
+		t.Fatalf("unsafe Recovery wording: %d %s", page.Code, page.Body.String())
 	}
 }
 
@@ -198,13 +227,13 @@ func TestMigrationRecoveryCanTakeOverImportNeedsAttentionAndStartPersistentOpera
 	}
 
 	entry := legacyPageTestResponse(app, recoveryWebRequest(http.MethodGet, "http://example/settings/server-migration/recovery", nil))
-	if entry.Code != http.StatusOK || !strings.Contains(entry.Body.String(), "previous Server Import still needs attention") {
+	if entry.Code != http.StatusOK || !strings.Contains(entry.Body.String(), "Server Import needs attention") {
 		t.Fatalf("Recovery entry from needs-attention Import returned %d: %s", entry.Code, entry.Body.String())
 	}
 
 	values := url.Values{
 		"csrf": {"csrf-token"}, "transaction": {transaction}, "plan_fingerprint": {serverMigrationFingerprint},
-		"finalize_confirmation": {"FINALIZE"},
+		"cleanup_confirmed": {"yes"},
 	}
 	page := httptestResponse(app, recoveryWebRequest(http.MethodPost, "http://example/settings/server-migration/recovery/apply", values))
 	if page.Code != http.StatusSeeOther || page.Header().Get("Location") != "/settings/server-migration/progress/"+serverMigrationOperationID {
@@ -283,7 +312,7 @@ func TestMigrationRecoveryOffersKeepCurrentForOrphanedImport(t *testing.T) {
 	if entry.Code != http.StatusOK {
 		t.Fatalf("orphaned Import Recovery page returned %d: %s", entry.Code, entry.Body.String())
 	}
-	for _, want := range []string{"No retained migration recovery transaction", "Keep current server and continue", "/settings/server-migration/recovery/resolve"} {
+	for _, want := range []string{"No recovery files need cleanup", "Keep current server and continue", "/settings/server-migration/recovery/resolve"} {
 		if !strings.Contains(entry.Body.String(), want) {
 			t.Fatalf("orphaned Import Recovery page missing %q: %s", want, entry.Body.String())
 		}

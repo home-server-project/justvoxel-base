@@ -56,7 +56,7 @@ func (s *server) adminDiagnosticLogRead(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	category, id := r.PathValue("category"), r.PathValue("id")
-	if (category != "setup" && category != "operation") || !validOperationID(id) {
+	if !validDiagnosticCategory(category) || !validOperationID(id) {
 		writeError(w, http.StatusBadRequest, "invalid diagnostic log identifier")
 		return
 	}
@@ -89,15 +89,15 @@ func (s *operationStore) appendOperationJournalDiagnosticBestEffort(journal oper
 }
 
 func (s *operationStore) appendOperationDiagnostic(id, operationType, category, message string, values map[string]string) error {
-	if s == nil || s.operationLogsDir == "" || !validOperationID(id) || !validDiagnosticOperationType(operationType) {
+	if s == nil || s.logsDir == "" || !validOperationID(id) || !validDiagnosticOperationType(operationType) {
 		return errors.New("invalid operation diagnostic identity")
 	}
 	s.diagnosticMu.Lock()
 	defer s.diagnosticMu.Unlock()
-	if err := validatePrivateDiagnosticDirectory(s.operationLogsDir); err != nil {
+	if err := validatePrivateDiagnosticDirectory(s.logsDir); err != nil {
 		return err
 	}
-	dir := filepath.Join(s.operationLogsDir, operationType)
+	dir := filepath.Join(s.logsDir, diagnosticCategoryForOperationType(operationType)+"-logs")
 	if err := ensurePrivateDirectory(dir); err != nil {
 		return err
 	}
@@ -166,6 +166,21 @@ func validDiagnosticOperationType(value string) bool {
 	return false
 }
 
+func validDiagnosticCategory(value string) bool {
+	switch value { case "setup", "migration", "restore", "reset", "operation": return true }
+	return false
+}
+
+func diagnosticCategoryForOperationType(value string) string {
+	switch value {
+	case operationTypeSetup: return "setup"
+	case operationTypeDataMigration, operationTypeMigrationExport, operationTypeMigrationImport, operationTypeMigrationRecovery: return "migration"
+	case operationTypeRestore: return "restore"
+	case operationTypeMinecraftReset, operationTypeFactoryReset: return "reset"
+	default: return ""
+	}
+}
+
 func validatePrivateDiagnosticDirectory(path string) error {
 	info, err := os.Lstat(path)
 	if err != nil {
@@ -204,22 +219,23 @@ func (s *operationStore) readDiagnosticLog(category, id string) ([]byte, error) 
 	if category == "setup" {
 		return s.readSetupDiagnostic(id)
 	}
-	if category != "operation" {
+	if !validDiagnosticCategory(category) || category == "setup" {
 		return nil, errors.New("invalid diagnostic log category")
 	}
-	journal, err := s.get(id)
-	if err != nil {
-		return nil, err
-	}
-	if !validDiagnosticOperationType(journal.OperationType) {
+	if category == "operation" {
+		journal, err := s.get(id)
+		if err != nil { return nil, err }
+		if !validDiagnosticOperationType(journal.OperationType) { return nil, os.ErrNotExist }
+		category = diagnosticCategoryForOperationType(journal.OperationType)
+	} else if journal, err := s.get(id); err == nil && diagnosticCategoryForOperationType(journal.OperationType) != category {
 		return nil, os.ErrNotExist
 	}
 	s.diagnosticMu.Lock()
 	defer s.diagnosticMu.Unlock()
-	if err := validatePrivateDiagnosticDirectory(s.operationLogsDir); err != nil {
+	if err := validatePrivateDiagnosticDirectory(s.logsDir); err != nil {
 		return nil, err
 	}
-	dir := filepath.Join(s.operationLogsDir, journal.OperationType)
+	dir := filepath.Join(s.logsDir, category+"-logs")
 	if err := validatePrivateDiagnosticDirectory(dir); err != nil {
 		return nil, err
 	}
@@ -235,7 +251,7 @@ func (s *operationStore) readDiagnosticLog(category, id string) ([]byte, error) 
 		return nil, err
 	}
 	ownership, owned := info.Sys().(*syscall.Stat_t)
-	if !info.Mode().IsRegular() || info.Size() > operationDiagnosticLimit || !owned || ownership.Uid != uint32(os.Geteuid()) {
+	if !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || info.Size() > operationDiagnosticLimit || !owned || ownership.Uid != uint32(os.Geteuid()) {
 		return nil, errors.New("unsafe diagnostic log file")
 	}
 	return io.ReadAll(io.LimitReader(file, operationDiagnosticLimit+1))
@@ -249,17 +265,16 @@ func (s *operationStore) listDiagnosticLogs() ([]diagnosticLogEntry, error) {
 	}
 	s.mu.Unlock()
 	entries := make([]diagnosticLogEntry, 0)
-	if err := validatePrivateDiagnosticDirectory(s.operationLogsDir); err != nil {
+	if err := validatePrivateDiagnosticDirectory(s.logsDir); err != nil {
 		return nil, err
 	}
-	if err := validatePrivateDiagnosticDirectory(s.setupLogsDir); err != nil {
-		return nil, err
-	}
-	files, err := os.ReadDir(s.setupLogsDir)
-	if err != nil {
-		return nil, err
-	}
-	for _, file := range files {
+	for _, category := range []string{"setup", "migration", "restore", "reset"} {
+		dir := filepath.Join(s.logsDir, category+"-logs")
+		if err := validatePrivateDiagnosticDirectory(dir); err != nil { return nil, err }
+		files, err := os.ReadDir(dir)
+		if err != nil { return nil, err }
+		categoryEntries := make([]diagnosticLogEntry, 0, len(files))
+		for _, file := range files {
 		if file.Type() != 0 || !strings.HasSuffix(file.Name(), ".log") {
 			continue
 		}
@@ -268,38 +283,23 @@ func (s *operationStore) listDiagnosticLogs() ([]diagnosticLogEntry, error) {
 			continue
 		}
 		info, err := file.Info()
-		if err != nil || !info.Mode().IsRegular() || info.Size() > operationDiagnosticLimit {
+		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || info.Size() > operationDiagnosticLimit {
 			continue
 		}
-		entry := diagnosticLogEntry{Category: "setup", LogID: id, Timestamp: info.ModTime().UTC().Format("2006-01-02T15:04:05Z07:00")}
-		if journal, known := operations[id]; known && journal.OperationType == operationTypeSetup {
+		owner, owned := info.Sys().(*syscall.Stat_t)
+		if !owned || owner.Uid != uint32(os.Geteuid()) { continue }
+		entry := diagnosticLogEntry{Category: category, LogID: id, Timestamp: info.ModTime().UTC().Format("2006-01-02T15:04:05Z07:00")}
+		if journal, known := operations[id]; known && diagnosticCategoryForOperationType(journal.OperationType) == category {
 			entry.OperationID = id
 			entry.OperationType = journal.OperationType
 			entry.State = string(journal.State)
 		}
-		entries = append(entries, entry)
-	}
-	for id, journal := range operations {
-		if !validDiagnosticOperationType(journal.OperationType) {
-			continue
+		categoryEntries = append(categoryEntries, entry)
 		}
-		dir := filepath.Join(s.operationLogsDir, journal.OperationType)
-		if err := validatePrivateDiagnosticDirectory(dir); err != nil {
-			continue
-		}
-		path := filepath.Join(dir, id+".log")
-		info, err := os.Lstat(path)
-		if err != nil || !info.Mode().IsRegular() || info.Size() > operationDiagnosticLimit {
-			continue
-		}
-		entries = append(entries, diagnosticLogEntry{
-			Category: "operation", LogID: id, OperationID: id, OperationType: journal.OperationType,
-			State: string(journal.State), Timestamp: info.ModTime().UTC().Format("2006-01-02T15:04:05Z07:00"),
-		})
+		sort.Slice(categoryEntries, func(i, j int) bool { return categoryEntries[i].Timestamp > categoryEntries[j].Timestamp })
+		if len(categoryEntries) > 200 { categoryEntries = categoryEntries[:200] }
+		entries = append(entries, categoryEntries...)
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Timestamp > entries[j].Timestamp })
-	if len(entries) > 200 {
-		entries = entries[:200]
-	}
 	return entries, nil
 }

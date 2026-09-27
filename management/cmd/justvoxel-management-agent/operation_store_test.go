@@ -219,6 +219,10 @@ func TestOperationStoreCreatesPrivatePersistentJournal(t *testing.T) {
 		filepath.Join(base, "logs"),
 		filepath.Join(base, "logs", "operations"),
 		filepath.Join(base, "logs", "setup-logs"),
+		filepath.Join(base, "logs", "migration-logs"),
+		filepath.Join(base, "logs", "restore-logs"),
+		filepath.Join(base, "logs", "reset-logs"),
+		filepath.Join(base, "logs", "support"),
 	} {
 		info, err := os.Stat(path)
 		if err != nil {

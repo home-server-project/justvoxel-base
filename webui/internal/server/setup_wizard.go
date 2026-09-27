@@ -564,7 +564,7 @@ func setupTimezoneOptions(current string) []string {
 			return nil
 		}
 		if setupTimezonePattern.MatchString(relative) && !strings.Contains(relative, "..") {
-			zones[relative] = struct{}{}
+			if _, err := time.LoadLocation(relative); err == nil { zones[relative] = struct{}{} }
 		}
 		return nil
 	})

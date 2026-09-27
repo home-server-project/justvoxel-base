@@ -77,9 +77,11 @@ func TestMinecraftWorkspaceMigrationContract(t *testing.T) {
 		`data-minecraft-tab="overview"`,
 		`data-minecraft-tab="memory"`,
 		`data-minecraft-tab="players"`,
-		`data-minecraft-tab="version"`,
 		`data-minecraft-tab="whitelist"`,
 		`data-minecraft-tab="crossplay"`,
+		`data-version-open`,
+		`data-version-tab="software"`,
+		`data-version-tab="minecraft"`,
 	} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("Minecraft workspace migration contract missing %q", want)
@@ -101,7 +103,7 @@ func TestMinecraftWorkspaceMigrationContract(t *testing.T) {
 		`"/api/minecraft/workspace/logs"`,
 		`section.className = "panel details minecraft-overview-logs"`,
 		`title.textContent = "Recent logs"`,
-		`const settingsTabs = new Set(["memory", "players", "crossplay", "version"])`,
+		`const settingsTabs = new Set(["memory", "players", "crossplay"])`,
 	} {
 		if !strings.Contains(behavior, want) {
 			t.Fatalf("Minecraft workspace behavior missing %q", want)

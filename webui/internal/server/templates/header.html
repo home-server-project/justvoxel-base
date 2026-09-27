@@ -4,7 +4,10 @@
     <strong>JV</strong>
   </a>
 
-  <div class="topbar-clock" data-topbar-clock aria-label="Local time">--:--</div>
+  <div class="topbar-time"><div class="topbar-clock" data-topbar-clock aria-label="Local time">--:--</div><span data-topbar-timezone></span><button class="secondary nav-admin-only" type="button" data-date-time-open aria-label="Date and Time settings" title="Date and Time">⋯</button></div>
+  <script src="/static/timezone-search.js"></script>
+  <script src="/static/date-time.js" defer></script>
+  <script src="/static/version-workspace.js" defer></script>
 
   <details class="control-center" data-control-center>
     <summary class="control-center-trigger" aria-label="Open Control Center">
@@ -60,7 +63,8 @@
         <section class="control-section">
           <span class="control-section-label">Minecraft</span>
           <div class="control-tile-grid">
-            <button class="control-tile" type="button" data-minecraft-open title="Minecraft overview, settings, whitelist and logs"><strong>Minecraft</strong></button>
+            <button class="control-tile" type="button" data-minecraft-open title="Minecraft overview, settings and whitelist"><strong>Minecraft Settings</strong></button>
+            <button class="control-tile nav-admin-only" type="button" data-version-open title="Server software and Minecraft version"><strong>Version</strong></button>
           </div>
         </section>
 
@@ -187,7 +191,7 @@
       <div class="minecraft-workspace-header" data-workspace-drag-handle>
         <div>
           <p class="eyebrow">JustVoxel</p>
-          <h2 id="minecraft-workspace-title">Minecraft</h2>
+          <h2 id="minecraft-workspace-title">Minecraft Settings</h2>
         </div>
         <div class="minecraft-workspace-header-actions">
           <button class="system-monitor-header-button" type="button" data-minecraft-refresh aria-label="Refresh Minecraft" title="Refresh Minecraft">↻</button>
@@ -200,13 +204,31 @@
         <button class="nav-admin-only" type="button" data-minecraft-tab="players" aria-selected="false">Players</button>
         <button class="nav-operator-plus" type="button" data-minecraft-tab="whitelist" aria-selected="false">Whitelist</button>
         <button class="nav-admin-only" type="button" data-minecraft-tab="crossplay" aria-selected="false">Cross-play</button>
-        <button class="nav-admin-only" type="button" data-minecraft-tab="version" aria-selected="false">Version</button>
       </nav>
       <div class="minecraft-workspace-body">
         <p class="minecraft-workspace-state" data-minecraft-state>Choose a section.</p>
         <div class="minecraft-workspace-content" data-minecraft-workspace-content></div>
       </div>
     </div>
+  </dialog>
+
+  <dialog class="workspace-window version-workspace-dialog" data-workspace-window="version" data-version-workspace-dialog aria-labelledby="version-workspace-title">
+    <div class="version-workspace-shell">
+      <div class="version-workspace-header" data-workspace-drag-handle><div><p class="eyebrow">JustVoxel</p><h2 id="version-workspace-title">Version</h2></div><div><button class="system-monitor-header-button" type="button" data-version-refresh aria-label="Refresh Version">↻</button><button class="system-monitor-header-button" type="button" data-version-close aria-label="Close Version">&times;</button></div></div>
+      <nav class="version-workspace-tabs" aria-label="Version workspace"><button type="button" data-version-tab="software" aria-selected="true">Server Software</button><button type="button" data-version-tab="minecraft" aria-selected="false">Minecraft Version</button></nav>
+      <div class="version-workspace-body"><p data-version-state></p><div data-version-content></div></div>
+    </div>
+  </dialog>
+
+  <dialog class="system-action-dialog date-time-dialog" data-date-time-dialog aria-labelledby="date-time-title">
+    <form class="system-action-dialog-content" data-date-time-form><h2 id="date-time-title">Date &amp; Time</h2><p class="muted" data-date-time-state></p>
+      <label class="setup-timezone-field">Timezone<input name="timezone" data-timezone-search autocomplete="off" aria-autocomplete="list" aria-controls="date-time-timezone-results" aria-expanded="false" required placeholder="Type Toronto, Warsaw, Amsterdam…"><div class="setup-timezone-results" id="date-time-timezone-results" data-timezone-results role="listbox" hidden></div></label>
+      <div data-timezone-options hidden></div><p class="muted compact">Selected timezone: <strong data-date-time-canonical>—</strong></p>
+      <label><input type="checkbox" name="automatic" data-date-time-automatic> Automatic date &amp; time</label>
+      <div class="date-time-manual" data-date-time-manual><label>Date<input type="date" name="date" required></label><label>Time<input type="time" name="time" required></label></div>
+      <p class="muted compact" data-date-time-warning hidden>Manual system time can affect logs, secure connections and scheduled tasks.</p>
+      <p class="alert" data-date-time-error hidden></p><div class="action-row"><button class="secondary" type="button" data-date-time-cancel>Cancel</button><button type="submit">Apply changes</button></div>
+    </form>
   </dialog>
 
   <dialog class="workspace-window system-monitor-dialog" data-workspace-window="system-monitor" data-system-monitor-dialog aria-labelledby="system-monitor-title">

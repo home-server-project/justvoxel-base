@@ -1,42 +1,45 @@
 {{define "migration_workspace_recovery_review.html"}}<div class="migration-workspace-content" data-migration-workspace-root>
-{{if .Error}}<div class="notice error"><strong>Migration Recovery needs another review.</strong><br>{{.Error}}</div>{{end}}
-
-  {{if .Plan.OK}}
-    {{if .Plan.Normalized}}
-    <section class="panel">
-      <p class="eyebrow">Authoritative Recovery plan</p>
-      <h2>{{.ModeLabel}}</h2>
-      <div class="details">
-        <strong>Phase</strong><br><span class="muted">{{.PhaseLabel}}</span><br><br>
-        <strong>Source type</strong><br><span class="muted">{{if .Plan.Normalized.SourceType}}{{.Plan.Normalized.SourceType}}{{else}}Unknown{{end}}</span><br><br>
-        <strong>Updated</strong><br><span class="muted">{{.Plan.Normalized.UpdatedAt}}</span><br><br>
-        <strong>Recovery transaction</strong><br><code>{{.Plan.Normalized.Transaction}}</code>
-      </div>
-    </section>
-    {{end}}
-
-    {{if .Plan.Warnings}}<section class="panel"><p class="eyebrow">Recovery warnings</p>{{range .Plan.Warnings}}<div class="notice warning">{{.Message}}</div>{{end}}</section>{{end}}
-
-    {{if .Plan.Requirements}}
-    <section class="panel">
-      <p class="eyebrow">What JustVoxel will validate</p>
-      <div class="notice"><strong>This finalization does not rerun the failed Import and does not copy or replace Minecraft server data.</strong><br>It confirms the reviewed post-rollback safety state and removes retained recovery evidence only after validation succeeds.</div>
-      {{if .Plan.Requirements.RuntimeValidationRequired}}<p>The JustVoxel will validate the current JustVoxel runtime before the retained recovery transaction is removed.</p>{{end}}
-      {{if .Plan.Requirements.UnconfiguredValidationRequired}}<p>The JustVoxel will verify that fresh-Import runtime files remain absent and Minecraft is inactive before the retained recovery transaction is removed.</p>{{end}}
-      <p class="muted">The Recovery transaction is re-planned and its state identity is checked again when Apply starts. If the retained state changed, finalization is refused.</p>
-    </section>
-    {{end}}
-
-    <form method="post" action="/workspace/migration/recovery/apply" autocomplete="off">
-      <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <input type="hidden" name="transaction" value="{{.Request.Transaction}}">
-      <input type="hidden" name="plan_fingerprint" value="{{.Plan.PlanFingerprint}}">
-      <label for="migration-recovery-confirmation"><strong>Type FINALIZE to continue</strong></label>
-      <input id="migration-recovery-confirmation" name="finalize_confirmation" autocomplete="off" required>
-      <div class="action-row"><button type="submit">Finalize Migration Recovery</button><a class="button-link secondary" href="/workspace/migration/recovery">Cancel</a></div>
-    </form>
+{{if .Error}}<div class="notice error"><strong>Cleanup needs another review.</strong><br>{{.Error}}</div>{{end}}
+{{if .Plan.OK}}
+<section class="panel">
+  <p class="eyebrow">Previous Server Import</p>
+  {{if and .Plan.Normalized (eq .Plan.Normalized.Phase "rolled-back")}}
+  <h2>Your original server was restored</h2>
+  <p>✓ The failed Import was rolled back.<br>✓ Your original Minecraft server was restored.<br>✓ Your server data is safe.</p>
+  <p>JustVoxel kept temporary recovery files from the failed Import. They are no longer needed. Before removing them, JustVoxel will first make sure the current Minecraft server is working.</p>
+  {{else if and .Plan.Normalized (eq .Plan.Normalized.Phase "rolled-back-fresh") (eq .Plan.Normalized.Mode "fresh-unconfigured")}}
+  <h2>Your setup state was restored</h2>
+  <p>✓ The failed Import was rolled back.<br>✓ JustVoxel was returned to setup mode.<br>✓ No Minecraft server was configured before this Import.</p>
+  <p>Temporary recovery files from the failed Import can now be cleaned up.</p>
   {{else}}
-    <section class="panel"><div class="notice error">{{if .Plan.Error}}{{.Plan.Error}}{{else}}The JustVoxel did not approve this retained Recovery state for finalization.{{end}}</div></section>
-    <div class="action-row"><a class="button-link secondary" href="/workspace/migration/recovery">Back to Migration Recovery</a></div>
+  <h2>Server Import needs attention</h2>
+  <div class="notice warning">JustVoxel cannot confirm that your original server was fully restored. Review the current server before cleaning up any recovery files.</div>
+  <p>JustVoxel will check the current server before it removes leftover files. If the checks fail, cleanup will stop.</p>
   {{end}}
+</section>
+{{if .Plan.Warnings}}<section class="panel">{{range .Plan.Warnings}}<div class="notice warning">{{.Message}}</div>{{end}}</section>{{end}}
+<form method="post" action="/workspace/migration/recovery/apply" data-recovery-cleanup-form>
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <input type="hidden" name="transaction" value="{{.Request.Transaction}}">
+  <input type="hidden" name="plan_fingerprint" value="{{.Plan.PlanFingerprint}}">
+  <input type="hidden" name="cleanup_confirmed" value="" data-recovery-confirmed>
+  <div class="action-row"><button type="button" data-recovery-open-confirmation>Clean Up Recovery Files</button><a class="button-link secondary" href="/workspace/migration/recovery">Cancel</a></div>
+  <dialog class="system-action-dialog" aria-labelledby="recovery-cleanup-title" data-recovery-confirmation-dialog>
+    <div class="system-action-dialog-content">
+      <h2 id="recovery-cleanup-title">Clean up recovery files?</h2>
+      {{if and .Plan.Normalized (eq .Plan.Normalized.Phase "rolled-back-fresh") (eq .Plan.Normalized.Mode "fresh-unconfigured")}}
+      <p>JustVoxel will make sure the appliance is still ready for setup and then remove the leftover files from the failed Import.</p>
+      <p>No Minecraft server or world data will be changed.</p>
+      {{else}}
+      <p>JustVoxel will make sure your current server is working and then remove the leftover files from the failed Import.</p>
+      <p>Your Minecraft server and world data will not be changed.</p>
+      {{end}}
+      <div class="action-row"><button type="button" class="secondary" data-recovery-cancel>Cancel</button><button type="button" data-recovery-confirm>Clean Up</button></div>
+    </div>
+  </dialog>
+</form>
+{{else}}
+<section class="panel"><div class="notice error">{{if .Plan.Error}}{{.Plan.Error}}{{else}}JustVoxel cannot safely clean up these files right now.{{end}}</div></section>
+<div class="action-row"><a class="button-link secondary" href="/workspace/migration/recovery">Back to Recovery</a></div>
+{{end}}
 </div>{{end}}

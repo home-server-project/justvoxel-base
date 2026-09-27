@@ -104,23 +104,27 @@ Management journals and human-readable diagnostic logs use one persistent hierar
 ```text
 /var/lib/justvoxel/management/
 ├── logs/
-│   ├── operations/
-│   ├── setup-logs/
-│   └── operation-logs/
-│       └── <operation-type>/<operation-id>.log
+│   ├── operations/<operation-id>.json
+│   ├── setup-logs/<operation-id>.log
+│   ├── migration-logs/<operation-id>.log
+│   ├── restore-logs/<operation-id>.log
+│   ├── reset-logs/<operation-id>.log
+│   └── support/
 ├── setup.lock
 ├── restore.lock
 ├── data-migration.lock
 └── server-migration.lock
 ```
 
-Operation journals are stored as JSON under `/var/lib/justvoxel/management/logs/operations/`. Setup diagnostic logs are stored under `/var/lib/justvoxel/management/logs/setup-logs/` and remain available through the existing downloadable setup-log API. Human-readable operation diagnostics use private files under `logs/operation-logs/<operation-type>/`, named by persistent operation ID. Server Import captures bounded, redacted backend output alongside its lifecycle and rollback evidence.
+Operation journals remain machine-readable metadata in `operations/`; System → Logs does not list their raw JSON. Setup logs use `setup-logs/`. Data Migration, Server Migration Export, Import, and Recovery use `migration-logs/`. Restore uses `restore-logs/`. Minecraft and factory resets use `reset-logs/`. The private `support/` directory is reserved for future diagnostic bundles; this release does not generate or upload them. Logs and journals remain root-owned, with private directories and files. Server Import records bounded, redacted backend output alongside its lifecycle and rollback evidence.
 
-Administrators can read and download retained setup and operation diagnostics in System → Logs. The WebUI reads these files only through the Management API's allowlisted `/v1/admin/logs` endpoints; it does not accept filesystem paths. The viewer is local to the appliance and does not send reports externally.
+Administrators can select Setup, Migration, Restore, Reset, or Support in System → Logs, then read and download a file through the Management API's allowlisted `/v1/admin/logs` endpoints. The WebUI does not accept filesystem paths or send reports externally.
 
-Future management logs intended for diagnostics or support should use the same `/var/lib/justvoxel/management/logs/` hierarchy. Runtime coordination files such as lock files remain directly under `/var/lib/justvoxel/management/`.
+The top-panel Date & Time control changes the host timezone, automatic time synchronization, and (when automatic time is off) the system clock. Its administrator-only WebUI route uses CSRF protection and calls the Management Agent over the local Unix socket. The agent validates the timezone against the host database and passes fixed arguments to `timedatectl`. The city search uses the same local timezone list as First Setup.
 
-On Management Agent startup, legacy `management/operations/` and `management/setup-logs/` directories are migrated into the `logs/` hierarchy without overwriting existing data. If both a legacy directory and its new destination already contain data, startup fails safely instead of merging or deleting either copy.
+Minecraft Settings contains Minecraft memory, players, whitelist, and cross-play controls. The separate Version workspace shows the current Paper implementation and container channel under Server Software, and installed/available Minecraft versions, policy, and Paper/Geyser compatibility under Minecraft Version. Purpur and Vanilla remain disabled placeholders. Version changes use the existing configuration Review → Apply path; incompatible cross-play remains enabled and blocks the proposed version change until the administrator changes the configuration explicitly.
+
+On Management Agent startup, legacy `management/operations/` and `management/setup-logs/` directories are migrated into the `logs/` hierarchy without overwriting existing data. Existing `logs/operation-logs/<operation-type>/` files are moved into the matching category directory after bounded preflight checks. Conflicting non-empty directories or file names stop startup rather than overwrite logs.
 
 Bootc image updates may update the immutable implementation, but JustVoxel does not silently replace the active administrator configuration in `/etc` as part of an ordinary image update.
 

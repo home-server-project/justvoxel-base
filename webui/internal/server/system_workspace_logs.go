@@ -60,7 +60,9 @@ func (a *App) systemWorkspaceLog(w http.ResponseWriter, r *http.Request) {
 }
 
 func validWorkspaceLogID(category, id string) bool {
-	if category != "setup" && category != "operation" {
+	switch category {
+	case "setup", "migration", "restore", "reset", "operation":
+	default:
 		return false
 	}
 	if len(id) != 36 {

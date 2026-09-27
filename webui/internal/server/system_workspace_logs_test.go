@@ -12,7 +12,7 @@ import (
 
 func TestWorkspaceLogIdentifiersAreAllowlisted(t *testing.T) {
 	id := "12345678-1234-4123-8123-123456789abc"
-	for _, category := range []string{"setup", "operation"} {
+	for _, category := range []string{"setup", "migration", "restore", "reset", "operation"} {
 		if !validWorkspaceLogID(category, id) {
 			t.Fatalf("rejected %s log", category)
 		}
@@ -40,7 +40,7 @@ func (f *fakeDiagnosticLogsAPI) Session(ctx context.Context, session string) (ap
 	return identity, err
 }
 func (f *fakeDiagnosticLogsAPI) AdminDiagnosticLogs(_ context.Context, _ string) ([]api.DiagnosticLogEntry, error) {
-	return []api.DiagnosticLogEntry{{Category: "operation", LogID: "12345678-1234-4123-8123-123456789abc", OperationType: "migration_import", State: "rolled_back"}}, nil
+	return []api.DiagnosticLogEntry{{Category: "migration", LogID: "12345678-1234-4123-8123-123456789abc", OperationType: "migration_import", State: "rolled_back"}}, nil
 }
 func (f *fakeDiagnosticLogsAPI) AdminDiagnosticLog(_ context.Context, _, _, _ string) ([]byte, error) {
 	f.reads++
@@ -54,7 +54,7 @@ func TestSystemWorkspaceLogsAreAdministratorOnlyAndDownloadText(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := "12345678-1234-4123-8123-123456789abc"
-	for _, path := range []string{"/api/system/workspace/logs", "/api/system/workspace/logs/operation/" + id} {
+	for _, path := range []string{"/api/system/workspace/logs", "/api/system/workspace/logs/migration/" + id} {
 		response := httptest.NewRecorder()
 		app.Handler().ServeHTTP(response, authenticatedAdminRequest(http.MethodGet, "http://example"+path, ""))
 		if response.Code != http.StatusForbidden {
@@ -71,12 +71,12 @@ func TestSystemWorkspaceLogsAreAdministratorOnlyAndDownloadText(t *testing.T) {
 		t.Fatalf("log listing = %d %s", listing.Code, listing.Body.String())
 	}
 	read := httptest.NewRecorder()
-	app.Handler().ServeHTTP(read, authenticatedAdminRequest(http.MethodGet, "http://example/api/system/workspace/logs/operation/"+id, ""))
+	app.Handler().ServeHTTP(read, authenticatedAdminRequest(http.MethodGet, "http://example/api/system/workspace/logs/migration/"+id, ""))
 	if read.Code != http.StatusOK || read.Header().Get("Content-Type") != "text/plain; charset=utf-8" || !strings.Contains(read.Body.String(), "rollback succeeded\n") {
 		t.Fatalf("log read = %d %s", read.Code, read.Body.String())
 	}
 	download := httptest.NewRecorder()
-	app.Handler().ServeHTTP(download, authenticatedAdminRequest(http.MethodGet, "http://example/api/system/workspace/logs/operation/"+id+"?download=1", ""))
+	app.Handler().ServeHTTP(download, authenticatedAdminRequest(http.MethodGet, "http://example/api/system/workspace/logs/migration/"+id+"?download=1", ""))
 	if download.Code != http.StatusOK || !strings.Contains(download.Header().Get("Content-Disposition"), "attachment") {
 		t.Fatalf("log download = %d", download.Code)
 	}

@@ -230,20 +230,47 @@ func TestFreshUnconfiguredMigrationRecoveryReviewAndApply(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	entry := legacyPageTestResponse(app, recoveryWebRequest(http.MethodGet, "http://example/settings/server-migration/recovery", nil))
+	if entry.Code != http.StatusOK {
+		t.Fatalf("fresh Recovery page returned %d: %s", entry.Code, entry.Body.String())
+	}
+	for _, want := range []string{
+		"Your setup state was restored", "The failed Import was rolled back", "JustVoxel was returned to setup mode",
+		"No Minecraft server was configured before this Import", "Clean Up Recovery Files",
+	} {
+		if !strings.Contains(entry.Body.String(), want) {
+			t.Fatalf("fresh Recovery page missing %q: %s", want, entry.Body.String())
+		}
+	}
+	for _, unsafe := range []string{"Server Import needs attention", "Your original Minecraft server was restored", "Your server data is safe"} {
+		if strings.Contains(entry.Body.String(), unsafe) {
+			t.Fatalf("fresh Recovery page incorrectly shows %q: %s", unsafe, entry.Body.String())
+		}
+	}
+
 	reviewValues := url.Values{"csrf": {"csrf-token"}, "transaction": {transaction}}
 	review := httptestResponse(app, recoveryWebRequest(http.MethodPost, "http://example/settings/server-migration/recovery/review", reviewValues))
 	if review.Code != http.StatusOK {
 		t.Fatalf("fresh Recovery review returned %d: %s", review.Code, review.Body.String())
 	}
-	for _, want := range []string{"Fresh appliance rollback", "Fresh Import rolled back", "fresh-Import runtime files remain absent"} {
+	for _, want := range []string{
+		"Your setup state was restored", "The failed Import was rolled back", "JustVoxel was returned to setup mode",
+		"No Minecraft server was configured before this Import", "Clean Up Recovery Files", "Clean up recovery files?",
+		"JustVoxel will make sure the appliance is still ready for setup", "No Minecraft server or world data will be changed",
+	} {
 		if !strings.Contains(review.Body.String(), want) {
 			t.Fatalf("fresh Recovery review missing %q: %s", want, review.Body.String())
+		}
+	}
+	for _, unsafe := range []string{"Server Import needs attention", "Your original Minecraft server was restored", "Your server data is safe"} {
+		if strings.Contains(review.Body.String(), unsafe) {
+			t.Fatalf("fresh Recovery review incorrectly shows %q: %s", unsafe, review.Body.String())
 		}
 	}
 
 	applyValues := url.Values{
 		"csrf": {"csrf-token"}, "transaction": {transaction},
-		"plan_fingerprint": {serverMigrationFingerprint}, "finalize_confirmation": {"FINALIZE"},
+		"plan_fingerprint": {serverMigrationFingerprint}, "cleanup_confirmed": {"yes"},
 	}
 	apply := httptestResponse(app, recoveryWebRequest(http.MethodPost, "http://example/settings/server-migration/recovery/apply", applyValues))
 	if apply.Code != http.StatusSeeOther || apply.Header().Get("Location") != "/settings/server-migration/progress/"+serverMigrationOperationID {

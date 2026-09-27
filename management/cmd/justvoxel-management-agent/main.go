@@ -209,6 +209,8 @@ func serve(socket string) error {
 	registerAdminActivityRoutes(mux, s)
 	registerAdminDiscoveryRoutes(mux, s)
 	registerAdminConfigurationRoutes(mux, s)
+	registerAdminDateTimeRoutes(mux, s)
+	registerAdminVersionStatusRoutes(mux, s)
 	registerAdminValidationRoutes(mux, s)
 	registerAdminRestoreRoutes(mux, s)
 	registerAdminBackupDeleteRoutes(mux, s)

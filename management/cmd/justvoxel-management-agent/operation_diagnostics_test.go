@@ -22,7 +22,7 @@ func TestOperationDiagnosticUsesCanonicalPrivateLogAndOperationID(t *testing.T) 
 	}); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(store.baseDir, "logs", "operation-logs", "migration_import", operation.OperationID+".log")
+	path := filepath.Join(store.baseDir, "logs", "migration-logs", operation.OperationID+".log")
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +53,7 @@ func TestOperationDiagnosticUsesCanonicalPrivateLogAndOperationID(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 || entries[0].Category != "operation" || entries[0].OperationID != operation.OperationID || entries[0].OperationType != operationTypeMigrationImport {
+	if len(entries) != 1 || entries[0].Category != "migration" || entries[0].OperationID != operation.OperationID || entries[0].OperationType != operationTypeMigrationImport {
 		t.Fatalf("unexpected log index: %#v", entries)
 	}
 }
@@ -73,8 +73,8 @@ func TestOperationDiagnosticRejectsPathsAndSymlinks(t *testing.T) {
 	if err := os.WriteFile(outside, []byte("private"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	dir := filepath.Join(store.operationLogsDir, "migration_import")
-	if err := os.Mkdir(dir, 0o700); err != nil {
+	dir := filepath.Join(store.logsDir, "migration-logs")
+	if err := validatePrivateDiagnosticDirectory(dir); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, operation.OperationID+".log")
@@ -86,6 +86,9 @@ func TestOperationDiagnosticRejectsPathsAndSymlinks(t *testing.T) {
 	}
 	if _, err := store.readDiagnosticLog("operation", operation.OperationID); err == nil {
 		t.Fatal("read log symlink")
+	}
+	if _, err := store.readDiagnosticLog("migration", operation.OperationID); err == nil {
+		t.Fatal("read category log symlink")
 	}
 	if data, err := os.ReadFile(outside); err != nil || string(data) != "private" {
 		t.Fatalf("outside file changed: %q %v", data, err)

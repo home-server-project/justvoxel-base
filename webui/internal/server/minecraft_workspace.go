@@ -47,6 +47,7 @@ type minecraftWorkspaceErrorResponse struct {
 }
 
 func (a *App) registerMinecraftWorkspaceRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/version/workspace/status", a.versionWorkspaceStatus)
 	mux.HandleFunc("GET /api/minecraft/workspace/settings", a.minecraftWorkspaceSettings)
 	mux.HandleFunc("POST /api/minecraft/workspace/settings/plan", a.minecraftWorkspaceSettingsPlan)
 	mux.HandleFunc("POST /api/minecraft/workspace/settings/apply", a.minecraftWorkspaceSettingsApply)
@@ -179,9 +180,8 @@ func minecraftWorkspaceConfigurationRequest(r *http.Request, current api.AdminCo
 		}
 		request.MaxPlayers = maxPlayers
 		request.MOTD = strings.TrimSpace(r.FormValue("motd"))
-		request.Timezone = strings.TrimSpace(r.FormValue("timezone"))
-		if request.MOTD == "" || request.Timezone == "" {
-			return request, errors.New("Server welcome message and timezone are required.")
+		if request.MOTD == "" {
+			return request, errors.New("Server welcome message is required.")
 		}
 	case "crossplay":
 		javaPort, err := parsePositiveFormInt(r.FormValue("java_port"), "Minecraft Java port")

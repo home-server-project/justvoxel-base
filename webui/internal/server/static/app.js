@@ -341,6 +341,7 @@ if (dashboard) {
   loadRole();
   refreshDashboard();
   window.setInterval(refreshDashboard, 5000);
+  window.addEventListener("justvoxel:minecraft-reset-complete", () => void refreshDashboard());
   if (window.matchMedia("(pointer: fine) and (prefers-reduced-motion: no-preference)").matches) {
     dashboard.addEventListener("pointermove", (event) => {
       dashboard.style.setProperty("--voxel-x", `${Math.round(event.clientX / window.innerWidth * 100)}%`);
@@ -524,6 +525,7 @@ if (topbarClock) {
     topbarClock.textContent = new Intl.DateTimeFormat([], {
       hour: "2-digit",
       minute: "2-digit",
+      timeZone: topbarClock.dataset.systemTimezone || undefined,
     }).format(now);
     topbarClock.title = new Intl.DateTimeFormat([], {
       weekday: "long",
@@ -532,10 +534,12 @@ if (topbarClock) {
       day: "numeric",
       hour: "2-digit",
       minute: "2-digit",
+      timeZone: topbarClock.dataset.systemTimezone || undefined,
     }).format(now);
   };
   updateTopbarClock();
   window.setInterval(updateTopbarClock, 30000);
+  window.addEventListener("justvoxel-timezone", updateTopbarClock);
 }
 
 if (controlCenter) {
@@ -1408,7 +1412,7 @@ const setupWorkspaceWindow = (element, options = {}) => {
     if (workspaceCompactQuery.matches) return;
     const saved = readWorkspaceWindowState(id);
     if (Number.isFinite(saved.width) && saved.width > 0) element.style.width = saved.width + "px";
-    if (Number.isFinite(saved.height) && saved.height > 0) element.style.height = saved.height + "px";
+    if (id !== "migration" && id !== "version" && Number.isFinite(saved.height) && saved.height > 0) element.style.height = saved.height + "px";
     if (Number.isFinite(saved.left)) element.style.left = saved.left + "px";
     if (Number.isFinite(saved.top)) element.style.top = saved.top + "px";
 
@@ -1498,7 +1502,7 @@ const setupWorkspaceWindow = (element, options = {}) => {
       resizeHandle.setPointerCapture(event.pointerId);
       const move = (moveEvent) => {
         element.style.width = Math.round(Math.min(maxWidth, Math.max(minWidth, startWidth + moveEvent.clientX - startX))) + "px";
-        element.style.height = Math.round(Math.min(maxHeight, Math.max(minHeight, startHeight + moveEvent.clientY - startY))) + "px";
+        if (id !== "migration") element.style.height = Math.round(Math.min(maxHeight, Math.max(minHeight, startHeight + moveEvent.clientY - startY))) + "px";
       };
       const finish = () => {
         resizeHandle.removeEventListener("pointermove", move);
@@ -1884,6 +1888,24 @@ if (backupsOpen && backupsDialog) {
 
 
 const migrationOpen = document.querySelector("[data-migration-open]");
+document.addEventListener("click", (event) => {
+  const open = event.target.closest("[data-recovery-open-confirmation]");
+  if (open) {
+    open.closest("[data-recovery-cleanup-form]")?.querySelector("[data-recovery-confirmation-dialog]")?.showModal();
+    return;
+  }
+  const cancel = event.target.closest("[data-recovery-cancel]");
+  if (cancel) { cancel.closest("dialog")?.close(); return; }
+  const confirm = event.target.closest("[data-recovery-confirm]");
+  if (confirm) {
+    const form = confirm.closest("[data-recovery-cleanup-form]");
+    if (!form) return;
+    form.querySelector("[data-recovery-confirmed]").value = "yes";
+    confirm.closest("dialog")?.close();
+    form.requestSubmit();
+  }
+});
+
 const migrationDialog = document.querySelector("[data-migration-workspace-dialog]");
 if (migrationOpen && migrationDialog) {
   const closeButton = migrationDialog.querySelector("[data-migration-close]");
@@ -2692,7 +2714,7 @@ if (minecraftOpen && minecraftDialog) {
   const content = minecraftDialog.querySelector("[data-minecraft-workspace-content]");
   const tabs = Array.from(minecraftDialog.querySelectorAll("[data-minecraft-tab]"));
   const csrf = document.querySelector("[data-minecraft-workspace-csrf]")?.value || "";
-  const settingsTabs = new Set(["memory", "players", "crossplay", "version"]);
+  const settingsTabs = new Set(["memory", "players", "crossplay"]);
   let currentTab = "overview";
   let loadSequence = 0;
 
@@ -2910,23 +2932,6 @@ if (minecraftOpen && minecraftDialog) {
     updateStatus();
   };
 
-  const syncVersionPolicy = (root) => {
-    const policy = root.querySelector('[name="version_policy"]');
-    const version = root.querySelector('[name="version"]');
-    const field = root.querySelector("[data-minecraft-version-field]");
-    if (!policy || !version || !field) return;
-    const sync = () => {
-      const pinned = policy.value === "pinned";
-      field.hidden = !pinned;
-      version.required = pinned;
-      version.readOnly = !pinned;
-      if (policy.value === "latest") version.value = "LATEST";
-      if (policy.value === "recommended") version.value = "";
-    };
-    policy.addEventListener("change", sync);
-    sync();
-  };
-
   const buildSettingsForm = (tab, payload, message = "") => {
     const minecraft = payload?.minecraft || {};
     const defaults = payload?.defaults || {};
@@ -2971,11 +2976,9 @@ if (minecraftOpen && minecraftDialog) {
         <div class="minecraft-native-grid">
           <label>Maximum players<input name="max_players" type="number" min="1" step="1" required></label>
           <label>Server welcome message (MOTD)<input name="motd" required></label>
-          <label>Timezone<input name="timezone" required autocomplete="off"><span class="minecraft-native-help">IANA timezone such as America/Toronto or Europe/Kyiv.</span></label>
         </div>`;
       section.querySelector('[name="max_players"]').value = String(minecraft.max_players || 10);
       section.querySelector('[name="motd"]').value = minecraft.motd || "";
-      section.querySelector('[name="timezone"]').value = minecraft.timezone || "";
       form.appendChild(section);
     } else if (tab === "crossplay") {
       section.innerHTML = `
@@ -2985,24 +2988,21 @@ if (minecraftOpen && minecraftDialog) {
           <label>Bedrock UDP port<input name="bedrock_port" type="number" min="1" max="65535" required></label>
         </div>
         <label class="minecraft-native-toggle"><input name="bedrock_enabled" type="checkbox"> Enable Bedrock cross-play</label>
-        <p class="muted compact">Port and Bedrock changes update the appliance firewall when applied. Minecraft is not restarted automatically for these non-memory changes.</p>`;
+        <p class="muted compact">Port and Bedrock changes update the appliance firewall when applied. Minecraft is not restarted automatically for these non-memory changes.</p>
+        <div data-crossplay-compatibility class="muted compact">Checking Geyser/Floodgate compatibility…</div><button type="button" class="secondary" data-open-version>Open Version</button>`;
       section.querySelector('[name="java_port"]').value = String(minecraft.java_port || 25565);
       section.querySelector('[name="bedrock_port"]').value = String(minecraft.bedrock_port || 19132);
       section.querySelector('[name="bedrock_enabled"]').checked = Boolean(minecraft.bedrock_enabled);
+      section.querySelector('[data-open-version]')?.addEventListener("click", () => document.querySelector("[data-version-open]")?.click());
+      requestWorkspaceJSON("/api/version/workspace/status").then((status) => {
+        const node = section.querySelector("[data-crossplay-compatibility]");
+        if (!node || !status) return;
+        const installed = status.installed || "Unknown";
+        if (!status.crossplay_enabled) node.textContent = `Cross-play disabled · Minecraft ${installed}.`;
+        else if (status.crossplay_compatible) node.textContent = `Cross-play enabled · Minecraft ${installed} · Geyser/Floodgate compatible with ${status.available}.`;
+        else node.textContent = status.reason || "Geyser/Floodgate compatibility is unavailable.";
+      }).catch(() => { const node = section.querySelector("[data-crossplay-compatibility]"); if (node) node.textContent = "Geyser/Floodgate compatibility is unavailable."; });
       form.appendChild(section);
-    } else if (tab === "version") {
-      section.innerHTML = `
-        <div class="section-heading"><div><p class="eyebrow">Software</p><h2>Minecraft version policy</h2></div></div>
-        <div class="minecraft-native-grid">
-          <label>Minecraft container channel or tag<input name="image_tag" required autocomplete="off"><span class="minecraft-native-help">stable, latest, or an exact upstream image tag.</span></label>
-          <label>Version policy<select name="version_policy"><option value="pinned">Pinned exact Minecraft version</option><option value="recommended">Resolve newest stable Paper-supported version now</option><option value="latest">LATEST when Minecraft starts</option></select></label>
-          <label data-minecraft-version-field>Exact Minecraft version<input name="version" autocomplete="off"><span class="minecraft-native-help">Used when the policy is Pinned.</span></label>
-        </div>`;
-      section.querySelector('[name="image_tag"]').value = minecraft.image_tag || "stable";
-      section.querySelector('[name="version_policy"]').value = minecraft.version_mode || "pinned";
-      section.querySelector('[name="version"]').value = minecraft.version || "";
-      form.appendChild(section);
-      syncVersionPolicy(section);
     }
 
     const actions = document.createElement("div");
@@ -3604,62 +3604,140 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   const renderLogs = async (sequence) => {
     const payload = await systemFetchJSON("/api/system/workspace/logs");
     if (!payload || sequence !== loadSequence || !content) return;
+    const groups = ["Setup", "Migration", "Restore", "Reset", "Support"];
+    const logs = Array.isArray(payload.logs) ? payload.logs : [];
     const root = document.createElement("div");
     root.className = "system-logs-layout";
-    const list = document.createElement("div");
-    list.className = "system-logs-list";
-    const reader = document.createElement("section");
-    reader.className = "panel system-logs-reader";
-    const heading = document.createElement("h3");
-    heading.textContent = "Diagnostic log";
+    root.dataset.systemLogsLayout = "";
+    const saved = (() => { try { return JSON.parse(localStorage.getItem("justvoxel.system.logs.columns") || "{}") || {}; } catch { return {}; } })();
+    let groupWidth = Number.isFinite(saved.groups) ? saved.groups : 170;
+    let fileWidth = Number.isFinite(saved.files) ? saved.files : 280;
+    const setWidths = () => {
+      const width = root.clientWidth || 900;
+      groupWidth = Math.max(130, Math.min(groupWidth, width - 160 - 220 - 20));
+      fileWidth = Math.max(160, Math.min(fileWidth, width - groupWidth - 220 - 20));
+      root.style.setProperty("--logs-groups-width", groupWidth + "px");
+      root.style.setProperty("--logs-files-width", fileWidth + "px");
+    };
+    const makeColumn = (name, className) => {
+      const column = document.createElement("section");
+      column.className = className;
+      const heading = document.createElement("h3");
+      heading.textContent = name;
+      column.appendChild(heading);
+      return column;
+    };
+    const groupColumn = makeColumn("Groups", "system-logs-groups");
+    const fileColumn = makeColumn("Files", "system-logs-files");
+    const fileList = document.createElement("div");
+    fileList.className = "system-logs-list";
+    fileColumn.appendChild(fileList);
+    const reader = makeColumn("Viewer", "system-logs-reader");
+    const viewer = document.createElement("div");
+    viewer.className = "system-logs-viewer";
     const download = document.createElement("a");
     download.className = "button-link secondary";
     download.textContent = "Download log";
     download.hidden = true;
     const documentText = document.createElement("pre");
-    documentText.textContent = "Select a log to read it here.";
-    reader.append(heading, download, documentText);
-    const logs = Array.isArray(payload.logs) ? payload.logs : [];
-    if (!logs.length) {
-      const empty = document.createElement("p");
-      empty.className = "muted";
-      empty.textContent = "No retained diagnostic logs are available.";
-      list.appendChild(empty);
-    }
-    logs.forEach((entry) => {
+    documentText.textContent = "Select a file to read it here.";
+    viewer.append(download, documentText);
+    reader.appendChild(viewer);
+    let selectedGroup = "Setup";
+    let selectedFile = "";
+    const renderFiles = () => {
+      fileList.replaceChildren();
+      viewer.scrollTop = 0;
+      download.hidden = true;
+      documentText.textContent = "Select a file to read it here.";
+      const entries = logs.filter((entry) => entry.category === selectedGroup.toLowerCase());
+      if (!entries.length) {
+        const empty = document.createElement("p");
+        empty.className = "muted";
+        empty.textContent = selectedGroup === "Support" ? "No support bundles generated." : "No " + selectedGroup.toLowerCase() + " logs available.";
+        fileList.appendChild(empty);
+        return;
+      }
+      entries.forEach((entry) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "system-log-entry secondary";
+        button.setAttribute("aria-pressed", selectedFile === entry.log_id ? "true" : "false");
+        const title = document.createElement("strong");
+        title.textContent = entry.log_id + ".log";
+        const meta = document.createElement("span");
+        meta.textContent = [entry.operation_type?.replaceAll("_", " ") || "", entry.state || "", entry.timestamp || ""].filter(Boolean).join(" · ");
+        button.append(title, meta);
+        button.addEventListener("click", async () => {
+          selectedFile = entry.log_id;
+          fileList.querySelectorAll("button").forEach((item) => item.setAttribute("aria-pressed", item === button ? "true" : "false"));
+          const url = "/api/system/workspace/logs/" + encodeURIComponent(entry.category) + "/" + encodeURIComponent(entry.log_id);
+          documentText.textContent = "Loading log…";
+          download.hidden = true;
+          try {
+            const response = await fetch(url, { credentials: "same-origin", cache: "no-store", headers: { Accept: "text/plain" } });
+            if (systemHandleAuth(response)) return;
+            if (!response.ok) throw new Error("Diagnostic log is unavailable.");
+            const data = await response.text();
+            if (sequence !== loadSequence || selectedFile !== entry.log_id) return;
+            documentText.textContent = data;
+            download.href = url + "?download=1";
+            download.hidden = false;
+          } catch (error) { documentText.textContent = error?.message || "Diagnostic log is unavailable."; }
+        });
+        fileList.appendChild(button);
+      });
+    };
+    groups.forEach((group) => {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "system-log-entry secondary";
-      const type = entry.operation_type || (entry.category === "setup" ? "Setup" : "Operation");
-      const title = document.createElement("strong");
-      title.textContent = type.replaceAll("_", " ");
-      const meta = document.createElement("span");
-      meta.textContent = [entry.state || "", entry.timestamp || ""].filter(Boolean).join(" · ");
-      const id = document.createElement("code");
-      id.textContent = entry.operation_id || entry.log_id;
-      button.append(title, meta, id);
-      button.addEventListener("click", async () => {
-        const url = "/api/system/workspace/logs/" + encodeURIComponent(entry.category) + "/" + encodeURIComponent(entry.log_id);
-        heading.textContent = title.textContent;
-        documentText.textContent = "Loading log…";
-        download.hidden = true;
-        try {
-          const response = await fetch(url, { credentials: "same-origin", cache: "no-store", headers: { Accept: "text/plain" } });
-          if (systemHandleAuth(response)) return;
-          if (!response.ok) throw new Error("Diagnostic log is unavailable.");
-          const data = await response.text();
-          if (sequence !== loadSequence) return;
-          documentText.textContent = data;
-          download.href = url + "?download=1";
-          download.hidden = false;
-        } catch (error) {
-          documentText.textContent = error?.message || "Diagnostic log is unavailable.";
-        }
+      button.className = "system-log-group secondary";
+      button.textContent = group;
+      button.setAttribute("aria-pressed", group === selectedGroup ? "true" : "false");
+      button.addEventListener("click", () => {
+        selectedGroup = group;
+        selectedFile = "";
+        groupColumn.querySelectorAll("button").forEach((item) => item.setAttribute("aria-pressed", item === button ? "true" : "false"));
+        renderFiles();
       });
-      list.appendChild(button);
+      groupColumn.appendChild(button);
     });
-    root.append(list, reader);
+    const splitter = (side) => {
+      const handle = document.createElement("div");
+      handle.className = "system-logs-splitter";
+      handle.dataset.logsSplitter = side;
+      handle.setAttribute("role", "separator");
+      handle.setAttribute("aria-label", "Resize " + (side === "groups" ? "Groups and Files" : "Files and Viewer"));
+      handle.setAttribute("aria-orientation", "vertical");
+      handle.tabIndex = 0;
+      const move = (delta) => {
+        if (side === "groups") groupWidth += delta;
+        else fileWidth += delta;
+        setWidths();
+        try { localStorage.setItem("justvoxel.system.logs.columns", JSON.stringify({ groups: groupWidth, files: fileWidth })); } catch {}
+      };
+      handle.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        handle.setPointerCapture(event.pointerId);
+        let previous = event.clientX;
+        const onMove = (next) => { const delta = next.clientX - previous; previous = next.clientX; move(delta); };
+        const onEnd = () => { handle.removeEventListener("pointermove", onMove); handle.removeEventListener("pointerup", onEnd); handle.removeEventListener("pointercancel", onEnd); };
+        handle.addEventListener("pointermove", onMove);
+        handle.addEventListener("pointerup", onEnd);
+        handle.addEventListener("pointercancel", onEnd);
+      });
+      handle.addEventListener("keydown", (event) => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); move(event.key === "ArrowLeft" ? -16 : 16); } });
+      return handle;
+    };
+    root.append(groupColumn, splitter("groups"), fileColumn, splitter("files"), reader);
     content.replaceChildren(root);
+    setWidths();
+    const logsResizeObserver = new ResizeObserver(() => {
+      if (!root.isConnected) { logsResizeObserver.disconnect(); return; }
+      setWidths();
+    });
+    logsResizeObserver.observe(root);
+    renderFiles();
   };
 
   const renderUsers = async (sequence, message = "") => {
@@ -4023,6 +4101,12 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   const renderResetOperation = (operation) => {
     clearResetPoll();
     if (!content || !operation) return;
+    if (operation.operation_type === "minecraft_reset" && operation.state === "succeeded") {
+      ++loadSequence;
+      workspaceWindow?.close();
+      window.dispatchEvent(new Event("justvoxel:minecraft-reset-complete"));
+      return;
+    }
     const root = document.createElement("div");
     root.className = "system-reset-view";
 
@@ -4433,6 +4517,31 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       list.appendChild(row);
     });
     built.panel.appendChild(list);
+    const project = document.createElement("div");
+    project.className = "about-project";
+    const projectHeading = document.createElement("h3");
+    projectHeading.textContent = "Project";
+    const projectList = document.createElement("dl");
+    [
+      ["Repository", "JustVoxel on GitHub", "https://github.com/home-server-project/justvoxel"],
+      ["Organization", "Home Server Project", "https://github.com/home-server-project"],
+      ["Support / Bugs", "Report an issue", "https://github.com/home-server-project/justvoxel/issues"],
+    ].forEach(([label, text, url]) => {
+      const row = document.createElement("div");
+      const dt = document.createElement("dt");
+      dt.textContent = label;
+      const dd = document.createElement("dd");
+      const link = document.createElement("a");
+      link.href = url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = text;
+      dd.appendChild(link);
+      row.append(dt, dd);
+      projectList.appendChild(row);
+    });
+    project.append(projectHeading, projectList);
+    built.panel.appendChild(project);
     const disclaimer = document.createElement("p");
     disclaimer.className = "disclaimer";
     disclaimer.textContent = "NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.";
@@ -4774,6 +4883,7 @@ if (dashboard) {
     storage: "[data-storage-open]",
     backups: "[data-backups-open]",
     migration: "[data-migration-open]",
+    version: "[data-version-open]",
   };
   if (Object.hasOwn(launchers, workspace)) {
     const launch = () => {
@@ -4787,7 +4897,8 @@ if (dashboard) {
         if (window.location.hash === "#minecraft-logs") tab = "overview";
       }
       const allowedTabs = {
-        minecraft: ["overview", "memory", "players", "whitelist", "crossplay", "version"],
+        minecraft: ["overview", "memory", "players", "whitelist", "crossplay"],
+        version: ["software", "minecraft"],
         system: ["health", "history", "users", "security", "reset", "ups", "about"],
         migration: ["export", "import", "recovery"],
       };

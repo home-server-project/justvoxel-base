@@ -40,6 +40,7 @@ type AdminConfigurationChangeResponse struct {
 	Error                 string                      `json:"error,omitempty"`
 	Changes               []AdminConfigurationChange  `json:"changes"`
 	Warnings              []string                    `json:"warnings"`
+	CompatibilityBlocked  bool                        `json:"compatibility_blocked"`
 	RestartRequired       bool                        `json:"restart_required"`
 	MemoryRestartRequired bool                        `json:"memory_restart_required"`
 	MemoryRemainingMiB    int                         `json:"memory_remaining_mib"`

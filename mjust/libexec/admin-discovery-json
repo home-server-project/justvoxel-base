@@ -313,7 +313,15 @@ configuration_change_json() {
             new_version=LATEST
             ;;
         recommended)
-            new_version="$(resolve_latest_stable_paper_version || true)"
+            local recommended_geyser_version=''
+            if [[ ${new_bedrock_enabled} == yes ]]; then
+                recommended_geyser_version="$(resolve_geyser_supported_java_version || true)"
+            fi
+            if [[ -n ${recommended_geyser_version} ]] && paper_version_has_stable_build "${recommended_geyser_version}"; then
+                new_version="${recommended_geyser_version}"
+            else
+                new_version="$(resolve_latest_stable_paper_version || true)"
+            fi
             if [[ -z ${new_version} ]]; then
                 jq -n '{ok:false,error:"Could not resolve the newest Minecraft version with a stable Paper build."}'
                 return 0
@@ -347,7 +355,22 @@ configuration_change_json() {
         return 0
     fi
 
-    local changes='[]' warnings='[]' restart_required=false
+    local changes='[]' warnings='[]' restart_required=false compatibility_blocked=false
+    if [[ ${new_bedrock_enabled} == yes && ( ${new_version} != "${old_version}" || ${new_version_policy} != "${old_version_mode}" || ${old_bedrock_enabled} != yes ) ]]; then
+        local compatible_candidate="${new_version}" geyser_supported_version=''
+        if [[ ${compatible_candidate} == LATEST ]]; then
+            compatible_candidate="$(resolve_latest_stable_paper_version || true)"
+        fi
+        geyser_supported_version="$(resolve_geyser_supported_java_version || true)"
+        if [[ -z ${compatible_candidate} || -z ${geyser_supported_version} ]] || ! bedrock_crossplay_supports_version "${compatible_candidate}" "${geyser_supported_version}"; then
+            compatibility_blocked=true
+            local compatibility_message='Bedrock cross-play compatibility could not be confirmed. Keep the current version, or turn off cross-play before applying this change.'
+            if [[ -n ${compatible_candidate} && -n ${geyser_supported_version} ]]; then
+                compatibility_message="Minecraft ${compatible_candidate} is available, but Geyser/Floodgate currently supports ${geyser_supported_version}. Keep ${geyser_supported_version} to keep cross-play working, or turn off cross-play before updating."
+            fi
+            warnings="$(jq -c --arg message "${compatibility_message}" '. + [$message]' <<< "${warnings}")"
+        fi
+    fi
     add_change() {
         local field="$1" label="$2" before="$3" after="$4" restart="$5"
         [[ ${before} != "${after}" ]] || return 0
@@ -435,6 +458,10 @@ configuration_change_json() {
         esac
     fi
 
+    if [[ ${mode} == apply && ${compatibility_blocked} == true ]]; then
+        jq -n '{ok:false,error:"Bedrock cross-play does not support the proposed Minecraft version. Turn off cross-play and review the version change again."}'
+        return 0
+    fi
     if [[ ${mode} == apply && $(jq 'length' <<< "${changes}") -gt 0 ]]; then
         local config_backup failed_java failed_bedrock_enabled failed_bedrock_port
         config_backup="$(mktemp "${JV_CONFIG_DIR}/.justvoxel.conf.pre-webui.XXXXXX")"
@@ -484,6 +511,7 @@ configuration_change_json() {
     jq -n \
         --argjson changes "${changes}" \
         --argjson warnings "${warnings}" \
+        --argjson compatibility_blocked "${compatibility_blocked}" \
         --argjson restart_required "${restart_required}" \
         --argjson memory_restart_required "${memory_restart_required}" \
         --argjson memory_remaining_mib "$(( remaining_mib > 0 ? remaining_mib : 0 ))" \
@@ -495,7 +523,7 @@ configuration_change_json() {
         --argjson restarted "${restarted}" \
         --argjson restart_deferred "${restart_deferred}" \
         --arg message "${result_message}" \
-        '{ok:true,changes:$changes,warnings:$warnings,restart_required:$restart_required,memory_restart_required:$memory_restart_required,memory_remaining_mib:$memory_remaining_mib,proposed:$proposed,applied:$applied,confirmation_required:$confirmation_required,online:$online,players:$players,restarted:$restarted,restart_deferred:$restart_deferred,message:$message}'
+        '{ok:true,changes:$changes,warnings:$warnings,compatibility_blocked:$compatibility_blocked,restart_required:$restart_required,memory_restart_required:$memory_restart_required,memory_remaining_mib:$memory_remaining_mib,proposed:$proposed,applied:$applied,confirmation_required:$confirmation_required,online:$online,players:$players,restarted:$restarted,restart_deferred:$restart_deferred,message:$message}'
 }
 
 case "${action}" in

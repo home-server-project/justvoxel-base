@@ -88,7 +88,7 @@ type operationStore struct {
 	baseDir            string
 	operationsDir      string
 	setupLogsDir       string
-	operationLogsDir   string
+	logsDir            string
 	diagnosticHostname string
 	lockFile         *os.File
 	restoreLockFile      *os.File
@@ -121,7 +121,7 @@ func openOperationStore(baseDir string) (*operationStore, error) {
 	}
 	operationsDir := filepath.Join(logsDir, "operations")
 	setupLogsDir := filepath.Join(logsDir, "setup-logs")
-	operationLogsDir := filepath.Join(logsDir, "operation-logs")
+	legacyOperationLogsDir := filepath.Join(logsDir, "operation-logs")
 	legacyOperationsDir := filepath.Join(baseDir, "operations")
 	legacySetupLogsDir := filepath.Join(baseDir, "setup-logs")
 	if err := validateLegacyManagementLogDirectoryMigration(legacyOperationsDir, operationsDir); err != nil {
@@ -129,6 +129,9 @@ func openOperationStore(baseDir string) (*operationStore, error) {
 	}
 	if err := validateLegacyManagementLogDirectoryMigration(legacySetupLogsDir, setupLogsDir); err != nil {
 		return nil, fmt.Errorf("preflight setup log migration: %w", err)
+	}
+	if err := validateOperationDiagnosticMigration(legacyOperationLogsDir, logsDir); err != nil {
+		return nil, fmt.Errorf("preflight operation log migration: %w", err)
 	}
 	if err := migrateLegacyManagementLogDirectory(legacyOperationsDir, operationsDir); err != nil {
 		return nil, fmt.Errorf("migrate operation journals: %w", err)
@@ -142,8 +145,13 @@ func openOperationStore(baseDir string) (*operationStore, error) {
 	if err := ensurePrivateDirectory(setupLogsDir); err != nil {
 		return nil, err
 	}
-	if err := ensurePrivateDirectory(operationLogsDir); err != nil {
+	if err := migrateOperationDiagnostics(legacyOperationLogsDir, logsDir); err != nil {
 		return nil, err
+	}
+	for _, category := range []string{"migration-logs", "restore-logs", "reset-logs", "support"} {
+		if err := ensurePrivateDirectory(filepath.Join(logsDir, category)); err != nil {
+			return nil, err
+		}
 	}
 	hostname, _ := os.Hostname()
 	lockPath := filepath.Join(baseDir, "setup.lock")
@@ -199,7 +207,7 @@ func openOperationStore(baseDir string) (*operationStore, error) {
 		baseDir:               baseDir,
 		operationsDir:         operationsDir,
 		setupLogsDir:          setupLogsDir,
-		operationLogsDir:      operationLogsDir,
+		logsDir:               logsDir,
 		diagnosticHostname:    strings.TrimSpace(hostname),
 		lockFile:              lockFile,
 		restoreLockFile:       restoreLockFile,

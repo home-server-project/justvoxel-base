@@ -240,7 +240,7 @@ func TestSetupWizardTimezoneSearchUsesLocalDatabaseWithoutDatalist(t *testing.T)
 		}
 	}
 
-	script, err := assets.ReadFile("static/settings.js")
+	script, err := assets.ReadFile("static/timezone-search.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,6 +249,7 @@ func TestSetupWizardTimezoneSearchUsesLocalDatabaseWithoutDatalist(t *testing.T)
 			t.Fatalf("timezone search behavior missing %q", want)
 		}
 	}
+	if !strings.Contains(body, "/static/timezone-search.js") { t.Fatal("Setup does not load the shared city search") }
 
 	invalid := validServerValues()
 	invalid.Set("timezone", "Mars/Olympus")

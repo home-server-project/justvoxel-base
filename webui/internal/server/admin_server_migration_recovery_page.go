@@ -170,12 +170,12 @@ func (a *App) serverMigrationRecoveryApply(w http.ResponseWriter, r *http.Reques
 		a.renderServerMigrationRecoveryReview(w, http.StatusConflict, identity, request, plan, csrfFromRequest(r), "This retained Migration Recovery state changed since it was reviewed. Review the current state again before continuing.")
 		return
 	}
-	if strings.TrimSpace(r.FormValue("finalize_confirmation")) != "FINALIZE" {
-		a.renderServerMigrationRecoveryReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), "Type FINALIZE exactly to confirm removal of this reviewed retained recovery transaction after Agent validation.")
+	if r.FormValue("cleanup_confirmed") != "yes" {
+		a.renderServerMigrationRecoveryReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), "Confirm cleanup before continuing.")
 		return
 	}
 	if plan.Requirements == nil || !plan.Requirements.FinalizeConfirmationRequired {
-		a.renderServerMigrationRecoveryReview(w, http.StatusBadGateway, identity, request, plan, csrfFromRequest(r), "Migration Recovery did not return its required finalization confirmation contract.")
+		a.renderServerMigrationRecoveryReview(w, http.StatusBadGateway, identity, request, plan, csrfFromRequest(r), "JustVoxel cannot confirm this cleanup right now.")
 		return
 	}
 	result, err := client.AdminMigrationRecoveryApply(r.Context(), session, api.AdminMigrationRecoveryApplyRequest{
@@ -184,7 +184,7 @@ func (a *App) serverMigrationRecoveryApply(w http.ResponseWriter, r *http.Reques
 		FinalizeConfirmed: true,
 	})
 	if err != nil {
-		a.renderServerMigrationRecoveryReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), apiMessage(err, "Could not start Migration Recovery finalization."))
+		a.renderServerMigrationRecoveryReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), apiMessage(err, "Could not start recovery file cleanup."))
 		return
 	}
 	if !result.OK || result.Operation == nil || result.Operation.OperationType != "migration_recovery" {
@@ -245,11 +245,11 @@ func parseServerMigrationRecoveryForm(r *http.Request, discovery api.AdminMigrat
 			continue
 		}
 		if !summary.Finalizable {
-			return api.AdminMigrationRecoveryPlanRequest{}, errors.New("this retained migration transaction is not safely finalizable in the current appliance state")
+			return api.AdminMigrationRecoveryPlanRequest{}, errors.New("JustVoxel cannot safely clean up these recovery files in the current server state")
 		}
 		return api.AdminMigrationRecoveryPlanRequest{Transaction: transaction}, nil
 	}
-	return api.AdminMigrationRecoveryPlanRequest{}, errors.New("choose a retained recovery transaction currently reported by the Management Agent")
+	return api.AdminMigrationRecoveryPlanRequest{}, errors.New("Choose recovery files currently shown on this page")
 }
 
 func (a *App) renderServerMigrationRecoveryPage(w http.ResponseWriter, status int, identity api.SessionInfo, discovery api.AdminMigrationRecoveryDiscoveryResponse, importNeedsAttention bool, importOperationID, csrf, errorMessage string) {
