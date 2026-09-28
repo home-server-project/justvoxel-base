@@ -10,7 +10,7 @@ require_root
 collect_status() {
     local variant efi=false firmware_available=false firmware_reason='' display_state=unknown
     local staged_update=false os_status_available=false minecraft_state=stopped
-    local status_json='' status_file connector_state found_connector=no
+    local status_json='' status_file connector_state found_connector=no firmware_capability=''
 
     variant="$(jv_variant_kind)"
     [[ -d /sys/firmware/efi ]] && efi=true
@@ -19,8 +19,11 @@ collect_status() {
         firmware_reason=not_hws
     elif [[ ${efi} != true ]]; then
         firmware_reason=not_efi
-    elif systemctl reboot --firmware-setup --dry-run >/dev/null 2>&1; then
-        firmware_available=true
+    elif firmware_capability="$(busctl call org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager CanRebootToFirmwareSetup 2>/dev/null)"; then
+        case "${firmware_capability}" in
+            's "yes"'|'s "challenge"') firmware_available=true ;;
+            *) firmware_reason=unsupported ;;
+        esac
     else
         firmware_reason=unsupported
     fi

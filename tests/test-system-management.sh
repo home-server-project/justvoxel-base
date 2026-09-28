@@ -100,7 +100,10 @@ grep -Fq 'action_confirmed:true' "${system_actions_api}" || fail 'System Actions
 grep -Fq 'confirm_players:$players_confirmed' "${system_actions_api}" || fail 'System Actions player confirmation replay missing'
 
 grep -Fq 'jv_stop_minecraft_adaptive' "${system_actions_backend}" || fail 'System Actions backend does not use adaptive Minecraft shutdown'
-grep -Fq 'systemctl reboot --firmware-setup --dry-run' "${system_actions_backend}" || fail 'System Actions backend lost firmware capability validation'
+grep -Fq 'busctl call org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager CanRebootToFirmwareSetup' "${system_actions_backend}" || fail 'System Actions backend must query login1 firmware capability'
+grep -Fq "'s \"yes\"'|'s \"challenge\"'" "${system_actions_backend}" || fail 'System Actions backend must accept supported login1 firmware capabilities'
+if grep -Fq 'systemctl reboot --firmware-setup --dry-run' "${system_actions_backend}"; then fail 'System Actions status must not arm firmware setup with a dry-run reboot'; fi
+if grep -Fq 'SetRebootToFirmwareSetup' "${system_actions_backend}"; then fail 'System Actions status must not set firmware reboot state'; fi
 grep -Fq 'systemd-run --quiet --collect --unit=justvoxel-reboot --on-active=2s /usr/bin/systemctl reboot' "${system_actions_backend}" || fail 'System reboot backend action missing'
 grep -Fq 'systemd-run --quiet --collect --unit=justvoxel-poweroff --on-active=2s /usr/bin/systemctl poweroff' "${system_actions_backend}" || fail 'System poweroff backend action missing'
 grep -Fq 'systemd-run --quiet --collect --unit=justvoxel-firmware-reboot --on-active=2s /usr/bin/systemctl reboot --firmware-setup' "${system_actions_backend}" || fail 'Firmware reboot backend action missing'
