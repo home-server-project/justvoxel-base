@@ -80,7 +80,8 @@ grep -Fq 'AdminSetupVersionPreview' "${repo_root}/webui/internal/server/setup_wi
 grep -Fq '/setup/version-preview?' "${repo_root}/webui/internal/server/static/settings.js"
 grep -Fq 'status.selected_candidate' "${repo_root}/webui/internal/server/static/settings.js"
 grep -Fq 'next.disabled = !status.selected_candidate || (status.crossplay_enabled && !status.crossplay_compatible)' "${repo_root}/webui/internal/server/static/settings.js"
-grep -Fq '{{.Plan.Normalized.Minecraft.Version}} {{.VersionLabel}}' "${repo_root}/webui/internal/server/templates/setup_review.html"
+grep -Fq '<dt>Minecraft version</dt><dd>{{.Plan.Normalized.Minecraft.Version}}</dd>' "${repo_root}/webui/internal/server/templates/setup_review.html"
+grep -Fq '<dt>Version policy</dt><dd>{{.VersionPolicyLabel}}</dd>' "${repo_root}/webui/internal/server/templates/setup_review.html"
 if grep -Fq 'Version: LATEST' "${repo_root}/webui/internal/server/templates/setup_review.html"; then exit 1; fi
 
 # Exercise the planner separately from the browser preview. The selected policy
