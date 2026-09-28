@@ -2,12 +2,34 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 )
+
+func TestMigrationRecoveryResolveClientUsesAdministratorEndpoint(t *testing.T) {
+	const operationID = "12345678-1234-4123-8123-123456789abc"
+	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPost || r.URL.Path != adminMigrationRecoveryResolvePath || r.Header.Get("Authorization") != "Bearer session-token" {
+			t.Fatalf("unexpected resolve request %s %s", r.Method, r.URL.Path)
+		}
+		var request AdminMigrationRecoveryResolveRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.OperationID != operationID || !request.KeepCurrentState {
+			t.Fatalf("unexpected resolve body %#v, err=%v", request, err)
+		}
+		body := `{"operation":{"operation_id":"` + operationID + `","operation_type":"migration_recovery","state":"resolved"}}`
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})}}
+	response, err := client.AdminMigrationRecoveryResolve(context.Background(), "session-token", AdminMigrationRecoveryResolveRequest{
+		OperationID: operationID, KeepCurrentState: true,
+	})
+	if err != nil || response.Operation == nil || response.Operation.State != "resolved" {
+		t.Fatalf("resolve response = %#v, err=%v", response, err)
+	}
+}
 
 func TestServerMigrationDiscoveryClientsUseAuthoritativeEndpoints(t *testing.T) {
 	tests := []struct {

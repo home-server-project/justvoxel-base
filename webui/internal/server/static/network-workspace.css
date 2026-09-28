@@ -145,7 +145,7 @@
 .network-workspace-header .eyebrow::after{content:" ·"}
 .network-workspace-header h2{margin:0;font-size:1.05rem}
 .network-workspace-header-actions{align-items:center;gap:var(--jv-space-xs)}
-.network-workspace-header .system-monitor-header-button{width:32px;height:32px;border-radius:8px;font-size:1.08rem}
+.network-workspace-header .system-monitor-header-button:not(.workspace-header-refresh){width:32px;height:32px;border-radius:8px;font-size:1.08rem}
 .network-workspace-body{min-width:0;padding:var(--jv-workspace-edge);overscroll-behavior:contain}
 .network-workspace-view{grid-template-columns:repeat(2,minmax(0,1fr));gap:.55rem;align-content:start;min-width:0}
 .network-workspace-view>.network-overview,.network-workspace-view>.network-devices,.network-workspace-view>.network-checkpoint-banner,.network-workspace-view>.network-connect-panel{grid-column:1/-1}

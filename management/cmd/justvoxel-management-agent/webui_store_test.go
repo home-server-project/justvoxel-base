@@ -217,7 +217,6 @@ func TestWebUIStoreFoundationTablesExist(t *testing.T) {
 	}
 }
 
-
 func TestWebUIStoreFactoryResetReturnsUserStateToDefaults(t *testing.T) {
 	store, _ := openTestWebUIStore(t)
 	base := time.Date(2026, time.September, 25, 20, 30, 0, 0, time.UTC)
@@ -249,7 +248,7 @@ func TestWebUIStoreFactoryResetReturnsUserStateToDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	changed := defaultSystemMonitorProfile()
-	changed.ProcessCount = 20
+	changed.ProcessCount = 15
 	changed.Alerts = false
 	if err := store.writeSystemMonitorProfile(changed); err != nil {
 		t.Fatal(err)

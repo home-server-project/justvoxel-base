@@ -27,7 +27,7 @@ func TestWorkspaceHeaderControls(t *testing.T) {
 			t.Errorf("%s close is not the shared accessible SVG control", match[1])
 		}
 	}
-	for _, name := range []string{"network", "system", "minecraft", "storage", "backups", "migration", "version", "system-update"} {
+	for _, name := range []string{"network", "system", "minecraft", "storage", "backups", "migration", "version", "system-update", "system-monitor"} {
 		if refreshes[name] == "" || closes[name] == "" {
 			t.Errorf("%s workspace lost its header controls", name)
 		}
@@ -35,8 +35,12 @@ func TestWorkspaceHeaderControls(t *testing.T) {
 	if closes["system-monitor"] == "" {
 		t.Error("system monitor lost its close control")
 	}
-	if refreshes["system-monitor"] != "" {
-		t.Error("system monitor gained an unexpected refresh control")
+	networkCSS, err := assets.ReadFile("static/network-workspace.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(networkCSS), `.network-workspace-header .system-monitor-header-button:not(.workspace-header-refresh){`) || strings.Contains(string(networkCSS), `.network-workspace-header .system-monitor-header-button{`) {
+		t.Error("network header button rule must leave shared Refresh typography and geometry intact")
 	}
 	css, err := assets.ReadFile("static/app.css")
 	if err != nil {

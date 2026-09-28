@@ -12,18 +12,22 @@ import (
 
 type fakeServerMigrationRecoveryAPI struct {
 	fakeServerMigrationAPI
-	plan         api.AdminMigrationRecoveryPlanResponse
-	planErr      error
-	planCalls    int
-	planReq      api.AdminMigrationRecoveryPlanRequest
-	apply        api.AdminMigrationApplyResponse
-	applyErr     error
-	applyCalls   int
-	applyReq     api.AdminMigrationRecoveryApplyRequest
-	resolve      api.AdminMigrationImportResolveResponse
-	resolveErr   error
-	resolveCalls int
-	resolveReq   api.AdminMigrationImportResolveRequest
+	plan                 api.AdminMigrationRecoveryPlanResponse
+	planErr              error
+	planCalls            int
+	planReq              api.AdminMigrationRecoveryPlanRequest
+	apply                api.AdminMigrationApplyResponse
+	applyErr             error
+	applyCalls           int
+	applyReq             api.AdminMigrationRecoveryApplyRequest
+	resolve              api.AdminMigrationImportResolveResponse
+	resolveErr           error
+	resolveCalls         int
+	resolveReq           api.AdminMigrationImportResolveRequest
+	recoveryResolve      api.AdminMigrationRecoveryResolveResponse
+	recoveryResolveErr   error
+	recoveryResolveCalls int
+	recoveryResolveReq   api.AdminMigrationRecoveryResolveRequest
 }
 
 func (f *fakeServerMigrationRecoveryAPI) AdminMigrationRecoveryPlan(_ context.Context, session string, request api.AdminMigrationRecoveryPlanRequest) (api.AdminMigrationRecoveryPlanResponse, error) {
@@ -51,6 +55,15 @@ func (f *fakeServerMigrationRecoveryAPI) AdminMigrationImportResolve(_ context.C
 	f.resolveCalls++
 	f.resolveReq = request
 	return f.resolve, f.resolveErr
+}
+
+func (f *fakeServerMigrationRecoveryAPI) AdminMigrationRecoveryResolve(_ context.Context, session string, request api.AdminMigrationRecoveryResolveRequest) (api.AdminMigrationRecoveryResolveResponse, error) {
+	if session != "session-token" {
+		return api.AdminMigrationRecoveryResolveResponse{}, api.ErrUnauthorized
+	}
+	f.recoveryResolveCalls++
+	f.recoveryResolveReq = request
+	return f.recoveryResolve, f.recoveryResolveErr
 }
 
 func recoveryDiscoveryFixture() api.AdminMigrationRecoveryDiscoveryResponse {

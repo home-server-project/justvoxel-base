@@ -1,4 +1,4 @@
-{{define "migration_workspace_progress.html"}}<div class="migration-workspace-content" data-migration-workspace-root>
+{{define "migration_workspace_progress.html"}}<div class="migration-workspace-content" data-migration-workspace-root data-migration-recovery-available="{{if .CanReviewRecovery}}true{{else}}false{{end}}">
 <div class="title-row"><div><p class="eyebrow">Administrator · migration</p><h1 id="server-migration-operation-name">{{.OperationName}}</h1></div><span class="badge" id="server-migration-operation-state">{{.StateLabel}}</span></div>
   <section class="panel" data-server-migration-operation data-status-url="/api/workspace/migration/progress/{{.Operation.OperationID}}">
     <p id="server-migration-operation-status">{{.Operation.Status}}</p>

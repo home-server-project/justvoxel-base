@@ -14,6 +14,7 @@ type adminMigrationWorkspaceRecoveryAPI interface {
 	AdminMigrationRecoveryPlan(ctx context.Context, session string, request api.AdminMigrationRecoveryPlanRequest) (api.AdminMigrationRecoveryPlanResponse, error)
 	AdminMigrationRecoveryApply(ctx context.Context, session string, request api.AdminMigrationRecoveryApplyRequest) (api.AdminMigrationApplyResponse, error)
 	AdminMigrationImportResolve(ctx context.Context, session string, request api.AdminMigrationImportResolveRequest) (api.AdminMigrationImportResolveResponse, error)
+	AdminMigrationRecoveryResolve(ctx context.Context, session string, request api.AdminMigrationRecoveryResolveRequest) (api.AdminMigrationRecoveryResolveResponse, error)
 }
 
 type migrationWorkspaceRecoveryTransactionView struct {
@@ -23,17 +24,18 @@ type migrationWorkspaceRecoveryTransactionView struct {
 }
 
 type migrationWorkspaceRecoveryPageData struct {
-	Title                string
-	Version              string
-	ManagementAPI        string
-	CSRF                 string
-	Identity             api.SessionInfo
-	Discovery            api.AdminMigrationRecoveryDiscoveryResponse
-	Transactions         []migrationWorkspaceRecoveryTransactionView
-	ImportNeedsAttention bool
-	ImportOperationID    string
-	CanKeepCurrent       bool
-	Error                string
+	Title                  string
+	Version                string
+	ManagementAPI          string
+	CSRF                   string
+	Identity               api.SessionInfo
+	Discovery              api.AdminMigrationRecoveryDiscoveryResponse
+	Transactions           []migrationWorkspaceRecoveryTransactionView
+	ImportNeedsAttention   bool
+	OperationID            string
+	RecoveryNeedsAttention bool
+	CanKeepCurrent         bool
+	Error                  string
 }
 
 type migrationWorkspaceRecoveryReviewPageData struct {
@@ -102,18 +104,22 @@ func (a *App) migrationWorkspaceRecoveryPage(w http.ResponseWriter, r *http.Requ
 		a.handleMigrationWorkspaceRequestError(w, r, err, "Migration Recovery discovery is unavailable.")
 		return
 	}
-	importOperationID := ""
-	if importNeedsAttention && len(discovery.Transactions) == 0 {
+	operationID := ""
+	recoveryNeedsAttention := false
+	if len(discovery.Transactions) == 0 {
 		current, currentErr := client.AdminCurrentMigrationOperation(r.Context(), session)
 		if currentErr != nil {
 			a.handleMigrationWorkspaceRequestError(w, r, currentErr, "Server Migration operation status is unavailable.")
 			return
 		}
-		if current.Operation != nil && current.Operation.OperationType == "migration_import" && current.Operation.State == "needs_attention" {
-			importOperationID = current.Operation.OperationID
+		if current.Operation != nil && current.Operation.State == "needs_attention" {
+			if current.Operation.OperationType == "migration_import" || current.Operation.OperationType == "migration_recovery" {
+				operationID = current.Operation.OperationID
+				recoveryNeedsAttention = current.Operation.OperationType == "migration_recovery"
+			}
 		}
 	}
-	a.renderMigrationWorkspaceRecoveryPage(w, http.StatusOK, identity, discovery, importNeedsAttention, importOperationID, csrfFromRequest(r), "")
+	a.renderMigrationWorkspaceRecoveryPage(w, http.StatusOK, identity, discovery, importNeedsAttention, recoveryNeedsAttention, operationID, csrfFromRequest(r), "")
 }
 
 func (a *App) migrationWorkspaceRecoveryReview(w http.ResponseWriter, r *http.Request) {
@@ -128,7 +134,7 @@ func (a *App) migrationWorkspaceRecoveryReview(w http.ResponseWriter, r *http.Re
 	}
 	request, err := parseMigrationWorkspaceRecoveryForm(r, discovery)
 	if err != nil {
-		a.renderMigrationWorkspaceRecoveryPage(w, http.StatusBadRequest, identity, discovery, false, "", csrfFromRequest(r), err.Error())
+		a.renderMigrationWorkspaceRecoveryPage(w, http.StatusBadRequest, identity, discovery, false, false, "", csrfFromRequest(r), err.Error())
 		return
 	}
 	plan, err := client.AdminMigrationRecoveryPlan(r.Context(), session, request)
@@ -156,7 +162,7 @@ func (a *App) migrationWorkspaceRecoveryApply(w http.ResponseWriter, r *http.Req
 	}
 	request, err := parseMigrationWorkspaceRecoveryForm(r, discovery)
 	if err != nil {
-		a.renderMigrationWorkspaceRecoveryPage(w, http.StatusBadRequest, identity, discovery, false, "", csrfFromRequest(r), err.Error())
+		a.renderMigrationWorkspaceRecoveryPage(w, http.StatusBadRequest, identity, discovery, false, false, "", csrfFromRequest(r), err.Error())
 		return
 	}
 	plan, err := client.AdminMigrationRecoveryPlan(r.Context(), session, request)
@@ -202,10 +208,6 @@ func (a *App) migrationWorkspaceRecoveryResolve(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
-	if !importNeedsAttention {
-		http.Error(w, "Server Import does not require resolution", http.StatusConflict)
-		return
-	}
 	discovery, err := client.AdminMigrationRecoveryDiscovery(r.Context(), session)
 	if err != nil {
 		a.handleMigrationWorkspaceRequestError(w, r, err, "Migration Recovery discovery is unavailable.")
@@ -216,23 +218,39 @@ func (a *App) migrationWorkspaceRecoveryResolve(w http.ResponseWriter, r *http.R
 		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Migration operation status is unavailable.")
 		return
 	}
-	if current.Operation == nil || current.Operation.OperationType != "migration_import" || current.Operation.State != "needs_attention" {
-		http.Error(w, "Server Import does not require resolution", http.StatusConflict)
+	if current.Operation == nil || current.Operation.State != "needs_attention" ||
+		(current.Operation.OperationType != "migration_import" && current.Operation.OperationType != "migration_recovery") {
+		http.Error(w, "Migration operation does not require resolution", http.StatusConflict)
 		return
 	}
+	recoveryNeedsAttention := current.Operation.OperationType == "migration_recovery"
 	if len(discovery.Transactions) != 0 {
-		a.renderMigrationWorkspaceRecoveryPage(w, http.StatusConflict, identity, discovery, true, "", csrfFromRequest(r), "Retained Import recovery state exists and must be reviewed before keeping the current server.")
+		message := "Retained Import recovery state exists and must be reviewed before keeping the current server."
+		if recoveryNeedsAttention {
+			message = "Retained recovery state exists and must be reviewed before keeping the current server."
+		}
+		a.renderMigrationWorkspaceRecoveryPage(w, http.StatusConflict, identity, discovery, importNeedsAttention, recoveryNeedsAttention, "", csrfFromRequest(r), message)
 		return
 	}
 	if strings.TrimSpace(r.FormValue("operation_id")) != current.Operation.OperationID || r.FormValue("keep_current_state") != "yes" {
-		a.renderMigrationWorkspaceRecoveryPage(w, http.StatusBadRequest, identity, discovery, true, current.Operation.OperationID, csrfFromRequest(r), "Confirm keeping the validated current server before continuing.")
+		a.renderMigrationWorkspaceRecoveryPage(w, http.StatusBadRequest, identity, discovery, importNeedsAttention, recoveryNeedsAttention, current.Operation.OperationID, csrfFromRequest(r), "Confirm keeping the validated current server before continuing.")
 		return
 	}
-	_, err = client.AdminMigrationImportResolve(r.Context(), session, api.AdminMigrationImportResolveRequest{
-		OperationID: current.Operation.OperationID, KeepCurrentState: true,
-	})
+	if recoveryNeedsAttention {
+		_, err = client.AdminMigrationRecoveryResolve(r.Context(), session, api.AdminMigrationRecoveryResolveRequest{
+			OperationID: current.Operation.OperationID, KeepCurrentState: true,
+		})
+	} else {
+		_, err = client.AdminMigrationImportResolve(r.Context(), session, api.AdminMigrationImportResolveRequest{
+			OperationID: current.Operation.OperationID, KeepCurrentState: true,
+		})
+	}
 	if err != nil {
-		a.renderMigrationWorkspaceRecoveryPage(w, http.StatusConflict, identity, discovery, true, current.Operation.OperationID, csrfFromRequest(r), apiMessage(err, "Failed Server Import could not be resolved safely."))
+		message := "Failed Server Import could not be resolved safely."
+		if recoveryNeedsAttention {
+			message = "Failed Migration Recovery could not be resolved safely."
+		}
+		a.renderMigrationWorkspaceRecoveryPage(w, http.StatusConflict, identity, discovery, importNeedsAttention, recoveryNeedsAttention, current.Operation.OperationID, csrfFromRequest(r), apiMessage(err, message))
 		return
 	}
 	http.Redirect(w, r, "/workspace/migration", http.StatusSeeOther)
@@ -255,7 +273,7 @@ func parseMigrationWorkspaceRecoveryForm(r *http.Request, discovery api.AdminMig
 	return api.AdminMigrationRecoveryPlanRequest{}, errors.New("Choose recovery files currently shown on this page")
 }
 
-func (a *App) renderMigrationWorkspaceRecoveryPage(w http.ResponseWriter, status int, identity api.SessionInfo, discovery api.AdminMigrationRecoveryDiscoveryResponse, importNeedsAttention bool, importOperationID, csrf, errorMessage string) {
+func (a *App) renderMigrationWorkspaceRecoveryPage(w http.ResponseWriter, status int, identity api.SessionInfo, discovery api.AdminMigrationRecoveryDiscoveryResponse, importNeedsAttention, recoveryNeedsAttention bool, operationID, csrf, errorMessage string) {
 	transactions := make([]migrationWorkspaceRecoveryTransactionView, 0, len(discovery.Transactions))
 	for _, summary := range discovery.Transactions {
 		transactions = append(transactions, migrationWorkspaceRecoveryTransactionView{
@@ -263,17 +281,18 @@ func (a *App) renderMigrationWorkspaceRecoveryPage(w http.ResponseWriter, status
 		})
 	}
 	a.renderMigrationWorkspace(w, "migration_workspace_recovery.html", status, migrationWorkspaceRecoveryPageData{
-		Title:                "Migration Recovery",
-		Version:              a.config.Version,
-		ManagementAPI:        a.config.ManagementAPI,
-		CSRF:                 csrf,
-		Identity:             identity,
-		Discovery:            discovery,
-		Transactions:         transactions,
-		ImportNeedsAttention: importNeedsAttention,
-		ImportOperationID:    importOperationID,
-		CanKeepCurrent:       importNeedsAttention && importOperationID != "" && len(discovery.Transactions) == 0,
-		Error:                errorMessage,
+		Title:                  "Migration Recovery",
+		Version:                a.config.Version,
+		ManagementAPI:          a.config.ManagementAPI,
+		CSRF:                   csrf,
+		Identity:               identity,
+		Discovery:              discovery,
+		Transactions:           transactions,
+		ImportNeedsAttention:   importNeedsAttention,
+		OperationID:            operationID,
+		RecoveryNeedsAttention: recoveryNeedsAttention,
+		CanKeepCurrent:         (importNeedsAttention || recoveryNeedsAttention) && operationID != "" && len(discovery.Transactions) == 0,
+		Error:                  errorMessage,
 	})
 }
 

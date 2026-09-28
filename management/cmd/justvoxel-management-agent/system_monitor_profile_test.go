@@ -55,7 +55,7 @@ func TestSystemMonitorProfileDefaultAndPersistence(t *testing.T) {
 
 	profile.Sensors = false
 	profile.Alerts = false
-	profile.ProcessCount = 20
+	profile.ProcessCount = 15
 	if err := store.writeSystemMonitorProfile(profile); err != nil {
 		t.Fatal(err)
 	}
@@ -107,13 +107,23 @@ func TestOnlyAdministratorCanWriteSystemMonitorProfile(t *testing.T) {
 	}
 }
 
-func TestSystemMonitorProfileRejectsUnsupportedProcessCount(t *testing.T) {
-	admin, _ := systemMonitorProfileTestServer(t, roleAdministrator)
-	profile := defaultSystemMonitorProfile()
-	profile.ProcessCount = 12
-	rr := httptest.NewRecorder()
-	admin.systemMonitorProfileSet(rr, systemMonitorProfileRequest(http.MethodPost, "/v1/admin/system-monitor/profile", profile))
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("invalid process count returned %d: %s", rr.Code, rr.Body.String())
+func TestSystemMonitorProfileProcessCountValidation(t *testing.T) {
+	for _, count := range []int{5, 10, 15, 20, 12, 0, -1} {
+		admin, store := systemMonitorProfileTestServer(t, roleAdministrator)
+		profile := defaultSystemMonitorProfile()
+		profile.ProcessCount = count
+		rr := httptest.NewRecorder()
+		admin.systemMonitorProfileSet(rr, systemMonitorProfileRequest(http.MethodPost, "/v1/admin/system-monitor/profile", profile))
+		if count == 5 || count == 10 || count == 15 {
+			if rr.Code != http.StatusOK {
+				t.Errorf("process count %d returned %d: %s", count, rr.Code, rr.Body.String())
+			}
+			got, err := store.readSystemMonitorProfile()
+			if err != nil || got.ProcessCount != count {
+				t.Errorf("process count %d was not saved: profile=%#v, err=%v", count, got, err)
+			}
+		} else if rr.Code != http.StatusBadRequest {
+			t.Errorf("invalid process count %d returned %d: %s", count, rr.Code, rr.Body.String())
+		}
 	}
 }

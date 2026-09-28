@@ -2055,6 +2055,7 @@ if (migrationOpen && migrationDialog) {
 
   const syncMigrationRecoveryAvailability = (root) => {
     if (!recoveryTab || !root) return;
+    if (!Object.hasOwn(root.dataset, "migrationRecoveryAvailable")) return;
     const available = root.dataset.migrationRecoveryAvailable === "true";
     recoveryTab.hidden = !available && currentTab !== "recovery";
   };
@@ -2118,6 +2119,7 @@ if (migrationOpen && migrationDialog) {
     if (progress) updateMigrationLocation("", progress[1]);
     currentTab = inferMigrationTab(responseURL, root);
     syncMigrationTabs();
+    syncMigrationRecoveryAvailability(root);
 
     if (currentTab === "import") {
       const sourceEntries = Array.from(root.querySelectorAll('input[type="radio"][name="source_path"]'));
@@ -2267,7 +2269,14 @@ if (migrationOpen && migrationDialog) {
           const detail = responseMarkup.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
           throw new Error(detail || `Migration request failed (HTTP ${response.status}).`);
         }
-        renderMigrationMarkup(responseMarkup, response.url || action.pathname);
+        const responseURL = response.url || action.pathname;
+        if (action.pathname === "/workspace/migration/recovery/resolve" && new URL(responseURL, window.location.href).pathname === "/workspace/migration") {
+          currentTab = "export";
+          updateMigrationLocation();
+          await loadMigrationEntry();
+        } else {
+          renderMigrationMarkup(responseMarkup, response.url || action.pathname);
+        }
         if ((response.url || "").includes("/migration/progress/")) {
           migrationSourceSMBPassword = "";
           migrationExportSMBPassword = "";
@@ -2416,10 +2425,11 @@ if (migrationOpen && migrationDialog) {
       const requestedMigrationOperation = migrationRequested ? destination.get("operation") : "";
       const requestedMigrationTab = migrationRequested ? destination.get("tab") : "";
       if (requestedMigrationOperation) return loadMigration("/workspace/migration/progress/" + encodeURIComponent(requestedMigrationOperation));
-      if (Object.hasOwn(tabURLs, requestedMigrationTab)) {
+      if (requestedMigrationTab === "recovery") {
         currentTab = requestedMigrationTab;
         return loadMigration(tabURLs[currentTab]);
       }
+      if (Object.hasOwn(tabURLs, requestedMigrationTab)) currentTab = requestedMigrationTab;
       return loadMigrationEntry();
     },
     onClose: () => {
@@ -2470,6 +2480,7 @@ const systemMonitorOpen = document.querySelector("[data-system-monitor-open]");
 const systemMonitorDialog = document.querySelector("[data-system-monitor-dialog]");
 if (systemMonitorOpen && systemMonitorDialog) {
   const closeButton = systemMonitorDialog.querySelector("[data-system-monitor-close]");
+  const refreshButton = systemMonitorDialog.querySelector("[data-system-monitor-refresh]");
   const profileToggle = systemMonitorDialog.querySelector("[data-system-monitor-profile-toggle]");
   const profilePanel = systemMonitorDialog.querySelector("[data-system-monitor-profile]");
   const resetButton = systemMonitorDialog.querySelector("[data-system-monitor-reset]");
@@ -2639,7 +2650,9 @@ if (systemMonitorOpen && systemMonitorDialog) {
     renderTable("[data-monitor-network]", Array.isArray(data.network) ? data.network : [], [
       {label:"Interface", render:(row)=>row.interface_name || row.name}, {label:"RX", render:(row)=>rate(row.bytes_recv_rate_per_sec)}, {label:"TX", render:(row)=>rate(row.bytes_sent_rate_per_sec)}
     ]);
-    const processLimit = [5, 10, 20].includes(Number(profile.process_count)) ? Number(profile.process_count) : 10;
+    const processLimit = [5, 10, 15].includes(Number(profile.process_count)) ? Number(profile.process_count) : 10;
+    const processesCard = systemMonitorDialog.querySelector('[data-monitor-card="processes"]');
+    if (processesCard) processesCard.dataset.processCount = String(processLimit);
     const processes = (Array.isArray(data.processlist) ? data.processlist : [])
       .slice().sort((a,b)=>Number(b.cpu_percent || 0)-Number(a.cpu_percent || 0));
     renderTable("[data-monitor-processes]", processes.slice(0, processLimit), [
@@ -2701,6 +2714,7 @@ if (systemMonitorOpen && systemMonitorDialog) {
     workspaceWindow?.open();
   });
   if (closeButton) closeButton.addEventListener("click", () => workspaceWindow?.close());
+  if (refreshButton) refreshButton.addEventListener("click", refreshMonitor);
 
   if (profileToggle && profilePanel) profileToggle.addEventListener("click", () => {
     profilePanel.hidden = !profilePanel.hidden;

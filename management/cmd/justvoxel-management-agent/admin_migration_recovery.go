@@ -68,6 +68,7 @@ func registerAdminMigrationRecoveryRoutes(mux *http.ServeMux, s *server) {
     mux.HandleFunc("GET /v1/admin/migration/recovery", s.adminMigrationRecoveryDiscover)
     mux.HandleFunc("POST /v1/admin/migration/recovery/plan", s.adminMigrationRecoveryPlan)
     mux.HandleFunc("POST /v1/admin/migration/recovery/apply", s.adminMigrationRecoveryApply)
+    mux.HandleFunc("POST /v1/admin/migration/recovery/resolve", s.adminMigrationRecoveryResolve)
 }
 
 func (s *server) adminMigrationRecoveryDiscover(w http.ResponseWriter, r *http.Request) {

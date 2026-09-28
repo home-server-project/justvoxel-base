@@ -14,16 +14,17 @@ import (
 )
 
 const (
-	adminMigrationExportPath        = "/v1/admin/migration/export"
-	adminMigrationExportPlanPath    = "/v1/admin/migration/export/plan"
-	adminMigrationExportApplyPath   = "/v1/admin/migration/export/apply"
-	adminMigrationImportPath        = "/v1/admin/migration/import"
-	adminMigrationImportPlanPath    = "/v1/admin/migration/import/plan"
-	adminMigrationImportApplyPath   = "/v1/admin/migration/import/apply"
-	adminMigrationImportResolvePath = "/v1/admin/migration/import/resolve"
-	adminMigrationRecoveryPath      = "/v1/admin/migration/recovery"
-	adminMigrationRecoveryPlanPath  = "/v1/admin/migration/recovery/plan"
-	adminMigrationRecoveryApplyPath = "/v1/admin/migration/recovery/apply"
+	adminMigrationExportPath          = "/v1/admin/migration/export"
+	adminMigrationExportPlanPath      = "/v1/admin/migration/export/plan"
+	adminMigrationExportApplyPath     = "/v1/admin/migration/export/apply"
+	adminMigrationImportPath          = "/v1/admin/migration/import"
+	adminMigrationImportPlanPath      = "/v1/admin/migration/import/plan"
+	adminMigrationImportApplyPath     = "/v1/admin/migration/import/apply"
+	adminMigrationImportResolvePath   = "/v1/admin/migration/import/resolve"
+	adminMigrationRecoveryPath        = "/v1/admin/migration/recovery"
+	adminMigrationRecoveryPlanPath    = "/v1/admin/migration/recovery/plan"
+	adminMigrationRecoveryApplyPath   = "/v1/admin/migration/recovery/apply"
+	adminMigrationRecoveryResolvePath = "/v1/admin/migration/recovery/resolve"
 )
 
 var (
@@ -283,6 +284,16 @@ type AdminMigrationImportResolveResponse struct {
 	Error     string               `json:"error,omitempty"`
 }
 
+type AdminMigrationRecoveryResolveRequest struct {
+	OperationID      string `json:"operation_id"`
+	KeepCurrentState bool   `json:"keep_current_state"`
+}
+
+type AdminMigrationRecoveryResolveResponse struct {
+	Operation *PersistentOperation `json:"operation,omitempty"`
+	Error     string               `json:"error,omitempty"`
+}
+
 type AdminMigrationImportApplyRequest struct {
 	PlanFingerprint     string                      `json:"plan_fingerprint"`
 	Request             AdminMigrationImportRequest `json:"request"`
@@ -436,6 +447,23 @@ func (c *Client) AdminMigrationRecoveryDiscovery(ctx context.Context, session st
 	}
 	if status != http.StatusOK || out.SchemaVersion != "v1" || out.Transactions == nil {
 		return out, errors.New("management API returned invalid server migration recovery discovery response")
+	}
+	return out, nil
+}
+
+func (c *Client) AdminMigrationRecoveryResolve(ctx context.Context, session string, request AdminMigrationRecoveryResolveRequest) (AdminMigrationRecoveryResolveResponse, error) {
+	var out AdminMigrationRecoveryResolveResponse
+	status, err := c.serverMigrationJSON(ctx, http.MethodPost, adminMigrationRecoveryResolvePath, session, request, &out, adminMigrationApplyTimeout,
+		http.StatusOK, http.StatusBadRequest, http.StatusConflict, http.StatusNotFound)
+	if err != nil {
+		return out, err
+	}
+	if status != http.StatusOK {
+		return out, &ResponseError{StatusCode: status, Message: serverMigrationMessage(out.Error, "Failed Migration Recovery could not be resolved")}
+	}
+	if out.Operation == nil || !persistentOperationIDPattern.MatchString(out.Operation.OperationID) ||
+		out.Operation.OperationID != request.OperationID || out.Operation.OperationType != "migration_recovery" || out.Operation.State != "resolved" {
+		return out, errors.New("management API returned invalid migration recovery resolution")
 	}
 	return out, nil
 }

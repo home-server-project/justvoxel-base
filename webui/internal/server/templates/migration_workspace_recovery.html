@@ -1,7 +1,8 @@
-{{define "migration_workspace_recovery.html"}}<div class="migration-workspace-content" data-migration-workspace-root>
+{{define "migration_workspace_recovery.html"}}<div class="migration-workspace-content" data-migration-workspace-root data-migration-recovery-available="true">
 <p class="muted">If a Server Import failed, check what happened and clean up leftover files when JustVoxel says it is safe.</p>
   {{if .Error}}<div class="notice error">{{.Error}}</div>{{end}}
   {{if .ImportNeedsAttention}}<div class="notice warning"><strong>Server Import needs attention.</strong><br>JustVoxel has not confirmed that your original server was fully restored. Review the current server before taking further action.</div>{{end}}
+  {{if .RecoveryNeedsAttention}}<div class="notice warning"><strong>Migration Recovery needs attention.</strong><br>Review the current appliance before releasing the failed recovery operation.</div>{{end}}
 
   {{if .Transactions}}
     {{range .Transactions}}
@@ -33,10 +34,14 @@
     <section class="panel migration-recovery-empty">
       <div class="notice">No recovery files need cleanup.</div>
       {{if .CanKeepCurrent}}
+      {{if .RecoveryNeedsAttention}}
+      <div class="notice warning"><strong>The previous Migration Recovery still needs attention.</strong><br>No retained recovery files remain. JustVoxel will validate the current appliance before releasing the failed recovery operation.</div>
+      {{else}}
       <div class="notice warning"><strong>The previous Import still needs attention.</strong><br>Keeping the current server first revalidates the running Minecraft and JustVoxel state. Nothing is deleted and the failed Import is not retried.</div>
+      {{end}}
       <form method="post" action="/workspace/migration/recovery/resolve">
         <input type="hidden" name="csrf" value="{{.CSRF}}">
-        <input type="hidden" name="operation_id" value="{{.ImportOperationID}}">
+        <input type="hidden" name="operation_id" value="{{.OperationID}}">
         <input type="hidden" name="keep_current_state" value="yes">
         <div class="action-row"><button type="submit">Keep current server and continue</button></div>
       </form>

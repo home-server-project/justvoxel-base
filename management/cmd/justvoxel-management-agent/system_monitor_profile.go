@@ -32,7 +32,7 @@ func defaultSystemMonitorProfile() systemMonitorProfile {
 
 func validSystemMonitorProfile(profile systemMonitorProfile) bool {
 	switch profile.ProcessCount {
-	case 5, 10, 20:
+	case 5, 10, 15:
 		return true
 	default:
 		return false
@@ -106,7 +106,7 @@ func (s *server) systemMonitorProfileSet(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if !validSystemMonitorProfile(profile) {
-		writeError(w, http.StatusBadRequest, "process_count must be 5, 10, or 20")
+		writeError(w, http.StatusBadRequest, "process_count must be 5, 10, or 15")
 		return
 	}
 	if err := s.store.writeSystemMonitorProfile(profile); err != nil {

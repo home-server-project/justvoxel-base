@@ -1061,7 +1061,7 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .system-monitor-lines strong{min-width:0;overflow-wrap:anywhere}
 .system-monitor-card-wide{grid-column:span 2}
 .system-monitor-table{max-height:92px;overflow:auto;overscroll-behavior:contain}
-.system-monitor-card[data-monitor-card="processes"] .system-monitor-table{max-height:130px}
+.system-monitor-card[data-monitor-card="processes"] .system-monitor-table{max-height:none}
 .system-monitor-table th,.system-monitor-table td{padding:.28rem .38rem}
 .system-monitor-table th{position:sticky;top:0;z-index:1;background:var(--jv-surface-raised)}
 .system-monitor-profile{display:grid;grid-template-columns:minmax(0,1fr) 145px auto;align-items:end;gap:.3rem .75rem;padding:.55rem .75rem;max-height:210px;overflow:auto}
