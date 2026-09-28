@@ -10,6 +10,7 @@
   let configured;
   let refreshTimer = 0;
   let resetWelcome = false;
+  let statusGeneration = 0;
 
   const stopRefreshTimer = () => {
     if (!refreshTimer) return;
@@ -89,6 +90,7 @@
   };
 
   const loadConfigurationState = async () => {
+    const generation = statusGeneration;
     try {
       const response = await fetch(dashboard.dataset.dashboardStatus, {
         method: "GET",
@@ -98,7 +100,9 @@
       });
       if (!response.ok) return;
       const snapshot = await response.json();
+      if (generation !== statusGeneration) return;
       configured = Boolean(snapshot?.status?.minecraft?.configured);
+      if (configured) resetWelcome = false;
       applyFirstRunState();
     } catch (_) {
       // Keep the last known first-run state when the management service is temporarily unavailable.
@@ -121,8 +125,13 @@
       // Fall back to showing the choice when browser storage is unavailable.
     }
     resetWelcome = true;
-    if (!role) void loadRole();
-    void loadConfigurationState();
+    statusGeneration += 1;
+    configured = false;
+    if (role) applyFirstRunState();
+    else {
+      showChoice();
+      void loadRole();
+    }
   });
 
   void Promise.all([loadRole(), loadConfigurationState()]);

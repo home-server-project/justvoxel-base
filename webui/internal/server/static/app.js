@@ -2480,7 +2480,6 @@ const systemMonitorOpen = document.querySelector("[data-system-monitor-open]");
 const systemMonitorDialog = document.querySelector("[data-system-monitor-dialog]");
 if (systemMonitorOpen && systemMonitorDialog) {
   const closeButton = systemMonitorDialog.querySelector("[data-system-monitor-close]");
-  const refreshButton = systemMonitorDialog.querySelector("[data-system-monitor-refresh]");
   const profileToggle = systemMonitorDialog.querySelector("[data-system-monitor-profile-toggle]");
   const profilePanel = systemMonitorDialog.querySelector("[data-system-monitor-profile]");
   const resetButton = systemMonitorDialog.querySelector("[data-system-monitor-reset]");
@@ -2714,7 +2713,6 @@ if (systemMonitorOpen && systemMonitorDialog) {
     workspaceWindow?.open();
   });
   if (closeButton) closeButton.addEventListener("click", () => workspaceWindow?.close());
-  if (refreshButton) refreshButton.addEventListener("click", refreshMonitor);
 
   if (profileToggle && profilePanel) profileToggle.addEventListener("click", () => {
     profilePanel.hidden = !profilePanel.hidden;

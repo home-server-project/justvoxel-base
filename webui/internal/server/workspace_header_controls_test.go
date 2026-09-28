@@ -27,13 +27,20 @@ func TestWorkspaceHeaderControls(t *testing.T) {
 			t.Errorf("%s close is not the shared accessible SVG control", match[1])
 		}
 	}
-	for _, name := range []string{"network", "system", "minecraft", "storage", "backups", "migration", "version", "system-update", "system-monitor"} {
+	for _, name := range []string{"network", "system", "minecraft", "storage", "backups", "migration", "version", "system-update"} {
 		if refreshes[name] == "" || closes[name] == "" {
 			t.Errorf("%s workspace lost its header controls", name)
 		}
 	}
+	if refreshes["system-monitor"] != "" {
+		t.Error("System Monitor must refresh automatically without a manual button")
+	}
 	if closes["system-monitor"] == "" {
 		t.Error("system monitor lost its close control")
+	}
+	controlCenter := regexp.MustCompile(`(?s)<summary class="control-center-trigger"[^>]*>(.*?)</summary>`).FindStringSubmatch(string(header))
+	if len(controlCenter) != 2 || !strings.Contains(controlCenter[1], `<svg class="control-center-icon"`) || !strings.Contains(controlCenter[1], `aria-hidden="true"`) || !strings.Contains(controlCenter[1], `Control Center`) || strings.Contains(controlCenter[1], "⚙") {
+		t.Error("Control Center must retain its label and use an accessible SVG gear")
 	}
 	networkCSS, err := assets.ReadFile("static/network-workspace.css")
 	if err != nil {
@@ -50,5 +57,9 @@ func TestWorkspaceHeaderControls(t *testing.T) {
 		if !strings.Contains(string(css), class) {
 			t.Errorf("shared workspace control CSS missing %s", class)
 		}
+	}
+	if !strings.Contains(string(css), ".control-center-trigger .control-center-icon{display:block;flex:none;width:19px;height:19px;stroke:currentColor") ||
+		!strings.Contains(string(css), ".system-monitor-header-button .gear-icon{display:block;width:20px;height:20px;stroke:currentColor") {
+		t.Error("gear icons must use centered, currentColor SVG sizing")
 	}
 }

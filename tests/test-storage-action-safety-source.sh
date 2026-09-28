@@ -79,6 +79,62 @@ grep -Fq 'storage_mkfs_xfs JV_STORAGE "${device}"' "${apply}" || {
     echo 'ERROR: generic partition formatting is not using the validated short XFS label.' >&2
     exit 1
 }
+grep -Fq 'nsenter --mount=/proc/1/ns/mnt -- lsblk -nro MOUNTPOINTS' "${common}" || {
+    echo 'ERROR: storage actions do not query the host mount namespace.' >&2
+    exit 1
+}
+grep -Fq 'nsenter --mount=/proc/1/ns/mnt -- umount -- "$1"' "${common}" || {
+    echo 'ERROR: storage actions do not unmount in the host mount namespace.' >&2
+    exit 1
+}
+grep -Fq 'nsenter --mount=/proc/1/ns/mnt -- lsblk -J' "${discovery}" || {
+    echo 'ERROR: Storage discovery does not report host mounts.' >&2
+    exit 1
+}
+grep -Fq 'current_mountpoint="$(storage_action_mountpoint "${device}")"' "${planner}" || {
+    echo 'ERROR: Format Review does not query host mount state.' >&2
+    exit 1
+}
+grep -Fq 'storage_action_host_unmount "${current_mountpoint}"' "${apply}" || {
+    echo 'ERROR: Format does not unmount the reviewed host mount.' >&2
+    exit 1
+}
+grep -Fq 'mounted_after="$(storage_action_host_mountpoints "${device}")"' "${apply}" || {
+    echo 'ERROR: Format does not verify host unmount before mkfs.' >&2
+    exit 1
+}
+grep -Fq 'if [[ -n ${mounted_after} ]]; then' "${apply}" || {
+    echo 'ERROR: Format does not fail closed when the host still reports a mount.' >&2
+    exit 1
+}
+grep -Fq 'storage_action_mkfs_error "${mkfs_output}"' "${apply}" || {
+    echo 'ERROR: Format failure output is not bounded for the UI.' >&2
+    exit 1
+}
+grep -Fq 'cut -c1-240' "${common}" || {
+    echo 'ERROR: Format failure output is not length bounded.' >&2
+    exit 1
+}
+grep -Fq 'storage_mkfs_xfs JV_STORAGE "${partition}" 2>&1' "${apply}" || {
+    echo 'ERROR: new partition format does not report bounded XFS errors.' >&2
+    exit 1
+}
+format_block="$(sed -n '/^        format)/,/^        create_partition)/p' "${apply}")"
+unmount_line="$(grep -nF 'storage_action_host_unmount "${current_mountpoint}"' <<< "${format_block}" | head -n1 | cut -d: -f1)"
+verify_line="$(grep -nF 'mounted_after="$(storage_action_host_mountpoints "${device}")"' <<< "${format_block}" | head -n1 | cut -d: -f1)"
+mkfs_line="$(grep -nF 'storage_mkfs_xfs JV_STORAGE "${device}"' <<< "${format_block}" | head -n1 | cut -d: -f1)"
+if [[ -z ${unmount_line} || -z ${verify_line} || -z ${mkfs_line} ]] || (( unmount_line >= verify_line || verify_line >= mkfs_line )); then
+    echo 'ERROR: Format must unmount, verify the host state, then format.' >&2
+    exit 1
+fi
+grep -Fq 'The partition is still in use and could not be unmounted. It was not formatted.' <<< "${format_block}" || {
+    echo 'ERROR: failed host unmount no longer fails closed.' >&2
+    exit 1
+}
+grep -Fq 'The partition is still mounted on the host. It was not formatted.' <<< "${format_block}" || {
+    echo 'ERROR: remaining host mount no longer fails closed.' >&2
+    exit 1
+}
 if grep -Fq 'mkfs.xfs' "${apply}"; then
     echo 'ERROR: generic partition formatting bypasses the shared XFS label-length guard.' >&2
     exit 1

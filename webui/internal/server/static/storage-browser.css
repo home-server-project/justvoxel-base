@@ -42,7 +42,7 @@ button.storage-partition-card:hover,button.storage-partition-card:focus-visible{
 .storage-empty-actions form{margin:0}
 .storage-empty-disk .compact{font-size:.72rem}
 
-.storage-detail-dialog{width:min(560px,calc(100% - 1.4rem));max-height:min(82vh,760px);padding:0;border:1px solid #3b454e;border-radius:16px;background:#171d22;color:#eef1f4;box-shadow:0 28px 80px #000b}
+.storage-detail-dialog{width:min(680px,calc(100% - 1.4rem));max-height:min(86dvh,820px);padding:0;border:1px solid #3b454e;border-radius:16px;background:#171d22;color:#eef1f4;box-shadow:0 28px 80px #000b}
 .storage-detail-dialog::backdrop{background:#050708a8;backdrop-filter:blur(3px)}
 .storage-detail-card{padding:1rem}
 .storage-detail-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;padding-bottom:.7rem;border-bottom:1px solid #2b333b}
@@ -50,7 +50,7 @@ button.storage-partition-card:hover,button.storage-partition-card:focus-visible{
 .storage-dialog-close{display:grid;place-items:center;width:36px;height:36px;padding:0;border:1px solid #3a454e;border-radius:9px;background:#222a31;color:#eef1f4;font-size:1.5rem;line-height:1}
 .storage-dialog-close:hover,.storage-dialog-close:focus-visible{background:#313c46;border-color:#5c6b76}
 .storage-detail-role{display:inline-block;margin:.75rem 0 .45rem;padding:.28rem .55rem;border-radius:999px;background:#25382e;color:#b9ebca;font-size:.72rem;font-weight:800}
-.storage-detail-list{max-height:50vh;overflow:auto}
+.storage-detail-list{overflow:visible}
 .storage-detail-list div{padding:.48rem 0}
 .storage-detail-actions-preview{margin-top:.7rem;padding:.65rem .75rem;border:1px dashed #3a454e;border-radius:9px;background:#10161a;font-size:.78rem;line-height:1.35}
 
@@ -206,18 +206,19 @@ button.storage-partition-card:hover,button.storage-partition-card:focus-visible{
 .storage-partition-card{min-height:0;padding:.5rem .65rem;gap:.12rem}
 .storage-partition-state{padding:.15rem .4rem}
 .storage-drive-empty{padding:.45rem .6rem}
-.storage-detail-dialog,.storage-action-dialog{overflow-y:auto;max-height:min(86dvh,760px)}
+.storage-detail-dialog{overflow-y:auto;max-height:min(86dvh,820px)}
+.storage-action-dialog{overflow-y:auto;max-height:min(86dvh,760px)}
 .storage-detail-card,.storage-action-card{padding:.8rem}
 .storage-detail-heading{padding-bottom:.5rem}
 .storage-detail-heading h2{font-size:1.1rem}
 .storage-detail-role{margin:.55rem 0 .3rem}
-.storage-detail-list{max-height:min(38dvh,340px);overflow-y:auto}
+.storage-detail-list{max-height:none;overflow:visible}
 .storage-detail-list div{padding:.35rem 0}
 .storage-detail-actions-preview{margin-top:.5rem;padding:.5rem .6rem}
 .storage-detail-actions{margin-top:.5rem;padding-top:.5rem}
 .storage-action-review{margin-top:.55rem;padding:.6rem}
 .storage-action-review dl div{padding:.3rem 0}
-.storage-action-warnings{max-height:30dvh;overflow-y:auto;overscroll-behavior:contain}
+.storage-action-warnings{max-height:none;overflow:visible}
 .storage-action-card>p{margin:.55rem 0}
 .storage-minecraft-dialog .storage-action-card{gap:.5rem}
 @media(max-width:700px){

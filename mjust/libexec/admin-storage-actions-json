@@ -101,7 +101,10 @@ prepare_plan() {
         }
         filesystem="$(storage_action_filesystem "${device}")"
         uuid="$(storage_action_uuid "${device}")"
-        current_mountpoint="$(storage_action_mountpoint "${device}")"
+        current_mountpoint="$(storage_action_mountpoint "${device}")" || {
+            json_error 'Could not verify the host mount state for this partition.'
+            return 1
+        }
         role="$(storage_action_role "${device}" "${filesystem}" "${uuid}" "${current_mountpoint}")"
         size="$(storage_action_size_bytes "${device}")"
         size="${size:-0}"

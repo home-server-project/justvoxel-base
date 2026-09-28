@@ -50,9 +50,10 @@
 .topbar-clock{justify-self:center;min-width:64px;padding:.35rem .65rem;border-radius:999px;color:#dce7e0;font-size:.9rem;font-weight:750;font-variant-numeric:tabular-nums;text-align:center}
 .control-center{position:relative;justify-self:end}
 .control-center>summary{list-style:none}.control-center>summary::-webkit-details-marker{display:none}
-.control-center-trigger{display:flex;align-items:center;justify-content:center;gap:.45rem;min-height:38px;padding:.4rem .65rem;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0;cursor:pointer;font-size:.84rem;font-weight:750;transition:background-color .16s ease,border-color .16s ease,transform .16s ease}
+.control-center-trigger{display:flex;align-items:center;justify-content:center;gap:.45rem;min-height:38px;padding:.4rem .65rem;border:1px solid #35414b;border-radius:10px;background:#171d22;color:#dce7e0;cursor:pointer;font-size:.84rem;font-weight:750;transition:background-color .16s ease,border-color .16s ease}
 .control-center-trigger:hover,.control-center[open]>.control-center-trigger{background:#1d2a23;border-color:#4f8b69;color:#c8f2d7}
 .control-center-icon{color:inherit!important;font-size:1.05rem}
+.control-center-trigger .control-center-icon{display:block;flex:none;width:19px;height:19px;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .control-center-panel{position:absolute;top:calc(100% + .45rem);right:0;width:min(620px,calc(100vw - 1.5rem));max-height:calc(100vh - 64px);overflow:auto;padding:.8rem;border:1px solid #303942;border-radius:14px;background:#151a1ff7;box-shadow:0 22px 60px #0009;backdrop-filter:blur(12px)}
 .control-center-heading{display:flex;align-items:center;justify-content:space-between;padding:.2rem .2rem .65rem;border-bottom:1px solid #2b333b}
 .control-center-heading>div{display:grid;gap:.05rem}.control-center-heading strong{font-size:1rem}.control-center-heading span{color:#89959e;font-size:.75rem}
@@ -371,6 +372,7 @@ body.role-operator .control-tile.nav-operator-only{display:flex!important}
 .system-monitor-admin-only{display:none!important}
 body.role-administrator .system-monitor-admin-only{display:grid!important}
 .system-monitor-header-button{display:grid;place-items:center;width:36px;height:36px;padding:0;border:1px solid #3b454e;border-radius:10px;background:#232b31;color:#dce7e0;font-size:1.25rem;line-height:1}
+.system-monitor-header-button .gear-icon{display:block;width:20px;height:20px;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .system-monitor-header-button:hover,.system-monitor-header-button:focus-visible{background:#303941;border-color:#52616d;color:#fff}
 .workspace-header-refresh{width:auto;min-width:78px;padding:0 .7rem;border-color:#4f8b69;background:#25382e;color:#c8f2d7;font-size:.86rem;line-height:1;font-weight:700;white-space:nowrap}
 .workspace-header-refresh:hover,.workspace-header-refresh:focus-visible{border-color:#78c99d;background:#2f4a39;color:#fff;box-shadow:0 0 0 2px #78c99d33}

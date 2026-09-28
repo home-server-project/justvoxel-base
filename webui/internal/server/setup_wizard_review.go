@@ -148,6 +148,12 @@ func setupConfigurationSnapshot(plan api.AdminSetupPlanResponse) string {
 	if plan.Normalized.Storage.Device != "" {
 		b.WriteString("Device: " + plan.Normalized.Storage.Device + "\n")
 	}
+	if plan.Normalized.Storage.Filesystem != "" {
+		b.WriteString("Filesystem: " + plan.Normalized.Storage.Filesystem + "\n")
+	}
+	if plan.Normalized.Storage.UUID != "" {
+		b.WriteString("UUID: " + plan.Normalized.Storage.UUID + "\n")
+	}
 	if plan.Normalized.Storage.MountPoint != "" {
 		b.WriteString("Mount point: " + plan.Normalized.Storage.MountPoint + "\n")
 	}
@@ -160,6 +166,15 @@ func setupConfigurationSnapshot(plan api.AdminSetupPlanResponse) string {
 	}
 	b.WriteString("Backups to keep: " + strconv.Itoa(plan.Normalized.Backups.Keep) + "\n")
 	b.WriteString("Backup directory: " + plan.Normalized.Backups.Path + "\n")
+	if plan.Normalized.Backups.Device != "" {
+		b.WriteString("Device: " + plan.Normalized.Backups.Device + "\n")
+	}
+	if plan.Normalized.Backups.Filesystem != "" {
+		b.WriteString("Filesystem: " + plan.Normalized.Backups.Filesystem + "\n")
+	}
+	if plan.Normalized.Backups.UUID != "" {
+		b.WriteString("UUID: " + plan.Normalized.Backups.UUID + "\n")
+	}
 	if plan.Normalized.Backups.Source != "" {
 		b.WriteString("Network source: " + plan.Normalized.Backups.Source + "\n")
 	}

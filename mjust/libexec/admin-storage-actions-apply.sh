@@ -4,7 +4,7 @@ storage_action_apply_json() {
     local submitted_fingerprint submitted_confirmation
     local operation device mountpoint current_mountpoint expected_confirmation
     local filesystem uuid mounted_after result_role size actual_uuid
-    local free_start planned_end before after partition new_partitions
+    local free_start planned_end before after partition new_partitions mkfs_output
 
     prepare_plan || return 0
 
@@ -38,18 +38,26 @@ storage_action_apply_json() {
             fi
             ;;
         unmount)
-            if ! umount -- "${current_mountpoint}"; then
+            if ! storage_action_host_unmount "${current_mountpoint}"; then
                 json_error 'Unmount failed. The partition may still be in use.'
                 return 0
             fi
             ;;
         format)
-            if [[ -n ${current_mountpoint} ]] && ! umount -- "${current_mountpoint}"; then
+            if [[ -n ${current_mountpoint} ]] && ! storage_action_host_unmount "${current_mountpoint}"; then
                 json_error 'The partition is still in use and could not be unmounted. It was not formatted.'
                 return 0
             fi
-            if ! storage_mkfs_xfs JV_STORAGE "${device}" >/dev/null 2>&1; then
-                json_error 'Formatting failed. Inspect the partition before retrying.'
+            mounted_after="$(storage_action_host_mountpoints "${device}")" || {
+                json_error 'The host mount state could not be verified. It was not formatted.'
+                return 0
+            }
+            if [[ -n ${mounted_after} ]]; then
+                json_error 'The partition is still mounted on the host. It was not formatted.'
+                return 0
+            fi
+            if ! mkfs_output="$(storage_mkfs_xfs JV_STORAGE "${device}" 2>&1)"; then
+                json_error "Formatting failed: $(storage_action_mkfs_error "${mkfs_output}")"
                 return 0
             fi
             udevadm settle >/dev/null 2>&1 || true
@@ -77,8 +85,16 @@ storage_action_apply_json() {
                 json_error 'The new partition could not be identified safely. Inspect the disk before retrying.'
                 return 0
             }
-            if ! storage_mkfs_xfs JV_STORAGE "${partition}" >/dev/null 2>&1; then
-                json_error 'The partition was created, but creating the XFS filesystem failed. Inspect the new partition before retrying.'
+            mounted_after="$(storage_action_host_mountpoints "${partition}")" || {
+                json_error 'The new partition host mount state could not be verified. It was not formatted.'
+                return 0
+            }
+            if [[ -n ${mounted_after} ]]; then
+                json_error 'The new partition became mounted on the host. It was not formatted.'
+                return 0
+            fi
+            if ! mkfs_output="$(storage_mkfs_xfs JV_STORAGE "${partition}" 2>&1)"; then
+                json_error "The partition was created, but creating the XFS filesystem failed: $(storage_action_mkfs_error "${mkfs_output}")"
                 return 0
             fi
             udevadm settle >/dev/null 2>&1 || true
@@ -88,7 +104,10 @@ storage_action_apply_json() {
 
     filesystem="$(storage_action_filesystem "${device}")"
     uuid="$(storage_action_uuid "${device}")"
-    mounted_after="$(storage_action_mountpoint "${device}")"
+    mounted_after="$(storage_action_mountpoint "${device}")" || {
+        json_error 'The host mount state could not be verified after the storage action.'
+        return 0
+    }
     result_role="$(storage_action_role "${device}" "${filesystem}" "${uuid}" "${mounted_after}")"
     size="$(storage_action_size_bytes "${device}")"
     size="${size:-0}"
@@ -99,9 +118,9 @@ storage_action_apply_json() {
                 json_error 'Mount command completed, but the partition is not mounted.'
                 return 0
             }
-            actual_uuid="$(jv_exact_mount_identity UUID "${mounted_after}" 2>/dev/null || true)"
+            actual_uuid="$(storage_action_host_mount_identity UUID "${mounted_after}" 2>/dev/null || true)"
             [[ -n ${uuid} && ${actual_uuid} == "${uuid}" ]] || {
-                umount -- "${mounted_after}" >/dev/null 2>&1 || true
+                storage_action_host_unmount "${mounted_after}" >/dev/null 2>&1 || true
                 json_error 'The mounted filesystem did not match the reviewed filesystem.'
                 return 0
             }

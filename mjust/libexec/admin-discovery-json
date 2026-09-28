@@ -95,7 +95,7 @@ storage_json() {
     local fs_size fs_used fs_free usage_known free_spaces disk table record
     local free_start free_end free_size free_size_mib free_size_bytes free_item
 
-    raw="$(lsblk -J -b -e7 -l -o NAME,PATH,PKNAME,TYPE,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINTS,MODEL,TRAN,RO)"
+    raw="$(nsenter --mount=/proc/1/ns/mnt -- lsblk -J -b -e7 -l -o NAME,PATH,PKNAME,TYPE,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINTS,MODEL,TRAN,RO)"
     systems='[]'
     system_parts='[]'
     system_lines="$(storage_system_disks || true)"
@@ -131,7 +131,7 @@ storage_json() {
         fs_free=0
         usage_known=false
         if [[ -n ${mountpoint} ]]; then
-            stats="$(df -B1 --output=size,used,avail -- "${mountpoint}" 2>/dev/null | awk 'NR == 2 {print $1 " " $2 " " $3}' || true)"
+            stats="$(nsenter --mount=/proc/1/ns/mnt -- df -B1 --output=size,used,avail -- "${mountpoint}" 2>/dev/null | awk 'NR == 2 {print $1 " " $2 " " $3}' || true)"
             if [[ ${stats} =~ ^[0-9]+[[:space:]][0-9]+[[:space:]][0-9]+$ ]]; then
                 read -r fs_size fs_used fs_free <<< "${stats}"
                 usage_known=true

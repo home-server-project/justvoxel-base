@@ -32,13 +32,10 @@
 
   <section class="panel setup-step-panel setup-review-panel">
     <div class="setup-review-content">
-    <h2>Review</h2>
-    <p class="setup-lead">Review the configuration validated by JustVoxel. Nothing has been applied yet.</p>
+    <div class="setup-review-header"><h2>Review</h2>{{if .Plan.OK}}<a class="button-link secondary" href="/setup/review/configuration">Download configuration</a>{{end}}</div>
     {{if .Error}}<div class="notice error"><strong>Setup needs attention</strong><br>{{.Error}}</div>{{end}}
 
     {{if .Plan.OK}}
-    <div class="setup-review-toolbar"><strong>Configuration validated.</strong><a class="button-link secondary" href="/setup/review/configuration">Download configuration</a></div>
-
     <div class="setup-review-summary" aria-label="Setup summary">
       <section><h3>Server</h3><dl>
         <div><dt>Server software</dt><dd>{{.ServerTypeLabel}}</dd></div>
@@ -73,47 +70,6 @@
     </section>
     {{end}}
 
-    <details class="setup-review-technical">
-      <summary>Technical details</summary>
-      <div class="setup-review-table">
-        <section><h3>Server</h3>
-          <p><span class="review-label">Players:</span> {{.Plan.Normalized.Server.MaxPlayers}}</p>
-          <p><span class="review-label">Bedrock:</span> {{if .Plan.Normalized.Server.BedrockEnabled}}Enabled{{else}}Disabled{{end}}</p>
-          <p><span class="review-label">Timezone:</span> <code>{{.Plan.Normalized.Server.Timezone}}</code></p>
-          <p><span class="review-label">MOTD:</span> {{.Plan.Normalized.Server.MOTD}}</p>
-        </section>
-        <section><h3>Minecraft</h3>
-          <p><span class="review-label">Type:</span> {{.ServerTypeLabel}}</p>
-          <p><span class="review-label">Version:</span> {{.Plan.Normalized.Minecraft.Version}} {{.VersionLabel}}</p>
-          <p><span class="review-label">Game mode:</span> {{.GameModeLabel}}</p>
-          <p><span class="review-label">Memory:</span> {{.Plan.Normalized.Minecraft.JavaMemory}} heap / {{.Plan.Normalized.Minecraft.ContainerMemory}} container</p>
-          <p><span class="review-label">Ports:</span> {{.Plan.Normalized.Minecraft.JavaPort}}/TCP{{if .Plan.Normalized.Server.BedrockEnabled}}, {{.Plan.Normalized.Minecraft.BedrockPort}}/UDP{{end}}</p>
-          <p><span class="review-label">Image:</span> <code>{{.Plan.Normalized.Minecraft.ImageTag}}</code></p>
-        </section>
-        <section><h3>Storage</h3>
-          <p><span class="review-label">Type:</span> {{.StorageLabel}}</p>
-          {{if .Plan.Normalized.Storage.Device}}<p><span class="review-label">Device:</span> <code>{{.Plan.Normalized.Storage.Device}}</code></p>{{end}}
-          {{if .Plan.Normalized.Storage.Filesystem}}<p><span class="review-label">Filesystem:</span> {{.Plan.Normalized.Storage.Filesystem}}</p>{{end}}
-          {{if .StorageSize}}<p><span class="review-label">Size:</span> {{.StorageSize}}</p>{{end}}
-          <p><span class="review-label">Path:</span> <code>{{.Plan.Normalized.Storage.Path}}</code></p>
-          {{if .Plan.Normalized.Storage.UUID}}<p><span class="review-label">UUID:</span> <code>{{.Plan.Normalized.Storage.UUID}}</code></p>{{end}}
-          {{if .Plan.Normalized.Storage.MountPoint}}<p><span class="review-label">Mount:</span> <code>{{.Plan.Normalized.Storage.MountPoint}}</code></p>{{end}}
-        </section>
-        <section><h3>Backups</h3>
-          <p><span class="review-label">Destination:</span> {{.BackupLabel}}</p>
-          <p><span class="review-label">Schedule:</span> {{if .Plan.Normalized.Backups.Automatic}}Daily {{.Plan.Normalized.Backups.DailyTime}}{{else}}Disabled{{end}}</p>
-          <p><span class="review-label">Retention:</span> Keep {{.Plan.Normalized.Backups.Keep}}</p>
-          {{if .Plan.Normalized.Backups.Device}}<p><span class="review-label">Device:</span> <code>{{.Plan.Normalized.Backups.Device}}</code></p>{{end}}
-          {{if .Plan.Normalized.Backups.Filesystem}}<p><span class="review-label">Filesystem:</span> {{.Plan.Normalized.Backups.Filesystem}}</p>{{end}}
-          {{if .BackupSize}}<p><span class="review-label">Size:</span> {{.BackupSize}}</p>{{end}}
-          <p><span class="review-label">Path:</span> <code>{{.Plan.Normalized.Backups.Path}}</code></p>
-          {{if .Plan.Normalized.Backups.UUID}}<p><span class="review-label">UUID:</span> <code>{{.Plan.Normalized.Backups.UUID}}</code></p>{{end}}
-          {{if .Plan.Normalized.Backups.Source}}<p><span class="review-label">Source:</span> <code>{{.Plan.Normalized.Backups.Source}}</code></p>{{end}}
-          {{if .Plan.Normalized.Backups.MountPoint}}<p><span class="review-label">Mount:</span> <code>{{.Plan.Normalized.Backups.MountPoint}}</code></p>{{end}}
-          {{if .Plan.Normalized.Backups.Username}}<p><span class="review-label">Account:</span> {{.Plan.Normalized.Backups.Username}}{{if .Plan.Normalized.Backups.Domain}} / {{.Plan.Normalized.Backups.Domain}}{{end}}</p>{{end}}
-        </section>
-      </div>
-    </details>
 
     {{if .Plan.Requirements.SMBPasswordRequired}}<div class="notice setup-secret-note"><strong>SMB password required during execution.</strong><span>The password is not stored in this setup draft or review. JustVoxel will request it only when the setup transaction is actually started.</span></div>{{end}}
     {{if .Plan.Requirements.NetworkBackupValidationOnApply}}<div class="notice"><strong>Network backup validation happens during execution.</strong><br>The configured network source will be mounted and verified before JustVoxel uses it. Planning does not mount the share.</div>{{end}}

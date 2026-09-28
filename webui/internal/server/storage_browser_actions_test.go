@@ -528,6 +528,32 @@ func TestStorageBrowserCreatePartitionUXUsesNativeUnallocatedSpaceFlow(t *testin
 	}
 }
 
+func TestStoragePartitionDialogsUseWholeDialogScrolling(t *testing.T) {
+	css, err := assets.ReadFile("static/storage-browser.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles := string(css)
+	for _, want := range []string{
+		".storage-detail-dialog{width:min(680px,calc(100% - 1.4rem))",
+		".storage-detail-list{max-height:none;overflow:visible}",
+		".storage-action-warnings{max-height:none;overflow:visible}",
+		".storage-action-dialog{overflow-y:auto;max-height:min(86dvh,760px)}",
+	} {
+		if !strings.Contains(styles, want) {
+			t.Errorf("Storage dialog layout missing %q", want)
+		}
+	}
+	for _, removed := range []string{
+		".storage-detail-list{max-height:min(38dvh,340px);overflow-y:auto}",
+		".storage-action-warnings{max-height:30dvh;overflow-y:auto",
+	} {
+		if strings.Contains(styles, removed) {
+			t.Errorf("Storage retains clipped internal scrolling %q", removed)
+		}
+	}
+}
+
 type fakeStorageWholeDiskMigrationAPI struct {
 	fakeDiscoveryAPI
 	plan         api.AdminDataMigrationPlanResponse

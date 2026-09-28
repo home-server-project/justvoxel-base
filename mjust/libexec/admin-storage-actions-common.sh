@@ -39,7 +39,34 @@ storage_action_is_system_partition() {
 }
 
 storage_action_mountpoint() {
-    lsblk -nro MOUNTPOINTS "$1" 2>/dev/null | sed '/^$/d' | head -n1
+    storage_action_host_mountpoints "$1" | awk 'NF && !found++ {print}'
+}
+
+storage_action_host_mountpoints() {
+    # lsblk reads /proc/self/mountinfo. Query it in the appliance mount namespace.
+    nsenter --mount=/proc/1/ns/mnt -- lsblk -nro MOUNTPOINTS "$1" | sed '/^$/d'
+}
+
+storage_action_host_mountpoint_occupied() {
+    nsenter --mount=/proc/1/ns/mnt -- mountpoint -q -- "$1"
+}
+
+storage_action_host_unmount() {
+    nsenter --mount=/proc/1/ns/mnt -- umount -- "$1"
+}
+
+storage_action_host_mount() {
+    nsenter --mount=/proc/1/ns/mnt -- mount -- "$1"
+}
+
+storage_action_host_mount_identity() {
+    nsenter --mount=/proc/1/ns/mnt -- bash -c 'source /usr/libexec/justvoxel/mjust/common.sh; jv_exact_mount_identity "$1" "$2"' bash "$1" "$2"
+}
+
+storage_action_mkfs_error() {
+    local message
+    message="$(printf '%s' "$1" | LC_ALL=C tr -cd '\11\12\15\40-\176' | tr '\r\n' '  ' | cut -c1-240)"
+    printf '%s\n' "${message:-XFS did not provide an error message. Inspect the partition before retrying.}"
 }
 
 storage_action_filesystem() {
@@ -100,7 +127,7 @@ storage_action_mount_device() {
     local device="$1" mountpoint="$2" filesystem="$3" mount_type mount_options
     mount_type="$(storage_action_mount_type "${filesystem}")" || return 1
     mount_options="$(storage_action_mount_options "${filesystem}")" || return 1
-    mount -t "${mount_type}" -o "${mount_options}" -- "${device}" "${mountpoint}"
+    nsenter --mount=/proc/1/ns/mnt -- mount -t "${mount_type}" -o "${mount_options}" -- "${device}" "${mountpoint}"
 }
 
 # Compatibility alias for storage-management paths that intentionally remain
@@ -191,7 +218,7 @@ storage_action_validate_mountpoint() {
         echo "ERROR: refusing to manage critical mount point: ${mountpoint}" >&2
         return 1
     }
-    mountpoint -q -- "${mountpoint}" && {
+    storage_action_host_mountpoint_occupied "${mountpoint}" && {
         echo "ERROR: mount point is already occupied: ${mountpoint}" >&2
         return 1
     }
@@ -206,6 +233,7 @@ storage_action_fingerprint() {
     type="$(lsblk -dnro TYPE "${device}" 2>/dev/null || true)"
     {
         printf 'device=%s\n' "$(storage_action_real_device "${device}")"
+        printf 'host-mounts=%s\n' "$(storage_action_host_mountpoints "${device}")"
         lsblk -b -P -o PATH,PKNAME,TYPE,SIZE,FSTYPE,UUID,PARTUUID,MOUNTPOINTS,START,RO,MODEL,SERIAL,WWN,TRAN "${device}" 2>/dev/null || true
         blkid "${device}" 2>/dev/null || true
         if [[ ${type} == disk ]]; then

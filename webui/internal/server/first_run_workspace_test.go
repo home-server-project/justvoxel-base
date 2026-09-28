@@ -165,17 +165,25 @@ func TestMinecraftResetReopensExistingFirstRunChoice(t *testing.T) {
 	for _, want := range []string{
 		"window.localStorage.removeItem(exploreStorageKey)",
 		"resetWelcome = true",
-		"void loadConfigurationState()",
+		"statusGeneration += 1",
+		"configured = false",
+		"if (role) applyFirstRunState()",
+		"else {\n      showChoice();",
 	} {
 		if !strings.Contains(handoff, want) {
 			t.Fatalf("first-run Reset handoff missing %q", want)
 		}
 	}
+	if strings.Contains(handoff, "void loadConfigurationState()") {
+		t.Fatal("Minecraft Reset must not immediately trust a potentially stale configured status")
+	}
 	if !strings.Contains(firstRun, `const exploreStorageKey = "justvoxel:first-run:explore"`) ||
 		!strings.Contains(firstRun, `(!resetWelcome && new URLSearchParams(window.location.search).has("workspace"))`) ||
 		!strings.Contains(firstRun, "else showChoice()") ||
-		!strings.Contains(firstRun, "configured = Boolean(snapshot?.status?.minecraft?.configured)") {
-		t.Fatal("Minecraft Reset must reopen the existing backend-driven Welcome choice")
+		!strings.Contains(firstRun, "configured = Boolean(snapshot?.status?.minecraft?.configured)") ||
+		!strings.Contains(firstRun, "if (generation !== statusGeneration) return;") ||
+		!strings.Contains(firstRun, "if (configured) resetWelcome = false;") {
+		t.Fatal("Minecraft Reset must show Welcome immediately, discard stale status, and later reconcile")
 	}
 	styleSource, err := assets.ReadFile("static/app.css")
 	if err != nil {

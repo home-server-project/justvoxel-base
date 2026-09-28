@@ -119,8 +119,8 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 	}
 	body := rr.Body.String()
 	for _, want := range []string{
-		"<h1>Set up JustVoxel</h1>", "Step 7 of 7", "<h2>Review</h2>", "Connections", "Version", "Configuration validated.", "Normalized Family Server", "20", "1.21.8",
-		"· Recommended", "Game mode:</span> Survival", "/var/lib/justvoxel/minecraft", "/var/lib/justvoxel/backups",
+		"<h1>Set up JustVoxel</h1>", "Step 7 of 7", "<h2>Review</h2>", "Connections", "Version", "Normalized Family Server", "20", "1.21.8",
+		"Recommended", "Game mode</dt><dd>Survival",
 		"Backups are on the same disk", "If this disk fails, both Minecraft and its backups could be lost.", "Minecraft End User License Agreement", "https://www.minecraft.net/eula",
 		"/static/setup-review.css", "/static/setup-operation.js",
 		`name="plan_fingerprint" value="` + setupReviewFingerprint + `"`, "Download configuration", "data-setup-eula-dialog", "Accept and continue",
@@ -131,10 +131,8 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 	}
 	summaryStart := strings.Index(body, `class="setup-review-summary"`)
 	warningsStart := strings.Index(body, `class="setup-review-warnings"`)
-	detailsStart := strings.Index(body, `<details class="setup-review-technical">`)
-	detailsEnd := strings.Index(body, "</details>")
-	if summaryStart < 0 || warningsStart <= summaryStart || detailsStart <= warningsStart || detailsEnd <= detailsStart {
-		t.Fatal("review summary, warnings, and technical details are out of order")
+	if summaryStart < 0 || warningsStart <= summaryStart {
+		t.Fatal("review summary and warnings are out of order")
 	}
 	summary := body[summaryStart:warningsStart]
 	for _, want := range []string{"Server software</dt><dd>Paper", "Welcome message</dt><dd>Normalized Family Server", "Game mode</dt><dd>Survival", "Java</dt><dd>Enabled, port 25565", "Bedrock cross-play</dt><dd>Enabled, port 19132", "Minecraft version</dt><dd>1.21.8", "Version policy</dt><dd>Recommended", "Minecraft game memory</dt><dd>4G", "Automatic backups</dt><dd>Enabled", "Daily at 04:30", "JustVoxel system storage"} {
@@ -147,14 +145,11 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 			t.Fatalf("human summary exposed %q", technical)
 		}
 	}
-	if strings.Count(body, `<details class="setup-review-technical">`) != 1 || strings.Contains(body, `<details class="setup-review-technical" open`) {
-		t.Fatal("technical details must be one collapsed section")
+	if strings.Contains(body, "Technical details") || strings.Contains(body, "Configuration validated.") || strings.Contains(body, "Review the configuration validated by JustVoxel.") {
+		t.Fatal("review retains removed status or technical details")
 	}
-	if !strings.Contains(body[detailsStart:detailsEnd], "/var/lib/justvoxel/minecraft") || !strings.Contains(body[detailsStart:detailsEnd], "/var/lib/justvoxel/backups") {
-		t.Fatal("technical paths missing from details")
-	}
-	if strings.Contains(body[detailsStart:detailsEnd], "Backups are on the same disk") {
-		t.Fatal("safety warning is hidden in technical details")
+	if !strings.Contains(body, `<div class="setup-review-header"><h2>Review</h2><a class="button-link secondary" href="/setup/review/configuration">Download configuration</a></div>`) {
+		t.Fatal("review heading and configuration download must share a row")
 	}
 	if client.planHit != 1 {
 		t.Fatalf("setup planner calls = %d, want 1", client.planHit)
@@ -190,12 +185,14 @@ func TestSetupReviewLatestShowsResolvedVersion(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("review returned %d: %s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), "1.21.8 · Latest") || strings.Contains(rr.Body.String(), "Version: LATEST") {
+	if !strings.Contains(rr.Body.String(), "<dt>Minecraft version</dt><dd>1.21.8</dd>") ||
+		!strings.Contains(rr.Body.String(), "<dt>Version policy</dt><dd>Latest</dd>") ||
+		strings.Contains(rr.Body.String(), "Version: LATEST") {
 		t.Fatalf("review did not show the exact Latest candidate: %s", rr.Body.String())
 	}
 }
 
-func TestSetupReviewKeepsTechnicalValuesCollapsedAndUsesPlanWarnings(t *testing.T) {
+func TestSetupReviewKeepsTechnicalValuesInDownloadAndUsesPlanWarnings(t *testing.T) {
 	client := setupReviewClient()
 	client.plan.Normalized.Server.BedrockEnabled = false
 	client.plan.Normalized.Backups.Automatic = false
@@ -216,21 +213,20 @@ func TestSetupReviewKeepsTechnicalValuesCollapsedAndUsesPlanWarnings(t *testing.
 		t.Fatalf("review returned %d: %s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	detailsStart := strings.Index(body, `<details class="setup-review-technical">`)
-	detailsEnd := strings.Index(body, "</details>")
-	if detailsStart < 0 || detailsEnd <= detailsStart {
-		t.Fatal("technical details missing")
-	}
-	summary := body[:detailsStart]
+	summary := body
 	for _, want := range []string{"Bedrock cross-play</dt><dd>Disabled", "Automatic backups</dt><dd>Disabled"} {
 		if !strings.Contains(summary, want) {
 			t.Fatalf("summary missing %q", want)
 		}
 	}
 	for _, technical := range []string{"/dev/vdb1", "/dev/vdc1", "data-uuid", "backup-uuid"} {
-		if strings.Contains(summary, technical) || !strings.Contains(body[detailsStart:detailsEnd], technical) {
-			t.Fatalf("technical value %q is misplaced", technical)
+		if strings.Contains(summary, technical) {
+			t.Fatalf("technical value %q leaked into human review", technical)
 		}
+	}
+	download := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review/configuration", ""))
+	if download.Code != http.StatusOK || !strings.Contains(download.Body.String(), "/dev/vdb1") || !strings.Contains(download.Body.String(), "/dev/vdc1") || !strings.Contains(download.Body.String(), "data-uuid") || !strings.Contains(download.Body.String(), "backup-uuid") {
+		t.Fatal("configuration download lost technical storage values")
 	}
 	if strings.Contains(body, "Backups are on the same disk") {
 		t.Fatal("review invented a same-disk warning absent from the plan")
@@ -283,6 +279,15 @@ func TestRecommendedAndAdvancedModesUseSameAuthoritativePlanRequest(t *testing.T
 	if recommendedRequest != advancedRequest {
 		t.Fatalf("setup mode changed authoritative Agent plan request:\nrecommended=%#v\nadvanced=%#v", recommendedRequest, advancedRequest)
 	}
+	reviewSource, err := assets.ReadFile("templates/setup_review.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(reviewSource)
+	if strings.Count(markup, `<div class="setup-review-header">`) != 1 || strings.Count(markup, `class="setup-review-summary"`) != 1 ||
+		!strings.Contains(markup, `{{if ne .SetupMode "recommended"}}`) {
+		t.Fatal("Recommended and Advanced must share one Review presentation")
+	}
 }
 
 func TestSetupReviewConfigurationDownloadExcludesSecrets(t *testing.T) {
@@ -328,7 +333,7 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 		t.Fatalf("review returned %d: %s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"Cancel setup", ">Back</button>", "setup-review-panel", "setup-review-content", "setup-step-actions setup-actions-split", "setup-review-technical", "Technical details", "setup-review-table", "<h3>Server</h3>", "<h3>Minecraft</h3>", "<h3>Storage</h3>", "<h3>Backups</h3>"} {
+	for _, want := range []string{"Cancel setup", ">Back</button>", "setup-review-panel", "setup-review-content", "setup-step-actions setup-actions-split", "setup-review-header", "<h3>Server</h3>", "<h3>Connections</h3>", "<h3>Minecraft</h3>", "<h3>Storage &amp; backups</h3>"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("review layout missing %q: %s", want, body)
 		}
@@ -349,9 +354,9 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 	}
 	styles := string(css)
 	for _, want := range []string{
-		"setup-review-toolbar",
+		"setup-review-header",
 		"white-space:nowrap",
-		".setup-review-table{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}",
+		".setup-review-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));",
 		".setup-review-content{flex:1;min-height:0;overflow:visible}",
 		".setup-review-panel>.setup-step-actions",
 	} {
@@ -360,8 +365,8 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 		}
 	}
 
-	if !strings.Contains(body, `<details class="setup-review-technical">`) || !strings.Contains(body, "<summary>Technical details</summary>") {
-		t.Fatal("review must provide collapsed technical details")
+	if strings.Contains(body, "Technical details") || strings.Contains(styles, "setup-review-technical") || strings.Contains(styles, "setup-review-table") {
+		t.Fatal("review retains removed technical details")
 	}
 	if !strings.Contains(body, `class="setup-review-content"`) || !strings.Contains(body, `class="setup-step-actions setup-actions-split"`) {
 		t.Fatal("review content and actions must remain separate")
@@ -464,10 +469,11 @@ func TestSetupReviewKeepsCompatibleRecommendedBedrockEnabled(t *testing.T) {
 	}
 	body := rr.Body.String()
 	for _, want := range []string{
-		`<p><span class="review-label">Players:</span> 20</p>`,
-		`<p><span class="review-label">Bedrock:</span> Enabled</p>`,
-		`<p><span class="review-label">Timezone:</span> <code>America/Toronto</code></p>`,
-		"1.21.8 · Recommended",
+		"<dt>Maximum players</dt><dd>20</dd>",
+		"<dt>Bedrock cross-play</dt><dd>Enabled, port 19132</dd>",
+		"<dt>Timezone</dt><dd>America/Toronto</dd>",
+		"<dt>Minecraft version</dt><dd>1.21.8</dd>",
+		"<dt>Version policy</dt><dd>Recommended</dd>",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("compatible Bedrock review missing %q: %s", want, body)
