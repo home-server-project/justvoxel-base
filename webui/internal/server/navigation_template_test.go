@@ -352,7 +352,6 @@ func TestAuthenticatedTemplatesUseSharedHeader(t *testing.T) {
 		"admin_activity.html",
 		"users.html",
 		"authentication.html",
-		"password.html",
 		"validation.html",
 		"server_settings.html",
 		"storage_settings.html",
@@ -385,6 +384,13 @@ func TestAuthenticatedTemplatesUseSharedHeader(t *testing.T) {
 		if !strings.Contains(markup, `/static/app.js`) {
 			t.Fatalf("%s does not load shared navigation behavior", name)
 		}
+	}
+	password, err := assets.ReadFile("templates/password.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(password), `{{template "app-header" .}}`) || strings.Contains(string(password), `/static/app.js`) {
+		t.Fatal("password page must remain outside shared navigation")
 	}
 }
 

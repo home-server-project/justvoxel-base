@@ -47,6 +47,7 @@ type migrationWorkspaceImportReviewPageData struct {
 	BackupSize      string
 	Prompt          string
 	Error           string
+	NeedsInput      bool
 	NeedsSourcePath bool
 	NeedsRoot       bool
 	NeedsVersion    bool
@@ -80,6 +81,9 @@ func (a *App) migrationWorkspaceImportRequest(w http.ResponseWriter, r *http.Req
 func (a *App) migrationWorkspaceImportPage(w http.ResponseWriter, r *http.Request) {
 	session, client, identity, ok := a.migrationWorkspaceImportRequest(w, r, false)
 	if !ok {
+		return
+	}
+	if migrationWorkspaceRedirectBrowser(w, r, "/?workspace=migration&tab=import") {
 		return
 	}
 	if a.redirectCurrentMigrationWorkspaceOperation(w, r, session, client) {
@@ -117,7 +121,7 @@ func (a *App) migrationWorkspaceImportReview(w http.ResponseWriter, r *http.Requ
 				a.renderMigrationWorkspaceImportReview(w, http.StatusOK, identity, scrubMigrationWorkspaceImportSecrets(request), plan, csrfFromRequest(r), migrationWorkspaceImportPrompt(plan), "")
 				return
 			}
-			a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, scrubMigrationWorkspaceImportSecrets(request), plan, csrfFromRequest(r), "", apiMessage(err, "Server Import planning was rejected."))
+			a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, scrubMigrationWorkspaceImportSecrets(request), plan, csrfFromRequest(r), "", migrationWorkspaceImportPlanError(plan, err, "Server Import planning was rejected."))
 			return
 		}
 		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Import planning is unavailable.")
@@ -147,7 +151,11 @@ func (a *App) migrationWorkspaceImportApply(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		var responseErr *api.ResponseError
 		if errors.As(err, &responseErr) && responseErr.StatusCode == http.StatusBadRequest && plan.SchemaVersion != "" {
-			a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, scrubMigrationWorkspaceImportSecrets(request), plan, csrfFromRequest(r), migrationWorkspaceImportPrompt(plan), apiMessage(err, "Server Import changed and must be reviewed again."))
+			prompt := ""
+			if migrationWorkspaceImportPlanNeedsInput(plan.Code) {
+				prompt = migrationWorkspaceImportPrompt(plan)
+			}
+			a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, scrubMigrationWorkspaceImportSecrets(request), plan, csrfFromRequest(r), prompt, migrationWorkspaceImportPlanError(plan, err, "Server Import changed and must be reviewed again."))
 			return
 		}
 		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Import planning is unavailable.")
@@ -470,6 +478,13 @@ func migrationWorkspaceImportPlanNeedsInput(code string) bool {
 	}
 }
 
+func migrationWorkspaceImportPlanError(plan api.AdminMigrationImportPlanResponse, err error, fallback string) string {
+	if plan.Error != "" {
+		return plan.Error
+	}
+	return apiMessage(err, fallback)
+}
+
 func migrationWorkspaceImportPrompt(plan api.AdminMigrationImportPlanResponse) string {
 	switch plan.Code {
 	case "source_selection_required":
@@ -532,6 +547,7 @@ func (a *App) renderMigrationWorkspaceImportReview(w http.ResponseWriter, status
 		BackupSize:      backupSize,
 		Prompt:          prompt,
 		Error:           errorMessage,
+		NeedsInput:      migrationWorkspaceImportPlanNeedsInput(plan.Code),
 		NeedsSourcePath: plan.Code == "source_selection_required",
 		NeedsRoot:       plan.Code == "multiple_roots" || plan.Code == "stale_root",
 		NeedsVersion:    plan.Code == "source_version_required",

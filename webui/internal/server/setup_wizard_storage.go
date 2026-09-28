@@ -654,8 +654,8 @@ func setupSameDiskWarning(draft setupDraft) string {
 	if draft.Storage.Type == "partition" && draft.Backups.Type == "partition" {
 		dataDevice, dataOK := safeSetupDevice(draft.Inventory, draft.Storage.Device)
 		backupDevice, backupOK := safeSetupDevice(draft.Inventory, draft.Backups.Device)
-		if dataOK && backupOK && dataDevice.System && backupDevice.System && setupPhysicalDiskKey(dataDevice) != "" && setupPhysicalDiskKey(dataDevice) == setupPhysicalDiskKey(backupDevice) {
-			return "Minecraft data and backups are on partitions of the same physical system disk. This helps with accidental file loss, but it does not protect against failure of that disk."
+		if dataOK && backupOK && setupPhysicalDiskKey(dataDevice) != "" && setupPhysicalDiskKey(dataDevice) == setupPhysicalDiskKey(backupDevice) {
+			return "Minecraft data and backups are on partitions of the same physical disk. This helps with accidental file loss, but it does not protect against failure of that disk."
 		}
 	}
 	return ""

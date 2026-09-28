@@ -523,12 +523,28 @@ func TestDashboardSurfacesMigrationNeedsAttention(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("dashboard returned %d: %s", rr.Code, rr.Body.String())
 	}
-	for _, want := range []string{"Server Migration needs attention", "Review Migration Recovery", "/settings/server-migration/recovery"} {
+	for _, want := range []string{"Server Migration needs attention", "Review Migration Recovery", "/?workspace=migration&amp;tab=recovery"} {
 		if !strings.Contains(rr.Body.String(), want) {
 			t.Fatalf("dashboard attention missing %q: %s", want, rr.Body.String())
 		}
 	}
-	if strings.Contains(rr.Body.String(), "/workspace/migration/recovery") {
+	if strings.Contains(rr.Body.String(), "/workspace/migration/recovery") || strings.Contains(rr.Body.String(), "/settings/server-migration/recovery") {
 		t.Fatalf("dashboard must not navigate directly to a workspace fragment: %s", rr.Body.String())
+	}
+}
+
+func TestDashboardRecoveryAttentionOpensRecoveryWorkspace(t *testing.T) {
+	for _, operationType := range []string{"migration_import", "migration_recovery"} {
+		t.Run(operationType, func(t *testing.T) {
+			attention := dashboardCurrentAttention(context.Background(), &fakeDashboardOperationAPI{migration: &api.PersistentOperation{
+				OperationType: operationType, State: "needs_attention", Status: "Recovery needs review.",
+			}}, "session-token")
+			if attention == nil || attention.Action != "/?workspace=migration&tab=recovery" || attention.Label != "Review Migration Recovery" || attention.Status != "Recovery needs review." {
+				t.Fatalf("unexpected Migration attention: %#v", attention)
+			}
+			if operationType == "migration_recovery" && attention.Title != "Migration Recovery needs attention" {
+				t.Fatalf("Recovery attention title = %q", attention.Title)
+			}
+		})
 	}
 }

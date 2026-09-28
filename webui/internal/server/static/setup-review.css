@@ -31,13 +31,21 @@
 .setup-log-download:hover,.setup-log-download:focus-visible{background:#7299d1;color:#fff}
 .setup-recovery-action{background:#a96713;border-color:#d28c2b;color:#fff}
 .setup-recovery-action:hover,.setup-recovery-action:focus-visible{background:#c17c1b;border-color:#e6a747;color:#fff}
-.setup-review-panel{display:flex;flex-direction:column;padding:.65rem .8rem;overflow:visible!important}
+.setup-review-panel{display:flex;flex-direction:column;padding:.65rem .8rem;overflow:visible}
 .setup-review-content{flex:1;min-height:0;overflow:visible}
 .setup-review-content>.setup-lead{max-width:none;margin:0 0 .2rem;font-size:.82rem;line-height:1.25}
 .setup-review-toolbar{display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin:.2rem 0;font-size:.82rem}
 .setup-review-toolbar .button-link{white-space:nowrap}
 .setup-review-technical{margin:.7rem 0;border:1px solid #303942;border-radius:10px;background:#10161a}
-.setup-review-technical>h2{margin:0;padding:.6rem .8rem;border-bottom:1px solid #303942;font-size:1rem}
+.setup-review-technical>summary{padding:.6rem .8rem;font-size:1rem;font-weight:700;cursor:pointer}
+.setup-review-technical[open]>summary{border-bottom:1px solid #303942}
+.setup-review-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.7rem;margin:.7rem 0}
+.setup-review-summary>section{min-width:0;padding:.8rem .9rem;border:1px solid #303942;border-radius:10px;background:#10161a}
+.setup-review-summary h3{margin:0 0 .45rem;font-size:1rem}
+.setup-review-summary dl{display:grid;gap:.3rem;margin:0}
+.setup-review-summary dl>div{display:flex;justify-content:space-between;gap:.8rem;line-height:1.4;font-size:.88rem}
+.setup-review-summary dt{color:#aeb9c2}
+.setup-review-summary dd{margin:0;text-align:right;overflow-wrap:anywhere}
 .setup-review-table{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
 .setup-review-table>section{min-width:0;padding:.8rem .9rem;border-right:1px solid #303942}
 .setup-review-table>section:last-child{border-right:0}
@@ -49,9 +57,10 @@
 .setup-review-panel>.setup-step-actions .setup-step-navigation form{margin:0}
 @media(max-width:1000px){.setup-review-table{grid-template-columns:repeat(2,minmax(0,1fr))}.setup-review-table>section:nth-child(2){border-right:0}.setup-review-table>section:nth-child(-n+2){border-bottom:1px solid #303942}}
 @media(max-width:560px){.setup-review-table{grid-template-columns:1fr}.setup-review-table>section{border-right:0;border-bottom:1px solid #303942}.setup-review-table>section:last-child{border-bottom:0}}
+@media(max-width:700px){.setup-review-summary{grid-template-columns:1fr}.setup-review-summary dl>div{flex-wrap:wrap}.setup-review-summary dd{text-align:left}}
 .setup-configure-disabled{position:relative;display:inline-flex;outline:none}
 .setup-configure-disabled:focus-visible{outline:2px solid #78c99d;outline-offset:2px;border-radius:8px}
 .setup-configure-disabled button:disabled{background:#495158;border-color:#667078;color:#e0e4e7;opacity:1;cursor:not-allowed;box-shadow:none}
 .setup-configure-tooltip{position:absolute;bottom:calc(100% + .5rem);right:0;z-index:5;width:max-content;max-width:min(18rem,calc(100vw - 2rem));padding:.55rem .7rem;border:1px solid #667078;border-radius:9px;background:#293138;color:#f0f3f5;font-size:.78rem;line-height:1.35;box-shadow:0 8px 22px #0008;visibility:hidden;opacity:0;pointer-events:none}
 .setup-configure-disabled:hover .setup-configure-tooltip,.setup-configure-disabled:focus-visible .setup-configure-tooltip{visibility:visible;opacity:1}
-@media(prefers-color-scheme:light){.setup-review-panel>.setup-step-actions{border-color:#d9dfe3}.setup-configure-disabled button:disabled{background:#d3d9dd;border-color:#adb7bd;color:#49555d}.setup-configure-tooltip{background:#fff;color:#263139;border-color:#adb7bd;box-shadow:0 8px 22px #0003}.setup-review-technical{background:#fff;border-color:#d9dfe3}.setup-review-table .review-label{color:#4c5962}}
+@media(prefers-color-scheme:light){.setup-review-panel>.setup-step-actions{border-color:#d9dfe3}.setup-configure-disabled button:disabled{background:#d3d9dd;border-color:#adb7bd;color:#49555d}.setup-configure-tooltip{background:#fff;color:#263139;border-color:#adb7bd;box-shadow:0 8px 22px #0003}.setup-review-technical,.setup-review-summary>section{background:#fff;border-color:#d9dfe3}.setup-review-summary dt,.setup-review-table .review-label{color:#4c5962}}

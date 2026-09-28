@@ -111,7 +111,11 @@ if [[ ${BEDROCK_ENABLED} == yes ]]; then
         BEDROCK_PORT="$(jui_input 'Destination Bedrock host UDP port' "${default_bedrock}")" || exit 1
     fi
     validate_port "${BEDROCK_PORT}" || { echo 'ERROR: invalid Bedrock port.' >&2; exit 1; }
-    jv_migration_check_candidate_port udp "${BEDROCK_PORT}" "$([[ ${old_bedrock_enabled} == yes ]] && printf '%s' "${old_bedrock}" || true)" || exit 1
+    if [[ ${configured} == yes ]]; then
+        jv_migration_check_import_bedrock_port "${BEDROCK_PORT}" "${old_bedrock_enabled}" "${old_bedrock}" || exit 1
+    else
+        jv_migration_check_candidate_port udp "${BEDROCK_PORT}" || exit 1
+    fi
 else
     BEDROCK_PORT="${BEDROCK_PORT:-19132}"
 fi

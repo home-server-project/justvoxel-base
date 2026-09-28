@@ -3,6 +3,7 @@ package server
 import "net/http"
 
 func (a *App) providerLoginPage(w http.ResponseWriter, r *http.Request) {
+	a.clearFactoryResetCompleteCookie(w)
 	if c, err := r.Cookie(sessionCookie); err == nil && c.Value != "" {
 		if _, err := a.api.Status(r.Context(), c.Value); err == nil {
 			if mustChange(r) {

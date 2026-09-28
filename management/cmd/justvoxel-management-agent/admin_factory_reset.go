@@ -18,6 +18,7 @@ import (
 )
 
 const adminFactoryResetHelper = "/usr/libexec/justvoxel/mjust/admin-factory-reset-json"
+const factoryBootstrapPasswordHash = "$6$0LPXGhsb5MOJ160J$K97FKtUs0SgIXum7OpGk69m.asoBR0Os86DpbUnes5JO27aV5XzfEgtpVb/Ff8RMKl.izzSgbqwK8XPpYRFV20"
 
 var adminFactoryResetPlanTimeout = 20 * time.Second
 var adminFactoryResetWorkerTimeout = 5 * time.Minute
@@ -28,8 +29,21 @@ var runAdminFactoryResetHelper = func(ctx context.Context, args ...string) ([]by
 
 var resetFactoryAuthenticationState = resetAuthenticationStateForFactoryReset
 
-var expireSystemAdministratorPassword = func(ctx context.Context) error {
-	return exec.CommandContext(ctx, "/usr/bin/chage", "-d", "0", systemAdminUsername).Run()
+var runFactoryCredentialCommand = func(ctx context.Context, path string, args ...string) error {
+	return exec.CommandContext(ctx, path, args...).Run()
+}
+
+var restoreSystemAdministratorFactoryCredential = func(ctx context.Context) error {
+	if err := runFactoryCredentialCommand(ctx, "/usr/sbin/usermod", "--password", "!"+factoryBootstrapPasswordHash, systemAdminUsername); err != nil {
+		return errors.New("system administrator factory password could not be restored in locked state")
+	}
+	if err := runFactoryCredentialCommand(ctx, "/usr/bin/chage", "-d", "0", systemAdminUsername); err != nil {
+		return errors.New("system administrator factory password could not be expired")
+	}
+	if err := runFactoryCredentialCommand(ctx, "/usr/sbin/usermod", "--unlock", systemAdminUsername); err != nil {
+		return errors.New("system administrator factory password could not be unlocked")
+	}
+	return nil
 }
 
 type adminFactoryResetPlanResponse struct {
@@ -347,7 +361,7 @@ func validateAdminFactoryResetPlan(plan adminFactoryResetPlanResponse) error {
 		plan.NetworkStorageAction != "preserve" ||
 		plan.AuthenticationAction != "reset_to_system" ||
 		plan.WebUIUsersAction != "delete" ||
-		plan.PasswordAction != "expire" ||
+		plan.PasswordAction != "restore_default_and_expire" ||
 		plan.SessionsAction != "invalidate" {
 		return errors.New("factory reset preservation contract changed")
 	}
@@ -493,8 +507,8 @@ func executeFactoryReset(ctx context.Context, s *server, operationID, expectedFi
 		_, _ = s.operations.transition(operationID, operationNeedsAttention, "identity_failed", "Authentication state could not be returned to System mode.")
 		return err
 	}
-	if err := expireSystemAdministratorPassword(ctx); err != nil {
-		_, _ = s.operations.transition(operationID, operationNeedsAttention, "password_expire_failed", "System administrator password could not be marked for mandatory change.")
+	if err := restoreSystemAdministratorFactoryCredential(ctx); err != nil {
+		_, _ = s.operations.transition(operationID, operationNeedsAttention, "password_reset_failed", "System administrator factory password could not be restored and expired. Review the system account before retrying.")
 		return err
 	}
 

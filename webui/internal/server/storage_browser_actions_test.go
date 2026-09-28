@@ -295,6 +295,35 @@ func TestStorageBrowserHiddenStateOverridesComponentDisplayRules(t *testing.T) {
 	}
 }
 
+func TestStorageBrowserCardsHoverWithoutMovement(t *testing.T) {
+	css, err := assets.ReadFile("static/storage-browser.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles := string(css)
+	for _, selector := range []string{
+		".storage-disk-card:hover,.storage-disk-card:focus-visible",
+		"button.storage-partition-card:hover,button.storage-partition-card:focus-visible",
+	} {
+		_, rule, found := strings.Cut(styles, selector+"{")
+		if !found {
+			t.Fatalf("storage card hover/focus rule missing: %s", selector)
+		}
+		rule, _, found = strings.Cut(rule, "}")
+		if !found {
+			t.Fatalf("storage card hover/focus rule is incomplete: %s", selector)
+		}
+		if strings.Contains(rule, "translateY(") {
+			t.Errorf("storage card hover/focus moves vertically: %s", selector)
+		}
+		for _, feedback := range []string{"border-color:", "background:"} {
+			if !strings.Contains(rule, feedback) {
+				t.Errorf("storage card hover/focus lacks %s feedback: %s", feedback, selector)
+			}
+		}
+	}
+}
+
 func TestStorageBrowserMountUXUsesHumanWording(t *testing.T) {
 	js, err := assets.ReadFile("static/storage-browser.js")
 	if err != nil {

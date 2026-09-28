@@ -237,7 +237,7 @@ plan() {
         [[ ${bedrock_port} =~ ^[0-9]+$ ]] || bedrock_port="$BEDROCK_PORT"
         validate_port "$java_port" && validate_port "$bedrock_port" || { [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error invalid_port 'Destination Minecraft port is invalid.'; return 0; }
         jv_migration_check_candidate_port tcp "$java_port" "$JAVA_PORT" >/dev/null 2>&1 || { [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error port_conflict 'Destination Java TCP port is already in use.'; return 0; }
-        if [[ ${bedrock_enabled} == true ]]; then jv_migration_check_candidate_port udp "$bedrock_port" "$([[ ${BEDROCK_ENABLED} == yes ]] && printf '%s' "$BEDROCK_PORT" || true)" >/dev/null 2>&1 || { [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error port_conflict 'Destination Bedrock UDP port is already in use.'; return 0; }; fi
+        if [[ ${bedrock_enabled} == true ]]; then jv_migration_check_import_bedrock_port "$bedrock_port" "$BEDROCK_ENABLED" "$BEDROCK_PORT" >/dev/null 2>&1 || { [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error port_conflict 'Destination Bedrock UDP port is already in use.'; return 0; }; fi
         player_json="$(/usr/libexec/justvoxel/mjust/web-status-json players 2>/dev/null || true)"
         if jq -e 'type=="object" and (.state|type=="string") and (.online|type=="number") and (.names|type=="array")' >/dev/null 2>&1 <<< "$player_json"; then
             minecraft_state="$(jq -r '.state' <<< "$player_json")"; online="$(jq -r '.online' <<< "$player_json")"; players="$(jq -c '.names' <<< "$player_json")"

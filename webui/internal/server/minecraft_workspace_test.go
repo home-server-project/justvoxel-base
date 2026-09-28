@@ -352,13 +352,87 @@ func TestMinecraftWorkspacePlayersTabRendersGameModeAndDeferredReview(t *testing
 	for _, want := range []string{
 		`new FormData(form).forEach((value, key) => params.append(key, String(value)))`,
 		`change.label || change.field`,
-		`change.before || "—"`,
-		`change.after || "—"`,
+		`minecraftSettingsReviewValue(change, change.before || "—")`,
+		`minecraftSettingsReviewValue(change, change.after || "—")`,
 		`The new settings will be saved, but Minecraft will not restart automatically for these non-memory changes.`,
 		`Minecraft settings saved. Restart remains pending.`,
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("Minecraft review or apply flow missing %q", want)
 		}
+	}
+}
+
+func TestMinecraftWorkspaceReviewHumanizesOnlyBedrockValues(t *testing.T) {
+	sourceBytes, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(sourceBytes)
+	helperStart := strings.Index(source, `const minecraftSettingsReviewValue = (change, value) => {`)
+	reviewStart := strings.Index(source, `const renderSettingsReview = (root, plan, params) => {`)
+	if helperStart < 0 || reviewStart <= helperStart {
+		t.Fatal("Minecraft settings review source blocks not found")
+	}
+	reviewEnd := strings.Index(source[reviewStart:], `const renderSettingsTab = async`)
+	if reviewEnd < 0 {
+		t.Fatal("Minecraft settings review end not found")
+	}
+	helper := source[helperStart:reviewStart]
+	review := source[reviewStart : reviewStart+reviewEnd]
+	for _, want := range []string{
+		`if (change.field !== "bedrock_enabled") return value;`,
+		`String(value).trim().toLowerCase()`,
+		`case "yes":`,
+		`case "true":`,
+		`case "on":`,
+		`return "Enabled";`,
+		`case "no":`,
+		`case "false":`,
+		`case "off":`,
+		`return "Disabled";`,
+		`default:`,
+		`return value;`,
+	} {
+		if !strings.Contains(helper, want) {
+			t.Errorf("Minecraft review value helper missing %q", want)
+		}
+	}
+	if !strings.Contains(helper, "case \"yes\":\n      case \"true\":\n      case \"on\":\n        return \"Enabled\";") ||
+		!strings.Contains(helper, "case \"no\":\n      case \"false\":\n      case \"off\":\n        return \"Disabled\";") {
+		t.Error("Minecraft review must map yes/true/on to Enabled and no/false/off to Disabled")
+	}
+	if strings.Contains(review, `document.createElement("code")`) {
+		t.Error("Minecraft review still renders change values as code")
+	}
+	for _, want := range []string{
+		`const before = document.createElement("span");`,
+		`const after = document.createElement("span");`,
+		`before.className = "minecraft-native-change-value";`,
+		`after.className = "minecraft-native-change-value";`,
+		`before.textContent = minecraftSettingsReviewValue(change, change.before || "—");`,
+		`after.textContent = minecraftSettingsReviewValue(change, change.after || "—");`,
+		`arrow.textContent = "→";`,
+		`const applyParams = new URLSearchParams(params);`,
+		`requestWorkspaceJSON("/api/minecraft/workspace/settings/apply", {`,
+		`body: applyParams.toString(),`,
+	} {
+		if !strings.Contains(review, want) {
+			t.Errorf("Minecraft review missing %q", want)
+		}
+	}
+	if !strings.Contains(source, `requestWorkspaceJSON("/api/minecraft/workspace/settings/plan", {`) ||
+		!strings.Contains(source, `body: params.toString(),`) {
+		t.Error("Minecraft settings plan request source changed")
+	}
+
+	cssBytes, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(cssBytes)
+	if !strings.Contains(css, `.minecraft-native-change-value{max-width:300px;min-width:0;overflow-wrap:anywhere;font-family:inherit}`) ||
+		strings.Contains(css, `.minecraft-native-change-row code{`) {
+		t.Error("Minecraft review values must use wrapping, normal-font CSS")
 	}
 }

@@ -122,8 +122,9 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /login", a.providerLoginPage)
 	mux.HandleFunc("POST /login", a.login)
 	mux.HandleFunc("POST /logout", a.logout)
-	mux.HandleFunc("GET /password", a.passwordOrWorkspacePage)
+	mux.HandleFunc("GET /password", a.providerPasswordPage)
 	mux.HandleFunc("POST /password", a.providerPasswordChange)
+	mux.HandleFunc("GET /factory-reset-complete", a.factoryResetCompletePage)
 	mux.HandleFunc("GET /settings/authentication", a.legacyWorkspaceRedirect("administrator", "system", "security"))
 	mux.HandleFunc("POST /settings/authentication", a.authenticationChange)
 	a.registerAdminUsersRoutes(mux)
@@ -452,14 +453,18 @@ func (a *App) dashboardData(ctx context.Context, session, csrf string) (pageData
 
 func dashboardCurrentAttention(ctx context.Context, operations dashboardOperationAPI, session string) *dashboardAttention {
 	if current, err := operations.AdminCurrentMigrationOperation(ctx, session); err == nil && current.Operation != nil && current.Operation.State == "needs_attention" {
-		action := "/workspace/migration"
+		action := "/?workspace=migration"
 		label := "Open Server Migration"
-		if current.Operation.OperationType == "migration_import" {
-			action = "/settings/server-migration/recovery"
+		title := "Server Migration needs attention"
+		if current.Operation.OperationType == "migration_import" || current.Operation.OperationType == "migration_recovery" {
+			action = "/?workspace=migration&tab=recovery"
 			label = "Review Migration Recovery"
 		}
+		if current.Operation.OperationType == "migration_recovery" {
+			title = "Migration Recovery needs attention"
+		}
 		return &dashboardAttention{
-			Title:  "Server Migration needs attention",
+			Title:  title,
 			Status: current.Operation.Status,
 			Action: action,
 			Label:  label,

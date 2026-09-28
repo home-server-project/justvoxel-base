@@ -33,7 +33,6 @@ func TestLegacyPagesOpenWorkspaceDestinations(t *testing.T) {
 		{"/settings/activity", "/?tab=history&workspace=system"},
 		{"/settings/users", "/?tab=users&workspace=system"},
 		{"/settings/authentication", "/?tab=security&workspace=system"},
-		{"/password", "/?tab=security&workspace=system"},
 		{"/about", "/?tab=about&workspace=system"},
 		{"/settings/new-storage", "/?workspace=storage"},
 		{"/settings/storage-provision", "/?workspace=storage"},

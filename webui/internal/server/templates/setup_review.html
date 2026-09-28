@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>JustVoxel - Review setup</title>
+  <title>JustVoxel - Set up JustVoxel - Review</title>
   <link rel="stylesheet" href="/static/app.css">
   <link rel="stylesheet" href="/static/setup.css">
   <link rel="stylesheet" href="/static/setup-review.css">
@@ -17,7 +17,7 @@
   <form class="nav-logout setup-topbar-logout" method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Log out</button></form>
 </header>
 <main class="setup-shell">
-  <div class="title-row setup-title-row"><div><h1>Review your JustVoxel setup</h1></div><span class="badge">{{if eq .SetupMode "recommended"}}Recommended setup{{else}}Step 7 of 7{{end}}</span></div>
+  <div class="title-row setup-title-row"><div><h1>Set up JustVoxel</h1></div><span class="badge">Step 7 of 7</span></div>
   {{if ne .SetupMode "recommended"}}
   <ol class="setup-progress" aria-label="Setup progress">
     <li class="complete"><form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="1"><button type="submit"><span class="setup-number">1</span><span>Server</span></button></form></li>
@@ -32,18 +32,53 @@
 
   <section class="panel setup-step-panel setup-review-panel">
     <div class="setup-review-content">
+    <h2>Review</h2>
     <p class="setup-lead">Review the configuration validated by JustVoxel. Nothing has been applied yet.</p>
     {{if .Error}}<div class="notice error"><strong>Setup needs attention</strong><br>{{.Error}}</div>{{end}}
 
     {{if .Plan.OK}}
     <div class="setup-review-toolbar"><strong>Configuration validated.</strong><a class="button-link secondary" href="/setup/review/configuration">Download configuration</a></div>
 
-    <section class="setup-review-technical" aria-label="Technical details">
-      <h2>Technical details</h2>
+    <div class="setup-review-summary" aria-label="Setup summary">
+      <section><h3>Server</h3><dl>
+        <div><dt>Server software</dt><dd>{{.ServerTypeLabel}}</dd></div>
+        <div><dt>Welcome message</dt><dd>{{.Plan.Normalized.Server.MOTD}}</dd></div>
+        <div><dt>Game mode</dt><dd>{{.GameModeLabel}}</dd></div>
+        <div><dt>Maximum players</dt><dd>{{.Plan.Normalized.Server.MaxPlayers}}</dd></div>
+        <div><dt>Timezone</dt><dd>{{.Plan.Normalized.Server.Timezone}}</dd></div>
+      </dl></section>
+      <section><h3>Connections</h3><dl>
+        <div><dt>Java</dt><dd>Enabled, port {{.Plan.Normalized.Minecraft.JavaPort}}</dd></div>
+        <div><dt>Bedrock cross-play</dt><dd>{{if .Plan.Normalized.Server.BedrockEnabled}}Enabled, port {{.Plan.Normalized.Minecraft.BedrockPort}}{{else}}Disabled{{end}}</dd></div>
+      </dl></section>
+      <section><h3>Minecraft</h3><dl>
+        <div><dt>Minecraft version</dt><dd>{{.Plan.Normalized.Minecraft.Version}}</dd></div>
+        <div><dt>Version policy</dt><dd>{{.VersionPolicyLabel}}</dd></div>
+        <div><dt>Minecraft game memory</dt><dd>{{.Plan.Normalized.Minecraft.JavaMemory}}</dd></div>
+        <div><dt>Maximum Minecraft memory</dt><dd>{{.Plan.Normalized.Minecraft.ContainerMemory}}</dd></div>
+        <div><dt>Container updates</dt><dd>{{.ImageChannelLabel}}</dd></div>
+      </dl></section>
+      <section><h3>Storage &amp; backups</h3><dl>
+        <div><dt>Minecraft data location</dt><dd>{{.StorageLabel}}</dd></div>
+        <div><dt>Backup destination</dt><dd>{{.BackupLabel}}</dd></div>
+        <div><dt>Automatic backups</dt><dd>{{if .Plan.Normalized.Backups.Automatic}}Enabled{{else}}Disabled{{end}}</dd></div>
+        {{if .Plan.Normalized.Backups.Automatic}}<div><dt>Schedule</dt><dd>Daily at {{.Plan.Normalized.Backups.DailyTime}}</dd></div>{{end}}
+        <div><dt>Retention</dt><dd>Keep {{.Plan.Normalized.Backups.Keep}} backups</dd></div>
+      </dl></section>
+    </div>
+
+    {{if .Plan.Warnings}}
+    <section class="setup-review-warnings" aria-label="Setup warnings">
+      {{range .Plan.Warnings}}<div class="setup-backup-resilience setup-disk-warning" role="note"><strong>{{if eq .Code "same_physical_disk"}}Backups are on the same disk{{else if eq .Code "bedrock_version_unsupported"}}Bedrock cross-play unavailable{{else if eq .Code "bedrock_compatibility_unavailable"}}Bedrock compatibility could not be checked{{else}}Setup needs attention{{end}}</strong><span>{{if eq .Code "same_physical_disk"}}If this disk fails, both Minecraft and its backups could be lost.{{else}}{{.Message}}{{end}}</span></div>{{end}}
+    </section>
+    {{end}}
+
+    <details class="setup-review-technical">
+      <summary>Technical details</summary>
       <div class="setup-review-table">
         <section><h3>Server</h3>
           <p><span class="review-label">Players:</span> {{.Plan.Normalized.Server.MaxPlayers}}</p>
-          <p><span class="review-label">Bedrock:</span> {{if .Plan.Normalized.Server.BedrockEnabled}}On{{else}}Off{{end}}</p>
+          <p><span class="review-label">Bedrock:</span> {{if .Plan.Normalized.Server.BedrockEnabled}}Enabled{{else}}Disabled{{end}}</p>
           <p><span class="review-label">Timezone:</span> <code>{{.Plan.Normalized.Server.Timezone}}</code></p>
           <p><span class="review-label">MOTD:</span> {{.Plan.Normalized.Server.MOTD}}</p>
         </section>
@@ -66,7 +101,7 @@
         </section>
         <section><h3>Backups</h3>
           <p><span class="review-label">Destination:</span> {{.BackupLabel}}</p>
-          <p><span class="review-label">Schedule:</span> {{if .Plan.Normalized.Backups.Automatic}}Daily {{.Plan.Normalized.Backups.DailyTime}}{{else}}Automatic off{{end}}</p>
+          <p><span class="review-label">Schedule:</span> {{if .Plan.Normalized.Backups.Automatic}}Daily {{.Plan.Normalized.Backups.DailyTime}}{{else}}Disabled{{end}}</p>
           <p><span class="review-label">Retention:</span> Keep {{.Plan.Normalized.Backups.Keep}}</p>
           {{if .Plan.Normalized.Backups.Device}}<p><span class="review-label">Device:</span> <code>{{.Plan.Normalized.Backups.Device}}</code></p>{{end}}
           {{if .Plan.Normalized.Backups.Filesystem}}<p><span class="review-label">Filesystem:</span> {{.Plan.Normalized.Backups.Filesystem}}</p>{{end}}
@@ -78,13 +113,7 @@
           {{if .Plan.Normalized.Backups.Username}}<p><span class="review-label">Account:</span> {{.Plan.Normalized.Backups.Username}}{{if .Plan.Normalized.Backups.Domain}} / {{.Plan.Normalized.Backups.Domain}}{{end}}</p>{{end}}
         </section>
       </div>
-    </section>
-
-    {{if .Plan.Warnings}}
-    <section class="setup-review-warnings" aria-label="Setup warnings">
-      {{range .Plan.Warnings}}<div class="setup-backup-resilience setup-disk-warning" role="note"><strong>{{if eq .Code "same_physical_disk"}}Backups are on the same disk{{else if eq .Code "bedrock_version_unsupported"}}Bedrock cross-play unavailable{{else if eq .Code "bedrock_compatibility_unavailable"}}Bedrock compatibility could not be checked{{else}}Setup needs attention{{end}}</strong><span>{{if eq .Code "same_physical_disk"}}If this disk fails, both Minecraft and its backups could be lost.{{else}}{{.Message}}{{end}}</span></div>{{end}}
-    </section>
-    {{end}}
+    </details>
 
     {{if .Plan.Requirements.SMBPasswordRequired}}<div class="notice setup-secret-note"><strong>SMB password required during execution.</strong><span>The password is not stored in this setup draft or review. JustVoxel will request it only when the setup transaction is actually started.</span></div>{{end}}
     {{if .Plan.Requirements.NetworkBackupValidationOnApply}}<div class="notice"><strong>Network backup validation happens during execution.</strong><br>The configured network source will be mounted and verified before JustVoxel uses it. Planning does not mount the share.</div>{{end}}

@@ -96,7 +96,7 @@ function initServerMigrationOperation(root = document) {
     if (rollbackNote) rollbackNote.hidden = !rolledBack;
     if (attentionNote) attentionNote.hidden = !needsAttention;
     if (dashboardLink) dashboardLink.hidden = !succeeded;
-    if (recoveryLink) recoveryLink.hidden = !(needsAttention && operation.operation_type === "migration_import");
+    if (recoveryLink) recoveryLink.hidden = !(needsAttention && ["migration_import", "migration_recovery"].includes(operation.operation_type));
     if (terminalState(operation.state)) finished = true;
   };
 

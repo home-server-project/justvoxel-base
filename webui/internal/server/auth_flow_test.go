@@ -191,6 +191,9 @@ func TestPasswordChangeShowsBackendPolicyReason(t *testing.T) {
 	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "Password is too simple") {
 		t.Fatalf("backend password rejection reason not shown: %d %s", rr.Code, rr.Body.String())
 	}
+	if !strings.Contains(rr.Body.String(), `/static/password.js`) || strings.Contains(rr.Body.String(), `/static/app.js`) {
+		t.Fatal("policy error left the standalone password boundary")
+	}
 }
 
 func TestAuthenticationModeChangeRejectsMissingCSRF(t *testing.T) {

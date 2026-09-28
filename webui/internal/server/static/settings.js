@@ -132,16 +132,36 @@ if (versionPolicy && versionInput && specificVersionField) {
   let timer;
   const channelLabel = (channel) => ({ STABLE: "Stable", BETA: "Beta", ALPHA: "Alpha" })[channel] || "Pre-release";
   const show = (status, policy) => {
-    const rows = [];
-    if (status.selected_candidate) rows.push(`${policy === "latest" ? "Will install now" : "Will install"}: ${status.selected_candidate}`);
-    if (status.available) rows.push(`Newest available: ${status.available}${status.available_channel && status.available_channel !== "STABLE" ? ` · ${channelLabel(status.available_channel)}` : ""}`);
-    if (status.crossplay_enabled && status.geyser_supported_version && (status.geyser_supported_version !== status.selected_candidate || status.available !== status.selected_candidate)) rows.push(`Bedrock-supported version: ${status.geyser_supported_version}`);
-    if (policy === "recommended" && status.crossplay_enabled && status.selected_candidate && status.available !== status.selected_candidate) rows.push("This version keeps Bedrock players compatible.");
-    if (policy === "latest") rows.push("Latest follows newer Minecraft server versions when available.");
-    if (status.candidate_channel && status.candidate_channel !== "STABLE") rows.push(`Paper release: ${channelLabel(status.candidate_channel)}. This is a pre-release server build.`);
-    if (status.crossplay_enabled && !status.crossplay_compatible && status.selected_candidate) rows.push("This version is not currently compatible with Bedrock cross-play. Choose Recommended, choose a compatible Specific version, or turn off Bedrock to continue.");
-    if (!status.selected_candidate) rows.push(status.reason || "No usable server build was found for this version.");
-    preview.replaceChildren(...rows.map((value) => { const p = document.createElement("p"); p.textContent = value; return p; }));
+    const make = (tag, className, value) => {
+      const node = document.createElement(tag);
+      node.className = className;
+      node.textContent = value;
+      return node;
+    };
+    const parts = [];
+    if (status.selected_candidate) {
+      const primary = make("div", "setup-version-primary", "");
+      primary.append(make("span", "setup-version-kicker", policy === "recommended" ? "Recommended" : policy === "latest" ? "Latest" : "Specific"));
+      primary.append(make("strong", "setup-version-candidate", status.selected_candidate));
+      if (status.candidate_channel && status.candidate_channel !== "STABLE") {
+        primary.append(make("span", "setup-version-note", `${channelLabel(status.candidate_channel)} pre-release server build`));
+      } else if (policy === "recommended") {
+        primary.append(make("span", "setup-version-note", "Stable choice for this setup"));
+      }
+      parts.push(primary);
+    }
+    if (policy === "recommended" && status.available && status.available !== status.selected_candidate) {
+      const secondary = make("div", "setup-version-secondary", "");
+      secondary.append(make("span", "setup-version-kicker", "Newer version available"));
+      secondary.append(make("span", "setup-version-newer", `${status.available}${status.available_channel ? ` · ${channelLabel(status.available_channel)}` : ""}`));
+      parts.push(secondary);
+    }
+    if (status.crossplay_enabled && status.geyser_supported_version && (status.geyser_supported_version !== status.selected_candidate || status.available !== status.selected_candidate)) parts.push(make("p", "setup-version-explanation", `Bedrock-supported version: ${status.geyser_supported_version}`));
+    if (policy === "recommended" && status.crossplay_enabled && status.selected_candidate && status.available !== status.selected_candidate) parts.push(make("p", "setup-version-explanation", "This version keeps Bedrock players compatible."));
+    if (policy === "latest") parts.push(make("p", "setup-version-explanation", "Latest follows newer Minecraft server versions when available."));
+    if (status.crossplay_enabled && !status.crossplay_compatible && status.selected_candidate) parts.push(make("p", "setup-version-explanation", "This version is not currently compatible with Bedrock cross-play. Choose Recommended, choose a compatible Specific version, or turn off Bedrock to continue."));
+    if (!status.selected_candidate) parts.push(make("p", "setup-version-explanation", status.reason || "No usable server build was found for this version."));
+    preview.replaceChildren(...parts);
     next.disabled = !status.selected_candidate || (status.crossplay_enabled && !status.crossplay_compatible);
   };
   const refresh = async () => {

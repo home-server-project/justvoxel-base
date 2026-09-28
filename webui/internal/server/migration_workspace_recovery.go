@@ -76,8 +76,8 @@ func (a *App) migrationWorkspaceRecoveryRequest(w http.ResponseWriter, r *http.R
 		return "", nil, api.SessionInfo{}, false, false
 	}
 	if current.Operation != nil {
-		if current.Operation.OperationType == "migration_import" && current.Operation.State == "needs_attention" {
-			return session, client, identity, true, true
+		if current.Operation.State == "needs_attention" && (current.Operation.OperationType == "migration_import" || current.Operation.OperationType == "migration_recovery") {
+			return session, client, identity, current.Operation.OperationType == "migration_import", true
 		}
 		if !migrationWorkspaceOperationType(current.Operation.OperationType) {
 			http.Error(w, "Server Migration operation status is invalid", http.StatusBadGateway)
@@ -92,6 +92,9 @@ func (a *App) migrationWorkspaceRecoveryRequest(w http.ResponseWriter, r *http.R
 func (a *App) migrationWorkspaceRecoveryPage(w http.ResponseWriter, r *http.Request) {
 	session, client, identity, importNeedsAttention, ok := a.migrationWorkspaceRecoveryRequest(w, r, false)
 	if !ok {
+		return
+	}
+	if migrationWorkspaceRedirectBrowser(w, r, "/?workspace=migration&tab=recovery") {
 		return
 	}
 	discovery, err := client.AdminMigrationRecoveryDiscovery(r.Context(), session)

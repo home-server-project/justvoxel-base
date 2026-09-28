@@ -15,7 +15,7 @@ phase="$(jq -r '.normalized.phase' <<< "${plan}")"
 printf '%s\n' '{"event":"progress","state":"validating","stage":"recovery_preflight","status":"Revalidating retained migration recovery state."}'
 case "${phase}" in
     rolled-back|critical-rollback)
-        /usr/libexec/justvoxel/mjust/restore-runtime-validate
+        /usr/libexec/justvoxel/mjust/restore-runtime-validate >&2
         ;;
     rolled-back-fresh)
         while IFS= read -r path; do [[ ! -e ${path} && ! -L ${path} ]] || { echo "fresh recovery runtime state reappeared" >&2; exit 1; }; done < <(jv_migration_runtime_paths)

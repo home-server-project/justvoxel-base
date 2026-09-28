@@ -119,7 +119,7 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 	}
 	body := rr.Body.String()
 	for _, want := range []string{
-		"Review your JustVoxel setup", "Step 7 of 7", "Connections", "Version", "Configuration validated.", "Normalized Family Server", "20", "1.21.8",
+		"<h1>Set up JustVoxel</h1>", "Step 7 of 7", "<h2>Review</h2>", "Connections", "Version", "Configuration validated.", "Normalized Family Server", "20", "1.21.8",
 		"· Recommended", "Game mode:</span> Survival", "/var/lib/justvoxel/minecraft", "/var/lib/justvoxel/backups",
 		"Backups are on the same disk", "If this disk fails, both Minecraft and its backups could be lost.", "Minecraft End User License Agreement", "https://www.minecraft.net/eula",
 		"/static/setup-review.css", "/static/setup-operation.js",
@@ -128,6 +128,33 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("review missing %q: %s", want, body)
 		}
+	}
+	summaryStart := strings.Index(body, `class="setup-review-summary"`)
+	warningsStart := strings.Index(body, `class="setup-review-warnings"`)
+	detailsStart := strings.Index(body, `<details class="setup-review-technical">`)
+	detailsEnd := strings.Index(body, "</details>")
+	if summaryStart < 0 || warningsStart <= summaryStart || detailsStart <= warningsStart || detailsEnd <= detailsStart {
+		t.Fatal("review summary, warnings, and technical details are out of order")
+	}
+	summary := body[summaryStart:warningsStart]
+	for _, want := range []string{"Server software</dt><dd>Paper", "Welcome message</dt><dd>Normalized Family Server", "Game mode</dt><dd>Survival", "Java</dt><dd>Enabled, port 25565", "Bedrock cross-play</dt><dd>Enabled, port 19132", "Minecraft version</dt><dd>1.21.8", "Version policy</dt><dd>Recommended", "Minecraft game memory</dt><dd>4G", "Automatic backups</dt><dd>Enabled", "Daily at 04:30", "JustVoxel system storage"} {
+		if !strings.Contains(summary, want) {
+			t.Fatalf("human summary missing %q", want)
+		}
+	}
+	for _, technical := range []string{"/var/lib/", "<code>", "UUID:", "Device:"} {
+		if strings.Contains(summary, technical) {
+			t.Fatalf("human summary exposed %q", technical)
+		}
+	}
+	if strings.Count(body, `<details class="setup-review-technical">`) != 1 || strings.Contains(body, `<details class="setup-review-technical" open`) {
+		t.Fatal("technical details must be one collapsed section")
+	}
+	if !strings.Contains(body[detailsStart:detailsEnd], "/var/lib/justvoxel/minecraft") || !strings.Contains(body[detailsStart:detailsEnd], "/var/lib/justvoxel/backups") {
+		t.Fatal("technical paths missing from details")
+	}
+	if strings.Contains(body[detailsStart:detailsEnd], "Backups are on the same disk") {
+		t.Fatal("safety warning is hidden in technical details")
 	}
 	if client.planHit != 1 {
 		t.Fatalf("setup planner calls = %d, want 1", client.planHit)
@@ -165,6 +192,48 @@ func TestSetupReviewLatestShowsResolvedVersion(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "1.21.8 · Latest") || strings.Contains(rr.Body.String(), "Version: LATEST") {
 		t.Fatalf("review did not show the exact Latest candidate: %s", rr.Body.String())
+	}
+}
+
+func TestSetupReviewKeepsTechnicalValuesCollapsedAndUsesPlanWarnings(t *testing.T) {
+	client := setupReviewClient()
+	client.plan.Normalized.Server.BedrockEnabled = false
+	client.plan.Normalized.Backups.Automatic = false
+	client.plan.Normalized.Storage.Device = "/dev/vdb1"
+	client.plan.Normalized.Storage.UUID = "data-uuid"
+	client.plan.Normalized.Backups.Device = "/dev/vdc1"
+	client.plan.Normalized.Backups.UUID = "backup-uuid"
+	client.plan.Warnings = nil
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer firstRunSetupReviews.delete(app, "session-token")
+	advanceSetupToReview(t, app)
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("review returned %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	detailsStart := strings.Index(body, `<details class="setup-review-technical">`)
+	detailsEnd := strings.Index(body, "</details>")
+	if detailsStart < 0 || detailsEnd <= detailsStart {
+		t.Fatal("technical details missing")
+	}
+	summary := body[:detailsStart]
+	for _, want := range []string{"Bedrock cross-play</dt><dd>Disabled", "Automatic backups</dt><dd>Disabled"} {
+		if !strings.Contains(summary, want) {
+			t.Fatalf("summary missing %q", want)
+		}
+	}
+	for _, technical := range []string{"/dev/vdb1", "/dev/vdc1", "data-uuid", "backup-uuid"} {
+		if strings.Contains(summary, technical) || !strings.Contains(body[detailsStart:detailsEnd], technical) {
+			t.Fatalf("technical value %q is misplaced", technical)
+		}
+	}
+	if strings.Contains(body, "Backups are on the same disk") {
+		t.Fatal("review invented a same-disk warning absent from the plan")
 	}
 }
 
@@ -291,8 +360,11 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 		}
 	}
 
-	if strings.Contains(body, "<details") || strings.Contains(styles, "setup-review-details") || strings.Contains(styles, "overflow-y:auto") {
-		t.Fatal("Review must remain fully visible without internal scrolling or collapsed details")
+	if !strings.Contains(body, `<details class="setup-review-technical">`) || !strings.Contains(body, "<summary>Technical details</summary>") {
+		t.Fatal("review must provide collapsed technical details")
+	}
+	if !strings.Contains(body, `class="setup-review-content"`) || !strings.Contains(body, `class="setup-step-actions setup-actions-split"`) {
+		t.Fatal("review content and actions must remain separate")
 	}
 
 	setupCSS, err := assets.ReadFile("static/setup.css")
@@ -305,36 +377,31 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 		".setup-body{display:flex;flex-direction:column;min-height:100dvh}",
 		".setup-shell{display:flex;flex:1;flex-direction:column",
 		".setup-shell>.project-footer",
-		".setup-body .setup-wizard-panel,.setup-body .setup-review-panel{height:auto;min-height:0;overflow:visible}",
-		".setup-body .setup-wizard-panel .setup-form{flex:1;min-height:0;margin:0;gap:.42rem;overflow:visible}",
+		"@media(min-width:851px)", "height:100dvh", "overflow:hidden",
+		".setup-body .setup-wizard-panel,.setup-body .setup-review-panel{flex:1;min-height:0;overflow:hidden}",
+		".setup-body .setup-wizard-panel .setup-form>.setup-step-content",
+		"overflow-y:auto", ".setup-body .setup-review-panel>.setup-review-content",
+		".setup-body .setup-wizard-panel .setup-form>.setup-step-actions{position:static;flex:none",
+		".setup-body .setup-review-panel>.setup-step-actions{flex:none",
+		".setup-body .setup-wizard-panel .setup-form>.setup-step-content{display:contents}",
 	} {
 		if !strings.Contains(setupStyles, want) {
-			t.Fatalf("responsive setup CSS missing %q", want)
+			t.Fatalf("stable desktop setup CSS missing %q", want)
 		}
 	}
-	if strings.Contains(setupStyles, ".setup-body .setup-step-panel{height:") || strings.Contains(setupStyles, ".setup-body .setup-operation-panel{height:") {
+	if strings.Contains(setupStyles, ".setup-body .setup-operation-panel{height:") {
 		t.Fatal("operation and result pages must remain content-sized")
 	}
-	for _, stylesheet := range []string{setupStyles, styles} {
-		for _, rule := range strings.Split(stylesheet, "}") {
-			open := strings.LastIndex(rule, "{")
-			if open < 0 {
-				continue
-			}
-			declarations := rule[open+1:]
-			for _, selector := range strings.Split(rule[:open], ",") {
-				selector = strings.TrimSpace(selector)
-				if !strings.HasSuffix(selector, ".setup-wizard-panel") && !strings.HasSuffix(selector, ".setup-review-panel") &&
-					!strings.HasSuffix(selector, ".setup-review-content") && !strings.HasSuffix(selector, ".setup-step-panel .setup-form") &&
-					!strings.HasSuffix(selector, ".setup-wizard-panel .setup-form") && !strings.HasSuffix(selector, ".setup-review-panel .setup-form") {
-					continue
-				}
-				if strings.Contains(declarations, "height:clamp(") || strings.Contains(declarations, "height:calc(100dvh") ||
-					strings.Contains(declarations, "overflow-y:auto") || strings.Contains(declarations, "overscroll-behavior:contain") ||
-					strings.Contains(declarations, "overscroll-behavior-y:contain") {
-					t.Fatalf("setup panel or form has fixed height or internal scrolling: %s{%s}", selector, declarations)
-				}
-			}
+	wizard, err := assets.ReadFile("templates/setup_wizard.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(wizard), `class="setup-step-content"`) != 6 || strings.Count(string(wizard), `class="setup-step-actions"`) != 6 {
+		t.Fatal("each advanced wizard step needs separate content and action regions")
+	}
+	for _, want := range []string{`class="setup-shell"`, `class="title-row setup-title-row"`, `class="setup-progress"`, `class="panel setup-step-panel setup-wizard-panel"`, `class="setup-form"`} {
+		if !strings.Contains(string(wizard), want) {
+			t.Fatalf("wizard structure missing %q", want)
 		}
 	}
 	progress, err := assets.ReadFile("templates/setup_progress.html")
@@ -398,7 +465,7 @@ func TestSetupReviewKeepsCompatibleRecommendedBedrockEnabled(t *testing.T) {
 	body := rr.Body.String()
 	for _, want := range []string{
 		`<p><span class="review-label">Players:</span> 20</p>`,
-		`<p><span class="review-label">Bedrock:</span> On</p>`,
+		`<p><span class="review-label">Bedrock:</span> Enabled</p>`,
 		`<p><span class="review-label">Timezone:</span> <code>America/Toronto</code></p>`,
 		"1.21.8 · Recommended",
 	} {

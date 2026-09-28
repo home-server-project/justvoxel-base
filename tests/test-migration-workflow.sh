@@ -53,6 +53,67 @@ available_bytes="$(jv_migration_available_bytes "${repo_root}")" || fail 'migrat
 [[ ${available_bytes} =~ ^[0-9]+$ ]] || fail 'migration free-space helper did not return a numeric byte count'
 (( available_bytes > 0 )) || fail 'migration free-space helper returned no available space'
 
+# Exercise the managed-container ownership decision without a Podman daemon.
+port_fixture="$(mktemp -d)"
+trap 'rm -rf -- "${port_fixture}"' EXIT
+cat > "${port_fixture}/podman" <<'EOF'
+#!/usr/bin/bash
+case "$1 $2 $3 $4 $5" in
+    'inspect --type container --format {{.State.Running}}')
+        [[ $6 == minecraft && ${FAKE_MINECRAFT_STATE:-missing} != missing ]] || exit 1
+        printf '%s\n' "${FAKE_MINECRAFT_STATE}"
+        ;;
+    'port minecraft 19132/udp  ')
+        [[ ${FAKE_MINECRAFT_MAPPING:-missing} != missing ]] || exit 1
+        printf '%s\n' "${FAKE_MINECRAFT_MAPPING}"
+        ;;
+    *) exit 1 ;;
+esac
+EOF
+cat > "${port_fixture}/ss" <<'EOF'
+#!/usr/bin/bash
+if [[ ${FAKE_UDP_LISTENER:-no} == yes && $2 == -lun ]]; then
+    printf '%s\n' 'UNCONN 0 0 0.0.0.0:19132 0.0.0.0:*'
+fi
+EOF
+chmod 0755 "${port_fixture}/podman" "${port_fixture}/ss"
+export PATH="${port_fixture}:${PATH}"
+export FAKE_MINECRAFT_STATE=running FAKE_MINECRAFT_MAPPING=0.0.0.0:19132 FAKE_UDP_LISTENER=yes
+FAKE_MINECRAFT_STATE=true
+jv_migration_running_minecraft_owns_port udp 19132 || fail 'running minecraft UDP mapping was not recognized'
+if jv_migration_running_minecraft_owns_port tcp 19132; then fail 'UDP mapping was recognized as TCP'; fi
+FAKE_MINECRAFT_STATE=false
+if jv_migration_running_minecraft_owns_port udp 19132; then fail 'stopped minecraft was recognized as owning a port'; fi
+FAKE_MINECRAFT_STATE=missing
+if jv_migration_running_minecraft_owns_port udp 19132; then fail 'missing minecraft was recognized as owning a port'; fi
+FAKE_MINECRAFT_STATE=true FAKE_MINECRAFT_MAPPING=0.0.0.0:19133
+if jv_migration_running_minecraft_owns_port udp 19132; then fail 'different host mapping was recognized as requested port'; fi
+FAKE_MINECRAFT_MAPPING=0.0.0.0:19132
+jv_migration_check_import_bedrock_port 19132 yes 19132 || fail 'enabled current Bedrock port was rejected'
+jv_migration_check_import_bedrock_port 19132 no 19133 || fail 'running managed Bedrock port was rejected after cross-play disable'
+FAKE_MINECRAFT_MAPPING=0.0.0.0:19133
+if jv_migration_check_import_bedrock_port 19132 no 19132 2>/dev/null; then fail 'unrelated Bedrock listener was allowed'; fi
+grep -Fq 'jv_migration_check_import_bedrock_port "$bedrock_port" "$BEDROCK_ENABLED" "$BEDROCK_PORT"' "${repo_root}/mjust/libexec/admin-migration-import-plan-json" || fail 'API Import planner does not use shared Bedrock check'
+grep -Fq 'jv_migration_check_import_bedrock_port "${BEDROCK_PORT}" "${old_bedrock_enabled}" "${old_bedrock}"' "${repo_root}/mjust/libexec/migration-import-plan-destination.sh" || fail 'CLI Import planner does not use shared Bedrock check'
+
+recovery_transaction="${repo_root}/mjust/libexec/admin-migration-recovery-transaction-json"
+validator_line='        /usr/libexec/justvoxel/mjust/restore-runtime-validate >&2'
+grep -Fxq "${validator_line}" "${recovery_transaction}" || fail 'recovery validator stdout is not isolated from JSON events'
+cat > "${port_fixture}/restore-runtime-validate" <<'EOF'
+#!/usr/bin/bash
+echo 'RCON: checked'
+echo 'Minecraft: checked'
+[[ ${FAKE_VALIDATOR_FAIL:-no} == no ]]
+EOF
+chmod 0755 "${port_fixture}/restore-runtime-validate"
+validator_call="${validator_line/\/usr\/libexec\/justvoxel\/mjust\/restore-runtime-validate/${port_fixture}\/restore-runtime-validate}"
+bash -e -c "printf '%s\\n' '{\"event\":\"progress\"}'; ${validator_call}; printf '%s\\n' '{\"event\":\"result\"}'" > "${port_fixture}/recovery.out" 2> "${port_fixture}/recovery.err" || fail 'successful recovery validator fixture failed'
+[[ $(wc -l < "${port_fixture}/recovery.out") == 2 ]] || fail 'validator diagnostics contaminated recovery JSON stdout'
+jq -e '.event == "progress" or .event == "result"' "${port_fixture}/recovery.out" >/dev/null || fail 'recovery fixture emitted non-JSON stdout'
+grep -Fq 'RCON: checked' "${port_fixture}/recovery.err" || fail 'validator diagnostics were not preserved on stderr'
+if FAKE_VALIDATOR_FAIL=yes bash -e -c "${validator_call}; printf '%s\\n' '{\"event\":\"result\"}'" > "${port_fixture}/failed.out" 2> "${port_fixture}/failed.err"; then fail 'validator failure did not fail recovery'; fi
+[[ ! -s "${port_fixture}/failed.out" ]] || fail 'failed validator emitted recovery result'
+
 for text in \
     'Type IMPORT to continue:' \
     'The source eula.txt, if present, is NOT accepted' \

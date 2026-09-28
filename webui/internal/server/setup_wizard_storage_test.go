@@ -50,7 +50,7 @@ func setupWizardStorageClient() *fakeDiscoveryAPI {
 	return client
 }
 
-func TestSetupSameDiskWarningOnlyForSystemDisk(t *testing.T) {
+func TestSetupSameDiskWarningUsesKnownPhysicalDisk(t *testing.T) {
 	client := setupWizardStorageClient()
 	draft := setupDraft{Inventory: client.storage}
 	for index := range draft.Inventory.Devices {
@@ -59,20 +59,55 @@ func TestSetupSameDiskWarningOnlyForSystemDisk(t *testing.T) {
 			draft.Inventory.Devices[index].UUID = "second-data-uuid"
 		}
 	}
-	draft.Storage.Type = "partition"
-	draft.Storage.Device = "/dev/vdb1"
-	draft.Backups.Type = "partition"
-	draft.Backups.Device = "/dev/vdb2"
-	if warning := setupSameDiskWarning(draft); warning != "" {
-		t.Fatalf("non-system disk warning = %q", warning)
-	}
+	draft.Inventory.Devices = append(draft.Inventory.Devices, api.AdminStorageDevice{
+		Name: "vdb3", Path: "/dev/vdb3", Type: "part", Filesystem: "xfs", UUID: "unknown-parent-uuid",
+	})
 	draft.Inventory.Devices = append(draft.Inventory.Devices, api.AdminStorageDevice{
 		Name: "vda5", Path: "/dev/vda5", Parent: "vda", Type: "part", Filesystem: "xfs", UUID: "second-system-uuid", System: true,
 	})
-	draft.Storage.Device = "/dev/vda5"
-	draft.Backups.Device = "/dev/vda4"
-	if warning := setupSameDiskWarning(draft); !strings.Contains(warning, "system disk") {
-		t.Fatalf("system disk warning = %q", warning)
+	for _, tc := range []struct {
+		name, storageType, storageDevice, backupType, backupDevice string
+		warn                                                       bool
+	}{
+		{"system and system", "system", "", "system", "", true},
+		{"system and system partition", "system", "", "partition", "/dev/vda4", true},
+		{"system and unrelated disk", "system", "", "partition", "/dev/vdb1", false},
+		{"system partition and system", "partition", "/dev/vda4", "system", "", true},
+		{"system disk partitions", "partition", "/dev/vda4", "partition", "/dev/vda5", true},
+		{"non-system partitions on same disk", "partition", "/dev/vdb1", "partition", "/dev/vdb2", true},
+		{"partitions on different disks", "partition", "/dev/vdb1", "partition", "/dev/vdd1", false},
+		{"NFS backup", "partition", "/dev/vdb1", "nfs", "", false},
+		{"SMB backup", "partition", "/dev/vdb1", "smb", "", false},
+		{"unknown parent", "partition", "/dev/vdb1", "partition", "/dev/vdb3", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			draft.Storage.Type, draft.Storage.Device = tc.storageType, tc.storageDevice
+			draft.Backups.Type, draft.Backups.Device = tc.backupType, tc.backupDevice
+			warning := setupSameDiskWarning(draft)
+			if (warning != "") != tc.warn {
+				t.Fatalf("same-disk warning = %q, want warning %t", warning, tc.warn)
+			}
+		})
+	}
+}
+
+func TestSetupSameDiskWarningAppearsOnlyOnBackupsStep(t *testing.T) {
+	markup, err := assets.ReadFile("templates/setup_wizard.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(markup)
+	backupsStart := strings.Index(source, "{{else if eq .CurrentStep 6}}")
+	if backupsStart < 0 {
+		t.Fatal("Backups step start is missing")
+	}
+	relativeEnd := strings.Index(source[backupsStart:], "{{else}}\n    <div class=\"setup-placeholder\"")
+	if relativeEnd < 0 {
+		t.Fatal("Backups step boundaries are missing")
+	}
+	backupsEnd := backupsStart + relativeEnd
+	if strings.Count(source, "{{if .SameDiskWarning}}") != 1 || !strings.Contains(source[backupsStart:backupsEnd], `data-setup-same-disk-warning`) {
+		t.Fatal("draft same-disk warning must appear only on Backups")
 	}
 }
 

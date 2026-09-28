@@ -1923,14 +1923,25 @@ if (migrationOpen && migrationDialog) {
     recovery: "/workspace/migration/recovery",
   };
   const migrationDestination = new URLSearchParams(window.location.search);
-  const requestedMigrationTab = migrationDestination.get("workspace") === "migration" ? migrationDestination.get("tab") : "";
-  let currentTab = Object.hasOwn(tabURLs, requestedMigrationTab) ? requestedMigrationTab : "export";
+  const migrationRequested = migrationDestination.get("workspace") === "migration";
+  const initialMigrationTab = migrationRequested ? migrationDestination.get("tab") : "";
+  let currentTab = Object.hasOwn(tabURLs, initialMigrationTab) ? initialMigrationTab : "export";
   let currentURL = tabURLs[currentTab];
   let loadSequence = 0;
   let migrationSourceSMBPassword = "";
   let migrationExportSMBPassword = "";
   let migrationLoadController = null;
   let migrationSubmitController = null;
+
+  const updateMigrationLocation = (tab = "", operation = "") => {
+    const destination = new URL("/?workspace=migration", window.location.href);
+    if (operation) destination.searchParams.set("operation", operation);
+    else if (Object.hasOwn(tabURLs, tab)) destination.searchParams.set("tab", tab);
+    const nextURL = destination.pathname + destination.search;
+    if (window.location.pathname + window.location.search !== nextURL) {
+      window.history.replaceState(window.history.state, "", nextURL);
+    }
+  };
 
   const setMigrationBusy = (message = "", kind = "busy") => {
     if (state) {
@@ -2045,12 +2056,7 @@ if (migrationOpen && migrationDialog) {
   const syncMigrationRecoveryAvailability = (root) => {
     if (!recoveryTab || !root) return;
     const available = root.dataset.migrationRecoveryAvailable === "true";
-    recoveryTab.hidden = !available;
-    if (!available && currentTab === "recovery") {
-      currentTab = "export";
-      currentURL = tabURLs.export;
-      syncMigrationTabs();
-    }
+    recoveryTab.hidden = !available && currentTab !== "recovery";
   };
 
   const inferMigrationTab = (url, root = null) => {
@@ -2106,6 +2112,10 @@ if (migrationOpen && migrationDialog) {
 
     const renderedURL = new URL(responseURL, window.location.href);
     currentURL = renderedURL.pathname + renderedURL.search;
+    const progress = renderedURL.origin === window.location.origin
+      ? renderedURL.pathname.match(/^\/workspace\/migration\/progress\/([A-Za-z0-9_-]+)$/)
+      : null;
+    if (progress) updateMigrationLocation("", progress[1]);
     currentTab = inferMigrationTab(responseURL, root);
     syncMigrationTabs();
 
@@ -2242,6 +2252,7 @@ if (migrationOpen && migrationDialog) {
           headers: {
             Accept: "text/html",
             "Content-Type": "application/x-www-form-urlencoded",
+            "X-JustVoxel-Migration-Fragment": "1",
           },
           body: body.toString(),
           cache: "no-store",
@@ -2280,6 +2291,22 @@ if (migrationOpen && migrationDialog) {
         workspaceWindow?.close();
         return;
       }
+      const destination = new URL(href, window.location.href);
+      if (destination.origin === window.location.origin && destination.pathname === "/" && destination.searchParams.get("workspace") === "migration") {
+        event.preventDefault();
+        migrationSubmitController?.abort();
+        migrationSubmitController = null;
+        const operation = destination.searchParams.get("operation");
+        const tab = destination.searchParams.get("tab");
+        updateMigrationLocation(tab, operation);
+        if (operation) await loadMigration("/workspace/migration/progress/" + encodeURIComponent(operation));
+        else if (Object.hasOwn(tabURLs, tab)) {
+          if (tab === "import") migrationSourceSMBPassword = "";
+          currentTab = tab;
+          await loadMigration(tabURLs[tab]);
+        } else await loadMigrationEntry();
+        return;
+      }
       if (!href.startsWith("/workspace/migration")) return;
       event.preventDefault();
       migrationSubmitController?.abort();
@@ -2306,7 +2333,7 @@ if (migrationOpen && migrationDialog) {
       const response = await fetch(url, {
         method: "GET",
         credentials: "same-origin",
-        headers: { Accept: "text/html" },
+        headers: { Accept: "text/html", "X-JustVoxel-Migration-Fragment": "1" },
         cache: "no-store",
         redirect: "follow",
         signal: loadController.signal,
@@ -2349,7 +2376,7 @@ if (migrationOpen && migrationDialog) {
       const response = await fetch("/workspace/migration", {
         method: "GET",
         credentials: "same-origin",
-        headers: { Accept: "text/html" },
+        headers: { Accept: "text/html", "X-JustVoxel-Migration-Fragment": "1" },
         cache: "no-store",
         redirect: "follow",
         signal: loadController.signal,
@@ -2383,7 +2410,18 @@ if (migrationOpen && migrationDialog) {
   };
 
   const workspaceWindow = setupWorkspaceWindow(migrationDialog, {
-    onOpen: loadMigrationEntry,
+    onOpen: () => {
+      const destination = new URLSearchParams(window.location.search);
+      const migrationRequested = destination.get("workspace") === "migration";
+      const requestedMigrationOperation = migrationRequested ? destination.get("operation") : "";
+      const requestedMigrationTab = migrationRequested ? destination.get("tab") : "";
+      if (requestedMigrationOperation) return loadMigration("/workspace/migration/progress/" + encodeURIComponent(requestedMigrationOperation));
+      if (Object.hasOwn(tabURLs, requestedMigrationTab)) {
+        currentTab = requestedMigrationTab;
+        return loadMigration(tabURLs[currentTab]);
+      }
+      return loadMigrationEntry();
+    },
     onClose: () => {
       abortMigrationRequests();
       migrationSourceSMBPassword = "";
@@ -2405,13 +2443,14 @@ if (migrationOpen && migrationDialog) {
       if (currentTab === "export" && nextTab !== "export") migrationExportSMBPassword = "";
       currentTab = nextTab;
       currentURL = tabURLs[currentTab];
+      updateMigrationLocation(currentTab);
       syncMigrationTabs();
       await loadMigration(currentURL);
     });
   });
 
   const restoreMigrationWhenRoleKnown = () => {
-    if (!readWorkspaceWindowState("migration").open) return;
+    if (!migrationRequested && !readWorkspaceWindowState("migration").open) return;
     if (document.body.classList.contains("role-administrator")) {
       workspaceWindow?.open();
       return;
@@ -3037,6 +3076,22 @@ if (minecraftOpen && minecraftDialog) {
     return params;
   };
 
+  const minecraftSettingsReviewValue = (change, value) => {
+    if (change.field !== "bedrock_enabled") return value;
+    switch (String(value).trim().toLowerCase()) {
+      case "yes":
+      case "true":
+      case "on":
+        return "Enabled";
+      case "no":
+      case "false":
+      case "off":
+        return "Disabled";
+      default:
+        return value;
+    }
+  };
+
   const renderSettingsReview = (root, plan, params) => {
     root.querySelector("[data-minecraft-native-review]")?.remove();
     const settingsForm = root.querySelector("[data-minecraft-settings-tab]");
@@ -3084,12 +3139,14 @@ if (minecraftOpen && minecraftDialog) {
       label.appendChild(strong);
       if (change.restart_required) label.appendChild(messageNode("Minecraft restart required.", "muted"));
       const values = document.createElement("div");
-      const before = document.createElement("code");
-      before.textContent = change.before || "—";
+      const before = document.createElement("span");
+      before.className = "minecraft-native-change-value";
+      before.textContent = minecraftSettingsReviewValue(change, change.before || "—");
       const arrow = document.createElement("span");
       arrow.textContent = "→";
-      const after = document.createElement("code");
-      after.textContent = change.after || "—";
+      const after = document.createElement("span");
+      after.className = "minecraft-native-change-value";
+      after.textContent = minecraftSettingsReviewValue(change, change.after || "—");
       values.append(before, arrow, after);
       row.append(label, values);
       changeList.appendChild(row);
@@ -3319,6 +3376,13 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   let initialized = false;
   let loadSequence = 0;
   let resetPollTimer = 0;
+  let activeFactoryResetOperationID = "";
+
+  const showFactoryResetComplete = () => {
+    const secure = window.location.protocol === "https:" ? "; Secure" : "";
+    document.cookie = "jv_factory_reset_complete=1; Path=/factory-reset-complete; Max-Age=120; SameSite=Strict" + secure;
+    window.location.replace("/factory-reset-complete");
+  };
 
   const systemHandleAuth = (response) => {
     if (response.redirected) {
@@ -3405,7 +3469,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     });
   };
 
-  const systemFetchJSON = async (url, options = {}) => {
+  const systemFetchJSON = async (url, options = {}, factoryResetPollOperationID = "") => {
     const response = await fetch(url, {
       credentials: "same-origin",
       cache: "no-store",
@@ -3416,6 +3480,11 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       },
     });
     if (response.status === 401) {
+      if (factoryResetPollOperationID && factoryResetPollOperationID === activeFactoryResetOperationID &&
+          url === "/api/system/workspace/reset/operations/" + factoryResetPollOperationID) {
+        showFactoryResetComplete();
+        return null;
+      }
       window.location.assign("/login");
       return null;
     }
@@ -4113,6 +4182,13 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   const renderResetOperation = (operation) => {
     clearResetPoll();
     if (!content || !operation) return;
+    if (operation.operation_type === "factory_reset" && operation.state === "succeeded") {
+      showFactoryResetComplete();
+      return;
+    }
+    activeFactoryResetOperationID = operation.operation_type === "factory_reset" &&
+      !["needs_attention", "resolved", "rolled_back"].includes(operation.state)
+      ? operation.operation_id : "";
     if (operation.operation_type === "minecraft_reset" && operation.state === "succeeded") {
       ++loadSequence;
       workspaceWindow?.close();
@@ -4143,7 +4219,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     if (operation.operation_type === "factory_reset") {
       const note = document.createElement("div");
       note.className = "notice warning";
-      note.textContent = "When Full Factory Reset completes, this WebUI session will be signed out and the voxel password must be changed on the next sign-in.";
+      note.textContent = "When Full Factory Reset completes, this WebUI session will be signed out. Sign in with voxel / voxel, then choose a new administrator password before normal administration is available.";
       built.panel.appendChild(note);
       if (operation.state === "needs_attention") {
         const recovery = document.createElement("div");
@@ -4213,7 +4289,8 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     resetPollTimer = window.setTimeout(async () => {
       if (currentTab !== "reset" || !content?.isConnected) return;
       try {
-        const payload = await systemFetchJSON("/api/system/workspace/reset/operations/" + operation.operation_id);
+        const payload = await systemFetchJSON("/api/system/workspace/reset/operations/" + operation.operation_id, {},
+          operation.operation_type === "factory_reset" ? operation.operation_id : "");
         if (payload?.operation) renderResetOperation(payload.operation);
       } catch (error) {
         if (state) state.textContent = error?.message || "Reset progress is temporarily unavailable.";
@@ -4249,7 +4326,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       else if (plan.backup_action === "preserve") keep.push("Backup archives on USB, external, or network storage.");
       remove.push("Local JustVoxel configuration backups.");
       remove.push("Additional WebUI users, notifications, history, and local authentication state.");
-      remove.push("Current WebUI sessions; the voxel system password will be marked for mandatory change.");
+      remove.push("Current WebUI sessions; the voxel system password returns to voxel / voxel and must be replaced immediately after sign-in.");
       keep.push("USB, external, NFS, and SMB data.");
       remove.push("JustVoxel-managed mounts and /etc/fstab entries are reset; storage data is not erased by removing these entries.");
       keep.push("Storage partitions, filesystems, and unrelated administrator /etc/fstab entries.");
@@ -4452,6 +4529,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
 
   const renderResetChoices = () => {
     clearResetPoll();
+    activeFactoryResetOperationID = "";
     if (!content) return;
     const root = document.createElement("div");
     root.className = "system-reset-view";

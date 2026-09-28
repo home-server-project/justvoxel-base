@@ -434,6 +434,40 @@ func TestSetupWizardServerStepValidatesAndPersistsChoices(t *testing.T) {
 	}
 }
 
+func TestSetupVersionPreviewPresentationContract(t *testing.T) {
+	markup, err := assets.ReadFile("templates/setup_wizard.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(markup), `class="setup-field-wide setup-version-preview" id="setup-version-preview"`) {
+		t.Fatal("version step is missing its structured preview container")
+	}
+	script, err := assets.ReadFile("static/settings.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(script)
+	for _, want := range []string{
+		`"setup-version-primary"`, `"setup-version-candidate"`, `policy === "recommended" ? "Recommended"`,
+		`"Stable choice for this setup"`, `status.available !== status.selected_candidate`,
+		`"setup-version-secondary"`, `"Newer version available"`,
+		`{ STABLE: "Stable", BETA: "Beta", ALPHA: "Alpha" }`,
+		`channelLabel(status.available_channel)`, `channelLabel(status.candidate_channel)`, `pre-release server build`,
+		`"setup-version-explanation"`, `"This version keeps Bedrock players compatible."`,
+		`"Latest follows newer Minecraft server versions when available."`,
+		`"This version is not currently compatible with Bedrock cross-play.`,
+		`next.disabled = !status.selected_candidate || (status.crossplay_enabled && !status.crossplay_compatible);`,
+		`if (policy === "pinned" && !version)`,
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("version preview contract missing %q", want)
+		}
+	}
+	if strings.Count(source, `fetch("/setup/version-preview?"`) != 1 {
+		t.Fatal("version preview must use the existing endpoint")
+	}
+}
+
 func TestSetupWizardServerStepRejectsInvalidPlayerLimit(t *testing.T) {
 	client := setupWizardClient()
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})

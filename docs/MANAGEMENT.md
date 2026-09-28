@@ -201,7 +201,7 @@ The optional **Separate WebUI password** provider uses a WebUI-local Argon2 cred
 
 Persistent WebUI authentication state is stored under `/var/lib/justvoxel/webui`. A missing authentication-mode state means System account mode, which keeps ordinary bootc updates/rebases safe for already-configured machines.
 
-Full Factory Reset removes appliance-owned state and returns authentication to System account mode. It expires the real Linux `voxel` administrator password, invalidates existing WebUI sessions when reset completes, and clears authentication failure and lock state. The next authentication enters the existing standalone forced password-change flow. The new password becomes the real system-wide `voxel` password used by WebUI, console, and SSH password authentication when enabled.
+Full Factory Reset removes appliance-owned state and restores System account authentication. It resets the real Linux `voxel` account to the same `voxel` / `voxel` bootstrap credential used by the installer and expires that password immediately. A successful reset invalidates existing WebUI sessions and clears authentication failure and lock state. The next authentication with `voxel` / `voxel` requires the administrator to replace the bootstrap password through the existing forced password-change flow. The replacement becomes the real system-wide `voxel` password for WebUI, console, and SSH password authentication when enabled.
 
 Web management can be enabled, disabled, inspected, and recovered through:
 

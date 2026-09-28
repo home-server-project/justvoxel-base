@@ -80,6 +80,9 @@ func (a *App) migrationWorkspaceExportPage(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+	if migrationWorkspaceRedirectBrowser(w, r, "/?workspace=migration&tab=export") {
+		return
+	}
 	if a.redirectCurrentMigrationWorkspaceOperation(w, r, session, client) {
 		return
 	}

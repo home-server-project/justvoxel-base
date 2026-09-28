@@ -13,7 +13,7 @@ import (
 	"github.com/home-server-project/justvoxel/management/internal/systemauth"
 )
 
-const validFactoryResetPlanHelper = `{"ok":true,"schema_version":"v1","mode":"factory","minecraft_configured":true,"data_path":"/var/lib/justvoxel/minecraft","data_scope":"internal","data_action":"delete","backup_path":"/var/lib/justvoxel/backups","backup_scope":"internal","backup_action":"delete","config_backups_action":"delete","storage_layout_action":"preserve","external_storage_action":"preserve","network_storage_action":"preserve","authentication_action":"reset_to_system","webui_users_action":"delete","password_action":"expire","sessions_action":"invalidate","players_online":0,"players":[],"warnings":[]}`
+const validFactoryResetPlanHelper = `{"ok":true,"schema_version":"v1","mode":"factory","minecraft_configured":true,"data_path":"/var/lib/justvoxel/minecraft","data_scope":"internal","data_action":"delete","backup_path":"/var/lib/justvoxel/backups","backup_scope":"internal","backup_action":"delete","config_backups_action":"delete","storage_layout_action":"preserve","external_storage_action":"preserve","network_storage_action":"preserve","authentication_action":"reset_to_system","webui_users_action":"delete","password_action":"restore_default_and_expire","sessions_action":"invalidate","players_online":0,"players":[],"warnings":[]}`
 
 func exactFactoryResetFingerprint(t *testing.T) string {
 	t.Helper()
@@ -53,7 +53,7 @@ func TestAdminFactoryResetPlanComputesFingerprintAndPreservesExternalStorage(t *
 		"\"external_storage_action\":\"preserve\"",
 		"\"network_storage_action\":\"preserve\"",
 		"\"authentication_action\":\"reset_to_system\"",
-		"\"password_action\":\"expire\"",
+		"\"password_action\":\"restore_default_and_expire\"",
 		"\"sessions_action\":\"invalidate\"",
 	} {
 		if !strings.Contains(body, want) {
@@ -326,8 +326,8 @@ func TestExecuteFactoryResetReturnsToFreshFirstUseState(t *testing.T) {
 
 	oldResetAuth := resetFactoryAuthenticationState
 	defer func() { resetFactoryAuthenticationState = oldResetAuth }()
-	oldExpire := expireSystemAdministratorPassword
-	defer func() { expireSystemAdministratorPassword = oldExpire }()
+	oldRestore := restoreSystemAdministratorFactoryCredential
+	defer func() { restoreSystemAdministratorFactoryCredential = oldRestore }()
 	oldReadMode := readAuthMode
 	defer func() { readAuthMode = oldReadMode }()
 	order := make([]string, 0, 2)
@@ -335,8 +335,8 @@ func TestExecuteFactoryResetReturnsToFreshFirstUseState(t *testing.T) {
 		order = append(order, "auth")
 		return nil
 	}
-	expireSystemAdministratorPassword = func(context.Context) error {
-		order = append(order, "expire")
+	restoreSystemAdministratorFactoryCredential = func(context.Context) error {
+		order = append(order, "restore_default_password_and_expire")
 		return nil
 	}
 	readAuthMode = func() (authMode, error) {
@@ -386,8 +386,8 @@ func TestExecuteFactoryResetReturnsToFreshFirstUseState(t *testing.T) {
 	if current, err := store.currentFactoryReset(); err != nil || current != nil {
 		t.Fatalf("factory reset remained current after success: %#v err=%v", current, err)
 	}
-	if strings.Join(order, ",") != "auth,expire" {
-		t.Fatalf("identity reset order = %q, want auth,expire", strings.Join(order, ","))
+	if strings.Join(order, ",") != "auth,restore_default_password_and_expire" {
+		t.Fatalf("identity reset order = %q, want auth,restore_default_password_and_expire", strings.Join(order, ","))
 	}
 	users, err := s.store.listWebUsers()
 	if err != nil {
@@ -401,6 +401,121 @@ func TestExecuteFactoryResetReturnsToFreshFirstUseState(t *testing.T) {
 	}
 }
 
+func TestRestoreSystemAdministratorFactoryCredential(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		failCall  int
+		wantCalls int
+	}{
+		{name: "locked bootstrap installation fails", failCall: 1, wantCalls: 1},
+		{name: "expiration fails", failCall: 2, wantCalls: 2},
+		{name: "unlock fails", failCall: 3, wantCalls: 3},
+		{name: "success", wantCalls: 3},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			oldRun := runFactoryCredentialCommand
+			defer func() { runFactoryCredentialCommand = oldRun }()
+			calls := 0
+			runFactoryCredentialCommand = func(_ context.Context, path string, args ...string) error {
+				calls++
+				switch calls {
+				case 1:
+					if path != "/usr/sbin/usermod" || len(args) != 3 || args[0] != "--password" || args[1] != "!"+factoryBootstrapPasswordHash || args[2] != systemAdminUsername {
+						t.Fatal("locked factory password installation command changed")
+					}
+				case 2:
+					if path != "/usr/bin/chage" || len(args) != 3 || args[0] != "-d" || args[1] != "0" || args[2] != systemAdminUsername {
+						t.Fatal("factory password expiration command changed")
+					}
+				case 3:
+					if path != "/usr/sbin/usermod" || len(args) != 2 || args[0] != "--unlock" || args[1] != systemAdminUsername {
+						t.Fatal("factory password unlock command changed")
+					}
+				default:
+					t.Fatal("unexpected factory credential command")
+				}
+				if calls == test.failCall {
+					return errors.New("command failed")
+				}
+				return nil
+			}
+			err := restoreSystemAdministratorFactoryCredential(context.Background())
+			if (err != nil) != (test.failCall != 0) {
+				t.Fatalf("credential restoration error = %v", err)
+			}
+			if calls != test.wantCalls {
+				t.Fatalf("credential command calls = %d, want %d", calls, test.wantCalls)
+			}
+		})
+	}
+}
+
+func TestExecuteFactoryResetCredentialFailureKeepsSessions(t *testing.T) {
+	for _, failure := range []string{"locked bootstrap installation", "expiration", "unlock"} {
+		t.Run(failure, func(t *testing.T) {
+			oldHelper := runAdminFactoryResetHelper
+			defer func() { runAdminFactoryResetHelper = oldHelper }()
+			runAdminFactoryResetHelper = func(_ context.Context, args ...string) ([]byte, error) {
+				if len(args) == 1 && args[0] == "plan" {
+					return []byte(validFactoryResetPlanHelper), nil
+				}
+				if len(args) == 2 && args[0] == "apply" && args[1] == "--confirm-players" {
+					return []byte(`{"ok":true,"schema_version":"v1","mode":"factory","minecraft_was_configured":true,"data_path":"/var/lib/justvoxel/minecraft","data_scope":"internal","data_action":"delete","backup_path":"/var/lib/justvoxel/backups","backup_scope":"internal","backup_action":"delete","config_backups_action":"delete","storage_layout_action":"preserve","external_storage_action":"preserve","network_storage_action":"preserve"}`), nil
+				}
+				t.Fatalf("unexpected factory reset helper args: %#v", args)
+				return nil, nil
+			}
+			oldResetAuth := resetFactoryAuthenticationState
+			defer func() { resetFactoryAuthenticationState = oldResetAuth }()
+			resetFactoryAuthenticationState = func() error { return nil }
+			oldRestore := restoreSystemAdministratorFactoryCredential
+			defer func() { restoreSystemAdministratorFactoryCredential = oldRestore }()
+			restoreSystemAdministratorFactoryCredential = func(context.Context) error {
+				return errors.New("factory password " + failure + " failed")
+			}
+
+			s := surfaceTestServer(t, roleAdministrator)
+			store := openTestOperationStore(t)
+			attachTestOperationStore(t, s, store)
+			s.sessions["factory-session"] = session{
+				Username: systemAdminUsername, Role: roleAdministrator,
+				Created: time.Now(), LastSeen: time.Now(),
+			}
+			s.failures = []time.Time{time.Now()}
+			s.lockTill = time.Now().Add(time.Minute)
+			baselineSessionCount := len(s.sessions)
+			baselineFailureCount := len(s.failures)
+			baselineLockTill := s.lockTill
+			fingerprint := exactFactoryResetFingerprint(t)
+			operation, _, err := store.beginFactoryReset(fingerprint)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := executeFactoryReset(context.Background(), s, operation.OperationID, fingerprint); err == nil {
+				t.Fatal("factory reset succeeded after credential failure")
+			}
+			finished, err := store.get(operation.OperationID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if finished.State != operationNeedsAttention || finished.Stage != "password_reset_failed" {
+				t.Fatalf("factory reset credential failure state = %#v", finished)
+			}
+			if len(s.sessions) != baselineSessionCount {
+				t.Fatalf("factory reset changed session count after credential failure: got %d, want %d", len(s.sessions), baselineSessionCount)
+			}
+			if _, ok := s.sessions["token"]; !ok {
+				t.Fatal("factory reset removed the existing session after credential failure")
+			}
+			if _, ok := s.sessions["factory-session"]; !ok {
+				t.Fatal("factory reset removed the factory session after credential failure")
+			}
+			if len(s.failures) != baselineFailureCount || s.lockTill.IsZero() || !s.lockTill.Equal(baselineLockTill) {
+				t.Fatal("factory reset invalidated sessions or cleared failures before success")
+			}
+		})
+	}
+}
 
 func TestAdminFactoryResetResolveKeepsCurrentStateAndReleasesLocks(t *testing.T) {
 	s := surfaceTestServer(t, roleAdministrator)

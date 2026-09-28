@@ -132,6 +132,34 @@ jv_migration_check_candidate_port() {
     fi
 }
 
+jv_migration_running_minecraft_owns_port() {
+    local proto="$1" port="$2" container_port running mappings mapping
+    case "${proto}" in
+        tcp) container_port=25565 ;;
+        udp) container_port=19132 ;;
+        *) return 1 ;;
+    esac
+    [[ ${port} =~ ^[0-9]+$ ]] || return 1
+    running="$(podman inspect --type container --format '{{.State.Running}}' minecraft 2>/dev/null)" || return 1
+    [[ ${running} == true ]] || return 1
+    mappings="$(podman port minecraft "${container_port}/${proto}" 2>/dev/null)" || return 1
+    while IFS= read -r mapping; do
+        [[ ${mapping} =~ ^.+:([0-9]+)$ && ${BASH_REMATCH[1]} == "${port}" ]] && return 0
+    done <<< "${mappings}"
+    return 1
+}
+
+jv_migration_check_import_bedrock_port() {
+    local port="$1" old_enabled="$2" old_port="$3"
+    if [[ ${old_enabled} == yes && ${port} == "${old_port}" ]]; then
+        return 0
+    fi
+    if [[ ${old_enabled} == no ]] && jv_migration_running_minecraft_owns_port udp "${port}"; then
+        return 0
+    fi
+    jv_migration_check_candidate_port udp "${port}"
+}
+
 jv_migration_write_state() {
     local transaction="$1" phase="$2" source="$3" source_type="${4:-unknown}" tmp
     tmp="${transaction}/.state.tmp"

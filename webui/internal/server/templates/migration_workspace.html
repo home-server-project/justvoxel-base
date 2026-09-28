@@ -7,7 +7,7 @@
     <div class="details"><strong>Available destination types</strong><br><span class="muted">{{if .ExportTargets}}{{.ExportTargets}}{{else}}None reported{{end}}</span></div>
     <div class="details"><strong>Suggested bundle</strong><br><span class="muted">{{.Export.SuggestedFilename}}</span></div>
     {{if .Export.ConfiguredBackupAvailable}}<div class="notice">Configured backup storage is available as an Export destination.</div>{{end}}
-    <div class="action-row"><a class="button-link" href="/workspace/migration/export">Open Server Export</a></div>
+    <div class="action-row"><a class="button-link" href="/?workspace=migration&amp;tab=export">Open Server Export</a></div>
   </section>
 
   <section class="panel">
@@ -15,7 +15,7 @@
     <p>Bring an exported JustVoxel server or supported Minecraft server directory into this appliance.</p>
     <div class="details"><strong>Available source types</strong><br><span class="muted">{{if .ImportSources}}{{.ImportSources}}{{else}}None reported{{end}}</span></div>
     <div class="details"><strong>Destination state</strong><br><span class="muted">{{if .Import.Configured}}Configured JustVoxel server{{else}}Fresh, unconfigured JustVoxel appliance{{end}}</span></div>
-    <div class="action-row"><a class="button-link" href="/workspace/migration/import">Open Server Import</a></div>
+    <div class="action-row"><a class="button-link" href="/?workspace=migration&amp;tab=import">Open Server Import</a></div>
   </section>
 
   <section class="panel">
@@ -28,7 +28,7 @@
     {{else}}
       <div class="notice">No retained migration recovery transaction is currently reported.</div>
     {{end}}
-    <div class="action-row"><a class="button-link" href="/workspace/migration/recovery">Open Migration Recovery</a></div>
+    <div class="action-row"><a class="button-link" href="/?workspace=migration&amp;tab=recovery">Open Migration Recovery</a></div>
   </section>
 
   <div class="notice">Server Export and Server Import use the same JustVoxel safety checks. If a migration operation is already active, this page reconnects directly to its persistent progress record.</div>

@@ -4,10 +4,25 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
 )
+
+const migrationWorkspaceFragmentHeader = "X-JustVoxel-Migration-Fragment"
+
+func migrationWorkspaceOperationURL(id string) string {
+	return "/?workspace=migration&operation=" + url.QueryEscape(id)
+}
+
+func migrationWorkspaceRedirectBrowser(w http.ResponseWriter, r *http.Request, destination string) bool {
+	if r.Header.Get(migrationWorkspaceFragmentHeader) == "1" {
+		return false
+	}
+	http.Redirect(w, r, destination, http.StatusSeeOther)
+	return true
+}
 
 type adminMigrationWorkspaceAPI interface {
 	Session(ctx context.Context, session string) (api.SessionInfo, error)
@@ -110,6 +125,9 @@ func (a *App) migrationWorkspacePage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if migrationWorkspaceRedirectBrowser(w, r, "/?workspace=migration") {
+		return
+	}
 	current, err := client.AdminCurrentMigrationOperation(r.Context(), session)
 	if err != nil {
 		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Migration operation status is unavailable.")
@@ -155,6 +173,9 @@ func (a *App) migrationWorkspaceProgressPage(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
+	if migrationWorkspaceRedirectBrowser(w, r, migrationWorkspaceOperationURL(r.PathValue("id"))) {
+		return
+	}
 	response, err := client.AdminOperation(r.Context(), session, r.PathValue("id"))
 	if err != nil {
 		var responseErr *api.ResponseError
@@ -179,7 +200,7 @@ func (a *App) migrationWorkspaceProgressPage(w http.ResponseWriter, r *http.Requ
 		OperationName:     migrationWorkspaceOperationName(response.Operation.OperationType),
 		StateLabel:        migrationWorkspaceStateLabel(response.Operation.State),
 		StageLabel:        migrationWorkspaceStageLabel(response.Operation.OperationType, response.Operation.Stage),
-		CanReviewRecovery: response.Operation.OperationType == "migration_import" && response.Operation.State == "needs_attention",
+		CanReviewRecovery: (response.Operation.OperationType == "migration_import" || response.Operation.OperationType == "migration_recovery") && response.Operation.State == "needs_attention",
 	})
 }
 

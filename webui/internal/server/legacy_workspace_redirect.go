@@ -37,23 +37,6 @@ func (a *App) legacyWorkspaceRedirect(role, workspace, tab string) http.HandlerF
 	}
 }
 
-func (a *App) passwordOrWorkspacePage(w http.ResponseWriter, r *http.Request) {
-	// The mandatory password change must work before the dashboard is available.
-	if mustChange(r) {
-		a.providerPasswordPage(w, r)
-		return
-	}
-	identity, ok := a.workspaceRedirectIdentity(w, r)
-	if !ok {
-		return
-	}
-	if identity.Role != "administrator" {
-		a.providerPasswordPage(w, r)
-		return
-	}
-	a.legacyWorkspaceRedirect("administrator", "system", "security")(w, r)
-}
-
 func (a *App) workspaceRedirectIdentity(w http.ResponseWriter, r *http.Request) (api.SessionInfo, bool) {
 	session, ok := sessionFromRequest(r)
 	if !ok {

@@ -3,6 +3,7 @@
   {{if .Prompt}}<div class="notice"><strong>More source information is required.</strong><br>{{.Prompt}}</div>{{end}}
 
   {{if not .Plan.OK}}
+  {{if .NeedsInput}}
   <form method="post" action="/workspace/migration/import/review" autocomplete="off">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <input type="hidden" name="source_kind" value="{{.Request.Source.Kind}}">
@@ -67,8 +68,11 @@
     {{end}}
 
 
-    <div class="action-row"><button type="submit">Continue review</button><a class="button-link secondary" href="/workspace/migration/import">Start over</a></div>
+    <div class="action-row"><button type="submit">Continue review</button><a class="button-link secondary" href="/?workspace=migration&amp;tab=import">Start over</a></div>
   </form>
+  {{else}}
+  <div class="action-row"><a class="button-link" href="/?workspace=migration&amp;tab=import">Back to Server Import</a></div>
+  {{end}}
   {{else}}
 
   {{if .Plan.Normalized}}
@@ -161,7 +165,7 @@
       </div>
       <label class="destructive-confirm-toggle-row" data-destructive-toggle-row hidden><span class="destructive-confirm-toggle-callout">Confirm &gt;</span><input class="destructive-confirm-toggle" type="checkbox" data-destructive-toggle aria-label="Confirm Server Import"></label>
     </div>
-    <div class="action-row"><a class="button-link secondary" href="/workspace/migration/import">Cancel</a><button type="submit" data-destructive-submit disabled>Start Server Import</button></div>
+    <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;tab=import">Cancel</a><button type="submit" data-destructive-submit disabled>Start Server Import</button></div>
   </form>
   {{end}}
   {{end}}
