@@ -4690,6 +4690,179 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     return item;
   };
 
+  const openUPSOptions = (snapshot, selectedMode) => {
+    if (!snapshot.available) return;
+    const dialog = document.createElement("dialog");
+    dialog.className = "system-action-dialog";
+    dialog.setAttribute("aria-label", "UPS options");
+    const shell = document.createElement("div");
+    shell.className = "system-action-dialog-content";
+    const title = document.createElement("h2");
+    title.textContent = "UPS options";
+    const settingField = (label, name, type, value) => {
+      const field = document.createElement("label");
+      field.textContent = label;
+      const input = document.createElement("input");
+      input.name = name;
+      input.type = type;
+      input.autocomplete = "off";
+      if (type !== "password") input.value = value || "";
+      field.appendChild(input);
+      return { field, input };
+    };
+    const shutdownSection = document.createElement("section");
+    shutdownSection.className = "system-ups-option-section";
+    const shutdownTitle = document.createElement("h3");
+    shutdownTitle.textContent = "Automatic shutdown";
+    const shutdownToggle = settingField("Shut down after UPS has been on battery", "enabled", "checkbox", "");
+    shutdownToggle.input.checked = Boolean(snapshot.protection_enabled);
+    const delay = settingField("Shutdown delay (seconds)", "delay_seconds", "number", String(snapshot.shutdown_delay_seconds || 120));
+    delay.input.min = "1";
+    delay.input.max = "86400";
+    const monitorUser = settingField("Monitor username", "monitor_username", "text", "");
+    const monitorPassword = settingField("Monitor password", "monitor_password", "password", "");
+    const shutdownNote = document.createElement("p");
+    shutdownNote.textContent = snapshot.monitor_credentials_configured ? "Credentials configured. Enter username and password again to update." : "Enter username and password to enable.";
+    const shutdownState = document.createElement("p");
+    shutdownState.textContent = "Monitor service: " + (snapshot.monitor_service_active ? "active" : "inactive") + " · NUT mode: " + (snapshot.nut_mode || "none");
+    const shutdownSave = document.createElement("button");
+    shutdownSave.type = "button";
+    shutdownSave.className = "secondary";
+    shutdownSave.textContent = "Save shutdown settings";
+    shutdownSection.append(shutdownTitle, shutdownToggle.field, delay.field, monitorUser.field, monitorPassword.field, shutdownNote, shutdownState, shutdownSave);
+
+    const sharingSection = document.createElement("section");
+    sharingSection.className = "system-ups-option-section";
+    sharingSection.hidden = selectedMode !== "local";
+    const sharingTitle = document.createElement("h3");
+    sharingTitle.textContent = "Network sharing";
+    const sharingToggle = settingField("Share this UPS over the network", "enabled", "checkbox", "");
+    sharingToggle.input.checked = Boolean(snapshot.sharing_enabled);
+    const listenAddress = settingField("Listen address", "listen_address", "text", snapshot.sharing_listen_address);
+    const listenPort = settingField("Port", "listen_port", "number", String(snapshot.sharing_listen_port || 3493));
+    listenPort.input.min = "1";
+    listenPort.input.max = "65535";
+    const clientUser = settingField("Client username", "client_username", "text", "");
+    const clientPassword = settingField("Client password", "client_password", "password", "");
+    const sharingNote = document.createElement("p");
+    sharingNote.textContent = snapshot.sharing_credentials_configured ? "Credentials configured. Enter username and password again to update." : "Enter username and password to enable.";
+    const sharingState = document.createElement("p");
+    sharingState.textContent = "Server service: " + (snapshot.server_service_active ? "active" : "inactive") + " · Driver service: " + (snapshot.driver_service_active ? "active" : "inactive");
+    const sharingSave = document.createElement("button");
+    sharingSave.type = "button";
+    sharingSave.className = "secondary";
+    sharingSave.textContent = "Save sharing settings";
+    sharingSection.append(sharingTitle, sharingToggle.field, listenAddress.field, listenPort.field, clientUser.field, clientPassword.field, sharingNote, sharingState, sharingSave);
+
+    const syncOptionFields = (toggle, fields) => {
+      fields.forEach(({ input }) => { input.disabled = !toggle.input.checked; });
+    };
+    shutdownToggle.input.addEventListener("change", () => syncOptionFields(shutdownToggle, [delay, monitorUser, monitorPassword]));
+    sharingToggle.input.addEventListener("change", () => syncOptionFields(sharingToggle, [listenAddress, listenPort, clientUser, clientPassword]));
+    syncOptionFields(shutdownToggle, [delay, monitorUser, monitorPassword]);
+    syncOptionFields(sharingToggle, [listenAddress, listenPort, clientUser, clientPassword]);
+
+    const section = document.createElement("h3");
+    section.textContent = "Saved monitoring source";
+    const copy = document.createElement("p");
+    copy.textContent = "Forgetting the saved source removes the configured UPS source and returns monitoring to the default local behavior.";
+    const error = document.createElement("p");
+    error.className = "system-action-dialog-error";
+    error.hidden = true;
+    const actions = document.createElement("div");
+    actions.className = "action-row";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "secondary";
+    cancel.textContent = "Cancel";
+    const forget = document.createElement("button");
+    forget.type = "button";
+    forget.className = "danger";
+    forget.textContent = "Forget saved source";
+    actions.appendChild(forget);
+    const closeActions = document.createElement("div");
+    closeActions.className = "action-row";
+    closeActions.appendChild(cancel);
+    shell.append(title, shutdownSection, sharingSection, section, copy, error, actions, closeActions);
+    dialog.appendChild(shell);
+    document.body.appendChild(dialog);
+
+    const close = () => {
+      if (dialog.open) dialog.close();
+      dialog.remove();
+    };
+    const saveOptions = async (path, toggle, fields, button, fallback) => {
+      error.hidden = true;
+      button.disabled = true;
+      try {
+        const body = new URLSearchParams({ csrf: upsCSRF?.value || "", enabled: String(toggle.input.checked) });
+        if (toggle.input.checked) fields.forEach(({ input }) => body.set(input.name, input.value));
+        const response = await systemFetchPage(path, {
+          method: "POST",
+          headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+          body: body.toString(),
+        });
+        if (!response) return;
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || fallback);
+        close();
+        upsAvailable = Boolean(result.available);
+        if (upsTabButton) upsTabButton.hidden = !upsAvailable;
+        renderUPSMarkup(result, await loadIdentity());
+        if (state) state.textContent = "";
+      } catch (failure) {
+        error.textContent = failure?.message || fallback;
+        error.hidden = false;
+      } finally {
+        button.disabled = false;
+      }
+    };
+    shutdownSave.addEventListener("click", () => saveOptions("/api/ups/shutdown", shutdownToggle, [delay, monitorUser, monitorPassword], shutdownSave, "Shutdown settings could not be saved."));
+    sharingSave.addEventListener("click", () => saveOptions("/api/ups/sharing", sharingToggle, [listenAddress, listenPort, clientUser, clientPassword], sharingSave, "Sharing settings could not be saved."));
+    cancel.addEventListener("click", close);
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      if (!forget.disabled) close();
+    });
+    let confirmed = false;
+    forget.addEventListener("click", async () => {
+      if (!confirmed) {
+        confirmed = true;
+        title.textContent = "Forget saved source?";
+        copy.textContent = "Remove the saved UPS source and return to local monitoring?";
+        forget.textContent = "Confirm forget";
+        forget.focus();
+        return;
+      }
+      forget.disabled = true;
+      cancel.disabled = true;
+      error.hidden = true;
+      try {
+        const body = new URLSearchParams({ csrf: upsCSRF?.value || "" });
+        const response = await systemFetchPage("/api/ups/source/forget", {
+          method: "POST",
+          headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+          body: body.toString(),
+        });
+        if (!response) return;
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || "UPS source could not be forgotten.");
+        close();
+        upsAvailable = Boolean(result.available);
+        if (upsTabButton) upsTabButton.hidden = !upsAvailable;
+        renderUPSMarkup(result, await loadIdentity());
+        if (state) state.textContent = "";
+      } catch (failure) {
+        error.textContent = failure?.message || "UPS source could not be forgotten.";
+        error.hidden = false;
+      } finally {
+        forget.disabled = false;
+        cancel.disabled = false;
+      }
+    });
+    dialog.showModal();
+  };
+
   const renderUPSMarkup = (snapshot, user) => {
     if (!content) return;
     const root = document.createElement("div");
@@ -4752,7 +4925,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       root.appendChild(grid);
     }
 
-    if (user?.role === "administrator") {
+    if (snapshot.available && user?.role === "administrator") {
       const panel = document.createElement("section");
       panel.className = "system-ups-source-panel";
       const heading = document.createElement("h3");
@@ -4785,12 +4958,12 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       modeLabel.appendChild(mode);
 
       const hostLabel = document.createElement("label");
-      hostLabel.textContent = "NUT server";
+      hostLabel.textContent = "Host / IP";
       const host = document.createElement("input");
       host.name = "host";
       host.type = "text";
       host.autocomplete = "off";
-      host.placeholder = "192.168.0.51 or blackbox.lan";
+      host.placeholder = "Hostname or IP address";
       host.value = snapshot.source?.host || "";
       hostLabel.appendChild(host);
 
@@ -4804,21 +4977,63 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       port.value = String(snapshot.source?.port || 3493);
       portLabel.appendChild(port);
 
+      const nameLabel = document.createElement("label");
+      nameLabel.textContent = "UPS name";
+      const name = document.createElement("input");
+      name.name = "ups_name";
+      name.type = "text";
+      name.autocomplete = "off";
+      name.value = snapshot.source?.ups_name || "";
+      nameLabel.appendChild(name);
+
+      const driverLabel = document.createElement("label");
+      driverLabel.textContent = "NUT driver";
+      const driver = document.createElement("input");
+      driver.name = "driver";
+      driver.type = "text";
+      driver.autocomplete = "off";
+      driver.value = snapshot.source?.driver || "";
+      driverLabel.appendChild(driver);
+
+      const deviceLabel = document.createElement("label");
+      deviceLabel.textContent = "Device port";
+      const device = document.createElement("input");
+      device.name = "device_port";
+      device.type = "text";
+      device.autocomplete = "off";
+      device.value = snapshot.source?.device_port || "";
+      deviceLabel.appendChild(device);
+
       const save = document.createElement("button");
       save.type = "submit";
       save.className = "button primary";
       save.textContent = "Save and verify";
 
+      const actions = document.createElement("div");
+      actions.className = "system-ups-source-actions";
+      const options = document.createElement("button");
+      options.type = "button";
+      options.className = "secondary";
+      options.textContent = "Options";
+      options.addEventListener("click", () => openUPSOptions(snapshot, mode.value));
+      actions.append(options, save);
+
       const syncRemoteFields = () => {
         const remote = mode.value === "remote";
         host.disabled = !remote;
         port.disabled = !remote;
+        driver.disabled = remote;
+        device.disabled = remote;
+        hostLabel.hidden = !remote;
+        portLabel.hidden = !remote;
+        driverLabel.hidden = remote;
+        deviceLabel.hidden = remote;
         host.required = remote;
       };
       mode.addEventListener("change", syncRemoteFields);
       syncRemoteFields();
 
-      form.append(csrf, modeLabel, hostLabel, portLabel, save);
+      form.append(csrf, modeLabel, hostLabel, portLabel, nameLabel, driverLabel, deviceLabel, actions);
       panel.append(heading, help, form);
       root.appendChild(panel);
     }

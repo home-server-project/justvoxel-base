@@ -1,0 +1,16 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+if (( $# != 1 )); then
+    exit 2
+fi
+
+case "$1" in
+    justvoxel-onbatt-secondary)
+        exec /usr/bin/sudo -n /usr/libexec/justvoxel/ups-emergency-poweroff
+        ;;
+    justvoxel-onbatt-primary)
+        exec /usr/bin/sudo -n /usr/libexec/justvoxel/ups-primary-fsd
+        ;;
+    *) exit 2 ;;
+esac

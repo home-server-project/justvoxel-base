@@ -6,6 +6,7 @@ source /ctx/build_files/packages.env
 
 cp -avf /ctx/system_files/. /
 install -m0440 /ctx/system_files/etc/sudoers.d/justvoxel-pwfeedback /etc/sudoers.d/justvoxel-pwfeedback
+install -m0440 /ctx/system_files/etc/sudoers.d/justvoxel-ups-event /etc/sudoers.d/justvoxel-ups-event
 
 if ! dnf repolist --enabled | grep -Eiq '(^|[[:space:]])crb([[:space:]]|$)'; then
     echo "ERROR: AlmaLinux CRB repository is not enabled."

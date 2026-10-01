@@ -153,10 +153,39 @@ func TestSystemWorkspaceMigrationContract(t *testing.T) {
 		`"/api/system/workspace/about"`,
 		`fetch("/api/ups"`,
 		`action.pathname !== "/api/ups/source"`,
+		`host.placeholder = "Hostname or IP address"`,
+		`options.textContent = "Options"`,
+		`actions.append(options, save)`,
+		`title.textContent = "UPS options"`,
+		`section.textContent = "Saved monitoring source"`,
+		`forget.textContent = "Forget saved source"`,
+		`forget.textContent = "Confirm forget"`,
+		`"/api/ups/source/forget"`,
+		`"/api/ups/shutdown"`,
+		`"/api/ups/sharing"`,
+		`shutdownTitle.textContent = "Automatic shutdown"`,
+		`"Shut down after UPS has been on battery"`,
+		`"Shutdown delay (seconds)"`,
+		`sharingTitle.textContent = "Network sharing"`,
+		`"Share this UPS over the network"`,
+		`sharingSection.hidden = selectedMode !== "local"`,
+		`if (snapshot.available && user?.role === "administrator")`,
+		`if (!snapshot.available) return`,
+		`name.name = "ups_name"`,
+		`driver.name = "driver"`,
+		`device.name = "device_port"`,
+		`monitorPassword = settingField("Monitor password", "monitor_password", "password", "")`,
+		`clientPassword = settingField("Client password", "client_password", "password", "")`,
+		`snapshot.source.host + ":" + snapshot.source.port`,
 		`data-system-workspace-csrf`,
 	} {
 		if !strings.Contains(behavior, want) && !strings.Contains(markup, want) {
 			t.Fatalf("System workspace behavior missing %q", want)
+		}
+	}
+	for _, old := range []string{"192.168.0.51", "blackbox.lan"} {
+		if strings.Contains(behavior, old) {
+			t.Fatalf("UPS UI contains private example %q", old)
 		}
 	}
 

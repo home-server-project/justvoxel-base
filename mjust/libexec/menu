@@ -51,6 +51,11 @@ Use a direct command instead, for example:
   mjust update-minecraft
   mjust os-status
   mjust os-update
+TEXT
+    if jv_variant_is_hws; then
+        printf '  mjust ups\n'
+    fi
+    cat <<'TEXT'
   mjust files
   mjust web status
   mjust password-reset
@@ -188,7 +193,9 @@ system_status_menu() {
 
 system_menu() {
     local choice
-    local -a options=('System status & updates' 'System resources' 'File browser' 'Network' 'Reboot JustVoxel' 'Power off JustVoxel')
+    local -a options=('System status & updates' 'System resources' 'File browser' 'Network')
+    jv_variant_is_hws && options+=('UPS')
+    options+=('Reboot JustVoxel' 'Power off JustVoxel')
     jv_variant_is_hws && options+=('Firmware / UEFI setup')
     options+=('Back')
 
@@ -199,6 +206,7 @@ system_menu() {
             'System resources') /usr/bin/mjust resources || true ;;
             'File browser') /usr/bin/mjust files || true ;;
             'Network') /usr/bin/mjust net || true ;;
+            'UPS') /usr/bin/mjust ups || true ;;
             'Reboot JustVoxel') run_and_pause /usr/bin/mjust reboot || true ;;
             'Power off JustVoxel') run_and_pause /usr/bin/mjust poweroff || true ;;
             'Firmware / UEFI setup') run_and_pause /usr/bin/mjust firmware || true ;;

@@ -1,0 +1,204 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/ui.sh
+
+readonly ups_api_client=/usr/libexec/justvoxel/mjust/api-client
+
+if (( EUID != 0 )); then
+    echo 'ERROR: UPS management must run as root through sudo.' >&2
+    exit 1
+fi
+
+ups_error() {
+    local response="${1:-}" message
+    message="$(jq -r 'if type == "object" then .error // .message // empty else empty end' <<<"${response}" 2>/dev/null || true)"
+    printf 'ERROR: %s\n' "${message:-UPS request failed through the JustVoxel Management API.}" >&2
+}
+
+ups_request() {
+    local method="$1" path="$2" payload="${3:-}" response
+    if [[ ${method} == GET ]]; then
+        response="$("${ups_api_client}" GET "${path}")" || { ups_error "${response}"; return 1; }
+    elif [[ -n ${payload} ]]; then
+        response="$(printf '%s\n' "${payload}" | "${ups_api_client}" POST "${path}" --data)" || { ups_error "${response}"; return 1; }
+    else
+        response="$("${ups_api_client}" POST "${path}")" || { ups_error "${response}"; return 1; }
+    fi
+    if ! jq -e 'type == "object" and (.available | type == "boolean") and (.source | type == "object")' <<<"${response}" >/dev/null 2>&1; then
+        echo 'ERROR: JustVoxel Management API returned invalid UPS status.' >&2
+        return 1
+    fi
+    printf '%s' "${response}"
+}
+
+ups_format_status() {
+    jq -r '
+        def yesno: if . then "yes" else "no" end;
+        def present: if . == null or . == "" then "none" else tostring end;
+        "UPS status",
+        "  Available: \(.available | yesno)",
+        (if .available then empty else "  Note: UPS functionality is unavailable on this JustVoxel variant." end),
+        "  Source mode: \(.source.mode // "unknown")",
+        (if .source.mode == "remote" then
+            "  Remote host: \(.source.host | present)",
+            "  Remote port: \(.source.port // 0)"
+         else
+            "  Driver: \(.source.driver | present)",
+            "  Device port: \(.source.device_port | present)"
+         end),
+        "  UPS name: \(.source.ups_name | present)",
+        "  Effective NUT mode: \(.nut_mode // "unknown")",
+        "  Monitoring: \(.monitoring | yesno)",
+        "  Shutdown protection: \(.protection_enabled | yesno)",
+        "  Shutdown delay: \(.shutdown_delay_seconds // 0) seconds",
+        "  Monitor credentials configured: \(.monitor_credentials_configured | yesno)",
+        "  Network sharing: \(.sharing_enabled | yesno)",
+        (if .sharing_enabled then
+            "  Listen address: \(.sharing_listen_address | present)",
+            "  Listen port: \(.sharing_listen_port // 0)"
+         else empty end),
+        "  Client credentials configured: \(.sharing_credentials_configured | yesno)",
+        "  NUT monitor service: \(.monitor_service_active | yesno)",
+        "  NUT server service: \(.server_service_active | yesno)",
+        "  NUT driver service: \(.driver_service_active | yesno)",
+        (if (.message // "") != "" then "  Note: \(.message)" else empty end),
+        (.devices[]? | "\n  UPS \(.display_name // .name // "unknown")",
+            "    State: \(.state // "unknown")",
+            (if (.manufacturer // "") != "" then "    Manufacturer: \(.manufacturer)" else empty end),
+            (if (.model // "") != "" then "    Model: \(.model)" else empty end),
+            (if .battery_charge != null then "    Battery charge: \(.battery_charge)%" else empty end),
+            (if .battery_runtime_seconds != null then "    Battery runtime: \(.battery_runtime_seconds) seconds" else empty end),
+            (if .load_percent != null then "    Load: \(.load_percent)%" else empty end),
+            (if .input_voltage != null then "    Input voltage: \(.input_voltage) V" else empty end),
+            (if .output_voltage != null then "    Output voltage: \(.output_voltage) V" else empty end),
+            (if .input_frequency != null then "    Input frequency: \(.input_frequency) Hz" else empty end),
+            (if .output_frequency != null then "    Output frequency: \(.output_frequency) Hz" else empty end),
+            (if .battery_voltage != null then "    Battery voltage: \(.battery_voltage) V" else empty end),
+            (if .temperature != null then "    Temperature: \(.temperature) °C" else empty end))
+    '
+}
+
+ups_secret() {
+    local prompt="$1" value
+    printf '%s: ' "${prompt}" >/dev/tty
+    IFS= read -r -s value </dev/tty || return 1
+    printf '\n' >/dev/tty
+    printf '%s' "${value}"
+}
+
+ups_number() {
+    local prompt="$1" default="$2" value
+    value="$(jui_input "${prompt}" "${default}")" || return 1
+    if [[ ! ${value} =~ ^[0-9]+$ ]]; then
+        echo 'ERROR: Enter a numeric value.' >&2
+        return 1
+    fi
+    printf '%s' "${value}"
+}
+
+ups_source() {
+    local status="$1" choice mode host port name driver device_port payload
+    choice="$(jui_choose 'UPS source' 'Remote NUT server' 'Local UPS' 'Back')" || return 0
+    case "${choice}" in
+        'Remote NUT server')
+            mode=remote
+            host="$(jui_input 'NUT host' "$(jq -r 'if .source.mode == "remote" then .source.host // "" else "" end' <<<"${status}")")" || return 0
+            port="$(ups_number 'NUT port' "$(jq -r 'if .source.mode == "remote" then .source.port // 3493 else 3493 end' <<<"${status}")")" || return 1
+            name="$(jui_input 'UPS name (blank to discover a single UPS)' "$(jq -r 'if .source.mode == "remote" then .source.ups_name // "" else "" end' <<<"${status}")")" || return 0
+            payload="$(jq -cn --arg mode "${mode}" --arg host "${host}" --arg port "${port}" --arg name "${name}" '{mode:$mode,host:$host,port:($port|tonumber),ups_name:$name}')" || return 1
+            ;;
+        'Local UPS')
+            mode=local
+            name="$(jui_input 'UPS name' "$(jq -r 'if .source.mode == "local" then .source.ups_name // "" else "" end' <<<"${status}")")" || return 0
+            driver="$(jui_input 'NUT driver' "$(jq -r 'if .source.mode == "local" then .source.driver // "" else "" end' <<<"${status}")")" || return 0
+            device_port="$(jui_input 'Device port' "$(jq -r 'if .source.mode == "local" then .source.device_port // "" else "" end' <<<"${status}")")" || return 0
+            payload="$(jq -cn --arg mode "${mode}" --arg name "${name}" --arg driver "${driver}" --arg device_port "${device_port}" '{mode:$mode,ups_name:$name,driver:$driver,device_port:$device_port}')" || return 1
+            ;;
+        *) return 0 ;;
+    esac
+    ups_request POST /v1/admin/ups/source "${payload}"
+}
+
+ups_shutdown() {
+    local status="$1" choice delay username password payload
+    choice="$(jui_choose 'Automatic UPS shutdown' 'Enable / update' 'Disable' 'Back')" || return 0
+    case "${choice}" in
+        'Enable / update')
+            delay="$(ups_number 'Shutdown delay in seconds' "$(jq -r 'if .shutdown_delay_seconds > 0 then .shutdown_delay_seconds else 60 end' <<<"${status}")")" || return 1
+            username="$(jui_input 'Monitor username')" || return 0
+            password="$(ups_secret 'Monitor password')" || return 0
+            payload="$(printf '%s' "${password}" | jq -Rs --arg username "${username}" --arg delay "${delay}" '{enabled:true,delay_seconds:($delay|tonumber),monitor_username:$username,monitor_password:.}')" || return 1
+            ;;
+        'Disable') payload='{"enabled":false}' ;;
+        *) return 0 ;;
+    esac
+    ups_request POST /v1/admin/ups/shutdown "${payload}"
+}
+
+ups_sharing() {
+    local status="$1" choice address port username password payload
+    if [[ $(jq -r '.source.mode' <<<"${status}") != local ]]; then
+        echo 'UPS sharing requires a local UPS source.' >&2
+        return 0
+    fi
+    choice="$(jui_choose 'UPS network sharing' 'Enable / update' 'Disable' 'Back')" || return 0
+    case "${choice}" in
+        'Enable / update')
+            address="$(jui_input 'Listen IP address' "$(jq -r '.sharing_listen_address // ""' <<<"${status}")")" || return 0
+            port="$(ups_number 'Listen port' "$(jq -r 'if .sharing_listen_port > 0 then .sharing_listen_port else 3493 end' <<<"${status}")")" || return 1
+            username="$(jui_input 'Client username')" || return 0
+            password="$(ups_secret 'Client password')" || return 0
+            payload="$(printf '%s' "${password}" | jq -Rs --arg address "${address}" --arg port "${port}" --arg username "${username}" '{enabled:true,listen_address:$address,listen_port:($port|tonumber),client_username:$username,client_password:.}')" || return 1
+            ;;
+        'Disable') payload='{"enabled":false}' ;;
+        *) return 0 ;;
+    esac
+    ups_request POST /v1/admin/ups/sharing "${payload}"
+}
+
+ups_forget() {
+    jui_confirm 'Forget the saved UPS source and disable UPS settings?' || return 0
+    ups_request POST /v1/admin/ups/source/forget
+}
+
+main() {
+    local status choice updated
+    (( $# == 0 )) || { echo 'Usage: mjust ups' >&2; return 2; }
+    status="$(ups_request GET /v1/ups)" || return 1
+    if ! jq -e '.available == true' <<<"${status}" >/dev/null; then
+        ups_format_status <<<"${status}"
+        return 0
+    fi
+    if ! jui_has_tty; then
+        ups_format_status <<<"${status}"
+        return 0
+    fi
+    while true; do
+        if ! jq -e '.available == true' <<<"${status}" >/dev/null; then
+            ups_format_status <<<"${status}"
+            return 0
+        fi
+        ups_format_status <<<"${status}"
+        echo
+        choice="$(jui_choose 'UPS' 'Refresh status' 'Configure source' 'Automatic shutdown' 'Network sharing' 'Forget saved source' 'Back')" || return 0
+        case "${choice}" in
+            'Refresh status') status="$(ups_request GET /v1/ups)" || return 1 ;;
+            'Configure source')
+                if updated="$(ups_source "${status}")" && [[ -n ${updated} ]]; then status="${updated}"; fi
+                ;;
+            'Automatic shutdown')
+                if updated="$(ups_shutdown "${status}")" && [[ -n ${updated} ]]; then status="${updated}"; fi
+                ;;
+            'Network sharing')
+                if updated="$(ups_sharing "${status}")" && [[ -n ${updated} ]]; then status="${updated}"; fi
+                ;;
+            'Forget saved source')
+                if updated="$(ups_forget)" && [[ -n ${updated} ]]; then status="${updated}"; fi
+                ;;
+            'Back') return 0 ;;
+        esac
+        jui_pause
+    done
+}
+
+main "$@"

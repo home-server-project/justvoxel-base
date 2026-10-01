@@ -54,6 +54,11 @@ test "$(stat -c '%a %U %G' /etc/sudoers.d/justvoxel-pwfeedback)" = '440 root roo
 grep -Fqx 'Defaults pwfeedback' /etc/sudoers.d/justvoxel-pwfeedback
 visudo -cf /etc/sudoers.d/justvoxel-pwfeedback >/dev/null
 
+test -f /etc/sudoers.d/justvoxel-ups-event
+test "$(stat -c '%a %U %G' /etc/sudoers.d/justvoxel-ups-event)" = '440 root root'
+grep -Fqx 'nut ALL=(root) NOPASSWD: /usr/libexec/justvoxel/ups-emergency-poweroff "", /usr/libexec/justvoxel/ups-primary-fsd ""' /etc/sudoers.d/justvoxel-ups-event
+visudo -cf /etc/sudoers.d/justvoxel-ups-event >/dev/null
+
 test -x /usr/lib/systemd/system-generators/zram-generator
 test -f /etc/systemd/zram-generator.conf
 grep -Fqx '[zram0]' /etc/systemd/zram-generator.conf

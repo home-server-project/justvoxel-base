@@ -17,16 +17,20 @@ import (
 
 const (
 	upsVariantPath = "/usr/lib/justvoxel/variant"
-	upsSourcePath  = "/etc/justvoxel/ups-source.json"
 	upsLibUSBPath  = "/usr/lib64/libusb-1.0.so"
 	defaultNUTPort = 3493
 	maxUPSDevices  = 8
 )
 
+var upsSourcePath = "/etc/justvoxel/ups-source.json"
+
 type upsSourceConfig struct {
-	Mode string `json:"mode"`
-	Host string `json:"host,omitempty"`
-	Port int    `json:"port,omitempty"`
+	Mode       string `json:"mode"`
+	Host       string `json:"host,omitempty"`
+	Port       int    `json:"port,omitempty"`
+	UPSName    string `json:"ups_name,omitempty"`
+	Driver     string `json:"driver,omitempty"`
+	DevicePort string `json:"device_port,omitempty"`
 }
 
 type upsDeviceView struct {
@@ -47,12 +51,23 @@ type upsDeviceView struct {
 }
 
 type upsStatusView struct {
-	Available           bool            `json:"available"`
-	LocalSetupAvailable bool            `json:"local_setup_available"`
-	Source              upsSourceConfig `json:"source"`
-	Monitoring          bool            `json:"monitoring"`
-	Devices             []upsDeviceView `json:"devices"`
-	Message             string          `json:"message,omitempty"`
+	Available                    bool            `json:"available"`
+	LocalSetupAvailable          bool            `json:"local_setup_available"`
+	Source                       upsSourceConfig `json:"source"`
+	Monitoring                   bool            `json:"monitoring"`
+	Devices                      []upsDeviceView `json:"devices"`
+	Message                      string          `json:"message,omitempty"`
+	NUTMode                      string          `json:"nut_mode"`
+	ProtectionEnabled            bool            `json:"protection_enabled"`
+	ShutdownDelaySeconds         int             `json:"shutdown_delay_seconds"`
+	MonitorCredentialsConfigured bool            `json:"monitor_credentials_configured"`
+	SharingEnabled               bool            `json:"sharing_enabled"`
+	SharingListenAddress         string          `json:"sharing_listen_address,omitempty"`
+	SharingListenPort            int             `json:"sharing_listen_port,omitempty"`
+	SharingCredentialsConfigured bool            `json:"sharing_credentials_configured"`
+	MonitorServiceActive         bool            `json:"monitor_service_active"`
+	ServerServiceActive          bool            `json:"server_service_active"`
+	DriverServiceActive          bool            `json:"driver_service_active"`
 }
 
 var runUPSC = func(ctx context.Context, args ...string) ([]byte, error) {
@@ -62,10 +77,39 @@ var runUPSC = func(ctx context.Context, args ...string) ([]byte, error) {
 var upsLookPath = exec.LookPath
 var upsReadFile = os.ReadFile
 var upsStat = os.Stat
+var upsRemoveFile = os.Remove
 
 func registerUPSRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("GET /v1/ups", s.upsStatus)
 	mux.HandleFunc("POST /v1/admin/ups/source", s.upsSourceSave)
+	mux.HandleFunc("POST /v1/admin/ups/source/forget", s.upsSourceForget)
+	mux.HandleFunc("POST /v1/admin/ups/shutdown", s.upsShutdownSave)
+	mux.HandleFunc("POST /v1/admin/ups/sharing", s.upsSharingSave)
+}
+
+func (s *server) upsSourceForget(w http.ResponseWriter, r *http.Request) {
+	actor, ok := s.requireAdministrator(w, r)
+	if !ok {
+		return
+	}
+	available, _, _ := upsCapability()
+	if !available {
+		writeError(w, http.StatusConflict, "UPS monitoring is unavailable on this JustVoxel variant")
+		return
+	}
+	if err := forgetUPSSource(r.Context()); err != nil {
+		if s.store != nil {
+			_ = s.store.recordAuditEvent(actor, "ups_source_forget", "local", false, "remove failed")
+		}
+		writeError(w, http.StatusInternalServerError, "UPS source could not be forgotten")
+		return
+	}
+	if s.store != nil {
+		_ = s.store.recordAuditEvent(actor, "ups_source_forget", "local", true, "source forgotten")
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	writeJSON(w, http.StatusOK, collectUPSStatus(ctx))
 }
 
 func (s *server) upsStatus(w http.ResponseWriter, r *http.Request) {
@@ -89,9 +133,12 @@ func (s *server) upsSourceSave(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var request struct {
-		Mode string `json:"mode"`
-		Host string `json:"host"`
-		Port int    `json:"port"`
+		Mode       string `json:"mode"`
+		Host       string `json:"host"`
+		Port       int    `json:"port"`
+		UPSName    string `json:"ups_name"`
+		Driver     string `json:"driver"`
+		DevicePort string `json:"device_port"`
 	}
 	if !decodeJSON(w, r, &request) {
 		return
@@ -100,6 +147,30 @@ func (s *server) upsSourceSave(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if err := extendUPSSource(&source, request.UPSName, request.Driver, request.DevicePort); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if source.Mode == "remote" && source.UPSName == "" {
+		previous, readErr := readUPSSource()
+		if readErr != nil {
+			writeError(w, http.StatusConflict, "UPS source configuration is invalid")
+			return
+		}
+		if previous.Mode == "remote" && previous.Host == source.Host && previous.Port == source.Port {
+			source.UPSName = previous.UPSName
+		}
+	}
+	if source.Mode == "local" && source.Driver == "" {
+		previous, readErr := readUPSSource()
+		if readErr != nil {
+			writeError(w, http.StatusConflict, "UPS source configuration is invalid")
+			return
+		}
+		if previous.Mode == "local" {
+			source.UPSName, source.Driver, source.DevicePort = previous.UPSName, previous.Driver, previous.DevicePort
+		}
 	}
 
 	if source.Mode == "remote" {
@@ -113,9 +184,25 @@ func (s *server) upsSourceSave(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "Remote NUT server did not report a UPS")
 			return
 		}
+		if source.UPSName == "" && len(names) == 1 {
+			source.UPSName = names[0]
+		}
+		if source.UPSName != "" {
+			found := false
+			for _, name := range names {
+				if name == source.UPSName {
+					found = true
+					break
+				}
+			}
+			if !found {
+				writeError(w, http.StatusBadRequest, "Selected UPS was not reported by the remote server")
+				return
+			}
+		}
 	}
 
-	if err := writeUPSSource(source); err != nil {
+	if err := saveUPSSource(r.Context(), source); err != nil {
 		if s.store != nil {
 			_ = s.store.recordAuditEvent(actor, "ups_source_change", source.Mode, false, "write failed")
 		}
@@ -171,6 +258,10 @@ func collectUPSStatus(ctx context.Context) upsStatusView {
 		return view
 	}
 	view.Source = source
+	fillUPSNativeStatus(ctx, &view)
+	if view.Message != "" {
+		return view
+	}
 
 	names, err := listUPSNames(ctx, source)
 	if err != nil {
@@ -212,10 +303,20 @@ func readUPSSource() (upsSourceConfig, error) {
 		return upsSourceConfig{}, err
 	}
 	var stored upsSourceConfig
-	if err := json.Unmarshal(data, &stored); err != nil {
+	if err := strictUPSJSON(data, &stored); err != nil {
 		return upsSourceConfig{}, err
 	}
-	return normalizeUPSSource(stored.Mode, stored.Host, stored.Port)
+	source, err := normalizeUPSSource(stored.Mode, stored.Host, stored.Port)
+	if err != nil {
+		return upsSourceConfig{}, err
+	}
+	if err := extendUPSSource(&source, stored.UPSName, stored.Driver, stored.DevicePort); err != nil {
+		return upsSourceConfig{}, err
+	}
+	if stored != source {
+		return upsSourceConfig{}, errors.New("UPS source configuration is not canonical")
+	}
+	return source, nil
 }
 
 func writeUPSSource(source upsSourceConfig) error {

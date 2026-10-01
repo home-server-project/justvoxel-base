@@ -125,8 +125,42 @@ grep -Fq 'Storage devices / provisioning' "${menu}" || fail 'advanced storage pr
 grep -Fq '/backups' "${storage_ui}" || fail 'backup storage must default to a backups directory'
 
 grep -Fq 'System status & updates' "${menu}" || fail 'combined system status/update menu missing'
-grep -Fq "'File browser' 'Network' 'Reboot JustVoxel'" "${menu}" || fail 'Network must be placed inside the System menu after File browser'
+grep -Fq "'File browser' 'Network'" "${menu}" || fail 'Network must follow File browser in the System menu'
 grep -Fq "'Network') /usr/bin/mjust net || true ;;" "${menu}" || fail 'System Network menu dispatch missing'
+grep -Fq "'UPS') /usr/bin/mjust ups || true ;;" "${menu}" || fail 'System UPS menu dispatch missing'
+grep -Fq 'ups:' "${justfile}" || fail 'mjust ups recipe missing'
+
+# Exercise the menu functions with a captured selector so variant-specific
+# entries and their order are checked without launching appliance commands.
+source <(sed -n '/^show_noninteractive_help() {/,/^}/p; /^system_menu() {/,/^}/p' "${menu}")
+jv_variant_is_hws() { [[ ${test_variant} == hws ]]; }
+jui_choose() { printf '%s\n' "$@" > "${visible}"; printf 'Back\n'; }
+for test_variant in hws vm; do
+    system_menu
+    if [[ ${test_variant} == hws ]]; then
+        expected=$'System\nSystem status & updates\nSystem resources\nFile browser\nNetwork\nUPS\nReboot JustVoxel\nPower off JustVoxel\nFirmware / UEFI setup\nBack'
+    else
+        expected=$'System\nSystem status & updates\nSystem resources\nFile browser\nNetwork\nReboot JustVoxel\nPower off JustVoxel\nBack'
+    fi
+    [[ $(cat "${visible}") == "${expected}" ]] || fail "${test_variant} System menu has incorrect entries or order"
+    help="$(show_noninteractive_help)"
+    if [[ ${test_variant} == hws ]]; then
+        grep -Fq '  mjust ups' <<< "${help}" || fail 'HWS help must advertise mjust ups'
+    elif grep -Fq 'mjust ups' <<< "${help}"; then
+        fail 'VM help must not advertise mjust ups'
+    fi
+done
+
+ups="${repo_root}/mjust/libexec/ups"
+source <(sed -n '/^ups_format_status() {/,/^}/p; /^main() {/,/^}/p' "${ups}")
+ups_request() { [[ $1 == GET && $2 == /v1/ups ]] || return 1; printf '%s\n' '{"available":false,"source":{},"message":"UPS hardware is unavailable."}'; }
+jui_has_tty() { return 0; }
+jui_choose() { : > "${visible}"; printf 'Back\n'; }
+rm -f "${visible}"
+ups_output="$(main)" || fail 'unavailable UPS status must return cleanly'
+grep -Fq 'UPS hardware is unavailable.' <<< "${ups_output}" || fail 'unavailable UPS message was not shown'
+[[ ! -e ${visible} ]] || fail 'unavailable UPS entered the interactive configuration menu'
+
 grep -Fq 'net:' "${justfile}" || fail 'mjust net recipe missing'
 grep -Fq 'Friendly network manager from Home Server Project' "${network}" || fail 'nm-hsp friendly description missing'
 grep -Fq 'Normal Ethernet, Wi-Fi and easy network troubleshooting.' "${network}" || fail 'nm-hsp troubleshooting description missing'

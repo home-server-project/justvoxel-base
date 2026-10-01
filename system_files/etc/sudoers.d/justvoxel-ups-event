@@ -1,0 +1,1 @@
+nut ALL=(root) NOPASSWD: /usr/libexec/justvoxel/ups-emergency-poweroff "", /usr/libexec/justvoxel/ups-primary-fsd ""

@@ -1,0 +1,10 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+if (( EUID != 0 || $# != 0 )); then
+    exit 2
+fi
+
+printf '%s\n' '{"action_confirmed":true,"confirm_players":true}' \
+    | /usr/libexec/justvoxel/mjust/api-client POST /v1/admin/system/poweroff --data \
+    >/dev/null
