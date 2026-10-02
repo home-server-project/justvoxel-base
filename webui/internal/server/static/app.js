@@ -4715,6 +4715,8 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     const shutdownTitle = document.createElement("h3");
     shutdownTitle.textContent = "Automatic shutdown";
     const shutdownToggle = settingField("Shut down after UPS has been on battery", "enabled", "checkbox", "");
+    shutdownToggle.field.classList.add("system-ups-shutdown-switch");
+    shutdownToggle.input.setAttribute("role", "switch");
     shutdownToggle.input.checked = Boolean(snapshot.protection_enabled);
     const delay = settingField("Shutdown delay (seconds)", "delay_seconds", "number", String(snapshot.shutdown_delay_seconds || 120));
     delay.input.min = "1";
@@ -4733,7 +4735,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
 
     const sharingSection = document.createElement("section");
     sharingSection.className = "system-ups-option-section";
-    sharingSection.hidden = selectedMode !== "local";
+    const sharingAvailable = selectedMode === "local";
     const sharingTitle = document.createElement("h3");
     sharingTitle.textContent = "Network sharing";
     const sharingToggle = settingField("Share this UPS over the network", "enabled", "checkbox", "");
@@ -4753,9 +4755,13 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     sharingSave.className = "secondary";
     sharingSave.textContent = "Save sharing settings";
     sharingSection.append(sharingTitle, sharingToggle.field, listenAddress.field, listenPort.field, clientUser.field, clientPassword.field, sharingNote, sharingState, sharingSave);
+    if (!sharingAvailable) {
+      sharingToggle.input.disabled = true;
+      sharingSave.disabled = true;
+    }
 
     const syncOptionFields = (toggle, fields) => {
-      fields.forEach(({ input }) => { input.disabled = !toggle.input.checked; });
+      fields.forEach(({ input }) => { input.disabled = toggle.input.disabled || !toggle.input.checked; });
     };
     shutdownToggle.input.addEventListener("change", () => syncOptionFields(shutdownToggle, [delay, monitorUser, monitorPassword]));
     sharingToggle.input.addEventListener("change", () => syncOptionFields(sharingToggle, [listenAddress, listenPort, clientUser, clientPassword]));
@@ -4779,11 +4785,11 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     forget.type = "button";
     forget.className = "danger";
     forget.textContent = "Forget saved source";
-    actions.appendChild(forget);
-    const closeActions = document.createElement("div");
-    closeActions.className = "action-row";
-    closeActions.appendChild(cancel);
-    shell.append(title, shutdownSection, sharingSection, section, copy, error, actions, closeActions);
+    actions.append(forget, cancel);
+    const optionColumns = document.createElement("div");
+    optionColumns.className = "system-ups-option-columns";
+    optionColumns.append(shutdownSection, sharingSection);
+    shell.append(title, optionColumns, section, copy, error, actions);
     dialog.appendChild(shell);
     document.body.appendChild(dialog);
 

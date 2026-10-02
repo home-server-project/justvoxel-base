@@ -16,14 +16,14 @@ func TestSystemMonitorProcessCountUIContract(t *testing.T) {
 		t.Fatal("top processes select missing")
 	}
 	monitorHeader := string(header)
-	gear := strings.Index(monitorHeader, `data-system-monitor-profile-toggle`)
+	settingsButton := strings.Index(monitorHeader, `data-system-monitor-profile-toggle`)
 	close := strings.Index(monitorHeader, `data-system-monitor-close`)
-	if gear < 0 || close <= gear || strings.Contains(monitorHeader, `data-system-monitor-refresh`) {
+	if settingsButton < 0 || close <= settingsButton || strings.Contains(monitorHeader, `data-system-monitor-refresh`) {
 		t.Error("System Monitor header controls must be Settings and Close")
 	}
 	settings := regexp.MustCompile(`(?s)<button[^>]*data-system-monitor-profile-toggle[^>]*>(.*?)</button>`).FindStringSubmatch(monitorHeader)
-	if len(settings) != 2 || !strings.Contains(settings[1], `<svg `) || !strings.Contains(settings[1], `aria-hidden="true"`) || !strings.Contains(settings[1], `viewBox="0 0 24 24"`) || strings.Contains(settings[1], "⚙") {
-		t.Error("System Monitor settings must use an accessible centered SVG gear")
+	if len(settings) != 2 || strings.TrimSpace(settings[1]) != "Settings" {
+		t.Error("System Monitor settings must use a text button without an icon")
 	}
 	options := regexp.MustCompile(`<option value="([0-9]+)">([0-9]+)</option>`).FindAllStringSubmatch(selectMarkup[1], -1)
 	if len(options) != 3 || options[0][1] != "5" || options[0][2] != "5" || options[1][1] != "10" || options[1][2] != "10" || options[2][1] != "15" || options[2][2] != "15" || strings.Count(selectMarkup[1], "<option") != 3 {

@@ -168,7 +168,7 @@ func TestSystemWorkspaceMigrationContract(t *testing.T) {
 		`"Shutdown delay (seconds)"`,
 		`sharingTitle.textContent = "Network sharing"`,
 		`"Share this UPS over the network"`,
-		`sharingSection.hidden = selectedMode !== "local"`,
+		`const sharingAvailable = selectedMode === "local"`,
 		`if (snapshot.available && user?.role === "administrator")`,
 		`if (!snapshot.available) return`,
 		`name.name = "ups_name"`,

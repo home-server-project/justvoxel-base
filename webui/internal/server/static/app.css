@@ -372,8 +372,8 @@ body.role-operator .control-tile.nav-operator-only{display:flex!important}
 .system-monitor-admin-only{display:none!important}
 body.role-administrator .system-monitor-admin-only{display:grid!important}
 .system-monitor-header-button{display:grid;place-items:center;width:36px;height:36px;padding:0;border:1px solid #3b454e;border-radius:10px;background:#232b31;color:#dce7e0;font-size:1.25rem;line-height:1}
-.system-monitor-header-button .gear-icon{display:block;width:20px;height:20px;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .system-monitor-header-button:hover,.system-monitor-header-button:focus-visible{background:#303941;border-color:#52616d;color:#fff}
+.system-monitor-header .system-monitor-header-button.system-monitor-settings-button{width:auto;min-width:82px;height:32px;padding:0 .75rem;font-size:.84rem;line-height:1;text-align:center;white-space:nowrap}
 .workspace-header-refresh{width:auto;min-width:78px;padding:0 .7rem;border-color:#4f8b69;background:#25382e;color:#c8f2d7;font-size:.86rem;line-height:1;font-weight:700;white-space:nowrap}
 .workspace-header-refresh:hover,.workspace-header-refresh:focus-visible{border-color:#78c99d;background:#2f4a39;color:#fff;box-shadow:0 0 0 2px #78c99d33}
 .workspace-header-close{flex:none;width:36px;height:36px}
@@ -611,17 +611,31 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .system-ups-source-form label{display:grid;gap:.3rem;color:#aeb8c0;font-size:.78rem;font-weight:700}
 .system-ups-source-form label[hidden]{display:none}
 .system-ups-source-form input,.system-ups-source-form select{min-height:38px;padding:.45rem .55rem;border:1px solid #3a454d;border-radius:8px;background:#11171b;color:#eef1f4}
-.system-ups-source-actions{display:grid;gap:.4rem}
-.system-ups-option-section{display:grid;gap:.45rem;padding:.65rem 0;border-bottom:1px solid #3a454d}
+.system-ups-source-actions{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:.65rem}
+.system-ups-source-actions button{min-height:38px}
+.system-ups-option-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1.25rem;margin:.65rem 0 1rem}
+.system-ups-option-section{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.45rem .6rem;align-content:start;min-width:0;padding:.65rem 0;border-top:1px solid #3a454d}
 .system-ups-option-section[hidden]{display:none}
-.system-ups-option-section h3{margin:0}
-.system-ups-option-section label{display:grid;gap:.25rem;font-size:.82rem}
+.system-ups-option-section h3{grid-column:1/-1;margin:0}
+.system-ups-option-section label{display:grid;gap:.25rem;min-width:0;margin:0;font-size:.82rem}
 .system-ups-option-section label:has(input[type=checkbox]){display:flex;align-items:center;gap:.5rem}
-.system-ups-option-section input:not([type=checkbox]){min-height:38px;padding:.45rem .55rem;border:1px solid #3a454d;border-radius:8px;background:#11171b;color:#eef1f4}
+.system-ups-option-section label:has(input[type=checkbox]),.system-ups-option-section label:has(input[name="delay_seconds"]),.system-ups-option-section p,.system-ups-option-section button{grid-column:1/-1}
+.system-ups-option-section input:not([type=checkbox]){width:100%;min-height:38px;margin-top:0;padding:.45rem .55rem;border:1px solid #3a454d;border-radius:8px;background:#11171b;color:#eef1f4}
 .system-ups-option-section p{margin:0;font-size:.78rem;color:#aab4bb}
 .system-ups-option-section button{justify-self:start}
-.system-action-dialog[aria-label="UPS options"]{max-height:calc(100dvh - 2rem);overflow:auto}
+.system-ups-shutdown-switch{justify-content:space-between;min-height:38px}
+.system-ups-shutdown-switch input[type=checkbox]{appearance:none;flex:none;position:relative;width:42px;height:24px;margin:0;border:1px solid #59666e;border-radius:999px;background:#303b42;cursor:pointer;transition:background .15s ease,border-color .15s ease}
+.system-ups-shutdown-switch input[type=checkbox]::before{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#eef1f4;transition:transform .15s ease}
+.system-ups-shutdown-switch input[type=checkbox]:checked{border-color:#68bd8e;background:#68bd8e}
+.system-ups-shutdown-switch input[type=checkbox]:checked::before{transform:translateX(18px);background:#07130d}
+.system-ups-shutdown-switch input[type=checkbox]:focus-visible{outline:2px solid #78c99d;outline-offset:2px}
+.system-action-dialog[aria-label="UPS options"]{width:min(800px,calc(100vw - 2rem));max-height:calc(100dvh - 2rem);overflow:auto}
+.system-action-dialog[aria-label="UPS options"] .system-action-dialog-content{padding:1.15rem 1.35rem}
+.system-action-dialog[aria-label="UPS options"] .system-action-dialog-content>h3{margin:.4rem 0 .25rem;font-size:.95rem}
+.system-action-dialog[aria-label="UPS options"] .system-action-dialog-content>p{margin:.2rem 0;font-size:.82rem}
+.system-action-dialog[aria-label="UPS options"] .action-row{margin-top:.7rem}
 @media(max-width:800px){.system-ups-source-form{grid-template-columns:1fr 1fr}.system-ups-source-form button{align-self:end}}
+@media(max-width:650px){.system-ups-option-columns{grid-template-columns:1fr;gap:.6rem}.system-ups-option-section{border-bottom:1px solid #3a454d}}
 @media(max-width:560px){.system-ups-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.system-ups-source-form{grid-template-columns:1fr}.system-ups-source{align-items:flex-start;flex-direction:column;gap:.2rem}}
 @media(prefers-color-scheme:light){.system-ups-source,.system-ups-card,.system-ups-metric{background:#f7f9fa;border-color:#d9dfe3}.system-ups-source-panel{border-color:#d9dfe3}.system-ups-source-form input,.system-ups-source-form select{background:#fff;border-color:#cbd3d8;color:#1a2025}.system-ups-source-panel p,.system-ups-source-form label{color:#5c6870}}
 @media(prefers-color-scheme:light){.system-ups-option-section input:not([type=checkbox]){background:#fff;border-color:#cbd3d8;color:#1a2025}.system-ups-option-section p{color:#5c6870}}

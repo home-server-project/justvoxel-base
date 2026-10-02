@@ -58,8 +58,10 @@ func TestWorkspaceHeaderControls(t *testing.T) {
 			t.Errorf("shared workspace control CSS missing %s", class)
 		}
 	}
-	if !strings.Contains(string(css), ".control-center-trigger .control-center-icon{display:block;flex:none;width:19px;height:19px;stroke:currentColor") ||
-		!strings.Contains(string(css), ".system-monitor-header-button .gear-icon{display:block;width:20px;height:20px;stroke:currentColor") {
-		t.Error("gear icons must use centered, currentColor SVG sizing")
+	if !strings.Contains(string(css), ".control-center-trigger .control-center-icon{display:block;flex:none;width:19px;height:19px;stroke:currentColor") {
+		t.Error("Control Center gear icon must use currentColor SVG sizing")
+	}
+	if !strings.Contains(string(css), ".system-monitor-header .system-monitor-header-button.system-monitor-settings-button{width:auto;min-width:82px;height:32px;") || strings.Contains(string(css), ".system-monitor-header-button .gear-icon{") {
+		t.Error("System Monitor settings must use text button geometry without gear styling")
 	}
 }
