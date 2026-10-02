@@ -395,14 +395,14 @@
             <small>Minecraft is stopped through the normal player-aware shutdown path.</small>
           </div>
 
-          <label class="system-update-option">
-            <input type="checkbox" data-system-update-backup>
+          <label class="system-update-option system-ups-shutdown-switch">
             <span><strong>Back up Minecraft before reboot</strong><small>Optional cold backup. Reboot is cancelled if the backup fails.</small></span>
+            <input type="checkbox" role="switch" data-system-update-backup disabled>
           </label>
 
-          <label class="system-update-option">
-            <input type="checkbox" data-system-update-quick>
+          <label class="system-update-option system-ups-shutdown-switch">
             <span><strong>Quick reboot</strong><small>Use a 10-second player warning instead of the normal 60 seconds.</small></span>
+            <input type="checkbox" role="switch" data-system-update-quick>
           </label>
 
           <p class="system-update-warning" data-system-update-warning>Player warning: 60 seconds</p>

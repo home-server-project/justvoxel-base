@@ -329,8 +329,7 @@ body.role-operator .control-tile.nav-operator-only{display:flex!important}
 .system-update-reboot-heading{display:grid;gap:.12rem;margin-bottom:.45rem}
 .system-update-reboot-heading strong{font-size:.96rem}
 .system-update-reboot-heading small,.system-update-option small{color:#89959e;line-height:1.35}
-.system-update-option{display:flex;align-items:flex-start;gap:.6rem;padding:.48rem 0;border-top:1px solid #293139;cursor:pointer}
-.system-update-option input{flex:0 0 auto;margin-top:.18rem;width:17px;height:17px}
+.system-update-option{display:flex;align-items:center;gap:.6rem;padding:.48rem 0;border-top:1px solid #293139;cursor:pointer}
 .system-update-option span{display:grid;gap:.14rem;min-width:0}
 .system-update-option strong{font-size:.88rem}
 .system-update-warning{margin:.55rem 0 0;color:#aab5bc;font-size:.8rem}
@@ -340,7 +339,7 @@ body.role-operator .control-tile.nav-operator-only{display:flex!important}
 .system-update-reboot-progress span{font-size:.86rem;line-height:1.35}
 .system-update-reboot-button{background:#35424b;color:#eef1f4}
 .system-update-reboot-button:hover,.system-update-reboot-button:focus-visible{background:#42515b}
-.system-update-option input:disabled+span{opacity:.58}
+.system-update-option:has(input:disabled){cursor:not-allowed}
 
 @media(max-width:700px){
   .system-update-dialog{inset:52px .25rem .25rem .25rem!important;width:auto!important;height:auto!important;min-width:0;min-height:0;max-width:none;max-height:none;resize:none;border-radius:12px}
@@ -611,7 +610,9 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .system-ups-source-form label{display:grid;gap:.3rem;color:#aeb8c0;font-size:.78rem;font-weight:700}
 .system-ups-source-form label[hidden]{display:none}
 .system-ups-source-form input,.system-ups-source-form select{min-height:38px;padding:.45rem .55rem;border:1px solid #3a454d;border-radius:8px;background:#11171b;color:#eef1f4}
-.system-ups-source-actions{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:.65rem}
+.system-ups-source-final-row{grid-column:1/-1;display:flex;align-items:end;gap:.65rem;min-width:0}
+.system-ups-source-final-row>label{flex:1;min-width:0}
+.system-ups-source-actions{display:flex;align-items:center;gap:.65rem;flex:none}
 .system-ups-source-actions button{min-height:38px}
 .system-ups-option-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1.25rem;margin:.65rem 0 1rem}
 .system-ups-option-section{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.45rem .6rem;align-content:start;min-width:0;padding:.65rem 0;border-top:1px solid #3a454d}
@@ -629,6 +630,8 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .system-ups-shutdown-switch input[type=checkbox]:checked{border-color:#68bd8e;background:#68bd8e}
 .system-ups-shutdown-switch input[type=checkbox]:checked::before{transform:translateX(18px);background:#07130d}
 .system-ups-shutdown-switch input[type=checkbox]:focus-visible{outline:2px solid #78c99d;outline-offset:2px}
+.system-ups-shutdown-switch:has(input:disabled){opacity:.58;cursor:not-allowed}
+.system-ups-shutdown-switch input[type=checkbox]:disabled{cursor:not-allowed}
 .system-action-dialog[aria-label="UPS options"]{width:min(800px,calc(100vw - 2rem));max-height:calc(100dvh - 2rem);overflow:auto}
 .system-action-dialog[aria-label="UPS options"] .system-action-dialog-content{padding:1.15rem 1.35rem}
 .system-action-dialog[aria-label="UPS options"] .system-action-dialog-content>h3{margin:.4rem 0 .25rem;font-size:.95rem}
@@ -636,7 +639,7 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .system-action-dialog[aria-label="UPS options"] .action-row{margin-top:.7rem}
 @media(max-width:800px){.system-ups-source-form{grid-template-columns:1fr 1fr}.system-ups-source-form button{align-self:end}}
 @media(max-width:650px){.system-ups-option-columns{grid-template-columns:1fr;gap:.6rem}.system-ups-option-section{border-bottom:1px solid #3a454d}}
-@media(max-width:560px){.system-ups-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.system-ups-source-form{grid-template-columns:1fr}.system-ups-source{align-items:flex-start;flex-direction:column;gap:.2rem}}
+@media(max-width:560px){.system-ups-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.system-ups-source-form{grid-template-columns:1fr}.system-ups-source-final-row{align-items:stretch;flex-direction:column}.system-ups-source-actions{justify-content:space-between}.system-ups-source{align-items:flex-start;flex-direction:column;gap:.2rem}}
 @media(prefers-color-scheme:light){.system-ups-source,.system-ups-card,.system-ups-metric{background:#f7f9fa;border-color:#d9dfe3}.system-ups-source-panel{border-color:#d9dfe3}.system-ups-source-form input,.system-ups-source-form select{background:#fff;border-color:#cbd3d8;color:#1a2025}.system-ups-source-panel p,.system-ups-source-form label{color:#5c6870}}
 @media(prefers-color-scheme:light){.system-ups-option-section input:not([type=checkbox]){background:#fff;border-color:#cbd3d8;color:#1a2025}.system-ups-option-section p{color:#5c6870}}
 

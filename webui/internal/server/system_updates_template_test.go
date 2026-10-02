@@ -34,6 +34,8 @@ func TestSystemUpdateWorkspaceUX(t *testing.T) {
 		"class=\"secondary system-update-reboot-button\"",
 		">Back up Minecraft before reboot</strong>",
 		">Quick reboot</strong>",
+		`<input type="checkbox" role="switch" data-system-update-backup disabled>`,
+		`<input type="checkbox" role="switch" data-system-update-quick>`,
 	} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("system update workspace markup missing %q", want)
@@ -55,6 +57,7 @@ func TestSystemUpdateWorkspaceUX(t *testing.T) {
 		"grid-template-columns:1fr",
 		".system-update-reboot-panel",
 		".system-update-option",
+		".system-ups-shutdown-switch input[type=checkbox]",
 		"@media(max-width:700px)",
 		"resize:none",
 	} {
@@ -84,6 +87,10 @@ func TestSystemUpdateWorkspaceUX(t *testing.T) {
 		"Player warning: 10 seconds",
 		"Confirm reboot",
 		"Creating Minecraft backup…",
+		`minecraftConfigured = dashboard?.dataset.configured === "true"`,
+		`minecraftConfigured = snapshot?.status?.minecraft?.configured === true`,
+		`if (!minecraftConfigured) backupToggle.checked = false`,
+		`backupToggle.disabled = !minecraftConfigured || checking || updating || rebootWorkflowActive`,
 		"refreshButton?.addEventListener(\"click\", checkSystemUpdate)",
 	} {
 		if !strings.Contains(js, want) {

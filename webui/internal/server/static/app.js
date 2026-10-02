@@ -840,6 +840,34 @@ const initSystemUpdateWorkspace = () => {
   let rebootPollTimer = null;
   let countdownTimer = null;
   let checkSequence = 0;
+  let minecraftConfigured = dashboard?.dataset.configured === "true";
+
+  if (dashboard) {
+    new MutationObserver(() => {
+      minecraftConfigured = dashboard.dataset.configured === "true";
+      syncActionAvailability();
+    }).observe(dashboard, { attributes: true, attributeFilter: ["data-configured"] });
+  }
+
+  const refreshMinecraftAvailability = async () => {
+    if (dashboard) return;
+    minecraftConfigured = false;
+    syncActionAvailability();
+    try {
+      const response = await fetch("/api/dashboard-status", {
+        method: "GET",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (handleAuthResponse(response) || !response.ok) return;
+      const snapshot = await response.json();
+      minecraftConfigured = snapshot?.status?.minecraft?.configured === true;
+      syncActionAvailability();
+    } catch (_) {
+      // Keep backup unavailable until Minecraft configuration can be confirmed.
+    }
+  };
 
   const deploymentVersion = (deployment, fallback) => {
     if (!deployment) return fallback;
@@ -901,7 +929,10 @@ const initSystemUpdateWorkspace = () => {
       (checkState === "update_available" || checkState === "unknown");
     if (updateButton) updateButton.disabled = !canStage;
     if (refreshButton) refreshButton.disabled = checking || updating || rebootWorkflowActive;
-    if (backupToggle) backupToggle.disabled = checking || updating || rebootWorkflowActive;
+    if (backupToggle) {
+      if (!minecraftConfigured) backupToggle.checked = false;
+      backupToggle.disabled = !minecraftConfigured || checking || updating || rebootWorkflowActive;
+    }
     if (quickToggle) quickToggle.disabled = checking || updating || rebootWorkflowActive;
     if (rebootButton) {
       rebootButton.disabled = checking || updating || rebootWorkflowActive ||
@@ -1295,6 +1326,7 @@ const initSystemUpdateWorkspace = () => {
 
   const workspaceWindow = setupWorkspaceWindow(systemUpdateDialog, {
     onOpen: () => {
+      void refreshMinecraftAvailability();
       updateWarningText();
       checkSystemUpdate();
     },
@@ -4739,6 +4771,8 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     const sharingTitle = document.createElement("h3");
     sharingTitle.textContent = "Network sharing";
     const sharingToggle = settingField("Share this UPS over the network", "enabled", "checkbox", "");
+    sharingToggle.field.classList.add("system-ups-shutdown-switch");
+    sharingToggle.input.setAttribute("role", "switch");
     sharingToggle.input.checked = Boolean(snapshot.sharing_enabled);
     const listenAddress = settingField("Listen address", "listen_address", "text", snapshot.sharing_listen_address);
     const listenPort = settingField("Port", "listen_port", "number", String(snapshot.sharing_listen_port || 3493));
@@ -4769,9 +4803,9 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     syncOptionFields(sharingToggle, [listenAddress, listenPort, clientUser, clientPassword]);
 
     const section = document.createElement("h3");
-    section.textContent = "Saved monitoring source";
+    section.textContent = "Saved UPS source";
     const copy = document.createElement("p");
-    copy.textContent = "Forgetting the saved source removes the configured UPS source and returns monitoring to the default local behavior.";
+    copy.textContent = "Remove this saved UPS connection and return to a UPS connected directly to this machine.";
     const error = document.createElement("p");
     error.className = "system-action-dialog-error";
     error.hidden = true;
@@ -4784,7 +4818,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     const forget = document.createElement("button");
     forget.type = "button";
     forget.className = "danger";
-    forget.textContent = "Forget saved source";
+    forget.textContent = "Remove saved source";
     actions.append(forget, cancel);
     const optionColumns = document.createElement("div");
     optionColumns.className = "system-ups-option-columns";
@@ -4834,9 +4868,9 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     forget.addEventListener("click", async () => {
       if (!confirmed) {
         confirmed = true;
-        title.textContent = "Forget saved source?";
+        title.textContent = "Remove saved source?";
         copy.textContent = "Remove the saved UPS source and return to local monitoring?";
-        forget.textContent = "Confirm forget";
+        forget.textContent = "Confirm removal";
         forget.focus();
         return;
       }
@@ -5023,6 +5057,9 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       options.textContent = "Options";
       options.addEventListener("click", () => openUPSOptions(snapshot, mode.value));
       actions.append(options, save);
+      const finalRow = document.createElement("div");
+      finalRow.className = "system-ups-source-final-row";
+      finalRow.append(nameLabel, actions);
 
       const syncRemoteFields = () => {
         const remote = mode.value === "remote";
@@ -5039,7 +5076,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       mode.addEventListener("change", syncRemoteFields);
       syncRemoteFields();
 
-      form.append(csrf, modeLabel, hostLabel, portLabel, nameLabel, driverLabel, deviceLabel, actions);
+      form.append(csrf, modeLabel, hostLabel, portLabel, driverLabel, deviceLabel, finalRow);
       panel.append(heading, help, form);
       root.appendChild(panel);
     }
