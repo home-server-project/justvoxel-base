@@ -88,7 +88,7 @@ button.storage-partition-card:hover,button.storage-partition-card:focus-visible{
 .storage-action-menu-popover .storage-action-danger:hover,.storage-action-menu-popover .storage-action-danger:focus-visible{background:#3a2420}
 .storage-protected-note{margin:.75rem 0 0;font-size:.8rem}
 
-.storage-action-dialog{width:min(540px,calc(100% - 1.4rem));max-height:min(86vh,760px);padding:0;border:1px solid #3b454e;border-radius:16px;background:#171d22;color:#eef1f4;box-shadow:0 30px 90px #000c}
+.storage-action-dialog{width:min(540px,calc(100% - 1.4rem));max-height:calc(100vh - 2rem);padding:0;border:1px solid #3b454e;border-radius:16px;background:#171d22;color:#eef1f4;box-shadow:0 30px 90px #000c}
 .storage-action-dialog::backdrop{background:#050708b8;backdrop-filter:blur(4px)}
 .storage-action-card{padding:1rem}
 .storage-action-card>p{line-height:1.45}
@@ -97,6 +97,9 @@ button.storage-partition-card:hover,button.storage-partition-card:focus-visible{
 .storage-action-review dl div{padding:.42rem 0}
 .storage-action-warnings{display:grid;gap:.45rem;margin-top:.7rem}
 .storage-action-warnings .notice{margin:0;font-size:.8rem}
+.storage-action-warnings .storage-warning-panel{padding:.5rem .65rem;line-height:1.35}
+.storage-warning-panel ul{margin:0;padding-left:1.1rem}
+.storage-warning-panel li+li{margin-top:.25rem}
 .storage-action-review label{margin:.75rem 0 0}
 .storage-action-review label code{display:inline-block;margin-left:.25rem;color:#ffbd9f}
 .storage-action-error{margin:.75rem 0 0;padding:.65rem .75rem;border:1px solid #a64c4c;border-radius:8px;background:#5b282833;color:#ffc1b8;font-size:.8rem}
@@ -207,7 +210,8 @@ button.storage-partition-card:hover,button.storage-partition-card:focus-visible{
 .storage-partition-state{padding:.15rem .4rem}
 .storage-drive-empty{padding:.45rem .6rem}
 .storage-detail-dialog{overflow-y:auto;max-height:min(86dvh,820px)}
-.storage-action-dialog{overflow-y:auto;max-height:min(86dvh,760px)}
+.storage-action-dialog{overflow-y:auto;overscroll-behavior:contain;max-height:calc(100dvh - 2rem)}
+body:has(.storage-action-dialog:modal){overflow:hidden}
 .storage-detail-card,.storage-action-card{padding:.8rem}
 .storage-detail-heading{padding-bottom:.5rem}
 .storage-detail-heading h2{font-size:1.1rem}

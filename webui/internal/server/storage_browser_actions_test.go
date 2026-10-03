@@ -541,7 +541,7 @@ func TestStoragePartitionDialogsUseWholeDialogScrolling(t *testing.T) {
 		".storage-detail-dialog{width:min(680px,calc(100% - 1.4rem))",
 		".storage-detail-list{max-height:none;overflow:visible}",
 		".storage-action-warnings{max-height:none;overflow:visible}",
-		".storage-action-dialog{overflow-y:auto;max-height:min(86dvh,760px)}",
+		".storage-action-dialog{overflow-y:auto;overscroll-behavior:contain;max-height:calc(100dvh - 2rem)}",
 	} {
 		if !strings.Contains(styles, want) {
 			t.Errorf("Storage dialog layout missing %q", want)
@@ -644,5 +644,97 @@ func TestStorageBrowserWholeDiskMinecraftUsesSharedReviewedMigration(t *testing.
 	}
 	if !strings.Contains(rr.Body.String(), storageMigrationOperationID) {
 		t.Fatalf("whole-disk apply did not return persistent operation id: %s", rr.Body.String())
+	}
+}
+
+func TestStorageBrowserActionDialogUsesViewportHeight(t *testing.T) {
+	css, err := assets.ReadFile("static/storage-browser.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles := string(css)
+	if strings.Contains(styles, "760px") {
+		t.Fatal("storage action dialog still has a fixed desktop height cap")
+	}
+	for _, want := range []string{
+		"max-height:calc(100vh - 2rem)",
+		"max-height:calc(100dvh - 2rem)",
+		"overflow-y:auto;overscroll-behavior:contain",
+		"body:has(.storage-action-dialog:modal){overflow:hidden}",
+		".storage-action-warnings .storage-warning-panel{padding:.5rem .65rem;line-height:1.35}",
+	} {
+		if !strings.Contains(styles, want) {
+			t.Fatalf("storage dialog viewport or compact warning styling missing %q", want)
+		}
+	}
+}
+
+func TestStorageBrowserLocalWarningsShareOnePanel(t *testing.T) {
+	js, err := assets.ReadFile("static/storage-browser.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(js)
+	for _, flow := range []struct {
+		function, container string
+	}{
+		{"renderWholeDiskWarnings", "wholeDiskWarnings"},
+		{"renderCreateWarnings", "createWarnings"},
+		{"renderWarnings", "warningBox"},
+	} {
+		want := "function " + flow.function + "(warnings) {\n    renderLocalStorageWarnings(" + flow.container + ", warnings);\n  }"
+		if !strings.Contains(source, want) {
+			t.Fatalf("local warning flow does not share the compact panel: %s", flow.function)
+		}
+	}
+	_, renderer, found := strings.Cut(source, "function renderLocalStorageWarnings(container, warnings) {")
+	if !found {
+		t.Fatal("local warning renderer missing")
+	}
+	renderer, _, found = strings.Cut(renderer, "\n  }\n")
+	if !found {
+		t.Fatal("local warning renderer incomplete")
+	}
+	for _, want := range []string{
+		`panel.className = "notice warning storage-warning-panel"`,
+		`const list = document.createElement("ul")`,
+		`const item = document.createElement("li")`,
+		`item.textContent = message`,
+		`list.appendChild(item)`,
+		`panel.appendChild(list)`,
+		`container.appendChild(panel)`,
+	} {
+		if !strings.Contains(renderer, want) {
+			t.Fatalf("compact warning panel loses accessible warning text structure: %q", want)
+		}
+	}
+	_, loop, found := strings.Cut(renderer, "warnings.forEach((message) => {")
+	if !found {
+		t.Fatal("warning renderer does not preserve every message")
+	}
+	loop, _, _ = strings.Cut(loop, "});")
+	if strings.Contains(loop, `document.createElement("div")`) || strings.Contains(loop, "notice warning") {
+		t.Fatal("warning renderer still creates a notice card for each warning")
+	}
+	template, err := assets.ReadFile("templates/storage_browser.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, control := range []string{
+		"data-storage-action-review-button",
+		"data-storage-action-apply-button",
+		"data-storage-confirm-slider",
+		"data-storage-confirm-toggle",
+	} {
+		if !strings.Contains(string(template), control) {
+			t.Fatalf("destructive confirmation control missing: %s", control)
+		}
+	}
+	for _, prefix := range []string{"data-storage-create", "data-storage-whole"} {
+		for _, control := range []string{"-review", "-apply", "-confirm-slider", "-confirm-toggle"} {
+			if !strings.Contains(string(template), prefix+control) {
+				t.Fatalf("destructive confirmation control missing: %s", prefix+control)
+			}
+		}
 	}
 }

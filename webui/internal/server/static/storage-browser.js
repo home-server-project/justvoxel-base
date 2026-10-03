@@ -397,15 +397,24 @@
     confirmationSliderArmed(slider, shell, text, "", idleText);
   }
 
-  function renderWholeDiskWarnings(warnings) {
-    if (!wholeDiskWarnings) return;
-    wholeDiskWarnings.replaceChildren();
-    (warnings || []).forEach((message) => {
-      const notice = document.createElement("div");
-      notice.className = "notice warning";
-      notice.textContent = message;
-      wholeDiskWarnings.appendChild(notice);
+  function renderLocalStorageWarnings(container, warnings) {
+    if (!container) return;
+    container.replaceChildren();
+    if (!warnings?.length) return;
+    const panel = document.createElement("div");
+    panel.className = "notice warning storage-warning-panel";
+    const list = document.createElement("ul");
+    warnings.forEach((message) => {
+      const item = document.createElement("li");
+      item.textContent = message;
+      list.appendChild(item);
     });
+    panel.appendChild(list);
+    container.appendChild(panel);
+  }
+
+  function renderWholeDiskWarnings(warnings) {
+    renderLocalStorageWarnings(wholeDiskWarnings, warnings);
   }
 
   function resetWholeDiskDialog(button) {
@@ -637,14 +646,7 @@
   freeDetailDialog?.addEventListener("cancel", closeFreeActionMenu);
 
   function renderCreateWarnings(warnings) {
-    if (!createWarnings) return;
-    createWarnings.replaceChildren();
-    (warnings || []).forEach((message) => {
-      const notice = document.createElement("div");
-      notice.className = "notice warning";
-      notice.textContent = message;
-      createWarnings.appendChild(notice);
-    });
+    renderLocalStorageWarnings(createWarnings, warnings);
   }
 
   function resetCreateReviewState() {
@@ -1351,14 +1353,7 @@
   }
 
   function renderWarnings(warnings) {
-    if (!warningBox) return;
-    warningBox.replaceChildren();
-    (warnings || []).forEach((message) => {
-      const notice = document.createElement("div");
-      notice.className = "notice warning";
-      notice.textContent = message;
-      warningBox.appendChild(notice);
-    });
+    renderLocalStorageWarnings(warningBox, warnings);
   }
 
   function targetDescription(plan) {

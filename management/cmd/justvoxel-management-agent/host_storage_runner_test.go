@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"regexp"
 	"strings"
@@ -13,32 +15,81 @@ import (
 	"time"
 )
 
+// All filesystem and command operations are fake; no runtime directory or PID 1 is needed.
+func fakeHostStorageOutput(t *testing.T) {
+	t.Helper()
+	read, remove := readHostStorageOutput, removeHostStorageOutput
+	t.Cleanup(func() {
+		readHostStorageOutput, removeHostStorageOutput = read, remove
+	})
+	readHostStorageOutput = func(string) ([]byte, error) {
+		t.Fatal("unexpected output read")
+		return nil, nil
+	}
+	removeHostStorageOutput = func(string) error { return nil }
+}
+
 func TestHostStorageMutationCommand(t *testing.T) {
 	old := runHostStorageCommand
 	defer func() { runHostStorageCommand = old }()
+	fakeHostStorageOutput(t)
 	units := map[string]bool{}
 	for _, helper := range []string{adminStorageProvisionHelper, adminStorageMountsHelper, adminStorageActionsHelper} {
 		request := []byte("{\"device\":\"/dev/vdb1\",\"confirmation\":\"$(false)\"}\n")
-		calls := 0
+		response := []byte(`{"ok":false,"error":"This partition is protected or unavailable for storage actions.","warnings":[],"applied":false}`)
+		calls, reads := 0, 0
+		var outputPath string
+		var removed []string
+		removeHostStorageOutput = func(path string) error {
+			removed = append(removed, path)
+			if len(removed) == 1 {
+				return os.ErrNotExist
+			}
+			return nil
+		}
+		readHostStorageOutput = func(path string) ([]byte, error) {
+			reads++
+			if calls != 1 || path != outputPath || len(removed) != 1 {
+				t.Fatalf("output read before execution or from wrong path: %q", path)
+			}
+			return response, nil
+		}
 		runHostStorageCommand = func(_ context.Context, executable string, args []string, stdin []byte) ([]byte, error) {
 			calls++
-			if executable != "/usr/bin/systemd-run" || len(args) != 10 {
+			if executable != "/usr/bin/systemd-run" || len(args) != 13 {
 				t.Fatalf("unexpected command: %s %q", executable, args)
 			}
-			unit := strings.TrimPrefix(args[6], "--unit=")
+			unit := strings.TrimPrefix(args[9], "--unit=")
 			if !regexp.MustCompile(`^justvoxel-host-storage-[0-9a-f]{32}\.service$`).MatchString(unit) || units[unit] {
 				t.Fatalf("invalid or reused internal unit: %q", unit)
 			}
 			units[unit] = true
-			want := []string{"--quiet", "--pipe", "--wait", "--collect", "--property=Type=exec", "--property=TimeoutStopSec=5s", "--unit=" + unit, "--", helper, "apply"}
-			if !reflect.DeepEqual(args, want) || string(stdin) != string(request) {
+			outputPath = strings.TrimPrefix(args[7], "--property=StandardOutput=file:")
+			if outputPath != "/run/justvoxel/"+unit+".json" || !reflect.DeepEqual(removed, []string{outputPath}) {
+				t.Fatalf("output path or stale cleanup changed: %q %q", outputPath, removed)
+			}
+			want := []string{
+				"--quiet", "--wait", "--collect", "--property=Type=exec", "--property=TimeoutStopSec=5s",
+				"--property=StandardInput=data", "--property=StandardInputData=" + base64.StdEncoding.EncodeToString(request),
+				"--property=StandardOutput=file:" + outputPath, "--property=StandardError=journal",
+				"--unit=" + unit, "--", helper, "apply",
+			}
+			if !reflect.DeepEqual(args, want) || len(stdin) != 0 {
 				t.Fatalf("argv/stdin changed: %q %q", args, stdin)
 			}
-			return []byte(`{"ok":true}`), nil
+			for _, arg := range args {
+				if arg == "--pipe" {
+					t.Fatal("FIFO transport must not be used")
+				}
+			}
+			return []byte("launcher output must not become helper JSON"), nil
 		}
 		output, err := hostStorageMutation(context.Background(), helper, "apply", request)
-		if err != nil || string(output) != `{"ok":true}` || calls != 1 {
-			t.Fatalf("output=%q err=%v calls=%d", output, err, calls)
+		if err != nil || string(output) != string(response) || calls != 1 || reads != 1 {
+			t.Fatalf("output=%q err=%v calls=%d reads=%d", output, err, calls, reads)
+		}
+		if !reflect.DeepEqual(removed, []string{outputPath, outputPath}) {
+			t.Fatalf("output cleanup missing: %q", removed)
 		}
 	}
 }
@@ -57,6 +108,7 @@ func (ctx *hostStorageTestContext) Err() error {
 }
 
 func TestHostStorageMutationCleanup(t *testing.T) {
+	fakeHostStorageOutput(t)
 	old := runHostStorageCommand
 	defer func() { runHostStorageCommand = old }()
 	for _, reason := range []string{"cancel", "timeout", "execution failure"} {
@@ -68,11 +120,17 @@ func TestHostStorageMutationCleanup(t *testing.T) {
 				failure := errors.New("launcher failed")
 				cleanupFailure := errors.New("stop failed")
 				calls := 0
-				var unit string
+				var unit, outputPath string
+				var removed []string
+				removeHostStorageOutput = func(path string) error {
+					removed = append(removed, path)
+					return nil
+				}
 				runHostStorageCommand = func(commandCtx context.Context, executable string, args []string, request []byte) ([]byte, error) {
 					calls++
 					if calls == 1 {
-						unit = strings.TrimPrefix(args[6], "--unit=")
+						unit = strings.TrimPrefix(args[9], "--unit=")
+						outputPath = strings.TrimPrefix(args[7], "--property=StandardOutput=file:")
 						switch reason {
 						case "cancel":
 							cancel()
@@ -87,7 +145,7 @@ func TestHostStorageMutationCleanup(t *testing.T) {
 						t.Fatalf("unexpected cleanup: %s %q", executable, args)
 					}
 					deadline, ok := commandCtx.Deadline()
-					if commandCtx.Err() != nil || !ok || time.Until(deadline) > 10*time.Second {
+					if commandCtx.Err() != nil || !ok || time.Until(deadline) <= 0 || time.Until(deadline) > 10*time.Second {
 						t.Fatal("cleanup must use an independent bounded context")
 					}
 					if cleanupFails {
@@ -105,11 +163,49 @@ func TestHostStorageMutationCleanup(t *testing.T) {
 				if calls != 2 || !errors.Is(err, wantErr) || (cleanupFails && !errors.Is(err, cleanupFailure)) {
 					t.Fatalf("calls=%d error=%v", calls, err)
 				}
+				if !reflect.DeepEqual(removed, []string{outputPath, outputPath}) {
+					t.Fatalf("failed operation output cleanup missing: %q", removed)
+				}
 				if reason == "cancel" && !errors.Is(err, context.Canceled) {
 					t.Fatalf("cancellation lost: %v", err)
 				}
 			})
 		}
+	}
+}
+
+func TestHostStorageMutationOutputFailures(t *testing.T) {
+	old := runHostStorageCommand
+	defer func() { runHostStorageCommand = old }()
+	for _, reason := range []string{"stale removal", "read"} {
+		t.Run(reason, func(t *testing.T) {
+			fakeHostStorageOutput(t)
+			failure := errors.New("filesystem failed")
+			calls, removals := 0, 0
+			removeHostStorageOutput = func(string) error {
+				removals++
+				if reason == "stale removal" {
+					return failure
+				}
+				return nil
+			}
+			readHostStorageOutput = func(string) ([]byte, error) { return nil, failure }
+			runHostStorageCommand = func(context.Context, string, []string, []byte) ([]byte, error) {
+				calls++
+				return nil, nil
+			}
+			_, err := hostStorageMutation(context.Background(), adminStorageActionsHelper, "apply", nil)
+			if !errors.Is(err, failure) {
+				t.Fatalf("filesystem failure lost: %v", err)
+			}
+			if reason == "stale removal" {
+				if calls != 0 || removals != 1 {
+					t.Fatalf("stale removal failure launched command: calls=%d removals=%d", calls, removals)
+				}
+			} else if calls != 1 || removals != 2 {
+				t.Fatalf("read failure skipped cleanup: calls=%d removals=%d", calls, removals)
+			}
+		})
 	}
 }
 

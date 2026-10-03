@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"time"
 )
@@ -25,6 +27,9 @@ var runHostStorageCommand = func(ctx context.Context, executable string, args []
 
 var runHostStorageMutation = hostStorageMutation
 
+var readHostStorageOutput = os.ReadFile
+var removeHostStorageOutput = os.Remove
+
 func hostStorageMutation(ctx context.Context, helper, action string, request []byte) ([]byte, error) {
 	if action != "apply" {
 		return nil, errors.New("host storage runner only accepts apply")
@@ -42,12 +47,21 @@ func hostStorageMutation(ctx context.Context, helper, action string, request []b
 		return nil, fmt.Errorf("generate host storage unit: %w", err)
 	}
 	unit := "justvoxel-host-storage-" + hex.EncodeToString(id[:]) + ".service"
+	outputPath := "/run/justvoxel/" + unit + ".json"
+	if err := removeHostStorageOutput(outputPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("remove stale host storage output: %w", err)
+	}
+	defer func() { _ = removeHostStorageOutput(outputPath) }()
 	// Bound service termination as well as the cleanup client timeout.
 	output, err := runHostStorageCommand(ctx, "/usr/bin/systemd-run", []string{
-		"--quiet", "--pipe", "--wait", "--collect", "--property=Type=exec",
+		"--quiet", "--wait", "--collect", "--property=Type=exec",
 		"--property=TimeoutStopSec=5s",
+		"--property=StandardInput=data",
+		"--property=StandardInputData=" + base64.StdEncoding.EncodeToString(request),
+		"--property=StandardOutput=file:" + outputPath,
+		"--property=StandardError=journal",
 		"--unit=" + unit, "--", helper, action,
-	}, request)
+	}, nil)
 	if err != nil || ctx.Err() != nil {
 		// Killing the client does not stop its service. Use an independent,
 		// bounded context and wait for systemd to stop this internally named unit.
@@ -58,6 +72,10 @@ func hostStorageMutation(ctx context.Context, helper, action string, request []b
 			cleanupErr = fmt.Errorf("stop host storage unit: %w", cleanupErr)
 		}
 		return output, errors.Join(err, ctx.Err(), cleanupErr)
+	}
+	output, err = readHostStorageOutput(outputPath)
+	if err != nil {
+		return nil, fmt.Errorf("read host storage output: %w", err)
 	}
 	return output, nil
 }
