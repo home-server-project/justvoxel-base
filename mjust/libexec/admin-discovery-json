@@ -95,7 +95,7 @@ storage_json() {
     local fs_size fs_used fs_free usage_known free_spaces disk table record
     local free_start free_end free_size free_size_mib free_size_bytes free_item
 
-    raw="$(nsenter --mount=/proc/1/ns/mnt -- lsblk -J -b -e7 -l -o NAME,PATH,PKNAME,TYPE,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINTS,MODEL,TRAN,RO)"
+    raw="$(nsenter --mount=/proc/1/ns/mnt -- lsblk -J -b -e7 -l -o NAME,PATH,PKNAME,TYPE,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINTS,MODEL,TRAN,RO,PTTYPE)"
     systems='[]'
     system_parts='[]'
     system_lines="$(storage_system_disks || true)"
@@ -112,7 +112,11 @@ storage_json() {
         size_bytes:(.size // 0), filesystem:(.fstype // ""), label:(.label // ""), uuid:(.uuid // ""),
         mountpoints:((.mountpoints // []) | map(select(. != null))),
         model:((.model // "") | gsub("^[[:space:]]+|[[:space:]]+$"; "")),
-        transport:(.tran // ""), read_only:((.ro // false) == true or (.ro // 0) == 1)
+        transport:(.tran // ""),
+        partition_table:((.pttype // "" | ascii_downcase) as $table |
+            if $table == "" or $table == "loop" then "none"
+            elif $table == "dos" then "msdos" else $table end),
+        read_only:((.ro // false) == true or (.ro // 0) == 1)
     }]' <<< "${raw}")"
     devices="$(jq --argjson systems "${systems}" --argjson system_parts "${system_parts}" '[.[] as $d | $d + {
         system:(if $d.type == "disk"

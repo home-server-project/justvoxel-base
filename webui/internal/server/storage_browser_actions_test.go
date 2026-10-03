@@ -478,7 +478,7 @@ func TestStorageBrowserPortableFilesystemPolicy(t *testing.T) {
 		"NTFS",
 		`showStorageAction("format", !wholeDevice && (!filesystem || mountable))`,
 		`showStorageAction("delete_partition", !wholeDevice)`,
-		`showStorageAction("initialize_disk", wholeDevice)`,
+		`showStorageAction("initialize_disk", wholeDevice && data.canInitialize === "Yes" && !mountable)`,
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("storage browser portable-filesystem policy missing %q", want)
@@ -736,5 +736,192 @@ func TestStorageBrowserLocalWarningsShareOnePanel(t *testing.T) {
 				t.Fatalf("destructive confirmation control missing: %s", prefix+control)
 			}
 		}
+	}
+}
+
+func TestStorageBrowserWholeDeviceUSBPermanentMountUsesExistingAPI(t *testing.T) {
+	client := &fakeStorageActionAPI{}
+	client.storage.Devices = []api.AdminStorageDevice{{Name: "sda", Path: "/dev/sda", Type: "disk", Transport: "usb", Filesystem: "vfat"}}
+	client.mountPlan = api.AdminStorageMountResponse{
+		OK: true,
+		Proposed: api.AdminStorageMountPlan{
+			Operation: "persist", Device: "/dev/sda", Filesystem: "vfat",
+			MountPoint: "/var/mnt/sda", Fingerprint: "mount-fingerprint",
+		},
+		Warnings: []string{},
+	}
+	client.mountApply = api.AdminStorageMountResponse{
+		OK: true, Applied: true,
+		Proposed: api.AdminStorageMountPlan{
+			Operation: "persist", Device: "/dev/sda", MountPoint: "/var/mnt/sda",
+			Persistence: "justvoxel", Mounted: true,
+		},
+		Warnings: []string{},
+	}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := "csrf=csrf-token&operation=persist&device=%2Fdev%2Fsda&mount_point=%2Fvar%2Fmnt%2Fsda"
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/api/new-storage/mounts/plan", body))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("permanent mount plan returned %d: %s", rr.Code, rr.Body.String())
+	}
+	if client.mountPlanCalls != 1 || client.mountPlanned.MountPoint != "/var/mnt/sda" || client.mountPlanned.Device != "/dev/sda" || client.mountPlanned.Operation != "persist" {
+		t.Fatalf("unexpected permanent mount plan request: %#v", client.mountPlanned)
+	}
+	if !strings.Contains(rr.Body.String(), "mount-fingerprint") {
+		t.Fatalf("permanent mount plan missing fingerprint: %s", rr.Body.String())
+	}
+
+	body = "csrf=csrf-token&operation=persist&device=%2Fdev%2Fsda&mount_point=%2Fvar%2Fmnt%2Fsda&fingerprint=mount-fingerprint"
+	rr = httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/api/new-storage/mounts/apply", body))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("permanent mount apply returned %d: %s", rr.Code, rr.Body.String())
+	}
+	if client.mountApplyCalls != 1 || client.mountApplied.Fingerprint != "mount-fingerprint" || client.mountApplied.Device != "/dev/sda" || client.mountApplied.Operation != "persist" {
+		t.Fatalf("permanent mount apply lost reviewed fingerprint: %#v", client.mountApplied)
+	}
+}
+
+func TestStorageBrowserDiskTableAndTransportPolicy(t *testing.T) {
+	cases := []struct {
+		name       string
+		table      string
+		filesystem string
+		transport  string
+		system     bool
+		readonly   bool
+		initialize bool
+		minecraft  bool
+		backups    bool
+	}{
+		{name: "whole FAT32 USB", table: "none", filesystem: "vfat", transport: "usb", backups: true},
+		{name: "parted loop FAT32 USB", table: "loop", filesystem: "vfat", transport: "usb", backups: true},
+		{name: "empty GPT", table: "gpt"},
+		{name: "empty MSDOS", table: "msdos"},
+		{name: "empty MBR", table: "dos"},
+		{name: "usable whole internal filesystem", filesystem: "ext4"},
+		{name: "blank internal disk", table: "none", initialize: true, minecraft: true, backups: true},
+		{name: "blank USB disk", transport: " USB ", initialize: true, backups: true},
+		{name: "empty GPT USB", table: "gpt", transport: "usb"},
+		{name: "system disk", system: true},
+		{name: "readonly USB", transport: "usb", readonly: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &fakeStorageBrowserMigrationAPI{}
+			client.storage.Devices = []api.AdminStorageDevice{{
+				Name: "sda", Path: "/dev/sda", Type: "disk", SizeBytes: 20 << 30,
+				PartitionTable: tc.table, Filesystem: tc.filesystem, Transport: tc.transport,
+				System: tc.system, ReadOnly: tc.readonly,
+			}}
+			// Deliberately report a candidate even for USB: browser policy must still exclude it.
+			client.migration.WholeDisks = []api.AdminDataMigrationCandidate{{Path: "/dev/sda"}}
+			client.migration.Partitions = []api.AdminDataMigrationCandidate{{Path: "/dev/sda"}}
+			if tc.table == "gpt" || tc.table == "msdos" || tc.table == "dos" {
+				client.storage.FreeSpaces = []api.AdminStorageFreeSpace{{Device: "/dev/sda", Start: "1MiB", End: "20479MiB", SizeBytes: 19 << 30}}
+			}
+			app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, err := app.buildStorageBrowserPageData(context.Background(), "session-token", client, api.SessionInfo{Role: "administrator"}, "csrf")
+			if err != nil {
+				t.Fatal(err)
+			}
+			disk := data.Disks[0]
+			if disk.CanInitialize != tc.initialize || disk.MinecraftWholeDisk != tc.minecraft || disk.BackupWholeDisk != tc.backups {
+				t.Fatalf("unexpected disk actions: %+v", disk)
+			}
+			if len(client.storage.FreeSpaces) > 0 && len(disk.FreeSpaces) != 1 {
+				t.Fatal("existing partition table lost its unallocated space")
+			}
+			if tc.filesystem != "" && len(disk.Partitions) != 1 {
+				t.Fatal("whole-device filesystem was not exposed")
+			}
+			if strings.EqualFold(strings.TrimSpace(tc.transport), "usb") && len(disk.Partitions) > 0 && disk.Partitions[0].MinecraftCandidate {
+				t.Fatal("USB filesystem exposed a Minecraft migration shortcut")
+			}
+			rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/storage", ""))
+			if rr.Code != http.StatusOK {
+				t.Fatalf("storage render returned %d: %s", rr.Code, rr.Body.String())
+			}
+			markup := rr.Body.String()
+			if strings.Contains(markup, "data-storage-initialize data-path=") != tc.initialize || strings.Contains(markup, `data-storage-whole-purpose="minecraft"`) != tc.minecraft || strings.Contains(markup, `data-storage-whole-purpose="backups"`) != tc.backups {
+				t.Fatalf("rendered shortcuts disagree with disk policy: %s", markup)
+			}
+			if len(disk.FreeSpaces) > 0 && (!strings.Contains(markup, "data-storage-free-space") || !strings.Contains(markup, "Create partition")) {
+				t.Fatal("unallocated space must retain the create-partition workflow")
+			}
+		})
+	}
+}
+
+func TestStorageBrowserWholeDiskMinecraftRejectsUSB(t *testing.T) {
+	for _, phase := range []string{"plan", "apply"} {
+		client := &fakeStorageWholeDiskMigrationAPI{plan: wholeDiskStorageMigrationPlan()}
+		client.storage.Devices = []api.AdminStorageDevice{{Path: "/dev/sda", Type: "disk", Transport: "usb"}}
+		app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/api/new-storage/whole-disk/"+phase, "csrf=csrf-token&purpose=minecraft&device=%2Fdev%2Fsda"))
+		if rr.Code != http.StatusBadRequest || client.planCalls != 0 || client.applyCalls != 0 {
+			t.Fatalf("USB Minecraft %s reached migration: status=%d plan=%d apply=%d", phase, rr.Code, client.planCalls, client.applyCalls)
+		}
+	}
+}
+
+type fakeStorageBrowserBackupProvisionAPI struct {
+	fakeDiscoveryAPI
+	planned api.AdminStorageProvisionRequest
+	applied api.AdminStorageProvisionRequest
+}
+
+func (f *fakeStorageBrowserBackupProvisionAPI) AdminStorageProvisionPlan(_ context.Context, _ string, request api.AdminStorageProvisionRequest) (api.AdminStorageProvisionResponse, error) {
+	f.planned = request
+	return api.AdminStorageProvisionResponse{OK: true, Proposed: api.AdminStorageProvisionPlan{
+		Operation: request.Operation, Device: request.Device, MountPoint: request.MountPoint, Path: request.Path,
+		Fingerprint: "usb-backup-review", Confirmation: "ERASE /dev/sda", Transport: "usb",
+	}, Warnings: []string{"The entire disk and its FAT32 filesystem will be erased."}}, nil
+}
+
+func (f *fakeStorageBrowserBackupProvisionAPI) AdminStorageProvisionApply(_ context.Context, _ string, request api.AdminStorageProvisionRequest) (api.AdminStorageProvisionResponse, error) {
+	f.applied = request
+	return api.AdminStorageProvisionResponse{OK: true, Applied: true}, nil
+}
+
+func TestStorageBrowserUSBBackupsUseExistingWholeDiskProvisioner(t *testing.T) {
+	client := &fakeStorageBrowserBackupProvisionAPI{}
+	client.storage.Devices = []api.AdminStorageDevice{{Name: "sda", Path: "/dev/sda", Type: "disk", Transport: "usb", Filesystem: "vfat"}}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := "csrf=csrf-token&purpose=backups&device=%2Fdev%2Fsda"
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/api/new-storage/whole-disk/plan", body))
+	if rr.Code != http.StatusOK || client.applied.Device != "" {
+		t.Fatalf("Review must only plan backup preparation: %d %s", rr.Code, rr.Body.String())
+	}
+	for _, want := range []string{"usb-backup-review", "ERASE /dev/sda", "FAT32"} {
+		if !strings.Contains(rr.Body.String(), want) {
+			t.Fatalf("backup Review missing %q", want)
+		}
+	}
+	request := client.planned
+	if request.Operation != "erase_disk" || request.Device != "/dev/sda" || request.MountPoint != "/var/mnt/justvoxel-backup" || request.Path != "/var/mnt/justvoxel-backup/backups" || request.SizeGiB != "all" {
+		t.Fatalf("backup preparation did not use existing whole-disk request: %+v", request)
+	}
+	body += "&fingerprint=usb-backup-review&confirmation=ERASE+%2Fdev%2Fsda"
+	rr = httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/api/new-storage/whole-disk/apply", body))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"applied":true`) {
+		t.Fatalf("backup Apply failed: %d %s", rr.Code, rr.Body.String())
+	}
+	request.Fingerprint = "usb-backup-review"
+	request.Confirmation = "ERASE /dev/sda"
+	if client.applied != request {
+		t.Fatalf("backup Apply lost reviewed request: %+v", client.applied)
 	}
 }

@@ -87,7 +87,7 @@ storage_action_apply_json() {
                     json_error 'The deleted partition is still visible. Inspect the disk before retrying.'; return 0
                 fi
             else
-                if ! wipefs --all -- "${device}" || ! parted -s -- "${device}" mklabel gpt || ! partprobe "${device}" || ! udevadm settle; then
+                if ! wipefs --all -- "${device}" >/dev/null || ! parted -s -- "${device}" mklabel gpt >/dev/null || ! partprobe "${device}" >/dev/null || ! udevadm settle >/dev/null; then
                     json_error 'Disk reinitialization did not complete cleanly. Inspect the disk before retrying.'; return 0
                 fi
                 [[ $(storage_partition_table_type "${device}") == gpt ]] || { json_error 'The new GPT table could not be verified.'; return 0; }

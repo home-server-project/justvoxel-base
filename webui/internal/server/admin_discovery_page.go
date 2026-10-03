@@ -50,6 +50,7 @@ type storageDeviceView struct {
 	Mountpoints          string
 	Model                string
 	Transport            string
+	PartitionTable       string
 	ReadOnly             bool
 	System               bool
 	FilesystemUsed       string
@@ -76,6 +77,7 @@ type storageBrowserPartitionView struct {
 	Formatted           bool
 	Swap                bool
 	Interactive         bool
+	CanInitialize       bool
 	MinecraftCandidate  bool
 	MinecraftMountPoint string
 }
@@ -94,11 +96,26 @@ type storageBrowserDiskView struct {
 	Size               string
 	Model              string
 	Transport          string
+	PartitionTable     string
 	System             bool
 	MinecraftWholeDisk bool
+	BackupWholeDisk    bool
 	CanInitialize      bool
 	Partitions         []storageBrowserPartitionView
 	FreeSpaces         []storageBrowserFreeSpaceView
+}
+
+func (disk storageBrowserDiskView) PartitionTableLabel() string {
+	switch disk.PartitionTable {
+	case "gpt":
+		return "GPT"
+	case "msdos":
+		return "MBR"
+	case "none":
+		return "No partition table"
+	default:
+		return "Unknown partition table"
+	}
 }
 
 type storageBrowserPageData struct {
@@ -273,12 +290,17 @@ func (a *App) buildStorageBrowserPageData(ctx context.Context, session string, c
 		_, listedSystemDisk := systemDisks[device.Path]
 		diskIndex[device.Name] = len(disks)
 		diskPathIndex[device.Path] = len(disks)
+		system := device.System || listedSystemDisk || systemDiskNames[device.Name] || storageBrowserLooksSystem(device)
+		table := storageBrowserPartitionTable(device.PartitionTable)
+		eligible := !device.ReadOnly && !system && table == "none"
+		usb := strings.EqualFold(strings.TrimSpace(device.Transport), "usb")
 		disks = append(disks, storageBrowserDiskView{
 			Name: device.Name, Path: device.Path, Size: humanBytes(device.SizeBytes),
-			Model: device.Model, Transport: device.Transport,
-			System:             device.System || listedSystemDisk || systemDiskNames[device.Name] || storageBrowserLooksSystem(device),
-			MinecraftWholeDisk: migrationWholeDisks[device.Path],
-			CanInitialize:      !device.ReadOnly && !device.System && !listedSystemDisk && !systemDiskNames[device.Name] && !storageBrowserLooksSystem(device),
+			Model: device.Model, Transport: device.Transport, PartitionTable: table,
+			System:             system,
+			MinecraftWholeDisk: eligible && !usb && device.Filesystem == "" && migrationWholeDisks[device.Path],
+			BackupWholeDisk:    eligible && (usb || device.Filesystem == ""),
+			CanInitialize:      eligible && !storageBrowserMountableFilesystem(device.Filesystem),
 		})
 	}
 	for _, device := range storage.Devices {
@@ -298,7 +320,7 @@ func (a *App) buildStorageBrowserPageData(ctx context.Context, session string, c
 		roleDevice.System = systemPartition
 		role := storageBrowserRole(roleDevice, configuration)
 		migrationCandidate, canMigrate := migrationCandidates[device.Path]
-		if strings.Contains(role, "Minecraft") || strings.Contains(role, "Backups") {
+		if strings.Contains(role, "Minecraft") || strings.Contains(role, "Backups") || strings.EqualFold(strings.TrimSpace(disks[index].Transport), "usb") {
 			canMigrate = false
 		}
 		view := storageBrowserPartitionView{
@@ -306,7 +328,7 @@ func (a *App) buildStorageBrowserPageData(ctx context.Context, session string, c
 				Name: device.Name, Path: device.Path, Parent: device.Parent, Type: device.Type,
 				Size: humanBytes(device.SizeBytes), Filesystem: device.Filesystem, Label: device.Label,
 				UUID: device.UUID, Mountpoints: strings.Join(device.Mountpoints, ", "), Model: device.Model,
-				Transport: device.Transport, ReadOnly: device.ReadOnly, System: systemPartition,
+				Transport: disks[index].Transport, PartitionTable: disks[index].PartitionTable, ReadOnly: device.ReadOnly, System: systemPartition,
 				FilesystemUsed: humanBytes(device.FilesystemUsedBytes), FilesystemFree: humanBytes(device.FilesystemFreeBytes),
 				FilesystemUsageKnown: device.FilesystemUsageKnown,
 			},
@@ -314,6 +336,7 @@ func (a *App) buildStorageBrowserPageData(ctx context.Context, session string, c
 			Role:              role, Mounted: len(device.Mountpoints) > 0, Formatted: device.Filesystem != "",
 			Swap:                device.Filesystem == "swap",
 			Interactive:         device.Filesystem != "swap",
+			CanInitialize:       device.Type == "disk" && disks[index].CanInitialize,
 			MinecraftCandidate:  canMigrate,
 			MinecraftMountPoint: migrationCandidate.Mountpoint,
 		}
@@ -334,6 +357,8 @@ func (a *App) buildStorageBrowserPageData(ctx context.Context, session string, c
 		for _, partition := range disks[index].Partitions {
 			if partition.Type == "part" {
 				disks[index].CanInitialize = false
+				disks[index].MinecraftWholeDisk = false
+				disks[index].BackupWholeDisk = false
 				break
 			}
 		}
@@ -361,6 +386,26 @@ func (a *App) buildStorageBrowserPageData(ctx context.Context, session string, c
 		InternalDisks: internalDisks, ExternalDisks: externalDisks, SelectedDisk: selectedDisk,
 		MinecraftMigrationNote: migrationNote,
 	}, nil
+}
+
+func storageBrowserPartitionTable(table string) string {
+	switch table = strings.ToLower(strings.TrimSpace(table)); table {
+	case "", "none", "loop":
+		return "none"
+	case "dos":
+		return "msdos"
+	default:
+		return table
+	}
+}
+
+func storageBrowserMountableFilesystem(filesystem string) bool {
+	switch strings.ToLower(strings.TrimSpace(filesystem)) {
+	case "xfs", "ext4", "btrfs", "ntfs", "vfat", "exfat":
+		return true
+	default:
+		return false
+	}
 }
 
 func storageBrowserLooksSystem(device api.AdminStorageDevice) bool {

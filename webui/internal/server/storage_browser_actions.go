@@ -79,7 +79,7 @@ func (a *App) storageBrowserWholeDiskChange(w http.ResponseWriter, r *http.Reque
 		writeStorageBrowserWholeDiskJSON(w, http.StatusForbidden, storageBrowserWholeDiskResponse{OK: false, Error: "invalid CSRF token"})
 		return
 	}
-	session, _, _, ok := a.adminDiscoveryRequest(w, r)
+	session, discovery, _, ok := a.adminDiscoveryRequest(w, r)
 	if !ok {
 		return
 	}
@@ -92,6 +92,20 @@ func (a *App) storageBrowserWholeDiskChange(w http.ResponseWriter, r *http.Reque
 	if device == "" || (purpose != "minecraft" && purpose != "backups") {
 		writeStorageBrowserWholeDiskJSON(w, http.StatusBadRequest, storageBrowserWholeDiskResponse{OK: false, Error: "choose a disk and storage purpose"})
 		return
+	}
+
+	if purpose == "minecraft" {
+		storage, err := discovery.AdminStorage(r.Context(), session)
+		if err != nil {
+			writeStorageBrowserWholeDiskJSON(w, storageBrowserErrorStatus(err), storageBrowserWholeDiskResponse{OK: false, Error: apiMessage(err, "storage discovery is unavailable")})
+			return
+		}
+		for _, candidate := range storage.Devices {
+			if candidate.Path == device && strings.EqualFold(strings.TrimSpace(candidate.Transport), "usb") {
+				writeStorageBrowserWholeDiskJSON(w, http.StatusBadRequest, storageBrowserWholeDiskResponse{OK: false, Error: "USB disks cannot be used for Minecraft data"})
+				return
+			}
+		}
 	}
 
 	if purpose == "backups" {

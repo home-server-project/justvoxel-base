@@ -245,22 +245,15 @@
       return;
     }
 
-    if (migrateButton) migrateButton.hidden = data.minecraftCandidate !== "Yes";
+    if (migrateButton) migrateButton.hidden = data.minecraftCandidate !== "Yes" || (data.transport || "").trim().toLowerCase() === "usb";
 
     const filesystem = normalizedFilesystem(data);
     const filesystemKey = filesystem.toLowerCase();
     const mountable = ["xfs", "ext4", "btrfs", "ntfs", "vfat", "exfat"].includes(filesystemKey);
     const wholeDevice = data.type === "disk";
     showStorageAction("delete_partition", !wholeDevice);
-    showStorageAction("initialize_disk", wholeDevice);
+    showStorageAction("initialize_disk", wholeDevice && data.canInitialize === "Yes" && !mountable);
     showStorageAction("format", !wholeDevice && (!filesystem || mountable));
-    // Whole-device mounts use the same local mount stack, without requiring a partition.
-    if (wholeDevice) {
-      if (data.mounted === "Yes") showStorageAction("unmount-for-now", true);
-      else showStorageAction("mount-for-now", mountable);
-      return;
-    }
-
     if (!filesystem) {
       return;
     }
@@ -429,7 +422,7 @@
     if (wholeDiskDescription) {
       wholeDiskDescription.textContent = minecraft
         ? "JustVoxel will review this whole disk, then safely migrate Minecraft data onto a new XFS filesystem."
-        : "JustVoxel will review this whole disk, then create and activate a new XFS backup filesystem.";
+        : "The ENTIRE disk, including its current filesystem (such as FAT32) and all data, will be erased after Review and destructive confirmation. JustVoxel will create GPT and XFS, mount it permanently, and activate it for backups.";
     }
     if (wholeDiskDevice) wholeDiskDevice.textContent = selectedWholeDisk.device;
     if (wholeDiskSize) wholeDiskSize.textContent = selectedWholeDisk.size;

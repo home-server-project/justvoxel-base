@@ -224,4 +224,29 @@ grep -Fq 'The selected partition changed after Review. Nothing was changed.' "${
     exit 1
 }
 
+# Initialization tools may print normal success diagnostics; helper stdout is JSON only.
+initialize_commands="$(grep -F 'if ! wipefs --all --' "${apply}")"
+for command in \
+    'wipefs --all -- "${device}" >/dev/null' \
+    'parted -s -- "${device}" mklabel gpt >/dev/null' \
+    'partprobe "${device}" >/dev/null' \
+    'udevadm settle >/dev/null'; do
+    grep -Fq "${command}" <<< "${initialize_commands}" || {
+        echo "ERROR: disk initialization leaks tool stdout: ${command}" >&2
+        exit 1
+    }
+done
+grep -Fq 'RO,PTTYPE)' "${discovery}" || {
+    echo 'ERROR: discovery must read actual partition-table type from lsblk.' >&2
+    exit 1
+}
+grep -Fq '$table == "" or $table == "loop" then "none"' "${discovery}" || {
+    echo 'ERROR: whole-device filesystems must not be mistaken for a real partition table.' >&2
+    exit 1
+}
+grep -Fq '$table == "dos" then "msdos"' "${discovery}" || {
+    echo 'ERROR: discovery must normalize MBR partition-table type.' >&2
+    exit 1
+}
+
 echo 'New Storage action safety source checks passed.'

@@ -65,6 +65,7 @@ type adminStorageDevice struct {
 	Mountpoints          []string `json:"mountpoints"`
 	Model                string   `json:"model"`
 	Transport            string   `json:"transport"`
+	PartitionTable       string   `json:"partition_table"`
 	ReadOnly             bool     `json:"read_only"`
 	System               bool     `json:"system"`
 	FilesystemSizeBytes  uint64   `json:"filesystem_size_bytes,omitempty"`

@@ -455,10 +455,70 @@ func TestStorageBrowserExactSystemProtectionAndWholeDeviceFilesystem(t *testing.
 		t.Fatalf("system protection must apply to exact partitions: %+v", system)
 	}
 	usb := data.Disks[1]
-	if len(usb.Partitions) != 1 || usb.Partitions[0].Path != "/dev/sda" || usb.Partitions[0].Type != "disk" || usb.Partitions[0].Filesystem != "vfat" || !usb.CanInitialize {
-		t.Fatalf("whole-device FAT32 must be represented and repurposable: %+v", usb)
+	if len(usb.Partitions) != 1 || usb.Partitions[0].Path != "/dev/sda" || usb.Partitions[0].Type != "disk" || usb.Partitions[0].Filesystem != "vfat" || usb.CanInitialize || !usb.BackupWholeDisk || usb.MinecraftWholeDisk {
+		t.Fatalf("whole-device FAT32 must be mountable with explicit backup preparation: %+v", usb)
 	}
 	if data.Disks[2].CanInitialize || !data.Disks[2].Partitions[0].ReadOnly {
 		t.Fatal("read-only whole-device storage must remain protected")
+	}
+}
+
+func TestStorageBrowserPhysicalDiskPartitionTableLabelsPreserveActionPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		table         string
+		label         string
+		transport     string
+		filesystem    string
+		canInitialize bool
+		minecraft     bool
+		backups       bool
+	}{
+		{name: "gpt", table: "gpt", label: "GPT"},
+		{name: "msdos", table: "msdos", label: "MBR"},
+		{name: "none", table: "none", label: "No partition table", canInitialize: true, minecraft: true, backups: true},
+		{name: "whole-device FAT32 USB", table: "none", label: "No partition table", transport: "usb", filesystem: "vfat", backups: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &fakeStorageBrowserMigrationAPI{}
+			client.storage.Devices = []api.AdminStorageDevice{
+				{Name: "sda", Path: "/dev/sda", Type: "disk", PartitionTable: tc.table, Transport: tc.transport, Filesystem: tc.filesystem},
+			}
+			client.migration.WholeDisks = []api.AdminDataMigrationCandidate{
+				{Path: "/dev/sda"},
+			}
+			app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, err := app.buildStorageBrowserPageData(context.Background(), "session-token", client, api.SessionInfo{Role: "administrator"}, "csrf")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(data.Disks) != 1 {
+				t.Fatalf("expected one physical disk: %+v", data.Disks)
+			}
+			disk := data.Disks[0]
+			if disk.PartitionTable != tc.table || disk.CanInitialize != tc.canInitialize || disk.MinecraftWholeDisk != tc.minecraft || disk.BackupWholeDisk != tc.backups {
+				t.Fatalf("partition table or existing action policy changed: %+v", disk)
+			}
+			rr := httptest.NewRecorder()
+			if err := app.templates.ExecuteTemplate(rr, "storage_browser_content", data); err != nil {
+				t.Fatal(err)
+			}
+			body := rr.Body.String()
+			want := "<small><code>/dev/sda</code> · " + tc.label + "</small>"
+			if !strings.Contains(body, want) {
+				t.Fatalf("physical disk card missing visible partition-table label %q", want)
+			}
+			if tc.filesystem != "" {
+				if len(disk.Partitions) != 1 || disk.Partitions[0].Type != "disk" || disk.Partitions[0].CanInitialize || disk.Partitions[0].MinecraftCandidate {
+					t.Fatalf("whole-device USB filesystem policy changed: %+v", disk.Partitions)
+				}
+				if !strings.Contains(body, `data-partition-table="none"`) || !strings.Contains(body, "FAT / FAT32") {
+					t.Fatal("whole-device FAT32 USB filesystem presentation changed")
+				}
+			}
+		})
 	}
 }

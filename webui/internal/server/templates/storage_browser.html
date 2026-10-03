@@ -20,7 +20,7 @@
         <span class="storage-disk-copy">
           <strong>{{if .Model}}{{.Model}}{{else}}{{.Path}}{{end}}</strong>
           <span>{{.Size}}{{if .Transport}} · {{.Transport}}{{end}}</span>
-          <small><code>{{.Path}}</code>{{if .System}} · System disk{{end}}</small>
+          <small><code>{{.Path}}</code> · {{.PartitionTableLabel}}{{if .System}} · System disk{{end}}</small>
         </span>
       </button>
       {{end}}
@@ -46,7 +46,7 @@
         <span class="storage-disk-copy">
           <strong>{{if .Model}}{{.Model}}{{else}}{{.Path}}{{end}}</strong>
           <span>{{.Size}} · USB</span>
-          <small><code>{{.Path}}</code>{{if .System}} · System disk{{end}}</small>
+          <small><code>{{.Path}}</code> · {{.PartitionTableLabel}}{{if .System}} · System disk{{end}}</small>
         </span>
       </button>
       {{end}}
@@ -79,6 +79,9 @@
                   data-storage-partition
                   data-name="{{.Name}}"
                   data-type="{{.Type}}"
+                  data-transport="{{.Transport}}"
+                  data-partition-table="{{.PartitionTable}}"
+                  data-can-initialize="{{if .CanInitialize}}Yes{{else}}No{{end}}"
                   data-path="{{.Path}}"
                   data-size="{{.Size}}"
                   data-filesystem="{{.Filesystem}}"
@@ -124,15 +127,15 @@
         <p class="muted compact">Erases the entire disk. After review and confirmation, create XFS partitions with your chosen sizes.</p>
       </div>
       {{end}}
-      {{if not .Partitions}}
+      {{if or .MinecraftWholeDisk .BackupWholeDisk}}
       <div class="notice storage-empty-disk">
-        <strong>Empty disk</strong>
-        <p class="muted">No partitions are present yet. Choose what JustVoxel should use this disk for.</p>
+        <strong>Prepare entire disk</strong>
+        <p class="muted">Choose a dedicated JustVoxel storage purpose. Preparation erases the entire disk and all existing filesystems and data.</p>
         <div class="storage-empty-actions">
           {{if .MinecraftWholeDisk}}
           <button type="button" data-storage-whole-disk data-storage-whole-purpose="minecraft" data-storage-whole-device="{{.Path}}" data-storage-whole-size="{{.Size}}">Use for Minecraft data</button>
           {{end}}
-          {{if not .System}}<button class="secondary" type="button" data-storage-whole-disk data-storage-whole-purpose="backups" data-storage-whole-device="{{.Path}}" data-storage-whole-size="{{.Size}}">Prepare for backups</button>{{end}}
+          {{if .BackupWholeDisk}}<button class="secondary" type="button" data-storage-whole-disk data-storage-whole-purpose="backups" data-storage-whole-device="{{.Path}}" data-storage-whole-size="{{.Size}}">Prepare for backups</button>{{end}}
         </div>
         <p class="muted compact">Nothing is erased until Review and the exact confirmation step.</p>
       </div>
