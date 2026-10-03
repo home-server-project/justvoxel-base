@@ -428,9 +428,7 @@ if (quickLook && quickLookToggle) {
       overlays.replaceChildren();
       [["Tailscale", "tailscale"], ["NetBird", "netbird"], ["Playit", "playit"]].forEach(([label, id]) => {
         const provider = providers.find((item) => item.id === id);
-        const value = id === "playit"
-          ? (provider?.configured ? (provider.service_active ? "Running" : "Configured") : "Not configured")
-          : (provider?.connected ? "Connected" : "Not connected");
+        const value = provider?.summary || "Unavailable";
         const line = document.createElement("span");
         const name = document.createElement("span");
         name.textContent = label;

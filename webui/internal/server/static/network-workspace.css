@@ -64,7 +64,7 @@
 .network-provider-card{display:flex;flex-direction:column;gap:.35rem}
 .network-provider-card h3{margin-bottom:.2rem}
 .network-provider-card>.network-inline-actions{justify-content:flex-start;margin-top:auto;padding-top:.5rem}
-.network-provider-card .button-link{display:inline-flex;align-items:center;justify-content:center;flex-basis:100%;text-align:center;border:1px solid var(--jv-border-strong);border-radius:8px;background:var(--jv-surface-raised);color:var(--jv-text);font-weight:700;line-height:1.25;text-decoration:none}
+.network-provider-card .button-link{display:inline-flex;align-items:center;justify-content:center;flex-basis:100%;text-align:center;border:1px solid var(--jv-border-strong);border-radius:8px;font-weight:700;line-height:1.25;text-decoration:none}
 .network-troubleshoot>.network-devices{margin-top:.5rem}
 .network-troubleshoot .network-inline-actions{margin-top:.55rem}
 .network-section>.state-text{margin:.25rem 0 .5rem;font-size:.8rem;line-height:1.4}
@@ -124,3 +124,5 @@
   .network-checkpoint-banner strong{color:#62460d}
   .network-checkpoint-banner span{color:#7a6336}
 }
+
+.network-provider-card button.warning{background:var(--jv-warning);color:var(--jv-surface-sunken)}

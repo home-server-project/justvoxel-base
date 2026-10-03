@@ -22,6 +22,8 @@
   let remoteProviders = [];
   let remoteError = "";
   let playitSetup = { state: "idle" };
+  let playitPopup = null;
+  let playitClaimOpened = false;
   let remoteBusy = false;
   let remotePollSequence = 0;
   const providerTransitional = (provider) => ["activating", "deactivating", "reloading", "refreshing"].includes(provider.service_state);
@@ -32,6 +34,31 @@
       activateDisabled: blocked || providerTransitional(provider) || provider.service_active || (provider.id === "playit" && setupRunning()),
       deactivateDisabled: blocked || (!(provider.id === "playit" && setupRunning()) && !provider.service_active && !provider.service_enabled && provider.service_state === "inactive")
     };
+  };
+  const effectiveTabs = (snapshot) => (snapshot?.workspace_tabs || ["Overview"])
+    .filter((tab) => tab !== "Wi-Fi" || (snapshot?.devices || []).some((device) => device.kind === "wifi"));
+  const connectivitySummary = (value) => ({
+    full: "Internet connected", limited: "Limited connectivity", portal: "Sign-in network detected",
+    none: "No internet connection"
+  }[value] || "Network status unknown");
+  const validPlayitClaim = (url) => /^https:\/\/playit\.gg\/claim\/[0-9a-fA-F]{10}(?![\s\S])$/.test(url || "");
+  const closePlayitPopup = () => {
+    try { playitPopup?.close(); } catch (_) { /* Browser may have closed it already. */ }
+    playitPopup = null;
+  };
+  const updatePlayitPopup = () => {
+    if (playitSetup.state === "waiting" && validPlayitClaim(playitSetup.claim_url) && playitPopup) {
+      try {
+        if (!playitPopup.closed) {
+          playitPopup.location.replace(playitSetup.claim_url);
+          playitClaimOpened = true;
+        }
+      } catch (_) { closePlayitPopup(); /* Offer the validated fallback link. */ }
+      playitPopup = null;
+    } else if (["failed", "idle", "complete"].includes(playitSetup.state)) {
+      closePlayitPopup();
+    }
+    if (playitSetup.state === "failed") remoteError = "Playit setup failed or timed out.";
   };
   const isAdministrator = () => (currentSnapshot?.workspace_tabs || []).includes("Ethernet");
   let loadSequence = 0;
@@ -271,12 +298,7 @@
 
     const connectivity = snapshot.connectivity || "unknown";
     const title = document.createElement("h2");
-    title.textContent =
-      connectivity === "full" ? "Internet connected" :
-      connectivity === "limited" ? "Limited connectivity" :
-      connectivity === "portal" ? "Sign-in network detected" :
-      connectivity === "none" ? "No internet connection" :
-      "Network status unknown";
+    title.textContent = connectivitySummary(connectivity);
     primary.append(eyebrow, title);
 
     const status = document.createElement("div");
@@ -316,11 +338,7 @@
     const section = document.createElement("section");
     section.className = "panel details network-overview";
     const connectivity = snapshot.connectivity || "unknown";
-    const heading = sectionHeading("Connectivity",
-      connectivity === "full" ? "Internet connected" :
-      connectivity === "limited" ? "Limited connectivity" :
-      connectivity === "portal" ? "Sign-in network detected" :
-      connectivity === "none" ? "No internet connection" : "Network status unknown");
+    const heading = sectionHeading("Connectivity", connectivitySummary(connectivity));
     const devices = (snapshot.devices || []).filter((device) => ["ethernet", "wifi"].includes(device.kind));
     const primary = devices.find((device) => device.state === "activated" && device.ipv4?.gateway && device.ipv4?.addresses?.length)
       || devices.find((device) => device.state === "activated" && device.ipv4?.addresses?.length);
@@ -769,7 +787,7 @@
     section.className = "panel network-section network-troubleshoot";
     const heading = sectionHeading("Network health", "Connectivity");
     heading.appendChild(actionButton("Check connectivity now", "networkConnectivityCheck", "true"));
-    section.append(heading, row("NetworkManager connectivity", label(snapshot.connectivity)));
+    section.append(heading, row("NetworkManager connectivity", connectivitySummary(snapshot.connectivity)));
     const grid = document.createElement("div");
     grid.className = "network-devices";
     if (!snapshot.networking_enabled) section.appendChild(row("Condition", "Networking is disabled"));
@@ -831,34 +849,32 @@
       if (needsSetup) {
         if (setupRunning()) card.appendChild(row("Setup", playitSetup.state === "waiting" ? "Waiting for approval" : "Preparing…"));
         if (playitSetup.state === "failed") card.appendChild(row("Setup", "Failed or timed out"));
-        const setup = actionButton(playitSetup.state === "failed" ? "Try setup again" : "Set up Playit", "networkPlayitSetup", "start");
-        setup.disabled = setupRunning() || remoteBusy || providerTransitional(provider);
-        actions.appendChild(setup);
-        if (playitSetup.state === "waiting" && /^https:\/\/playit\.gg\/claim\/[0-9a-fA-F]{10}(?![\s\S])$/.test(playitSetup.claim_url || "")) {
-          const claim = document.createElement("a");
-          claim.href = playitSetup.claim_url;
-          claim.target = "_blank";
-          claim.rel = "noopener noreferrer";
-          claim.className = "button-link secondary network-action-button";
-          claim.textContent = "Open Playit setup";
-          actions.appendChild(claim);
-        }
       }
       const controls = providerControls(provider);
-      const activate = actionButton("Activate", "networkProvider", provider.id);
+      const activate = actionButton("Activate", "networkProvider", provider.id, "warning");
       activate.dataset.action = "activate";
       activate.disabled = controls.activateDisabled;
       const deactivate = actionButton("Deactivate", "networkProvider", provider.id);
       deactivate.dataset.action = "deactivate";
       deactivate.disabled = controls.deactivateDisabled;
-      if (!(needsSetup && provider.service_active)) actions.appendChild(activate);
+      if (needsSetup && playitSetup.state === "waiting" && !playitClaimOpened && validPlayitClaim(playitSetup.claim_url)) {
+        const claim = document.createElement("a");
+        claim.href = playitSetup.claim_url;
+        claim.target = "_blank";
+        claim.rel = "noopener noreferrer";
+        claim.className = "button-link primary network-action-button";
+        claim.textContent = "Open Playit setup";
+        actions.appendChild(claim);
+      } else {
+        actions.appendChild(activate);
+      }
       actions.appendChild(deactivate);
       const dashboard = document.createElement("a");
       // Fixed destinations only, even if a malformed status payload is received.
       dashboard.href = { tailscale: "https://console.tailscale.com/admin/", netbird: "https://app.netbird.io/", playit: "https://playit.gg/account/" }[provider.id];
       dashboard.target = "_blank";
       dashboard.rel = "noopener noreferrer";
-      dashboard.className = "button-link secondary network-action-button";
+      dashboard.className = "button-link primary network-action-button";
       dashboard.textContent = "Open provider dashboard";
       actions.appendChild(dashboard);
       card.appendChild(actions);
@@ -873,7 +889,7 @@
     currentCheckpoint = checkpoint || null;
     const root = document.createElement("div");
     root.className = "network-workspace-view";
-    const tabs = currentSnapshot.workspace_tabs || ["Overview"];
+    const tabs = effectiveTabs(currentSnapshot);
     if (!tabs.includes(selectedTab)) selectedTab = "Overview";
     const tablist = document.createElement("nav");
     tablist.className = "system-workspace-tabs network-tabs";
@@ -988,6 +1004,7 @@
         }
       } catch (error) { remoteError = error?.message || "Remote access status unavailable."; }
       if (sequence !== loadSequence) return;
+      updatePlayitPopup();
       renderNetwork();
       state.textContent = "";
       if (remoteProviders.some(providerTransitional) || setupRunning()) pollRemoteAccess();
@@ -1168,6 +1185,7 @@
     if (selectedTab === "Remote Access") playitSetup = await requestJSON("/api/network/remote-access/playit/setup") || { state: "idle" };
     const remote = await requestJSON("/api/network/remote-access");
     remoteProviders = (remote?.providers || []).filter((provider) => ["tailscale", "netbird", "playit"].includes(provider.id));
+    updatePlayitPopup();
     renderNetwork();
   };
 
@@ -1183,12 +1201,18 @@
         if (sequence !== remotePollSequence || !dialog.open || !isAdministrator()) return;
         await refreshRemoteAccess();
       }
-    } catch (error) { state.textContent = error?.message || "Remote access status unavailable. Refresh to retry."; }
+    } catch (error) {
+      closePlayitPopup();
+      remoteError = error?.message || "Remote access status unavailable. Refresh to retry.";
+      state.textContent = remoteError;
+      renderNetwork();
+    }
   };
 
   const runRemoteAction = async (action) => {
     if (remoteBusy) return;
     remoteBusy = true;
+    remoteError = "";
     ++remotePollSequence;
     renderNetwork();
     try {
@@ -1196,7 +1220,9 @@
       await refreshRemoteAccess();
       pollRemoteAccess();
     } catch (error) {
-      state.textContent = error?.message || "Remote access change failed.";
+      closePlayitPopup();
+      remoteError = error?.message || "Remote access change failed.";
+      state.textContent = remoteError;
       try { await refreshRemoteAccess(); pollRemoteAccess(); } catch (_) { /* Keep the reported failure visible. */ }
     } finally {
       remoteBusy = false;
@@ -1229,16 +1255,29 @@
       return;
     }
     if (!isAdministrator()) return;
-    const setup = event.target.closest("[data-network-playit-setup]");
-    if (setup) {
-      if (!setup.disabled && !setupRunning()) runRemoteAction(async () => {
-        playitSetup = await postForm("/api/network/remote-access/playit/setup");
-      });
-      return;
-    }
     const provider = event.target.closest("[data-network-provider]");
     if (provider) {
-      if (!provider.disabled) runRemoteAction(() => postForm("/api/network/remote-access/" + escapePath(provider.dataset.networkProvider), { action: provider.dataset.action }));
+      if (provider.disabled || remoteBusy) return;
+      const id = provider.dataset.networkProvider;
+      const needsSetup = id === "playit" && provider.dataset.action === "activate" &&
+        !remoteProviders.find((item) => item.id === id)?.configured;
+      if (needsSetup) {
+        closePlayitPopup();
+        playitClaimOpened = false;
+        // Open during the click; sever the opener before navigating the validated claim.
+        try {
+          playitPopup = window.open("about:blank", "_blank");
+          if (playitPopup) playitPopup.opener = null;
+        } catch (_) { closePlayitPopup(); }
+        runRemoteAction(async () => {
+          // The existing setup endpoint enables/starts the fixed service before setup.
+          playitSetup = await postForm("/api/network/remote-access/playit/setup");
+          updatePlayitPopup();
+        });
+      } else {
+        if (id === "playit" && provider.dataset.action === "deactivate") closePlayitPopup();
+        runRemoteAction(() => postForm("/api/network/remote-access/" + escapePath(id), { action: provider.dataset.action }));
+      }
       return;
     }
     const check = event.target.closest("[data-network-connectivity-check]");
@@ -1331,7 +1370,7 @@
     const tab = event.target.closest("[data-network-tab]");
     if (!tab || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
-    const tabs = currentSnapshot?.workspace_tabs || ["Overview"];
+    const tabs = effectiveTabs(currentSnapshot);
     let index = tabs.indexOf(selectedTab);
     if (event.key === "Home") index = 0;
     else if (event.key === "End") index = tabs.length - 1;
