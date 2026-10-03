@@ -500,19 +500,15 @@ render_runtime_files() {
     replace_token "${env_tmp}" MAX_PLAYERS "${MAX_PLAYERS}"
     replace_token "${env_tmp}" RCON_PASSWORD "${rcon_password}"
     replace_token "${env_tmp}" MOTD "$(systemd_env_escape "${MOTD}")"
-    if [[ ${BEDROCK_ENABLED} == yes && ${BEDROCK_MANAGED_PLUGINS} == yes ]]; then
-        replace_token "${env_tmp}" PLUGINS_LINE 'PLUGINS=https://download.geysermc.org/v2/projects/geyser/versions/latest/builds/latest/downloads/spigot,https://download.geysermc.org/v2/projects/floodgate/versions/latest/builds/latest/downloads/spigot'
-    elif [[ ${BEDROCK_ENABLED} == yes ]]; then
-        replace_token "${env_tmp}" PLUGINS_LINE '# Geyser/Floodgate binaries are preserved from imported persistent server data.'
-    else
-        replace_token "${env_tmp}" PLUGINS_LINE '# Bedrock cross-play disabled; Geyser and Floodgate are not installed by JustVoxel.'
-    fi
+    # JustVoxel verifies these binaries; the container only owns ViaVersion.
+    replace_token "${env_tmp}" PLUGINS_LINE '# Cross-play binaries are managed by JustVoxel.'
     install -o root -g root -m0600 "${env_tmp}" "${JV_MC_ENV}"
     rm -f "${env_tmp}"
 
     image_ref="$(minecraft_image_ref)"
     quadlet_tmp="$(mktemp /etc/containers/systemd/.minecraft.container.XXXXXX)"
     cp "${JV_TEMPLATE_ROOT}/quadlets/minecraft.container.in" "${quadlet_tmp}"
+    sed -i '/^ExecStartPre=.*validate-data-mount$/a ExecStartPre=/usr/libexec/justvoxel/mjust/managed-crossplay-start' "${quadlet_tmp}"
     replace_token "${quadlet_tmp}" MINECRAFT_IMAGE "${image_ref}"
     replace_token "${quadlet_tmp}" DATA_PATH "${DATA_PATH}"
     replace_token "${quadlet_tmp}" JAVA_PORT "${JAVA_PORT}"

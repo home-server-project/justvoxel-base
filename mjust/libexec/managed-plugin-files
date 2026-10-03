@@ -1,0 +1,47 @@
+#!/usr/bin/bash
+set -euo pipefail
+python3 - "$@" <<'PY'
+"""Remove only recognized managed Spigot binaries; never configuration data."""
+import os
+import re
+import sys
+import zipfile
+
+check_only = len(sys.argv) == 5 and sys.argv[4] == "--check"
+if len(sys.argv) not in (4, 5) or (len(sys.argv) == 5 and not check_only):
+    raise SystemExit(1)
+root, component, keep = sys.argv[1:4]
+if component not in ("geyser", "floodgate", "viaversion", "all"):
+    raise SystemExit(1)
+if os.path.islink(root):
+    raise SystemExit("Managed plugin root must not be a symlink")
+identities = {
+    "org.geysermc.geyser.platform.spigot.GeyserSpigotPlugin": "geyser",
+    "org.geysermc.floodgate.SpigotPlugin": "floodgate",
+    "com.viaversion.viaversion.ViaVersionPlugin": "viaversion",
+    "us.myles.ViaVersion.ViaVersionPlugin": "viaversion",
+}
+canonical = {"geyser-spigot.jar": "geyser", "floodgate-spigot.jar": "floodgate", "viaversion.jar": "viaversion"}
+if not os.path.isdir(root):
+    raise SystemExit(0)
+for entry in os.scandir(root):
+    if entry.name == keep or not entry.name.lower().endswith(".jar") or not entry.is_file(follow_symlinks=False):
+        continue
+    owned = canonical.get(entry.name.lower())
+    if owned is None:
+        try:
+            with zipfile.ZipFile(entry.path) as jar:
+                info = jar.getinfo("plugin.yml")
+                if info.file_size > 65536:
+                    continue
+                descriptor = jar.read(info).decode("utf-8")
+            main = re.search(r"^[ \t]*main:\s*['\"]?([A-Za-z0-9_.]+)['\"]?\s*(?:#.*)?$", descriptor, re.MULTILINE)
+            owned = identities.get(main.group(1)) if main else None
+        except (OSError, ValueError, KeyError, UnicodeError, zipfile.BadZipFile):
+            continue
+    if owned and (component == "all" or component == owned):
+        if check_only:
+            raise SystemExit(2)
+        os.unlink(entry.path)
+
+PY

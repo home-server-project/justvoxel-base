@@ -10,6 +10,13 @@ import (
 )
 
 type adminVersionStatus struct {
+	StackState             string `json:"stack_state"`
+	MinecraftState         string `json:"minecraft_state"`
+	GeyserState            string `json:"geyser_state"`
+	FloodgateState         string `json:"floodgate_state"`
+	ViaVersionState        string `json:"viaversion_state"`
+	ImageState             string `json:"image_state"`
+	PlanFingerprint        string `json:"plan_fingerprint"`
 	ServerSoftware         string `json:"server_software"`
 	Installed              string `json:"installed"`
 	Available              string `json:"available"`
@@ -38,6 +45,9 @@ var runSetupVersionPreview = func(ctx context.Context, policy, version, bedrock 
 
 func registerAdminVersionStatusRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("GET /v1/admin/version/status", s.adminVersionStatus)
+	mux.HandleFunc("POST /v1/admin/version/update", s.adminMinecraftStackUpdate)
+	mux.HandleFunc("GET /v1/admin/version/update/current", s.adminMinecraftStackUpdateCurrent)
+	mux.HandleFunc("POST /v1/admin/version/update/acknowledge", s.adminMinecraftStackUpdateAcknowledge)
 	mux.HandleFunc("GET /v1/admin/setup/version-preview", s.adminSetupVersionPreview)
 }
 
@@ -58,7 +68,7 @@ func (s *server) adminSetupVersionPreview(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "Invalid Bedrock choice")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
 	output, err := runSetupVersionPreview(ctx, policy, version, bedrock)
 	if err != nil {
@@ -77,7 +87,7 @@ func (s *server) adminVersionStatus(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.requireAdministrator(w, r); !ok {
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
 	policy, version := r.URL.Query().Get("policy"), r.URL.Query().Get("version")
 	if policy != "" && policy != "recommended" && policy != "latest" && policy != "pinned" {

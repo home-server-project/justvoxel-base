@@ -48,6 +48,8 @@ type minecraftWorkspaceErrorResponse struct {
 
 func (a *App) registerMinecraftWorkspaceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/version/workspace/status", a.versionWorkspaceStatus)
+	mux.HandleFunc("POST /api/version/workspace/update", a.versionWorkspaceUpdate)
+	mux.HandleFunc("GET /api/version/workspace/update-operation", a.versionWorkspaceUpdateOperation)
 	mux.HandleFunc("GET /api/minecraft/workspace/settings", a.minecraftWorkspaceSettings)
 	mux.HandleFunc("POST /api/minecraft/workspace/settings/plan", a.minecraftWorkspaceSettingsPlan)
 	mux.HandleFunc("POST /api/minecraft/workspace/settings/apply", a.minecraftWorkspaceSettingsApply)

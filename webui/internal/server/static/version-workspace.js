@@ -7,6 +7,7 @@ if (versionLauncher && versionDialog) {
   const csrf = document.querySelector("[data-minecraft-workspace-csrf]")?.value || "";
   let currentTab = "software";
   let sequence = 0;
+  let updateOperation = "";
   const request = async (url, options = {}) => {
     const response = await fetch(url, { credentials: "same-origin", cache: "no-store", ...options });
     const payload = await response.json();
@@ -32,6 +33,68 @@ if (versionLauncher && versionDialog) {
     heading.textContent = title;
     panel.appendChild(heading);
     return panel;
+  };
+  const stackLabel = (value) => ({ up_to_date: "Up to date", updates_available: "Updates available", waiting_for_compatibility: "Waiting for compatibility", unavailable: "Unavailable", managed_automatically: "Managed automatically", disabled: "Cross-play off" })[value] || "Unavailable";
+  const watchUpdate = async (id) => {
+    updateOperation = id;
+    try {
+      const result = await request("/api/version/workspace/update-operation?" + new URLSearchParams({ id }));
+      const operation = result.operation;
+      state.textContent = operation?.status || "Server update status is unavailable.";
+      if (["succeeded", "resolved"].includes(operation?.state)) {
+        updateOperation = "";
+        await render(operation.status);
+      } else if (["needs_attention", "failed"].includes(operation?.state)) {
+        updateOperation = "";
+        await render(operation.status);
+      } else {
+        setTimeout(() => watchUpdate(id), 2000);
+      }
+    } catch (failure) { state.textContent = failure.message; updateOperation = ""; }
+  };
+  const reviewUpdates = async (root, button) => {
+    button.disabled = true;
+    try {
+      const plan = await request(statusURL());
+      if (!plan.update_available || plan.stack_state !== "updates_available") throw new Error(plan.reason || "No safe server update is currently available.");
+      root.querySelector("[data-stack-review]")?.remove();
+      const review = card("Review updates");
+      review.dataset.stackReview = "";
+      const grid = document.createElement("div");
+      grid.className = "version-status-grid";
+      grid.append(line("Minecraft", `${plan.installed} → ${plan.selected_candidate}`), line("Geyser", stackLabel(plan.geyser_state)), line("Floodgate", stackLabel(plan.floodgate_state)), line("ViaVersion", "Managed automatically"));
+      const notice = document.createElement("p");
+      notice.className = "notice warning";
+      notice.textContent = "JustVoxel will create a cold backup and safely restart Minecraft. Online players will receive a shutdown countdown. A stopped server may start temporarily for verification and will be stopped again afterward.";
+      const consent = document.createElement("label");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      consent.append(checkbox, document.createTextNode("Allow the update to interrupt online players."));
+      const actions = document.createElement("div");
+      actions.className = "action-row";
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "secondary";
+      cancel.textContent = "Cancel review";
+      cancel.addEventListener("click", () => review.remove());
+      const apply = document.createElement("button");
+      apply.type = "button";
+      apply.textContent = "Apply update";
+      apply.addEventListener("click", async () => {
+        apply.disabled = true;
+        try {
+          const body = new URLSearchParams({ csrf, plan_fingerprint: plan.plan_fingerprint, confirm_players: checkbox.checked ? "yes" : "no" });
+          const result = await request("/api/version/workspace/update", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
+          review.remove();
+          if (!result.operation?.operation_id) throw new Error("Server update tracking is unavailable.");
+          watchUpdate(result.operation.operation_id);
+        } catch (failure) { state.textContent = failure.message; apply.disabled = false; }
+      });
+      actions.append(cancel, apply);
+      review.append(grid, notice, consent, actions);
+      root.appendChild(review);
+    } catch (failure) { state.textContent = failure.message; }
+    finally { button.disabled = false; }
   };
   const showReview = (root, form, plan, params, status) => {
     root.querySelector("[data-version-review]")?.remove();
@@ -126,12 +189,38 @@ if (versionLauncher && versionDialog) {
     const ticket = ++sequence;
     state.textContent = "Loading version information…";
     try {
-      const [settings, status] = await Promise.all([
+      const [settings, status, pending] = await Promise.all([
         request("/api/minecraft/workspace/settings"), request(statusURL()),
+        request("/api/version/workspace/update-operation").catch(() => ({})),
       ]);
       if (ticket !== sequence) return;
       const minecraft = settings.minecraft || {};
       const root = document.createElement("div");
+      if (pending.operation) {
+        const progress = card("Server update");
+        const notice = document.createElement("p");
+        notice.textContent = pending.operation.status;
+        progress.appendChild(notice);
+        if (["needs_attention", "failed"].includes(pending.operation.state)) {
+          updateOperation = "";
+          const acknowledge = document.createElement("button");
+          acknowledge.type = "button";
+          acknowledge.textContent = "Verify and keep current server";
+          acknowledge.addEventListener("click", async () => {
+            acknowledge.disabled = true;
+            try {
+              const body = new URLSearchParams({ csrf, acknowledge: "yes", operation_id: pending.operation.operation_id });
+              await request("/api/version/workspace/update", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
+              await render("Current server verified and kept. Review updates again when ready.");
+            } catch (failure) { state.textContent = failure.message; acknowledge.disabled = false; }
+          });
+          progress.appendChild(acknowledge);
+        } else if (!updateOperation) {
+          watchUpdate(pending.operation.operation_id);
+        }
+        root.appendChild(progress);
+      }
+
       if (currentTab === "software") {
         const software = card("Server software");
         const choices = document.createElement("div");
@@ -165,11 +254,23 @@ if (versionLauncher && versionDialog) {
         const panel = card("Minecraft Version");
         const grid = document.createElement("div");
         grid.className = "version-status-grid";
-        grid.append(line("Installed", status.installed || "Not detected"), line("Newest available", status.available ? `${status.available} · ${releaseLabel(status.available_channel)}` : "Unavailable"), line("Recommended", status.recommended), line("Configured", status.configured_version === "LATEST" ? "Follows new versions" : status.configured_version), line("Server software", status.server_software || "Paper"), line("Container channel", status.image_tag), line("Version policy", policyLabel(minecraft.version_mode)), line("Update", status.update_available ? "Available" : "No update confirmed"));
+        grid.append(line("Installed", status.installed || "Not detected"), line("Newest available", status.available ? `${status.available} · ${releaseLabel(status.available_channel)}` : "Unavailable"), line("Recommended", status.recommended), line("Configured", status.configured_version === "LATEST" ? "Follows new versions" : status.configured_version), line("Server software", status.server_software || "Paper"), line("Container channel", status.image_tag), line("Version policy", policyLabel(minecraft.version_mode)), line("Overall", stackLabel(status.stack_state)));
+        grid.append(line("Minecraft update", stackLabel(status.minecraft_state)), line("Geyser", stackLabel(status.geyser_state)), line("Floodgate", stackLabel(status.floodgate_state)), line("ViaVersion", "Managed automatically"));
+        if (status.crossplay_enabled && status.policy === "recommended" && status.available && status.recommended && status.available !== status.recommended) {
+          grid.append(line("New Minecraft version", `${status.available} · Waiting for cross-play support`));
+        }
         panel.appendChild(grid);
+        if (status.update_available && status.stack_state === "updates_available") {
+          const updates = document.createElement("button");
+          updates.type = "button";
+          updates.textContent = "Review updates";
+          updates.disabled = Boolean(updateOperation || pending.operation);
+          updates.addEventListener("click", () => reviewUpdates(root, updates));
+          panel.appendChild(updates);
+        }
         const compatibility = document.createElement("p");
         compatibility.className = status.crossplay_enabled && !status.crossplay_compatible ? "notice warning" : "muted compact";
-        compatibility.textContent = status.reason || (status.crossplay_enabled ? `Paper supported · Geyser/Floodgate supports ${status.geyser_supported_version || "an unknown version"}.` : status.paper_supported ? "Paper supports the available version." : "Compatibility could not be confirmed.");
+        compatibility.textContent = status.reason || (status.stack_state === "up_to_date" ? "Your JustVoxel server is up to date. No action needed." : status.stack_state === "updates_available" ? "Compatible server updates are ready to review." : "Server update information could not be verified.");
         panel.appendChild(compatibility);
         root.appendChild(panel);
         const policyPanel = card("Version policy");
@@ -195,6 +296,9 @@ if (versionLauncher && versionDialog) {
         root.appendChild(policyPanel);
         wireForm(root, form, minecraft);
         sync();
+      }
+      if (pending.operation) {
+        root.querySelectorAll("form input, form select, form button").forEach((control) => { control.disabled = true; });
       }
       content.replaceChildren(root);
       state.textContent = message;

@@ -1,0 +1,29 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/managed-crossplay.sh
+require_root
+require_config
+[[ ${BEDROCK_ENABLED} == yes ]] || exit 0
+# Normal starts preserve working binaries, including during upstream outages.
+# Explicit maintenance owns refreshes; first setup/import needs verified binaries.
+if [[ -s ${DATA_PATH}/plugins/Geyser-Spigot.jar && ! -L ${DATA_PATH}/plugins/Geyser-Spigot.jar &&
+      -s ${DATA_PATH}/plugins/floodgate-spigot.jar && ! -L ${DATA_PATH}/plugins/floodgate-spigot.jar ]]; then
+    exit 0
+fi
+staging="$(mktemp -d)"
+jv_crossplay_start_cleanup() {
+    local status=$?
+    if (( status != 0 )) && [[ -f ${staging}/replacement-started ]]; then
+        if ! jv_crossplay_rollback "${staging}"; then
+            echo "ERROR: Managed cross-play rollback failed; appliance state requires attention. Recovery files preserved at ${staging}." >&2
+            return "${status}"
+        fi
+    fi
+    rm -rf -- "${staging}"
+    return "${status}"
+}
+trap jv_crossplay_start_cleanup EXIT
+jv_crossplay_prepare "${staging}"
+jv_crossplay_install "${staging}"
+jv_crossplay_verify "${staging}"

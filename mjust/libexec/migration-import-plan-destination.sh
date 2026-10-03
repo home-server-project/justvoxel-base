@@ -60,12 +60,8 @@ else
     fi
 fi
 
-plugin_names="$(jq -r '.pluginJars[]? | ascii_downcase' <<< "${selected}" 2>/dev/null || true)"
-if [[ ${BEDROCK_ENABLED} == yes ]] && grep -q 'geyser' <<< "${plugin_names}" && grep -q 'floodgate' <<< "${plugin_names}"; then
-    BEDROCK_MANAGED_PLUGINS=no
-else
-    BEDROCK_MANAGED_PLUGINS=yes
-fi
+# Imported configuration is data; managed binaries belong to JustVoxel.
+BEDROCK_MANAGED_PLUGINS=yes
 
 # Destination-specific configuration.
 MINECRAFT_VERSION_MODE=pinned
@@ -158,6 +154,7 @@ fi
 
 # Recalculate data destination ownership and normalize only appliance-specific runtime values.
 jv_migration_normalize_staged_runtime_files "${staged_server}" "${BEDROCK_ENABLED}"
+/usr/libexec/justvoxel/mjust/managed-plugin-files "${staged_server}/plugins" all ''
 
 # Show the final plan before any live destination changes.
 echo

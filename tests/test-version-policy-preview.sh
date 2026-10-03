@@ -20,8 +20,16 @@ paper_version_build_channel() {
     esac
 }
 bedrock_crossplay_supports_version() { [[ $1 == "$2" ]]; }
+systemctl() { echo runtime-check >> "${DATA_PATH}.checks"; return 1; }
+minecraft_image_ref() { echo runtime-check >> "${DATA_PATH}.checks"; printf 'docker.io/itzg/minecraft-server:stable'; }
+jv_remote_platform_digest() { return 1; }
+podman() { echo runtime-check >> "${DATA_PATH}.checks"; return 1; }
+jv_crossplay_metadata() { echo runtime-check >> "${DATA_PATH}.checks"; return 1; }
+jv_crossplay_artifact_state() { printf unavailable; }
 EOF
-sed "s|^source /usr/libexec/justvoxel/mjust/common.sh$|source ${fixture_dir}/common.sh|" \
+sed -e "s|^source /usr/libexec/justvoxel/mjust/common.sh$|source ${fixture_dir}/common.sh|" \
+    -e '\|^source /usr/libexec/justvoxel/mjust/managed-crossplay.sh$|d' \
+    -e '\|^source /usr/libexec/justvoxel/mjust/update-policy.sh$|d' \
     "${repo_root}/mjust/libexec/admin-version-status-json" > "${fixture_dir}/status"
 export STABLE_VERSION=26.2 NEWEST_VERSION=26.3 DATA_PATH="${fixture_dir}/data"
 export MINECRAFT_VERSION_MODE=recommended MINECRAFT_VERSION="${STABLE_VERSION}" MINECRAFT_IMAGE_TAG=stable
@@ -52,6 +60,14 @@ jq -e --arg newest "${NEWEST_VERSION}" '.selected_candidate == $newest and .cand
 
 missing="$(bash "${fixture_dir}/status" pinned 9.9 no)"
 jq -e '.selected_candidate == "" and .paper_supported == false' <<< "${missing}" >/dev/null
+
+# Setup compatibility never depends on a local appliance runtime or JARs.
+[[ ! -e ${DATA_PATH} && ! -e ${DATA_PATH}.checks ]]
+for preview in "${recommended}" "${bedrock}" "${latest}" "${latest_bedrock}" "${specific_bedrock}"; do
+    jq -e '.stack_state == "not_applicable" and .image_state == "not_applicable" and .installed == "" and .plan_fingerprint == "" and (.update_available | not) and (.reason | contains("Server update information could not be verified") | not)' <<< "${preview}" >/dev/null
+done
+jq -e '.recommended == "26.2" and .crossplay_compatible and .paper_supported' <<< "${bedrock}" >/dev/null
+jq -e '.reason | contains("selected Minecraft 26.3 is not compatible")' <<< "${specific_bedrock}" >/dev/null
 
 # Exercise the shared Paper metadata resolver with stable, pre-release, and
 # unusable build records. A build without a server download is not installable.
