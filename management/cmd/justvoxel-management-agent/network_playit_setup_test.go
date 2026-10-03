@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,6 +23,8 @@ func setupFixture(t *testing.T) string {
 	remoteFixture(t)
 	oldRun, oldStat, oldTimeout, oldCommand := playitSetupRun, playitExecutableStat, playitSetupTimeout, playitSetupCommand
 	playitSetup.mu.Lock()
+	playitSetup.generation++
+	playitSetup.cancel, playitSetup.done = nil, nil
 	playitSetup.state = playitSetupState{State: "idle"}
 	playitSetup.mu.Unlock()
 	executable := filepath.Join(t.TempDir(), "executable-evidence")
@@ -126,7 +129,7 @@ func TestPlayitSetupSingleProcessCompletesWithoutOutputOrAuditSecrets(t *testing
 	if starts.Load() != 1 {
 		t.Fatal("concurrent setup processes")
 	}
-	if rr := networkAdminRequest(s, "/v1/admin/network/remote-access/playit", `{"action":"deactivate"}`); rr.Code != http.StatusConflict {
+	if rr := networkAdminRequest(s, "/v1/admin/network/remote-access/playit", `{"action":"activate"}`); rr.Code != http.StatusConflict {
 		t.Fatal("setup allowed lifecycle change")
 	}
 	close(release)
@@ -278,5 +281,107 @@ func TestPlayitSetupActivatesInactiveUsingProviderLifecycle(t *testing.T) {
 	}
 	if rr := setupRequest(adminServerForTest(), http.MethodPost); rr.Code != http.StatusServiceUnavailable {
 		t.Fatal("activation failure accepted")
+	}
+}
+
+func TestPlayitDeactivateCancelsAndAllowsFreshSetup(t *testing.T) {
+	for _, result := range []error{nil, os.ErrInvalid} {
+		t.Run(fmt.Sprint(result), func(t *testing.T) {
+			setupFixture(t)
+			store, _ := openTestWebUIStore(t)
+			s := adminServerForTest()
+			s.store = store
+			var mutations []string
+			remoteSystemctl = func(_ context.Context, args ...string) (string, error) {
+				if args[0] == "show" {
+					return "LoadState=loaded\nUnitFileState=enabled\nActiveState=active", nil
+				}
+				mutations = append(mutations, strings.Join(args, " "))
+				return "", nil
+			}
+			cancelled, lateClaim, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			playitSetupRun = func(ctx context.Context, output io.Writer) error {
+				fmt.Fprintln(output, "https://playit.gg/claim/0123abcdef")
+				<-ctx.Done()
+				close(cancelled)
+				// A buffered output callback and completion must both be ignored.
+				fmt.Fprintln(output, "https://playit.gg/claim/abcdef0123")
+				close(lateClaim)
+				<-release
+				return result
+			}
+			if rr := setupRequest(s, http.MethodPost); rr.Code != http.StatusAccepted {
+				t.Fatal(rr.Body.String())
+			}
+			waitSetup(t, "waiting")
+			deactivated := make(chan *httptest.ResponseRecorder, 1)
+			go func() {
+				deactivated <- networkAdminRequest(s, "/v1/admin/network/remote-access/playit", `{"action":"deactivate"}`)
+			}()
+			select {
+			case <-cancelled:
+			case <-time.After(3 * time.Second):
+				t.Fatal("setup command was not cancelled")
+			}
+			select {
+			case <-lateClaim:
+			case <-time.After(3 * time.Second):
+				t.Fatal("late claim callback blocked")
+			}
+			playitSetup.mu.Lock()
+			state := playitSetup.state
+			playitSetup.mu.Unlock()
+			close(release)
+			rr := <-deactivated
+			if rr.Code != http.StatusOK || state.State != "idle" || state.ClaimURL != "" {
+				t.Fatalf("deactivate: %d state=%+v", rr.Code, state)
+			}
+			if !reflect.DeepEqual(mutations, []string{"stop playit.service", "disable playit.service"}) {
+				t.Fatalf("unexpected lifecycle %v", mutations)
+			}
+			rr = setupRequest(s, http.MethodGet)
+			if strings.Contains(rr.Body.String(), "claim") || !strings.Contains(rr.Body.String(), `"state":"idle"`) {
+				t.Fatalf("cancelled completion overwrote state: %s", rr.Body.String())
+			}
+			events, err := store.listAuditEvents(20)
+			if err != nil || len(events) != 2 {
+				t.Fatalf("cancellation audit: %v %v", events, err)
+			}
+			for _, event := range events {
+				if event.Action == "network_playit_setup_failed" || event.Action == "network_playit_setup_complete" {
+					t.Fatal("cancellation audited as setup result")
+				}
+			}
+			freshRelease := make(chan struct{})
+			playitSetupRun = func(ctx context.Context, output io.Writer) error {
+				fmt.Fprintln(output, "https://playit.gg/claim/9876543210")
+				<-freshRelease
+				return os.ErrInvalid
+			}
+			if rr := setupRequest(s, http.MethodPost); rr.Code != http.StatusAccepted {
+				t.Fatalf("fresh setup rejected: %s", rr.Body.String())
+			}
+			waitSetup(t, "waiting")
+			rr = setupRequest(s, http.MethodGet)
+			if !strings.Contains(rr.Body.String(), "9876543210") {
+				t.Fatal("fresh claim state unavailable")
+			}
+			close(freshRelease)
+			waitSetup(t, "failed")
+		})
+	}
+}
+
+func TestReadOnlyPlayitPendingStatusNeverIncludesClaim(t *testing.T) {
+	setupFixture(t)
+	playitSetup.mu.Lock()
+	playitSetup.state = playitSetupState{State: "waiting", ClaimURL: "https://playit.gg/claim/0123abcdef"}
+	playitSetup.mu.Unlock()
+	mux := http.NewServeMux()
+	registerNetworkRoutes(mux, roleServerForTest(roleViewer))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, authorizedRequest(http.MethodGet, "/v1/network/remote-access", ""))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"summary":"Setup pending"`) || strings.Contains(rr.Body.String(), "claim") || strings.Contains(rr.Body.String(), "0123abcdef") {
+		t.Fatalf("read-only pending status: %d %s", rr.Code, rr.Body.String())
 	}
 }

@@ -224,6 +224,8 @@ type RemoteAccessProvider struct {
 	Configured     bool   `json:"configured"`
 	DashboardURL   string `json:"dashboard_url"`
 	ServiceState   string `json:"service_state"`
+	Summary        string `json:"summary"`
+	Connected      bool   `json:"connected"`
 }
 
 type RemoteAccessStatus struct {

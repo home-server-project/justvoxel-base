@@ -408,7 +408,7 @@ if (quickLook && quickLookToggle) {
     });
   };
 
-  const renderQuickLook = (snapshot) => {
+  const renderQuickLook = (snapshot, providers = []) => {
     const status = snapshot?.status || {};
     const minecraft = status.minecraft || {};
     const players = snapshot?.players || {};
@@ -426,8 +426,11 @@ if (quickLook && quickLookToggle) {
     const overlays = quickLook.querySelector("[data-quick-look-overlays]");
     if (overlays) {
       overlays.replaceChildren();
-      [["Tailscale", system.tailscale], ["NetBird", system.netbird]].forEach(([label, value]) => {
-        if (!value) return;
+      [["Tailscale", "tailscale"], ["NetBird", "netbird"], ["Playit", "playit"]].forEach(([label, id]) => {
+        const provider = providers.find((item) => item.id === id);
+        const value = id === "playit"
+          ? (provider?.configured ? (provider.service_active ? "Running" : "Configured") : "Not configured")
+          : (provider?.connected ? "Connected" : "Not connected");
         const line = document.createElement("span");
         const name = document.createElement("span");
         name.textContent = label;
@@ -458,7 +461,17 @@ if (quickLook && quickLookToggle) {
         return;
       }
       if (!response.ok) return;
-      renderQuickLook(await response.json());
+      const snapshot = await response.json();
+      let providers = [];
+      try {
+        const remote = await fetch("/api/network/remote-access", {
+          credentials: "same-origin", headers: { Accept: "application/json" }, cache: "no-store",
+        });
+        if (remote.ok) providers = (await remote.json()).providers || [];
+      } catch (_) {
+        // Missing provider evidence is presented conservatively.
+      }
+      renderQuickLook(snapshot, providers);
     } catch (_) {
       // Keep the last values and retry on the next refresh.
     }

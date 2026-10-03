@@ -7,14 +7,18 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func remoteFixture(t *testing.T) *[]string {
 	t.Helper()
-	oldRun, oldStat := remoteSystemctl, remoteStat
+	oldRun, oldStat, oldStatus := remoteSystemctl, remoteStat, tailscaleStatus
+	tailscaleStatus = func(context.Context) (bool, string) { return false, "Not configured" }
 	calls := []string{}
 	remoteSystemctl = func(_ context.Context, args ...string) (string, error) {
 		calls = append(calls, strings.Join(args, " "))
@@ -24,7 +28,7 @@ func remoteFixture(t *testing.T) *[]string {
 		return "", nil
 	}
 	remoteStat = func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
-	t.Cleanup(func() { remoteSystemctl = oldRun; remoteStat = oldStat })
+	t.Cleanup(func() { remoteSystemctl = oldRun; remoteStat = oldStat; tailscaleStatus = oldStatus })
 	return &calls
 }
 
@@ -140,7 +144,7 @@ func TestPlayitConfigurationEvidenceOnlyUsesExpectedFile(t *testing.T) {
 	}
 }
 
-func TestRemoteProviderRejectsTransitionalLifecycle(t *testing.T) {
+func TestRemoteProviderTransitionalLifecycle(t *testing.T) {
 	remoteFixture(t)
 	for _, state := range []string{"activating", "deactivating", "reloading", "refreshing"} {
 		var mutations int
@@ -152,13 +156,147 @@ func TestRemoteProviderRejectsTransitionalLifecycle(t *testing.T) {
 			return "", nil
 		}
 		for _, action := range []string{"activate", "deactivate"} {
-			rr := networkAdminRequest(adminServerForTest(), "/v1/admin/network/remote-access/playit", `{"action":"`+action+`"}`)
-			if rr.Code != http.StatusConflict {
+			rr := networkAdminRequest(adminServerForTest(), "/v1/admin/network/remote-access/netbird", `{"action":"`+action+`"}`)
+			want := http.StatusConflict
+			if action == "deactivate" && state != "deactivating" {
+				want = http.StatusOK
+			}
+			if rr.Code != want {
 				t.Fatalf("%s %s: %d", state, action, rr.Code)
 			}
 		}
-		if mutations != 0 {
-			t.Fatal("transitional lifecycle reached systemctl")
+		want := 2
+		if state == "deactivating" {
+			want = 0
 		}
+		if mutations != want {
+			t.Fatalf("unexpected mutations: %d", mutations)
+		}
+	}
+}
+
+func TestTailscaleStatusHelperProcess(t *testing.T) {
+	if os.Getenv("JUSTVOXEL_TAILSCALE_STATUS_FIXTURE") != "1" {
+		return
+	}
+	_, _ = os.Stdout.WriteString(os.Getenv("JUSTVOXEL_TAILSCALE_JSON"))
+	os.Exit(0)
+}
+
+func TestTailscaleFixedStatusIdentityEvidence(t *testing.T) {
+	oldCommand := tailscaleStatusCommand
+	t.Cleanup(func() { tailscaleStatusCommand = oldCommand })
+	for _, test := range []struct {
+		name, payload, summary string
+		configured             bool
+	}{
+		{"needs-login", `{"BackendState":"NeedsLogin","HaveNodeKey":true,"CurrentTailnet":{}}`, "Not configured", false},
+		{"no-state", `{"BackendState":"NoState","HaveNodeKey":true,"CurrentTailnet":{}}`, "Not configured", false},
+		{"running", `{"BackendState":"Running","HaveNodeKey":true,"CurrentTailnet":{"Name":"private-account"}}`, "Connected", true},
+		{"approval", `{"BackendState":"NeedsMachineAuth"}`, "Awaiting approval", true},
+		{"starting-no-identity", `{"BackendState":"Starting"}`, "Not configured", false},
+		{"starting-key", `{"BackendState":"Starting","HaveNodeKey":true}`, "Starting", true},
+		{"stopped-no-identity", `{"BackendState":"Stopped","CurrentTailnet":null}`, "Not configured", false},
+		{"stopped-tailnet", `{"BackendState":"Stopped","CurrentTailnet":{}}`, "Stopped", true},
+		{"unknown", `{"BackendState":"Unknown","HaveNodeKey":true}`, "Not configured", false},
+		{"invalid", `{`, "Not configured", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tailscaleStatusCommand = func(ctx context.Context, executable string, args ...string) *exec.Cmd {
+				if executable != "/usr/bin/tailscale" || !reflect.DeepEqual(args, []string{"status", "--json"}) {
+					t.Fatalf("nonfixed command: %s %v", executable, args)
+				}
+				deadline, ok := ctx.Deadline()
+				if !ok || time.Until(deadline) > 2*time.Second {
+					t.Fatal("status query is not bounded")
+				}
+				cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestTailscaleStatusHelperProcess$")
+				cmd.Env = append(os.Environ(), "JUSTVOXEL_TAILSCALE_STATUS_FIXTURE=1", "JUSTVOXEL_TAILSCALE_JSON="+test.payload)
+				return cmd
+			}
+			configured, summary := tailscaleStatus(context.Background())
+			if configured != test.configured || summary != test.summary {
+				t.Fatalf("configured=%v summary=%q", configured, summary)
+			}
+		})
+	}
+	tailscaleStatusCommand = func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/nonexistent/justvoxel-test-tailscale")
+	}
+	if configured, summary := tailscaleStatus(context.Background()); configured || summary != "Not configured" {
+		t.Fatal("command failure claimed configuration")
+	}
+}
+
+func TestTailscaleStateFileAloneIsNotConfiguration(t *testing.T) {
+	remoteFixture(t)
+	path := filepath.Join(t.TempDir(), "tailscaled.state")
+	if err := os.WriteFile(path, []byte("fresh daemon state"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	remoteStat = func(string) (os.FileInfo, error) { return os.Stat(path) }
+	provider, _ := remoteProviderByID("tailscale")
+	status, err := remoteProviderStatus(context.Background(), provider)
+	if err != nil || status.Configured || status.Connected || remoteConfigured(provider) {
+		t.Fatalf("state file claimed configuration: %+v %v", status, err)
+	}
+}
+
+func TestNetBirdActivatingDeactivateUsesOnlyFixedLifecycle(t *testing.T) {
+	remoteFixture(t)
+	var mutations []string
+	remoteSystemctl = func(_ context.Context, args ...string) (string, error) {
+		if args[0] == "show" {
+			return "LoadState=loaded\nUnitFileState=enabled\nActiveState=activating", nil
+		}
+		mutations = append(mutations, strings.Join(args, " "))
+		return "", nil
+	}
+	rr := networkAdminRequest(adminServerForTest(), "/v1/admin/network/remote-access/netbird", `{"action":"deactivate"}`)
+	if rr.Code != http.StatusOK || !reflect.DeepEqual(mutations, []string{"stop netbird.service", "disable netbird.service"}) {
+		t.Fatalf("deactivate: %d %v", rr.Code, mutations)
+	}
+}
+
+func TestCanonicalProviderSummariesFollowConfigurationAndService(t *testing.T) {
+	remoteFixture(t)
+	path := filepath.Join(t.TempDir(), "configuration")
+	if err := os.WriteFile(path, []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		id, state, summary    string
+		configured, connected bool
+	}{
+		{"netbird", "activating", "Not configured", false, false},
+		{"netbird", "active", "Connected", true, true},
+		{"netbird", "inactive", "Stopped", true, false},
+		{"playit", "active", "Not configured", false, false},
+		{"playit", "active", "Running", true, true},
+		{"playit", "inactive", "Configured", true, false},
+	} {
+		remoteStat = func(string) (os.FileInfo, error) {
+			if test.configured {
+				return os.Stat(path)
+			}
+			return nil, os.ErrNotExist
+		}
+		remoteSystemctl = func(context.Context, ...string) (string, error) {
+			return "LoadState=loaded\nUnitFileState=enabled\nActiveState=" + test.state, nil
+		}
+		provider, _ := remoteProviderByID(test.id)
+		status, err := remoteProviderStatus(context.Background(), provider)
+		if err != nil || status.Configured != test.configured || status.Connected != test.connected || status.Summary != test.summary {
+			t.Fatalf("%s %s: %+v %v", test.id, test.state, status, err)
+		}
+	}
+	tailscaleStatus = func(context.Context) (bool, string) { return true, "Connected" }
+	remoteSystemctl = func(context.Context, ...string) (string, error) {
+		return "LoadState=loaded\nUnitFileState=enabled\nActiveState=inactive", nil
+	}
+	provider, _ := remoteProviderByID("tailscale")
+	status, err := remoteProviderStatus(context.Background(), provider)
+	if err != nil || !status.Configured || status.Connected || status.Summary != "Stopped" {
+		t.Fatalf("stopped Tailscale: %+v %v", status, err)
 	}
 }

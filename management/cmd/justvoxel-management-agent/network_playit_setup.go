@@ -21,8 +21,12 @@ func (state playitSetupState) running() bool {
 
 // One appliance-wide attempt, shared with lifecycle requests. No identity data.
 var playitSetup = struct {
-	mu    sync.Mutex
-	state playitSetupState
+	operation  sync.Mutex
+	mu         sync.Mutex
+	state      playitSetupState
+	cancel     context.CancelFunc
+	done       chan struct{}
+	generation uint64
 }{state: playitSetupState{State: "idle"}}
 
 var playitSetupTimeout = 10 * time.Minute
@@ -84,6 +88,10 @@ func (s *server) networkPlayitSetup(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if r.Method == http.MethodPost {
+		playitSetup.operation.Lock()
+		defer playitSetup.operation.Unlock()
+	}
 	playitSetup.mu.Lock()
 	defer playitSetup.mu.Unlock()
 	if r.Method == http.MethodGet {
@@ -117,6 +125,11 @@ func (s *server) networkPlayitSetup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	setupContext, setupCancel := context.WithTimeout(context.Background(), playitSetupTimeout)
+	playitSetup.generation++
+	generation := playitSetup.generation
+	done := make(chan struct{})
+	playitSetup.cancel, playitSetup.done = setupCancel, done
 	playitSetup.state = playitSetupState{State: "starting"}
 	if s.store != nil {
 		_ = s.store.recordAuditEvent(actor, "network_playit_setup_start", "playit", true, "packaged setup started")
@@ -124,12 +137,15 @@ func (s *server) networkPlayitSetup(w http.ResponseWriter, r *http.Request) {
 	// The CLI owns daemon readiness, approval, exchange and provisioning.
 	// Request disconnects must not abandon the bounded setup attempt.
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), playitSetupTimeout)
-		defer cancel()
+		ctx := setupContext
+		defer setupCancel()
+		defer close(done)
 		output := &playitClaimWriter{onClaim: func(url string) {
 			playitSetup.mu.Lock()
 			defer playitSetup.mu.Unlock()
-			playitSetup.state = playitSetupState{State: "waiting", ClaimURL: url}
+			if playitSetup.generation == generation {
+				playitSetup.state = playitSetupState{State: "waiting", ClaimURL: url}
+			}
 		}}
 		err := playitSetupRun(ctx, output)
 		output.mu.Lock()
@@ -137,6 +153,10 @@ func (s *server) networkPlayitSetup(w http.ResponseWriter, r *http.Request) {
 		output.mu.Unlock()
 		playitSetup.mu.Lock()
 		defer playitSetup.mu.Unlock()
+		if playitSetup.generation != generation {
+			return
+		}
+		playitSetup.cancel = nil
 		success := err == nil && ctx.Err() == nil && remoteConfigured(provider)
 		action := "network_playit_setup_failed"
 		playitSetup.state = playitSetupState{State: "failed"}

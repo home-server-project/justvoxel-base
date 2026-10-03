@@ -27,10 +27,10 @@
   const providerTransitional = (provider) => ["activating", "deactivating", "reloading", "refreshing"].includes(provider.service_state);
   const setupRunning = () => ["starting", "waiting"].includes(playitSetup.state);
   const providerControls = (provider) => {
-    const blocked = !provider.installed || providerTransitional(provider) || remoteBusy || (provider.id === "playit" && setupRunning());
+    const blocked = !provider.installed || remoteBusy || provider.service_state === "deactivating";
     return {
-      activateDisabled: blocked || (provider.service_active && provider.service_enabled),
-      deactivateDisabled: blocked || (!provider.service_active && !provider.service_enabled && provider.service_state === "inactive")
+      activateDisabled: blocked || providerTransitional(provider) || provider.service_active || (provider.id === "playit" && setupRunning()),
+      deactivateDisabled: blocked || (!(provider.id === "playit" && setupRunning()) && !provider.service_active && !provider.service_enabled && provider.service_state === "inactive")
     };
   };
   const isAdministrator = () => (currentSnapshot?.workspace_tabs || []).includes("Ethernet");
@@ -256,7 +256,7 @@
     return controls;
   };
 
-  const renderOverview = (snapshot) => {
+  const renderConnectivity = (snapshot) => {
     const section = document.createElement("section");
     section.className = "panel details network-overview";
 
@@ -309,6 +309,30 @@
     subtitle.textContent = "NetworkManager " + (snapshot.version || "unknown version");
 
     section.append(heading, subtitle);
+    return section;
+  };
+
+  const renderOverview = (snapshot) => {
+    const section = document.createElement("section");
+    section.className = "panel details network-overview";
+    const connectivity = snapshot.connectivity || "unknown";
+    const heading = sectionHeading("Connectivity",
+      connectivity === "full" ? "Internet connected" :
+      connectivity === "limited" ? "Limited connectivity" :
+      connectivity === "portal" ? "Sign-in network detected" :
+      connectivity === "none" ? "No internet connection" : "Network status unknown");
+    const devices = (snapshot.devices || []).filter((device) => ["ethernet", "wifi"].includes(device.kind));
+    const primary = devices.find((device) => device.state === "activated" && device.ipv4?.gateway && device.ipv4?.addresses?.length)
+      || devices.find((device) => device.state === "activated" && device.ipv4?.addresses?.length);
+    const ethernet = devices.find((device) => device.kind === "ethernet" && device.state === "activated")
+      || devices.find((device) => device.kind === "ethernet");
+    section.append(heading,
+      row("IPv4", primary?.ipv4?.addresses?.[0]?.address || "Unavailable"),
+      row("Ethernet", ethernet ? ethernet.interface + " · " + (ethernet.state === "activated" && ethernet.carrier !== false ? "Connected" : "Disconnected") : "Unavailable"));
+    for (const [id, name] of [["tailscale", "Tailscale"], ["netbird", "NetBird"], ["playit", "Playit"]]) {
+      const provider = remoteProviders.find((item) => item.id === id);
+      section.appendChild(row(name, provider?.summary || "Unavailable"));
+    }
     return section;
   };
 
@@ -877,25 +901,6 @@
     const devices = (currentSnapshot.devices || []).filter((device) => ["ethernet", "wifi"].includes(device.kind));
     if (selectedTab === "Overview") {
       panel.appendChild(renderOverview(currentSnapshot));
-      const interfaces = document.createElement("section");
-      interfaces.className = "panel network-section";
-      interfaces.appendChild(sectionHeading("Network", "Interfaces"));
-      const grid = document.createElement("div");
-      grid.className = "network-devices";
-      devices.forEach((device) => {
-        const card = document.createElement("article");
-        card.className = "panel network-device-card";
-        const heading = sectionHeading(device.kind === "wifi" ? "Wi-Fi" : "Ethernet", device.interface);
-        heading.appendChild(badge(label(device.state), device.state === "activated" ? "good" : ""));
-        card.append(heading, row("IPv4", firstAddress(device.ipv4)));
-        card.appendChild(device.kind === "wifi"
-          ? row("Signal", device.wireless?.ssid ? (device.wireless.signal || 0) + "%" : "—")
-          : row("Link", device.carrier === false ? "Cable disconnected" : device.speed_mbps ? device.speed_mbps + " Mbps" : "Connected"));
-        grid.appendChild(card);
-      });
-      interfaces.appendChild(grid);
-      if (!devices.length) interfaces.appendChild(row("Devices", "No Ethernet or Wi-Fi interface is available"));
-      panel.appendChild(interfaces);
     } else if (selectedTab === "Ethernet") {
       devices.filter((device) => device.kind === "ethernet").forEach((device) => {
         const card = renderDevice(device);
@@ -906,7 +911,7 @@
       });
       if (!devices.some((device) => device.kind === "ethernet")) panel.appendChild(row("Ethernet", "No Ethernet interface is available"));
     } else if (selectedTab === "Wi-Fi") {
-      panel.appendChild(renderOverview(currentSnapshot));
+      panel.appendChild(renderConnectivity(currentSnapshot));
       const layout = document.createElement("div");
       layout.className = "network-wifi-layout";
       const settings = document.createElement("div");
@@ -974,15 +979,14 @@
         { id: "playit", display_name: "Playit.gg", status_unavailable: true },
       ];
       remoteError = "";
-      if (isAdministrator()) {
-        try {
-          const remote = await requestJSON("/api/network/remote-access");
-          if (sequence !== loadSequence) return;
-          remoteProviders = (remote?.providers || []).filter((provider) => ["tailscale", "netbird", "playit"].includes(provider.id));
+      try {
+        const remote = await requestJSON("/api/network/remote-access");
+        if (sequence !== loadSequence) return;
+        remoteProviders = (remote?.providers || []).filter((provider) => ["tailscale", "netbird", "playit"].includes(provider.id));
+        if (isAdministrator() && selectedTab === "Remote Access") {
           playitSetup = await requestJSON("/api/network/remote-access/playit/setup") || { state: "idle" };
-          if (sequence !== loadSequence) return;
-        } catch (error) { remoteError = error?.message || "Remote access status unavailable."; }
-      }
+        }
+      } catch (error) { remoteError = error?.message || "Remote access status unavailable."; }
       if (sequence !== loadSequence) return;
       renderNetwork();
       state.textContent = "";
@@ -1161,7 +1165,7 @@
   };
 
   const refreshRemoteAccess = async () => {
-    playitSetup = await requestJSON("/api/network/remote-access/playit/setup") || { state: "idle" };
+    if (selectedTab === "Remote Access") playitSetup = await requestJSON("/api/network/remote-access/playit/setup") || { state: "idle" };
     const remote = await requestJSON("/api/network/remote-access");
     remoteProviders = (remote?.providers || []).filter((provider) => ["tailscale", "netbird", "playit"].includes(provider.id));
     renderNetwork();
@@ -1216,7 +1220,14 @@
 
   content.addEventListener("click", (event) => {
     const tab = event.target.closest("[data-network-tab]");
-    if (tab) { selectedTab = tab.dataset.networkTab; connectionDraft = null; renderNetwork(); content.querySelector('[aria-selected="true"]')?.focus(); return; }
+    if (tab) {
+      selectedTab = tab.dataset.networkTab;
+      connectionDraft = null;
+      renderNetwork();
+      if (selectedTab === "Remote Access") refreshRemoteAccess().then(pollRemoteAccess).catch((error) => { state.textContent = error?.message || "Remote access status unavailable."; });
+      content.querySelector('[aria-selected="true"]')?.focus();
+      return;
+    }
     if (!isAdministrator()) return;
     const setup = event.target.closest("[data-network-playit-setup]");
     if (setup) {
@@ -1328,6 +1339,7 @@
     selectedTab = tabs[index];
     connectionDraft = null;
     renderNetwork();
+    if (selectedTab === "Remote Access") refreshRemoteAccess().then(pollRemoteAccess).catch((error) => { state.textContent = error?.message || "Remote access status unavailable."; });
     content.querySelector('[aria-selected="true"]')?.focus();
   });
 

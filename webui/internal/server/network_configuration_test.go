@@ -202,9 +202,13 @@ assert(nodes.some((n) => n.textContent === "Set up Playit" && !n.disabled));
 assert(!nodes.some((n) => n.textContent === "Activate"));
 assert(nodes.some((n) => n.textContent === "Deactivate" && !n.disabled));
 assert(!nodes.some((n) => /mjust net|use CLI/.test(n.textContent)));
-for (const state of ["activating", "deactivating", "reloading"]) {
+for (const state of ["activating", "deactivating", "reloading", "refreshing"]) {
   nodes = render({ ...base, configured: true, service_active: false, service_state: state });
-  assert(nodes.filter((n) => ["Activate", "Deactivate"].includes(n.textContent)).every((n) => n.disabled));
+  assert(nodes.some((n) => n.textContent === "Activate" && n.disabled));
+  assert(nodes.some((n) => n.textContent === "Deactivate" && n.disabled === (state === "deactivating")));
+  const netbird = render({ ...base, id: "netbird", configured: false, service_active: false, service_state: state });
+  assert(netbird.some((n) => n.textContent === "Activate" && n.disabled));
+  assert(netbird.some((n) => n.textContent === "Deactivate" && n.disabled === (state === "deactivating")));
   assert(nodes.some((n) => n.textContent === "Service: " + state[0].toUpperCase() + state.slice(1) + "…"));
 }
 for (const id of ["tailscale", "netbird", "playit"]) {
@@ -228,7 +232,10 @@ for (const state of ["inactive", "failed"]) {
 for (const state of ["starting", "waiting"]) {
   playitSetup = { state, claim_url: "https://playit.gg/claim/0123abcdef" };
   nodes = render(base);
-  assert(nodes.filter((n) => ["Activate", "Deactivate", "Set up Playit"].includes(n.textContent)).every((n) => n.disabled));
+  assert(nodes.filter((n) => ["Activate", "Set up Playit"].includes(n.textContent)).every((n) => n.disabled));
+  assert(nodes.some((n) => n.textContent === "Deactivate" && !n.disabled));
+  assert(nodes.some((n) => n.textContent === "Open provider dashboard"));
+  assert(render({ ...base, service_active: false, service_enabled: false, service_state: "inactive" }).some((n) => n.textContent === "Deactivate" && !n.disabled));
   if (state === "waiting") assert.equal(nodes.find((n) => n.textContent === "Open Playit setup").href, playitSetup.claim_url);
 }
 for (const claim_url of ["https://playit.gg/claim/0123abcdef", "https://playit.gg/claim/A1B2C3D4E5"]) {
@@ -309,5 +316,135 @@ let refreshRemoteAccess = async () => { polls++; if (polls === 2) remoteProvider
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("polling behavior: %v\n%s", err, output)
+	}
+}
+
+func TestNetworkOverviewCompactCanonicalRows(t *testing.T) {
+	source, err := assets.ReadFile("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(source)
+	start := strings.Index(script, "  const renderOverview =")
+	end := strings.Index(script, "  const renderCheckpoint =")
+	if start < 0 || end <= start {
+		t.Fatal("overview function missing")
+	}
+	program := `
+const assert = require("node:assert/strict");
+class Element {
+  constructor(tag) { this.tag = tag; this.children = []; this.textContent = ""; }
+  append(...nodes) { this.children.push(...nodes); }
+  appendChild(node) { this.append(node); return node; }
+}
+const document = { createElement: (tag) => new Element(tag) };
+const row = (name, value) => { const e = new Element("row"); e.textContent = name + ": " + value; return e; };
+const sectionHeading = (name, value) => { const e = new Element("heading"); e.textContent = name + ": " + value; return e; };
+const remoteProviders = [
+  { id: "tailscale", summary: "Awaiting approval" },
+  { id: "netbird", summary: "Not configured" },
+  { id: "playit", summary: "Setup pending", claim_url: "https://playit.gg/claim/0123abcdef" },
+];
+` + script[start:end] + `
+const snapshot = { connectivity: "full", devices: [
+  { kind: "ethernet", interface: "enp1s0", state: "activated", carrier: true, ipv4: { gateway: "192.168.0.1", addresses: [{ address: "192.168.0.28" }] } },
+] };
+const panel = renderOverview(snapshot);
+assert.equal(panel.tag, "section"); assert.equal(panel.children.length, 6);
+assert.deepEqual(panel.children.map((node) => node.textContent), [
+  "Connectivity: Internet connected", "IPv4: 192.168.0.28", "Ethernet: enp1s0 · Connected",
+  "Tailscale: Awaiting approval", "NetBird: Not configured", "Playit: Setup pending",
+]);
+assert(!JSON.stringify(panel).includes("claim"));
+const missing = renderOverview({ devices: [] });
+assert.equal(missing.children[1].textContent, "IPv4: Unavailable");
+assert.equal(missing.children[2].textContent, "Ethernet: Unavailable");
+`
+	cmd := exec.Command("node")
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("overview behavior: %v\n%s", err, output)
+	}
+	start = strings.Index(script, `if (selectedTab === "Overview") {`)
+	if start < 0 {
+		t.Fatal("overview tab missing")
+	}
+	end = strings.Index(script[start:], `} else if (selectedTab === "Ethernet")`)
+	if end < 0 || strings.Count(script[start:start+end], "panel.appendChild(") != 1 || strings.Contains(script[start:start+end], "Interfaces") {
+		t.Fatal("overview contains a second panel")
+	}
+	if strings.Contains(script[strings.Index(script, "  const renderOverview ="):strings.Index(script, "  const renderCheckpoint =")], "claim_url") {
+		t.Fatal("overview reads administrator setup data")
+	}
+	if !strings.Contains(script, `if (isAdministrator() && selectedTab === "Remote Access")`) || !strings.Contains(script, `if (selectedTab === "Remote Access") playitSetup = await requestJSON`) {
+		t.Fatal("overview setup fetch guard missing")
+	}
+}
+
+func TestDrawerRetainsNetworkBlockAndAddsCanonicalPlayitRow(t *testing.T) {
+	source, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(source)
+	start := strings.Index(script, `    const overlays = quickLook.querySelector("[data-quick-look-overlays]");`)
+	if start < 0 {
+		t.Fatal("existing drawer status block missing")
+	}
+	end := strings.Index(script[start:], `    setValue("[data-quick-look-backup]"`)
+	if end < 0 {
+		t.Fatal("existing drawer status block missing")
+	}
+	program := `
+const assert = require("node:assert/strict");
+class Element {
+  constructor(tag) { this.tag = tag; this.children = []; this.textContent = ""; }
+  append(...nodes) { this.children.push(...nodes); }
+  appendChild(node) { this.append(node); }
+  replaceChildren() { this.children = []; }
+}
+const document = { createElement: (tag) => new Element(tag) };
+const overlays = new Element("div");
+const quickLook = { querySelector: () => overlays };
+const render = (providers) => {
+` + strings.Replace(script[start:start+end], `    const overlays = quickLook.querySelector("[data-quick-look-overlays]");`, "", 1) + `
+  return overlays.children.map((line) => line.children.map((cell) => cell.textContent));
+};
+assert.deepEqual(render([]), [["Tailscale", "Not connected"], ["NetBird", "Not connected"], ["Playit", "Not configured"]]);
+assert.deepEqual(render([{ id: "tailscale", connected: true }, { id: "netbird", connected: true }, { id: "playit", configured: true, service_active: true }]),
+  [["Tailscale", "Connected"], ["NetBird", "Connected"], ["Playit", "Running"]]);
+assert.equal(render([{ id: "playit", configured: true, service_active: false }])[2][1], "Configured");
+`
+	cmd := exec.Command("node")
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("drawer behavior: %v\n%s", err, output)
+	}
+	header, err := assets.ReadFile("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(header), `quick-look-tile quick-look-network-tile`) != 1 || !strings.Contains(string(header), `<span>IPv4</span><strong data-quick-look-ipv4>`) || !strings.Contains(string(header), `data-quick-look-overlays`) {
+		t.Fatal("existing drawer block changed")
+	}
+	if !strings.Contains(script, `fetch("/api/network/remote-access"`) {
+		t.Fatal("drawer does not consume canonical status")
+	}
+}
+
+func TestReadOnlyRemoteAccessProxyUsesStatusWithoutSetup(t *testing.T) {
+	for _, role := range []string{"administrator", "operator", "viewer"} {
+		fake := &fakeNetworkConfigurationAPI{fakeNetworkAPI: &fakeNetworkAPI{fakeAPI: &fakeAPI{}, role: role}}
+		app, err := New(fake, Config{Version: "1.0.0", ManagementAPI: "v1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodGet, "/api/network/remote-access", nil)
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK || fake.calls != 0 || strings.Contains(rr.Body.String(), "claim") {
+			t.Fatalf("role %s status=%d setup calls=%d body=%s", role, rr.Code, fake.calls, rr.Body.String())
+		}
 	}
 }

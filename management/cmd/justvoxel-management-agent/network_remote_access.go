@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"os/exec"
@@ -18,6 +19,8 @@ type remoteProvider struct {
 	Configured   bool   `json:"configured"`
 	Dashboard    string `json:"dashboard_url"`
 	ServiceState string `json:"service_state"`
+	Summary      string `json:"summary"`
+	Connected    bool   `json:"connected"`
 }
 
 type remoteProviderMetadata struct {
@@ -26,12 +29,45 @@ type remoteProviderMetadata struct {
 }
 
 var remoteProviders = []remoteProviderMetadata{
-	{"tailscale", "Tailscale", "tailscaled.service", "https://console.tailscale.com/admin/", []string{"/var/lib/tailscale/tailscaled.state"}},
+	{"tailscale", "Tailscale", "tailscaled.service", "https://console.tailscale.com/admin/", nil},
 	{"netbird", "NetBird", "netbird.service", "https://app.netbird.io/", []string{"/var/lib/netbird/default.json", "/etc/netbird/config.json", "/etc/netbird/config.yaml"}},
 	{"playit", "Playit.gg", "playit.service", "https://playit.gg/account/", []string{"/etc/playit/playit.toml"}},
 }
 
 var remoteStat = os.Stat
+var tailscaleStatusCommand = exec.CommandContext
+var tailscaleStatus = func(ctx context.Context) (bool, string) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	cmd := tailscaleStatusCommand(ctx, "/usr/bin/tailscale", "status", "--json")
+	cmd.WaitDelay = time.Second
+	output, err := cmd.Output()
+	if err != nil || ctx.Err() != nil {
+		return false, "Not configured"
+	}
+	var status struct {
+		BackendState   string
+		HaveNodeKey    bool
+		CurrentTailnet *struct{}
+	}
+	if json.Unmarshal(output, &status) != nil {
+		return false, "Not configured"
+	}
+	switch status.BackendState {
+	case "Running":
+		return true, "Connected"
+	case "NeedsMachineAuth":
+		return true, "Awaiting approval"
+	case "Starting", "Stopped":
+		if status.HaveNodeKey || status.CurrentTailnet != nil {
+			if status.BackendState == "Starting" {
+				return true, "Starting"
+			}
+			return true, "Stopped"
+		}
+	}
+	return false, "Not configured"
+}
 var remoteSystemctl = func(ctx context.Context, args ...string) (string, error) {
 	output, err := exec.CommandContext(ctx, "systemctl", args...).Output()
 	return strings.TrimSpace(string(output)), err
@@ -47,6 +83,9 @@ func remoteProviderByID(id string) (remoteProviderMetadata, bool) {
 }
 
 func remoteConfigured(provider remoteProviderMetadata) bool {
+	if provider.id == "tailscale" {
+		return false // Only fixed CLI status provides Tailscale identity evidence.
+	}
 	for _, path := range provider.config {
 		if info, err := remoteStat(path); err == nil && info.Mode().IsRegular() && info.Size() > 0 {
 			return true
@@ -70,13 +109,34 @@ func remoteProviderStatus(ctx context.Context, provider remoteProviderMetadata) 
 	if properties["LoadState"] == "" || properties["ActiveState"] == "" {
 		return remoteProvider{}, os.ErrInvalid
 	}
-	return remoteProvider{
+	status := remoteProvider{
 		ID: provider.id, Name: provider.name, Dashboard: provider.dashboard,
 		Installed:    properties["LoadState"] == "loaded",
 		Enabled:      properties["UnitFileState"] == "enabled",
 		Active:       properties["ActiveState"] == "active",
 		ServiceState: properties["ActiveState"], Configured: remoteConfigured(provider),
-	}, nil
+	}
+	status.Summary = "Not configured"
+	if provider.id == "tailscale" {
+		status.Configured, status.Summary = tailscaleStatus(ctx)
+		status.Connected = status.Active && status.Summary == "Connected"
+		if status.Configured && !status.Active && status.Summary == "Connected" {
+			status.Summary = "Stopped"
+		}
+	} else if status.Configured {
+		status.Summary = "Stopped"
+		if provider.id == "playit" {
+			status.Summary = "Configured"
+		}
+		if status.Active {
+			status.Connected = true
+			status.Summary = "Connected"
+			if provider.id == "playit" {
+				status.Summary = "Running"
+			}
+		}
+	}
+	return status, nil
 }
 
 func (s *server) networkRemoteAccessStatus(w http.ResponseWriter, r *http.Request) {
@@ -91,6 +151,13 @@ func (s *server) networkRemoteAccessStatus(w http.ResponseWriter, r *http.Reques
 		if err != nil {
 			writeError(w, http.StatusServiceUnavailable, "remote-access service status is unavailable")
 			return
+		}
+		if provider.id == "playit" && !status.Configured {
+			playitSetup.mu.Lock()
+			if playitSetup.state.running() {
+				status.Summary = "Setup pending"
+			}
+			playitSetup.mu.Unlock()
 		}
 		providers = append(providers, status)
 	}
@@ -117,19 +184,45 @@ func (s *server) networkRemoteAccessChange(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "action must be activate or deactivate")
 		return
 	}
+	playitSetup.operation.Lock()
+	defer playitSetup.operation.Unlock()
 	playitSetup.mu.Lock()
-	defer playitSetup.mu.Unlock()
-	if provider.id == "playit" && playitSetup.state.running() {
+	runningSetup := provider.id == "playit" && playitSetup.state.running()
+	playitSetup.mu.Unlock()
+	if runningSetup && request.Action == "activate" {
 		writeError(w, http.StatusConflict, "Playit setup is in progress")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
+	if provider.id == "playit" && request.Action == "deactivate" {
+		playitSetup.mu.Lock()
+		var done chan struct{}
+		if playitSetup.cancel != nil {
+			playitSetup.cancel()
+			done = playitSetup.done
+		}
+		playitSetup.generation++
+		playitSetup.cancel = nil
+		playitSetup.state = playitSetupState{State: "idle"}
+		playitSetup.mu.Unlock()
+		if done != nil {
+			select {
+			case <-done:
+			case <-ctx.Done():
+				if s.store != nil {
+					_ = s.store.recordAuditEvent(actor, "network_remote_access_deactivate", provider.id, false, "fixed provider service lifecycle")
+				}
+				writeError(w, http.StatusServiceUnavailable, "Playit setup cancellation timed out")
+				return
+			}
+		}
+	}
 	status, err := remoteProviderStatus(ctx, provider)
 	if err == nil && !status.Installed {
 		err = os.ErrNotExist
 	}
-	if err == nil && remoteTransitional(status.ServiceState) {
+	if err == nil && (status.ServiceState == "deactivating" || (request.Action == "activate" && remoteTransitional(status.ServiceState))) {
 		writeError(w, http.StatusConflict, "provider service is changing state; refresh service status")
 		return
 	}
