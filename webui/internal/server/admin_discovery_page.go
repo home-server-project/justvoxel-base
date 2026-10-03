@@ -96,6 +96,7 @@ type storageBrowserDiskView struct {
 	Transport          string
 	System             bool
 	MinecraftWholeDisk bool
+	CanInitialize      bool
 	Partitions         []storageBrowserPartitionView
 	FreeSpaces         []storageBrowserFreeSpaceView
 }
@@ -277,13 +278,18 @@ func (a *App) buildStorageBrowserPageData(ctx context.Context, session string, c
 			Model: device.Model, Transport: device.Transport,
 			System:             device.System || listedSystemDisk || systemDiskNames[device.Name] || storageBrowserLooksSystem(device),
 			MinecraftWholeDisk: migrationWholeDisks[device.Path],
+			CanInitialize:      !device.ReadOnly && !device.System && !listedSystemDisk && !systemDiskNames[device.Name] && !storageBrowserLooksSystem(device),
 		})
 	}
 	for _, device := range storage.Devices {
-		if device.Type != "part" {
+		if device.Type != "part" && !(device.Type == "disk" && device.Filesystem != "") {
 			continue
 		}
-		index, exists := diskIndex[device.Parent]
+		parent := device.Parent
+		if device.Type == "disk" {
+			parent = device.Name
+		}
+		index, exists := diskIndex[parent]
 		if !exists {
 			continue
 		}
@@ -322,6 +328,15 @@ func (a *App) buildStorageBrowserPageData(ctx context.Context, session string, c
 			Device: free.Device, Start: free.Start, End: free.End,
 			Size: humanBytes(free.SizeBytes), SizeBytes: free.SizeBytes,
 		})
+	}
+
+	for index := range disks {
+		for _, partition := range disks[index].Partitions {
+			if partition.Type == "part" {
+				disks[index].CanInitialize = false
+				break
+			}
+		}
 	}
 
 	internalDisks := make([]storageBrowserDiskView, 0, len(disks))

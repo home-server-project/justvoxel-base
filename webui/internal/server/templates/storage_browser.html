@@ -78,6 +78,7 @@
           <button class="storage-partition-card" type="button"
                   data-storage-partition
                   data-name="{{.Name}}"
+                  data-type="{{.Type}}"
                   data-path="{{.Path}}"
                   data-size="{{.Size}}"
                   data-filesystem="{{.Filesystem}}"
@@ -115,6 +116,12 @@
           <small>Available for a new partition</small>
         </button>
         {{end}}
+      </div>
+      {{end}}
+      {{if .CanInitialize}}
+      <div class="storage-empty-actions">
+        <button class="secondary" type="button" data-storage-initialize data-path="{{.Path}}">Reinitialize disk as GPT</button>
+        <p class="muted compact">Erases the entire disk. After review and confirmation, create XFS partitions with your chosen sizes.</p>
       </div>
       {{end}}
       {{if not .Partitions}}
@@ -171,6 +178,8 @@
             <button type="button" data-storage-action="remove-permanent" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5Z"></path><path d="M12 14v6"></path></svg></span><span>Remove permanent mount</span></button>
             <button type="button" data-storage-minecraft-migrate hidden>Use for Minecraft data</button>
             <button class="storage-action-danger" type="button" data-storage-action="format">Format partition</button>
+            <button class="storage-action-danger" type="button" data-storage-action="delete_partition" hidden>Delete partition</button>
+            <button class="storage-action-danger" type="button" data-storage-action="initialize_disk" hidden>Reinitialize entire disk as GPT</button>
           </div>
         </details>
       </div>
@@ -207,18 +216,18 @@
         <div><p class="eyebrow">New partition</p><h2>Create and format partition</h2></div>
         <button class="storage-dialog-close" type="button" data-storage-create-close aria-label="Close partition creation">×</button>
       </div>
-      <p class="muted">JustVoxel will create one partition inside this unallocated space and format that exact new partition as XFS.</p>
+      <p class="muted">Choose a size in GiB or use all available space. JustVoxel creates one XFS partition and leaves any remainder unallocated for additional partitions later.</p>
       <dl class="storage-action-review">
         <div><dt>Disk</dt><dd><code data-storage-create-device></code></dd></div>
         <div><dt>Available</dt><dd data-storage-create-available></dd></div>
       </dl>
       <label class="storage-option-toggle-row">
         <span><strong>Use all available space</strong><small>Use the complete selected unallocated segment.</small></span>
-        <input class="storage-option-toggle" type="checkbox" checked data-storage-create-all aria-label="Use all available unallocated space">
+        <input class="storage-option-toggle" type="checkbox" data-storage-create-all aria-label="Use all available unallocated space">
       </label>
       <label>Partition size (GiB)
-        <input type="number" min="1" step="1" inputmode="numeric" data-storage-create-size disabled>
-        <span class="muted compact">Turn off “Use all available space” to choose a smaller whole-GiB size.</span>
+        <input type="number" min="1" step="1" inputmode="numeric" placeholder="e.g. 200" data-storage-create-size>
+        <span class="muted compact">Enter a whole-GiB size, or turn on “Use all available space”.</span>
       </label>
       <div data-storage-create-review-panel hidden>
         <dl class="storage-action-review">

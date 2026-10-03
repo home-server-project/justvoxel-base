@@ -22,7 +22,7 @@ storage_action_parent_disk() {
     device="$1"
     real="$(storage_action_real_device "${device}")"
     [[ -n ${real} ]] || return 1
-    lsblk -s -npo NAME,TYPE "${real}" 2>/dev/null | awk '$2 == "disk" {print $1; exit}'
+    lsblk -s -nrpo NAME,TYPE "${real}" 2>/dev/null | awk '$2 == "disk" {print $1; exit}'
 }
 
 storage_action_is_system_partition() {
@@ -188,19 +188,32 @@ storage_action_role() {
 }
 
 storage_action_validate_target() {
-    local device="$1" filesystem
+    local device="$1" filesystem type mountpoint mounts
     storage_require_identified_system_disk >/dev/null 2>&1 || {
         echo 'ERROR: JustVoxel could not identify the system disk safely.' >&2
         return 1
     }
-    storage_validate_partition "${device}" >/dev/null 2>&1 || {
-        echo 'ERROR: target must be a writable partition.' >&2
-        return 1
-    }
-    if storage_action_is_system_partition "${device}"; then
-        echo 'ERROR: partitions on the JustVoxel system disk are protected.' >&2
-        return 1
+    type="$(lsblk -dnro TYPE "${device}" 2>/dev/null || true)"
+    if [[ ${type} == disk ]]; then
+        storage_validate_disk "${device}" || return 1
+        storage_disk_is_system "${device}" && return 1
+        # Whole-device filesystems must not overlap a partitioned layout.
+        [[ $(lsblk -nrpo NAME,TYPE "${device}" | wc -l) -eq 1 ]] || return 1
+        storage_action_mountable_filesystem "$(storage_action_filesystem "${device}")" || return 1
+    else
+        storage_validate_partition "${device}" || return 1
+        storage_validate_disk "$(storage_action_parent_disk "${device}")" || return 1
+        if storage_action_is_system_partition "${device}"; then
+            echo 'ERROR: JustVoxel system partitions are protected.' >&2
+            return 1
+        fi
     fi
+    # Mapped children/holders must never be overwritten by raw-device actions.
+    [[ $(lsblk -nrpo NAME,TYPE "${device}" | wc -l) -eq 1 ]] || return 1
+    mounts="$(storage_action_host_mountpoints "${device}")" || return 1
+    while IFS= read -r mountpoint; do
+        storage_mount_is_critical "${mountpoint}" && return 1
+    done <<< "${mounts}"
     filesystem="$(storage_action_filesystem "${device}")"
     if [[ ${filesystem} == swap ]]; then
         echo 'ERROR: swap partitions are not managed from the storage browser.' >&2
@@ -228,14 +241,36 @@ storage_action_validate_mountpoint() {
     fi
 }
 
+storage_action_validate_deletion() {
+    local device="$1" parent number record table
+    storage_action_validate_target "${device}" || return 1
+    storage_validate_partition "${device}" || return 1
+    parent="$(storage_action_parent_disk "${device}")" || return 1
+    storage_validate_disk "${parent}" || return 1
+    number="$(cat "/sys/class/block/${device##*/}/partition")" || return 1
+    [[ ${number} =~ ^[1-9][0-9]*$ ]] || return 1
+    table="$(storage_partition_table_type "${parent}")" || return 1
+    [[ ${table} == gpt || ${table} == msdos ]] || return 1
+    record="$(parted -s -m "${parent}" print | awk -F: -v n="${number}" '$1 == n {print; exit}')" || return 1
+    [[ -n ${record} ]] || return 1
+    # Removing an MBR extended partition would also remove logical partitions.
+    [[ ${table} != msdos || $(cut -d: -f5 <<< "${record}") != extended ]]
+}
+
 storage_action_fingerprint() {
     local device="$1" type
     type="$(lsblk -dnro TYPE "${device}" 2>/dev/null || true)"
     {
+        if [[ -r ${JV_CONFIG} ]]; then
+            sha256sum "${JV_CONFIG}"
+        fi
         printf 'device=%s\n' "$(storage_action_real_device "${device}")"
         printf 'host-mounts=%s\n' "$(storage_action_host_mountpoints "${device}")"
         lsblk -b -P -o PATH,PKNAME,TYPE,SIZE,FSTYPE,UUID,PARTUUID,MOUNTPOINTS,START,RO,MODEL,SERIAL,WWN,TRAN "${device}" 2>/dev/null || true
         blkid "${device}" 2>/dev/null || true
+        if [[ ${type} == part ]]; then
+            parted -s -m "$(storage_action_parent_disk "${device}")" unit MiB print free 2>/dev/null || true
+        fi
         if [[ ${type} == disk ]]; then
             parted -s -m "${device}" unit MiB print free 2>/dev/null || true
         fi

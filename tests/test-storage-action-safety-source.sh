@@ -203,8 +203,8 @@ grep -Fq 'storage_action_mountable_filesystem "${filesystem}"' "${planner}" || {
     echo 'ERROR: generic mount planning is not using the expanded mountable-filesystem policy.' >&2
     exit 1
 }
-grep -Fq 'storage_action_managed_filesystem "${filesystem}"' "${planner}" || {
-    echo 'ERROR: format planning lost the managed-filesystem boundary.' >&2
+grep -Fq 'storage_action_mountable_filesystem "${filesystem}"' "${planner}" || {
+    echo 'ERROR: format planning lost the supported-filesystem boundary.' >&2
     exit 1
 }
 grep -Fq 'storage_action_mount_device "${device}" "${mountpoint}" "${filesystem}"' "${apply}" || {

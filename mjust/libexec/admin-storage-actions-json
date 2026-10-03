@@ -16,7 +16,7 @@ append_warning() {
 }
 
 prepare_plan() {
-    local request operation device requested_mountpoint requested_size_gib requested_free_start
+    local mounted mounts request operation device requested_mountpoint requested_size_gib requested_free_start
     local filesystem='' uuid='' current_mountpoint='' role='' size=0 fingerprint
     local confirmation='' destructive=false proposed_mountpoint='' target_filesystem=''
     local table free_line='' free_start='' free_end='' free_size='' free_mib=0 planned_end='' planned_mib=0
@@ -50,7 +50,7 @@ prepare_plan() {
             return 1
         }
         table="$(storage_partition_table_type "${device}" 2>/dev/null || true)"
-        [[ -n ${table} && ${table} != unknown ]] || {
+        [[ ${table} == gpt || ${table} == msdos ]] || {
             json_error 'The selected disk has no usable partition table.'
             return 1
         }
@@ -73,7 +73,7 @@ prepare_plan() {
         if [[ ${requested_size_gib} == all ]]; then
             planned_end="${free_end}"
             planned_mib="${free_mib}"
-        elif [[ ${requested_size_gib} =~ ^[1-9][0-9]*$ ]]; then
+        elif [[ ${requested_size_gib} =~ ^[1-9][0-9]*$ && ${#requested_size_gib} -le 9 ]]; then
             (( requested_size_gib * 1024 <= free_mib )) || {
                 json_error 'The requested partition is larger than the selected unallocated space.'
                 return 1
@@ -94,6 +94,24 @@ prepare_plan() {
         if storage_disk_is_system "${device}"; then
             PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'This unallocated space is on the JustVoxel system disk. Existing system partitions will not be resized or reformatted.')"
         fi
+    elif [[ ${operation} == initialize_disk ]]; then
+        storage_require_identified_system_disk >/dev/null 2>&1 && storage_validate_disk "${device}" >/dev/null 2>&1 || {
+            json_error 'The disk is unavailable or system storage could not be identified.'; return 1;
+        }
+        if storage_disk_is_system "${device}"; then
+            json_error 'The JustVoxel system disk cannot be reinitialized.'; return 1
+        fi
+        # This general workflow only initializes disks without partitions.
+        [[ $(lsblk -nrpo NAME,TYPE "${device}" | wc -l) -eq 1 ]] || {
+            json_error 'Delete individual non-system partitions before reinitializing this disk.'; return 1;
+        }
+        filesystem="$(storage_action_filesystem "${device}")"
+        uuid="$(storage_action_uuid "${device}")"
+        current_mountpoint="$(storage_action_mountpoint "${device}")" || {
+            json_error 'Could not verify the host mount state for this disk.'; return 1;
+        }
+        role="$(storage_action_role "${device}" "${filesystem}" "${uuid}" "${current_mountpoint}")"
+        size="$(storage_action_size_bytes "${device}")"
     else
         storage_action_validate_target "${device}" >/dev/null 2>&1 || {
             json_error 'This partition is protected or unavailable for storage actions.'
@@ -136,8 +154,9 @@ prepare_plan() {
             if [[ ${role} == *Backups* ]]; then PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'JustVoxel backups use this partition. Backups will fail while it is unmounted.')"; fi
             ;;
         format)
-            if [[ -n ${filesystem} ]] && ! storage_action_managed_filesystem "${filesystem}"; then
-                json_error 'This filesystem can be mounted, but JustVoxel does not reformat this filesystem type.'
+            storage_validate_partition "${device}" >/dev/null 2>&1 || { json_error 'Reinitialize whole-device storage as GPT before creating XFS partitions.'; return 1; }
+            if [[ -n ${filesystem} ]] && ! storage_action_mountable_filesystem "${filesystem}"; then
+                json_error 'This filesystem type is unavailable for formatting.'
                 return 1
             fi
             if [[ -n ${current_mountpoint} ]] && storage_mount_is_critical "${current_mountpoint}"; then
@@ -152,13 +171,43 @@ prepare_plan() {
             if [[ ${role} == *Minecraft* ]]; then PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'Minecraft data is stored on this partition. Formatting it will permanently destroy that Minecraft data and leave the current server storage configuration invalid until you choose a new location.')"; fi
             if [[ ${role} == *Backups* ]]; then PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'JustVoxel backups are stored on this partition. Formatting it will permanently destroy those backups and leave the current backup destination invalid until you choose a new location.')"; fi
             ;;
+        delete_partition|initialize_disk)
+            if [[ ${operation} == delete_partition ]]; then
+                storage_validate_partition "${device}" >/dev/null 2>&1 || { json_error 'Choose a non-system partition to delete.'; return 1; }
+                storage_action_is_system_partition "${device}" && { json_error 'System partitions cannot be deleted.'; return 1; }
+                storage_validate_disk "$(storage_action_parent_disk "${device}")" >/dev/null 2>&1 || { json_error 'The parent disk is unavailable or read-only.'; return 1; }
+                storage_action_validate_deletion "${device}" >/dev/null 2>&1 || {
+                    json_error 'This partition cannot be deleted safely. Extended partitions containing other partitions are unavailable.'; return 1;
+                }
+                confirmation="DELETE PARTITION ${device}"
+                PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'Deleting permanently destroys the selected partition and all its data. Only that partition is removed; neighboring partitions are not resized. Its space becomes unallocated.')"
+            else
+                confirmation="ERASE DISK ${device}"
+                PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'The entire disk will be erased and reinitialized with a modern GPT partition table. Then choose a partition size in the resulting unallocated space; the rest can remain unallocated.')"
+            fi
+            mounts="$(storage_action_host_mountpoints "${device}")" || { json_error 'Could not verify host mounts.'; return 1; }
+            while IFS= read -r mounted; do
+                storage_mount_is_critical "${mounted}" && { json_error 'Critical system mounts cannot be modified.'; return 1; }
+            done <<< "${mounts}"
+            destructive=true
+            if [[ -n ${current_mountpoint} ]]; then PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" "JustVoxel will unmount ${current_mountpoint} before erasing data.")"; fi
+            if [[ ${role} == *Minecraft* ]]; then PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'This destroys Minecraft data and leaves its storage configuration unavailable until another location is chosen.')"; fi
+            if [[ ${role} == *Backups* ]]; then PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'This destroys backups and leaves the backup destination unavailable until another location is chosen.')"; fi
+            ;;
         create_partition)
             ;;
         *)
-            json_error 'Choose Mount, Unmount, Format, or Create partition.'
+            json_error 'Choose Mount, Unmount, Format, Delete partition, Reinitialize disk, or Create partition.'
             return 1
             ;;
     esac
+
+    if [[ ${destructive} == true && ${operation} != create_partition ]]; then
+        PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'Saved mount settings referencing the erased filesystem will become unavailable and may need to be removed or replaced.')"
+    fi
+    if [[ ${destructive} == true && ${role} == *Minecraft* ]]; then
+        PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'Applying also confirms interruption of online players. Minecraft will be stopped through its player-aware graceful shutdown before data is erased and will remain stopped.')"
+    fi
 
     PLAN_JSON="$(jq -n \
         --arg operation "${operation}" \

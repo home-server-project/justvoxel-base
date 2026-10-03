@@ -35,7 +35,7 @@ grep -Fq 'windows_names' "${common}"
 grep -Fq 'fmask=0133,dmask=0022' "${common}"
 grep -Fq 'utf8=1' "${common}"
 grep -Fq 'storage_action_mount_device()' "${common}"
-grep -Fq 'storage_action_managed_filesystem "${filesystem}"' "${actions}"
+grep -Fq 'storage_action_mountable_filesystem "${filesystem}"' "${actions}"
 
 grep -Fq 'xfs|ext4|btrfs' "${backup}"
 grep -Fq 'xfs|ext4|btrfs' "${migration}"

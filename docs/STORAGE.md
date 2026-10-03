@@ -103,3 +103,31 @@ The old Minecraft data directory is never deleted automatically. After a success
 Manual backups, timer backups, pre-update backups, and pre-migration backups use the same verified cold-backup helper and the same retention count. If retention is seven, publishing the eighth verified archive removes the oldest archive.
 
 A backup on another partition of the same physical disk can protect against an OS reinstall, but not against failure of that physical disk. A separate internal disk, USB device, or NAS share provides a stronger failure boundary.
+
+## Local block storage in the WebUI
+
+The Storage workspace protects the exact JustVoxel system partitions. Additional
+non-system partitions and unallocated space on the system disk remain manageable,
+as do internal, virtual, and USB disks. Network storage is unchanged.
+
+Existing XFS, ext4, Btrfs, NTFS, VFAT/FAT32, and exFAT filesystems can be mounted
+with the existing filesystem-specific mount stack. Non-system partitions can be
+explicitly reformatted to XFS or deleted after destructive review and confirmation.
+Deletion removes only the selected partition, leaving its space unallocated and
+neighboring partitions unchanged. Read-only and unavailable targets remain blocked.
+
+For a new partition, enter a whole-number size in GiB (for example, 200), or choose
+**Use all available space**. Any remainder stays unallocated for later partitions.
+JustVoxel creates only XFS filesystems.
+
+A supported filesystem directly on a whole non-system disk can be mounted for now.
+To repurpose a disk without partitions, choose **Reinitialize disk as GPT**. This
+separately reviewed action erases the entire disk, creates a GPT table, and leaves
+space available for partitions of your chosen sizes. The system disk cannot be
+reinitialized. Whole-disk Minecraft and backup preparation remains a convenience.
+
+Formatting, deletion, and reinitialization warn when Minecraft or Backups use the
+target: that data is destroyed and its configured location becomes unavailable
+until replaced. Destructive confirmation also acknowledges player interruption
+for Minecraft storage; the existing player-aware graceful stop runs before erasure
+and Minecraft remains stopped. Saved mount settings may also need replacement.

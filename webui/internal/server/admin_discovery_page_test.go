@@ -428,3 +428,37 @@ func TestStorageBrowserFilesystemDisplayNames(t *testing.T) {
 		}
 	}
 }
+
+func TestStorageBrowserExactSystemProtectionAndWholeDeviceFilesystem(t *testing.T) {
+	client := &fakeDiscoveryAPI{}
+	client.storage.SystemDisks = []string{"/dev/nvme0n1"}
+	client.storage.Devices = []api.AdminStorageDevice{
+		{Name: "nvme0n1", Path: "/dev/nvme0n1", Type: "disk", System: true},
+		{Name: "nvme0n1p1", Path: "/dev/nvme0n1p1", Parent: "nvme0n1", Type: "part", System: true, Filesystem: "vfat", Mountpoints: []string{"/boot/efi"}},
+		{Name: "nvme0n1p4", Path: "/dev/nvme0n1p4", Parent: "nvme0n1", Type: "part", Filesystem: "ntfs"},
+		{Name: "sda", Path: "/dev/sda", Type: "disk", Transport: "usb", Filesystem: "vfat", UUID: "0EF7-49C2"},
+		{Name: "sdb", Path: "/dev/sdb", Type: "disk", Transport: "usb", ReadOnly: true, Filesystem: "exfat"},
+	}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := app.buildStorageBrowserPageData(context.Background(), "session-token", client, api.SessionInfo{Role: "administrator"}, "csrf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data.Disks) != 3 || len(data.Disks[0].Partitions) != 2 {
+		t.Fatalf("unexpected disk/partition discovery: %+v", data.Disks)
+	}
+	system := data.Disks[0]
+	if !system.Partitions[0].System || system.Partitions[1].System || system.CanInitialize {
+		t.Fatalf("system protection must apply to exact partitions: %+v", system)
+	}
+	usb := data.Disks[1]
+	if len(usb.Partitions) != 1 || usb.Partitions[0].Path != "/dev/sda" || usb.Partitions[0].Type != "disk" || usb.Partitions[0].Filesystem != "vfat" || !usb.CanInitialize {
+		t.Fatalf("whole-device FAT32 must be represented and repurposable: %+v", usb)
+	}
+	if data.Disks[2].CanInitialize || !data.Disks[2].Partitions[0].ReadOnly {
+		t.Fatal("read-only whole-device storage must remain protected")
+	}
+}

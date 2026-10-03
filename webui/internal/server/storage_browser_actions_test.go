@@ -473,18 +473,19 @@ func TestStorageBrowserPortableFilesystemPolicy(t *testing.T) {
 	source := string(js)
 	for _, want := range []string{
 		"[\"xfs\", \"ext4\", \"btrfs\", \"ntfs\", \"vfat\", \"exfat\"]",
-		"[\"xfs\", \"ext4\", \"btrfs\"]",
 		"FAT / FAT32",
 		"exFAT",
 		"NTFS",
-		"showStorageAction(\"format\", managedLinux)",
+		`showStorageAction("format", !wholeDevice && (!filesystem || mountable))`,
+		`showStorageAction("delete_partition", !wholeDevice)`,
+		`showStorageAction("initialize_disk", wholeDevice)`,
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("storage browser portable-filesystem policy missing %q", want)
 		}
 	}
-	if strings.Contains(source, "showStorageAction(\"format\", true);\n      setOptional(detail.mountTypeRow") {
-		t.Fatal("portable filesystems can still expose Format through the generic mounted-filesystem path")
+	if strings.Contains(source, "managedLinux") {
+		t.Fatal("portable filesystem formatting is still restricted to Linux filesystems")
 	}
 }
 
@@ -519,6 +520,8 @@ func TestStorageBrowserCreatePartitionUXUsesNativeUnallocatedSpaceFlow(t *testin
 		`body.set("operation", "create_partition")`,
 		`body.set("free_start", selectedFreeSpace?.start || "")`,
 		`body.set("size_gib", sizeGiB)`,
+		"createUseAll.checked = false",
+		"createSize.disabled = false",
 		"Slide to confirm partition creation",
 		"createConfirmToggle?.addEventListener",
 	} {

@@ -157,7 +157,7 @@ storage_json() {
         [[ -n ${disk} ]] || continue
         storage_validate_disk "${disk}" >/dev/null 2>&1 || continue
         table="$(storage_partition_table_type "${disk}" 2>/dev/null || true)"
-        [[ -n ${table} && ${table} != unknown ]] || continue
+        [[ ${table} == gpt || ${table} == msdos ]] || continue
         while IFS= read -r record; do
             [[ -n ${record} ]] || continue
             IFS=: read -r _ free_start free_end free_size _ <<< "${record}"

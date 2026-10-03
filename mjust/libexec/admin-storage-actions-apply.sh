@@ -28,6 +28,14 @@ storage_action_apply_json() {
         return 0
     fi
 
+    if [[ $(jq -r '.destructive' <<< "${PLAN_JSON}") == true && $(jq -r '.role' <<< "${PLAN_JSON}") == *Minecraft* ]]; then
+        source /usr/libexec/justvoxel/mjust/interrupt-safety.sh
+        if ! JV_INTERRUPT_CONFIRMATION_MODE=confirmed jv_stop_minecraft_adaptive 'erase Minecraft storage' >/dev/null 2>&1; then
+            json_error 'Minecraft could not be stopped safely. No storage was erased.'
+            return 0
+        fi
+    fi
+
     case "${operation}" in
         mount)
             install -d -m0755 -o root -g root "${mountpoint}"
@@ -61,6 +69,32 @@ storage_action_apply_json() {
                 return 0
             fi
             udevadm settle >/dev/null 2>&1 || true
+            ;;
+        delete_partition|initialize_disk)
+            if [[ -n ${current_mountpoint} ]] && ! storage_action_host_unmount "${current_mountpoint}"; then
+                json_error 'Storage is still in use. Nothing was erased.'; return 0
+            fi
+            mounted_after="$(storage_action_host_mountpoints "${device}")" || { json_error 'Host mount state could not be verified. Nothing was erased.'; return 0; }
+            [[ -z ${mounted_after} ]] || { json_error 'Storage is still mounted. Nothing was erased.'; return 0; }
+            if [[ ${operation} == delete_partition ]]; then
+                local parent number
+                parent="$(storage_action_parent_disk "${device}")"
+                number="$(cat "/sys/class/block/${device##*/}/partition")" || { json_error 'Partition number could not be read safely.'; return 0; }
+                [[ ${number} =~ ^[1-9][0-9]*$ ]] || { json_error 'Partition number could not be identified safely.'; return 0; }
+                if ! parted -s -- "${parent}" rm "${number}" || ! partprobe "${parent}" || ! udevadm settle; then
+                    json_error 'Partition deletion did not complete cleanly. Inspect the disk before retrying.'; return 0
+                fi
+                if lsblk -nrpo NAME "${parent}" | grep -Fxq "${device}"; then
+                    json_error 'The deleted partition is still visible. Inspect the disk before retrying.'; return 0
+                fi
+            else
+                if ! wipefs --all -- "${device}" || ! parted -s -- "${device}" mklabel gpt || ! partprobe "${device}" || ! udevadm settle; then
+                    json_error 'Disk reinitialization did not complete cleanly. Inspect the disk before retrying.'; return 0
+                fi
+                [[ $(storage_partition_table_type "${device}") == gpt ]] || { json_error 'The new GPT table could not be verified.'; return 0; }
+            fi
+            jq -n --argjson proposed "${PLAN_JSON}" --argjson warnings "${PLAN_WARNINGS}" '{ok:true,proposed:$proposed,warnings:$warnings,applied:true}'
+            return 0
             ;;
         create_partition)
             before="$(mktemp)"

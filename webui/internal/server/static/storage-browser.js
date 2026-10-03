@@ -250,10 +250,18 @@
     const filesystem = normalizedFilesystem(data);
     const filesystemKey = filesystem.toLowerCase();
     const mountable = ["xfs", "ext4", "btrfs", "ntfs", "vfat", "exfat"].includes(filesystemKey);
-    const managedLinux = ["xfs", "ext4", "btrfs"].includes(filesystemKey);
+    const wholeDevice = data.type === "disk";
+    showStorageAction("delete_partition", !wholeDevice);
+    showStorageAction("initialize_disk", wholeDevice);
+    showStorageAction("format", !wholeDevice && (!filesystem || mountable));
+    // Whole-device mounts use the same local mount stack, without requiring a partition.
+    if (wholeDevice) {
+      if (data.mounted === "Yes") showStorageAction("unmount-for-now", true);
+      else showStorageAction("mount-for-now", mountable);
+      return;
+    }
 
     if (!filesystem) {
-      showStorageAction("format", true);
       return;
     }
     if (!mountable) return;
@@ -281,7 +289,6 @@
     }
 
     if (persistence === "none") {
-      showStorageAction("format", managedLinux);
       setOptional(detail.mountTypeRow, detail.mountType, mounted ? "For now" : "Not mounted");
       if (mounted) {
         showStorageAction("unmount-for-now", true);
@@ -670,10 +677,10 @@
     if (!selectedFreeSpace) return;
     if (createDevice) createDevice.textContent = selectedFreeSpace.device || "";
     if (createAvailable) createAvailable.textContent = selectedFreeSpace.size || "Unknown";
-    if (createUseAll) createUseAll.checked = true;
+    if (createUseAll) createUseAll.checked = false;
     if (createSize) {
       createSize.value = "";
-      createSize.disabled = true;
+      createSize.disabled = false;
       const availableGiB = Math.floor(Number(selectedFreeSpace.sizeBytes || 0) / (1024 * 1024 * 1024));
       if (availableGiB > 0) createSize.max = String(availableGiB);
       else createSize.removeAttribute("max");
@@ -707,7 +714,7 @@
     freeDetailDialog?.close();
     resetCreateDialog();
     createDialog.showModal();
-    createReview?.focus();
+    createSize?.focus();
   });
 
   function closeCreateDialog() {
@@ -1203,6 +1210,8 @@
   void showCurrentMigrationIfAny();
 
   function actionLabel(action) {
+    if (action === "delete_partition") return "Delete partition";
+    if (action === "initialize_disk") return "Reinitialize entire disk as GPT";
     if (action === "mount-for-now") return "Mount for now";
     if (action === "mount-permanently") return "Mount permanently";
     if (action === "make-permanent") return "Make permanent";
@@ -1213,6 +1222,8 @@
   }
 
   function actionCopy(action) {
+    if (action === "delete_partition") return "Permanently delete only this partition and all its data. Its space becomes unallocated; neighboring partitions stay unchanged.";
+    if (action === "initialize_disk") return "Erase the entire disk and create a modern GPT partition table. Then choose sizes for new XFS partitions in its unallocated space.";
     if (action === "mount-for-now") return "This storage will stay mounted at the selected location until you unmount it or reboot JustVoxel.";
     if (action === "mount-permanently") return "This storage will be mounted at the selected location and JustVoxel will mount it automatically after every reboot.";
     if (action === "make-permanent") return "JustVoxel will remember the current mount location and mount this storage automatically after every reboot.";
@@ -1242,8 +1253,8 @@
     if (selectedAction === "unmount-for-now") {
       return { family: "actions", operation: "unmount", mountPoint: "" };
     }
-    if (selectedAction === "format") {
-      return { family: "actions", operation: "format", mountPoint: "" };
+    if (["format", "delete_partition", "initialize_disk"].includes(selectedAction)) {
+      return { family: "actions", operation: selectedAction, mountPoint: "" };
     }
     if (selectedAction === "mount-permanently") {
       return { family: "mounts", operation: "persist", mountPoint: mountInput?.value.trim() || "" };
@@ -1278,12 +1289,23 @@
       confirmSliderText,
       confirmToggleRow,
       confirmToggle,
-      "Slide to confirm formatting",
+      "Slide to confirm destructive action",
     );
     if (actionError) { actionError.hidden = true; actionError.textContent = ""; }
     if (reviewButton) { reviewButton.hidden = false; reviewButton.disabled = false; reviewButton.textContent = "Review action"; }
     if (applyButton) { applyButton.hidden = true; applyButton.disabled = false; applyButton.textContent = "Apply action"; }
   }
+
+  root.querySelectorAll("[data-storage-initialize]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!actionDialog) return;
+      selectedPartition = { ...button.dataset, type: "disk" };
+      selectedMountStatus = null;
+      resetActionDialog("initialize_disk");
+      actionDialog.showModal();
+      reviewButton?.focus();
+    });
+  });
 
   actionButtons.forEach((button) => {
     button.addEventListener("click", () => {
@@ -1340,6 +1362,8 @@
   }
 
   function targetDescription(plan) {
+    if (selectedAction === "delete_partition") return "Partition deleted; space becomes unallocated";
+    if (selectedAction === "initialize_disk") return "Entire disk erased; GPT table with unallocated space";
     if (selectedAction === "mount-for-now") return "Mounted for now at " + (plan.mount_point || "selected location");
     if (selectedAction === "mount-permanently" || selectedAction === "make-permanent") return "Permanent mount at " + (plan.mount_point || "selected location");
     if (selectedAction === "mount-now") return "Mounted now at " + (plan.mount_point || "saved location");
@@ -1368,7 +1392,7 @@
       if (reviewTargetRow) reviewTargetRow.hidden = false;
       renderWarnings(payload.warnings);
       const needsConfirmation = Boolean(reviewedPlan.confirmation);
-      const destructiveSummary = (reviewedPlan.device || selectedPartition.path) + " will be formatted";
+      const destructiveSummary = (reviewedPlan.device || selectedPartition.path) + (selectedAction === "delete_partition" ? " will be deleted" : selectedAction === "initialize_disk" ? " will be entirely erased" : " will be formatted");
       resetConfirmationControl(
         confirmationField,
         confirmationSummary,
@@ -1377,7 +1401,7 @@
         confirmSliderText,
         confirmToggleRow,
         confirmToggle,
-        "Slide to confirm formatting",
+        "Slide to confirm destructive action",
       );
       if (confirmationSummary) confirmationSummary.textContent = destructiveSummary;
       if (confirmationField) confirmationField.hidden = !needsConfirmation;
@@ -1404,8 +1428,8 @@
       confirmSlider,
       confirmSliderShell,
       confirmSliderText,
-      (reviewedPlan.device || selectedPartition?.path || "Selected partition") + " will be formatted",
-      "Slide to confirm formatting",
+      (reviewedPlan.device || selectedPartition?.path || "Selected partition") + (selectedAction === "delete_partition" ? " will be deleted" : selectedAction === "initialize_disk" ? " will be entirely erased" : " will be formatted"),
+      "Slide to confirm destructive action",
     );
     if (confirmToggleRow) confirmToggleRow.hidden = !needsConfirmation || !sliderArmed;
     if (!sliderArmed && confirmToggle) confirmToggle.checked = false;
