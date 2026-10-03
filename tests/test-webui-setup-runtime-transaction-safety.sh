@@ -89,6 +89,47 @@ render_line="$(grep -nF '    render_runtime_files || return 1' "${runtime_helper
 start_line="$(grep -nF '    output="$(systemctl start minecraft.service 2>&1)"' "${runtime_helper}" | cut -d: -f1)"
 validation_line="$(grep -nF '    validation_output="$(/usr/libexec/justvoxel/mjust/validate-backend 2>&1)"' "${runtime_helper}" | cut -d: -f1)"
 [[ -n ${render_line} && -n ${start_line} && -n ${validation_line} && ${render_line} -lt ${start_line} && ${start_line} -lt ${validation_line} ]] || { echo 'runtime render, service start, and final validation are out of order' >&2; exit 1; }
+
+# Exercise the actual first-start function with all appliance operations mocked.
+# Replace only the absolute final validator command, never invoke host services.
+(
+    A55_EVIDENCE='{}'
+    runtime_log="$(mktemp)"
+    trap 'rm -f -- "${runtime_log}"' EXIT
+    source <(sed -n '/^_a55_verify_action() {/,/^}/p' "${runtime_helper}" | sed 's|/usr/libexec/justvoxel/mjust/validate-backend|mock_validate_backend|g')
+    _a55_load_values() { MINECRAFT_IMAGE_TAG=testing; BEDROCK_ENABLED=no; }
+    _a55_evidence_set() { printf 'evidence %s %s\n' "$1" "$2" >> "${runtime_log}"; }
+    _a55_evidence_set_bounded() { :; }
+    _a55_manifest_update() { :; }
+    _a55_json() { printf 'verified %s\n' "$3" >> "${runtime_log}"; }
+    wait_for_rcon() { return 0; }
+    activate_backup_timer() { return 0; }
+    mock_validate_backend() { return 0; }
+    systemctl() { printf 'systemctl %s\n' "$*" >> "${runtime_log}"; }
+    podman() {
+        printf 'podman %s\n' "$*" >> "${runtime_log}"
+        if [[ $1 == pull ]]; then return "${pull_rc}"; fi
+        [[ $1 == exec && $2 == minecraft && $3 == rcon-cli && $4 == version ]]
+    }
+
+    pull_rc=1
+    if _a55_verify_action; then echo 'failed setup image pull returned success' >&2; exit 1; fi
+    grep -Fxq "podman pull ${JV_MINECRAFT_IMAGE_REPO}:testing" "${runtime_log}"
+    grep -Fxq 'evidence minecraft_image_pull failed' "${runtime_log}"
+    if grep -q '^systemctl\|^verified' "${runtime_log}"; then echo 'failed pull continued setup' >&2; exit 1; fi
+
+    : > "${runtime_log}"
+    pull_rc=0
+    _a55_verify_action || { echo 'successful image pull did not continue setup' >&2; exit 1; }
+    pull_line="$(grep -n '^podman pull ' "${runtime_log}" | cut -d: -f1)"
+    start_line="$(grep -n '^systemctl start minecraft.service$' "${runtime_log}" | cut -d: -f1)"
+    [[ -n ${pull_line} && -n ${start_line} && ${pull_line} -lt ${start_line} ]]
+    grep -Fxq 'verified runtime_verified' "${runtime_log}"
+)
+if grep -Eiq '^[[:space:]]*Pull[[:space:]]*=[[:space:]]*always' "${repo_root}/templates/quadlets/minecraft.container.in"; then
+    echo 'normal Minecraft startup must not force an image pull' >&2
+    exit 1
+fi
 grep -Fq 'if grep -q '\''container_file_t'\'' <<< "${data_context}"; then' "${repo_root}/mjust/libexec/validate-backend"
 grep -Fq 'fail "Minecraft data is not labeled container_file_t:' "${repo_root}/mjust/libexec/validate-backend"
 

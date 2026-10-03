@@ -5,9 +5,192 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os/exec"
 	"strings"
 	"testing"
 )
+
+func TestSetupMemoryPresetsMatchDefaultsAndPreserveCustomValues(t *testing.T) {
+	script, err := assets.ReadFile("static/settings.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	program := `
+const assert = require("node:assert/strict");
+const vm = require("node:vm");
+const { execFileSync } = require("node:child_process");
+function backendDefaults(mib, swapMiB) {
+  const shell = 'source "$1"; test_mem_kib="$2"; test_swap_kib="$3"; ' +
+    'awk() { if [[ $# -eq 2 && $2 == /proc/meminfo ]]; then ' +
+    'printf "MemTotal: %s kB\\nSwapTotal: %s kB\\n" "$test_mem_kib" "$test_swap_kib" | command awk "$1"; ' +
+    'else command awk "$@"; fi; }; suggest_memory_values';
+  return execFileSync("bash", ["-c", shell, "memory-policy", "../../../mjust/libexec/common.sh", String(mib * 1024), String(swapMiB * 1024)], { encoding: "utf8" }).trim().split(/\s+/);
+}
+const source = ` + fmt.Sprintf("%q", string(script)) + `;
+function open(mib, heap, maximum, players = "10") {
+  const input = (value) => ({ value, events: {}, addEventListener(name, fn) { this.events[name] = fn; }, focus() {} });
+  const game = input(heap), max = input(maximum), player = input(players);
+  const buttons = ["light", "recommended", "high", "custom"].map((name) => ({
+    dataset: { memoryPreset: name }, events: {}, selected: false,
+    addEventListener(event, fn) { this.events[event] = fn; },
+    classList: { toggle(_, selected) { buttons.find((b) => b.dataset.memoryPreset === name).selected = selected; } }
+  }));
+  const panel = { dataset: { systemMemoryMib: String(mib), minReserveMib: "1024", recommendedReserveMib: "2048" }, querySelectorAll() { return buttons; } };
+  const status = { classList: { remove() {}, add() {} } };
+  const fields = { "java-memory": game, "container-memory": max, "max-players": player, "memory-status": status };
+  const document = { querySelector(selector) { return selector === "[data-memory-settings]" ? panel : null; }, getElementById(id) { return fields[id] || null; } };
+  vm.runInNewContext(source, { document, window: { location: { hash: "" } } });
+  return { game, max, player, selected: () => buttons.find((b) => b.selected)?.dataset.memoryPreset, click: (name) => buttons.find((b) => b.dataset.memoryPreset === name).events.click() };
+}
+// Fresh discovery defaults come from suggest_memory_values and must select Recommended.
+for (const [mib, heap, maximum] of [
+  [1536, "256M", "512M"], [2560, "1G", "1536M"],
+  [3840, "2G", "2816M"], [4096, "2G", "3G"],
+  [5888, "3G", "4G"], [6144, "3G", "4G"],
+  [7884, "4G", "6G"], [7936, "4G", "6G"], [8064, "4G", "6G"], [8192, "4G", "6G"],
+  [12288, "8G", "10G"], [16384, "8G", "12G"], [32768, "8G", "12G"]
+]) {
+  for (const swapMiB of [0, 65536]) {
+    const defaults = backendDefaults(mib, swapMiB);
+    assert.deepEqual(defaults, [heap, maximum], String(mib) + " backend defaults");
+    const discovered = open(mib, ...defaults);
+    assert.equal(discovered.selected(), "recommended", String(mib) + " discovery preset");
+  }
+  const page = open(mib, heap, maximum);
+  assert.equal(page.selected(), "recommended", String(mib));
+  assert.deepEqual([page.game.value, page.max.value], [heap, maximum]);
+  page.click("recommended");
+  assert.deepEqual([page.game.value, page.max.value], [heap, maximum], String(mib));
+}
+for (const [name, heap, maximum] of [["light", "2G", "3G"], ["recommended", "4G", "6G"], ["high", "5G", "6G"], ["custom", "3G", "5G"]]) {
+  const page = open(7884, heap, maximum);
+  assert.equal(page.selected(), name);
+  assert.deepEqual([page.game.value, page.max.value], [heap, maximum]);
+  if (name !== "custom") {
+    page.click(name);
+    assert.deepEqual([page.game.value, page.max.value], [heap, maximum]);
+  }
+}
+const morePlayers = open(7884, "4G", "6G", "30");
+assert.equal(morePlayers.selected(), "recommended");
+morePlayers.player.value = "40";
+morePlayers.player.events.change();
+assert.deepEqual([morePlayers.game.value, morePlayers.max.value], ["4G", "6G"]);
+morePlayers.click("recommended");
+assert.deepEqual([morePlayers.game.value, morePlayers.max.value], ["4G", "6G"]);
+const edited = open(7884, "4G", "6G");
+edited.game.value = "3G";
+edited.game.events.input();
+assert.equal(edited.selected(), "custom");
+assert.deepEqual([edited.game.value, edited.max.value], ["3G", "6G"]);
+edited.max.events.change();
+assert.equal(edited.selected(), "custom");
+assert.deepEqual([edited.game.value, edited.max.value], ["3G", "6G"]);
+edited.player.value = "20";
+edited.player.events.change();
+assert.deepEqual([edited.game.value, edited.max.value], ["3G", "6G"]);
+const revisited = open(7884, edited.game.value, edited.max.value, "20");
+assert.equal(revisited.selected(), "custom");
+assert.deepEqual([revisited.game.value, revisited.max.value], ["3G", "6G"]);
+for (const field of [revisited.game, revisited.max]) {
+  field.events.input();
+  field.events.change();
+  assert.equal(revisited.selected(), "custom");
+  assert.deepEqual([revisited.game.value, revisited.max.value], ["3G", "6G"]);
+}
+edited.game.value = "4G";
+edited.game.events.change();
+edited.player.value = "10";
+// Detect the restored default values without replacing either field.
+edited.max.events.input();
+assert.equal(edited.selected(), "recommended");
+assert.deepEqual([edited.game.value, edited.max.value], ["4G", "6G"]);
+for (const mib of [1536, 2048, 2560, 3072, 3584, 3840, 5632, 7680, 7884, 15872, 32256]) {
+  for (const name of ["light", "recommended", "high"]) {
+    const page = open(mib, "1G", "2G");
+    page.click(name);
+    const toMiB = (value) => Number(value.slice(0, -1)) * (value.endsWith("G") ? 1024 : 1);
+    assert.ok(toMiB(page.game.value) > 0);
+    assert.ok(toMiB(page.game.value) < toMiB(page.max.value));
+    assert.ok(mib - toMiB(page.max.value) >= 1024, String(mib) + " " + name);
+  }
+}
+const insufficient = open(1024, "256M", "512M");
+assert.equal(insufficient.selected(), "custom");
+insufficient.click("recommended");
+assert.deepEqual([insufficient.game.value, insufficient.max.value], ["256M", "512M"]);
+assert.equal(open(7884, "4096M", "6144M").selected(), "recommended");
+`
+	cmd := exec.Command("node")
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("setup memory preset behavior: %v\n%s", err, output)
+	}
+}
+
+func TestSetupEightGBClassDefaultsReachBothWizardModes(t *testing.T) {
+	for _, mode := range []string{"advanced", "recommended"} {
+		t.Run(mode, func(t *testing.T) {
+			client := setupWizardClient()
+			client.defaults.SystemMemoryMiB = 7884
+			client.defaults.JavaMemory = "4G"
+			client.defaults.ContainerMemory = "6G"
+			app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer firstRunSetupDrafts.delete(app, "session-token")
+			defer firstRunSetupReviews.delete(app, "session-token")
+			if mode == "advanced" {
+				startSetup(t, app)
+			} else {
+				values := url.Values{"csrf": {"csrf-token"}, "server_type": {"paper"}}
+				rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recommended", values.Encode()))
+				if rr.Code != http.StatusSeeOther {
+					t.Fatalf("recommended setup returned %d: %s", rr.Code, rr.Body.String())
+				}
+			}
+			draft, ok := firstRunSetupDrafts.get(app, "session-token")
+			if !ok || draft.Minecraft.JavaMemory != "4G" || draft.Minecraft.ContainerMemory != "6G" {
+				t.Fatalf("%s fresh setup lost Recommended 4G/6G defaults: %#v", mode, draft.Minecraft)
+			}
+		})
+	}
+}
+
+func TestSetupReviewCompactDesktopProgressContract(t *testing.T) {
+	css, err := assets.ReadFile("static/setup.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := strings.Index(string(css), "/* Advanced setup keeps one desktop frame;")
+	if start < 0 {
+		t.Fatal("desktop setup layout missing")
+	}
+	desktop := string(css)[start:]
+	end := strings.Index(desktop, "@media(max-width:850px)")
+	if end < 0 {
+		t.Fatal("mobile setup layout boundary missing")
+	}
+	desktop = desktop[:end]
+	for _, want := range []string{
+		"@media(min-width:851px)",
+		".setup-shell:has(.setup-review-panel):has(.setup-progress)>.setup-title-row{margin-bottom:.15rem}",
+		".setup-shell:has(.setup-review-panel)>.setup-progress{margin-bottom:.25rem;gap:.25rem}",
+		"padding:.2rem .45rem", "flex-basis:1.4rem;width:1.4rem;height:1.4rem",
+	} {
+		if !strings.Contains(desktop, want) {
+			t.Fatalf("compact Advanced Review desktop progress missing %q", want)
+		}
+	}
+	markup, err := assets.ReadFile("templates/setup_review.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(markup), `{{if ne .SetupMode "recommended"}}`) || strings.Count(string(markup), `class="setup-number"`) != 7 || strings.Count(string(markup), `action="/setup/navigate"`) != 6 {
+		t.Fatal("Advanced Review must retain seven steps and navigation; Recommended omits progress")
+	}
+}
 
 func setupWizardClient() *fakeDiscoveryAPI {
 	client := &fakeDiscoveryAPI{}
@@ -417,7 +600,7 @@ func TestSetupWizardServerStepValidatesAndPersistsChoices(t *testing.T) {
 	}
 	page = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	body = page.Body.String()
-	for _, want := range []string{"Step 3 of 7", "Resources", "Minecraft game memory", "Technical name: Java heap", "Maximum Minecraft memory", "container memory limit", "8.0 GiB detected", "2.0 GiB", "1.0 GiB", "20-player limit", "Recommended", "High memory", "/static/settings.js"} {
+	for _, want := range []string{"Step 3 of 7", "Resources", "Minecraft game memory", "Technical name: Java heap", "Maximum Minecraft memory", "container memory limit", "8.0 GiB detected", "2.0 GiB", "1.0 GiB", "Presets are starting points based on system memory and headroom. Larger servers or heavier plugins may need High memory or Custom settings.", "Recommended", "High memory", "/static/settings.js"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("Resources step missing %q: %s", want, body)
 		}

@@ -217,7 +217,14 @@ _a55_apply_action() {
 
 _a55_verify_action() {
     _a55_load_values
-    local output rc rcon_started rcon_elapsed validation_output
+    local output rc rcon_started rcon_elapsed validation_output image
+
+    image="$(minecraft_image_ref)" || return 1
+    output="$(podman pull "${image}" 2>&1)"
+    rc=$?
+    _a55_evidence_set minecraft_image_pull "$([[ ${rc} -eq 0 ]] && printf ok || printf failed)" || return 1
+    _a55_evidence_set_bounded minecraft_image_pull_output "${output}" || return 1
+    (( rc == 0 )) || return 1
 
     output="$(systemctl start minecraft.service 2>&1)"
     rc=$?

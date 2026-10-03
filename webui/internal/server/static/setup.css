@@ -278,6 +278,11 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
 
 /* Advanced setup keeps one desktop frame; only the step contents scroll. */
 @media(min-width:851px){
+  .setup-shell:has(.setup-review-panel):has(.setup-progress)>.setup-title-row{margin-bottom:.15rem}
+  .setup-shell:has(.setup-review-panel)>.setup-progress{margin-bottom:.25rem;gap:.25rem}
+  .setup-shell:has(.setup-review-panel)>.setup-progress li{gap:.35rem}
+  .setup-shell:has(.setup-review-panel)>.setup-progress li button,.setup-shell:has(.setup-review-panel)>.setup-progress li:not(:has(form)){padding:.2rem .45rem}
+  .setup-shell:has(.setup-review-panel)>.setup-progress .setup-number{flex-basis:1.4rem;width:1.4rem;height:1.4rem;font-size:.75rem}
   .setup-body:has(.setup-wizard-panel),.setup-body:has(.setup-review-panel){height:100dvh;min-height:0;overflow:hidden}
   .setup-body:has(.setup-wizard-panel)>.setup-topbar,.setup-body:has(.setup-review-panel)>.setup-topbar{flex:none}
   .setup-body:has(.setup-wizard-panel)>.setup-shell,.setup-body:has(.setup-review-panel)>.setup-shell{flex:1;min-height:0;overflow:hidden}

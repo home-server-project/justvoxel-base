@@ -177,19 +177,38 @@ memory_to_mib() {
 }
 
 suggest_memory_values() {
-    local total_mib
+    local total_mib nominal_gib heap_mib maximum_mib allowed_mib
     total_mib=$(( $(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0) / 1024 ))
-    if (( total_mib >= 32768 )); then
-        printf '8G 12G\n'
-    elif (( total_mib >= 16384 )); then
-        printf '6G 8G\n'
-    elif (( total_mib >= 8192 )); then
-        printf '4G 6G\n'
-    elif (( total_mib >= 4096 )); then
-        printf '2G 3G\n'
+    # Same Recommended policy as settings.js. Round only the sizing class;
+    # reserve checks always use actual MemTotal, never swap/zram.
+    nominal_gib=$(( (total_mib + 512) / 1024 ))
+    (( total_mib > 0 )) || nominal_gib=8
+    if (( nominal_gib >= 16 )); then
+        heap_mib=8192 maximum_mib=12288
+    elif (( nominal_gib >= 12 )); then
+        heap_mib=8192 maximum_mib=10240
+    elif (( nominal_gib >= 8 )); then
+        heap_mib=4096 maximum_mib=6144
+    elif (( nominal_gib >= 6 )); then
+        heap_mib=3072 maximum_mib=4096
+    elif (( nominal_gib >= 4 )); then
+        heap_mib=2048 maximum_mib=3072
     else
-        printf '1G 2G\n'
+        heap_mib=1024 maximum_mib=2048
     fi
+    if (( total_mib > 0 )); then
+        allowed_mib=$(( total_mib - 1024 ))
+        (( allowed_mib >= 2 )) || return 1
+        # Preserve the tier heap when a MiB-precision container limit fits.
+        (( maximum_mib <= allowed_mib )) || maximum_mib=${allowed_mib}
+        if (( heap_mib >= maximum_mib )); then
+            heap_mib=$(( maximum_mib >= 2048 ? maximum_mib - 1024 : maximum_mib / 2 ))
+        fi
+    fi
+    local heap maximum
+    if (( heap_mib % 1024 == 0 )); then heap="$((heap_mib / 1024))G"; else heap="${heap_mib}M"; fi
+    if (( maximum_mib % 1024 == 0 )); then maximum="$((maximum_mib / 1024))G"; else maximum="${maximum_mib}M"; fi
+    printf '%s %s\n' "${heap}" "${maximum}"
 }
 
 normalize_daily_backup_time() {

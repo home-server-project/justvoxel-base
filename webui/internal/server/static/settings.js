@@ -8,7 +8,6 @@ if (memoryPanel) {
   const totalMiB = Number(memoryPanel.dataset.systemMemoryMib || 0);
   const minimumReserveMiB = Number(memoryPanel.dataset.minReserveMib || 1024);
   const recommendedReserveMiB = Number(memoryPanel.dataset.recommendedReserveMib || 2048);
-  let activePreset = "";
 
   const parseMemoryMiB = (value) => {
     const match = String(value || "").trim().match(/^([1-9][0-9]*)([mMgG])$/);
@@ -28,7 +27,6 @@ if (memoryPanel) {
   };
 
   const markPreset = (name) => {
-    activePreset = name;
     buttons.forEach((button) => button.classList.toggle("is-selected", button.dataset.memoryPreset === name));
   };
 
@@ -58,6 +56,49 @@ if (memoryPanel) {
     }
   };
 
+  const presetValues = (name) => {
+    // Match suggest_memory_values: round the sizing class, not the reserve.
+    const totalGiB = totalMiB > 0 ? Math.round(totalMiB / 1024) : 8;
+
+    let baseRecommended, baseMaximum;
+    if (totalGiB >= 16) { baseRecommended = 8; baseMaximum = 12; }
+    else if (totalGiB >= 12) { baseRecommended = 8; baseMaximum = 10; }
+    else if (totalGiB >= 8) { baseRecommended = 4; baseMaximum = 6; }
+    else if (totalGiB >= 6) { baseRecommended = 3; baseMaximum = 4; }
+    else if (totalGiB >= 4) { baseRecommended = 2; baseMaximum = 3; }
+    else { baseRecommended = 1; baseMaximum = 2; }
+
+    let heapGiB = baseRecommended;
+    if (name === "light") heapGiB = Math.max(2, baseRecommended - 2);
+    if (name === "high") heapGiB = Math.min(14, baseRecommended + 2);
+    let heapMiB = heapGiB * 1024;
+    let maximumMiB = (name === "recommended" ? baseMaximum : heapGiB + (heapGiB >= 4 ? 2 : 1)) * 1024;
+
+    if (totalMiB > 0) {
+      const allowedMaximumMiB = Math.floor(totalMiB - Math.max(1024, minimumReserveMiB));
+      if (allowedMaximumMiB < 2) return null;
+      // High retains whole-GiB sizing; Recommended and Light can use MiB
+      // precision to preserve their heap despite firmware/kernel reservations.
+      const limitMiB = name === "high" && allowedMaximumMiB >= 2048
+        ? Math.floor(allowedMaximumMiB / 1024) * 1024 : allowedMaximumMiB;
+      maximumMiB = Math.min(maximumMiB, limitMiB);
+      if (heapMiB >= maximumMiB) {
+        heapMiB = maximumMiB >= 2048 ? maximumMiB - 1024 : Math.floor(maximumMiB / 2);
+      }
+    }
+
+    return { heapMiB, maximumMiB };
+  };
+
+  const detectPreset = () => {
+    const matching = ["recommended", "light", "high"].find((name) => {
+      const values = presetValues(name);
+      return values && parseMemoryMiB(gameMemory?.value) === values.heapMiB &&
+        parseMemoryMiB(maxMemory?.value) === values.maximumMiB;
+    });
+    markPreset(matching || "custom");
+  };
+
   const applyPreset = (name) => {
     if (name === "custom") {
       markPreset("custom");
@@ -65,37 +106,11 @@ if (memoryPanel) {
       updateStatus();
       return;
     }
-    if (!gameMemory || !maxMemory || !maxPlayers) return;
-
-    const players = Math.max(1, Number(maxPlayers.value || 10));
-    const playerGroups = Math.max(1, Math.ceil(players / 10));
-    const playerExtra = Math.min(Math.max(playerGroups - 1, 0), 4);
-    const totalGiB = totalMiB > 0 ? totalMiB / 1024 : 8;
-
-    let baseRecommended;
-    if (totalGiB < 6) baseRecommended = 2;
-    else baseRecommended = Math.max(4, Math.min(8, Math.floor((totalGiB - 2) / 2)));
-
-    const recommendedHeap = Math.min(12, baseRecommended + playerExtra);
-    let heapGiB = recommendedHeap;
-    if (name === "light") heapGiB = Math.max(2, recommendedHeap - 2);
-    if (name === "high") heapGiB = Math.min(14, recommendedHeap + 2);
-
-    let overheadGiB = heapGiB >= 4 ? 2 : 1;
-    let maximumGiB = heapGiB + overheadGiB;
-
-    if (totalMiB > 0) {
-      const reserveMiB = name === "high" ? minimumReserveMiB : recommendedReserveMiB;
-      const allowedMaximumGiB = Math.floor(Math.max(0, totalMiB - reserveMiB) / 1024);
-      if (allowedMaximumGiB >= 2 && maximumGiB > allowedMaximumGiB) {
-        maximumGiB = allowedMaximumGiB;
-        heapGiB = Math.max(1, Math.min(heapGiB, maximumGiB - 1));
-        overheadGiB = maximumGiB - heapGiB;
-      }
-    }
-
-    gameMemory.value = memoryValue(heapGiB * 1024);
-    maxMemory.value = memoryValue(maximumGiB * 1024);
+    if (!gameMemory || !maxMemory) return;
+    const values = presetValues(name);
+    if (!values) return;
+    gameMemory.value = memoryValue(values.heapMiB);
+    maxMemory.value = memoryValue(values.maximumMiB);
     markPreset(name);
     updateStatus();
   };
@@ -106,18 +121,22 @@ if (memoryPanel) {
 
   [gameMemory, maxMemory].forEach((input) => {
     if (!input) return;
-    input.addEventListener("input", () => {
-      if (activePreset && activePreset !== "custom") markPreset("custom");
+    const memoryChanged = () => {
+      detectPreset();
       updateStatus();
-    });
+    };
+    input.addEventListener("input", memoryChanged);
+    input.addEventListener("change", memoryChanged);
   });
 
   if (maxPlayers) {
     maxPlayers.addEventListener("change", () => {
-      if (activePreset && activePreset !== "custom") applyPreset(activePreset);
+      detectPreset();
+      updateStatus();
     });
   }
 
+  detectPreset();
   updateStatus();
 }
 
