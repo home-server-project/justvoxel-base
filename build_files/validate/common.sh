@@ -154,7 +154,7 @@ test -f /etc/profile.d/90-justvoxel-motd.sh
 bash -n /etc/profile.d/90-justvoxel-motd.sh
 grep -Fq 'timeout 3s /usr/libexec/justvoxel/motd || true' /etc/profile.d/90-justvoxel-motd.sh
 grep -Fq 'timeout 1s nmcli' /usr/libexec/justvoxel/motd
-grep -Fq 'timeout 1s tailscale ip -4' /usr/libexec/justvoxel/motd
+grep -Fq 'timeout 1s tailscale status --json' /usr/libexec/justvoxel/motd
 grep -Fq 'timeout 1s netbird status --ipv4' /usr/libexec/justvoxel/motd
 test -x /usr/libexec/justvoxel/motd
 bash -n /usr/libexec/justvoxel/motd
@@ -169,6 +169,7 @@ grep -Fq "line 'Network:'" /usr/libexec/justvoxel/motd
 grep -Fq "line 'Wi-Fi:'" /usr/libexec/justvoxel/motd
 grep -Fq "line 'Tailscale:'" /usr/libexec/justvoxel/motd
 grep -Fq "line 'NetBird:'" /usr/libexec/justvoxel/motd
+grep -Fq "line 'Playit:'" /usr/libexec/justvoxel/motd
 grep -Fq 'IPv4:' /usr/libexec/justvoxel/motd
 grep -Fq 'Web interface:' /usr/libexec/justvoxel/motd
 grep -Fq "line 'First setup:'" /usr/libexec/justvoxel/motd
