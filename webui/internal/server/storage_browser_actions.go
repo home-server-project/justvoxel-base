@@ -2,9 +2,12 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
@@ -53,6 +56,8 @@ type storageBrowserWholeDiskResponse struct {
 }
 
 func (a *App) registerStorageBrowserActionRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("POST /api/new-storage/backup-partition/plan", a.storageBrowserBackupPartitionPlan)
+	mux.HandleFunc("POST /api/new-storage/backup-partition/apply", a.storageBrowserBackupPartitionApply)
 	mux.HandleFunc("POST /api/new-storage/actions/plan", a.storageBrowserActionPlan)
 	mux.HandleFunc("POST /api/new-storage/actions/apply", a.storageBrowserActionApply)
 	mux.HandleFunc("GET /api/new-storage/mounts/status", a.storageBrowserMountStatus)
@@ -389,4 +394,129 @@ func writeStorageBrowserMountJSON(w http.ResponseWriter, status int, result api.
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(result)
+}
+
+// Partition adoption uses the existing backup destination backend, never provisioning.
+type adminStorageBackupPartitionAPI interface {
+	AdminStorageMountStatus(ctx context.Context, session, device string) (api.AdminStorageMountResponse, error)
+	AdminBackupStoragePlan(ctx context.Context, session string, request api.AdminBackupStorageRequest) (api.AdminBackupStorageResponse, error)
+	AdminBackupStorageApply(ctx context.Context, session string, request api.AdminBackupStorageRequest) (api.AdminBackupStorageResponse, error)
+}
+
+func (a *App) storageBrowserBackupPartitionPlan(w http.ResponseWriter, r *http.Request) {
+	a.storageBrowserBackupPartitionChange(w, r, false)
+}
+
+func (a *App) storageBrowserBackupPartitionApply(w http.ResponseWriter, r *http.Request) {
+	a.storageBrowserBackupPartitionChange(w, r, true)
+}
+
+func (a *App) storageBrowserBackupPartitionChange(w http.ResponseWriter, r *http.Request, apply bool) {
+	fail := func(status int, message string) {
+		writeStorageBrowserActionJSON(w, status, api.AdminStorageActionResponse{OK: false, Error: message})
+	}
+	if !a.validCSRF(r) {
+		fail(http.StatusForbidden, "invalid CSRF token")
+		return
+	}
+	session, discovery, _, ok := a.adminDiscoveryRequest(w, r)
+	if !ok {
+		return
+	}
+	client, ok := a.api.(adminStorageBackupPartitionAPI)
+	if !ok {
+		fail(http.StatusServiceUnavailable, "backup partition adoption is unavailable")
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		fail(http.StatusBadRequest, "could not read backup partition request")
+		return
+	}
+	device := strings.TrimSpace(r.FormValue("device"))
+	storage, err := discovery.AdminStorage(r.Context(), session)
+	if err != nil {
+		fail(storageBrowserErrorStatus(err), apiMessage(err, "storage discovery is unavailable"))
+		return
+	}
+	eligible := false
+	for _, candidate := range storage.Devices {
+		if candidate.Path == device && candidate.Type == "part" && !candidate.System && !candidate.ReadOnly {
+			eligible = true
+			break
+		}
+	}
+	if !eligible {
+		fail(http.StatusBadRequest, "choose a writable non-system partition")
+		return
+	}
+	status, err := client.AdminStorageMountStatus(r.Context(), session, device)
+	if err != nil {
+		fail(storageBrowserErrorStatus(err), apiMessage(err, "partition mount status is unavailable"))
+		return
+	}
+	mount := status.Proposed
+	if !status.OK || mount.Device != device || !mount.Mounted || mount.CurrentMountPoint == "" ||
+		(mount.Persistence != "justvoxel" && mount.Persistence != "external") || mount.CurrentMountPoint != mount.MountPoint {
+		fail(http.StatusBadRequest, "mount this partition permanently before using it for backups")
+		return
+	}
+	request := api.AdminBackupStorageRequest{
+		Type: "partition", Device: device, MountPoint: mount.CurrentMountPoint,
+		Path: filepath.Join(mount.CurrentMountPoint, "backups"),
+	}
+	// Apply must use the reviewed mount, rather than adopting a new location silently.
+	if apply && (r.FormValue("mount_point") != request.MountPoint || r.FormValue("path") != request.Path) {
+		fail(http.StatusConflict, "partition mount changed; review the backup destination again")
+		return
+	}
+	plan, err := client.AdminBackupStoragePlan(r.Context(), session, request)
+	if err != nil {
+		fail(storageBrowserErrorStatus(err), apiMessage(err, "backup destination review failed"))
+		return
+	}
+	if !plan.OK {
+		fail(http.StatusBadRequest, "backup destination review failed")
+		return
+	}
+	// Bind review to the backend's validated destination identity and warnings.
+	evidence, err := json.Marshal(struct {
+		Request    api.AdminBackupStorageRequest
+		UUID       string
+		Source     string
+		Filesystem string
+		Warnings   []string
+	}{request, plan.Proposed.ExpectedUUID, plan.Proposed.ExpectedSource, plan.Proposed.Filesystem, plan.Warnings})
+	if err != nil {
+		fail(http.StatusInternalServerError, "could not prepare backup destination review")
+		return
+	}
+	fingerprint := fmt.Sprintf("sha256:%x", sha256.Sum256(evidence))
+	if apply {
+		if r.FormValue("fingerprint") != fingerprint {
+			fail(http.StatusConflict, "backup destination changed; review it again")
+			return
+		}
+		result, err := client.AdminBackupStorageApply(r.Context(), session, request)
+		if err != nil {
+			fail(storageBrowserErrorStatus(err), apiMessage(err, "backup destination apply failed"))
+			return
+		}
+		if !result.OK || !result.Applied {
+			fail(http.StatusConflict, "backup destination change did not complete")
+			return
+		}
+	}
+	warnings := plan.Warnings
+	if warnings == nil {
+		warnings = []string{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(struct {
+		OK          bool                         `json:"ok"`
+		Proposed    api.AdminBackupStorageTarget `json:"proposed"`
+		Warnings    []string                     `json:"warnings"`
+		Fingerprint string                       `json:"fingerprint"`
+		Applied     bool                         `json:"applied"`
+	}{true, plan.Proposed, warnings, fingerprint, apply})
 }

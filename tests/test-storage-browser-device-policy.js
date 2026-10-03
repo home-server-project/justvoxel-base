@@ -7,7 +7,7 @@ const source = fs.readFileSync(path.join(__dirname, "../webui/internal/server/st
 function functionSource(name, next) {
   return source.slice(source.indexOf("  function " + name + "("), source.indexOf(next, source.indexOf("  function " + name + "(")));
 }
-const actions = ["mount-for-now", "mount-permanently", "unmount-for-now", "make-permanent", "mount-now", "remove-permanent", "initialize_disk", "delete_partition", "format"];
+const actions = ["mount-for-now", "mount-permanently", "unmount-for-now", "make-permanent", "mount-now", "remove-permanent", "initialize_disk", "delete_partition", "format", "use-for-backups"];
 const context = {
   actionButtons: actions.map(action => ({dataset: {storageAction: action}, hidden: true})),
   detailActions: {}, protectedNote: {}, detail: {}, migrateButton: {},
@@ -39,3 +39,33 @@ const request = context.actionRequest();
 assert.equal(request.family, "mounts");
 assert.equal(request.operation, "persist");
 assert.equal(request.mountPoint, "/var/mnt/sda");
+
+// Backup adoption requires an actual partition and a current permanent mount.
+for (const filesystem of ["xfs", "ext4", "btrfs"]) {
+  const partition = {type: "part", filesystem, system: "No", readonly: "No"};
+  for (const persistence of ["justvoxel", "external"]) {
+    const status = {persistence, mounted: true, current_mount_point: "/var/mnt/vdb1", mount_point: "/var/mnt/vdb1"};
+    check(partition, status, ["format", "delete_partition", "unmount-for-now", "use-for-backups", ...(persistence === "justvoxel" ? ["remove-permanent"] : [])]);
+    check({...partition, system: "Yes"}, status, []);
+    check({...partition, readonly: "Yes"}, status, []);
+    check({...partition, type: "disk"}, status, ["unmount-for-now", ...(persistence === "justvoxel" ? ["remove-permanent"] : [])]);
+  }
+  check(partition, {persistence: "none", mounted: true}, ["format", "delete_partition", "unmount-for-now", "make-permanent"]);
+  check(partition, {persistence: "none", mounted: false}, ["format", "delete_partition", "mount-for-now", "mount-permanently"]);
+  check(partition, {persistence: "justvoxel", mounted: false, mount_point: "/var/mnt/vdb1"}, ["format", "delete_partition", "mount-now", "remove-permanent"]);
+}
+for (const filesystem of ["vfat", "exfat", "ntfs"]) {
+  check({type: "part", filesystem}, {persistence: "justvoxel", mounted: true, current_mount_point: "/var/mnt/vdb1", mount_point: "/var/mnt/vdb1"}, ["format", "delete_partition", "unmount-for-now", "remove-permanent"]);
+}
+context.selectedAction = "use-for-backups";
+const backupRequest = context.actionRequest();
+assert.equal(backupRequest.family, "backup-partition");
+assert.equal(backupRequest.operation, "");
+assert.equal(backupRequest.mountPoint, "");
+
+for (const filesystem of ["fat", "swap"]) {
+  context.configurePartitionActions({type: "part", filesystem}, {persistence: "justvoxel", mounted: true, current_mount_point: "/var/mnt/vdb1", mount_point: "/var/mnt/vdb1"});
+  assert.equal(context.actionButtons.find(button => button.dataset.storageAction === "use-for-backups").hidden, true);
+}
+context.configurePartitionActions({type: "part", filesystem: "xfs", mounted: "Yes"}, null);
+assert.equal(context.actionButtons.find(button => button.dataset.storageAction === "use-for-backups").hidden, true);

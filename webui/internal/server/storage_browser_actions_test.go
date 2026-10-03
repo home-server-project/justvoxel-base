@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -923,5 +925,158 @@ func TestStorageBrowserUSBBackupsUseExistingWholeDiskProvisioner(t *testing.T) {
 	request.Confirmation = "ERASE /dev/sda"
 	if client.applied != request {
 		t.Fatalf("backup Apply lost reviewed request: %+v", client.applied)
+	}
+}
+
+type fakeStorageBackupPartitionAPI struct {
+	fakeStorageActionAPI
+	backupPlanned    api.AdminBackupStorageRequest
+	backupApplied    api.AdminBackupStorageRequest
+	backupPlanCalls  int
+	backupApplyCalls int
+}
+
+func (f *fakeStorageBackupPartitionAPI) AdminBackupStoragePlan(_ context.Context, _ string, request api.AdminBackupStorageRequest) (api.AdminBackupStorageResponse, error) {
+	f.backupPlanCalls++
+	f.backupPlanned = request
+	return api.AdminBackupStorageResponse{OK: true, Proposed: api.AdminBackupStorageTarget{
+		Type: request.Type, Device: request.Device, MountPoint: request.MountPoint, Path: request.Path,
+		ExpectedUUID: "backup-uuid", Filesystem: "xfs", SamePhysicalDisk: true,
+	}, Warnings: []string{"Backups and Minecraft data are on the same physical disk."}}, nil
+}
+
+func (f *fakeStorageBackupPartitionAPI) AdminBackupStorageApply(_ context.Context, _ string, request api.AdminBackupStorageRequest) (api.AdminBackupStorageResponse, error) {
+	f.backupApplyCalls++
+	f.backupApplied = request
+	return api.AdminBackupStorageResponse{OK: true, Applied: true}, nil
+}
+
+func storageBackupPartitionClient() *fakeStorageBackupPartitionAPI {
+	client := &fakeStorageBackupPartitionAPI{}
+	client.storage.Devices = []api.AdminStorageDevice{{Path: "/dev/vdb1", Type: "part", Filesystem: "xfs"}}
+	client.mountStatus = api.AdminStorageMountResponse{OK: true, Proposed: api.AdminStorageMountPlan{
+		Device: "/dev/vdb1", Mounted: true, Persistence: "justvoxel",
+		MountPoint: "/var/mnt/vdb1", CurrentMountPoint: "/var/mnt/vdb1",
+	}}
+	return client
+}
+
+func TestStorageBrowserBackupPartitionReviewApply(t *testing.T) {
+	for _, persistence := range []string{"justvoxel", "external"} {
+		t.Run(persistence, func(t *testing.T) {
+			client := storageBackupPartitionClient()
+			client.mountStatus.Proposed.Persistence = persistence
+			app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			values := url.Values{"csrf": {"csrf-token"}, "device": {"/dev/vdb1"}, "mount_point": {"/arbitrary"}}
+			rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/api/new-storage/backup-partition/plan", values.Encode()))
+			if rr.Code != http.StatusOK {
+				t.Fatalf("Review: %d %s", rr.Code, rr.Body.String())
+			}
+			want := api.AdminBackupStorageRequest{Type: "partition", Device: "/dev/vdb1", MountPoint: "/var/mnt/vdb1", Path: "/var/mnt/vdb1/backups"}
+			if client.backupPlanned != want || client.backupApplyCalls != 0 {
+				t.Fatalf("unexpected Review: %+v", client.backupPlanned)
+			}
+			if !strings.Contains(rr.Body.String(), "same physical disk") {
+				t.Fatal("backend warning missing")
+			}
+			var review struct {
+				Fingerprint string `json:"fingerprint"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &review); err != nil {
+				t.Fatal(err)
+			}
+			values.Set("fingerprint", review.Fingerprint)
+			values.Set("mount_point", want.MountPoint)
+			values.Set("path", want.Path)
+			rr = httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/api/new-storage/backup-partition/apply", values.Encode()))
+			if rr.Code != http.StatusOK || client.backupApplyCalls != 1 || client.backupApplied != want {
+				t.Fatalf("Apply: %d %s request=%+v", rr.Code, rr.Body.String(), client.backupApplied)
+			}
+			if client.planCalls != 0 || client.applyCalls != 0 || client.mountPlanCalls != 0 || client.mountApplyCalls != 0 {
+				t.Fatal("adoption invoked storage mutation APIs")
+			}
+			client.mountStatus.Proposed.CurrentMountPoint = "/var/mnt/changed"
+			client.mountStatus.Proposed.MountPoint = "/var/mnt/changed"
+			rr = httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/api/new-storage/backup-partition/apply", values.Encode()))
+			if rr.Code != http.StatusConflict || client.backupApplyCalls != 1 {
+				t.Fatal("Apply accepted changed mount")
+			}
+		})
+	}
+}
+
+func TestStorageBrowserBackupPartitionRejectsUnsafeRequests(t *testing.T) {
+	for _, scenario := range []string{"missing", "whole USB FAT32", "system", "readonly", "temporary", "unmounted", "bad csrf", "operator", "unreviewed"} {
+		t.Run(scenario, func(t *testing.T) {
+			client := storageBackupPartitionClient()
+			values := url.Values{"csrf": {"csrf-token"}, "device": {"/dev/vdb1"}}
+			phase := "plan"
+			switch scenario {
+			case "missing":
+				client.storage.Devices = nil
+			case "whole USB FAT32":
+				client.storage.Devices[0].Type = "disk"
+				client.storage.Devices[0].Filesystem = "vfat"
+				client.storage.Devices[0].Transport = "usb"
+			case "system":
+				client.storage.Devices[0].System = true
+			case "readonly":
+				client.storage.Devices[0].ReadOnly = true
+			case "temporary":
+				client.mountStatus.Proposed.Persistence = "none"
+			case "unmounted":
+				client.mountStatus.Proposed.Mounted = false
+			case "bad csrf":
+				values.Set("csrf", "wrong")
+			case "operator":
+				client.role = "operator"
+			case "unreviewed":
+				phase = "apply"
+				values.Set("mount_point", "/var/mnt/vdb1")
+				values.Set("path", "/var/mnt/vdb1/backups")
+			}
+			app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/api/new-storage/backup-partition/"+phase, values.Encode()))
+			if rr.Code < 400 || client.backupApplyCalls != 0 {
+				t.Fatalf("unsafe request accepted: %d", rr.Code)
+			}
+			if scenario != "unreviewed" && client.backupPlanCalls != 0 {
+				t.Fatal("unsafe request reached backend")
+			}
+		})
+	}
+}
+
+func TestStorageBrowserBackupPartitionUsesStorageReviewModal(t *testing.T) {
+	script, err := assets.ReadFile("static/storage-browser.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`return { family: "backup-partition", operation: "", mountPoint: "" }`,
+		`if (selectedAction === "use-for-backups") reviewedPlan.fingerprint = payload.fingerprint`,
+		`body.set("mount_point", reviewedPlan.mount_point)`,
+		`body.set("path", reviewedPlan.path)`,
+		`"Mount: " + plan.mount_point + " · Backup directory: " + plan.path`,
+		`renderWarnings(payload.warnings)`,
+		`const needsConfirmation = Boolean(reviewedPlan.confirmation)`,
+		`applyButton?.classList.toggle("danger", action !== "use-for-backups")`,
+	} {
+		if !strings.Contains(string(script), want) {
+			t.Errorf("backup partition Review/Apply missing %q", want)
+		}
+	}
+	markup, err := assets.ReadFile("templates/storage_browser.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(markup), `data-storage-action="use-for-backups" hidden>Use for backups</button>`) {
+		t.Fatal("partition backup action missing")
 	}
 }

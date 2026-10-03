@@ -1,6 +1,8 @@
 package server
 
 import (
+	"bytes"
+	"html/template"
 	"strings"
 	"testing"
 )
@@ -125,6 +127,57 @@ func TestBackupsScriptsCanInitializeInsideWorkspaceFragment(t *testing.T) {
 	} {
 		if !strings.Contains(restoreSource, want) {
 			t.Fatalf("Restore fragment script missing %q", want)
+		}
+	}
+}
+
+func TestBackupsWorkspaceNormalCardsShowOnlyFilenameAndSize(t *testing.T) {
+	source, err := assets.ReadFile("templates/backups_workspace.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(source)
+	_, card, found := strings.Cut(markup, "{{range .Backups}}")
+	if !found {
+		t.Fatal("backup card range missing")
+	}
+	card, _, found = strings.Cut(card, "</label>")
+	if !found {
+		t.Fatal("backup selection card missing")
+	}
+	for _, removed := range []string{".CreatedLabel", ".Version", ".Bedrock", ".Variant", ".MetadataStatus", "Ready", "Metadata missing", "Metadata invalid"} {
+		if strings.Contains(card, removed) {
+			t.Errorf("normal card retains %q", removed)
+		}
+	}
+	view, err := template.New("card").Parse(card + "</label>")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range []string{"valid", "missing", "invalid"} {
+		var output bytes.Buffer
+		err := view.Execute(&output, backupsWorkspaceBackupView{
+			ID: "minecraft-2026-10-02-211241.tar.gz", Size: "274.7 MiB",
+			CreatedLabel: "Oct 3, 2026", Version: "full Paper version output", Bedrock: true,
+			Variant: "justvoxel-vm", MetadataStatus: status,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{"minecraft-2026-10-02-211241.tar.gz", "274.7 MiB", "data-backup-select", `type="checkbox"`, "data-backup-card"} {
+			if !strings.Contains(output.String(), want) {
+				t.Errorf("rendered card missing %q", want)
+			}
+		}
+		for _, removed := range []string{"Oct 3, 2026", "full Paper version output", "Bedrock", "justvoxel-vm", "Ready", "Metadata missing", "Metadata invalid"} {
+			if strings.Contains(output.String(), removed) {
+				t.Errorf("rendered card retains %q", removed)
+			}
+		}
+	}
+	for _, control := range []string{"data-backup-restore-selected", "data-backup-delete-selected"} {
+		if !strings.Contains(markup, control) {
+			t.Errorf("backup control missing %q", control)
 		}
 	}
 }

@@ -261,6 +261,10 @@
 
     const mounted = status ? Boolean(status.mounted) : data.mounted === "Yes";
     const persistence = status?.persistence || "";
+    showStorageAction("use-for-backups", data.type === "part" &&
+      ["xfs", "ext4", "btrfs"].includes(filesystemKey) && mounted &&
+      ["justvoxel", "external"].includes(persistence) && Boolean(status?.current_mount_point) &&
+      status.current_mount_point === status.mount_point);
 
     if (!status) {
       if (mounted) showStorageAction("unmount-for-now", true);
@@ -1205,6 +1209,7 @@
   void showCurrentMigrationIfAny();
 
   function actionLabel(action) {
+    if (action === "use-for-backups") return "Use for backups";
     if (action === "delete_partition") return "Delete partition";
     if (action === "initialize_disk") return "Reinitialize entire disk as GPT";
     if (action === "mount-for-now") return "Mount for now";
@@ -1217,6 +1222,7 @@
   }
 
   function actionCopy(action) {
+    if (action === "use-for-backups") return "Review this permanently mounted partition as the backup destination. Existing files will be kept.";
     if (action === "delete_partition") return "Permanently delete only this partition and all its data. Its space becomes unallocated; neighboring partitions stay unchanged.";
     if (action === "initialize_disk") return "Erase the entire disk and create a modern GPT partition table. Then choose sizes for new XFS partitions in its unallocated space.";
     if (action === "mount-for-now") return "This storage will stay mounted at the selected location until you unmount it or reboot JustVoxel.";
@@ -1242,6 +1248,9 @@
   }
 
   function actionRequest() {
+    if (selectedAction === "use-for-backups") {
+      return { family: "backup-partition", operation: "", mountPoint: "" };
+    }
     if (selectedAction === "mount-for-now") {
       return { family: "actions", operation: "mount", mountPoint: mountInput?.value.trim() || "" };
     }
@@ -1268,6 +1277,7 @@
 
   function resetActionDialog(action) {
     selectedAction = action;
+    applyButton?.classList.toggle("danger", action !== "use-for-backups");
     reviewedPlan = null;
     if (actionTitle) actionTitle.textContent = actionLabel(action);
     if (actionDescription) actionDescription.textContent = actionCopy(action);
@@ -1330,6 +1340,10 @@
     body.set("operation", request.operation);
     body.set("device", selectedPartition?.path || "");
     if (request.mountPoint) body.set("mount_point", request.mountPoint);
+    if (selectedAction === "use-for-backups" && phase === "apply") {
+      body.set("mount_point", reviewedPlan.mount_point);
+      body.set("path", reviewedPlan.path);
+    }
     Object.entries(extra || {}).forEach(([key, value]) => body.set(key, value || ""));
     const response = await fetch("/api/new-storage/" + request.family + "/" + phase, {
       method: "POST",
@@ -1350,6 +1364,7 @@
   }
 
   function targetDescription(plan) {
+    if (selectedAction === "use-for-backups") return "Mount: " + plan.mount_point + " · Backup directory: " + plan.path;
     if (selectedAction === "delete_partition") return "Partition deleted; space becomes unallocated";
     if (selectedAction === "initialize_disk") return "Entire disk erased; GPT table with unallocated space";
     if (selectedAction === "mount-for-now") return "Mounted for now at " + (plan.mount_point || "selected location");
@@ -1372,6 +1387,7 @@
     try {
       const payload = await postAction("plan");
       reviewedPlan = payload.proposed;
+      if (selectedAction === "use-for-backups") reviewedPlan.fingerprint = payload.fingerprint;
       if (reviewPanel) reviewPanel.hidden = false;
       if (reviewDevice) reviewDevice.textContent = reviewedPlan.device || selectedPartition.path;
       if (reviewRole) reviewRole.textContent = reviewedPlan.role || selectedPartition.role || "Available";

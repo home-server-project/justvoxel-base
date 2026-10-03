@@ -17,16 +17,8 @@
         </div>
         <div class="backup-file-copy">
           <strong title="{{.ID}}">{{.ID}}</strong>
-          <span>{{.CreatedLabel}}</span>
-          <small>{{.Size}}{{if .Version}} · Minecraft {{.Version}}{{end}}{{if .Bedrock}} · Bedrock{{end}}{{if .Variant}} · {{.Variant}}{{end}}</small>
+          <small>{{.Size}}</small>
         </div>
-        {{if eq .MetadataStatus "valid"}}
-        <span class="backup-file-status">Ready</span>
-        {{else if eq .MetadataStatus "missing"}}
-        <span class="backup-file-status backup-file-status-warning">Metadata missing</span>
-        {{else}}
-        <span class="backup-file-status backup-file-status-warning">Metadata invalid</span>
-        {{end}}
       </label>
       {{end}}
     </div>
