@@ -184,3 +184,76 @@
   .network-overview .section-heading{align-items:flex-start}
   .network-connect-password{grid-column:1}
 }
+
+.network-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  margin-bottom: 1rem;
+}
+
+.network-tabs [aria-selected="true"] {
+  border-color: #4f8b69;
+  font-weight: 700;
+}
+
+#network-tab-panel {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.network-ethernet-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .75rem;
+  margin-top: 1rem;
+}
+
+.network-ethernet-form label {
+  display: grid;
+  gap: .35rem;
+  min-width: 0;
+}
+
+.network-ethernet-form input,
+.network-ethernet-form select {
+  width: 100%;
+  min-width: 0;
+}
+
+.network-ethernet-form input[type="checkbox"] {
+  width: auto;
+  justify-self: start;
+}
+
+.network-ethernet-form .state-text {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 600px) {
+  .network-ethernet-form { grid-template-columns: 1fr; }
+  .network-tabs button { flex: 1 1 auto; }
+}
+
+.network-ethernet-form label {
+  color: #aeb8bf;
+  font-size: .76rem;
+  font-weight: 700;
+}
+
+.network-ethernet-form input:not([type="checkbox"]),
+.network-ethernet-form select {
+  min-height: 38px;
+  padding: .48rem .58rem;
+  border: 1px solid #3b454e;
+  border-radius: 8px;
+  background: #0f1519;
+  color: #eef1f4;
+}
+
+@media (prefers-color-scheme: light) {
+  .network-ethernet-form label { color: #53636d; }
+  .network-ethernet-form input:not([type="checkbox"]),
+  .network-ethernet-form select { background: #fff; color: #1a2025; border-color: #cbd4da; }
+}

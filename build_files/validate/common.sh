@@ -44,6 +44,14 @@ rpm -q \
     just fzf gum btop iputils btrfs-progs ntfs-3g parted nfs-utils cifs-utils \
     gssproxy zram-generator superfile glances >/dev/null
 
+# Fresh image policy only; no account secret or running tunnel is required.
+rpm -q playit >/dev/null
+test -x /usr/bin/playit
+test -x /usr/bin/playitd
+test -f /usr/lib/systemd/system/playit.service
+test "$(systemctl is-enabled playit.service)" = "enabled"
+test ! -e /etc/playit/playit.toml
+
 test -f /etc/pam.d/justvoxel
 grep -Fqx 'auth       include      system-auth' /etc/pam.d/justvoxel
 grep -Fqx 'account    include      system-auth' /etc/pam.d/justvoxel

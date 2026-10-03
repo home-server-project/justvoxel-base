@@ -30,31 +30,21 @@ The browser never talks to D-Bus directly and never receives raw D-Bus object pa
 
 The Management Agent owns the JustVoxel networking backend under `management/internal/networking`. That package talks directly to `org.freedesktop.NetworkManager` on the system D-Bus using `github.com/godbus/dbus/v5`.
 
-The networking work is split into independent checkpoints.
+## Network Workspace
 
-### Backend foundation
+The existing draggable, resizable Network window retains Refresh and now has five tabs for administrators:
 
-The Management Agent owns the direct NetworkManager D-Bus implementation and normalized appliance model. This layer remains independent from both the browser UI and `nm-hsp`.
+- **Overview**: connectivity, NetworkManager state/version, networking enabled state, and compact Ethernet/Wi-Fi summaries with addresses. No configuration controls.
+- **Ethernet**: active profile, carrier, speed, IPv4, gateway, DNS, MTU and autoconnect, with automatic/DHCP or manual IPv4 controls.
+- **Wi-Fi**: radio, nearby networks, scan, saved-profile activation, new/hidden networks, disconnect and forget.
+- **Troubleshoot**: NetworkManager connectivity, interface/carrier state, addresses, gateway, DNS and active profile. Administrators can request a fresh connectivity check or reconnect a selected active Ethernet/Wi-Fi profile behind a checkpoint.
+- **Remote Access**: Tailscale, NetBird and Playit.gg availability, enabled/running state, configuration evidence, lifecycle controls and external dashboard links.
 
-### Read-only WebUI workspace
-
-The Management API and WebUI now expose the read-only network experience, with Wi-Fi scan as the only operation that asks NetworkManager to refresh runtime state. It provides:
-
-- NetworkManager version, overall state, and connectivity state
-- networking and Wi-Fi radio state
-- Ethernet and Wi-Fi device status
-- active runtime IPv4 and IPv6 addresses, gateway, and DNS
-- saved non-secret connection-profile metadata
-- Ethernet carrier and link speed
-- active Wi-Fi SSID, signal, and bitrate
-- nearby Wi-Fi networks and security classification
-- explicit Wi-Fi scan requests
-
-This checkpoint does not connect or disconnect networks, toggle radios, change IP/DNS/gateway/MTU settings, modify autoconnect, forget profiles, or run repairs. Those configuration-changing actions require later checkpoints and the safety model described below.
+Operators and Viewers receive Overview only. Management Agent authorization remains authoritative for all mutations; WebUI POST requests retain CSRF protection.
 
 ### Checkpoint safety layer
 
-The Management Agent now implements the NetworkManager checkpoint transaction layer that future disruptive network mutations must use.
+The Management Agent now implements the NetworkManager checkpoint transaction layer used by disruptive network mutations.
 
 The Management API exposes administrator-only checkpoint lifecycle endpoints for:
 
@@ -63,7 +53,7 @@ The Management API exposes administrator-only checkpoint lifecycle endpoints for
 - confirming the new state by destroying the checkpoint
 - rolling back immediately and reporting per-interface rollback results
 
-The unprivileged WebUI has matching proxy endpoints, but Step 3 intentionally adds no visible checkpoint controls. Future mutation screens will use this transaction layer behind the normal user experience.
+The unprivileged WebUI uses matching proxy endpoints and the existing Keep settings / Revert now banner.
 
 Checkpoint behavior is deliberately conservative:
 
@@ -81,7 +71,7 @@ The in-memory JustVoxel transaction map is intentionally not authoritative for r
 
 ### Wi-Fi management
 
-Step 4 adds administrator-only Wi-Fi mutations through the same independent JustVoxel backend:
+The Wi-Fi tab provides administrator-only Wi-Fi mutations through the same independent JustVoxel backend:
 
 - turn the NetworkManager Wi-Fi radio on
 - turn the Wi-Fi radio off behind a checkpoint that covers all Wi-Fi interfaces
@@ -159,18 +149,33 @@ The intended mutation transaction is:
 
 This is the safety mechanism for changes such as static IP, gateway, DNS, or other settings that could otherwise lock a remote user out of the appliance.
 
-## Functional target
+## Ethernet confirmation and persistence
 
-The WebUI should eventually cover the same normal-user networking jobs that JustVoxel currently exposes through its friendly CLI experience, while remaining an independent implementation:
+Ethernet editing requires an active, normal Ethernet profile. Devices use interface names; profiles use NetworkManager UUIDs. The agent validates IPv4 addresses, prefixes, gateways, DNS servers, MTU and identifiers. Advanced profiles remain a job for `nmtui`.
 
-- status and connection overview
-- Ethernet automatic/manual configuration
-- DNS, gateway, MTU, and autoconnect
-- Wi-Fi radio, scan, connect, disconnect, saved networks, and forget
-- safe troubleshooting and guarded repairs
-- Tailscale and NetBird status/normal controls when those providers are installed
+The browser creates the existing 90-second checkpoint for the explicit Ethernet interface before applying a candidate. The agent reads the device's applied connection and stages the candidate with NetworkManager `Reapply`. It does **not** update the saved profile before confirmation. Autoconnect is a future activation policy and is saved only upon confirmation.
 
-Tailscale and NetBird are not part of NetworkManager's core D-Bus backend. Their WebUI support should use separate JustVoxel provider adapters behind the Management Agent rather than creating a dependency on `nm-hsp`.
+If NetworkManager cannot reapply the requested settings safely, the operation reports an error and requests rollback; it never falls back to saving first. Revert or automatic timeout restores live connectivity while the previous persistent profile remains unchanged. An agent restart discards the candidate; NetworkManager still owns the automatic rollback.
+
+After reconnecting (and signing in at the new address when necessary), administrator status recovers pending opaque checkpoints without transferring credentials between browser origins. **Keep settings** must successfully destroy the checkpoint before the agent updates the persistent profile. The agent rejects concurrent changes to either the saved or applied connection. If persistence fails after acceptance, the UI reports that live settings were accepted but saving failed. Review the saved configuration before rebooting; a failed or timed-out save is not reported as successful persistence.
+
+See NetworkManager's [Device applied-connection and Reapply API](https://networkmanager.dev/docs/api/latest/gdbus-org.freedesktop.NetworkManager.Device.html) for the live connection semantics.
+
+## Remote Access providers
+
+Tailscale, NetBird and Playit are separate providers outside `management/internal/networking`; NetworkManager remains the Ethernet/Wi-Fi authority. A fixed Management Agent provider layer controls only `tailscaled.service`, `netbird.service` and `playit.service` with bounded systemctl operations. Arbitrary provider or unit names are rejected.
+
+**Activate** enables and starts the fixed service. **Deactivate** stops and disables it, so the administrator's choice survives reboot. Successful and failed lifecycle changes are audited. Status is read-access; mutations require administrator authorization.
+
+Configured status uses non-empty regular files as appliance evidence only, never their contents: Tailscale's `/var/lib/tailscale/tailscaled.state`, NetBird's known `/var/lib/netbird/default.json` or `/etc/netbird/config.json` or `/etc/netbird/config.yaml`, and Playit's `/etc/playit/playit.toml`. This evidence does not verify cloud authentication or an active tunnel.
+
+Provider cloud configuration remains external:
+
+- [Tailscale admin console](https://console.tailscale.com/admin/)
+- [NetBird dashboard](https://app.netbird.io/)
+- [Playit.gg account](https://playit.gg/account/)
+
+JustVoxel does not collect provider API keys or implement cloud account, policy or tunnel management. Playit is enabled during image composition, without starting it or creating a secret. On the first deployed boot, a running unconfigured Playit service is a normal waiting-for-secret state, not a failure. Initial account/agent setup is available in `mjust net` option three, using the packaged `/usr/bin/playit setup`. The packaged CLI owns the setup interaction and persistent configuration; further tunnel/account management belongs at Playit's account page.
 
 ## Development rule
 

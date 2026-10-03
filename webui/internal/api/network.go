@@ -55,13 +55,15 @@ type NetworkDevice struct {
 }
 
 type NetworkStatus struct {
-	Version           string           `json:"version"`
-	State             string           `json:"state"`
-	Connectivity      string           `json:"connectivity"`
-	NetworkingEnabled bool             `json:"networking_enabled"`
-	WirelessEnabled   bool             `json:"wireless_enabled"`
-	Devices           []NetworkDevice  `json:"devices"`
-	Profiles          []NetworkProfile `json:"profiles"`
+	PendingCheckpoints []NetworkCheckpoint `json:"pending_checkpoints,omitempty"`
+	WorkspaceTabs      []string            `json:"workspace_tabs,omitempty"`
+	Version            string              `json:"version"`
+	State              string              `json:"state"`
+	Connectivity       string              `json:"connectivity"`
+	NetworkingEnabled  bool                `json:"networking_enabled"`
+	WirelessEnabled    bool                `json:"wireless_enabled"`
+	Devices            []NetworkDevice     `json:"devices"`
+	Profiles           []NetworkProfile    `json:"profiles"`
 }
 
 type WiFiNetwork struct {
@@ -210,5 +212,58 @@ func (c *Client) ForgetWiFiProfile(ctx context.Context, session, profileUUID str
 	var out NetworkWiFiMutation
 	path := "/v1/admin/network/wifi/profiles/" + url.PathEscape(profileUUID) + "/forget"
 	err := c.do(ctx, http.MethodPost, path, session, nil, &out)
+	return out, err
+}
+
+type RemoteAccessProvider struct {
+	ID             string `json:"id"`
+	DisplayName    string `json:"display_name"`
+	Installed      bool   `json:"installed"`
+	ServiceEnabled bool   `json:"service_enabled"`
+	ServiceActive  bool   `json:"service_active"`
+	Configured     bool   `json:"configured"`
+	DashboardURL   string `json:"dashboard_url"`
+	ServiceState   string `json:"service_state"`
+}
+
+type RemoteAccessStatus struct {
+	Providers []RemoteAccessProvider `json:"providers"`
+}
+
+type EthernetSettings struct {
+	CheckpointID string   `json:"checkpoint_id"`
+	ProfileUUID  string   `json:"profile_uuid"`
+	Method       string   `json:"method"`
+	Address      string   `json:"address"`
+	Prefix       uint32   `json:"prefix"`
+	Gateway      string   `json:"gateway"`
+	DNS          []string `json:"dns"`
+	MTU          uint32   `json:"mtu"`
+	Autoconnect  bool     `json:"autoconnect"`
+}
+
+func (c *Client) RemoteAccessStatus(ctx context.Context, session string) (RemoteAccessStatus, error) {
+	var out RemoteAccessStatus
+	err := c.do(ctx, http.MethodGet, "/v1/network/remote-access", session, nil, &out)
+	return out, err
+}
+
+func (c *Client) ChangeRemoteAccess(ctx context.Context, session, provider, action string) error {
+	return c.do(ctx, http.MethodPost, "/v1/admin/network/remote-access/"+url.PathEscape(provider), session, map[string]string{"action": action}, nil)
+}
+
+func (c *Client) ConfigureEthernet(ctx context.Context, session, interfaceName string, settings EthernetSettings) (NetworkWiFiMutation, error) {
+	var out NetworkWiFiMutation
+	err := c.do(ctx, http.MethodPost, "/v1/admin/network/ethernet/"+url.PathEscape(interfaceName), session, settings, &out)
+	return out, err
+}
+
+func (c *Client) CheckNetworkConnectivity(ctx context.Context, session string) error {
+	return c.do(ctx, http.MethodPost, "/v1/admin/network/connectivity-check", session, nil, nil)
+}
+
+func (c *Client) ReconnectNetwork(ctx context.Context, session, interfaceName, uuid, checkpointID string) (NetworkWiFiMutation, error) {
+	var out NetworkWiFiMutation
+	err := c.do(ctx, http.MethodPost, "/v1/admin/network/reconnect/"+url.PathEscape(interfaceName), session, map[string]string{"profile_uuid": uuid, "checkpoint_id": checkpointID}, &out)
 	return out, err
 }

@@ -27,6 +27,11 @@ type networkAPI interface {
 
 func (a *App) registerNetworkWorkspaceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/network", a.networkStatus)
+	mux.HandleFunc("GET /api/network/remote-access", a.networkRemoteAccessStatus)
+	mux.HandleFunc("POST /api/network/remote-access/{provider}", a.networkConfigurationChange)
+	mux.HandleFunc("POST /api/network/ethernet/{interface}", a.networkConfigurationChange)
+	mux.HandleFunc("POST /api/network/reconnect/{interface}", a.networkConfigurationChange)
+	mux.HandleFunc("POST /api/network/connectivity-check", a.networkConfigurationChange)
 	mux.HandleFunc("GET /api/network/wifi/{interface}/networks", a.networkWiFiNetworks)
 	mux.HandleFunc("POST /api/network/wifi/{interface}/scan", a.networkWiFiScan)
 	mux.HandleFunc("POST /api/network/checkpoints", a.networkCheckpointCreate)
@@ -52,6 +57,19 @@ func (a *App) networkStatus(w http.ResponseWriter, r *http.Request) {
 	status, err := client.NetworkStatus(r.Context(), session)
 	if !a.handleNetworkAPIError(w, err) {
 		return
+	}
+	identityClient, ok := a.api.(sessionIdentityAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, "Session service unavailable")
+		return
+	}
+	identity, err := identityClient.Session(r.Context(), session)
+	if !a.handleNetworkAPIError(w, err) {
+		return
+	}
+	status.WorkspaceTabs = networkWorkspaceTabs(identity.Role)
+	if identity.Role != "administrator" {
+		status.PendingCheckpoints = nil
 	}
 	writeNetworkWebJSON(w, http.StatusOK, status)
 }
@@ -387,4 +405,86 @@ func writeNetworkWebJSON(w http.ResponseWriter, status int, value any) {
 
 func writeNetworkWebError(w http.ResponseWriter, status int, message string) {
 	writeNetworkWebJSON(w, status, map[string]string{"error": message})
+}
+
+// Extensions use the existing API client and Unix-socket transport.
+type networkConfigurationAPI interface {
+	RemoteAccessStatus(context.Context, string) (api.RemoteAccessStatus, error)
+	ChangeRemoteAccess(context.Context, string, string, string) error
+	ConfigureEthernet(context.Context, string, string, api.EthernetSettings) (api.NetworkWiFiMutation, error)
+	CheckNetworkConnectivity(context.Context, string) error
+	ReconnectNetwork(context.Context, string, string, string, string) (api.NetworkWiFiMutation, error)
+}
+
+func (a *App) networkRemoteAccessStatus(w http.ResponseWriter, r *http.Request) {
+	session, ok := a.networkSession(w, r)
+	if !ok {
+		return
+	}
+	client, ok := a.api.(networkConfigurationAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, "Network service unavailable")
+		return
+	}
+	status, err := client.RemoteAccessStatus(r.Context(), session)
+	if !a.handleNetworkAPIError(w, err) {
+		return
+	}
+	writeNetworkWebJSON(w, http.StatusOK, status)
+}
+
+func (a *App) networkConfigurationChange(w http.ResponseWriter, r *http.Request) {
+	if !a.validCSRF(r) {
+		writeNetworkWebError(w, http.StatusForbidden, "invalid CSRF token")
+		return
+	}
+	session, ok := a.networkAdministratorSession(w, r)
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		writeNetworkWebError(w, http.StatusBadRequest, "invalid network request")
+		return
+	}
+	client, ok := a.api.(networkConfigurationAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, "Network service unavailable")
+		return
+	}
+	var result any = map[string]bool{"ok": true}
+	var err error
+	switch {
+	case r.PathValue("provider") != "":
+		err = client.ChangeRemoteAccess(r.Context(), session, r.PathValue("provider"), r.FormValue("action"))
+	case strings.HasPrefix(r.URL.Path, "/api/network/ethernet/"):
+		prefix, prefixErr := strconv.ParseUint(r.FormValue("prefix"), 10, 32)
+		mtu, mtuErr := strconv.ParseUint(r.FormValue("mtu"), 10, 32)
+		autoconnect, autoErr := strconv.ParseBool(r.FormValue("autoconnect"))
+		if prefixErr != nil || mtuErr != nil || autoErr != nil {
+			writeNetworkWebError(w, http.StatusBadRequest, "invalid Ethernet numeric or autoconnect value")
+			return
+		}
+		settings := api.EthernetSettings{
+			CheckpointID: r.FormValue("checkpoint_id"), ProfileUUID: r.FormValue("profile_uuid"), Method: r.FormValue("method"),
+			Address: r.FormValue("address"), Prefix: uint32(prefix), Gateway: r.FormValue("gateway"),
+			DNS: strings.FieldsFunc(r.FormValue("dns"), func(c rune) bool { return c == ',' || c == ' ' || c == '\n' || c == '\t' }),
+			MTU: uint32(mtu), Autoconnect: autoconnect,
+		}
+		result, err = client.ConfigureEthernet(r.Context(), session, r.PathValue("interface"), settings)
+	case strings.HasPrefix(r.URL.Path, "/api/network/reconnect/"):
+		result, err = client.ReconnectNetwork(r.Context(), session, r.PathValue("interface"), r.FormValue("profile_uuid"), r.FormValue("checkpoint_id"))
+	default:
+		err = client.CheckNetworkConnectivity(r.Context(), session)
+	}
+	if !a.handleNetworkAPIError(w, err) {
+		return
+	}
+	writeNetworkWebJSON(w, http.StatusOK, result)
+}
+
+func networkWorkspaceTabs(role string) []string {
+	if role == "administrator" {
+		return []string{"Overview", "Ethernet", "Wi-Fi", "Troubleshoot", "Remote Access"}
+	}
+	return []string{"Overview"}
 }

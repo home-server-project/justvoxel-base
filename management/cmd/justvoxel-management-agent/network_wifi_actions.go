@@ -280,6 +280,10 @@ func (s *server) claimNetworkMutationCheckpoint(id string, requiredInterfaces []
 	if err != nil {
 		return networkCheckpointTransaction{}, err
 	}
+	if transaction.EthernetCandidate != nil {
+		s.releaseNetworkCheckpoint(transaction.ID)
+		return networkCheckpointTransaction{}, errNetworkCheckpointBusy
+	}
 	covered := make(map[string]struct{}, len(transaction.Interfaces))
 	for _, interfaceName := range transaction.Interfaces {
 		covered[interfaceName] = struct{}{}
@@ -305,10 +309,17 @@ func (s *server) rollbackFailedNetworkMutation(
 	ctx context.Context,
 	client networkClient,
 	transaction networkCheckpointTransaction,
-) {
+) bool {
 	rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 8*time.Second)
 	defer cancel()
-	if _, err := client.RollbackCheckpoint(rollbackCtx, transaction.Checkpoint); err == nil {
+	if results, err := client.RollbackCheckpoint(rollbackCtx, transaction.Checkpoint); err == nil {
 		s.removeNetworkCheckpoint(transaction.ID)
+		for _, interfaceName := range transaction.Interfaces {
+			if results[interfaceName] != networking.RollbackResultOK {
+				return false
+			}
+		}
+		return true
 	}
+	return false
 }

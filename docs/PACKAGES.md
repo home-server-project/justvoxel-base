@@ -27,6 +27,16 @@ They are **not configured automatically** and their services are **disabled by d
 
 Their external package repositories are used only during image composition and are disabled in the finished image.
 
+## Playit.gg public game access
+
+Playit is consumed exclusively from the Home Server Packages artifact `ghcr.io/home-server-project/playit:stable`. The Containerfile copies its `/rpms` payload through a package stage, and image composition installs the verified `playit-*.x86_64.rpm`. JustVoxel has no Playit software version pin or custom digest resolution. HSP owns upstream tracking, build and provenance.
+
+JustVoxel owns appliance service policy: composition enables `playit.service` without starting it. The fresh image intentionally contains no `/etc/playit/playit.toml`, account secret or agent identity. On deployed boot the enabled service starts in its supported waiting-for-secret state. After setup it reads the persistent `/etc/playit/playit.toml` normally on reboot. WebUI Activate/Deactivate persistently enable/start or stop/disable the service.
+
+Appliance image validation checks the `playit` RPM, `/usr/bin/playit`, `/usr/bin/playitd`, the packaged service unit, enabled state and absence of fresh-image configuration. It does not start Playit, require configuration or test tunnels.
+
+`mjust net` option three provides Playit status, activation/deactivation and initial setup through the packaged `playit setup` CLI. Account and tunnel management remains at https://playit.gg/account/.
+
 ## Container and appliance runtime
 
 The Base includes the tools required for the containerized Minecraft workload and JustVoxel management layer:

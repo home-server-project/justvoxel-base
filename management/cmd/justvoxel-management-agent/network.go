@@ -71,13 +71,14 @@ type networkDeviceView struct {
 }
 
 type networkStatusView struct {
-	Version           string               `json:"version"`
-	State             string               `json:"state"`
-	Connectivity      string               `json:"connectivity"`
-	NetworkingEnabled bool                 `json:"networking_enabled"`
-	WirelessEnabled   bool                 `json:"wireless_enabled"`
-	Devices           []networkDeviceView  `json:"devices"`
-	Profiles          []networkProfileView `json:"profiles"`
+	PendingCheckpoints []networkCheckpointView `json:"pending_checkpoints,omitempty"`
+	Version            string                  `json:"version"`
+	State              string                  `json:"state"`
+	Connectivity       string                  `json:"connectivity"`
+	NetworkingEnabled  bool                    `json:"networking_enabled"`
+	WirelessEnabled    bool                    `json:"wireless_enabled"`
+	Devices            []networkDeviceView     `json:"devices"`
+	Profiles           []networkProfileView    `json:"profiles"`
 }
 
 type networkWiFiNetworkView struct {
@@ -103,12 +104,18 @@ func registerNetworkRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("GET /v1/network", s.networkStatus)
 	mux.HandleFunc("GET /v1/network/wifi/{interface}/networks", s.networkWiFiNetworks)
 	mux.HandleFunc("POST /v1/network/wifi/{interface}/scan", s.networkWiFiScan)
+	mux.HandleFunc("GET /v1/network/remote-access", s.networkRemoteAccessStatus)
+	mux.HandleFunc("POST /v1/admin/network/remote-access/{provider}", s.networkRemoteAccessChange)
+	mux.HandleFunc("POST /v1/admin/network/ethernet/{interface}", s.networkEthernetConfigure)
+	mux.HandleFunc("POST /v1/admin/network/connectivity-check", s.networkConnectivityCheck)
+	mux.HandleFunc("POST /v1/admin/network/reconnect/{interface}", s.networkReconnect)
 	registerNetworkCheckpointRoutes(mux, s)
 	registerNetworkWiFiActionRoutes(mux, s)
 }
 
 func (s *server) networkStatus(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.requireReadAccess(w, r); !ok {
+	actor, ok := s.requireReadAccess(w, r)
+	if !ok {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
@@ -126,7 +133,11 @@ func (s *server) networkStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "network status is unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, networkSnapshotView(snapshot))
+	view := networkSnapshotView(snapshot)
+	if actor.Role == roleAdministrator {
+		view.PendingCheckpoints = s.pendingNetworkCheckpointViews()
+	}
+	writeJSON(w, http.StatusOK, view)
 }
 
 func (s *server) networkWiFiNetworks(w http.ResponseWriter, r *http.Request) {

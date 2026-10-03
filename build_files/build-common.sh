@@ -30,6 +30,15 @@ if [[ -z ${glances_rpm} ]]; then
 fi
 dnf install -y "${glances_rpm}"
 
+playit_rpm="$(find /ctx/playit-rpms -maxdepth 1 -type f -name 'playit-*.x86_64.rpm' -print -quit)"
+if [[ -z ${playit_rpm} ]]; then
+    echo "ERROR: verified Playit RPM artifact is missing."
+    exit 1
+fi
+dnf install -y "${playit_rpm}"
+# Appliance policy: enabled for deployed boot, never started in composition.
+systemctl enable playit.service
+
 systemctl enable NetworkManager.service 2>/dev/null || true
 systemctl enable systemd-resolved.service
 systemctl enable firewalld.service 2>/dev/null || true

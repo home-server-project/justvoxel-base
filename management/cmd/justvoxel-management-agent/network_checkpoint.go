@@ -29,6 +29,8 @@ type networkCheckpointTransaction struct {
 	ID                  string
 	Checkpoint          networking.Checkpoint
 	Interfaces          []string
+	EthernetCandidate   *networking.EthernetCandidate
+	EthernetActor       session
 	CreatedProfileUUIDs []string
 	CreatedAt           time.Time
 	ExpiresAt           time.Time
@@ -157,10 +159,27 @@ func (s *server) networkCheckpointConfirm(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusServiceUnavailable, "network checkpoint could not be confirmed")
 		return
 	}
-	s.removeNetworkCheckpoint(id)
+	// Retain overlap protection while the accepted candidate is being saved.
+	defer s.removeNetworkCheckpoint(id)
 	finished = true
 	if s.store != nil {
 		_ = s.store.recordAuditEvent(actor, "network_checkpoint_confirm", id, true, strings.Join(transaction.Interfaces, ","))
+	}
+	if transaction.EthernetCandidate != nil {
+		configuration, supported := client.(networkConfigurationClient)
+		var persistErr error
+		if !supported {
+			persistErr = errors.New("Ethernet persistence is unavailable")
+		} else {
+			persistErr = configuration.PersistEthernet(ctx, transaction.EthernetCandidate)
+		}
+		if s.store != nil {
+			_ = s.store.recordAuditEvent(actor, "network_ethernet_persist", transaction.EthernetCandidate.Settings.Interface, persistErr == nil, "checkpoint accepted before persistence")
+		}
+		if persistErr != nil {
+			writeError(w, http.StatusServiceUnavailable, "Live Ethernet settings were accepted, but saving the persistent profile failed. Persistence is unconfirmed; review the saved configuration before reboot.")
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":     true,
@@ -200,6 +219,9 @@ func (s *server) networkCheckpointRollback(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		if s.store != nil {
 			_ = s.store.recordAuditEvent(actor, "network_checkpoint_rollback", id, false, err.Error())
+			if transaction.EthernetCandidate != nil {
+				_ = s.store.recordAuditEvent(actor, "network_ethernet_rollback", transaction.EthernetCandidate.Settings.Interface, false, "rollback failed; persistent profile unchanged")
+			}
 		}
 		writeError(w, http.StatusServiceUnavailable, "network checkpoint could not be rolled back")
 		return
@@ -237,6 +259,9 @@ func (s *server) networkCheckpointRollback(w http.ResponseWriter, r *http.Reques
 			fmt.Sprintf("interfaces=%s", strings.Join(transaction.Interfaces, ",")),
 		)
 	}
+	if transaction.EthernetCandidate != nil && s.store != nil {
+		_ = s.store.recordAuditEvent(actor, "network_ethernet_rollback", transaction.EthernetCandidate.Settings.Interface, success, "persistent profile unchanged")
+	}
 	writeJSON(w, http.StatusOK, networkCheckpointRollbackView{OK: success, ID: id, Results: items})
 }
 
@@ -261,11 +286,11 @@ func (s *server) beginNetworkCheckpoint(ctx context.Context, interfaces []string
 	}
 	defer client.Close()
 
+	createdAt := networkNow().UTC()
 	checkpoint, err := client.CreateCheckpoint(ctx, interfaces, timeout)
 	if err != nil {
 		return networkCheckpointTransaction{}, fmt.Errorf("create network checkpoint: %w", err)
 	}
-	createdAt := networkNow().UTC()
 	transaction := networkCheckpointTransaction{
 		ID:         id,
 		Checkpoint: checkpoint,
@@ -360,7 +385,13 @@ func writeNetworkCheckpointClaimError(w http.ResponseWriter, err error) {
 
 func (s *server) cleanupExpiredNetworkCheckpointsLocked(now time.Time) {
 	for id, transaction := range s.networkTransactions {
+		if transaction.Busy {
+			continue
+		}
 		if !transaction.ExpiresAt.After(now) {
+			if transaction.EthernetCandidate != nil && s.store != nil {
+				_ = s.store.recordAuditEvent(transaction.EthernetActor, "network_ethernet_timeout", transaction.EthernetCandidate.Settings.Interface, true, "candidate discarded; NetworkManager owns automatic rollback; persistent profile unchanged")
+			}
 			delete(s.networkTransactions, id)
 		}
 	}
@@ -377,8 +408,8 @@ func normalizeNetworkCheckpointInterfaces(values []string) ([]string, error) {
 	interfaces := make([]string, 0, len(values))
 	for _, raw := range values {
 		value := strings.TrimSpace(raw)
-		if value == "" {
-			return nil, fmt.Errorf("network interface is required")
+		if err := networking.ValidateInterface(value); err != nil {
+			return nil, err
 		}
 		if _, ok := seen[value]; ok {
 			continue
@@ -426,4 +457,18 @@ func networkCheckpointToView(transaction networkCheckpointTransaction) networkCh
 		CreatedAt:              transaction.CreatedAt.Format(time.RFC3339),
 		ExpiresAt:              transaction.ExpiresAt.Format(time.RFC3339),
 	}
+}
+
+// A newly authenticated browser at a changed IP can recover the existing opaque
+// transaction without transferring session credentials between origins.
+func (s *server) pendingNetworkCheckpointViews() []networkCheckpointView {
+	s.networkMu.Lock()
+	defer s.networkMu.Unlock()
+	s.cleanupExpiredNetworkCheckpointsLocked(networkNow().UTC())
+	views := make([]networkCheckpointView, 0, len(s.networkTransactions))
+	for _, transaction := range s.networkTransactions {
+		views = append(views, networkCheckpointToView(transaction))
+	}
+	sort.Slice(views, func(i, j int) bool { return views[i].CreatedAt < views[j].CreatedAt })
+	return views
 }

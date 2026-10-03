@@ -15,26 +15,45 @@ TEXT
     exit 0
 fi
 
+playit_menu() {
+    while true; do
+        echo
+        systemctl --no-pager --lines=0 status playit.service || true
+        if sudo test -s /etc/playit/playit.toml; then
+            echo 'Playit: configured'
+        else
+            echo 'Playit: not configured (waiting for account setup is normal)'
+        fi
+        local lifecycle choice
+        lifecycle='Activate Playit'
+        if systemctl is-active --quiet playit.service; then
+            lifecycle='Deactivate Playit'
+        fi
+        choice="$(jui_choose 'Playit.gg public game access' "${lifecycle}" 'Playit CLI status' 'Set up Playit account/agent' 'Back')" || return 0
+        case "${choice}" in
+            'Activate Playit') sudo systemctl enable --now playit.service || true ;;
+            'Deactivate Playit') sudo systemctl disable --now playit.service || true ;;
+            'Playit CLI status') sudo /usr/bin/playit status || true ;;
+            'Set up Playit account/agent')
+                sudo /usr/bin/playit setup || true
+                echo 'Further tunnel and account management: https://playit.gg/account/'
+                ;;
+            'Back') return 0 ;;
+        esac
+    done
+}
+
 while true; do
     echo
     echo 'nm-hsp - Friendly network manager from Home Server Project'
     echo '  Normal Ethernet, Wi-Fi and easy network troubleshooting.'
-    echo
     echo 'nmtui - Classic NetworkManager interface'
     echo '  Advanced/classic Linux networking configuration.'
-    echo
-
-    choice="$(jui_choose 'Network'         'Friendly network manager (nm-hsp)'         'Classic NetworkManager interface (nmtui)'         'Back')" || exit 0
-
+    choice="$(jui_choose 'Network' 'Friendly network manager (nm-hsp)' 'Classic NetworkManager interface (nmtui)' 'Playit.gg public game access' 'Back')" || exit 0
     case "${choice}" in
-        'Friendly network manager (nm-hsp)')
-            sudo /usr/bin/nm-hsp || true
-            ;;
-        'Classic NetworkManager interface (nmtui)')
-            sudo /usr/bin/nmtui || true
-            ;;
-        'Back')
-            exit 0
-            ;;
+        'Friendly network manager (nm-hsp)') sudo /usr/bin/nm-hsp || true ;;
+        'Classic NetworkManager interface (nmtui)') sudo /usr/bin/nmtui || true ;;
+        'Playit.gg public game access') playit_menu ;;
+        'Back') exit 0 ;;
     esac
 done
