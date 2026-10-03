@@ -27,6 +27,8 @@ type networkAPI interface {
 
 func (a *App) registerNetworkWorkspaceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/network", a.networkStatus)
+	mux.HandleFunc("GET /api/network/remote-access/playit/setup", a.networkPlayitSetup)
+	mux.HandleFunc("POST /api/network/remote-access/playit/setup", a.networkPlayitSetup)
 	mux.HandleFunc("GET /api/network/remote-access", a.networkRemoteAccessStatus)
 	mux.HandleFunc("POST /api/network/remote-access/{provider}", a.networkConfigurationChange)
 	mux.HandleFunc("POST /api/network/ethernet/{interface}", a.networkConfigurationChange)
@@ -487,4 +489,29 @@ func networkWorkspaceTabs(role string) []string {
 		return []string{"Overview", "Ethernet", "Wi-Fi", "Troubleshoot", "Remote Access"}
 	}
 	return []string{"Overview"}
+}
+
+type networkPlayitSetupAPI interface {
+	PlayitSetup(context.Context, string, bool) (api.PlayitSetupState, error)
+}
+
+func (a *App) networkPlayitSetup(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost && !a.validCSRF(r) {
+		writeNetworkWebError(w, http.StatusForbidden, "invalid CSRF token")
+		return
+	}
+	session, ok := a.networkAdministratorSession(w, r)
+	if !ok {
+		return
+	}
+	client, ok := a.api.(networkPlayitSetupAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, "Playit setup unavailable")
+		return
+	}
+	status, err := client.PlayitSetup(r.Context(), session, r.Method == http.MethodPost)
+	if !a.handleNetworkAPIError(w, err) {
+		return
+	}
+	writeNetworkWebJSON(w, http.StatusOK, status)
 }

@@ -104,6 +104,7 @@ func registerNetworkRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("GET /v1/network", s.networkStatus)
 	mux.HandleFunc("GET /v1/network/wifi/{interface}/networks", s.networkWiFiNetworks)
 	mux.HandleFunc("POST /v1/network/wifi/{interface}/scan", s.networkWiFiScan)
+	registerPlayitSetupRoutes(mux, s)
 	mux.HandleFunc("GET /v1/network/remote-access", s.networkRemoteAccessStatus)
 	mux.HandleFunc("POST /v1/admin/network/remote-access/{provider}", s.networkRemoteAccessChange)
 	mux.HandleFunc("POST /v1/admin/network/ethernet/{interface}", s.networkEthernetConfigure)

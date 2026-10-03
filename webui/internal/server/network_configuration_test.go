@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -130,5 +131,183 @@ func TestNetworkWiFiControlsRemainInsideWiFiTab(t *testing.T) {
 	}
 	if !strings.Contains(script, `currentSnapshot.workspace_tabs || ["Overview"]`) || !strings.Contains(script, "if (!isAdministrator()) return;") {
 		t.Fatal("read-only tab/action guard missing")
+	}
+}
+
+func (f *fakeNetworkConfigurationAPI) PlayitSetup(_ context.Context, _ string, start bool) (api.PlayitSetupState, error) {
+	f.calls++
+	return api.PlayitSetupState{State: "waiting", ClaimURL: "https://playit.gg/claim/0123abcdef"}, nil
+}
+
+func TestPlayitSetupProxyAdministratorAndCSRF(t *testing.T) {
+	for _, role := range []string{"administrator", "operator", "viewer"} {
+		for _, method := range []string{http.MethodGet, http.MethodPost} {
+			for _, csrf := range []string{"", "token"} {
+				fake := &fakeNetworkConfigurationAPI{fakeNetworkAPI: &fakeNetworkAPI{fakeAPI: &fakeAPI{}, role: role}}
+				app, err := New(fake, Config{Version: "1.0.0", ManagementAPI: "v1", ExternalScheme: "http"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				req := httptest.NewRequest(method, "/api/network/remote-access/playit/setup", strings.NewReader("csrf="+csrf))
+				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+				req.AddCookie(&http.Cookie{Name: csrfCookie, Value: "token"})
+				rr := httptest.NewRecorder()
+				app.Handler().ServeHTTP(rr, req)
+				allowed := role == "administrator" && (method == http.MethodGet || csrf == "token")
+				if allowed {
+					if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "https://playit.gg/claim/0123abcdef") || fake.calls != 1 {
+						t.Fatal(rr.Body.String())
+					}
+				} else if rr.Code != http.StatusForbidden || strings.Contains(rr.Body.String(), "0123abcdef") || fake.calls != 0 {
+					t.Fatalf("%s %s csrf=%q: %d %s", role, method, csrf, rr.Code, rr.Body.String())
+				}
+			}
+		}
+	}
+}
+
+func TestRemoteAccessCardBehavior(t *testing.T) {
+	source, err := assets.ReadFile("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(source)
+	controlsStart := strings.Index(script, "  const providerTransitional =")
+	controlsEnd := strings.Index(script, "  const isAdministrator =")
+	renderStart := strings.Index(script, "  const renderRemoteAccess =")
+	renderEnd := strings.Index(script, "  const renderNetwork =")
+	if controlsStart < 0 || controlsEnd <= controlsStart || renderStart < 0 || renderEnd <= renderStart {
+		t.Fatal("remote card functions missing")
+	}
+	program := `
+const assert = require("node:assert/strict");
+class Element {
+  constructor(tag) { this.tag = tag; this.children = []; this.dataset = {}; this.disabled = false; this.textContent = ""; }
+  append(...nodes) { this.children.push(...nodes); }
+  appendChild(node) { this.append(node); return node; }
+}
+const document = { createElement: (tag) => new Element(tag) };
+const row = (name, value) => { const e = new Element("row"); e.textContent = name + ": " + value; return e; };
+const sectionHeading = () => new Element("heading");
+const actionButton = (text, key, value) => { const e = new Element("button"); e.textContent = text; e.dataset[key] = value; return e; };
+const label = (value) => String(value || "unknown");
+let remoteBusy = false, remoteError = "", remoteProviders = [], playitSetup = { state: "idle" };
+` + script[controlsStart:controlsEnd] + script[renderStart:renderEnd] + `
+const flatten = (node) => [node, ...node.children.flatMap(flatten)];
+const render = (provider) => { remoteProviders = [provider]; return flatten(renderRemoteAccess()); };
+const base = { id: "playit", display_name: "Playit.gg", installed: true, service_active: true, service_enabled: true, service_state: "active", configured: false, dashboard_url: "https://evil.test/" };
+let nodes = render(base);
+assert(nodes.some((n) => n.textContent === "Set up Playit" && !n.disabled));
+assert(!nodes.some((n) => n.textContent === "Activate"));
+assert(nodes.some((n) => n.textContent === "Deactivate" && !n.disabled));
+assert(!nodes.some((n) => /mjust net|use CLI/.test(n.textContent)));
+for (const state of ["activating", "deactivating", "reloading"]) {
+  nodes = render({ ...base, configured: true, service_active: false, service_state: state });
+  assert(nodes.filter((n) => ["Activate", "Deactivate"].includes(n.textContent)).every((n) => n.disabled));
+  assert(nodes.some((n) => n.textContent === "Service: " + state[0].toUpperCase() + state.slice(1) + "…"));
+}
+for (const id of ["tailscale", "netbird", "playit"]) {
+  nodes = render({ ...base, id, configured: true });
+  assert(nodes.some((n) => n.textContent === "Activate" && n.disabled));
+  assert(nodes.some((n) => n.textContent === "Deactivate" && !n.disabled));
+  assert(!nodes.some((n) => n.textContent === "Set up Playit"));
+  const link = nodes.find((n) => n.textContent === "Open provider dashboard");
+  assert.equal(link.className, "button-link secondary network-action-button");
+  assert.equal(link.target, "_blank"); assert.equal(link.rel, "noopener noreferrer");
+  assert.equal(link.href, { tailscale: "https://console.tailscale.com/admin/", netbird: "https://app.netbird.io/", playit: "https://playit.gg/account/" }[id]);
+}
+nodes = render({ ...base, configured: true, service_active: false, service_enabled: false, service_state: "inactive" });
+assert(nodes.some((n) => n.textContent === "Activate" && !n.disabled));
+assert(nodes.some((n) => n.textContent === "Deactivate" && n.disabled));
+for (const state of ["inactive", "failed"]) {
+  nodes = render({ ...base, configured: true, service_active: false, service_state: state });
+  assert(nodes.some((n) => n.textContent === "Activate" && !n.disabled));
+  assert(nodes.some((n) => n.textContent === "Deactivate" && !n.disabled));
+}
+for (const state of ["starting", "waiting"]) {
+  playitSetup = { state, claim_url: "https://playit.gg/claim/0123abcdef" };
+  nodes = render(base);
+  assert(nodes.filter((n) => ["Activate", "Deactivate", "Set up Playit"].includes(n.textContent)).every((n) => n.disabled));
+  if (state === "waiting") assert.equal(nodes.find((n) => n.textContent === "Open Playit setup").href, playitSetup.claim_url);
+}
+for (const claim_url of ["https://playit.gg/claim/0123abcdef", "https://playit.gg/claim/A1B2C3D4E5"]) {
+  playitSetup = { state: "waiting", claim_url };
+  assert.equal(render(base).find((n) => n.textContent === "Open Playit setup").href, claim_url);
+}
+for (const claim_url of [
+  "https://playit.gg/claim/0123abcde",
+  "https://playit.gg/claim/0123abcdef0",
+  "https://playit.gg/claim/0123abcdeg",
+  "https://playit.gg/claim/0123abcdef?secret=x",
+  "https://playit.gg/claim/0123abcdef/path",
+  "http://playit.gg/claim/0123abcdef",
+  "https://evil.test/claim/0123abcdef",
+  "https://playit.gg/claim/",
+  "prefixhttps://playit.gg/claim/0123abcdef",
+  "https://playit.gg/claim/0123abcdefsuffix",
+  "https://playit.gg/claim/0123abcdef\n",
+]) {
+  playitSetup = { state: "waiting", claim_url };
+  assert(!render(base).some((n) => n.textContent === "Open Playit setup"));
+}
+playitSetup = { state: "failed" };
+assert(render(base).some((n) => n.textContent === "Try setup again" && !n.disabled));
+`
+	cmd := exec.Command("node")
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("card behavior: %v\n%s", err, output)
+	}
+	css, err := assets.ReadFile("static/network-workspace.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(css), ".network-provider-card .button-link{display:inline-flex;") || !strings.Contains(string(css), "background:var(--jv-surface-raised);color:var(--jv-text)") {
+		t.Fatal("provider anchor lost normal button styling")
+	}
+}
+
+func TestRemoteAccessPollingIsBoundedAndStopsWhenStable(t *testing.T) {
+	source, err := assets.ReadFile("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(source)
+	start := strings.Index(script, "  const pollRemoteAccess =")
+	end := strings.Index(script, "  const runRemoteAction =")
+	if start < 0 || end <= start {
+		t.Fatal("bounded remote polling missing")
+	}
+	program := `
+const assert = require("node:assert/strict");
+let now = 0, polls = 0, remotePollSequence = 0;
+let playitSetup = { state: "idle" }, remoteProviders = [{ service_state: "activating" }];
+const dialog = { open: true }, state = {};
+const isAdministrator = () => true;
+const providerTransitional = (p) => ["activating", "deactivating", "reloading"].includes(p.service_state);
+const setupRunning = () => ["starting", "waiting"].includes(playitSetup.state);
+Date.now = () => now;
+const setTimeout = (callback, interval) => { now += interval; callback(); };
+let refreshRemoteAccess = async () => { polls++; if (polls === 2) remoteProviders = [{ service_state: "active" }]; };
+` + script[start:end] + `
+(async () => {
+  await pollRemoteAccess(); assert.equal(polls, 2);
+  polls = 0; now = 0; remoteProviders = [{ service_state: "deactivating" }];
+  refreshRemoteAccess = async () => { polls++; };
+  await pollRemoteAccess(); assert(polls > 0 && polls <= 27); assert(now >= 20000);
+  polls = 0; now = 0; playitSetup = { state: "waiting" };
+  await pollRemoteAccess(); assert(polls > 0 && polls <= 305); assert(now >= 610000);
+  polls = 0; dialog.open = false;
+  await pollRemoteAccess(); assert.equal(polls, 0);
+  dialog.open = true; now = 0; playitSetup = { state: "waiting" };
+  refreshRemoteAccess = async () => { polls++; playitSetup = { state: "complete" }; remoteProviders = [{ service_state: "active", configured: true }]; };
+  await pollRemoteAccess(); assert.equal(polls, 1); assert(remoteProviders[0].configured);
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+`
+	cmd := exec.Command("node")
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("polling behavior: %v\n%s", err, output)
 	}
 }

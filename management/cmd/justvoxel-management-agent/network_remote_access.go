@@ -117,15 +117,25 @@ func (s *server) networkRemoteAccessChange(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "action must be activate or deactivate")
 		return
 	}
+	playitSetup.mu.Lock()
+	defer playitSetup.mu.Unlock()
+	if provider.id == "playit" && playitSetup.state.running() {
+		writeError(w, http.StatusConflict, "Playit setup is in progress")
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	status, err := remoteProviderStatus(ctx, provider)
 	if err == nil && !status.Installed {
 		err = os.ErrNotExist
 	}
+	if err == nil && remoteTransitional(status.ServiceState) {
+		writeError(w, http.StatusConflict, "provider service is changing state; refresh service status")
+		return
+	}
 	if err == nil {
 		if request.Action == "activate" {
-			_, err = remoteSystemctl(ctx, "enable", "--now", provider.unit)
+			err = remoteActivate(ctx, provider)
 		} else {
 			// Stop first: an interrupted operation must not leave an active service
 			// that the response presents as deactivated.
@@ -143,4 +153,13 @@ func (s *server) networkRemoteAccessChange(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func remoteTransitional(state string) bool {
+	return state == "activating" || state == "deactivating" || state == "reloading" || state == "refreshing"
+}
+
+func remoteActivate(ctx context.Context, provider remoteProviderMetadata) error {
+	_, err := remoteSystemctl(ctx, "enable", "--now", provider.unit)
+	return err
 }

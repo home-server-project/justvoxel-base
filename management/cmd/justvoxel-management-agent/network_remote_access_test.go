@@ -139,3 +139,26 @@ func TestPlayitConfigurationEvidenceOnlyUsesExpectedFile(t *testing.T) {
 		t.Fatal("empty configuration classified as configured")
 	}
 }
+
+func TestRemoteProviderRejectsTransitionalLifecycle(t *testing.T) {
+	remoteFixture(t)
+	for _, state := range []string{"activating", "deactivating", "reloading", "refreshing"} {
+		var mutations int
+		remoteSystemctl = func(_ context.Context, args ...string) (string, error) {
+			if args[0] == "show" {
+				return "LoadState=loaded\nUnitFileState=enabled\nActiveState=" + state, nil
+			}
+			mutations++
+			return "", nil
+		}
+		for _, action := range []string{"activate", "deactivate"} {
+			rr := networkAdminRequest(adminServerForTest(), "/v1/admin/network/remote-access/playit", `{"action":"`+action+`"}`)
+			if rr.Code != http.StatusConflict {
+				t.Fatalf("%s %s: %d", state, action, rr.Code)
+			}
+		}
+		if mutations != 0 {
+			t.Fatal("transitional lifecycle reached systemctl")
+		}
+	}
+}

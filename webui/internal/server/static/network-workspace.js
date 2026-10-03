@@ -21,6 +21,18 @@
   let selectedTab = "Overview";
   let remoteProviders = [];
   let remoteError = "";
+  let playitSetup = { state: "idle" };
+  let remoteBusy = false;
+  let remotePollSequence = 0;
+  const providerTransitional = (provider) => ["activating", "deactivating", "reloading", "refreshing"].includes(provider.service_state);
+  const setupRunning = () => ["starting", "waiting"].includes(playitSetup.state);
+  const providerControls = (provider) => {
+    const blocked = !provider.installed || providerTransitional(provider) || remoteBusy || (provider.id === "playit" && setupRunning());
+    return {
+      activateDisabled: blocked || (provider.service_active && provider.service_enabled),
+      deactivateDisabled: blocked || (!provider.service_active && !provider.service_enabled && provider.service_state === "inactive")
+    };
+  };
   const isAdministrator = () => (currentSnapshot?.workspace_tabs || []).includes("Ethernet");
   let loadSequence = 0;
   let currentSnapshot = null;
@@ -123,7 +135,7 @@
 
   const badge = (text, tone = "") => {
     const item = document.createElement("span");
-    item.className = "network-badge" + (tone ? " " + tone : "");
+    item.className = "badge network-badge" + (tone ? " " + tone : "");
     item.textContent = text;
     return item;
   };
@@ -199,6 +211,49 @@
       }
       throw error;
     }
+  };
+
+  const sectionHeading = (eyebrowText, titleText) => {
+    const heading = document.createElement("div");
+    heading.className = "section-heading";
+    const copy = document.createElement("div");
+    const eyebrow = document.createElement("p");
+    eyebrow.className = "eyebrow";
+    eyebrow.textContent = eyebrowText;
+    const title = document.createElement("h2");
+    title.textContent = titleText;
+    copy.append(eyebrow, title);
+    heading.appendChild(copy);
+    return heading;
+  };
+
+  // Bound variable-length Wi-Fi lists without hiding networks or adding a scroller.
+  const paginateList = (list, pageSize) => {
+    const items = [...list.children];
+    if (items.length <= pageSize) return null;
+    let page = 0;
+    const pages = Math.ceil(items.length / pageSize);
+    const controls = document.createElement("div");
+    controls.className = "network-list-pages";
+    const previous = document.createElement("button");
+    const next = document.createElement("button");
+    const status = document.createElement("span");
+    status.setAttribute("aria-live", "polite");
+    previous.type = next.type = "button";
+    previous.className = next.className = "secondary network-action-button";
+    previous.textContent = "Previous";
+    next.textContent = "Next";
+    const update = () => {
+      items.forEach((item, index) => { item.hidden = Math.floor(index / pageSize) !== page; });
+      previous.disabled = page === 0;
+      next.disabled = page === pages - 1;
+      status.textContent = "Page " + (page + 1) + " of " + pages;
+    };
+    previous.addEventListener("click", () => { page--; update(); });
+    next.addEventListener("click", () => { page++; update(); });
+    controls.append(previous, status, next);
+    update();
+    return controls;
   };
 
   const renderOverview = (snapshot) => {
@@ -314,13 +369,13 @@
 
   const renderDevice = (device) => {
     const card = document.createElement("article");
-    card.className = "network-device-card";
+    card.className = "panel network-device-card";
 
     const heading = document.createElement("div");
     heading.className = "network-device-heading";
     const titleWrap = document.createElement("div");
     const kind = document.createElement("span");
-    kind.className = "network-device-kind";
+    kind.className = "eyebrow network-device-kind";
     kind.textContent = device.kind === "wifi" ? "Wi-Fi" : device.kind === "ethernet" ? "Ethernet" : "Network";
     const title = document.createElement("strong");
     title.textContent = device.interface || "Unknown interface";
@@ -349,7 +404,10 @@
       summary.append(
         row("Link", device.carrier === false ? "Cable disconnected" : device.speed_mbps ? device.speed_mbps + " Mbps" : "Connected"),
         row("IPv4", firstAddress(device.ipv4)),
-        row("Profile", device.active_connection?.id || "No active profile")
+        row("Profile", device.active_connection?.id || "No active profile"),
+        row("Gateway", device.ipv4?.gateway || "—"),
+        row("DNS", device.ipv4?.dns?.join(", ") || "—"),
+        row("MTU", device.mtu ? String(device.mtu) : "—")
       );
     }
 
@@ -380,7 +438,7 @@
 
   const renderWiFiNetworks = (device, response) => {
     const section = document.createElement("section");
-    section.className = "network-wifi-section";
+    section.className = "panel network-wifi-section";
 
     const heading = document.createElement("div");
     heading.className = "network-section-heading";
@@ -451,6 +509,8 @@
       });
     }
     section.appendChild(list);
+    const pages = paginateList(list, 4);
+    if (pages) section.appendChild(pages);
     return section;
   };
 
@@ -474,7 +534,7 @@
     if (profiles.length === 0) return null;
     const active = activeProfileUUIDs(snapshot);
     const details = document.createElement("details");
-    details.className = "network-saved";
+    details.className = "panel network-saved";
     const summary = document.createElement("summary");
     summary.textContent = "Saved Wi-Fi networks (" + profiles.length + ")";
     const list = document.createElement("div");
@@ -508,13 +568,15 @@
       list.appendChild(item);
     });
     details.append(summary, list);
+    const pages = paginateList(list, 3);
+    if (pages) details.appendChild(pages);
     return details;
   };
 
   const renderConnectPanel = () => {
     if (!connectionDraft) return null;
     const panel = document.createElement("section");
-    panel.className = "network-connect-panel nav-admin-only";
+    panel.className = "panel network-connect-panel nav-admin-only";
     panel.dataset.networkConnectPanel = "true";
 
     const heading = document.createElement("div");
@@ -617,7 +679,7 @@
 
   const renderEthernetForm = (device) => {
     const form = document.createElement("form");
-    form.className = "network-ethernet-form";
+    form.className = "settings-form network-ethernet-form";
     form.dataset.networkEthernetForm = device.interface;
     form.dataset.profileUuid = device.active_connection.uuid;
     const field = (name, title, value, type = "text") => {
@@ -627,8 +689,12 @@
       input.name = name;
       input.type = type;
       input.value = value ?? "";
-      if (type === "checkbox") input.checked = Boolean(value);
-      wrap.appendChild(input);
+      if (type === "checkbox") {
+        input.checked = Boolean(value);
+        wrap.className = "toggle-line";
+        wrap.prepend(input);
+      }
+      if (type !== "checkbox") wrap.appendChild(input);
       form.appendChild(wrap);
       return input;
     };
@@ -649,7 +715,7 @@
     const prefix = field("prefix", "Prefix length", device.ipv4?.addresses?.[0]?.prefix ?? 24, "number");
     prefix.min = "0"; prefix.max = "32";
     const gateway = field("gateway", "Gateway (optional)", device.ipv4?.gateway);
-    field("dns", "DNS servers (comma separated; blank uses automatic DNS)", (device.ipv4?.dns || []).join(", "));
+    field("dns", "DNS servers (comma separated)", (device.ipv4?.dns || []).join(", "));
     const mtu = field("mtu", "MTU (0 for automatic)", device.mtu || 0, "number");
     mtu.min = "0"; mtu.max = "9000";
     field("autoconnect", "Connect automatically", device.active_connection.autoconnect, "checkbox");
@@ -662,27 +728,35 @@
     updateMode();
     const hint = document.createElement("p");
     hint.className = "state-text";
-    hint.textContent = "Apply stages live settings for 90 seconds. Reconnect at the new address if needed, then Keep settings to save them for reboot. Unsupported live changes are safely rejected.";
+    hint.textContent = "Settings roll back after 90 seconds unless you Keep settings. Reconnect at the new address if needed. Blank DNS and MTU 0 use automatic settings.";
     const apply = document.createElement("button");
     apply.type = "submit";
     apply.textContent = "Apply with safety checkpoint";
     apply.disabled = Boolean(currentCheckpoint);
-    form.append(hint, apply);
+    const actions = document.createElement("div");
+    actions.className = "network-form-actions";
+    actions.appendChild(apply);
+    form.append(hint, actions);
     return form;
   };
 
   const renderTroubleshoot = (snapshot) => {
     const section = document.createElement("section");
-    section.className = "network-devices";
-    section.appendChild(row("NetworkManager connectivity", label(snapshot.connectivity)));
-    section.appendChild(actionButton("Check connectivity now", "networkConnectivityCheck", "true"));
+    section.className = "panel network-section network-troubleshoot";
+    const heading = sectionHeading("Network health", "Connectivity");
+    heading.appendChild(actionButton("Check connectivity now", "networkConnectivityCheck", "true"));
+    section.append(heading, row("NetworkManager connectivity", label(snapshot.connectivity)));
+    const grid = document.createElement("div");
+    grid.className = "network-devices";
     if (!snapshot.networking_enabled) section.appendChild(row("Condition", "Networking is disabled"));
     const devices = (snapshot.devices || []).filter((device) => ["ethernet", "wifi"].includes(device.kind));
     if (!devices.length) section.appendChild(row("Condition", "No Ethernet or Wi-Fi interface is available"));
     devices.forEach((device) => {
       const card = document.createElement("article");
-      card.className = "network-device-card";
-      card.append(
+      card.className = "panel network-device-card";
+      const summary = document.createElement("div");
+      summary.className = "network-health-summary";
+      summary.append(
         row("Interface", device.interface), row("State", label(device.state)),
         row("Link", device.carrier === false ? "No carrier" : device.carrier === true ? "Carrier present" : "Not reported"),
         row("IPv4", firstAddress(device.ipv4)),
@@ -690,56 +764,83 @@
         row("DNS servers", device.ipv4?.dns?.join(", ") || "Missing"),
         row("Active profile", device.active_connection?.id || "Missing")
       );
+      card.appendChild(summary);
       if (device.active_connection && device.managed) {
         const repair = actionButton("Reconnect active profile", "networkReconnect", device.interface);
         repair.dataset.profileUuid = device.active_connection.uuid;
         repair.disabled = Boolean(currentCheckpoint);
-        card.appendChild(repair);
+        const actions = document.createElement("div");
+        actions.className = "network-inline-actions";
+        actions.appendChild(repair);
+        card.appendChild(actions);
       }
-      section.appendChild(card);
+      grid.appendChild(card);
     });
+    section.appendChild(grid);
     return section;
   };
 
   const renderRemoteAccess = () => {
     const section = document.createElement("section");
-    section.className = "network-devices";
+    section.className = "panel network-section";
+    section.appendChild(sectionHeading("Remote access", "Providers"));
+    const grid = document.createElement("div");
+    grid.className = "network-provider-grid";
     const hint = document.createElement("p");
     hint.className = "state-text";
     hint.textContent = remoteError || "Activate enables and starts a provider; Deactivate stops and disables it. Manage accounts and tunnels in the provider dashboard.";
     section.appendChild(hint);
     remoteProviders.forEach((provider) => {
       const card = document.createElement("article");
-      card.className = "network-device-card";
+      card.className = "panel network-device-card network-provider-card";
       const title = document.createElement("h3");
       title.textContent = provider.display_name;
       card.append(title,
         row("Software", provider.status_unavailable ? "Unknown" : provider.installed ? "Installed" : "Unavailable"),
         row("Service enabled", provider.status_unavailable ? "Unknown" : provider.service_enabled ? "Yes" : "No"),
-        row("Service", provider.service_active ? "Running" : label(provider.service_state)),
+        row("Service", providerTransitional(provider) ? provider.service_state[0].toUpperCase() + provider.service_state.slice(1) + "…" : provider.service_active ? "Running" : label(provider.service_state).replace(/^./, (c) => c.toUpperCase())),
         row("Configuration", provider.status_unavailable ? "Unknown" : provider.configured ? "Configured" : "Not configured")
       );
-      if (provider.id === "playit" && provider.service_active && !provider.configured) {
-        card.appendChild(row("Setup", "Waiting for account setup is normal. Use mjust net → Playit.gg → Set up Playit account/agent."));
-      }
+      const needsSetup = provider.id === "playit" && provider.installed && !provider.configured;
       const actions = document.createElement("div");
       actions.className = "network-inline-actions";
+      if (needsSetup) {
+        if (setupRunning()) card.appendChild(row("Setup", playitSetup.state === "waiting" ? "Waiting for approval" : "Preparing…"));
+        if (playitSetup.state === "failed") card.appendChild(row("Setup", "Failed or timed out"));
+        const setup = actionButton(playitSetup.state === "failed" ? "Try setup again" : "Set up Playit", "networkPlayitSetup", "start");
+        setup.disabled = setupRunning() || remoteBusy || providerTransitional(provider);
+        actions.appendChild(setup);
+        if (playitSetup.state === "waiting" && /^https:\/\/playit\.gg\/claim\/[0-9a-fA-F]{10}(?![\s\S])$/.test(playitSetup.claim_url || "")) {
+          const claim = document.createElement("a");
+          claim.href = playitSetup.claim_url;
+          claim.target = "_blank";
+          claim.rel = "noopener noreferrer";
+          claim.className = "button-link secondary network-action-button";
+          claim.textContent = "Open Playit setup";
+          actions.appendChild(claim);
+        }
+      }
+      const controls = providerControls(provider);
       const activate = actionButton("Activate", "networkProvider", provider.id);
       activate.dataset.action = "activate";
-      activate.disabled = !provider.installed || (provider.service_active && provider.service_enabled);
+      activate.disabled = controls.activateDisabled;
       const deactivate = actionButton("Deactivate", "networkProvider", provider.id);
       deactivate.dataset.action = "deactivate";
-      deactivate.disabled = !provider.installed || (!provider.service_active && !provider.service_enabled);
+      deactivate.disabled = controls.deactivateDisabled;
+      if (!(needsSetup && provider.service_active)) actions.appendChild(activate);
+      actions.appendChild(deactivate);
       const dashboard = document.createElement("a");
       // Fixed destinations only, even if a malformed status payload is received.
       dashboard.href = { tailscale: "https://console.tailscale.com/admin/", netbird: "https://app.netbird.io/", playit: "https://playit.gg/account/" }[provider.id];
       dashboard.target = "_blank";
       dashboard.rel = "noopener noreferrer";
+      dashboard.className = "button-link secondary network-action-button";
       dashboard.textContent = "Open provider dashboard";
-      actions.append(activate, deactivate, dashboard);
+      actions.appendChild(dashboard);
       card.appendChild(actions);
-      section.appendChild(card);
+      grid.appendChild(card);
     });
+    section.appendChild(grid);
     return section;
   };
 
@@ -750,14 +851,13 @@
     root.className = "network-workspace-view";
     const tabs = currentSnapshot.workspace_tabs || ["Overview"];
     if (!tabs.includes(selectedTab)) selectedTab = "Overview";
-    const tablist = document.createElement("div");
-    tablist.className = "network-tabs";
+    const tablist = document.createElement("nav");
+    tablist.className = "system-workspace-tabs network-tabs";
     tablist.setAttribute("role", "tablist");
     tablist.setAttribute("aria-label", "Network views");
     tabs.forEach((name) => {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "secondary";
       button.dataset.networkTab = name;
       button.textContent = name;
       button.setAttribute("role", "tab");
@@ -771,18 +871,31 @@
     if (currentCheckpoint && isAdministrator()) root.appendChild(renderCheckpoint(currentCheckpoint));
     const panel = document.createElement("div");
     panel.id = "network-tab-panel";
+    panel.dataset.networkView = selectedTab;
     panel.setAttribute("role", "tabpanel");
     panel.setAttribute("aria-labelledby", "network-tab-" + selectedTab.replaceAll(" ", "-"));
     const devices = (currentSnapshot.devices || []).filter((device) => ["ethernet", "wifi"].includes(device.kind));
     if (selectedTab === "Overview") {
       panel.appendChild(renderOverview(currentSnapshot));
+      const interfaces = document.createElement("section");
+      interfaces.className = "panel network-section";
+      interfaces.appendChild(sectionHeading("Network", "Interfaces"));
+      const grid = document.createElement("div");
+      grid.className = "network-devices";
       devices.forEach((device) => {
         const card = document.createElement("article");
-        card.className = "network-device-card";
-        card.append(row(device.kind === "wifi" ? "Wi-Fi" : "Ethernet", device.interface), row("State", label(device.state)), row("IPv4", firstAddress(device.ipv4)));
-        panel.appendChild(card);
+        card.className = "panel network-device-card";
+        const heading = sectionHeading(device.kind === "wifi" ? "Wi-Fi" : "Ethernet", device.interface);
+        heading.appendChild(badge(label(device.state), device.state === "activated" ? "good" : ""));
+        card.append(heading, row("IPv4", firstAddress(device.ipv4)));
+        card.appendChild(device.kind === "wifi"
+          ? row("Signal", device.wireless?.ssid ? (device.wireless.signal || 0) + "%" : "—")
+          : row("Link", device.carrier === false ? "Cable disconnected" : device.speed_mbps ? device.speed_mbps + " Mbps" : "Connected"));
+        grid.appendChild(card);
       });
-      if (!devices.length) panel.appendChild(row("Devices", "No Ethernet or Wi-Fi interface is available"));
+      interfaces.appendChild(grid);
+      if (!devices.length) interfaces.appendChild(row("Devices", "No Ethernet or Wi-Fi interface is available"));
+      panel.appendChild(interfaces);
     } else if (selectedTab === "Ethernet") {
       devices.filter((device) => device.kind === "ethernet").forEach((device) => {
         const card = renderDevice(device);
@@ -794,13 +907,22 @@
       if (!devices.some((device) => device.kind === "ethernet")) panel.appendChild(row("Ethernet", "No Ethernet interface is available"));
     } else if (selectedTab === "Wi-Fi") {
       panel.appendChild(renderOverview(currentSnapshot));
+      const layout = document.createElement("div");
+      layout.className = "network-wifi-layout";
+      const settings = document.createElement("div");
+      settings.className = "network-wifi-settings";
+      const nearby = document.createElement("div");
+      nearby.className = "network-wifi-nearby";
       devices.filter((device) => device.kind === "wifi").forEach((device) => {
-        panel.append(renderDevice(device), renderWiFiNetworks(device, currentNetworks.get(device.interface)));
+        settings.appendChild(renderDevice(device));
+        nearby.appendChild(renderWiFiNetworks(device, currentNetworks.get(device.interface)));
       });
       const saved = renderSavedWiFi(currentSnapshot);
-      if (saved) panel.appendChild(saved);
+      if (saved) nearby.appendChild(saved);
       const connectPanel = renderConnectPanel();
-      if (connectPanel) panel.appendChild(connectPanel);
+      if (connectPanel) settings.appendChild(connectPanel);
+      layout.append(settings, nearby);
+      panel.appendChild(layout);
     } else if (selectedTab === "Troubleshoot") {
       panel.appendChild(renderTroubleshoot(currentSnapshot));
     } else if (selectedTab === "Remote Access") {
@@ -857,11 +979,14 @@
           const remote = await requestJSON("/api/network/remote-access");
           if (sequence !== loadSequence) return;
           remoteProviders = (remote?.providers || []).filter((provider) => ["tailscale", "netbird", "playit"].includes(provider.id));
+          playitSetup = await requestJSON("/api/network/remote-access/playit/setup") || { state: "idle" };
+          if (sequence !== loadSequence) return;
         } catch (error) { remoteError = error?.message || "Remote access status unavailable."; }
       }
       if (sequence !== loadSequence) return;
       renderNetwork();
       state.textContent = "";
+      if (remoteProviders.some(providerTransitional) || setupRunning()) pollRemoteAccess();
     } catch (error) {
       if (sequence !== loadSequence) return;
       state.textContent = error?.message || "Network information is unavailable.";
@@ -1035,6 +1160,46 @@
     } finally { button.disabled = false; }
   };
 
+  const refreshRemoteAccess = async () => {
+    playitSetup = await requestJSON("/api/network/remote-access/playit/setup") || { state: "idle" };
+    const remote = await requestJSON("/api/network/remote-access");
+    remoteProviders = (remote?.providers || []).filter((provider) => ["tailscale", "netbird", "playit"].includes(provider.id));
+    renderNetwork();
+  };
+
+  // Each refresh/action starts a finite observation window. Closing the workspace
+  // ends observation; the agent still owns the setup timeout.
+  const pollRemoteAccess = async () => {
+    const sequence = ++remotePollSequence;
+    const deadline = Date.now() + (setupRunning() ? 610000 : 20000);
+    try {
+      while (sequence === remotePollSequence && dialog.open && isAdministrator() && Date.now() < deadline &&
+             (remoteProviders.some(providerTransitional) || setupRunning())) {
+        await new Promise((resolve) => setTimeout(resolve, setupRunning() ? 2000 : 750));
+        if (sequence !== remotePollSequence || !dialog.open || !isAdministrator()) return;
+        await refreshRemoteAccess();
+      }
+    } catch (error) { state.textContent = error?.message || "Remote access status unavailable. Refresh to retry."; }
+  };
+
+  const runRemoteAction = async (action) => {
+    if (remoteBusy) return;
+    remoteBusy = true;
+    ++remotePollSequence;
+    renderNetwork();
+    try {
+      await action();
+      await refreshRemoteAccess();
+      pollRemoteAccess();
+    } catch (error) {
+      state.textContent = error?.message || "Remote access change failed.";
+      try { await refreshRemoteAccess(); pollRemoteAccess(); } catch (_) { /* Keep the reported failure visible. */ }
+    } finally {
+      remoteBusy = false;
+      renderNetwork();
+    }
+  };
+
   const submitEthernet = (form) => {
     const values = Object.fromEntries(new FormData(form));
     if (values.method === "auto") { values.address = ""; values.prefix = 0; values.gateway = ""; }
@@ -1053,9 +1218,16 @@
     const tab = event.target.closest("[data-network-tab]");
     if (tab) { selectedTab = tab.dataset.networkTab; connectionDraft = null; renderNetwork(); content.querySelector('[aria-selected="true"]')?.focus(); return; }
     if (!isAdministrator()) return;
+    const setup = event.target.closest("[data-network-playit-setup]");
+    if (setup) {
+      if (!setup.disabled && !setupRunning()) runRemoteAction(async () => {
+        playitSetup = await postForm("/api/network/remote-access/playit/setup");
+      });
+      return;
+    }
     const provider = event.target.closest("[data-network-provider]");
     if (provider) {
-      runConfigurationAction(provider, () => postForm("/api/network/remote-access/" + escapePath(provider.dataset.networkProvider), { action: provider.dataset.action }));
+      if (!provider.disabled) runRemoteAction(() => postForm("/api/network/remote-access/" + escapePath(provider.dataset.networkProvider), { action: provider.dataset.action }));
       return;
     }
     const check = event.target.closest("[data-network-connectivity-check]");
@@ -1108,7 +1280,7 @@
         hidden: false,
       };
       renderNetwork();
-      content.querySelector("[data-network-connect-panel]")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      content.querySelector("[data-network-connect-panel] input")?.focus({ preventScroll: true });
       return;
     }
 
@@ -1122,7 +1294,7 @@
         hidden: true,
       };
       renderNetwork();
-      content.querySelector("[data-network-connect-panel]")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      content.querySelector("[data-network-connect-panel] input")?.focus({ preventScroll: true });
       return;
     }
 

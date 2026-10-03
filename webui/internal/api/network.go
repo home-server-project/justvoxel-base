@@ -267,3 +267,18 @@ func (c *Client) ReconnectNetwork(ctx context.Context, session, interfaceName, u
 	err := c.do(ctx, http.MethodPost, "/v1/admin/network/reconnect/"+url.PathEscape(interfaceName), session, map[string]string{"profile_uuid": uuid, "checkpoint_id": checkpointID}, &out)
 	return out, err
 }
+
+type PlayitSetupState struct {
+	State    string `json:"state"`
+	ClaimURL string `json:"claim_url,omitempty"`
+}
+
+func (c *Client) PlayitSetup(ctx context.Context, session string, start bool) (PlayitSetupState, error) {
+	var out PlayitSetupState
+	method := http.MethodGet
+	if start {
+		method = http.MethodPost
+	}
+	err := c.do(ctx, method, "/v1/admin/network/remote-access/playit/setup", session, nil, &out)
+	return out, err
+}
