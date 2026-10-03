@@ -76,7 +76,7 @@ grep -Fq 'confirmation="DELETE PARTITION ${device}"' <<< "${delete_block}"
 grep -Fq 'confirmation="ERASE DISK ${device}"' <<< "${delete_block}"
 grep -Fq 'parted -s -- "${parent}" rm "${number}"' "${apply}"
 grep -Fq 'mklabel gpt' "${apply}"
-grep -Fq 'requested_size_gib * 1024' "${planner}"
+grep -Fq 'storage_action_plan_partition' "${planner}"
 grep -Fq 'submitted_fingerprint' "${apply}"
 grep -Fq 'jv_stop_minecraft_adaptive' "${apply}"
 if grep -Eq 'resizepart|smb|nfs|credentials' "${planner}" "${apply}"; then

@@ -112,7 +112,13 @@ func (s *server) runAdminStorageMount(w http.ResponseWriter, r *http.Request, ac
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
-	output, err := runAdminStorageMountsHelper(ctx, action, payload)
+	var output []byte
+	var err error
+	if action == "apply" {
+		output, err = runHostStorageMutation(ctx, adminStorageMountsHelper, action, payload)
+	} else {
+		output, err = runAdminStorageMountsHelper(ctx, action, payload)
+	}
 	if err != nil {
 		if action == "apply" && s.store != nil {
 			_ = s.store.recordAuditEvent(actor, "storage_mount_"+request.Operation, request.Device, false, "permanent mount helper failed")

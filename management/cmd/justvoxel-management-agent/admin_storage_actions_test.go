@@ -59,10 +59,13 @@ func TestAdminStorageActionPlanReturnsReviewEvidence(t *testing.T) {
 
 func TestAdminStorageActionApplyReturnsBoundedFailure(t *testing.T) {
 	s := surfaceTestServer(t, roleAdministrator)
-	old := runAdminStorageActionsHelper
-	defer func() { runAdminStorageActionsHelper = old }()
+	old := runHostStorageMutation
+	defer func() { runHostStorageMutation = old }()
 
-	runAdminStorageActionsHelper = func(_ context.Context, action string, _ []byte) ([]byte, error) {
+	runHostStorageMutation = func(_ context.Context, helper, action string, _ []byte) ([]byte, error) {
+		if helper != adminStorageActionsHelper {
+			t.Fatalf("unexpected helper: %s", helper)
+		}
 		if action != "apply" {
 			t.Fatalf("action = %q, want apply", action)
 		}

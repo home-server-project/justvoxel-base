@@ -152,7 +152,12 @@ func (s *server) runAdminStorageProvisionChange(w http.ResponseWriter, r *http.R
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
-	output, err := runAdminStorageProvisionHelper(ctx, action, payload)
+	var output []byte
+	if action == "apply" {
+		output, err = runHostStorageMutation(ctx, adminStorageProvisionHelper, action, payload)
+	} else {
+		output, err = runAdminStorageProvisionHelper(ctx, action, payload)
+	}
 	if err != nil {
 		if action == "apply" {
 			_ = s.store.recordAuditEvent(actor, "provision_backup_storage", request.Device, false, "storage provisioning helper failed")

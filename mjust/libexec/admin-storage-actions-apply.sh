@@ -4,7 +4,7 @@ storage_action_apply_json() {
     local submitted_fingerprint submitted_confirmation
     local operation device mountpoint current_mountpoint expected_confirmation
     local filesystem uuid mounted_after result_role size actual_uuid
-    local free_start planned_end before after partition new_partitions mkfs_output
+    local planned_end before after partition new_partitions mkfs_output
 
     prepare_plan || return 0
 
@@ -15,7 +15,6 @@ storage_action_apply_json() {
     mountpoint="$(jq -r '.mount_point' <<< "${PLAN_JSON}")"
     current_mountpoint="$(jq -r '.current_mount_point' <<< "${PLAN_JSON}")"
     expected_confirmation="$(jq -r '.confirmation' <<< "${PLAN_JSON}")"
-    free_start="$(jq -r '.free_start // ""' <<< "${PLAN_JSON}")"
     planned_end="$(jq -r '.planned_end // ""' <<< "${PLAN_JSON}")"
     partition=''
 
@@ -100,7 +99,7 @@ storage_action_apply_json() {
             before="$(mktemp)"
             after="$(mktemp)"
             lsblk -nrpo NAME,TYPE "${device}" | awk '$2 == "part" {print $1}' | sort > "${before}"
-            if ! storage_create_partition "${device}" "${free_start}" "${planned_end}" >/dev/null 2>&1 \
+            if ! storage_create_partition "${device}" "${STORAGE_ACTION_START}" "${planned_end}" >/dev/null 2>&1 \
                 || ! partprobe "${device}" >/dev/null 2>&1 \
                 || ! udevadm settle >/dev/null 2>&1; then
                 rm -f "${before}" "${after}"

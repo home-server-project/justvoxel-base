@@ -96,7 +96,12 @@ func (s *server) runAdminStorageAction(w http.ResponseWriter, r *http.Request, a
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
-	output, err := runAdminStorageActionsHelper(ctx, action, payload)
+	var output []byte
+	if action == "apply" {
+		output, err = runHostStorageMutation(ctx, adminStorageActionsHelper, action, payload)
+	} else {
+		output, err = runAdminStorageActionsHelper(ctx, action, payload)
+	}
 	if err != nil {
 		if action == "apply" {
 			_ = s.store.recordAuditEvent(actor, "storage_"+request.Operation, request.Device, false, "storage action helper failed")

@@ -257,12 +257,82 @@ storage_action_validate_deletion() {
     [[ ${table} != msdos || $(cut -d: -f5 <<< "${record}") != extended ]]
 }
 
+# Keep the browser's MiB selection identity, but use exact sectors for mkpart.
+# Parted's end sector is inclusive; alignment is calculated on the exclusive end.
+storage_action_plan_partition() {
+    local device="$1" wanted="$2" requested="$3"
+    local sectors display recheck index record start end length logical physical minimum optimal offset
+    local grain value a b remainder aligned_start aligned_limit count
+    sectors="$(LC_ALL=C parted -s -m "${device}" unit s print free)" || return 1
+    display="$(LC_ALL=C parted -s -m "${device}" unit MiB print free)" || return 1
+    recheck="$(LC_ALL=C parted -s -m "${device}" unit s print free)" || return 1
+    [[ ${sectors} == "${recheck}" ]] || return 1
+    # Matching record positions must describe the same layout in both units.
+    [[ $(awk -F: 'NR > 2 {print $1, ($5 == "free;")}' <<< "${sectors}") == \
+       "$(awk -F: 'NR > 2 {print $1, ($5 == "free;")}' <<< "${display}")" ]] || return 1
+    index="$(awk -F: -v wanted="${wanted}" '$5 == "free;" && $2 == wanted {n++; row=NR} END {if (n == 1) print row}' <<< "${display}")"
+    [[ -n ${index} ]] || return 1
+    record="$(awk -v row="${index}" 'NR == row' <<< "${sectors}")"
+    IFS=: read -r _ start end length value <<< "${record}"
+    [[ ${value} == 'free;' && ${start} =~ ^[0-9]+s$ && ${end} =~ ^[0-9]+s$ && ${length} =~ ^[0-9]+s$ ]] || return 1
+    start="${start%s}"; end="${end%s}"; length="${length%s}"
+    [[ ${#start} -le 15 && ${#end} -le 15 && ${#length} -le 15 ]] || return 1
+    start=$((10#${start})); end=$((10#${end})); length=$((10#${length}))
+    (( end >= start && length == end - start + 1 )) || return 1
+    logical="$(blockdev --getss "${device}")" || return 1
+    physical="$(blockdev --getpbsz "${device}")" || return 1
+    minimum="$(blockdev --getiomin "${device}")" || return 1
+    optimal="$(blockdev --getioopt "${device}")" || return 1
+    offset="$(blockdev --getalignoff "${device}")" || return 1
+    for value in "${logical}" "${physical}" "${minimum}" "${optimal}" "${offset}"; do
+        [[ ${value} =~ ^[0-9]+$ && ${#value} -le 10 ]] || return 1
+    done
+    (( logical >= 512 && logical <= 65536 && 1048576 % logical == 0 &&
+       end < 9223372036854775807 / logical && offset % logical == 0 )) || return 1
+    # A multiple of 1 MiB and every advertised I/O grain satisfies optimal
+    # alignment, including devices with an alignment offset. Unknown topology
+    # fails closed rather than letting parted choose a point outside the extent.
+    grain=1048576
+    for value in "${physical}" "${minimum}" "${optimal}"; do
+        (( value == 0 )) && continue
+        (( value % logical == 0 )) || return 1
+        a=${grain}; b=${value}
+        while (( b > 0 )); do
+            remainder=$((a % b)); a=${b}; b=${remainder}
+        done
+        (( grain / a <= 1099511627776 / value )) || return 1
+        grain=$((grain / a * value))
+        (( grain > 0 && grain <= 1099511627776 )) || return 1
+    done
+    grain=$((grain / logical)); offset=$((offset / logical))
+    aligned_start=$((start + (grain - (start + offset) % grain) % grain))
+    aligned_limit=$((end + 1 - (end + 1 + offset) % grain))
+    (( aligned_limit > aligned_start )) || return 1
+    if [[ ${requested} == all ]]; then
+        count=$((aligned_limit - aligned_start))
+    elif [[ ${requested} =~ ^[1-9][0-9]*$ && ${#requested} -le 9 ]]; then
+        count=$((requested * (1073741824 / logical)))
+        # Fixed sizes are exact from the aligned start, with an inclusive end.
+        (( count <= aligned_limit - aligned_start )) || return 1
+    else
+        return 1
+    fi
+    (( count >= 1073741824 / logical )) || return 1
+    STORAGE_ACTION_START="${aligned_start}s"
+    STORAGE_ACTION_END="$((aligned_start + count - 1))s"
+    STORAGE_ACTION_SIZE=$((count * logical))
+    STORAGE_ACTION_GEOMETRY="$(printf '%s\n' "${sectors}" "${logical}:${physical}:${minimum}:${optimal}:${offset}:${grain}" | sha256sum | awk '{print $1}')"
+}
+
 storage_action_fingerprint() {
     local device="$1" type
     type="$(lsblk -dnro TYPE "${device}" 2>/dev/null || true)"
     {
         if [[ -r ${JV_CONFIG} ]]; then
             sha256sum "${JV_CONFIG}"
+        fi
+        if [[ -n ${2:-} ]]; then
+            printf 'creation-geometry=%s\n' "$2"
         fi
         printf 'device=%s\n' "$(storage_action_real_device "${device}")"
         printf 'host-mounts=%s\n' "$(storage_action_host_mountpoints "${device}")"

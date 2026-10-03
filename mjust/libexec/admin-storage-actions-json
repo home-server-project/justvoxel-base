@@ -19,7 +19,7 @@ prepare_plan() {
     local mounted mounts request operation device requested_mountpoint requested_size_gib requested_free_start
     local filesystem='' uuid='' current_mountpoint='' role='' size=0 fingerprint
     local confirmation='' destructive=false proposed_mountpoint='' target_filesystem=''
-    local table free_line='' free_start='' free_end='' free_size='' free_mib=0 planned_end='' planned_mib=0
+    local table free_line='' free_start='' free_end='' free_size='' planned_end='' geometry=''
     PLAN_WARNINGS='[]'
 
     request="$(cat)"
@@ -64,29 +64,19 @@ prepare_plan() {
             return 1
         }
         IFS=: read -r _ free_start free_end free_size _ <<< "${free_line}"
-        free_size="${free_size%MiB}"
-        awk -v n="${free_size}" 'BEGIN {exit !(n >= 1024)}' || {
-            json_error 'The selected unallocated space is smaller than 1 GiB.'
-            return 1
-        }
-        free_mib="$(awk -v n="${free_size}" 'BEGIN {printf "%.0f", n}')"
-        if [[ ${requested_size_gib} == all ]]; then
-            planned_end="${free_end}"
-            planned_mib="${free_mib}"
-        elif [[ ${requested_size_gib} =~ ^[1-9][0-9]*$ && ${#requested_size_gib} -le 9 ]]; then
-            (( requested_size_gib * 1024 <= free_mib )) || {
-                json_error 'The requested partition is larger than the selected unallocated space.'
-                return 1
-            }
-            planned_mib=$((requested_size_gib * 1024))
-            planned_end="$(awk -v s="${free_start%MiB}" -v m="${planned_mib}" 'BEGIN {printf "%.2fMiB", s + m}')"
-        else
+        if [[ ${requested_size_gib} != all && ! ( ${requested_size_gib} =~ ^[1-9][0-9]*$ && ${#requested_size_gib} -le 9 ) ]]; then
             json_error 'Partition size must be a whole number of GiB or all available space.'
             return 1
         fi
+        storage_action_plan_partition "${device}" "${requested_free_start}" "${requested_size_gib}" || {
+            json_error 'The selected space changed, its alignment could not be verified, or the requested size does not fit its safely usable extent. Refresh Storage and review again.'
+            return 1
+        }
+        planned_end="${STORAGE_ACTION_END}"
+        geometry="${STORAGE_ACTION_GEOMETRY}"
 
         role='Unallocated'
-        size=$((planned_mib * 1024 * 1024))
+        size=${STORAGE_ACTION_SIZE}
         destructive=true
         confirmation="CREATE PARTITION ${device}"
         target_filesystem=xfs
@@ -128,7 +118,7 @@ prepare_plan() {
         size="${size:-0}"
     fi
 
-    fingerprint="$(storage_action_fingerprint "${device}")"
+    fingerprint="$(storage_action_fingerprint "${device}" "${geometry}")"
     [[ -n ${fingerprint} ]] || {
         json_error 'Could not capture a stable storage fingerprint.'
         return 1

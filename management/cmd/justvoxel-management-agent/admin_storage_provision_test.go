@@ -14,6 +14,15 @@ func TestLocalRootCanProvisionBackupStorageWithoutBearerSession(t *testing.T) {
 	old := runAdminStorageProvisionHelper
 	defer func() { runAdminStorageProvisionHelper = old }()
 
+	oldHost := runHostStorageMutation
+	defer func() { runHostStorageMutation = oldHost }()
+	runHostStorageMutation = func(ctx context.Context, helper, action string, request []byte) ([]byte, error) {
+		if helper != adminStorageProvisionHelper || action != "apply" {
+			t.Fatalf("unexpected host mutation: %s %s", helper, action)
+		}
+		return runAdminStorageProvisionHelper(ctx, action, request)
+	}
+
 	calls := make([]string, 0, 3)
 	runAdminStorageProvisionHelper = func(_ context.Context, action string, request []byte) ([]byte, error) {
 		calls = append(calls, action)
@@ -116,10 +125,13 @@ func TestAdminStorageProvisionPlanReturnsExactConfirmation(t *testing.T) {
 
 func TestAdminStorageProvisionApplyReturnsBoundedFailure(t *testing.T) {
 	s := surfaceTestServer(t, roleAdministrator)
-	old := runAdminStorageProvisionHelper
-	defer func() { runAdminStorageProvisionHelper = old }()
+	old := runHostStorageMutation
+	defer func() { runHostStorageMutation = old }()
 
-	runAdminStorageProvisionHelper = func(_ context.Context, action string, _ []byte) ([]byte, error) {
+	runHostStorageMutation = func(_ context.Context, helper, action string, _ []byte) ([]byte, error) {
+		if helper != adminStorageProvisionHelper {
+			t.Fatalf("unexpected helper: %s", helper)
+		}
 		if action != "apply" {
 			t.Fatalf("action = %q, want apply", action)
 		}

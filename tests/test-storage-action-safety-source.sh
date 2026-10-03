@@ -187,7 +187,7 @@ grep -Fq 'confirmation="CREATE PARTITION ${device}"' "${planner}" || {
     echo 'ERROR: partition creation lost exact reviewed confirmation.' >&2
     exit 1
 }
-grep -Fq 'storage_create_partition "${device}" "${free_start}" "${planned_end}"' "${apply}" || {
+grep -Fq 'storage_create_partition "${device}" "${STORAGE_ACTION_START}" "${planned_end}"' "${apply}" || {
     echo 'ERROR: Storage partition creation is not bound to reviewed free-space geometry.' >&2
     exit 1
 }

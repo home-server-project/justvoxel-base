@@ -87,10 +87,13 @@ func TestAdminStorageMountPlanReturnsReviewedIdentity(t *testing.T) {
 
 func TestAdminStorageMountApplyCarriesFingerprint(t *testing.T) {
 	s := surfaceTestServer(t, roleAdministrator)
-	old := runAdminStorageMountsHelper
-	defer func() { runAdminStorageMountsHelper = old }()
+	old := runHostStorageMutation
+	defer func() { runHostStorageMutation = old }()
 
-	runAdminStorageMountsHelper = func(_ context.Context, action string, request []byte) ([]byte, error) {
+	runHostStorageMutation = func(_ context.Context, helper, action string, request []byte) ([]byte, error) {
+		if helper != adminStorageMountsHelper {
+			t.Fatalf("unexpected helper: %s", helper)
+		}
 		if action != "apply" {
 			t.Fatalf("action = %q, want apply", action)
 		}
@@ -112,10 +115,13 @@ func TestAdminStorageMountApplyCarriesFingerprint(t *testing.T) {
 
 func TestAdminStorageMountApplyReturnsBoundedStaleReview(t *testing.T) {
 	s := surfaceTestServer(t, roleAdministrator)
-	old := runAdminStorageMountsHelper
-	defer func() { runAdminStorageMountsHelper = old }()
+	old := runHostStorageMutation
+	defer func() { runHostStorageMutation = old }()
 
-	runAdminStorageMountsHelper = func(_ context.Context, action string, _ []byte) ([]byte, error) {
+	runHostStorageMutation = func(_ context.Context, helper, action string, _ []byte) ([]byte, error) {
+		if helper != adminStorageMountsHelper {
+			t.Fatalf("unexpected helper: %s", helper)
+		}
 		if action != "apply" {
 			t.Fatalf("action = %q, want apply", action)
 		}
