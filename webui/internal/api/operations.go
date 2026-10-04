@@ -25,7 +25,8 @@ type ManualBackupResponse struct {
 }
 
 type TextOutputResponse struct {
-	Output string `json:"output"`
+	WhitelistEnabled *bool  `json:"whitelist_enabled,omitempty"`
+	Output           string `json:"output"`
 }
 
 type LogsResponse struct {

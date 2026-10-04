@@ -67,6 +67,7 @@ jv_config_payload() {
         version_policy:.minecraft.version_mode,
         version:.minecraft.version,
         game_mode:.minecraft.game_mode,
+        whitelist_enabled:.minecraft.whitelist_enabled,
         backup_keep:.backup.keep,
         backup_schedule:.backup.schedule,
         backup_timer_enabled:.backup.timer_enabled,

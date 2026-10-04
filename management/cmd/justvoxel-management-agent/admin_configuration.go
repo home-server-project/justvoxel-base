@@ -11,6 +11,7 @@ import (
 )
 
 type adminConfigurationChangeRequest struct {
+	WhitelistEnabled   *bool  `json:"whitelist_enabled,omitempty"`
 	GameMode           string `json:"game_mode"`
 	JavaMemory         string `json:"java_memory"`
 	ContainerMemory    string `json:"container_memory"`

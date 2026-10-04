@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -50,7 +51,7 @@ func (f *fakeMinecraftWorkspaceAPI) Whitelist(_ context.Context, session string)
 	if session != "session-token" {
 		return api.TextOutputResponse{}, api.ErrUnauthorized
 	}
-	return api.TextOutputResponse{Output: f.whitelist}, nil
+	return api.TextOutputResponse{Output: f.whitelist, WhitelistEnabled: &f.configuration.Minecraft.WhitelistEnabled}, nil
 }
 
 func (f *fakeMinecraftWorkspaceAPI) WhitelistChange(_ context.Context, session, platform, action, name string) (api.TextOutputResponse, error) {
@@ -589,7 +590,14 @@ func TestMinecraftWorkspacePlayersClientUsesBoundedWhitelistActions(t *testing.T
 	block := source[start:end]
 	for _, want := range []string{
 		`requestWorkspaceJSON("/api/dashboard-status")`,
-		`Online players:`, `No players online.`, `identity.startsWith(".")`, `identity.slice(1)`,
+		`Online players:`, `onlineIdentities.has(entry.identity) ? "Online" : "Offline"`,
+		`const onlineIdentities = new Set`, `Platform</th>`, `Player</th>`, `Status</th>`, `Actions</th>`,
+		`name="platform"`, `name="name"`, `value="java"`, `value="bedrock"`,
+		`payload.whitelist_enabled`, `payload.can_toggle`, `toggle.setAttribute("role", "switch")`,
+		`toggle.setAttribute("aria-checked", String(enabled))`, `toggle.type = "button"`,
+		`enabled === true ? "Enabled" : enabled === false ? "Disabled"`,
+		`if (enabled && !window.confirm(`, `Players not on the whitelist will be allowed to join.`,
+		`enabled: String(!enabled)`, `await loadCurrentTab();`,
 		`payload.entries.forEach`, `row.dataset.playerIdentity = entry.identity`,
 		`remove.textContent = "Remove"`, `remove.addEventListener("click"`,
 		`platform: entry.platform`, `action: "remove"`,
@@ -602,12 +610,75 @@ func TestMinecraftWorkspacePlayersClientUsesBoundedWhitelistActions(t *testing.T
 			t.Fatalf("Players missing %q", want)
 		}
 	}
-	for _, forbidden := range []string{`name="action"`, `row.addEventListener`, `console/command`, `name="command"`, `action: "ban"`, `action: "kick"`, `action: "pardon"`} {
+	for _, forbidden := range []string{`<h2>Online</h2>`, `No players online.`, `player-chip`, `name="action"`, `row.addEventListener`, `console/command`, `name="command"`, `action: "ban"`, `action: "kick"`, `action: "pardon"`} {
 		if strings.Contains(block, forbidden) {
 			t.Fatalf("unexpected Players surface %q", forbidden)
 		}
 	}
 	if !strings.Contains(source, `new Set(["memory", "gameplay", "crossplay"])`) || !strings.Contains(source, `currentTab === "players") await renderPlayers`) {
 		t.Fatal("incorrect gameplay/players dispatch")
+	}
+}
+
+func TestMinecraftWorkspaceWhitelistTogglePreservesConfigurationAndPermissions(t *testing.T) {
+	for _, role := range []string{"administrator", "operator", "viewer"} {
+		for _, enabled := range []bool{true, false} {
+			t.Run(role+"/"+strconv.FormatBool(enabled), func(t *testing.T) {
+				client := configuredMinecraftWorkspaceAPI()
+				client.role = role
+				client.configuration.Minecraft.WhitelistEnabled = !enabled
+				client.configuration.Minecraft.EnforceWhitelist = true
+				app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				rr := httptest.NewRecorder()
+				app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "http://example/api/minecraft/workspace/whitelist/state", "csrf=csrf-token&enabled="+strconv.FormatBool(enabled)))
+				if role != "administrator" {
+					if rr.Code != http.StatusForbidden || client.applied.WhitelistEnabled != nil {
+						t.Fatalf("unauthorized toggle: %d %#v", rr.Code, client.applied)
+					}
+					return
+				}
+				if rr.Code != http.StatusOK {
+					t.Fatalf("toggle: %d %s", rr.Code, rr.Body.String())
+				}
+				expected := configurationRequestFromDiscovery(client.configuration)
+				expected.WhitelistEnabled = &enabled
+				if !reflect.DeepEqual(client.applied, expected) {
+					t.Fatalf("toggle changed other settings: %#v", client.applied)
+				}
+				if !client.configuration.Minecraft.EnforceWhitelist {
+					t.Fatal("enforcement changed")
+				}
+			})
+		}
+	}
+}
+
+func TestMinecraftWorkspaceWhitelistStateAndPreservation(t *testing.T) {
+	for _, enabled := range []bool{true, false} {
+		client := configuredMinecraftWorkspaceAPI()
+		client.configuration.Minecraft.WhitelistEnabled = enabled
+		for _, role := range []string{"administrator", "operator"} {
+			client.role = role
+			app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rr := httptest.NewRecorder()
+			app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/api/minecraft/workspace/whitelist", ""))
+			var out minecraftWorkspaceWhitelistResponse
+			if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+				t.Fatal(err)
+			}
+			if out.WhitelistEnabled == nil || *out.WhitelistEnabled != enabled || out.CanToggle != (role == "administrator") {
+				t.Fatalf("incorrect state: %#v", out)
+			}
+		}
+		request := configurationRequestFromDiscovery(client.configuration)
+		if request.WhitelistEnabled == nil || *request.WhitelistEnabled != enabled {
+			t.Fatal("configuration did not preserve whitelist")
+		}
 	}
 }

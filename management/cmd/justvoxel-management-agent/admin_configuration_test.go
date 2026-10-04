@@ -198,3 +198,42 @@ func TestAdminConfigurationValidationFailureIsReturnedWithoutRawHelperData(t *te
 		t.Fatalf("validation message missing: %s", rr.Body.String())
 	}
 }
+
+func TestAdminConfigurationWhitelistFieldIsOptionalAndPreservesExplicitFalse(t *testing.T) {
+	for _, body := range []string{`{}`, `{"whitelist_enabled":true}`, `{"whitelist_enabled":false}`} {
+		for _, action := range []string{"plan", "apply"} {
+			old := runAdminConfigurationHelper
+			called := false
+			runAdminConfigurationHelper = func(_ context.Context, gotAction string, payload []byte) ([]byte, error) {
+				called = true
+				if gotAction != action {
+					t.Fatal(gotAction)
+				}
+				var got map[string]any
+				if err := json.Unmarshal(payload, &got); err != nil {
+					t.Fatal(err)
+				}
+				var expected map[string]any
+				if err := json.Unmarshal([]byte(body), &expected); err != nil {
+					t.Fatal(err)
+				}
+				value, present := got["whitelist_enabled"]
+				expectedValue, expectedPresent := expected["whitelist_enabled"]
+				if present != expectedPresent || value != expectedValue {
+					t.Fatalf("whitelist field lost: %s", payload)
+				}
+				if _, present := got["enforce_whitelist"]; present {
+					t.Fatal("enforcement exposed")
+				}
+				return []byte(`{"ok":true,"applied":true}`), nil
+			}
+			s := surfaceTestServer(t, roleAdministrator)
+			rr := httptest.NewRecorder()
+			s.runAdminConfigurationChange(rr, surfaceRequest(http.MethodPost, "/v1/admin/configuration/"+action, body), action, session{})
+			runAdminConfigurationHelper = old
+			if rr.Code != http.StatusOK || !called {
+				t.Fatalf("%s: %d %s", action, rr.Code, rr.Body.String())
+			}
+		}
+	}
+}

@@ -212,6 +212,17 @@ setup_defaults_json() {
           system_memory_mib:$system_memory_mib,system_reserve_minimum_mib:1024,system_reserve_recommended_mib:2048}'
 }
 
+apply_live_whitelist() {
+    local output
+    if [[ $1 == yes ]]; then
+        output="$(timeout 10 podman exec minecraft rcon-cli 'whitelist on' 2>/dev/null)" || return 1
+        [[ ${output} == *'Whitelist is now turned on'* || ${output} == *'Whitelist is already turned on'* ]]
+    else
+        output="$(timeout 10 podman exec minecraft rcon-cli 'whitelist off' 2>/dev/null)" || return 1
+        [[ ${output} == *'Whitelist is now turned off'* || ${output} == *'Whitelist is already turned off'* ]]
+    fi
+}
+
 configuration_change_json() {
     local mode="$1" request
     request="$(cat)"
@@ -225,6 +236,15 @@ configuration_change_json() {
     fi
 
     require_config
+
+    local old_whitelist_enabled="${WHITELIST_ENABLED}" new_whitelist_enabled="${WHITELIST_ENABLED}"
+    if jq -e 'has("whitelist_enabled")' >/dev/null <<< "${request}"; then
+        if ! jq -e '.whitelist_enabled | type == "boolean"' >/dev/null <<< "${request}"; then
+            jq -n '{ok:false,error:"Whitelist state must be a boolean."}'
+            return 0
+        fi
+        if [[ $(jq -r .whitelist_enabled <<< "${request}") == true ]]; then new_whitelist_enabled=yes; else new_whitelist_enabled=no; fi
+    fi
 
     local old_java_port="${JAVA_PORT}" old_bedrock_enabled="${BEDROCK_ENABLED}" old_bedrock_port="${BEDROCK_PORT}"
     local old_java_memory="${JAVA_MEMORY}" old_container_memory="${CONTAINER_MEMORY}" old_timezone="${TIMEZONE}"
@@ -393,6 +413,7 @@ configuration_change_json() {
         if [[ ${restart} == true ]]; then restart_required=true; fi
     }
 
+    add_change whitelist_enabled 'Whitelist' "${old_whitelist_enabled}" "${new_whitelist_enabled}" false
     add_change java_memory 'Minecraft game memory' "${old_java_memory}" "${new_java_memory^^}" true
     add_change container_memory 'Maximum Minecraft memory' "${old_container_memory}" "${new_container_memory^^}" true
     add_change max_players 'Maximum players' "${old_max_players}" "${new_max_players}" true
@@ -420,6 +441,7 @@ configuration_change_json() {
         warnings="$(jq -c --arg message "Memory remaining outside Minecraft is below the recommended 2 GiB headroom. JustVoxel itself typically uses roughly 0.6–1.0 GiB; the rest is useful for Linux cache, backups, updates, management services and temporary workload spikes." '. + [$message]' <<< "${warnings}")"
     fi
 
+    WHITELIST_ENABLED="${new_whitelist_enabled}"
     JAVA_MEMORY="${new_java_memory^^}"
     CONTAINER_MEMORY="${new_container_memory^^}"
     JAVA_PORT="${new_java_port}"
@@ -496,6 +518,33 @@ configuration_change_json() {
             rm -f "${config_backup}"
             jq -n '{ok:false,error:"Could not apply the new settings. Previous settings were restored."}'
             return 0
+        fi
+
+        if [[ ${old_whitelist_enabled} != "${new_whitelist_enabled}" ]] && systemctl is-active --quiet minecraft.service 2>/dev/null; then
+            if ! apply_live_whitelist "${new_whitelist_enabled}"; then
+                local rollback_failed=false
+                failed_java="${JAVA_PORT}"
+                failed_bedrock_enabled="${BEDROCK_ENABLED}"
+                failed_bedrock_port="${BEDROCK_PORT}"
+                cp -a "${config_backup}" "${JV_CONFIG}" || rollback_failed=true
+                require_config || rollback_failed=true
+                render_runtime >/dev/null 2>&1 || rollback_failed=true
+                update_firewall_ports "${failed_java}" "${failed_bedrock_enabled}" "${failed_bedrock_port}" >/dev/null 2>&1 || rollback_failed=true
+                # A timeout can occur after the server accepted the command. Reassert
+                # the previous fixed state; stop Minecraft if agreement is uncertain.
+                if ! apply_live_whitelist "${old_whitelist_enabled}" || [[ ${rollback_failed} == true ]]; then
+                    if ! timeout 15 systemctl stop minecraft.service || systemctl is-active --quiet minecraft.service; then
+                        rollback_failed=true
+                    fi
+                fi
+                rm -f "${config_backup}"
+                if [[ ${rollback_failed} == true ]]; then
+                    jq -n '{ok:false,error:"Live whitelist change failed and recovery could not be verified. Check Minecraft before allowing players to join."}'
+                else
+                    jq -n '{ok:false,error:"Live whitelist change failed. Previous settings were restored; Minecraft was stopped if its live state could not be confirmed."}'
+                fi
+                return 0
+            fi
         fi
 
         if [[ ${memory_restart_required} == true && ${was_running} == true ]]; then

@@ -1160,18 +1160,34 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .minecraft-native-toggle{margin:var(--jv-space-sm) 0}
 .minecraft-native-actions{margin-top:var(--jv-space-sm);padding-top:var(--jv-space-sm);border-top:1px solid var(--jv-border)}
 .minecraft-native-review{margin:0!important}
+/* Players controls wrap with the workspace's available width. */
+.minecraft-player-controls{padding:0 var(--jv-space-sm)}
+.minecraft-player-controls>p{margin:0 0 var(--jv-space-sm)}
+.minecraft-player-add{display:flex;flex-wrap:wrap;align-items:end;gap:var(--jv-space-sm)}
+.minecraft-player-add label{margin:0;min-width:0}
+.minecraft-player-platform{flex:0 0 7.5rem}
+.minecraft-player-input{flex:1 1 20rem}
+.minecraft-player-add>button{flex:0 0 auto;margin:0}
+.minecraft-whitelist-section{min-width:0;margin-top:var(--jv-space-md)}
+.minecraft-whitelist-section h2{margin:0;font-size:1rem}
+.minecraft-whitelist-section .section-heading{display:flex;align-items:center;justify-content:space-between;gap:var(--jv-space-sm)}
+.minecraft-whitelist-state{display:flex;align-items:center;gap:var(--jv-space-sm)}
+.minecraft-whitelist-list{background:rgba(0,0,0,.22);border:1px solid var(--jv-border);border-radius:8px;padding:var(--jv-space-sm);overflow-x:auto}
+.minecraft-whitelist-list>p{margin:var(--jv-space-sm)}
+.minecraft-whitelist-table{width:100%;border-collapse:collapse;font-size:.875rem}
+.minecraft-whitelist-table th,.minecraft-whitelist-table td{padding:6px 8px;text-align:left;border-bottom:1px solid rgba(255,255,255,.09)}
+.minecraft-whitelist-table th{font-size:.72rem;text-transform:uppercase;color:var(--jv-muted)}
+.minecraft-whitelist-table td:nth-child(2){overflow-wrap:anywhere}
+.minecraft-whitelist-table th:last-child,.minecraft-whitelist-table td:last-child{text-align:right}
+.minecraft-whitelist-table tr:last-child td{border-bottom:0}
+.minecraft-whitelist-table button{padding:4px 9px;font-size:.8rem;min-height:30px}
 .minecraft-whitelist-section .log-box{max-height:210px;margin:var(--jv-space-sm) 0}
-.minecraft-whitelist-list,.minecraft-whitelist-section form{min-width:0}
-.minecraft-whitelist-list{display:grid;gap:var(--jv-space-sm)}
-.minecraft-whitelist-row{display:flex;align-items:center;justify-content:space-between;gap:var(--jv-space-sm)}
-.minecraft-player-name{display:flex;align-items:center;flex-wrap:wrap;gap:var(--jv-space-sm);min-width:0;overflow-wrap:anywhere}
-.minecraft-whitelist-row>button{flex:none}
-@media(min-width:850px){
-  .minecraft-whitelist-section{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:0 var(--jv-space-md);align-items:start}
-  .minecraft-whitelist-section .section-heading{grid-column:1 / -1}
-  .minecraft-whitelist-section .log-box{margin:0;max-height:310px}
-  .minecraft-whitelist-section .minecraft-native-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
-}
+.minecraft-whitelist-switch{position:relative;width:42px;min-width:42px;height:24px;min-height:24px;padding:0;border-radius:20px;background:#505860;border:1px solid rgba(255,255,255,.25)}
+.minecraft-whitelist-switch::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff}
+.minecraft-whitelist-switch[aria-checked="true"]{background:#287f68}
+.minecraft-whitelist-switch[aria-checked="true"]::after{left:21px}
+.minecraft-whitelist-switch:focus-visible{outline:2px solid #9ad7c4;outline-offset:3px}
+
 .version-workspace-body .panel{margin:0 0 var(--jv-space-sm);padding:var(--jv-space-md)}
 .version-workspace-body .panel h2{margin-bottom:var(--jv-space-sm)}
 .version-workspace-body .panel.details{margin-bottom:var(--jv-space-sm)}

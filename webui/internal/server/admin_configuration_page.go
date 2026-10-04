@@ -143,7 +143,8 @@ func configurationRequestFromDiscovery(configuration api.AdminConfigurationDisco
 		return api.AdminConfigurationChangeRequest{}
 	}
 	return api.AdminConfigurationChangeRequest{
-		JavaMemory: configuration.Minecraft.JavaMemory, ContainerMemory: configuration.Minecraft.ContainerMemory,
+		WhitelistEnabled: &configuration.Minecraft.WhitelistEnabled,
+		JavaMemory:       configuration.Minecraft.JavaMemory, ContainerMemory: configuration.Minecraft.ContainerMemory,
 		JavaPort: configuration.Minecraft.JavaPort, BedrockEnabled: configuration.Minecraft.BedrockEnabled,
 		BedrockPort: configuration.Minecraft.BedrockPort, Timezone: configuration.Minecraft.Timezone,
 		MaxPlayers: configuration.Minecraft.MaxPlayers, MOTD: configuration.Minecraft.MOTD,

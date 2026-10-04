@@ -45,10 +45,12 @@ type minecraftWorkspaceWhitelistEntry struct {
 }
 
 type minecraftWorkspaceWhitelistResponse struct {
-	OK      bool                               `json:"ok"`
-	Entries []minecraftWorkspaceWhitelistEntry `json:"entries"`
-	Parsed  bool                               `json:"parsed"`
-	Output  string                             `json:"output,omitempty"`
+	WhitelistEnabled *bool                              `json:"whitelist_enabled"`
+	CanToggle        bool                               `json:"can_toggle"`
+	OK               bool                               `json:"ok"`
+	Entries          []minecraftWorkspaceWhitelistEntry `json:"entries"`
+	Parsed           bool                               `json:"parsed"`
+	Output           string                             `json:"output,omitempty"`
 }
 
 var minecraftWhitelistListPattern = regexp.MustCompile(`^There are ([0-9]+) whitelisted player\(s\):\s*(.*)$`)
@@ -112,6 +114,7 @@ func (a *App) registerMinecraftWorkspaceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/minecraft/workspace/settings/apply", a.minecraftWorkspaceSettingsApply)
 	mux.HandleFunc("GET /api/minecraft/workspace/whitelist", a.minecraftWorkspaceWhitelist)
 	mux.HandleFunc("POST /api/minecraft/workspace/whitelist", a.minecraftWorkspaceWhitelistChange)
+	mux.HandleFunc("POST /api/minecraft/workspace/whitelist/state", a.minecraftWorkspaceWhitelistState)
 	mux.HandleFunc("GET /api/minecraft/workspace/logs", a.minecraftWorkspaceLogs)
 }
 
@@ -277,7 +280,7 @@ func minecraftWorkspaceConfigurationRequest(r *http.Request, current api.AdminCo
 }
 
 func (a *App) minecraftWorkspaceWhitelist(w http.ResponseWriter, r *http.Request) {
-	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator", "operator")
+	session, identity, ok := a.minecraftWorkspaceIdentity(w, r, "administrator", "operator")
 	if !ok {
 		return
 	}
@@ -292,7 +295,7 @@ func (a *App) minecraftWorkspaceWhitelist(w http.ResponseWriter, r *http.Request
 		return
 	}
 	entries, parsed := parseMinecraftWorkspaceWhitelist(result.Output)
-	writeMinecraftWorkspaceJSON(w, http.StatusOK, minecraftWorkspaceWhitelistResponse{OK: true, Entries: entries, Parsed: parsed, Output: result.Output})
+	writeMinecraftWorkspaceJSON(w, http.StatusOK, minecraftWorkspaceWhitelistResponse{WhitelistEnabled: result.WhitelistEnabled, CanToggle: identity.Role == "administrator", OK: true, Entries: entries, Parsed: parsed, Output: result.Output})
 }
 
 func (a *App) minecraftWorkspaceWhitelistChange(w http.ResponseWriter, r *http.Request) {
@@ -383,4 +386,47 @@ func writeMinecraftWorkspaceJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+// Only the administrator can change the authoritative whitelist setting.
+func (a *App) minecraftWorkspaceWhitelistState(w http.ResponseWriter, r *http.Request) {
+	if !a.validCSRF(r) {
+		writeMinecraftWorkspaceError(w, http.StatusForbidden, "Invalid CSRF token.")
+		return
+	}
+	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
+	if !ok {
+		return
+	}
+	client, ok := a.api.(minecraftWorkspaceSettingsAPI)
+	if !ok {
+		writeMinecraftWorkspaceError(w, http.StatusServiceUnavailable, "Minecraft settings are unavailable.")
+		return
+	}
+	enabled, err := strconv.ParseBool(r.FormValue("enabled"))
+	if err != nil {
+		writeMinecraftWorkspaceError(w, http.StatusBadRequest, "Whitelist state is required.")
+		return
+	}
+	current, err := client.AdminConfiguration(r.Context(), session)
+	if err != nil {
+		a.writeMinecraftWorkspaceAPIError(w, err, "Minecraft settings are unavailable.")
+		return
+	}
+	if !current.Configured {
+		writeMinecraftWorkspaceError(w, http.StatusConflict, "Minecraft is not configured yet.")
+		return
+	}
+	request := configurationRequestFromDiscovery(current)
+	request.WhitelistEnabled = &enabled
+	result, err := client.AdminConfigurationApply(r.Context(), session, request)
+	if err != nil {
+		a.writeMinecraftWorkspaceAPIError(w, err, "Whitelist change failed.")
+		return
+	}
+	if !result.OK || !result.Applied {
+		writeMinecraftWorkspaceError(w, http.StatusBadRequest, "Whitelist change was not applied.")
+		return
+	}
+	writeMinecraftWorkspaceJSON(w, http.StatusOK, minecraftWorkspaceTextResponse{OK: true, Message: "Whitelist updated."})
 }

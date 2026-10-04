@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -30,6 +31,15 @@ func surfaceRequest(method, path, body string) *http.Request {
 }
 
 func TestLocalRootCanUseWhitelistWithoutBearerSession(t *testing.T) {
+	oldDiscovery := runAdminDiscoveryHelper
+	defer func() { runAdminDiscoveryHelper = oldDiscovery }()
+	runAdminDiscoveryHelper = func(_ context.Context, action string) ([]byte, error) {
+		if action != "configuration" {
+			t.Fatal(action)
+		}
+		return []byte(`{"configured":true,"minecraft":{"whitelist_enabled":true}}`), nil
+	}
+
 	s := &server{sessions: make(map[string]session)}
 	old := runWhitelistHelper
 	defer func() { runWhitelistHelper = old }()
@@ -277,6 +287,36 @@ func TestViewerGetsSanitizedActivityOnly(t *testing.T) {
 	for _, secret := range []string{"operator-one", "minecraft.service", "private context"} {
 		if strings.Contains(body, secret) {
 			t.Fatalf("sanitized activity leaked %q: %s", secret, body)
+		}
+	}
+}
+
+func TestWhitelistListExposesOnlyAuthoritativeStateForOperators(t *testing.T) {
+	oldDiscovery, oldWhitelist := runAdminDiscoveryHelper, runWhitelistHelper
+	defer func() { runAdminDiscoveryHelper, runWhitelistHelper = oldDiscovery, oldWhitelist }()
+	for _, enabled := range []bool{true, false} {
+		runAdminDiscoveryHelper = func(_ context.Context, action string) ([]byte, error) {
+			if action != "configuration" {
+				t.Fatal(action)
+			}
+			return []byte(fmt.Sprintf(`{"configured":true,"minecraft":{"whitelist_enabled":%t,"enforce_whitelist":true,"motd":"private-configuration"}}`, enabled)), nil
+		}
+		runWhitelistHelper = func(_ context.Context, args ...string) ([]byte, error) {
+			return []byte("There are 0 whitelisted player(s):"), nil
+		}
+		s := surfaceTestServer(t, roleOperator)
+		rr := httptest.NewRecorder()
+		s.whitelistList(rr, surfaceRequest(http.MethodGet, "/v1/whitelist", ""))
+		if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), fmt.Sprintf(`"whitelist_enabled":%t`, enabled)) || strings.Contains(rr.Body.String(), "private-configuration") {
+			t.Fatal(rr.Body.String())
+		}
+		runWhitelistHelper = func(_ context.Context, args ...string) ([]byte, error) {
+			return []byte("Minecraft must be running for whitelist changes."), fmt.Errorf("stopped")
+		}
+		rr = httptest.NewRecorder()
+		s.whitelistList(rr, surfaceRequest(http.MethodGet, "/v1/whitelist", ""))
+		if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), fmt.Sprintf(`"whitelist_enabled":%t`, enabled)) || !strings.Contains(rr.Body.String(), "Whitelist list unavailable") {
+			t.Fatal(rr.Body.String())
 		}
 	}
 }

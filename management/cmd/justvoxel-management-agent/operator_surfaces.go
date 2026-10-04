@@ -39,12 +39,16 @@ func (s *server) whitelistList(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	output, err := runWhitelistHelper(ctx, "list")
-	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "whitelist is unavailable", "output": strings.TrimSpace(string(output))})
+	var configuration adminConfigurationDiscovery
+	if !s.collectAdminDiscovery(w, r, "configuration", &configuration) {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"output": strings.TrimSpace(string(output))})
+	output, err := runWhitelistHelper(ctx, "list")
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"output": "Whitelist list unavailable. " + strings.TrimSpace(string(output)), "whitelist_enabled": configuration.Minecraft.WhitelistEnabled})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"output": strings.TrimSpace(string(output)), "whitelist_enabled": configuration.Minecraft.WhitelistEnabled})
 }
 
 func (s *server) whitelistChange(w http.ResponseWriter, r *http.Request) {
