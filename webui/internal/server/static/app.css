@@ -1164,7 +1164,11 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .minecraft-native-actions{margin-top:var(--jv-space-sm);padding-top:var(--jv-space-sm);border-top:1px solid var(--jv-border)}
 .minecraft-native-review{margin:0!important}
 .minecraft-whitelist-section .log-box{max-height:210px;margin:var(--jv-space-sm) 0}
-.minecraft-whitelist-section .log-box,.minecraft-whitelist-section form{min-width:0}
+.minecraft-whitelist-list,.minecraft-whitelist-section form{min-width:0}
+.minecraft-whitelist-list{display:grid;gap:var(--jv-space-sm)}
+.minecraft-whitelist-row{display:flex;align-items:center;justify-content:space-between;gap:var(--jv-space-sm)}
+.minecraft-player-name{display:flex;align-items:center;flex-wrap:wrap;gap:var(--jv-space-sm);min-width:0;overflow-wrap:anywhere}
+.minecraft-whitelist-row>button{flex:none}
 @media(min-width:850px){
   .minecraft-whitelist-section{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:0 var(--jv-space-md);align-items:start}
   .minecraft-whitelist-section .section-heading{grid-column:1 / -1}

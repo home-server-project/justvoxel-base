@@ -87,8 +87,8 @@ func TestMinecraftWorkspaceMigrationContract(t *testing.T) {
 		`data-workspace-window="minecraft"`,
 		`data-minecraft-tab="overview"`,
 		`data-minecraft-tab="memory"`,
+		`data-minecraft-tab="gameplay"`,
 		`data-minecraft-tab="players"`,
-		`data-minecraft-tab="whitelist"`,
 		`data-minecraft-tab="crossplay"`,
 		`data-version-open`,
 		`data-version-tab="software"`,
@@ -97,6 +97,9 @@ func TestMinecraftWorkspaceMigrationContract(t *testing.T) {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("Minecraft workspace migration contract missing %q", want)
 		}
+	}
+	if strings.Contains(markup, `data-minecraft-tab="whitelist"`) {
+		t.Fatal("Minecraft workspace still contains the stale whitelist tab")
 	}
 
 	script, err := assets.ReadFile("static/app.js")
@@ -114,7 +117,7 @@ func TestMinecraftWorkspaceMigrationContract(t *testing.T) {
 		`"/api/minecraft/workspace/logs"`,
 		`section.className = "panel details minecraft-overview-logs"`,
 		`title.textContent = "Recent logs"`,
-		`const settingsTabs = new Set(["memory", "players", "crossplay"])`,
+		`const settingsTabs = new Set(["memory", "gameplay", "crossplay"])`,
 	} {
 		if !strings.Contains(behavior, want) {
 			t.Fatalf("Minecraft workspace behavior missing %q", want)

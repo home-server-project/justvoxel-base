@@ -2,8 +2,10 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -159,7 +161,7 @@ func TestMinecraftWorkspaceCrossplayPlanCanDisableBedrockWithoutChangingOtherTab
 	}
 }
 
-func TestMinecraftWorkspacePlayersGameModePlanAndApplyPreserveConfiguration(t *testing.T) {
+func TestMinecraftWorkspaceGameplayGameModePlanAndApplyPreserveConfiguration(t *testing.T) {
 	client := configuredMinecraftWorkspaceAPI()
 	client.planResult = api.AdminConfigurationChangeResponse{
 		OK:              true,
@@ -171,7 +173,7 @@ func TestMinecraftWorkspacePlayersGameModePlanAndApplyPreserveConfiguration(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := "csrf=csrf-token&tab=players&max_players=12&motd=Creative+world&game_mode=creative"
+	body := "csrf=csrf-token&tab=gameplay&max_players=12&motd=Creative+world&game_mode=creative"
 	for _, path := range []string{"plan", "apply"} {
 		rr := httptest.NewRecorder()
 		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "http://example/api/minecraft/workspace/settings/"+path, body))
@@ -183,7 +185,7 @@ func TestMinecraftWorkspacePlayersGameModePlanAndApplyPreserveConfiguration(t *t
 			request = client.applied
 		}
 		if request.MaxPlayers != 12 || request.MOTD != "Creative world" || request.GameMode != "creative" {
-			t.Fatalf("%s players fields: %#v", path, request)
+			t.Fatalf("%s gameplay fields: %#v", path, request)
 		}
 		if request.VersionPolicy != "pinned" || request.Version != "1.21.8" || request.ImageTag != "stable" ||
 			request.JavaMemory != "4G" || request.ContainerMemory != "6G" || request.JavaPort != 25565 ||
@@ -210,14 +212,14 @@ func TestMinecraftWorkspacePlayersGameModePlanAndApplyPreserveConfiguration(t *t
 	}
 }
 
-func TestMinecraftWorkspacePlayersRejectsInvalidGameMode(t *testing.T) {
+func TestMinecraftWorkspaceGameplayRejectsInvalidGameMode(t *testing.T) {
 	client := configuredMinecraftWorkspaceAPI()
 	app, err := New(client, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, mode := range []string{"", "hardcore", "CREATIVE"} {
-		body := "csrf=csrf-token&tab=players&max_players=10&motd=JustVoxel&game_mode=" + mode
+		body := "csrf=csrf-token&tab=gameplay&max_players=10&motd=JustVoxel&game_mode=" + mode
 		rr := httptest.NewRecorder()
 		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "http://example/api/minecraft/workspace/settings/plan", body))
 		if rr.Code != http.StatusBadRequest {
@@ -246,7 +248,7 @@ func TestMinecraftWorkspaceSettingsRejectOperatorBeforeAdminDiscovery(t *testing
 func TestMinecraftWorkspaceOperatorWhitelistAndLogsAreNativeJSON(t *testing.T) {
 	client := configuredMinecraftWorkspaceAPI()
 	client.role = "operator"
-	client.whitelist = "Alex\nSteve"
+	client.whitelist = "There are 2 whitelisted player(s): Alex, Steve"
 	client.whitelistChange = api.TextOutputResponse{Output: "updated"}
 	client.logs = []string{"line one", "line two"}
 	app, err := New(client, Config{})
@@ -317,26 +319,39 @@ func TestMinecraftWorkspaceClientDoesNotRenderLegacyPages(t *testing.T) {
 	}
 }
 
-func TestMinecraftWorkspacePlayersTabRendersGameModeAndDeferredReview(t *testing.T) {
+func TestMinecraftWorkspaceGameplayTabRendersGameModeAndDeferredReview(t *testing.T) {
 	headerBytes, err := assets.ReadFile("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(headerBytes), `data-minecraft-tab="players"`) {
-		t.Fatal("Minecraft Settings is missing its Players tab")
+	for _, want := range []string{
+		`class="nav-admin-only" type="button" data-minecraft-tab="gameplay" aria-selected="false">Gameplay</button>`,
+		`class="nav-operator-plus" type="button" data-minecraft-tab="players" aria-selected="false">Players</button>`,
+	} {
+		if !strings.Contains(string(headerBytes), want) {
+			t.Fatalf("Minecraft Settings missing tab %q", want)
+		}
+	}
+	if strings.Contains(string(headerBytes), `data-minecraft-tab="whitelist"`) {
+		t.Fatal("Minecraft Settings still has a standalone Whitelist tab")
 	}
 	sourceBytes, err := assets.ReadFile("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
 	source := string(sourceBytes)
-	start := strings.Index(source, `} else if (tab === "players") {`)
+	start := strings.Index(source, `} else if (tab === "gameplay") {`)
+	if start < 0 {
+		t.Fatal("Minecraft Gameplay form block not found")
+	}
 	end := strings.Index(source[start+1:], `} else if (tab === "crossplay") {`)
-	if start < 0 || end < 0 {
-		t.Fatal("Minecraft Players form block not found")
+	if end < 0 {
+		t.Fatal("Minecraft Gameplay form block not found")
 	}
 	players := source[start : start+1+end]
 	for _, want := range []string{
+		`<label>Maximum players<input name="max_players"`,
+		`<label>Server welcome message (MOTD)<input name="motd" required>`,
 		`<label>Game mode<select name="game_mode" required>`,
 		`<option value="survival">Survival</option>`,
 		`<option value="creative">Creative</option>`,
@@ -346,7 +361,7 @@ func TestMinecraftWorkspacePlayersTabRendersGameModeAndDeferredReview(t *testing
 		`form.appendChild(section)`,
 	} {
 		if !strings.Contains(players, want) {
-			t.Fatalf("Minecraft Players form missing %q", want)
+			t.Fatalf("Minecraft Gameplay form missing %q", want)
 		}
 	}
 	for _, want := range []string{
@@ -434,5 +449,135 @@ func TestMinecraftWorkspaceReviewHumanizesOnlyBedrockValues(t *testing.T) {
 	if !strings.Contains(css, `.minecraft-native-change-value{max-width:300px;min-width:0;overflow-wrap:anywhere;font-family:inherit}`) ||
 		strings.Contains(css, `.minecraft-native-change-row code{`) {
 		t.Error("Minecraft review values must use wrapping, normal-font CSS")
+	}
+}
+
+func TestMinecraftWorkspaceWhitelistParsing(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		output  string
+		parsed  bool
+		entries []minecraftWorkspaceWhitelistEntry
+	}{
+		{"imported identities", "There are 5 whitelisted player(s): .SirGiggles0, SirGiggles0, .CatchaLlama, .T025712, bagel2716", true, []minecraftWorkspaceWhitelistEntry{
+			{Display: "SirGiggles0", Platform: "bedrock", Identity: ".SirGiggles0"},
+			{Display: "SirGiggles0", Platform: "java", Identity: "SirGiggles0"},
+			{Display: "CatchaLlama", Platform: "bedrock", Identity: ".CatchaLlama"},
+			{Display: "T025712", Platform: "bedrock", Identity: ".T025712"},
+			{Display: "bagel2716", Platform: "java", Identity: "bagel2716"},
+		}},
+		{"one leading dot only", "There are 1 whitelisted player(s): ..Player", true, []minecraftWorkspaceWhitelistEntry{{Display: ".Player", Platform: "bedrock", Identity: "..Player"}}},
+		{"blank", " \n", true, []minecraftWorkspaceWhitelistEntry{}},
+		{"zero", "There are 0 whitelisted player(s):\n", true, []minecraftWorkspaceWhitelistEntry{}},
+		{"no players", "There are no whitelisted players\n", true, []minecraftWorkspaceWhitelistEntry{}},
+		{"unexpected", "RCON is unavailable", false, []minecraftWorkspaceWhitelistEntry{}},
+		{"count mismatch", "There are 2 whitelisted player(s): Alex", false, []minecraftWorkspaceWhitelistEntry{}},
+		{"empty identity", "There are 2 whitelisted player(s): Alex,", false, []minecraftWorkspaceWhitelistEntry{}},
+		{"dot only", "There are 1 whitelisted player(s): .", false, []minecraftWorkspaceWhitelistEntry{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			entries, parsed := parseMinecraftWorkspaceWhitelist(tc.output)
+			if parsed != tc.parsed || !reflect.DeepEqual(entries, tc.entries) {
+				t.Fatalf("got entries=%#v parsed=%v, want entries=%#v parsed=%v", entries, parsed, tc.entries, tc.parsed)
+			}
+		})
+	}
+}
+
+func TestMinecraftWorkspaceWhitelistPermissionsAndStructuredResponse(t *testing.T) {
+	for _, role := range []string{"administrator", "operator", "viewer"} {
+		t.Run(role, func(t *testing.T) {
+			client := configuredMinecraftWorkspaceAPI()
+			client.role = role
+			client.whitelist = "There are 2 whitelisted player(s): .SirGiggles0, SirGiggles0"
+			app, err := New(client, Config{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rr := httptest.NewRecorder()
+			app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/api/minecraft/workspace/whitelist", ""))
+			if role == "viewer" {
+				if rr.Code != http.StatusForbidden {
+					t.Fatalf("viewer GET status=%d", rr.Code)
+				}
+			} else {
+				var response minecraftWorkspaceWhitelistResponse
+				if rr.Code != http.StatusOK {
+					t.Fatalf("GET status=%d", rr.Code)
+				}
+				if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+					t.Fatal(err)
+				}
+				if !response.OK || !response.Parsed || len(response.Entries) != 2 || response.Entries[0].Identity != ".SirGiggles0" || response.Entries[1].Identity != "SirGiggles0" {
+					t.Fatalf("unexpected response: %#v", response)
+				}
+				for _, output := range []string{"", "Unexpected backend response"} {
+					client.whitelist = output
+					rr = httptest.NewRecorder()
+					app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/api/minecraft/workspace/whitelist", ""))
+					if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"entries":[]`) {
+						t.Fatalf("fallback status=%d body=%s", rr.Code, rr.Body.String())
+					}
+					if output != "" && (!strings.Contains(rr.Body.String(), `"parsed":false`) || !strings.Contains(rr.Body.String(), output)) {
+						t.Fatalf("missing fallback: %s", rr.Body.String())
+					}
+				}
+			}
+			for _, mutation := range [][3]string{{"java", "add", "Alex"}, {"java", "remove", "SirGiggles0"}, {"bedrock", "remove", "SirGiggles0"}} {
+				rr = httptest.NewRecorder()
+				body := "csrf=csrf-token&platform=" + mutation[0] + "&action=" + mutation[1] + "&name=" + mutation[2]
+				app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "http://example/api/minecraft/workspace/whitelist", body))
+				if role == "viewer" {
+					if rr.Code != http.StatusForbidden || client.whitelistRequest != [3]string{} {
+						t.Fatalf("viewer mutation status=%d request=%#v", rr.Code, client.whitelistRequest)
+					}
+				} else if rr.Code != http.StatusOK || client.whitelistRequest != mutation {
+					t.Fatalf("mutation status=%d request=%#v", rr.Code, client.whitelistRequest)
+				}
+			}
+			client.whitelistRequest = [3]string{}
+			rr = httptest.NewRecorder()
+			app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "http://example/api/minecraft/workspace/whitelist", "csrf=wrong&platform=java&action=remove&name=Alex"))
+			if rr.Code != http.StatusForbidden || client.whitelistRequest != [3]string{} {
+				t.Fatalf("CSRF bypass status=%d", rr.Code)
+			}
+		})
+	}
+}
+
+func TestMinecraftWorkspacePlayersClientUsesBoundedWhitelistActions(t *testing.T) {
+	sourceBytes, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(sourceBytes)
+	start := strings.Index(source, "  const renderPlayers =")
+	end := strings.Index(source, "  const renderLogs =")
+	if start < 0 || end <= start {
+		t.Fatal("Players source block missing")
+	}
+	block := source[start:end]
+	for _, want := range []string{
+		`requestWorkspaceJSON("/api/dashboard-status")`,
+		`Online players:`, `No players online.`, `identity.startsWith(".")`, `identity.slice(1)`,
+		`payload.entries.forEach`, `row.dataset.playerIdentity = entry.identity`,
+		`remove.textContent = "Remove"`, `remove.addEventListener("click"`,
+		`platform: entry.platform`, `action: "remove"`,
+		`name: entry.platform === "bedrock" ? entry.display : entry.identity`,
+		`params.set("action", "add")`, `params.set("csrf", csrf)`,
+		`requestWorkspaceJSON("/api/minecraft/workspace/whitelist", {`, `method: "POST"`,
+		`await loadCurrentTab(result.message || "Whitelist updated.")`, `Add player`,
+	} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("Players missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{`name="action"`, `row.addEventListener`, `console/command`, `name="command"`, `action: "ban"`, `action: "kick"`, `action: "pardon"`} {
+		if strings.Contains(block, forbidden) {
+			t.Fatalf("unexpected Players surface %q", forbidden)
+		}
+	}
+	if !strings.Contains(source, `new Set(["memory", "gameplay", "crossplay"])`) || !strings.Contains(source, `currentTab === "players") await renderPlayers`) {
+		t.Fatal("incorrect gameplay/players dispatch")
 	}
 }

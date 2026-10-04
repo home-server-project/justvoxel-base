@@ -2811,7 +2811,7 @@ if (minecraftOpen && minecraftDialog) {
   const content = minecraftDialog.querySelector("[data-minecraft-workspace-content]");
   const tabs = Array.from(minecraftDialog.querySelectorAll("[data-minecraft-tab]"));
   const csrf = document.querySelector("[data-minecraft-workspace-csrf]")?.value || "";
-  const settingsTabs = new Set(["memory", "players", "crossplay"]);
+  const settingsTabs = new Set(["memory", "gameplay", "crossplay"]);
   let currentTab = "overview";
   let loadSequence = 0;
 
@@ -3067,9 +3067,9 @@ if (minecraftOpen && minecraftDialog) {
       section.querySelector('[name="container_memory"]').value = minecraft.container_memory || "";
       form.appendChild(section);
       initNativeMemoryControls(section, defaults);
-    } else if (tab === "players") {
+    } else if (tab === "gameplay") {
       section.innerHTML = `
-        <div class="section-heading"><div><p class="eyebrow">Server</p><h2>Players & identity</h2></div></div>
+        <div class="section-heading"><div><p class="eyebrow">Server</p><h2>Gameplay</h2></div></div>
         <div class="minecraft-native-grid">
           <label>Maximum players<input name="max_players" type="number" min="1" step="1" required></label>
           <label>Server welcome message (MOTD)<input name="motd" required></label>
@@ -3298,40 +3298,67 @@ if (minecraftOpen && minecraftDialog) {
     });
   };
 
-  const renderWhitelist = async (sequence, message = "") => {
-    const payload = await requestWorkspaceJSON("/api/minecraft/workspace/whitelist");
-    if (!payload || sequence !== loadSequence || !content) return;
+  const playerNameBadge = (display, platform) => {
+    const chip = document.createElement("span");
+    chip.className = "player-chip minecraft-player-name";
+    const name = document.createElement("span");
+    name.textContent = display;
+    const badge = document.createElement("span");
+    badge.className = "badge";
+    badge.textContent = platform === "bedrock" ? "Bedrock" : "Java";
+    chip.append(name, badge);
+    return chip;
+  };
+
+  const renderPlayers = async (sequence, message = "") => {
+    const [snapshot, payload] = await Promise.all([
+      requestWorkspaceJSON("/api/dashboard-status"),
+      requestWorkspaceJSON("/api/minecraft/workspace/whitelist"),
+    ]);
+    if (!snapshot || !payload || sequence !== loadSequence || !content) return;
     const root = document.createElement("div");
     root.className = "minecraft-native-operations";
     if (message) root.appendChild(noticeNode(message));
 
+    const minecraft = snapshot?.status?.minecraft || {};
+    const players = snapshot?.players || {};
+    const online = document.createElement("section");
+    online.className = "panel details minecraft-workspace-section";
+    online.innerHTML = '<div class="section-heading"><h2>Online</h2></div>';
+    online.appendChild(messageNode(`Online players: ${players.online ?? 0} / ${players.max ?? minecraft.max_players ?? "—"}`));
+    if (!minecraft.configured || players.state === "not_configured") online.appendChild(messageNode("Minecraft is not configured yet."));
+    else if (players.state === "unavailable") online.appendChild(messageNode(players.error || "Player information is temporarily unavailable."));
+    else if ((players.online ?? 0) === 0) online.appendChild(messageNode("No players online."));
+    else if (Array.isArray(players.names)) {
+      const list = document.createElement("div");
+      list.className = "player-list";
+      players.names.forEach((name) => {
+        const identity = String(name);
+        const bedrock = identity.startsWith(".");
+        list.appendChild(playerNameBadge(bedrock ? identity.slice(1) : identity, bedrock ? "bedrock" : "java"));
+      });
+      online.appendChild(list);
+    }
+    root.appendChild(online);
+
     const section = document.createElement("section");
     section.className = "panel details minecraft-workspace-section minecraft-whitelist-section";
     section.innerHTML = `
-      <div class="section-heading"><div><p class="eyebrow">Minecraft</p><h2>Whitelist</h2></div></div>
-      <pre class="log-box" data-minecraft-native-whitelist></pre>
+      <div class="section-heading"><h2>Whitelist</h2></div>
+      <div class="minecraft-whitelist-list" data-minecraft-native-whitelist></div>
       <form class="minecraft-native-form" data-minecraft-native-whitelist-form>
         <div class="minecraft-native-grid">
           <label>Platform<select name="platform"><option value="java">Java</option><option value="bedrock">Bedrock</option></select></label>
-          <label>Action<select name="action"><option value="add">Add</option><option value="remove">Remove</option></select></label>
-          <label>Player name, Xbox gamertag, or Floodgate UUID<input name="name" required maxlength="64" autocomplete="off"></label>
+          <label>Player name / Xbox gamertag / Floodgate UUID<input name="name" required maxlength="64" autocomplete="off"></label>
         </div>
         <p class="muted compact">For Bedrock, use the Xbox gamertag without the leading dot. If Floodgate cannot resolve it, use the player's Floodgate UUID.</p>
-        <div class="minecraft-native-actions"><button type="submit">Apply whitelist change</button></div>
+        <div class="minecraft-native-actions"><button type="submit">Add player</button></div>
       </form>`;
-    section.querySelector("[data-minecraft-native-whitelist]").textContent = payload.output || "No whitelist information available.";
-    root.appendChild(section);
-    content.replaceChildren(root);
 
-    const form = section.querySelector("[data-minecraft-native-whitelist-form]");
-    form?.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const submitter = event.submitter;
+    const changeWhitelist = async (params, submitter) => {
       if (submitter) submitter.disabled = true;
       if (state) state.textContent = "Updating whitelist…";
       try {
-        const params = new URLSearchParams();
-        new FormData(form).forEach((value, key) => params.append(key, String(value)));
         params.set("csrf", csrf);
         const result = await requestWorkspaceJSON("/api/minecraft/workspace/whitelist", {
           method: "POST",
@@ -3342,8 +3369,49 @@ if (minecraftOpen && minecraftDialog) {
         await loadCurrentTab(result.message || "Whitelist updated.");
       } catch (error) {
         if (state) state.textContent = error?.message || "Whitelist change could not be completed.";
+      } finally {
         if (submitter) submitter.disabled = false;
       }
+    };
+
+    const list = section.querySelector("[data-minecraft-native-whitelist]");
+    if (!payload.parsed) {
+      list.appendChild(noticeNode("Whitelist information could not be interpreted. Backend output:", "warning"));
+      const diagnostic = document.createElement("pre");
+      diagnostic.className = "log-box";
+      diagnostic.textContent = payload.output || "No whitelist information available.";
+      list.appendChild(diagnostic);
+    } else if (!payload.entries?.length) {
+      list.appendChild(messageNode("No whitelisted players."));
+    } else {
+      payload.entries.forEach((entry) => {
+        const row = document.createElement("div");
+        row.className = "minecraft-whitelist-row";
+        row.dataset.playerIdentity = entry.identity;
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "secondary";
+        remove.textContent = "Remove";
+        remove.setAttribute("aria-label", `Remove ${entry.display} (${entry.platform === "bedrock" ? "Bedrock" : "Java"}) from whitelist`);
+        remove.addEventListener("click", () => changeWhitelist(new URLSearchParams({
+          platform: entry.platform,
+          action: "remove",
+          name: entry.platform === "bedrock" ? entry.display : entry.identity,
+        }), remove));
+        row.append(playerNameBadge(entry.display, entry.platform), remove);
+        list.appendChild(row);
+      });
+    }
+    root.appendChild(section);
+    content.replaceChildren(root);
+
+    const form = section.querySelector("[data-minecraft-native-whitelist-form]");
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const params = new URLSearchParams();
+      new FormData(form).forEach((value, key) => params.append(key, String(value)));
+      params.set("action", "add");
+      changeWhitelist(params, event.submitter);
     });
   };
 
@@ -3379,7 +3447,7 @@ if (minecraftOpen && minecraftDialog) {
     if (content) content.replaceChildren();
     try {
       if (settingsTabs.has(currentTab)) await renderSettingsTab(sequence, message);
-      else if (currentTab === "whitelist") await renderWhitelist(sequence, message);
+      else if (currentTab === "players") await renderPlayers(sequence, message);
       else if (currentTab === "logs") await renderLogs(sequence, message);
       else await renderOverview(sequence, message);
       if (sequence === loadSequence && state?.textContent === "Loading…") state.textContent = "";
@@ -5265,11 +5333,11 @@ if (dashboard) {
       button.click();
       let tab = destination.get("tab") || "";
       if (workspace === "minecraft") {
-        if (window.location.hash === "#whitelist") tab = "whitelist";
+        if (window.location.hash === "#whitelist") tab = "players";
         if (window.location.hash === "#minecraft-logs") tab = "overview";
       }
       const allowedTabs = {
-        minecraft: ["overview", "memory", "players", "whitelist", "crossplay"],
+        minecraft: ["overview", "memory", "gameplay", "players", "crossplay"],
         version: ["software", "minecraft"],
         system: ["health", "history", "users", "security", "reset", "ups", "about"],
         migration: ["export", "import", "recovery"],

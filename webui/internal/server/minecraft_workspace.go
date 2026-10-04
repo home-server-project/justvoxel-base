@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
@@ -34,6 +36,61 @@ type minecraftWorkspaceTextResponse struct {
 	OK      bool   `json:"ok"`
 	Output  string `json:"output,omitempty"`
 	Message string `json:"message,omitempty"`
+}
+
+type minecraftWorkspaceWhitelistEntry struct {
+	Display  string `json:"display"`
+	Platform string `json:"platform"`
+	Identity string `json:"identity"`
+}
+
+type minecraftWorkspaceWhitelistResponse struct {
+	OK      bool                               `json:"ok"`
+	Entries []minecraftWorkspaceWhitelistEntry `json:"entries"`
+	Parsed  bool                               `json:"parsed"`
+	Output  string                             `json:"output,omitempty"`
+}
+
+var minecraftWhitelistListPattern = regexp.MustCompile(`^There are ([0-9]+) whitelisted player\(s\):\s*(.*)$`)
+var minecraftWhitelistIdentityPattern = regexp.MustCompile(`^[.A-Za-z0-9_ ]+$`)
+
+// Parse only the known list format; retain the original output for diagnostics.
+// Display names are never used to deduplicate Java and Floodgate identities.
+func parseMinecraftWorkspaceWhitelist(output string) ([]minecraftWorkspaceWhitelistEntry, bool) {
+	entries := []minecraftWorkspaceWhitelistEntry{}
+	output = strings.TrimSpace(output)
+	if output == "" || output == "There are no whitelisted players" {
+		return entries, true
+	}
+	match := minecraftWhitelistListPattern.FindStringSubmatch(output)
+	if match == nil {
+		return entries, false
+	}
+	count, err := strconv.Atoi(match[1])
+	if err != nil {
+		return entries, false
+	}
+	if count == 0 && match[2] == "" {
+		return entries, true
+	}
+	identities := strings.Split(match[2], ",")
+	if len(identities) != count {
+		return entries, false
+	}
+	for _, value := range identities {
+		identity := strings.TrimSpace(value)
+		display := identity
+		platform := "java"
+		if strings.HasPrefix(identity, ".") {
+			display = strings.TrimPrefix(identity, ".")
+			platform = "bedrock"
+		}
+		if display == "" || len(identity) > 64 || !minecraftWhitelistIdentityPattern.MatchString(identity) {
+			return []minecraftWorkspaceWhitelistEntry{}, false
+		}
+		entries = append(entries, minecraftWorkspaceWhitelistEntry{Display: display, Platform: platform, Identity: identity})
+	}
+	return entries, true
 }
 
 type minecraftWorkspaceLogsResponse struct {
@@ -175,7 +232,7 @@ func minecraftWorkspaceConfigurationRequest(r *http.Request, current api.AdminCo
 		if request.JavaMemory == "" || request.ContainerMemory == "" {
 			return request, errors.New("Minecraft memory values are required.")
 		}
-	case "players":
+	case "gameplay":
 		maxPlayers, err := parsePositiveFormInt(r.FormValue("max_players"), "Maximum players")
 		if err != nil {
 			return request, err
@@ -234,7 +291,8 @@ func (a *App) minecraftWorkspaceWhitelist(w http.ResponseWriter, r *http.Request
 		a.writeMinecraftWorkspaceAPIError(w, err, "Minecraft whitelist is unavailable.")
 		return
 	}
-	writeMinecraftWorkspaceJSON(w, http.StatusOK, minecraftWorkspaceTextResponse{OK: true, Output: result.Output})
+	entries, parsed := parseMinecraftWorkspaceWhitelist(result.Output)
+	writeMinecraftWorkspaceJSON(w, http.StatusOK, minecraftWorkspaceWhitelistResponse{OK: true, Entries: entries, Parsed: parsed, Output: result.Output})
 }
 
 func (a *App) minecraftWorkspaceWhitelistChange(w http.ResponseWriter, r *http.Request) {
