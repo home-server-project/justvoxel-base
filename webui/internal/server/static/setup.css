@@ -297,3 +297,10 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
 @media(max-width:850px){
   .setup-body .setup-wizard-panel .setup-form>.setup-step-content{display:contents}
 }
+
+/* Reuse the Date & Time switch without the wizard's text-input sizing. */
+.setup-wizard-panel .date-time-switch{min-height:0;margin:0;padding:0}
+.setup-wizard-panel .date-time-switch:disabled{cursor:not-allowed;opacity:.45}
+@media(prefers-color-scheme:light){
+  .setup-form .notice.error{background:#fff0f0;border-color:#d58a8a}
+}

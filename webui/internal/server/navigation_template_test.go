@@ -494,13 +494,14 @@ func TestSetupTemplatesUseThinTopbar(t *testing.T) {
 			t.Fatal(err)
 		}
 		markup := string(content)
-		if strings.Contains(markup, `/static/justvoxel-logo.png`) {
-			t.Fatalf("%s must retain visible Setup JV branding", name)
+		branding := `<img class="brand-logo" src="/static/justvoxel-logo.png" alt="JustVoxel">`
+		if name == "setup_progress.html" {
+			branding = `<span class="brand-name">JustVoxel</span>`
 		}
 		for _, want := range []string{
 			`class="setup-header topbar setup-topbar"`,
 			`class="brand-link brand-mark"`,
-			`<strong>JV</strong>`,
+			branding,
 			`data-topbar-clock`,
 			`/static/app.js`,
 		} {

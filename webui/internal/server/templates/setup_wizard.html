@@ -15,7 +15,7 @@
 </head>
 <body class="role-administrator setup-body">
 <header class="setup-header topbar setup-topbar">
-  <a class="brand-link brand-mark" href="/setup" aria-current="page" aria-label="JustVoxel first setup"><strong>JV</strong><span class="brand-name">JustVoxel</span></a>
+  <a class="brand-link brand-mark" href="/setup" aria-current="page" aria-label="JustVoxel first setup"><img class="brand-logo" src="/static/justvoxel-logo.png" alt="JustVoxel"></a>
   <div class="topbar-clock" data-topbar-clock aria-label="Local time">--:--</div>
   <form class="nav-logout setup-topbar-logout" method="post" action="/logout">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
@@ -108,8 +108,8 @@
     <form method="post" action="/setup/connections" class="setup-form" data-setup-connections>
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      {{if eq .Minecraft.ServerType "vanilla"}}<p class="notice">Managed Bedrock cross-play currently requires Paper or Purpur.</p>{{end}}
-      <label class="setup-choice"><input type="checkbox" name="bedrock_enabled" data-bedrock-toggle {{if eq .Minecraft.ServerType "vanilla"}}disabled{{end}} {{if .Server.BedrockEnabled}}checked{{end}}><span><strong>Enable Bedrock cross-play</strong><small>Allow supported Bedrock clients to join through Geyser/Floodgate. Compatibility is checked before Apply.</small></span></label>
+      {{if eq .Minecraft.ServerType "vanilla"}}<p class="notice error">Bedrock cross-play is currently not supported for Vanilla. Select Paper or Purpur on Step 1.</p>{{end}}
+      <label class="date-time-automatic"><span><strong>Enable Bedrock cross-play</strong><small class="field-help">Allow supported Bedrock clients to join through Geyser/Floodgate. Compatibility is checked before Apply.</small></span><input class="date-time-switch" type="checkbox" name="bedrock_enabled" data-bedrock-toggle {{if eq .Minecraft.ServerType "vanilla"}}disabled{{end}} {{if .Server.BedrockEnabled}}checked{{end}}></label>
       <div class="setup-form-grid">
         <label class="setup-field">Minecraft Java port<input name="java_port" type="number" min="1" max="65535" value="{{.Minecraft.JavaPort}}" inputmode="numeric"><span class="field-help">Default: 25565/TCP.</span></label>
         <label class="setup-field" data-bedrock-port-field>Bedrock UDP port<input name="bedrock_port" type="number" min="1" max="65535" value="{{.Minecraft.BedrockPort}}" inputmode="numeric"><span class="field-help">Default: 19132/UDP. Used only when Bedrock cross-play is enabled.</span></label>

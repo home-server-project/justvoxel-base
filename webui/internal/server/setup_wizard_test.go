@@ -10,6 +10,82 @@ import (
 	"testing"
 )
 
+const vanillaBedrockWarning = "Bedrock cross-play is currently not supported for Vanilla. Select Paper or Purpur on Step 1."
+
+func assertSetupApplicationLogo(t *testing.T, body string) {
+	t.Helper()
+	headerTemplate, err := assets.ReadFile("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const logo = `<img class="brand-logo" src="/static/justvoxel-logo.png" alt="JustVoxel">`
+	if !strings.Contains(string(headerTemplate), logo) {
+		t.Fatal("expected logo no longer matches the normal application header")
+	}
+	start := strings.Index(body, "<header ")
+	end := strings.Index(body, "</header>")
+	if start < 0 || end < start {
+		t.Fatal("setup header missing")
+	}
+	header := body[start:end]
+	if !strings.Contains(header, `class="brand-link brand-mark"`) || !strings.Contains(header, logo) || strings.Contains(header, "<strong>JV</strong>") {
+		t.Fatalf("setup header does not reuse the application logo: %s", header)
+	}
+}
+
+func TestAdvancedConnectionsBedrockToggleCapabilities(t *testing.T) {
+	for _, serverType := range []string{"paper", "purpur", "vanilla"} {
+		t.Run(serverType, func(t *testing.T) {
+			app, err := New(setupWizardClient(), Config{Version: "test", ManagementAPI: "v1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer firstRunSetupDrafts.delete(app, "session-token")
+			startSetup(t, app)
+			page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
+			assertSetupApplicationLogo(t, page.Body.String())
+			values := validServerValues()
+			values.Set("server_type", serverType)
+			if rr := saveServerStep(t, app, values); rr.Code != http.StatusSeeOther {
+				t.Fatalf("server selection returned %d: %s", rr.Code, rr.Body.String())
+			}
+			page = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
+			if page.Code != http.StatusOK {
+				t.Fatalf("Connections returned %d", page.Code)
+			}
+			body := page.Body.String()
+			const toggleStart = `<input class="date-time-switch" type="checkbox" name="bedrock_enabled" data-bedrock-toggle`
+			start := strings.Index(body, toggleStart)
+			if start < 0 || !strings.Contains(body, `<label class="date-time-automatic">`) {
+				t.Fatal("Bedrock control does not use the Date & Time switch pattern")
+			}
+			control := body[start : start+strings.Index(body[start:], ">")+1]
+			vanilla := serverType == "vanilla"
+			if strings.Contains(control, "disabled") != vanilla {
+				t.Fatalf("incorrect disabled state: %s", control)
+			}
+			if vanilla && strings.Contains(control, "checked") {
+				t.Fatalf("Vanilla toggle rendered enabled: %s", control)
+			}
+			warning := `<p class="notice error">` + vanillaBedrockWarning + `</p>`
+			if strings.Contains(body, warning) != vanilla || strings.Contains(body, vanillaBedrockWarning) != vanilla {
+				t.Fatal("incorrect Vanilla warning or danger class")
+			}
+			if !vanilla {
+				connections := validConnectionValues()
+				connections.Set("bedrock_enabled", "on")
+				if rr := saveConnectionsStep(t, app, connections); rr.Code != http.StatusSeeOther {
+					t.Fatalf("Bedrock submission returned %d: %s", rr.Code, rr.Body.String())
+				}
+				draft, _ := firstRunSetupDrafts.get(app, "session-token")
+				if !draft.Server.BedrockEnabled {
+					t.Fatal("supported server did not preserve Bedrock enabled")
+				}
+			}
+		})
+	}
+}
+
 func TestSetupMemoryPresetsMatchDefaultsAndPreserveCustomValues(t *testing.T) {
 	script, err := assets.ReadFile("static/settings.js")
 	if err != nil {
@@ -377,6 +453,7 @@ func TestSetupWizardShowsRecommendedAndAdvancedChoices(t *testing.T) {
 	if client.configurationHit != 1 {
 		t.Fatalf("configuration discovery calls = %d, want 1", client.configurationHit)
 	}
+	assertSetupApplicationLogo(t, body)
 }
 
 func TestRecommendedSetupBuildsReadyPaperDraftAndJumpsToReview(t *testing.T) {
@@ -1000,7 +1077,7 @@ func TestVanillaAdvancedConnectionsCannotEnableBedrock(t *testing.T) {
 		t.Fatalf("server: %d %s", rr.Code, rr.Body.String())
 	}
 	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-	if !strings.Contains(page.Body.String(), "requires Paper or Purpur") || !strings.Contains(page.Body.String(), "data-bedrock-toggle disabled") {
+	if !strings.Contains(page.Body.String(), `<p class="notice error">`+vanillaBedrockWarning+`</p>`) || !strings.Contains(page.Body.String(), "data-bedrock-toggle disabled") {
 		t.Fatal("Vanilla Connections did not disable Bedrock")
 	}
 	connections := validConnectionValues()

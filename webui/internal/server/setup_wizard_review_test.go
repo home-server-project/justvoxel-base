@@ -129,6 +129,7 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 			t.Fatalf("review missing %q: %s", want, body)
 		}
 	}
+	assertSetupApplicationLogo(t, body)
 	summaryStart := strings.Index(body, `class="setup-review-summary"`)
 	warningsStart := strings.Index(body, `class="setup-review-warnings"`)
 	if summaryStart < 0 || warningsStart <= summaryStart {
