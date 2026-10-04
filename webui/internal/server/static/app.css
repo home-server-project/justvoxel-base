@@ -1291,8 +1291,46 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 
 .project-wallpaper-button{display:none;padding:0;border:0;border-radius:0;background:transparent;font:inherit}
 #dashboard[data-configured="true"] .project-wallpaper-button{display:inline}
-.wallpaper-dialog{max-height:calc(100dvh - 2rem);overflow:auto}
-.wallpaper-dialog fieldset{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.5rem;border:0;padding:0;margin:1rem 0}
-.wallpaper-dialog fieldset label{display:flex;align-items:center;gap:.35rem;margin:0;padding:.5rem;border:1px solid #59646d;border-radius:8px}
-.wallpaper-dialog input[type=radio]{width:auto;margin:0}
+/* Wallpaper controls fit in the dialog without an internal scroll area. */
+.wallpaper-dialog{width:min(560px,calc(100% - 1rem));max-height:none;overflow:visible}
+.wallpaper-dialog .system-action-dialog-content{padding:1rem;display:grid;gap:.65rem}
+.wallpaper-dialog h2{margin:0;font-size:1.3rem}
+.wallpaper-dialog p{margin:0;font-size:.8rem;line-height:1.35}
+.wallpaper-dialog fieldset{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.45rem;border:0;padding:0;margin:0;min-width:0}
+.wallpaper-dialog legend{padding:0;margin-bottom:.3rem;font-size:.82rem}
+.wallpaper-dialog label{color:inherit;display:flex;align-items:center;gap:.35rem;margin:0;padding:.45rem;border:1px solid #59646d;border-radius:8px;font-size:.82rem;min-width:0;cursor:pointer}
+.wallpaper-dialog label:has(input[type=radio]:checked){border-color:#68bd8e;box-shadow:inset 0 0 0 1px #68bd8e}
+.wallpaper-dialog label:has(input:focus-visible){outline:2px solid #78c99d;outline-offset:2px}
+.wallpaper-dialog input[type=radio]{width:auto;margin:0;flex:none}
+.wallpaper-dialog .wallpaper-theme-card{display:grid;gap:.3rem;padding:.4rem}
+.wallpaper-theme-heading{display:flex;align-items:center;gap:.35rem;font-weight:700}
+.wallpaper-split-preview{display:grid;grid-template-columns:1fr 1fr;gap:2px}
+.wallpaper-split-preview>span{position:relative;min-width:0}
+.wallpaper-split-preview img{display:block;width:100%;height:84px;object-fit:cover;border-radius:4px}
+.wallpaper-split-preview>span>span{position:absolute;bottom:3px;left:3px;background:#07100bcc;color:#fff;padding:.1rem .25rem;border-radius:3px;font-size:.65rem}
+.wallpaper-dialog .wallpaper-appearance{grid-template-columns:repeat(3,minmax(0,1fr))}
+.wallpaper-schedule{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.45rem}
+.wallpaper-dialog .wallpaper-schedule label{display:grid;border:0;padding:0;gap:.2rem;cursor:default}
+.wallpaper-dialog input:not([type=radio]){min-width:0;padding:.45rem;margin:0;font-size:.82rem}
+.wallpaper-dialog .wallpaper-input-row{border:0;padding:0;cursor:default}
+.wallpaper-input-row input{flex:1;width:0}
+.wallpaper-dialog [data-wallpaper-upload-fields] p,.wallpaper-dialog [data-wallpaper-url-fields] p{margin-top:.3rem}
+.wallpaper-dialog [data-wallpaper-error]{padding:.4rem .5rem;overflow-wrap:anywhere}
+.wallpaper-dialog .action-row{display:flex;flex-wrap:nowrap;gap:.4rem;margin:0}
+.wallpaper-dialog button{padding:.5rem .65rem;font-size:.82rem;white-space:nowrap}
+.wallpaper-dialog [data-wallpaper-reset]{margin-right:auto}
 .wallpaper-dialog [hidden]{display:none!important}
+.dashboard-wallpaper.wallpaper-theme-v1{object-position:50% center}
+.dashboard-wallpaper.wallpaper-theme-v2{object-position:65% center}
+@media(max-width:600px),(max-height:720px){
+  .wallpaper-dialog .system-action-dialog-content{padding:.75rem;gap:.5rem}
+  .wallpaper-split-preview img{height:60px}
+  .wallpaper-dialog label{padding:.4rem}
+}
+@media(max-width:390px){
+  .wallpaper-dialog .system-action-dialog-content{padding:.65rem;gap:.45rem}
+  .wallpaper-split-preview img{height:50px}
+  .wallpaper-dialog button{padding:.5rem;font-size:.78rem}
+  .wallpaper-dialog .wallpaper-appearance label{gap:.2rem;padding:.35rem;font-size:.78rem}
+}
+@media(max-width:600px){.dashboard-wallpaper.wallpaper-theme-v2{object-position:78% center}}

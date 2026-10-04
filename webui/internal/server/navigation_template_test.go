@@ -561,8 +561,8 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 			t.Fatalf("authenticated header must retain %s", want)
 		}
 	}
-	if !strings.Contains(markup, `data-dashboard-wallpaper src="/static/justvoxel-default-wallpaper.jpg" alt="" aria-hidden="true"`) {
-		t.Fatal("dashboard must include the decorative built-in wallpaper image")
+	if !strings.Contains(markup, `<img class="dashboard-wallpaper wallpaper-theme-v2" data-dashboard-wallpaper src="/static/wallpapers/jv-wp-v2-day.webp" alt="" aria-hidden="true">`) {
+		t.Fatal("dashboard must include the decorative V2 Day built-in wallpaper fallback")
 	}
 	if _, err := assets.ReadFile("static/justvoxel-default-wallpaper.jpg"); err != nil {
 		t.Fatal(err)
@@ -570,7 +570,7 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 	if strings.Contains(styles, "conic-gradient(") {
 		t.Fatal("dashboard must not retain the generated voxel wallpaper")
 	}
-	for _, want := range []string{"object-fit:cover", "object-position:center", `#dashboard[data-spotlight-active="true"]::after`} {
+	for _, want := range []string{"object-fit:cover", ".dashboard-wallpaper.wallpaper-theme-v2{object-position:65% center}", `#dashboard[data-spotlight-active="true"]::after`} {
 		if !strings.Contains(styles, want) {
 			t.Fatalf("dashboard wallpaper behavior missing %q", want)
 		}
@@ -593,8 +593,20 @@ func TestWallpaperSettingsUX(t *testing.T) {
 	}
 	markup := string(content)
 	for _, want := range []string{
-		`<fieldset>`,
-		`<legend class="muted">Background</legend>`,
+		`name="mode" value="builtin" hidden checked`,
+		`<fieldset class="wallpaper-themes">`,
+		`<legend class="muted">Built-in</legend>`,
+		`name="theme" value="v1">V1`,
+		`name="theme" value="v2" checked>V2`,
+		`<fieldset class="wallpaper-appearance"`,
+		`<legend class="muted">Appearance</legend>`,
+		`name="appearance" value="auto" checked>Automatic`,
+		`name="appearance" value="day">Day`,
+		`name="appearance" value="night">Night`,
+		`Day starts<input type="time" name="dayStart" value="07:00"`,
+		`Night starts<input type="time" name="nightStart" value="19:00"`,
+		`<fieldset class="wallpaper-custom">`,
+		`<legend class="muted">Custom</legend>`,
 		`<input type="radio" name="mode" value="url">Web address`,
 		`<input type="radio" name="mode" value="upload">Upload picture`,
 		`data-wallpaper-reset>Reset to default</button>`,
@@ -615,8 +627,22 @@ func TestWallpaperSettingsUX(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(content), ".wallpaper-dialog fieldset{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.5rem;border:0;padding:0;margin:1rem 0}") {
-		t.Fatal("wallpaper background choices must use two equal columns with existing fieldset spacing")
+	styles := string(content)
+	for _, want := range []string{
+		".wallpaper-dialog{width:min(560px,calc(100% - 1rem));max-height:none;overflow:visible}",
+		".wallpaper-dialog .wallpaper-theme-card{display:grid",
+		".wallpaper-split-preview{display:grid;grid-template-columns:1fr 1fr",
+		".wallpaper-dialog .wallpaper-appearance{grid-template-columns:repeat(3,minmax(0,1fr))}",
+		".wallpaper-schedule{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))",
+		".dashboard-wallpaper.wallpaper-theme-v1{object-position:",
+		".dashboard-wallpaper.wallpaper-theme-v2{object-position:",
+	} {
+		if !strings.Contains(styles, want) {
+			t.Fatalf("wallpaper settings styling missing %q", want)
+		}
+	}
+	if strings.Contains(styles, ".wallpaper-dialog{max-height:calc(100dvh - 2rem);overflow:auto}") {
+		t.Fatal("wallpaper dialog must not retain the old internal scrolling layout")
 	}
 
 	content, err = assets.ReadFile("static/wallpaper.js")
@@ -625,21 +651,16 @@ func TestWallpaperSettingsUX(t *testing.T) {
 	}
 	script := string(content)
 	for _, want := range []string{
-		`let preference = { mode: "default" };`,
-		`if (saved.mode === "default") return;`,
-		"const reset = async () => {\n    applyImage(defaultImage);\n    preference = { mode: \"default\" };",
+		`mode: "builtin", theme: "v2", appearance: "auto", dayStart: "07:00", nightStart: "19:00"`,
+		`if (saved.mode === "default") return defaultPreference();`,
+		"const reset = async () => {\n    preference = defaultPreference();",
 		`savePreference(preference)`,
 		`await storedImage("delete")`,
 		`try { await reset(); dialog.close(); }`,
 		`input.checked = input.value === preference.mode`,
-		`form.querySelector('button[type="submit"]').disabled = busy || (mode !== "url" && mode !== "upload");`,
-		`if (mode !== "url" && mode !== "upload") return;`,
+		`form.querySelector('button[type="submit"]').disabled = busy;`,
 		`hidden = mode !== "url"`,
 		`hidden = mode !== "upload"`,
-		`if (mode === "url")`,
-		`else if (mode === "upload")`,
-		`savePreference({ mode: "url", url })`,
-		`savePreference({ mode: "upload" })`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("wallpaper settings behavior missing %q", want)
@@ -649,8 +670,18 @@ func TestWallpaperSettingsUX(t *testing.T) {
 	if submitStart < 0 {
 		t.Fatal("wallpaper Apply handler missing")
 	}
-	if strings.Contains(script[submitStart:], `mode === "default"`) {
-		t.Fatal("wallpaper Apply must not handle the default mode")
+	for _, want := range []string{
+		`if (!["builtin", "url", "upload"].includes(mode)) return;`,
+		`if (mode === "builtin")`,
+		`savePreference(next)`,
+		`else if (mode === "url")`,
+		`savePreference({ mode: "url", url })`,
+		`else if (mode === "upload")`,
+		`savePreference({ mode: "upload" })`,
+	} {
+		if !strings.Contains(script[submitStart:], want) {
+			t.Fatalf("wallpaper Apply behavior missing %q", want)
+		}
 	}
 }
 

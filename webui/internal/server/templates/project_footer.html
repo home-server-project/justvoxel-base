@@ -15,18 +15,46 @@
   <form class="system-action-dialog-content" data-wallpaper-form>
     <h2 id="wallpaper-title">Wallpaper</h2>
     <p class="muted">Choose the background used by this browser.</p>
-    <fieldset>
-      <legend class="muted">Background</legend>
+    <input type="radio" name="mode" value="builtin" hidden checked>
+    <fieldset class="wallpaper-themes">
+      <legend class="muted">Built-in</legend>
+      <label class="wallpaper-theme-card">
+        <span class="wallpaper-theme-heading"><input type="radio" name="theme" value="v1">V1</span>
+        <span class="wallpaper-split-preview">
+          <span><img src="/static/wallpapers/jv-wp-v1-day-preview.webp" width="480" height="270" alt=""><span>Day</span></span>
+          <span><img src="/static/wallpapers/jv-wp-v1-night-preview.webp" width="480" height="270" alt=""><span>Night</span></span>
+        </span>
+      </label>
+      <label class="wallpaper-theme-card">
+        <span class="wallpaper-theme-heading"><input type="radio" name="theme" value="v2" checked>V2</span>
+        <span class="wallpaper-split-preview">
+          <span><img src="/static/wallpapers/jv-wp-v2-day-preview.webp" width="480" height="270" alt=""><span>Day</span></span>
+          <span><img src="/static/wallpapers/jv-wp-v2-night-preview.webp" width="480" height="270" alt=""><span>Night</span></span>
+        </span>
+      </label>
+    </fieldset>
+    <fieldset class="wallpaper-appearance" data-wallpaper-builtin-fields>
+      <legend class="muted">Appearance</legend>
+      <label><input type="radio" name="appearance" value="auto" checked>Automatic</label>
+      <label><input type="radio" name="appearance" value="day">Day</label>
+      <label><input type="radio" name="appearance" value="night">Night</label>
+    </fieldset>
+    <div class="wallpaper-schedule" data-wallpaper-schedule>
+      <label>Day starts<input type="time" name="dayStart" value="07:00" required></label>
+      <label>Night starts<input type="time" name="nightStart" value="19:00" required></label>
+    </div>
+    <fieldset class="wallpaper-custom">
+      <legend class="muted">Custom</legend>
       <label><input type="radio" name="mode" value="url">Web address</label>
       <label><input type="radio" name="mode" value="upload">Upload picture</label>
     </fieldset>
     <div data-wallpaper-url-fields hidden>
-      <label>Web address<input type="url" name="url" placeholder="https://example.com/picture.jpg"></label>
+      <label class="wallpaper-input-row">Web address<input type="url" name="url" placeholder="https://example.com/picture.jpg"></label>
       <p class="muted">The image is loaded directly by this browser.</p>
     </div>
     <div data-wallpaper-upload-fields hidden>
-      <label>Picture<input type="file" name="picture" accept="image/jpeg,image/png,image/webp,image/avif"></label>
-      <p class="muted">Choose a JPEG, PNG, WebP or AVIF picture up to 10 MiB.</p>
+      <label class="wallpaper-input-row">Picture<input type="file" name="picture" accept="image/jpeg,image/png,image/webp,image/avif"></label>
+      <p class="muted">JPEG, PNG, WebP or AVIF, up to 10 MiB.</p>
     </div>
     <p class="alert" data-wallpaper-error role="alert" hidden></p>
     <div class="action-row">
