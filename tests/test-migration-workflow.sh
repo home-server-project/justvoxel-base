@@ -178,7 +178,9 @@ if grep -Fq "fail '/dev/zram0 is not available" "${validate_backend}"; then fail
 if grep -Fq "fail 'zram0 is not active as swap" "${validate_backend}"; then fail 'zram inactivity must not be a fatal appliance validation failure'; fi
 
 grep -Fq 'Migration' "${menu}" || fail 'Migration TUI missing'
-grep -Fq 'Import existing Minecraft server' "${menu}" || fail 'fresh-appliance import entry missing'
+if grep -Fq 'Import existing Minecraft server' "${menu}"; then fail 'fresh-appliance menu must not expose an import entry'; fi
+grep -Fq "jui_choose 'Migration' 'Export server' 'Import server'" "${menu}" || fail 'Migration submenu import entry missing'
+grep -Fq "'Import server') run_and_pause /usr/bin/mjust import" "${menu}" || fail 'Migration submenu import entry does not dispatch to mjust import'
 grep -Fq 'Recover / finalize interrupted import' "${menu}" || fail 'migration recovery entry missing from TUI'
 grep -Fq 'mjust export' "${menu}" || fail 'export command not discoverable in TUI'
 grep -Fq 'mjust import' "${menu}" || fail 'import command not discoverable in TUI'
