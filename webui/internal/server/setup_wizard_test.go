@@ -158,7 +158,7 @@ func TestSetupEightGBClassDefaultsReachBothWizardModes(t *testing.T) {
 	}
 }
 
-func TestSetupReviewCompactDesktopProgressContract(t *testing.T) {
+func TestSetupWizardCompactDesktopProgressContract(t *testing.T) {
 	css, err := assets.ReadFile("static/setup.css")
 	if err != nil {
 		t.Fatal(err)
@@ -175,12 +175,19 @@ func TestSetupReviewCompactDesktopProgressContract(t *testing.T) {
 	desktop = desktop[:end]
 	for _, want := range []string{
 		"@media(min-width:851px)",
-		".setup-shell:has(.setup-review-panel):has(.setup-progress)>.setup-title-row{margin-bottom:.15rem}",
-		".setup-shell:has(.setup-review-panel)>.setup-progress{margin-bottom:.25rem;gap:.25rem}",
-		"padding:.2rem .45rem", "flex-basis:1.4rem;width:1.4rem;height:1.4rem",
+		".setup-shell:has(.setup-progress)>.setup-title-row{margin-bottom:.15rem}",
+		".setup-shell>.setup-progress{margin-bottom:.25rem;gap:.25rem}",
+		".setup-shell>.setup-progress li{gap:.35rem}",
+		".setup-shell>.setup-progress li button,.setup-shell>.setup-progress li:not(:has(form)){padding:.2rem .45rem}",
+		".setup-shell>.setup-progress .setup-number{flex-basis:1.4rem;width:1.4rem;height:1.4rem;font-size:.75rem}",
 	} {
 		if !strings.Contains(desktop, want) {
-			t.Fatalf("compact Advanced Review desktop progress missing %q", want)
+			t.Fatalf("compact Setup wizard desktop progress missing %q", want)
+		}
+	}
+	for _, line := range strings.Split(string(css), "\n") {
+		if strings.Contains(line, ".setup-review-panel") && strings.Contains(line, ".setup-progress") {
+			t.Fatal("compact progress styling must not be limited to Review")
 		}
 	}
 	markup, err := assets.ReadFile("templates/setup_review.html")
@@ -189,6 +196,20 @@ func TestSetupReviewCompactDesktopProgressContract(t *testing.T) {
 	}
 	if !strings.Contains(string(markup), `{{if ne .SetupMode "recommended"}}`) || strings.Count(string(markup), `class="setup-number"`) != 7 || strings.Count(string(markup), `action="/setup/navigate"`) != 6 {
 		t.Fatal("Advanced Review must retain seven steps and navigation; Recommended omits progress")
+	}
+	for i, label := range []string{"Server", "Connections", "Resources", "Version", "Storage", "Backups", "Review"} {
+		if !strings.Contains(string(markup), fmt.Sprintf(`<span class="setup-number">%d</span><span>%s</span>`, i+1, label)) {
+			t.Fatalf("Setup progress missing step %d: %s", i+1, label)
+		}
+	}
+	wizard, err := assets.ReadFile("templates/setup_wizard.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`{{range .Steps}}`, `{{if .Active}}aria-current="step"{{end}}`, `{{if .Visited}}<form method="post" action="/setup/navigate">`, `name="direction" value="jump"`, `name="step" value="{{.Number}}"`, `<span class="setup-number">{{.Number}}</span><span>{{.Name}}</span>`} {
+		if !strings.Contains(string(wizard), want) {
+			t.Fatalf("Setup wizard progress navigation missing %q", want)
+		}
 	}
 }
 
