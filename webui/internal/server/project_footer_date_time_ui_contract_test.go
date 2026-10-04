@@ -66,10 +66,34 @@ func TestProjectFooterAndDateTimeUIContracts(t *testing.T) {
 		}
 	}
 	wallpaperJS := read("static/wallpaper.js")
-	for _, want := range []string{".project-wallpaper-button{display:none;", "#dashboard .project-wallpaper-button{display:inline}"} {
+	for _, want := range []string{".project-wallpaper-button{display:none;", `#dashboard[data-configured="true"] .project-wallpaper-button{display:inline}`} {
 		if !strings.Contains(appCSS, want) {
-			t.Fatalf("Dashboard-only wallpaper control styling missing %q", want)
+			t.Fatalf("Configured-dashboard-only wallpaper control styling missing %q", want)
 		}
+	}
+	if strings.Contains(appCSS, "#dashboard .project-wallpaper-button{display:inline}") {
+		t.Fatal("Wallpaper control must not be shown on an unconfigured dashboard")
+	}
+	for _, want := range []string{
+		`#dashboard[data-configured="false"] .dashboard-wallpaper{display:none}`,
+		`#dashboard[data-configured="false"]::before,#dashboard[data-configured="false"]::after{content:none;display:none}`,
+	} {
+		if !strings.Contains(appCSS, want) {
+			t.Fatalf("Unconfigured dashboard wallpaper and overlay suppression missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		`.dashboard-wallpaper{position:fixed;inset:48px 0 0;width:100%;height:calc(100dvh - 48px);object-fit:cover;object-position:center;z-index:-3;pointer-events:none}`,
+		`#dashboard::before{content:"";position:fixed;inset:48px 0 0;z-index:-2;pointer-events:none;background:#07100b66}`,
+		`#dashboard::after{content:"";position:fixed;inset:48px 0 0;z-index:-1;pointer-events:none;opacity:0;background:radial-gradient(circle 125px at var(--voxel-x,50%) var(--voxel-y,30%),#68bd8e24,transparent 100%)}`,
+		`#dashboard[data-spotlight-active="true"]::after{opacity:1}`,
+	} {
+		if !strings.Contains(appCSS, want) {
+			t.Fatalf("Configured dashboard wallpaper behavior missing %q", want)
+		}
+	}
+	if !strings.Contains(read("templates/dashboard.html"), `data-configured="{{.Status.Minecraft.Configured}}"`) || !strings.Contains(read("static/app.js"), "dashboard.dataset.configured = String(Boolean(status.minecraft.configured));") {
+		t.Fatal("Wallpaper visibility must use the existing synchronized dashboard configuration state")
 	}
 	if !strings.Contains(wallpaperJS, "const wallpaper = document.querySelector(\"[data-dashboard-wallpaper]\");\n  if (!wallpaper) return;\n  const form =") {
 		t.Fatal("Wallpaper must require the dashboard wallpaper element before initialization")

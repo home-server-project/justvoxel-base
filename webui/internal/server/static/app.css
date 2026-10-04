@@ -825,6 +825,8 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 #dashboard::before{content:"";position:fixed;inset:48px 0 0;z-index:-2;pointer-events:none;background:#07100b66}
 #dashboard::after{content:"";position:fixed;inset:48px 0 0;z-index:-1;pointer-events:none;opacity:0;background:radial-gradient(circle 125px at var(--voxel-x,50%) var(--voxel-y,30%),#68bd8e24,transparent 100%)}
 #dashboard[data-spotlight-active="true"]::after{opacity:1}
+#dashboard[data-configured="false"] .dashboard-wallpaper{display:none}
+#dashboard[data-configured="false"]::before,#dashboard[data-configured="false"]::after{content:none;display:none}
 .project-footer{margin-top:auto;padding-top:1rem;color:#79838b;font-size:.72rem}
 .project-footer .disclaimer{margin:.35rem 0 0}
 .project-links{display:flex;flex-wrap:wrap;align-items:center;gap:.15rem .45rem}
@@ -1288,7 +1290,7 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 }
 
 .project-wallpaper-button{display:none;padding:0;border:0;border-radius:0;background:transparent;font:inherit}
-#dashboard .project-wallpaper-button{display:inline}
+#dashboard[data-configured="true"] .project-wallpaper-button{display:inline}
 .wallpaper-dialog{max-height:calc(100dvh - 2rem);overflow:auto}
 .wallpaper-dialog fieldset{display:flex;flex-wrap:wrap;gap:.5rem;border:0;padding:0;margin:1rem 0}
 .wallpaper-dialog fieldset label{display:flex;align-items:center;gap:.35rem;margin:0;padding:.5rem;border:1px solid #59646d;border-radius:8px}
