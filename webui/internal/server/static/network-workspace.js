@@ -42,6 +42,21 @@
     none: "No internet connection"
   }[value] || "Network status unknown");
   const validPlayitClaim = (url) => /^https:\/\/playit\.gg\/claim\/[0-9a-fA-F]{10}(?![\s\S])$/.test(url || "");
+  const renderPlayitPopup = (failed = false) => {
+    if (!playitPopup || playitPopup.closed) return;
+    playitPopup.document.open();
+    if (failed) {
+      playitPopup.document.write('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Playit setup</title></head><body><h1>Playit setup could not be started.</h1><p>Return to JustVoxel and try Activate again.</p></body></html>');
+    } else {
+      playitPopup.document.write('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Playit setup</title></head><body><h1>Preparing Playit setup…</h1><p>Starting Playit and generating your secure setup link.</p><p>This page will open Playit automatically when ready.</p></body></html>');
+    }
+    playitPopup.document.close();
+  };
+  const failPlayitPopup = () => {
+    try { renderPlayitPopup(true); } catch (_) { /* Popup may be unavailable. */ }
+    // Keep the fixed failure page open, outside subsequent popup cleanup.
+    playitPopup = null;
+  };
   const closePlayitPopup = () => {
     try { playitPopup?.close(); } catch (_) { /* Browser may have closed it already. */ }
     playitPopup = null;
@@ -55,7 +70,9 @@
         }
       } catch (_) { closePlayitPopup(); /* Offer the validated fallback link. */ }
       playitPopup = null;
-    } else if (["failed", "idle", "complete"].includes(playitSetup.state)) {
+    } else if (playitSetup.state === "failed") {
+      failPlayitPopup();
+    } else if (["idle", "complete"].includes(playitSetup.state)) {
       closePlayitPopup();
     }
     if (playitSetup.state === "failed") remoteError = "Playit setup failed or timed out.";
@@ -1202,7 +1219,7 @@
         await refreshRemoteAccess();
       }
     } catch (error) {
-      closePlayitPopup();
+      failPlayitPopup();
       remoteError = error?.message || "Remote access status unavailable. Refresh to retry.";
       state.textContent = remoteError;
       renderNetwork();
@@ -1220,7 +1237,7 @@
       await refreshRemoteAccess();
       pollRemoteAccess();
     } catch (error) {
-      closePlayitPopup();
+      failPlayitPopup();
       remoteError = error?.message || "Remote access change failed.";
       state.textContent = remoteError;
       try { await refreshRemoteAccess(); pollRemoteAccess(); } catch (_) { /* Keep the reported failure visible. */ }
@@ -1267,7 +1284,10 @@
         // Open during the click; sever the opener before navigating the validated claim.
         try {
           playitPopup = window.open("about:blank", "_blank");
-          if (playitPopup) playitPopup.opener = null;
+          if (playitPopup) {
+            try { renderPlayitPopup(); }
+            finally { playitPopup.opener = null; }
+          }
         } catch (_) { closePlayitPopup(); }
         runRemoteAction(async () => {
           // The existing setup endpoint enables/starts the fixed service before setup.

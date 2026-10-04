@@ -312,7 +312,7 @@ const setupRunning = () => ["starting", "waiting"].includes(playitSetup.state);
 Date.now = () => now;
 const setTimeout = (callback, interval) => { now += interval; callback(); };
 let remoteError = "";
-const closePlayitPopup = () => {}, renderNetwork = () => {};
+const failPlayitPopup = () => {}, renderNetwork = () => {};
 let refreshRemoteAccess = async () => { polls++; if (polls === 2) remoteProviders = [{ service_state: "active" }]; };
 ` + script[start:end] + `
 (async () => {
@@ -532,17 +532,43 @@ func TestPlayitActivationOpensPopupBeforeSetup(t *testing.T) {
 	end := strings.Index(script, "  const isAdministrator =")
 	clickStart := strings.Index(script, `    const provider = event.target.closest("[data-network-provider]");`)
 	clickEnd := strings.Index(script[clickStart:], "    const check =")
+	actionStart := strings.Index(script, "  const runRemoteAction =")
+	actionEnd := strings.Index(script, "  const submitEthernet =")
 	program := `
 const assert = require("node:assert/strict");
 let playitPopup = null, playitClaimOpened = false, remoteError = "", playitSetup = { state: "idle" }, remoteBusy = false;
 ` + script[start:end] + `
-let events = [], closed = 0, destination;
-const popup = { closed: false, close() { closed++; }, location: { replace(url) { destination = url; } } };
-let blocked = false, fail = false;
-const window = { open(url, target) { events.push("open"); assert.equal(url, "about:blank"); assert.equal(target, "_blank"); return blocked ? null : popup; } };
-let pending;
-const runRemoteAction = (action) => { pending = action().catch(() => closePlayitPopup()); };
-const postForm = async (url) => { events.push("request"); assert.equal(url, "/api/network/remote-access/playit/setup"); if (fail) throw Error("failed"); return { state: "starting" }; };
+let events = [], popup, blocked = false, pending, resolveSetup, rejectSetup;
+const writes = [], navigations = [];
+const window = { open(url, target) {
+  events.push("open");
+  assert.equal(url, "about:blank"); assert.equal(target, "_blank");
+  if (blocked) return null;
+  popup = {
+    closed: false, closeCalls: 0, html: "", opener: {},
+    close() { this.closeCalls++; this.closed = true; },
+    location: { replace(url) { navigations.push({ popup, url }); } },
+    document: {
+      open() { events.push("document.open"); popup.html = ""; },
+      write(html) { events.push("document.write"); popup.html += html; writes.push(html); },
+      close() { events.push("document.close"); }
+    }
+  };
+  return popup;
+} };
+let remotePollSequence = 0;
+const state = { textContent: "" };
+const renderNetwork = () => {}, refreshRemoteAccess = async () => {}, pollRemoteAccess = () => {};
+` + strings.Replace(script[actionStart:actionEnd], "const runRemoteAction =", "const executeRemoteAction =", 1) + `
+const runRemoteAction = (action) => { pending = executeRemoteAction(action); };
+const postForm = (url) => {
+  events.push("request"); assert.equal(url, "/api/network/remote-access/playit/setup");
+  if (!blocked) {
+    assert.match(popup.html, /<h1>Preparing Playit setup…<\/h1>/);
+    assert.equal(popup.opener, null);
+  }
+  return new Promise((resolve, reject) => { resolveSetup = resolve; rejectSetup = reject; });
+};
 const remoteProviders = [{ id: "playit", configured: false }];
 const providerButton = { disabled: false, dataset: { networkProvider: "playit", action: "activate" } };
 const click = () => {
@@ -550,14 +576,65 @@ const click = () => {
 ` + script[clickStart:clickStart+clickEnd] + `
 };
 (async () => {
-  click(); assert.deepEqual(events, ["open", "request"]); assert.equal(popup.opener, null);
+  click();
+  const initialPopup = popup;
+  assert.deepEqual(events, ["open", "document.open", "document.write", "document.close", "request"]);
+  assert.equal(playitPopup, initialPopup); assert.equal(popup.opener, null);
+  assert.match(popup.html, /Starting Playit and generating your secure setup link\./);
+  assert.match(popup.html, /This page will open Playit automatically when ready\./);
+  assert.equal(navigations.length, 0);
+  resolveSetup({ state: "starting" });
   await pending;
-  playitSetup = { state: "waiting", claim_url: "https://evil.test/claim/0123abcdef" };
-  updatePlayitPopup(); assert.equal(destination, undefined);
+  const loadingHTML = popup.html;
+  for (const claim_url of [
+    "https://evil.test/claim/0123abcdef", "javascript:alert(1)",
+    "https://playit.gg/claim/0123abcde", "https://playit.gg/claim/0123abcdef0",
+    "https://playit.gg/claim/0123abcdeg", "https://playit.gg/claim/0123abcdef?secret=x",
+    "https://playit.gg/claim/0123abcdef/path", "https://playit.gg/claim/0123abcdef\n",
+    "<script>untrusted</script>"
+  ]) {
+    playitSetup = { state: "waiting", claim_url };
+    updatePlayitPopup();
+    assert.equal(navigations.length, 0); assert.equal(popup.html, loadingHTML);
+  }
   playitSetup.claim_url = "https://playit.gg/claim/0123abcdef";
-  updatePlayitPopup(); assert.equal(destination, playitSetup.claim_url); assert(playitClaimOpened);
-  blocked = true; click(); await pending; assert.equal(playitPopup, null); assert(!playitClaimOpened);
-  blocked = false; fail = true; click(); await pending; assert.equal(closed, 1); assert.equal(playitPopup, null);
+  updatePlayitPopup();
+  assert.deepEqual(navigations, [{ popup: initialPopup, url: "https://playit.gg/claim/0123abcdef" }]);
+  assert(playitClaimOpened); assert.equal(playitPopup, null);
+  assert.equal(popup.html, loadingHTML);
+
+  events = []; blocked = true; click();
+  assert.deepEqual(events, ["open", "request"]);
+  resolveSetup({ state: "waiting", claim_url: "https://playit.gg/claim/0123abcdef" });
+  await pending; assert.equal(playitPopup, null); assert(!playitClaimOpened);
+  assert.equal(navigations.length, 1);
+  click(); rejectSetup(Error("<script>backend-secret</script> https://evil.test/claim/0123abcdef"));
+  await pending; assert.equal(playitPopup, null);
+
+  blocked = false; click();
+  rejectSetup(Error("<script>backend-secret</script> https://evil.test/claim/0123abcdef"));
+  await pending;
+  const failureHTML = popup.html;
+  assert.match(failureHTML, /<h1>Playit setup could not be started\.<\/h1>/);
+  assert.match(failureHTML, /Return to JustVoxel and try Activate again\./);
+  assert(!failureHTML.includes("Preparing Playit setup"));
+  assert.equal(playitPopup, null); assert.equal(popup.opener, null);
+  closePlayitPopup();
+  assert.equal(popup.closeCalls, 0); assert.equal(popup.closed, false);
+
+  click(); resolveSetup({ state: "starting" }); await pending;
+  playitSetup = { state: "failed", error: "backend-secret", claim_url: "https://evil.test/claim/0123abcdef" };
+  updatePlayitPopup(); closePlayitPopup();
+  assert.equal(popup.html, failureHTML); assert.equal(popup.closeCalls, 0);
+  assert.equal(playitPopup, null);
+
+  click(); const closedPopup = popup; closedPopup.close();
+  const writesBeforeFailure = writes.length;
+  rejectSetup(Error("backend-secret")); await pending;
+  assert.equal(playitPopup, null); assert.equal(closedPopup.closeCalls, 1);
+  assert.equal(writes.length, writesBeforeFailure);
+  assert(writes.every((html) => html === loadingHTML || html === failureHTML));
+  assert(writes.every((html) => !html.includes("backend-secret") && !html.includes("https://") && !html.includes("<script>")));
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 `
 	cmd := exec.Command("node")
