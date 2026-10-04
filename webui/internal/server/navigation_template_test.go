@@ -11,6 +11,17 @@ func TestControlCenterNavigationUX(t *testing.T) {
 		t.Fatal(err)
 	}
 	markup := string(header)
+	for _, want := range []string{
+		`href="/" aria-label="JustVoxel dashboard"`,
+		`<img class="brand-logo" src="/static/justvoxel-logo.png" alt="JustVoxel">`,
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("authenticated header branding missing %q", want)
+		}
+	}
+	if strings.Contains(markup, `<strong>JV</strong>`) {
+		t.Fatal("authenticated header must use the approved logo")
+	}
 	navigationStart := strings.Index(markup, `<nav class="control-navigation"`)
 	if navigationStart < 0 {
 		t.Fatal("Control Center navigation missing")
@@ -380,6 +391,32 @@ func TestMigrationWorkspaceUsesIndependentWorkspaceRoutes(t *testing.T) {
 }
 
 func TestAuthenticatedTemplatesUseSharedHeader(t *testing.T) {
+	templates, err := assets.ReadDir("templates")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range templates {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".html") {
+			continue
+		}
+		content, err := assets.ReadFile("templates/" + entry.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		markup := string(content)
+		favicon := `<link rel="icon" type="image/png" href="/static/justvoxel-favicon.png">`
+		headStart := strings.Index(markup, "<head>")
+		if headStart < 0 {
+			if strings.Contains(markup, favicon) {
+				t.Fatalf("partial %s must not own a favicon", entry.Name())
+			}
+			continue
+		}
+		headEnd := strings.Index(markup[headStart:], "</head>")
+		if headEnd < 0 || !strings.Contains(markup[headStart:headStart+headEnd], favicon) {
+			t.Fatalf("full document %s must reference the approved favicon in its head", entry.Name())
+		}
+	}
 	for _, name := range []string{
 		"dashboard.html",
 		"about.html",
@@ -454,6 +491,9 @@ func TestSetupTemplatesUseThinTopbar(t *testing.T) {
 			t.Fatal(err)
 		}
 		markup := string(content)
+		if strings.Contains(markup, `/static/justvoxel-logo.png`) {
+			t.Fatalf("%s must retain visible Setup JV branding", name)
+		}
 		for _, want := range []string{
 			`class="setup-header topbar setup-topbar"`,
 			`class="brand-link brand-mark"`,
@@ -496,6 +536,9 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 	styles := string(css)
 	for _, want := range []string{
 		"#dashboard[data-configured=\"true\"]::before",
+		"min-height:calc(100dvh - 48px)",
+		"inset:48px 0 0",
+		".app-header.topbar{",
 		".dashboard-setup-area{display:grid;place-items:center",
 		"#dashboard .dashboard-setup-area .minecraft-setup-invitation{width:min(560px",
 		"@media(max-width:900px)",
@@ -503,6 +546,29 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 		if !strings.Contains(styles, want) {
 			t.Fatalf("compact dashboard styling missing %q", want)
 		}
+	}
+	headerStart := strings.Index(styles, ".app-header.topbar{")
+	headerEnd := strings.Index(styles[headerStart:], "}")
+	if headerEnd < 0 {
+		t.Fatal("authenticated header rule is incomplete")
+	}
+	header := styles[headerStart+len(".app-header.topbar{") : headerStart+headerEnd]
+	for _, want := range []string{"height:48px", "min-height:48px"} {
+		if !strings.Contains(";"+header+";", ";"+want+";") {
+			t.Fatalf("authenticated header must retain %s", want)
+		}
+	}
+	wallpaperStart := strings.Index(styles, `#dashboard[data-configured="true"]::before{`)
+	wallpaperEnd := strings.Index(styles[wallpaperStart:], "}")
+	if wallpaperEnd < 0 {
+		t.Fatal("configured dashboard wallpaper rule is incomplete")
+	}
+	wallpaper := styles[wallpaperStart : wallpaperStart+wallpaperEnd]
+	if strings.Count(wallpaper, "linear-gradient(")+strings.Count(wallpaper, "conic-gradient(") < 3 {
+		t.Fatal("configured dashboard must retain gradient voxel geometry")
+	}
+	if strings.Contains(wallpaper, "radial-gradient(circle at") || strings.Contains(wallpaper, "url(") {
+		t.Fatal("configured dashboard must use a local spotlight and CSS voxel geometry")
 	}
 }
 

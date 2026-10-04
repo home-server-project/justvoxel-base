@@ -19,7 +19,7 @@ type DiagnosticLogEntry struct {
 }
 
 func validDiagnosticLogIdentifier(category, id string) bool {
-	return (category == "setup" || category == "operation") && persistentOperationIDPattern.MatchString(id)
+	return (category == "setup" || category == "migration" || category == "restore" || category == "reset" || category == "operation") && persistentOperationIDPattern.MatchString(id)
 }
 
 func (c *Client) AdminDiagnosticLogs(ctx context.Context, session string) ([]DiagnosticLogEntry, error) {

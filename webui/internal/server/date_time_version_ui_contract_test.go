@@ -98,4 +98,10 @@ func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 	if !strings.Contains(app, "data-crossplay-compatibility") {
 		t.Fatal("Cross-play compatibility missing")
 	}
+	if !strings.Contains(app, `Geyser/Floodgate compatible with ${status.geyser_supported_version}.`) {
+		t.Fatal("Cross-play compatibility must use the Geyser-supported Java version")
+	}
+	if strings.Contains(app, `Geyser/Floodgate compatible with ${status.available}.`) {
+		t.Fatal("Cross-play compatibility must not use the newest available Minecraft version")
+	}
 }

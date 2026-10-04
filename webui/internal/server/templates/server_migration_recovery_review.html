@@ -1,5 +1,5 @@
 {{define "server_migration_recovery_review.html"}}<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JustVoxel - Migration Recovery</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js" defer></script></head>
+<html lang="en"><head><link rel="icon" type="image/png" href="/static/justvoxel-favicon.png"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JustVoxel - Migration Recovery</title><link rel="stylesheet" href="/static/app.css"><script src="/static/app.js" defer></script></head>
 <body class="role-administrator">{{template "app-header" .}}<main><div class="title-row"><h1>Migration Recovery</h1></div>
 {{if .Error}}<div class="notice error"><strong>Cleanup needs another review.</strong><br>{{.Error}}</div>{{end}}
 {{if .Plan.OK}}

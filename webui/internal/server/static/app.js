@@ -3103,7 +3103,7 @@ if (minecraftOpen && minecraftDialog) {
         if (!node || !status) return;
         const installed = status.installed || "Unknown";
         if (!status.crossplay_enabled) node.textContent = `Cross-play disabled · Minecraft ${installed}.`;
-        else if (status.crossplay_compatible) node.textContent = `Cross-play enabled · Minecraft ${installed} · Geyser/Floodgate compatible with ${status.available}.`;
+        else if (status.crossplay_compatible) node.textContent = `Cross-play enabled · Minecraft ${installed} · Geyser/Floodgate compatible with ${status.geyser_supported_version}.`;
         else node.textContent = status.reason || "Geyser/Floodgate compatibility is unavailable.";
       }).catch(() => { const node = section.querySelector("[data-crossplay-compatibility]"); if (node) node.textContent = "Geyser/Floodgate compatibility is unavailable."; });
       form.appendChild(section);
