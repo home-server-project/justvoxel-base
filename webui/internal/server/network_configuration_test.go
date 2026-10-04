@@ -534,6 +534,17 @@ func TestPlayitActivationOpensPopupBeforeSetup(t *testing.T) {
 	clickEnd := strings.Index(script[clickStart:], "    const check =")
 	actionStart := strings.Index(script, "  const runRemoteAction =")
 	actionEnd := strings.Index(script, "  const submitEthernet =")
+	// Both popup documents must remain complete static literals, with no interpolation.
+	popupWrites := strings.Split(script[start:end], "playitPopup.document.write(`")
+	if len(popupWrites) != 3 || strings.Count(script[start:end], "playitPopup.document.write(") != 2 {
+		t.Fatal("popup pages must be written as two fixed HTML literals")
+	}
+	for _, write := range popupWrites[1:] {
+		html, _, ok := strings.Cut(write, "`);")
+		if !ok || strings.Contains(html, "${") || strings.Contains(html, "`") {
+			t.Fatal("popup HTML must not interpolate or concatenate values")
+		}
+	}
 	program := `
 const assert = require("node:assert/strict");
 let playitPopup = null, playitClaimOpened = false, remoteError = "", playitSetup = { state: "idle" }, remoteBusy = false;
@@ -564,7 +575,7 @@ const runRemoteAction = (action) => { pending = executeRemoteAction(action); };
 const postForm = (url) => {
   events.push("request"); assert.equal(url, "/api/network/remote-access/playit/setup");
   if (!blocked) {
-    assert.match(popup.html, /<h1>Preparing Playit setup…<\/h1>/);
+    assert.match(popup.html, /<h1 id="setup-title">Preparing Playit setup…<\/h1>/);
     assert.equal(popup.opener, null);
   }
   return new Promise((resolve, reject) => { resolveSetup = resolve; rejectSetup = reject; });
@@ -586,6 +597,12 @@ const click = () => {
   resolveSetup({ state: "starting" });
   await pending;
   const loadingHTML = popup.html;
+  assert.match(loadingHTML, /<section class="setup-card" aria-labelledby="setup-title">/);
+  assert.match(loadingHTML, /<div class="claim-panel" role="status">/);
+  assert.match(loadingHTML, /Claim link/);
+  assert.match(loadingHTML, /Waiting for Playit to generate the secure claim link\./);
+  assert.match(loadingHTML, /class="pulse-dot" aria-hidden="true"/);
+  assert.match(loadingHTML, /@media \(prefers-reduced-motion: reduce\)\{\.pulse-dot\{animation:none\}\}/);
   for (const claim_url of [
     "https://evil.test/claim/0123abcdef", "javascript:alert(1)",
     "https://playit.gg/claim/0123abcde", "https://playit.gg/claim/0123abcdef0",
@@ -615,9 +632,20 @@ const click = () => {
   rejectSetup(Error("<script>backend-secret</script> https://evil.test/claim/0123abcdef"));
   await pending;
   const failureHTML = popup.html;
-  assert.match(failureHTML, /<h1>Playit setup could not be started\.<\/h1>/);
+  assert.match(failureHTML, /<h1 id="setup-title">Playit setup could not be started\.<\/h1>/);
   assert.match(failureHTML, /Return to JustVoxel and try Activate again\./);
   assert(!failureHTML.includes("Preparing Playit setup"));
+  assert.match(failureHTML, /<section class="setup-card failure" aria-labelledby="setup-title">/);
+  for (const html of [loadingHTML, failureHTML]) {
+    for (const token of ["color-scheme:dark", "PLAYIT SETUP", "JUSTVOXEL", "PLAYIT", "max-width:580px", "border-radius:18px", "radial-gradient", "background:#0d1822", "prefers-reduced-motion"]) {
+      assert(html.includes(token), "missing popup design token: " + token);
+    }
+    assert(!html.includes("Login"));
+    assert(!html.includes("Create Account"));
+    assert(!/<(?:button|a|input|script|link|img)\b/i.test(html));
+    assert(!/\b(?:src|href)=|url\(/i.test(html));
+    assert.match(html, /<style>[\s\S]*<\/style>/);
+  }
   assert.equal(playitPopup, null); assert.equal(popup.opener, null);
   closePlayitPopup();
   assert.equal(popup.closeCalls, 0); assert.equal(popup.closed, false);

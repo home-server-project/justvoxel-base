@@ -46,9 +46,94 @@
     if (!playitPopup || playitPopup.closed) return;
     playitPopup.document.open();
     if (failed) {
-      playitPopup.document.write('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Playit setup</title></head><body><h1>Playit setup could not be started.</h1><p>Return to JustVoxel and try Activate again.</p></body></html>');
+      playitPopup.document.write(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Playit setup</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#eef3f5;background:#0b1117}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;background:radial-gradient(ellipse at top left,rgba(84,214,160,.09),transparent 55%),radial-gradient(ellipse at bottom right,rgba(57,166,165,.07),transparent 55%),#0b1117}
+header{padding:18px 24px;border-bottom:1px solid #26343e;background:rgba(13,21,29,.9);font-size:.75rem;font-weight:650;letter-spacing:.14em;color:#c8d0d6}
+header .separator{margin:0 10px;color:#667782}
+header .brand{color:#78c99d}
+main{flex:1;display:grid;place-items:center;padding:32px 20px}
+.setup-card{width:100%;max-width:580px;padding:36px;border:1px solid rgba(84,214,160,.22);border-radius:18px;background:rgba(17,28,36,.96);box-shadow:0 20px 60px #0005,0 0 40px rgba(84,214,160,.03)}
+.eyebrow{display:inline-block;margin:0 0 20px;padding:6px 10px;border:1px solid rgba(84,214,160,.2);border-radius:999px;background:rgba(84,214,160,.07);color:#78c99d;font-size:.68rem;font-weight:650;letter-spacing:.12em}
+h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25;letter-spacing:-.025em;font-weight:650}
+p{margin:0;font-size:.9rem;line-height:1.65;color:#ced8df}
+.muted{margin-top:10px;color:#9aa6b2;font-size:.82rem}
+.claim-panel{margin-top:28px;padding:20px;border:1px solid #273b49;border-radius:12px;background:#0d1822}
+.claim-heading{display:flex;align-items:center;gap:10px;margin:0 0 8px;font-size:.82rem;font-weight:600}
+.claim-panel p{font-size:.82rem;color:#9aa6b2}
+.pulse-dot{flex:none;width:7px;height:7px;border-radius:50%;background:#54d6a0;animation:setup-pulse 2s ease-in-out infinite}
+@keyframes setup-pulse{0%,100%{opacity:.45}50%{opacity:1}}
+@media (prefers-reduced-motion: reduce){.pulse-dot{animation:none}}
+.failure .eyebrow{color:#e0b38a;border-color:rgba(224,179,138,.25);background:rgba(224,179,138,.07)}
+.failure{border-color:rgba(224,179,138,.25)}
+@media (max-width:480px){header{padding:16px 20px}main{padding:24px 16px}.setup-card{padding:26px 22px}.claim-panel{padding:16px}}
+</style>
+</head>
+<body>
+<header aria-label="JustVoxel Playit"><span>JUSTVOXEL</span><span class="separator" aria-hidden="true">·</span><span class="brand">PLAYIT</span></header>
+<main>
+<section class="setup-card failure" aria-labelledby="setup-title">
+<p class="eyebrow">PLAYIT SETUP</p>
+<h1 id="setup-title">Playit setup could not be started.</h1>
+<p>Return to JustVoxel and try Activate again.</p>
+</section>
+</main>
+</body>
+</html>`);
     } else {
-      playitPopup.document.write('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Playit setup</title></head><body><h1>Preparing Playit setup…</h1><p>Starting Playit and generating your secure setup link.</p><p>This page will open Playit automatically when ready.</p></body></html>');
+      playitPopup.document.write(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Playit setup</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#eef3f5;background:#0b1117}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;background:radial-gradient(ellipse at top left,rgba(84,214,160,.09),transparent 55%),radial-gradient(ellipse at bottom right,rgba(57,166,165,.07),transparent 55%),#0b1117}
+header{padding:18px 24px;border-bottom:1px solid #26343e;background:rgba(13,21,29,.9);font-size:.75rem;font-weight:650;letter-spacing:.14em;color:#c8d0d6}
+header .separator{margin:0 10px;color:#667782}
+header .brand{color:#78c99d}
+main{flex:1;display:grid;place-items:center;padding:32px 20px}
+.setup-card{width:100%;max-width:580px;padding:36px;border:1px solid rgba(84,214,160,.22);border-radius:18px;background:rgba(17,28,36,.96);box-shadow:0 20px 60px #0005,0 0 40px rgba(84,214,160,.03)}
+.eyebrow{display:inline-block;margin:0 0 20px;padding:6px 10px;border:1px solid rgba(84,214,160,.2);border-radius:999px;background:rgba(84,214,160,.07);color:#78c99d;font-size:.68rem;font-weight:650;letter-spacing:.12em}
+h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25;letter-spacing:-.025em;font-weight:650}
+p{margin:0;font-size:.9rem;line-height:1.65;color:#ced8df}
+.muted{margin-top:10px;color:#9aa6b2;font-size:.82rem}
+.claim-panel{margin-top:28px;padding:20px;border:1px solid #273b49;border-radius:12px;background:#0d1822}
+.claim-heading{display:flex;align-items:center;gap:10px;margin:0 0 8px;font-size:.82rem;font-weight:600}
+.claim-panel p{font-size:.82rem;color:#9aa6b2}
+.pulse-dot{flex:none;width:7px;height:7px;border-radius:50%;background:#54d6a0;animation:setup-pulse 2s ease-in-out infinite}
+@keyframes setup-pulse{0%,100%{opacity:.45}50%{opacity:1}}
+@media (prefers-reduced-motion: reduce){.pulse-dot{animation:none}}
+.failure .eyebrow{color:#e0b38a;border-color:rgba(224,179,138,.25);background:rgba(224,179,138,.07)}
+.failure{border-color:rgba(224,179,138,.25)}
+@media (max-width:480px){header{padding:16px 20px}main{padding:24px 16px}.setup-card{padding:26px 22px}.claim-panel{padding:16px}}
+</style>
+</head>
+<body>
+<header aria-label="JustVoxel Playit"><span>JUSTVOXEL</span><span class="separator" aria-hidden="true">·</span><span class="brand">PLAYIT</span></header>
+<main>
+<section class="setup-card" aria-labelledby="setup-title">
+<p class="eyebrow">PLAYIT SETUP</p>
+<h1 id="setup-title">Preparing Playit setup…</h1>
+<p>Starting Playit and generating your secure setup link.</p>
+<p class="muted">This page will open Playit automatically when ready.</p>
+<div class="claim-panel" role="status">
+<h2 class="claim-heading"><span class="pulse-dot" aria-hidden="true"></span>Claim link</h2>
+<p>Waiting for Playit to generate the secure claim link.</p>
+</div>
+</section>
+</main>
+</body>
+</html>`);
     }
     playitPopup.document.close();
   };

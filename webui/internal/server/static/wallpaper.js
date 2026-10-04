@@ -103,6 +103,7 @@
     form.elements.url.disabled = mode !== "url";
     form.elements.url.required = mode === "url";
     form.elements.picture.disabled = mode !== "upload";
+    form.querySelector('button[type="submit"]').disabled = busy || (mode !== "url" && mode !== "upload");
   };
   const reset = async () => {
     applyImage(defaultImage);
@@ -154,7 +155,7 @@
   open.addEventListener("click", () => {
     if (dialog.open || busy) return;
     restoreCanceled = true;
-    form.elements.mode.value = preference.mode;
+    form.querySelectorAll('input[name="mode"]').forEach((input) => { input.checked = input.value === preference.mode; });
     form.elements.url.value = preference.url || "";
     form.elements.picture.value = "";
     error.hidden = true;
@@ -182,17 +183,14 @@
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (busy) return;
+    const mode = form.elements.mode.value;
+    if (mode !== "url" && mode !== "upload") return;
     const currentOperation = ++operation;
     let candidateObjectURL = null;
     setBusy(true);
     error.hidden = true;
     try {
-      const mode = form.elements.mode.value;
-      if (mode === "default") {
-        committing = true;
-        setBusy(true);
-        await reset();
-      } else if (mode === "url") {
+      if (mode === "url") {
         let url;
         try { url = validateURL(form.elements.url.value.trim()); }
         catch { throw new Error("Use a web address starting with http:// or https://."); }

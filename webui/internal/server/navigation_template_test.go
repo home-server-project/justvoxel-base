@@ -586,6 +586,74 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 	}
 }
 
+func TestWallpaperSettingsUX(t *testing.T) {
+	content, err := assets.ReadFile("templates/project_footer.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(content)
+	for _, want := range []string{
+		`<fieldset>`,
+		`<legend class="muted">Background</legend>`,
+		`<input type="radio" name="mode" value="url">Web address`,
+		`<input type="radio" name="mode" value="upload">Upload picture`,
+		`data-wallpaper-reset>Reset to default</button>`,
+		`data-wallpaper-cancel>Cancel</button>`,
+		`<button type="submit">Apply</button>`,
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("wallpaper settings markup missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{`Default JustVoxel`, `value="default"`} {
+		if strings.Contains(markup, forbidden) {
+			t.Fatalf("wallpaper settings still contains duplicate default choice %q", forbidden)
+		}
+	}
+
+	content, err = assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), ".wallpaper-dialog fieldset{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.5rem;border:0;padding:0;margin:1rem 0}") {
+		t.Fatal("wallpaper background choices must use two equal columns with existing fieldset spacing")
+	}
+
+	content, err = assets.ReadFile("static/wallpaper.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(content)
+	for _, want := range []string{
+		`let preference = { mode: "default" };`,
+		`if (saved.mode === "default") return;`,
+		"const reset = async () => {\n    applyImage(defaultImage);\n    preference = { mode: \"default\" };",
+		`savePreference(preference)`,
+		`await storedImage("delete")`,
+		`try { await reset(); dialog.close(); }`,
+		`input.checked = input.value === preference.mode`,
+		`form.querySelector('button[type="submit"]').disabled = busy || (mode !== "url" && mode !== "upload");`,
+		`if (mode !== "url" && mode !== "upload") return;`,
+		`hidden = mode !== "url"`,
+		`hidden = mode !== "upload"`,
+		`if (mode === "url")`,
+		`else if (mode === "upload")`,
+		`savePreference({ mode: "url", url })`,
+		`savePreference({ mode: "upload" })`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("wallpaper settings behavior missing %q", want)
+		}
+	}
+	submitStart := strings.Index(script, `form.addEventListener("submit"`)
+	if submitStart < 0 {
+		t.Fatal("wallpaper Apply handler missing")
+	}
+	if strings.Contains(script[submitStart:], `mode === "default"`) {
+		t.Fatal("wallpaper Apply must not handle the default mode")
+	}
+}
+
 func TestStorageBrowserInteractionContract(t *testing.T) {
 	templateContent, err := assets.ReadFile("templates/storage_browser.html")
 	if err != nil {
