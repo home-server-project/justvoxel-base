@@ -18,7 +18,19 @@ if [[ ${MINECRAFT_SERVER_TYPE-paper} == vanilla ]]; then
     printf 'Minecraft version: %s\n' "${actual}"
     exit 0
 fi
-version="$(podman exec minecraft rcon-cli version)"
+# Paper/Purpur can expose RCON before their asynchronous version check completes.
+# Retry only that readiness response; every final software/version check stays strict.
+version_wait=0
+while :; do
+    version="$(podman exec minecraft rcon-cli version)"
+    [[ ${version,,} == *'checking version, please wait'* ]] || break
+    if (( version_wait >= 60 )); then
+        echo 'ERROR: Minecraft version response could not be verified.' >&2
+        exit 1
+    fi
+    sleep 3
+    version_wait=$((version_wait + 3))
+done
 printf 'Minecraft version: %s\n' "${version}"
 [[ ${version,,} == *"${MINECRAFT_SERVER_TYPE-paper}"* ]] || { echo 'ERROR: Minecraft is not running the selected server software.' >&2; exit 1; }
 [[ ${version} == *'MC: '* || ${version} == *'Minecraft version '* || ${version} == *'Paper version '* || ${version} == *'Purpur version '* ]] || { echo 'ERROR: Minecraft version response could not be verified.' >&2; exit 1; }

@@ -3,6 +3,7 @@ set -uo pipefail
 
 source /usr/libexec/justvoxel/mjust/common.sh
 source /usr/libexec/justvoxel/mjust/admin-setup-storage-transaction-common.sh
+source /usr/libexec/justvoxel/mjust/minecraft-reset-common.sh
 require_root
 
 readonly A55_SETUP_MARKER=${JV_SETUP_IN_PROGRESS}
@@ -181,13 +182,59 @@ _a55_manifest_update() {
     mv -f -- "${tmp}" "${A53_MANIFEST}" || { rm -f -- "${tmp}"; return 1; }
 }
 
+# Record before rendering/starting Minecraft. Missing evidence always preserves data.
+# Canonical paths, directory identity and mount identity must remain unchanged.
+_a55_data_identity() {
+    local canonical scope mount_identity fstype canonical_backup
+    canonical="$(realpath -e -- "${DATA_PATH}")" || return 1
+    [[ ${canonical} == "${DATA_PATH}" && -d ${DATA_PATH} && ! -L ${DATA_PATH} ]] || return 1
+    scope="$(jv_reset_data_scope "${DATA_PATH}")" || return 1
+    [[ ${scope} == internal ]] || return 1
+    mount_identity="$(findmnt -n -o SOURCE,FSTYPE,TARGET --target "${DATA_PATH}")" || return 1
+    # Even an appliance path must not permit deletion of a network mount.
+    fstype="$(findmnt -n -o FSTYPE --target "${DATA_PATH}")" || return 1
+    case "${fstype,,}" in
+        nfs|nfs4|cifs|smb3) return 1 ;;
+    esac
+    [[ -z $(jv_reset_nested_mounts "${DATA_PATH}") ]] || return 1
+    jv_reset_backup_nested_in_data "${DATA_PATH}" "${BACKUP_PATH}" && return 1
+    canonical_backup="$(realpath -e -- "${BACKUP_PATH}")" || return 1
+    jv_reset_backup_nested_in_data "${DATA_PATH}" "${canonical_backup}" && return 1
+    local directory_identity
+    directory_identity="$(stat -c '%d:%i' -- "${DATA_PATH}")" || return 1
+    jq -cn --arg path "${DATA_PATH}" --arg directory "${directory_identity}" \
+        --arg mount "${mount_identity}" '{path:$path,directory:$directory,mount:$mount}'
+}
+
+_a55_cleanup_failed_data() {
+    local recorded current
+    # Only an empty pre-runtime directory owned by this transaction is eligible.
+    recorded="$(jq -c '.runtime.empty_data_identity // null' "${A53_MANIFEST}")" || return 1
+    [[ ${recorded} != null ]] || return 0
+    current="$(_a55_data_identity)" || {
+        echo 'ERROR: failed setup data no longer passes reset storage safety checks.' >&2
+        return 1
+    }
+    [[ ${recorded} == "${current}" ]] || {
+        echo 'ERROR: failed setup data identity changed; preserving data.' >&2
+        return 1
+    }
+    jv_reset_remove_minecraft_container || return 1
+    jv_reset_delete_internal_data "${DATA_PATH}" "${BACKUP_PATH}"
+}
+
 _a55_record_initial_state() {
-    local java_open=false bedrock_open=false
+    local java_open=false bedrock_open=false data_identity=null first_entry
+    # A failed enumeration must never be mistaken for an empty directory.
+    first_entry="$(find "${DATA_PATH}" -mindepth 1 -maxdepth 1 -print -quit)" || return 1
+    if [[ -z ${first_entry} ]]; then
+        data_identity="$(_a55_data_identity)" || data_identity=null
+    fi
     firewall-cmd --permanent --query-port="${JAVA_PORT}/tcp" >/dev/null 2>&1 && java_open=true
     if [[ ${BEDROCK_ENABLED} == yes ]]; then
         firewall-cmd --permanent --query-port="${BEDROCK_PORT}/udp" >/dev/null 2>&1 && bedrock_open=true
     fi
-    _a55_manifest_update ".runtime = {java_firewall_preexisting:${java_open},bedrock_firewall_preexisting:${bedrock_open},minecraft_started:false,timer_activated:false,marker:true}" || return 1
+    _a55_manifest_update ".runtime = {java_firewall_preexisting:${java_open},bedrock_firewall_preexisting:${bedrock_open},minecraft_started:false,timer_activated:false,marker:true,empty_data_identity:${data_identity}}" || return 1
 }
 
 _a55_apply_action() {
@@ -218,9 +265,34 @@ _a55_apply_action() {
     _a55_json true true runtime_configured '' "${A55_EVIDENCE}"
 }
 
+# First-run setup retains the full slow-start allowance but stops after three
+# automatic restarts since this start, rather than waiting out a crash loop.
+_a55_wait_for_rcon() {
+    local timeout="$1" baseline="$2" elapsed=0 restarts
+    while (( elapsed < timeout )); do
+        if podman exec minecraft rcon-cli list >/dev/null 2>&1 &&
+            systemctl is-active --quiet minecraft.service; then
+            return 0
+        fi
+        restarts="$(systemctl show minecraft.service --property=NRestarts --value)" || return 1
+        [[ ${restarts} =~ ^[0-9]+$ ]] || return 1
+        # A manual start can reset systemd's historical restart counter.
+        if (( restarts < baseline )); then baseline=0; fi
+        if (( restarts >= baseline + 3 )); then
+            _a55_evidence_set rcon_result crash_loop || return 1
+            echo 'ERROR: Minecraft repeatedly restarted during first-run startup.' >&2
+            return 1
+        fi
+        sleep 5
+        elapsed=$((elapsed + 5))
+    done
+    _a55_evidence_set rcon_result timeout || return 1
+    return 1
+}
+
 _a55_verify_action() {
     _a55_load_values
-    local output rc rcon_started rcon_elapsed validation_output image
+    local output rc rcon_started rcon_elapsed validation_output image restart_baseline
 
     image="$(minecraft_image_ref)" || return 1
     output="$(podman pull "${image}" 2>&1)"
@@ -229,6 +301,8 @@ _a55_verify_action() {
     _a55_evidence_set_bounded minecraft_image_pull_output "${output}" || return 1
     (( rc == 0 )) || return 1
 
+    restart_baseline="$(systemctl show minecraft.service --property=NRestarts --value)" || return 1
+    [[ ${restart_baseline} =~ ^[0-9]+$ ]] || return 1
     output="$(systemctl start minecraft.service 2>&1)"
     rc=$?
     if (( rc != 0 )); then
@@ -241,13 +315,12 @@ _a55_verify_action() {
     _a55_manifest_update '.runtime.minecraft_started = true' || return 1
 
     rcon_started=${SECONDS}
-    if wait_for_rcon 900; then
+    if _a55_wait_for_rcon 900 "${restart_baseline}"; then
         rcon_elapsed=$((SECONDS - rcon_started))
         _a55_evidence_set rcon_result ready || return 1
         _a55_evidence_set rcon_wait_seconds "${rcon_elapsed}" || return 1
     else
         rcon_elapsed=$((SECONDS - rcon_started))
-        _a55_evidence_set rcon_result timeout || return 1
         _a55_evidence_set rcon_wait_seconds "${rcon_elapsed}" || return 1
         return 1
     fi
@@ -296,8 +369,13 @@ _a55_rollback_action() {
 
     systemctl disable --now minecraft-backup.timer >/dev/null 2>&1 || true
     if systemctl is-active --quiet minecraft-backup.timer 2>/dev/null; then failure=1; fi
-    systemctl stop minecraft.service >/dev/null 2>&1 || true
-    if systemctl is-active --quiet minecraft.service 2>/dev/null; then failure=1; fi
+    systemctl stop minecraft.service >/dev/null 2>&1 || failure=1
+    if systemctl is-active --quiet minecraft.service 2>/dev/null; then
+        failure=1
+    elif (( failure == 0 )); then
+        # Do not delete while the service is active or if container removal fails.
+        _a55_cleanup_failed_data || failure=1
+    fi
 
     rm -f -- "${JV_QUADLET}" "${JV_MC_ENV}" "${JV_BACKUP_ENV}" "${JV_BACKUP_SERVICE}" "${JV_BACKUP_TIMER}" "${JV_CONFIG}" || failure=1
     systemctl daemon-reload >/dev/null 2>&1 || failure=1

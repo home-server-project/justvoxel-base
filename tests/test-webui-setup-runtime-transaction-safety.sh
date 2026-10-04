@@ -47,7 +47,7 @@ grep -Fq 'render_runtime_files' "${common}"
 grep -Fq 'activate_backup_timer' "${common}"
 grep -Fq 'render_runtime_files' "${runtime_helper}"
 grep -Fq 'activate_backup_timer' "${runtime_helper}"
-grep -Fq 'wait_for_rcon 900' "${runtime_helper}"
+grep -Fq '_a55_wait_for_rcon 900' "${runtime_helper}"
 grep -Fq '/usr/libexec/justvoxel/mjust/validate-backend' "${runtime_helper}"
 if grep -Fq '/usr/libexec/justvoxel/mjust/validate ' "${runtime_helper}"; then
     echo 'A5.5 runtime transaction must not recurse through the mJust validation API frontend.' >&2
@@ -102,12 +102,12 @@ validation_line="$(grep -nF '    validation_output="$(/usr/libexec/justvoxel/mju
     _a55_evidence_set_bounded() { :; }
     _a55_manifest_update() { :; }
     _a55_json() { printf 'verified %s\n' "$3" >> "${runtime_log}"; }
-    wait_for_rcon() { return 0; }
+    _a55_wait_for_rcon() { return 0; }
     activate_backup_timer() { return 0; }
     mock_validate_backend() { return 0; }
     mock_verify_stack() { return 0; }
     MINECRAFT_VERSION=26.2
-    systemctl() { printf 'systemctl %s\n' "$*" >> "${runtime_log}"; }
+    systemctl() { printf 'systemctl %s\n' "$*" >> "${runtime_log}"; if [[ $1 == show ]]; then printf '0\n'; fi; }
     podman() {
         printf 'podman %s\n' "$*" >> "${runtime_log}"
         if [[ $1 == pull ]]; then return "${pull_rc}"; fi

@@ -60,6 +60,10 @@ Selecting **Configure JustVoxel** requests an SMB password in a modal when the b
 
 The progress page follows the persistent setup operation through Storage, Configuration, Minecraft, Verification, and Complete. During Minecraft startup it explains that downloads and initialization can take several minutes. Refreshing or reopening the page reconnects to the same operation.
 
+First-run startup keeps its 15-minute allowance for downloads and initialization, but three automatic Minecraft restarts during that start fail verification and enter rollback. Paper/Purpur version checks retry the temporary “Checking version, please wait...” response every three seconds for up to one minute; software, game version, and plugin verification remain required before backup timer activation.
+
+A failed first-run rollback uses the Reset Minecraft cleanup helpers to remove generated data only when the transaction recorded an empty appliance-owned internal data directory before runtime configuration. It rechecks directory and mount identity before cleanup. Pre-existing data, external/network/unknown storage, and backups are preserved. Symlinks, nested mounts, unsafe paths, or changed storage identity prevent deletion; an eligible cleanup that cannot complete safely requires attention.
+
 If setup needs attention during storage rollback, the Administrator can select **Retry recovery** on that operation's progress page. The Management Agent checks the preserved storage transaction before restoring any remaining changes. **Start setup over** stays disabled until recovery succeeds and the operation reaches **Rolled back**. Other attention stages do not offer this retry.
 
 ## Password policy

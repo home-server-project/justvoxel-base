@@ -257,6 +257,7 @@ func TestSetupProgressPageAndJSONTrackSamePersistentOperation(t *testing.T) {
 	if page.Code != http.StatusOK {
 		t.Fatalf("progress page returned %d: %s", page.Code, page.Body.String())
 	}
+	assertSetupApplicationLogo(t, page.Body.String())
 	for _, want := range []string{
 		"Configuring JustVoxel",
 		"Writing transactional Minecraft runtime configuration.",

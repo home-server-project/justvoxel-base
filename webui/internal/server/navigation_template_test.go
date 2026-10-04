@@ -495,9 +495,6 @@ func TestSetupTemplatesUseThinTopbar(t *testing.T) {
 		}
 		markup := string(content)
 		branding := `<img class="brand-logo" src="/static/justvoxel-logo.png" alt="JustVoxel">`
-		if name == "setup_progress.html" {
-			branding = `<span class="brand-name">JustVoxel</span>`
-		}
 		for _, want := range []string{
 			`class="setup-header topbar setup-topbar"`,
 			`class="brand-link brand-mark"`,

@@ -79,7 +79,7 @@ func TestExecuteSetupTransactionSuccess(t *testing.T) {
 	}
 }
 
-func TestExecuteSetupTransactionRuntimeFailureRollsBackRuntimeBeforeStorage(t *testing.T) {
+func TestExecuteSetupTransactionCrashLoopRollsBackRuntimeBeforeStorage(t *testing.T) {
 	store := openTestOperationStore(t)
 	operation := beginStorageTestOperation(t, store)
 	plan := setupPlanForRuntimeTest(t)
@@ -113,7 +113,7 @@ func TestExecuteSetupTransactionRuntimeFailureRollsBackRuntimeBeforeStorage(t *t
 		case "apply":
 			return []byte(`{"ok":true,"applied":true,"phase":"runtime_configured"}`), nil
 		case "verify":
-			return []byte(`{"ok":false,"applied":false,"phase":"runtime_verify","error":"Minecraft runtime verification failed."}`), nil
+			return []byte(`{"ok":false,"applied":false,"phase":"runtime_verify","error":"Minecraft runtime verification failed.","evidence":{"rcon_result":"crash_loop"}}`), nil
 		case "rollback":
 			return []byte(`{"ok":true,"applied":false,"phase":"runtime_rolled_back"}`), nil
 		default:
@@ -234,4 +234,3 @@ func TestSetupRuntimeHelperEvidenceIsAccepted(t *testing.T) {
 		t.Fatalf("unexpected helper evidence: %#v", response.Evidence)
 	}
 }
-
