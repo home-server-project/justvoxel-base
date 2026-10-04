@@ -344,9 +344,15 @@ if (dashboard) {
   window.addEventListener("justvoxel:minecraft-reset-complete", () => void refreshDashboard());
   if (window.matchMedia("(pointer: fine) and (prefers-reduced-motion: no-preference)").matches) {
     dashboard.addEventListener("pointermove", (event) => {
+      dashboard.dataset.spotlightActive = "true";
       dashboard.style.setProperty("--voxel-x", `${Math.round(event.clientX / window.innerWidth * 100)}%`);
       dashboard.style.setProperty("--voxel-y", `${Math.round((event.clientY - 48) / Math.max(1, window.innerHeight - 48) * 100)}%`);
     });
+    const hideSpotlight = () => { dashboard.dataset.spotlightActive = "false"; };
+    dashboard.addEventListener("pointerleave", hideSpotlight);
+    dashboard.addEventListener("pointercancel", hideSpotlight);
+    document.documentElement.addEventListener("mouseleave", hideSpotlight);
+    window.addEventListener("blur", hideSpotlight);
   }
 }
 

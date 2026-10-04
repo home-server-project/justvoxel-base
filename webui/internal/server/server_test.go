@@ -548,3 +548,15 @@ func TestDashboardRecoveryAttentionOpensRecoveryWorkspace(t *testing.T) {
 		})
 	}
 }
+
+func TestWallpaperContentSecurityPolicy(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	securityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})).ServeHTTP(recorder, request)
+	want := "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' http: https: blob:; form-action 'self'; frame-ancestors 'none'"
+	if got := recorder.Header().Get("Content-Security-Policy"); got != want {
+		t.Fatalf("wallpaper CSP must preserve all non-image restrictions: got %q", got)
+	}
+}

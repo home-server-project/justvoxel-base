@@ -95,7 +95,7 @@ if (timezoneInput && timezoneResults && timezoneSource.length > 0) {
   };
 
   timezoneInput.addEventListener("input", renderTimezoneResults);
-  timezoneInput.addEventListener("focus", renderTimezoneResults);
+  timezoneInput.addEventListener("click", renderTimezoneResults);
   timezoneInput.addEventListener("keydown", (event) => {
     if (event.key === "ArrowDown" && !timezoneResults.hidden) {
       event.preventDefault();

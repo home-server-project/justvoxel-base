@@ -538,7 +538,7 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 	}
 	styles := string(css)
 	for _, want := range []string{
-		"#dashboard[data-configured=\"true\"]::before",
+		".dashboard-wallpaper{",
 		"min-height:calc(100dvh - 48px)",
 		"inset:48px 0 0",
 		".app-header.topbar{",
@@ -561,17 +561,28 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 			t.Fatalf("authenticated header must retain %s", want)
 		}
 	}
-	wallpaperStart := strings.Index(styles, `#dashboard[data-configured="true"]::before{`)
-	wallpaperEnd := strings.Index(styles[wallpaperStart:], "}")
-	if wallpaperEnd < 0 {
-		t.Fatal("configured dashboard wallpaper rule is incomplete")
+	if !strings.Contains(markup, `data-dashboard-wallpaper src="/static/justvoxel-default-wallpaper.jpg" alt="" aria-hidden="true"`) {
+		t.Fatal("dashboard must include the decorative built-in wallpaper image")
 	}
-	wallpaper := styles[wallpaperStart : wallpaperStart+wallpaperEnd]
-	if strings.Count(wallpaper, "linear-gradient(")+strings.Count(wallpaper, "conic-gradient(") < 3 {
-		t.Fatal("configured dashboard must retain gradient voxel geometry")
+	if _, err := assets.ReadFile("static/justvoxel-default-wallpaper.jpg"); err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(wallpaper, "radial-gradient(circle at") || strings.Contains(wallpaper, "url(") {
-		t.Fatal("configured dashboard must use a local spotlight and CSS voxel geometry")
+	if strings.Contains(styles, "conic-gradient(") {
+		t.Fatal("dashboard must not retain the generated voxel wallpaper")
+	}
+	for _, want := range []string{"object-fit:cover", "object-position:center", `#dashboard[data-spotlight-active="true"]::after`} {
+		if !strings.Contains(styles, want) {
+			t.Fatalf("dashboard wallpaper behavior missing %q", want)
+		}
+	}
+	appJS, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`dashboard.dataset.spotlightActive = "true"`, `dashboard.dataset.spotlightActive = "false"`, `dashboard.addEventListener("pointerleave", hideSpotlight)`, `document.documentElement.addEventListener("mouseleave", hideSpotlight)`, `window.addEventListener("blur", hideSpotlight)`} {
+		if !strings.Contains(string(appJS), want) {
+			t.Fatalf("dashboard spotlight behavior missing %q", want)
+		}
 	}
 }
 

@@ -51,6 +51,11 @@ func TestProjectFooterAndDateTimeUIContracts(t *testing.T) {
 		}
 		last = position
 	}
+	wallpaperPosition := strings.Index(footer, `type="button" data-wallpaper-open>Wallpaper</button>`)
+	if wallpaperPosition <= last {
+		t.Fatal("Wallpaper button must follow Report an issue")
+	}
+	last = wallpaperPosition
 	if position := strings.Index(footer, "NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT."); position <= last {
 		t.Fatal("Project disclaimer must follow the links")
 	}
@@ -60,6 +65,38 @@ func TestProjectFooterAndDateTimeUIContracts(t *testing.T) {
 			t.Fatalf("%s must use the shared project footer", path)
 		}
 	}
+	wallpaperJS := read("static/wallpaper.js")
+	for _, want := range []string{".project-wallpaper-button{display:none;", "#dashboard .project-wallpaper-button{display:inline}"} {
+		if !strings.Contains(appCSS, want) {
+			t.Fatalf("Dashboard-only wallpaper control styling missing %q", want)
+		}
+	}
+	if !strings.Contains(wallpaperJS, "const wallpaper = document.querySelector(\"[data-dashboard-wallpaper]\");\n  if (!wallpaper) return;\n  const form =") {
+		t.Fatal("Wallpaper must require the dashboard wallpaper element before initialization")
+	}
+	for _, want := range []string{"justvoxel-wallpaper-preference", "localStorage.setItem", "indexedDB.open", `images.put(blob, "uploaded")`, `images.delete("uploaded")`, "URL.createObjectURL", "URL.revokeObjectURL", `url.protocol !== "http:" && url.protocol !== "https:"`, "10 * 1024 * 1024", `"image/jpeg", "image/png", "image/webp", "image/avif"`, "await loadImage(url)", "await loadImage(candidateObjectURL)"} {
+		if !strings.Contains(wallpaperJS, want) {
+			t.Fatalf("browser wallpaper behavior missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"fetch(", "XMLHttpRequest", "/api/", "FileReader", "readAsDataURL"} {
+		if strings.Contains(wallpaperJS, forbidden) {
+			t.Fatalf("wallpaper must remain browser-local without %q", forbidden)
+		}
+	}
+	if !strings.Contains(footer, `<script src="/static/wallpaper.js" defer></script>`) {
+		t.Fatal("shared footer must load wallpaper controls")
+	}
+	timezoneJS := read("static/timezone-search.js")
+	if strings.Contains(timezoneJS, `addEventListener("focus", renderTimezoneResults)`) {
+		t.Fatal("timezone focus must not open suggestions")
+	}
+	for _, want := range []string{`addEventListener("click", renderTimezoneResults)`, `addEventListener("input", renderTimezoneResults)`, `event.key === "Escape"`, `button.addEventListener("click", () => chooseTimezone(zone))`} {
+		if !strings.Contains(timezoneJS, want) {
+			t.Fatalf("timezone search interaction missing %q", want)
+		}
+	}
+
 	setupCSS := read("static/setup.css")
 	for _, want := range []string{"#dashboard{position:relative;isolation:isolate;display:flex;flex-direction:column;min-height:calc(100dvh - 48px)", ".project-footer{margin-top:auto", ".setup-body{display:flex;flex-direction:column;min-height:100dvh}", ".setup-shell{display:flex;flex:1;flex-direction:column"} {
 		if !strings.Contains(appCSS+setupCSS, want) {

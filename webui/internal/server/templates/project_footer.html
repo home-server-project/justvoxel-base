@@ -6,7 +6,36 @@
     <a href="https://github.com/home-server-project" target="_blank" rel="noopener noreferrer">Home Server Project</a>
     <span aria-hidden="true">·</span>
     <a href="https://github.com/home-server-project/justvoxel/issues" target="_blank" rel="noopener noreferrer">Report an issue</a>
+    <span aria-hidden="true">·</span>
+    <button class="project-wallpaper-button" type="button" data-wallpaper-open>Wallpaper</button>
   </nav>
   <p class="disclaimer">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</p>
 </footer>
+<dialog class="system-action-dialog wallpaper-dialog" data-wallpaper-dialog aria-labelledby="wallpaper-title">
+  <form class="system-action-dialog-content" data-wallpaper-form>
+    <h2 id="wallpaper-title">Wallpaper</h2>
+    <p class="muted">Choose the background used by this browser.</p>
+    <fieldset>
+      <legend class="muted">Background</legend>
+      <label><input type="radio" name="mode" value="default" checked>Default JustVoxel</label>
+      <label><input type="radio" name="mode" value="url">Web address</label>
+      <label><input type="radio" name="mode" value="upload">Upload picture</label>
+    </fieldset>
+    <div data-wallpaper-url-fields hidden>
+      <label>Web address<input type="url" name="url" placeholder="https://example.com/picture.jpg"></label>
+      <p class="muted">The image is loaded directly by this browser.</p>
+    </div>
+    <div data-wallpaper-upload-fields hidden>
+      <label>Picture<input type="file" name="picture" accept="image/jpeg,image/png,image/webp,image/avif"></label>
+      <p class="muted">Choose a JPEG, PNG, WebP or AVIF picture up to 10 MiB.</p>
+    </div>
+    <p class="alert" data-wallpaper-error role="alert" hidden></p>
+    <div class="action-row">
+      <button class="secondary" type="button" data-wallpaper-reset>Reset to default</button>
+      <button class="secondary" type="button" data-wallpaper-cancel>Cancel</button>
+      <button type="submit">Apply</button>
+    </div>
+  </form>
+</dialog>
+<script src="/static/wallpaper.js" defer></script>
 {{end}}
