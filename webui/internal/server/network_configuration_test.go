@@ -527,6 +527,21 @@ func TestPlayitActivationOpensPopupBeforeSetup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	stylesheet, err := assets.ReadFile("static/playit-setup.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(stylesheet)
+	for _, token := range []string{"color-scheme:dark", "max-width:580px", "border-radius:18px", "radial-gradient", "background:#0d1822", ".pulse-dot", "@keyframes setup-pulse", "prefers-reduced-motion", ".failure", "@media (prefers-reduced-motion: reduce){.pulse-dot{animation:none}}"} {
+		if !strings.Contains(css, token) {
+			t.Fatalf("missing popup stylesheet design token: %s", token)
+		}
+	}
+	for _, forbidden := range []string{"@import", "url("} {
+		if strings.Contains(strings.ToLower(css), forbidden) {
+			t.Fatalf("popup stylesheet must not contain %s", forbidden)
+		}
+	}
 	script := string(source)
 	start := strings.Index(script, "  const validPlayitClaim =")
 	end := strings.Index(script, "  const isAdministrator =")
@@ -543,6 +558,9 @@ func TestPlayitActivationOpensPopupBeforeSetup(t *testing.T) {
 		html, _, ok := strings.Cut(write, "`);")
 		if !ok || strings.Contains(html, "${") || strings.Contains(html, "`") {
 			t.Fatal("popup HTML must not interpolate or concatenate values")
+		}
+		if !strings.HasPrefix(html, "<!doctype html>\n<html lang=\"en\">\n<head>") || !strings.HasSuffix(html, "</body>\n</html>") {
+			t.Fatal("popup HTML must be a complete document")
 		}
 	}
 	program := `
@@ -602,7 +620,6 @@ const click = () => {
   assert.match(loadingHTML, /Claim link/);
   assert.match(loadingHTML, /Waiting for Playit to generate the secure claim link\./);
   assert.match(loadingHTML, /class="pulse-dot" aria-hidden="true"/);
-  assert.match(loadingHTML, /@media \(prefers-reduced-motion: reduce\)\{\.pulse-dot\{animation:none\}\}/);
   for (const claim_url of [
     "https://evil.test/claim/0123abcdef", "javascript:alert(1)",
     "https://playit.gg/claim/0123abcde", "https://playit.gg/claim/0123abcdef0",
@@ -637,14 +654,18 @@ const click = () => {
   assert(!failureHTML.includes("Preparing Playit setup"));
   assert.match(failureHTML, /<section class="setup-card failure" aria-labelledby="setup-title">/);
   for (const html of [loadingHTML, failureHTML]) {
-    for (const token of ["color-scheme:dark", "PLAYIT SETUP", "JUSTVOXEL", "PLAYIT", "max-width:580px", "border-radius:18px", "radial-gradient", "background:#0d1822", "prefers-reduced-motion"]) {
+    for (const token of ["PLAYIT SETUP", "JUSTVOXEL", "PLAYIT"]) {
       assert(html.includes(token), "missing popup design token: " + token);
     }
     assert(!html.includes("Login"));
     assert(!html.includes("Create Account"));
-    assert(!/<(?:button|a|input|script|link|img)\b/i.test(html));
-    assert(!/\b(?:src|href)=|url\(/i.test(html));
-    assert.match(html, /<style>[\s\S]*<\/style>/);
+    assert(!html.includes("${"));
+    assert(!/<(?:style|button|a|input|script|img)\b/i.test(html));
+    assert(!/\b(?:src|style)\s*=|url\(/i.test(html));
+    const stylesheetLink = '<link rel="stylesheet" href="/static/playit-setup.css">';
+    assert.equal(html.split(stylesheetLink).length - 1, 1);
+    assert(!/\bhref\s*=/i.test(html.replace(stylesheetLink, "")));
+    assert.match(html, /<head>\s*<meta charset="utf-8">\s*<meta name="viewport" content="width=device-width, initial-scale=1">\s*<title>Playit setup<\/title>\s*<link rel="stylesheet" href="\/static\/playit-setup\.css">\s*<\/head>/);
   }
   assert.equal(playitPopup, null); assert.equal(popup.opener, null);
   closePlayitPopup();
