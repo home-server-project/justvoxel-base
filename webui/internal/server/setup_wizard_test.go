@@ -450,8 +450,8 @@ func TestSetupWizardStartsWithFriendlyServerDefaults(t *testing.T) {
 			t.Fatalf("server step missing %q: %s", want, body)
 		}
 	}
-	if !strings.Contains(body, "JustVoxel Java and Bedrock Server") {
-		t.Fatal("server step did not use setup defaults")
+	if strings.Contains(body, "JustVoxel Java and Bedrock Server") || !strings.Contains(body, `type="hidden" name="motd_automatic" value="true"`) {
+		t.Fatal("server step did not use automatic setup MOTD")
 	}
 	if client.defaultsHit != 1 {
 		t.Fatalf("setup defaults calls = %d, want 1", client.defaultsHit)

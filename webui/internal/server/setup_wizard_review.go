@@ -352,7 +352,7 @@ func setupPlanRequestFromDraft(draft setupDraft) (api.AdminSetupPlanRequest, err
 	return api.AdminSetupPlanRequest{
 		DiagnosticSessionID: draft.DiagnosticSessionID,
 		Server: api.AdminSetupPlanServerRequest{
-			MOTD: draft.Server.MOTD, MaxPlayers: maxPlayers,
+			MOTD: draft.Server.MOTD, MOTDAutomatic: draft.Server.MOTDAutomatic, MaxPlayers: maxPlayers,
 			BedrockEnabled: draft.Server.BedrockEnabled, Timezone: draft.Server.Timezone,
 		},
 		Minecraft: api.AdminSetupPlanMinecraftRequest{

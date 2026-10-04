@@ -34,6 +34,7 @@ type setupDraftKey struct {
 
 type setupServerDraft struct {
 	MOTD           string
+	MOTDAutomatic  bool
 	MaxPlayers     string
 	BedrockEnabled bool
 	Timezone       string
@@ -333,7 +334,8 @@ func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
 		draft.Server.BedrockEnabled = false
 	}
 	draft.Minecraft.GameMode = r.FormValue("game_mode")
-	draft.Server.MOTD = strings.TrimSpace(r.FormValue("motd"))
+	draft.Server.MOTDAutomatic = r.FormValue("motd_automatic") == "true"
+	draft.Server.MOTD = r.FormValue("motd")
 	draft.Server.MaxPlayers = strings.TrimSpace(r.FormValue("max_players"))
 	draft.Server.Timezone = strings.TrimSpace(r.FormValue("timezone"))
 	if err := validateSetupServer(draft.Server); err != nil {
@@ -657,9 +659,6 @@ func normalizedSetupDefaults(defaults api.AdminSetupDefaults) api.AdminSetupDefa
 	if defaults.MaxPlayers == 0 {
 		defaults.MaxPlayers = 10
 	}
-	if defaults.MOTD == "" {
-		defaults.MOTD = "JustVoxel Java and Bedrock Server"
-	}
 	if defaults.ImageTag == "" {
 		defaults.ImageTag = "stable"
 	}
@@ -693,7 +692,7 @@ func draftFromSetupDefaults(defaults api.AdminSetupDefaults, inventory api.Admin
 	return setupDraft{
 		Started: true, CurrentStep: 1, HighestStep: 1, Defaults: defaults, Inventory: inventory,
 		Server: setupServerDraft{
-			MOTD: defaults.MOTD, MaxPlayers: strconv.Itoa(defaults.MaxPlayers),
+			MOTDAutomatic: true, MaxPlayers: strconv.Itoa(defaults.MaxPlayers),
 			BedrockEnabled: defaults.BedrockEnabled, Timezone: defaults.Timezone,
 		},
 		Minecraft: setupMinecraftDraft{

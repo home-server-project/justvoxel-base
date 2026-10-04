@@ -265,17 +265,32 @@ if (versionLauncher && versionDialog) {
         const software = card("Server software");
         const choices = document.createElement("div");
         choices.className = "version-software-choices";
-        choices.appendChild(line("Current server software", status.server_software || "Paper"));
-        if (minecraft.server_type === "vanilla") {
-          choices.appendChild(line("Vanilla", "Java only · no managed plugins or Bedrock cross-play"));
-          const note = document.createElement("p");
-          note.textContent = "Changing server software requires Reset Minecraft and setup again.";
-          choices.appendChild(note);
-        } else {
-          const target = minecraft.server_type === "purpur" ? "paper" : "purpur";
-          const change = document.createElement("button");
+        const currentSoftware = minecraft.server_type || "paper";
+        for (const [target, name, description] of [
+          ["paper", "Paper", "Plugins and managed Bedrock cross-play."],
+          ["purpur", "Purpur", "Plugins and managed Bedrock cross-play."],
+          ["vanilla", "Vanilla", "Original Minecraft · Java only · no plugins."],
+        ]) {
+          const isCurrent = target === currentSoftware;
+          const selectable = !isCurrent && ["paper", "purpur"].includes(currentSoftware) && ["paper", "purpur"].includes(target);
+          const change = document.createElement(selectable ? "button" : "div");
+          change.className = "version-software-choice" + (isCurrent ? " is-current" : selectable ? " secondary" : "");
+          const title = document.createElement("strong");
+          title.textContent = name;
+          const availability = document.createElement("span");
+          availability.textContent = isCurrent ? "Current" : selectable ? "Available" : "Unavailable";
+          const detail = document.createElement("small");
+          detail.textContent = description;
+          change.append(title, availability, detail);
+          choices.appendChild(change);
+          if (!isCurrent && !selectable) {
+            change.setAttribute("aria-disabled", "true");
+            const note = document.createElement("small");
+            note.textContent = "Requires Reset Minecraft and setup again.";
+            change.appendChild(note);
+          }
+          if (!selectable) continue;
           change.type = "button";
-          change.textContent = `Change to ${target === "paper" ? "Paper" : "Purpur"}`;
           change.addEventListener("click", async () => {
             change.disabled = true;
             try {
@@ -311,7 +326,6 @@ if (versionLauncher && versionDialog) {
               root.appendChild(review);
             } catch (failure) { state.textContent = failure.message; change.disabled = false; }
           });
-          choices.appendChild(change);
         }
         software.appendChild(choices);
         root.appendChild(software);

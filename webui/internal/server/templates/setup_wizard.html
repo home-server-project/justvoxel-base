@@ -11,6 +11,7 @@
   <script src="/static/timezone-search.js" defer></script>
   <script src="/static/settings.js" defer></script>
   <script src="/static/setup-storage.js" defer></script>
+  <script src="/static/setup-motd.js" defer></script>
 </head>
 <body class="role-administrator setup-body">
 <header class="setup-header topbar setup-topbar">
@@ -40,7 +41,7 @@
             <legend>Choose server software</legend>
             <label class="setup-server-type is-available">
               <input type="radio" name="server_type" value="paper" {{if or (eq .Minecraft.ServerType "") (eq .Minecraft.ServerType "paper")}}checked{{end}}>
-              <span><strong>Paper</strong><small>Recommended · plugins · Bedrock cross-play enabled by default when supported.</small></span>
+              <span><strong>Paper</strong><small>Recommended · Plugins and managed Bedrock cross-play.</small></span>
             </label>
             <label class="setup-server-type is-available">
               <input type="radio" name="server_type" value="purpur" {{if eq .Minecraft.ServerType "purpur"}}checked{{end}}>
@@ -88,7 +89,8 @@
         <label class="setup-server-type is-available"><input type="radio" name="server_type" value="vanilla" {{if eq .Minecraft.ServerType "vanilla"}}checked{{end}}><span><strong>Vanilla</strong><small>Original Minecraft · Java only · no plugins.</small></span></label>
       </fieldset>
       <div class="setup-form-grid">
-        <label class="setup-field setup-field-wide">Server name / welcome message<input name="motd" value="{{.Server.MOTD}}" autocomplete="off" placeholder="JustVoxel Java and Bedrock Server"><span class="field-help">Shown to players in the Minecraft server list. Technical name: MOTD.</span></label>
+        <input type="hidden" name="motd_automatic" value="{{.Server.MOTDAutomatic}}" data-setup-motd-automatic>
+        <label class="setup-field setup-field-wide">Server name / welcome message<input name="motd" value="{{.Server.MOTD}}" autocomplete="off" {{if .Server.MOTDAutomatic}}placeholder="Automatic: JustVoxel {{if eq .Minecraft.ServerType "purpur"}}Purpur{{else if eq .Minecraft.ServerType "vanilla"}}Vanilla{{else}}Paper{{end}} Minecraft &lt;resolved version&gt; Server"{{end}} data-setup-motd><span class="field-help">Shown to players in the Minecraft server list. Technical name: MOTD.</span></label>
         <label class="setup-field">Game mode<select name="game_mode" required><option value="survival" {{if eq .Minecraft.GameMode "survival"}}selected{{end}}>Survival</option><option value="creative" {{if eq .Minecraft.GameMode "creative"}}selected{{end}}>Creative</option><option value="adventure" {{if eq .Minecraft.GameMode "adventure"}}selected{{end}}>Adventure</option><option value="spectator" {{if eq .Minecraft.GameMode "spectator"}}selected{{end}}>Spectator</option></select></label>
         <label class="setup-field">Maximum players<input name="max_players" type="number" min="1" step="1" value="{{.Server.MaxPlayers}}" inputmode="numeric"><span class="field-help">Used for the player limit and memory recommendations.</span></label>
         <label class="setup-field setup-timezone-field">Timezone

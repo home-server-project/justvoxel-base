@@ -26,6 +26,7 @@ var runAdminSetupPlanHelper = func(ctx context.Context, request []byte) ([]byte,
 
 type adminSetupPlanServerRequest struct {
 	MOTD           string `json:"motd"`
+	MOTDAutomatic  bool   `json:"motd_automatic,omitempty"`
 	MaxPlayers     int    `json:"max_players"`
 	BedrockEnabled bool   `json:"bedrock_enabled"`
 	Timezone       string `json:"timezone"`
@@ -293,6 +294,9 @@ func authoritativeAdminSetupPlan(parent context.Context, request adminSetupPlanR
 	}
 	helperRequest := request
 	helperRequest.DiagnosticSessionID = ""
+	// The shell helper keeps its existing strict contract. The agent generates
+	// this WebUI default only after the helper resolves the final version.
+	helperRequest.Server.MOTDAutomatic = false
 	payload, err := json.Marshal(helperRequest)
 	if err != nil {
 		return out, &adminSetupPlanningError{status: http.StatusInternalServerError, message: "first-run setup request could not be prepared"}
@@ -322,6 +326,14 @@ func authoritativeAdminSetupPlan(parent context.Context, request adminSetupPlanR
 	}
 	if out.Normalized == nil || !validSetupServerType(out.Normalized.Minecraft.ServerType) || (out.Normalized.Minecraft.ServerType == "vanilla" && out.Normalized.Server.BedrockEnabled) || out.Requirements == nil || out.Normalized.Minecraft.VersionPolicy == "" || !validSetupGameMode(out.Normalized.Minecraft.GameMode) || out.Normalized.Minecraft.MinecraftUID == 0 || out.Normalized.Minecraft.MinecraftGID == 0 || out.Normalized.Storage.Type == "" || out.Normalized.Backups.Type == "" {
 		return out, &adminSetupPlanningError{status: http.StatusInternalServerError, message: "first-run setup planner returned incomplete data"}
+	}
+	if request.Server.MOTDAutomatic {
+		version := out.Normalized.Minecraft.Version
+		if version == "" || version == "LATEST" || version == "recommended" || version == "latest" || version == "pinned" {
+			return out, &adminSetupPlanningError{status: http.StatusInternalServerError, message: "first-run setup planner did not resolve a Minecraft version"}
+		}
+		software := map[string]string{"paper": "Paper", "purpur": "Purpur", "vanilla": "Vanilla"}[out.Normalized.Minecraft.ServerType]
+		out.Normalized.Server.MOTD = "JustVoxel " + software + " Minecraft " + version + " Server"
 	}
 	fingerprint, err := adminSetupPlanFingerprint(out.SchemaVersion, out.Normalized, out.Requirements)
 	if err != nil {

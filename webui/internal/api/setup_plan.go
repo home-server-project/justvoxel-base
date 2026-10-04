@@ -17,6 +17,7 @@ var adminSetupPlanClientTimeout = 30 * time.Second
 
 type AdminSetupPlanServerRequest struct {
 	MOTD           string `json:"motd"`
+	MOTDAutomatic  bool   `json:"motd_automatic,omitempty"`
 	MaxPlayers     int    `json:"max_players"`
 	BedrockEnabled bool   `json:"bedrock_enabled"`
 	Timezone       string `json:"timezone"`
