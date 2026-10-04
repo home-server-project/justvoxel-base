@@ -1184,6 +1184,7 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .version-software-choice small{line-height:1.3}
 .version-workspace-body form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 var(--jv-space-md);align-items:end}
 .version-workspace-body form>label{min-width:0}
+.version-workspace-body form>[data-version-select]{align-self:start}
 .version-workspace-body form>[data-version-preview],.version-workspace-body form>.action-row{grid-column:1 / -1}
 .version-workspace-body form>[data-version-preview]{margin-top:var(--jv-space-sm)}
 .version-workspace-body .panel>.muted.compact,.version-workspace-body .panel>.notice{margin:var(--jv-space-sm) 0 0}

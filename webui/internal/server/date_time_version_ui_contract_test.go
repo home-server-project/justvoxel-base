@@ -47,17 +47,27 @@ func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 	}
 	for _, want := range []string{
 		`recommended: "Recommended", latest: "Latest", pinned: "Specific version"`,
+		`card("Version")`,
+		`<select name="policy" aria-label="Version">`,
+		`await settleSelectChange()`,
+		`setTimeout(resolve, 0)`,
+		`previewTicket !== previewSequence`,
 		`includes(minecraft.version_mode) ? minecraft.version_mode : "recommended"`,
 		`line("Installed", status.installed || "Not detected")`,
 		`line("Newest available", status.available ?`,
 		`line("Configured", status.configured_version === "LATEST" ?`,
-		`line("Version policy", policyLabel(minecraft.version_mode))`,
+		`line("Version", policyLabel(minecraft.version_mode))`,
 		`form.querySelector("[data-version-specific]").hidden = policy !== "pinned"`,
 		`form.elements.version.required = policy === "pinned"`,
 		`line(policy === "latest" ? "Will install now" : "Will install", candidate.selected_candidate)`,
 	} {
 		if !strings.Contains(version, want) {
 			t.Fatalf("Version policy contract missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{`card("Version policy")`, `<label>Policy`, `line("Version policy",`, `Version mode`, `waitForSelectBlur`} {
+		if strings.Contains(version, forbidden) {
+			t.Fatalf("redundant Version label: %q", forbidden)
 		}
 	}
 	if strings.Contains(version, `minecraft.version_mode === "latest" ? "latest" : "pinned"`) {
