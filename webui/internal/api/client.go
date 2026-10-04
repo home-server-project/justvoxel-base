@@ -36,14 +36,16 @@ type Status struct {
 		NetBird   string `json:"netbird,omitempty"`
 	} `json:"system"`
 	Minecraft struct {
-		Configured  bool   `json:"configured"`
-		State       string `json:"state"`
-		Players     int    `json:"players"`
-		MaxPlayers  int    `json:"max_players"`
-		Version     string `json:"version"`
-		JavaPort    int    `json:"java_port"`
-		Bedrock     bool   `json:"bedrock"`
-		BedrockPort int    `json:"bedrock_port"`
+		ServerType     string `json:"server_type"`
+		ServerSoftware string `json:"server_software"`
+		Configured     bool   `json:"configured"`
+		State          string `json:"state"`
+		Players        int    `json:"players"`
+		MaxPlayers     int    `json:"max_players"`
+		Version        string `json:"version"`
+		JavaPort       int    `json:"java_port"`
+		Bedrock        bool   `json:"bedrock"`
+		BedrockPort    int    `json:"bedrock_port"`
 	} `json:"minecraft"`
 	Backup struct {
 		Enabled bool   `json:"enabled"`

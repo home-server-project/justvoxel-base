@@ -106,6 +106,10 @@ plan() {
         native_manifest="$(/usr/libexec/justvoxel/mjust/migration-archive verify-native "$source_path" 2>/dev/null)" || { emit_error invalid_integrity 'Native JustVoxel migration bundle integrity verification failed.'; return 0; }
     fi
 
+    if [[ -n ${native_manifest} && $(jq -r '.minecraft.implementation // "paper"' <<< "${native_manifest}") != paper ]]; then
+        emit_error unsupported_server_type 'Migration v1 cannot import Purpur or Vanilla native bundles; their implementation is preserved in the export manifest.'
+        return 0
+    fi
     if [[ -d ${source_path} ]]; then
         detection_base="$source_path"
         detection="$(/usr/libexec/justvoxel/mjust/migration-archive detect "$detection_base" 2>/dev/null)" || { emit_error detection_failed 'Minecraft server detection failed.'; return 0; }
@@ -184,6 +188,8 @@ plan() {
     fi
     source_version="${source_version:-$supplied_version}"
     [[ ${source_version} =~ ^[0-9]+([.][0-9]+){1,2}$ ]] || { [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error source_version_required 'An exact source Minecraft version is required.' "$candidates"; return 0; }
+    if [[ -r ${JV_CONFIG} ]]; then require_config; fi
+    if [[ ${MINECRAFT_SERVER_TYPE-paper} != paper ]]; then emit_error unsupported_server_type 'Migration v1 import requires a Paper destination.'; return 0; fi
     paper_version_has_stable_build "$source_version" >/dev/null 2>&1 || { [[ -n ${temp:-} ]] && rm -rf -- "$temp"; trap - RETURN 2>/dev/null || true; emit_error unsupported_version 'PaperMC did not confirm a stable build for the exact source Minecraft version.'; return 0; }
 
     if [[ ${source_class} == justvoxel ]]; then

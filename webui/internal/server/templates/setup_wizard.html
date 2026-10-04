@@ -39,16 +39,16 @@
           <fieldset class="setup-server-types">
             <legend>Choose server software</legend>
             <label class="setup-server-type is-available">
-              <input type="radio" name="server_type" value="paper" checked>
+              <input type="radio" name="server_type" value="paper" {{if or (eq .Minecraft.ServerType "") (eq .Minecraft.ServerType "paper")}}checked{{end}}>
               <span><strong>Paper</strong><small>Recommended · plugins · Bedrock cross-play enabled by default when supported.</small></span>
             </label>
-            <label class="setup-server-type is-placeholder" aria-disabled="true">
-              <input type="radio" name="server_type" value="purpur" disabled>
-              <span><strong>Purpur</strong><small>Coming next · placeholder only in this cycle.</small></span>
+            <label class="setup-server-type is-available">
+              <input type="radio" name="server_type" value="purpur" {{if eq .Minecraft.ServerType "purpur"}}checked{{end}}>
+              <span><strong>Purpur</strong><small>Plugins and managed Bedrock cross-play.</small></span>
             </label>
-            <label class="setup-server-type is-placeholder" aria-disabled="true">
-              <input type="radio" name="server_type" value="vanilla" disabled>
-              <span><strong>Vanilla</strong><small>Coming next · placeholder only in this cycle.</small></span>
+            <label class="setup-server-type is-available">
+              <input type="radio" name="server_type" value="vanilla" {{if eq .Minecraft.ServerType "vanilla"}}checked{{end}}>
+              <span><strong>Vanilla</strong><small>Original Minecraft · Java only · no plugins.</small></span>
             </label>
           </fieldset>
           <button type="submit">Use recommended setup</button>
@@ -84,8 +84,8 @@
       <fieldset class="setup-server-types setup-server-types-compact">
         <legend>Server software</legend>
         <label class="setup-server-type is-available"><input type="radio" name="server_type" value="paper" {{if or (eq .Minecraft.ServerType "") (eq .Minecraft.ServerType "paper")}}checked{{end}}><span><strong>Paper</strong><small>Supported now · plugins and Bedrock cross-play.</small></span></label>
-        <label class="setup-server-type is-placeholder" aria-disabled="true"><input type="radio" name="server_type" value="purpur" disabled><span><strong>Purpur</strong><small>Coming next.</small></span></label>
-        <label class="setup-server-type is-placeholder" aria-disabled="true"><input type="radio" name="server_type" value="vanilla" disabled><span><strong>Vanilla</strong><small>Coming next.</small></span></label>
+        <label class="setup-server-type is-available"><input type="radio" name="server_type" value="purpur" {{if eq .Minecraft.ServerType "purpur"}}checked{{end}}><span><strong>Purpur</strong><small>Plugins and managed Bedrock cross-play.</small></span></label>
+        <label class="setup-server-type is-available"><input type="radio" name="server_type" value="vanilla" {{if eq .Minecraft.ServerType "vanilla"}}checked{{end}}><span><strong>Vanilla</strong><small>Original Minecraft · Java only · no plugins.</small></span></label>
       </fieldset>
       <div class="setup-form-grid">
         <label class="setup-field setup-field-wide">Server name / welcome message<input name="motd" value="{{.Server.MOTD}}" autocomplete="off" placeholder="JustVoxel Java and Bedrock Server"><span class="field-help">Shown to players in the Minecraft server list. Technical name: MOTD.</span></label>
@@ -106,7 +106,8 @@
     <form method="post" action="/setup/connections" class="setup-form" data-setup-connections>
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <label class="setup-choice"><input type="checkbox" name="bedrock_enabled" data-bedrock-toggle {{if .Server.BedrockEnabled}}checked{{end}}><span><strong>Enable Bedrock cross-play</strong><small>Allow supported Bedrock clients to join through Geyser/Floodgate. Compatibility is checked before Apply.</small></span></label>
+      {{if eq .Minecraft.ServerType "vanilla"}}<p class="notice">Managed Bedrock cross-play currently requires Paper or Purpur.</p>{{end}}
+      <label class="setup-choice"><input type="checkbox" name="bedrock_enabled" data-bedrock-toggle {{if eq .Minecraft.ServerType "vanilla"}}disabled{{end}} {{if .Server.BedrockEnabled}}checked{{end}}><span><strong>Enable Bedrock cross-play</strong><small>Allow supported Bedrock clients to join through Geyser/Floodgate. Compatibility is checked before Apply.</small></span></label>
       <div class="setup-form-grid">
         <label class="setup-field">Minecraft Java port<input name="java_port" type="number" min="1" max="65535" value="{{.Minecraft.JavaPort}}" inputmode="numeric"><span class="field-help">Default: 25565/TCP.</span></label>
         <label class="setup-field" data-bedrock-port-field>Bedrock UDP port<input name="bedrock_port" type="number" min="1" max="65535" value="{{.Minecraft.BedrockPort}}" inputmode="numeric"><span class="field-help">Default: 19132/UDP. Used only when Bedrock cross-play is enabled.</span></label>

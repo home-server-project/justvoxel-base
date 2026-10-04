@@ -14,8 +14,10 @@ systemctl() { [[ ${ACTIVE:-yes} == yes ]]; }
 wait_for_rcon() { [[ ${READY:-yes} == yes ]]; }
 podman() {
     case "${*: -1}" in
-        version) printf '%s' "${VERSION_RESPONSE:-This server is running Paper version 26.2-19-main (Implementing API version 26.2-R0.1-SNAPSHOT)}" ;;
-        plugins) printf '%s' "${PLUGIN_RESPONSE:-Plugins (3): Geyser-Spigot, floodgate, ViaVersion}" ;;
+        --json) printf '%s' "${MONITOR_RESPONSE}" ;;
+        list) printf 'There are 0 of a max of 10 players online' ;;
+        version) [[ ${MINECRAFT_SERVER_TYPE:-paper} != vanilla ]] || { echo 'Unexpected Vanilla version command' >&2; return 1; }; printf '%s' "${VERSION_RESPONSE:-This server is running Paper version 26.2-19-main (Implementing API version 26.2-R0.1-SNAPSHOT)}" ;;
+        plugins) [[ ${MINECRAFT_SERVER_TYPE:-paper} != vanilla ]] || { echo 'Unexpected Vanilla plugins command' >&2; return 1; }; printf '%s' "${PLUGIN_RESPONSE:-Plugins (3): Geyser-Spigot, floodgate, ViaVersion}" ;;
         'geyser version') printf '%s' "${GEYSER_RESPONSE:-This server is running Geyser version fixture}" ;;
         *) return 1 ;;
     esac
@@ -30,3 +32,11 @@ for failure in 'ACTIVE=no' 'READY=no' 'VERSION_RESPONSE=Unknown command' 'VERSIO
 done
 printf 'auth-type: online\n' > "${DATA_PATH}/plugins/Geyser-Spigot/config.yml"
 if bash "${fixture_dir}/verify" 26.2; then echo 'Unverified authentication accepted' >&2; exit 1; fi
+
+MINECRAFT_SERVER_TYPE=purpur BEDROCK_ENABLED=no VERSION_RESPONSE='This server is running Purpur version 26.2-19-main' bash "${fixture_dir}/verify" 26.2
+MINECRAFT_SERVER_TYPE=vanilla BEDROCK_ENABLED=no MONITOR_RESPONSE='{"server_info":{"version":{"name":"26.2"}}}' bash "${fixture_dir}/verify" 26.2
+for response in '{"server_info":{"version":{"name":"26.3"}}}' '{}' 'not JSON'; do
+    if MINECRAFT_SERVER_TYPE=vanilla BEDROCK_ENABLED=no MONITOR_RESPONSE="${response}" bash "${fixture_dir}/verify" 26.2; then
+        echo 'Invalid Vanilla status accepted' >&2; exit 1
+    fi
+done

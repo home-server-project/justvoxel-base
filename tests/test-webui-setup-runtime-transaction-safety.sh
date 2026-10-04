@@ -96,7 +96,7 @@ validation_line="$(grep -nF '    validation_output="$(/usr/libexec/justvoxel/mju
     A55_EVIDENCE='{}'
     runtime_log="$(mktemp)"
     trap 'rm -f -- "${runtime_log}"' EXIT
-    source <(sed -n '/^_a55_verify_action() {/,/^}/p' "${runtime_helper}" | sed 's|/usr/libexec/justvoxel/mjust/validate-backend|mock_validate_backend|g')
+    source <(sed -n '/^_a55_verify_action() {/,/^}/p' "${runtime_helper}" | sed -e 's|/usr/libexec/justvoxel/mjust/validate-backend|mock_validate_backend|g' -e 's|/usr/libexec/justvoxel/mjust/verify-minecraft-stack|mock_verify_stack|g')
     _a55_load_values() { MINECRAFT_IMAGE_TAG=testing; BEDROCK_ENABLED=no; }
     _a55_evidence_set() { printf 'evidence %s %s\n' "$1" "$2" >> "${runtime_log}"; }
     _a55_evidence_set_bounded() { :; }
@@ -105,6 +105,8 @@ validation_line="$(grep -nF '    validation_output="$(/usr/libexec/justvoxel/mju
     wait_for_rcon() { return 0; }
     activate_backup_timer() { return 0; }
     mock_validate_backend() { return 0; }
+    mock_verify_stack() { return 0; }
+    MINECRAFT_VERSION=26.2
     systemctl() { printf 'systemctl %s\n' "$*" >> "${runtime_log}"; }
     podman() {
         printf 'podman %s\n' "$*" >> "${runtime_log}"

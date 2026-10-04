@@ -44,8 +44,8 @@ systemctl() {
     if [[ $1 == stop ]]; then printf stopped > "${FIXTURE}/service"; printf stop >> "${FIXTURE}/actions"; fi
     if [[ $1 == start ]]; then printf active > "${FIXTURE}/service"; printf start >> "${FIXTURE}/actions"; fi
 }
-write_main_config() { printf config >> "${FIXTURE}/config-actions"; printf '%s' "${MINECRAFT_VERSION}" > "${FIXTURE}/version"; }
-render_runtime() { printf '%s' "${MINECRAFT_VERSION}" > "${FIXTURE}/version"; printf render >> "${FIXTURE}/actions"; }
+write_main_config() { printf '%s' "${MINECRAFT_SERVER_TYPE-paper}" > "${FIXTURE}/software"; printf config >> "${FIXTURE}/config-actions"; printf '%s' "${MINECRAFT_VERSION}" > "${FIXTURE}/version"; }
+render_runtime() { printf '%s' "${MINECRAFT_SERVER_TYPE-paper}" > "${FIXTURE}/software"; printf '%s' "${MINECRAFT_VERSION}" > "${FIXTURE}/version"; printf render >> "${FIXTURE}/actions"; }
 confirm() { echo 'Unexpected interactive confirmation in reviewed flow' >&2; return 1; }
 wait_for_rcon() { [[ $(cat "${FIXTURE}/service") == active ]]; }
 restorecon() { [[ ${FAIL_ROLLBACK:-no} != yes || ! -e ${FIXTURE}/rollback-started ]]; }
@@ -96,6 +96,7 @@ printf verified >> "${FIXTURE}/actions"
 [[ ${FAIL_VERIFY:-no} != yes ]]
 STUB
 chmod +x "${fixture_dir}/status" "${fixture_dir}/backup" "${fixture_dir}/verify"
+sed -n '/^# Three fixed implementations/,/^render_runtime_files() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/common.sh"
 sed -e "s|^source /usr/libexec/justvoxel/mjust/common.sh$|source ${fixture_dir}/common.sh|" \
     -e '\|^source /usr/libexec/justvoxel/mjust/update-policy.sh$|d' \
     -e "s|^source /usr/libexec/justvoxel/mjust/managed-crossplay.sh$|source ${fixture_dir}/managed.sh|" \
@@ -197,3 +198,25 @@ if FAIL_VERIFY=yes FAIL_ROLLBACK=yes bash "${fixture_dir}/backend" --reviewed-st
 grep -q 'managed Geyser/Floodgate rollback failed' "${fixture_dir}/output"
 grep -q 'operation requires attention' "${fixture_dir}/output"
 [[ $(cat "${fixture_dir}/service") == stopped ]]
+
+# Server software switches reuse this same transaction and preserve plugin data.
+for direction in 'paper purpur' 'purpur paper'; do
+    read -r old target <<< "${direction}"
+    reset_runtime active
+    MINECRAFT_SERVER_TYPE="${old}" bash "${fixture_dir}/backend" --server-type "${target}" --reviewed-stack "${fingerprint}"
+    [[ $(cat "${fixture_dir}/software") == "${target}" && $(cat "${fixture_dir}/service") == active ]]
+    [[ $(cat "${fixture_dir}/actions") == backuprenderstartverified ]]
+    assert_preserved
+    reset_runtime active
+    if MINECRAFT_SERVER_TYPE="${old}" FAIL_VERIFY=yes bash "${fixture_dir}/backend" --server-type "${target}" --reviewed-stack "${fingerprint}"; then
+        echo 'Failed software switch accepted' >&2; exit 1
+    fi
+    [[ $(cat "${fixture_dir}/software") == "${old}" ]]
+    assert_preserved
+done
+for direction in 'paper vanilla' 'purpur vanilla' 'vanilla paper' 'vanilla purpur'; do
+    read -r old target <<< "${direction}"
+    reset_runtime active
+    if MINECRAFT_SERVER_TYPE="${old}" bash "${fixture_dir}/backend" --server-type "${target}" --reviewed-stack "${fingerprint}"; then exit 1; fi
+    [[ ! -e ${fixture_dir}/actions && ! -e ${fixture_dir}/config-actions ]]
+done

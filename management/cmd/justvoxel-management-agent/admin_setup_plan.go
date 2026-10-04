@@ -32,6 +32,7 @@ type adminSetupPlanServerRequest struct {
 }
 
 type adminSetupPlanMinecraftRequest struct {
+	ServerType      string `json:"server_type,omitempty"`
 	GameMode        string `json:"game_mode"`
 	JavaMemory      string `json:"java_memory"`
 	ContainerMemory string `json:"container_memory"`
@@ -83,6 +84,7 @@ type adminSetupPlanServer struct {
 }
 
 type adminSetupPlanMinecraft struct {
+	ServerType             string `json:"server_type"`
 	GameMode               string `json:"game_mode"`
 	JavaMemory             string `json:"java_memory"`
 	ContainerMemory        string `json:"container_memory"`
@@ -167,6 +169,7 @@ type adminSetupPlanResponse struct {
 }
 
 type adminSetupFingerprintMinecraft struct {
+	ServerType             string `json:"server_type"`
 	GameMode               string `json:"game_mode"`
 	JavaMemory             string `json:"java_memory"`
 	ContainerMemory        string `json:"container_memory"`
@@ -282,6 +285,12 @@ func (s *server) adminSetupPlan(w http.ResponseWriter, r *http.Request) {
 
 func authoritativeAdminSetupPlan(parent context.Context, request adminSetupPlanRequest) (adminSetupPlanResponse, *adminSetupPlanningError) {
 	var out adminSetupPlanResponse
+	if request.Minecraft.ServerType == "" {
+		request.Minecraft.ServerType = "paper"
+	}
+	if !validSetupServerType(request.Minecraft.ServerType) || (request.Minecraft.ServerType == "vanilla" && request.Server.BedrockEnabled) {
+		return out, &adminSetupPlanningError{status: http.StatusBadRequest, message: "invalid server software or Bedrock choice"}
+	}
 	helperRequest := request
 	helperRequest.DiagnosticSessionID = ""
 	payload, err := json.Marshal(helperRequest)
@@ -308,7 +317,10 @@ func authoritativeAdminSetupPlan(parent context.Context, request adminSetupPlanR
 		out.Error = boundedSetupPlanError(out.Error)
 		return out, nil
 	}
-	if out.Normalized == nil || out.Requirements == nil || out.Normalized.Minecraft.VersionPolicy == "" || !validSetupGameMode(out.Normalized.Minecraft.GameMode) || out.Normalized.Minecraft.MinecraftUID == 0 || out.Normalized.Minecraft.MinecraftGID == 0 || out.Normalized.Storage.Type == "" || out.Normalized.Backups.Type == "" {
+	if out.Normalized != nil && out.Normalized.Minecraft.ServerType == "" {
+		out.Normalized.Minecraft.ServerType = "paper"
+	}
+	if out.Normalized == nil || !validSetupServerType(out.Normalized.Minecraft.ServerType) || (out.Normalized.Minecraft.ServerType == "vanilla" && out.Normalized.Server.BedrockEnabled) || out.Requirements == nil || out.Normalized.Minecraft.VersionPolicy == "" || !validSetupGameMode(out.Normalized.Minecraft.GameMode) || out.Normalized.Minecraft.MinecraftUID == 0 || out.Normalized.Minecraft.MinecraftGID == 0 || out.Normalized.Storage.Type == "" || out.Normalized.Backups.Type == "" {
 		return out, &adminSetupPlanningError{status: http.StatusInternalServerError, message: "first-run setup planner returned incomplete data"}
 	}
 	fingerprint, err := adminSetupPlanFingerprint(out.SchemaVersion, out.Normalized, out.Requirements)
@@ -323,11 +335,19 @@ func adminSetupPlanFingerprint(schemaVersion string, normalized *adminSetupNorma
 	if schemaVersion == "" || normalized == nil || requirements == nil {
 		return "", errors.New("incomplete setup plan")
 	}
+	serverType := normalized.Minecraft.ServerType
+	if serverType == "" {
+		serverType = "paper"
+	}
+	if !validSetupServerType(serverType) {
+		return "", errors.New("invalid server type")
+	}
 	canonical := adminSetupFingerprintPayload{
 		SchemaVersion: schemaVersion,
 		Normalized: adminSetupFingerprintNormalized{
 			Server: normalized.Server,
 			Minecraft: adminSetupFingerprintMinecraft{
+				ServerType: serverType,
 				GameMode:   normalized.Minecraft.GameMode,
 				JavaMemory: normalized.Minecraft.JavaMemory, ContainerMemory: normalized.Minecraft.ContainerMemory,
 				JavaPort: normalized.Minecraft.JavaPort, BedrockPort: normalized.Minecraft.BedrockPort,
@@ -361,6 +381,10 @@ func adminSetupPlanFingerprint(schemaVersion string, normalized *adminSetupNorma
 	}
 	sum := sha256.Sum256(payload)
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+func validSetupServerType(value string) bool {
+	return value == "paper" || value == "purpur" || value == "vanilla"
 }
 
 func validSetupGameMode(mode string) bool {

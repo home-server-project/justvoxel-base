@@ -140,7 +140,7 @@ func (a *App) registerSetupWizardRoutes(mux *http.ServeMux) {
 }
 
 type setupVersionPreviewAPI interface {
-	AdminSetupVersionPreview(context.Context, string, string, string, bool) (api.AdminVersionStatus, error)
+	AdminSetupVersionPreview(context.Context, string, string, string, bool, string) (api.AdminVersionStatus, error)
 }
 
 func (a *App) setupWizardVersionPreview(w http.ResponseWriter, r *http.Request) {
@@ -158,7 +158,7 @@ func (a *App) setupWizardVersionPreview(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Version information is unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	status, err := client.AdminSetupVersionPreview(r.Context(), session, r.URL.Query().Get("policy"), r.URL.Query().Get("version"), draft.Server.BedrockEnabled)
+	status, err := client.AdminSetupVersionPreview(r.Context(), session, r.URL.Query().Get("policy"), r.URL.Query().Get("version"), draft.Server.BedrockEnabled, draft.Minecraft.ServerType)
 	if err != nil {
 		http.Error(w, "Version information is unavailable", http.StatusServiceUnavailable)
 		return
@@ -230,7 +230,7 @@ func (a *App) setupWizardRecommended(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	serverType := strings.ToLower(strings.TrimSpace(r.FormValue("server_type")))
-	if serverType != "paper" {
+	if !validSetupServerType(serverType) {
 		http.Error(w, "selected Minecraft server type is not available yet", http.StatusBadRequest)
 		return
 	}
@@ -289,9 +289,13 @@ func (a *App) setupWizardRecommended(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/setup/review", http.StatusSeeOther)
 }
 
+func validSetupServerType(value string) bool {
+	return value == "paper" || value == "purpur" || value == "vanilla"
+}
+
 func recommendedServerSupportsBedrock(serverType string) bool {
 	switch serverType {
-	case "paper":
+	case "paper", "purpur":
 		return true
 	default:
 		return false
@@ -316,7 +320,7 @@ func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
 	if serverType == "" {
 		serverType = "paper"
 	}
-	if serverType != "paper" {
+	if !validSetupServerType(serverType) {
 		draft.Server.Complete = false
 		firstRunSetupDrafts.save(a, session, draft)
 		w.WriteHeader(http.StatusBadRequest)
@@ -325,6 +329,9 @@ func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	draft.Minecraft.ServerType = serverType
+	if serverType == "vanilla" {
+		draft.Server.BedrockEnabled = false
+	}
 	draft.Minecraft.GameMode = r.FormValue("game_mode")
 	draft.Server.MOTD = strings.TrimSpace(r.FormValue("motd"))
 	draft.Server.MaxPlayers = strings.TrimSpace(r.FormValue("max_players"))
@@ -364,6 +371,12 @@ func (a *App) setupWizardSaveConnections(w http.ResponseWriter, r *http.Request)
 	}
 
 	draft.Server.BedrockEnabled = r.FormValue("bedrock_enabled") == "on"
+	if draft.Server.BedrockEnabled && !recommendedServerSupportsBedrock(draft.Minecraft.ServerType) {
+		draft.Server.BedrockEnabled = false
+		w.WriteHeader(http.StatusBadRequest)
+		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), "Managed Bedrock cross-play requires Paper or Purpur.")
+		return
+	}
 	draft.Minecraft.JavaPort = strings.TrimSpace(r.FormValue("java_port"))
 	draft.Minecraft.BedrockPort = strings.TrimSpace(r.FormValue("bedrock_port"))
 

@@ -40,7 +40,7 @@ func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 		}
 	}
 	version := read("static/version-workspace.js")
-	for _, want := range []string{"Paper", "Purpur", "Vanilla", "Coming soon", "Installed", "Available", "Recommended", "Latest", "Specific version", "Geyser/Floodgate", "/api/minecraft/workspace/settings/plan", "/api/minecraft/workspace/settings/apply", "compatibility_blocked"} {
+	for _, want := range []string{"Paper", "Purpur", "Vanilla", "Reset Minecraft", "Installed", "Available", "Recommended", "Latest", "Specific version", "Geyser/Floodgate", "/api/minecraft/workspace/settings/plan", "/api/minecraft/workspace/settings/apply", "compatibility_blocked"} {
 		if !strings.Contains(version, want) {
 			t.Fatalf("Version missing %q", want)
 		}

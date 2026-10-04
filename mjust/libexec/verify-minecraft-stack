@@ -9,14 +9,24 @@ if [[ ${JUSTVOXEL_MAINTENANCE_LOCK_HELD:-0} != 1 ]]; then
 fi
 systemctl is-active --quiet minecraft.service || { echo 'ERROR: Minecraft service is not active.' >&2; exit 1; }
 wait_for_rcon 60 || { echo 'ERROR: Minecraft RCON is not ready.' >&2; exit 1; }
+expected_version="${1:-${MINECRAFT_VERSION}}"
+if [[ ${MINECRAFT_SERVER_TYPE-paper} == vanilla ]]; then
+    status="$(podman exec minecraft mc-monitor status --json)" || { echo 'ERROR: Minecraft status probe failed.' >&2; exit 1; }
+    actual="$(jq -er '.server_info.version.name | select(type == "string" and length > 0)' <<< "${status}")" || { echo 'ERROR: Minecraft status version is invalid.' >&2; exit 1; }
+    [[ ${expected_version} == LATEST || ${actual} == "${expected_version}" ]] || { echo 'ERROR: Minecraft is not running the selected game version.' >&2; exit 1; }
+    podman exec minecraft rcon-cli list >/dev/null || { echo 'ERROR: Minecraft RCON check failed.' >&2; exit 1; }
+    printf 'Minecraft version: %s\n' "${actual}"
+    exit 0
+fi
 version="$(podman exec minecraft rcon-cli version)"
 printf 'Minecraft version: %s\n' "${version}"
-[[ ${version} == *'MC: '* || ${version} == *'Minecraft version '* || ${version} == *'Paper version '* ]] || { echo 'ERROR: Minecraft version response could not be verified.' >&2; exit 1; }
+[[ ${version,,} == *"${MINECRAFT_SERVER_TYPE-paper}"* ]] || { echo 'ERROR: Minecraft is not running the selected server software.' >&2; exit 1; }
+[[ ${version} == *'MC: '* || ${version} == *'Minecraft version '* || ${version} == *'Paper version '* || ${version} == *'Purpur version '* ]] || { echo 'ERROR: Minecraft version response could not be verified.' >&2; exit 1; }
 expected_version="${1:-${MINECRAFT_VERSION}}"
 if [[ ${expected_version} != LATEST ]]; then
     [[ ${expected_version} =~ ^[0-9A-Za-z._-]+$ ]] || exit 1
     [[ ${version} == *"MC: ${expected_version})"* || ${version} == *"Minecraft version ${expected_version} "* ||
-       ${version} == *"Paper version ${expected_version}-"* || ${version} == *"Paper version ${expected_version} "* ]] || {
+       ${version} == *"Paper version ${expected_version}-"* || ${version} == *"Paper version ${expected_version} "* || ${version} == *"Purpur version ${expected_version}-"* || ${version} == *"Purpur version ${expected_version} "* ]] || {
         echo 'ERROR: Minecraft is not running the selected game version.' >&2; exit 1;
     }
 fi

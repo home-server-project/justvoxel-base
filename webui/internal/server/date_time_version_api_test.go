@@ -32,7 +32,7 @@ func (f *fakeDateTimeVersionAPI) AdminDateTimeApply(_ context.Context, _ string,
 	return api.AdminDateTimeState{Timezone: change.Timezone, Automatic: change.Automatic}, nil
 }
 
-func (f *fakeDateTimeVersionAPI) AdminVersionStatus(_ context.Context, _, policy, version string) (api.AdminVersionStatus, error) {
+func (f *fakeDateTimeVersionAPI) AdminVersionStatus(_ context.Context, _, policy, version, serverType string) (api.AdminVersionStatus, error) {
 	f.versionReads++
 	return api.AdminVersionStatus{ServerSoftware: "Paper", Installed: "26.2", Available: "26.3", Recommended: "26.2", SelectedCandidate: "26.2", Policy: "recommended", UpdateAvailable: true, PaperSupported: true}, nil
 }

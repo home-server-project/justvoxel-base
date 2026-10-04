@@ -23,6 +23,7 @@ type AdminSetupPlanServerRequest struct {
 }
 
 type AdminSetupPlanMinecraftRequest struct {
+	ServerType      string `json:"server_type"`
 	GameMode        string `json:"game_mode"`
 	JavaMemory      string `json:"java_memory"`
 	ContainerMemory string `json:"container_memory"`
@@ -74,6 +75,7 @@ type AdminSetupPlanServer struct {
 }
 
 type AdminSetupPlanMinecraft struct {
+	ServerType             string `json:"server_type"`
 	GameMode               string `json:"game_mode"`
 	JavaMemory             string `json:"java_memory"`
 	ContainerMemory        string `json:"container_memory"`

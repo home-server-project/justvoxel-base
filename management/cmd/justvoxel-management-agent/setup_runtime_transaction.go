@@ -35,6 +35,7 @@ type setupRuntimeServer struct {
 }
 
 type setupRuntimeMinecraft struct {
+	ServerType      string `json:"server_type"`
 	GameMode        string `json:"game_mode"`
 	JavaMemory      string `json:"java_memory"`
 	ContainerMemory string `json:"container_memory"`
@@ -94,10 +95,17 @@ func setupRuntimeRequestForOperation(operation operationJournal, plan *adminSetu
 	if plan.Minecraft.MinecraftUID == 0 || plan.Minecraft.MinecraftGID == 0 {
 		return setupRuntimeTransactionRequest{}, errors.New("invalid Minecraft runtime identity")
 	}
+	serverType := plan.Minecraft.ServerType
+	if serverType == "" {
+		serverType = "paper"
+	}
+	if !validSetupServerType(serverType) || (serverType == "vanilla" && plan.Server.BedrockEnabled) {
+		return setupRuntimeTransactionRequest{}, errors.New("invalid server capabilities")
+	}
 	return setupRuntimeTransactionRequest{
 		SchemaVersion: operationSchemaVersion, OperationID: operation.OperationID, PlanFingerprint: operation.PlanFingerprint,
 		Server:    setupRuntimeServer{MOTD: plan.Server.MOTD, MaxPlayers: plan.Server.MaxPlayers, BedrockEnabled: plan.Server.BedrockEnabled, Timezone: plan.Server.Timezone},
-		Minecraft: setupRuntimeMinecraft{GameMode: plan.Minecraft.GameMode, JavaMemory: plan.Minecraft.JavaMemory, ContainerMemory: plan.Minecraft.ContainerMemory, JavaPort: plan.Minecraft.JavaPort, BedrockPort: plan.Minecraft.BedrockPort, ImageTag: plan.Minecraft.ImageTag, VersionPolicy: plan.Minecraft.VersionPolicy, Version: plan.Minecraft.Version, MinecraftUID: plan.Minecraft.MinecraftUID, MinecraftGID: plan.Minecraft.MinecraftGID},
+		Minecraft: setupRuntimeMinecraft{ServerType: serverType, GameMode: plan.Minecraft.GameMode, JavaMemory: plan.Minecraft.JavaMemory, ContainerMemory: plan.Minecraft.ContainerMemory, JavaPort: plan.Minecraft.JavaPort, BedrockPort: plan.Minecraft.BedrockPort, ImageTag: plan.Minecraft.ImageTag, VersionPolicy: plan.Minecraft.VersionPolicy, Version: plan.Minecraft.Version, MinecraftUID: plan.Minecraft.MinecraftUID, MinecraftGID: plan.Minecraft.MinecraftGID},
 		Storage:   setupRuntimeStorage{Type: plan.Storage.Type, Path: plan.Storage.Path, MountPoint: plan.Storage.MountPoint, ExpectedUUID: plan.Storage.ExpectedUUID, ExpectedSource: plan.Storage.ExpectedSource},
 		Backups:   setupRuntimeBackups{Type: plan.Backups.Type, Path: plan.Backups.Path, MountPoint: plan.Backups.MountPoint, ExpectedUUID: plan.Backups.ExpectedUUID, ExpectedSource: plan.Backups.ExpectedSource, Automatic: plan.Backups.Automatic, Schedule: plan.Backups.Schedule, Keep: plan.Backups.Keep},
 	}, nil

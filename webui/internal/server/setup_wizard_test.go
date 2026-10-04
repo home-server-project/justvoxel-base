@@ -370,8 +370,8 @@ func TestSetupWizardShowsRecommendedAndAdvancedChoices(t *testing.T) {
 		}
 	}
 	for _, want := range []string{`value="purpur" disabled`, `value="vanilla" disabled`} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("setup placeholder missing %q: %s", want, body)
+		if strings.Contains(body, want) {
+			t.Fatalf("setup choice disabled %q: %s", want, body)
 		}
 	}
 	if client.configurationHit != 1 {
@@ -412,8 +412,8 @@ func TestRecommendedSetupBuildsReadyPaperDraftAndJumpsToReview(t *testing.T) {
 	}
 }
 
-func TestRecommendedSetupRejectsPlaceholderServerTypes(t *testing.T) {
-	for _, serverType := range []string{"purpur", "vanilla"} {
+func TestRecommendedSetupRejectsUnsupportedServerTypes(t *testing.T) {
+	for _, serverType := range []string{"fabric", "PAPER-invalid", ""} {
 		client := setupWizardClient()
 		app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
 		if err != nil {
@@ -655,7 +655,7 @@ func TestSetupVersionPreviewPresentationContract(t *testing.T) {
 		`"setup-version-primary"`, `"setup-version-candidate"`, `policy === "recommended" ? "Recommended"`,
 		`"Stable choice for this setup"`, `status.available !== status.selected_candidate`,
 		`"setup-version-secondary"`, `"Newer version available"`,
-		`{ STABLE: "Stable", BETA: "Beta", ALPHA: "Alpha" }`,
+		`{ STABLE: "Stable", BETA: "Beta", ALPHA: "Alpha", RELEASE: "Release" }`,
 		`channelLabel(status.available_channel)`, `channelLabel(status.candidate_channel)`, `pre-release server build`,
 		`"setup-version-explanation"`, `"This version keeps Bedrock players compatible."`,
 		`"Latest follows newer Minecraft server versions when available."`,
@@ -954,5 +954,66 @@ func TestSetupWizardVisitedStepNavigation(t *testing.T) {
 		if draft.CurrentStep != step.current || draft.HighestStep != 3 {
 			t.Fatalf("jump to %d changed visited steps: %#v", step.target, draft)
 		}
+	}
+}
+
+func TestRecommendedSetupServerSoftwareCapabilities(t *testing.T) {
+	for _, serverType := range []string{"paper", "purpur", "vanilla"} {
+		t.Run(serverType, func(t *testing.T) {
+			client := setupWizardClient()
+			app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer firstRunSetupDrafts.delete(app, "session-token")
+			defer firstRunSetupReviews.delete(app, "session-token")
+			values := url.Values{"csrf": {"csrf-token"}, "server_type": {serverType}}
+			rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recommended", values.Encode()))
+			if rr.Code != http.StatusSeeOther {
+				t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
+			}
+			draft, ok := firstRunSetupDrafts.get(app, "session-token")
+			if !ok || draft.Minecraft.ServerType != serverType || draft.Server.BedrockEnabled != (serverType != "vanilla") {
+				t.Fatalf("wrong capabilities: %#v", draft)
+			}
+			request, err := setupPlanRequestFromDraft(draft)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if request.Minecraft.ServerType != serverType {
+				t.Fatal("server software lost from request")
+			}
+		})
+	}
+}
+
+func TestVanillaAdvancedConnectionsCannotEnableBedrock(t *testing.T) {
+	app, err := New(setupWizardClient(), Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstRunSetupDrafts.delete(app, "session-token")
+	startSetup(t, app)
+	values := validServerValues()
+	values.Set("server_type", "vanilla")
+	if rr := saveServerStep(t, app, values); rr.Code != http.StatusSeeOther {
+		t.Fatalf("server: %d %s", rr.Code, rr.Body.String())
+	}
+	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
+	if !strings.Contains(page.Body.String(), "requires Paper or Purpur") || !strings.Contains(page.Body.String(), "data-bedrock-toggle disabled") {
+		t.Fatal("Vanilla Connections did not disable Bedrock")
+	}
+	connections := validConnectionValues()
+	connections.Set("bedrock_enabled", "on")
+	if rr := saveConnectionsStep(t, app, connections); rr.Code != http.StatusBadRequest {
+		t.Fatalf("Bedrock accepted: %d", rr.Code)
+	}
+	draft, _ := firstRunSetupDrafts.get(app, "session-token")
+	if draft.Server.BedrockEnabled || draft.CurrentStep != 2 {
+		t.Fatal("Rejected Bedrock request changed the saved draft")
+	}
+	connections.Del("bedrock_enabled")
+	if rr := saveConnectionsStep(t, app, connections); rr.Code != http.StatusSeeOther {
+		t.Fatalf("Java-only Connections: %d %s", rr.Code, rr.Body.String())
 	}
 }

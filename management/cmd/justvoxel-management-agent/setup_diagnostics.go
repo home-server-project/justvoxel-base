@@ -29,7 +29,7 @@ var (
 	setupDiagnosticHostnamePattern     = regexp.MustCompile(`(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,62})\.)+(?:[a-z]{2,63}|local|lan|home|internal)\b`)
 	setupDiagnosticInlineSecretPattern = regexp.MustCompile(`(?i)\b[a-z0-9_]*(password|secret|token|authorization|cookie|credential)[a-z0-9_]*\s*[:=]\s*[^\s]+`)
 	setupDiagnosticKeyPattern          = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$`)
-	runBootcStatusJSON = func(ctx context.Context) ([]byte, error) {
+	runBootcStatusJSON                 = func(ctx context.Context) ([]byte, error) {
 		return exec.CommandContext(ctx, "bootc", "status", "--json").CombinedOutput()
 	}
 	runSetupDiagnosticCommand = func(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -393,7 +393,9 @@ func (s *operationStore) readSetupDiagnostic(id string) ([]byte, error) {
 	}
 	s.diagnosticMu.Lock()
 	defer s.diagnosticMu.Unlock()
-	if err := validatePrivateDiagnosticDirectory(s.setupLogsDir); err != nil { return nil, err }
+	if err := validatePrivateDiagnosticDirectory(s.setupLogsDir); err != nil {
+		return nil, err
+	}
 	path := s.setupDiagnosticPath(id)
 	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
 	if err != nil {
@@ -402,7 +404,9 @@ func (s *operationStore) readSetupDiagnostic(id string) ([]byte, error) {
 	file := os.NewFile(uintptr(fd), path)
 	defer file.Close()
 	info, err := file.Stat()
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	ownership, owned := info.Sys().(*syscall.Stat_t)
 	if !info.Mode().IsRegular() || !owned || ownership.Uid != uint32(os.Geteuid()) {
 		return nil, errors.New("setup diagnostic log is not a regular file")
@@ -469,31 +473,32 @@ func setupDiagnosticPlanningErrorValues(err *adminSetupPlanningError) map[string
 
 func setupDiagnosticPlanRequestValues(request adminSetupPlanRequest) map[string]string {
 	return map[string]string{
-		"motd":                 request.Server.MOTD,
-		"max_players":          fmt.Sprintf("%d", request.Server.MaxPlayers),
-		"bedrock_enabled":      fmt.Sprintf("%t", request.Server.BedrockEnabled),
-		"timezone":             request.Server.Timezone,
-		"java_memory":          request.Minecraft.JavaMemory,
-		"container_memory":     request.Minecraft.ContainerMemory,
-		"java_port":            fmt.Sprintf("%d", request.Minecraft.JavaPort),
-		"bedrock_port":         fmt.Sprintf("%d", request.Minecraft.BedrockPort),
-		"minecraft_image":      request.Minecraft.ImageTag,
-		"version_policy":       request.Minecraft.VersionPolicy,
-		"minecraft_version":    request.Minecraft.Version,
-		"storage_type":         request.Storage.Type,
-		"storage_path":         request.Storage.Path,
-		"storage_device":       request.Storage.Device,
-		"storage_mount_point":  request.Storage.MountPoint,
-		"backup_automatic":     fmt.Sprintf("%t", request.Backups.Automatic),
-		"backup_daily_time":    request.Backups.DailyTime,
-		"backup_keep":          fmt.Sprintf("%d", request.Backups.Keep),
-		"backup_type":          request.Backups.Type,
-		"backup_path":          request.Backups.Path,
-		"backup_device":        request.Backups.Device,
-		"backup_mount_point":   request.Backups.MountPoint,
-		"backup_source":        request.Backups.Source,
-		"backup_username":      request.Backups.Username,
-		"backup_domain":        request.Backups.Domain,
+		"motd":                request.Server.MOTD,
+		"max_players":         fmt.Sprintf("%d", request.Server.MaxPlayers),
+		"bedrock_enabled":     fmt.Sprintf("%t", request.Server.BedrockEnabled),
+		"timezone":            request.Server.Timezone,
+		"java_memory":         request.Minecraft.JavaMemory,
+		"container_memory":    request.Minecraft.ContainerMemory,
+		"java_port":           fmt.Sprintf("%d", request.Minecraft.JavaPort),
+		"bedrock_port":        fmt.Sprintf("%d", request.Minecraft.BedrockPort),
+		"minecraft_image":     request.Minecraft.ImageTag,
+		"version_policy":      request.Minecraft.VersionPolicy,
+		"minecraft_version":   request.Minecraft.Version,
+		"server_type":         request.Minecraft.ServerType,
+		"storage_type":        request.Storage.Type,
+		"storage_path":        request.Storage.Path,
+		"storage_device":      request.Storage.Device,
+		"storage_mount_point": request.Storage.MountPoint,
+		"backup_automatic":    fmt.Sprintf("%t", request.Backups.Automatic),
+		"backup_daily_time":   request.Backups.DailyTime,
+		"backup_keep":         fmt.Sprintf("%d", request.Backups.Keep),
+		"backup_type":         request.Backups.Type,
+		"backup_path":         request.Backups.Path,
+		"backup_device":       request.Backups.Device,
+		"backup_mount_point":  request.Backups.MountPoint,
+		"backup_source":       request.Backups.Source,
+		"backup_username":     request.Backups.Username,
+		"backup_domain":       request.Backups.Domain,
 	}
 }
 
@@ -502,30 +507,31 @@ func setupDiagnosticNormalizedPlanValues(plan *adminSetupNormalizedPlan) map[str
 		return nil
 	}
 	return map[string]string{
-		"motd":                 plan.Server.MOTD,
-		"max_players":          fmt.Sprintf("%d", plan.Server.MaxPlayers),
-		"bedrock_enabled":      fmt.Sprintf("%t", plan.Server.BedrockEnabled),
-		"timezone":             plan.Server.Timezone,
-		"java_memory":          plan.Minecraft.JavaMemory,
-		"container_memory":     plan.Minecraft.ContainerMemory,
-		"java_port":            fmt.Sprintf("%d", plan.Minecraft.JavaPort),
-		"bedrock_port":         fmt.Sprintf("%d", plan.Minecraft.BedrockPort),
-		"minecraft_image":      plan.Minecraft.ImageTag,
-		"version_policy":       plan.Minecraft.VersionPolicy,
-		"minecraft_version":    plan.Minecraft.Version,
-		"storage_type":         plan.Storage.Type,
-		"storage_path":         plan.Storage.Path,
-		"storage_device":       plan.Storage.Device,
-		"storage_mount_point":  plan.Storage.MountPoint,
-		"backup_automatic":     fmt.Sprintf("%t", plan.Backups.Automatic),
-		"backup_keep":          fmt.Sprintf("%d", plan.Backups.Keep),
-		"backup_type":          plan.Backups.Type,
-		"backup_path":          plan.Backups.Path,
-		"backup_device":        plan.Backups.Device,
-		"backup_mount_point":   plan.Backups.MountPoint,
-		"backup_source":        plan.Backups.Source,
-		"backup_username":      plan.Backups.Username,
-		"backup_domain":        plan.Backups.Domain,
+		"motd":                plan.Server.MOTD,
+		"max_players":         fmt.Sprintf("%d", plan.Server.MaxPlayers),
+		"bedrock_enabled":     fmt.Sprintf("%t", plan.Server.BedrockEnabled),
+		"timezone":            plan.Server.Timezone,
+		"java_memory":         plan.Minecraft.JavaMemory,
+		"container_memory":    plan.Minecraft.ContainerMemory,
+		"java_port":           fmt.Sprintf("%d", plan.Minecraft.JavaPort),
+		"bedrock_port":        fmt.Sprintf("%d", plan.Minecraft.BedrockPort),
+		"minecraft_image":     plan.Minecraft.ImageTag,
+		"version_policy":      plan.Minecraft.VersionPolicy,
+		"minecraft_version":   plan.Minecraft.Version,
+		"server_type":         plan.Minecraft.ServerType,
+		"storage_type":        plan.Storage.Type,
+		"storage_path":        plan.Storage.Path,
+		"storage_device":      plan.Storage.Device,
+		"storage_mount_point": plan.Storage.MountPoint,
+		"backup_automatic":    fmt.Sprintf("%t", plan.Backups.Automatic),
+		"backup_keep":         fmt.Sprintf("%d", plan.Backups.Keep),
+		"backup_type":         plan.Backups.Type,
+		"backup_path":         plan.Backups.Path,
+		"backup_device":       plan.Backups.Device,
+		"backup_mount_point":  plan.Backups.MountPoint,
+		"backup_source":       plan.Backups.Source,
+		"backup_username":     plan.Backups.Username,
+		"backup_domain":       plan.Backups.Domain,
 	}
 }
 
@@ -709,7 +715,6 @@ func sanitizeSetupDiagnosticImageDigest(value string) string {
 	}
 	return value
 }
-
 
 func collectSetupDiagnosticEnvironment() map[string]string {
 	values := map[string]string{

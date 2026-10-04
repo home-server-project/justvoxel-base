@@ -14,6 +14,7 @@ JV_BACKUP_SERVICE="${JV_TEST_ROOT}/minecraft-backup.service"
 JV_BACKUP_TIMER="${JV_TEST_ROOT}/minecraft-backup.timer"
 JV_PREVIOUS_IMAGE_STATE="${JV_TEST_ROOT}/previous-image"
 require_root() { :; }
+validate_server_type() { case "$1" in paper|purpur|vanilla) return 0 ;; *) return 1 ;; esac; }
 source "${JV_TEST_REPO}/mjust/libexec/minecraft-reset-common.sh"
 jv_reset_path_scope() { printf 'unknown\n'; }
 jv_reset_data_scope() { jv_reset_path_scope "$1"; }

@@ -10,7 +10,7 @@ latest_mc=''
 game_state='moving'
 
 if [[ ${MINECRAFT_VERSION_MODE} == pinned ]]; then
-    latest_mc="$(resolve_latest_stable_paper_version || true)"
+    latest_mc="$(resolve_recommended_server_version || true)"
     game_state="$(jv_game_version_state "${MINECRAFT_VERSION_MODE}" "${MINECRAFT_VERSION}" "${latest_mc}")"
 fi
 
@@ -47,7 +47,7 @@ fi
 echo 'Minecraft update'
 echo '----------------'
 case "${game_state}" in
-    current) echo "Game version:      Current - Paper ${MINECRAFT_VERSION}" ;;
+    current) echo "Game version:      Current - $(server_software_display_name) ${MINECRAFT_VERSION}" ;;
     update_available) echo "Game version:      Update available - ${MINECRAFT_VERSION} -> ${latest_mc}" ;;
     moving) echo 'Game version:      LATEST policy - resolved when Minecraft starts' ;;
     *) echo "Game version:      Check unavailable - keeping ${MINECRAFT_VERSION}" ;;
@@ -82,7 +82,7 @@ case "${image_state}" in
     update_available|image_missing) echo 'Container maintenance is available.' ;;
     restart_needed) echo 'A restart is required to use the already-selected local image.' ;;
 esac
-[[ ${game_state} == update_available ]] && echo 'A newer stable Paper-supported Minecraft version is available.'
+[[ ${game_state} == update_available ]] && echo 'A newer supported Minecraft version is available.'
 echo
 
 echo 'Opening maintenance details and safety checks...'

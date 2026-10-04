@@ -14,6 +14,10 @@ jv_backup_load_config() {
 
     # shellcheck disable=SC1090
     source "${backup_config_file}"
+    MINECRAFT_SERVER_TYPE=paper
+    if [[ -r ${JV_CONFIG} ]]; then
+        MINECRAFT_SERVER_TYPE="$(require_config && printf '%s' "${MINECRAFT_SERVER_TYPE}")" || return 1
+    fi
 
     : "${MINECRAFT_DATA_PATH:?MINECRAFT_DATA_PATH must be configured}"
     : "${MINECRAFT_BACKUP_PATH:?MINECRAFT_BACKUP_PATH must be configured}"
@@ -140,7 +144,9 @@ jv_backup_write_metadata() {
         local_config=/etc/justvoxel/justvoxel.conf
         [[ -r ${local_config} ]]
         # shellcheck disable=SC1090
+        MINECRAFT_SERVER_TYPE=paper
         source "${local_config}"
+        validate_server_capabilities
 
         image_repo='docker.io/itzg/minecraft-server'
         image_ref="${image_repo}:${MINECRAFT_IMAGE_TAG:-latest}"
@@ -171,6 +177,7 @@ jv_backup_write_metadata() {
             --arg archive "$(basename -- "${archive}")" \
             --argjson archiveSizeBytes "${archive_size}" \
             --arg dataDirectoryName "$(basename -- "${MINECRAFT_DATA_PATH}")" \
+            --arg serverType "${MINECRAFT_SERVER_TYPE}" \
             --arg versionMode "${MINECRAFT_VERSION_MODE:-unknown}" \
             --arg configuredVersion "${MINECRAFT_VERSION:-unknown}" \
             --arg serverReportedVersion "${server_reported_version}" \
@@ -191,6 +198,7 @@ jv_backup_write_metadata() {
                 archive: $archive,
                 archiveSizeBytes: $archiveSizeBytes,
                 minecraft: {
+                    serverType: $serverType,
                     dataDirectoryName: $dataDirectoryName,
                     versionMode: $versionMode,
                     configuredVersion: $configuredVersion,

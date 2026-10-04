@@ -21,7 +21,9 @@ if [[ ! -r ${JV_CONFIG} ]]; then
 fi
 
 # shellcheck disable=SC1090
+MINECRAFT_SERVER_TYPE=paper
 source "${JV_CONFIG}"
+validate_server_type "${MINECRAFT_SERVER_TYPE}" || exit 1
 
 data_scope="$(jv_reset_data_scope "${DATA_PATH}")"
 data_action=preserve

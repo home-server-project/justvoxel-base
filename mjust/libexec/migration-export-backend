@@ -107,9 +107,13 @@ geyser_reported="${JV_MIGRATION_EXPORT_GEYSER_REPORTED:-}"
 plugins_reported=''
 if systemctl is-active --quiet minecraft.service; then
     was_active=yes
-    server_reported="$(podman exec minecraft rcon-cli 'version' 2>/dev/null | head -n1 || true)"
-    geyser_reported="$(podman exec minecraft rcon-cli 'geyser version' 2>/dev/null | head -n1 || true)"
-    plugins_reported="$(podman exec minecraft rcon-cli 'plugins' 2>/dev/null | head -n1 || true)"
+    if server_supports_plugins; then
+        server_reported="$(podman exec minecraft rcon-cli 'version' 2>/dev/null | head -n1 || true)"
+        geyser_reported="$(podman exec minecraft rcon-cli 'geyser version' 2>/dev/null | head -n1 || true)"
+    else
+        server_reported="$(podman exec minecraft mc-monitor status --json 2>/dev/null | jq -er '.server_info.version.name | select(type == "string")' || true)"
+    fi
+    if server_supports_plugins; then plugins_reported="$(podman exec minecraft rcon-cli 'plugins' 2>/dev/null | head -n1 || true)"; fi
     jv_player_check_before_interrupt 'Export server' || { echo 'Export cancelled.'; exit 0; }
     echo 'Stopping Minecraft through its configured graceful shutdown path.'
     restart_required=yes
@@ -186,6 +190,7 @@ jq -n \
     --arg architecture "$(uname -m)" \
     --arg bootcImage "${bootc_ref}" \
     --arg bootcDigest "${bootc_digest}" \
+    --arg implementation "${MINECRAFT_SERVER_TYPE-paper}" \
     --arg version "${source_version}" \
     --arg reportedVersion "${server_reported}" \
     --arg gameMode "${configured_game_mode}" \
@@ -221,7 +226,7 @@ jq -n \
             bootcDigest: (if $bootcDigest == "" then null else $bootcDigest end)
         },
         minecraft: {
-            implementation: "paper",
+            implementation: $implementation,
             version: $version,
             reportedVersion: (if $reportedVersion == "" then null else $reportedVersion end),
             onlineMode: true,

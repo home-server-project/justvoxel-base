@@ -11,6 +11,8 @@ import (
 )
 
 type AdminVersionStatus struct {
+	ServerType             string `json:"server_type"`
+	ServerSupported        bool   `json:"server_supported"`
 	StackState             string `json:"stack_state"`
 	MinecraftState         string `json:"minecraft_state"`
 	GeyserState            string `json:"geyser_state"`
@@ -36,13 +38,13 @@ type AdminVersionStatus struct {
 	Reason                 string `json:"reason"`
 }
 
-func (c *Client) AdminSetupVersionPreview(ctx context.Context, session, policy, version string, bedrock bool) (AdminVersionStatus, error) {
+func (c *Client) AdminSetupVersionPreview(ctx context.Context, session, policy, version string, bedrock bool, serverType string) (AdminVersionStatus, error) {
 	var out AdminVersionStatus
 	choice := "no"
 	if bedrock {
 		choice = "yes"
 	}
-	path := "/v1/admin/setup/version-preview?policy=" + url.QueryEscape(policy) + "&version=" + url.QueryEscape(version) + "&bedrock=" + choice
+	path := "/v1/admin/setup/version-preview?policy=" + url.QueryEscape(policy) + "&version=" + url.QueryEscape(version) + "&bedrock=" + choice + "&server_type=" + url.QueryEscape(serverType)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://unix"+path, nil)
 	if err != nil {
 		return out, err
@@ -69,9 +71,9 @@ func (c *Client) AdminSetupVersionPreview(ctx context.Context, session, policy, 
 	return out, err
 }
 
-func (c *Client) AdminVersionStatus(ctx context.Context, session, policy, version string) (AdminVersionStatus, error) {
+func (c *Client) AdminVersionStatus(ctx context.Context, session, policy, version, serverType string) (AdminVersionStatus, error) {
 	var out AdminVersionStatus
-	path := "/v1/admin/version/status?policy=" + url.QueryEscape(policy) + "&version=" + url.QueryEscape(version)
+	path := "/v1/admin/version/status?policy=" + url.QueryEscape(policy) + "&version=" + url.QueryEscape(version) + "&server_type=" + url.QueryEscape(serverType)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://unix"+path, nil)
 	if err != nil {
 		return out, err
@@ -99,6 +101,7 @@ func (c *Client) AdminVersionStatus(ctx context.Context, session, policy, versio
 }
 
 type MinecraftStackUpdateRequest struct {
+	ServerType      string `json:"server_type,omitempty"`
 	PlanFingerprint string `json:"plan_fingerprint"`
 	ConfirmPlayers  bool   `json:"confirm_players"`
 }

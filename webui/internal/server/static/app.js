@@ -3103,15 +3103,18 @@ if (minecraftOpen && minecraftDialog) {
       section.querySelector('[name="java_port"]').value = String(minecraft.java_port || 25565);
       section.querySelector('[name="bedrock_port"]').value = String(minecraft.bedrock_port || 19132);
       section.querySelector('[name="bedrock_enabled"]').checked = Boolean(minecraft.bedrock_enabled);
+      section.querySelector('[name="bedrock_enabled"]').disabled = minecraft.server_type === "vanilla";
+      if (minecraft.server_type === "vanilla") section.querySelector('[data-crossplay-compatibility]').textContent = "Managed Bedrock cross-play currently requires Paper or Purpur.";
       section.querySelector('[data-open-version]')?.addEventListener("click", () => document.querySelector("[data-version-open]")?.click());
       requestWorkspaceJSON("/api/version/workspace/status").then((status) => {
         const node = section.querySelector("[data-crossplay-compatibility]");
         if (!node || !status) return;
         const installed = status.installed || "Unknown";
+        if (minecraft.server_type === "vanilla") { node.textContent = "Managed Bedrock cross-play currently requires Paper or Purpur."; return; }
         if (!status.crossplay_enabled) node.textContent = `Cross-play disabled · Minecraft ${installed}.`;
         else if (status.crossplay_compatible) node.textContent = `Cross-play enabled · Minecraft ${installed} · Geyser/Floodgate compatible with ${status.geyser_supported_version}.`;
         else node.textContent = status.reason || "Geyser/Floodgate compatibility is unavailable.";
-      }).catch(() => { const node = section.querySelector("[data-crossplay-compatibility]"); if (node) node.textContent = "Geyser/Floodgate compatibility is unavailable."; });
+      }).catch(() => { const node = section.querySelector("[data-crossplay-compatibility]"); if (node && minecraft.server_type !== "vanilla") node.textContent = "Geyser/Floodgate compatibility is unavailable."; });
       form.appendChild(section);
     }
 

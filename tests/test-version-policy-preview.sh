@@ -27,6 +27,7 @@ podman() { echo runtime-check >> "${DATA_PATH}.checks"; return 1; }
 jv_crossplay_metadata() { echo runtime-check >> "${DATA_PATH}.checks"; return 1; }
 jv_crossplay_artifact_state() { printf unavailable; }
 EOF
+sed -n '/^# Three fixed implementations/,/^render_runtime_files() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/common.sh"
 sed -e "s|^source /usr/libexec/justvoxel/mjust/common.sh$|source ${fixture_dir}/common.sh|" \
     -e '\|^source /usr/libexec/justvoxel/mjust/managed-crossplay.sh$|d' \
     -e '\|^source /usr/libexec/justvoxel/mjust/update-policy.sh$|d' \
@@ -90,8 +91,8 @@ curl() {
 if paper_version_has_stable_build 26.1; then exit 1; fi
 if paper_version_build_channel 9.9 >/dev/null; then exit 1; fi
 
-grep -Fq 'resolve_latest_available_paper_version' "${repo_root}/mjust/libexec/admin-setup-plan-json"
-grep -Fq 'paper_version_build_channel "${version}"' "${repo_root}/mjust/libexec/admin-setup-plan-json"
+grep -Fq 'resolve_latest_server_version' "${repo_root}/mjust/libexec/admin-setup-plan-json"
+grep -Fq 'server_version_available "${version}"' "${repo_root}/mjust/libexec/admin-setup-plan-json"
 grep -Fq 'AdminSetupVersionPreview' "${repo_root}/webui/internal/server/setup_wizard.go"
 grep -Fq '/setup/version-preview?' "${repo_root}/webui/internal/server/static/settings.js"
 grep -Fq 'status.selected_candidate' "${repo_root}/webui/internal/server/static/settings.js"
@@ -122,6 +123,7 @@ bedrock_crossplay_supports_version() { [[ $1 == "$2" ]]; }
 normalize_daily_backup_time() { printf '%s' "$1"; }
 daily_backup_schedule_from_time() { printf '*-*-* %s:00' "$1"; }
 EOF
+sed -n '/^# Three fixed implementations/,/^render_runtime_files() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/planner-common.sh"
 touch "${fixture_dir}/planner-storage.sh"
 sed -e "s|^source /usr/libexec/justvoxel/mjust/common.sh$|source ${fixture_dir}/planner-common.sh|" \
     -e "s|^source /usr/libexec/justvoxel/mjust/storage-common-base.sh$|source ${fixture_dir}/planner-storage.sh|" \
@@ -137,4 +139,31 @@ for policy in latest pinned; do
     incompatible_request="$(jq -c --arg policy "${policy}" '.minecraft.version_policy=$policy | .minecraft.version="26.3"' <<< "${planner_request}")"
     incompatible_plan="$(env JV_CONFIG="${fixture_dir}/absent-config" JV_QUADLET="${fixture_dir}/absent-quadlet" bash "${fixture_dir}/planner" <<< "${incompatible_request}")"
     jq -e '.ok == false and .code == "bedrock_version_unsupported" and (.error | contains("26.3") and contains("26.2"))' <<< "${incompatible_plan}" >/dev/null
+done
+
+cat >> "${fixture_dir}/planner-common.sh" <<'STUB'
+curl() {
+    case "${*: -1}" in
+        */v2/purpur) printf '{"metadata":{"current":"26.2"},"versions":["26.2","26.3"]}' ;;
+        */version_manifest_v2.json) printf '{"latest":{"release":"26.2"},"versions":[{"id":"26.2","type":"release"}]}' ;;
+        *) return 1 ;;
+    esac
+}
+STUB
+for software in paper purpur vanilla; do
+    for bedrock in true false; do
+        request="$(jq -c --arg software "${software}" --argjson bedrock "${bedrock}" '.minecraft.server_type=$software | .server.bedrock_enabled=$bedrock' <<< "${planner_request}")"
+        result="$(env JV_CONFIG="${fixture_dir}/absent-config" JV_QUADLET="${fixture_dir}/absent-quadlet" bash "${fixture_dir}/planner" <<< "${request}")"
+        if [[ ${software} == vanilla && ${bedrock} == true ]]; then jq -e '.ok == false and .code == "invalid_minecraft"' <<< "${result}" >/dev/null
+        else jq -e --arg software "${software}" '.ok and .normalized.minecraft.server_type == $software' <<< "${result}" >/dev/null
+        fi
+    done
+done
+request="$(jq -c '.minecraft.server_type="fabric"' <<< "${planner_request}")"
+result="$(env JV_CONFIG="${fixture_dir}/absent-config" JV_QUADLET="${fixture_dir}/absent-quadlet" bash "${fixture_dir}/planner" <<< "${request}")"
+jq -e '.ok == false and .code == "schema_error"' <<< "${result}" >/dev/null
+for invalid in false null '""' '"PAPER"'; do
+    request="$(jq -c --argjson invalid "${invalid}" '.minecraft.server_type=$invalid' <<< "${planner_request}")"
+    result="$(env JV_CONFIG="${fixture_dir}/absent-config" JV_QUADLET="${fixture_dir}/absent-quadlet" bash "${fixture_dir}/planner" <<< "${request}")"
+    jq -e '.ok == false and .code == "schema_error"' <<< "${result}" >/dev/null
 done

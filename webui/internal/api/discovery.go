@@ -6,6 +6,7 @@ import (
 )
 
 type AdminMinecraftConfiguration struct {
+	ServerType         string `json:"server_type"`
 	DataPath           string `json:"data_path"`
 	DataMountPoint     string `json:"data_mount_point"`
 	DataExpectedUUID   string `json:"data_expected_uuid"`

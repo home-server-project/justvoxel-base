@@ -89,13 +89,14 @@ validate_request_shape() {
       (.storage|type == "object") and
       (.backups|type == "object") and
       ((.server|keys) - ["motd","max_players","bedrock_enabled","timezone"] | length == 0) and
-      ((.minecraft|keys) - ["java_memory","container_memory","java_port","bedrock_port","image_tag","version_policy","version","game_mode"] | length == 0) and
+      ((.minecraft|keys) - ["server_type","java_memory","container_memory","java_port","bedrock_port","image_tag","version_policy","version","game_mode"] | length == 0) and
       ((.storage|keys) - ["type","path","device","mount_point"] | length == 0) and
       ((.backups|keys) - ["automatic","daily_time","keep","type","path","device","mount_point","source","username","domain"] | length == 0) and
       (.server.motd|type == "string") and
       (.server.max_players|type == "number") and
       (.server.bedrock_enabled|type == "boolean") and
       (.server.timezone|type == "string") and
+      (.minecraft | (has("server_type") | not) or (.server_type | type == "string" and (. == "paper" or . == "purpur" or . == "vanilla"))) and
       (.minecraft.java_memory|type == "string") and
       (.minecraft.container_memory|type == "string") and
       (.minecraft.java_port|type == "number") and
@@ -271,6 +272,7 @@ if [[ -e ${JV_CONFIG} || -e ${JV_QUADLET} ]]; then
     exit 0
 fi
 
+MINECRAFT_SERVER_TYPE="$(jq -r '.minecraft.server_type // "paper"' <<< "${request}")"
 motd="$(jq -r '.server.motd' <<< "${request}")"
 max_players="$(jq -r '.server.max_players' <<< "${request}")"
 bedrock_enabled="$(jq -r '.server.bedrock_enabled' <<< "${request}")"
@@ -298,6 +300,10 @@ backup_source="$(jq -r '.backups.source // ""' <<< "${request}")"
 backup_username="$(jq -r '.backups.username // ""' <<< "${request}")"
 backup_domain="$(jq -r '.backups.domain // ""' <<< "${request}")"
 
+if [[ ${MINECRAFT_SERVER_TYPE} == vanilla && ${bedrock_enabled} == true ]]; then
+    json_error 'Managed Bedrock cross-play requires Paper or Purpur.' invalid_minecraft
+    exit 0
+fi
 warnings='[]'
 
 read -r minecraft_uid minecraft_gid minecraft_id_source < <(resolve_minecraft_ids)
@@ -357,20 +363,20 @@ fi
 case "${version_policy}" in
     recommended)
         if [[ ${requested_bedrock_enabled} == true ]]; then
-            if [[ -z ${geyser_supported_version} ]] || ! paper_version_has_stable_build "${geyser_supported_version}"; then
+            if [[ -z ${geyser_supported_version} ]] || ! server_version_recommended_available "${geyser_supported_version}"; then
                 json_error 'Could not confirm a stable Minecraft version for Bedrock players.' upstream_unavailable
                 exit 0
             fi
             version="${geyser_supported_version}"
         else
-            version="$(resolve_latest_stable_paper_version || true)"
+            version="$(resolve_recommended_server_version || true)"
         fi
-        [[ -n ${version} ]] || { json_error 'Could not resolve a stable Paper-backed Minecraft version.' upstream_unavailable; exit 0; }
+        [[ -n ${version} ]] || { json_error 'Could not resolve a recommended Minecraft server version.' upstream_unavailable; exit 0; }
         bedrock_compatibility_version="${version}"
         resolved_version_policy=recommended
         ;;
     latest)
-        version="$(resolve_latest_available_paper_version || true)"
+        version="$(resolve_latest_server_version || true)"
         [[ -n ${version} ]] || { json_error 'Could not resolve the newest available Minecraft server version.' upstream_unavailable; exit 0; }
         bedrock_compatibility_version="${version}"
         resolved_version_policy=latest
@@ -380,8 +386,8 @@ case "${version_policy}" in
             json_error 'Specific Minecraft version is invalid.' invalid_minecraft
             exit 0
         fi
-        if ! paper_version_build_channel "${version}" >/dev/null; then
-            json_error 'PaperMC did not confirm a usable build for that Minecraft version.' invalid_minecraft
+        if ! server_version_available "${version}" >/dev/null; then
+            json_error 'The selected server software did not confirm a released/usable build for that Minecraft version.' invalid_minecraft
             exit 0
         fi
         bedrock_compatibility_version="${version}"
@@ -529,6 +535,7 @@ server_json="$(jq -n \
     '{motd:$motd,max_players:$max_players,bedrock_enabled:$bedrock_enabled,timezone:$timezone}')"
 
 minecraft_json="$(jq -n \
+    --arg server_type "${MINECRAFT_SERVER_TYPE}" \
     --arg java_memory "${java_memory}" \
     --arg container_memory "${container_memory}" \
     --argjson java_port "${java_port}" \
@@ -542,7 +549,7 @@ minecraft_json="$(jq -n \
     --argjson system_reserve_mib "${remaining_mib}" \
     --argjson minecraft_uid "${minecraft_uid}" \
     --argjson minecraft_gid "${minecraft_gid}" \
-    '{java_memory:$java_memory,container_memory:$container_memory,java_port:$java_port,bedrock_port:$bedrock_port,image_tag:$image_tag,game_mode:$game_mode,requested_version_policy:$requested_version_policy,version_policy:$version_policy,version:$version,system_memory_mib:$system_memory_mib,system_reserve_mib:$system_reserve_mib,minecraft_uid:$minecraft_uid,minecraft_gid:$minecraft_gid}')"
+    '{server_type:$server_type,java_memory:$java_memory,container_memory:$container_memory,java_port:$java_port,bedrock_port:$bedrock_port,image_tag:$image_tag,game_mode:$game_mode,requested_version_policy:$requested_version_policy,version_policy:$version_policy,version:$version,system_memory_mib:$system_memory_mib,system_reserve_mib:$system_reserve_mib,minecraft_uid:$minecraft_uid,minecraft_gid:$minecraft_gid}')"
 
 backup_json="$(jq -c \
     --argjson automatic "${backup_automatic}" \

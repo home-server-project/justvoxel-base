@@ -196,7 +196,7 @@ if systemctl is-active --quiet minecraft.service; then
     else
         fail 'RCON did not respond'
     fi
-    if version="$(podman exec minecraft rcon-cli 'version' 2>/dev/null)"; then
+    if version="$(/usr/libexec/justvoxel/mjust/verify-minecraft-stack 2>/dev/null)"; then
         pass "Minecraft reports: ${version}"
     else
         fail 'Minecraft version query failed'

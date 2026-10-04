@@ -233,8 +233,12 @@ fi
 server_reported=''
 geyser_reported=''
 if [[ "$live_minecraft_state" == running ]]; then
-    server_reported="$(podman exec minecraft rcon-cli 'version' 2>/dev/null | head -n1 || true)"
-    geyser_reported="$(podman exec minecraft rcon-cli 'geyser version' 2>/dev/null | head -n1 || true)"
+    if server_supports_plugins; then
+        server_reported="$(podman exec minecraft rcon-cli 'version' 2>/dev/null | head -n1 || true)"
+        geyser_reported="$(podman exec minecraft rcon-cli 'geyser version' 2>/dev/null | head -n1 || true)"
+    else
+        server_reported="$(podman exec minecraft mc-monitor status --json 2>/dev/null | jq -er '.server_info.version.name | select(type == "string")' || true)"
+    fi
     emit_progress running player_recheck 'Rechecking players immediately before the cold export.'
     stop_mode=required
     [[ "$players_confirmed" == true ]] && stop_mode=confirmed

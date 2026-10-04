@@ -8,27 +8,41 @@ if [[ -r ${JV_CONFIG:-/etc/justvoxel/justvoxel.conf} ]]; then
     require_config
 fi
 
+configured_type="${MINECRAFT_SERVER_TYPE-paper}"
+target_type="${configured_type}"
+if [[ ${1:-} == --server-type ]]; then
+    (( $# >= 2 )) || exit 1
+    target_type="$2"
+    shift 2
+fi
+validate_server_type "${target_type}" || exit 1
+if (( $# != 3 )); then server_allows_in_place_switch "${configured_type}" "${target_type}" || exit 1; fi
+MINECRAFT_SERVER_TYPE="${target_type}"
+if (( $# == 3 )); then BEDROCK_ENABLED="$3"; fi
+validate_server_capabilities || exit 1
+software_changed=false
+[[ ${configured_type} == "${target_type}" ]] || software_changed=true
 installed=''
 latest_log="${DATA_PATH:-/var/lib/justvoxel/minecraft}/logs/latest.log"
 if (( $# != 3 )) && [[ -r ${latest_log} ]]; then
     installed="$(grep -Eo 'Starting minecraft server version [0-9A-Za-z._-]+' "${latest_log}" 2>/dev/null | tail -n1 | awk '{print $5}' || true)"
 fi
-available="$(resolve_latest_available_paper_version || true)"
+available="$(resolve_latest_server_version || true)"
 available_channel=''
-[[ -z ${available} ]] || available_channel="$(paper_version_build_channel "${available}" || true)"
-recommended="$(resolve_latest_stable_paper_version || true)"
+[[ -z ${available} ]] || available_channel="$(server_version_channel "${available}" || true)"
+recommended="$(resolve_recommended_server_version || true)"
 candidate=''
 policy="${1:-${MINECRAFT_VERSION_MODE:-recommended}}"
 specific="${2:-${MINECRAFT_VERSION:-}}"
 bedrock="${3:-${BEDROCK_ENABLED:-no}}"
 candidate_channel=''
-paper_supported=false
+server_supported=false
 geyser_version=''
 crossplay_compatible=false
 reason=''
 if [[ ${bedrock} == yes ]]; then
     geyser_version="$(resolve_geyser_supported_java_version || true)"
-    if [[ -n ${geyser_version} ]] && paper_version_has_stable_build "${geyser_version}"; then
+    if [[ -n ${geyser_version} ]] && server_version_recommended_available "${geyser_version}"; then
         recommended="${geyser_version}"
     else
         recommended=''
@@ -43,12 +57,12 @@ case "${policy}" in
         fi
         ;;
 esac
-[[ -z ${candidate} ]] || candidate_channel="$(paper_version_build_channel "${candidate}" || true)"
-if [[ -n ${candidate_channel} && ( ${policy} != recommended || ${bedrock} != yes || ${candidate_channel} == STABLE ) ]]; then
-    paper_supported=true
+[[ -z ${candidate} ]] || candidate_channel="$(server_version_channel "${candidate}" || true)"
+if [[ -n ${candidate_channel} && ( ${policy} != recommended || ${bedrock} != yes || ${candidate_channel} == STABLE || ${target_type} != paper ) ]]; then
+    server_supported=true
 else
     candidate=''
-    reason='A usable Paper build for the selected version could not be confirmed.'
+    reason='A usable server build for the selected version could not be confirmed.'
 fi
 if [[ ${bedrock} == yes ]]; then
     if [[ -z ${geyser_version} ]]; then
@@ -110,7 +124,7 @@ else
           ( ${bedrock} == yes && ${crossplay_compatible} != true ) ]]; then
         stack_state=unavailable
         minecraft_state=unavailable
-    elif [[ ${installed} != "${candidate}" || ${geyser_state} == updates_available ||
+    elif [[ ${software_changed} == true || ${installed} != "${candidate}" || ${geyser_state} == updates_available ||
             ${floodgate_state} == updates_available || ${image_state} == updates_available ]]; then
         stack_state=updates_available
         [[ ${installed} == "${candidate}" ]] || minecraft_state=updates_available
@@ -127,25 +141,27 @@ fi
 # Bind review to resolved artifacts and appliance configuration; no browser URLs.
 fingerprint=''
 if (( $# != 3 )); then
-    fingerprint="sha256:$(jq -cn --arg candidate "${candidate}" --arg policy "${policy}" \
+    fingerprint="sha256:$(jq -cn --arg server_type "${target_type}" --arg configured_type "${configured_type}" --arg candidate "${candidate}" --arg policy "${policy}" \
         --arg configured "${MINECRAFT_VERSION:-}" --arg bedrock "${bedrock}" \
         --arg data_path "${DATA_PATH:-}" --arg image "$(minecraft_image_ref)" --arg digest "${remote_digest}" \
         --arg installed "${installed}" --argjson geyser "${geyser_metadata}" --argjson floodgate "${floodgate_metadata}" \
-        '[$candidate,$policy,$configured,$bedrock,$data_path,$image,$digest,$installed,$geyser,$floodgate]' | sha256sum | cut -d ' ' -f1)"
+        '[$server_type,$configured_type,$candidate,$policy,$configured,$bedrock,$data_path,$image,$digest,$installed,$geyser,$floodgate]' | sha256sum | cut -d ' ' -f1)"
 fi
-jq -n --arg installed "${installed}" --arg available "${available}" \
+jq -n --arg server_type "${target_type}" --arg server_software "$(server_software_display_name)" \
+    --arg viaversion_state "$(server_supports_plugins && printf managed_automatically || printf not_applicable)" \
+    --arg installed "${installed}" --arg available "${available}" \
     --arg recommended "${recommended}" --arg candidate "${candidate}" \
     --arg available_channel "${available_channel}" --arg candidate_channel "${candidate_channel}" \
     --arg image_tag "${MINECRAFT_IMAGE_TAG:-stable}" --arg policy "${policy}" \
     --arg configured_version "${MINECRAFT_VERSION:-}" --arg geyser_version "${geyser_version}" \
-    --arg reason "${reason}" --argjson paper_supported "${paper_supported}" \
+    --arg reason "${reason}" --argjson server_supported "${server_supported}" \
     --argjson crossplay_compatible "${crossplay_compatible}" \
     --arg stack_state "${stack_state}" --arg minecraft_state "${minecraft_state}" \
     --arg geyser_state "${geyser_state}" --arg floodgate_state "${floodgate_state}" \
     --argjson geyser_artifact "${geyser_metadata}" --argjson floodgate_artifact "${floodgate_metadata}" \
     --arg managed_image_digest "${remote_digest}" --arg image_state "${image_state}" --arg fingerprint "${fingerprint}" \
     --argjson crossplay_enabled "$([[ ${bedrock} == yes ]] && printf true || printf false)" \
-    '{server_software:"Paper",installed:$installed,available:$available,available_channel:$available_channel,recommended:$recommended,selected_candidate:$candidate,candidate_channel:$candidate_channel,image_tag:$image_tag,policy:$policy,configured_version:$configured_version,
+    '{server_type:$server_type,server_software:$server_software,installed:$installed,available:$available,available_channel:$available_channel,recommended:$recommended,selected_candidate:$candidate,candidate_channel:$candidate_channel,image_tag:$image_tag,policy:$policy,configured_version:$configured_version,
       managed_image_digest:$managed_image_digest,managed_artifacts:{geyser:$geyser_artifact,floodgate:$floodgate_artifact},update_available:($stack_state == "updates_available"),stack_state:$stack_state,minecraft_state:$minecraft_state,
-      geyser_state:$geyser_state,floodgate_state:$floodgate_state,viaversion_state:"managed_automatically",image_state:$image_state,plan_fingerprint:$fingerprint,paper_supported:$paper_supported,
+      geyser_state:$geyser_state,floodgate_state:$floodgate_state,viaversion_state:$viaversion_state,image_state:$image_state,plan_fingerprint:$fingerprint,server_supported:$server_supported,paper_supported:($server_supported and $server_type == "paper"),
       crossplay_enabled:$crossplay_enabled,geyser_supported_version:$geyser_version,crossplay_compatible:$crossplay_compatible,reason:$reason}'

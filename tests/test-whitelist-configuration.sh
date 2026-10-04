@@ -102,3 +102,9 @@ invalid="$(jq '.whitelist_enabled="false"' <<< "$payload")"
 result="$(bash "${fixture_dir}/helper" apply <<< "$invalid")"
 jq -e '(.ok|not) and (.error|contains("boolean"))' <<< "$result" >/dev/null
 printf 'PASS: whitelist configuration preservation, plan/apply, fixed live commands, stopped server, rollback\n'
+
+reset_fixture yes
+request="$(jq '.bedrock_enabled=true' <<< "$payload")"
+result="$(MINECRAFT_SERVER_TYPE=vanilla bash "${fixture_dir}/helper" apply <<< "$request")"
+jq -e '(.ok|not) and (.error|contains("requires Paper or Purpur"))' <<< "$result" >/dev/null
+[[ ! -s ${fixture_dir}/rcon && ! -s ${fixture_dir}/systemctl ]]

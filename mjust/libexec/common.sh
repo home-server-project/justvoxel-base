@@ -82,10 +82,13 @@ require_config() {
         exit 1
     fi
     # shellcheck disable=SC1090
+    MINECRAFT_SERVER_TYPE=paper
     source "${JV_CONFIG}"
 
     # Compatibility defaults for configurations created before image/version
     # policy and portable Minecraft settings became administrator-configurable.
+    MINECRAFT_SERVER_TYPE="${MINECRAFT_SERVER_TYPE-paper}"
+    validate_server_capabilities || return 1
     MINECRAFT_IMAGE_TAG="${MINECRAFT_IMAGE_TAG:-latest}"
     GAME_MODE="${GAME_MODE:-survival}"
     DIFFICULTY="${DIFFICULTY:-normal}"
@@ -308,6 +311,8 @@ resolve_latest_itzg_release() {
 }
 
 write_main_config() {
+    MINECRAFT_SERVER_TYPE="${MINECRAFT_SERVER_TYPE-paper}"
+    validate_server_capabilities || return 1
     install -d -m0700 -o root -g root "${JV_CONFIG_DIR}"
     local tmp
     tmp="$(mktemp "${JV_CONFIG_DIR}/.justvoxel.conf.XXXXXX")"
@@ -333,6 +338,7 @@ write_main_config() {
         shell_quote_assignment BEDROCK_MANAGED_PLUGINS "${BEDROCK_MANAGED_PLUGINS:-yes}"
         shell_quote_assignment JAVA_MEMORY "${JAVA_MEMORY}"
         shell_quote_assignment CONTAINER_MEMORY "${CONTAINER_MEMORY}"
+        shell_quote_assignment MINECRAFT_SERVER_TYPE "${MINECRAFT_SERVER_TYPE}"
         shell_quote_assignment MINECRAFT_IMAGE_TAG "${MINECRAFT_IMAGE_TAG}"
         shell_quote_assignment MINECRAFT_VERSION_MODE "${MINECRAFT_VERSION_MODE}"
         shell_quote_assignment MINECRAFT_VERSION "${MINECRAFT_VERSION}"
@@ -474,6 +480,70 @@ resolve_latest_stable_paper_version() {
     return 1
 }
 
+# Three fixed implementations, with Paper compatibility for pre-existing configs.
+validate_server_type() {
+    case "$1" in paper|purpur|vanilla) return 0 ;; *) return 1 ;; esac
+}
+server_supports_plugins() { [[ ${1:-${MINECRAFT_SERVER_TYPE-paper}} == paper || ${1:-${MINECRAFT_SERVER_TYPE-paper}} == purpur ]]; }
+server_allows_in_place_switch() {
+    validate_server_type "$1" && validate_server_type "$2" || return 1
+    [[ $1 == "$2" ]] || { server_supports_plugins "$1" && server_supports_plugins "$2"; }
+}
+server_software_display_name() {
+    case "${1:-${MINECRAFT_SERVER_TYPE-paper}}" in paper) printf Paper ;; purpur) printf Purpur ;; vanilla) printf Vanilla ;; *) return 1 ;; esac
+}
+validate_server_capabilities() {
+    validate_server_type "${MINECRAFT_SERVER_TYPE-paper}" || { echo 'ERROR: invalid Minecraft server type.' >&2; return 1; }
+    if [[ ${BEDROCK_ENABLED:-no} == yes ]] && ! server_supports_plugins; then
+        echo 'ERROR: managed Bedrock cross-play requires Paper or Purpur.' >&2
+        return 1
+    fi
+}
+purpur_metadata() {
+    curl --connect-timeout 5 --max-time 20 -fsSL https://api.purpurmc.org/v2/purpur | jq -e '
+        select(.metadata.current | type == "string" and test("^[0-9]+([.][0-9]+){1,2}$"))
+        | select(.versions | type == "array" and length > 0 and all(.[]; type == "string" and test("^[0-9]+([.][0-9]+){1,2}$")))
+        | select(.metadata.current as $current | .versions | index($current) != null)'
+}
+vanilla_metadata() {
+    curl --connect-timeout 5 --max-time 20 -fsSL https://piston-meta.mojang.com/mc/game/version_manifest_v2.json | jq -e '
+        select(.latest.release | type == "string" and length > 0)
+        | select(.versions | type == "array" and length > 0)
+        | select(.latest.release as $release | any(.versions[]; .id == $release and .type == "release"))'
+}
+server_version_available() {
+    local version="$1"
+    [[ ${version} =~ ^[0-9A-Za-z._-]+$ ]] || return 1
+    case "${MINECRAFT_SERVER_TYPE-paper}" in
+        paper) paper_version_build_channel "${version}" >/dev/null ;;
+        purpur) purpur_metadata | jq -e --arg v "${version}" '.versions | index($v) != null' >/dev/null ;;
+        vanilla) vanilla_metadata | jq -e --arg v "${version}" 'any(.versions[]; .id == $v and .type == "release")' >/dev/null ;;
+        *) return 1 ;;
+    esac
+}
+server_version_recommended_available() {
+    if [[ ${MINECRAFT_SERVER_TYPE-paper} == paper ]]; then paper_version_has_stable_build "$1"; else server_version_available "$1"; fi
+}
+resolve_recommended_server_version() {
+    case "${MINECRAFT_SERVER_TYPE-paper}" in
+        paper) resolve_latest_stable_paper_version ;;
+        purpur) purpur_metadata | jq -er '.metadata.current' ;;
+        vanilla) vanilla_metadata | jq -er '.latest.release' ;;
+        *) return 1 ;;
+    esac
+}
+resolve_latest_server_version() {
+    case "${MINECRAFT_SERVER_TYPE-paper}" in
+        paper) resolve_latest_available_paper_version ;;
+        purpur) purpur_metadata | jq -er '.versions | sort_by(split(".") | map(tonumber)) | last' ;;
+        vanilla) resolve_recommended_server_version ;;
+        *) return 1 ;;
+    esac
+}
+server_version_channel() {
+    if [[ ${MINECRAFT_SERVER_TYPE-paper} == paper ]]; then paper_version_build_channel "$1"; else server_version_available "$1" && printf RELEASE; fi
+}
+
 render_runtime_files() {
     require_config
     install -d -m0700 -o root -g root "${JV_CONFIG_DIR}"
@@ -491,11 +561,13 @@ render_runtime_files() {
 
     runtime_version="${MINECRAFT_VERSION}"
     paper_channel=default
-    if [[ ${MINECRAFT_VERSION_MODE} == latest ]]; then
+    if [[ ${MINECRAFT_SERVER_TYPE} != paper ]]; then
+        if [[ ${MINECRAFT_VERSION_MODE} == latest ]]; then runtime_version=LATEST; fi
+    elif [[ ${MINECRAFT_VERSION_MODE} == latest ]]; then
         runtime_version=LATEST
         paper_channel=experimental
     elif [[ ${MINECRAFT_VERSION_MODE} == pinned ]] &&
-        ! grep -Fqx "VERSION=${MINECRAFT_VERSION}" "${JV_MC_ENV}" 2>/dev/null; then
+        { ! grep -Fqx "VERSION=${MINECRAFT_VERSION}" "${JV_MC_ENV}" 2>/dev/null || ! grep -Fqx TYPE=PAPER "${JV_MC_ENV}" 2>/dev/null; }; then
         build_channel="$(paper_version_build_channel "${MINECRAFT_VERSION}")" || return 1
         if [[ ${build_channel} != STABLE ]]; then
             paper_channel=experimental
@@ -505,6 +577,7 @@ render_runtime_files() {
     fi
     env_tmp="$(mktemp "${JV_CONFIG_DIR}/.minecraft.env.XXXXXX")"
     cp "${JV_TEMPLATE_ROOT}/config/minecraft.env.in" "${env_tmp}"
+    replace_token "${env_tmp}" MINECRAFT_SERVER_TYPE "${MINECRAFT_SERVER_TYPE^^}"
     replace_token "${env_tmp}" EULA TRUE
     replace_token "${env_tmp}" MINECRAFT_VERSION "${runtime_version}"
     replace_token "${env_tmp}" PAPER_CHANNEL "${paper_channel}"
@@ -521,13 +594,17 @@ render_runtime_files() {
     replace_token "${env_tmp}" MOTD "$(systemd_env_escape "${MOTD}")"
     # JustVoxel verifies these binaries; the container only owns ViaVersion.
     replace_token "${env_tmp}" PLUGINS_LINE '# Cross-play binaries are managed by JustVoxel.'
+    if [[ ${MINECRAFT_SERVER_TYPE} != paper ]]; then sed -i '/^PAPER_CHANNEL=/d' "${env_tmp}"; fi
+    if ! server_supports_plugins; then sed -i '/^MODRINTH_PROJECTS=/d' "${env_tmp}"; fi
     install -o root -g root -m0600 "${env_tmp}" "${JV_MC_ENV}"
     rm -f "${env_tmp}"
 
     image_ref="$(minecraft_image_ref)"
     quadlet_tmp="$(mktemp /etc/containers/systemd/.minecraft.container.XXXXXX)"
     cp "${JV_TEMPLATE_ROOT}/quadlets/minecraft.container.in" "${quadlet_tmp}"
-    sed -i '/^ExecStartPre=.*validate-data-mount$/a ExecStartPre=/usr/libexec/justvoxel/mjust/managed-crossplay-start' "${quadlet_tmp}"
+    if server_supports_plugins; then
+        sed -i '/^ExecStartPre=.*validate-data-mount$/a ExecStartPre=/usr/libexec/justvoxel/mjust/managed-crossplay-start' "${quadlet_tmp}"
+    fi
     replace_token "${quadlet_tmp}" MINECRAFT_IMAGE "${image_ref}"
     replace_token "${quadlet_tmp}" DATA_PATH "${DATA_PATH}"
     replace_token "${quadlet_tmp}" JAVA_PORT "${JAVA_PORT}"

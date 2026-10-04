@@ -1,5 +1,5 @@
 [Unit]
-Description=JustVoxel Paper Minecraft Java and Bedrock Cross-Play Server
+Description=JustVoxel Minecraft Server
 Wants=network-online.target
 After=network-online.target
 RequiresMountsFor=@@DATA_PATH@@

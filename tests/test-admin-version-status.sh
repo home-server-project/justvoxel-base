@@ -22,6 +22,7 @@ jv_crossplay_metadata() {
 }
 jv_crossplay_artifact_state() { printf '%s' "${COMPONENT_STATE:-up_to_date}"; }
 STUB
+sed -n '/^# Three fixed implementations/,/^render_runtime_files() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/common.sh"
 sed -e "s|^source /usr/libexec/justvoxel/mjust/common.sh$|source ${fixture_dir}/common.sh|" \
     -e '\|^source /usr/libexec/justvoxel/mjust/managed-crossplay.sh$|d' \
     -e '\|^source /usr/libexec/justvoxel/mjust/update-policy.sh$|d' \
@@ -66,3 +67,28 @@ preview="$(COMPONENT_STATE=unavailable IMAGE_STATE=unavailable bash "${fixture_d
 jq -e '.installed == "" and .recommended == "26.2" and .selected_candidate == "26.2" and .crossplay_compatible and .paper_supported and .stack_state == "not_applicable" and (.reason | contains("Server update information could not be verified") | not)' <<< "${preview}" >/dev/null
 preview_incompatible="$(COMPONENT_STATE=unavailable IMAGE_STATE=unavailable bash "${fixture_dir}/status" pinned 26.3 yes)"
 jq -e '.selected_candidate == "26.3" and (.crossplay_compatible | not) and .stack_state == "not_applicable" and (.reason | contains("not compatible"))' <<< "${preview_incompatible}" >/dev/null
+
+cat >> "${fixture_dir}/common.sh" <<'STUB'
+curl() {
+    case "${*: -1}" in
+        */v2/purpur) printf '{"metadata":{"current":"26.2"},"versions":["26.2","26.3"]}' ;;
+        */version_manifest_v2.json) printf '{"latest":{"release":"26.3"},"versions":[{"id":"26.3","type":"release"},{"id":"26.2","type":"release"},{"id":"26.4-snapshot","type":"snapshot"}]}' ;;
+        *) return 1 ;;
+    esac
+}
+STUB
+purpur="$(MINECRAFT_SERVER_TYPE=purpur bash "${fixture_dir}/status" recommended '' yes)"
+jq -e '.server_type == "purpur" and .server_software == "Purpur" and .recommended == "26.2" and .available == "26.3" and .server_supported and .crossplay_compatible and (.paper_supported | not)' <<< "${purpur}" >/dev/null
+vanilla="$(MINECRAFT_SERVER_TYPE=vanilla BEDROCK_ENABLED=no bash "${fixture_dir}/status" latest '' no)"
+jq -e '.server_software == "Vanilla" and .selected_candidate == "26.3" and .server_supported and .viaversion_state == "not_applicable" and (.crossplay_enabled | not)' <<< "${vanilla}" >/dev/null
+if MINECRAFT_SERVER_TYPE=vanilla BEDROCK_ENABLED=no bash "${fixture_dir}/status" recommended '' yes; then echo 'Vanilla Bedrock preview accepted' >&2; exit 1; fi
+
+# A software-only change is actionable, and its review cannot authorize a different target.
+printf 'Starting minecraft server version 26.2\n' > "${DATA_PATH}/logs/latest.log"
+paper="$(PAPER_AVAILABLE=26.2 PAPER_STABLE=26.2 bash "${fixture_dir}/status" recommended)"
+switch="$(bash "${fixture_dir}/status" --server-type purpur recommended)"
+jq -e '.server_type == "purpur" and .server_software == "Purpur" and .stack_state == "updates_available" and .crossplay_compatible' <<< "${switch}" >/dev/null
+[[ $(jq -r '.plan_fingerprint' <<< "${switch}") != "$(jq -r '.plan_fingerprint' <<< "${paper}")" ]]
+preview="$(bash "${fixture_dir}/status" --server-type vanilla recommended '' no)"
+jq -e '.server_type == "vanilla" and .server_supported and (.crossplay_enabled | not)' <<< "${preview}" >/dev/null
+if bash "${fixture_dir}/status" --server-type vanilla recommended; then echo 'In-place Vanilla status accepted' >&2; exit 1; fi

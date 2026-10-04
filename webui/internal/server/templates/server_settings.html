@@ -72,7 +72,8 @@
           <span class="field-help">UDP port used by Bedrock/Geyser clients. Default: <code>19132</code>.</span>
         </label>
       </div>
-      <label class="toggle-line"><input name="bedrock_enabled" type="checkbox" {{if .Form.BedrockEnabled}}checked{{end}}> Enable Bedrock cross-play</label>
+      {{if eq .Configuration.Minecraft.ServerType "vanilla"}}<p class="notice">Managed Bedrock cross-play currently requires Paper or Purpur.</p>{{end}}
+      <label class="toggle-line"><input name="bedrock_enabled" type="checkbox" {{if eq .Configuration.Minecraft.ServerType "vanilla"}}disabled{{end}} {{if .Form.BedrockEnabled}}checked{{end}}> Enable Bedrock cross-play</label>
       <p class="muted compact">Port and Bedrock changes update JustVoxel's firewall configuration when applied. Minecraft itself is not restarted automatically.</p>
     </section>
 
@@ -86,10 +87,10 @@
         <label>Version policy
           <select name="version_policy" id="version-policy">
             <option value="pinned" {{if eq .Form.VersionPolicy "pinned"}}selected{{end}}>Pinned exact Minecraft version</option>
-            <option value="recommended">Resolve newest stable Paper-supported version now</option>
+            <option value="recommended">Resolve recommended server version now</option>
             <option value="latest" {{if eq .Form.VersionPolicy "latest"}}selected{{end}}>LATEST when Minecraft starts</option>
           </select>
-          <span class="field-help">Pinned is the most predictable. LATEST may move to a newer Minecraft/Paper release when the server starts.</span>
+          <span class="field-help">Pinned is the most predictable. LATEST may move to a newer Minecraft release when the server starts.</span>
         </label>
         <label>Exact Minecraft version
           <input name="version" id="minecraft-version" value="{{.Form.Version}}" autocomplete="off">

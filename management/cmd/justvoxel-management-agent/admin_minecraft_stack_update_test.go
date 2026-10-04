@@ -19,7 +19,7 @@ func TestMinecraftStackStatusStatesAndPrivateArtifactMetadata(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		runAdminVersionStatus = func(_ context.Context, _, _ string) ([]byte, error) { return data, nil }
+		runAdminVersionStatus = func(_ context.Context, _, _, _ string) ([]byte, error) { return data, nil }
 		rr := httptest.NewRecorder()
 		admin.adminVersionStatus(rr, surfaceRequest(http.MethodGet, "/v1/admin/version/status", ""))
 		var result adminVersionStatus
@@ -36,7 +36,7 @@ func TestMinecraftStackApplyAuthorizationStrictRequestAndReview(t *testing.T) {
 	oldStatus, oldWorker := runAdminVersionStatus, startMinecraftStackUpdateWorker
 	defer func() { runAdminVersionStatus = oldStatus; startMinecraftStackUpdateWorker = oldWorker }()
 	reads, starts := 0, 0
-	runAdminVersionStatus = func(_ context.Context, _, _ string) ([]byte, error) {
+	runAdminVersionStatus = func(_ context.Context, _, _, _ string) ([]byte, error) {
 		reads++
 		return []byte(`{"stack_state":"updates_available","update_available":true,"plan_fingerprint":"` + testMinecraftResetFingerprint + `"}`), nil
 	}
@@ -98,7 +98,10 @@ func TestMinecraftStackWorkerFailureIsPersistentAndNeverRetries(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := 0
-	runMinecraftStackUpdate = func(_ context.Context, _ string, _ bool) error { calls++; return errors.New("fixture failure") }
+	runMinecraftStackUpdate = func(_ context.Context, _ string, _ bool, _ string) error {
+		calls++
+		return errors.New("fixture failure")
+	}
 	if executeMinecraftStackUpdate(context.Background(), s, journal.OperationID, minecraftStackUpdateRequest{PlanFingerprint: testMinecraftResetFingerprint}, session{}) == nil {
 		t.Fatal("failure reported success")
 	}
@@ -117,7 +120,7 @@ func TestMinecraftStackWorkerSuccessAndAcknowledgeRequireRuntimeVerification(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	runMinecraftStackUpdate = func(_ context.Context, _ string, _ bool) error { return nil }
+	runMinecraftStackUpdate = func(_ context.Context, _ string, _ bool, _ string) error { return nil }
 	if err := executeMinecraftStackUpdate(context.Background(), s, journal.OperationID, minecraftStackUpdateRequest{}, session{}); err != nil {
 		t.Fatal(err)
 	}

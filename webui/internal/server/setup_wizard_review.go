@@ -133,6 +133,7 @@ func setupConfigurationSnapshot(plan api.AdminSetupPlanResponse) string {
 	b.WriteString("Timezone: " + plan.Normalized.Server.Timezone + "\n\n")
 
 	b.WriteString("Minecraft\n")
+	b.WriteString("Server software: " + setupServerTypeLabel(plan.Normalized.Minecraft.ServerType) + "\n")
 	b.WriteString("Game mode: " + setupGameModeLabel(plan.Normalized.Minecraft.GameMode) + "\n")
 	b.WriteString("Game memory: " + plan.Normalized.Minecraft.JavaMemory + "\n")
 	b.WriteString("Maximum memory: " + plan.Normalized.Minecraft.ContainerMemory + "\n")
@@ -355,7 +356,7 @@ func setupPlanRequestFromDraft(draft setupDraft) (api.AdminSetupPlanRequest, err
 			BedrockEnabled: draft.Server.BedrockEnabled, Timezone: draft.Server.Timezone,
 		},
 		Minecraft: api.AdminSetupPlanMinecraftRequest{
-			JavaMemory: draft.Minecraft.JavaMemory, ContainerMemory: draft.Minecraft.ContainerMemory,
+			ServerType: draft.Minecraft.ServerType, JavaMemory: draft.Minecraft.JavaMemory, ContainerMemory: draft.Minecraft.ContainerMemory,
 			JavaPort: javaPort, BedrockPort: bedrockPort, ImageTag: draft.Minecraft.ImageTag,
 			VersionPolicy: draft.Minecraft.VersionPolicy, Version: draft.Minecraft.Version, GameMode: draft.Minecraft.GameMode,
 		},
@@ -387,7 +388,7 @@ func setupReviewErrorMessage(err error) string {
 func (a *App) renderSetupReview(w http.ResponseWriter, identity api.SessionInfo, state setupReviewState, csrf, errorMessage string) {
 	plan := state.Plan
 	data := setupReviewPageData{
-		Title: "Review setup", SetupMode: state.SetupMode, ServerTypeLabel: setupServerTypeLabel(state.ServerType),
+		Title: "Review setup", SetupMode: state.SetupMode, ServerTypeLabel: setupServerTypeLabel(plan.Normalized.Minecraft.ServerType),
 		Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
 		CSRF: csrf, Identity: identity, Plan: plan, Error: errorMessage,
 		EULAAccepted: state.EULAAccepted, EULAURL: minecraftEULAURL,

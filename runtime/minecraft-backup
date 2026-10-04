@@ -68,11 +68,15 @@ metadata_server_version=''
 metadata_geyser_version=''
 metadata_floodgate=false
 if systemctl is-active --quiet "${MINECRAFT_SERVICE}"; then
-    metadata_server_version="$(podman exec minecraft rcon-cli 'version' 2>/dev/null | head -n1 || true)"
-    metadata_geyser_version="$(podman exec minecraft rcon-cli 'geyser version' 2>/dev/null | head -n1 || true)"
+    if server_supports_plugins; then
+        metadata_server_version="$(podman exec minecraft rcon-cli 'version' 2>/dev/null | head -n1 || true)"
+        metadata_geyser_version="$(podman exec minecraft rcon-cli 'geyser version' 2>/dev/null | head -n1 || true)"
+    else
+        metadata_server_version="$(podman exec minecraft mc-monitor status --json 2>/dev/null | jq -er '.server_info.version.name | select(type == "string")' || true)"
+    fi
 fi
 geyser_config="${minecraft_data_path}/plugins/Geyser-Spigot/config.yml"
-if grep -Eq '^[[:space:]]*auth-type:[[:space:]]*floodgate[[:space:]]*$' "${geyser_config}" 2>/dev/null; then
+if server_supports_plugins && grep -Eq '^[[:space:]]*auth-type:[[:space:]]*floodgate[[:space:]]*$' "${geyser_config}" 2>/dev/null; then
     metadata_floodgate=true
 fi
 

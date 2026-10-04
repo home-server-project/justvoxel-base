@@ -39,7 +39,9 @@ rollback_import() {
     if [[ ${configured} == yes && ${rollback_ok} == yes ]]; then
         # Reload destination variables from the restored administrator configuration.
         # shellcheck disable=SC1090
+        MINECRAFT_SERVER_TYPE=paper
         source "${JV_CONFIG}" || rollback_ok=no
+        validate_server_type "${MINECRAFT_SERVER_TYPE}" || rollback_ok=no
         GAME_MODE="${GAME_MODE:-survival}"
         DIFFICULTY="${DIFFICULTY:-normal}"
         WHITELIST_ENABLED="${WHITELIST_ENABLED:-yes}"

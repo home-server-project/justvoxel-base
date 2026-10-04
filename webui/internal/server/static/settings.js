@@ -149,7 +149,7 @@ if (versionPolicy && versionInput && specificVersionField) {
   const next = form?.querySelector('button[name="direction"][value="next"]');
   let sequence = 0;
   let timer;
-  const channelLabel = (channel) => ({ STABLE: "Stable", BETA: "Beta", ALPHA: "Alpha" })[channel] || "Pre-release";
+  const channelLabel = (channel) => ({ STABLE: "Stable", BETA: "Beta", ALPHA: "Alpha", RELEASE: "Release" })[channel] || "Pre-release";
   const show = (status, policy) => {
     const make = (tag, className, value) => {
       const node = document.createElement(tag);

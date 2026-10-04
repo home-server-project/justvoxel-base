@@ -377,3 +377,31 @@ func TestAdminSetupPlanRouteExistsWithoutApplyRoute(t *testing.T) {
 		t.Fatalf("apply route status = %d, want 404", rr.Code)
 	}
 }
+
+func TestSetupServerSoftwareFingerprintAndWorker(t *testing.T) {
+	var response adminSetupPlanResponse
+	if err := json.Unmarshal([]byte(validAdminSetupPlanResponse), &response); err != nil {
+		t.Fatal(err)
+	}
+	previous := ""
+	for _, software := range []string{"paper", "purpur", "vanilla"} {
+		response.Normalized.Minecraft.ServerType = software
+		response.Normalized.Server.BedrockEnabled = false
+		fingerprint, err := adminSetupPlanFingerprint("v1", response.Normalized, response.Requirements)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fingerprint == previous {
+			t.Fatal("server type did not change fingerprint")
+		}
+		again, err := adminSetupPlanFingerprint("v1", response.Normalized, response.Requirements)
+		if err != nil || again != fingerprint {
+			t.Fatal("non-deterministic fingerprint")
+		}
+		previous = fingerprint
+		request, err := setupRuntimeRequestForOperation(operationJournal{OperationType: operationTypeSetup, OperationID: "00000000-0000-4000-8000-000000000000", PlanFingerprint: fingerprint}, response.Normalized)
+		if err != nil || request.Minecraft.ServerType != software {
+			t.Fatalf("runtime lost type: %#v %v", request, err)
+		}
+	}
+}

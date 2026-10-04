@@ -14,9 +14,9 @@ if (versionLauncher && versionDialog) {
     if (!response.ok) throw new Error(payload.error || "Version information is unavailable.");
     return payload;
   };
-  const statusURL = (policy = "", version = "") => "/api/version/workspace/status?" + new URLSearchParams({ policy, version });
+  const statusURL = (policy = "", version = "", server_type = "") => "/api/version/workspace/status?" + new URLSearchParams({ policy, version, server_type });
   const policyLabel = (policy) => ({ recommended: "Recommended", latest: "Latest", pinned: "Specific version" })[policy] || "Unknown";
-  const releaseLabel = (channel) => ({ STABLE: "Stable", BETA: "Beta", ALPHA: "Alpha" })[channel] || "Pre-release";
+  const releaseLabel = (channel) => ({ STABLE: "Stable", BETA: "Beta", ALPHA: "Alpha", RELEASE: "Release" })[channel] || "Pre-release";
   const line = (label, value) => {
     const row = document.createElement("div");
     const name = document.createElement("span");
@@ -34,7 +34,7 @@ if (versionLauncher && versionDialog) {
     panel.appendChild(heading);
     return panel;
   };
-  const stackLabel = (value) => ({ up_to_date: "Up to date", updates_available: "Updates available", waiting_for_compatibility: "Waiting for compatibility", unavailable: "Unavailable", managed_automatically: "Managed automatically", disabled: "Cross-play off" })[value] || "Unavailable";
+  const stackLabel = (value) => ({ up_to_date: "Up to date", updates_available: "Updates available", waiting_for_compatibility: "Waiting for compatibility", unavailable: "Unavailable", managed_automatically: "Managed automatically", disabled: "Cross-play off", not_applicable: "Not applicable" })[value] || "Unavailable";
   const watchUpdate = async (id) => {
     updateOperation = id;
     try {
@@ -61,7 +61,7 @@ if (versionLauncher && versionDialog) {
   const showReview = (root, form, plan, params, status, players) => {
     const versionReview = Boolean(form.elements.policy);
     const needsUpdate = versionReview && requiresRuntimeUpdate(plan, status);
-    const blocked = plan.compatibility_blocked || (status?.crossplay_enabled && !status.crossplay_compatible) || (versionReview && (!status.paper_supported || !status.installed)) || (needsUpdate && status.stack_state !== "updates_available");
+    const blocked = plan.compatibility_blocked || (status?.crossplay_enabled && !status.crossplay_compatible) || (versionReview && (!(status.server_supported ?? status.paper_supported) || !status.installed)) || (needsUpdate && status.stack_state !== "updates_available");
     root.querySelector("[data-version-review]")?.remove();
     const review = card("Review changes");
     review.dataset.versionReview = "";
@@ -84,7 +84,7 @@ if (versionLauncher && versionDialog) {
     if (needsUpdate) {
       const grid = document.createElement("div");
       grid.className = "version-status-grid";
-      grid.append(line("Minecraft", `${status.installed} → ${status.selected_candidate}`), line("Geyser", stackLabel(status.geyser_state)), line("Floodgate", stackLabel(status.floodgate_state)), line("ViaVersion", "Managed automatically"));
+      grid.append(line("Minecraft", `${status.installed} → ${status.selected_candidate}`), line("Geyser", stackLabel(status.geyser_state)), line("Floodgate", stackLabel(status.floodgate_state)), line("ViaVersion", stackLabel(status.viaversion_state)));
       review.appendChild(grid);
       const notice = document.createElement("p");
       notice.className = "notice warning";
@@ -265,17 +265,54 @@ if (versionLauncher && versionDialog) {
         const software = card("Server software");
         const choices = document.createElement("div");
         choices.className = "version-software-choices";
-        [["Paper", "Supported now · plugins · Bedrock cross-play where compatible", true], ["Purpur", "Coming soon", false], ["Vanilla", "Coming soon", false]].forEach(([name, description, enabled]) => {
-          const choice = document.createElement("div");
-          choice.className = "version-software-choice" + (enabled ? " is-current" : "");
-          if (!enabled) choice.setAttribute("aria-disabled", "true");
-          const title = document.createElement("strong");
-          const text = document.createElement("small");
-          title.textContent = name + (enabled ? " · Current" : "");
-          text.textContent = description;
-          choice.append(title, text);
-          choices.appendChild(choice);
-        });
+        choices.appendChild(line("Current server software", status.server_software || "Paper"));
+        if (minecraft.server_type === "vanilla") {
+          choices.appendChild(line("Vanilla", "Java only · no managed plugins or Bedrock cross-play"));
+          const note = document.createElement("p");
+          note.textContent = "Changing server software requires Reset Minecraft and setup again.";
+          choices.appendChild(note);
+        } else {
+          const target = minecraft.server_type === "purpur" ? "paper" : "purpur";
+          const change = document.createElement("button");
+          change.type = "button";
+          change.textContent = `Change to ${target === "paper" ? "Paper" : "Purpur"}`;
+          change.addEventListener("click", async () => {
+            change.disabled = true;
+            try {
+              const [plan, snapshot] = await Promise.all([request(statusURL("", "", target)), request("/api/dashboard-status")]);
+              const review = card("Review server software change");
+              review.appendChild(line("Server software", `${status.server_software} → ${plan.server_software}`));
+              review.appendChild(line("Minecraft version", plan.selected_candidate));
+              review.appendChild(line("Players online", String(snapshot?.players?.online ?? "Unknown")));
+              const note = document.createElement("p");
+              note.textContent = "JustVoxel will create a cold backup, safely stop Minecraft, change software and verify the stack. If startup or verification fails, it will restore the previous configuration. Worlds, plugins and player data are preserved.";
+              review.appendChild(note);
+              const consent = document.createElement("input"); consent.type = "checkbox";
+              const label = document.createElement("label");
+              label.append(consent, document.createTextNode(" Confirm the reviewed switch and allow the shutdown countdown for online players."));
+              review.appendChild(label);
+              const apply = document.createElement("button"); apply.type = "button"; apply.textContent = "Apply server software change";
+              const safe = plan.stack_state === "updates_available" && plan.server_supported && (!plan.crossplay_enabled || plan.crossplay_compatible) && Boolean(plan.plan_fingerprint);
+              apply.disabled = true;
+              consent.addEventListener("change", () => { apply.disabled = !safe || !consent.checked; });
+              if (!safe) review.appendChild(line("Unavailable", plan.reason));
+              apply.addEventListener("click", async () => {
+                apply.disabled = true;
+                try {
+                  const body = new URLSearchParams({ csrf, server_type: target, plan_fingerprint: plan.plan_fingerprint, confirm_players: consent.checked ? "yes" : "no" });
+                  const result = await request("/api/version/workspace/update", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
+                  if (!result.operation?.operation_id) throw new Error("Server update tracking is unavailable.");
+                  await render("Server software change started."); watchUpdate(result.operation.operation_id);
+                } catch (failure) { state.textContent = failure.message; }
+              });
+              review.appendChild(apply);
+              const cancel = document.createElement("button"); cancel.type = "button"; cancel.textContent = "Cancel review";
+              cancel.addEventListener("click", () => { review.remove(); change.disabled = false; }); review.appendChild(cancel);
+              root.appendChild(review);
+            } catch (failure) { state.textContent = failure.message; change.disabled = false; }
+          });
+          choices.appendChild(change);
+        }
         software.appendChild(choices);
         root.appendChild(software);
         const panel = card("Container release channel");
@@ -295,7 +332,7 @@ if (versionLauncher && versionDialog) {
         const grid = document.createElement("div");
         grid.className = "version-status-grid";
         grid.append(line("Installed", status.installed || "Not detected"), line("Newest available", status.available ? `${status.available} · ${releaseLabel(status.available_channel)}` : "Unavailable"), line("Recommended", status.recommended), line("Configured", status.configured_version === "LATEST" ? "Follows new versions" : status.configured_version), line("Server software", status.server_software || "Paper"), line("Container channel", status.image_tag), line("Version", policyLabel(minecraft.version_mode)), line("Overall", stackLabel(status.stack_state)));
-        grid.append(line("Minecraft update", stackLabel(status.minecraft_state)), line("Geyser", stackLabel(status.geyser_state)), line("Floodgate", stackLabel(status.floodgate_state)), line("ViaVersion", "Managed automatically"));
+        grid.append(line("Minecraft update", stackLabel(status.minecraft_state)), line("Geyser", stackLabel(status.geyser_state)), line("Floodgate", stackLabel(status.floodgate_state)), line("ViaVersion", stackLabel(status.viaversion_state)));
         if (status.crossplay_enabled && status.policy === "recommended" && status.available && status.recommended && status.available !== status.recommended) {
           grid.append(line("New Minecraft version", `${status.available} · Waiting for cross-play support`));
         }
@@ -324,7 +361,7 @@ if (versionLauncher && versionDialog) {
             const candidate = await request(statusURL(policy, policy === "pinned" ? form.elements.version.value.trim() : ""));
             await settleSelectChange();
             if (!preview.isConnected || previewTicket !== previewSequence) return;
-            preview.replaceChildren(line("Newest available", candidate.available ? `${candidate.available} · ${releaseLabel(candidate.available_channel)}` : "Unavailable"), line(policy === "latest" ? "Will install now" : "Will install", candidate.selected_candidate), line("Paper release", candidate.candidate_channel ? releaseLabel(candidate.candidate_channel) : "Unknown"), line("Geyser/Floodgate", candidate.crossplay_enabled ? candidate.crossplay_compatible ? `Compatible with ${candidate.selected_candidate}` : "Not compatible" : "Cross-play off"));
+            preview.replaceChildren(line("Newest available", candidate.available ? `${candidate.available} · ${releaseLabel(candidate.available_channel)}` : "Unavailable"), line(policy === "latest" ? "Will install now" : "Will install", candidate.selected_candidate), line("Server release", candidate.candidate_channel ? releaseLabel(candidate.candidate_channel) : "Unknown"), line("Geyser/Floodgate", candidate.crossplay_enabled ? candidate.crossplay_compatible ? `Compatible with ${candidate.selected_candidate}` : "Not compatible" : "Cross-play off"));
           } catch (_) {
             await settleSelectChange();
             if (preview.isConnected && previewTicket === previewSequence) preview.textContent = "Available version and compatibility could not be confirmed.";

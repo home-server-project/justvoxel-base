@@ -12,7 +12,7 @@ func TestVersionStatusIsAdministratorOnlyAndValidatesInputs(t *testing.T) {
 	old := runAdminVersionStatus
 	defer func() { runAdminVersionStatus = old }()
 	called := false
-	runAdminVersionStatus = func(_ context.Context, policy, version string) ([]byte, error) {
+	runAdminVersionStatus = func(_ context.Context, policy, version, serverType string) ([]byte, error) {
 		called = true
 		return []byte(`{"server_software":"Paper","installed":"26.2","available":"26.3","recommended":"26.2","selected_candidate":"26.2","policy":"recommended","update_available":true,"paper_supported":true}`), nil
 	}
@@ -44,7 +44,7 @@ func TestSetupVersionPreviewUsesAdministratorAndExplicitBedrockChoice(t *testing
 	old := runSetupVersionPreview
 	defer func() { runSetupVersionPreview = old }()
 	called := false
-	runSetupVersionPreview = func(_ context.Context, policy, version, bedrock string) ([]byte, error) {
+	runSetupVersionPreview = func(_ context.Context, policy, version, bedrock, serverType string) ([]byte, error) {
 		called = true
 		if policy != "pinned" || version != "1.21.8" || bedrock != "yes" {
 			t.Fatalf("unexpected preview request: %q %q %q", policy, version, bedrock)

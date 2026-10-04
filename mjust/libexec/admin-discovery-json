@@ -14,6 +14,7 @@ system_memory_mib() {
 
 configuration_values_json() {
     jq -n \
+        --arg server_type "${MINECRAFT_SERVER_TYPE-paper}" \
         --arg data_path "${DATA_PATH}" \
         --arg data_mount_point "${DATA_MOUNT_POINT}" \
         --arg data_expected_uuid "${DATA_EXPECTED_UUID}" \
@@ -44,6 +45,7 @@ configuration_values_json() {
         '{
             configured:true,
             minecraft:{
+                server_type:$server_type,
                 data_path:$data_path,
                 data_mount_point:$data_mount_point,
                 data_expected_uuid:$data_expected_uuid,
@@ -236,6 +238,16 @@ configuration_change_json() {
     fi
 
     require_config
+    if jq -e 'has("server_type")' <<< "${request}" >/dev/null; then
+        local requested_type
+        requested_type="$(jq -r '.server_type' <<< "${request}")"
+        if ! server_allows_in_place_switch "${MINECRAFT_SERVER_TYPE-paper}" "${requested_type}"; then
+            jq -n '{ok:false,error:"Changing to/from Vanilla requires Reset Minecraft and setup again."}'; return 0
+        fi
+        if [[ ${requested_type} != "${MINECRAFT_SERVER_TYPE-paper}" ]]; then
+            jq -n '{ok:false,error:"Server software changes require the reviewed server maintenance operation."}'; return 0
+        fi
+    fi
 
     local old_whitelist_enabled="${WHITELIST_ENABLED}" new_whitelist_enabled="${WHITELIST_ENABLED}"
     if jq -e 'has("whitelist_enabled")' >/dev/null <<< "${request}"; then
@@ -279,6 +291,10 @@ configuration_change_json() {
     confirm_players_json="$(jq -r '.confirm_players // false' <<< "${request}")"
 
     if [[ ${new_bedrock_enabled_json} == true ]]; then new_bedrock_enabled=yes; else new_bedrock_enabled=no; fi
+    if [[ ${MINECRAFT_SERVER_TYPE-paper} == vanilla && ${new_bedrock_enabled} == yes ]]; then
+        jq -n '{ok:false,error:"Managed Bedrock cross-play requires Paper or Purpur."}'
+        return 0
+    fi
     if [[ ${new_backup_timer_enabled_json} == true ]]; then new_backup_timer_enabled=yes; else new_backup_timer_enabled=no; fi
     if [[ ${confirm_players_json} == true ]]; then confirm_players=yes; else confirm_players=no; fi
 
@@ -344,6 +360,10 @@ configuration_change_json() {
 
     case "${new_version_policy}" in
         latest)
+            if [[ ${MINECRAFT_SERVER_TYPE-paper} != paper && ${old_version_mode} != latest ]] && ! resolve_latest_server_version >/dev/null; then
+                jq -n '{ok:false,error:"The current released Minecraft version could not be verified for the selected server software."}'
+                return 0
+            fi
             new_version=LATEST
             ;;
         recommended)
@@ -352,13 +372,13 @@ configuration_change_json() {
                 if [[ ${new_bedrock_enabled} == yes ]]; then
                     recommended_geyser_version="$(resolve_geyser_supported_java_version || true)"
                 fi
-                if [[ -n ${recommended_geyser_version} ]] && paper_version_has_stable_build "${recommended_geyser_version}"; then
+                if [[ -n ${recommended_geyser_version} ]] && server_version_recommended_available "${recommended_geyser_version}"; then
                     new_version="${recommended_geyser_version}"
                 else
-                    new_version="$(resolve_latest_stable_paper_version || true)"
+                    new_version="$(resolve_recommended_server_version || true)"
                 fi
                 if [[ -z ${new_version} ]]; then
-                    jq -n '{ok:false,error:"Could not resolve the newest Minecraft version with a stable Paper build."}'
+                    jq -n '{ok:false,error:"Could not resolve the recommended Minecraft server version."}'
                     return 0
                 fi
             fi
@@ -369,8 +389,8 @@ configuration_change_json() {
                 return 0
             fi
             if [[ ${old_version_mode} != pinned || ${new_version} != "${old_version}" ]]; then
-                if ! paper_version_build_channel "${new_version}" >/dev/null; then
-                    jq -n '{ok:false,error:"PaperMC did not confirm a usable build for that Minecraft version."}'
+                if ! server_version_available "${new_version}" >/dev/null; then
+                    jq -n '{ok:false,error:"The selected server software did not confirm a usable build for that Minecraft version."}'
                     return 0
                 fi
             fi
@@ -394,7 +414,7 @@ configuration_change_json() {
     if [[ ${new_bedrock_enabled} == yes && ( ${new_version} != "${old_version}" || ${new_version_policy} != "${old_version_mode}" || ${old_bedrock_enabled} != yes ) ]]; then
         local compatible_candidate="${new_version}" geyser_supported_version=''
         if [[ ${compatible_candidate} == LATEST ]]; then
-            compatible_candidate="$(resolve_latest_available_paper_version || true)"
+            compatible_candidate="$(resolve_latest_server_version || true)"
         fi
         geyser_supported_version="$(resolve_geyser_supported_java_version || true)"
         if [[ -z ${compatible_candidate} || -z ${geyser_supported_version} ]] || ! bedrock_crossplay_supports_version "${compatible_candidate}" "${geyser_supported_version}"; then

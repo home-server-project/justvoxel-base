@@ -17,6 +17,10 @@ if ! wait_for_rcon 900; then
 fi
 
 players="$(podman exec minecraft rcon-cli 'list' 2>/dev/null)" || { echo 'ERROR: Minecraft player query failed after restore.' >&2; exit 1; }
+if [[ ${MINECRAFT_SERVER_TYPE-paper} == vanilla ]]; then
+    JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack
+    exit $?
+fi
 version="$(podman exec minecraft rcon-cli 'version' 2>/dev/null)" || { echo 'ERROR: Minecraft version query failed after restore.' >&2; exit 1; }
 plugins="$(podman exec minecraft rcon-cli 'plugins' 2>/dev/null)" || { echo 'ERROR: Minecraft plugin query failed after restore.' >&2; exit 1; }
 

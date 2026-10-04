@@ -7,6 +7,16 @@ require_config
 
 image="$(minecraft_image_ref)"
 source /usr/libexec/justvoxel/mjust/managed-crossplay.sh
+old_server_type="${MINECRAFT_SERVER_TYPE-paper}"
+target_server_type="${old_server_type}"
+if [[ ${1:-} == --server-type ]]; then
+    (( $# >= 2 )) || exit 1
+    target_server_type="$2"
+    shift 2
+fi
+server_allows_in_place_switch "${old_server_type}" "${target_server_type}" || { echo 'ERROR: changing to/from Vanilla requires Minecraft reset and setup again.' >&2; exit 1; }
+status_args=()
+if [[ ${target_server_type} != "${old_server_type}" ]]; then status_args=(--server-type "${target_server_type}"); fi
 reviewed=no
 expected_fingerprint=''
 players_override=no
@@ -20,7 +30,7 @@ if (( $# > 0 )); then
         players_override=yes
     fi
 fi
-stack_plan="$(/usr/libexec/justvoxel/mjust/admin-version-status-json)"
+stack_plan="$(/usr/libexec/justvoxel/mjust/admin-version-status-json "${status_args[@]}")"
 stack_state="$(jq -r '.stack_state' <<< "${stack_plan}")"
 if [[ ${reviewed} == yes ]]; then
     [[ ${stack_state} == updates_available &&
@@ -44,13 +54,15 @@ latest_image_release=''
 repin_game=no
 old_game_mode="${MINECRAFT_VERSION_MODE}"
 old_game_version="${MINECRAFT_VERSION}"
+old_managed_plugins="${BEDROCK_MANAGED_PLUGINS:-yes}"
 # Specific version remains explicit; Recommended follows verified compatibility.
 if [[ ${MINECRAFT_VERSION_MODE} == recommended && ${MINECRAFT_VERSION} != "${latest_mc}" ]]; then
     repin_game=yes
 fi
 printf 'Minecraft: %s -> %s\n' "$(jq -r '.installed' <<< "${stack_plan}")" "${latest_mc}"
-printf 'Geyser: %s\nFloodgate: %s\nViaVersion: Managed automatically\n' \
+printf 'Geyser: %s\nFloodgate: %s\n' \
     "$(jq -r '.geyser_state' <<< "${stack_plan}")" "$(jq -r '.floodgate_state' <<< "${stack_plan}")"
+server_supports_plugins && echo 'ViaVersion: Managed automatically'
 
 echo
 if [[ ${MINECRAFT_IMAGE_TAG} != stable && ${MINECRAFT_IMAGE_TAG} != latest ]]; then
@@ -164,6 +176,8 @@ cleanup() {
                 echo 'ERROR: managed Geyser/Floodgate rollback failed; previous runtime was not restored; operation requires attention.' >&2
                 recovery_ok=no
             fi
+            BEDROCK_MANAGED_PLUGINS="${old_managed_plugins}"
+            MINECRAFT_SERVER_TYPE="${old_server_type}"
             MINECRAFT_VERSION_MODE="${old_game_mode}"
             MINECRAFT_VERSION="${old_game_version}"
             if [[ ${game_config_changed} == yes ]] && ! write_main_config; then recovery_ok=no; fi
@@ -178,7 +192,7 @@ cleanup() {
                 recovery_ok=no
             fi
             if [[ ${recovery_ok} == yes && ${was_active} == yes ]]; then
-                if ! systemctl start minecraft.service || ! wait_for_rcon 900; then recovery_ok=no; fi
+                if ! systemctl start minecraft.service || ! wait_for_rcon 900 || ! JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack "${old_game_version}"; then recovery_ok=no; fi
             fi
         fi
         if [[ ${recovery_ok} != yes ]]; then
@@ -199,7 +213,7 @@ if [[ ${BEDROCK_ENABLED} == yes ]]; then
         }
     done
 fi
-current_plan="$(/usr/libexec/justvoxel/mjust/admin-version-status-json)"
+current_plan="$(/usr/libexec/justvoxel/mjust/admin-version-status-json "${status_args[@]}")"
 [[ $(jq -r '.plan_fingerprint' <<< "${current_plan}") == "$(jq -r '.plan_fingerprint' <<< "${stack_plan}")" &&
    $(jq -r '.stack_state' <<< "${current_plan}") == updates_available &&
    $(jq -r '.update_available' <<< "${current_plan}") == true ]] || {
@@ -254,11 +268,16 @@ if [[ ${new_local_digest} != "${remote_digest_after}" || ${new_local_digest} != 
 fi
 remote_digest="${remote_digest_after}"
 
+if [[ ${target_server_type} != "${old_server_type}" ]]; then
+    MINECRAFT_SERVER_TYPE="${target_server_type}"
+    game_config_changed=yes
+    write_main_config
+fi
 if [[ ${repin_game} == yes ]]; then
     MINECRAFT_VERSION="${latest_mc}"
     game_config_changed=yes
     write_main_config
-    echo "Minecraft/Paper selected version updated to ${MINECRAFT_VERSION}."
+    echo "Minecraft selected version updated to ${MINECRAFT_VERSION}."
 fi
 
 # Retire the legacy imported-binary opt-out and the container URL downloader.

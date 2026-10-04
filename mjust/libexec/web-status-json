@@ -45,7 +45,7 @@ web_players() {
     fi
 
     # shellcheck disable=SC1090
-    source "${JV_CONFIG}"
+    require_config
     [[ ${MAX_PLAYERS:-} =~ ^[0-9]+$ ]] && configured_max="${MAX_PLAYERS}"
 
     if ! systemctl is-active --quiet minecraft.service 2>/dev/null; then
@@ -101,7 +101,7 @@ web_action() {
     fi
 
     # shellcheck disable=SC1090
-    source "${JV_CONFIG}"
+    require_config
 
     case "${action}" in
         start)
@@ -183,7 +183,7 @@ web_status() {
 
     if [[ -r ${JV_CONFIG} && ! -e ${JV_SETUP_IN_PROGRESS} ]]; then
         # shellcheck disable=SC1090
-        source "${JV_CONFIG}"
+        require_config
         configured=yes
     fi
 
@@ -407,6 +407,8 @@ web_status() {
         --arg mc_state "${minecraft_state}" \
         --argjson players "${players}" \
         --argjson max_players "${max_players}" \
+        --arg server_type "${MINECRAFT_SERVER_TYPE-paper}" \
+        --arg server_software "$(server_software_display_name)" \
         --arg mc_version "${mc_version}" \
         --arg version_policy "${configured_version}" \
         --argjson java_port "${java_port}" \
@@ -450,7 +452,7 @@ web_status() {
         --arg details_network "${details_network}" \
         '{
           system:{variant:$variant,health:$health,ipv4:$ipv4,tailscale:$tailscale,netbird:$netbird},
-          minecraft:{configured:$configured,state:$mc_state,players:$players,max_players:$max_players,version:$mc_version,java_port:$java_port,bedrock:$bedrock,bedrock_port:$bedrock_port},
+          minecraft:{server_type:$server_type,server_software:$server_software,configured:$configured,state:$mc_state,players:$players,max_players:$max_players,version:$mc_version,java_port:$java_port,bedrock:$bedrock,bedrock_port:$bedrock_port},
           backup:{enabled:$backup_enabled,last:$backup_last,next:$backup_next},
           justvoxel:{version:$justvoxel_version,webui:$webui_version,management_api:$api_version},
           extended:{

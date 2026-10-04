@@ -12,12 +12,16 @@ import (
 )
 
 type minecraftStackUpdateRequest struct {
+	ServerType      string `json:"server_type,omitempty"`
 	PlanFingerprint string `json:"plan_fingerprint"`
 	ConfirmPlayers  bool   `json:"confirm_players"`
 }
 
-var runMinecraftStackUpdate = func(ctx context.Context, fingerprint string, confirmPlayers bool) error {
+var runMinecraftStackUpdate = func(ctx context.Context, fingerprint string, confirmPlayers bool, serverType string) error {
 	args := []string{"--reviewed-stack", fingerprint}
+	if serverType != "" {
+		args = append([]string{"--server-type", serverType}, args...)
+	}
 	if confirmPlayers {
 		args = append(args, "--confirm-players")
 	}
@@ -65,7 +69,11 @@ func (s *server) adminMinecraftStackUpdate(w http.ResponseWriter, r *http.Reques
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
-	data, err := runAdminVersionStatus(ctx, "", "")
+	if request.ServerType != "" && !validSetupServerType(request.ServerType) {
+		writeError(w, http.StatusBadRequest, "Invalid server type")
+		return
+	}
+	data, err := runAdminVersionStatus(ctx, "", "", request.ServerType)
 	var plan adminVersionStatus
 	if err != nil || json.Unmarshal(data, &plan) != nil || plan.StackState != "updates_available" || !plan.UpdateAvailable {
 		writeError(w, http.StatusServiceUnavailable, "A safe server update could not be verified")
@@ -102,7 +110,7 @@ func executeMinecraftStackUpdate(ctx context.Context, s *server, operationID str
 	if _, err := s.operations.transition(operationID, operationRunning, "updating", "Preparing verified updates, a cold backup and a safe restart."); err != nil {
 		return err
 	}
-	err := runMinecraftStackUpdate(ctx, request.PlanFingerprint, request.ConfirmPlayers)
+	err := runMinecraftStackUpdate(ctx, request.PlanFingerprint, request.ConfirmPlayers, request.ServerType)
 	success := err == nil
 	if err != nil {
 		message := "Server update stopped. Review Minecraft state before continuing."

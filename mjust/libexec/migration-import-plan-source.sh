@@ -102,6 +102,10 @@ else
 fi
 
 candidate_type="$(jq -r '.sourceType' <<< "${selected}")"
+if [[ ${MINECRAFT_SERVER_TYPE-paper} != paper || ( -n ${native_manifest} && $(jq -r '.minecraft.implementation // "paper"' <<< "${native_manifest}") != paper ) ]]; then
+    echo 'ERROR: Migration v1 imports require a Paper destination and a Paper native bundle; reset/re-setup is required to change server software.' >&2
+    exit 1
+fi
 case "${candidate_type}" in
     paper|itzg-paper) ;;
     vanilla)

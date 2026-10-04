@@ -60,13 +60,14 @@ _a55_parse_request() {
       (.storage|type == "object") and
       (.backups|type == "object") and
       ((.server|keys) - ["motd","max_players","bedrock_enabled","timezone"] | length == 0) and
-      ((.minecraft|keys) - ["java_memory","container_memory","java_port","bedrock_port","image_tag","version_policy","version","game_mode","minecraft_uid","minecraft_gid"] | length == 0) and
+      ((.minecraft|keys) - ["server_type","java_memory","container_memory","java_port","bedrock_port","image_tag","version_policy","version","game_mode","minecraft_uid","minecraft_gid"] | length == 0) and
       ((.storage|keys) - ["type","path","mount_point","expected_uuid","expected_source"] | length == 0) and
       ((.backups|keys) - ["type","path","mount_point","expected_uuid","expected_source","automatic","schedule","keep"] | length == 0) and
       (.server.motd|type == "string") and
       (.server.max_players|type == "number") and
       (.server.bedrock_enabled|type == "boolean") and
       (.server.timezone|type == "string") and
+      (.minecraft | (has("server_type") | not) or (.server_type | type == "string" and (. == "paper" or . == "purpur" or . == "vanilla"))) and
       (.minecraft.java_memory|type == "string") and
       (.minecraft.container_memory|type == "string") and
       (.minecraft.java_port|type == "number") and
@@ -128,6 +129,7 @@ _a55_load_values() {
     BEDROCK_MANAGED_PLUGINS=yes
     JAVA_MEMORY="$(jq -r '.minecraft.java_memory' <<< "${A55_REQUEST}")"
     CONTAINER_MEMORY="$(jq -r '.minecraft.container_memory' <<< "${A55_REQUEST}")"
+    MINECRAFT_SERVER_TYPE="$(jq -r '.minecraft.server_type // "paper"' <<< "${A55_REQUEST}")"
     MINECRAFT_IMAGE_TAG="$(jq -r '.minecraft.image_tag' <<< "${A55_REQUEST}")"
     MINECRAFT_VERSION_MODE="$(jq -r '.minecraft.version_policy' <<< "${A55_REQUEST}")"
     MINECRAFT_VERSION="$(jq -r '.minecraft.version' <<< "${A55_REQUEST}")"
@@ -144,6 +146,7 @@ _a55_load_values() {
 
 _a55_validate_runtime_inputs() {
     _a55_load_values
+    validate_server_capabilities || return 1
     validate_storage_path "${DATA_PATH}" || return 1
     validate_storage_path "${BACKUP_PATH}" || return 1
     validate_memory "${JAVA_MEMORY}" && validate_memory "${CONTAINER_MEMORY}" || return 1
@@ -249,12 +252,6 @@ _a55_verify_action() {
         return 1
     fi
 
-    output="$(podman exec minecraft rcon-cli version 2>&1)"
-    rc=$?
-    _a55_evidence_set minecraft_version_check "$([[ ${rc} -eq 0 ]] && printf ok || printf failed)" || return 1
-    _a55_evidence_set_bounded minecraft_version_output "${output}" || return 1
-    (( rc == 0 )) || return 1
-
     if [[ ${BEDROCK_ENABLED} == yes ]]; then
         output="$(configure_geyser_floodgate 2>&1)"
         rc=$?
@@ -268,6 +265,12 @@ _a55_verify_action() {
         _a55_evidence_set_bounded geyser_version_output "${output}" || return 1
         (( rc == 0 )) || return 1
     fi
+
+    output="$(/usr/libexec/justvoxel/mjust/verify-minecraft-stack "${MINECRAFT_VERSION}" 2>&1)"
+    rc=$?
+    _a55_evidence_set minecraft_version_check "$([[ ${rc} -eq 0 ]] && printf ok || printf failed)" || return 1
+    _a55_evidence_set_bounded minecraft_version_output "${output}" || return 1
+    (( rc == 0 )) || return 1
 
     output="$(activate_backup_timer 2>&1)"
     rc=$?

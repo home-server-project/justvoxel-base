@@ -10,6 +10,8 @@ import (
 )
 
 type adminVersionStatus struct {
+	ServerType             string `json:"server_type"`
+	ServerSupported        bool   `json:"server_supported"`
 	StackState             string `json:"stack_state"`
 	MinecraftState         string `json:"minecraft_state"`
 	GeyserState            string `json:"geyser_state"`
@@ -36,11 +38,19 @@ type adminVersionStatus struct {
 }
 
 var versionInputPattern = regexp.MustCompile(`^[0-9A-Za-z._-]+$`)
-var runAdminVersionStatus = func(ctx context.Context, policy, version string) ([]byte, error) {
-	return exec.CommandContext(ctx, "/usr/libexec/justvoxel/mjust/admin-version-status-json", policy, version).CombinedOutput()
+var runAdminVersionStatus = func(ctx context.Context, policy, version, serverType string) ([]byte, error) {
+	args := []string{policy, version}
+	if serverType != "" {
+		args = append([]string{"--server-type", serverType}, args...)
+	}
+	return exec.CommandContext(ctx, "/usr/libexec/justvoxel/mjust/admin-version-status-json", args...).CombinedOutput()
 }
-var runSetupVersionPreview = func(ctx context.Context, policy, version, bedrock string) ([]byte, error) {
-	return exec.CommandContext(ctx, "/usr/libexec/justvoxel/mjust/admin-version-status-json", policy, version, bedrock).CombinedOutput()
+var runSetupVersionPreview = func(ctx context.Context, policy, version, bedrock, serverType string) ([]byte, error) {
+	args := []string{policy, version, bedrock}
+	if serverType != "" {
+		args = append([]string{"--server-type", serverType}, args...)
+	}
+	return exec.CommandContext(ctx, "/usr/libexec/justvoxel/mjust/admin-version-status-json", args...).CombinedOutput()
 }
 
 func registerAdminVersionStatusRoutes(mux *http.ServeMux, s *server) {
@@ -68,9 +78,14 @@ func (s *server) adminSetupVersionPreview(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "Invalid Bedrock choice")
 		return
 	}
+	serverType := r.URL.Query().Get("server_type")
+	if serverType != "" && !validSetupServerType(serverType) {
+		writeError(w, http.StatusBadRequest, "Invalid server type")
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
-	output, err := runSetupVersionPreview(ctx, policy, version, bedrock)
+	output, err := runSetupVersionPreview(ctx, policy, version, bedrock, serverType)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "Version information is unavailable")
 		return
@@ -87,6 +102,11 @@ func (s *server) adminVersionStatus(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.requireAdministrator(w, r); !ok {
 		return
 	}
+	serverType := r.URL.Query().Get("server_type")
+	if serverType != "" && !validSetupServerType(serverType) {
+		writeError(w, http.StatusBadRequest, "Invalid server type")
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
 	policy, version := r.URL.Query().Get("policy"), r.URL.Query().Get("version")
@@ -98,7 +118,7 @@ func (s *server) adminVersionStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid Minecraft version")
 		return
 	}
-	output, err := runAdminVersionStatus(ctx, policy, version)
+	output, err := runAdminVersionStatus(ctx, policy, version, serverType)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "Version information is unavailable")
 		return

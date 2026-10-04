@@ -8,7 +8,7 @@ import (
 )
 
 type versionStatusAPI interface {
-	AdminVersionStatus(context.Context, string, string, string) (api.AdminVersionStatus, error)
+	AdminVersionStatus(context.Context, string, string, string, string) (api.AdminVersionStatus, error)
 }
 
 func (a *App) versionWorkspaceStatus(w http.ResponseWriter, r *http.Request) {
@@ -21,7 +21,7 @@ func (a *App) versionWorkspaceStatus(w http.ResponseWriter, r *http.Request) {
 		writeMinecraftWorkspaceError(w, http.StatusServiceUnavailable, "Version information is unavailable.")
 		return
 	}
-	status, err := client.AdminVersionStatus(r.Context(), session, r.URL.Query().Get("policy"), r.URL.Query().Get("version"))
+	status, err := client.AdminVersionStatus(r.Context(), session, r.URL.Query().Get("policy"), r.URL.Query().Get("version"), r.URL.Query().Get("server_type"))
 	if err != nil {
 		a.writeMinecraftWorkspaceAPIError(w, err, "Version information is unavailable.")
 		return
@@ -60,7 +60,7 @@ func (a *App) versionWorkspaceUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := client.AdminMinecraftStackUpdate(r.Context(), session, api.MinecraftStackUpdateRequest{
-		PlanFingerprint: r.FormValue("plan_fingerprint"), ConfirmPlayers: r.FormValue("confirm_players") == "yes",
+		ServerType: r.FormValue("server_type"), PlanFingerprint: r.FormValue("plan_fingerprint"), ConfirmPlayers: r.FormValue("confirm_players") == "yes",
 	})
 	if err != nil {
 		a.writeMinecraftWorkspaceAPIError(w, err, "Server update could not start.")
