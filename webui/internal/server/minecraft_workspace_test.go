@@ -378,6 +378,36 @@ func TestMinecraftWorkspaceGameplayTabRendersGameModeAndDeferredReview(t *testin
 	}
 }
 
+func TestMinecraftWorkspaceCrossplayUsesExistingCheckboxSwitch(t *testing.T) {
+	sourceBytes, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(sourceBytes)
+	for _, want := range []string{
+		`<label class="minecraft-native-toggle system-ups-shutdown-switch"><span>Enable Bedrock cross-play</span><input name="bedrock_enabled" type="checkbox"></label>`,
+		`section.querySelector('[name="bedrock_enabled"]').checked = Boolean(minecraft.bedrock_enabled);`,
+		`Geyser/Floodgate compatible with ${status.geyser_supported_version}.`,
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("Cross-play form missing %q", want)
+		}
+	}
+	cssBytes, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`.system-ups-shutdown-switch input[type=checkbox]`,
+		`.system-ups-shutdown-switch input[type=checkbox]:checked`,
+		`.system-ups-shutdown-switch input[type=checkbox]:focus-visible`,
+	} {
+		if !strings.Contains(string(cssBytes), want) {
+			t.Fatalf("existing switch styling missing %q", want)
+		}
+	}
+}
+
 func TestMinecraftWorkspaceReviewHumanizesOnlyBedrockValues(t *testing.T) {
 	sourceBytes, err := assets.ReadFile("static/app.js")
 	if err != nil {

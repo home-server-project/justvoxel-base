@@ -2,13 +2,39 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestAdminConfigurationCommandReturnsOnlyStdoutJSON(t *testing.T) {
+	helper := filepath.Join(t.TempDir(), "configuration-helper")
+	script := "#!/bin/sh\nprintf '%s' '{\"ok\":true,\"applied\":true}'\nprintf '%s\\n' 'Harmless apply diagnostic' >&2\n"
+	if err := os.WriteFile(helper, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := runAdminConfigurationCommand(context.Background(), helper, "apply", []byte(`{"bedrock_enabled":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(output) != `{"ok":true,"applied":true}` {
+		t.Fatalf("protocol output = %q, want only stdout JSON", output)
+	}
+	var out adminConfigurationChangeResponse
+	if err := json.Unmarshal(output, &out); err != nil {
+		t.Fatalf("stdout JSON could not be decoded: %v", err)
+	}
+	if !out.OK || !out.Applied {
+		t.Fatalf("unexpected decoded response: %#v", out)
+	}
+}
 
 func TestLocalRootCanPlanAndApplyConfigurationWithoutBearerSession(t *testing.T) {
 	s := surfaceTestServer(t, roleViewer)

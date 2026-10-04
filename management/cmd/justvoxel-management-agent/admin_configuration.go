@@ -57,9 +57,13 @@ type adminConfigurationChangeResponse struct {
 }
 
 var runAdminConfigurationHelper = func(ctx context.Context, action string, request []byte) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, adminDiscoveryHelper, action)
+	return runAdminConfigurationCommand(ctx, adminDiscoveryHelper, action, request)
+}
+
+func runAdminConfigurationCommand(ctx context.Context, helper, action string, request []byte) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, helper, action)
 	cmd.Stdin = bytes.NewReader(request)
-	return cmd.CombinedOutput()
+	return cmd.Output()
 }
 
 func registerAdminConfigurationRoutes(mux *http.ServeMux, s *server) {

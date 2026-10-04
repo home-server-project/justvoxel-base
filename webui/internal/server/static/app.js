@@ -3097,7 +3097,7 @@ if (minecraftOpen && minecraftDialog) {
           <label>Minecraft Java port<input name="java_port" type="number" min="1" max="65535" required></label>
           <label>Bedrock UDP port<input name="bedrock_port" type="number" min="1" max="65535" required></label>
         </div>
-        <label class="minecraft-native-toggle"><input name="bedrock_enabled" type="checkbox"> Enable Bedrock cross-play</label>
+        <label class="minecraft-native-toggle system-ups-shutdown-switch"><span>Enable Bedrock cross-play</span><input name="bedrock_enabled" type="checkbox"></label>
         <p class="muted compact">Port and Bedrock changes update the appliance firewall when applied. Minecraft is not restarted automatically for these non-memory changes.</p>
         <div data-crossplay-compatibility class="muted compact">Checking Geyser/Floodgate compatibility…</div><button type="button" class="secondary" data-open-version>Open Version</button>`;
       section.querySelector('[name="java_port"]').value = String(minecraft.java_port || 25565);
