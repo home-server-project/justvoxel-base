@@ -79,6 +79,39 @@ for id in setup status players configure service whitelist backups migration sto
     grep -Fq "${id})" "${menu}" || fail "menu preview/dispatch id missing: ${id}"
 done
 
+# Capture both main-menu selectors without invoking any appliance commands.
+(
+    source <(sed -n '/^select_rich() {/,/^}/p; /^select_compact() {/,/^}/p; /^migration_menu() {/,/^}/p' "${menu}")
+    jui_terminal_cols() { echo 100; }
+    jui_terminal_lines() { echo 30; }
+    jui_menu_profile() { echo standard; }
+    jui_menu_gap_enabled() { return 1; }
+    fzf() { cat > "${visible}"; printf 'exit\tExit\n'; }
+    jui_choose() { printf '%s\n' "$@" > "${visible}"; printf 'Back\n'; }
+
+    configured=no
+    select_rich >/dev/null
+    expected=$'setup\tFirst setup\nstatus\tStatus\nstorage\tStorage\nsystem\tSystem\nexit\tExit'
+    [[ $(cat "${visible}") == "${expected}" ]] || fail 'unconfigured rich menu has incorrect entries or order'
+    select_compact >/dev/null
+    expected=$'JustVoxel\nFirst setup\nStatus\nStorage\nSystem\nExit'
+    [[ $(cat "${visible}") == "${expected}" ]] || fail 'unconfigured compact menu has incorrect entries or order'
+
+    configured=yes
+    select_rich >/dev/null
+    grep -Fxq $'migration\tMigration' "${visible}" || fail 'configured rich menu must retain Migration'
+    select_compact >/dev/null
+    grep -Fxq 'Migration' "${visible}" || fail 'configured compact menu must retain Migration'
+    migration_menu
+    expected=$'Migration\nExport server\nImport server\nRecover / finalize interrupted import\nBack'
+    [[ $(cat "${visible}") == "${expected}" ]] || fail 'Migration submenu has incorrect entries or order'
+)
+if grep -Fq 'Import existing Minecraft server' "${menu}" || grep -Eq '^        import\)' "${menu}"; then
+    fail 'dead pre-setup import menu plumbing remains'
+fi
+grep -Fq "'Import server') run_and_pause /usr/bin/mjust import || true ;;" "${menu}" || fail 'Migration import dispatch must remain available'
+grep -Fq '  mjust import' "${menu}" || fail 'direct import command must remain advertised'
+
 grep -Fq 'jui_menu_profile()' "${repo_root}/mjust/libexec/ui.sh" || fail 'shared adaptive menu profile helper missing'
 grep -Fq 'jui_menu_gap_enabled()' "${repo_root}/mjust/libexec/ui.sh" || fail 'shared adaptive menu gap helper missing'
 if grep -Fq 'main_menu_profile()' "${menu}" || grep -Fq 'main_menu_gap_enabled()' "${menu}"; then

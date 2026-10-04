@@ -17,26 +17,43 @@ fi
 
 playit_menu() {
     while true; do
-        echo
-        systemctl --no-pager --lines=0 status playit.service || true
+        local state configured active choice
+        local -a options=()
+        configured=no
+        active=no
+        state='Not configured'
         if sudo test -s /etc/playit/playit.toml; then
-            echo 'Playit: configured'
-        else
-            echo 'Playit: not configured (waiting for account setup is normal)'
+            configured=yes
+            state='Configured'
         fi
-        local lifecycle choice
-        lifecycle='Activate Playit'
         if systemctl is-active --quiet playit.service; then
-            lifecycle='Deactivate Playit'
+            active=yes
+            [[ ${configured} == yes ]] && state='Running'
         fi
-        choice="$(jui_choose 'Playit.gg public game access' "${lifecycle}" 'Playit CLI status' 'Set up Playit account/agent' 'Back')" || return 0
+        if [[ ${configured} == no || ${active} == no ]]; then
+            options+=('Activate Playit')
+        fi
+        [[ ${active} == yes ]] && options+=('Deactivate Playit')
+        options+=('Playit status' 'Back')
+        choice="$(jui_choose "Playit.gg public game access · ${state}" "${options[@]}")" || return 0
         case "${choice}" in
-            'Activate Playit') sudo systemctl enable --now playit.service || true ;;
-            'Deactivate Playit') sudo systemctl disable --now playit.service || true ;;
-            'Playit CLI status') sudo /usr/bin/playit status || true ;;
-            'Set up Playit account/agent')
-                sudo /usr/bin/playit setup || true
-                echo 'Further tunnel and account management: https://playit.gg/account/'
+            'Activate Playit')
+                if sudo systemctl enable --now playit.service; then
+                    if ! sudo test -s /etc/playit/playit.toml; then
+                        sudo /usr/bin/playit setup || true
+                        echo 'Further tunnel and account management: https://playit.gg/account/'
+                    fi
+                fi
+                jui_pause
+                ;;
+            'Deactivate Playit')
+                sudo systemctl disable --now playit.service || true
+                jui_pause
+                ;;
+            'Playit status')
+                systemctl --no-pager --lines=0 status playit.service || true
+                sudo /usr/bin/playit status || true
+                jui_pause
                 ;;
             'Back') return 0 ;;
         esac

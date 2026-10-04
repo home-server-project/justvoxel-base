@@ -9,7 +9,6 @@ configured=no
 preview() {
     case "${1:-}" in
         setup) echo -e 'First setup\nConfigure Minecraft, storage and backups for a new server.' ;;
-        import) echo -e 'Import existing Minecraft server\nBring an existing JustVoxel, Paper or compatible server into this appliance.' ;;
         status) echo -e 'Status\nOverall JustVoxel and Minecraft health.' ;;
         players) echo -e 'Players\nSee who is currently connected.' ;;
         configure) echo -e 'Configure Minecraft\nChange gameplay, memory, ports and server settings.' ;;
@@ -264,7 +263,7 @@ select_rich() {
     if [[ ${configured} == yes ]]; then
         rows=$'status\tStatus\nplayers\tPlayers\nconfigure\tConfigure Minecraft\nservice\tStart / Stop / Restart\nwhitelist\tWhitelist\nbackups\tBackups\nmigration\tMigration\nstorage\tStorage\nupdate\tUpdate Minecraft\nsystem\tSystem\nvalidate\tValidation\nlogs\tLogs\nadvanced\tAdvanced\nexit\tExit'
     else
-        rows=$'setup\tFirst setup\nimport\tImport existing Minecraft server\nstatus\tStatus\nstorage\tStorage\nsystem\tSystem\nexit\tExit'
+        rows=$'setup\tFirst setup\nstatus\tStatus\nstorage\tStorage\nsystem\tSystem\nexit\tExit'
     fi
 
     cols="$(jui_terminal_cols)"
@@ -317,8 +316,8 @@ select_compact() {
             'Validation') printf 'validate' ;; 'Logs') printf 'logs' ;; 'Advanced') printf 'advanced' ;; *) printf 'exit' ;;
         esac
     else
-        choice="$(jui_choose 'JustVoxel' 'First setup' 'Import existing Minecraft server' 'Status' 'Storage' 'System' 'Exit')" || { printf 'exit'; return 0; }
-        case "${choice}" in 'First setup') printf 'setup' ;; 'Import existing Minecraft server') printf 'import' ;; 'Status') printf 'status' ;; 'Storage') printf 'storage' ;; 'System') printf 'system' ;; *) printf 'exit' ;; esac
+        choice="$(jui_choose 'JustVoxel' 'First setup' 'Status' 'Storage' 'System' 'Exit')" || { printf 'exit'; return 0; }
+        case "${choice}" in 'First setup') printf 'setup' ;; 'Status') printf 'status' ;; 'Storage') printf 'storage' ;; 'System') printf 'system' ;; *) printf 'exit' ;; esac
     fi
 }
 
@@ -328,7 +327,6 @@ while true; do
     echo
     case "${action}" in
         setup) run_and_pause /usr/bin/mjust setup || true ;;
-        import) run_and_pause /usr/bin/mjust import || true ;;
         status) run_and_pause /usr/bin/mjust status || true ;;
         players) run_and_pause /usr/bin/mjust players || true ;;
         configure) configure_menu ;;
