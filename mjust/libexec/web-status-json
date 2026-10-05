@@ -181,7 +181,7 @@ web_status() {
     local backup_last_summary='Unknown' record epoch path now age details_failed='' details_systemd='' details_podman='' details_storage='' details_network=''
     local tailscale_value='' netbird_value='' tailscale_configured=no netbird_configured=no netbird_path=''
 
-    if [[ -r ${JV_CONFIG} && ! -e ${JV_SETUP_IN_PROGRESS} ]]; then
+    if ! jv_is_plus && [[ -r ${JV_CONFIG} && ! -e ${JV_SETUP_IN_PROGRESS} ]]; then
         # shellcheck disable=SC1090
         require_config
         configured=yes
@@ -354,6 +354,11 @@ web_status() {
 
     health="$(jv_status_overall "${minecraft_state}" "${failed_count}" "${system_state}" "${network_state}" "${storage_state}" "${backup_state}")"
 
+    docker_state=unavailable
+    if jv_is_plus; then
+        if systemctl is-active --quiet docker.service 2>/dev/null; then docker_state=Running; else docker_state=Stopped; health="Attention needed"; fi
+    fi
+
     webui_version='Unknown'
     api_version='v1'
     if [[ -r ${metadata} ]]; then
@@ -371,12 +376,16 @@ web_status() {
 
     if [[ ${details} == --details ]]; then
         details_failed="$(systemctl --failed --type=service --no-pager --full 2>&1 || true)"
+        if jv_is_plus; then
+            details_systemd="$(systemctl --no-pager --full status docker.service containerd.service 2>&1 || true)"
+        else
         details_systemd="$(systemctl --no-pager --full status minecraft.service 2>&1 || true)"
         if podman container exists minecraft 2>/dev/null; then
             details_podman="$(podman ps -a --filter name='^minecraft$' 2>&1 || true)"
             details_podman+=$'\n'"$(podman stats --no-stream minecraft 2>&1 || true)"
         else
             details_podman='Minecraft container does not currently exist.'
+        fi
         fi
         if [[ ${configured} == yes ]]; then
             details_storage="$(findmnt --target "${DATA_PATH}" 2>&1 || true)"
@@ -392,6 +401,7 @@ web_status() {
     fi
 
     jq -n \
+        --arg docker_state "${docker_state}" \
         --arg variant "${variant}" \
         --arg health "${health}" \
         --arg ipv4 "${ipv4}" \
@@ -451,6 +461,7 @@ web_status() {
         --arg details_storage "${details_storage}" \
         --arg details_network "${details_network}" \
         '{
+          plus:{configured:false,docker:$docker_state},
           system:{variant:$variant,health:$health,ipv4:$ipv4,tailscale:$tailscale,netbird:$netbird},
           minecraft:{server_type:$server_type,server_software:$server_software,configured:$configured,state:$mc_state,players:$players,max_players:$max_players,version:$mc_version,java_port:$java_port,bedrock:$bedrock,bedrock_port:$bedrock_port},
           backup:{enabled:$backup_enabled,last:$backup_last,next:$backup_next},

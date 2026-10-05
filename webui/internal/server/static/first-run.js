@@ -5,7 +5,8 @@
   const choice = document.querySelector("[data-first-run-choice]");
   const explore = document.querySelector("[data-first-run-explore]");
   const invitation = document.querySelector("[data-minecraft-setup-invitation]");
-  const exploreStorageKey = "justvoxel:first-run:explore";
+  const plus = document.querySelector('[data-plus="true"]') !== null;
+  const exploreStorageKey = plus ? "justvoxel-plus:first-run:explore" : "justvoxel:first-run:explore";
   let role = "";
   let configured;
   let refreshTimer = 0;
@@ -101,7 +102,7 @@
       if (!response.ok) return;
       const snapshot = await response.json();
       if (generation !== statusGeneration) return;
-      configured = Boolean(snapshot?.status?.minecraft?.configured);
+      configured = Boolean(plus ? snapshot?.status?.plus?.configured : snapshot?.status?.minecraft?.configured);
       if (configured) resetWelcome = false;
       applyFirstRunState();
     } catch (_) {

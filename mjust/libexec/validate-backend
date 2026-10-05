@@ -2,6 +2,15 @@
 set -euo pipefail
 source /usr/libexec/justvoxel/mjust/common.sh
 require_root
+if jv_is_plus; then
+    failures=0
+    for unit in docker.service containerd.service justvoxel-management.service justvoxel-webui.service; do
+        if systemctl is-active --quiet "${unit}"; then printf 'OK: %s is running\n' "${unit}";
+        else printf 'FAIL: %s is not running\n' "${unit}"; failures=$((failures + 1)); fi
+    done
+    if (( failures > 0 )); then exit 1; fi
+    exit 0
+fi
 require_config
 
 failures=0

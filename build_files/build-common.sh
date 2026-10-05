@@ -44,7 +44,7 @@ systemctl enable systemd-resolved.service
 systemctl enable firewalld.service 2>/dev/null || true
 systemctl enable sshd.service 2>/dev/null || true
 systemctl enable justvoxel-web-bootstrap.service
-systemctl enable justvoxel-minecraft-shutdown-guard.service
+systemctl disable justvoxel-minecraft-shutdown-guard.service
 
 install -d -m0755 /usr/share/doc/justvoxel
 cp -avf /ctx/docs/. /usr/share/doc/justvoxel/

@@ -48,7 +48,7 @@ collect_status() {
         jv_bootc_staged_exists "${status_json}" && staged_update=true
     fi
 
-    systemctl is-active --quiet minecraft.service 2>/dev/null && minecraft_state=running
+    if ! jv_is_plus; then systemctl is-active --quiet minecraft.service 2>/dev/null && minecraft_state=running; fi
 
     jq -cn         --arg variant "${variant}"         --arg minecraft_state "${minecraft_state}"         --arg firmware_reason "${firmware_reason}"         --arg display_state "${display_state}"         --argjson efi "${efi}"         --argjson firmware_available "${firmware_available}"         --argjson staged_update "${staged_update}"         --argjson os_status_available "${os_status_available}"         '{
             ok:true,

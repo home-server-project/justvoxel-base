@@ -1,5 +1,5 @@
 {{define "app-header"}}
-<header class="app-header topbar">
+<header class="app-header topbar" data-plus="{{isPlus}}">
   <a class="brand-link brand-mark" href="/" aria-label="JustVoxel dashboard">
     <img class="brand-logo" src="/static/justvoxel-logo.png" alt="JustVoxel">
   </a>
@@ -17,7 +17,7 @@
 
     <div class="control-center-panel">
       <div class="control-center-heading">
-        <div><strong>JustVoxel</strong><span>Control Center</span></div>
+        <div><strong>JustVoxel{{if isPlus}} Plus{{end}}</strong><span>Control Center</span></div>
       </div>
 
       <section class="control-section control-session">
@@ -60,6 +60,7 @@
       </section>
 
       <nav class="control-navigation" aria-label="JustVoxel navigation">
+{{if not isPlus}}
         <section class="control-section">
           <span class="control-section-label">Minecraft</span>
           <div class="control-tile-grid">
@@ -68,6 +69,7 @@
           </div>
         </section>
 
+{{end}}
         <section class="control-section">
           <span class="control-section-label">System</span>
           <div class="control-tile-grid">
@@ -82,8 +84,8 @@
           <span class="control-section-label">Storage &amp; Data</span>
           <div class="control-tile-grid">
             <button class="control-tile nav-admin-only" type="button" data-storage-open title="Disks, partitions, mounts and external USB storage"><strong>Storage</strong></button>
-            <button class="control-tile nav-admin-only" type="button" data-backups-open title="Create, schedule, restore and manage backups"><strong>Backups</strong></button>
-            <button class="control-tile nav-admin-only" type="button" data-migration-open title="Export, import and recover a JustVoxel server"><strong>Migration</strong></button>
+{{if not isPlus}}            <button class="control-tile nav-admin-only" type="button" data-backups-open title="Create, schedule, restore and manage backups"><strong>Backups</strong></button>{{end}}
+{{if not isPlus}}            <button class="control-tile nav-admin-only" type="button" data-migration-open title="Export, import and recover a JustVoxel server"><strong>Migration</strong></button>{{end}}
           </div>
         </section>
       </nav>
@@ -94,6 +96,9 @@
   <section class="quick-look" data-quick-look aria-label="Quick Look">
     <div class="quick-look-panel" id="quick-look-panel" data-quick-look-panel>
       <div class="quick-look-grid">
+{{if isPlus}}
+        <article class="quick-look-tile"><span>Docker</span><strong data-quick-look-docker>—</strong></article>
+{{else}}
         <article class="quick-look-tile">
           <div class="quick-look-tile-heading">
             <span>Minecraft</span>
@@ -119,9 +124,10 @@
         </article>
         <article class="quick-look-tile"><span>Version</span><strong data-quick-look-version>—</strong></article>
         <article class="quick-look-tile"><span>Players</span><strong data-quick-look-players>—</strong></article>
+{{end}}
         <article class="quick-look-tile"><span>System</span><strong data-quick-look-system>—</strong></article>
         <article class="quick-look-tile quick-look-network-tile"><div class="quick-look-network-row"><span>IPv4</span><strong data-quick-look-ipv4>—</strong></div><div class="network-overlay-list" data-quick-look-overlays></div></article>
-        <article class="quick-look-tile"><div class="quick-look-tile-heading"><span>Backup</span><a class="quick-look-backup-action nav-operator-only" href="/operations#manual-backup">Create backup</a></div><strong data-quick-look-backup>—</strong></article>
+{{if not isPlus}}        <article class="quick-look-tile"><div class="quick-look-tile-heading"><span>Backup</span><a class="quick-look-backup-action nav-operator-only" href="/operations#manual-backup">Create backup</a></div><strong data-quick-look-backup>—</strong></article>{{end}}
       </div>
     </div>
     <button class="quick-look-handle" type="button" data-quick-look-toggle aria-expanded="false" aria-controls="quick-look-panel" aria-label="Toggle Quick Look">
@@ -186,6 +192,7 @@
     </div>
   </dialog>
 
+{{if not isPlus}}
   <dialog class="workspace-window minecraft-workspace-dialog" data-workspace-window="minecraft" data-minecraft-workspace-dialog aria-labelledby="minecraft-workspace-title">
     <div class="minecraft-workspace-shell">
       <div class="minecraft-workspace-header" data-workspace-drag-handle>
@@ -211,7 +218,9 @@
       </div>
     </div>
   </dialog>
+{{end}}
 
+{{if not isPlus}}
   <dialog class="workspace-window version-workspace-dialog" data-workspace-window="version" data-version-workspace-dialog aria-labelledby="version-workspace-title">
     <div class="version-workspace-shell">
       <div class="version-workspace-header" data-workspace-drag-handle><div><p class="eyebrow">JustVoxel</p><h2 id="version-workspace-title">Version</h2></div><div><button class="system-monitor-header-button workspace-header-refresh" type="button" data-version-refresh aria-label="Refresh Version">Refresh</button><button class="system-monitor-header-button workspace-header-close" type="button" data-version-close aria-label="Close Version"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M5 5l14 14M19 5L5 19"/></svg></button></div></div>
@@ -219,6 +228,7 @@
       <div class="version-workspace-body"><p data-version-state></p><div data-version-content></div></div>
     </div>
   </dialog>
+{{end}}
 
   <dialog class="system-action-dialog date-time-dialog" data-date-time-dialog aria-labelledby="date-time-title">
     <form class="system-action-dialog-content" data-date-time-form><h2 id="date-time-title">Date &amp; Time</h2><p class="muted" data-date-time-state></p>
@@ -313,6 +323,7 @@
     </div>
   </dialog>
 
+{{if not isPlus}}
   <dialog class="workspace-window backups-workspace-dialog" data-workspace-window="backups" data-backups-workspace-dialog aria-labelledby="backups-workspace-title">
     <div class="backups-workspace-shell">
       <div class="backups-workspace-header" data-workspace-drag-handle>
@@ -331,7 +342,9 @@
       </div>
     </div>
   </dialog>
+{{end}}
 
+{{if not isPlus}}
   <dialog class="workspace-window migration-workspace-dialog" data-workspace-window="migration" data-migration-workspace-dialog aria-labelledby="migration-workspace-title">
     <div class="migration-workspace-shell">
       <div class="migration-workspace-header" data-workspace-drag-handle>
@@ -355,6 +368,7 @@
       </div>
     </div>
   </dialog>
+{{end}}
 
   <dialog class="workspace-window system-update-dialog" data-workspace-window="system-update" data-system-update-dialog aria-labelledby="system-update-title">
     <div class="system-update-dialog-shell">
@@ -392,9 +406,10 @@
         <section class="system-update-reboot-panel" data-system-update-reboot hidden>
           <div class="system-update-reboot-heading">
             <strong data-system-update-reboot-title>Reboot to apply update</strong>
-            <small>Minecraft is stopped through the normal player-aware shutdown path.</small>
+            <small>{{if isPlus}}The host will restart to apply the staged update.{{else}}Minecraft is stopped through the normal player-aware shutdown path.{{end}}</small>
           </div>
 
+{{if not isPlus}}
           <label class="system-update-option system-ups-shutdown-switch">
             <span><strong>Back up Minecraft before reboot</strong><small>Optional cold backup. Reboot is cancelled if the backup fails.</small></span>
             <input type="checkbox" role="switch" data-system-update-backup disabled>
@@ -406,6 +421,7 @@
           </label>
 
           <p class="system-update-warning" data-system-update-warning>Player warning: 60 seconds</p>
+{{end}}
           <div class="system-update-reboot-players" data-system-update-reboot-players hidden></div>
           <div class="system-update-reboot-progress" data-system-update-reboot-progress hidden>
             <strong data-system-update-countdown></strong>

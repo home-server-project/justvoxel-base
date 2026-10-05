@@ -12,7 +12,7 @@ The copied stable workflow is disabled in this branch. Automatic package cleanup
 
 ## Product boundary and milestone
 
-JustVoxel Plus manages the host. Drydock manages infrastructure containers. Pterodactyl manages game servers. Phase one isolates publication and selects the Docker parent; it does not yet deploy the infrastructure stack or replace the inherited Minecraft interface.
+JustVoxel Plus manages the host. Drydock manages infrastructure containers. Pterodactyl manages game servers. Phase one isolates publication and selects the Docker parent. Phase two enables the host-only Plus desktop and blocks inherited game workflows. The infrastructure stack and deployment wizard are not implemented yet.
 
 The later wizard account step must explain: These are separate accounts. Changing your password in one does not change the other.
 

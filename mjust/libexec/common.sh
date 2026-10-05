@@ -43,17 +43,22 @@ jv_variant_raw() {
     cat /usr/lib/justvoxel/variant 2>/dev/null || printf 'unknown\n'
 }
 
+jv_is_plus() {
+    [[ $(jv_variant_raw) == justvoxel-plus-base ]]
+}
+
 jv_variant_kind() {
     local raw="${1:-}"
     [[ -n ${raw} ]] || raw="$(jv_variant_raw)"
     case "${raw}" in
-        vm|justvoxel-vm) printf 'vm\n' ;;
+        vm|justvoxel-vm|justvoxel-plus-base) printf 'vm\n' ;;
         hws|justvoxel-hws) printf 'hws\n' ;;
         *) printf 'unknown\n' ;;
     esac
 }
 
 jv_variant_name() {
+    if [[ ${1:-$(jv_variant_raw)} == justvoxel-plus-base ]]; then printf 'Plus Base\n'; return; fi
     case "$(jv_variant_kind "${1:-}")" in
         vm) printf 'VM\n' ;;
         hws) printf 'HWS\n' ;;

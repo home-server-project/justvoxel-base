@@ -20,6 +20,7 @@ fi
 
 variant_id="$(cat /usr/lib/justvoxel/variant 2>/dev/null || true)"
 case "${variant_id}" in
+    justvoxel-plus-base) variant='Plus Base' ;;
     justvoxel-vm|vm) variant='VM' ;;
     justvoxel-hws|hws) variant='HWS' ;;
     *) variant='Unknown' ;;

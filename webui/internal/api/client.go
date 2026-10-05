@@ -28,6 +28,10 @@ type LoginResponse struct {
 }
 
 type Status struct {
+	Plus struct {
+		Configured bool   `json:"configured"`
+		Docker     string `json:"docker"`
+	} `json:"plus,omitempty"`
 	System struct {
 		Variant   string `json:"variant"`
 		Health    string `json:"health"`

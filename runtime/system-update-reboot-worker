@@ -21,6 +21,11 @@ restart_minecraft_if_needed() {
     fi
 }
 
+if [[ $(cat /usr/lib/justvoxel/variant 2>/dev/null || true) == justvoxel-plus-base ]]; then
+    backup_minecraft=no
+    was_active=no
+fi
+
 if [[ ${warning_seconds} != 60 && ${warning_seconds} != 10 ]]; then
     write_state failed 'Invalid reboot warning configuration.' 0 0 invalid_warning
     exit 2

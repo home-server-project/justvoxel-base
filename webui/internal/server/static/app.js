@@ -1,3 +1,4 @@
+const justVoxelPlus = document.querySelector("[data-plus=\"true\"]") !== null;
 
 const enhancePasswordFields = (root = document) => {
   root.querySelectorAll('input[type="password"]:not([data-password-reveal-ready])').forEach((input) => {
@@ -290,12 +291,13 @@ if (dashboard) {
 
   const renderDashboard = (snapshot) => {
     const { status, players, attention } = snapshot;
-    updatePendingState(status, players);
+    if (!justVoxelPlus) updatePendingState(status, players);
     renderDashboardAttention(attention || null);
     const setupArea = document.querySelector("[data-dashboard-setup-area]");
-    if (setupArea) setupArea.hidden = Boolean(status.minecraft.configured);
-    dashboard.dataset.configured = String(Boolean(status.minecraft.configured));
+    if (setupArea) setupArea.hidden = Boolean(justVoxelPlus ? status.plus?.configured : status.minecraft.configured);
+    dashboard.dataset.configured = String(Boolean(justVoxelPlus ? status.plus?.configured : status.minecraft.configured));
 
+    if (justVoxelPlus) return;
     const displayedState = pendingAction ? actionProgress(pendingAction) : status.minecraft.state;
     text("minecraft-control-state", displayedState);
 
@@ -409,6 +411,7 @@ if (quickLook && quickLookToggle) {
     const system = status.system || {};
     const backup = status.backup || {};
 
+    setValue("[data-quick-look-docker]", status.plus?.docker);
     setValue("[data-quick-look-minecraft]", minecraft.state);
     setValue("[data-quick-look-version]", minecraft.version);
     setValue(
@@ -596,19 +599,19 @@ if (systemPower && systemDialog) {
   const actionCopy = {
     reboot: {
       title: "Reboot JustVoxel?",
-      message: "Minecraft will be stopped safely first when it is running. The server will then reboot.",
+      message: justVoxelPlus ? "The host and its containers will restart." : "Minecraft will be stopped safely first when it is running. The server will then reboot.",
       confirm: "Reboot",
       working: "Rebooting JustVoxel…",
     },
     poweroff: {
       title: "Power off JustVoxel?",
-      message: "Minecraft will be stopped safely first when it is running. The server will then power off.",
+      message: justVoxelPlus ? "The host and its containers will shut down." : "Minecraft will be stopped safely first when it is running. The server will then power off.",
       confirm: "Power off",
       working: "Powering off JustVoxel…",
     },
     "firmware-reboot": {
       title: "Reboot to UEFI/BIOS?",
-      message: "Minecraft will be stopped safely first. The server will reboot into the physical machine's UEFI/BIOS setup.",
+      message: justVoxelPlus ? "The host will restart into UEFI/BIOS setup." : "Minecraft will be stopped safely first. The server will reboot into the physical machine's UEFI/BIOS setup.",
       confirm: "Reboot to UEFI/BIOS",
       working: "Rebooting to UEFI/BIOS…",
     },
@@ -3824,10 +3827,24 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     });
   };
 
-  const renderLogs = async (sequence) => {
+  const renderLogs = async (sequence, service = "management-agent") => {
+    if (justVoxelPlus) {
+      const payload = await systemFetchJSON("/api/system/workspace/logs?service=" + encodeURIComponent(service));
+      if (!payload || sequence !== loadSequence || !content) return;
+      const panel = systemPanel("Host logs", "Current boot · last 200 lines").panel;
+      const select = document.createElement("select");
+      select.setAttribute("aria-label", "Host service");
+      [["management-agent", "Management Agent"], ["webui", "WebUI"], ["docker", "Docker"], ["containerd", "containerd"]].forEach(([value, label]) => {
+        const option = document.createElement("option"); option.value = value; option.textContent = label; select.appendChild(option);
+      });
+      select.value = service;
+      select.addEventListener("change", () => void renderLogs(++loadSequence, select.value));
+      const pre = document.createElement("pre"); pre.className = "log-box"; pre.textContent = payload.output || "No entries for this boot.";
+      panel.append(select, pre); content.replaceChildren(panel); return;
+    }
     const payload = await systemFetchJSON("/api/system/workspace/logs");
     if (!payload || sequence !== loadSequence || !content) return;
-    const groups = ["Setup", "Migration", "Restore", "Reset", "Support"];
+    const groups = justVoxelPlus ? ["Host"] : ["Setup", "Migration", "Restore", "Reset", "Support"];
     const logs = Array.isArray(payload.logs) ? payload.logs : [];
     const root = document.createElement("div");
     root.className = "system-logs-layout";
@@ -3866,7 +3883,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     documentText.textContent = "Select a file to read it here.";
     viewer.append(download, documentText);
     reader.appendChild(viewer);
-    let selectedGroup = "Setup";
+    let selectedGroup = justVoxelPlus ? "Host" : "Setup";
     let selectedFile = "";
     const renderFiles = () => {
       fileList.replaceChildren();
@@ -4019,14 +4036,16 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       table.className = "system-users-table";
       const head = document.createElement("thead");
       head.innerHTML = "<tr><th scope=\"col\">Username</th><th scope=\"col\">Role</th><th scope=\"col\">Status</th><th scope=\"col\">Restart</th><th scope=\"col\">Backup</th><th scope=\"col\">Actions</th></tr>";
+      if (justVoxelPlus) head.innerHTML = '<tr><th scope="col">Username</th><th scope="col">Role</th><th scope="col">Status</th><th scope="col">Actions</th></tr>';
       const rows = document.createElement("tbody");
       table.append(head, rows);
       list.appendChild(table);
       let openManagement = null;
       users.forEach((user, index) => {
         const row = document.createElement("tr");
-        for (const value of [user.username || "User", user.role === "operator" ? "Operator" : "Viewer", user.enabled ? "Enabled" : "Disabled",
-          `${user.restart_used ?? 0} / ${user.restart_limit ?? 0}`, `${user.backup_used ?? 0} / ${user.backup_limit ?? 0}`]) {
+        const values = [user.username || "User", user.role === "operator" ? "Operator" : "Viewer", user.enabled ? "Enabled" : "Disabled"];
+        if (!justVoxelPlus) values.push(`${user.restart_used ?? 0} / ${user.restart_limit ?? 0}`, `${user.backup_used ?? 0} / ${user.backup_limit ?? 0}`);
+        for (const value of values) {
           const cell = document.createElement("td");
           cell.textContent = value;
           row.appendChild(cell);
@@ -4044,7 +4063,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         managementRow.hidden = true;
         managementRow.id = "system-user-management-" + index;
         const managementCell = document.createElement("td");
-        managementCell.colSpan = 6;
+        managementCell.colSpan = justVoxelPlus ? 4 : 6;
         const card = document.createElement("div");
         card.className = "system-user-management";
         managementCell.appendChild(card);
@@ -4086,6 +4105,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         });
         actions.appendChild(enabledButton);
 
+        if (!justVoxelPlus) {
         const restartButton = document.createElement("button");
         restartButton.type = "button";
         restartButton.className = "secondary";
@@ -4107,6 +4127,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
           if (result) await renderUsers(++loadSequence, result.message || "Backup allowance reset.");
         });
         actions.appendChild(backupButton);
+        }
         card.appendChild(actions);
 
         const passwordDetails = document.createElement("details");
@@ -4726,6 +4747,10 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   };
 
   const renderReset = async (sequence) => {
+    if (justVoxelPlus) {
+      content.replaceChildren(systemNotice("Factory reset will be available when Plus stack reset support is ready."));
+      return;
+    }
     clearResetPoll();
     const operation = await resetCurrentOperation();
     if (sequence !== loadSequence || currentTab !== "reset") return;

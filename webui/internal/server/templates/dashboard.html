@@ -4,30 +4,30 @@
   <link rel="icon" type="image/png" href="/static/justvoxel-favicon.png">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>JustVoxel - Dashboard</title>
+  <title>JustVoxel{{if isPlus}} Plus{{end}} - Dashboard</title>
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/first-run.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
 <body class="role-pending">
 {{template "app-header" .}}
-<main id="dashboard" data-dashboard-status="/api/dashboard-status" data-session-info="/api/session-info" data-pending-action="{{.PendingAction}}" data-configured="{{.Status.Minecraft.Configured}}">
+<main id="dashboard" data-dashboard-status="/api/dashboard-status" data-session-info="/api/session-info" data-pending-action="{{.PendingAction}}" data-configured="{{if isPlus}}{{.Status.Plus.Configured}}{{else}}{{.Status.Minecraft.Configured}}{{end}}">
   <img class="dashboard-wallpaper wallpaper-theme-v2" data-dashboard-wallpaper src="/static/wallpapers/jv-wp-v2-day.webp" alt="" aria-hidden="true">
   <section class="first-run-choice" data-first-run-choice hidden aria-labelledby="first-run-choice-title">
     <div class="first-run-choice-panel">
-      <p class="eyebrow">Welcome to JustVoxel</p>
+      <p class="eyebrow">Welcome to JustVoxel{{if isPlus}} Plus{{end}}</p>
       <h1 id="first-run-choice-title">What would you like to do first?</h1>
-      <p class="first-run-choice-lead">Minecraft is not configured yet. You can set it up now or explore JustVoxel first.</p>
+      <p class="first-run-choice-lead">{{if isPlus}}Your application stack is not configured yet. Set it up or look around first.{{else}}Minecraft is not configured yet. You can set it up now or explore JustVoxel first.{{end}}</p>
       <div class="first-run-choice-grid">
         <button class="first-run-choice-card first-run-explore-card" type="button" data-first-run-explore>
           <span class="first-run-card-kicker">Explore first</span>
           <strong>Look around JustVoxel</strong>
-          <small>Open the Workspace, Control Center and system tools. Minecraft setup will stay available when you are ready.</small>
+          <small>Open the Workspace, Control Center and system tools. {{if isPlus}}Setup will stay available when you are ready.{{else}}Minecraft setup will stay available when you are ready.{{end}}</small>
         </button>
         <a class="first-run-choice-card first-run-setup-card" href="/setup" data-first-run-setup>
-          <span class="first-run-card-kicker">Recommended</span>
-          <strong>Set up Minecraft</strong>
-          <small>Start the guided Minecraft server setup now.</small>
+          <span class="first-run-card-kicker">Setup</span>
+          <strong>{{if isPlus}}Set up JustVoxel Plus{{else}}Set up Minecraft{{end}}</strong>
+          <small>{{if isPlus}}Set up Pterodactyl and Drydock.{{else}}Start the guided Minecraft server setup now.{{end}}</small>
         </a>
       </div>
     </div>
@@ -60,10 +60,10 @@
   </section>
   {{end}}
 
-  <div class="dashboard-setup-area" data-dashboard-setup-area {{if .Status.Minecraft.Configured}}hidden{{end}}>
+  <div class="dashboard-setup-area" data-dashboard-setup-area {{if isPlus}}{{if .Status.Plus.Configured}}hidden{{end}}{{else}}{{if .Status.Minecraft.Configured}}hidden{{end}}{{end}}>
     <a class="minecraft-setup-invitation" href="/setup" data-minecraft-setup-invitation>
-      <span class="minecraft-setup-invitation-kicker">Minecraft is not configured</span>
-      <strong>Set up your Minecraft server</strong>
+      <span class="minecraft-setup-invitation-kicker">{{if isPlus}}JustVoxel Plus setup{{else}}Minecraft is not configured{{end}}</span>
+      <strong>{{if isPlus}}Set up Pterodactyl and Drydock{{else}}Set up your Minecraft server{{end}}</strong>
       <small><span>Start setup when you are ready.</span><span>You can continue exploring JustVoxel until then.</span></small>
     </a>
   </div>

@@ -241,9 +241,13 @@ func (a *App) storageBrowserWindow(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) buildStorageBrowserPageData(ctx context.Context, session string, client adminDiscoveryAPI, identity api.SessionInfo, csrf string) (storageBrowserPageData, error) {
-	configuration, err := client.AdminConfiguration(ctx, session)
-	if err != nil {
-		return storageBrowserPageData{}, err
+	var configuration api.AdminConfigurationDiscovery
+	if !a.config.Plus {
+		var err error
+		configuration, err = client.AdminConfiguration(ctx, session)
+		if err != nil {
+			return storageBrowserPageData{}, err
+		}
 	}
 	storage, err := client.AdminStorage(ctx, session)
 	if err != nil {
@@ -253,7 +257,7 @@ func (a *App) buildStorageBrowserPageData(ctx context.Context, session string, c
 	migrationCandidates := make(map[string]api.AdminDataMigrationCandidate)
 	migrationWholeDisks := make(map[string]bool)
 	migrationNote := ""
-	if migrationClient, ok := any(client).(storageBrowserMigrationDiscoveryAPI); ok {
+	if migrationClient, ok := any(client).(storageBrowserMigrationDiscoveryAPI); ok && !a.config.Plus {
 		discovery, err := migrationClient.AdminDataMigrationDiscovery(ctx, session)
 		if err != nil {
 			migrationNote = "Minecraft storage assignment is temporarily unavailable. Other storage actions are still available."

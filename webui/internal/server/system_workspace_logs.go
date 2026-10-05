@@ -13,6 +13,10 @@ type systemWorkspaceLogsAPI interface {
 }
 
 func (a *App) systemWorkspaceLogs(w http.ResponseWriter, r *http.Request) {
+	if a.config.Plus {
+		a.plusHostLogs(w, r)
+		return
+	}
 	session, _, ok := a.systemWorkspaceIdentity(w, r, "administrator")
 	if !ok {
 		return
@@ -31,6 +35,10 @@ func (a *App) systemWorkspaceLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) systemWorkspaceLog(w http.ResponseWriter, r *http.Request) {
+	if a.config.Plus {
+		http.NotFound(w, r)
+		return
+	}
 	session, _, ok := a.systemWorkspaceIdentity(w, r, "administrator")
 	if !ok {
 		return

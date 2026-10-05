@@ -127,7 +127,7 @@
         <p class="muted compact">Erases the entire disk. After review and confirmation, create XFS partitions with your chosen sizes.</p>
       </div>
       {{end}}
-      {{if or .MinecraftWholeDisk .BackupWholeDisk}}
+      {{if and (not isPlus) (or .MinecraftWholeDisk .BackupWholeDisk)}}
       <div class="notice storage-empty-disk">
         <strong>Prepare entire disk</strong>
         <p class="muted">Choose a dedicated JustVoxel storage purpose. Preparation erases the entire disk and all existing filesystems and data.</p>
@@ -179,8 +179,8 @@
             <button type="button" data-storage-action="mount-now" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5Z"></path><path d="M12 14v6"></path></svg></span><span>Mount now</span></button>
             <button type="button" data-storage-action="unmount-for-now" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><path d="M12 8v5l3 2"></path></svg></span><span>Unmount for now</span></button>
             <button type="button" data-storage-action="remove-permanent" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5Z"></path><path d="M12 14v6"></path></svg></span><span>Remove permanent mount</span></button>
-            <button type="button" data-storage-minecraft-migrate hidden>Use for Minecraft data</button>
-            <button type="button" data-storage-action="use-for-backups" hidden>Use for backups</button>
+{{if not isPlus}}            <button type="button" data-storage-minecraft-migrate hidden>Use for Minecraft data</button>{{end}}
+{{if not isPlus}}            <button type="button" data-storage-action="use-for-backups" hidden>Use for backups</button>{{end}}
             <button class="storage-action-danger" type="button" data-storage-action="format">Format partition</button>
             <button class="storage-action-danger" type="button" data-storage-action="delete_partition" hidden>Delete partition</button>
             <button class="storage-action-danger" type="button" data-storage-action="initialize_disk" hidden>Reinitialize entire disk as GPT</button>
@@ -300,6 +300,7 @@
     </div>
   </dialog>
 
+{{if not isPlus}}
   <dialog class="storage-action-dialog storage-minecraft-dialog" data-storage-minecraft-dialog>
     <div class="storage-action-card">
       <div class="storage-detail-heading">
@@ -378,6 +379,7 @@
       </div>
     </div>
   </dialog>
+{{end}}
 
   <dialog class="storage-action-dialog" data-storage-action-dialog>
     <div class="storage-action-card">

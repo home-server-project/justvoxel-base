@@ -103,7 +103,7 @@ test "$(systemctl is-enabled systemd-resolved.service)" = "enabled"
 test "$(systemctl is-enabled firewalld.service)" = "enabled"
 test "$(systemctl is-enabled sshd.service)" = "enabled"
 test "$(systemctl is-enabled justvoxel-web-bootstrap.service)" = "enabled"
-test "$(systemctl is-enabled justvoxel-minecraft-shutdown-guard.service)" = "enabled"
+test "$(systemctl is-enabled justvoxel-minecraft-shutdown-guard.service || true)" = "disabled"
 [[ "$(systemctl is-enabled justvoxel-webui.service 2>/dev/null || true)" != "enabled" ]]
 [[ "$(systemctl is-enabled justvoxel-management.service 2>/dev/null || true)" != "enabled" ]]
 [[ "$(systemctl is-enabled justvoxel-glances.service 2>/dev/null || true)" != "enabled" ]]
@@ -209,7 +209,8 @@ test -f /usr/lib/systemd/system/justvoxel-glances.service
 test -f /etc/glances/glances.conf
 grep -Fq -- '--bind 127.0.0.1 --port 61208' /usr/lib/systemd/system/justvoxel-glances.service
 grep -Fq -- '--disable-webui' /usr/lib/systemd/system/justvoxel-glances.service
-grep -Fqx 'podman_sock=unix:///run/podman/podman.sock' /etc/glances/glances.conf
+! grep -Eq '^podman_sock=' /etc/glances/glances.conf
+grep -Fqx 'Wants=docker.service' /usr/lib/systemd/system/justvoxel-glances.service
 grep -Fq 'Wants=network-online.target justvoxel-glances.service' /usr/lib/systemd/system/justvoxel-webui.service
 if grep -Fq 'Requires=justvoxel-glances.service' /usr/lib/systemd/system/justvoxel-webui.service; then
     echo 'ERROR: System Monitor must not be a hard WebUI dependency.' >&2

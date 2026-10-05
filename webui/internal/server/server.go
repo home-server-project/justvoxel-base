@@ -36,6 +36,7 @@ type sessionIdentityAPI interface {
 }
 
 type Config struct {
+	Plus           bool
 	Version        string
 	Commit         string
 	ManagementAPI  string
@@ -104,7 +105,7 @@ func New(client API, cfg Config) (*App, error) {
 	if cfg.ExternalScheme == "" {
 		cfg.ExternalScheme = "http"
 	}
-	t, err := template.ParseFS(assets, "templates/*.html")
+	t, err := template.New("").Funcs(template.FuncMap{"isPlus": func() bool { return cfg.Plus }}).ParseFS(assets, "templates/*.html")
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +151,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("POST /minecraft/stop", a.minecraftAction("stop"))
 	mux.HandleFunc("POST /minecraft/restart", a.minecraftAction("restart"))
 	mux.HandleFunc("GET /", a.dashboard)
-	return securityHeaders(mux)
+	return securityHeaders(a.plusRoutes(mux))
 }
 
 func (a *App) ListenAndServe(addr string) error {
@@ -425,6 +426,9 @@ func (a *App) dashboardData(ctx context.Context, session, csrf string) (pageData
 	status, err := a.api.Status(ctx, session)
 	if err != nil {
 		return pageData{}, err
+	}
+	if a.config.Plus {
+		return pageData{Title: "JustVoxel Plus", Version: a.config.Version, Commit: a.config.Commit, ManagementAPI: a.config.ManagementAPI, CSRF: csrf, Status: status}, nil
 	}
 	players, err := a.api.Players(ctx, session)
 	if err != nil {

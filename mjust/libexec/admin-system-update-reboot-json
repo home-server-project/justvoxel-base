@@ -56,7 +56,12 @@ request_reboot() {
         return 2
     fi
 
-    if systemctl is-active --quiet minecraft.service 2>/dev/null; then
+    if jv_is_plus && [[ ${backup_minecraft} == yes ]]; then
+        emit_error invalid_option 'Minecraft backup is unavailable on JustVoxel Plus.'
+        return 2
+    fi
+
+    if ! jv_is_plus && systemctl is-active --quiet minecraft.service 2>/dev/null; then
         was_active=yes
         players="$(jv_player_list_raw 2>/dev/null || true)"
         if [[ -z ${players} ]]; then

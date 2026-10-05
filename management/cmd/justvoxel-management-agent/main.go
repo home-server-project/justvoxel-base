@@ -56,6 +56,7 @@ type session struct {
 }
 
 type server struct {
+	plus       bool
 	webUID     uint32
 	store      *webUIStore
 	operations *operationStore
@@ -189,6 +190,7 @@ func serve(socket string) error {
 	}
 
 	s := &server{
+		plus:                isPlusImage(),
 		webUID:              uint32(uid64),
 		store:               store,
 		operations:          operations,
@@ -204,6 +206,7 @@ func serve(socket string) error {
 	mux.HandleFunc("GET /v1/session", s.sessionStatus)
 	mux.HandleFunc("GET /v1/info", s.info)
 	mux.HandleFunc("GET /v1/status", s.status)
+	mux.HandleFunc("GET /v1/admin/plus/host-logs", s.plusHostLogs)
 	mux.HandleFunc("POST /v1/backups/manual", s.manualBackup)
 	registerAdminUserRoutes(mux, s)
 	registerAdminActivityRoutes(mux, s)
@@ -229,7 +232,7 @@ func serve(socket string) error {
 	registerNetworkRoutes(mux, s)
 
 	httpServer := &http.Server{
-		Handler:           s.requirePeer(mux),
+		Handler:           s.requirePeer(s.plusRoutes(mux)),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      20 * time.Minute,

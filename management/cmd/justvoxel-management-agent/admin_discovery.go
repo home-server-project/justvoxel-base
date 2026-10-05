@@ -128,6 +128,10 @@ func (s *server) adminConfiguration(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.requireAdministrator(w, r); !ok {
 		return
 	}
+	if s.plus {
+		writeJSON(w, http.StatusOK, adminConfigurationDiscovery{})
+		return
+	}
 	var out adminConfigurationDiscovery
 	if !s.collectAdminDiscovery(w, r, "configuration", &out) {
 		return

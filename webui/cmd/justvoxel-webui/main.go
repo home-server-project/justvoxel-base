@@ -24,6 +24,7 @@ func main() {
 
 	client := api.NewClient(*socket)
 	app, err := server.New(client, server.Config{
+		Plus:           true,
 		Version:        version.Version,
 		Commit:         version.Commit,
 		ManagementAPI:  version.ManagementAPI,
