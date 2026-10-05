@@ -14,8 +14,16 @@ if ! dnf repolist --enabled | grep -Eiq '(^|[[:space:]])crb([[:space:]]|$)'; the
 fi
 
 read -r -a common_packages <<< "${JUSTVOXEL_COMMON_PACKAGES}"
-# EPEL is enabled only for image composition; finalize-image keeps it disabled.
-dnf install -y --enablerepo=epel "${common_packages[@]}"
+dnf install -y "${common_packages[@]}"
+
+# The stable package artifact includes Fedora and AlmaLinux builds.
+# Select only the AlmaLinux 10 RPM for this image.
+python_docker_rpm="$(find /ctx/python-docker-rpms -maxdepth 1 -type f -name 'python3-docker-*.el10.noarch.rpm' -print -quit)"
+if [[ -z ${python_docker_rpm} ]]; then
+    echo "ERROR: Home Server Packages python3-docker AlmaLinux 10 RPM is missing." >&2
+    exit 1
+fi
+dnf install -y "${python_docker_rpm}"
 
 superfile_rpm="$(find /ctx/superfile-rpms -maxdepth 1 -type f -name 'superfile-*.x86_64.rpm' -print -quit)"
 if [[ -z ${superfile_rpm} ]]; then

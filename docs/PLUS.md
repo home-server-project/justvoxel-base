@@ -10,7 +10,7 @@ The existing desktop, wallpapers and host workspaces remain. System Monitor, Net
 
 Minecraft workspaces, game software/version controls, backups, restore, migration and game reset are not exposed. The WebUI and privileged Management API both reject the inherited game routes. Their implementation remains in source for now. Game-specific storage assignment is unavailable; ordinary disk/partition/mount operations keep their existing review and confirmation steps.
 
-Host power and update reboots do not use Minecraft player queries or game backups. Docker/systemd handle host shutdown normally. Glances remains the RPM supplied by Home Server Packages. The Plus image adds the distro python3-docker client so Glances can use Docker rather than requesting the Podman API socket. The inherited Minecraft shutdown guard is not enabled.
+Host power and update reboots do not use Minecraft player queries or game backups. Docker/systemd handle host shutdown normally. Glances remains the RPM supplied by Home Server Packages. The Plus image installs the AlmaLinux 10 python3-docker RPM from the Home Server Packages stable artifact with DNF so Glances can use Docker rather than requesting the Podman API socket. The inherited Minecraft shutdown guard is not enabled.
 
 The Logs screen provides the current boot's last 200 journal lines for the Management Agent, WebUI, Docker and containerd. Only Administrators may read these logs. Service selection is fixed, and lines matching the existing sensitive diagnostic pattern are redacted.
 

@@ -209,6 +209,7 @@ test -f /usr/lib/systemd/system/justvoxel-glances.service
 test -f /etc/glances/glances.conf
 grep -Fq -- '--bind 127.0.0.1 --port 61208' /usr/lib/systemd/system/justvoxel-glances.service
 grep -Fq -- '--disable-webui' /usr/lib/systemd/system/justvoxel-glances.service
+rpm -q python3-docker >/dev/null
 python3 -c 'import docker'
 ! grep -Eq '^podman_sock=' /etc/glances/glances.conf
 grep -Fqx 'Wants=docker.service' /usr/lib/systemd/system/justvoxel-glances.service

@@ -2,10 +2,12 @@ ARG HOME_SERVER_BASE_IMAGE=ghcr.io/home-server-project/home-server-base-10:stabl
 ARG JUSTVOXEL_BASE_REPOSITORY=ghcr.io/home-server-project/justvoxel-plus-base
 ARG SUPERFILE_PACKAGE_IMAGE=ghcr.io/home-server-project/superfile:stable
 ARG PLAYIT_PACKAGE_IMAGE=ghcr.io/home-server-project/playit:stable
+ARG PYTHON_DOCKER_PACKAGE_IMAGE=ghcr.io/home-server-project/python3-docker:stable
 ARG GLANCES_PACKAGE_IMAGE=ghcr.io/home-server-project/glances:stable
 
 FROM ${SUPERFILE_PACKAGE_IMAGE} AS superfile-package
 FROM ${GLANCES_PACKAGE_IMAGE} AS glances-package
+FROM ${PYTHON_DOCKER_PACKAGE_IMAGE} AS python-docker-package
 FROM ${PLAYIT_PACKAGE_IMAGE} AS playit-package
 
 FROM scratch AS ctx
@@ -18,6 +20,7 @@ COPY runtime /runtime
 COPY mjust /mjust
 COPY --from=superfile-package /rpms /superfile-rpms
 COPY --from=glances-package /rpms /glances-rpms
+COPY --from=python-docker-package /rpms /python-docker-rpms
 COPY --from=playit-package /rpms /playit-rpms
 COPY cosign.pub /cosign.pub
 
