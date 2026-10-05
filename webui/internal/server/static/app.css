@@ -823,10 +823,8 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 #dashboard{position:relative;isolation:isolate;display:flex;flex-direction:column;min-height:calc(100dvh - 48px)}
 .dashboard-wallpaper{position:fixed;inset:48px 0 0;width:100%;height:calc(100dvh - 48px);object-fit:cover;object-position:center;z-index:-3;pointer-events:none}
 #dashboard::before{content:"";position:fixed;inset:48px 0 0;z-index:-2;pointer-events:none;background:#07100b66}
-#dashboard::after{content:"";position:fixed;inset:48px 0 0;z-index:-1;pointer-events:none;opacity:0;background:radial-gradient(circle 125px at var(--voxel-x,50%) var(--voxel-y,30%),#68bd8e24,transparent 100%)}
-#dashboard[data-spotlight-active="true"]::after{opacity:1}
 #dashboard[data-configured="false"] .dashboard-wallpaper{display:none}
-#dashboard[data-configured="false"]::before,#dashboard[data-configured="false"]::after{content:none;display:none}
+#dashboard[data-configured="false"]::before{content:none;display:none}
 .project-footer{margin-top:auto;padding-top:1rem;color:#79838b;font-size:.72rem}
 .project-footer .disclaimer{margin:.35rem 0 0}
 .project-links{display:flex;flex-wrap:wrap;align-items:center;gap:.15rem .45rem}
@@ -1051,14 +1049,13 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .system-users-view>.panel:nth-last-child(2){grid-column:2;grid-row:1 / span 2}
 .system-users-view:has(>.notice)>.panel:nth-last-child(2){grid-row:2 / span 2}
 .system-users-view>.panel:last-child{grid-column:1/-1;min-height:0;overflow:hidden;display:flex;flex-direction:column}
-.system-users-view .user-list{min-height:0;overflow:auto;align-content:start;gap:.45rem;margin-top:.35rem}
-.system-users-view .user-card{padding:.55rem .65rem}
-.system-users-view .user-card-heading{align-items:center;gap:.5rem}
-.system-users-view .user-card-heading strong{font-size:.95rem}
-.system-users-view .quota-grid{gap:.5rem;margin:.45rem 0}
-.system-users-view .quota-box{display:flex;align-items:baseline;justify-content:space-between;gap:.5rem;padding:.35rem .5rem;border:0;border-radius:6px}
-.system-users-view .quota-box span{margin:0;font-size:.74rem}
-.system-users-view .quota-box strong{font-size:.85rem;white-space:nowrap}
+.system-users-view .user-list{display:block;min-height:0;overflow:auto;margin-top:.35rem}
+.system-users-view .system-users-table{width:100%;border-collapse:collapse;font-size:.8rem}
+.system-users-table th,.system-users-table td{padding:.35rem .5rem;text-align:left;border-bottom:1px solid var(--jv-border);white-space:nowrap}
+.system-users-table th{position:sticky;top:0;z-index:1;background:var(--jv-surface-raised);color:var(--jv-muted)}
+.system-users-table button{padding:.35rem .55rem;font-size:.76rem}
+.system-users-table tr[hidden]{display:none}
+.system-user-management{padding:.35rem;white-space:normal;min-width:540px}
 .system-users-view .user-actions-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:.4rem}
 .system-users-view .user-actions-grid button{min-height:34px;margin-top:0;font-size:.76rem}
 .system-users-view .user-actions-grid form{display:grid;gap:.2rem}
@@ -1100,6 +1097,9 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .system-monitor-lines strong{min-width:0;overflow-wrap:anywhere}
 .system-monitor-card-wide{grid-column:span 2}
 .system-monitor-table{max-height:92px;overflow:auto;overscroll-behavior:contain}
+/* Header plus five compact data rows; other cards keep their existing limits. */
+.system-monitor-card:is([data-monitor-card="filesystem"],[data-monitor-card="diskio"],[data-monitor-card="network"]) .system-monitor-table{max-height:calc(9.36rem + 6px)}
+.system-monitor-card:is([data-monitor-card="filesystem"],[data-monitor-card="diskio"],[data-monitor-card="network"]) :is(th,td){line-height:1rem}
 .system-monitor-card[data-monitor-card="processes"] .system-monitor-table{max-height:none}
 .system-monitor-table th,.system-monitor-table td{padding:.28rem .38rem}
 .system-monitor-table th{position:sticky;top:0;z-index:1;background:var(--jv-surface-raised)}
@@ -1334,3 +1334,13 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
   .wallpaper-dialog .wallpaper-appearance label{gap:.2rem;padding:.35rem;font-size:.78rem}
 }
 @media(max-width:600px){.dashboard-wallpaper.wallpaper-theme-v2{object-position:78% center}}
+
+.version-software-review-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.6rem}
+.version-software-review-summary>div{display:grid;gap:.2rem;min-width:0;padding:.55rem;border:1px solid var(--jv-border);border-radius:var(--jv-radius)}
+.version-software-review-summary span{color:var(--jv-muted);font-size:.75rem}
+.version-software-review-summary strong{font-size:.9rem;overflow-wrap:anywhere}
+.version-software-review-actions{justify-content:flex-end}
+@media(max-width:600px){.version-software-review-summary{grid-template-columns:1fr}}
+
+/* Polling can enter needs_attention without replacing the progress fragment. */
+[data-server-migration-operation]:has(#server-migration-operation-attention:not([hidden])) .migration-progress-navigation{display:none}

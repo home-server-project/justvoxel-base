@@ -15,12 +15,12 @@ wait_for_rcon() { [[ ${READY:-yes} == yes ]]; }
 sleep() { printf '%s\n' "$1" >> "${DATA_PATH}/sleeps"; }
 podman() {
     case "${*: -1}" in
-        --json) printf '%s' "${MONITOR_RESPONSE}" ;;
+        --json) printf 'probe\n' >> "${DATA_PATH}/monitor-probes"; [[ ${MONITOR_FAIL:-no} != yes ]] || return 1; printf '%s' "${MONITOR_RESPONSE}" ;;
         list) printf 'There are 0 of a max of 10 players online' ;;
-        version) [[ ${MINECRAFT_SERVER_TYPE:-paper} != vanilla ]] || { echo 'Unexpected Vanilla version command' >&2; return 1; }; if [[ ${TRANSIENT:-no} == yes ]]; then
+        version) [[ ${VERSION_FAIL:-no} != yes ]] || return 1; [[ ${MINECRAFT_SERVER_TYPE:-paper} != vanilla ]] || { echo 'Unexpected Vanilla version command' >&2; return 1; }; if [[ ${TRANSIENT:-no} == yes ]]; then
             count=$(cat "${DATA_PATH}/probes" 2>/dev/null || printf 0)
             printf '%s' "$((count + 1))" > "${DATA_PATH}/probes"
-            if (( count < ${TRANSIENT_COUNT:-1} )); then printf 'Checking version, please wait...'; return 0; fi
+            if (( count < ${TRANSIENT_COUNT:-1} )); then printf '%s' "${TRANSIENT_RESPONSE:-Checking version, please wait...}"; return 0; fi
         fi; printf '%s' "${VERSION_RESPONSE:-This server is running Paper version 26.2-19-main (Implementing API version 26.2-R0.1-SNAPSHOT)}" ;;
         plugins) [[ ${MINECRAFT_SERVER_TYPE:-paper} != vanilla ]] || { echo 'Unexpected Vanilla plugins command' >&2; return 1; }; printf '%s' "${PLUGIN_RESPONSE:-Plugins (3): Geyser-Spigot, floodgate, ViaVersion}" ;;
         'geyser version') printf '%s' "${GEYSER_RESPONSE:-This server is running Geyser version fixture}" ;;
@@ -61,10 +61,57 @@ for software in paper purpur; do
             echo 'Invalid response after transient accepted' >&2; exit 1
         fi
     done
-    rm -f "${DATA_PATH}/probes" "${DATA_PATH}/sleeps"
-    if TRANSIENT=yes TRANSIENT_COUNT=100 MINECRAFT_SERVER_TYPE="${software}" bash "${fixture_dir}/verify" 26.2; then
-        echo 'Unbounded transient version response accepted' >&2; exit 1
-    fi
-    [[ $(cat "${DATA_PATH}/probes") == 21 && $(wc -l < "${DATA_PATH}/sleeps") == 20 ]]
+    # Exhaust the same bounded wait, then verify the running version locally.
+    printf 'auth-type: floodgate\n' > "${DATA_PATH}/plugins/Geyser-Spigot/config.yml"
+    for expected in 26.2 LATEST; do
+        rm -f "${DATA_PATH}/probes" "${DATA_PATH}/sleeps"
+        TRANSIENT=yes TRANSIENT_COUNT=100 MINECRAFT_SERVER_TYPE="${software}" \
+            MONITOR_RESPONSE='{"server_info":{"version":{"name":"26.2"}}}' bash "${fixture_dir}/verify" "${expected}"
+        [[ $(cat "${DATA_PATH}/probes") == 21 && $(wc -l < "${DATA_PATH}/sleeps") == 20 ]]
+    done
+    # Reproduce the real ANSI-styled transient response, including terminal whitespace.
+    for response in $'\033[37m\033[3mChecking version, please wait...\033[0m' $' \r\n\033[37m\033[3mChecking version, please wait...\r\n\033[0m\t '; do
+        rm -f "${DATA_PATH}/probes" "${DATA_PATH}/sleeps"
+        TRANSIENT=yes TRANSIENT_COUNT=100 TRANSIENT_RESPONSE="${response}" MINECRAFT_SERVER_TYPE="${software}" \
+            MONITOR_RESPONSE='{"server_info":{"version":{"name":"26.2"}}}' bash "${fixture_dir}/verify" 26.2
+        [[ $(cat "${DATA_PATH}/probes") == 21 && $(wc -l < "${DATA_PATH}/sleeps") == 20 ]]
+    done
+    # Formatting removal must not turn extra response content into the exact transient.
+    for response in $'\033[37m\033[3mChecking version, please wait... unexpected\033[0m' $'\033[37m\033[3mWarning: Checking version, please wait...\033[0m'; do
+        rm -f "${DATA_PATH}/probes" "${DATA_PATH}/sleeps" "${DATA_PATH}/monitor-probes"
+        if TRANSIENT=yes TRANSIENT_COUNT=100 TRANSIENT_RESPONSE="${response}" MINECRAFT_SERVER_TYPE="${software}" \
+            MONITOR_RESPONSE='{"server_info":{"version":{"name":"26.2"}}}' bash "${fixture_dir}/verify" 26.2; then
+            echo 'ANSI-formatted non-transient response accepted' >&2; exit 1
+        fi
+        [[ $(cat "${DATA_PATH}/probes") == 1 && ! -e ${DATA_PATH}/sleeps && ! -e ${DATA_PATH}/monitor-probes ]]
+    done
+    for response in '{"server_info":{"version":{"name":"26.3"}}}' 'not JSON' '{}' '{"server_info":{"version":{"name":""}}}' '{"server_info":{"version":{"name":26.2}}}'; do
+        rm -f "${DATA_PATH}/probes" "${DATA_PATH}/sleeps"
+        if TRANSIENT=yes TRANSIENT_COUNT=100 MINECRAFT_SERVER_TYPE="${software}" \
+            MONITOR_RESPONSE="${response}" bash "${fixture_dir}/verify" 26.2; then
+            echo 'Invalid fallback status accepted' >&2; exit 1
+        fi
+        [[ $(cat "${DATA_PATH}/probes") == 21 && $(wc -l < "${DATA_PATH}/sleeps") == 20 ]]
+    done
+    for failure in 'MONITOR_FAIL=yes' 'PLUGIN_RESPONSE=Plugins (1): OtherPlugin' 'PLUGIN_RESPONSE=Plugins (1): ViaVersion' 'GEYSER_RESPONSE=Unknown command' 'VERSION_FAIL=yes' 'ACTIVE=no' 'READY=no'; do
+        rm -f "${DATA_PATH}/probes"
+        if env "${failure}" TRANSIENT=yes TRANSIENT_COUNT=100 MINECRAFT_SERVER_TYPE="${software}" \
+            MONITOR_RESPONSE='{"server_info":{"version":{"name":"26.2"}}}' bash "${fixture_dir}/verify" 26.2; then
+            echo "Invalid fallback runtime accepted: ${failure}" >&2; exit 1
+        fi
+    done
+    for response in 'Unknown command' 'This server is running Spigot (MC: 26.2)' "This server is running ${software^} (MC: 26.3)" 'Checking version, please wait... unexpected'; do
+        if MINECRAFT_SERVER_TYPE="${software}" VERSION_RESPONSE="${response}" \
+            MONITOR_RESPONSE='{"server_info":{"version":{"name":"26.2"}}}' bash "${fixture_dir}/verify" 26.2; then
+            echo 'Completed invalid response bypassed by fallback' >&2; exit 1
+        fi
+    done
+    for response in '{}' 'not JSON' '{"server_info":{"version":{"name":""}}}'; do
+        rm -f "${DATA_PATH}/probes"
+        if TRANSIENT=yes TRANSIENT_COUNT=100 MINECRAFT_SERVER_TYPE="${software}" \
+            MONITOR_RESPONSE="${response}" bash "${fixture_dir}/verify" LATEST; then
+            echo 'Invalid LATEST fallback accepted' >&2; exit 1
+        fi
+    done
 done
 echo 'Minecraft stack readiness regression checks passed.'

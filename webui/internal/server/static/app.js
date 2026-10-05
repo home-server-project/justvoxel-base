@@ -342,18 +342,6 @@ if (dashboard) {
   refreshDashboard();
   window.setInterval(refreshDashboard, 5000);
   window.addEventListener("justvoxel:minecraft-reset-complete", () => void refreshDashboard());
-  if (window.matchMedia("(pointer: fine) and (prefers-reduced-motion: no-preference)").matches) {
-    dashboard.addEventListener("pointermove", (event) => {
-      dashboard.dataset.spotlightActive = "true";
-      dashboard.style.setProperty("--voxel-x", `${Math.round(event.clientX / window.innerWidth * 100)}%`);
-      dashboard.style.setProperty("--voxel-y", `${Math.round((event.clientY - 48) / Math.max(1, window.innerHeight - 48) * 100)}%`);
-    });
-    const hideSpotlight = () => { dashboard.dataset.spotlightActive = "false"; };
-    dashboard.addEventListener("pointerleave", hideSpotlight);
-    dashboard.addEventListener("pointercancel", hideSpotlight);
-    document.documentElement.addEventListener("mouseleave", hideSpotlight);
-    window.addEventListener("blur", hideSpotlight);
-  }
 }
 
 
@@ -4027,38 +4015,50 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     } else {
       const list = document.createElement("div");
       list.className = "user-list";
-      users.forEach((user) => {
-        const card = document.createElement("article");
-        card.className = "user-card";
-
-        const heading = document.createElement("div");
-        heading.className = "user-card-heading";
-        const identityWrap = document.createElement("div");
-        const username = document.createElement("strong");
-        username.textContent = user.username || "User";
-        const enabled = document.createElement("span");
-        enabled.className = "muted";
-        enabled.textContent = user.enabled ? "Enabled" : "Disabled";
-        identityWrap.append(username, enabled);
-        const roleBadge = document.createElement("span");
-        roleBadge.className = "badge";
-        roleBadge.textContent = user.role || "viewer";
-        heading.append(identityWrap, roleBadge);
-        card.appendChild(heading);
-
-        const quota = document.createElement("div");
-        quota.className = "quota-grid";
-        [["Restart allowance", user.restart_used, user.restart_limit], ["Backup allowance", user.backup_used, user.backup_limit]].forEach(([label, used, limit]) => {
-          const box = document.createElement("div");
-          box.className = "quota-box";
-          const labelNode = document.createElement("span");
-          labelNode.textContent = label;
-          const valueNode = document.createElement("strong");
-          valueNode.textContent = String(used ?? 0) + " / " + String(limit ?? 0);
-          box.append(labelNode, valueNode);
-          quota.appendChild(box);
+      const table = document.createElement("table");
+      table.className = "system-users-table";
+      const head = document.createElement("thead");
+      head.innerHTML = "<tr><th scope=\"col\">Username</th><th scope=\"col\">Role</th><th scope=\"col\">Status</th><th scope=\"col\">Restart</th><th scope=\"col\">Backup</th><th scope=\"col\">Actions</th></tr>";
+      const rows = document.createElement("tbody");
+      table.append(head, rows);
+      list.appendChild(table);
+      let openManagement = null;
+      users.forEach((user, index) => {
+        const row = document.createElement("tr");
+        for (const value of [user.username || "User", user.role === "operator" ? "Operator" : "Viewer", user.enabled ? "Enabled" : "Disabled",
+          `${user.restart_used ?? 0} / ${user.restart_limit ?? 0}`, `${user.backup_used ?? 0} / ${user.backup_limit ?? 0}`]) {
+          const cell = document.createElement("td");
+          cell.textContent = value;
+          row.appendChild(cell);
+        }
+        const manageCell = document.createElement("td");
+        const manage = document.createElement("button");
+        manage.type = "button";
+        manage.className = "secondary";
+        manage.textContent = "Manage";
+        manage.setAttribute("aria-expanded", "false");
+        manage.setAttribute("aria-controls", "system-user-management-" + index);
+        manageCell.appendChild(manage);
+        row.appendChild(manageCell);
+        const managementRow = document.createElement("tr");
+        managementRow.hidden = true;
+        managementRow.id = "system-user-management-" + index;
+        const managementCell = document.createElement("td");
+        managementCell.colSpan = 6;
+        const card = document.createElement("div");
+        card.className = "system-user-management";
+        managementCell.appendChild(card);
+        managementRow.appendChild(managementCell);
+        manage.addEventListener("click", () => {
+          const opening = managementRow.hidden;
+          if (openManagement) {
+            openManagement.row.hidden = true;
+            openManagement.button.setAttribute("aria-expanded", "false");
+          }
+          managementRow.hidden = !opening;
+          manage.setAttribute("aria-expanded", String(opening));
+          openManagement = opening ? { row: managementRow, button: manage } : null;
         });
-        card.appendChild(quota);
 
         const actions = document.createElement("div");
         actions.className = "user-actions-grid";
@@ -4150,7 +4150,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         deleteDetails.append(deleteSummary, deleteText, deleteButton);
         card.appendChild(deleteDetails);
 
-        list.appendChild(card);
+        rows.append(row, managementRow);
       });
       listPanel.appendChild(list);
     }

@@ -105,18 +105,18 @@ func (a *App) migrationWorkspaceRecoveryPage(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	operationID := ""
+	importNeedsAttention = false
 	recoveryNeedsAttention := false
-	if len(discovery.Transactions) == 0 {
-		current, currentErr := client.AdminCurrentMigrationOperation(r.Context(), session)
-		if currentErr != nil {
-			a.handleMigrationWorkspaceRequestError(w, r, currentErr, "Server Migration operation status is unavailable.")
-			return
-		}
-		if current.Operation != nil && current.Operation.State == "needs_attention" {
-			if current.Operation.OperationType == "migration_import" || current.Operation.OperationType == "migration_recovery" {
-				operationID = current.Operation.OperationID
-				recoveryNeedsAttention = current.Operation.OperationType == "migration_recovery"
-			}
+	current, currentErr := client.AdminCurrentMigrationOperation(r.Context(), session)
+	if currentErr != nil {
+		a.handleMigrationWorkspaceRequestError(w, r, currentErr, "Server Migration operation status is unavailable.")
+		return
+	}
+	if current.Operation != nil && current.Operation.State == "needs_attention" {
+		if current.Operation.OperationType == "migration_import" || current.Operation.OperationType == "migration_recovery" {
+			operationID = current.Operation.OperationID
+			importNeedsAttention = current.Operation.OperationType == "migration_import"
+			recoveryNeedsAttention = current.Operation.OperationType == "migration_recovery"
 		}
 	}
 	a.renderMigrationWorkspaceRecoveryPage(w, http.StatusOK, identity, discovery, importNeedsAttention, recoveryNeedsAttention, operationID, csrfFromRequest(r), "")

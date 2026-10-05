@@ -76,7 +76,7 @@ func TestProjectFooterAndDateTimeUIContracts(t *testing.T) {
 	}
 	for _, want := range []string{
 		`#dashboard[data-configured="false"] .dashboard-wallpaper{display:none}`,
-		`#dashboard[data-configured="false"]::before,#dashboard[data-configured="false"]::after{content:none;display:none}`,
+		`#dashboard[data-configured="false"]::before{content:none;display:none}`,
 	} {
 		if !strings.Contains(appCSS, want) {
 			t.Fatalf("Unconfigured dashboard wallpaper and overlay suppression missing %q", want)
@@ -85,11 +85,14 @@ func TestProjectFooterAndDateTimeUIContracts(t *testing.T) {
 	for _, want := range []string{
 		`.dashboard-wallpaper{position:fixed;inset:48px 0 0;width:100%;height:calc(100dvh - 48px);object-fit:cover;object-position:center;z-index:-3;pointer-events:none}`,
 		`#dashboard::before{content:"";position:fixed;inset:48px 0 0;z-index:-2;pointer-events:none;background:#07100b66}`,
-		`#dashboard::after{content:"";position:fixed;inset:48px 0 0;z-index:-1;pointer-events:none;opacity:0;background:radial-gradient(circle 125px at var(--voxel-x,50%) var(--voxel-y,30%),#68bd8e24,transparent 100%)}`,
-		`#dashboard[data-spotlight-active="true"]::after{opacity:1}`,
 	} {
 		if !strings.Contains(appCSS, want) {
 			t.Fatalf("Configured dashboard wallpaper behavior missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"#dashboard::after", "data-spotlight-active", "--voxel-x", "--voxel-y"} {
+		if strings.Contains(appCSS, forbidden) {
+			t.Fatalf("Removed dashboard spotlight styling must not contain %q", forbidden)
 		}
 	}
 	if !strings.Contains(read("templates/dashboard.html"), `data-configured="{{.Status.Minecraft.Configured}}"`) || !strings.Contains(read("static/app.js"), "dashboard.dataset.configured = String(Boolean(status.minecraft.configured));") {

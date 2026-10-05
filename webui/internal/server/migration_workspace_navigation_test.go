@@ -89,6 +89,9 @@ func TestMigrationWorkspaceProgressBrowserRedirectAndInternalFragment(t *testing
 	if fragment.Code != http.StatusOK || !strings.Contains(fragment.Body.String(), "data-migration-workspace-root") || !strings.Contains(fragment.Body.String(), `href="/?workspace=migration&amp;tab=recovery"`) || !strings.Contains(fragment.Body.String(), "Review Migration Recovery") {
 		t.Fatalf("internal progress response = %d: %s", fragment.Code, fragment.Body.String())
 	}
+	if strings.Contains(fragment.Body.String(), `href="/?workspace=migration"`) {
+		t.Fatal("needs-attention progress exposes looping Server Migration navigation")
+	}
 }
 
 func TestMigrationWorkspaceApplyRedirectRendersCanonicalProgress(t *testing.T) {
@@ -223,5 +226,50 @@ func TestMigrationWorkspaceExplicitURLStateContract(t *testing.T) {
 	operationLoad := strings.Index(js, `if (operation) await loadMigration("/workspace/migration/progress/" + encodeURIComponent(operation));`)
 	if canonicalLink < 0 || operationLoad < 0 || canonicalLink > operationLoad {
 		t.Fatal("canonical Migration links must update history before loading the fragment")
+	}
+}
+
+func TestMigrationWorkspaceImportAttentionActionsAndResolvedNavigation(t *testing.T) {
+	for _, state := range []string{"needs_attention", "resolved", "succeeded"} {
+		t.Run(state, func(t *testing.T) {
+			client := &fakeServerMigrationAPI{operation: &api.PersistentOperation{
+				OperationID: serverMigrationOperationID, OperationType: "migration_import", State: state,
+			}}
+			app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := authenticatedAdminRequest(http.MethodGet, "http://example/workspace/migration/progress/"+serverMigrationOperationID, "")
+			request.Header.Set(migrationWorkspaceFragmentHeader, "1")
+			page := httptestResponse(app, request)
+			body := page.Body.String()
+			if page.Code != http.StatusOK || !strings.Contains(body, "Download Import log") || !strings.Contains(body, "/api/system/workspace/logs/operation/"+serverMigrationOperationID+"?download=1") {
+				t.Fatalf("Import progress actions missing: %d %s", page.Code, body)
+			}
+			if state == "needs_attention" {
+				if !strings.Contains(body, `href="/?workspace=migration&amp;tab=recovery" >Review Migration Recovery`) || strings.Contains(body, `href="/?workspace=migration"`) {
+					t.Fatalf("needs-attention progress actions loop or omit Recovery: %s", body)
+				}
+			} else if !strings.Contains(body, `href="/?workspace=migration">Server Migration`) {
+				t.Fatalf("resolved progress lost normal Migration navigation: %s", body)
+			}
+		})
+	}
+}
+
+func TestMigrationWorkspacePolledAttentionHidesLoopingNavigation(t *testing.T) {
+	styles, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(styles), `[data-server-migration-operation]:has(#server-migration-operation-attention:not([hidden])) .migration-progress-navigation{display:none}`) {
+		t.Fatal("polled needs-attention progress does not hide looping navigation")
+	}
+	markup, err := assets.ReadFile("templates/migration_workspace_progress.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(markup), `class="button-link secondary migration-progress-navigation" href="/?workspace=migration"`) {
+		t.Fatal("normal Migration navigation is not connected to the polled attention styling")
 	}
 }

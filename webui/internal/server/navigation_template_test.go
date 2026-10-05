@@ -568,7 +568,7 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 	if strings.Contains(styles, "conic-gradient(") {
 		t.Fatal("dashboard must not retain the generated voxel wallpaper")
 	}
-	for _, want := range []string{"object-fit:cover", ".dashboard-wallpaper.wallpaper-theme-v2{object-position:65% center}", `#dashboard[data-spotlight-active="true"]::after`} {
+	for _, want := range []string{"object-fit:cover", ".dashboard-wallpaper.wallpaper-theme-v2{object-position:65% center}", `#dashboard::before`} {
 		if !strings.Contains(styles, want) {
 			t.Fatalf("dashboard wallpaper behavior missing %q", want)
 		}
@@ -577,9 +577,14 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`dashboard.dataset.spotlightActive = "true"`, `dashboard.dataset.spotlightActive = "false"`, `dashboard.addEventListener("pointerleave", hideSpotlight)`, `document.documentElement.addEventListener("mouseleave", hideSpotlight)`, `window.addEventListener("blur", hideSpotlight)`} {
-		if !strings.Contains(string(appJS), want) {
-			t.Fatalf("dashboard spotlight behavior missing %q", want)
+	for _, removed := range []string{"spotlightActive", "hideSpotlight", "--voxel-x", "--voxel-y", `dashboard.addEventListener("pointermove"`} {
+		if strings.Contains(string(appJS), removed) {
+			t.Fatalf("dashboard retains removed spotlight behavior %q", removed)
+		}
+	}
+	for _, removed := range []string{"#dashboard::after", "data-spotlight-active", "--voxel-x", "--voxel-y"} {
+		if strings.Contains(styles, removed) {
+			t.Fatalf("dashboard retains removed spotlight styling %q", removed)
 		}
 	}
 }
@@ -1033,6 +1038,42 @@ func TestNewBackupsAutomaticPolicyResponsiveLayout(t *testing.T) {
 	} {
 		if !strings.Contains(styles, want) {
 			t.Fatalf("New Backups automatic policy responsive styling missing %q", want)
+		}
+	}
+}
+
+func TestCompactUsersAndFiveRowMonitorContract(t *testing.T) {
+	script, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js, css := string(script), string(styles)
+	start := strings.Index(js, "  const renderUsers =")
+	end := strings.Index(js[start:], "  const renderSecurity =")
+	users := js[start : start+end]
+	for _, want := range []string{"system-users-table", "Username", "Role", "Status", "Restart", "Backup", "Actions", `manage.className = "secondary"`, `manage.textContent = "Manage"`, "managementRow.hidden = true", "openManagement.row.hidden = true", `managementCell.colSpan = 6`, "user.restart_used ?? 0", "user.backup_used ?? 0", "Primary administrator", "minimum_password_len", "/restart-allowance/reset", "/backup-allowance/reset", `+ "/role"`, `+ "/enabled"`, `+ "/password"`, `+ "/delete"`, `deleteButton.className = "danger"`} {
+		if !strings.Contains(users, want) {
+			t.Fatalf("compact Users contract missing %q", want)
+		}
+	}
+	for _, removed := range []string{`card.className = "user-card"`, `quota.className = "quota-grid"`} {
+		if strings.Contains(users, removed) {
+			t.Fatalf("Users retains expanded card presentation %q", removed)
+		}
+	}
+	for _, want := range []string{
+		`.system-users-view .user-list{display:block;min-height:0;overflow:auto`,
+		`.system-monitor-card:is([data-monitor-card="filesystem"],[data-monitor-card="diskio"],[data-monitor-card="network"]) .system-monitor-table{max-height:calc(9.36rem + 6px)}`,
+		`.system-monitor-card:is([data-monitor-card="filesystem"],[data-monitor-card="diskio"],[data-monitor-card="network"]) :is(th,td){line-height:1rem}`,
+		`.system-monitor-card[data-monitor-card="processes"] .system-monitor-table{max-height:none}`,
+		`.system-monitor-table th{position:sticky;top:0`,
+	} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("compact table styling missing %q", want)
 		}
 	}
 }

@@ -296,15 +296,20 @@ if (versionLauncher && versionDialog) {
             try {
               const [plan, snapshot] = await Promise.all([request(statusURL("", "", target)), request("/api/dashboard-status")]);
               const review = card("Review server software change");
-              review.appendChild(line("Server software", `${status.server_software} → ${plan.server_software}`));
-              review.appendChild(line("Minecraft version", plan.selected_candidate));
-              review.appendChild(line("Players online", String(snapshot?.players?.online ?? "Unknown")));
-              const note = document.createElement("p");
-              note.textContent = "JustVoxel will create a cold backup, safely stop Minecraft, change software and verify the stack. If startup or verification fails, it will restore the previous configuration. Worlds, plugins and player data are preserved.";
-              review.appendChild(note);
+              const summary = document.createElement("div");
+              summary.className = "version-software-review-summary";
+              summary.append(line("Server software", `${status.server_software} → ${plan.server_software}`),
+                line("Minecraft version", plan.selected_candidate),
+                line("Players online", String(snapshot?.players?.online ?? "Unknown")));
+              review.appendChild(summary);
               const consent = document.createElement("input"); consent.type = "checkbox";
+              consent.setAttribute("role", "switch");
+              consent.checked = false;
               const label = document.createElement("label");
-              label.append(consent, document.createTextNode(" Confirm the reviewed switch and allow the shutdown countdown for online players."));
+              label.className = "minecraft-native-toggle system-ups-shutdown-switch";
+              const confirmation = document.createElement("span");
+              confirmation.textContent = "Confirm server software change";
+              label.append(confirmation, consent);
               review.appendChild(label);
               const apply = document.createElement("button"); apply.type = "button"; apply.textContent = "Apply server software change";
               const safe = plan.stack_state === "updates_available" && plan.server_supported && (!plan.crossplay_enabled || plan.crossplay_compatible) && Boolean(plan.plan_fingerprint);
@@ -312,17 +317,28 @@ if (versionLauncher && versionDialog) {
               consent.addEventListener("change", () => { apply.disabled = !safe || !consent.checked; });
               if (!safe) review.appendChild(line("Unavailable", plan.reason));
               apply.addEventListener("click", async () => {
+                if (!safe || !consent.checked || apply.disabled) return;
                 apply.disabled = true;
+                cancel.disabled = true;
+                consent.disabled = true;
                 try {
                   const body = new URLSearchParams({ csrf, server_type: target, plan_fingerprint: plan.plan_fingerprint, confirm_players: consent.checked ? "yes" : "no" });
                   const result = await request("/api/version/workspace/update", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
                   if (!result.operation?.operation_id) throw new Error("Server update tracking is unavailable.");
                   await render("Server software change started."); watchUpdate(result.operation.operation_id);
-                } catch (failure) { state.textContent = failure.message; }
+                } catch (failure) {
+                  state.textContent = failure.message;
+                  cancel.disabled = false;
+                  consent.disabled = false;
+                  apply.disabled = !safe || !consent.checked;
+                }
               });
-              review.appendChild(apply);
-              const cancel = document.createElement("button"); cancel.type = "button"; cancel.textContent = "Cancel review";
-              cancel.addEventListener("click", () => { review.remove(); change.disabled = false; }); review.appendChild(cancel);
+              const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "secondary"; cancel.textContent = "Cancel review";
+              cancel.addEventListener("click", () => { review.remove(); change.disabled = false; });
+              const actions = document.createElement("div");
+              actions.className = "action-row version-software-review-actions";
+              actions.append(cancel, apply);
+              review.appendChild(actions);
               root.appendChild(review);
             } catch (failure) { state.textContent = failure.message; change.disabled = false; }
           });

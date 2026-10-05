@@ -49,5 +49,5 @@
     </section>
   {{end}}
 
-  <div class="action-row"><a class="button-link secondary" href="/?workspace=migration">Back to Server Migration</a></div>
+  {{if not (or .ImportNeedsAttention .RecoveryNeedsAttention)}}<div class="action-row"><a class="button-link secondary" href="/?workspace=migration">Back to Server Migration</a></div>{{end}}
 </div>{{end}}

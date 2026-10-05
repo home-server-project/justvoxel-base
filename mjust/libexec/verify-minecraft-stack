@@ -19,28 +19,41 @@ if [[ ${MINECRAFT_SERVER_TYPE-paper} == vanilla ]]; then
     exit 0
 fi
 # Paper/Purpur can expose RCON before their asynchronous version check completes.
-# Retry only that readiness response; every final software/version check stays strict.
+# Retry only that exact readiness response; completed software/version checks stay strict.
+# After the same bounded wait, local status can verify the running game version.
 version_wait=0
 while :; do
     version="$(podman exec minecraft rcon-cli version)"
-    [[ ${version,,} == *'checking version, please wait'* ]] || break
+    # Normalize terminal presentation only; keep the raw completed response for validation.
+    comparison_version="$(printf '%s' "${version}" | sed $'s/\033\\[[0-9;]*m//g')"
+    comparison_version="${comparison_version//$'\r'/}"
+    comparison_version="${comparison_version#"${comparison_version%%[![:space:]]*}"}"
+    comparison_version="${comparison_version%"${comparison_version##*[![:space:]]}"}"
+    [[ ${comparison_version} == 'Checking version, please wait...' ]] || break
     if (( version_wait >= 60 )); then
-        echo 'ERROR: Minecraft version response could not be verified.' >&2
-        exit 1
+        [[ ${MINECRAFT_SERVER_TYPE-paper} == paper || ${MINECRAFT_SERVER_TYPE-paper} == purpur ]] || { echo 'ERROR: Minecraft server software cannot use the local version fallback.' >&2; exit 1; }
+        status="$(podman exec minecraft mc-monitor status --json)" || { echo 'ERROR: Minecraft status probe failed.' >&2; exit 1; }
+        actual="$(jq -er '.server_info.version.name | select(type == "string" and length > 0)' <<< "${status}")" || { echo 'ERROR: Minecraft status version is invalid.' >&2; exit 1; }
+        [[ ${expected_version} == LATEST || ${actual} == "${expected_version}" ]] || { echo 'ERROR: Minecraft is not running the selected game version.' >&2; exit 1; }
+        printf 'Minecraft version (local status): %s\n' "${actual}"
+        break
     fi
     sleep 3
     version_wait=$((version_wait + 3))
 done
-printf 'Minecraft version: %s\n' "${version}"
-[[ ${version,,} == *"${MINECRAFT_SERVER_TYPE-paper}"* ]] || { echo 'ERROR: Minecraft is not running the selected server software.' >&2; exit 1; }
-[[ ${version} == *'MC: '* || ${version} == *'Minecraft version '* || ${version} == *'Paper version '* || ${version} == *'Purpur version '* ]] || { echo 'ERROR: Minecraft version response could not be verified.' >&2; exit 1; }
-expected_version="${1:-${MINECRAFT_VERSION}}"
-if [[ ${expected_version} != LATEST ]]; then
-    [[ ${expected_version} =~ ^[0-9A-Za-z._-]+$ ]] || exit 1
-    [[ ${version} == *"MC: ${expected_version})"* || ${version} == *"Minecraft version ${expected_version} "* ||
-       ${version} == *"Paper version ${expected_version}-"* || ${version} == *"Paper version ${expected_version} "* || ${version} == *"Purpur version ${expected_version}-"* || ${version} == *"Purpur version ${expected_version} "* ]] || {
-        echo 'ERROR: Minecraft is not running the selected game version.' >&2; exit 1;
-    }
+# Only the exact transient response may use the local status fallback above.
+if [[ ${comparison_version} != 'Checking version, please wait...' ]]; then
+    printf 'Minecraft version: %s\n' "${version}"
+    [[ ${version,,} == *"${MINECRAFT_SERVER_TYPE-paper}"* ]] || { echo 'ERROR: Minecraft is not running the selected server software.' >&2; exit 1; }
+    [[ ${version} == *'MC: '* || ${version} == *'Minecraft version '* || ${version} == *'Paper version '* || ${version} == *'Purpur version '* ]] || { echo 'ERROR: Minecraft version response could not be verified.' >&2; exit 1; }
+    expected_version="${1:-${MINECRAFT_VERSION}}"
+    if [[ ${expected_version} != LATEST ]]; then
+        [[ ${expected_version} =~ ^[0-9A-Za-z._-]+$ ]] || exit 1
+        [[ ${version} == *"MC: ${expected_version})"* || ${version} == *"Minecraft version ${expected_version} "* ||
+           ${version} == *"Paper version ${expected_version}-"* || ${version} == *"Paper version ${expected_version} "* || ${version} == *"Purpur version ${expected_version}-"* || ${version} == *"Purpur version ${expected_version} "* ]] || {
+            echo 'ERROR: Minecraft is not running the selected game version.' >&2; exit 1;
+        }
+    fi
 fi
 plugins="$(podman exec minecraft rcon-cli plugins)"
 printf 'Plugins: %s\n' "${plugins}"
