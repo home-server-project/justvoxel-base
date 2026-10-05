@@ -1,0 +1,131 @@
+name: justvoxel-plus
+
+x-infrastructure-labels: &infrastructure-labels
+  dd.watch: "true"
+  dd.compose.file: /etc/justvoxel/plus/compose.yaml
+  io.home-server-project.justvoxel.layer: infrastructure
+
+services:
+  database:
+    image: ${MARIADB_IMAGE:-mariadb:11.4}
+    profiles: [database]
+    restart: unless-stopped
+    labels: *infrastructure-labels
+    env_file: database.env
+    volumes:
+      - ${PLUS_DATA_ROOT:?Setup must select persistent storage}/database:/var/lib/mysql:Z
+    networks: [infrastructure]
+    healthcheck:
+      test: [CMD, healthcheck.sh, --connect, --innodb_initialized]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  cache:
+    image: ${REDIS_IMAGE:-redis:7.4-alpine}
+    profiles: [cache]
+    restart: unless-stopped
+    labels: *infrastructure-labels
+    command: [redis-server, --appendonly, "yes"]
+    volumes:
+      - ${PLUS_DATA_ROOT:?Setup must select persistent storage}/redis:/data:Z
+    networks: [infrastructure]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  panel:
+    image: ${PANEL_IMAGE:-ghcr.io/pterodactyl/panel:v1.15.1}
+    profiles: [panel]
+    restart: unless-stopped
+    labels: *infrastructure-labels
+    env_file: panel.env
+    environment:
+      DB_HOST: database
+      DB_PORT: "3306"
+      DB_DATABASE: panel
+      DB_USERNAME: pterodactyl
+      REDIS_HOST: cache
+      CACHE_DRIVER: redis
+      SESSION_DRIVER: redis
+      QUEUE_DRIVER: redis
+      APP_ENV: production
+      APP_ENVIRONMENT_ONLY: "false"
+      APP_TIMEZONE: ${PLUS_TIMEZONE:-UTC}
+      APP_URL: ${PANEL_URL:?Setup must provide the reachable Panel URL}
+      APP_SERVICE_AUTHOR: ${PANEL_AUTHOR:-noreply@localhost}
+    ports:
+      - ${PLUS_BIND_ADDRESS:-0.0.0.0}:${PANEL_HTTP_PORT:-8081}:80
+      - ${PLUS_BIND_ADDRESS:-0.0.0.0}:${PANEL_HTTPS_PORT:-8443}:443
+    volumes:
+      - ${PLUS_DATA_ROOT}/panel/var:/app/var:Z
+      - ${PLUS_DATA_ROOT}/panel/logs:/app/storage/logs:Z
+      - ${PLUS_DATA_ROOT}/panel/nginx:/etc/nginx/http.d:Z
+      - ${PLUS_DATA_ROOT}/certificates:/etc/letsencrypt:z
+    networks: [infrastructure]
+
+  wings:
+    image: ${WINGS_IMAGE:-ghcr.io/pterodactyl/wings:v1.13.3}
+    profiles: [wings]
+    restart: unless-stopped
+    labels: *infrastructure-labels
+    # Wings must access host Docker state; confinement of game containers stays
+    # under Wings. SELinux enforcement on the host remains enabled.
+    security_opt: [label=disable]
+    environment:
+      TZ: ${PLUS_TIMEZONE:-UTC}
+    ports:
+      - ${PLUS_BIND_ADDRESS:-0.0.0.0}:${WINGS_API_PORT:-8080}:8080
+      - ${PLUS_BIND_ADDRESS:-0.0.0.0}:${WINGS_SFTP_PORT:-2022}:2022
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /etc/justvoxel/plus/wings:/etc/pterodactyl:z
+      # The Docker daemon uses HOST paths supplied by Wings, so preserve the
+      # exact absolute data path inside Wings, including secondary-drive paths.
+      - ${PLUS_DATA_ROOT}/wings/data:${PLUS_DATA_ROOT}/wings/data:z
+      - ${PLUS_DATA_ROOT}/wings/logs:/var/log/pterodactyl:Z
+      - /tmp/pterodactyl:/tmp/pterodactyl:z
+      - /run/wings:/run/wings:z
+      - /etc/ssl/certs:/etc/ssl/certs:ro
+      - ${PLUS_DATA_ROOT}/certificates:/etc/letsencrypt:z
+    networks: [infrastructure]
+
+  drydock:
+    image: ${DRYDOCK_IMAGE:-ghcr.io/codeswhat/drydock:1.6.1}
+    profiles: [drydock]
+    restart: unless-stopped
+    labels: *infrastructure-labels
+    user: "1000:1000"
+    group_add:
+      - ${DOCKER_GID:?Setup must provide the Docker socket group}
+    security_opt: [label=disable]
+    env_file:
+      - path: drydock.env
+        # Preserve Argon2id dollar signs without Compose interpolation.
+        format: raw
+    environment:
+      DD_WATCHER_LOCAL_SOCKET: /var/run/docker.sock
+      DD_WATCHER_LOCAL_WATCHBYDEFAULT: "false"
+      DD_WATCHER_LOCAL_WATCHALL: "true"
+      DD_ACTION_DOCKERCOMPOSE_INFRA_FILE: /etc/justvoxel/plus/compose.yaml
+      DD_ACTION_DOCKERCOMPOSE_INFRA_MODE: batch
+      DD_ACTION_DOCKERCOMPOSE_INFRA_AUTO: "false"
+      DD_ACTION_DOCKERCOMPOSE_INFRA_BACKUP: "false"
+      DD_ACTION_DOCKERCOMPOSE_INFRA_PRUNE: "false"
+      DD_SERVER_PORT: "3000"
+    ports:
+      - ${PLUS_BIND_ADDRESS:-0.0.0.0}:${DRYDOCK_PORT:-3000}:3000
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /etc/justvoxel/plus:/etc/justvoxel/plus:z
+      - ${PLUS_DATA_ROOT}/drydock:/store:Z
+    networks: [infrastructure]
+
+networks:
+  infrastructure:
+    name: justvoxel-plus-infrastructure
+    driver: bridge

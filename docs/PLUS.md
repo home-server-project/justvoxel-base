@@ -18,8 +18,12 @@ Setup and Look Around are retained. The setup page currently explains that appli
 
 Tailscale, NetBird and playit.gg setup, installation and activation are unchanged.
 
+## Phase three: infrastructure templates
+
+Upstream Panel, MariaDB, Redis, Wings and Drydock Compose definitions and runtime configuration templates are installed with the image. Every component has its own profile for the wizard switches. Drydock watches only explicitly labelled infrastructure containers and uses its upstream Compose action for administrator-requested updates. The stack service remains disabled until setup deploys and connects the applications. See PLUS_STACK.md for the configuration and storage contract.
+
 ## Remaining phases
 
-Provide upstream container definitions and persistent configuration; implement the compact setup wizard; create and connect Panel/Wings and application launchers; then adapt CLI and factory reset and verify the working appliance at runtime.
+Implement the compact setup wizard; create and connect Panel/Wings and application launchers; then adapt CLI and factory reset and verify the working appliance at runtime.
 
 The password step must explain: These are separate accounts. Changing your password in one does not change the other.

@@ -45,7 +45,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y libpam0g-dev libpwquality-dev
+          sudo apt-get install -y libpam0g-dev libpwquality-dev python3-yaml
 
       - name: Run shell and mjust regression tests
         shell: bash

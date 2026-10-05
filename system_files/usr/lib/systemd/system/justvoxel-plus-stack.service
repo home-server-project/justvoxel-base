@@ -1,0 +1,20 @@
+[Unit]
+Description=JustVoxel Plus infrastructure stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/justvoxel/plus/deployed
+ConditionPathExists=/etc/justvoxel/plus/compose.yaml
+ConditionPathExists=/etc/justvoxel/plus/stack.env
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/etc/justvoxel/plus
+ExecStart=/usr/bin/docker compose --env-file stack.env --file compose.yaml up --detach
+ExecStop=/usr/bin/docker compose --env-file stack.env --file compose.yaml stop
+TimeoutStartSec=600
+TimeoutStopSec=180
+
+[Install]
+WantedBy=multi-user.target
