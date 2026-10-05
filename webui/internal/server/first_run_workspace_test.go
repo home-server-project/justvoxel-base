@@ -48,7 +48,7 @@ func TestFirstRunConfiguredStateOverridesExploreInvitation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(templateSource), `data-dashboard-setup-area {{if .Status.Minecraft.Configured}}hidden{{end}}`) {
+	if !strings.Contains(string(templateSource), `data-dashboard-setup-area {{if isPlus}}{{if .Status.Plus.Configured}}hidden{{end}}{{else}}{{if .Status.Minecraft.Configured}}hidden{{end}}{{end}}`) {
 		t.Fatal("Workspace setup invitation must follow the configured state")
 	}
 }
@@ -177,10 +177,10 @@ func TestMinecraftResetReopensExistingFirstRunChoice(t *testing.T) {
 	if strings.Contains(handoff, "void loadConfigurationState()") {
 		t.Fatal("Minecraft Reset must not immediately trust a potentially stale configured status")
 	}
-	if !strings.Contains(firstRun, `const exploreStorageKey = "justvoxel:first-run:explore"`) ||
+	if !strings.Contains(firstRun, `const exploreStorageKey = plus ? "justvoxel-plus:first-run:explore" : "justvoxel:first-run:explore"`) ||
 		!strings.Contains(firstRun, `(!resetWelcome && new URLSearchParams(window.location.search).has("workspace"))`) ||
 		!strings.Contains(firstRun, "else showChoice()") ||
-		!strings.Contains(firstRun, "configured = Boolean(snapshot?.status?.minecraft?.configured)") ||
+		!strings.Contains(firstRun, "configured = Boolean(plus ? snapshot?.status?.plus?.configured : snapshot?.status?.minecraft?.configured)") ||
 		!strings.Contains(firstRun, "if (generation !== statusGeneration) return;") ||
 		!strings.Contains(firstRun, "if (configured) resetWelcome = false;") {
 		t.Fatal("Minecraft Reset must show Welcome immediately, discard stale status, and later reconcile")

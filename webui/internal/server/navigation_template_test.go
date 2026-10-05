@@ -516,7 +516,7 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 	}
 	markup := string(content)
 	for _, want := range []string{
-		`data-configured="{{.Status.Minecraft.Configured}}"`,
+		`data-configured="{{if isPlus}}{{.Status.Plus.Configured}}{{else}}{{.Status.Minecraft.Configured}}{{end}}"`,
 		`data-dashboard-setup-area`,
 	} {
 		if !strings.Contains(markup, want) {
@@ -1055,7 +1055,7 @@ func TestCompactUsersAndFiveRowMonitorContract(t *testing.T) {
 	start := strings.Index(js, "  const renderUsers =")
 	end := strings.Index(js[start:], "  const renderSecurity =")
 	users := js[start : start+end]
-	for _, want := range []string{"system-users-table", "Username", "Role", "Status", "Restart", "Backup", "Actions", `manage.className = "secondary"`, `manage.textContent = "Manage"`, "managementRow.hidden = true", "openManagement.row.hidden = true", `managementCell.colSpan = 6`, "user.restart_used ?? 0", "user.backup_used ?? 0", "Primary administrator", "minimum_password_len", "/restart-allowance/reset", "/backup-allowance/reset", `+ "/role"`, `+ "/enabled"`, `+ "/password"`, `+ "/delete"`, `deleteButton.className = "danger"`} {
+	for _, want := range []string{"system-users-table", "Username", "Role", "Status", "Restart", "Backup", "Actions", `manage.className = "secondary"`, `manage.textContent = "Manage"`, "managementRow.hidden = true", "openManagement.row.hidden = true", `managementCell.colSpan = justVoxelPlus ? 4 : 6`, "user.restart_used ?? 0", "user.backup_used ?? 0", "Primary administrator", "minimum_password_len", "/restart-allowance/reset", "/backup-allowance/reset", `+ "/role"`, `+ "/enabled"`, `+ "/password"`, `+ "/delete"`, `deleteButton.className = "danger"`} {
 		if !strings.Contains(users, want) {
 			t.Fatalf("compact Users contract missing %q", want)
 		}

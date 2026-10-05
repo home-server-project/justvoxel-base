@@ -95,7 +95,7 @@ func TestProjectFooterAndDateTimeUIContracts(t *testing.T) {
 			t.Fatalf("Removed dashboard spotlight styling must not contain %q", forbidden)
 		}
 	}
-	if !strings.Contains(read("templates/dashboard.html"), `data-configured="{{.Status.Minecraft.Configured}}"`) || !strings.Contains(read("static/app.js"), "dashboard.dataset.configured = String(Boolean(status.minecraft.configured));") {
+	if !strings.Contains(read("templates/dashboard.html"), `data-configured="{{if isPlus}}{{.Status.Plus.Configured}}{{else}}{{.Status.Minecraft.Configured}}{{end}}"`) || !strings.Contains(read("static/app.js"), "dashboard.dataset.configured = String(Boolean(justVoxelPlus ? status.plus?.configured : status.minecraft.configured));") {
 		t.Fatal("Wallpaper visibility must use the existing synchronized dashboard configuration state")
 	}
 	if !strings.Contains(wallpaperJS, "const wallpaper = document.querySelector(\"[data-dashboard-wallpaper]\");\n  if (!wallpaper) return;\n  const form =") {
