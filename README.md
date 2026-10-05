@@ -1,3 +1,13 @@
+# JustVoxel Plus development
+
+This branch develops JustVoxel Plus exclusively in testing-plus. Its image is ghcr.io/home-server-project/justvoxel-plus-base:testing-plus, built on Home Server Base 10 stable-docker for x86-64-v3.
+
+JustVoxel Plus manages the host, Drydock manages infrastructure containers, and Pterodactyl manages game servers. Phase one establishes the isolated build; the stack and Plus interface are not implemented yet. See docs/BUILD.md for the Plus build contract.
+
+The inherited documentation below describes normal JustVoxel and is retained as reference while Plus development proceeds. Its release instructions do not apply to testing-plus.
+
+---
+
 # JustVoxel Base
 
 JustVoxel Base is the shared, VM-ready immutable appliance image used to develop and release the JustVoxel Minecraft server platform.

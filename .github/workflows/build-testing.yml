@@ -1,36 +1,37 @@
 ---
-name: testing
+name: testing-plus
 
 on:
   push:
-    branches: [testing]
+    branches: [testing-plus]
     paths-ignore:
       - '**/README.md'
       - 'docs/**'
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-testing
+  group: ${{ github.workflow }}-testing-plus
   cancel-in-progress: true
 
 env:
-  IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/justvoxel-base
-  CURRENT_TAG: 'testing'
+  IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/justvoxel-plus-base
+  CURRENT_TAG: 'testing-plus'
   RECHUNK_MAX_LAYERS: '127'
   OCI_LAYER_LIMIT: '128'
-  HOME_SERVER_BASE_IMAGE: ghcr.io/home-server-project/home-server-base-10:stable
+  HOME_SERVER_BASE_IMAGE: ghcr.io/home-server-project/home-server-base-10:stable-docker
 
 jobs:
   source-tests:
+    if: github.ref == 'refs/heads/testing-plus'
     name: Source and management tests
     runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
-      - name: Checkout testing branch
+      - name: Checkout testing-plus branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: testing
+          ref: ${{ github.sha }}
 
       - name: Set up Go
         uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6
@@ -86,7 +87,7 @@ jobs:
           /tmp/management-agent version
 
   build:
-    name: Build JustVoxel Base testing
+    name: Build JustVoxel Plus testing-plus
     needs: [source-tests]
     runs-on: ubuntu-24.04
     permissions:
@@ -95,10 +96,10 @@ jobs:
       id-token: write
 
     steps:
-      - name: Checkout testing branch
+      - name: Checkout testing-plus branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: testing
+          ref: ${{ github.sha }}
 
       - name: Set up Go for local WebUI build
         uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6
@@ -193,7 +194,6 @@ jobs:
             --device /dev/fuse \
             --build-arg "HOME_SERVER_BASE_IMAGE=${HOME_SERVER_BASE_IMAGE}" \
             --build-arg "JUSTVOXEL_BASE_REPOSITORY=${IMAGE_REPOSITORY}" \
-            --build-arg "JUSTVOXEL_VM_REPOSITORY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/justvoxel-vm" \
             --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
             --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --label "io.home-server-project.justvoxel.webui.version=${WEBUI_VERSION}" \
@@ -272,12 +272,12 @@ jobs:
             ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
           chmod 600 "${HOME}/.docker/config.json"
 
-      - name: Push testing Base image
+      - name: Push testing-plus Base image
         id: push
         shell: bash
         run: |
           set -euo pipefail
-          build_tag="testing-$(date -u +%Y%m%d)-${GITHUB_SHA:0:7}"
+          build_tag="testing-plus-$(date -u +%Y%m%d)-${GITHUB_SHA:0:7}"
           echo "BUILD_TAG=${build_tag}" >> "${GITHUB_ENV}"
 
           sudo podman tag justvoxel-base:test "${IMAGE_REPOSITORY}:${build_tag}"
@@ -295,7 +295,7 @@ jobs:
           [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
           echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
 
-      - name: Sign testing Base image digest
+      - name: Sign testing-plus Base image digest
         shell: bash
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
@@ -308,7 +308,7 @@ jobs:
             --key env://COSIGN_PRIVATE_KEY \
             "${IMAGE_REPOSITORY}@${DIGEST}"
 
-      - name: Verify testing Base signature
+      - name: Verify testing-plus Base signature
         shell: bash
         env:
           DIGEST: ${{ steps.push.outputs.digest }}
@@ -328,7 +328,7 @@ jobs:
           WEBUI_VERSION: ${{ steps.webui.outputs.version }}
         run: |
           {
-            echo "## JustVoxel Base testing"
+            echo "## JustVoxel Plus testing-plus"
             echo
             echo "- Home Server Base input: ${HOME_SERVER_BASE_IMAGE}"
             echo "- WebUI: ${WEBUI_VERSION:-unresolved}"
@@ -339,22 +339,3 @@ jobs:
             echo "- Digest: ${DIGEST:-not-published}"
             echo "- Health: common + bootc lint"
           } >> "${GITHUB_STEP_SUMMARY}"
-
-  cleanup:
-    name: cleanup
-    needs: build
-    runs-on: ubuntu-24.04
-    permissions:
-      packages: write
-
-    steps:
-      - name: Remove expired testing Base images
-        uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          packages: justvoxel-base
-          delete-tags: 'testing-*'
-          exclude-tags: 'testing,stable,stable-*'
-          older-than: 45 days
-          keep-n-tagged: 7
-          validate: true

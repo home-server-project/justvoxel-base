@@ -31,9 +31,9 @@ Home Server Base 10
 
 ## Development branch
 
-Active development happens on:
+Plus development happens only on:
 
-testing
+testing-plus
 
 Do not modify `main` unless the user explicitly approves a stable promotion or main-specific task.
 
@@ -43,10 +43,11 @@ git status -sb
 git branch --show-current
 git log -1 --oneline --decorate
 
-Expected normal development branch:
+Required Plus development branch:
 
-testing
+testing-plus
 
+Do not inspect, modify, merge into, cherry-pick into, or use the normal testing branch.
 Do not silently switch branches.
 
 ## Golden references

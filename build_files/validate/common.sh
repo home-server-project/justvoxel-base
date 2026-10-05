@@ -20,6 +20,15 @@ source /usr/lib/os-release
 [[ "${HOME_SERVER_BASE_UPSTREAM_PLATFORM_ID:-}" == "platform:el10" ]]
 [[ "${HOME_SERVER_BASE_UPSTREAM_CPE_NAME:-}" == cpe:/o:almalinux:* ]]
 
+[[ "${VARIANT_ID:-}" == "justvoxel-plus-base" ]]
+[[ "$(cat /usr/share/home-server-base/container-runtime)" == "docker" ]]
+for cmd in docker containerd; do
+    command -v "${cmd}" >/dev/null
+done
+docker compose version >/dev/null
+docker buildx version >/dev/null
+systemctl is-enabled docker.service containerd.service >/dev/null
+
 for cmd in \
     bootc podman skopeo just mjust fzf gum btop glances \
     tar gzip less ip python3 ping \

@@ -97,7 +97,7 @@ osr_unset() {
     done
 }
 
-osr_set NAME "JustVoxel"
+osr_set NAME "JustVoxel Plus"
 osr_set PRETTY_NAME "${IMAGE_PRETTY_NAME}"
 osr_set ID "justvoxel"
 osr_set ID_LIKE "almalinux rhel centos fedora"
@@ -107,7 +107,7 @@ osr_set VARIANT_ID "${IMAGE_VARIANT_ID}"
 osr_set IMAGE_ID "${IMAGE_VARIANT_ID}"
 osr_set IMAGE_VERSION "10"
 osr_set HOME_URL "https://github.com/home-server-project/justvoxel"
-osr_set DOCUMENTATION_URL "https://github.com/home-server-project/justvoxel-base/tree/main/docs"
+osr_set DOCUMENTATION_URL "https://github.com/home-server-project/justvoxel-base/tree/testing-plus/docs"
 osr_set SUPPORT_URL "https://github.com/home-server-project/justvoxel/issues"
 osr_set BUG_REPORT_URL "https://github.com/home-server-project/justvoxel/issues"
 osr_set VENDOR_NAME "Home Server Project"
