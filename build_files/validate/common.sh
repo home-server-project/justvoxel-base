@@ -209,6 +209,7 @@ test -f /usr/lib/systemd/system/justvoxel-glances.service
 test -f /etc/glances/glances.conf
 grep -Fq -- '--bind 127.0.0.1 --port 61208' /usr/lib/systemd/system/justvoxel-glances.service
 grep -Fq -- '--disable-webui' /usr/lib/systemd/system/justvoxel-glances.service
+python3 -c 'import docker'
 ! grep -Eq '^podman_sock=' /etc/glances/glances.conf
 grep -Fqx 'Wants=docker.service' /usr/lib/systemd/system/justvoxel-glances.service
 grep -Fq 'Wants=network-online.target justvoxel-glances.service' /usr/lib/systemd/system/justvoxel-webui.service

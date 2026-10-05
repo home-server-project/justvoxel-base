@@ -14,7 +14,8 @@ if ! dnf repolist --enabled | grep -Eiq '(^|[[:space:]])crb([[:space:]]|$)'; the
 fi
 
 read -r -a common_packages <<< "${JUSTVOXEL_COMMON_PACKAGES}"
-dnf install -y "${common_packages[@]}"
+# EPEL is enabled only for image composition; finalize-image keeps it disabled.
+dnf install -y --enablerepo=epel "${common_packages[@]}"
 
 superfile_rpm="$(find /ctx/superfile-rpms -maxdepth 1 -type f -name 'superfile-*.x86_64.rpm' -print -quit)"
 if [[ -z ${superfile_rpm} ]]; then
