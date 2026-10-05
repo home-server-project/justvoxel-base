@@ -16,11 +16,15 @@ func (a *App) plusRoutes(next http.Handler) http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/setup" && r.Method == http.MethodGet {
-			_, _, ok := a.systemWorkspaceIdentity(w, r, "administrator")
-			if !ok {
-				return
-			}
-			a.render(w, "plus-setup-pending.html", pageData{Title: "JustVoxel Plus setup", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI, CSRF: csrfFromRequest(r)})
+			a.plusSetupPage(w, r)
+			return
+		}
+		if r.URL.Path == "/api/plus/setup/state" && r.Method == http.MethodGet {
+			a.plusSetupState(w, r)
+			return
+		}
+		if r.URL.Path == "/api/plus/setup/prepare" && r.Method == http.MethodPost {
+			a.plusSetupPrepare(w, r)
 			return
 		}
 		for _, prefix := range []string{

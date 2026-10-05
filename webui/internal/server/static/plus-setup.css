@@ -1,0 +1,24 @@
+.plus-setup-main { max-width: 1440px; margin: 24px auto; padding: 0 24px; }
+.plus-wizard { padding: 24px; }
+.plus-steps { display: flex; gap: 12px; flex-wrap: wrap; margin: 16px 0; }
+.plus-steps span { padding: 8px 12px; border: 1px solid var(--border, #39424c); border-radius: 8px; opacity: .65; }
+.plus-steps [aria-current="step"] { opacity: 1; border-color: var(--accent, #46b1a5); }
+.plus-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.plus-card { border: 1px solid var(--border, #39424c); border-radius: 12px; padding: 20px; min-width: 0; }
+.plus-card > label:not(.plus-switch) { display: grid; gap: 6px; margin: 14px 0; }
+.plus-card input:not([type="checkbox"]), .plus-card textarea, .plus-card select { width: 100%; box-sizing: border-box; }
+.plus-components { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.plus-switch { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; cursor: pointer; }
+.plus-switch input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.plus-switch i { width: 40px; height: 22px; border-radius: 20px; background: #657079; position: relative; flex-shrink: 0; }
+.plus-switch i::after { content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: transform .15s; }
+.plus-switch input:checked + i { background: var(--accent, #318f84); }
+.plus-switch input:checked + i::after { transform: translateX(18px); }
+.plus-switch input:focus-visible + i { outline: 2px solid currentColor; outline-offset: 3px; }
+.plus-warning { color: var(--warning, #dfa95f); }
+.plus-wizard-actions { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-top: 24px; }
+.plus-wizard-actions > div { display: flex; gap: 12px; }
+.plus-wizard [hidden] { display: none !important; }
+.plus-wizard dl { display: grid; grid-template-columns: 140px 1fr; gap: 12px; margin: 0; }
+.plus-wizard dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 800px) { .plus-grid, .plus-components { grid-template-columns: 1fr; } .plus-setup-main { padding: 0 12px; } .plus-wizard, .plus-card { padding: 16px; } .plus-wizard-actions { flex-wrap: wrap; } }

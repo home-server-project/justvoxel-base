@@ -2,7 +2,7 @@
 
 This branch develops JustVoxel Plus exclusively in testing-plus. Its image is ghcr.io/home-server-project/justvoxel-plus-base:testing-plus, built on Home Server Base 10 stable-docker for x86-64-v3.
 
-JustVoxel Plus manages the host, Drydock manages infrastructure containers, and Pterodactyl manages game servers. The isolated build, host-only Plus interface and upstream Docker stack templates are in place. The setup wizard and automatic application deployment are the next phases. See docs/BUILD.md for the Plus build contract.
+JustVoxel Plus manages the host, Drydock manages infrastructure containers, and Pterodactyl manages game servers. The isolated build, host-only Plus interface and upstream Docker stack templates are in place. The single setup wizard now securely prepares component, address, storage and account choices. Automatic application deployment is the next phase. See docs/BUILD.md for the Plus build contract.
 
 The inherited documentation below describes normal JustVoxel and is retained as reference while Plus development proceeds. Its release instructions do not apply to testing-plus.
 

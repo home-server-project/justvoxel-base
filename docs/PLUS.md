@@ -16,7 +16,7 @@ The Plus console reports Docker and infrastructure setup status, using the Plus 
 
 The Logs screen provides the current boot's last 200 journal lines for the Management Agent, WebUI, Docker and containerd. Only Administrators may read these logs. Service selection is fixed, and lines matching the existing sensitive diagnostic pattern are redacted.
 
-Setup and Look Around are retained. The setup page currently explains that application deployment is still being developed; it does not run the inherited Minecraft wizard. Factory Reset stays visible but cannot execute until its Plus scope is implemented. Pterodactyl and Drydock launchers follow when actual deployment URLs exist.
+Setup and Look Around are retained. Setup opens the Plus component, address, storage and account wizard; it does not run the inherited Minecraft wizard. This stage saves choices while application deployment is still being developed. Factory Reset stays visible but cannot execute until its Plus scope is implemented. Pterodactyl and Drydock launchers follow when actual deployment URLs exist.
 
 Tailscale, NetBird and playit.gg setup, installation and activation are unchanged.
 
@@ -26,6 +26,43 @@ Upstream Panel, MariaDB, Redis, Wings and Drydock Compose definitions and runtim
 
 ## Remaining phases
 
-Implement the compact setup wizard; create and connect Panel/Wings and application launchers; then adapt CLI and factory reset and verify the working appliance at runtime.
+Deploy the prepared stack; create and connect Panel/Wings and application launchers; then adapt CLI and factory reset and verify the working appliance at runtime.
 
 The password step must explain: These are separate accounts. Changing your password in one does not change the other.
+
+## Phase four: one setup wizard
+
+The Plus desktop's Setup invitation now opens one five-step flow: components,
+address and optional TLS, storage, application account, and review. There is no
+recommended/advanced mode split. All five infrastructure components start enabled;
+the Pterodactyl group switch and individual switches remain editable. Partial
+selections are allowed with a warning that external services or configuration may
+be needed.
+
+A domain is optional. The administrator supplies the reachable hostname or IP,
+and may upload or paste a PEM certificate chain and matching private key. The
+Agent checks certificate validity, key matching and hostname coverage. DNS and
+certificate issuance are not performed by the wizard. Without supplied TLS,
+applications use HTTP; the wizard recommends a trusted local network.
+
+Storage defaults to `/var/lib/justvoxel-plus`. A mounted local ext4, XFS or Btrfs
+filesystem under `/mnt/`, `/srv/` or `/media/` can instead hold the application
+data in a `justvoxel-plus` subdirectory. Docker image storage stays on the system
+disk. Read-only, network and memory filesystems are not offered. The disk must
+remain mounted across reboot; use the existing Storage interface to prepare it.
+The wizard does not format disks, move Docker storage or create backups.
+
+The signed-in host username is prefilled. The administrator may choose a different
+application username and enters the desired password once, plus confirmation.
+Panel needs an email address. Selected Panel and Drydock accounts use these
+initial credentials but remain independent of the host and of each other.
+Changing one account does not synchronize the others.
+
+This stage prepares setup, **not deployment**. An administrator-only Agent API
+stores the choices, account password and optional TLS material in
+`/var/lib/justvoxel-plus-setup/setup.json` (0600, parent 0700). The WebUI forwards
+input over the existing local Unix socket, never executes commands, and never
+stores credentials in browser storage or returns them in API responses. Existing
+choices can be replaced before deployment. The deployment stage must consume this
+preparation, create the upstream accounts, and remove the temporary password.
+No deployed marker or service activation is written by this stage.

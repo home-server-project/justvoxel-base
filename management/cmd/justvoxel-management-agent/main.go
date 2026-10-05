@@ -61,6 +61,7 @@ type server struct {
 	store      *webUIStore
 	operations *operationStore
 
+	plusSetupMu    sync.Mutex
 	systemUpdateMu sync.Mutex
 
 	networkMu           sync.Mutex
@@ -207,6 +208,8 @@ func serve(socket string) error {
 	mux.HandleFunc("GET /v1/info", s.info)
 	mux.HandleFunc("GET /v1/status", s.status)
 	mux.HandleFunc("GET /v1/admin/plus/host-logs", s.plusHostLogs)
+	mux.HandleFunc("GET /v1/admin/plus/setup/state", s.plusSetupState)
+	mux.HandleFunc("POST /v1/admin/plus/setup/prepare", s.plusSetupPrepare)
 	mux.HandleFunc("POST /v1/backups/manual", s.manualBackup)
 	registerAdminUserRoutes(mux, s)
 	registerAdminActivityRoutes(mux, s)
