@@ -63,32 +63,44 @@ for software in paper purpur; do
     done
     # Exhaust the same bounded wait, then verify the running version locally.
     printf 'auth-type: floodgate\n' > "${DATA_PATH}/plugins/Geyser-Spigot/config.yml"
-    for expected in 26.2 LATEST; do
+    for expected in 26.2 26.3 LATEST; do
+        reported_version="${expected}"
+        [[ ${expected} != LATEST ]] || reported_version=26.3
         rm -f "${DATA_PATH}/probes" "${DATA_PATH}/sleeps"
         TRANSIENT=yes TRANSIENT_COUNT=100 MINECRAFT_SERVER_TYPE="${software}" \
-            MONITOR_RESPONSE='{"server_info":{"version":{"name":"26.2"}}}' bash "${fixture_dir}/verify" "${expected}"
+            MONITOR_RESPONSE="{\"server_info\":{\"version\":{\"name\":\"${software^} ${reported_version}\",\"protocol\":776}}}" bash "${fixture_dir}/verify" "${expected}"
         [[ $(cat "${DATA_PATH}/probes") == 21 && $(wc -l < "${DATA_PATH}/sleeps") == 20 ]]
     done
     # Reproduce the real ANSI-styled transient response, including terminal whitespace.
     for response in $'\033[37m\033[3mChecking version, please wait...\033[0m' $' \r\n\033[37m\033[3mChecking version, please wait...\r\n\033[0m\t '; do
         rm -f "${DATA_PATH}/probes" "${DATA_PATH}/sleeps"
         TRANSIENT=yes TRANSIENT_COUNT=100 TRANSIENT_RESPONSE="${response}" MINECRAFT_SERVER_TYPE="${software}" \
-            MONITOR_RESPONSE='{"server_info":{"version":{"name":"26.2"}}}' bash "${fixture_dir}/verify" 26.2
+            MONITOR_RESPONSE="{\"server_info\":{\"version\":{\"name\":\"${software^} 26.2\"}}}" bash "${fixture_dir}/verify" 26.2
         [[ $(cat "${DATA_PATH}/probes") == 21 && $(wc -l < "${DATA_PATH}/sleeps") == 20 ]]
     done
     # Formatting removal must not turn extra response content into the exact transient.
     for response in $'\033[37m\033[3mChecking version, please wait... unexpected\033[0m' $'\033[37m\033[3mWarning: Checking version, please wait...\033[0m'; do
         rm -f "${DATA_PATH}/probes" "${DATA_PATH}/sleeps" "${DATA_PATH}/monitor-probes"
         if TRANSIENT=yes TRANSIENT_COUNT=100 TRANSIENT_RESPONSE="${response}" MINECRAFT_SERVER_TYPE="${software}" \
-            MONITOR_RESPONSE='{"server_info":{"version":{"name":"26.2"}}}' bash "${fixture_dir}/verify" 26.2; then
+            MONITOR_RESPONSE="{\"server_info\":{\"version\":{\"name\":\"${software^} 26.2\"}}}" bash "${fixture_dir}/verify" 26.2; then
             echo 'ANSI-formatted non-transient response accepted' >&2; exit 1
         fi
         [[ $(cat "${DATA_PATH}/probes") == 1 && ! -e ${DATA_PATH}/sleeps && ! -e ${DATA_PATH}/monitor-probes ]]
     done
-    for response in '{"server_info":{"version":{"name":"26.3"}}}' 'not JSON' '{}' '{"server_info":{"version":{"name":""}}}' '{"server_info":{"version":{"name":26.2}}}'; do
+    wrong_software=Paper
+    [[ ${software} != paper ]] || wrong_software=Purpur
+    for response in "{\"server_info\":{\"version\":{\"name\":\"${software^} 26.2\"}}}" \
+        "{\"server_info\":{\"version\":{\"name\":\"${wrong_software} 26.3\"}}}" \
+        '{"server_info":{"version":{"name":"Spigot 26.3"}}}' \
+        '{"server_info":{"version":{"name":"26.3"}}}' \
+        "{\"server_info\":{\"version\":{\"name\":\"${software^} 26.3 extra\"}}}" \
+        "{\"server_info\":{\"version\":{\"name\":\"${software^}  26.3\"}}}" \
+        "{\"server_info\":{\"version\":{\"name\":\"${software^} 26.3\\n\"}}}" \
+        'not JSON' '{}' '{"server_info":{"version":{}}}' \
+        '{"server_info":{"version":{"name":""}}}' '{"server_info":{"version":{"name":26.3}}}'; do
         rm -f "${DATA_PATH}/probes" "${DATA_PATH}/sleeps"
         if TRANSIENT=yes TRANSIENT_COUNT=100 MINECRAFT_SERVER_TYPE="${software}" \
-            MONITOR_RESPONSE="${response}" bash "${fixture_dir}/verify" 26.2; then
+            MONITOR_RESPONSE="${response}" bash "${fixture_dir}/verify" 26.3; then
             echo 'Invalid fallback status accepted' >&2; exit 1
         fi
         [[ $(cat "${DATA_PATH}/probes") == 21 && $(wc -l < "${DATA_PATH}/sleeps") == 20 ]]
@@ -96,17 +108,19 @@ for software in paper purpur; do
     for failure in 'MONITOR_FAIL=yes' 'PLUGIN_RESPONSE=Plugins (1): OtherPlugin' 'PLUGIN_RESPONSE=Plugins (1): ViaVersion' 'GEYSER_RESPONSE=Unknown command' 'VERSION_FAIL=yes' 'ACTIVE=no' 'READY=no'; do
         rm -f "${DATA_PATH}/probes"
         if env "${failure}" TRANSIENT=yes TRANSIENT_COUNT=100 MINECRAFT_SERVER_TYPE="${software}" \
-            MONITOR_RESPONSE='{"server_info":{"version":{"name":"26.2"}}}' bash "${fixture_dir}/verify" 26.2; then
+            MONITOR_RESPONSE="{\"server_info\":{\"version\":{\"name\":\"${software^} 26.2\"}}}" bash "${fixture_dir}/verify" 26.2; then
             echo "Invalid fallback runtime accepted: ${failure}" >&2; exit 1
         fi
     done
     for response in 'Unknown command' 'This server is running Spigot (MC: 26.2)' "This server is running ${software^} (MC: 26.3)" 'Checking version, please wait... unexpected'; do
         if MINECRAFT_SERVER_TYPE="${software}" VERSION_RESPONSE="${response}" \
-            MONITOR_RESPONSE='{"server_info":{"version":{"name":"26.2"}}}' bash "${fixture_dir}/verify" 26.2; then
+            MONITOR_RESPONSE="{\"server_info\":{\"version\":{\"name\":\"${software^} 26.2\"}}}" bash "${fixture_dir}/verify" 26.2; then
             echo 'Completed invalid response bypassed by fallback' >&2; exit 1
         fi
     done
-    for response in '{}' 'not JSON' '{"server_info":{"version":{"name":""}}}'; do
+    for response in '{}' 'not JSON' '{"server_info":{"version":{"name":""}}}' \
+        '{"server_info":{"version":{"name":26.3}}}' '{"server_info":{"version":{"name":"Spigot 26.3"}}}' \
+        "{\"server_info\":{\"version\":{\"name\":\"${wrong_software} 26.3\"}}}"; do
         rm -f "${DATA_PATH}/probes"
         if TRANSIENT=yes TRANSIENT_COUNT=100 MINECRAFT_SERVER_TYPE="${software}" \
             MONITOR_RESPONSE="${response}" bash "${fixture_dir}/verify" LATEST; then

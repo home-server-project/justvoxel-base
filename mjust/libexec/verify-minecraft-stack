@@ -20,7 +20,7 @@ if [[ ${MINECRAFT_SERVER_TYPE-paper} == vanilla ]]; then
 fi
 # Paper/Purpur can expose RCON before their asynchronous version check completes.
 # Retry only that exact readiness response; completed software/version checks stay strict.
-# After the same bounded wait, local status can verify the running game version.
+# After the same bounded wait, local status can verify the running software and game version.
 version_wait=0
 while :; do
     version="$(podman exec minecraft rcon-cli version)"
@@ -33,8 +33,12 @@ while :; do
     if (( version_wait >= 60 )); then
         [[ ${MINECRAFT_SERVER_TYPE-paper} == paper || ${MINECRAFT_SERVER_TYPE-paper} == purpur ]] || { echo 'ERROR: Minecraft server software cannot use the local version fallback.' >&2; exit 1; }
         status="$(podman exec minecraft mc-monitor status --json)" || { echo 'ERROR: Minecraft status probe failed.' >&2; exit 1; }
-        actual="$(jq -er '.server_info.version.name | select(type == "string" and length > 0)' <<< "${status}")" || { echo 'ERROR: Minecraft status version is invalid.' >&2; exit 1; }
-        [[ ${expected_version} == LATEST || ${actual} == "${expected_version}" ]] || { echo 'ERROR: Minecraft is not running the selected game version.' >&2; exit 1; }
+        actual="$(jq -er '.server_info.version.name | select(type == "string" and length > 0) | select(contains("\n") | not)' <<< "${status}")" || { echo 'ERROR: Minecraft status version is invalid.' >&2; exit 1; }
+        [[ ${actual} =~ ^(Paper|Purpur)\ ([0-9A-Za-z._-]+)$ ]] || { echo 'ERROR: Minecraft status version is invalid.' >&2; exit 1; }
+        actual_software="${BASH_REMATCH[1]}"
+        actual_version="${BASH_REMATCH[2]}"
+        [[ ${actual_software,,} == "${MINECRAFT_SERVER_TYPE-paper}" ]] || { echo 'ERROR: Minecraft is not running the selected server software.' >&2; exit 1; }
+        [[ ${expected_version} == LATEST || ${actual_version} == "${expected_version}" ]] || { echo 'ERROR: Minecraft is not running the selected game version.' >&2; exit 1; }
         printf 'Minecraft version (local status): %s\n' "${actual}"
         break
     fi
