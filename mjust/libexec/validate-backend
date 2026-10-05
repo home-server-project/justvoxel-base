@@ -4,10 +4,20 @@ source /usr/libexec/justvoxel/mjust/common.sh
 require_root
 if jv_is_plus; then
     failures=0
-    for unit in docker.service containerd.service justvoxel-management.service justvoxel-webui.service; do
+    for unit in docker.service containerd.service justvoxel-management.service justvoxel-webui.service justvoxel-glances.service; do
         if systemctl is-active --quiet "${unit}"; then printf 'OK: %s is running\n' "${unit}";
         else printf 'FAIL: %s is not running\n' "${unit}"; failures=$((failures + 1)); fi
     done
+    if timeout 5s docker info >/dev/null 2>&1; then
+        printf 'OK: Docker API responds\n'
+    else
+        printf 'FAIL: Docker API is unavailable\n'; failures=$((failures + 1))
+    fi
+    if curl -fsS --max-time 3 http://127.0.0.1:61208/api/4/all | jq -e 'has("cpu") and has("mem")' >/dev/null; then
+        printf 'OK: System Monitor API responds\n'
+    else
+        printf 'FAIL: System Monitor API is unavailable\n'; failures=$((failures + 1))
+    fi
     if (( failures > 0 )); then exit 1; fi
     exit 0
 fi

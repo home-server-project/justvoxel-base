@@ -19,6 +19,17 @@ cat > "${fixture}/bin/systemd-run" <<'STUB'
 #!/usr/bin/bash
 printf 'queue %s\n' "$*" >> "${PLUS_TEST_CALLS}"
 STUB
+cat > "${fixture}/bin/docker" <<'STUB'
+#!/usr/bin/bash
+printf 'docker %s\n' "$*" >> "${PLUS_TEST_CALLS}"
+[[ ${1:-} == info ]] && [[ ${PLUS_TEST_DOCKER_FAIL:-0} != 1 ]]
+STUB
+cat > "${fixture}/bin/curl" <<'STUB'
+#!/usr/bin/bash
+printf 'curl %s\n' "$*" >> "${PLUS_TEST_CALLS}"
+[[ ${PLUS_TEST_MONITOR_FAIL:-0} != 1 ]] || exit 1
+printf '{"cpu":{},"mem":{}}\n'
+STUB
 chmod +x "${fixture}/bin/"*
 export PATH="${fixture}/bin:${PATH}"
 python3 - "${repo_root}" "${fixture}" <<'PY'
@@ -38,7 +49,15 @@ for action in reboot poweroff; do
 done
 bash "${fixture}/validate-backend" > "${fixture}/health"
 grep -Fq 'OK: docker.service is running' "${fixture}/health"
-if rg -q 'minecraft|rcon|backup' "${PLUS_TEST_CALLS}"; then
+grep -Fq 'OK: Docker API responds' "${fixture}/health"
+grep -Fq 'OK: System Monitor API responds' "${fixture}/health"
+for failure in DOCKER MONITOR; do
+ if env "PLUS_TEST_${failure}_FAIL=1" bash "${fixture}/validate-backend" > "${fixture}/health-failure"; then
+  echo "FAIL: unavailable ${failure} API was reported healthy" >&2
+  exit 1
+ fi
+done
+if grep -Eq 'minecraft|rcon|backup' "${PLUS_TEST_CALLS}"; then
  echo 'FAIL: Plus host controls reached the game layer' >&2
  exit 1
 fi

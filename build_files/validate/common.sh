@@ -31,7 +31,7 @@ systemctl is-enabled docker.service containerd.service >/dev/null
 
 for cmd in \
     bootc podman skopeo just mjust fzf gum btop glances \
-    tar gzip less ip python3 ping \
+    tar gzip less ip python3 ping curl jq journalctl systemctl nmcli firewall-cmd sudo \
     findmnt mountpoint flock timeout mkfs.xfs btrfs mount.nfs mount.cifs mount.ntfs-3g lsblk blkid wipefs parted partprobe udevadm \
     spf; do
     command -v "${cmd}" >/dev/null
@@ -103,7 +103,9 @@ test "$(systemctl is-enabled systemd-resolved.service)" = "enabled"
 test "$(systemctl is-enabled firewalld.service)" = "enabled"
 test "$(systemctl is-enabled sshd.service)" = "enabled"
 test "$(systemctl is-enabled justvoxel-web-bootstrap.service)" = "enabled"
-test "$(systemctl is-enabled justvoxel-minecraft-shutdown-guard.service || true)" = "disabled"
+if [[ -f /usr/lib/systemd/system/justvoxel-minecraft-shutdown-guard.service ]]; then
+    test "$(systemctl is-enabled justvoxel-minecraft-shutdown-guard.service || true)" = "disabled"
+fi
 [[ "$(systemctl is-enabled justvoxel-webui.service 2>/dev/null || true)" != "enabled" ]]
 [[ "$(systemctl is-enabled justvoxel-management.service 2>/dev/null || true)" != "enabled" ]]
 [[ "$(systemctl is-enabled justvoxel-glances.service 2>/dev/null || true)" != "enabled" ]]
@@ -145,7 +147,10 @@ trap 'rm -f "${issue_test}"' EXIT
 timeout 5s /usr/libexec/justvoxel/motd --issue > "${issue_test}"
 grep -Fq 'JUSTVOXEL' "${issue_test}"
 grep -Fq 'Variant:' "${issue_test}"
-grep -Fq 'Minecraft:' "${issue_test}"
+grep -Fq 'JustVoxel Plus Base' "${issue_test}"
+grep -Fq 'Docker:' "${issue_test}"
+grep -Fq 'Infrastructure:' "${issue_test}"
+! grep -Fq 'Minecraft:' "${issue_test}"
 grep -Fq 'Web interface:' "${issue_test}"
 grep -Fq 'Network:' "${issue_test}"
 grep -Fq '\e[38;5;45m' "${issue_test}"
@@ -167,7 +172,7 @@ grep -Fq 'timeout 1s tailscale status --json' /usr/libexec/justvoxel/motd
 grep -Fq 'timeout 1s netbird status --ipv4' /usr/libexec/justvoxel/motd
 test -x /usr/libexec/justvoxel/motd
 bash -n /usr/libexec/justvoxel/motd
-grep -Fq 'Minecraft Server Appliance' /usr/libexec/justvoxel/motd
+grep -Fq 'JustVoxel Plus Base' /usr/libexec/justvoxel/motd
 grep -Fq "justvoxel-hws|hws) variant='HWS'" /usr/libexec/justvoxel/motd
 grep -Fq "network_state='Not connected - use mjust net'" /usr/libexec/justvoxel/motd
 grep -Fq "network_state='Ethernet connected'" /usr/libexec/justvoxel/motd
@@ -199,9 +204,6 @@ grep -Fqx 'u rpc 32 "Rpcbind Daemon" /var/lib/rpcbind -' /usr/lib/sysusers.d/jus
 test -f /usr/lib/sysusers.d/justvoxel-web.conf
 grep -Fq 'u justvoxel-web ' /usr/lib/sysusers.d/justvoxel-web.conf
 test -f /usr/lib/tmpfiles.d/justvoxel-web.conf
-test -f /usr/lib/systemd/system/justvoxel-minecraft-shutdown-guard.service
-grep -Fqx 'After=minecraft.service' /usr/lib/systemd/system/justvoxel-minecraft-shutdown-guard.service
-grep -Fqx 'ExecStop=/usr/libexec/justvoxel/mjust/host-shutdown-guard' /usr/lib/systemd/system/justvoxel-minecraft-shutdown-guard.service
 test -f /usr/lib/systemd/system/justvoxel-management.service
 test -f /usr/lib/systemd/system/justvoxel-webui.service
 test -f /usr/lib/systemd/system/justvoxel-web-bootstrap.service
@@ -248,17 +250,6 @@ grep -Fqx "source=${webui_source}" <<<"${webui_version_output}"
 grep -Fqx "management-api=${webui_api}" <<<"${webui_version_output}"
 /usr/libexec/justvoxel/management-agent version | grep -Fq 'JustVoxel Management API v1'
 
-test -x /usr/libexec/justvoxel/minecraft-backup
-bash -n /usr/libexec/justvoxel/minecraft-backup
-for template in \
-    /usr/share/justvoxel/templates/quadlets/minecraft.container.in \
-    /usr/share/justvoxel/templates/config/minecraft.env.in \
-    /usr/share/justvoxel/templates/config/minecraft-backup.env.in \
-    /usr/share/justvoxel/templates/systemd/minecraft-backup.service.in \
-    /usr/share/justvoxel/templates/systemd/minecraft-backup.timer.in; do
-    test -f "${template}"
-done
-
 test -x /usr/bin/mjust
 test -f /usr/share/justvoxel/mjust/justfile
 test -f /usr/libexec/justvoxel/mjust/storage-common.sh
@@ -270,7 +261,6 @@ test -x /usr/libexec/justvoxel/mjust/storage-summary
 test -x /usr/libexec/justvoxel/mjust/web
 test -x /usr/libexec/justvoxel/mjust/web-status-json
 test -x /usr/libexec/justvoxel/mjust/ui.sh
-test -x /usr/libexec/justvoxel/mjust/host-shutdown-guard
 for script in /usr/libexec/justvoxel/mjust/*; do
     [[ -f "${script}" ]] || continue
     bash -n "${script}"

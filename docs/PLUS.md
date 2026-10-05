@@ -12,6 +12,8 @@ Minecraft workspaces, game software/version controls, backups, restore, migratio
 
 Host power and update reboots do not use Minecraft player queries or game backups. Docker/systemd handle host shutdown normally. Glances remains the RPM supplied by Home Server Packages. The Plus image installs the AlmaLinux 10 python3-docker RPM from the Home Server Packages stable artifact with DNF so Glances can use Docker rather than requesting the Podman API socket. The inherited Minecraft shutdown guard is not enabled.
 
+The Plus console reports Docker and infrastructure setup status, using the Plus deployment marker rather than a Minecraft Quadlet. Host validation checks Docker, containerd, the Agent, WebUI and Glances services, plus bounded Docker and Glances API probes. Game templates are retained in source but no longer define Plus image readiness.
+
 The Logs screen provides the current boot's last 200 journal lines for the Management Agent, WebUI, Docker and containerd. Only Administrators may read these logs. Service selection is fixed, and lines matching the existing sensitive diagnostic pattern are redacted.
 
 Setup and Look Around are retained. The setup page currently explains that application deployment is still being developed; it does not run the inherited Minecraft wizard. Factory Reset stays visible but cannot execute until its Plus scope is implemented. Pterodactyl and Drydock launchers follow when actual deployment URLs exist.

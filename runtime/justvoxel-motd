@@ -121,7 +121,16 @@ elif [[ ${ethernet_connecting} == yes ]]; then
     network_state='Ethernet connected, obtaining address...'
 fi
 
-if [[ -f /etc/containers/systemd/minecraft.container ]]; then
+if [[ ${variant_id} == justvoxel-plus-base ]]; then
+    infrastructure_state='Not configured'
+    needs_setup=yes
+    if [[ -f /etc/justvoxel/plus/deployed ]]; then
+        infrastructure_state='Configured'
+        needs_setup=no
+    fi
+    docker_state='Stopped'
+    if systemctl is-active --quiet docker.service 2>/dev/null; then docker_state='Running'; fi
+elif [[ -f /etc/containers/systemd/minecraft.container ]]; then
     minecraft_state='Configured'
     needs_setup=no
 else
@@ -255,13 +264,22 @@ line() {
 
 printf '%s%s====================================================%s\n' "${cyan}" "${bold}" "${reset}"
 printf '%s%s                    JUSTVOXEL%s\n' "${cyan}" "${bold}" "${reset}"
-printf '%s%s              Minecraft Server Appliance%s\n' "${cyan}" "${bold}" "${reset}"
+if [[ ${variant_id} == justvoxel-plus-base ]]; then
+    printf '%s%s                JustVoxel Plus Base%s\n' "${cyan}" "${bold}" "${reset}"
+else
+    printf '%s%s              Minecraft Server Appliance%s\n' "${cyan}" "${bold}" "${reset}"
+fi
 printf '%s%s====================================================%s\n\n' "${cyan}" "${bold}" "${reset}"
 
 line 'System:' "${white}" "${pretty_name}"
 line 'Variant:' "${white}" "${variant}"
 line 'Host:' "${white}" "${host}"
-line 'Minecraft:' "$([[ ${minecraft_state} == Configured ]] && printf '%s' "${green}" || printf '%s' "${yellow}")" "${minecraft_state}"
+if [[ ${variant_id} == justvoxel-plus-base ]]; then
+    line 'Docker:' "${white}" "${docker_state}"
+    line 'Infrastructure:' "${white}" "${infrastructure_state}"
+else
+    line 'Minecraft:' "$([[ ${minecraft_state} == Configured ]] && printf '%s' "${green}" || printf '%s' "${yellow}")" "${minecraft_state}"
+fi
 
 printf '\n'
 line 'Web interface:' "$([[ ${web_state} == Ready ]] && printf '%s' "${green}" || printf '%s' "${yellow}")" "${web_state}"
@@ -299,10 +317,16 @@ fi
 
 printf '\n%s%sCommon commands%s\n' "${bold}" "${cyan}" "${reset}"
 if [[ ${needs_setup} == yes ]]; then
-    line 'First setup:' "${green}" 'mjust setup'
+    if [[ ${variant_id} == justvoxel-plus-base ]]; then
+        line 'First setup:' "${green}" 'Complete setup in the Web interface'
+    else
+        line 'First setup:' "${green}" 'mjust setup'
+    fi
 fi
 line 'Admin menu:' "${green}" 'mjust'
-line 'Server status:' "${green}" 'mjust status'
+if [[ ${variant_id} != justvoxel-plus-base ]]; then
+    line 'Server status:' "${green}" 'mjust status'
+fi
 line 'List commands:' "${green}" 'mjust --list'
 
 printf '\n%s%sLinks%s\n' "${bold}" "${cyan}" "${reset}"

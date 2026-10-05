@@ -94,7 +94,9 @@ with tempfile.TemporaryDirectory() as directory:
         assert set(resolved['services']) == expected
         wings_mounts = resolved['services']['wings']['volumes']
         assert any(v['source'] == root + '/wings/data' and v['target'] == root + '/wings/data' for v in wings_mounts)
-        assert resolved['services']['drydock']['environment']['DD_AUTH_BASIC_ADMIN_HASH'] == raw_hash
+        # Compose escapes dollar signs in exported JSON as well as YAML.
+        # Compare the full export representation, not an interpolated hash.
+        assert resolved['services']['drydock']['environment']['DD_AUTH_BASIC_ADMIN_HASH'] == raw_hash.replace('$', '$$'), 'Compose export changed the authentication hash beyond dollar escaping'
         for name in expected:
             assert set(config([name], root)['services']) == {name}
     env = {**clean_env, 'COMPOSE_PROFILES': ','.join(expected), 'PLUS_DATA_ROOT': '/var/lib/justvoxel-plus', 'PANEL_IMAGE': 'ghcr.io/pterodactyl/panel:administrator-choice'}
