@@ -102,8 +102,9 @@ else
 fi
 
 candidate_type="$(jq -r '.sourceType' <<< "${selected}")"
-if [[ ${MINECRAFT_SERVER_TYPE-paper} != paper || ( -n ${native_manifest} && $(jq -r '.minecraft.implementation // "paper"' <<< "${native_manifest}") != paper ) ]]; then
-    echo 'ERROR: Migration v1 imports require a Paper destination and a Paper native bundle; reset/re-setup is required to change server software.' >&2
+if ! server_supports_plugins "${MINECRAFT_SERVER_TYPE-paper}" ||
+    { [[ -n ${native_manifest} ]] && ! server_allows_in_place_switch "${MINECRAFT_SERVER_TYPE-paper}" "$(jq -r '.minecraft.implementation // "paper"' <<< "${native_manifest}")"; }; then
+    echo 'ERROR: Migration v1 imports require a Paper or Purpur destination and a Paper or Purpur native bundle.' >&2
     exit 1
 fi
 case "${candidate_type}" in
@@ -190,16 +191,9 @@ fi
     echo "ERROR: source Minecraft version is not an exact supported version string: ${source_version}" >&2
     exit 1
 }
-if paper_version_has_stable_build "${source_version}"; then
-    :
-else
-    version_rc=$?
-    if (( version_rc == 2 )); then
-        echo "ERROR: PaperMC availability for Minecraft ${source_version} could not be verified." >&2
-    else
-        echo "ERROR: no stable Paper build was confirmed for Minecraft ${source_version}." >&2
-    fi
-    echo 'Import stopped before activation. Migration and Minecraft version upgrade remain separate operations.' >&2
+if ! server_version_available "$source_version"; then
+    echo 'ERROR: The destination server software could not confirm availability of the imported Minecraft version.' >&2
+    echo 'Import stopped before activation because the destination server software could not confirm the imported Minecraft version.' >&2
     exit 1
 fi
 

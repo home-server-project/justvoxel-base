@@ -53,6 +53,48 @@ available_bytes="$(jv_migration_available_bytes "${repo_root}")" || fail 'migrat
 [[ ${available_bytes} =~ ^[0-9]+$ ]] || fail 'migration free-space helper did not return a numeric byte count'
 (( available_bytes > 0 )) || fail 'migration free-space helper returned no available space'
 
+# Shared compatibility and destination-specific availability, without network access.
+api_planner="${repo_root}/mjust/libexec/admin-migration-import-plan-json"
+source_planner="${repo_root}/mjust/libexec/migration-import-plan-source.sh"
+destination_planner="${repo_root}/mjust/libexec/migration-import-plan-destination.sh"
+(
+    source "${common}"
+    server_supports_plugins paper || fail 'Paper must support plugins'
+    server_supports_plugins purpur || fail 'Purpur must support plugins'
+    if server_supports_plugins vanilla; then fail 'Vanilla must not support plugins'; fi
+
+    availability_fixture="$(mktemp -d)"
+    trap 'rm -rf -- "${availability_fixture}"' EXIT
+    curl() { fail 'availability fixture attempted network access'; }
+    paper_version_build_channel() {
+        printf 'paper %s\n' "$1" >> "${availability_fixture}/calls"
+        [[ $1 == 27.1 ]]
+    }
+    purpur_metadata() {
+        printf 'purpur metadata\n' >> "${availability_fixture}/calls"
+        printf '%s' '{"versions":["28.3"]}'
+    }
+    MINECRAFT_SERVER_TYPE=paper
+    source_version=27.1
+    server_version_available "$source_version" || fail 'Paper availability did not use the destination helper'
+    [[ $(cat "${availability_fixture}/calls") == 'paper 27.1' ]] || fail 'wrong Paper availability path'
+    if server_version_available 28.3; then fail 'unavailable Paper version accepted'; fi
+    rm -f "${availability_fixture}/calls"
+    MINECRAFT_SERVER_TYPE=purpur
+    source_version=28.3
+    server_version_available "$source_version" || fail 'Purpur availability did not use the destination helper'
+    [[ $(cat "${availability_fixture}/calls") == 'purpur metadata' ]] || fail 'wrong Purpur availability path'
+    if server_version_available 27.1; then fail 'unavailable Purpur version accepted'; fi
+)
+for planner in "${api_planner}" "${source_planner}"; do
+    grep -Fq 'server_supports_plugins "${MINECRAFT_SERVER_TYPE-paper}"' "${planner}" || fail 'planner lacks shared destination compatibility gate'
+    grep -Fq 'server_allows_in_place_switch "${MINECRAFT_SERVER_TYPE-paper}" "$(jq -r '\''.minecraft.implementation // "paper"'\'' <<< "${native_manifest}")"' "${planner}" || fail 'planner lacks existing in-place switch compatibility authority'
+    grep -Fq 'server_version_available "$source_version"' "${planner}" || fail 'planner lacks destination version availability preflight'
+    if grep -Fq 'paper_version_has_stable_build' "${planner}"; then fail 'Import uses a Paper-only availability check'; fi
+done
+grep -Fxq 'MINECRAFT_VERSION_MODE=pinned' "${destination_planner}" || fail 'Import does not pin the source version'
+grep -Fxq 'MINECRAFT_VERSION="${source_version}"' "${destination_planner}" || fail 'Import does not retain the exact source version'
+
 # Exercise the managed-container ownership decision without a Podman daemon.
 port_fixture="$(mktemp -d)"
 trap 'rm -rf -- "${port_fixture}"' EXIT
@@ -153,6 +195,21 @@ if grep -Fq 'admin-migration-import-plan-json plan' "${repo_root}/mjust/libexec/
 if grep -Fq 'postplan=' "${repo_root}/mjust/libexec/admin-migration-import-transaction-json"; then fail 'Import transaction must not post-failure re-plan or retry the archive'; fi
 if grep -Fq 'jv_migration_source_identity "${JV_MIGRATION_SOURCE}"' "${repo_root}/mjust/libexec/migration-import-activate.sh"; then fail 'Import activation must not re-read the original source after staging'; fi
 grep -Fq 'jv_migration_api_result "${preactivation_outcome}" pre-activation' "${repo_root}/mjust/libexec/migration-import-common.sh" || fail 'Import backend does not report bounded pre-activation failure directly'
+activation="${repo_root}/mjust/libexec/migration-import-activate.sh"
+grep -Fq 'restore-runtime-validate "${source_version}"' "${activation}" || fail 'Import does not verify the concrete source version'
+if grep -Eq 'rcon-cli.*version' "${activation}" "${repo_root}/mjust/libexec/restore-runtime-validate"; then fail 'Import/restore bypasses readiness-aware version verification'; fi
+grep -Fq 'verify-minecraft-stack "${1:-${MINECRAFT_VERSION}}"' "${repo_root}/mjust/libexec/restore-runtime-validate" || fail 'restore does not use the authoritative version verifier'
+if grep -Eq '/usr/libexec/justvoxel/mjust/(restore-runtime-validate|validate)([[:space:]]|$)' "${repo_root}/mjust/libexec/admin-migration-import-transaction-json"; then fail 'API wrapper repeats backend validation'; fi
+runtime_line="$(grep -n '^/usr/libexec/justvoxel/mjust/restore-runtime-validate ' "${activation}" | cut -d: -f1)"
+validation_line="$(grep -n '^JUSTVOXEL_RUNTIME_ALREADY_VALIDATED=1 JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/validate-backend$' "${activation}" | cut -d: -f1)"
+validated_line="$(grep -n '^jv_migration_write_state .* validated ' "${activation}" | cut -d: -f1)"
+success_line="$(grep -n '^jv_migration_api_result succeeded validated ' "${activation}" | cut -d: -f1)"
+(( runtime_line < validation_line && validation_line < validated_line && validated_line < success_line )) || fail 'backend success precedes appliance validation/validated state'
+rollback="${repo_root}/mjust/libexec/migration-import-common.sh"
+rollback_runtime_line="$(grep -n 'if /usr/libexec/justvoxel/mjust/restore-runtime-validate' "${rollback}" | cut -d: -f1)"
+rollback_validation_line="$(grep -n '&& JUSTVOXEL_RUNTIME_ALREADY_VALIDATED=1 JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/validate-backend; then' "${rollback}" | cut -d: -f1)"
+(( rollback_runtime_line < rollback_validation_line )) || fail 'rollback must verify runtime before full appliance validation'
+grep -Fq 'if [[ ${JUSTVOXEL_RUNTIME_ALREADY_VALIDATED:-0} == 1 ]]; then' "${validate_backend}" || fail 'full validation lacks explicit runtime-only skip'
 if grep -Fq 'storage_write_network_fstab' <<< "${transport_text}"; then fail 'temporary migration transport must not write fstab'; fi
 grep -Fq 'JV_MIGRATION_SMB_CREDENTIALS="${JV_MIGRATION_TRANSPORT_ROOT}/smb.credentials"' <<< "${transport_text}" || fail 'temporary SMB credentials are not under /run transport state'
 grep -Fq 'chmod 0600 "${JV_MIGRATION_SMB_CREDENTIALS}"' <<< "${transport_text}" || fail 'temporary SMB credentials are not mode 0600'

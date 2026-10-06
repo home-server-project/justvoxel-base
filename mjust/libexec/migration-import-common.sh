@@ -58,7 +58,7 @@ rollback_import() {
         if systemctl start minecraft.service; then
             validation_started=yes
             if /usr/libexec/justvoxel/mjust/restore-runtime-validate \
-                && /usr/libexec/justvoxel/mjust/validate; then
+                && JUSTVOXEL_RUNTIME_ALREADY_VALIDATED=1 JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/validate-backend; then
                 if [[ ${minecraft_was_active} != yes ]]; then
                     systemctl stop minecraft.service || rollback_ok=no
                 fi

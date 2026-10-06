@@ -191,22 +191,29 @@ fi
 
 if systemctl is-active --quiet minecraft.service; then
     pass 'minecraft.service is active'
-    if players="$(podman exec minecraft rcon-cli 'list' 2>/dev/null)"; then
-        pass "RCON responded: ${players}"
+    # Maintenance callers may skip these probes only after restore-runtime-validate succeeds.
+    if [[ ${JUSTVOXEL_RUNTIME_ALREADY_VALIDATED:-0} == 1 ]]; then
+        pass 'Minecraft runtime already verified by restore-runtime-validate'
     else
-        fail 'RCON did not respond'
-    fi
-    if version="$(/usr/libexec/justvoxel/mjust/verify-minecraft-stack 2>/dev/null)"; then
-        pass "Minecraft reports: ${version}"
-    else
-        fail 'Minecraft version query failed'
+        if players="$(podman exec minecraft rcon-cli 'list' 2>/dev/null)"; then
+            pass "RCON responded: ${players}"
+        else
+            fail 'RCON did not respond'
+        fi
+        if version="$(/usr/libexec/justvoxel/mjust/verify-minecraft-stack 2>/dev/null)"; then
+            pass "Minecraft reports: ${version}"
+        else
+            fail 'Minecraft version query failed'
+        fi
+        if [[ ${BEDROCK_ENABLED} == yes ]]; then
+            if geyser="$(podman exec minecraft rcon-cli 'geyser version' 2>/dev/null)"; then
+                pass "Geyser reports: ${geyser}"
+            else
+                fail 'Geyser version query failed'
+            fi
+        fi
     fi
     if [[ ${BEDROCK_ENABLED} == yes ]]; then
-        if geyser="$(podman exec minecraft rcon-cli 'geyser version' 2>/dev/null)"; then
-            pass "Geyser reports: ${geyser}"
-        else
-            fail 'Geyser version query failed'
-        fi
         geyser_config="${DATA_PATH}/plugins/Geyser-Spigot/config.yml"
         if grep -Eq '^[[:space:]]*auth-type:[[:space:]]*floodgate[[:space:]]*$' "${geyser_config}" 2>/dev/null; then
             pass 'Geyser auth-type is floodgate'

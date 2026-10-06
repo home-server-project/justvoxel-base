@@ -123,10 +123,7 @@ if [[ -r "$result_file" ]] && jq -e 'type=="object" and (.outcome|type=="string"
     status="$(jq -r '.status' "$result_file")"
     rm -f -- "$result_file"
     case "$outcome" in
-        succeeded)
-            emit_progress verifying import_verify 'Revalidating the imported Minecraft runtime after the Import transaction.'
-            if /usr/libexec/justvoxel/mjust/restore-runtime-validate >/dev/null 2>&1 && /usr/libexec/justvoxel/mjust/validate >/dev/null 2>&1; then emit_result succeeded "$status"; else emit_result needs_attention 'Imported data was activated but final runtime verification could not be reconfirmed; administrator attention is required.'; fi
-            ;;
+        succeeded) emit_result succeeded "$status" ;;
         rolled_back) emit_result rolled_back "$status" ;;
         needs_attention) emit_result needs_attention "$status" ;;
         *) emit_result needs_attention 'Server migration Import backend returned an unknown safety outcome.' ;;

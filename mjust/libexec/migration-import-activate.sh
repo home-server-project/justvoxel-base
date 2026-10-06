@@ -108,14 +108,7 @@ echo 'Starting imported Minecraft server.'
 systemctl start minecraft.service
 echo 'Validating the imported Minecraft server.'
 jv_migration_write_state "${transaction}" validating "${JV_MIGRATION_SOURCE}" "${source_class}"
-/usr/libexec/justvoxel/mjust/restore-runtime-validate
-
-reported="$(podman exec minecraft rcon-cli 'version' 2>/dev/null | head -n1 || true)"
-if [[ -z ${reported} || ${reported} != *"${source_version}"* ]]; then
-    echo "ERROR: imported server did not report the required source Minecraft version ${source_version}." >&2
-    echo "Reported: ${reported:-unknown}" >&2
-    exit 1
-fi
+/usr/libexec/justvoxel/mjust/restore-runtime-validate "${source_version}"
 
 post_plugin_count="$(find "${DATA_PATH}/plugins" -maxdepth 1 -type f -iname '*.jar' 2>/dev/null | wc -l | tr -d ' ')"
 [[ ${post_plugin_count} =~ ^[0-9]+$ ]] || post_plugin_count=0
@@ -124,7 +117,7 @@ if [[ ${plugin_count} =~ ^[0-9]+$ ]] && (( post_plugin_count < plugin_count )); 
     exit 1
 fi
 
-/usr/libexec/justvoxel/mjust/validate
+JUSTVOXEL_RUNTIME_ALREADY_VALIDATED=1 JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/validate-backend
 validated=yes
 jv_migration_write_state "${transaction}" validated "${JV_MIGRATION_SOURCE}" "${source_class}"
 

@@ -17,29 +17,5 @@ if ! wait_for_rcon 900; then
 fi
 
 players="$(podman exec minecraft rcon-cli 'list' 2>/dev/null)" || { echo 'ERROR: Minecraft player query failed after restore.' >&2; exit 1; }
-if [[ ${MINECRAFT_SERVER_TYPE-paper} == vanilla ]]; then
-    JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack
-    exit $?
-fi
-version="$(podman exec minecraft rcon-cli 'version' 2>/dev/null)" || { echo 'ERROR: Minecraft version query failed after restore.' >&2; exit 1; }
-plugins="$(podman exec minecraft rcon-cli 'plugins' 2>/dev/null)" || { echo 'ERROR: Minecraft plugin query failed after restore.' >&2; exit 1; }
-
-grep -qi 'ViaVersion' <<< "${plugins}" || { echo 'ERROR: ViaVersion was not confirmed after restore.' >&2; exit 1; }
-
-if [[ ${BEDROCK_ENABLED} == yes ]]; then
-    grep -qi 'Geyser' <<< "${plugins}" || { echo 'ERROR: Geyser was not confirmed after restore.' >&2; exit 1; }
-    grep -qi 'floodgate' <<< "${plugins}" || { echo 'ERROR: Floodgate was not confirmed after restore.' >&2; exit 1; }
-    geyser="$(podman exec minecraft rcon-cli 'geyser version' 2>/dev/null)" || { echo 'ERROR: Geyser did not respond after restore.' >&2; exit 1; }
-    geyser_config="${DATA_PATH}/plugins/Geyser-Spigot/config.yml"
-    grep -Eq '^[[:space:]]*auth-type:[[:space:]]*floodgate[[:space:]]*$' "${geyser_config}" 2>/dev/null || { echo 'ERROR: Geyser auth-type is not confirmed as floodgate after restore.' >&2; exit 1; }
-else
-    geyser='Disabled'
-fi
-
 printf 'RCON: %s\n' "${players}"
-printf 'Minecraft: %s\n' "${version}"
-printf 'Plugins: %s\n' "${plugins}"
-if [[ ${BEDROCK_ENABLED} == yes ]]; then
-    printf 'Geyser: %s\n' "${geyser}"
-    echo 'Floodgate: configured and loaded'
-fi
+JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack "${1:-${MINECRAFT_VERSION}}"
