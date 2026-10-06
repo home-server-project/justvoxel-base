@@ -55,7 +55,7 @@ func (s *server) plusHostLogs(w http.ResponseWriter, r *http.Request) {
 	if service == "" {
 		service = "management-agent"
 	}
-	units := map[string]string{"management-agent": "justvoxel-management.service", "webui": "justvoxel-webui.service", "docker": "docker.service", "containerd": "containerd.service"}
+	units := map[string]string{"management-agent": "justvoxel-management.service", "webui": "justvoxel-webui.service", "docker": "docker.service", "containerd": "containerd.service", "plus-setup": plusSetupUnit, "plus-stack": "justvoxel-plus-stack.service"}
 	unit, ok := units[service]
 	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid host log service")

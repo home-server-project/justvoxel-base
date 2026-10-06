@@ -287,10 +287,14 @@ test ! -e /etc/containers/systemd/minecraft.container
 test ! -e /etc/justvoxel/minecraft.env
 test ! -e /etc/justvoxel/justvoxel.conf
 
-# Plus ships deployment templates only. Setup owns active configuration/secrets.
+# Plus ships first-run deployment code and templates. Setup owns active configuration/secrets.
 test -f /usr/lib/systemd/system/justvoxel-plus-stack.service
 [[ "$(systemctl is-enabled justvoxel-plus-stack.service 2>/dev/null || true)" != "enabled" ]]
-for template in compose.yaml stack.env.in database.env.in panel.env.in panel-persistent.env.in drydock.env.in; do
+test -f /usr/lib/systemd/system/justvoxel-plus-setup.service
+[[ "$(systemctl is-enabled justvoxel-plus-setup.service 2>/dev/null || true)" != "enabled" ]]
+command -v findmnt >/dev/null
+command -v mountpoint >/dev/null
+for template in compose.yaml stack.env.in database.env.in panel.env.in panel-persistent.env.in drydock.env.in panel-bootstrap.php panel-nginx.conf.in; do
     test -f "/usr/share/justvoxel/templates/plus/${template}"
 done
 test ! -e /etc/justvoxel/plus/stack.env

@@ -14,6 +14,7 @@ import (
 type plusSetupTestAPI struct {
 	plusTestAPI
 	prepareCalls int
+	deployCalls  int
 	request      api.PlusSetupRequest
 }
 
@@ -104,5 +105,41 @@ func TestPlusSetupWebStrictPayloadAndWizard(t *testing.T) {
 	}
 	if strings.Contains(rr.Body.String(), "Recommended setup") || strings.Contains(rr.Body.String(), "Advanced setup") {
 		t.Fatal("wizard split into separate modes")
+	}
+}
+
+func (f *plusSetupTestAPI) PlusSetupDeploy(context.Context, string) (api.PlusDeploymentResponse, error) {
+	f.deployCalls++
+	return api.PlusDeploymentResponse{OK: true, Deployment: api.PlusDeploymentStatus{State: "running"}}, nil
+}
+func (f *plusSetupTestAPI) PlusApplications(context.Context, string) (api.PlusApplications, error) {
+	return api.PlusApplications{Configured: true, PanelURL: "https://panel.example.com:8443", DrydockURL: "https://panel.example.com:3000"}, nil
+}
+func TestPlusDeploymentCSRFAndLaunchers(t *testing.T) {
+	for _, role := range []string{"administrator", "operator", "viewer"} {
+		client := &plusSetupTestAPI{plusTestAPI: plusTestAPI{role: role}}
+		app, err := New(client, Config{Plus: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, csrf := range []bool{false, true} {
+			rr := httptest.NewRecorder()
+			app.Handler().ServeHTTP(rr, plusSetupWebRequest(http.MethodPost, "/api/plus/setup/deploy", "csrf=token", csrf))
+			want := http.StatusForbidden
+			if csrf && role == "administrator" {
+				want = http.StatusAccepted
+			}
+			if rr.Code != want {
+				t.Fatalf("deployment %s csrf=%t: %d", role, csrf, rr.Code)
+			}
+		}
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, plusSetupWebRequest(http.MethodGet, "/applications/pterodactyl", "", false))
+		if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "https://panel.example.com:8443" {
+			t.Fatal("Panel launcher not available to authenticated host role")
+		}
+		if strings.Contains(rr.Header().Get("Location"), "session") {
+			t.Fatal("host session forwarded to external application")
+		}
 	}
 }

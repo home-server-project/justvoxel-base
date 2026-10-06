@@ -68,6 +68,15 @@
     </a>
   </div>
 
+{{if isPlus}}
+  <section class="panel" data-plus-applications {{if not .Status.Plus.Configured}}hidden{{end}}>
+    <p class="eyebrow">Applications</p>
+    <div class="action-row">
+      <a class="button-link" href="/applications/pterodactyl" target="_blank" rel="noopener noreferrer" data-plus-panel {{if not .Status.Plus.PanelURL}}hidden{{end}}>Open Pterodactyl</a>
+      <a class="button-link" href="/applications/drydock" target="_blank" rel="noopener noreferrer" data-plus-drydock {{if not .Status.Plus.DrydockURL}}hidden{{end}}>Open Drydock</a>
+    </div>
+  </section>
+{{end}}
   {{template "project-footer" .}}
 </main>
 </body>

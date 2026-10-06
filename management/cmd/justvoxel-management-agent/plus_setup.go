@@ -75,7 +75,7 @@ func eligiblePlusSetupMounts(mounts []plusSetupMount) []plusSetupMount {
 		if !strings.HasPrefix(mount.Source, "/dev/") || !strings.Contains(","+mount.Options+",", ",rw,") {
 			continue
 		}
-		if !(strings.HasPrefix(mount.Target, "/mnt/") || strings.HasPrefix(mount.Target, "/srv/") || strings.HasPrefix(mount.Target, "/media/")) {
+		if !(strings.HasPrefix(mount.Target, "/mnt/") || strings.HasPrefix(mount.Target, "/srv/") || strings.HasPrefix(mount.Target, "/media/") || strings.HasPrefix(mount.Target, "/var/mnt/") || strings.HasPrefix(mount.Target, "/var/srv/")) {
 			continue
 		}
 		if filepath.Clean(mount.Target) != mount.Target || strings.ContainsAny(mount.Target, "\r\n\x00$") {
@@ -123,7 +123,20 @@ func (s *server) plusSetupState(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "setup state is unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"prepared": err == nil, "deployed": deployed, "mounts": mounts})
+	prepared := err == nil
+	p := defaultPlusDeploymentPaths()
+	deployment, err := readPlusDeploymentStatus(p)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "deployment progress is unavailable")
+		return
+	}
+	running := plusSetupUnitRunning(ctx)
+	if deployment.State == "running" && !running {
+		deployment.State = "failed"
+		deployment.Message = "Setup was interrupted. Existing data is retained. Fix the cause and retry deployment."
+	}
+	_, runtimeErr := os.Lstat(filepath.Join(p.Configuration, "compose.yaml"))
+	writeJSON(w, http.StatusOK, map[string]any{"prepared": prepared, "deployed": deployed, "mounts": mounts, "deployment": deployment, "running": running, "locked": runtimeErr == nil})
 }
 
 func decodePlusSetup(w http.ResponseWriter, r *http.Request, target any) bool {
@@ -153,6 +166,9 @@ func validatePlusSetup(request *plusSetupRequest, hostUsername string, mounts []
 		return errors.New("provide the hostname or IP address used to open the applications")
 	}
 	ip := net.ParseIP(request.Host)
+	if ip != nil && ip.To4() == nil {
+		return errors.New("use an IPv4 address or hostname for the initial application setup")
+	}
 	if ip == nil {
 		for _, label := range strings.Split(request.Host, ".") {
 			if !plusSetupHostnameLabel.MatchString(label) {
@@ -294,6 +310,23 @@ func (s *server) plusSetupPrepare(w http.ResponseWriter, r *http.Request) {
 	}
 	s.plusSetupMu.Lock()
 	defer s.plusSetupMu.Unlock()
+	if plusSetupUnitRunning(r.Context()) {
+		writeError(w, http.StatusConflict, "setup is already running")
+		return
+	}
+	lock, err := plusPreparationLock(plusSetupDirectory)
+	if err != nil {
+		writeError(w, http.StatusConflict, "setup is already running")
+		return
+	}
+	defer lock.Close()
+	if _, err := os.Lstat(filepath.Join(plusConfigurationDirectory, "compose.yaml")); err == nil {
+		writeError(w, http.StatusConflict, "deployment has started; retry the saved choices or manage configuration as administrator")
+		return
+	} else if !os.IsNotExist(err) {
+		writeError(w, http.StatusServiceUnavailable, "setup state is unavailable")
+		return
+	}
 	deployed, err := plusSetupDeployed()
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "setup state is unavailable")
@@ -322,5 +355,5 @@ func (s *server) plusSetupPrepare(w http.ResponseWriter, r *http.Request) {
 		_ = s.store.recordAuditEvent(actor, "prepare_plus_setup", "plus", true, "setup choices prepared")
 	}
 	// Deliberately return no request fields, credentials, certificates or key material.
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "prepared": true, "message": "Setup choices saved. Container deployment is the next development stage."})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "prepared": true, "message": "Setup choices saved. Ready to deploy the selected applications."})
 }

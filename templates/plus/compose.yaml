@@ -57,14 +57,20 @@ services:
       APP_TIMEZONE: ${PLUS_TIMEZONE:-UTC}
       APP_URL: ${PANEL_URL:?Setup must provide the reachable Panel URL}
       APP_SERVICE_AUTHOR: ${PANEL_AUTHOR:-noreply@localhost}
+      MAIL_MAILER: log
+    extra_hosts:
+      - "${PLUS_HOST:-localhost}:host-gateway"
     ports:
-      - ${PLUS_BIND_ADDRESS:-0.0.0.0}:${PANEL_HTTP_PORT:-8081}:80
+      - ${PANEL_HTTP_BIND_ADDRESS:-0.0.0.0}:${PANEL_HTTP_PORT:-8081}:80
       - ${PLUS_BIND_ADDRESS:-0.0.0.0}:${PANEL_HTTPS_PORT:-8443}:443
     volumes:
       - ${PLUS_DATA_ROOT}/panel/var:/app/var:Z
+      - /etc/justvoxel/plus/panel-bootstrap.php:/run/justvoxel-plus-bootstrap.php:ro,Z
       - ${PLUS_DATA_ROOT}/panel/logs:/app/storage/logs:Z
       - ${PLUS_DATA_ROOT}/panel/nginx:/etc/nginx/http.d:Z
       - ${PLUS_DATA_ROOT}/certificates:/etc/letsencrypt:z
+      - /etc/justvoxel/plus/trust:/etc/justvoxel-plus/trust:ro,z
+      - /etc/justvoxel/plus/trust/php-ca.ini:/usr/local/etc/php/conf.d/zz-justvoxel-plus-ca.ini:ro,Z
     networks: [infrastructure]
 
   wings:
@@ -77,6 +83,12 @@ services:
     security_opt: [label=disable]
     environment:
       TZ: ${PLUS_TIMEZONE:-UTC}
+      WINGS_UID: "988"
+      WINGS_GID: "988"
+      WINGS_USERNAME: pterodactyl
+      SSL_CERT_FILE: /etc/justvoxel-plus/trust/ca-bundle.crt
+    extra_hosts:
+      - "${PLUS_HOST:-localhost}:host-gateway"
     ports:
       - ${PLUS_BIND_ADDRESS:-0.0.0.0}:${WINGS_API_PORT:-8080}:8080
       - ${PLUS_BIND_ADDRESS:-0.0.0.0}:${WINGS_SFTP_PORT:-2022}:2022
@@ -86,12 +98,13 @@ services:
       - /etc/justvoxel/plus/wings:/etc/pterodactyl:z
       # The Docker daemon uses HOST paths supplied by Wings, so preserve the
       # exact absolute data path inside Wings, including secondary-drive paths.
-      - ${PLUS_DATA_ROOT}/wings/data:${PLUS_DATA_ROOT}/wings/data:z
+      - ${PLUS_DATA_ROOT}/wings:${PLUS_DATA_ROOT}/wings:z
       - ${PLUS_DATA_ROOT}/wings/logs:/var/log/pterodactyl:Z
       - /tmp/pterodactyl:/tmp/pterodactyl:z
       - /run/wings:/run/wings:z
       - /etc/ssl/certs:/etc/ssl/certs:ro
       - ${PLUS_DATA_ROOT}/certificates:/etc/letsencrypt:z
+      - /etc/justvoxel/plus/trust:/etc/justvoxel-plus/trust:ro,z
     networks: [infrastructure]
 
   drydock:
@@ -123,6 +136,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /etc/justvoxel/plus:/etc/justvoxel/plus:z
       - ${PLUS_DATA_ROOT}/drydock:/store:Z
+      - ${PLUS_DATA_ROOT}/certificates/drydock:/run/justvoxel-plus-tls:ro,Z
     networks: [infrastructure]
 
 networks:

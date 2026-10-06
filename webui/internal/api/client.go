@@ -31,6 +31,8 @@ type Status struct {
 	Plus struct {
 		Configured bool   `json:"configured"`
 		Docker     string `json:"docker"`
+		PanelURL   string `json:"panel_url,omitempty"`
+		DrydockURL string `json:"drydock_url,omitempty"`
 	} `json:"plus,omitempty"`
 	System struct {
 		Variant   string `json:"variant"`

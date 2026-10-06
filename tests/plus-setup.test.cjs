@@ -14,13 +14,13 @@ class Element {
   replaceChildren() { this.children = []; }
   reportValidity() { return !this.required || Boolean(this.value); }
 }
-async function wizard({deployed = false, fail = false} = {}) {
+async function wizard({deployed = false, fail = false, deployFail = false} = {}) {
   const names = ['stack','panel','database','cache','wings','drydock','use_domain','host','use_tls','certificate','private_key','external_storage','storage_mount','separate_account','username','email','password','confirm_password','csrf'];
   const fields = Object.fromEntries(names.map(name => [name, new Element()]));
   for (const name of ['stack','panel','database','cache','wings','drydock']) fields[name].checked = true;
   fields.csrf.value = 'token';
   const form = new Element(); form.elements = {namedItem: name => fields[name]};
-  const selectors = Object.fromEntries(['data-setup-notice','data-setup-next','data-setup-back','data-setup-save','data-partial-warning','data-host-label','data-tls-fields','data-http-warning','data-storage-fields','data-system-storage','data-account-fields','data-no-account','data-email-field','data-setup-review','data-certificate-file','data-key-file'].map(name => [`[${name}]`, new Element()]));
+  const selectors = Object.fromEntries(['data-setup-notice','data-setup-next','data-setup-back','data-setup-save','data-partial-warning','data-host-label','data-tls-fields','data-http-warning','data-storage-fields','data-system-storage','data-account-fields','data-no-account','data-email-field','data-setup-review','data-certificate-file','data-key-file','data-setup-progress','data-deployment-message','data-deployment-panel','data-deployment-drydock','data-deployment-retry'].map(name => [`[${name}]`, new Element()]));
   selectors['[data-setup-form]'] = form;
   const stepFields = [['stack','panel','database','cache','wings','drydock'],['host','certificate','private_key'],['storage_mount'],['username','email','password','confirm_password'],[]];
   const steps = stepFields.map(names => Object.assign(new Element(), {querySelectorAll: () => names.map(name => fields[name])}));
@@ -28,15 +28,17 @@ async function wizard({deployed = false, fail = false} = {}) {
   const progress = steps.map(() => new Element());
   const root = {dataset:{username:'hostadmin'},querySelector: selector => selectors[selector],querySelectorAll: selector => selector === '[data-setup-step]' ? steps : selector === '.plus-steps span' ? progress : [selectors['[data-certificate-file]'],selectors['[data-key-file]']]};
   const calls = [];
+  const timers = [];
   vm.runInNewContext(source, {
     document:{querySelector:()=>root,createElement:()=>new Element()}, window:{location:{hostname:'192.168.1.10'}}, URLSearchParams,
+    setTimeout: listener => {timers.push(listener);return timers.length;}, clearTimeout: () => {},
     fetch:async (url, options) => {
       calls.push({url, options});
-      return {ok:!fail,json:async()=> url.endsWith('state') ? {deployed,mounts:[{target:'/mnt/data',fstype:'xfs'}]} : {ok:true,message:'Saved'}};
+      return {ok:!fail && !(deployFail && url.endsWith('deploy')),json:async()=> url.endsWith('state') ? {deployed,mounts:[{target:'/mnt/data',fstype:'xfs'}]} : url.endsWith('deploy') ? {ok:!deployFail,error: deployFail ? 'Service unavailable' : '',deployment:{state:'running',stage:'queued',message:'Queued',started:true}} : {ok:true,message:'Saved'}};
     }
   });
   await new Promise(resolve => setImmediate(resolve));
-  return {fields,steps,selectors,calls,form,change: name => form.listeners.change({target:fields[name]}),next:()=>selectors['[data-setup-next]'].listeners.click()};
+  return {fields,steps,selectors,calls,form,timers,change: name => form.listeners.change({target:fields[name]}),next:()=>selectors['[data-setup-next]'].listeners.click()};
 }
 
 test('One wizard supports group and individual choices, storage, and independent account credentials', async () => {
@@ -58,6 +60,12 @@ test('One wizard supports group and individual choices, storage, and independent
   const call=w.calls.find(call=>call.url.endsWith('prepare'));const saved=JSON.parse(call.options.body.get('setup'));
   assert.equal(saved.password,'one-password-123');assert.equal(saved.storage_mount,'/mnt/data');assert.equal(saved.components.database,true);
   for(const name of ['password','confirm_password','private_key','certificate'])assert.equal(f[name].value,'');
+  assert.equal(w.calls.filter(call => call.url.endsWith('deploy')).length,1);
+  assert.equal(w.form.hidden,true);
+  assert.equal(w.selectors['[data-deployment-retry]'].hidden,true);
+  assert.equal(w.timers.length,1);
+  await w.form.listeners.submit({preventDefault(){}});
+  assert.equal(w.calls.filter(call => call.url.endsWith('deploy')).length,1);
 });
 
 test('No component selection, unavailable state, and deployed systems cannot prepare setup', async () => {
@@ -70,4 +78,20 @@ test('No component selection, unavailable state, and deployed systems cannot pre
     await stopped.form.listeners.submit({preventDefault(){}});
     assert.equal(stopped.calls.some(call=>call.url.endsWith('prepare')),false);
   }
+});
+
+
+test('A start failure offers an explicit retry of saved choices without resending credentials', async () => {
+  const w = await wizard({deployFail:true});const f=w.fields;
+  w.next();w.next();w.next();
+  f.email.value='admin@example.com';f.password.value='one-password-123';f.confirm_password.value=f.password.value;w.next();
+  await w.form.listeners.submit({preventDefault(){}});
+  assert.equal(w.selectors['[data-deployment-retry]'].hidden,false);
+  assert.equal(f.password.value,'');
+  await w.selectors['[data-deployment-retry]'].listeners.click();
+  assert.equal(w.calls.filter(call=>call.url.endsWith('prepare')).length,1);
+  assert.equal(w.calls.filter(call=>call.url.endsWith('deploy')).length,2);
+  const retry=w.calls.filter(call=>call.url.endsWith('deploy'))[1];
+  assert.equal(retry.options.body.get('csrf'),'token');
+  assert.equal(retry.options.body.has('setup'),false);
 });

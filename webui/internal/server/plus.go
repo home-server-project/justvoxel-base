@@ -27,6 +27,14 @@ func (a *App) plusRoutes(next http.Handler) http.Handler {
 			a.plusSetupPrepare(w, r)
 			return
 		}
+		if r.URL.Path == "/api/plus/setup/deploy" && r.Method == http.MethodPost {
+			a.plusSetupDeploy(w, r)
+			return
+		}
+		if (r.URL.Path == "/applications/pterodactyl" || r.URL.Path == "/applications/drydock") && r.Method == http.MethodGet {
+			a.plusApplicationLaunch(w, r)
+			return
+		}
 		for _, prefix := range []string{
 			"/minecraft", "/api/minecraft", "/api/version", "/operations",
 			"/setup", "/api/setup", "/settings/server", "/settings/server-migration", "/settings/restore",

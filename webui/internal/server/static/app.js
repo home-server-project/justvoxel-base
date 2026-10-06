@@ -297,7 +297,15 @@ if (dashboard) {
     if (setupArea) setupArea.hidden = Boolean(justVoxelPlus ? status.plus?.configured : status.minecraft.configured);
     dashboard.dataset.configured = String(Boolean(justVoxelPlus ? status.plus?.configured : status.minecraft.configured));
 
-    if (justVoxelPlus) return;
+    if (justVoxelPlus) {
+      const applications = document.querySelector("[data-plus-applications]");
+      const panel = document.querySelector("[data-plus-panel]");
+      const drydock = document.querySelector("[data-plus-drydock]");
+      if (applications) applications.hidden = !status.plus?.configured;
+      if (panel) panel.hidden = !status.plus?.panel_url;
+      if (drydock) drydock.hidden = !status.plus?.drydock_url;
+      return;
+    }
     const displayedState = pendingAction ? actionProgress(pendingAction) : status.minecraft.state;
     text("minecraft-control-state", displayedState);
 
@@ -3834,7 +3842,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       const panel = systemPanel("Host logs", "Current boot · last 200 lines").panel;
       const select = document.createElement("select");
       select.setAttribute("aria-label", "Host service");
-      [["management-agent", "Management Agent"], ["webui", "WebUI"], ["docker", "Docker"], ["containerd", "containerd"]].forEach(([value, label]) => {
+      [["management-agent", "Management Agent"], ["webui", "WebUI"], ["docker", "Docker"], ["containerd", "containerd"], ["plus-setup", "Plus setup"], ["plus-stack", "Plus stack"]].forEach(([value, label]) => {
         const option = document.createElement("option"); option.value = value; option.textContent = label; select.appendChild(option);
       });
       select.value = service;

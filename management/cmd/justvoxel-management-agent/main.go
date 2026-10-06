@@ -109,6 +109,15 @@ func main() {
 		if err := serve(socket); err != nil {
 			fatal("serve: %v", err)
 		}
+	case "plus-deploy":
+		if len(args) != 1 || !isPlusImage() || os.Geteuid() != 0 {
+			fatal("Plus deployment requires the Plus image and root")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		if err := runPlusDeployment(ctx, defaultPlusDeploymentPaths()); err != nil {
+			fatal("Plus setup: %v", err)
+		}
 	case "version":
 		meta, _ := readReleaseMetadata()
 		fmt.Printf("JustVoxel Management API %s\nWebUI %s\n", managementAPI, valueOr(meta.Version, "unknown"))
@@ -210,6 +219,8 @@ func serve(socket string) error {
 	mux.HandleFunc("GET /v1/admin/plus/host-logs", s.plusHostLogs)
 	mux.HandleFunc("GET /v1/admin/plus/setup/state", s.plusSetupState)
 	mux.HandleFunc("POST /v1/admin/plus/setup/prepare", s.plusSetupPrepare)
+	mux.HandleFunc("POST /v1/admin/plus/setup/deploy", s.plusSetupDeploy)
+	mux.HandleFunc("GET /v1/plus/applications", s.plusApplications)
 	mux.HandleFunc("POST /v1/backups/manual", s.manualBackup)
 	registerAdminUserRoutes(mux, s)
 	registerAdminActivityRoutes(mux, s)
@@ -332,6 +343,13 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 	if !json.Valid(output) {
 		writeError(w, http.StatusInternalServerError, "status collector returned invalid data")
 		return
+	}
+	if s.plus {
+		output, err = plusStatusWithApplications(output, defaultPlusDeploymentPaths())
+		if err != nil {
+			writeError(w, http.StatusServiceUnavailable, "Plus application status is unavailable")
+			return
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")

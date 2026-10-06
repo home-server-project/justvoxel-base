@@ -1,0 +1,17 @@
+[Unit]
+Description=JustVoxel Plus first-run application deployment
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+ConditionPathExists=/var/lib/justvoxel-plus-setup/setup.json
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+ExecStart=/usr/libexec/justvoxel/management-agent plus-deploy
+TimeoutStartSec=35min
+# The deployment code writes bounded, secret-free progress for the WebUI.
+# Upstream stdout/stderr is captured privately and never sent to the journal.
+StandardOutput=null
+StandardError=journal

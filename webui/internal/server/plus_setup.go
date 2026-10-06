@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
@@ -83,4 +84,67 @@ func (a *App) plusSetupPrepare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeSystemWorkspaceJSON(w, http.StatusOK, response)
+}
+
+type plusDeploymentAPI interface {
+	PlusSetupDeploy(context.Context, string) (api.PlusDeploymentResponse, error)
+}
+
+func (a *App) plusSetupDeploy(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	if !a.validCSRF(r) {
+		writeSystemWorkspaceError(w, http.StatusForbidden, "Invalid CSRF token.")
+		return
+	}
+	session, _, ok := a.systemWorkspaceIdentity(w, r, "administrator")
+	if !ok {
+		return
+	}
+	client, ok := a.api.(plusDeploymentAPI)
+	if !ok {
+		writeSystemWorkspaceError(w, http.StatusServiceUnavailable, "Deployment is unavailable.")
+		return
+	}
+	response, err := client.PlusSetupDeploy(r.Context(), session)
+	if err != nil {
+		a.writeSystemWorkspaceAPIError(w, err, "Deployment could not be started.")
+		return
+	}
+	writeSystemWorkspaceJSON(w, http.StatusAccepted, response)
+}
+
+type plusApplicationsAPI interface {
+	PlusApplications(context.Context, string) (api.PlusApplications, error)
+}
+
+func (a *App) plusApplicationLaunch(w http.ResponseWriter, r *http.Request) {
+	session, _, ok := a.systemWorkspaceIdentity(w, r, "administrator", "operator", "viewer")
+	if !ok {
+		return
+	}
+	client, ok := a.api.(plusApplicationsAPI)
+	if !ok {
+		http.Error(w, "Applications are unavailable.", http.StatusServiceUnavailable)
+		return
+	}
+	applications, err := client.PlusApplications(r.Context(), session)
+	if err != nil {
+		http.Error(w, "Applications are unavailable.", http.StatusServiceUnavailable)
+		return
+	}
+	address := applications.PanelURL
+	if r.URL.Path == "/applications/drydock" {
+		address = applications.DrydockURL
+	}
+	if !applications.Configured || address == "" {
+		http.Error(w, "This application is not deployed. Complete setup from the desktop.", http.StatusConflict)
+		return
+	}
+	u, err := url.Parse(address)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" {
+		http.Error(w, "The application address is invalid.", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	http.Redirect(w, r, address, http.StatusSeeOther)
 }

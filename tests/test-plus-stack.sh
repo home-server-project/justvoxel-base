@@ -35,7 +35,7 @@ assert services['drydock']['env_file'][0]['format'] == 'raw'
 assert not any('ANONYMOUS' in key or 'INSECURE_ROOT' in key for key in services['drydock']['environment'])
 assert services['drydock']['user'] == '1000:1000'
 assert '/etc/justvoxel/plus:/etc/justvoxel/plus:z' in services['drydock']['volumes']
-assert '${PLUS_DATA_ROOT}/wings/data:${PLUS_DATA_ROOT}/wings/data:z' in services['wings']['volumes']
+assert '${PLUS_DATA_ROOT}/wings:${PLUS_DATA_ROOT}/wings:z' in services['wings']['volumes']
 for service in services.values():
     for mount in service.get('volumes', []):
         if mount.startswith(('/var/run/docker.sock:', '/var/lib/docker/containers:', '/etc/ssl/certs:')):
@@ -75,6 +75,8 @@ with tempfile.TemporaryDirectory() as directory:
         'DATABASE_PASSWORD': 'fixtureDatabasePassword', 'DATABASE_ROOT_PASSWORD': 'fixtureRootPassword',
         'PANEL_APP_KEY': 'base64:fixtureOnly', 'PANEL_HASHIDS_SALT': 'fixtureSalt',
         'DRYDOCK_USER': 'fixtureAdmin', 'DRYDOCK_PASSWORD_HASH': raw_hash,
+        'DATA_ROOT': '/var/lib/justvoxel-plus', 'PROFILES': ','.join(sorted(expected)),
+        'PLUS_HOST': '192.0.2.10', 'PANEL_HTTP_BIND_ADDRESS': '0.0.0.0', 'TLS_ENABLED': 'false',
     }
     for filename in ('stack.env', 'database.env', 'panel.env', 'drydock.env'):
         text = (templates / (filename + '.in')).read_text()
@@ -93,7 +95,7 @@ with tempfile.TemporaryDirectory() as directory:
         resolved = config(sorted(expected), root)
         assert set(resolved['services']) == expected
         wings_mounts = resolved['services']['wings']['volumes']
-        assert any(v['source'] == root + '/wings/data' and v['target'] == root + '/wings/data' for v in wings_mounts)
+        assert any(v['source'] == root + '/wings' and v['target'] == root + '/wings' for v in wings_mounts)
         # Compose escapes dollar signs in exported JSON as well as YAML.
         # Compare the full export representation, not an interpolated hash.
         assert resolved['services']['drydock']['environment']['DD_AUTH_BASIC_ADMIN_HASH'] == raw_hash.replace('$', '$$'), 'Compose export changed the authentication hash beyond dollar escaping'

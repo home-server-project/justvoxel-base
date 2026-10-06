@@ -13,6 +13,11 @@
   let loaded = false;
   let deployed = false;
   let busy = false;
+  let running = false;
+  let locked = false;
+  let pollTimer;
+  const progress = root.querySelector('[data-setup-progress]');
+  const retry = root.querySelector('[data-deployment-retry]');
   field('host').value = window.location.hostname.replace(/^\[|\]$/g, '');
 
   function sync() {
@@ -43,10 +48,11 @@
     root.querySelectorAll('.plus-steps span').forEach((item, index) => {
       if (index === step) item.setAttribute('aria-current', 'step'); else item.removeAttribute('aria-current');
     });
+    form.hidden = running || locked || deployed;
     back.disabled = step === 0 || busy;
     next.hidden = step === 4;
     save.hidden = step !== 4;
-    next.disabled = save.disabled = !loaded || deployed || busy;
+    next.disabled = save.disabled = !loaded || deployed || running || locked || busy;
     if (step === 4) review();
   }
 
@@ -109,29 +115,80 @@
       try { field(name).value = await file.text(); } catch { notice.textContent = 'The PEM file could not be read.'; }
     });
   }
+  function deploymentState(state) {
+    deployed = Boolean(state.deployed);
+    running = Boolean(state.running);
+    locked = Boolean(state.locked);
+    const deployment = state.deployment || {};
+    progress.hidden = !(deployment.started || deployed || running);
+    root.querySelector('[data-deployment-message]').textContent = deployment.message || (deployed ? 'Setup complete.' : 'Starting deployment…');
+    root.querySelector('[data-deployment-panel]').hidden = !deployed || !deployment.panel_url;
+    root.querySelector('[data-deployment-drydock]').hidden = !deployed || !deployment.drydock_url;
+    retry.hidden = deployed || running || !state.prepared;
+    retry.disabled = busy;
+    sync();
+    if (pollTimer) clearTimeout(pollTimer);
+    if (running) pollTimer = setTimeout(pollDeployment, 3000);
+  }
+
+  async function pollDeployment() {
+    try {
+      const response = await fetch('/api/plus/setup/state', {credentials: 'same-origin', cache: 'no-store'});
+      const state = await response.json();
+      if (!response.ok) throw new Error('Progress is temporarily unavailable.');
+      deploymentState(state);
+    } catch {
+      root.querySelector('[data-deployment-message]').textContent = 'Progress is temporarily unavailable. Deployment continues on the host.';
+      pollTimer = setTimeout(pollDeployment, 5000);
+    }
+  }
+
+  async function startDeployment() {
+    const body = new URLSearchParams({csrf: field('csrf').value});
+    const response = await fetch('/api/plus/setup/deploy', {method: 'POST', credentials: 'same-origin', body});
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || 'Deployment could not be started.');
+    notice.textContent = '';
+    deploymentState({running: true, prepared: true, deployment: result.deployment});
+  }
+
+  retry.addEventListener('click', async () => {
+    if (busy || running || deployed) return;
+    busy = true; retry.disabled = true;
+    try { await startDeployment(); }
+    catch (error) { root.querySelector('[data-deployment-message]').textContent = error.message || 'Deployment could not be started.'; }
+    finally { busy = false; retry.disabled = false; sync(); }
+  });
+
   form.addEventListener('submit', async event => {
     event.preventDefault();
-    if (!loaded || deployed || busy || step !== 4) return;
-    busy = true; sync(); notice.textContent = 'Saving setup choices…';
+    if (!loaded || deployed || running || locked || busy || step !== 4) return;
+    busy = true; sync(); notice.textContent = 'Preparing deployment…';
+    let prepared = false;
     try {
       const body = new URLSearchParams({csrf: field('csrf').value, setup: JSON.stringify(request())});
       const response = await fetch('/api/plus/setup/prepare', {method: 'POST', credentials: 'same-origin', body});
       const result = await response.json();
       if (!response.ok || !result.ok) throw new Error(result.error || 'Setup could not be saved.');
-      notice.textContent = result.message;
-      // No credentials are persisted in browser storage or returned by the API.
+      prepared = true;
       for (const name of ['password', 'confirm_password', 'private_key', 'certificate']) field(name).value = '';
       root.querySelectorAll('input[type="file"]').forEach(input => { input.value = ''; });
-      step = 0;
-    } catch (error) { notice.textContent = error.message || 'Setup could not be saved.'; }
-    finally { busy = false; sync(); }
+      await startDeployment();
+    } catch (error) {
+      notice.textContent = error.message || 'Setup could not be started.';
+      if (prepared) {
+        progress.hidden = false;
+        retry.hidden = false;
+        root.querySelector('[data-deployment-message]').textContent = 'Choices are saved. Retry deployment when the setup service is available.';
+      }
+    } finally { busy = false; retry.disabled = false; sync(); }
   });
   sync();
   fetch('/api/plus/setup/state', {credentials: 'same-origin', cache: 'no-store'})
     .then(async response => {
       const state = await response.json();
       if (!response.ok) throw new Error(state.error || 'Setup information is unavailable.');
-      deployed = state.deployed;
+      deployed = Boolean(state.deployed);
       for (const mount of state.mounts || []) {
         const option = document.createElement('option'); option.value = mount.target;
         option.textContent = `${mount.target} (${mount.fstype})`; field('storage_mount').append(option);
@@ -139,6 +196,6 @@
       field('external_storage').disabled = !(state.mounts || []).length;
       loaded = true;
       notice.textContent = deployed ? 'This appliance is already deployed.' : state.prepared ? 'Saved choices are ready. Enter new choices to replace them before deployment.' : 'Choose your components, then continue.';
-      sync();
+      deploymentState(state);
     }).catch(() => { notice.textContent = 'Setup information is unavailable. Return to the desktop and try again.'; });
 })();
