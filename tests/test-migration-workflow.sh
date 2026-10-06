@@ -199,7 +199,19 @@ activation="${repo_root}/mjust/libexec/migration-import-activate.sh"
 grep -Fq 'restore-runtime-validate "${source_version}"' "${activation}" || fail 'Import does not verify the concrete source version'
 if grep -Eq 'rcon-cli.*version' "${activation}" "${repo_root}/mjust/libexec/restore-runtime-validate"; then fail 'Import/restore bypasses readiness-aware version verification'; fi
 grep -Fq 'verify-minecraft-stack "${1:-${MINECRAFT_VERSION}}"' "${repo_root}/mjust/libexec/restore-runtime-validate" || fail 'restore does not use the authoritative version verifier'
-if grep -Eq '/usr/libexec/justvoxel/mjust/(restore-runtime-validate|validate)([[:space:]]|$)' "${repo_root}/mjust/libexec/admin-migration-import-transaction-json"; then fail 'API wrapper repeats backend validation'; fi
+import_transaction="${repo_root}/mjust/libexec/admin-migration-import-transaction-json"
+if grep -Eq '/usr/libexec/justvoxel/mjust/(restore-runtime-validate|validate|validate-backend)([[:space:]]|$)' "${import_transaction}"; then fail 'API wrapper repeats backend validation'; fi
+# Backend success must pass through the journal's verifying state without validation work.
+import_success_branch="$(sed -n '/^[[:space:]]*succeeded)/,/^[[:space:]]*;;/p' "${import_transaction}")"
+[[ $(grep -c 'emit_progress verifying import_verify ' "${import_transaction}") == 1 ]] || fail 'Import transaction must emit exactly one verifying event'
+grep -Fq 'emit_progress verifying import_verify ' <<< "${import_success_branch}" || fail 'Import backend success does not finalize the verifying state'
+if grep -Eq 'restore-runtime-validate|validate-backend|(^|[^[:alnum:]_-])validate([^[:alnum:]_-]|$)' <<< "${import_success_branch}"; then fail 'Import success branch repeats backend validation'; fi
+execute_line="$(grep -n '^emit_progress running import_execute ' "${import_transaction}" | cut -d: -f1)"
+verify_line="$(grep -n '^[[:space:]]*emit_progress verifying import_verify ' "${import_transaction}" | cut -d: -f1)"
+result_line="$(grep -n '^[[:space:]]*emit_result succeeded "\$status"$' "${import_transaction}" | cut -d: -f1)"
+[[ -n ${execute_line} && -n ${verify_line} && -n ${result_line} ]] || fail 'Import transaction success event sequence is incomplete'
+(( execute_line < verify_line && verify_line < result_line )) || fail 'Import transaction must emit running, verifying, then succeeded'
+if grep -Fq 'Migration and Minecraft-version upgrade remain separate' "${activation}"; then fail 'Import completion retains stale version-upgrade wording'; fi
 runtime_line="$(grep -n '^/usr/libexec/justvoxel/mjust/restore-runtime-validate ' "${activation}" | cut -d: -f1)"
 validation_line="$(grep -n '^JUSTVOXEL_RUNTIME_ALREADY_VALIDATED=1 JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/validate-backend$' "${activation}" | cut -d: -f1)"
 validated_line="$(grep -n '^jv_migration_write_state .* validated ' "${activation}" | cut -d: -f1)"

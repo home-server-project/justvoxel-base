@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -89,7 +90,7 @@ func TestMigrationWorkspaceProgressBrowserRedirectAndInternalFragment(t *testing
 	if fragment.Code != http.StatusOK || !strings.Contains(fragment.Body.String(), "data-migration-workspace-root") || !strings.Contains(fragment.Body.String(), `href="/?workspace=migration&amp;tab=recovery"`) || !strings.Contains(fragment.Body.String(), "Review Migration Recovery") {
 		t.Fatalf("internal progress response = %d: %s", fragment.Code, fragment.Body.String())
 	}
-	if strings.Contains(fragment.Body.String(), `href="/?workspace=migration"`) {
+	if !strings.Contains(fragment.Body.String(), `id="server-migration-back-link" href="/?workspace=migration" hidden>Back</a>`) {
 		t.Fatal("needs-attention progress exposes looping Server Migration navigation")
 	}
 }
@@ -230,28 +231,51 @@ func TestMigrationWorkspaceExplicitURLStateContract(t *testing.T) {
 }
 
 func TestMigrationWorkspaceImportAttentionActionsAndResolvedNavigation(t *testing.T) {
-	for _, state := range []string{"needs_attention", "resolved", "succeeded"} {
-		t.Run(state, func(t *testing.T) {
-			client := &fakeServerMigrationAPI{operation: &api.PersistentOperation{
-				OperationID: serverMigrationOperationID, OperationType: "migration_import", State: state,
-			}}
-			app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			request := authenticatedAdminRequest(http.MethodGet, "http://example/workspace/migration/progress/"+serverMigrationOperationID, "")
-			request.Header.Set(migrationWorkspaceFragmentHeader, "1")
-			page := httptestResponse(app, request)
-			body := page.Body.String()
-			if page.Code != http.StatusOK || !strings.Contains(body, "Download Import log") || !strings.Contains(body, "/api/system/workspace/logs/operation/"+serverMigrationOperationID+"?download=1") {
-				t.Fatalf("Import progress actions missing: %d %s", page.Code, body)
-			}
-			if state == "needs_attention" {
-				if !strings.Contains(body, `href="/?workspace=migration&amp;tab=recovery" >Review Migration Recovery`) || strings.Contains(body, `href="/?workspace=migration"`) {
-					t.Fatalf("needs-attention progress actions loop or omit Recovery: %s", body)
-				}
-			} else if !strings.Contains(body, `href="/?workspace=migration">Server Migration`) {
-				t.Fatalf("resolved progress lost normal Migration navigation: %s", body)
+	backAnchor := regexp.MustCompile(`<a\b[^>]*\bid="server-migration-back-link"[^>]*>Back</a>`)
+	hiddenAttribute := regexp.MustCompile(`\shidden(?:\s|>)`)
+	for _, surface := range []string{"workspace", "standalone"} {
+		t.Run(surface, func(t *testing.T) {
+			for _, state := range []string{"validating", "running", "verifying", "needs_attention", "resolved", "succeeded", "rolled_back"} {
+				t.Run(state, func(t *testing.T) {
+					client := &fakeServerMigrationAPI{operation: &api.PersistentOperation{
+						OperationID: serverMigrationOperationID, OperationType: "migration_import", State: state,
+					}}
+					app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+					if err != nil {
+						t.Fatal(err)
+					}
+					path := "/workspace/migration/progress/"
+					if surface == "standalone" {
+						path = "/settings/server-migration/progress/"
+					}
+					request := authenticatedAdminRequest(http.MethodGet, "http://example"+path+serverMigrationOperationID, "")
+					request.Header.Set(migrationWorkspaceFragmentHeader, "1")
+					page := httptestResponse(app, request)
+					body := page.Body.String()
+					if page.Code != http.StatusOK || !strings.Contains(body, "Download Import log") || !strings.Contains(body, "/api/system/workspace/logs/operation/"+serverMigrationOperationID+"?download=1") {
+						t.Fatalf("Import progress actions missing: %d %s", page.Code, body)
+					}
+					wantBack := state == "succeeded" || state == "rolled_back" || state == "resolved"
+					backLink := backAnchor.FindString(body)
+					if backLink == "" || !strings.Contains(backLink, `href="/?workspace=migration"`) || hiddenAttribute.MatchString(backLink) == wantBack {
+						t.Fatalf("%s progress Back navigation incorrect: %s", state, body)
+					}
+					if strings.Contains(body, ">Server Migration</a>") {
+						t.Fatalf("progress navigation still labelled Server Migration: %s", body)
+					}
+					if state == "succeeded" && !strings.Contains(body, `href="/" >Open dashboard</a>`) {
+						t.Fatalf("succeeded progress missing visible dashboard action: %s", body)
+					}
+					if state == "needs_attention" {
+						recoveryLink := `href="/?workspace=migration&amp;tab=recovery" >Review Migration Recovery</a>`
+						if surface == "standalone" {
+							recoveryLink = `href="/settings/server-migration/recovery">Review Migration Recovery</a>`
+						}
+						if !strings.Contains(body, recoveryLink) {
+							t.Fatalf("needs-attention progress actions loop or omit Recovery: %s", body)
+						}
+					}
+				})
 			}
 		})
 	}
@@ -269,7 +293,34 @@ func TestMigrationWorkspacePolledAttentionHidesLoopingNavigation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(markup), `class="button-link secondary migration-progress-navigation" href="/?workspace=migration"`) {
+	if !strings.Contains(string(markup), `class="button-link secondary migration-progress-navigation" id="server-migration-back-link" href="/?workspace=migration"`) {
 		t.Fatal("normal Migration navigation is not connected to the polled attention styling")
+	}
+
+	script, err := assets.ReadFile("static/server-migration-operation.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(script)
+	if !strings.Contains(js, `const backLink = root.querySelector("#server-migration-back-link");`) {
+		t.Fatal("migration operation renderer does not select Back navigation")
+	}
+	render := strings.Index(js, "const render = (operation) => {")
+	poll := strings.Index(js, "const poll = async () => {")
+	if render < 0 || poll <= render {
+		t.Fatal("migration operation render/poll path is missing")
+	}
+	for _, want := range []string{
+		`const succeeded = operation.state === "succeeded";`,
+		`const rolledBack = operation.state === "rolled_back";`,
+		`const resolved = operation.state === "resolved";`,
+		`if (backLink) backLink.hidden = !(succeeded || rolledBack || resolved);`,
+	} {
+		if !strings.Contains(js[render:poll], want) {
+			t.Fatalf("dynamic Migration Back navigation contract missing %q", want)
+		}
+	}
+	if !strings.Contains(js[poll:], "render(payload.operation);") {
+		t.Fatal("migration poll does not render the current operation")
 	}
 }

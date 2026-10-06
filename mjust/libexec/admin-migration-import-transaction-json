@@ -123,7 +123,10 @@ if [[ -r "$result_file" ]] && jq -e 'type=="object" and (.outcome|type=="string"
     status="$(jq -r '.status' "$result_file")"
     rm -f -- "$result_file"
     case "$outcome" in
-        succeeded) emit_result succeeded "$status" ;;
+        succeeded)
+            emit_progress verifying import_verify 'Finalizing the already-validated server migration Import backend result.'
+            emit_result succeeded "$status"
+            ;;
         rolled_back) emit_result rolled_back "$status" ;;
         needs_attention) emit_result needs_attention "$status" ;;
         *) emit_result needs_attention 'Server migration Import backend returned an unknown safety outcome.' ;;

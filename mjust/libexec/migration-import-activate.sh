@@ -147,7 +147,6 @@ echo "Minecraft version: ${source_version}"
 echo "Minecraft data: ${DATA_PATH}"
 echo "Java: ${JAVA_PORT}/tcp"
 if [[ ${BEDROCK_ENABLED} == yes ]]; then echo "Bedrock: ${BEDROCK_PORT}/udp"; fi
-echo 'Migration and Minecraft-version upgrade remain separate; run mjust update-minecraft later if you intentionally want to upgrade.'
 if [[ ${removable_owned} == yes ]]; then
     echo 'Device unmounted.'
     echo 'It is safe to remove the USB device.'
