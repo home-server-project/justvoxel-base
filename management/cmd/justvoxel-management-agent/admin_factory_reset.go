@@ -10,7 +10,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -49,6 +51,8 @@ var restoreSystemAdministratorFactoryCredential = func(ctx context.Context) erro
 type adminFactoryResetPlanResponse struct {
 	OK                    bool     `json:"ok"`
 	SchemaVersion         string   `json:"schema_version,omitempty"`
+	RuntimeFingerprint    string   `json:"runtime_fingerprint,omitempty"`
+	Plus                  bool     `json:"plus,omitempty"`
 	Mode                  string   `json:"mode,omitempty"`
 	PlanFingerprint       string   `json:"plan_fingerprint,omitempty"`
 	Code                  string   `json:"code,omitempty"`
@@ -115,6 +119,8 @@ type adminFactoryResetHelperApplyResponse struct {
 
 type factoryResetFingerprintPayload struct {
 	SchemaVersion         string `json:"schema_version"`
+	RuntimeFingerprint    string `json:"runtime_fingerprint,omitempty"`
+	Plus                  bool   `json:"plus,omitempty"`
 	Mode                  string `json:"mode"`
 	MinecraftConfigured   bool   `json:"minecraft_configured"`
 	DataPath              string `json:"data_path"`
@@ -143,7 +149,7 @@ func (s *server) adminFactoryResetPlan(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.requireAdministrator(w, r); !ok {
 		return
 	}
-	plan, status := authoritativeAdminFactoryResetPlan(r.Context())
+	plan, status := s.factoryResetPlan(r.Context())
 	if status != 0 {
 		writeJSON(w, status, plan)
 		return
@@ -249,7 +255,7 @@ func (s *server) adminFactoryResetApply(w http.ResponseWriter, r *http.Request) 
 	}
 	request.SystemPassword = ""
 
-	plan, status := authoritativeAdminFactoryResetPlan(r.Context())
+	plan, status := s.factoryResetPlan(r.Context())
 	if status != 0 {
 		writeJSON(w, status, plan)
 		return
@@ -385,6 +391,8 @@ func validFactoryResetStorageAction(scope, action string) bool {
 func factoryResetPlanFingerprint(plan adminFactoryResetPlanResponse) (string, error) {
 	payload, err := json.Marshal(factoryResetFingerprintPayload{
 		SchemaVersion:         plan.SchemaVersion,
+		RuntimeFingerprint:    plan.RuntimeFingerprint,
+		Plus:                  plan.Plus,
 		Mode:                  plan.Mode,
 		MinecraftConfigured:   plan.MinecraftConfigured,
 		DataPath:              plan.DataPath,
@@ -458,17 +466,27 @@ func executeFactoryReset(ctx context.Context, s *server, operationID, expectedFi
 		return err
 	}
 
-	plan, status := authoritativeAdminFactoryResetPlan(ctx)
+	plan, status := s.factoryResetPlan(ctx)
 	if status != 0 || !plan.OK || plan.PlanFingerprint != expectedFingerprint {
 		_, _ = s.operations.transition(operationID, operationNeedsAttention, "plan_changed", "Full factory reset stopped because the reviewed plan changed.")
 		return errors.New("factory reset plan changed before execution")
 	}
 
-	if _, err := s.operations.transition(operationID, operationRunning, "resetting_runtime", "Removing appliance-owned Minecraft and local backup state."); err != nil {
+	message := "Removing appliance-owned Minecraft and local backup state."
+	if s.plus {
+		message = "Removing Plus applications and appliance-owned internal data."
+	}
+	if _, err := s.operations.transition(operationID, operationRunning, "resetting_runtime", message); err != nil {
 		return err
 	}
 
-	output, runErr := runAdminFactoryResetHelper(ctx, "apply", "--confirm-players")
+	var output []byte
+	var runErr error
+	if s.plus {
+		output, runErr = applyPlusFactoryReset(ctx, plusFactoryResetPaths(), plan)
+	} else {
+		output, runErr = runAdminFactoryResetHelper(ctx, "apply", "--confirm-players")
+	}
 	var applied adminFactoryResetHelperApplyResponse
 	if decodeErr := decodeAdminFactoryResetApplyResponse(output, &applied); decodeErr != nil || runErr != nil || !applied.OK {
 		status := "Full factory reset did not complete local runtime cleanup. Review appliance state before retrying."
@@ -515,7 +533,18 @@ func executeFactoryReset(ctx context.Context, s *server, operationID, expectedFi
 	if _, err := s.operations.transition(operationID, operationVerifying, "verifying", "Verifying fresh JustVoxel first-use state."); err != nil {
 		return err
 	}
-	configured, preflightErr := setupAlreadyConfiguredForApply(ctx)
+	configured := false
+	var preflightErr *adminSetupPlanningError
+	if s.plus {
+		_, plusErr := os.Stat(filepath.Join(plusFactoryResetPaths().Configuration, "deployed"))
+		configured = plusErr == nil
+		if plusErr != nil && !os.IsNotExist(plusErr) {
+			_, _ = s.operations.transition(operationID, operationNeedsAttention, "verification_failed", "Plus setup state could not be verified after reset.")
+			return plusErr
+		}
+	} else {
+		configured, preflightErr = setupAlreadyConfiguredForApply(ctx)
+	}
 	if preflightErr != nil || configured {
 		_, _ = s.operations.transition(operationID, operationNeedsAttention, "verification_failed", "Factory reset finished with an unexpected appliance configuration state.")
 		if preflightErr != nil {

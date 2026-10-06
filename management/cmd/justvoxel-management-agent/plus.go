@@ -19,6 +19,10 @@ func (s *server) plusRoutes(next http.Handler) http.Handler {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/admin/reset/factory/") {
+			next.ServeHTTP(w, r)
+			return
+		}
 		for _, prefix := range []string{
 			"/v1/minecraft", "/v1/players", "/v1/whitelist", "/v1/backups", "/v1/logs/minecraft",
 			"/v1/admin/backup-storage", "/v1/admin/backups", "/v1/admin/configuration/plan", "/v1/admin/configuration/apply",

@@ -19,6 +19,6 @@ if [[ $(jq -r '.reboot_required' <<<"${response}") == true ]]; then
     staged_digest="$(jq -r '.staged.digest // empty' <<<"${response}")"
     [[ -n ${staged_version} ]] && echo "Staged version: ${staged_version}"
     [[ -n ${staged_digest} ]] && echo "Staged digest:  ${staged_digest}"
-    echo 'Minecraft continues running normally.'
+    if jv_is_plus; then echo 'Host applications continue running normally.'; else echo 'Minecraft continues running normally.'; fi
     echo 'The staged OS deployment will be used after the next reboot.'
 fi

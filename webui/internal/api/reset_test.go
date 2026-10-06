@@ -13,6 +13,16 @@ import (
 const resetTestFingerprint = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
 const resetTestOperationID = "12345678-1234-4123-8123-123456789abc"
 
+func TestPlusFactoryResetPlanAcceptsExplicitPlusContract(t *testing.T) {
+	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"ok":true,"schema_version":"v1","mode":"factory","plus":true,"runtime_fingerprint":"opaque","plan_fingerprint":"` + resetTestFingerprint + `","data_path":"/var/lib/justvoxel-plus","data_scope":"internal","data_action":"delete","players":[],"warnings":[]}`)), Header: make(http.Header)}, nil
+	})}}
+	plan, err := client.AdminFactoryResetPlan(context.Background(), "session-token")
+	if err != nil || !plan.Plus || plan.RuntimeFingerprint != "opaque" || plan.DataAction != "delete" {
+		t.Fatalf("Plus plan rejected: %v", err)
+	}
+}
+
 func TestFactoryResetPlanAndApplyClientContract(t *testing.T) {
 	call := 0
 	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {

@@ -16,7 +16,7 @@ The Plus console reports Docker and infrastructure setup status, using the Plus 
 
 The Logs screen provides the current boot's last 200 journal lines for the Management Agent, WebUI, Docker and containerd. Only Administrators may read these logs. Service selection is fixed, and lines matching the existing sensitive diagnostic pattern are redacted.
 
-Setup and Look Around are retained. Setup opens the Plus component, address, storage and account wizard; it does not run the inherited Minecraft wizard. The wizard deploys the selected upstream applications and shows host-side progress. Factory Reset stays visible but cannot execute until its Plus scope is implemented. Pterodactyl and Drydock launchers appear after successful deployment.
+Setup and Look Around are retained. Setup opens the Plus component, address, storage and account wizard; it does not run the inherited Minecraft wizard. The wizard deploys the selected upstream applications and shows host-side progress. Factory Reset reviews and removes the Plus installation and owned internal data while preserving second-drive data. Pterodactyl and Drydock launchers appear after successful deployment.
 
 Tailscale, NetBird and playit.gg setup, installation and activation are unchanged.
 
@@ -26,9 +26,9 @@ Upstream Panel, MariaDB, Redis, Wings and Drydock Compose definitions and runtim
 
 ## Remaining phases
 
-Adapt CLI and factory reset, then verify the working appliance at runtime.
+Verify the working appliance at runtime.
 
-The password step must explain: These are separate accounts. Changing your password in one does not change the other.
+The password step explains: These are separate accounts. Changing your password in one does not change the other.
 
 ## Phase four: one setup wizard
 
@@ -109,3 +109,63 @@ CI has a bounded Ubuntu/Docker smoke check that pulls the declared upstream
 images, starts the complete stack, verifies Panel/Wings and Drydock authentication,
 and checks that an unlabelled container is excluded from Drydock's default view.
 This does not replace immutable-image, SELinux or appliance reboot testing.
+
+
+## Phase six: host CLI and factory reset
+
+The Plus mjust entry point uses a compact host menu and explicit host command
+list. Status, application URLs, bounded host logs, networking, file browsing,
+system resources, OS updates, power, existing UPS/firmware commands, WebUI
+controls and password reset remain available. Setup directs the administrator
+to the WebUI wizard. Legacy game, backup, restore, migration and game-storage
+commands are unavailable through mjust in Plus. Existing remote-access helpers
+are reused unchanged.
+
+Full Factory Reset uses the existing administrator boundary, reviewed plan,
+confirmation, persistent operation tracking, explicit retry and first-login
+credential reset. The reviewed fingerprint includes the runtime configuration;
+a changed configuration requires a fresh review. It stops the Plus stack,
+removes its Compose containers, and removes only Pterodactyl-labelled game
+containers whose UUID data bind belongs to this installation. Unrelated Docker
+containers and downloaded images are preserved; no Docker prune is used.
+
+Only the default appliance-owned internal data directory is erased. A selected
+second drive, custom data path or mounted data directory is preserved. Nested
+filesystems must be unmounted before reset, and symlink paths are refused.
+Partitions, filesystem formats, mounts, network, SSH and remote-access settings
+are preserved. The Plus runtime configuration, temporary setup state and stack
+storage dependency are removed. WebUI users/history/sessions are reset using the
+existing identity backend; the voxel password returns to voxel / voxel and must
+be changed immediately after sign-in. There is no automatic backup or retry.
+If second-drive data is preserved, fresh setup requires an empty application
+directory; the administrator decides what to do with the old data.
+
+The CLI factory-reset command requires an interactive terminal and an exact
+FACTORY RESET confirmation after displaying the plan. It queues the same Agent
+operation as the WebUI and directs progress/recovery to the WebUI.
+
+CI's bounded upstream container smoke test additionally exercises Plus runtime
+cleanup and preservation of an unrelated container. Host identity, systemd,
+SELinux, boot and reboot behavior still require appliance runtime validation.
+
+## First appliance runtime check (when available)
+
+Boot ghcr.io/home-server-project/justvoxel-plus-base:testing-plus on an x86-64-v3
+VM. Sign in, change the initial password, open the host WebUI on port 8099 and
+check Look Around plus the Setup invitation. Complete the five-step setup with
+all components enabled, the VM's reachable IPv4 address, default storage and
+TLS off for a local-network first check.
+
+Setup should pull and start MariaDB, Redis, Panel, Wings and Drydock, create the
+initial accounts, connect Panel to Wings and show both launchers. Open Panel
+on port 8081 and Drydock on port 3000. Check that Panel's node is connected and
+Drydock shows the five infrastructure containers. In the console, check mjust,
+mjust status, mjust applications and mjust logs plus-setup. Reboot and confirm
+the host WebUI and all selected applications return with the same accounts.
+
+Report the failing screen/stage, mjust status --details, the relevant bounded
+host log (plus-setup, plus-stack, docker or management-agent), and any SELinux
+AVC denials. Do not send credentials, full environment files or Wings tokens.
+Optional checks after the basic path: supplied domain/TLS, second-drive reboot
+and missing-disk startup guard, and factory reset on a disposable VM containing
+only test data. These are deferred runtime checks, not claimed source results.

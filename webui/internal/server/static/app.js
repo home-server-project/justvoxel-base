@@ -4408,7 +4408,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       if (operation.state === "needs_attention") {
         const recovery = document.createElement("div");
         recovery.className = "notice warning";
-        recovery.innerHTML = "<strong>Factory Reset stopped before completion.</strong><br>You can keep the server exactly as it is now and release the blocked Restore/Migration operations, or review and retry the destructive reset.";
+        recovery.innerHTML = justVoxelPlus ? "<strong>Factory Reset stopped before completion.</strong><br>Review the current state, then keep it and release the setup lock, or review and retry the reset." : "<strong>Factory Reset stopped before completion.</strong><br>You can keep the server exactly as it is now and release the blocked Restore/Migration operations, or review and retry the destructive reset.";
         built.panel.appendChild(recovery);
 
         const actions = document.createElement("div");
@@ -4486,6 +4486,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   const resetCurrentOperation = async () => {
     const factory = await systemFetchJSON("/api/system/workspace/reset/factory/current");
     if (factory?.operation) return factory.operation;
+    if (justVoxelPlus) return null;
     const minecraft = await systemFetchJSON("/api/system/workspace/reset/minecraft/current");
     return minecraft?.operation || null;
   };
@@ -4493,6 +4494,18 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   const resetImpactFromPlan = (mode, plan) => {
     const remove = [];
     const keep = [];
+    if (justVoxelPlus) {
+      remove.push("Plus infrastructure and game containers belonging to this installation.");
+      remove.push("Plus installation configuration and temporary setup credentials.");
+      if (plan.data_action === "delete") remove.push("Application databases, game data and files at " + plan.data_path + ".");
+      else if (plan.data_path) keep.push("Application data at " + plan.data_path + ". Fresh setup needs an empty directory.");
+      remove.push("WebUI users, history, sessions and authentication settings.");
+      remove.push("The voxel password returns to voxel / voxel and must be changed on sign-in.");
+      keep.push("Second-drive data, partitions, filesystems and mounts.");
+      keep.push("Network, SSH, remote-access settings and the OS image.");
+      keep.push("Docker images and unrelated containers.");
+      return { remove, keep };
+    }
 
     if (mode === "minecraft") {
       remove.push("Current Minecraft container and runtime configuration.");
@@ -4749,16 +4762,15 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       '<small>Deletes local Minecraft, local backups, WebUI users/history, and resets authentication. External/network storage stays untouched.</small>';
     factory.addEventListener("click", () => planReset("factory"));
 
-    choices.append(minecraft, factory);
+    if (justVoxelPlus) {
+      factory.innerHTML = '<strong>Full Factory Reset</strong><span>Return Plus to first-use condition.</span><small>Removes the Plus installation, owned internal data and host WebUI accounts. Second-drive data and network settings are preserved.</small>';
+      choices.append(factory);
+    } else choices.append(minecraft, factory);
     root.appendChild(choices);
     content.replaceChildren(root);
   };
 
   const renderReset = async (sequence) => {
-    if (justVoxelPlus) {
-      content.replaceChildren(systemNotice("Factory reset will be available when Plus stack reset support is ready."));
-      return;
-    }
     clearResetPoll();
     const operation = await resetCurrentOperation();
     if (sequence !== loadSequence || currentTab !== "reset") return;

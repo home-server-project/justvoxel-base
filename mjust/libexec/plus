@@ -1,0 +1,79 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/ui.sh
+
+help() {
+    cat <<'TEXT'
+JustVoxel Plus Base host commands
+  mjust status [--details]
+  mjust applications
+  mjust setup
+  mjust logs [management-agent|webui|docker|containerd|plus-setup|plus-stack]
+  mjust validate
+  mjust net
+  mjust files
+  mjust resources
+  mjust os-status
+  mjust os-update
+  mjust reboot
+  mjust poweroff
+  mjust ups
+  mjust firmware
+  mjust web [status|enable|disable]
+  mjust password-reset
+  mjust factory-reset
+  mjust welcome | welcome-on | welcome-off
+
+Set up the applications and manage disks in the host WebUI.
+Use Drydock for infrastructure and Pterodactyl for games.
+TEXT
+}
+
+if (( $# == 0 )); then
+    if ! jui_is_interactive; then help; exit 0; fi
+    while true; do
+        choice="$(jui_choose 'JustVoxel Plus Base' 'Host status' 'Applications / setup' 'Network' 'File browser' 'System monitor' 'System updates' 'Host logs' 'WebUI and password' 'Factory reset' 'Power' 'Exit')" || exit 0
+        case "${choice}" in
+            'Host status') /usr/bin/mjust status || true ;;
+            'Applications / setup') /usr/bin/mjust applications || true ;;
+            'Network') /usr/bin/mjust net || true ;;
+            'File browser') /usr/bin/mjust files || true ;;
+            'System monitor') /usr/bin/mjust resources || true ;;
+            'System updates') /usr/bin/mjust os-status || true; /usr/bin/mjust os-update || true ;;
+            'Host logs') /usr/bin/mjust logs || true ;;
+            'WebUI and password')
+                action="$(jui_choose 'Host WebUI' 'Status' 'Enable' 'Disable' 'Reset password' 'Back')" || continue
+                case "${action}" in
+                    Status) /usr/bin/mjust web status || true ;;
+                    Enable) /usr/bin/mjust web enable || true ;;
+                    Disable) /usr/bin/mjust web disable || true ;;
+                    'Reset password') /usr/bin/mjust password-reset || true ;;
+                esac ;;
+            'Factory reset') /usr/bin/mjust factory-reset || true ;;
+            'Power')
+                action="$(jui_choose 'Host power' 'Reboot' 'Power off' 'Back')" || continue
+                case "${action}" in
+                    Reboot) /usr/bin/mjust reboot || true ;;
+                    'Power off') /usr/bin/mjust poweroff || true ;;
+                esac ;;
+            *) exit 0 ;;
+        esac
+        jui_pause
+    done
+fi
+
+command="$1"; shift
+case "${command}" in
+    --list|--help) (( $# == 0 )) || exit 2; help ;;
+    status) [[ $# == 0 || ( $# == 1 && $1 == --details ) ]] || exit 2; exec sudo /usr/libexec/justvoxel/mjust/plus-host status "$@" ;;
+    applications|factory-reset) (( $# == 0 )) || exit 2; exec sudo /usr/libexec/justvoxel/mjust/plus-host "${command}" ;;
+    logs) [[ $# == 0 || $# == 1 ]] || exit 2; exec sudo /usr/libexec/justvoxel/mjust/plus-host logs "$@" ;;
+    setup) (( $# == 0 )) || exit 2; echo 'Open the host WebUI and choose Setup. Look Around remains available.' ;;
+    net|files|resources) (( $# == 0 )) || exit 2; helper="${command}"; [[ ${command} != net ]] || helper=network; exec "/usr/libexec/justvoxel/mjust/${helper}" ;;
+    os-status|os-update|validate|ups|firmware) (( $# == 0 )) || exit 2; exec sudo "/usr/libexec/justvoxel/mjust/${command}" ;;
+    reboot|poweroff) (( $# == 0 )) || exit 2; exec sudo /usr/libexec/justvoxel/mjust/system-power "${command}" ;;
+    web) [[ $# == 0 || ( $# == 1 && $1 =~ ^(status|enable|disable)$ ) ]] || exit 2; exec sudo /usr/libexec/justvoxel/mjust/web "${1:-status}" ;;
+    password-reset) (( $# == 0 )) || exit 2; exec sudo /usr/libexec/justvoxel/mjust/web password-reset ;;
+    welcome|welcome-on|welcome-off) (( $# == 0 )) || exit 2; action=show; [[ ${command} != welcome-on ]] || action=on; [[ ${command} != welcome-off ]] || action=off; exec /usr/libexec/justvoxel/mjust/welcome "${action}" ;;
+    *) echo 'This command is unavailable in Plus. Run mjust --list for host commands.' >&2; exit 2 ;;
+esac

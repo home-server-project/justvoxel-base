@@ -35,6 +35,10 @@ func (a *App) plusRoutes(next http.Handler) http.Handler {
 			a.plusApplicationLaunch(w, r)
 			return
 		}
+		if strings.HasPrefix(r.URL.Path, "/api/system/workspace/reset/factory/") || strings.HasPrefix(r.URL.Path, "/api/system/workspace/reset/operations/") || r.URL.Path == "/factory-reset-complete" {
+			next.ServeHTTP(w, r)
+			return
+		}
 		for _, prefix := range []string{
 			"/minecraft", "/api/minecraft", "/api/version", "/operations",
 			"/setup", "/api/setup", "/settings/server", "/settings/server-migration", "/settings/restore",

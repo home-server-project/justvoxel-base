@@ -308,6 +308,9 @@ func (s *server) plusSetupPrepare(w http.ResponseWriter, r *http.Request) {
 	if !decodePlusSetup(w, r, &request) {
 		return
 	}
+	if s.plusResetBlocksSetup(w, r) {
+		return
+	}
 	s.plusSetupMu.Lock()
 	defer s.plusSetupMu.Unlock()
 	if plusSetupUnitRunning(r.Context()) {

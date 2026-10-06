@@ -1,0 +1,46 @@
+#!/usr/bin/bash
+set -euo pipefail
+(( EUID == 0 )) || { echo 'Run this operation through sudo.' >&2; exit 1; }
+readonly api=/usr/libexec/justvoxel/mjust/api-client
+[[ $(cat /usr/lib/justvoxel/variant 2>/dev/null || true) == justvoxel-plus-base ]] || exit 2
+action="${1:-}"; shift
+case "${action}" in
+    status)
+        [[ $# == 0 || ( $# == 1 && $1 == --details ) ]] || exit 2
+        path=/v1/status; [[ ${1:-} != --details ]] || path='/v1/status?details=1'
+        response="$("${api}" GET "${path}")"
+        jq -r '"JustVoxel Plus Base", "Host health: \(.system.health // "Unknown")", "Docker: \(.plus.docker // "Unknown")", "Applications configured: \(.plus.configured // false)", "Hostname: \(.extended.system.hostname // "Unknown")"' <<<"${response}"
+        if [[ ${1:-} == --details ]]; then jq '{system,plus,host:.extended.system}' <<<"${response}"; fi ;;
+    applications)
+        (( $# == 0 )) || exit 2
+        response="$("${api}" GET /v1/plus/applications)"
+        jq -r 'if .configured then "Pterodactyl: \(.panel_url // "Not selected")\nDrydock: \(.drydock_url // "Not selected")" else "Open the host WebUI and complete Setup." end' <<<"${response}" ;;
+    logs)
+        [[ $# == 0 || $# == 1 ]] || exit 2; service="${1:-management-agent}"
+        case "${service}" in management-agent|webui|docker|containerd|plus-setup|plus-stack) ;; *) exit 2 ;; esac
+        "${api}" GET "/v1/admin/plus/host-logs?service=${service}" | jq -r '.output' ;;
+    factory-reset)
+        (( $# == 0 )) || exit 2
+        [[ -t 0 ]] || { echo 'Factory reset needs an interactive terminal to review and confirm.' >&2; exit 2; }
+        current="$("${api}" GET /v1/admin/reset/factory/current-operation)"
+        if jq -e '.operation != null' <<<"${current}" >/dev/null; then
+            echo 'A reset is active or needs attention. Review it in the host WebUI.'
+            jq '.operation | {operation_id,state,stage,status}' <<<"${current}"; exit 1
+        fi
+        plan="$(printf '{}\n' | "${api}" POST /v1/admin/reset/factory/plan --data)"
+        jq -r '"Full Factory Reset", "Stops and removes this Plus installation and its game containers.", "Data path: \(.data_path // "None")", "Data action: \(.data_action)", "Removes WebUI users/history and restores voxel / voxel; change it on sign-in.", "Preserves second-drive data, network settings, SSH, mounts and the OS.", (.warnings[]?)' <<<"${plan}"
+        echo 'Type exactly: FACTORY RESET'
+        read -r confirmation
+        [[ ${confirmation} == 'FACTORY RESET' ]] || { echo 'Cancelled.'; exit 0; }
+        auth="$("${api}" GET /v1/auth)"; password=''
+        if [[ $(jq -r '.auth_mode // .mode // "system"' <<<"${auth}") == separate ]]; then
+            read -rs -p 'Current voxel system password: ' password; echo
+        fi
+        fingerprint="$(jq -r '.plan_fingerprint' <<<"${plan}")"
+        # Password only crosses stdin, never argv, environment or a temporary file.
+        payload="$(printf '%s' "${password}" | jq -Rs --arg fingerprint "${fingerprint}" '{plan_fingerprint:$fingerprint,confirm_players:true,system_password:.}')"
+        password=''
+        response="$(printf '%s' "${payload}" | "${api}" POST /v1/admin/reset/factory/apply --data)"; payload=''
+        jq -r '"Reset queued. Follow progress in the host WebUI.", "Operation: \(.operation.operation_id)"' <<<"${response}" ;;
+    *) exit 2 ;;
+esac

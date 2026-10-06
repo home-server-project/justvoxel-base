@@ -1,6 +1,10 @@
 #!/usr/bin/bash
 set -euo pipefail
 
+if [[ $(cat /usr/lib/justvoxel/variant 2>/dev/null || true) == justvoxel-plus-base ]]; then
+    exec /usr/libexec/justvoxel/mjust/plus "$@"
+fi
+
 if [[ ${1:-} == --list ]]; then
     /usr/bin/just --justfile /usr/share/justvoxel/mjust/justfile --list
     cat <<'TEXT'

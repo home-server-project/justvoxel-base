@@ -23,6 +23,9 @@ func (s *server) plusSetupDeploy(w http.ResponseWriter, r *http.Request) {
 	if !decodePlusSetup(w, r, &body) {
 		return
 	}
+	if s.plusResetBlocksSetup(w, r) {
+		return
+	}
 	s.plusSetupMu.Lock()
 	defer s.plusSetupMu.Unlock()
 	p := defaultPlusDeploymentPaths()

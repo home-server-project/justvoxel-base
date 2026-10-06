@@ -11,14 +11,14 @@ import (
 func TestPlusManagementBlocksGameRoutesAndKeepsHostRoutes(t *testing.T) {
 	s := &server{plus: true}
 	handler := s.plusRoutes(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }))
-	for _, path := range []string{"/v1/minecraft/start", "/v1/players", "/v1/backups/manual", "/v1/admin/setup/apply", "/v1/admin/reset/minecraft/apply", "/v1/admin/reset/factory/apply", "/v1/admin/version/update", "/v1/admin/data-migration/apply", "/v1/admin/migration/import/apply", "/v1/admin/storage-provision/apply", "/v1/admin/users/1/backup-allowance/reset"} {
+	for _, path := range []string{"/v1/minecraft/start", "/v1/players", "/v1/backups/manual", "/v1/admin/setup/apply", "/v1/admin/reset/minecraft/apply", "/v1/admin/version/update", "/v1/admin/data-migration/apply", "/v1/admin/migration/import/apply", "/v1/admin/storage-provision/apply", "/v1/admin/users/1/backup-allowance/reset"} {
 		rr := httptest.NewRecorder()
 		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, path, nil))
 		if rr.Code != http.StatusNotFound {
 			t.Fatalf("exposed %s: %d", path, rr.Code)
 		}
 	}
-	for _, path := range []string{"/v1/status", "/v1/session", "/v1/admin/users", "/v1/admin/storage", "/v1/admin/storage-actions/apply", "/v1/admin/storage-mounts/apply", "/v1/admin/system/reboot", "/v1/admin/system/updates", "/v1/network", "/v1/admin/network/remote-access/playit/setup", "/v1/admin/network/remote-access/tailscale", "/v1/admin/network/remote-access/netbird", "/v1/ups"} {
+	for _, path := range []string{"/v1/admin/reset/factory/apply", "/v1/admin/reset/factory/current-operation", "/v1/status", "/v1/session", "/v1/admin/users", "/v1/admin/storage", "/v1/admin/storage-actions/apply", "/v1/admin/storage-mounts/apply", "/v1/admin/system/reboot", "/v1/admin/system/updates", "/v1/network", "/v1/admin/network/remote-access/playit/setup", "/v1/admin/network/remote-access/tailscale", "/v1/admin/network/remote-access/netbird", "/v1/ups"} {
 		rr := httptest.NewRecorder()
 		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
 		if rr.Code != http.StatusNoContent {

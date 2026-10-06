@@ -103,4 +103,18 @@ func TestPlusUpstreamStack(t *testing.T) {
 		t.Fatal("Drydock authentication or infrastructure-only view did not become ready")
 	}
 	t.Log("Upstream MariaDB, Redis, Panel, Wings and Drydock started; Panel authenticated to Wings; Drydock authentication and infrastructure-only view verified; initial account credentials removed.")
+	plan, err := planPlusFactoryReset(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := applyPlusFactoryReset(ctx, p, plan); err != nil {
+		t.Fatalf("Plus runtime reset failed: %v", err)
+	}
+	if _, err := os.Stat(p.DefaultData); !os.IsNotExist(err) {
+		t.Fatal("Plus reset left internal application data")
+	}
+	if _, err := original(ctx, "docker", []string{"inspect", fixture}, nil); err != nil {
+		t.Fatal("Plus reset removed an unrelated container")
+	}
+	t.Log("Plus runtime reset removed infrastructure and internal application data while preserving an unrelated container.")
 }

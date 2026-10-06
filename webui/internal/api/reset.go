@@ -30,6 +30,8 @@ var (
 type AdminResetPlanResponse struct {
 	OK                    bool     `json:"ok"`
 	SchemaVersion         string   `json:"schema_version,omitempty"`
+	RuntimeFingerprint    string   `json:"runtime_fingerprint,omitempty"`
+	Plus                  bool     `json:"plus,omitempty"`
 	Mode                  string   `json:"mode,omitempty"`
 	PlanFingerprint       string   `json:"plan_fingerprint,omitempty"`
 	Code                  string   `json:"code,omitempty"`
