@@ -16,7 +16,7 @@ The Plus console reports Docker and infrastructure setup status, using the Plus 
 
 The Logs screen provides the current boot's last 200 journal lines for the Management Agent, WebUI, Docker and containerd. Only Administrators may read these logs. Service selection is fixed, and lines matching the existing sensitive diagnostic pattern are redacted.
 
-Setup and Look Around are retained. Setup opens the Plus component, address, storage and account wizard; it does not run the inherited Minecraft wizard. The wizard deploys the selected upstream applications and shows host-side progress. Factory Reset reviews and removes the Plus installation and owned internal data while preserving second-drive data. Pterodactyl and Drydock launchers appear after successful deployment.
+Setup and Look Around are retained. Setup opens the Plus component, address, storage and account wizard; it does not run the inherited Minecraft wizard. The wizard deploys the selected upstream applications and shows host-side progress. Factory Reset reviews and removes the Plus installation and owned internal data while preserving second-drive data. Pterodactyl and Drydock launchers appear in the Control Center’s Applications section after successful deployment.
 
 Tailscale, NetBird and playit.gg setup, installation and activation are unchanged.
 
@@ -103,7 +103,7 @@ mount must be mounted before startup, so an absent disk cannot silently become
 new application storage. Existing host authentication and remote-access tools
 are unchanged.
 
-The desktop launches Pterodactyl and Drydock in separate tabs. Their own logins
+The Control Center’s Applications section launches Pterodactyl and Drydock in separate tabs. The desktop has no application launcher panel. Their own logins
 remain independent. Host Logs includes Plus setup and stack journals.
 CI has a bounded Ubuntu/Docker smoke check that pulls the declared upstream
 images, starts the complete stack, verifies Panel/Wings and Drydock authentication,

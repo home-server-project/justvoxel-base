@@ -301,7 +301,7 @@ if (dashboard) {
       const applications = document.querySelector("[data-plus-applications]");
       const panel = document.querySelector("[data-plus-panel]");
       const drydock = document.querySelector("[data-plus-drydock]");
-      if (applications) applications.hidden = !status.plus?.configured;
+      if (applications) applications.hidden = !status.plus?.configured || !(status.plus?.panel_url || status.plus?.drydock_url);
       if (panel) panel.hidden = !status.plus?.panel_url;
       if (drydock) drydock.hidden = !status.plus?.drydock_url;
       return;

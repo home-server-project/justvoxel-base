@@ -60,6 +60,15 @@
       </section>
 
       <nav class="control-navigation" aria-label="JustVoxel navigation">
+{{if isPlus}}
+        <section class="control-section" data-plus-applications {{if not (and .Status.Plus.Configured (or .Status.Plus.PanelURL .Status.Plus.DrydockURL))}}hidden{{end}}>
+          <span class="control-section-label">Applications</span>
+          <div class="control-tile-grid">
+            <a class="control-tile" href="/applications/pterodactyl" target="_blank" rel="noopener noreferrer" data-plus-panel {{if not .Status.Plus.PanelURL}}hidden{{end}} title="Open Pterodactyl in a new tab"><strong>Pterodactyl</strong></a>
+            <a class="control-tile" href="/applications/drydock" target="_blank" rel="noopener noreferrer" data-plus-drydock {{if not .Status.Plus.DrydockURL}}hidden{{end}} title="Open Drydock in a new tab"><strong>Drydock</strong></a>
+          </div>
+        </section>
+{{end}}
 {{if not isPlus}}
         <section class="control-section">
           <span class="control-section-label">Minecraft</span>
