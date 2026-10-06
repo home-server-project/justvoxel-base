@@ -23,6 +23,9 @@ func plusDeploymentFixture(t *testing.T) plusDeploymentPaths {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := os.Stat(filepath.Join(template, "stack.env.in")); err != nil {
+		t.Fatalf("Plus deployment tests require repository templates: %v", err)
+	}
 	p := plusDeploymentPaths{Configuration: filepath.Join(base, "configuration"), Preparation: filepath.Join(base, "preparation"), Templates: template, DefaultData: filepath.Join(base, "data"), Socket: filepath.Join(base, "socket"), CABundle: filepath.Join(base, "ca.crt"), UnitOverride: filepath.Join(base, "units")}
 	if err := os.WriteFile(p.Socket, []byte("fixture"), 0600); err != nil {
 		t.Fatal(err)
@@ -243,7 +246,7 @@ func TestPlusDeploymentFailureRetainsDataWithoutEnableOrRetry(t *testing.T) {
 		t.Fatal("pull failure hidden or diagnostic leaked")
 	}
 	if pulls != 1 {
-		t.Fatal("automatic retry performed")
+		t.Fatalf("expected exactly one image pull attempt, got %d", pulls)
 	}
 	if _, err := os.Stat(filepath.Join(p.Configuration, "deployed")); !os.IsNotExist(err) {
 		t.Fatal("failed deployment marked configured")

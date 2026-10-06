@@ -195,6 +195,7 @@ jobs:
             --pull=always \
             --security-opt=label=disable \
             -v "${PWD}/management:/src:ro" \
+            -v "${PWD}/templates/plus:/templates/plus:ro" \
             -v "${PWD}/system_files/usr/libexec/justvoxel:/system_files/usr/libexec/justvoxel:ro" \
             -v "${PWD}/system_files/etc/pam.d/justvoxel:/etc/pam.d/justvoxel:ro" \
             -v "${PWD}/tests/run-pam-integration-alma.sh:/run-pam-integration-alma.sh:ro" \
