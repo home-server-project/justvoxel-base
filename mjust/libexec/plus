@@ -5,7 +5,8 @@ source /usr/libexec/justvoxel/mjust/ui.sh
 help() {
     cat <<'TEXT'
 JustVoxel Plus Base host commands
-  mjust status [--details]
+  mjust status
+  mjust status --details
   mjust applications
   mjust setup
   mjust logs [management-agent|webui|docker|containerd|plus-setup|plus-stack]
@@ -19,7 +20,9 @@ JustVoxel Plus Base host commands
   mjust poweroff
   mjust ups
   mjust firmware
-  mjust web [status|enable|disable]
+  mjust web status
+  mjust web enable
+  mjust web disable
   mjust password-reset
   mjust factory-reset
   mjust welcome | welcome-on | welcome-off

@@ -37,6 +37,15 @@ chmod +x "${fixture}/helpers/"* "${fixture}/bin/"*
 export PATH="${fixture}/bin:${PATH}"
 "${fixture}/mjust" --list > "${fixture}/list"
 grep -Fq 'JustVoxel Plus Base host commands' "${fixture}/list"
+python3 - "${repo_root}/build_files/validate/common.sh" "${fixture}/list" <<'PY'
+from pathlib import Path
+import re,sys
+validator,listing=map(Path,sys.argv[1:])
+expected=re.findall(r"^grep -Fq '([^']+)' <<<\"\$\{mjust_list\}\"",validator.read_text(),re.MULTILINE)
+assert expected, 'No image command-list validation contract found'
+for command in expected:
+    assert command in listing.read_text(), 'Plus CLI help misses image validation entry: '+command
+PY
 if grep -Eq 'mjust (players|backup|restore|configure|start|stop|update-minecraft)' "${fixture}/list"; then exit 1; fi
 for command in players backup restore configure start stop update-minecraft storage-migrate start-over; do
  if "${fixture}/mjust" "${command}" > /dev/null 2>&1; then echo "Legacy command accepted: ${command}" >&2; exit 1; fi

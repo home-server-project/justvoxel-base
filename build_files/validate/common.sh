@@ -1,5 +1,6 @@
 #!/usr/bin/bash
 set -euo pipefail
+trap 'printf "ERROR: image validation failed at line %s.\n" "$LINENO" >&2' ERR
 
 # Validate JustVoxel product identity, direct Home Server Base parent, and
 # inherited AlmaLinux upstream provenance.
