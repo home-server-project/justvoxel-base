@@ -2,7 +2,7 @@
 {{if .Error}}<div class="notice error"><strong>Server Import needs attention.</strong><br>{{.Error}}</div>{{end}}
   {{if .Prompt}}<div class="notice"><strong>More source information is required.</strong><br>{{.Prompt}}</div>{{end}}
 
-  {{if not .Plan.OK}}
+  {{if and (not .Plan.OK) (not .Incompatible)}}
   {{if .NeedsInput}}
   <form method="post" action="/workspace/migration/import/review" autocomplete="off">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
@@ -79,10 +79,10 @@
   <div class="migration-review-grid">
   <section class="panel">
     <p class="eyebrow">Reviewed source plan</p>
-    <h2>{{.Plan.Normalized.Source.SourceClass}} · Minecraft {{.Plan.Normalized.Source.MinecraftVersion}}</h2>
+    <h2>{{if or (eq .Plan.Normalized.Source.SourceClass "paper") (eq .Plan.Normalized.Source.SourceClass "itzg-paper") (eq .Plan.Normalized.Source.SourceClass "vanilla")}}{{.SourceSoftware}}{{else}}{{.Plan.Normalized.Source.SourceClass}}{{end}} · Minecraft {{.Plan.Normalized.Source.MinecraftVersion}}</h2>
     <div class="migration-facts">
       <div><strong>Selected source</strong><span>{{.Plan.Normalized.Source.Path}}{{if .Plan.Normalized.Source.SelectedRoot}} · root {{.Plan.Normalized.Source.SelectedRoot}}{{end}}</span></div>
-      <div><strong>Server type</strong><span>{{.Plan.Normalized.Source.CandidateType}}</span></div>
+      <div><strong>Server software</strong><span>{{.SourceSoftware}}</span></div>
       <div><strong>Online identity</strong><span>{{.Plan.Normalized.Source.OnlineMode}}</span></div>
       <div><strong>Imported data</strong><span>{{.DataSize}}</span></div>
       <div><strong>Game settings</strong><span>{{.Plan.Normalized.Source.GameMode}} · {{.Plan.Normalized.Source.Difficulty}} · max {{.Plan.Normalized.Source.MaxPlayers}}</span></div>
@@ -94,6 +94,7 @@
     <p class="eyebrow">Reviewed destination plan</p>
     <h2>{{if eq .Plan.Normalized.Destination.Mode "fresh"}}Fresh JustVoxel destination{{else}}Replace configured JustVoxel server{{end}}</h2>
     <div class="migration-facts">
+      <div><strong>Server software</strong><span>{{.DestinationSoftware}}</span></div>
       <div><strong>Minecraft data</strong><span>{{.Plan.Normalized.Destination.DataPath}}</span></div>
       <div><strong>Backups</strong><span>{{.Plan.Normalized.Destination.BackupPath}} · keep {{.Plan.Normalized.Destination.BackupKeep}}{{if .Plan.Normalized.Destination.BackupAutomatic}} · {{.Plan.Normalized.Destination.BackupSchedule}}{{end}}</span></div>
       <div><strong>Ports</strong><span>Java {{.Plan.Normalized.Destination.JavaPort}}/TCP{{if .Plan.Normalized.Source.BedrockEnabled}} · Bedrock {{.Plan.Normalized.Destination.BedrockPort}}/UDP{{end}}</span></div>
@@ -105,6 +106,25 @@
   </div>
   {{end}}
 
+  {{if .Incompatible}}
+  <section class="panel notice error">
+    <p class="eyebrow">Safety checks and confirmations</p>
+    <h2>This import can’t continue</h2>
+    {{if and (or (eq .SourceSoftware "Paper") (eq .SourceSoftware "Purpur")) (eq .DestinationSoftware "Vanilla")}}
+    <p>This backup uses {{.SourceSoftware}} server software, but your JustVoxel server is currently using Vanilla.</p>
+    <p>{{.SourceSoftware}} server backups cannot be imported into a Vanilla server.</p>
+    <p>Change Server Version to Paper or Purpur, then try the import again.</p>
+    {{else if and (eq .SourceSoftware "Vanilla") (eq .DestinationSoftware "Vanilla")}}
+    <p>This backup uses Vanilla server software.</p>
+    <p>Server Import currently supports this backup only when your JustVoxel server uses Paper or Purpur.</p>
+    <p>Change Server Version to Paper or Purpur, then try the import again.</p>
+    {{else}}
+    <p>This backup and your current server software cannot be imported together safely.</p>
+    <p>Backup server software: {{.SourceSoftware}}<br>Current server software: {{.DestinationSoftware}}</p>
+    {{end}}
+  </section>
+  <div class="action-row"><a class="button-link" href="/?workspace=version&amp;tab=software">Server Version</a><a class="button-link secondary" href="/?workspace=migration&amp;tab=import">Back to Server Import</a></div>
+  {{else}}
   {{if .Plan.Warnings}}<section class="panel"><p class="eyebrow">Import warnings</p>{{range .Plan.Warnings}}<div class="notice warning">{{.Message}}</div>{{end}}</section>{{end}}
 
   {{if .Plan.Requirements}}
@@ -167,6 +187,7 @@
     </div>
     <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;tab=import">Cancel</a><button type="submit" data-destructive-submit disabled>Start Server Import</button></div>
   </form>
+  {{end}}
   {{end}}
   {{end}}
 </div>{{end}}

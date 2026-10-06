@@ -95,6 +95,98 @@ done
 grep -Fxq 'MINECRAFT_VERSION_MODE=pinned' "${destination_planner}" || fail 'Import does not pin the source version'
 grep -Fxq 'MINECRAFT_VERSION="${source_version}"' "${destination_planner}" || fail 'Import does not retain the exact source version'
 
+# Exercise the actual API planner with bounded source/configuration fixtures.
+# Appliance helpers are replaced only in this temporary test copy.
+(
+    source "${common}"
+    review_fixture="$(mktemp -d)"
+    trap 'rm -rf -- "${review_fixture}"' EXIT
+    export REVIEW_FIXTURE="${review_fixture}"
+    mkdir -p "${review_fixture}/server" "${review_fixture}/helpers"
+    REVIEW_CONFIG="${review_fixture}/config"
+    REVIEW_QUADLET="${review_fixture}/quadlet"
+    touch "$REVIEW_CONFIG" "$REVIEW_QUADLET"
+    sed -e '/^source /d' -e '/^require_root$/d' \
+        -e '/^case "${1:-discover}" in/,$d' \
+        -e 's/JV_CONFIG/REVIEW_CONFIG/g; s/JV_QUADLET/REVIEW_QUADLET/g' \
+        -e "s|/usr/libexec/justvoxel/mjust/|${review_fixture}/helpers/|g" \
+        "$api_planner" > "${review_fixture}/planner.sh"
+    source "${review_fixture}/planner.sh"
+    cat > "${review_fixture}/helpers/migration-archive" <<'FIXTURE'
+#!/usr/bin/bash
+set -euo pipefail
+case "$1" in
+    inspect) jq -cn --argjson native "$REVIEW_NATIVE" '{expandedBytes:1024,nativeBundle:$native}' ;;
+    verify-native) jq -cn --arg software "$REVIEW_SOURCE_TYPE" '{minecraft:{implementation:$software,version:"26.2",onlineMode:true}}' ;;
+    detect) jq -cn --arg root "$REVIEW_FIXTURE/server" --arg type "$REVIEW_CANDIDATE_TYPE" '{candidates:[{root:$root,sourceType:$type,minecraftVersion:"26.2",onlineMode:true,maxPlayers:10,javaPortHint:25565,pluginJarCount:0}]}' ;;
+    *) exit 1 ;;
+esac
+FIXTURE
+    cat > "${review_fixture}/helpers/validate-data-mount" <<'FIXTURE'
+#!/usr/bin/bash
+exit 0
+FIXTURE
+    cat > "${review_fixture}/helpers/web-status-json" <<'FIXTURE'
+#!/usr/bin/bash
+printf '%s\n' '{"state":"stopped","online":0,"names":[]}'
+FIXTURE
+    chmod +x "${review_fixture}/helpers/"*
+    require_config() { :; }
+    jv_migration_import_source_prepare() {
+        JV_MIGRATION_IMPORT_SOURCE_PATH="${review_fixture}/server"
+        JV_MIGRATION_IMPORT_SOURCE_IDENTITY=source-fixture
+    }
+    jv_migration_import_source_cleanup() { :; }
+    jv_restore_validate_data_layout() { :; }
+    jv_migration_check_candidate_port() { :; }
+    # A rejected software plan must never ask for version availability.
+    server_version_available() {
+        [[ $MINECRAFT_SERVER_TYPE != vanilla ]] || fail 'incompatible plan checked destination version availability'
+        printf '%s\n' "$MINECRAFT_SERVER_TYPE" >> "${review_fixture}/availability"
+    }
+    DATA_PATH="${review_fixture}/server" BACKUP_PATH="${review_fixture}/backups"
+    JAVA_PORT=25565 BEDROCK_PORT=19132 BEDROCK_ENABLED=no
+    JAVA_MEMORY=4G CONTAINER_MEMORY=6G TIMEZONE=UTC MINECRAFT_IMAGE_TAG=stable
+    MINECRAFT_UID=1001 MINECRAFT_GID=1001 BACKUP_KEEP=7
+    BACKUP_SCHEDULE='*-*-* 04:30:00' BACKUP_TIMER_ENABLED=yes
+    review_request="$(jq -cn --arg path "$DATA_PATH" '{source:{kind:"local",path:$path},destination:{java_port:25565,bedrock_port:19132,backup_keep:7,backup_automatic:true,storage:{},backups:{}}}')"
+    for source_software in paper purpur; do
+        export REVIEW_SOURCE_TYPE="$source_software" REVIEW_NATIVE=true REVIEW_CANDIDATE_TYPE=itzg-paper
+        MINECRAFT_SERVER_TYPE=vanilla
+        rejected="$(plan <<< "$review_request")"
+        jq -e --arg source "$source_software" --arg data "$DATA_PATH" '
+            .ok==false and .code=="unsupported_server_type" and
+            .normalized.source.server_type==$source and .normalized.source.minecraft_version=="26.2" and
+            .normalized.source.online_mode=="online" and .normalized.source.max_players==10 and
+            .normalized.destination.server_type=="vanilla" and .normalized.destination.data_path==$data and
+            .normalized.destination.java_memory=="4G" and
+            .requirements==null and .context==null and .plan_fingerprint==null
+        ' >/dev/null <<< "$rejected" || fail 'incompatible plan lost review facts or became Apply-ready'
+        [[ ! -e ${review_fixture}/availability ]] || fail 'rejected plan checked version availability'
+        for destination_software in paper purpur; do
+            MINECRAFT_SERVER_TYPE="$destination_software"
+            compatible="$(plan <<< "$review_request")"
+            jq -e --arg source "$source_software" --arg destination "$destination_software" '
+                .ok==true and .normalized.source.server_type==$source and
+                .normalized.destination.server_type==$destination and
+                .requirements.import_confirmation_required==true and
+                .requirements.vanilla_confirmation_required==false and .context!=null
+            ' >/dev/null <<< "$compatible" || fail 'compatible Paper/Purpur planning changed'
+            [[ $(cat "${review_fixture}/availability") == "$destination_software" ]] || fail 'compatible plan skipped version availability'
+            rm "${review_fixture}/availability"
+        done
+    done
+    export REVIEW_SOURCE_TYPE=vanilla REVIEW_NATIVE=false REVIEW_CANDIDATE_TYPE=vanilla
+    MINECRAFT_SERVER_TYPE=paper
+    guarded="$(plan <<< "$review_request")"
+    jq -e '
+        .ok==true and .normalized.source.server_type=="vanilla" and
+        .normalized.destination.server_type=="paper" and
+        .requirements.vanilla_confirmation_required==true and
+        any(.warnings[]; .code=="vanilla_conversion") and .context!=null
+    ' >/dev/null <<< "$guarded" || fail 'guarded Vanilla to Paper planning changed'
+)
+
 # Exercise the managed-container ownership decision without a Podman daemon.
 port_fixture="$(mktemp -d)"
 trap 'rm -rf -- "${port_fixture}"' EXIT

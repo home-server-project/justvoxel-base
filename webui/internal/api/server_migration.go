@@ -201,6 +201,7 @@ type AdminMigrationImportCandidate struct {
 }
 
 type AdminMigrationImportSourceNormalized struct {
+	ServerType            string `json:"server_type"`
 	Path                  string `json:"path"`
 	SelectedRoot          string `json:"selected_root"`
 	SourceClass           string `json:"source_class"`
@@ -222,6 +223,7 @@ type AdminMigrationImportSourceNormalized struct {
 }
 
 type AdminMigrationImportDestinationNormalized struct {
+	ServerType      string                 `json:"server_type"`
 	Mode            string                 `json:"mode"`
 	DataPath        string                 `json:"data_path"`
 	BackupPath      string                 `json:"backup_path"`

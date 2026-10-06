@@ -98,6 +98,7 @@ type adminMigrationImportCandidate struct {
     FloodgateKeySHA256 string `json:"floodgateKeySha256,omitempty"`
 }
 type adminMigrationImportSourceNormalized struct {
+    ServerType string `json:"server_type"`
     Path string `json:"path"`
     SelectedRoot string `json:"selected_root"`
     SourceClass string `json:"source_class"`
@@ -118,6 +119,7 @@ type adminMigrationImportSourceNormalized struct {
     ExpandedBytes uint64 `json:"expanded_bytes"`
 }
 type adminMigrationImportDestinationNormalized struct {
+    ServerType string `json:"server_type"`
     Mode string `json:"mode"`
     DataPath string `json:"data_path"`
     BackupPath string `json:"backup_path"`

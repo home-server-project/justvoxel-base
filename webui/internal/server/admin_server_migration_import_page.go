@@ -35,23 +35,26 @@ type serverMigrationImportPageData struct {
 }
 
 type serverMigrationImportReviewPageData struct {
-	Title           string
-	Version         string
-	ManagementAPI   string
-	CSRF            string
-	Identity        api.SessionInfo
-	Request         api.AdminMigrationImportRequest
-	Plan            api.AdminMigrationImportPlanResponse
-	DataSize        string
-	StorageSize     string
-	BackupSize      string
-	Prompt          string
-	Error           string
-	NeedsSourcePath bool
-	NeedsRoot       bool
-	NeedsVersion    bool
-	SourceSMB       bool
-	EULAURL         string
+	Title               string
+	Version             string
+	ManagementAPI       string
+	CSRF                string
+	Identity            api.SessionInfo
+	Request             api.AdminMigrationImportRequest
+	Plan                api.AdminMigrationImportPlanResponse
+	DataSize            string
+	StorageSize         string
+	BackupSize          string
+	Prompt              string
+	Error               string
+	Incompatible        bool
+	SourceSoftware      string
+	DestinationSoftware string
+	NeedsSourcePath     bool
+	NeedsRoot           bool
+	NeedsVersion        bool
+	SourceSMB           bool
+	EULAURL             string
 }
 
 func (a *App) registerAdminServerImportPages(mux *http.ServeMux) {
@@ -507,6 +510,20 @@ func (a *App) renderServerMigrationImportPage(w http.ResponseWriter, status int,
 }
 
 func (a *App) renderServerMigrationImportReview(w http.ResponseWriter, status int, identity api.SessionInfo, request api.AdminMigrationImportRequest, plan api.AdminMigrationImportPlanResponse, csrf, prompt, errorMessage string) {
+	incompatible := !plan.OK && plan.Code == "unsupported_server_type" && plan.Normalized != nil
+	sourceSoftware, destinationSoftware := "", ""
+	if plan.Normalized != nil {
+		sourceType := plan.Normalized.Source.ServerType
+		if sourceType == "" {
+			sourceType = plan.Normalized.Source.CandidateType
+		}
+		sourceSoftware = importServerSoftwareLabel(sourceType)
+		destinationSoftware = importServerSoftwareLabel(plan.Normalized.Destination.ServerType)
+	}
+	if incompatible {
+		errorMessage = ""
+		prompt = ""
+	}
 	dataSize := ""
 	storageSize := ""
 	backupSize := ""
@@ -520,22 +537,38 @@ func (a *App) renderServerMigrationImportReview(w http.ResponseWriter, status in
 		}
 	}
 	a.renderServerMigration(w, "server_migration_import_review.html", status, serverMigrationImportReviewPageData{
-		Title:           "Review Server Import",
-		Version:         a.config.Version,
-		ManagementAPI:   a.config.ManagementAPI,
-		CSRF:            csrf,
-		Identity:        identity,
-		Request:         request,
-		Plan:            plan,
-		DataSize:        dataSize,
-		StorageSize:     storageSize,
-		BackupSize:      backupSize,
-		Prompt:          prompt,
-		Error:           errorMessage,
-		NeedsSourcePath: plan.Code == "source_selection_required",
-		NeedsRoot:       plan.Code == "multiple_roots" || plan.Code == "stale_root",
-		NeedsVersion:    plan.Code == "source_version_required",
-		SourceSMB:       request.Source.Kind == "smb",
-		EULAURL:         minecraftEULAURL,
+		Title:               "Review Server Import",
+		Version:             a.config.Version,
+		ManagementAPI:       a.config.ManagementAPI,
+		CSRF:                csrf,
+		Identity:            identity,
+		Request:             request,
+		Plan:                plan,
+		DataSize:            dataSize,
+		StorageSize:         storageSize,
+		BackupSize:          backupSize,
+		Prompt:              prompt,
+		Error:               errorMessage,
+		Incompatible:        incompatible,
+		SourceSoftware:      sourceSoftware,
+		DestinationSoftware: destinationSoftware,
+		NeedsSourcePath:     plan.Code == "source_selection_required",
+		NeedsRoot:           plan.Code == "multiple_roots" || plan.Code == "stale_root",
+		NeedsVersion:        plan.Code == "source_version_required",
+		SourceSMB:           request.Source.Kind == "smb",
+		EULAURL:             minecraftEULAURL,
 	})
+}
+
+func importServerSoftwareLabel(serverType string) string {
+	switch serverType {
+	case "paper", "itzg-paper":
+		return "Paper"
+	case "purpur":
+		return "Purpur"
+	case "vanilla":
+		return "Vanilla"
+	default:
+		return serverType
+	}
 }

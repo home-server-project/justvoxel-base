@@ -6,7 +6,7 @@
   {{if .Error}}<div class="notice error"><strong>Server Import needs attention.</strong><br>{{.Error}}</div>{{end}}
   {{if .Prompt}}<div class="notice"><strong>More source information is required.</strong><br>{{.Prompt}}</div>{{end}}
 
-  {{if not .Plan.OK}}
+  {{if and (not .Plan.OK) (not .Incompatible)}}
   <form method="post" action="/settings/server-migration/import/review" autocomplete="off" data-server-import-form data-server-import-require-smb="{{if .SourceSMB}}true{{else}}false{{end}}">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <input type="hidden" name="source_kind" value="{{.Request.Source.Kind}}">
@@ -80,11 +80,11 @@
 
   {{if .Plan.Normalized}}
   <section class="panel">
-    <p class="eyebrow">Authoritative source plan</p>
-    <h2>{{.Plan.Normalized.Source.SourceClass}} · Minecraft {{.Plan.Normalized.Source.MinecraftVersion}}</h2>
+    <p class="eyebrow">Reviewed source plan</p>
+    <h2>{{if or (eq .Plan.Normalized.Source.SourceClass "paper") (eq .Plan.Normalized.Source.SourceClass "itzg-paper") (eq .Plan.Normalized.Source.SourceClass "vanilla")}}{{.SourceSoftware}}{{else}}{{.Plan.Normalized.Source.SourceClass}}{{end}} · Minecraft {{.Plan.Normalized.Source.MinecraftVersion}}</h2>
     <div class="details">
       <strong>Selected source</strong><br><span class="muted">{{.Plan.Normalized.Source.Path}}{{if .Plan.Normalized.Source.SelectedRoot}} · root {{.Plan.Normalized.Source.SelectedRoot}}{{end}}</span><br><br>
-      <strong>Server type</strong><br><span class="muted">{{.Plan.Normalized.Source.CandidateType}}</span><br><br>
+      <strong>Server software</strong><br><span class="muted">{{.SourceSoftware}}</span><br><br>
       <strong>Online identity</strong><br><span class="muted">{{.Plan.Normalized.Source.OnlineMode}}</span><br><br>
       <strong>Imported data size</strong><br><span class="muted">{{.DataSize}}</span><br><br>
       <strong>Game settings</strong><br><span class="muted">{{.Plan.Normalized.Source.GameMode}} · {{.Plan.Normalized.Source.Difficulty}} · max {{.Plan.Normalized.Source.MaxPlayers}} players</span><br><br>
@@ -93,9 +93,10 @@
   </section>
 
   <section class="panel">
-    <p class="eyebrow">Authoritative destination plan</p>
+    <p class="eyebrow">Reviewed destination plan</p>
     <h2>{{if eq .Plan.Normalized.Destination.Mode "fresh"}}Fresh JustVoxel destination{{else}}Replace configured JustVoxel server{{end}}</h2>
     <div class="details">
+      <strong>Server software</strong><br><span class="muted">{{.DestinationSoftware}}</span><br><br>
       <strong>Minecraft data</strong><br><span class="muted">{{.Plan.Normalized.Destination.DataPath}}</span><br><br>
       <strong>Backups</strong><br><span class="muted">{{.Plan.Normalized.Destination.BackupPath}} · keep {{.Plan.Normalized.Destination.BackupKeep}}{{if .Plan.Normalized.Destination.BackupAutomatic}} · {{.Plan.Normalized.Destination.BackupSchedule}}{{end}}</span><br><br>
       <strong>Ports</strong><br><span class="muted">Java {{.Plan.Normalized.Destination.JavaPort}}/TCP{{if .Plan.Normalized.Source.BedrockEnabled}} · Bedrock {{.Plan.Normalized.Destination.BedrockPort}}/UDP{{end}}</span><br><br>
@@ -106,6 +107,25 @@
   </section>
   {{end}}
 
+  {{if .Incompatible}}
+  <section class="panel notice error">
+    <p class="eyebrow">Safety checks and confirmations</p>
+    <h2>This import can’t continue</h2>
+    {{if and (or (eq .SourceSoftware "Paper") (eq .SourceSoftware "Purpur")) (eq .DestinationSoftware "Vanilla")}}
+    <p>This backup uses {{.SourceSoftware}} server software, but your JustVoxel server is currently using Vanilla.</p>
+    <p>{{.SourceSoftware}} server backups cannot be imported into a Vanilla server.</p>
+    <p>Change Server Version to Paper or Purpur, then try the import again.</p>
+    {{else if and (eq .SourceSoftware "Vanilla") (eq .DestinationSoftware "Vanilla")}}
+    <p>This backup uses Vanilla server software.</p>
+    <p>Server Import currently supports this backup only when your JustVoxel server uses Paper or Purpur.</p>
+    <p>Change Server Version to Paper or Purpur, then try the import again.</p>
+    {{else}}
+    <p>This backup and your current server software cannot be imported together safely.</p>
+    <p>Backup server software: {{.SourceSoftware}}<br>Current server software: {{.DestinationSoftware}}</p>
+    {{end}}
+  </section>
+  <div class="action-row"><a class="button-link" href="/?workspace=version&amp;tab=software">Server Version</a><a class="button-link secondary" href="/?workspace=migration&amp;tab=import">Back to Server Import</a></div>
+  {{else}}
   {{if .Plan.Warnings}}<section class="panel"><p class="eyebrow">Import warnings</p>{{range .Plan.Warnings}}<div class="notice warning">{{.Message}}</div>{{end}}</section>{{end}}
 
   {{if .Plan.Requirements}}
@@ -169,6 +189,7 @@
     </div>
     <div class="action-row"><a class="button-link secondary" href="/settings/server-migration/import">Cancel</a><button type="submit" data-destructive-submit disabled>Start Server Import</button></div>
   </form>
+  {{end}}
   {{end}}
   {{end}}
   <p class="foot">WebUI {{.Version}} · Management API {{.ManagementAPI}}</p>

@@ -42,3 +42,30 @@ func TestMigrationImportCandidateAcceptsDetectorFields(t *testing.T) {
         t.Fatalf("rich candidate fields were not preserved: %+v", candidate)
     }
 }
+
+func TestMigrationImportRejectedSoftwarePlanPreservesReviewWithoutFingerprint(t *testing.T) {
+    for _, sourceType := range []string{"paper", "purpur"} {
+        t.Run(sourceType, func(t *testing.T) {
+            helper := step5A2ImportHelper(false)
+            helper.OK = false
+            helper.Code = "unsupported_server_type"
+            helper.Error = "Migration v1 import requires a Paper or Purpur destination."
+            helper.Normalized.Source.ServerType = sourceType
+            helper.Normalized.Destination.ServerType = "vanilla"
+            helper.Requirements = nil
+            helper.Context = nil
+            installStep5A2ImportPlanHelper(t, helper)
+            plan, err := authoritativeAdminMigrationImportPlan(context.Background(), step5A2ImportRequest())
+            if err != nil { t.Fatal(err) }
+            if plan.OK || plan.Code != "unsupported_server_type" || plan.Normalized == nil {
+                t.Fatalf("unexpected rejected plan: %+v", plan)
+            }
+            if plan.Normalized.Source.ServerType != sourceType || plan.Normalized.Destination.ServerType != "vanilla" {
+                t.Fatalf("software evidence lost: %+v", plan.Normalized)
+            }
+            if plan.PlanFingerprint != "" || plan.Requirements != nil || plan.Context != nil {
+                t.Fatalf("rejected plan became Apply-ready: %+v", plan)
+            }
+        })
+    }
+}
