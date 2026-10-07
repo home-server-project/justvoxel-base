@@ -7,6 +7,8 @@ on:
     paths-ignore:
       - '**/README.md'
       - 'docs/**'
+      - 'AGENTS.md'
+      - '.agents/skills/**'
   workflow_dispatch:
 
 concurrency:
