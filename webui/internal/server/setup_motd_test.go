@@ -249,15 +249,14 @@ func TestPostSetupMOTDRemainsExplicitConfiguration(t *testing.T) {
 	}
 	values := settingsFormValues()
 	values.Set("motd", "My new welcome message")
-	values.Set("version", "26.4")
-	r := authenticatedAdminRequest(http.MethodPost, "http://example/settings/server/plan", values.Encode())
-	parsed, err := parseServerSettingsForm(r)
-	if err != nil || parsed.MOTD != "My new welcome message" {
-		t.Fatalf("post-setup MOTD edit changed: %#v, %v", parsed, err)
-	}
+	values.Set("tab", "gameplay")
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/api/minecraft/workspace/settings/plan", values.Encode()))
+	if rr.Code != http.StatusOK || client.planCalls != 1 || client.plannedRequest.MOTD != "My new welcome message" {
+		t.Fatalf("post-setup MOTD edit changed: status=%d request=%#v", rr.Code, client.plannedRequest)
 	}
 	for _, path := range []string{"/setup/start", "/setup/recommended"} {
 		rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example"+path, "csrf=csrf-token&server_type=purpur"))

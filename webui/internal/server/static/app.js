@@ -129,7 +129,6 @@ if (navigationGroups.length > 0) {
   });
 
   const path = window.location.pathname;
-  const hash = window.location.hash;
   const brand = document.querySelector(".brand-link");
   if (brand) {
     if (path === "/") brand.setAttribute("aria-current", "page");
@@ -138,28 +137,7 @@ if (navigationGroups.length > 0) {
 
   let currentGroup = "";
   let currentHref = "";
-  if (path === "/activity") {
-    currentGroup = "server";
-    currentHref = "/activity";
-  } else if (path === "/operations") {
-    if (hash === "#manual-backup") {
-      currentGroup = "storage";
-      currentHref = "/operations#manual-backup";
-    } else {
-      currentGroup = "server";
-      if (hash === "#whitelist") currentHref = "/operations#whitelist";
-      if (hash === "#minecraft-logs") currentHref = "/operations#minecraft-logs";
-    }
-  } else if (path === "/settings/activity") {
-    currentGroup = "administration";
-    currentHref = "/settings/activity";
-  } else if (path === "/settings/users") {
-    currentGroup = "administration";
-    currentHref = "/settings/users";
-  } else if (path === "/settings/authentication") {
-    currentGroup = "administration";
-    currentHref = "/settings/authentication";
-  } else if (path === "/password") {
+  if (path === "/password") {
     currentGroup = "administration";
     currentHref = "/password";
   }
@@ -389,6 +367,35 @@ if (quickLook && quickLookToggle) {
     const node = quickLook.querySelector(selector);
     if (node) node.textContent = value || "—";
   };
+
+  const backupCreate = quickLook.querySelector("[data-quick-look-backup-create]");
+  const backupCSRF = quickLook.querySelector("[data-quick-look-backup-csrf]");
+  backupCreate?.addEventListener("click", async () => {
+    if (backupCreate.disabled) return;
+    backupCreate.disabled = true;
+    backupCreate.textContent = "Starting…";
+    try {
+      const response = await fetch("/api/backups/manual", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        body: new URLSearchParams({ csrf: backupCSRF?.value || "" }),
+      });
+      if (response.status === 401) {
+        window.location.assign("/login");
+        return;
+      }
+      const result = await response.json();
+      setValue("[data-quick-look-backup]", response.ok && result.ok
+        ? result.message
+        : result.error || "Manual backup could not be started.");
+    } catch (_) {
+      setValue("[data-quick-look-backup]", "Manual backup could not be started.");
+    } finally {
+      backupCreate.disabled = false;
+      backupCreate.textContent = "Create backup";
+    }
+  });
 
   const setActionAvailability = (status) => {
     const running = status?.minecraft?.state === "Running";
@@ -1380,13 +1387,18 @@ let workspaceWindowZ = 120;
 const workspaceWindowZMax = 900;
 const workspaceCompactQuery = window.matchMedia("(max-width: 700px)");
 
-const workspaceWindowStateKey = (id) => `justvoxel-workspace-window-${id === "system-monitor" ? "v2" : "v1"}:${id}`;
+const workspaceUsername = dashboard?.dataset.workspaceUsername || "";
+const workspaceWindowStateKey = (id) => workspaceUsername
+  ? `justvoxel-workspace-window-${id === "system-monitor" ? "v2" : "v1"}:${encodeURIComponent(workspaceUsername)}:${id}`
+  : null;
 
 const workspaceRestoreAllowed = () => !["/login", "/password"].includes(window.location.pathname) && !document.querySelector("[data-credential-boundary]");
 
 const readWorkspaceWindowState = (id) => {
+  const key = workspaceWindowStateKey(id);
+  if (!key) return {};
   try {
-    const saved = JSON.parse(window.localStorage.getItem(workspaceWindowStateKey(id)) || "{}");
+    const saved = JSON.parse(window.localStorage.getItem(key) || "{}");
     return workspaceRestoreAllowed() ? saved : { ...saved, open: false };
   } catch (_) {
     return {};
@@ -1394,9 +1406,11 @@ const readWorkspaceWindowState = (id) => {
 };
 
 const writeWorkspaceWindowState = (id, patch) => {
+  const key = workspaceWindowStateKey(id);
+  if (!key) return;
   try {
     const current = readWorkspaceWindowState(id);
-    window.localStorage.setItem(workspaceWindowStateKey(id), JSON.stringify({ ...current, ...patch }));
+    window.localStorage.setItem(key, JSON.stringify({ ...current, ...patch }));
   } catch (_) {
     // Layout persistence is optional. The window still works without browser storage.
   }
@@ -2778,9 +2792,11 @@ if (systemMonitorOpen && systemMonitorDialog) {
   });
   if (saveButton) saveButton.addEventListener("click", saveProfile);
 
+  const monitorRestoreRoleAllowed = () => !document.body.classList.contains("role-pending") &&
+    ["role-administrator", "role-operator", "role-viewer"].some((role) => document.body.classList.contains(role));
   const restoreWhenRoleKnown = () => {
     if (!readWorkspaceWindowState("system-monitor").open) return;
-    if (document.body.classList.contains("role-administrator")) {
+    if (monitorRestoreRoleAllowed()) {
       workspaceWindow?.open();
       return;
     }
@@ -2788,7 +2804,7 @@ if (systemMonitorOpen && systemMonitorDialog) {
     const observer = new MutationObserver(() => {
       if (document.body.classList.contains("role-pending")) return;
       observer.disconnect();
-      if (document.body.classList.contains("role-administrator")) workspaceWindow?.open();
+      if (monitorRestoreRoleAllowed()) workspaceWindow?.open();
     });
     observer.observe(document.body, { attributes: true, attributeFilter: ["class"] });
   };

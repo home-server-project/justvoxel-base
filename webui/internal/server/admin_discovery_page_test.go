@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -70,115 +71,13 @@ func (f *fakeStorageBrowserMigrationAPI) AdminDataMigrationDiscovery(_ context.C
 	return f.migration, nil
 }
 
-func TestServerSettingsShowsCurrentConfiguration(t *testing.T) {
-	client := &fakeDiscoveryAPI{}
-	client.configuration.Configured = true
-	client.configuration.Minecraft.DataPath = "/var/lib/justvoxel/minecraft"
-	client.configuration.Minecraft.JavaMemory = "4G"
-	client.configuration.Minecraft.ContainerMemory = "6G"
-	client.configuration.Minecraft.JavaPort = 25565
-	client.configuration.Minecraft.Version = "1.21.8"
-	client.configuration.Minecraft.VersionMode = "pinned"
-	client.configuration.Minecraft.MaxPlayers = 10
-	client.configuration.Backup.Type = "system"
-	client.configuration.Backup.Path = "/var/lib/justvoxel/backups"
-	client.configuration.Backup.Keep = 7
-	client.configuration.Backup.Schedule = "*-*-* 04:30:00"
-	client.defaults.JavaMemory = "4G"
-	client.defaults.ContainerMemory = "6G"
-	client.defaults.DataPath = "/var/lib/justvoxel/minecraft"
-	client.defaults.BackupPath = "/var/lib/justvoxel/backups"
-	client.defaults.JavaPort = 25565
-	client.defaults.BedrockPort = 19132
-	client.defaults.MaxPlayers = 10
-	client.defaults.BackupKeep = 7
-	client.defaults.BackupDailyTime = "04:30"
-	client.defaults.SystemMemoryMiB = 8192
-	client.defaults.SystemReserveMinimumMiB = 1024
-	client.defaults.SystemReserveRecommendedMiB = 2048
-
-	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rr := httptest.NewRecorder()
-	legacyPageTestServe(app, rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/server", ""))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("server settings returned %d: %s", rr.Code, rr.Body.String())
-	}
-	body := rr.Body.String()
-	for _, want := range []string{"Minecraft settings", "/var/lib/justvoxel/minecraft", "4G", "6G", "1.21.8", "/var/lib/justvoxel/backups", "Review changes"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("server settings missing %q", want)
-		}
-	}
-	if client.configurationHit != 1 || client.defaultsHit != 1 {
-		t.Fatalf("discovery calls configuration=%d defaults=%d", client.configurationHit, client.defaultsHit)
-	}
-}
-
-func TestServerSettingsSupportsUnconfiguredAppliance(t *testing.T) {
-	client := &fakeDiscoveryAPI{}
-	client.defaults.DataPath = "/var/lib/justvoxel/minecraft"
-	client.defaults.BackupPath = "/var/lib/justvoxel/backups"
-	client.defaults.JavaMemory = "4G"
-	client.defaults.ContainerMemory = "6G"
-	client.defaults.SystemMemoryMiB = 8192
-	client.defaults.SystemReserveMinimumMiB = 1024
-	client.defaults.SystemReserveRecommendedMiB = 2048
-
-	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rr := httptest.NewRecorder()
-	legacyPageTestServe(app, rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/server", ""))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("unconfigured settings returned %d: %s", rr.Code, rr.Body.String())
-	}
-	for _, want := range []string{"Minecraft is not configured yet", "Suggested defaults", "8.0 GiB", "2.0 GiB", "1.0 GiB"} {
-		if !strings.Contains(rr.Body.String(), want) {
-			t.Fatalf("missing unconfigured state %q: %s", want, rr.Body.String())
-		}
-	}
-}
-
-func TestStorageSettingsShowsHumanReadableInventory(t *testing.T) {
-	client := &fakeDiscoveryAPI{}
-	client.configuration.Configured = true
-	client.configuration.Minecraft.DataPath = "/var/lib/justvoxel/minecraft"
-	client.configuration.Backup.Path = "/var/mnt/backup/justvoxel"
-	client.storage.SystemDisks = []string{"/dev/vda"}
-	client.storage.Devices = []api.AdminStorageDevice{{
-		Name: "vdb1", Path: "/dev/vdb1", Type: "part", SizeBytes: 1073741824,
-		Filesystem: "xfs", Label: "BACKUP", UUID: "uuid-123", Mountpoints: []string{"/var/mnt/backup"},
-		Model: "Virtual Disk", Transport: "virtio",
-	}}
-
-	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rr := httptest.NewRecorder()
-	legacyPageTestServe(app, rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/storage", ""))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("storage settings returned %d: %s", rr.Code, rr.Body.String())
-	}
-	body := rr.Body.String()
-	for _, want := range []string{"Storage overview", "/dev/vda", "Virtual Disk", "/dev/vdb1", "1.0 GiB", "xfs", "/var/mnt/backup"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("storage settings missing %q", want)
-		}
-	}
-}
-
 func TestDiscoveryPagesRejectOperatorBeforePrivilegedDiscovery(t *testing.T) {
 	client := &fakeDiscoveryAPI{role: "operator"}
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"/settings/server", "/settings/storage", "/settings/new-storage", "/workspace/storage"} {
+	for _, path := range []string{"/workspace/storage"} {
 		rr := httptest.NewRecorder()
 		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example"+path, ""))
 		if rr.Code != http.StatusForbidden {
@@ -190,7 +89,7 @@ func TestDiscoveryPagesRejectOperatorBeforePrivilegedDiscovery(t *testing.T) {
 	}
 }
 
-func TestNewStorageBrowserGroupsDisksAndPartitions(t *testing.T) {
+func TestStorageWorkspaceBrowserGroupsDisksAndPartitions(t *testing.T) {
 	client := &fakeDiscoveryAPI{}
 	client.configuration.Configured = true
 	client.configuration.Minecraft.DataPath = "/var/mnt/data/minecraft"
@@ -222,12 +121,12 @@ func TestNewStorageBrowserGroupsDisksAndPartitions(t *testing.T) {
 		t.Fatal(err)
 	}
 	rr := httptest.NewRecorder()
-	legacyPageTestServe(app, rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-storage", ""))
+	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/storage", ""))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("new storage returned %d: %s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"Storage", "Internal drives", "USB drives", "System Disk", "Data Disk", "USB Backup", "data-storage-disk=\"vda\"", "data-storage-disk=\"sdc\"", "data-storage-partitions=\"vdb\"", "data-storage-partitions=\"sdc\"", "/dev/vdb1", "Minecraft", "/dev/vdb2", "Not formatted", "storage-partition-card storage-partition-swap", "data-storage-detail-dialog", "data-storage-detail-close", "data-storage-free-space", "data-storage-create-dialog", "data-filesystem-usage-known=\"Yes\"", "120.0 GiB", "/static/storage-browser.js"} {
+	for _, want := range []string{"Storage", "Internal drives", "USB drives", "System Disk", "Data Disk", "USB Backup", "data-storage-disk=\"vda\"", "data-storage-disk=\"sdc\"", "data-storage-partitions=\"vdb\"", "data-storage-partitions=\"sdc\"", "/dev/vdb1", "Minecraft", "/dev/vdb2", "Not formatted", "storage-partition-card storage-partition-swap", "data-storage-detail-dialog", "data-storage-detail-close", "data-storage-free-space", "data-storage-create-dialog", "data-filesystem-usage-known=\"Yes\"", "120.0 GiB", "data-storage-browser-root"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("new storage browser missing %q: %s", want, body)
 		}
@@ -267,7 +166,7 @@ func TestNewStorageBrowserGroupsDisksAndPartitions(t *testing.T) {
 	}
 }
 
-func TestNewStorageUsesAgentApprovedMinecraftMigrationCandidates(t *testing.T) {
+func TestStorageWorkspaceUsesAgentApprovedMinecraftMigrationCandidates(t *testing.T) {
 	client := &fakeStorageBrowserMigrationAPI{}
 	client.configuration.Configured = true
 	client.configuration.Minecraft.DataPath = "/var/mnt/minecraft/minecraft"
@@ -303,7 +202,7 @@ func TestNewStorageUsesAgentApprovedMinecraftMigrationCandidates(t *testing.T) {
 		t.Fatal(err)
 	}
 	rr := httptest.NewRecorder()
-	legacyPageTestServe(app, rr, authenticatedAdminRequest(http.MethodGet, "http://example/settings/new-storage", ""))
+	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/storage", ""))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("new storage returned %d: %s", rr.Code, rr.Body.String())
 	}
@@ -520,5 +419,85 @@ func TestStorageBrowserPhysicalDiskPartitionTableLabelsPreserveActionPolicy(t *t
 				}
 			}
 		})
+	}
+}
+
+func TestStandaloneMinecraftStorageSettingsUIRetired(t *testing.T) {
+	app, err := New(&fakeDiscoveryAPI{}, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		method string
+		paths  []string
+		status int
+	}{
+		{http.MethodGet, []string{
+			"/settings/server", "/settings/storage", "/settings/new-storage", "/settings/storage-provision",
+		}, http.StatusNotFound},
+		{http.MethodPost, []string{
+			"/settings/server/plan", "/settings/server/apply",
+			"/settings/storage-provision/plan", "/settings/storage-provision/apply",
+		}, http.StatusMethodNotAllowed},
+	} {
+		for _, path := range tc.paths {
+			t.Run(tc.method+" "+path, func(t *testing.T) {
+				rr := httptestResponse(app, authenticatedAdminRequest(tc.method, "http://example"+path, "csrf=csrf-token"))
+				if rr.Code != tc.status {
+					t.Fatalf("got %d, want %d: %s", rr.Code, tc.status, rr.Body.String())
+				}
+			})
+		}
+	}
+	for _, path := range []string{
+		"templates/server_settings.html", "templates/storage_settings.html", "templates/storage_provision.html",
+	} {
+		if _, err := assets.ReadFile(path); err == nil {
+			t.Errorf("retired template %s remains embedded", path)
+		}
+	}
+	if _, err := assets.ReadFile("templates/storage_browser.html"); err != nil {
+		t.Fatalf("current Storage browser template missing: %v", err)
+	}
+	for _, tc := range []struct {
+		file   string
+		routes []string
+	}{
+		{"minecraft_workspace.go", []string{
+			`"GET /api/minecraft/workspace/settings"`,
+			`"POST /api/minecraft/workspace/settings/plan"`,
+			`"POST /api/minecraft/workspace/settings/apply"`,
+		}},
+		{"admin_discovery_page.go", []string{
+			`"GET /workspace/storage"`,
+			`a.registerStorageBrowserActionRoutes(mux)`,
+			`a.registerSetupWizardRoutes(mux)`,
+			`a.registerSetupWizardReviewRoutes(mux)`,
+		}},
+		{"storage_browser_actions.go", []string{
+			`"POST /api/new-storage/backup-partition/plan"`,
+			`"POST /api/new-storage/backup-partition/apply"`,
+			`"POST /api/new-storage/actions/plan"`,
+			`"POST /api/new-storage/actions/apply"`,
+			`"GET /api/new-storage/mounts/status"`,
+			`"POST /api/new-storage/mounts/plan"`,
+			`"POST /api/new-storage/mounts/apply"`,
+			`"POST /api/new-storage/whole-disk/plan"`,
+			`"POST /api/new-storage/whole-disk/apply"`,
+			`"GET /api/new-storage/minecraft-data/current"`,
+			`"POST /api/new-storage/minecraft-data/plan"`,
+			`"POST /api/new-storage/minecraft-data/apply"`,
+			`"GET /api/new-storage/minecraft-data/progress/{id}"`,
+		}},
+	} {
+		source, err := os.ReadFile(tc.file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, route := range tc.routes {
+			if !strings.Contains(string(source), route) {
+				t.Errorf("%s missing current route registration %s", tc.file, route)
+			}
+		}
 	}
 }

@@ -51,7 +51,6 @@ type storageBrowserWholeDiskResponse struct {
 	Online                      int      `json:"online,omitempty"`
 	Players                     []string `json:"players,omitempty"`
 	Applied                     bool     `json:"applied,omitempty"`
-	Redirect                    string   `json:"redirect,omitempty"`
 	OperationID                 string   `json:"operation_id,omitempty"`
 }
 
@@ -151,12 +150,6 @@ func (a *App) storageBrowserWholeDiskChange(w http.ResponseWriter, r *http.Reque
 			MountPoint: result.Proposed.MountPoint, Path: result.Proposed.Path,
 			Fingerprint: result.Proposed.Fingerprint, Confirmation: result.Proposed.Confirmation,
 			Warnings: result.Warnings, Applied: result.Applied,
-			Redirect: func() string {
-				if result.Applied {
-					return "/settings/new-storage"
-				}
-				return ""
-			}(),
 		})
 		return
 	}

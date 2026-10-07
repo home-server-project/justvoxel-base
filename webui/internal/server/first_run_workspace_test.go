@@ -1,9 +1,64 @@
 package server
 
 import (
+	"bytes"
+	"context"
 	"strings"
 	"testing"
 )
+
+func TestWorkspaceWindowStateIsScopedToAuthenticatedUser(t *testing.T) {
+	app, err := New(&fakeAPI{}, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := app.dashboardData(context.Background(), "session-token", "csrf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data.Username != "admin" {
+		t.Fatalf("dashboard username = %q, want authenticated username", data.Username)
+	}
+	var markup bytes.Buffer
+	if err := app.templates.ExecuteTemplate(&markup, "dashboard.html", data); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(markup.String(), `data-workspace-username="admin"`) {
+		t.Fatal("dashboard must expose the authenticated username for workspace persistence")
+	}
+
+	source, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(source)
+	start := strings.Index(script, "const workspaceUsername =")
+	end := strings.Index(script, "const workspaceTopInset =")
+	if start < 0 || end <= start {
+		t.Fatal("shared workspace persistence missing")
+	}
+	persistence := script[start:end]
+	for _, want := range []string{
+		`const workspaceUsername = dashboard?.dataset.workspaceUsername || "";`,
+		"const workspaceWindowStateKey = (id) => workspaceUsername\n  ? `justvoxel-workspace-window-${id === \"system-monitor\" ? \"v2\" : \"v1\"}:${encodeURIComponent(workspaceUsername)}:${id}`\n  : null;",
+		"const readWorkspaceWindowState = (id) => {\n  const key = workspaceWindowStateKey(id);\n  if (!key) return {};",
+		"const writeWorkspaceWindowState = (id, patch) => {\n  const key = workspaceWindowStateKey(id);\n  if (!key) return;",
+		`window.localStorage.getItem(key)`,
+		`window.localStorage.setItem(key, JSON.stringify({ ...current, ...patch }))`,
+		`["/login", "/password"].includes(window.location.pathname)`,
+		`!document.querySelector("[data-credential-boundary]")`,
+		`workspaceRestoreAllowed() ? saved : { ...saved, open: false }`,
+	} {
+		if !strings.Contains(persistence, want) {
+			t.Fatalf("user-scoped workspace persistence missing %q", want)
+		}
+	}
+	if strings.Count(persistence, "justvoxel-workspace-window-") != 1 ||
+		strings.Count(persistence, "localStorage.getItem(") != 1 ||
+		strings.Contains(persistence, "localStorage.removeItem(") {
+		t.Fatal("workspace persistence must ignore old unscoped keys without migration or deletion")
+	}
+}
 
 func TestCredentialPagesIgnorePersistedWorkspaceOpenState(t *testing.T) {
 	source, err := assets.ReadFile("static/app.js")

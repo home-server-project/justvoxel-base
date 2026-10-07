@@ -475,7 +475,6 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .minecraft-workspace-content .settings-submit-row{justify-content:flex-end}
 .minecraft-workspace-content .settings-submit-row .muted{order:1}
 .minecraft-workspace-content .settings-submit-row button{order:2}
-.minecraft-workspace-content form[action="/operations/whitelist"]>button[type="submit"]{display:block;margin-left:auto}
 .minecraft-workspace-content .log-box{max-height:430px;overflow:auto}
 @media(max-width:700px){.minecraft-workspace-dialog{inset:52px .25rem .25rem .25rem!important;width:auto!important;height:auto!important;min-width:0;min-height:0;max-width:none;max-height:none;resize:none;border-radius:12px}.minecraft-workspace-header{padding:.85rem .9rem .7rem;cursor:default;touch-action:auto}.minecraft-workspace-tabs{padding:.55rem .9rem}.minecraft-workspace-body{padding:.8rem .9rem}.minecraft-overview-grid{grid-template-columns:1fr}}
 @media(prefers-color-scheme:light){.minecraft-workspace-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025}.minecraft-workspace-header,.minecraft-workspace-tabs{border-color:#d9dfe3}.minecraft-workspace-tabs{background:#f7f9fa}.minecraft-workspace-tabs button{color:#56636c}.minecraft-workspace-tabs button:hover,.minecraft-workspace-tabs button:focus-visible{background:#e9eef1;color:#1a2025}.minecraft-workspace-tabs button[aria-selected="true"]{background:#e3f1e8;border-color:#86b99a;color:#184c31}.minecraft-overview-card,.minecraft-overview-players{background:#f7f9fa;border-color:#d9dfe3}}
@@ -791,6 +790,7 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .first-run-setup-card::after,.minecraft-setup-invitation::after{content:"";position:absolute;inset:-35% -55%;background:linear-gradient(115deg,transparent 38%,#ffffff24 49%,#ffffff42 52%,transparent 63%);transform:translateX(-55%);animation:setup-invite-shimmer 4.8s ease-in-out infinite;pointer-events:none}
 .first-run-setup-card .first-run-card-kicker{color:#9be0b7!important}
 .minecraft-setup-invitation{position:relative;display:grid;gap:.18rem;width:min(600px,100%);margin:0 auto .85rem;padding:1rem 1.1rem;overflow:hidden;border:1px solid #4f8b69;border-radius:15px;background:linear-gradient(135deg,#1c3528,#183024);color:#d8f6e3;box-shadow:0 10px 30px #0004;text-decoration:none;transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease}
+button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:transparent;line-height:normal}
 .quick-look-backup-action{color:#9be0b7;font-size:.67rem;font-weight:700;white-space:nowrap}
 .quick-look-backup-action:hover,.quick-look-backup-action:focus-visible{color:#d8f6e3}
 .dashboard-setup-area{display:grid;place-items:center;min-height:clamp(320px,58dvh,650px)}

@@ -292,26 +292,6 @@ func TestUnconfiguredDashboardShowsSetupWithoutLivePanels(t *testing.T) {
 	}
 }
 
-func TestAboutPageCarriesApplianceBuildInformation(t *testing.T) {
-	app, err := New(&fakeAPI{}, Config{Version: "1.0.0", Commit: "abc123", ManagementAPI: "v1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	req := httptest.NewRequest(http.MethodGet, "http://example/about", nil)
-	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
-	rr := httptest.NewRecorder()
-	app.aboutPage(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("got %d: %s", rr.Code, rr.Body.String())
-	}
-	body := rr.Body.String()
-	for _, want := range []string{"About", "10-test", "1.0.0", "v1", "abc123"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("about page missing %q", want)
-		}
-	}
-}
-
 func TestDashboardStatusRequiresAuthentication(t *testing.T) {
 	app, err := New(&fakeAPI{}, Config{})
 	if err != nil {

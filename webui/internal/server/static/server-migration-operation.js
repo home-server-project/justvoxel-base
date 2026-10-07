@@ -35,6 +35,7 @@ function initServerMigrationOperation(root = document) {
     if (state === "succeeded") return "Succeeded";
     if (state === "rolled_back") return "Rolled back";
     if (state === "needs_attention") return "Needs attention";
+    if (state === "resolved") return "Resolved";
     return "Working";
   };
 
@@ -79,7 +80,7 @@ function initServerMigrationOperation(root = document) {
   };
 
   const supportedType = (type) => ["migration_export", "migration_import", "migration_recovery"].includes(type);
-  const terminalState = (state) => ["succeeded", "rolled_back", "needs_attention"].includes(state);
+  const terminalState = (state) => ["succeeded", "rolled_back", "needs_attention", "resolved"].includes(state);
 
   const render = (operation) => {
     if (!operation || !supportedType(operation.operation_type)) return;
@@ -134,8 +135,3 @@ function initServerMigrationOperation(root = document) {
 }
 
 window.JustVoxelServerMigrationOperation = { init: initServerMigrationOperation };
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", () => initServerMigrationOperation(document), { once: true });
-} else {
-  initServerMigrationOperation(document);
-}

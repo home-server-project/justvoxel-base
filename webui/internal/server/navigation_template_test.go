@@ -1,6 +1,7 @@
 package server
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -65,8 +66,20 @@ func TestControlCenterNavigationUX(t *testing.T) {
 	if !strings.Contains(markup, `class="nav-logout"`) || !strings.Contains(markup, `data-system-power`) {
 		t.Fatal("session and power actions missing")
 	}
-	if !strings.Contains(markup, `class="quick-look-backup-action nav-operator-only" href="/operations#manual-backup"`) {
-		t.Fatal("operator manual backup needs an accessible entry until it has a workspace replacement")
+	quickLookStart := strings.Index(markup, `<section class="quick-look"`)
+	if quickLookStart < 0 {
+		t.Fatal("Quick Look missing")
+	}
+	quickLookEnd := strings.Index(markup[quickLookStart:], `</section>`)
+	if quickLookEnd < 0 {
+		t.Fatal("Quick Look closing tag missing")
+	}
+	quickLook := markup[quickLookStart : quickLookStart+quickLookEnd]
+	if !strings.Contains(quickLook, `<button class="quick-look-backup-action nav-operator-only" type="button" data-quick-look-backup-create>`) {
+		t.Fatal("operator manual backup needs an accessible native Quick Look button")
+	}
+	if strings.Contains(markup, `/operations#manual-backup`) {
+		t.Fatal("header still links to the legacy manual backup operation")
 	}
 }
 
@@ -278,7 +291,7 @@ func TestQuickLookNetworkFitsSingleTileWithoutTruncatingAddresses(t *testing.T) 
 }
 
 func TestBackupsLibraryLeadsWorkspaceAndOwnsActions(t *testing.T) {
-	content, err := assets.ReadFile("templates/new_backups.html")
+	content, err := assets.ReadFile("templates/backups_workspace.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,32 +435,7 @@ func TestAuthenticatedTemplatesUseSharedHeader(t *testing.T) {
 	}
 	for _, name := range []string{
 		"dashboard.html",
-		"about.html",
-		"operations.html",
-		"activity.html",
-		"admin_activity.html",
-		"users.html",
-		"authentication.html",
-		"validation.html",
-		"server_settings.html",
-		"storage_settings.html",
 		"storage_browser.html",
-		"backup_storage.html",
-		"new_backups.html",
-		"restore.html",
-		"restore_review.html",
-		"restore_progress.html",
-		"data_migration.html",
-		"data_migration_review.html",
-		"data_migration_progress.html",
-		"server_migration.html",
-		"server_migration_export.html",
-		"server_migration_export_review.html",
-		"server_migration_import.html",
-		"server_migration_import_review.html",
-		"server_migration_recovery.html",
-		"server_migration_recovery_review.html",
-		"server_migration_progress.html",
 	} {
 		content, err := assets.ReadFile("templates/" + name)
 		if err != nil {
@@ -470,20 +458,45 @@ func TestAuthenticatedTemplatesUseSharedHeader(t *testing.T) {
 	}
 }
 
-func TestOperationsExposeStableNavigationAnchors(t *testing.T) {
-	content, err := assets.ReadFile("templates/operations.html")
+func TestStandaloneOperationsUIRetired(t *testing.T) {
+	app, err := New(&fakeAPI{}, Config{Version: "test", ManagementAPI: "v1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	markup := string(content)
-	for _, want := range []string{
-		`id="manual-backup"`,
-		`id="whitelist"`,
-		`id="minecraft-logs"`,
+	// The GET / catch-all makes retired POST routes return 405, proving
+	// their POST handlers are no longer registered.
+	for _, route := range []struct {
+		method string
+		path   string
+		status int
+	}{
+		{http.MethodGet, "/operations", http.StatusNotFound},
+		{http.MethodPost, "/operations/backup", http.StatusMethodNotAllowed},
+		{http.MethodPost, "/operations/whitelist", http.StatusMethodNotAllowed},
 	} {
-		if !strings.Contains(markup, want) {
-			t.Fatalf("operations template missing navigation anchor %q", want)
-		}
+		t.Run(route.method+" "+route.path, func(t *testing.T) {
+			response := httptestResponse(app, authenticatedAdminRequest(route.method, route.path, ""))
+			if response.Code != route.status {
+				t.Fatalf("retired route returned %d, want HTTP %d", response.Code, route.status)
+			}
+		})
+	}
+	script, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(script), `path === "/operations"`) {
+		t.Fatal("navigation retains the retired Operations branch")
+	}
+	header, err := assets.ReadFile("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(header), `href="/operations`) || strings.Contains(string(header), `href='/operations`) {
+		t.Fatal("header links to retired Operations UI")
+	}
+	if _, err := assets.ReadFile("templates/operations.html"); err == nil {
+		t.Fatal("retired Operations template remains embedded")
 	}
 }
 
@@ -789,7 +802,7 @@ func TestStorageBrowserReviewedActionFlow(t *testing.T) {
 		`reviewedPlan.fingerprint`,
 		`data.system === "Yes"`,
 		`data.readonly === "Yes"`,
-		`window.location.reload()`,
+		`refreshStorageWorkspace();`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("storage action behavior missing %q", want)
@@ -858,22 +871,35 @@ func TestStorageBrowserMinecraftMigrationHandoff(t *testing.T) {
 	}
 }
 
-func TestNewBackupsCompactLibraryLayout(t *testing.T) {
-	templateContent, err := assets.ReadFile("templates/new_backups.html")
+func TestBackupsWorkspaceCompactLibraryLayout(t *testing.T) {
+	templateContent, err := assets.ReadFile("templates/backups_workspace.html")
 	if err != nil {
 		t.Fatal(err)
 	}
 	markup := string(templateContent)
+	loaderContent, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`loadBackupsScript("/static/new-backups.js"`,
+		`loadBackupsScript("/static/restore-operation.js"`,
+		`window.JustVoxelNewBackups?.init(root)`,
+		`window.JustVoxelRestoreOperation?.init(root)`,
+	} {
+		if !strings.Contains(string(loaderContent), want) {
+			t.Fatalf("Backups workspace loader missing %q", want)
+		}
+	}
 	for _, want := range []string{
 		"Backup Now",
 		"Restore selected",
 		"backup-command-bar",
 		"backup-file-grid",
 		"backup-file-card",
-		"/settings/new-backups/backup",
-		"/settings/new-backups/restore/plan",
-		"/settings/new-backups/restore/apply",
-		"/static/restore-operation.js",
+		"/workspace/backups/backup",
+		"/workspace/backups/restore/plan",
+		"/workspace/backups/restore/apply",
 	} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("New Backups template missing %q", want)
@@ -919,12 +945,24 @@ func TestNewBackupsMobileLibraryStaysSingleColumn(t *testing.T) {
 	}
 }
 
-func TestNewBackupsReviewedMultiDeleteFlow(t *testing.T) {
-	templateContent, err := assets.ReadFile("templates/new_backups.html")
+func TestBackupsWorkspaceReviewedMultiDeleteFlow(t *testing.T) {
+	templateContent, err := assets.ReadFile("templates/backups_workspace.html")
 	if err != nil {
 		t.Fatal(err)
 	}
 	markup := string(templateContent)
+	loaderContent, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`loadBackupsScript("/static/new-backups.js"`,
+		`window.JustVoxelNewBackups?.init(root)`,
+	} {
+		if !strings.Contains(string(loaderContent), want) {
+			t.Fatalf("Backups workspace loader missing %q", want)
+		}
+	}
 	for _, want := range []string{
 		`data-backup-select`,
 		`data-backup-delete-selected`,
@@ -933,7 +971,6 @@ func TestNewBackupsReviewedMultiDeleteFlow(t *testing.T) {
 		`data-destructive-slider`,
 		`data-destructive-toggle`,
 		`data-destructive-submit`,
-		`/static/new-backups.js`,
 	} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("New Backups delete UI missing %q", want)
@@ -955,13 +992,22 @@ func TestNewBackupsReviewedMultiDeleteFlow(t *testing.T) {
 		`reviewedPlan.confirmation`,
 		`ids.forEach((id) => body.append("backup_id", id))`,
 		`const workspaceURL = "/workspace/backups?result=deleted&count="`,
-		`const pageURL = "/settings/new-backups?result=deleted&count="`,
 		`window.JustVoxelBackupsWorkspace?.reload`,
 		`await window.JustVoxelBackupsWorkspace.reload(workspaceURL)`,
-		`window.location.assign(pageURL)`,
+		`throw new Error("Backups Workspace reload is unavailable. Refresh the workspace to see the updated library.")`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("New Backups delete behavior missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		`/settings/new-backups`,
+		`pageURL`,
+		`window.location.assign(pageURL)`,
+		`main.new-backups-shell`,
+	} {
+		if strings.Contains(script, forbidden) {
+			t.Fatalf("Backups workspace delete behavior retains retired standalone UI %q", forbidden)
 		}
 	}
 
@@ -982,7 +1028,7 @@ func TestNewBackupsReviewedMultiDeleteFlow(t *testing.T) {
 }
 
 func TestNewBackupsAutomaticPolicyControls(t *testing.T) {
-	templateContent, err := assets.ReadFile("templates/new_backups.html")
+	templateContent, err := assets.ReadFile("templates/backups_workspace.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -991,8 +1037,8 @@ func TestNewBackupsAutomaticPolicyControls(t *testing.T) {
 		`name="automatic_enabled"`,
 		`name="daily_time" type="time"`,
 		`name="backup_keep" type="number"`,
-		`/settings/new-backups/automatic/plan`,
-		`/settings/new-backups/automatic/apply`,
+		`/workspace/backups/automatic/plan`,
+		`/workspace/backups/automatic/apply`,
 		"After a successful backup, JustVoxel automatically removes older backups",
 	} {
 		if !strings.Contains(markup, want) {

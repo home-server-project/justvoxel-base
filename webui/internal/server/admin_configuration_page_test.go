@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
-	"testing"
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
 )
@@ -88,211 +86,13 @@ func settingsFormValues() url.Values {
 	}
 }
 
-func TestGameModeSettingsRequestPreservesVersion(t *testing.T) {
-	client := configuredSettingsFake()
-	request := configurationRequestFromDiscovery(client.configuration)
-	if request.GameMode != "survival" || request.VersionPolicy != "pinned" || request.Version != "1.21.8" || request.ImageTag != "stable" {
-		t.Fatalf("discovered settings lost game mode or version: %#v", request)
-	}
-	values := settingsFormValues()
-	values.Set("game_mode", "creative")
-	r := httptest.NewRequest(http.MethodPost, "/settings/server/plan", strings.NewReader(values.Encode()))
-	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	parsed, err := parseServerSettingsForm(r)
-	if err != nil || parsed.GameMode != "creative" || parsed.VersionPolicy != "pinned" || parsed.Version != "1.21.8" || parsed.ImageTag != "stable" {
-		t.Fatalf("game mode form lost version settings: %#v, %v", parsed, err)
-	}
-	values.Set("game_mode", "adventure")
-	values.Set("version", "1.21.9")
-	r = httptest.NewRequest(http.MethodPost, "/settings/server/plan", strings.NewReader(values.Encode()))
-	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	parsed, err = parseServerSettingsForm(r)
-	if err != nil || parsed.GameMode != "adventure" || parsed.Version != "1.21.9" {
-		t.Fatalf("version form lost game mode: %#v, %v", parsed, err)
-	}
-}
-
-func TestMinecraftSettingsUsesUserFriendlyMemoryControls(t *testing.T) {
-	client := configuredSettingsFake()
-	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rr := legacyPageTestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/settings/server", ""))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("settings page returned %d: %s", rr.Code, rr.Body.String())
-	}
-	body := rr.Body.String()
-	for _, want := range []string{
-		"Minecraft game memory", "Technical name: Java heap", "Maximum Minecraft memory", "container memory limit",
-		"8.0 GiB detected", "2.0 GiB", "1.0 GiB", "Light", "Recommended", "High memory", "Custom",
-		"additional block of 10 players", "JustVoxel itself typically uses roughly 0.6–1.0 GiB", "Memory left outside Minecraft is not reserved", "/static/settings.js", "Review changes",
-	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("settings page missing %q", want)
-		}
-	}
-}
-
-func TestMinecraftSettingsPlanShowsReviewWithoutApplying(t *testing.T) {
-	client := configuredSettingsFake()
-	request := api.AdminConfigurationChangeRequest{
-		JavaMemory: "4G", ContainerMemory: "6G", JavaPort: 25565, BedrockEnabled: true, BedrockPort: 19132,
-		Timezone: "America/Toronto", MaxPlayers: 20, MOTD: "Family Minecraft", ImageTag: "stable",
-		VersionPolicy: "pinned", Version: "1.21.8", GameMode: "survival", BackupKeep: 7, BackupSchedule: "*-*-* 04:30:00", BackupTimerEnabled: true,
-	}
-	client.planResponse = api.AdminConfigurationChangeResponse{
-		OK: true, RestartRequired: true, MemoryRemainingMiB: 2048,
-		Changes:  []api.AdminConfigurationChange{{Field: "max_players", Label: "Maximum players", Before: "10", After: "20", RestartRequired: true}},
-		Warnings: []string{"This is a tight memory configuration."},
-		Proposed: api.AdminConfigurationDiscovery{Configured: true, Minecraft: client.configuration.Minecraft, Backup: client.configuration.Backup},
-	}
-	client.planResponse.Proposed.Minecraft.MaxPlayers = 20
-	client.planResponse.Proposed.Minecraft.BedrockEnabled = true
-
-	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := settingsFormValues().Encode()
-	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/settings/server/plan", body))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("plan returned %d: %s", rr.Code, rr.Body.String())
-	}
-	if client.planCalls != 1 || client.applyCalls != 0 {
-		t.Fatalf("plan calls=%d apply calls=%d", client.planCalls, client.applyCalls)
-	}
-	if client.plannedRequest != request {
-		t.Fatalf("planned request = %#v, want %#v", client.plannedRequest, request)
-	}
-	for _, want := range []string{"Proposed changes", "Maximum players", "10", "20", "Minecraft will not restart automatically", "Apply changes"} {
-		if !strings.Contains(rr.Body.String(), want) {
-			t.Fatalf("review missing %q: %s", want, rr.Body.String())
-		}
-	}
-}
-
-func TestMinecraftMemoryApplyRequiresPlayerConfirmationBeforeMutation(t *testing.T) {
-	client := configuredSettingsFake()
-	proposed := client.configuration
-	proposed.Minecraft.JavaMemory = "5G"
-	proposed.Minecraft.ContainerMemory = "7G"
-	client.applyResponse = api.AdminConfigurationChangeResponse{
-		OK: true, RestartRequired: true, MemoryRestartRequired: true, MemoryRemainingMiB: 1024,
-		Changes: []api.AdminConfigurationChange{
-			{Field: "java_memory", Label: "Minecraft game memory", Before: "4G", After: "5G", RestartRequired: true},
-			{Field: "container_memory", Label: "Maximum Minecraft memory", Before: "6G", After: "7G", RestartRequired: true},
-		},
-		Proposed: proposed, ConfirmationRequired: true, Online: 2, Players: []string{"Alex", "Steve"},
-	}
-	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	values := settingsFormValues()
-	values.Set("java_memory", "5G")
-	values.Set("container_memory", "7G")
-	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/settings/server/apply", values.Encode()))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("confirmation apply returned %d: %s", rr.Code, rr.Body.String())
-	}
-	body := rr.Body.String()
-	for _, want := range []string{"Players are online.", "2 players", "Alex", "Steve", `name="confirm_players" value="yes"`, "Restart Minecraft and apply", "No settings have been changed yet."} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("memory restart confirmation missing %q: %s", want, body)
-		}
-	}
-	if client.applyCalls != 1 || client.appliedRequest.ConfirmPlayers {
-		t.Fatalf("first apply calls=%d confirm=%t", client.applyCalls, client.appliedRequest.ConfirmPlayers)
-	}
-}
-
-func TestMinecraftMemoryConfirmedApplyRedirectsAfterRestart(t *testing.T) {
-	client := configuredSettingsFake()
-	client.applyResponse = api.AdminConfigurationChangeResponse{
-		OK: true, Applied: true, RestartRequired: true, MemoryRestartRequired: true, Restarted: true,
-	}
-	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	values := settingsFormValues()
-	values.Set("java_memory", "5G")
-	values.Set("container_memory", "7G")
-	values.Set("confirm_players", "yes")
-	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/settings/server/apply", values.Encode()))
-	if rr.Code != http.StatusSeeOther {
-		t.Fatalf("confirmed memory apply returned %d: %s", rr.Code, rr.Body.String())
-	}
-	if rr.Header().Get("Location") != "/settings/server?result=saved&memory_restart=1" {
-		t.Fatalf("unexpected redirect %q", rr.Header().Get("Location"))
-	}
-	if !client.appliedRequest.ConfirmPlayers {
-		t.Fatal("confirmed memory apply did not carry player confirmation")
-	}
-}
-
-func TestMinecraftMemoryStoppedServerDefersUntilNextStart(t *testing.T) {
-	client := configuredSettingsFake()
-	client.applyResponse = api.AdminConfigurationChangeResponse{
-		OK: true, Applied: true, RestartRequired: true, MemoryRestartRequired: true, RestartDeferred: true,
-	}
-	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	values := settingsFormValues()
-	values.Set("java_memory", "5G")
-	values.Set("container_memory", "7G")
-	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/settings/server/apply", values.Encode()))
-	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/settings/server?result=saved&next_start=1" {
-		t.Fatalf("stopped memory apply returned %d %q", rr.Code, rr.Header().Get("Location"))
-	}
-}
-func TestMinecraftSettingsApplyRedirectsWithRestartNotice(t *testing.T) {
-	client := configuredSettingsFake()
-	client.applyResponse = api.AdminConfigurationChangeResponse{OK: true, Applied: true, RestartRequired: true, RestartDeferred: true}
-	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := settingsFormValues().Encode()
-	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/settings/server/apply", body))
-	if rr.Code != http.StatusSeeOther {
-		t.Fatalf("apply returned %d: %s", rr.Code, rr.Body.String())
-	}
-	if rr.Header().Get("Location") != "/settings/server?result=saved&restart=1" {
-		t.Fatalf("unexpected redirect %q", rr.Header().Get("Location"))
-	}
-	if client.applyCalls != 1 {
-		t.Fatalf("apply calls = %d, want 1", client.applyCalls)
-	}
-}
-
-func TestMinecraftSettingsOperatorCannotPlanChanges(t *testing.T) {
-	client := configuredSettingsFake()
-	client.role = "operator"
-	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/settings/server/plan", settingsFormValues().Encode()))
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("operator plan status = %d, want 403", rr.Code)
-	}
-	if client.planCalls != 0 {
-		t.Fatalf("plan API called for operator %d times", client.planCalls)
-	}
-}
-
 func httptestResponse(app *App, request *http.Request) *httptest.ResponseRecorder {
 	rr := httptest.NewRecorder()
 	app.Handler().ServeHTTP(rr, request)
 	return rr
 }
 
-// Tests for the retained operation handlers call them directly now that their
-// public GET routes lead to workspaces.
+// Shared response helpers for page tests.
 func legacyPageTestResponse(app *App, request *http.Request) *httptest.ResponseRecorder {
 	rr := httptest.NewRecorder()
 	legacyPageTestServe(app, rr, request)
@@ -300,36 +100,5 @@ func legacyPageTestResponse(app *App, request *http.Request) *httptest.ResponseR
 }
 
 func legacyPageTestServe(app *App, rr *httptest.ResponseRecorder, request *http.Request) {
-	switch request.URL.Path {
-	case "/settings/server":
-		app.serverSettingsPage(rr, request)
-	case "/settings/storage":
-		app.storageSettingsPage(rr, request)
-	case "/settings/new-storage":
-		app.storageBrowserPage(rr, request)
-	case "/settings/validation":
-		app.adminValidationPage(rr, request)
-	case "/settings/users":
-		app.adminUsersPage(rr, request)
-	case "/settings/storage-provision":
-		app.storageProvisionPage(rr, request)
-	case "/settings/new-backups":
-		app.newBackupsPage(rr, request)
-	case "/settings/backup-storage":
-		app.backupStoragePage(rr, request)
-	case "/settings/restore":
-		app.restorePage(rr, request)
-	case "/settings/server-migration":
-		app.serverMigrationPage(rr, request)
-	case "/settings/server-migration/export":
-		app.serverMigrationExportPage(rr, request)
-	case "/settings/server-migration/import":
-		app.serverMigrationImportPage(rr, request)
-	case "/settings/server-migration/recovery":
-		app.serverMigrationRecoveryPage(rr, request)
-	case "/settings/data-migration":
-		app.dataMigrationPage(rr, request)
-	default:
-		app.Handler().ServeHTTP(rr, request)
-	}
+	app.Handler().ServeHTTP(rr, request)
 }

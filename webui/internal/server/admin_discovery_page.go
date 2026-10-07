@@ -21,23 +21,6 @@ type storageBrowserMigrationDiscoveryAPI interface {
 	AdminDataMigrationDiscovery(ctx context.Context, session string) (api.AdminDataMigrationDiscoveryResponse, error)
 }
 
-type serverSettingsPageData struct {
-	Title                    string
-	Version                  string
-	ManagementAPI            string
-	CSRF                     string
-	Identity                 api.SessionInfo
-	Configuration            api.AdminConfigurationDiscovery
-	Defaults                 api.AdminSetupDefaults
-	Form                     api.AdminConfigurationChangeRequest
-	Plan                     *api.AdminConfigurationChangeResponse
-	Error                    string
-	Message                  string
-	SystemMemory             string
-	SystemReserveMinimum     string
-	SystemReserveRecommended string
-}
-
 type storageDeviceView struct {
 	Name                 string
 	Path                 string
@@ -56,17 +39,6 @@ type storageDeviceView struct {
 	FilesystemUsed       string
 	FilesystemFree       string
 	FilesystemUsageKnown bool
-}
-
-type storageSettingsPageData struct {
-	Title         string
-	Version       string
-	ManagementAPI string
-	CSRF          string
-	Identity      api.SessionInfo
-	Configuration api.AdminConfigurationDiscovery
-	SystemDisks   []string
-	Devices       []storageDeviceView
 }
 
 type storageBrowserPartitionView struct {
@@ -133,94 +105,10 @@ type storageBrowserPageData struct {
 }
 
 func (a *App) registerAdminDiscoveryPages(mux *http.ServeMux) {
-	mux.HandleFunc("GET /settings/server", a.legacyWorkspaceRedirect("administrator", "minecraft", "memory"))
-	mux.HandleFunc("POST /settings/server/plan", a.serverSettingsPlan)
-	mux.HandleFunc("POST /settings/server/apply", a.serverSettingsApply)
-	mux.HandleFunc("GET /settings/storage", a.legacyWorkspaceRedirect("administrator", "storage", ""))
-	mux.HandleFunc("GET /settings/new-storage", a.legacyWorkspaceRedirect("administrator", "storage", ""))
 	mux.HandleFunc("GET /workspace/storage", a.storageBrowserWindow)
-	a.registerAdminBackupStoragePages(mux)
-	a.registerAdminStorageProvisionPages(mux)
 	a.registerStorageBrowserActionRoutes(mux)
 	a.registerSetupWizardRoutes(mux)
 	a.registerSetupWizardReviewRoutes(mux)
-}
-
-func (a *App) serverSettingsPage(w http.ResponseWriter, r *http.Request) {
-	session, client, identity, ok := a.adminDiscoveryRequest(w, r)
-	if !ok {
-		return
-	}
-	configuration, err := client.AdminConfiguration(r.Context(), session)
-	if err != nil {
-		a.handleAdminDiscoveryError(w, r, err)
-		return
-	}
-	defaults, err := client.AdminSetupDefaults(r.Context(), session)
-	if err != nil {
-		a.handleAdminDiscoveryError(w, r, err)
-		return
-	}
-	message := ""
-	if r.URL.Query().Get("result") == "saved" {
-		switch {
-		case r.URL.Query().Get("memory_restart") == "1":
-			message = "Memory settings saved and Minecraft restarted with the new limits."
-		case r.URL.Query().Get("next_start") == "1":
-			message = "Memory settings saved. Minecraft is stopped, so the new limits will be used on its next start."
-		case r.URL.Query().Get("restart") == "1":
-			message = "Settings saved. Minecraft was not restarted; restart it when it is safe to apply the server changes."
-		default:
-			message = "Settings saved and applied."
-		}
-	}
-	data := a.buildServerSettingsPageData(identity, configuration, defaults, configurationRequestFromDiscovery(configuration), nil, "", message)
-	data.CSRF = csrfFromRequest(r)
-	a.renderAdminDiscovery(w, "server_settings.html", data)
-}
-
-func (a *App) storageSettingsPage(w http.ResponseWriter, r *http.Request) {
-	session, client, identity, ok := a.adminDiscoveryRequest(w, r)
-	if !ok {
-		return
-	}
-	configuration, err := client.AdminConfiguration(r.Context(), session)
-	if err != nil {
-		a.handleAdminDiscoveryError(w, r, err)
-		return
-	}
-	storage, err := client.AdminStorage(r.Context(), session)
-	if err != nil {
-		a.handleAdminDiscoveryError(w, r, err)
-		return
-	}
-	devices := make([]storageDeviceView, 0, len(storage.Devices))
-	for _, device := range storage.Devices {
-		devices = append(devices, storageDeviceView{
-			Name: device.Name, Path: device.Path, Parent: device.Parent, Type: device.Type, Size: humanBytes(device.SizeBytes),
-			Filesystem: device.Filesystem, Label: device.Label, UUID: device.UUID,
-			Mountpoints: strings.Join(device.Mountpoints, ", "), Model: device.Model, Transport: device.Transport,
-			ReadOnly: device.ReadOnly, System: device.System,
-		})
-	}
-	a.renderAdminDiscovery(w, "storage_settings.html", storageSettingsPageData{
-		Title: "Storage overview", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
-		CSRF: csrfFromRequest(r), Identity: identity, Configuration: configuration,
-		SystemDisks: storage.SystemDisks, Devices: devices,
-	})
-}
-
-func (a *App) storageBrowserPage(w http.ResponseWriter, r *http.Request) {
-	session, client, identity, ok := a.adminDiscoveryRequest(w, r)
-	if !ok {
-		return
-	}
-	data, err := a.buildStorageBrowserPageData(r.Context(), session, client, identity, csrfFromRequest(r))
-	if err != nil {
-		a.handleAdminDiscoveryError(w, r, err)
-		return
-	}
-	a.renderAdminDiscovery(w, "storage_browser.html", data)
 }
 
 func (a *App) storageBrowserWindow(w http.ResponseWriter, r *http.Request) {

@@ -121,7 +121,7 @@
         <article class="quick-look-tile"><span>Players</span><strong data-quick-look-players>—</strong></article>
         <article class="quick-look-tile"><span>System</span><strong data-quick-look-system>—</strong></article>
         <article class="quick-look-tile quick-look-network-tile"><div class="quick-look-network-row"><span>IPv4</span><strong data-quick-look-ipv4>—</strong></div><div class="network-overlay-list" data-quick-look-overlays></div></article>
-        <article class="quick-look-tile"><div class="quick-look-tile-heading"><span>Backup</span><a class="quick-look-backup-action nav-operator-only" href="/operations#manual-backup">Create backup</a></div><strong data-quick-look-backup>—</strong></article>
+        <article class="quick-look-tile"><div class="quick-look-tile-heading"><span>Backup</span><button class="quick-look-backup-action nav-operator-only" type="button" data-quick-look-backup-create>Create backup</button><input type="hidden" value="{{.CSRF}}" data-quick-look-backup-csrf></div><strong data-quick-look-backup>—</strong></article>
       </div>
     </div>
     <button class="quick-look-handle" type="button" data-quick-look-toggle aria-expanded="false" aria-controls="quick-look-panel" aria-label="Toggle Quick Look">

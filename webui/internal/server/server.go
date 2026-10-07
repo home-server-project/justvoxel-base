@@ -72,6 +72,7 @@ type pageData struct {
 	Error            string
 	Message          string
 	CSRF             string
+	Username         string
 	Status           api.Status
 	Players          api.Players
 	PendingAction    string
@@ -88,16 +89,6 @@ type dashboardSnapshot struct {
 	Status    api.Status          `json:"status"`
 	Players   api.Players         `json:"players"`
 	Attention *dashboardAttention `json:"attention,omitempty"`
-}
-
-type aboutPageData struct {
-	Title         string
-	Version       string
-	Commit        string
-	ManagementAPI string
-	CSRF          string
-	Identity      api.SessionInfo
-	Status        api.Status
 }
 
 func New(client API, cfg Config) (*App, error) {
@@ -125,17 +116,11 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /password", a.providerPasswordPage)
 	mux.HandleFunc("POST /password", a.providerPasswordChange)
 	mux.HandleFunc("GET /factory-reset-complete", a.factoryResetCompletePage)
-	mux.HandleFunc("GET /settings/authentication", a.legacyWorkspaceRedirect("administrator", "system", "security"))
-	mux.HandleFunc("POST /settings/authentication", a.authenticationChange)
-	a.registerAdminUsersRoutes(mux)
+	a.registerRolePages(mux)
 	a.registerAdminDiscoveryPages(mux)
-	a.registerAdminValidationPages(mux)
 	a.registerAdminRestorePages(mux)
-	a.registerNewBackupsPages(mux)
 	a.registerBackupsWorkspaceRoutes(mux)
 	a.registerNewBackupsDeleteRoutes(mux)
-	a.registerAdminDataMigrationPages(mux)
-	a.registerAdminServerMigrationPages(mux)
 	a.registerAdminMigrationWorkspacePages(mux)
 	a.registerAdminSystemActionPages(mux)
 	a.registerAdminSystemUpdatePages(mux)
@@ -145,7 +130,6 @@ func (a *App) Handler() http.Handler {
 	a.registerMinecraftWorkspaceRoutes(mux)
 	a.registerSystemWorkspaceRoutes(mux)
 	mux.HandleFunc("GET /api/dashboard-status", a.dashboardStatus)
-	mux.HandleFunc("GET /about", a.legacyWorkspaceRedirect("", "system", "about"))
 	mux.HandleFunc("POST /minecraft/start", a.minecraftAction("start"))
 	mux.HandleFunc("POST /minecraft/stop", a.minecraftAction("stop"))
 	mux.HandleFunc("POST /minecraft/restart", a.minecraftAction("restart"))
@@ -275,38 +259,6 @@ func (a *App) passwordChange(w http.ResponseWriter, r *http.Request) {
 	}
 	a.clearSessionCookies(w)
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
-}
-
-func (a *App) aboutPage(w http.ResponseWriter, r *http.Request) {
-	session, ok := sessionFromRequest(r)
-	if !ok {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
-	}
-	identityClient, ok := a.api.(sessionIdentityAPI)
-	if !ok {
-		http.Error(w, "session information is unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	identity, err := identityClient.Session(r.Context(), session)
-	if err != nil {
-		a.handleRolePageError(w, r, err)
-		return
-	}
-	status, err := a.api.Status(r.Context(), session)
-	if err != nil {
-		a.handleRolePageError(w, r, err)
-		return
-	}
-	a.renderAbout(w, aboutPageData{
-		Title:         "About",
-		Version:       a.config.Version,
-		Commit:        a.config.Commit,
-		ManagementAPI: a.config.ManagementAPI,
-		CSRF:          csrfFromRequest(r),
-		Identity:      identity,
-		Status:        status,
-	})
 }
 
 func (a *App) dashboard(w http.ResponseWriter, r *http.Request) {
@@ -442,10 +394,13 @@ func (a *App) dashboardData(ctx context.Context, session, csrf string) (pageData
 		Status:        status,
 		Players:       players,
 	}
-	if operations, ok := a.api.(dashboardOperationAPI); ok {
-		identity, identityErr := operations.Session(ctx, session)
-		if identityErr == nil && identity.Role == "administrator" {
-			data.Attention = dashboardCurrentAttention(ctx, operations, session)
+	if identityClient, ok := a.api.(sessionIdentityAPI); ok {
+		identity, identityErr := identityClient.Session(ctx, session)
+		if identityErr == nil {
+			data.Username = identity.Username
+			if operations, ok := a.api.(dashboardOperationAPI); ok && identity.Role == "administrator" {
+				data.Attention = dashboardCurrentAttention(ctx, operations, session)
+			}
 		}
 	}
 	return data, nil
@@ -554,14 +509,6 @@ func actionProgress(action string) string {
 		return "Restarting…"
 	default:
 		return "Working…"
-	}
-}
-
-func (a *App) renderAbout(w http.ResponseWriter, data aboutPageData) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	if err := a.templates.ExecuteTemplate(w, "about.html", data); err != nil {
-		http.Error(w, "render error", http.StatusInternalServerError)
 	}
 }
 

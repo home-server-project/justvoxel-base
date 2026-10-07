@@ -6,6 +6,42 @@ import (
 	"testing"
 )
 
+func TestSystemMonitorPersistedRestoreAllowsAllSupportedRoles(t *testing.T) {
+	source, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(source)
+	start := strings.Index(script, "const monitorRestoreRoleAllowed =")
+	if start < 0 {
+		t.Fatal("System Monitor restore role check missing")
+	}
+	end := strings.Index(script[start:], "  restoreWhenRoleKnown();")
+	if end < 0 {
+		t.Fatal("System Monitor persisted restore missing")
+	}
+	restore := script[start : start+end]
+	for _, want := range []string{
+		`!document.body.classList.contains("role-pending") &&`,
+		`["role-administrator", "role-operator", "role-viewer"].some((role) => document.body.classList.contains(role))`,
+		`if (!readWorkspaceWindowState("system-monitor").open) return;`,
+		`if (monitorRestoreRoleAllowed()) {`,
+		`if (!document.body.classList.contains("role-pending")) return;`,
+		`const observer = new MutationObserver(() => {`,
+		`if (document.body.classList.contains("role-pending")) return;`,
+		`observer.disconnect();`,
+		`if (monitorRestoreRoleAllowed()) workspaceWindow?.open();`,
+		`observer.observe(document.body, { attributes: true, attributeFilter: ["class"] });`,
+	} {
+		if !strings.Contains(restore, want) {
+			t.Fatalf("System Monitor persisted restore missing %q", want)
+		}
+	}
+	if strings.Count(script, "monitorRestoreRoleAllowed()") != 2 {
+		t.Fatal("supported-role restore check must apply only to System Monitor")
+	}
+}
+
 func TestSystemMonitorProcessCountUIContract(t *testing.T) {
 	header, err := assets.ReadFile("templates/header.html")
 	if err != nil {

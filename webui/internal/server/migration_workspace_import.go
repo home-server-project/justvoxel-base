@@ -467,6 +467,19 @@ func parseMigrationWorkspaceImportDestination(r *http.Request, discovery api.Adm
 	}, nil
 }
 
+func importServerSoftwareLabel(serverType string) string {
+	switch serverType {
+	case "paper", "itzg-paper":
+		return "Paper"
+	case "purpur":
+		return "Purpur"
+	case "vanilla":
+		return "Vanilla"
+	default:
+		return serverType
+	}
+}
+
 func scrubMigrationWorkspaceImportSecrets(request api.AdminMigrationImportRequest) api.AdminMigrationImportRequest {
 	request.Source.SMBPassword = ""
 	return request

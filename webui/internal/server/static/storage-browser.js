@@ -3,6 +3,10 @@
     if (!root) return;
     if (root.dataset?.storageBrowserInitialized === "true") return;
     if (root.dataset) root.dataset.storageBrowserInitialized = "true";
+    function refreshStorageWorkspace() {
+      const workspace = root.closest("[data-storage-workspace-dialog]");
+      workspace?.querySelector("[data-storage-refresh]")?.click();
+    }
   const diskButtons = [...root.querySelectorAll("[data-storage-disk]")];
   const diskPanels = [...root.querySelectorAll("[data-storage-partitions]")];
   const partitionButtons = [...root.querySelectorAll("[data-storage-partition]")];
@@ -602,10 +606,9 @@
           stage: "queued",
           status: "Minecraft data migration operation queued.",
         });
-      } else if (payload.redirect) {
-        window.location.assign(payload.redirect);
       } else {
-        window.location.reload();
+        wholeDiskDialog?.close();
+        refreshStorageWorkspace();
       }
     } catch (error) {
       wholeDiskApplying = false;
@@ -855,7 +858,8 @@
     createApply.textContent = "Applying…";
     try {
       await postCreatePartition("apply");
-      window.location.reload();
+      createDialog?.close();
+      refreshStorageWorkspace();
     } catch (error) {
       createApplying = false;
       if (createError) {
@@ -1202,7 +1206,7 @@
   migrationClose?.addEventListener("click", closeMigrationDialog);
   migrationCancel?.addEventListener("click", closeMigrationDialog);
   migrationProgressClose?.addEventListener("click", closeMigrationDialog);
-  migrationRefresh?.addEventListener("click", () => window.location.reload());
+  migrationRefresh?.addEventListener("click", refreshStorageWorkspace);
   migrationDialog?.addEventListener("click", (event) => { if (event.target === migrationDialog) closeMigrationDialog(); });
   migrationDialog?.addEventListener("cancel", (event) => { if (migrationApplying) event.preventDefault(); else stopMigrationPolling(); });
 
@@ -1464,7 +1468,8 @@
         fingerprint: reviewedPlan.fingerprint,
         confirmation: entered,
       });
-      window.location.reload();
+      actionDialog?.close();
+      refreshStorageWorkspace();
     } catch (error) {
       actionApplying = false;
       if (actionError) { actionError.textContent = error.message; actionError.hidden = false; }

@@ -1,6 +1,8 @@
 package server
 
 import (
+	"errors"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -233,7 +235,7 @@ func TestMigrationWorkspaceExplicitURLStateContract(t *testing.T) {
 func TestMigrationWorkspaceImportAttentionActionsAndResolvedNavigation(t *testing.T) {
 	backAnchor := regexp.MustCompile(`<a\b[^>]*\bid="server-migration-back-link"[^>]*>Back</a>`)
 	hiddenAttribute := regexp.MustCompile(`\shidden(?:\s|>)`)
-	for _, surface := range []string{"workspace", "standalone"} {
+	for _, surface := range []string{"workspace"} {
 		t.Run(surface, func(t *testing.T) {
 			for _, state := range []string{"validating", "running", "verifying", "needs_attention", "resolved", "succeeded", "rolled_back"} {
 				t.Run(state, func(t *testing.T) {
@@ -245,9 +247,6 @@ func TestMigrationWorkspaceImportAttentionActionsAndResolvedNavigation(t *testin
 						t.Fatal(err)
 					}
 					path := "/workspace/migration/progress/"
-					if surface == "standalone" {
-						path = "/settings/server-migration/progress/"
-					}
 					request := authenticatedAdminRequest(http.MethodGet, "http://example"+path+serverMigrationOperationID, "")
 					request.Header.Set(migrationWorkspaceFragmentHeader, "1")
 					page := httptestResponse(app, request)
@@ -268,9 +267,6 @@ func TestMigrationWorkspaceImportAttentionActionsAndResolvedNavigation(t *testin
 					}
 					if state == "needs_attention" {
 						recoveryLink := `href="/?workspace=migration&amp;tab=recovery" >Review Migration Recovery</a>`
-						if surface == "standalone" {
-							recoveryLink = `href="/settings/server-migration/recovery">Review Migration Recovery</a>`
-						}
 						if !strings.Contains(body, recoveryLink) {
 							t.Fatalf("needs-attention progress actions loop or omit Recovery: %s", body)
 						}
@@ -310,6 +306,12 @@ func TestMigrationWorkspacePolledAttentionHidesLoopingNavigation(t *testing.T) {
 	if render < 0 || poll <= render {
 		t.Fatal("migration operation render/poll path is missing")
 	}
+	if !strings.Contains(js[:render], `const terminalState = (state) => ["succeeded", "rolled_back", "needs_attention", "resolved"].includes(state);`) || !strings.Contains(js[render:poll], `if (terminalState(operation.state)) finished = true;`) {
+		t.Fatal("migration operation renderer does not stop polling for resolved state")
+	}
+	if !strings.Contains(js[:render], `if (state === "resolved") return "Resolved";`) {
+		t.Fatal("migration operation renderer does not label resolved state as Resolved")
+	}
 	for _, want := range []string{
 		`const succeeded = operation.state === "succeeded";`,
 		`const rolledBack = operation.state === "rolled_back";`,
@@ -322,5 +324,111 @@ func TestMigrationWorkspacePolledAttentionHidesLoopingNavigation(t *testing.T) {
 	}
 	if !strings.Contains(js[poll:], "render(payload.operation);") {
 		t.Fatal("migration poll does not render the current operation")
+	}
+}
+
+func TestStandaloneServerMigrationUIRetired(t *testing.T) {
+	app, err := New(&fakeServerMigrationAPI{}, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		method string
+		paths  []string
+		status int
+	}{
+		{http.MethodGet, []string{
+			"/settings/server-migration",
+			"/settings/server-migration/export",
+			"/settings/server-migration/import",
+			"/settings/server-migration/recovery",
+			"/settings/server-migration/progress/operation-id",
+			"/api/server-migration/progress/operation-id",
+		}, http.StatusNotFound},
+		{http.MethodPost, []string{
+			"/settings/server-migration/export/review",
+			"/settings/server-migration/export/apply",
+			"/settings/server-migration/import/review",
+			"/settings/server-migration/import/apply",
+			"/settings/server-migration/recovery/review",
+			"/settings/server-migration/recovery/apply",
+			"/settings/server-migration/recovery/resolve",
+		}, http.StatusMethodNotAllowed},
+	} {
+		for _, path := range tc.paths {
+			t.Run(tc.method+" "+path, func(t *testing.T) {
+				response := httptestResponse(app, authenticatedAdminRequest(tc.method, "http://example"+path, ""))
+				if response.Code != tc.status {
+					t.Fatalf("status = %d, want %d", response.Code, tc.status)
+				}
+			})
+		}
+	}
+	for _, name := range []string{
+		"server_migration.html", "server_migration_export.html", "server_migration_export_review.html",
+		"server_migration_import.html", "server_migration_import_review.html", "server_migration_progress.html",
+		"server_migration_recovery.html", "server_migration_recovery_review.html",
+	} {
+		if _, err := assets.ReadFile("templates/" + name); !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("retired template %s: expected absence, got %v", name, err)
+		}
+	}
+	for _, tc := range []struct{ template, action string }{
+		{"migration_workspace_export.html", "/workspace/migration/export/review"},
+		{"migration_workspace_export_review.html", "/workspace/migration/export/apply"},
+		{"migration_workspace_import.html", "/workspace/migration/import/review"},
+		{"migration_workspace_import_review.html", "/workspace/migration/import/apply"},
+		{"migration_workspace_recovery.html", "/workspace/migration/recovery/review"},
+		{"migration_workspace_recovery_review.html", "/workspace/migration/recovery/apply"},
+		{"migration_workspace_recovery.html", "/workspace/migration/recovery/resolve"},
+		{"migration_workspace_progress.html", "/api/workspace/migration/progress/"},
+	} {
+		markup, err := assets.ReadFile("templates/" + tc.template)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(markup), tc.action) {
+			t.Fatalf("%s missing current action %q", tc.template, tc.action)
+		}
+	}
+}
+
+func TestMigrationScriptsUseWorkspaceInitializationOnly(t *testing.T) {
+	for _, kind := range []string{"export", "import", "operation"} {
+		name := map[string]string{"export": "Export", "import": "Import", "operation": "Operation"}[kind]
+		script, err := assets.ReadFile("static/server-migration-" + kind + ".js")
+		if err != nil {
+			t.Fatal(err)
+		}
+		js := string(script)
+		for _, want := range []string{"window.JustVoxelServerMigration" + name, "initServerMigration" + name} {
+			if !strings.Contains(js, want) {
+				t.Fatalf("%s script missing %q", kind, want)
+			}
+		}
+		for _, forbidden := range []string{
+			"requestStandalone" + name + "SMBPassword", "workspaceManaged", "DOMContentLoaded", "initServerMigration" + name + "(document)",
+		} {
+			if strings.Contains(js, forbidden) {
+				t.Fatalf("%s script retains %q", kind, forbidden)
+			}
+		}
+		if kind == "operation" && !strings.Contains(js, `const terminalState = (state) => ["succeeded", "rolled_back", "needs_attention", "resolved"].includes(state);`) {
+			t.Fatal("resolved must remain a terminal operation state")
+		}
+	}
+	script, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"Export", "Import", "Operation"} {
+		for _, want := range []string{
+			`await loadMigrationScript("/static/server-migration-` + strings.ToLower(kind) + `.js", () => Boolean(window.JustVoxelServerMigration` + kind + `?.init));`,
+			`window.JustVoxelServerMigration` + kind + `?.init(root);`,
+		} {
+			if !strings.Contains(string(script), want) {
+				t.Fatalf("app.js missing current initialization %q", want)
+			}
+		}
 	}
 }

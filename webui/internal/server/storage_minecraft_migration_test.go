@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
@@ -130,6 +131,11 @@ func TestStorageMinecraftMigrationApplyReplansAndReturnsPersistentOperation(t *t
 }
 
 func TestStorageMinecraftMigrationSourceHasNoLegacyPageDependency(t *testing.T) {
+	assertStorageMinecraftMigrationSource(t)
+}
+
+func assertStorageMinecraftMigrationSource(t *testing.T) {
+	t.Helper()
 	for _, name := range []string{
 		"templates/storage_browser.html",
 		"static/storage-browser.js",
@@ -138,8 +144,10 @@ func TestStorageMinecraftMigrationSourceHasNoLegacyPageDependency(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(string(content), "/settings/data-migration") {
-			t.Fatalf("Storage workspace still references legacy Data Migration page in %s", name)
+		for _, forbidden := range []string{"/settings/data-migration", "/api/data-migration/progress", "data-migration-operation.js"} {
+			if strings.Contains(string(content), forbidden) {
+				t.Fatalf("Storage workspace still references %q in %s", forbidden, name)
+			}
 		}
 	}
 
@@ -229,4 +237,40 @@ func TestStorageMinecraftMigrationProgressUsesPersistentOperationJournal(t *test
 			t.Fatalf("Storage migration progress missing %q: %s", want, rr.Body.String())
 		}
 	}
+}
+
+func TestStandaloneDataMigrationUIRetired(t *testing.T) {
+	app, err := New(&fakeAPI{}, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		method, path string
+		status       int
+	}{
+		{http.MethodGet, "/settings/data-migration", http.StatusNotFound},
+		{http.MethodGet, "/settings/data-migration/progress/operation-id", http.StatusNotFound},
+		{http.MethodGet, "/api/data-migration/progress/operation-id", http.StatusNotFound},
+		{http.MethodPost, "/settings/data-migration/review", http.StatusMethodNotAllowed},
+		{http.MethodPost, "/settings/data-migration/apply", http.StatusMethodNotAllowed},
+	} {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			rr := httptestResponse(app, authenticatedAdminRequest(tc.method, "http://example"+tc.path, ""))
+			if rr.Code != tc.status {
+				t.Fatalf("status=%d, want %d: %s", rr.Code, tc.status, rr.Body.String())
+			}
+		})
+	}
+	for _, name := range []string{
+		"templates/data_migration.html",
+		"templates/data_migration_review.html",
+		"templates/data_migration_progress.html",
+		"static/data-migration-operation.js",
+	} {
+		if _, err := assets.ReadFile(name); !os.IsNotExist(err) {
+			t.Fatalf("retired asset %s: expected not found, got %v", name, err)
+		}
+	}
+	// The Storage workspace and its native migration endpoints remain available.
+	assertStorageMinecraftMigrationSource(t)
 }

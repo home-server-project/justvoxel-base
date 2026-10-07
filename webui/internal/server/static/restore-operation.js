@@ -99,6 +99,6 @@
   }
 
   window.JustVoxelRestoreOperation = { init: initRestoreOperation };
-  const initialRoot = document.querySelector("[data-backups-workspace-root]") || document.querySelector("main.new-backups-shell");
+  const initialRoot = document.querySelector("[data-backups-workspace-root]");
   if (initialRoot) initRestoreOperation(initialRoot);
 })();

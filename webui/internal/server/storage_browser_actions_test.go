@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 
@@ -921,6 +922,16 @@ func TestStorageBrowserUSBBackupsUseExistingWholeDiskProvisioner(t *testing.T) {
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"applied":true`) {
 		t.Fatalf("backup Apply failed: %d %s", rr.Code, rr.Body.String())
 	}
+	var result map[string]json.RawMessage
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := result["redirect"]; exists {
+		t.Fatalf("backup Apply returned an obsolete redirect: %s", rr.Body.String())
+	}
+	if string(result["ok"]) != "true" || string(result["applied"]) != "true" {
+		t.Fatalf("backup Apply lost successful result: %s", rr.Body.String())
+	}
 	request.Fingerprint = "usb-backup-review"
 	request.Confirmation = "ERASE /dev/sda"
 	if client.applied != request {
@@ -1078,5 +1089,42 @@ func TestStorageBrowserBackupPartitionUsesStorageReviewModal(t *testing.T) {
 	}
 	if !strings.Contains(string(markup), `data-storage-action="use-for-backups" hidden>Use for backups</button>`) {
 		t.Fatal("partition backup action missing")
+	}
+}
+
+func TestStorageBrowserActionsRefreshWorkspaceInPlace(t *testing.T) {
+	js, err := assets.ReadFile("static/storage-browser.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(js)
+	for _, forbidden := range []string{"payload.redirect", "window.location.reload()", "/settings/new-storage"} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("Storage actions still contain %q", forbidden)
+		}
+	}
+	for _, want := range []string{
+		`function refreshStorageWorkspace()`,
+		`root.closest("[data-storage-workspace-dialog]")`,
+		`workspace?.querySelector("[data-storage-refresh]")?.click()`,
+		"wholeDiskDialog?.close();\n        refreshStorageWorkspace();",
+		"createDialog?.close();\n      refreshStorageWorkspace();",
+		"actionDialog?.close();\n      refreshStorageWorkspace();",
+		`migrationRefresh?.addEventListener("click", refreshStorageWorkspace)`,
+		`if (payload.operation_id)`,
+		`showMigrationProgress({`,
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("Storage workspace refresh contract missing %q", want)
+		}
+	}
+	actions, err := os.ReadFile("storage_browser_actions.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{`/settings/new-storage`, `json:"redirect`} {
+		if strings.Contains(string(actions), forbidden) {
+			t.Fatalf("Storage action response still exposes %q", forbidden)
+		}
 	}
 }

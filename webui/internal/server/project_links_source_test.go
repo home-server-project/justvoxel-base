@@ -28,7 +28,6 @@ func TestProjectLinksInDashboardAndAbout(t *testing.T) {
 		show func(http.ResponseWriter, *http.Request)
 	}{
 		{"dashboard", "/", app.Handler().ServeHTTP},
-		{"about page", "/about", app.aboutPage},
 	} {
 		t.Run(page.name, func(t *testing.T) {
 			req := authenticatedAdminRequest(http.MethodGet, "http://example"+page.path, "")

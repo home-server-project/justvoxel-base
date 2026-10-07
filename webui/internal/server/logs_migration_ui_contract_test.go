@@ -59,7 +59,7 @@ func TestMigrationWorkspaceHasBoundedContentAndNormalConfirmation(t *testing.T) 
 	if strings.Contains(string(css), `.migration-workspace-content form>.action-row:last-of-type{position:sticky`) {
 		t.Fatal("Migration confirmation must remain in the content flow")
 	}
-	for _, name := range []string{"migration_workspace_recovery_review.html", "server_migration_recovery_review.html"} {
+	for _, name := range []string{"migration_workspace_recovery_review.html"} {
 		markup, err := os.ReadFile(filepath.Join("templates", name))
 		if err != nil {
 			t.Fatal(err)
