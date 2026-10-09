@@ -733,20 +733,36 @@ func TestNetBirdActivationOpensCorrectLoginAndRejectsTailscale(t *testing.T) {
 	}
 	program := `
 const assert = require("node:assert/strict");
-let remoteBusy = false, netbirdLoginURL = "", pending, loginTab, responseURL;
+let remoteBusy = false, netbirdLoginURL = "", pending, loginTab, responseURL, responseError;
+let blocked = false, events = [];
 const remoteProviders = [{ id: "netbird", service_active: false, connected: false, configured: false }];
 const providerProgress = new Map();
 const window = { open(url, target) {
+  events.push("open");
   assert.equal(url, "about:blank");
   assert.equal(target, "_blank");
-  loginTab = { closed: false, opener: {}, navigations: [],
+  if (blocked) return null;
+  loginTab = { closed: false, opener: {}, navigations: [], html: "",
     location: { replace(url) { loginTab.navigations.push(url); } },
-    close() { this.closed = true; } };
+    close() { this.closed = true; },
+    document: {
+      open() { events.push("document.open"); loginTab.html = ""; },
+      write(html) { events.push("document.write"); loginTab.html += html; },
+      close() { events.push("document.close"); }
+    }
+  };
   return loginTab;
 } };
 const postForm = async (path, params) => {
+  events.push("request");
   assert.equal(path, "/api/network/remote-access/netbird");
   assert.deepEqual(params, { action: "activate" });
+  if (!blocked) {
+    assert.match(loginTab.html, /Preparing NetBird login/);
+    assert.match(loginTab.html, /Waiting for the authentication link/);
+    assert.equal(loginTab.opener, null);
+  }
+  if (responseError) throw Error(responseError);
   return { login_url: responseURL };
 };
 const runRemoteAction = (action) => { pending = action(); };
@@ -764,15 +780,44 @@ const click = () => {
 (async () => {
   responseURL = "https://app.netbird.io/verify?user_code=abc";
   click();
+  assert.deepEqual(events.slice(0, 5), ["open", "document.open", "document.write", "document.close", "request"]);
+  assert.match(loginTab.html, /<h1 id="setup-title">Preparing NetBird login…<\\/h1>/);
+  assert.match(loginTab.html, /class="pulse-dot"/);
+  assert.match(loginTab.html, /JUSTVOXEL/);
+  assert.match(loginTab.html, /static\\/playit-setup.css/);
+  assert(!loginTab.html.includes(responseURL));
   await pending;
   assert.deepEqual(loginTab.navigations, [responseURL]);
   assert.equal(loginTab.opener, null);
   assert.equal(netbirdLoginURL, responseURL);
+
   responseURL = "https://login.tailscale.com/a/123";
   click();
   await assert.rejects(pending, /invalid login link/);
   assert.deepEqual(loginTab.navigations, []);
-  assert(loginTab.closed);
+  assert.equal(loginTab.closed, false);
+  assert.match(loginTab.html, /Remote access setup could not continue/);
+  assert(!loginTab.html.includes(responseURL));
+
+  responseURL = "https://app.netbird.io/verify?user_code=abc";
+  responseError = "private backend message <script>alert(1)</script>";
+  click();
+  await assert.rejects(pending, /private backend message/);
+  assert.match(loginTab.html, /Remote access setup could not continue/);
+  assert(!loginTab.html.includes("private backend message"));
+  assert(!loginTab.html.includes("<script>"));
+  responseError = "";
+
+  responseURL = "";
+  click();
+  await pending;
+  assert.equal(loginTab.closed, true);
+
+  blocked = true;
+  responseURL = "https://app.netbird.io/verify?user_code=abc";
+  click();
+  await pending;
+  assert.equal(netbirdLoginURL, responseURL);
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 `
 	cmd := exec.Command("node")
@@ -790,47 +835,75 @@ func TestTailscaleActivationOpensMachineLink(t *testing.T) {
 	script := string(data)
 	validStart := strings.Index(script, "  const validTailscaleLoginURL =")
 	validEnd := strings.Index(script, "  const providerDashboards =")
+	popupStart := strings.Index(script, "  const renderRemoteLoginPopup =")
+	popupEnd := strings.Index(script, "  const openActivatedDashboards =")
 	clickStart := strings.Index(script, `    const provider = event.target.closest("[data-network-provider]");`)
 	clickEnd := strings.Index(script[clickStart:], "    const check =")
-	if validStart < 0 || validEnd <= validStart || clickStart < 0 || clickEnd < 0 {
+	if validStart < 0 || validEnd <= validStart || popupStart < 0 || popupEnd <= popupStart || clickStart < 0 || clickEnd < 0 {
 		t.Fatal("Tailscale login UI path missing")
 	}
 	program := `
 const assert = require("node:assert/strict");
 let remoteBusy = false, tailscaleLoginURL = "", pending;
-let popup, events = [];
+let popup, events = [], responseURL = "https://login.tailscale.com/a/0123456789abcdef", responseError = "";
 const remoteProviders = [{ id: "tailscale", service_active: true, connected: false }];
 const providerProgress = new Map();
 const providerDashboards = { tailscale: "https://console.tailscale.com/admin/" };
 const window = { open(url, target) {
   events.push(["open", url]);
   assert.equal(target, "_blank");
-  popup = { closed: false, opener: {}, location: { replace(url) { events.push(["navigate", url]); } },
-    close() { this.closed = true; } };
+  popup = { closed: false, opener: {}, html: "", location: { replace(url) { events.push(["navigate", url]); } },
+    close() { this.closed = true; },
+    document: {
+      open() { events.push(["document.open"]); popup.html = ""; },
+      write(html) { events.push(["document.write"]); popup.html += html; },
+      close() { events.push(["document.close"]); }
+    }
+  };
   return popup;
 } };
 const postForm = async (path, params) => {
   events.push(["request", path]);
   assert.deepEqual(params, { action: "activate" });
-  return { login_url: "https://login.tailscale.com/a/0123456789abcdef" };
+  assert.match(popup.html, /Preparing Tailscale login/);
+  assert.equal(popup.opener, null);
+  if (responseError) throw Error(responseError);
+  return { login_url: responseURL };
 };
 const runRemoteAction = (action) => { pending = action(); };
 const button = { disabled: false, dataset: { networkProvider: "tailscale", action: "activate" } };
-` + script[validStart:validEnd] + `
+` + script[validStart:validEnd] + script[popupStart:popupEnd] + `
 const click = () => {
   const event = { target: { closest: (selector) => selector === "[data-network-provider]" ? button : null } };
 ` + script[clickStart:clickStart+clickEnd] + `
 };
 (async () => {
   click();
-  assert.deepEqual(events.slice(0, 2), [
-    ["open", "about:blank"], ["request", "/api/network/remote-access/tailscale"]
+  assert.deepEqual(events.slice(0, 5), [
+    ["open", "about:blank"], ["document.open"], ["document.write"], ["document.close"],
+    ["request", "/api/network/remote-access/tailscale"]
   ]);
+  assert.match(popup.html, /Preparing Tailscale login/);
+  assert.match(popup.html, /Waiting for the authentication link/);
+  assert.match(popup.html, /class="pulse-dot"/);
   await pending;
-  assert.deepEqual(events[2], ["navigate", "https://login.tailscale.com/a/0123456789abcdef"]);
+  assert.deepEqual(events[5], ["navigate", responseURL]);
   assert.equal(popup.opener, null);
-  assert.equal(tailscaleLoginURL, "https://login.tailscale.com/a/0123456789abcdef");
+  assert.equal(tailscaleLoginURL, responseURL);
   assert(!events.some((event) => event.includes("https://console.tailscale.com/admin/")));
+
+  responseError = "secret activation failure";
+  click();
+  await assert.rejects(pending, /secret activation failure/);
+  assert.match(popup.html, /Remote access setup could not continue/);
+  assert(!popup.html.includes("secret activation failure"));
+  assert.equal(popup.closed, false);
+  responseError = "";
+
+  responseURL = "";
+  click();
+  await pending;
+  assert.equal(popup.closed, true);
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 `
 	cmd := exec.Command("node")
