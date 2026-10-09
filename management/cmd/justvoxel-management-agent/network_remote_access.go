@@ -137,37 +137,130 @@ var netbirdLogin = func() (string, error) {
 
 var remoteStat = os.Stat
 var tailscaleStatusCommand = exec.CommandContext
-var tailscaleStatus = func(ctx context.Context) (bool, string) {
+var tailscaleStatus = func(ctx context.Context) (bool, string, string) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	cmd := tailscaleStatusCommand(ctx, "/usr/bin/tailscale", "status", "--json")
 	cmd.WaitDelay = time.Second
 	output, err := cmd.Output()
 	if err != nil || ctx.Err() != nil {
-		return false, "Not configured"
+		return false, "Not configured", ""
 	}
 	var status struct {
 		BackendState   string
 		HaveNodeKey    bool
 		CurrentTailnet *struct{}
+		TailscaleIPs   []string
 	}
 	if json.Unmarshal(output, &status) != nil {
-		return false, "Not configured"
+		return false, "Not configured", ""
 	}
 	switch status.BackendState {
 	case "Running":
-		return true, "Connected"
+		ip := ""
+		for _, candidate := range status.TailscaleIPs {
+			if address := net.ParseIP(candidate); address != nil && address.To4() != nil {
+				ip = address.String()
+				break
+			}
+		}
+		return true, "Connected", ip
 	case "NeedsMachineAuth":
-		return true, "Awaiting approval"
+		return true, "Awaiting approval", ""
 	case "Starting", "Stopped":
 		if status.HaveNodeKey || status.CurrentTailnet != nil {
 			if status.BackendState == "Starting" {
-				return true, "Starting"
+				return true, "Starting", ""
 			}
-			return true, "Stopped"
+			return true, "Stopped", ""
 		}
 	}
-	return false, "Not configured"
+	return false, "Not configured", ""
+}
+
+// Tailscale up --json emits an AuthURL before it waits for browser approval.
+var tailscaleUpCommand = exec.CommandContext
+
+func validTailscaleLoginURL(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) == 0 || len(value) > 2048 || strings.ContainsAny(value, " \t\r\n<>\"'") {
+		return ""
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme != "https" || parsed.Host != "login.tailscale.com" ||
+		parsed.User != nil || !strings.HasPrefix(parsed.Path, "/a/") || len(parsed.Path) <= len("/a/") {
+		return ""
+	}
+	return value
+}
+
+var tailscaleLogin = func() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	cmd := tailscaleUpCommand(ctx, "/usr/bin/tailscale", "up", "--json")
+	cmd.Stderr = io.Discard
+	cmd.WaitDelay = time.Second
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		cancel()
+		return "", err
+	}
+	if err := cmd.Start(); err != nil {
+		cancel()
+		return "", err
+	}
+	type loginResult struct {
+		url string
+		err error
+	}
+	ready := make(chan loginResult, 1)
+	go func() {
+		defer cancel()
+		decoder := json.NewDecoder(stdout)
+		reported := false
+		for {
+			var message struct {
+				AuthURL      string
+				BackendState string
+				Error        string
+			}
+			if err := decoder.Decode(&message); err != nil {
+				break
+			}
+			if reported {
+				continue // Drain the second JSON response until login completes.
+			}
+			if message.Error != "" {
+				ready <- loginResult{err: os.ErrInvalid}
+				reported = true
+			} else if message.AuthURL != "" {
+				if link := validTailscaleLoginURL(message.AuthURL); link != "" {
+					ready <- loginResult{url: link}
+				} else {
+					ready <- loginResult{err: os.ErrInvalid}
+				}
+				reported = true
+			} else if message.BackendState == "Running" {
+				ready <- loginResult{} // Already authenticated; no login page needed.
+				reported = true
+			}
+		}
+		err := cmd.Wait()
+		if !reported {
+			if err == nil {
+				err = os.ErrInvalid
+			}
+			ready <- loginResult{err: err}
+		}
+	}()
+	timer := time.NewTimer(15 * time.Second)
+	defer timer.Stop()
+	select {
+	case result := <-ready:
+		return result.url, result.err
+	case <-timer.C:
+		cancel()
+		return "", context.DeadlineExceeded
+	}
 }
 var remoteSystemctl = func(ctx context.Context, args ...string) (string, error) {
 	output, err := exec.CommandContext(ctx, "systemctl", args...).Output()
@@ -219,8 +312,9 @@ func remoteProviderStatus(ctx context.Context, provider remoteProviderMetadata) 
 	}
 	status.Summary = "Not configured"
 	if provider.id == "tailscale" {
-		status.Configured, status.Summary = tailscaleStatus(ctx)
+		status.Configured, status.Summary, status.IP = tailscaleStatus(ctx)
 		status.Connected = status.Active && status.Summary == "Connected"
+		if !status.Connected { status.IP = "" }
 		if status.Configured && !status.Active && status.Summary == "Connected" {
 			status.Summary = "Stopped"
 		}
@@ -338,7 +432,7 @@ func (s *server) networkRemoteAccessChange(w http.ResponseWriter, r *http.Reques
 	if err == nil && !status.Installed {
 		err = os.ErrNotExist
 	}
-	if err == nil && (status.ServiceState == "deactivating" || (request.Action == "activate" && remoteTransitional(status.ServiceState) && !(provider.id == "netbird" && status.ServiceState == "activating"))) {
+	if err == nil && (status.ServiceState == "deactivating" || (request.Action == "activate" && remoteTransitional(status.ServiceState) && !((provider.id == "netbird" || provider.id == "tailscale") && status.ServiceState == "activating"))) {
 		writeError(w, http.StatusConflict, "provider service is changing state; refresh service status")
 		return
 	}
@@ -346,8 +440,13 @@ func (s *server) networkRemoteAccessChange(w http.ResponseWriter, r *http.Reques
 	if err == nil {
 		if request.Action == "activate" {
 			err = remoteActivate(ctx, provider)
-			if err == nil && provider.id == "netbird" && !status.Connected {
-				loginURL, err = netbirdLogin()
+			if err == nil && !status.Connected {
+				switch provider.id {
+				case "netbird":
+					loginURL, err = netbirdLogin()
+				case "tailscale":
+					loginURL, err = tailscaleLogin()
+				}
 			}
 		} else {
 			// Stop first: an interrupted operation must not leave an active service
@@ -365,7 +464,7 @@ func (s *server) networkRemoteAccessChange(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusServiceUnavailable, "provider lifecycle change failed; refresh service status")
 		return
 	}
-	if provider.id == "netbird" && request.Action == "activate" {
+	if (provider.id == "netbird" || provider.id == "tailscale") && request.Action == "activate" {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "login_url": loginURL})
 		return
 	}
