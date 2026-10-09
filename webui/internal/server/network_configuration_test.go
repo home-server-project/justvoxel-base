@@ -718,6 +718,70 @@ const click = () => {
 	}
 }
 
+func TestNetBirdActivationOpensCorrectLoginAndRejectsTailscale(t *testing.T) {
+	data, err := assets.ReadFile("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(data)
+	validStart := strings.Index(script, "  const validNetbirdLoginURL =")
+	validEnd := strings.Index(script, "  const openActivatedDashboards =")
+	clickStart := strings.Index(script, `    const provider = event.target.closest("[data-network-provider]");`)
+	clickEnd := strings.Index(script[clickStart:], "    const check =")
+	if validStart < 0 || validEnd <= validStart || clickStart < 0 || clickEnd < 0 {
+		t.Fatal("NetBird login code missing")
+	}
+	program := `
+const assert = require("node:assert/strict");
+let remoteBusy = false, netbirdLoginURL = "", pending, loginTab, responseURL;
+const remoteProviders = [{ id: "netbird", service_active: false, connected: false, configured: false }];
+const providerProgress = new Map();
+const window = { open(url, target) {
+  assert.equal(url, "about:blank");
+  assert.equal(target, "_blank");
+  loginTab = { closed: false, opener: {}, navigations: [],
+    location: { replace(url) { loginTab.navigations.push(url); } },
+    close() { this.closed = true; } };
+  return loginTab;
+} };
+const postForm = async (path, params) => {
+  assert.equal(path, "/api/network/remote-access/netbird");
+  assert.deepEqual(params, { action: "activate" });
+  return { login_url: responseURL };
+};
+const runRemoteAction = (action) => { pending = action(); };
+const button = { disabled: false, dataset: { networkProvider: "netbird", action: "activate" } };
+` + script[validStart:validEnd] + `
+assert(validNetbirdLoginURL("https://app.netbird.io/verify?user_code=abc"));
+assert(validNetbirdLoginURL("https://idp.example.org/authorize?state=123"));
+assert(!validNetbirdLoginURL("https://login.tailscale.com/a/123"));
+assert(!validNetbirdLoginURL("https://console.tailscale.com/admin/"));
+assert(!validNetbirdLoginURL("javascript:alert(1)"));
+const click = () => {
+  const event = { target: { closest: (selector) => selector === "[data-network-provider]" ? button : null } };
+` + script[clickStart:clickStart+clickEnd] + `
+};
+(async () => {
+  responseURL = "https://app.netbird.io/verify?user_code=abc";
+  click();
+  await pending;
+  assert.deepEqual(loginTab.navigations, [responseURL]);
+  assert.equal(loginTab.opener, null);
+  assert.equal(netbirdLoginURL, responseURL);
+  responseURL = "https://login.tailscale.com/a/123";
+  click();
+  await assert.rejects(pending, /invalid login link/);
+  assert.deepEqual(loginTab.navigations, []);
+  assert(loginTab.closed);
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+`
+	cmd := exec.Command("node")
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("NetBird browser redirect: %v\n%s", err, output)
+	}
+}
+
 func TestTailscaleActivationOpensMachineLink(t *testing.T) {
 	data, err := assets.ReadFile("static/network-workspace.js")
 	if err != nil {
