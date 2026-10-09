@@ -61,7 +61,7 @@
   const providerControls = (provider) => {
     const blocked = !provider.installed || remoteBusy || provider.service_state === "deactivating";
     return {
-      activateDisabled: blocked || providerTransitional(provider) || provider.service_active || (provider.id === "playit" && setupRunning()),
+      activateDisabled: blocked || providerTransitional(provider) || (provider.id === "netbird" ? provider.connected : provider.service_active) || (provider.id === "playit" && setupRunning()),
       deactivateDisabled: blocked || (!(provider.id === "playit" && setupRunning()) && !provider.service_active && !provider.service_enabled && provider.service_state === "inactive")
     };
   };
@@ -1428,12 +1428,18 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         runRemoteAction(async () => {
           try {
             const result = await postForm("/api/network/remote-access/netbird", { action: "activate" });
-            if (!validNetbirdLoginURL(result?.login_url)) throw new Error("NetBird did not provide a login link. Try Activate again.");
-            netbirdLoginURL = result.login_url;
-            providerProgress.set(id, "Complete NetBird login in your browser.");
-            if (loginTab && !loginTab.closed) {
-              try { loginTab.location.replace(netbirdLoginURL); }
-              catch (_) { /* The login button remains available in the card. */ }
+            if (result?.login_url && !validNetbirdLoginURL(result.login_url)) throw new Error("NetBird returned an invalid login link.");
+            netbirdLoginURL = result?.login_url || "";
+            if (netbirdLoginURL) {
+              providerProgress.set(id, "Complete NetBird login in your browser.");
+              if (loginTab && !loginTab.closed) {
+                try { loginTab.location.replace(netbirdLoginURL); }
+                catch (_) { /* The login button remains available in the card. */ }
+              }
+            } else {
+              // NetBird may already have a saved login and connect without a URL.
+              try { if (loginTab && !loginTab.closed) loginTab.close(); } catch (_) {}
+              providerProgress.set(id, "Checking NetBird connection…");
             }
           } catch (error) {
             try { if (loginTab && !loginTab.closed) loginTab.close(); } catch (_) {}
