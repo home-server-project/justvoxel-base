@@ -718,6 +718,64 @@ const click = () => {
 	}
 }
 
+func TestTailscaleActivationOpensMachineLink(t *testing.T) {
+	data, err := assets.ReadFile("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(data)
+	validStart := strings.Index(script, "  const validTailscaleLoginURL =")
+	validEnd := strings.Index(script, "  const providerDashboards =")
+	clickStart := strings.Index(script, `    const provider = event.target.closest("[data-network-provider]");`)
+	clickEnd := strings.Index(script[clickStart:], "    const check =")
+	if validStart < 0 || validEnd <= validStart || clickStart < 0 || clickEnd < 0 {
+		t.Fatal("Tailscale login UI path missing")
+	}
+	program := `
+const assert = require("node:assert/strict");
+let remoteBusy = false, tailscaleLoginURL = "", pending;
+let popup, events = [];
+const remoteProviders = [{ id: "tailscale", service_active: true, connected: false }];
+const providerProgress = new Map();
+const providerDashboards = { tailscale: "https://console.tailscale.com/admin/" };
+const window = { open(url, target) {
+  events.push(["open", url]);
+  assert.equal(target, "_blank");
+  popup = { closed: false, opener: {}, location: { replace(url) { events.push(["navigate", url]); } },
+    close() { this.closed = true; } };
+  return popup;
+} };
+const postForm = async (path, params) => {
+  events.push(["request", path]);
+  assert.deepEqual(params, { action: "activate" });
+  return { login_url: "https://login.tailscale.com/a/0123456789abcdef" };
+};
+const runRemoteAction = (action) => { pending = action(); };
+const button = { disabled: false, dataset: { networkProvider: "tailscale", action: "activate" } };
+` + script[validStart:validEnd] + `
+const click = () => {
+  const event = { target: { closest: (selector) => selector === "[data-network-provider]" ? button : null } };
+` + script[clickStart:clickStart+clickEnd] + `
+};
+(async () => {
+  click();
+  assert.deepEqual(events.slice(0, 2), [
+    ["open", "about:blank"], ["request", "/api/network/remote-access/tailscale"]
+  ]);
+  await pending;
+  assert.deepEqual(events[2], ["navigate", "https://login.tailscale.com/a/0123456789abcdef"]);
+  assert.equal(popup.opener, null);
+  assert.equal(tailscaleLoginURL, "https://login.tailscale.com/a/0123456789abcdef");
+  assert(!events.some((event) => event.includes("https://console.tailscale.com/admin/")));
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+`
+	cmd := exec.Command("node")
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("Tailscale browser login: %v\n%s", err, output)
+	}
+}
+
 func TestProviderDashboardWaitsForSuccessfulServiceActivation(t *testing.T) {
 	data, err := assets.ReadFile("static/network-workspace.js")
 	if err != nil {
