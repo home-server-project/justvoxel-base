@@ -8,6 +8,10 @@
 .backup-library-section{margin-top:0;padding:.9rem;border:1px solid #303942;border-radius:14px;background:#13191e}
 .backup-library-section .section-heading{margin-bottom:.65rem}
 .backup-library-section h2{margin:.05rem 0 0;font-size:1.1rem}
+.backup-server-filter{display:flex;align-items:center;gap:.4rem;font-size:.75rem;color:#aab5bd}
+.backup-server-filter select{max-width:min(100%,260px);min-height:34px;border:1px solid #46515b;border-radius:8px;background:#1d252b;color:#eef1f4;padding:.25rem .45rem;font:inherit}
+.backup-server-filter select:focus-visible{outline:2px solid #7bbd95;outline-offset:2px}
+.backups-workspace-content [data-backup-card][hidden],.backups-workspace-content [data-backup-filter-empty][hidden]{display:none!important}
 .backup-file-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:.55rem}
 .backup-file-card{display:grid;grid-template-columns:40px minmax(0,1fr) auto;align-items:center;gap:.7rem;min-width:0;padding:.7rem .8rem;border:1px solid #303942;border-radius:10px;background:#171d22}
 .backup-file-icon{display:grid;place-items:center;width:36px;height:36px;border-radius:9px;background:#10161a;color:#9bc8ad}
@@ -209,7 +213,7 @@
 .backup-workflow-review-close:hover:not(:disabled),.backup-workflow-review-close:focus-visible{background:#313c46;border-color:#5c6b76}
 .backup-workflow-review-dialog .backup-restore-review,.backup-workflow-review-dialog .backup-automatic-review,.backup-workflow-review-dialog .backup-destination-review{clear:both;margin:0;border:0;background:transparent;padding:0}
 @media(max-width:560px){.backup-workflow-review-dialog{width:calc(100vw - .5rem);max-height:calc(100dvh - .5rem);border-radius:12px}.backup-workflow-review-card{max-height:calc(100dvh - .5rem);padding:.8rem}}
-@media(prefers-color-scheme:light){.backup-workflow-review-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025;box-shadow:0 30px 90px #0003}.backup-workflow-review-close{background:#f1f4f6;border-color:#cbd4da;color:#1a2025}}
+@media(prefers-color-scheme:light){.backup-workflow-review-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025;box-shadow:0 30px 90px #0003}.backup-workflow-review-close{background:#f1f4f6;border-color:#cbd4da;color:#1a2025}.backup-server-filter{color:#596873}.backup-server-filter select{background:#fff;color:#1a2025;border-color:#cbd4da}}
 
 /* Compact workspace sections while keeping review and destructive controls visible. */
 .backups-workspace-content{container-type:inline-size;min-width:0}
@@ -224,6 +228,9 @@
 .backups-workspace-content .backup-file-icon{width:30px;height:30px}
 .backups-workspace-content .backup-file-icon svg{width:18px;height:18px}
 .backups-workspace-content .backup-library-empty{min-height:62px;padding:.45rem}
+.backups-workspace-content .backup-library-section>.section-heading{display:flex;align-items:center;justify-content:space-between;gap:.5rem;flex-wrap:wrap}
+.backups-workspace-content .backup-server-filter{margin-left:auto}
+@container (max-width:430px){.backups-workspace-content .backup-server-filter{width:100%;justify-content:space-between}.backups-workspace-content .backup-server-filter select{flex:1;min-width:0}}
 .backups-workspace-content .backup-command-bar{gap:.6rem;margin-top:.45rem;padding-top:.45rem}
 .backups-workspace-content .backup-library-summary{gap:.85rem}
 .backups-workspace-content .backup-command-actions{gap:.4rem;flex-wrap:wrap;justify-content:flex-end}

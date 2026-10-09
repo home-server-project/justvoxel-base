@@ -5,12 +5,20 @@
   <section class="backup-library-section" id="backup-library">
     <div class="section-heading">
       <div><p class="eyebrow">Backup library</p><h2>Existing backups</h2></div>
+      {{if .Backups}}
+      <label class="backup-server-filter">Server
+        <select data-backup-server-filter aria-label="Filter backups by server">
+          <option value="all">All servers</option>
+          <option value="legacy">Older / Unassigned</option>
+        </select>
+      </label>
+      {{end}}
     </div>
 
     {{if .Backups}}
     <div class="backup-file-grid" role="list">
       {{range .Backups}}
-      <label class="backup-file-card backup-file-selectable" role="listitem" data-backup-card>
+      <label class="backup-file-card backup-file-selectable" role="listitem" data-backup-card data-backup-size-bytes="{{.SizeBytes}}">
         <input class="backup-file-checkbox" type="checkbox" value="{{.ID}}" data-backup-select aria-label="Select {{.ID}}">
         <div class="backup-file-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24"><path d="M4 4h11l5 5v11H4z"></path><path d="M15 4v5h5"></path><path d="M8 14h8M8 17h6"></path></svg>
@@ -22,6 +30,10 @@
       </label>
       {{end}}
     </div>
+    <div class="backup-library-empty" data-backup-filter-empty role="status" hidden>
+      <strong>No backups for this selection</strong>
+      <span>Choose another server or All servers.</span>
+    </div>
     {{else}}
     <div class="backup-library-empty">
       <strong>No backups yet</strong>
@@ -31,8 +43,8 @@
 
     <section class="backup-command-bar" aria-label="Backup controls">
       <div class="backup-library-summary">
-        <div><span>Backups</span><strong>{{.BackupCount}}</strong></div>
-        <div><span>Total size</span><strong>{{.TotalSize}}</strong></div>
+        <div><span>Backups</span><strong data-backup-visible-count>{{.BackupCount}}</strong></div>
+        <div><span>Total size</span><strong data-backup-visible-size>{{.TotalSize}}</strong></div>
         <div><span>Selected</span><strong data-backup-selected-count>0</strong></div>
       </div>
       <div class="backup-command-actions">

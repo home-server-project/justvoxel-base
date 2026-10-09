@@ -43,6 +43,7 @@ type backupsWorkspaceAutomaticForm struct {
 type backupsWorkspaceBackupView struct {
 	ID             string
 	DisplayName    string
+	SizeBytes      uint64
 	CreatedLabel   string
 	Size           string
 	MetadataStatus string
@@ -514,7 +515,7 @@ func (a *App) buildBackupsWorkspaceData(
 		totalBytes += backup.SizeBytes
 		view := backupsWorkspaceBackupView{
 			ID: backup.ID, DisplayName: path.Base(backup.ID), CreatedLabel: backupsWorkspaceFormatTime(backup.CreatedAt),
-			Size: humanBytes(backup.SizeBytes), MetadataStatus: backup.MetadataStatus,
+			SizeBytes: backup.SizeBytes, Size: humanBytes(backup.SizeBytes), MetadataStatus: backup.MetadataStatus,
 		}
 		if backup.Metadata != nil {
 			view.Version = backup.Metadata.Minecraft.ServerReportedVersion

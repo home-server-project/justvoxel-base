@@ -5,6 +5,11 @@
     if (root.dataset) root.dataset.newBackupsInitialized = "true";
 
     const checkboxes = [...root.querySelectorAll("[data-backup-select]")];
+    const serverFilter = root.querySelector("[data-backup-server-filter]");
+    const backupCards = [...root.querySelectorAll("[data-backup-card]")];
+    const visibleCount = root.querySelector("[data-backup-visible-count]");
+    const visibleSize = root.querySelector("[data-backup-visible-size]");
+    const filterEmpty = root.querySelector("[data-backup-filter-empty]");
     const selectedCount = root.querySelector("[data-backup-selected-count]");
     const deleteButton = root.querySelector("[data-backup-delete-selected]");
     const restoreButton = root.querySelector("[data-backup-restore-selected]");
@@ -28,9 +33,30 @@
     let reviewedPlan = null;
     let reviewedIDs = [];
     let deleteApplying = false;
+    let filterGeneration = 0;
+    let activeServerFilter = "all";
+
+    // Folder-based backup references are local UI grouping only.
+    // Both current and retired server folders appear when they contain backups.
+    const serverIDs = new Set();
+    backupCards.forEach((card) => {
+      const id = card.querySelector("[data-backup-select]")?.value || "";
+      const match = /^(jv-[a-z0-9]{6,12})\/minecraft-/.exec(id);
+      card.dataset.backupServer = match ? match[1] : "legacy";
+      if (match) serverIDs.add(match[1]);
+    });
+    if (serverFilter) {
+      const legacyOption = serverFilter.querySelector('option[value="legacy"]');
+      [...serverIDs].sort().forEach((id) => {
+        const option = document.createElement("option");
+        option.value = id;
+        option.textContent = "Server " + id;
+        serverFilter.insertBefore(option, legacyOption);
+      });
+    }
 
     function selectedIDs() {
-      return checkboxes.filter((box) => box.checked).map((box) => box.value);
+      return checkboxes.filter((box) => box.checked && !box.closest("[data-backup-card]")?.hidden).map((box) => box.value);
     }
 
     function updateSelection() {
@@ -41,6 +67,37 @@
     }
 
     checkboxes.forEach((box) => box.addEventListener("change", updateSelection));
+
+    function updateServerFilter() {
+      if (!serverFilter) return;
+      if (deleteApplying) {
+        serverFilter.value = activeServerFilter;
+        return;
+      }
+      activeServerFilter = serverFilter.value;
+      filterGeneration += 1;
+      closeDialog();
+      closeRestoreDialog();
+
+      let count = 0;
+      let bytes = 0;
+      backupCards.forEach((card) => {
+        const show = activeServerFilter === "all" || card.dataset.backupServer === activeServerFilter;
+        card.hidden = !show;
+        const box = card.querySelector("[data-backup-select]");
+        if (box) box.checked = false;
+        if (show) {
+          count += 1;
+          bytes += Number(card.dataset.backupSizeBytes || 0);
+        }
+      });
+      if (visibleCount) visibleCount.textContent = String(count);
+      if (visibleSize) visibleSize.textContent = formatBytes(bytes);
+      if (filterEmpty) filterEmpty.hidden = count !== 0;
+      updateSelection();
+    }
+
+    serverFilter?.addEventListener("change", updateServerFilter);
     updateSelection();
 
     const restoreDialog = root.querySelector("[data-backup-restore-dialog]");
@@ -154,6 +211,7 @@
     deleteButton?.addEventListener("click", async () => {
       const ids = selectedIDs();
       if (ids.length === 0 || !dialog) return;
+      const generation = filterGeneration;
 
       clearError(pageError);
       deleteButton.disabled = true;
@@ -161,6 +219,7 @@
       deleteButton.textContent = "Reviewing…";
       try {
         const payload = await postDelete("/api/new-backups/delete/plan", ids);
+        if (generation !== filterGeneration) return;
         reviewedIDs = [...ids];
         renderPlan(payload);
         dialog.showModal();
