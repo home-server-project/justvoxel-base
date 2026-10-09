@@ -365,7 +365,11 @@ func (s *server) networkRemoteAccessChange(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusServiceUnavailable, "provider lifecycle change failed; refresh service status")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "login_url": loginURL})
+	if provider.id == "netbird" && request.Action == "activate" {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "login_url": loginURL})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func remoteTransitional(state string) bool {
