@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -21,6 +25,7 @@ type remoteProvider struct {
 	ServiceState string `json:"service_state"`
 	Summary      string `json:"summary"`
 	Connected    bool   `json:"connected"`
+	IP           string `json:"ip,omitempty"`
 }
 
 type remoteProviderMetadata struct {
@@ -32,6 +37,102 @@ var remoteProviders = []remoteProviderMetadata{
 	{"tailscale", "Tailscale", "tailscaled.service", "https://console.tailscale.com/admin/", nil},
 	{"netbird", "NetBird", "netbird.service", "https://app.netbird.io/", []string{"/var/lib/netbird/default.json", "/etc/netbird/config.json", "/etc/netbird/config.yaml"}},
 	{"playit", "Playit.gg", "playit.service", "https://playit.gg/account/", []string{"/etc/playit/playit.toml"}},
+}
+
+// NetBird uses the packaged CLI for login and connected-state information.
+var netbirdCommand = exec.CommandContext
+var netbirdStatus = func(ctx context.Context) (bool, string) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	cmd := netbirdCommand(ctx, "/usr/bin/netbird", "status", "--json")
+	cmd.WaitDelay = time.Second
+	output, err := cmd.Output()
+	if err != nil {
+		return false, ""
+	}
+	var state struct {
+		DaemonStatus string `json:"daemonStatus"`
+		IP           string `json:"netbirdIp"`
+		Management   struct {
+			Connected bool `json:"connected"`
+		} `json:"management"`
+	}
+	if json.Unmarshal(output, &state) != nil || state.DaemonStatus != "Connected" || !state.Management.Connected {
+		return false, ""
+	}
+	ip := strings.TrimSpace(state.IP)
+	if net.ParseIP(strings.Split(ip, "/")[0]) == nil {
+		ip = ""
+	}
+	return true, ip
+}
+
+// The URL is supplied by NetBird's own CLI, never by a browser or user input.
+// NetBird also supports self-hosted identity providers, so the host is not fixed.
+func validNetbirdLoginURL(text string) string {
+	text = strings.TrimSpace(text)
+	if len(text) == 0 || len(text) > 2048 || strings.ContainsAny(text, " \t\r\n<>\"'") {
+		return ""
+	}
+	parsed, err := url.Parse(text)
+	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil {
+		return ""
+	}
+	return text
+}
+
+var netbirdLogin = func() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	cmd := netbirdCommand(ctx, "/usr/bin/netbird", "up", "--no-browser")
+	reader, writer := io.Pipe()
+	cmd.Stdout, cmd.Stderr = writer, writer
+	cmd.WaitDelay = time.Second
+	if err := cmd.Start(); err != nil {
+		cancel()
+		_ = reader.Close()
+		_ = writer.Close()
+		return "", err
+	}
+	links := make(chan string, 1)
+	readDone := make(chan struct{})
+	finished := make(chan error, 1)
+	go func() {
+		defer close(readDone)
+		defer reader.Close()
+		scanner := bufio.NewScanner(reader)
+		scanner.Buffer(make([]byte, 4096), 8192)
+		for scanner.Scan() {
+			if link := validNetbirdLoginURL(scanner.Text()); link != "" {
+				select {
+				case links <- link:
+				default:
+				}
+			}
+		}
+	}()
+	go func() {
+		err := cmd.Wait()
+		_ = writer.Close()
+		<-readDone
+		cancel()
+		finished <- err
+	}()
+	timer := time.NewTimer(15 * time.Second)
+	defer timer.Stop()
+	select {
+	case link := <-links:
+		return link, nil
+	case err := <-finished:
+		select {
+		case link := <-links:
+			return link, nil
+		default:
+		}
+		return "", err
+	case <-timer.C:
+		cancel()
+		return "", context.DeadlineExceeded
+	}
 }
 
 var remoteStat = os.Stat
@@ -122,6 +223,21 @@ func remoteProviderStatus(ctx context.Context, provider remoteProviderMetadata) 
 		status.Connected = status.Active && status.Summary == "Connected"
 		if status.Configured && !status.Active && status.Summary == "Connected" {
 			status.Summary = "Stopped"
+		}
+	} else if provider.id == "netbird" {
+		if status.Configured {
+			status.Summary = "Stopped"
+		}
+		if status.Active {
+			connected, ip := netbirdStatus(ctx)
+			if connected {
+				status.Configured = true
+				status.Connected = true
+				status.Summary = "Connected"
+				status.IP = ip
+			} else if status.Configured {
+				status.Summary = "Not connected"
+			}
 		}
 	} else if status.Configured {
 		status.Summary = "Stopped"
@@ -226,9 +342,13 @@ func (s *server) networkRemoteAccessChange(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusConflict, "provider service is changing state; refresh service status")
 		return
 	}
+	loginURL := ""
 	if err == nil {
 		if request.Action == "activate" {
 			err = remoteActivate(ctx, provider)
+			if err == nil && provider.id == "netbird" && !status.Connected {
+				loginURL, err = netbirdLogin()
+			}
 		} else {
 			// Stop first: an interrupted operation must not leave an active service
 			// that the response presents as deactivated.
@@ -245,7 +365,7 @@ func (s *server) networkRemoteAccessChange(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusServiceUnavailable, "provider lifecycle change failed; refresh service status")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "login_url": loginURL})
 }
 
 func remoteTransitional(state string) bool {
