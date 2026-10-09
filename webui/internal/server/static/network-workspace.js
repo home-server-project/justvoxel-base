@@ -26,6 +26,15 @@
   let playitClaimOpened = false;
   let remoteBusy = false;
   let netbirdLoginURL = "";
+  let tailscaleLoginURL = "";
+  const validTailscaleLoginURL = (value) => {
+    if (typeof value !== "string" || value.length > 2048 || /\s/.test(value)) return false;
+    try {
+      const url = new URL(value);
+      return url.protocol === "https:" && url.host === "login.tailscale.com" &&
+        url.pathname.startsWith("/a/") && url.pathname.length > 3 && !url.username && !url.password;
+    } catch (_) { return false; }
+  };
   const providerDashboards = { tailscale: "https://console.tailscale.com/admin/", netbird: "https://app.netbird.io/" };
   const pendingDashboards = new Set();
   const providerProgress = new Map();
@@ -61,7 +70,7 @@
   const providerControls = (provider) => {
     const blocked = !provider.installed || remoteBusy || provider.service_state === "deactivating";
     return {
-      activateDisabled: blocked || (providerTransitional(provider) && !(provider.id === "netbird" && provider.service_state === "activating")) || (provider.id === "netbird" ? provider.connected : provider.service_active) || (provider.id === "playit" && setupRunning()),
+      activateDisabled: blocked || (providerTransitional(provider) && !((provider.id === "netbird" || provider.id === "tailscale") && provider.service_state === "activating")) || (["netbird", "tailscale"].includes(provider.id) ? provider.connected : provider.service_active) || (provider.id === "playit" && setupRunning()),
       deactivateDisabled: blocked || (!(provider.id === "playit" && setupRunning()) && !provider.service_active && !provider.service_enabled && provider.service_state === "inactive")
     };
   };
@@ -953,6 +962,10 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         row("Configuration", provider.status_unavailable ? "Unknown" : provider.configured ? "Configured" : "Not configured")
       );
       if (provider.id === "netbird" && provider.connected && provider.ip) card.appendChild(row("NetBird IP", provider.ip));
+      if (provider.id === "tailscale") {
+        card.appendChild(row("Connection", provider.summary || "Unknown"));
+        if (provider.connected && provider.ip) card.appendChild(row("Tailscale IP", provider.ip));
+      }
       if (providerProgress.has(provider.id)) {
         const progress = document.createElement("p");
         progress.className = "state-text";
@@ -986,6 +999,15 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         actions.appendChild(activate);
       }
       actions.appendChild(deactivate);
+      if (provider.id === "tailscale" && !provider.connected && validTailscaleLoginURL(tailscaleLoginURL)) {
+        const login = document.createElement("a");
+        login.href = tailscaleLoginURL;
+        login.target = "_blank";
+        login.rel = "noopener noreferrer";
+        login.className = "button-link primary network-action-button";
+        login.textContent = "Complete Tailscale login";
+        actions.appendChild(login);
+      }
       if (provider.id === "netbird" && !provider.connected && validNetbirdLoginURL(netbirdLoginURL)) {
         const login = document.createElement("a");
         login.href = netbirdLoginURL;
@@ -1318,6 +1340,10 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       netbirdLoginURL = "";
       providerProgress.delete("netbird");
     }
+    if (remoteProviders.some((provider) => provider.id === "tailscale" && provider.connected)) {
+      tailscaleLoginURL = "";
+      providerProgress.delete("tailscale");
+    }
     renderNetwork();
   };
 
@@ -1325,16 +1351,17 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
   // ends observation; the agent still owns the setup timeout.
   const pollRemoteAccess = async () => {
     const sequence = ++remotePollSequence;
-    const deadline = Date.now() + (setupRunning() ? 610000 : providerProgress.has("netbird") ? 120000 : 20000);
+    const deadline = Date.now() + (setupRunning() ? 610000 : (providerProgress.has("netbird") || providerProgress.has("tailscale")) ? 120000 : 20000);
     try {
       while (sequence === remotePollSequence && dialog.open && isAdministrator() && Date.now() < deadline &&
-             (remoteProviders.some(providerTransitional) || setupRunning() || providerProgress.has("netbird"))) {
-        await new Promise((resolve) => setTimeout(resolve, setupRunning() || providerProgress.has("netbird") ? 2000 : 750));
+             (remoteProviders.some(providerTransitional) || setupRunning() || providerProgress.has("netbird") || providerProgress.has("tailscale"))) {
+        await new Promise((resolve) => setTimeout(resolve, setupRunning() || providerProgress.has("netbird") || providerProgress.has("tailscale") ? 2000 : 750));
         if (sequence !== remotePollSequence || !dialog.open || !isAdministrator()) return;
         await refreshRemoteAccess();
       }
       if (sequence === remotePollSequence) {
         if (providerProgress.has("netbird")) providerProgress.set("netbird", "Finish NetBird login in your browser, then select Refresh to see the assigned IP.");
+        if (providerProgress.has("tailscale")) providerProgress.set("tailscale", "Finish Tailscale login in your browser, then select Refresh to see the assigned IP.");
         pendingDashboards.forEach((id) => providerProgress.set(id, "Service activation is still pending. Refresh to check its status, or use the provider dashboard link."));
         pendingDashboards.clear();
         renderNetwork();
@@ -1418,6 +1445,33 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
           // The existing setup endpoint enables/starts the fixed service before setup.
           playitSetup = await postForm("/api/network/remote-access/playit/setup");
           updatePlayitPopup();
+        });
+      } else if (id === "tailscale" && provider.dataset.action === "activate") {
+        // Reserve the tab during the user click to avoid popup blockers.
+        let loginTab = null;
+        try { loginTab = window.open("about:blank", "_blank"); if (loginTab) loginTab.opener = null; }
+        catch (_) { /* Keep the login link available in the card. */ }
+        providerProgress.set(id, "Starting Tailscale login…");
+        runRemoteAction(async () => {
+          try {
+            const result = await postForm("/api/network/remote-access/tailscale", { action: "activate" });
+            if (result?.login_url && !validTailscaleLoginURL(result.login_url)) throw new Error("Tailscale returned an invalid login link.");
+            tailscaleLoginURL = result?.login_url || "";
+            if (tailscaleLoginURL) {
+              providerProgress.set(id, "Complete Tailscale login in your browser.");
+              if (loginTab && !loginTab.closed) {
+                try { loginTab.location.replace(tailscaleLoginURL); }
+                catch (_) { /* The login link remains available in the card. */ }
+              }
+            } else {
+              try { if (loginTab && !loginTab.closed) loginTab.close(); } catch (_) {}
+              providerProgress.set(id, "Checking Tailscale connection…");
+            }
+          } catch (error) {
+            try { if (loginTab && !loginTab.closed) loginTab.close(); } catch (_) {}
+            providerProgress.delete(id);
+            throw error;
+          }
         });
       } else if (id === "netbird" && provider.dataset.action === "activate") {
         // Reserve a browser tab during the click, not after the API request.
