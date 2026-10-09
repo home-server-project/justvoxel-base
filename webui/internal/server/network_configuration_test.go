@@ -781,10 +781,10 @@ const click = () => {
   responseURL = "https://app.netbird.io/verify?user_code=abc";
   click();
   assert.deepEqual(events.slice(0, 5), ["open", "document.open", "document.write", "document.close", "request"]);
-  assert.match(loginTab.html, /<h1 id="setup-title">Preparing NetBird login…<\\/h1>/);
+  assert(loginTab.html.includes('<h1 id="setup-title">Preparing NetBird login…</h1>'));
   assert.match(loginTab.html, /class="pulse-dot"/);
   assert.match(loginTab.html, /JUSTVOXEL/);
-  assert.match(loginTab.html, /static\\/playit-setup.css/);
+  assert(loginTab.html.includes('/static/playit-setup.css'));
   assert(!loginTab.html.includes(responseURL));
   await pending;
   assert.deepEqual(loginTab.navigations, [responseURL]);
