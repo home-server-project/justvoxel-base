@@ -412,7 +412,7 @@ func writeNetworkWebError(w http.ResponseWriter, status int, message string) {
 // Extensions use the existing API client and Unix-socket transport.
 type networkConfigurationAPI interface {
 	RemoteAccessStatus(context.Context, string) (api.RemoteAccessStatus, error)
-	ChangeRemoteAccess(context.Context, string, string, string) error
+	ChangeRemoteAccess(context.Context, string, string, string) (api.RemoteAccessChange, error)
 	ConfigureEthernet(context.Context, string, string, api.EthernetSettings) (api.NetworkWiFiMutation, error)
 	CheckNetworkConnectivity(context.Context, string) error
 	ReconnectNetwork(context.Context, string, string, string, string) (api.NetworkWiFiMutation, error)
@@ -457,7 +457,7 @@ func (a *App) networkConfigurationChange(w http.ResponseWriter, r *http.Request)
 	var err error
 	switch {
 	case r.PathValue("provider") != "":
-		err = client.ChangeRemoteAccess(r.Context(), session, r.PathValue("provider"), r.FormValue("action"))
+		result, err = client.ChangeRemoteAccess(r.Context(), session, r.PathValue("provider"), r.FormValue("action"))
 	case strings.HasPrefix(r.URL.Path, "/api/network/ethernet/"):
 		prefix, prefixErr := strconv.ParseUint(r.FormValue("prefix"), 10, 32)
 		mtu, mtuErr := strconv.ParseUint(r.FormValue("mtu"), 10, 32)
