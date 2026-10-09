@@ -25,9 +25,15 @@
   let playitPopup = null;
   let playitClaimOpened = false;
   let remoteBusy = false;
+  let netbirdLoginURL = "";
   const providerDashboards = { tailscale: "https://console.tailscale.com/admin/", netbird: "https://app.netbird.io/" };
   const pendingDashboards = new Set();
   const providerProgress = new Map();
+  const validNetbirdLoginURL = (value) => {
+    if (typeof value !== "string" || value.length > 2048 || /[\\s<>"\x27]/.test(value)) return false;
+    try { const url = new URL(value); return url.protocol === "https:" && Boolean(url.hostname) && !url.username && !url.password; }
+    catch (_) { return false; }
+  };
   const openActivatedDashboards = () => {
     for (const id of pendingDashboards) {
       const provider = remoteProviders.find((item) => item.id === id);
@@ -946,6 +952,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         row("Service", providerTransitional(provider) ? provider.service_state[0].toUpperCase() + provider.service_state.slice(1) + "…" : provider.service_active ? "Running" : label(provider.service_state).replace(/^./, (c) => c.toUpperCase())),
         row("Configuration", provider.status_unavailable ? "Unknown" : provider.configured ? "Configured" : "Not configured")
       );
+      if (provider.id === "netbird" && provider.connected && provider.ip) card.appendChild(row("NetBird IP", provider.ip));
       if (providerProgress.has(provider.id)) {
         const progress = document.createElement("p");
         progress.className = "state-text";
@@ -979,6 +986,15 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         actions.appendChild(activate);
       }
       actions.appendChild(deactivate);
+      if (provider.id === "netbird" && !provider.connected && validNetbirdLoginURL(netbirdLoginURL)) {
+        const login = document.createElement("a");
+        login.href = netbirdLoginURL;
+        login.target = "_blank";
+        login.rel = "noopener noreferrer";
+        login.className = "button-link primary network-action-button";
+        login.textContent = "Complete NetBird login";
+        actions.appendChild(login);
+      }
       const dashboard = document.createElement("a");
       // Fixed destinations only, even if a malformed status payload is received.
       dashboard.href = { tailscale: "https://console.tailscale.com/admin/", netbird: "https://app.netbird.io/", playit: "https://playit.gg/account/" }[provider.id];
@@ -1298,6 +1314,10 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     remoteProviders = (remote?.providers || []).filter((provider) => ["tailscale", "netbird", "playit"].includes(provider.id));
     updatePlayitPopup();
     openActivatedDashboards();
+    if (remoteProviders.some((provider) => provider.id === "netbird" && provider.connected)) {
+      netbirdLoginURL = "";
+      providerProgress.delete("netbird");
+    }
     renderNetwork();
   };
 
@@ -1305,15 +1325,16 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
   // ends observation; the agent still owns the setup timeout.
   const pollRemoteAccess = async () => {
     const sequence = ++remotePollSequence;
-    const deadline = Date.now() + (setupRunning() ? 610000 : 20000);
+    const deadline = Date.now() + (setupRunning() ? 610000 : providerProgress.has("netbird") ? 120000 : 20000);
     try {
       while (sequence === remotePollSequence && dialog.open && isAdministrator() && Date.now() < deadline &&
-             (remoteProviders.some(providerTransitional) || setupRunning())) {
-        await new Promise((resolve) => setTimeout(resolve, setupRunning() ? 2000 : 750));
+             (remoteProviders.some(providerTransitional) || setupRunning() || providerProgress.has("netbird"))) {
+        await new Promise((resolve) => setTimeout(resolve, setupRunning() || providerProgress.has("netbird") ? 2000 : 750));
         if (sequence !== remotePollSequence || !dialog.open || !isAdministrator()) return;
         await refreshRemoteAccess();
       }
       if (sequence === remotePollSequence) {
+        if (providerProgress.has("netbird")) providerProgress.set("netbird", "Finish NetBird login in your browser, then select Refresh to see the assigned IP.");
         pendingDashboards.forEach((id) => providerProgress.set(id, "Service activation is still pending. Refresh to check its status, or use the provider dashboard link."));
         pendingDashboards.clear();
         renderNetwork();
@@ -1397,6 +1418,28 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
           // The existing setup endpoint enables/starts the fixed service before setup.
           playitSetup = await postForm("/api/network/remote-access/playit/setup");
           updatePlayitPopup();
+        });
+      } else if (id === "netbird" && provider.dataset.action === "activate") {
+        // Reserve a browser tab during the click, not after the API request.
+        let loginTab = null;
+        try { loginTab = window.open("about:blank", "_blank"); if (loginTab) loginTab.opener = null; }
+        catch (_) { /* The login button remains available in the card. */ }
+        providerProgress.set(id, "Starting NetBird login…");
+        runRemoteAction(async () => {
+          try {
+            const result = await postForm("/api/network/remote-access/netbird", { action: "activate" });
+            if (!validNetbirdLoginURL(result?.login_url)) throw new Error("NetBird did not provide a login link. Try Activate again.");
+            netbirdLoginURL = result.login_url;
+            providerProgress.set(id, "Complete NetBird login in your browser.");
+            if (loginTab && !loginTab.closed) {
+              try { loginTab.location.replace(netbirdLoginURL); }
+              catch (_) { /* The login button remains available in the card. */ }
+            }
+          } catch (error) {
+            try { if (loginTab && !loginTab.closed) loginTab.close(); } catch (_) {}
+            providerProgress.delete(id);
+            throw error;
+          }
         });
       } else {
         if (id === "playit" && provider.dataset.action === "deactivate") closePlayitPopup();
