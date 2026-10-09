@@ -407,7 +407,7 @@ if (quickLook && quickLookToggle) {
   const topbar = document.querySelector(".topbar");
 
   const syncQuickLookTop = () => {
-    quickLook.style.top = Math.round(topbar?.getBoundingClientRect().height || 48) + "px";
+    quickLook.style.top = Math.round(topbar?.getBoundingClientRect().bottom || 48) + "px";
   };
   syncQuickLookTop();
   window.addEventListener("resize", syncQuickLookTop);
@@ -602,14 +602,25 @@ if (quickLook && quickLookToggle) {
 const controlCenter = document.querySelector("[data-control-center]");
 const topbarClock = document.querySelector("[data-topbar-clock]");
 if (topbarClock) {
+  const initialSystemTime = Number(topbarClock.dataset.systemNow);
+  let systemClockOffset = Number.isFinite(initialSystemTime) && initialSystemTime > 0 ? initialSystemTime - Date.now() : 0;
   const updateTopbarClock = () => {
-    const now = new Date();
-    topbarClock.textContent = new Intl.DateTimeFormat([], {
-      hour: "2-digit",
-      minute: "2-digit",
-      timeZone: topbarClock.dataset.systemTimezone || undefined,
-    }).format(now);
+    const now = new Date(Date.now() + systemClockOffset);
+    const zone = topbarClock.dataset.systemTimezone || undefined;
+    const clockTime = new Intl.DateTimeFormat("en-US", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: zone }).format(now);
+    const clockDate = new Intl.DateTimeFormat("en-US", { month: "short", day: "2-digit", year: "numeric", timeZone: zone }).format(now);
+    const time = document.createElement("span");
+    time.textContent = clockTime;
+    const date = document.createElement("span");
+    date.className = "topbar-clock-date";
+    date.textContent = clockDate;
+    const separator = document.createElement("span");
+    separator.className = "topbar-clock-separator";
+    separator.textContent = " · ";
+    topbarClock.replaceChildren(time, separator, date);
+    topbarClock.setAttribute("aria-label", `${clockTime} · ${clockDate}`);
     topbarClock.title = new Intl.DateTimeFormat([], {
+      hour12: true,
       weekday: "long",
       year: "numeric",
       month: "long",
@@ -621,7 +632,19 @@ if (topbarClock) {
   };
   updateTopbarClock();
   window.setInterval(updateTopbarClock, 30000);
-  window.addEventListener("justvoxel-timezone", updateTopbarClock);
+  window.addEventListener("justvoxel-timezone", (event) => {
+    const { zone, localDate, localTime } = event.detail || {};
+    if (/^\d{4}-\d{2}-\d{2}$/.test(localDate || "") && /^\d{2}:\d{2}$/.test(localTime || "") && zone) {
+      const now = new Date(Date.now() + systemClockOffset);
+      const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+        timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+      }).formatToParts(now).map(({ type, value }) => [type, value]));
+      const displayedMinute = Date.parse(`${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:00Z`);
+      const systemMinute = Date.parse(`${localDate}T${localTime}:00Z`);
+      if (Number.isFinite(systemMinute) && Number.isFinite(displayedMinute)) systemClockOffset += systemMinute - displayedMinute;
+    }
+    updateTopbarClock();
+  });
 }
 
 if (controlCenter) {
@@ -1507,7 +1530,6 @@ const setupWorkspaceWindow = (element, options = {}) => {
 
   workspaceWindows.add(element);
   const dragHandle = element.querySelector("[data-workspace-drag-handle]");
-  const resizeHandle = element.querySelector("[data-workspace-resize-handle]");
   let resizeSaveTimer = null;
 
   const bringToFront = () => {
@@ -1608,40 +1630,7 @@ const setupWorkspaceWindow = (element, options = {}) => {
     });
   }
 
-  if (resizeHandle) {
-    resizeHandle.addEventListener("pointerdown", (event) => {
-      if (workspaceCompactQuery.matches || event.button !== 0) return;
-      bringToFront();
-      const rect = element.getBoundingClientRect();
-      const startX = event.clientX;
-      const startY = event.clientY;
-      const startWidth = rect.width;
-      const startHeight = rect.height;
-      const computed = window.getComputedStyle(element);
-      const minWidth = Number.parseFloat(computed.minWidth) || 360;
-      const minHeight = Number.parseFloat(computed.minHeight) || 260;
-      const maxWidth = Math.max(minWidth, window.innerWidth - rect.left - 8);
-      const maxHeight = Math.max(minHeight, window.innerHeight - rect.top - 8);
-      event.preventDefault();
-      resizeHandle.setPointerCapture(event.pointerId);
-      const move = (moveEvent) => {
-        element.style.width = Math.round(Math.min(maxWidth, Math.max(minWidth, startWidth + moveEvent.clientX - startX))) + "px";
-        element.style.height = Math.round(Math.min(maxHeight, Math.max(minHeight, startHeight + moveEvent.clientY - startY))) + "px";
-      };
-      const finish = () => {
-        resizeHandle.removeEventListener("pointermove", move);
-        resizeHandle.removeEventListener("pointerup", finish);
-        resizeHandle.removeEventListener("pointercancel", finish);
-        clampWorkspaceWindow(element);
-        persistGeometry();
-      };
-      resizeHandle.addEventListener("pointermove", move);
-      resizeHandle.addEventListener("pointerup", finish);
-      resizeHandle.addEventListener("pointercancel", finish);
-    });
-  }
-
-    const resizeObserver = new ResizeObserver(() => {
+  const resizeObserver = new ResizeObserver(() => {
     if (!element.open || workspaceCompactQuery.matches) return;
     window.clearTimeout(resizeSaveTimer);
     resizeSaveTimer = window.setTimeout(() => {
@@ -1665,6 +1654,7 @@ document.addEventListener("keydown", (event) => {
   const openWindows = Array.from(workspaceWindows).filter((element) => element.open);
   if (openWindows.length === 0) return;
   openWindows.sort((a, b) => Number(b.style.zIndex || 0) - Number(a.style.zIndex || 0));
+  if (openWindows[0] === systemWorkspaceDialog && window.JustVoxelWallpaper?.canLeave() === false) return;
   openWindows[0].close();
 });
 
@@ -3009,6 +2999,7 @@ if (minecraftOpen && minecraftDialog) {
       eyebrow.textContent = "Diagnostics";
       const title = document.createElement("h2");
       title.textContent = "Recent logs";
+      headingText.className = "diagnostics-heading";
       headingText.append(eyebrow, title);
       heading.appendChild(headingText);
       const pre = document.createElement("pre");
@@ -3597,7 +3588,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   const state = systemWorkspaceDialog.querySelector("[data-system-state]");
   const content = systemWorkspaceDialog.querySelector("[data-system-workspace-content]");
   const tabs = Array.from(systemWorkspaceDialog.querySelectorAll("[data-system-tab]"));
-  const administratorTabs = new Set(["health", "users", "security", "logs", "reset"]);
+  const administratorTabs = new Set(["health", "users", "security", "logs", "date-time", "reset"]);
   const upsTabButton = systemWorkspaceDialog.querySelector("[data-system-ups-tab]");
   const upsCSRF = document.querySelector("[data-system-ups-csrf]");
   const systemWorkspaceCSRF = document.querySelector("[data-system-workspace-csrf]")?.value || "";
@@ -3779,6 +3770,33 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     content.replaceChildren(root);
   };
 
+  const systemSplitter = (label, move) => {
+    const handle = document.createElement("div");
+    handle.className = "system-logs-splitter";
+    handle.setAttribute("role", "separator");
+    handle.setAttribute("aria-label", label);
+    handle.setAttribute("aria-orientation", "vertical");
+    handle.tabIndex = 0;
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      handle.setPointerCapture(event.pointerId);
+      let previous = event.clientX;
+      const onMove = (next) => { const delta = next.clientX - previous; previous = next.clientX; move(delta); };
+      const onEnd = () => { handle.removeEventListener("pointermove", onMove); handle.removeEventListener("pointerup", onEnd); handle.removeEventListener("pointercancel", onEnd); };
+      handle.addEventListener("pointermove", onMove);
+      handle.addEventListener("pointerup", onEnd);
+      handle.addEventListener("pointercancel", onEnd);
+    });
+    handle.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        event.preventDefault();
+        move(event.key === "ArrowLeft" ? -16 : 16);
+      }
+    });
+    return handle;
+  };
+
   const renderHistory = async (sequence, message = "") => {
     const payload = await systemFetchJSON("/api/system/workspace/history");
     if (!payload || sequence !== loadSequence || !content) return;
@@ -3868,7 +3886,24 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         });
         auditPanel.appendChild(list);
       }
-      root.appendChild(auditPanel);
+      let notificationWidth = 300;
+      const divider = systemSplitter("Resize Open notifications and Detailed history", (delta) => {
+        notificationWidth += delta;
+        setHistoryWidth();
+      });
+      const setHistoryWidth = () => {
+        notificationWidth = Math.max(240, Math.min(notificationWidth, (root.clientWidth || 800) - 270));
+        root.style.setProperty("--history-notifications-width", notificationWidth + "px");
+        divider.setAttribute("aria-valuemin", "240");
+        divider.setAttribute("aria-valuemax", String(Math.max(240, root.clientWidth - 270)));
+        divider.setAttribute("aria-valuenow", String(Math.round(notificationWidth)));
+      };
+      root.append(divider, auditPanel);
+      const historyResizeObserver = new ResizeObserver(() => {
+        if (!root.isConnected) { historyResizeObserver.disconnect(); return; }
+        setHistoryWidth();
+      });
+      historyResizeObserver.observe(root);
     } else {
       const activityPanel = systemPanel("Activity", "Recent appliance actions").panel;
       const events = Array.isArray(payload.events) ? payload.events : [];
@@ -3922,14 +3957,14 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     root.className = "system-logs-layout";
     root.dataset.systemLogsLayout = "";
     const saved = (() => { try { return JSON.parse(localStorage.getItem("justvoxel.system.logs.columns") || "{}") || {}; } catch { return {}; } })();
-    let groupWidth = Number.isFinite(saved.groups) ? saved.groups : 170;
     let fileWidth = Number.isFinite(saved.files) ? saved.files : 280;
     const setWidths = () => {
       const width = root.clientWidth || 900;
-      groupWidth = Math.max(130, Math.min(groupWidth, width - 160 - 220 - 20));
-      fileWidth = Math.max(160, Math.min(fileWidth, width - groupWidth - 220 - 20));
-      root.style.setProperty("--logs-groups-width", groupWidth + "px");
+      fileWidth = Math.max(160, Math.min(fileWidth, width - 220 - 10));
       root.style.setProperty("--logs-files-width", fileWidth + "px");
+      handle.setAttribute("aria-valuemin", "160");
+      handle.setAttribute("aria-valuemax", String(Math.max(160, width - 230)));
+      handle.setAttribute("aria-valuenow", String(Math.round(fileWidth)));
     };
     const makeColumn = (name, className) => {
       const column = document.createElement("section");
@@ -3939,7 +3974,9 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       column.appendChild(heading);
       return column;
     };
-    const groupColumn = makeColumn("Groups", "system-logs-groups");
+    const groupColumn = document.createElement("nav");
+    groupColumn.className = "system-logs-groups";
+    groupColumn.setAttribute("aria-label", "Log categories");
     const fileColumn = makeColumn("Files", "system-logs-files");
     const fileList = document.createElement("div");
     fileList.className = "system-logs-list";
@@ -4014,34 +4051,13 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       });
       groupColumn.appendChild(button);
     });
-    const splitter = (side) => {
-      const handle = document.createElement("div");
-      handle.className = "system-logs-splitter";
-      handle.dataset.logsSplitter = side;
-      handle.setAttribute("role", "separator");
-      handle.setAttribute("aria-label", "Resize " + (side === "groups" ? "Groups and Files" : "Files and Viewer"));
-      handle.setAttribute("aria-orientation", "vertical");
-      handle.tabIndex = 0;
-      const move = (delta) => {
-        if (side === "groups") groupWidth += delta;
-        else fileWidth += delta;
-        setWidths();
-        try { localStorage.setItem("justvoxel.system.logs.columns", JSON.stringify({ groups: groupWidth, files: fileWidth })); } catch {}
-      };
-      handle.addEventListener("pointerdown", (event) => {
-        event.preventDefault();
-        handle.setPointerCapture(event.pointerId);
-        let previous = event.clientX;
-        const onMove = (next) => { const delta = next.clientX - previous; previous = next.clientX; move(delta); };
-        const onEnd = () => { handle.removeEventListener("pointermove", onMove); handle.removeEventListener("pointerup", onEnd); handle.removeEventListener("pointercancel", onEnd); };
-        handle.addEventListener("pointermove", onMove);
-        handle.addEventListener("pointerup", onEnd);
-        handle.addEventListener("pointercancel", onEnd);
-      });
-      handle.addEventListener("keydown", (event) => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); move(event.key === "ArrowLeft" ? -16 : 16); } });
-      return handle;
-    };
-    root.append(groupColumn, splitter("groups"), fileColumn, splitter("files"), reader);
+    const handle = systemSplitter("Resize Files and Viewer", (delta) => {
+      fileWidth += delta;
+      setWidths();
+      try { localStorage.setItem("justvoxel.system.logs.columns", JSON.stringify({ files: fileWidth })); } catch {}
+    });
+    handle.dataset.logsSplitter = "files";
+    root.append(groupColumn, fileColumn, handle, reader);
     content.replaceChildren(root);
     setWidths();
     const logsResizeObserver = new ResizeObserver(() => {
@@ -4053,6 +4069,12 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   };
 
   const renderUsers = async (sequence, message = "") => {
+    if (!document.querySelector('link[href="/static/storage-browser.css"]')) {
+      const stylesheet = document.createElement("link");
+      stylesheet.rel = "stylesheet";
+      stylesheet.href = "/static/storage-browser.css";
+      document.head.appendChild(stylesheet);
+    }
     const payload = await systemFetchJSON("/api/system/workspace/users");
     if (!payload || sequence !== loadSequence || !content) return;
     const root = document.createElement("div");
@@ -4111,7 +4133,6 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       const rows = document.createElement("tbody");
       table.append(head, rows);
       list.appendChild(table);
-      let openManagement = null;
       users.forEach((user, index) => {
         const row = document.createElement("tr");
         for (const value of [user.username || "User", user.role === "operator" ? "Operator" : "Viewer", user.enabled ? "Enabled" : "Disabled",
@@ -4120,126 +4141,121 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
           cell.textContent = value;
           row.appendChild(cell);
         }
-        const manageCell = document.createElement("td");
-        const manage = document.createElement("button");
-        manage.type = "button";
-        manage.className = "secondary";
-        manage.textContent = "Manage";
-        manage.setAttribute("aria-expanded", "false");
-        manage.setAttribute("aria-controls", "system-user-management-" + index);
-        manageCell.appendChild(manage);
-        row.appendChild(manageCell);
-        const managementRow = document.createElement("tr");
-        managementRow.hidden = true;
-        managementRow.id = "system-user-management-" + index;
-        const managementCell = document.createElement("td");
-        managementCell.colSpan = 6;
-        const card = document.createElement("div");
-        card.className = "system-user-management";
-        managementCell.appendChild(card);
-        managementRow.appendChild(managementCell);
-        manage.addEventListener("click", () => {
-          const opening = managementRow.hidden;
-          if (openManagement) {
-            openManagement.row.hidden = true;
-            openManagement.button.setAttribute("aria-expanded", "false");
+        const cell = document.createElement("td");
+        const menu = document.createElement("details");
+        menu.className = "storage-action-menu system-user-menu";
+        const trigger = document.createElement("summary");
+        trigger.textContent = "⋯";
+        trigger.setAttribute("aria-label", "Actions for " + user.username);
+        const choices = document.createElement("div");
+        choices.className = "storage-action-menu-popover";
+        // Use the browser top layer so the compact scrolling table cannot clip the menu.
+        choices.setAttribute("popover", "auto");
+        menu.addEventListener("toggle", () => {
+          if (!menu.isConnected) return;
+          if (menu.open) {
+            const rect = trigger.getBoundingClientRect();
+            choices.style.right = Math.max(8, window.innerWidth - rect.right) + "px";
+            choices.style.top = Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - 300)) + "px";
+            choices.showPopover();
+          } else if (choices.matches(":popover-open")) choices.hidePopover();
+        });
+        choices.addEventListener("toggle", (event) => {
+          if (event.newState === "closed") {
+            menu.open = false;
+            if (choices.contains(document.activeElement)) trigger.focus();
           }
-          managementRow.hidden = !opening;
-          manage.setAttribute("aria-expanded", String(opening));
-          openManagement = opening ? { row: managementRow, button: manage } : null;
         });
-
-        const actions = document.createElement("div");
-        actions.className = "user-actions-grid";
-
-        const roleForm = document.createElement("form");
-        roleForm.innerHTML = '<label>Role<select name="role"><option value="operator">Operator</option><option value="viewer">Viewer</option></select></label><button class="secondary" type="submit">Save role</button>';
-        roleForm.querySelector("select").value = user.role || "viewer";
-        roleForm.addEventListener("submit", async (event) => {
-          event.preventDefault();
-          const result = await systemPostForm("/api/system/workspace/users/" + user.id + "/role", {
-            role: roleForm.querySelector("select").value,
+        const openAction = (title, fields, action, submitText, dangerous = false) => {
+          menu.open = false;
+          if (choices.matches(":popover-open")) choices.hidePopover();
+          const dialog = document.createElement("dialog");
+          dialog.className = "system-action-dialog system-user-dialog";
+          const wrap = document.createElement("div");
+          wrap.className = "system-action-dialog-content";
+          const heading = document.createElement("h2");
+          heading.id = "system-user-action-" + index;
+          heading.textContent = title + " · " + user.username;
+          dialog.setAttribute("aria-labelledby", heading.id);
+          const form = document.createElement("form");
+          form.innerHTML = fields;
+          form.querySelectorAll('input[type="password"]').forEach((input) => { input.minLength = Number(payload.minimum_password_len || 8); });
+          const error = document.createElement("p");
+          error.className = "notice error";
+          error.hidden = true;
+          error.setAttribute("role", "alert");
+          const actions = document.createElement("div");
+          actions.className = "action-row";
+          const cancel = document.createElement("button");
+          cancel.type = "button";
+          cancel.className = "secondary";
+          cancel.textContent = "Cancel";
+          cancel.addEventListener("click", () => dialog.close());
+          const submit = document.createElement("button");
+          submit.type = "submit";
+          submit.textContent = submitText;
+          if (dangerous) {
+            submit.className = "danger";
+            submit.dataset.destructiveSubmit = "";
+            submit.disabled = true;
+            const confirmation = document.createElement("div");
+            confirmation.className = "destructive-confirmation";
+            confirmation.dataset.destructiveConfirmation = "";
+            confirmation.innerHTML = '<div class="destructive-confirm-slider" data-destructive-slider-shell><span class="destructive-confirm-slider-text" data-destructive-slider-text>Slide to confirm</span><span class="destructive-confirm-slider-thumb" aria-hidden="true">&gt;</span><input type="range" min="0" max="100" step="1" value="0" data-destructive-slider aria-label="Slide to confirm account action"></div><label class="destructive-confirm-toggle-row" data-destructive-toggle-row hidden><span class="destructive-confirm-toggle-callout">Confirm &gt;</span><input class="destructive-confirm-toggle" type="checkbox" data-destructive-toggle aria-label="Confirm account action"></label>';
+            form.appendChild(confirmation);
+          }
+          actions.append(cancel, submit);
+          form.append(error, actions);
+          form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            if (submit.disabled || (dangerous && (!form.querySelector("[data-destructive-toggle]").checked || Number(form.querySelector("[data-destructive-slider]").value) < 100))) return;
+            submit.disabled = true;
+            cancel.disabled = true;
+            const preventClose = (event) => event.preventDefault();
+            dialog.addEventListener("cancel", preventClose);
+            try {
+              const fields = Object.fromEntries(new FormData(form).entries());
+              const result = await systemPostForm("/api/system/workspace/users/" + user.id + "/" + action, fields);
+              if (result) {
+                dialog.close();
+                await renderUsers(++loadSequence, result.message || "WebUI user updated.");
+              }
+            } catch (failure) {
+              error.textContent = failure?.message || "Could not update WebUI user.";
+              error.hidden = false;
+            } finally {
+              cancel.disabled = false;
+              dialog.removeEventListener("cancel", preventClose);
+              if (dangerous) form.querySelector("[data-destructive-confirmation]")._justVoxelDestructiveSync();
+              else submit.disabled = false;
+            }
           });
-          if (result) await renderUsers(++loadSequence, result.message || "WebUI user updated.");
-        });
-        actions.appendChild(roleForm);
-
-        const enabledButton = document.createElement("button");
-        enabledButton.type = "button";
-        enabledButton.className = "secondary";
-        enabledButton.textContent = user.enabled ? "Disable" : "Enable";
-        enabledButton.addEventListener("click", async () => {
-          enabledButton.disabled = true;
-          const result = await systemPostForm("/api/system/workspace/users/" + user.id + "/enabled", { enabled: !user.enabled });
-          if (result) await renderUsers(++loadSequence, result.message || "WebUI user updated.");
-        });
-        actions.appendChild(enabledButton);
-
-        const restartButton = document.createElement("button");
-        restartButton.type = "button";
-        restartButton.className = "secondary";
-        restartButton.textContent = "Reset restart allowance";
-        restartButton.disabled = Number(user.restart_used || 0) === 0;
-        restartButton.addEventListener("click", async () => {
-          const result = await systemPostForm("/api/system/workspace/users/" + user.id + "/restart-allowance/reset");
-          if (result) await renderUsers(++loadSequence, result.message || "Restart allowance reset.");
-        });
-        actions.appendChild(restartButton);
-
-        const backupButton = document.createElement("button");
-        backupButton.type = "button";
-        backupButton.className = "secondary";
-        backupButton.textContent = "Reset backup allowance";
-        backupButton.disabled = Number(user.backup_used || 0) === 0;
-        backupButton.addEventListener("click", async () => {
-          const result = await systemPostForm("/api/system/workspace/users/" + user.id + "/backup-allowance/reset");
-          if (result) await renderUsers(++loadSequence, result.message || "Backup allowance reset.");
-        });
-        actions.appendChild(backupButton);
-        card.appendChild(actions);
-
-        const passwordDetails = document.createElement("details");
-        passwordDetails.className = "user-details";
-        const passwordSummary = document.createElement("summary");
-        passwordSummary.textContent = "Change password";
-        const passwordForm = document.createElement("form");
-        passwordForm.className = "admin-form-grid compact-form";
-        passwordForm.innerHTML =
-          '<label>New password<input type="password" name="password" required autocomplete="new-password"></label>' +
-          '<label>Confirm password<input type="password" name="confirm_password" required autocomplete="new-password"></label>' +
-          '<div class="form-actions"><button class="secondary" type="submit">Change password</button></div>';
-        passwordForm.querySelectorAll('input[type="password"]').forEach((input) => {
-          input.minLength = Number(payload.minimum_password_len || 8);
-        });
-        passwordForm.addEventListener("submit", async (event) => {
-          event.preventDefault();
-          const data = Object.fromEntries(new FormData(passwordForm).entries());
-          const result = await systemPostForm("/api/system/workspace/users/" + user.id + "/password", data);
-          if (result) await renderUsers(++loadSequence, result.message || "WebUI user password changed.");
-        });
-        passwordDetails.append(passwordSummary, passwordForm);
-        card.appendChild(passwordDetails);
-
-        const deleteDetails = document.createElement("details");
-        deleteDetails.className = "user-details danger-zone";
-        const deleteSummary = document.createElement("summary");
-        deleteSummary.textContent = "Delete account";
-        const deleteText = document.createElement("p");
-        deleteText.className = "muted compact";
-        deleteText.textContent = "Deleting this WebUI identity also removes its saved Operator quota history.";
-        const deleteButton = document.createElement("button");
-        deleteButton.type = "button";
-        deleteButton.className = "danger";
-        deleteButton.textContent = "Delete " + (user.username || "account");
-        deleteButton.addEventListener("click", async () => {
-          deleteButton.disabled = true;
-          const result = await systemPostForm("/api/system/workspace/users/" + user.id + "/delete");
-          if (result) await renderUsers(++loadSequence, result.message || "WebUI user deleted.");
-        });
-        deleteDetails.append(deleteSummary, deleteText, deleteButton);
-        card.appendChild(deleteDetails);
-
-        rows.append(row, managementRow);
+          wrap.append(heading, form);
+          dialog.appendChild(wrap);
+          document.body.appendChild(dialog);
+          initializeSharedWebUIControls(dialog);
+          dialog.addEventListener("close", () => { dialog.remove(); trigger.focus(); }, { once: true });
+          dialog.showModal();
+        };
+        const addAction = (title, fields, action, submitText, dangerous = false, disabled = false) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = title;
+          button.disabled = disabled;
+          if (dangerous) button.className = "storage-action-danger";
+          button.addEventListener("click", () => openAction(title, fields, action, submitText, dangerous));
+          choices.appendChild(button);
+        };
+        addAction("Change role", '<label>Role<select name="role"><option value="operator"' + (user.role === "operator" ? ' selected' : '') + '>Operator</option><option value="viewer"' + (user.role !== "operator" ? ' selected' : '') + '>Viewer</option></select></label>', "role", "Save role");
+        addAction("Reset restart allowance", '<p>Reset the used restart allowance for this account.</p>', "restart-allowance/reset", "Reset allowance", false, Number(user.restart_used || 0) === 0);
+        addAction("Reset backup allowance", '<p>Reset the used backup allowance for this account.</p>', "backup-allowance/reset", "Reset allowance", false, Number(user.backup_used || 0) === 0);
+        addAction(user.enabled ? "Disable account" : "Enable account", '<input type="hidden" name="enabled" value="' + String(!user.enabled) + '"><p>' + (user.enabled ? 'This account will no longer be able to sign in.' : 'Allow this account to sign in again.') + '</p>', "enabled", user.enabled ? "Disable account" : "Enable account", Boolean(user.enabled));
+        addAction("Change password", '<label>New password<input type="password" name="password" required autocomplete="new-password"></label><label>Confirm password<input type="password" name="confirm_password" required autocomplete="new-password"></label>', "password", "Change password");
+        addAction("Delete account", '<p>Deleting this WebUI identity also removes its saved Operator quota history.</p>', "delete", "Delete account", true);
+        menu.append(trigger, choices);
+        cell.appendChild(menu);
+        row.appendChild(cell);
+        rows.appendChild(row);
       });
       listPanel.appendChild(list);
     }
@@ -5019,7 +5035,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     forget.type = "button";
     forget.className = "danger";
     forget.textContent = "Remove saved source";
-    actions.append(forget, cancel);
+    actions.append(cancel, forget);
     const optionColumns = document.createElement("div");
     optionColumns.className = "system-ups-option-columns";
     optionColumns.append(shutdownSection, sharingSection);
@@ -5346,7 +5362,19 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     }
   };
 
+  const settingsPanels = new Map(Array.from(document.querySelectorAll("[data-system-settings-panel]"), (panel) =>
+    [panel.dataset.systemSettingsPanel, { panel, home: panel.parentNode }]));
+  const parkSettingsPanels = () => {
+    settingsPanels.forEach(({ panel, home }) => {
+      panel.hidden = true;
+      home.appendChild(panel);
+    });
+  };
+
   const loadCurrentSystemTab = async () => {
+    if (window.JustVoxelWallpaper?.canLeave() === false) return;
+    window.JustVoxelWallpaper?.leave();
+    parkSettingsPanels();
     const sequence = ++loadSequence;
     if (state) state.textContent = "Loading…";
     if (refreshButton) refreshButton.disabled = true;
@@ -5355,6 +5383,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     try {
       const user = await loadIdentity();
       if (!user) return;
+      if (sequence !== loadSequence) return;
       if (administratorTabs.has(currentTab) && user.role !== "administrator") {
         currentTab = "history";
         syncSystemTabs();
@@ -5364,6 +5393,14 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       else if (currentTab === "users") await renderUsers(sequence);
       else if (currentTab === "security") await renderSecurity(sequence);
       else if (currentTab === "logs") await renderLogs(sequence);
+      else if (settingsPanels.has(currentTab)) {
+        const { panel } = settingsPanels.get(currentTab);
+        if (sequence !== loadSequence) return;
+        panel.hidden = false;
+        content.appendChild(panel);
+        if (currentTab === "date-time") await window.JustVoxelDateTime?.refresh();
+        else window.JustVoxelWallpaper?.prepare();
+      }
       else if (currentTab === "reset") await renderReset(sequence);
       else if (currentTab === "ups") await loadUPS(sequence);
       else await renderAbout(sequence);
@@ -5378,6 +5415,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   };
 
   const selectSystemTab = async (tab) => {
+    if (window.JustVoxelWallpaper?.canLeave() === false) return;
     const user = await loadIdentity();
     if (!user) return;
     if (administratorTabs.has(tab) && user.role !== "administrator") return;
@@ -5398,6 +5436,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   });
 
   const workspaceWindow = setupWorkspaceWindow(systemWorkspaceDialog, {
+    onClose: () => { window.JustVoxelWallpaper?.leave(); clearResetPoll(); },
     onOpen: async () => {
       try {
         const user = await loadIdentity();
@@ -5408,7 +5447,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
           const target = new URLSearchParams(window.location.search);
           const requested = target.get("workspace") === "system" ? target.get("tab") : "";
           currentTab = user.role === "administrator" ? "health" : "history";
-          if (["health", "history", "users", "security", "logs", "reset", "about"].includes(requested) &&
+          if (["health", "history", "users", "security", "logs", "date-time", "wallpaper", "reset", "about"].includes(requested) &&
               (!administratorTabs.has(requested) || user.role === "administrator")) currentTab = requested;
           syncSystemTabs();
         }
@@ -5419,11 +5458,27 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     },
   });
 
+  window.JustVoxelSystem = {
+    openTab: async (tab) => {
+      if (!settingsPanels.has(tab)) return;
+      if (window.JustVoxelWallpaper?.canLeave() === false) return;
+      const user = await loadIdentity();
+      if (!user || administratorTabs.has(tab) && user.role !== "administrator") return;
+      initialized = true;
+      currentTab = tab;
+      syncSystemTabs();
+      if (controlCenter) controlCenter.open = false;
+      workspaceWindow?.open();
+    },
+  };
+
   systemWorkspaceOpen.addEventListener("click", () => {
     if (controlCenter) controlCenter.open = false;
     workspaceWindow?.open();
   });
   closeButton?.addEventListener("click", () => {
+    if (window.JustVoxelWallpaper?.canLeave() === false) return;
+    window.JustVoxelWallpaper?.leave();
     clearResetPoll();
     workspaceWindow?.close();
   });
@@ -5460,7 +5515,7 @@ if (dashboard) {
       const allowedTabs = {
         minecraft: ["overview", "memory", "gameplay", "players", "crossplay"],
         version: ["software", "minecraft"],
-        system: ["health", "history", "users", "security", "reset", "ups", "about"],
+        system: ["health", "history", "users", "security", "logs", "date-time", "wallpaper", "reset", "ups", "about"],
         migration: ["export", "import", "recovery"],
       };
       if (workspace !== "migration" && allowedTabs[workspace]?.includes(tab)) {

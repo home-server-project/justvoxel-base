@@ -1,4 +1,55 @@
 (() => {
+  // Presentation only: setup retains its own plan/apply requests below.
+  function diskBrowser(form, selectedDevice, preference) {
+    const disks = Array.from(form.querySelectorAll('[data-setup-disk]'));
+    const groups = Array.from(form.querySelectorAll('[data-setup-disk-partitions]'));
+    let selected = '';
+    let restored = '';
+    // Store only a physical-disk UI preference across preparation's inventory reload.
+    try {
+      restored = sessionStorage.getItem(preference) || '';
+      sessionStorage.removeItem(preference);
+    } catch (_) { /* Disk preferences are optional when browser storage is unavailable. */ }
+    function select(disk) {
+      selected = disk.dataset.setupDisk;
+      disks.forEach((button) => {
+        const active = button === disk;
+        button.classList.toggle('is-selected', active);
+        button.setAttribute('aria-pressed', String(active));
+      });
+      groups.forEach((group) => { group.hidden = group.dataset.setupDiskPartitions !== selected; });
+      // Large inventories may scroll; keep the chosen physical disk in view.
+      disk.scrollIntoView({block: 'nearest', inline: 'nearest'});
+    }
+    disks.forEach((disk) => disk.addEventListener('click', () => select(disk)));
+    const existing = groups.find((group) => Array.from(group.querySelectorAll('[data-device]'))
+      .some((button) => button.dataset.device === selectedDevice));
+    const initial = disks.find((disk) => disk.dataset.setupDisk === restored)
+      || disks.find((disk) => disk.dataset.setupDisk === existing?.dataset.setupDiskPartitions) || disks[0];
+    if (initial) select(initial);
+    return {
+      restored: !!restored && !!initial,
+      reveal() {
+        const disk = disks.find((button) => button.dataset.setupDisk === selected);
+        disk?.scrollIntoView({block: 'nearest', inline: 'nearest'});
+      },
+      reload() {
+        try { if (selected) sessionStorage.setItem(preference, selected); } catch (_) { /* Optional UI preference. */ }
+        window.location.reload();
+      },
+    };
+  }
+
+  function syncPreparationSlider(slider) {
+    const shell = slider?.closest('.destructive-confirm-slider');
+    if (!shell) return;
+    const progress = Number(slider.value || 0) / 100;
+    shell.style.setProperty('--confirm-progress', String(progress));
+    shell.classList.toggle('is-armed', progress >= 1);
+    const text = shell.querySelector('.destructive-confirm-slider-text');
+    if (text) text.textContent = progress >= 1 ? 'Ready to confirm' : 'Slide to confirm';
+  }
+
   const storageForm = document.querySelector('[data-setup-storage-form]');
   if (storageForm) {
     const csrf = storageForm.dataset.csrf || '';
@@ -6,6 +57,7 @@
     const device = storageForm.querySelector('[data-setup-storage-device]');
     const mount = storageForm.querySelector('[data-setup-storage-mount]');
     const path = storageForm.querySelector('[data-setup-storage-path]');
+    const disks = diskBrowser(storageForm, device?.value, 'justvoxel-setup-data-disk');
     const systemButton = storageForm.querySelector('[data-setup-storage-system]');
     const internalButton = storageForm.querySelector('[data-setup-storage-internal]');
     const systemPanel = storageForm.querySelector('[data-setup-storage-system-panel]');
@@ -30,6 +82,7 @@
 
     let reviewed = null;
     let applying = false;
+    let planning = false;
 
     function minecraftPath(mountPoint) {
       return mountPoint.replace(/\/$/, '') + '/minecraft';
@@ -40,6 +93,7 @@
       if (internalPanel) internalPanel.hidden = kind === 'system';
       systemButton?.classList.toggle('is-selected', kind === 'system');
       internalButton?.classList.toggle('is-selected', kind !== 'system');
+      if (kind !== 'system') disks.reveal();
     }
 
     function selectSystem() {
@@ -81,20 +135,22 @@
     }
 
     function resetReview() {
+      if (applying) return;
       reviewed = null;
-      if (review) review.hidden = true;
+      review?.close();
       if (reviewError) {
         reviewError.hidden = true;
         reviewError.textContent = '';
       }
       if (confirmSlider) confirmSlider.value = '0';
+      syncPreparationSlider(confirmSlider);
       if (confirmToggle) {
         confirmToggle.checked = false;
         confirmToggle.disabled = true;
       }
       if (applyButton) {
         applyButton.disabled = true;
-        applyButton.textContent = 'Apply reviewed action';
+        applyButton.textContent = 'Apply';
       }
     }
 
@@ -110,6 +166,7 @@
     }
 
     function updateApplyState() {
+      syncPreparationSlider(confirmSlider);
       if (!reviewed || !applyButton || !confirmSlider || !confirmToggle) return;
       const armed = Number(confirmSlider.value || 0) >= 100;
       confirmToggle.disabled = !armed;
@@ -142,6 +199,8 @@
     }
 
     async function reviewPreparation(button) {
+      if (applying || planning) return;
+      planning = true;
       resetReview();
       const operation = button.dataset.setupStoragePrepare || '';
       const request = {
@@ -150,6 +209,11 @@
         freeStart: button.dataset.freeStart || '',
         sizeGiB: operation === 'create_partition' ? 'all' : '',
       };
+      if (reviewTitle) reviewTitle.textContent = operation === 'create_partition' ? 'Create partition' : 'Format blank partition';
+      if (reviewDevice) reviewDevice.textContent = request.device;
+      if (reviewResult) reviewResult.textContent = operation === 'create_partition'
+        ? 'Create an XFS partition in the selected unallocated space' : 'Format this blank partition as XFS';
+      renderWarnings([]);
       button.disabled = true;
       try {
         const payload = await postStorageAction('plan', request);
@@ -162,15 +226,15 @@
             : 'Create a new XFS filesystem on this blank partition';
         }
         renderWarnings(reviewed.warnings);
-        if (review) review.hidden = false;
-        review.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+        if (review && !review.open) review.showModal();
       } catch (error) {
         if (reviewError) {
           reviewError.textContent = error.message;
           reviewError.hidden = false;
         }
-        if (review) review.hidden = false;
+        if (review && !review.open) review.showModal();
       } finally {
+        planning = false;
         button.disabled = false;
       }
     }
@@ -183,14 +247,14 @@
       if (reviewError) reviewError.hidden = true;
       try {
         await postStorageAction('apply', reviewed.request);
-        window.location.reload();
+        disks.reload();
       } catch (error) {
         applying = false;
         if (reviewError) {
           reviewError.textContent = error.message;
           reviewError.hidden = false;
         }
-        applyButton.textContent = 'Apply reviewed action';
+        applyButton.textContent = 'Apply';
         updateApplyState();
       }
     }
@@ -199,17 +263,26 @@
     internalButton?.addEventListener('click', chooseInternal);
     existingButtons.forEach((button) => button.addEventListener('click', () => selectExisting(button)));
     prepareButtons.forEach((button) => button.addEventListener('click', () => void reviewPreparation(button)));
+    storageForm.addEventListener('submit', (event) => { if (review?.open) event.preventDefault(); });
+    review?.addEventListener('cancel', (event) => { event.preventDefault(); resetReview(); });
     reviewClose?.addEventListener('click', resetReview);
     reviewBack?.addEventListener('click', resetReview);
     confirmSlider?.addEventListener('input', updateApplyState);
     confirmToggle?.addEventListener('change', updateApplyState);
     applyButton?.addEventListener('click', () => void applyPreparation());
 
-    if (type?.value === 'partition') {
+    if (type?.value === 'partition' || disks.restored) {
       setPanels('partition');
+      if (type) type.value = 'partition';
       const current = existingButtons.find((button) => button.dataset.device === device?.value);
       if (current) selectExisting(current);
-      else if (selectedBox) selectedBox.hidden = true;
+      else {
+        // A refreshed inventory may no longer contain the draft's old partition.
+        if (device) device.value = '';
+        if (mount) mount.value = '';
+        if (path) path.value = '';
+        if (selectedBox) selectedBox.hidden = true;
+      }
     } else {
       selectSystem();
     }
@@ -222,6 +295,7 @@
     const device = backupForm.querySelector('[data-setup-backup-device]');
     const mount = backupForm.querySelector('[data-setup-backup-mount]');
     const path = backupForm.querySelector('[data-setup-backup-path]');
+    const disks = diskBrowser(backupForm, device?.value, 'justvoxel-setup-backup-disk');
     const source = backupForm.querySelector('[data-setup-backup-source]');
     const username = backupForm.querySelector('[data-setup-backup-username]');
     const domain = backupForm.querySelector('[data-setup-backup-domain]');
@@ -250,6 +324,7 @@
 
     let reviewed = null;
     let applying = false;
+    let planning = false;
 
     const backupPath = (mountPoint) => mountPoint.replace(/\/$/, '') + '/backups';
 
@@ -265,6 +340,7 @@
       panels.forEach((panel) => {
         panel.hidden = panel.dataset.setupBackupPanel !== kind;
       });
+      if (kind === 'partition') disks.reveal();
       if (kind !== 'partition') clearLocalSelection();
       else if (selectedBox) selectedBox.hidden = !device?.value;
       syncNetworkFields(kind);
@@ -324,20 +400,22 @@
     }
 
     function resetReview() {
+      if (applying) return;
       reviewed = null;
-      if (review) review.hidden = true;
+      review?.close();
       if (reviewError) {
         reviewError.hidden = true;
         reviewError.textContent = '';
       }
       if (confirmSlider) confirmSlider.value = '0';
+      syncPreparationSlider(confirmSlider);
       if (confirmToggle) {
         confirmToggle.checked = false;
         confirmToggle.disabled = true;
       }
       if (applyButton) {
         applyButton.disabled = true;
-        applyButton.textContent = 'Apply reviewed action';
+        applyButton.textContent = 'Apply';
       }
     }
 
@@ -353,6 +431,7 @@
     }
 
     function updateApplyState() {
+      syncPreparationSlider(confirmSlider);
       if (!reviewed || !applyButton || !confirmSlider || !confirmToggle) return;
       const armed = Number(confirmSlider.value || 0) >= 100;
       confirmToggle.disabled = !armed;
@@ -385,6 +464,8 @@
     }
 
     async function reviewPreparation(button) {
+      if (applying || planning) return;
+      planning = true;
       resetReview();
       showKind('partition');
       const operation = button.dataset.setupBackupPrepare || '';
@@ -394,6 +475,11 @@
         freeStart: button.dataset.freeStart || '',
         sizeGiB: operation === 'create_partition' ? 'all' : '',
       };
+      if (reviewTitle) reviewTitle.textContent = operation === 'create_partition' ? 'Create partition' : 'Format blank partition';
+      if (reviewDevice) reviewDevice.textContent = request.device;
+      if (reviewResult) reviewResult.textContent = operation === 'create_partition'
+        ? 'Create an XFS partition in the selected unallocated space' : 'Format this blank partition as XFS';
+      renderWarnings([]);
       button.disabled = true;
       try {
         const payload = await postStorageAction('plan', request);
@@ -406,15 +492,15 @@
             : 'Create a new XFS filesystem on this blank partition';
         }
         renderWarnings(reviewed.warnings);
-        if (review) review.hidden = false;
-        review.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+        if (review && !review.open) review.showModal();
       } catch (error) {
         if (reviewError) {
           reviewError.textContent = error.message;
           reviewError.hidden = false;
         }
-        if (review) review.hidden = false;
+        if (review && !review.open) review.showModal();
       } finally {
+        planning = false;
         button.disabled = false;
       }
     }
@@ -425,16 +511,15 @@
       applyButton.disabled = true;
       applyButton.textContent = 'Applying…';
       try {
-        sessionStorage.setItem('justvoxel.setup.backup.resume', 'partition');
         await postStorageAction('apply', reviewed.request);
-        window.location.reload();
+        disks.reload();
       } catch (error) {
         applying = false;
         if (reviewError) {
           reviewError.textContent = error.message;
           reviewError.hidden = false;
         }
-        applyButton.textContent = 'Apply reviewed action';
+        applyButton.textContent = 'Apply';
         updateApplyState();
       }
     }
@@ -474,6 +559,8 @@
     backupForm.querySelector('[data-setup-smb-username]')?.addEventListener('input', () => syncNetworkFields('smb'));
     backupForm.querySelector('[data-setup-smb-domain]')?.addEventListener('input', () => syncNetworkFields('smb'));
 
+    backupForm.addEventListener('submit', (event) => { if (review?.open) event.preventDefault(); });
+    review?.addEventListener('cancel', (event) => { event.preventDefault(); resetReview(); });
     reviewClose?.addEventListener('click', resetReview);
     reviewBack?.addEventListener('click', resetReview);
     confirmSlider?.addEventListener('input', updateApplyState);
@@ -482,15 +569,16 @@
 
     backupForm.addEventListener('submit', () => syncNetworkFields(type?.value || 'system'));
 
-    const resume = sessionStorage.getItem('justvoxel.setup.backup.resume');
-    if (resume === 'partition') {
-      sessionStorage.removeItem('justvoxel.setup.backup.resume');
-      showKind('partition');
-    } else if (type?.value === 'partition') {
+    if (type?.value === 'partition' || disks.restored) {
       showKind('partition');
       const current = existingButtons.find((button) => button.dataset.device === device?.value);
       if (current) selectExisting(current);
-      else if (selectedBox) selectedBox.hidden = true;
+      else {
+        if (device) device.value = '';
+        if (mount) mount.value = '';
+        if (path) path.value = '';
+        if (selectedBox) selectedBox.hidden = true;
+      }
     } else if (type?.value === 'nfs' || type?.value === 'smb') {
       showKind(type.value);
     } else {

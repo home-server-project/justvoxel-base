@@ -18,18 +18,19 @@
   <form class="nav-logout setup-topbar-logout" method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Log out</button></form>
 </header>
 <main class="setup-shell">
-  <div class="title-row setup-title-row"><div><h1>Set up JustVoxel</h1></div><span class="badge">Step 7 of 7</span></div>
+  <div class="setup-stage-header"><h1>Set up JustVoxel</h1>
   {{if ne .SetupMode "recommended"}}
   <ol class="setup-progress" aria-label="Setup progress">
     <li class="complete"><form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="1"><button type="submit"><span class="setup-number">1</span><span>Server</span></button></form></li>
-    <li class="complete"><form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="2"><button type="submit"><span class="setup-number">2</span><span>Connections</span></button></form></li>
-    <li class="complete"><form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="3"><button type="submit"><span class="setup-number">3</span><span>Resources</span></button></form></li>
+    <li class="complete"><form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="2"><button type="submit"><span class="setup-number">2</span><span>Cross-play</span></button></form></li>
+    <li class="complete"><form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="3"><button type="submit"><span class="setup-number">3</span><span>Memory</span></button></form></li>
     <li class="complete"><form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="4"><button type="submit"><span class="setup-number">4</span><span>Version</span></button></form></li>
     <li class="complete"><form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="5"><button type="submit"><span class="setup-number">5</span><span>Storage</span></button></form></li>
     <li class="complete"><form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="6"><button type="submit"><span class="setup-number">6</span><span>Backups</span></button></form></li>
     <li class="active" aria-current="step"><span class="setup-number">7</span><span>Review</span></li>
   </ol>
   {{end}}
+  </div>
 
   <section class="panel setup-step-panel setup-review-panel">
     <div class="setup-review-content">
@@ -45,7 +46,7 @@
         <div><dt>Maximum players</dt><dd>{{.Plan.Normalized.Server.MaxPlayers}}</dd></div>
         <div><dt>Timezone</dt><dd>{{.Plan.Normalized.Server.Timezone}}</dd></div>
       </dl></section>
-      <section><h3>Connections</h3><dl>
+      <section><h3>Cross-play</h3><dl>
         <div><dt>Java</dt><dd>Enabled, port {{.Plan.Normalized.Minecraft.JavaPort}}</dd></div>
         <div><dt>Bedrock cross-play</dt><dd>{{if .Plan.Normalized.Server.BedrockEnabled}}Enabled, port {{.Plan.Normalized.Minecraft.BedrockPort}}{{else}}Disabled{{end}}</dd></div>
       </dl></section>
@@ -72,8 +73,6 @@
     {{end}}
 
 
-    {{if .Plan.Requirements.SMBPasswordRequired}}<div class="notice setup-secret-note"><strong>SMB password required during execution.</strong><span>The password is not stored in this setup draft or review. JustVoxel will request it only when the setup transaction is actually started.</span></div>{{end}}
-    {{if .Plan.Requirements.NetworkBackupValidationOnApply}}<div class="notice"><strong>Network backup validation happens during execution.</strong><br>The configured network source will be mounted and verified before JustVoxel uses it. Planning does not mount the share.</div>{{end}}
 
     <form id="setup-apply-form" method="post" action="/setup/review/apply" data-setup-apply data-instance-preflight data-eula-accepted="{{.EULAAccepted}}" data-smb-required="{{.Plan.Requirements.SMBPasswordRequired}}">
       <input type="hidden" name="csrf" value="{{.CSRF}}">

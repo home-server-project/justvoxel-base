@@ -68,7 +68,7 @@
     {{end}}
 
 
-    <div class="action-row"><button type="submit">Continue review</button><a class="button-link secondary" href="/?workspace=migration&amp;tab=import">Start over</a></div>
+    <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;tab=import">Start over</a><button type="submit">Continue review</button></div>
   </form>
   {{else}}
   <div class="action-row"><a class="button-link" href="/?workspace=migration&amp;tab=import">Back to Server Import</a></div>
@@ -123,7 +123,7 @@
     <p>Backup server software: {{.SourceSoftware}}<br>Current server software: {{.DestinationSoftware}}</p>
     {{end}}
   </section>
-  <div class="action-row"><a class="button-link" href="/?workspace=version&amp;tab=software">Server Version</a><a class="button-link secondary" href="/?workspace=migration&amp;tab=import">Back to Server Import</a></div>
+  <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;tab=import">Back to Server Import</a><a class="button-link" href="/?workspace=version&amp;tab=software">Server Version</a></div>
   {{else}}
   {{if .Plan.Warnings}}<section class="panel"><p class="eyebrow">Import warnings</p>{{range .Plan.Warnings}}<div class="notice warning">{{.Message}}</div>{{end}}</section>{{end}}
 

@@ -169,13 +169,14 @@ if (versionPolicy && versionInput && specificVersionField) {
       }
       parts.push(primary);
     }
-    if (policy === "recommended" && status.available && status.available !== status.selected_candidate) {
+    {
       const secondary = make("div", "setup-version-secondary", "");
-      secondary.append(make("span", "setup-version-kicker", "Newer version available"));
-      secondary.append(make("span", "setup-version-newer", `${status.available}${status.available_channel ? ` · ${channelLabel(status.available_channel)}` : ""}`));
+      secondary.append(make("span", "setup-version-kicker", "Newest available version"));
+      secondary.append(make("span", "setup-version-newer", status.available ? `${status.available}${status.available_channel ? ` · ${channelLabel(status.available_channel)}` : ""}` : "Unavailable"));
       parts.push(secondary);
     }
-    if (status.crossplay_enabled && status.geyser_supported_version && (status.geyser_supported_version !== status.selected_candidate || status.available !== status.selected_candidate)) parts.push(make("p", "setup-version-explanation", `Bedrock-supported version: ${status.geyser_supported_version}`));
+    parts.push(make("p", "setup-version-explanation", `Bedrock-supported version: ${status.geyser_supported_version || "Unavailable"}`));
+    parts.push(make("p", "setup-version-explanation", status.crossplay_enabled ? (status.crossplay_compatible ? "Bedrock compatibility: Supported" : "Bedrock compatibility: Unavailable") : "Bedrock cross-play is off · Java only"));
     if (policy === "recommended" && status.crossplay_enabled && status.selected_candidate && status.available !== status.selected_candidate) parts.push(make("p", "setup-version-explanation", "This version keeps Bedrock players compatible."));
     if (policy === "latest") parts.push(make("p", "setup-version-explanation", "Latest follows newer Minecraft server versions when available."));
     if (status.crossplay_enabled && !status.crossplay_compatible && status.selected_candidate) parts.push(make("p", "setup-version-explanation", "This version is not currently compatible with Bedrock cross-play. Choose Recommended, choose a compatible Specific version, or turn off Bedrock to continue."));
@@ -249,7 +250,13 @@ if (setupConnections) {
   const bedrockToggle = setupConnections.querySelector("[data-bedrock-toggle]");
   const bedrockPortField = setupConnections.querySelector("[data-bedrock-port-field]");
   const syncBedrockPort = () => {
-    if (bedrockPortField) bedrockPortField.hidden = !bedrockToggle?.checked;
+    if (bedrockPortField) {
+      const enabled = !!bedrockToggle?.checked;
+      bedrockPortField.classList.toggle("is-disabled", !enabled);
+      // Preserve submission of the existing port while cross-play is off.
+      const port = bedrockPortField.querySelector("input");
+      if (port) { port.readOnly = !enabled; port.setAttribute("aria-disabled", String(!enabled)); }
+    }
   };
   bedrockToggle?.addEventListener("change", syncBedrockPort);
   syncBedrockPort();

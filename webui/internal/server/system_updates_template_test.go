@@ -57,7 +57,7 @@ func TestSystemUpdateWorkspaceUX(t *testing.T) {
 		"grid-template-columns:1fr",
 		".system-update-reboot-panel",
 		".system-update-option",
-		".system-ups-shutdown-switch input[type=checkbox]",
+		"input[type=checkbox]:not(.destructive-confirm-toggle):not(.storage-confirm-toggle)",
 		"@media(max-width:700px)",
 		"resize:none",
 	} {

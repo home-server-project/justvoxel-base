@@ -10,6 +10,8 @@ import (
 	"io/fs"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -95,11 +97,32 @@ type dashboardSnapshot struct {
 	Attention *dashboardAttention `json:"attention,omitempty"`
 }
 
+// Read the appliance timezone for every page render, including non-admin clocks.
+// This is read-only presentation data; date/time changes still use the Management API.
+func systemTimezone() string {
+	path, err := filepath.EvalSymlinks("/etc/localtime")
+	if err == nil {
+		if _, zone, ok := strings.Cut(path, "/zoneinfo/"); ok {
+			if _, err := time.LoadLocation(zone); err == nil {
+				return zone
+			}
+		}
+	}
+	// Some systems provide /etc/timezone instead of a zoneinfo symlink.
+	if data, err := os.ReadFile("/etc/timezone"); err == nil {
+		zone := strings.TrimSpace(string(data))
+		if _, err := time.LoadLocation(zone); err == nil {
+			return zone
+		}
+	}
+	return "UTC"
+}
+
 func New(client API, cfg Config) (*App, error) {
 	if cfg.ExternalScheme == "" {
 		cfg.ExternalScheme = "http"
 	}
-	t, err := template.ParseFS(assets, "templates/*.html")
+	t, err := template.New("pages").Funcs(template.FuncMap{"systemTimezone": systemTimezone, "systemNow": func() int64 { return time.Now().UnixMilli() }}).ParseFS(assets, "templates/*.html")
 	if err != nil {
 		return nil, err
 	}
@@ -592,7 +615,7 @@ func securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' http: https: blob:; form-action 'self'; frame-ancestors 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'sha256-ypuHOrHdFK0ra+bQlE+zbe2vHCx4oWqJLuhMbpi6gms='; script-src 'self'; img-src 'self' http: https: blob:; form-action 'self'; frame-ancestors 'none'")
 		next.ServeHTTP(w, r)
 	})
 }

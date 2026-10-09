@@ -4,7 +4,7 @@
     <img class="brand-logo" src="/static/justvoxel-logo.png" alt="JustVoxel">
   </a>
 
-  <div class="topbar-time"><div class="topbar-clock" data-topbar-clock aria-label="Local time">--:--</div><button class="topbar-time-utility nav-admin-only" type="button" data-date-time-open aria-label="Date and Time settings" title="Date and Time">⋯</button></div>
+  <div class="topbar-time"><div class="topbar-clock" data-topbar-clock data-system-timezone="{{systemTimezone}}" data-system-now="{{systemNow}}" aria-label="System date and time">--:--</div></div>
   <script src="/static/timezone-search.js"></script>
   <script src="/static/date-time.js" defer></script>
   <script src="/static/version-workspace.js" defer></script>
@@ -17,7 +17,7 @@
 
     <div class="control-center-panel">
       <div class="control-center-heading">
-        <div><strong>JustVoxel</strong><span>Control Center</span></div>
+        <div><p class="eyebrow">JUSTVOXEL</p><h2>Control Center</h2></div>
       </div>
 
       <section class="control-section control-session">
@@ -150,10 +150,9 @@
         </div>
       </div>
       <div class="network-workspace-body">
-        <p class="network-workspace-state" data-network-state>Network status is loaded when this window opens.</p>
+        <p class="network-workspace-state" data-network-state role="status" aria-live="polite">Network status is loaded when this window opens.</p>
         <div class="network-workspace-content" data-network-content></div>
       </div>
-      <div class="workspace-resize-grip" data-workspace-resize-handle aria-hidden="true"></div>
     </div>
   </dialog>
 
@@ -175,6 +174,8 @@
         <button class="nav-admin-only" type="button" data-system-tab="users" aria-selected="false">Users</button>
         <button class="nav-admin-only" type="button" data-system-tab="security" aria-selected="false">Security</button>
         <button class="nav-admin-only" type="button" data-system-tab="logs" aria-selected="false">Logs</button>
+        <button class="nav-admin-only" type="button" data-system-tab="date-time" aria-selected="false">Date &amp; Time</button>
+        <button type="button" data-system-tab="wallpaper" aria-selected="false">Wallpaper</button>
         <button class="nav-admin-only" type="button" data-system-tab="reset" aria-selected="false">Factory Reset</button>
         <button type="button" data-system-tab="ups" data-system-ups-tab aria-selected="false" hidden>UPS</button>
         <button type="button" data-system-tab="about" aria-selected="false">About</button>
@@ -220,16 +221,16 @@
     </div>
   </dialog>
 
-  <dialog class="system-action-dialog date-time-dialog" data-date-time-dialog aria-labelledby="date-time-title">
+  <section class="panel date-time-panel" data-system-settings-panel="date-time" data-date-time-panel aria-labelledby="date-time-title" hidden>
     <form class="system-action-dialog-content" data-date-time-form><h2 id="date-time-title">Date &amp; Time</h2><p class="muted" data-date-time-state></p>
       <label class="setup-timezone-field">Timezone<input name="timezone" data-timezone-search autocomplete="off" aria-autocomplete="list" aria-controls="date-time-timezone-results" aria-expanded="false" required placeholder="Type Toronto, Warsaw, Amsterdam…"><div class="setup-timezone-results" id="date-time-timezone-results" data-timezone-results role="listbox" hidden></div></label>
       <div data-timezone-options hidden></div><p class="muted compact">Selected timezone: <strong data-date-time-canonical>—</strong></p>
       <label class="date-time-automatic"><span>Automatic date &amp; time</span><input class="date-time-switch" type="checkbox" name="automatic" data-date-time-automatic></label>
       <div class="date-time-manual" data-date-time-manual><label>Date<input type="date" name="date" required></label><label>Time<input type="time" name="time" required></label></div>
       <p class="muted compact" data-date-time-warning hidden>Manual system time can affect logs, secure connections and scheduled tasks.</p>
-      <p class="alert" data-date-time-error hidden></p><div class="action-row"><button class="secondary" type="button" data-date-time-cancel>Cancel</button><button type="submit">Apply changes</button></div>
+      <p class="alert" data-date-time-error hidden></p><div class="action-row"><button class="secondary" type="button" data-date-time-cancel>Reset changes</button><button type="submit">Apply changes</button></div>
     </form>
-  </dialog>
+  </section>
 
   <dialog class="workspace-window system-monitor-dialog" data-workspace-window="system-monitor" data-system-monitor-dialog aria-labelledby="system-monitor-title">
     <div class="system-monitor-shell">
@@ -290,7 +291,6 @@
           <section class="system-monitor-card system-monitor-card-wide" data-monitor-card="alerts"><span>Alerts</span><div class="system-monitor-table" data-monitor-alerts></div></section>
         </div>
       </div>
-      <div class="workspace-resize-grip" data-workspace-resize-handle aria-hidden="true"></div>
     </div>
   </dialog>
 

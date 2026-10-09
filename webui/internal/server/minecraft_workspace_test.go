@@ -388,6 +388,7 @@ func TestMinecraftWorkspaceCrossplayUsesExistingCheckboxSwitch(t *testing.T) {
 	for _, want := range []string{
 		`<label class="minecraft-native-toggle system-ups-shutdown-switch"><span>Enable Bedrock cross-play</span><input name="bedrock_enabled" type="checkbox"></label>`,
 		`section.querySelector('[name="bedrock_enabled"]').checked = Boolean(minecraft.bedrock_enabled);`,
+		`section.querySelector('[name="bedrock_enabled"]').disabled = minecraft.server_type === "vanilla";`,
 		`Geyser/Floodgate compatible with ${status.geyser_supported_version}.`,
 	} {
 		if !strings.Contains(source, want) {
@@ -398,13 +399,34 @@ func TestMinecraftWorkspaceCrossplayUsesExistingCheckboxSwitch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{
-		`.system-ups-shutdown-switch input[type=checkbox]`,
-		`.system-ups-shutdown-switch input[type=checkbox]:checked`,
-		`.system-ups-shutdown-switch input[type=checkbox]:focus-visible`,
+	css := string(cssBytes)
+	// Cross-play's plain checkbox uses the shared switch rules, which exclude
+	// only the separate destructive confirmation controls.
+	const switchSelector = `input[type=checkbox]:not(.destructive-confirm-toggle):not(.storage-confirm-toggle)`
+	for _, rule := range []struct {
+		selector     string
+		declarations []string
+	}{
+		{switchSelector, []string{`appearance:none`, `width:42px`, `height:24px`, `border-radius:999px`, `background:#303b42`}},
+		{switchSelector + `::before`, []string{`content:""`, `width:16px`, `height:16px`, `border-radius:50%`, `background:#eef1f4`}},
+		{switchSelector + `:checked`, []string{`border-color:#68bd8e`, `background:#68bd8e`}},
+		{switchSelector + `:checked::before`, []string{`transform:translateX(18px)`, `background:#07130d`}},
+		{switchSelector + `:focus-visible`, []string{`outline:2px solid #78c99d`, `outline-offset:2px`}},
+		{switchSelector + `:disabled`, []string{`cursor:not-allowed`}},
+		{`.system-ups-shutdown-switch:has(input:disabled)`, []string{`opacity:.58`, `cursor:not-allowed`}},
 	} {
-		if !strings.Contains(string(cssBytes), want) {
-			t.Fatalf("existing switch styling missing %q", want)
+		_, body, found := strings.Cut(css, rule.selector+"{")
+		if !found {
+			t.Fatalf("shared switch styling missing selector %q", rule.selector)
+		}
+		body, _, found = strings.Cut(body, "}")
+		if !found {
+			t.Fatalf("shared switch styling has unterminated rule %q", rule.selector)
+		}
+		for _, want := range rule.declarations {
+			if !strings.Contains(";"+body+";", ";"+want+";") {
+				t.Fatalf("shared switch rule %q missing declaration %q", rule.selector, want)
+			}
 		}
 	}
 }

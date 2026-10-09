@@ -240,7 +240,7 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
 .setup-wizard-panel>.setup-lead{flex:none;max-width:none;margin:0 0 .28rem;font-size:.82rem;line-height:1.3}
 .setup-wizard-panel>.notice{flex:none;margin:0 0 .35rem;padding:.45rem .6rem}
 .setup-body .setup-wizard-panel .setup-form{flex:1;min-height:0;margin:0;gap:.42rem;overflow:visible}
-.setup-body .setup-wizard-panel .setup-form>.setup-step-actions{flex:none;bottom:0;min-height:55px;margin-top:auto;padding:.45rem .6rem;border-top:1px solid #303942;border-radius:0}
+.setup-body .setup-wizard-panel .setup-form>.setup-step-actions{flex:none;bottom:0;min-height:55px;margin-top:auto;padding:.45rem .6rem}
 .setup-wizard-panel .setup-form-grid{gap:0 .75rem}
 .setup-wizard-panel .setup-field{margin:.2rem 0;font-size:.83rem}
 .setup-wizard-panel input,.setup-wizard-panel select{min-height:36px;margin-top:.16rem;padding:.42rem .55rem}
@@ -304,3 +304,77 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
 @media(prefers-color-scheme:light){
   .setup-form .notice.error{background:#fff0f0;border-color:#d58a8a}
 }
+
+/* Share workspace software-card presentation while retaining native radio choices. */
+.setup-server-type{padding:var(--jv-space-md);border-color:var(--jv-border-strong);border-radius:var(--jv-radius);background:var(--jv-surface-sunken);color:var(--jv-text);text-align:left;align-items:flex-start}
+.setup-server-type span{min-width:0;gap:var(--jv-space-xs)}
+.setup-server-type strong{font-size:.94rem}
+.setup-server-type small{color:var(--jv-muted);font-size:.78rem;line-height:1.35}
+.setup-server-type.is-available:has(input:checked){border-color:var(--jv-success);background:color-mix(in srgb,var(--jv-success) 18%,var(--jv-surface-sunken))}
+.setup-server-type .software-availability{font-size:.75rem;color:var(--jv-muted)}
+.setup-actions{justify-content:flex-end}
+
+/* The heading and all seven steps share the wizard panel's width. */
+.setup-stage-header{display:flex;flex:none;align-items:center;gap:1rem;width:100%;margin-bottom:.6rem;min-width:0}
+.setup-stage-header h1{flex:none;margin:0;font-size:1.45rem;white-space:nowrap}
+.setup-stage-header .setup-progress{display:grid;flex:1;grid-template-columns:repeat(7,minmax(0,1fr));gap:.35rem;margin:0;min-width:0;overflow:visible;padding:0}
+.setup-stage-header .setup-progress li{display:flex;align-items:center;justify-content:center;gap:.35rem;height:58px;min-width:0;padding:0;border-radius:11px;font-size:.78rem}
+.setup-stage-header .setup-progress li form{display:flex;align-self:stretch;flex:1;margin:0;min-width:0;border-radius:inherit}
+.setup-stage-header .setup-progress li button{display:flex;align-items:center;justify-content:center;gap:.35rem;width:100%;height:100%;margin:0;padding:.35rem;border:0;border-radius:inherit;background:transparent;color:inherit;box-shadow:none;transform:none}
+.setup-stage-header .setup-progress li button:hover,.setup-stage-header .setup-progress li button:focus-visible,.setup-stage-header .setup-progress li button:active{border-radius:inherit;background:color-mix(in srgb,var(--jv-accent) 12%,transparent)}
+.setup-stage-header .setup-progress li button:focus-visible{outline:2px solid var(--jv-accent);outline-offset:2px}
+.setup-stage-header .setup-progress li span:last-child{display:inline;white-space:normal;overflow:visible;text-overflow:clip}
+.setup-stage-header .setup-number{flex:0 0 1.4rem;width:1.4rem;height:1.4rem;font-size:.75rem}
+.setup-wizard-panel .setup-server-type.server-software-card,.setup-server-type.server-software-card{display:grid;align-items:center;gap:.7rem;min-height:104px;padding:.65rem .75rem}
+.setup-server-type.server-software-card .server-software-icon{display:grid;place-items:center}
+.setup-version-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1.5rem;align-items:start}
+.setup-version-column{display:grid;gap:.4rem;min-width:0}
+.setup-version-column .setup-field-wide{grid-column:auto}
+.setup-version-column .setup-version-preview{margin:0;gap:.4rem}
+.setup-version-column .setup-version-primary{padding:.5rem .65rem}
+.setup-version-column .setup-version-candidate{font-size:1.25rem}
+.setup-version-column .setup-version-secondary{padding:.35rem .65rem}
+.setup-wizard-panel .setup-field.is-disabled{opacity:.5}
+.setup-field.is-disabled input{cursor:not-allowed;background:var(--jv-surface-sunken)}
+.setup-wizard-panel .setup-memory{display:grid;gap:.5rem;padding:.8rem}
+.setup-wizard-panel .setup-memory-summary>div{padding:.6rem .7rem}
+.setup-wizard-panel .setup-memory>.field-help,.setup-wizard-panel .memory-presets{margin:0}
+.setup-wizard-panel .setup-memory .setup-form-grid{gap:.6rem 1rem}
+.setup-wizard-panel .setup-storage-browser{display:grid;gap:.4rem}
+.setup-wizard-panel .setup-browser-intro{display:block}
+.setup-wizard-panel .setup-partition-instruction{display:none}
+.setup-wizard-panel .setup-storage-browser-heading{padding:.3rem 0;border:0;border-radius:0;background:transparent}
+.setup-wizard-panel .storage-disk-grid{max-height:150px;margin:0}
+.setup-wizard-panel .setup-partition-browser{margin:0;min-width:0}
+.setup-wizard-panel .storage-partition-grid{max-height:230px}
+.setup-wizard-panel .setup-storage-segment.storage-partition-card{min-height:0;padding:.5rem .65rem;gap:.15rem}
+.setup-wizard-panel .setup-storage-action-review:not([open]){display:none}
+.setup-wizard-panel .setup-storage-action-review[open]{display:grid;gap:.7rem;width:min(620px,calc(100vw - 2rem));max-height:calc(100dvh - 2rem);margin:auto;padding:1rem;background:var(--jv-surface);color:var(--jv-text);border:1px solid var(--jv-border-strong);border-radius:14px;overflow-y:auto;overscroll-behavior:contain}
+.setup-storage-action-review::backdrop{background:#050708b8}
+.setup-storage-action-review .setup-storage-action-buttons{display:flex;justify-content:flex-end;gap:.55rem}
+.setup-storage-action-review .setup-storage-action-buttons .secondary{margin-right:auto}
+.setup-wizard-panel .setup-storage-confirm input[type=range]{min-height:32px;padding:0}
+.setup-wizard-panel .setup-storage-confirm input.destructive-confirm-toggle{width:50px;min-height:28px;margin:0;padding:0}
+.setup-wizard-panel .setup-secret-inline{padding:.4rem .6rem;border-left:3px solid var(--jv-accent);border-radius:4px;background:color-mix(in srgb,var(--jv-accent) 10%,var(--jv-surface-sunken));color:var(--jv-text);font-size:.8rem;line-height:1.4}
+.setup-wizard-panel .setup-backup-automatic{justify-content:space-between}
+@media(max-width:1050px){
+  .setup-stage-header{flex-direction:column;align-items:stretch;gap:.5rem}
+  .setup-stage-header .setup-progress{flex:none}
+  .setup-stage-header .setup-progress li{height:54px}
+}
+@media(max-width:850px){
+  .setup-stage-header h1{white-space:normal}
+  .setup-stage-header .setup-progress{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .setup-stage-header .setup-progress li{flex:none;min-width:0}
+  .setup-version-columns{grid-template-columns:1fr;gap:.8rem}
+  .setup-wizard-panel .storage-partition-grid{max-height:280px}
+  .setup-wizard-panel .setup-storage-action-details{grid-template-columns:1fr}
+}
+@media(max-width:430px){
+  .setup-stage-header .setup-progress{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .setup-stage-header .setup-progress li{font-size:.73rem}
+}
+
+.setup-server-types{grid-auto-rows:1fr}
+.setup-wizard-panel .setup-storage-confirm .destructive-confirm-slider input[type=range]{height:100%;margin:0;padding:0}
+.setup-wizard-panel .setup-storage-confirm .destructive-confirm-toggle-row{justify-content:flex-end}

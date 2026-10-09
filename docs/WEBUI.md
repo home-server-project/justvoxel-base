@@ -48,6 +48,13 @@ This expiration is performed by the JustVoxel ISO installation path only. A boot
 
 The dashboard shows live Minecraft controls and players after configuration. Before configuration, it presents a centered setup invitation. Quick Look in the header holds compact status values. Control Center launches the Minecraft, System, Network, System Monitor, System Update, Storage, Backups, and Migration workspaces. Older page URLs with workspace replacements open the matching dashboard workspace. In-progress operation and recovery pages remain available, and Operators can still start a manual backup from Quick Look.
 
+The floating top panel shows date and time in the appliance timezone. System contains Health, History, Users, Security, Logs, Date & Time, Wallpaper, Factory Reset, and About; UPS remains conditional on availability. Date & Time controls are Administrator-only. Wallpaper settings remain local to this browser, and the footer Wallpaper link opens the same System tab.
+
+Network keeps loading and errors below its navigation. Troubleshoot groups each interface with its connection, gateway, DNS, and reconnect action. Tailscale and NetBird activation shows service progress and opens their dashboard after the service is running; use the dashboard link if the browser blocks opening. Account setup remains separate from service activation. Playit retains its dark waiting page and validated claim-link flow. Storage refresh keeps the selected physical drive when it is still available.
+
+
+The Advanced wizard uses Server, Cross-play, Memory, Version, Storage, Backups and Review navigation cards beside its title on desktop. Storage and local backups share the Control Center disk and partition presentation: choose a physical drive to show only its partitions. Preparation opens a focused dialog with the existing destructive slider and confirmation switch, then refreshes the inventory and returns to that drive when available. Server software cards share local artwork from `webui/internal/server/static/server-software/`; its README records sources, licenses and the pending official Paper asset.
+
 The Administrator can choose Recommended setup or follow the seven-step Advanced wizard. Previously visited steps remain clickable, and drafts retain their choices when navigating back and forward. Storage and local backup destinations require an explicit partition selection; disk preparation remains a separate reviewed action. When data and backups use the same filesystem, JustVoxel mounts it once and uses separate directories. Review shows the four configuration summary cards and authoritative warnings. The Download configuration action provides a technical snapshot.
 
 First-run WebUI setup generates the welcome message as `JustVoxel <software> Minecraft <resolved-version> Server` using the validated plan’s Paper, Purpur, or Vanilla version. Advanced setup allows a custom message; entering one disables the automatic default and preserves the message through software and version changes. Review shows the final message. After setup, Minecraft settings can still edit it; updates and software changes do not regenerate it, and existing servers are unchanged.
@@ -88,7 +95,7 @@ In this mode:
 
 Switching from System account to Separate WebUI password requires confirmation with the current real system password and a new WebUI password entered twice. Switching back to System account requires the real system password. Both transitions invalidate existing WebUI sessions and require sign-in again.
 
-The local credential store is structured so future WebUI-only Operator/Viewer identities can be added without automatically creating Linux system users. Those roles are not implemented yet.
+WebUI-only Operator and Viewer identities do not create Linux system users. In **System → Users**, the Administrator opens an account’s actions menu to change its role or password, reset its restart or backup allowance, enable or disable it, or delete it. Each dialog names the selected account. Disabling or deleting an account requires sliding to the end and enabling the red confirmation toggle.
 
 ## Recovery
 
@@ -137,6 +144,10 @@ Administrator users have a power control in the top-right WebUI header. It opens
 Selecting a power action first opens a centered confirmation dialog. The WebUI then submits the action through the existing System Actions API; it does not call systemd or firmware tools directly. If Minecraft players are online, the Management Agent returns its player-confirmation requirement and the dialog asks again before the existing graceful shutdown path is allowed to continue.
 
 The Agent remains authoritative for HWS/VM capability detection, player state, graceful Minecraft shutdown, firmware/UEFI availability, and final host action acceptance.
+
+## Workspace controls
+
+Desktop workspaces can be dragged by their headers and resized from the browser’s bottom corner. Window geometry is saved separately for each signed-in user. In **System → History**, drag the divider between Open notifications and Detailed history to adjust their widths. **System → Logs** has a horizontal category selector above Files and Viewer. Its divider adjusts those two columns. Both dividers can also be focused with Tab and moved with the Left and Right arrow keys.
 
 ## Local behavior
 

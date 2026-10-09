@@ -1,7 +1,6 @@
-const dateTimeOpen = document.querySelector("[data-date-time-open]");
-const dateTimeDialog = document.querySelector("[data-date-time-dialog]");
-if (dateTimeOpen && dateTimeDialog) {
-  const form = dateTimeDialog.querySelector("[data-date-time-form]");
+const dateTimePanel = document.querySelector("[data-date-time-panel]");
+if (dateTimePanel) {
+  const form = dateTimePanel.querySelector("[data-date-time-form]");
   const timezone = form.elements.timezone;
   const automatic = form.elements.automatic;
   const date = form.elements.date;
@@ -19,10 +18,10 @@ if (dateTimeOpen && dateTimeDialog) {
     time.disabled = automatic.checked;
     warning.hidden = automatic.checked;
   };
-  const updateClockZone = (zone) => {
+  const updateClockZone = (zone, localDate = "", localTime = "") => {
     const clock = document.querySelector("[data-topbar-clock]");
     if (clock) clock.dataset.systemTimezone = zone;
-    window.dispatchEvent(new Event("justvoxel-timezone"));
+    window.dispatchEvent(new CustomEvent("justvoxel-timezone", { detail: { zone, localDate, localTime } }));
   };
   const read = async () => {
     const response = await fetch("/api/system/workspace/date-time", { credentials: "same-origin", cache: "no-store" });
@@ -46,11 +45,11 @@ if (dateTimeOpen && dateTimeDialog) {
       options.dataset.searchReady = "true";
     }
     syncManual();
-    updateClockZone(payload.timezone);
+    updateClockZone(payload.timezone, payload.local_date, payload.local_time);
   };
   const startRead = () => {
     if (!document.body.classList.contains("role-administrator")) return;
-    read().catch(() => {});
+    read().catch((failure) => { error.textContent = failure.message; error.hidden = false; });
   };
   if (document.body.classList.contains("role-pending")) {
     const observer = new MutationObserver(() => {
@@ -60,13 +59,13 @@ if (dateTimeOpen && dateTimeDialog) {
     });
     observer.observe(document.body, { attributes: true, attributeFilter: ["class"] });
   } else startRead();
-  dateTimeOpen.addEventListener("click", async () => {
+  const refresh = async () => {
     error.hidden = true;
-    dateTimeDialog.showModal();
-    try { await read(); } catch (failure) { error.textContent = failure.message; error.hidden = false; }
-    timezone.focus();
-  });
-  form.querySelector("[data-date-time-cancel]").addEventListener("click", () => dateTimeDialog.close());
+    state.textContent = "Loading date and time…";
+    try { await read(); } catch (failure) { state.textContent = ""; error.textContent = failure.message; error.hidden = false; }
+  };
+  window.JustVoxelDateTime = { refresh };
+  form.querySelector("[data-date-time-cancel]").addEventListener("click", refresh);
   automatic.addEventListener("change", syncManual);
   timezone.addEventListener("input", () => { canonical.textContent = timezone.value; });
   timezone.addEventListener("change", () => { canonical.textContent = timezone.value; });
@@ -86,8 +85,8 @@ if (dateTimeOpen && dateTimeDialog) {
       const response = await fetch("/api/system/workspace/date-time", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Date and time could not be changed.");
-      updateClockZone(payload.timezone);
-      dateTimeDialog.close();
+      updateClockZone(payload.timezone, payload.local_date, payload.local_time);
+      await read();
     } catch (failure) { error.textContent = failure.message; error.hidden = false; }
     finally { submit.disabled = false; }
   });

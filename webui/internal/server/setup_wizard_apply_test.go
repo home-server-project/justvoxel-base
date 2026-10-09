@@ -387,7 +387,7 @@ func TestRolledBackSetupCanStartFreshDraft(t *testing.T) {
 		t.Fatalf("start over returned %d %q", start.Code, start.Header().Get("Location"))
 	}
 	wizard := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-	if wizard.Code != http.StatusOK || !strings.Contains(wizard.Body.String(), "Step 1 of 7") {
+	if wizard.Code != http.StatusOK || !strings.Contains(wizard.Body.String(), "<h2>Server</h2>") {
 		t.Fatalf("fresh draft unavailable: %d", wizard.Code)
 	}
 	if client.applyCalls != 0 {

@@ -193,6 +193,7 @@ const sectionHeading = () => new Element("heading");
 const actionButton = (text, key, value, kind = "secondary") => { const e = new Element("button"); e.textContent = text; e.dataset[key] = value; e.className = kind + " nav-admin-only network-action-button"; return e; };
 const label = (value) => String(value || "unknown");
 let remoteBusy = false, remoteError = "", remoteProviders = [], playitSetup = { state: "idle" };
+const providerProgress = new Map();
 let playitPopup = null, playitClaimOpened = false;
 ` + script[controlsStart:controlsEnd] + script[renderStart:renderEnd] + `
 const flatten = (node) => [node, ...node.children.flatMap(flatten)];
@@ -304,6 +305,7 @@ func TestRemoteAccessPollingIsBoundedAndStopsWhenStable(t *testing.T) {
 	program := `
 const assert = require("node:assert/strict");
 let now = 0, polls = 0, remotePollSequence = 0;
+const pendingDashboards = new Set(), providerProgress = new Map();
 let playitSetup = { state: "idle" }, remoteProviders = [{ service_state: "activating" }];
 const dialog = { open: true }, state = {};
 const isAdministrator = () => true;
@@ -660,12 +662,14 @@ const click = () => {
     assert(!html.includes("Login"));
     assert(!html.includes("Create Account"));
     assert(!html.includes("${"));
-    assert(!/<(?:style|button|a|input|script|img)\b/i.test(html));
+    assert(!/<(?:button|a|input|script|img)\b/i.test(html));
+    assert.match(html, /<style>\s*:root\{color-scheme:dark/);
     assert(!/\b(?:src|style)\s*=|url\(/i.test(html));
     const stylesheetLink = '<link rel="stylesheet" href="/static/playit-setup.css">';
     assert.equal(html.split(stylesheetLink).length - 1, 1);
+    assert(html.indexOf("<style>") < html.indexOf(stylesheetLink));
     assert(!/\bhref\s*=/i.test(html.replace(stylesheetLink, "")));
-    assert.match(html, /<head>\s*<meta charset="utf-8">\s*<meta name="viewport" content="width=device-width, initial-scale=1">\s*<title>Playit setup<\/title>\s*<link rel="stylesheet" href="\/static\/playit-setup\.css">\s*<\/head>/);
+    assert.match(html, /<head>\s*<meta charset="utf-8">\s*<meta name="viewport" content="width=device-width, initial-scale=1">\s*<title>Playit setup<\/title>\s*<style>[\s\S]*?<\/style>\s*<link rel="stylesheet" href="\/static\/playit-setup\.css">\s*<\/head>/);
   }
   assert.equal(playitPopup, null); assert.equal(popup.opener, null);
   closePlayitPopup();
@@ -690,5 +694,61 @@ const click = () => {
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("Playit activation: %v\n%s", err, output)
+	}
+}
+
+func TestProviderDashboardWaitsForSuccessfulServiceActivation(t *testing.T) {
+	data, err := assets.ReadFile("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(data)
+	start := strings.Index(script, "  const providerDashboards =")
+	end := strings.Index(script, "  let remotePollSequence =")
+	if start < 0 || end <= start {
+		t.Fatal("Provider dashboard flow missing")
+	}
+	program := `
+const assert = require("node:assert/strict");
+let remoteProviders = [];
+const providerTransitional = (provider) => ["activating", "deactivating", "reloading", "refreshing"].includes(provider.service_state);
+let blocked = false, opens = [], popup;
+const window = { open(url, target) {
+  assert.equal(target, "_blank");
+  assert.notEqual(url, "about:blank");
+  opens.push(url);
+  popup = blocked ? null : { opener: {} };
+  return popup;
+} };
+` + script[start:end] + `
+for (const id of ["tailscale", "netbird"]) {
+  opens = [];
+  const provider = { id, service_state: "activating", service_active: false, configured: false, connected: false };
+  remoteProviders = [provider]; pendingDashboards.add(id);
+  openActivatedDashboards(); assert.equal(opens.length, 0);
+  assert(pendingDashboards.has(id));
+  provider.service_state = "active"; provider.service_active = true;
+  openActivatedDashboards();
+  assert.deepEqual(opens, [providerDashboards[id]]);
+  assert.equal(popup.opener, null);
+  assert.equal(provider.configured, false); assert.equal(provider.connected, false);
+  assert(!pendingDashboards.has(id));
+  openActivatedDashboards(); assert.equal(opens.length, 1);
+
+  blocked = true; pendingDashboards.add(id); openActivatedDashboards();
+  assert.match(providerProgress.get(id), /Use Open provider dashboard/);
+  assert.equal(provider.configured, false); assert.equal(provider.connected, false);
+  blocked = false;
+  provider.service_active = false; provider.service_state = "failed";
+  const previous = opens.length;
+  pendingDashboards.add(id); openActivatedDashboards();
+  assert.equal(opens.length, previous);
+  assert.match(providerProgress.get(id), /has not completed/);
+}
+`
+	cmd := exec.Command("node")
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("Provider dashboard flow: %v\n%s", err, output)
 	}
 }

@@ -25,6 +25,30 @@
   let playitPopup = null;
   let playitClaimOpened = false;
   let remoteBusy = false;
+  const providerDashboards = { tailscale: "https://console.tailscale.com/admin/", netbird: "https://app.netbird.io/" };
+  const pendingDashboards = new Set();
+  const providerProgress = new Map();
+  const openActivatedDashboards = () => {
+    for (const id of pendingDashboards) {
+      const provider = remoteProviders.find((item) => item.id === id);
+      if (!provider || provider.status_unavailable || providerTransitional(provider)) continue;
+      if (!provider.service_active) {
+        pendingDashboards.delete(id);
+        providerProgress.set(id, "Service activation has not completed. Refresh to check its status.");
+        continue;
+      }
+      pendingDashboards.delete(id);
+      let popup = null;
+      try {
+        // Open the actual destination only after the service reports running.
+        popup = window.open(providerDashboards[id], "_blank");
+        if (popup) popup.opener = null;
+      } catch (_) { /* The fixed dashboard link remains available. */ }
+      providerProgress.set(id, popup
+        ? "Service activated. Complete account setup in the provider dashboard."
+        : "Service activated. Use Open provider dashboard to complete account setup; your browser may have blocked automatic opening.");
+    }
+  };
   let remotePollSequence = 0;
   const providerTransitional = (provider) => ["activating", "deactivating", "reloading", "refreshing"].includes(provider.service_state);
   const setupRunning = () => ["starting", "waiting"].includes(playitSetup.state);
@@ -52,6 +76,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Playit setup</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#eef3f5;background:#0b1117}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:flex;flex-direction:column;background:#0b1117}
+header{padding:18px 24px;border-bottom:1px solid #26343e;background:#0d151d;font-size:.75rem;font-weight:650;letter-spacing:.14em;color:#c8d0d6}
+header .separator{margin:0 10px;color:#667782}header .brand,.eyebrow{color:#78c99d}
+main{flex:1;display:grid;place-items:center;padding:32px 20px}.setup-card{width:100%;max-width:580px;padding:36px;border:1px solid #294c40;border-radius:18px;background:#111c24}
+h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-size:.9rem;line-height:1.65;color:#ced8df}.muted{color:#9aa6b2}
+.claim-panel{margin-top:28px;padding:20px;border:1px solid #273b49;border-radius:12px;background:#0d1822}.claim-heading{font-size:.82rem}
+</style>
 <link rel="stylesheet" href="/static/playit-setup.css">
 </head>
 <body>
@@ -72,6 +105,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Playit setup</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#eef3f5;background:#0b1117}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:flex;flex-direction:column;background:#0b1117}
+header{padding:18px 24px;border-bottom:1px solid #26343e;background:#0d151d;font-size:.75rem;font-weight:650;letter-spacing:.14em;color:#c8d0d6}
+header .separator{margin:0 10px;color:#667782}header .brand,.eyebrow{color:#78c99d}
+main{flex:1;display:grid;place-items:center;padding:32px 20px}.setup-card{width:100%;max-width:580px;padding:36px;border:1px solid #294c40;border-radius:18px;background:#111c24}
+h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-size:.9rem;line-height:1.65;color:#ced8df}.muted{color:#9aa6b2}
+.claim-panel{margin-top:28px;padding:20px;border:1px solid #273b49;border-radius:12px;background:#0d1822}.claim-heading{font-size:.82rem}
+</style>
 <link rel="stylesheet" href="/static/playit-setup.css">
 </head>
 <body>
@@ -847,7 +889,7 @@
     heading.appendChild(actionButton("Check connectivity now", "networkConnectivityCheck", "true"));
     section.append(heading, row("NetworkManager connectivity", connectivitySummary(snapshot.connectivity)));
     const grid = document.createElement("div");
-    grid.className = "network-devices";
+    grid.className = "network-troubleshoot-devices";
     if (!snapshot.networking_enabled) section.appendChild(row("Condition", "Networking is disabled"));
     const devices = (snapshot.devices || []).filter((device) => ["ethernet", "wifi"].includes(device.kind));
     if (!devices.length) section.appendChild(row("Condition", "No Ethernet or Wi-Fi interface is available"));
@@ -871,8 +913,11 @@
         repair.disabled = Boolean(currentCheckpoint);
         const actions = document.createElement("div");
         actions.className = "network-inline-actions";
+        const explanation = document.createElement("p");
+        explanation.className = "state-text";
+        explanation.textContent = "Reconnect this interface using its current settings. The connection may briefly pause; previous settings are restored unless you confirm.";
         actions.appendChild(repair);
-        card.appendChild(actions);
+        card.append(explanation, actions);
       }
       grid.appendChild(card);
     });
@@ -901,6 +946,13 @@
         row("Service", providerTransitional(provider) ? provider.service_state[0].toUpperCase() + provider.service_state.slice(1) + "…" : provider.service_active ? "Running" : label(provider.service_state).replace(/^./, (c) => c.toUpperCase())),
         row("Configuration", provider.status_unavailable ? "Unknown" : provider.configured ? "Configured" : "Not configured")
       );
+      if (providerProgress.has(provider.id)) {
+        const progress = document.createElement("p");
+        progress.className = "state-text";
+        progress.setAttribute("role", "status");
+        progress.textContent = providerProgress.get(provider.id);
+        card.appendChild(progress);
+      }
       const needsSetup = provider.id === "playit" && provider.installed && !provider.configured;
       const actions = document.createElement("div");
       actions.className = "network-inline-actions";
@@ -965,7 +1017,7 @@
       button.id = "network-tab-" + name.replaceAll(" ", "-");
       tablist.appendChild(button);
     });
-    root.appendChild(tablist);
+    root.append(tablist, state);
     if (currentCheckpoint && isAdministrator()) root.appendChild(renderCheckpoint(currentCheckpoint));
     const panel = document.createElement("div");
     panel.id = "network-tab-panel";
@@ -1063,6 +1115,7 @@
       } catch (error) { remoteError = error?.message || "Remote access status unavailable."; }
       if (sequence !== loadSequence) return;
       updatePlayitPopup();
+      openActivatedDashboards();
       renderNetwork();
       state.textContent = "";
       if (remoteProviders.some(providerTransitional) || setupRunning()) pollRemoteAccess();
@@ -1244,6 +1297,7 @@
     const remote = await requestJSON("/api/network/remote-access");
     remoteProviders = (remote?.providers || []).filter((provider) => ["tailscale", "netbird", "playit"].includes(provider.id));
     updatePlayitPopup();
+    openActivatedDashboards();
     renderNetwork();
   };
 
@@ -1258,6 +1312,11 @@
         await new Promise((resolve) => setTimeout(resolve, setupRunning() ? 2000 : 750));
         if (sequence !== remotePollSequence || !dialog.open || !isAdministrator()) return;
         await refreshRemoteAccess();
+      }
+      if (sequence === remotePollSequence) {
+        pendingDashboards.forEach((id) => providerProgress.set(id, "Service activation is still pending. Refresh to check its status, or use the provider dashboard link."));
+        pendingDashboards.clear();
+        renderNetwork();
       }
     } catch (error) {
       failPlayitPopup();
@@ -1326,6 +1385,10 @@
         try {
           playitPopup = window.open("about:blank", "_blank");
           if (playitPopup) {
+            if (playitPopup.document.documentElement) {
+              playitPopup.document.documentElement.style.backgroundColor = "#0b1117";
+              playitPopup.document.documentElement.style.colorScheme = "dark";
+            }
             try { renderPlayitPopup(); }
             finally { playitPopup.opener = null; }
           }
@@ -1337,7 +1400,22 @@
         });
       } else {
         if (id === "playit" && provider.dataset.action === "deactivate") closePlayitPopup();
-        runRemoteAction(() => postForm("/api/network/remote-access/" + escapePath(id), { action: provider.dataset.action }));
+        const action = provider.dataset.action;
+        if (action === "activate" && providerDashboards[id]) {
+          providerProgress.set(id, "Activating service…");
+        } else {
+          pendingDashboards.delete(id);
+          providerProgress.delete(id);
+        }
+        runRemoteAction(async () => {
+          try {
+            await postForm("/api/network/remote-access/" + escapePath(id), { action });
+            if (action === "activate" && providerDashboards[id]) pendingDashboards.add(id);
+          } catch (error) {
+            providerProgress.delete(id);
+            throw error;
+          }
+        });
       }
       return;
     }

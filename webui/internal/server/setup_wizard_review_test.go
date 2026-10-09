@@ -119,7 +119,7 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 	}
 	body := rr.Body.String()
 	for _, want := range []string{
-		"<h1>Set up JustVoxel</h1>", "Step 7 of 7", "<h2>Review</h2>", "Connections", "Version", "Normalized Family Server", "20", "1.21.8",
+		"<h1>Set up JustVoxel</h1>", "<h2>Review</h2>", "<h2>Review</h2>", "Cross-play", "Version", "Normalized Family Server", "20", "1.21.8",
 		"Recommended", "Game mode</dt><dd>Survival",
 		"Backups are on the same disk", "If this disk fails, both Minecraft and its backups could be lost.", "Minecraft End User License Agreement", "https://www.minecraft.net/eula",
 		"/static/setup-review.css", "/static/setup-operation.js",
@@ -334,7 +334,7 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 		t.Fatalf("review returned %d: %s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"Cancel setup", ">Back</button>", "setup-review-panel", "setup-review-content", "setup-step-actions setup-actions-split", "setup-review-header", "<h3>Server</h3>", "<h3>Connections</h3>", "<h3>Minecraft</h3>", "<h3>Storage &amp; backups</h3>"} {
+	for _, want := range []string{"Cancel setup", ">Back</button>", "setup-review-panel", "setup-review-content", "setup-step-actions setup-actions-split", "setup-review-header", "<h3>Server</h3>", "<h3>Cross-play</h3>", "<h3>Minecraft</h3>", "<h3>Storage &amp; backups</h3>"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("review layout missing %q: %s", want, body)
 		}
@@ -405,7 +405,7 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 	if strings.Count(string(wizard), `class="setup-step-content"`) != 6 || strings.Count(string(wizard), `class="setup-step-actions"`) != 6 {
 		t.Fatal("each advanced wizard step needs separate content and action regions")
 	}
-	for _, want := range []string{`class="setup-shell"`, `class="title-row setup-title-row"`, `class="setup-progress"`, `class="panel setup-step-panel setup-wizard-panel"`, `class="setup-form"`} {
+	for _, want := range []string{`class="setup-shell"`, `class="setup-stage-header"`, `class="setup-progress"`, `class="panel setup-step-panel setup-wizard-panel"`, `class="setup-form"`} {
 		if !strings.Contains(string(wizard), want) {
 			t.Fatalf("wizard structure missing %q", want)
 		}

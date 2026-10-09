@@ -21,12 +21,12 @@ func TestProjectFooterAndDateTimeUIContracts(t *testing.T) {
 	if strings.Contains(header, "data-topbar-timezone") || strings.Contains(dateTime, "data-topbar-timezone") {
 		t.Fatal("Timezone must not be displayed in the top bar")
 	}
-	for _, want := range []string{"data-topbar-clock", "topbar-time-utility", "data-date-time-open", "data-date-time-canonical", "data-timezone-search", `type="checkbox" name="automatic" data-date-time-automatic`, "date-time-switch"} {
+	for _, want := range []string{"data-topbar-clock", `data-system-tab="date-time"`, "data-date-time-panel", "data-date-time-canonical", "data-timezone-search", `type="checkbox" name="automatic" data-date-time-automatic`, "date-time-switch"} {
 		if !strings.Contains(header, want) {
 			t.Fatalf("Date & Time template missing %q", want)
 		}
 	}
-	for _, want := range []string{".topbar-time .topbar-time-utility", ".date-time-switch{appearance:none", ".date-time-switch:checked{border-color:#4f9e6e;background:#4f9e6e", ".date-time-switch:focus-visible"} {
+	for _, want := range []string{".date-time-switch{appearance:none", ".date-time-switch:checked{border-color:#4f9e6e;background:#4f9e6e", ".date-time-switch:focus-visible"} {
 		if !strings.Contains(appCSS, want) {
 			t.Fatalf("Date & Time styling missing %q", want)
 		}
@@ -83,8 +83,8 @@ func TestProjectFooterAndDateTimeUIContracts(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		`.dashboard-wallpaper{position:fixed;inset:48px 0 0;width:100%;height:calc(100dvh - 48px);object-fit:cover;object-position:center;z-index:-3;pointer-events:none}`,
-		`#dashboard::before{content:"";position:fixed;inset:48px 0 0;z-index:-2;pointer-events:none;background:#07100b66}`,
+		`.dashboard-wallpaper{position:fixed;inset:0;width:100%;height:100dvh;object-fit:cover;object-position:center;z-index:-3;pointer-events:none}`,
+		`#dashboard::before{content:"";position:fixed;inset:0;z-index:-2;pointer-events:none;background:#07100b66}`,
 	} {
 		if !strings.Contains(appCSS, want) {
 			t.Fatalf("Configured dashboard wallpaper behavior missing %q", want)
@@ -130,7 +130,19 @@ func TestProjectFooterAndDateTimeUIContracts(t *testing.T) {
 			t.Fatalf("Footer page layout missing %q", want)
 		}
 	}
-	if strings.Contains(setupCSS, "height:clamp(520px") || strings.Contains(setupCSS, "height:calc(100dvh - 185px)") || strings.Contains(setupCSS, "overflow-y:auto;overscroll-behavior:contain") {
-		t.Fatal("Setup content must not scroll inside a fixed page panel")
+	// Auto overflow is a safety fallback for small screens, large inventories and
+	// long warnings, including the storage confirmation dialog. It does not force
+	// scrolling when ordinary step content fits the desktop frame.
+	if strings.Contains(setupCSS, "height:clamp(520px") || strings.Contains(setupCSS, "height:calc(100dvh - 185px)") || strings.Contains(setupCSS, "overflow-y:scroll") {
+		t.Fatal("Setup must not use obsolete fixed panel heights or force vertical scrolling")
+	}
+	for _, want := range []string{
+		`.setup-body .setup-wizard-panel .setup-form>.setup-step-content{display:flex;flex:1;flex-direction:column;gap:.42rem;min-height:0;min-width:0;overflow-y:auto;overflow-x:hidden}`,
+		`.setup-body .setup-wizard-panel .setup-form>.setup-step-actions{position:static;flex:none;margin-top:.4rem}`,
+		`.setup-body .setup-wizard-panel .setup-form>.setup-step-content{display:contents}`,
+	} {
+		if !strings.Contains(setupCSS, want) {
+			t.Fatalf("Setup overflow safety and reachable actions missing %q", want)
+		}
 	}
 }

@@ -239,26 +239,17 @@ func TestSetupWizardCompactDesktopProgressContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	start := strings.Index(string(css), "/* Advanced setup keeps one desktop frame;")
-	if start < 0 {
-		t.Fatal("desktop setup layout missing")
-	}
-	desktop := string(css)[start:]
-	end := strings.Index(desktop, "@media(max-width:850px)")
-	if end < 0 {
-		t.Fatal("mobile setup layout boundary missing")
-	}
-	desktop = desktop[:end]
 	for _, want := range []string{
-		"@media(min-width:851px)",
-		".setup-shell:has(.setup-progress)>.setup-title-row{margin-bottom:.15rem}",
-		".setup-shell>.setup-progress{margin-bottom:.25rem;gap:.25rem}",
-		".setup-shell>.setup-progress li{gap:.35rem}",
-		".setup-shell>.setup-progress li button,.setup-shell>.setup-progress li:not(:has(form)){padding:.2rem .45rem}",
-		".setup-shell>.setup-progress .setup-number{flex-basis:1.4rem;width:1.4rem;height:1.4rem;font-size:.75rem}",
+		".setup-stage-header{display:flex",
+		"grid-template-columns:repeat(7,minmax(0,1fr))",
+		"height:58px",
+		".setup-stage-header .setup-progress li form{display:flex",
+		"border-radius:inherit",
+		".setup-stage-header .setup-progress li button:focus-visible",
+		"grid-template-columns:repeat(4,minmax(0,1fr))",
 	} {
-		if !strings.Contains(desktop, want) {
-			t.Fatalf("compact Setup wizard desktop progress missing %q", want)
+		if !strings.Contains(string(css), want) {
+			t.Fatalf("Setup wizard header missing %q", want)
 		}
 	}
 	for _, line := range strings.Split(string(css), "\n") {
@@ -273,7 +264,7 @@ func TestSetupWizardCompactDesktopProgressContract(t *testing.T) {
 	if !strings.Contains(string(markup), `{{if ne .SetupMode "recommended"}}`) || strings.Count(string(markup), `class="setup-number"`) != 7 || strings.Count(string(markup), `action="/setup/navigate"`) != 6 {
 		t.Fatal("Advanced Review must retain seven steps and navigation; Recommended omits progress")
 	}
-	for i, label := range []string{"Server", "Connections", "Resources", "Version", "Storage", "Backups", "Review"} {
+	for i, label := range []string{"Server", "Cross-play", "Memory", "Version", "Storage", "Backups", "Review"} {
 		if !strings.Contains(string(markup), fmt.Sprintf(`<span class="setup-number">%d</span><span>%s</span>`, i+1, label)) {
 			t.Fatalf("Setup progress missing step %d: %s", i+1, label)
 		}
@@ -281,6 +272,11 @@ func TestSetupWizardCompactDesktopProgressContract(t *testing.T) {
 	wizard, err := assets.ReadFile("templates/setup_wizard.html")
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, source := range []string{string(wizard), string(markup)} {
+		if strings.Contains(source, " of 7</span>") || strings.Contains(source, "Step {{.CurrentStep}} of") {
+			t.Fatal("Setup header must not display redundant step badges")
+		}
 	}
 	for _, want := range []string{`{{range .Steps}}`, `{{if .Active}}aria-current="step"{{end}}`, `{{if .Visited}}<form method="post" action="/setup/navigate">`, `name="direction" value="jump"`, `name="step" value="{{.Number}}"`, `<span class="setup-number">{{.Number}}</span><span>{{.Name}}</span>`} {
 		if !strings.Contains(string(wizard), want) {
@@ -519,7 +515,7 @@ func TestSetupWizardStartsWithFriendlyServerDefaults(t *testing.T) {
 		t.Fatalf("server step returned %d: %s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"Step 1 of 7", "Server name / welcome message", "Family", "Maximum players", "Server software", "Paper", "America/Toronto", "Technical name: MOTD", "data-timezone-search", "data-timezone-results", "data-timezone-value=\"UTC\""} {
+	for _, want := range []string{"<h2>Server</h2>", "Server name / welcome message", "Family", "Maximum players", "Server software", "Paper", "America/Toronto", "Technical name: MOTD", "data-timezone-search", "data-timezone-results", "data-timezone-value=\"UTC\""} {
 		if want == "Family" {
 			continue
 		}
@@ -604,7 +600,7 @@ func TestSetupWizardConnectionsValidateBeforeResources(t *testing.T) {
 		t.Fatalf("valid Connections form returned %d: %s", rr.Code, rr.Body.String())
 	}
 	resources := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-	if resources.Code != http.StatusOK || !strings.Contains(resources.Body.String(), "Step 3 of 7") || !strings.Contains(resources.Body.String(), "Minecraft game memory") {
+	if resources.Code != http.StatusOK || !strings.Contains(resources.Body.String(), "<h2>Memory</h2>") || !strings.Contains(resources.Body.String(), "Minecraft game memory") {
 		t.Fatalf("Connections did not advance to Resources: %d %s", resources.Code, resources.Body.String())
 	}
 }
@@ -688,7 +684,7 @@ func TestSetupWizardServerStepValidatesAndPersistsChoices(t *testing.T) {
 	}
 	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	body := page.Body.String()
-	for _, want := range []string{"Step 2 of 7", "Connections", "Enable Bedrock cross-play", "Minecraft Java port", "Bedrock UDP port", "25565", "19132"} {
+	for _, want := range []string{"<h2>Cross-play</h2>", "Cross-play", "Enable Bedrock cross-play", "Minecraft Java port", "Bedrock UDP port", "25565", "19132"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("Resources step missing %q: %s", want, body)
 		}
@@ -698,7 +694,7 @@ func TestSetupWizardServerStepValidatesAndPersistsChoices(t *testing.T) {
 	}
 	page = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	body = page.Body.String()
-	for _, want := range []string{"Step 3 of 7", "Resources", "Minecraft game memory", "Technical name: Java heap", "Maximum Minecraft memory", "container memory limit", "8.0 GiB detected", "2.0 GiB", "1.0 GiB", "Presets are starting points based on system memory and headroom. Larger servers or heavier plugins may need High memory or Custom settings.", "Recommended", "High memory", "/static/settings.js"} {
+	for _, want := range []string{"<h2>Memory</h2>", "Memory", "Minecraft game memory", "Technical name: Java heap", "Maximum Minecraft memory", "container memory limit", "8.0 GiB detected", "2.0 GiB", "1.0 GiB", "Presets are starting points based on system memory and headroom. Larger servers or heavier plugins may need High memory or Custom settings.", "Recommended", "High memory", "/static/settings.js"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("Resources step missing %q: %s", want, body)
 		}
@@ -708,7 +704,7 @@ func TestSetupWizardServerStepValidatesAndPersistsChoices(t *testing.T) {
 	}
 	page = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	body = page.Body.String()
-	for _, want := range []string{"Step 4 of 7", "Container updates", "Stable (recommended)", "Latest", "Custom", "This does not choose the Minecraft game version below.", `id="image-tag"`, `value="stable"`, "Recommended", "Specific version", `id="specific-version-field"`, `id="setup-version-preview"`, "/static/settings.js"} {
+	for _, want := range []string{"<h2>Version</h2>", "Container updates", "Stable (recommended)", "Latest", "Custom", "This does not choose the Minecraft game version below.", `id="image-tag"`, `value="stable"`, "Recommended", "Specific version", `id="specific-version-field"`, `id="setup-version-preview"`, "/static/settings.js"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("Minecraft step missing %q: %s", want, body)
 		}
@@ -720,7 +716,7 @@ func TestSetupVersionPreviewPresentationContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(markup), `class="setup-field-wide setup-version-preview" id="setup-version-preview"`) {
+	if !strings.Contains(string(markup), `class="setup-version-preview" id="setup-version-preview"`) {
 		t.Fatal("version step is missing its structured preview container")
 	}
 	script, err := assets.ReadFile("static/settings.js")
@@ -731,7 +727,7 @@ func TestSetupVersionPreviewPresentationContract(t *testing.T) {
 	for _, want := range []string{
 		`"setup-version-primary"`, `"setup-version-candidate"`, `policy === "recommended" ? "Recommended"`,
 		`"Stable choice for this setup"`, `status.available !== status.selected_candidate`,
-		`"setup-version-secondary"`, `"Newer version available"`,
+		`"setup-version-secondary"`, `"Newest available version"`,
 		`{ STABLE: "Stable", BETA: "Beta", ALPHA: "Alpha", RELEASE: "Release" }`,
 		`channelLabel(status.available_channel)`, `channelLabel(status.candidate_channel)`, `pre-release server build`,
 		`"setup-version-explanation"`, `"This version keeps Bedrock players compatible."`,
@@ -834,7 +830,7 @@ func TestSetupWizardMinecraftStepAdvancesOnlyAfterValidation(t *testing.T) {
 		t.Fatalf("valid Resources form returned %d %q: %s", rr.Code, rr.Header().Get("Location"), rr.Body.String())
 	}
 	minecraftPage := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-	if minecraftPage.Code != http.StatusOK || !strings.Contains(minecraftPage.Body.String(), "Step 4 of 7") || !strings.Contains(minecraftPage.Body.String(), "Container updates") {
+	if minecraftPage.Code != http.StatusOK || !strings.Contains(minecraftPage.Body.String(), "<h2>Version</h2>") || !strings.Contains(minecraftPage.Body.String(), "Container updates") {
 		t.Fatalf("Resources step did not advance to Minecraft: %d %s", minecraftPage.Code, minecraftPage.Body.String())
 	}
 
@@ -843,7 +839,7 @@ func TestSetupWizardMinecraftStepAdvancesOnlyAfterValidation(t *testing.T) {
 		t.Fatalf("valid Minecraft form returned %d %q: %s", rr.Code, rr.Header().Get("Location"), rr.Body.String())
 	}
 	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Step 5 of 7") || !strings.Contains(page.Body.String(), "Use another internal disk") {
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "<h2>Storage</h2>") || !strings.Contains(page.Body.String(), "Use another internal disk") {
 		t.Fatalf("Minecraft step did not advance to storage: %d %s", page.Code, page.Body.String())
 	}
 }
@@ -871,7 +867,7 @@ func TestSetupWizardMinecraftBackPreservesUnsavedValues(t *testing.T) {
 		t.Fatalf("Minecraft back returned %d: %s", back.Code, back.Body.String())
 	}
 	resourcesPage := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-	for _, want := range []string{"Step 3 of 7", `value="5G"`, `value="7G"`} {
+	for _, want := range []string{"<h2>Memory</h2>", `value="5G"`, `value="7G"`} {
 		if !strings.Contains(resourcesPage.Body.String(), want) {
 			t.Fatalf("Resources draft lost %q: %s", want, resourcesPage.Body.String())
 		}
@@ -922,7 +918,7 @@ func TestSetupWizardCancelDiscardsDraft(t *testing.T) {
 	if welcome.Code != http.StatusOK || !strings.Contains(welcome.Body.String(), "Set up your Minecraft server") {
 		t.Fatalf("cancel did not discard draft: %d %s", welcome.Code, welcome.Body.String())
 	}
-	if strings.Contains(welcome.Body.String(), "Step 1 of 7") {
+	if strings.Contains(welcome.Body.String(), "<h2>Server</h2>") {
 		t.Fatal("cancelled draft still rendered as active setup")
 	}
 }

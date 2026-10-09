@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -535,8 +537,40 @@ func TestWallpaperContentSecurityPolicy(t *testing.T) {
 	securityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})).ServeHTTP(recorder, request)
-	want := "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' http: https: blob:; form-action 'self'; frame-ancestors 'none'"
+	want := "default-src 'self'; style-src 'self' 'sha256-ypuHOrHdFK0ra+bQlE+zbe2vHCx4oWqJLuhMbpi6gms='; script-src 'self'; img-src 'self' http: https: blob:; form-action 'self'; frame-ancestors 'none'"
 	if got := recorder.Header().Get("Content-Security-Policy"); got != want {
-		t.Fatalf("wallpaper CSP must preserve all non-image restrictions: got %q", got)
+		t.Fatalf("CSP must allow only the fixed Playit initial styles and preserve other restrictions: got %q", got)
+	}
+}
+
+func TestPlayitInitialStylesMatchCSP(t *testing.T) {
+	data, err := assets.ReadFile("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(data)
+	recorder := httptest.NewRecorder()
+	securityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+	writes := strings.Split(script, "playitPopup.document.write(`")
+	if len(writes) != 3 {
+		t.Fatal("Both fixed Playit documents must retain initial styling")
+	}
+	for _, document := range writes[1:] {
+		_, rest, ok := strings.Cut(document, "<style>")
+		if !ok {
+			t.Fatal("Playit needs immediate dark styling")
+		}
+		style, _, ok := strings.Cut(rest, "</style>")
+		if !ok {
+			t.Fatal("Incomplete initial styles")
+		}
+		sum := sha256.Sum256([]byte(style))
+		allowed := "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+		if !strings.Contains(recorder.Header().Get("Content-Security-Policy"), allowed) {
+			t.Fatal("Initial styles are blocked by CSP")
+		}
+		if strings.Contains(style, "url(") || strings.Contains(style, "@import") {
+			t.Fatal("Initial styling must not wait for external resources")
+		}
 	}
 }

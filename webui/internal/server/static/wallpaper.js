@@ -1,11 +1,11 @@
 (() => {
-  const dialog = document.querySelector("[data-wallpaper-dialog]");
+  const panel = document.querySelector("[data-wallpaper-panel]");
   const open = document.querySelector("[data-wallpaper-open]");
-  if (!dialog || !open) return;
+  if (!panel || !open) return;
 
   const wallpaper = document.querySelector("[data-dashboard-wallpaper]");
   if (!wallpaper) return;
-  const form = dialog.querySelector("[data-wallpaper-form]");
+  const form = panel.querySelector("[data-wallpaper-form]");
   const error = form.querySelector("[data-wallpaper-error]");
   const defaultImage = "/static/wallpapers/jv-wp-v2-day.webp";
   const defaultPreference = () => ({
@@ -236,8 +236,8 @@
   window.addEventListener("focus", refreshBuiltin);
   window.addEventListener("pageshow", refreshBuiltin);
 
-  open.addEventListener("click", () => {
-    if (dialog.open || busy) return;
+  const prepare = () => {
+    if (busy) return;
     restoreCanceled = true;
     form.querySelectorAll('input[name="mode"]').forEach((input) => { input.checked = input.value === preference.mode; });
     pendingTheme = preference.theme || "v2";
@@ -248,8 +248,13 @@
     form.elements.picture.value = "";
     error.hidden = true;
     updateFields();
-    dialog.showModal();
-  });
+  };
+  window.JustVoxelWallpaper = {
+    prepare,
+    canLeave: () => !committing,
+    leave: () => { if (!committing) operation += 1; },
+  };
+  open.addEventListener("click", () => window.JustVoxelSystem?.openTab("wallpaper"));
   form.querySelectorAll('input[name="mode"]').forEach((input) => input.addEventListener("change", () => {
     error.hidden = true;
     updateFields();
@@ -265,18 +270,19 @@
     updateFields();
   }));
   form.querySelector("[data-wallpaper-cancel]").addEventListener("click", () => {
-    if (!committing) dialog.close();
+    if (!committing) { operation += 1; prepare(); }
   });
-  dialog.addEventListener("cancel", (event) => {
-    if (committing) event.preventDefault();
-  });
-  dialog.addEventListener("close", () => { operation += 1; });
   form.querySelector("[data-wallpaper-reset]").addEventListener("click", async () => {
     committing = true;
     setBusy(true);
     error.hidden = true;
-    try { await reset(); dialog.close(); } catch (failure) { showError(failure); }
-    finally { committing = false; setBusy(false); updateFields(); }
+    try { await reset(); } catch (failure) { showError(failure); }
+    finally {
+      committing = false; setBusy(false);
+      const message = error.hidden ? "" : error.textContent;
+      prepare();
+      if (message) showError(new Error(message));
+    }
   });
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -323,14 +329,15 @@
         applyImage(candidateObjectURL, candidateObjectURL);
         candidateObjectURL = null;
       }
-      dialog.close();
+      // Keep the controls inside System after applying the preference.
     } catch (failure) {
       showError(failure);
     } finally {
       if (candidateObjectURL) URL.revokeObjectURL(candidateObjectURL);
       committing = false;
       setBusy(false);
-      updateFields();
+      if (currentOperation !== operation) prepare();
+      else updateFields();
     }
   });
   window.addEventListener("pagehide", (event) => {

@@ -194,6 +194,8 @@
   function selectDisk(name) {
     closeActionMenu();
     closeFreeActionMenu();
+    const workspace = root.closest("[data-storage-workspace-dialog]");
+    if (workspace) workspace.dataset.storageSelectedDisk = name;
     diskButtons.forEach((button) => {
       const selected = button.dataset.storageDisk === name;
       button.classList.toggle("is-selected", selected);
@@ -207,6 +209,10 @@
   diskButtons.forEach((button) => {
     button.addEventListener("click", () => selectDisk(button.dataset.storageDisk));
   });
+  const rememberedDisk = root.closest("[data-storage-workspace-dialog]")?.dataset.storageSelectedDisk;
+  const initialDisk = diskButtons.find((button) => button.dataset.storageDisk === rememberedDisk)
+    || diskButtons.find((button) => button.getAttribute("aria-pressed") === "true") || diskButtons[0];
+  if (initialDisk) selectDisk(initialDisk.dataset.storageDisk);
 
   function setOptional(row, node, value) {
     if (!row || !node) return;

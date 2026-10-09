@@ -118,9 +118,9 @@ func TestWallpaperUIContracts(t *testing.T) {
 	require(css, "wallpaper layout",
 		"object-fit:cover", ".dashboard-wallpaper.wallpaper-theme-v1{object-position:50% center}",
 		".dashboard-wallpaper.wallpaper-theme-v2{object-position:65% center}",
-		".wallpaper-dialog .wallpaper-appearance{grid-template-columns:repeat(3,minmax(0,1fr))}",
+		".wallpaper-panel .wallpaper-appearance{grid-template-columns:repeat(3,minmax(0,1fr))}",
 		".wallpaper-schedule{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))",
-		".wallpaper-dialog [data-wallpaper-error]{padding:.4rem .5rem;overflow-wrap:anywhere}",
+		".wallpaper-panel [data-wallpaper-error]{padding:.4rem .5rem;overflow-wrap:anywhere}",
 	)
 	rules := regexp.MustCompile(`(?s)([^{}]+)\{([^{}]*)\}`)
 	scroll := regexp.MustCompile(`overflow(?:-y)?\s*:\s*(?:auto|scroll)\b`)
@@ -132,7 +132,7 @@ func TestWallpaperUIContracts(t *testing.T) {
 	require(css, "phone and short-screen layout",
 		"@media(max-width:600px),(max-height:720px)",
 		"@media(max-width:390px)", ".wallpaper-split-preview img{height:50px}",
-		".wallpaper-dialog .system-action-dialog-content{padding:.65rem;gap:.45rem}",
+		".wallpaper-panel .system-action-dialog-content{padding:.65rem;gap:.45rem}",
 		".dashboard-wallpaper.wallpaper-theme-v2{object-position:78% center}",
 	)
 	if strings.Contains(footer, "style=") {

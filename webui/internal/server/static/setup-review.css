@@ -38,7 +38,7 @@
 .setup-review-summary dl>div{display:flex;justify-content:space-between;gap:.8rem;line-height:1.4;font-size:.88rem}
 .setup-review-summary dt{color:#aeb9c2}
 .setup-review-summary dd{margin:0;text-align:right;overflow-wrap:anywhere}
-.setup-review-panel>.setup-step-actions{position:relative;bottom:auto;flex:none;min-height:48px;margin:.25rem 0 0;padding:.35rem .5rem;border-top:1px solid #303942;border-radius:0}
+.setup-review-panel>.setup-step-actions{position:relative;bottom:auto;flex:none;min-height:48px;margin:.25rem 0 0;padding:.35rem .5rem}
 .setup-review-panel>.setup-step-actions .setup-step-navigation form{margin:0}
 @media(max-width:700px){.setup-review-summary{grid-template-columns:1fr}.setup-review-summary dl>div{flex-wrap:wrap}.setup-review-summary dd{text-align:left}}
 .setup-configure-disabled{position:relative;display:inline-flex;outline:none}

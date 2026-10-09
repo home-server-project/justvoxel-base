@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>JustVoxel - First setup</title>
   <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/storage-browser.css">
   <link rel="stylesheet" href="/static/setup.css">
   <script src="/static/app.js" defer></script>
   <script src="/static/timezone-search.js" defer></script>
@@ -39,17 +40,17 @@
           <input type="hidden" name="csrf" value="{{.CSRF}}">
           <fieldset class="setup-server-types">
             <legend>Choose server software</legend>
-            <label class="setup-server-type is-available">
+            <label class="setup-server-type server-software-card is-available">
               <input type="radio" name="server_type" value="paper" {{if or (eq .Minecraft.ServerType "") (eq .Minecraft.ServerType "paper")}}checked{{end}}>
-              <span><strong>Paper</strong><small>Recommended · Plugins and managed Bedrock cross-play.</small></span>
+              <span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/paper.svg" alt="" width="48" height="48"></span><span class="server-software-copy"><strong>Paper</strong><span class="software-availability">Available</span><small>Recommended · Plugins and managed Bedrock cross-play.</small></span>
             </label>
-            <label class="setup-server-type is-available">
+            <label class="setup-server-type server-software-card is-available">
               <input type="radio" name="server_type" value="purpur" {{if eq .Minecraft.ServerType "purpur"}}checked{{end}}>
-              <span><strong>Purpur</strong><small>Plugins and managed Bedrock cross-play.</small></span>
+              <span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/purpur.svg" alt="" width="48" height="48"></span><span class="server-software-copy"><strong>Purpur</strong><span class="software-availability">Available</span><small>Plugins and managed Bedrock cross-play.</small></span>
             </label>
-            <label class="setup-server-type is-available">
+            <label class="setup-server-type server-software-card is-available">
               <input type="radio" name="server_type" value="vanilla" {{if eq .Minecraft.ServerType "vanilla"}}checked{{end}}>
-              <span><strong>Vanilla</strong><small>Original Minecraft · Java only · no plugins.</small></span>
+              <span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/vanilla.svg" alt="" width="48" height="48"></span><span class="server-software-copy"><strong>Vanilla</strong><span class="software-availability">Available</span><small>Original Minecraft · Java only · no plugins.</small></span>
             </label>
           </fieldset>
           <button type="submit">Use recommended setup</button>
@@ -59,7 +60,7 @@
       <section class="setup-mode-card setup-mode-advanced">
         <span class="setup-mode-kicker">Custom path</span>
         <h2>Advanced setup</h2>
-        <p>Walk through the full guided setup and choose resources, ports, version policy, storage and backup destination yourself.</p>
+        <p>Walk through the full guided setup and choose memory, ports, version policy, storage and backup destination yourself.</p>
         <form method="post" action="/setup/start">
           <input type="hidden" name="csrf" value="{{.CSRF}}">
           <button class="secondary" type="submit">Start advanced setup</button>
@@ -70,8 +71,9 @@
     <div class="setup-terminal-note"><span>Prefer the terminal?</span><code>mjust setup</code><small>Available from a local console or SSH.</small><a class="button-link secondary setup-dashboard-exit" href="/">Back to dashboard</a></div>
   </section>
   {{else}}
-  <div class="title-row setup-title-row"><div><h1>Set up JustVoxel</h1></div><span class="badge">Step {{.CurrentStep}} of {{len .Steps}}</span></div>
+  <div class="setup-stage-header"><h1>Set up JustVoxel</h1>
   <ol class="setup-progress" aria-label="Setup progress">{{range .Steps}}<li class="{{if .Active}}active{{end}} {{if .Complete}}complete{{end}}" {{if .Active}}aria-current="step"{{end}}>{{if .Visited}}<form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="{{.Number}}"><button type="submit"><span class="setup-number">{{.Number}}</span><span>{{.Name}}</span></button></form>{{else}}<span class="setup-number">{{.Number}}</span><span>{{.Name}}</span>{{end}}</li>{{end}}</ol>
+  </div>
 
   <section class="panel setup-step-panel setup-wizard-panel">
     <h2>{{.Current.Name}}</h2>
@@ -84,9 +86,9 @@
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <fieldset class="setup-server-types setup-server-types-compact">
         <legend>Server software</legend>
-        <label class="setup-server-type is-available"><input type="radio" name="server_type" value="paper" {{if or (eq .Minecraft.ServerType "") (eq .Minecraft.ServerType "paper")}}checked{{end}}><span><strong>Paper</strong><small>Supported now · plugins and Bedrock cross-play.</small></span></label>
-        <label class="setup-server-type is-available"><input type="radio" name="server_type" value="purpur" {{if eq .Minecraft.ServerType "purpur"}}checked{{end}}><span><strong>Purpur</strong><small>Plugins and managed Bedrock cross-play.</small></span></label>
-        <label class="setup-server-type is-available"><input type="radio" name="server_type" value="vanilla" {{if eq .Minecraft.ServerType "vanilla"}}checked{{end}}><span><strong>Vanilla</strong><small>Original Minecraft · Java only · no plugins.</small></span></label>
+        <label class="setup-server-type server-software-card is-available"><input type="radio" name="server_type" value="paper" {{if or (eq .Minecraft.ServerType "") (eq .Minecraft.ServerType "paper")}}checked{{end}}><span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/paper.svg" alt="" width="48" height="48"></span><span class="server-software-copy"><strong>Paper</strong><span class="software-availability">Available</span><small>Recommended · Plugins and managed Bedrock cross-play.</small></span></label>
+        <label class="setup-server-type server-software-card is-available"><input type="radio" name="server_type" value="purpur" {{if eq .Minecraft.ServerType "purpur"}}checked{{end}}><span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/purpur.svg" alt="" width="48" height="48"></span><span class="server-software-copy"><strong>Purpur</strong><span class="software-availability">Available</span><small>Plugins and managed Bedrock cross-play.</small></span></label>
+        <label class="setup-server-type server-software-card is-available"><input type="radio" name="server_type" value="vanilla" {{if eq .Minecraft.ServerType "vanilla"}}checked{{end}}><span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/vanilla.svg" alt="" width="48" height="48"></span><span class="server-software-copy"><strong>Vanilla</strong><span class="software-availability">Available</span><small>Original Minecraft · Java only · no plugins.</small></span></label>
       </fieldset>
       <div class="setup-form-grid">
         <input type="hidden" name="motd_automatic" value="{{.Server.MOTDAutomatic}}" data-setup-motd-automatic>
@@ -138,13 +140,17 @@
     <form method="post" action="/setup/minecraft" class="setup-form">
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <div class="setup-form-grid setup-section-gap">
+      <div class="setup-version-columns">
+        <section class="setup-version-column" aria-label="Container updates">
         <label class="setup-field">Container updates<select id="image-channel" data-current-tag="{{.Minecraft.ImageTag}}"><option value="stable" {{if eq .Minecraft.ImageTag "stable"}}selected{{end}}>Stable (recommended)</option><option value="latest" {{if eq .Minecraft.ImageTag "latest"}}selected{{end}}>Latest</option><option value="custom" {{if and (ne .Minecraft.ImageTag "stable") (ne .Minecraft.ImageTag "latest")}}selected{{end}}>Custom</option></select><span class="field-help">Controls server container software updates. This does not choose the Minecraft game version below.</span></label>
         <label id="custom-image-tag-field" class="setup-field" {{if or (eq .Minecraft.ImageTag "stable") (eq .Minecraft.ImageTag "latest")}}hidden{{end}}>Custom container tag<input id="custom-image-tag" value="{{if and (ne .Minecraft.ImageTag "stable") (ne .Minecraft.ImageTag "latest")}}{{.Minecraft.ImageTag}}{{end}}" autocomplete="off" placeholder="Enter a supported container tag"><span class="field-help">Advanced option. Use an upstream tag only when you know you need it.</span></label>
         <input id="image-tag" name="image_tag" type="hidden" value="{{.Minecraft.ImageTag}}">
+        </section>
+        <section class="setup-version-column" aria-label="Minecraft version">
         <label class="setup-field">Minecraft version<select id="version-policy" name="version_policy"><option value="recommended" {{if eq .Minecraft.VersionPolicy "recommended"}}selected{{end}}>Recommended</option><option value="latest" {{if eq .Minecraft.VersionPolicy "latest"}}selected{{end}}>Latest</option><option value="pinned" {{if eq .Minecraft.VersionPolicy "pinned"}}selected{{end}}>Specific version</option></select><span class="field-help">Recommended uses the newest stable server version. Latest follows newer server versions when available.</span></label>
         <label id="specific-version-field" class="setup-field setup-field-wide" {{if ne .Minecraft.VersionPolicy "pinned"}}hidden{{end}}>Specific Minecraft version<input id="minecraft-version" name="version" value="{{.Minecraft.Version}}" autocomplete="off"><span class="field-help">Choose an exact version. Available pre-release builds can also be used.</span></label>
-        <div class="setup-field-wide setup-version-preview" id="setup-version-preview" role="status" aria-live="polite">Checking available versions…</div>
+        <div class="setup-version-preview" id="setup-version-preview" role="status" aria-live="polite">Checking available versions…</div>
+        </section>
       </div>
       </div>
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next" disabled>Continue</button></div></div>
@@ -188,31 +194,36 @@
         </div></div>
 
         {{if .StorageDisks}}
-        <div class="setup-storage-disk-list">
+        <div class="storage-disk-grid" aria-label="Physical disks">
+          {{range .StorageDisks}}
+          <button class="storage-disk-card{{if .External}} storage-disk-card-external{{end}}" type="button" data-setup-disk="{{.Path}}" aria-pressed="false">
+            <span class="storage-disk-icon" aria-hidden="true"><svg viewBox="0 0 24 24">{{if .External}}<path d="M9 3h6v5h2v9H7V8h2z"></path><path d="M11 3v3M13 3v3M9 20h6"></path>{{else}}<rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M7 15h.01M17 15h.01M7 9h10"></path>{{end}}</svg></span>
+            <span class="storage-disk-copy"><strong>{{if .Model}}{{.Model}}{{else}}{{.Name}}{{end}}</strong><span>{{.Size}}{{if .External}} · USB{{else}} · Internal{{end}}</span><small><code>{{.Path}}</code>{{if .SystemDisk}} · System disk{{end}}</small></span>
+          </button>
+          {{end}}
+        </div>
+        <div class="setup-partition-browser">
           {{range .StorageDisks}}{{$disk := .}}
-          <article class="setup-storage-disk">
-            <div class="setup-storage-disk-heading">
-              <div><strong>{{if .Model}}{{.Model}}{{else}}{{.Name}}{{end}}</strong><span><code>{{.Path}}</code> · {{.Size}}{{if .SystemDisk}} · System disk{{end}}</span></div>
-            </div>
+          <article class="storage-partition-group" data-setup-disk-partitions="{{.Path}}" hidden>
             {{if or .Partitions .FreeSpaces}}
-            <div class="setup-storage-layout">
+            <div class="storage-partition-grid">
               {{range .Partitions}}
                 {{if .Formatted}}
-                <button class="setup-storage-segment setup-storage-existing{{if eq $.Storage.Device .Path}} is-selected{{end}}" type="button"
+                <button class="setup-storage-segment storage-partition-card setup-storage-existing{{if eq $.Storage.Device .Path}} is-selected{{end}}" type="button"
                         data-setup-existing-partition
                         data-device="{{.Path}}"
                         data-mountpoint="{{.Mountpoint}}">
-                  <span class="setup-storage-segment-state">{{if eq $.Storage.Device .Path}}Selected{{else}}Ready{{end}}</span>
+                  <span class="setup-storage-segment-state storage-partition-state">{{if eq $.Storage.Device .Path}}Selected{{else}}Ready{{end}}</span>
                   <strong>{{$disk.Name}} · {{.Path}}</strong>
                   <span>{{.Size}} · {{.Filesystem}}{{if .Label}} · {{.Label}}{{end}}</span>
                   <small>{{if .Mountpoint}}{{.Mountpoint}}{{else}}Will use /var/mnt/justvoxel-data{{end}}</small>
                 </button>
                 {{else}}
-                <button class="setup-storage-segment setup-storage-prepare" type="button"
+                <button class="setup-storage-segment storage-partition-card setup-storage-prepare" type="button"
                         data-setup-storage-prepare="format"
                         data-device="{{.Path}}"
                         data-size="{{.Size}}">
-                  <span class="setup-storage-segment-state">Blank</span>
+                  <span class="setup-storage-segment-state storage-partition-state">Blank</span>
                   <strong>{{.Path}}</strong>
                   <span>{{.Size}}</span>
                   <small>Format as XFS for Minecraft</small>
@@ -220,12 +231,12 @@
                 {{end}}
               {{end}}
               {{range .FreeSpaces}}
-              <button class="setup-storage-segment setup-storage-prepare" type="button"
+              <button class="setup-storage-segment storage-partition-card setup-storage-prepare" type="button"
                       data-setup-storage-prepare="create_partition"
                       data-device="{{.Device}}"
                       data-free-start="{{.Start}}"
                       data-size="{{.Size}}">
-                <span class="setup-storage-segment-state">Unallocated</span>
+                <span class="setup-storage-segment-state storage-partition-state">Unallocated</span>
                 <strong>{{.Size}} free</strong>
                 <span>{{.Start}} → {{.End}}</span>
                 <small>Create one XFS partition using this free space</small>
@@ -247,9 +258,9 @@
         {{end}}
       </section>
 
-      <section class="setup-storage-action-review" data-setup-storage-action-review hidden>
+      <dialog class="setup-storage-action-review storage-action-dialog" data-setup-storage-action-review aria-labelledby="setup-storage-action-title">
         <div class="setup-storage-action-heading">
-          <div><span class="setup-storage-choice-kicker">Review storage action</span><strong data-setup-storage-action-title>Prepare storage</strong></div>
+          <div><span class="setup-storage-choice-kicker">Review storage action</span><strong id="setup-storage-action-title" data-setup-storage-action-title>Prepare storage</strong></div>
           <button class="secondary" type="button" data-setup-storage-action-close>Close</button>
         </div>
         <dl class="setup-storage-action-details">
@@ -259,15 +270,15 @@
         <div data-setup-storage-action-warnings></div>
         <div class="setup-storage-confirm">
           <p>Review the target above, then slide fully to the right and confirm.</p>
-          <input type="range" min="0" max="100" step="1" value="0" data-setup-storage-confirm-slider aria-label="Slide to confirm storage preparation">
-          <label><input type="checkbox" data-setup-storage-confirm-toggle disabled> Confirm this reviewed storage action</label>
+          <div class="destructive-confirm-slider"><span class="destructive-confirm-slider-text">Slide to confirm</span><span class="destructive-confirm-slider-thumb" aria-hidden="true">&gt;</span><input type="range" min="0" max="100" step="1" value="0" data-setup-storage-confirm-slider aria-label="Slide to confirm storage preparation"></div>
+          <label class="destructive-confirm-toggle-row"><input class="destructive-confirm-toggle" type="checkbox" data-setup-storage-confirm-toggle disabled> Confirm this reviewed storage action</label>
         </div>
         <p class="notice error" data-setup-storage-action-error hidden></p>
         <div class="setup-storage-action-buttons">
           <button class="secondary" type="button" data-setup-storage-action-back>Back</button>
-          <button type="button" data-setup-storage-action-apply disabled>Apply reviewed action</button>
+          <button type="button" data-setup-storage-action-apply disabled>Apply</button>
         </div>
-      </section>
+      </dialog>
 
       </div>
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
@@ -286,7 +297,7 @@
       <input type="hidden" name="backup_domain" value="{{.Backups.Domain}}" data-setup-backup-domain>
 
       <div class="setup-backup-topline">
-        <label class="setup-choice setup-backup-automatic"><input type="checkbox" name="backup_automatic" {{if .Backups.Automatic}}checked{{end}}><span><strong>Automatic backups</strong><small>Run backups on schedule. Manual backups remain available later.</small></span></label>
+        <label class="setup-choice setup-backup-automatic"><input class="date-time-switch" type="checkbox" name="backup_automatic" {{if .Backups.Automatic}}checked{{end}}><span><strong>Automatic backups</strong><small>Run backups on schedule. Manual backups remain available later.</small></span></label>
         <div class="setup-backup-schedule">
           <label class="setup-field">Daily time<input name="backup_daily_time" type="time" value="{{.Backups.DailyTime}}"></label>
           <label class="setup-field">Keep<input name="backup_keep" type="number" min="1" step="1" value="{{.Backups.Keep}}" inputmode="numeric"></label>
@@ -324,30 +335,35 @@
         <div class="setup-browser-intro"><div class="setup-partition-instruction"><strong>Choose partition</strong><span>Select a ready filesystem or prepare a blank partition.</span></div>
         <div class="setup-storage-browser-heading"><div><strong>Local backup disks</strong><span>Internal and USB/external storage are both allowed for backups.</span></div><span class="badge">{{len .BackupDisks}}</span></div></div>
         {{if .BackupDisks}}
-        <div class="setup-storage-disk-list">
+        <div class="storage-disk-grid" aria-label="Physical disks">
+          {{range .BackupDisks}}
+          <button class="storage-disk-card{{if .External}} storage-disk-card-external{{end}}" type="button" data-setup-disk="{{.Path}}" aria-pressed="false">
+            <span class="storage-disk-icon" aria-hidden="true"><svg viewBox="0 0 24 24">{{if .External}}<path d="M9 3h6v5h2v9H7V8h2z"></path><path d="M11 3v3M13 3v3M9 20h6"></path>{{else}}<rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M7 15h.01M17 15h.01M7 9h10"></path>{{end}}</svg></span>
+            <span class="storage-disk-copy"><strong>{{if .Model}}{{.Model}}{{else}}{{.Name}}{{end}}</strong><span>{{.Size}}{{if .External}} · USB{{else}} · Internal{{end}}</span><small><code>{{.Path}}</code>{{if .SystemDisk}} · System disk{{end}}</small></span>
+          </button>
+          {{end}}
+        </div>
+        <div class="setup-partition-browser">
           {{range .BackupDisks}}{{$disk := .}}
-          <article class="setup-storage-disk">
-            <div class="setup-storage-disk-heading">
-              <div><strong>{{if .Model}}{{.Model}}{{else}}{{.Name}}{{end}}</strong><span><code>{{.Path}}</code> · {{.Size}}{{if .External}} · External / USB{{else}} · Internal{{end}}{{if .SystemDisk}} · System disk{{end}}</span></div>
-            </div>
+          <article class="storage-partition-group" data-setup-disk-partitions="{{.Path}}" hidden>
             {{if or .Partitions .FreeSpaces}}
-            <div class="setup-storage-layout">
+            <div class="storage-partition-grid">
               {{range .Partitions}}
                 {{if .Formatted}}
-                <button class="setup-storage-segment setup-backup-existing{{if eq $.Backups.Device .Path}} is-selected{{end}}" type="button"
+                <button class="setup-storage-segment storage-partition-card setup-backup-existing{{if eq $.Backups.Device .Path}} is-selected{{end}}" type="button"
                         data-setup-backup-existing
                         data-device="{{.Path}}"
                         data-mountpoint="{{if eq $.Storage.Device .Path}}{{$.Storage.MountPoint}}{{else}}{{.Mountpoint}}{{end}}">
-                  <span class="setup-storage-segment-state">{{if eq $.Backups.Device .Path}}Selected{{else}}Ready{{end}}</span>
+                  <span class="setup-storage-segment-state storage-partition-state">{{if eq $.Backups.Device .Path}}Selected{{else}}Ready{{end}}</span>
                   <strong>{{$disk.Name}} · {{.Path}}</strong>
                   <span>{{.Size}} · {{.Filesystem}}{{if .Label}} · {{.Label}}{{end}}</span>
                   <small>{{if eq $.Storage.Device .Path}}{{$.Storage.MountPoint}}{{else}}{{if .Mountpoint}}{{.Mountpoint}}{{else}}/var/mnt/justvoxel-backup{{end}}{{end}}</small>
                 </button>
                 {{else}}
-                <button class="setup-storage-segment setup-storage-prepare" type="button"
+                <button class="setup-storage-segment storage-partition-card setup-storage-prepare" type="button"
                         data-setup-backup-prepare="format"
                         data-device="{{.Path}}">
-                  <span class="setup-storage-segment-state">Blank</span>
+                  <span class="setup-storage-segment-state storage-partition-state">Blank</span>
                   <strong>{{.Path}}</strong>
                   <span>{{.Size}}</span>
                   <small>Format as XFS for backups</small>
@@ -355,11 +371,11 @@
                 {{end}}
               {{end}}
               {{range .FreeSpaces}}
-              <button class="setup-storage-segment setup-storage-prepare" type="button"
+              <button class="setup-storage-segment storage-partition-card setup-storage-prepare" type="button"
                       data-setup-backup-prepare="create_partition"
                       data-device="{{.Device}}"
                       data-free-start="{{.Start}}">
-                <span class="setup-storage-segment-state">Unallocated</span>
+                <span class="setup-storage-segment-state storage-partition-state">Unallocated</span>
                 <strong>{{.Size}} free</strong>
                 <span>{{.Start}} → {{.End}}</span>
                 <small>Create one XFS backup partition using this free space</small>
@@ -399,9 +415,9 @@
 
       {{if .SameDiskWarning}}<div class="setup-backup-resilience setup-disk-warning" role="note" data-setup-same-disk-warning><strong>Backups are on the same disk</strong><span>If this disk fails, both Minecraft and its backups could be lost.</span></div>{{end}}
 
-      <section class="setup-storage-action-review" data-setup-backup-action-review hidden>
+      <dialog class="setup-storage-action-review storage-action-dialog" data-setup-backup-action-review aria-labelledby="setup-backup-action-title">
         <div class="setup-storage-action-heading">
-          <div><span class="setup-storage-choice-kicker">Review backup disk action</span><strong data-setup-backup-action-title>Prepare backup storage</strong></div>
+          <div><span class="setup-storage-choice-kicker">Review backup disk action</span><strong id="setup-backup-action-title" data-setup-backup-action-title>Prepare backup storage</strong></div>
           <button class="secondary" type="button" data-setup-backup-action-close>Close</button>
         </div>
         <dl class="setup-storage-action-details">
@@ -411,12 +427,12 @@
         <div data-setup-backup-action-warnings></div>
         <div class="setup-storage-confirm">
           <p>Review the target above, then slide fully to the right and confirm.</p>
-          <input type="range" min="0" max="100" step="1" value="0" data-setup-backup-confirm-slider aria-label="Slide to confirm backup storage preparation">
-          <label><input type="checkbox" data-setup-backup-confirm-toggle disabled> Confirm this reviewed storage action</label>
+          <div class="destructive-confirm-slider"><span class="destructive-confirm-slider-text">Slide to confirm</span><span class="destructive-confirm-slider-thumb" aria-hidden="true">&gt;</span><input type="range" min="0" max="100" step="1" value="0" data-setup-backup-confirm-slider aria-label="Slide to confirm backup storage preparation"></div>
+          <label class="destructive-confirm-toggle-row"><input class="destructive-confirm-toggle" type="checkbox" data-setup-backup-confirm-toggle disabled> Confirm this reviewed storage action</label>
         </div>
         <p class="notice error" data-setup-backup-action-error hidden></p>
-        <div class="setup-storage-action-buttons"><button class="secondary" type="button" data-setup-backup-action-back>Back</button><button type="button" data-setup-backup-action-apply disabled>Apply reviewed action</button></div>
-      </section>
+        <div class="setup-storage-action-buttons"><button class="secondary" type="button" data-setup-backup-action-back>Back</button><button type="button" data-setup-backup-action-apply disabled>Apply</button></div>
+      </dialog>
 
       </div>
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>

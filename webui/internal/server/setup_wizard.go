@@ -118,8 +118,8 @@ type setupWizardPageData struct {
 
 var setupWizardSteps = []setupWizardStepView{
 	{Number: 1, Name: "Server", Description: "Choose server software, welcome message, player limit and timezone."},
-	{Number: 2, Name: "Connections", Description: "Choose Java and Bedrock connectivity."},
-	{Number: 3, Name: "Resources", Description: "Choose how much system memory Minecraft may use."},
+	{Number: 2, Name: "Cross-play", Description: "Choose Bedrock cross-play and Minecraft connection ports."},
+	{Number: 3, Name: "Memory", Description: "Choose how much system memory Minecraft may use."},
 	{Number: 4, Name: "Version", Description: "Choose the container channel and Minecraft version policy."},
 	{Number: 5, Name: "Storage", Description: "Choose where Minecraft worlds, configuration and server data will live."},
 	{Number: 6, Name: "Backups", Description: "Choose backup location, retention and automatic backup schedule."},

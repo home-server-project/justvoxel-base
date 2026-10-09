@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -84,15 +85,15 @@ function button(root, text) { return root.all().find(node => node.tagName === "b
   for (const current of ["paper", "purpur", "vanilla"]) {
     const page = await open(current);
     const choices = cards(page);
-    assert.deepEqual(choices.map(choice => choice.children[0].textContent), ["Paper", "Purpur", "Vanilla"]);
+    assert.deepEqual(choices.map(choice => choice.children[1].children[0].textContent), ["Paper", "Purpur", "Vanilla"]);
     for (const choice of choices) {
-      const type = choice.children[0].textContent.toLowerCase();
+      const type = choice.children[1].children[0].textContent.toLowerCase();
       const isCurrent = type === current;
       assert.equal(choice.className.includes("is-current"), isCurrent);
-      assert.equal(choice.children[1].textContent, isCurrent ? "Current" : (current === "vanilla" || type === "vanilla") ? "Unavailable" : "Available");
+      assert.equal(choice.children[1].children[1].textContent, isCurrent ? "Current" : (current === "vanilla" || type === "vanilla") ? "Unavailable" : "Available");
       if (!isCurrent && (current === "vanilla" || type === "vanilla")) {
         assert.equal(choice.attributes["aria-disabled"], "true");
-        assert.ok(choice.children.some(node => node.textContent === "Requires Reset Minecraft and setup again."));
+        assert.ok(choice.children[1].children.some(node => node.textContent === "Requires Reset Minecraft and setup again."));
         assert.equal(choice.events.click, undefined);
         assert.equal(choice.tagName, "div");
       } else if (isCurrent) {
@@ -104,7 +105,7 @@ function button(root, text) { return root.all().find(node => node.tagName === "b
     assert.ok(!page.content.textContent.includes("Change to "));
     if (current === "vanilla") continue;
     const target = current === "paper" ? "purpur" : "paper";
-    const selectable = choices.find(choice => choice.children[0].textContent.toLowerCase() === target);
+    const selectable = choices.find(choice => choice.children[1].children[0].textContent.toLowerCase() === target);
     assert.equal(selectable.tagName, "button");
     await selectable.events.click();
     assert.equal(selectable.disabled, true);
@@ -164,19 +165,44 @@ func TestSetupRecommendedPaperCardWording(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	want := `<strong>Paper</strong><small>Recommended · Plugins and managed Bedrock cross-play.</small>`
-	if strings.Count(text, want) != 1 {
-		t.Fatal("Recommended setup Paper card must contain the exact approved wording once")
-	}
 	if strings.Contains(text, "Recommended · plugins · Bedrock cross-play enabled by default when supported.") {
 		t.Fatal("old Recommended setup Paper wording remains")
 	}
-	for _, unchanged := range []string{
-		`<strong>Purpur</strong><small>Plugins and managed Bedrock cross-play.</small>`,
-		`<strong>Vanilla</strong><small>Original Minecraft · Java only · no plugins.</small>`,
-	} {
-		if !strings.Contains(text, unchanged) {
-			t.Fatalf("setup card wording changed: %s", unchanged)
+	// Recommended and Advanced setup each contain the same three cards. Check
+	// each card's text and icon/copy wrappers without requiring adjacent elements.
+	cardPattern := regexp.MustCompile(`(?s)<label class="setup-server-type server-software-card is-available">(.*?)</label>`)
+	sections := strings.SplitN(text, "{{else}}\n  <div class=\"setup-stage-header\">", 2)
+	if len(sections) != 2 {
+		t.Fatal("Recommended and Advanced setup sections must be present")
+	}
+	for sectionIndex, section := range sections {
+		cards := cardPattern.FindAllStringSubmatch(section, -1)
+		if len(cards) != 3 {
+			t.Fatalf("setup section %d must contain three software cards", sectionIndex)
+		}
+		for index, software := range []struct{ value, name, description string }{
+			{"paper", "Paper", "Recommended · Plugins and managed Bedrock cross-play."},
+			{"purpur", "Purpur", "Plugins and managed Bedrock cross-play."},
+			{"vanilla", "Vanilla", "Original Minecraft · Java only · no plugins."},
+		} {
+			card := cards[index][1]
+			for _, want := range []string{
+				`name="server_type" value="` + software.value + `"`,
+				`<span class="server-software-icon" aria-hidden="true">`,
+				`<span class="server-software-copy">`,
+				`<strong>` + software.name + `</strong>`,
+				`<span class="software-availability">Available</span>`,
+				`<small>` + software.description + `</small>`,
+			} {
+				if strings.Count(card, want) != 1 {
+					t.Fatalf("setup section %d %s card must contain %q once", sectionIndex, software.name, want)
+				}
+			}
+			// The official Paper asset is still pending; preserve the shared local
+			// SVG references for the two bundled icons.
+			if software.value != "paper" && !strings.Contains(card, `<img src="/static/server-software/`+software.value+`.svg" alt="" width="48" height="48">`) {
+				t.Fatalf("setup %s card must use its shared local SVG icon", software.name)
+			}
 		}
 	}
 }

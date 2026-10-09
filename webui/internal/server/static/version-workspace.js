@@ -29,9 +29,11 @@ if (versionLauncher && versionDialog) {
   const card = (title) => {
     const panel = document.createElement("section");
     panel.className = "panel details";
-    const heading = document.createElement("h2");
-    heading.textContent = title;
-    panel.appendChild(heading);
+    if (title) {
+      const heading = document.createElement("h2");
+      heading.textContent = title;
+      panel.appendChild(heading);
+    }
     return panel;
   };
   const stackLabel = (value) => ({ up_to_date: "Up to date", updates_available: "Updates available", waiting_for_compatibility: "Waiting for compatibility", unavailable: "Unavailable", managed_automatically: "Managed automatically", disabled: "Cross-play off", not_applicable: "Not applicable" })[value] || "Unavailable";
@@ -262,7 +264,7 @@ if (versionLauncher && versionDialog) {
       }
 
       if (currentTab === "software") {
-        const software = card("Server software");
+        const software = card("");
         const choices = document.createElement("div");
         choices.className = "version-software-choices";
         const currentSoftware = minecraft.server_type || "paper";
@@ -274,20 +276,31 @@ if (versionLauncher && versionDialog) {
           const isCurrent = target === currentSoftware;
           const selectable = !isCurrent && ["paper", "purpur"].includes(currentSoftware) && ["paper", "purpur"].includes(target);
           const change = document.createElement(selectable ? "button" : "div");
-          change.className = "version-software-choice" + (isCurrent ? " is-current" : selectable ? " secondary" : "");
+          change.className = "version-software-choice server-software-card" + (isCurrent ? " is-current" : selectable ? " secondary" : "");
           const title = document.createElement("strong");
           title.textContent = name;
           const availability = document.createElement("span");
           availability.textContent = isCurrent ? "Current" : selectable ? "Available" : "Unavailable";
           const detail = document.createElement("small");
           detail.textContent = description;
-          change.append(title, availability, detail);
+          const icon = document.createElement("span");
+          icon.className = "server-software-icon";
+          icon.setAttribute("aria-hidden", "true");
+          const image = document.createElement("img");
+          image.src = `/static/server-software/${target}.svg`;
+          image.alt = "";
+          image.width = image.height = 48;
+          icon.appendChild(image);
+          const copy = document.createElement("span");
+          copy.className = "server-software-copy";
+          copy.append(title, availability, detail);
+          change.append(icon, copy);
           choices.appendChild(change);
           if (!isCurrent && !selectable) {
             change.setAttribute("aria-disabled", "true");
             const note = document.createElement("small");
             note.textContent = "Requires Reset Minecraft and setup again.";
-            change.appendChild(note);
+            copy.appendChild(note);
           }
           if (!selectable) continue;
           change.type = "button";
@@ -345,9 +358,9 @@ if (versionLauncher && versionDialog) {
         }
         software.appendChild(choices);
         root.appendChild(software);
-        const panel = card("Container release channel");
+        const panel = card("Container updates");
         const form = document.createElement("form");
-        form.innerHTML = '<label>Channel<select name="channel"><option value="stable">Stable</option><option value="latest">Latest</option><option value="custom">Custom</option></select></label><label data-version-custom hidden>Custom tag<input name="custom_tag" autocomplete="off"></label><div class="action-row"><button type="submit">Review changes</button></div>';
+        form.innerHTML = '<div class="version-selection-row"><select name="channel" aria-label="Container updates"><option value="stable">Stable</option><option value="latest">Latest</option><option value="custom">Custom</option></select><button type="submit">Review changes</button></div><label data-version-custom hidden>Custom tag<input name="custom_tag" autocomplete="off"></label>';
         const channel = form.elements.channel;
         channel.value = ["stable", "latest"].includes(minecraft.image_tag) ? minecraft.image_tag : "custom";
         form.elements.custom_tag.value = channel.value === "custom" ? minecraft.image_tag || "" : "";
@@ -372,9 +385,9 @@ if (versionLauncher && versionDialog) {
         compatibility.textContent = status.reason || (status.stack_state === "up_to_date" ? "Your JustVoxel server is up to date. No action needed." : status.stack_state === "updates_available" ? "Compatible server updates are ready to review." : "Server update information could not be verified.");
         panel.appendChild(compatibility);
         root.appendChild(panel);
-        const policyPanel = card("Version");
+        const policyPanel = card("Version configuration");
         const form = document.createElement("form");
-        form.innerHTML = '<label data-version-select><select name="policy" aria-label="Version"><option value="recommended">Recommended</option><option value="latest">Latest</option><option value="pinned">Specific version</option></select></label><label data-version-specific>Exact Minecraft version<input name="version" autocomplete="off"></label><div class="version-status-grid" data-version-preview></div><div class="action-row"><button type="submit">Review changes</button></div>';
+        form.innerHTML = '<div class="version-status-grid" data-version-preview></div><div class="version-selection-row"><label data-version-select><select name="policy" aria-label="Version"><option value="recommended">Recommended</option><option value="latest">Latest</option><option value="pinned">Specific version</option></select></label><button type="submit">Review changes</button></div><label data-version-specific>Exact Minecraft version<input name="version" autocomplete="off"></label>';
         form.elements.policy.value = ["recommended", "latest", "pinned"].includes(minecraft.version_mode) ? minecraft.version_mode : "recommended";
         form.elements.version.value = minecraft.version === "LATEST" ? "" : minecraft.version || "";
         let previewSequence = 0;

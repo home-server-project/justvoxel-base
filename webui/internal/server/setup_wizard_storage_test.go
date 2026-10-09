@@ -143,7 +143,7 @@ func TestSetupWizardStorageStepShowsInternalDiskBrowserAndExcludesUSB(t *testing
 	}
 	body := page.Body.String()
 	for _, want := range []string{
-		"Step 5 of 7", "Use system storage", "Use another internal disk", "/dev/vda4", "/dev/vdb1", "/dev/vdb2",
+		"<h2>Storage</h2>", "Use system storage", "Use another internal disk", "/dev/vda4", "/dev/vdb1", "/dev/vdb2",
 		"Samsung SSD", "ext4", "Unallocated", "Create one XFS partition using this free space",
 		"External drives are not offered for Minecraft data", "/static/setup-storage.js",
 	} {
@@ -287,7 +287,7 @@ func TestSetupWizardStorageStepValidatesAndAdvances(t *testing.T) {
 		t.Fatalf("valid storage step returned %d %q: %s", rr.Code, rr.Header().Get("Location"), rr.Body.String())
 	}
 	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Step 6 of 7") || !strings.Contains(page.Body.String(), "Internal or USB drive") {
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "<h2>Backups</h2>") || !strings.Contains(page.Body.String(), "Internal or USB drive") {
 		t.Fatalf("storage step did not advance to backups: %d %s", page.Code, page.Body.String())
 	}
 }
@@ -313,10 +313,18 @@ func TestSetupWizardBackupStepSupportsLocalNFSAndSMBWithoutPasswordDraft(t *test
 
 	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	body := page.Body.String()
-	for _, want := range []string{"Automatic backups", "04:30", "System storage", "Internal or USB drive", "NFS share", "SMB share", "Password will be requested when setup starts.", `data-setup-same-disk-warning`, "Backups are on the same disk", "If this disk fails, both Minecraft and its backups could be lost.", "USB SSD", "External / USB"} {
+	for _, want := range []string{"Automatic backups", "04:30", "System storage", "Internal or USB drive", "NFS share", "SMB share", "Password will be requested when setup starts.", `data-setup-same-disk-warning`, "Backups are on the same disk", "If this disk fails, both Minecraft and its backups could be lost.", "USB SSD", " · USB</span>"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("backup page missing %q: %s", want, body)
 		}
+	}
+	usbCardStart := strings.Index(body, `data-setup-disk="/dev/vdd"`)
+	if usbCardStart < 0 {
+		t.Fatal("backup page must offer the USB physical disk for selection")
+	}
+	usbCard, _, found := strings.Cut(body[usbCardStart:], "</button>")
+	if !found || !strings.Contains(usbCard, "<strong>USB SSD</strong>") || !strings.Contains(usbCard, " · USB</span>") || !strings.Contains(usbCard, "<code>/dev/vdd</code>") {
+		t.Fatal("USB backup disk card must retain its model, USB label and device identity")
 	}
 	if strings.Contains(body, `name="backup_password"`) || strings.Contains(body, `type="password"`) {
 		t.Fatal("SMB password field must not be part of the A4.3 setup draft")
@@ -401,7 +409,7 @@ func TestSetupWizardBackupUsesSharedReviewedStorageActions(t *testing.T) {
 		"fetch('/api/new-storage/actions/' + phase",
 		"body.set('fingerprint', reviewed?.proposed?.fingerprint || '')",
 		"body.set('confirmation', reviewed?.proposed?.confirmation || '')",
-		"justvoxel.setup.backup.resume",
+		"justvoxel-setup-backup-disk",
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("setup Backup shared action behavior missing %q", want)
@@ -457,7 +465,7 @@ func TestSetupWizardStorageAndBackupBackPreserveDraft(t *testing.T) {
 		t.Fatalf("backup back returned %d: %s", back.Code, back.Body.String())
 	}
 	storagePage := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-	for _, want := range []string{"Step 5 of 7", "/dev/vda4", "/var/mnt/justvoxel-data/minecraft"} {
+	for _, want := range []string{"<h2>Storage</h2>", "/dev/vda4", "/var/mnt/justvoxel-data/minecraft"} {
 		if !strings.Contains(storagePage.Body.String(), want) {
 			t.Fatalf("storage draft lost %q: %s", want, storagePage.Body.String())
 		}

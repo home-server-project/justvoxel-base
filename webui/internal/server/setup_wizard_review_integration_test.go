@@ -92,7 +92,6 @@ func TestSetupReviewExecutionSurfaceKeepsSMBSecretTransientAndManagementAPIPriva
 		`action="/setup/review/apply"`,
 		`type="password" name="smb_password" form="setup-apply-form" required maxlength="4096" autocomplete="off"`,
 		`data-setup-password-dialog`,
-		"SMB password required during execution",
 		"It is not stored in the setup draft or operation journal.",
 		`data-eula-accepted="false"`, `data-setup-eula-dialog`, `data-setup-eula-accept`,
 	} {
@@ -100,7 +99,7 @@ func TestSetupReviewExecutionSurfaceKeepsSMBSecretTransientAndManagementAPIPriva
 			t.Fatalf("review execution surface missing %q: %s", want, body)
 		}
 	}
-	for _, forbidden := range []string{`name="password"`, `name="backup_password"`, `action="/setup/apply"`, `action="/v1/admin/setup/apply"`, "family-secret"} {
+	for _, forbidden := range []string{"SMB password required during execution.", "Network backup validation happens during execution.", `name="password"`, `name="backup_password"`, `action="/setup/apply"`, `action="/v1/admin/setup/apply"`, "family-secret"} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("review exposed forbidden management/secret surface %q: %s", forbidden, body)
 		}

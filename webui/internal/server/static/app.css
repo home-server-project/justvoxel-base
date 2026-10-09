@@ -59,7 +59,6 @@
 .control-center-trigger .control-center-icon{display:block;flex:none;width:19px;height:19px;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .control-center-panel{position:absolute;top:calc(100% + .45rem);right:0;width:min(620px,calc(100vw - 1.5rem));max-height:calc(100vh - 64px);overflow:auto;padding:.8rem;border:1px solid #303942;border-radius:14px;background:#151a1ff7;box-shadow:0 22px 60px #0009;backdrop-filter:blur(12px)}
 .control-center-heading{display:flex;align-items:center;justify-content:space-between;padding:.2rem .2rem .65rem;border-bottom:1px solid #2b333b}
-.control-center-heading>div{display:grid;gap:.05rem}.control-center-heading strong{font-size:1rem}.control-center-heading span{color:#89959e;font-size:.75rem}
 .control-navigation{display:grid;gap:.7rem;margin-top:.7rem}
 .control-section{padding:.65rem;border:1px solid #293139;border-radius:12px;background:#10161a}
 .control-section-label{display:block;margin:0 0 .5rem;color:#89959e!important;font-size:.68rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase}
@@ -366,7 +365,7 @@ body.role-operator .control-tile.nav-operator-only{display:flex!important}
 
 /* JustVoxel System Monitor powered by the loopback-only Glances API. */
 .workspace-window{position:fixed;margin:0}
-.system-monitor-dialog{width:min(860px,calc(100vw - 1rem));height:min(720px,calc(100dvh - 1rem));min-width:min(420px,calc(100vw - 1rem));min-height:320px;max-width:calc(100vw - 1rem);max-height:calc(100dvh - 1rem);padding:0;overflow:hidden;resize:none;border:1px solid #3b454e;border-radius:16px;background:#171d22;color:#eef1f4;box-shadow:0 28px 80px #000b}
+.system-monitor-dialog{width:min(860px,calc(100vw - 1rem));height:min(720px,calc(100dvh - 1rem));min-width:min(420px,calc(100vw - 1rem));min-height:320px;max-width:calc(100vw - 1rem);max-height:calc(100dvh - 1rem);padding:0;overflow:hidden;resize:both;border:1px solid #3b454e;border-radius:16px;background:#171d22;color:#eef1f4;box-shadow:0 28px 80px #000b}
 .system-monitor-shell{display:flex;flex-direction:column;height:100%;min-height:0}
 .system-monitor-header{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;padding:1rem 1.1rem .8rem;border-bottom:1px solid #303942;cursor:move;touch-action:none;user-select:none}
 .system-monitor-header h2{margin:.1rem 0 0;font-size:1.25rem}
@@ -406,10 +405,6 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .system-monitor-table th,.system-monitor-table td{padding:.38rem .42rem;border-bottom:1px solid #283038;text-align:left;white-space:nowrap}
 .system-monitor-table th{color:#89959e;font-size:.68rem;letter-spacing:.04em;text-transform:uppercase}
 .system-monitor-card[hidden]{display:none}
-.workspace-resize-grip{position:absolute;right:5px;bottom:5px;z-index:4;width:22px;height:22px;cursor:nwse-resize;touch-action:none}
-.workspace-resize-grip::before,.workspace-resize-grip::after{content:"";position:absolute;right:3px;bottom:3px;width:12px;height:2px;border-radius:2px;background:#788690;transform:rotate(-45deg);transform-origin:right center}
-.workspace-resize-grip::after{right:3px;bottom:7px;width:7px;opacity:.75}
-@media(max-width:700px){.workspace-resize-grip{display:none}}
 @media(max-width:700px){.system-monitor-dialog{inset:52px .25rem .25rem .25rem!important;width:auto!important;height:auto!important;min-width:0;min-height:0;max-width:none;max-height:none;resize:none;border-radius:12px}.system-monitor-grid{grid-template-columns:1fr}.system-monitor-card-wide{grid-column:auto}.system-monitor-header{padding:.85rem .9rem .7rem;cursor:default;touch-action:auto}.system-monitor-profile,.system-monitor-body{padding:.8rem .9rem}}
 @media(max-width:420px){.system-monitor-profile-grid{grid-template-columns:1fr 1fr}}
 @media(prefers-color-scheme:light){.system-monitor-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025}.system-monitor-header,.system-monitor-profile{border-color:#d9dfe3}.system-monitor-header-button{background:#eef2f4;border-color:#cbd4da;color:#34414a}.system-monitor-profile{background:#f7f9fa}.system-monitor-card{background:#f7f9fa;border-color:#d9dfe3}.system-monitor-table th,.system-monitor-table td{border-color:#e2e7ea}}
@@ -467,7 +462,7 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .minecraft-workspace-section{margin:0}
 .minecraft-overview-logs{margin:0;padding:.75rem}
 .minecraft-overview-logs h2{margin:.05rem 0 0;font-size:1rem}
-.minecraft-overview-logs .log-box{max-height:250px;margin-top:.55rem}
+.minecraft-overview-logs .log-box{margin-top:.55rem}
 .minecraft-workspace-content .settings-form{margin:0}
 .minecraft-workspace-content .settings-form>.panel:first-of-type{margin-top:0}
 .minecraft-workspace-content .review-panel{margin-top:1rem}
@@ -627,13 +622,13 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .system-ups-option-section p{margin:0;font-size:.78rem;color:#aab4bb}
 .system-ups-option-section button{justify-self:start}
 .system-ups-shutdown-switch{justify-content:space-between;min-height:38px}
-.system-ups-shutdown-switch input[type=checkbox]{appearance:none;flex:none;position:relative;width:42px;height:24px;margin:0;border:1px solid #59666e;border-radius:999px;background:#303b42;cursor:pointer;transition:background .15s ease,border-color .15s ease}
-.system-ups-shutdown-switch input[type=checkbox]::before{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#eef1f4;transition:transform .15s ease}
-.system-ups-shutdown-switch input[type=checkbox]:checked{border-color:#68bd8e;background:#68bd8e}
-.system-ups-shutdown-switch input[type=checkbox]:checked::before{transform:translateX(18px);background:#07130d}
-.system-ups-shutdown-switch input[type=checkbox]:focus-visible{outline:2px solid #78c99d;outline-offset:2px}
+input[type=checkbox]:not(.destructive-confirm-toggle):not(.storage-confirm-toggle){appearance:none;flex:none;position:relative;width:42px;min-width:42px;height:24px;min-height:24px;padding:0;margin:0;vertical-align:middle;border:1px solid #59666e;border-radius:999px;background:#303b42;cursor:pointer;transition:background .15s ease,border-color .15s ease}
+input[type=checkbox]:not(.destructive-confirm-toggle):not(.storage-confirm-toggle)::before{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;margin:0;border-radius:50%;background:#eef1f4;box-shadow:none;transition:transform .15s ease}
+input[type=checkbox]:not(.destructive-confirm-toggle):not(.storage-confirm-toggle):checked{border-color:#68bd8e;background:#68bd8e}
+input[type=checkbox]:not(.destructive-confirm-toggle):not(.storage-confirm-toggle):checked::before{transform:translateX(18px);background:#07130d}
+input[type=checkbox]:not(.destructive-confirm-toggle):not(.storage-confirm-toggle):focus-visible{outline:2px solid #78c99d;outline-offset:2px}
 .system-ups-shutdown-switch:has(input:disabled){opacity:.58;cursor:not-allowed}
-.system-ups-shutdown-switch input[type=checkbox]:disabled{cursor:not-allowed}
+input[type=checkbox]:not(.destructive-confirm-toggle):not(.storage-confirm-toggle):disabled{cursor:not-allowed}
 .system-action-dialog[aria-label="UPS options"]{width:min(800px,calc(100vw - 2rem));max-height:calc(100dvh - 2rem);overflow:auto}
 .system-action-dialog[aria-label="UPS options"] .system-action-dialog-content{padding:1.15rem 1.35rem}
 .system-action-dialog[aria-label="UPS options"] .system-action-dialog-content>h3{margin:.4rem 0 .25rem;font-size:.95rem}
@@ -706,10 +701,10 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 
 /* Shared compact workspace chrome. */
 .system-update-dialog-header,.system-monitor-header,.storage-workspace-header,.backups-workspace-header,.minecraft-workspace-header,.system-workspace-header,.migration-workspace-header{align-items:center;padding:.48rem .7rem;min-height:52px}
-.system-update-dialog-header>div:first-child,.system-monitor-header>div:first-child,.storage-workspace-header>div:first-child,.backups-workspace-header>div:first-child,.minecraft-workspace-header>div:first-child,.system-workspace-header>div:first-child,.migration-workspace-header>div:first-child{display:flex;align-items:baseline;gap:.38rem;min-width:0}
-.system-update-dialog-header .eyebrow,.system-monitor-header .eyebrow,.storage-workspace-header .eyebrow,.backups-workspace-header .eyebrow,.minecraft-workspace-header .eyebrow,.system-workspace-header .eyebrow,.migration-workspace-header .eyebrow{margin:0;white-space:nowrap}
+.system-update-dialog-header>div:first-child,.system-monitor-header>div:first-child,.storage-workspace-header>div:first-child,.backups-workspace-header>div:first-child,.minecraft-workspace-header>div:first-child,.system-workspace-header>div:first-child,.migration-workspace-header>div:first-child,.control-center-heading>div{display:flex;align-items:baseline;gap:.38rem;min-width:0}
+.system-update-dialog-header .eyebrow,.system-monitor-header .eyebrow,.storage-workspace-header .eyebrow,.backups-workspace-header .eyebrow,.minecraft-workspace-header .eyebrow,.system-workspace-header .eyebrow,.migration-workspace-header .eyebrow,.control-center-heading .eyebrow{margin:0;white-space:nowrap}
 .system-update-dialog-header .eyebrow::after,.system-monitor-header .eyebrow::after,.storage-workspace-header .eyebrow::after,.backups-workspace-header .eyebrow::after,.minecraft-workspace-header .eyebrow::after,.system-workspace-header .eyebrow::after,.migration-workspace-header .eyebrow::after{content:" ·"}
-.system-update-dialog-header h2,.system-monitor-header h2,.storage-workspace-header h2,.backups-workspace-header h2,.minecraft-workspace-header h2,.system-workspace-header h2,.migration-workspace-header h2{margin:0;font-size:1.05rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.system-update-dialog-header h2,.system-monitor-header h2,.storage-workspace-header h2,.backups-workspace-header h2,.minecraft-workspace-header h2,.system-workspace-header h2,.migration-workspace-header h2,.control-center-heading h2{margin:0;font-size:1.05rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .system-update-dialog-header .system-monitor-header-button,.system-monitor-header .system-monitor-header-button,.storage-workspace-header .system-monitor-header-button,.backups-workspace-header .system-monitor-header-button,.minecraft-workspace-header .system-monitor-header-button,.system-workspace-header .system-monitor-header-button,.migration-workspace-header .system-monitor-header-button{width:32px;height:32px;border-radius:8px;font-size:1.08rem}
 
 /* Network overlay addresses in the IPv4 tile. */
@@ -750,15 +745,12 @@ body.role-administrator .system-monitor-admin-only{display:grid!important}
 .destructive-confirm-toggle-row{display:flex;align-items:center;justify-content:flex-end;gap:.7rem;margin:.6rem 0 0}
 .destructive-confirm-toggle-callout{display:inline-flex;align-items:center;color:#eef1f4;font-size:1.02rem;font-weight:850}
 .destructive-confirm-toggle-callout::before{content:">";margin-right:.45rem;color:#aeb8c0;font-size:1.2rem;font-weight:950}
-.destructive-confirm-toggle{appearance:none;width:50px;height:28px;margin:0;border:1px solid #4a5862;border-radius:999px;background:radial-gradient(circle at 13px 50%,#f2f5f7 0 9px,transparent 10px),#303942;cursor:pointer}
-.destructive-confirm-toggle:checked{border-color:#ff5f56;background:radial-gradient(circle at calc(100% - 13px) 50%,#fff 0 9px,transparent 10px),#e6534b;box-shadow:0 0 0 1px #ff5f5644}
+input[type=checkbox].destructive-confirm-toggle{appearance:none;padding:0;flex:none;min-width:50px;min-height:28px;width:50px;height:28px;margin:0;border:1px solid #4a5862;border-radius:999px;background:radial-gradient(circle at 13px 50%,#f2f5f7 0 9px,transparent 10px),#303942;cursor:pointer}
+input[type=checkbox].destructive-confirm-toggle:checked{border-color:#ff5f56;background:radial-gradient(circle at calc(100% - 13px) 50%,#fff 0 9px,transparent 10px),#e6534b;box-shadow:0 0 0 1px #ff5f5644}
 
-/* System Monitor desktop geometry v2: useful multi-column minimum and a catchable resize grip. */
+/* System Monitor desktop geometry: useful multi-column minimum. */
 .system-monitor-dialog{min-width:min(620px,calc(100vw - 1rem));width:min(860px,calc(100vw - 1rem))}
 .system-monitor-grid{grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
-.workspace-resize-grip{right:2px;bottom:2px;width:38px;height:38px;border-radius:0 0 14px 0;background:linear-gradient(135deg,transparent 52%,#52616d55 53%,#52616d55 58%,transparent 59%,transparent 68%,#788690aa 69%,#788690aa 74%,transparent 75%)}
-.workspace-resize-grip::before,.workspace-resize-grip::after{display:none}
-@media(max-width:700px){.system-monitor-dialog{min-width:0}.workspace-resize-grip{display:none}}
 
 /* Light-mode shared controls. */
 @media(prefers-color-scheme:light){
@@ -821,8 +813,8 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
 .quick-look-network-row>strong,.network-overlay-list>span>strong{min-width:0;overflow-wrap:anywhere;color:#eef1f4;font-size:.76rem;font-weight:700;white-space:normal}
 .quick-look-network-tile .network-overlay-list{gap:.13rem;margin-top:.13rem}
 #dashboard{position:relative;isolation:isolate;display:flex;flex-direction:column;min-height:calc(100dvh - 48px)}
-.dashboard-wallpaper{position:fixed;inset:48px 0 0;width:100%;height:calc(100dvh - 48px);object-fit:cover;object-position:center;z-index:-3;pointer-events:none}
-#dashboard::before{content:"";position:fixed;inset:48px 0 0;z-index:-2;pointer-events:none;background:#07100b66}
+.dashboard-wallpaper{position:fixed;inset:0;width:100%;height:100dvh;object-fit:cover;object-position:center;z-index:-3;pointer-events:none}
+#dashboard::before{content:"";position:fixed;inset:0;z-index:-2;pointer-events:none;background:#07100b66}
 #dashboard[data-configured="false"] .dashboard-wallpaper{display:none}
 #dashboard[data-configured="false"]::before{content:none;display:none}
 .project-footer{margin-top:auto;padding-top:1rem;color:#79838b;font-size:.72rem}
@@ -859,11 +851,12 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
 .migration-workspace-content .migration-destination-helper h2{margin:0 0 .7rem;font-size:1.15rem;line-height:1.3}
 .migration-workspace-content .migration-destination-helper p:last-child{margin:0;font-size:.93rem;line-height:1.5;max-width:72ch}
 .system-workspace-content:has(.system-logs-layout){overflow:hidden}
-.system-logs-layout{display:grid;grid-template-columns:var(--logs-groups-width,170px) 10px var(--logs-files-width,280px) 10px minmax(220px,1fr);height:100%;min-height:0;overflow:hidden}
-.system-logs-groups,.system-logs-files,.system-logs-reader{min-width:0;min-height:0;padding:.35rem .65rem}
-.system-logs-groups h3,.system-logs-files h3,.system-logs-reader h3{margin:.2rem 0 .7rem;font-size:.85rem;text-transform:uppercase;letter-spacing:.06em}
-.system-logs-groups{display:flex;flex-direction:column;gap:.45rem}
-.system-log-group{text-align:left;width:100%}
+.system-logs-layout{display:grid;grid-template-columns:var(--logs-files-width,280px) 10px minmax(220px,1fr);grid-template-rows:auto minmax(0,1fr);height:100%;min-height:0;overflow:hidden}
+.system-logs-files,.system-logs-reader{min-width:0;min-height:0;padding:.35rem .65rem}
+.system-logs-files h3,.system-logs-reader h3{margin:.2rem 0 .7rem;font-size:.85rem;text-transform:uppercase;letter-spacing:.06em}
+.system-logs-groups{grid-column:1/-1;display:flex;gap:var(--jv-space-xs);overflow-x:auto;padding:0 0 var(--jv-space-sm);border-bottom:1px solid var(--jv-border)}
+.system-logs-groups button{flex:none;white-space:nowrap}
+.system-log-group{text-align:left;width:auto}
 .system-log-group[aria-pressed="true"],.system-log-entry[aria-pressed="true"]{border-color:#4f8b69;background:#25382e;color:#d7f4e2}
 .system-logs-files,.system-logs-reader{display:flex;flex-direction:column}
 .system-logs-list{display:grid;align-content:start;gap:.5rem;min-height:0;overflow-y:auto}
@@ -873,7 +866,7 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
 .system-logs-viewer pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.82rem;line-height:1.5}
 .system-logs-splitter{cursor:col-resize;touch-action:none;border-left:1px solid #39444c;border-right:1px solid #39444c}
 .system-logs-splitter:hover,.system-logs-splitter:focus-visible{background:#4f8b69;outline:none}
-@media(max-width:700px){.system-logs-layout{grid-template-columns:minmax(105px,32%) minmax(0,1fr);grid-template-rows:minmax(150px,40%) minmax(0,1fr)}.system-logs-groups{grid-column:1;grid-row:1/3;overflow-y:auto}.system-logs-files{grid-column:2;grid-row:1}.system-logs-reader{grid-column:2;grid-row:2;border-top:1px solid #39444c}.system-logs-splitter{display:none}}
+@media(max-width:700px){.system-logs-layout{grid-template-columns:minmax(120px,35%) minmax(0,1fr)}.system-logs-files{grid-column:1;grid-row:2}.system-logs-reader{grid-column:2;grid-row:2}.system-logs-splitter{display:none}}
 @media(prefers-color-scheme:light){.migration-workspace-content .migration-destination-helper{background:#edf7f0}}
 
 /* Version keeps its window size while tab content scrolls inside. */
@@ -893,13 +886,13 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
 .version-software-choice small{color:#aeb8c0}.version-status-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.4rem}
 .version-status-grid>div{display:grid;gap:.15rem;padding:.55rem;border:1px solid #303942;border-radius:8px}.version-status-grid span{color:#aeb8c0;font-size:.75rem}
 .version-workspace-body .action-row{justify-content:flex-end;margin-top:.8rem;padding-top:.7rem;border-top:1px solid #303942}.version-workspace-body .admin-form-grid{gap:.55rem}
-.topbar-time{display:flex;align-items:center;justify-self:center;gap:.2rem}.topbar-time .topbar-time-utility{display:grid;place-items:center;width:20px;height:20px;min-height:0;padding:0;border:1px solid transparent;border-radius:5px;background:transparent;color:#9ca7b0;font-size:1rem;line-height:1}.topbar-time-utility:hover,.topbar-time-utility:focus-visible{border-color:#4f8b69;background:#25382e;color:#c8f2d7}.topbar-time-utility:focus-visible{outline:2px solid #78c99d;outline-offset:2px}
-.date-time-dialog{overflow:visible}.date-time-dialog .setup-timezone-field{position:relative;display:block}.date-time-dialog .setup-timezone-results{position:absolute;top:100%;left:0;right:0;z-index:30;max-height:220px;overflow:auto;padding:.3rem;border:1px solid #3b454e;border-radius:9px;background:#171d22}
-.date-time-dialog .setup-timezone-results[hidden]{display:none}.date-time-dialog .setup-timezone-option{display:grid;width:100%;gap:.1rem;padding:.4rem;text-align:left;background:transparent;color:inherit}.date-time-dialog .setup-timezone-option small{color:#aeb8c0}
+.topbar-time{display:flex;align-items:center;justify-self:center}
+.date-time-panel{overflow:visible}.date-time-panel .setup-timezone-field{position:relative;display:block}.date-time-panel .setup-timezone-results{position:absolute;top:100%;left:0;right:0;z-index:30;max-height:220px;overflow:auto;padding:.3rem;border:1px solid #3b454e;border-radius:9px;background:#171d22}
+.date-time-panel .setup-timezone-results[hidden]{display:none}.date-time-panel .setup-timezone-option{display:grid;width:100%;gap:.1rem;padding:.4rem;text-align:left;background:transparent;color:inherit}.date-time-panel .setup-timezone-option small{color:#aeb8c0}
 .date-time-automatic{display:flex;align-items:center;justify-content:space-between;gap:1rem}.date-time-switch{appearance:none;flex:none;width:2.25rem;height:1.3rem;margin:0;padding:0;border:1px solid #59646d;border-radius:999px;background:#59646d;cursor:pointer;transition:background .15s ease,border-color .15s ease}.date-time-switch::before{content:"";display:block;width:.9rem;height:.9rem;margin:.13rem;border-radius:50%;background:#fff;box-shadow:0 1px 3px #0005;transition:transform .15s ease}.date-time-switch:checked{border-color:#4f9e6e;background:#4f9e6e}.date-time-switch:checked::before{transform:translateX(.95rem)}.date-time-switch:focus-visible{outline:2px solid #78c99d;outline-offset:3px}
 .date-time-manual{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}.date-time-manual input:disabled{opacity:.5}
 @media(max-width:700px){.version-workspace-dialog{inset:52px .25rem .25rem .25rem!important;width:auto!important;height:calc(100dvh - 52px - .25rem)!important;min-width:0;min-height:0;max-width:none;max-height:calc(100dvh - 52px - .25rem);resize:none}.version-software-choices{grid-template-columns:1fr}}
-@media(prefers-color-scheme:light){.version-workspace-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025}.version-workspace-tabs,.version-software-choice{background:#f7f9fa;border-color:#d9dfe3}.version-software-choice.is-current{background:#e3f1e8}.date-time-dialog .setup-timezone-results{background:#fff}}
+@media(prefers-color-scheme:light){.version-workspace-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025}.version-workspace-tabs,.version-software-choice{background:#f7f9fa;border-color:#d9dfe3}.version-software-choice.is-current{background:#e3f1e8}.date-time-panel .setup-timezone-results{background:#fff}}
 .migration-workspace-dialog{width:min(1280px,calc(100vw - 2rem));min-width:min(1000px,calc(100vw - 2rem))}
 .migration-workspace-content .migration-smb-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.7rem}
 .migration-workspace-content .migration-smb-fields>div{min-width:0}
@@ -972,7 +965,6 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
 .workspace-window :is(.minecraft-workspace-tabs,.system-workspace-tabs,.migration-workspace-tabs,.version-workspace-tabs) button{min-height:34px;padding:.38rem .7rem;border-radius:8px;font-size:.86rem}
 .workspace-window :is(.system-update-dialog-body,.system-monitor-body,.storage-workspace-body,.backups-workspace-body,.minecraft-workspace-body,.system-workspace-body,.migration-workspace-body,.version-workspace-body){min-width:0;min-height:0;padding:var(--jv-workspace-edge);overscroll-behavior:contain}
 .workspace-window :is(.system-update-state,.system-monitor-state,.storage-workspace-state,.backups-workspace-state,.minecraft-workspace-state,.system-workspace-state,.migration-workspace-state,[data-version-state]){color:var(--jv-muted);font-size:.82rem;line-height:1.4}
-.workspace-window .workspace-resize-grip{color:var(--jv-muted)}
 
 /* Workspace -> section -> content -> action hierarchy. */
 :where(.workspace-window) :is(.panel,.details,.control-panel,.players-panel){border-color:var(--jv-border);border-radius:var(--jv-radius)}
@@ -1025,18 +1017,18 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
 .system-workspace-body{padding:.6rem .75rem}
 .system-workspace-content{min-width:0}
 .system-workspace-content .panel{min-width:0;margin:.35rem 0;padding:.65rem .75rem}
-.system-workspace-content .panel>.section-heading{margin-bottom:.35rem}
-.system-workspace-content .panel>.section-heading .eyebrow{margin:0;font-size:.7rem}
-.system-workspace-content .panel>.section-heading h2{margin:0;font-size:.98rem}
+.system-workspace-content .panel>.section-heading,.minecraft-overview-logs>.section-heading{margin-bottom:.35rem}
+.system-workspace-content .panel>.section-heading .eyebrow,.minecraft-overview-logs>.section-heading .eyebrow{margin:0;font-size:.7rem}
+.system-workspace-content .panel>.section-heading h2,.minecraft-overview-logs>.section-heading h2{margin:0;font-size:.98rem}
 .system-workspace-content .panel>.section-heading>div:first-child{display:flex;align-items:baseline;gap:.4rem;flex-wrap:wrap}
 .system-health-view{gap:.45rem}
-.system-health-view>.panel{margin:0;padding:.55rem .7rem}
-.system-health-view>.panel .log-box{margin:.35rem 0 0;padding:.65rem;overflow:auto}
-.system-history-view{display:grid;grid-template-columns:minmax(270px,.8fr) minmax(0,1.7fr);grid-template-rows:minmax(0,1fr);gap:.55rem;height:100%;min-height:0}
+.system-health-view>.panel,.minecraft-overview-compact .minecraft-overview-logs{margin:0;padding:.55rem .7rem}
+.system-health-view>.panel .log-box,.minecraft-overview-logs .log-box{margin:.35rem 0 0;padding:.65rem;overflow:auto}
+.system-history-view{display:grid;grid-template-columns:var(--history-notifications-width,300px) 10px minmax(260px,1fr);grid-template-rows:minmax(0,1fr);gap:0;height:100%;min-height:0}
 .system-history-view:has(>.notice){grid-template-rows:auto minmax(0,1fr)}
 .system-history-view>.notice{grid-column:1/-1;margin:0}
 .system-history-view>.panel{display:flex;flex-direction:column;min-height:0;max-height:100%;margin:0;overflow:auto}
-.system-history-view>.panel:only-child{grid-column:1/-1}
+.system-history-view>.panel:only-child,.system-history-view:not(:has(>.system-logs-splitter))>.panel{grid-column:1/-1}
 .system-history-view .event-list{min-height:0;overflow:auto;align-content:start;gap:0}
 .system-history-view .event-row{gap:.6rem;padding:.4rem 0}
 .system-history-view .event-row>div{min-width:0;gap:.1rem;overflow-wrap:anywhere}
@@ -1064,7 +1056,7 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
 .system-users-view .user-details{margin-top:.4rem;padding-top:.4rem}
 .system-security-view{gap:.5rem}
 .system-security-pane{max-width:900px}
-.system-security-form{grid-template-columns:repeat(2,minmax(0,1fr));align-items:end;gap:.45rem .75rem}
+.system-security-form{grid-template-columns:minmax(0,1fr);align-items:start;gap:var(--jv-space-sm);max-width:600px}
 .system-security-form button[type="submit"]{grid-column:1/-1}
 .system-security-status{margin:.25rem 0 .45rem}
 .system-reset-view{gap:.5rem}
@@ -1151,7 +1143,7 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
 .minecraft-overview-card strong{font-size:1rem}
 .minecraft-overview-playerline{min-height:0;padding:.45rem .65rem;border-color:var(--jv-border);background:var(--jv-surface-sunken)}
 .minecraft-overview-logs{padding:var(--jv-space-md)}
-.minecraft-overview-logs .log-box{max-height:clamp(180px,35vh,310px);margin-top:var(--jv-space-sm)}
+.minecraft-overview-logs .log-box{flex:1;min-height:120px;max-height:none;overflow:auto}
 .minecraft-native-form{gap:var(--jv-space-sm)}
 .minecraft-native-grid{gap:0 var(--jv-space-md)}
 .minecraft-native-grid>label{min-width:0}
@@ -1292,46 +1284,46 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
 .project-wallpaper-button{display:none;padding:0;border:0;border-radius:0;background:transparent;font:inherit}
 #dashboard[data-configured="true"] .project-wallpaper-button{display:inline}
 /* Wallpaper controls fit in the dialog without an internal scroll area. */
-.wallpaper-dialog{width:min(560px,calc(100% - 1rem));max-height:none;overflow:visible}
-.wallpaper-dialog .system-action-dialog-content{padding:1rem;display:grid;gap:.65rem}
-.wallpaper-dialog h2{margin:0;font-size:1.3rem}
-.wallpaper-dialog p{margin:0;font-size:.8rem;line-height:1.35}
-.wallpaper-dialog fieldset{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.45rem;border:0;padding:0;margin:0;min-width:0}
-.wallpaper-dialog legend{padding:0;margin-bottom:.3rem;font-size:.82rem}
-.wallpaper-dialog label{color:inherit;display:flex;align-items:center;gap:.35rem;margin:0;padding:.45rem;border:1px solid #59646d;border-radius:8px;font-size:.82rem;min-width:0;cursor:pointer}
-.wallpaper-dialog label:has(input[type=radio]:checked){border-color:#68bd8e;box-shadow:inset 0 0 0 1px #68bd8e}
-.wallpaper-dialog label:has(input:focus-visible){outline:2px solid #78c99d;outline-offset:2px}
-.wallpaper-dialog input[type=radio]{width:auto;margin:0;flex:none}
-.wallpaper-dialog .wallpaper-theme-card{display:grid;gap:.3rem;padding:.4rem}
+.wallpaper-panel{width:100%;max-width:760px;margin:0 auto;overflow:visible}
+.wallpaper-panel .system-action-dialog-content{padding:1rem;display:grid;gap:.65rem}
+.wallpaper-panel h2{margin:0;font-size:1.3rem}
+.wallpaper-panel p{margin:0;font-size:.8rem;line-height:1.35}
+.wallpaper-panel fieldset{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.45rem;border:0;padding:0;margin:0;min-width:0}
+.wallpaper-panel legend{padding:0;margin-bottom:.3rem;font-size:.82rem}
+.wallpaper-panel label{color:inherit;display:flex;align-items:center;gap:.35rem;margin:0;padding:.45rem;border:1px solid #59646d;border-radius:8px;font-size:.82rem;min-width:0;cursor:pointer}
+.wallpaper-panel label:has(input[type=radio]:checked){border-color:#68bd8e;box-shadow:inset 0 0 0 1px #68bd8e}
+.wallpaper-panel label:has(input:focus-visible){outline:2px solid #78c99d;outline-offset:2px}
+.wallpaper-panel input[type=radio]{width:auto;margin:0;flex:none}
+.wallpaper-panel .wallpaper-theme-card{display:grid;gap:.3rem;padding:.4rem}
 .wallpaper-theme-heading{display:flex;align-items:center;gap:.35rem;font-weight:700}
 .wallpaper-split-preview{display:grid;grid-template-columns:1fr 1fr;gap:2px}
 .wallpaper-split-preview>span{position:relative;min-width:0}
 .wallpaper-split-preview img{display:block;width:100%;height:84px;object-fit:cover;border-radius:4px}
 .wallpaper-split-preview>span>span{position:absolute;bottom:3px;left:3px;background:#07100bcc;color:#fff;padding:.1rem .25rem;border-radius:3px;font-size:.65rem}
-.wallpaper-dialog .wallpaper-appearance{grid-template-columns:repeat(3,minmax(0,1fr))}
+.wallpaper-panel .wallpaper-appearance{grid-template-columns:repeat(3,minmax(0,1fr))}
 .wallpaper-schedule{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.45rem}
-.wallpaper-dialog .wallpaper-schedule label{display:grid;border:0;padding:0;gap:.2rem;cursor:default}
-.wallpaper-dialog input:not([type=radio]){min-width:0;padding:.45rem;margin:0;font-size:.82rem}
-.wallpaper-dialog .wallpaper-input-row{border:0;padding:0;cursor:default}
+.wallpaper-panel .wallpaper-schedule label{display:grid;border:0;padding:0;gap:.2rem;cursor:default}
+.wallpaper-panel input:not([type=radio]){min-width:0;padding:.45rem;margin:0;font-size:.82rem}
+.wallpaper-panel .wallpaper-input-row{border:0;padding:0;cursor:default}
 .wallpaper-input-row input{flex:1;width:0}
-.wallpaper-dialog [data-wallpaper-upload-fields] p,.wallpaper-dialog [data-wallpaper-url-fields] p{margin-top:.3rem}
-.wallpaper-dialog [data-wallpaper-error]{padding:.4rem .5rem;overflow-wrap:anywhere}
-.wallpaper-dialog .action-row{display:flex;flex-wrap:nowrap;gap:.4rem;margin:0}
-.wallpaper-dialog button{padding:.5rem .65rem;font-size:.82rem;white-space:nowrap}
-.wallpaper-dialog [data-wallpaper-reset]{margin-right:auto}
-.wallpaper-dialog [hidden]{display:none!important}
+.wallpaper-panel [data-wallpaper-upload-fields] p,.wallpaper-panel [data-wallpaper-url-fields] p{margin-top:.3rem}
+.wallpaper-panel [data-wallpaper-error]{padding:.4rem .5rem;overflow-wrap:anywhere}
+.wallpaper-panel .action-row{display:flex;flex-wrap:nowrap;gap:.4rem;margin:0}
+.wallpaper-panel button{padding:.5rem .65rem;font-size:.82rem;white-space:nowrap}
+.wallpaper-panel [data-wallpaper-reset]{margin-right:auto}
+.wallpaper-panel [hidden]{display:none!important}
 .dashboard-wallpaper.wallpaper-theme-v1{object-position:50% center}
 .dashboard-wallpaper.wallpaper-theme-v2{object-position:65% center}
 @media(max-width:600px),(max-height:720px){
-  .wallpaper-dialog .system-action-dialog-content{padding:.75rem;gap:.5rem}
+  .wallpaper-panel .system-action-dialog-content{padding:.75rem;gap:.5rem}
   .wallpaper-split-preview img{height:60px}
-  .wallpaper-dialog label{padding:.4rem}
+  .wallpaper-panel label{padding:.4rem}
 }
 @media(max-width:390px){
-  .wallpaper-dialog .system-action-dialog-content{padding:.65rem;gap:.45rem}
+  .wallpaper-panel .system-action-dialog-content{padding:.65rem;gap:.45rem}
   .wallpaper-split-preview img{height:50px}
-  .wallpaper-dialog button{padding:.5rem;font-size:.78rem}
-  .wallpaper-dialog .wallpaper-appearance label{gap:.2rem;padding:.35rem;font-size:.78rem}
+  .wallpaper-panel button{padding:.5rem;font-size:.78rem}
+  .wallpaper-panel .wallpaper-appearance label{gap:.2rem;padding:.35rem;font-size:.78rem}
 }
 @media(max-width:600px){.dashboard-wallpaper.wallpaper-theme-v2{object-position:78% center}}
 
@@ -1352,3 +1344,87 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
 .instance-id-form label{display:flex;align-items:center;gap:.35rem;margin:0}
 .instance-id-form input{width:14ch;margin:0}
 .instance-id-form button{margin:0}
+
+@media(max-width:700px){.system-monitor-dialog{min-width:0}}
+
+/* Consistent actions and shared server-software cards. */
+.action-row,.form-actions{justify-content:flex-end}
+.admin-form-grid>.form-actions{grid-column:1/-1}
+input[type=checkbox]:disabled{cursor:not-allowed;opacity:.5}
+input[type=checkbox].destructive-confirm-toggle:focus-visible{outline:2px solid var(--jv-accent);outline-offset:2px}
+input[type=checkbox].destructive-confirm-toggle::before{content:none}
+.version-software-choice,.setup-server-type{min-width:0;align-content:start;text-align:left;gap:var(--jv-space-xs);padding:var(--jv-space-md);border:1px solid var(--jv-border-strong);border-radius:var(--jv-radius);background:var(--jv-surface-sunken);color:var(--jv-text)}
+.version-software-choice strong,.setup-server-type strong{font-size:.94rem}
+.version-software-choice span{color:var(--jv-muted);font-size:.75rem;font-weight:400}
+.version-software-choice small,.setup-server-type small{color:var(--jv-muted);font-size:.78rem;font-weight:400;line-height:1.35}
+.version-software-choice.is-current,.setup-server-type:has(input:checked){border-color:var(--jv-success);background:color-mix(in srgb,var(--jv-success) 18%,var(--jv-surface-sunken))}
+.version-workspace-body form:has(>.version-selection-row){grid-template-columns:minmax(0,1fr)}
+.version-selection-row{display:flex;align-items:center;gap:var(--jv-space-md);min-width:0;margin-top:var(--jv-space-sm)}
+.version-selection-row>select,.version-selection-row>label{flex:1;min-width:0;margin:0}
+.version-selection-row select{margin:0;width:100%}
+.version-selection-row>button{flex:none;margin-left:auto}
+.diagnostics-heading{display:flex;align-items:baseline;gap:var(--jv-space-sm);min-width:0}
+.diagnostics-heading .eyebrow,.minecraft-overview-logs .diagnostics-heading h2{margin:0}
+.minecraft-workspace-body:has(.minecraft-overview-logs){display:flex;flex-direction:column;overflow:hidden}
+.minecraft-workspace-content:has(.minecraft-overview-logs){display:flex;flex:1;min-height:0}
+.minecraft-overview-compact:has(.minecraft-overview-logs){display:flex;flex:1;min-width:0;min-height:0;flex-direction:column}
+.minecraft-overview-compact:has(.minecraft-overview-logs)>:not(.minecraft-overview-logs){flex:none}
+.minecraft-overview-compact .minecraft-overview-logs{display:flex;flex:1;min-height:0;flex-direction:column;margin:0;overflow:hidden}
+.system-user-menu .storage-action-menu-popover{position:fixed;inset:auto;margin:0;width:max-content;max-width:calc(100vw - 1rem);max-height:calc(100dvh - 1rem);overflow:auto;color:var(--jv-text)}
+.system-user-menu .storage-action-menu-popover:not(:popover-open){display:none}
+.system-user-dialog{max-height:calc(100dvh - 2rem);overflow:auto}
+.system-user-dialog form>label{margin:var(--jv-space-sm) 0}
+@media(max-width:700px){
+  .system-history-view>.system-logs-splitter{display:none}
+  .system-monitor-profile-actions{justify-content:flex-end}
+  .minecraft-workspace-body:has(.minecraft-overview-logs){overflow:auto}
+  .minecraft-overview-compact .minecraft-overview-logs{min-height:220px}
+}
+@media(max-width:430px){.version-selection-row{flex-wrap:wrap}.version-selection-row>label,.version-selection-row>select{flex-basis:100%}}
+
+/* Floating panel: the outer footprint stays 48px; workspaces measure its bottom. */
+.app-header.topbar{height:40px;min-height:40px;margin:4px 8px;padding:2px .5rem;top:4px;border:1px solid #303942;border-radius:12px;background:#151a1ff7;color:#dce7e0;box-shadow:0 4px 16px #0005;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}
+.app-header .brand-mark{min-height:32px;padding:1px .35rem}
+.app-header .brand-logo{width:28px;height:28px}
+.app-header .control-center-trigger{min-height:32px;height:32px;padding:.3rem .6rem;border-color:transparent}
+.app-header .control-center-trigger:hover,.app-header .control-center-trigger:focus-visible,.app-header .control-center[open]>.control-center-trigger{border-color:#4f8b69}
+.topbar-time{min-width:0}
+.topbar-clock{white-space:nowrap;padding:.2rem .4rem;font-size:.82rem}
+.system-monitor-profile{grid-template-columns:minmax(0,1fr) max-content auto}
+.system-monitor-profile .system-monitor-process-count{display:flex;align-items:center;gap:.6rem;max-width:none;white-space:nowrap}
+.system-monitor-profile .system-monitor-process-count select{width:4.5rem;margin:0;flex:none}
+.system-monitor-profile-actions{align-items:center}
+.date-time-panel{max-width:760px;width:100%;margin:0 auto}
+.date-time-panel .system-action-dialog-content{padding:.75rem;display:grid;gap:.6rem}
+.date-time-panel .action-row{margin:0}
+@media(max-width:900px){.system-monitor-profile{grid-template-columns:minmax(0,1fr) max-content}}
+@media(max-width:600px){
+  .app-header.topbar{margin:4px;gap:.2rem;padding:2px .3rem}
+  .app-header .control-center-trigger{width:32px;padding:0}
+  .topbar-clock{display:grid;gap:0;font-size:.72rem;line-height:1.15}
+  .topbar-clock-separator{display:none}
+  .topbar-clock-date{font-size:.65rem}
+  .control-center-panel{top:52px}
+  .system-monitor-profile{grid-template-columns:minmax(0,1fr)}
+}
+
+.app-header .topbar-clock{color:#dce7e0}
+.system-monitor-profile-status{flex-basis:100%;text-align:right;max-width:240px;overflow-wrap:anywhere}
+.system-monitor-profile-actions{max-width:260px}
+.system-monitor-profile-grid input[type=checkbox]{width:42px;min-width:42px;height:24px;border-radius:999px}
+
+.system-workspace-content>.panel:is(.date-time-panel,.wallpaper-panel){margin:0 auto}
+.system-monitor-profile-status:empty{display:none}
+
+/* One visual foundation for setup radios and Version's software actions. */
+.server-software-card{position:relative;display:grid;grid-template-columns:48px minmax(0,1fr);align-items:center;align-content:center;gap:.7rem;min-width:0;min-height:104px;padding:.65rem .75rem;border:1px solid var(--jv-border-strong);border-radius:var(--jv-radius);background:var(--jv-surface-sunken);color:var(--jv-text);text-align:left}
+.server-software-card .server-software-icon{display:grid;place-items:center;width:48px;height:48px;min-width:48px;background:transparent}
+.server-software-icon img{display:block;width:100%;height:100%;object-fit:contain;aspect-ratio:1;filter:none}
+.server-software-card .server-software-copy{display:grid;gap:.2rem;min-width:0;color:var(--jv-text);font-size:.85rem;text-align:left}
+.server-software-card .server-software-copy strong{font-size:.94rem;color:var(--jv-text)}
+.server-software-card .server-software-copy small{font-size:.78rem;color:var(--jv-muted);font-weight:400;line-height:1.35}
+.server-software-card .server-software-copy>span{font-size:.75rem;color:var(--jv-muted)}
+button.server-software-card:hover,label.server-software-card:hover{border-color:var(--jv-accent);border-radius:var(--jv-radius);background:color-mix(in srgb,var(--jv-accent) 8%,var(--jv-surface-sunken))}
+.server-software-card:focus-visible,.server-software-card:has(input:focus-visible){outline:2px solid var(--jv-accent);outline-offset:2px;border-radius:var(--jv-radius)}
+.server-software-card.is-current,.server-software-card:has(input:checked){border-color:var(--jv-success);border-radius:var(--jv-radius);background:color-mix(in srgb,var(--jv-success) 18%,var(--jv-surface-sunken))}
+label.server-software-card>input[type=radio]{position:absolute;width:1px;min-width:0;height:1px;min-height:0;margin:0;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}

@@ -126,3 +126,11 @@
 }
 
 .network-provider-card button.warning{background:var(--jv-warning);color:var(--jv-surface-sunken)}
+
+/* Status belongs below navigation, without the tab margin covering its text. */
+.network-workspace-body{overflow:auto}
+.network-workspace-view>.network-workspace-state{margin:0;padding:.4rem .6rem;border:1px solid var(--jv-border);border-radius:var(--jv-radius);background:var(--jv-surface-sunken)}
+.network-workspace-view>.network-workspace-state:empty{display:none}
+.network-troubleshoot-devices{display:grid;grid-template-columns:minmax(0,1fr);gap:.55rem;margin-top:.55rem}
+.network-troubleshoot .network-device-card>.state-text{margin:.5rem 0 0;font-size:.8rem;line-height:1.4;color:var(--jv-muted)}
+@media(max-width:700px){.network-workspace-dialog{top:var(--jv-workspace-top-inset)!important}}

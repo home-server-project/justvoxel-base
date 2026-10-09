@@ -63,7 +63,7 @@
       <div class="notice success" id="restore-operation-success" {{if ne .RestoreOperation.State "succeeded"}}hidden{{end}}><strong>Minecraft Restore completed successfully.</strong><br>The restored runtime passed validation.</div>
       <div class="notice warning" id="restore-operation-rollback" {{if ne .RestoreOperation.State "rolled_back"}}hidden{{end}}><strong>Restore was rolled back safely.</strong><br>The restored runtime did not pass validation and the previous Minecraft data was restored.</div>
       <div class="notice error" id="restore-operation-attention" {{if ne .RestoreOperation.State "needs_attention"}}hidden{{end}}><strong>Restore needs administrator attention.</strong><br>Do not start another Restore until the preserved recovery state is reviewed.</div>
-      <div class="action-row"><a class="button-link" id="restore-dashboard-link" href="/" {{if ne .RestoreOperation.State "succeeded"}}hidden{{end}}>Open dashboard</a><a class="button-link secondary" href="#backup-library">Backup library</a></div>
+      <div class="action-row"><a class="button-link secondary" href="#backup-library">Backup library</a><a class="button-link" id="restore-dashboard-link" href="/" {{if ne .RestoreOperation.State "succeeded"}}hidden{{end}}>Open dashboard</a></div>
     </div>
   </section>
   {{end}}
@@ -167,7 +167,7 @@
         {{if .Automatic.Enabled}}<input type="hidden" name="automatic_enabled" value="on">{{end}}
         <input type="hidden" name="daily_time" value="{{.Automatic.DailyTime}}">
         <input type="hidden" name="backup_keep" value="{{.Automatic.Keep}}">
-        <div class="action-row"><button type="submit">Apply settings</button><a class="button-link secondary" href="/workspace/backups">Cancel</a></div>
+        <div class="action-row"><a class="button-link secondary" href="/workspace/backups">Cancel</a><button type="submit">Apply settings</button></div>
       </form>
       {{else}}
       <p class="muted compact">No automatic backup changes were detected.</p>
@@ -291,7 +291,7 @@
             <span class="muted compact">Requested only now for the reviewed SMB destination.</span>
           </label>
           {{end}}
-          <div class="action-row"><button type="submit">Apply destination</button><a class="button-link secondary" href="/workspace/backups">Cancel</a></div>
+          <div class="action-row"><a class="button-link secondary" href="/workspace/backups">Cancel</a><button type="submit">Apply destination</button></div>
         </form>
         {{else}}<p class="muted compact">This destination already matches the current backup configuration.</p>{{end}}
       </div>

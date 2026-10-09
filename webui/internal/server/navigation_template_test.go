@@ -254,14 +254,14 @@ func TestWorkspaceCleanupLayoutContract(t *testing.T) {
 	if headerClose < 0 || quickLook < 0 || systemMonitor < 0 || headerClose > quickLook || headerClose > systemMonitor {
 		t.Fatal("topbar must close before Quick Look and workspace windows")
 	}
-	if !strings.Contains(markup, `data-workspace-resize-handle`) {
-		t.Fatal("System Monitor is missing the visible resize grip")
+	if strings.Contains(markup, `data-workspace-resize-handle`) {
+		t.Fatal("workspaces must use native corner resizing")
 	}
 	styles, err := assets.ReadFile("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{".quick-look{position:fixed", ".workspace-resize-grip", ".system-security-switcher", ".system-health-view", ".password-field-shell", ".password-reveal-button", ".destructive-confirm-slider", "min-width:min(620px"} {
+	for _, want := range []string{".quick-look{position:fixed", ".system-security-switcher", ".system-health-view", ".password-field-shell", ".password-reveal-button", ".destructive-confirm-slider", "min-width:min(620px"} {
 		if !strings.Contains(string(styles), want) {
 			t.Fatalf("workspace cleanup CSS missing %q", want)
 		}
@@ -549,25 +549,33 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 	}
 	styles := string(css)
 	for _, want := range []string{
-		".dashboard-wallpaper{",
+		".dashboard-wallpaper{position:fixed;inset:0;width:100%;height:100dvh;object-fit:cover;object-position:center",
+		"#dashboard::before{content:\"\";position:fixed;inset:0;",
+		// The 40px floating panel plus its vertical margins still occupies 48px.
 		"min-height:calc(100dvh - 48px)",
-		"inset:48px 0 0",
 		".app-header.topbar{",
 		".dashboard-setup-area{display:grid;place-items:center",
 		"#dashboard .dashboard-setup-area .minecraft-setup-invitation{width:min(560px",
 		"@media(max-width:900px)",
+		"@media(max-width:600px){\n  .app-header.topbar{margin:4px;gap:.2rem;padding:2px .3rem}",
+		"@media(max-width:600px){.dashboard-wallpaper.wallpaper-theme-v2{object-position:78% center}}",
+		"inset:52px .25rem .25rem .25rem!important",
 	} {
 		if !strings.Contains(styles, want) {
 			t.Fatalf("compact dashboard styling missing %q", want)
 		}
 	}
-	headerStart := strings.Index(styles, ".app-header.topbar{")
+	// Inspect the final height rule, which overrides the original full-width panel.
+	headerStart := strings.LastIndex(styles, ".app-header.topbar{height:")
+	if headerStart < 0 {
+		t.Fatal("authenticated header height rule is missing")
+	}
 	headerEnd := strings.Index(styles[headerStart:], "}")
 	if headerEnd < 0 {
 		t.Fatal("authenticated header rule is incomplete")
 	}
 	header := styles[headerStart+len(".app-header.topbar{") : headerStart+headerEnd]
-	for _, want := range []string{"height:48px", "min-height:48px"} {
+	for _, want := range []string{"height:40px", "min-height:40px", "margin:4px 8px", "top:4px", "border-radius:12px"} {
 		if !strings.Contains(";"+header+";", ";"+want+";") {
 			t.Fatalf("authenticated header must retain %s", want)
 		}
@@ -589,6 +597,11 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 	appJS, err := assets.ReadFile("static/app.js")
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, want := range []string{"const workspaceTopInset = () => {", "Math.round((topbar?.getBoundingClientRect().bottom || 0) + 8)", "const minTop = workspaceTopInset();"} {
+		if !strings.Contains(string(appJS), want) {
+			t.Fatalf("workspace clearance below the floating panel missing %q", want)
+		}
 	}
 	for _, removed := range []string{"spotlightActive", "hideSpotlight", "--voxel-x", "--voxel-y", `dashboard.addEventListener("pointermove"`} {
 		if strings.Contains(string(appJS), removed) {
@@ -645,10 +658,10 @@ func TestWallpaperSettingsUX(t *testing.T) {
 	}
 	styles := string(content)
 	for _, want := range []string{
-		".wallpaper-dialog{width:min(560px,calc(100% - 1rem));max-height:none;overflow:visible}",
-		".wallpaper-dialog .wallpaper-theme-card{display:grid",
+		".wallpaper-panel{width:100%;max-width:760px;margin:0 auto;overflow:visible}",
+		".wallpaper-panel .wallpaper-theme-card{display:grid",
 		".wallpaper-split-preview{display:grid;grid-template-columns:1fr 1fr",
-		".wallpaper-dialog .wallpaper-appearance{grid-template-columns:repeat(3,minmax(0,1fr))}",
+		".wallpaper-panel .wallpaper-appearance{grid-template-columns:repeat(3,minmax(0,1fr))}",
 		".wallpaper-schedule{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))",
 		".dashboard-wallpaper.wallpaper-theme-v1{object-position:",
 		".dashboard-wallpaper.wallpaper-theme-v2{object-position:",
@@ -657,7 +670,7 @@ func TestWallpaperSettingsUX(t *testing.T) {
 			t.Fatalf("wallpaper settings styling missing %q", want)
 		}
 	}
-	if strings.Contains(styles, ".wallpaper-dialog{max-height:calc(100dvh - 2rem);overflow:auto}") {
+	if strings.Contains(styles, ".wallpaper-panel{max-height:calc(100dvh - 2rem);overflow:auto}") {
 		t.Fatal("wallpaper dialog must not retain the old internal scrolling layout")
 	}
 
@@ -672,7 +685,7 @@ func TestWallpaperSettingsUX(t *testing.T) {
 		"const reset = async () => {\n    preference = defaultPreference();",
 		`savePreference(preference)`,
 		`await storedImage("delete")`,
-		`try { await reset(); dialog.close(); }`,
+		`try { await reset(); }`,
 		`input.checked = input.value === preference.mode`,
 		`form.querySelector('button[type="submit"]').disabled = busy;`,
 		`hidden = mode !== "url"`,
@@ -1101,12 +1114,12 @@ func TestCompactUsersAndFiveRowMonitorContract(t *testing.T) {
 	start := strings.Index(js, "  const renderUsers =")
 	end := strings.Index(js[start:], "  const renderSecurity =")
 	users := js[start : start+end]
-	for _, want := range []string{"system-users-table", "Username", "Role", "Status", "Restart", "Backup", "Actions", `manage.className = "secondary"`, `manage.textContent = "Manage"`, "managementRow.hidden = true", "openManagement.row.hidden = true", `managementCell.colSpan = 6`, "user.restart_used ?? 0", "user.backup_used ?? 0", "Primary administrator", "minimum_password_len", "/restart-allowance/reset", "/backup-allowance/reset", `+ "/role"`, `+ "/enabled"`, `+ "/password"`, `+ "/delete"`, `deleteButton.className = "danger"`} {
+	for _, want := range []string{"system-users-table", "Username", "Role", "Status", "Restart", "Backup", "Actions", "storage-action-menu system-user-menu", "dialog.showModal()", "heading.textContent = title +", "user.restart_used ?? 0", "user.backup_used ?? 0", "Primary administrator", "minimum_password_len", "restart-allowance/reset", "backup-allowance/reset", `"role", "Save role"`, `"enabled", user.enabled`, `"password", "Change password"`, `"delete", "Delete account", true`, "data-destructive-slider", "data-destructive-toggle", "submit.className = \"danger\""} {
 		if !strings.Contains(users, want) {
 			t.Fatalf("compact Users contract missing %q", want)
 		}
 	}
-	for _, removed := range []string{`card.className = "user-card"`, `quota.className = "quota-grid"`} {
+	for _, removed := range []string{`card.className = "user-card"`, `quota.className = "quota-grid"`, "managementRow", "openManagement"} {
 		if strings.Contains(users, removed) {
 			t.Fatalf("Users retains expanded card presentation %q", removed)
 		}

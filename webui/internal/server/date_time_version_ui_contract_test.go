@@ -17,7 +17,7 @@ func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 	}
 	header := read("templates/header.html")
 	for _, want := range []string{
-		`data-date-time-open`, `data-date-time-dialog`, `data-timezone-search`, `data-date-time-automatic`,
+		`data-system-tab="date-time"`, `data-date-time-panel`, `data-timezone-search`, `data-date-time-automatic`,
 		`data-date-time-manual`, `data-version-open`, `data-version-workspace-dialog`,
 		`data-version-tab="software"`, `data-version-tab="minecraft"`, `Minecraft Settings`,
 	} {
@@ -47,7 +47,7 @@ func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 	}
 	for _, want := range []string{
 		`recommended: "Recommended", latest: "Latest", pinned: "Specific version"`,
-		`card("Version")`,
+		`card("Version configuration")`,
 		`<select name="policy" aria-label="Version">`,
 		`await settleSelectChange()`,
 		`setTimeout(resolve, 0)`,
@@ -113,5 +113,53 @@ func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 	}
 	if strings.Contains(app, `Geyser/Floodgate compatible with ${status.available}.`) {
 		t.Fatal("Cross-play compatibility must not use the newest available Minecraft version")
+	}
+}
+
+func TestSecondRoundWorkspacePresentationContracts(t *testing.T) {
+	read := func(name string) string {
+		data, err := assets.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	header := read("templates/header.html")
+	last := -1
+	for _, tab := range []string{"health", "history", "users", "security", "logs", "date-time", "wallpaper", "reset", "about"} {
+		position := strings.Index(header, `data-system-tab="`+tab+`"`)
+		if position <= last {
+			t.Fatalf("System tab missing or out of order: %s", tab)
+		}
+		last = position
+	}
+	if strings.Contains(header, "data-date-time-open") || strings.Contains(header, "data-date-time-dialog") {
+		t.Fatal("Date & Time must be embedded in System")
+	}
+	footer := read("templates/project_footer.html")
+	if strings.Contains(footer, "data-wallpaper-dialog") || !strings.Contains(footer, `data-system-settings-panel="wallpaper"`) {
+		t.Fatal("Wallpaper must be embedded in System")
+	}
+	app := read("static/app.js")
+	for _, want := range []string{"parkSettingsPanels()", "content.appendChild(panel)", `hour12: true`, "topbarClock.dataset.systemTimezone", "workspaceTopInset", "getBoundingClientRect().bottom"} {
+		if !strings.Contains(app, want) {
+			t.Fatalf("Workspace presentation missing %q", want)
+		}
+	}
+	wallpaper := read("static/wallpaper.js")
+	if strings.Contains(wallpaper, "showModal") || !strings.Contains(wallpaper, `window.JustVoxelSystem?.openTab("wallpaper")`) {
+		t.Fatal("Footer must open the System Wallpaper tab")
+	}
+	network := read("static/network-workspace.js")
+	for _, want := range []string{"root.append(tablist, state)", "network-troubleshoot-devices", "Activating service…", "openActivatedDashboards()", "if (!provider.service_active)", "popup.opener = null"} {
+		if !strings.Contains(network, want) {
+			t.Fatalf("Network presentation missing %q", want)
+		}
+	}
+	storage := read("static/storage-browser.js")
+	for _, want := range []string{"workspace.dataset.storageSelectedDisk = name", "button.dataset.storageDisk === rememberedDisk", "|| diskButtons[0]", "selectDisk(initialDisk.dataset.storageDisk)"} {
+		if !strings.Contains(storage, want) {
+			t.Fatalf("Drive restoration missing %q", want)
+		}
 	}
 }

@@ -23,7 +23,7 @@
   <input type="hidden" name="transaction" value="{{.Request.Transaction}}">
   <input type="hidden" name="plan_fingerprint" value="{{.Plan.PlanFingerprint}}">
   <input type="hidden" name="cleanup_confirmed" value="" data-recovery-confirmed>
-  <div class="action-row"><button type="button" data-recovery-open-confirmation>Clean Up Recovery Files</button><a class="button-link secondary" href="/?workspace=migration&amp;tab=recovery">Cancel</a></div>
+  <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;tab=recovery">Cancel</a><button type="button" data-recovery-open-confirmation>Clean Up Recovery Files</button></div>
   <dialog class="system-action-dialog" aria-labelledby="recovery-cleanup-title" data-recovery-confirmation-dialog>
     <div class="system-action-dialog-content">
       <h2 id="recovery-cleanup-title">Clean up recovery files?</h2>
