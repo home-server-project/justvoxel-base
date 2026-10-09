@@ -225,6 +225,7 @@ func TestAdminMinecraftResetApplySameFingerprintReconnectsWithoutPlanning(t *tes
 }
 
 func TestExecuteMinecraftResetCompletesPersistentOperation(t *testing.T) {
+	useTestMinecraftInstances(t)
 	oldHelper := runAdminMinecraftResetHelper
 	defer func() { runAdminMinecraftResetHelper = oldHelper }()
 	runAdminMinecraftResetHelper = func(_ context.Context, args ...string) ([]byte, error) {

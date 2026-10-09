@@ -1,10 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -38,6 +39,7 @@ func setupApplyBody(t *testing.T, fingerprint string) string {
 }
 
 func TestAdminSetupApplyRequiresAdministratorBeforePreflight(t *testing.T) {
+	useTestMinecraftInstances(t)
 	oldPlan := runAdminSetupPlanHelper
 	oldDiscovery := runAdminDiscoveryHelper
 	defer func() {
@@ -69,6 +71,7 @@ func TestAdminSetupApplyRequiresAdministratorBeforePreflight(t *testing.T) {
 }
 
 func TestLocalRootCanApplyFirstRunSetupWithoutBearerSession(t *testing.T) {
+	useTestMinecraftInstances(t)
 	oldWorker := startSetupWorker
 	startSetupWorker = func(_ *server, _ string, _ adminSetupNormalizedPlan, secret []byte) { zeroBytes(secret) }
 	defer func() { startSetupWorker = oldWorker }()
@@ -108,10 +111,14 @@ func TestLocalRootCanApplyFirstRunSetupWithoutBearerSession(t *testing.T) {
 }
 
 func TestAdminSetupApplyExactReviewedPlanCreatesQueuedOperation(t *testing.T) {
+	useTestMinecraftInstances(t)
 	oldWorker := startSetupWorker
 	workerCalls := 0
 	startSetupWorker = func(_ *server, _ string, _ adminSetupNormalizedPlan, secret []byte) {
 		workerCalls++
+		if identity, err := minecraftInstances.read(); err != nil || identity.Status != "available" {
+			t.Fatal("setup worker started without persisted destination identity")
+		}
 		zeroBytes(secret)
 	}
 	defer func() { startSetupWorker = oldWorker }()
@@ -171,6 +178,7 @@ func TestAdminSetupApplyExactReviewedPlanCreatesQueuedOperation(t *testing.T) {
 }
 
 func TestAdminSetupApplyRequiresExplicitEULAAcceptance(t *testing.T) {
+	useTestMinecraftInstances(t)
 	s := surfaceTestServer(t, roleAdministrator)
 	attachTestOperationStore(t, s, openTestOperationStore(t))
 	var request adminSetupPlanRequest
@@ -189,6 +197,7 @@ func TestAdminSetupApplyRequiresExplicitEULAAcceptance(t *testing.T) {
 }
 
 func TestAdminSetupApplyRejectsStaleReviewedFingerprintWithoutOperation(t *testing.T) {
+	useTestMinecraftInstances(t)
 	s := surfaceTestServer(t, roleAdministrator)
 	store := openTestOperationStore(t)
 	attachTestOperationStore(t, s, store)
@@ -223,6 +232,7 @@ func TestAdminSetupApplyRejectsStaleReviewedFingerprintWithoutOperation(t *testi
 }
 
 func TestAdminSetupApplyRejectsConfiguredAppliance(t *testing.T) {
+	useTestMinecraftInstances(t)
 	s := surfaceTestServer(t, roleAdministrator)
 	store := openTestOperationStore(t)
 	attachTestOperationStore(t, s, store)
@@ -251,6 +261,7 @@ func TestAdminSetupApplyRejectsConfiguredAppliance(t *testing.T) {
 }
 
 func TestAdminSetupApplySameFingerprintIsIdempotentAndDifferentPlanConflicts(t *testing.T) {
+	useTestMinecraftInstances(t)
 	s := surfaceTestServer(t, roleAdministrator)
 	store := openTestOperationStore(t)
 	attachTestOperationStore(t, s, store)
@@ -294,6 +305,7 @@ func TestAdminSetupApplySameFingerprintIsIdempotentAndDifferentPlanConflicts(t *
 }
 
 func TestAdminSetupApplyRejectsUnknownSecretAndTrailingJSON(t *testing.T) {
+	useTestMinecraftInstances(t)
 	s := surfaceTestServer(t, roleAdministrator)
 	attachTestOperationStore(t, s, openTestOperationStore(t))
 
@@ -321,6 +333,7 @@ func TestAdminSetupApplyRejectsUnknownSecretAndTrailingJSON(t *testing.T) {
 }
 
 func TestAdminSetupApplyRequiresTransientSMBPasswordWithoutPersistingIt(t *testing.T) {
+	useTestMinecraftInstances(t)
 	oldWorker := startSetupWorker
 	startSetupWorker = func(_ *server, _ string, _ adminSetupNormalizedPlan, secret []byte) { zeroBytes(secret) }
 	defer func() { startSetupWorker = oldWorker }()
@@ -412,6 +425,7 @@ func TestAdminSetupApplyRequiresTransientSMBPasswordWithoutPersistingIt(t *testi
 }
 
 func TestAdminSetupApplyPreflightFailureIsSanitized(t *testing.T) {
+	useTestMinecraftInstances(t)
 	s := surfaceTestServer(t, roleAdministrator)
 	attachTestOperationStore(t, s, openTestOperationStore(t))
 
@@ -425,5 +439,47 @@ func TestAdminSetupApplyPreflightFailureIsSanitized(t *testing.T) {
 	s.adminSetupApply(rr, surfaceRequest(http.MethodPost, "/v1/admin/setup/apply", setupApplyBody(t, exactSetupApplyFingerprint(t))))
 	if rr.Code != http.StatusServiceUnavailable || strings.Contains(rr.Body.String(), "/etc/private") {
 		t.Fatalf("status = %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSetupIdentityFailureDoesNotCreateOperationAndManualSaveResumes(t *testing.T) {
+	useTestMinecraftInstances(t)
+	minecraftInstances.random = bytes.NewReader(nil)
+	oldPlan, oldDiscovery, oldWorker := runAdminSetupPlanHelper, runAdminDiscoveryHelper, startSetupWorker
+	t.Cleanup(func() {
+		runAdminSetupPlanHelper, runAdminDiscoveryHelper, startSetupWorker = oldPlan, oldDiscovery, oldWorker
+	})
+	runAdminSetupPlanHelper = func(context.Context, []byte) ([]byte, error) { return []byte(validAdminSetupPlanResponse), nil }
+	runAdminDiscoveryHelper = func(context.Context, string) ([]byte, error) {
+		return []byte(`{"configured":false,"minecraft":{},"backup":{}}`), nil
+	}
+	workers := 0
+	startSetupWorker = func(_ *server, _ string, _ adminSetupNormalizedPlan, secret []byte) {
+		workers++
+		zeroBytes(secret)
+		identity, err := minecraftInstances.read()
+		if err != nil || identity.ID != "jv-manual1" {
+			t.Fatal("worker missing saved identity")
+		}
+	}
+	s := surfaceTestServer(t, roleAdministrator)
+	store := openTestOperationStore(t)
+	attachTestOperationStore(t, s, store)
+	body := setupApplyBody(t, exactSetupApplyFingerprint(t))
+	rr := httptest.NewRecorder()
+	s.adminSetupApply(rr, surfaceRequest(http.MethodPost, "/v1/admin/setup/apply", body))
+	if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), `"code":"identity_required"`) || workers != 0 {
+		t.Fatalf("unresolved identity: %d %s", rr.Code, rr.Body.String())
+	}
+	if current, err := store.currentSetup(); err != nil || current != nil {
+		t.Fatal("identity failure created partial setup")
+	}
+	if _, err := minecraftInstances.register("MANUAL1", true); err != nil {
+		t.Fatal(err)
+	}
+	rr = httptest.NewRecorder()
+	s.adminSetupApply(rr, surfaceRequest(http.MethodPost, "/v1/admin/setup/apply", body))
+	if rr.Code != http.StatusAccepted || workers != 1 {
+		t.Fatalf("same reviewed submission did not resume: %d %s", rr.Code, rr.Body.String())
 	}
 }

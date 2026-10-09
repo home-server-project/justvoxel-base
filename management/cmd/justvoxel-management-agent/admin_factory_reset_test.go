@@ -311,6 +311,7 @@ func TestAdminFactoryResetApplySameFingerprintReconnectsWithoutPasswordOrPlannin
 }
 
 func TestExecuteFactoryResetReturnsToFreshFirstUseState(t *testing.T) {
+	useTestMinecraftInstances(t)
 	oldHelper := runAdminFactoryResetHelper
 	defer func() { runAdminFactoryResetHelper = oldHelper }()
 	runAdminFactoryResetHelper = func(_ context.Context, args ...string) ([]byte, error) {

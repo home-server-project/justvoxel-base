@@ -43,7 +43,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (password) password.value = "";
       }
     });
-    applyForm.addEventListener("submit", (event) => {
+    applyForm.addEventListener("submit", async (event) => {
       if (applyForm.dataset.smbRequired === "true" && !passwordConfirmed) {
         event.preventDefault();
         if (passwordDialog && !passwordDialog.open) passwordDialog.showModal();
@@ -54,10 +54,47 @@ document.addEventListener("DOMContentLoaded", () => {
         if (eulaDialog && !eulaDialog.open) eulaDialog.showModal();
         return;
       }
+      event.preventDefault();
+      if (submitting) return;
+      // Keep the exact reviewed submission, including credentials, only in memory.
+      const body = new URLSearchParams();
+      new FormData(applyForm).forEach((value, key) => body.append(key, String(value)));
+      if (event.submitter?.name) body.set(event.submitter.name, event.submitter.value);
       submitting = true;
+      eulaDialog?.close();
       if (configure) {
         configure.disabled = true;
         configure.textContent = "Starting setup…";
+      }
+      try {
+        const response = await resumeReviewedIdentitySubmission(() => fetch(applyForm.action, {
+          method: "POST", credentials: "same-origin", cache: "no-store",
+          headers: {Accept: "text/html, application/json", "Content-Type": "application/x-www-form-urlencoded"},
+          body: body.toString(),
+        }), body.get("csrf") || "");
+        if (response.redirected) {
+          window.location.assign(response.url);
+          return;
+        }
+        const markup = await response.text();
+        const page = new DOMParser().parseFromString(markup, "text/html");
+        const message = page.querySelector(".notice.error")?.textContent.trim();
+        throw new Error(message || "Could not start JustVoxel setup. Reload Review to check the current configuration.");
+      } catch (error) {
+        submitting = false;
+        if (configure) {
+          configure.disabled = false;
+          configure.textContent = "Configure JustVoxel";
+        }
+        const feedback = document.createElement("p");
+        feedback.setAttribute("role", "alert");
+        feedback.textContent = error?.message || "Could not start JustVoxel setup.";
+        const review = document.createElement("a");
+        review.href = "/setup/review";
+        review.textContent = "Reload Review";
+        applyForm.append(feedback, review);
+      } finally {
+        body.delete("smb_password");
       }
     });
   }

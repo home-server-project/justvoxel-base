@@ -70,6 +70,12 @@ func (s *server) adminMigrationImportApply(w http.ResponseWriter, r *http.Reques
     if req.BackupSMBPasswordRequired&&request.BackupSMBPassword=="" { writeAdminMigrationImportApplyFailure(w,http.StatusBadRequest,"backup_smb_password_required","SMB backup password is required for this fresh Import destination"); return }
     if !req.BackupSMBPasswordRequired&&request.BackupSMBPassword!="" { writeAdminMigrationImportApplyFailure(w,http.StatusBadRequest,"unexpected_backup_smb_password","SMB backup password is accepted only for a reviewed SMB backup destination"); return }
 
+    // Identity belongs to the local destination, never to the source archive.
+    // This also assigns a missing identity to a legacy Replace destination.
+    if _, err := minecraftInstances.register("", false); err != nil {
+        writeAdminMigrationImportApplyFailure(w, http.StatusConflict, "identity_required", "Instance ID could not be generated: " + err.Error()); return
+    }
+
     operation,created,err:=s.operations.beginMigrationImport(request.PlanFingerprint)
     if err!=nil {
         if errors.Is(err,errFactoryResetOperationBusy) {

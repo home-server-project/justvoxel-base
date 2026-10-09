@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -375,6 +376,12 @@ func executeMinecraftReset(ctx context.Context, s *server, operationID, expected
 			return errors.New(preflightErr.message)
 		}
 		return errors.New("appliance is still configured after Minecraft reset")
+	}
+
+	if err := minecraftInstances.retire(); err != nil {
+		failure := fmt.Errorf("Minecraft Instance ID retirement failed: %w", err)
+		_, _ = s.operations.transition(operationID, operationNeedsAttention, "instance_retirement_failed", failure.Error())
+		return failure
 	}
 
 	if _, err := s.operations.transition(operationID, operationSucceeded, "complete", "Minecraft reset completed. JustVoxel is ready for first setup."); err != nil {

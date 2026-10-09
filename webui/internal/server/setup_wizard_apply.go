@@ -157,6 +157,10 @@ func (a *App) setupWizardReviewApply(w http.ResponseWriter, r *http.Request) {
 		EULAAccepted:        true,
 	})
 	smbPassword = ""
+	if result.Code == "identity_required" && strings.Contains(r.Header.Get("Accept"), "application/json") {
+		writeMinecraftWorkspaceJSON(w, http.StatusConflict, map[string]string{"code": "identity_required", "error": result.Error})
+		return
+	}
 	if err != nil {
 		if errors.Is(err, api.ErrUnauthorized) || errors.Is(err, api.ErrPasswordChangeRequired) {
 			a.handleAdminDiscoveryError(w, r, err)

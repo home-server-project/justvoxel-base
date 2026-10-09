@@ -11,7 +11,7 @@
 </head>
 <body class="role-pending">
 {{template "app-header" .}}
-<main id="dashboard" data-dashboard-status="/api/dashboard-status" data-session-info="/api/session-info" data-workspace-username="{{.Username}}" data-pending-action="{{.PendingAction}}" data-configured="{{.Status.Minecraft.Configured}}">
+<main id="dashboard" data-dashboard-status="/api/dashboard-status" data-session-info="/api/session-info" data-workspace-username="{{.Username}}" data-pending-action="{{.PendingAction}}" data-configured="{{.Status.Minecraft.Configured}}" data-instance-required="{{.InstanceRequired}}">
   <img class="dashboard-wallpaper wallpaper-theme-v2" data-dashboard-wallpaper src="/static/wallpapers/jv-wp-v2-day.webp" alt="" aria-hidden="true">
   <section class="first-run-choice" data-first-run-choice hidden aria-labelledby="first-run-choice-title">
     <div class="first-run-choice-panel">

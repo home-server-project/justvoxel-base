@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
 )
@@ -106,6 +107,9 @@ type minecraftWorkspaceErrorResponse struct {
 }
 
 func (a *App) registerMinecraftWorkspaceRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/minecraft/workspace/identity", a.minecraftWorkspaceInstance)
+	mux.HandleFunc("POST /api/minecraft/workspace/identity/ensure", a.minecraftWorkspaceInstance)
+	mux.HandleFunc("POST /api/minecraft/workspace/identity/manual", a.minecraftWorkspaceInstance)
 	mux.HandleFunc("GET /api/version/workspace/status", a.versionWorkspaceStatus)
 	mux.HandleFunc("POST /api/version/workspace/update", a.versionWorkspaceUpdate)
 	mux.HandleFunc("GET /api/version/workspace/update-operation", a.versionWorkspaceUpdateOperation)
@@ -429,4 +433,71 @@ func (a *App) minecraftWorkspaceWhitelistState(w http.ResponseWriter, r *http.Re
 		return
 	}
 	writeMinecraftWorkspaceJSON(w, http.StatusOK, minecraftWorkspaceTextResponse{OK: true, Message: "Whitelist updated."})
+}
+
+type minecraftInstanceAPI interface {
+	MinecraftIdentity(context.Context, string) (api.MinecraftIdentity, error)
+	EnsureMinecraftIdentity(context.Context, string) (api.MinecraftIdentity, error)
+	SaveMinecraftIdentity(context.Context, string, string) (api.MinecraftIdentity, error)
+}
+
+func (a *App) minecraftWorkspaceInstance(w http.ResponseWriter, r *http.Request) {
+	roles := []string{"administrator", "operator", "viewer"}
+	if r.Method == http.MethodPost {
+		if !a.validCSRF(r) {
+			writeMinecraftWorkspaceError(w, http.StatusForbidden, "Invalid CSRF token.")
+			return
+		}
+		roles = []string{"administrator"}
+	}
+	session, _, ok := a.minecraftWorkspaceIdentity(w, r, roles...)
+	if !ok {
+		return
+	}
+	client, ok := a.api.(minecraftInstanceAPI)
+	if !ok {
+		writeMinecraftWorkspaceError(w, http.StatusServiceUnavailable, "Instance ID is unavailable.")
+		return
+	}
+	var result api.MinecraftIdentity
+	var err error
+	switch {
+	case r.Method == http.MethodGet:
+		result, err = client.MinecraftIdentity(r.Context(), session)
+	case strings.HasSuffix(r.URL.Path, "/ensure"):
+		result, err = client.EnsureMinecraftIdentity(r.Context(), session)
+	default:
+		result, err = client.SaveMinecraftIdentity(r.Context(), session, r.FormValue("suffix"))
+	}
+	if err != nil {
+		a.writeMinecraftWorkspaceAPIError(w, err, "Instance ID registration is unavailable. You can save a manual ID.")
+		return
+	}
+	writeMinecraftWorkspaceJSON(w, http.StatusOK, result)
+}
+
+// One synchronous attempt per administrator session. No operation or runtime change.
+type minecraftSessionIdentityAttempt struct {
+	once sync.Once
+	err  error
+}
+
+func (a *App) ensureSessionMinecraftIdentity(ctx context.Context, session string) bool {
+	client, ok := a.api.(minecraftInstanceAPI)
+	if !ok {
+		return false
+	}
+	identity, err := client.MinecraftIdentity(ctx, session)
+	if err == nil && identity.Status == "available" {
+		return false
+	}
+	value, _ := a.instanceSessionAttempts.LoadOrStore(session, &minecraftSessionIdentityAttempt{})
+	attempt := value.(*minecraftSessionIdentityAttempt)
+	attempt.once.Do(func() {
+		identity, attempt.err = client.EnsureMinecraftIdentity(ctx, session)
+		if attempt.err == nil && identity.Status != "available" {
+			attempt.err = errors.New("Instance ID was not saved.")
+		}
+	})
+	return attempt.err != nil
 }

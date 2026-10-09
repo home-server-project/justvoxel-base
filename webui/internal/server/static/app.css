@@ -1344,3 +1344,11 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
 
 /* Polling can enter needs_attention without replacing the progress fragment. */
 [data-server-migration-operation]:has(#server-migration-operation-attention:not([hidden])) .migration-progress-navigation{display:none}
+
+/* Compact optional identity fallback in the existing Minecraft Overview. */
+
+.instance-id-dialog h2{font-size:1.1rem}
+.instance-id-form{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.instance-id-form label{display:flex;align-items:center;gap:.35rem;margin:0}
+.instance-id-form input{width:14ch;margin:0}
+.instance-id-form button{margin:0}

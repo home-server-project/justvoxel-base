@@ -1,3 +1,73 @@
+// Identity fallback belongs to the active reviewed workflow or administrator session.
+const saveRequiredMinecraftIdentity = (csrf) => new Promise((resolve) => {
+  const dialog = document.createElement("dialog");
+  dialog.className = "system-action-dialog instance-id-dialog";
+  const content = document.createElement("div");
+  content.className = "system-action-dialog-content";
+  const title = document.createElement("h2");
+  title.textContent = "Instance ID could not be generated.";
+  const form = document.createElement("form");
+  form.className = "instance-id-form";
+  const label = document.createElement("label");
+  label.textContent = "jv- ";
+  const input = document.createElement("input");
+  input.required = true;
+  input.minLength = 6;
+  input.maxLength = 12;
+  input.pattern = "[A-Za-z0-9]{6,12}";
+  input.autocomplete = "off";
+  input.setAttribute("aria-label", "Instance ID suffix");
+  input.title = "Use 6-12 letters and numbers after jv-.";
+  const save = document.createElement("button");
+  save.type = "submit";
+  save.textContent = "Save";
+  const feedback = document.createElement("p");
+  feedback.textContent = "Valid input: 6-12 letters and numbers.";
+  feedback.setAttribute("role", "status");
+  label.append(input);
+  form.append(label, save);
+  content.append(title, form, feedback);
+  dialog.append(content);
+  document.body.append(dialog);
+  dialog.addEventListener("cancel", (event) => event.preventDefault());
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!form.reportValidity()) return;
+    save.disabled = true;
+    try {
+      const response = await fetch("/api/minecraft/workspace/identity/manual", {
+        method: "POST", credentials: "same-origin", cache: "no-store",
+        headers: {Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded"},
+        body: new URLSearchParams({csrf, suffix: input.value}).toString(),
+      });
+      const result = await response.json();
+      if (!response.ok || result.status !== "available" || !result.id) {
+        throw new Error(result.error || "Instance ID was not saved.");
+      }
+      dialog.close();
+      dialog.remove();
+      resolve();
+    } catch (error) {
+      feedback.textContent = error?.message || "Instance ID could not be saved.";
+      save.disabled = false;
+    }
+  });
+  dialog.showModal();
+  input.focus();
+});
+const resumeReviewedIdentitySubmission = async (send, csrf) => {
+  const response = await send();
+  if (response.status !== 409 || !response.headers.get("Content-Type")?.includes("application/json")) return response;
+  const result = await response.clone().json();
+  if (result.code !== "identity_required") return response;
+  await saveRequiredMinecraftIdentity(csrf);
+  return send();
+};
+const identityDashboard = document.querySelector('[data-instance-required="true"]');
+if (identityDashboard) {
+  void saveRequiredMinecraftIdentity(document.querySelector('input[name="csrf"]')?.value || "");
+}
+
 
 const enhancePasswordFields = (root = document) => {
   root.querySelectorAll('input[type="password"]:not([data-password-reveal-ready])').forEach((input) => {
@@ -2299,11 +2369,11 @@ if (migrationOpen && migrationDialog) {
           body.set("smb_password", migrationExportSMBPassword);
         }
         form.querySelectorAll('input[name="source_smb_password"],input[name="smb_password"]').forEach((input) => { input.value = ""; });
-        const response = await fetch(action.pathname + action.search, {
+        const sendMigration = () => fetch(action.pathname + action.search, {
           method: (form.method || "POST").toUpperCase(),
           credentials: "same-origin",
           headers: {
-            Accept: "text/html",
+            Accept: action.pathname === "/workspace/migration/import/apply" ? "text/html, application/json" : "text/html",
             "Content-Type": "application/x-www-form-urlencoded",
             "X-JustVoxel-Migration-Fragment": "1",
           },
@@ -2312,6 +2382,9 @@ if (migrationOpen && migrationDialog) {
           redirect: "follow",
           signal: submitController.signal,
         });
+        const response = action.pathname === "/workspace/migration/import/apply"
+          ? await resumeReviewedIdentitySubmission(sendMigration, body.get("csrf") || "")
+          : await sendMigration();
         if (await handleMigrationAuth(response)) return;
         if (response.status === 403) throw new Error("Administrator access required.");
 

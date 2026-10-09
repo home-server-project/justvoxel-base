@@ -228,6 +228,10 @@ func (a *App) migrationWorkspaceImportApply(w http.ResponseWriter, r *http.Reque
 	})
 	request.Source.SMBPassword = ""
 	backupSMBPassword = ""
+	if result.Code == "identity_required" && strings.Contains(r.Header.Get("Accept"), "application/json") {
+		writeMinecraftWorkspaceJSON(w, http.StatusConflict, map[string]string{"code": "identity_required", "error": result.Error})
+		return
+	}
 	if err != nil {
 		a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", apiMessage(err, "Could not start Server Import."))
 		return

@@ -209,6 +209,7 @@ func TestSetupStorageHelperResponseIsStrict(t *testing.T) {
 }
 
 func TestAdminSetupApplyDoesNotLaunchDuplicateWorker(t *testing.T) {
+	useTestMinecraftInstances(t)
 	s := surfaceTestServer(t, roleAdministrator)
 	store := openTestOperationStore(t)
 	attachTestOperationStore(t, s, store)

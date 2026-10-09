@@ -20,6 +20,12 @@ printf 'end\n' > "${tmp}/source/minecraft/world_the_end/level.dat"
 printf 'plugin-data\n' > "${tmp}/source/minecraft/plugins/ExamplePlugin/config.yml"
 ln -s level.dat "${tmp}/source/minecraft/world/safe-link"
 
+# Existing backups have no ID; the local destination identity lives outside data.
+mkdir -p "${tmp}/instances"
+printf '{"id":"jv-local123"}\n' > "${tmp}/instances/minecraft.json"
+chmod 0700 "${tmp}/instances"
+chmod 0600 "${tmp}/instances/minecraft.json"
+local_identity="$(cat "${tmp}/instances/minecraft.json")"
 tar -C "${tmp}/source" -czf "${tmp}/minecraft-2026-09-15-043000.tar.gz" minecraft
 
 info="$(bash "${helper}" inspect "${tmp}/minecraft-2026-09-15-043000.tar.gz")"
@@ -38,6 +44,17 @@ test ! -e "${tmp}/world-stage/minecraft/server.properties" || fail 'world-only s
 bash "${helper}" extract-full "${tmp}/minecraft-2026-09-15-043000.tar.gz" "${tmp}/full-stage" >/dev/null
 test -f "${tmp}/full-stage/minecraft/plugins/ExamplePlugin/config.yml" || fail 'full restore staging missed plugin data'
 test -f "${tmp}/full-stage/minecraft/server.properties" || fail 'full restore staging missed server.properties'
+
+[[ $(cat "${tmp}/instances/minecraft.json") == "${local_identity}" ]] || fail 'legacy restore changed local identity'
+
+# An external data archive can contain a similarly named file; it remains data
+# within staging and cannot replace the appliance-owned identity outside data.
+mkdir -p "${tmp}/source/minecraft/instances"
+printf '{"id":"jv-archive123"}\n' > "${tmp}/source/minecraft/instances/minecraft.json"
+tar -C "${tmp}/source" -czf "${tmp}/external.tar.gz" minecraft
+bash "${helper}" extract-full "${tmp}/external.tar.gz" "${tmp}/external-stage" >/dev/null
+[[ $(cat "${tmp}/instances/minecraft.json") == "${local_identity}" ]] || fail 'external archive replaced local identity'
+test -f "${tmp}/external-stage/minecraft/world/level.dat" || fail 'external archive no longer restores'
 
 printf 'not a gzip archive\n' > "${tmp}/corrupt.tar.gz"
 if bash "${helper}" inspect "${tmp}/corrupt.tar.gz" >/dev/null 2>&1; then

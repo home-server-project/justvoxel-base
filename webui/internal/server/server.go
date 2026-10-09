@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
@@ -44,10 +45,11 @@ type Config struct {
 }
 
 type App struct {
-	api       API
-	config    Config
-	templates *template.Template
-	static    http.Handler
+	api                     API
+	config                  Config
+	templates               *template.Template
+	static                  http.Handler
+	instanceSessionAttempts sync.Map
 }
 
 type dashboardAttention struct {
@@ -82,6 +84,8 @@ type pageData struct {
 	ConfirmProgress  string
 	ConfirmOnline    int
 	ConfirmPlayers   []string
+	Administrator    bool
+	InstanceRequired bool
 	Attention        *dashboardAttention
 }
 
@@ -215,6 +219,7 @@ func (a *App) logout(w http.ResponseWriter, r *http.Request) {
 	}
 	if c, err := r.Cookie(sessionCookie); err == nil && c.Value != "" {
 		_ = a.api.Logout(r.Context(), c.Value)
+		a.instanceSessionAttempts.Delete(c.Value)
 	}
 	a.clearSessionCookies(w)
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
@@ -279,6 +284,9 @@ func (a *App) dashboard(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.handleDashboardError(w, r, err)
 		return
+	}
+	if data.Administrator && data.Status.Minecraft.Configured {
+		data.InstanceRequired = a.ensureSessionMinecraftIdentity(r.Context(), session)
 	}
 	result := r.URL.Query().Get("result")
 	data.Message = actionResultMessage(result)
@@ -398,6 +406,7 @@ func (a *App) dashboardData(ctx context.Context, session, csrf string) (pageData
 		identity, identityErr := identityClient.Session(ctx, session)
 		if identityErr == nil {
 			data.Username = identity.Username
+			data.Administrator = identity.Role == "administrator"
 			if operations, ok := a.api.(dashboardOperationAPI); ok && identity.Role == "administrator" {
 				data.Attention = dashboardCurrentAttention(ctx, operations, session)
 			}

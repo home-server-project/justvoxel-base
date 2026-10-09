@@ -138,7 +138,7 @@
     {{if .Plan.Requirements.BackupSMBPasswordRequired}}<div class="notice">The fresh destination uses SMB backup storage. Its password is requested only on the final Apply request and is not stored in this review or operation journal.</div>{{end}}
   </section>
 
-  <form method="post" action="/workspace/migration/import/apply" autocomplete="off">
+  <form method="post" action="/workspace/migration/import/apply" data-instance-preflight autocomplete="off">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <input type="hidden" name="source_kind" value="{{.Request.Source.Kind}}">
     <input type="hidden" name="local_path" value="{{.Request.Source.Path}}">

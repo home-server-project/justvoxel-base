@@ -243,3 +243,29 @@ func (c *Client) do(ctx context.Context, method, path, session string, body any,
 	}
 	return nil
 }
+
+// MinecraftIdentity is destination metadata, independent of runtime status and archives.
+type MinecraftIdentity struct {
+	ID     string `json:"id,omitempty"`
+	Status string `json:"status"`
+}
+
+func (c *Client) MinecraftIdentity(ctx context.Context, session string) (MinecraftIdentity, error) {
+	var out MinecraftIdentity
+	err := c.do(ctx, http.MethodGet, "/v1/minecraft/identity", session, nil, &out)
+	return out, err
+}
+
+func (c *Client) EnsureMinecraftIdentity(ctx context.Context, session string) (MinecraftIdentity, error) {
+	var out MinecraftIdentity
+	err := c.do(ctx, http.MethodPost, "/v1/minecraft/identity/ensure", session, struct{}{}, &out)
+	return out, err
+}
+
+func (c *Client) SaveMinecraftIdentity(ctx context.Context, session, suffix string) (MinecraftIdentity, error) {
+	var out MinecraftIdentity
+	err := c.do(ctx, http.MethodPost, "/v1/minecraft/identity/manual", session, struct {
+		Suffix string `json:"suffix"`
+	}{Suffix: suffix}, &out)
+	return out, err
+}

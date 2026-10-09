@@ -75,7 +75,7 @@
     {{if .Plan.Requirements.SMBPasswordRequired}}<div class="notice setup-secret-note"><strong>SMB password required during execution.</strong><span>The password is not stored in this setup draft or review. JustVoxel will request it only when the setup transaction is actually started.</span></div>{{end}}
     {{if .Plan.Requirements.NetworkBackupValidationOnApply}}<div class="notice"><strong>Network backup validation happens during execution.</strong><br>The configured network source will be mounted and verified before JustVoxel uses it. Planning does not mount the share.</div>{{end}}
 
-    <form id="setup-apply-form" method="post" action="/setup/review/apply" data-setup-apply data-eula-accepted="{{.EULAAccepted}}" data-smb-required="{{.Plan.Requirements.SMBPasswordRequired}}">
+    <form id="setup-apply-form" method="post" action="/setup/review/apply" data-setup-apply data-instance-preflight data-eula-accepted="{{.EULAAccepted}}" data-smb-required="{{.Plan.Requirements.SMBPasswordRequired}}">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <input type="hidden" name="plan_fingerprint" value="{{.Plan.PlanFingerprint}}">
     </form>

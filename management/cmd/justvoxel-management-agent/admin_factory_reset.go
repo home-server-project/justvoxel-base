@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -538,6 +539,12 @@ func executeFactoryReset(ctx context.Context, s *server, operationID, expectedFi
 			return err
 		}
 		return errors.New("WebUI users remain after full factory reset")
+	}
+
+	if err := minecraftInstances.retire(); err != nil {
+		failure := fmt.Errorf("Minecraft Instance ID retirement failed: %w", err)
+		_, _ = s.operations.transition(operationID, operationNeedsAttention, "instance_retirement_failed", failure.Error())
+		return failure
 	}
 
 	if _, err := s.operations.transition(operationID, operationSucceeded, "complete", "Full factory reset completed. Sign in with the voxel system account to set a new password."); err != nil {
