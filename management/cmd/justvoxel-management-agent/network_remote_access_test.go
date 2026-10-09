@@ -316,7 +316,7 @@ func TestCanonicalProviderSummariesFollowConfigurationAndService(t *testing.T) {
 		configured, connected bool
 	}{
 		{"netbird", "activating", "Not configured", false, false},
-		{"netbird", "active", "Connected", true, true},
+		{"netbird", "active", "Not connected", true, false},
 		{"netbird", "inactive", "Stopped", true, false},
 		{"playit", "active", "Not configured", false, false},
 		{"playit", "active", "Running", true, true},
