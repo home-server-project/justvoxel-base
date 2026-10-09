@@ -222,7 +222,7 @@ for (const state of ["activating", "deactivating", "reloading", "refreshing"]) {
 }
 for (const id of ["tailscale", "netbird", "playit"]) {
   nodes = render({ ...base, id, configured: true });
-  assert(nodes.some((n) => n.textContent === "Activate" && n.disabled));
+  assert(nodes.some((n) => n.textContent === "Activate" && n.disabled === (id !== "netbird")));
   assert(nodes.some((n) => n.textContent === "Deactivate" && !n.disabled));
   assert(!nodes.some((n) => n.textContent === "Set up Playit"));
   const link = nodes.find((n) => n.textContent === "Open provider dashboard");
@@ -238,6 +238,7 @@ assert(nodes.some((n) => n.textContent === "Complete NetBird login" && n.href ==
 netbirdLoginURL = "";
 nodes = render({ ...base, id: "netbird", configured: true, connected: true, ip: "100.80.12.5/16" });
 assert(nodes.some((n) => n.textContent === "NetBird IP: 100.80.12.5/16"));
+assert(nodes.some((n) => n.textContent === "Activate" && n.disabled));
 nodes = render({ ...base, configured: true, service_active: false, service_enabled: false, service_state: "inactive" });
 assert(nodes.some((n) => n.textContent === "Activate" && !n.disabled));
 assert(nodes.some((n) => n.textContent === "Deactivate" && n.disabled));
