@@ -47,6 +47,70 @@
         host !== "tailscale.com" && !host.endsWith(".tailscale.com");
     } catch (_) { return false; }
   };
+  // Reuse the existing Playit setup appearance for VPN authentication.
+  // Only fixed provider names enter the HTML; never interpolate response data.
+  const renderRemoteLoginPopup = (popup, id, failed = false) => {
+    if (!popup || popup.closed) return;
+    const providerName = id === "tailscale" ? "Tailscale" : "NetBird";
+    const title = failed ? "Remote access setup could not continue." : `Preparing ${providerName} login…`;
+    const description = failed
+      ? "Return to JustVoxel and try Activate again, or use the login link if one is shown."
+      : `Starting ${providerName} and generating your secure login link.`;
+    popup.document.open();
+    popup.document.write(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${providerName} setup</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#eef3f5;background:#0b1117}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:flex;flex-direction:column;background:#0b1117}
+header{padding:18px 24px;border-bottom:1px solid #26343e;background:#0d151d;font-size:.75rem;font-weight:650;letter-spacing:.14em;color:#c8d0d6}
+header .separator{margin:0 10px;color:#667782}header .brand,.eyebrow{color:#78c99d}
+main{flex:1;display:grid;place-items:center;padding:32px 20px}.setup-card{width:100%;max-width:580px;padding:36px;border:1px solid #294c40;border-radius:18px;background:#111c24}
+h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-size:.9rem;line-height:1.65;color:#ced8df}.muted{color:#9aa6b2}
+.claim-panel{margin-top:28px;padding:20px;border:1px solid #273b49;border-radius:12px;background:#0d1822}.claim-heading{font-size:.82rem}
+</style>
+<link rel="stylesheet" href="/static/playit-setup.css">
+</head>
+<body>
+<header aria-label="JustVoxel remote access"><span>JUSTVOXEL</span><span class="separator" aria-hidden="true">·</span><span class="brand">${providerName}</span></header>
+<main>
+<section class="setup-card${failed ? " failure" : ""}" aria-labelledby="setup-title">
+<p class="eyebrow">REMOTE ACCESS SETUP</p>
+<h1 id="setup-title">${title}</h1>
+<p>${description}</p>
+${failed ? "" : `<p class="muted">This page will open ${providerName} automatically when ready.</p>
+<div class="claim-panel" role="status">
+<h2 class="claim-heading"><span class="pulse-dot" aria-hidden="true"></span>Secure login link</h2>
+<p>Waiting for the authentication link.</p>
+</div>`}
+</section>
+</main>
+</body>
+</html>`);
+    popup.document.close();
+  };
+  const openRemoteLoginPopup = (id) => {
+    let popup = null;
+    try {
+      // Reserve the tab during the click to avoid browser popup blockers.
+      popup = window.open("about:blank", "_blank");
+      if (popup) {
+        try { renderRemoteLoginPopup(popup, id); }
+        finally { popup.opener = null; }
+      }
+    } catch (_) {
+      try { if (popup && !popup.closed) popup.close(); } catch (_) {}
+      popup = null;
+    }
+    return popup;
+  };
+  const failRemoteLoginPopup = (popup, id) => {
+    try { renderRemoteLoginPopup(popup, id, true); }
+    catch (_) { try { if (popup && !popup.closed) popup.close(); } catch (_) {} }
+  };
   const openActivatedDashboards = () => {
     for (const id of pendingDashboards) {
       const provider = remoteProviders.find((item) => item.id === id);
@@ -1451,10 +1515,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
           updatePlayitPopup();
         });
       } else if (id === "tailscale" && provider.dataset.action === "activate") {
-        // Reserve the tab during the user click to avoid popup blockers.
-        let loginTab = null;
-        try { loginTab = window.open("about:blank", "_blank"); if (loginTab) loginTab.opener = null; }
-        catch (_) { /* Keep the login link available in the card. */ }
+        const loginTab = openRemoteLoginPopup(id);
         providerProgress.set(id, "Starting Tailscale login…");
         runRemoteAction(async () => {
           try {
@@ -1465,23 +1526,20 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
               providerProgress.set(id, "Complete Tailscale login in your browser.");
               if (loginTab && !loginTab.closed) {
                 try { loginTab.location.replace(tailscaleLoginURL); }
-                catch (_) { /* The login link remains available in the card. */ }
+                catch (_) { failRemoteLoginPopup(loginTab, id); /* Keep the login link in the card. */ }
               }
             } else {
               try { if (loginTab && !loginTab.closed) loginTab.close(); } catch (_) {}
               providerProgress.set(id, "Checking Tailscale connection…");
             }
           } catch (error) {
-            try { if (loginTab && !loginTab.closed) loginTab.close(); } catch (_) {}
+            failRemoteLoginPopup(loginTab, id);
             providerProgress.delete(id);
             throw error;
           }
         });
       } else if (id === "netbird" && provider.dataset.action === "activate") {
-        // Reserve a browser tab during the click, not after the API request.
-        let loginTab = null;
-        try { loginTab = window.open("about:blank", "_blank"); if (loginTab) loginTab.opener = null; }
-        catch (_) { /* The login button remains available in the card. */ }
+        const loginTab = openRemoteLoginPopup(id);
         providerProgress.set(id, "Starting NetBird login…");
         runRemoteAction(async () => {
           try {
@@ -1492,7 +1550,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
               providerProgress.set(id, "Complete NetBird login in your browser.");
               if (loginTab && !loginTab.closed) {
                 try { loginTab.location.replace(netbirdLoginURL); }
-                catch (_) { /* The login button remains available in the card. */ }
+                catch (_) { failRemoteLoginPopup(loginTab, id); /* Keep the login link in the card. */ }
               }
             } else {
               // NetBird may already have a saved login and connect without a URL.
@@ -1500,7 +1558,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
               providerProgress.set(id, "Checking NetBird connection…");
             }
           } catch (error) {
-            try { if (loginTab && !loginTab.closed) loginTab.close(); } catch (_) {}
+            failRemoteLoginPopup(loginTab, id);
             providerProgress.delete(id);
             throw error;
           }
