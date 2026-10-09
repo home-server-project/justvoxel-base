@@ -9,6 +9,27 @@ import (
 	"testing"
 )
 
+func TestRestoreBackupFilenameCompatibility(t *testing.T) {
+	for _, name := range []string{
+		"minecraft-2026-09-20-043000.tar.gz",
+		"minecraft-paper-2026-10-09-1506.tar.gz",
+		"minecraft-kids-purpur-2026-10-09-1506-2.tar.gz",
+	} {
+		if !restoreBackupIDPattern.MatchString(name) {
+			t.Errorf("rejected valid backup %q", name)
+		}
+	}
+	for _, name := range []string{
+		"../minecraft-paper-2026-10-09-1506.tar.gz",
+		"minecraft-paper-2026-10-09-1506.tar.gz.partial",
+		"minecraft-bad.tar.gz",
+	} {
+		if restoreBackupIDPattern.MatchString(name) {
+			t.Errorf("accepted unsafe backup %q", name)
+		}
+	}
+}
+
 const restoreTestFingerprint = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 const restoreTestOperationID = "12345678-1234-4123-8123-123456789abc"
 

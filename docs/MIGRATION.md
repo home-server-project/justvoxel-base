@@ -184,7 +184,7 @@ An existing completed JustVoxel backup such as:
 minecraft-2026-09-15-043000.tar.gz
 ```
 
-can also be selected by `mjust import`.
+or a current backup named `minecraft-paper-2026-10-09-1506.tar.gz` can also be selected by `mjust import`. Current native exports use names like `justvoxel-migration-minecraft-paper-2026-10-09-1506.tar.gz`. Naming does not change archive contents or import compatibility.
 
 If its `.meta.json` sidecar is present, migration uses useful metadata. Older valid JustVoxel backups without the sidecar remain usable when the Minecraft data itself can be identified safely.
 

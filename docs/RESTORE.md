@@ -86,12 +86,15 @@ being silently restarted.
 
 ## Backup metadata
 
-New backups keep the existing archive format and add an optional sidecar:
+New backups keep the existing archive contents and optional sidecar metadata, but use readable minute-resolution filenames. For example:
 
 ```text
-minecraft-YYYY-MM-DD-HHMMSS.tar.gz
-minecraft-YYYY-MM-DD-HHMMSS.tar.gz.meta.json
+minecraft-paper-2026-10-09-1506.tar.gz
+minecraft-paper-2026-10-09-1506.tar.gz.meta.json
+minecraft-paper-2026-10-09-1506-2.tar.gz
 ```
+
+The leading `minecraft` is today's default server name; `paper` is the configured server type. The second archive in a minute gets a numeric suffix instead of overwriting the first. Old names such as `minecraft-2026-09-15-043000.tar.gz` remain fully supported. No JustVoxel Instance ID is embedded in the archives.
 
 The metadata records restore-useful information such as configured Minecraft
 version policy, reported server version when available, container image/digest,

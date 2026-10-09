@@ -74,7 +74,7 @@ discover() {
     if jv_backup_load_config >/dev/null 2>&1 && jv_backup_validate_mount_identity >/dev/null 2>&1; then
         backup_available=true
     fi
-    filename="justvoxel-migration-$(date -u +%Y-%m-%d-%H%M%S).tar.gz"
+    filename="justvoxel-migration-$(jv_archive_server_label)-$(date -u +%Y-%m-%d-%H%M).tar.gz"
     jq -cn --arg filename "$filename" --argjson devices "$devices" --argjson backup_available "$backup_available" \
         '{ok:true,schema_version:"v1",suggested_filename:$filename,configured_backup_available:$backup_available,devices:$devices,target_kinds:["local","backup","device","nfs","smb"]}'
 }

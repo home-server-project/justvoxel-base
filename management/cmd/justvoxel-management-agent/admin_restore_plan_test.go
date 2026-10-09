@@ -9,6 +9,27 @@ import (
 	"testing"
 )
 
+func TestAdminRestoreBackupFilenameCompatibility(t *testing.T) {
+	for _, name := range []string{
+		"minecraft-2026-09-20-043000.tar.gz",
+		"minecraft-paper-2026-10-09-1506.tar.gz",
+		"minecraft-kids-purpur-2026-10-09-1506-2.tar.gz",
+	} {
+		if !adminRestoreBackupIDPattern.MatchString(name) {
+			t.Errorf("rejected valid backup %q", name)
+		}
+	}
+	for _, name := range []string{
+		"../../etc/passwd",
+		"minecraft-paper-2026-10-09-1506.tar.gz.partial",
+		"minecraft-bad.tar.gz",
+	} {
+		if adminRestoreBackupIDPattern.MatchString(name) {
+			t.Errorf("accepted unsafe backup %q", name)
+		}
+	}
+}
+
 const validRestorePlanHelper = `{"ok":true,"schema_version":"v1","normalized":{"backup_id":"minecraft-2026-09-20-043000.tar.gz","mode":"world","created_at":"2026-09-20T08:30:00Z","size_bytes":12345,"metadata_status":"valid","metadata":{"created_at":"2026-09-20T08:30:00Z","minecraft":{"version_mode":"pinned","configured_version":"26.2","server_reported_version":"Paper 26.2"},"bedrock":{"enabled":false,"floodgate_configured":false},"justvoxel":{"variant":"justvoxel-vm"}},"current":{"version_mode":"pinned","version":"26.3","bedrock_enabled":false},"version_relation":"backup_older","validation":{"archive_integrity":"pending_apply","archive_safety":"pending_apply","staging_space":"pending_apply"}},"warnings":[{"code":"backup_older","message":"Older backup."}],"requirements":{"destructive_confirmation_required":true,"players_confirmation_required":false,"minecraft_state":"running","online":0,"players":[],"archive_integrity_validation_on_apply":true,"archive_safety_validation_on_apply":true,"staging_space_validation_on_apply":true},"context":{"archive_identity":"8:123:12345:1789900000","data_path":"/var/lib/justvoxel/minecraft","backup_path":"/var/lib/justvoxel/backups","minecraft_uid":"1001","minecraft_gid":"1001","backup_type":"system","backup_mount_point":"","backup_expected_uuid":"","backup_expected_source":""}}`
 
 func TestAdminRestorePlanSuccessComputesFingerprintAndHidesContext(t *testing.T) {

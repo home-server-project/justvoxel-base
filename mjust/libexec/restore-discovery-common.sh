@@ -46,7 +46,7 @@ jv_restore_discovery_json() {
     while IFS="$(printf '\t')" read -r epoch size archive; do
         [[ -n ${archive} ]] || continue
         id="$(basename -- "${archive}")"
-        [[ ${id} =~ ^minecraft-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}\.tar\.gz$ ]] || continue
+        jv_backup_valid_archive_id "${id}" || continue
         [[ ${size} =~ ^[0-9]+$ ]] || continue
         epoch_int="${epoch%%.*}"
         [[ ${epoch_int} =~ ^[0-9]+$ ]] || continue

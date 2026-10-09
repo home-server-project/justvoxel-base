@@ -4,6 +4,24 @@ if ! declare -F jv_exact_mount_identity >/dev/null; then
     source "$(dirname -- "${BASH_SOURCE[0]}")/common.sh"
 fi
 
+# Filename labels describe the Minecraft server, not the local JustVoxel Instance ID.
+# The friendly server name can be added when named instances are supported.
+jv_archive_server_label() {
+    local server_type="${MINECRAFT_SERVER_TYPE:-paper}"
+    server_type="${server_type,,}"
+    [[ ${server_type} =~ ^[a-z][a-z0-9-]{0,39}$ ]] || return 1
+    printf 'minecraft-%s\n' "${server_type}"
+}
+
+# Existing second-resolution backups and new minute-resolution names are both valid.
+# Only a safe basename is accepted; archive path checks remain separate.
+jv_backup_valid_archive_id() {
+    local id="$1"
+    (( ${#id} <= 160 )) || return 1
+    [[ ${id} =~ ^minecraft-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}\.tar\.gz$ ]] ||
+        [[ ${id} =~ ^minecraft-[a-z][a-z0-9-]{0,70}-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}(-[1-9][0-9]{0,2})?\.tar\.gz$ ]]
+}
+
 jv_backup_load_config() {
     local backup_config_file="${1:-/etc/justvoxel/minecraft-backup.env}"
 

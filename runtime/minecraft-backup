@@ -40,9 +40,22 @@ fi
 
 minecraft_source_parent="$(dirname -- "${minecraft_data_path}")"
 minecraft_source_name="$(basename -- "${minecraft_data_path}")"
-minecraft_timestamp="$(date +%F-%H%M%S)"
-minecraft_final_archive="${minecraft_backup_path}/minecraft-${minecraft_timestamp}.tar.gz"
+minecraft_timestamp="$(date +%F-%H%M)"
+minecraft_basename="$(jv_archive_server_label)-${minecraft_timestamp}"
+minecraft_final_archive="${minecraft_backup_path}/${minecraft_basename}.tar.gz"
 minecraft_partial_archive="${minecraft_final_archive}.partial"
+minecraft_collision=2
+while [[ -e ${minecraft_final_archive} || -L ${minecraft_final_archive} ||
+         -e ${minecraft_partial_archive} || -L ${minecraft_partial_archive} ||
+         -e ${minecraft_final_archive}.meta.json || -L ${minecraft_final_archive}.meta.json ]]; do
+    if (( minecraft_collision > 999 )); then
+        echo 'ERROR: too many backups with the same minute timestamp.' >&2
+        exit 1
+    fi
+    minecraft_final_archive="${minecraft_backup_path}/${minecraft_basename}-${minecraft_collision}.tar.gz"
+    minecraft_partial_archive="${minecraft_final_archive}.partial"
+    minecraft_collision=$((minecraft_collision + 1))
+done
 minecraft_restart_required=0
 
 cleanup() {

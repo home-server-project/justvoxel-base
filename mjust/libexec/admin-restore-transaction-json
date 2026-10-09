@@ -162,7 +162,7 @@ players_confirmed="$(jq -r '.players_confirmed' <<< "${request}")"
     echo 'ERROR: invalid Restore plan fingerprint.' >&2
     exit 1
 }
-[[ ${backup_id} =~ ^minecraft-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}\.tar\.gz$ ]] || {
+jv_backup_valid_archive_id "${backup_id}" || {
     echo 'ERROR: invalid Restore backup id.' >&2
     exit 1
 }

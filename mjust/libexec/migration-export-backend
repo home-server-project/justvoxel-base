@@ -41,8 +41,8 @@ trap cleanup EXIT INT TERM
 /usr/libexec/justvoxel/mjust/validate-data-mount
 [[ -d ${DATA_PATH} ]] || { echo "ERROR: Minecraft data directory does not exist: ${DATA_PATH}" >&2; exit 1; }
 
-stamp="$(date +%Y-%m-%d-%H%M%S)"
-filename="justvoxel-migration-${stamp}.tar.gz"
+stamp="$(date +%Y-%m-%d-%H%M)"
+filename="justvoxel-migration-$(jv_archive_server_label)-${stamp}.tar.gz"
 if (( $# == 1 )); then
     requested="$1"
     if [[ ${requested} == *.tar.gz ]]; then

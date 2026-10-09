@@ -10,10 +10,19 @@ for script in "${common}" "${apply}" "${entry}"; do
     bash -n "${script}"
 done
 
-grep -Fq 'minecraft-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}\.tar\.gz' "${common}" || {
+grep -Fq 'jv_backup_valid_archive_id "$1"' "${common}" || {
     echo 'ERROR: backup deletion lost strict JustVoxel archive naming.' >&2
     exit 1
 }
+source "${repo_root}/mjust/libexec/backup-common.sh"
+for id in minecraft-2026-09-15-043000.tar.gz minecraft-paper-2026-10-09-1506.tar.gz minecraft-kids-purpur-2026-10-09-1506-2.tar.gz; do
+    jv_backup_valid_archive_id "${id}" || { echo "ERROR: valid archive name rejected: ${id}" >&2; exit 1; }
+done
+for id in ../minecraft-paper-2026-10-09-1506.tar.gz minecraft-paper-2026-10-09-1506.tar.gz.partial minecraft-paper-2026-10-09-1506.tar.gz/../other minecraft-bad.tar.gz; do
+    if jv_backup_valid_archive_id "${id}"; then echo "ERROR: unsafe archive name accepted: ${id}" >&2; exit 1; fi
+done
+[[ "$(MINECRAFT_SERVER_TYPE=purpur jv_archive_server_label)" == minecraft-purpur ]] || { echo 'ERROR: configured Minecraft type missing from archive label' >&2; exit 1; }
+
 grep -Fq '! -L ${archive}' "${common}" || {
     echo 'ERROR: backup deletion lost archive symlink rejection.' >&2
     exit 1

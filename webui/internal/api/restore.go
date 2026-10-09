@@ -22,7 +22,7 @@ var (
 	adminRestoreBackupsTimeout = 20 * time.Second
 	adminRestorePlanTimeout    = 25 * time.Second
 	adminRestoreApplyTimeout   = 30 * time.Second
-	restoreBackupIDPattern     = regexp.MustCompile(`^minecraft-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}\.tar\.gz$`)
+	restoreBackupIDPattern     = regexp.MustCompile(`^minecraft-(?:[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}|[a-z][a-z0-9-]{0,70}-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}(?:-[1-9][0-9]{0,2})?)\.tar\.gz$`)
 	restoreFingerprintPattern  = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 )
 

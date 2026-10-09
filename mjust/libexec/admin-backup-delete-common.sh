@@ -14,7 +14,7 @@ backup_delete_json_error() {
 }
 
 backup_delete_validate_id() {
-    [[ $1 =~ ^minecraft-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}\.tar\.gz$ ]]
+    jv_backup_valid_archive_id "$1"
 }
 
 backup_delete_archive_path() {
