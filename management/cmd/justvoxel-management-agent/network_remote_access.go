@@ -78,7 +78,32 @@ func validNetbirdLoginURL(text string) string {
 	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil {
 		return ""
 	}
+	// Never direct a NetBird activation to another VPN provider.
+	host := strings.ToLower(parsed.Hostname())
+	if host == "tailscale.com" || strings.HasSuffix(host, ".tailscale.com") {
+		return ""
+	}
 	return text
+}
+
+// NetBird prints the login URL on a line that may also contain instructions
+// such as "and enter the code ...". Only extract it after NetBird's login prompt.
+func netbirdLoginURLFromLine(line string, awaitingURL bool) (string, bool) {
+	line = strings.TrimSpace(line)
+	const prompt = "use this url to log in:"
+	if index := strings.Index(strings.ToLower(line), prompt); index >= 0 {
+		awaitingURL = true
+		line = strings.TrimSpace(line[index+len(prompt):])
+	}
+	if !awaitingURL {
+		return "", false
+	}
+	for _, field := range strings.Fields(line) {
+		if link := validNetbirdLoginURL(field); link != "" {
+			return link, false
+		}
+	}
+	return "", true
 }
 
 var netbirdLogin = func() (string, error) {
@@ -101,8 +126,11 @@ var netbirdLogin = func() (string, error) {
 		defer reader.Close()
 		scanner := bufio.NewScanner(reader)
 		scanner.Buffer(make([]byte, 4096), 8192)
+		awaitingURL := false
 		for scanner.Scan() {
-			if link := validNetbirdLoginURL(scanner.Text()); link != "" {
+			link, waiting := netbirdLoginURLFromLine(scanner.Text(), awaitingURL)
+			awaitingURL = waiting
+			if link != "" {
 				select {
 				case links <- link:
 				default:
