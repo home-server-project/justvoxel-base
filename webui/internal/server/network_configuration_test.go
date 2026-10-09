@@ -216,7 +216,7 @@ for (const state of ["activating", "deactivating", "reloading", "refreshing"]) {
   assert(nodes.some((n) => n.textContent === "Activate" && n.disabled));
   assert(nodes.some((n) => n.textContent === "Deactivate" && n.disabled === (state === "deactivating")));
   const netbird = render({ ...base, id: "netbird", configured: false, service_active: false, service_state: state });
-  assert(netbird.some((n) => n.textContent === "Activate" && n.disabled));
+  assert(netbird.some((n) => n.textContent === "Activate" && n.disabled === (state !== "activating")));
   assert(netbird.some((n) => n.textContent === "Deactivate" && n.disabled === (state === "deactivating")));
   assert(nodes.some((n) => n.textContent === "Service: " + state[0].toUpperCase() + state.slice(1) + "…"));
 }
