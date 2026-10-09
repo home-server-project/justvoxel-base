@@ -61,7 +61,7 @@
   const providerControls = (provider) => {
     const blocked = !provider.installed || remoteBusy || provider.service_state === "deactivating";
     return {
-      activateDisabled: blocked || providerTransitional(provider) || (provider.id === "netbird" ? provider.connected : provider.service_active) || (provider.id === "playit" && setupRunning()),
+      activateDisabled: blocked || (providerTransitional(provider) && !(provider.id === "netbird" && provider.service_state === "activating")) || (provider.id === "netbird" ? provider.connected : provider.service_active) || (provider.id === "playit" && setupRunning()),
       deactivateDisabled: blocked || (!(provider.id === "playit" && setupRunning()) && !provider.service_active && !provider.service_enabled && provider.service_state === "inactive")
     };
   };
