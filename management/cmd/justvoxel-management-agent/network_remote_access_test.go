@@ -17,10 +17,11 @@ import (
 
 func remoteFixture(t *testing.T) *[]string {
 	t.Helper()
-	oldRun, oldStat, oldStatus, oldNetbirdStatus, oldNetbirdLogin := remoteSystemctl, remoteStat, tailscaleStatus, netbirdStatus, netbirdLogin
+	oldRun, oldStat, oldStatus, oldTailscaleLogin, oldNetbirdStatus, oldNetbirdLogin := remoteSystemctl, remoteStat, tailscaleStatus, tailscaleLogin, netbirdStatus, netbirdLogin
 	netbirdStatus = func(context.Context) (bool, string) { return false, "" }
 	netbirdLogin = func() (string, error) { return "https://app.netbird.io/login?code=example", nil }
-	tailscaleStatus = func(context.Context) (bool, string) { return false, "Not configured" }
+	tailscaleStatus = func(context.Context) (bool, string, string) { return false, "Not configured", "" }
+	tailscaleLogin = func() (string, error) { return "https://login.tailscale.com/a/0123456789abcdef", nil }
 	calls := []string{}
 	remoteSystemctl = func(_ context.Context, args ...string) (string, error) {
 		calls = append(calls, strings.Join(args, " "))
@@ -30,7 +31,7 @@ func remoteFixture(t *testing.T) *[]string {
 		return "", nil
 	}
 	remoteStat = func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
-	t.Cleanup(func() { remoteSystemctl = oldRun; remoteStat = oldStat; tailscaleStatus = oldStatus; netbirdStatus = oldNetbirdStatus; netbirdLogin = oldNetbirdLogin })
+	t.Cleanup(func() { remoteSystemctl = oldRun; remoteStat = oldStat; tailscaleStatus = oldStatus; tailscaleLogin = oldTailscaleLogin; netbirdStatus = oldNetbirdStatus; netbirdLogin = oldNetbirdLogin })
 	return &calls
 }
 
@@ -73,9 +74,9 @@ func TestRemoteProviderLifecycleUsesFixedUnitsAndAudits(t *testing.T) {
 			}
 			joined := strings.Join(*calls, "\n")
 			if action == "activate" {
-				if provider.id == "netbird" {
-					if !strings.Contains(joined, "enable netbird.service") || !strings.Contains(joined, "start --no-block netbird.service") {
-						t.Fatal("NetBird activation did not start service without blocking login")
+				if provider.id == "netbird" || provider.id == "tailscale" {
+					if !strings.Contains(joined, "enable "+provider.unit) || !strings.Contains(joined, "start --no-block "+provider.unit) {
+						t.Fatalf("%s activation blocked login", provider.id)
 					}
 				} else if !strings.Contains(joined, "enable --now "+provider.unit) {
 					t.Fatal("activate did not enable and start fixed unit")
@@ -242,19 +243,19 @@ func TestTailscaleFixedStatusIdentityEvidence(t *testing.T) {
 	oldCommand := tailscaleStatusCommand
 	t.Cleanup(func() { tailscaleStatusCommand = oldCommand })
 	for _, test := range []struct {
-		name, payload, summary string
-		configured             bool
+		name, payload, summary, ip string
+		configured                 bool
 	}{
-		{"needs-login", `{"BackendState":"NeedsLogin","HaveNodeKey":true,"CurrentTailnet":{}}`, "Not configured", false},
-		{"no-state", `{"BackendState":"NoState","HaveNodeKey":true,"CurrentTailnet":{}}`, "Not configured", false},
-		{"running", `{"BackendState":"Running","HaveNodeKey":true,"CurrentTailnet":{"Name":"private-account"}}`, "Connected", true},
-		{"approval", `{"BackendState":"NeedsMachineAuth"}`, "Awaiting approval", true},
-		{"starting-no-identity", `{"BackendState":"Starting"}`, "Not configured", false},
-		{"starting-key", `{"BackendState":"Starting","HaveNodeKey":true}`, "Starting", true},
-		{"stopped-no-identity", `{"BackendState":"Stopped","CurrentTailnet":null}`, "Not configured", false},
-		{"stopped-tailnet", `{"BackendState":"Stopped","CurrentTailnet":{}}`, "Stopped", true},
-		{"unknown", `{"BackendState":"Unknown","HaveNodeKey":true}`, "Not configured", false},
-		{"invalid", `{`, "Not configured", false},
+		{"needs-login", `{"BackendState":"NeedsLogin","HaveNodeKey":true,"CurrentTailnet":{}}`, "Not configured", "", false},
+		{"no-state", `{"BackendState":"NoState","HaveNodeKey":true,"CurrentTailnet":{}}`, "Not configured", "", false},
+		{"running", `{"BackendState":"Running","HaveNodeKey":true,"TailscaleIPs":["fd7a:115c:a1e0::5","100.111.12.13"],"CurrentTailnet":{"Name":"private-account"}}`, "Connected", "100.111.12.13", true},
+		{"approval", `{"BackendState":"NeedsMachineAuth"}`, "Awaiting approval", "", true},
+		{"starting-no-identity", `{"BackendState":"Starting"}`, "Not configured", "", false},
+		{"starting-key", `{"BackendState":"Starting","HaveNodeKey":true}`, "Starting", "", true},
+		{"stopped-no-identity", `{"BackendState":"Stopped","CurrentTailnet":null}`, "Not configured", "", false},
+		{"stopped-tailnet", `{"BackendState":"Stopped","CurrentTailnet":{}}`, "Stopped", "", true},
+		{"unknown", `{"BackendState":"Unknown","HaveNodeKey":true}`, "Not configured", "", false},
+		{"invalid", `{`, "Not configured", "", false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			tailscaleStatusCommand = func(ctx context.Context, executable string, args ...string) *exec.Cmd {
@@ -269,17 +270,88 @@ func TestTailscaleFixedStatusIdentityEvidence(t *testing.T) {
 				cmd.Env = append(os.Environ(), "JUSTVOXEL_TAILSCALE_STATUS_FIXTURE=1", "JUSTVOXEL_TAILSCALE_JSON="+test.payload)
 				return cmd
 			}
-			configured, summary := tailscaleStatus(context.Background())
-			if configured != test.configured || summary != test.summary {
-				t.Fatalf("configured=%v summary=%q", configured, summary)
+			configured, summary, ip := tailscaleStatus(context.Background())
+			if configured != test.configured || summary != test.summary || ip != test.ip {
+				t.Fatalf("configured=%v summary=%q ip=%q", configured, summary, ip)
 			}
 		})
 	}
 	tailscaleStatusCommand = func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
 		return exec.CommandContext(ctx, "/nonexistent/justvoxel-test-tailscale")
 	}
-	if configured, summary := tailscaleStatus(context.Background()); configured || summary != "Not configured" {
+	if configured, summary, ip := tailscaleStatus(context.Background()); configured || summary != "Not configured" || ip != "" {
 		t.Fatal("command failure claimed configuration")
+	}
+}
+
+func TestTailscaleActivationReturnsMachineAuthURL(t *testing.T) {
+	remoteFixture(t)
+	calls := 0
+	tailscaleLogin = func() (string, error) {
+		calls++
+		return "https://login.tailscale.com/a/test1234", nil
+	}
+	rr := networkAdminRequest(adminServerForTest(), "/v1/admin/network/remote-access/tailscale", `{"action":"activate"}`)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"login_url":"https://login.tailscale.com/a/test1234"`) || calls != 1 {
+		t.Fatalf("Tailscale link: code=%d body=%s calls=%d", rr.Code, rr.Body.String(), calls)
+	}
+}
+
+func TestTailscaleAlreadyConnectedDoesNotRequestLogin(t *testing.T) {
+	remoteFixture(t)
+	tailscaleStatus = func(context.Context) (bool, string, string) { return true, "Connected", "100.101.102.103" }
+	tailscaleLogin = func() (string, error) { t.Fatal("connected Tailscale should not request login"); return "", nil }
+	rr := networkAdminRequest(adminServerForTest(), "/v1/admin/network/remote-access/tailscale", `{"action":"activate"}`)
+	if rr.Code != http.StatusOK || strings.Contains(rr.Body.String(), "login.tailscale.com") {
+		t.Fatalf("connected Tailscale login: code=%d body=%s", rr.Code, rr.Body.String())
+	}
+	provider, _ := remoteProviderByID("tailscale")
+	status, err := remoteProviderStatus(context.Background(), provider)
+	if err != nil || !status.Connected || status.IP != "100.101.102.103" {
+		t.Fatalf("Tailscale IP: %+v err=%v", status, err)
+	}
+}
+
+func TestTailscaleAuthURLIsMachineSpecific(t *testing.T) {
+	for _, candidate := range []string{
+		"https://console.tailscale.com/admin/", "https://login.tailscale.com/",
+		"https://evil.test/a/test123", "http://login.tailscale.com/a/test123",
+		"https://evil.test@login.tailscale.com/a/test123", "javascript:alert(1)",
+		"https://login.tailscale.com/a/invalid value",
+	} {
+		if validTailscaleLoginURL(candidate) != "" {
+			t.Fatalf("accepted non-machine auth URL %q", candidate)
+		}
+	}
+	if validTailscaleLoginURL("https://login.tailscale.com/a/0123456789abcdef") == "" {
+		t.Fatal("valid machine auth URL rejected")
+	}
+}
+
+func TestTailscaleUpCLIHelper(t *testing.T) {
+	if os.Getenv("JUSTVOXEL_TEST_TAILSCALE_UP") != "1" {
+		return
+	}
+	_, _ = os.Stdout.WriteString("{\"AuthURL\":\"https://login.tailscale.com/a/0123456789abcdef\",\"BackendState\":\"NeedsLogin\"}\n")
+	time.Sleep(40 * time.Millisecond)
+	_, _ = os.Stdout.WriteString("{\"BackendState\":\"Running\"}\n")
+	os.Exit(0)
+}
+
+func TestTailscaleUpReturnsLinkBeforeLoginFinishes(t *testing.T) {
+	old := tailscaleUpCommand
+	t.Cleanup(func() { tailscaleUpCommand = old })
+	tailscaleUpCommand = func(ctx context.Context, executable string, args ...string) *exec.Cmd {
+		if executable != "/usr/bin/tailscale" || !reflect.DeepEqual(args, []string{"up", "--json"}) {
+			t.Fatalf("unexpected command %s %v", executable, args)
+		}
+		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestTailscaleUpCLIHelper$")
+		cmd.Env = append(os.Environ(), "JUSTVOXEL_TEST_TAILSCALE_UP=1")
+		return cmd
+	}
+	url, err := tailscaleLogin()
+	if err != nil || url != "https://login.tailscale.com/a/0123456789abcdef" {
+		t.Fatalf("login result %q, %v", url, err)
 	}
 }
 
@@ -345,7 +417,7 @@ func TestCanonicalProviderSummariesFollowConfigurationAndService(t *testing.T) {
 			t.Fatalf("%s %s: %+v %v", test.id, test.state, status, err)
 		}
 	}
-	tailscaleStatus = func(context.Context) (bool, string) { return true, "Connected" }
+	tailscaleStatus = func(context.Context) (bool, string, string) { return true, "Connected", "100.100.1.2" }
 	remoteSystemctl = func(context.Context, ...string) (string, error) {
 		return "LoadState=loaded\nUnitFileState=enabled\nActiveState=inactive", nil
 	}
