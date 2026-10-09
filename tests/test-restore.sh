@@ -52,6 +52,18 @@ if grep -Fq "${tmp}/backups" <<< "${discovery}"; then
     fail 'API restore discovery must not expose backup filesystem paths'
 fi
 
+mkdir -p "${tmp}/backups/jv-abc123"
+touch -d '2026-09-17 04:30:00' "${tmp}/backups/jv-abc123/minecraft-paper-2026-09-17-0430.tar.gz"
+touch -d '2026-09-18 04:30:00' "${tmp}/backups/jv-abc123/minecraft-paper-2026-09-18-0430.tar.gz.partial"
+mkdir -p "${tmp}/other"
+touch "${tmp}/other/minecraft-paper-2026-09-19-0430.tar.gz"
+ln -s "${tmp}/other" "${tmp}/backups/jv-redirect1"
+nested_discovery="$(jv_restore_discovery_json "${tmp}/backups")"
+[[ $(jq -r '.backups | length' <<< "${nested_discovery}") == 3 ]] || fail 'discovery lost or duplicated instance and legacy backups'
+[[ $(jq -r '.backups[0].id' <<< "${nested_discovery}") == jv-abc123/minecraft-paper-2026-09-17-0430.tar.gz ]] || fail 'instance backup folder was not resolved relative to configured backup root'
+[[ $(jq -r '.backups[1].id' <<< "${nested_discovery}") == minecraft-2026-09-15-043000.tar.gz ]] || fail 'legacy backup disappeared after discovery of instance backups'
+if grep -Fq 'jv-redirect1' <<< "${nested_discovery}"; then fail 'symlinked instance folder was followed'; fi
+
 [[ $(jv_restore_version_relation pinned 26.1 pinned 26.2) == backup_older ]] || fail 'older backup version relation wrong'
 [[ $(jv_restore_version_relation pinned 26.2 pinned 26.2) == same ]] || fail 'same version relation wrong'
 [[ $(jv_restore_version_relation pinned 26.3 pinned 26.2) == backup_newer ]] || fail 'newer backup version relation wrong'

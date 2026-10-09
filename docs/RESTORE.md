@@ -94,7 +94,7 @@ minecraft-paper-2026-10-09-1506.tar.gz.meta.json
 minecraft-paper-2026-10-09-1506-2.tar.gz
 ```
 
-The leading `minecraft` is today's default server name; `paper` is the configured server type. The second archive in a minute gets a numeric suffix instead of overwriting the first. Old names such as `minecraft-2026-09-15-043000.tar.gz` remain fully supported. No JustVoxel Instance ID is embedded in the archives.
+The leading `minecraft` is today's default server name; `paper` is the configured server type. The second archive in a minute gets a numeric suffix instead of overwriting the first. Old names such as `minecraft-2026-09-15-043000.tar.gz` remain fully supported. New backups use a child folder named after the current local JustVoxel Instance ID inside the configured backup destination (for example, `BACKUP_PATH/jv-abc123/minecraft-paper-2026-10-09-1506.tar.gz`). Existing root-level backups remain in place, visible and restorable. Each instance folder has separate automatic retention. The configured backup path and mount never change, and no JustVoxel Instance ID is embedded in an archive.
 
 The metadata records restore-useful information such as configured Minecraft
 version policy, reported server version when available, container image/digest,

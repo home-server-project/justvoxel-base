@@ -26,7 +26,7 @@ fi
 
 backup_id="$(jq -r '.backup_id' <<< "${request}")"
 mode="$(jq -r '.mode' <<< "${request}")"
-if ! jv_backup_valid_archive_id "${backup_id}"; then
+if ! jv_backup_valid_archive_ref "${backup_id}"; then
     emit_plan_error invalid_backup_id 'Selected backup identifier is invalid.'
     exit 0
 fi
@@ -73,7 +73,7 @@ fi
 selected_record=''
 while IFS= read -r record; do
     IFS="$(printf '\t')" read -r epoch size path <<< "${record}"
-    if [[ $(basename -- "${path}") == "${backup_id}" ]]; then
+    if [[ $(jv_backup_archive_ref "${minecraft_backup_path}" "${path}") == "${backup_id}" ]]; then
         selected_record="${record}"
         break
     fi

@@ -16,7 +16,7 @@ const adminRestoreDiscoveryHelper = "/usr/libexec/justvoxel/mjust/admin-restore-
 
 var (
 	adminRestoreDiscoveryTimeout = 15 * time.Second
-	adminRestoreBackupIDPattern  = regexp.MustCompile(`^minecraft-(?:[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}|[a-z][a-z0-9-]{0,70}-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}(?:-[1-9][0-9]{0,2})?)\.tar\.gz$`)
+	adminRestoreBackupIDPattern  = regexp.MustCompile(`^(?:jv-[a-z0-9]{6,12}/)?minecraft-(?:[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}|[a-z][a-z0-9-]{0,70}-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}(?:-[1-9][0-9]{0,2})?)\.tar\.gz$`)
 )
 
 var runAdminRestoreDiscoveryHelper = func(ctx context.Context) ([]byte, error) {

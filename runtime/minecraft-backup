@@ -1,6 +1,7 @@
 #!/usr/bin/bash
 set -Eeuo pipefail
 source /usr/libexec/justvoxel/mjust/backup-common.sh
+source /usr/libexec/justvoxel/mjust/backup-instance-storage.sh
 source /usr/libexec/justvoxel/mjust/interrupt-safety.sh
 
 readonly config_file="/etc/justvoxel/minecraft-backup.env"
@@ -38,11 +39,26 @@ if [[ ${JUSTVOXEL_MAINTENANCE_LOCK_HELD:-0} != 1 ]]; then
     fi
 fi
 
+# Keep the administrator-configured backup root. The ID is only a subfolder.
+# Legacy installations without an identity continue using the backup root.
+if minecraft_instance_backup_path="$(jv_backup_prepare_instance_directory "${minecraft_backup_path}")"; then
+    :
+else
+    instance_storage_status=$?
+    if (( instance_storage_status == 2 )); then
+        minecraft_instance_backup_path="${minecraft_backup_path}"
+        echo 'WARNING: Instance ID not yet registered; backup stays at configured root.' >&2
+    else
+        echo 'ERROR: instance backup subfolder is unsafe or unavailable.' >&2
+        exit 1
+    fi
+fi
+
 minecraft_source_parent="$(dirname -- "${minecraft_data_path}")"
 minecraft_source_name="$(basename -- "${minecraft_data_path}")"
 minecraft_timestamp="$(date +%F-%H%M)"
 minecraft_basename="$(jv_archive_server_label)-${minecraft_timestamp}"
-minecraft_final_archive="${minecraft_backup_path}/${minecraft_basename}.tar.gz"
+minecraft_final_archive="${minecraft_instance_backup_path}/${minecraft_basename}.tar.gz"
 minecraft_partial_archive="${minecraft_final_archive}.partial"
 minecraft_collision=2
 while [[ -e ${minecraft_final_archive} || -L ${minecraft_final_archive} ||
@@ -52,7 +68,7 @@ while [[ -e ${minecraft_final_archive} || -L ${minecraft_final_archive} ||
         echo 'ERROR: too many backups with the same minute timestamp.' >&2
         exit 1
     fi
-    minecraft_final_archive="${minecraft_backup_path}/${minecraft_basename}-${minecraft_collision}.tar.gz"
+    minecraft_final_archive="${minecraft_instance_backup_path}/${minecraft_basename}-${minecraft_collision}.tar.gz"
     minecraft_partial_archive="${minecraft_final_archive}.partial"
     minecraft_collision=$((minecraft_collision + 1))
 done
@@ -75,7 +91,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-find "${minecraft_backup_path}" -maxdepth 1 -type f -name 'minecraft-*.tar.gz.partial' -mmin +1440 -delete
+find "${minecraft_instance_backup_path}" -maxdepth 1 -type f -name 'minecraft-*.tar.gz.partial' -mmin +1440 -delete
 
 metadata_server_version=''
 metadata_geyser_version=''
@@ -122,7 +138,7 @@ else
 fi
 
 mapfile -t minecraft_archives < <(
-    find "${minecraft_backup_path}" -maxdepth 1 -type f -name 'minecraft-*.tar.gz' -printf '%T@ %p\n' | sort -nr | cut -d' ' -f2-
+    find "${minecraft_instance_backup_path}" -maxdepth 1 -type f -name 'minecraft-*.tar.gz' -printf '%T@ %p\n' | sort -nr | cut -d' ' -f2-
 )
 if (( ${#minecraft_archives[@]} > BACKUP_KEEP )); then
     for (( index=BACKUP_KEEP; index<${#minecraft_archives[@]}; index++ )); do

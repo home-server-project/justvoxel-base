@@ -45,8 +45,7 @@ jv_restore_discovery_json() {
 
     while IFS="$(printf '\t')" read -r epoch size archive; do
         [[ -n ${archive} ]] || continue
-        id="$(basename -- "${archive}")"
-        jv_backup_valid_archive_id "${id}" || continue
+        id="$(jv_backup_archive_ref "${path}" "${archive}")" || continue
         [[ ${size} =~ ^[0-9]+$ ]] || continue
         epoch_int="${epoch%%.*}"
         [[ ${epoch_int} =~ ^[0-9]+$ ]] || continue

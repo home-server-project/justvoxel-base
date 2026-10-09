@@ -162,7 +162,7 @@ players_confirmed="$(jq -r '.players_confirmed' <<< "${request}")"
     echo 'ERROR: invalid Restore plan fingerprint.' >&2
     exit 1
 }
-jv_backup_valid_archive_id "${backup_id}" || {
+jv_backup_valid_archive_ref "${backup_id}" || {
     echo 'ERROR: invalid Restore backup id.' >&2
     exit 1
 }
@@ -197,7 +197,7 @@ fi
 selected_record=''
 while IFS= read -r record; do
     IFS="$(printf '\t')" read -r _epoch _size path <<< "${record}"
-    if [[ $(basename -- "${path}") == "${backup_id}" ]]; then
+    if [[ $(jv_backup_archive_ref "${minecraft_backup_path}" "${path}") == "${backup_id}" ]]; then
         selected_record="${record}"
         break
     fi

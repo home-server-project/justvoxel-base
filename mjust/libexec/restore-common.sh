@@ -1,10 +1,18 @@
 #!/usr/bin/bash
 
 jv_restore_list_archives() {
-    local path="$1"
-    find "${path}" -maxdepth 1 -type f -name 'minecraft-*.tar.gz' \
-        -printf '%T@\t%s\t%p\n' 2>/dev/null \
-        | sort -t $'\t' -k1,1nr
+    local path="$1" directory id
+    {
+        # Untouched legacy backups under the configured root.
+        find "${path}" -maxdepth 1 -type f -name 'minecraft-*.tar.gz' -printf '%T@\t%s\t%p\n' 2>/dev/null
+        # No recursion beyond the first level of valid Instance ID folders.
+        for directory in "${path}"/jv-*; do
+            [[ -d ${directory} && ! -L ${directory} ]] || continue
+            id="$(basename -- "${directory}")"
+            [[ ${id} =~ ^jv-[a-z0-9]{6,12}$ ]] || continue
+            find "${directory}" -maxdepth 1 -type f -name 'minecraft-*.tar.gz' -printf '%T@\t%s\t%p\n' 2>/dev/null
+        done
+    } | sort -t $'\t' -k1,1nr
 }
 
 jv_restore_human_bytes() {

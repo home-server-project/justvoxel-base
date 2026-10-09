@@ -22,6 +22,24 @@ jv_backup_valid_archive_id() {
         [[ ${id} =~ ^minecraft-[a-z][a-z0-9-]{0,70}-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}(-[1-9][0-9]{0,2})?\.tar\.gz$ ]]
 }
 
+# Public backup references may be old root filenames or files directly under
+# a locally managed JustVoxel Instance ID folder. No archive embeds this ID.
+jv_backup_valid_archive_ref() {
+    local ref="$1" filename
+    if jv_backup_valid_archive_id "${ref}"; then return 0; fi
+    [[ ${ref} =~ ^(jv-[a-z0-9]{6,12})/([^/]+)$ ]] || return 1
+    filename="${BASH_REMATCH[2]}"
+    jv_backup_valid_archive_id "${filename}"
+}
+
+jv_backup_archive_ref() {
+    local root="$1" archive="$2" ref
+    [[ ${archive} == "${root}/"* ]] || return 1
+    ref="${archive#${root}/}"
+    jv_backup_valid_archive_ref "${ref}" || return 1
+    printf '%s\n' "${ref}"
+}
+
 jv_backup_load_config() {
     local backup_config_file="${1:-/etc/justvoxel/minecraft-backup.env}"
 

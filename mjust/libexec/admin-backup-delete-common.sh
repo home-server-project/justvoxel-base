@@ -14,7 +14,7 @@ backup_delete_json_error() {
 }
 
 backup_delete_validate_id() {
-    jv_backup_valid_archive_id "$1"
+    jv_backup_valid_archive_ref "$1"
 }
 
 backup_delete_archive_path() {
@@ -35,7 +35,7 @@ backup_delete_metadata_path() {
     [[ -f ${metadata} && ! -L ${metadata} ]] || return 1
     root="$(readlink -f -- "${minecraft_backup_path}" 2>/dev/null || true)"
     real="$(readlink -f -- "${metadata}" 2>/dev/null || true)"
-    [[ -n ${root} && -n ${real} && ${real} == "${root}/$(basename -- "${metadata}")" ]] || return 1
+    [[ -n ${root} && -n ${real} && ${real} == "${archive}.meta.json" ]] || return 1
     printf '%s\n' "${real}"
 }
 

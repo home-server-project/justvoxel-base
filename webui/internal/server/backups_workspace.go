@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -41,6 +42,7 @@ type backupsWorkspaceAutomaticForm struct {
 
 type backupsWorkspaceBackupView struct {
 	ID             string
+	DisplayName    string
 	CreatedLabel   string
 	Size           string
 	MetadataStatus string
@@ -511,7 +513,7 @@ func (a *App) buildBackupsWorkspaceData(
 	for _, backup := range backups.Backups {
 		totalBytes += backup.SizeBytes
 		view := backupsWorkspaceBackupView{
-			ID: backup.ID, CreatedLabel: backupsWorkspaceFormatTime(backup.CreatedAt),
+			ID: backup.ID, DisplayName: path.Base(backup.ID), CreatedLabel: backupsWorkspaceFormatTime(backup.CreatedAt),
 			Size: humanBytes(backup.SizeBytes), MetadataStatus: backup.MetadataStatus,
 		}
 		if backup.Metadata != nil {
