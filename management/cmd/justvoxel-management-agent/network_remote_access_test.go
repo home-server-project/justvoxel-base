@@ -17,7 +17,9 @@ import (
 
 func remoteFixture(t *testing.T) *[]string {
 	t.Helper()
-	oldRun, oldStat, oldStatus := remoteSystemctl, remoteStat, tailscaleStatus
+	oldRun, oldStat, oldStatus, oldNetbirdStatus, oldNetbirdLogin := remoteSystemctl, remoteStat, tailscaleStatus, netbirdStatus, netbirdLogin
+	netbirdStatus = func(context.Context) (bool, string) { return false, "" }
+	netbirdLogin = func() (string, error) { return "https://app.netbird.io/login?code=example", nil }
 	tailscaleStatus = func(context.Context) (bool, string) { return false, "Not configured" }
 	calls := []string{}
 	remoteSystemctl = func(_ context.Context, args ...string) (string, error) {
@@ -28,7 +30,7 @@ func remoteFixture(t *testing.T) *[]string {
 		return "", nil
 	}
 	remoteStat = func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
-	t.Cleanup(func() { remoteSystemctl = oldRun; remoteStat = oldStat; tailscaleStatus = oldStatus })
+	t.Cleanup(func() { remoteSystemctl = oldRun; remoteStat = oldStat; tailscaleStatus = oldStatus; netbirdStatus = oldNetbirdStatus; netbirdLogin = oldNetbirdLogin })
 	return &calls
 }
 
@@ -93,6 +95,51 @@ func TestRemoteProviderLifecycleUsesFixedUnitsAndAudits(t *testing.T) {
 		if !strings.HasPrefix(event.Action, "network_remote_access_") {
 			t.Fatalf("unexpected action %s", event.Action)
 		}
+	}
+}
+
+
+func TestNetBirdActivationReturnsCLILoginURL(t *testing.T) {
+	remoteFixture(t)
+	calls := 0
+	netbirdLogin = func() (string, error) {
+		calls++
+		return "https://login.netbird.io/device?user_code=abcd", nil
+	}
+	rr := networkAdminRequest(adminServerForTest(), "/v1/admin/network/remote-access/netbird", `{"action":"activate"}`)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"login_url":"https://login.netbird.io/device?user_code=abcd"`) || calls != 1 {
+		t.Fatalf("NetBird login did not return CLI URL: code=%d body=%s calls=%d", rr.Code, rr.Body.String(), calls)
+	}
+}
+
+func TestNetBirdConnectedShowsAddressWithoutStartingLogin(t *testing.T) {
+	remoteFixture(t)
+	path := filepath.Join(t.TempDir(), "netbird-state")
+	if err := os.WriteFile(path, []byte("state"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	remoteStat = func(string) (os.FileInfo, error) { return os.Stat(path) }
+	netbirdStatus = func(context.Context) (bool, string) { return true, "100.90.1.4/16" }
+	netbirdLogin = func() (string, error) { t.Fatal("login must not start when connected"); return "", nil }
+	netbird, _ := remoteProviderByID("netbird")
+	status, err := remoteProviderStatus(context.Background(), netbird)
+	if err != nil || !status.Connected || !status.Configured || status.Summary != "Connected" || status.IP != "100.90.1.4/16" {
+		t.Fatalf("NetBird status: %+v, %v", status, err)
+	}
+	rr := networkAdminRequest(adminServerForTest(), "/v1/admin/network/remote-access/netbird", `{"action":"activate"}`)
+	if rr.Code != http.StatusOK || strings.Contains(rr.Body.String(), "login.netbird.io") {
+		t.Fatalf("connected NetBird unexpectedly requested login: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestNetBirdLoginURLRejectsUnsafeLinks(t *testing.T) {
+	for _, candidate := range []string{"http://app.netbird.io/", "javascript:alert(1)", "https://evil.test\nhttps://app.netbird.io/", "https://user:pass@app.netbird.io/", "https://app.netbird.io/ invalid"} {
+		if validNetbirdLoginURL(candidate) != "" {
+			t.Fatalf("accepted unsafe URL %q", candidate)
+		}
+	}
+	if validNetbirdLoginURL("https://app.netbird.io/device?user_code=1234") == "" {
+		t.Fatal("rejected valid NetBird URL")
 	}
 }
 
