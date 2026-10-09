@@ -72,8 +72,14 @@ func TestRemoteProviderLifecycleUsesFixedUnitsAndAudits(t *testing.T) {
 				t.Fatalf("%s %s: %s", provider.id, action, rr.Body.String())
 			}
 			joined := strings.Join(*calls, "\n")
-			if action == "activate" && !strings.Contains(joined, "enable --now "+provider.unit) {
-				t.Fatal("activate did not enable and start fixed unit")
+			if action == "activate" {
+				if provider.id == "netbird" {
+					if !strings.Contains(joined, "enable netbird.service") || !strings.Contains(joined, "start --no-block netbird.service") {
+						t.Fatal("NetBird activation did not start service without blocking login")
+					}
+				} else if !strings.Contains(joined, "enable --now "+provider.unit) {
+					t.Fatal("activate did not enable and start fixed unit")
+				}
 			}
 			if action == "deactivate" && (!strings.Contains(joined, "stop "+provider.unit) || !strings.Contains(joined, "disable "+provider.unit)) {
 				t.Fatal("deactivate did not stop and disable fixed unit")
@@ -205,7 +211,7 @@ func TestRemoteProviderTransitionalLifecycle(t *testing.T) {
 		for _, action := range []string{"activate", "deactivate"} {
 			rr := networkAdminRequest(adminServerForTest(), "/v1/admin/network/remote-access/netbird", `{"action":"`+action+`"}`)
 			want := http.StatusConflict
-			if action == "deactivate" && state != "deactivating" {
+			if (action == "deactivate" && state != "deactivating") || (action == "activate" && state == "activating") {
 				want = http.StatusOK
 			}
 			if rr.Code != want {
@@ -215,6 +221,8 @@ func TestRemoteProviderTransitionalLifecycle(t *testing.T) {
 		want := 2
 		if state == "deactivating" {
 			want = 0
+		} else if state == "activating" {
+			want = 4
 		}
 		if mutations != want {
 			t.Fatalf("unexpected mutations: %d", mutations)
