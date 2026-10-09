@@ -338,7 +338,7 @@ func (s *server) networkRemoteAccessChange(w http.ResponseWriter, r *http.Reques
 	if err == nil && !status.Installed {
 		err = os.ErrNotExist
 	}
-	if err == nil && (status.ServiceState == "deactivating" || (request.Action == "activate" && remoteTransitional(status.ServiceState))) {
+	if err == nil && (status.ServiceState == "deactivating" || (request.Action == "activate" && remoteTransitional(status.ServiceState) && !(provider.id == "netbird" && status.ServiceState == "activating"))) {
 		writeError(w, http.StatusConflict, "provider service is changing state; refresh service status")
 		return
 	}
@@ -377,6 +377,14 @@ func remoteTransitional(state string) bool {
 }
 
 func remoteActivate(ctx context.Context, provider remoteProviderMetadata) error {
+	if provider.id == "netbird" {
+		// NetBird login must not wait for the daemon to report fully active.
+		if _, err := remoteSystemctl(ctx, "enable", provider.unit); err != nil {
+			return err
+		}
+		_, err := remoteSystemctl(ctx, "start", "--no-block", provider.unit)
+		return err
+	}
 	_, err := remoteSystemctl(ctx, "enable", "--now", provider.unit)
 	return err
 }
