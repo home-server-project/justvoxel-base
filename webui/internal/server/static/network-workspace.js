@@ -30,7 +30,7 @@
   const pendingDashboards = new Set();
   const providerProgress = new Map();
   const validNetbirdLoginURL = (value) => {
-    if (typeof value !== "string" || value.length > 2048 || /[\\s<>"\x27]/.test(value)) return false;
+    if (typeof value !== "string" || value.length > 2048 || /\s/.test(value) || /[<>"\x27]/.test(value)) return false;
     try { const url = new URL(value); return url.protocol === "https:" && Boolean(url.hostname) && !url.username && !url.password; }
     catch (_) { return false; }
   };
