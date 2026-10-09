@@ -14,7 +14,7 @@ func TestRestoreBackupFilenameCompatibility(t *testing.T) {
 		"minecraft-2026-09-20-043000.tar.gz",
 		"minecraft-paper-2026-10-09-1506.tar.gz",
 		"minecraft-kids-purpur-2026-10-09-1506-2.tar.gz",
-        "jv-abc123/minecraft-paper-2026-10-09-1506.tar.gz",
+		"jv-abc123/minecraft-paper-2026-10-09-1506.tar.gz",
 	} {
 		if !restoreBackupIDPattern.MatchString(name) {
 			t.Errorf("rejected valid backup %q", name)
@@ -24,8 +24,8 @@ func TestRestoreBackupFilenameCompatibility(t *testing.T) {
 		"../minecraft-paper-2026-10-09-1506.tar.gz",
 		"minecraft-paper-2026-10-09-1506.tar.gz.partial",
 		"minecraft-bad.tar.gz",
-        "jv-abc123/../minecraft-paper-2026-10-09-1506.tar.gz",
-        "other/minecraft-paper-2026-10-09-1506.tar.gz",
+		"jv-abc123/../minecraft-paper-2026-10-09-1506.tar.gz",
+		"other/minecraft-paper-2026-10-09-1506.tar.gz",
 	} {
 		if restoreBackupIDPattern.MatchString(name) {
 			t.Errorf("accepted unsafe backup %q", name)
