@@ -239,16 +239,13 @@ var tailscaleLogin = func() (string, error) {
 					ready <- loginResult{err: os.ErrInvalid}
 				}
 				reported = true
-			} else if message.BackendState == "Running" {
+			} else if message.BackendState == "Running" || message.BackendState == "NeedsMachineAuth" {
 				ready <- loginResult{} // Already authenticated; no login page needed.
 				reported = true
 			}
 		}
 		err := cmd.Wait()
 		if !reported {
-			if err == nil {
-				err = os.ErrInvalid
-			}
 			ready <- loginResult{err: err}
 		}
 	}()
@@ -432,7 +429,7 @@ func (s *server) networkRemoteAccessChange(w http.ResponseWriter, r *http.Reques
 	if err == nil && !status.Installed {
 		err = os.ErrNotExist
 	}
-	if err == nil && (status.ServiceState == "deactivating" || (request.Action == "activate" && remoteTransitional(status.ServiceState) && !((provider.id == "netbird" || provider.id == "tailscale") && status.ServiceState == "activating"))) {
+	if err == nil && (status.ServiceState == "deactivating" || (request.Action == "activate" && remoteTransitional(status.ServiceState) && !(provider.id == "netbird" && status.ServiceState == "activating"))) {
 		writeError(w, http.StatusConflict, "provider service is changing state; refresh service status")
 		return
 	}
@@ -476,8 +473,8 @@ func remoteTransitional(state string) bool {
 }
 
 func remoteActivate(ctx context.Context, provider remoteProviderMetadata) error {
-	if provider.id == "netbird" || provider.id == "tailscale" {
-		// The daemon may still be starting; do not block the account login.
+	if provider.id == "netbird" {
+		// NetBird login must not wait for the daemon to report fully active.
 		if _, err := remoteSystemctl(ctx, "enable", provider.unit); err != nil {
 			return err
 		}
