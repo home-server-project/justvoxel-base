@@ -52,6 +52,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          syntax_failures=()
+          test_failures=()
+          test_count=0
           for script in \
             build_files/*.sh \
             build_files/validate/*.sh \
@@ -60,12 +63,41 @@ jobs:
             runtime/* \
             tests/*.sh; do
             [[ -f "${script}" ]] || continue
-            bash -n "${script}"
+            printf 'Checking syntax: %s\n' "${script}"
+            if bash -n "${script}"; then
+              printf 'PASS syntax: %s\n' "${script}"
+            else
+              printf 'FAIL syntax: %s\n' "${script}" >&2
+              syntax_failures+=("${script}")
+            fi
           done
           for test_script in tests/test-*.sh; do
             [[ -f "${test_script}" ]] || continue
-            bash "${test_script}"
+            test_count=$((test_count + 1))
+            printf 'Running test: %s\n' "${test_script}"
+            if bash "${test_script}"; then
+              printf 'PASS: %s\n' "${test_script}"
+            else
+              test_status=$?
+              printf 'FAIL: %s (exit %s)\n' "${test_script}" "${test_status}" >&2
+              test_failures+=("${test_script}")
+            fi
           done
+          if (( test_count == 0 )); then
+            echo 'ERROR: no shell regression scripts found.' >&2
+            exit 1
+          fi
+          if (( ${#syntax_failures[@]} > 0 )); then
+            printf 'Syntax checks failed:\n' >&2
+            printf '  %s\n' "${syntax_failures[@]}" >&2
+          fi
+          if (( ${#test_failures[@]} > 0 )); then
+            printf 'Regression tests failed:\n' >&2
+            printf '  %s\n' "${test_failures[@]}" >&2
+          fi
+          if (( ${#syntax_failures[@]} > 0 || ${#test_failures[@]} > 0 )); then
+            exit 1
+          fi
 
       - name: Check WebUI JavaScript syntax
         shell: bash
