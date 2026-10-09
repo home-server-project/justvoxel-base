@@ -476,8 +476,8 @@ func remoteTransitional(state string) bool {
 }
 
 func remoteActivate(ctx context.Context, provider remoteProviderMetadata) error {
-	if provider.id == "netbird" {
-		// NetBird login must not wait for the daemon to report fully active.
+	if provider.id == "netbird" || provider.id == "tailscale" {
+		// The daemon may still be starting; do not block the account login.
 		if _, err := remoteSystemctl(ctx, "enable", provider.unit); err != nil {
 			return err
 		}
