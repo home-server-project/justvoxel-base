@@ -74,9 +74,9 @@ func TestRemoteProviderLifecycleUsesFixedUnitsAndAudits(t *testing.T) {
 			}
 			joined := strings.Join(*calls, "\n")
 			if action == "activate" {
-				if provider.id == "netbird" || provider.id == "tailscale" {
-					if !strings.Contains(joined, "enable "+provider.unit) || !strings.Contains(joined, "start --no-block "+provider.unit) {
-						t.Fatalf("%s activation blocked login", provider.id)
+				if provider.id == "netbird" {
+					if !strings.Contains(joined, "enable netbird.service") || !strings.Contains(joined, "start --no-block netbird.service") {
+						t.Fatal("NetBird activation blocked login")
 					}
 				} else if !strings.Contains(joined, "enable --now "+provider.unit) {
 					t.Fatal("activate did not enable and start fixed unit")
