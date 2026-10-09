@@ -197,7 +197,8 @@ const actionButton = (text, key, value, kind = "secondary") => { const e = new E
 const label = (value) => String(value || "unknown");
 let remoteBusy = false, remoteError = "", remoteProviders = [], playitSetup = { state: "idle" };
 const providerProgress = new Map();
-let playitPopup = null, playitClaimOpened = false, netbirdLoginURL = "";
+let playitPopup = null, playitClaimOpened = false, netbirdLoginURL = "", tailscaleLoginURL = "";
+const validTailscaleLoginURL = (value) => typeof value === "string" && value.startsWith("https://login.tailscale.com/a/");
 const validNetbirdLoginURL = (value) => typeof value === "string" && value.startsWith("https://");
 ` + script[controlsStart:controlsEnd] + script[renderStart:renderEnd] + `
 const flatten = (node) => [node, ...node.children.flatMap(flatten)];
@@ -222,7 +223,7 @@ for (const state of ["activating", "deactivating", "reloading", "refreshing"]) {
 }
 for (const id of ["tailscale", "netbird", "playit"]) {
   nodes = render({ ...base, id, configured: true });
-  assert(nodes.some((n) => n.textContent === "Activate" && n.disabled === (id !== "netbird")));
+  assert(nodes.some((n) => n.textContent === "Activate" && n.disabled === (id === "playit")));
   assert(nodes.some((n) => n.textContent === "Deactivate" && !n.disabled));
   assert(!nodes.some((n) => n.textContent === "Set up Playit"));
   const link = nodes.find((n) => n.textContent === "Open provider dashboard");
@@ -238,6 +239,15 @@ assert(nodes.some((n) => n.textContent === "Complete NetBird login" && n.href ==
 netbirdLoginURL = "";
 nodes = render({ ...base, id: "netbird", configured: true, connected: true, ip: "100.80.12.5/16" });
 assert(nodes.some((n) => n.textContent === "NetBird IP: 100.80.12.5/16"));
+assert(nodes.some((n) => n.textContent === "Activate" && n.disabled));
+tailscaleLoginURL = "https://login.tailscale.com/a/0123456789abcdef";
+nodes = render({ ...base, id: "tailscale", configured: false, connected: false, service_active: true });
+assert(nodes.some((n) => n.textContent === "Activate" && !n.disabled));
+assert(nodes.some((n) => n.textContent === "Complete Tailscale login" && n.href === tailscaleLoginURL));
+tailscaleLoginURL = "";
+nodes = render({ ...base, id: "tailscale", configured: true, connected: true, ip: "100.101.102.103", summary: "Connected" });
+assert(nodes.some((n) => n.textContent === "Tailscale IP: 100.101.102.103"));
+assert(nodes.some((n) => n.textContent === "Connection: Connected"));
 assert(nodes.some((n) => n.textContent === "Activate" && n.disabled));
 nodes = render({ ...base, configured: true, service_active: false, service_enabled: false, service_state: "inactive" });
 assert(nodes.some((n) => n.textContent === "Activate" && !n.disabled));
