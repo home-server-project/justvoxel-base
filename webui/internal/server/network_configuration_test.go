@@ -23,10 +23,13 @@ type fakeNetworkConfigurationAPI struct {
 func (f *fakeNetworkConfigurationAPI) RemoteAccessStatus(context.Context, string) (api.RemoteAccessStatus, error) {
 	return api.RemoteAccessStatus{Providers: []api.RemoteAccessProvider{{ID: "playit", DisplayName: "Playit.gg", Installed: true, ServiceActive: true, ServiceEnabled: true}}}, nil
 }
-func (f *fakeNetworkConfigurationAPI) ChangeRemoteAccess(_ context.Context, _, provider, action string) error {
+func (f *fakeNetworkConfigurationAPI) ChangeRemoteAccess(_ context.Context, _, provider, action string) (api.RemoteAccessChange, error) {
 	f.calls++
 	f.provider, f.action = provider, action
-	return nil
+	if provider == "netbird" && action == "activate" {
+		return api.RemoteAccessChange{OK: true, LoginURL: "https://app.netbird.io/login?test=1"}, nil
+	}
+	return api.RemoteAccessChange{OK: true}, nil
 }
 func (f *fakeNetworkConfigurationAPI) ConfigureEthernet(_ context.Context, _, _ string, settings api.EthernetSettings) (api.NetworkWiFiMutation, error) {
 	f.calls++
@@ -194,7 +197,8 @@ const actionButton = (text, key, value, kind = "secondary") => { const e = new E
 const label = (value) => String(value || "unknown");
 let remoteBusy = false, remoteError = "", remoteProviders = [], playitSetup = { state: "idle" };
 const providerProgress = new Map();
-let playitPopup = null, playitClaimOpened = false;
+let playitPopup = null, playitClaimOpened = false, netbirdLoginURL = "";
+const validNetbirdLoginURL = (value) => typeof value === "string" && value.startsWith("https://");
 ` + script[controlsStart:controlsEnd] + script[renderStart:renderEnd] + `
 const flatten = (node) => [node, ...node.children.flatMap(flatten)];
 const render = (provider) => { remoteProviders = [provider]; return flatten(renderRemoteAccess()); };
@@ -228,6 +232,12 @@ for (const id of ["tailscale", "netbird", "playit"]) {
   assert.equal(link.target, "_blank"); assert.equal(link.rel, "noopener noreferrer");
   assert.equal(link.href, { tailscale: "https://console.tailscale.com/admin/", netbird: "https://app.netbird.io/", playit: "https://playit.gg/account/" }[id]);
 }
+netbirdLoginURL = "https://app.netbird.io/login?code=abcd";
+nodes = render({ ...base, id: "netbird", configured: false, service_active: false, service_enabled: false, service_state: "inactive" });
+assert(nodes.some((n) => n.textContent === "Complete NetBird login" && n.href === netbirdLoginURL));
+netbirdLoginURL = "";
+nodes = render({ ...base, id: "netbird", configured: true, connected: true, ip: "100.80.12.5/16" });
+assert(nodes.some((n) => n.textContent === "NetBird IP: 100.80.12.5/16"));
 nodes = render({ ...base, configured: true, service_active: false, service_enabled: false, service_state: "inactive" });
 assert(nodes.some((n) => n.textContent === "Activate" && !n.disabled));
 assert(nodes.some((n) => n.textContent === "Deactivate" && n.disabled));
