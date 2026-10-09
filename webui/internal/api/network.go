@@ -226,6 +226,7 @@ type RemoteAccessProvider struct {
 	ServiceState   string `json:"service_state"`
 	Summary        string `json:"summary"`
 	Connected      bool   `json:"connected"`
+	IP             string `json:"ip,omitempty"`
 }
 
 type RemoteAccessStatus struct {
@@ -250,8 +251,15 @@ func (c *Client) RemoteAccessStatus(ctx context.Context, session string) (Remote
 	return out, err
 }
 
-func (c *Client) ChangeRemoteAccess(ctx context.Context, session, provider, action string) error {
-	return c.do(ctx, http.MethodPost, "/v1/admin/network/remote-access/"+url.PathEscape(provider), session, map[string]string{"action": action}, nil)
+type RemoteAccessChange struct {
+	OK       bool   `json:"ok"`
+	LoginURL string `json:"login_url,omitempty"`
+}
+
+func (c *Client) ChangeRemoteAccess(ctx context.Context, session, provider, action string) (RemoteAccessChange, error) {
+	var out RemoteAccessChange
+	err := c.do(ctx, http.MethodPost, "/v1/admin/network/remote-access/"+url.PathEscape(provider), session, map[string]string{"action": action}, &out)
+	return out, err
 }
 
 func (c *Client) ConfigureEthernet(ctx context.Context, session, interfaceName string, settings EthernetSettings) (NetworkWiFiMutation, error) {
