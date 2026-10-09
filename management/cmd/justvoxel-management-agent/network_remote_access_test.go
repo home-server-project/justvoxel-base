@@ -140,13 +140,97 @@ func TestNetBirdConnectedShowsAddressWithoutStartingLogin(t *testing.T) {
 }
 
 func TestNetBirdLoginURLRejectsUnsafeLinks(t *testing.T) {
-	for _, candidate := range []string{"http://app.netbird.io/", "javascript:alert(1)", "https://evil.test\nhttps://app.netbird.io/", "https://user:pass@app.netbird.io/", "https://app.netbird.io/ invalid"} {
+	for _, candidate := range []string{
+		"http://app.netbird.io/", "javascript:alert(1)",
+		"https://evil.test\nhttps://app.netbird.io/", "https://user:pass@app.netbird.io/",
+		"https://app.netbird.io/ invalid",
+		"https://login.tailscale.com/a/machine-authorization", "https://console.tailscale.com/admin/",
+		"https://tailscale.com/", "https://other.tailscale.com/",
+	} {
 		if validNetbirdLoginURL(candidate) != "" {
-			t.Fatalf("accepted unsafe URL %q", candidate)
+			t.Fatalf("accepted unsafe or wrong-provider URL %q", candidate)
 		}
 	}
-	if validNetbirdLoginURL("https://app.netbird.io/device?user_code=1234") == "" {
-		t.Fatal("rejected valid NetBird URL")
+	for _, candidate := range []string{
+		"https://app.netbird.io/device?user_code=1234",
+		"https://idp.example.org/authorize?user_code=ABCD",
+	} {
+		if validNetbirdLoginURL(candidate) != candidate {
+			t.Fatalf("rejected NetBird authentication URL %q", candidate)
+		}
+	}
+}
+
+func TestNetBirdLoginURLExtractsOnlyFromSSOPrompt(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		lines []string
+		want  string
+	}{
+		{
+			name: "NetBird CLI output with instructions and user code",
+			lines: []string{
+				"Use this URL to log in:",
+				"",
+				"https://app.netbird.io/verify?user_code=abcd and enter the code ABCD to authenticate.",
+			},
+			want: "https://app.netbird.io/verify?user_code=abcd",
+		},
+		{
+			name: "prompt and link on the same line",
+			lines: []string{"Use this URL to log in: https://idp.example.org/authorize?state=abc and enter the code TEST"},
+			want: "https://idp.example.org/authorize?state=abc",
+		},
+		{
+			name: "no URL in other CLI output",
+			lines: []string{"NetBird is running", "https://login.tailscale.com/a/token"},
+		},
+		{
+			name: "wrong-provider URL following prompt",
+			lines: []string{"Use this URL to log in:", "https://login.tailscale.com/a/token"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			waiting := false
+			link := ""
+			for _, line := range tc.lines {
+				var candidate string
+				candidate, waiting = netbirdLoginURLFromLine(line, waiting)
+				if candidate != "" {
+					link = candidate
+					break
+				}
+			}
+			if link != tc.want {
+				t.Fatalf("login URL %q, want %q", link, tc.want)
+			}
+		})
+	}
+}
+
+func TestNetBirdUpCLIHelper(t *testing.T) {
+	if os.Getenv("JUSTVOXEL_NETBIRD_LOGIN_FIXTURE") != "1" {
+		return
+	}
+	_, _ = os.Stdout.WriteString("Use this URL to log in:\n\nhttps://app.netbird.io/verify?user_code=ABC and enter the code ABC to authenticate.\n")
+	time.Sleep(40 * time.Millisecond)
+	os.Exit(0)
+}
+
+func TestNetBirdUpExtractsCLILoginURL(t *testing.T) {
+	oldCommand := netbirdCommand
+	t.Cleanup(func() { netbirdCommand = oldCommand })
+	netbirdCommand = func(ctx context.Context, executable string, args ...string) *exec.Cmd {
+		if executable != "/usr/bin/netbird" || !reflect.DeepEqual(args, []string{"up", "--no-browser"}) {
+			t.Fatalf("unexpected command %s %v", executable, args)
+		}
+		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestNetBirdUpCLIHelper$")
+		cmd.Env = append(os.Environ(), "JUSTVOXEL_NETBIRD_LOGIN_FIXTURE=1")
+		return cmd
+	}
+	link, err := netbirdLogin()
+	if err != nil || link != "https://app.netbird.io/verify?user_code=ABC" {
+		t.Fatalf("NetBird did not capture CLI login: %q err=%v", link, err)
 	}
 }
 
