@@ -259,6 +259,7 @@ var tailscaleLogin = func() (string, error) {
 		return "", context.DeadlineExceeded
 	}
 }
+
 var remoteSystemctl = func(ctx context.Context, args ...string) (string, error) {
 	output, err := exec.CommandContext(ctx, "systemctl", args...).Output()
 	return strings.TrimSpace(string(output)), err
@@ -311,7 +312,9 @@ func remoteProviderStatus(ctx context.Context, provider remoteProviderMetadata) 
 	if provider.id == "tailscale" {
 		status.Configured, status.Summary, status.IP = tailscaleStatus(ctx)
 		status.Connected = status.Active && status.Summary == "Connected"
-		if !status.Connected { status.IP = "" }
+		if !status.Connected {
+			status.IP = ""
+		}
 		if status.Configured && !status.Active && status.Summary == "Connected" {
 			status.Summary = "Stopped"
 		}
