@@ -153,6 +153,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (stage === "setup_failed") return "Preparing recovery";
     if (stage === "runtime_rollback") return "Restoring Minecraft configuration";
     if (stage === "storage_rollback") return "Restoring storage changes";
+    if (stage === "runtime_recovery") return "Retrying Minecraft recovery";
     if (stage === "storage_recovery") return "Retrying storage recovery";
     if (stage === "setup_rolled_back") return "Rolled back";
     if (stage === "interrupted") return "Interrupted";
@@ -229,7 +230,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (dashboardLink) dashboardLink.hidden = !terminalState(operation.state);
     if (reviewLink) reviewLink.hidden = !rolledBack;
     if (startOverForm) startOverForm.hidden = !rolledBack;
-    if (recoverForm) recoverForm.hidden = !(needsAttention && operation.stage === "storage_rollback");
+    if (recoverForm) recoverForm.hidden = !(needsAttention && ["storage_rollback", "runtime_rollback"].includes(operation.stage));
     if (disabledStartOver) disabledStartOver.hidden = !needsAttention;
     if (diagnosticLogLink) diagnosticLogLink.hidden = !terminalState(operation.state);
     if (diagnosticLogView) diagnosticLogView.hidden = !terminalState(operation.state);

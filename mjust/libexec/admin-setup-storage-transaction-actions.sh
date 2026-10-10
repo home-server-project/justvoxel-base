@@ -148,7 +148,8 @@ a53_recover_action() {
         (.mounts_by_transaction|type == "array") and
         all(.mounts_by_transaction[]; (.mountpoint|type == "string") and (.source|type == "string") and (.uuid|type == "string")) and
         ((.rollback.state == "failed" and .rollback.result == "needs_attention") or
-         (.rollback.state == "running" and .rollback.result == "recovery_in_progress") or
+         (.rollback.state == "running" and (.rollback.result == "recovery_in_progress" or .rollback.result == "rollback_in_progress")) or
+         (.runtime_rollback_verified == true and .rollback.state == "not_started") or
          (.phase == "storage_rolled_back" and .rollback.state == "succeeded" and .rollback.result == "rolled_back"))
     ' "${A53_MANIFEST}" >/dev/null 2>&1; then
         _a53_recovery_fail

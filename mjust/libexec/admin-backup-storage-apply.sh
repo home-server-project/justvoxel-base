@@ -27,7 +27,7 @@ apply_json() {
         return 0
     fi
 
-    local current proposed config_backup fstab_backup credentials_backup credentials_new=''
+    local current proposed config_backup fstab_backup credentials_backup='' credentials_new=''
     local fstab_existed=no credentials_existed=no mounted_by_us=no credentials_changed=no
     local old_backup_type old_backup_path old_backup_mount old_backup_uuid old_backup_source
     current="$(current_status_json | jq '.current')"
@@ -47,10 +47,27 @@ apply_json() {
         cp -a -- "${A31_FSTAB}" "${fstab_backup}"
         fstab_existed=yes
     fi
-    credentials_backup="$(mktemp /etc/justvoxel/.smb-backup.credentials.XXXXXX 2>/dev/null || mktemp /tmp/.smb-backup.credentials.XXXXXX)" || true
-    if [[ -e ${A31_SMB_CREDENTIALS} && -n ${credentials_backup:-} ]]; then
-        cp -a -- "${A31_SMB_CREDENTIALS}" "${credentials_backup}"
-        credentials_existed=yes
+    # Local storage and already-mounted shares do not own SMB credentials.
+    # A replacement must have a confirmed rollback point before any mutation.
+    if [[ ${TARGET_TYPE} == smb && ${TARGET_ALREADY_MOUNTED} != true ]]; then
+        if [[ -e ${A31_SMB_CREDENTIALS} || -L ${A31_SMB_CREDENTIALS} ]]; then
+            if [[ ! -f ${A31_SMB_CREDENTIALS} || -L ${A31_SMB_CREDENTIALS} ]]; then
+                rm -f -- "${config_backup}" "${fstab_backup}"
+                json_error 'Existing SMB credential path is not a safe regular file.'
+                return 0
+            fi
+            credentials_existed=yes
+        fi
+        credentials_backup="$(mktemp /etc/justvoxel/.smb-backup.credentials.XXXXXX 2>/dev/null || mktemp /tmp/.smb-backup.credentials.XXXXXX)" || {
+            rm -f -- "${config_backup}" "${fstab_backup}"
+            json_error 'Could not prepare a secure SMB credential rollback point.'
+            return 0
+        }
+        if [[ ${credentials_existed} == yes ]] && ! cp -a -- "${A31_SMB_CREDENTIALS}" "${credentials_backup}"; then
+            rm -f -- "${config_backup}" "${fstab_backup}" "${credentials_backup}"
+            json_error 'Could not snapshot existing SMB credentials; they were preserved.'
+            return 0
+        fi
     fi
 
     old_backup_type="${BACKUP_TYPE}"
@@ -122,7 +139,9 @@ apply_json() {
         {
             printf 'username=%s\n' "${TARGET_USERNAME}"
             printf 'password=%s\n' "${TARGET_PASSWORD}"
-            [[ -n ${TARGET_DOMAIN} ]] && printf 'domain=%s\n' "${TARGET_DOMAIN}"
+            if [[ -n ${TARGET_DOMAIN} ]]; then
+                printf 'domain=%s\n' "${TARGET_DOMAIN}"
+            fi
         } > "${credentials_new}" || { rollback; json_error 'Could not write temporary SMB credentials securely.'; return 0; }
         chown root:root "${credentials_new}" >/dev/null 2>&1 || { rollback; json_error 'Could not set SMB credential ownership.'; return 0; }
         chmod 0600 "${credentials_new}" || { rollback; json_error 'Could not set SMB credential permissions.'; return 0; }

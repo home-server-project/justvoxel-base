@@ -524,11 +524,17 @@ func (s *operationStore) loadAndRecover() error {
 		journal := s.operations[activeSetup]
 		if operationInterruptedByRestart(journal.State) {
 			now := s.now().UTC().Format(time.RFC3339Nano)
-			interruptedStorageRecovery := journal.State == operationRollingBack && journal.Stage == "storage_recovery"
+			interruptedStorageRecovery := journal.State == operationRollingBack && (journal.Stage == "storage_recovery" || journal.Stage == "storage_rollback")
+			interruptedRuntimeRecovery := journal.Stage == "runtime_recovery" || journal.Stage == "runtime_rollback" || journal.Stage == "runtime_config" || journal.Stage == "minecraft_verify" || journal.Stage == "final_validation"
 			journal.State = operationNeedsAttention
 			if interruptedStorageRecovery {
 				journal.Stage = "storage_rollback"
 				journal.Status = "Storage recovery was interrupted; retry recovery from the preserved transaction."
+				journal.Rollback.State = "failed"
+				journal.Rollback.Result = "needs_attention"
+			} else if interruptedRuntimeRecovery {
+				journal.Stage = "runtime_rollback"
+				journal.Status = "Minecraft setup or recovery was interrupted; retry recovery from the preserved transaction."
 				journal.Rollback.State = "failed"
 				journal.Rollback.Result = "needs_attention"
 			} else {
@@ -1400,11 +1406,11 @@ func (s *operationStore) transition(id string, next operationState, stage, statu
 	if !ok {
 		return operationJournal{}, errOperationNotFound
 	}
-	setupRecovery := journal.OperationType == operationTypeSetup && journal.State == operationNeedsAttention && journal.Stage == "storage_rollback" && next == operationRollingBack && stage == "storage_recovery"
+	setupRecovery := journal.OperationType == operationTypeSetup && journal.State == operationNeedsAttention && ((journal.Stage == "storage_rollback" && stage == "storage_recovery") || (journal.Stage == "runtime_rollback" && stage == "runtime_recovery")) && next == operationRollingBack
 	if !setupRecovery && !operationTransitionAllowed(journal.State, next) {
 		return operationJournal{}, fmt.Errorf("invalid operation transition %s -> %s", journal.State, next)
 	}
-	recoveryFailed := journal.OperationType == operationTypeSetup && journal.State == operationRollingBack && journal.Stage == "storage_recovery" && next == operationNeedsAttention && stage == "storage_rollback"
+	recoveryFailed := journal.OperationType == operationTypeSetup && journal.State == operationRollingBack && (journal.Stage == "storage_recovery" || journal.Stage == "runtime_recovery") && next == operationNeedsAttention && (stage == "storage_rollback" || stage == "runtime_rollback")
 	journal.State = next
 	journal.Stage = stage
 	journal.Status = status

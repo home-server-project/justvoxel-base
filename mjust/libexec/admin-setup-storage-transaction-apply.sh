@@ -64,6 +64,7 @@ _a53_prepare_transaction() {
         --arg credentials_uid "${A54_CREDENTIALS_UID}" \
         --arg credentials_gid "${A54_CREDENTIALS_GID}" \
         '{schema_version:"v1",operation_id:$operation_id,plan_fingerprint:$plan_fingerprint,phase:"storage_snapshot",fstab_existed:$fstab_existed,fstab_before_sha256:$fstab_before_sha256,fstab_mode:$fstab_mode,fstab_uid:$fstab_uid,fstab_gid:$fstab_gid,fstab_changed:false,fstab_after_sha256:"",credentials_existed:$credentials_existed,credentials_before_sha256:$credentials_before_sha256,credentials_mode:$credentials_mode,credentials_uid:$credentials_uid,credentials_gid:$credentials_gid,credentials_changed:false,credentials_after_sha256:"",mounts_by_transaction:[],directories_created:[],rollback:{state:"not_started",result:""}}')" || return 1
+    manifest="$(jq -c --argjson request "${A53_REQUEST}" '. + {storage_request:$request}' <<< "${manifest}")" || return 1
     _a53_manifest_write "${manifest}" || return 1
     return 0
 }
@@ -294,6 +295,9 @@ _a53_restore_fstab() {
 
 _a54_restore_smb_credentials() {
     local snapshot="${A53_TX_DIR}/smb.credentials.before"
+    # An unrelated transaction has no authority over this shared credential file,
+    # even when credentials_existed is false because no snapshot was needed.
+    [[ ${A54_CREDENTIALS_CHANGED} == true ]] || return 0
     if [[ ${A54_CREDENTIALS_EXISTED} == true ]]; then
         [[ -f ${snapshot} ]] || return 1
         install -d -m0700 -o root -g root "$(dirname -- "${A54_SMB_CREDENTIALS}")" || return 1

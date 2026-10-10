@@ -21,10 +21,36 @@ var (
 	setupWorkerTimeout          = 30 * time.Minute
 )
 
-var runAdminSetupRuntimeTransactionHelper = func(ctx context.Context, action string, request []byte) ([]byte, error) {
+var runAdminSetupRuntimeTransactionHelper = func(ctx context.Context, action string, request []byte) ([]byte, []byte, error) {
 	cmd := exec.CommandContext(ctx, adminSetupRuntimeTransactionHelper, action)
 	cmd.Stdin = bytes.NewReader(request)
-	return cmd.CombinedOutput()
+	return captureSetupRuntimeTransactionOutput(cmd)
+}
+
+// Drain stderr without retaining unlimited helper output in memory.
+type setupRuntimeDiagnosticBuffer struct {
+	buffer bytes.Buffer
+}
+
+func (b *setupRuntimeDiagnosticBuffer) Len() int      { return b.buffer.Len() }
+func (b *setupRuntimeDiagnosticBuffer) Bytes() []byte { return b.buffer.Bytes() }
+
+func (b *setupRuntimeDiagnosticBuffer) Write(p []byte) (int, error) {
+	n := len(p)
+	if remaining := 16*1024 - b.Len(); remaining > 0 {
+		if len(p) > remaining {
+			p = p[:remaining]
+		}
+		_, _ = b.buffer.Write(p)
+	}
+	return n, nil
+}
+
+func captureSetupRuntimeTransactionOutput(cmd *exec.Cmd) ([]byte, []byte, error) {
+	var stderr setupRuntimeDiagnosticBuffer
+	cmd.Stderr = &stderr
+	stdout, err := cmd.Output()
+	return stdout, stderr.Bytes(), err
 }
 
 type setupRuntimeServer struct {
@@ -122,26 +148,38 @@ func runSetupRuntimeTransactionAction(parent context.Context, action string, tim
 	if err != nil {
 		return response, err
 	}
+	return runSetupRuntimeTransactionPayload(parent, action, timeout, payload)
+}
+
+func runSetupRuntimeTransactionPayload(parent context.Context, action string, timeout time.Duration, payload []byte) (setupRuntimeTransactionResponse, error) {
+	var response setupRuntimeTransactionResponse
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
-	output, err := runAdminSetupRuntimeTransactionHelper(ctx, action, payload)
+	output, stderr, err := runAdminSetupRuntimeTransactionHelper(ctx, action, payload)
+	diagnostic := sanitizeSetupDiagnosticText(boundedSetupDiagnosticHelperOutput(stderr), "")
 	if err != nil {
-		return response, newSetupHelperExecutionError("runtime", action, err, output)
+		return response, newSetupHelperExecutionError("runtime", action, err, []byte(diagnostic))
 	}
 	decoder := json.NewDecoder(bytes.NewReader(output))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&response); err != nil {
-		return response, errors.New("setup runtime transaction helper returned invalid data")
+		return response, newSetupHelperExecutionError("runtime", action, errors.New("setup runtime transaction helper returned invalid data"), []byte(diagnostic))
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
-		return response, errors.New("setup runtime transaction helper returned invalid data")
+		return response, newSetupHelperExecutionError("runtime", action, errors.New("setup runtime transaction helper returned invalid data"), []byte(diagnostic))
 	}
 	if response.Phase == "" {
-		return response, errors.New("setup runtime transaction helper returned incomplete data")
+		return response, newSetupHelperExecutionError("runtime", action, errors.New("setup runtime transaction helper returned incomplete data"), []byte(diagnostic))
 	}
 	if response.Error != "" && (len(response.Error) > 512 || bytes.ContainsAny([]byte(response.Error), "\r\n")) {
 		response.Error = "setup runtime transaction failed"
+	}
+	if diagnostic != "" {
+		if response.Evidence == nil {
+			response.Evidence = make(map[string]string)
+		}
+		response.Evidence["helper_stderr"] = diagnostic
 	}
 	return response, nil
 }
@@ -255,7 +293,7 @@ func failSetupAfterStorage(parent context.Context, store *operationStore, operat
 		if err != nil {
 			store.appendSetupHelperFailureBestEffort(operationID, "runtime", "rollback", err)
 		}
-		if err != nil || !rolledRuntime.OK {
+		if err != nil || !rolledRuntime.OK || rolledRuntime.Applied || rolledRuntime.Phase != "runtime_rolled_back" || rolledRuntime.Error != "" {
 			if err == nil {
 				err = errors.New(setupRuntimeFirstNonEmpty(rolledRuntime.Error, "runtime rollback could not be confirmed"))
 			}

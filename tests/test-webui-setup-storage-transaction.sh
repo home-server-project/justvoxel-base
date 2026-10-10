@@ -218,16 +218,30 @@ run_action(){
 }
 
 # System storage: no fstab mutation, rollback removes only transaction-created empty dirs.
+# A saved, currently unavailable SMB mount and its credentials are unrelated.
+install -d -m0700 "$(dirname "$A54_SMB_CREDENTIALS")"
+printf 'username=saved\npassword=keep-this-secret\n' > "$A54_SMB_CREDENTIALS"
+chmod 0600 "$A54_SMB_CREDENTIALS"
+cp -p "$A54_SMB_CREDENTIALS" "$TMP/unrelated.credentials.expected"
+printf '//saved/backups /var/mnt/justvoxel-backup cifs credentials=%s,nofail 0 0\n' "$A54_SMB_CREDENTIALS" >> "$A53_FSTAB"
+cp -p "$A53_FSTAB" "$TMP/fstab.expected"
 req="$(make_system_request 11111111-1111-4111-8111-111111111111)"
 run_action a53_apply_action "$req"
 out="$ACTION_OUT"
 jq -e '.ok and .applied and .phase=="storage_verified"' >/dev/null <<< "$out" || fail "system apply: $out"
 cmp -s "$A53_FSTAB" "$TMP/fstab.expected" || fail 'system apply changed fstab'
+cmp -s "$A54_SMB_CREDENTIALS" "$TMP/unrelated.credentials.expected" || fail 'system apply modified SMB credentials'
+[[ ! -e $A53_TRANSACTION_ROOT/11111111-1111-4111-8111-111111111111/smb.credentials.before ]] || fail 'system apply snapshotted unrelated credentials'
 reset_runtime
 run_action a53_rollback_action "$req"
 out="$ACTION_OUT"
 jq -e '.ok and .rollback_state=="succeeded"' >/dev/null <<< "$out" || fail "system rollback: $out"
 [[ ! -e $A53_DEFAULT_DATA_PATH && ! -e $A53_DEFAULT_BACKUP_PATH ]] || fail 'system rollback left created paths'
+cmp -s "$A54_SMB_CREDENTIALS" "$TMP/unrelated.credentials.expected" || fail 'system rollback modified SMB credentials'
+cmp -s "$A53_FSTAB" "$TMP/fstab.expected" || fail 'system rollback removed saved SMB mount'
+# Even a direct restore call must refuse ownership when nothing was changed.
+_a54_restore_smb_credentials || fail 'unrelated credential restore guard failed'
+cmp -s "$A54_SMB_CREDENTIALS" "$TMP/unrelated.credentials.expected" || fail 'restore without credential ownership deleted existing credentials'
 
 # Existing local partition: one UUID mount, exact fstab restoration.
 MOUNTED=0
@@ -253,6 +267,19 @@ DUPLICATE_IDENTITY=0
 [[ $MOUNTED -eq 0 ]] || fail 'rollback did not unmount owned mount'
 cmp -s "$A53_FSTAB" "$TMP/fstab.expected" || fail 'rollback did not restore exact fstab bytes'
 [[ $(stat -c '%a' "$A53_FSTAB") == 640 ]] || fail 'rollback did not restore fstab mode'
+cmp -s "$A54_SMB_CREDENTIALS" "$TMP/unrelated.credentials.expected" || fail 'local partition rollback modified SMB credentials'
+[[ $(stat -c '%a' "$A54_SMB_CREDENTIALS") == 600 ]] || fail 'local rollback changed SMB credential permissions'
+# A failure during local preparation also leaves the saved SMB state intact.
+reset_runtime
+req="$(make_system_request 22222222-2222-4222-8222-333333333333)"
+PROBE_FAIL_PATH="$A53_DEFAULT_BACKUP_PATH"
+run_action a53_apply_action "$req"
+jq -e '(.ok|not) and .rollback_state=="succeeded"' >/dev/null <<< "$ACTION_OUT" || fail 'local preparation failure did not roll back'
+PROBE_FAIL_PATH=''
+cmp -s "$A54_SMB_CREDENTIALS" "$TMP/unrelated.credentials.expected" || fail 'local failure rollback modified SMB credentials'
+cmp -s "$A53_FSTAB" "$TMP/fstab.expected" || fail 'local failure rollback modified saved SMB mount'
+rm -f "$A54_SMB_CREDENTIALS"
+rmdir "$(dirname "$A54_SMB_CREDENTIALS")"
 
 # Stale reviewed UUID must be rejected before mutation.
 CURRENT_UUID=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee

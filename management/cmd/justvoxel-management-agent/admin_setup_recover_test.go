@@ -61,7 +61,7 @@ func TestAdminSetupRecoverRequiresAdministratorAndExactState(t *testing.T) {
 		state operationState
 		stage string
 	}{
-		{operationNeedsAttention, "runtime_rollback"},
+		{operationNeedsAttention, "runtime_unknown"},
 		{operationFailed, "storage_rollback"},
 		{operationRollingBack, "storage_rollback"},
 		{operationRunning, "storage_rollback"},
@@ -182,5 +182,118 @@ func TestInterruptedSetupStorageRecoveryReloadKeepsLock(t *testing.T) {
 	otherFingerprint := "sha256:" + strings.Repeat("b", 64)
 	if _, _, err := second.beginSetup(otherFingerprint); err != errSetupOperationBusy {
 		t.Fatalf("new setup error = %v, want setup busy", err)
+	}
+}
+
+func TestRuntimeSetupRecoverySequenceAndLock(t *testing.T) {
+	for _, outcome := range []string{"success", "runtime_failed", "runtime_interrupted", "runtime_unverified", "storage_failed"} {
+		t.Run(outcome, func(t *testing.T) {
+			s, store, op := setupRecoveryOperation(t, operationNeedsAttention, "runtime_rollback")
+			oldRuntime, oldStorage := runAdminSetupRuntimeTransactionHelper, runAdminSetupStorageTransactionHelper
+			defer func() {
+				runAdminSetupRuntimeTransactionHelper, runAdminSetupStorageTransactionHelper = oldRuntime, oldStorage
+			}()
+			var events []string
+			runAdminSetupRuntimeTransactionHelper = func(ctx context.Context, action string, body []byte) ([]byte, []byte, error) {
+				events = append(events, "runtime:"+action)
+				var identity map[string]string
+				if err := json.Unmarshal(body, &identity); err != nil || len(identity) != 3 || identity["operation_id"] != op.OperationID || identity["plan_fingerprint"] != op.PlanFingerprint {
+					t.Fatalf("invalid recovery identity: %s", body)
+				}
+				if !store.setupLockHeld {
+					t.Fatal("lock released before runtime verification")
+				}
+				switch outcome {
+				case "runtime_failed":
+					return []byte(`{"ok":false,"applied":false,"phase":"runtime_rollback","error":"changed data identity"}`), nil, nil
+				case "runtime_interrupted":
+					return nil, nil, context.DeadlineExceeded
+				case "runtime_unverified":
+					return []byte(`{"ok":true,"applied":true,"phase":"runtime_rolled_back"}`), nil, nil
+				}
+				return []byte(`{"ok":true,"applied":false,"phase":"runtime_rolled_back"}`), nil, nil
+			}
+			runAdminSetupStorageTransactionHelper = func(ctx context.Context, action string, body []byte) ([]byte, error) {
+				events = append(events, "storage:"+action)
+				if !store.setupLockHeld {
+					t.Fatal("lock released before storage verification")
+				}
+				journal, _ := store.get(op.OperationID)
+				if journal.Stage != "storage_recovery" {
+					t.Fatalf("stage = %s", journal.Stage)
+				}
+				if outcome == "storage_failed" {
+					return []byte(`{"ok":false,"applied":false,"phase":"storage_rollback","rollback_state":"failed","rollback_result":"needs_attention","error":"changed mount"}`), nil
+				}
+				return []byte(`{"ok":true,"applied":false,"phase":"storage_rolled_back","rollback_state":"succeeded","rollback_result":"rolled_back"}`), nil
+			}
+			rr := httptest.NewRecorder()
+			s.adminSetupRecover(rr, surfaceRequest(http.MethodPost, "/v1/admin/setup/recover", `{"operation_id":"`+op.OperationID+`","retry_recovery":true}`))
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d: %s", rr.Code, rr.Body.String())
+			}
+			journal, err := store.get(op.OperationID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if outcome == "success" {
+				if journal.State != operationRolledBack || store.setupLockHeld {
+					t.Fatalf("incomplete recovery: %#v", journal)
+				}
+				if strings.Join(events, ",") != "runtime:recover,storage:recover" {
+					t.Fatalf("sequence = %v", events)
+				}
+				if _, created, err := store.beginSetup("sha256:" + strings.Repeat("c", 64)); err != nil || !created {
+					t.Fatalf("restart: %v %v", created, err)
+				}
+			} else {
+				stage := "runtime_rollback"
+				if outcome == "storage_failed" {
+					stage = "storage_rollback"
+				} else if len(events) != 1 {
+					t.Fatalf("storage ran without runtime verification: %v", events)
+				}
+				if journal.State != operationNeedsAttention || journal.Stage != stage || !store.setupLockHeld {
+					t.Fatalf("unsafe failed recovery: %#v", journal)
+				}
+			}
+		})
+	}
+}
+
+func TestInterruptedRuntimeSetupRecoveryReload(t *testing.T) {
+	for _, stage := range []string{"runtime_recovery", "runtime_rollback", "runtime_config", "minecraft_verify", "final_validation"} {
+		t.Run(stage, func(t *testing.T) {
+			base := filepath.Join(t.TempDir(), "management")
+			store, err := openOperationStore(base)
+			if err != nil {
+				t.Fatal(err)
+			}
+			op := beginStorageTestOperation(t, store)
+			if _, err := store.transition(op.OperationID, operationNeedsAttention, "runtime_rollback", "Runtime needs attention."); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.transition(op.OperationID, operationRollingBack, "runtime_recovery", "Retrying runtime recovery."); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.updateProgress(op.OperationID, operationRollingBack, stage, "Recovery in progress."); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.close(); err != nil {
+				t.Fatal(err)
+			}
+			reloaded, err := openOperationStore(base)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reloaded.close()
+			current, err := reloaded.currentSetup()
+			if err != nil || current == nil || current.Stage != "runtime_rollback" || current.State != operationNeedsAttention || current.InterruptedAt == "" || !reloaded.setupLockHeld {
+				t.Fatalf("recovery state: %#v %v", current, err)
+			}
+			if _, err := reloaded.transition(op.OperationID, operationRollingBack, "runtime_recovery", "Retrying preserved recovery."); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

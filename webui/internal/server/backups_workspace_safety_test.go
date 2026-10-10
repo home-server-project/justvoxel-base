@@ -146,6 +146,34 @@ func TestBackupsWorkspaceDestinationPassesSMBPasswordOnlyAtApply(t *testing.T) {
 	}
 }
 
+func TestBackupsWorkspaceReconnectsSavedSMBDestination(t *testing.T) {
+	current := api.AdminBackupStorageTarget{
+		Status: "unavailable", Type: "smb", Path: "/var/mnt/justvoxel-backup/backups",
+		MountPoint: "/var/mnt/justvoxel-backup", ExpectedSource: "//nas/backups",
+	}
+	proposed := current
+	proposed.CredentialsNeeded = true
+	client := &fakeNewBackupsAPI{
+		destinationStatus: api.AdminBackupStorageResponse{OK: true, Current: current},
+		destinationPlan:   api.AdminBackupStorageResponse{OK: true, Changed: true, Current: current, Proposed: proposed},
+	}
+	page := backupsSafetyRequest(t, client, http.MethodGet, "/workspace/backups", nil)
+	if !strings.Contains(page.Body.String(), "To reconnect this share") {
+		t.Fatal("saved unavailable SMB destination lacks recovery guidance")
+	}
+	values := backupsSafetySMBForm()
+	values.Set("domain", "")
+	review := backupsSafetyRequest(t, client, http.MethodPost, "/workspace/backups/destination/plan", values)
+	backupsSafetyReview(t, review, `action="/workspace/backups/destination/apply"`, `name="password" type="password" required`, `name="source" value="//nas/backups"`)
+	if client.plannedDestination.Password != "" || strings.Contains(review.Body.String(), values.Get("password")) {
+		t.Fatal("SMB recovery password leaked into Review")
+	}
+	applied := backupsSafetyRequest(t, client, http.MethodPost, "/workspace/backups/destination/apply", values)
+	if applied.Code != http.StatusSeeOther || client.appliedDestination.Password != values.Get("password") || client.appliedDestination.Source != current.ExpectedSource || client.appliedDestination.Path != current.Path || client.appliedDestination.MountPoint != current.MountPoint {
+		t.Fatal("SMB recovery did not retain saved identity and submit the password only at Apply")
+	}
+}
+
 func backupsSafetyRestoreForm() url.Values {
 	return url.Values{
 		"csrf": {"csrf-token"}, "backup_id": {"minecraft-2026-09-20-043000.tar.gz"}, "mode": {"world"},

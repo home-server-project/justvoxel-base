@@ -340,6 +340,11 @@ plan_json() {
     local current proposed changed=false
     current="$(current_status_json | jq '.current')"
     proposed="$(proposed_json)"
+    # Matching saved settings still need Apply when the share is unavailable.
+    # This exposes the existing execution-only password form for SMB recovery.
+    if [[ ${TARGET_NEEDS_CREDENTIALS} == true ]]; then
+        changed=true
+    fi
     if ! jq -e --argjson p "${proposed}" '.type == $p.type and .path == $p.path and .mount_point == $p.mount_point and .expected_uuid == $p.expected_uuid and .expected_source == $p.expected_source' >/dev/null 2>&1 <<< "${current}"; then
         changed=true
     fi

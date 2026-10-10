@@ -30,7 +30,7 @@ func (c *Client) AdminSetupRecover(ctx context.Context, session, operationID str
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+session)
 	client := *c.http
-	client.Timeout = 60 * time.Second
+	client.Timeout = 160 * time.Second
 	resp, err := client.Do(req)
 	if err != nil {
 		return out, fmt.Errorf("management API unavailable: %w", err)

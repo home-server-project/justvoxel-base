@@ -42,25 +42,24 @@ func (s *server) adminSetupRecover(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "current setup operation was not found")
 		return
 	}
-	if current.OperationType != operationTypeSetup || current.State != operationNeedsAttention || current.Stage != "storage_rollback" {
+	if current.OperationType != operationTypeSetup || current.State != operationNeedsAttention || (current.Stage != "storage_rollback" && current.Stage != "runtime_rollback") {
 		writeError(w, http.StatusConflict, "setup recovery is unavailable in the current state")
 		return
 	}
-	if _, err := s.operations.transition(current.OperationID, operationRollingBack, "storage_recovery", "Retrying storage recovery from the preserved transaction."); err != nil {
+	stage := "storage_recovery"
+	if current.Stage == "runtime_rollback" {
+		stage = "runtime_recovery"
+	}
+	if _, err := s.operations.transition(current.OperationID, operationRollingBack, stage, "Retrying setup recovery from the preserved transaction."); err != nil {
 		writeError(w, http.StatusConflict, "setup recovery could not be started")
 		return
 	}
-	operation := recoverSetupStorage(context.Background(), s.operations, *current)
+	operation := recoverSetupTransaction(context.Background(), s.operations, *current)
 	writeJSON(w, http.StatusOK, adminOperationResponse{Operation: &operation})
 }
 
 func recoverSetupStorage(ctx context.Context, store *operationStore, current operationJournal) operationJournal {
-	payload := struct {
-		SchemaVersion   string `json:"schema_version"`
-		OperationID     string `json:"operation_id"`
-		PlanFingerprint string `json:"plan_fingerprint"`
-	}{operationSchemaVersion, current.OperationID, current.PlanFingerprint}
-	request, err := json.Marshal(payload)
+	request, err := setupRecoveryPayload(current)
 	var response setupStorageTransactionResponse
 	if err == nil {
 		response, err = runSetupStorageRecoveryAction(ctx, request)
@@ -69,7 +68,7 @@ func recoverSetupStorage(ctx context.Context, store *operationStore, current ope
 	if err != nil {
 		store.appendSetupHelperFailureBestEffort(current.OperationID, "storage", "recover", err)
 	}
-	if err == nil && response.OK && response.Phase == "storage_rolled_back" && response.RollbackState == "succeeded" && response.RollbackResult == "rolled_back" {
+	if err == nil && response.OK && !response.Applied && response.Error == "" && response.Phase == "storage_rolled_back" && response.RollbackState == "succeeded" && response.RollbackResult == "rolled_back" {
 		store.appendSetupStorageEvidenceBestEffort(current.OperationID, "rolled_back", nil, "recovery_verified")
 		if finished, transitionErr := store.transition(current.OperationID, operationRolledBack, "setup_rolled_back", "Storage recovery completed; setup was rolled back."); transitionErr == nil {
 			return finished
@@ -85,9 +84,55 @@ func recoverSetupStorage(ctx context.Context, store *operationStore, current ope
 		err = errors.New(message)
 	}
 	store.appendSetupStorageFailureEvidenceBestEffort(current.OperationID, "recover", nil, err)
-	if failed, transitionErr := store.transition(current.OperationID, operationNeedsAttention, "storage_rollback", "Storage recovery could not be confirmed; review the setup log before retrying."); transitionErr == nil {
+	if failed, transitionErr := store.transition(current.OperationID, operationNeedsAttention, "storage_rollback", setupRecoveryFailureStatus("Storage", err)); transitionErr == nil {
 		return failed
 	}
 	latest, _ := store.get(current.OperationID)
 	return latest
+}
+
+// The privileged helpers load their protected transaction evidence. Never reconstruct
+// a runtime request from live configuration or accept replacement paths from a caller.
+func setupRecoveryPayload(current operationJournal) ([]byte, error) {
+	payload := struct {
+		SchemaVersion   string `json:"schema_version"`
+		OperationID     string `json:"operation_id"`
+		PlanFingerprint string `json:"plan_fingerprint"`
+	}{operationSchemaVersion, current.OperationID, current.PlanFingerprint}
+	return json.Marshal(payload)
+}
+
+func recoverSetupTransaction(ctx context.Context, store *operationStore, current operationJournal) operationJournal {
+	if current.Stage != "runtime_rollback" {
+		return recoverSetupStorage(ctx, store, current)
+	}
+	request, err := setupRecoveryPayload(current)
+	var response setupRuntimeTransactionResponse
+	if err == nil {
+		response, err = runSetupRuntimeTransactionPayload(ctx, "recover", setupRuntimeRollbackTimeout, request)
+	}
+	store.appendSetupRuntimeHelperEvidenceBestEffort(current.OperationID, "recover", response.Evidence)
+	if err == nil && response.OK && !response.Applied && response.Phase == "runtime_rolled_back" && response.Error == "" {
+		if _, err = store.updateProgress(current.OperationID, operationRollingBack, "storage_recovery", "Runtime recovery verified; restoring the preserved storage transaction."); err == nil {
+			return recoverSetupStorage(ctx, store, current)
+		}
+	}
+	if err == nil {
+		err = errors.New(setupRuntimeFirstNonEmpty(response.Error, "runtime recovery could not be confirmed"))
+	}
+	store.appendSetupHelperFailureBestEffort(current.OperationID, "runtime", "recover", err)
+	status := setupRecoveryFailureStatus("Runtime", err)
+	if failed, transitionErr := store.transition(current.OperationID, operationNeedsAttention, "runtime_rollback", status); transitionErr == nil {
+		return failed
+	}
+	latest, _ := store.get(current.OperationID)
+	return latest
+}
+
+func setupRecoveryFailureStatus(kind string, err error) string {
+	status := kind + " recovery failed: " + sanitizeSetupDiagnosticText(err.Error(), "")
+	if len(status) > 400 || !validOperationStatus(status) {
+		return kind + " recovery could not be confirmed; review the setup log before retrying."
+	}
+	return status
 }

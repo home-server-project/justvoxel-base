@@ -2,11 +2,11 @@
 set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Source the actual classifier, never the privileged validator entrypoint.
-source <(sed -n '/^validate_failed_units() {/,/^}/p' "${repo_root}/mjust/libexec/validate-backend")
+source <(sed -n '/^decode_dependency_units() {/,/^}/p; /^validate_failed_units() {/,/^}/p' "${repo_root}/mjust/libexec/validate-backend")
 pass() { :; }
 fail() { failures=$((failures + 1)); diagnostics+="FAIL: $*"$'\n'; }
 warn() { warnings=$((warnings + 1)); diagnostics+="WARN: $*"$'\n'; }
-systemctl() {
+classifier_systemctl() {
     local arg unit='' options_done=no
     if [[ $1 == show ]]; then
         shift
@@ -26,19 +26,28 @@ systemctl() {
     if [[ $1 == --failed ]]; then
         [[ ${enumeration_fails} == no ]] || return 1
         [[ -z ${failed_unit} ]] || printf '%s loaded failed failed fixture\n' "${failed_unit}"
-    elif [[ $* == *--property=LoadState* ]]; then
-        printf 'loaded\n'
-    elif [[ $* == *--property=Where* ]]; then
-        printf '%s\n' "${mount_where}"
     else
-        [[ ${dependencies_fail} == no ]] || return 1
-        # Exercise an indirect critical dependency as well as direct Minecraft.
-        if [[ ${unit} == local-fs.target ]]; then printf '%s\n' '-.mount'; fi
-        if [[ ${critical} == yes && ${unit} == minecraft.service ]]; then printf 'fixture-required.service\n'; fi
-        if [[ ${critical} == yes && ${unit} == fixture-required.service ]]; then printf '%s\n' "${failed_unit}"; fi
+        # Reject presentation strings: a permissive mock hid the VM regression.
+        case "${unit}" in
+            minecraft.service|minecraft-backup.service|minecraft-backup.timer|basic.target|sysinit.target|local-fs.target|-.mount|fixture-required.service|'var-mnt-justvoxel\x2dbackup.mount'|'var-mnt-justvoxel\x2ddata.mount'|unknown.service) ;;
+            *) printf 'incorrect unit name: %s\n' "${unit}" >&2; return 1 ;;
+        esac
+        if [[ $* == *--property=LoadState* ]]; then
+            printf 'loaded\n'
+        elif [[ $* == *--property=Where* ]]; then
+            printf '%s\n' "${mount_where}"
+        else
+            [[ ${dependencies_fail} == no ]] || return 1
+            # Exercise an indirect critical dependency as well as direct Minecraft.
+            if [[ ${unit} == local-fs.target ]]; then printf '%s\n' '-.mount'; fi
+            if [[ ${critical} == yes && ${unit} == minecraft.service ]]; then printf 'fixture-required.service\n'; fi
+            if [[ ${critical} == yes && ${unit} == fixture-required.service ]]; then printf '%s\n' "${failed_unit}"; fi
+            if [[ ${unit} == minecraft-backup.service ]]; then printf '%s\n' "${dependency_output}"; fi
+        fi
     fi
     return 0
 }
+systemctl() { classifier_systemctl "$@"; }
 systemd-escape() {
     case "$3" in
         /var/mnt/justvoxel-backup) printf '%s\n' 'var-mnt-justvoxel\x2dbackup.mount' ;;
@@ -52,6 +61,7 @@ reset_case() {
     DATA_MOUNT_POINT='' BACKUP_MOUNT_POINT=''
     failed_unit='var-mnt-justvoxel\x2dbackup.mount' mount_where=/var/mnt/justvoxel-backup
     critical=no dependencies_fail=no enumeration_fails=no
+    dependency_output=''
 }
 reset_case
 validate_failed_units first-run
@@ -97,6 +107,34 @@ enumeration_fails=yes
 validate_failed_units first-run
 [[ $failures == 1 && $diagnostics == *'could not enumerate'* ]]
 
+# Actual systemctl presentation: quotes and doubled backslashes must never be
+# passed back to systemctl. Exercise Requires, Requisite and BindsTo lines.
+for property_line in 1 2 3; do
+    reset_case
+    failed_unit='var-mnt-justvoxel\x2ddata.mount' mount_where=/var/mnt/justvoxel-data
+    case ${property_line} in
+        1) dependency_output='"var-mnt-justvoxel\\x2ddata.mount" basic.target';;
+        2) dependency_output=$'basic.target\n'"\"var-mnt-justvoxel\\\\x2ddata.mount\"";;
+        3) dependency_output=$'basic.target\n\n'"\"var-mnt-justvoxel\\\\x2ddata.mount\"";;
+    esac
+    validate_failed_units first-run
+    [[ $failures == 1 && $warnings == 0 && $diagnostics == *'required setup unit'* ]]
+done
+reset_case
+dependency_output='"var-mnt-justvoxel\\x2ddata.mount" basic.target'
+validate_failed_units first-run
+[[ $failures == 0 && $warnings == 1 ]]
+reset_case
+dependency_output='"var-mnt-justvoxel\\x2dbackup.mount"'
+validate_failed_units first-run
+[[ $failures == 1 && $warnings == 0 && $diagnostics == *'required setup unit'* ]]
+for malformed in '"var-mnt-justvoxel\x2ddata.mount"' '"unterminated.mount' 'bad\n.service' '$(touch /tmp/invalid).service' '*.mount'; do
+    reset_case
+    dependency_output=${malformed}
+    validate_failed_units first-run
+    [[ $failures == 1 && $diagnostics == *'dependencies'*'malformed'* ]]
+done
+
 # Exercise real first-run verification with healthy startup and classifier-backed
 # validation. No system services or disk operations run: every command is mocked.
 source <(sed -n '/^_a55_verify_action() {/,/^}/p' "${repo_root}/mjust/libexec/admin-setup-runtime-transaction-json" |
@@ -112,7 +150,6 @@ _a55_evidence_set() { if [[ $1 == final_validation ]]; then final_validation=$2;
 _a55_evidence_set_bounded() { if [[ $1 == final_validation_output ]]; then final_output=$2; fi; }
 _a55_json() { verified_phase=$3; }
 # Add only the start/restart counter cases to the existing classifier mock.
-eval "$(declare -f systemctl | sed 's/systemctl/classifier_systemctl/')"
 systemctl() {
     case "$1" in
         show) if [[ $* == *NRestarts* ]]; then printf '0\n'; else classifier_systemctl "$@"; fi ;;

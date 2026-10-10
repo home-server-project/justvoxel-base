@@ -234,6 +234,35 @@ _a55_commit_action > "${fixture}/commit-failure.json"
 jq -e '.ok == false and .phase == "runtime_commit"' "${fixture}/commit-failure.json" >/dev/null
 [[ -e ${A55_SETUP_MARKER} ]]
 
+# A completed runtime rollback must not erase new content on retry if interrupted
+# before the journal advanced to storage recovery.
+new_case completed-runtime-retry
+ready=no
+_a55_record_initial_state
+generate_paper
+rollback
+jq -e '.runtime_rollback_verified == true' "${A53_MANIFEST}" >/dev/null
+printf unrelated > "${DATA_PATH}/after-rollback"
+rollback
+[[ -f ${DATA_PATH}/after-rollback ]]
+
+# Recovered mount expectations are enforced in addition to inode/filesystem identity.
+new_case changed-expected-mount
+DATA_MOUNT_POINT="${fixture}/selected-mount"
+DATA_EXPECTED_UUID=original-uuid
+DATA_EXPECTED_SOURCE=/dev/fixture
+mountpoint() { return 0; }
+mock_uuid=original-uuid
+jv_exact_mount_identity() { case "$1" in UUID) printf '%s\n' "${mock_uuid}" ;; SOURCE) printf '/dev/fixture\n' ;; esac; }
+_a55_record_initial_state
+jq -e '.runtime.empty_data_identity != null' "${A53_MANIFEST}" >/dev/null
+generate_paper
+mock_uuid=replacement-uuid
+_a55_rollback_action > "${fixture}/rollback.json" 2>> "${expected_stderr}"
+jq -e '.ok == false and .phase == "runtime_rollback"' "${fixture}/rollback.json" >/dev/null
+[[ -f ${DATA_PATH}/paper-global.yml ]]
+unset DATA_MOUNT_POINT DATA_EXPECTED_UUID DATA_EXPECTED_SOURCE
+
 # Cleanup must keep using the shared reset implementation.
 grep -Fq 'source /usr/libexec/justvoxel/mjust/minecraft-reset-common.sh' "${helper}"
 grep -Fq 'jv_reset_delete_internal_data "${DATA_PATH}" "${BACKUP_PATH}"' "${helper}"

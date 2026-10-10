@@ -33,6 +33,35 @@ check_file "${JV_BACKUP_TIMER}" 644
 
 # The first-run transaction alone requests this policy. Ordinary validation
 # still treats every failed unit as a blocking appliance-health problem.
+decode_dependency_units() {
+    local line token decoded char i
+    local unit_pattern='^([a-zA-Z0-9:_.@-]|\\x[0-9a-fA-F]{2})+\.(service|socket|target|device|mount|automount|swap|timer|path|slice|scope)$'
+    local -a tokens=()
+    while IFS= read -r line; do
+        read -r -a tokens <<< "${line}"
+        for token in "${tokens[@]}"; do
+            if [[ ${token} == \"* ]]; then
+                [[ ${#token} -ge 2 && ${token} == *\" ]] || return 1
+                token="${token:1:${#token}-2}"
+                decoded=''
+                # systemctl quotes names containing escapes and doubles their
+                # backslashes. Undo only that presentation, never \xHH itself.
+                for (( i=0; i<${#token}; i++ )); do
+                    char="${token:i:1}"
+                    if [[ ${char} == '\' ]]; then
+                        i=$((i + 1))
+                        [[ ${token:i:1} == '\' ]] || return 1
+                    fi
+                    decoded+="${char}"
+                done
+                token="${decoded}"
+            fi
+            [[ ${token} =~ ${unit_pattern} ]] || return 1
+            printf '%s\n' "${token}"
+        done
+    done
+}
+
 validate_failed_units() {
     local mode="${1:-global}" failed_units unit line where escaped path dependency dependencies expected_where classification_failed
     local -A required=()
@@ -72,7 +101,14 @@ validate_failed_units() {
             echo "${failed_units}" >&2
             return
         fi
-        for dependency in ${dependencies}; do pending+=("${dependency}"); done
+        if ! dependencies="$(decode_dependency_units <<< "${dependencies}")"; then
+            fail "cannot classify failed units: required dependencies of ${unit} are malformed"
+            echo "${failed_units}" >&2
+            return
+        fi
+        while IFS= read -r dependency; do
+            [[ -z ${dependency} ]] || pending+=("${dependency}")
+        done <<< "${dependencies}"
     done
     while IFS= read -r line; do
         [[ -n ${line} ]] || continue

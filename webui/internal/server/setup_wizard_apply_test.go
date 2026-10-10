@@ -321,13 +321,13 @@ func TestSetupProgressTerminalActions(t *testing.T) {
 	}
 }
 
-func TestSetupRecoveryActionOnlyAtStorageRollback(t *testing.T) {
+func TestSetupRecoveryActionAtRuntimeAndStorageRollback(t *testing.T) {
 	for _, tc := range []struct {
 		state, stage string
 		available    bool
 	}{
 		{"needs_attention", "storage_rollback", true},
-		{"needs_attention", "runtime_rollback", false},
+		{"needs_attention", "runtime_rollback", true},
 		{"rolled_back", "setup_rolled_back", false},
 	} {
 		t.Run(tc.state+"_"+tc.stage, func(t *testing.T) {
@@ -349,7 +349,7 @@ func TestSetupRecoveryActionOnlyAtStorageRollback(t *testing.T) {
 			if !strings.Contains(page.Body.String(), form) {
 				t.Fatalf("recovery action visibility incorrect: %s", page.Body.String())
 			}
-			post := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recover", "csrf=csrf-token&operation_id="+setupExecutionOperationID))
+			post := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recover", "csrf=csrf-token&recovery_confirmed=on&operation_id="+setupExecutionOperationID))
 			if tc.available {
 				if post.Code != http.StatusSeeOther || post.Header().Get("Location") != "/setup/progress/"+setupExecutionOperationID || client.recoverCalls != 1 || client.recoverID != setupExecutionOperationID {
 					t.Fatalf("recovery POST = %d, calls = %d", post.Code, client.recoverCalls)
@@ -480,5 +480,50 @@ func TestSetupEntryResumesCurrentPersistentOperation(t *testing.T) {
 	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/setup/progress/"+setupExecutionOperationID {
 		t.Fatalf("active setup was not resumed: %d %q", rr.Code, rr.Header().Get("Location"))
+	}
+}
+
+func TestSetupRecoveryRequiresCleanupConfirmation(t *testing.T) {
+	client := setupExecutionClient()
+	client.operation = &api.PersistentOperation{OperationID: setupExecutionOperationID, OperationType: "setup", State: "needs_attention", Stage: "runtime_rollback"}
+	client.current = client.operation
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recover", "csrf=csrf-token&operation_id="+setupExecutionOperationID))
+	if response.Code != http.StatusBadRequest || client.recoverCalls != 0 {
+		t.Fatalf("unconfirmed recovery: %d calls=%d", response.Code, client.recoverCalls)
+	}
+}
+
+func TestRuntimeRecoveryCompletionOffersFreshSetup(t *testing.T) {
+	client := setupExecutionClient()
+	client.operation = &api.PersistentOperation{OperationID: setupExecutionOperationID, OperationType: "setup", State: "needs_attention", Stage: "runtime_rollback"}
+	client.current = client.operation
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstRunSetupDrafts.delete(app, "session-token")
+	retry := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recover", "csrf=csrf-token&recovery_confirmed=on&operation_id="+setupExecutionOperationID))
+	if retry.Code != http.StatusSeeOther || client.recoverCalls != 1 {
+		t.Fatalf("retry: %d calls=%d", retry.Code, client.recoverCalls)
+	}
+	// Simulate the authoritative completed operation returned by subsequent polling.
+	client.operation.State = "rolled_back"
+	client.operation.Stage = "setup_rolled_back"
+	client.current = nil
+	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/progress/"+setupExecutionOperationID, ""))
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), `id="setup-start-over-form" >`) || !strings.Contains(page.Body.String(), "Start setup over") {
+		t.Fatalf("restart action unavailable: %d %s", page.Code, page.Body.String())
+	}
+	start := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/start", "csrf=csrf-token"))
+	if start.Code != http.StatusSeeOther || start.Header().Get("Location") != "/setup" {
+		t.Fatalf("start over: %d %q", start.Code, start.Header().Get("Location"))
+	}
+	wizard := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
+	if wizard.Code != http.StatusOK || !strings.Contains(wizard.Body.String(), "<h2>Server</h2>") || client.applyCalls != 0 {
+		t.Fatalf("fresh setup unavailable: %d apply=%d", wizard.Code, client.applyCalls)
 	}
 }

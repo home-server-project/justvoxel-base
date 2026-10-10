@@ -71,8 +71,8 @@ _a55_parse_request() {
       (.minecraft | (has("server_type") | not) or (.server_type | type == "string" and (. == "paper" or . == "purpur" or . == "vanilla"))) and
       (.minecraft.java_memory|type == "string") and
       (.minecraft.container_memory|type == "string") and
-      (.minecraft.java_port|type == "number") and
-      (.minecraft.bedrock_port|type == "number") and
+      (.minecraft.java_port|type == "number" and . == floor and . >= 1 and . <= 65535) and
+      (.minecraft.bedrock_port|type == "number" and . == floor and . >= 1 and . <= 65535) and
       (.minecraft.image_tag|type == "string") and
       (.minecraft.version_policy|type == "string") and
       (.minecraft.version|type == "string") and
@@ -104,10 +104,31 @@ _a55_parse_request() {
     A53_PLAN_FINGERPRINT="${A55_PLAN_FINGERPRINT}"
     A53_TX_DIR="${A53_TRANSACTION_ROOT}/${A55_OPERATION_ID}"
     A53_MANIFEST="${A53_TX_DIR}/manifest.json"
-    [[ -f ${A53_MANIFEST} ]] || return 1
+    _a55_private_manifest || return 1
     [[ $(jq -r '.operation_id // ""' "${A53_MANIFEST}") == "${A55_OPERATION_ID}" ]] || return 1
     [[ $(jq -r '.plan_fingerprint // ""' "${A53_MANIFEST}") == "${A55_PLAN_FINGERPRINT}" ]] || return 1
+    # Compare the selected paths and mount expectations with the original storage request.
+    jq -e --argjson request "${A55_REQUEST}" '
+      . as $manifest | .schema_version == "v1" and
+      .storage_request.schema_version == $request.schema_version and
+      .storage_request.operation_id == $request.operation_id and
+      .storage_request.plan_fingerprint == $request.plan_fingerprint and
+      all(["storage","backups"][]; . as $section |
+        all(["type","path","mount_point","expected_uuid","expected_source"][];
+          . as $key | ($request[$section][$key] // "") == ($manifest.storage_request[$section][$key] // ""))) and
+      (.runtime_request == null or .runtime_request == $request)
+    ' "${A53_MANIFEST}" >/dev/null 2>&1 || return 1
     return 0
+}
+
+# Recovery evidence must stay in the root-owned private transaction directory.
+_a55_private_manifest() {
+    local path
+    for path in "${A53_TRANSACTION_ROOT}" "${A53_TX_DIR}" "${A53_MANIFEST}"; do
+        [[ ! -L ${path} && $(stat -c '%u' -- "${path}") == 0 ]] || return 1
+        case "$(stat -c '%a' -- "${path}")" in 700|600) ;; *) return 1 ;; esac
+    done
+    [[ -d ${A53_TX_DIR} && -f ${A53_MANIFEST} ]]
 }
 
 _a55_load_values() {
@@ -179,7 +200,9 @@ _a55_manifest_update() {
     tmp="$(mktemp "${A53_TX_DIR}/.runtime-manifest.XXXXXX")" || return 1
     jq -c "${filter}" <<< "${current}" > "${tmp}" || { rm -f -- "${tmp}"; return 1; }
     chmod 0600 "${tmp}" || { rm -f -- "${tmp}"; return 1; }
+    sync -f "${tmp}" || { rm -f -- "${tmp}"; return 1; }
     mv -f -- "${tmp}" "${A53_MANIFEST}" || { rm -f -- "${tmp}"; return 1; }
+    sync -f "${A53_TX_DIR}"
 }
 
 # Record before rendering/starting Minecraft. Missing evidence always preserves data.
@@ -188,6 +211,11 @@ _a55_data_identity() {
     local canonical scope mount_identity fstype canonical_backup
     canonical="$(realpath -e -- "${DATA_PATH}")" || return 1
     [[ ${canonical} == "${DATA_PATH}" && -d ${DATA_PATH} && ! -L ${DATA_PATH} ]] || return 1
+    if [[ -n ${DATA_MOUNT_POINT:-} ]]; then
+        mountpoint -q -- "${DATA_MOUNT_POINT}" || return 1
+        [[ -z ${DATA_EXPECTED_UUID:-} || $(jv_exact_mount_identity UUID "${DATA_MOUNT_POINT}") == "${DATA_EXPECTED_UUID}" ]] || return 1
+        [[ -z ${DATA_EXPECTED_SOURCE:-} || $(jv_exact_mount_identity SOURCE "${DATA_MOUNT_POINT}") == "${DATA_EXPECTED_SOURCE}" ]] || return 1
+    fi
     scope="$(jv_reset_data_scope "${DATA_PATH}")" || return 1
     [[ ${scope} == internal ]] || return 1
     mount_identity="$(findmnt -n -o SOURCE,FSTYPE,TARGET --target "${DATA_PATH}")" || return 1
@@ -239,10 +267,12 @@ _a55_record_initial_state() {
 
 _a55_apply_action() {
     _a55_load_values
+    # Persist the complete non-secret request before the first runtime mutation.
+    _a55_manifest_update ".runtime_request = ${A55_REQUEST}" || return 1
+    _a55_record_initial_state || return 1
     install -d -m0700 -o root -g root "$(dirname -- "${A55_SETUP_MARKER}")" || return 1
     printf '%s %s\n' "${A55_OPERATION_ID}" "${A55_PLAN_FINGERPRINT}" > "${A55_SETUP_MARKER}" || return 1
     chmod 0600 "${A55_SETUP_MARKER}" || return 1
-    _a55_record_initial_state || return 1
 
     if jq -e --arg p "${DATA_PATH}" '.directories_created | index($p) != null' "${A53_MANIFEST}" >/dev/null 2>&1; then
         chown "${MINECRAFT_UID}:${MINECRAFT_GID}" "${DATA_PATH}" || return 1
@@ -356,7 +386,19 @@ _a55_verify_action() {
 
 _a55_rollback_action() {
     _a55_load_values
-    local failure=0 java_pre=false bedrock_pre=false
+    # A durable completed rollback survives interruption before the storage stage.
+    # Do not erase anything again after this transaction's runtime was restored.
+    if jq -e '.runtime_rollback_verified == true' "${A53_MANIFEST}" >/dev/null 2>&1; then
+        _a55_json true false runtime_rolled_back ''
+        return 0
+    fi
+    # No runtime initial state means no runtime mutation was permitted.
+    if [[ $(jq -r '.runtime // null' "${A53_MANIFEST}") == null ]]; then
+        _a55_manifest_update '.runtime_rollback_verified = true' || return 1
+        _a55_json true false runtime_rolled_back ''
+        return 0
+    fi
+    local failure=0 java_pre=false bedrock_pre=false reason='Runtime rollback could not be completed safely.'
     java_pre="$(jq -r '.runtime.java_firewall_preexisting // false' "${A53_MANIFEST}")"
     bedrock_pre="$(jq -r '.runtime.bedrock_firewall_preexisting // false' "${A53_MANIFEST}")"
 
@@ -368,13 +410,20 @@ _a55_rollback_action() {
     fi
 
     systemctl disable --now minecraft-backup.timer >/dev/null 2>&1 || true
-    if systemctl is-active --quiet minecraft-backup.timer 2>/dev/null; then failure=1; fi
-    systemctl stop minecraft.service >/dev/null 2>&1 || failure=1
+    if systemctl is-active --quiet minecraft-backup.timer 2>/dev/null; then failure=1; reason='The backup timer is still active; setup data was preserved.'; fi
+    if ! systemctl stop minecraft.service >/dev/null 2>&1; then
+        # A prior rollback may already have removed the generated unit.
+        [[ $(systemctl show -p LoadState --value minecraft.service 2>/dev/null) == not-found ]] || failure=1
+    fi
     if systemctl is-active --quiet minecraft.service 2>/dev/null; then
         failure=1
+        reason='Minecraft is still active; setup data was preserved.'
     elif (( failure == 0 )); then
         # Do not delete while the service is active or if container removal fails.
-        _a55_cleanup_failed_data || failure=1
+        if ! jv_reset_remove_minecraft_container || ! _a55_cleanup_failed_data; then
+            failure=1
+            reason='Minecraft data or container cleanup could not be verified; review the setup log before retrying.'
+        fi
     fi
 
     rm -f -- "${JV_QUADLET}" "${JV_MC_ENV}" "${JV_BACKUP_ENV}" "${JV_BACKUP_SERVICE}" "${JV_BACKUP_TIMER}" "${JV_CONFIG}" || failure=1
@@ -392,9 +441,13 @@ _a55_rollback_action() {
 
     rm -f -- "${A55_SETUP_MARKER}" || failure=1
     if (( failure != 0 )); then
-        _a55_json false false runtime_rollback 'Runtime rollback could not be completed safely.'
+        _a55_json false false runtime_rollback "${reason}"
     else
-        _a55_json true false runtime_rolled_back ''
+        if _a55_manifest_update '.runtime_rollback_verified = true'; then
+            _a55_json true false runtime_rolled_back ''
+        else
+            _a55_json false false runtime_rollback 'Could not persist verified runtime rollback.'
+        fi
     fi
 }
 
@@ -429,7 +482,30 @@ _a55_commit_action() {
     _a55_json true true runtime_committed '' "${A55_EVIDENCE}"
 }
 
+_a55_recover_request() {
+    local identity operation fingerprint saved
+    identity="$(cat)"
+    jq -e 'type == "object" and (keys|sort) == ["operation_id","plan_fingerprint","schema_version"] and .schema_version == "v1"' <<< "${identity}" >/dev/null 2>&1 || return 1
+    operation="$(jq -r '.operation_id' <<< "${identity}")"
+    fingerprint="$(jq -r '.plan_fingerprint' <<< "${identity}")"
+    [[ ${operation} =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ && ${fingerprint} =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+    A53_TX_DIR="${A53_TRANSACTION_ROOT}/${operation}"
+    A53_MANIFEST="${A53_TX_DIR}/manifest.json"
+    _a55_private_manifest || return 1
+    saved="$(jq -ce '.runtime_request | select(type == "object")' "${A53_MANIFEST}")" || return 1
+    [[ $(jq -r '.operation_id' <<< "${saved}") == "${operation}" && $(jq -r '.plan_fingerprint' <<< "${saved}") == "${fingerprint}" ]] || return 1
+    _a55_parse_request <<< "${saved}"
+}
+
 action="${1:-validate}"
+if [[ ${action} == recover ]]; then
+    if ! _a55_recover_request; then
+        _a55_json false false runtime_rollback 'Durable runtime recovery evidence is missing or does not match this transaction.'
+    elif ! _a55_rollback_action; then
+        _a55_json false false runtime_rollback 'Runtime recovery could not be completed safely.'
+    fi
+    exit 0
+fi
 if ! _a55_parse_request; then
     _a55_json false false runtime_preflight 'Runtime transaction request is invalid or storage transaction evidence is missing.'
     exit 0
@@ -437,7 +513,7 @@ fi
 
 case "${action}" in
     validate)
-        if _a55_validate_runtime_inputs; then _a55_json true false runtime_preflight ''; else _a55_json false false runtime_preflight 'Runtime preflight failed or managed runtime files already exist.'; fi
+        if _a55_validate_runtime_inputs && _a55_manifest_update ".runtime_request = ${A55_REQUEST}"; then _a55_json true false runtime_preflight ''; else _a55_json false false runtime_preflight 'Runtime preflight failed or managed runtime files already exist.'; fi
         ;;
     apply)
         if _a55_validate_runtime_inputs && _a55_apply_action; then :; else _a55_json false false runtime_config 'Runtime configuration could not be applied safely.'; fi
@@ -452,6 +528,6 @@ case "${action}" in
         _a55_commit_action
         ;;
     *)
-        _a55_json false false invalid_action 'Usage: admin-setup-runtime-transaction-json {validate|apply|verify|rollback|commit}'
+        _a55_json false false invalid_action 'Usage: admin-setup-runtime-transaction-json {validate|apply|verify|rollback|recover|commit}'
         ;;
 esac

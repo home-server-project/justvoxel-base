@@ -145,4 +145,20 @@ printf 'unexpected\n' > "${A54_SMB_CREDENTIALS}"
 assert_result "$(recover)" needs_attention
 grep -q '^unexpected$' "${A54_SMB_CREDENTIALS}"
 
+# Runtime recovery must be durably verified before entering untouched storage rollback.
+fixture
+jq '.rollback = {state:"not_started",result:""}' "${A53_MANIFEST}" > "${base}/manifest.updated"
+mv -- "${base}/manifest.updated" "${A53_MANIFEST}"
+assert_result "$(recover)" needs_attention
+fixture
+jq '.rollback = {state:"not_started",result:""} | .runtime_rollback_verified = true' "${A53_MANIFEST}" > "${base}/manifest.updated"
+mv -- "${base}/manifest.updated" "${A53_MANIFEST}"
+assert_result "$(recover)" rolled_back
+cmp -s -- "${A53_FSTAB}" "${A53_TX_DIR}/fstab.before"
+
+fixture
+jq '.rollback = {state:"running",result:"rollback_in_progress"} | .runtime_rollback_verified = true' "${A53_MANIFEST}" > "${base}/manifest.updated"
+mv -- "${base}/manifest.updated" "${A53_MANIFEST}"
+assert_result "$(recover)" rolled_back
+
 echo 'Setup storage recovery cases passed.'

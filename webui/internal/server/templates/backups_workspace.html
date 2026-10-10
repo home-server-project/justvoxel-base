@@ -194,6 +194,7 @@
       {{if .Destination.Current.Status}}<span class="badge backup-destination-status">{{.Destination.Current.Status}}</span>{{end}}
     </div>
     {{if .Destination.Current.StatusDetail}}<p class="muted compact">{{.Destination.Current.StatusDetail}}</p>{{end}}
+    {{if and (eq .Destination.Current.Type "smb") (eq .Destination.Current.Status "unavailable")}}<p class="muted compact">To reconnect this share, open Change destination, keep the saved location, and enter your username and optional domain. Choose Review destination, then enter your password during Apply.</p>{{end}}
     <dl class="backup-destination-summary">
       <div><dt>Type</dt><dd>{{.Destination.Current.Type}}</dd></div>
       <div><dt>Backup directory</dt><dd><code>{{.Destination.Current.Path}}</code></dd></div>
