@@ -7,6 +7,22 @@ pass() { :; }
 fail() { failures=$((failures + 1)); diagnostics+="FAIL: $*"$'\n'; }
 warn() { warnings=$((warnings + 1)); diagnostics+="WARN: $*"$'\n'; }
 systemctl() {
+    local arg unit='' options_done=no
+    if [[ $1 == show ]]; then
+        shift
+        for arg in "$@"; do
+            if [[ ${options_done} == yes ]]; then
+                unit=${arg}
+            else
+                case "${arg}" in
+                    --) options_done=yes ;;
+                    --property=*|--value) ;;
+                    -*) printf 'systemctl: invalid option: %s\n' "${arg}" >&2; return 1 ;;
+                    *) unit=${arg} ;;
+                esac
+            fi
+        done
+    fi
     if [[ $1 == --failed ]]; then
         [[ ${enumeration_fails} == no ]] || return 1
         [[ -z ${failed_unit} ]] || printf '%s loaded failed failed fixture\n' "${failed_unit}"
@@ -17,15 +33,16 @@ systemctl() {
     else
         [[ ${dependencies_fail} == no ]] || return 1
         # Exercise an indirect critical dependency as well as direct Minecraft.
-        if [[ ${critical} == yes && $2 == minecraft.service ]]; then printf 'fixture-required.service\n'; fi
-        if [[ ${critical} == yes && $2 == fixture-required.service ]]; then printf '%s\n' "${failed_unit}"; fi
+        if [[ ${unit} == local-fs.target ]]; then printf '%s\n' '-.mount'; fi
+        if [[ ${critical} == yes && ${unit} == minecraft.service ]]; then printf 'fixture-required.service\n'; fi
+        if [[ ${critical} == yes && ${unit} == fixture-required.service ]]; then printf '%s\n' "${failed_unit}"; fi
     fi
     return 0
 }
 systemd-escape() {
     case "$3" in
-        /var/mnt/justvoxel-backup) printf 'var-mnt-justvoxel-backup.mount\n' ;;
-        /var/mnt/justvoxel-data) printf 'var-mnt-justvoxel-data.mount\n' ;;
+        /var/mnt/justvoxel-backup) printf '%s\n' 'var-mnt-justvoxel\x2dbackup.mount' ;;
+        /var/mnt/justvoxel-data) printf '%s\n' 'var-mnt-justvoxel\x2ddata.mount' ;;
         *) return 1 ;;
     esac
 }
@@ -33,7 +50,7 @@ reset_case() {
     failures=0 warnings=0 diagnostics=''
     DATA_PATH=/var/lib/justvoxel/minecraft BACKUP_PATH=/var/lib/justvoxel/backups
     DATA_MOUNT_POINT='' BACKUP_MOUNT_POINT=''
-    failed_unit=var-mnt-justvoxel-backup.mount mount_where=/var/mnt/justvoxel-backup
+    failed_unit='var-mnt-justvoxel\x2dbackup.mount' mount_where=/var/mnt/justvoxel-backup
     critical=no dependencies_fail=no enumeration_fails=no
 }
 reset_case
@@ -44,7 +61,7 @@ BACKUP_MOUNT_POINT=/var/mnt/justvoxel-backup BACKUP_PATH=/var/mnt/justvoxel-back
 validate_failed_units first-run
 [[ $failures == 1 && $diagnostics == *'selected setup storage mount'* ]]
 reset_case
-failed_unit=var-mnt-justvoxel-data.mount mount_where=/var/mnt/justvoxel-data
+failed_unit='var-mnt-justvoxel\x2ddata.mount' mount_where=/var/mnt/justvoxel-data
 DATA_MOUNT_POINT=/var/mnt/justvoxel-data DATA_PATH=/var/mnt/justvoxel-data/minecraft
 validate_failed_units first-run
 [[ $failures == 1 ]]
@@ -52,6 +69,10 @@ reset_case
 failed_unit=minecraft.service
 validate_failed_units first-run
 [[ $failures == 1 && $diagnostics == *'required setup unit'* ]]
+reset_case
+failed_unit=-.mount
+validate_failed_units first-run
+[[ $failures == 1 && $warnings == 0 && $diagnostics == *'required setup unit'* ]]
 reset_case
 critical=yes
 validate_failed_units first-run
