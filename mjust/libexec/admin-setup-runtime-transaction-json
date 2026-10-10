@@ -412,8 +412,11 @@ _a55_commit_action() {
     fi
 
     local output rc
-    output="$(activate_backup_timer 2>&1)"
-    rc=$?
+    if output="$(activate_backup_timer 2>&1)"; then
+        rc=0
+    else
+        rc=$?
+    fi
     _a55_evidence_set backup_timer_activation "$([[ ${rc} -eq 0 ]] && printf ok || printf failed)" || return 1
     _a55_evidence_set_bounded backup_timer_output "${output}" || return 1
     if (( rc != 0 )); then
