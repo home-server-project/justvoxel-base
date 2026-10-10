@@ -143,6 +143,8 @@ fi
 section 'Network'
 row 'Interface' "$(jq -r '.extended.network.interface // "Unknown"' <<<"${response}")"
 row 'IPv4' "${host_ip}"
+row 'Tailscale' "$(jq -r '.system.tailscale // "Unavailable"' <<<"${response}")"
+row 'NetBird' "$(jq -r '.system.netbird // "Unavailable"' <<<"${response}")"
 row 'Gateway' "$(jq -r '.extended.network.gateway // "Unknown"' <<<"${response}")"
 row 'DNS' "$(jq -r '.extended.network.dns // "Unknown"' <<<"${response}")"
 

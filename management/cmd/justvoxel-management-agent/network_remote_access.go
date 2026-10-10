@@ -15,17 +15,18 @@ import (
 )
 
 type remoteProvider struct {
-	ID           string `json:"id"`
-	Name         string `json:"display_name"`
-	Installed    bool   `json:"installed"`
-	Enabled      bool   `json:"service_enabled"`
-	Active       bool   `json:"service_active"`
-	Configured   bool   `json:"configured"`
-	Dashboard    string `json:"dashboard_url"`
-	ServiceState string `json:"service_state"`
-	Summary      string `json:"summary"`
-	Connected    bool   `json:"connected"`
-	IP           string `json:"ip,omitempty"`
+	ID           string         `json:"id"`
+	Name         string         `json:"display_name"`
+	Installed    bool           `json:"installed"`
+	Enabled      bool           `json:"service_enabled"`
+	Active       bool           `json:"service_active"`
+	Configured   bool           `json:"configured"`
+	Dashboard    string         `json:"dashboard_url"`
+	ServiceState string         `json:"service_state"`
+	Summary      string         `json:"summary"`
+	Connected    bool           `json:"connected"`
+	IP           string         `json:"ip,omitempty"`
+	Tunnels      []playitTunnel `json:"tunnels,omitempty"`
 }
 
 type remoteProviderMetadata struct {
@@ -61,7 +62,7 @@ var netbirdStatus = func(ctx context.Context) (bool, string) {
 		return false, ""
 	}
 	ip := strings.TrimSpace(state.IP)
-	if net.ParseIP(strings.Split(ip, "/")[0]) == nil {
+	if address := net.ParseIP(strings.Split(ip, "/")[0]); address == nil || address.To4() == nil {
 		ip = ""
 	}
 	return true, ip
@@ -172,7 +173,7 @@ var tailscaleStatus = func(ctx context.Context) (bool, string, string) {
 	cmd.WaitDelay = time.Second
 	output, err := cmd.Output()
 	if err != nil || ctx.Err() != nil {
-		return false, "Not configured", ""
+		return false, "Unavailable", ""
 	}
 	var status struct {
 		BackendState   string
@@ -181,13 +182,13 @@ var tailscaleStatus = func(ctx context.Context) (bool, string, string) {
 		TailscaleIPs   []string
 	}
 	if json.Unmarshal(output, &status) != nil {
-		return false, "Not configured", ""
+		return false, "Unavailable", ""
 	}
 	switch status.BackendState {
 	case "Running":
 		ip := ""
 		for _, candidate := range status.TailscaleIPs {
-			if address := net.ParseIP(candidate); address != nil && address.To4() != nil {
+			if address := net.ParseIP(strings.Split(candidate, "/")[0]); address != nil && address.To4() != nil {
 				ip = address.String()
 				break
 			}
@@ -363,15 +364,15 @@ func remoteProviderStatus(ctx context.Context, provider remoteProviderMetadata) 
 		}
 	} else if status.Configured {
 		status.Summary = "Stopped"
-		if provider.id == "playit" {
-			status.Summary = "Configured"
-		}
 		if status.Active {
-			status.Connected = true
-			status.Summary = "Connected"
-			if provider.id == "playit" {
-				status.Summary = "Running"
+			status.Summary = "Running" // Service fallback does not confirm tunnels.
+			if result, err := playitTunnelStatus(ctx); err == nil {
+				status.Summary, status.Connected, status.Tunnels = result.Summary, result.Connected, result.Tunnels
 			}
+		} else if status.ServiceState == "activating" {
+			status.Summary = "Connecting"
+		} else if status.ServiceState == "deactivating" {
+			status.Summary = "Stopping"
 		}
 	}
 	return status, nil

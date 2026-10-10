@@ -499,7 +499,12 @@ if (quickLook && quickLookToggle) {
       overlays.replaceChildren();
       [["Tailscale", "tailscale"], ["NetBird", "netbird"], ["Playit", "playit"]].forEach(([label, id]) => {
         const provider = providers.find((item) => item.id === id);
-        const value = provider?.summary || "Unavailable";
+        let value = provider?.summary || "Unavailable";
+        if (provider?.connected && id !== "playit" && provider.ip) value = provider.ip.split("/")[0];
+        if (id === "playit" && provider?.connected && Array.isArray(provider.tunnels)) {
+          const count = provider.tunnels.filter((tunnel) => !tunnel.is_disabled).length;
+          value = count === 0 ? "No tunnels" : `${count} tunnel${count === 1 ? "" : "s"}`;
+        }
         const line = document.createElement("span");
         const name = document.createElement("span");
         name.textContent = label;

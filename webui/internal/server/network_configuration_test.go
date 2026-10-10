@@ -233,12 +233,25 @@ for (const id of ["tailscale", "netbird", "playit"]) {
   assert.equal(link.target, "_blank"); assert.equal(link.rel, "noopener noreferrer");
   assert.equal(link.href, { tailscale: "https://console.tailscale.com/admin/", netbird: "https://app.netbird.io/", playit: "https://playit.gg/account/" }[id]);
 }
+nodes = render({ ...base, configured: true, connected: true, summary: "2 tunnels", tunnels: [
+  { display_address: "one.playit.gg:1234", destination: "127.0.0.1:25565", is_disabled: false },
+  { display_address: "two.playit.gg:2345", destination: "127.0.0.1:19132", is_disabled: false },
+  { display_address: "disabled.playit.gg:3456", destination: "127.0.0.1:25566", is_disabled: true },
+] });
+for (const text of ["Software: Installed", "Service enabled: Yes", "Service: Running", "Configuration: Configured", "Tunnels: 2 tunnels", "Public tunnel: one.playit.gg:1234", "Public tunnel: two.playit.gg:2345", "Disabled tunnel: disabled.playit.gg:3456", "Local destination: 127.0.0.1:25565", "Local destination: 127.0.0.1:19132", "Local destination: 127.0.0.1:25566"]) assert(nodes.some((n) => n.textContent === text));
+assert(nodes.some((n) => n.textContent === "Activate" && n.disabled));
+assert(nodes.some((n) => n.textContent === "Deactivate" && !n.disabled));
+for (const summary of ["No tunnels", "Running", "Connecting", "Unavailable"]) {
+  nodes = render({ ...base, configured: true, summary });
+  assert(nodes.some((n) => n.textContent === "Tunnels: " + summary));
+  assert(!nodes.some((n) => n.textContent.startsWith("Public tunnel:")));
+}
 netbirdLoginURL = "https://app.netbird.io/login?code=abcd";
 nodes = render({ ...base, id: "netbird", configured: false, service_active: false, service_enabled: false, service_state: "inactive" });
 assert(nodes.some((n) => n.textContent === "Complete NetBird login" && n.href === netbirdLoginURL));
 netbirdLoginURL = "";
 nodes = render({ ...base, id: "netbird", configured: true, connected: true, ip: "100.80.12.5/16" });
-assert(nodes.some((n) => n.textContent === "NetBird IP: 100.80.12.5/16"));
+assert(nodes.some((n) => n.textContent === "NetBird IP: 100.80.12.5"));
 assert(nodes.some((n) => n.textContent === "Activate" && n.disabled));
 tailscaleLoginURL = "https://login.tailscale.com/a/0123456789abcdef";
 nodes = render({ ...base, id: "tailscale", configured: false, connected: false, service_active: true });
@@ -455,6 +468,10 @@ assert.deepEqual(render(["tailscale", "netbird", "playit"].map((id) => ({ id, su
   [["Tailscale", "Not configured"], ["NetBird", "Not configured"], ["Playit", "Not configured"]]);
 assert.deepEqual(render([{ id: "tailscale", summary: "Awaiting approval" }, { id: "netbird", summary: "Stopped" }, { id: "playit", summary: "Running" }]),
   [["Tailscale", "Awaiting approval"], ["NetBird", "Stopped"], ["Playit", "Running"]]);
+assert.deepEqual(render([{ id: "tailscale", summary: "Connected", connected: true, ip: "100.64.0.3/16" }, { id: "netbird", summary: "Stopped", connected: false, ip: "100.64.0.4/16" }, { id: "playit", connected: true, tunnels: [{ display_address: "one.playit.gg", is_disabled: false }, { display_address: "two.playit.gg", is_disabled: false }, { display_address: "disabled.playit.gg", is_disabled: true }] }]),
+  [["Tailscale", "100.64.0.3"], ["NetBird", "Stopped"], ["Playit", "2 tunnels"]]);
+for (const tunnels of [[], [{ is_disabled: true }]]) assert.equal(render([{ id: "playit", connected: true, tunnels }])[2][1], "No tunnels");
+assert.equal(render([{ id: "playit", connected: true, tunnels: [{ display_address: "one.playit.gg", is_disabled: false }] }])[2][1], "1 tunnel");
 `
 	cmd := exec.Command("node")
 	cmd.Stdin = strings.NewReader(program)

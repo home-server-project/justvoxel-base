@@ -17,6 +17,9 @@ import (
 
 func remoteFixture(t *testing.T) *[]string {
 	t.Helper()
+	oldPlayit := playitTunnelStatus
+	playitTunnelStatus = func(context.Context) (playitStatusResult, error) { return playitStatusResult{}, os.ErrNotExist }
+	t.Cleanup(func() { playitTunnelStatus = oldPlayit })
 	oldRun, oldStat, oldStatus, oldTailscaleLogin, oldNetbirdStatus, oldNetbirdLogin := remoteSystemctl, remoteStat, tailscaleStatus, tailscaleLogin, netbirdStatus, netbirdLogin
 	netbirdStatus = func(context.Context) (bool, string) { return false, "" }
 	netbirdLogin = func() (string, error) { return "https://app.netbird.io/login?code=example", nil }
@@ -31,7 +34,14 @@ func remoteFixture(t *testing.T) *[]string {
 		return "", nil
 	}
 	remoteStat = func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
-	t.Cleanup(func() { remoteSystemctl = oldRun; remoteStat = oldStat; tailscaleStatus = oldStatus; tailscaleLogin = oldTailscaleLogin; netbirdStatus = oldNetbirdStatus; netbirdLogin = oldNetbirdLogin })
+	t.Cleanup(func() {
+		remoteSystemctl = oldRun
+		remoteStat = oldStat
+		tailscaleStatus = oldStatus
+		tailscaleLogin = oldTailscaleLogin
+		netbirdStatus = oldNetbirdStatus
+		netbirdLogin = oldNetbirdLogin
+	})
 	return &calls
 }
 
@@ -105,7 +115,6 @@ func TestRemoteProviderLifecycleUsesFixedUnitsAndAudits(t *testing.T) {
 	}
 }
 
-
 func TestNetBirdActivationReturnsCLILoginURL(t *testing.T) {
 	remoteFixture(t)
 	calls := 0
@@ -177,16 +186,16 @@ func TestNetBirdLoginURLExtractsOnlyFromSSOPrompt(t *testing.T) {
 			want: "https://app.netbird.io/verify?user_code=abcd",
 		},
 		{
-			name: "prompt and link on the same line",
+			name:  "prompt and link on the same line",
 			lines: []string{"Use this URL to log in: https://idp.example.org/authorize?state=abc and enter the code TEST"},
-			want: "https://idp.example.org/authorize?state=abc",
+			want:  "https://idp.example.org/authorize?state=abc",
 		},
 		{
-			name: "no URL in other CLI output",
+			name:  "no URL in other CLI output",
 			lines: []string{"NetBird is running", "https://login.tailscale.com/a/token"},
 		},
 		{
-			name: "wrong-provider URL following prompt",
+			name:  "wrong-provider URL following prompt",
 			lines: []string{"Use this URL to log in:", "https://login.tailscale.com/a/token"},
 		},
 	} {
@@ -333,13 +342,15 @@ func TestTailscaleFixedStatusIdentityEvidence(t *testing.T) {
 		{"needs-login", `{"BackendState":"NeedsLogin","HaveNodeKey":true,"CurrentTailnet":{}}`, "Not configured", "", false},
 		{"no-state", `{"BackendState":"NoState","HaveNodeKey":true,"CurrentTailnet":{}}`, "Not configured", "", false},
 		{"running", `{"BackendState":"Running","HaveNodeKey":true,"TailscaleIPs":["fd7a:115c:a1e0::5","100.111.12.13"],"CurrentTailnet":{"Name":"private-account"}}`, "Connected", "100.111.12.13", true},
+		{"running-cidr", `{"BackendState":"Running","TailscaleIPs":["100.111.12.13/16"]}`, "Connected", "100.111.12.13", true},
+		{"stopped-stale-ip", `{"BackendState":"Stopped","HaveNodeKey":true,"TailscaleIPs":["100.111.12.13"]}`, "Stopped", "", true},
 		{"approval", `{"BackendState":"NeedsMachineAuth"}`, "Awaiting approval", "", true},
 		{"starting-no-identity", `{"BackendState":"Starting"}`, "Not configured", "", false},
 		{"starting-key", `{"BackendState":"Starting","HaveNodeKey":true}`, "Starting", "", true},
 		{"stopped-no-identity", `{"BackendState":"Stopped","CurrentTailnet":null}`, "Not configured", "", false},
 		{"stopped-tailnet", `{"BackendState":"Stopped","CurrentTailnet":{}}`, "Stopped", "", true},
 		{"unknown", `{"BackendState":"Unknown","HaveNodeKey":true}`, "Not configured", "", false},
-		{"invalid", `{`, "Not configured", "", false},
+		{"invalid", `{`, "Unavailable", "", false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			tailscaleStatusCommand = func(ctx context.Context, executable string, args ...string) *exec.Cmd {
@@ -363,7 +374,7 @@ func TestTailscaleFixedStatusIdentityEvidence(t *testing.T) {
 	tailscaleStatusCommand = func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
 		return exec.CommandContext(ctx, "/nonexistent/justvoxel-test-tailscale")
 	}
-	if configured, summary, ip := tailscaleStatus(context.Background()); configured || summary != "Not configured" || ip != "" {
+	if configured, summary, ip := tailscaleStatus(context.Background()); configured || summary != "Unavailable" || ip != "" {
 		t.Fatal("command failure claimed configuration")
 	}
 }
@@ -483,8 +494,8 @@ func TestCanonicalProviderSummariesFollowConfigurationAndService(t *testing.T) {
 		{"netbird", "active", "Not connected", true, false},
 		{"netbird", "inactive", "Stopped", true, false},
 		{"playit", "active", "Not configured", false, false},
-		{"playit", "active", "Running", true, true},
-		{"playit", "inactive", "Configured", true, false},
+		{"playit", "active", "Running", true, false},
+		{"playit", "inactive", "Stopped", true, false},
 	} {
 		remoteStat = func(string) (os.FileInfo, error) {
 			if test.configured {
@@ -509,5 +520,36 @@ func TestCanonicalProviderSummariesFollowConfigurationAndService(t *testing.T) {
 	status, err := remoteProviderStatus(context.Background(), provider)
 	if err != nil || !status.Configured || status.Connected || status.Summary != "Stopped" {
 		t.Fatalf("stopped Tailscale: %+v %v", status, err)
+	}
+}
+
+func TestPlayitLifecyclePresentationDoesNotChangeProviderControls(t *testing.T) {
+	remoteFixture(t)
+	path := filepath.Join(t.TempDir(), "config")
+	if err := os.WriteFile(path, []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	remoteStat = func(string) (os.FileInfo, error) { return os.Stat(path) }
+	expected := playitStatusResult{Summary: "2 tunnels", Connected: true, Tunnels: []playitTunnel{
+		{DisplayAddress: "one.playit.gg", Destination: "127.0.0.1:25565"},
+		{DisplayAddress: "two.playit.gg", Destination: "127.0.0.1:19132"},
+		{DisplayAddress: "disabled.playit.gg", Destination: "127.0.0.1:25565", Disabled: true},
+	}}
+	playitTunnelStatus = func(context.Context) (playitStatusResult, error) { return expected, nil }
+	provider, _ := remoteProviderByID("playit")
+	status, err := remoteProviderStatus(context.Background(), provider)
+	if err != nil || !status.Installed || !status.Enabled || !status.Active || !status.Configured || !status.Connected || status.Summary != "2 tunnels" || !reflect.DeepEqual(status.Tunnels, expected.Tunnels) {
+		t.Fatalf("Playit status %+v: %v", status, err)
+	}
+	remoteSystemctl = func(context.Context, ...string) (string, error) {
+		return "LoadState=loaded\nUnitFileState=enabled\nActiveState=inactive", nil
+	}
+	playitTunnelStatus = func(context.Context) (playitStatusResult, error) {
+		t.Fatal("stopped agent must not query IPC")
+		return expected, nil
+	}
+	status, err = remoteProviderStatus(context.Background(), provider)
+	if err != nil || status.Summary != "Stopped" || status.Connected || len(status.Tunnels) != 0 {
+		t.Fatalf("stale tunnels %+v: %v", status, err)
 	}
 }

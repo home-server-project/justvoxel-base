@@ -32,6 +32,8 @@ done
 
 grep -Fq '"${api_client}" GET "${path}"' "${status}" || fail 'mJust status must use the Management API'
 grep -Fq "path='/v1/status?details=1'" "${status}" || fail 'mJust detailed status must use the Management API'
+grep -Fq '.system.tailscale' "${status}" || fail 'mJust status must display current Tailscale information'
+grep -Fq '.system.netbird' "${status}" || fail 'mJust status must display current NetBird information'
 grep -Fq 'extended.system.hostname' "${status}" || fail 'mJust status does not consume extended system status'
 grep -Fq 'extended.storage.system' "${status}" || fail 'mJust status does not consume extended storage status'
 
@@ -47,8 +49,8 @@ if grep -Fq 'df -Pk --output=' "${collector}"; then
 fi
 
 grep -Fq 'jv_variant_name' "${collector}" || fail 'Agent status collector must use canonical variant normalization'
-grep -Fq 'tailscale ip -4' "${collector}" || fail 'status dashboard must expose configured Tailscale IPv4'
-grep -Fq 'netbird status --ipv4' "${collector}" || fail 'status dashboard must expose configured NetBird IPv4'
+grep -Fq 'remote-access-status tailscale' "${collector}" || fail 'status dashboard must expose configured Tailscale IPv4'
+grep -Fq 'remote-access-status netbird' "${collector}" || fail 'status dashboard must expose configured NetBird IPv4'
 grep -Fq 'tailscale:$tailscale,netbird:$netbird' "${collector}" || fail 'status JSON is missing overlay-network fields'
 grep -Fq 'justvoxel-hws' "${common}" || fail 'JustVoxel HWS variant normalization missing'
 grep -Fq 'c_good=' "${status}" || fail 'healthy status color missing'

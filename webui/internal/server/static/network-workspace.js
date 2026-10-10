@@ -532,7 +532,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       row("Ethernet", ethernet ? ethernet.interface + " · " + (ethernet.state === "activated" && ethernet.carrier !== false ? "Connected" : "Disconnected") : "Unavailable"));
     for (const [id, name] of [["tailscale", "Tailscale"], ["netbird", "NetBird"], ["playit", "Playit"]]) {
       const provider = remoteProviders.find((item) => item.id === id);
-      section.appendChild(row(name, provider?.summary || "Unavailable"));
+      section.appendChild(row(name, provider?.connected && provider.ip ? provider.ip.split("/")[0] : provider?.summary || "Unavailable"));
     }
     return section;
   };
@@ -1029,10 +1029,17 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         row("Service", providerTransitional(provider) ? provider.service_state[0].toUpperCase() + provider.service_state.slice(1) + "…" : provider.service_active ? "Running" : label(provider.service_state).replace(/^./, (c) => c.toUpperCase())),
         row("Configuration", provider.status_unavailable ? "Unknown" : provider.configured ? "Configured" : "Not configured")
       );
-      if (provider.id === "netbird" && provider.connected && provider.ip) card.appendChild(row("NetBird IP", provider.ip));
+      if (provider.id === "netbird" && provider.connected && provider.ip) card.appendChild(row("NetBird IP", provider.ip.split("/")[0]));
       if (provider.id === "tailscale") {
         card.appendChild(row("Connection", provider.summary || "Unknown"));
-        if (provider.connected && provider.ip) card.appendChild(row("Tailscale IP", provider.ip));
+        if (provider.connected && provider.ip) card.appendChild(row("Tailscale IP", provider.ip.split("/")[0]));
+      }
+      if (provider.id === "playit") {
+        card.appendChild(row("Tunnels", provider.summary || "Unavailable"));
+        (provider.tunnels || []).forEach((tunnel) => {
+          card.appendChild(row(tunnel.is_disabled ? "Disabled tunnel" : "Public tunnel", tunnel.display_address));
+          card.appendChild(row("Local destination", tunnel.destination));
+        });
       }
       if (providerProgress.has(provider.id)) {
         const progress = document.createElement("p");

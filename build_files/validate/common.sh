@@ -154,8 +154,8 @@ test -f /etc/profile.d/90-justvoxel-motd.sh
 bash -n /etc/profile.d/90-justvoxel-motd.sh
 grep -Fq 'timeout 3s /usr/libexec/justvoxel/motd || true' /etc/profile.d/90-justvoxel-motd.sh
 grep -Fq 'timeout 1s nmcli' /usr/libexec/justvoxel/motd
-grep -Fq 'timeout 1s tailscale status --json' /usr/libexec/justvoxel/motd
-grep -Fq 'timeout 1s netbird status --ipv4' /usr/libexec/justvoxel/motd
+test -x /usr/libexec/justvoxel/remote-access-status
+grep -Fq 'remote_status=/usr/libexec/justvoxel/remote-access-status' /usr/libexec/justvoxel/motd
 test -x /usr/libexec/justvoxel/motd
 bash -n /usr/libexec/justvoxel/motd
 grep -Fq 'Minecraft Server Appliance' /usr/libexec/justvoxel/motd

@@ -216,17 +216,24 @@ func (c *Client) ForgetWiFiProfile(ctx context.Context, session, profileUUID str
 }
 
 type RemoteAccessProvider struct {
-	ID             string `json:"id"`
-	DisplayName    string `json:"display_name"`
-	Installed      bool   `json:"installed"`
-	ServiceEnabled bool   `json:"service_enabled"`
-	ServiceActive  bool   `json:"service_active"`
-	Configured     bool   `json:"configured"`
-	DashboardURL   string `json:"dashboard_url"`
-	ServiceState   string `json:"service_state"`
-	Summary        string `json:"summary"`
-	Connected      bool   `json:"connected"`
-	IP             string `json:"ip,omitempty"`
+	ID             string         `json:"id"`
+	DisplayName    string         `json:"display_name"`
+	Installed      bool           `json:"installed"`
+	ServiceEnabled bool           `json:"service_enabled"`
+	ServiceActive  bool           `json:"service_active"`
+	Configured     bool           `json:"configured"`
+	DashboardURL   string         `json:"dashboard_url"`
+	ServiceState   string         `json:"service_state"`
+	Summary        string         `json:"summary"`
+	Connected      bool           `json:"connected"`
+	IP             string         `json:"ip,omitempty"`
+	Tunnels        []PlayitTunnel `json:"tunnels,omitempty"`
+}
+
+type PlayitTunnel struct {
+	DisplayAddress string `json:"display_address"`
+	Destination    string `json:"destination"`
+	Disabled       bool   `json:"is_disabled"`
 }
 
 type RemoteAccessStatus struct {

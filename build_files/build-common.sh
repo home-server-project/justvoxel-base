@@ -59,6 +59,7 @@ install -m0755 /ctx/mjust/bin/mjust /usr/bin/mjust
 install -d -m0755 /usr/libexec/justvoxel
 install -m0755 /ctx/runtime/minecraft-backup /usr/libexec/justvoxel/minecraft-backup
 install -m0755 /ctx/runtime/system-update-reboot-worker /usr/libexec/justvoxel/system-update-reboot-worker
+install -m0755 /ctx/runtime/justvoxel-remote-access-status /usr/libexec/justvoxel/remote-access-status
 install -m0755 /ctx/runtime/justvoxel-motd /usr/libexec/justvoxel/motd
 install -m0755 /ctx/runtime/justvoxel-console-issue /usr/libexec/justvoxel/console-issue-refresh
 install -d -m0755 /usr/libexec/justvoxel/mjust

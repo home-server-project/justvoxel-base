@@ -24,7 +24,7 @@ playit_menu() {
         state='Not configured'
         if sudo test -s /etc/playit/playit.toml; then
             configured=yes
-            state='Configured'
+            state='Stopped'
         fi
         if systemctl is-active --quiet playit.service; then
             active=yes
@@ -53,6 +53,7 @@ playit_menu() {
             'Playit status')
                 systemctl --no-pager --lines=0 status playit.service || true
                 sudo /usr/bin/playit status || true
+                sudo /usr/libexec/justvoxel/remote-access-status playit --details || true
                 jui_pause
                 ;;
             'Back') return 0 ;;

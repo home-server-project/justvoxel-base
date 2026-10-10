@@ -1,0 +1,192 @@
+#!/usr/bin/python3
+"""Read-only remote-access summaries. Never read provider credentials."""
+import argparse
+import ipaddress
+import json
+import os
+import socket
+import stat
+import subprocess
+import time
+
+PLAYIT_SOCKET = "/run/playit/playitd.sock"
+MAX_FRAME = 256 * 1024
+CONFIGS = {
+    "netbird": ("/var/lib/netbird/default.json", "/etc/netbird/config.json", "/etc/netbird/config.yaml"),
+    "playit": ("/etc/playit/playit.toml",),
+}
+
+
+def command(*args):
+    try:
+        result = subprocess.run(args, capture_output=True, timeout=0.5, check=True)
+        if len(result.stdout) <= MAX_FRAME:
+            return result.stdout.decode("utf-8")
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        pass
+    return ""
+
+
+def ipv4(value):
+    try:
+        address = ipaddress.ip_address(value.strip().split("/")[0])
+        return str(address) if address.version == 4 else ""
+    except (ValueError, AttributeError):
+        return ""
+
+
+def configured(provider):
+    inaccessible = False
+    for path in CONFIGS.get(provider, ()):
+        try:
+            info = os.stat(path)
+            if stat.S_ISREG(info.st_mode) and info.st_size > 0:
+                return True
+        except PermissionError:
+            inaccessible = True
+        except OSError:
+            pass
+    return None if inaccessible else False
+
+
+def summary(value, connected=False, ip="", tunnels=None):
+    result = {"summary": value, "connected": connected, "ip": ip}
+    if tunnels is not None:
+        result["tunnels"] = tunnels
+    return result
+
+
+def safe_text(value):
+    return isinstance(value, str) and 0 < len(value) <= 512 and all(c.isprintable() for c in value)
+
+
+def playit_lifecycle(path=PLAYIT_SOCKET):
+    # v1.0.10 playit-ipc: protocol 2, hello then exactly one get_state RPC.
+    # A single deadline and frame limits also bound slow or incompatible peers.
+    deadline = time.monotonic() + 0.5
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.settimeout(max(0.001, deadline - time.monotonic()))
+        client.connect(path)
+        buffered = bytearray()
+
+        def frame():
+            while b"\n" not in buffered:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("IPC timeout")
+                client.settimeout(remaining)
+                chunk = client.recv(min(4096, MAX_FRAME + 1 - len(buffered)))
+                if not chunk or len(buffered) + len(chunk) > MAX_FRAME:
+                    raise ValueError("invalid IPC frame")
+                buffered.extend(chunk)
+            line, _, rest = buffered.partition(b"\n")
+            buffered[:] = rest
+            return json.loads(line)
+
+        hello = frame()
+        protocol = hello.get("data", {}).get("protocol", {})
+        if hello.get("message_kind") != "hello" or protocol.get("ipc_version") != 2 or "lifecycle_state" not in protocol.get("capabilities", []):
+            raise ValueError("unsupported IPC protocol")
+        client.sendall(b'{"ipc_version":2,"request_id":1,"request":{"type":"get_state"}}\n')
+        envelope = frame()
+        data = envelope.get("data", {})
+        response = data.get("response", {})
+        if envelope.get("message_kind") != "response" or data.get("ipc_version") != 2 or data.get("request_id") != 1 or response.get("type") != "state":
+            raise ValueError("invalid IPC response")
+        lifecycle = response["data"]
+        state = lifecycle.get("state")
+        if state == "running":
+            raw = lifecycle.get("data", {}).get("tunnels")
+            if not isinstance(raw, list):
+                raise ValueError("missing tunnels")
+            tunnels = []
+            for tunnel in raw:
+                address, destination, disabled = tunnel.get("display_address"), tunnel.get("destination"), tunnel.get("is_disabled")
+                if not safe_text(address) or not safe_text(destination) or not isinstance(disabled, bool):
+                    raise ValueError("invalid tunnel")
+                # Allowlist only public tunnel information, never identity/login fields.
+                tunnels.append({"display_address": address, "destination": destination, "is_disabled": disabled})
+            count = sum(not tunnel["is_disabled"] for tunnel in tunnels)
+            return summary("No tunnels" if count == 0 else f"{count} tunnel" + ("s" if count != 1 else ""), True, tunnels=tunnels)
+        states = {"starting": "Connecting", "stopping": "Stopping", "waiting_for_secret": "Not configured", "has_invalid_secret": "Not connected", "disabled_over_limit": "Disabled", "error": "Unavailable"}
+        if state not in states:
+            raise ValueError("unsupported lifecycle")
+        return summary(states[state])
+
+
+def provider_status(provider, ipc_only=False):
+    if provider == "playit" and ipc_only:
+        return playit_lifecycle()
+    unit = "tailscaled.service" if provider == "tailscale" else provider + ".service"
+    active = command("systemctl", "show", "--property=ActiveState", "--value", unit).strip()
+    evidence = configured(provider)
+    if provider == "tailscale":
+        data = json.loads(command("tailscale", "status", "--json"))
+        state = data.get("BackendState")
+        key, tailnet = data.get("HaveNodeKey", False), data.get("CurrentTailnet")
+        if not isinstance(key, bool) or (tailnet is not None and not isinstance(tailnet, dict)):
+            raise ValueError("invalid identity evidence")
+        if state == "Running":
+            if active != "active":
+                return summary("Stopped" if active in ("inactive", "failed") else "Unavailable")
+            address = next((ipv4(value) for value in data.get("TailscaleIPs", []) if ipv4(value)), "")
+            return summary("Connected", True, address)
+        if state == "NeedsMachineAuth":
+            return summary("Awaiting approval")
+        if state in ("Starting", "Stopped") and (key or tailnet is not None):
+            return summary(state)
+        return summary("Not configured")
+    if provider == "netbird":
+        text = command("netbird", "status", "--json") if active == "active" else ""
+        data = json.loads(text) if text else {}
+        if active == "active" and data.get("daemonStatus") == "Connected" and data.get("management", {}).get("connected") is True:
+            return summary("Connected", True, ipv4(data.get("netbirdIp", "")))
+        if evidence is None:
+            return summary("Unavailable")
+        return summary(("Not connected" if active == "active" else "Stopped") if evidence else "Not configured")
+    # Live lifecycle is stronger evidence than filesystem visibility in user shells.
+    if active == "active":
+        try:
+            return playit_lifecycle()
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+            return summary("Running" if evidence else "Unavailable" if evidence is None else "Not configured")
+    if evidence is None:
+        return summary("Unavailable")
+    if not evidence:
+        return summary("Not configured")
+    return summary({"activating": "Connecting", "deactivating": "Stopping", "inactive": "Stopped", "failed": "Stopped"}.get(active, "Unavailable"))
+
+
+def display(result, compact=False):
+    if result["connected"] and result.get("ip"):
+        return result["ip"]
+    tunnels = [t for t in result.get("tunnels", []) if not t["is_disabled"]]
+    if result["connected"] and len(tunnels) == 1 and not compact:
+        return tunnels[0]["display_address"]
+    return result["summary"]
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("provider", choices=("tailscale", "netbird", "playit"))
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--ipc-only", action="store_true")
+    parser.add_argument("--details", action="store_true")
+    args = parser.parse_args()
+    try:
+        result = provider_status(args.provider, args.ipc_only)
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        if args.ipc_only:
+            raise SystemExit(1)
+        result = summary("Unavailable")
+    if args.json:
+        print(json.dumps(result))
+    else:
+        print(display(result))
+        if args.details:
+            for tunnel in result.get("tunnels", []):
+                print(f'{tunnel["display_address"]} -> {tunnel["destination"]}' + (" (Disabled)" if tunnel["is_disabled"] else ""))
+
+
+if __name__ == "__main__":
+    main()
