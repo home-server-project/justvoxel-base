@@ -55,6 +55,19 @@ jobs:
           syntax_failures=()
           test_failures=()
           test_count=0
+          check_syntax() {
+            local script="$1" shebang
+            shebang="$(head -n 1 "${script}")" || return 1
+            if [[ "${shebang}" =~ ^'#!'[[:space:]]*([^[:space:]]*/)?(env[[:space:]]+)?python3([.][0-9]+)?([[:space:]]|$) ]]; then
+              python3 -B -c 'import ast, pathlib, sys; ast.parse(pathlib.Path(sys.argv[1]).read_bytes(), filename=sys.argv[1])' "${script}"
+            elif [[ "${shebang}" =~ ^'#!'[[:space:]]*([^[:space:]]*/)?(env[[:space:]]+)?(bash|sh|dash)([[:space:]]|$) ]] || [[ "${shebang}" != '#!'* ]]; then
+              # Files without a shebang include sourced shell helpers.
+              bash -n "${script}"
+            else
+              printf 'Unsupported interpreter: %s (%s)\n' "${script}" "${shebang}" >&2
+              return 1
+            fi
+          }
           for script in \
             build_files/*.sh \
             build_files/validate/*.sh \
@@ -64,7 +77,7 @@ jobs:
             tests/*.sh; do
             [[ -f "${script}" ]] || continue
             printf 'Checking syntax: %s\n' "${script}"
-            if bash -n "${script}"; then
+            if check_syntax "${script}"; then
               printf 'PASS syntax: %s\n' "${script}"
             else
               printf 'FAIL syntax: %s\n' "${script}" >&2
