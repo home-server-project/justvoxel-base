@@ -345,7 +345,7 @@ _a55_verify_action() {
     _a55_evidence_set_bounded minecraft_version_output "${output}" || return 1
     (( rc == 0 )) || return 1
 
-    validation_output="$(/usr/libexec/justvoxel/mjust/validate-backend 2>&1)"
+    validation_output="$(/usr/libexec/justvoxel/mjust/validate-backend --first-run 2>&1)"
     rc=$?
     _a55_evidence_set final_validation "$([[ ${rc} -eq 0 ]] && printf passed || printf failed)" || return 1
     _a55_evidence_set_bounded final_validation_output "${validation_output}" || return 1

@@ -11,9 +11,8 @@
   <script src="/static/app.js" defer></script>
   <script src="/static/timezone-search.js" defer></script>
   <script src="/static/settings.js" defer></script>
-  <script src="/static/storage-browser.js" defer></script>
   <script src="/static/setup-storage.js" defer></script>
-  <script src="/static/setup-storage-manager.js" defer></script>
+  <script src="/static/setup-storage-actions.js" defer></script>
   <script src="/static/setup-motd.js" defer></script>
 </head>
 <body class="role-administrator setup-body">
@@ -73,7 +72,7 @@
     <div class="setup-terminal-note"><span>Prefer the terminal?</span><code>mjust setup</code><small>Available from a local console or SSH.</small><a class="button-link secondary setup-dashboard-exit" href="/">Back to dashboard</a></div>
   </section>
   {{else}}
-  <div class="setup-stage-header"><h1>Set up JustVoxel</h1>
+  <div class="setup-stage-header">
   <ol class="setup-progress" aria-label="Setup progress">{{range .Steps}}<li class="{{if .Active}}active{{end}} {{if .Complete}}complete{{end}}" {{if .Active}}aria-current="step"{{end}}>{{if .Visited}}<form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="{{.Number}}"><button type="submit"><span class="setup-number">{{.Number}}</span><span>{{.Name}}</span></button></form>{{else}}<span class="setup-number">{{.Number}}</span><span>{{.Name}}</span>{{end}}</li>{{end}}</ol>
   </div>
 
@@ -149,7 +148,7 @@
         <input id="image-tag" name="image_tag" type="hidden" value="{{.Minecraft.ImageTag}}">
         </section>
         <section class="setup-version-column" aria-label="Minecraft version">
-        <label class="setup-field">Minecraft version<select id="version-policy" name="version_policy"><option value="recommended" {{if eq .Minecraft.VersionPolicy "recommended"}}selected{{end}}>Recommended</option><option value="latest" {{if eq .Minecraft.VersionPolicy "latest"}}selected{{end}}>Latest</option><option value="pinned" {{if eq .Minecraft.VersionPolicy "pinned"}}selected{{end}}>Specific version</option></select><span class="field-help">Recommended uses the newest stable server version. Latest follows newer server versions when available.</span></label>
+        <label class="setup-field">Minecraft version<select id="version-policy" name="version_policy"><option value="recommended" {{if eq .Minecraft.VersionPolicy "recommended"}}selected{{end}}>Recommended</option><option value="latest" {{if eq .Minecraft.VersionPolicy "latest"}}selected{{end}}>Latest</option><option value="pinned" {{if eq .Minecraft.VersionPolicy "pinned"}}selected{{end}}>Specific version</option></select></label>
         <label id="specific-version-field" class="setup-field setup-field-wide" {{if ne .Minecraft.VersionPolicy "pinned"}}hidden{{end}}>Specific Minecraft version<input id="minecraft-version" name="version" value="{{.Minecraft.Version}}" autocomplete="off"><span class="field-help">Choose an exact version. Available pre-release builds can also be used.</span></label>
         <div class="setup-version-preview" id="setup-version-preview" role="status" aria-live="polite">Checking available versions…</div>
         </section>
@@ -161,7 +160,6 @@
     {{else if eq .CurrentStep 5}}
     <form method="post" action="/setup/storage" class="setup-form" data-setup-storage-form data-csrf="{{.CSRF}}">
       <div class="setup-step-content">
-      <div class="setup-storage-manager-launch"><span class="field-help">Manage disks and partitions, then choose a destination below.</span><button class="secondary" type="button" data-setup-storage-manage>Manage disks and partitions</button></div>
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <input type="hidden" name="storage_type" value="{{.Storage.Type}}" data-setup-storage-type>
       <input type="hidden" name="storage_device" value="{{.Storage.Device}}" data-setup-storage-device>
@@ -211,9 +209,11 @@
             {{if or .Partitions .FreeSpaces}}
             <div class="storage-partition-grid">
               {{range .Partitions}}
+                <div class="setup-partition-card-group">
                 {{if .Formatted}}
                 <button class="setup-storage-segment storage-partition-card setup-storage-existing{{if eq $.Storage.Device .Path}} is-selected{{end}}" type="button"
                         data-setup-existing-partition
+                        data-uuid="{{.UUID}}"
                         data-device="{{.Path}}"
                         data-mountpoint="{{.Mountpoint}}">
                   <span class="setup-storage-segment-state storage-partition-state">{{if eq $.Storage.Device .Path}}Selected{{else}}Ready{{end}}</span>
@@ -221,9 +221,9 @@
                   <span>{{.Size}} · {{.Filesystem}}{{if .Label}} · {{.Label}}{{end}}</span>
                   <small>{{if .Mountpoint}}{{.Mountpoint}}{{else}}Will use /var/mnt/justvoxel-data{{end}}</small>
                 </button>
-                {{else}}
+                {{else if and (eq .Filesystem "") (not .Protected)}}
                 <button class="setup-storage-segment storage-partition-card setup-storage-prepare" type="button"
-                        data-setup-storage-prepare="format"
+                        data-setup-storage-prepare="format" disabled
                         data-device="{{.Path}}"
                         data-size="{{.Size}}">
                   <span class="setup-storage-segment-state storage-partition-state">Blank</span>
@@ -231,7 +231,20 @@
                   <span>{{.Size}}</span>
                   <small>Format as XFS for Minecraft</small>
                 </button>
+                {{else}}
+                <div class="setup-storage-segment storage-partition-card"><span class="storage-partition-state">{{if .Protected}}Protected{{else}}Not ready{{end}}</span><strong>{{.Path}}</strong><span>{{.Size}} · {{.Filesystem}}</span><small>Destination selection is unavailable.</small></div>
                 {{end}}
+                <div class="setup-partition-actions" data-setup-partition-actions data-device="{{.Path}}" data-filesystem="{{.Filesystem}}" data-uuid="{{.UUID}}" data-mountpoint="{{.Mountpoint}}" data-protected="{{.Protected}}" data-size="{{.Size}}" data-label="{{.Label}}">
+                  <button class="secondary" type="button" data-setup-disk-action="inspect">Details</button>
+                  {{if not .Protected}}
+                  <button class="secondary" type="button" data-setup-disk-action="format" hidden>Format</button>
+                  <button class="secondary" type="button" data-setup-disk-action="delete_partition" hidden>Delete</button>
+                  <button class="secondary" type="button" data-setup-disk-action="mount" hidden>Mount now</button>
+                  <button class="secondary" type="button" data-setup-disk-action="persist" hidden>Configure persistent mount</button>
+                  {{end}}
+                  <span class="field-help" data-setup-partition-status></span>
+                </div>
+                </div>
               {{end}}
               {{range .FreeSpaces}}
               <button class="setup-storage-segment storage-partition-card setup-storage-prepare" type="button"
@@ -269,7 +282,6 @@
     {{else if eq .CurrentStep 6}}
     <form method="post" action="/setup/backups" class="setup-form" data-setup-backup-form data-csrf="{{.CSRF}}" data-data-device="{{.Storage.Device}}" data-data-mount="{{.Storage.MountPoint}}">
       <div class="setup-step-content">
-      <div class="setup-storage-manager-launch"><span class="field-help">Manage disks and partitions, then choose a destination below.</span><button class="secondary" type="button" data-setup-storage-manage>Manage disks and partitions</button></div>
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <input type="hidden" name="backup_type" value="{{.Backups.Type}}" data-setup-backup-type>
       <input type="hidden" name="backup_device" value="{{.Backups.Device}}" data-setup-backup-device>
@@ -332,9 +344,11 @@
             {{if or .Partitions .FreeSpaces}}
             <div class="storage-partition-grid">
               {{range .Partitions}}
+                <div class="setup-partition-card-group">
                 {{if .Formatted}}
                 <button class="setup-storage-segment storage-partition-card setup-backup-existing{{if eq $.Backups.Device .Path}} is-selected{{end}}" type="button"
                         data-setup-backup-existing
+                        data-uuid="{{.UUID}}"
                         data-device="{{.Path}}"
                         data-mountpoint="{{if eq $.Storage.Device .Path}}{{$.Storage.MountPoint}}{{else}}{{.Mountpoint}}{{end}}">
                   <span class="setup-storage-segment-state storage-partition-state">{{if eq $.Backups.Device .Path}}Selected{{else}}Ready{{end}}</span>
@@ -342,16 +356,29 @@
                   <span>{{.Size}} · {{.Filesystem}}{{if .Label}} · {{.Label}}{{end}}</span>
                   <small>{{if eq $.Storage.Device .Path}}{{$.Storage.MountPoint}}{{else}}{{if .Mountpoint}}{{.Mountpoint}}{{else}}/var/mnt/justvoxel-backup{{end}}{{end}}</small>
                 </button>
-                {{else}}
+                {{else if and (eq .Filesystem "") (not .Protected)}}
                 <button class="setup-storage-segment storage-partition-card setup-storage-prepare" type="button"
-                        data-setup-backup-prepare="format"
+                        data-setup-backup-prepare="format" disabled
                         data-device="{{.Path}}">
                   <span class="setup-storage-segment-state storage-partition-state">Blank</span>
                   <strong>{{.Path}}</strong>
                   <span>{{.Size}}</span>
                   <small>Format as XFS for backups</small>
                 </button>
+                {{else}}
+                <div class="setup-storage-segment storage-partition-card"><span class="storage-partition-state">{{if .Protected}}Protected{{else}}Not ready{{end}}</span><strong>{{.Path}}</strong><span>{{.Size}} · {{.Filesystem}}</span><small>Destination selection is unavailable.</small></div>
                 {{end}}
+                <div class="setup-partition-actions" data-setup-partition-actions data-device="{{.Path}}" data-filesystem="{{.Filesystem}}" data-uuid="{{.UUID}}" data-mountpoint="{{.Mountpoint}}" data-protected="{{.Protected}}" data-size="{{.Size}}" data-label="{{.Label}}">
+                  <button class="secondary" type="button" data-setup-disk-action="inspect">Details</button>
+                  {{if not .Protected}}
+                  <button class="secondary" type="button" data-setup-disk-action="format" hidden>Format</button>
+                  <button class="secondary" type="button" data-setup-disk-action="delete_partition" hidden>Delete</button>
+                  <button class="secondary" type="button" data-setup-disk-action="mount" hidden>Mount now</button>
+                  <button class="secondary" type="button" data-setup-disk-action="persist" hidden>Configure persistent mount</button>
+                  {{end}}
+                  <span class="field-help" data-setup-partition-status></span>
+                </div>
+                </div>
               {{end}}
               {{range .FreeSpaces}}
               <button class="setup-storage-segment storage-partition-card setup-storage-prepare" type="button"
@@ -410,11 +437,26 @@
   </section>
   {{end}}
   {{if and .Started (or (eq .CurrentStep 5) (eq .CurrentStep 6))}}
-  <dialog class="setup-storage-manager" data-setup-storage-manager data-storage-workspace-dialog aria-labelledby="setup-storage-manager-title">
-    <div class="setup-storage-manager-heading"><div><p class="eyebrow">Storage</p><h2 id="setup-storage-manager-title">Disks and partitions</h2></div><div class="action-row"><button class="secondary" type="button" data-storage-refresh>Refresh</button><button class="secondary" type="button" data-setup-storage-manager-close>Close</button></div></div>
-    <p class="notice error" role="alert" data-setup-storage-manager-error hidden></p>
-    <div data-storage-workspace-content></div>
+  <dialog class="setup-storage-action-dialog" data-setup-disk-review aria-labelledby="setup-disk-review-title">
+    <h2 id="setup-disk-review-title" data-setup-disk-title></h2>
+    <p data-setup-disk-target></p>
+    <label class="setup-field" data-setup-disk-size-field hidden>Partition size (GiB)<input type="number" min="1" step="1" data-setup-disk-size><span class="field-help">Choose a whole number of GiB, or use all available space.</span></label>
+    <label data-setup-disk-all-field hidden><input type="checkbox" data-setup-disk-all checked> Use all available space</label>
+    <label class="setup-field" data-setup-disk-mount-field hidden>Mount point<input data-setup-disk-mount autocomplete="off"></label>
+    <div data-setup-disk-result></div>
+    <div data-setup-disk-warnings></div>
+    <div class="notice error" role="alert" data-setup-disk-error hidden></div>
+    <div data-setup-disk-confirm hidden>
+      <p data-setup-disk-confirm-summary></p>
+      <div class="storage-confirm-slider" data-setup-disk-slider-shell style="--confirm-progress:0">
+        <span class="storage-confirm-slider-text">Slide to confirm destructive action</span><span class="storage-confirm-slider-thumb" aria-hidden="true">&gt;</span>
+        <input type="range" min="0" max="100" step="1" value="0" data-setup-disk-slider aria-label="Slide to confirm the reviewed destructive action">
+      </div>
+      <label class="storage-confirm-toggle-row" data-setup-disk-toggle-row hidden><span>Confirm</span><input class="storage-confirm-toggle" type="checkbox" data-setup-disk-toggle disabled aria-label="Confirm destructive partition action"></label>
+    </div>
+    <div class="action-row"><button class="secondary" type="button" data-setup-disk-close>Close</button><button type="button" data-setup-disk-plan>Review action</button><button class="danger" type="button" data-setup-disk-apply disabled hidden>Apply</button></div>
   </dialog>
+  <div class="notice error" role="alert" data-setup-inventory-error hidden></div>
   {{end}}
   {{template "project-footer" .}}
 </main>

@@ -1,15 +1,9 @@
 (() => {
-  // Selection only. Disk management uses the shared Control Center Storage browser.
-  function diskBrowser(form, selectedDevice, preference) {
+  // Destination selection stays inline; preparations use reviewed storage APIs.
+  function diskBrowser(form, selectedDevice) {
     const disks = Array.from(form.querySelectorAll('[data-setup-disk]'));
     const groups = Array.from(form.querySelectorAll('[data-setup-disk-partitions]'));
     let selected = '';
-    let restored = '';
-    // Store only a physical-disk UI preference across preparation's inventory reload.
-    try {
-      restored = sessionStorage.getItem(preference) || '';
-      sessionStorage.removeItem(preference);
-    } catch (_) { /* Disk preferences are optional when browser storage is unavailable. */ }
     function select(disk) {
       selected = disk.dataset.setupDisk;
       disks.forEach((button) => {
@@ -24,11 +18,9 @@
     disks.forEach((disk) => disk.addEventListener('click', () => select(disk)));
     const existing = groups.find((group) => Array.from(group.querySelectorAll('[data-device]'))
       .some((button) => button.dataset.device === selectedDevice));
-    const initial = disks.find((disk) => disk.dataset.setupDisk === restored)
-      || disks.find((disk) => disk.dataset.setupDisk === existing?.dataset.setupDiskPartitions) || disks[0];
+    const initial = disks.find((disk) => disk.dataset.setupDisk === existing?.dataset.setupDiskPartitions) || disks[0];
     if (initial) select(initial);
     return {
-      restored: !!restored && !!initial,
       reveal() {
         const disk = disks.find((button) => button.dataset.setupDisk === selected);
         disk?.scrollIntoView({block: 'nearest', inline: 'nearest'});
@@ -38,13 +30,14 @@
   }
 
   function initSetupStorage(root = document) {
+    window.JustVoxelSetupDiskActions?.init(root);
     const storageForm = root.querySelector('[data-setup-storage-form]');
     if (storageForm) {
       const type = storageForm.querySelector('[data-setup-storage-type]');
       const device = storageForm.querySelector('[data-setup-storage-device]');
       const mount = storageForm.querySelector('[data-setup-storage-mount]');
       const path = storageForm.querySelector('[data-setup-storage-path]');
-      const disks = diskBrowser(storageForm, device?.value, 'justvoxel-setup-data-disk');
+      const disks = diskBrowser(storageForm, device?.value);
       const systemButton = storageForm.querySelector('[data-setup-storage-system]');
       const internalButton = storageForm.querySelector('[data-setup-storage-internal]');
       const systemPanel = storageForm.querySelector('[data-setup-storage-system-panel]');
@@ -108,9 +101,9 @@
       systemButton?.addEventListener('click', selectSystem);
       internalButton?.addEventListener('click', chooseInternal);
       existingButtons.forEach((button) => button.addEventListener('click', () => selectExisting(button)));
-      prepareButtons.forEach((button) => button.addEventListener('click', () => window.JustVoxelSetupStorageManager?.open(button.dataset)));
+      prepareButtons.forEach((button) => button.addEventListener('click', () => window.JustVoxelSetupDiskActions?.open(button.dataset)));
 
-      if (type?.value === 'partition' || disks.restored) {
+      if (type?.value === 'partition') {
         setPanels('partition');
         if (type) type.value = 'partition';
         const current = existingButtons.find((button) => button.dataset.device === device?.value);
@@ -133,7 +126,7 @@
       const device = backupForm.querySelector('[data-setup-backup-device]');
       const mount = backupForm.querySelector('[data-setup-backup-mount]');
       const path = backupForm.querySelector('[data-setup-backup-path]');
-      const disks = diskBrowser(backupForm, device?.value, 'justvoxel-setup-backup-disk');
+      const disks = diskBrowser(backupForm, device?.value);
       const source = backupForm.querySelector('[data-setup-backup-source]');
       const username = backupForm.querySelector('[data-setup-backup-username]');
       const domain = backupForm.querySelector('[data-setup-backup-domain]');
@@ -239,7 +232,7 @@
         });
       });
       existingButtons.forEach((button) => button.addEventListener('click', () => selectExisting(button)));
-      prepareButtons.forEach((button) => button.addEventListener('click', () => window.JustVoxelSetupStorageManager?.open(button.dataset)));
+      prepareButtons.forEach((button) => button.addEventListener('click', () => window.JustVoxelSetupDiskActions?.open(button.dataset)));
 
       ['nfs', 'smb'].forEach((kind) => {
         backupForm.querySelector('[data-setup-network-source="' + kind + '"]')?.addEventListener('input', () => syncNetworkFields(kind));
@@ -259,7 +252,7 @@
 
       backupForm.addEventListener('submit', () => syncNetworkFields(type?.value || 'system'));
 
-      if (type?.value === 'partition' || disks.restored) {
+      if (type?.value === 'partition') {
         showKind('partition');
         const current = existingButtons.find((button) => button.dataset.device === device?.value);
         if (current) selectExisting(current);

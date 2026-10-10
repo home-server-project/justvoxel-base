@@ -379,7 +379,7 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
 .setup-wizard-panel .setup-storage-confirm .destructive-confirm-slider input[type=range]{height:100%;margin:0;padding:0}
 .setup-wizard-panel .setup-storage-confirm .destructive-confirm-toggle-row{justify-content:flex-end}
 
-/* Keep the title balanced above seven equally sized navigation cards. */
+/* Keep seven equally sized Advanced navigation cards. */
 .setup-stage-header{flex-direction:column;align-items:stretch;gap:.65rem}
 .setup-stage-header h1{font-size:1.9rem;line-height:1.15;font-weight:750;letter-spacing:-.025em}
 .setup-stage-header .setup-progress{flex:none;gap:.55rem}
@@ -388,11 +388,16 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
 .setup-stage-header .setup-number{flex:0 0 1.8rem;width:1.8rem;height:1.8rem;font-size:.95rem}
 .setup-version-column .setup-version-candidate{font-size:1.65rem;line-height:1.2}
 .setup-version-compatibility{margin:.2rem 0;padding:.65rem .8rem;line-height:1.4}
-.setup-storage-manager-launch{display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin-bottom:.5rem}
-.setup-storage-manager{width:min(1000px,calc(100vw - 2rem));max-height:calc(100dvh - 2rem);padding:1rem;overflow:auto;background:var(--jv-surface);color:var(--jv-text);border:1px solid var(--jv-border-strong);border-radius:var(--jv-radius)}
-.setup-storage-manager::backdrop{background:#050708b8}
-.setup-storage-manager-heading{display:flex;align-items:center;justify-content:space-between;gap:.7rem;margin-bottom:.6rem}
-.setup-storage-manager-heading h2{margin:0}
-.setup-storage-manager-heading .action-row{margin:0}
 @media(max-width:850px){.setup-stage-header .setup-progress li{font-size:.9rem}.setup-stage-header h1{font-size:1.65rem}}
-@media(max-width:430px){.setup-stage-header .setup-progress li{font-size:.8rem}.setup-storage-manager-launch,.setup-storage-manager-heading{align-items:stretch;flex-direction:column}}
+@media(max-width:430px){.setup-stage-header .setup-progress li{font-size:.8rem}}
+
+.setup-storage-action-dialog{width:min(560px,calc(100vw - 2rem));max-height:calc(100dvh - 2rem);overflow:auto;padding:1rem;background:var(--jv-surface);color:var(--jv-text);border:1px solid var(--jv-border-strong);border-radius:var(--jv-radius)}
+.setup-storage-action-dialog::backdrop{background:#050708b8}
+.setup-partition-actions{display:flex;flex-wrap:wrap;gap:.35rem;align-items:center;padding:.3rem}
+.setup-partition-actions button{padding:.3rem .5rem;font-size:.8rem}
+.setup-partition-actions .field-help{flex-basis:100%}
+.setup-partition-card-group{display:grid;gap:.2rem;align-content:start;min-width:0}
+.setup-version-panel{display:grid;gap:.4rem;padding:.75rem .85rem;line-height:1.4}
+.setup-version-panel.warning{border:1px solid var(--jv-warning);background:color-mix(in srgb,var(--jv-warning) 18%,var(--jv-surface-sunken))}
+.setup-version-panel .setup-version-primary{padding:0;border:0;background:transparent}
+.setup-version-panel .setup-version-kicker{color:inherit}

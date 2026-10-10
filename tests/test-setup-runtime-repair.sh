@@ -203,6 +203,19 @@ jq -e '.runtime.minecraft_started == true' "${A53_MANIFEST}" >/dev/null
 rollback
 [[ -z $(find "${DATA_PATH}" -mindepth 1 -print -quit) ]]
 
+# Healthy startup followed by a required-unit validation failure still takes
+# the real guarded rollback path and preserves existing backups.
+new_case verification-required-mount
+_a55_record_initial_state
+generate_paper
+ready=yes restart_base=0 restart_increase=0 A55_EVIDENCE='{}'
+mock_validate_backend() { [[ $1 == --first-run ]] || return 1; echo 'FAIL: selected setup storage mount is failed'; return 1; }
+if _a55_verify_action 2>> "${expected_stderr}"; then echo 'Required mount failure accepted' >&2; exit 1; fi
+jq -e '.final_validation == "failed" and (.final_validation_output | contains("selected setup storage mount"))' <<< "${A55_EVIDENCE}" >/dev/null
+ready=no
+rollback
+[[ -z $(find "${DATA_PATH}" -mindepth 1 -print -quit) ]]
+
 # Commit activates backups after verification with the setup marker in place.
 # Failed activation must preserve the marker so rollback remains possible.
 new_case commit-backup

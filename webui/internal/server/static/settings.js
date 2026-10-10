@@ -158,6 +158,8 @@ if (versionPolicy && versionInput && specificVersionField) {
       return node;
     };
     const parts = [];
+    const incompatible = status.crossplay_enabled && !status.crossplay_compatible;
+    const panel = make("div", "notice " + (incompatible || !status.selected_candidate ? "warning" : "success") + " setup-version-panel", "");
     if (status.selected_candidate) {
       const primary = make("div", "setup-version-primary", "");
       primary.append(make("span", "setup-version-kicker", policy === "recommended" ? "Recommended" : policy === "latest" ? "Latest" : "Specific"));
@@ -179,10 +181,11 @@ if (versionPolicy && versionInput && specificVersionField) {
       const compatibility = status.crossplay_compatible
         ? `Bedrock cross-play is compatible. Current supported version: ${supported}.`
         : `The selected version is not currently compatible with Bedrock cross-play. Choose Recommended, choose a compatible Specific version, or disable Bedrock cross-play. Current supported Bedrock version: ${supported}.`;
-      parts.push(make("div", status.crossplay_compatible ? "notice success setup-version-compatibility" : "notice warning setup-version-compatibility", compatibility));
+      parts.push(make("p", "setup-version-compatibility", compatibility));
     }
     if (!status.selected_candidate) parts.push(make("p", "setup-version-explanation", status.reason || "No usable server build was found for this version."));
-    preview.replaceChildren(...parts);
+    panel.append(...parts);
+    preview.replaceChildren(panel);
     next.disabled = !status.selected_candidate || (status.crossplay_enabled && !status.crossplay_compatible);
   };
   const refresh = async () => {

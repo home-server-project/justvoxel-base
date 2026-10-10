@@ -88,10 +88,10 @@ if grep -Eq '_a55_apply_selinux|selinux_rule_added|selinux_data_label|semanage f
     exit 1
 fi
 grep -Fq 'output="$(systemctl start minecraft.service 2>&1)"' "${runtime_helper}"
-grep -Fq 'validation_output="$(/usr/libexec/justvoxel/mjust/validate-backend 2>&1)"' "${runtime_helper}"
+grep -Fq 'validation_output="$(/usr/libexec/justvoxel/mjust/validate-backend --first-run 2>&1)"' "${runtime_helper}"
 render_line="$(grep -nF '    render_runtime_files || return 1' "${runtime_helper}" | cut -d: -f1)"
 start_line="$(grep -nF '    output="$(systemctl start minecraft.service 2>&1)"' "${runtime_helper}" | cut -d: -f1)"
-validation_line="$(grep -nF '    validation_output="$(/usr/libexec/justvoxel/mjust/validate-backend 2>&1)"' "${runtime_helper}" | cut -d: -f1)"
+validation_line="$(grep -nF '    validation_output="$(/usr/libexec/justvoxel/mjust/validate-backend --first-run 2>&1)"' "${runtime_helper}" | cut -d: -f1)"
 [[ -n ${render_line} && -n ${start_line} && -n ${validation_line} && ${render_line} -lt ${start_line} && ${start_line} -lt ${validation_line} ]] || { echo 'runtime render, service start, and final validation are out of order' >&2; exit 1; }
 
 # The backup timer must not interrupt first-run readiness checks.

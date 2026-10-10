@@ -31,13 +31,100 @@ check_file "${JV_QUADLET}" 644
 check_file "${JV_BACKUP_SERVICE}" 644
 check_file "${JV_BACKUP_TIMER}" 644
 
-failed_units="$(systemctl --failed --no-legend --plain 2>/dev/null || true)"
-if [[ -z ${failed_units} ]]; then
-    pass 'Failed system services: none'
-else
-    fail 'one or more systemd units are failed'
-    echo "${failed_units}" >&2
-fi
+# The first-run transaction alone requests this policy. Ordinary validation
+# still treats every failed unit as a blocking appliance-health problem.
+validate_failed_units() {
+    local mode="${1:-global}" failed_units unit line where escaped path dependency dependencies expected_where classification_failed
+    local -A required=()
+    local -a pending=(minecraft.service minecraft-backup.service minecraft-backup.timer basic.target sysinit.target local-fs.target)
+    if [[ ${mode} != first-run ]]; then
+        failed_units="$(systemctl --failed --no-legend --plain 2>/dev/null || true)"
+        if [[ -z ${failed_units} ]]; then
+            pass 'Failed system services: none'
+        else
+            fail 'one or more systemd units are failed'
+            echo "${failed_units}" >&2
+        fi
+        return
+    fi
+    if ! failed_units="$(systemctl --failed --no-legend --plain 2>/dev/null)"; then
+        fail 'could not enumerate failed systemd units'
+        return
+    fi
+    if [[ -z ${failed_units} ]]; then
+        pass 'Failed system services: none'
+        return
+    fi
+    # Walk mandatory dependencies, including transitive ones. Optional Wants
+    # (such as nofail mounts) do not become required merely because they exist.
+    while (( ${#pending[@]} )); do
+        unit="${pending[0]}"
+        pending=("${pending[@]:1}")
+        [[ -z ${required[${unit}]+present} ]] || continue
+        required["${unit}"]=1
+        if [[ $(systemctl show "${unit}" --property=LoadState --value 2>/dev/null) != loaded ]]; then
+            fail "cannot classify failed units: required unit ${unit} could not be loaded"
+            echo "${failed_units}" >&2
+            return
+        fi
+        if ! dependencies="$(systemctl show "${unit}" --property=Requires --property=Requisite --property=BindsTo --value)"; then
+            fail "cannot classify failed units: required dependencies of ${unit} are unavailable"
+            echo "${failed_units}" >&2
+            return
+        fi
+        for dependency in ${dependencies}; do pending+=("${dependency}"); done
+    done
+    while IFS= read -r line; do
+        [[ -n ${line} ]] || continue
+        read -r unit _ <<< "${line}"
+        if [[ -n ${required[${unit}]+present} ]]; then
+            fail "required setup unit is failed: ${line}"
+            continue
+        fi
+        # Only known legacy appliance mounts can be classified as unrelated.
+        # Unknown units and critical system mounts remain blocking, even if they
+        # are absent from the mandatory dependency graph.
+        case "${unit}" in
+            var-mnt-justvoxel-backup.mount) expected_where=/var/mnt/justvoxel-backup ;;
+            var-mnt-justvoxel-data.mount) expected_where=/var/mnt/justvoxel-data ;;
+            *) fail "failed unit cannot be classified as unrelated to setup: ${line}"; continue ;;
+        esac
+        where="$(systemctl show "${unit}" --property=Where --value)" || where=''
+        escaped="$(systemd-escape --path --suffix=mount "${where}" 2>/dev/null)" || escaped=''
+        if [[ ${where} != "${expected_where}" || ${escaped} != "${unit}" ]]; then
+            fail "failed mount identity could not be verified: ${line}"
+            continue
+        fi
+        local selected=false
+        classification_failed=false
+        for path in "${DATA_PATH}" "${BACKUP_PATH}" "${DATA_MOUNT_POINT:-}" "${BACKUP_MOUNT_POINT:-}"; do
+            [[ -n ${path} ]] || continue
+            if ! path="$(realpath -m -- "${path}")"; then
+                fail "selected storage path could not be resolved while classifying ${unit}"
+                classification_failed=true
+                break
+            fi
+            if [[ ${path} == "${where}" || ${path} == "${where}/"* || ${where} == "${path%/}/"* ]]; then selected=true; fi
+        done
+        [[ ${classification_failed} == false ]] || continue
+        if [[ ${selected} == true ]]; then
+            fail "selected setup storage mount is failed: ${line}"
+        else
+            warn "unrelated failed appliance mount (not selected or required by this setup): ${line}"
+        fi
+    done <<< "${failed_units}"
+}
+
+validation_mode=global
+case "${1:-}" in
+    '') ;;
+    --first-run)
+        [[ -f ${JV_SETUP_IN_PROGRESS} ]] || { fail 'first-run validation requires an active setup transaction'; exit 1; }
+        validation_mode=first-run
+        ;;
+    *) fail 'unknown validation mode'; exit 1 ;;
+esac
+validate_failed_units "${validation_mode}"
 
 # JustVoxel ships zram-generator's default min(RAM/2, 4096 MiB) policy, but
 # administrators may intentionally disable or tune zram. Treat drift from the

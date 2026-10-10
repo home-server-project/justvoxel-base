@@ -119,7 +119,7 @@ func TestSetupReviewUsesAuthoritativeNormalizedPlan(t *testing.T) {
 	}
 	body := rr.Body.String()
 	for _, want := range []string{
-		"<h1>Set up JustVoxel</h1>", "<h2>Review</h2>", "<h2>Review</h2>", "Cross-play", "Version", "Normalized Family Server", "20", "1.21.8",
+		"<h2>Review</h2>", "Cross-play", "Version", "Normalized Family Server", "20", "1.21.8",
 		"Recommended", "Game mode</dt><dd>Survival",
 		"Backups are on the same disk", "If this disk fails, both Minecraft and its backups could be lost.", "Minecraft End User License Agreement", "https://www.minecraft.net/eula",
 		"/static/setup-review.css", "/static/setup-operation.js",

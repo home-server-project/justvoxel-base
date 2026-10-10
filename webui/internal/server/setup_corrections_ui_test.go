@@ -39,25 +39,26 @@ const fixture = { selected_candidate: "1.21.8", available: "1.21.8", candidate_c
 for (const policy of ["recommended", "latest", "pinned"]) {
   show(fixture, policy);
   assert.equal(next.disabled, false);
+  assert.equal(preview.children.length, 1);
   assert(text().includes("1.21.8"));
   assert(text().includes("Server software build channel: Release"));
   assert(!text().includes("pre-release"));
   assert(!text().includes("Newest available version"));
-  assert.equal(preview.children.filter(n => n.className === "notice success setup-version-compatibility").length, 1);
-  assert.equal(preview.children.filter(n => /compatibility/.test(n.className)).length, 1);
+  assert.equal(preview.children.filter(n => n.className === "notice success setup-version-panel").length, 1);
+  assert.equal(preview.children[0].children.filter(n => /compatibility/.test(n.className)).length, 1);
 }
 show({ ...fixture, candidate_channel: "BETA" }, "recommended");
 assert(text().includes("Server software build channel: Beta"));
 assert(!text().includes("Stable choice"));
 show({ ...fixture, candidate_channel: "", crossplay_enabled: false }, "pinned");
 assert(text().includes("Server software build channel: Unavailable"));
-assert.equal(preview.children.filter(n => /compatibility/.test(n.className)).length, 0);
+assert.equal(preview.children[0].children.filter(n => /compatibility/.test(n.className)).length, 0);
 for (const policy of ["latest", "pinned"]) {
   show({ ...fixture, crossplay_compatible: false, geyser_supported_version: "1.21.7" }, policy);
   assert.equal(next.disabled, true);
   assert(text().includes("Current supported Bedrock version: 1.21.7"));
   assert(text().includes("Choose Recommended, choose a compatible Specific version, or disable Bedrock cross-play."));
-  assert.equal(preview.children.filter(n => n.className === "notice warning setup-version-compatibility").length, 1);
+  assert.equal(preview.children.filter(n => n.className === "notice warning setup-version-panel").length, 1);
   assert.equal(preview.children.filter(n => /success/.test(n.className)).length, 0);
 }
 show({ ...fixture, available: "1.21.9", available_channel: "ALPHA" }, "recommended");
@@ -166,81 +167,20 @@ func TestSystemCorrectionsPreserveMenusAndMetadata(t *testing.T) {
 	}
 }
 
-func TestWizardStorageManagerAvailableInBothSteps(t *testing.T) {
+func TestWizardStoragePreparationsStayInline(t *testing.T) {
 	markup := correctionSource(t, "templates/setup_wizard.html")
-	if strings.Count(markup, "data-setup-storage-manage>") != 2 {
-		t.Fatal("both Storage and Backups must launch shared disk management")
+	if strings.Contains(markup, "data-setup-storage-manage") || strings.Contains(markup, "setup-storage-manager") {
+		t.Fatal("wizard must not open a Storage workspace")
 	}
-	if strings.Contains(markup, "data-setup-storage-action-review") || strings.Contains(markup, "data-setup-backup-action-review") {
-		t.Fatal("setup must not keep independent storage review dialogs")
-	}
-	sharedMarkup := correctionSource(t, "templates/storage_browser.html")
-	for _, want := range []string{`data-storage-action="format"`, `data-storage-action="delete_partition"`, `data-storage-action="mount-for-now"`, `data-storage-action="mount-permanently"`, `data-storage-create-size`, `data-storage-create-confirm-slider`, `data-storage-confirm-toggle`} {
-		if !strings.Contains(sharedMarkup, want) {
-			t.Fatalf("shared storage operation or safety control missing %q", want)
-		}
+	if strings.Count(markup, "data-setup-partition-actions") != 2 || strings.Count(markup, "data-setup-disk-review") != 1 {
+		t.Fatal("both steps need inline partition actions and one focused dialog")
 	}
 }
 
-func TestWizardInventoryRefreshPreservesEnteredValues(t *testing.T) {
-	source := correctionSource(t, "static/setup-storage-manager.js")
-	start := strings.Index(source, "  async function refreshWizardInventory()")
-	if start < 0 {
-		t.Fatal("wizard inventory refresh missing")
-	}
-	end := strings.Index(source[start:], "  async function load(")
-	if end < 0 {
-		t.Fatal("wizard inventory refresh boundary missing")
-	}
-	program := `
-const assert = require("node:assert/strict");
-const field = (name, value, type = "hidden", checked = false) => ({ name, value, type, checked });
-const error = {};
-const formSelector = "form", choiceSelector = "choice";
-let current, replacement, eligible = [], initialized = 0, diskSelected = 0;
-function makeForm(fields, diskName) {
-  return { fields, parentElement: {}, getAttribute: () => "/setup/backups",
-    querySelectorAll(selector) {
-      if (selector === choiceSelector) return eligible;
-      if (selector === "[data-setup-disk]") return [{ dataset: { setupDisk: diskName }, click() { diskSelected++; } }];
-      if (selector.startsWith("[data-setup-storage-device]")) return fields.filter(f => ["backup_device", "backup_mount_point", "backup_path"].includes(f.name));
-      return fields;
-    },
-    querySelector(selector) { return selector.startsWith("[data-setup-disk]") ? { dataset: { setupDisk: diskName } } : fields.find(f => f.name === "backup_device"); },
-    replaceWith(next) { current = next; } };
-}
-const form = () => current;
-const readMarkup = async () => "new inventory";
-class DOMParser { parseFromString() { return { querySelector: () => replacement }; } }
-const window = { JustVoxelSetupStorage: { init() { initialized++; current.fields.find(f => f.name === "backup_path").value = "initializer default"; } } };
-` + source[start:start+end] + `
-(async () => {
-  current = makeForm([field("backup_type", "smb"), field("backup_device", ""), field("backup_path", "/var/mnt/custom/my-backups"),
-    field("backup_keep", "19", "number"), field("backup_automatic", "on", "checkbox", false), field("csrf", "old")], "/dev/vdb");
-  replacement = makeForm([field("backup_type", "system"), field("backup_device", ""), field("backup_path", "/default"),
-    field("backup_keep", "7", "number"), field("backup_automatic", "on", "checkbox", true), field("csrf", "fresh")], "/dev/vdb");
-  await refreshWizardInventory();
-  assert.equal(current, replacement);
-  assert.equal(current.fields.find(f => f.name === "backup_type").value, "smb");
-  assert.equal(current.fields.find(f => f.name === "backup_path").value, "/var/mnt/custom/my-backups");
-  assert.equal(current.fields.find(f => f.name === "backup_keep").value, "19");
-  assert.equal(current.fields.find(f => f.name === "backup_automatic").checked, false);
-  assert.equal(current.fields.find(f => f.name === "csrf").value, "fresh");
-  assert.equal(initialized, 1);
-  assert.equal(diskSelected, 1);
-  current = makeForm([field("backup_type", "partition"), field("backup_device", "/dev/vdb1"), field("backup_path", "/old/backups")], "/dev/vdb");
-  replacement = makeForm([field("backup_type", "system"), field("backup_device", ""), field("backup_path", "/default")], "/dev/vdb");
-  await refreshWizardInventory();
-  assert.equal(current.fields.find(f => f.name === "backup_device").value, "");
-  assert.equal(current.fields.find(f => f.name === "backup_path").value, "");
-  assert.equal(error.hidden, false);
-  assert(error.textContent.includes("no longer available"));
-})().catch(error => { console.error(error); process.exitCode = 1; });
-`
-	cmd := exec.Command("node")
-	cmd.Stdin = strings.NewReader(program)
+func TestWizardInlineStorageBehaviorAndStateRefresh(t *testing.T) {
+	cmd := exec.Command("node", "../../../tests/test-setup-inline-storage.js")
 	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("wizard inventory value preservation: %v\n%s", err, output)
+		t.Fatalf("inline wizard disk operations: %v\n%s", err, output)
 	}
 }
 

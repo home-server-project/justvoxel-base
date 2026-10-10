@@ -50,6 +50,8 @@ type setupFilesystemView struct {
 }
 
 type setupStoragePartitionView struct {
+	UUID       string
+	Protected  bool
 	Path       string
 	Size       string
 	Filesystem string
@@ -379,10 +381,6 @@ func setupStorageDiskViews(storage api.AdminStorageDiscovery) ([]setupStorageDis
 			continue
 		}
 		formatted := safeSetupDeviceValue(device)
-		blank := safeSetupBlankMinecraftDeviceValue(storage, device)
-		if !formatted && !blank {
-			continue
-		}
 		mountpoint := ""
 		if len(device.Mountpoints) > 0 {
 			mountpoint = device.Mountpoints[0]
@@ -390,6 +388,7 @@ func setupStorageDiskViews(storage api.AdminStorageDiscovery) ([]setupStorageDis
 		disks[index].Partitions = append(disks[index].Partitions, setupStoragePartitionView{
 			Path: device.Path, Size: humanBytes(device.SizeBytes), Filesystem: device.Filesystem,
 			Label: device.Label, Mountpoint: mountpoint, Formatted: formatted,
+			UUID: device.UUID, Protected: device.System || device.ReadOnly || storageBrowserLooksSystem(device),
 			SystemDisk: disks[index].SystemDisk,
 		})
 	}
@@ -452,10 +451,6 @@ func setupBackupDiskViews(storage api.AdminStorageDiscovery) []setupStorageDiskV
 			continue
 		}
 		formatted := safeSetupDeviceValue(device)
-		blank := safeSetupBlankBackupDeviceValue(device)
-		if !formatted && !blank {
-			continue
-		}
 		mountpoint := ""
 		if len(device.Mountpoints) > 0 {
 			mountpoint = device.Mountpoints[0]
@@ -463,6 +458,7 @@ func setupBackupDiskViews(storage api.AdminStorageDiscovery) []setupStorageDiskV
 		disks[index].Partitions = append(disks[index].Partitions, setupStoragePartitionView{
 			Path: device.Path, Size: humanBytes(device.SizeBytes), Filesystem: device.Filesystem,
 			Label: device.Label, Mountpoint: mountpoint, Formatted: formatted,
+			UUID: device.UUID, Protected: device.System || device.ReadOnly || storageBrowserLooksSystem(device),
 			SystemDisk: disks[index].SystemDisk,
 		})
 	}

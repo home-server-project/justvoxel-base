@@ -732,7 +732,15 @@ func TestSetupVersionPreviewPresentationContract(t *testing.T) {
 		`"setup-version-secondary"`, `"Newest available version"`,
 		`{ STABLE: "Stable", BETA: "Beta", ALPHA: "Alpha", RELEASE: "Release" }`,
 		`channelLabel(status.available_channel)`, `channelLabel(status.candidate_channel)`, `Server software build channel:`,
-		`"setup-version-explanation"`, `"notice success setup-version-compatibility"`, `"notice warning setup-version-compatibility"`,
+		`"setup-version-explanation"`,
+		`const incompatible = status.crossplay_enabled && !status.crossplay_compatible;`,
+		`const panel = make("div", "notice " + (incompatible || !status.selected_candidate ? "warning" : "success") + " setup-version-panel", "");`,
+		`primary.append(make("strong", "setup-version-candidate", status.selected_candidate));`,
+		`parts.push(primary);`, `panel.append(...parts);`, `preview.replaceChildren(panel);`,
+		`if (status.crossplay_enabled && status.selected_candidate)`,
+		`const supported = status.geyser_supported_version || "Unavailable";`,
+		`Bedrock cross-play is compatible. Current supported version: ${supported}.`,
+		`parts.push(make("p", "setup-version-compatibility", compatibility));`,
 		`"Latest follows newer Minecraft server versions when available."`,
 		`The selected version is not currently compatible with Bedrock cross-play.`, `Current supported Bedrock version: ${supported}`,
 		`next.disabled = !status.selected_candidate || (status.crossplay_enabled && !status.crossplay_compatible);`,
@@ -744,6 +752,32 @@ func TestSetupVersionPreviewPresentationContract(t *testing.T) {
 	}
 	if strings.Count(source, `fetch("/setup/version-preview?"`) != 1 {
 		t.Fatal("version preview must use the existing endpoint")
+	}
+	if !strings.Contains(source, "const status = await response.json();") || !strings.Contains(source, "if (ticket === sequence) show(status, policy);") {
+		t.Fatal("version preview must render the current API response")
+	}
+	if strings.Count(source, `const panel = make("div", "notice "`) != 1 || strings.Contains(source, `notice success setup-version-compatibility`) || strings.Contains(source, `notice warning setup-version-compatibility`) {
+		t.Fatal("version and compatibility information must share one notice panel")
+	}
+	styles, err := assets.ReadFile("static/setup.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`.setup-version-panel{display:grid;`,
+		`.setup-version-panel.warning{border:1px solid var(--jv-warning);background:color-mix(in srgb,var(--jv-warning) 18%,var(--jv-surface-sunken))}`,
+		`.setup-version-panel .setup-version-primary{padding:0;border:0;background:transparent}`,
+	} {
+		if !strings.Contains(string(styles), want) {
+			t.Fatalf("version preview styling contract missing %q", want)
+		}
+	}
+	commonStyles, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(commonStyles), `.notice.success{border:1px solid #3e7e5b;background:#244a3533}`) {
+		t.Fatal("version preview success panel must retain its shared green frame")
 	}
 }
 
