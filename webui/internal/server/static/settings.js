@@ -166,8 +166,8 @@ if (versionPolicy && versionInput && specificVersionField) {
       summary.append(make("p", "setup-version-explanation", status.reason || "No usable server build was found for this version."));
     }
     const compatibility = make("div", "notice " + (status.crossplay_compatible ? "success" : "warning") + " setup-version-compatibility", "");
-    compatibility.append(make("p", "", status.crossplay_compatible ? "Bedrock cross-play is supported." : "Bedrock cross-play is not supported."));
-    if (!status.crossplay_compatible) compatibility.append(make("p", "", "Choose Recommended, select a compatible Specific version, or disable Bedrock cross-play."));
+    compatibility.append(make("p", "", !status.crossplay_enabled ? "Bedrock cross-play is disabled." : status.crossplay_compatible ? "Bedrock cross-play is supported." : "Bedrock cross-play is not supported."));
+    if (status.crossplay_enabled && !status.crossplay_compatible) compatibility.append(make("p", "", "Choose Recommended, select a compatible Specific version, or disable Bedrock cross-play."));
     compatibility.append(make("p", "", `Current supported Minecraft version: ${status.geyser_supported_version || "Unavailable"}.`));
     preview.replaceChildren(summary, compatibility);
     next.disabled = !status.selected_candidate || (status.crossplay_enabled && !status.crossplay_compatible);
@@ -180,7 +180,7 @@ if (versionPolicy && versionInput && specificVersionField) {
     const version = policy === "pinned" ? versionInput.value.trim() : "";
     if (policy === "pinned" && !version) { preview.textContent = "Enter a Minecraft version to check availability."; return; }
     try {
-      const response = await fetch("/setup/version-preview?" + new URLSearchParams({ policy, version }), { credentials: "same-origin", cache: "no-store" });
+      const response = await fetch("/setup/version-preview?" + new URLSearchParams({ policy, version, bedrock_enabled: String(!!form?.querySelector("[data-bedrock-toggle]")?.checked) }), { credentials: "same-origin", cache: "no-store" });
       if (!response.ok) throw new Error();
       const status = await response.json();
       if (ticket === sequence) show(status, policy);
@@ -194,8 +194,9 @@ if (versionPolicy && versionInput && specificVersionField) {
     if (!specific) versionInput.value = "";
     refresh();
   };
+  form?.querySelector("[data-bedrock-toggle]")?.addEventListener("change", refresh);
   versionPolicy.addEventListener("change", updateVersionHelp);
-  versionInput.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(refresh, 300); });
+  versionInput.addEventListener("input", () => { clearTimeout(timer); ++sequence; next.disabled = true; preview.textContent = "Checking available versions…"; timer = setTimeout(refresh, 300); });
   form?.addEventListener("submit", (event) => { if (event.submitter?.value === "next" && next.disabled) event.preventDefault(); });
   updateVersionHelp();
 }
@@ -231,7 +232,6 @@ if (imageChannel && imageTag && customImageTagField && customImageTag) {
 }
 
 
-window.initializeJustVoxelTimezoneSearch?.();
 
 const setupConnections = document.querySelector("[data-setup-connections]");
 if (setupConnections) {

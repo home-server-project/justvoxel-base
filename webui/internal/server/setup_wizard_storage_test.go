@@ -97,7 +97,7 @@ func TestSetupSameDiskWarningAppearsOnlyOnBackupsStep(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := string(markup)
-	backupsStart := strings.Index(source, "{{else if eq .CurrentStep 6}}")
+	backupsStart := strings.Index(source, "{{else if eq .CurrentStep 5}}")
 	if backupsStart < 0 {
 		t.Fatal("Backups step start is missing")
 	}
@@ -123,9 +123,7 @@ func advanceToStorage(t *testing.T, app *App) {
 	if rr := saveResourcesStep(t, app, validResourceValues()); rr.Code != http.StatusSeeOther {
 		t.Fatalf("resources save returned %d: %s", rr.Code, rr.Body.String())
 	}
-	if rr := saveMinecraftStep(t, app, validMinecraftValues()); rr.Code != http.StatusSeeOther {
-		t.Fatalf("Minecraft save returned %d: %s", rr.Code, rr.Body.String())
-	}
+
 }
 
 func TestSetupWizardStorageStepShowsInternalDiskBrowserAndExcludesUSB(t *testing.T) {
@@ -144,7 +142,7 @@ func TestSetupWizardStorageStepShowsInternalDiskBrowserAndExcludesUSB(t *testing
 	body := page.Body.String()
 	for _, want := range []string{
 		"<h2>Storage</h2>", "Use system storage", "Use another internal disk", "/dev/vda4", "/dev/vdb1", "/dev/vdb2",
-		"Samsung SSD", "ext4", "Unallocated", "Review partition creation and choose a size",
+		"Samsung SSD", "ext4", "Unallocated",
 		"External drives are not offered for Minecraft data", "/static/setup-storage.js",
 	} {
 		if !strings.Contains(body, want) {
@@ -246,7 +244,7 @@ func TestSetupWizardStorageMissingPartitionKeepsInternalMode(t *testing.T) {
 		t.Fatalf("missing storage partition did not keep chooser: %d %s", rr.Code, rr.Body.String())
 	}
 	draft, _ := firstRunSetupDrafts.get(app, "session-token")
-	if draft.Storage.Type != "partition" || draft.Storage.Device != "" || draft.CurrentStep != 5 {
+	if draft.Storage.Type != "partition" || draft.Storage.Device != "" || draft.CurrentStep != setupStorageStep {
 		t.Fatalf("storage mode changed after validation error: %#v", draft.Storage)
 	}
 }
@@ -269,7 +267,7 @@ func TestSetupWizardBackupMissingPartitionKeepsLocalMode(t *testing.T) {
 		t.Fatalf("missing backup partition did not keep chooser: %d %s", rr.Code, rr.Body.String())
 	}
 	draft, _ := firstRunSetupDrafts.get(app, "session-token")
-	if draft.Backups.Type != "partition" || draft.Backups.Device != "" || draft.CurrentStep != 6 {
+	if draft.Backups.Type != "partition" || draft.Backups.Device != "" || draft.CurrentStep != setupBackupsStep {
 		t.Fatalf("backup mode changed after validation error: %#v", draft.Backups)
 	}
 }
@@ -292,8 +290,8 @@ func setupWizardInlineStorageMarkup(t *testing.T, app *App) string {
 			t.Fatalf("wizard regression: %q", forbidden)
 		}
 	}
-	if strings.Count(markup, `data-storage-create-dialog`) != 1 || strings.Count(markup, `data-storage-action-dialog`) != 1 || strings.Count(markup, `class="setup-number"`) != 7 {
-		t.Fatal("Advanced setup must retain seven cards and shared focused reviews")
+	if strings.Count(markup, `data-storage-create-dialog`) != 1 || strings.Count(markup, `data-storage-action-dialog`) != 1 || strings.Count(markup, `class="setup-number"`) != 6 {
+		t.Fatal("Advanced setup must retain six cards and shared focused reviews")
 	}
 	return markup
 }
@@ -409,7 +407,7 @@ func TestSetupWizardBackupStepSupportsLocalNFSAndSMBWithoutPasswordDraft(t *test
 		t.Fatalf("SMB backup draft returned %d %q: %s", rr.Code, rr.Header().Get("Location"), rr.Body.String())
 	}
 	draft, ok := firstRunSetupDrafts.get(app, "session-token")
-	if !ok || draft.CurrentStep != 7 || draft.Backups.Type != "smb" || draft.Backups.Source != "//nas/backups" || draft.Backups.Username != "minecraft" {
+	if !ok || draft.CurrentStep != setupReviewStep || draft.Backups.Type != "smb" || draft.Backups.Source != "//nas/backups" || draft.Backups.Username != "minecraft" {
 		t.Fatalf("SMB backup draft was not preserved: %#v", draft)
 	}
 	if strings.Contains(strings.ToLower(fmt.Sprintf("%#v", draft.Backups)), "password") {

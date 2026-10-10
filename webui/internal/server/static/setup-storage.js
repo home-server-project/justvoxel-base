@@ -155,8 +155,8 @@
       function selectExisting(button) {
         showKind('partition');
         const targetDevice = button.dataset.device || '';
-        const targetMount = targetDevice === backupForm.dataset.dataDevice && backupForm.dataset.dataMount
-          ? backupForm.dataset.dataMount : (button.dataset.mountpoint || '/var/mnt/justvoxel-backup');
+        const targetMount = button.dataset.mountpoint || (targetDevice === backupForm.dataset.dataDevice && backupForm.dataset.dataMount
+          ? backupForm.dataset.dataMount : '/var/mnt/justvoxel-backup');
         if (device) device.value = targetDevice;
         if (mount) mount.value = targetMount;
         if (path) path.value = backupPath(targetMount);

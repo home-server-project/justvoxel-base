@@ -2,6 +2,7 @@ package server
 
 import (
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -130,19 +131,34 @@ func TestProjectFooterAndDateTimeUIContracts(t *testing.T) {
 			t.Fatalf("Footer page layout missing %q", want)
 		}
 	}
-	// Auto overflow is a safety fallback for small screens, large inventories and
-	// long warnings, including the storage confirmation dialog. It does not force
-	// scrolling when ordinary step content fits the desktop frame.
+	// Keep ordinary desktop steps compact, but let the page grow and scroll for
+	// short viewports, long content and browser zoom. Navigation stays in flow.
 	if strings.Contains(setupCSS, "height:clamp(520px") || strings.Contains(setupCSS, "height:calc(100dvh - 185px)") || strings.Contains(setupCSS, "overflow-y:scroll") {
 		t.Fatal("Setup must not use obsolete fixed panel heights or force vertical scrolling")
 	}
-	for _, want := range []string{
-		`.setup-body .setup-wizard-panel .setup-form>.setup-step-content{display:flex;flex:1;flex-direction:column;gap:.42rem;min-height:0;min-width:0;overflow-y:auto;overflow-x:hidden}`,
-		`.setup-body .setup-wizard-panel .setup-form>.setup-step-actions{position:static;flex:none;margin-top:.4rem}`,
-		`.setup-body .setup-wizard-panel .setup-form>.setup-step-content{display:contents}`,
-	} {
-		if !strings.Contains(setupCSS, want) {
-			t.Fatalf("Setup overflow safety and reachable actions missing %q", want)
+	assertRule := func(selector string, declarations ...string) {
+		t.Helper()
+		rules := regexp.MustCompile(regexp.QuoteMeta(selector)+`\s*\{([^{}]*)\}`).FindAllStringSubmatch(setupCSS, -1)
+		for _, rule := range rules {
+			properties := strings.Split(rule[1], ";")
+			matches := true
+			for _, want := range declarations {
+				found := false
+				for _, property := range properties {
+					found = found || strings.TrimSpace(property) == want
+				}
+				matches = matches && found
+			}
+			if matches {
+				return
+			}
 		}
+		t.Fatalf("Setup layout rule %q missing properties %v", selector, declarations)
 	}
+	assertRule(".setup-body:has(.setup-wizard-panel),.setup-body:has(.setup-review-panel)", "height:auto", "min-height:100dvh", "overflow-y:auto")
+	assertRule(".setup-body .setup-wizard-panel,.setup-body .setup-review-panel", "height:auto", "overflow:visible")
+	assertRule(".setup-body .setup-wizard-panel .setup-form>.setup-step-content", "display:flex", "gap:.42rem", "min-width:0", "overflow:visible")
+	assertRule(".setup-body .setup-wizard-panel .setup-form>.setup-step-actions", "position:static", "flex:none", "margin-top:.4rem")
+	assertRule(".setup-body .setup-wizard-panel .setup-form>.setup-step-content", "display:contents")
+	assertRule(".setup-body .setup-step-panel .setup-form>.setup-step-actions", "position:sticky", "bottom:0")
 }

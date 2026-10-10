@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"fmt"
+	"github.com/home-server-project/justvoxel-webui/internal/api"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -253,7 +255,7 @@ func TestSetupWizardCompactDesktopProgressContract(t *testing.T) {
 	}
 	for _, want := range []string{
 		".setup-stage-header{display:flex",
-		"grid-template-columns:repeat(7,minmax(0,1fr))",
+		"grid-template-columns:repeat(6,minmax(0,1fr))",
 		".setup-stage-header .setup-progress li{font-size:1rem;height:56px",
 		".setup-stage-header h1{font-size:1.9rem",
 		".setup-stage-header .setup-number{flex:0 0 1.8rem",
@@ -275,10 +277,10 @@ func TestSetupWizardCompactDesktopProgressContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(markup), `{{if ne .SetupMode "recommended"}}`) || strings.Count(string(markup), `class="setup-number"`) != 7 || strings.Count(string(markup), `action="/setup/navigate"`) != 6 {
-		t.Fatal("Advanced Review must retain seven steps and navigation; Recommended omits progress")
+	if !strings.Contains(string(markup), `{{if ne .SetupMode "recommended"}}`) || strings.Count(string(markup), `class="setup-number"`) != 6 || strings.Count(string(markup), `action="/setup/navigate"`) != 5 {
+		t.Fatal("Advanced Review must retain six steps and navigation; Recommended omits progress")
 	}
-	for i, label := range []string{"Server", "Cross-play", "Memory", "Version", "Storage", "Backups", "Review"} {
+	for i, label := range []string{"Server", "Cross-play", "Memory", "Storage", "Backups", "Review"} {
 		if !strings.Contains(string(markup), fmt.Sprintf(`<span class="setup-number">%d</span><span>%s</span>`, i+1, label)) {
 			t.Fatalf("Setup progress missing step %d: %s", i+1, label)
 		}
@@ -352,15 +354,6 @@ func saveResourcesStep(t *testing.T, app *App, values url.Values) *httptest.Resp
 	return httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/resources", values.Encode()))
 }
 
-func saveMinecraftStep(t *testing.T, app *App, values url.Values) *httptest.ResponseRecorder {
-	t.Helper()
-	if values == nil {
-		values = url.Values{}
-	}
-	values.Set("csrf", "csrf-token")
-	return httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/minecraft", values.Encode()))
-}
-
 func validServerValues() url.Values {
 	return url.Values{
 		"server_type": {"paper"},
@@ -406,6 +399,9 @@ func TestSetupGameModeDefaultAndSelection(t *testing.T) {
 
 func validConnectionValues() url.Values {
 	return url.Values{
+		"image_tag":       {"stable"},
+		"version_policy":  {"recommended"},
+		"version":         {""},
 		"bedrock_enabled": {"on"},
 		"java_port":       {"25565"},
 		"bedrock_port":    {"19132"},
@@ -417,19 +413,6 @@ func validResourceValues() url.Values {
 	return url.Values{
 		"java_memory":      {"4G"},
 		"container_memory": {"6G"},
-		"direction":        {"next"},
-	}
-}
-
-func validMinecraftValues() url.Values {
-	return url.Values{
-		"java_memory":      {"4G"},
-		"container_memory": {"6G"},
-		"java_port":        {"25565"},
-		"bedrock_port":     {"19132"},
-		"image_tag":        {"stable"},
-		"version_policy":   {"recommended"},
-		"version":          {""},
 		"direction":        {"next"},
 	}
 }
@@ -529,7 +512,7 @@ func TestSetupWizardStartsWithFriendlyServerDefaults(t *testing.T) {
 		t.Fatalf("server step returned %d: %s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"<h2>Server</h2>", "Server name / welcome message", "Family", "Maximum players", "Server software", "Paper", "America/Toronto", "Technical name: MOTD", "data-timezone-search", "data-timezone-results", "data-timezone-value=\"UTC\""} {
+	for _, want := range []string{"<h2>Server</h2>", "Server name", "Welcome message", "Future multi-instance placeholder.", "Family", "Maximum players", "Server software", "Paper", "Technical name: MOTD"} {
 		if want == "Family" {
 			continue
 		}
@@ -545,44 +528,54 @@ func TestSetupWizardStartsWithFriendlyServerDefaults(t *testing.T) {
 	}
 }
 
-func TestSetupWizardTimezoneSearchUsesLocalDatabaseWithoutDatalist(t *testing.T) {
-	client := setupWizardClient()
-	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	startSetup(t, app)
-
-	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-	body := page.Body.String()
-	if strings.Contains(body, "<datalist") || strings.Contains(body, "list=\"timezone-options\"") {
-		t.Fatal("advanced setup still uses the browser timezone datalist")
-	}
-	for _, want := range []string{"data-timezone-search", "data-timezone-results", "Toronto, Warsaw, Amsterdam", "no Internet service is required"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("timezone search UI missing %q: %s", want, body)
+func TestSetupWizardPreservesApplianceTimezone(t *testing.T) {
+	for _, zone := range []string{"", "UTC", "America/Toronto"} {
+		for _, mode := range []string{"advanced", "recommended"} {
+			t.Run(zone+"/"+mode, func(t *testing.T) {
+				client := setupWizardClient()
+				client.defaults.Timezone = zone
+				app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer firstRunSetupDrafts.delete(app, "session-token")
+				defer firstRunSetupReviews.delete(app, "session-token")
+				expected := zone
+				if expected == "" {
+					expected = "UTC"
+				}
+				if mode == "recommended" {
+					rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recommended", "csrf=csrf-token&server_type=paper"))
+					if rr.Code != http.StatusSeeOther {
+						t.Fatal(rr.Code, rr.Body.String())
+					}
+				} else {
+					startSetup(t, app)
+					body := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", "")).Body.String()
+					if strings.Contains(body, `name="timezone"`) || strings.Contains(body, "data-timezone-options") {
+						t.Fatal("wizard edits or enumerates timezone")
+					}
+					for _, submitted := range []string{"", "Mars/Olympus"} {
+						values := validServerValues()
+						values.Set("timezone", submitted)
+						if rr := saveServerStep(t, app, values); rr.Code != http.StatusSeeOther {
+							t.Fatal(rr.Code, rr.Body.String())
+						}
+					}
+				}
+				draft, _ := firstRunSetupDrafts.get(app, "session-token")
+				if draft.Server.Timezone != expected {
+					t.Fatalf("timezone = %q, want %q", draft.Server.Timezone, expected)
+				}
+				if err := validateSetupServer(draft.Server); err != nil {
+					t.Fatal(err)
+				}
+				plan, err := setupPlanRequestFromDraft(draft)
+				if err != nil || plan.Server.Timezone != expected {
+					t.Fatalf("timezone lost from Review/apply planning request: %q, %v", plan.Server.Timezone, err)
+				}
+			})
 		}
-	}
-
-	script, err := assets.ReadFile("static/timezone-search.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{"data-timezone-value", "scoreZone", "cityLabel", "ArrowDown", "chooseTimezone"} {
-		if !strings.Contains(string(script), want) {
-			t.Fatalf("timezone search behavior missing %q", want)
-		}
-	}
-	if !strings.Contains(body, "/static/timezone-search.js") {
-		t.Fatal("Setup does not load the shared city search")
-	}
-
-	invalid := validServerValues()
-	invalid.Set("timezone", "Mars/Olympus")
-	rr := saveServerStep(t, app, invalid)
-	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "Choose a timezone from the JustVoxel timezone suggestions") {
-		t.Fatalf("unknown timezone was not rejected: %d %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -663,8 +656,8 @@ func TestSetupWizardUsesCompactAlignedActions(t *testing.T) {
 			t.Fatalf("setup template still contains old action label %q", oldLabel)
 		}
 	}
-	if strings.Count(markup, ">Continue</button>") != 6 {
-		t.Fatalf("setup template Continue button count = %d, want 6", strings.Count(markup, ">Continue</button>"))
+	if strings.Count(markup, ">Continue</button>") != 5 {
+		t.Fatalf("setup template Continue button count = %d, want 5", strings.Count(markup, ">Continue</button>"))
 	}
 }
 
@@ -703,6 +696,11 @@ func TestSetupWizardServerStepValidatesAndPersistsChoices(t *testing.T) {
 			t.Fatalf("Resources step missing %q: %s", want, body)
 		}
 	}
+	for _, want := range []string{"<h2>Cross-play</h2>", "Container updates", "Stable (recommended)", "Latest", "Custom", "This does not choose the Minecraft game version below.", `id="image-tag"`, `value="stable"`, "Recommended", "Specific version", `id="specific-version-field"`, `id="setup-version-preview"`, "/static/settings.js"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("Minecraft step missing %q: %s", want, body)
+		}
+	}
 	if rr := saveConnectionsStep(t, app, validConnectionValues()); rr.Code != http.StatusSeeOther {
 		t.Fatalf("connections save returned %d: %s", rr.Code, rr.Body.String())
 	}
@@ -715,13 +713,6 @@ func TestSetupWizardServerStepValidatesAndPersistsChoices(t *testing.T) {
 	}
 	if rr := saveResourcesStep(t, app, validResourceValues()); rr.Code != http.StatusSeeOther {
 		t.Fatalf("resources save returned %d: %s", rr.Code, rr.Body.String())
-	}
-	page = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-	body = page.Body.String()
-	for _, want := range []string{"<h2>Version</h2>", "Container updates", "Stable (recommended)", "Latest", "Custom", "This does not choose the Minecraft game version below.", `id="image-tag"`, `value="stable"`, "Recommended", "Specific version", `id="specific-version-field"`, `id="setup-version-preview"`, "/static/settings.js"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("Minecraft step missing %q: %s", want, body)
-		}
 	}
 }
 
@@ -820,17 +811,11 @@ func TestSetupWizardSpecificVersionRequiresExplicitValue(t *testing.T) {
 	if rr := saveServerStep(t, app, validServerValues()); rr.Code != http.StatusSeeOther {
 		t.Fatalf("server save returned %d", rr.Code)
 	}
-	if rr := saveConnectionsStep(t, app, validConnectionValues()); rr.Code != http.StatusSeeOther {
-		t.Fatalf("connections save returned %d", rr.Code)
-	}
-	if rr := saveResourcesStep(t, app, validResourceValues()); rr.Code != http.StatusSeeOther {
-		t.Fatalf("resources save returned %d", rr.Code)
-	}
 
-	values := validMinecraftValues()
+	values := validConnectionValues()
 	values.Set("version_policy", "pinned")
 	values.Set("version", "")
-	rr := saveMinecraftStep(t, app, values)
+	rr := saveConnectionsStep(t, app, values)
 	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "Specific Minecraft version is invalid") {
 		t.Fatalf("missing specific version was not rejected: %d %s", rr.Code, rr.Body.String())
 	}
@@ -869,55 +854,73 @@ func TestSetupWizardMinecraftStepAdvancesOnlyAfterValidation(t *testing.T) {
 	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/setup" {
 		t.Fatalf("valid Resources form returned %d %q: %s", rr.Code, rr.Header().Get("Location"), rr.Body.String())
 	}
-	minecraftPage := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-	if minecraftPage.Code != http.StatusOK || !strings.Contains(minecraftPage.Body.String(), "<h2>Version</h2>") || !strings.Contains(minecraftPage.Body.String(), "Container updates") {
-		t.Fatalf("Resources step did not advance to Minecraft: %d %s", minecraftPage.Code, minecraftPage.Body.String())
-	}
-
-	rr = saveMinecraftStep(t, app, validMinecraftValues())
-	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/setup" {
-		t.Fatalf("valid Minecraft form returned %d %q: %s", rr.Code, rr.Header().Get("Location"), rr.Body.String())
-	}
 	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "<h2>Storage</h2>") || !strings.Contains(page.Body.String(), "Use another internal disk") {
 		t.Fatalf("Minecraft step did not advance to storage: %d %s", page.Code, page.Body.String())
 	}
 }
 
-func TestSetupWizardMinecraftBackPreservesUnsavedValues(t *testing.T) {
-	client := setupWizardClient()
-	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+func assertSetupBedrockChecked(t *testing.T, body string, enabled bool) {
+	t.Helper()
+	const toggleStart = `<input class="date-time-switch" type="checkbox" name="bedrock_enabled" data-bedrock-toggle`
+	start := strings.Index(body, toggleStart)
+	if start < 0 {
+		t.Fatal("Bedrock checkbox missing")
+	}
+	end := strings.Index(body[start:], ">")
+	if end < 0 {
+		t.Fatal("Bedrock checkbox tag is incomplete")
+	}
+	checked := false
+	for _, attribute := range strings.Fields(body[start : start+end]) {
+		checked = checked || attribute == "checked"
+	}
+	if checked != enabled {
+		t.Fatalf("Bedrock checked state = %t, want %t", checked, enabled)
+	}
+}
+
+func TestSetupWizardCrossplayBackPreservesUnsavedValues(t *testing.T) {
+	app, err := New(setupWizardClient(), Config{Version: "test", ManagementAPI: "v1"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer firstRunSetupDrafts.delete(app, "session-token")
 	startSetup(t, app)
 	_ = saveServerStep(t, app, validServerValues())
-	_ = saveConnectionsStep(t, app, validConnectionValues())
-	resources := validResourceValues()
-	resources.Set("java_memory", "5G")
-	resources.Set("container_memory", "7G")
-	_ = saveResourcesStep(t, app, resources)
-
-	values := validMinecraftValues()
+	values := validConnectionValues()
 	values.Set("image_tag", "java21")
+	values.Set("version_policy", "pinned")
+	values.Set("version", "1.21.8")
+	values.Set("java_port", "25566")
+	values.Set("bedrock_port", "19133")
 	values.Set("direction", "back")
-	back := saveMinecraftStep(t, app, values)
-	if back.Code != http.StatusSeeOther {
-		t.Fatalf("Minecraft back returned %d: %s", back.Code, back.Body.String())
+	if rr := saveConnectionsStep(t, app, values); rr.Code != http.StatusSeeOther {
+		t.Fatal(rr.Code, rr.Body.String())
 	}
-	resourcesPage := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-	for _, want := range []string{"<h2>Memory</h2>", `value="5G"`, `value="7G"`} {
-		if !strings.Contains(resourcesPage.Body.String(), want) {
-			t.Fatalf("Resources draft lost %q: %s", want, resourcesPage.Body.String())
+	draft, _ := firstRunSetupDrafts.get(app, "session-token")
+	if draft.CurrentStep != setupServerStep || draft.Minecraft.ConnectionsComplete {
+		t.Fatal("Back did not return to Server with incomplete edits")
+	}
+	if !draft.Server.BedrockEnabled || draft.Minecraft.JavaPort != "25566" || draft.Minecraft.BedrockPort != "19133" || draft.Minecraft.ImageTag != "java21" || draft.Minecraft.VersionPolicy != "pinned" || draft.Minecraft.Version != "1.21.8" {
+		t.Fatal("Back did not persist submitted Cross-play values")
+	}
+	_ = saveServerStep(t, app, validServerValues())
+	body := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", "")).Body.String()
+	for _, want := range []string{`value="java21"`, `value="custom" selected`, `value="1.21.8"`, `value="25566"`, `value="19133"`, `value="pinned" selected`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("lost %q", want)
 		}
 	}
-	_ = saveResourcesStep(t, app, resources)
-	minecraftPage := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-	for _, want := range []string{`value="java21"`, `value="custom" selected`, "Custom container tag"} {
-		if !strings.Contains(minecraftPage.Body.String(), want) {
-			t.Fatalf("Minecraft draft lost %q: %s", want, minecraftPage.Body.String())
-		}
+	assertSetupBedrockChecked(t, body, true)
+	values.Set("direction", "next")
+	if rr := saveConnectionsStep(t, app, values); rr.Code != http.StatusSeeOther {
+		t.Fatal(rr.Code, rr.Body.String())
+	}
+	_ = saveResourcesStep(t, app, validResourceValues())
+	draft, _ = firstRunSetupDrafts.get(app, "session-token")
+	if draft.CurrentStep != setupStorageStep || draft.HighestStep != setupStorageStep || !draft.Minecraft.Complete {
+		t.Fatal("combined flow did not reach Storage")
 	}
 }
 
@@ -1129,4 +1132,15 @@ func TestVanillaAdvancedConnectionsCannotEnableBedrock(t *testing.T) {
 	if rr := saveConnectionsStep(t, app, connections); rr.Code != http.StatusSeeOther {
 		t.Fatalf("Java-only Connections: %d %s", rr.Code, rr.Body.String())
 	}
+}
+
+func (f *fakeDiscoveryAPI) AdminSetupVersionPreview(_ context.Context, session, policy, version string, bedrock bool, software string) (api.AdminVersionStatus, error) {
+	if session != "session-token" {
+		return api.AdminVersionStatus{}, api.ErrUnauthorized
+	}
+	candidate := "1.21.8"
+	if policy == "pinned" {
+		candidate = version
+	}
+	return api.AdminVersionStatus{SelectedCandidate: candidate, CrossplayEnabled: bedrock, CrossplayCompatible: true}, nil
 }

@@ -2,6 +2,8 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"os/exec"
 	"strings"
 	"testing"
@@ -218,8 +220,38 @@ func TestWizardScheduleAndHeadings(t *testing.T) {
 			t.Fatal("redundant setup heading remains")
 		}
 	}
-	if !strings.Contains(review, `{{if ne .SetupMode "recommended"}}`) || strings.Count(review, `class="setup-number"`) != 7 || !strings.Contains(review, "<h2>Review</h2>") {
+	if !strings.Contains(review, `{{if ne .SetupMode "recommended"}}`) || strings.Count(review, `class="setup-number"`) != 6 || !strings.Contains(review, "<h2>Review</h2>") {
 		t.Fatal("Review must keep its title and Advanced-only navigation")
+	}
+	for i, name := range []string{"Server", "Cross-play", "Memory", "Storage", "Backups", "Review"} {
+		if !strings.Contains(review, fmt.Sprintf(`<span class="setup-number">%d</span><span>%s</span>`, i+1, name)) {
+			t.Fatalf("Advanced Review missing step %d: %s", i+1, name)
+		}
+	}
+	app, err := New(setupReviewClient(), Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstRunSetupDrafts.delete(app, "session-token")
+	defer firstRunSetupReviews.delete(app, "session-token")
+	advanceSetupToReview(t, app)
+	for _, mode := range []string{"advanced", "recommended"} {
+		draft, _ := firstRunSetupDrafts.get(app, "session-token")
+		draft.Mode = mode
+		firstRunSetupDrafts.save(app, "session-token", draft)
+		page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
+		body := page.Body.String()
+		if page.Code != http.StatusOK || strings.Contains(body, `aria-label="Setup progress"`) != (mode == "advanced") {
+			t.Fatalf("%s Review navigation is incorrect: status %d", mode, page.Code)
+		}
+		for _, want := range []string{"<h2>Review</h2>", `action="/setup/review/back"`, ">Back</button>", "data-setup-eula-dialog", "data-setup-eula-accept"} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s Review missing %q", mode, want)
+			}
+		}
+		if mode == "advanced" && (strings.Count(body, `class="setup-number"`) != 6 || !strings.Contains(body, `<li class="active" aria-current="step"><span class="setup-number">6</span><span>Review</span>`)) {
+			t.Fatal("Advanced Review must show six steps with Review active at Step 6")
+		}
 	}
 	css := correctionSource(t, "static/setup.css")
 	if !strings.Contains(css, ".setup-toggle-field{display:flex;align-items:center;justify-content:space-between") {

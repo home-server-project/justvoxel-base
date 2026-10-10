@@ -197,7 +197,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const minutes = Math.floor(seconds / 60);
     const remainder = seconds % 60;
     const formatted = minutes === 0 ? `${seconds} sec` : remainder === 0 ? `${minutes} min` : `${minutes} min ${String(remainder).padStart(2, "0")} sec`;
-    elapsed.textContent = `Elapsed since setup started: ${formatted}`;
+    elapsed.textContent = `Time elapsed since setup started: ${formatted}`;
     elapsed.hidden = false;
   };
 

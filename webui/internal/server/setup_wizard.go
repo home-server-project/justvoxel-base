@@ -22,6 +22,15 @@ import (
 
 const setupDraftLifetime = 24 * time.Hour
 
+const (
+	setupServerStep = iota + 1
+	setupCrossplayStep
+	setupMemoryStep
+	setupStorageStep
+	setupBackupsStep
+	setupReviewStep
+)
+
 var setupMemoryPattern = regexp.MustCompile(`^([1-9][0-9]*)([mMgG])$`)
 var setupImageTagPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 var setupVersionPattern = regexp.MustCompile(`^[0-9A-Za-z._-]+$`)
@@ -113,17 +122,15 @@ type setupWizardPageData struct {
 	SystemMemory             string
 	SystemReserveMinimum     string
 	SystemReserveRecommended string
-	Timezones                []string
 }
 
 var setupWizardSteps = []setupWizardStepView{
-	{Number: 1, Name: "Server", Description: "Choose server software, welcome message, player limit and timezone."},
-	{Number: 2, Name: "Cross-play", Description: "Choose Bedrock cross-play and Minecraft connection ports."},
-	{Number: 3, Name: "Memory", Description: "Choose how much system memory Minecraft may use."},
-	{Number: 4, Name: "Version", Description: "Choose the container channel and Minecraft version policy."},
-	{Number: 5, Name: "Storage", Description: "Choose where Minecraft worlds, configuration and server data will live."},
-	{Number: 6, Name: "Backups", Description: "Choose backup location, retention and automatic backup schedule."},
-	{Number: 7, Name: "Review", Description: "Review the final setup plan and accept the Minecraft EULA before anything is applied."},
+	{Number: setupServerStep, Name: "Server", Description: "Choose server software, welcome message, game mode and player limit."},
+	{Number: setupCrossplayStep, Name: "Cross-play", Description: "Choose Bedrock cross-play, connection ports, container updates and Minecraft version."},
+	{Number: setupMemoryStep, Name: "Memory", Description: "Choose how much system memory Minecraft may use."},
+	{Number: setupStorageStep, Name: "Storage", Description: "Choose where Minecraft worlds, configuration and server data will live."},
+	{Number: setupBackupsStep, Name: "Backups", Description: "Choose backup location, retention and automatic backup schedule."},
+	{Number: setupReviewStep, Name: "Review", Description: "Review the final setup plan and accept the Minecraft EULA before anything is applied."},
 }
 
 func (a *App) registerSetupWizardRoutes(mux *http.ServeMux) {
@@ -133,7 +140,6 @@ func (a *App) registerSetupWizardRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /setup/server", a.setupWizardSaveServer)
 	mux.HandleFunc("POST /setup/connections", a.setupWizardSaveConnections)
 	mux.HandleFunc("POST /setup/resources", a.setupWizardSaveResources)
-	mux.HandleFunc("POST /setup/minecraft", a.setupWizardSaveMinecraft)
 	mux.HandleFunc("GET /setup/version-preview", a.setupWizardVersionPreview)
 	mux.HandleFunc("POST /setup/navigate", a.setupWizardNavigate)
 	mux.HandleFunc("POST /setup/cancel", a.setupWizardCancel)
@@ -150,7 +156,7 @@ func (a *App) setupWizardVersionPreview(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	draft, exists := firstRunSetupDrafts.get(a, session)
-	if !exists || !draft.Started || draft.CurrentStep != 4 {
+	if !exists || !draft.Started || draft.CurrentStep != setupCrossplayStep {
 		http.Error(w, "Version setup is unavailable", http.StatusConflict)
 		return
 	}
@@ -159,7 +165,7 @@ func (a *App) setupWizardVersionPreview(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Version information is unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	status, err := client.AdminSetupVersionPreview(r.Context(), session, r.URL.Query().Get("policy"), r.URL.Query().Get("version"), draft.Server.BedrockEnabled, draft.Minecraft.ServerType)
+	status, err := client.AdminSetupVersionPreview(r.Context(), session, r.URL.Query().Get("policy"), r.URL.Query().Get("version"), r.URL.Query().Get("bedrock_enabled") == "true", draft.Minecraft.ServerType)
 	if err != nil {
 		http.Error(w, "Version information is unavailable", http.StatusServiceUnavailable)
 		return
@@ -180,10 +186,26 @@ func (a *App) setupWizardPage(w http.ResponseWriter, r *http.Request) {
 	draft, exists := firstRunSetupDrafts.get(a, session)
 	if !exists {
 		draft = setupDraft{}
-	} else if draft.Started && draft.CurrentStep == 7 {
-		http.Redirect(w, r, "/setup/review", http.StatusSeeOther)
-		return
-	} else if draft.Started && (draft.CurrentStep == 5 || draft.CurrentStep == 6) {
+	} else if draft.Started && draft.CurrentStep == setupReviewStep {
+		if setupDraftReadyForReview(draft) {
+			http.Redirect(w, r, "/setup/review", http.StatusSeeOther)
+			return
+		}
+		// A revisited form may have invalidated a previously visited Review.
+		switch {
+		case !draft.Server.Complete:
+			draft.CurrentStep = setupServerStep
+		case !draft.Minecraft.ConnectionsComplete:
+			draft.CurrentStep = setupCrossplayStep
+		case !draft.Minecraft.ResourcesComplete || !draft.Minecraft.Complete:
+			draft.CurrentStep = setupMemoryStep
+		case !draft.Storage.Complete:
+			draft.CurrentStep = setupStorageStep
+		default:
+			draft.CurrentStep = setupBackupsStep
+		}
+		firstRunSetupDrafts.save(a, session, draft)
+	} else if draft.Started && (draft.CurrentStep == setupStorageStep || draft.CurrentStep == setupBackupsStep) {
 		storage, err := client.AdminStorage(r.Context(), session)
 		if err != nil {
 			a.handleAdminDiscoveryError(w, r, err)
@@ -266,7 +288,7 @@ func (a *App) setupWizardRecommended(w http.ResponseWriter, r *http.Request) {
 	draft.Minecraft.Complete = true
 	draft.Storage.Complete = true
 	draft.Backups.Complete = true
-	draft.CurrentStep = 7
+	draft.CurrentStep = setupReviewStep
 
 	if err := validateSetupServer(draft.Server); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -329,6 +351,10 @@ func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if draft.Minecraft.ServerType != serverType {
+		draft.Minecraft.ConnectionsComplete = false
+		draft.Minecraft.Complete = false
+	}
 	draft.Minecraft.ServerType = serverType
 	if serverType == "vanilla" {
 		draft.Server.BedrockEnabled = false
@@ -337,7 +363,6 @@ func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
 	draft.Server.MOTDAutomatic = r.FormValue("motd_automatic") == "true"
 	draft.Server.MOTD = r.FormValue("motd")
 	draft.Server.MaxPlayers = strings.TrimSpace(r.FormValue("max_players"))
-	draft.Server.Timezone = strings.TrimSpace(r.FormValue("timezone"))
 	if err := validateSetupServer(draft.Server); err != nil {
 		draft.Server.Complete = false
 		firstRunSetupDrafts.save(a, session, draft)
@@ -354,7 +379,7 @@ func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	draft.Server.Complete = true
-	draft.CurrentStep = 2
+	draft.CurrentStep = setupCrossplayStep
 	firstRunSetupReviews.delete(a, session)
 	firstRunSetupDrafts.save(a, session, draft)
 	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "server settings saved", draft)
@@ -372,26 +397,30 @@ func (a *App) setupWizardSaveConnections(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	draft.CurrentStep = setupCrossplayStep
 	draft.Server.BedrockEnabled = r.FormValue("bedrock_enabled") == "on"
-	if draft.Server.BedrockEnabled && !recommendedServerSupportsBedrock(draft.Minecraft.ServerType) {
-		draft.Server.BedrockEnabled = false
-		w.WriteHeader(http.StatusBadRequest)
-		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), "Managed Bedrock cross-play requires Paper or Purpur.")
-		return
-	}
 	draft.Minecraft.JavaPort = strings.TrimSpace(r.FormValue("java_port"))
 	draft.Minecraft.BedrockPort = strings.TrimSpace(r.FormValue("bedrock_port"))
+	draft.Minecraft.ImageTag = strings.TrimSpace(r.FormValue("image_tag"))
+	draft.Minecraft.VersionPolicy = strings.TrimSpace(r.FormValue("version_policy"))
+	draft.Minecraft.Version = strings.TrimSpace(r.FormValue("version"))
+	draft.Minecraft.ConnectionsComplete = false
+	draft.Minecraft.Complete = false
+	firstRunSetupReviews.delete(a, session)
 
 	if r.FormValue("direction") == "back" {
 		draft.Minecraft.ConnectionsComplete = false
-		draft.CurrentStep = 1
+		draft.CurrentStep = setupServerStep
 		firstRunSetupReviews.delete(a, session)
 		firstRunSetupDrafts.save(a, session, draft)
 		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "connection settings changed; user returned to Server", draft)
 		http.Redirect(w, r, "/setup", http.StatusSeeOther)
 		return
 	}
-	if err := validateSetupConnections(draft.Minecraft); err != nil {
+	if err := a.validateSetupCrossplay(r.Context(), session, draft); err != nil {
+		if !recommendedServerSupportsBedrock(draft.Minecraft.ServerType) {
+			draft.Server.BedrockEnabled = false
+		}
 		draft.Minecraft.ConnectionsComplete = false
 		firstRunSetupDrafts.save(a, session, draft)
 		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "connection settings rejected", draft)
@@ -399,8 +428,12 @@ func (a *App) setupWizardSaveConnections(w http.ResponseWriter, r *http.Request)
 		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
 		return
 	}
+	if draft.Minecraft.VersionPolicy != "pinned" {
+		draft.Minecraft.Version = ""
+	}
 	draft.Minecraft.ConnectionsComplete = true
-	draft.CurrentStep = 3
+	draft.Minecraft.Complete = draft.Minecraft.ResourcesComplete
+	draft.CurrentStep = setupMemoryStep
 	firstRunSetupReviews.delete(a, session)
 	firstRunSetupDrafts.save(a, session, draft)
 	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "connection settings saved", draft)
@@ -424,10 +457,10 @@ func (a *App) setupWizardSaveResources(w http.ResponseWriter, r *http.Request) {
 	if r.FormValue("direction") == "back" {
 		draft.Minecraft.ResourcesComplete = false
 		draft.Minecraft.Complete = false
-		draft.CurrentStep = 2
+		draft.CurrentStep = setupCrossplayStep
 		firstRunSetupReviews.delete(a, session)
 		firstRunSetupDrafts.save(a, session, draft)
-		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "resource settings changed; user returned to Connections", draft)
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "resource settings changed; user returned to Cross-play", draft)
 		http.Redirect(w, r, "/setup", http.StatusSeeOther)
 		return
 	}
@@ -441,55 +474,11 @@ func (a *App) setupWizardSaveResources(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	draft.Minecraft.ResourcesComplete = true
-	draft.Minecraft.Complete = false
-	draft.CurrentStep = 4
+	draft.Minecraft.Complete = draft.Minecraft.ConnectionsComplete
+	draft.CurrentStep = setupStorageStep
 	firstRunSetupReviews.delete(a, session)
 	firstRunSetupDrafts.save(a, session, draft)
 	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "resource settings saved", draft)
-	http.Redirect(w, r, "/setup", http.StatusSeeOther)
-}
-
-func (a *App) setupWizardSaveMinecraft(w http.ResponseWriter, r *http.Request) {
-	session, client, identity, ok := a.setupWizardRequest(w, r, true)
-	if !ok {
-		return
-	}
-	draft, exists := firstRunSetupDrafts.get(a, session)
-	if !exists || !draft.Started {
-		http.Redirect(w, r, "/setup", http.StatusSeeOther)
-		return
-	}
-
-	draft.Minecraft.ImageTag = strings.TrimSpace(r.FormValue("image_tag"))
-	draft.Minecraft.VersionPolicy = strings.TrimSpace(r.FormValue("version_policy"))
-	draft.Minecraft.Version = strings.TrimSpace(r.FormValue("version"))
-
-	if r.FormValue("direction") == "back" {
-		draft.Minecraft.Complete = false
-		draft.CurrentStep = 3
-		firstRunSetupReviews.delete(a, session)
-		firstRunSetupDrafts.save(a, session, draft)
-		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "version settings changed; user returned to Resources", draft)
-		http.Redirect(w, r, "/setup", http.StatusSeeOther)
-		return
-	}
-	if err := validateSetupMinecraft(draft.Minecraft, draft.Defaults); err != nil {
-		draft.Minecraft.Complete = false
-		firstRunSetupDrafts.save(a, session, draft)
-		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "Minecraft settings rejected", draft)
-		w.WriteHeader(http.StatusBadRequest)
-		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
-		return
-	}
-	draft.Minecraft.ResourcesComplete = true
-	draft.Minecraft.Complete = true
-	if draft.Minecraft.VersionPolicy != "pinned" {
-		draft.Minecraft.Version = ""
-	}
-	draft.CurrentStep = 5
-	firstRunSetupReviews.delete(a, session)
-	firstRunSetupDrafts.save(a, session, draft)
-	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "version settings saved", draft)
 	http.Redirect(w, r, "/setup", http.StatusSeeOther)
 }
 
@@ -515,7 +504,7 @@ func (a *App) setupWizardNavigate(w http.ResponseWriter, r *http.Request) {
 	firstRunSetupReviews.delete(a, session)
 	if draft, exists := firstRunSetupDrafts.get(a, session); exists {
 		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "wizard navigation changed", draft)
-		if draft.CurrentStep == 7 {
+		if draft.CurrentStep == setupReviewStep {
 			http.Redirect(w, r, "/setup/review", http.StatusSeeOther)
 			return
 		}
@@ -565,7 +554,7 @@ func (a *App) renderSetupWizard(w http.ResponseWriter, identity api.SessionInfo,
 	current := setupWizardStepView{}
 	if draft.Started {
 		if draft.CurrentStep < 1 || draft.CurrentStep > len(steps) {
-			draft.CurrentStep = 1
+			draft.CurrentStep = setupServerStep
 		}
 		for i := range steps {
 			steps[i].Active = steps[i].Number == draft.CurrentStep
@@ -587,7 +576,6 @@ func (a *App) renderSetupWizard(w http.ResponseWriter, identity api.SessionInfo,
 		SystemMemory:             formatMemoryMiB(draft.Defaults.SystemMemoryMiB),
 		SystemReserveMinimum:     formatMemoryMiB(draft.Defaults.SystemReserveMinimumMiB),
 		SystemReserveRecommended: formatMemoryMiB(draft.Defaults.SystemReserveRecommendedMiB),
-		Timezones:                setupTimezoneOptions(draft.Server.Timezone),
 		CanBack:                  draft.Started && draft.CurrentStep > 1,
 		CanNext:                  draft.Started && draft.CurrentStep < len(steps),
 	}
@@ -690,7 +678,7 @@ func draftFromSetupDefaults(defaults api.AdminSetupDefaults, inventory api.Admin
 		version = "LATEST"
 	}
 	return setupDraft{
-		Started: true, CurrentStep: 1, HighestStep: 1, Defaults: defaults, Inventory: inventory,
+		Started: true, CurrentStep: setupServerStep, HighestStep: setupServerStep, Defaults: defaults, Inventory: inventory,
 		Server: setupServerDraft{
 			MOTDAutomatic: true, MaxPlayers: strconv.Itoa(defaults.MaxPlayers),
 			BedrockEnabled: defaults.BedrockEnabled, Timezone: defaults.Timezone,
@@ -708,18 +696,18 @@ func draftFromSetupDefaults(defaults api.AdminSetupDefaults, inventory api.Admin
 
 func validateSetupServer(server setupServerDraft) error {
 	if strings.ContainsAny(server.MOTD, "\r\n") {
-		return errors.New("Server name / welcome message must be a single line.")
+		return errors.New("Welcome message must be a single line.")
 	}
 	if _, err := parsePositiveFormInt(server.MaxPlayers, "Maximum players"); err != nil {
 		return err
 	}
 	if !setupTimezonePattern.MatchString(server.Timezone) || strings.Contains(server.Timezone, "..") || strings.HasPrefix(server.Timezone, "/") {
-		return errors.New("Timezone must look like UTC or America/Toronto.")
+		return errors.New("The appliance timezone is invalid. Check system Date & Time settings.")
 	}
 	if server.Timezone != "UTC" {
 		info, err := os.Stat(filepath.Join("/usr/share/zoneinfo", server.Timezone))
 		if err != nil || info.IsDir() {
-			return errors.New("Choose a timezone from the JustVoxel timezone suggestions.")
+			return errors.New("The appliance timezone is unavailable. Check system Date & Time settings.")
 		}
 	}
 	return nil
@@ -771,6 +759,10 @@ func validateSetupMinecraft(minecraft setupMinecraftDraft, defaults api.AdminSet
 	if err := validateSetupConnections(minecraft); err != nil {
 		return err
 	}
+	return validateSetupVersion(minecraft)
+}
+
+func validateSetupVersion(minecraft setupMinecraftDraft) error {
 	if !setupImageTagPattern.MatchString(minecraft.ImageTag) {
 		return errors.New("Minecraft container channel or tag is invalid.")
 	}
@@ -785,6 +777,33 @@ func validateSetupMinecraft(minecraft setupMinecraftDraft, defaults api.AdminSet
 		}
 	default:
 		return errors.New("Choose a Minecraft version.")
+	}
+	return nil
+}
+
+func (a *App) validateSetupCrossplay(ctx context.Context, session string, draft setupDraft) error {
+	if draft.Server.BedrockEnabled && !recommendedServerSupportsBedrock(draft.Minecraft.ServerType) {
+		return errors.New("Managed Bedrock cross-play requires Paper or Purpur.")
+	}
+	if err := validateSetupConnections(draft.Minecraft); err != nil {
+		return err
+	}
+	if err := validateSetupVersion(draft.Minecraft); err != nil {
+		return err
+	}
+	client, ok := a.api.(setupVersionPreviewAPI)
+	if !ok {
+		return errors.New("Version information is unavailable. Try again before continuing.")
+	}
+	status, err := client.AdminSetupVersionPreview(ctx, session, draft.Minecraft.VersionPolicy, draft.Minecraft.Version, draft.Server.BedrockEnabled, draft.Minecraft.ServerType)
+	if err != nil {
+		return errors.New("Version information is unavailable. Try again before continuing.")
+	}
+	if status.SelectedCandidate == "" {
+		return errors.New("The selected Minecraft version is unavailable. Choose an available version.")
+	}
+	if draft.Server.BedrockEnabled && !status.CrossplayCompatible {
+		return errors.New("The selected Minecraft version does not support Bedrock cross-play. Choose a compatible version or disable Bedrock cross-play.")
 	}
 	return nil
 }
@@ -877,9 +896,9 @@ func (s *setupDraftStore) navigateTo(app *App, session, direction string, target
 	}
 	switch direction {
 	case "next":
-		// Steps 1-6 have real forms and cannot be skipped through the generic
+		// Steps before Review have real forms and cannot be skipped through the generic
 		// navigation endpoint. The validated Review has its own route.
-		if draft.CurrentStep <= 6 {
+		if draft.CurrentStep < setupReviewStep {
 			return false
 		}
 	case "back":
@@ -890,7 +909,12 @@ func (s *setupDraftStore) navigateTo(app *App, session, direction string, target
 		if target < 1 || target > draft.HighestStep || target > len(setupWizardSteps) {
 			return false
 		}
+		previousStep := draft.CurrentStep
 		draft.CurrentStep = target
+		if target == setupReviewStep && !setupDraftReadyForReview(draft) {
+			draft.CurrentStep = previousStep
+			return false
+		}
 	default:
 		return false
 	}

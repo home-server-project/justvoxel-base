@@ -31,7 +31,7 @@
     const oldDisk = oldChoice?.closest('[data-setup-disk-partitions]')?.dataset.setupDiskPartitions;
     const nextDisk = nextChoice?.closest('[data-setup-disk-partitions]')?.dataset.setupDiskPartitions;
     const diskIdentity = (root, disk) => [...root.querySelectorAll('[data-setup-disk]')].find(button => button.dataset.setupDisk === disk)?.dataset.diskIdentity;
-    const available = Boolean(nextChoice && oldChoice?.dataset.uuid === nextChoice.dataset.uuid && oldDisk === nextDisk && diskIdentity(current, oldDisk) === diskIdentity(replacement, nextDisk));
+    const available = Boolean(nextChoice && oldChoice?.dataset.uuid && oldChoice.dataset.uuid === nextChoice.dataset.uuid && oldDisk === nextDisk && diskIdentity(current, oldDisk) === diskIdentity(replacement, nextDisk));
     if (oldDevice && !available) {
       replacement.querySelectorAll('[data-setup-storage-device], [data-setup-storage-mount], [data-setup-storage-path], [data-setup-backup-device], [data-setup-backup-mount], [data-setup-backup-path]').forEach(field => { field.value = ''; });
     }
@@ -51,12 +51,22 @@
       if (current.dataset.setupOperationsInitialized) return;
       current.dataset.setupOperationsInitialized = 'true';
       const choices = () => selectableChoices(current);
+      const canSelect = (path, status) => {
+        const choice = choices().find(button => button.dataset.device === path);
+        if (!choice) return false;
+        if (!status) return choice.dataset.mounted !== 'Yes';
+        if (status.device !== path || !status.uuid || status.uuid !== choice.dataset.uuid) return false;
+        if (!['none', 'justvoxel', 'external'].includes(status.persistence)) return false;
+        if (status.mounted && (!status.current_mount_point ||
+          (status.persistence !== 'none' && status.current_mount_point !== status.mount_point))) return false;
+        return true;
+      };
       window.JustVoxelStorageBrowser.init(current, {
         inlineDetails: true,
-        canSelect: path => choices().some(button => button.dataset.device === path),
+        canSelect,
         onSelect(path, status) {
           const choice = choices().find(button => button.dataset.device === path);
-          if (!choice) return;
+          if (!choice || !canSelect(path, status)) return;
           const knownMount = status?.current_mount_point || status?.mount_point;
           if (knownMount && ['none', 'justvoxel', 'external'].includes(status.persistence)) choice.dataset.mountpoint = knownMount;
           current.dispatchEvent(new CustomEvent('setup-destination-select', {detail: path}));

@@ -35,7 +35,7 @@
     setupChoice.textContent = "Choose for setup";
     setupChoice.hidden = true;
     setupChoice.addEventListener("click", () => {
-      if (!selectedPartition || !options.canSelect?.(selectedPartition.path)) return;
+      if (!selectedPartition || !options.canSelect?.(selectedPartition.path, selectedMountStatus)) return;
       options.onSelect(selectedPartition.path, selectedMountStatus);
       closeDetailDialog();
     });
@@ -281,7 +281,7 @@
 
   function configurePartitionActions(data, status) {
     const protectedPartition = data.system === "Yes" || data.readonly === "Yes";
-    if (setupChoice) setupChoice.hidden = !options.canSelect?.(data.path);
+    if (setupChoice) setupChoice.hidden = !options.canSelect?.(data.path, status);
 
     if (detailActions) detailActions.hidden = protectedPartition && !(options.inlineDetails && setupChoice && !setupChoice.hidden);
     if (protectedNote) protectedNote.hidden = !protectedPartition;

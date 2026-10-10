@@ -29,10 +29,9 @@ func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 		t.Fatal("Version remains inside Minecraft Settings")
 	}
 	search := read("static/timezone-search.js")
-	setup := read("static/settings.js")
 	date := read("static/date-time.js")
-	if !strings.Contains(search, "scoreZone") || !strings.Contains(setup, "initializeJustVoxelTimezoneSearch") || !strings.Contains(date, "initializeJustVoxelTimezoneSearch") {
-		t.Fatal("Setup and Date & Time do not share the city search")
+	if !strings.Contains(search, "scoreZone") || !strings.Contains(date, "initializeJustVoxelTimezoneSearch") {
+		t.Fatal("Date & Time is missing the city search")
 	}
 	for _, want := range []string{"date.disabled = automatic.checked", "time.disabled = automatic.checked", "/api/system/workspace/date-time", "csrf"} {
 		if !strings.Contains(date, want) {

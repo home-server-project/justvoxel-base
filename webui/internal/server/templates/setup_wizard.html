@@ -9,7 +9,6 @@
   <link rel="stylesheet" href="/static/storage-browser.css">
   <link rel="stylesheet" href="/static/setup.css">
   <script src="/static/app.js" defer></script>
-  <script src="/static/timezone-search.js" defer></script>
   <script src="/static/settings.js" defer></script>
   <script src="/static/storage-browser.js" defer></script>
   <script src="/static/setup-storage-actions.js" defer></script>
@@ -37,7 +36,7 @@
       <section class="setup-mode-card setup-mode-recommended">
         <span class="setup-mode-kicker">Fast path</span>
         <h2>Recommended setup</h2>
-        <p>JustVoxel chooses safe defaults for memory, ports, system storage, automatic backups, timezone and Minecraft version.</p>
+        <p>JustVoxel chooses safe defaults for memory, ports, system storage, automatic backups and Minecraft version, and keeps the appliance timezone.</p>
         <form method="post" action="/setup/recommended" class="setup-recommended-form">
           <input type="hidden" name="csrf" value="{{.CSRF}}">
           <fieldset class="setup-server-types">
@@ -94,16 +93,13 @@
       </fieldset>
       <div class="setup-form-grid">
         <input type="hidden" name="motd_automatic" value="{{.Server.MOTDAutomatic}}" data-setup-motd-automatic>
-        <label class="setup-field setup-field-wide">Server name / welcome message<input name="motd" value="{{.Server.MOTD}}" autocomplete="off" {{if .Server.MOTDAutomatic}}placeholder="Automatic: JustVoxel {{if eq .Minecraft.ServerType "purpur"}}Purpur{{else if eq .Minecraft.ServerType "vanilla"}}Vanilla{{else}}Paper{{end}} Minecraft &lt;resolved version&gt; Server"{{end}} data-setup-motd><span class="field-help">Shown to players in the Minecraft server list. Technical name: MOTD.</span></label>
+        <label class="setup-field">Server name<input value="Minecraft server" disabled aria-describedby="setup-server-name-help"><span class="field-help" id="setup-server-name-help">Future multi-instance placeholder. This name does not configure the server.</span></label>
+        <label class="setup-field">Welcome message<input name="motd" value="{{.Server.MOTD}}" autocomplete="off" {{if .Server.MOTDAutomatic}}placeholder="Automatic: JustVoxel {{if eq .Minecraft.ServerType "purpur"}}Purpur{{else if eq .Minecraft.ServerType "vanilla"}}Vanilla{{else}}Paper{{end}} Minecraft &lt;resolved version&gt; Server"{{end}} data-setup-motd><span class="field-help">Shown to players in the Minecraft server list. Technical name: MOTD.</span></label>
         <label class="setup-field">Game mode<select name="game_mode" required><option value="survival" {{if eq .Minecraft.GameMode "survival"}}selected{{end}}>Survival</option><option value="creative" {{if eq .Minecraft.GameMode "creative"}}selected{{end}}>Creative</option><option value="adventure" {{if eq .Minecraft.GameMode "adventure"}}selected{{end}}>Adventure</option><option value="spectator" {{if eq .Minecraft.GameMode "spectator"}}selected{{end}}>Spectator</option></select></label>
         <label class="setup-field">Maximum players<input name="max_players" type="number" min="1" step="1" value="{{.Server.MaxPlayers}}" inputmode="numeric"><span class="field-help">Used for the player limit and memory recommendations.</span></label>
-        <label class="setup-field setup-timezone-field">Timezone
-          <input id="timezone" name="timezone" value="{{.Server.Timezone}}" autocomplete="off" placeholder="Type Toronto, Warsaw, Amsterdam…" data-timezone-search aria-autocomplete="list" aria-controls="timezone-results" aria-expanded="false">
-          <div class="setup-timezone-results" id="timezone-results" data-timezone-results role="listbox" hidden></div>
-          <span class="field-help">Type a nearby major city. JustVoxel searches the local system timezone database; no Internet service is required.</span>
-        </label>
-        <div data-timezone-options hidden>{{range .Timezones}}<span data-timezone-value="{{.}}"></span>{{end}}</div>
+
       </div>
+      <p class="field-help">Timezone follows the appliance settings. Change it in system Date &amp; Time.</p>
       </div>
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button type="submit">Continue</button></div></div>
     </form>
@@ -118,8 +114,20 @@
         <label class="setup-field">Minecraft Java port<input name="java_port" type="number" min="1" max="65535" value="{{.Minecraft.JavaPort}}" inputmode="numeric"><span class="field-help">Default: 25565/TCP.</span></label>
         <label class="setup-field" data-bedrock-port-field>Bedrock UDP port<input name="bedrock_port" type="number" min="1" max="65535" value="{{.Minecraft.BedrockPort}}" inputmode="numeric"><span class="field-help">Default: 19132/UDP. Used only when Bedrock cross-play is enabled.</span></label>
       </div>
+      <div class="setup-version-columns">
+        <section class="setup-version-column" aria-label="Container updates">
+        <label class="setup-field">Container updates<select id="image-channel" data-current-tag="{{.Minecraft.ImageTag}}"><option value="stable" {{if eq .Minecraft.ImageTag "stable"}}selected{{end}}>Stable (recommended)</option><option value="latest" {{if eq .Minecraft.ImageTag "latest"}}selected{{end}}>Latest</option><option value="custom" {{if and (ne .Minecraft.ImageTag "stable") (ne .Minecraft.ImageTag "latest")}}selected{{end}}>Custom</option></select><span class="field-help">Controls server container software updates. This does not choose the Minecraft game version below.</span></label>
+        <label id="custom-image-tag-field" class="setup-field" {{if or (eq .Minecraft.ImageTag "stable") (eq .Minecraft.ImageTag "latest")}}hidden{{end}}>Custom container tag<input id="custom-image-tag" value="{{if and (ne .Minecraft.ImageTag "stable") (ne .Minecraft.ImageTag "latest")}}{{.Minecraft.ImageTag}}{{end}}" autocomplete="off" placeholder="Enter a supported container tag"><span class="field-help">Advanced option. Use an upstream tag only when you know you need it.</span></label>
+        <input id="image-tag" name="image_tag" type="hidden" value="{{.Minecraft.ImageTag}}">
+        </section>
+        <section class="setup-version-column" aria-label="Minecraft version">
+        <label class="setup-field">Minecraft version<select id="version-policy" name="version_policy"><option value="recommended" {{if eq .Minecraft.VersionPolicy "recommended"}}selected{{end}}>Recommended</option><option value="latest" {{if eq .Minecraft.VersionPolicy "latest"}}selected{{end}}>Latest</option><option value="pinned" {{if eq .Minecraft.VersionPolicy "pinned"}}selected{{end}}>Specific version</option></select></label>
+        <label id="specific-version-field" class="setup-field setup-field-wide" {{if ne .Minecraft.VersionPolicy "pinned"}}hidden{{end}}>Specific Minecraft version<input id="minecraft-version" name="version" value="{{.Minecraft.Version}}" autocomplete="off"><span class="field-help">Choose an exact version. Available pre-release builds can also be used.</span></label>
+        <div class="setup-version-preview" id="setup-version-preview" role="status" aria-live="polite">Checking available versions…</div>
+        </section>
       </div>
-      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
+      </div>
+      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next" disabled>Continue</button></div></div>
     </form>
 
     {{else if eq .CurrentStep 3}}
@@ -135,30 +143,10 @@
         <div id="memory-status" class="memory-status" aria-live="polite"></div>
       </div>
       </div>
-      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
+      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
     </form>
 
     {{else if eq .CurrentStep 4}}
-    <form method="post" action="/setup/minecraft" class="setup-form">
-      <div class="setup-step-content">
-      <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <div class="setup-version-columns">
-        <section class="setup-version-column" aria-label="Container updates">
-        <label class="setup-field">Container updates<select id="image-channel" data-current-tag="{{.Minecraft.ImageTag}}"><option value="stable" {{if eq .Minecraft.ImageTag "stable"}}selected{{end}}>Stable (recommended)</option><option value="latest" {{if eq .Minecraft.ImageTag "latest"}}selected{{end}}>Latest</option><option value="custom" {{if and (ne .Minecraft.ImageTag "stable") (ne .Minecraft.ImageTag "latest")}}selected{{end}}>Custom</option></select><span class="field-help">Controls server container software updates. This does not choose the Minecraft game version below.</span></label>
-        <label id="custom-image-tag-field" class="setup-field" {{if or (eq .Minecraft.ImageTag "stable") (eq .Minecraft.ImageTag "latest")}}hidden{{end}}>Custom container tag<input id="custom-image-tag" value="{{if and (ne .Minecraft.ImageTag "stable") (ne .Minecraft.ImageTag "latest")}}{{.Minecraft.ImageTag}}{{end}}" autocomplete="off" placeholder="Enter a supported container tag"><span class="field-help">Advanced option. Use an upstream tag only when you know you need it.</span></label>
-        <input id="image-tag" name="image_tag" type="hidden" value="{{.Minecraft.ImageTag}}">
-        </section>
-        <section class="setup-version-column" aria-label="Minecraft version">
-        <label class="setup-field">Minecraft version<select id="version-policy" name="version_policy"><option value="recommended" {{if eq .Minecraft.VersionPolicy "recommended"}}selected{{end}}>Recommended</option><option value="latest" {{if eq .Minecraft.VersionPolicy "latest"}}selected{{end}}>Latest</option><option value="pinned" {{if eq .Minecraft.VersionPolicy "pinned"}}selected{{end}}>Specific version</option></select></label>
-        <label id="specific-version-field" class="setup-field setup-field-wide" {{if ne .Minecraft.VersionPolicy "pinned"}}hidden{{end}}>Specific Minecraft version<input id="minecraft-version" name="version" value="{{.Minecraft.Version}}" autocomplete="off"><span class="field-help">Choose an exact version. Available pre-release builds can also be used.</span></label>
-        <div class="setup-version-preview" id="setup-version-preview" role="status" aria-live="polite">Checking available versions…</div>
-        </section>
-      </div>
-      </div>
-      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next" disabled>Continue</button></div></div>
-    </form>
-
-    {{else if eq .CurrentStep 5}}
     <form method="post" action="/setup/storage" class="setup-form" data-setup-storage-form data-csrf="{{.CSRF}}">
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
@@ -204,6 +192,7 @@
           </button>
           {{end}}
         </div>
+        <p class="field-help">Saved mount conflicts may include stale JustVoxel settings. Ask the appliance administrator to compare the saved UUID and mount location with this partition before continuing. Setup cannot overwrite a conflict.</p>
         <div class="setup-partition-browser">
           {{range .StorageDisks}}{{$disk := .}}
           <article class="storage-partition-group" data-setup-disk-partitions="{{.Path}}" hidden>
@@ -227,8 +216,6 @@
                       data-start="{{.Start}}" data-end="{{.End}}" data-size-bytes="{{.SizeBytes}}">
                 <span class="setup-storage-segment-state storage-partition-state">Unallocated</span>
                 <strong>{{.Size}} free</strong>
-                <span>{{.Start}} → {{.End}}</span>
-                <small>Review partition creation and choose a size</small>
               </button>
               {{end}}
             </div>
@@ -251,14 +238,14 @@
 
 
       </div>
-      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
+      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
       <input type="hidden" value="{{.CSRF}}" data-storage-action-csrf>
       {{template "storage_partition_create_review" .}}
       {{template "storage_partition_action_review" .}}
       <div class="notice error" role="alert" data-setup-inventory-error hidden></div>
     </form>
 
-    {{else if eq .CurrentStep 6}}
+    {{else if eq .CurrentStep 5}}
     <form method="post" action="/setup/backups" class="setup-form" data-setup-backup-form data-csrf="{{.CSRF}}" data-data-device="{{.Storage.Device}}" data-data-mount="{{.Storage.MountPoint}}">
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
@@ -317,6 +304,7 @@
           </button>
           {{end}}
         </div>
+        <p class="field-help">Saved mount conflicts may include stale JustVoxel settings. Ask the appliance administrator to compare the saved UUID and mount location with this partition before continuing. Setup cannot overwrite a conflict.</p>
         <div class="setup-partition-browser">
           {{range .BackupDisks}}{{$disk := .}}
           <article class="storage-partition-group" data-setup-disk-partitions="{{.Path}}" hidden>
@@ -340,8 +328,6 @@
                       data-start="{{.Start}}" data-end="{{.End}}" data-size-bytes="{{.SizeBytes}}">
                 <span class="setup-storage-segment-state storage-partition-state">Unallocated</span>
                 <strong>{{.Size}} free</strong>
-                <span>{{.Start}} → {{.End}}</span>
-                <small>Review partition creation and choose a size</small>
               </button>
               {{end}}
             </div>
@@ -382,7 +368,7 @@
 
 
       </div>
-      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
+      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
       <input type="hidden" value="{{.CSRF}}" data-storage-action-csrf>
       {{template "storage_partition_create_review" .}}
       {{template "storage_partition_action_review" .}}

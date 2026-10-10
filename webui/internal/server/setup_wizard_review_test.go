@@ -76,9 +76,7 @@ func advanceSetupToReview(t *testing.T, app *App) {
 	if rr := saveResourcesStep(t, app, validResourceValues()); rr.Code != http.StatusSeeOther {
 		t.Fatalf("resources save returned %d: %s", rr.Code, rr.Body.String())
 	}
-	if rr := saveMinecraftStep(t, app, validMinecraftValues()); rr.Code != http.StatusSeeOther {
-		t.Fatalf("Minecraft save returned %d: %s", rr.Code, rr.Body.String())
-	}
+
 	storage := url.Values{
 		"csrf": {"csrf-token"}, "storage_type": {"system"}, "storage_path": {"/var/lib/justvoxel/minecraft"}, "direction": {"next"},
 	}
@@ -383,12 +381,11 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 		".setup-body{display:flex;flex-direction:column;min-height:100dvh}",
 		".setup-shell{display:flex;flex:1;flex-direction:column",
 		".setup-shell>.project-footer",
-		"@media(min-width:851px)", "height:100dvh", "overflow:hidden",
-		".setup-body .setup-wizard-panel,.setup-body .setup-review-panel{flex:1;min-height:0;overflow:hidden}",
+		"@media(min-width:851px)", "height:auto;min-height:100dvh;overflow-y:auto",
+		".setup-body .setup-wizard-panel,.setup-body .setup-review-panel{flex:none;overflow:visible}",
 		".setup-body .setup-wizard-panel .setup-form>.setup-step-content",
-		"overflow-y:auto", ".setup-body .setup-review-panel>.setup-review-content",
+		"overflow:visible",
 		".setup-body .setup-wizard-panel .setup-form>.setup-step-actions{position:static;flex:none",
-		".setup-body .setup-review-panel>.setup-step-actions{flex:none",
 		".setup-body .setup-wizard-panel .setup-form>.setup-step-content{display:contents}",
 	} {
 		if !strings.Contains(setupStyles, want) {
@@ -402,7 +399,7 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(string(wizard), `class="setup-step-content"`) != 6 || strings.Count(string(wizard), `class="setup-step-actions"`) != 6 {
+	if strings.Count(string(wizard), `class="setup-step-content"`) != 5 || strings.Count(string(wizard), `class="setup-step-actions"`) != 5 {
 		t.Fatal("each advanced wizard step needs separate content and action regions")
 	}
 	for _, want := range []string{`class="setup-shell"`, `class="setup-stage-header"`, `class="setup-progress"`, `class="panel setup-step-panel setup-wizard-panel"`, `class="setup-form"`} {
@@ -574,7 +571,7 @@ func TestSetupReviewBackInvalidatesAcceptedReview(t *testing.T) {
 		t.Fatal("review/EULA state survived editing an earlier setup step")
 	}
 	draft, ok := firstRunSetupDrafts.get(app, "session-token")
-	if !ok || draft.CurrentStep != 6 {
+	if !ok || draft.CurrentStep != setupBackupsStep {
 		t.Fatalf("review back did not return to backups: %#v", draft)
 	}
 }

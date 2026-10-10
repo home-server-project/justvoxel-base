@@ -133,7 +133,7 @@ function fixture(kind, controlCenter = false) {
     return f;
   }
   current = makeForm(['/dev/vdb1']);
-  let deny = false, refreshFails = false, status = {persistence: 'none', mounted: false};
+  let deny = false, refreshFails = false, status = {device: '/dev/vdb1', uuid: 'uuid-/dev/vdb1', persistence: 'none', mounted: false};
   const context = {
     document, window: {}, URLSearchParams, console,
     CustomEvent: class {constructor(type, options) {this.type = type; this.detail = options.detail;}},
@@ -141,10 +141,11 @@ function fixture(kind, controlCenter = false) {
     DOMParser: class {parseFromString() { return {querySelector: () => fresh}; }},
     async fetch(url, options = {}) {
       requests.push({url, body: options.body ? new URLSearchParams(options.body) : null});
-      if (url === '/setup') { if (refreshFails) return {ok: false}; fresh = makeForm(['/dev/vdb1', '/dev/vdc1']); return {ok: true, text: async () => 'mocked wizard'}; }
+      if (url === '/setup') { if (refreshFails) return {ok: false}; fresh = makeForm(['/dev/vdb1', '/dev/vdc1']); if (status.mounted) fresh.many['[data-storage-partition]'][0].dataset.mountpoint = status.current_mount_point; return {ok: true, text: async () => 'mocked wizard'}; }
       if (url.includes('/mounts/status')) return {ok: true, json: async () => ({ok: true, proposed: status})};
       if (deny) return {ok: false, json: async () => ({ok: false, error: 'Protected or unavailable'})};
       const values = Object.fromEntries(new URLSearchParams(options.body));
+      if (url.endsWith('/mounts/apply')) status = {device: values.device, uuid: 'uuid-' + values.device, persistence: 'justvoxel', mounted: true, current_mount_point: values.mount_point, mount_point: values.mount_point};
       return {ok: true, json: async () => ({ok: true, proposed: {...values, device: values.device, fingerprint: 'disk-fingerprint', confirmation: ['create_partition', 'format', 'delete_partition'].includes(values.operation) ? 'CONFIRM ' + values.device : '', planned_end: '20481MiB'}, warnings: ['fixture warning']})};
     },
   };
@@ -156,7 +157,7 @@ function fixture(kind, controlCenter = false) {
     vm.runInContext(selectionSource, context);
   }
   const get = key => current.one['[data-storage-' + key + ']'];
-  return {context, get, requests, refreshFailure(value) {refreshFails = value;}, form: () => current, deny(value) {deny = value;}, status(value) {status = value;}, changedUUID() {current.many['[data-setup-existing-partition], [data-setup-backup-existing]'][0].dataset.uuid = 'old-uuid';}, diskChanged() {current.many['[data-setup-disk]'][0].dataset.diskIdentity = 'old-disk';}};
+  return {context, get, requests, refreshFailure(value) {refreshFails = value;}, form: () => current, deny(value) {deny = value;}, status(value) {status = {device: "/dev/vdb1", uuid: "uuid-/dev/vdb1", ...value};}, changedUUID() {current.many['[data-setup-existing-partition], [data-setup-backup-existing]'][0].dataset.uuid = 'old-uuid';}, diskChanged() {current.many['[data-setup-disk]'][0].dataset.diskIdentity = 'old-disk';}};
 }
 const settle = async () => { for (let i = 0; i < 15; i++) await Promise.resolve(); };
 (async () => {
@@ -186,6 +187,25 @@ const settle = async () => { for (let i = 0; i < 15; i++) await Promise.resolve(
       choice.click();
       assert.equal(device.value, '');
       assert.equal(selections, 0);
+    }
+  }
+  for (const kind of ['storage', 'backup']) {
+    const f = fixture(kind), prefix = kind === 'backup' ? 'backup' : 'storage';
+    const card = f.form().many['[data-storage-partition]'][0];
+    card.dataset.mounted = 'Yes';
+    if (kind === 'backup') { f.form().dataset.dataDevice = '/dev/vdb1'; f.form().dataset.dataMount = '/srv/stale'; }
+    f.status({persistence: 'justvoxel', mounted: true, current_mount_point: '/var/mnt/vdb1', mount_point: '/var/mnt/vdb1'});
+    card.click(); await settle();
+    const choose = f.get('action-menu').one['.storage-action-menu-popover'].children[0];
+    assert.equal(choose.hidden, false); choose.click();
+    assert.equal(f.form().one[`[data-setup-${prefix}-mount]`].value, '/var/mnt/vdb1');
+    for (const status of [
+      {persistence: 'conflict', mounted: true},
+      {persistence: 'justvoxel', mounted: true, current_mount_point: '/srv/changed', mount_point: '/srv/saved'},
+      {persistence: 'justvoxel', mounted: true, uuid: 'changed-uuid', current_mount_point: '/var/mnt/vdb1', mount_point: '/var/mnt/vdb1'},
+    ]) {
+      f.status(status); card.click(); await settle(); assert.equal(choose.hidden, true);
+      choose.click(); assert.equal(f.form().one[`[data-setup-${prefix}-mount]`].value, '/var/mnt/vdb1');
     }
   }
   for (const kind of ['storage', 'backup']) {
@@ -280,6 +300,9 @@ const settle = async () => { for (let i = 0; i < 15; i++) await Promise.resolve(
     assert.equal(mounted.url, '/api/new-storage/mounts/apply');
     assert.equal(mounted.body.get('mount_point'), '/srv/custom');
     assert.equal(mounted.body.get('fingerprint'), 'disk-fingerprint');
+    assert.equal(field('mount').value, '/srv/custom');
+    assert.equal(field('path').value, '/srv/custom/' + (kind === 'backup' ? 'backups' : 'minecraft'));
+    f.status({persistence: 'none', mounted: false});
     // Protected cards use the same safeguards as Control Center.
     f.form().many['[data-storage-partition]'].at(-1).click();
     assert.equal(f.get('detail-actions').hidden, true);

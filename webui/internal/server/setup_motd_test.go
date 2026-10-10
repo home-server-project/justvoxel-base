@@ -100,14 +100,15 @@ func TestAdvancedSetupMOTDStateSurvivesSoftwareAndVersionChanges(t *testing.T) {
 				if rr.Code != http.StatusSeeOther {
 					t.Fatalf("server: %d %s", rr.Code, rr.Body.String())
 				}
-				versions := validMinecraftValues()
+				versions := validConnectionValues()
 				versions.Set("version_policy", "pinned")
 				versions.Set("version", "26.2")
 				if software == "vanilla" {
+					versions.Del("bedrock_enabled")
 					versions.Set("version_policy", "latest")
 					versions.Set("version", "")
 				}
-				rr = saveMinecraftStep(t, app, versions)
+				rr = saveConnectionsStep(t, app, versions)
 				if rr.Code != http.StatusSeeOther {
 					t.Fatalf("version: %d %s", rr.Code, rr.Body.String())
 				}
@@ -129,7 +130,7 @@ func TestAdvancedSetupMOTDStateSurvivesSoftwareAndVersionChanges(t *testing.T) {
 				}
 			}
 			draft, _ := firstRunSetupDrafts.get(app, "session-token")
-			draft.CurrentStep = 7
+			draft.CurrentStep = setupReviewStep
 			firstRunSetupDrafts.save(app, "session-token", draft)
 			rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
 			if rr.Code != http.StatusOK {
