@@ -92,7 +92,7 @@
 </header>
 
   <section class="quick-look" data-quick-look aria-label="Quick Look">
-    <div class="quick-look-panel" id="quick-look-panel" data-quick-look-panel>
+    <div class="quick-look-panel" id="quick-look-panel" data-quick-look-panel inert aria-hidden="true">
       <div class="quick-look-grid">
         <article class="quick-look-tile">
           <div class="quick-look-tile-heading">
@@ -222,7 +222,16 @@
   </dialog>
 
   <section class="panel date-time-panel" data-system-settings-panel="date-time" data-date-time-panel aria-labelledby="date-time-title" hidden>
-    <form class="system-action-dialog-content" data-date-time-form><h2 id="date-time-title">Date &amp; Time</h2><p class="muted" data-date-time-state></p>
+    <h2 id="date-time-title">Date &amp; Time</h2>
+    <div class="topbar-display-preferences">
+      <p class="eyebrow">Display preferences</p><h3>Topbar clock and date</h3>
+      <p class="muted compact">Saved in this browser. System time and scheduled tasks stay unchanged.</p>
+      <div class="topbar-display-fields">
+        <label>Time format<select data-topbar-time-format><option value="12">12-hour time</option><option value="24">24-hour time</option></select></label>
+        <label>Date format<select data-topbar-date-format><option value="mdy">MM/DD/YYYY</option><option value="dmy">DD/MM/YYYY</option></select></label>
+      </div>
+    </div>
+    <form class="system-action-dialog-content" data-date-time-form><p class="muted" data-date-time-state></p>
       <label class="setup-timezone-field">Timezone<input name="timezone" data-timezone-search autocomplete="off" aria-autocomplete="list" aria-controls="date-time-timezone-results" aria-expanded="false" required placeholder="Type Toronto, Warsaw, Amsterdam…"><div class="setup-timezone-results" id="date-time-timezone-results" data-timezone-results role="listbox" hidden></div></label>
       <div data-timezone-options hidden></div><p class="muted compact">Selected timezone: <strong data-date-time-canonical>—</strong></p>
       <label class="date-time-automatic"><span>Automatic date &amp; time</span><input class="date-time-switch" type="checkbox" name="automatic" data-date-time-automatic></label>

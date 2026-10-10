@@ -968,9 +968,20 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
   const renderTroubleshoot = (snapshot) => {
     const section = document.createElement("section");
     section.className = "panel network-section network-troubleshoot";
-    const heading = sectionHeading("Network health", "Connectivity");
-    heading.appendChild(actionButton("Check connectivity now", "networkConnectivityCheck", "true"));
-    section.append(heading, row("NetworkManager connectivity", connectivitySummary(snapshot.connectivity)));
+    const heading = document.createElement("div");
+    heading.className = "network-health-heading";
+    const title = document.createElement("h2");
+    title.textContent = "Network health";
+    const status = document.createElement("span");
+    status.className = "state-text";
+    status.textContent = snapshot.connectivity === "full" ? "Internet connected"
+      : ["none", "limited", "portal"].includes(snapshot.connectivity) ? "Internet not connected"
+      : "Internet status unavailable";
+    heading.append(title, status);
+    if (["none", "limited", "portal"].includes(snapshot.connectivity)) {
+      heading.appendChild(actionButton("Check internet now", "networkConnectivityCheck", "true"));
+    }
+    section.appendChild(heading);
     const grid = document.createElement("div");
     grid.className = "network-troubleshoot-devices";
     if (!snapshot.networking_enabled) section.appendChild(row("Condition", "Networking is disabled"));
@@ -1056,12 +1067,13 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         if (playitSetup.state === "failed") card.appendChild(row("Setup", "Failed or timed out"));
       }
       const controls = providerControls(provider);
-      const activate = actionButton("Activate", "networkProvider", provider.id, "warning");
+      const activate = actionButton("Activate", "networkProvider", provider.id, "primary");
       activate.dataset.action = "activate";
       activate.disabled = controls.activateDisabled;
       const deactivate = actionButton("Deactivate", "networkProvider", provider.id);
       deactivate.dataset.action = "deactivate";
       deactivate.disabled = controls.deactivateDisabled;
+      actions.appendChild(deactivate);
       if (needsSetup && playitSetup.state === "waiting" && !playitClaimOpened && validPlayitClaim(playitSetup.claim_url)) {
         const claim = document.createElement("a");
         claim.href = playitSetup.claim_url;
@@ -1073,7 +1085,6 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       } else {
         actions.appendChild(activate);
       }
-      actions.appendChild(deactivate);
       if (provider.id === "tailscale" && !provider.connected && validTailscaleLoginURL(tailscaleLoginURL)) {
         const login = document.createElement("a");
         login.href = tailscaleLoginURL;
@@ -1098,7 +1109,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       dashboard.target = "_blank";
       dashboard.rel = "noopener noreferrer";
       dashboard.className = "button-link primary network-action-button";
-      dashboard.textContent = "Open provider dashboard";
+      dashboard.textContent = { tailscale: "Open Tailscale dashboard", netbird: "Open NetBird dashboard", playit: "Open Playit.gg dashboard" }[provider.id];
       actions.appendChild(dashboard);
       card.appendChild(actions);
       grid.appendChild(card);

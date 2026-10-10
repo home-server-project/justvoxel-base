@@ -144,7 +144,7 @@ func TestSetupWizardStorageStepShowsInternalDiskBrowserAndExcludesUSB(t *testing
 	body := page.Body.String()
 	for _, want := range []string{
 		"<h2>Storage</h2>", "Use system storage", "Use another internal disk", "/dev/vda4", "/dev/vdb1", "/dev/vdb2",
-		"Samsung SSD", "ext4", "Unallocated", "Create one XFS partition using this free space",
+		"Samsung SSD", "ext4", "Unallocated", "Review partition creation and choose a size",
 		"External drives are not offered for Minecraft data", "/static/setup-storage.js",
 	} {
 		if !strings.Contains(body, want) {
@@ -218,40 +218,116 @@ func TestSetupWizardBackupMissingPartitionKeepsLocalMode(t *testing.T) {
 		t.Fatalf("backup mode changed after validation error: %#v", draft.Backups)
 	}
 }
+
+// Inspect the rendered step and the fragment that its manager actually loads,
+// so controls in an inactive template branch cannot satisfy the contract.
+func setupWizardSharedStorageMarkup(t *testing.T, app *App) string {
+	t.Helper()
+	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
+	if page.Code != http.StatusOK {
+		t.Fatalf("setup page returned %d: %s", page.Code, page.Body.String())
+	}
+	markup := page.Body.String()
+	for _, want := range []string{
+		`data-setup-storage-manage>`, `data-setup-storage-manager data-storage-workspace-dialog`,
+		`data-storage-workspace-content`, `data-storage-refresh`,
+		`/static/storage-browser.js`, `/static/setup-storage.js`, `/static/setup-storage-manager.js`,
+		`Review partition creation and choose a size`,
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("rendered setup shared manager missing %q", want)
+		}
+	}
+	if strings.Count(markup, `data-setup-storage-manage>`) != 1 {
+		t.Fatal("the current step must render one shared Storage launcher")
+	}
+	workspace := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/storage", ""))
+	if workspace.Code != http.StatusOK {
+		t.Fatalf("setup Storage workspace returned %d: %s", workspace.Code, workspace.Body.String())
+	}
+	for _, want := range []string{
+		`data-storage-browser-root`, `value="csrf-token" data-storage-action-csrf`,
+		`data-storage-partition`, `data-path="/dev/vdb2"`,
+		`data-storage-free-space`, `data-start="563201MiB"`,
+		`data-storage-create-partition`, `data-storage-create-size`,
+		`data-storage-create-review`, `data-storage-create-apply`,
+		`data-storage-action="format"`, `data-storage-action="delete_partition"`,
+		`data-storage-action="mount-for-now"`, `data-storage-action="mount-permanently"`,
+		`data-storage-action-review-button`, `data-storage-action-apply-button`,
+		`data-storage-create-confirm-slider`, `data-storage-create-confirm-toggle`,
+		`data-storage-confirm-slider`, `data-storage-confirm-toggle`,
+		`data-system="Yes"`, `data-readonly=`, `data-storage-protected-note`,
+	} {
+		if !strings.Contains(workspace.Body.String(), want) {
+			t.Fatalf("loaded setup Storage workspace missing %q", want)
+		}
+	}
+	return markup
+}
+
 func TestSetupWizardStorageUsesSharedReviewedStorageActions(t *testing.T) {
-	template, err := assets.ReadFile("templates/setup_wizard.html")
+	client := setupWizardStorageClient()
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	markup := string(template)
+	defer firstRunSetupDrafts.delete(app, "session-token")
+	advanceToStorage(t, app)
+	markup := setupWizardSharedStorageMarkup(t, app)
+	read := func(name string) string {
+		data, err := assets.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
 	for _, want := range []string{
-		"data-setup-storage-prepare=\"format\"",
-		"data-setup-storage-prepare=\"create_partition\"",
-		"data-setup-storage-confirm-slider",
-		"data-setup-storage-confirm-toggle",
+		`data-setup-storage-prepare="format"`, `data-setup-storage-prepare="create_partition"`,
+		`data-setup-storage-manage`, `data-setup-storage-manager`, `/static/setup-storage-manager.js`,
 	} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("setup Storage shared action UI missing %q", want)
 		}
 	}
-
-	script, err := assets.ReadFile("static/setup-storage.js")
-	if err != nil {
-		t.Fatal(err)
+	selection := read("static/setup-storage.js")
+	if !strings.Contains(selection, "window.JustVoxelSetupStorageManager?.open(button.dataset)") {
+		t.Fatal("preparation must open shared partition details")
 	}
-	content := string(script)
-	for _, want := range []string{
-		"fetch('/api/new-storage/actions/' + phase",
-		"body.set('fingerprint', reviewed?.proposed?.fingerprint || '')",
-		"body.set('confirmation', reviewed?.proposed?.confirmation || '')",
-		"operation === 'create_partition' ? 'all'",
-		"window.location.reload()",
+	for _, forbidden := range []string{"/api/new-storage/actions/", "window.location.reload()", "function reviewPreparation"} {
+		if strings.Contains(selection, forbidden) {
+			t.Fatalf("independent setup disk-management path: %q", forbidden)
+		}
+	}
+	shared := read("static/storage-browser.js")
+	for _, want := range []string{`"delete_partition"`, `"format"`, `"mount-for-now"`, `"mount-permanently"`,
+		`body.set("size_gib", sizeGiB)`, `body.set("free_start", selectedFreeSpace?.start || "")`,
+		`createSize?.addEventListener("input", resetCreateReviewState)`,
+		`if (!Number.isInteger(value) || value < 1) return ""`,
+		`body.set("fingerprint", reviewedCreatePartition.fingerprint)`,
+		`Number(createConfirmSlider?.value || 0) < 100 || !createConfirmToggle?.checked`,
+		`await postCreatePartition("apply")`,
+		`options.onChanged()`, `data.system === "Yes" || data.readonly === "Yes"`,
+		`Number(confirmSlider?.value || 0) >= 100 && Boolean(confirmToggle?.checked)`, `if (expected && !confirmationReady)`,
 	} {
-		if !strings.Contains(content, want) {
-			t.Fatalf("setup Storage shared action behavior missing %q", want)
+		if !strings.Contains(shared, want) {
+			t.Fatalf("shared disk safety/action behavior missing %q", want)
+		}
+	}
+	manager := read("static/setup-storage-manager.js")
+	for _, want := range []string{`readMarkup('/workspace/storage')`, `readMarkup('/setup')`,
+		`window.JustVoxelStorageBrowser.init(root,`, `onChanged:`, `current.replaceWith(replacement)`,
+		`event.target.closest('[data-setup-storage-manage]')`,
+		`refresh.addEventListener('click', () => void load(null, true))`,
+		`button.dataset.path === target.device`, `button.dataset.start === target.freeStart`,
+		`disk?.click()`, `selected?.click()`,
+		`restoreValues()`, `current.getAttribute('action') !== replacement.getAttribute('action')`, `inventoryStale`,
+	} {
+		if !strings.Contains(manager, want) {
+			t.Fatalf("setup shared storage refresh missing %q", want)
 		}
 	}
 }
+
 func TestSetupWizardStorageStepValidatesAndAdvances(t *testing.T) {
 	client := setupWizardStorageClient()
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
@@ -384,35 +460,68 @@ func TestSetupWizardBackupAllowsExternalUSBFilesystem(t *testing.T) {
 }
 
 func TestSetupWizardBackupUsesSharedReviewedStorageActions(t *testing.T) {
-	template, err := assets.ReadFile("templates/setup_wizard.html")
+	client := setupWizardStorageClient()
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	markup := string(template)
+	defer firstRunSetupDrafts.delete(app, "session-token")
+	advanceToStorage(t, app)
+	storage := url.Values{"csrf": {"csrf-token"}, "storage_type": {"system"}, "direction": {"next"}}
+	if rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/storage", storage.Encode())); rr.Code != http.StatusSeeOther {
+		t.Fatalf("storage save returned %d: %s", rr.Code, rr.Body.String())
+	}
+	markup := setupWizardSharedStorageMarkup(t, app)
+	read := func(name string) string {
+		data, err := assets.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
 	for _, want := range []string{
-		"data-setup-backup-prepare=\"format\"",
-		"data-setup-backup-prepare=\"create_partition\"",
-		"data-setup-backup-confirm-slider",
-		"data-setup-backup-confirm-toggle",
+		`data-setup-backup-prepare="format"`, `data-setup-backup-prepare="create_partition"`,
+		`data-setup-storage-manage`, `data-setup-storage-manager`, `/static/setup-storage-manager.js`,
 	} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("setup Backup shared action UI missing %q", want)
 		}
 	}
-
-	script, err := assets.ReadFile("static/setup-storage.js")
-	if err != nil {
-		t.Fatal(err)
+	selection := read("static/setup-storage.js")
+	if !strings.Contains(selection, "window.JustVoxelSetupStorageManager?.open(button.dataset)") {
+		t.Fatal("preparation must open shared partition details")
 	}
-	content := string(script)
-	for _, want := range []string{
-		"fetch('/api/new-storage/actions/' + phase",
-		"body.set('fingerprint', reviewed?.proposed?.fingerprint || '')",
-		"body.set('confirmation', reviewed?.proposed?.confirmation || '')",
-		"justvoxel-setup-backup-disk",
+	for _, forbidden := range []string{"/api/new-storage/actions/", "window.location.reload()", "function reviewPreparation"} {
+		if strings.Contains(selection, forbidden) {
+			t.Fatalf("independent setup disk-management path: %q", forbidden)
+		}
+	}
+	shared := read("static/storage-browser.js")
+	for _, want := range []string{`"delete_partition"`, `"format"`, `"mount-for-now"`, `"mount-permanently"`,
+		`body.set("size_gib", sizeGiB)`, `body.set("free_start", selectedFreeSpace?.start || "")`,
+		`createSize?.addEventListener("input", resetCreateReviewState)`,
+		`if (!Number.isInteger(value) || value < 1) return ""`,
+		`body.set("fingerprint", reviewedCreatePartition.fingerprint)`,
+		`Number(createConfirmSlider?.value || 0) < 100 || !createConfirmToggle?.checked`,
+		`await postCreatePartition("apply")`,
+		`options.onChanged()`, `data.system === "Yes" || data.readonly === "Yes"`,
+		`Number(confirmSlider?.value || 0) >= 100 && Boolean(confirmToggle?.checked)`, `if (expected && !confirmationReady)`,
 	} {
-		if !strings.Contains(content, want) {
-			t.Fatalf("setup Backup shared action behavior missing %q", want)
+		if !strings.Contains(shared, want) {
+			t.Fatalf("shared disk safety/action behavior missing %q", want)
+		}
+	}
+	manager := read("static/setup-storage-manager.js")
+	for _, want := range []string{`readMarkup('/workspace/storage')`, `readMarkup('/setup')`,
+		`window.JustVoxelStorageBrowser.init(root,`, `onChanged:`, `current.replaceWith(replacement)`,
+		`event.target.closest('[data-setup-storage-manage]')`,
+		`refresh.addEventListener('click', () => void load(null, true))`,
+		`button.dataset.path === target.device`, `button.dataset.start === target.freeStart`,
+		`disk?.click()`, `selected?.click()`,
+		`restoreValues()`, `current.getAttribute('action') !== replacement.getAttribute('action')`, `inventoryStale`,
+	} {
+		if !strings.Contains(manager, want) {
+			t.Fatalf("setup shared storage refresh missing %q", want)
 		}
 	}
 }

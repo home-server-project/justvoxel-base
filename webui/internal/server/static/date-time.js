@@ -1,5 +1,16 @@
 const dateTimePanel = document.querySelector("[data-date-time-panel]");
 if (dateTimePanel) {
+  const timeFormat = dateTimePanel.querySelector("[data-topbar-time-format]");
+  const dateFormat = dateTimePanel.querySelector("[data-topbar-date-format]");
+  const display = window.JustVoxelClockDisplay;
+  if (display && timeFormat && dateFormat) {
+    const preferences = display.read();
+    timeFormat.value = preferences.time;
+    dateFormat.value = preferences.date;
+    const saveDisplay = () => display.save({ time: timeFormat.value, date: dateFormat.value });
+    timeFormat.addEventListener("change", saveDisplay);
+    dateFormat.addEventListener("change", saveDisplay);
+  }
   const form = dateTimePanel.querySelector("[data-date-time-form]");
   const timezone = form.elements.timezone;
   const automatic = form.elements.automatic;

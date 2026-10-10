@@ -405,9 +405,16 @@ if (quickLook && quickLookToggle) {
   let refreshTimer = null;
   let lastMonitorData = null;
   const topbar = document.querySelector(".topbar");
+  const quickLookPanel = quickLook.querySelector("[data-quick-look-panel]");
 
   const syncQuickLookTop = () => {
-    quickLook.style.top = Math.round(topbar?.getBoundingClientRect().bottom || 48) + "px";
+    const bounds = topbar?.getBoundingClientRect();
+    quickLook.style.top = Math.round(bounds?.bottom || 48) + "px";
+    if (bounds) {
+      quickLook.style.left = bounds.left + "px";
+      quickLook.style.width = bounds.width + "px";
+      quickLook.style.right = "auto";
+    }
   };
   syncQuickLookTop();
   window.addEventListener("resize", syncQuickLookTop);
@@ -417,6 +424,10 @@ if (quickLook && quickLookToggle) {
   const setOpen = (open, persist = true) => {
     quickLook.classList.toggle("is-open", open);
     quickLookToggle.setAttribute("aria-expanded", open ? "true" : "false");
+    if (quickLookPanel) {
+      quickLookPanel.inert = !open;
+      quickLookPanel.setAttribute("aria-hidden", open ? "false" : "true");
+    }
     if (identity?.role === "administrator" && persist) {
       try {
         window.localStorage.setItem(stateKey(identity.username), open ? "open" : "closed");
@@ -605,6 +616,23 @@ if (quickLook && quickLookToggle) {
 }
 
 const controlCenter = document.querySelector("[data-control-center]");
+const clockPreferenceKey = "justvoxel.topbar.display.v1";
+let clockPreferences = { time: "12", date: "mdy" };
+try {
+  const saved = JSON.parse(window.localStorage.getItem(clockPreferenceKey) || "{}");
+  if (["12", "24"].includes(saved.time)) clockPreferences.time = saved.time;
+  if (["mdy", "dmy"].includes(saved.date)) clockPreferences.date = saved.date;
+} catch (_) { /* Display preferences remain usable without browser storage. */ }
+window.JustVoxelClockDisplay = {
+  read: () => ({ ...clockPreferences }),
+  save: (preferences) => {
+    if (["12", "24"].includes(preferences.time)) clockPreferences.time = preferences.time;
+    if (["mdy", "dmy"].includes(preferences.date)) clockPreferences.date = preferences.date;
+    try { window.localStorage.setItem(clockPreferenceKey, JSON.stringify(clockPreferences)); } catch (_) { /* Optional persistence. */ }
+    window.dispatchEvent(new Event("justvoxel-clock-display"));
+  },
+};
+
 const topbarClock = document.querySelector("[data-topbar-clock]");
 if (topbarClock) {
   const initialSystemTime = Number(topbarClock.dataset.systemNow);
@@ -612,8 +640,8 @@ if (topbarClock) {
   const updateTopbarClock = () => {
     const now = new Date(Date.now() + systemClockOffset);
     const zone = topbarClock.dataset.systemTimezone || undefined;
-    const clockTime = new Intl.DateTimeFormat("en-US", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: zone }).format(now);
-    const clockDate = new Intl.DateTimeFormat("en-US", { month: "short", day: "2-digit", year: "numeric", timeZone: zone }).format(now);
+    const clockTime = new Intl.DateTimeFormat("en-US", { hour: "2-digit", minute: "2-digit", hour12: clockPreferences.time === "12", timeZone: zone }).format(now);
+    const clockDate = new Intl.DateTimeFormat(clockPreferences.date === "dmy" ? "en-GB" : "en-US", { month: "2-digit", day: "2-digit", year: "numeric", timeZone: zone }).format(now);
     const time = document.createElement("span");
     time.textContent = clockTime;
     const date = document.createElement("span");
@@ -625,7 +653,7 @@ if (topbarClock) {
     topbarClock.replaceChildren(time, separator, date);
     topbarClock.setAttribute("aria-label", `${clockTime} · ${clockDate}`);
     topbarClock.title = new Intl.DateTimeFormat([], {
-      hour12: true,
+      hour12: clockPreferences.time === "12",
       weekday: "long",
       year: "numeric",
       month: "long",
@@ -637,6 +665,7 @@ if (topbarClock) {
   };
   updateTopbarClock();
   window.setInterval(updateTopbarClock, 30000);
+  window.addEventListener("justvoxel-clock-display", updateTopbarClock);
   window.addEventListener("justvoxel-timezone", (event) => {
     const { zone, localDate, localTime } = event.detail || {};
     if (/^\d{4}-\d{2}-\d{2}$/.test(localDate || "") && /^\d{2}:\d{2}$/.test(localTime || "") && zone) {
@@ -1521,12 +1550,20 @@ const workspaceTopInset = () => {
 
 const clampWorkspaceWindow = (element) => {
   if (!element.open || workspaceCompactQuery.matches) return;
-  const rect = element.getBoundingClientRect();
   const minTop = workspaceTopInset();
-  const left = Math.min(Math.max(rect.left, 8), Math.max(8, window.innerWidth - rect.width - 8));
+  const width = Math.max(1, document.documentElement.clientWidth - 16);
+  const height = Math.max(1, window.innerHeight - minTop - 8);
+  // First fit the whole window, including saved dimensions from a larger screen.
+  element.style.setProperty("--workspace-available-width", width + "px");
+  element.style.setProperty("--workspace-available-height", height + "px");
+  const rect = element.getBoundingClientRect();
+  const left = Math.min(Math.max(rect.left, 8), Math.max(8, document.documentElement.clientWidth - rect.width - 8));
   const top = Math.min(Math.max(rect.top, minTop), Math.max(minTop, window.innerHeight - rect.height - 8));
   element.style.left = Math.round(left) + "px";
   element.style.top = Math.round(top) + "px";
+  // Native resizing must stop at the remaining space, before it can overflow.
+  element.style.setProperty("--workspace-available-width", Math.max(1, document.documentElement.clientWidth - Math.round(left) - 8) + "px");
+  element.style.setProperty("--workspace-available-height", Math.max(1, window.innerHeight - Math.round(top) - 8) + "px");
 };
 
 const setupWorkspaceWindow = (element, options = {}) => {
@@ -1567,15 +1604,16 @@ const setupWorkspaceWindow = (element, options = {}) => {
     if (Number.isFinite(saved.left)) element.style.left = saved.left + "px";
     if (Number.isFinite(saved.top)) element.style.top = saved.top + "px";
 
-    window.requestAnimationFrame(() => {
-      if (!Number.isFinite(saved.left) || !Number.isFinite(saved.top)) {
-        const rect = element.getBoundingClientRect();
-        element.style.left = Math.max(8, Math.round((window.innerWidth - rect.width) / 2)) + "px";
-        element.style.top = Math.max(workspaceTopInset(), Math.round((window.innerHeight - rect.height) / 2)) + "px";
-      }
-      clampWorkspaceWindow(element);
-      persistGeometry();
-    });
+    // Bound restored geometry synchronously; an off-screen saved window must
+    // never contribute document overflow for an animation frame.
+    clampWorkspaceWindow(element);
+    if (!Number.isFinite(saved.left) || !Number.isFinite(saved.top)) {
+      const rect = element.getBoundingClientRect();
+      element.style.left = Math.max(8, Math.round((document.documentElement.clientWidth - rect.width) / 2)) + "px";
+      element.style.top = Math.max(workspaceTopInset(), Math.round((window.innerHeight - rect.height) / 2)) + "px";
+    }
+    clampWorkspaceWindow(element);
+    persistGeometry();
   };
 
   const open = () => {
@@ -1612,7 +1650,7 @@ const setupWorkspaceWindow = (element, options = {}) => {
       const move = (moveEvent) => {
         const left = Math.min(
           Math.max(startLeft + moveEvent.clientX - startX, 8),
-          Math.max(8, window.innerWidth - rect.width - 8),
+          Math.max(8, document.documentElement.clientWidth - rect.width - 8),
         );
         const top = Math.min(
           Math.max(startTop + moveEvent.clientY - startY, minTop),
@@ -1620,6 +1658,7 @@ const setupWorkspaceWindow = (element, options = {}) => {
         );
         element.style.left = Math.round(left) + "px";
         element.style.top = Math.round(top) + "px";
+        clampWorkspaceWindow(element);
       };
 
       const finish = () => {
@@ -1637,9 +1676,9 @@ const setupWorkspaceWindow = (element, options = {}) => {
 
   const resizeObserver = new ResizeObserver(() => {
     if (!element.open || workspaceCompactQuery.matches) return;
+    clampWorkspaceWindow(element);
     window.clearTimeout(resizeSaveTimer);
     resizeSaveTimer = window.setTimeout(() => {
-      clampWorkspaceWindow(element);
       persistGeometry();
     }, 120);
   });
@@ -4150,8 +4189,8 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         const menu = document.createElement("details");
         menu.className = "storage-action-menu system-user-menu";
         const trigger = document.createElement("summary");
-        trigger.textContent = "⋯";
-        trigger.setAttribute("aria-label", "Actions for " + user.username);
+        trigger.textContent = "Manage";
+        trigger.setAttribute("aria-label", "Manage " + user.username);
         const choices = document.createElement("div");
         choices.className = "storage-action-menu-popover";
         // Use the browser top layer so the compact scrolling table cannot clip the menu.
@@ -4286,7 +4325,18 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       button.setAttribute("aria-selected", securityPane === kind ? "true" : "false");
       switcher.appendChild(button);
     });
-    root.appendChild(switcher);
+    const securityHeading = document.createElement("div");
+    securityHeading.className = "system-security-heading";
+    const securityLabel = document.createElement("p");
+    securityLabel.className = "eyebrow";
+    securityLabel.textContent = "Account security";
+    const securityTitle = document.createElement("h2");
+    securityTitle.textContent = "Security";
+    const securityDescription = document.createElement("p");
+    securityDescription.className = "muted compact";
+    securityDescription.textContent = "Manage how you sign in and protect your account.";
+    securityHeading.append(securityLabel, securityTitle, securityDescription);
+    root.append(securityHeading, switcher);
 
     const authPane = document.createElement("section");
     authPane.className = "system-security-pane";
@@ -4298,7 +4348,10 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     const authDescription = document.createElement("p");
     authDescription.className = "muted compact";
     authDescription.textContent = "Choose whether WebUI uses the voxel system password or its own separate password.";
-    authHeading.append(authTitle, authDescription);
+    const authLabel = document.createElement("p");
+    authLabel.className = "eyebrow";
+    authLabel.textContent = "Sign-in method";
+    authHeading.append(authLabel, authTitle, authDescription);
     authPane.appendChild(authHeading);
 
     const authStatus = document.createElement("div");
@@ -4361,7 +4414,10 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     const passwordDescription = document.createElement("p");
     passwordDescription.className = "muted compact";
     passwordDescription.textContent = "Change the password used by the current WebUI authentication mode.";
-    passwordHeading.append(passwordTitle, passwordDescription);
+    const passwordLabel = document.createElement("p");
+    passwordLabel.className = "eyebrow";
+    passwordLabel.textContent = "Account password";
+    passwordHeading.append(passwordLabel, passwordTitle, passwordDescription);
     passwordPane.appendChild(passwordHeading);
 
     const passwordForm = document.createElement("form");
@@ -4851,11 +4907,9 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     if (!payload || sequence !== loadSequence || !content) return;
     const root = document.createElement("div");
     root.className = "system-about-view";
-    const built = systemPanel("JustVoxel", "About");
-    const badge = document.createElement("span");
-    badge.className = "badge";
-    badge.textContent = payload.variant || "Unknown";
-    built.heading.appendChild(badge);
+    const variant = String(payload.variant || "").trim().toLowerCase();
+    const variantName = ({ vm: "VM", hws: "HWS", "justvoxel-vm": "VM", "justvoxel-hws": "HWS" })[variant];
+    const built = systemPanel("Installed appliance", variantName ? `JustVoxel ${variantName}` : "JustVoxel");
     const list = document.createElement("dl");
     [
       ["JustVoxel", payload.justvoxel || "—"],

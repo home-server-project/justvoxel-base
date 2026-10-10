@@ -13,6 +13,36 @@ import (
 	"github.com/home-server-project/justvoxel-webui/internal/api"
 )
 
+func TestBackupsWorkspaceDisplaysDestinationCapacity(t *testing.T) {
+	for _, status := range []string{"ready", "unmounted"} {
+		t.Run(status, func(t *testing.T) {
+			current := api.AdminBackupStorageTarget{Status: status, Type: "system", Path: "/var/lib/justvoxel/backups"}
+			if status == "ready" {
+				current.AvailableBytes = 40 * 1024 * 1024 * 1024
+				current.FilesystemBytes = 80 * 1024 * 1024 * 1024
+			}
+			client := &fakeNewBackupsAPI{role: "administrator", destinationStatus: api.AdminBackupStorageResponse{OK: true, Current: current}}
+			app, err := New(client, Config{ManagementAPI: "v1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			response := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/backups", ""))
+			if response.Code != http.StatusOK {
+				t.Fatalf("workspace returned HTTP %d: %s", response.Code, response.Body.String())
+			}
+			for label, value := range map[string]uint64{"Available": current.AvailableBytes, "Filesystem size": current.FilesystemBytes} {
+				formatted := "Unknown"
+				if value > 0 {
+					formatted = humanBytes(value)
+				}
+				if !strings.Contains(response.Body.String(), "<dt>"+label+"</dt><dd>"+formatted+"</dd>") {
+					t.Fatalf("workspace does not display %s as %s", label, formatted)
+				}
+			}
+		})
+	}
+}
+
 func TestBackupsWorkspaceOwnsUnifiedBackupTools(t *testing.T) {
 	header, err := assets.ReadFile("templates/header.html")
 	if err != nil {

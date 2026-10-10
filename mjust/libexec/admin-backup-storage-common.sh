@@ -30,13 +30,13 @@ nearest_existing_path() {
 available_bytes_for_path() {
     local probe
     probe="$(nearest_existing_path "$1")"
-    df -B1 -P --output=avail "${probe}" 2>/dev/null | awk 'NR == 2 {print $1+0}'
+    df -B1 --output=avail "${probe}" 2>/dev/null | awk 'NR == 2 && $1 ~ /^[0-9]+$/ {print $1}'
 }
 
 filesystem_bytes_for_path() {
     local probe
     probe="$(nearest_existing_path "$1")"
-    df -B1 -P --output=size "${probe}" 2>/dev/null | awk 'NR == 2 {print $1+0}'
+    df -B1 --output=size "${probe}" 2>/dev/null | awk 'NR == 2 && $1 ~ /^[0-9]+$/ {print $1}'
 }
 
 source_for_path() {

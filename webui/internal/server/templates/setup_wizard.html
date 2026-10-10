@@ -11,7 +11,9 @@
   <script src="/static/app.js" defer></script>
   <script src="/static/timezone-search.js" defer></script>
   <script src="/static/settings.js" defer></script>
+  <script src="/static/storage-browser.js" defer></script>
   <script src="/static/setup-storage.js" defer></script>
+  <script src="/static/setup-storage-manager.js" defer></script>
   <script src="/static/setup-motd.js" defer></script>
 </head>
 <body class="role-administrator setup-body">
@@ -159,6 +161,7 @@
     {{else if eq .CurrentStep 5}}
     <form method="post" action="/setup/storage" class="setup-form" data-setup-storage-form data-csrf="{{.CSRF}}">
       <div class="setup-step-content">
+      <div class="setup-storage-manager-launch"><span class="field-help">Manage disks and partitions, then choose a destination below.</span><button class="secondary" type="button" data-setup-storage-manage>Manage disks and partitions</button></div>
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <input type="hidden" name="storage_type" value="{{.Storage.Type}}" data-setup-storage-type>
       <input type="hidden" name="storage_device" value="{{.Storage.Device}}" data-setup-storage-device>
@@ -239,7 +242,7 @@
                 <span class="setup-storage-segment-state storage-partition-state">Unallocated</span>
                 <strong>{{.Size}} free</strong>
                 <span>{{.Start}} → {{.End}}</span>
-                <small>Create one XFS partition using this free space</small>
+                <small>Review partition creation and choose a size</small>
               </button>
               {{end}}
             </div>
@@ -258,27 +261,6 @@
         {{end}}
       </section>
 
-      <dialog class="setup-storage-action-review storage-action-dialog" data-setup-storage-action-review aria-labelledby="setup-storage-action-title">
-        <div class="setup-storage-action-heading">
-          <div><span class="setup-storage-choice-kicker">Review storage action</span><strong id="setup-storage-action-title" data-setup-storage-action-title>Prepare storage</strong></div>
-          <button class="secondary" type="button" data-setup-storage-action-close>Close</button>
-        </div>
-        <dl class="setup-storage-action-details">
-          <div><dt>Target</dt><dd><code data-setup-storage-action-device></code></dd></div>
-          <div><dt>Result</dt><dd data-setup-storage-action-result></dd></div>
-        </dl>
-        <div data-setup-storage-action-warnings></div>
-        <div class="setup-storage-confirm">
-          <p>Review the target above, then slide fully to the right and confirm.</p>
-          <div class="destructive-confirm-slider"><span class="destructive-confirm-slider-text">Slide to confirm</span><span class="destructive-confirm-slider-thumb" aria-hidden="true">&gt;</span><input type="range" min="0" max="100" step="1" value="0" data-setup-storage-confirm-slider aria-label="Slide to confirm storage preparation"></div>
-          <label class="destructive-confirm-toggle-row"><input class="destructive-confirm-toggle" type="checkbox" data-setup-storage-confirm-toggle disabled> Confirm this reviewed storage action</label>
-        </div>
-        <p class="notice error" data-setup-storage-action-error hidden></p>
-        <div class="setup-storage-action-buttons">
-          <button class="secondary" type="button" data-setup-storage-action-back>Back</button>
-          <button type="button" data-setup-storage-action-apply disabled>Apply</button>
-        </div>
-      </dialog>
 
       </div>
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
@@ -287,6 +269,7 @@
     {{else if eq .CurrentStep 6}}
     <form method="post" action="/setup/backups" class="setup-form" data-setup-backup-form data-csrf="{{.CSRF}}" data-data-device="{{.Storage.Device}}" data-data-mount="{{.Storage.MountPoint}}">
       <div class="setup-step-content">
+      <div class="setup-storage-manager-launch"><span class="field-help">Manage disks and partitions, then choose a destination below.</span><button class="secondary" type="button" data-setup-storage-manage>Manage disks and partitions</button></div>
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <input type="hidden" name="backup_type" value="{{.Backups.Type}}" data-setup-backup-type>
       <input type="hidden" name="backup_device" value="{{.Backups.Device}}" data-setup-backup-device>
@@ -378,7 +361,7 @@
                 <span class="setup-storage-segment-state storage-partition-state">Unallocated</span>
                 <strong>{{.Size}} free</strong>
                 <span>{{.Start}} → {{.End}}</span>
-                <small>Create one XFS backup partition using this free space</small>
+                <small>Review partition creation and choose a size</small>
               </button>
               {{end}}
             </div>
@@ -415,24 +398,6 @@
 
       {{if .SameDiskWarning}}<div class="setup-backup-resilience setup-disk-warning" role="note" data-setup-same-disk-warning><strong>Backups are on the same disk</strong><span>If this disk fails, both Minecraft and its backups could be lost.</span></div>{{end}}
 
-      <dialog class="setup-storage-action-review storage-action-dialog" data-setup-backup-action-review aria-labelledby="setup-backup-action-title">
-        <div class="setup-storage-action-heading">
-          <div><span class="setup-storage-choice-kicker">Review backup disk action</span><strong id="setup-backup-action-title" data-setup-backup-action-title>Prepare backup storage</strong></div>
-          <button class="secondary" type="button" data-setup-backup-action-close>Close</button>
-        </div>
-        <dl class="setup-storage-action-details">
-          <div><dt>Target</dt><dd><code data-setup-backup-action-device></code></dd></div>
-          <div><dt>Result</dt><dd data-setup-backup-action-result></dd></div>
-        </dl>
-        <div data-setup-backup-action-warnings></div>
-        <div class="setup-storage-confirm">
-          <p>Review the target above, then slide fully to the right and confirm.</p>
-          <div class="destructive-confirm-slider"><span class="destructive-confirm-slider-text">Slide to confirm</span><span class="destructive-confirm-slider-thumb" aria-hidden="true">&gt;</span><input type="range" min="0" max="100" step="1" value="0" data-setup-backup-confirm-slider aria-label="Slide to confirm backup storage preparation"></div>
-          <label class="destructive-confirm-toggle-row"><input class="destructive-confirm-toggle" type="checkbox" data-setup-backup-confirm-toggle disabled> Confirm this reviewed storage action</label>
-        </div>
-        <p class="notice error" data-setup-backup-action-error hidden></p>
-        <div class="setup-storage-action-buttons"><button class="secondary" type="button" data-setup-backup-action-back>Back</button><button type="button" data-setup-backup-action-apply disabled>Apply</button></div>
-      </dialog>
 
       </div>
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back">Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
@@ -443,6 +408,13 @@
     {{end}}
 
   </section>
+  {{end}}
+  {{if and .Started (or (eq .CurrentStep 5) (eq .CurrentStep 6))}}
+  <dialog class="setup-storage-manager" data-setup-storage-manager data-storage-workspace-dialog aria-labelledby="setup-storage-manager-title">
+    <div class="setup-storage-manager-heading"><div><p class="eyebrow">Storage</p><h2 id="setup-storage-manager-title">Disks and partitions</h2></div><div class="action-row"><button class="secondary" type="button" data-storage-refresh>Refresh</button><button class="secondary" type="button" data-setup-storage-manager-close>Close</button></div></div>
+    <p class="notice error" role="alert" data-setup-storage-manager-error hidden></p>
+    <div data-storage-workspace-content></div>
+  </dialog>
   {{end}}
   {{template "project-footer" .}}
 </main>

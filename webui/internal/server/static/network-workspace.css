@@ -132,5 +132,8 @@
 .network-workspace-view>.network-workspace-state{margin:0;padding:.4rem .6rem;border:1px solid var(--jv-border);border-radius:var(--jv-radius);background:var(--jv-surface-sunken)}
 .network-workspace-view>.network-workspace-state:empty{display:none}
 .network-troubleshoot-devices{display:grid;grid-template-columns:minmax(0,1fr);gap:.55rem;margin-top:.55rem}
+.network-troubleshoot>.network-health-heading{display:flex;align-items:center;gap:.65rem;flex-wrap:wrap}
+.network-health-heading>h2{margin:0;font-size:1rem}
+.network-health-heading>button{margin-left:auto}
 .network-troubleshoot .network-device-card>.state-text{margin:.5rem 0 0;font-size:.8rem;line-height:1.4;color:var(--jv-muted)}
 @media(max-width:700px){.network-workspace-dialog{top:var(--jv-workspace-top-inset)!important}}

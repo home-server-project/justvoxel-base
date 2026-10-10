@@ -1,11 +1,12 @@
 (() => {
-  function initStorageBrowser(root = document) {
+  function initStorageBrowser(root = document, options = {}) {
     if (!root) return;
     if (root.dataset?.storageBrowserInitialized === "true") return;
     if (root.dataset) root.dataset.storageBrowserInitialized = "true";
     function refreshStorageWorkspace() {
       const workspace = root.closest("[data-storage-workspace-dialog]");
-      workspace?.querySelector("[data-storage-refresh]")?.click();
+      if (options.onChanged) options.onChanged();
+      else workspace?.querySelector("[data-storage-refresh]")?.click();
     }
   const diskButtons = [...root.querySelectorAll("[data-storage-disk]")];
   const diskPanels = [...root.querySelectorAll("[data-storage-partitions]")];
@@ -18,9 +19,28 @@
   const actionMenu = detailDialog?.querySelector("[data-storage-action-menu]");
   const actionButtons = [...root.querySelectorAll("[data-storage-action]")];
   const migrateButton = detailDialog?.querySelector("[data-storage-minecraft-migrate]");
+  let setupChoice = null;
+  if (options.onSelect && actionMenu) {
+    setupChoice = document.createElement("button");
+    setupChoice.type = "button";
+    setupChoice.textContent = "Choose for setup";
+    setupChoice.hidden = true;
+    setupChoice.addEventListener("click", () => {
+      if (!selectedPartition || !options.canSelect?.(selectedPartition.path)) return;
+      options.onSelect(selectedPartition.path);
+      closeDetailDialog();
+    });
+    actionMenu.querySelector(".storage-action-menu-popover")?.prepend(setupChoice);
+  }
+
   const csrf = root.querySelector("[data-storage-action-csrf]")?.value || "";
 
   const wholeDiskButtons = [...root.querySelectorAll("[data-storage-whole-disk]")];
+  if (options.onSelect) wholeDiskButtons.forEach((button) => {
+    button.hidden = true;
+    const purposePanel = button.closest(".storage-empty-disk");
+    if (purposePanel) purposePanel.hidden = true;
+  });
   const wholeDiskDialog = root.querySelector("[data-storage-whole-disk-dialog]");
   const wholeDiskClose = wholeDiskDialog?.querySelector("[data-storage-whole-close]");
   const wholeDiskCancel = wholeDiskDialog?.querySelector("[data-storage-whole-cancel]");
@@ -244,6 +264,8 @@
 
   function configurePartitionActions(data, status) {
     const protectedPartition = data.system === "Yes" || data.readonly === "Yes";
+    if (setupChoice) setupChoice.hidden = !options.canSelect?.(data.path);
+
     if (detailActions) detailActions.hidden = protectedPartition;
     if (protectedNote) protectedNote.hidden = !protectedPartition;
     actionButtons.forEach((button) => { button.hidden = true; });
@@ -255,7 +277,7 @@
       return;
     }
 
-    if (migrateButton) migrateButton.hidden = data.minecraftCandidate !== "Yes" || (data.transport || "").trim().toLowerCase() === "usb";
+    if (migrateButton) migrateButton.hidden = Boolean(options.onSelect) || data.minecraftCandidate !== "Yes" || (data.transport || "").trim().toLowerCase() === "usb";
 
     const filesystem = normalizedFilesystem(data);
     const filesystemKey = filesystem.toLowerCase();
@@ -271,7 +293,7 @@
 
     const mounted = status ? Boolean(status.mounted) : data.mounted === "Yes";
     const persistence = status?.persistence || "";
-    showStorageAction("use-for-backups", data.type === "part" &&
+    showStorageAction("use-for-backups", !options.onSelect && data.type === "part" &&
       ["xfs", "ext4", "btrfs"].includes(filesystemKey) && mounted &&
       ["justvoxel", "external"].includes(persistence) && Boolean(status?.current_mount_point) &&
       status.current_mount_point === status.mount_point);

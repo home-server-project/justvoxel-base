@@ -242,7 +242,9 @@ func TestSetupWizardCompactDesktopProgressContract(t *testing.T) {
 	for _, want := range []string{
 		".setup-stage-header{display:flex",
 		"grid-template-columns:repeat(7,minmax(0,1fr))",
-		"height:58px",
+		".setup-stage-header .setup-progress li{font-size:1rem;height:56px",
+		".setup-stage-header h1{font-size:1.9rem",
+		".setup-stage-header .setup-number{flex:0 0 1.8rem",
 		".setup-stage-header .setup-progress li form{display:flex",
 		"border-radius:inherit",
 		".setup-stage-header .setup-progress li button:focus-visible",
@@ -726,13 +728,13 @@ func TestSetupVersionPreviewPresentationContract(t *testing.T) {
 	source := string(script)
 	for _, want := range []string{
 		`"setup-version-primary"`, `"setup-version-candidate"`, `policy === "recommended" ? "Recommended"`,
-		`"Stable choice for this setup"`, `status.available !== status.selected_candidate`,
+		`"Recommended follows the newest stable compatible Minecraft version."`, `status.available !== status.selected_candidate`,
 		`"setup-version-secondary"`, `"Newest available version"`,
 		`{ STABLE: "Stable", BETA: "Beta", ALPHA: "Alpha", RELEASE: "Release" }`,
-		`channelLabel(status.available_channel)`, `channelLabel(status.candidate_channel)`, `pre-release server build`,
-		`"setup-version-explanation"`, `"This version keeps Bedrock players compatible."`,
+		`channelLabel(status.available_channel)`, `channelLabel(status.candidate_channel)`, `Server software build channel:`,
+		`"setup-version-explanation"`, `"notice success setup-version-compatibility"`, `"notice warning setup-version-compatibility"`,
 		`"Latest follows newer Minecraft server versions when available."`,
-		`"This version is not currently compatible with Bedrock cross-play.`,
+		`The selected version is not currently compatible with Bedrock cross-play.`, `Current supported Bedrock version: ${supported}`,
 		`next.disabled = !status.selected_candidate || (status.crossplay_enabled && !status.crossplay_compatible);`,
 		`if (policy === "pinned" && !version)`,
 	} {

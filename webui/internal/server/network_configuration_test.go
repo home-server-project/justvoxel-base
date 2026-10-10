@@ -226,10 +226,11 @@ for (const id of ["tailscale", "netbird", "playit"]) {
   assert(nodes.some((n) => n.textContent === "Activate" && n.disabled === (id === "playit")));
   assert(nodes.some((n) => n.textContent === "Deactivate" && !n.disabled));
   assert(!nodes.some((n) => n.textContent === "Set up Playit"));
-  const link = nodes.find((n) => n.textContent === "Open provider dashboard");
+  const link = nodes.find((n) => n.textContent === { tailscale: "Open Tailscale dashboard", netbird: "Open NetBird dashboard", playit: "Open Playit.gg dashboard" }[id]);
   assert.equal(link.className, "button-link primary network-action-button");
-  assert.equal(nodes.find((n) => n.textContent === "Activate").className, "warning nav-admin-only network-action-button");
+  assert.equal(nodes.find((n) => n.textContent === "Activate").className, "primary nav-admin-only network-action-button");
   assert.equal(nodes.find((n) => n.textContent === "Deactivate").className, "secondary nav-admin-only network-action-button");
+  assert(nodes.indexOf(nodes.find((n) => n.textContent === "Deactivate")) < nodes.indexOf(nodes.find((n) => n.textContent === "Activate")));
   assert.equal(link.target, "_blank"); assert.equal(link.rel, "noopener noreferrer");
   assert.equal(link.href, { tailscale: "https://console.tailscale.com/admin/", netbird: "https://app.netbird.io/", playit: "https://playit.gg/account/" }[id]);
 }
@@ -275,10 +276,11 @@ for (const state of ["starting", "waiting"]) {
   nodes = render(base);
   assert(nodes.filter((n) => ["Activate", "Set up Playit"].includes(n.textContent)).every((n) => n.disabled));
   assert(nodes.some((n) => n.textContent === "Deactivate" && !n.disabled));
-  assert(nodes.some((n) => n.textContent === "Open provider dashboard"));
+  assert(nodes.some((n) => n.textContent === "Open Playit.gg dashboard"));
   assert(render({ ...base, service_active: false, service_enabled: false, service_state: "inactive" }).some((n) => n.textContent === "Deactivate" && !n.disabled));
   if (state === "waiting") {
     const claim = nodes.find((n) => n.textContent === "Open Playit setup");
+    assert(nodes.indexOf(nodes.find((n) => n.textContent === "Deactivate")) < nodes.indexOf(claim));
     assert.equal(claim.href, playitSetup.claim_url);
     assert.equal(claim.className, "button-link primary network-action-button");
     assert(!nodes.some((n) => n.textContent === "Activate"));
@@ -557,8 +559,68 @@ for (const [value, expected] of Object.entries({ full: "Internet connected", lim
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("visible tabs: %v\n%s", err, output)
 	}
-	if !strings.Contains(script, `row("NetworkManager connectivity", connectivitySummary(snapshot.connectivity))`) {
-		t.Fatal("troubleshoot must use friendly connectivity wording")
+	if strings.Contains(script, `row("NetworkManager connectivity",`) || strings.Contains(script, `sectionHeading("Network health", "Connectivity")`) {
+		t.Fatal("troubleshoot must not duplicate connectivity status")
+	}
+}
+
+func TestNetworkTroubleshootInternetStates(t *testing.T) {
+	source, err := assets.ReadFile("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(source)
+	start := strings.Index(script, "  const renderTroubleshoot =")
+	end := strings.Index(script, "  const renderRemoteAccess =")
+	if start < 0 || end <= start {
+		t.Fatal("troubleshoot renderer missing")
+	}
+	program := `
+const assert = require("node:assert/strict");
+class Element {
+  constructor(tag) { this.tag = tag; this.children = []; this.dataset = {}; this.textContent = ""; }
+  append(...nodes) { this.children.push(...nodes); }
+  appendChild(node) { this.append(node); return node; }
+}
+const document = { createElement: (tag) => new Element(tag) };
+const row = (name, value) => { const e = new Element("row"); e.textContent = name + ": " + value; return e; };
+const label = (value) => value;
+const firstAddress = (ip) => ip?.addresses?.[0] || "Missing";
+const actionButton = (text, key, value) => { const e = new Element("button"); e.textContent = text; e.dataset[key] = value; return e; };
+let currentCheckpoint = null;
+` + script[start:end] + `
+const flatten = (node) => [node, ...node.children.flatMap(flatten)];
+const device = { kind: "ethernet", interface: "enp1s0", state: "activated", carrier: true, managed: true,
+  ipv4: { addresses: ["192.168.0.28"], gateway: "192.168.0.1", dns: ["192.168.0.1"] },
+  active_connection: { id: "Wired", uuid: "profile-uuid" } };
+for (const connectivity of ["full", "none", "limited", "portal", "unknown", "unavailable", "", null, undefined]) {
+  const section = renderTroubleshoot({ connectivity, networking_enabled: true, devices: [device] });
+  const heading = section.children[0];
+  const knownDisconnected = ["none", "limited", "portal"].includes(connectivity);
+  assert.equal(heading.children[0].textContent, "Network health");
+  assert.equal(heading.children[1].textContent, connectivity === "full" ? "Internet connected" : knownDisconnected ? "Internet not connected" : "Internet status unavailable");
+  assert.equal(heading.children.length, knownDisconnected ? 3 : 2);
+  if (knownDisconnected) {
+    assert.equal(heading.children[2].textContent, "Check internet now");
+    assert.equal(heading.children[2].dataset.networkConnectivityCheck, "true");
+  }
+  const nodes = flatten(section);
+  assert(!nodes.some((n) => n.textContent.startsWith("NetworkManager connectivity:")));
+  for (const text of ["Interface: enp1s0", "State: activated", "Link: Carrier present", "IPv4: 192.168.0.28", "Default gateway: 192.168.0.1", "DNS servers: 192.168.0.1", "Active profile: Wired"]) {
+    assert(nodes.some((n) => n.textContent === text));
+  }
+  assert.equal(nodes.find((n) => n.textContent === "Reconnect active profile").disabled, false);
+}
+currentCheckpoint = { id: "pending" };
+const nodes = flatten(renderTroubleshoot({ connectivity: "none", networking_enabled: false, devices: [device] }));
+assert(nodes.some((n) => n.textContent === "Condition: Networking is disabled"));
+assert.equal(nodes.find((n) => n.textContent === "Reconnect active profile").disabled, true);
+assert(flatten(renderTroubleshoot({ connectivity: "unknown", devices: [] })).some((n) => n.textContent === "Condition: No Ethernet or Wi-Fi interface is available"));
+`
+	cmd := exec.Command("node")
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("troubleshoot internet states: %v\n%s", err, output)
 	}
 }
 

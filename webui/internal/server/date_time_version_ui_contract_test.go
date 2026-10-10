@@ -141,7 +141,7 @@ func TestSecondRoundWorkspacePresentationContracts(t *testing.T) {
 		t.Fatal("Wallpaper must be embedded in System")
 	}
 	app := read("static/app.js")
-	for _, want := range []string{"parkSettingsPanels()", "content.appendChild(panel)", `hour12: true`, "topbarClock.dataset.systemTimezone", "workspaceTopInset", "getBoundingClientRect().bottom"} {
+	for _, want := range []string{"parkSettingsPanels()", "content.appendChild(panel)", `hour12: clockPreferences.time === "12"`, "topbarClock.dataset.systemTimezone", "workspaceTopInset", "getBoundingClientRect().bottom"} {
 		if !strings.Contains(app, want) {
 			t.Fatalf("Workspace presentation missing %q", want)
 		}

@@ -149,7 +149,7 @@ if (versionPolicy && versionInput && specificVersionField) {
   const next = form?.querySelector('button[name="direction"][value="next"]');
   let sequence = 0;
   let timer;
-  const channelLabel = (channel) => ({ STABLE: "Stable", BETA: "Beta", ALPHA: "Alpha", RELEASE: "Release" })[channel] || "Pre-release";
+  const channelLabel = (channel) => ({ STABLE: "Stable", BETA: "Beta", ALPHA: "Alpha", RELEASE: "Release" })[channel] || channel || "Unavailable";
   const show = (status, policy) => {
     const make = (tag, className, value) => {
       const node = document.createElement(tag);
@@ -162,24 +162,25 @@ if (versionPolicy && versionInput && specificVersionField) {
       const primary = make("div", "setup-version-primary", "");
       primary.append(make("span", "setup-version-kicker", policy === "recommended" ? "Recommended" : policy === "latest" ? "Latest" : "Specific"));
       primary.append(make("strong", "setup-version-candidate", status.selected_candidate));
-      if (status.candidate_channel && status.candidate_channel !== "STABLE") {
-        primary.append(make("span", "setup-version-note", `${channelLabel(status.candidate_channel)} pre-release server build`));
-      } else if (policy === "recommended") {
-        primary.append(make("span", "setup-version-note", "Stable choice for this setup"));
-      }
+      primary.append(make("span", "setup-version-note", `Server software build channel: ${channelLabel(status.candidate_channel)}`));
       parts.push(primary);
     }
-    {
+    if (status.available && status.available !== status.selected_candidate) {
       const secondary = make("div", "setup-version-secondary", "");
       secondary.append(make("span", "setup-version-kicker", "Newest available version"));
-      secondary.append(make("span", "setup-version-newer", status.available ? `${status.available}${status.available_channel ? ` · ${channelLabel(status.available_channel)}` : ""}` : "Unavailable"));
+      secondary.append(make("span", "setup-version-newer", `${status.available}${status.available_channel ? ` · Server build: ${channelLabel(status.available_channel)}` : ""}`));
       parts.push(secondary);
     }
-    parts.push(make("p", "setup-version-explanation", `Bedrock-supported version: ${status.geyser_supported_version || "Unavailable"}`));
-    parts.push(make("p", "setup-version-explanation", status.crossplay_enabled ? (status.crossplay_compatible ? "Bedrock compatibility: Supported" : "Bedrock compatibility: Unavailable") : "Bedrock cross-play is off · Java only"));
-    if (policy === "recommended" && status.crossplay_enabled && status.selected_candidate && status.available !== status.selected_candidate) parts.push(make("p", "setup-version-explanation", "This version keeps Bedrock players compatible."));
+    if (policy === "recommended") parts.push(make("p", "setup-version-explanation", "Recommended follows the newest stable compatible Minecraft version."));
     if (policy === "latest") parts.push(make("p", "setup-version-explanation", "Latest follows newer Minecraft server versions when available."));
-    if (status.crossplay_enabled && !status.crossplay_compatible && status.selected_candidate) parts.push(make("p", "setup-version-explanation", "This version is not currently compatible with Bedrock cross-play. Choose Recommended, choose a compatible Specific version, or turn off Bedrock to continue."));
+    if (policy === "pinned") parts.push(make("p", "setup-version-explanation", "Specific uses the exact Minecraft version you choose."));
+    if (status.crossplay_enabled && status.selected_candidate) {
+      const supported = status.geyser_supported_version || "Unavailable";
+      const compatibility = status.crossplay_compatible
+        ? `Bedrock cross-play is compatible. Current supported version: ${supported}.`
+        : `The selected version is not currently compatible with Bedrock cross-play. Choose Recommended, choose a compatible Specific version, or disable Bedrock cross-play. Current supported Bedrock version: ${supported}.`;
+      parts.push(make("div", status.crossplay_compatible ? "notice success setup-version-compatibility" : "notice warning setup-version-compatibility", compatibility));
+    }
     if (!status.selected_candidate) parts.push(make("p", "setup-version-explanation", status.reason || "No usable server build was found for this version."));
     preview.replaceChildren(...parts);
     next.disabled = !status.selected_candidate || (status.crossplay_enabled && !status.crossplay_compatible);

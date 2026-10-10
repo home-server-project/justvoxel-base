@@ -58,6 +58,7 @@ sudo() {
     case "$*" in
         'systemctl enable --now playit.service') return "$ACTIVATION_RC" ;;
         'systemctl disable --now playit.service'|'/usr/bin/playit setup'|'/usr/bin/playit status') return "$ACTION_RC" ;;
+        '/usr/libexec/justvoxel/remote-access-status playit --details') return "$ACTION_RC" ;;
         *) exit 99 ;;
     esac
 }
@@ -98,7 +99,7 @@ for config, active, state, options in (
     ('', 'no', 'Not configured', ['Activate Playit']),
     (None, 'yes', 'Not configured', ['Activate Playit', 'Deactivate Playit']),
     ('configured', 'yes', 'Running', ['Deactivate Playit']),
-    ('configured', 'no', 'Configured', ['Activate Playit']),
+    ('configured', 'no', 'Stopped', ['Activate Playit']),
 ):
     output, selector = exercise(config, active)
     assert not output, output  # No automatic detailed status dump.
@@ -122,6 +123,8 @@ for action_rc in (0, 1):
     assert output == ['sudo systemctl disable --now playit.service', 'PAUSE'], output
     output, _ = exercise(None, 'no', 'Playit status', action_rc=action_rc)
     assert output == ['systemctl --no-pager --lines=0 status playit.service',
-                      'sudo /usr/bin/playit status', 'PAUSE'], output
+                      'sudo /usr/bin/playit status',
+                      'sudo /usr/libexec/justvoxel/remote-access-status playit --details',
+                      'PAUSE'], output
 print('Network Playit appliance source checks passed.')
 PY
