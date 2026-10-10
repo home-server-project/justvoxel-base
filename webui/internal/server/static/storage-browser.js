@@ -3,6 +3,15 @@
     if (!root) return;
     if (root.dataset?.storageBrowserInitialized === "true") return;
     if (root.dataset) root.dataset.storageBrowserInitialized = "true";
+    function showDetails(panel) {
+      if (options.inlineDetails) panel.hidden = false;
+      else panel.showModal();
+    }
+    function hideDetails(panel) {
+      if (!panel) return;
+      if (options.inlineDetails) panel.hidden = true;
+      else panel.close();
+    }
     function refreshStorageWorkspace() {
       const workspace = root.closest("[data-storage-workspace-dialog]");
       if (options.onChanged) options.onChanged();
@@ -27,11 +36,15 @@
     setupChoice.hidden = true;
     setupChoice.addEventListener("click", () => {
       if (!selectedPartition || !options.canSelect?.(selectedPartition.path)) return;
-      options.onSelect(selectedPartition.path);
+      options.onSelect(selectedPartition.path, selectedMountStatus);
       closeDetailDialog();
     });
     actionMenu.querySelector(".storage-action-menu-popover")?.prepend(setupChoice);
   }
+
+  if (options.inlineDetails) root.addEventListener("submit", event => {
+    if (root.querySelector("dialog[open]")) event.preventDefault();
+  });
 
   const csrf = root.querySelector("[data-storage-action-csrf]")?.value || "";
 
@@ -214,6 +227,10 @@
   function selectDisk(name) {
     closeActionMenu();
     closeFreeActionMenu();
+    if (options.inlineDetails) {
+      hideDetails(detailDialog);
+      hideDetails(freeDetailDialog);
+    }
     const workspace = root.closest("[data-storage-workspace-dialog]");
     if (workspace) workspace.dataset.storageSelectedDisk = name;
     diskButtons.forEach((button) => {
@@ -266,7 +283,7 @@
     const protectedPartition = data.system === "Yes" || data.readonly === "Yes";
     if (setupChoice) setupChoice.hidden = !options.canSelect?.(data.path);
 
-    if (detailActions) detailActions.hidden = protectedPartition;
+    if (detailActions) detailActions.hidden = protectedPartition && !(options.inlineDetails && setupChoice && !setupChoice.hidden);
     if (protectedNote) protectedNote.hidden = !protectedPartition;
     actionButtons.forEach((button) => { button.hidden = true; });
     setOptional(detail.mountTypeRow, detail.mountType, "");
@@ -384,7 +401,12 @@
       if (detail.mountLabel) detail.mountLabel.textContent = "Mounted at";
       setOptional(detail.mountRow, detail.mount, data.system === "Yes" ? "" : data.mountpoints);
       configurePartitionActions(selectedPartition, null);
-      detailDialog.showModal();
+      if (options.inlineDetails) {
+        hideDetails(freeDetailDialog);
+        partitionButtons.forEach(candidate => candidate.classList.toggle("is-selected", candidate === button));
+        freeSpaceButtons.forEach(candidate => candidate.classList.remove("is-selected"));
+      }
+      showDetails(detailDialog);
       detailClose?.focus();
       void loadMountStatus(selectedPartition);
     });
@@ -392,7 +414,7 @@
 
   function closeDetailDialog() {
     closeActionMenu();
-    detailDialog?.close();
+    hideDetails(detailDialog);
   }
 
   detailClose?.addEventListener("click", closeDetailDialog);
@@ -658,14 +680,19 @@
       reviewedCreatePartition = null;
       if (freeDetailDevice) freeDetailDevice.textContent = selectedFreeSpace.device || "";
       if (freeDetailSize) freeDetailSize.textContent = selectedFreeSpace.size || "Unknown";
-      freeDetailDialog.showModal();
+      if (options.inlineDetails) {
+        hideDetails(detailDialog);
+        freeSpaceButtons.forEach(candidate => candidate.classList.toggle("is-selected", candidate === button));
+        partitionButtons.forEach(candidate => candidate.classList.remove("is-selected"));
+      }
+      showDetails(freeDetailDialog);
       freeDetailClose?.focus();
     });
   });
 
   function closeFreeDetailDialog() {
     closeFreeActionMenu();
-    freeDetailDialog?.close();
+    hideDetails(freeDetailDialog);
   }
 
   freeDetailClose?.addEventListener("click", closeFreeDetailDialog);
@@ -741,7 +768,7 @@
   createPartitionButton?.addEventListener("click", () => {
     if (!selectedFreeSpace || !createDialog) return;
     closeFreeActionMenu();
-    freeDetailDialog?.close();
+    hideDetails(freeDetailDialog);
     resetCreateDialog();
     createDialog.showModal();
     createSize?.focus();
@@ -1135,7 +1162,7 @@
   migrateButton?.addEventListener("click", async () => {
     if (!selectedPartition || selectedPartition.minecraftCandidate !== "Yes" || !migrationDialog) return;
     closeActionMenu();
-    detailDialog?.close();
+    hideDetails(detailDialog);
     resetMigrationDialog();
 
     const existingMount = selectedPartition.minecraftMountPoint || "";
@@ -1349,6 +1376,7 @@
       if (!selectedPartition || !actionDialog) return;
       closeActionMenu();
       resetActionDialog(button.dataset.storageAction);
+      if (options.inlineDetails) hideDetails(detailDialog);
       actionDialog.showModal();
       if (selectedAction === "mount-for-now" || selectedAction === "mount-permanently") mountInput?.focus();
       else reviewButton?.focus();

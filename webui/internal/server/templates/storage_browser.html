@@ -147,118 +147,14 @@
   <div class="notice">No physical disks were reported by the Management Agent.</div>
   {{end}}
   <dialog class="storage-detail-dialog" data-storage-detail-dialog>
-    <div class="storage-detail-card">
-      <div class="storage-detail-heading">
-        <div><p class="eyebrow">Partition details</p><h2 data-detail-title>Partition</h2></div>
-        <button class="storage-dialog-close" type="button" data-storage-detail-close aria-label="Close partition details">×</button>
-      </div>
-      <div class="storage-detail-role" data-detail-role></div>
-      <dl class="storage-detail-list">
-        <div><dt>Device</dt><dd><code data-detail-path></code></dd></div>
-        <div><dt>Size</dt><dd data-detail-size></dd></div>
-        <div data-detail-used-row hidden><dt>Used</dt><dd data-detail-used></dd></div>
-        <div data-detail-free-row hidden><dt>Free</dt><dd data-detail-free></dd></div>
-        <div data-detail-usage-unavailable-row hidden><dt>Free</dt><dd>Unavailable while unmounted</dd></div>
-        <div><dt>Filesystem</dt><dd data-detail-filesystem></dd></div>
-        <div data-detail-label-row><dt>Label</dt><dd data-detail-label></dd></div>
-        <div data-detail-uuid-row><dt>UUID</dt><dd><code data-detail-uuid></code></dd></div>
-        <div data-detail-mount-row><dt data-detail-mount-label>Mounted at</dt><dd><code data-detail-mount></code></dd></div>
-        <div><dt>Mounted</dt><dd data-detail-mounted></dd></div>
-        <div data-detail-mount-type-row hidden><dt>Mount type</dt><dd data-detail-mount-type></dd></div>
-        <div><dt>System protected</dt><dd data-detail-system></dd></div>
-        <div><dt>Read only</dt><dd data-detail-readonly></dd></div>
-      </dl>
-      <div class="storage-detail-actions" data-storage-detail-actions hidden>
-        <span class="muted">Partition actions</span>
-        <details class="storage-action-menu" data-storage-action-menu>
-          <summary aria-label="More partition actions">⋯</summary>
-          <div class="storage-action-menu-popover">
-            <button type="button" data-storage-action="mount-for-now" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><path d="M12 8v5l3 2"></path></svg></span><span>Mount for now</span></button>
-            <button type="button" data-storage-action="mount-permanently" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5Z"></path><path d="M12 14v6"></path></svg></span><span>Mount permanently</span></button>
-            <button type="button" data-storage-action="make-permanent" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5Z"></path><path d="M12 14v6"></path></svg></span><span>Make permanent</span></button>
-            <button type="button" data-storage-action="mount-now" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5Z"></path><path d="M12 14v6"></path></svg></span><span>Mount now</span></button>
-            <button type="button" data-storage-action="unmount-for-now" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><path d="M12 8v5l3 2"></path></svg></span><span>Unmount for now</span></button>
-            <button type="button" data-storage-action="remove-permanent" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5Z"></path><path d="M12 14v6"></path></svg></span><span>Remove permanent mount</span></button>
-            <button type="button" data-storage-minecraft-migrate hidden>Use for Minecraft data</button>
-            <button type="button" data-storage-action="use-for-backups" hidden>Use for backups</button>
-            <button class="storage-action-danger" type="button" data-storage-action="format">Format partition</button>
-            <button class="storage-action-danger" type="button" data-storage-action="delete_partition" hidden>Delete partition</button>
-            <button class="storage-action-danger" type="button" data-storage-action="initialize_disk" hidden>Reinitialize entire disk as GPT</button>
-          </div>
-        </details>
-      </div>
-      <div class="notice storage-protected-note" data-storage-protected-note hidden>This partition is protected by JustVoxel. Storage actions are not available.</div>
-    </div>
+    {{template "storage_partition_operation" .}}
   </dialog>
 
   <dialog class="storage-detail-dialog" data-storage-free-detail-dialog>
-    <div class="storage-detail-card">
-      <div class="storage-detail-heading">
-        <div><p class="eyebrow">Disk layout</p><h2>Unallocated space</h2></div>
-        <button class="storage-dialog-close" type="button" data-storage-free-detail-close aria-label="Close unallocated space details">×</button>
-      </div>
-      <div class="storage-detail-role">Available</div>
-      <dl class="storage-detail-list">
-        <div><dt>Disk</dt><dd><code data-storage-free-device></code></dd></div>
-        <div><dt>Available</dt><dd data-storage-free-size></dd></div>
-      </dl>
-      <div class="storage-detail-actions">
-        <span class="muted">Space actions</span>
-        <details class="storage-action-menu" data-storage-free-action-menu>
-          <summary aria-label="More unallocated-space actions">⋯</summary>
-          <div class="storage-action-menu-popover">
-            <button type="button" data-storage-create-partition>Create partition</button>
-          </div>
-        </details>
-      </div>
-    </div>
+    {{template "storage_free_operation" .}}
   </dialog>
 
-  <dialog class="storage-action-dialog" data-storage-create-dialog>
-    <div class="storage-action-card">
-      <div class="storage-detail-heading">
-        <div><p class="eyebrow">New partition</p><h2>Create and format partition</h2></div>
-        <button class="storage-dialog-close" type="button" data-storage-create-close aria-label="Close partition creation">×</button>
-      </div>
-      <p class="muted">Choose a size in GiB or use all available space. JustVoxel creates one XFS partition and leaves any remainder unallocated for additional partitions later.</p>
-      <dl class="storage-action-review">
-        <div><dt>Disk</dt><dd><code data-storage-create-device></code></dd></div>
-        <div><dt>Available</dt><dd data-storage-create-available></dd></div>
-      </dl>
-      <label class="storage-option-toggle-row">
-        <span><strong>Use all available space</strong><small>Use the complete selected unallocated segment.</small></span>
-        <input class="storage-option-toggle" type="checkbox" data-storage-create-all aria-label="Use all available unallocated space">
-      </label>
-      <label>Partition size (GiB)
-        <input type="number" min="1" step="1" inputmode="numeric" placeholder="e.g. 200" data-storage-create-size>
-        <span class="muted compact">Enter a whole-GiB size, or turn on “Use all available space”.</span>
-      </label>
-      <div data-storage-create-review-panel hidden>
-        <dl class="storage-action-review">
-          <div><dt>After action</dt><dd data-storage-create-after></dd></div>
-        </dl>
-        <div class="storage-action-warnings" data-storage-create-warnings></div>
-        <div class="storage-confirmation" data-storage-create-confirmation-field hidden>
-          <p class="storage-confirm-selected">Selected space: <strong data-storage-create-confirmation-summary></strong></p>
-          <div class="storage-confirm-slider" data-storage-create-confirm-slider-shell style="--confirm-progress:0">
-            <span class="storage-confirm-slider-text" data-storage-create-confirm-slider-text>Slide to confirm partition creation</span>
-            <span class="storage-confirm-slider-thumb" aria-hidden="true">&gt;</span>
-            <input type="range" min="0" max="100" step="1" value="0" data-storage-create-confirm-slider aria-label="Slide to confirm creating and formatting this partition">
-          </div>
-          <label class="storage-confirm-toggle-row" data-storage-create-confirm-toggle-row hidden>
-            <span class="storage-confirm-toggle-callout">Confirm <span class="storage-confirm-toggle-arrow" aria-hidden="true">&gt;</span></span>
-            <input class="storage-confirm-toggle" type="checkbox" data-storage-create-confirm-toggle aria-label="Confirm partition creation">
-          </label>
-        </div>
-      </div>
-      <p class="storage-action-error" data-storage-create-error hidden></p>
-      <div class="action-row storage-action-buttons">
-        <button class="secondary" type="button" data-storage-create-cancel>Cancel</button>
-        <button type="button" data-storage-create-review>Review action</button>
-        <button class="danger" type="button" data-storage-create-apply hidden>Apply destructive action</button>
-      </div>
-    </div>
-  </dialog>
+  {{template "storage_partition_create_review" .}}
 
   <dialog class="storage-action-dialog" data-storage-whole-disk-dialog>
     <div class="storage-action-card">
@@ -379,6 +275,156 @@
     </div>
   </dialog>
 
+  {{template "storage_partition_action_review" .}}
+
+</div>
+{{end}}
+
+{{define "storage_browser.html"}}<!doctype html>
+<html lang="en">
+<head>
+  <link rel="icon" type="image/png" href="/static/justvoxel-favicon.png">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>JustVoxel - Storage</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/storage-browser.css">
+  <script src="/static/app.js" defer></script>
+  <script src="/static/storage-browser.js" defer></script>
+</head>
+<body class="role-administrator">
+{{template "app-header" .}}
+<main>
+  <div class="title-row">
+    <div><p class="eyebrow">Administrator · fallback page</p><h1>Storage</h1></div>
+    <span class="badge">{{.Identity.Username}}</span>
+  </div>
+  {{template "storage_browser_content" .}}
+</main>
+</body>
+</html>{{end}}
+
+{{define "storage_partition_operation"}}
+
+    <div class="storage-detail-card">
+      <div class="storage-detail-heading">
+        <div><p class="eyebrow">Partition details</p><h2 data-detail-title>Partition</h2></div>
+        <button class="storage-dialog-close" type="button" data-storage-detail-close aria-label="Close partition details">×</button>
+      </div>
+      <div class="storage-detail-role" data-detail-role></div>
+      <dl class="storage-detail-list">
+        <div><dt>Device</dt><dd><code data-detail-path></code></dd></div>
+        <div><dt>Size</dt><dd data-detail-size></dd></div>
+        <div data-detail-used-row hidden><dt>Used</dt><dd data-detail-used></dd></div>
+        <div data-detail-free-row hidden><dt>Free</dt><dd data-detail-free></dd></div>
+        <div data-detail-usage-unavailable-row hidden><dt>Free</dt><dd>Unavailable while unmounted</dd></div>
+        <div><dt>Filesystem</dt><dd data-detail-filesystem></dd></div>
+        <div data-detail-label-row><dt>Label</dt><dd data-detail-label></dd></div>
+        <div data-detail-uuid-row><dt>UUID</dt><dd><code data-detail-uuid></code></dd></div>
+        <div data-detail-mount-row><dt data-detail-mount-label>Mounted at</dt><dd><code data-detail-mount></code></dd></div>
+        <div><dt>Mounted</dt><dd data-detail-mounted></dd></div>
+        <div data-detail-mount-type-row hidden><dt>Mount type</dt><dd data-detail-mount-type></dd></div>
+        <div><dt>System protected</dt><dd data-detail-system></dd></div>
+        <div><dt>Read only</dt><dd data-detail-readonly></dd></div>
+      </dl>
+      <div class="storage-detail-actions" data-storage-detail-actions hidden>
+        <span class="muted">Partition actions</span>
+        <details class="storage-action-menu" data-storage-action-menu>
+          <summary aria-label="More partition actions">⋯</summary>
+          <div class="storage-action-menu-popover">
+            <button type="button" data-storage-action="mount-for-now" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><path d="M12 8v5l3 2"></path></svg></span><span>Mount for now</span></button>
+            <button type="button" data-storage-action="mount-permanently" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5Z"></path><path d="M12 14v6"></path></svg></span><span>Mount permanently</span></button>
+            <button type="button" data-storage-action="make-permanent" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5Z"></path><path d="M12 14v6"></path></svg></span><span>Make permanent</span></button>
+            <button type="button" data-storage-action="mount-now" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5Z"></path><path d="M12 14v6"></path></svg></span><span>Mount now</span></button>
+            <button type="button" data-storage-action="unmount-for-now" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><path d="M12 8v5l3 2"></path></svg></span><span>Unmount for now</span></button>
+            <button type="button" data-storage-action="remove-permanent" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5Z"></path><path d="M12 14v6"></path></svg></span><span>Remove permanent mount</span></button>
+            <button type="button" data-storage-minecraft-migrate hidden>Use for Minecraft data</button>
+            <button type="button" data-storage-action="use-for-backups" hidden>Use for backups</button>
+            <button class="storage-action-danger" type="button" data-storage-action="format">Format partition</button>
+            <button class="storage-action-danger" type="button" data-storage-action="delete_partition" hidden>Delete partition</button>
+            <button class="storage-action-danger" type="button" data-storage-action="initialize_disk" hidden>Reinitialize entire disk as GPT</button>
+          </div>
+        </details>
+      </div>
+      <div class="notice storage-protected-note" data-storage-protected-note hidden>This partition is protected by JustVoxel. Storage actions are not available.</div>
+    </div>
+
+{{end}}
+
+{{define "storage_free_operation"}}
+
+    <div class="storage-detail-card">
+      <div class="storage-detail-heading">
+        <div><p class="eyebrow">Disk layout</p><h2>Unallocated space</h2></div>
+        <button class="storage-dialog-close" type="button" data-storage-free-detail-close aria-label="Close unallocated space details">×</button>
+      </div>
+      <div class="storage-detail-role">Available</div>
+      <dl class="storage-detail-list">
+        <div><dt>Disk</dt><dd><code data-storage-free-device></code></dd></div>
+        <div><dt>Available</dt><dd data-storage-free-size></dd></div>
+      </dl>
+      <div class="storage-detail-actions">
+        <span class="muted">Space actions</span>
+        <details class="storage-action-menu" data-storage-free-action-menu>
+          <summary aria-label="More unallocated-space actions">⋯</summary>
+          <div class="storage-action-menu-popover">
+            <button type="button" data-storage-create-partition>Create partition</button>
+          </div>
+        </details>
+      </div>
+    </div>
+
+{{end}}
+
+{{define "storage_partition_create_review"}}
+  <dialog class="storage-action-dialog" data-storage-create-dialog>
+    <div class="storage-action-card">
+      <div class="storage-detail-heading">
+        <div><p class="eyebrow">New partition</p><h2>Create and format partition</h2></div>
+        <button class="storage-dialog-close" type="button" data-storage-create-close aria-label="Close partition creation">×</button>
+      </div>
+      <p class="muted">Choose a size in GiB or use all available space. JustVoxel creates one XFS partition and leaves any remainder unallocated for additional partitions later.</p>
+      <dl class="storage-action-review">
+        <div><dt>Disk</dt><dd><code data-storage-create-device></code></dd></div>
+        <div><dt>Available</dt><dd data-storage-create-available></dd></div>
+      </dl>
+      <label class="storage-option-toggle-row">
+        <span><strong>Use all available space</strong><small>Use the complete selected unallocated segment.</small></span>
+        <input class="storage-option-toggle" type="checkbox" data-storage-create-all aria-label="Use all available unallocated space">
+      </label>
+      <label>Partition size (GiB)
+        <input type="number" min="1" step="1" inputmode="numeric" placeholder="e.g. 200" data-storage-create-size>
+        <span class="muted compact">Enter a whole-GiB size, or turn on “Use all available space”.</span>
+      </label>
+      <div data-storage-create-review-panel hidden>
+        <dl class="storage-action-review">
+          <div><dt>After action</dt><dd data-storage-create-after></dd></div>
+        </dl>
+        <div class="storage-action-warnings" data-storage-create-warnings></div>
+        <div class="storage-confirmation" data-storage-create-confirmation-field hidden>
+          <p class="storage-confirm-selected">Selected space: <strong data-storage-create-confirmation-summary></strong></p>
+          <div class="storage-confirm-slider" data-storage-create-confirm-slider-shell style="--confirm-progress:0">
+            <span class="storage-confirm-slider-text" data-storage-create-confirm-slider-text>Slide to confirm partition creation</span>
+            <span class="storage-confirm-slider-thumb" aria-hidden="true">&gt;</span>
+            <input type="range" min="0" max="100" step="1" value="0" data-storage-create-confirm-slider aria-label="Slide to confirm creating and formatting this partition">
+          </div>
+          <label class="storage-confirm-toggle-row" data-storage-create-confirm-toggle-row hidden>
+            <span class="storage-confirm-toggle-callout">Confirm <span class="storage-confirm-toggle-arrow" aria-hidden="true">&gt;</span></span>
+            <input class="storage-confirm-toggle" type="checkbox" data-storage-create-confirm-toggle aria-label="Confirm partition creation">
+          </label>
+        </div>
+      </div>
+      <p class="storage-action-error" data-storage-create-error hidden></p>
+      <div class="action-row storage-action-buttons">
+        <button class="secondary" type="button" data-storage-create-cancel>Cancel</button>
+        <button type="button" data-storage-create-review>Review action</button>
+        <button class="danger" type="button" data-storage-create-apply hidden>Apply destructive action</button>
+      </div>
+    </div>
+  </dialog>
+{{end}}
+
+{{define "storage_partition_action_review"}}
   <dialog class="storage-action-dialog" data-storage-action-dialog>
     <div class="storage-action-card">
       <div class="storage-detail-heading">
@@ -418,30 +464,4 @@
       </div>
     </div>
   </dialog>
-
-</div>
 {{end}}
-
-{{define "storage_browser.html"}}<!doctype html>
-<html lang="en">
-<head>
-  <link rel="icon" type="image/png" href="/static/justvoxel-favicon.png">
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>JustVoxel - Storage</title>
-  <link rel="stylesheet" href="/static/app.css">
-  <link rel="stylesheet" href="/static/storage-browser.css">
-  <script src="/static/app.js" defer></script>
-  <script src="/static/storage-browser.js" defer></script>
-</head>
-<body class="role-administrator">
-{{template "app-header" .}}
-<main>
-  <div class="title-row">
-    <div><p class="eyebrow">Administrator · fallback page</p><h1>Storage</h1></div>
-    <span class="badge">{{.Identity.Username}}</span>
-  </div>
-  {{template "storage_browser_content" .}}
-</main>
-</body>
-</html>{{end}}

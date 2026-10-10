@@ -4,7 +4,7 @@
   <link rel="icon" type="image/png" href="/static/justvoxel-favicon.png">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>JustVoxel - Set up JustVoxel - Review</title>
+  <title>JustVoxel - Review setup</title>
   <link rel="stylesheet" href="/static/app.css">
   <link rel="stylesheet" href="/static/setup.css">
   <link rel="stylesheet" href="/static/setup-review.css">
@@ -18,7 +18,7 @@
   <form class="nav-logout setup-topbar-logout" method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Log out</button></form>
 </header>
 <main class="setup-shell">
-  <div class="setup-stage-header">{{if eq .SetupMode "recommended"}}<h1>Set up JustVoxel</h1>{{end}}
+  <div class="setup-stage-header">
   {{if ne .SetupMode "recommended"}}
   <ol class="setup-progress" aria-label="Setup progress">
     <li class="complete"><form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="1"><button type="submit"><span class="setup-number">1</span><span>Server</span></button></form></li>

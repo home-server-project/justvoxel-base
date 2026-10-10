@@ -158,6 +158,61 @@ func TestSetupWizardStorageStepShowsInternalDiskBrowserAndExcludesUSB(t *testing
 	}
 }
 
+func TestSetupWizardProtectedFormattedPartitionsRemainDetailsOnly(t *testing.T) {
+	client := setupWizardStorageClient()
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstRunSetupDrafts.delete(app, "session-token")
+	advanceToStorage(t, app)
+
+	for _, step := range []struct {
+		name, marker string
+	}{
+		{"storage", "data-setup-existing-partition"},
+		{"backups", "data-setup-backup-existing"},
+	} {
+		t.Run(step.name, func(t *testing.T) {
+			page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
+			if page.Code != http.StatusOK {
+				t.Fatalf("setup page returned %d", page.Code)
+			}
+			body := page.Body.String()
+			for _, partition := range []struct {
+				path      string
+				protected bool
+			}{
+				{"/dev/vda4", true}, // XFS with a UUID, but protected system storage.
+				{"/dev/vdb1", false},
+			} {
+				position := strings.Index(body, `data-path="`+partition.path+`"`)
+				if position < 0 {
+					t.Fatalf("partition %s must remain visible", partition.path)
+				}
+				start := strings.LastIndex(body[:position], "<button")
+				end := strings.Index(body[position:], "</button>")
+				if start < 0 || end < 0 {
+					t.Fatalf("partition %s card missing", partition.path)
+				}
+				card := body[start : position+end]
+				if !strings.Contains(card, "data-storage-partition") || strings.Contains(card, step.marker) == partition.protected {
+					t.Fatalf("partition %s details/selection eligibility incorrect: %s", partition.path, card)
+				}
+				if partition.protected && (!strings.Contains(card, `data-system="Yes"`) || !strings.Contains(card, "Protected")) {
+					t.Fatalf("protected partition lost its status: %s", card)
+				}
+			}
+		})
+		if step.name == "storage" {
+			values := url.Values{"csrf": {"csrf-token"}, "storage_type": {"system"}, "direction": {"next"}}
+			if rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/storage", values.Encode())); rr.Code != http.StatusSeeOther {
+				t.Fatalf("advance to backups returned %d", rr.Code)
+			}
+		}
+	}
+}
+
 func TestSetupWizardStorageRejectsUSBFilesystemEvenWhenPostedDirectly(t *testing.T) {
 	client := setupWizardStorageClient()
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
@@ -227,7 +282,7 @@ func setupWizardInlineStorageMarkup(t *testing.T, app *App) string {
 		t.Fatalf("setup page returned %d: %s", page.Code, page.Body.String())
 	}
 	markup := page.Body.String()
-	for _, want := range []string{`data-setup-disk-review`, `data-setup-disk-size`, `data-setup-disk-slider`, `data-setup-disk-toggle`, `/static/setup-storage-actions.js`, `data-setup-partition-actions`, `data-setup-disk-action="inspect"`, `data-setup-disk-action="delete_partition"`, `data-setup-disk-action="mount"`, `data-setup-disk-action="persist"`} {
+	for _, want := range []string{`data-storage-detail-dialog`, `data-storage-create-size`, `data-storage-create-confirm-slider`, `data-storage-create-confirm-toggle`, `/static/storage-browser.js`, `/static/setup-storage-actions.js`, `data-storage-action-menu`, `data-storage-action="delete_partition"`, `data-storage-action="mount-for-now"`, `data-storage-action="mount-permanently"`} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("inline setup missing %q", want)
 		}
@@ -237,8 +292,8 @@ func setupWizardInlineStorageMarkup(t *testing.T, app *App) string {
 			t.Fatalf("wizard regression: %q", forbidden)
 		}
 	}
-	if strings.Count(markup, `data-setup-disk-review`) != 1 || strings.Count(markup, `class="setup-number"`) != 7 {
-		t.Fatal("Advanced setup must retain seven cards and one preparation dialog")
+	if strings.Count(markup, `data-storage-create-dialog`) != 1 || strings.Count(markup, `data-storage-action-dialog`) != 1 || strings.Count(markup, `class="setup-number"`) != 7 {
+		t.Fatal("Advanced setup must retain seven cards and shared focused reviews")
 	}
 	return markup
 }
@@ -251,7 +306,7 @@ func TestSetupWizardStorageUsesInlineReviewedStorageActions(t *testing.T) {
 	defer firstRunSetupDrafts.delete(app, "session-token")
 	advanceToStorage(t, app)
 	markup := setupWizardInlineStorageMarkup(t, app)
-	for _, want := range []string{`data-setup-storage-prepare="format"`, `data-setup-storage-prepare="create_partition"`} {
+	for _, want := range []string{`data-storage-action="format"`, `data-storage-free-space`} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("inline storage missing %q", want)
 		}
@@ -401,7 +456,7 @@ func TestSetupWizardBackupUsesInlineReviewedStorageActions(t *testing.T) {
 		t.Fatalf("storage save returned %d", rr.Code)
 	}
 	markup := setupWizardInlineStorageMarkup(t, app)
-	for _, want := range []string{`data-setup-backup-prepare="format"`, `data-setup-backup-prepare="create_partition"`} {
+	for _, want := range []string{`data-storage-action="format"`, `data-storage-free-space`} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("inline backups missing %q", want)
 		}

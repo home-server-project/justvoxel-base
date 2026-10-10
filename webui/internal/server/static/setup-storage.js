@@ -1,36 +1,17 @@
 (() => {
   // Destination selection stays inline; preparations use reviewed storage APIs.
   function diskBrowser(form, selectedDevice) {
-    const disks = Array.from(form.querySelectorAll('[data-setup-disk]'));
-    const groups = Array.from(form.querySelectorAll('[data-setup-disk-partitions]'));
-    let selected = '';
-    function select(disk) {
-      selected = disk.dataset.setupDisk;
-      disks.forEach((button) => {
-        const active = button === disk;
-        button.classList.toggle('is-selected', active);
-        button.setAttribute('aria-pressed', String(active));
-      });
-      groups.forEach((group) => { group.hidden = group.dataset.setupDiskPartitions !== selected; });
-      // Large inventories may scroll; keep the chosen physical disk in view.
-      disk.scrollIntoView({block: 'nearest', inline: 'nearest'});
+    // Physical disk selection belongs to the shared Storage browser.
+    form.querySelectorAll('[data-setup-disk]').forEach(button => { button.dataset.storageDisk = button.dataset.setupDisk; });
+    form.querySelectorAll('[data-setup-disk-partitions]').forEach(panel => { panel.dataset.storagePartitions = panel.dataset.setupDiskPartitions; });
+    if (!form.querySelector('[data-setup-disk][aria-pressed="true"]')) {
+      const group = [...form.querySelectorAll('[data-setup-disk-partitions]')].find(panel => [...panel.querySelectorAll('[data-device]')].some(button => button.dataset.device === selectedDevice));
+      [...form.querySelectorAll('[data-setup-disk]')].find(button => button.dataset.setupDisk === group?.dataset.setupDiskPartitions)?.setAttribute('aria-pressed', 'true');
     }
-    disks.forEach((disk) => disk.addEventListener('click', () => select(disk)));
-    const existing = groups.find((group) => Array.from(group.querySelectorAll('[data-device]'))
-      .some((button) => button.dataset.device === selectedDevice));
-    const initial = disks.find((disk) => disk.dataset.setupDisk === existing?.dataset.setupDiskPartitions) || disks[0];
-    if (initial) select(initial);
-    return {
-      reveal() {
-        const disk = disks.find((button) => button.dataset.setupDisk === selected);
-        disk?.scrollIntoView({block: 'nearest', inline: 'nearest'});
-      },
-
-    };
+    return {reveal() { form.querySelector('[data-setup-disk][aria-pressed="true"]')?.scrollIntoView({block: 'nearest', inline: 'nearest'}); }};
   }
 
   function initSetupStorage(root = document) {
-    window.JustVoxelSetupDiskActions?.init(root);
     const storageForm = root.querySelector('[data-setup-storage-form]');
     if (storageForm) {
       const type = storageForm.querySelector('[data-setup-storage-type]');
@@ -43,7 +24,6 @@
       const systemPanel = storageForm.querySelector('[data-setup-storage-system-panel]');
       const internalPanel = storageForm.querySelector('[data-setup-storage-internal-panel]');
       const existingButtons = Array.from(storageForm.querySelectorAll('[data-setup-existing-partition]'));
-      const prepareButtons = Array.from(storageForm.querySelectorAll('[data-setup-storage-prepare]'));
       const selectedBox = storageForm.querySelector('[data-setup-storage-selected]');
       const selectedDevice = storageForm.querySelector('[data-setup-storage-selected-device]');
       const selectedPath = storageForm.querySelector('[data-setup-storage-selected-path]');
@@ -100,8 +80,10 @@
 
       systemButton?.addEventListener('click', selectSystem);
       internalButton?.addEventListener('click', chooseInternal);
-      existingButtons.forEach((button) => button.addEventListener('click', () => selectExisting(button)));
-      prepareButtons.forEach((button) => button.addEventListener('click', () => window.JustVoxelSetupDiskActions?.open(button.dataset)));
+      storageForm.addEventListener('setup-destination-select', event => {
+        const button = existingButtons.find(candidate => candidate.dataset.device === event.detail);
+        if (button) selectExisting(button);
+      });
 
       if (type?.value === 'partition') {
         setPanels('partition');
@@ -133,7 +115,6 @@
       const choices = Array.from(backupForm.querySelectorAll('[data-setup-backup-choice]'));
       const panels = Array.from(backupForm.querySelectorAll('[data-setup-backup-panel]'));
       const existingButtons = Array.from(backupForm.querySelectorAll('[data-setup-backup-existing]'));
-      const prepareButtons = Array.from(backupForm.querySelectorAll('[data-setup-backup-prepare]'));
       const selectedBox = backupForm.querySelector('[data-setup-backup-selected]');
       const selectedDevice = backupForm.querySelector('[data-setup-backup-selected-device]');
       const selectedPath = backupForm.querySelector('[data-setup-backup-selected-path]');
@@ -231,8 +212,10 @@
           }
         });
       });
-      existingButtons.forEach((button) => button.addEventListener('click', () => selectExisting(button)));
-      prepareButtons.forEach((button) => button.addEventListener('click', () => window.JustVoxelSetupDiskActions?.open(button.dataset)));
+      backupForm.addEventListener('setup-destination-select', event => {
+        const button = existingButtons.find(candidate => candidate.dataset.device === event.detail);
+        if (button) selectExisting(button);
+      });
 
       ['nfs', 'smb'].forEach((kind) => {
         backupForm.querySelector('[data-setup-network-source="' + kind + '"]')?.addEventListener('input', () => syncNetworkFields(kind));
@@ -270,6 +253,7 @@
       }
     }
 
+    window.JustVoxelSetupDiskActions?.init(root);
   }
   window.JustVoxelSetupStorage = { init: initSetupStorage };
   initSetupStorage();

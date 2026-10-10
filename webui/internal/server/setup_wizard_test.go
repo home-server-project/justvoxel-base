@@ -35,54 +35,66 @@ func assertSetupApplicationLogo(t *testing.T, body string) {
 
 func TestAdvancedConnectionsBedrockToggleCapabilities(t *testing.T) {
 	for _, serverType := range []string{"paper", "purpur", "vanilla"} {
-		t.Run(serverType, func(t *testing.T) {
-			app, err := New(setupWizardClient(), Config{Version: "test", ManagementAPI: "v1"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer firstRunSetupDrafts.delete(app, "session-token")
-			startSetup(t, app)
-			page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-			assertSetupApplicationLogo(t, page.Body.String())
-			values := validServerValues()
-			values.Set("server_type", serverType)
-			if rr := saveServerStep(t, app, values); rr.Code != http.StatusSeeOther {
-				t.Fatalf("server selection returned %d: %s", rr.Code, rr.Body.String())
-			}
-			page = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-			if page.Code != http.StatusOK {
-				t.Fatalf("Connections returned %d", page.Code)
-			}
-			body := page.Body.String()
-			const toggleStart = `<input class="date-time-switch" type="checkbox" name="bedrock_enabled" data-bedrock-toggle`
-			start := strings.Index(body, toggleStart)
-			if start < 0 || !strings.Contains(body, `<label class="date-time-automatic">`) {
-				t.Fatal("Bedrock control does not use the Date & Time switch pattern")
-			}
-			control := body[start : start+strings.Index(body[start:], ">")+1]
-			vanilla := serverType == "vanilla"
-			if strings.Contains(control, "disabled") != vanilla {
-				t.Fatalf("incorrect disabled state: %s", control)
-			}
-			if vanilla && strings.Contains(control, "checked") {
-				t.Fatalf("Vanilla toggle rendered enabled: %s", control)
-			}
-			warning := `<p class="notice error">` + vanillaBedrockWarning + `</p>`
-			if strings.Contains(body, warning) != vanilla || strings.Contains(body, vanillaBedrockWarning) != vanilla {
-				t.Fatal("incorrect Vanilla warning or danger class")
-			}
-			if !vanilla {
-				connections := validConnectionValues()
-				connections.Set("bedrock_enabled", "on")
-				if rr := saveConnectionsStep(t, app, connections); rr.Code != http.StatusSeeOther {
-					t.Fatalf("Bedrock submission returned %d: %s", rr.Code, rr.Body.String())
+		for _, enabled := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/enabled=%t", serverType, enabled), func(t *testing.T) {
+				client := setupWizardClient()
+				client.defaults.BedrockEnabled = enabled
+				app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+				if err != nil {
+					t.Fatal(err)
 				}
-				draft, _ := firstRunSetupDrafts.get(app, "session-token")
-				if !draft.Server.BedrockEnabled {
-					t.Fatal("supported server did not preserve Bedrock enabled")
+				defer firstRunSetupDrafts.delete(app, "session-token")
+				startSetup(t, app)
+				page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
+				assertSetupApplicationLogo(t, page.Body.String())
+				values := validServerValues()
+				values.Set("server_type", serverType)
+				if rr := saveServerStep(t, app, values); rr.Code != http.StatusSeeOther {
+					t.Fatalf("server selection returned %d: %s", rr.Code, rr.Body.String())
 				}
-			}
-		})
+				page = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
+				if page.Code != http.StatusOK {
+					t.Fatalf("Connections returned %d", page.Code)
+				}
+				body := page.Body.String()
+				const toggleStart = `<input class="date-time-switch" type="checkbox" name="bedrock_enabled" data-bedrock-toggle`
+				start := strings.Index(body, toggleStart)
+				if start < 0 || !strings.Contains(body, `<label class="date-time-automatic">`) {
+					t.Fatal("Bedrock control does not use the Date & Time switch pattern")
+				}
+				control := body[start : start+strings.Index(body[start:], ">")+1]
+				labelStart := strings.LastIndex(body[:start], `<label class="date-time-automatic">`)
+				if labelStart < 0 {
+					t.Fatal("Bedrock switch must follow its Date & Time label")
+				}
+				copy := body[labelStart:start]
+				if !strings.Contains(copy, `<span><strong>Enable Bedrock cross-play</strong><small class="field-help">`) || !strings.HasSuffix(copy, `</small></span>`) || !strings.HasPrefix(body[start+len(control):], `</label>`) {
+					t.Fatal("Bedrock label and description must precede the trailing Date & Time switch")
+				}
+				vanilla := serverType == "vanilla"
+				if strings.Contains(control, "disabled") != vanilla {
+					t.Fatalf("incorrect disabled state: %s", control)
+				}
+				if strings.Contains(control, "checked") != (enabled && !vanilla) {
+					t.Fatalf("incorrect default checked state: %s", control)
+				}
+				warning := `<p class="notice error">` + vanillaBedrockWarning + `</p>`
+				if strings.Contains(body, warning) != vanilla || strings.Contains(body, vanillaBedrockWarning) != vanilla {
+					t.Fatal("incorrect Vanilla warning or danger class")
+				}
+				if !vanilla {
+					connections := validConnectionValues()
+					connections.Set("bedrock_enabled", "on")
+					if rr := saveConnectionsStep(t, app, connections); rr.Code != http.StatusSeeOther {
+						t.Fatalf("Bedrock submission returned %d: %s", rr.Code, rr.Body.String())
+					}
+					draft, _ := firstRunSetupDrafts.get(app, "session-token")
+					if !draft.Server.BedrockEnabled {
+						t.Fatal("supported server did not preserve Bedrock enabled")
+					}
+				}
+			})
+		}
 	}
 }
 
@@ -665,7 +677,7 @@ func TestSetupWizardStorageNoLongerLeavesFirstRunForAdvancedStorage(t *testing.T
 	if strings.Contains(markup, "/settings/storage-provision?from=setup") {
 		t.Fatal("first-run Storage still leaves the wizard for legacy Advanced Storage")
 	}
-	for _, want := range []string{"Use another internal disk", "data-setup-storage-prepare=\"format\"", "data-setup-storage-prepare=\"create_partition\""} {
+	for _, want := range []string{"Use another internal disk", "data-storage-partition", "data-storage-free-space"} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("first-run Storage replacement missing %q", want)
 		}
@@ -727,22 +739,14 @@ func TestSetupVersionPreviewPresentationContract(t *testing.T) {
 	}
 	source := string(script)
 	for _, want := range []string{
-		`"setup-version-primary"`, `"setup-version-candidate"`, `policy === "recommended" ? "Recommended"`,
-		`"Recommended follows the newest stable compatible Minecraft version."`, `status.available !== status.selected_candidate`,
-		`"setup-version-secondary"`, `"Newest available version"`,
+		`"setup-version-candidate"`, `policy === "recommended" ? "Recommended"`,
 		`{ STABLE: "Stable", BETA: "Beta", ALPHA: "Alpha", RELEASE: "Release" }`,
-		`channelLabel(status.available_channel)`, `channelLabel(status.candidate_channel)`, `Server software build channel:`,
-		`"setup-version-explanation"`,
-		`const incompatible = status.crossplay_enabled && !status.crossplay_compatible;`,
-		`const panel = make("div", "notice " + (incompatible || !status.selected_candidate ? "warning" : "success") + " setup-version-panel", "");`,
-		`primary.append(make("strong", "setup-version-candidate", status.selected_candidate));`,
-		`parts.push(primary);`, `panel.append(...parts);`, `preview.replaceChildren(panel);`,
-		`if (status.crossplay_enabled && status.selected_candidate)`,
-		`const supported = status.geyser_supported_version || "Unavailable";`,
-		`Bedrock cross-play is compatible. Current supported version: ${supported}.`,
-		`parts.push(make("p", "setup-version-compatibility", compatibility));`,
-		`"Latest follows newer Minecraft server versions when available."`,
-		`The selected version is not currently compatible with Bedrock cross-play.`, `Current supported Bedrock version: ${supported}`,
+		`channelLabel(status.candidate_channel)`, `Minecraft build classification:`,
+		`"setup-version-explanation"`, `const summary = make("div", "notice " + (status.selected_candidate ? "success" : "warning") + " setup-version-panel", "");`,
+		`status.crossplay_compatible ? "success" : "warning"`,
+		`preview.replaceChildren(summary, compatibility);`,
+		`Bedrock cross-play is supported.`, `Bedrock cross-play is not supported.`,
+		`Current supported Minecraft version: ${status.geyser_supported_version || "Unavailable"}`,
 		`next.disabled = !status.selected_candidate || (status.crossplay_enabled && !status.crossplay_compatible);`,
 		`if (policy === "pinned" && !version)`,
 	} {
@@ -756,8 +760,8 @@ func TestSetupVersionPreviewPresentationContract(t *testing.T) {
 	if !strings.Contains(source, "const status = await response.json();") || !strings.Contains(source, "if (ticket === sequence) show(status, policy);") {
 		t.Fatal("version preview must render the current API response")
 	}
-	if strings.Count(source, `const panel = make("div", "notice "`) != 1 || strings.Contains(source, `notice success setup-version-compatibility`) || strings.Contains(source, `notice warning setup-version-compatibility`) {
-		t.Fatal("version and compatibility information must share one notice panel")
+	if !strings.Contains(source, `preview.replaceChildren(summary, compatibility);`) || strings.Contains(source, "follows the newest") || strings.Contains(source, "Server software build channel") {
+		t.Fatal("version and compatibility must be separate panels without future compatibility promises")
 	}
 	styles, err := assets.ReadFile("static/setup.css")
 	if err != nil {
@@ -765,8 +769,8 @@ func TestSetupVersionPreviewPresentationContract(t *testing.T) {
 	}
 	for _, want := range []string{
 		`.setup-version-panel{display:grid;`,
-		`.setup-version-panel.warning{border:1px solid var(--jv-warning);background:color-mix(in srgb,var(--jv-warning) 18%,var(--jv-surface-sunken))}`,
-		`.setup-version-panel .setup-version-primary{padding:0;border:0;background:transparent}`,
+		`.setup-version-compatibility.warning{border:1px solid var(--jv-warning);background:color-mix(in srgb,var(--jv-warning) 18%,var(--jv-surface-sunken))}`,
+		`.setup-version-compatibility p{margin:0}`,
 	} {
 		if !strings.Contains(string(styles), want) {
 			t.Fatalf("version preview styling contract missing %q", want)

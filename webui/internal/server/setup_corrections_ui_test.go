@@ -39,35 +39,49 @@ const fixture = { selected_candidate: "1.21.8", available: "1.21.8", candidate_c
 for (const policy of ["recommended", "latest", "pinned"]) {
   show(fixture, policy);
   assert.equal(next.disabled, false);
-  assert.equal(preview.children.length, 1);
-  assert(text().includes("1.21.8"));
-  assert(text().includes("Server software build channel: Release"));
-  assert(!text().includes("pre-release"));
-  assert(!text().includes("Newest available version"));
-  assert.equal(preview.children.filter(n => n.className === "notice success setup-version-panel").length, 1);
-  assert.equal(preview.children[0].children.filter(n => /compatibility/.test(n.className)).length, 1);
+  assert.equal(preview.children.length, 2);
+  assert.equal(preview.children[0].className, "notice success setup-version-panel");
+  assert.equal(preview.children[1].className, "notice success setup-version-compatibility");
+  assert(text().includes("Minecraft build classification: Release"));
+  assert(text().includes("Bedrock cross-play is supported."));
+  assert(text().includes("Current supported Minecraft version: 1.21.8."));
+  assert(!text().includes("channel"));
+  assert(!text().includes("follows"));
+  assert.equal(preview.children[0].children.filter(n => n.textContent === "1.21.8").length, 1);
 }
 show({ ...fixture, candidate_channel: "BETA" }, "recommended");
-assert(text().includes("Server software build channel: Beta"));
-assert(!text().includes("Stable choice"));
-show({ ...fixture, candidate_channel: "", crossplay_enabled: false }, "pinned");
-assert(text().includes("Server software build channel: Unavailable"));
-assert.equal(preview.children[0].children.filter(n => /compatibility/.test(n.className)).length, 0);
+assert(text().includes("Minecraft build classification: Beta"));
 for (const policy of ["latest", "pinned"]) {
-  show({ ...fixture, crossplay_compatible: false, geyser_supported_version: "1.21.7" }, policy);
+  show({ ...fixture, selected_candidate: "1.22.3", crossplay_compatible: false, geyser_supported_version: "1.22.2" }, policy);
   assert.equal(next.disabled, true);
-  assert(text().includes("Current supported Bedrock version: 1.21.7"));
-  assert(text().includes("Choose Recommended, choose a compatible Specific version, or disable Bedrock cross-play."));
-  assert.equal(preview.children.filter(n => n.className === "notice warning setup-version-panel").length, 1);
-  assert.equal(preview.children.filter(n => /success/.test(n.className)).length, 0);
+  assert.equal(preview.children.length, 2);
+  assert.equal(preview.children[0].className, "notice success setup-version-panel");
+  assert.equal(preview.children[1].className, "notice warning setup-version-compatibility");
+  assert(text().includes("1.22.3"));
+  assert(text().includes("Current supported Minecraft version: 1.22.2."));
+  assert(text().includes("Bedrock cross-play is not supported."));
+  assert(text().includes("Choose Recommended, select a compatible Specific version, or disable Bedrock cross-play."));
 }
-show({ ...fixture, available: "1.21.9", available_channel: "ALPHA" }, "recommended");
-assert(text().includes("Newest available version"));
-assert(text().includes("1.21.9 · Server build: Alpha"));
-assert(text().includes("Recommended follows the newest stable compatible Minecraft version."));
-show({ ...fixture, selected_candidate: "", reason: "No build found" }, "pinned");
+show({ ...fixture, crossplay_enabled: false, crossplay_compatible: false }, "pinned");
+assert.equal(next.disabled, false);
+assert.equal(preview.children.length, 2);
+for (const policy of ["recommended", "latest", "pinned"]) {
+  for (const candidate of ["", undefined]) {
+    for (const compatible of [true, false]) {
+      show({ ...fixture, selected_candidate: candidate, reason: "No build found", crossplay_enabled: false, crossplay_compatible: compatible }, policy);
+      assert.equal(next.disabled, true);
+      assert.equal(preview.children.length, 2);
+      assert.equal(preview.children[0].className, "notice warning setup-version-panel");
+      assert.equal(preview.children[1].className, "notice " + (compatible ? "success" : "warning") + " setup-version-compatibility");
+      assert(!preview.children[0].children.some(n => n.className === "setup-version-candidate"));
+      assert(text().includes("No build found"));
+    }
+  }
+}
+show({ ...fixture, selected_candidate: "", reason: "" }, "pinned");
 assert.equal(next.disabled, true);
-assert(text().includes("No build found"));
+assert.equal(preview.children[0].className, "notice warning setup-version-panel");
+assert(text().includes("No usable server build was found for this version."));
 `
 	cmd := exec.Command("node")
 	cmd.Stdin = strings.NewReader(program)
@@ -169,11 +183,47 @@ func TestSystemCorrectionsPreserveMenusAndMetadata(t *testing.T) {
 
 func TestWizardStoragePreparationsStayInline(t *testing.T) {
 	markup := correctionSource(t, "templates/setup_wizard.html")
-	if strings.Contains(markup, "data-setup-storage-manage") || strings.Contains(markup, "setup-storage-manager") {
-		t.Fatal("wizard must not open a Storage workspace")
+	storage := correctionSource(t, "templates/storage_browser.html")
+	for _, name := range []string{"storage_partition_operation", "storage_free_operation", "storage_partition_create_review", "storage_partition_action_review"} {
+		call := `{{template "` + name + `" .}}`
+		if strings.Count(markup, call) != 2 || !strings.Contains(storage, call) || !strings.Contains(storage, `{{define "`+name+`"}}`) {
+			t.Fatalf("operation component %s must be shared by both wizard steps and Control Center", name)
+		}
 	}
-	if strings.Count(markup, "data-setup-partition-actions") != 2 || strings.Count(markup, "data-setup-disk-review") != 1 {
-		t.Fatal("both steps need inline partition actions and one focused dialog")
+	for _, forbidden := range []string{"data-setup-storage-manage", "setup-storage-manager", "data-setup-partition-actions", "data-setup-disk-action", "data-setup-disk-review", "/workspace/storage"} {
+		if strings.Contains(markup, forbidden) {
+			t.Fatalf("wizard duplicate or workspace: %s", forbidden)
+		}
+	}
+	adapter := correctionSource(t, "static/setup-storage-actions.js")
+	if !strings.Contains(adapter, "window.JustVoxelStorageBrowser.init(current") || !strings.Contains(adapter, "inlineDetails: true") || strings.Contains(adapter, "/api/new-storage/") || strings.Contains(adapter, "showModal") {
+		t.Fatal("wizard must delegate operation presentation and API logic to Storage browser")
+	}
+}
+
+func TestWizardScheduleAndHeadings(t *testing.T) {
+	markup := correctionSource(t, "templates/setup_wizard.html")
+	start := strings.Index(markup, `<div class="setup-backup-topline">`)
+	end := strings.Index(markup[start:], `<div class="setup-backup-choice-grid">`)
+	schedule := markup[start : start+end]
+	if strings.Index(schedule, "setup-backup-schedule") > strings.Index(schedule, "setup-backup-automatic") || strings.Index(schedule, "Automatic backups</span>") > strings.Index(schedule, `name="backup_automatic"`) {
+		t.Fatal("schedule must be on left; automatic label must precede right-hand switch")
+	}
+	if strings.Contains(markup, "Run backups on schedule.") || !strings.Contains(markup, `class="setup-toggle-field setup-backup-automatic"`) {
+		t.Fatal("toggle fields are inconsistent")
+	}
+	review := correctionSource(t, "templates/setup_review.html")
+	for _, source := range []string{markup, review} {
+		if strings.Contains(source, "Set up JustVoxel") {
+			t.Fatal("redundant setup heading remains")
+		}
+	}
+	if !strings.Contains(review, `{{if ne .SetupMode "recommended"}}`) || strings.Count(review, `class="setup-number"`) != 7 || !strings.Contains(review, "<h2>Review</h2>") {
+		t.Fatal("Review must keep its title and Advanced-only navigation")
+	}
+	css := correctionSource(t, "static/setup.css")
+	if !strings.Contains(css, ".setup-toggle-field{display:flex;align-items:center;justify-content:space-between") {
+		t.Fatal("toggle must align to far right")
 	}
 }
 

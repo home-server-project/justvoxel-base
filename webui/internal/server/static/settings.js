@@ -157,35 +157,19 @@ if (versionPolicy && versionInput && specificVersionField) {
       node.textContent = value;
       return node;
     };
-    const parts = [];
-    const incompatible = status.crossplay_enabled && !status.crossplay_compatible;
-    const panel = make("div", "notice " + (incompatible || !status.selected_candidate ? "warning" : "success") + " setup-version-panel", "");
+    const summary = make("div", "notice " + (status.selected_candidate ? "success" : "warning") + " setup-version-panel", "");
+    summary.append(make("span", "setup-version-kicker", policy === "recommended" ? "Recommended" : policy === "latest" ? "Latest" : "Specific"));
     if (status.selected_candidate) {
-      const primary = make("div", "setup-version-primary", "");
-      primary.append(make("span", "setup-version-kicker", policy === "recommended" ? "Recommended" : policy === "latest" ? "Latest" : "Specific"));
-      primary.append(make("strong", "setup-version-candidate", status.selected_candidate));
-      primary.append(make("span", "setup-version-note", `Server software build channel: ${channelLabel(status.candidate_channel)}`));
-      parts.push(primary);
+      summary.append(make("strong", "setup-version-candidate", status.selected_candidate));
+      summary.append(make("span", "setup-version-note", `Minecraft build classification: ${channelLabel(status.candidate_channel)}`));
+    } else {
+      summary.append(make("p", "setup-version-explanation", status.reason || "No usable server build was found for this version."));
     }
-    if (status.available && status.available !== status.selected_candidate) {
-      const secondary = make("div", "setup-version-secondary", "");
-      secondary.append(make("span", "setup-version-kicker", "Newest available version"));
-      secondary.append(make("span", "setup-version-newer", `${status.available}${status.available_channel ? ` · Server build: ${channelLabel(status.available_channel)}` : ""}`));
-      parts.push(secondary);
-    }
-    if (policy === "recommended") parts.push(make("p", "setup-version-explanation", "Recommended follows the newest stable compatible Minecraft version."));
-    if (policy === "latest") parts.push(make("p", "setup-version-explanation", "Latest follows newer Minecraft server versions when available."));
-    if (policy === "pinned") parts.push(make("p", "setup-version-explanation", "Specific uses the exact Minecraft version you choose."));
-    if (status.crossplay_enabled && status.selected_candidate) {
-      const supported = status.geyser_supported_version || "Unavailable";
-      const compatibility = status.crossplay_compatible
-        ? `Bedrock cross-play is compatible. Current supported version: ${supported}.`
-        : `The selected version is not currently compatible with Bedrock cross-play. Choose Recommended, choose a compatible Specific version, or disable Bedrock cross-play. Current supported Bedrock version: ${supported}.`;
-      parts.push(make("p", "setup-version-compatibility", compatibility));
-    }
-    if (!status.selected_candidate) parts.push(make("p", "setup-version-explanation", status.reason || "No usable server build was found for this version."));
-    panel.append(...parts);
-    preview.replaceChildren(panel);
+    const compatibility = make("div", "notice " + (status.crossplay_compatible ? "success" : "warning") + " setup-version-compatibility", "");
+    compatibility.append(make("p", "", status.crossplay_compatible ? "Bedrock cross-play is supported." : "Bedrock cross-play is not supported."));
+    if (!status.crossplay_compatible) compatibility.append(make("p", "", "Choose Recommended, select a compatible Specific version, or disable Bedrock cross-play."));
+    compatibility.append(make("p", "", `Current supported Minecraft version: ${status.geyser_supported_version || "Unavailable"}.`));
+    preview.replaceChildren(summary, compatibility);
     next.disabled = !status.selected_candidate || (status.crossplay_enabled && !status.crossplay_compatible);
   };
   const refresh = async () => {

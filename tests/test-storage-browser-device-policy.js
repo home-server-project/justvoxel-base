@@ -11,6 +11,8 @@ const actions = ["mount-for-now", "mount-permanently", "unmount-for-now", "make-
 const context = {
   actionButtons: actions.map(action => ({dataset: {storageAction: action}, hidden: true})),
   detailActions: {}, protectedNote: {}, detail: {}, migrateButton: {},
+  // These bindings belong to initStorageBrowser's closure in actual browser execution.
+  setupChoice: null, options: {},
   normalizedFilesystem: data => data.filesystem || "",
   setOptional: () => {}, closeActionMenu: () => {},
   selectedAction: "mount-permanently", mountInput: {value: "/var/mnt/sda"},
@@ -69,3 +71,18 @@ for (const filesystem of ["fat", "swap"]) {
 }
 context.configurePartitionActions({type: "part", filesystem: "xfs", mounted: "Yes"}, null);
 assert.equal(context.actionButtons.find(button => button.dataset.storageAction === "use-for-backups").hidden, true);
+
+// Setup shares the policy, with a separate choice limited to its eligible destinations.
+context.setupChoice = {hidden: true};
+context.options = {inlineDetails: true, onSelect() {}, canSelect: device => device === "/dev/vdb1"};
+const setupPartition = {path: "/dev/vdb1", type: "part", filesystem: "xfs", minecraftCandidate: "Yes"};
+const permanentMount = {persistence: "justvoxel", mounted: true, current_mount_point: "/var/mnt/vdb1", mount_point: "/var/mnt/vdb1"};
+check(setupPartition, permanentMount, ["format", "delete_partition", "unmount-for-now", "remove-permanent"]);
+assert.equal(context.setupChoice.hidden, false);
+assert.equal(context.migrateButton.hidden, true);
+for (const protection of [{system: "Yes"}, {readonly: "Yes"}]) {
+  check({...setupPartition, ...protection, path: "/dev/protected"}, permanentMount, []);
+  assert.equal(context.setupChoice.hidden, true);
+  assert.equal(context.detailActions.hidden, true);
+  assert.equal(context.protectedNote.hidden, false);
+}

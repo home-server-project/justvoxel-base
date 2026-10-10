@@ -741,7 +741,14 @@ func TestStorageBrowserInteractionContract(t *testing.T) {
 	}
 	script := string(scriptContent)
 	for _, want := range []string{
-		`detailDialog.showModal()`,
+		`function showDetails(panel)`,
+		`if (options.inlineDetails) panel.hidden = false;`,
+		`else panel.showModal();`,
+		`showDetails(detailDialog);`,
+		`function hideDetails(panel)`,
+		`if (options.inlineDetails) panel.hidden = true;`,
+		`else panel.close();`,
+		`hideDetails(detailDialog);`,
 		`detailClose?.addEventListener("click"`,
 		`detailDialog?.addEventListener("cancel", closeActionMenu)`,
 		`"/api/new-storage/whole-disk/" + phase`,
@@ -750,9 +757,6 @@ func TestStorageBrowserInteractionContract(t *testing.T) {
 		if !strings.Contains(script, want) {
 			t.Fatalf("storage browser behavior missing %q", want)
 		}
-	}
-	if strings.Contains(script, "detailDialog?.close()") && !strings.Contains(script, "detailClose?.addEventListener") {
-		t.Fatal("storage detail dialog can close without explicit close control")
 	}
 }
 
