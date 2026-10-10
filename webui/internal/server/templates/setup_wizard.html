@@ -192,7 +192,6 @@
           </button>
           {{end}}
         </div>
-        <p class="field-help">Saved mount conflicts may include stale JustVoxel settings. Ask the appliance administrator to compare the saved UUID and mount location with this partition before continuing. Setup cannot overwrite a conflict.</p>
         <div class="setup-partition-browser">
           {{range .StorageDisks}}{{$disk := .}}
           <article class="storage-partition-group" data-setup-disk-partitions="{{.Path}}" hidden>
@@ -232,17 +231,17 @@
         {{if gt .ExternalStorageCount 0}}
         <div class="notice setup-storage-external-note"><strong>External drives are not offered for Minecraft data.</strong><span>{{.ExternalStorageCount}} USB/external disk{{if ne .ExternalStorageCount 1}}s were{{else}} was{{end}} detected. External storage remains appropriate for backups and will be available on the Backup step.</span></div>
         {{end}}
-        <section class="setup-storage-operation" data-storage-detail-dialog hidden>{{template "storage_partition_operation" .}}</section>
-        <section class="setup-storage-operation" data-storage-free-detail-dialog hidden>{{template "storage_free_operation" .}}</section>
+        <dialog class="storage-detail-dialog setup-storage-operation" data-storage-detail-dialog aria-label="Partition details">{{template "storage_partition_operation" .}}</dialog>
+        <dialog class="storage-detail-dialog setup-storage-operation" data-storage-free-detail-dialog aria-label="Unallocated space details">{{template "storage_free_operation" .}}</dialog>
       </section>
 
 
+      <div class="notice error" role="alert" data-setup-inventory-error hidden></div>
       </div>
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
       <input type="hidden" value="{{.CSRF}}" data-storage-action-csrf>
       {{template "storage_partition_create_review" .}}
       {{template "storage_partition_action_review" .}}
-      <div class="notice error" role="alert" data-setup-inventory-error hidden></div>
     </form>
 
     {{else if eq .CurrentStep 5}}
@@ -304,7 +303,6 @@
           </button>
           {{end}}
         </div>
-        <p class="field-help">Saved mount conflicts may include stale JustVoxel settings. Ask the appliance administrator to compare the saved UUID and mount location with this partition before continuing. Setup cannot overwrite a conflict.</p>
         <div class="setup-partition-browser">
           {{range .BackupDisks}}{{$disk := .}}
           <article class="storage-partition-group" data-setup-disk-partitions="{{.Path}}" hidden>
@@ -336,8 +334,8 @@
           {{end}}
         </div>
         {{else}}<div class="notice">No local backup disk with a usable target was reported.</div>{{end}}
-        <section class="setup-storage-operation" data-storage-detail-dialog hidden>{{template "storage_partition_operation" .}}</section>
-        <section class="setup-storage-operation" data-storage-free-detail-dialog hidden>{{template "storage_free_operation" .}}</section>
+        <dialog class="storage-detail-dialog setup-storage-operation" data-storage-detail-dialog aria-label="Partition details">{{template "storage_partition_operation" .}}</dialog>
+        <dialog class="storage-detail-dialog setup-storage-operation" data-storage-free-detail-dialog aria-label="Unallocated space details">{{template "storage_free_operation" .}}</dialog>
       </section>
 
       <section data-setup-backup-panel="nfs" {{if ne .Backups.Type "nfs"}}hidden{{end}}>
@@ -367,12 +365,12 @@
       {{if .SameDiskWarning}}<div class="setup-backup-resilience setup-disk-warning" role="note" data-setup-same-disk-warning><strong>Backups are on the same disk</strong><span>If this disk fails, both Minecraft and its backups could be lost.</span></div>{{end}}
 
 
+      <div class="notice error" role="alert" data-setup-inventory-error hidden></div>
       </div>
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
       <input type="hidden" value="{{.CSRF}}" data-storage-action-csrf>
       {{template "storage_partition_create_review" .}}
       {{template "storage_partition_action_review" .}}
-      <div class="notice error" role="alert" data-setup-inventory-error hidden></div>
     </form>
 
     {{else}}

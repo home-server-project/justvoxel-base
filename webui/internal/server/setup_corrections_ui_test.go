@@ -183,7 +183,7 @@ func TestSystemCorrectionsPreserveMenusAndMetadata(t *testing.T) {
 	}
 }
 
-func TestWizardStoragePreparationsStayInline(t *testing.T) {
+func TestWizardStoragePreparationsUseSharedModals(t *testing.T) {
 	markup := correctionSource(t, "templates/setup_wizard.html")
 	storage := correctionSource(t, "templates/storage_browser.html")
 	for _, name := range []string{"storage_partition_operation", "storage_free_operation", "storage_partition_create_review", "storage_partition_action_review"} {
@@ -198,8 +198,23 @@ func TestWizardStoragePreparationsStayInline(t *testing.T) {
 		}
 	}
 	adapter := correctionSource(t, "static/setup-storage-actions.js")
-	if !strings.Contains(adapter, "window.JustVoxelStorageBrowser.init(current") || !strings.Contains(adapter, "inlineDetails: true") || strings.Contains(adapter, "/api/new-storage/") || strings.Contains(adapter, "showModal") {
+	if !strings.Contains(adapter, "window.JustVoxelStorageBrowser.init(current") || !strings.Contains(adapter, "inlineDetails: false") || strings.Contains(adapter, "inlineDetails: true") {
 		t.Fatal("wizard must delegate operation presentation and API logic to Storage browser")
+	}
+	for _, name := range []string{"detail", "free-detail"} {
+		if strings.Count(markup, `<dialog class="storage-detail-dialog setup-storage-operation" data-storage-`+name+`-dialog`) != 2 || strings.Contains(markup, `<section class="setup-storage-operation" data-storage-`+name+`-dialog`) {
+			t.Fatalf("both wizard steps must open %s details in shared modal dialogs without expanding the panel", name)
+		}
+	}
+	// The adapter reads mount identity during inventory refresh; mutations and
+	// their plan/apply dialogs remain owned by the shared Storage browser.
+	for _, forbidden := range []string{"/actions/plan", "/actions/apply", "/mounts/plan", "/mounts/apply", `method: 'POST'`, `method: "POST"`} {
+		if strings.Contains(adapter, forbidden) {
+			t.Fatalf("wizard duplicated storage mutation machinery: %s", forbidden)
+		}
+	}
+	if strings.Contains(adapter, "notice.showModal()") || strings.Contains(adapter, "current.inert = true") || !strings.Contains(adapter, "current.dataset.inventoryStale = 'true'") {
+		t.Fatal("refresh recovery must invalidate stale cards without blocking wizard navigation")
 	}
 }
 
@@ -259,10 +274,10 @@ func TestWizardScheduleAndHeadings(t *testing.T) {
 	}
 }
 
-func TestWizardInlineStorageBehaviorAndStateRefresh(t *testing.T) {
+func TestWizardModalStorageBehaviorAndStateRefresh(t *testing.T) {
 	cmd := exec.Command("node", "../../../tests/test-setup-inline-storage.js")
 	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("inline wizard disk operations: %v\n%s", err, output)
+		t.Fatalf("modal wizard disk operations: %v\n%s", err, output)
 	}
 }
 

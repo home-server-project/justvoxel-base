@@ -272,8 +272,8 @@ func TestSetupWizardBackupMissingPartitionKeepsLocalMode(t *testing.T) {
 	}
 }
 
-// Inspect the active wizard step; storage preparations must stay inline.
-func setupWizardInlineStorageMarkup(t *testing.T, app *App) string {
+// Inspect the active wizard step; storage preparations use shared modal dialogs.
+func setupWizardModalStorageMarkup(t *testing.T, app *App) string {
 	t.Helper()
 	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	if page.Code != http.StatusOK {
@@ -293,17 +293,25 @@ func setupWizardInlineStorageMarkup(t *testing.T, app *App) string {
 	if strings.Count(markup, `data-storage-create-dialog`) != 1 || strings.Count(markup, `data-storage-action-dialog`) != 1 || strings.Count(markup, `class="setup-number"`) != 6 {
 		t.Fatal("Advanced setup must retain six cards and shared focused reviews")
 	}
+	for _, name := range []string{"detail", "free-detail"} {
+		if !strings.Contains(markup, `class="storage-detail-dialog setup-storage-operation" data-storage-`+name+`-dialog`) || strings.Contains(markup, `<section class="setup-storage-operation" data-storage-`+name+`-dialog`) {
+			t.Fatalf("%s details must use a real modal dialog", name)
+		}
+	}
+	if strings.Contains(markup, "Saved mount conflicts may include") {
+		t.Fatal("normal setup must not require interpreting appliance mount configuration")
+	}
 	return markup
 }
 
-func TestSetupWizardStorageUsesInlineReviewedStorageActions(t *testing.T) {
+func TestSetupWizardStorageUsesModalReviewedStorageActions(t *testing.T) {
 	app, err := New(setupWizardStorageClient(), Config{Version: "test", ManagementAPI: "v1"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer firstRunSetupDrafts.delete(app, "session-token")
 	advanceToStorage(t, app)
-	markup := setupWizardInlineStorageMarkup(t, app)
+	markup := setupWizardModalStorageMarkup(t, app)
 	for _, want := range []string{`data-storage-action="format"`, `data-storage-free-space`} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("inline storage missing %q", want)
@@ -453,7 +461,7 @@ func TestSetupWizardBackupUsesInlineReviewedStorageActions(t *testing.T) {
 	if rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/storage", storage.Encode())); rr.Code != http.StatusSeeOther {
 		t.Fatalf("storage save returned %d", rr.Code)
 	}
-	markup := setupWizardInlineStorageMarkup(t, app)
+	markup := setupWizardModalStorageMarkup(t, app)
 	for _, want := range []string{`data-storage-action="format"`, `data-storage-free-space`} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("inline backups missing %q", want)

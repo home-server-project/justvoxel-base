@@ -12,9 +12,9 @@
       if (options.inlineDetails) panel.hidden = true;
       else panel.close();
     }
-    function refreshStorageWorkspace() {
+    function refreshStorageWorkspace(message = "Storage updated.") {
       const workspace = root.closest("[data-storage-workspace-dialog]");
-      if (options.onChanged) options.onChanged();
+      if (options.onChanged) options.onChanged(message);
       else workspace?.querySelector("[data-storage-refresh]")?.click();
     }
   const diskButtons = [...root.querySelectorAll("[data-storage-disk]")];
@@ -32,17 +32,41 @@
   if (options.onSelect && actionMenu) {
     setupChoice = document.createElement("button");
     setupChoice.type = "button";
-    setupChoice.textContent = "Choose for setup";
+    setupChoice.textContent = "Use this partition";
+    setupChoice.dataset.setupPartitionSelect = "";
     setupChoice.hidden = true;
     setupChoice.addEventListener("click", () => {
       if (!selectedPartition || !options.canSelect?.(selectedPartition.path, selectedMountStatus)) return;
       options.onSelect(selectedPartition.path, selectedMountStatus);
       closeDetailDialog();
     });
-    actionMenu.querySelector(".storage-action-menu-popover")?.prepend(setupChoice);
+    detailActions?.prepend(setupChoice);
   }
 
-  if (options.inlineDetails) root.addEventListener("submit", event => {
+  const selectionStatus = options.onSelect && detailDialog ? document.createElement("div") : null;
+  if (selectionStatus) {
+    selectionStatus.className = "notice compact";
+    selectionStatus.dataset.setupMountStatus = "";
+    selectionStatus.setAttribute("role", "status");
+    detailDialog.append(selectionStatus);
+  }
+  function selectionFeedback(message, failed = false) {
+    if (!selectionStatus) return;
+    selectionStatus.textContent = message;
+    selectionStatus.className = failed ? "notice error compact" : "notice compact";
+    selectionStatus.setAttribute("role", failed ? "alert" : "status");
+  }
+  function setupMountError(message) {
+    if (/conflict|inconsistent|different filesystem|another filesystem|other filesystem/i.test(message)) {
+      return "Saved mount location conflicts with another filesystem. Choose another partition or ask your administrator for help.";
+    }
+    if (/protected|unavailable|UUID|verify|unsupported/i.test(message)) {
+      return "Partition cannot be selected safely. Choose another partition or retry after refreshing the drives.";
+    }
+    return "Mount operation failed. " + message + " Retry or choose another partition.";
+  }
+
+  if (options.onSelect || options.inlineDetails) root.addEventListener("submit", event => {
     if (root.querySelector("dialog[open]")) event.preventDefault();
   });
 
@@ -353,25 +377,40 @@
   async function loadMountStatus(data) {
     const filesystem = normalizedFilesystem(data);
     const mountable = ["xfs", "ext4", "btrfs", "ntfs", "vfat", "exfat"].includes(filesystem.toLowerCase());
-    if (!mountable || data.system === "Yes" || data.readonly === "Yes") return;
+    if (!mountable || data.system === "Yes" || data.readonly === "Yes") {
+      selectionFeedback(!filesystem && data.system !== "Yes" && data.readonly !== "Yes"
+        ? "Prepare this partition using the partition actions before selecting it."
+        : "Partition cannot be selected safely. Choose another partition.", Boolean(filesystem));
+      return;
+    }
 
     const selectedPath = data.path || "";
     try {
       const response = await fetch("/api/new-storage/mounts/status?device=" + encodeURIComponent(selectedPath), {
         method: "GET",
+        cache: "no-store",
         headers: { "Accept": "application/json" },
         credentials: "same-origin",
       });
       let payload = null;
       try { payload = await response.json(); } catch (_) { payload = null; }
       if (!response.ok || !payload?.ok) throw new Error(payload?.error || "Mount status is unavailable.");
-      if (selectedPartition?.path !== selectedPath) return;
+      if (selectedPartition !== data) return;
       selectedMountStatus = payload.proposed || null;
+      if (options.onSelect) {
+        const eligible = options.canSelect?.(selectedPath, selectedMountStatus);
+        selectionFeedback(eligible
+          ? (selectedMountStatus.mounted ? "Drive already mounted. Use this partition to keep its current location." : "Use this partition, or mount it first using the partition actions.")
+          : (selectedMountStatus?.persistence === "conflict" || selectedMountStatus?.persistence === "other_mount"
+            ? "Saved mount location conflicts with another filesystem. Choose another partition or ask your administrator for help."
+            : "Partition cannot be selected safely. Refresh the drives or choose another partition."), !eligible);
+      }
       configurePartitionActions(selectedPartition, selectedMountStatus);
-    } catch (_) {
-      if (selectedPartition?.path !== selectedPath) return;
+    } catch (error) {
+      if (selectedPartition !== data) return;
       selectedMountStatus = null;
       configurePartitionActions(selectedPartition, null);
+      selectionFeedback(setupMountError(error.message), true);
     }
   }
 
@@ -382,6 +421,7 @@
       closeActionMenu();
       selectedPartition = { ...data };
       selectedMountStatus = null;
+      selectionFeedback("Checking whether this partition can be used safely…");
       if (detail.title) detail.title.textContent = data.path || "Partition";
       if (detail.role) detail.role.textContent = data.role || "Partition";
       if (detail.path) detail.path.textContent = data.path || "";
@@ -401,8 +441,8 @@
       if (detail.mountLabel) detail.mountLabel.textContent = "Mounted at";
       setOptional(detail.mountRow, detail.mount, data.system === "Yes" ? "" : data.mountpoints);
       configurePartitionActions(selectedPartition, null);
+      if (options.onSelect) hideDetails(freeDetailDialog);
       if (options.inlineDetails) {
-        hideDetails(freeDetailDialog);
         partitionButtons.forEach(candidate => candidate.classList.toggle("is-selected", candidate === button));
         freeSpaceButtons.forEach(candidate => candidate.classList.remove("is-selected"));
       }
@@ -680,8 +720,8 @@
       reviewedCreatePartition = null;
       if (freeDetailDevice) freeDetailDevice.textContent = selectedFreeSpace.device || "";
       if (freeDetailSize) freeDetailSize.textContent = selectedFreeSpace.size || "Unknown";
+      if (options.onSelect) hideDetails(detailDialog);
       if (options.inlineDetails) {
-        hideDetails(detailDialog);
         freeSpaceButtons.forEach(candidate => candidate.classList.toggle("is-selected", candidate === button));
         partitionButtons.forEach(candidate => candidate.classList.remove("is-selected"));
       }
@@ -1376,7 +1416,7 @@
       if (!selectedPartition || !actionDialog) return;
       closeActionMenu();
       resetActionDialog(button.dataset.storageAction);
-      if (options.inlineDetails) hideDetails(detailDialog);
+      if (options.onSelect || options.inlineDetails) hideDetails(detailDialog);
       actionDialog.showModal();
       if (selectedAction === "mount-for-now" || selectedAction === "mount-permanently") mountInput?.focus();
       else reviewButton?.focus();
@@ -1478,7 +1518,7 @@
       if (needsConfirmation) confirmSlider?.focus();
       else applyButton?.focus();
     } catch (error) {
-      if (actionError) { actionError.textContent = error.message; actionError.hidden = false; }
+      if (actionError) { actionError.textContent = options.onSelect && selectedAction.startsWith("mount") ? setupMountError(error.message) : error.message; actionError.hidden = false; }
     } finally {
       reviewButton.disabled = false;
       reviewButton.textContent = "Review action";
@@ -1525,10 +1565,10 @@
         confirmation: entered,
       });
       actionDialog?.close();
-      refreshStorageWorkspace();
+      refreshStorageWorkspace(selectedAction.startsWith("mount") ? "Drive mounted successfully." : "Storage updated.");
     } catch (error) {
       actionApplying = false;
-      if (actionError) { actionError.textContent = error.message; actionError.hidden = false; }
+      if (actionError) { actionError.textContent = options.onSelect && selectedAction.startsWith("mount") ? setupMountError(error.message) : error.message; actionError.hidden = false; }
       if (actionClose) actionClose.disabled = false;
       if (actionCancel) actionCancel.disabled = false;
       applyButton.disabled = false;

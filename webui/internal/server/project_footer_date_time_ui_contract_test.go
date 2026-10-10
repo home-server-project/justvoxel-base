@@ -131,8 +131,10 @@ func TestProjectFooterAndDateTimeUIContracts(t *testing.T) {
 			t.Fatalf("Footer page layout missing %q", want)
 		}
 	}
-	// Keep ordinary desktop steps compact, but let the page grow and scroll for
-	// short viewports, long content and browser zoom. Navigation stays in flow.
+	// Desktop steps share the available viewport space, rather than a fixed pixel
+	// height. Short viewports and browser zoom retain accessible page flow.
+	// TestWizardFHDViewportConstraints guards the desktop height breakpoint;
+	// these source contracts do not establish rendered browser geometry.
 	if strings.Contains(setupCSS, "height:clamp(520px") || strings.Contains(setupCSS, "height:calc(100dvh - 185px)") || strings.Contains(setupCSS, "overflow-y:scroll") {
 		t.Fatal("Setup must not use obsolete fixed panel heights or force vertical scrolling")
 	}
@@ -155,10 +157,14 @@ func TestProjectFooterAndDateTimeUIContracts(t *testing.T) {
 		}
 		t.Fatalf("Setup layout rule %q missing properties %v", selector, declarations)
 	}
-	assertRule(".setup-body:has(.setup-wizard-panel),.setup-body:has(.setup-review-panel)", "height:auto", "min-height:100dvh", "overflow-y:auto")
-	assertRule(".setup-body .setup-wizard-panel,.setup-body .setup-review-panel", "height:auto", "overflow:visible")
+	assertRule(".setup-body:has(.setup-wizard-panel),.setup-body:has(.setup-review-panel)", "height:100dvh", "min-height:0", "overflow:visible")
+	assertRule(".setup-body .setup-topbar,.setup-shell>.project-footer", "flex:none")
+	assertRule(".setup-body .setup-wizard-panel,.setup-body .setup-review-panel", "flex:1", "min-height:0", "overflow:visible")
+	assertRule(".setup-body .setup-wizard-panel,.setup-body .setup-review-panel", "height:auto", "min-height:0", "overflow:visible")
 	assertRule(".setup-body .setup-wizard-panel .setup-form>.setup-step-content", "display:flex", "gap:.42rem", "min-width:0", "overflow:visible")
-	assertRule(".setup-body .setup-wizard-panel .setup-form>.setup-step-actions", "position:static", "flex:none", "margin-top:.4rem")
+	assertRule(".setup-body .setup-wizard-panel .setup-form>.setup-step-actions", "position:static", "flex:none", "margin-top:auto")
+	assertRule(".setup-body .setup-review-panel>.setup-step-actions", "margin-top:auto")
+	assertRule(".setup-wizard-panel .storage-disk-grid,.setup-wizard-panel .storage-partition-grid", "max-height:none", "overflow:visible")
 	assertRule(".setup-body .setup-wizard-panel .setup-form>.setup-step-content", "display:contents")
 	assertRule(".setup-body .setup-step-panel .setup-form>.setup-step-actions", "position:sticky", "bottom:0")
 }

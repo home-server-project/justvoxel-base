@@ -1,5 +1,5 @@
 (() => {
-  // Destination selection stays inline; preparations use reviewed storage APIs.
+  // Compact destination browser; details and preparations use shared modal dialogs.
   function diskBrowser(form, selectedDevice) {
     // Physical disk selection belongs to the shared Storage browser.
     form.querySelectorAll('[data-setup-disk]').forEach(button => { button.dataset.storageDisk = button.dataset.setupDisk; });
@@ -8,7 +8,30 @@
       const group = [...form.querySelectorAll('[data-setup-disk-partitions]')].find(panel => [...panel.querySelectorAll('[data-device]')].some(button => button.dataset.device === selectedDevice));
       [...form.querySelectorAll('[data-setup-disk]')].find(button => button.dataset.setupDisk === group?.dataset.setupDiskPartitions)?.setAttribute('aria-pressed', 'true');
     }
-    return {reveal() { form.querySelector('[data-setup-disk][aria-pressed="true"]')?.scrollIntoView({block: 'nearest', inline: 'nearest'}); }};
+    // Page inventories rather than growing the wizard or adding nested scroll regions.
+    form.querySelectorAll('.storage-disk-grid, .storage-partition-grid').forEach(grid => {
+      const cards = [...grid.children];
+      const isDiskGrid = grid.classList.contains('storage-disk-grid');
+      const pageSize = 4;
+      if (cards.length <= pageSize) return;
+      let page = Math.floor(Math.max(0, cards.findIndex(card => card.dataset.device === selectedDevice || card.getAttribute('aria-pressed') === 'true')) / pageSize);
+      const pager = document.createElement('nav');
+      pager.className = 'setup-inventory-pages';
+      pager.setAttribute('aria-label', isDiskGrid ? 'Drive pages' : 'Partition pages');
+      const previous = document.createElement('button'), next = document.createElement('button'), label = document.createElement('span');
+      previous.type = next.type = 'button';
+      previous.className = next.className = 'secondary';
+      previous.textContent = 'Previous'; next.textContent = 'Next';
+      label.setAttribute('aria-live', 'polite');
+      function showPage() {
+        cards.forEach((card, index) => { card.hidden = Math.floor(index / pageSize) !== page; });
+        previous.disabled = page === 0; next.disabled = (page + 1) * pageSize >= cards.length;
+        label.textContent = 'Page ' + (page + 1) + ' of ' + Math.ceil(cards.length / pageSize);
+      }
+      previous.addEventListener('click', () => { page--; showPage(); if (previous.disabled) next.focus(); });
+      next.addEventListener('click', () => { page++; showPage(); if (next.disabled) previous.focus(); });
+      pager.append(previous, label, next); grid.after(pager); showPage();
+    });
   }
 
   function initSetupStorage(root = document) {
@@ -18,7 +41,7 @@
       const device = storageForm.querySelector('[data-setup-storage-device]');
       const mount = storageForm.querySelector('[data-setup-storage-mount]');
       const path = storageForm.querySelector('[data-setup-storage-path]');
-      const disks = diskBrowser(storageForm, device?.value);
+      diskBrowser(storageForm, device?.value);
       const systemButton = storageForm.querySelector('[data-setup-storage-system]');
       const internalButton = storageForm.querySelector('[data-setup-storage-internal]');
       const systemPanel = storageForm.querySelector('[data-setup-storage-system-panel]');
@@ -37,7 +60,6 @@
         if (internalPanel) internalPanel.hidden = kind === 'system';
         systemButton?.classList.toggle('is-selected', kind === 'system');
         internalButton?.classList.toggle('is-selected', kind !== 'system');
-        if (kind !== 'system') disks.reveal();
       }
 
       function selectSystem() {
@@ -108,7 +130,7 @@
       const device = backupForm.querySelector('[data-setup-backup-device]');
       const mount = backupForm.querySelector('[data-setup-backup-mount]');
       const path = backupForm.querySelector('[data-setup-backup-path]');
-      const disks = diskBrowser(backupForm, device?.value);
+      diskBrowser(backupForm, device?.value);
       const source = backupForm.querySelector('[data-setup-backup-source]');
       const username = backupForm.querySelector('[data-setup-backup-username]');
       const domain = backupForm.querySelector('[data-setup-backup-domain]');
@@ -136,7 +158,6 @@
         panels.forEach((panel) => {
           panel.hidden = panel.dataset.setupBackupPanel !== kind;
         });
-        if (kind === 'partition') disks.reveal();
         if (kind !== 'partition') clearLocalSelection();
         else if (selectedBox) selectedBox.hidden = !device?.value;
         syncNetworkFields(kind);

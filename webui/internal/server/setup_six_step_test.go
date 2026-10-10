@@ -4,11 +4,51 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
 )
+
+// These checks guard source layout constraints, not rendered browser geometry.
+// FHD fitting and zoom accessibility still require browser/VM acceptance.
+func TestWizardFHDViewportConstraints(t *testing.T) {
+	css := correctionSource(t, "static/setup.css")
+	frame := regexp.MustCompile(`@media\(min-width:(\d+)px\) and \(min-height:(\d+)px\)\{([^}]+\}[^}]+\}[^}]+\})`).FindStringSubmatch(css)
+	if len(frame) != 4 {
+		t.Fatal("shared desktop frame breakpoint missing")
+	}
+	minWidth, _ := strconv.Atoi(frame[1])
+	minHeight, _ := strconv.Atoi(frame[2])
+	for _, height := range []int{850, 900, 950, 999, 1000, 1080} {
+		if 1920 < minWidth || height < minHeight {
+			t.Fatalf("FHD viewport 1920x%d misses shared frame rules", height)
+		}
+	}
+	if minWidth <= 850 || minHeight < 850 {
+		t.Fatal("small or zoomed viewports need ordinary page flow")
+	}
+	for _, want := range []string{
+		"height:100dvh;min-height:0;overflow:visible",
+		".setup-body .setup-topbar,.setup-shell>.project-footer{flex:none}",
+		".setup-body .setup-wizard-panel,.setup-body .setup-review-panel{flex:1;min-height:0;overflow:visible}",
+	} {
+		if !strings.Contains(frame[3], want) {
+			t.Fatalf("desktop frame must allocate remaining space consistently: %q", want)
+		}
+	}
+	for _, forbidden := range []string{"min-height:1000px", "height:760px", "max-height:230px", "max-height:150px"} {
+		if strings.Contains(css, forbidden) {
+			t.Fatalf("obsolete fixed-size or scroll constraint remains: %q", forbidden)
+		}
+	}
+	markup := correctionSource(t, "templates/setup_wizard.html")
+	if strings.Count(markup, "data-setup-inventory-error hidden></div>\n      </div>\n      <div class=\"setup-step-actions\">") != 2 {
+		t.Fatal("recovery notices must stay in content before the navigation row")
+	}
+}
 
 type setupPreviewClient struct {
 	*fakeDiscoveryAPI
@@ -125,10 +165,21 @@ func TestSetupCompactTilesAndElapsedContract(t *testing.T) {
 	if strings.Count(markup, `data-start="{{.Start}}" data-end="{{.End}}" data-size-bytes="{{.SizeBytes}}"`) != 2 {
 		t.Fatal("partition review geometry was removed")
 	}
+	if strings.Count(markup, `class="setup-storage-segment storage-partition-card"`) != 4 {
+		t.Fatal("both steps must use the same tile classes for partitions and unallocated space")
+	}
+	if strings.Count(markup, `<dialog class="storage-detail-dialog setup-storage-operation"`) != 4 || strings.Contains(markup, `<section class="setup-storage-operation"`) {
+		t.Fatal("partition and free-space details must not expand inline")
+	}
 	css := correctionSource(t, "static/setup.css")
-	for _, want := range []string{`.setup-wizard-panel .setup-storage-segment.storage-partition-card{min-height:82px;align-content:center}`, `max-height:none;overflow:visible`, `height:auto;min-height:100dvh;overflow-y:auto`} {
+	for _, want := range []string{`.setup-wizard-panel .setup-storage-segment.storage-partition-card{height:82px;min-height:82px;align-content:center;box-sizing:border-box}`, `max-height:none;overflow:visible`, `flex:1;min-height:0;overflow:visible`} {
 		if !strings.Contains(css, want) {
 			t.Fatalf("compact accessible layout missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"height:auto;min-height:100dvh;overflow-y:auto", ".setup-wizard-panel{overflow:hidden", ".setup-wizard-panel .storage-partition-grid{overflow:auto"} {
+		if strings.Contains(css, forbidden) {
+			t.Fatalf("wizard must fit by compact presentation rather than scrolling or clipping: %q", forbidden)
 		}
 	}
 	script := correctionSource(t, "static/setup-operation.js")

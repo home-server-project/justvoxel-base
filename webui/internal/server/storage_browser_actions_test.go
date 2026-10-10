@@ -191,8 +191,8 @@ func TestStorageBrowserMountStatusReportsPermanentState(t *testing.T) {
 		mountStatus: api.AdminStorageMountResponse{
 			OK: true,
 			Proposed: api.AdminStorageMountPlan{
-				Device: "/dev/vdb1", Filesystem: "xfs", UUID: "uuid-1",
-				MountPoint: "/var/mnt/vdb1", CurrentMountPoint: "/var/mnt/vdb1",
+				Device: "/dev/vdc1", Filesystem: "xfs", UUID: "5f99d8c9-443b-42b6-963e-d60242de9944",
+				MountPoint: "/var/mnt/vdc1", CurrentMountPoint: "/var/mnt/vdc1",
 				Persistence: "justvoxel", Mounted: true,
 			},
 			Warnings: []string{},
@@ -202,17 +202,22 @@ func TestStorageBrowserMountStatusReportsPermanentState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/api/new-storage/mounts/status?device=%2Fdev%2Fvdb1", ""))
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/api/new-storage/mounts/status?device=%2Fdev%2Fvdc1", ""))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("mount status returned %d: %s", rr.Code, rr.Body.String())
 	}
 	if client.mountStatusCalls != 1 {
 		t.Fatalf("mount status calls=%d, want 1", client.mountStatusCalls)
 	}
-	for _, want := range []string{"justvoxel", "/var/mnt/vdb1", "uuid-1"} {
-		if !strings.Contains(rr.Body.String(), want) {
-			t.Fatalf("mount status missing %q: %s", want, rr.Body.String())
-		}
+	var payload api.AdminStorageMountResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !payload.OK || payload.Proposed != client.mountStatus.Proposed {
+		t.Fatalf("mounted filesystem identity changed: %#v", payload)
+	}
+	if client.mountPlanCalls != 0 || client.mountApplyCalls != 0 {
+		t.Fatal("reading a correctly mounted partition must not remount it")
 	}
 }
 
@@ -1104,12 +1109,13 @@ func TestStorageBrowserActionsRefreshWorkspaceInPlace(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		`function refreshStorageWorkspace()`,
+		`function refreshStorageWorkspace(message = "Storage updated.")`,
 		`root.closest("[data-storage-workspace-dialog]")`,
+		"if (options.onChanged) options.onChanged(message);\n      else workspace?.querySelector(\"[data-storage-refresh]\")?.click();",
 		`workspace?.querySelector("[data-storage-refresh]")?.click()`,
 		"wholeDiskDialog?.close();\n        refreshStorageWorkspace();",
 		"createDialog?.close();\n      refreshStorageWorkspace();",
-		"actionDialog?.close();\n      refreshStorageWorkspace();",
+		"actionDialog?.close();\n      refreshStorageWorkspace(selectedAction.startsWith(\"mount\") ? \"Drive mounted successfully.\" : \"Storage updated.\");",
 		`migrationRefresh?.addEventListener("click", refreshStorageWorkspace)`,
 		`if (payload.operation_id)`,
 		`showMigrationProgress({`,
