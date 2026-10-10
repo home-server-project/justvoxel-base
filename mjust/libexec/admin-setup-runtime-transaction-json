@@ -345,13 +345,6 @@ _a55_verify_action() {
     _a55_evidence_set_bounded minecraft_version_output "${output}" || return 1
     (( rc == 0 )) || return 1
 
-    output="$(activate_backup_timer 2>&1)"
-    rc=$?
-    _a55_evidence_set backup_timer_activation "$([[ ${rc} -eq 0 ]] && printf ok || printf failed)" || return 1
-    _a55_evidence_set_bounded backup_timer_output "${output}" || return 1
-    (( rc == 0 )) || return 1
-    _a55_manifest_update '.runtime.timer_activated = true' || return 1
-
     validation_output="$(/usr/libexec/justvoxel/mjust/validate-backend 2>&1)"
     rc=$?
     _a55_evidence_set final_validation "$([[ ${rc} -eq 0 ]] && printf passed || printf failed)" || return 1
@@ -366,6 +359,13 @@ _a55_rollback_action() {
     local failure=0 java_pre=false bedrock_pre=false
     java_pre="$(jq -r '.runtime.java_firewall_preexisting // false' "${A53_MANIFEST}")"
     bedrock_pre="$(jq -r '.runtime.bedrock_firewall_preexisting // false' "${A53_MANIFEST}")"
+
+    # A running backup owns the maintenance lock. Never delete its source data.
+    exec 9>"${JV_MAINTENANCE_LOCK}" || { _a55_json false false runtime_rollback 'Could not acquire Minecraft maintenance lock.'; return 0; }
+    if ! flock -n 9; then
+        _a55_json false false runtime_rollback 'A Minecraft maintenance operation is still running; setup data was preserved.'
+        return 0
+    fi
 
     systemctl disable --now minecraft-backup.timer >/dev/null 2>&1 || true
     if systemctl is-active --quiet minecraft-backup.timer 2>/dev/null; then failure=1; fi
@@ -399,10 +399,31 @@ _a55_rollback_action() {
 }
 
 _a55_commit_action() {
-    [[ -f ${JV_CONFIG} && -f ${JV_QUADLET} ]] || { _a55_json false false runtime_commit 'Runtime configuration is incomplete.'; return 0; }
+    _a55_load_values
+    [[ -f ${JV_CONFIG} && -f ${JV_QUADLET} && -f ${A55_SETUP_MARKER} ]] || { _a55_json false false runtime_commit 'Runtime configuration is incomplete.'; return 0; }
     systemctl is-active --quiet minecraft.service || { _a55_json false false runtime_commit 'Minecraft is not active.'; return 0; }
+
+    # The timer may immediately catch up on a missed run. Keep setup protected
+    # by its marker and the existing maintenance lock until commit finishes.
+    exec 9>"${JV_MAINTENANCE_LOCK}" || { _a55_json false false runtime_commit 'Could not acquire Minecraft maintenance lock.'; return 0; }
+    if ! flock -n 9; then
+        _a55_json false false runtime_commit 'Minecraft maintenance is running; setup cannot commit yet.'
+        return 0
+    fi
+
+    local output rc
+    output="$(activate_backup_timer 2>&1)"
+    rc=$?
+    _a55_evidence_set backup_timer_activation "$([[ ${rc} -eq 0 ]] && printf ok || printf failed)" || return 1
+    _a55_evidence_set_bounded backup_timer_output "${output}" || return 1
+    if (( rc != 0 )); then
+        _a55_json false false runtime_commit 'Automatic backup timer could not be activated.' "${A55_EVIDENCE}"
+        return 0
+    fi
+    _a55_manifest_update '.runtime.timer_activated = true' || { _a55_json false false runtime_commit 'Could not record backup timer activation.'; return 0; }
+
     rm -f -- "${A55_SETUP_MARKER}" || { _a55_json false false runtime_commit 'Could not finalize configured state.'; return 0; }
-    _a55_json true true runtime_committed ''
+    _a55_json true true runtime_committed '' "${A55_EVIDENCE}"
 }
 
 action="${1:-validate}"

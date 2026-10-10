@@ -33,6 +33,7 @@ JV_BACKUP_SERVICE="${fixture}/backup.service"
 JV_BACKUP_TIMER="${fixture}/backup.timer"
 JV_CONFIG="${fixture}/config"
 JAVA_PORT=25565 BEDROCK_PORT=19132 BEDROCK_ENABLED=no
+JV_MAINTENANCE_LOCK="${fixture}/minecraft-maintenance.lock"
 _a55_load_values() { :; }
 firewall-cmd() { [[ $* != *--query-port* ]]; }
 systemctl() {
@@ -171,6 +172,20 @@ generate_paper
 rollback
 [[ -f ${DATA_PATH}/paper-global.yml ]]
 
+# Rollback must preserve data while a backup owns the maintenance lock.
+new_case rollback-lock-busy
+_a55_record_initial_state
+generate_paper
+exec 9>&-
+exec 8>"${JV_MAINTENANCE_LOCK}"
+flock -n 8
+_a55_rollback_action > "${fixture}/rollback-busy.json"
+jq -e '.ok == false and .phase == "runtime_rollback"' "${fixture}/rollback-busy.json" >/dev/null
+[[ -f ${DATA_PATH}/paper-global.yml ]]
+flock -u 8
+exec 8>&-
+rollback
+
 # Exercise the real verification failure followed by the existing rollback action.
 new_case verification-crash
 _a55_record_initial_state
@@ -187,6 +202,24 @@ jq -e '.rcon_result == "crash_loop"' <<< "${A55_EVIDENCE}" >/dev/null
 jq -e '.runtime.minecraft_started == true' "${A53_MANIFEST}" >/dev/null
 rollback
 [[ -z $(find "${DATA_PATH}" -mindepth 1 -print -quit) ]]
+
+# Commit activates backups after verification with the setup marker in place.
+# Failed activation must preserve the marker so rollback remains possible.
+new_case commit-backup
+touch "${JV_CONFIG}" "${JV_QUADLET}" "${A55_SETUP_MARKER}"
+ready=yes
+activate_backup_timer() { [[ -f ${A55_SETUP_MARKER} ]] && touch "${fixture}/timer-activated"; }
+_a55_commit_action > "${fixture}/commit.json"
+jq -e '.ok == true and .phase == "runtime_committed"' "${fixture}/commit.json" >/dev/null
+[[ -f ${fixture}/timer-activated && ! -e ${A55_SETUP_MARKER} ]]
+
+new_case commit-timer-failure
+touch "${JV_CONFIG}" "${JV_QUADLET}" "${A55_SETUP_MARKER}"
+ready=yes
+activate_backup_timer() { return 1; }
+_a55_commit_action > "${fixture}/commit-failure.json"
+jq -e '.ok == false and .phase == "runtime_commit"' "${fixture}/commit-failure.json" >/dev/null
+[[ -e ${A55_SETUP_MARKER} ]]
 
 # Cleanup must keep using the shared reset implementation.
 grep -Fq 'source /usr/libexec/justvoxel/mjust/minecraft-reset-common.sh' "${helper}"

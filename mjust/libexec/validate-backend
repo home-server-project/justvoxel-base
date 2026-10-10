@@ -182,6 +182,8 @@ fi
 if [[ ${BACKUP_TIMER_ENABLED} == yes ]]; then
     if [[ $(systemctl is-enabled minecraft-backup.timer 2>/dev/null || true) == enabled ]]; then
         pass 'Minecraft backup timer is enabled'
+    elif [[ -f ${JV_SETUP_IN_PROGRESS} ]]; then
+        pass 'Minecraft backup timer will be activated after first-run verification'
     else
         fail 'Minecraft backup timer should be enabled but is not'
     fi

@@ -6,6 +6,7 @@ source /usr/libexec/justvoxel/mjust/interrupt-safety.sh
 
 readonly config_file="/etc/justvoxel/minecraft-backup.env"
 readonly lock_file="/run/justvoxel-minecraft-maintenance.lock"
+readonly setup_marker="/var/lib/justvoxel/management/setup-in-progress"
 leave_stopped=0
 
 while (( $# > 0 )); do
@@ -24,6 +25,13 @@ if [[ ${EUID} -ne 0 ]]; then
     exit 1
 fi
 
+# Scheduled backups must not touch Minecraft files while first-run setup or
+# its rollback owns the data. Check before loading possibly removed config.
+if [[ -e ${setup_marker} ]]; then
+    echo 'Skipping backup: first-run setup or rollback is in progress.'
+    exit 0
+fi
+
 jv_backup_load_config "${config_file}"
 if [[ ! -d ${minecraft_data_path} ]]; then
     echo "ERROR: Minecraft data directory does not exist: ${minecraft_data_path}" >&2
@@ -37,6 +45,12 @@ if [[ ${JUSTVOXEL_MAINTENANCE_LOCK_HELD:-0} != 1 ]]; then
         echo 'ERROR: another JustVoxel Minecraft maintenance operation is already running.' >&2
         exit 1
     fi
+fi
+
+# Setup might have started while the backup acquired its maintenance lock.
+if [[ -e ${setup_marker} ]]; then
+    echo 'Skipping backup: first-run setup or rollback is in progress.'
+    exit 0
 fi
 
 # Keep the administrator-configured backup root. The ID is only a subfolder.

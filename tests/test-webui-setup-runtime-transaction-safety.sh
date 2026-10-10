@@ -7,6 +7,8 @@ common="${repo_root}/mjust/libexec/common.sh"
 discovery="${repo_root}/mjust/libexec/admin-discovery-json"
 apply="${repo_root}/management/cmd/justvoxel-management-agent/admin_setup_apply.go"
 worker="${repo_root}/management/cmd/justvoxel-management-agent/setup_worker.go"
+backup="${repo_root}/runtime/minecraft-backup"
+validator="${repo_root}/mjust/libexec/validate-backend"
 runner="${repo_root}/management/cmd/justvoxel-management-agent/setup_runtime_transaction.go"
 planner="${repo_root}/mjust/libexec/admin-setup-plan-json"
 
@@ -15,6 +17,8 @@ for file in "${runtime_helper}" "${common}" "${discovery}" "${apply}" "${worker}
 done
 bash -n "${runtime_helper}"
 bash -n "${common}"
+bash -n "${backup}"
+bash -n "${validator}"
 bash -n "${discovery}"
 bash -n "${planner}"
 
@@ -90,6 +94,26 @@ start_line="$(grep -nF '    output="$(systemctl start minecraft.service 2>&1)"' 
 validation_line="$(grep -nF '    validation_output="$(/usr/libexec/justvoxel/mjust/validate-backend 2>&1)"' "${runtime_helper}" | cut -d: -f1)"
 [[ -n ${render_line} && -n ${start_line} && -n ${validation_line} && ${render_line} -lt ${start_line} && ${start_line} -lt ${validation_line} ]] || { echo 'runtime render, service start, and final validation are out of order' >&2; exit 1; }
 
+# The backup timer must not interrupt first-run readiness checks.
+verify_body="$(sed -n '/^_a55_verify_action() {/,/^}/p' "${runtime_helper}")"
+commit_body="$(sed -n '/^_a55_commit_action() {/,/^}/p' "${runtime_helper}")"
+if grep -Fq 'activate_backup_timer' <<< "${verify_body}"; then
+    echo 'backup timer can interrupt first-run runtime verification' >&2
+    exit 1
+fi
+grep -Fq 'activate_backup_timer' <<< "${commit_body}"
+grep -Fq 'flock -n 9' <<< "${commit_body}"
+grep -Fq 'flock -n 9' "${runtime_helper}"
+grep -Fq 'Skipping backup: first-run setup or rollback is in progress.' "${backup}"
+grep -Fq 'elif [[ -f ${JV_SETUP_IN_PROGRESS} ]]; then' "${validator}"
+grep -Fq "fail 'Minecraft backup timer should be enabled but is not'" "${validator}"
+marker_line="$(grep -nF 'if [[ -e ${setup_marker} ]]; then' "${backup}" | head -n1 | cut -d: -f1)"
+config_line="$(grep -nF 'jv_backup_load_config "${config_file}"' "${backup}" | cut -d: -f1)"
+[[ -n ${marker_line} && -n ${config_line} && ${marker_line} -lt ${config_line} ]] || {
+    echo 'backup setup guard must precede config access' >&2
+    exit 1
+}
+
 # Exercise the actual first-start function with all appliance operations mocked.
 # Replace only the absolute final validator command, never invoke host services.
 (
@@ -103,7 +127,7 @@ validation_line="$(grep -nF '    validation_output="$(/usr/libexec/justvoxel/mju
     _a55_manifest_update() { :; }
     _a55_json() { printf 'verified %s\n' "$3" >> "${runtime_log}"; }
     _a55_wait_for_rcon() { return 0; }
-    activate_backup_timer() { return 0; }
+    activate_backup_timer() { echo 'timer activated during verify' >&2; return 1; }
     mock_validate_backend() { return 0; }
     mock_verify_stack() { return 0; }
     MINECRAFT_VERSION=26.2
