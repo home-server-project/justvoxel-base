@@ -443,6 +443,51 @@ func TestStorageBrowserDestructiveConfirmationUsesSliderAndToggle(t *testing.T) 
 	}
 }
 
+func TestStorageBrowserPartitionActionMenuContainsDirectActions(t *testing.T) {
+	markup, err := assets.ReadFile("templates/storage_browser.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, partition, found := strings.Cut(string(markup), `{{define "storage_partition_operation"}}`)
+	if !found {
+		t.Fatal("partition operation template missing")
+	}
+	partition, _, _ = strings.Cut(partition, "{{end}}")
+	_, menu, found := strings.Cut(partition, `<div class="storage-action-menu-popover">`)
+	if !found {
+		t.Fatal("partition action menu missing")
+	}
+	menu, _, found = strings.Cut(menu, "</div>")
+	if !found {
+		t.Fatal("partition action menu closing tag missing")
+	}
+	for _, want := range []string{
+		`data-storage-action="mount-for-now"`,
+		`data-storage-action="mount-permanently"`,
+		`data-storage-action="mount-now"`,
+		`data-storage-action="make-permanent"`,
+		`data-storage-action="unmount-for-now"`,
+		`data-storage-action="remove-permanent"`,
+		`data-storage-minecraft-migrate`,
+		`data-storage-action="use-for-backups"`,
+		`data-storage-action="format"`,
+		`data-storage-action="delete_partition"`,
+		`data-storage-action="initialize_disk"`,
+	} {
+		if !strings.Contains(menu, want) {
+			t.Errorf("partition action menu missing %q", want)
+		}
+	}
+	if strings.Count(menu, "<button ") != 11 {
+		t.Error("partition action menu must contain all eleven supported action buttons")
+	}
+	for _, forbidden := range []string{"<details", "<div", "Advanced Storage — disk preparation"} {
+		if strings.Contains(menu, forbidden) {
+			t.Errorf("partition action menu contains nested grouping %q", forbidden)
+		}
+	}
+}
+
 func TestStorageBrowserActionMenuClosesWithDialogAndOutsideClick(t *testing.T) {
 	js, err := assets.ReadFile("static/storage-browser.js")
 	if err != nil {

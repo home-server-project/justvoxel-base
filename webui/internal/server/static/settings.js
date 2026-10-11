@@ -166,13 +166,11 @@ if (versionPolicy && versionInput && specificVersionField) {
       summary.append(make("p", "setup-version-explanation", status.reason || "No usable server build was found for this version."));
     }
     preview.replaceChildren(summary);
-    if (status.crossplay_enabled) {
-      const compatibility = make("div", "notice " + (status.crossplay_compatible ? "success" : "warning") + " setup-version-compatibility", "");
-      compatibility.append(make("p", "", status.crossplay_compatible ? "Bedrock cross-play is supported." : "Bedrock cross-play is not supported."));
-      if (!status.crossplay_compatible) compatibility.append(make("p", "", "Choose Recommended, select a compatible Specific version, or disable Bedrock cross-play."));
-      if (status.geyser_supported_version) compatibility.append(make("p", "", `Current supported Minecraft version: ${status.geyser_supported_version}.`));
-      preview.append(compatibility);
-    }
+    const compatibility = make("div", "notice " + (!status.crossplay_enabled || status.crossplay_compatible ? "success" : "warning") + " setup-version-compatibility", "");
+    compatibility.append(make("p", "", !status.crossplay_enabled ? (form.querySelector("[data-bedrock-toggle]")?.disabled ? "Vanilla supports Java only. Select Paper or Purpur to enable Bedrock cross-play." : "Bedrock cross-play is disabled.") : status.crossplay_compatible ? "Bedrock cross-play is supported." : "Bedrock cross-play is not supported."));
+    if (status.crossplay_enabled && !status.crossplay_compatible) compatibility.append(make("p", "", "Choose Recommended, select a compatible Specific version, or disable Bedrock cross-play."));
+    if (status.crossplay_enabled && status.geyser_supported_version) compatibility.append(make("p", "", `Current supported Minecraft version: ${status.geyser_supported_version}.`));
+    preview.append(compatibility);
     next.disabled = !status.selected_candidate || (status.crossplay_enabled && !status.crossplay_compatible);
   };
   const refresh = async () => {

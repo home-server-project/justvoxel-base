@@ -15,7 +15,7 @@
   <script src="/static/setup-storage.js" defer></script>
   <script src="/static/setup-motd.js" defer></script>
 </head>
-<body class="role-administrator setup-body">
+<body class="role-administrator setup-body{{if .Started}} setup-advanced{{end}}">
 <header class="setup-header topbar setup-topbar">
   <a class="brand-link brand-mark" href="/setup" aria-current="page" aria-label="JustVoxel first setup"><img class="brand-logo" src="/static/justvoxel-logo.png" alt="JustVoxel"></a>
   <div class="topbar-clock" data-topbar-clock aria-label="Local time">--:--</div>
@@ -76,7 +76,7 @@
   <ol class="setup-progress" aria-label="Setup progress">{{range .Steps}}<li class="{{if .Active}}active{{end}} {{if .Complete}}complete{{end}}" {{if .Active}}aria-current="step"{{end}}>{{if .Complete}}<form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="{{.Number}}"><button type="submit"><span class="setup-number">{{.Number}}</span><span>{{.Name}}</span></button></form>{{else}}<span class="setup-number">{{.Number}}</span><span>{{.Name}}</span>{{end}}</li>{{end}}</ol>
   </div>
 
-  <section class="panel setup-step-panel setup-wizard-panel">
+  <section class="panel setup-step-panel setup-wizard-panel setup-advanced-frame">
     <h2>{{.Current.Name}}</h2>
     <p class="setup-lead">{{.Current.Description}}</p>
     {{if .Error}}<div class="notice error">{{.Error}}</div>{{end}}
@@ -107,7 +107,6 @@
     <form method="post" action="/setup/connections" class="setup-form" data-setup-connections data-setup-version>
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <label class="date-time-automatic"><span><strong>Enable Bedrock cross-play</strong><small class="field-help">{{if eq .Minecraft.ServerType "vanilla"}}Select Paper or Purpur on Step 1 to enable Bedrock cross-play.{{else}}Allow supported Bedrock clients to join through Geyser/Floodgate. Compatibility is checked below.{{end}}</small></span><input class="date-time-switch" type="checkbox" name="bedrock_enabled" data-bedrock-toggle {{if eq .Minecraft.ServerType "vanilla"}}disabled{{end}} {{if .Server.BedrockEnabled}}checked{{end}}></label>
       <div class="setup-form-grid">
         <label class="setup-field">Minecraft Java TCP port<input name="java_port" type="number" min="1" max="65535" value="{{.Minecraft.JavaPort}}" inputmode="numeric"><span class="field-help">Default: 25565/TCP.</span></label>
         <label class="setup-field" data-bedrock-port-field>Bedrock UDP port<input name="bedrock_port" type="number" min="1" max="65535" value="{{.Minecraft.BedrockPort}}" inputmode="numeric"><span class="field-help">Default: 19132/UDP. Used only when Bedrock cross-play is enabled.</span></label>
@@ -122,9 +121,10 @@
         <section class="setup-version-column" aria-label="Minecraft version">
         <label class="setup-field">Minecraft version<select id="version-policy" name="version_policy"><option value="recommended" {{if eq .Minecraft.VersionPolicy "recommended"}}selected{{end}}>Recommended</option><option value="latest" {{if eq .Minecraft.VersionPolicy "latest"}}selected{{end}}>Latest</option><option value="pinned" {{if eq .Minecraft.VersionPolicy "pinned"}}selected{{end}}>Specific version</option></select></label>
         <label id="specific-version-field" class="setup-field setup-field-wide" {{if ne .Minecraft.VersionPolicy "pinned"}}hidden{{end}}>Specific Minecraft version<input id="minecraft-version" name="version" value="{{.Minecraft.Version}}" autocomplete="off"><span class="field-help">Choose an exact version. Available pre-release builds can also be used.</span></label>
-        <div class="setup-version-preview" id="setup-version-preview" role="status" aria-live="polite">Checking available versions…</div>
         </section>
       </div>
+      <div class="setup-version-preview" id="setup-version-preview" role="status" aria-live="polite">Checking available versions…</div>
+      <label class="date-time-automatic"><span><strong>Enable Bedrock cross-play</strong><small class="field-help">{{if eq .Minecraft.ServerType "vanilla"}}Select Paper or Purpur on Step 1 to enable Bedrock cross-play.{{else}}Allow supported Bedrock clients to join through Geyser/Floodgate. Compatibility is checked above.{{end}}</small></span><input class="date-time-switch" type="checkbox" name="bedrock_enabled" data-bedrock-toggle {{if eq .Minecraft.ServerType "vanilla"}}disabled{{end}} {{if .Server.BedrockEnabled}}checked{{end}}></label>
       </div>
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next" disabled>Continue</button></div></div>
     </form>

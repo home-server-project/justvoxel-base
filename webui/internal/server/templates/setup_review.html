@@ -11,7 +11,7 @@
   <script src="/static/app.js" defer></script>
   <script src="/static/setup-operation.js" defer></script>
 </head>
-<body class="role-administrator setup-body">
+<body class="role-administrator setup-body{{if ne .SetupMode "recommended"}} setup-advanced{{end}}">
 <header class="setup-header topbar setup-topbar">
   <a class="brand-link brand-mark" href="/setup/review" aria-current="page" aria-label="JustVoxel first setup review"><img class="brand-logo" src="/static/justvoxel-logo.png" alt="JustVoxel"></a>
   <div class="topbar-clock" data-topbar-clock aria-label="Local time">--:--</div>
@@ -31,7 +31,7 @@
   {{end}}
   </div>
 
-  <section class="panel setup-step-panel setup-review-panel">
+  <section class="panel setup-step-panel setup-review-panel{{if ne .SetupMode "recommended"}} setup-advanced-frame{{end}}">
     <div class="setup-review-content">
     <div class="setup-review-header"><h2>Review</h2>{{if .Plan.OK}}<a class="button-link secondary" href="/setup/review/configuration">Download configuration</a>{{end}}</div>
     {{if .Error}}<div class="notice error"><strong>Setup needs attention</strong><br>{{.Error}}</div>{{end}}

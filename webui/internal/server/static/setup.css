@@ -422,3 +422,42 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
 .setup-existing-filesystems small{overflow-wrap:anywhere}
 .setup-advanced-storage{margin-top:.7rem}
 .setup-advanced-storage>summary{cursor:pointer;margin-bottom:.6rem}
+
+/* Advanced alone shares the viewport between topbar, six cards, panel and footer.
+   Narrow/short windows retain the natural flow above, including Recommended. */
+.setup-advanced .setup-wizard-panel .setup-version-preview{grid-template-columns:1fr}
+.setup-advanced .setup-wizard-panel .setup-version-columns{column-gap:.75rem}
+@media(min-width:1100px) and (min-height:850px){
+  .setup-body.setup-advanced{height:100dvh;min-height:0;overflow:hidden}
+  .setup-advanced>.setup-topbar{flex:none}
+  .setup-advanced>.setup-shell{flex:1;min-height:0;margin:0 auto}
+  .setup-advanced .setup-advanced-frame{display:flex;flex:1;flex-direction:column;min-height:0;padding:.8rem 1rem;overflow:visible}
+  .setup-advanced .setup-advanced-frame .setup-form{flex:1;min-height:0}
+  .setup-advanced .setup-advanced-frame .setup-step-content{display:flex;flex:1;flex-direction:column;min-height:0;gap:.42rem}
+  .setup-advanced .setup-advanced-frame .setup-step-content>*{flex:none}
+  .setup-advanced .setup-advanced-frame .setup-step-actions{flex:none;min-height:55px;margin:.7rem 0 0;padding:.45rem .6rem}
+  .setup-advanced .setup-shell>.project-footer{flex:none;margin-top:0}
+
+  /* Keep overflow in the shared inventory grids, rather than the page/form. */
+  .setup-advanced .setup-advanced-frame .setup-step-content>.setup-storage-browser{display:flex;flex:1;flex-direction:column;min-height:0}
+  .setup-advanced .setup-storage-browser>.storage-browser-content{display:flex;flex:1;flex-direction:column;min-height:0}
+  .setup-advanced .storage-browser-intro{flex:none;margin:0 0 .4rem;font-size:.78rem}
+  .setup-advanced .storage-drive-section{flex:none;margin-top:.4rem}
+  .setup-advanced .storage-external-section{padding-top:.4rem}
+  .setup-advanced .storage-drive-section-heading{margin-bottom:.3rem}
+  .setup-advanced .storage-disk-grid{max-height:90px}
+  .setup-advanced .storage-partition-browser{display:flex;flex:1;min-height:0;margin-top:.4rem}
+  .setup-advanced .storage-partition-group{display:flex;flex:1;flex-direction:column;min-width:0;min-height:0;padding:.55rem}
+  .setup-advanced .storage-selected-heading{flex:none;margin-bottom:.4rem}
+  .setup-advanced .storage-partition-grid{min-height:0;flex:0 1 auto}
+  .setup-advanced .storage-partition-group>.storage-advanced-actions{flex:none}
+
+  /* Review keeps the same frame and Apply path; only long warnings are bounded. */
+  .setup-advanced .setup-review-content{flex:1;min-height:0}
+  .setup-advanced .setup-review-header{min-height:1.4rem;align-items:flex-start}
+  .setup-advanced .setup-review-header h2{font-size:1.18rem;line-height:1.4rem}
+  .setup-advanced .setup-review-summary{margin:.5rem 0;gap:.5rem}
+  .setup-advanced .setup-review-summary>section{padding:.55rem .7rem}
+  .setup-advanced .setup-review-summary dl>div{padding:.25rem 0;font-size:.82rem}
+  .setup-advanced .setup-review-warnings{max-height:180px;overflow-y:auto;overscroll-behavior:contain}
+}

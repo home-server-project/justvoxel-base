@@ -1,6 +1,6 @@
 {{define "storage_browser_content"}}
 <div class="storage-browser-shell storage-browser-content" data-storage-browser-root>
-  <p class="muted storage-browser-intro">Choose a physical disk to see the partitions inside it. Mount and format operations are available in Advanced Storage.</p>
+  <p class="muted storage-browser-intro">{{if .SetupPurpose}}Choose a disk, then select a ready partition or review a storage preparation action.{{else}}Choose a physical disk to see the partitions inside it. Mount and format operations are available in Advanced Storage.{{end}}</p>
   <input type="hidden" value="{{.CSRF}}" data-storage-action-csrf>
 
   <section class="storage-drive-section" aria-label="Internal drives">
@@ -123,7 +123,7 @@
       </div>
       {{end}}
       {{if or .CanInitialize .MinecraftWholeDisk .BackupWholeDisk}}
-      <details class="storage-advanced-actions"><summary>Advanced Storage — disk preparation</summary>
+      <details class="storage-advanced-actions"><summary>{{if $.SetupPurpose}}Disk preparation{{else}}Advanced Storage — disk preparation{{end}}</summary>
       {{if .CanInitialize}}
       <div class="storage-empty-actions">
         <button class="secondary" type="button" data-storage-initialize data-path="{{.Path}}">Reinitialize disk as GPT</button>
@@ -201,6 +201,7 @@
     </div>
   </dialog>
 
+  {{if not .SetupPurpose}}
   <dialog class="storage-action-dialog storage-minecraft-dialog" data-storage-minecraft-dialog>
     <div class="storage-action-card">
       <div class="storage-detail-heading">
@@ -280,6 +281,8 @@
     </div>
   </dialog>
 
+  {{end}}
+
   {{template "storage_partition_action_review" .}}
 
 </div>
@@ -345,11 +348,9 @@
             <button type="button" data-storage-action="remove-permanent" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5Z"></path><path d="M12 14v6"></path></svg></span><span>Remove permanent mount</span></button>
             <button type="button" data-storage-minecraft-migrate hidden>Use for Minecraft data</button>
             <button type="button" data-storage-action="use-for-backups" hidden>Use for backups</button>
-            <details class="storage-advanced-actions"><summary>Advanced Storage — disk preparation</summary>
             <button class="storage-action-danger" type="button" data-storage-action="format">Format partition</button>
             <button class="storage-action-danger" type="button" data-storage-action="delete_partition" hidden>Delete partition</button>
             <button class="storage-action-danger" type="button" data-storage-action="initialize_disk" hidden>Reinitialize entire disk as GPT</button>
-            </details>
           </div>
         </details>
       </div>

@@ -33,6 +33,7 @@ const assert = require("node:assert/strict");
 const document = { createElement: () => ({ children: [], textContent: "", append(...nodes) { this.children.push(...nodes); } }) };
 const preview = { replaceChildren(...nodes) { this.children = nodes; }, append(...nodes) { this.children.push(...nodes); } };
 const next = { disabled: true };
+const form = { querySelector: () => ({ disabled: false }) };
 ` + source[start:start+end] + `
 const flatten = (node) => [node.textContent || "", ...(node.children || []).flatMap(flatten)];
 const text = () => flatten(preview).join(" ");
@@ -66,15 +67,15 @@ for (const policy of ["latest", "pinned"]) {
 }
 show({ ...fixture, crossplay_enabled: false, crossplay_compatible: false }, "pinned");
 assert.equal(next.disabled, false);
-assert.equal(preview.children.length, 1);
+assert.equal(preview.children.length, 2);
 for (const policy of ["recommended", "latest", "pinned"]) {
   for (const candidate of ["", undefined]) {
     for (const compatible of [true, false]) {
       show({ ...fixture, selected_candidate: candidate, reason: "No build found", crossplay_enabled: false, crossplay_compatible: compatible }, policy);
       assert.equal(next.disabled, true);
-      assert.equal(preview.children.length, 1);
+      assert.equal(preview.children.length, 2);
       assert.equal(preview.children[0].className, "notice warning setup-version-panel");
-      assert(!text().includes("Bedrock cross-play is disabled"));
+      assert(text().includes("Bedrock cross-play is disabled"));
       assert(!text().includes("Current supported Minecraft version"));
       assert(!preview.children[0].children.some(n => n.className === "setup-version-candidate"));
       assert(text().includes("No build found"));

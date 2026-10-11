@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -14,15 +15,44 @@ import (
 
 // These checks guard source layout constraints, not rendered browser geometry.
 // FHD fitting and zoom accessibility still require browser/VM acceptance.
-func TestWizardNaturalHeightLayout(t *testing.T) {
+func TestWizardSharedDesktopFrame(t *testing.T) {
 	css := correctionSource(t, "static/setup.css")
-	for _, forbidden := range []string{"height:100dvh;min-height:0", "min-height:calc(100%", "position:sticky", "bottom:0;min-height:55px", "margin-top:auto;padding:.45rem", ".setup-review-panel{flex:1"} {
-		if strings.Contains(css, forbidden) {
-			t.Fatalf("wizard height regression: %q", forbidden)
+	for _, want := range []string{
+		"@media(min-width:1100px) and (min-height:850px)",
+		".setup-body.setup-advanced{height:100dvh;min-height:0;overflow:hidden}",
+		".setup-advanced>.setup-shell{flex:1;min-height:0;margin:0 auto}",
+		".setup-advanced .setup-advanced-frame{display:flex;flex:1;flex-direction:column;min-height:0",
+		".setup-advanced .setup-advanced-frame .setup-form{flex:1;min-height:0}",
+		".setup-advanced .setup-advanced-frame .setup-step-content{display:flex;flex:1",
+		".setup-advanced .setup-advanced-frame .setup-step-actions{flex:none;min-height:55px;margin:.7rem 0 0;padding:.45rem .6rem}",
+		".setup-advanced .setup-review-content{flex:1;min-height:0}",
+		".setup-advanced .setup-storage-browser>.storage-browser-content{display:flex;flex:1",
+		".setup-advanced .storage-partition-grid{min-height:0;flex:0 1 auto}",
+	} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("shared desktop frame missing %q", want)
 		}
 	}
-	if !strings.Contains(css, ".setup-body .setup-wizard-panel .setup-form{flex:none;") {
-		t.Fatal("wizard forms must use natural height")
+	for _, forbidden := range []string{"data-step", "overflow-y:scroll"} {
+		if strings.Contains(css, forbidden) {
+			t.Fatalf("per-step or page sizing: %q", forbidden)
+		}
+	}
+	if strings.Count(css, ".setup-advanced .setup-advanced-frame{") != 1 {
+		t.Fatal("Advanced must use one shared outer frame rule")
+	}
+	// Inspect outer-frame declarations only; bounded dialogs may use viewport
+	// max-height without changing the shared wizard geometry.
+	viewportHeight := regexp.MustCompile(`(?:^|;)\s*(?:min-|max-)?height\s*:\s*calc\(\s*100dvh`)
+	for _, rule := range regexp.MustCompile(`([^{}]+)\{([^{}]*)\}`).FindAllStringSubmatch(css, -1) {
+		for _, selector := range strings.Split(rule[1], ",") {
+			selector = strings.TrimSpace(selector)
+			for _, outer := range []string{".setup-body", ".setup-body.setup-advanced", ".setup-shell", ".setup-advanced-frame", ".setup-wizard-panel", ".setup-review-panel"} {
+				if strings.HasSuffix(selector, outer) && viewportHeight.MatchString(rule[2]) {
+					t.Fatalf("outer wizard frame has separate viewport sizing: %s", selector)
+				}
+			}
+		}
 	}
 	markup := correctionSource(t, "templates/setup_wizard.html")
 	if strings.Count(markup, `class="setup-step-content"`) != 5 || strings.Count(markup, `class="setup-step-actions"`) != 5 {
@@ -36,7 +66,13 @@ func TestWizardNaturalHeightLayout(t *testing.T) {
 			t.Fatal("navigation precedes content")
 		}
 	}
+	if !strings.Contains(markup, "setup-wizard-panel setup-advanced-frame") {
+		t.Fatal("wizard missing shared frame")
+	}
 	review := correctionSource(t, "templates/setup_review.html")
+	if !strings.Contains(review, `setup-review-panel{{if ne .SetupMode "recommended"}} setup-advanced-frame{{end}}`) {
+		t.Fatal("Advanced Review must share the frame without changing Recommended")
+	}
 	if strings.Index(review, `class="setup-review-content"`) > strings.Index(review, `class="setup-step-actions setup-actions-split"`) {
 		t.Fatal("Review navigation precedes content")
 	}

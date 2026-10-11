@@ -131,8 +131,8 @@ func TestProjectFooterAndDateTimeUIContracts(t *testing.T) {
 			t.Fatalf("Footer page layout missing %q", want)
 		}
 	}
-	// Wizard and review panels follow their content rather than stretching short
-	// steps to fill the viewport. Actions remain in normal page flow.
+	// Recommended and narrow/short Advanced windows retain natural flow.
+	// Advanced desktop uses one shared frame, guarded separately.
 	// TestWizardFHDViewportConstraints guards the desktop height breakpoint;
 	// these source contracts do not establish rendered browser geometry.
 	if strings.Contains(setupCSS, "height:clamp(520px") || strings.Contains(setupCSS, "height:calc(100dvh - 185px)") || strings.Contains(setupCSS, "overflow-y:scroll") {
@@ -170,7 +170,7 @@ func TestProjectFooterAndDateTimeUIContracts(t *testing.T) {
 		}
 		for _, target := range strings.Split(selector, ",") {
 			target = strings.TrimSpace(target)
-			if strings.HasSuffix(target, ".setup-wizard-panel") || strings.HasSuffix(target, ".setup-review-panel") || strings.HasSuffix(target, ".setup-form") || strings.Contains(target, ".setup-body:has(") {
+			if !strings.HasPrefix(target, ".setup-advanced ") && (strings.HasSuffix(target, ".setup-wizard-panel") || strings.HasSuffix(target, ".setup-review-panel") || strings.HasSuffix(target, ".setup-form") || strings.Contains(target, ".setup-body:has(")) {
 				if regexp.MustCompile(`(?:^|;)\s*(?:(?:min-)?height\s*:\s*100dvh|flex\s*:\s*1)\s*(?:;|$)`).MatchString(declarations) {
 					t.Fatalf("Setup panels and forms must not force viewport stretching: %s", target)
 				}

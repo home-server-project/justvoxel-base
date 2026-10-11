@@ -400,7 +400,7 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 	if strings.Count(string(wizard), `class="setup-step-content"`) != 5 || strings.Count(string(wizard), `class="setup-step-actions"`) != 5 {
 		t.Fatal("each of the five advanced wizard forms needs separate content and action regions")
 	}
-	for _, want := range []string{`class="setup-shell"`, `class="setup-stage-header"`, `class="setup-progress"`, `class="panel setup-step-panel setup-wizard-panel"`, `class="setup-form"`} {
+	for _, want := range []string{`class="setup-shell"`, `class="setup-stage-header"`, `class="setup-progress"`, `class="panel setup-step-panel setup-wizard-panel setup-advanced-frame"`, `class="setup-form"`} {
 		if !strings.Contains(string(wizard), want) {
 			t.Fatalf("wizard structure missing %q", want)
 		}
