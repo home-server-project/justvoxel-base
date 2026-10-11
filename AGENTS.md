@@ -41,11 +41,25 @@ Prefer simple, safe, stable, secure solutions. Do not add machinery merely becau
 
 ### Known-working behavior
 
+**WORKING FEATURE = DO NOT TOUCH IT.**
+
 **IF A SUPPORTED SYSTEM / FEATURE / USER FLOW WORKS IN REAL USE AND THERE IS NO DEMONSTRATED BUG OR EXPLICITLY APPROVED REQUIREMENT TO CHANGE IT, LEAVE IT ALONE.**
 
 Do not redesign, remove, tighten, replace, refactor, "clean up", or reinterpret known-working behavior merely because another implementation seems cleaner or theoretically safer. Working behavior is an asset, not technical debt.
 
+Approval to modify one feature is not permission to alter adjacent working features. Do not change a working feature as collateral damage, incidental cleanup, refactoring, simplification, consistency work, visual polish, or because changing it makes implementation easier.
+
+If accomplishing an approved task appears to require changing another working feature, STOP. Identify that dependency and obtain explicit human approval for that additional change before touching it.
+
 Before changing an established workflow, inspect its existing behavior, history, tests, and compatibility expectations.
+
+### WebUI appearance is human-controlled
+
+**THE RENDERED WEBUI IS A PROTECTED PRODUCT INVARIANT. WITHOUT EXPLICIT HUMAN APPROVAL FOR THE EXACT VISUAL CHANGE, DO NOT CHANGE EVEN ONE PIXEL OF IT.**
+
+Approval for backend, API, behavior, bug-fix, cleanup, refactor, test, accessibility, or responsive work does not authorize incidental WebUI changes. Do not move, resize, reorder, restyle, relabel, hide/show, or "polish" controls; do not change spacing, geometry, colors, typography, icons, animations, responsive breakpoints, window/dialog placement, or other rendered appearance unless the human explicitly approved that exact UI scope.
+
+If a functional change appears to require an unapproved WebUI change, stop and propose the exact visual change for human approval. Do not make it as an incidental implementation detail.
 
 ### Recovery is protected product behavior
 
