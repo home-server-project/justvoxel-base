@@ -6,6 +6,7 @@ source /usr/libexec/justvoxel/mjust/admin-setup-storage-transaction-common.sh
 source /usr/libexec/justvoxel/mjust/minecraft-reset-common.sh
 require_root
 
+readonly A55_CGROUP_ROOT=/sys/fs/cgroup
 readonly A55_SETUP_MARKER=${JV_SETUP_IN_PROGRESS}
 readonly A55_RUNTIME_FILES=(
     /etc/justvoxel/justvoxel.conf
@@ -20,6 +21,7 @@ A55_REQUEST=''
 A55_OPERATION_ID=''
 A55_PLAN_FINGERPRINT=''
 A55_EVIDENCE='{}'
+A55_LEGACY_RECOVERY=false
 
 _a55_evidence_set() {
     local key="$1" value="$2"
@@ -482,8 +484,180 @@ _a55_commit_action() {
     _a55_json true true runtime_committed '' "${A55_EVIDENCE}"
 }
 
+# Old images did not persist runtime ports/settings. Only verify an already
+# torn-down runtime; never synthesize a request or remove guessed firewall rules.
+_a55_legacy_recovery_request() {
+    jq -e '
+      (has("runtime_request") | not) and
+      .phase == "storage_verified" and
+      (.rollback | type == "object") and
+      .rollback.state == "not_started" and
+      .rollback.result == "" and
+      (.runtime | type == "object") and
+      (.runtime.java_firewall_preexisting | type == "boolean") and
+      (.runtime.bedrock_firewall_preexisting | type == "boolean") and
+      (.runtime.minecraft_started | type == "boolean") and
+      (.runtime.timer_activated | type == "boolean") and
+      .runtime.marker == true
+    ' "${A53_MANIFEST}" >/dev/null 2>&1 || return 1
+    A55_LEGACY_RECOVERY=true
+}
+
+_a55_legacy_unit_clean() {
+    local unit="$1" state pid cgroup events path
+    state="$(systemctl show --property=ActiveState --value "${unit}")" || return 1
+    case "${state}" in inactive|failed) ;; *) return 1 ;; esac
+    if [[ ${unit} != *.timer ]]; then
+        for pid in MainPID ControlPID; do
+            [[ $(systemctl show --property="${pid}" --value "${unit}") == 0 ]] || return 1
+        done
+    fi
+    cgroup="$(systemctl show --property=ControlGroup --value "${unit}")" || return 1
+    # Also inspect the known unit cgroup when systemd has forgotten the unit.
+    for path in "/system.slice/${unit}" "${cgroup}"; do
+        [[ -n ${path} ]] || continue
+        [[ ${path} == /system.slice/* && ${path} != *..* ]] || return 1
+        if [[ -d ${A55_CGROUP_ROOT}${path} ]]; then
+            events="$(cat -- "${A55_CGROUP_ROOT}${path}/cgroup.events")" || return 1
+            [[ $'\n'${events}$'\n' == *$'\npopulated 0\n'* ]] || return 1
+        fi
+    done
+}
+
+# Reuse storage containment rules, but require successful mount enumeration.
+# The shared reset nested-mount helper tolerates discovery errors for its callers.
+_a55_legacy_no_nested_mounts() {
+    local root="$1" allow_transaction_mounts="${2:-false}" targets target
+    targets="$(findmnt -rn -o TARGET)" || return 1
+    while IFS= read -r target; do
+        [[ -n ${target} && ${target%/} != "${root%/}" ]] || continue
+        if _a53_path_within "${target}" "${root}"; then
+            # A created parent may contain this transaction's own mount. Its
+            # identity and nested mounts are checked separately below.
+            if [[ ${allow_transaction_mounts} == true ]] && jq -e --arg target "${target}" 'any(.mounts_by_transaction[]; .mountpoint == $target)' "${A53_MANIFEST}" >/dev/null 2>&1; then
+                continue
+            fi
+            return 1
+        fi
+    done <<< "${targets}"
+    return 0
+}
+
+_a55_legacy_validate_mountpoint() {
+    local mountpoint="$1"
+    validate_storage_path "${mountpoint}" || return 1
+    case "${mountpoint}" in
+        /|/boot|/boot/*|/var|/var/tmp|/var/lib/containers|/var/lib/containers/*|/etc|/etc/*|/sysroot|/sysroot/*) return 1 ;;
+    esac
+    return 0
+}
+
+_a55_legacy_storage_clean() {
+    local path mount recorded current entry source uuid directory
+    # Historical manifests have no storage request. Check only recorded paths;
+    # do not reconstruct data/backup settings from live configuration.
+    jq -e '
+      (.directories_created | type == "array") and
+      all(.directories_created[]; type == "string")
+    ' "${A53_MANIFEST}" >/dev/null 2>&1 || return 1
+    while IFS= read -r path; do
+        validate_storage_path "${path}" || return 1
+        [[ ${path} != / && $(realpath -m -- "${path}") == "${path}" && ! -L ${path} ]] || return 1
+        [[ ! -e ${path} || -d ${path} ]] || return 1
+        _a55_legacy_no_nested_mounts "${path}" true || return 1
+    done < <(jq -r '.directories_created[]' "${A53_MANIFEST}")
+    # Check all mounts recorded by the transaction, including shared mounts.
+    jq -e '
+      (.mounts_by_transaction | type == "array") and
+      all(.mounts_by_transaction[];
+        (.mountpoint | type == "string") and (.source | type == "string") and (.uuid | type == "string"))
+    ' "${A53_MANIFEST}" >/dev/null || return 1
+    while IFS= read -r entry; do
+        mount="$(jq -r '.mountpoint' <<< "${entry}")"
+        source="$(jq -r '.source' <<< "${entry}")"
+        uuid="$(jq -r '.uuid' <<< "${entry}")"
+        [[ -n ${source} && ${source} != null && ${uuid} != null && $(realpath -m -- "${mount}") == "${mount}" ]] || return 1
+        _a55_legacy_validate_mountpoint "${mount}" || return 1
+        _a55_legacy_no_nested_mounts "${mount}" || return 1
+        if mountpoint -q -- "${mount}"; then
+            current="$(jv_exact_mount_identity SOURCE "${mount}")" || return 1
+            [[ ${current} == "${source}" ]] || return 1
+            if [[ -n ${uuid} ]]; then
+                current="$(jv_exact_mount_identity UUID "${mount}")" || return 1
+                [[ ${current} == "${uuid}" ]] || return 1
+            fi
+        fi
+    done < <(jq -c '.mounts_by_transaction[]' "${A53_MANIFEST}")
+    recorded="$(jq -c '.runtime.empty_data_identity' "${A53_MANIFEST}")" || return 1
+    if [[ ${recorded} != null ]]; then
+        jq -e '
+          type == "object" and (.path | type == "string") and
+          (.directory | type == "string" and test("^[0-9]+:[0-9]+$")) and
+          (.mount | type == "string" and length > 0)
+        ' <<< "${recorded}" >/dev/null 2>&1 || return 1
+        path="$(jq -r '.path' <<< "${recorded}")" || return 1
+        validate_storage_path "${path}" || return 1
+        [[ ${path} != / && $(realpath -e -- "${path}") == "${path}" && -d ${path} && ! -L ${path} ]] || return 1
+        _a55_legacy_no_nested_mounts "${path}" || return 1
+        directory="$(stat -c '%d:%i' -- "${path}")" || return 1
+        current="$(findmnt -n -o SOURCE,FSTYPE,TARGET --target "${path}")" || return 1
+        [[ ${directory} == "$(jq -r '.directory' <<< "${recorded}")" && ${current} == "$(jq -r '.mount' <<< "${recorded}")" ]] || return 1
+    fi
+    return 0
+}
+
+_a55_legacy_recover_action() {
+    local file unit rc
+    exec 9>"${JV_MAINTENANCE_LOCK}" || { _a55_json false false runtime_rollback 'Could not acquire Minecraft maintenance lock.'; return 0; }
+    if ! flock -n 9; then
+        _a55_json false false runtime_rollback 'A Minecraft maintenance operation is still running; retry recovery when it finishes.'
+        return 0
+    fi
+    for file in "${A55_RUNTIME_FILES[@]}" "${A55_SETUP_MARKER}"; do
+        if [[ -e ${file} || -L ${file} ]]; then
+            _a55_json false false runtime_rollback "Failed setup runtime file remains: ${file}."
+            return 0
+        fi
+    done
+    for unit in minecraft.service minecraft-backup.service minecraft-backup.timer; do
+        if ! _a55_legacy_unit_clean "${unit}"; then
+            _a55_json false false runtime_rollback "Runtime teardown is not verified for ${unit}; it is active, has remaining processes, or could not be inspected."
+            return 0
+        fi
+    done
+    if podman container exists minecraft >/dev/null 2>&1; then rc=0; else rc=$?; fi
+    if [[ ${rc} != 1 ]]; then
+        _a55_json false false runtime_rollback 'The Minecraft container remains or its absence could not be verified.'
+        return 0
+    fi
+    if ! _a55_legacy_storage_clean; then
+        _a55_json false false runtime_rollback 'Transaction storage identity or mount safety could not be verified; setup data was preserved.'
+        return 0
+    fi
+    # Historical teardown already attempted removal with the original in-memory
+    # ports. Boolean initial-state evidence cannot identify those ports now.
+    # Preserve possible residual rules rather than delete unrelated configuration.
+    if ! _a55_manifest_update '.runtime_rollback_verified = true | .runtime_recovery = {mode:"legacy_verified_clean",firewall:"preserved_unknown_ports",data:"preserved"}'; then
+        _a55_json false false runtime_rollback 'Could not persist verified legacy runtime recovery.'
+        return 0
+    fi
+    _a55_evidence_set recovery_mode legacy_verified_clean || return 1
+    _a55_evidence_set firewall_recovery preserved_unknown_ports || return 1
+    _a55_json true false runtime_rolled_back '' "${A55_EVIDENCE}"
+}
+
+_a55_recover_action() {
+    if [[ ${A55_LEGACY_RECOVERY} == true ]]; then
+        _a55_legacy_recover_action
+    else
+        _a55_rollback_action
+    fi
+}
+
 _a55_recover_request() {
     local identity operation fingerprint saved
+    A55_LEGACY_RECOVERY=false
+    A55_REQUEST=''
     identity="$(cat)"
     jq -e 'type == "object" and (keys|sort) == ["operation_id","plan_fingerprint","schema_version"] and .schema_version == "v1"' <<< "${identity}" >/dev/null 2>&1 || return 1
     operation="$(jq -r '.operation_id' <<< "${identity}")"
@@ -492,6 +666,15 @@ _a55_recover_request() {
     A53_TX_DIR="${A53_TRANSACTION_ROOT}/${operation}"
     A53_MANIFEST="${A53_TX_DIR}/manifest.json"
     _a55_private_manifest || return 1
+    jq -e --arg operation "${operation}" --arg fingerprint "${fingerprint}" '
+      .schema_version == "v1" and .operation_id == $operation and .plan_fingerprint == $fingerprint
+    ' "${A53_MANIFEST}" >/dev/null 2>&1 || return 1
+    A55_OPERATION_ID="${operation}"
+    A55_PLAN_FINGERPRINT="${fingerprint}"
+    if jq -e 'has("runtime_request") | not' "${A53_MANIFEST}" >/dev/null 2>&1; then
+        _a55_legacy_recovery_request
+        return $?
+    fi
     saved="$(jq -ce '.runtime_request | select(type == "object")' "${A53_MANIFEST}")" || return 1
     [[ $(jq -r '.operation_id' <<< "${saved}") == "${operation}" && $(jq -r '.plan_fingerprint' <<< "${saved}") == "${fingerprint}" ]] || return 1
     _a55_parse_request <<< "${saved}"
@@ -500,8 +683,8 @@ _a55_recover_request() {
 action="${1:-validate}"
 if [[ ${action} == recover ]]; then
     if ! _a55_recover_request; then
-        _a55_json false false runtime_rollback 'Durable runtime recovery evidence is missing or does not match this transaction.'
-    elif ! _a55_rollback_action; then
+        _a55_json false false runtime_rollback 'Runtime recovery evidence is missing, invalid, or does not match this transaction.'
+    elif ! _a55_recover_action; then
         _a55_json false false runtime_rollback 'Runtime recovery could not be completed safely.'
     fi
     exit 0

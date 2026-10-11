@@ -506,6 +506,17 @@ func TestRuntimeRecoveryCompletionOffersFreshSetup(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer firstRunSetupDrafts.delete(app, "session-token")
+	// The WebUI consumes operation state, so legacy and durable manifests use
+	// the same recovery action. Incomplete runtime verification stays retryable.
+	client.operation.Status = "Runtime recovery failed: The Minecraft container remains or its absence could not be verified."
+	before := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/progress/"+setupExecutionOperationID, ""))
+	if before.Code != http.StatusOK || !strings.Contains(before.Body.String(), `id="setup-recover-form" >`) || !strings.Contains(before.Body.String(), `id="setup-start-over-form" hidden`) || !strings.Contains(before.Body.String(), "The Minecraft container remains") {
+		t.Fatalf("unsafe legacy recovery actions: %d %s", before.Code, before.Body.String())
+	}
+	blockedStart := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/start", "csrf=csrf-token"))
+	if blockedStart.Code != http.StatusSeeOther || blockedStart.Header().Get("Location") != "/setup/progress/"+setupExecutionOperationID || client.applyCalls != 0 {
+		t.Fatalf("start over bypassed recovery: %d %q apply=%d", blockedStart.Code, blockedStart.Header().Get("Location"), client.applyCalls)
+	}
 	retry := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recover", "csrf=csrf-token&recovery_confirmed=on&operation_id="+setupExecutionOperationID))
 	if retry.Code != http.StatusSeeOther || client.recoverCalls != 1 {
 		t.Fatalf("retry: %d calls=%d", retry.Code, client.recoverCalls)

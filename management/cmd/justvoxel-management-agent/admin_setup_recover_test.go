@@ -186,7 +186,7 @@ func TestInterruptedSetupStorageRecoveryReloadKeepsLock(t *testing.T) {
 }
 
 func TestRuntimeSetupRecoverySequenceAndLock(t *testing.T) {
-	for _, outcome := range []string{"success", "runtime_failed", "runtime_interrupted", "runtime_unverified", "storage_failed"} {
+	for _, outcome := range []string{"success", "legacy_success", "legacy_runtime_failed", "runtime_failed", "runtime_interrupted", "runtime_unverified", "storage_failed"} {
 		t.Run(outcome, func(t *testing.T) {
 			s, store, op := setupRecoveryOperation(t, operationNeedsAttention, "runtime_rollback")
 			oldRuntime, oldStorage := runAdminSetupRuntimeTransactionHelper, runAdminSetupStorageTransactionHelper
@@ -204,12 +204,15 @@ func TestRuntimeSetupRecoverySequenceAndLock(t *testing.T) {
 					t.Fatal("lock released before runtime verification")
 				}
 				switch outcome {
-				case "runtime_failed":
+				case "runtime_failed", "legacy_runtime_failed":
 					return []byte(`{"ok":false,"applied":false,"phase":"runtime_rollback","error":"changed data identity"}`), nil, nil
 				case "runtime_interrupted":
 					return nil, nil, context.DeadlineExceeded
 				case "runtime_unverified":
 					return []byte(`{"ok":true,"applied":true,"phase":"runtime_rolled_back"}`), nil, nil
+				}
+				if outcome == "legacy_success" {
+					return []byte(`{"ok":true,"applied":false,"phase":"runtime_rolled_back","evidence":{"recovery_mode":"legacy_verified_clean","firewall_recovery":"preserved_unknown_ports"}}`), nil, nil
 				}
 				return []byte(`{"ok":true,"applied":false,"phase":"runtime_rolled_back"}`), nil, nil
 			}
@@ -236,7 +239,7 @@ func TestRuntimeSetupRecoverySequenceAndLock(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if outcome == "success" {
+			if outcome == "success" || outcome == "legacy_success" {
 				if journal.State != operationRolledBack || store.setupLockHeld {
 					t.Fatalf("incomplete recovery: %#v", journal)
 				}
@@ -255,6 +258,20 @@ func TestRuntimeSetupRecoverySequenceAndLock(t *testing.T) {
 				}
 				if journal.State != operationNeedsAttention || journal.Stage != stage || !store.setupLockHeld {
 					t.Fatalf("unsafe failed recovery: %#v", journal)
+				}
+				if outcome == "legacy_runtime_failed" {
+					if !strings.Contains(journal.Status, "changed data identity") {
+						t.Fatalf("concrete recovery failure missing: %s", journal.Status)
+					}
+					// The same operation can retry after the unsafe condition clears.
+					outcome = "legacy_success"
+					events = nil
+					retry := httptest.NewRecorder()
+					s.adminSetupRecover(retry, surfaceRequest(http.MethodPost, "/v1/admin/setup/recover", `{"operation_id":"`+op.OperationID+`","retry_recovery":true}`))
+					journal, err = store.get(op.OperationID)
+					if retry.Code != http.StatusOK || err != nil || journal.State != operationRolledBack || store.setupLockHeld || strings.Join(events, ",") != "runtime:recover,storage:recover" {
+						t.Fatalf("legacy retry did not finish safely: status=%d operation=%#v events=%v err=%v", retry.Code, journal, events, err)
+					}
 				}
 			}
 		})

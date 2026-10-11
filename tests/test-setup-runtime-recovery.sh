@@ -51,6 +51,193 @@ if _a55_recover_request <<< "${identity}"; then echo 'Symlink evidence accepted'
 rm "${A53_MANIFEST}"
 reset_manifest
 
+# Durable transactions still dispatch to the original guarded rollback action.
+(
+    _a55_recover_request <<< "${identity}"
+    [[ ${A55_LEGACY_RECOVERY} == false ]]
+    _a55_rollback_action() { printf 'durable rollback\n' > "${fixture}/durable-dispatch"; }
+    _a55_legacy_recover_action() { echo 'Durable transaction used legacy recovery' >&2; exit 99; }
+    _a55_recover_action
+    [[ -s ${fixture}/durable-dispatch ]]
+)
+
+# Legacy evidence matches commit 24b086b: neither request was persisted.
+# Exercise the real compatibility
+# verification and existing storage recovery without host service/container calls.
+(
+    source "${repo_root}/mjust/libexec/admin-setup-storage-transaction-common.sh"
+    source "${repo_root}/mjust/libexec/admin-setup-storage-transaction-apply.sh"
+    source "${repo_root}/mjust/libexec/admin-setup-storage-transaction-actions.sh"
+    source "${repo_root}/mjust/libexec/minecraft-reset-common.sh"
+    A53_TX_DIR="${A53_TRANSACTION_ROOT}/${op}"
+    A53_MANIFEST="${A53_TX_DIR}/manifest.json"
+    A55_CGROUP_ROOT="${fixture}/cgroups"
+    A55_EVIDENCE='{}'
+    A55_SETUP_MARKER="${fixture}/legacy-marker"
+    A55_RUNTIME_FILES=()
+    for name in justvoxel.conf minecraft.env minecraft-backup.env minecraft.container minecraft-backup.service minecraft-backup.timer; do
+        A55_RUNTIME_FILES+=("${fixture}/${name}")
+    done
+    A53_DEFAULT_DATA_PATH="${fixture}/legacy-data"
+    A53_DEFAULT_BACKUP_PATH="${fixture}/legacy-backups"
+    mkdir -p "${A53_DEFAULT_DATA_PATH}" "${A53_DEFAULT_BACKUP_PATH}"
+    printf 'preserved world\n' > "${A53_DEFAULT_DATA_PATH}/world.dat"
+    printf 'preserved backup\n' > "${A53_DEFAULT_BACKUP_PATH}/backup.zip"
+    JV_MAINTENANCE_LOCK="${fixture}/legacy-maintenance.lock"
+    A53_FSTAB="${fixture}/legacy-fstab"
+    A54_SMB_CREDENTIALS="${fixture}/legacy-credentials"
+    fixture_active_state=inactive main_pid=0 control_pid=0 container_rc=1 nested=false mount_error=false storage_invalid=false
+    failing_unit=minecraft.service
+    selected_mounted=false selected_source=/dev/fixture selected_uuid=fixture-uuid
+    mountpoint() { [[ ${selected_mounted} == true ]]; }
+    jv_exact_mount_identity() {
+        case "$1" in SOURCE) printf '%s\n' "${selected_source}" ;; UUID) printf '%s\n' "${selected_uuid}" ;; esac
+    }
+    umount() { [[ $* == "-- ${fixture}/legacy-mount" ]] || exit 99; selected_mounted=false; }
+    systemctl() {
+        [[ $* != 'daemon-reload' ]] || return 0 # Existing storage fstab rollback.
+        [[ $1 == show ]] || { echo 'Unexpected runtime mutation' >&2; exit 99; }
+        case "$2" in
+            --property=ActiveState) if [[ ${*: -1} == "${failing_unit}" ]]; then printf '%s\n' "${fixture_active_state}"; else printf 'inactive\n'; fi ;;
+            --property=MainPID) printf '%s\n' "${main_pid}" ;;
+            --property=ControlPID) printf '%s\n' "${control_pid}" ;;
+            --property=ControlGroup) printf '\n' ;;
+            *) return 1 ;;
+        esac
+    }
+    podman() { [[ $* == 'container exists minecraft' ]] || exit 99; return "${container_rc}"; }
+    firewall-cmd() { echo 'Legacy recovery must not change unidentified firewall rules' >&2; exit 99; }
+    jv_reset_remove_active_configuration() { exit 99; }
+    jv_reset_remove_minecraft_container() { exit 99; }
+    jv_reset_delete_internal_data() { exit 99; }
+    validate_storage_path() { [[ ${storage_invalid} == false ]]; }
+    storage_validate_mountpoint_path() { [[ ${1-} == "${fixture}/legacy-mount" ]]; }
+    # Exercise the local legacy validator, including every critical mount scope.
+    _a55_legacy_validate_mountpoint "${fixture}/legacy-mount"
+    for critical_mount in / /boot /boot/efi /var /var/tmp /var/lib/containers /var/lib/containers/storage /etc /etc/justvoxel /sysroot /sysroot/var; do
+        if _a55_legacy_validate_mountpoint "${critical_mount}"; then
+            echo "Critical legacy mountpoint accepted: ${critical_mount}" >&2
+            exit 1
+        fi
+    done
+    findmnt() {
+        [[ ${mount_error} == false ]] || return 2
+        case "$*" in
+            '-rn -o TARGET') [[ ${nested} == false ]] || printf '%s/nested\n' "${A53_DEFAULT_DATA_PATH}" ;;
+            '-n -o TARGET,FSTYPE --target '*) printf '/ xfs\n' ;;
+            '-n -o SOURCE,FSTYPE,TARGET --target '*) printf '/dev/fixture xfs /\n' ;;
+            '-n -o FSTYPE --target '*) printf 'xfs\n' ;;
+            *) return 1 ;;
+        esac
+        return 0
+    }
+    # Paths are in a temporary fixture; use the real canonical/inode/mount checks.
+    jv_reset_data_scope() { printf 'internal\n'; }
+    legacy_manifest() {
+        printf '# original fstab\n' > "${A53_TX_DIR}/fstab.before"
+        chmod 0600 "${A53_TX_DIR}/fstab.before"
+        printf '# transaction fstab\n' > "${A53_FSTAB}"
+        # Restore fixture ownership without requiring root; private evidence ownership is mocked above.
+        jq -cn --argjson identity "${identity}" --arg data "${A53_DEFAULT_DATA_PATH}" --arg backups "${A53_DEFAULT_BACKUP_PATH}" \
+          --arg mount "${fixture}/legacy-mount" --arg before "$(_a53_file_sha256 "${A53_TX_DIR}/fstab.before")" --arg after "$(_a53_file_sha256 "${A53_FSTAB}")" \
+          --arg uid "$(command stat -c '%u' -- "${A53_FSTAB}")" --arg gid "$(command stat -c '%g' -- "${A53_FSTAB}")" '
+          $identity + {phase:"storage_verified",
+          runtime:{java_firewall_preexisting:false,bedrock_firewall_preexisting:true,minecraft_started:true,timer_activated:false,marker:true,empty_data_identity:null},
+          mounts_by_transaction:[{mountpoint:$mount,source:"/dev/fixture",uuid:"fixture-uuid"}],directories_created:[$data,$backups],
+          fstab_existed:true,fstab_changed:true,fstab_before_sha256:$before,fstab_after_sha256:$after,fstab_mode:"644",fstab_uid:$uid,fstab_gid:$gid,
+          credentials_existed:false,credentials_changed:false,credentials_before_sha256:"absent",credentials_after_sha256:"",credentials_mode:"",credentials_uid:"",credentials_gid:"",
+          rollback:{state:"not_started",result:""}}' > "${A53_MANIFEST}"
+        chmod 0600 "${A53_MANIFEST}"
+    }
+    legacy_manifest
+    jq -e '(has("runtime_request") | not) and (has("storage_request") | not) and .phase == "storage_verified" and .rollback.state == "not_started"' "${A53_MANIFEST}" >/dev/null
+    selected_mounted=true
+    _a55_recover_request <<< "${identity}"
+    [[ ${A55_LEGACY_RECOVERY} == true && -z ${A55_REQUEST} ]]
+    _a55_recover_action > "${fixture}/legacy-result"
+    jq -e '.ok == true and .phase == "runtime_rolled_back" and .evidence.recovery_mode == "legacy_verified_clean"' "${fixture}/legacy-result" >/dev/null
+    jq -e '.runtime_rollback_verified == true and .runtime_recovery.firewall == "preserved_unknown_ports" and (has("runtime_request") | not) and (has("storage_request") | not)' "${A53_MANIFEST}" >/dev/null
+    # The original storage helper accepts the verified runtime handoff.
+    a53_recover_action <<< "${identity}" > "${fixture}/legacy-storage-result"
+    jq -e '.ok == true and .phase == "storage_rolled_back" and .rollback_result == "rolled_back"' "${fixture}/legacy-storage-result" >/dev/null
+    jq -e '.rollback.state == "succeeded" and .phase == "storage_rolled_back"' "${A53_MANIFEST}" >/dev/null
+    [[ ${selected_mounted} == false ]]
+    cmp "${A53_TX_DIR}/fstab.before" "${A53_FSTAB}"
+    [[ $(cat "${A53_DEFAULT_DATA_PATH}/world.dat") == 'preserved world' && $(cat "${A53_DEFAULT_BACKUP_PATH}/backup.zip") == 'preserved backup' ]]
+
+    # Every managed file, including dangling links, blocks verification.
+    for file in "${A55_RUNTIME_FILES[@]}" "${A55_SETUP_MARKER}"; do
+        legacy_manifest
+        ln -s "${fixture}/missing" "${file}"
+        _a55_recover_request <<< "${identity}"
+        _a55_recover_action > "${fixture}/legacy-result"
+        jq -e '.ok == false and .phase == "runtime_rollback" and (.error | contains("runtime file remains"))' "${fixture}/legacy-result" >/dev/null
+        jq -e '.runtime_rollback_verified != true' "${A53_MANIFEST}" >/dev/null
+        rm "${file}"
+    done
+    for failing_unit in minecraft.service minecraft-backup.service minecraft-backup.timer; do
+        for fixture_active_state in active activating deactivating unknown; do
+            legacy_manifest
+            _a55_recover_request <<< "${identity}"
+            _a55_recover_action > "${fixture}/legacy-result"
+            jq -e '.ok == false and .phase == "runtime_rollback"' "${fixture}/legacy-result" >/dev/null
+        done
+    done
+    fixture_active_state=inactive
+    for unsafe in main-pid control-pid cgroup container podman-error nested mount-error storage changed-source changed-uuid changed-inode maintenance; do
+        legacy_manifest
+        case "${unsafe}" in
+            main-pid) main_pid=42 ;;
+            control-pid) control_pid=42 ;;
+            cgroup) mkdir -p "${A55_CGROUP_ROOT}/system.slice/minecraft.service"; printf 'populated 1\n' > "${A55_CGROUP_ROOT}/system.slice/minecraft.service/cgroup.events" ;;
+            container) container_rc=0 ;;
+            podman-error) container_rc=125 ;;
+            nested) nested=true ;;
+            mount-error) mount_error=true ;;
+            storage) storage_invalid=true ;;
+            changed-source|changed-uuid)
+                jq --arg mount "${fixture}/legacy-mount" '.mounts_by_transaction = [{mountpoint:$mount,source:"/dev/fixture",uuid:"fixture-uuid"}]' "${A53_MANIFEST}" > "${fixture}/changed"
+                cat "${fixture}/changed" > "${A53_MANIFEST}"
+                selected_mounted=true
+                if [[ ${unsafe} == changed-source ]]; then selected_source=/dev/other; else selected_uuid=other-uuid; fi
+                ;;
+            changed-inode)
+                DATA_PATH="${A53_DEFAULT_DATA_PATH}" BACKUP_PATH="${A53_DEFAULT_BACKUP_PATH}" DATA_MOUNT_POINT='' DATA_EXPECTED_UUID='' DATA_EXPECTED_SOURCE=''
+                recorded="$(_a55_data_identity)"
+                jq --argjson recorded "${recorded}" '.runtime.empty_data_identity = $recorded' "${A53_MANIFEST}" > "${fixture}/changed"
+                cat "${fixture}/changed" > "${A53_MANIFEST}"
+                mv "${DATA_PATH}" "${DATA_PATH}-original"; mkdir "${DATA_PATH}"
+                ;;
+            maintenance) exec 9>&-; exec 8>"${JV_MAINTENANCE_LOCK}"; flock -n 8 ;;
+        esac
+        _a55_recover_request <<< "${identity}"
+        _a55_recover_action > "${fixture}/legacy-result"
+        jq -e '.ok == false and .phase == "runtime_rollback" and (.error | length > 0)' "${fixture}/legacy-result" >/dev/null
+        jq -e '.runtime_rollback_verified != true and .rollback.state == "not_started"' "${A53_MANIFEST}" >/dev/null
+        case "${unsafe}" in
+            changed-inode) rmdir "${DATA_PATH}"; mv "${DATA_PATH}-original" "${DATA_PATH}" ;;
+            maintenance) flock -u 8; exec 8>&- ;;
+        esac
+        main_pid=0 control_pid=0 container_rc=1 nested=false mount_error=false storage_invalid=false
+        selected_source=/dev/fixture selected_uuid=fixture-uuid
+        rm -rf "${A55_CGROUP_ROOT}"
+        # The same preserved manifest is retryable after the condition clears.
+        _a55_recover_request <<< "${identity}"
+        _a55_recover_action > "${fixture}/legacy-result"
+        jq -e '.ok == true and .phase == "runtime_rolled_back"' "${fixture}/legacy-result" >/dev/null
+        selected_mounted=false
+    done
+    for change in '.operation_id = "wrong"' '.plan_fingerprint = "wrong"' '.schema_version = "wrong"' 'del(.runtime)' '.runtime.marker = "true"' '.runtime_request = null' \
+        '.phase = "runtime_verified"' '.rollback.state = "succeeded"' '.rollback.result = "rolled_back"' '.runtime.marker = false' \
+        '.rollback = null' 'del(.rollback)' 'del(.rollback.result)'; do
+        legacy_manifest
+        jq "${change}" "${A53_MANIFEST}" > "${fixture}/changed"
+        cat "${fixture}/changed" > "${A53_MANIFEST}"
+        if _a55_recover_request <<< "${identity}"; then echo "Invalid legacy evidence accepted: ${change}" >&2; exit 1; fi
+    done
+)
+reset_manifest
+
 # Drive the real apply function. Rendering is the first meaningful mutation;
 # the full request and initial rollback identity must already be durable there.
 _a55_load_values() { DATA_PATH="${fixture}/data"; }

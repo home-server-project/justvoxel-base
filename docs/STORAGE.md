@@ -136,6 +136,9 @@ and Minecraft remains stopped. Saved mount settings may also need replacement.
 
 ### First-run runtime recovery
 
+Failed first-run setup must retain a user-accessible recovery path whenever safe
+recovery can be proven. This is a product invariant across transaction formats.
+
 New setup transactions retain the non-secret runtime request in the root-owned,
 private storage transaction manifest before runtime changes begin. It includes the
 operation identity, reviewed plan fingerprint, ports, data and backup paths, and
@@ -153,6 +156,34 @@ unrelated storage remain protected.
 After both rollback stages are verified, the operation becomes `rolled_back`, the
 setup lock is released, and **Start setup over** is available. Failure or restart
 during recovery retains the transaction and setup lock, reports the reason, and
-allows retry at the preserved recovery stage. Older transactions without durable
-runtime evidence remain locked for manual attention; Setup Retry cannot repair them
-by inferring missing evidence.
+allows retry at the preserved recovery stage.
+
+For transactions from older images that have no `runtime_request`, **Retry recovery**
+must support bounded compatibility verification when sufficient preserved
+transaction evidence and current appliance state positively prove safe recovery.
+This is an implementation requirement, not a claim of verified legacy runtime
+behavior. Evidence may include the private operation identity, plan fingerprint,
+runtime initial-state evidence, transaction-owned mount identities, created
+directories, optional recorded data-directory identity, and fstab snapshot/hash
+evidence. Historical manifests need neither `runtime_request` nor
+`storage_request`. Verification of an already-clean runtime must establish that
+managed runtime files and the setup marker are absent, Minecraft and backup units are inactive with no remaining unit
+processes, the Minecraft container is absent, the maintenance lock is available,
+and storage identity and mount safety still match the transaction.
+
+Compatibility recovery must never fabricate missing evidence, reconstruct runtime
+settings from live configuration, or bypass storage/runtime identity or ownership
+checks. Unverifiable recovery must retain the transaction and lock and report the
+concrete failure. `needs_attention` must not become a permanent dead end merely
+because internal transaction formats changed when safe recovery can be proven.
+
+The protected product workflow remains **Retry recovery -> verified rollback ->
+`rolled_back` -> setup lock releases -> Start setup over**. Factory Reset and
+Minecraft Reset remain separate operations, never substitutes for Setup Recovery.
+
+Compatibility recovery must preserve remaining data and unrelated firewall rules.
+Historical rollback attempted firewall cleanup using the original in-memory ports;
+preserved boolean firewall evidence does not identify those ports. Compatibility
+recovery must therefore preserve firewall rules, including any residual setup
+rules, rather than risk deleting unrelated rules. New transactions continue using
+their durable `runtime_request` for guarded runtime cleanup.

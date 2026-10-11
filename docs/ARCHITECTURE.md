@@ -109,6 +109,14 @@ The appliance relies on:
 
 The goal is for the convenient interface to preserve the same safety expectations as the underlying system operations.
 
+## Stability and recovery invariants
+
+JustVoxel is intended for normal appliance users without Linux system administration knowledge. Known-working user-facing behavior is preserved unless there is a demonstrated defect or an approved product change.
+
+Supported appliance failures must remain recoverable through JustVoxel interfaces whenever sufficient safe recovery evidence exists. Internal implementation changes must not unnecessarily turn a previously recoverable state into one requiring terminal repair, Factory Reset, or appliance reinstall.
+
+Persistent workflow changes must consider compatibility with state written by deployed versions. Safety checks remain fail-closed when safety cannot be established, but safety and recoverability must be designed together: safely recoverable state must not become a permanent dead end after an update.
+
 ## Separate update paths
 
 JustVoxel has two important update layers.

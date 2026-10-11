@@ -37,6 +37,66 @@ Knowledgeable users may run additional Podman containers manually, but generic m
 
 Prefer simple, safe, stable, secure solutions. Do not add machinery merely because it is technically possible.
 
+## Protected product invariants
+
+### Known-working behavior
+
+**IF A SUPPORTED SYSTEM / FEATURE / USER FLOW WORKS IN REAL USE AND THERE IS NO DEMONSTRATED BUG OR EXPLICITLY APPROVED REQUIREMENT TO CHANGE IT, LEAVE IT ALONE.**
+
+Do not redesign, remove, tighten, replace, refactor, "clean up", or reinterpret known-working behavior merely because another implementation seems cleaner or theoretically safer. Working behavior is an asset, not technical debt.
+
+Before changing an established workflow, inspect its existing behavior, history, tests, and compatibility expectations.
+
+### Recovery is protected product behavior
+
+Recovery is a normal appliance feature, not a developer or sysadmin escape hatch. **Never remove, destroy, strand, or silently make an existing supported recovery path unusable.**
+
+A failed supported operation must not become instructions to use the terminal, manually edit/delete operation journals, remove locks, repair internal state, use Factory Reset or Minecraft Reset, or reinstall the appliance merely because the implementation changed.
+
+First-run Setup Recovery is specifically protected:
+
+**Retry recovery -> verified rollback/recovery -> `rolled_back` -> setup lock releases -> Start setup over becomes available.**
+
+Factory Reset and Minecraft Reset are separate product operations, never substitutes for failed Setup Recovery. A `needs_attention` state must retain a usable recovery path whenever the appliance has enough evidence to recover safely.
+
+### Persistent-state compatibility
+
+Persistent operation journals, transaction manifests, recovery evidence, schemas, and state-machine changes must account for already deployed appliances. Never intentionally introduce a persistent-state format that makes an existing valid/recoverable operation permanently unrecoverable.
+
+When changing persistent transaction evidence or recovery schemas:
+
+- inspect compatibility with state written by currently and previously deployed implementations;
+- preserve compatibility whenever technically possible;
+- add a bounded compatibility path when safe;
+- never invent missing evidence or bypass identity or ownership checks;
+- never silently discard an existing operation.
+
+### Safety must preserve usability
+
+Do not improve theoretical safety by breaking practical recoverability. Fail-closed behavior is required when safety cannot be established; new validation must not unnecessarily strand previously valid appliance state.
+
+Before tightening persistent-workflow validation, determine how deployed appliances behave after update. If a new rule would strand existing safe/recoverable state, implement safe compatibility handling rather than simply declaring it unsupported.
+
+**SIMPLE. SAFE. STABLE. SECURE. Safe must not mean unusable; fail closed must not mean permanently unrecoverable when safe recovery can be proven.**
+
+### SELinux is not a troubleshooting knob
+
+SELinux Enforcing is a protected appliance invariant. Never:
+
+- disable SELinux or switch the appliance to permissive;
+- weaken policy merely to make a failing feature work;
+- change types, contexts, file labels, or labeling strategy as speculative troubleshooting;
+- add `chcon` hacks, broad `restorecon` or relabel-at-boot hacks;
+- add `semanage fcontext` changes merely to silence an unexplained problem.
+
+Preserve the established Podman `:Z` data-labeling model. **If SELinux is Enforcing and the existing labeling works, LEAVE IT ALONE.**
+
+Investigate an AVC and prove its relevance before proposing policy or labeling changes. Any deliberate SELinux policy/labeling change requires:
+
+1. evidence that SELinux is actually the cause;
+2. explicit task scope for the SELinux change;
+3. human approval.
+
 ## Branch and release model
 
 Active integration development happens on `testing`.
@@ -78,8 +138,6 @@ If another problem is discovered:
 3. do not fix it unless it is required by the approved scope or the human expands scope.
 
 If a relevant test fails because of an unrelated area, do not chase the failure through other subsystems. Report the failure, likely cause, and boundary.
-
-Protect known-working behavior. Do not replace, restructure, or clean up working code unless the approved task requires it.
 
 Avoid speculative cleanup and endless test-fix-test loops.
 
