@@ -17,7 +17,11 @@ Keep the Base image simple, immutable, reproducible, and appliance-focused.
 - Never introduce a private digest-resolution layer for those packages.
 - Inspect existing build/system patterns before inventing another mechanism.
 - Prefer declarative systemd/image configuration over fragile boot-time scripting where practical.
-- Preserve SELinux enforcement, but use the simplest policy/labeling needed for the appliance rather than enterprise-style overengineering.
+- Preserve SELinux Enforcing and all known-working labels, types, policy, labeling behavior, and the established Podman `:Z` data-labeling model.
+- Never use SELinux as speculative troubleshooting: do not switch to permissive mode, weaken policy, add `chcon` hacks, broad `restorecon` or relabel-at-boot fixes, or `semanage fcontext` changes merely to make an unexplained failure pass.
+- Investigate AVC evidence first and prove SELinux is actually involved before proposing an SELinux change.
+- Any deliberate SELinux policy or labeling change requires explicit approved SELinux scope and human approval.
+- If SELinux is Enforcing and the existing labeling works, LEAVE IT ALONE.
 - Avoid broad privileges that are not required by the actual appliance function.
 
 ## Validation Levels
