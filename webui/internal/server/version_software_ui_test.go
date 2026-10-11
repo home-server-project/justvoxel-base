@@ -112,7 +112,9 @@ function button(root, text) { return root.all().find(node => node.tagName === "b
         assert.equal(choice.attributes["aria-disabled"], "true");
         assert.equal(choice.events.click, undefined);
       } else if (isCurrent) {
-        assert.equal(choice.events.click, undefined);
+        assert.equal(choice.tagName, "button");
+        assert.equal(typeof choice.events.click, "function");
+        assert.equal(choice.attributes["aria-pressed"], "true");
       }
     }
     assert.ok(!page.content.textContent.includes("Current server software"));
@@ -145,6 +147,41 @@ function button(root, text) { return root.all().find(node => node.tagName === "b
     let apply = button(page.content, "Apply server software change");
     assert.equal(apply.disabled, true);
     assert.ok(!page.calls.some(call => call.options.method === "POST"));
+    const vanilla = choices.find(choice => choice.children[1].children[0].textContent === "Vanilla");
+    const warning = page.content.all().find(node => node.ownText === "Requires Reset Minecraft and setup again.");
+    await installed.events.click();
+    assert.ok(installed.className.includes("is-selected"));
+    assert.equal(installed.attributes["aria-pressed"], "true");
+    assert.equal(selectable.attributes["aria-pressed"], "false");
+    assert.equal(button(page.content, "Apply server software change"), undefined);
+    assert.ok(!page.content.textContent.includes("Review server software change"));
+    await selectable.events.click();
+    assert.equal(page.content.all().filter(node => node.ownText === "Review server software change").length, 1);
+    const beforeVanilla = page.calls.length;
+    await vanilla.events.click();
+    assert.equal(page.calls.length, beforeVanilla);
+    for (const choice of choices) {
+      assert.equal(choice.className.includes("is-selected"), choice === vanilla);
+      assert.equal(choice.attributes["aria-pressed"], String(choice === vanilla));
+    }
+    assert.equal(warning.hidden, false);
+    assert.equal(button(page.content, "Apply server software change"), undefined);
+    assert.ok(!page.content.textContent.includes("Review server software change"));
+    assert.equal(page.content.all().find(node => node.tagName === "input" && node.attributes.role === "switch"), undefined);
+    assert.ok(page.content.textContent.includes("Container updates"));
+    await installed.events.click();
+    assert.equal(warning.hidden, true);
+    assert.ok(installed.className.includes("is-selected"));
+    assert.equal(button(page.content, "Apply server software change"), undefined);
+    await vanilla.events.click();
+    await selectable.events.click();
+    assert.equal(warning.hidden, true);
+    assert.ok(selectable.className.includes("is-selected"));
+    assert.equal(page.content.all().filter(node => node.ownText === "Review server software change").length, 1);
+    assert.ok(page.content.textContent.includes("Server software " + transition));
+    assert.equal(installed.children[1].children[1].textContent, "Current");
+    assert.ok(!page.calls.some(call => call.options.method === "POST"));
+    apply = button(page.content, "Apply server software change");
     const cancel = button(page.content, "Cancel review");
     assert.ok(cancel);
     assert.equal(cancel.parent, apply.parent);

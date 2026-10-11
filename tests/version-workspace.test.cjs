@@ -10,18 +10,19 @@ const reviewSource = source.slice(source.indexOf('  const requiresRuntimeUpdate 
 class Element {
   constructor(tag) {
     this.tag = tag;
+    this.tagName = tag;
     this.children = [];
     this.dataset = {};
     this.listeners = {};
     this.checked = false;
     this.disabled = false;
   }
-  append(...children) { this.children.push(...children); }
+  append(...children) { children.forEach((child) => { child.parent = this; this.children.push(child); }); }
   appendChild(child) { this.append(child); }
   setAttribute(name, value) { this[name] = value; }
   addEventListener(name, listener) { this.listeners[name] = listener; }
   querySelector() { return null; }
-  remove() { this.removed = true; }
+  remove() { this.removed = true; if (this.parent) this.parent.children = this.parent.children.filter((child) => child !== this); }
   all() { return [this, ...this.children.flatMap((child) => child.all())]; }
 }
 const policyChange = { field: 'version_policy', before: 'recommended', after: 'pinned' };
@@ -135,24 +136,26 @@ test('persistent operation polling continues while running and renders its final
   assert.deepEqual(messages, ['Server update completed.']);
 });
 
-// Exercise the production software review with the selected target and API plan.
-const softwareReviewSource = source.slice(source.indexOf('              const [plan, snapshot] ='), source.indexOf('              root.appendChild(review);') + '              root.appendChild(review);'.length);
-async function softwareReview(overrides = {}) {
+// Exercise the production software cards, selection and review together.
+const softwareSource = source.slice(source.indexOf('        const software = card("");'), source.indexOf('        const panel = card("Container updates");'));
+function softwareWorkspace({ current = 'paper', overrides = {}, planning } = {}) {
   const calls = [];
   const root = new Element('div');
-  const change = new Element('button');
-  const plan = { ...statusFor('26.2'), server_supported: true, server_software: 'Purpur', ...overrides };
   const context = vm.createContext({
-    Boolean, String, URLSearchParams, csrf: 'csrf', state: {}, target: 'purpur', root, change,
-    status: { server_software: 'Paper' }, currentSoftware: 'paper', softwareReviewPending: true,
-    selectSoftware: (target) => { change.selected = target; },
+    Boolean, String, URLSearchParams, csrf: 'csrf', state: {}, root, ticket: 1, sequence: 1,
+    minecraft: { server_type: current },
+    status: { server_software: current === 'purpur' ? 'Purpur' : 'Paper' },
     document: { createElement: (tag) => new Element(tag) },
     card: (title) => Object.assign(new Element('section'), { textContent: title }),
     line: (label, value) => Object.assign(new Element('div'), { textContent: `${label}: ${value}` }),
     statusURL: (policy, version, target) => `/api/version/workspace/status?server_type=${target}`,
     request: async (url, options) => {
       calls.push({ url, body: options?.body });
-      if (url.startsWith('/api/version/workspace/status?')) return plan;
+      if (url.startsWith('/api/version/workspace/status?')) {
+        const target = new URLSearchParams(url.split('?')[1]).get('server_type');
+        const plan = { ...statusFor('26.2'), server_supported: true, server_software: target === 'purpur' ? 'Purpur' : 'Paper', ...overrides };
+        return planning ? planning(plan) : plan;
+      }
       if (url === '/api/dashboard-status') return { players: { online: 0 } };
       if (url === '/api/version/workspace/update') return { operation: { operation_id: 'software-1' } };
       throw new Error(`Unexpected request: ${url}`);
@@ -160,13 +163,27 @@ async function softwareReview(overrides = {}) {
     render: async (message) => { calls.push({ message }); },
     watchUpdate: (id) => { calls.push({ watch: id }); },
   });
-  await vm.runInContext(`(async () => { ${softwareReviewSource} })()`, context);
-  const nodes = root.all();
+  vm.runInContext(softwareSource, context);
+  const cards = root.all().filter((node) => node.className?.split(' ').includes('version-software-choice'));
+  const choice = (target) => cards.find((node) => node.children[1].children[0].textContent.toLowerCase() === target);
+  const find = (text) => root.all().find((node) => node.textContent === text);
   return {
-    root, calls, change,
-    apply: nodes.find((node) => node.textContent === 'Apply server software change'),
-    cancel: nodes.find((node) => node.textContent === 'Cancel review'),
-    consent: nodes.find((node) => node.tag === 'input'),
+    root, calls, cards, choice, find,
+    click: (target) => choice(target).listeners.click(),
+    warning: root.all().find((node) => node.textContent === 'Requires Reset Minecraft and setup again.'),
+    reviews: () => root.all().filter((node) => node.textContent === 'Review server software change'),
+    consent: () => root.all().find((node) => node.tag === 'input'),
+    state: context.state,
+  };
+}
+async function softwareReview(overrides = {}) {
+  const workspace = softwareWorkspace({ overrides });
+  await workspace.click('purpur');
+  return {
+    ...workspace, change: workspace.choice('purpur'),
+    apply: workspace.find('Apply server software change'),
+    cancel: workspace.find('Cancel review'),
+    consent: workspace.consent(),
   };
 }
 
@@ -228,10 +245,132 @@ test('software confirmation cannot enable an unsafe plan', async () => {
 test('software Cancel removes the review and restores installed selection without applying', async () => {
   const result = await softwareReview();
   await result.cancel.listeners.click();
-  assert.equal(result.root.children[0].removed, true);
+  assert.equal(result.reviews().length, 0);
   assert.equal(result.change.disabled, false);
-  assert.equal(result.change.selected, 'paper');
+  assert.ok(result.choice('paper').className.includes('is-selected'));
+  assert.equal(result.change['aria-pressed'], 'false');
   assert.ok(!result.calls.some((call) => call.url === '/api/version/workspace/update'));
+});
+
+function assertSoftwareSelection(page, selected, installed) {
+  for (const node of page.cards) {
+    const type = node.children[1].children[0].textContent.toLowerCase();
+    assert.equal(node.className.includes('is-selected'), type === selected);
+    assert.equal(node.className.includes('is-current'), type === installed);
+    if (node.tag === 'button') assert.equal(node['aria-pressed'], String(type === selected));
+    assert.equal(node.children[1].children[1].textContent,
+      type === installed ? 'Current' : installed !== 'vanilla' && type !== 'vanilla' ? 'Switch Available' : 'Switch Unavailable');
+  }
+}
+
+test('installed Paper and Purpur stay clickable and reversibly clear and recreate one review', async () => {
+  for (const installed of ['paper', 'purpur']) {
+    const target = installed === 'paper' ? 'purpur' : 'paper';
+    const page = softwareWorkspace({ current: installed });
+    assertSoftwareSelection(page, installed, installed);
+    assert.equal(page.choice(installed).tag, 'button');
+    assert.equal(page.reviews().length, 0);
+    await page.click(target);
+    assertSoftwareSelection(page, target, installed);
+    assert.equal(page.reviews().length, 1);
+    const calls = page.calls.length;
+    await page.click(target);
+    assert.equal(page.calls.length, calls);
+    assert.equal(page.reviews().length, 1);
+    await page.click(installed);
+    assert.equal(page.calls.length, calls);
+    assertSoftwareSelection(page, installed, installed);
+    assert.equal(page.reviews().length, 0);
+    assert.equal(page.consent(), undefined);
+    await page.click(target);
+    assertSoftwareSelection(page, target, installed);
+    assert.equal(page.reviews().length, 1);
+    const from = installed === 'paper' ? 'Paper' : 'Purpur';
+    const to = target === 'paper' ? 'Paper' : 'Purpur';
+    assert.ok(page.find(`Server software: ${from} → ${to}`));
+    page.find('Cancel review').listeners.click();
+    assertSoftwareSelection(page, installed, installed);
+    assert.equal(page.reviews().length, 0);
+    assert.ok(!page.calls.some((call) => call.url === '/api/version/workspace/update'));
+  }
+});
+
+test('Vanilla replaces software review with only its warning and supports leaving either way', async () => {
+  for (const installed of ['paper', 'purpur']) {
+    const target = installed === 'paper' ? 'purpur' : 'paper';
+    const page = softwareWorkspace({ current: installed });
+    await page.click(target);
+    const beforeVanilla = page.calls.length;
+    await page.click('vanilla');
+    assert.equal(page.calls.length, beforeVanilla);
+    assertSoftwareSelection(page, 'vanilla', installed);
+    assert.equal(page.reviews().length, 0);
+    assert.equal(page.warning.hidden, false);
+    assert.equal(page.find('Apply server software change'), undefined);
+    assert.equal(page.find('Confirm server software change'), undefined);
+    assert.equal(page.consent(), undefined);
+    await page.click(installed);
+    assertSoftwareSelection(page, installed, installed);
+    assert.equal(page.warning.hidden, true);
+    assert.equal(page.reviews().length, 0);
+    assert.equal(page.calls.length, beforeVanilla);
+    await page.click('vanilla');
+    await page.click(target);
+    assertSoftwareSelection(page, target, installed);
+    assert.equal(page.warning.hidden, true);
+    assert.equal(page.reviews().length, 1);
+    assert.equal(page.calls.filter((call) => call.url.includes(`server_type=${target}`)).length, 2);
+    assert.ok(!page.calls.some((call) => call.url.includes('server_type=vanilla') || call.url === '/api/version/workspace/update'));
+  }
+});
+
+test('Vanilla installed preserves unavailable Paper and Purpur capability', () => {
+  const page = softwareWorkspace({ current: 'vanilla' });
+  assertSoftwareSelection(page, 'vanilla', 'vanilla');
+  for (const target of ['paper', 'purpur']) {
+    assert.equal(page.choice(target).tag, 'div');
+    assert.equal(page.choice(target)['aria-disabled'], 'true');
+    assert.equal(page.choice(target).listeners.click, undefined);
+  }
+});
+
+test('late Purpur planning cannot recreate a review after Vanilla or installed Paper selection', async () => {
+  for (const next of ['vanilla', 'paper']) {
+    let resolvePlan;
+    const page = softwareWorkspace({ planning: (plan) => new Promise((resolve) => { resolvePlan = () => resolve(plan); }) });
+    const pending = page.click('purpur');
+    await page.click(next);
+    resolvePlan();
+    await pending;
+    assertSoftwareSelection(page, next, 'paper');
+    assert.equal(page.warning.hidden, next !== 'vanilla');
+    assert.equal(page.reviews().length, 0);
+    assert.equal(page.consent(), undefined);
+    assert.equal(page.find('Apply server software change'), undefined);
+    assert.ok(!page.calls.some((call) => call.url === '/api/version/workspace/update'));
+  }
+});
+
+test('older planning cannot replace a fresh review of the same target or undo selection on failure', async () => {
+  const pendingPlans = [];
+  const page = softwareWorkspace({ planning: (plan) => new Promise((resolve, reject) => pendingPlans.push({ resolve: () => resolve(plan), reject })) });
+  const old = page.click('purpur');
+  await page.click('vanilla');
+  const fresh = page.click('purpur');
+  pendingPlans[1].resolve();
+  await fresh;
+  const review = page.reviews()[0];
+  pendingPlans[0].resolve();
+  await old;
+  assert.deepEqual(page.reviews(), [review]);
+  await page.click('paper');
+  const failed = page.click('purpur');
+  await page.click('vanilla');
+  pendingPlans[2].reject(new Error('Old planning failed'));
+  await failed;
+  assertSoftwareSelection(page, 'vanilla', 'paper');
+  assert.equal(page.reviews().length, 0);
+  assert.equal(page.state.textContent, '');
 });
 
 const channelChange = { field: 'image_tag', label: 'Container channel', before: 'stable', after: 'latest' };

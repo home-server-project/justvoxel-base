@@ -1405,6 +1405,11 @@ input[type=checkbox].destructive-confirm-toggle::before{content:none}
 .app-header .brand-mark{min-height:32px;padding:1px .35rem}
 .app-header .brand-logo{width:28px;height:28px}
 .app-header .control-center-trigger{min-height:32px;height:32px;padding:.3rem .6rem;border-color:transparent}
+/* Keep the panel's 32px anchor; center the desktop frame on the 40px outer border. */
+@media(min-width:601px){
+  .app-header .control-center{height:32px}
+  .app-header .control-center-trigger{position:relative;top:-4px;min-height:40px;height:40px}
+}
 .app-header .control-center-trigger:hover,.app-header .control-center-trigger:focus-visible,.app-header .control-center[open]>.control-center-trigger{border-color:#4f8b69}
 .topbar-time{min-width:0}
 .topbar-clock{white-space:nowrap;padding:.2rem .4rem;font-size:.82rem}

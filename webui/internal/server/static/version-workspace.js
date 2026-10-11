@@ -291,9 +291,17 @@ if (versionLauncher && versionDialog) {
         const choices = document.createElement("div");
         choices.className = "version-software-choices";
         const currentSoftware = minecraft.server_type || "paper";
-        let softwareReviewPending = false;
+        let selectedSoftware = currentSoftware;
+        let softwareSelectionSequence = 0;
+        let softwareReview;
         const softwareCards = [];
         const selectSoftware = (target) => {
+          ++softwareSelectionSequence;
+          selectedSoftware = target;
+          softwareReview?.remove();
+          softwareReview = undefined;
+          vanillaWarning.hidden = target !== "vanilla";
+          state.textContent = "";
           softwareCards.forEach(({ node, type }) => {
             node.className = node.className.replace(/ is-selected/g, "") + (type === target ? " is-selected" : "");
             if (node.tagName.toLowerCase() === "button") node.setAttribute("aria-pressed", String(type === target));
@@ -309,7 +317,7 @@ if (versionLauncher && versionDialog) {
           ["vanilla", "Vanilla", "Original Minecraft"],
         ]) {
           const isCurrent = target === currentSoftware;
-          const selectable = !isCurrent && ["paper", "purpur"].includes(currentSoftware) && ["paper", "purpur"].includes(target);
+          const selectable = ["paper", "purpur"].includes(currentSoftware) && ["paper", "purpur"].includes(target);
           const change = document.createElement(selectable || target === "vanilla" ? "button" : "div");
           change.className = "version-software-choice server-software-card" + (isCurrent ? " is-current is-selected" : selectable ? " secondary" : "");
           const title = document.createElement("strong");
@@ -340,17 +348,18 @@ if (versionLauncher && versionDialog) {
           if (selectable || target === "vanilla") change.setAttribute("aria-pressed", String(isCurrent));
           if (target === "vanilla") {
             change.type = "button";
-            change.addEventListener("click", () => { vanillaWarning.hidden = false; });
+            change.addEventListener("click", () => { selectSoftware(target); });
           } else if (!isCurrent && !selectable) change.setAttribute("aria-disabled", "true");
           if (!selectable) continue;
           change.type = "button";
           change.addEventListener("click", async () => {
-            vanillaWarning.hidden = true;
-            if (softwareReviewPending) return;
-            softwareReviewPending = true;
+            if (selectedSoftware === target) return;
             selectSoftware(target);
+            if (isCurrent) return;
+            const selectionTicket = softwareSelectionSequence;
             try {
               const [plan, snapshot] = await Promise.all([request(statusURL("", "", target)), request("/api/dashboard-status")]);
+              if (selectionTicket !== softwareSelectionSequence || ticket !== sequence) return;
               const review = card("Review server software change");
               const summary = document.createElement("div");
               summary.className = "version-software-review-summary";
@@ -390,13 +399,18 @@ if (versionLauncher && versionDialog) {
                 }
               });
               const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "secondary"; cancel.textContent = "Cancel review";
-              cancel.addEventListener("click", () => { review.remove(); softwareReviewPending = false; selectSoftware(currentSoftware); });
+              cancel.addEventListener("click", () => { selectSoftware(currentSoftware); });
               const actions = document.createElement("div");
               actions.className = "action-row version-software-review-actions";
               actions.append(cancel, apply);
               review.appendChild(actions);
+              softwareReview = review;
               root.appendChild(review);
-            } catch (failure) { state.textContent = failure.message; softwareReviewPending = false; selectSoftware(currentSoftware); }
+            } catch (failure) {
+              if (selectionTicket !== softwareSelectionSequence || ticket !== sequence) return;
+              selectSoftware(currentSoftware);
+              state.textContent = failure.message;
+            }
           });
         }
         software.append(choices, vanillaWarning);
