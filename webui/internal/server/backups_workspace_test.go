@@ -119,7 +119,7 @@ func TestBackupsWorkspaceUsesIndependentWorkspaceRoutes(t *testing.T) {
 	for _, want := range []string{
 		`action="/workspace/backups/backup"`,
 		`action="/workspace/backups/automatic/plan"`,
-		`action="/workspace/backups/destination/plan"`,
+		`action="{{.DestinationWorkspace}}/destination/plan"`,
 		`action="/workspace/backups/restore/plan"`,
 		`action="/workspace/backups/restore/resolve-reset"`,
 		`Keep current server and continue Restore`,
@@ -437,8 +437,8 @@ func TestStandaloneBackupStorageUIRetired(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, action := range []string{
-		`action="/workspace/backups/destination/plan"`,
-		`action="/workspace/backups/destination/apply"`,
+		`action="{{.DestinationWorkspace}}/destination/plan"`,
+		`action="{{.DestinationWorkspace}}/destination/apply"`,
 	} {
 		if !strings.Contains(string(markup), action) {
 			t.Fatalf("Backups workspace missing replacement %q", action)

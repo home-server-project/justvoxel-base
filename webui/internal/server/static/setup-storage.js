@@ -91,6 +91,8 @@
       }
 
       function chooseInternal() {
+        const current = existingButtons.find(button => button.dataset.device === device?.value);
+        if (current) { selectExisting(current); return; }
         setPanels('partition');
         if (type) type.value = 'partition';
         if (device) device.value = '';
@@ -100,6 +102,7 @@
         if (selectedBox) selectedBox.hidden = true;
       }
 
+      existingButtons.filter(button => button.hasAttribute('data-setup-select-existing')).forEach(button => button.addEventListener('click', () => selectExisting(button)));
       systemButton?.addEventListener('click', selectSystem);
       internalButton?.addEventListener('click', chooseInternal);
       storageForm.addEventListener('setup-destination-select', event => {
@@ -216,6 +219,7 @@
         if (device) device.value = '';
       }
 
+      existingButtons.filter(button => button.hasAttribute('data-setup-select-existing')).forEach(button => button.addEventListener('click', () => selectExisting(button)));
       choices.forEach((choice) => {
         choice.addEventListener('click', () => {
           const kind = choice.dataset.setupBackupChoice || 'system';

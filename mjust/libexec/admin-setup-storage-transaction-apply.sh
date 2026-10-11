@@ -1,5 +1,17 @@
 _a53_prepare_transaction() {
-    local fstab_snapshot before manifest credentials_snapshot credentials_before backup_type backup_mount
+    local fstab_snapshot before manifest credentials_snapshot credentials_before backup_type backup_mount snapshot_credentials=false
+    [[ ! -L ${A53_FSTAB} && ( ! -e ${A53_FSTAB} || -f ${A53_FSTAB} ) ]] || return 1
+    backup_type="$(jq -r '.backups.type' <<< "${A53_REQUEST}")"
+    backup_mount="$(_a53_normalize_path "$(jq -r '.backups.mount_point // ""' <<< "${A53_REQUEST}")")"
+    if { [[ ${backup_type} == smb && -n ${backup_mount} ]] && ! mountpoint -q -- "${backup_mount}"; } ||
+       jv_storage_credentials_referenced "${A53_FSTAB}" "${A54_SMB_CREDENTIALS}"; then
+        [[ ! -L ${A54_SMB_CREDENTIALS} && $(_a53_normalize_path "${A54_SMB_CREDENTIALS}") == "${A54_SMB_CREDENTIALS}" ]] || return 1
+        if [[ -e ${A54_SMB_CREDENTIALS} || -L ${A54_SMB_CREDENTIALS} ]]; then
+            jv_storage_credentials_safe "${A54_SMB_CREDENTIALS}" || return 1
+        fi
+        snapshot_credentials=true
+    fi
+
     install -d -m0700 -o root -g root "${A53_TRANSACTION_ROOT}" || return 1
     A53_TX_DIR="${A53_TRANSACTION_ROOT}/${A53_OPERATION_ID}"
     [[ ! -e ${A53_TX_DIR} ]] || return 2
@@ -25,9 +37,7 @@ _a53_prepare_transaction() {
 
     credentials_snapshot="${A53_TX_DIR}/smb.credentials.before"
     credentials_before=absent
-    backup_type="$(jq -r '.backups.type' <<< "${A53_REQUEST}")"
-    backup_mount="$(_a53_normalize_path "$(jq -r '.backups.mount_point // ""' <<< "${A53_REQUEST}")")"
-    if [[ ${backup_type} == smb && -n ${backup_mount} ]] && ! mountpoint -q -- "${backup_mount}"; then
+    if [[ ${snapshot_credentials} == true ]]; then
         if [[ -e ${A54_SMB_CREDENTIALS} ]]; then
             cat -- "${A54_SMB_CREDENTIALS}" > "${credentials_snapshot}" || return 1
             chmod 0600 "${credentials_snapshot}" || return 1
@@ -63,7 +73,7 @@ _a53_prepare_transaction() {
         --arg credentials_mode "${A54_CREDENTIALS_MODE}" \
         --arg credentials_uid "${A54_CREDENTIALS_UID}" \
         --arg credentials_gid "${A54_CREDENTIALS_GID}" \
-        '{schema_version:"v1",operation_id:$operation_id,plan_fingerprint:$plan_fingerprint,phase:"storage_snapshot",fstab_existed:$fstab_existed,fstab_before_sha256:$fstab_before_sha256,fstab_mode:$fstab_mode,fstab_uid:$fstab_uid,fstab_gid:$fstab_gid,fstab_changed:false,fstab_after_sha256:"",credentials_existed:$credentials_existed,credentials_before_sha256:$credentials_before_sha256,credentials_mode:$credentials_mode,credentials_uid:$credentials_uid,credentials_gid:$credentials_gid,credentials_changed:false,credentials_after_sha256:"",mounts_by_transaction:[],directories_created:[],rollback:{state:"not_started",result:""}}')" || return 1
+        '{schema_version:"v1",operation_id:$operation_id,plan_fingerprint:$plan_fingerprint,phase:"storage_snapshot",fstab_existed:$fstab_existed,fstab_before_sha256:$fstab_before_sha256,fstab_mode:$fstab_mode,fstab_uid:$fstab_uid,fstab_gid:$fstab_gid,fstab_changed:false,fstab_after_sha256:"",credentials_existed:$credentials_existed,credentials_before_sha256:$credentials_before_sha256,credentials_mode:$credentials_mode,credentials_uid:$credentials_uid,credentials_gid:$credentials_gid,credentials_changed:false,credentials_after_sha256:"",mounts_by_transaction:[],retired_mounts:[],directories_created:[],rollback:{state:"not_started",result:""}}')" || return 1
     manifest="$(jq -c --argjson request "${A53_REQUEST}" '. + {storage_request:$request}' <<< "${manifest}")" || return 1
     _a53_manifest_write "${manifest}" || return 1
     return 0
@@ -298,8 +308,10 @@ _a54_restore_smb_credentials() {
     # An unrelated transaction has no authority over this shared credential file,
     # even when credentials_existed is false because no snapshot was needed.
     [[ ${A54_CREDENTIALS_CHANGED} == true ]] || return 0
+    [[ ! -L ${A54_SMB_CREDENTIALS} && $(_a53_normalize_path "${A54_SMB_CREDENTIALS}") == "${A54_SMB_CREDENTIALS}" ]] || return 1
+    [[ ! -e ${A54_SMB_CREDENTIALS} || -f ${A54_SMB_CREDENTIALS} ]] || return 1
     if [[ ${A54_CREDENTIALS_EXISTED} == true ]]; then
-        [[ -f ${snapshot} ]] || return 1
+        [[ -f ${snapshot} && ! -L ${snapshot} ]] || return 1
         install -d -m0700 -o root -g root "$(dirname -- "${A54_SMB_CREDENTIALS}")" || return 1
         cat -- "${snapshot}" > "${A54_SMB_CREDENTIALS}" || return 1
         chmod "${A54_CREDENTIALS_MODE}" "${A54_SMB_CREDENTIALS}" || return 1
@@ -411,6 +423,7 @@ _a53_rollback() {
         _a54_restore_smb_credentials || failure=1
     fi
 
+    _a53_restore_retired_mounts || failure=1
     _a53_remove_created_empty_dirs
 
     if (( failure != 0 )); then
@@ -426,4 +439,69 @@ _a53_rollback() {
     _a53_manifest_set_phase storage_rolled_back >/dev/null 2>&1 || true
     _a53_manifest_set_rollback succeeded rolled_back >/dev/null 2>&1 || true
     return 0
+}
+
+# The original complete fstab and private credentials are already snapshotted.
+_a53_retire_obsolete_mounts() {
+    local point source selected entry was_mounted
+    selected="$(jq -r '[.storage.mount_point // "", .backups.mount_point // ""][]' <<< "${A53_REQUEST}")"
+    [[ ! -e ${A53_FSTAB} ]] && return 0
+    [[ -f ${A53_FSTAB} && ! -L ${A53_FSTAB} ]] || return 1
+    local -a points=()
+    mapfile -t points < <(awk '$0 !~ /^[[:space:]]*#/ && NF >= 4 {print $2}' "${A53_FSTAB}" | sort -u)
+    for point in "${points[@]}"; do
+        [[ ${point} == /* && ${point} != *[[:space:]]* ]] || continue
+        grep -Fxq -- "${point}" <<< "${selected}" && continue
+        source="$(jv_storage_managed_entry "${A53_FSTAB}" "${point}" "${A54_SMB_CREDENTIALS}")" || {
+            # Ambiguous definitions at reserved paths must not be guessed away.
+            case "${point}" in /var/mnt/justvoxel-data|/var/mnt/justvoxel-backup) return 1 ;; esac
+            continue
+        }
+        was_mounted=false
+        if mountpoint -q -- "${point}"; then
+            jv_storage_identity_matches "${point}" "${source}" || return 1
+            was_mounted=true
+        fi
+        entry="$(jq -cn --arg mountpoint "${point}" --arg source "${source}" --argjson mounted "${was_mounted}" '{mountpoint:$mountpoint,source:$source,was_mounted:$mounted}')" || return 1
+        _a53_manifest_update ".retired_mounts += [${entry}]" || return 1
+        if [[ ${was_mounted} == true ]]; then
+            # Recheck immediately before disruption.
+            jv_storage_identity_matches "${point}" "${source}" || return 1
+            umount -- "${point}" || return 1
+        fi
+        jv_storage_remove_entry "${A53_FSTAB}" "${point}" || return 1
+        _a53_manifest_set_fstab_changed || return 1
+        jv_storage_clear_retired_failure "${point}" || return 1
+    done
+}
+
+_a53_remove_obsolete_credentials() {
+    [[ $(jq -r '.backups.type' <<< "${A53_REQUEST}") != smb ]] || return 0
+    [[ ${A54_CREDENTIALS_EXISTED} == true ]] || return 0
+    jv_storage_credentials_referenced "${A53_FSTAB}" "${A54_SMB_CREDENTIALS}" && return 0
+    # A snapshot alone does not imply ownership: only a retired managed reference does.
+    jq -e 'any(.retired_mounts[]?; .source | startswith("//"))' "${A53_MANIFEST}" >/dev/null || return 0
+    jv_storage_credentials_safe "${A54_SMB_CREDENTIALS}" || return 1
+    A54_CREDENTIALS_CHANGED=true
+    _a53_manifest_update '.credentials_changed = true | .credentials_after_sha256 = "absent"' || return 1
+    rm -f -- "${A54_SMB_CREDENTIALS}"
+}
+
+_a53_restore_retired_mounts() {
+    local entry point source persisted
+    # Older v1 manifests have no retired mounts; retain their rollback behavior.
+    jq -e '(.retired_mounts // []) | type == "array" and all(.[];
+      (.mountpoint|type == "string") and (.source|type == "string") and (.was_mounted|type == "boolean"))' "${A53_MANIFEST}" >/dev/null || return 1
+    while IFS= read -r entry; do
+        point="$(jq -r '.mountpoint' <<< "${entry}")"
+        source="$(jq -r '.source' <<< "${entry}")"
+        persisted="$(jv_storage_managed_entry "${A53_FSTAB}" "${point}" "${A54_SMB_CREDENTIALS}")" || return 1
+        [[ ${persisted} == "${source}" ]] || return 1
+        if mountpoint -q -- "${point}"; then
+            jv_storage_identity_matches "${point}" "${source}" || return 1
+        else
+            mount "${point}" >/dev/null 2>&1 || return 1
+            jv_storage_identity_matches "${point}" "${source}" || return 1
+        fi
+    done < <(jq -c '.retired_mounts[]? | select(.was_mounted == true)' "${A53_MANIFEST}")
 }

@@ -329,6 +329,10 @@ func TestSetupRecoveryActionAtRuntimeAndStorageRollback(t *testing.T) {
 		{"needs_attention", "storage_rollback", true},
 		{"needs_attention", "runtime_rollback", true},
 		{"rolled_back", "setup_rolled_back", false},
+		{"needs_attention", "interrupted", false},
+		{"running", "runtime_rollback", false},
+		{"rolling_back", "storage_rollback", false},
+		{"succeeded", "completed", false},
 	} {
 		t.Run(tc.state+"_"+tc.stage, func(t *testing.T) {
 			client := setupExecutionClient()
@@ -345,11 +349,40 @@ func TestSetupRecoveryActionAtRuntimeAndStorageRollback(t *testing.T) {
 			form := `id="setup-recover-form"`
 			if !tc.available {
 				form += " hidden"
+			} else {
+				form += " >"
 			}
 			if !strings.Contains(page.Body.String(), form) {
 				t.Fatalf("recovery action visibility incorrect: %s", page.Body.String())
 			}
-			post := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recover", "csrf=csrf-token&recovery_confirmed=on&operation_id="+setupExecutionOperationID))
+			body := page.Body.String()
+			for _, forbidden := range []string{`name="recovery_confirmed"`, `type="checkbox"`, "I understand recovery", "confirm removal of data"} {
+				if strings.Contains(body, forbidden) {
+					t.Fatalf("recovery retains acknowledgement gate %q", forbidden)
+				}
+			}
+			if !strings.Contains(body, `<button class="setup-recovery-action" type="submit">Retry recovery</button>`) {
+				t.Fatal("recovery must use an immediately enabled submit button")
+			}
+			startForm := `id="setup-start-over-form" `
+			if tc.state != "rolled_back" {
+				startForm += "hidden"
+			} else {
+				startForm += ">"
+			}
+			if !strings.Contains(body, startForm) || !strings.Contains(body, `<button type="button" disabled aria-describedby="setup-start-over-help">Start setup over</button>`) {
+				t.Fatal("start over must remain disabled until rolled_back")
+			}
+			disabledStart := `aria-describedby="setup-start-over-help" `
+			if tc.state == "needs_attention" {
+				disabledStart += ">"
+			} else {
+				disabledStart += "hidden"
+			}
+			if !strings.Contains(body, disabledStart) {
+				t.Fatal("disabled start-over control visibility is incorrect")
+			}
+			post := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recover", "csrf=csrf-token&operation_id="+setupExecutionOperationID))
 			if tc.available {
 				if post.Code != http.StatusSeeOther || post.Header().Get("Location") != "/setup/progress/"+setupExecutionOperationID || client.recoverCalls != 1 || client.recoverID != setupExecutionOperationID {
 					t.Fatalf("recovery POST = %d, calls = %d", post.Code, client.recoverCalls)
@@ -483,7 +516,7 @@ func TestSetupEntryResumesCurrentPersistentOperation(t *testing.T) {
 	}
 }
 
-func TestSetupRecoveryRequiresCleanupConfirmation(t *testing.T) {
+func TestSetupRecoveryNeedsNoAcknowledgement(t *testing.T) {
 	client := setupExecutionClient()
 	client.operation = &api.PersistentOperation{OperationID: setupExecutionOperationID, OperationType: "setup", State: "needs_attention", Stage: "runtime_rollback"}
 	client.current = client.operation
@@ -492,8 +525,8 @@ func TestSetupRecoveryRequiresCleanupConfirmation(t *testing.T) {
 		t.Fatal(err)
 	}
 	response := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recover", "csrf=csrf-token&operation_id="+setupExecutionOperationID))
-	if response.Code != http.StatusBadRequest || client.recoverCalls != 0 {
-		t.Fatalf("unconfirmed recovery: %d calls=%d", response.Code, client.recoverCalls)
+	if response.Code != http.StatusSeeOther || client.recoverCalls != 1 {
+		t.Fatalf("recovery without acknowledgement: %d calls=%d", response.Code, client.recoverCalls)
 	}
 }
 
@@ -517,7 +550,7 @@ func TestRuntimeRecoveryCompletionOffersFreshSetup(t *testing.T) {
 	if blockedStart.Code != http.StatusSeeOther || blockedStart.Header().Get("Location") != "/setup/progress/"+setupExecutionOperationID || client.applyCalls != 0 {
 		t.Fatalf("start over bypassed recovery: %d %q apply=%d", blockedStart.Code, blockedStart.Header().Get("Location"), client.applyCalls)
 	}
-	retry := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recover", "csrf=csrf-token&recovery_confirmed=on&operation_id="+setupExecutionOperationID))
+	retry := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recover", "csrf=csrf-token&operation_id="+setupExecutionOperationID))
 	if retry.Code != http.StatusSeeOther || client.recoverCalls != 1 {
 		t.Fatalf("retry: %d calls=%d", retry.Code, client.recoverCalls)
 	}
@@ -536,5 +569,26 @@ func TestRuntimeRecoveryCompletionOffersFreshSetup(t *testing.T) {
 	wizard := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	if wizard.Code != http.StatusOK || !strings.Contains(wizard.Body.String(), "<h2>Server</h2>") || client.applyCalls != 0 {
 		t.Fatalf("fresh setup unavailable: %d apply=%d", wizard.Code, client.applyCalls)
+	}
+}
+
+func TestSetupProgressActionsUseNormalButtonLayout(t *testing.T) {
+	markup := correctionSource(t, "templates/setup_progress.html")
+	for _, want := range []string{
+		`class="action-row setup-operation-actions"`,
+		`class="button-link secondary" id="setup-diagnostic-log-view"`,
+		`class="button-link setup-log-download" id="setup-diagnostic-log-link"`,
+		`class="button-link" id="setup-dashboard-link"`,
+		`<button class="setup-recovery-action" type="submit">Retry recovery</button>`,
+		`<button type="submit">Start setup over</button>`,
+		`<button type="button" disabled aria-describedby="setup-start-over-help">Start setup over</button>`,
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("normal setup action structure missing %q", want)
+		}
+	}
+	css := correctionSource(t, "static/setup-review.css")
+	if !strings.Contains(css, `.setup-operation-actions{display:flex;align-items:center;justify-content:flex-end;gap:.65rem;flex-wrap:wrap}`) {
+		t.Fatal("setup actions must wrap and keep their natural height on desktop and mobile")
 	}
 }

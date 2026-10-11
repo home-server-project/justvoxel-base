@@ -29,6 +29,7 @@ grep -q "password is required when applying a new SMB mount" "${helper_apply}"
 # SMB mount diagnostics must preserve useful mount.cifs text without leaking
 # credential values or unbounded/multiline output.
 # shellcheck disable=SC1090
+source "${repo_root}/mjust/libexec/storage-lifecycle.sh"
 source "${helper_apply}"
 diag="$(bounded_smb_mount_error "$(printf 'mount error(13): Permission denied\npassword=super-secret credentials=/etc/justvoxel/smb-backup.credentials')")"
 [[ ${diag} == *'mount error(13): Permission denied'* ]] || { echo "SMB mount diagnostic lost the real error: ${diag}" >&2; exit 1; }

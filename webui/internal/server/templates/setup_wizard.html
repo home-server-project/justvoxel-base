@@ -108,26 +108,14 @@
     <form method="post" action="/setup/connections" class="setup-form" data-setup-connections>
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      {{if eq .Minecraft.ServerType "vanilla"}}<p class="notice error">Bedrock cross-play is currently not supported for Vanilla. Select Paper or Purpur on Step 1.</p>{{end}}
-      <label class="date-time-automatic"><span><strong>Enable Bedrock cross-play</strong><small class="field-help">Allow supported Bedrock clients to join through Geyser/Floodgate. Compatibility is checked before Apply.</small></span><input class="date-time-switch" type="checkbox" name="bedrock_enabled" data-bedrock-toggle {{if eq .Minecraft.ServerType "vanilla"}}disabled{{end}} {{if .Server.BedrockEnabled}}checked{{end}}></label>
+      <label class="date-time-automatic"><span><strong>Enable Bedrock cross-play</strong><small class="field-help">{{if eq .Minecraft.ServerType "vanilla"}}Select Paper or Purpur on Step 1 to enable Bedrock cross-play.{{else}}Allow supported Bedrock clients to join through Geyser/Floodgate. Compatibility is checked on the Version step.{{end}}</small></span><input class="date-time-switch" type="checkbox" name="bedrock_enabled" data-bedrock-toggle {{if eq .Minecraft.ServerType "vanilla"}}disabled{{end}} {{if .Server.BedrockEnabled}}checked{{end}}></label>
       <div class="setup-form-grid">
         <label class="setup-field">Minecraft Java port<input name="java_port" type="number" min="1" max="65535" value="{{.Minecraft.JavaPort}}" inputmode="numeric"><span class="field-help">Default: 25565/TCP.</span></label>
         <label class="setup-field" data-bedrock-port-field>Bedrock UDP port<input name="bedrock_port" type="number" min="1" max="65535" value="{{.Minecraft.BedrockPort}}" inputmode="numeric"><span class="field-help">Default: 19132/UDP. Used only when Bedrock cross-play is enabled.</span></label>
       </div>
-      <div class="setup-version-columns">
-        <section class="setup-version-column" aria-label="Container updates">
-        <label class="setup-field">Container updates<select id="image-channel" data-current-tag="{{.Minecraft.ImageTag}}"><option value="stable" {{if eq .Minecraft.ImageTag "stable"}}selected{{end}}>Stable (recommended)</option><option value="latest" {{if eq .Minecraft.ImageTag "latest"}}selected{{end}}>Latest</option><option value="custom" {{if and (ne .Minecraft.ImageTag "stable") (ne .Minecraft.ImageTag "latest")}}selected{{end}}>Custom</option></select><span class="field-help">Controls server container software updates. This does not choose the Minecraft game version below.</span></label>
-        <label id="custom-image-tag-field" class="setup-field" {{if or (eq .Minecraft.ImageTag "stable") (eq .Minecraft.ImageTag "latest")}}hidden{{end}}>Custom container tag<input id="custom-image-tag" value="{{if and (ne .Minecraft.ImageTag "stable") (ne .Minecraft.ImageTag "latest")}}{{.Minecraft.ImageTag}}{{end}}" autocomplete="off" placeholder="Enter a supported container tag"><span class="field-help">Advanced option. Use an upstream tag only when you know you need it.</span></label>
-        <input id="image-tag" name="image_tag" type="hidden" value="{{.Minecraft.ImageTag}}">
-        </section>
-        <section class="setup-version-column" aria-label="Minecraft version">
-        <label class="setup-field">Minecraft version<select id="version-policy" name="version_policy"><option value="recommended" {{if eq .Minecraft.VersionPolicy "recommended"}}selected{{end}}>Recommended</option><option value="latest" {{if eq .Minecraft.VersionPolicy "latest"}}selected{{end}}>Latest</option><option value="pinned" {{if eq .Minecraft.VersionPolicy "pinned"}}selected{{end}}>Specific version</option></select></label>
-        <label id="specific-version-field" class="setup-field setup-field-wide" {{if ne .Minecraft.VersionPolicy "pinned"}}hidden{{end}}>Specific Minecraft version<input id="minecraft-version" name="version" value="{{.Minecraft.Version}}" autocomplete="off"><span class="field-help">Choose an exact version. Available pre-release builds can also be used.</span></label>
-        <div class="setup-version-preview" id="setup-version-preview" role="status" aria-live="polite">Checking available versions…</div>
-        </section>
+
       </div>
-      </div>
-      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next" disabled>Continue</button></div></div>
+      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
     </form>
 
     {{else if eq .CurrentStep 3}}
@@ -147,6 +135,26 @@
     </form>
 
     {{else if eq .CurrentStep 4}}
+    <form method="post" action="/setup/version" class="setup-form" data-setup-version>
+      <div class="setup-step-content">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <div class="setup-version-columns">
+        <section class="setup-version-column" aria-label="Container updates">
+        <label class="setup-field">Container updates<select id="image-channel" data-current-tag="{{.Minecraft.ImageTag}}"><option value="stable" {{if eq .Minecraft.ImageTag "stable"}}selected{{end}}>Stable (recommended)</option><option value="latest" {{if eq .Minecraft.ImageTag "latest"}}selected{{end}}>Latest</option><option value="custom" {{if and (ne .Minecraft.ImageTag "stable") (ne .Minecraft.ImageTag "latest")}}selected{{end}}>Custom</option></select><span class="field-help">Controls server container software updates. This does not choose the Minecraft game version below.</span></label>
+        <label id="custom-image-tag-field" class="setup-field" {{if or (eq .Minecraft.ImageTag "stable") (eq .Minecraft.ImageTag "latest")}}hidden{{end}}>Custom container tag<input id="custom-image-tag" value="{{if and (ne .Minecraft.ImageTag "stable") (ne .Minecraft.ImageTag "latest")}}{{.Minecraft.ImageTag}}{{end}}" autocomplete="off" placeholder="Enter a supported container tag"><span class="field-help">Advanced option. Use an upstream tag only when you know you need it.</span></label>
+        <input id="image-tag" name="image_tag" type="hidden" value="{{.Minecraft.ImageTag}}">
+        </section>
+        <section class="setup-version-column" aria-label="Minecraft version">
+        <label class="setup-field">Minecraft version<select id="version-policy" name="version_policy"><option value="recommended" {{if eq .Minecraft.VersionPolicy "recommended"}}selected{{end}}>Recommended</option><option value="latest" {{if eq .Minecraft.VersionPolicy "latest"}}selected{{end}}>Latest</option><option value="pinned" {{if eq .Minecraft.VersionPolicy "pinned"}}selected{{end}}>Specific version</option></select></label>
+        <label id="specific-version-field" class="setup-field setup-field-wide" {{if ne .Minecraft.VersionPolicy "pinned"}}hidden{{end}}>Specific Minecraft version<input id="minecraft-version" name="version" value="{{.Minecraft.Version}}" autocomplete="off"><span class="field-help">Choose an exact version. Available pre-release builds can also be used.</span></label>
+        <div class="setup-version-preview" id="setup-version-preview" role="status" aria-live="polite">Checking available versions…</div>
+        </section>
+      </div>
+      </div>
+      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next" disabled>Continue</button></div></div>
+    </form>
+
+    {{else if eq .CurrentStep 5}}
     <form method="post" action="/setup/storage" class="setup-form" data-setup-storage-form data-csrf="{{.CSRF}}">
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
@@ -158,13 +166,13 @@
       <div class="setup-storage-choice-grid">
         <button class="setup-storage-choice{{if eq .Storage.Type "system"}} is-selected{{end}}" type="button" data-setup-storage-system data-system-path="{{.Defaults.DataPath}}">
           <span class="setup-storage-choice-kicker">Simple</span>
-          <strong>Use system storage</strong>
+          <strong>Use JustVoxel system storage</strong>
           <small>Store Minecraft at <code>{{.Defaults.DataPath}}</code>. No disk preparation is required.</small>
         </button>
         <button class="setup-storage-choice{{if eq .Storage.Type "partition"}} is-selected{{end}}" type="button" data-setup-storage-internal>
           <span class="setup-storage-choice-kicker">Custom</span>
-          <strong>Use another internal disk</strong>
-          <small>Choose an existing Linux filesystem, format a blank partition, or create one in unallocated space.</small>
+          <strong>Use an existing local filesystem / partition</strong>
+          <small>Choose a usable filesystem reported by JustVoxel. Existing files are preserved.</small>
         </button>
       </div>
 
@@ -177,6 +185,17 @@
       </section>
 
       <section class="setup-storage-browser" data-setup-storage-internal-panel {{if ne .Storage.Type "partition"}}hidden{{end}}>
+        <div class="setup-existing-filesystems" aria-label="Existing local filesystems">
+          {{range .MinecraftFilesystems}}
+          <button class="setup-storage-segment" type="button" data-setup-existing-partition data-setup-select-existing data-device="{{.Path}}" data-mountpoint="{{.Mountpoint}}">
+            <strong>{{.Model}}{{if .Label}} · {{.Label}}{{end}}</strong>
+            <span>{{.Size}} · {{.Filesystem}} · <code>{{.Path}}</code></span>
+            <small>UUID: {{.UUID}}{{if .Mountpoint}} · Mounted at {{.Mountpoint}}{{else}} · Not mounted{{end}}{{if .UsageKnown}} · {{.Available}} available{{end}}</small>
+          </button>
+          {{else}}<p class="notice">No usable existing internal filesystem was reported.</p>{{end}}
+        </div>
+        <details class="setup-advanced-storage">
+        <summary>Advanced Storage — disk preparation</summary>
         <div class="setup-browser-intro"><div class="setup-partition-instruction"><strong>Choose partition</strong><span>Select a ready filesystem or prepare a blank partition.</span></div>
         <div class="setup-storage-browser-heading">
           <div><strong>Internal disks</strong><span>Only internal storage is offered for live Minecraft data.</span></div>
@@ -233,6 +252,7 @@
         {{end}}
         <dialog class="storage-detail-dialog setup-storage-operation" data-storage-detail-dialog aria-label="Partition details">{{template "storage_partition_operation" .}}</dialog>
         <dialog class="storage-detail-dialog setup-storage-operation" data-storage-free-detail-dialog aria-label="Unallocated space details">{{template "storage_free_operation" .}}</dialog>
+        </details>
       </section>
 
 
@@ -244,7 +264,7 @@
       {{template "storage_partition_action_review" .}}
     </form>
 
-    {{else if eq .CurrentStep 5}}
+    {{else if eq .CurrentStep 6}}
     <form method="post" action="/setup/backups" class="setup-form" data-setup-backup-form data-csrf="{{.CSRF}}" data-data-device="{{.Storage.Device}}" data-data-mount="{{.Storage.MountPoint}}">
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
@@ -292,6 +312,15 @@
       </section>
 
       <section class="setup-storage-browser" data-setup-backup-panel="partition" {{if ne .Backups.Type "partition"}}hidden{{end}}>
+        <div class="setup-existing-filesystems" aria-label="Existing backup filesystems">
+          {{range .Filesystems}}
+          <button class="setup-storage-segment" type="button" data-setup-backup-existing data-setup-select-existing data-device="{{.Path}}" data-mountpoint="{{.Mountpoint}}">
+            <strong>{{.Model}}{{if .Label}} · {{.Label}}{{end}}</strong><span>{{.Size}} · {{.Filesystem}} · {{.Path}}</span>
+            <small>UUID: {{.UUID}}{{if .Mountpoint}} · Mounted at {{.Mountpoint}}{{end}}{{if .UsageKnown}} · {{.Available}} available{{end}}</small>
+          </button>
+          {{else}}<p class="notice">No usable existing backup filesystem was reported.</p>{{end}}
+        </div>
+        <details class="setup-advanced-storage"><summary>Advanced Storage — disk preparation</summary>
         <div class="setup-browser-intro"><div class="setup-partition-instruction"><strong>Choose partition</strong><span>Select a ready filesystem or prepare a blank partition.</span></div>
         <div class="setup-storage-browser-heading"><div><strong>Local backup disks</strong><span>Internal and USB/external storage are both allowed for backups.</span></div><span class="badge">{{len .BackupDisks}}</span></div></div>
         {{if .BackupDisks}}
@@ -336,6 +365,7 @@
         {{else}}<div class="notice">No local backup disk with a usable target was reported.</div>{{end}}
         <dialog class="storage-detail-dialog setup-storage-operation" data-storage-detail-dialog aria-label="Partition details">{{template "storage_partition_operation" .}}</dialog>
         <dialog class="storage-detail-dialog setup-storage-operation" data-storage-free-detail-dialog aria-label="Unallocated space details">{{template "storage_free_operation" .}}</dialog>
+        </details>
       </section>
 
       <section data-setup-backup-panel="nfs" {{if ne .Backups.Type "nfs"}}hidden{{end}}>

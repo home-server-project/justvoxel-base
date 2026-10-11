@@ -73,6 +73,7 @@ a53_apply_action() {
     storage="$(jq -c '.storage' <<< "${A53_REQUEST}")"
     backups="$(jq -c '.backups' <<< "${A53_REQUEST}")"
     _a53_manifest_set_phase storage_mount || { _a53_apply_failure 'Could not persist storage transaction state.'; return 0; }
+    _a53_retire_obsolete_mounts || { _a53_apply_failure 'Obsolete managed storage could not be retired safely.'; return 0; }
     _a53_mount_target "${storage}" data || { _a53_apply_failure 'Minecraft local storage could not be mounted safely.'; return 0; }
 
     case "$(jq -r '.type' <<< "${backups}")" in
@@ -93,6 +94,7 @@ a53_apply_action() {
 
     _a53_manifest_set_phase storage_paths || { _a53_apply_failure 'Could not persist storage transaction state.'; return 0; }
     _a53_prepare_paths || { _a53_apply_failure 'Local storage directories could not be prepared or verified writable.'; return 0; }
+    _a53_remove_obsolete_credentials || { _a53_apply_failure 'Obsolete SMB credentials could not be retired safely.'; return 0; }
     _a53_manifest_set_phase storage_verified || { _a53_apply_failure 'Could not persist the verified storage transaction state.'; return 0; }
     _a53_evidence_from_manifest
     _a53_json true true storage_verified not_started '' ''
@@ -173,6 +175,7 @@ a53_recover_action() {
     fi
 
     if [[ ${A54_CREDENTIALS_CHANGED} == true ]]; then
+        [[ ! -L ${A54_SMB_CREDENTIALS} && $(_a53_normalize_path "${A54_SMB_CREDENTIALS}") == "${A54_SMB_CREDENTIALS}" ]] || { _a53_recovery_fail; return 0; }
         credentials_before="$(jq -r '.credentials_before_sha256 // ""' "${A53_MANIFEST}")"
         credentials_after="$(jq -r '.credentials_after_sha256 // ""' "${A53_MANIFEST}")"
         credentials_current="$(_a53_file_sha256 "${A54_SMB_CREDENTIALS}")"
@@ -181,7 +184,7 @@ a53_recover_action() {
             [[ -f ${A53_TX_DIR}/smb.credentials.before && $(_a53_file_sha256 "${A53_TX_DIR}/smb.credentials.before") == "${credentials_before}" ]] || { _a53_recovery_fail; return 0; }
         fi
         if [[ ${credentials_current} != "${credentials_before}" ]]; then
-            [[ ${credentials_after} =~ ^[0-9a-f]{64}$ && ${credentials_current} == "${credentials_after}" ]] || { _a53_recovery_fail; return 0; }
+            [[ ( ${credentials_after} =~ ^[0-9a-f]{64}$ || ${credentials_after} == absent ) && ${credentials_current} == "${credentials_after}" ]] || { _a53_recovery_fail; return 0; }
         fi
         _a53_evidence_set credentials_recovery_state "$([[ ${credentials_current} == "${credentials_before}" ]] && echo already_restored || echo after_state)"
     fi
@@ -234,6 +237,7 @@ a53_recover_action() {
         fi
         [[ $(_a53_file_sha256 "${A54_SMB_CREDENTIALS}") == "${credentials_before}" ]] || { _a53_recovery_fail; return 0; }
     fi
+    _a53_restore_retired_mounts || { _a53_recovery_fail; return 0; }
     _a53_remove_created_empty_dirs
     _a53_manifest_set_phase storage_rolled_back && _a53_manifest_set_rollback succeeded rolled_back || { _a53_recovery_fail; return 0; }
     _a53_evidence_set recovery_result rolled_back

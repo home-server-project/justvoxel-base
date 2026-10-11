@@ -131,8 +131,8 @@ func TestProjectFooterAndDateTimeUIContracts(t *testing.T) {
 			t.Fatalf("Footer page layout missing %q", want)
 		}
 	}
-	// Desktop steps share the available viewport space, rather than a fixed pixel
-	// height. Short viewports and browser zoom retain accessible page flow.
+	// Wizard and review panels follow their content rather than stretching short
+	// steps to fill the viewport. Actions remain in normal page flow.
 	// TestWizardFHDViewportConstraints guards the desktop height breakpoint;
 	// these source contracts do not establish rendered browser geometry.
 	if strings.Contains(setupCSS, "height:clamp(520px") || strings.Contains(setupCSS, "height:calc(100dvh - 185px)") || strings.Contains(setupCSS, "overflow-y:scroll") {
@@ -157,14 +157,25 @@ func TestProjectFooterAndDateTimeUIContracts(t *testing.T) {
 		}
 		t.Fatalf("Setup layout rule %q missing properties %v", selector, declarations)
 	}
-	assertRule(".setup-body:has(.setup-wizard-panel),.setup-body:has(.setup-review-panel)", "height:100dvh", "min-height:0", "overflow:visible")
-	assertRule(".setup-body .setup-topbar,.setup-shell>.project-footer", "flex:none")
-	assertRule(".setup-body .setup-wizard-panel,.setup-body .setup-review-panel", "flex:1", "min-height:0", "overflow:visible")
 	assertRule(".setup-body .setup-wizard-panel,.setup-body .setup-review-panel", "height:auto", "min-height:0", "overflow:visible")
+	assertRule(".setup-body .setup-wizard-panel .setup-form", "flex:none", "min-height:0", "overflow:visible")
 	assertRule(".setup-body .setup-wizard-panel .setup-form>.setup-step-content", "display:flex", "gap:.42rem", "min-width:0", "overflow:visible")
-	assertRule(".setup-body .setup-wizard-panel .setup-form>.setup-step-actions", "position:static", "flex:none", "margin-top:auto")
-	assertRule(".setup-body .setup-review-panel>.setup-step-actions", "margin-top:auto")
+	assertRule(".setup-body .setup-step-panel .setup-form>.setup-step-actions", "position:static", "margin-top:.7rem")
+	assertRule(".setup-body .setup-wizard-panel .setup-form>.setup-step-actions", "flex:none", "margin-top:.7rem")
 	assertRule(".setup-wizard-panel .storage-disk-grid,.setup-wizard-panel .storage-partition-grid", "max-height:none", "overflow:visible")
 	assertRule(".setup-body .setup-wizard-panel .setup-form>.setup-step-content", "display:contents")
-	assertRule(".setup-body .setup-step-panel .setup-form>.setup-step-actions", "position:sticky", "bottom:0")
+	for _, rule := range regexp.MustCompile(`([^{}]+)\{([^{}]*)\}`).FindAllStringSubmatch(setupCSS+read("static/setup-review.css"), -1) {
+		selector, declarations := strings.TrimSpace(rule[1]), rule[2]
+		if strings.Contains(selector, ".setup-step-actions") && regexp.MustCompile(`(?:^|;)\s*(?:margin-top\s*:\s*auto|position\s*:\s*(?:sticky|fixed))\s*(?:;|$)`).MatchString(declarations) {
+			t.Fatalf("Setup actions must follow content without bottom pinning: %s", selector)
+		}
+		for _, target := range strings.Split(selector, ",") {
+			target = strings.TrimSpace(target)
+			if strings.HasSuffix(target, ".setup-wizard-panel") || strings.HasSuffix(target, ".setup-review-panel") || strings.HasSuffix(target, ".setup-form") || strings.Contains(target, ".setup-body:has(") {
+				if regexp.MustCompile(`(?:^|;)\s*(?:(?:min-)?height\s*:\s*100dvh|flex\s*:\s*1)\s*(?:;|$)`).MatchString(declarations) {
+					t.Fatalf("Setup panels and forms must not force viewport stretching: %s", target)
+				}
+			}
+		}
+	}
 }

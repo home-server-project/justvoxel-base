@@ -97,7 +97,7 @@ func TestSetupSameDiskWarningAppearsOnlyOnBackupsStep(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := string(markup)
-	backupsStart := strings.Index(source, "{{else if eq .CurrentStep 5}}")
+	backupsStart := strings.Index(source, "{{else if eq .CurrentStep 6}}")
 	if backupsStart < 0 {
 		t.Fatal("Backups step start is missing")
 	}
@@ -123,6 +123,9 @@ func advanceToStorage(t *testing.T, app *App) {
 	if rr := saveResourcesStep(t, app, validResourceValues()); rr.Code != http.StatusSeeOther {
 		t.Fatalf("resources save returned %d: %s", rr.Code, rr.Body.String())
 	}
+	if rr := saveVersionStep(t, app, validConnectionValues()); rr.Code != http.StatusSeeOther {
+		t.Fatalf("version save returned %d: %s", rr.Code, rr.Body.String())
+	}
 
 }
 
@@ -141,7 +144,7 @@ func TestSetupWizardStorageStepShowsInternalDiskBrowserAndExcludesUSB(t *testing
 	}
 	body := page.Body.String()
 	for _, want := range []string{
-		"<h2>Storage</h2>", "Use system storage", "Use another internal disk", "/dev/vda4", "/dev/vdb1", "/dev/vdb2",
+		"<h2>Storage</h2>", "Use JustVoxel system storage", "Use an existing local filesystem / partition", "/dev/vda4", "/dev/vdb1", "/dev/vdb2",
 		"Samsung SSD", "ext4", "Unallocated",
 		"External drives are not offered for Minecraft data", "/static/setup-storage.js",
 	} {
@@ -290,8 +293,8 @@ func setupWizardModalStorageMarkup(t *testing.T, app *App) string {
 			t.Fatalf("wizard regression: %q", forbidden)
 		}
 	}
-	if strings.Count(markup, `data-storage-create-dialog`) != 1 || strings.Count(markup, `data-storage-action-dialog`) != 1 || strings.Count(markup, `class="setup-number"`) != 6 {
-		t.Fatal("Advanced setup must retain six cards and shared focused reviews")
+	if strings.Count(markup, `data-storage-create-dialog`) != 1 || strings.Count(markup, `data-storage-action-dialog`) != 1 || strings.Count(markup, `class="setup-number"`) != 7 {
+		t.Fatal("Advanced setup must retain seven cards and shared focused reviews")
 	}
 	for _, name := range []string{"detail", "free-detail"} {
 		if !strings.Contains(markup, `class="storage-detail-dialog setup-storage-operation" data-storage-`+name+`-dialog`) || strings.Contains(markup, `<section class="setup-storage-operation" data-storage-`+name+`-dialog`) {

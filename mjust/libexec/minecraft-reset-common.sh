@@ -120,8 +120,34 @@ jv_reset_delete_internal_data() {
     jv_reset_delete_tree_same_filesystem "${data_path}" 'Minecraft data'
 }
 
+jv_reset_validate_storage_preservation() {
+    local credentials="${JV_CONFIG_DIR}/smb-backup.credentials" persisted
+    JV_RESET_PRESERVE_CREDENTIALS=no
+    [[ ! -L ${JV_CONFIG_DIR} && $(realpath -m -- "${JV_CONFIG_DIR}") == "${JV_CONFIG_DIR}" ]] || return 1
+    if [[ ${BACKUP_TYPE:-} != smb && ! -e ${credentials} && ! -L ${credentials} ]]; then
+        return 0
+    fi
+    if ! declare -F jv_storage_credentials_safe >/dev/null; then
+        source /usr/libexec/justvoxel/mjust/storage-lifecycle.sh || return 1
+    fi
+    # Adopted administrator shares with their own credentials are unaffected.
+    if [[ -f ${JV_FSTAB:-/etc/fstab} ]] && jv_storage_credentials_referenced "${JV_FSTAB:-/etc/fstab}" "${credentials}"; then
+        [[ ${BACKUP_TYPE:-} == smb ]] || return 1
+        persisted="$(jv_storage_managed_entry "${JV_FSTAB:-/etc/fstab}" "${BACKUP_MOUNT_POINT:-}" "${credentials}")" || return 1
+        [[ -n ${BACKUP_EXPECTED_SOURCE:-} && ${persisted} == "${BACKUP_EXPECTED_SOURCE}" ]] || return 1
+        jv_storage_credentials_safe "${credentials}" || return 1
+        JV_RESET_PRESERVE_CREDENTIALS=yes
+    fi
+}
+
 jv_reset_remove_active_configuration() {
-    local java_port="$1" bedrock_enabled="$2" bedrock_port="$3"
+    local java_port="$1" bedrock_enabled="$2" bedrock_port="$3" storage_mode="${4:-remove}"
+    local preserve_credentials=no
+    case "${storage_mode}" in preserve-storage|remove) ;; *) return 1 ;; esac
+    if [[ ${storage_mode} == preserve-storage ]]; then
+        jv_reset_validate_storage_preservation || return 1
+        preserve_credentials="${JV_RESET_PRESERVE_CREDENTIALS}"
+    fi
 
     systemctl disable --now minecraft-backup.timer >/dev/null 2>&1 || true
 
@@ -132,7 +158,12 @@ jv_reset_remove_active_configuration() {
     firewall-cmd --reload >/dev/null 2>&1 || true
 
     rm -f -- "${JV_QUADLET}" "${JV_BACKUP_SERVICE}" "${JV_BACKUP_TIMER}"
-    rm -rf -- "${JV_CONFIG_DIR}"
+    if [[ ${preserve_credentials} == yes ]]; then
+        # Keep the original private file in place; never copy its secret elsewhere.
+        find "${JV_CONFIG_DIR}" -mindepth 1 -maxdepth 1 ! -name smb-backup.credentials -exec rm -rf -- {} + || return 1
+    else
+        rm -rf -- "${JV_CONFIG_DIR}" || return 1
+    fi
     rm -f -- "${JV_PREVIOUS_IMAGE_STATE}"
     systemctl daemon-reload
     systemctl reset-failed minecraft.service minecraft-backup.service minecraft-backup.timer >/dev/null 2>&1 || true

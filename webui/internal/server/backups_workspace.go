@@ -61,6 +61,7 @@ type backupsWorkspacePartitionView struct {
 }
 
 type backupsWorkspaceData struct {
+	DestinationWorkspace         string
 	CSRF                         string
 	Identity                     api.SessionInfo
 	Backups                      []backupsWorkspaceBackupView
@@ -285,7 +286,11 @@ func (a *App) backupsWorkspaceDestinationApply(w http.ResponseWriter, r *http.Re
 		a.renderBackupsWorkspace(w, r, session, client, identity, "", "Backup destination was not applied.", nil, nil, &request, &result, nil, nil, "")
 		return
 	}
-	http.Redirect(w, r, "/workspace/backups?result=destination", http.StatusSeeOther)
+	destinationWorkspace := "/workspace/backups"
+	if strings.HasPrefix(r.URL.Path, "/workspace/storage/destination/") {
+		destinationWorkspace = "/workspace/storage"
+	}
+	http.Redirect(w, r, destinationWorkspace+"?result=destination", http.StatusSeeOther)
 }
 
 func (a *App) backupsWorkspaceRestorePlan(w http.ResponseWriter, r *http.Request) {
@@ -421,6 +426,10 @@ func (a *App) renderBackupsWorkspace(
 	restorePlan *api.AdminRestorePlanResponse,
 	restoreError string,
 ) {
+	if strings.HasPrefix(r.URL.Path, "/workspace/storage/destination/") {
+		a.renderStorageDestination(w, r, session, identity, message, pageError, destinationOverride, destinationPlan)
+		return
+	}
 	data, err := a.buildBackupsWorkspaceData(r, session, client, identity, message, pageError, automaticOverride, automaticPlan, destinationOverride, destinationPlan, restoreRequest, restorePlan, restoreError)
 	if err != nil {
 		a.handleBackupsWorkspaceError(w, r, err)
@@ -532,7 +541,7 @@ func (a *App) buildBackupsWorkspaceData(
 		CSRF: csrfFromRequest(r), Identity: identity, Backups: views,
 		BackupCount: len(views), TotalSize: humanBytes(totalBytes), Message: message, Error: pageError,
 		Automatic: automatic, AutomaticPlan: automaticPlan, Timezone: configuration.Minecraft.Timezone,
-		Destination: destination, DestinationForm: destinationForm, DestinationPlan: destinationPlan,
+		DestinationWorkspace: "/workspace/backups", Destination: destination, DestinationForm: destinationForm, DestinationPlan: destinationPlan,
 		DestinationPartitions:     partitions,
 		DestinationAvailable:      backupsWorkspaceFormatOptionalBytes(destination.Current.AvailableBytes),
 		DestinationFilesystemSize: backupsWorkspaceFormatOptionalBytes(destination.Current.FilesystemBytes),

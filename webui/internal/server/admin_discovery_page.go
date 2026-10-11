@@ -91,6 +91,8 @@ func (disk storageBrowserDiskView) PartitionTableLabel() string {
 }
 
 type storageBrowserPageData struct {
+	BackupDestination      *backupsWorkspaceData
+	BackupDestinationNote  string
 	Title                  string
 	Version                string
 	ManagementAPI          string
@@ -106,6 +108,8 @@ type storageBrowserPageData struct {
 
 func (a *App) registerAdminDiscoveryPages(mux *http.ServeMux) {
 	mux.HandleFunc("GET /workspace/storage", a.storageBrowserWindow)
+	mux.HandleFunc("POST /workspace/storage/destination/plan", a.backupsWorkspaceDestinationPlan)
+	mux.HandleFunc("POST /workspace/storage/destination/apply", a.backupsWorkspaceDestinationApply)
 	a.registerStorageBrowserActionRoutes(mux)
 	a.registerSetupWizardRoutes(mux)
 	a.registerSetupWizardReviewRoutes(mux)
@@ -120,6 +124,17 @@ func (a *App) storageBrowserWindow(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.handleAdminDiscoveryError(w, r, err)
 		return
+	}
+	if data.Configuration.Configured {
+		destination, err := a.storageDestinationData(r, session, identity, csrfFromRequest(r), nil, nil)
+		if err != nil {
+			data.BackupDestinationNote = "Backup destination information is temporarily unavailable. Refresh Storage to try again."
+		} else {
+			if r.URL.Query().Get("result") == "destination" {
+				destination.Message = "Backup destination updated. New backups will use it."
+			}
+			data.BackupDestination = &destination
+		}
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")

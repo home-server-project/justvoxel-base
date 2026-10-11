@@ -1,8 +1,18 @@
 {{define "storage_browser_content"}}
 <div class="storage-browser-shell storage-browser-content" data-storage-browser-root>
-  <p class="muted storage-browser-intro">Choose a physical disk to see the partitions inside it. Partition changes are reviewed before they are applied.</p>
+  <p class="muted storage-browser-intro">Choose a physical disk to see the partitions inside it. Mount and Minecraft data changes are reviewed before they are applied. Disk preparation is available in Advanced Storage.</p>
   {{if .MinecraftMigrationNote}}<div class="notice">{{.MinecraftMigrationNote}}</div>{{end}}
   <input type="hidden" value="{{.CSRF}}" data-storage-action-csrf>
+
+  <section class="storage-overview" aria-label="Storage overview">
+    <h2>Minecraft data location</h2>
+    {{if .Configuration.Configured}}
+    <p><code>{{.Configuration.Minecraft.DataPath}}</code>{{if .Configuration.Minecraft.DataMountPoint}} · Mounted at {{.Configuration.Minecraft.DataMountPoint}}{{end}}{{if .Configuration.Minecraft.DataExpectedUUID}} · UUID {{.Configuration.Minecraft.DataExpectedUUID}}{{end}}</p>
+    <p class="muted">Choose an available filesystem below to review moving Minecraft data.</p>
+    {{else}}<p class="muted">Choose the Minecraft data location during first-run setup.</p>{{end}}
+  </section>
+  {{if .BackupDestination}}{{template "backup_destination_content" .BackupDestination}}{{end}}
+  {{if .BackupDestinationNote}}<div class="notice">{{.BackupDestinationNote}}</div>{{end}}
 
   <section class="storage-drive-section" aria-label="Internal drives">
     <div class="storage-drive-section-heading">
@@ -105,6 +115,7 @@
           </button>
           {{end}}
         {{end}}
+        {{if .FreeSpaces}}<details class="storage-advanced-actions"><summary>Advanced Storage — unallocated space</summary>
         {{range .FreeSpaces}}
         <button class="storage-partition-card storage-free-space-card" type="button"
                 data-storage-free-space
@@ -119,8 +130,11 @@
           <small>Available for a new partition</small>
         </button>
         {{end}}
+        </details>{{end}}
       </div>
       {{end}}
+      {{if or .CanInitialize .MinecraftWholeDisk .BackupWholeDisk}}
+      <details class="storage-advanced-actions"><summary>Advanced Storage — disk preparation</summary>
       {{if .CanInitialize}}
       <div class="storage-empty-actions">
         <button class="secondary" type="button" data-storage-initialize data-path="{{.Path}}">Reinitialize disk as GPT</button>
@@ -139,6 +153,8 @@
         </div>
         <p class="muted compact">Nothing is erased until Review and the exact confirmation step.</p>
       </div>
+      {{end}}
+      </details>
       {{end}}
     </div>
     {{end}}
@@ -340,9 +356,11 @@
             <button type="button" data-storage-action="remove-permanent" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5Z"></path><path d="M12 14v6"></path></svg></span><span>Remove permanent mount</span></button>
             <button type="button" data-storage-minecraft-migrate hidden>Use for Minecraft data</button>
             <button type="button" data-storage-action="use-for-backups" hidden>Use for backups</button>
+            <details class="storage-advanced-actions"><summary>Advanced Storage — disk preparation</summary>
             <button class="storage-action-danger" type="button" data-storage-action="format">Format partition</button>
             <button class="storage-action-danger" type="button" data-storage-action="delete_partition" hidden>Delete partition</button>
             <button class="storage-action-danger" type="button" data-storage-action="initialize_disk" hidden>Reinitialize entire disk as GPT</button>
+            </details>
           </div>
         </details>
       </div>

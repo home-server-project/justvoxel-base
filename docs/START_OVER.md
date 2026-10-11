@@ -12,6 +12,6 @@ If Minecraft is running, Start over uses the normal player-aware shutdown path. 
 
 The operation then requires the exact phrase `START OVER`.
 
-Start over removes the active JustVoxel configuration, generated Minecraft Quadlet, generated backup service/timer, JustVoxel-managed Java/Bedrock firewall openings, and local JustVoxel secrets such as SMB credentials. It does not delete the Minecraft data directory, backup archives, storage partitions, filesystems, `/etc/fstab` storage mounts, network-share contents, Podman images, unrelated containers, or bootc deployments.
+Start over removes the active JustVoxel configuration, generated Minecraft Quadlet, generated backup service/timer, JustVoxel-managed Java/Bedrock firewall openings, and local JustVoxel secrets, except the root-private SMB credentials required by the current preserved backup mount. That mount and its existing credentials survive together; unsafe or inconsistent credential configuration blocks Start over. It does not delete the Minecraft data directory, backup archives, storage partitions, filesystems, `/etc/fstab` storage mounts, network-share contents, Podman images, unrelated containers, or bootc deployments.
 
 After completion, running `mjust` returns to the first-setup interface.

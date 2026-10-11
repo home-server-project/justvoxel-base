@@ -3,6 +3,7 @@ set -uo pipefail
 
 source /usr/libexec/justvoxel/mjust/common.sh
 source /usr/libexec/justvoxel/mjust/storage-common-base.sh
+source /usr/libexec/justvoxel/mjust/storage-lifecycle.sh
 source /usr/libexec/justvoxel/mjust/admin-setup-storage-transaction-common.sh
 source /usr/libexec/justvoxel/mjust/admin-setup-storage-transaction-apply.sh
 source /usr/libexec/justvoxel/mjust/admin-setup-storage-transaction-actions.sh

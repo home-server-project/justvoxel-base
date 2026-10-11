@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -14,39 +12,31 @@ import (
 
 // These checks guard source layout constraints, not rendered browser geometry.
 // FHD fitting and zoom accessibility still require browser/VM acceptance.
-func TestWizardFHDViewportConstraints(t *testing.T) {
+func TestWizardNaturalHeightLayout(t *testing.T) {
 	css := correctionSource(t, "static/setup.css")
-	frame := regexp.MustCompile(`@media\(min-width:(\d+)px\) and \(min-height:(\d+)px\)\{([^}]+\}[^}]+\}[^}]+\})`).FindStringSubmatch(css)
-	if len(frame) != 4 {
-		t.Fatal("shared desktop frame breakpoint missing")
-	}
-	minWidth, _ := strconv.Atoi(frame[1])
-	minHeight, _ := strconv.Atoi(frame[2])
-	for _, height := range []int{850, 900, 950, 999, 1000, 1080} {
-		if 1920 < minWidth || height < minHeight {
-			t.Fatalf("FHD viewport 1920x%d misses shared frame rules", height)
-		}
-	}
-	if minWidth <= 850 || minHeight < 850 {
-		t.Fatal("small or zoomed viewports need ordinary page flow")
-	}
-	for _, want := range []string{
-		"height:100dvh;min-height:0;overflow:visible",
-		".setup-body .setup-topbar,.setup-shell>.project-footer{flex:none}",
-		".setup-body .setup-wizard-panel,.setup-body .setup-review-panel{flex:1;min-height:0;overflow:visible}",
-	} {
-		if !strings.Contains(frame[3], want) {
-			t.Fatalf("desktop frame must allocate remaining space consistently: %q", want)
-		}
-	}
-	for _, forbidden := range []string{"min-height:1000px", "height:760px", "max-height:230px", "max-height:150px"} {
+	for _, forbidden := range []string{"height:100dvh;min-height:0", "min-height:calc(100%", "position:sticky", "bottom:0;min-height:55px", "margin-top:auto;padding:.45rem", ".setup-review-panel{flex:1"} {
 		if strings.Contains(css, forbidden) {
-			t.Fatalf("obsolete fixed-size or scroll constraint remains: %q", forbidden)
+			t.Fatalf("wizard height regression: %q", forbidden)
 		}
+	}
+	if !strings.Contains(css, ".setup-body .setup-wizard-panel .setup-form{flex:none;") {
+		t.Fatal("wizard forms must use natural height")
 	}
 	markup := correctionSource(t, "templates/setup_wizard.html")
-	if strings.Count(markup, "data-setup-inventory-error hidden></div>\n      </div>\n      <div class=\"setup-step-actions\">") != 2 {
-		t.Fatal("recovery notices must stay in content before the navigation row")
+	if strings.Count(markup, `class="setup-step-content"`) != 6 || strings.Count(markup, `class="setup-step-actions"`) != 6 {
+		t.Fatal("all six forms need shared content then navigation")
+	}
+	for _, form := range strings.Split(markup, `<form method="post" action="/setup/`)[1:] {
+		if !strings.Contains(form, `class="setup-form"`) {
+			continue
+		}
+		if strings.Index(form, `class="setup-step-content"`) > strings.Index(form, `class="setup-step-actions"`) {
+			t.Fatal("navigation precedes content")
+		}
+	}
+	review := correctionSource(t, "templates/setup_review.html")
+	if strings.Index(review, `class="setup-review-content"`) > strings.Index(review, `class="setup-step-actions setup-actions-split"`) {
+		t.Fatal("Review navigation precedes content")
 	}
 }
 
@@ -65,7 +55,7 @@ func (f *setupPreviewClient) AdminSetupVersionPreview(_ context.Context, _, poli
 	return status, f.err
 }
 
-func TestCombinedCrossplayValidationPreservesDraftOnRefresh(t *testing.T) {
+func TestVersionValidationPreservesDraftOnRefresh(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		status  api.AdminVersionStatus
@@ -97,26 +87,28 @@ func TestCombinedCrossplayValidationPreservesDraftOnRefresh(t *testing.T) {
 			if !tc.bedrock {
 				values.Del("bedrock_enabled")
 			}
-			rr := saveConnectionsStep(t, app, values)
+			_ = saveConnectionsStep(t, app, values)
+			_ = saveResourcesStep(t, app, validResourceValues())
+			rr := saveVersionStep(t, app, values)
 			if rr.Code != tc.code {
 				t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
 			}
 			draft, _ := firstRunSetupDrafts.get(app, "session-token")
-			expectedStep := setupCrossplayStep
+			expectedStep := setupVersionStep
 			if tc.code == http.StatusSeeOther {
-				expectedStep = setupMemoryStep
+				expectedStep = setupStorageStep
 			}
-			if draft.CurrentStep != expectedStep || draft.Minecraft.ConnectionsComplete != (tc.code == http.StatusSeeOther) || draft.Minecraft.ImageTag != "stable" || draft.Minecraft.VersionPolicy != "pinned" || draft.Minecraft.JavaPort != "25566" || draft.Minecraft.BedrockPort != "19133" || draft.Minecraft.Version != "1.21.8" || draft.Server.BedrockEnabled != tc.bedrock {
+			if draft.CurrentStep != expectedStep || draft.Minecraft.VersionComplete != (tc.code == http.StatusSeeOther) || draft.Minecraft.ImageTag != "stable" || draft.Minecraft.VersionPolicy != "pinned" || draft.Minecraft.JavaPort != "25566" || draft.Minecraft.BedrockPort != "19133" || draft.Minecraft.Version != "1.21.8" || draft.Server.BedrockEnabled != tc.bedrock {
 				t.Fatalf("draft = %#v", draft)
 			}
 			if client.bedrock != tc.bedrock || client.policy != "pinned" || client.version != "1.21.8" || client.software != "paper" {
 				t.Fatal("validation used stale choices")
 			}
 			if tc.code == http.StatusBadRequest {
-				assertSetupBedrockChecked(t, rr.Body.String(), tc.bedrock)
+
 				body := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", "")).Body.String()
-				assertSetupBedrockChecked(t, body, tc.bedrock)
-				for _, want := range []string{"<h2>Cross-play</h2>", `value="1.21.8"`, `value="25566"`, `value="19133"`, `id="image-tag" name="image_tag" type="hidden" value="stable"`, `value="pinned" selected`, ">Back</button>", ">Continue</button>"} {
+
+				for _, want := range []string{"<h2>Version</h2>", `value="1.21.8"`, `id="image-tag" name="image_tag" type="hidden" value="stable"`, `value="pinned" selected`, ">Back</button>", ">Continue</button>"} {
 					if !strings.Contains(body, want) {
 						t.Fatalf("refresh lost %q", want)
 					}
@@ -126,7 +118,7 @@ func TestCombinedCrossplayValidationPreservesDraftOnRefresh(t *testing.T) {
 	}
 }
 
-func TestCrossplayPreviewUsesCurrentToggleWithoutSavingDraft(t *testing.T) {
+func TestVersionPreviewUsesSavedCrossplayWithoutChangingDraft(t *testing.T) {
 	client := &setupPreviewClient{fakeDiscoveryAPI: setupWizardClient(), status: api.AdminVersionStatus{SelectedCandidate: "1.21.8", CrossplayCompatible: true}}
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
 	if err != nil {
@@ -134,25 +126,25 @@ func TestCrossplayPreviewUsesCurrentToggleWithoutSavingDraft(t *testing.T) {
 	}
 	defer firstRunSetupDrafts.delete(app, "session-token")
 	startSetup(t, app)
-	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/version-preview?policy=recommended&bedrock_enabled=true", ""))
-	if rr.Code != http.StatusConflict {
-		t.Fatal("preview allowed outside Cross-play")
-	}
 	_ = saveServerStep(t, app, validServerValues())
-	for _, toggle := range []string{"true", "false"} {
-		rr = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/version-preview?policy=pinned&version=1.21.8&bedrock_enabled="+toggle, ""))
-		if rr.Code != http.StatusOK || client.bedrock != (toggle == "true") {
-			t.Fatalf("preview %s: %d", toggle, rr.Code)
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/version-preview?policy=recommended", ""))
+	if rr.Code != http.StatusConflict {
+		t.Fatal("preview allowed on Cross-play")
+	}
+	for _, enabled := range []bool{true, false} {
+		values := validConnectionValues()
+		if !enabled {
+			values.Del("bedrock_enabled")
+		}
+		_ = saveConnectionsStep(t, app, values)
+		_ = saveResourcesStep(t, app, validResourceValues())
+		rr = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/version-preview?policy=pinned&version=1.21.8&bedrock_enabled=ignored", ""))
+		if rr.Code != http.StatusOK || client.bedrock != enabled {
+			t.Fatalf("preview: %d bedrock=%v", rr.Code, client.bedrock)
 		}
 		draft, _ := firstRunSetupDrafts.get(app, "session-token")
-		if draft.Server.BedrockEnabled || draft.CurrentStep != setupCrossplayStep {
+		if draft.Server.BedrockEnabled != enabled || draft.CurrentStep != setupVersionStep {
 			t.Fatal("preview changed draft")
-		}
-	}
-	script := correctionSource(t, "static/settings.js")
-	for _, want := range []string{`bedrock_enabled: String(!!form?.querySelector("[data-bedrock-toggle]")?.checked)`, `addEventListener("change", refresh)`} {
-		if !strings.Contains(script, want) {
-			t.Fatalf("preview missing %q", want)
 		}
 	}
 }
@@ -172,7 +164,7 @@ func TestSetupCompactTilesAndElapsedContract(t *testing.T) {
 		t.Fatal("partition and free-space details must not expand inline")
 	}
 	css := correctionSource(t, "static/setup.css")
-	for _, want := range []string{`.setup-wizard-panel .setup-storage-segment.storage-partition-card{height:82px;min-height:82px;align-content:center;box-sizing:border-box}`, `max-height:none;overflow:visible`, `flex:1;min-height:0;overflow:visible`} {
+	for _, want := range []string{`.setup-wizard-panel .setup-storage-segment.storage-partition-card{height:82px;min-height:82px;align-content:center;box-sizing:border-box}`, `max-height:none;overflow:visible`, `flex:none;min-height:0;margin:0;gap:.42rem;overflow:visible`} {
 		if !strings.Contains(css, want) {
 			t.Fatalf("compact accessible layout missing %q", want)
 		}
@@ -240,13 +232,13 @@ func TestIncompleteVisitedReviewCannotSkipFormsOrLoop(t *testing.T) {
 	advanceSetupToReview(t, app)
 	draft, _ := firstRunSetupDrafts.get(app, "session-token")
 	if draft.CurrentStep != setupReviewStep || draft.HighestStep != setupReviewStep || !setupDraftReadyForReview(draft) {
-		t.Fatal("six-step flow did not reach validated Review")
+		t.Fatal("seven-step flow did not reach validated Review")
 	}
 	draft.Minecraft.ConnectionsComplete = false
 	draft.Minecraft.Complete = false
 	draft.CurrentStep = setupCrossplayStep
 	firstRunSetupDrafts.save(app, "session-token", draft)
-	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/navigate", "csrf=csrf-token&direction=jump&step=6"))
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/navigate", "csrf=csrf-token&direction=jump&step=7"))
 	if rr.Code != http.StatusBadRequest {
 		t.Fatal("jump skipped incomplete Cross-play")
 	}
@@ -296,35 +288,37 @@ func TestServerSoftwareChangeRequiresCrossplayRevalidationBeforeReview(t *testin
 	assertPreserved(draft)
 	assertReviewBlocked := func() {
 		t.Helper()
-		rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/navigate", "csrf=csrf-token&direction=jump&step=6"))
+		rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/navigate", "csrf=csrf-token&direction=jump&step=7"))
 		if rr.Code != http.StatusBadRequest {
 			t.Fatalf("Review jump before revalidation: %d", rr.Code)
 		}
 		draft, _ := firstRunSetupDrafts.get(app, "session-token")
-		if draft.CurrentStep != setupCrossplayStep || setupDraftReadyForReview(draft) {
+		if (draft.CurrentStep != setupCrossplayStep && draft.CurrentStep != setupVersionStep) || setupDraftReadyForReview(draft) {
 			t.Fatal("blocked Review jump left Cross-play")
 		}
 	}
 	assertReviewBlocked()
 
 	client.status.CrossplayCompatible = false
-	if rr := saveConnectionsStep(t, app, validConnectionValues()); rr.Code != http.StatusBadRequest {
+	_ = saveConnectionsStep(t, app, validConnectionValues())
+	_ = saveResourcesStep(t, app, validResourceValues())
+	if rr := saveVersionStep(t, app, validConnectionValues()); rr.Code != http.StatusBadRequest {
 		t.Fatalf("incompatible Cross-play revalidation: %d", rr.Code)
 	}
 	assertReviewBlocked()
 	client.status.CrossplayCompatible = true
-	if rr := saveConnectionsStep(t, app, validConnectionValues()); rr.Code != http.StatusSeeOther {
+	if rr := saveVersionStep(t, app, validConnectionValues()); rr.Code != http.StatusSeeOther {
 		t.Fatalf("Cross-play revalidation: %d: %s", rr.Code, rr.Body.String())
 	}
 	if client.software != "purpur" || client.policy != "recommended" || !client.bedrock {
 		t.Fatal("Cross-play revalidation used stale choices")
 	}
 	draft, _ = firstRunSetupDrafts.get(app, "session-token")
-	if draft.CurrentStep != setupMemoryStep || !draft.Minecraft.ConnectionsComplete || !draft.Minecraft.Complete {
+	if draft.CurrentStep != setupStorageStep || !draft.Minecraft.ConnectionsComplete || !draft.Minecraft.Complete {
 		t.Fatal("successful Cross-play revalidation did not restore completion")
 	}
 	assertPreserved(draft)
-	if rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/navigate", "csrf=csrf-token&direction=jump&step=6")); rr.Code != http.StatusSeeOther {
+	if rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/navigate", "csrf=csrf-token&direction=jump&step=7")); rr.Code != http.StatusSeeOther {
 		t.Fatalf("Review jump after revalidation: %d", rr.Code)
 	}
 	draft, _ = firstRunSetupDrafts.get(app, "session-token")
@@ -334,7 +328,7 @@ func TestServerSoftwareChangeRequiresCrossplayRevalidationBeforeReview(t *testin
 	assertPreserved(draft)
 }
 
-func TestSixStepBackRoutesPreserveMemoryStorageAndBackups(t *testing.T) {
+func TestSevenStepBackRoutesPreserveMemoryStorageAndBackups(t *testing.T) {
 	app, err := New(setupReviewClient(), Config{Version: "test", ManagementAPI: "v1"})
 	if err != nil {
 		t.Fatal(err)
@@ -358,12 +352,14 @@ func TestSixStepBackRoutesPreserveMemoryStorageAndBackups(t *testing.T) {
 	_ = saveConnectionsStep(t, app, validConnectionValues())
 	memory.Set("direction", "next")
 	_ = saveResourcesStep(t, app, memory)
+	_ = saveVersionStep(t, app, validConnectionValues())
 	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/storage", "csrf=csrf-token&storage_type=system&direction=back"))
 	draft, _ = firstRunSetupDrafts.get(app, "session-token")
-	if rr.Code != http.StatusSeeOther || draft.CurrentStep != setupMemoryStep || draft.Storage.Path != draft.Defaults.DataPath {
-		t.Fatal("Storage Back lost destination or skipped Memory")
+	if rr.Code != http.StatusSeeOther || draft.CurrentStep != setupVersionStep || draft.Storage.Path != draft.Defaults.DataPath {
+		t.Fatal("Storage Back lost destination or skipped Version")
 	}
 	_ = saveResourcesStep(t, app, memory)
+	_ = saveVersionStep(t, app, validConnectionValues())
 	_ = httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/storage", "csrf=csrf-token&storage_type=system&direction=next"))
 	rr = httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/backups", "csrf=csrf-token&backup_type=system&backup_keep=19&backup_daily_time=09%3A37&backup_automatic=on&direction=back"))
 	draft, _ = firstRunSetupDrafts.get(app, "session-token")

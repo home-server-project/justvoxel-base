@@ -96,6 +96,10 @@ if [[ ${confirm_players} != --confirm-players ]]; then
     minecraft_reset_fail "confirmation_required" "Minecraft reset Apply requires explicit player interruption confirmation." 4
 fi
 
+if ! jv_reset_validate_storage_preservation; then
+    minecraft_reset_fail "configuration_cleanup_failed" "Preserved SMB storage configuration is unsafe or inconsistent."
+fi
+
 if systemctl is-active --quiet minecraft.service 2>/dev/null; then
     set +e
     stop_output="$(/usr/libexec/justvoxel/mjust/web-status-json stop --confirm-players 2>/dev/null)"
@@ -117,7 +121,7 @@ if [[ ${data_action} == delete ]]; then
     fi
 fi
 
-if ! jv_reset_remove_active_configuration "${JAVA_PORT}" "${BEDROCK_ENABLED}" "${BEDROCK_PORT}"; then
+if ! jv_reset_remove_active_configuration "${JAVA_PORT}" "${BEDROCK_ENABLED}" "${BEDROCK_PORT}" preserve-storage; then
     minecraft_reset_fail "configuration_cleanup_failed" "JustVoxel runtime configuration could not be removed completely."
 fi
 

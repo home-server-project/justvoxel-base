@@ -165,11 +165,14 @@ if (versionPolicy && versionInput && specificVersionField) {
     } else {
       summary.append(make("p", "setup-version-explanation", status.reason || "No usable server build was found for this version."));
     }
-    const compatibility = make("div", "notice " + (status.crossplay_compatible ? "success" : "warning") + " setup-version-compatibility", "");
-    compatibility.append(make("p", "", !status.crossplay_enabled ? "Bedrock cross-play is disabled." : status.crossplay_compatible ? "Bedrock cross-play is supported." : "Bedrock cross-play is not supported."));
-    if (status.crossplay_enabled && !status.crossplay_compatible) compatibility.append(make("p", "", "Choose Recommended, select a compatible Specific version, or disable Bedrock cross-play."));
-    compatibility.append(make("p", "", `Current supported Minecraft version: ${status.geyser_supported_version || "Unavailable"}.`));
-    preview.replaceChildren(summary, compatibility);
+    preview.replaceChildren(summary);
+    if (status.crossplay_enabled) {
+      const compatibility = make("div", "notice " + (status.crossplay_compatible ? "success" : "warning") + " setup-version-compatibility", "");
+      compatibility.append(make("p", "", status.crossplay_compatible ? "Bedrock cross-play is supported." : "Bedrock cross-play is not supported."));
+      if (!status.crossplay_compatible) compatibility.append(make("p", "", "Choose Recommended, select a compatible Specific version, or disable Bedrock cross-play."));
+      if (status.geyser_supported_version) compatibility.append(make("p", "", `Current supported Minecraft version: ${status.geyser_supported_version}.`));
+      preview.append(compatibility);
+    }
     next.disabled = !status.selected_candidate || (status.crossplay_enabled && !status.crossplay_compatible);
   };
   const refresh = async () => {
@@ -180,7 +183,7 @@ if (versionPolicy && versionInput && specificVersionField) {
     const version = policy === "pinned" ? versionInput.value.trim() : "";
     if (policy === "pinned" && !version) { preview.textContent = "Enter a Minecraft version to check availability."; return; }
     try {
-      const response = await fetch("/setup/version-preview?" + new URLSearchParams({ policy, version, bedrock_enabled: String(!!form?.querySelector("[data-bedrock-toggle]")?.checked) }), { credentials: "same-origin", cache: "no-store" });
+      const response = await fetch("/setup/version-preview?" + new URLSearchParams({ policy, version }), { credentials: "same-origin", cache: "no-store" });
       if (!response.ok) throw new Error();
       const status = await response.json();
       if (ticket === sequence) show(status, policy);

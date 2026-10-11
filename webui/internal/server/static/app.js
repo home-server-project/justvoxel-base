@@ -1726,6 +1726,17 @@ if (storageOpen && storageDialog) {
       document.head.appendChild(stylesheet);
     }
 
+    if (!document.querySelector('link[href="/static/new-backups.css"]')) {
+      const css = document.createElement("link"); css.rel = "stylesheet"; css.href = "/static/new-backups.css"; document.head.appendChild(css);
+    }
+    if (!window.JustVoxelNewBackups?.init) {
+      await new Promise((resolve, reject) => {
+        let script = document.querySelector('script[src="/static/new-backups.js"]');
+        if (!script) { script = document.createElement("script"); script.src = "/static/new-backups.js"; document.head.appendChild(script); }
+        script.addEventListener("load", resolve, { once: true });
+        script.addEventListener("error", reject, { once: true });
+      });
+    }
     if (window.JustVoxelStorageBrowser?.init) return;
     let script = document.querySelector('script[src="/static/storage-browser.js"]');
     await new Promise((resolve, reject) => {
@@ -1744,14 +1755,15 @@ if (storageOpen && storageDialog) {
     });
   };
 
-  const loadStorage = async () => {
+  const loadStorage = async (url = "/workspace/storage", request = {}) => {
     const sequence = ++loadSequence;
     if (state) state.textContent = "Loading storage…";
     if (refreshButton) refreshButton.disabled = true;
     try {
       await ensureStorageBrowserAssets();
-      const response = await fetch("/workspace/storage", {
-        method: "GET",
+      const response = await fetch(url, {
+        ...request,
+        method: request.method || "GET",
         credentials: "same-origin",
         headers: { Accept: "text/html" },
         cache: "no-store",
@@ -1772,6 +1784,16 @@ if (storageOpen && storageDialog) {
       const root = content.querySelector("[data-storage-browser-root]");
       if (!root || !window.JustVoxelStorageBrowser?.init) throw new Error("Storage browser could not be initialized.");
       window.JustVoxelStorageBrowser.init(root);
+      window.JustVoxelNewBackups?.init(root);
+      root.querySelectorAll('form[action^="/workspace/storage/destination/"]').forEach(form => {
+        form.addEventListener("submit", async event => {
+          event.preventDefault();
+          const submitter = event.submitter;
+          if (submitter) submitter.disabled = true;
+          await loadStorage(form.action, { method: "POST", body: new URLSearchParams(new FormData(form)) });
+        });
+      });
+      root.querySelectorAll('a[href="/workspace/storage"]').forEach(link => link.addEventListener("click", event => { event.preventDefault(); loadStorage(); }));
       if (state) state.textContent = "";
     } catch (error) {
       if (sequence !== loadSequence) return;
@@ -1782,14 +1804,14 @@ if (storageOpen && storageDialog) {
     }
   };
 
-  const workspaceWindow = setupWorkspaceWindow(storageDialog, { onOpen: loadStorage });
+  const workspaceWindow = setupWorkspaceWindow(storageDialog, { onOpen: () => loadStorage() });
 
   storageOpen.addEventListener("click", () => {
     if (controlCenter) controlCenter.open = false;
     workspaceWindow?.open();
   });
   closeButton?.addEventListener("click", () => workspaceWindow?.close());
-  refreshButton?.addEventListener("click", loadStorage);
+  refreshButton?.addEventListener("click", () => loadStorage());
 
   const restoreStorageWhenRoleKnown = () => {
     if (!readWorkspaceWindowState("storage").open) return;

@@ -29,6 +29,7 @@ class Node {
   setAttribute(k, v) { this.attributes[k] = v; }
   removeAttribute(k) { delete this.attributes[k]; }
   getAttribute(k) { return this.attributes[k] || null; }
+  hasAttribute(k) { return Object.prototype.hasOwnProperty.call(this.attributes, k); }
   scrollIntoView() { throw new Error('Wizard must not scroll to reveal controls'); } focus() { this.focused = true; } remove() {}
   after(node) {this.following = node;}
   closest(s) {

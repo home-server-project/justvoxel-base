@@ -47,6 +47,8 @@ type setupFilesystemView struct {
 	Model      string
 	Transport  string
 	SystemDisk bool
+	Available  string
+	UsageKnown bool
 }
 
 type setupStoragePartitionView struct {
@@ -106,9 +108,9 @@ func (a *App) setupWizardSaveStorage(w http.ResponseWriter, r *http.Request) {
 
 	if r.FormValue("direction") == "back" {
 		draft.Storage.Complete = false
-		draft.CurrentStep = setupMemoryStep
+		draft.CurrentStep = setupVersionStep
 		firstRunSetupDrafts.save(a, session, draft)
-		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "storage settings changed; user returned to Memory", draft)
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "storage settings changed; user returned to Version", draft)
 		http.Redirect(w, r, "/setup", http.StatusSeeOther)
 		return
 	}
@@ -322,7 +324,7 @@ func validateSetupBackups(backups setupBackupDraft, data setupStorageDraft, inve
 func setupFilesystemViews(storage api.AdminStorageDiscovery) []setupFilesystemView {
 	out := make([]setupFilesystemView, 0)
 	for _, device := range storage.Devices {
-		if !safeSetupDeviceValue(device) {
+		if !safeSetupDeviceValue(device) || device.System || storageBrowserLooksSystem(device) {
 			continue
 		}
 		mountpoint := ""
@@ -331,12 +333,24 @@ func setupFilesystemViews(storage api.AdminStorageDiscovery) []setupFilesystemVi
 		}
 		model := strings.TrimSpace(device.Model)
 		if model == "" {
-			model = "Local filesystem"
+			for _, parent := range storage.Devices {
+				if parent.Name == device.Parent {
+					model = strings.TrimSpace(parent.Model)
+					if model == "" {
+						model = parent.Name
+					}
+					break
+				}
+			}
+		}
+		if model == "" {
+			model = device.Name
 		}
 		out = append(out, setupFilesystemView{
 			Path: device.Path, Name: device.Name, Size: humanBytes(device.SizeBytes), Filesystem: device.Filesystem,
 			Label: device.Label, UUID: device.UUID, Mountpoint: mountpoint, Model: model,
 			Transport: device.Transport, SystemDisk: device.System,
+			Available: humanBytes(device.FilesystemFreeBytes), UsageKnown: device.FilesystemUsageKnown,
 		})
 	}
 	return out

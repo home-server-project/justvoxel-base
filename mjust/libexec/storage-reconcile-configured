@@ -1,0 +1,7 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/storage-lifecycle.sh
+require_root
+[[ $# == 0 ]] || exit 1
+jv_storage_reconcile_configured /etc/fstab /etc/justvoxel/smb-backup.credentials

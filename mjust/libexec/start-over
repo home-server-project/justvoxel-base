@@ -5,6 +5,7 @@ source /usr/libexec/justvoxel/mjust/minecraft-reset-common.sh
 source /usr/libexec/justvoxel/mjust/ui.sh
 require_root
 require_config
+jv_reset_validate_storage_preservation || { echo 'ERROR: preserved SMB storage configuration is unsafe or inconsistent.' >&2; exit 1; }
 
 timestamp="$(date +%Y%m%d-%H%M%S)"
 data_path="${DATA_PATH}"
@@ -131,7 +132,7 @@ if [[ ${container_action} == remove ]] && podman container exists minecraft 2>/d
     podman rm minecraft >/dev/null
 fi
 
-jv_reset_remove_active_configuration "${java_port}" "${bedrock_enabled}" "${bedrock_port}"
+jv_reset_remove_active_configuration "${java_port}" "${bedrock_enabled}" "${bedrock_port}" preserve-storage
 
 echo
 echo 'JustVoxel Minecraft configuration has been removed.'

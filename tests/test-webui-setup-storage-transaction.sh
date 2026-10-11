@@ -3,6 +3,7 @@ set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${repo_root}/mjust/libexec/common.sh"
+source "${repo_root}/mjust/libexec/storage-lifecycle.sh"
 set +e
 # shellcheck disable=SC1091
 source "${repo_root}/mjust/libexec/admin-setup-storage-transaction-common.sh"
@@ -37,6 +38,16 @@ chown() {
     esac
 }
 
+# Model appliance ownership while retaining real mode/link-count checks.
+stat() {
+    if [[ ${2:-} == '%u:%g:%a:%h' ]]; then
+        local metadata
+        metadata="$(command stat -c '%a:%h' -- "${@: -1}")" || return 1
+        printf '0:0:%s\n' "${metadata}"
+    else
+        command stat "$@"
+    fi
+}
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -223,7 +234,7 @@ install -d -m0700 "$(dirname "$A54_SMB_CREDENTIALS")"
 printf 'username=saved\npassword=keep-this-secret\n' > "$A54_SMB_CREDENTIALS"
 chmod 0600 "$A54_SMB_CREDENTIALS"
 cp -p "$A54_SMB_CREDENTIALS" "$TMP/unrelated.credentials.expected"
-printf '//saved/backups /var/mnt/justvoxel-backup cifs credentials=%s,nofail 0 0\n' "$A54_SMB_CREDENTIALS" >> "$A53_FSTAB"
+printf '//saved/backups /mnt/admin-backups cifs credentials=%s,nofail 0 0\n' "$TMP/admin.credentials" >> "$A53_FSTAB"
 cp -p "$A53_FSTAB" "$TMP/fstab.expected"
 req="$(make_system_request 11111111-1111-4111-8111-111111111111)"
 run_action a53_apply_action "$req"
@@ -281,6 +292,69 @@ cmp -s "$A53_FSTAB" "$TMP/fstab.expected" || fail 'local failure rollback modifi
 rm -f "$A54_SMB_CREDENTIALS"
 rmdir "$(dirname "$A54_SMB_CREDENTIALS")"
 
+# Confirmed lifecycle bug: a reserved stale CIFS mount replaced by one local
+# data filesystem with backups beside Minecraft data. No old data is touched.
+# Use the exact VM mount/path contract; directory and mount calls remain mocked.
+saved_mount="$MOUNT"
+saved_ensure_dir="$(declare -f _a53_ensure_dir)"
+MOUNT=/var/mnt/justvoxel-data
+_a53_ensure_dir(){ return 0; }
+reset_runtime
+install -d -m0700 "$(dirname "$A54_SMB_CREDENTIALS")"
+printf 'username=old\npassword=preserved-secret\n' > "$A54_SMB_CREDENTIALS"
+chmod 0600 "$A54_SMB_CREDENTIALS"
+cp -p "$A54_SMB_CREDENTIALS" "$TMP/stale.credentials.expected"
+printf '//192.168.0.50/storage/TEMP /var/mnt/justvoxel-backup cifs credentials=%s,nofail 0 0\n' "$A54_SMB_CREDENTIALS" >> "$A53_FSTAB"
+cp -p "$A53_FSTAB" "$TMP/stale.fstab.expected"
+SYSTEMCTL_LOG="$TMP/systemctl.log"
+RETIRED_LOAD_STATE=''
+systemctl(){
+    printf '%s\n' "$*" >> "$SYSTEMCTL_LOG"
+    case "$*" in
+        daemon-reload)
+            RETIRED_LOAD_STATE=''
+            if ! grep -Fq '/var/mnt/justvoxel-backup' "$A53_FSTAB"; then
+                RETIRED_LOAD_STATE=not-found
+            fi
+            ;;
+        'show --property=LoadState --value -- var-mnt-justvoxel\x2dbackup.mount')
+            printf '%s\n' "$RETIRED_LOAD_STATE"
+            ;;
+    esac
+    return 0
+}
+MOUNTED=0
+MOUNT_SOURCE="$FAKE_PART"
+req="$(make_partition_request 88888888-8888-4888-8888-111111111111)"
+run_action a53_apply_action "$req"
+jq -e '.ok and .applied' >/dev/null <<< "$ACTION_OUT" || fail "stale CIFS transition: $ACTION_OUT"
+! grep -Fq '/var/mnt/justvoxel-backup' "$A53_FSTAB" || fail 'stale CIFS entry survived'
+grep -Fq "UUID=$CURRENT_UUID $MOUNT xfs" "$A53_FSTAB" || fail 'new local UUID missing'
+grep -Fxq 'daemon-reload' "$SYSTEMCTL_LOG" || fail 'stale CIFS retirement did not reload generated units'
+[[ $(grep '^reset-failed' "$SYSTEMCTL_LOG") == 'reset-failed var-mnt-justvoxel\x2dbackup.mount' ]] || fail 'expected only the exact obsolete mount to be reset once'
+[[ ! -e $A54_SMB_CREDENTIALS ]] || fail 'obsolete SMB credentials survived'
+grep -Fxq "$(grep '/mnt/admin-backups' "$TMP/fstab.expected")" "$A53_FSTAB" || fail 'administrator mount changed'
+reset_runtime
+run_action a53_rollback_action "$req"
+jq -e '.ok and .rollback_state=="succeeded"' >/dev/null <<< "$ACTION_OUT" || fail "stale CIFS rollback: $ACTION_OUT"
+cmp -s "$A53_FSTAB" "$TMP/stale.fstab.expected" || fail 'rollback did not restore original fstab'
+cmp -s "$A54_SMB_CREDENTIALS" "$TMP/stale.credentials.expected" || fail 'rollback did not restore credentials'
+# Later storage failure must restore both, too.
+reset_runtime
+req="$(make_partition_request 88888888-8888-4888-8888-222222222222)"
+PROBE_FAIL_PATH="$MOUNT/backups"
+run_action a53_apply_action "$req"
+jq -e '(.ok|not) and .rollback_state=="succeeded"' >/dev/null <<< "$ACTION_OUT" || fail 'stale CIFS failure did not roll back'
+cmp -s "$A53_FSTAB" "$TMP/stale.fstab.expected" || fail 'later failure lost fstab'
+cmp -s "$A54_SMB_CREDENTIALS" "$TMP/stale.credentials.expected" || fail 'later failure lost credentials'
+PROBE_FAIL_PATH=''
+cp -p "$TMP/fstab.expected" "$A53_FSTAB"
+rm -f "$A54_SMB_CREDENTIALS"
+rmdir "$(dirname "$A54_SMB_CREDENTIALS")"
+reset_runtime
+MOUNT="$saved_mount"
+eval "$saved_ensure_dir"
+
 # Stale reviewed UUID must be rejected before mutation.
 CURRENT_UUID=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
 req="$(make_partition_request 33333333-3333-4333-8333-333333333333)"
@@ -334,7 +408,7 @@ cmp -s "$A53_FSTAB" "$TMP/fstab.expected" || fail 'SMB rollback did not restore 
 # Pre-existing SMB credentials must be restored exactly, including mode.
 install -d -m0700 "$(dirname "$A54_SMB_CREDENTIALS")"
 printf 'username=old\npassword=old-secret\n' > "$A54_SMB_CREDENTIALS"
-chmod 0640 "$A54_SMB_CREDENTIALS"
+chmod 0600 "$A54_SMB_CREDENTIALS"
 cp "$A54_SMB_CREDENTIALS" "$TMP/smb.credentials.expected"
 MOUNTED=0
 MOUNT_CALLS=0
@@ -350,7 +424,7 @@ run_action a53_rollback_action "$req_without_password"
 out="$ACTION_OUT"
 jq -e '.ok and .rollback_state=="succeeded"' >/dev/null <<< "$out" || fail "SMB existing-credential rollback failed: $out"
 cmp -s "$A54_SMB_CREDENTIALS" "$TMP/smb.credentials.expected" || fail 'SMB rollback did not restore previous credential contents'
-[[ $(stat -c '%a' "$A54_SMB_CREDENTIALS") == 640 ]] || fail 'SMB rollback did not restore previous credential mode'
+[[ $(stat -c '%a' "$A54_SMB_CREDENTIALS") == 600 ]] || fail 'SMB rollback did not restore previous credential mode'
 [[ ! -e $A53_TRANSACTION_ROOT/44444444-4444-4444-8444-666666666666/smb.credentials.before ]] || fail 'successful SMB rollback retained previous credential snapshot'
 rm -f "$A54_SMB_CREDENTIALS"
 rmdir "$(dirname "$A54_SMB_CREDENTIALS")" 2>/dev/null || true

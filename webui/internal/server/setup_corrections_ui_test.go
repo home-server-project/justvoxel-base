@@ -31,7 +31,7 @@ func TestSetupVersionPreviewMetadataAndCompatibility(t *testing.T) {
 	program := `
 const assert = require("node:assert/strict");
 const document = { createElement: () => ({ children: [], textContent: "", append(...nodes) { this.children.push(...nodes); } }) };
-const preview = { replaceChildren(...nodes) { this.children = nodes; } };
+const preview = { replaceChildren(...nodes) { this.children = nodes; }, append(...nodes) { this.children.push(...nodes); } };
 const next = { disabled: true };
 ` + source[start:start+end] + `
 const flatten = (node) => [node.textContent || "", ...(node.children || []).flatMap(flatten)];
@@ -66,15 +66,16 @@ for (const policy of ["latest", "pinned"]) {
 }
 show({ ...fixture, crossplay_enabled: false, crossplay_compatible: false }, "pinned");
 assert.equal(next.disabled, false);
-assert.equal(preview.children.length, 2);
+assert.equal(preview.children.length, 1);
 for (const policy of ["recommended", "latest", "pinned"]) {
   for (const candidate of ["", undefined]) {
     for (const compatible of [true, false]) {
       show({ ...fixture, selected_candidate: candidate, reason: "No build found", crossplay_enabled: false, crossplay_compatible: compatible }, policy);
       assert.equal(next.disabled, true);
-      assert.equal(preview.children.length, 2);
+      assert.equal(preview.children.length, 1);
       assert.equal(preview.children[0].className, "notice warning setup-version-panel");
-      assert.equal(preview.children[1].className, "notice " + (compatible ? "success" : "warning") + " setup-version-compatibility");
+      assert(!text().includes("Bedrock cross-play is disabled"));
+      assert(!text().includes("Current supported Minecraft version"));
       assert(!preview.children[0].children.some(n => n.className === "setup-version-candidate"));
       assert(text().includes("No build found"));
     }
@@ -235,10 +236,10 @@ func TestWizardScheduleAndHeadings(t *testing.T) {
 			t.Fatal("redundant setup heading remains")
 		}
 	}
-	if !strings.Contains(review, `{{if ne .SetupMode "recommended"}}`) || strings.Count(review, `class="setup-number"`) != 6 || !strings.Contains(review, "<h2>Review</h2>") {
+	if !strings.Contains(review, `{{if ne .SetupMode "recommended"}}`) || strings.Count(review, `class="setup-number"`) != 7 || !strings.Contains(review, "<h2>Review</h2>") {
 		t.Fatal("Review must keep its title and Advanced-only navigation")
 	}
-	for i, name := range []string{"Server", "Cross-play", "Memory", "Storage", "Backups", "Review"} {
+	for i, name := range []string{"Server", "Cross-play", "Memory", "Version", "Storage", "Backups", "Review"} {
 		if !strings.Contains(review, fmt.Sprintf(`<span class="setup-number">%d</span><span>%s</span>`, i+1, name)) {
 			t.Fatalf("Advanced Review missing step %d: %s", i+1, name)
 		}
@@ -264,8 +265,8 @@ func TestWizardScheduleAndHeadings(t *testing.T) {
 				t.Fatalf("%s Review missing %q", mode, want)
 			}
 		}
-		if mode == "advanced" && (strings.Count(body, `class="setup-number"`) != 6 || !strings.Contains(body, `<li class="active" aria-current="step"><span class="setup-number">6</span><span>Review</span>`)) {
-			t.Fatal("Advanced Review must show six steps with Review active at Step 6")
+		if mode == "advanced" && (strings.Count(body, `class="setup-number"`) != 7 || !strings.Contains(body, `<li class="active" aria-current="step"><span class="setup-number">7</span><span>Review</span>`)) {
+			t.Fatal("Advanced Review must show seven steps with Review active at Step 7")
 		}
 	}
 	css := correctionSource(t, "static/setup.css")

@@ -152,6 +152,7 @@ func resetPassword() (string, error) {
 }
 
 func serve(socket string) error {
+	reconcileConfiguredStorageAtStartup()
 	if _, _, err := bootstrap(); err != nil {
 		return err
 	}

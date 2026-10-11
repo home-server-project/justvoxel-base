@@ -2,6 +2,7 @@
 set -uo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${repo_root}/mjust/libexec/admin-backup-storage-common.sh"
+source "${repo_root}/mjust/libexec/storage-lifecycle.sh"
 source "${repo_root}/mjust/libexec/admin-backup-storage-apply.sh"
 base="$(mktemp -d)"
 trap 'rm -rf -- "${base}"' EXIT
@@ -20,6 +21,14 @@ findmnt() { case "$*" in *FSTYPE*) printf 'ext4\n';; *TARGET*) printf '/var\n';;
 mountpoint() { [[ -f "${base}/.test-mounted" && ${@: -1} == "${base}/mount" ]]; }
 systemctl() { :; }
 chown() { :; }
+# Simulate root ownership only; check actual mode, links and credential content.
+stat() {
+    if [[ ${2:-} == '%u:%g:%a:%h' ]]; then
+        printf '0:0:%s\n' "$(command stat -c '%a:%h' -- "${@: -1}")"
+    else
+        command stat "$@"
+    fi
+}
 mount() { [[ ${mount_fails} == no ]] || return 1; : > "${base}/.test-mounted"; }
 umount() { rm -f -- "${base}/.test-mounted"; }
 jv_exact_mount_identity() { [[ $1 == SOURCE ]] && printf '%s\n' "${test_actual_source}"; }
@@ -113,6 +122,9 @@ for render_fails_case in no yes; do
     fixture
     render_fails=${render_fails_case}
     # Failure to create an SMB snapshot must not affect an unrelated local action.
+    # The retained SMB entry is not the previous configured backup destination.
+    BACKUP_TYPE=system BACKUP_PATH="${base}/local-backups" BACKUP_MOUNT_POINT=''
+    BACKUP_EXPECTED_UUID='' BACKUP_EXPECTED_SOURCE=''
     snapshot_fails=create
     request="$(jq -cn --arg path "${base}/local-backups" '{type:"system",path:$path}')"
     apply
