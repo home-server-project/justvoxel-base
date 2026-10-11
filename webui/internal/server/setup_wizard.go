@@ -681,7 +681,7 @@ func normalizedSetupDefaults(defaults api.AdminSetupDefaults) api.AdminSetupDefa
 		defaults.SystemReserveMinimumMiB = 1024
 	}
 	if defaults.SystemReserveRecommendedMiB == 0 {
-		defaults.SystemReserveRecommendedMiB = 2048
+		defaults.SystemReserveRecommendedMiB = 1536
 	}
 	return defaults
 }

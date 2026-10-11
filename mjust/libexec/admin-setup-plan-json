@@ -9,7 +9,7 @@ readonly SETUP_PLAN_SCHEMA_VERSION=v1
 readonly SETUP_DEFAULT_DATA_PATH=/var/lib/justvoxel/minecraft
 readonly SETUP_DEFAULT_BACKUP_PATH=/var/lib/justvoxel/backups
 readonly SETUP_MIN_SYSTEM_RESERVE_MIB=1024
-readonly SETUP_RECOMMENDED_SYSTEM_RESERVE_MIB=2048
+readonly SETUP_RECOMMENDED_SYSTEM_RESERVE_MIB=1536
 
 json_error() {
     local message="$1" code="${2:-invalid_request}"
@@ -327,7 +327,7 @@ if (( total_mib > 0 && remaining_mib < SETUP_MIN_SYSTEM_RESERVE_MIB )); then
     exit 0
 fi
 if (( total_mib > 0 && remaining_mib < SETUP_RECOMMENDED_SYSTEM_RESERVE_MIB )); then
-    warnings="$(warning_add "${warnings}" low_system_reserve 'Less than the recommended 2 GiB remains for JustVoxel and system services.')"
+    warnings="$(warning_add "${warnings}" low_system_reserve 'Less than the recommended 1.5 GiB remains for JustVoxel and system services.')"
 fi
 
 validate_port "${java_port}" || { json_error 'Minecraft Java port must be between 1 and 65535.' invalid_minecraft; exit 0; }

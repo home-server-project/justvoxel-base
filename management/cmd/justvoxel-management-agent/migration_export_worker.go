@@ -118,6 +118,8 @@ func executeMigrationExportTransaction(parent context.Context, store *operationS
 		return err
 	}
 
+	appendMigrationExportIdentityDiagnostic(store, operationID, "reviewed", plan)
+
 	request := migrationExportTransactionRequest{
 		OperationID:            operationID,
 		PlanFingerprint:        operation.PlanFingerprint,
@@ -141,7 +143,13 @@ func executeMigrationExportTransaction(parent context.Context, store *operationS
 				return errors.New("server migration export helper returned multiple final results")
 			}
 			finalSeen = true
-			return applyMigrationExportResult(store, operationID, event)
+			if err := applyMigrationExportResult(store, operationID, event); err != nil {
+				return err
+			}
+			if event.Outcome == "succeeded" {
+				appendMigrationExportIdentityDiagnostic(store, operationID, "completed", plan)
+			}
+			return nil
 		default:
 			return errors.New("server migration export helper returned an unsupported event")
 		}
@@ -242,4 +250,17 @@ func markMigrationExportNeedsAttention(store *operationStore, operationID, stage
 	}
 	_, err = store.transition(operationID, operationNeedsAttention, stage, status)
 	return err
+}
+
+// Only the normalized identity from the authoritative reviewed plan is logged.
+// Diagnostic failure must not strand or alter the migration transaction.
+func appendMigrationExportIdentityDiagnostic(store *operationStore, operationID, stage string, plan migrationExportExecutionPlan) {
+	if plan.BundleFilename == "" || plan.TargetDisplay == "" || plan.DestinationKind == "" {
+		return
+	}
+	_ = store.appendOperationDiagnostic(operationID, operationTypeMigrationExport, "EXPORT", stage, map[string]string{
+		"file":             plan.BundleFilename,
+		"destination":      redactSetupDiagnosticNetworkLocation(plan.TargetDisplay),
+		"destination_type": plan.DestinationKind,
+	})
 }

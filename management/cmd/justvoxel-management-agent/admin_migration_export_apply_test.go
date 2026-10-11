@@ -30,6 +30,9 @@ func TestAdminMigrationExportApplyExactReviewedPlanCreatesQueuedOperation(t *tes
 	workerCalls := 0
 	startMigrationExportWorker = func(_ *server, _ string, plan migrationExportExecutionPlan) {
 		workerCalls++
+		if plan.BundleFilename != "justvoxel-migration-test.tar.gz" || plan.TargetDisplay != "/var/lib/justvoxel/exports/justvoxel-migration-test.tar.gz" || plan.DestinationKind != "local" {
+			t.Fatal("worker did not receive normalized Export diagnostic identity")
+		}
 		if plan.ConfigIdentity == "" || plan.DataIdentity == "" || plan.TargetIdentity == "" ||
 			plan.ExpectedMinecraftState != "running" {
 			t.Fatalf("worker did not receive reviewed export identity: %#v", plan)

@@ -211,7 +211,7 @@ setup_defaults_json() {
         '{data_path:$data_path,backup_path:$backup_path,java_memory:$java_memory,container_memory:$container_memory,
           java_port:$java_port,bedrock_enabled:false,bedrock_port:$bedrock_port,timezone:$timezone,max_players:$max_players,
           motd:$motd,image_tag:$image_tag,version_mode:$version_mode,backup_keep:$backup_keep,backup_daily_time:$backup_daily_time,
-          system_memory_mib:$system_memory_mib,system_reserve_minimum_mib:1024,system_reserve_recommended_mib:2048}'
+          system_memory_mib:$system_memory_mib,system_reserve_minimum_mib:1024,system_reserve_recommended_mib:1536}'
 }
 
 apply_live_whitelist() {
@@ -457,8 +457,8 @@ configuration_change_json() {
         memory_restart_required=true
     fi
 
-    if (( total_mib > 0 && remaining_mib < 2048 )); then
-        warnings="$(jq -c --arg message "Memory remaining outside Minecraft is below the recommended 2 GiB headroom. JustVoxel itself typically uses roughly 0.6–1.0 GiB; the rest is useful for Linux cache, backups, updates, management services and temporary workload spikes." '. + [$message]' <<< "${warnings}")"
+    if (( total_mib > 0 && remaining_mib < 1536 )); then
+        warnings="$(jq -c --arg message "Memory remaining outside Minecraft is below the recommended 1.5 GiB headroom. JustVoxel itself typically uses roughly 0.6–1.0 GiB; the rest is useful for Linux cache, backups, updates, management services and temporary workload spikes." '. + [$message]' <<< "${warnings}")"
     fi
 
     WHITELIST_ENABLED="${new_whitelist_enabled}"

@@ -140,7 +140,17 @@ func (s *operationStore) appendOperationDiagnostic(id, operationType, category, 
 		if len(value) > 2048 {
 			value = value[:2048] + "…"
 		}
-		fmt.Fprintf(&line, " %s=%q", key, sanitizeSetupDiagnosticValue(key, value, s.diagnosticHostname))
+		value = sanitizeSetupDiagnosticValue(key, value, s.diagnosticHostname)
+		// Migration bundle extensions are filenames, not hostnames. Preserve the
+		// known suffix while retaining redaction of the stem and destination.
+		if operationType == operationTypeMigrationExport && (key == "file" || key == "destination") {
+			original := values[key]
+			filename := filepath.Base(original)
+			if len(original) <= 2048 && !operationDiagnosticSensitivePattern.MatchString(original) && migrationExportFilenamePattern.MatchString(filename) {
+				value = sanitizeSetupDiagnosticValue(key, strings.TrimSuffix(original, ".tar.gz"), s.diagnosticHostname) + ".tar.gz"
+			}
+		}
+		fmt.Fprintf(&line, " %s=%q", key, value)
 	}
 	line.WriteByte('\n')
 	remaining := operationDiagnosticLimit - size

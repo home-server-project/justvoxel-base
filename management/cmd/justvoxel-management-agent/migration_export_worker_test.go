@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -15,6 +16,9 @@ func testMigrationExportExecutionPlan() migrationExportExecutionPlan {
 		DataIdentity:           "1:2:3:4",
 		TargetIdentity:         "local:5:6:7",
 		ExpectedMinecraftState: "running",
+		BundleFilename:         "justvoxel-migration-test.tar.gz",
+		TargetDisplay:          "/var/lib/justvoxel/exports/justvoxel-migration-test.tar.gz",
+		DestinationKind:        "local",
 	}
 }
 
@@ -60,6 +64,20 @@ func TestExecuteMigrationExportTransactionSuccessTracksProgress(t *testing.T) {
 	}
 	if current, err := store.currentMigration(); err != nil || current != nil {
 		t.Fatalf("current migration after export success = %#v err=%v", current, err)
+	}
+	data, err := store.readDiagnosticLog("migration", operation.OperationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"EXPORT reviewed", "EXPORT completed",
+		`file="justvoxel-migration-test.tar.gz"`,
+		`destination="/var/lib/justvoxel/exports/justvoxel-migration-test.tar.gz"`,
+		`destination_type="local"`, `state="succeeded"`,
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("Export log missing %q: %s", want, data)
+		}
 	}
 }
 
@@ -121,5 +139,43 @@ func TestExecuteMigrationExportTransactionUnexpectedBackendFailureNeedsAttention
 	current, _ := store.currentMigration()
 	if current == nil || current.OperationID != operation.OperationID {
 		t.Fatalf("needs-attention export was not kept current: %#v", current)
+	}
+}
+
+func TestMigrationExportIdentityDiagnosticsExcludeCredentialsAndRetainRedaction(t *testing.T) {
+	store := openTestOperationStore(t)
+	operation, _, err := store.beginMigrationExport(testMigrationExportFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := testMigrationExportExecutionPlan()
+	plan.DestinationKind = "smb"
+	plan.TargetDisplay = "//fileserver/share/justvoxel-migration-test.tar.gz"
+	plan.SMBPassword = "private-smb-value-987"
+	plan.Request.Username = "private-user-987"
+	plan.Request.Domain = "private-domain-987"
+	appendMigrationExportIdentityDiagnostic(store, operation.OperationID, "reviewed", plan)
+	data, err := store.readDiagnosticLog("migration", operation.OperationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{plan.SMBPassword, plan.Request.Username, plan.Request.Domain, "fileserver"} {
+		if strings.Contains(string(data), forbidden) {
+			t.Fatalf("Export diagnostic exposed private detail %q", forbidden)
+		}
+	}
+	for _, want := range []string{`file="justvoxel-migration-test.tar.gz"`, `destination="//<HOSTNAME-REDACTED>/share/justvoxel-migration-test.tar.gz"`, `destination_type="smb"`} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("Export diagnostic missing %q: %s", want, data)
+		}
+	}
+	plan.TargetDisplay = "/exports/password=private-smb-value-987/justvoxel-migration-test.tar.gz"
+	appendMigrationExportIdentityDiagnostic(store, operation.OperationID, "completed", plan)
+	data, err = store.readDiagnosticLog("migration", operation.OperationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), plan.SMBPassword) {
+		t.Fatal("sensitive normalized destination bypassed diagnostic redaction")
 	}
 }

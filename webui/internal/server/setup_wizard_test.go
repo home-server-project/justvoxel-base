@@ -124,7 +124,7 @@ function open(mib, heap, maximum, players = "10") {
     addEventListener(event, fn) { this.events[event] = fn; },
     classList: { toggle(_, selected) { buttons.find((b) => b.dataset.memoryPreset === name).selected = selected; } }
   }));
-  const panel = { dataset: { systemMemoryMib: String(mib), minReserveMib: "1024", recommendedReserveMib: "2048" }, querySelectorAll() { return buttons; } };
+  const panel = { dataset: { systemMemoryMib: String(mib), minReserveMib: "1024", recommendedReserveMib: "1536" }, querySelectorAll() { return buttons; } };
   const status = { classList: { remove() {}, add() {} } };
   const fields = { "java-memory": game, "container-memory": max, "max-players": player, "memory-status": status };
   const document = { querySelector(selector) { return selector === "[data-memory-settings]" ? panel : null; }, getElementById(id) { return fields[id] || null; } };
@@ -314,7 +314,7 @@ func setupWizardClient() *fakeDiscoveryAPI {
 	client.defaults.VersionMode = "pinned"
 	client.defaults.SystemMemoryMiB = 8192
 	client.defaults.SystemReserveMinimumMiB = 1024
-	client.defaults.SystemReserveRecommendedMiB = 2048
+	client.defaults.SystemReserveRecommendedMiB = 1536
 	return client
 }
 
@@ -706,7 +706,7 @@ func TestSetupWizardServerStepValidatesAndPersistsChoices(t *testing.T) {
 	}
 	page = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	body = page.Body.String()
-	for _, want := range []string{"<h2>Memory</h2>", "Memory", "Minecraft game memory", "Technical name: Java heap", "Maximum Minecraft memory", "container memory limit", "8.0 GiB detected", "2.0 GiB", "1.0 GiB", "Presets are starting points based on system memory and headroom. Larger servers or heavier plugins may need High memory or Custom settings.", "Recommended", "High memory", "/static/settings.js"} {
+	for _, want := range []string{"<h2>Memory</h2>", "Memory", "Minecraft game memory", "Technical name: Java heap", "Maximum Minecraft memory", "container memory limit", "8.0 GiB detected", "1.5 GiB", "1.0 GiB", "Presets are starting points based on system memory and headroom. Larger servers or heavier plugins may need High memory or Custom settings.", "Recommended", "High memory", "/static/settings.js"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("Resources step missing %q: %s", want, body)
 		}

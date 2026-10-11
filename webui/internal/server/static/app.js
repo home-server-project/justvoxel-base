@@ -2493,7 +2493,9 @@ if (migrationOpen && migrationDialog) {
         else if (Object.hasOwn(tabURLs, tab)) {
           if (tab === "import") migrationSourceSMBPassword = "";
           currentTab = tab;
-          await loadMigration(tabURLs[tab]);
+          currentURL = tabURLs[tab];
+          syncMigrationTabs();
+          await loadMigration(currentURL);
         } else await loadMigrationEntry();
         return;
       }
@@ -3092,7 +3094,7 @@ if (minecraftOpen && minecraftDialog) {
     const buttons = Array.from(root.querySelectorAll("[data-minecraft-memory-preset]"));
     const totalMiB = Number(defaults?.system_memory_mib || 0);
     const minimumReserveMiB = Number(defaults?.system_reserve_minimum_mib || 1024);
-    const recommendedReserveMiB = Number(defaults?.system_reserve_recommended_mib || 2048);
+    const recommendedReserveMiB = Number(defaults?.system_reserve_recommended_mib || 1536);
     let activePreset = "";
 
     const parseMemoryMiB = (value) => {
@@ -4015,6 +4017,10 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     });
   };
 
+  const systemLogDestination = new URLSearchParams(window.location.search);
+  let requestedMigrationLog = systemLogDestination.get("workspace") === "system" && systemLogDestination.get("tab") === "logs" && systemLogDestination.get("log_group") === "migration"
+    ? { group: "Migration", id: systemLogDestination.get("log_id") || "" } : null;
+
   const renderLogs = async (sequence) => {
     const payload = await systemFetchJSON("/api/system/workspace/logs");
     if (!payload || sequence !== loadSequence || !content) return;
@@ -4059,8 +4065,10 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     documentText.textContent = "Select a file to read it here.";
     viewer.append(download, documentText);
     reader.appendChild(viewer);
-    let selectedGroup = "Setup";
+    let selectedGroup = requestedMigrationLog?.group || "Setup";
     let selectedFile = "";
+    let requestedEntry = requestedMigrationLog ? logs.find((entry) => entry.category === "migration" && entry.log_id === requestedMigrationLog.id) : null;
+    requestedMigrationLog = null;
     const renderFiles = () => {
       fileList.replaceChildren();
       viewer.scrollTop = 0;
@@ -4102,6 +4110,10 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
           } catch (error) { documentText.textContent = error?.message || "Diagnostic log is unavailable."; }
         });
         fileList.appendChild(button);
+        if (entry === requestedEntry) {
+          requestedEntry = null;
+          button.click();
+        }
       });
     };
     groups.forEach((group) => {

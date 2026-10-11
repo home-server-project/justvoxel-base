@@ -92,7 +92,7 @@ func configuredMinecraftWorkspaceAPI() *fakeMinecraftWorkspaceAPI {
 	client.configuration.Backup.TimerEnabled = true
 	client.defaults.SystemMemoryMiB = 16384
 	client.defaults.SystemReserveMinimumMiB = 1024
-	client.defaults.SystemReserveRecommendedMiB = 2048
+	client.defaults.SystemReserveRecommendedMiB = 1536
 	return client
 }
 

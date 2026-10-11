@@ -432,3 +432,36 @@ func TestMigrationScriptsUseWorkspaceInitializationOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestMigrationWorkspaceExportTerminalDoneAndLogLinks(t *testing.T) {
+	doneAnchor := regexp.MustCompile(`<a\b[^>]*\bid="server-migration-dashboard-link"[^>]*>Done</a>`)
+	hiddenAttribute := regexp.MustCompile(`\shidden(?:\s|>)`)
+	for _, state := range []string{"running", "succeeded", "rolled_back", "failed", "needs_attention"} {
+		t.Run(state, func(t *testing.T) {
+			client := &fakeServerMigrationAPI{operation: &api.PersistentOperation{
+				OperationID: serverMigrationOperationID, OperationType: "migration_export", State: state,
+			}}
+			app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := authenticatedAdminRequest(http.MethodGet, "http://example/workspace/migration/progress/"+serverMigrationOperationID, "")
+			request.Header.Set(migrationWorkspaceFragmentHeader, "1")
+			page := httptestResponse(app, request)
+			body := page.Body.String()
+			if page.Code != http.StatusOK {
+				t.Fatalf("progress = %d: %s", page.Code, body)
+			}
+			done := doneAnchor.FindString(body)
+			if done == "" || !strings.Contains(done, `href="/?workspace=migration&amp;tab=export"`) || hiddenAttribute.MatchString(done) == (state == "succeeded") {
+				t.Fatalf("Export Done action incorrect for %s: %s", state, done)
+			}
+			if strings.Contains(body, ">Open dashboard</a>") {
+				t.Fatal("Export still exposes stale dashboard navigation")
+			}
+			if !strings.Contains(body, `workspace=system&amp;tab=logs&amp;log_group=migration&amp;log_id=`+serverMigrationOperationID) || !strings.Contains(body, "Details available on System -&gt; Logs -&gt; Migration.") {
+				t.Fatal("Export lacks its Migration log destination")
+			}
+		})
+	}
+}

@@ -15,6 +15,7 @@ function initServerMigrationOperation(root = document) {
   const backLink = root.querySelector("#server-migration-back-link");
   const dashboardLink = root.querySelector("#server-migration-dashboard-link");
   const recoveryLink = root.querySelector("#server-migration-recovery-link");
+  const exportLogDetails = root.querySelector("#server-migration-export-log-details");
   let failures = 0;
   let finished = false;
 
@@ -98,7 +99,14 @@ function initServerMigrationOperation(root = document) {
     if (successNote) successNote.hidden = !succeeded;
     if (rollbackNote) rollbackNote.hidden = !rolledBack;
     if (attentionNote) attentionNote.hidden = !needsAttention;
-    if (dashboardLink) dashboardLink.hidden = !succeeded;
+    if (dashboardLink) {
+      dashboardLink.hidden = !succeeded;
+      if (operation.operation_type === "migration_export") {
+        dashboardLink.textContent = "Done";
+        dashboardLink.href = "/?workspace=migration&tab=export";
+      }
+    }
+    if (exportLogDetails) exportLogDetails.hidden = !(operation.operation_type === "migration_export" && ["succeeded", "rolled_back", "failed", "needs_attention"].includes(operation.state));
     if (backLink) backLink.hidden = !(succeeded || rolledBack || resolved);
     if (recoveryLink) recoveryLink.hidden = !(needsAttention && ["migration_import", "migration_recovery"].includes(operation.operation_type));
     if (terminalState(operation.state)) finished = true;

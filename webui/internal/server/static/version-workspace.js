@@ -62,8 +62,10 @@ if (versionLauncher && versionDialog) {
   ));
   const showReview = (root, form, plan, params, status, players) => {
     const versionReview = Boolean(form.elements.policy);
-    const needsUpdate = versionReview && requiresRuntimeUpdate(plan, status);
-    const blocked = plan.compatibility_blocked || (status?.crossplay_enabled && !status.crossplay_compatible) || (versionReview && (!(status.server_supported ?? status.paper_supported) || !status.installed)) || (needsUpdate && status.stack_state !== "updates_available");
+    const channelChange = !versionReview && Boolean(plan.changes?.length);
+    const needsUpdate = versionReview ? requiresRuntimeUpdate(plan, status) : status?.image_state === "updates_available";
+    const runtimePossible = needsUpdate || channelChange;
+    const blocked = plan.compatibility_blocked || (status?.crossplay_enabled && !status.crossplay_compatible) || (versionReview && (!(status.server_supported ?? status.paper_supported) || !status.installed)) || (needsUpdate && !channelChange && status.stack_state !== "updates_available");
     root.querySelector("[data-version-review]")?.remove();
     const review = card("Review changes");
     review.dataset.versionReview = "";
@@ -83,14 +85,20 @@ if (versionLauncher && versionDialog) {
       empty.textContent = "No changes were found.";
       review.appendChild(empty);
     }
-    if (needsUpdate) {
+    if (channelChange) {
+      const note = document.createElement("p");
+      note.textContent = "Applying saves the channel, then re-checks the configured image. If an update is needed, JustVoxel will update the container.";
+      review.appendChild(note);
+    }
+    if (runtimePossible) {
       const grid = document.createElement("div");
       grid.className = "version-status-grid";
-      grid.append(line("Minecraft", `${status.installed} → ${status.selected_candidate}`), line("Geyser", stackLabel(status.geyser_state)), line("Floodgate", stackLabel(status.floodgate_state)), line("ViaVersion", stackLabel(status.viaversion_state)));
+      if (versionReview) grid.append(line("Minecraft", `${status.installed} → ${status.selected_candidate}`), line("Geyser", stackLabel(status.geyser_state)), line("Floodgate", stackLabel(status.floodgate_state)), line("ViaVersion", stackLabel(status.viaversion_state)));
+      else grid.append(line("Container image", needsUpdate ? "Update available" : "Re-check after saving"));
       review.appendChild(grid);
       const notice = document.createElement("p");
       notice.className = "notice warning";
-      notice.textContent = "JustVoxel will create a cold backup and safely restart Minecraft. Online players will receive a shutdown countdown. A stopped server may start temporarily for verification and will be stopped again afterward.";
+      notice.textContent = (channelChange ? "If a container update is needed, JustVoxel" : "JustVoxel") + " will create a cold backup and safely restart Minecraft. Online players will receive a shutdown countdown. A stopped server may start temporarily for verification and will be stopped again afterward.";
       review.appendChild(notice);
     } else if (!versionReview && plan.restart_required) {
       const notice = document.createElement("p");
@@ -116,18 +124,18 @@ if (versionLauncher && versionDialog) {
       warning.textContent = status.reason || "A safe Minecraft update could not be verified.";
       review.appendChild(warning);
     }
-    const confirmationRequired = plan.confirmation_required || (needsUpdate && Number(players?.online || 0) > 0);
+    const confirmationRequired = versionReview ? plan.confirmation_required || (needsUpdate && Number(players?.online || 0) > 0) : runtimePossible && Number(players?.online || 0) > 0;
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.setAttribute("role", "switch");
-    checkbox.checked = !versionReview && Boolean(plan.confirmation_required);
-    if (!versionReview && plan.confirmation_required) {
+    checkbox.checked = false;
+    if (!versionReview && confirmationRequired) {
       const warning = document.createElement("p");
       warning.className = "notice warning";
-      warning.textContent = `${plan.online || 0} player(s) are online. Applying this change will disconnect them.`;
+      warning.textContent = `${players?.online || 0} player(s) are online. Applying this change will disconnect them.`;
       review.appendChild(warning);
     }
-    if (versionReview && confirmationRequired && !blocked) {
+    if (confirmationRequired && !blocked) {
       const consent = document.createElement("label");
       consent.className = "minecraft-native-toggle system-ups-shutdown-switch";
       const label = document.createElement("span");
@@ -163,6 +171,22 @@ if (versionLauncher && versionDialog) {
             const result = await request("/api/minecraft/workspace/settings/apply", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
             if (!result.applied) throw new Error(result.error || "The change was not applied. Review again.");
             saved = true;
+          }
+          if (!versionReview && runtimePossible) {
+            state.textContent = "Checking configured container image…";
+            const refreshed = await request(statusURL());
+            if (refreshed.image_state === "updates_available") {
+              if (refreshed.stack_state !== "updates_available" || !refreshed.update_available || !refreshed.plan_fingerprint || !(refreshed.server_supported ?? refreshed.paper_supported) || (refreshed.crossplay_enabled && !refreshed.crossplay_compatible)) throw new Error(refreshed.reason || "A safe container update could not be verified. Review changes again.");
+              const body = new URLSearchParams({ csrf, plan_fingerprint: refreshed.plan_fingerprint, confirm_players: checkbox.checked ? "yes" : "no" });
+              const result = await request("/api/version/workspace/update", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
+              if (!result.operation?.operation_id) throw new Error("Server update tracking is unavailable. Refresh Version to check its status.");
+              review.remove();
+              updateOperation = result.operation.operation_id;
+              await render("Container update started.");
+              watchUpdate(result.operation.operation_id);
+              return;
+            }
+            if (refreshed.image_state !== "up_to_date") throw new Error("Unable to check the configured container image. Review changes again.");
           }
           if (versionReview) {
             state.textContent = "Refreshing version information…";
@@ -213,11 +237,10 @@ if (versionLauncher && versionDialog) {
       const version = policy === "pinned" ? (form.elements.version?.value.trim() || minecraft.version || "") : "";
       const params = new URLSearchParams({ csrf, tab: "version", image_tag: imageTag, version_policy: policy, version });
       try {
-        const versionReview = Boolean(form.elements.policy);
         const [plan, candidate, snapshot] = await Promise.all([
           request("/api/minecraft/workspace/settings/plan", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: params }),
           request(statusURL(policy, version)),
-          versionReview ? request("/api/dashboard-status") : Promise.resolve(null),
+          request("/api/dashboard-status"),
         ]);
         showReview(root, form, plan, params, candidate, snapshot?.players);
         state.textContent = "";
@@ -268,19 +291,31 @@ if (versionLauncher && versionDialog) {
         const choices = document.createElement("div");
         choices.className = "version-software-choices";
         const currentSoftware = minecraft.server_type || "paper";
+        let softwareReviewPending = false;
+        const softwareCards = [];
+        const selectSoftware = (target) => {
+          softwareCards.forEach(({ node, type }) => {
+            node.className = node.className.replace(/ is-selected/g, "") + (type === target ? " is-selected" : "");
+            if (node.tagName.toLowerCase() === "button") node.setAttribute("aria-pressed", String(type === target));
+          });
+        };
+        const vanillaWarning = document.createElement("p");
+        vanillaWarning.className = "notice warning";
+        vanillaWarning.textContent = "Requires Reset Minecraft and setup again.";
+        vanillaWarning.hidden = true;
         for (const [target, name, description] of [
           ["paper", "Paper", "Plugins and managed Bedrock cross-play."],
           ["purpur", "Purpur", "Plugins and managed Bedrock cross-play."],
-          ["vanilla", "Vanilla", "Original Minecraft · Java only · no plugins."],
+          ["vanilla", "Vanilla", "Original Minecraft"],
         ]) {
           const isCurrent = target === currentSoftware;
           const selectable = !isCurrent && ["paper", "purpur"].includes(currentSoftware) && ["paper", "purpur"].includes(target);
-          const change = document.createElement(selectable ? "button" : "div");
-          change.className = "version-software-choice server-software-card" + (isCurrent ? " is-current" : selectable ? " secondary" : "");
+          const change = document.createElement(selectable || target === "vanilla" ? "button" : "div");
+          change.className = "version-software-choice server-software-card" + (isCurrent ? " is-current is-selected" : selectable ? " secondary" : "");
           const title = document.createElement("strong");
           title.textContent = name;
           const availability = document.createElement("span");
-          availability.textContent = isCurrent ? "Current" : selectable ? "Available" : "Unavailable";
+          availability.textContent = isCurrent ? "Current" : selectable ? "Switch Available" : "Switch Unavailable";
           const detail = document.createElement("small");
           detail.textContent = description;
           const icon = document.createElement("span");
@@ -294,18 +329,26 @@ if (versionLauncher && versionDialog) {
           const copy = document.createElement("span");
           copy.className = "server-software-copy";
           copy.append(title, availability, detail);
+          if (target === "vanilla") {
+            const javaOnly = document.createElement("small");
+            javaOnly.textContent = "Java only, no plugins";
+            copy.appendChild(javaOnly);
+          }
+          softwareCards.push({ node: change, type: target });
           change.append(icon, copy);
           choices.appendChild(change);
-          if (!isCurrent && !selectable) {
-            change.setAttribute("aria-disabled", "true");
-            const note = document.createElement("small");
-            note.textContent = "Requires Reset Minecraft and setup again.";
-            copy.appendChild(note);
-          }
+          if (selectable || target === "vanilla") change.setAttribute("aria-pressed", String(isCurrent));
+          if (target === "vanilla") {
+            change.type = "button";
+            change.addEventListener("click", () => { vanillaWarning.hidden = false; });
+          } else if (!isCurrent && !selectable) change.setAttribute("aria-disabled", "true");
           if (!selectable) continue;
           change.type = "button";
           change.addEventListener("click", async () => {
-            change.disabled = true;
+            vanillaWarning.hidden = true;
+            if (softwareReviewPending) return;
+            softwareReviewPending = true;
+            selectSoftware(target);
             try {
               const [plan, snapshot] = await Promise.all([request(statusURL("", "", target)), request("/api/dashboard-status")]);
               const review = card("Review server software change");
@@ -347,16 +390,16 @@ if (versionLauncher && versionDialog) {
                 }
               });
               const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "secondary"; cancel.textContent = "Cancel review";
-              cancel.addEventListener("click", () => { review.remove(); change.disabled = false; });
+              cancel.addEventListener("click", () => { review.remove(); softwareReviewPending = false; selectSoftware(currentSoftware); });
               const actions = document.createElement("div");
               actions.className = "action-row version-software-review-actions";
               actions.append(cancel, apply);
               review.appendChild(actions);
               root.appendChild(review);
-            } catch (failure) { state.textContent = failure.message; change.disabled = false; }
+            } catch (failure) { state.textContent = failure.message; softwareReviewPending = false; selectSoftware(currentSoftware); }
           });
         }
-        software.appendChild(choices);
+        software.append(choices, vanillaWarning);
         root.appendChild(software);
         const panel = card("Container updates");
         const form = document.createElement("form");
@@ -367,6 +410,7 @@ if (versionLauncher && versionDialog) {
         const sync = () => { form.querySelector("[data-version-custom]").hidden = channel.value !== "custom"; form.elements.custom_tag.required = channel.value === "custom"; };
         channel.addEventListener("change", sync);
         sync();
+        panel.appendChild(line("Container image", ({ up_to_date: "Current", updates_available: "Update available", not_applicable: "Not applicable" })[status.image_state] || "Unable to check"));
         panel.appendChild(form);
         root.appendChild(panel);
         wireForm(root, form, minecraft);

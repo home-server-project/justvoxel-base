@@ -14,6 +14,7 @@ class Element {
     this.dataset = {};
     this.listeners = {};
     this.checked = false;
+    this.disabled = false;
   }
   append(...children) { this.children.push(...children); }
   appendChild(child) { this.append(child); }
@@ -29,7 +30,7 @@ const statusFor = (candidate, extra = {}) => ({
   crossplay_enabled: false, crossplay_compatible: false,
   update_available: true, stack_state: 'updates_available', plan_fingerprint: 'refreshed', ...extra,
 });
-function review(candidate, { changes = [policyChange], online = 0, refreshed = candidate } = {}) {
+function review(candidate, { changes = [policyChange], online = 0, refreshed = candidate, container = false, planExtra = {} } = {}) {
   const calls = [];
   const context = vm.createContext({
     Boolean, Number, URLSearchParams, csrf: 'csrf', state: {}, updateOperation: '',
@@ -51,11 +52,11 @@ function review(candidate, { changes = [policyChange], online = 0, refreshed = c
   });
   vm.runInContext(reviewSource + '\nglobalThis.showReview = showReview;', context);
   const root = new Element('div');
-  const form = { elements: { policy: {} } };
-  context.showReview(root, form, { changes, restart_required: true }, new URLSearchParams({ version_policy: 'pinned' }), candidate, { online });
-  const apply = root.all().find((element) => element.tag === 'button' && element.textContent === 'Apply changes');
+  const form = { elements: container ? { channel: {} } : { policy: {} } };
+  context.showReview(root, form, { changes, restart_required: true, ...planExtra }, new URLSearchParams({ version_policy: 'pinned' }), candidate, { online });
+  const apply = root.all().find((element) => element.tag === 'button' && ['Apply changes', 'Confirm and apply'].includes(element.textContent));
   const consent = root.all().find((element) => element.tag === 'input');
-  return { root, apply, consent, calls };
+  return { root, apply, consent, calls, state: context.state };
 }
 
 test('same-version mode changes save without starting an update, even with unrelated stack updates available', async () => {
@@ -143,7 +144,8 @@ async function softwareReview(overrides = {}) {
   const plan = { ...statusFor('26.2'), server_supported: true, server_software: 'Purpur', ...overrides };
   const context = vm.createContext({
     Boolean, String, URLSearchParams, csrf: 'csrf', state: {}, target: 'purpur', root, change,
-    status: { server_software: 'Paper' },
+    status: { server_software: 'Paper' }, currentSoftware: 'paper', softwareReviewPending: true,
+    selectSoftware: (target) => { change.selected = target; },
     document: { createElement: (tag) => new Element(tag) },
     card: (title) => Object.assign(new Element('section'), { textContent: title }),
     line: (label, value) => Object.assign(new Element('div'), { textContent: `${label}: ${value}` }),
@@ -223,10 +225,78 @@ test('software confirmation cannot enable an unsafe plan', async () => {
   assert.equal(compatible.apply.disabled, false);
 });
 
-test('software Cancel removes the review and re-enables selection without applying', async () => {
+test('software Cancel removes the review and restores installed selection without applying', async () => {
   const result = await softwareReview();
   await result.cancel.listeners.click();
   assert.equal(result.root.children[0].removed, true);
   assert.equal(result.change.disabled, false);
+  assert.equal(result.change.selected, 'paper');
   assert.ok(!result.calls.some((call) => call.url === '/api/version/workspace/update'));
+});
+
+const channelChange = { field: 'image_tag', label: 'Container channel', before: 'stable', after: 'latest' };
+const imageStatus = (image_state, extra = {}) => statusFor('26.2', { image_state, ...extra });
+
+test('current image and plugin-only updates do not create a container review Apply', () => {
+  for (const status of [imageStatus('up_to_date', { stack_state: 'up_to_date', update_available: false }), imageStatus('up_to_date', { geyser_state: 'updates_available' }), imageStatus('unavailable')]) {
+    const result = review(status, { container: true, changes: [] });
+    assert.equal(result.apply, undefined);
+    assert.ok(!result.root.all().some(node => node.textContent === 'Container image: Update available'));
+  }
+});
+
+test('same-channel rebuilt image reviews and uses the existing update operation without a settings save', async () => {
+  const result = review(imageStatus('updates_available'), { container: true, changes: [] });
+  assert.ok(result.apply);
+  assert.ok(!result.root.all().some(node => node.textContent === 'No changes were found.'));
+  assert.ok(result.root.all().some(node => node.textContent === 'Container image: Update available'));
+  await result.apply.listeners.click();
+  assert.deepEqual(result.calls.filter(call => call.url).map(call => call.url), ['/api/version/workspace/status', '/api/version/workspace/update']);
+  assert.equal(result.calls.find(call => call.url.endsWith('/update')).body.get('plan_fingerprint'), 'refreshed');
+  assert.equal(result.calls.at(-1).watch, 'operation-1');
+});
+
+test('channel change saves then refreshes and applies only when the authoritative image needs maintenance', async () => {
+  for (const after of ['latest', 'custom-tag']) {
+    for (const image_state of ['updates_available', 'up_to_date']) {
+      const result = review(imageStatus('up_to_date'), { container: true, changes: [{ ...channelChange, after }], refreshed: imageStatus(image_state) });
+      assert.ok(result.root.all().some(node => node.textContent?.includes('Applying saves the channel, then re-checks')));
+      await result.apply.listeners.click();
+      const urls = result.calls.filter(call => call.url).map(call => call.url);
+      assert.deepEqual(urls.slice(0, 2), ['/api/minecraft/workspace/settings/apply', '/api/version/workspace/status']);
+      assert.equal(urls.includes('/api/version/workspace/update'), image_state === 'updates_available');
+      if (image_state === 'up_to_date') assert.equal(result.calls.at(-1).message, 'Changes saved.');
+    }
+  }
+});
+
+test('potential container maintenance requires explicit online-player consent', async () => {
+  for (const changes of [[], [channelChange]]) {
+    const result = review(imageStatus(changes.length ? 'up_to_date' : 'updates_available'), { container: true, changes, online: 2, refreshed: imageStatus('updates_available'), planExtra: { confirmation_required: true } });
+    assert.equal(result.apply.disabled, true);
+    assert.equal(result.consent.checked, false);
+    assert.equal(result.consent.role, 'switch');
+    await result.apply.listeners.click();
+    assert.equal(result.calls.length, 0);
+    result.consent.checked = true;
+    result.consent.listeners.change();
+    await result.apply.listeners.click();
+    assert.equal(result.calls.find(call => call.url.endsWith('/update')).body.get('confirm_players'), 'yes');
+  }
+});
+
+test('saved channel with unavailable or unsafe refreshed status stops without retry', async () => {
+  for (const refreshed of [imageStatus('unavailable'), imageStatus('updates_available', { plan_fingerprint: '' }), imageStatus('updates_available', { crossplay_enabled: true, crossplay_compatible: false })]) {
+    const result = review(imageStatus('up_to_date'), { container: true, changes: [channelChange], refreshed });
+    await result.apply.listeners.click();
+    assert.equal(result.calls.filter(call => call.url?.endsWith('/settings/apply')).length, 1);
+    assert.ok(!result.calls.some(call => call.url?.endsWith('/update')));
+    assert.match(result.calls.at(-1).message, /^Changes saved\./);
+  }
+});
+
+test('container status uses image_state and WebUI never implements a direct pull', () => {
+  assert.match(source, /\[status.image_state\]/);
+  assert.ok(source.includes('up_to_date: "Current", updates_available: "Update available"'));
+  assert.ok(!/podman|exec.Command|child_process/.test(source));
 });

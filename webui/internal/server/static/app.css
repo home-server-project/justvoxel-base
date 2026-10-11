@@ -883,7 +883,7 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
 .version-workspace-body .panel{margin:.45rem 0;padding:.7rem}.version-workspace-body .section-heading{margin-bottom:.35rem}
 .version-software-choices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.5rem}
 .version-software-choice{display:grid;gap:.25rem;padding:.7rem;border:1px solid #3b454e;border-radius:10px;background:#11171b}
-.version-software-choice.is-current{border-color:#4f8b69;background:#20382b}.version-software-choice[aria-disabled="true"]{opacity:.65}
+.version-software-choice.is-selected{border-color:#4f8b69;background:#20382b}.version-software-choice[aria-disabled="true"]{opacity:.65}
 .version-software-choice small{color:#aeb8c0}.version-status-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.4rem}
 .version-status-grid>div{display:grid;gap:.15rem;padding:.55rem;border:1px solid #303942;border-radius:8px}.version-status-grid span{color:#aeb8c0;font-size:.75rem}
 .version-workspace-body .action-row{justify-content:flex-end;margin-top:.8rem;padding-top:.7rem;border-top:1px solid #303942}.version-workspace-body .admin-form-grid{gap:.55rem}
@@ -893,7 +893,7 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
 .date-time-automatic{display:flex;align-items:center;justify-content:space-between;gap:1rem}.date-time-switch{appearance:none;flex:none;width:2.25rem;height:1.3rem;margin:0;padding:0;border:1px solid #59646d;border-radius:999px;background:#59646d;cursor:pointer;transition:background .15s ease,border-color .15s ease}.date-time-switch::before{content:"";display:block;width:.9rem;height:.9rem;margin:.13rem;border-radius:50%;background:#fff;box-shadow:0 1px 3px #0005;transition:transform .15s ease}.date-time-switch:checked{border-color:#4f9e6e;background:#4f9e6e}.date-time-switch:checked::before{transform:translateX(.95rem)}.date-time-switch:focus-visible{outline:2px solid #78c99d;outline-offset:3px}
 .date-time-manual{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}.date-time-manual input:disabled{opacity:.5}
 @media(max-width:700px){.version-workspace-dialog{inset:52px .25rem .25rem .25rem!important;width:auto!important;height:calc(100dvh - 52px - .25rem)!important;min-width:0;min-height:0;max-width:none;max-height:calc(100dvh - 52px - .25rem);resize:none}.version-software-choices{grid-template-columns:1fr}}
-@media(prefers-color-scheme:light){.version-workspace-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025}.version-workspace-tabs,.version-software-choice{background:#f7f9fa;border-color:#d9dfe3}.version-software-choice.is-current{background:#e3f1e8}.date-time-panel .setup-timezone-results{background:#fff}}
+@media(prefers-color-scheme:light){.version-workspace-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025}.version-workspace-tabs,.version-software-choice{background:#f7f9fa;border-color:#d9dfe3}.version-software-choice.is-selected{background:#e3f1e8}.date-time-panel .setup-timezone-results{background:#fff}}
 .migration-workspace-dialog{width:min(1280px,calc(100vw - 2rem));min-width:min(1000px,calc(100vw - 2rem))}
 .migration-workspace-content .migration-smb-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.7rem}
 .migration-workspace-content .migration-smb-fields>div{min-width:0}
@@ -1373,7 +1373,7 @@ input[type=checkbox].destructive-confirm-toggle::before{content:none}
 .version-software-choice strong,.setup-server-type strong{font-size:.94rem}
 .version-software-choice span{color:var(--jv-muted);font-size:.75rem;font-weight:400}
 .version-software-choice small,.setup-server-type small{color:var(--jv-muted);font-size:.78rem;font-weight:400;line-height:1.35}
-.version-software-choice.is-current,.setup-server-type:has(input:checked){border-color:var(--jv-success);background:color-mix(in srgb,var(--jv-success) 18%,var(--jv-surface-sunken))}
+.version-software-choice.is-selected,.setup-server-type:has(input:checked){border-color:var(--jv-success);background:color-mix(in srgb,var(--jv-success) 18%,var(--jv-surface-sunken))}
 .version-workspace-body form:has(>.version-selection-row){grid-template-columns:minmax(0,1fr)}
 .version-selection-row{display:flex;align-items:center;gap:var(--jv-space-md);min-width:0;margin-top:var(--jv-space-sm)}
 .version-selection-row>select,.version-selection-row>label{flex:1;min-width:0;margin:0}
@@ -1400,6 +1400,8 @@ input[type=checkbox].destructive-confirm-toggle::before{content:none}
 
 /* Floating panel: the outer footprint stays 48px; workspaces measure its bottom. */
 .app-header.topbar{height:40px;min-height:40px;margin:4px 8px;padding:2px .5rem;top:4px;border:1px solid #303942;border-radius:12px;background:#151a1f;color:#dce7e0;box-shadow:0 4px 16px #0005;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}
+/* Offset desktop padding and border so trigger and panel share the outer edge. */
+@media(min-width:601px){.app-header .control-center{margin-right:calc(-.5rem - 1px)}}
 .app-header .brand-mark{min-height:32px;padding:1px .35rem}
 .app-header .brand-logo{width:28px;height:28px}
 .app-header .control-center-trigger{min-height:32px;height:32px;padding:.3rem .6rem;border-color:transparent}
@@ -1443,7 +1445,7 @@ input[type=checkbox].destructive-confirm-toggle::before{content:none}
 .server-software-card .server-software-copy>span{font-size:.75rem;color:var(--jv-muted)}
 button.server-software-card:hover,label.server-software-card:hover{border-color:var(--jv-accent);border-radius:var(--jv-radius);background:color-mix(in srgb,var(--jv-accent) 8%,var(--jv-surface-sunken))}
 .server-software-card:focus-visible,.server-software-card:has(input:focus-visible){outline:2px solid var(--jv-accent);outline-offset:2px;border-radius:var(--jv-radius)}
-.server-software-card.is-current,.server-software-card:has(input:checked){border-color:var(--jv-success);border-radius:var(--jv-radius);background:color-mix(in srgb,var(--jv-success) 18%,var(--jv-surface-sunken))}
+.server-software-card.is-selected,.server-software-card:has(input:checked){border-color:var(--jv-success);border-radius:var(--jv-radius);background:color-mix(in srgb,var(--jv-success) 18%,var(--jv-surface-sunken))}
 label.server-software-card>input[type=radio]{position:absolute;width:1px;min-width:0;height:1px;min-height:0;margin:0;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 
 /* Login branding keeps the source logo's aspect ratio within the existing card. */

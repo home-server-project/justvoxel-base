@@ -59,7 +59,7 @@ func configuredSettingsFake() *fakeConfigurationAPI {
 	client.configuration.Backup.TimerEnabled = true
 	client.defaults.SystemMemoryMiB = 8192
 	client.defaults.SystemReserveMinimumMiB = 1024
-	client.defaults.SystemReserveRecommendedMiB = 2048
+	client.defaults.SystemReserveRecommendedMiB = 1536
 	client.defaults.JavaMemory = "4G"
 	client.defaults.ContainerMemory = "6G"
 	return client

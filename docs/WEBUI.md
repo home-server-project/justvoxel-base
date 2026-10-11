@@ -75,6 +75,14 @@ A failed first-run rollback uses the Reset Minecraft cleanup helpers to remove g
 
 If setup needs attention during storage rollback, the Administrator can select **Retry recovery** on that operation's progress page. The Management Agent checks the preserved storage transaction before restoring any remaining changes. **Start setup over** stays disabled until recovery succeeds and the operation reaches **Rolled back**. Other attention stages do not offer this retry.
 
+## Server software and container updates
+
+In Version → Server Software, **Current** always identifies the installed software. Selecting Paper or Purpur moves the green frame to the review target; Cancel restores it to the installed server. Vanilla is informational: selecting it explains that switching requires Reset Minecraft and setup again.
+
+Container updates shows the configured image's authoritative state separately from Minecraft and cross-play updates. Leave the current channel selected and choose **Review changes** to review an image update, including a rebuilt Stable or Latest tag. A channel change saves the configuration and then re-checks the image; when an image update is required, Apply continues through the existing reviewed server update with cold backup, safe shutdown, verification, and rollback. Online players require explicit interruption confirmation. A saved configuration or failed update is never automatically retried.
+
+Minecraft memory settings retain a hard minimum of 1 GiB (1024 MiB) outside Minecraft. The recommended headroom warning appears from 1024 through 1535 MiB; at least 1.5 GiB (1536 MiB) clears that warning.
+
 ## Password policy
 
 JustVoxel does not impose its own uppercase/lowercase/digit/symbol formula or a separate hard-coded password length.

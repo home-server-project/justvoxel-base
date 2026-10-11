@@ -12,6 +12,8 @@ Administrators can open **Storage & Backups → Server Migration** in the WebUI.
 
 The WebUI does not mount filesystems, manipulate Minecraft data, execute migration helpers, or implement storage policy directly. Temporary source SMB credentials are supplied only for the current planning or Apply request. Export SMB passwords and fresh-destination backup SMB passwords are Apply-only. They are not stored in reviewed plans, URLs, hidden persistent state, or the operation journal.
 
+After a successful Export, **Done** returns to a fresh Export screen and clears the completed operation from the workspace URL. It keeps the operation journal and diagnostic log. Export success and failure views offer **Logs**, opening System → Logs → Migration and selecting that operation's log when it exists. The log records the reviewed normalized bundle filename, destination, and destination type, and repeats them after successful completion; existing secret and host-identity redaction still applies.
+
 Refreshing or reopening a migration reconnects to the current persistent Agent operation. If Import reaches `needs_attention`, the WebUI exposes the Agent-owned Recovery handoff. Fresh-unconfigured `rolled-back-fresh` recovery is supported. Browser file upload is intentionally outside migration v1; imported data must already be reachable through a supported local, configured-backup, device/USB, NFS, or SMB source.
 
 JustVoxel migration moves the **complete persistent Minecraft server state** to another JustVoxel installation. It is separate from normal JustVoxel Backup/Restore.

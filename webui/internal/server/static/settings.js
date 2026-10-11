@@ -7,7 +7,7 @@ if (memoryPanel) {
   const buttons = Array.from(memoryPanel.querySelectorAll("[data-memory-preset]"));
   const totalMiB = Number(memoryPanel.dataset.systemMemoryMib || 0);
   const minimumReserveMiB = Number(memoryPanel.dataset.minReserveMib || 1024);
-  const recommendedReserveMiB = Number(memoryPanel.dataset.recommendedReserveMib || 2048);
+  const recommendedReserveMiB = Number(memoryPanel.dataset.recommendedReserveMib || 1536);
 
   const parseMemoryMiB = (value) => {
     const match = String(value || "").trim().match(/^([1-9][0-9]*)([mMgG])$/);
@@ -49,7 +49,7 @@ if (memoryPanel) {
       status.textContent = `Not enough memory remains outside Minecraft: about ${formatRemaining(remaining)}. JustVoxel requires at least 1 GiB outside the Minecraft limit; reduce Maximum Minecraft memory before continuing.`;
       status.classList.add("danger");
     } else if (remaining < recommendedReserveMiB) {
-      status.textContent = `Tight memory configuration: about ${formatRemaining(remaining)} remains outside Minecraft. JustVoxel itself typically uses roughly 0.6–1.0 GiB; around 2 GiB gives extra room for cache, backups, updates and temporary spikes.`;
+      status.textContent = `Tight memory configuration: about ${formatRemaining(remaining)} remains outside Minecraft. JustVoxel itself typically uses roughly 0.6–1.0 GiB; recommended 1.5 GiB headroom gives extra room for cache, backups, updates and temporary spikes.`;
       status.classList.add("warning");
     } else {
       status.textContent = `Memory remaining outside Minecraft: about ${formatRemaining(remaining)}. JustVoxel itself typically uses roughly 0.6–1.0 GiB; the rest stays available for Linux cache, backups, updates, management services and temporary workload spikes.`;

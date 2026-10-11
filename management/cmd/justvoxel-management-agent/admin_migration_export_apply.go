@@ -34,6 +34,9 @@ type migrationExportExecutionPlan struct {
 	ExpectedMinecraftState string
 	PlayersConfirmed       bool
 	SMBPassword            string
+	BundleFilename         string
+	TargetDisplay          string
+	DestinationKind        string
 }
 
 func registerAdminMigrationExportRoutes(mux *http.ServeMux, s *server) {
@@ -157,6 +160,9 @@ func (s *server) adminMigrationExportApply(w http.ResponseWriter, r *http.Reques
 			ExpectedMinecraftState: plan.Requirements.MinecraftState,
 			PlayersConfirmed:       request.PlayersConfirmed,
 			SMBPassword:            request.SMBPassword,
+			BundleFilename:         plan.Normalized.Filename,
+			TargetDisplay:          plan.Normalized.TargetDisplay,
+			DestinationKind:        plan.Normalized.Kind,
 		})
 	}
 }

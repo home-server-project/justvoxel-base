@@ -39,7 +39,7 @@ class Element {
     this.custom = new Element("label");
   }
 }
-async function open(currentSoftware) {
+async function open(currentSoftware, imageState = "up_to_date") {
   const content = new Element("div"), state = new Element("span"), launcher = new Element("button");
   const dialog = new Element("dialog");
   const close = new Element("button"), refresh = new Element("button");
@@ -59,7 +59,7 @@ async function open(currentSoftware) {
     if (parsed.pathname === "/api/minecraft/workspace/settings") payload = { minecraft: { server_type: currentSoftware, image_tag: "stable" } };
     else if (parsed.pathname === "/api/version/workspace/status") {
       const target = parsed.searchParams.get("server_type");
-      payload = { server_software: (target || currentSoftware).replace(/^./, c => c.toUpperCase()), selected_candidate: "1.21.8", stack_state: "updates_available", server_supported: true, crossplay_enabled: true, crossplay_compatible: true, plan_fingerprint: "reviewed-" + target };
+      payload = { server_software: (target || currentSoftware).replace(/^./, c => c.toUpperCase()), selected_candidate: "1.21.8", stack_state: "updates_available", server_supported: true, crossplay_enabled: true, crossplay_compatible: true, plan_fingerprint: "reviewed-" + target, image_state: imageState, managed_image_digest: "private-digest" };
     } else if (parsed.pathname === "/api/dashboard-status") payload = { players: { online: 3 } };
     else if (parsed.pathname === "/api/version/workspace/update") {
       assert.equal(options.method, "POST");
@@ -82,6 +82,11 @@ async function open(currentSoftware) {
 function cards(page) { return page.content.all().filter(node => node.className?.split(" ").includes("version-software-choice")); }
 function button(root, text) { return root.all().find(node => node.tagName === "button" && node.textContent === text); }
 (async () => {
+  for (const [state, label] of [["up_to_date", "Current"], ["updates_available", "Update available"], ["unavailable", "Unable to check"], ["not_applicable", "Not applicable"]]) {
+    const page = await open("paper", state);
+    assert.ok(page.content.textContent.includes("Container image " + label));
+    assert.ok(!page.content.textContent.includes("private-digest"));
+  }
   for (const current of ["paper", "purpur", "vanilla"]) {
     const page = await open(current);
     const choices = cards(page);
@@ -90,15 +95,24 @@ function button(root, text) { return root.all().find(node => node.tagName === "b
       const type = choice.children[1].children[0].textContent.toLowerCase();
       const isCurrent = type === current;
       assert.equal(choice.className.includes("is-current"), isCurrent);
-      assert.equal(choice.children[1].children[1].textContent, isCurrent ? "Current" : (current === "vanilla" || type === "vanilla") ? "Unavailable" : "Available");
-      if (!isCurrent && (current === "vanilla" || type === "vanilla")) {
+      assert.equal(choice.className.includes("is-selected"), isCurrent);
+      assert.equal(choice.children[1].children[1].textContent, isCurrent ? "Current" : (current === "vanilla" || type === "vanilla") ? "Switch Unavailable" : "Switch Available");
+      assert.ok(!choice.textContent.includes("Requires Reset"));
+      if (type === "vanilla") {
+        assert.equal(choice.tagName, "button");
+        assert.equal(choice.attributes["aria-disabled"], undefined);
+        assert.deepEqual(choice.children[1].children.slice(2).map(node => node.textContent), ["Original Minecraft", "Java only, no plugins"]);
+        const before = page.calls.length;
+        await choice.events.click();
+        assert.equal(page.calls.length, before);
+        const warning = page.content.all().find(node => node.className === "notice warning" && node.ownText === "Requires Reset Minecraft and setup again.");
+        assert.equal(warning.hidden, false);
+        assert.equal(button(page.content, "Apply server software change"), undefined);
+      } else if (!isCurrent && current === "vanilla") {
         assert.equal(choice.attributes["aria-disabled"], "true");
-        assert.ok(choice.children[1].children.some(node => node.textContent === "Requires Reset Minecraft and setup again."));
         assert.equal(choice.events.click, undefined);
-        assert.equal(choice.tagName, "div");
       } else if (isCurrent) {
         assert.equal(choice.events.click, undefined);
-        assert.ok(!choice.textContent.includes("Requires Reset"));
       }
     }
     assert.ok(!page.content.textContent.includes("Current server software"));
@@ -108,7 +122,17 @@ function button(root, text) { return root.all().find(node => node.tagName === "b
     const selectable = choices.find(choice => choice.children[1].children[0].textContent.toLowerCase() === target);
     assert.equal(selectable.tagName, "button");
     await selectable.events.click();
-    assert.equal(selectable.disabled, true);
+    assert.equal(selectable.disabled, false);
+    assert.equal(selectable.attributes["aria-pressed"], "true");
+    assert.ok(selectable.className.includes("is-selected"));
+    const installed = choices.find(choice => choice.className.includes("is-current"));
+    assert.ok(!installed.className.includes("is-selected"));
+    assert.equal(installed.children[1].children[1].textContent, "Current");
+    assert.equal(page.content.all().find(node => node.ownText === "Requires Reset Minecraft and setup again.").hidden, true);
+    const reviewedCalls = page.calls.length;
+    await selectable.events.click();
+    assert.equal(page.calls.length, reviewedCalls);
+    assert.equal(page.content.all().filter(node => node.ownText === "Review server software change").length, 1);
     assert.ok(page.calls.some(call => new URL(call.url, "http://example").searchParams.get("server_type") === target));
     assert.ok(page.calls.some(call => call.url === "/api/dashboard-status"));
     assert.ok(page.content.textContent.includes("Review server software change"));
@@ -128,6 +152,9 @@ function button(root, text) { return root.all().find(node => node.tagName === "b
     assert.ok(cancel.parent.children.indexOf(cancel) < cancel.parent.children.indexOf(apply));
     cancel.events.click();
     assert.equal(selectable.disabled, false);
+    assert.equal(selectable.attributes["aria-pressed"], "false");
+    assert.ok(!selectable.className.includes("is-selected"));
+    assert.ok(installed.className.includes("is-selected"));
     assert.equal(button(page.content, "Apply server software change"), undefined);
     assert.ok(!page.content.textContent.includes("Review server software change"));
     await selectable.events.click();
