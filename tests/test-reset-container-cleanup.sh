@@ -20,6 +20,8 @@ jv_reset_path_scope() { printf 'unknown\n'; }
 jv_reset_data_scope() { jv_reset_path_scope "$1"; }
 # Factory reset also targets a fixed appliance backup path; leave the host untouched.
 jv_reset_delete_tree_same_filesystem() { :; }
+# Generic mount retirement is covered by the dedicated storage lifecycle tests.
+storage_mount_retire_all() { :; }
 EOF
 
 cat >"${scratch}/bin/podman" <<'EOF'
@@ -44,8 +46,16 @@ EOF
 chmod +x "${scratch}/bin/"*
 
 for mode in minecraft factory; do
-    sed "s@source /usr/libexec/justvoxel/mjust/common.sh@source ${scratch}/common.sh@; /source \/usr\/libexec\/justvoxel\/mjust\/minecraft-reset-common.sh/d" \
+    sed -e "s@source /usr/libexec/justvoxel/mjust/common.sh@source ${scratch}/common.sh@" \
+        -e "s@source /usr/libexec/justvoxel/mjust/admin-storage-actions-common.sh@source ${scratch}/common.sh@" \
+        -e '\@source /usr/libexec/justvoxel/mjust/minecraft-reset-common.sh@d' \
+        -e '\@source /usr/libexec/justvoxel/mjust/storage-mount-ownership.sh@d' \
         "${repo}/mjust/libexec/admin-${mode}-reset-json" >"${scratch}/${mode}-reset"
+
+    if [[ ${mode} == factory ]] && grep -Eq '^[[:space:]]*source[[:space:]]+/usr/libexec/justvoxel/mjust/(admin-storage-actions-common|minecraft-reset-common|storage-mount-ownership)\.sh' "${scratch}/${mode}-reset"; then
+        echo 'ERROR: Factory reset fixture retained an unresolved appliance source.' >&2
+        exit 1
+    fi
 
     for exists_rc in 1 0 125; do
         root="${scratch}/${mode}-${exists_rc}"
