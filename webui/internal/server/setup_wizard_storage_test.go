@@ -97,7 +97,7 @@ func TestSetupSameDiskWarningAppearsOnlyOnBackupsStep(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := string(markup)
-	backupsStart := strings.Index(source, "{{else if eq .CurrentStep 6}}")
+	backupsStart := strings.Index(source, "{{else if eq .CurrentStep 5}}")
 	if backupsStart < 0 {
 		t.Fatal("Backups step start is missing")
 	}
@@ -123,9 +123,6 @@ func advanceToStorage(t *testing.T, app *App) {
 	if rr := saveResourcesStep(t, app, validResourceValues()); rr.Code != http.StatusSeeOther {
 		t.Fatalf("resources save returned %d: %s", rr.Code, rr.Body.String())
 	}
-	if rr := saveVersionStep(t, app, validConnectionValues()); rr.Code != http.StatusSeeOther {
-		t.Fatalf("version save returned %d: %s", rr.Code, rr.Body.String())
-	}
 
 }
 
@@ -144,9 +141,9 @@ func TestSetupWizardStorageStepShowsInternalDiskBrowserAndExcludesUSB(t *testing
 	}
 	body := page.Body.String()
 	for _, want := range []string{
-		"<h2>Storage</h2>", "Use JustVoxel system storage", "Use an existing local filesystem / partition", "/dev/vda4", "/dev/vdb1", "/dev/vdb2",
+		"<h2>Storage</h2>", "Use JustVoxel system storage", "Use another internal disk", "/dev/vda4", "/dev/vdb1", "/dev/vdb2",
 		"Samsung SSD", "ext4", "Unallocated",
-		"External drives are not offered for Minecraft data", "/static/setup-storage.js",
+		"External drives are unavailable for Minecraft data", "/static/setup-storage.js",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("storage page missing %q: %s", want, body)
@@ -200,7 +197,7 @@ func TestSetupWizardProtectedFormattedPartitionsRemainDetailsOnly(t *testing.T) 
 				if !strings.Contains(card, "data-storage-partition") || strings.Contains(card, step.marker) == partition.protected {
 					t.Fatalf("partition %s details/selection eligibility incorrect: %s", partition.path, card)
 				}
-				if partition.protected && (!strings.Contains(card, `data-system="Yes"`) || !strings.Contains(card, "Protected")) {
+				if partition.protected && (!strings.Contains(card, `data-system="Yes"`) || !strings.Contains(card, "System partition")) {
 					t.Fatalf("protected partition lost its status: %s", card)
 				}
 			}
@@ -293,11 +290,11 @@ func setupWizardModalStorageMarkup(t *testing.T, app *App) string {
 			t.Fatalf("wizard regression: %q", forbidden)
 		}
 	}
-	if strings.Count(markup, `data-storage-create-dialog`) != 1 || strings.Count(markup, `data-storage-action-dialog`) != 1 || strings.Count(markup, `class="setup-number"`) != 7 {
-		t.Fatal("Advanced setup must retain seven cards and shared focused reviews")
+	if strings.Count(markup, `data-storage-create-dialog`) != 1 || strings.Count(markup, `data-storage-action-dialog`) != 1 || strings.Count(markup, `class="setup-number"`) != 6 {
+		t.Fatal("Advanced setup must retain six cards and shared focused reviews")
 	}
 	for _, name := range []string{"detail", "free-detail"} {
-		if !strings.Contains(markup, `class="storage-detail-dialog setup-storage-operation" data-storage-`+name+`-dialog`) || strings.Contains(markup, `<section class="setup-storage-operation" data-storage-`+name+`-dialog`) {
+		if !strings.Contains(markup, `class="storage-detail-dialog" data-storage-`+name+`-dialog`) || strings.Contains(markup, `<section class="setup-storage-operation" data-storage-`+name+`-dialog`) {
 			t.Fatalf("%s details must use a real modal dialog", name)
 		}
 	}
@@ -388,7 +385,7 @@ func TestSetupWizardBackupStepSupportsLocalNFSAndSMBWithoutPasswordDraft(t *test
 			t.Fatalf("backup page missing %q: %s", want, body)
 		}
 	}
-	usbCardStart := strings.Index(body, `data-setup-disk="/dev/vdd"`)
+	usbCardStart := strings.Index(body, `data-storage-disk="vdd"`)
 	if usbCardStart < 0 {
 		t.Fatal("backup page must offer the USB physical disk for selection")
 	}

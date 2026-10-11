@@ -52,7 +52,7 @@ func (a *App) systemWorkspaceDateTimeApply(w http.ResponseWriter, r *http.Reques
 		writeSystemWorkspaceError(w, http.StatusBadRequest, "Could not read date and time settings.")
 		return
 	}
-	request := api.AdminDateTimeChange{Timezone: strings.TrimSpace(r.FormValue("timezone")), Automatic: r.FormValue("automatic") == "on"}
+	request := api.AdminDateTimeChange{TimeFormat: r.FormValue("time_format"), DateFormat: r.FormValue("date_format"), Timezone: strings.TrimSpace(r.FormValue("timezone")), Automatic: r.FormValue("automatic") == "on"}
 	if !request.Automatic {
 		request.Date, request.Time = r.FormValue("date"), r.FormValue("time")
 	}

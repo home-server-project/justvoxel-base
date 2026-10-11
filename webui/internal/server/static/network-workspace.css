@@ -93,7 +93,7 @@
 .network-ethernet-form{margin-top:.5rem;padding-top:.5rem;border-top:1px solid var(--jv-border)}
 .network-workspace-content :is(.network-connect-panel,.network-ethernet-form) label{display:grid;gap:.2rem;min-width:0;margin:0;font-size:.8rem;font-weight:700}
 .network-workspace-content :is(.network-connect-panel,.network-ethernet-form) :is(input:not([type="checkbox"]),select){width:100%;min-width:0;min-height:34px;margin:0;padding:.38rem .55rem}
-.network-workspace-content .network-ethernet-form .toggle-line{display:flex;align-items:center;gap:.5rem;grid-column:1/-1}
+.network-workspace-content .network-ethernet-form .toggle-line{display:flex;align-items:center;justify-content:flex-end;gap:.5rem;grid-column:1/-1}
 .network-ethernet-form input[type="checkbox"]{width:auto;margin:0}
 .network-ethernet-form .state-text,.network-connect-hint{grid-column:1/-1;margin:0;font-size:.78rem;line-height:1.4;color:var(--jv-muted)}
 .network-connect-password{grid-column:1/-1}
@@ -137,3 +137,5 @@
 .network-health-heading>button{margin-left:auto}
 .network-troubleshoot .network-device-card>.state-text{margin:.5rem 0 0;font-size:.8rem;line-height:1.4;color:var(--jv-muted)}
 @media(max-width:700px){.network-workspace-dialog{top:var(--jv-workspace-top-inset)!important}}
+
+.network-provider-card [data-action="activate"]{margin-left:auto}

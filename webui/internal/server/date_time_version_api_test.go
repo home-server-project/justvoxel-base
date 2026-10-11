@@ -20,6 +20,7 @@ type fakeDateTimeVersionAPI struct {
 func (f *fakeDateTimeVersionAPI) Session(ctx context.Context, session string) (api.SessionInfo, error) {
 	identity, err := f.fakeAPI.Session(ctx, session)
 	identity.Role = f.role
+	identity.TimeFormat, identity.DateFormat = "24", "dmy"
 	return identity, err
 }
 
@@ -29,7 +30,7 @@ func (f *fakeDateTimeVersionAPI) AdminDateTime(_ context.Context, _ string) (api
 
 func (f *fakeDateTimeVersionAPI) AdminDateTimeApply(_ context.Context, _ string, change api.AdminDateTimeChange) (api.AdminDateTimeState, error) {
 	f.dateWrites++
-	return api.AdminDateTimeState{Timezone: change.Timezone, Automatic: change.Automatic}, nil
+	return api.AdminDateTimeState{Timezone: change.Timezone, Automatic: change.Automatic, TimeFormat: change.TimeFormat, DateFormat: change.DateFormat}, nil
 }
 
 func (f *fakeDateTimeVersionAPI) AdminVersionStatus(_ context.Context, _, policy, version, serverType string) (api.AdminVersionStatus, error) {
@@ -73,5 +74,31 @@ func TestDateTimeAndVersionWorkspaceRequireAdministrator(t *testing.T) {
 		if !strings.Contains(rr.Body.String(), want) {
 			t.Fatalf("version missing %s: %s", want, rr.Body.String())
 		}
+	}
+}
+
+func TestSharedDateTimeFormatForEveryRole(t *testing.T) {
+	for _, role := range []string{"administrator", "operator", "viewer"} {
+		t.Run(role, func(t *testing.T) {
+			client := &fakeDateTimeVersionAPI{fakeAPI: &fakeAPI{}, role: role}
+			app, err := New(client, Config{ManagementAPI: "v1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rr := httptest.NewRecorder()
+			app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/api/session-info", ""))
+			if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"time_format":"24"`) || !strings.Contains(rr.Body.String(), `"date_format":"dmy"`) {
+				t.Fatalf("shared format: %d %s", rr.Code, rr.Body.String())
+			}
+			rr = httptest.NewRecorder()
+			app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "http://example/api/system/workspace/date-time", "csrf=csrf-token&timezone=UTC&automatic=on&time_format=12&date_format=mdy"))
+			if role != "administrator" {
+				if rr.Code != http.StatusForbidden || client.dateWrites != 0 {
+					t.Fatalf("unauthorized mutation: %d, writes=%d", rr.Code, client.dateWrites)
+				}
+			} else if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"time_format":"12"`) || !strings.Contains(rr.Body.String(), `"date_format":"mdy"`) {
+				t.Fatalf("format apply: %d %s", rr.Code, rr.Body.String())
+			}
+		})
 	}
 }

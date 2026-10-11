@@ -7,6 +7,8 @@ import (
 )
 
 type SessionInfo struct {
+	TimeFormat string `json:"time_format"`
+	DateFormat string `json:"date_format"`
 	Username   string `json:"username"`
 	Role       string `json:"role"`
 	AuthSource string `json:"auth_source"`

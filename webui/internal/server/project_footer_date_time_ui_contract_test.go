@@ -162,7 +162,6 @@ func TestProjectFooterAndDateTimeUIContracts(t *testing.T) {
 	assertRule(".setup-body .setup-wizard-panel .setup-form>.setup-step-content", "display:flex", "gap:.42rem", "min-width:0", "overflow:visible")
 	assertRule(".setup-body .setup-step-panel .setup-form>.setup-step-actions", "position:static", "margin-top:.7rem")
 	assertRule(".setup-body .setup-wizard-panel .setup-form>.setup-step-actions", "flex:none", "margin-top:.7rem")
-	assertRule(".setup-wizard-panel .storage-disk-grid,.setup-wizard-panel .storage-partition-grid", "max-height:none", "overflow:visible")
 	assertRule(".setup-body .setup-wizard-panel .setup-form>.setup-step-content", "display:contents")
 	for _, rule := range regexp.MustCompile(`([^{}]+)\{([^{}]*)\}`).FindAllStringSubmatch(setupCSS+read("static/setup-review.css"), -1) {
 		selector, declarations := strings.TrimSpace(rule[1]), rule[2]

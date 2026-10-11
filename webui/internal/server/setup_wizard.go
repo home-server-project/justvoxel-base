@@ -26,7 +26,6 @@ const (
 	setupServerStep = iota + 1
 	setupCrossplayStep
 	setupMemoryStep
-	setupVersionStep
 	setupStorageStep
 	setupBackupsStep
 	setupReviewStep
@@ -119,6 +118,8 @@ type setupWizardPageData struct {
 	Filesystems              []setupFilesystemView
 	StorageDisks             []setupStorageDiskView
 	BackupDisks              []setupStorageDiskView
+	StorageBrowser           storageBrowserPageData
+	BackupBrowser            storageBrowserPageData
 	ExternalStorageCount     int
 	SameDiskWarning          string
 	Defaults                 api.AdminSetupDefaults
@@ -129,9 +130,8 @@ type setupWizardPageData struct {
 
 var setupWizardSteps = []setupWizardStepView{
 	{Number: setupServerStep, Name: "Server", Description: "Choose server software, welcome message, game mode and player limit."},
-	{Number: setupCrossplayStep, Name: "Cross-play", Description: "Choose Bedrock cross-play and connection ports."},
+	{Number: setupCrossplayStep, Name: "Cross-play", Description: "Choose Bedrock cross-play, connection ports, server updates and Minecraft version."},
 	{Number: setupMemoryStep, Name: "Memory", Description: "Choose how much system memory Minecraft may use."},
-	{Number: setupVersionStep, Name: "Version", Description: "Choose container updates and the Minecraft game version; check Bedrock compatibility."},
 	{Number: setupStorageStep, Name: "Storage", Description: "Choose where Minecraft worlds, configuration and server data will live."},
 	{Number: setupBackupsStep, Name: "Backups", Description: "Choose backup location, retention and automatic backup schedule."},
 	{Number: setupReviewStep, Name: "Review", Description: "Review the final setup plan and accept the Minecraft EULA before anything is applied."},
@@ -144,7 +144,6 @@ func (a *App) registerSetupWizardRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /setup/server", a.setupWizardSaveServer)
 	mux.HandleFunc("POST /setup/connections", a.setupWizardSaveConnections)
 	mux.HandleFunc("POST /setup/resources", a.setupWizardSaveResources)
-	mux.HandleFunc("POST /setup/version", a.setupWizardSaveVersion)
 	mux.HandleFunc("GET /setup/version-preview", a.setupWizardVersionPreview)
 	mux.HandleFunc("POST /setup/navigate", a.setupWizardNavigate)
 	mux.HandleFunc("POST /setup/cancel", a.setupWizardCancel)
@@ -161,7 +160,7 @@ func (a *App) setupWizardVersionPreview(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	draft, exists := firstRunSetupDrafts.get(a, session)
-	if !exists || !draft.Started || draft.CurrentStep != setupVersionStep {
+	if !exists || !draft.Started || draft.CurrentStep != setupCrossplayStep {
 		http.Error(w, "Version setup is unavailable", http.StatusConflict)
 		return
 	}
@@ -170,7 +169,11 @@ func (a *App) setupWizardVersionPreview(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Version information is unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	status, err := client.AdminSetupVersionPreview(r.Context(), session, r.URL.Query().Get("policy"), r.URL.Query().Get("version"), draft.Server.BedrockEnabled, draft.Minecraft.ServerType)
+	bedrock := draft.Server.BedrockEnabled
+	if r.URL.Query().Has("bedrock_enabled") {
+		bedrock = r.URL.Query().Get("bedrock_enabled") == "on" && recommendedServerSupportsBedrock(draft.Minecraft.ServerType)
+	}
+	status, err := client.AdminSetupVersionPreview(r.Context(), session, r.URL.Query().Get("policy"), r.URL.Query().Get("version"), bedrock, draft.Minecraft.ServerType)
 	if err != nil {
 		http.Error(w, "Version information is unavailable", http.StatusServiceUnavailable)
 		return
@@ -200,12 +203,12 @@ func (a *App) setupWizardPage(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case !draft.Server.Complete:
 			draft.CurrentStep = setupServerStep
-		case !draft.Minecraft.ConnectionsComplete:
+		case !draft.Minecraft.ConnectionsComplete || !draft.Minecraft.VersionComplete:
 			draft.CurrentStep = setupCrossplayStep
 		case !draft.Minecraft.ResourcesComplete:
 			draft.CurrentStep = setupMemoryStep
-		case !draft.Minecraft.VersionComplete || !draft.Minecraft.Complete:
-			draft.CurrentStep = setupVersionStep
+		case !draft.Minecraft.Complete:
+			draft.CurrentStep = setupCrossplayStep
 		case !draft.Storage.Complete:
 			draft.CurrentStep = setupStorageStep
 		default:
@@ -410,6 +413,9 @@ func (a *App) setupWizardSaveConnections(w http.ResponseWriter, r *http.Request)
 	draft.Server.BedrockEnabled = r.FormValue("bedrock_enabled") == "on"
 	draft.Minecraft.JavaPort = strings.TrimSpace(r.FormValue("java_port"))
 	draft.Minecraft.BedrockPort = strings.TrimSpace(r.FormValue("bedrock_port"))
+	draft.Minecraft.ImageTag = strings.TrimSpace(r.FormValue("image_tag"))
+	draft.Minecraft.VersionPolicy = strings.TrimSpace(r.FormValue("version_policy"))
+	draft.Minecraft.Version = strings.TrimSpace(r.FormValue("version"))
 	draft.Minecraft.ConnectionsComplete = false
 	draft.Minecraft.VersionComplete = false
 	draft.Minecraft.Complete = false
@@ -424,7 +430,7 @@ func (a *App) setupWizardSaveConnections(w http.ResponseWriter, r *http.Request)
 		http.Redirect(w, r, "/setup", http.StatusSeeOther)
 		return
 	}
-	if err := validateSetupConnectionDraft(draft); err != nil {
+	if err := a.validateSetupCrossplay(r.Context(), session, draft); err != nil {
 		if !recommendedServerSupportsBedrock(draft.Minecraft.ServerType) {
 			draft.Server.BedrockEnabled = false
 		}
@@ -435,6 +441,10 @@ func (a *App) setupWizardSaveConnections(w http.ResponseWriter, r *http.Request)
 		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
 		return
 	}
+	if draft.Minecraft.VersionPolicy != "pinned" {
+		draft.Minecraft.Version = ""
+	}
+	draft.Minecraft.VersionComplete = true
 	draft.Minecraft.ConnectionsComplete = true
 	draft.Minecraft.Complete = draft.Minecraft.ResourcesComplete && draft.Minecraft.VersionComplete
 	draft.CurrentStep = setupMemoryStep
@@ -479,49 +489,10 @@ func (a *App) setupWizardSaveResources(w http.ResponseWriter, r *http.Request) {
 	}
 	draft.Minecraft.ResourcesComplete = true
 	draft.Minecraft.Complete = draft.Minecraft.ConnectionsComplete && draft.Minecraft.VersionComplete
-	draft.CurrentStep = setupVersionStep
+	draft.CurrentStep = setupStorageStep
 	firstRunSetupReviews.delete(a, session)
 	firstRunSetupDrafts.save(a, session, draft)
 	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "resource settings saved", draft)
-	http.Redirect(w, r, "/setup", http.StatusSeeOther)
-}
-
-func (a *App) setupWizardSaveVersion(w http.ResponseWriter, r *http.Request) {
-	session, client, identity, ok := a.setupWizardRequest(w, r, true)
-	if !ok {
-		return
-	}
-	draft, exists := firstRunSetupDrafts.get(a, session)
-	if !exists || !draft.Started {
-		http.Redirect(w, r, "/setup", http.StatusSeeOther)
-		return
-	}
-	draft.CurrentStep = setupVersionStep
-	draft.Minecraft.ImageTag = strings.TrimSpace(r.FormValue("image_tag"))
-	draft.Minecraft.VersionPolicy = strings.TrimSpace(r.FormValue("version_policy"))
-	draft.Minecraft.Version = strings.TrimSpace(r.FormValue("version"))
-	draft.Minecraft.VersionComplete = false
-	draft.Minecraft.Complete = false
-	firstRunSetupReviews.delete(a, session)
-	if r.FormValue("direction") == "back" {
-		draft.CurrentStep = setupMemoryStep
-	} else {
-		if err := a.validateSetupCrossplay(r.Context(), session, draft); err != nil {
-			firstRunSetupDrafts.save(a, session, draft)
-			a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "version settings rejected", draft)
-			w.WriteHeader(http.StatusBadRequest)
-			a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
-			return
-		}
-		if draft.Minecraft.VersionPolicy != "pinned" {
-			draft.Minecraft.Version = ""
-		}
-		draft.Minecraft.VersionComplete = true
-		draft.Minecraft.Complete = draft.Minecraft.ConnectionsComplete && draft.Minecraft.ResourcesComplete
-		draft.CurrentStep = setupStorageStep
-	}
-	firstRunSetupDrafts.save(a, session, draft)
-	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "version settings saved", draft)
 	http.Redirect(w, r, "/setup", http.StatusSeeOther)
 }
 
@@ -602,7 +573,7 @@ func (a *App) renderSetupWizard(w http.ResponseWriter, identity api.SessionInfo,
 		for i := range steps {
 			steps[i].Active = steps[i].Number == draft.CurrentStep
 			steps[i].Complete = steps[i].Number < draft.CurrentStep
-			steps[i].Visited = steps[i].Number <= draft.HighestStep
+			steps[i].Visited = steps[i].Number < draft.CurrentStep
 			if steps[i].Active {
 				current = steps[i]
 			}
@@ -620,6 +591,7 @@ func (a *App) renderSetupWizard(w http.ResponseWriter, identity api.SessionInfo,
 		CSRF: csrf, Identity: identity, Started: draft.Started, CurrentStep: draft.CurrentStep,
 		Current: current, Steps: steps, Error: errorMessage,
 		Server: draft.Server, Minecraft: draft.Minecraft, Storage: draft.Storage, Backups: draft.Backups,
+		StorageBrowser: setupStorageBrowserData(draft, csrf, false), BackupBrowser: setupStorageBrowserData(draft, csrf, true),
 		MinecraftFilesystems: minecraftFilesystems, Filesystems: setupFilesystemViews(draft.Inventory), StorageDisks: storageDisks, BackupDisks: setupBackupDiskViews(draft.Inventory),
 		ExternalStorageCount: externalStorageCount, SameDiskWarning: setupSameDiskWarning(draft), Defaults: draft.Defaults,
 		SystemMemory:             formatMemoryMiB(draft.Defaults.SystemMemoryMiB),
@@ -781,7 +753,7 @@ func validateSetupResources(minecraft setupMinecraftDraft, defaults api.AdminSet
 }
 
 func validateSetupConnections(minecraft setupMinecraftDraft) error {
-	if _, err := parseSetupPort(minecraft.JavaPort, "Minecraft Java port"); err != nil {
+	if _, err := parseSetupPort(minecraft.JavaPort, "Minecraft Java TCP port"); err != nil {
 		return err
 	}
 	if _, err := parseSetupPort(minecraft.BedrockPort, "Bedrock UDP port"); err != nil {
@@ -813,7 +785,7 @@ func validateSetupMinecraft(minecraft setupMinecraftDraft, defaults api.AdminSet
 
 func validateSetupVersion(minecraft setupMinecraftDraft) error {
 	if !setupImageTagPattern.MatchString(minecraft.ImageTag) {
-		return errors.New("Minecraft container channel or tag is invalid.")
+		return errors.New("Server update channel or tag is invalid.")
 	}
 	switch minecraft.VersionPolicy {
 	case "recommended":
@@ -959,7 +931,7 @@ func (s *setupDraftStore) navigateTo(app *App, session, direction string, target
 			draft.CurrentStep--
 		}
 	case "jump":
-		if target < 1 || target > draft.HighestStep || target > len(setupWizardSteps) {
+		if target < 1 || target >= draft.CurrentStep || target > len(setupWizardSteps) {
 			return false
 		}
 		previousStep := draft.CurrentStep

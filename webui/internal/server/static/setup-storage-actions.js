@@ -29,9 +29,9 @@
     const oldMount = current.querySelector('[data-setup-storage-mount], [data-setup-backup-mount]')?.value;
     const oldChoice = selectableChoices(current).find(button => button.dataset.device === oldDevice);
     const nextChoice = selectableChoices(replacement).find(button => button.dataset.device === oldDevice);
-    const oldDisk = oldChoice?.closest('[data-setup-disk-partitions]')?.dataset.setupDiskPartitions;
-    const nextDisk = nextChoice?.closest('[data-setup-disk-partitions]')?.dataset.setupDiskPartitions;
-    const diskIdentity = (root, disk) => [...root.querySelectorAll('[data-setup-disk]')].find(button => button.dataset.setupDisk === disk)?.dataset.diskIdentity;
+    const oldDisk = oldChoice?.closest('[data-storage-partitions]')?.dataset.storagePartitions;
+    const nextDisk = nextChoice?.closest('[data-storage-partitions]')?.dataset.storagePartitions;
+    const diskIdentity = (root, disk) => [...root.querySelectorAll('[data-storage-disk]')].find(button => button.dataset.storageDisk === disk)?.dataset.diskIdentity;
     let available = Boolean(nextChoice && oldChoice?.dataset.uuid && oldChoice.dataset.uuid === nextChoice.dataset.uuid && oldDisk === nextDisk && diskIdentity(current, oldDisk) === diskIdentity(replacement, nextDisk));
     let selectionError = '';
     if (available) try {
@@ -62,13 +62,13 @@
     available = available && latestDevice === oldDevice && latestMount === oldMount;
     saved = snapshot();
     restore();
-    const selectedDisk = current.querySelector('[data-setup-disk][aria-pressed="true"]')?.dataset.setupDisk;
+    const selectedDisk = current.querySelector('[data-storage-disk][aria-pressed="true"]')?.dataset.storageDisk;
     const lostSelection = latestDevice && !available;
     if (lostSelection) {
       replacement.querySelectorAll('[data-setup-storage-device], [data-setup-storage-mount], [data-setup-storage-path], [data-setup-backup-device], [data-setup-backup-mount], [data-setup-backup-path]').forEach(field => { field.value = ''; });
     }
     current.replaceWith(replacement);
-    [...replacement.querySelectorAll('[data-setup-disk]')].forEach(button => button.setAttribute('aria-pressed', String(button.dataset.setupDisk === selectedDisk)));
+    [...replacement.querySelectorAll('[data-storage-disk]')].forEach(button => button.setAttribute('aria-pressed', String(button.dataset.storageDisk === selectedDisk)));
     window.JustVoxelSetupStorage.init(replacement.parentElement);
     restore(true);
     const notice = document.querySelector('[data-setup-inventory-error]');
@@ -78,7 +78,7 @@
       notice.setAttribute('role', lostSelection ? 'alert' : 'status');
       notice.textContent = lostSelection ? [successMessage, selectionError, 'The previous partition selection was cleared. Choose another partition or system storage, or open the partition details to try verification again.'].filter(Boolean).join(' ') : successMessage;
     }
-    [...replacement.querySelectorAll('[data-setup-disk]')].find(button => button.dataset.setupDisk === selectedDisk)?.click();
+    [...replacement.querySelectorAll('[data-storage-disk]')].find(button => button.dataset.storageDisk === selectedDisk)?.click();
   }
   function init(root = document) {
     root.querySelectorAll(formSelector).forEach(current => {

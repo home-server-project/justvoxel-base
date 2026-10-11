@@ -183,7 +183,7 @@ if (versionPolicy && versionInput && specificVersionField) {
     const version = policy === "pinned" ? versionInput.value.trim() : "";
     if (policy === "pinned" && !version) { preview.textContent = "Enter a Minecraft version to check availability."; return; }
     try {
-      const response = await fetch("/setup/version-preview?" + new URLSearchParams({ policy, version }), { credentials: "same-origin", cache: "no-store" });
+      const response = await fetch("/setup/version-preview?" + new URLSearchParams({ policy, version, bedrock_enabled: form?.querySelector("[data-bedrock-toggle]")?.checked ? "on" : "off" }), { credentials: "same-origin", cache: "no-store" });
       if (!response.ok) throw new Error();
       const status = await response.json();
       if (ticket === sequence) show(status, policy);

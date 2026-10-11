@@ -1070,7 +1070,7 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
 .system-users-view .user-actions-grid label{font-size:.76rem}
 .system-users-view .user-actions-grid select{margin-top:.12rem}
 .system-users-view .user-details{margin-top:.4rem;padding-top:.4rem}
-.system-security-view{gap:.5rem}
+.system-security-view{gap:.5rem;width:min(600px,100%);margin-inline:auto}
 .system-security-pane{max-width:900px}
 .system-security-form{grid-template-columns:minmax(0,1fr);align-items:start;gap:var(--jv-space-sm);max-width:600px}
 .system-security-form button[type="submit"]{grid-column:1/-1}
@@ -1452,23 +1452,27 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 .login-brand>img{display:block;width:min(320px,100%);height:auto;margin-inline:auto}
 
 /* System settings use the same framed workspace panels and compact actions. */
-.system-user-menu.storage-action-menu summary{width:auto;min-height:34px;padding:.4rem .75rem;font-size:.85rem;font-weight:700;line-height:1.2}
-.system-security-heading h2{margin:.15rem 0 .3rem;font-size:1.4rem}
+.system-user-menu.storage-action-menu summary{width:max-content;min-height:34px;padding:.4rem .75rem;font-size:.85rem;font-weight:700;line-height:1.2}
+.system-security-heading{display:flex;align-items:baseline;gap:.4rem}
+.system-security-heading h2{margin:0;font-size:.98rem}
+.system-security-heading :is(h2,.eyebrow){white-space:nowrap}
 .system-security-heading .eyebrow,.system-security-pane .eyebrow{color:var(--jv-success);font-size:.7rem;margin:0 0 .2rem}
-.system-workspace-content .system-security-pane{width:100%;max-width:760px;padding:1rem;border:1px solid var(--jv-border-strong);border-radius:var(--jv-radius);background:var(--jv-surface-sunken)}
+.system-workspace-content .system-security-pane{width:100%;max-width:600px;padding:1rem;border:1px solid var(--jv-border-strong);border-radius:var(--jv-radius);background:var(--jv-surface-sunken)}
 .system-security-pane-heading h3{color:var(--jv-text);font-size:1.2rem}
 .system-security-status{display:inline-flex;width:fit-content;max-width:100%;padding:.35rem .55rem;margin:.1rem 0 .6rem}
-.system-security-form{width:100%;max-width:600px;gap:.65rem}
+.system-security-form{width:100%;max-width:380px;gap:.65rem}
 .system-security-form button[type=submit]{justify-self:end;min-height:36px;padding:.5rem .85rem}
-.date-time-panel{max-width:680px;padding:.8rem}
+.system-workspace-content .date-time-panel{width:min(520px,100%);max-width:520px;margin-inline:auto;padding:.8rem}
 .date-time-panel .system-action-dialog-content{padding:0;gap:.4rem}
 .date-time-panel :is(h2,h3,p){margin:.15rem 0}
-.topbar-display-preferences{margin-bottom:.7rem;padding-bottom:.7rem;border-bottom:1px solid var(--jv-border)}
-.topbar-display-preferences h3{font-size:1rem}
-.topbar-display-preferences .eyebrow{color:var(--jv-success);font-size:.7rem}
-.topbar-display-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.7rem}
+.date-time-format-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.7rem}
 .date-time-panel label{margin:.3rem 0}
 .wallpaper-panel .action-row{display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:.55rem;margin:.65rem 0 0}
 .wallpaper-panel .action-row button{width:auto;min-height:36px;padding:.5rem .85rem;font-size:.85rem;font-weight:700;line-height:1.2;margin:0}
 .wallpaper-panel .action-row [data-wallpaper-reset]{margin-right:auto}
-@media(max-width:430px){.topbar-display-fields{grid-template-columns:1fr}.system-workspace-content .system-security-pane{padding:.7rem}}
+@media(max-width:430px){.date-time-format-fields{grid-template-columns:1fr}.system-workspace-content .system-security-pane{padding:.7rem}}
+
+.system-users-table th:last-child,.system-users-table td:last-child{text-align:center}
+.system-users-table .system-user-menu{display:inline-block;width:max-content;max-width:100%;margin:0 auto;text-align:left}
+/* Match the existing Control Center tile text size (.control-tile strong) without changing geometry. */
+:is(button,.button-link):not(.control-icon-button,.workspace-header-close,.password-reveal-button,.quick-look-handle):not([class*="-close"]):not(:has(>svg:only-child)),.system-user-menu>summary{font-size:.84rem!important}

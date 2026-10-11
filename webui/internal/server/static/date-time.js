@@ -2,15 +2,6 @@ const dateTimePanel = document.querySelector("[data-date-time-panel]");
 if (dateTimePanel) {
   const timeFormat = dateTimePanel.querySelector("[data-topbar-time-format]");
   const dateFormat = dateTimePanel.querySelector("[data-topbar-date-format]");
-  const display = window.JustVoxelClockDisplay;
-  if (display && timeFormat && dateFormat) {
-    const preferences = display.read();
-    timeFormat.value = preferences.time;
-    dateFormat.value = preferences.date;
-    const saveDisplay = () => display.save({ time: timeFormat.value, date: dateFormat.value });
-    timeFormat.addEventListener("change", saveDisplay);
-    dateFormat.addEventListener("change", saveDisplay);
-  }
   const form = dateTimePanel.querySelector("[data-date-time-form]");
   const timezone = form.elements.timezone;
   const automatic = form.elements.automatic;
@@ -38,6 +29,9 @@ if (dateTimePanel) {
     const response = await fetch("/api/system/workspace/date-time", { credentials: "same-origin", cache: "no-store" });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "Date and time are unavailable.");
+    timeFormat.value = payload.time_format;
+    dateFormat.value = payload.date_format;
+    window.JustVoxelClockDisplay?.update(payload);
     timezone.value = payload.timezone;
     canonical.textContent = payload.timezone;
     automatic.checked = Boolean(payload.automatic);
@@ -88,7 +82,7 @@ if (dateTimePanel) {
       error.hidden = false;
       return;
     }
-    const body = new URLSearchParams({ csrf, timezone: timezone.value, automatic: automatic.checked ? "on" : "off" });
+    const body = new URLSearchParams({ csrf, time_format: timeFormat.value, date_format: dateFormat.value, timezone: timezone.value, automatic: automatic.checked ? "on" : "off" });
     if (!automatic.checked && (date.value !== loadedDate || time.value !== loadedTime)) { body.set("date", date.value); body.set("time", time.value); }
     const submit = form.querySelector('[type="submit"]');
     submit.disabled = true;
@@ -96,6 +90,7 @@ if (dateTimePanel) {
       const response = await fetch("/api/system/workspace/date-time", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Date and time could not be changed.");
+      window.JustVoxelClockDisplay?.update(payload);
       updateClockZone(payload.timezone, payload.local_date, payload.local_time);
       await read();
     } catch (failure) { error.textContent = failure.message; error.hidden = false; }

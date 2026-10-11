@@ -131,6 +131,20 @@ var webUIStoreMigrations = []webUIStoreMigration{
 			)`,
 		},
 	},
+	{
+		version: 3,
+		name:    "date_time_profile",
+		statements: []string{
+			`CREATE TABLE date_time_profile (
+				id INTEGER PRIMARY KEY CHECK (id = 1),
+				profile_json TEXT NOT NULL,
+				updated_at TEXT NOT NULL
+			)`,
+			`INSERT INTO date_time_profile(id, profile_json, updated_at) VALUES(
+				1, '{"time_format":"12","date_format":"mdy"}', '1970-01-01T00:00:00Z'
+			)`,
+		},
+	},
 }
 
 func openWebUIStore(path string) (*webUIStore, error) {

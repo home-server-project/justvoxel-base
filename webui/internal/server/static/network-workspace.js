@@ -917,7 +917,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       if (type === "checkbox") {
         input.checked = Boolean(value);
         wrap.className = "toggle-line";
-        wrap.prepend(input);
+        wrap.appendChild(input);
       }
       if (type !== "checkbox") wrap.appendChild(input);
       form.appendChild(wrap);
@@ -956,7 +956,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     hint.textContent = "Settings roll back after 90 seconds unless you Keep settings. Reconnect at the new address if needed. Blank DNS and MTU 0 use automatic settings.";
     const apply = document.createElement("button");
     apply.type = "submit";
-    apply.textContent = "Apply with safety checkpoint";
+    apply.textContent = "Apply";
     apply.disabled = Boolean(currentCheckpoint);
     const actions = document.createElement("div");
     actions.className = "network-form-actions";
@@ -1111,6 +1111,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       dashboard.className = "button-link primary network-action-button";
       dashboard.textContent = { tailscale: "Open Tailscale dashboard", netbird: "Open NetBird dashboard", playit: "Open Playit.gg dashboard" }[provider.id];
       actions.appendChild(dashboard);
+      if (activate.parentElement === actions) actions.appendChild(activate);
       card.appendChild(actions);
       grid.appendChild(card);
     });

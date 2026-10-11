@@ -616,19 +616,11 @@ if (quickLook && quickLookToggle) {
 }
 
 const controlCenter = document.querySelector("[data-control-center]");
-const clockPreferenceKey = "justvoxel.topbar.display.v1";
 let clockPreferences = { time: "12", date: "mdy" };
-try {
-  const saved = JSON.parse(window.localStorage.getItem(clockPreferenceKey) || "{}");
-  if (["12", "24"].includes(saved.time)) clockPreferences.time = saved.time;
-  if (["mdy", "dmy"].includes(saved.date)) clockPreferences.date = saved.date;
-} catch (_) { /* Display preferences remain usable without browser storage. */ }
 window.JustVoxelClockDisplay = {
-  read: () => ({ ...clockPreferences }),
-  save: (preferences) => {
-    if (["12", "24"].includes(preferences.time)) clockPreferences.time = preferences.time;
-    if (["mdy", "dmy"].includes(preferences.date)) clockPreferences.date = preferences.date;
-    try { window.localStorage.setItem(clockPreferenceKey, JSON.stringify(clockPreferences)); } catch (_) { /* Optional persistence. */ }
+  update: (profile) => {
+    if (["12", "24"].includes(profile.time_format)) clockPreferences.time = profile.time_format;
+    if (["mdy", "dmy"].includes(profile.date_format)) clockPreferences.date = profile.date_format;
     window.dispatchEvent(new Event("justvoxel-clock-display"));
   },
 };
@@ -640,8 +632,9 @@ if (topbarClock) {
   const updateTopbarClock = () => {
     const now = new Date(Date.now() + systemClockOffset);
     const zone = topbarClock.dataset.systemTimezone || undefined;
-    const clockTime = new Intl.DateTimeFormat("en-US", { hour: "2-digit", minute: "2-digit", hour12: clockPreferences.time === "12", timeZone: zone }).format(now);
-    const clockDate = new Intl.DateTimeFormat(clockPreferences.date === "dmy" ? "en-GB" : "en-US", { month: "2-digit", day: "2-digit", year: "numeric", timeZone: zone }).format(now);
+    const clockTime = new Intl.DateTimeFormat("en-US", { hour: "2-digit", minute: "2-digit", ...(clockPreferences.time === "12" ? { hour12: true } : { hourCycle: "h23" }), timeZone: zone }).format(now);
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: zone }).formatToParts(now).map(({ type, value }) => [type, value]));
+    const clockDate = clockPreferences.date === "dmy" ? `${parts.day} ${parts.month} ${parts.year}` : `${parts.month} ${parts.day} ${parts.year}`;
     const time = document.createElement("span");
     time.textContent = clockTime;
     const date = document.createElement("span");
@@ -653,7 +646,7 @@ if (topbarClock) {
     topbarClock.replaceChildren(time, separator, date);
     topbarClock.setAttribute("aria-label", `${clockTime} · ${clockDate}`);
     topbarClock.title = new Intl.DateTimeFormat([], {
-      hour12: clockPreferences.time === "12",
+      ...(clockPreferences.time === "12" ? { hour12: true } : { hourCycle: "h23" }),
       weekday: "long",
       year: "numeric",
       month: "long",
@@ -663,6 +656,14 @@ if (topbarClock) {
       timeZone: topbarClock.dataset.systemTimezone || undefined,
     }).format(now);
   };
+  const refreshClockDisplay = async () => {
+    try {
+      const response = await fetch("/api/session-info", { credentials: "same-origin", cache: "no-store" });
+      if (response.ok) window.JustVoxelClockDisplay.update(await response.json());
+    } catch (_) { /* Retry shared settings on the next refresh. */ }
+  };
+  refreshClockDisplay();
+  window.addEventListener("focus", refreshClockDisplay);
   updateTopbarClock();
   window.setInterval(updateTopbarClock, 30000);
   window.addEventListener("justvoxel-clock-display", updateTopbarClock);
@@ -4354,10 +4355,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     securityLabel.textContent = "Account security";
     const securityTitle = document.createElement("h2");
     securityTitle.textContent = "Security";
-    const securityDescription = document.createElement("p");
-    securityDescription.className = "muted compact";
-    securityDescription.textContent = "Manage how you sign in and protect your account.";
-    securityHeading.append(securityLabel, securityTitle, securityDescription);
+    securityHeading.append(securityLabel, securityTitle);
     root.append(securityHeading, switcher);
 
     const authPane = document.createElement("section");
@@ -4369,7 +4367,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     authTitle.textContent = "Authentication";
     const authDescription = document.createElement("p");
     authDescription.className = "muted compact";
-    authDescription.textContent = "Choose whether WebUI uses the voxel system password or its own separate password.";
+    authDescription.textContent = "Choose whether WebUI uses the voxel system password or its own password.";
     const authLabel = document.createElement("p");
     authLabel.className = "eyebrow";
     authLabel.textContent = "Sign-in method";

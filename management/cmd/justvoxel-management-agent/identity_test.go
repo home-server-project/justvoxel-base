@@ -60,6 +60,7 @@ func TestDisabledSQLiteWebUserCannotLogin(t *testing.T) {
 
 func TestSessionStatusReturnsServerSideIdentity(t *testing.T) {
 	s := roleServerForTest(roleViewer)
+	s.store, _ = openTestWebUIStore(t)
 	req := authorizedRequest(http.MethodGet, "/v1/session", "")
 	rr := httptest.NewRecorder()
 	s.sessionStatus(rr, req)

@@ -42,6 +42,8 @@ type storageDeviceView struct {
 }
 
 type storageBrowserPartitionView struct {
+	SetupSelectable bool
+	SetupMountPoint string
 	storageDeviceView
 	FilesystemDisplay   string
 	Role                string
@@ -91,6 +93,7 @@ func (disk storageBrowserDiskView) PartitionTableLabel() string {
 }
 
 type storageBrowserPageData struct {
+	SetupPurpose           string
 	BackupDestination      *backupsWorkspaceData
 	BackupDestinationNote  string
 	Title                  string
@@ -172,6 +175,14 @@ func (a *App) buildStorageBrowserPageData(ctx context.Context, session string, c
 		migrationNote = "Minecraft storage assignment is unavailable in this WebUI build."
 	}
 
+	data := storageBrowserPresentation(storage, configuration, identity, csrf, migrationCandidates, migrationWholeDisks)
+	data.Version, data.ManagementAPI = a.config.Version, a.config.ManagementAPI
+	data.MinecraftMigrationNote = migrationNote
+	return data, nil
+}
+
+// Shared disk/partition presentation; callers supply their authorized inventory.
+func storageBrowserPresentation(storage api.AdminStorageDiscovery, configuration api.AdminConfigurationDiscovery, identity api.SessionInfo, csrf string, migrationCandidates map[string]api.AdminDataMigrationCandidate, migrationWholeDisks map[string]bool) storageBrowserPageData {
 	systemDisks := make(map[string]struct{}, len(storage.SystemDisks))
 	for _, path := range storage.SystemDisks {
 		systemDisks[path] = struct{}{}
@@ -284,11 +295,10 @@ func (a *App) buildStorageBrowserPageData(ctx context.Context, session string, c
 	}
 
 	return storageBrowserPageData{
-		Title: "Storage", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
-		CSRF: csrf, Identity: identity, Configuration: configuration, Disks: disks,
+		Title: "Storage",
+		CSRF:  csrf, Identity: identity, Configuration: configuration, Disks: disks,
 		InternalDisks: internalDisks, ExternalDisks: externalDisks, SelectedDisk: selectedDisk,
-		MinecraftMigrationNote: migrationNote,
-	}, nil
+	}
 }
 
 func storageBrowserPartitionTable(table string) string {

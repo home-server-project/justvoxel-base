@@ -108,9 +108,9 @@ func (a *App) setupWizardSaveStorage(w http.ResponseWriter, r *http.Request) {
 
 	if r.FormValue("direction") == "back" {
 		draft.Storage.Complete = false
-		draft.CurrentStep = setupVersionStep
+		draft.CurrentStep = setupMemoryStep
 		firstRunSetupDrafts.save(a, session, draft)
-		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "storage settings changed; user returned to Version", draft)
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "storage settings changed; user returned to Memory", draft)
 		http.Redirect(w, r, "/setup", http.StatusSeeOther)
 		return
 	}
@@ -679,4 +679,52 @@ func setupPhysicalDiskKey(device api.AdminStorageDevice) string {
 		return "/dev/" + device.Parent
 	}
 	return device.Path
+}
+
+// Setup uses the Control Center Storage presentation and operations, with purpose-specific selection.
+func setupStorageBrowserData(draft setupDraft, csrf string, backups bool) storageBrowserPageData {
+	data := storageBrowserPresentation(draft.Inventory, api.AdminConfigurationDiscovery{}, api.SessionInfo{}, csrf, nil, nil)
+	disks := make([]storageBrowserDiskView, 0, len(data.Disks))
+	data.InternalDisks, data.ExternalDisks = nil, nil
+	selectedDevice := draft.Storage.Device
+	if backups {
+		selectedDevice = draft.Backups.Device
+	}
+	data.SelectedDisk = ""
+	data.SetupPurpose = "minecraft"
+	if backups {
+		data.SetupPurpose = "backups"
+	}
+	for _, disk := range data.Disks {
+		if !backups && setupDeviceIsExternal(draft.Inventory, api.AdminStorageDevice{Path: disk.Path, Transport: disk.Transport}) {
+			continue
+		}
+		// Setup prepares partitions through the shared Review, without assigning a live server.
+		disk.MinecraftWholeDisk, disk.BackupWholeDisk, disk.CanInitialize = false, false, false
+		for i := range disk.Partitions {
+			partition := &disk.Partitions[i]
+			device, safe := safeSetupMinecraftDevice(draft.Inventory, partition.Path)
+			if backups {
+				device, safe = safeSetupDevice(draft.Inventory, partition.Path)
+			}
+			partition.SetupSelectable = safe && !partition.System
+			if partition.SetupSelectable && len(device.Mountpoints) == 1 {
+				partition.SetupMountPoint = device.Mountpoints[0]
+			}
+			if partition.Path == selectedDevice {
+				data.SelectedDisk = disk.Name
+			}
+		}
+		disks = append(disks, disk)
+		if setupDeviceIsExternal(draft.Inventory, api.AdminStorageDevice{Path: disk.Path, Transport: disk.Transport}) {
+			data.ExternalDisks = append(data.ExternalDisks, disk)
+		} else {
+			data.InternalDisks = append(data.InternalDisks, disk)
+		}
+	}
+	data.Disks = disks
+	if data.SelectedDisk == "" && len(disks) > 0 {
+		data.SelectedDisk = disks[0].Name
+	}
+	return data
 }

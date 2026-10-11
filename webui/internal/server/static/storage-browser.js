@@ -1579,5 +1579,5 @@
 
   window.JustVoxelStorageBrowser = { init: initStorageBrowser };
   const initialStorageBrowser = document.querySelector("[data-storage-browser-root]");
-  if (initialStorageBrowser) initStorageBrowser(initialStorageBrowser);
+  if (initialStorageBrowser && !initialStorageBrowser.closest("[data-setup-storage-form], [data-setup-backup-form]")) initStorageBrowser(initialStorageBrowser);
 })();

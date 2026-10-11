@@ -17,7 +17,7 @@ class Node {
     this.classList = {contains: name => this.classes.has(name), toggle() {}, remove() {}}; this.style = {setProperty() {}};
   }
   querySelector(s) {
-    if (s === '[data-setup-disk][aria-pressed="true"]') return (this.many['[data-setup-disk]'] || []).find(node => node.attributes['aria-pressed'] === 'true') || null;
+    if (s === '[data-storage-disk][aria-pressed="true"]') return (this.many['[data-storage-disk]'] || []).find(node => node.attributes['aria-pressed'] === 'true') || null;
     if (s === 'dialog[open]') return Object.values(this.one).find(node => node.tag === 'dialog' && node.open) || null;
     return this.one[s] || null;
   }
@@ -33,7 +33,7 @@ class Node {
   scrollIntoView() { throw new Error('Wizard must not scroll to reveal controls'); } focus() { this.focused = true; } remove() {}
   after(node) {this.following = node;}
   closest(s) {
-    if (s === '[data-setup-disk-partitions]') return this.diskGroup;
+    if (s === '[data-storage-partitions]') return this.diskGroup;
     if (s === '[data-storage-workspace-dialog]') return this.workspace || null;
     return null;
   }
@@ -49,7 +49,7 @@ class Node {
     return this.kind === 'backup' ? s.includes('backup-form') : s.includes('storage-form');
   }
 }
-function fixture(kind, controlCenter = false, paged = false) {
+function fixture(kind, controlCenter = false, largeInventory = false) {
   let current, fresh;
   let workspaceRefreshes = 0;
   const requests = [];
@@ -105,10 +105,8 @@ function fixture(kind, controlCenter = false, paged = false) {
     f.many['[data-setup-existing-partition], [data-setup-backup-existing]'] = choices;
     f.many['input, select, textarea'] = fields;
     f.many['[data-setup-storage-device], [data-setup-storage-mount], [data-setup-storage-path], [data-setup-backup-device], [data-setup-backup-mount], [data-setup-backup-path]'] = fields.filter(field => new RegExp('^' + prefix + '_(device|mount_point|path)$').test(field.name));
-    f.many['[data-setup-disk]'] = [new Node({setupDisk: '/dev/vdc', diskIdentity: 'fixture-disk'})];
-    const group = new Node({setupDiskPartitions: '/dev/vdc'}); group.many['[data-device]'] = choices; choices.forEach(choice => {choice.diskGroup = group;});
-    f.many['[data-setup-disk-partitions]'] = [group];
-    f.many['[data-storage-disk]'] = f.many['[data-setup-disk]'];
+    f.many['[data-storage-disk]'] = [new Node({storageDisk: '/dev/vdc', diskIdentity: 'fixture-disk'})];
+    const group = new Node({storagePartitions: '/dev/vdc'}); group.many['[data-device]'] = choices; choices.forEach(choice => {choice.diskGroup = group;});
     f.many['[data-storage-partitions]'] = [group];
     const system = new Node({systemPath: '/var/lib/justvoxel/' + (kind === 'backup' ? 'backups' : 'minecraft'), setupBackupChoice: 'system'});
     if (kind === 'storage') f.one['[data-setup-storage-system]'] = system;
@@ -143,9 +141,9 @@ function fixture(kind, controlCenter = false, paged = false) {
     f.many['[data-storage-partition]'] = [...choices, new Node({path: '/dev/protected', system: 'Yes', type: 'part', filesystem: 'xfs'})];
     f.many['[data-storage-free-space]'] = [new Node({device: '/dev/vdc', start: '1MiB', size: '40 GiB', sizeBytes: String(40 * 1024 ** 3)})];
     f.many['[data-storage-partition], [data-storage-free-space]'] = [...f.many['[data-storage-partition]'], ...f.many['[data-storage-free-space]']];
-    if (paged) {
-      const disks = f.many['[data-setup-disk]'];
-      for (let i = 1; i < 9; i++) disks.push(new Node({setupDisk: '/dev/disk' + i, diskIdentity: 'disk-' + i}));
+    if (largeInventory) {
+      const disks = f.many['[data-storage-disk]'];
+      for (let i = 1; i < 9; i++) disks.push(new Node({storageDisk: '/dev/disk' + i, diskIdentity: 'disk-' + i}));
       const driveGrid = new Node(), partitionGrid = new Node();
       driveGrid.classes.add('storage-disk-grid'); driveGrid.children = disks;
       partitionGrid.classes.add('storage-partition-grid');
@@ -180,7 +178,7 @@ function fixture(kind, controlCenter = false, paged = false) {
     vm.runInContext(selectionSource, context);
   }
   const get = key => current.one['[data-storage-' + key + ']'];
-  return {context, get, requests, workspaceRefreshes: () => workspaceRefreshes, statusFailure(value, device = '') {statusError = value; statusErrorDevice = device;}, applyFailure(value) {applyError = value;}, refreshFailure(value) {refreshFails = value;}, form: () => current, deny(value) {deny = value;}, status(value) {status = {device: "/dev/vdb1", uuid: "uuid-/dev/vdb1", mount_point: "/srv/vdb1", ...value};}, changedUUID() {current.many['[data-setup-existing-partition], [data-setup-backup-existing]'][0].dataset.uuid = 'old-uuid';}, diskChanged() {current.many['[data-setup-disk]'][0].dataset.diskIdentity = 'old-disk';}};
+  return {context, get, requests, workspaceRefreshes: () => workspaceRefreshes, statusFailure(value, device = '') {statusError = value; statusErrorDevice = device;}, applyFailure(value) {applyError = value;}, refreshFailure(value) {refreshFails = value;}, form: () => current, deny(value) {deny = value;}, status(value) {status = {device: "/dev/vdb1", uuid: "uuid-/dev/vdb1", mount_point: "/srv/vdb1", ...value};}, changedUUID() {current.many['[data-setup-existing-partition], [data-setup-backup-existing]'][0].dataset.uuid = 'old-uuid';}, diskChanged() {current.many['[data-storage-disk]'][0].dataset.diskIdentity = 'old-disk';}};
 }
 const settle = async () => { for (let i = 0; i < 15; i++) await Promise.resolve(); };
 (async () => {
@@ -318,7 +316,7 @@ const settle = async () => { for (let i = 0; i < 15; i++) await Promise.resolve(
     assert.equal(f.form().one['[csrf]'].value, 'new-csrf');
     assert.equal(f.get('action-csrf').value, 'new-csrf');
     assert.equal(f.form().getAttribute('action'), kind === 'backup' ? '/setup/backups' : '/setup/storage');
-    assert.equal(f.form().many['[data-setup-disk]'][0].getAttribute('aria-pressed'), 'true');
+    assert.equal(f.form().many['[data-storage-disk]'][0].getAttribute('aria-pressed'), 'true');
     if (kind === 'backup') {
       assert.equal(f.form().one['[data-setup-network-source="smb"]'].value, '//nas/unsaved');
       assert.equal(f.form().one['[data-setup-network-path="nfs"]'].value, '/var/mnt/custom/backups');
@@ -527,23 +525,8 @@ const settle = async () => { for (let i = 0; i < 15; i++) await Promise.resolve(
   for (const kind of ['storage', 'backup']) {
     const f = fixture(kind, false, true);
     for (const grid of f.form().many['.storage-disk-grid, .storage-partition-grid']) {
-      const size = 4;
-      const [previous, label, next] = grid.following.children;
-      const visited = new Set();
-      assert(previous.disabled);
-      do {
-        const visible = grid.children.filter(card => !card.hidden);
-        assert(visible.length > 0 && visible.length <= size);
-        visible.forEach(card => visited.add(card));
-        assert(label.textContent.startsWith('Page '));
-        if (next.disabled) break;
-        next.click();
-      } while (true);
-      assert.equal(visited.size, grid.children.length, 'Every inventory card must remain reachable');
-      assert(previous.focused, 'Focus stays on a reachable paging action');
-      while (!previous.disabled) previous.click();
-      assert(next.focused);
-      assert.equal(grid.children.filter(card => !card.hidden).length, size);
+      assert.equal(grid.following, undefined, 'Setup must not create its own paging controls');
+      assert(grid.children.every(card => !card.hidden), 'All inventory cards remain reachable through shared bounded overflow');
     }
   }
   // Control Center uses the same component with its original modal presentation.

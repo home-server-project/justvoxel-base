@@ -10,6 +10,8 @@ import (
 )
 
 type AdminDateTimeState struct {
+	TimeFormat   string `json:"time_format,omitempty"`
+	DateFormat   string `json:"date_format,omitempty"`
 	Timezone     string `json:"timezone"`
 	LocalDate    string `json:"local_date"`
 	LocalTime    string `json:"local_time"`
@@ -18,10 +20,12 @@ type AdminDateTimeState struct {
 }
 
 type AdminDateTimeChange struct {
-	Timezone  string `json:"timezone"`
-	Automatic bool   `json:"automatic"`
-	Date      string `json:"date,omitempty"`
-	Time      string `json:"time,omitempty"`
+	TimeFormat string `json:"time_format,omitempty"`
+	DateFormat string `json:"date_format,omitempty"`
+	Timezone   string `json:"timezone"`
+	Automatic  bool   `json:"automatic"`
+	Date       string `json:"date,omitempty"`
+	Time       string `json:"time,omitempty"`
 }
 
 func (c *Client) AdminDateTime(ctx context.Context, session string) (AdminDateTimeState, error) {

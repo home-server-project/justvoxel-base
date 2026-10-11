@@ -95,7 +95,7 @@ assert(text().includes("No usable server build was found for this version."));
 
 func TestTopbarClockDisplayPreferences(t *testing.T) {
 	source := correctionSource(t, "static/app.js")
-	start := strings.Index(source, "const clockPreferenceKey =")
+	start := strings.Index(source, "let clockPreferences =")
 	if start < 0 {
 		t.Fatal("clock display preferences missing")
 	}
@@ -110,36 +110,54 @@ func TestTopbarClockDisplayPreferences(t *testing.T) {
 	program := `
 const assert = require("node:assert/strict");
 const vm = require("node:vm");
-const stored = new Map();
-const instant = Date.parse("2026-10-09T17:05:00Z");
+const profile = { time_format: "24", date_format: "dmy" };
+let instant = Date.parse("2026-10-09T17:05:00Z");
 class FixedDate extends Date { constructor(...args) { super(...(args.length ? args : [instant])); } static now() { return instant; } }
 function browser() {
   const handlers = new Map();
   const clock = { dataset: { systemTimezone: "UTC", systemNow: String(instant) },
     replaceChildren(...nodes) { this.children = nodes; }, setAttribute() {} };
   const document = { querySelector: () => clock, createElement: () => ({ textContent: "" }) };
-  const window = { localStorage: { getItem: key => stored.get(key), setItem: (key, value) => stored.set(key, value) },
+  const window = {
     setInterval() {}, addEventListener: (name, fn) => handlers.set(name, fn),
     dispatchEvent: event => handlers.get(event.type)?.(event) };
-  const context = vm.createContext({ document, window, Intl, Date: FixedDate, Event: class { constructor(type) { this.type = type; } } });
+  const context = vm.createContext({ document, window, fetch: async () => ({ ok: true, json: async () => profile }), Intl, Date: FixedDate, Event: class { constructor(type) { this.type = type; } } });
   return { context, window, clock };
 }
 ` + "const script = " + string(encoded) + ";\n" + `
+(async () => {
 let page = browser();
 vm.runInContext(script, page.context);
 assert.equal(page.clock.children[0].textContent, "05:05 PM");
-assert.equal(page.clock.children[2].textContent, "10/09/2026");
-page.window.JustVoxelClockDisplay.save({ time: "24", date: "dmy" });
+assert.equal(page.clock.children[2].textContent, "Oct 9 2026");
+page.window.JustVoxelClockDisplay.update(profile);
 assert.equal(page.clock.children[0].textContent, "17:05");
-assert.equal(page.clock.children[2].textContent, "09/10/2026");
+assert.equal(page.clock.children[2].textContent, "9 Oct 2026");
 assert.equal(page.clock.dataset.systemTimezone, "UTC");
 assert.equal(page.clock.dataset.systemNow, String(instant));
+page.window.JustVoxelClockDisplay.update({ time_format: "12", date_format: "dmy" });
+assert.equal(page.clock.children[0].textContent, "05:05 PM");
+assert.equal(page.clock.children[2].textContent, "9 Oct 2026");
+page.window.JustVoxelClockDisplay.update({ time_format: "24", date_format: "mdy" });
+assert.equal(page.clock.children[0].textContent, "17:05");
+assert.equal(page.clock.children[2].textContent, "Oct 9 2026");
 page = browser();
 vm.runInContext(script, page.context);
+await new Promise(setImmediate);
 assert.equal(page.clock.children[0].textContent, "17:05");
-assert.equal(page.clock.children[2].textContent, "09/10/2026");
-page.window.JustVoxelClockDisplay.save({ time: "invalid", date: "invalid" });
-assert.equal(page.clock.children[2].textContent, "09/10/2026");
+assert.equal(page.clock.children[2].textContent, "9 Oct 2026");
+page.window.JustVoxelClockDisplay.update({ time_format: "invalid", date_format: "invalid" });
+assert.equal(page.clock.children[2].textContent, "9 Oct 2026");
+instant = Date.parse("2026-10-11T00:42:00Z");
+page = browser();
+vm.runInContext(script, page.context);
+await new Promise(setImmediate);
+assert.equal(page.clock.children[0].textContent, "00:42");
+assert.equal(page.clock.children[2].textContent, "11 Oct 2026");
+page.window.JustVoxelClockDisplay.update({ time_format: "12", date_format: "mdy" });
+assert.equal(page.clock.children[0].textContent, "12:42 AM");
+assert.equal(page.clock.children[2].textContent, "Oct 11 2026");
+})().catch(error => { console.error(error); process.exitCode = 1; });
 `
 	cmd := exec.Command("node")
 	cmd.Stdin = strings.NewReader(program)
@@ -171,13 +189,13 @@ func TestSystemCorrectionsPreserveMenusAndMetadata(t *testing.T) {
 		t.Fatal("About retains redundant title or variant badge")
 	}
 	header := correctionSource(t, "templates/header.html")
-	for _, want := range []string{`data-topbar-time-format`, `data-topbar-date-format`, `12-hour time`, `24-hour time`, `MM/DD/YYYY`, `DD/MM/YYYY`} {
+	for _, want := range []string{`data-topbar-time-format`, `data-topbar-date-format`, `12-hour`, `24-hour`, `Day first`, `Month first`} {
 		if !strings.Contains(header, want) {
 			t.Fatalf("clock preference control missing %q", want)
 		}
 	}
 	css := correctionSource(t, "static/app.css")
-	for _, want := range []string{`.system-user-menu.storage-action-menu summary{width:auto`, `.system-workspace-content .system-security-pane{width:100%`, `.wallpaper-panel .action-row button{width:auto;min-height:36px`} {
+	for _, want := range []string{`.system-user-menu.storage-action-menu summary{width:max-content`, `.system-workspace-content .system-security-pane{width:100%`, `.wallpaper-panel .action-row button{width:auto;min-height:36px`} {
 		if !strings.Contains(css, want) {
 			t.Fatalf("System panel/action styling missing %q", want)
 		}
@@ -187,9 +205,12 @@ func TestSystemCorrectionsPreserveMenusAndMetadata(t *testing.T) {
 func TestWizardStoragePreparationsUseSharedModals(t *testing.T) {
 	markup := correctionSource(t, "templates/setup_wizard.html")
 	storage := correctionSource(t, "templates/storage_browser.html")
+	if !strings.Contains(markup, `{{template "storage_browser_content" .StorageBrowser}}`) || !strings.Contains(markup, `{{template "storage_browser_content" .BackupBrowser}}`) {
+		t.Fatal("both steps must reuse Storage")
+	}
 	for _, name := range []string{"storage_partition_operation", "storage_free_operation", "storage_partition_create_review", "storage_partition_action_review"} {
 		call := `{{template "` + name + `" .}}`
-		if strings.Count(markup, call) != 2 || !strings.Contains(storage, call) || !strings.Contains(storage, `{{define "`+name+`"}}`) {
+		if strings.Contains(markup, call) || !strings.Contains(storage, call) || !strings.Contains(storage, `{{define "`+name+`"}}`) {
 			t.Fatalf("operation component %s must be shared by both wizard steps and Control Center", name)
 		}
 	}
@@ -203,7 +224,7 @@ func TestWizardStoragePreparationsUseSharedModals(t *testing.T) {
 		t.Fatal("wizard must delegate operation presentation and API logic to Storage browser")
 	}
 	for _, name := range []string{"detail", "free-detail"} {
-		if strings.Count(markup, `<dialog class="storage-detail-dialog setup-storage-operation" data-storage-`+name+`-dialog`) != 2 || strings.Contains(markup, `<section class="setup-storage-operation" data-storage-`+name+`-dialog`) {
+		if !strings.Contains(storage, `<dialog class="storage-detail-dialog" data-storage-`+name+`-dialog`) || strings.Contains(markup, `<section class="setup-storage-operation" data-storage-`+name+`-dialog`) {
 			t.Fatalf("both wizard steps must open %s details in shared modal dialogs without expanding the panel", name)
 		}
 	}
@@ -236,10 +257,10 @@ func TestWizardScheduleAndHeadings(t *testing.T) {
 			t.Fatal("redundant setup heading remains")
 		}
 	}
-	if !strings.Contains(review, `{{if ne .SetupMode "recommended"}}`) || strings.Count(review, `class="setup-number"`) != 7 || !strings.Contains(review, "<h2>Review</h2>") {
+	if !strings.Contains(review, `{{if ne .SetupMode "recommended"}}`) || strings.Count(review, `class="setup-number"`) != 6 || !strings.Contains(review, "<h2>Review</h2>") {
 		t.Fatal("Review must keep its title and Advanced-only navigation")
 	}
-	for i, name := range []string{"Server", "Cross-play", "Memory", "Version", "Storage", "Backups", "Review"} {
+	for i, name := range []string{"Server", "Cross-play", "Memory", "Storage", "Backups", "Review"} {
 		if !strings.Contains(review, fmt.Sprintf(`<span class="setup-number">%d</span><span>%s</span>`, i+1, name)) {
 			t.Fatalf("Advanced Review missing step %d: %s", i+1, name)
 		}
@@ -265,8 +286,8 @@ func TestWizardScheduleAndHeadings(t *testing.T) {
 				t.Fatalf("%s Review missing %q", mode, want)
 			}
 		}
-		if mode == "advanced" && (strings.Count(body, `class="setup-number"`) != 7 || !strings.Contains(body, `<li class="active" aria-current="step"><span class="setup-number">7</span><span>Review</span>`)) {
-			t.Fatal("Advanced Review must show seven steps with Review active at Step 7")
+		if mode == "advanced" && (strings.Count(body, `class="setup-number"`) != 6 || !strings.Contains(body, `<li class="active" aria-current="step"><span class="setup-number">6</span><span>Review</span>`)) {
+			t.Fatal("Advanced Review must show six steps with Review active at Step 6")
 		}
 	}
 	css := correctionSource(t, "static/setup.css")

@@ -111,9 +111,6 @@ func TestAdvancedSetupMOTDStateSurvivesSoftwareAndVersionChanges(t *testing.T) {
 				rr = saveConnectionsStep(t, app, versions)
 				if rr.Code == http.StatusSeeOther {
 					rr = saveResourcesStep(t, app, validResourceValues())
-					if rr.Code == http.StatusSeeOther {
-						rr = saveVersionStep(t, app, versions)
-					}
 				}
 				if rr.Code != http.StatusSeeOther {
 					t.Fatalf("version: %d %s", rr.Code, rr.Body.String())

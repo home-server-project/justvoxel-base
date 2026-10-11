@@ -140,7 +140,7 @@ func TestSecondRoundWorkspacePresentationContracts(t *testing.T) {
 		t.Fatal("Wallpaper must be embedded in System")
 	}
 	app := read("static/app.js")
-	for _, want := range []string{"parkSettingsPanels()", "content.appendChild(panel)", `hour12: clockPreferences.time === "12"`, "topbarClock.dataset.systemTimezone", "workspaceTopInset", "getBoundingClientRect().bottom"} {
+	for _, want := range []string{"parkSettingsPanels()", "content.appendChild(panel)", `clockPreferences.time === "12" ? { hour12: true } : { hourCycle: "h23" }`, "topbarClock.dataset.systemTimezone", "workspaceTopInset", "getBoundingClientRect().bottom"} {
 		if !strings.Contains(app, want) {
 			t.Fatalf("Workspace presentation missing %q", want)
 		}
@@ -159,6 +159,59 @@ func TestSecondRoundWorkspacePresentationContracts(t *testing.T) {
 	for _, want := range []string{"workspace.dataset.storageSelectedDisk = name", "button.dataset.storageDisk === rememberedDisk", "|| diskButtons[0]", "selectDisk(initialDisk.dataset.storageDisk)"} {
 		if !strings.Contains(storage, want) {
 			t.Fatalf("Drive restoration missing %q", want)
+		}
+	}
+}
+
+func TestApprovedSystemAndNetworkRepairContracts(t *testing.T) {
+	read := func(path string) string {
+		data, err := assets.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	app, date, header, css := read("static/app.js"), read("static/date-time.js"), read("templates/header.html"), read("static/app.css")
+	if strings.Contains(header, `id="date-time-title"`) || strings.Contains(header, `aria-labelledby="date-time-title"`) {
+		t.Fatal("Date & Time must not repeat the System tab heading")
+	}
+	if !strings.Contains(header, `data-date-time-panel aria-label="Date &amp; Time"`) {
+		t.Fatal("Date & Time panel must have an accessible label")
+	}
+	for _, source := range []string{app, date, header} {
+		for _, stale := range []string{"justvoxel.topbar.display.v1", "Display preferences", "Topbar clock and date", "Saved in this browser. System time and scheduled tasks stay unchanged.", "Manage how you sign in and protect your account."} {
+			if strings.Contains(source, stale) {
+				t.Fatalf("stale System presentation: %s", stale)
+			}
+		}
+	}
+	for _, want := range []string{`Choose whether WebUI uses the voxel system password or its own password.`, `month: "short"`, `refreshClockDisplay`, `/api/session-info`} {
+		if !strings.Contains(app, want) {
+			t.Fatalf("System repair missing %s", want)
+		}
+	}
+	for _, want := range []string{`time_format: timeFormat.value`, `date_format: dateFormat.value`, `window.JustVoxelClockDisplay?.update(payload)`} {
+		if !strings.Contains(date, want) {
+			t.Fatalf("shared format form missing %s", want)
+		}
+	}
+	for _, want := range []string{`.system-users-table th:last-child,.system-users-table td:last-child{text-align:center}`, `.system-user-menu{display:inline-block;width:max-content`, `.system-security-heading{display:flex;align-items:baseline;gap:.4rem}`, `margin-inline:auto`, `max-width:380px`, `font-size:.84rem!important`} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("layout repair missing %s", want)
+		}
+	}
+	network, networkCSS := read("static/network-workspace.js"), read("static/network-workspace.css")
+	if strings.Contains(network, "Apply with safety checkpoint") || !strings.Contains(network, `apply.textContent = "Apply"`) {
+		t.Fatal("Ethernet Apply wording")
+	}
+	for _, want := range []string{`wrap.appendChild(input)`, `if (activate.parentElement === actions) actions.appendChild(activate)`} {
+		if !strings.Contains(network, want) {
+			t.Fatalf("Network action ordering missing %s", want)
+		}
+	}
+	for _, want := range []string{`[data-action="activate"]{margin-left:auto}`, `.toggle-line{display:flex;align-items:center;justify-content:flex-end;gap:.5rem`} {
+		if !strings.Contains(networkCSS, want) {
+			t.Fatalf("Network alignment missing %s", want)
 		}
 	}
 }

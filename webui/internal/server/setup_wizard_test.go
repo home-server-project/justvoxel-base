@@ -254,7 +254,7 @@ func TestSetupWizardCompactDesktopProgressContract(t *testing.T) {
 	}
 	for _, want := range []string{
 		".setup-stage-header{display:flex",
-		"grid-template-columns:repeat(7,minmax(0,1fr))",
+		"grid-template-columns:repeat(6,minmax(0,1fr))",
 		".setup-stage-header .setup-progress li{font-size:1rem;height:56px",
 		".setup-stage-header h1{font-size:1.9rem",
 		".setup-stage-header .setup-number{flex:0 0 1.8rem",
@@ -276,10 +276,10 @@ func TestSetupWizardCompactDesktopProgressContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(markup), `{{if ne .SetupMode "recommended"}}`) || strings.Count(string(markup), `class="setup-number"`) != 7 || strings.Count(string(markup), `action="/setup/navigate"`) != 6 {
-		t.Fatal("Advanced Review must retain seven steps and navigation; Recommended omits progress")
+	if !strings.Contains(string(markup), `{{if ne .SetupMode "recommended"}}`) || strings.Count(string(markup), `class="setup-number"`) != 6 || strings.Count(string(markup), `action="/setup/navigate"`) != 5 {
+		t.Fatal("Advanced Review must retain six steps and navigation; Recommended omits progress")
 	}
-	for i, label := range []string{"Server", "Cross-play", "Memory", "Version", "Storage", "Backups", "Review"} {
+	for i, label := range []string{"Server", "Cross-play", "Memory", "Storage", "Backups", "Review"} {
 		if !strings.Contains(string(markup), fmt.Sprintf(`<span class="setup-number">%d</span><span>%s</span>`, i+1, label)) {
 			t.Fatalf("Setup progress missing step %d: %s", i+1, label)
 		}
@@ -293,7 +293,7 @@ func TestSetupWizardCompactDesktopProgressContract(t *testing.T) {
 			t.Fatal("Setup header must not display redundant step badges")
 		}
 	}
-	for _, want := range []string{`{{range .Steps}}`, `{{if .Active}}aria-current="step"{{end}}`, `{{if .Visited}}<form method="post" action="/setup/navigate">`, `name="direction" value="jump"`, `name="step" value="{{.Number}}"`, `<span class="setup-number">{{.Number}}</span><span>{{.Name}}</span>`} {
+	for _, want := range []string{`{{range .Steps}}`, `{{if .Active}}aria-current="step"{{end}}`, `{{if .Complete}}<form method="post" action="/setup/navigate">`, `name="direction" value="jump"`, `name="step" value="{{.Number}}"`, `<span class="setup-number">{{.Number}}</span><span>{{.Name}}</span>`} {
 		if !strings.Contains(string(wizard), want) {
 			t.Fatalf("Setup wizard progress navigation missing %q", want)
 		}
@@ -342,12 +342,6 @@ func saveConnectionsStep(t *testing.T, app *App, values url.Values) *httptest.Re
 	}
 	values.Set("csrf", "csrf-token")
 	return httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/connections", values.Encode()))
-}
-
-func saveVersionStep(t *testing.T, app *App, values url.Values) *httptest.ResponseRecorder {
-	t.Helper()
-	values.Set("csrf", "csrf-token")
-	return httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/version", values.Encode()))
 }
 
 func saveResourcesStep(t *testing.T, app *App, values url.Values) *httptest.ResponseRecorder {
@@ -599,7 +593,7 @@ func TestSetupWizardConnectionsValidateBeforeResources(t *testing.T) {
 	bad := validConnectionValues()
 	bad.Set("java_port", "70000")
 	rr := saveConnectionsStep(t, app, bad)
-	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "Minecraft Java port must be between 1 and 65535") {
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "Minecraft Java TCP port must be between 1 and 65535") {
 		t.Fatalf("invalid Java port was not rejected: %d %s", rr.Code, rr.Body.String())
 	}
 	draft, _ := firstRunSetupDrafts.get(app, "session-token")
@@ -661,8 +655,8 @@ func TestSetupWizardUsesCompactAlignedActions(t *testing.T) {
 			t.Fatalf("setup template still contains old action label %q", oldLabel)
 		}
 	}
-	if strings.Count(markup, ">Continue</button>") != 6 {
-		t.Fatalf("setup template Continue button count = %d, want 6", strings.Count(markup, ">Continue</button>"))
+	if strings.Count(markup, ">Continue</button>") != 5 {
+		t.Fatalf("setup template Continue button count = %d, want 5", strings.Count(markup, ">Continue</button>"))
 	}
 }
 
@@ -675,7 +669,7 @@ func TestSetupWizardStorageNoLongerLeavesFirstRunForAdvancedStorage(t *testing.T
 	if strings.Contains(markup, "/settings/storage-provision?from=setup") {
 		t.Fatal("first-run Storage still leaves the wizard for legacy Advanced Storage")
 	}
-	for _, want := range []string{"Use an existing local filesystem / partition", "data-storage-partition", "data-storage-free-space"} {
+	for _, want := range []string{"Use another internal disk", `{{template "storage_browser_content" .StorageBrowser}}`} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("first-run Storage replacement missing %q", want)
 		}
@@ -696,12 +690,12 @@ func TestSetupWizardServerStepValidatesAndPersistsChoices(t *testing.T) {
 	}
 	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	body := page.Body.String()
-	for _, want := range []string{"<h2>Cross-play</h2>", "Cross-play", "Enable Bedrock cross-play", "Minecraft Java port", "Bedrock UDP port", "25565", "19132"} {
+	for _, want := range []string{"<h2>Cross-play</h2>", "Cross-play", "Enable Bedrock cross-play", "Minecraft Java TCP port", "Bedrock UDP port", "25565", "19132", "Server update channel", "Stable (recommended)", "Latest", "Custom", `id="image-tag"`, "Recommended", "Specific version", `id="specific-version-field"`, `id="setup-version-preview"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("Resources step missing %q: %s", want, body)
 		}
 	}
-	for _, forbidden := range []string{"Container updates", `name="version_policy"`, `name="version"`, "setup-version-preview"} {
+	for _, forbidden := range []string{"Container updates", "<h2>Version</h2>", "Timezone follows"} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("Cross-play contains %q", forbidden)
 		}
@@ -722,9 +716,13 @@ func TestSetupWizardServerStepValidatesAndPersistsChoices(t *testing.T) {
 	}
 	page = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
 	body = page.Body.String()
-	for _, want := range []string{"<h2>Version</h2>", "Container updates", "Stable (recommended)", "Latest", "Custom", "This does not choose the Minecraft game version below.", `id="image-tag"`, `value="stable"`, "Recommended", "Specific version", `id="specific-version-field"`, `id="setup-version-preview"`, "/static/settings.js"} {
+	draft, _ := firstRunSetupDrafts.get(app, "session-token")
+	if draft.CurrentStep != 4 {
+		t.Fatalf("Memory advanced to step %d, want Step 4 Storage", draft.CurrentStep)
+	}
+	for _, want := range []string{"<h2>Storage</h2>", "Use another internal disk", "data-storage-browser-root", "Internal drives", "No physical disks were reported by the Management Agent."} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("Minecraft step missing %q: %s", want, body)
+			t.Fatalf("Storage step missing %q: %s", want, body)
 		}
 	}
 }
@@ -735,7 +733,7 @@ func TestSetupVersionPreviewPresentationContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(markup), `class="setup-version-preview" id="setup-version-preview"`) {
-		t.Fatal("version step is missing its structured preview container")
+		t.Fatal("Cross-play is missing its structured version preview container")
 	}
 	script, err := assets.ReadFile("static/settings.js")
 	if err != nil {
@@ -828,9 +826,7 @@ func TestSetupWizardSpecificVersionRequiresExplicitValue(t *testing.T) {
 	values := validConnectionValues()
 	values.Set("version_policy", "pinned")
 	values.Set("version", "")
-	_ = saveConnectionsStep(t, app, validConnectionValues())
-	_ = saveResourcesStep(t, app, validResourceValues())
-	rr := saveVersionStep(t, app, values)
+	rr := saveConnectionsStep(t, app, values)
 	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "Specific Minecraft version is invalid") {
 		t.Fatalf("missing specific version was not rejected: %d %s", rr.Code, rr.Body.String())
 	}
@@ -870,8 +866,8 @@ func TestSetupWizardMinecraftStepAdvancesOnlyAfterValidation(t *testing.T) {
 		t.Fatalf("valid Resources form returned %d %q: %s", rr.Code, rr.Header().Get("Location"), rr.Body.String())
 	}
 	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "<h2>Version</h2>") || !strings.Contains(page.Body.String(), "Container updates") {
-		t.Fatalf("Memory step did not advance to Version: %d %s", page.Code, page.Body.String())
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "<h2>Storage</h2>") || !strings.Contains(page.Body.String(), "Use another internal disk") {
+		t.Fatalf("Memory step did not advance to Storage: %d %s", page.Code, page.Body.String())
 	}
 }
 
@@ -914,26 +910,34 @@ func TestSetupWizardCrossplayBackPreservesUnsavedValues(t *testing.T) {
 		t.Fatal(rr.Code, rr.Body.String())
 	}
 	draft, _ := firstRunSetupDrafts.get(app, "session-token")
-	if draft.CurrentStep != setupServerStep || draft.Minecraft.ConnectionsComplete {
+	if draft.CurrentStep != setupServerStep || draft.Minecraft.ConnectionsComplete || draft.Minecraft.VersionComplete {
 		t.Fatal("Back did not return to Server with incomplete edits")
 	}
-	if !draft.Server.BedrockEnabled || draft.Minecraft.JavaPort != "25566" || draft.Minecraft.BedrockPort != "19133" || draft.Minecraft.ImageTag != "stable" || draft.Minecraft.VersionPolicy != "recommended" {
+	if !draft.Server.BedrockEnabled || draft.Minecraft.JavaPort != "25566" || draft.Minecraft.BedrockPort != "19133" || draft.Minecraft.ImageTag != "java21" || draft.Minecraft.VersionPolicy != "pinned" || draft.Minecraft.Version != "1.21.8" {
 		t.Fatal("Back did not persist submitted Cross-play values")
 	}
 	_ = saveServerStep(t, app, validServerValues())
 	body := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", "")).Body.String()
-	for _, want := range []string{`value="25566"`, `value="19133"`} {
+	for _, want := range []string{`value="25566"`, `value="19133"`, `value="java21"`, `value="pinned" selected`, `value="1.21.8"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("lost %q", want)
 		}
 	}
 	assertSetupBedrockChecked(t, body, true)
 	values.Set("direction", "next")
+	values.Set("java_port", "invalid")
+	if rr := saveConnectionsStep(t, app, values); rr.Code != http.StatusBadRequest {
+		t.Fatalf("Cross-play edits were not revalidated: %d %s", rr.Code, rr.Body.String())
+	}
+	draft, _ = firstRunSetupDrafts.get(app, "session-token")
+	if draft.CurrentStep != setupCrossplayStep || draft.Minecraft.ConnectionsComplete || draft.Minecraft.VersionComplete {
+		t.Fatal("invalid Cross-play edits advanced or completed the step")
+	}
+	values.Set("java_port", "25566")
 	if rr := saveConnectionsStep(t, app, values); rr.Code != http.StatusSeeOther {
 		t.Fatal(rr.Code, rr.Body.String())
 	}
 	_ = saveResourcesStep(t, app, validResourceValues())
-	_ = saveVersionStep(t, app, values)
 	draft, _ = firstRunSetupDrafts.get(app, "session-token")
 	if draft.CurrentStep != setupStorageStep || draft.HighestStep != setupStorageStep || !draft.Minecraft.Complete {
 		t.Fatal("combined flow did not reach Storage")
@@ -1076,7 +1080,7 @@ func TestSetupWizardVisitedStepNavigation(t *testing.T) {
 	if rr := saveConnectionsStep(t, app, validConnectionValues()); rr.Code != http.StatusSeeOther {
 		t.Fatal(rr.Code)
 	}
-	for _, step := range []struct{ target, status, current int }{{1, http.StatusSeeOther, 1}, {3, http.StatusSeeOther, 3}, {4, http.StatusBadRequest, 3}} {
+	for _, step := range []struct{ target, status, current int }{{1, http.StatusSeeOther, 1}, {3, http.StatusBadRequest, 1}, {4, http.StatusBadRequest, 1}, {1, http.StatusBadRequest, 1}} {
 		body := fmt.Sprintf("csrf=csrf-token&direction=jump&step=%d", step.target)
 		rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/navigate", body))
 		if rr.Code != step.status {

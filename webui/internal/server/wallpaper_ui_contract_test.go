@@ -25,8 +25,7 @@ func TestWallpaperUIContracts(t *testing.T) {
 
 	footer := read("templates/project_footer.html")
 	require(footer, "Wallpaper dialog",
-		`<h2 id="wallpaper-title">Wallpaper</h2>`,
-		"Choose the background used by this browser.",
+		`aria-label="Wallpaper"`,
 		`name="theme" value="v1">V1`, `name="theme" value="v2" checked>V2`,
 		`name="appearance" value="auto" checked>Automatic`,
 		`name="appearance" value="day">Day`, `name="appearance" value="night">Night`,
@@ -37,6 +36,9 @@ func TestWallpaperUIContracts(t *testing.T) {
 		"data-wallpaper-builtin-fields", "data-wallpaper-schedule",
 		"data-wallpaper-url-fields", "data-wallpaper-upload-fields",
 	)
+	if strings.Contains(footer, "Choose the background used by this browser.") || strings.Contains(footer, `id="wallpaper-title"`) {
+		t.Fatal("redundant wallpaper introduction remains")
+	}
 	if strings.Count(footer, `class="wallpaper-theme-card"`) != 2 ||
 		strings.Count(footer, `class="wallpaper-split-preview"`) != 2 {
 		t.Fatal("Wallpaper must have exactly two split-preview theme cards")

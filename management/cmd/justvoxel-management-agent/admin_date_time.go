@@ -13,6 +13,7 @@ import (
 )
 
 type adminDateTimeState struct {
+	dateTimeProfile
 	Timezone string `json:"timezone"`
 	LocalDate string `json:"local_date"`
 	LocalTime string `json:"local_time"`
@@ -21,6 +22,8 @@ type adminDateTimeState struct {
 }
 
 type adminDateTimeChange struct {
+	TimeFormat *string `json:"time_format,omitempty"`
+	DateFormat *string `json:"date_format,omitempty"`
 	Timezone string `json:"timezone"`
 	Automatic bool `json:"automatic"`
 	Date string `json:"date,omitempty"`
@@ -74,6 +77,8 @@ func (s *server) adminDateTimeRead(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	state, err := systemDateTime(ctx)
 	if err != nil { writeError(w, http.StatusServiceUnavailable, "System date and time are unavailable"); return }
+	state.dateTimeProfile, err = s.store.readDateTimeProfile()
+	if err != nil { writeError(w, http.StatusServiceUnavailable, "Date and time display settings are unavailable"); return }
 	writeJSON(w, http.StatusOK, state)
 }
 
@@ -82,6 +87,11 @@ func (s *server) adminDateTimeApply(w http.ResponseWriter, r *http.Request) {
 	if !ok { return }
 	var request adminDateTimeChange
 	if !decodeJSON(w, r, &request) { return }
+	profile, err := s.store.readDateTimeProfile()
+	if err != nil { writeError(w, http.StatusServiceUnavailable, "Date and time display settings are unavailable"); return }
+	if request.TimeFormat != nil { profile.TimeFormat = *request.TimeFormat }
+	if request.DateFormat != nil { profile.DateFormat = *request.DateFormat }
+	if !validDateTimeProfile(profile) { writeError(w, http.StatusBadRequest, "Choose a valid time and date format"); return }
 	if !validSystemTimezone(request.Timezone) {
 		writeError(w, http.StatusBadRequest, "Choose a timezone from the system list")
 		return
@@ -118,6 +128,9 @@ func (s *server) adminDateTimeApply(w http.ResponseWriter, r *http.Request) {
 	}
 	state, err := systemDateTime(ctx)
 	if err != nil { writeError(w, http.StatusServiceUnavailable, "System date and time could not be read back"); return }
+	if err := s.store.writeDateTimeProfile(profile); err != nil { writeError(w, http.StatusServiceUnavailable, "Date and time display settings could not be saved"); return }
 	_ = s.store.recordAuditEvent(actor, "change_system_date_time", "system clock", true, "System date and time settings changed")
+	state.dateTimeProfile, err = s.store.readDateTimeProfile()
+	if err != nil { writeError(w, http.StatusServiceUnavailable, "Date and time display settings are unavailable"); return }
 	writeJSON(w, http.StatusOK, state)
 }

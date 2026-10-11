@@ -73,7 +73,7 @@
   </section>
   {{else}}
   <div class="setup-stage-header">
-  <ol class="setup-progress" aria-label="Setup progress">{{range .Steps}}<li class="{{if .Active}}active{{end}} {{if .Complete}}complete{{end}}" {{if .Active}}aria-current="step"{{end}}>{{if .Visited}}<form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="{{.Number}}"><button type="submit"><span class="setup-number">{{.Number}}</span><span>{{.Name}}</span></button></form>{{else}}<span class="setup-number">{{.Number}}</span><span>{{.Name}}</span>{{end}}</li>{{end}}</ol>
+  <ol class="setup-progress" aria-label="Setup progress">{{range .Steps}}<li class="{{if .Active}}active{{end}} {{if .Complete}}complete{{end}}" {{if .Active}}aria-current="step"{{end}}>{{if .Complete}}<form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="{{.Number}}"><button type="submit"><span class="setup-number">{{.Number}}</span><span>{{.Name}}</span></button></form>{{else}}<span class="setup-number">{{.Number}}</span><span>{{.Name}}</span>{{end}}</li>{{end}}</ol>
   </div>
 
   <section class="panel setup-step-panel setup-wizard-panel">
@@ -99,23 +99,34 @@
         <label class="setup-field">Maximum players<input name="max_players" type="number" min="1" step="1" value="{{.Server.MaxPlayers}}" inputmode="numeric"><span class="field-help">Used for the player limit and memory recommendations.</span></label>
 
       </div>
-      <p class="field-help">Timezone follows the appliance settings. Change it in system Date &amp; Time.</p>
       </div>
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button type="submit">Continue</button></div></div>
     </form>
 
     {{else if eq .CurrentStep 2}}
-    <form method="post" action="/setup/connections" class="setup-form" data-setup-connections>
+    <form method="post" action="/setup/connections" class="setup-form" data-setup-connections data-setup-version>
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <label class="date-time-automatic"><span><strong>Enable Bedrock cross-play</strong><small class="field-help">{{if eq .Minecraft.ServerType "vanilla"}}Select Paper or Purpur on Step 1 to enable Bedrock cross-play.{{else}}Allow supported Bedrock clients to join through Geyser/Floodgate. Compatibility is checked on the Version step.{{end}}</small></span><input class="date-time-switch" type="checkbox" name="bedrock_enabled" data-bedrock-toggle {{if eq .Minecraft.ServerType "vanilla"}}disabled{{end}} {{if .Server.BedrockEnabled}}checked{{end}}></label>
+      <label class="date-time-automatic"><span><strong>Enable Bedrock cross-play</strong><small class="field-help">{{if eq .Minecraft.ServerType "vanilla"}}Select Paper or Purpur on Step 1 to enable Bedrock cross-play.{{else}}Allow supported Bedrock clients to join through Geyser/Floodgate. Compatibility is checked below.{{end}}</small></span><input class="date-time-switch" type="checkbox" name="bedrock_enabled" data-bedrock-toggle {{if eq .Minecraft.ServerType "vanilla"}}disabled{{end}} {{if .Server.BedrockEnabled}}checked{{end}}></label>
       <div class="setup-form-grid">
-        <label class="setup-field">Minecraft Java port<input name="java_port" type="number" min="1" max="65535" value="{{.Minecraft.JavaPort}}" inputmode="numeric"><span class="field-help">Default: 25565/TCP.</span></label>
+        <label class="setup-field">Minecraft Java TCP port<input name="java_port" type="number" min="1" max="65535" value="{{.Minecraft.JavaPort}}" inputmode="numeric"><span class="field-help">Default: 25565/TCP.</span></label>
         <label class="setup-field" data-bedrock-port-field>Bedrock UDP port<input name="bedrock_port" type="number" min="1" max="65535" value="{{.Minecraft.BedrockPort}}" inputmode="numeric"><span class="field-help">Default: 19132/UDP. Used only when Bedrock cross-play is enabled.</span></label>
       </div>
 
+      <div class="setup-version-columns">
+        <section class="setup-version-column" aria-label="Server update channel">
+        <label class="setup-field">Server update channel<select id="image-channel" data-current-tag="{{.Minecraft.ImageTag}}"><option value="stable" {{if eq .Minecraft.ImageTag "stable"}}selected{{end}}>Stable (recommended)</option><option value="latest" {{if eq .Minecraft.ImageTag "latest"}}selected{{end}}>Latest</option><option value="custom" {{if and (ne .Minecraft.ImageTag "stable") (ne .Minecraft.ImageTag "latest")}}selected{{end}}>Custom</option></select><span class="field-help">Controls how JustVoxel server software updates are delivered. Choose the Minecraft game version separately.</span></label>
+        <label id="custom-image-tag-field" class="setup-field" {{if or (eq .Minecraft.ImageTag "stable") (eq .Minecraft.ImageTag "latest")}}hidden{{end}}>Custom server update tag<input id="custom-image-tag" value="{{if and (ne .Minecraft.ImageTag "stable") (ne .Minecraft.ImageTag "latest")}}{{.Minecraft.ImageTag}}{{end}}" autocomplete="off" placeholder="Enter a supported update tag"><span class="field-help">Advanced option. Use an upstream tag only when you know you need it.</span></label>
+        <input id="image-tag" name="image_tag" type="hidden" value="{{.Minecraft.ImageTag}}">
+        </section>
+        <section class="setup-version-column" aria-label="Minecraft version">
+        <label class="setup-field">Minecraft version<select id="version-policy" name="version_policy"><option value="recommended" {{if eq .Minecraft.VersionPolicy "recommended"}}selected{{end}}>Recommended</option><option value="latest" {{if eq .Minecraft.VersionPolicy "latest"}}selected{{end}}>Latest</option><option value="pinned" {{if eq .Minecraft.VersionPolicy "pinned"}}selected{{end}}>Specific version</option></select></label>
+        <label id="specific-version-field" class="setup-field setup-field-wide" {{if ne .Minecraft.VersionPolicy "pinned"}}hidden{{end}}>Specific Minecraft version<input id="minecraft-version" name="version" value="{{.Minecraft.Version}}" autocomplete="off"><span class="field-help">Choose an exact version. Available pre-release builds can also be used.</span></label>
+        <div class="setup-version-preview" id="setup-version-preview" role="status" aria-live="polite">Checking available versions…</div>
+        </section>
       </div>
-      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
+      </div>
+      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next" disabled>Continue</button></div></div>
     </form>
 
     {{else if eq .CurrentStep 3}}
@@ -135,26 +146,6 @@
     </form>
 
     {{else if eq .CurrentStep 4}}
-    <form method="post" action="/setup/version" class="setup-form" data-setup-version>
-      <div class="setup-step-content">
-      <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <div class="setup-version-columns">
-        <section class="setup-version-column" aria-label="Container updates">
-        <label class="setup-field">Container updates<select id="image-channel" data-current-tag="{{.Minecraft.ImageTag}}"><option value="stable" {{if eq .Minecraft.ImageTag "stable"}}selected{{end}}>Stable (recommended)</option><option value="latest" {{if eq .Minecraft.ImageTag "latest"}}selected{{end}}>Latest</option><option value="custom" {{if and (ne .Minecraft.ImageTag "stable") (ne .Minecraft.ImageTag "latest")}}selected{{end}}>Custom</option></select><span class="field-help">Controls server container software updates. This does not choose the Minecraft game version below.</span></label>
-        <label id="custom-image-tag-field" class="setup-field" {{if or (eq .Minecraft.ImageTag "stable") (eq .Minecraft.ImageTag "latest")}}hidden{{end}}>Custom container tag<input id="custom-image-tag" value="{{if and (ne .Minecraft.ImageTag "stable") (ne .Minecraft.ImageTag "latest")}}{{.Minecraft.ImageTag}}{{end}}" autocomplete="off" placeholder="Enter a supported container tag"><span class="field-help">Advanced option. Use an upstream tag only when you know you need it.</span></label>
-        <input id="image-tag" name="image_tag" type="hidden" value="{{.Minecraft.ImageTag}}">
-        </section>
-        <section class="setup-version-column" aria-label="Minecraft version">
-        <label class="setup-field">Minecraft version<select id="version-policy" name="version_policy"><option value="recommended" {{if eq .Minecraft.VersionPolicy "recommended"}}selected{{end}}>Recommended</option><option value="latest" {{if eq .Minecraft.VersionPolicy "latest"}}selected{{end}}>Latest</option><option value="pinned" {{if eq .Minecraft.VersionPolicy "pinned"}}selected{{end}}>Specific version</option></select></label>
-        <label id="specific-version-field" class="setup-field setup-field-wide" {{if ne .Minecraft.VersionPolicy "pinned"}}hidden{{end}}>Specific Minecraft version<input id="minecraft-version" name="version" value="{{.Minecraft.Version}}" autocomplete="off"><span class="field-help">Choose an exact version. Available pre-release builds can also be used.</span></label>
-        <div class="setup-version-preview" id="setup-version-preview" role="status" aria-live="polite">Checking available versions…</div>
-        </section>
-      </div>
-      </div>
-      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next" disabled>Continue</button></div></div>
-    </form>
-
-    {{else if eq .CurrentStep 5}}
     <form method="post" action="/setup/storage" class="setup-form" data-setup-storage-form data-csrf="{{.CSRF}}">
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
@@ -171,8 +162,8 @@
         </button>
         <button class="setup-storage-choice{{if eq .Storage.Type "partition"}} is-selected{{end}}" type="button" data-setup-storage-internal>
           <span class="setup-storage-choice-kicker">Custom</span>
-          <strong>Use an existing local filesystem / partition</strong>
-          <small>Choose a usable filesystem reported by JustVoxel. Existing files are preserved.</small>
+          <strong>Use another internal disk</strong>
+          <small>Choose an existing Linux filesystem, format a blank partition, or create one in unallocated space.</small>
         </button>
       </div>
 
@@ -185,74 +176,8 @@
       </section>
 
       <section class="setup-storage-browser" data-setup-storage-internal-panel {{if ne .Storage.Type "partition"}}hidden{{end}}>
-        <div class="setup-existing-filesystems" aria-label="Existing local filesystems">
-          {{range .MinecraftFilesystems}}
-          <button class="setup-storage-segment" type="button" data-setup-existing-partition data-setup-select-existing data-device="{{.Path}}" data-mountpoint="{{.Mountpoint}}">
-            <strong>{{.Model}}{{if .Label}} · {{.Label}}{{end}}</strong>
-            <span>{{.Size}} · {{.Filesystem}} · <code>{{.Path}}</code></span>
-            <small>UUID: {{.UUID}}{{if .Mountpoint}} · Mounted at {{.Mountpoint}}{{else}} · Not mounted{{end}}{{if .UsageKnown}} · {{.Available}} available{{end}}</small>
-          </button>
-          {{else}}<p class="notice">No usable existing internal filesystem was reported.</p>{{end}}
-        </div>
-        <details class="setup-advanced-storage">
-        <summary>Advanced Storage — disk preparation</summary>
-        <div class="setup-browser-intro"><div class="setup-partition-instruction"><strong>Choose partition</strong><span>Select a ready filesystem or prepare a blank partition.</span></div>
-        <div class="setup-storage-browser-heading">
-          <div><strong>Internal disks</strong><span>Only internal storage is offered for live Minecraft data.</span></div>
-          <span class="badge">{{len .StorageDisks}}</span>
-        </div></div>
-
-        {{if .StorageDisks}}
-        <div class="storage-disk-grid" aria-label="Physical disks">
-          {{range .StorageDisks}}
-          <button class="storage-disk-card{{if .External}} storage-disk-card-external{{end}}" type="button" data-setup-disk="{{.Path}}" data-disk-identity="{{.Path}}|{{.Model}}|{{.Size}}|{{.Transport}}" aria-pressed="false">
-            <span class="storage-disk-icon" aria-hidden="true"><svg viewBox="0 0 24 24">{{if .External}}<path d="M9 3h6v5h2v9H7V8h2z"></path><path d="M11 3v3M13 3v3M9 20h6"></path>{{else}}<rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M7 15h.01M17 15h.01M7 9h10"></path>{{end}}</svg></span>
-            <span class="storage-disk-copy"><strong>{{if .Model}}{{.Model}}{{else}}{{.Name}}{{end}}</strong><span>{{.Size}}{{if .External}} · USB{{else}} · Internal{{end}}</span><small><code>{{.Path}}</code>{{if .SystemDisk}} · System disk{{end}}</small></span>
-          </button>
-          {{end}}
-        </div>
-        <div class="setup-partition-browser">
-          {{range .StorageDisks}}{{$disk := .}}
-          <article class="storage-partition-group" data-setup-disk-partitions="{{.Path}}" hidden>
-            {{if or .Partitions .FreeSpaces}}
-            <div class="storage-partition-grid">
-              {{range .Partitions}}
-              <button class="setup-storage-segment storage-partition-card" type="button" data-storage-partition
-                      data-path="{{.Path}}" data-device="{{.Path}}" data-type="part" data-size="{{.Size}}"
-                      data-filesystem="{{.Filesystem}}" data-uuid="{{.UUID}}" data-label="{{.Label}}"
-                      data-mountpoints="{{.Mountpoint}}" data-system="{{if .Protected}}Yes{{else}}No{{end}}"
-                      data-mounted="{{if .Mountpoint}}Yes{{else}}No{{end}}" data-readonly="No"
-                      {{if and .Formatted (not .Protected)}}data-setup-existing-partition data-mountpoint="{{.Mountpoint}}"{{end}}>
-                <span class="setup-storage-segment-state storage-partition-state">{{if .Protected}}Protected{{else if .Formatted}}Ready{{else if eq .Filesystem ""}}Blank{{else}}Not ready{{end}}</span>
-                <strong>{{.Path}}</strong><span>{{.Size}}{{if .Filesystem}} · {{.Filesystem}}{{end}}</span>
-              </button>
-              {{end}}
-              {{range .FreeSpaces}}
-              <button class="setup-storage-segment storage-partition-card" type="button"
-                      data-storage-free-space
-                      data-device="{{.Device}}" data-size="{{.Size}}"
-                      data-start="{{.Start}}" data-end="{{.End}}" data-size-bytes="{{.SizeBytes}}">
-                <span class="setup-storage-segment-state storage-partition-state">Unallocated</span>
-                <strong>{{.Size}} free</strong>
-              </button>
-              {{end}}
-            </div>
-            {{else}}
-            <div class="notice compact">No usable existing filesystem or unallocated segment was reported on this disk.</div>
-            {{end}}
-          </article>
-          {{end}}
-        </div>
-        {{else}}
-        <div class="notice">No internal disk with a usable Minecraft storage target was reported.</div>
-        {{end}}
-
-        {{if gt .ExternalStorageCount 0}}
-        <div class="notice setup-storage-external-note"><strong>External drives are not offered for Minecraft data.</strong><span>{{.ExternalStorageCount}} USB/external disk{{if ne .ExternalStorageCount 1}}s were{{else}} was{{end}} detected. External storage remains appropriate for backups and will be available on the Backup step.</span></div>
-        {{end}}
-        <dialog class="storage-detail-dialog setup-storage-operation" data-storage-detail-dialog aria-label="Partition details">{{template "storage_partition_operation" .}}</dialog>
-        <dialog class="storage-detail-dialog setup-storage-operation" data-storage-free-detail-dialog aria-label="Unallocated space details">{{template "storage_free_operation" .}}</dialog>
-        </details>
+        {{template "storage_browser_content" .StorageBrowser}}
+        {{if gt .ExternalStorageCount 0}}<div class="notice setup-storage-external-note">External drives are unavailable for Minecraft data. Use them for backups in Step 5.</div>{{end}}
       </section>
 
 
@@ -260,11 +185,9 @@
       </div>
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
       <input type="hidden" value="{{.CSRF}}" data-storage-action-csrf>
-      {{template "storage_partition_create_review" .}}
-      {{template "storage_partition_action_review" .}}
     </form>
 
-    {{else if eq .CurrentStep 6}}
+    {{else if eq .CurrentStep 5}}
     <form method="post" action="/setup/backups" class="setup-form" data-setup-backup-form data-csrf="{{.CSRF}}" data-data-device="{{.Storage.Device}}" data-data-mount="{{.Storage.MountPoint}}">
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
@@ -312,60 +235,7 @@
       </section>
 
       <section class="setup-storage-browser" data-setup-backup-panel="partition" {{if ne .Backups.Type "partition"}}hidden{{end}}>
-        <div class="setup-existing-filesystems" aria-label="Existing backup filesystems">
-          {{range .Filesystems}}
-          <button class="setup-storage-segment" type="button" data-setup-backup-existing data-setup-select-existing data-device="{{.Path}}" data-mountpoint="{{.Mountpoint}}">
-            <strong>{{.Model}}{{if .Label}} · {{.Label}}{{end}}</strong><span>{{.Size}} · {{.Filesystem}} · {{.Path}}</span>
-            <small>UUID: {{.UUID}}{{if .Mountpoint}} · Mounted at {{.Mountpoint}}{{end}}{{if .UsageKnown}} · {{.Available}} available{{end}}</small>
-          </button>
-          {{else}}<p class="notice">No usable existing backup filesystem was reported.</p>{{end}}
-        </div>
-        <details class="setup-advanced-storage"><summary>Advanced Storage — disk preparation</summary>
-        <div class="setup-browser-intro"><div class="setup-partition-instruction"><strong>Choose partition</strong><span>Select a ready filesystem or prepare a blank partition.</span></div>
-        <div class="setup-storage-browser-heading"><div><strong>Local backup disks</strong><span>Internal and USB/external storage are both allowed for backups.</span></div><span class="badge">{{len .BackupDisks}}</span></div></div>
-        {{if .BackupDisks}}
-        <div class="storage-disk-grid" aria-label="Physical disks">
-          {{range .BackupDisks}}
-          <button class="storage-disk-card{{if .External}} storage-disk-card-external{{end}}" type="button" data-setup-disk="{{.Path}}" data-disk-identity="{{.Path}}|{{.Model}}|{{.Size}}|{{.Transport}}" aria-pressed="false">
-            <span class="storage-disk-icon" aria-hidden="true"><svg viewBox="0 0 24 24">{{if .External}}<path d="M9 3h6v5h2v9H7V8h2z"></path><path d="M11 3v3M13 3v3M9 20h6"></path>{{else}}<rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M7 15h.01M17 15h.01M7 9h10"></path>{{end}}</svg></span>
-            <span class="storage-disk-copy"><strong>{{if .Model}}{{.Model}}{{else}}{{.Name}}{{end}}</strong><span>{{.Size}}{{if .External}} · USB{{else}} · Internal{{end}}</span><small><code>{{.Path}}</code>{{if .SystemDisk}} · System disk{{end}}</small></span>
-          </button>
-          {{end}}
-        </div>
-        <div class="setup-partition-browser">
-          {{range .BackupDisks}}{{$disk := .}}
-          <article class="storage-partition-group" data-setup-disk-partitions="{{.Path}}" hidden>
-            {{if or .Partitions .FreeSpaces}}
-            <div class="storage-partition-grid">
-              {{range .Partitions}}
-              <button class="setup-storage-segment storage-partition-card" type="button" data-storage-partition
-                      data-path="{{.Path}}" data-device="{{.Path}}" data-type="part" data-size="{{.Size}}"
-                      data-filesystem="{{.Filesystem}}" data-uuid="{{.UUID}}" data-label="{{.Label}}"
-                      data-mountpoints="{{.Mountpoint}}" data-system="{{if .Protected}}Yes{{else}}No{{end}}"
-                      data-mounted="{{if .Mountpoint}}Yes{{else}}No{{end}}" data-readonly="No"
-                      {{if and .Formatted (not .Protected)}}data-setup-backup-existing data-mountpoint="{{.Mountpoint}}"{{end}}>
-                <span class="setup-storage-segment-state storage-partition-state">{{if .Protected}}Protected{{else if .Formatted}}Ready{{else if eq .Filesystem ""}}Blank{{else}}Not ready{{end}}</span>
-                <strong>{{.Path}}</strong><span>{{.Size}}{{if .Filesystem}} · {{.Filesystem}}{{end}}</span>
-              </button>
-              {{end}}
-              {{range .FreeSpaces}}
-              <button class="setup-storage-segment storage-partition-card" type="button"
-                      data-storage-free-space
-                      data-device="{{.Device}}" data-size="{{.Size}}"
-                      data-start="{{.Start}}" data-end="{{.End}}" data-size-bytes="{{.SizeBytes}}">
-                <span class="setup-storage-segment-state storage-partition-state">Unallocated</span>
-                <strong>{{.Size}} free</strong>
-              </button>
-              {{end}}
-            </div>
-            {{else}}<div class="notice compact">No usable existing filesystem or unallocated segment was reported on this disk.</div>{{end}}
-          </article>
-          {{end}}
-        </div>
-        {{else}}<div class="notice">No local backup disk with a usable target was reported.</div>{{end}}
-        <dialog class="storage-detail-dialog setup-storage-operation" data-storage-detail-dialog aria-label="Partition details">{{template "storage_partition_operation" .}}</dialog>
-        <dialog class="storage-detail-dialog setup-storage-operation" data-storage-free-detail-dialog aria-label="Unallocated space details">{{template "storage_free_operation" .}}</dialog>
-        </details>
+        {{template "storage_browser_content" .BackupBrowser}}
       </section>
 
       <section data-setup-backup-panel="nfs" {{if ne .Backups.Type "nfs"}}hidden{{end}}>
@@ -399,8 +269,6 @@
       </div>
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
       <input type="hidden" value="{{.CSRF}}" data-storage-action-csrf>
-      {{template "storage_partition_create_review" .}}
-      {{template "storage_partition_action_review" .}}
     </form>
 
     {{else}}

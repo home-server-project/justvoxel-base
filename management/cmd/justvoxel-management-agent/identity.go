@@ -80,7 +80,14 @@ func (s *server) sessionStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "invalid session")
 		return
 	}
+	profile, err := s.store.readDateTimeProfile()
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "Date and time display settings are unavailable")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
+		"time_format": profile.TimeFormat,
+		"date_format": profile.DateFormat,
 		"username":    sess.Username,
 		"role":        sess.Role,
 		"auth_source": sess.AuthSource,
