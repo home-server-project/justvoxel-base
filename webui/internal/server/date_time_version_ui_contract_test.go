@@ -209,7 +209,12 @@ func TestApprovedSystemAndNetworkRepairContracts(t *testing.T) {
 			t.Fatalf("Network action ordering missing %s", want)
 		}
 	}
-	for _, want := range []string{`[data-action="activate"]{margin-left:auto}`, `.toggle-line{display:flex;align-items:center;justify-content:flex-end;gap:.5rem`} {
+	for _, want := range []string{
+		`.network-provider-card>.network-inline-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));`,
+		`.network-provider-card [data-action="deactivate"]{grid-column:1;justify-self:start}`,
+		`.network-provider-card [data-action="activate"]{grid-column:2;justify-self:end}`,
+		`.toggle-line{display:flex;align-items:center;justify-content:flex-end;gap:.5rem`,
+	} {
 		if !strings.Contains(networkCSS, want) {
 			t.Fatalf("Network alignment missing %s", want)
 		}

@@ -25,7 +25,6 @@ func TestWizardSharedDesktopFrame(t *testing.T) {
 		".setup-advanced .setup-advanced-frame .setup-form{flex:1;min-height:0}",
 		".setup-advanced .setup-advanced-frame .setup-step-content{display:flex;flex:1",
 		".setup-advanced .setup-advanced-frame .setup-step-actions{flex:none;min-height:55px;margin:.7rem 0 0;padding:.45rem .6rem}",
-		".setup-advanced .setup-review-content{flex:1;min-height:0}",
 		".setup-advanced .setup-storage-browser>.storage-browser-content{display:flex;flex:1",
 		".setup-advanced .storage-partition-grid{min-height:0;flex:0 1 auto}",
 	} {
@@ -72,6 +71,15 @@ func TestWizardSharedDesktopFrame(t *testing.T) {
 	review := correctionSource(t, "templates/setup_review.html")
 	if !strings.Contains(review, `setup-review-panel{{if ne .SetupMode "recommended"}} setup-advanced-frame{{end}}`) {
 		t.Fatal("Advanced Review must share the frame without changing Recommended")
+	}
+	for _, forbidden := range []string{
+		".setup-advanced .setup-review-header",
+		".setup-advanced .setup-review-summary",
+		".setup-advanced .setup-review-warnings",
+	} {
+		if strings.Contains(css, forbidden) {
+			t.Fatalf("Advanced Review must retain normal spacing and typography without internal scrolling: %q", forbidden)
+		}
 	}
 	if strings.Index(review, `class="setup-review-content"`) > strings.Index(review, `class="setup-step-actions setup-actions-split"`) {
 		t.Fatal("Review navigation precedes content")

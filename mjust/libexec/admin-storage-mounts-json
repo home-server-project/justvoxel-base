@@ -5,8 +5,7 @@ source /usr/libexec/justvoxel/mjust/admin-storage-actions-common.sh
 require_root
 storage_action_load_config
 
-STORAGE_MOUNT_FSTAB="${STORAGE_MOUNT_FSTAB:-/etc/fstab}"
-STORAGE_MOUNT_STATE_DIR="${STORAGE_MOUNT_STATE_DIR:-/etc/justvoxel/storage-mounts}"
+source /usr/libexec/justvoxel/mjust/storage-mount-ownership.sh
 
 REQUEST_JSON=''
 PLAN_JSON=''
@@ -18,88 +17,6 @@ json_error() {
 
 append_warning() {
     jq -c --arg message "$2" '. + [$message]' <<< "$1"
-}
-
-storage_mount_passno() {
-    [[ $1 == ext4 ]] && printf '2\n' || printf '0\n'
-}
-
-storage_mount_fstab_line() {
-    local uuid="$1" mountpoint="$2" filesystem="$3" mount_type mount_options
-    mount_type="$(storage_action_mount_type "${filesystem}")" || return 1
-    mount_options="$(storage_action_mount_options "${filesystem}")" || return 1
-    printf 'UUID=%s %s %s %s,nofail,x-systemd.device-timeout=10s 0 %s\n' \
-        "${uuid}" "${mountpoint}" "${mount_type}" "${mount_options}" "$(storage_mount_passno "${filesystem}")"
-}
-
-storage_mount_state_path() {
-    [[ $1 =~ ^[A-Za-z0-9._-]+$ ]] || return 1
-    printf '%s/%s.conf\n' "${STORAGE_MOUNT_STATE_DIR}" "$1"
-}
-
-storage_mount_load_state() {
-    local uuid="$1" state
-    state="$(storage_mount_state_path "${uuid}")" || return 1
-    [[ -r ${state} ]] || return 1
-    awk -F= '
-        NF < 2 { bad=1; next }
-        $1 != "schema" && $1 != "uuid" && $1 != "mount_point" && $1 != "filesystem" && $1 != "created_dir" { bad=1 }
-        END { exit bad ? 1 : 0 }
-    ' "${state}" || return 1
-    MOUNT_STATE_SCHEMA="$(awk -F= '$1=="schema"{print substr($0,index($0,"=")+1)}' "${state}")"
-    MOUNT_STATE_UUID="$(awk -F= '$1=="uuid"{print substr($0,index($0,"=")+1)}' "${state}")"
-    MOUNT_STATE_MOUNT="$(awk -F= '$1=="mount_point"{print substr($0,index($0,"=")+1)}' "${state}")"
-    MOUNT_STATE_FILESYSTEM="$(awk -F= '$1=="filesystem"{print substr($0,index($0,"=")+1)}' "${state}")"
-    MOUNT_STATE_CREATED="$(awk -F= '$1=="created_dir"{print substr($0,index($0,"=")+1)}' "${state}")"
-    [[ ${MOUNT_STATE_SCHEMA} == v1 && ${MOUNT_STATE_UUID} == "${uuid}" ]] || return 1
-    [[ -n ${MOUNT_STATE_MOUNT} && -n ${MOUNT_STATE_FILESYSTEM} ]] || return 1
-    [[ ${MOUNT_STATE_CREATED} == true || ${MOUNT_STATE_CREATED} == false ]] || return 1
-}
-
-storage_mount_fstab_matches() {
-    local uuid="$1" mountpoint="$2"
-    [[ -r ${STORAGE_MOUNT_FSTAB} ]] || return 0
-    awk -v source="UUID=${uuid}" -v mount="${mountpoint}" '
-        /^[[:space:]]*#/ || NF < 2 { next }
-        $1 == source || (mount != "" && $2 == mount) { print }
-    ' "${STORAGE_MOUNT_FSTAB}"
-}
-
-storage_mount_first_fstab_target() {
-    local uuid="$1"
-    [[ -r ${STORAGE_MOUNT_FSTAB} ]] || return 0
-    awk -v source="UUID=${uuid}" '
-        /^[[:space:]]*#/ || NF < 2 { next }
-        $1 == source { print $2; exit }
-    ' "${STORAGE_MOUNT_FSTAB}"
-}
-
-storage_mount_ownership() {
-    local uuid="$1" requested_mount="$2" filesystem="$3" matches expected count state
-    state="$(storage_mount_state_path "${uuid}")" || { printf 'conflict\n'; return 0; }
-    if [[ -e ${state} ]]; then
-        if ! storage_mount_load_state "${uuid}"; then
-            printf 'conflict\n'
-            return 0
-        fi
-        storage_validate_mountpoint_path "${MOUNT_STATE_MOUNT}" >/dev/null 2>&1 || { printf 'conflict\n'; return 0; }
-        [[ ${MOUNT_STATE_FILESYSTEM} == "${filesystem}" ]] || { printf 'conflict\n'; return 0; }
-        expected="$(storage_mount_fstab_line "${uuid}" "${MOUNT_STATE_MOUNT}" "${filesystem}")"
-        matches="$(storage_mount_fstab_matches "${uuid}" "${MOUNT_STATE_MOUNT}")"
-        count="$(sed '/^$/d' <<< "${matches}" | wc -l)"
-        [[ ${count} -eq 1 && ${matches} == "${expected}" ]] || { printf 'conflict\n'; return 0; }
-        if [[ -n ${requested_mount} && ${requested_mount} != "${MOUNT_STATE_MOUNT}" ]]; then
-            printf 'other_mount\n'
-        else
-            printf 'justvoxel\n'
-        fi
-        return 0
-    fi
-    if [[ -n $(storage_mount_fstab_matches "${uuid}" "${requested_mount}") ]]; then
-        printf 'external\n'
-    else
-        printf 'none\n'
-    fi
 }
 
 storage_mount_fingerprint() {
@@ -146,6 +63,7 @@ prepare_plan() {
     local operation device requested_mount filesystem uuid current_mount role size ownership fingerprint
     local mounted=false changed=true rc created=false
     PLAN_WARNINGS='[]'
+    STORAGE_MOUNT_ORPHAN_LINE=''
     storage_mount_read_request || { json_error 'Invalid permanent-mount request.'; return 1; }
 
     operation="$(jq -r '.operation // ""' <<< "${REQUEST_JSON}")"
@@ -190,8 +108,12 @@ prepare_plan() {
             ownership="$(storage_mount_ownership "${uuid}" "${requested_mount}" "${filesystem}")"
             case "${ownership}" in
                 external)
-                    json_error 'This filesystem or mount location already has a permanent mount configured outside JustVoxel. JustVoxel will not replace it.'
-                    return 1
+                    if [[ -z ${current_mount} ]] && storage_mount_prove_orphan "${device}" "${uuid}" "${requested_mount}" "${filesystem}"; then
+                        ownership=none
+                    else
+                        json_error 'This filesystem or mount location already has a permanent mount configured outside JustVoxel. JustVoxel will not replace it.'
+                        return 1
+                    fi
                     ;;
                 conflict)
                     json_error 'The saved permanent-mount configuration is inconsistent. Nothing was changed.'
@@ -250,42 +172,6 @@ prepare_plan() {
         '{operation:$operation,device:$device,filesystem:$filesystem,uuid:$uuid,mount_point:$mount_point,current_mount_point:$current_mount_point,role:$role,persistence:$ownership,fingerprint:$fingerprint,size_bytes:$size_bytes,mounted:$mounted,changed:$changed,directory_created:$directory_created}')"
 }
 
-storage_mount_write_state() {
-    local uuid="$1" mountpoint="$2" filesystem="$3" created="$4" state tmp
-    state="$(storage_mount_state_path "${uuid}")" || return 1
-    install -d -m0700 -o root -g root "${STORAGE_MOUNT_STATE_DIR}" || return 1
-    tmp="$(mktemp "${STORAGE_MOUNT_STATE_DIR}/.mount.XXXXXX")" || return 1
-    printf 'schema=v1\nuuid=%s\nmount_point=%s\nfilesystem=%s\ncreated_dir=%s\n' \
-        "${uuid}" "${mountpoint}" "${filesystem}" "${created}" > "${tmp}" || { rm -f -- "${tmp}"; return 1; }
-    install -o root -g root -m0600 "${tmp}" "${state}" || { rm -f -- "${tmp}"; return 1; }
-    rm -f -- "${tmp}"
-}
-
-storage_mount_append_fstab() {
-    local line="$1" tmp
-    [[ -e ${STORAGE_MOUNT_FSTAB} ]] || : > "${STORAGE_MOUNT_FSTAB}"
-    tmp="$(mktemp "$(dirname -- "${STORAGE_MOUNT_FSTAB}")/.fstab.justvoxel-mount.XXXXXX")" || return 1
-    cat -- "${STORAGE_MOUNT_FSTAB}" > "${tmp}" || { rm -f -- "${tmp}"; return 1; }
-    [[ ! -s ${tmp} ]] || printf '\n' >> "${tmp}"
-    printf '%s\n' "${line}" >> "${tmp}" || { rm -f -- "${tmp}"; return 1; }
-    install -o root -g root -m0644 "${tmp}" "${STORAGE_MOUNT_FSTAB}" || { rm -f -- "${tmp}"; return 1; }
-    rm -f -- "${tmp}"
-}
-
-storage_mount_remove_fstab_line() {
-    local line="$1" tmp removed
-    tmp="$(mktemp "$(dirname -- "${STORAGE_MOUNT_FSTAB}")/.fstab.justvoxel-mount.XXXXXX")" || return 1
-    removed="$(mktemp /tmp/justvoxel-mount-removed.XXXXXX)" || { rm -f -- "${tmp}"; return 1; }
-    awk -v expected="${line}" -v removed="${removed}" '
-        $0 == expected && !done { print "yes" > removed; done=1; next }
-        { print }
-    ' "${STORAGE_MOUNT_FSTAB}" > "${tmp}" || { rm -f -- "${tmp}" "${removed}"; return 1; }
-    grep -Fqx yes "${removed}" || { rm -f -- "${tmp}" "${removed}"; return 1; }
-    rm -f -- "${removed}"
-    install -o root -g root -m0644 "${tmp}" "${STORAGE_MOUNT_FSTAB}" || { rm -f -- "${tmp}"; return 1; }
-    rm -f -- "${tmp}"
-}
-
 plan_json() {
     prepare_plan || return 0
     jq -n --argjson proposed "${PLAN_JSON}" --argjson warnings "${PLAN_WARNINGS}" '{ok:true,proposed:$proposed,warnings:$warnings,applied:false}'
@@ -320,9 +206,10 @@ status_json() {
 }
 
 apply_json() {
-    local submitted operation device filesystem uuid mountpoint current ownership created state line
+    local submitted operation device filesystem uuid mountpoint current ownership created state line reviewed_orphan_line
     local fstab_snapshot state_snapshot='' fstab_existed=false state_existed=false created_now=false mounted_by_us=false was_mounted=false path_removed=false actual_uuid
     prepare_plan || return 0
+    reviewed_orphan_line="${STORAGE_MOUNT_ORPHAN_LINE}"
     submitted="$(jq -r '.fingerprint // ""' <<< "${REQUEST_JSON}")"
     [[ -n ${submitted} && ${submitted} == "$(jq -r '.fingerprint' <<< "${PLAN_JSON}")" ]] || {
         json_error 'The selected filesystem or permanent-mount settings changed after Review. Nothing was changed. Review the action again.'
@@ -336,9 +223,17 @@ apply_json() {
     state="$(storage_mount_state_path "${uuid}")" || { json_error 'Invalid filesystem identity.'; return 0; }
     line="$(storage_mount_fstab_line "${uuid}" "${mountpoint}" "${filesystem}")"
 
-    fstab_snapshot="$(mktemp /etc/.fstab.justvoxel-mount-before.XXXXXX)" || { json_error 'Could not prepare a permanent-mount rollback point.'; return 0; }
-    if [[ -e ${STORAGE_MOUNT_FSTAB} ]]; then cp -a -- "${STORAGE_MOUNT_FSTAB}" "${fstab_snapshot}"; fstab_existed=true; else : > "${fstab_snapshot}"; fi
-    if [[ -e ${state} ]]; then state_snapshot="$(mktemp /etc/.justvoxel-mount-state-before.XXXXXX)"; cp -a -- "${state}" "${state_snapshot}"; state_existed=true; fi
+    fstab_snapshot="$(mktemp "$(dirname -- "${STORAGE_MOUNT_FSTAB}")/.fstab.justvoxel-mount-before.XXXXXX")" || { json_error 'Could not prepare a permanent-mount rollback point.'; return 0; }
+    if [[ -e ${STORAGE_MOUNT_FSTAB} ]]; then
+        cp -a -- "${STORAGE_MOUNT_FSTAB}" "${fstab_snapshot}" || { rm -f -- "${fstab_snapshot}"; json_error 'Could not snapshot permanent-mount configuration.'; return 0; }
+        fstab_existed=true
+    else : > "${fstab_snapshot}"; fi
+    if [[ -e ${state} ]]; then
+        state_snapshot="$(mktemp "$(dirname -- "${STORAGE_MOUNT_FSTAB}")/.justvoxel-mount-state-before.XXXXXX")" && cp -a -- "${state}" "${state_snapshot}" || {
+            rm -f -- "${fstab_snapshot}" "${state_snapshot}"; json_error 'Could not snapshot permanent-mount ownership.'; return 0;
+        }
+        state_existed=true
+    fi
 
     restore() {
         local ok=true
@@ -351,20 +246,33 @@ apply_json() {
         [[ ${ok} == true ]]
     }
 
+    permanent_mount_fail() {
+        if restore; then
+            rm -f -- "${fstab_snapshot}" "${state_snapshot}"
+            json_error "$1 The previous configuration was restored."
+        else
+            json_error "$1 Rollback could not complete; the rollback snapshots were preserved."
+        fi
+    }
+
     case "${operation}" in
         persist)
             if [[ ${ownership} != justvoxel ]]; then
                 if [[ ! -d ${mountpoint} ]]; then install -d -m0755 -o root -g root "${mountpoint}" || { rm -f -- "${fstab_snapshot}" "${state_snapshot}"; json_error 'Could not create the selected mount location.'; return 0; }; created_now=true; created=true; fi
-                storage_mount_append_fstab "${line}" && storage_mount_write_state "${uuid}" "${mountpoint}" "${filesystem}" "${created}" && systemctl daemon-reload >/dev/null 2>&1 || {
-                    restore >/dev/null 2>&1 || true; rm -f -- "${fstab_snapshot}" "${state_snapshot}"; json_error 'Could not save the permanent mount safely. The previous configuration was restored.'; return 0;
+                { [[ -z ${reviewed_orphan_line} ]] || {
+                    storage_mount_prove_orphan "${device}" "${uuid}" "${mountpoint}" "${filesystem}" &&
+                    [[ ${STORAGE_MOUNT_ORPHAN_LINE} == "${reviewed_orphan_line}" ]] &&
+                    storage_mount_remove_fstab_line "${reviewed_orphan_line}"
+                }; } && storage_mount_append_fstab "${line}" && storage_mount_write_state "${uuid}" "${mountpoint}" "${filesystem}" "${created}" && systemctl daemon-reload >/dev/null 2>&1 || {
+                    permanent_mount_fail 'Could not save the permanent mount safely.'; return 0;
                 }
             fi
             if [[ -z ${current} ]]; then
-                storage_action_host_mount "${mountpoint}" >/dev/null 2>&1 || { restore >/dev/null 2>&1 || true; rm -f -- "${fstab_snapshot}" "${state_snapshot}"; json_error 'The filesystem could not be mounted. The previous configuration was restored.'; return 0; }
+                storage_action_host_mount "${mountpoint}" >/dev/null 2>&1 || { permanent_mount_fail 'The filesystem could not be mounted.'; return 0; }
                 mounted_by_us=true
             fi
             actual_uuid="$(storage_action_host_mount_identity UUID "${mountpoint}" 2>/dev/null || true)"
-            [[ ${actual_uuid} == "${uuid}" ]] || { restore >/dev/null 2>&1 || true; rm -f -- "${fstab_snapshot}" "${state_snapshot}"; json_error 'The mounted filesystem did not match the reviewed filesystem. The previous configuration was restored.'; return 0; }
+            [[ ${actual_uuid} == "${uuid}" ]] || { permanent_mount_fail 'The mounted filesystem did not match the reviewed filesystem.'; return 0; }
             rm -f -- "${fstab_snapshot}" "${state_snapshot}"
             jq -n --argjson proposed "${PLAN_JSON}" --argjson warnings "${PLAN_WARNINGS}" '{ok:true,proposed:($proposed + {persistence:"justvoxel",current_mount_point:$proposed.mount_point,mounted:true}),warnings:$warnings,applied:true,mount_point_removed:false}'
             ;;
@@ -376,7 +284,7 @@ apply_json() {
                 storage_action_host_unmount "${mountpoint}" >/dev/null 2>&1 || { rm -f -- "${fstab_snapshot}" "${state_snapshot}"; json_error 'The filesystem is still in use and could not be unmounted. Its permanent mount was left unchanged.'; return 0; }
             fi
             storage_mount_remove_fstab_line "${line}" && rm -f -- "${state}" && systemctl daemon-reload >/dev/null 2>&1 || {
-                restore >/dev/null 2>&1 || true; rm -f -- "${fstab_snapshot}" "${state_snapshot}"; json_error 'Could not remove the permanent mount safely. The previous configuration was restored.'; return 0;
+                permanent_mount_fail 'Could not remove the permanent mount safely.'; return 0;
             }
             if [[ ${created} == true ]] && rmdir -- "${mountpoint}" >/dev/null 2>&1; then path_removed=true; elif [[ ${created} == true ]]; then PLAN_WARNINGS="$(append_warning "${PLAN_WARNINGS}" 'The permanent mount was removed, but its folder was kept because it is not empty or could not be removed safely.')"; fi
             rm -f -- "${fstab_snapshot}" "${state_snapshot}"

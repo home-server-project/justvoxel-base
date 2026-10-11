@@ -1,6 +1,6 @@
 {{define "storage_browser_content"}}
 <div class="storage-browser-shell storage-browser-content" data-storage-browser-root>
-  <p class="muted storage-browser-intro">{{if .SetupPurpose}}Choose a disk, then select a ready partition or review a storage preparation action.{{else}}Choose a physical disk to see the partitions inside it. Mount and format operations are available in Advanced Storage.{{end}}</p>
+  <p class="muted storage-browser-intro">{{if .SetupPurpose}}Choose a disk, then select a ready partition or review a storage preparation action.{{else}}Choose a disk to see the partitions inside it.{{end}}</p>
   <input type="hidden" value="{{.CSRF}}" data-storage-action-csrf>
 
   <section class="storage-drive-section" aria-label="Internal drives">

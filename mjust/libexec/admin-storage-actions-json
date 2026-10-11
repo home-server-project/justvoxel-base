@@ -2,6 +2,7 @@
 set -euo pipefail
 
 source /usr/libexec/justvoxel/mjust/admin-storage-actions-common.sh
+source /usr/libexec/justvoxel/mjust/storage-mount-ownership.sh
 source /usr/libexec/justvoxel/mjust/admin-storage-actions-apply.sh
 require_root
 storage_action_load_config

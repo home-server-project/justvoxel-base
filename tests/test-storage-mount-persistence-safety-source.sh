@@ -3,9 +3,11 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 helper="${repo_root}/mjust/libexec/admin-storage-mounts-json"
+ownership="${repo_root}/mjust/libexec/storage-mount-ownership.sh"
 agent="${repo_root}/management/cmd/justvoxel-management-agent/admin_storage_mounts.go"
 
 bash -n "${helper}"
+bash -n "${ownership}"
 
 for required in \
     'storage_action_validate_target' \
@@ -21,7 +23,7 @@ for required in \
     'mounted filesystem did not match the reviewed filesystem' \
     'The previous configuration was restored.' \
     'rmdir -- "${mountpoint}"'; do
-    grep -Fq -- "${required}" "${helper}" || {
+    grep -Fq -- "${required}" "${helper}" "${ownership}" || {
         echo "missing permanent-mount safety invariant: ${required}" >&2
         exit 1
     }

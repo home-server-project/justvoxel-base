@@ -36,6 +36,19 @@ storage_action_apply_json() {
     fi
 
     case "${operation}" in
+        format|delete_partition|initialize_disk)
+            if ! storage_mount_retire_device "${device}"; then
+                json_error 'The permanent-mount ownership could not be retired safely. Nothing was erased.'
+                return 0
+            fi
+            # A verified generic mount may already have been unmounted above.
+            current_mountpoint="$(storage_action_mountpoint "${device}")" || {
+                json_error 'Host mount state could not be verified. Nothing was erased.'; return 0;
+            }
+            ;;
+    esac
+
+    case "${operation}" in
         mount)
             install -d -m0755 -o root -g root "${mountpoint}"
             filesystem="$(storage_action_filesystem "${device}")"

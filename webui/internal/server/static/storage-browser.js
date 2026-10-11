@@ -40,7 +40,7 @@
       options.onSelect(selectedPartition.path, selectedMountStatus);
       closeDetailDialog();
     });
-    detailActions?.prepend(setupChoice);
+    detailActions?.append(setupChoice);
   }
 
   const selectionStatus = options.onSelect && detailDialog ? document.createElement("div") : null;
@@ -53,6 +53,7 @@
   function selectionFeedback(message, failed = false) {
     if (!selectionStatus) return;
     selectionStatus.textContent = message;
+    selectionStatus.hidden = !message;
     selectionStatus.className = failed ? "notice error compact" : "notice compact";
     selectionStatus.setAttribute("role", failed ? "alert" : "status");
   }
@@ -400,7 +401,7 @@
       if (options.onSelect) {
         const eligible = options.canSelect?.(selectedPath, selectedMountStatus);
         selectionFeedback(eligible
-          ? (selectedMountStatus.mounted ? "Drive already mounted. Use this partition to keep its current location." : "Use this partition, or mount it first using the partition actions.")
+          ? (selectedMountStatus.mounted ? "Drive already mounted. Use this partition to keep its current location." : "")
           : (selectedMountStatus?.persistence === "conflict" || selectedMountStatus?.persistence === "other_mount"
             ? "Saved mount location conflicts with another filesystem. Choose another partition or ask your administrator for help."
             : "Partition cannot be selected safely. Refresh the drives or choose another partition."), !eligible);

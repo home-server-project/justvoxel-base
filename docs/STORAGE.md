@@ -193,3 +193,25 @@ preserved boolean firewall evidence does not identify those ports. Compatibility
 recovery must therefore preserve firewall rules, including any residual setup
 rules, rather than risk deleting unrelated rules. New transactions continue using
 their durable `runtime_request` for guarded runtime cleanup.
+
+## Generic permanent-mount ownership lifecycle
+
+Generic permanent mounts use a filesystem UUID row in `/etc/fstab` and a matching
+v1 ownership record under `/etc/justvoxel/storage-mounts`. Format, Delete partition,
+and Reinitialize disk retire only verified generic ownership for the exact device
+before destroying its filesystem identity. Reinitialize disk continues to require
+an unpartitioned, non-system disk. Full Factory Reset validates and retires these
+records before removing JustVoxel configuration; it preserves external/network
+data and partition layouts. Administrator mount entries are not adopted by this
+cleanup. Ambiguous ownership or a mounted identity mismatch prevents retirement.
+
+An explicit permanent-mount request can also recover the historical orphan left
+by filesystem recreation: one exact historical JustVoxel native-filesystem row at
+the requested, unused non-critical location, whose old UUID no longer exists,
+with no conflicting ownership or setup/data/backup selection evidence. This is a
+bounded compatibility check during the normal operation, not boot-time cleanup
+or a general classification of Administrator entries as JustVoxel-owned. Apply
+revalidates the evidence, snapshots persisted state, replaces only that row,
+creates normal ownership, reloads systemd, mounts, and verifies the current UUID.
+Failure restores prior persisted state; rollback failures retain their snapshots
+and report failure.

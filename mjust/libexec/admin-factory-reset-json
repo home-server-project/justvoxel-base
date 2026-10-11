@@ -1,8 +1,9 @@
 #!/usr/bin/bash
 set -euo pipefail
 
-source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/admin-storage-actions-common.sh
 source /usr/libexec/justvoxel/mjust/minecraft-reset-common.sh
+source /usr/libexec/justvoxel/mjust/storage-mount-ownership.sh
 
 require_root
 
@@ -208,7 +209,7 @@ if [[ ${backup_action} == delete ]]; then
     fi
 fi
 
-if ! factory_reset_managed_mounts; then
+if ! storage_mount_retire_all || ! factory_reset_managed_mounts; then
     factory_reset_fail "mount_cleanup_failed" "JustVoxel-managed mount entries could not be cleaned safely. Review mount identity and /etc/fstab before retrying."
 fi
 

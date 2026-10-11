@@ -185,7 +185,8 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
 @media(max-width:850px){.setup-topbar{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}}
 
 /* Keep local storage choices compact; only the target list scrolls. */
-.setup-dashboard-exit{margin-left:auto;white-space:nowrap}
+.setup-dashboard-exit{white-space:nowrap}
+.setup-terminal-help{display:flex;align-items:center;flex-wrap:wrap;gap:.55rem;margin-left:auto}
 .setup-progress li{padding:0}
 .setup-progress li>form{width:100%;margin:0}
 .setup-progress li button{display:flex;align-items:center;gap:.45rem;width:100%;height:100%;padding:.5rem;border:0;border-radius:inherit;background:transparent;color:inherit;text-align:left;font:inherit;cursor:pointer}
@@ -203,7 +204,7 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
 .setup-storage-segment.is-selected{box-shadow:inset 0 0 0 1px #68bd8e}
 .setup-storage-segment.is-selected .setup-storage-segment-state{background:#68bd8e;color:#10161a}
 .setup-secret-inline{display:inline-block;justify-self:start;padding:.3rem .55rem;border:1px solid #4f8b69;border-radius:7px;background:#244a3533;color:#b9ebca;font-size:.78rem}
-@media(max-width:760px){.setup-storage-disk-list{max-height:255px}.setup-dashboard-exit{margin-left:0}}
+@media(max-width:760px){.setup-storage-disk-list{max-height:255px}.setup-terminal-help{margin-left:0}}
 @media(prefers-color-scheme:light){.setup-partition-instruction,.setup-secret-inline{background:#eef7f1;color:#245b3a}.setup-partition-instruction strong{color:#245b3a}}
 
 /* Let setup content grow while the footer reaches the page bottom. */
@@ -408,8 +409,7 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
 @media(max-width:850px){.setup-wizard-panel .setup-version-preview{grid-template-columns:1fr}}
 
 /* Setup selection actions use the shared Storage dialogs and bounded inventory. */
-.setup-wizard-panel .storage-detail-actions{flex-wrap:wrap}
-.setup-wizard-panel .storage-detail-actions>[data-setup-partition-select]{margin-right:auto}
+.setup-wizard-panel .storage-detail-actions{flex-wrap:wrap;justify-content:flex-end}
 .setup-wizard-panel .storage-detail-actions>.muted{display:none}
 .setup-wizard-panel .setup-storage-operation{margin:auto}
 .setup-wizard-panel .setup-storage-operation:not([open]){display:none}
@@ -451,13 +451,4 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
   .setup-advanced .storage-selected-heading{flex:none;margin-bottom:.4rem}
   .setup-advanced .storage-partition-grid{min-height:0;flex:0 1 auto}
   .setup-advanced .storage-partition-group>.storage-advanced-actions{flex:none}
-
-  /* Review keeps the same frame and Apply path; only long warnings are bounded. */
-  .setup-advanced .setup-review-content{flex:1;min-height:0}
-  .setup-advanced .setup-review-header{min-height:1.4rem;align-items:flex-start}
-  .setup-advanced .setup-review-header h2{font-size:1.18rem;line-height:1.4rem}
-  .setup-advanced .setup-review-summary{margin:.5rem 0;gap:.5rem}
-  .setup-advanced .setup-review-summary>section{padding:.55rem .7rem}
-  .setup-advanced .setup-review-summary dl>div{padding:.25rem 0;font-size:.82rem}
-  .setup-advanced .setup-review-warnings{max-height:180px;overflow-y:auto;overscroll-behavior:contain}
 }

@@ -63,7 +63,9 @@
 .network-workspace-content :is(.network-action-button,.network-scan-button){min-height:32px;padding:.38rem .65rem;font-size:.8rem}
 .network-provider-card{display:flex;flex-direction:column;gap:.35rem}
 .network-provider-card h3{margin-bottom:.2rem}
-.network-provider-card>.network-inline-actions{justify-content:flex-start;margin-top:auto;padding-top:.5rem}
+.network-provider-card>.network-inline-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));margin-top:auto;padding-top:.5rem}
+.network-provider-card>.network-inline-actions>.button-link{grid-column:1/-1;order:-1}
+.network-provider-card>.network-inline-actions>.button-link.warning{order:-2}
 .network-provider-card .button-link{display:inline-flex;align-items:center;justify-content:center;flex-basis:100%;text-align:center;border:1px solid var(--jv-border-strong);border-radius:8px;font-weight:700;line-height:1.25;text-decoration:none}
 .network-troubleshoot>.network-devices{margin-top:.5rem}
 .network-troubleshoot .network-inline-actions{margin-top:.55rem}
@@ -125,7 +127,7 @@
   .network-checkpoint-banner span{color:#7a6336}
 }
 
-.network-provider-card button.warning{background:var(--jv-warning);color:var(--jv-surface-sunken)}
+.network-provider-card :is(button,.button-link).warning{background:var(--jv-warning);color:var(--jv-surface-sunken)}
 
 /* Status belongs below navigation, without the tab margin covering its text. */
 .network-workspace-body{overflow:auto}
@@ -138,4 +140,5 @@
 .network-troubleshoot .network-device-card>.state-text{margin:.5rem 0 0;font-size:.8rem;line-height:1.4;color:var(--jv-muted)}
 @media(max-width:700px){.network-workspace-dialog{top:var(--jv-workspace-top-inset)!important}}
 
-.network-provider-card [data-action="activate"]{margin-left:auto}
+.network-provider-card [data-action="deactivate"]{grid-column:1;justify-self:start}
+.network-provider-card [data-action="activate"]{grid-column:2;justify-self:end}

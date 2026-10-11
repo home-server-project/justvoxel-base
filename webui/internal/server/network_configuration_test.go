@@ -227,7 +227,7 @@ for (const id of ["tailscale", "netbird", "playit"]) {
   assert(nodes.some((n) => n.textContent === "Deactivate" && !n.disabled));
   assert(!nodes.some((n) => n.textContent === "Set up Playit"));
   const link = nodes.find((n) => n.textContent === { tailscale: "Open Tailscale dashboard", netbird: "Open NetBird dashboard", playit: "Open Playit.gg dashboard" }[id]);
-  assert.equal(link.className, "button-link primary network-action-button");
+  assert.equal(link.className, "button-link warning network-action-button");
   assert.equal(nodes.find((n) => n.textContent === "Activate").className, "primary nav-admin-only network-action-button");
   assert.equal(nodes.find((n) => n.textContent === "Deactivate").className, "secondary nav-admin-only network-action-button");
   assert(nodes.indexOf(nodes.find((n) => n.textContent === "Deactivate")) < nodes.indexOf(nodes.find((n) => n.textContent === "Activate")));
@@ -322,8 +322,18 @@ assert(!render(base).some((n) => n.textContent === "Set up Playit"));
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(css), ".network-provider-card .button-link{display:inline-flex;") || !strings.Contains(string(css), "button.warning{background:var(--jv-warning)") {
-		t.Fatal("provider anchor lost normal button styling")
+	for _, want := range []string{
+		".network-provider-card .button-link{display:inline-flex;",
+		".network-provider-card :is(button,.button-link).warning{background:var(--jv-warning);color:var(--jv-surface-sunken)}",
+		".network-provider-card>.network-inline-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));",
+		".network-provider-card>.network-inline-actions>.button-link{grid-column:1/-1;order:-1}",
+		".network-provider-card>.network-inline-actions>.button-link.warning{order:-2}",
+		`.network-provider-card [data-action="deactivate"]{grid-column:1;justify-self:start}`,
+		`.network-provider-card [data-action="activate"]{grid-column:2;justify-self:end}`,
+	} {
+		if !strings.Contains(string(css), want) {
+			t.Fatalf("provider action layout or styling missing %q", want)
+		}
 	}
 }
 
