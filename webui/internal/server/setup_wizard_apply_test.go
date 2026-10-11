@@ -291,6 +291,10 @@ func TestSetupProgressTerminalActions(t *testing.T) {
 		visible []string
 		hidden  []string
 	}{
+		{"queued", []string{`id="setup-diagnostic-log-view" type="button">Live Console</button>`}, []string{`id="setup-dashboard-link" href="/" hidden`, `id="setup-diagnostic-log-link" href="/setup/progress/` + setupExecutionOperationID + `/log" hidden`}},
+		{"validating", []string{`id="setup-diagnostic-log-view" type="button">Live Console</button>`}, []string{`id="setup-dashboard-link" href="/" hidden`, `id="setup-diagnostic-log-link" href="/setup/progress/` + setupExecutionOperationID + `/log" hidden`}},
+		{"running", []string{`id="setup-diagnostic-log-view" type="button">Live Console</button>`}, []string{`id="setup-dashboard-link" href="/" hidden`, `id="setup-diagnostic-log-link" href="/setup/progress/` + setupExecutionOperationID + `/log" hidden`}},
+		{"verifying", []string{`id="setup-diagnostic-log-view" type="button">Live Console</button>`}, []string{`id="setup-dashboard-link" href="/" hidden`, `id="setup-diagnostic-log-link" href="/setup/progress/` + setupExecutionOperationID + `/log" hidden`}},
 		{"succeeded", []string{`id="setup-dashboard-link" href="/"`, `id="setup-diagnostic-log-view"`, `id="setup-diagnostic-log-link"`}, []string{`id="setup-start-over-form" hidden`, `id="setup-start-over-disabled" role="group" aria-disabled="true" tabindex="0" aria-describedby="setup-start-over-help" hidden`}},
 		{"rolled_back", []string{`id="setup-dashboard-link" href="/"`, `id="setup-review-link" href="/setup/review"`, `id="setup-start-over-form"`, `action="/setup/start"`}, []string{`id="setup-start-over-disabled" role="group" aria-disabled="true" tabindex="0" aria-describedby="setup-start-over-help" hidden`}},
 		{"needs_attention", []string{`id="setup-dashboard-link" href="/"`, `id="setup-start-over-disabled" role="group"`, `Resolve the recovery issue before starting setup again.`}, []string{`id="setup-start-over-form" hidden`, `id="setup-review-link" href="/setup/review" hidden`}},

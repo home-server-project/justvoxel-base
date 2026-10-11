@@ -30,6 +30,8 @@ test('Control Center offsets only desktop padding/border and preserves compact p
   const wrapper = declarations(desktop[1]);
   const trigger = declarations(desktop[2]);
   const compactTrigger = declarations(css.match(/\.app-header \.control-center-trigger\{([^}]*height:32px;[^}]*)\}/)[1]);
+  assert.equal(topbar.border, '1px solid #303942', 'preserve the topbar border color');
+  assert.equal(compactTrigger['border-color'], '#303942', 'normal desktop trigger border matches the topbar');
   assert.ok(css.includes('*{box-sizing:border-box}'));
   assert.match(css, /\.topbar\{[^}]*align-items:center;/);
   assert.equal(trigger.position, 'relative');

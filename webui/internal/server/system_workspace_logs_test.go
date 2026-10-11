@@ -62,7 +62,7 @@ func TestSystemWorkspaceLogsAreAdministratorOnlyAndDownloadText(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := "12345678-1234-4123-8123-123456789abc"
-	for _, path := range []string{"/api/system/workspace/logs", "/api/system/workspace/logs/migration/" + id} {
+	for _, path := range []string{"/api/system/workspace/logs", "/api/system/workspace/logs/migration/" + id, "/api/system/workspace/logs/reset/" + id} {
 		response := httptest.NewRecorder()
 		app.Handler().ServeHTTP(response, authenticatedAdminRequest(http.MethodGet, "http://example"+path, ""))
 		if response.Code != http.StatusForbidden {
@@ -83,6 +83,13 @@ func TestSystemWorkspaceLogsAreAdministratorOnlyAndDownloadText(t *testing.T) {
 	if read.Code != http.StatusOK || read.Header().Get("Content-Type") != "text/plain; charset=utf-8" || !strings.Contains(read.Body.String(), "rollback succeeded\n") {
 		t.Fatalf("log read = %d %s", read.Code, read.Body.String())
 	}
+	// Live Console uses the same Administrator-only plain-text route as System Logs.
+	reset := httptest.NewRecorder()
+	app.Handler().ServeHTTP(reset, authenticatedAdminRequest(http.MethodGet, "http://example/api/system/workspace/logs/reset/"+id, ""))
+	if reset.Code != http.StatusOK || reset.Header().Get("Content-Type") != "text/plain; charset=utf-8" || reset.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("reset log read = %d %s", reset.Code, reset.Body.String())
+	}
+
 	download := httptest.NewRecorder()
 	app.Handler().ServeHTTP(download, authenticatedAdminRequest(http.MethodGet, "http://example/api/system/workspace/logs/migration/"+id+"?download=1", ""))
 	if download.Code != http.StatusOK || !strings.Contains(download.Header().Get("Content-Disposition"), "attachment") {
@@ -90,7 +97,7 @@ func TestSystemWorkspaceLogsAreAdministratorOnlyAndDownloadText(t *testing.T) {
 	}
 	invalid := httptest.NewRecorder()
 	app.Handler().ServeHTTP(invalid, authenticatedAdminRequest(http.MethodGet, "http://example/api/system/workspace/logs/operation/invalid", ""))
-	if invalid.Code != http.StatusBadRequest || client.reads != 2 {
+	if invalid.Code != http.StatusBadRequest || client.reads != 3 {
 		t.Fatalf("invalid log id = %d; reads=%d", invalid.Code, client.reads)
 	}
 }

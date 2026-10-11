@@ -1693,6 +1693,160 @@ const setupWorkspaceWindow = (element, options = {}) => {
   return { open, close, bringToFront, id };
 };
 
+// One explicit-open diagnostic viewer shared by setup and persistent resets.
+window.JustVoxelLiveConsole = (() => {
+  let dialog, viewer, label, indicator, workspace;
+  let selected = null;
+  let generation = 0;
+  let timer = null;
+  let controller = null;
+  let reconnecting = false;
+  const stateLabel = (state) => ({
+    succeeded: "Complete", resolved: "Complete", rolled_back: "Rolled back",
+    needs_attention: "Needs attention",
+  }[state] || "Live");
+  const showState = () => {
+    indicator.textContent = reconnecting ? "Reconnecting…" : stateLabel(selected.state);
+  };
+  const stop = () => {
+    generation += 1;
+    window.clearTimeout(timer);
+    timer = null;
+    controller?.abort();
+    controller = null;
+  };
+  const close = () => {
+    stop();
+    workspace?.close();
+  };
+  const ensureWindow = () => {
+    if (dialog) return;
+    const make = (tag, className, text) => {
+      const node = document.createElement(tag);
+      node.className = className;
+      if (text !== undefined) node.textContent = text;
+      return node;
+    };
+    dialog = make("dialog", "workspace-window live-console-dialog");
+    dialog.dataset.workspaceWindow = "live-console";
+    dialog.setAttribute("aria-labelledby", "live-console-title");
+    const shell = make("div", "live-console-shell");
+    const header = make("header", "system-workspace-header live-console-header");
+    header.setAttribute("data-workspace-drag-handle", "");
+    const heading = make("div", "");
+    const title = make("h2", "", "Live Console");
+    title.id = "live-console-title";
+    heading.append(make("p", "eyebrow", "JustVoxel"), title);
+    const dismiss = make("button", "secondary system-monitor-header-button workspace-header-close", "×");
+    dismiss.type = "button";
+    dismiss.setAttribute("aria-label", "Close Live Console");
+    dismiss.addEventListener("click", close);
+    header.append(heading, dismiss);
+    const context = make("div", "live-console-context");
+    label = make("span", "");
+    indicator = make("span", "badge");
+    indicator.setAttribute("role", "status");
+    context.append(label, indicator);
+    viewer = make("pre", "live-console-transcript", "");
+    viewer.tabIndex = 0;
+    viewer.setAttribute("aria-label", "Operation diagnostic transcript");
+    shell.append(header, context, viewer);
+    dialog.append(shell);
+    document.body.append(dialog);
+    workspace = setupWorkspaceWindow(dialog, { onClose: () => { if (!dialog.open) stop(); } });
+    // Never restore open state: each page begins with the console closed.
+  };
+  const read = async (token) => {
+    const current = () => token === generation && dialog.open;
+    if (!current()) return;
+    const source = selected;
+    controller = new AbortController();
+    try {
+      const response = await fetch(source.url, {
+        credentials: "same-origin", cache: "no-store",
+        headers: { Accept: "text/plain" }, signal: controller.signal,
+      });
+      if (!current()) return;
+      if (response.status === 401) {
+        close();
+        if (source.onUnauthorized) source.onUnauthorized();
+        else window.location.assign("/login");
+        return;
+      }
+      if (response.redirected) {
+        const target = new URL(response.url, window.location.href);
+        if (target.origin === window.location.origin && ["/login", "/password"].includes(target.pathname)) {
+          close();
+          window.location.assign(target.pathname + target.search);
+          return;
+        }
+      }
+      if (response.status === 403) {
+        if (source.kind === "setup") {
+          close();
+          window.location.assign("/password");
+          return;
+        }
+        const payload = await response.json().catch(() => ({}));
+        if (!current()) return;
+        if (String(payload.error || "").toLowerCase().includes("password change")) {
+          close();
+          window.location.assign("/password");
+          return;
+        }
+      }
+      if (!response.ok || !/^text\/plain(?:;|$)/i.test(response.headers.get("Content-Type") || "")) {
+        throw new Error("Transcript unavailable");
+      }
+      const transcript = await response.text();
+      if (!current()) return;
+      const follow = viewer.scrollHeight - viewer.clientHeight - viewer.scrollTop <= 40;
+      viewer.textContent = transcript;
+      if (follow) viewer.scrollTop = viewer.scrollHeight;
+      reconnecting = false;
+      showState();
+    } catch (_) {
+      if (!current()) return;
+      reconnecting = true;
+      showState();
+    }
+    if (current()) timer = window.setTimeout(() => read(token), 2500);
+  };
+  const open = (config) => {
+    const labels = { setup: "First-run Setup", minecraft_reset: "Reset Minecraft", factory_reset: "Full Factory Reset" };
+    if (!["setup", "minecraft_reset", "factory_reset"].includes(config.kind) || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(config.operationID)) return;
+    ensureWindow();
+    if (dialog.open && selected?.operationID === config.operationID && selected.kind === config.kind) {
+      selected.state = config.state;
+      showState();
+      workspace.bringToFront();
+      return;
+    }
+    stop();
+    const id = encodeURIComponent(config.operationID);
+    selected = {
+      kind: config.kind, operationID: config.operationID, state: config.state,
+      onUnauthorized: config.onUnauthorized,
+      url: config.kind === "setup" ? `/setup/progress/${id}/log/view` : `/api/system/workspace/logs/reset/${id}`,
+    };
+    reconnecting = false;
+    label.textContent = labels[config.kind];
+    viewer.textContent = "";
+    viewer.scrollTop = 0;
+    showState();
+    workspace.open();
+    void read(generation);
+  };
+  const updateState = (operationID, state) => {
+    if (selected?.operationID !== operationID || !dialog?.open) return;
+    selected.state = state;
+    showState();
+  };
+  window.addEventListener("pagehide", close);
+  window.addEventListener("beforeunload", close);
+  return { open, close, updateState };
+})();
+
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   if (document.querySelector("dialog:modal")) return;
@@ -3671,9 +3825,19 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   let activeFactoryResetOperationID = "";
 
   const showFactoryResetComplete = () => {
+    window.JustVoxelLiveConsole.close();
     const secure = window.location.protocol === "https:" ? "; Secure" : "";
     document.cookie = "jv_factory_reset_complete=1; Path=/factory-reset-complete; Max-Age=120; SameSite=Strict" + secure;
     window.location.replace("/factory-reset-complete");
+  };
+
+  const resetLiveConsoleUnauthorized = (operation) => {
+    // Preserve the existing factory-reset session invalidation transition.
+    if (operation.operation_type === "factory_reset" && operation.operation_id === activeFactoryResetOperationID) {
+      showFactoryResetComplete();
+      return;
+    }
+    window.location.assign("/login");
   };
 
   const systemHandleAuth = (response) => {
@@ -4546,6 +4710,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   const renderResetOperation = (operation) => {
     clearResetPoll();
     if (!content || !operation) return;
+    window.JustVoxelLiveConsole.updateState(operation.operation_id, operation.state);
     if (operation.operation_type === "factory_reset" && operation.state === "succeeded") {
       showFactoryResetComplete();
       return;
@@ -4555,6 +4720,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       ? operation.operation_id : "";
     if (operation.operation_type === "minecraft_reset" && operation.state === "succeeded") {
       ++loadSequence;
+      window.JustVoxelLiveConsole.close();
       workspaceWindow?.close();
       window.dispatchEvent(new Event("justvoxel:minecraft-reset-complete"));
       return;
@@ -4579,6 +4745,17 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     stage.className = "muted compact";
     stage.textContent = "Stage: " + String(operation.stage || "working").replaceAll("_", " ");
     built.panel.append(status, stage);
+    const liveConsole = document.createElement("button");
+    liveConsole.type = "button";
+    liveConsole.className = "secondary";
+    liveConsole.textContent = "Live Console";
+    liveConsole.addEventListener("click", () => window.JustVoxelLiveConsole.open({
+      kind: operation.operation_type,
+      operationID: operation.operation_id,
+      state: operation.state,
+      onUnauthorized: () => resetLiveConsoleUnauthorized(operation),
+    }));
+    built.panel.appendChild(liveConsole);
 
     if (operation.operation_type === "factory_reset") {
       const note = document.createElement("div");

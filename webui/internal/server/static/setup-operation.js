@@ -121,6 +121,12 @@ document.addEventListener("DOMContentLoaded", () => {
   const verifyNote = document.getElementById("setup-minecraft-verify-note");
   const elapsed = document.getElementById("setup-operation-elapsed");
 
+  let consoleState = panel.dataset.initialState;
+  diagnosticLogView?.addEventListener("click", () => window.JustVoxelLiveConsole.open({
+    kind: "setup", operationID: panel.dataset.operationId, state: consoleState,
+  }));
+  dashboardLink?.addEventListener("click", () => window.JustVoxelLiveConsole.close());
+
   let failures = 0;
   let finished = false;
   let elapsedInterval = null;
@@ -204,6 +210,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const render = (operation) => {
     if (!operation) return;
+    consoleState = operation.state;
+    window.JustVoxelLiveConsole.updateState(panel.dataset.operationId, operation.state);
     failures = 0;
     if (reconnectNote) reconnectNote.hidden = true;
     if (statusText) statusText.textContent = operation.status || "Setup is running.";
@@ -233,7 +241,6 @@ document.addEventListener("DOMContentLoaded", () => {
     if (recoverForm) recoverForm.hidden = !(needsAttention && ["storage_rollback", "runtime_rollback"].includes(operation.stage));
     if (disabledStartOver) disabledStartOver.hidden = !needsAttention;
     if (diagnosticLogLink) diagnosticLogLink.hidden = !terminalState(operation.state);
-    if (diagnosticLogView) diagnosticLogView.hidden = !terminalState(operation.state);
 
     if (terminalState(operation.state)) {
       finished = true;
