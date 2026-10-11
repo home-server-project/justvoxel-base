@@ -2,8 +2,11 @@ package server
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -30,8 +33,13 @@ func TestWorkspaceLogIdentifiersAreAllowlisted(t *testing.T) {
 
 type fakeDiagnosticLogsAPI struct {
 	*fakeAPI
-	role  string
-	reads int
+	role         string
+	reads        int
+	units        []api.FailedUnit
+	unitError    error
+	unitReads    int
+	unitLists    int
+	journalError error
 }
 
 func (f *fakeDiagnosticLogsAPI) Session(ctx context.Context, session string) (api.SessionInfo, error) {
@@ -84,5 +92,100 @@ func TestSystemWorkspaceLogsAreAdministratorOnlyAndDownloadText(t *testing.T) {
 	app.Handler().ServeHTTP(invalid, authenticatedAdminRequest(http.MethodGet, "http://example/api/system/workspace/logs/operation/invalid", ""))
 	if invalid.Code != http.StatusBadRequest || client.reads != 2 {
 		t.Fatalf("invalid log id = %d; reads=%d", invalid.Code, client.reads)
+	}
+}
+
+func (f *fakeDiagnosticLogsAPI) AdminFailedUnits(_ context.Context, _ string) ([]api.FailedUnit, error) {
+	f.unitLists++
+	if f.units == nil && f.unitError == nil {
+		return []api.FailedUnit{}, nil
+	}
+	return f.units, f.unitError
+}
+func (f *fakeDiagnosticLogsAPI) AdminFailedUnitJournal(_ context.Context, _, unit string) ([]byte, error) {
+	f.unitReads++
+	if f.journalError != nil {
+		return nil, f.journalError
+	}
+	return []byte("bounded journal for " + unit + "\n"), nil
+}
+
+func TestSystemWorkspaceFailedUnitsSeparateLiveCollectionAndDownload(t *testing.T) {
+	unit := `srv-my\x20disk.mount`
+	client := &fakeDiagnosticLogsAPI{fakeAPI: &fakeAPI{}, role: "administrator", units: []api.FailedUnit{{Unit: unit, Description: "Disk", ActiveState: "failed", SubState: "failed"}}}
+	app, err := New(client, Config{ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listing := func() *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/api/system/workspace/logs", ""))
+		return rr
+	}
+	rr := listing()
+	var payload struct {
+		Logs  []api.DiagnosticLogEntry `json:"logs"`
+		Units []api.FailedUnit         `json:"failed_units"`
+		Error string                   `json:"failed_units_error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if rr.Code != 200 || len(payload.Logs) != 1 || payload.Logs[0].Category != "migration" || len(payload.Units) != 1 || payload.Units[0].Unit != unit || payload.Error != "" {
+		t.Fatalf("separate logs %#v: %s", payload, rr.Body.String())
+	}
+	path := "http://example/api/system/workspace/logs/failed/" + url.PathEscape(unit)
+	for _, suffix := range []string{"", "?download=1"} {
+		rr = httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, path+suffix, ""))
+		if rr.Code != 200 || !strings.Contains(rr.Body.String(), unit) || rr.Header().Get("Content-Type") != "text/plain; charset=utf-8" || rr.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("journal: %d %s", rr.Code, rr.Body.String())
+		}
+		if suffix != "" && !strings.Contains(rr.Header().Get("Content-Disposition"), "attachment") {
+			t.Fatal("missing download")
+		}
+	}
+	client.units = []api.FailedUnit{}
+	rr = listing()
+	if !strings.Contains(rr.Body.String(), `"failed_units":[]`) || client.unitLists != 2 {
+		t.Fatalf("refresh: %s", rr.Body.String())
+	}
+	client.unitError = errors.New("privileged secret error")
+	rr = listing()
+	if rr.Code != 200 || !strings.Contains(rr.Body.String(), `"failed_units_error":"Failed systemd units are unavailable."`) || !strings.Contains(rr.Body.String(), "migration") || strings.Contains(rr.Body.String(), "secret") {
+		t.Fatalf("enumeration failure: %s", rr.Body.String())
+	}
+	client.journalError = &api.ResponseError{StatusCode: 404, Message: "privileged secret error"}
+	rr = httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, path, ""))
+	if rr.Code != 404 || strings.Contains(rr.Body.String(), "secret") {
+		t.Fatalf("journal failure: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSystemWorkspaceFailedJournalAuthorizationAndIdentity(t *testing.T) {
+	client := &fakeDiagnosticLogsAPI{fakeAPI: &fakeAPI{}, role: "viewer"}
+	app, err := New(client, Config{ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, role := range []string{"viewer", "operator"} {
+		client.role = role
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/api/system/workspace/logs/failed/minecraft.service", ""))
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("%s read failed journal: %d", role, rr.Code)
+		}
+	}
+	client.role = "administrator"
+	for _, invalid := range []string{"*.service", "a/b.mount", "a.service;reboot", "a.service\n", `a\bad.mount`} {
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/api/system/workspace/logs/failed/"+url.PathEscape(invalid), ""))
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("accepted unsafe %q: %d", invalid, rr.Code)
+		}
+	}
+	if client.unitReads != 0 {
+		t.Fatal("unsafe journal proxy reached Agent client")
 	}
 }

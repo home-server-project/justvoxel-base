@@ -4021,11 +4021,14 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   let requestedMigrationLog = systemLogDestination.get("workspace") === "system" && systemLogDestination.get("tab") === "logs" && systemLogDestination.get("log_group") === "migration"
     ? { group: "Migration", id: systemLogDestination.get("log_id") || "" } : null;
 
+  let failedUnitsSelected = false;
+
   const renderLogs = async (sequence) => {
     const payload = await systemFetchJSON("/api/system/workspace/logs");
     if (!payload || sequence !== loadSequence || !content) return;
-    const groups = ["Setup", "Migration", "Restore", "Reset", "Support"];
+    const groups = ["Setup", "Migration", "Restore", "Reset", "Support", "Failed units"];
     const logs = Array.isArray(payload.logs) ? payload.logs : [];
+    const failedUnits = Array.isArray(payload.failed_units) ? payload.failed_units : [];
     const root = document.createElement("div");
     root.className = "system-logs-layout";
     root.dataset.systemLogsLayout = "";
@@ -4065,7 +4068,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     documentText.textContent = "Select a file to read it here.";
     viewer.append(download, documentText);
     reader.appendChild(viewer);
-    let selectedGroup = requestedMigrationLog?.group || "Setup";
+    let selectedGroup = requestedMigrationLog?.group || (failedUnitsSelected ? "Failed units" : "Setup");
     let selectedFile = "";
     let requestedEntry = requestedMigrationLog ? logs.find((entry) => entry.category === "migration" && entry.log_id === requestedMigrationLog.id) : null;
     requestedMigrationLog = null;
@@ -4073,41 +4076,48 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       fileList.replaceChildren();
       viewer.scrollTop = 0;
       download.hidden = true;
-      documentText.textContent = "Select a file to read it here.";
-      const entries = logs.filter((entry) => entry.category === selectedGroup.toLowerCase());
+      const live = selectedGroup === "Failed units";
+      fileColumn.children[0].textContent = live ? "Units" : "Files";
+      documentText.textContent = live ? "Select a unit to read its last 60 current-boot journal lines here." : "Select a file to read it here.";
+      const entries = live ? failedUnits : logs.filter((entry) => entry.category === selectedGroup.toLowerCase());
       if (!entries.length) {
         const empty = document.createElement("p");
         empty.className = "muted";
-        empty.textContent = selectedGroup === "Support" ? "No support bundles generated." : "No " + selectedGroup.toLowerCase() + " logs available.";
+        empty.textContent = live ? (payload.failed_units_error ? "Failed systemd units are unavailable." : "No failed systemd units.") : selectedGroup === "Support" ? "No support bundles generated." : "No " + selectedGroup.toLowerCase() + " logs available.";
         fileList.appendChild(empty);
         return;
       }
       entries.forEach((entry) => {
+        const identity = live ? entry.unit : entry.log_id;
         const button = document.createElement("button");
         button.type = "button";
         button.className = "system-log-entry secondary";
-        button.setAttribute("aria-pressed", selectedFile === entry.log_id ? "true" : "false");
+        button.setAttribute("aria-pressed", selectedFile === identity ? "true" : "false");
         const title = document.createElement("strong");
-        title.textContent = entry.log_id + ".log";
+        title.textContent = live ? entry.unit : entry.log_id + ".log";
         const meta = document.createElement("span");
-        meta.textContent = [entry.operation_type?.replaceAll("_", " ") || "", entry.state || "", entry.timestamp || ""].filter(Boolean).join(" · ");
+        meta.textContent = live ? [entry.description, entry.active_state, entry.sub_state].filter(Boolean).join(" · ") : [entry.operation_type?.replaceAll("_", " ") || "", entry.state || "", entry.timestamp || ""].filter(Boolean).join(" · ");
         button.append(title, meta);
         button.addEventListener("click", async () => {
-          selectedFile = entry.log_id;
+          selectedFile = identity;
+          const clickedGroup = selectedGroup;
           fileList.querySelectorAll("button").forEach((item) => item.setAttribute("aria-pressed", item === button ? "true" : "false"));
-          const url = "/api/system/workspace/logs/" + encodeURIComponent(entry.category) + "/" + encodeURIComponent(entry.log_id);
+          const url = live ? "/api/system/workspace/logs/failed/" + encodeURIComponent(entry.unit) : "/api/system/workspace/logs/" + encodeURIComponent(entry.category) + "/" + encodeURIComponent(entry.log_id);
           documentText.textContent = "Loading log…";
           download.hidden = true;
           try {
             const response = await fetch(url, { credentials: "same-origin", cache: "no-store", headers: { Accept: "text/plain" } });
             if (systemHandleAuth(response)) return;
-            if (!response.ok) throw new Error("Diagnostic log is unavailable.");
+            if (!response.ok) throw new Error(live ? "Failed unit journal is unavailable." : "Diagnostic log is unavailable.");
             const data = await response.text();
-            if (sequence !== loadSequence || selectedFile !== entry.log_id) return;
+            if (sequence !== loadSequence || selectedFile !== identity || selectedGroup !== clickedGroup) return;
             documentText.textContent = data;
             download.href = url + "?download=1";
             download.hidden = false;
-          } catch (error) { documentText.textContent = error?.message || "Diagnostic log is unavailable."; }
+          } catch (error) {
+            if (sequence !== loadSequence || selectedFile !== identity || selectedGroup !== clickedGroup) return;
+            documentText.textContent = live ? "Failed unit journal is unavailable." : error?.message || "Diagnostic log is unavailable.";
+          }
         });
         fileList.appendChild(button);
         if (entry === requestedEntry) {
@@ -4124,6 +4134,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       button.setAttribute("aria-pressed", group === selectedGroup ? "true" : "false");
       button.addEventListener("click", () => {
         selectedGroup = group;
+        failedUnitsSelected = group === "Failed units";
         selectedFile = "";
         groupColumn.querySelectorAll("button").forEach((item) => item.setAttribute("aria-pressed", item === button ? "true" : "false"));
         renderFiles();
@@ -5512,6 +5523,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     if (administratorTabs.has(tab) && user.role !== "administrator") return;
     if (tab === "ups" && !upsAvailable) return;
     if (currentTab === "reset" && tab !== "reset") clearResetPoll();
+    failedUnitsSelected = false;
     currentTab = tab;
     syncSystemTabs();
     loadCurrentSystemTab();
@@ -5527,7 +5539,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   });
 
   const workspaceWindow = setupWorkspaceWindow(systemWorkspaceDialog, {
-    onClose: () => { window.JustVoxelWallpaper?.leave(); clearResetPoll(); },
+    onClose: () => { failedUnitsSelected = false; window.JustVoxelWallpaper?.leave(); clearResetPoll(); },
     onOpen: async () => {
       try {
         const user = await loadIdentity();

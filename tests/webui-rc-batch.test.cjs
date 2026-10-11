@@ -67,20 +67,21 @@ test('Export Done clears operation navigation, selects Export, and reopening loa
 });
 
 const logSource = app.slice(app.indexOf('  const systemLogDestination ='), app.indexOf('  const renderUsers =', app.indexOf('  const systemLogDestination =')));
-async function openLogs(search, logs) {
+async function openLogs(search, logs, live = {}) {
+  const listCalls = [];
   const calls = [];
   const content = new Element('div');
   const context = vm.createContext({
     URLSearchParams, Number, JSON, Array, Math, String, encodeURIComponent, loadSequence: 1, content,
     window: { location: { search } }, document: { createElement: tag => new Element(tag) },
     localStorage: { getItem: () => null }, ResizeObserver: class { observe() {} disconnect() {} },
-    systemSplitter: () => new Element('div'), systemFetchJSON: async () => ({ logs }), systemHandleAuth: () => false,
-    fetch: async url => { calls.push(url); return { ok: true, text: async () => 'Export evidence' }; },
+    systemSplitter: () => new Element('div'), systemFetchJSON: async url => { listCalls.push(url); return { logs, ...live }; }, systemHandleAuth: () => false,
+    fetch: async url => { calls.push(url); return { ok: !live.journalError, text: async () => live.journalText || 'Export evidence' }; },
   });
   vm.runInContext(logSource + '\nglobalThis.renderLogs = renderLogs;', context);
   await context.renderLogs(1);
   await new Promise(resolve => setImmediate(resolve));
-  return { content, calls, render: async () => { await context.renderLogs(1); } };
+  return { content, calls, listCalls, render: async () => { await context.renderLogs(1); } };
 }
 const migrationLog = { category: 'migration', log_id: 'operation-1', operation_type: 'migration_export' };
 
@@ -166,4 +167,79 @@ test('recommended memory warning boundary is 1536 MiB and hard reserve remains 1
   assert.ok(discovery.includes('recommended 1.5 GiB headroom'));
   assert.ok(setup.includes('recommended 1.5 GiB'));
   assert.ok(read('webui/internal/server/setup_wizard.go').includes('defaults.SystemReserveRecommendedMiB = 1536'));
+});
+
+const failedUnits = [
+  { unit: 'minecraft.service', description: 'Minecraft Server', active_state: 'failed', sub_state: 'failed' },
+  { unit: 'backup.timer', description: 'Backup timer', active_state: 'failed', sub_state: 'failed' },
+  { unit: 'srv-my\\x20disk.mount', description: 'Disk', active_state: 'failed', sub_state: 'failed' },
+];
+const logGroup = (page, name) => page.content.all().find(node => node.className === 'system-log-group secondary' && node.textContent === name);
+const logEntries = page => page.content.all().filter(node => node.className === 'system-log-entry secondary');
+const logViewer = page => page.content.all().find(node => node.tag === 'pre');
+
+test('Failed units appends the exact category and lists each live unit separately', async () => {
+  const live = { failed_units: failedUnits, journalText: 'Current boot last 60 lines' };
+  const page = await openLogs('', [migrationLog], live);
+  assert.deepEqual(page.content.all().filter(node => node.className === 'system-log-group secondary').map(node => node.textContent),
+    ['Setup', 'Migration', 'Restore', 'Reset', 'Support', 'Failed units']);
+  assert.equal(logGroup(page, 'Setup').attrs['aria-pressed'], 'true');
+  await logGroup(page, 'Failed units').click();
+  assert.equal(logEntries(page).length, 3);
+  assert.deepEqual(logEntries(page).map(node => node.children[0].textContent), failedUnits.map(unit => unit.unit));
+  assert.ok(page.content.all().some(node => node.tag === 'h3' && node.textContent === 'Units'));
+  assert.match(logViewer(page).textContent, /last 60 current-boot journal lines/);
+  await logEntries(page)[2].click();
+  const url = '/api/system/workspace/logs/failed/' + encodeURIComponent(failedUnits[2].unit);
+  assert.deepEqual(page.calls, [url]);
+  assert.equal(logViewer(page).textContent, live.journalText);
+  const download = page.content.all().find(node => node.textContent === 'Download log');
+  assert.equal(download.href, url + '?download=1');
+  assert.equal(download.hidden, false);
+  await logGroup(page, 'Migration').click();
+  assert.equal(logEntries(page).length, 1);
+  assert.ok(page.content.all().some(node => node.tag === 'h3' && node.textContent === 'Files'));
+  assert.equal(download.hidden, true);
+  await logEntries(page)[0].click();
+  assert.equal(page.calls.at(-1), '/api/system/workspace/logs/migration/operation-1');
+});
+
+test('Failed units refresh enumerates again and removes fixed units', async () => {
+  const live = { failed_units: [...failedUnits] };
+  const page = await openLogs('', [], live);
+  await logGroup(page, 'Failed units').click();
+  await logEntries(page)[0].click();
+  live.failed_units = [failedUnits[1]];
+  await page.render();
+  assert.equal(logGroup(page, 'Failed units').attrs['aria-pressed'], 'true');
+  assert.deepEqual(logEntries(page).map(node => node.children[0].textContent), ['backup.timer']);
+  assert.equal(page.listCalls.length, 2);
+  assert.ok(page.listCalls.every(url => url === '/api/system/workspace/logs'));
+  live.failed_units = [];
+  await page.render();
+  assert.equal(logEntries(page).length, 0);
+  assert.ok(page.content.all().some(node => node.textContent === 'No failed systemd units.'));
+  assert.deepEqual(page.calls, ['/api/system/workspace/logs/failed/minecraft.service']);
+});
+
+test('Failed unit enumeration and journal errors show unavailable without hiding other logs or units', async () => {
+  const page = await openLogs('', [migrationLog], { failed_units: null, failed_units_error: 'Failed systemd units are unavailable.' });
+  await logGroup(page, 'Failed units').click();
+  assert.ok(page.content.all().some(node => node.textContent === 'Failed systemd units are unavailable.'));
+  assert.ok(!page.content.all().some(node => node.textContent === 'No failed systemd units.'));
+  await logGroup(page, 'Migration').click();
+  assert.equal(logEntries(page).length, 1);
+  const journalPage = await openLogs('', [], { failed_units: failedUnits, journalError: true });
+  await logGroup(journalPage, 'Failed units').click();
+  await logEntries(journalPage)[0].click();
+  assert.equal(logViewer(journalPage).textContent, 'Failed unit journal is unavailable.');
+  assert.equal(logEntries(journalPage).length, 3);
+  assert.equal(journalPage.content.all().find(node => node.textContent === 'Download log').hidden, true);
+});
+
+test('Failed-unit browser view has no privileged command execution and Agent client requests 60 lines', () => {
+  assert.doesNotMatch(app, /\b(?:systemctl|journalctl|child_process)\b|exec\.Command|\b(?:execSync|spawnSync)\s*\(/);
+  assert.ok(read('webui/internal/api/failed_units.go').includes('/journal?limit=60'));
+  assert.ok(app.includes('refreshButton?.addEventListener("click", loadCurrentSystemTab)'));
+  assert.ok(app.includes('failedUnitsSelected = false;'));
 });

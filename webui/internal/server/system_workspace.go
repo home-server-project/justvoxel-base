@@ -101,6 +101,7 @@ func (a *App) registerSystemWorkspaceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/system/workspace/date-time", a.systemWorkspaceDateTimeApply)
 	mux.HandleFunc("GET /api/system/workspace/health", a.systemWorkspaceHealth)
 	mux.HandleFunc("GET /api/system/workspace/logs", a.systemWorkspaceLogs)
+	mux.HandleFunc("GET /api/system/workspace/logs/failed/{unit}", a.systemWorkspaceFailedUnitJournal)
 	mux.HandleFunc("GET /api/system/workspace/logs/{category}/{id}", a.systemWorkspaceLog)
 	mux.HandleFunc("GET /api/system/workspace/history", a.systemWorkspaceHistory)
 	mux.HandleFunc("POST /api/system/workspace/history/notifications/{id}/resolve", a.systemWorkspaceResolveNotification)
