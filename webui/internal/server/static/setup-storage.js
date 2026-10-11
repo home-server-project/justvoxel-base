@@ -1,4 +1,14 @@
 (() => {
+  function setPartitionSelection(buttons, selected = null) {
+    buttons.forEach(button => {
+      const isSelected = button === selected;
+      button.classList.toggle('is-selected', isSelected);
+      button.setAttribute('aria-pressed', String(isSelected));
+      const badge = button.querySelector('.storage-partition-state');
+      if (badge) badge.textContent = isSelected ? 'Selected' : button.dataset.role;
+    });
+  }
+
   // Compact destination browser; details and preparations use shared modal dialogs.
   function diskBrowser(form, selectedDevice) {
     const group = [...form.querySelectorAll('[data-storage-partitions]')].find(panel => [...panel.querySelectorAll('[data-device]')].some(button => button.dataset.device === selectedDevice));
@@ -20,6 +30,7 @@
       const systemPanel = storageForm.querySelector('[data-setup-storage-system-panel]');
       const internalPanel = storageForm.querySelector('[data-setup-storage-internal-panel]');
       const existingButtons = Array.from(storageForm.querySelectorAll('[data-setup-existing-partition]'));
+      setPartitionSelection(existingButtons);
       const selectedBox = storageForm.querySelector('[data-setup-storage-selected]');
       const selectedDevice = storageForm.querySelector('[data-setup-storage-selected-device]');
       const selectedPath = storageForm.querySelector('[data-setup-storage-selected-path]');
@@ -40,7 +51,7 @@
         if (device) device.value = '';
         if (mount) mount.value = '';
         if (path) path.value = systemButton?.dataset.systemPath || '/var/lib/justvoxel/minecraft';
-        existingButtons.forEach((button) => button.classList.remove('is-selected'));
+        setPartitionSelection(existingButtons);
         if (selectedBox) selectedBox.hidden = true;
         setPanels('system');
       }
@@ -52,11 +63,7 @@
         if (device) device.value = selectedDeviceValue;
         if (mount) mount.value = selectedMount;
         if (path) path.value = minecraftPath(selectedMount);
-        existingButtons.forEach((candidate) => candidate.classList.toggle('is-selected', candidate === button));
-        existingButtons.forEach((candidate) => {
-          const badge = candidate.querySelector('.setup-storage-segment-state');
-          if (badge) badge.textContent = candidate === button ? 'Selected' : 'Ready';
-        });
+        setPartitionSelection(existingButtons, button);
         if (selectedBox) selectedBox.hidden = false;
         if (selectedDevice) selectedDevice.textContent = selectedDeviceValue;
         if (selectedPath) selectedPath.textContent = minecraftPath(selectedMount);
@@ -71,7 +78,7 @@
         if (device) device.value = '';
         if (mount) mount.value = '';
         if (path) path.value = '';
-        existingButtons.forEach((button) => button.classList.remove('is-selected'));
+        setPartitionSelection(existingButtons);
         if (selectedBox) selectedBox.hidden = true;
       }
 
@@ -113,6 +120,7 @@
       const choices = Array.from(backupForm.querySelectorAll('[data-setup-backup-choice]'));
       const panels = Array.from(backupForm.querySelectorAll('[data-setup-backup-panel]'));
       const existingButtons = Array.from(backupForm.querySelectorAll('[data-setup-backup-existing]'));
+      setPartitionSelection(existingButtons);
       const selectedBox = backupForm.querySelector('[data-setup-backup-selected]');
       const selectedDevice = backupForm.querySelector('[data-setup-backup-selected-device]');
       const selectedPath = backupForm.querySelector('[data-setup-backup-selected-path]');
@@ -123,7 +131,7 @@
       const backupPath = (mountPoint) => mountPoint.replace(/\/$/, '') + '/backups';
 
       function clearLocalSelection() {
-        existingButtons.forEach((button) => button.classList.remove('is-selected'));
+        setPartitionSelection(existingButtons);
         if (device) device.value = '';
         if (selectedBox) selectedBox.hidden = true;
       }
@@ -160,11 +168,7 @@
         if (source) source.value = '';
         if (username) username.value = '';
         if (domain) domain.value = '';
-        existingButtons.forEach((candidate) => candidate.classList.toggle('is-selected', candidate === button));
-        existingButtons.forEach((candidate) => {
-          const badge = candidate.querySelector('.setup-storage-segment-state');
-          if (badge) badge.textContent = candidate === button ? 'Selected' : 'Ready';
-        });
+        setPartitionSelection(existingButtons, button);
         if (selectedBox) selectedBox.hidden = false;
         if (selectedDevice) selectedDevice.textContent = targetDevice;
         if (selectedPath) selectedPath.textContent = backupPath(targetMount);

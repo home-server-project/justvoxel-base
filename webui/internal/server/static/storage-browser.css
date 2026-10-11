@@ -30,6 +30,8 @@
 .storage-partition-card{display:grid;align-content:start;gap:.18rem;min-width:0;min-height:105px;padding:.7rem .8rem;border:1px solid #303942;border-radius:10px;background:#171d22;color:#eef1f4;text-align:left}
 button.storage-partition-card{cursor:pointer;transition:border-color .14s ease,background-color .14s ease,transform .14s ease}
 button.storage-partition-card:hover,button.storage-partition-card:focus-visible{border-color:#4f8b69;background:#1d2a23}
+[data-setup-storage-form] .storage-partition-card[data-setup-existing-partition].is-selected,
+[data-setup-backup-form] .storage-partition-card[data-setup-backup-existing].is-selected{border-color:#68bd8e;background:#203128;box-shadow:inset 0 0 0 1px #315940}
 .storage-partition-card strong{font-size:.88rem;overflow-wrap:anywhere}
 .storage-partition-card>span:not(.storage-partition-state){color:#aab5bd;font-size:.76rem}
 .storage-partition-card small{color:#77838c;font-size:.7rem;overflow-wrap:anywhere}
@@ -68,6 +70,8 @@ button.storage-partition-card:hover,button.storage-partition-card:focus-visible{
   .storage-disk-card,.storage-partition-card,.storage-partition-group,.storage-detail-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025}
   .storage-disk-card:hover,.storage-disk-card:focus-visible,button.storage-partition-card:hover,button.storage-partition-card:focus-visible{background:#eef6f1;border-color:#9fc9ae}
   .storage-disk-card.is-selected{background:#e3f1e8;border-color:#86b99a;box-shadow:inset 0 0 0 1px #b5d3c0}
+  [data-setup-storage-form] .storage-partition-card[data-setup-existing-partition].is-selected,
+  [data-setup-backup-form] .storage-partition-card[data-setup-backup-existing].is-selected{background:#e3f1e8;border-color:#86b99a;box-shadow:inset 0 0 0 1px #b5d3c0}
   .storage-disk-icon,.storage-detail-actions-preview{background:#f6f8f9}
   .storage-detail-heading{border-color:#e2e7ea}
   .storage-dialog-close{background:#f1f4f6;border-color:#cbd4da;color:#1a2025}

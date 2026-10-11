@@ -14,7 +14,15 @@ class Node {
     this.disabled = false; this.type = 'text'; this.name = ''; this.textContent = '';
     this.children = []; this.events = {}; this.one = {}; this.many = {}; this.attributes = {};
     this.classes = new Set();
-    this.classList = {contains: name => this.classes.has(name), toggle() {}, remove() {}}; this.style = {setProperty() {}};
+    this.classList = {
+      contains: name => this.classes.has(name),
+      toggle: (name, force = !this.classes.has(name)) => {
+        if (force) this.classes.add(name);
+        else this.classes.delete(name);
+        return force;
+      },
+      remove: (...names) => names.forEach(name => this.classes.delete(name)),
+    }; this.style = {setProperty() {}};
   }
   querySelector(s) {
     if (s === '[data-storage-disk][aria-pressed="true"]') return (this.many['[data-storage-disk]'] || []).find(node => node.attributes['aria-pressed'] === 'true') || null;
@@ -49,7 +57,7 @@ class Node {
     return this.kind === 'backup' ? s.includes('backup-form') : s.includes('storage-form');
   }
 }
-function fixture(kind, controlCenter = false, largeInventory = false) {
+function fixture(kind, controlCenter = false, largeInventory = false, initial = {}) {
   let current, fresh;
   let workspaceRefreshes = 0;
   const requests = [];
@@ -100,7 +108,12 @@ function fixture(kind, controlCenter = false, largeInventory = false) {
       // This fixture also ensures future password inputs stay in memory only.
       add('[password]', 'backup_password', 'memory-only-secret').type = 'password';
     }
-    const choices = devices.map(device => new Node({storagePartition: '', path: device, device, type: 'part', filesystem: 'xfs', system: 'No', readonly: 'No', uuid: 'uuid-' + device, mountpoint: '/srv/' + device.split('/').pop()}));
+    const choices = devices.map(device => {
+      const card = new Node({storagePartition: '', path: device, device, role: 'Available', type: 'part', filesystem: 'xfs', system: 'No', readonly: 'No', uuid: 'uuid-' + device, mountpoint: '/srv/' + device.split('/').pop()});
+      const badge = new Node(); badge.textContent = card.dataset.role;
+      card.one['.storage-partition-state'] = badge;
+      return card;
+    });
     f.many[kind === 'backup' ? '[data-setup-backup-existing]' : '[data-setup-existing-partition]'] = choices;
     f.many['[data-setup-existing-partition], [data-setup-backup-existing]'] = choices;
     f.many['input, select, textarea'] = fields;
@@ -152,7 +165,11 @@ function fixture(kind, controlCenter = false, largeInventory = false) {
     }
     return f;
   }
-  current = makeForm(['/dev/vdb1']);
+  current = makeForm(initial.devices || ['/dev/vdb1']);
+  if (initial.selectedDevice) {
+    current.one[`[data-setup-${kind}-type]`].value = 'partition';
+    current.one[`[data-setup-${kind}-device]`].value = initial.selectedDevice;
+  }
   let deny = false, refreshFails = false, statusError = null, statusErrorDevice = '', applyError = null, status = {device: '/dev/vdb1', uuid: 'uuid-/dev/vdb1', persistence: 'none', mounted: false, mount_point: '/srv/vdb1'};
   const context = {
     document, window: {}, URLSearchParams, console,
@@ -181,7 +198,68 @@ function fixture(kind, controlCenter = false, largeInventory = false) {
   return {context, get, requests, workspaceRefreshes: () => workspaceRefreshes, statusFailure(value, device = '') {statusError = value; statusErrorDevice = device;}, applyFailure(value) {applyError = value;}, refreshFailure(value) {refreshFails = value;}, form: () => current, deny(value) {deny = value;}, status(value) {status = {device: "/dev/vdb1", uuid: "uuid-/dev/vdb1", mount_point: "/srv/vdb1", ...value};}, changedUUID() {current.many['[data-setup-existing-partition], [data-setup-backup-existing]'][0].dataset.uuid = 'old-uuid';}, diskChanged() {current.many['[data-storage-disk]'][0].dataset.diskIdentity = 'old-disk';}};
 }
 const settle = async () => { for (let i = 0; i < 15; i++) await Promise.resolve(); };
+function assertPartitionSelection(card, selected) {
+  assert.equal(card.classList.contains('is-selected'), selected);
+  assert.equal(card.getAttribute('aria-pressed'), String(selected));
+  assert.equal(card.querySelector('.storage-partition-state').textContent, selected ? 'Selected' : card.dataset.role);
+}
 (async () => {
+  // Both wizard steps show the destination choice, rather than the open detail card.
+  for (const kind of ['storage', 'backup']) {
+    const f = fixture(kind, false, false, {devices: ['/dev/vdb1', '/dev/vdc1']});
+    const cards = f.form().many['[data-storage-partition]'].slice(0, 2);
+    cards[1].dataset.role = 'Mounted';
+    cards[1].querySelector('.storage-partition-state').textContent = 'Mounted';
+    const choose = async index => {
+      const card = cards[index];
+      f.status({device: card.dataset.device, uuid: card.dataset.uuid, persistence: 'none', mounted: false, mount_point: card.dataset.mountpoint});
+      card.click(); await settle();
+      const button = f.get('detail-actions').children[0];
+      assert.equal(button.textContent, 'Use this partition');
+      assert.equal(button.hidden, false);
+      button.click();
+      cards.forEach((candidate, i) => assertPartitionSelection(candidate, i === index));
+      assert.equal(f.form().one[`[data-setup-${kind}-device]`].value, card.dataset.device);
+    };
+    cards.forEach(card => assertPartitionSelection(card, false));
+    await choose(0);
+    cards[1].click(); await settle();
+    assertPartitionSelection(cards[0], true);
+    assertPartitionSelection(cards[1], false);
+    await choose(1);
+    await choose(0); // Restore the other card's own role, including non-Available roles.
+    const alternatives = kind === 'storage'
+      ? [f.form().one['[data-setup-storage-system]']]
+      : f.form().many['[data-setup-backup-choice]'].filter(choice => choice.dataset.setupBackupChoice !== 'partition');
+    for (const alternative of alternatives) {
+      await choose(0);
+      alternative.click();
+      cards.forEach(card => assertPartitionSelection(card, false));
+    }
+    assert.equal(cards[0].dataset.role, 'Available', 'Selection must retain the original role');
+    assert.equal(cards[1].dataset.role, 'Mounted');
+  }
+  // Initialization restores the visual choice from the existing hidden device field.
+  for (const kind of ['storage', 'backup']) {
+    for (const selectedDevice of ['/dev/vdb1', '/dev/vdc1', '/dev/missing']) {
+      const f = fixture(kind, false, false, {devices: ['/dev/vdb1', '/dev/vdc1'], selectedDevice});
+      f.form().many['[data-storage-partition]'].slice(0, 2).forEach(card => {
+        assertPartitionSelection(card, card.dataset.device === selectedDevice);
+      });
+    }
+  }
+  // Selected colors apply only to selectable Setup cards in both color schemes.
+  const css = fs.readFileSync(path.join(base, 'storage-browser.css'), 'utf8');
+  const selectedRules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(match => match[1].includes('.storage-partition-card') && match[1].includes('.is-selected'));
+  assert.equal(selectedRules.length, 2);
+  for (const [, selectors] of selectedRules) {
+    assert.deepEqual(selectors.trim().split(/,\s*/), [
+      '[data-setup-storage-form] .storage-partition-card[data-setup-existing-partition].is-selected',
+      '[data-setup-backup-form] .storage-partition-card[data-setup-backup-existing].is-selected',
+    ]);
+  }
+  assert(selectedRules[0][2].includes('background:#203128'));
+  assert(selectedRules[1][2].includes('background:#e3f1e8'));
   // A formatted card with stale selection markup must still be blocked by the adapter.
   for (const kind of ['storage', 'backup']) {
     for (const protection of ['system', 'readonly']) {
@@ -314,6 +392,9 @@ const settle = async () => { for (let i = 0; i < 15; i++) await Promise.resolve(
     assert.notEqual(f.form(), oldForm);
     assert.equal(field('device').value, '/dev/vdb1');
     assert.equal(f.form().one['[csrf]'].value, 'new-csrf');
+    f.form().many['[data-storage-partition]'].slice(0, 2).forEach(card => {
+      assertPartitionSelection(card, card.dataset.device === field('device').value);
+    });
     assert.equal(f.get('action-csrf').value, 'new-csrf');
     assert.equal(f.form().getAttribute('action'), kind === 'backup' ? '/setup/backups' : '/setup/storage');
     assert.equal(f.form().many['[data-storage-disk]'][0].getAttribute('aria-pressed'), 'true');
@@ -531,7 +612,13 @@ const settle = async () => { for (let i = 0; i < 15; i++) await Promise.resolve(
   }
   // Control Center uses the same component with its original modal presentation.
   const control = fixture('storage', true);
+  const controlCard = control.form().many['[data-storage-partition]'][0];
+  assert.equal(controlCard.getAttribute('aria-pressed'), null);
+  assert.equal(controlCard.querySelector('.storage-partition-state').textContent, 'Available');
   control.form().many['[data-storage-partition]'][0].click(); await settle();
+  assert.equal(controlCard.classList.contains('is-selected'), false);
+  assert.equal(controlCard.getAttribute('aria-pressed'), null);
+  assert.equal(controlCard.querySelector('.storage-partition-state').textContent, 'Available');
   assert.equal(control.get('detail-dialog').open, true);
   assert.equal(control.get('detail-dialog').openCount, 1);
   assert.equal(control.form().one['[data-detail-path]'].textContent, '/dev/vdb1');
