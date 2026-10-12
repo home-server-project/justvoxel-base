@@ -454,20 +454,20 @@ func pluginVersionCompatible(v pluginCatalogVersion, server pluginServerContext)
 	}
 	return false
 }
-func pluginQuery(q url.Values) (bool, bool, int, error) {
+func pluginQuery(q url.Values) (bool, bool, int, int, error) {
 	for key, values := range q {
-		if (key != "q" && key != "compatible_only" && key != "release_only" && key != "offset") || len(values) != 1 {
-			return false, false, 0, errors.New("invalid catalog query")
+		if (key != "q" && key != "compatible_only" && key != "release_only" && key != "offset" && key != "limit") || len(values) != 1 {
+			return false, false, 0, 0, errors.New("invalid catalog query")
 		}
 	}
 	if len(q.Get("q")) > 200 {
-		return false, false, 0, errors.New("search is too long")
+		return false, false, 0, 0, errors.New("search is too long")
 	}
 	compatible, release := true, true
 	for key, target := range map[string]*bool{"compatible_only": &compatible, "release_only": &release} {
 		if value := q.Get(key); value != "" {
 			if value != "true" && value != "false" {
-				return false, false, 0, errors.New("invalid filter")
+				return false, false, 0, 0, errors.New("invalid filter")
 			}
 			*target = value == "true"
 		}
@@ -477,16 +477,33 @@ func pluginQuery(q url.Values) (bool, bool, int, error) {
 		var err error
 		offset, err = strconv.Atoi(value)
 		if err != nil || offset < 0 || offset > 10000 {
-			return false, false, 0, errors.New("invalid offset")
+			return false, false, 0, 0, errors.New("invalid offset")
 		}
 	}
-	return compatible, release, offset, nil
+	limit := 8
+	if values, present := q["limit"]; present {
+		value := values[0]
+		if value == "" || strings.Trim(value, "0123456789") != "" {
+			return false, false, 0, 0, errors.New("invalid limit")
+		}
+		var err error
+		limit, err = strconv.Atoi(value)
+		if err != nil || limit < 1 || limit > 12 {
+			return false, false, 0, 0, errors.New("invalid limit")
+		}
+	}
+	return compatible, release, offset, limit, nil
 }
 func (s *server) adminPluginsDiscover(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.requireAdministrator(w, r); !ok {
 		return
 	}
-	compatible, release, offset, err := pluginQuery(r.URL.Query())
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid catalog query")
+		return
+	}
+	compatible, release, offset, limit, err := pluginQuery(query)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -522,11 +539,11 @@ func (s *server) adminPluginsDiscover(w http.ResponseWriter, r *http.Request) {
 		Hits  []pluginCatalogProject `json:"hits"`
 		Total *int                   `json:"total_hits"`
 	}
-	if err := modrinthPluginJSON(ctx, "/search", url.Values{"query": {r.URL.Query().Get("q")}, "facets": {string(encoded)}, "limit": {"8"}, "offset": {strconv.Itoa(offset)}}, &search); err != nil {
+	if err := modrinthPluginJSON(ctx, "/search", url.Values{"query": {r.URL.Query().Get("q")}, "facets": {string(encoded)}, "limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(offset)}}, &search); err != nil {
 		writeError(w, http.StatusBadGateway, "Modrinth catalog is unavailable. Try again later.")
 		return
 	}
-	if search.Hits == nil || search.Total == nil || len(search.Hits) > 8 || *search.Total < 0 {
+	if search.Hits == nil || search.Total == nil || len(search.Hits) > limit || *search.Total < 0 {
 		writeError(w, http.StatusBadGateway, "Modrinth catalog is unavailable. Try again later.")
 		return
 	}

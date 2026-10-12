@@ -104,7 +104,7 @@ func TestPluginsWorkspaceUsesExistingWindowAndSafeRendering(t *testing.T) {
 		t.Fatal(err)
 	}
 	markup, behavior := string(header), string(script)
-	for _, want := range []string{`class="control-tile nav-admin-only" type="button" data-plugins-open`, `data-workspace-window="plugins"`, `data-plugins-tab="discover"`, `data-plugins-tab="installed"`, `data-plugins-tab="updates"`, `name="compatible_only" type="checkbox" checked`, `name="release_only" type="checkbox" checked`} {
+	for _, want := range []string{`class="control-tile nav-admin-only" type="button" data-plugins-open`, `data-workspace-window="plugins"`, `data-plugins-tab="discover"`, `data-plugins-tab="installed"`, `data-plugins-tab="updates"`, `role="switch" name="compatible_only" type="checkbox" checked`, `role="switch" name="release_only" type="checkbox" checked`} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("plugin contract missing %s", want)
 		}
@@ -146,18 +146,24 @@ func TestPluginsWorkspaceCompactInfoPresentation(t *testing.T) {
 		t.Fatal("compact plugin renderers missing")
 	}
 	info := behavior[start:project]
-	for _, want := range []string{`text("button", "Info"`, `button.type = "button"`, `button.setAttribute("aria-haspopup", "dialog")`, `button.setAttribute("aria-controls", "plugins-overlay")`, "showPanel(`Info for ${name}`)", `renderInfo();`, `overlayActions(panelAction("Close"`, `"plugins-card-actions"`, `"plugins-icon-tile"`, `header.append(identityTile(name, projectID), copy)`} {
+	for _, want := range []string{`card.tabIndex = 0`, `card.setAttribute("role", "button")`, `card.setAttribute("aria-haspopup", "dialog")`, `card.setAttribute("aria-controls", "plugins-overlay")`, `event.key === "Enter" || event.key === " "`, `node.classList.toggle("is-selected", node === card)`, `card.addEventListener("click", open)`, "showPanel(`Info for ${name}`)", `renderInfo();`, `overlayActions(panelAction("Close"`, `"plugins-icon-tile"`, `header.append(identityTile(name, projectID), copy)`} {
 		if !strings.Contains(info, want) {
-			t.Fatalf("overlay Info behavior missing %s", want)
+			t.Fatalf("whole-card overlay behavior missing %s", want)
 		}
 	}
+	for _, forbidden := range []string{`text("button", "Info"`, `text("button", "Install"`, `plugins-card-actions`} {
+		if strings.Contains(behavior[start:end], forbidden) {
+			t.Fatal("separate card action remains", forbidden)
+		}
+	}
+
 	for _, inline := range []string{`card.append(details)`, `const details =`, `panelBody.append(text("h3", name), details`, `createElement("details")`, `plugins-card-details`, `aria-expanded`} {
 		if strings.Contains(behavior[start:end], inline) {
 			t.Fatalf("raw or inline card detail block remains: %s", inline)
 		}
 	}
 	discover := behavior[project:installed]
-	for _, want := range []string{`addInfo(card, project.title, () => {`, `"plugins-card-description"`, `counts.set(kind, (counts.get(kind) || 0) + 1)`, `"JustVoxel managed"`, `else if (project.install_available`, `reviewPlugin(project.project_id, version.id, project)`} {
+	for _, want := range []string{`interactiveCard(card, project.title, () => reviewPlugin`, `"plugins-card-description"`, `counts.set(kind, (counts.get(kind) || 0) + 1)`, `"JustVoxel managed"`, `const installable = !managed && project.install_available`, `reviewPlugin(project.project_id, version.id, project)`} {
 		if !strings.Contains(discover, want) {
 			t.Fatalf("Discover summary or Info missing %s", want)
 		}
@@ -174,7 +180,7 @@ func TestPluginsWorkspaceCompactInfoPresentation(t *testing.T) {
 		}
 	}
 	style := string(css)
-	for _, want := range []string{`.plugins-workspace-body{container-type:inline-size;`, `grid-template-columns:minmax(0,1fr)`, `@container(min-width:580px){.plugins-results{grid-template-columns:repeat(2,minmax(0,1fr))}}`, `@container(min-width:860px){.plugins-results{grid-template-columns:repeat(3,minmax(0,1fr))}}`, `-webkit-line-clamp:2`, `.plugins-workspace-dialog [hidden]{display:none!important}`, `max-width:1080px`, `.plugins-card-actions`, `.plugins-icon-tile{display:grid;place-items:center;flex:none;width:40px;height:40px`, `.plugins-overlay-actions{display:flex;flex-wrap:wrap;`, `.plugins-card-actions button,.plugins-install-content button{padding:.72rem 1rem}`, `word-break:normal`, `.plugins-version-list{display:flex;flex-wrap:wrap;`, `.plugins-info-rows{grid-template-columns:minmax(0,1fr)}`} {
+	for _, want := range []string{`.plugins-workspace-body{container-type:inline-size;`, `grid-template-columns:minmax(0,1fr)`, `@container(min-width:580px){.plugins-results{grid-template-columns:repeat(2,minmax(0,1fr))}}`, `@container(min-width:860px){.plugins-results{grid-template-columns:repeat(3,minmax(0,1fr))}}`, `-webkit-line-clamp:2`, `.plugins-workspace-dialog [hidden]{display:none!important}`, `max-width:1080px`, `.plugins-result-card.is-selected`, `.plugins-icon-tile{display:grid;place-items:center;flex:none;width:40px;height:40px`, `.plugins-overlay-actions{display:flex;flex-wrap:wrap;`, `.plugins-install-content button{padding:.72rem 1rem}`, `word-break:normal`, `.plugins-version-list{display:flex;flex-wrap:wrap;`, `.plugins-info-rows{grid-template-columns:minmax(0,1fr)}`} {
 		if !strings.Contains(style, want) {
 			t.Fatalf("compact workspace styling missing %s", want)
 		}
@@ -185,20 +191,7 @@ func TestPluginsWorkspaceCompactInfoPresentation(t *testing.T) {
 			t.Fatalf("artificial plugin geometry remains %s", bad)
 		}
 	}
-	actionStart := strings.Index(style, `.plugins-workspace-dialog .plugins-info-button{`)
-	if actionStart < 0 {
-		t.Fatal("plugin action layout missing")
-	}
-	actionEnd := strings.Index(style[actionStart:], "}")
-	if actionEnd < 0 {
-		t.Fatal("plugin action rule incomplete")
-	}
-	actionStyle := style[actionStart : actionStart+actionEnd]
-	for _, override := range []string{"min-height", "padding", "font-size", "plugins-badge"} {
-		if strings.Contains(actionStyle, override) {
-			t.Fatal("plugin actions must inherit normal button sizing", override)
-		}
-	}
+
 }
 
 func TestPluginsWorkspaceBoundedOverlay(t *testing.T) {
@@ -336,11 +329,11 @@ func TestPluginsInstallReviewProgressAndOwnershipRendering(t *testing.T) {
 	for _, want := range []string{
 		`project.install_available && project.compatible && server.supported && server.minecraft_version && version?.version_type === "release"`,
 		`["geyser", "floodgate", "viaversion"].includes(project.slug)`,
-		`pluginRequest("install/plan"`, `plan.project_name`, `overlaySection("Server compatibility", primary)`, `plan.artifacts`, `plan.installation_location`,
+		`pluginRequest("install/plan"`, `plan.project_name`, `overlaySection("Compatibility")`, `plan.artifacts`, `plan.installation_location`,
 		`if (plan.confirmation_required)`, `plan.players`, `confirm_players: String(plan.confirmation_required === true)`,
 		`plan_fingerprint: plan.plan_fingerprint`, `operation.stage`, `operation.status`, `install-operation?id=`,
 		`"View in Installed"`, `"Install another plugin"`, `"Done"`, `"Managed by Plugins"`, `"JustVoxel managed"`, `"Manual / unmanaged"`,
-		`addInfo(card, project.title, () => {`, `addInfo(card, name, () => {`, `"Administrator attention required"`,
+		`interactiveCard(card, project.title, () => reviewPlugin`, `addInfo(card, name, () => {`, `"Administrator attention required"`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("missing Stage 2 behavior %s", want)
@@ -417,7 +410,7 @@ func TestPluginsAdditionalInfoAndStructuredInstallPresentation(t *testing.T) {
 		t.Fatal("plugin presentation boundaries missing")
 	}
 	discoverInfo := script[project:installed]
-	for _, want := range []string{`overlayHeader(project.title, project.description`, `overlaySection("About this version")`, `about("Release"`, `about("Release type"`, `about("Published"`, `about("Source"`, `about("Project ID"`, `about("Release ID"`, `overlaySection("Compatibility")`, `compatibility("Active JustVoxel Minecraft version"`, `compatibility("Publisher-supported platforms"`, `compatibility("Publisher-supported Minecraft versions"`, `new Set(version?.game_versions || [])`, `"plugins-version-list"`, `versions.forEach((value) => versionList.append(text("li", value)))`, `overlaySection("Dependencies").append(dependencyGroups(dependencies))`} {
+	for _, want := range []string{`overlayHeader(project.title, project.description`, `overlaySection("About this version")`, `about("Release"`, `about("Release type"`, `about("Published"`, `about("Source"`, `about("Project ID"`, `about("Release ID"`, `overlaySection("Compatibility")`, `compatibility("Active Minecraft version"`, `compatibility("Publisher-supported platforms"`, `compatibility("Publisher-supported Minecraft versions"`, `new Set(version?.game_versions || [])`, `"plugins-version-list"`, `versions.forEach((value) => versionList.append(text("li", value)))`, `overlaySection("Dependencies").append(dependencyGroups(dependencies))`} {
 		if !strings.Contains(discoverInfo, want) {
 			t.Fatal("structured Discover Info missing", want)
 		}
@@ -445,17 +438,23 @@ func TestPluginsAdditionalInfoAndStructuredInstallPresentation(t *testing.T) {
 		}
 	}
 	review := script[reviewStart:resume]
-	for _, want := range []string{`overlayHeader(plan.project_name, plan.description || project?.description`, `overlaySection("Server compatibility", primary)`, `"plugins-compatibility-state"`, `compatibility("Server software"`, `compatibility("Active Minecraft version"`, `overlaySection("Dependencies", primary)`, `artifact.satisfied ? "Already satisfied" : "Will be installed"`, `overlaySection("Files to install", primary)`, `readableSize(artifact.size)`, `overlaySection("Installation location", primary)`, `overlaySection("Version details", secondary)`, `version("Project ID"`, `version("Release ID"`, `overlaySection("Restart notice", secondary)`, `restart.classList.add("plugins-install-warning")`, `verified cold backup`, `Minecraft must restart for load verification`, `originally stopped`, `returns to stopped`, `if (plan.confirmation_required) {`, `overlaySection("Players", secondary)`, `overlayActions(panelAction("Cancel"`, `panelAction("Install", () => applyPlugin(plan))`} {
+	for _, want := range []string{`overlayHeader(plan.project_name, plan.description || project?.description`, `overlaySection("About this version")`, `about("Release"`, `about("Release type"`, `about("Published"`, `about("Source"`, `about("Project ID"`, `about("Release ID"`, `overlaySection("Compatibility")`, `compatibility("Result"`, `compatibility("Server software"`, `compatibility("Active Minecraft version"`, `compatibility("Publisher-supported platforms"`, `compatibility("Publisher-supported Minecraft versions"`, `overlaySection("Dependencies")`, `artifact.satisfied ? "Already satisfied" : "Will be installed"`, `dependency.dependency_type !== "required"`, `overlaySection("Files to install")`, `readableSize(artifact.size)`, `overlaySection("Installation")`, `plan.installation_location`, `overlaySection("Restart")`, `restart("Required", plan.restart_required ? "Yes" : "No")`, `Verified cold backup before changes`, `Minecraft starts/restarts to load and verify plugins`, `Returns to stopped after verification`, `if (plan.confirmation_required) {`, `overlaySection("Players")`, `overlayActions(panelAction("Cancel"`, `panelAction("Install", () => applyPlugin(plan))`} {
 		if !strings.Contains(review, want) {
-			t.Fatal("structured review missing", want)
+			t.Fatal("combined plugin overlay missing", want)
 		}
 	}
+	for _, forbidden := range []string{"plugins-review-layout", "plugins-review-primary", "plugins-review-secondary", "plugins-install-warning"} {
+		if strings.Contains(review, forbidden) {
+			t.Fatal("rejected install review presentation remains", forbidden)
+		}
+	}
+
 	for _, old := range []string{`section("Plugin")`, `section("Compatibility")`, `section("Installation")`, `toLocaleString()} bytes`} {
 		if strings.Contains(review, old) {
 			t.Fatal("raw review presentation remains", old)
 		}
 	}
-	if strings.Count(review, "player-aware shutdown") != 1 || strings.Index(review, `overlaySection("Players", secondary)`) < strings.Index(review, "if (plan.confirmation_required)") {
+	if strings.Count(review, "player-aware shutdown") != 1 || strings.Index(review, `overlaySection("Players")`) < strings.Index(review, "if (plan.confirmation_required)") {
 		t.Fatal("player warning not conditional or duplicated")
 	}
 	for _, want := range []string{`Number.isFinite(size)`, `"Size unavailable"`, `"MiB"`, `"KiB"`} {
@@ -630,8 +629,8 @@ func TestPluginsWorkspaceApprovedCompactHierarchyAndStageFlow(t *testing.T) {
 		}
 		return script[a : a+b]
 	}
-	header := between("  const addInfo =", "  const infoRows =")
-	for _, want := range []string{`copy.className = "plugins-card-copy"`, `copy.append(heading)`, `card.querySelector(".plugins-card-description, .plugins-card-release")`, `copy.append(description)`, `header.append(identityTile(name, projectID), copy)`, `header.append(actions)`} {
+	header := between("  const interactiveCard =", "  const infoRows =")
+	for _, want := range []string{`copy.className = "plugins-card-copy"`, `copy.append(heading)`, `card.querySelector(".plugins-card-description, .plugins-card-release")`, `copy.append(description)`, `header.append(identityTile(name, projectID), copy)`} {
 		if !strings.Contains(header, want) {
 			t.Fatal("identity/header hierarchy missing", want)
 		}
@@ -639,7 +638,7 @@ func TestPluginsWorkspaceApprovedCompactHierarchyAndStageFlow(t *testing.T) {
 	if strings.Contains(header, `card.append(actions)`) {
 		t.Fatal("actions detached from compact card header")
 	}
-	collapsed := between("  const renderProject =", "    addInfo(card, project.title")
+	collapsed := between("  const renderProject =", "    const renderInfo =")
 	for _, want := range []string{`server.server_software || server.server_type`, `const identityBadges = [version?.version_number, platform,`, `server.minecraft_version`, `identityBadges.filter(Boolean)`, `"plugins-badge"`} {
 		if !strings.Contains(collapsed, want) {
 			t.Fatal("concise release/platform/MC badges missing", want)
@@ -668,11 +667,12 @@ func TestPluginsWorkspaceApprovedCompactHierarchyAndStageFlow(t *testing.T) {
 		t.Fatal("unidentified and failed icons must retain fallback")
 	}
 	review := between("  const reviewPlugin =", "  const resumePluginInstall =")
-	for _, want := range []string{`layout.className = "plugins-review-layout"`, `primary.className = "plugins-review-primary"`, `secondary.className = "plugins-review-secondary"`, `layout.append(primary, secondary)`, `overlaySection("Server compatibility", primary)`, `overlaySection("Dependencies", primary)`, `overlaySection("Files to install", primary)`, `overlaySection("Installation location", primary)`, `overlaySection("Version details", secondary)`, `overlaySection("Restart notice", secondary)`, `overlaySection("Players", secondary)`, `readableSize(artifact.size)`, `project?.version?.id === plan.version_id`, `project?.project_id === plan.project_id && project.source`} {
+	for _, want := range []string{`overlaySection("About this version")`, `overlaySection("Compatibility")`, `overlaySection("Dependencies")`, `overlaySection("Files to install")`, `overlaySection("Installation")`, `overlaySection("Restart")`, `overlaySection("Players")`, `readableSize(artifact.size)`, `project?.version?.id === plan.version_id`, `project?.project_id === plan.project_id && project.source`} {
 		if !strings.Contains(review, want) {
-			t.Fatal("two-area Review structure missing", want)
+			t.Fatal("single-column overlay structure missing", want)
 		}
 	}
+
 	progress := between("  const showOperation =", "  const pollOperation =")
 	if strings.Count(progress, `operation.status`) != 1 || !strings.Contains(progress, `index !== undefined && position < index`) || !strings.Contains(progress, `position === index`) || !strings.Contains(progress, `})[operation.stage]`) {
 		t.Fatal("progress must derive real states from the persisted stage and render status once")
@@ -682,7 +682,7 @@ func TestPluginsWorkspaceApprovedCompactHierarchyAndStageFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	css := string(rawCSS)
-	for _, want := range []string{`.plugins-install-stages{display:flex;flex-direction:column;align-items:flex-start;`, `.plugins-install-stages li::before{content:"○"`, `.plugins-install-stages .is-complete::before{content:"✓"`, `.plugins-install-stages [aria-current="step"]::before{content:"●"`, `.plugins-review-layout{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);`, `@container(max-width:500px){.plugins-review-layout{grid-template-columns:minmax(0,1fr);`, `.plugins-review-layout .plugins-info-rows{grid-template-columns:minmax(0,1fr);`} {
+	for _, want := range []string{`.plugins-install-stages{display:flex;flex-direction:column;align-items:flex-start;`, `.plugins-install-stages li::before{content:"○"`, `.plugins-install-stages .is-complete::before{content:"✓"`, `.plugins-install-stages [aria-current="step"]::before{content:"●"`} {
 		if !strings.Contains(css, want) {
 			t.Fatal("compact responsive layout missing", want)
 		}
@@ -727,6 +727,98 @@ func TestPluginsInventoryForwardsVerifiedOptionalIdentity(t *testing.T) {
 		}
 		if _, exists := wire.Plugins[0]["version_id"]; exists {
 			t.Fatal("unidentified release ID must be omitted")
+		}
+	}
+}
+
+func TestPluginsWorkspaceBoundedDiscoverQuery(t *testing.T) {
+	for _, tc := range []struct {
+		query    string
+		accepted bool
+	}{
+		{"", true}, {"limit=1", true}, {"limit=12", true},
+		{"limit=0", false}, {"limit=13", false}, {"limit=abc", false},
+		{"limit=1.5", false}, {"limit=", false}, {"limit=%2B1", false},
+		{"limit=1&limit=12", false}, {"source=hangar", false}, {"url=https://example.com", false}, {"limit=1&bad=%xx", false},
+	} {
+		t.Run(tc.query, func(t *testing.T) {
+			client := &fakePluginsWorkspaceAPI{}
+			client.role = "administrator"
+			app, err := New(client, Config{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rr := httptest.NewRecorder()
+			app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/api/plugins/workspace/discover?"+tc.query, ""))
+			if tc.accepted {
+				if rr.Code != http.StatusOK || client.catalogCalls != 1 {
+					t.Fatal("catalog query rejected", rr.Code)
+				}
+				values, _ := url.ParseQuery(tc.query)
+				if client.query.Get("limit") != values.Get("limit") {
+					t.Fatal("limit was not forwarded")
+				}
+			} else if rr.Code != http.StatusBadRequest || client.catalogCalls != 0 {
+				t.Fatal("invalid catalog query forwarded", rr.Code)
+			}
+		})
+	}
+}
+
+func TestPluginsWorkspaceToolbarCapacityAndPagination(t *testing.T) {
+	rawHeader, err := assets.ReadFile("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawJS, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawCSS, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	header, js, css := string(rawHeader), string(rawJS), string(rawCSS)
+	start := strings.Index(js, "// Plugin workspace.")
+	end := strings.Index(js, "// Bookmarked standalone pages")
+	if start < 0 || end <= start {
+		t.Fatal("plugin workspace missing")
+	}
+	js = js[start:end]
+	for _, want := range []string{`aria-label="Search plugins"`, `placeholder="Search Modrinth plugins"`, `role="switch" data-plugins-modrinth checked aria-readonly="true"`, `role="switch" data-plugins-hangar disabled>Hangar`, `>Compatible only`, `>Release only`} {
+		if !strings.Contains(header, want) {
+			t.Fatal("toolbar control missing", want)
+		}
+	}
+	for _, forbidden := range []string{`>Search plugins<input`, `data-plugins-source`, `Source: Modrinth`} {
+		if strings.Contains(header, forbidden) {
+			t.Fatal("visible toolbar text remains", forbidden)
+		}
+	}
+	for _, want := range []string{`limit: String(pageLimit)`, `results.getBoundingClientRect()`, `style.gridTemplateColumns`, `results.clientHeight`, `style.getPropertyValue("--plugins-card-height")`, `columns * rows`, `Math.min(12`, `new ResizeObserver`, `setTimeout(() => updateCapacity(), 200)`, `Math.floor(oldOffset / newLimit)`, `offset = newPage * newLimit`, `Math.ceil(payload.total / pageLimit)`, `Math.floor(offset / pageLimit) + 1`, "`Page ${currentPage} of ${totalPages}`", `offset - pageLimit`, `event.preventDefault()`} {
+		if !strings.Contains(js, want) {
+			t.Fatal("dynamic catalog behavior missing", want)
+		}
+	}
+	for _, forbidden := range []string{`Catalog page`, `offset / 8`, `offset - 8`, `source:`, `hangar.com`} {
+		if strings.Contains(js, forbidden) {
+			t.Fatal("obsolete or fake catalog behavior", forbidden)
+		}
+	}
+	page := strings.Index(header, "<span data-plugins-page>")
+	previous := strings.Index(header, "data-plugins-previous")
+	next := strings.Index(header, "data-plugins-next")
+	if page < 0 || previous <= page || next <= previous {
+		t.Fatal("pagination order changed")
+	}
+	for _, want := range []string{`display:flex;flex-direction:column;gap:.55rem;flex:1`, `.plugins-search{display:flex;flex:none;align-items:center;flex-wrap:nowrap`, `max-width:200px`, `--plugins-card-height:144px`, `height:var(--plugins-card-height)`, `.plugins-result-card.is-selected{border-color:var(--jv-success)`, `color-mix(in srgb,var(--jv-success) 18%,var(--jv-surface-sunken))`, `.plugins-result-card:focus-visible`, `justify-content:flex-end;gap:.6rem;margin-top:auto`, `@container(max-width:680px){.plugins-search{flex-wrap:wrap}`} {
+		if !strings.Contains(css, want) {
+			t.Fatal("approved layout rule missing", want)
+		}
+	}
+	for _, forbidden := range []string{`plugins-review-layout`, `plugins-review-primary`, `plugins-review-secondary`, `plugins-card-actions`, `min-height:230px`} {
+		if strings.Contains(css, forbidden) {
+			t.Fatal("rejected layout remains", forbidden)
 		}
 	}
 }

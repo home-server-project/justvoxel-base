@@ -53,7 +53,12 @@ func (a *App) pluginsWorkspaceDiscover(w http.ResponseWriter, r *http.Request) {
 		writeMinecraftWorkspaceError(w, http.StatusServiceUnavailable, "Plugin catalog is unavailable.")
 		return
 	}
-	out, err := client.AdminPluginDiscover(r.Context(), session, r.URL.Query())
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil || api.ValidatePluginDiscoverQuery(query) != nil {
+		writeMinecraftWorkspaceError(w, http.StatusBadRequest, "Invalid catalog query.")
+		return
+	}
+	out, err := client.AdminPluginDiscover(r.Context(), session, query)
 	if err != nil {
 		a.writeMinecraftWorkspaceAPIError(w, err, "Plugin catalog is unavailable.")
 		return

@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -179,6 +180,7 @@ func TestModrinthPluginDefaultFiltersAndReleaseDependencies(t *testing.T) {
 		return []byte(`{"minecraft":{"server_type":"purpur","version":"1.21.8"}}`), nil
 	}
 	calls := 0
+	expectedLimit := "8"
 	pluginCatalogClient = &http.Client{Transport: pluginTestTransport(func(r *http.Request) (*http.Response, error) {
 		calls++
 		if r.URL.Scheme != "https" || r.URL.Host != "api.modrinth.com" || !strings.Contains(r.Header.Get("User-Agent"), "JustVoxel") {
@@ -187,6 +189,9 @@ func TestModrinthPluginDefaultFiltersAndReleaseDependencies(t *testing.T) {
 		body := ""
 		switch r.URL.Path {
 		case "/v2/search":
+			if r.URL.Query().Get("limit") != expectedLimit {
+				t.Fatal("validated catalog limit not forwarded", r.URL)
+			}
 			facets := r.URL.Query().Get("facets")
 			for _, filter := range []string{"versions:1.21.8", "categories:paper", "categories:purpur", "categories:spigot", "categories:bukkit", "project_type:mod"} {
 				if !strings.Contains(facets, filter) {
@@ -221,17 +226,36 @@ func TestModrinthPluginDefaultFiltersAndReleaseDependencies(t *testing.T) {
 	if project.Version == nil || project.Version.ID != "release" || len(project.Version.Dependencies) != 3 || !project.Compatible || project.Compatibility != "Compatible according to publisher metadata" || calls != 2 {
 		t.Fatalf("project: %#v calls=%d", project, calls)
 	}
+	for _, value := range []string{"1", "12"} {
+		expectedLimit = value
+		rr := httptest.NewRecorder()
+		s.adminPluginsDiscover(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/discover?q=Example&limit="+value, ""))
+		if rr.Code != http.StatusOK {
+			t.Fatal("bounded limit rejected", value, rr.Code, rr.Body.String())
+		}
+	}
+
 }
 func TestPluginCatalogQueryRejectsUpstreamAndInvalidFilters(t *testing.T) {
-	for _, query := range []string{"url=https://example.com", "host=example.com", "compatible_only=maybe", "release_only=0", "offset=-1", "q=a&q=b"} {
+	for _, query := range []string{"url=https://example.com", "host=example.com", "compatible_only=maybe", "release_only=0", "offset=-1", "q=a&q=b", "limit=0", "limit=13", "limit=abc", "limit=1.5", "limit=", "limit=%2B1", "limit=1&limit=12"} {
 		values, _ := url.ParseQuery(query)
-		if _, _, _, err := pluginQuery(values); err == nil {
+		if _, _, _, _, err := pluginQuery(values); err == nil {
 			t.Fatalf("accepted %s", query)
 		}
 	}
-	compatible, release, offset, err := pluginQuery(url.Values{})
-	if err != nil || !compatible || !release || offset != 0 {
+	compatible, release, offset, limit, err := pluginQuery(url.Values{})
+	if err != nil || !compatible || !release || offset != 0 || limit != 8 {
 		t.Fatal("defaults not enabled")
+	}
+}
+
+func TestPluginCatalogQueryAcceptsBoundedLimit(t *testing.T) {
+	for _, value := range []string{"1", "12"} {
+		want, _ := strconv.Atoi(value)
+		_, _, _, limit, err := pluginQuery(url.Values{"limit": {value}})
+		if err != nil || limit != want {
+			t.Fatalf("limit %s: %d %v", value, limit, err)
+		}
 	}
 }
 

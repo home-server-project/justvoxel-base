@@ -5801,10 +5801,10 @@ if (pluginsDialog && pluginsOpen) {
   const results = pluginsDialog.querySelector("[data-plugins-results]");
   const state = pluginsDialog.querySelector("[data-plugins-state]");
   const context = pluginsDialog.querySelector("[data-plugins-context]");
-  const source = pluginsDialog.querySelector("[data-plugins-source]");
   const pagination = pluginsDialog.querySelector("[data-plugins-pagination]");
   const previous = pluginsDialog.querySelector("[data-plugins-previous]");
   const next = pluginsDialog.querySelector("[data-plugins-next]");
+  let pageLimit = 8, capacityTimer = null;
   let tab = "discover", offset = 0, nextOffset = -1, generation = 0, controller = null;
   const text = (tag, value, className = "") => {
     const node = document.createElement(tag);
@@ -5856,17 +5856,27 @@ if (pluginsDialog && pluginsOpen) {
     panelBody.append(footer);
     return footer;
   };
-  const addInfo = (card, name, renderInfo, projectID) => {
-    const button = text("button", "Info", "plugins-info-button secondary");
-    button.type = "button";
-    button.setAttribute("aria-label", `Info for ${name}`);
-    button.setAttribute("aria-haspopup", "dialog");
-    button.setAttribute("aria-controls", "plugins-overlay");
-    button.addEventListener("click", () => {
-      stopPolling();
-      showPanel(`Info for ${name}`);
-      renderInfo();
-      overlayActions(panelAction("Close", closePanel, true));
+  const interactiveCard = (card, name, activate, projectID) => {
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    card.setAttribute("aria-label", `Open ${name}`);
+    card.setAttribute("aria-haspopup", "dialog");
+    card.setAttribute("aria-controls", "plugins-overlay");
+    card.setAttribute("aria-pressed", "false");
+    const open = () => {
+      results.querySelectorAll(".plugins-result-card").forEach((node) => {
+        node.classList.toggle("is-selected", node === card);
+        node.setAttribute("aria-pressed", String(node === card));
+      });
+      card.focus();
+      activate();
+    };
+    card.addEventListener("click", open);
+    card.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        open();
+      }
     });
     const heading = card.querySelector("h3");
     const header = document.createElement("div");
@@ -5878,10 +5888,14 @@ if (pluginsDialog && pluginsOpen) {
     const description = card.querySelector(".plugins-card-description, .plugins-card-release");
     if (description) copy.append(description);
     header.append(identityTile(name, projectID), copy);
-    const actions = document.createElement("div");
-    actions.className = "plugins-card-actions";
-    actions.append(button);
-    header.append(actions);
+  };
+  const addInfo = (card, name, renderInfo, projectID) => {
+    interactiveCard(card, name, () => {
+      stopPolling();
+      showPanel(`Info for ${name}`);
+      renderInfo();
+      overlayActions(panelAction("Close", closePanel, true));
+    }, projectID);
   };
   const infoRows = (container) => {
     const rows = document.createElement("dl");
@@ -5938,7 +5952,7 @@ if (pluginsDialog && pluginsOpen) {
       });
       card.append(text("p", Array.from(counts, ([kind, count]) => `${count} ${kind}`).join(" · "), "plugins-card-meta"));
     }
-    addInfo(card, project.title, () => {
+    const renderInfo = () => {
       overlayHeader(project.title, project.description, identityBadges, project.project_id);
       const about = infoRows(overlaySection("About this version"));
       about("Release", version?.version_number || "Unavailable");
@@ -5948,7 +5962,9 @@ if (pluginsDialog && pluginsOpen) {
       about("Project ID", project.project_id);
       about("Release ID", version?.id || "Unavailable");
       const compatibility = infoRows(overlaySection("Compatibility"));
-      compatibility("Active JustVoxel Minecraft version", server.minecraft_version || "Unknown");
+      compatibility("Result", project.compatibility);
+      compatibility("Server software", platform || "Unknown");
+      compatibility("Active Minecraft version", server.minecraft_version || "Unknown");
       compatibility("Publisher-supported platforms", (version?.loaders || []).join(" / ") || "Not provided");
       const versions = [...new Set(version?.game_versions || [])];
       const versionList = document.createElement("ul");
@@ -5957,15 +5973,17 @@ if (pluginsDialog && pluginsOpen) {
       compatibility("Publisher-supported Minecraft versions", versions.length ? versionList : "Not provided");
       overlaySection("Dependencies").append(dependencyGroups(dependencies));
       if (project.metadata_error || !version) panelBody.append(text("p", project.metadata_error || "Release metadata unavailable.", "plugins-card-meta"));
-    }, project.project_id);
+    };
     const managed = ["geyser", "floodgate", "viaversion"].includes(project.slug);
-    if (managed) {
-      badges.append(text("span", "JustVoxel managed", "plugins-badge"));
-    } else if (project.install_available && project.compatible && server.supported && server.minecraft_version && version?.version_type === "release") {
-      const install = text("button", "Install", "plugins-info-button");
-      install.type = "button";
-      install.addEventListener("click", () => reviewPlugin(project.project_id, version.id, project));
-      card.querySelector(".plugins-card-actions").append(install);
+    if (managed) badges.append(text("span", "JustVoxel managed", "plugins-badge"));
+    const installable = !managed && project.install_available && project.compatible && server.supported && server.minecraft_version && version?.version_type === "release";
+    if (installable) {
+      interactiveCard(card, project.title, () => reviewPlugin(project.project_id, version.id, project), project.project_id);
+    } else {
+      addInfo(card, project.title, () => {
+        renderInfo();
+        if (managed) infoRows(overlaySection("Management"))("Status", "JustVoxel managed");
+      }, project.project_id);
     }
     // Publisher data uses textContent; artifact URLs never reach this browser.
     return card;
@@ -5995,7 +6013,7 @@ if (pluginsDialog && pluginsOpen) {
         if (plugin.version_id) identity("Release ID", plugin.version_id);
       }
     }, projectID);
-    let summary = plugin.metadata_status === "Metadata read" ? "Descriptor available" : "See Info for metadata status";
+    let summary = plugin.metadata_status === "Metadata read" ? "Descriptor available" : "Metadata unavailable";
     if (tab === "updates") {
       summary = plugin.management === "justvoxel" ? "Updates via server updates" : plugin.management === "plugins" ? "Plugin updates are not available yet" : "Update status unknown";
     }
@@ -6171,20 +6189,25 @@ if (pluginsDialog && pluginsOpen) {
       if (current !== installGeneration) return;
       showPanel();
       overlayHeader(plan.project_name, plan.description || project?.description, [plan.version_number, plan.server.server_software, plan.server.minecraft_version && `MC ${plan.server.minecraft_version}`], plan.project_id);
-      const layout = document.createElement("div");
-      layout.className = "plugins-review-layout";
-      const primary = document.createElement("div");
-      primary.className = "plugins-review-primary";
-      const secondary = document.createElement("div");
-      secondary.className = "plugins-review-secondary";
-      layout.append(primary, secondary);
-      panelBody.append(layout);
-      const compatibilitySection = overlaySection("Server compatibility", primary);
-      compatibilitySection.append(text("p", plan.compatibility, "plugins-compatibility-state"));
-      const compatibility = infoRows(compatibilitySection);
+      const selectedVersion = project?.version?.id === plan.version_id ? project.version : null;
+      const about = infoRows(overlaySection("About this version"));
+      about("Release", plan.version_number);
+      about("Release type", selectedVersion?.version_type || "Not provided");
+      about("Published", selectedVersion?.date_published || "Not provided");
+      about("Source", project?.project_id === plan.project_id && project.source ? project.source : "Modrinth");
+      about("Project ID", plan.project_id);
+      about("Release ID", plan.version_id);
+      const compatibility = infoRows(overlaySection("Compatibility"));
+      compatibility("Result", plan.compatibility);
       compatibility("Server software", plan.server.server_software);
       compatibility("Active Minecraft version", plan.server.minecraft_version);
-      const dependencies = overlaySection("Dependencies", primary);
+      compatibility("Publisher-supported platforms", (selectedVersion?.loaders || []).join(" / ") || "Not provided");
+      const versions = [...new Set(selectedVersion?.game_versions || [])];
+      const versionList = document.createElement("ul");
+      versionList.className = "plugins-version-list";
+      versions.forEach((value) => versionList.append(text("li", value)));
+      compatibility("Publisher-supported Minecraft versions", versions.length ? versionList : "Not provided");
+      const dependencies = overlaySection("Dependencies");
       const required = plan.artifacts.filter((artifact) => !artifact.requested);
       dependencies.append(text("p", required.length ? `${required.length} required dependencies in this plan.` : "No required dependencies."));
       const dependencyList = document.createElement("ul");
@@ -6195,6 +6218,8 @@ if (pluginsDialog && pluginsOpen) {
         dependencyList.append(item);
       });
       dependencies.append(dependencyList);
+      const informational = (plan.display_dependencies || []).filter((dependency) => dependency.dependency_type !== "required");
+      if (informational.length) dependencies.append(dependencyGroups(informational));
       const files = document.createElement("ul");
       files.className = "plugins-overlay-list";
       plan.artifacts.filter((artifact) => !artifact.satisfied).forEach((artifact) => {
@@ -6202,20 +6227,21 @@ if (pluginsDialog && pluginsOpen) {
         item.append(text("span", readableSize(artifact.size), "plugins-list-secondary"));
         files.append(item);
       });
-      overlaySection("Files to install", primary).append(files);
-      overlaySection("Installation location", primary).append(text("p", plan.installation_location), text("p", "Files are placed in the configured Minecraft plugins directory.", "plugins-list-secondary"));
-      const version = infoRows(overlaySection("Version details", secondary));
-      version("Project ID", plan.project_id);
-      version("Release ID", plan.version_id);
-      if (project?.version?.id === plan.version_id) version("Release type", project.version.version_type);
-      if (project?.project_id === plan.project_id && project.source) version("Source", project.source);
-      const restart = overlaySection("Restart notice", secondary);
-      restart.classList.add("plugins-install-warning");
-      restart.append(text("p", "A verified cold backup occurs before plugin files change. Minecraft must restart for load verification. If Minecraft was originally stopped, it starts temporarily for verification and returns to stopped before completion."));
+      overlaySection("Files to install").append(files);
+      const installation = infoRows(overlaySection("Installation"));
+      installation("Target plugin directory", plan.installation_location);
+      installation("Changes", "The listed files are installed after a verified cold backup.");
+      const restart = infoRows(overlaySection("Restart"));
+      restart("Required", plan.restart_required ? "Yes" : "No");
+      restart("Backup", "Verified cold backup before changes");
+      restart("Verification", "Minecraft starts/restarts to load and verify plugins");
+      restart("Original stopped state", "Returns to stopped after verification");
       if (plan.confirmation_required) {
-        const players = infoRows(overlaySection("Players", secondary));
-        players("Online", `${plan.online} · ${(plan.players || []).join(", ") || "Names unavailable"}`);
-        secondary.append(text("p", "Install confirms the player-aware shutdown and restart.", "plugins-install-warning"));
+        const section = overlaySection("Players");
+        const players = infoRows(section);
+        players("Online", String(plan.online));
+        if (plan.players?.length) players("Names", plan.players.join(", "));
+        section.append(text("p", "Install confirms the player-aware shutdown and restart."));
       }
       overlayActions(panelAction("Cancel", closePanel, true), panelAction("Install", () => applyPlugin(plan)));
       panelBody.querySelector("button")?.focus();
@@ -6249,10 +6275,11 @@ if (pluginsDialog && pluginsOpen) {
     controller = new AbortController();
     state.textContent = "Loading plugins…";
     results.replaceChildren();
-    pagination.hidden = true;
+    pagination.hidden = tab !== "discover";
+    previous.disabled = true;
+    next.disabled = true;
     form.hidden = tab !== "discover";
-    source.textContent = tab === "discover" ? "Source: Modrinth · Compatible releases can be reviewed for installation." : "Source: installed JAR files";
-    const query = new URLSearchParams({ q: form.elements.q.value, compatible_only: String(form.elements.compatible_only.checked), release_only: String(form.elements.release_only.checked), offset: String(offset) });
+    const query = new URLSearchParams({ q: form.elements.q.value, compatible_only: String(form.elements.compatible_only.checked), release_only: String(form.elements.release_only.checked), offset: String(offset), limit: String(pageLimit) });
     try {
       const response = await fetch(`/api/plugins/workspace/${tab}${tab === "discover" ? "?" + query : ""}`, { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" }, signal: controller.signal });
       const payload = await response.json();
@@ -6262,23 +6289,52 @@ if (pluginsDialog && pluginsOpen) {
       if (!response.ok) throw new Error(payload.error || "Plugin information is unavailable.");
       const server = payload.server;
       context.textContent = `${server.server_software || "Minecraft"} · Minecraft ${server.minecraft_version || "version unavailable"}`;
-      form.querySelectorAll("input,button").forEach((control) => { control.disabled = !server.supported; });
+      form.querySelectorAll("input,button").forEach((control) => { control.disabled = control.hasAttribute("data-plugins-hangar") || !server.supported; });
       if (!server.supported) { state.textContent = server.message; return; }
       const items = tab === "discover" ? payload.projects : payload.plugins;
       items.forEach((item) => results.append(tab === "discover" ? renderProject(item, server) : renderInstalled(item)));
       state.textContent = server.message || (items.length ? "" : tab === "discover" ? "No plugins match these filters on this page." : "No installed plugin JARs found.");
       if (tab === "discover") {
+        offset = payload.offset;
         nextOffset = payload.next_offset;
-        pagination.hidden = offset === 0 && nextOffset < 0;
+        pagination.hidden = false;
         previous.disabled = offset === 0;
-        next.disabled = nextOffset < 0;
-        pluginsDialog.querySelector("[data-plugins-page]").textContent = `Catalog page ${Math.floor(offset / 8) + 1}`;
+        const totalPages = Math.max(1, Math.ceil(payload.total / pageLimit));
+        const currentPage = Math.floor(offset / pageLimit) + 1;
+        next.disabled = currentPage >= totalPages || nextOffset < 0;
+        pluginsDialog.querySelector("[data-plugins-page]").textContent = `Page ${currentPage} of ${totalPages}`;
       }
     } catch (error) {
       if (current === generation && error.name !== "AbortError") state.textContent = error.message || "Plugin information is unavailable.";
     }
   };
-  const workspaceWindow = setupWorkspaceWindow(pluginsDialog, { onOpen: () => { load(); resumePluginInstall(); }, onClose: () => { ++generation; controller?.abort(); closePanel(); } });
+  const discoverCapacity = () => {
+    const geometry = results.getBoundingClientRect();
+    if (geometry.width <= 0 || geometry.height <= 0) return pageLimit;
+    const style = getComputedStyle(results);
+    const columns = style.gridTemplateColumns.split(" ").filter(Boolean).length;
+    const cardHeight = parseFloat(style.getPropertyValue("--plugins-card-height"));
+    const gap = parseFloat(style.rowGap) || 0;
+    const rows = Math.max(1, Math.floor((results.clientHeight + gap) / (cardHeight + gap)));
+    return Math.max(1, Math.min(12, columns * rows));
+  };
+  const updateCapacity = (reload = true) => {
+    if (!pluginsDialog.open || tab !== "discover") return;
+    const newLimit = discoverCapacity();
+    if (newLimit === pageLimit) return;
+    const oldOffset = offset;
+    pageLimit = newLimit;
+    const newPage = Math.floor(oldOffset / newLimit);
+    offset = newPage * newLimit;
+    if (reload) load();
+  };
+  const capacityObserver = new ResizeObserver(() => {
+    clearTimeout(capacityTimer);
+    capacityTimer = setTimeout(() => updateCapacity(), 200);
+  });
+  capacityObserver.observe(results);
+  form.querySelector("[data-plugins-modrinth]").addEventListener("click", (event) => event.preventDefault());
+  const workspaceWindow = setupWorkspaceWindow(pluginsDialog, { onOpen: () => { updateCapacity(false); load(); resumePluginInstall(); }, onClose: () => { clearTimeout(capacityTimer); ++generation; controller?.abort(); closePanel(); } });
   pluginsOpen.addEventListener("click", () => {
     if (!document.body.classList.contains("role-administrator")) return;
     const controlCenter = document.querySelector("[data-control-center]");
@@ -6291,11 +6347,12 @@ if (pluginsDialog && pluginsOpen) {
     tab = button.dataset.pluginsTab;
     offset = 0;
     pluginsDialog.querySelectorAll("[data-plugins-tab]").forEach((node) => node.setAttribute("aria-selected", String(node === button)));
+    updateCapacity(false);
     load();
   }));
   form.addEventListener("submit", (event) => { event.preventDefault(); offset = 0; load(); });
-  form.querySelectorAll('input[type="checkbox"]').forEach((control) => control.addEventListener("change", () => { offset = 0; load(); }));
-  previous.addEventListener("click", () => { offset = Math.max(0, offset - 8); load(); });
+  form.querySelectorAll('input[name="compatible_only"],input[name="release_only"]').forEach((control) => control.addEventListener("change", () => { offset = 0; load(); }));
+  previous.addEventListener("click", () => { offset = Math.max(0, offset - pageLimit); load(); });
   next.addEventListener("click", () => { if (nextOffset >= 0) { offset = nextOffset; load(); } });
   // Role discovery is asynchronous. Restore only after Administrator identity
   // has been established, matching the role-gated launcher.

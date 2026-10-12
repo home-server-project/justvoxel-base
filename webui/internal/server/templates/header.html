@@ -224,15 +224,16 @@
       <nav class="plugins-workspace-tabs" aria-label="Plugins workspace"><button type="button" data-plugins-tab="discover" aria-selected="true">Discover</button><button type="button" data-plugins-tab="installed" aria-selected="false">Installed</button><button type="button" data-plugins-tab="updates" aria-selected="false">Updates</button></nav>
       <div class="plugins-workspace-body">
         <form class="plugins-search" data-plugins-search role="search">
-          <label class="plugins-search-field">Search plugins<input name="q" type="search" maxlength="200" placeholder="Search Modrinth plugins" autocomplete="off"></label>
+          <label class="plugins-search-field"><input aria-label="Search plugins" name="q" type="search" maxlength="200" placeholder="Search Modrinth plugins" autocomplete="off"></label>
           <button type="submit">Search</button>
-          <label class="plugins-filter"><input name="compatible_only" type="checkbox" checked>Compatible only</label>
-          <label class="plugins-filter"><input name="release_only" type="checkbox" checked>Release only</label>
+          <label class="plugins-filter plugins-source-fixed"><input type="checkbox" role="switch" data-plugins-modrinth checked aria-readonly="true" tabindex="-1">Modrinth</label>
+          <label class="plugins-filter plugins-source-unavailable"><input type="checkbox" role="switch" data-plugins-hangar disabled>Hangar</label>
+          <label class="plugins-filter"><input role="switch" name="compatible_only" type="checkbox" checked>Compatible only</label>
+          <label class="plugins-filter"><input role="switch" name="release_only" type="checkbox" checked>Release only</label>
         </form>
-        <p class="plugins-source" data-plugins-source>Source: Modrinth · Read only</p>
         <p class="plugins-workspace-state" data-plugins-state role="status" aria-live="polite"></p>
         <div class="plugins-results" data-plugins-results></div>
-        <div class="plugins-pagination" data-plugins-pagination hidden><button type="button" data-plugins-previous>Previous</button><span data-plugins-page></span><button type="button" data-plugins-next>Next</button></div>
+        <div class="plugins-pagination" data-plugins-pagination><span data-plugins-page>Page 1 of 1</span><button type="button" data-plugins-previous disabled>Previous</button><button type="button" data-plugins-next>Next</button></div>
       </div>
     </div>
   </dialog>

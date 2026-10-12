@@ -7,13 +7,24 @@ resizable window has Discover, Installed and Updates tabs. The original Cycle 1 
 it cannot install, download, update, remove or hot load plugins, change server
 configuration, or interrupt Minecraft.
 
-Plugin results use compact summaries for scanning. Each card’s **Info** button
-opens additional publisher or installed JAR metadata in the same bounded overlay
-used by installation Review, Progress and terminal results. Closing the overlay
-returns focus to the card; details never expand inside the results grid.
+Discover has one compact desktop toolbar: a bounded search field and Search
+button, a fixed ON Modrinth source switch, an OFF disabled Hangar placeholder,
+and Compatible only / Release only switches. Hangar makes no requests and is not
+an available source. The toolbar may wrap in a genuinely narrow workspace.
+
+Plugin results use compact cards of uniform height, with a fixed-size logo,
+clamped name and description, release/platform/Minecraft badges and a short
+status or dependency summary. The entire card opens its overlay by click, Enter
+or Space. Keyboard focus is visible; selection uses the green Server Software
+card language and stays visible while the overlay is open. There are no separate
+Info or Install card buttons. Closing the overlay returns focus to the card;
+details never expand inside the results grid. Installed and Updates use the same
+whole-card selection and information/status overlays, without update or removal
+actions. Installable Discover cards open one combined information/install
+overlay; JustVoxel-managed and unavailable selections remain read only.
 Supported Minecraft versions appear as a wrapping list in the compatibility
 section. Dependencies are grouped by type, with identities
-first and IDs as secondary metadata. Installed Info has separate sections for JAR,
+first and IDs as secondary metadata. Installed information has separate sections for JAR,
 Metadata, Management and Update status. Installed and Updates cards show ownership
 and a compact status; update and removal actions remain unavailable.
 Discover uses three columns in wide windows, two in medium windows and one in
@@ -25,7 +36,7 @@ fixed Modrinth project API and fetches the verified HTTPS project CDN image;
 upstream URLs never reach the browser. PNG, JPEG and WebP are bounded to 512 KiB,
 with no redirects or persistent image cache. Missing or rejected images leave
 the existing fixed-size deterministic initials tile without affecting any
-catalog or installation operation. Info and Review reuse the card identity tile.
+catalog or installation operation. Information and installation reuse the card identity tile.
 Progress and terminal results retain the selected identity in browser memory,
 bound to the returned operation ID; after reload they use fallback. Inventory
 exposes the existing manifest project/release IDs only after exact
@@ -44,8 +55,16 @@ JustVoxel has not verified third-party runtime compatibility. Required, optional
 incompatible and embedded dependencies are publisher metadata only. If the active
 Minecraft version cannot be determined, the compatible search stays unavailable;
 turning off Compatible only permits browsing without claiming compatibility.
-Catalog pages contain up to eight projects. Release filtering can leave a page
-empty; Next continues to the next catalog page. Upstream failures are shown as
+Discover measures the actual grid columns and available result height to choose
+1–12 projects per page. Workspace resizing recalculates capacity after a brief
+debounce and realigns the previous first-result offset to a page under the new
+limit, preserving the approximate catalog position. The Agent accepts only
+integer limits from 1 to 12 and defaults to 8 when omitted. Pagination stays at
+the bottom-right of Discover, in the order **Page X of Y**, **Previous**, **Next**.
+The page count uses Modrinth's authoritative total; Previous is disabled on the
+first page and Next on the final page. Installed and Updates have no catalog
+pagination. Release filtering can leave a page empty; Next continues to the next
+catalog page. Upstream failures are shown as
 unavailable metadata, never as proven incompatibility.
 
 Installed reads regular JARs under the configured data directory's `plugins`
@@ -69,11 +88,25 @@ There are no mutation endpoints in this cycle.
 
 ## Stage 2 — third-party installation
 
-Stage 2 adds **Install** beside Info for compatible third-party Modrinth releases
+Stage 2 permits installation of compatible third-party Modrinth releases
 on Paper and Purpur when the current Minecraft version is known and publisher
-file metadata is complete. Turning off Compatible only or Release only still
-permits browsing; incompatible, beta and alpha selections remain Info only.
-The existing compact cards and bounded Info overlay remain available.
+file metadata is complete. Clicking an installable Discover card fetches the
+authoritative plan and opens a single-column combined information/install
+overlay. Turning off Compatible only or Release only still permits browsing;
+incompatible, beta, alpha and JustVoxel-managed selections have read-only
+information overlays with no generic Install action.
+
+The combined overlay shows About this version, Compatibility, Dependencies,
+Files to install, Installation and Restart as normal restrained information
+sections. Required dependencies show their exact planned name/version and
+**Already satisfied** or **Will be installed** status. Optional/incompatible
+publisher entries remain informational without duplicating required entries.
+Restart explains the verified cold backup, Minecraft start/restart for plugin
+verification and return to an original stopped state; it does not promise
+continuous uptime. Players appears only when the plan requires player-aware
+confirmation, with online count and available names. The footer offers Cancel
+and Install. This source implementation still requires human real-VM visual
+acceptance.
 
 Installation uses an authoritative Management Agent plan. The browser supplies
 only Modrinth project/version IDs; it cannot choose download URLs, filenames,

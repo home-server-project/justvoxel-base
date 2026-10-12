@@ -7,6 +7,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 )
 
@@ -86,8 +87,48 @@ func (c *Client) AdminPluginInventory(ctx context.Context, session string, updat
 	err := c.pluginRead(ctx, session, path, &out)
 	return out, err
 }
+
+// ValidatePluginDiscoverQuery permits only the bounded catalog contract.
+func ValidatePluginDiscoverQuery(query url.Values) error {
+	for key, values := range query {
+		if (key != "q" && key != "compatible_only" && key != "release_only" && key != "offset" && key != "limit") || len(values) != 1 {
+			return errors.New("Invalid catalog query.")
+		}
+	}
+	if len(query.Get("q")) > 200 {
+		return errors.New("Search is too long.")
+	}
+	for _, key := range []string{"compatible_only", "release_only"} {
+		if value := query.Get(key); value != "" && value != "true" && value != "false" {
+			return errors.New("Invalid catalog filter.")
+		}
+	}
+	if value := query.Get("offset"); value != "" {
+		offset, err := strconv.Atoi(value)
+		if err != nil || offset < 0 || offset > 10000 {
+			return errors.New("Invalid catalog offset.")
+		}
+	}
+	if values, present := query["limit"]; present {
+		value := values[0]
+		for _, digit := range value {
+			if digit < '0' || digit > '9' {
+				return errors.New("Invalid catalog limit.")
+			}
+		}
+		limit, err := strconv.Atoi(value)
+		if err != nil || limit < 1 || limit > 12 {
+			return errors.New("Invalid catalog limit.")
+		}
+	}
+	return nil
+}
+
 func (c *Client) AdminPluginDiscover(ctx context.Context, session string, query url.Values) (PluginCatalog, error) {
 	var out PluginCatalog
+	if err := ValidatePluginDiscoverQuery(query); err != nil {
+		return out, err
+	}
 	err := c.pluginRead(ctx, session, "/v1/admin/plugins/discover?"+query.Encode(), &out)
 	return out, err
 }
