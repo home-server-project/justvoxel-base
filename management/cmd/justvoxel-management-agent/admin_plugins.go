@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -711,15 +710,13 @@ func (s *server) adminPluginIcon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Header.Set("User-Agent", "JustVoxel/PluginWorkspace (https://github.com/home-server-project/justvoxel-base)")
-	req.Header.Set("Accept", "image/png, image/jpeg, image/bmp, image/gif, image/webp, image/svg+xml, image/x-rgb")
 	response, err := pluginCatalogClient.Do(req)
 	if err != nil {
 		http.Error(w, "Plugin icon unavailable.", http.StatusBadGateway)
 		return
 	}
 	defer response.Body.Close()
-	contentType, _, typeErr := mime.ParseMediaType(response.Header.Get("Content-Type"))
-	if response.StatusCode != http.StatusOK || response.ContentLength > pluginIconLimit || typeErr != nil {
+	if response.StatusCode != http.StatusOK || response.ContentLength > pluginIconLimit {
 		http.Error(w, "Plugin icon unavailable.", http.StatusBadGateway)
 		return
 	}
@@ -728,7 +725,7 @@ func (s *server) adminPluginIcon(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Plugin icon unavailable.", http.StatusBadGateway)
 		return
 	}
-	data, contentType, err = verifiedPluginIcon(ctx, strings.TrimPrefix(filepath.Ext(icon.Path), "."), contentType, data)
+	data, contentType, err := verifiedPluginIcon(ctx, strings.TrimPrefix(filepath.Ext(icon.Path), "."), data)
 	if err != nil {
 		http.Error(w, "Plugin icon unavailable.", http.StatusBadGateway)
 		return
@@ -789,25 +786,20 @@ func validPluginRGB(data []byte) bool {
 	return dimension >= 1 && dimension <= 3 && width > 0 && height > 0 && width <= 1024 && height <= 1024 && channels > 0 && channels <= 4 && binary.BigEndian.Uint32(data[104:108]) == 0
 }
 
-func verifiedPluginIcon(ctx context.Context, extension, kind string, data []byte) ([]byte, string, error) {
+func verifiedPluginIcon(ctx context.Context, extension string, data []byte) ([]byte, string, error) {
 	unavailable := errors.New("plugin icon unavailable")
 	if len(data) == 0 || len(data) > pluginIconLimit {
 		return nil, "", unavailable
 	}
-	canonical := map[string]string{"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "bmp": "image/bmp", "gif": "image/gif", "webp": "image/webp"}[extension]
-	if canonical != "" {
-		mimeOK := kind == canonical || (canonical == "image/bmp" && (kind == "image/x-ms-bmp" || kind == "image/x-bmp")) || (canonical == "image/jpeg" && kind == "image/jpg")
-		if !mimeOK || http.DetectContentType(data) != canonical {
-			return nil, "", unavailable
-		}
-		return data, canonical, nil
+	// CDN transforms can change the representation without changing the path or headers.
+	// Only the bounded bytes determine the canonical raster MIME.
+	switch kind := http.DetectContentType(data); kind {
+	case "image/png", "image/jpeg", "image/bmp", "image/gif", "image/webp":
+		return data, kind, nil
 	}
 	var convert func(context.Context, []byte, io.Writer) error
 	switch extension {
 	case "svg", "svgz":
-		if kind != "image/svg+xml" && !(extension == "svgz" && (kind == "application/gzip" || kind == "application/x-gzip")) {
-			return nil, "", unavailable
-		}
 		if extension == "svgz" {
 			if len(data) < 2 || data[0] != 0x1f || data[1] != 0x8b {
 				return nil, "", unavailable
@@ -825,7 +817,7 @@ func verifiedPluginIcon(ctx context.Context, extension, kind string, data []byte
 		}
 		convert = convertPluginSVG
 	case "rgb":
-		if (kind != "image/x-rgb" && kind != "image/sgi" && kind != "image/x-sgi" && kind != "image/rgb") || !validPluginRGB(data) {
+		if !validPluginRGB(data) {
 			return nil, "", unavailable
 		}
 		convert = convertPluginRGB

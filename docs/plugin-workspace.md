@@ -41,13 +41,23 @@ icons begin with that metadata lookup. Installed uses project ID only. Initials
 stay visible until a logo loads and are the final fallback if metadata or image
 retrieval fails. The browser never uses a CDN URL as `img.src`.
 All documented Modrinth extensions are accepted: `png`, `jpg`, `jpeg`, `bmp`,
-`gif`, `webp`, `svg`, `svgz` and `rgb` (case-sensitive). Raster formats are
-verified against their extension, MIME and byte signature and proxied with a
-canonical image MIME. The Agent converts SVG/SVGZ and SGI RGB into bounded PNG
-using fixed image-composition tooling, private bounded buffers and a short timeout.
+`gif`, `webp`, `svg`, `svgz` and `rgb` (case-sensitive). Project-bound URL
+validation remains strict: HTTPS on exactly `cdn.modrinth.com`, the matching
+`/data/<project_id>/<filename>` path, a bounded URL length, and no credentials,
+ports, queries, fragments, encoded alternate paths or traversal. Filename
+extensions remain a path safety rule; neither they nor CDN response headers prove
+the delivered raster representation. Actual PNG/JPEG/BMP/GIF/WebP byte signatures
+are authoritative, and the Agent derives canonical browser MIME from those bytes
+without transcoding. Upstream Content-Type is advisory, including when missing or
+malformed, and is never forwarded. The Agent requests no specific CDN image format.
+SVG/SVGZ and SGI RGB use bounded PNG conversion only when the CDN delivers source
+representations rather than an already verified supported raster. Conversion uses
+fixed image-composition tooling, private bounded buffers and a short timeout.
 SVGZ decompression is bounded; RGB headers and dimensions are checked before
 conversion. Browsers never receive raw SVG, SVGZ or RGB. Source and final image
-bytes are limited to 512 KiB, with no redirects or persistent image cache.
+bytes are limited to 512 KiB, with no redirects or persistent image cache. This
+improves compatibility with Modrinth CDN transforms while preserving the
+same-origin proxy and security boundary.
 Information and installation reuse the card identity tile.
 On hover-capable pointers, the existing green card frame/background follows the
 pointer. Cards begin unselected; selection can remain while their overlay is

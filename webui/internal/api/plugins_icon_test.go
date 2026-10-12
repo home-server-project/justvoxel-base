@@ -30,6 +30,9 @@ func TestAdminPluginIconOnlyUsesAgentAndPreservesVerifiedType(t *testing.T) {
 			calls := 0
 			client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 				calls++
+				if r.Header.Get("Accept") != "image/png, image/jpeg, image/bmp, image/gif, image/webp" {
+					t.Fatal("request must accept exactly the five canonical raster types")
+				}
 				if r.Method != http.MethodGet || r.URL.Host != "unix" || r.URL.Path != "/v1/admin/plugins/icon" || len(r.URL.Query()) != 1 || r.URL.Query().Get("project_id") != "root" || r.Header.Get("Authorization") != "Bearer session-token" {
 					t.Fatalf("unexpected Agent request: %s", r.URL)
 				}

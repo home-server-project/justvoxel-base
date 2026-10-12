@@ -728,13 +728,16 @@ func TestPluginIconSearchURLSkipsMetadataAndVerifiesBytes(t *testing.T) {
 	old := pluginCatalogClient
 	defer func() { pluginCatalogClient = old }()
 	for _, tc := range []struct {
-		name, kind          string
-		oversized, mismatch bool
-		status, want        int
+		name, kind               string
+		oversized, mismatch, xml bool
+		advertisedOversize       bool
+		status, want             int
 	}{
 		{name: "valid", kind: "image/png", status: 200, want: 200},
-		{name: "bad MIME", kind: "text/html", status: 200, want: 502},
-		{name: "mismatch", kind: "image/png", mismatch: true, status: 200, want: 502},
+		{name: "advisory MIME", kind: "text/html", status: 200, want: 200},
+		{name: "random bytes", kind: "image/png", mismatch: true, status: 200, want: 502},
+		{name: "XML disguised as raster", kind: "image/png", xml: true, status: 200, want: 502},
+		{name: "oversized Content-Length", kind: "image/png", advertisedOversize: true, status: 200, want: 502},
 		{name: "oversized", kind: "image/png", oversized: true, status: 200, want: 502},
 		{name: "redirect", kind: "image/png", status: 302, want: 502},
 	} {
@@ -752,7 +755,14 @@ func TestPluginIconSearchURLSkipsMetadataAndVerifiesBytes(t *testing.T) {
 				if tc.mismatch {
 					data = []byte("private upstream body")
 				}
-				return &http.Response{StatusCode: tc.status, Header: http.Header{"Content-Type": {tc.kind}, "Location": {"https://evil.example/"}}, Body: io.NopCloser(bytes.NewReader(data))}, nil
+				if tc.xml {
+					data = []byte(`<?xml version="1.0"?><svg/>`)
+				}
+				length := int64(-1)
+				if tc.advertisedOversize {
+					length = pluginIconLimit + 1
+				}
+				return &http.Response{StatusCode: tc.status, ContentLength: length, Header: http.Header{"Content-Type": {tc.kind}, "Location": {"https://evil.example/"}}, Body: io.NopCloser(bytes.NewReader(data))}, nil
 			})}
 			s := surfaceTestServer(t, roleAdministrator)
 			rr := httptest.NewRecorder()
@@ -762,6 +772,95 @@ func TestPluginIconSearchURLSkipsMetadataAndVerifiesBytes(t *testing.T) {
 			}
 			if tc.want != 200 && (bytes.Contains(rr.Body.Bytes(), []byte("private upstream body")) || rr.Header().Get("Content-Type") == "image/png") {
 				t.Fatal("unverified bytes exposed")
+			}
+		})
+	}
+}
+
+func TestPluginIconCDNRepresentations(t *testing.T) {
+	oldClient := pluginCatalogClient
+	oldSVG, oldRGB := convertPluginSVG, convertPluginRGB
+	t.Cleanup(func() {
+		pluginCatalogClient = oldClient
+		convertPluginSVG, convertPluginRGB = oldSVG, oldRGB
+	})
+	pngData := pluginIconImage(t, "image/png")
+	webpData := pluginIconImage(t, "image/webp")
+	jpegData := pluginIconImage(t, "image/jpeg")
+	svgData := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>`)
+	var zipped bytes.Buffer
+	zipper := gzip.NewWriter(&zipped)
+	if _, err := zipper.Write(svgData); err != nil {
+		t.Fatal(err)
+	}
+	if err := zipper.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, ext, header, wantType    string
+		data, wantData, converterInput []byte
+		conversion                     string
+	}{
+		{name: "webp with jpeg header", ext: "webp", header: "image/jpeg", data: webpData, wantType: "image/webp", wantData: webpData},
+		{name: "png path delivering webp", ext: "png", header: "image/jpeg", data: webpData, wantType: "image/webp", wantData: webpData},
+		{name: "png missing header", ext: "png", data: pngData, wantType: "image/png", wantData: pngData},
+		{name: "png malformed header", ext: "png", header: "image/png; broken", data: pngData, wantType: "image/png", wantData: pngData},
+		{name: "png generic header", ext: "png", header: "application/octet-stream", data: pngData, wantType: "image/png", wantData: pngData},
+		{name: "png wrong header", ext: "png", header: "text/html", data: pngData, wantType: "image/png", wantData: pngData},
+		{name: "jpeg with webp header", ext: "jpg", header: "image/webp", data: jpegData, wantType: "image/jpeg", wantData: jpegData},
+		{name: "svg path delivering png", ext: "svg", data: pngData, wantType: "image/png", wantData: pngData},
+		{name: "svg path delivering webp", ext: "svg", header: "image/jpeg", data: webpData, wantType: "image/webp", wantData: webpData},
+		{name: "svgz path delivering png", ext: "svgz", header: "application/gzip", data: pngData, wantType: "image/png", wantData: pngData},
+		{name: "rgb path delivering webp", ext: "rgb", header: "image/x-rgb", data: webpData, wantType: "image/webp", wantData: webpData},
+		{name: "svg source missing header", ext: "svg", data: svgData, wantType: "image/png", wantData: pngData, conversion: "svg", converterInput: svgData},
+		{name: "svg source wrong header", ext: "svg", header: "image/jpeg", data: svgData, wantType: "image/png", wantData: pngData, conversion: "svg", converterInput: svgData},
+		{name: "svgz source malformed header", ext: "svgz", header: "image/png; broken", data: zipped.Bytes(), wantType: "image/png", wantData: pngData, conversion: "svg", converterInput: svgData},
+		{name: "rgb source generic header", ext: "rgb", header: "application/octet-stream", data: pluginTestRGB(), wantType: "image/png", wantData: pngData, conversion: "rgb", converterInput: pluginTestRGB()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			conversions := 0
+			converter := func(kind string) func(context.Context, []byte, io.Writer) error {
+				return func(ctx context.Context, input []byte, output io.Writer) error {
+					conversions++
+					deadline, ok := ctx.Deadline()
+					if tc.conversion != kind || !bytes.Equal(input, tc.converterInput) || !ok || time.Until(deadline) > 3*time.Second {
+						t.Fatal("unexpected conversion or unbounded deadline")
+					}
+					_, err := output.Write(pngData)
+					return err
+				}
+			}
+			convertPluginSVG, convertPluginRGB = converter("svg"), converter("rgb")
+			iconURL := "https://cdn.modrinth.com/data/root/icon." + tc.ext
+			calls := 0
+			client := *oldClient
+			client.Transport = pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+				calls++
+				if calls != 1 || r.URL.String() != iconURL || r.Method != http.MethodGet {
+					t.Fatal("unexpected CDN request", r.URL)
+				}
+				if _, present := r.Header["Accept"]; present || r.Header.Get("User-Agent") == "" {
+					t.Fatal("CDN request must retain User-Agent without negotiating an image format")
+				}
+				header := make(http.Header)
+				if tc.header != "" {
+					header.Set("Content-Type", tc.header)
+				}
+				return &http.Response{StatusCode: http.StatusOK, Header: header, ContentLength: int64(len(tc.data)), Body: io.NopCloser(bytes.NewReader(tc.data))}, nil
+			})
+			pluginCatalogClient = &client
+			s := surfaceTestServer(t, roleAdministrator)
+			rr := httptest.NewRecorder()
+			s.adminPluginIcon(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/icon?"+url.Values{"project_id": {"root"}, "icon_url": {iconURL}}.Encode(), ""))
+			if rr.Code != http.StatusOK || rr.Header().Get("Content-Type") != tc.wantType || !bytes.Equal(rr.Body.Bytes(), tc.wantData) || rr.Header().Get("X-Content-Type-Options") != "nosniff" || calls != 1 {
+				t.Fatalf("CDN representation lost: status=%d type=%s", rr.Code, rr.Header().Get("Content-Type"))
+			}
+			wantConversions := 0
+			if tc.conversion != "" {
+				wantConversions = 1
+			}
+			if conversions != wantConversions {
+				t.Fatal("unexpected conversion count", conversions)
 			}
 		})
 	}
@@ -811,40 +910,29 @@ func TestPluginIconDocumentedExtensions(t *testing.T) {
 
 func TestPluginIconRasterFamilies(t *testing.T) {
 	for _, tc := range []struct {
-		ext, mime string
-		data      []byte
+		mime string
+		data []byte
 	}{
-		{"png", "image/png", pluginIconImage(t, "image/png")},
-		{"jpg", "image/jpeg", pluginIconImage(t, "image/jpeg")},
-		{"jpeg", "image/jpeg", pluginIconImage(t, "image/jpeg")},
-		{"bmp", "image/bmp", []byte("BMfixture")},
-		{"gif", "image/gif", []byte("GIF89afixture")},
-		{"webp", "image/webp", pluginIconImage(t, "image/webp")},
+		{"image/png", pluginIconImage(t, "image/png")},
+		{"image/jpeg", pluginIconImage(t, "image/jpeg")},
+		{"image/bmp", []byte("BMfixture")},
+		{"image/gif", []byte("GIF89afixture")},
+		{"image/webp", pluginIconImage(t, "image/webp")},
 	} {
-		t.Run(tc.ext, func(t *testing.T) {
-			data, kind, err := verifiedPluginIcon(context.Background(), tc.ext, tc.mime, tc.data)
-			if err != nil || kind != tc.mime || !bytes.Equal(data, tc.data) {
-				t.Fatal("raster lost", kind, err)
-			}
-			if _, _, err := verifiedPluginIcon(context.Background(), tc.ext, "text/html", tc.data); err == nil {
-				t.Fatal("bad MIME accepted")
-			}
-			if _, _, err := verifiedPluginIcon(context.Background(), tc.ext, tc.mime, []byte("<svg/>")); err == nil {
-				t.Fatal("bad signature accepted")
-			}
-			other := "png"
-			if tc.ext == "png" {
-				other = "jpg"
-			}
-			if _, _, err := verifiedPluginIcon(context.Background(), other, tc.mime, tc.data); err == nil {
-				t.Fatal("extension mismatch accepted")
+		t.Run(tc.mime, func(t *testing.T) {
+			for _, ext := range []string{"png", "jpg", "jpeg", "bmp", "gif", "webp", "svg", "svgz", "rgb"} {
+				data, kind, err := verifiedPluginIcon(context.Background(), ext, tc.data)
+				if err != nil || kind != tc.mime || !bytes.Equal(data, tc.data) {
+					t.Fatal("raster lost for extension", ext, kind, err)
+				}
 			}
 		})
 	}
-	for _, alias := range []string{"image/x-bmp", "image/x-ms-bmp"} {
-		_, kind, err := verifiedPluginIcon(context.Background(), "bmp", alias, []byte("BMfixture"))
-		if err != nil || kind != "image/bmp" {
-			t.Fatal("BMP alias not canonicalized")
+	for _, data := range [][]byte{[]byte("<svg/>"), []byte(`<?xml version="1.0"?><svg/>`), []byte("<html>bad</html>"), {0, 1, 2, 3}} {
+		for _, ext := range []string{"png", "jpg", "jpeg", "bmp", "gif", "webp"} {
+			if output, _, err := verifiedPluginIcon(context.Background(), ext, data); err == nil || len(output) != 0 {
+				t.Fatal("bad raster signature accepted", ext)
+			}
 		}
 	}
 }
@@ -874,12 +962,12 @@ func TestPluginIconBoundedConversions(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
-		ext, mime   string
+		ext         string
 		data, input []byte
 	}{
-		{"svg", "image/svg+xml", svgData, svgData},
-		{"svgz", "image/svg+xml", zipped.Bytes(), svgData},
-		{"rgb", "image/x-rgb", pluginTestRGB(), pluginTestRGB()},
+		{"svg", svgData, svgData},
+		{"svgz", zipped.Bytes(), svgData},
+		{"rgb", pluginTestRGB(), pluginTestRGB()},
 	} {
 		t.Run(tc.ext, func(t *testing.T) {
 			calls := 0
@@ -893,7 +981,7 @@ func TestPluginIconBoundedConversions(t *testing.T) {
 				return err
 			}
 			convertPluginSVG, convertPluginRGB = converter, converter
-			data, mime, err := verifiedPluginIcon(context.Background(), tc.ext, tc.mime, tc.data)
+			data, mime, err := verifiedPluginIcon(context.Background(), tc.ext, tc.data)
 			if err != nil || calls != 1 || mime != "image/png" || !bytes.Equal(data, pngData) || bytes.Equal(data, tc.data) {
 				t.Fatal("conversion not authoritative", err)
 			}
@@ -919,7 +1007,7 @@ func TestPluginIconBoundedConversions(t *testing.T) {
 						return nil
 					}
 					convertPluginSVG, convertPluginRGB = converter, converter
-					data, _, err := verifiedPluginIcon(context.Background(), tc.ext, tc.mime, tc.data)
+					data, _, err := verifiedPluginIcon(context.Background(), tc.ext, tc.data)
 					if err == nil || len(data) != 0 {
 						t.Fatal("unsafe conversion exposed")
 					}
@@ -928,7 +1016,7 @@ func TestPluginIconBoundedConversions(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 			convertPluginSVG, convertPluginRGB = converter, converter
-			if _, _, err := verifiedPluginIcon(ctx, tc.ext, tc.mime, tc.data); err == nil {
+			if _, _, err := verifiedPluginIcon(ctx, tc.ext, tc.data); err == nil {
 				t.Fatal("expired conversion accepted")
 			}
 		})
@@ -949,7 +1037,7 @@ func TestPluginIconMalformedConversionInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, data := range [][]byte{[]byte("<svg/>"), {0x1f, 0x8b}, overflow.Bytes()} {
-		if _, _, err := verifiedPluginIcon(context.Background(), "svgz", "image/svg+xml", data); err == nil {
+		if _, _, err := verifiedPluginIcon(context.Background(), "svgz", data); err == nil {
 			t.Fatal("invalid gzip accepted")
 		}
 	}
@@ -983,7 +1071,7 @@ func TestPluginIconMalformedConversionInputs(t *testing.T) {
 			if validPluginRGB(data) {
 				t.Fatal("invalid header accepted")
 			}
-			if _, _, err := verifiedPluginIcon(context.Background(), "rgb", "image/x-rgb", data); err == nil {
+			if _, _, err := verifiedPluginIcon(context.Background(), "rgb", data); err == nil {
 				t.Fatal("invalid RGB accepted")
 			}
 		})

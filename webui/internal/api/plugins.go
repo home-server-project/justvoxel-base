@@ -226,7 +226,7 @@ func (c *Client) AdminPluginIcon(ctx context.Context, session, projectID string,
 		return out, err
 	}
 	req.Header.Set("Authorization", "Bearer "+session)
-	req.Header.Set("Accept", "image/png, image/jpeg, image/webp")
+	req.Header.Set("Accept", "image/png, image/jpeg, image/bmp, image/gif, image/webp")
 	client := *c.http
 	client.Timeout = 15 * time.Second
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
