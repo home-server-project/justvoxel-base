@@ -1948,6 +1948,40 @@ func TestPluginNamesRealPaperInfoHeader(t *testing.T) {
 	}
 }
 
+func TestPluginNamesPaper262Formatting(t *testing.T) {
+	const three = "§xℹ Server Plugins (3):\n§xBukkit Plugins:\n - floodgate, Geyser-Spigot, ViaVersion"
+	const four = "§xℹ Server Plugins (4):\n§xBukkit Plugins:\n - floodgate, Geyser-Spigot, ViaVersion, VeinMiner"
+	for _, test := range []struct {
+		name     string
+		raw      string
+		expected []string
+		ok       bool
+	}{
+		{"real three plugins", three, []string{"floodgate", "Geyser-Spigot", "ViaVersion"}, true},
+		{"real four plugins", four, []string{"floodgate", "Geyser-Spigot", "ViaVersion", "VeinMiner"}, true},
+		{"missing VeinMiner", three, []string{"VeinMiner"}, false},
+		{"malformed count", strings.Replace(four, "(4)", "(x)", 1), []string{"VeinMiner"}, false},
+		{"count mismatch", strings.Replace(four, "(4)", "(5)", 1), []string{"VeinMiner"}, false},
+		{"duplicate VeinMiner", strings.Replace(four, "(4)", "(5)", 1) + ", VeinMiner", []string{"VeinMiner"}, false},
+		{"uppercase presentation", strings.ReplaceAll(four, "§x", "§X"), []string{"VeinMiner"}, true},
+		{"entry presentation", strings.Replace(four, "VeinMiner", "§xVein§XMiner", 1), []string{"VeinMiner"}, true},
+		{"Paper group presentation", strings.Replace(four, ", VeinMiner", "\n§XPaper Plugins:\n - §xVeinMiner", 1), []string{"VeinMiner"}, true},
+		{"red entry", strings.Replace(four, "VeinMiner", "§c§xVeinMiner", 1), []string{"VeinMiner"}, false},
+		{"dark red entry", strings.Replace(four, "VeinMiner", "§4§XVeinMiner", 1), []string{"VeinMiner"}, false},
+		{"failed then reset entry", strings.Replace(four, "VeinMiner", "§cVein§x§aMiner", 1), []string{"VeinMiner"}, false},
+		{"red carries across entries", strings.Replace(four, "ViaVersion, VeinMiner", "§cViaVersion, §xVeinMiner", 1), []string{"VeinMiner"}, false},
+		{"unknown header formatting", strings.Replace(four, "§xℹ", "§zℹ", 1), []string{"VeinMiner"}, false},
+		{"unknown group formatting", strings.Replace(four, "§xBukkit", "§zBukkit", 1), []string{"VeinMiner"}, false},
+		{"unknown entry formatting", strings.Replace(four, "VeinMiner", "§zVeinMiner", 1), []string{"VeinMiner"}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := pluginNamesLoaded([]byte(test.raw), test.expected); got != test.ok {
+				t.Fatalf("%q: got %v, want %v", test.raw, got, test.ok)
+			}
+		})
+	}
+}
+
 func TestPluginInstallCanonicalManagedDependencies(t *testing.T) {
 	for _, component := range []struct{ slug, filename, main string }{
 		{"geyser", "geyser-spigot.jar", "org.geysermc.geyser.platform.spigot.GeyserSpigotPlugin"},

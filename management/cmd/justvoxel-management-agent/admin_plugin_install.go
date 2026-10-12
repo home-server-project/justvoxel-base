@@ -988,7 +988,7 @@ func verifyPluginRuntime(ctx context.Context, version string) error {
 // Only structurally identified entries count; compare names literally and carry
 // failure colors across tokens. Unsupported formatting fails closed.
 var pluginANSIColor = regexp.MustCompile("\x1b\\[([0-9;]*)m")
-var pluginColorCode = regexp.MustCompile(`§[0-9a-fk-orA-FK-OR]`)
+var pluginColorCode = regexp.MustCompile(`§[0-9a-fk-orxA-FK-ORX]`)
 var pluginListHeader = regexp.MustCompile(`^((?:ℹ\s*)?Server )?Plugins \(([0-9]+)\):`)
 var pluginListGroup = regexp.MustCompile(`^(Bukkit|Paper) Plugins(?: \([0-9]+\))?:`)
 
@@ -1065,7 +1065,7 @@ func pluginNamesLoaded(raw []byte, expected []string) bool {
 					red = true
 				} else if strings.ContainsRune("012356789abdefrABDEFR", code) {
 					red = false
-				} else if !strings.ContainsRune("klmnoKLMNO", code) {
+				} else if !strings.ContainsRune("klmnoxKLMNOX", code) {
 					return false
 				}
 				continue

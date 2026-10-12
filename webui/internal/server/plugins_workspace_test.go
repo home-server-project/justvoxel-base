@@ -1071,8 +1071,9 @@ func TestPluginsWorkspaceVMCorrectionHeaderButtonsAndBackdrop(t *testing.T) {
 	}
 	css := string(rawCSS)
 	for _, want := range []string{
-		`.workspace-window.plugins-workspace-dialog button{min-height:42px;border-radius:10px;padding:.5rem .75rem;font-size:.84rem!important}`,
-		`.workspace-window.plugins-workspace-dialog .workspace-header-close{width:42px;height:42px;min-height:42px;padding:0;border-radius:10px}`,
+		`.workspace-window.plugins-workspace-dialog button{height:36px;min-height:36px;border-radius:8px;font-size:.84rem!important}`,
+		`.workspace-window .workspace-header-close{width:36px;height:36px;padding:0;font-size:inherit}`,
+		`:where(.workspace-window) :is(button,.button-link){padding:.5rem .75rem;border-radius:8px;line-height:1.25}`,
 		`.plugins-overlay-identity h3{flex:1;margin:0;min-width:0}`,
 		`.plugins-install-content .plugins-overlay-identity button{flex:none;margin:0 0 0 auto}`,
 		`.plugins-pagination button{flex:none;margin:0}`,
@@ -1082,13 +1083,71 @@ func TestPluginsWorkspaceVMCorrectionHeaderButtonsAndBackdrop(t *testing.T) {
 			t.Fatal("unified plugin geometry missing", want)
 		}
 	}
+	const buttonSelector = ".workspace-window.plugins-workspace-dialog button"
+	if strings.Count(css, buttonSelector+"{") != 1 {
+		t.Fatal("Plugins buttons must have one shared geometry rule")
+	}
 	for _, rule := range strings.Split(css, "}") {
 		selector, declarations, ok := strings.Cut(rule, "{")
-		if ok && strings.Contains(selector, ".plugins-") && strings.Contains(selector, "button") && (strings.Contains(declarations, "min-height:34px") || strings.Contains(declarations, "border-radius:8px") || strings.Contains(declarations, "padding:.72rem")) {
-			t.Fatal("conflicting plugin button geometry", rule)
+		if !ok || !strings.Contains(selector, ".plugins-") {
+			continue
 		}
-		if ok && strings.Contains(selector, ".plugins-result-card") && strings.Contains(declarations, "min-height:42px") {
-			t.Fatal("button geometry applied to article cards")
+		for _, declaration := range strings.Split(declarations, ";") {
+			property, value, ok := strings.Cut(strings.TrimSpace(declaration), ":")
+			if !ok {
+				continue
+			}
+			property, value = strings.TrimSpace(property), strings.TrimSpace(value)
+			if (property == "height" || property == "min-height" || property == "width") && value == "42px" {
+				t.Fatal("oversized Plugins geometry remains", rule)
+			}
+			if strings.Contains(selector, "button") || strings.Contains(selector, ".workspace-header-close") {
+				if strings.TrimSpace(selector) != buttonSelector && (property == "height" || property == "min-height" || property == "border-radius" || property == "padding" || strings.HasPrefix(property, "padding-")) {
+					t.Fatal("tabs, pagination and actions must inherit the same Plugins button geometry", rule)
+				}
+			} else if (property == "height" || property == "min-height") && value == "36px" {
+				t.Fatal("button height applied to cards, switches, inputs or badges", rule)
+			}
+		}
+	}
+	// Static toolbar buttons and dynamically created actions all use the same
+	// button selector; cards and filters remain different element types.
+	rawHeader, err := assets.ReadFile("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`<button class="system-monitor-header-button workspace-header-refresh" type="button" data-plugins-refresh`,
+		`<button class="system-monitor-header-button workspace-header-close" type="button" data-plugins-close`,
+		`<button type="button" data-plugins-tab="discover"`,
+		`<button type="button" data-plugins-tab="installed"`,
+		`<button type="button" data-plugins-tab="updates"`,
+		`<button type="button" data-plugins-previous`,
+		`<button type="button" data-plugins-next`,
+		`<button type="submit">Search</button>`,
+	} {
+		if !strings.Contains(string(rawHeader), want) {
+			t.Fatal("Plugins toolbar must use actual buttons covered by the shared rule", want)
+		}
+	}
+	for _, want := range []string{
+		`const button = text("button", label, secondary ? "secondary" : "");`,
+		`panelAction("Install"`, `panelAction("Close"`, `panelAction("Done"`,
+		`panelAction("View in Installed"`, `panelAction("Install another plugin"`,
+		`panelAction("Re-check after repair"`,
+		`const card = document.createElement("article");`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatal("Plugins actions must share button geometry while cards remain articles", want)
+		}
+	}
+	for _, want := range []string{
+		`.plugins-result-card{display:flex;flex-direction:column;height:var(--plugins-card-height);`,
+		`.plugins-filter input{appearance:none;position:relative;flex:none;width:28px;height:16px;`,
+		`.plugins-search-field input{width:100%;margin-bottom:0}`,
+	} {
+		if !strings.Contains(css, want) {
+			t.Fatal("card and input geometry must remain independent of button sizing", want)
 		}
 	}
 }
