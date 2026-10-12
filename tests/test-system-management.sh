@@ -52,6 +52,8 @@ grep -Fq 'exec.CommandContext(ctx, "bootc", "upgrade")' "${system_update_agent}"
 if grep -Eq -- '--download-only|--from-downloaded|--apply' "${system_update_agent}"; then fail 'System Update backend contains an unwanted bootc download/apply mode'; fi
 grep -Fq 'JustVoxel operating system' "${os_status}" || fail 'OS status summary missing'
 
+grep -Fqx "UMask=0007" "${management_unit}" ||
+    fail "management service must keep restrictive UMask=0007"
 grep -Fq 'ProtectSystem=true' "${management_unit}" || fail 'management service must keep /etc writable for PAM system password changes'
 if grep -Fqx 'ProtectSystem=full' "${management_unit}" || grep -Fqx 'ProtectSystem=strict' "${management_unit}"; then
     fail 'management service must not make /etc read-only while PAM system password changes are supported'

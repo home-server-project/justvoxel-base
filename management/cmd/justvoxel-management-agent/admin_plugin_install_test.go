@@ -2039,10 +2039,6 @@ func TestPluginInstallCanonicalManagedDependencies(t *testing.T) {
 
 // Umask is process-global: this regression must never run in parallel.
 func TestPluginPlacementReadableWithRestrictiveUmask(t *testing.T) {
-	unit, err := os.ReadFile("../../../system_files/usr/lib/systemd/system/justvoxel-management.service")
-	if err != nil || !strings.Contains(string(unit), "UMask=0007") {
-		t.Fatal("restrictive Agent umask changed", err)
-	}
 	f := newPluginInstallFixture(t)
 	artifact := f.plan(t).Artifacts[0]
 	staging := t.TempDir()
