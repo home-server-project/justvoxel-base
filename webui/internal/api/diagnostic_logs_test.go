@@ -4,7 +4,7 @@ import "testing"
 
 func TestValidDiagnosticLogIdentifier(t *testing.T) {
 	const validID = "12345678-1234-4234-8234-123456789abc"
-	categories := []string{"setup", "migration", "restore", "reset", "operation"}
+	categories := []string{"setup", "migration", "restore", "plugins", "reset", "operation"}
 	for _, category := range categories {
 		t.Run(category, func(t *testing.T) {
 			if !validDiagnosticLogIdentifier(category, validID) {
@@ -46,6 +46,17 @@ func TestValidDiagnosticLogIdentifier(t *testing.T) {
 					t.Fatal("invalid diagnostic log ID accepted")
 				}
 			})
+		}
+	}
+}
+
+func TestPluginsCategoryKeepsExactUUIDValidation(t *testing.T) {
+	if !validDiagnosticLogIdentifier("plugins", "12345678-1234-4234-8234-123456789abc") {
+		t.Fatal("Plugins log rejected")
+	}
+	for _, id := range []string{"../private", "12345678-1234-4234-8234-123456789abc.log", "12345678-1234-1234-8234-123456789abc"} {
+		if validDiagnosticLogIdentifier("plugins", id) {
+			t.Fatal("unsafe Plugins ID accepted", id)
 		}
 	}
 }

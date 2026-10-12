@@ -1093,3 +1093,80 @@ func TestPluginIconCopyCannotBypassBound(t *testing.T) {
 		t.Fatal("copy bypassed output limit")
 	}
 }
+
+func TestPluginInventoryPhysicalManagedStateWithoutSchemaChange(t *testing.T) {
+	for _, tc := range []string{"enabled", "disabled", "duplicate", "hash mismatch", "descriptor mismatch"} {
+		t.Run(tc, func(t *testing.T) {
+			state := "enabled"
+			if tc != "enabled" {
+				state = "disabled"
+			}
+			f := newPluginManageFixture(t, state)
+			switch tc {
+			case "duplicate":
+				if err := os.WriteFile(filepath.Join(f.data, "plugins", f.entry.Filename), f.jars[f.entry.Filename], 0644); err != nil {
+					t.Fatal(err)
+				}
+			case "hash mismatch":
+				if err := os.WriteFile(filepath.Join(f.data, ".justvoxel", "disabled-plugins", f.entry.Filename), []byte("changed JAR"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			case "descriptor mismatch":
+				m, raw, err := readPluginManifest(f.data)
+				if err != nil {
+					t.Fatal(err)
+				}
+				m.Artifacts[0].Main = "other.Main"
+				if _, err = commitPluginManifest(f.data, raw, m); err != nil {
+					t.Fatal(err)
+				}
+			}
+			items, err := readPluginInventory(f.data)
+			if err != nil || len(items) != 1 {
+				t.Fatal(items, err)
+			}
+			safe := tc == "enabled" || tc == "disabled"
+			if safe {
+				if items[0].Management != "plugins" || items[0].State != state || items[0].ProjectID != f.entry.ProjectID || items[0].VersionID != f.entry.VersionID {
+					t.Fatal("managed identity missing", items)
+				}
+			} else {
+				if items[0].Management == "plugins" || items[0].State != "" || !strings.HasPrefix(items[0].UpdateStatus, "Attention:") {
+					t.Fatal("unsafe state was managed", items)
+				}
+			}
+			_, raw, err := readPluginManifest(f.data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(raw), `"state"`) || strings.Contains(string(raw), `"enabled"`) || strings.Contains(string(raw), `"disabled"`) {
+				t.Fatal("v1 manifest schema changed")
+			}
+		})
+	}
+}
+func TestPluginInventoryPrivateDisabledStoreDoesNotAdoptFiles(t *testing.T) {
+	f := newPluginManageFixture(t, "enabled")
+	disabled, err := openDisabledPluginDirectory(f.data, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := disabled.Stat()
+	disabled.Close()
+	if err != nil || info.Mode().Perm() != 0700 {
+		t.Fatal("disabled store not private", err)
+	}
+	if err = os.WriteFile(filepath.Join(f.data, ".justvoxel", "disabled-plugins", "unowned.jar"), f.jars[f.entry.Filename], 0644); err != nil {
+		t.Fatal(err)
+	}
+	items, err := readPluginInventory(f.data)
+	if err != nil || len(items) != 1 {
+		t.Fatal("private unowned JAR adopted", items, err)
+	}
+	if err = os.Chmod(filepath.Join(f.data, ".justvoxel", "disabled-plugins"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.s.resolvePluginManage(context.Background(), "disable", f.entry.ProjectID); err == nil {
+		t.Fatal("unsafe disabled store accepted")
+	}
+}

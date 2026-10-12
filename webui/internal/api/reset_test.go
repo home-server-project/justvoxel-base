@@ -216,3 +216,16 @@ func TestFactoryResetResolveClientContract(t *testing.T) {
 		t.Fatalf("unexpected factory reset resolve response: %#v", response)
 	}
 }
+
+func TestMinecraftResetPlanCarriesManagedPluginCleanup(t *testing.T) {
+	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != adminMinecraftResetPlanPath {
+			t.Fatal(r.URL.Path)
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"ok":true,"schema_version":"v1","mode":"minecraft","plan_fingerprint":"` + resetTestFingerprint + `","data_action":"preserve","plugins_action":"remove_managed_jars","players":[],"warnings":[]}`))}, nil
+	})}}
+	plan, err := client.AdminMinecraftResetPlan(context.Background(), "session")
+	if err != nil || plan.PluginsAction != "remove_managed_jars" || plan.DataAction != "preserve" {
+		t.Fatal("managed Plugin reset contract lost", plan, err)
+	}
+}

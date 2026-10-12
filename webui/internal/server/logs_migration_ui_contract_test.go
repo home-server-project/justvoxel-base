@@ -17,7 +17,7 @@ func TestSystemLogsGroupedResizableWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		`["Setup", "Migration", "Restore", "Reset", "Support", "Failed units"]`,
+		`["Setup", "Migration", "Restore", "Plugins", "Reset", "Support", "Failed units"]`,
 		`entry.category === selectedGroup.toLowerCase()`,
 		`No support bundles generated.`,
 		`justvoxel.system.logs.columns`,

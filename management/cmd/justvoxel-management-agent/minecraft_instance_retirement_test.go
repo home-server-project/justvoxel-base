@@ -103,6 +103,11 @@ func TestResetMinecraftInstanceRetirement(t *testing.T) {
 			}
 			t.Run(mode+"/"+outcome, func(t *testing.T) {
 				useTestMinecraftInstances(t)
+				var preserved *pluginInstallFixture
+				if mode == "minecraft" && outcome == "preserved_data" {
+					preserved = newPluginInstallFixture(t)
+				}
+				configured := preserved != nil
 				var original minecraftInstanceIdentity
 				var err error
 				if outcome != "missing_directory" {
@@ -148,6 +153,9 @@ func TestResetMinecraftInstanceRetirement(t *testing.T) {
 					if outcome == "verification_failed" {
 						return []byte(`{"configured":true}`), nil
 					}
+					if configured {
+						return json.Marshal(map[string]any{"configured": true, "minecraft": map[string]string{"server_type": "paper", "data_path": preserved.data}})
+					}
 					return []byte(`{"configured":false}`), nil
 				}
 				resetFactoryAuthenticationState = func() error {
@@ -173,6 +181,19 @@ func TestResetMinecraftInstanceRetirement(t *testing.T) {
 					var plan adminMinecraftResetPlanResponse
 					if err := json.Unmarshal([]byte(planJSON), &plan); err != nil {
 						t.Fatal(err)
+					}
+					if preserved != nil {
+						plan.DataPath = preserved.data
+						// The helper returns configuration; the Agent adds exact
+						// filesystem evidence before fingerprinting the review.
+						raw, marshalErr := json.Marshal(plan)
+						if marshalErr != nil {
+							t.Fatal(marshalErr)
+						}
+						planJSON = string(raw)
+						if prepareErr := prepareMinecraftResetPlugins(&plan); prepareErr != nil {
+							t.Fatal(prepareErr)
+						}
 					}
 					fingerprint, err = minecraftResetPlanFingerprint(plan)
 					result := adminMinecraftResetHelperApplyResponse{OK: true, SchemaVersion: "v1", Mode: mode, DataPath: plan.DataPath, DataScope: plan.DataScope, DataAction: plan.DataAction, BackupPath: plan.BackupPath, BackupAction: plan.BackupAction, AuthenticationAction: plan.AuthenticationAction, WebUIUsersAction: plan.WebUIUsersAction}
@@ -209,6 +230,7 @@ func TestResetMinecraftInstanceRetirement(t *testing.T) {
 					if outcome == "helper_failed" {
 						return []byte(`{"ok":false,"error":"cleanup failed"}`), errors.New("cleanup failed")
 					}
+					configured = false
 					return applyJSON, nil
 				}
 				runAdminMinecraftResetHelper, runAdminFactoryResetHelper = helper, helper

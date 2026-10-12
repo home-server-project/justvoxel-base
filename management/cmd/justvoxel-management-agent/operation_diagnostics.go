@@ -170,14 +170,14 @@ func (s *operationStore) appendOperationDiagnostic(id, operationType, category, 
 
 func validDiagnosticOperationType(value string) bool {
 	switch value {
-	case operationTypeRestore, operationTypeDataMigration, operationTypeMinecraftReset, operationTypeFactoryReset, operationTypeMigrationExport, operationTypeMigrationImport, operationTypeMigrationRecovery:
+	case operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove, operationTypeRestore, operationTypeDataMigration, operationTypeMinecraftReset, operationTypeFactoryReset, operationTypeMigrationExport, operationTypeMigrationImport, operationTypeMigrationRecovery:
 		return true
 	}
 	return false
 }
 
 func validDiagnosticCategory(value string) bool {
-	switch value { case "setup", "migration", "restore", "reset", "operation": return true }
+	switch value { case "setup", "migration", "restore", "plugins", "reset", "operation": return true }
 	return false
 }
 
@@ -186,6 +186,7 @@ func diagnosticCategoryForOperationType(value string) string {
 	case operationTypeSetup: return "setup"
 	case operationTypeDataMigration, operationTypeMigrationExport, operationTypeMigrationImport, operationTypeMigrationRecovery: return "migration"
 	case operationTypeRestore: return "restore"
+	case operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove: return "plugins"
 	case operationTypeMinecraftReset, operationTypeFactoryReset: return "reset"
 	default: return ""
 	}
@@ -278,7 +279,7 @@ func (s *operationStore) listDiagnosticLogs() ([]diagnosticLogEntry, error) {
 	if err := validatePrivateDiagnosticDirectory(s.logsDir); err != nil {
 		return nil, err
 	}
-	for _, category := range []string{"setup", "migration", "restore", "reset"} {
+	for _, category := range []string{"setup", "migration", "restore", "plugins", "reset"} {
 		dir := filepath.Join(s.logsDir, category+"-logs")
 		if err := validatePrivateDiagnosticDirectory(dir); err != nil { return nil, err }
 		files, err := os.ReadDir(dir)

@@ -205,7 +205,7 @@ test('Failed units appends the exact category and lists each live unit separatel
   const live = { failed_units: failedUnits, journalText: 'Current boot last 60 lines' };
   const page = await openLogs('', [migrationLog], live);
   assert.deepEqual(page.content.all().filter(node => node.className === 'system-log-group secondary').map(node => node.textContent),
-    ['Setup', 'Migration', 'Restore', 'Reset', 'Support', 'Failed units']);
+    ['Setup', 'Migration', 'Restore', 'Plugins', 'Reset', 'Support', 'Failed units']);
   assert.equal(logGroup(page, 'Setup').attrs['aria-pressed'], 'true');
   await logGroup(page, 'Failed units').click();
   assert.equal(logEntries(page).length, 3);
@@ -265,4 +265,135 @@ test('Failed-unit browser view has no privileged command execution and Agent cli
   assert.ok(read('webui/internal/api/failed_units.go').includes('/journal?limit=60'));
   assert.ok(app.includes('refreshButton?.addEventListener("click", loadCurrentSystemTab)'));
   assert.ok(app.includes('failedUnitsSelected = false;'));
+});
+
+test('Plugins Logs selects and downloads the exact Agent operation log without reloading', async () => {
+  const id = '12345678-1234-4123-8123-123456789abc';
+  const entry = { category: 'plugins', log_id: id, operation_id: id, operation_type: 'plugin_disable', timestamp: 'now', state: 'needs_attention' };
+  const page = await openLogs('?workspace=system&tab=logs&log_group=plugins&log_id=' + id, [entry]);
+  assert.equal(logGroup(page, 'Plugins').attrs['aria-pressed'], 'true');
+  assert.deepEqual(page.calls, ['/api/system/workspace/logs/plugins/' + id]);
+  const download = page.content.all().find(node => node.textContent === 'Download log');
+  assert.equal(download.href, '/api/system/workspace/logs/plugins/' + id + '?download=1');
+  assert.equal(download.hidden, false);
+  const unsafe = await openLogs('?workspace=system&tab=logs&log_group=plugins&log_id=../etc/passwd', [entry]);
+  assert.deepEqual(unsafe.calls, []);
+});
+
+test('Reset Minecraft review distinguishes managed JAR cleanup from preserved external data', () => {
+  const start = app.indexOf('  const resetImpactFromPlan =');
+  const end = app.indexOf('  const renderResetPlan =', start);
+  assert.ok(start >= 0 && end > start);
+  const context = vm.createContext({});
+  vm.runInContext(app.slice(start, end) + '\nthis.impact = resetImpactFromPlan;', context);
+  const result = context.impact('minecraft', { data_action: 'preserve', plugins_action: 'remove_managed_jars' });
+  assert.ok(result.remove.includes('Plugins-managed JARs installed through JustVoxel.'));
+  assert.ok(result.keep.includes('Plugin configuration/data folders and manual plugins.'));
+  assert.ok(!result.remove.some(item => item.includes('world/data')));
+});
+
+const lifecycleElement = (tag, value = '', className = '') => {
+  const node = new Element(tag);
+  node.textContent = value;
+  node.className = className;
+  node.classList = {
+    add(name) { node.className += ' ' + name; },
+    toggle(name, enabled) { const classes = new Set(node.className.split(' ').filter(Boolean)); if (enabled) classes.add(name); else classes.delete(name); node.className = [...classes].join(' '); },
+  };
+  return node;
+};
+
+test('Installed lifecycle actions derive one toggle and preserve read-only ownership and icons', () => {
+  const start = app.indexOf('  const renderInstalled =');
+  const end = app.indexOf('  // Review, progress', start);
+  let headerBadges = [];
+  const context = vm.createContext({
+    document: { createElement: tag => lifecycleElement(tag) }, text: lifecycleElement,
+    overlayHeader: (_, __, badges) => { headerBadges = badges; },
+    overlaySection: () => lifecycleElement('section'), infoRows: () => () => {},
+    addInfo: (card, _, render, projectID) => { card.info = render; card.iconProjectID = projectID; },
+    pluginAction: (label, handler, style) => { const button = lifecycleElement('button', label, style); button.addEventListener('click', handler); return button; },
+    reviewManagedPlugin() {},
+  });
+  vm.runInContext(app.slice(start, end) + '\nthis.renderInstalled = renderInstalled;', context);
+  for (const [management, state, labels, badge] of [
+    ['plugins', 'enabled', ['Disable', 'Remove'], 'Enabled'],
+    ['plugins', 'disabled', ['Enable', 'Remove'], 'Disabled'],
+    ['manual', 'enabled', [], ''],
+    ['justvoxel', 'enabled', [], ''],
+  ]) {
+    const card = context.renderInstalled({ management, state, name: 'Root', filename: 'root.jar', version: '1.0', project_id: management === 'plugins' ? 'root' : undefined, icon_project_id: management === 'justvoxel' ? 'wKkoqHrH' : undefined, metadata_status: 'Metadata read' });
+    const buttons = card.info() || [];
+    assert.deepEqual(Array.from(buttons, node => node.textContent), labels);
+    assert.ok(!(buttons.some(node => node.textContent === 'Enable') && buttons.some(node => node.textContent === 'Disable')));
+    if (badge) {
+      assert.ok(card.all().some(node => node.textContent === badge));
+      assert.ok(headerBadges.includes(badge));
+      assert.equal(buttons[0].className, 'plugins-state-action');
+      assert.equal(buttons[1].className, 'plugins-remove-action');
+      assert.equal(card.iconProjectID, 'root');
+    } else if (management === 'justvoxel') assert.equal(card.iconProjectID, 'wKkoqHrH');
+    else assert.equal(card.iconProjectID, undefined);
+  }
+});
+
+async function pluginLifecycleReview(action) {
+  const start = app.indexOf('  const reviewManagedPlugin =');
+  const end = app.indexOf('  const pluginRequest =', start);
+  const body = lifecycleElement('div');
+  const submissions = [];
+  let installed = 0;
+  const plan = { action, project_id: 'root', project_name: 'Root', state: action === 'enable' ? 'disabled' : 'enabled', plan_fingerprint: 'sha256:' + 'a'.repeat(64), confirmation_required: false };
+  const context = vm.createContext({
+    AbortController, Array, Number, Math, String, installGeneration: 0, installController: null, operationIdentity: null, pollTimer: null,
+    document: { createElement: tag => lifecycleElement(tag) }, text: lifecycleElement, panelBody: body,
+    stopPolling: () => { context.installGeneration++; }, showPanel: () => body.replaceChildren(),
+    overlayHeader() {}, blockPluginInstall: async () => false,
+    returnToInstalled: () => { installed++; },
+    panelAction: (label, handler) => { const button = lifecycleElement('button', label); button.addEventListener('click', handler); return button; },
+    pluginAction: (label, handler, style) => { const button = lifecycleElement('button', label, style); button.addEventListener('click', handler); return button; },
+    overlayActions: (...buttons) => body.append(...buttons),
+    pluginRequest: async (route, request) => { if (route === 'manage/plan') return plan; submissions.push({ route, request }); return { operation: { operation_id: '12345678-1234-4123-8123-123456789abc', state: 'succeeded' } }; },
+    showOperation: () => true, panelError: error => { throw error; },
+  });
+  vm.runInContext(app.slice(start, end) + '\nthis.review = reviewManagedPlugin;', context);
+  await context.review({ project_id: 'root', name: 'Root', version: '1.0' }, action);
+  return { body, submissions, installed: () => installed };
+}
+
+test('Enable and Disable reviews have Cancel and one yellow final action with no destructive slider', async () => {
+  for (const action of ['enable', 'disable']) {
+    const page = await pluginLifecycleReview(action);
+    const buttons = page.body.all().filter(node => node.tag === 'button');
+    assert.deepEqual(buttons.map(node => node.textContent), ['Cancel', action === 'enable' ? 'Enable' : 'Disable']);
+    assert.equal(buttons[1].className, 'plugins-state-action');
+    assert.ok(!page.body.all().some(node => node.type === 'range'));
+    assert.equal(buttons[1].disabled, false);
+    await buttons[0].click();
+    assert.equal(page.installed(), 1);
+    assert.equal(page.submissions.length, 0);
+  }
+});
+
+test('Remove review requires both a fully armed slider and the final confirmation switch', async () => {
+  const page = await pluginLifecycleReview('remove');
+  const buttons = page.body.all().filter(node => node.tag === 'button');
+  assert.deepEqual(buttons.map(node => node.textContent), ['Cancel', 'Remove']);
+  const remove = buttons[1];
+  assert.equal(remove.className, 'plugins-remove-action');
+  assert.equal(remove.disabled, true);
+  const slider = page.body.all().find(node => node.type === 'range');
+  const confirm = page.body.all().find(node => node.className === 'destructive-confirm-toggle');
+  slider.value = '100'; slider.events.input();
+  assert.equal(remove.disabled, true);
+  confirm.checked = true; confirm.events.change();
+  assert.equal(remove.disabled, false);
+  slider.value = '99'; slider.events.input();
+  assert.equal(confirm.checked, false);
+  assert.equal(remove.disabled, true);
+  slider.value = '100'; slider.events.input(); confirm.checked = true; confirm.events.change();
+  await remove.click();
+  assert.equal(page.submissions.length, 1);
+  assert.equal(page.submissions[0].route, 'manage');
+  assert.equal(page.submissions[0].request.action, 'remove');
 });

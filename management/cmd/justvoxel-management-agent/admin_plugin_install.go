@@ -534,6 +534,8 @@ var errPluginLoaderArtifact = errors.New("JAR contains loader metadata without a
 
 const pluginLoaderReviewRejection = "Loader-based server mod - not supported by the current version of JustVoxel Plugin installer. Should be available in future updates."
 
+const pluginBlueMapReviewRejection = "BlueMap addon - separate installation path not supported by the current JustVoxel Plugin installer."
+
 const pluginDirectReviewRejection = "This release is not a direct Paper/Bukkit plugin and cannot be installed into the plugins directory."
 
 // Review only the exact requested artifact. Installation still inspects every
@@ -555,13 +557,16 @@ func reviewRootPluginArtifact(ctx context.Context, plan pluginInstallPlan) error
 		if err != nil {
 			return errors.New("Plugin review artifact unavailable")
 		}
-		_, inspectErr := inspectStagedPlugin(file, artifact.Filename)
+		identity, inspectErr := inspectStagedPlugin(file, artifact.Filename)
 		closeErr := file.Close()
 		if errors.Is(inspectErr, errPluginLoaderArtifact) {
 			return errors.New(pluginLoaderReviewRejection)
 		}
 		if inspectErr != nil {
 			return errors.New(pluginDirectReviewRejection)
+		}
+		if artifact.ProjectID == "99IreA6y" && identity.Main == "de.bluecolored.bluemap.entities.PaperEntrypoint" {
+			return errors.New(pluginBlueMapReviewRejection)
 		}
 		return closeErr
 	}
@@ -725,10 +730,16 @@ func classifyGenericPluginInventory(dataPath string, f *os.File, item *installed
 			item.UpdateStatus = "Attention: plugin descriptor differs from ownership manifest; manual / unmanaged"
 			return
 		}
+		verified := managedPluginInventoryItem(dataPath, e)
+		if verified.Management != "plugins" {
+			item.UpdateStatus = verified.UpdateStatus
+			return
+		}
 		item.Management = "plugins"
+		item.State = verified.State
 		item.ProjectID = e.ProjectID
 		item.VersionID = e.VersionID
-		item.UpdateStatus = "Managed by Plugins; update and removal are not available yet"
+		item.UpdateStatus = "Managed by Plugins; updates are not available yet"
 		return
 	}
 }
@@ -1429,6 +1440,9 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 			return failUntouched(err)
 		}
 		a.PluginName, a.Main = identity.Name, identity.Main
+		if a.Requested && a.ProjectID == "99IreA6y" && identity.Main == "de.bluecolored.bluemap.entities.PaperEntrypoint" {
+			return failUntouched(errors.New(pluginBlueMapReviewRejection))
+		}
 		if component := managedPluginDescriptor(a.Filename, a.PluginName, a.Main); component != "" {
 			if a.Requested {
 				return failUntouched(errors.New("Requested JAR is a JustVoxel-managed component"))
@@ -1545,6 +1559,7 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 		return rollback(err)
 	}
 	if err := verifyPluginRuntime(ctx, plan.Server.MinecraftVersion); err != nil {
+		recordPluginStartupEvidence(s.operations, id, plan.DataPath, pluginInstallExpectedNames(plan))
 		return rollback(errors.New("Existing Minecraft stack verification failed"))
 	}
 	expected := []string{}
@@ -1552,6 +1567,7 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 		expected = append(expected, a.PluginName)
 	}
 	if err := verifyPluginStartup(plan.DataPath, expected); err != nil {
+		recordPluginStartupEvidence(s.operations, id, plan.DataPath, expected)
 		return rollback(err)
 	}
 	if !originallyRunning {
@@ -1753,6 +1769,9 @@ func placePluginArtifact(root *os.File, directory, id string, a pluginInstallArt
 	return true, root.Sync()
 }
 func commitPluginManifest(dataPath string, previous []byte, manifest pluginManifest) (bool, error) {
+	return commitPluginManifestContent(dataPath, previous, manifest, nil)
+}
+func commitPluginManifestContent(dataPath string, previous []byte, manifest pluginManifest, exactRaw []byte) (bool, error) {
 	_, raw, err := readPluginManifest(dataPath)
 	if err != nil || !bytes.Equal(raw, previous) {
 		return false, errors.New("Ownership manifest changed")
@@ -1782,6 +1801,16 @@ func commitPluginManifest(dataPath string, previous []byte, manifest pluginManif
 	f := os.NewFile(uintptr(mfd), temp)
 	defer unix.Unlinkat(fd, temp, 0)
 	raw, err = json.Marshal(manifest)
+	if exactRaw != nil {
+		var original pluginManifest
+		d := json.NewDecoder(bytes.NewReader(exactRaw))
+		d.DisallowUnknownFields()
+		if d.Decode(&original) != nil || d.Decode(new(any)) != io.EOF || !reflect.DeepEqual(original, manifest) {
+			f.Close()
+			return false, errors.New("Original manifest evidence is invalid")
+		}
+		raw = slices.Clone(exactRaw)
+	}
 	if err == nil && len(raw) > pluginManifestLimit {
 		err = errors.New("Ownership manifest exceeds safe size")
 	}
@@ -2279,4 +2308,14 @@ func managedPluginDescriptor(filename, name, main string) string {
 		return "viaversion"
 	}
 	return ""
+}
+
+func pluginInstallExpectedNames(plan pluginInstallPlan) []string {
+	names := []string{}
+	for _, a := range plan.Artifacts {
+		if a.PluginName != "" {
+			names = append(names, a.PluginName)
+		}
+	}
+	return names
 }

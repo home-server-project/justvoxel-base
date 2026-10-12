@@ -38,6 +38,7 @@ type AdminResetPlanResponse struct {
 	DataPath              string   `json:"data_path,omitempty"`
 	DataScope             string   `json:"data_scope,omitempty"`
 	DataAction            string   `json:"data_action,omitempty"`
+	PluginsAction         string   `json:"plugins_action,omitempty"`
 	BackupPath            string   `json:"backup_path,omitempty"`
 	BackupScope           string   `json:"backup_scope,omitempty"`
 	BackupAction          string   `json:"backup_action,omitempty"`

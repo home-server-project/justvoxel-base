@@ -19,8 +19,8 @@ or Space. Keyboard focus is visible; selection uses the green Server Software
 card language and stays visible while the overlay is open. There are no separate
 Info or Install card buttons. Closing the overlay returns focus to the card;
 details never expand inside the results grid. Installed uses the same
-whole-card selection and information/status overlays, without update or removal
-actions. Installable Discover cards open one combined information/install
+whole-card selection and information/status overlays. Managed lifecycle actions
+are described in the current cycle below; updates remain unavailable. Installable Discover cards open one combined information/install
 overlay; JustVoxel-managed and unavailable selections remain read only.
 Supported versions appear as compact slash-separated text that wraps when
 needed. Supported platforms use the same compact presentation. Publisher
@@ -28,7 +28,7 @@ dependencies are grouped into compact rows, including cross-loader required
 metadata that will not be installed. Actual install dependencies remain explicit.
 Installed information has separate sections for JAR,
 Metadata, Management and Update status. Installed cards show ownership
-and a compact status; update and removal actions remain unavailable.
+and a compact status; updates remain unavailable.
 Discover uses three columns in wide windows, two in medium windows and one in
 narrow windows. Buttons stay distinct from badges. Authoritative Modrinth project
 IDs use real publisher logos through the Administrator-only same-origin
@@ -335,7 +335,7 @@ An Agent restart/reboot during installation also becomes `needs_attention` with
 plugin-specific interruption status. It never claims success or deletes unknown
 transaction artifacts automatically.
 
-Administrators can use **Re-check after repair** for a matching `needs_attention`
+Administrators can use **Re-check recovery** for a matching `needs_attention`
 plugin operation. This strictly decoded acknowledgement re-checks private
 transaction evidence, files, ownership and the original service state. It accepts
 only all expected installed files with exact hashes and ownership, or all
@@ -387,3 +387,108 @@ Workspace integration, or multi-instance support. It makes **no SELinux policy,
 label, mount-label or Quadlet changes**. If the existing environment cannot consume
 new JARs, verification fails and rollback runs; labeling changes require a separate
 human-approved task.
+
+
+## Managed Enable, Disable and Remove
+
+Only entries whose ownership is verified as **Managed by Plugins** receive
+lifecycle actions. Enabled entries show **Enabled** and one yellow **Disable**
+action; disabled entries show **Disabled** and one yellow **Enable** action.
+Both offer red **Remove**. Disabled is a normal state. Manual/unmanaged plugins
+and JustVoxel-managed Geyser, Floodgate and ViaVersion stay read only.
+
+The existing `<DataPath>/.justvoxel/plugins.json` **v1 schema is unchanged**.
+Enabled/disabled state is never persisted in that JSON: an enabled JAR is in
+`<DataPath>/plugins/<filename>`, and a disabled JAR is in the root-private,
+mode-0700 `<DataPath>/.justvoxel/disabled-plugins/<filename>` directory. Both
+locations use pinned directory access, no symlink following, the same filename
+rules and exact manifest SHA-512/name/main-class verification. A duplicate,
+missing, changed or unsafe JAR becomes Attention and cannot receive lifecycle
+mutations. Arbitrary files in the disabled store are never adopted.
+
+Enable returns the same verified stored JAR to `/plugins`; Disable moves that
+exact JAR out of the active set. Neither changes the ownership manifest. Remove
+stages the exact JAR privately on the data filesystem and commits only removal
+of that project's manifest entry after runtime verification. The staged rollback
+copy survives until the success journal is durable. **All plugin configuration
+and data directories remain untouched**, and dependencies are never removed
+automatically. An enabled managed parent recorded in `required_by` blocks Disable
+and Remove of its dependency. A verified disabled parent does not block; unsafe
+or ambiguous parent state fails closed. Orphan dependencies remain installed.
+
+There is no hot plugin load/unload. Actions share Minecraft maintenance exclusion
+with install, reset and updates, re-resolve the exact reviewed SHA-256 plan,
+recheck players under the runtime maintenance lock, persist private synced
+transaction evidence before downtime, and use the existing verified cold backup
+with `--leave-stopped`. Minecraft starts for normal stack verification and the
+existing active-plugin startup proof for Enable. Disable/Remove require absence
+from the final initialization inventory. This also temporarily starts an
+originally stopped server for verification and returns it to stopped afterward.
+Failures stop the failed runtime, restore the exact original JAR location and
+ownership, and verify the original runtime. Unproven recovery retains
+`needs_attention`, evidence and maintenance exclusion after restart.
+
+**Re-check recovery** for lifecycle operations uses durable evidence, never
+browser memory. It verifies a complete target state or performs a bounded exact
+rollback and verifies the original state. It cannot resolve ambiguous copies,
+changed hashes/descriptors or unexplained manifest changes. No terminal cleanup
+is part of the WebUI recovery workflow.
+
+The administrator-only Agent endpoints are `POST /v1/admin/plugins/manage/plan`,
+`POST /v1/admin/plugins/manage`, `POST /v1/admin/plugins/manage/acknowledge`, and
+`GET /v1/admin/plugins/operation`. Requests are bounded and reject unknown fields;
+only `enable`, `disable` and `remove` are supported. Matching CSRF-protected WebUI
+routes live under `/api/plugins/workspace/`. The workspace uses the generic
+current Plugin operation contract for install and all lifecycle actions; prior
+install endpoints remain available for compatibility. Installed inventory stays
+blocked until a mutation has a verified terminal state. Lifecycle progress uses
+Prepare, Backup, Change, Restart and Verify from the persisted operation journal.
+Administrator audit events use `plugin_enable`, `plugin_disable` and
+`plugin_remove`, the project ID, and the actual success/failure outcome.
+
+### Exact BlueMap addon classification
+
+Only Modrinth project `99IreA6y` **and** descriptor main class
+`de.bluecolored.bluemap.entities.PaperEntrypoint` together receive the dedicated
+root-artifact review rejection:
+
+> BlueMap addon - separate installation path not supported by the current JustVoxel Plugin installer.
+
+This addon is not installed into `/plugins`; BlueMap packs installation is
+outside this cycle. Either identity alone continues through normal strict
+validation. Names, descriptions and loader tags do not trigger this special
+case. PlayerDataSync has no special rejection, and Purpur compatibility and
+active-plugin verification remain unchanged.
+
+### Plugins diagnostics
+
+**System → Logs → Plugins** lists, reads and downloads the private Agent log for
+`plugin_install`, `plugin_enable`, `plugin_disable` and `plugin_remove`.
+`plugins-logs` uses the same private protections as other operation logs.
+Operation journals provide real stage/status history. Failed final startup
+verification adds only a small sanitized excerpt from the bounded final
+PluginInitializerManager initialization segment, limited to the expected plugin
+identities. Standard load/enable/disable/failure messages and safely identified
+plugin logger explanations can explain storage/configuration failures or a
+plugin disabling itself. Evidence is capped at 64 lines and 16 KiB, including
+its diagnostic framing; control corruption is rejected, sensitive lines are
+redacted, and URLs, connection strings and stack frames are excluded. Host
+identity uses existing diagnostic sanitation. The full server log is never
+exposed and raw Minecraft logs remain untouched. Read-only catalog compatibility
+rejections do not create persistent operations or logs.
+
+### Reset Minecraft cleanup
+
+The authoritative reset plan includes fingerprinted `plugins_action`:
+`delete_with_internal_data` keeps existing whole internal-data deletion;
+`remove_managed_jars` removes exact Plugins-managed JAR ownership while external,
+network or unknown data is preserved. Preserved-data resets verify every manifest
+entry in exactly one active/disabled location, persist private cleanup evidence,
+and atomically stage those JARs before the destructive helper. Unsafe evidence
+blocks reset. Helper failure restores and verifies the staged JARs. Successful
+completion removes the manifest and empty disabled ownership store before
+discarding staging. Retry recognizes existing staged files and durable helper
+completion rather than duplicating or losing JARs. Manual plugins and plugin
+configuration/data folders remain when the data path is preserved. Internal
+reset verifies that manifest/disabled ownership state did not survive deletion.
+Full Factory Reset policy is unchanged.

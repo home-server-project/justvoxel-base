@@ -129,3 +129,73 @@ func TestMigrationDiagnosticRetainsBoundedFailureTailWithoutSecrets(t *testing.T
 		t.Fatalf("diagnostic size = %d", len(data))
 	}
 }
+
+func TestPluginOperationDiagnosticsPrivateCategoryAndExactJournal(t *testing.T) {
+	for _, kind := range []string{operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove} {
+		t.Run(kind, func(t *testing.T) {
+			store := openTestOperationStore(t)
+			j, _, err := store.beginMinecraftMaintenance(testSetupFingerprint, kind)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = store.transition(j.OperationID, operationValidating, "validating", "Preparing plugin."); err != nil {
+				t.Fatal(err)
+			}
+			if diagnosticCategoryForOperationType(kind) != "plugins" {
+				t.Fatal("wrong plugin diagnostic category")
+			}
+			info, err := os.Stat(filepath.Join(store.logsDir, "plugins-logs"))
+			if err != nil || info.Mode().Perm() != 0700 {
+				t.Fatal("plugin diagnostics not private", err)
+			}
+			data, err := store.readDiagnosticLog("plugins", j.OperationID)
+			if err != nil || !strings.Contains(string(data), "Preparing plugin.") {
+				t.Fatal("canonical plugin journal unavailable", err)
+			}
+			if _, err = store.readDiagnosticLog("restore", j.OperationID); err == nil {
+				t.Fatal("wrong journal category accepted")
+			}
+			entries, err := store.listDiagnosticLogs()
+			if err != nil || len(entries) != 1 || entries[0].Category != "plugins" || entries[0].OperationType != kind {
+				t.Fatal(entries, err)
+			}
+		})
+	}
+}
+func TestPluginStartupEvidenceBoundedSanitizedFinalSegment(t *testing.T) {
+	raw := "[Root] earlier arbitrary log\n[PluginInitializerManager] Initializing plugins...\n[Root] previous startup failure\n[PluginInitializerManager] Initializing plugins...\n[Root] Storage initialization failed\n[Root] password=hunter2\n[Root] token abc\n[Root] https://example.invalid/private\n[Root] at example.Main.run(Main.java:4)\n[Other] unrelated\n"
+	raw += strings.Repeat("[Root] Could not initialize storage\n", 200) + "[Root] Storage initialization failed\n[Root] password=hunter2\n"
+	lines := pluginStartupDiagnosticExcerpt([]byte(raw), []string{"Root"}, "private-host")
+	if len(lines) > 64 || len(strings.Join(lines, "\n")) > 16<<10 {
+		t.Fatal("evidence limit exceeded")
+	}
+	excerpt := strings.Join(lines, "\n")
+	for _, unsafe := range []string{"hunter2", "token abc", "https://", "Main.java", "earlier", "previous startup", "unrelated"} {
+		if strings.Contains(excerpt, unsafe) {
+			t.Fatal("unsafe or non-final log exposed", unsafe)
+		}
+	}
+	if !strings.Contains(excerpt, "Storage initialization failed") || !strings.Contains(excerpt, "redacted") {
+		t.Fatal("useful evidence missing", excerpt)
+	}
+	for _, corrupt := range []string{"\x00", "\x01", "\x7f"} {
+		if lines := pluginStartupDiagnosticExcerpt([]byte("[PluginInitializerManager] Initializing plugins...\n[Root] failure"+corrupt+"\n"), []string{"Root"}, ""); lines != nil {
+			t.Fatal("control corruption accepted")
+		}
+	}
+}
+
+func TestPluginStartupEvidenceRedactsAllSensitiveFamiliesAndHostIdentity(t *testing.T) {
+	for _, family := range []string{"password", "secret", "token", "cookie", "authorization", "credential", "api-key", "api_key", "apikey", "API key"} {
+		raw := "[PluginInitializerManager] Initializing plugins...\n[Root] " + family + ": do-not-expose\n"
+		lines := pluginStartupDiagnosticExcerpt([]byte(raw), []string{"Root"}, "")
+		if len(lines) != 1 || strings.Contains(strings.Join(lines, "\n"), "do-not-expose") || !strings.Contains(lines[0], "redacted") {
+			t.Fatal("sensitive startup detail escaped", family, lines)
+		}
+	}
+	raw := "[PluginInitializerManager] Initializing plugins...\n[Root] Storage failed on private-host 10.20.30.40\n"
+	lines := pluginStartupDiagnosticExcerpt([]byte(raw), []string{"Root"}, "private-host")
+	if len(lines) != 1 || strings.Contains(lines[0], "private-host") || strings.Contains(lines[0], "10.20.30.40") {
+		t.Fatal("host identity escaped startup sanitation", lines)
+	}
+}

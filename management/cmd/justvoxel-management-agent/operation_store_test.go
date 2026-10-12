@@ -557,3 +557,36 @@ func TestFactoryResetResolutionRequiresNeedsAttention(t *testing.T) {
 		t.Fatalf("factory reset current state changed after rejected resolution: %#v err=%v", current, err)
 	}
 }
+
+func TestPluginLifecycleSharesMaintenanceAndRetainsInterruptedExclusion(t *testing.T) {
+	for _, kind := range []string{operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove} {
+		t.Run(kind, func(t *testing.T) {
+			store := openTestOperationStore(t)
+			j, _, err := store.beginMinecraftMaintenance(testSetupFingerprint, kind)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, blocked := range []string{operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove, operationTypeMinecraftReset, operationTypeMinecraftUpdate} {
+				if blocked == kind {
+					continue
+				}
+				if _, _, err = store.beginMinecraftMaintenance(testSetupFingerprint, blocked); err == nil {
+					t.Fatal("concurrent mutation allowed", blocked)
+				}
+			}
+			base := store.baseDir
+			if err = store.close(); err != nil {
+				t.Fatal(err)
+			}
+			reopened, err := openOperationStore(base)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reopened.close()
+			current, err := reopened.currentPluginOperation()
+			if err != nil || current == nil || current.OperationID != j.OperationID || current.State != operationNeedsAttention {
+				t.Fatal("unfinished lifecycle exclusion lost", current, err)
+			}
+		})
+	}
+}

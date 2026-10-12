@@ -25,6 +25,9 @@ const (
 	operationTypeMinecraftReset    = "minecraft_reset"
 	operationTypeMinecraftUpdate   = "minecraft_update"
 	operationTypePluginInstall     = "plugin_install"
+	operationTypePluginEnable      = "plugin_enable"
+	operationTypePluginDisable     = "plugin_disable"
+	operationTypePluginRemove      = "plugin_remove"
 	operationTypeFactoryReset      = "factory_reset"
 	operationTypeMigrationExport   = "migration_export"
 	operationTypeMigrationImport   = "migration_import"
@@ -152,7 +155,7 @@ func openOperationStore(baseDir string) (*operationStore, error) {
 	if err := migrateOperationDiagnostics(legacyOperationLogsDir, logsDir); err != nil {
 		return nil, err
 	}
-	for _, category := range []string{"migration-logs", "restore-logs", "reset-logs", "support"} {
+	for _, category := range []string{"migration-logs", "restore-logs", "plugins-logs", "reset-logs", "support"} {
 		if err := ensurePrivateDirectory(filepath.Join(logsDir, category)); err != nil {
 			return nil, err
 		}
@@ -473,7 +476,7 @@ func (s *operationStore) loadAndRecover() error {
 					return errors.New("multiple active data migration operation journals require attention")
 				}
 				activeDataMigration = journal.OperationID
-			case operationTypeMinecraftReset, operationTypeMinecraftUpdate, operationTypePluginInstall:
+			case operationTypeMinecraftReset, operationTypeMinecraftUpdate, operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove:
 				if activeMinecraftReset != "" {
 					return errors.New("multiple active Minecraft reset operation journals require attention")
 				}
@@ -503,14 +506,20 @@ func (s *operationStore) loadAndRecover() error {
 		journal := s.operations[activeMinecraftReset]
 		if operationInterruptedByRestart(journal.State) {
 			now := s.now().UTC().Format(time.RFC3339Nano)
+			wasQueued := journal.State == operationQueued
 			journal.State = operationNeedsAttention
 			journal.Stage = "interrupted"
+			if wasQueued && isPluginOperationType(journal.OperationType) && journal.OperationType != operationTypePluginInstall {
+				journal.Stage = "interrupted_queued"
+			}
 			journal.Status = "Minecraft reset was interrupted before completion. Review appliance state before continuing."
 			if journal.OperationType == operationTypeMinecraftUpdate {
 				journal.Status = "Server update was interrupted. Review Minecraft state before continuing."
 			}
 			if journal.OperationType == operationTypePluginInstall {
 				journal.Status = "Plugin installation was interrupted. Automatic recovery could not be proven; administrator attention is required. Staged transaction evidence has been preserved."
+			} else if isPluginOperationType(journal.OperationType) {
+				journal.Status = "Plugin management was interrupted. Re-check recovery uses preserved durable transaction evidence; maintenance remains reserved. See System -> Logs -> Plugins."
 			}
 			journal.UpdatedAt = now
 			journal.InterruptedAt = now
@@ -519,6 +528,9 @@ func (s *operationStore) loadAndRecover() error {
 				return err
 			}
 			s.operations[journal.OperationID] = journal
+			if isPluginOperationType(journal.OperationType) {
+				s.appendOperationJournalDiagnosticBestEffort(journal)
+			}
 		}
 		s.currentMinecraftResetID = activeMinecraftReset
 	}
@@ -718,7 +730,7 @@ func validateOperationJournal(journal operationJournal) error {
 	if !validOperationID(journal.OperationID) {
 		return errors.New("invalid operation id")
 	}
-	if journal.OperationType != operationTypeSetup && journal.OperationType != operationTypeRestore && journal.OperationType != operationTypeDataMigration && journal.OperationType != operationTypeMinecraftReset && journal.OperationType != operationTypeMinecraftUpdate && journal.OperationType != operationTypePluginInstall && journal.OperationType != operationTypeFactoryReset && journal.OperationType != operationTypeMigrationExport && journal.OperationType != operationTypeMigrationImport && journal.OperationType != operationTypeMigrationRecovery {
+	if journal.OperationType != operationTypeSetup && journal.OperationType != operationTypeRestore && journal.OperationType != operationTypeDataMigration && journal.OperationType != operationTypeMinecraftReset && journal.OperationType != operationTypeMinecraftUpdate && !isPluginOperationType(journal.OperationType) && journal.OperationType != operationTypeFactoryReset && journal.OperationType != operationTypeMigrationExport && journal.OperationType != operationTypeMigrationImport && journal.OperationType != operationTypeMigrationRecovery {
 		return errors.New("unsupported operation type")
 	}
 	if !operationFingerprintPattern.MatchString(journal.PlanFingerprint) {
@@ -1107,7 +1119,7 @@ func (s *operationStore) beginMinecraftReset(planFingerprint string) (operationJ
 
 // Update, reset and plugin installation share the existing maintenance locks.
 func (s *operationStore) beginMinecraftMaintenance(planFingerprint, kind string) (operationJournal, bool, error) {
-	if kind != operationTypeMinecraftReset && kind != operationTypeMinecraftUpdate && kind != operationTypePluginInstall {
+	if kind != operationTypeMinecraftReset && kind != operationTypeMinecraftUpdate && !isPluginOperationType(kind) {
 		return operationJournal{}, false, errors.New("invalid Minecraft maintenance type")
 	}
 	if !operationFingerprintPattern.MatchString(planFingerprint) {
@@ -1145,6 +1157,8 @@ func (s *operationStore) beginMinecraftMaintenance(planFingerprint, kind string)
 	}
 	if kind == operationTypePluginInstall {
 		status = "Plugin installation queued."
+	} else if isPluginOperationType(kind) {
+		status = "Plugin " + strings.TrimPrefix(kind, "plugin_") + " queued."
 	}
 	journal := operationJournal{
 		SchemaVersion: operationSchemaVersion, OperationID: id, OperationType: kind,
@@ -1158,6 +1172,9 @@ func (s *operationStore) beginMinecraftMaintenance(planFingerprint, kind string)
 	}
 	s.operations[id] = journal
 	s.currentMinecraftResetID = id
+	if isPluginOperationType(kind) {
+		s.appendOperationJournalDiagnosticBestEffort(journal)
+	}
 	return journal, true, nil
 }
 
@@ -1440,7 +1457,7 @@ func (s *operationStore) transition(id string, next operationState, stage, statu
 		return operationJournal{}, errOperationNotFound
 	}
 	setupRecovery := journal.OperationType == operationTypeSetup && journal.State == operationNeedsAttention && ((journal.Stage == "storage_rollback" && stage == "storage_recovery") || (journal.Stage == "runtime_rollback" && stage == "runtime_recovery")) && next == operationRollingBack
-	queuedPluginCancellation := journal.OperationType == operationTypePluginInstall && journal.State == operationQueued && next == operationRolledBack && stage == "complete"
+	queuedPluginCancellation := isPluginOperationType(journal.OperationType) && journal.State == operationQueued && next == operationRolledBack && stage == "complete"
 	if !setupRecovery && !queuedPluginCancellation && !operationTransitionAllowed(journal.State, next) {
 		return operationJournal{}, fmt.Errorf("invalid operation transition %s -> %s", journal.State, next)
 	}
@@ -1486,7 +1503,7 @@ func (s *operationStore) transition(id string, next operationState, stage, statu
 			if err := s.releaseDataMigrationLock(); err != nil {
 				return operationJournal{}, err
 			}
-		case operationTypeMinecraftReset, operationTypeMinecraftUpdate, operationTypePluginInstall:
+		case operationTypeMinecraftReset, operationTypeMinecraftUpdate, operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove:
 			s.currentMinecraftResetID = ""
 			if err := s.releaseMinecraftResetLocks(); err != nil {
 				return operationJournal{}, err
@@ -1745,7 +1762,7 @@ func (s *operationStore) pluginProgress(id, stage, status string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	journal, ok := s.operations[id]
-	if !ok || journal.OperationType != operationTypePluginInstall || !operationInterruptedByRestart(journal.State) {
+	if !ok || !isPluginOperationType(journal.OperationType) || !operationInterruptedByRestart(journal.State) {
 		return errors.New("plugin operation is not active")
 	}
 	if !operationStagePattern.MatchString(stage) || !validOperationStatus(status) {
@@ -1757,6 +1774,7 @@ func (s *operationStore) pluginProgress(id, stage, status string) error {
 		return err
 	}
 	s.operations[id] = journal
+	s.appendOperationJournalDiagnosticBestEffort(journal)
 	return nil
 }
 func (s *operationStore) currentPluginInstall() (*operationJournal, error) {
@@ -1782,4 +1800,19 @@ func (s *operationStore) pluginCleanupWarning(id string) error {
 	}
 	s.operations[id] = journal
 	return nil
+}
+
+func isPluginOperationType(kind string) bool {
+	switch kind {
+	case operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove:
+		return true
+	}
+	return false
+}
+func (s *operationStore) currentPluginOperation() (*operationJournal, error) {
+	journal, err := s.currentMinecraftMaintenance()
+	if journal != nil && !isPluginOperationType(journal.OperationType) {
+		journal = nil
+	}
+	return journal, err
 }

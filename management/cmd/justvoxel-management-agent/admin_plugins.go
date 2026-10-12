@@ -50,6 +50,7 @@ type pluginServerContext struct {
 	Message          string `json:"message,omitempty"`
 }
 type installedPlugin struct {
+	State          string `json:"state,omitempty"`
 	Name           string `json:"name,omitempty"`
 	Version        string `json:"version,omitempty"`
 	ProjectID      string `json:"project_id,omitempty"`
@@ -114,6 +115,10 @@ func registerAdminPluginRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("POST /v1/admin/plugins/install", s.adminPluginInstall)
 	mux.HandleFunc("POST /v1/admin/plugins/install/acknowledge", s.adminPluginInstallAcknowledge)
 	mux.HandleFunc("GET /v1/admin/plugins/install-operation", s.adminPluginInstallCurrent)
+	mux.HandleFunc("POST /v1/admin/plugins/manage/plan", s.adminPluginManagePlan)
+	mux.HandleFunc("POST /v1/admin/plugins/manage", s.adminPluginManage)
+	mux.HandleFunc("POST /v1/admin/plugins/manage/acknowledge", s.adminPluginManageAcknowledge)
+	mux.HandleFunc("GET /v1/admin/plugins/operation", s.adminPluginOperation)
 }
 
 // Reuse authoritative discovery and runtime status; never parse appliance config here.
@@ -170,6 +175,13 @@ func (s *server) adminPluginsInstalled(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.requireAdministrator(w, r); !ok {
 		return
 	}
+	if s.operations != nil {
+		current, err := s.operations.currentPluginOperation()
+		if err != nil || current != nil {
+			writeError(w, 409, "Plugin inventory is unavailable until the current Plugin operation reaches a verified final state")
+			return
+		}
+	}
 	server, path, ok := s.pluginContext(w, r)
 	if !ok {
 		return
@@ -198,7 +210,7 @@ func readPluginInventory(dataPath string) ([]installedPlugin, error) {
 		manifest, _, manifestErr := readPluginManifest(dataPath)
 		if manifestErr == nil {
 			for _, entry := range manifest.Artifacts {
-				out = append(out, installedPlugin{Name: entry.PluginName, Filename: entry.Filename, Management: "manual", MetadataStatus: "Managed JAR missing or unavailable", UpdateStatus: "Attention: plugin directory is missing; ownership is unverified"})
+				out = append(out, managedPluginInventoryItem(dataPath, entry))
 			}
 		}
 		return out, nil
@@ -250,7 +262,7 @@ func readPluginInventory(dataPath string) ([]installedPlugin, error) {
 				}
 			}
 			if !present {
-				out = append(out, installedPlugin{Name: managed.PluginName, Filename: managed.Filename, Management: "manual", MetadataStatus: "Managed JAR missing or unavailable", UpdateStatus: "Attention: manifest JAR is missing or unavailable; ownership is unverified"})
+				out = append(out, managedPluginInventoryItem(dataPath, managed))
 			}
 		}
 		sort.Slice(out, func(i, j int) bool { return out[i].Filename < out[j].Filename })
@@ -831,4 +843,39 @@ func verifiedPluginIcon(ctx context.Context, extension string, data []byte) ([]b
 		return nil, "", unavailable
 	}
 	return output.Bytes(), "image/png", nil
+}
+
+func managedPluginInventoryItem(path string, e pluginManifestEntry) installedPlugin {
+	item := installedPlugin{Name: e.PluginName, Filename: e.Filename, Management: "manual", MetadataStatus: "Managed JAR missing or unavailable", UpdateStatus: "Attention: manifest JAR is missing or unavailable; ownership is unverified"}
+	state, err := resolveManagedPluginLocation(path, e)
+	if err != nil {
+		item.UpdateStatus = "Attention: " + err.Error()
+		return item
+	}
+	item.Management = "plugins"
+	item.State = state
+	item.ProjectID = e.ProjectID
+	item.VersionID = e.VersionID
+	item.Version = e.VersionNumber
+	var root *os.File
+	if state == "enabled" {
+		root, err = openPluginDirectory(path)
+	} else {
+		root, err = openDisabledPluginDirectory(path, false)
+	}
+	if err == nil {
+		jar, eerr := openPluginAt(root, e.Filename)
+		if eerr == nil {
+			identity, ierr := inspectStagedPlugin(jar, e.Filename)
+			jar.Close()
+			if ierr == nil && identity.Version != "" {
+				item.Version = identity.Version
+			}
+		}
+		root.Close()
+	}
+	item.Main = e.Main
+	item.MetadataStatus = "Metadata read"
+	item.UpdateStatus = "Managed by Plugins; updates are not available yet"
+	return item
 }

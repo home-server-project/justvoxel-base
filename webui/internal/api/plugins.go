@@ -20,6 +20,7 @@ type PluginServerContext struct {
 	Message          string `json:"message,omitempty"`
 }
 type InstalledPlugin struct {
+	State          string `json:"state,omitempty"`
 	Name           string `json:"name,omitempty"`
 	Version        string `json:"version,omitempty"`
 	ProjectID      string `json:"project_id,omitempty"`
@@ -253,4 +254,72 @@ func (c *Client) AdminPluginIcon(ctx context.Context, session, projectID string,
 		return out, errors.New("Plugin icon unavailable.")
 	}
 	return PluginIcon{Data: data, ContentType: contentType}, nil
+}
+
+// Explicit lifecycle requests share install's bounded transport and strict Agent
+// decoding. No caller-selected path or JAR filename is accepted.
+type PluginManageRequest struct {
+	Action    string `json:"action"`
+	ProjectID string `json:"project_id"`
+}
+type PluginManageApplyRequest struct {
+	Action          string `json:"action"`
+	ProjectID       string `json:"project_id"`
+	PlanFingerprint string `json:"plan_fingerprint"`
+	ConfirmPlayers  bool   `json:"confirm_players"`
+}
+type PluginManagePlan struct {
+	Action               string              `json:"action"`
+	ProjectID            string              `json:"project_id"`
+	Name                 string              `json:"project_name"`
+	State                string              `json:"state"`
+	Server               PluginServerContext `json:"server"`
+	Online               int                 `json:"online"`
+	Players              []string            `json:"players"`
+	ConfirmationRequired bool                `json:"confirmation_required"`
+	RestartRequired      bool                `json:"restart_required"`
+	Fingerprint          string              `json:"plan_fingerprint"`
+}
+
+func validPluginManageRequest(action, project string) bool {
+	return (action == "enable" || action == "disable" || action == "remove") && validPluginProjectID(project)
+}
+func (c *Client) AdminPluginManagePlan(ctx context.Context, session string, request PluginManageRequest) (PluginManagePlan, error) {
+	var out PluginManagePlan
+	if !validPluginManageRequest(request.Action, request.ProjectID) {
+		return out, errors.New("Invalid plugin management request")
+	}
+	err := c.pluginPost(ctx, session, "/v1/admin/plugins/manage/plan", request, &out)
+	return out, err
+}
+func (c *Client) AdminPluginManage(ctx context.Context, session string, request PluginManageApplyRequest) (PersistentOperationResponse, error) {
+	var out PersistentOperationResponse
+	if !validPluginManageRequest(request.Action, request.ProjectID) || !adminResetFingerprintPattern.MatchString(request.PlanFingerprint) {
+		return out, errors.New("Invalid plugin management request")
+	}
+	err := c.pluginPost(ctx, session, "/v1/admin/plugins/manage", request, &out)
+	return out, err
+}
+func (c *Client) AdminPluginManageAcknowledge(ctx context.Context, session string, request PluginInstallAcknowledgeRequest) (PersistentOperationResponse, error) {
+	var out PersistentOperationResponse
+	if !persistentOperationIDPattern.MatchString(request.OperationID) {
+		return out, errors.New("Invalid plugin operation identity")
+	}
+	err := c.pluginPost(ctx, session, "/v1/admin/plugins/manage/acknowledge", request, &out)
+	return out, err
+}
+func (c *Client) AdminCurrentPluginOperation(ctx context.Context, session string) (PersistentOperationResponse, error) {
+	return c.getPersistentOperation(ctx, session, "/v1/admin/plugins/operation")
+}
+
+func validPluginProjectID(project string) bool {
+	if len(project) == 0 || len(project) > 64 {
+		return false
+	}
+	for _, c := range project {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	return true
 }

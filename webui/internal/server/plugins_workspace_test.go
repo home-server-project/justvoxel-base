@@ -149,7 +149,7 @@ func TestPluginsWorkspaceCompactInfoPresentation(t *testing.T) {
 		t.Fatal("compact plugin renderers missing")
 	}
 	info := behavior[start:project]
-	for _, want := range []string{`card.tabIndex = 0`, `card.setAttribute("role", "button")`, `card.setAttribute("aria-haspopup", "dialog")`, `card.setAttribute("aria-controls", "plugins-overlay")`, `event.key === "Enter" || event.key === " "`, `node.classList.toggle("is-selected", node === card)`, `card.addEventListener("click", open)`, "showPanel(`Info for ${name}`, true)", `renderInfo();`, `overlayActions(panelAction("Close"`, `"plugins-icon-tile"`, `header.append(identityTile(name, projectID, iconURL), copy)`} {
+	for _, want := range []string{`card.tabIndex = 0`, `card.setAttribute("role", "button")`, `card.setAttribute("aria-haspopup", "dialog")`, `card.setAttribute("aria-controls", "plugins-overlay")`, `event.key === "Enter" || event.key === " "`, `node.classList.toggle("is-selected", node === card)`, `card.addEventListener("click", open)`, "showPanel(`Info for ${name}`, true)", `renderInfo();`, `overlayActions(...actions, panelAction("Close"`, `"plugins-icon-tile"`, `header.append(identityTile(name, projectID, iconURL), copy)`} {
 		if !strings.Contains(info, want) {
 			t.Fatalf("whole-card overlay behavior missing %s", want)
 		}
@@ -172,7 +172,7 @@ func TestPluginsWorkspaceCompactInfoPresentation(t *testing.T) {
 		}
 	}
 	inventory := behavior[installed:end]
-	for _, want := range []string{`const name = plugin.name || plugin.filename;`, `addInfo(card, name, () => {`, `overlayHeader(name, "", [plugin.version || "Version unknown", management], projectID)`, `plugin.update_status?.startsWith("Update available")`, `"Needs attention"`, `"plugins-inventory-status"`, `"JustVoxel managed"`, `"Managed by Plugins"`, `"Manual / unmanaged"`} {
+	for _, want := range []string{`const name = plugin.name || plugin.filename;`, `addInfo(card, name, () => {`, `overlayHeader(name, "", [plugin.version || "Version unknown", management, stateLabel], projectID)`, `plugin.update_status?.startsWith("Update available")`, `"Needs attention"`, `"plugins-inventory-status"`, `"JustVoxel managed"`, `"Managed by Plugins"`, `"Manual / unmanaged"`} {
 		if !strings.Contains(inventory, want) {
 			t.Fatalf("Installed/Updates presentation missing %s", want)
 		}
@@ -338,7 +338,7 @@ func TestPluginsInstallReviewProgressAndOwnershipRendering(t *testing.T) {
 		`["geyser", "floodgate", "viaversion"].includes(project.slug)`,
 		`pluginRequest("install/plan"`, `plan.project_name`, `overlaySection("Compatibility")`, `plan.artifacts`, `plan.installation_location`,
 		`if (plan.confirmation_required)`, `plan.players`, `confirm_players: String(plan.confirmation_required === true)`,
-		`plan_fingerprint: plan.plan_fingerprint`, `operation.stage`, `operation.status`, `install-operation?id=`,
+		`plan_fingerprint: plan.plan_fingerprint`, `operation.stage`, `operation.status`, `operation?id=`,
 		`"View in Installed"`, `"Done"`, `"Managed by Plugins"`, `"JustVoxel managed"`, `"Manual / unmanaged"`,
 		`interactiveCard(card, project.title, () => reviewRejection`, `addInfo(card, name, () => {`, `"Administrator attention required"`,
 	} {
@@ -470,7 +470,7 @@ func TestPluginsAdditionalInfoAndStructuredInstallPresentation(t *testing.T) {
 		}
 	}
 	progress := script[progressStart:poll]
-	for _, want := range []string{`["Prepare", "Backup", "Install", "Restart", "Verify"]`, `[operation.stage]`, `operation.state`, `operation.status`, `"Plugin installation verified"`, `"Plugin state verified"`, `"Installation did not complete"`, `"Administrator attention required"`, `"Re-check after repair"`, `pluginRequest("install/acknowledge"`, `operation_id: operation.operation_id`, `payload.operation.state !== "resolved"`, `"View in Installed"`, `"Done"`, `overlayActions(`} {
+	for _, want := range []string{`["Prepare", "Backup", "Install", "Restart", "Verify"]`, `[operation.stage]`, `operation.state`, `operation.status`, `"Plugin installation verified"`, `"Plugin state verified"`, `"Installation did not complete"`, `"Administrator attention required"`, `"Re-check recovery"`, `pluginRequest(lifecycle ? "manage/acknowledge" : "install/acknowledge"`, `operation_id: operation.operation_id`, `payload.operation.state !== "resolved"`, `"View in Installed"`, `"Done"`, `overlayActions(`} {
 		if !strings.Contains(progress, want) {
 			t.Fatal("persistent progress action missing", want)
 		}
@@ -602,7 +602,7 @@ func TestPluginsWorkspaceSharedSameOriginLogoAndFallback(t *testing.T) {
 		`}, project.project_id, project.icon_url || "")`,
 		`overlayHeader(plan.project_name, plan.description || project?.description, [plan.version_number, plan.server.server_software,`,
 		`const projectID = plugin.project_id || plugin.icon_project_id || undefined`,
-		`overlayHeader(name, "", [plugin.version || "Version unknown", management], projectID)`,
+		`overlayHeader(name, "", [plugin.version || "Version unknown", management, stateLabel], projectID)`,
 		`}, projectID)`,
 		`operationIdentity?.operation_id === operation.operation_id`,
 		`project_id: plan.project_id, name: plan.project_name`,
@@ -854,7 +854,7 @@ func TestPluginCorrectionReviewAndCursorStructure(t *testing.T) {
 		t.Fatal("plugin workspace missing")
 	}
 	script = script[start:end]
-	for _, forbidden := range []string{`offset - pageLimit`, `Math.floor(offset / pageLimit)`, `Publisher-supported`, `versions.forEach`, `panelAction("Cancel"`, `dependency.dependency_type !== "required"`, `innerHTML`, `insertAdjacentHTML`, `cdn.modrinth.com`, `plugins-review-layout`, `plugins-review-primary`, `plugins-review-secondary`, `plugins-review-install-action`} {
+	for _, forbidden := range []string{`offset - pageLimit`, `Math.floor(offset / pageLimit)`, `Publisher-supported`, `versions.forEach`, `dependency.dependency_type !== "required"`, `innerHTML`, `insertAdjacentHTML`, `cdn.modrinth.com`, `plugins-review-layout`, `plugins-review-primary`, `plugins-review-secondary`, `plugins-review-install-action`} {
 		if strings.Contains(script, forbidden) {
 			t.Fatal("rejected behavior remains", forbidden)
 		}
@@ -866,6 +866,9 @@ func TestPluginCorrectionReviewAndCursorStructure(t *testing.T) {
 	}
 	reviewStart, reviewEnd := strings.Index(script, "  const reviewPlugin ="), strings.Index(script, "  const resumePluginInstall =")
 	review := script[reviewStart:reviewEnd]
+	if strings.Contains(review, `panelAction("Cancel"`) {
+		t.Fatal("installation correction review must retain its existing close actions")
+	}
 	identity := strings.Index(review, `overlayHeader(plan.project_name`)
 	install := strings.Index(review, `panelAction("Install"`)
 	about := strings.Index(review, `overlaySection("About this version")`)
@@ -979,10 +982,10 @@ func TestPluginsWorkspaceInventoryGatePrecedesFetchAndRendering(t *testing.T) {
 	}
 	loader := script[start : start+end]
 	gate := `      if (tab !== "discover") {
-        const installation = await pluginRequest("install-operation", null, controller.signal);
+        const installation = await pluginRequest("operation", null, controller.signal);
         if (current !== generation) return;
         if (!pluginInventorySafe(installation.operation)) {
-          state.textContent = "Plugin installation is still being verified or recovered. Installed inventory will be available after the operation reaches a verified final state.";
+          state.textContent = "Plugin operation is still being verified or recovered. Installed inventory will be available after the operation reaches a verified final state.";
           inventoryTimer = setTimeout(() => recheckBlockedInventory(current), 1500);
           return;
         }
@@ -994,7 +997,7 @@ func TestPluginsWorkspaceInventoryGatePrecedesFetchAndRendering(t *testing.T) {
 	if clear < 0 || check <= clear || fetch <= check+len(gate) || render <= fetch {
 		t.Fatal("Installed/Updates must clear stale cards and check operation before inventory fetch/render; Discover must bypass the check")
 	}
-	if strings.Count(loader, "await fetch(") != 1 || strings.Count(loader, `pluginRequest("install-operation"`) != 1 {
+	if strings.Count(loader, "await fetch(") != 1 || strings.Count(loader, `pluginRequest("operation"`) != 1 {
 		t.Fatal("inventory must not bypass the operation gate")
 	}
 	for _, forbidden := range []string{"filename", "timestamp", "mtime", "birthtime", "adopt", "manual", "disabled = true"} {
@@ -1071,7 +1074,7 @@ func TestPluginsWorkspaceVMCorrectionHeaderButtonsAndBackdrop(t *testing.T) {
 		t.Fatal("review preparation and review must allow backdrop dismissal")
 	}
 	for _, area := range []string{between("  const showOperation =", "  const pollOperation ="), between("  const applyPlugin =", "  const readableSize ="), between("  const panelError =", "  const showOperation =")} {
-		if (!strings.Contains(area, `showPanel();`) && !strings.Contains(area, `showPanel("Plugin installation", false, sameOperation);`)) || strings.Contains(area, `showPanel("Plugin installation", true)`) || strings.Contains(area, "overlayDismissible = true") {
+		if (!strings.Contains(area, `showPanel();`) && !strings.Contains(area, `showPanel(lifecycle ? "Plugin management" : "Plugin installation", false, sameOperation);`)) || strings.Contains(area, `showPanel("Plugin installation", true)`) || strings.Contains(area, "overlayDismissible = true") {
 			t.Fatal("operation rendering or submission allowed backdrop dismissal")
 		}
 	}
@@ -1123,7 +1126,7 @@ func TestPluginsWorkspaceVMCorrectionHeaderButtonsAndBackdrop(t *testing.T) {
 		`const button = text("button", label, secondary ? "secondary" : "");`,
 		`panelAction("Install"`, `panelAction("Close"`, `panelAction("Done"`,
 		`panelAction("View in Installed"`,
-		`panelAction("Re-check after repair"`,
+		`panelAction("Re-check recovery"`,
 		`const card = document.createElement("article");`,
 	} {
 		if !strings.Contains(script, want) {
@@ -1206,7 +1209,7 @@ func TestPluginsWorkspaceApprovedLiveSearchAndSharedTabs(t *testing.T) {
 func TestPluginsWorkspaceStableOperationIdentity(t *testing.T) {
 	script := pluginWorkspaceScript(t)
 	operation := pluginScriptSection(t, script, "  const showOperation =", "  const pollOperation =")
-	for _, want := range []string{`const sameOperation = !panel.hidden && operationViewID === operation.operation_id`, `showPanel("Plugin installation", false, sameOperation)`, `if (!sameOperation) {`, `operationViewID = operation.operation_id`} {
+	for _, want := range []string{`const sameOperation = !panel.hidden && operationViewID === operation.operation_id`, `showPanel(lifecycle ? "Plugin management" : "Plugin installation", false, sameOperation)`, `if (!sameOperation) {`, `operationViewID = operation.operation_id`} {
 		if !strings.Contains(operation, want) {
 			t.Fatal("operation identity lifecycle missing", want)
 		}
@@ -1244,7 +1247,7 @@ func TestPluginsWorkspaceOperationGatesAndInventoryRecheck(t *testing.T) {
 		t.Fatal("opening Plugins must skip settled operations")
 	}
 	recheck := pluginScriptSection(t, script, "  const recheckBlockedInventory =", "  const load =")
-	for _, want := range []string{`inventoryTimer = null`, `!pluginsDialog.open || tab === "discover" || current !== generation`, `pluginRequest("install-operation", null, controller.signal)`, `if (pluginInventorySafe(payload.operation)) { load(); return; }`, `inventoryTimer = setTimeout(() => recheckBlockedInventory(current), 1500)`} {
+	for _, want := range []string{`inventoryTimer = null`, `!pluginsDialog.open || tab === "discover" || current !== generation`, `pluginRequest("operation", null, controller.signal)`, `if (pluginInventorySafe(payload.operation)) { load(); return; }`, `inventoryTimer = setTimeout(() => recheckBlockedInventory(current), 1500)`} {
 		if !strings.Contains(recheck, want) {
 			t.Fatal("automatic safe inventory return missing", want)
 		}
@@ -1280,7 +1283,7 @@ const closePanel = () => {}, panelError = () => {}, pollOperation = () => {}, lo
 const stopPolling = () => { clearTimeout(pollTimer); installController?.abort(); ++installGeneration; };
 const clearInventoryTimer = () => { clearTimeout(inventoryTimer); inventoryTimer = null; };
 const showOperation = (op) => { shown.push(op.state); panel.hidden = false; return ["succeeded","rolled_back","resolved","needs_attention"].includes(op.state); };
-const pluginRequest = async (route) => { requests.push(route); if (route !== "install-operation") throw new Error("stop after authorized request"); return {operation}; };
+const pluginRequest = async (route) => { requests.push(route); if (route !== "operation") throw new Error("stop after authorized request"); return {operation}; };
 ` + settled + gates + review + resume + inventory + `
 (async () => {
  for (const state of [null,"succeeded","rolled_back","resolved","queued","validating","running","verifying","rolling_back","needs_attention","unknown",""]) {
@@ -1290,7 +1293,7 @@ const pluginRequest = async (route) => { requests.push(route); if (route !== "in
   for (const invoke of [() => reviewPlugin("root","release"), () => applyPlugin({project_id:"root",version_id:"release"})]) {
    requests = []; shown = []; timers.clear(); panel.hidden = true;
    await invoke();
-   assert.equal(requests[0], "install-operation");
+   assert.equal(requests[0], "operation");
    assert.equal(requests.length, safe ? 2 : 1);
    if (safe) assert(["install/plan","install"].includes(requests[1]));
    assert.deepEqual(shown, safe ? [] : [state]);
@@ -1303,7 +1306,7 @@ const pluginRequest = async (route) => { requests.push(route); if (route !== "in
  for (const inventoryTab of ["installed"]) {
   tab = inventoryTab; pluginsDialog.open = true; operation = {state:"needs_attention"}; requests = []; timers.clear(); loads = 0;
   await recheckBlockedInventory(generation);
-  assert.deepEqual(requests, ["install-operation"]); assert.equal(loads, 0); assert.equal(timers.size, 1);
+  assert.deepEqual(requests, ["operation"]); assert.equal(loads, 0); assert.equal(timers.size, 1);
   const timer = timers.get(inventoryTimer); timers.delete(inventoryTimer);
   operation = {state:"resolved"}; await timer.fn();
   assert.equal(loads, 1); assert.equal(timers.size, 0); assert.equal(inventoryTimer, null);
@@ -1328,7 +1331,8 @@ func TestPluginsWorkspaceOperationKeepsLogoDOM(t *testing.T) {
 	program := `
 const assert = require("node:assert/strict");
 class Node {
- constructor(tag = "div") { this.tag = tag; this.children = []; this.hidden = false; this.textContent = ""; this.isConnected = true; }
+ constructor(tag = "div") { this.tag = tag; this.children = []; this.hidden = false; this.textContent = ""; this.isConnected = true; this.classList = {add() {}}; }
+ get lastElementChild() { return this.children.at(-1); }
  append(...nodes) { for (const node of nodes) { node.parent = this; this.children.push(node); } }
  replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
  remove() { this.parent.children = this.parent.children.filter((node) => node !== this); }
@@ -1343,10 +1347,12 @@ panel.hidden = true;
 let overlayDismissible = false, returnFocus = null, operationViewID = null, operationIdentity = null, headerCount = 0;
 const text = (tag, value) => { const node = new Node(tag); node.textContent = value; return node; };
 const overlayHeader = (name) => { const header = new Node("header"), title = text("h3",name), logo = new Node("img"); header.append(title,logo); panelBody.append(header); headerCount++; };
-const overlayActions = (...buttons) => { const actions = new Node(); actions.append(...buttons); panelBody.append(actions); };
+const overlayActions = (...buttons) => { const actions = new Node(); actions.append(...buttons); panelBody.append(actions); return actions; };
 const panelAction = (label) => text("button",label), closePanel = () => {}, load = () => {};
 ` + panel + operation + `
-const op = {operation_id:"one",state:"running",stage:"backup",status:"Backing up"};
+for (const operation_type of ["plugin_install","plugin_enable","plugin_disable","plugin_remove"]) {
+panel.hidden = true; headerCount = 0; operationViewID = null;
+const op = {operation_type,operation_id:"one",state:"running",stage:"backup",status:"Backing up"};
 showOperation(op);
 const header = panelBody.children[0], image = header.children[1];
 for (const stage of ["installing","restarting","verifying"]) {
@@ -1359,6 +1365,7 @@ showOperation({...op,operation_id:"two"});
 assert.equal(headerCount,2); assert.notEqual(panelBody.children[0],header);
 panel.hidden = true; showOperation({...op,operation_id:"two"});
 assert.equal(headerCount,3);
+}
 `
 	command := exec.Command("node", "-e", program)
 	if output, err := command.CombinedOutput(); err != nil {
@@ -1641,5 +1648,118 @@ for(const c of cards){assert.equal(c.classList.contains("is-selected"),false);as
 	info := pluginScriptSection(t, script, "  const addInfo =", "  const infoRows =")
 	if !strings.Contains(discover, "interactiveCard(card,") || !strings.Contains(installed, "addInfo(card,") || !strings.Contains(info, "interactiveCard(card,") {
 		t.Fatal("cards do not share interaction")
+	}
+}
+
+func TestManagedPluginLifecycleUIContract(t *testing.T) {
+	raw, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(raw)
+	start := strings.Index(script, "  const renderInstalled =")
+	end := strings.Index(script, "  // Review, progress")
+	inventory := script[start:end]
+	for _, want := range []string{`plugin.management === "plugins" && ["enabled", "disabled"].includes(plugin.state)`, `plugin.state === "disabled" ? "Disabled" : "Enabled"`, `plugin.state === "disabled" ? "enable" : "disable"`, `action === "enable" ? "Enable" : "Disable"`, `"plugins-state-action"`, `pluginAction("Remove"`, `"plugins-remove-action"`} {
+		if !strings.Contains(inventory, want) {
+			t.Fatal("managed UI contract missing", want)
+		}
+	}
+	for _, want := range []string{`pluginRequest("manage/plan"`, `pluginRequest("manage"`, `slider.type = "range"`, `finalConfirm.className = "destructive-confirm-toggle"`, `Number(slider.value) !== 100 || !finalConfirm.checked`, `overlayActions(panelAction("Cancel", returnToInstalled, true), apply)`, `See System -> Logs -> Plugins for diagnostic details.`, `pluginRequest("operation"`, `["Prepare", "Backup", "Change", "Restart", "Verify"]`, `pluginsDialog.querySelector('[data-plugins-tab="installed"]').click()`} {
+		if !strings.Contains(script, want) {
+			t.Fatal("review or progress missing", want)
+		}
+	}
+	css, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`button.plugins-state-action`, `button.plugins-remove-action`, `button.plugins-done-action`, `@media(prefers-color-scheme:light)`, `.plugins-result-card.is-selected`} {
+		if !strings.Contains(string(css), want) {
+			t.Fatal("Plugin style missing", want)
+		}
+	}
+}
+
+type fakePluginsManageAPI struct {
+	fakePluginsInstallAPI
+	manageCalls   int
+	manageRequest api.PluginManageApplyRequest
+}
+
+func (f *fakePluginsManageAPI) AdminPluginManagePlan(_ context.Context, _ string, r api.PluginManageRequest) (api.PluginManagePlan, error) {
+	f.manageCalls++
+	return api.PluginManagePlan{Action: r.Action, ProjectID: r.ProjectID, State: "enabled", Fingerprint: "sha256:" + strings.Repeat("a", 64)}, nil
+}
+func (f *fakePluginsManageAPI) AdminPluginManage(_ context.Context, _ string, r api.PluginManageApplyRequest) (api.PersistentOperationResponse, error) {
+	f.manageCalls++
+	f.manageRequest = r
+	return api.PersistentOperationResponse{Operation: &api.PersistentOperation{OperationType: "plugin_" + r.Action, OperationID: "12345678-1234-4123-8123-123456789abc", State: "running"}}, nil
+}
+func (f *fakePluginsManageAPI) AdminPluginManageAcknowledge(_ context.Context, _ string, r api.PluginInstallAcknowledgeRequest) (api.PersistentOperationResponse, error) {
+	f.manageCalls++
+	return api.PersistentOperationResponse{Operation: &api.PersistentOperation{OperationType: "plugin_disable", OperationID: r.OperationID, State: "resolved"}}, nil
+}
+func (f *fakePluginsManageAPI) AdminCurrentPluginOperation(ctx context.Context, session string) (api.PersistentOperationResponse, error) {
+	return f.AdminCurrentPluginInstall(ctx, session)
+}
+func TestPluginManageWorkspaceAuthorizationAndStrictForms(t *testing.T) {
+	for _, role := range []string{"viewer", "operator", "administrator"} {
+		t.Run(role, func(t *testing.T) {
+			client := &fakePluginsManageAPI{}
+			client.role = role
+			app, err := New(client, Config{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, tc := range []struct {
+				route, body string
+				code        int
+			}{{"manage/plan", "csrf=csrf-token&action=disable&project_id=root", 200}, {"manage", "csrf=csrf-token&action=disable&project_id=root&plan_fingerprint=sha256:" + strings.Repeat("a", 64) + "&confirm_players=true", 202}, {"manage/acknowledge", "csrf=csrf-token&operation_id=12345678-1234-4123-8123-123456789abc", 200}} {
+				rr := httptest.NewRecorder()
+				app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "http://example/api/plugins/workspace/"+tc.route, tc.body))
+				want := 403
+				if role == "administrator" {
+					want = tc.code
+				}
+				if rr.Code != want {
+					t.Fatal(tc.route, rr.Code, rr.Body.String())
+				}
+			}
+			if role != "administrator" && client.manageCalls != 0 {
+				t.Fatal("non-administrator reached lifecycle API")
+			}
+			if role == "administrator" {
+				if client.manageRequest.Action != "disable" || client.manageRequest.ProjectID != "root" || !client.manageRequest.ConfirmPlayers {
+					t.Fatal("reviewed action contract changed")
+				}
+				calls := client.manageCalls
+				for _, body := range []string{"csrf=wrong&action=remove&project_id=root", "csrf=csrf-token&action=remove&action=enable&project_id=root", "csrf=csrf-token&action=remove&project_id=root&filename=manual.jar"} {
+					rr := httptest.NewRecorder()
+					app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "http://example/api/plugins/workspace/manage/plan", body))
+					if rr.Code < 400 || client.manageCalls != calls {
+						t.Fatal("invalid lifecycle form forwarded", rr.Code)
+					}
+				}
+			}
+		})
+	}
+}
+func TestGenericPluginWorkspaceOperationAcceptsAllFourMutations(t *testing.T) {
+	for _, kind := range []string{"plugin_install", "plugin_enable", "plugin_disable", "plugin_remove"} {
+		t.Run(kind, func(t *testing.T) {
+			client := &fakePluginsManageAPI{}
+			client.role = "administrator"
+			client.operationType = kind
+			app, err := New(client, Config{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rr := httptest.NewRecorder()
+			app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/api/plugins/workspace/operation", ""))
+			if rr.Code != 200 || !strings.Contains(rr.Body.String(), kind) {
+				t.Fatal("active mutation not discovered", rr.Code, rr.Body.String())
+			}
+		})
 	}
 }

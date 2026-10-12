@@ -15,7 +15,7 @@ import (
 
 func TestWorkspaceLogIdentifiersAreAllowlisted(t *testing.T) {
 	id := "12345678-1234-4123-8123-123456789abc"
-	for _, category := range []string{"setup", "migration", "restore", "reset", "operation"} {
+	for _, category := range []string{"setup", "migration", "restore", "plugins", "reset", "operation"} {
 		if !validWorkspaceLogID(category, id) {
 			t.Fatalf("rejected %s log", category)
 		}
@@ -194,5 +194,24 @@ func TestSystemWorkspaceFailedJournalAuthorizationAndIdentity(t *testing.T) {
 	}
 	if client.unitReads != 0 {
 		t.Fatal("unsafe journal proxy reached Agent client")
+	}
+}
+
+func TestPluginsLogsReadAndDownloadExactAgentContent(t *testing.T) {
+	client := &fakeDiagnosticLogsAPI{fakeAPI: &fakeAPI{}, role: "administrator"}
+	app, err := New(client, Config{ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := "12345678-1234-4123-8123-123456789abc"
+	for _, query := range []string{"", "?download=1"} {
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/api/system/workspace/logs/plugins/"+id+query, ""))
+		if rr.Code != 200 || rr.Body.String() != "backend rejected <unsafe>\nrollback succeeded\n" {
+			t.Fatal("Agent log changed", rr.Code, rr.Body.String())
+		}
+		if query != "" && !strings.Contains(rr.Header().Get("Content-Disposition"), "justvoxel-plugins-"+id+".log") {
+			t.Fatal("wrong download filename")
+		}
 	}
 }

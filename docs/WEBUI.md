@@ -159,6 +159,38 @@ The Agent remains authoritative for HWS/VM capability detection, player state, g
 
 Desktop workspaces can be dragged by their headers and resized from the browser’s bottom corner. Window geometry is saved separately for each signed-in user. In **System → History**, drag the divider between Open notifications and Detailed history to adjust their widths. **System → Logs** has a horizontal category selector above Files and Viewer. Its divider adjusts those two columns. Both dividers can also be focused with Tab and moved with the Left and Right arrow keys.
 
+## Plugins lifecycle and diagnostics
+
+**Minecraft → Plugins → Installed** shows Enabled or Disabled for verified
+Plugins-managed entries. Their information overlay offers one yellow state
+action (**Disable** when enabled, **Enable** when disabled) and red **Remove**.
+Manual/unmanaged plugins and JustVoxel-managed Geyser, Floodgate and ViaVersion
+remain read only. Enable/Disable review has Cancel and one yellow final action.
+Remove requires the destructive slider fully armed and the final confirmation
+switch, with Cancel and red Remove. Cancel returns to Installed. Configuration
+and data folders are preserved; dependencies are not removed automatically.
+Enabled managed parents can block disabling/removing a required dependency.
+Actions use cold backup and verified Minecraft restart, with no hot toggling.
+Successful operations refresh Installed; Done is green and View in Installed is
+dark secondary. Failures point to **System → Logs → Plugins**, with an in-workspace
+shortcut where available. Re-check recovery retains maintenance exclusion until
+an exact target or restored original state can be verified.
+
+System Logs categories appear exactly in this order: **Setup, Migration,
+Restore, Plugins, Reset, Support, Failed units**. Plugins supports the same
+list/select/read/download flow as other operation groups. Deep links accept
+`workspace=system&tab=logs&log_group=plugins&log_id=<operation UUID>` with existing
+identifier validation. Plugin startup failure evidence is bounded and sanitized;
+it does not expose the full Minecraft server log.
+
+**System → Factory Reset → Reset Minecraft** review states that Plugins-managed
+JARs installed through JustVoxel will be removed. When Minecraft data outside
+internal storage is preserved, manual plugins and plugin configuration/data
+folders are preserved too. Reset stages exact verified managed JARs before its
+helper and retains recovery evidence through failure/retry. Internal-data reset
+continues to delete the whole Minecraft data tree. Full Factory Reset policy is
+unchanged.
+
 ## Local behavior
 
 When Web management is enabled and healthy, the console/SSH welcome message reports `Web interface: Ready` and shows the friendly `hostname.local:8099` address plus the direct IPv4 address. The live health check takes precedence over bootstrap marker timing so a healthy listener is not reported as merely starting.

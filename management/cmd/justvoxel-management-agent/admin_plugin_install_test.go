@@ -1773,7 +1773,9 @@ func TestPluginInstallQueuedUntilPreflightDurable(t *testing.T) {
 				if state == operationValidating {
 					sawValidating = true
 				}
-				if state != operationQueued {
+				// Diagnostics also read the clock after atomic queued cancellation.
+				// Only a nonterminal worker state crosses the durability boundary.
+				if state != operationQueued && state != operationRolledBack {
 					leftQueued = true
 					if !durable() {
 						t.Fatal("nonqueued worker without durable preflight", state)
@@ -1806,6 +1808,10 @@ func TestPluginInstallQueuedUntilPreflightDurable(t *testing.T) {
 				t.Fatal("preflight failure crossed queued boundary", current, executeErr)
 			}
 			f.assertUntouched(t, current)
+			persisted, readErr := readOperationJournal(filepath.Join(f.s.operations.operationsDir, journal.OperationID+".json"))
+			if readErr != nil || persisted.State != operationRolledBack {
+				t.Fatal("queued cancellation was not durable", persisted, readErr)
+			}
 			if _, created, err := f.s.operations.beginMinecraftMaintenance("sha256:"+strings.Repeat("c", 64), operationTypeMinecraftUpdate); err != nil || !created {
 				t.Fatal("preflight failure retained exclusion", err)
 			}
@@ -2453,5 +2459,32 @@ func TestStagedPluginLoaderClassificationPreservesDescriptorValidation(t *testin
 func TestPluginLoaderRejectionStableWording(t *testing.T) {
 	if pluginLoaderReviewRejection != "Loader-based server mod - not supported by the current version of JustVoxel Plugin installer. Should be available in future updates." {
 		t.Fatal("loader rejection wording changed")
+	}
+}
+
+func TestBlueMapEntitiesExactNonstandardRootReview(t *testing.T) {
+	for _, tc := range []struct {
+		project, main string
+		reject        bool
+	}{{"99IreA6y", "de.bluecolored.bluemap.entities.PaperEntrypoint", true}, {"anotherProject", "de.bluecolored.bluemap.entities.PaperEntrypoint", false}, {"99IreA6y", "example.Normal", false}, {"normalProject", "example.Normal", false}} {
+		t.Run(tc.project+tc.main, func(t *testing.T) {
+			f := newPluginInstallFixture(t)
+			f.addJar(t, tc.project, "bluemapRelease", "addon.jar", "Addon", tc.main)
+			p, err := resolvePluginInstallPlan(context.Background(), pluginServerContext{Configured: true, ServerType: "purpur", ServerSoftware: "Purpur", MinecraftVersion: "1.21.8", Supported: true}, f.data, tc.project, "bluemapRelease")
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = reviewRootPluginArtifact(context.Background(), p)
+			if tc.reject {
+				if err == nil || err.Error() != pluginBlueMapReviewRejection {
+					t.Fatal("missing dedicated classification", err)
+				}
+			} else if err != nil {
+				t.Fatal("classification generalized", err)
+			}
+			if len(f.commands) != 0 {
+				t.Fatal("read-only artifact rejection mutated runtime")
+			}
+		})
 	}
 }

@@ -1585,3 +1585,18 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 .version-channel-row select,.version-channel-row input{width:100%;margin-bottom:0}
 .version-combined-form .version-channel-row>label:first-child{flex:0 1 13rem}
 @media(max-width:430px){.version-combined-form .version-channel-row>label{flex:1 1 100%}}
+
+/* Only the approved managed Plugin lifecycle actions use these colors. */
+.plugins-install-content button.plugins-state-action{background:#80601f;border-color:#c89b39;color:#fff1bd}
+.plugins-install-content button.plugins-state-action:hover{background:#9b7627;border-color:#e0b44b}
+.plugins-install-content button.plugins-remove-action{background:#8c3038;border-color:#c75862;color:#fff0f1}
+.plugins-install-content button.plugins-remove-action:hover{background:#a83b45;border-color:#e2747d}
+.plugins-install-content button.plugins-done-action{background:#28643d;border-color:#4a9c65;color:#e7ffed}
+.plugins-state{color:var(--jv-text);border-color:var(--jv-border-strong)}
+@media(prefers-color-scheme:light){
+.plugins-install-content button.plugins-state-action{background:#f5d889;border-color:#b38728;color:#533d0b}
+.plugins-install-content button.plugins-state-action:hover{background:#efd078;border-color:#946e1d}
+.plugins-install-content button.plugins-remove-action{background:#f5d4d7;border-color:#bc4d58;color:#7d202b}
+.plugins-install-content button.plugins-remove-action:hover{background:#edc1c6;border-color:#a13945}
+.plugins-install-content button.plugins-done-action{background:#d5eddd;border-color:#479161;color:#235737}
+}
