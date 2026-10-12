@@ -30,6 +30,8 @@ class Element {
   all() { return this.children.flatMap(child => [child, ...child.all()]); }
   querySelector(selector) {
     if (selector === "[data-version-custom]") return this.custom;
+    if (selector === ".version-channel-row") return this.channelRow;
+    if (selector === "[data-version-operation]") return this.all().find(node => "versionOperation" in node.dataset);
     return null;
   }
   set innerHTML(value) {
@@ -38,7 +40,11 @@ class Element {
     this.elements = { channel: new Element("select"), custom_tag: new Element("input") };
     this.custom = new Element("label");
     this.custom.append(this.elements.custom_tag);
-    this.append(this.elements.channel, this.custom);
+    this.channelRow = new Element("div");
+    const channelLabel = new Element("label");
+    channelLabel.append(this.elements.channel);
+    this.channelRow.append(channelLabel, this.custom);
+    this.append(this.channelRow);
   }
 }
 async function open(currentSoftware, imageState = "up_to_date") {
@@ -93,7 +99,7 @@ async function review(page) {
 (async () => {
   for (const [state, label] of [["up_to_date", "Current"], ["updates_available", "Update available"], ["unavailable", "Unable to check"], ["not_applicable", "Not applicable"]]) {
     const page = await open("paper", state);
-    assert.ok(page.content.textContent.includes("Container image " + label));
+    assert.ok(page.content.textContent.includes("Container image: " + label));
     assert.ok(!page.content.textContent.includes("private-digest"));
   }
   for (const current of ["paper", "purpur", "vanilla"]) {

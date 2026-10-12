@@ -209,12 +209,11 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
 
 /* Let setup content grow while the footer reaches the page bottom. */
 .setup-body{display:flex;flex-direction:column;min-height:100dvh}
-.setup-shell{display:flex;flex:1;flex-direction:column;width:min(1180px,100%);min-height:0;padding-bottom:1rem}
+.setup-shell{display:flex;flex:1;flex-direction:column;width:min(1180px,100%);min-height:0;padding-bottom:0}
 .setup-body .setup-wizard-panel,.setup-body .setup-review-panel{height:auto;min-height:0;overflow:visible}
 .setup-body .setup-step-panel .setup-form{display:flex;flex-direction:column;min-height:0}
 .setup-body .setup-step-panel .setup-form>.setup-step-actions{position:static;margin-top:.7rem;background:#151a1ff2;backdrop-filter:blur(8px)}
-.setup-shell>.project-footer{text-align:center;line-height:1.5}
-.setup-shell>.project-footer .project-links{justify-content:center}
+.setup-body>.project-footer{flex:none;width:100%;margin-inline:auto;text-align:left;line-height:1.5}
 .setup-browser-intro{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch}
 .setup-partition-instruction,.setup-storage-browser-heading{display:grid;align-content:center;gap:.12rem;min-width:0;padding:.4rem .65rem;border:1px solid #4f8b69;border-radius:9px;background:#244a3533}
 .setup-storage-browser-heading{grid-template-columns:minmax(0,1fr) auto}
@@ -436,7 +435,7 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
   .setup-advanced .setup-advanced-frame .setup-step-content{display:flex;flex:1;flex-direction:column;min-height:0;gap:.42rem}
   .setup-advanced .setup-advanced-frame .setup-step-content>*{flex:none}
   .setup-advanced .setup-advanced-frame .setup-step-actions{flex:none;min-height:55px;margin:.7rem 0 0;padding:.45rem .6rem}
-  .setup-advanced .setup-shell>.project-footer{flex:none;margin-top:0}
+  .setup-advanced>.project-footer{margin-top:0}
 
   /* Keep overflow in the shared inventory grids, rather than the page/form. */
   .setup-advanced .setup-advanced-frame .setup-step-content>.setup-storage-browser{display:flex;flex:1;flex-direction:column;min-height:0}

@@ -66,7 +66,8 @@
 .control-quick-actions{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
 .control-power-actions{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap}
 body.role-administrator .control-power-actions.nav-admin-only{display:flex!important}
-.control-power-actions button,.control-session .nav-logout button{min-height:34px;padding:.45rem .65rem;font-size:.8rem}
+.control-power-actions button,.control-session .nav-logout button,.login-panel>form[action="/login"]>button[type=submit]{min-height:34px;padding:.45rem .65rem;font-size:.8rem}
+.login-panel>form[action="/login"]>button[type=submit]{display:block;margin-left:auto}
 .control-power-actions .system-power-danger{background:#3a2420;color:#ffc0a4;border:1px solid #75483f}
 .control-power-actions .system-power-error{flex-basis:100%;max-width:none;margin:.2rem 0 0;color:#d9a19a!important}
 .control-session .nav-logout{margin-left:auto}
@@ -188,7 +189,9 @@ body.role-administrator .control-power-actions.nav-admin-only{display:flex!impor
 
 
 /* Dashboard and Control Center refinement after first visual review. */
-#dashboard{max-width:1320px;padding-top:1rem;padding-bottom:1rem}
+/* Setup footers share the desktop gutter without widening setup panels. */
+#dashboard,.setup-body>.project-footer{max-width:1320px;padding-inline:1.25rem;padding-bottom:1rem}
+#dashboard{padding-top:1rem}
 #dashboard .title-row{align-items:center}
 #dashboard h1{margin:.12rem 0 .65rem;font-size:1.72rem}
 .dashboard-live-panels{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:.7rem;margin-top:.7rem}
@@ -1482,7 +1485,7 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 .system-users-table th:last-child,.system-users-table td:last-child{text-align:center}
 .system-users-table .system-user-menu{display:inline-block;width:max-content;max-width:100%;margin:0 auto;text-align:left}
 /* Match the existing Control Center tile text size (.control-tile strong) without changing geometry. */
-:is(button,.button-link):not(.control-icon-button,.workspace-header-close,.password-reveal-button,.quick-look-handle):not([class*="-close"]):not(:has(>svg:only-child)),.system-user-menu>summary{font-size:.84rem!important}
+:is(button,.button-link):not(.control-icon-button,.workspace-header-close,.password-reveal-button,.quick-look-handle,.project-wallpaper-button):not([class*="-close"]):not(:has(>svg:only-child)),.system-user-menu>summary{font-size:.84rem!important}
 
 /* Read-only operation transcript; movement and resize bounds use workspace windows. */
 .live-console-dialog{max-width:calc(100vw - 16px);box-sizing:border-box;width:min(760px,calc(100vw - 16px));height:min(460px,var(--jv-workspace-height));padding:0;overflow:hidden;resize:both;box-shadow:0 28px 80px #000b}
@@ -1578,13 +1581,21 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 @container(max-width:450px){.plugins-info-row{flex-wrap:wrap}.plugins-info-row dt{flex-basis:100%}}
 
 /* Approved Version Workspace software and channel integration. */
-.version-combined-form{display:block}
-.version-channel-row{display:flex;align-items:flex-end;flex-wrap:wrap;gap:var(--jv-space-md)}
-.version-channel-row>label{flex:1;min-width:10rem;margin:0}
-.version-channel-row>label[hidden]{display:none}
-.version-channel-row select,.version-channel-row input{width:100%;margin-bottom:0}
-.version-combined-form .version-channel-row>label:first-child{flex:0 1 13rem}
-@media(max-width:430px){.version-combined-form .version-channel-row>label{flex:1 1 100%}}
+/* Version Workspace channel controls and persistent operation status. */
+.version-workspace-body .version-container-detail{display:flex;align-items:baseline;gap:.4rem;flex-wrap:wrap;margin-bottom:var(--jv-space-xs)}
+.version-workspace-body form.version-combined-form{display:block}
+.version-workspace-body .version-channel-row{display:grid;grid-template-columns:minmax(7rem,.8fr) minmax(8rem,1fr) auto auto;align-items:end;gap:var(--jv-space-sm)}
+.version-workspace-body .version-channel-row>label{min-width:0;margin:0}
+.version-workspace-body .version-channel-row select,.version-workspace-body .version-channel-row input{width:100%;margin-bottom:0}
+.version-workspace-body .version-channel-row>button{margin:0;white-space:nowrap}
+.version-workspace-body .version-status-grid>.version-new-minecraft{grid-column:1 / -1;border-bottom:0}
+.version-workspace-body .version-new-minecraft strong{white-space:nowrap;overflow-wrap:normal}
+.version-workspace-body .version-operation-status{border:1px solid var(--version-operation-accent);border-left-width:4px;border-radius:var(--jv-radius);background:color-mix(in srgb,var(--version-operation-accent) 12%,var(--jv-surface-sunken))}
+.version-workspace-body .version-operation-status.is-running{--version-operation-accent:var(--jv-warning)}
+.version-workspace-body .version-operation-status.is-succeeded{--version-operation-accent:var(--jv-success)}
+.version-workspace-body .version-operation-status.is-failed{--version-operation-accent:var(--jv-error)}
+@media(max-width:700px){.version-workspace-body .version-channel-row{grid-template-columns:repeat(2,minmax(0,1fr))}.version-workspace-body .version-new-minecraft strong{white-space:normal;overflow-wrap:anywhere}}
+@media(max-width:430px){.version-workspace-body .version-channel-row{grid-template-columns:minmax(0,1fr)}}
 
 /* Only the approved managed Plugin lifecycle actions use these colors. */
 .plugins-install-content button.plugins-state-action{background:#80601f;border-color:#c89b39;color:#fff1bd}

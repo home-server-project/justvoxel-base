@@ -101,7 +101,7 @@
       <div class="setup-step-navigation"><form method="post" action="/setup/review/back"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Back</button></form>{{if .Plan.OK}}<button type="submit" form="setup-apply-form" data-setup-configure>Configure JustVoxel</button>{{else}}<span class="setup-configure-disabled" role="group" aria-disabled="true" tabindex="0" aria-describedby="setup-configure-help"><button type="button" disabled aria-describedby="setup-configure-help">Configure JustVoxel</button><span class="setup-configure-tooltip" id="setup-configure-help" role="tooltip">Setup is not ready. Resolve the items above first.</span></span>{{end}}</div>
     </div>
   </section>
-  {{template "project-footer" .}}
 </main>
+{{template "project-footer" .}}
 </body>
 </html>{{end}}

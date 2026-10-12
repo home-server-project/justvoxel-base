@@ -8,6 +8,8 @@ if (versionLauncher && versionDialog) {
   let currentTab = "software";
   let sequence = 0;
   let updateOperation = "";
+  const operationKinds = new Map();
+  let completedOperation = null;
   const request = async (url, options = {}) => {
     const response = await fetch(url, { credentials: "same-origin", cache: "no-store", ...options });
     const payload = await response.json();
@@ -21,6 +23,7 @@ if (versionLauncher && versionDialog) {
     const row = document.createElement("div");
     const name = document.createElement("span");
     const detail = document.createElement("strong");
+    row.className = "version-detail-line";
     name.textContent = label;
     detail.textContent = value || "Unavailable";
     row.append(name, detail);
@@ -37,18 +40,39 @@ if (versionLauncher && versionDialog) {
     return panel;
   };
   const stackLabel = (value) => ({ up_to_date: "Up to date", updates_available: "Updates available", waiting_for_compatibility: "Waiting for compatibility", unavailable: "Unavailable", managed_automatically: "Managed automatically", disabled: "Cross-play off", not_applicable: "Not applicable" })[value] || "Unavailable";
+  const operationFrame = (operation) => {
+    const succeeded = operation.state === "succeeded";
+    const failed = ["failed", "needs_attention"].includes(operation.state);
+    const resolved = operation.state === "resolved";
+    const kind = operationKinds.get(operation.operation_id);
+    const heading = succeeded ? kind === "switch" ? "Switch succeeded" : kind === "container" ? "Container update succeeded" : "Server update succeeded"
+      : failed ? "Server update needs attention" : resolved ? "Current server verified and kept" : "Server update in progress";
+    const progress = card(heading);
+    progress.className += " version-operation-status " + (succeeded || resolved ? "is-succeeded" : failed ? "is-failed" : "is-running");
+    progress.dataset.versionOperation = "";
+    progress.setAttribute("role", "status");
+    const notice = document.createElement("p");
+    notice.textContent = operation.status;
+    progress.appendChild(notice);
+    return progress;
+  };
   const watchUpdate = async (id) => {
     updateOperation = id;
     try {
       const result = await request("/api/version/workspace/update-operation?" + new URLSearchParams({ id }));
       const operation = result.operation;
-      state.textContent = operation?.status || "Server update status is unavailable.";
-      if (["succeeded", "resolved"].includes(operation?.state)) {
+      if (!operation) throw new Error("Server update status is unavailable.");
+      const progress = content.querySelector("[data-version-operation]");
+      if (progress) {
+        const refreshed = operationFrame(operation);
+        progress.className = refreshed.className;
+        progress.replaceChildren(...refreshed.children);
+      }
+      state.textContent = "";
+      if (["succeeded", "resolved", "needs_attention", "failed"].includes(operation.state)) {
         updateOperation = "";
-        await render(operation.status);
-      } else if (["needs_attention", "failed"].includes(operation?.state)) {
-        updateOperation = "";
-        await render(operation.status);
+        completedOperation = operation;
+        await render("", operation);
       } else {
         setTimeout(() => watchUpdate(id), 2000);
       }
@@ -247,7 +271,7 @@ if (versionLauncher && versionDialog) {
       } catch (failure) { state.textContent = failure.message; }
     });
   };
-  const render = async (message = "") => {
+  const render = async (message = "", confirmedOperation = completedOperation) => {
     const ticket = ++sequence;
     await settleSelectChange();
     if (ticket !== sequence) return;
@@ -266,12 +290,10 @@ if (versionLauncher && versionDialog) {
       const minecraft = settings.minecraft || {};
       const root = document.createElement("div");
       let initializePreview;
-      if (pending.operation) {
-        const progress = card("Server update");
-        const notice = document.createElement("p");
-        notice.textContent = pending.operation.status;
-        progress.appendChild(notice);
-        if (["needs_attention", "failed"].includes(pending.operation.state)) {
+      const operation = pending.operation || confirmedOperation;
+      if (operation) {
+        const progress = operationFrame(operation);
+        if (["needs_attention", "failed"].includes(operation.state)) {
           updateOperation = "";
           const acknowledge = document.createElement("button");
           acknowledge.type = "button";
@@ -279,14 +301,15 @@ if (versionLauncher && versionDialog) {
           acknowledge.addEventListener("click", async () => {
             acknowledge.disabled = true;
             try {
-              const body = new URLSearchParams({ csrf, acknowledge: "yes", operation_id: pending.operation.operation_id });
+              const body = new URLSearchParams({ csrf, acknowledge: "yes", operation_id: operation.operation_id });
               await request("/api/version/workspace/update", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
+              completedOperation = null;
               await render("Current server verified and kept. Review changes again when ready.");
             } catch (failure) { state.textContent = failure.message; acknowledge.disabled = false; }
           });
           progress.appendChild(acknowledge);
-        } else if (!updateOperation) {
-          watchUpdate(pending.operation.operation_id);
+        } else if (!["succeeded", "resolved"].includes(operation.state) && !updateOperation) {
+          watchUpdate(operation.operation_id);
         }
         root.appendChild(progress);
       }
@@ -306,7 +329,7 @@ if (versionLauncher && versionDialog) {
         panel.dataset.versionCombinedControls = "";
         const form = document.createElement("form");
         form.className = "version-combined-form";
-        form.innerHTML = '<div class="version-channel-row"><label>Container update channel<select name="channel" aria-label="Container update channel"><option value="stable">Stable</option><option value="latest">Latest</option><option value="custom">Custom</option></select></label><label data-version-custom hidden>Custom tag<input name="custom_tag" autocomplete="off" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9._-]*"></label></div>';
+        form.innerHTML = '<p>Change update channel to:</p><div class="version-channel-row"><label><select name="channel" aria-label="Container update channel"><option value="stable">Stable</option><option value="latest">Latest</option><option value="custom">Custom</option></select></label><label data-version-custom>Custom tag<input name="custom_tag" autocomplete="off" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9._-]*"></label></div>';
         const channel = form.elements.channel;
         const customTag = form.elements.custom_tag;
         const resetChannel = () => {
@@ -316,7 +339,8 @@ if (versionLauncher && versionDialog) {
         const selectedTag = () => channel.value === "custom" ? customTag.value.trim() : channel.value;
         const unsupported = () => selectedSoftware !== currentSoftware && [selectedSoftware, currentSoftware].includes("vanilla");
         const imageLabel = (value) => ({ up_to_date: "Current", updates_available: "Update available", not_applicable: "Not applicable" })[value] || "Unable to check";
-        const imageStatus = line("Container image", imageLabel(status.image_state));
+        const imageStatus = line("Container image:", imageLabel(status.image_state));
+        imageStatus.className += " version-container-detail";
         const vanillaWarning = document.createElement("p");
         vanillaWarning.className = "notice warning";
         vanillaWarning.textContent = "Requires Reset Minecraft and setup again. Multi-container support is coming in future JustVoxel updates.";
@@ -329,7 +353,6 @@ if (versionLauncher && versionDialog) {
         };
         const sync = () => {
           const custom = channel.value === "custom";
-          form.querySelector("[data-version-custom]").hidden = !custom;
           customTag.required = custom;
           customTag.disabled = !custom || Boolean(pending.operation);
           vanillaWarning.hidden = !unsupported();
@@ -392,9 +415,10 @@ if (versionLauncher && versionDialog) {
         channel.addEventListener("change", () => { clearReview(); sync(); });
         customTag.addEventListener("input", clearReview);
         sync();
-        panel.append(imageStatus, line("Configured container channel", configuredTag), form);
-        const actions = document.createElement("div");
-        actions.className = "action-row";
+        const configuredChannel = line("Configured container channel:", ({ stable: "Stable", latest: "Latest" })[configuredTag] || "Custom");
+        configuredChannel.className += " version-container-detail";
+        panel.append(imageStatus, configuredChannel, form);
+        const channelRow = form.querySelector(".version-channel-row");
         const check = document.createElement("button");
         check.type = "button";
         check.className = "secondary";
@@ -402,8 +426,7 @@ if (versionLauncher && versionDialog) {
         const reviewButton = document.createElement("button");
         reviewButton.type = "submit";
         reviewButton.textContent = "Review changes";
-        actions.append(check, reviewButton);
-        form.appendChild(actions);
+        channelRow.append(check, reviewButton);
         check.disabled = reviewButton.disabled = Boolean(pending.operation);
         const preview = async (reviewRequested) => {
           if (applying || pending.operation || unsupported()) return;
@@ -422,7 +445,7 @@ if (versionLauncher && versionDialog) {
               request(statusURL("", "", target, imageTag)), request("/api/dashboard-status"),
             ]);
             if (selectionTicket !== selectionSequence || ticket !== sequence) return;
-            imageStatus.replaceChildren(...line("Container image", imageLabel(plan.image_state)).children);
+            imageStatus.replaceChildren(...line("Container image:", imageLabel(plan.image_state)).children);
             state.textContent = plan.reason || (plan.update_available ? "Changes are ready to review." : "No changes were found.");
             if (!reviewRequested) return;
             const review = card("Review changes");
@@ -485,8 +508,16 @@ if (versionLauncher && versionDialog) {
                 const body = new URLSearchParams({ csrf, server_type: target, image_tag: imageTag, plan_fingerprint: plan.plan_fingerprint, confirm_players: consent.checked ? "yes" : "no" });
                 const result = await request("/api/version/workspace/update", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
                 if (!result.operation?.operation_id) throw new Error("Server update tracking is unavailable. Refresh Version to check its status.");
+                // Only the reviewed plan can establish a container-only update.
+                // Missing or inconclusive component evidence keeps the generic label.
+                const containerOnly = plan.image_state === "updates_available"
+                  && Boolean(plan.installed && plan.selected_candidate && plan.installed === plan.selected_candidate)
+                  && plan.minecraft_state === "up_to_date"
+                  && [plan.geyser_state, plan.floodgate_state, plan.viaversion_state]
+                    .every((component) => ["up_to_date", "disabled", "not_applicable", "managed_automatically"].includes(component));
+                operationKinds.set(result.operation.operation_id, target !== currentSoftware ? "switch" : containerOnly ? "container" : "server");
                 updateOperation = result.operation.operation_id;
-                await render("Server update started.");
+                await render();
                 watchUpdate(result.operation.operation_id);
               } catch (failure) {
                 // A lost response may still have started maintenance. Reconnect before another review.
@@ -517,7 +548,9 @@ if (versionLauncher && versionDialog) {
         grid.append(line("Installed", status.installed || "Not detected"), line("Newest available", status.available ? `${status.available} · ${releaseLabel(status.available_channel)}` : "Unavailable"), line("Recommended", status.recommended), line("Configured", status.configured_version === "LATEST" ? "Follows new versions" : status.configured_version), line("Server software", status.server_software || "Paper"), line("Container channel", status.image_tag), line("Version", policyLabel(minecraft.version_mode)), line("Overall", stackLabel(status.stack_state)));
         grid.append(line("Minecraft update", stackLabel(status.minecraft_state)), line("Geyser", stackLabel(status.geyser_state)), line("Floodgate", stackLabel(status.floodgate_state)), line("ViaVersion", stackLabel(status.viaversion_state)));
         if (status.crossplay_enabled && status.policy === "recommended" && status.available && status.recommended && status.available !== status.recommended) {
-          grid.append(line("New Minecraft version", `${status.available} · Waiting for cross-play support`));
+          const newVersion = line("New Minecraft version", `${status.available} · Waiting for cross-play support`);
+          newVersion.className += " version-new-minecraft";
+          grid.appendChild(newVersion);
         }
         panel.appendChild(grid);
         const compatibility = document.createElement("p");
@@ -566,7 +599,7 @@ if (versionLauncher && versionDialog) {
       if (ticket !== sequence) return;
       content.replaceChildren(root);
       initializePreview?.();
-      state.textContent = message;
+      state.textContent = operation && message === operation.status ? "" : message;
     } catch (failure) { if (ticket === sequence) state.textContent = failure.message; }
   };
   const windowControl = setupWorkspaceWindow(versionDialog, { onOpen: () => render() });

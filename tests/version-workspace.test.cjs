@@ -23,15 +23,25 @@ class Element {
   addEventListener(name, listener) { this.listeners[name] = listener; }
   querySelector(selector) {
     if (selector === '[data-version-custom]') return this.custom;
+    if (selector === '.version-channel-row') return this.channelRow;
+    if (selector === '[data-version-operation]') return this.all().find(node => 'versionOperation' in node.dataset) || null;
     return this.all().find(node => selector === '[data-version-review]' && 'versionReview' in node.dataset) || null;
   }
   replaceChildren(...children) { this.children = []; this.append(...children); }
   set innerHTML(value) {
     assert.match(value, /select name="channel"/);
+    this.html = value;
     this.elements = { channel: new Element('select'), custom_tag: new Element('input') };
     this.custom = new Element('label');
     this.custom.append(this.elements.custom_tag);
-    this.append(this.elements.channel, this.custom);
+    assert.doesNotMatch(value, /data-version-custom hidden/);
+    this.channelRow = Object.assign(new Element('div'), { className: 'version-channel-row' });
+    const channelLabel = new Element('label');
+    channelLabel.append(this.elements.channel);
+    this.channelRow.append(channelLabel, this.custom);
+    const prompt = Object.assign(new Element('p'), { textContent: value.match(/^<p>([^<]*)<\/p>/)?.[1] });
+    this.append(prompt);
+    this.append(this.channelRow);
   }
   remove() { this.removed = true; if (this.parent) this.parent.children = this.parent.children.filter((child) => child !== this); }
   all() { return [this, ...this.children.flatMap((child) => child.all())]; }
@@ -123,28 +133,46 @@ test('changed candidate after saving stops before the updater without automatic 
   assert.match(result.calls.at(-1).message, /Changes saved.*Review changes again/);
 });
 
-test('persistent operation polling continues while running and renders its final result', async () => {
+test('persistent polling updates the frame, keeps journal messages once, and renders terminal evidence', async () => {
   let nextPoll;
-  let result = { operation: { state: 'running', status: 'Creating cold backup.' } };
+  let result = { operation: { operation_id: 'operation-1', state: 'running', status: 'Creating cold backup.' } };
   const messages = [];
+  const content = new Element('div');
   const context = vm.createContext({
-    URLSearchParams, updateOperation: '', state: {},
-    request: async (url) => {
-      assert.equal(url, '/api/version/workspace/update-operation?id=operation-1');
-      return result;
-    },
-    render: async (message) => { messages.push(message); },
+    URLSearchParams, updateOperation: '', completedOperation: null, state: {}, content, operationKinds: new Map(),
+    document: { createElement: tag => new Element(tag) },
+    card: title => { const panel = new Element('section'); const heading = new Element('h2'); heading.textContent = title; panel.append(heading); return panel; },
+    request: async (url) => { assert.equal(url, '/api/version/workspace/update-operation?id=operation-1'); return result; },
+    render: async (message, operation) => { messages.push({message, operation}); },
     setTimeout: (callback, delay) => { assert.equal(delay, 2000); nextPoll = callback; },
   });
-  const pollingSource = source.slice(source.indexOf('  const watchUpdate ='), source.indexOf('  // Let the native select'));
-  vm.runInContext(pollingSource + '\nglobalThis.watchUpdate = watchUpdate;', context);
+  const pollingSource = source.slice(source.indexOf('  const operationFrame ='), source.indexOf('  // Let the native select'));
+  vm.runInContext(pollingSource + '\nglobalThis.watchUpdate = watchUpdate; globalThis.operationFrame = operationFrame;', context);
+  content.append(context.operationFrame(result.operation));
   await context.watchUpdate('operation-1');
-  assert.equal(context.state.textContent, 'Creating cold backup.');
+  assert.equal(context.state.textContent, '');
+  assert.equal(content.all().filter(node => node.textContent === 'Creating cold backup.').length, 1);
   assert.equal(context.updateOperation, 'operation-1');
-  result = { operation: { state: 'succeeded', status: 'Server update completed.' } };
+  assert.match(content.children[0].className, /is-running/);
+  context.operationKinds.set('operation-1', 'switch');
+  // A known switch is still running until the journal confirms success.
+  assert.equal(context.operationFrame(result.operation).children[0].textContent, 'Server update in progress');
+  result = { operation: { operation_id: 'operation-1', state: 'succeeded', status: 'Server update completed.' } };
   await nextPoll();
   assert.equal(context.updateOperation, '');
-  assert.deepEqual(messages, ['Server update completed.']);
+  assert.equal(messages[0].message, '');
+  assert.equal(messages[0].operation, result.operation);
+  assert.match(content.children[0].className, /is-succeeded/);
+  assert.equal(content.children[0].children[0].textContent, 'Switch succeeded');
+  context.operationKinds.set('operation-1', 'container');
+  assert.equal(context.operationFrame(result.operation).children[0].textContent, 'Container update succeeded');
+  context.operationKinds.clear();
+  assert.equal(context.operationFrame(result.operation).children[0].textContent, 'Server update succeeded');
+  for (const state of ['failed', 'needs_attention']) {
+    const frame = context.operationFrame({state, status:'Actual persistent failure message.'});
+    assert.match(frame.className, /is-failed/);
+    assert.equal(frame.children[1].textContent, 'Actual persistent failure message.');
+  }
 });
 
 // Extract the entire Software branch using stable enclosing branch boundaries.
@@ -158,7 +186,7 @@ function softwareWorkspace({ current = 'paper', tag = 'stable', online = 0, over
   const root = new Element('div');
   const context = vm.createContext({
     Boolean, String, Number, URLSearchParams, csrf: 'csrf', state: {}, root, ticket: 1, sequence: 1,
-    pending: { operation }, updateOperation: '',
+    pending: { operation }, updateOperation: '', operationKinds: new Map(),
     minecraft: { server_type: current, image_tag: tag },
     status: { server_software: current[0].toUpperCase() + current.slice(1), image_state: 'up_to_date' },
     document: { createElement: (tag) => new Element(tag) },
@@ -197,7 +225,7 @@ function softwareWorkspace({ current = 'paper', tag = 'stable', online = 0, over
   const find = text => root.all().find(node => node.textContent === text);
   const form = root.all().find(node => node.tag === 'form');
   return {
-    root, calls, cards, choice, find, form, state: context.state,
+    root, calls, cards, choice, find, form, state: context.state, operationKinds: context.operationKinds,
     click: target => choice(target).listeners.click(),
     review: async () => {
       const firstPlan = previewPlans.length;
@@ -233,6 +261,83 @@ function assertSoftwareSelection(page, selected, installed) {
       type === installed ? 'Current' : installed !== 'vanilla' && type !== 'vanilla' ? 'Switch Available' : 'Switch Unavailable');
   }
 }
+function operationPresentation(operationKinds = new Map()) {
+  const context = vm.createContext({
+    operationKinds, document: { createElement: tag => new Element(tag) },
+    card: title => {
+      const panel = new Element('section');
+      panel.append(Object.assign(new Element('h2'), { textContent: title }));
+      return panel;
+    },
+  });
+  vm.runInContext(source.slice(source.indexOf('  const operationFrame ='), source.indexOf('  const watchUpdate ='))
+    + '\nglobalThis.operationFrame = operationFrame;', context);
+  return context;
+}
+const currentComponents = {
+  minecraft_state: 'up_to_date', image_state: 'up_to_date',
+  geyser_state: 'disabled', floodgate_state: 'disabled', viaversion_state: 'managed_automatically',
+};
+for (const [name, target, overrides, heading] of [
+  ['software switch', 'purpur', {}, 'Switch succeeded'],
+  ['container-only update', 'paper', { image_state: 'updates_available' }, 'Container update succeeded'],
+  ['Minecraft game-version-only update', 'paper', { selected_candidate: '26.3', minecraft_state: 'updates_available' }, 'Server update succeeded'],
+  ['managed-plugin-only update', 'paper', { geyser_state: 'updates_available' }, 'Server update succeeded'],
+  ['mixed update', 'paper', { selected_candidate: '26.3', minecraft_state: 'updates_available', image_state: 'updates_available', floodgate_state: 'updates_available' }, 'Server update succeeded'],
+  ['image update with missing plugin evidence', 'paper', { image_state: 'updates_available', geyser_state: undefined }, 'Server update succeeded'],
+  ['image update with unknown plugin evidence', 'paper', { image_state: 'updates_available', geyser_state: 'unavailable' }, 'Server update succeeded'],
+  ['image and plugin update', 'paper', { image_state: 'updates_available', floodgate_state: 'updates_available' }, 'Server update succeeded'],
+  ['image and game-version update', 'paper', { image_state: 'updates_available', selected_candidate: '26.3' }, 'Server update succeeded'],
+]) {
+  test(`${name} success uses the reviewed plan label`, async () => {
+    const page = softwareWorkspace({ overrides: { ...currentComponents, ...overrides } });
+    page.click(target);
+    await page.review();
+    const consent = page.consent();
+    consent.checked = true; consent.listeners.change();
+    await page.find('Apply changes').listeners.click();
+    const operation = { operation_id: 'software-1', state: 'succeeded', status: 'Server update completed.' };
+    const frame = operationPresentation(page.operationKinds).operationFrame(operation);
+    assert.equal(frame.children[0].textContent, heading);
+    assert.equal(frame.children[1].textContent, operation.status);
+    assert.equal(page.calls.find(call => 'message' in call).message, undefined);
+    assert.equal(page.calls.filter(call => call.body).length, 1);
+  });
+}
+test('unknown operation after reconnect uses generic success without inferring its kind', () => {
+  // Even a remembered kind for a different operation is not evidence for this one.
+  const context = operationPresentation(new Map([['previous-operation', 'switch']]));
+  Object.assign(context, {
+    root: new Element('div'), pending: {}, confirmedOperation: { operation_id: 'reconnected', state: 'succeeded', status: 'Server update completed.' },
+    updateOperation: '', watchUpdate: () => assert.fail('A successful operation must not restart polling'),
+  });
+  const start = source.indexOf('      const operation = pending.operation || confirmedOperation;');
+  vm.runInContext(source.slice(start, source.indexOf('      if (currentTab === "software")', start)), context);
+  assert.equal(context.root.children[0].children[0].textContent, 'Server update succeeded');
+  assert.equal(context.operationKinds.has('reconnected'), false);
+});
+test('render shows journal progress once inside the operation frame and preserves unrelated messages', async () => {
+  const operation = { operation_id: 'persisted', state: 'running', status: 'Creating cold backup.' };
+  const context = operationPresentation();
+  const root = new Element('div');
+  root.append(context.operationFrame(operation));
+  Object.assign(context, { root, operation, content: new Element('div'), state: {}, ticket: 1, sequence: 1, initializePreview: undefined, settleSelectChange: async () => {} });
+  const start = source.indexOf('      await settleSelectChange();\n      if (ticket !== sequence) return;\n      content.replaceChildren(root);');
+  assert.ok(start >= 0);
+  const finish = source.slice(start, source.indexOf('    } catch (failure)', start));
+  for (const [message, expected] of [
+    ['', ''], [operation.status, ''], ['Response lost', 'Response lost'],
+    ['Verification failed.', 'Verification failed.'],
+    ['Current server verified and kept. Review changes again when ready.', 'Current server verified and kept. Review changes again when ready.'],
+  ]) {
+    context.message = message;
+    await vm.runInContext('(async () => {\n' + finish + '\n})()', context);
+    assert.equal(context.state.textContent, expected);
+    assert.equal(context.content.all().filter(node => node.textContent === operation.status).length, 1);
+    assert.equal(context.content.children[0].children[0].children[1].textContent, operation.status);
+    assert.ok(!context.content.all().some(node => node.textContent === 'Server update started.'));
+  }
+});
 test('selection stays read-only until explicit combined review and Apply', async () => {
   const page = softwareWorkspace();
   page.click('purpur'); page.channel('latest');
@@ -370,4 +475,125 @@ test('image status labels use image_state and the browser never pulls directly',
 
 test('software workspace fails closed when persistent operation tracking is unavailable', () => {
   assert.ok(source.includes('if (currentTab === "software") throw failure;'));
+});
+
+const css = readFileSync(path.join(__dirname, '../webui/internal/server/static/app.css'), 'utf8');
+function cssRule(selector) {
+  const start = css.indexOf(selector + '{');
+  assert.ok(start >= 0, selector);
+  return css.slice(start + selector.length + 1, css.indexOf('}', start));
+}
+test('channel controls share one desktop row and Custom stays present for all channel choices', () => {
+  const page = softwareWorkspace();
+  const row = page.form.querySelector('.version-channel-row');
+  assert.deepEqual(row.children.map(node => node.tag), ['label', 'label', 'button', 'button']);
+  assert.equal(row.children[0].children[0], page.form.elements.channel);
+  assert.equal(row.children[1].children[0], page.form.elements.custom_tag);
+  assert.deepEqual(row.children.slice(2).map(node => node.textContent), ['Check for updates', 'Review changes']);
+  assert.equal(row.children[2].type, 'button');
+  assert.equal(row.children[3].type, 'submit');
+  for (const channel of ['stable', 'latest', 'custom', 'stable']) {
+    page.channel(channel);
+    assert.ok(!page.form.custom.hidden);
+    assert.equal(page.form.elements.custom_tag.disabled, channel !== 'custom');
+  }
+  assert.doesNotMatch(source, /\[data-version-custom\]"\)\.hidden/);
+  assert.match(cssRule('.version-workspace-body form.version-combined-form'), /display:block/);
+  assert.match(cssRule('.version-workspace-body .version-channel-row'), /display:grid;grid-template-columns:minmax\(7rem,.8fr\) minmax\(8rem,1fr\) auto auto/);
+});
+test('the exact channel prompt appears above the channel controls', () => {
+  const page = softwareWorkspace();
+  assert.equal(page.form.children[0].tag, 'p');
+  assert.equal(page.form.children[0].textContent, 'Change update channel to:');
+  assert.equal(page.form.children[1], page.form.querySelector('.version-channel-row'));
+  assert.match(page.form.html, /^<p>Change update channel to:<\/p><div class="version-channel-row">/);
+});
+test('container detail labels and bold values have explicit layout spacing', () => {
+  const context = vm.createContext({document:{createElement: tag => new Element(tag)}});
+  vm.runInContext(source.slice(source.indexOf('  const line ='), source.indexOf('  const stackLabel =')) + '\nglobalThis.line = line;', context);
+  const row = context.line('Container image:', 'Update available');
+  assert.equal(row.className, 'version-detail-line');
+  assert.deepEqual(row.children.map(node => node.tag), ['span', 'strong']);
+  assert.deepEqual(row.children.map(node => node.textContent), ['Container image:', 'Update available']);
+  assert.match(cssRule('.version-workspace-body .version-container-detail'), /display:flex;align-items:baseline;gap:.4rem/);
+  assert.ok(source.includes('configuredChannel.className += " version-container-detail"'));
+  assert.ok(source.includes('stable: "Stable", latest: "Latest"'));
+});
+test('a verified image update remains reviewable on the unchanged Stable channel', async () => {
+  const page = softwareWorkspace({overrides:{image_state:'updates_available'}});
+  await page.check();
+  assert.equal(page.reviews().length, 0);
+  await page.review();
+  const apply = page.find('Apply changes');
+  assert.equal(apply.disabled, true);
+  const consent = page.consent(); consent.checked = true; consent.listeners.change();
+  assert.equal(apply.disabled, false);
+  await apply.listeners.click();
+  assert.equal(page.calls.filter(call => call.body).length, 1);
+  assert.equal(page.calls.find(call => call.body).body.get('image_tag'), 'stable');
+  assert.equal(page.calls.find(call => call.body).body.get('server_type'), 'paper');
+});
+test('Minecraft overview keeps game status separate and gives the waiting version a full desktop line', () => {
+  const start = source.indexOf('        const panel = card("Minecraft Version");');
+  const end = source.indexOf('        panel.appendChild(grid);', start);
+  const context = vm.createContext({
+    document:{createElement:tag=>new Element(tag)},
+    minecraft:{version_mode:'recommended'},
+    status:{installed:'26.2',available:'26.3',recommended:'26.2',crossplay_enabled:true,policy:'recommended',minecraft_state:'up_to_date',stack_state:'updates_available',image_state:'updates_available'},
+    policyLabel:value=>value,releaseLabel:value=>value,stackLabel:value=>value,
+  });
+  const helpers = source.slice(source.indexOf('  const line ='), source.indexOf('  const stackLabel ='));
+  vm.runInContext(helpers + source.slice(start,end) + '\nglobalThis.grid = grid;', context);
+  const entry = label => context.grid.children.find(row => row.children[0].textContent === label);
+  assert.equal(entry('Minecraft update').children[1].textContent, 'up_to_date');
+  const waiting = entry('New Minecraft version');
+  assert.ok(waiting.className.includes('version-new-minecraft'));
+  assert.equal(waiting.children[1].textContent, '26.3 · Waiting for cross-play support');
+  assert.match(cssRule('.version-workspace-body .version-status-grid>.version-new-minecraft'), /grid-column:1 \/ -1/);
+  assert.match(cssRule('.version-workspace-body .version-new-minecraft strong'), /white-space:nowrap;overflow-wrap:normal/);
+  assert.doesNotMatch(cssRule('.version-workspace-body .version-new-minecraft strong'), /font-size/);
+  assert.ok(!context.grid.all().some(node=>['button','input','select'].includes(node.tag)));
+  assert.match(source, /imageLabel\(status.image_state\)/);
+});
+test('operation framing and state accents are scoped to Version Workspace', () => {
+  assert.match(cssRule('.version-workspace-body .version-operation-status'), /border:1px solid var\(--version-operation-accent\);border-left-width:4px/);
+  for (const [state,color] of [['running','warning'],['succeeded','success'],['failed','error']]) {
+    assert.equal(cssRule('.version-workspace-body .version-operation-status.is-'+state), '--version-operation-accent:var(--jv-'+color+')');
+  }
+  assert.ok(!source.includes('state.textContent = operation?.status'));
+  assert.ok(source.includes('const progress = operationFrame(operation)'));
+});
+
+test('failed operation keeps verified acknowledgement and reconnect polling stays intact', async () => {
+  const start = source.indexOf('      const operation = pending.operation || confirmedOperation;');
+  const end = source.indexOf('      if (currentTab === "software")', start);
+  for (const failure of [false, true]) {
+    const calls = [];
+    const root = new Element('div');
+    const context = vm.createContext({
+      root, pending:{operation:{operation_id:'persisted',state:'needs_attention',status:'Recovery evidence retained.'}},
+      confirmedOperation:null,completedOperation:null,updateOperation:'',csrf:'csrf',URLSearchParams,state:{},
+      document:{createElement:tag=>new Element(tag)},
+      operationFrame:operation => { const panel=new Element('section'); panel.textContent=operation.status; return panel; },
+      request:async (url,options)=>{ calls.push({url,body:options.body}); if(failure) throw new Error('Verification failed.'); },
+      render:async message=>calls.push({message}),
+      watchUpdate:id=>calls.push({watch:id}),
+    });
+    vm.runInContext(source.slice(start,end),context);
+    const acknowledge = root.all().find(node=>node.tag==='button');
+    assert.equal(acknowledge.textContent,'Verify and keep current server');
+    await acknowledge.listeners.click();
+    assert.equal(calls[0].url,'/api/version/workspace/update');
+    assert.equal(calls[0].body.get('operation_id'),'persisted');
+    assert.equal(calls[0].body.get('acknowledge'),'yes');
+    assert.equal(calls[0].body.has('plan_fingerprint'),false);
+    if(failure) {
+      assert.equal(context.state.textContent,'Verification failed.');
+      assert.equal(acknowledge.disabled,false);
+      assert.equal(calls.length,1);
+    } else assert.match(calls[1].message,/Current server verified and kept/);
+  }
+  assert.ok(source.includes('completedOperation = operation;'));
+  assert.ok(source.includes('confirmedOperation = completedOperation'));
+  assert.ok(source.includes('watchUpdate(operation.operation_id)'));
 });

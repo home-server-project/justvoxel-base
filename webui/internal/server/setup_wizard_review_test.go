@@ -380,7 +380,8 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 		"max-width:1180px", ".setup-step-actions", "@media(max-width:850px)",
 		".setup-body{display:flex;flex-direction:column;min-height:100dvh}",
 		".setup-shell{display:flex;flex:1;flex-direction:column",
-		".setup-shell>.project-footer",
+		".setup-body>.project-footer{flex:none;width:100%;margin-inline:auto;text-align:left;line-height:1.5}",
+		".setup-advanced>.project-footer{margin-top:0}",
 		".setup-body .setup-wizard-panel .setup-form>.setup-step-content",
 		"overflow:visible",
 		".setup-body .setup-wizard-panel .setup-form>.setup-step-actions{flex:none;margin-top:.7rem",
@@ -392,6 +393,25 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 	}
 	if strings.Contains(setupStyles, ".setup-body .setup-operation-panel{height:") {
 		t.Fatal("operation and result pages must remain content-sized")
+	}
+	appCSS, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(appCSS), "#dashboard,.setup-body>.project-footer{max-width:1320px;padding-inline:1.25rem;padding-bottom:1rem}") {
+		t.Fatal("setup footer must share the configured desktop width and gutter")
+	}
+	for _, name := range []string{"setup_wizard.html", "setup_review.html", "setup_progress.html"} {
+		markup, err := assets.ReadFile("templates/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		template := string(markup)
+		footer := `{{template "project-footer" .}}`
+		mainEnd := strings.Index(template, "</main>")
+		if mainEnd < 0 || strings.Count(template, footer) != 1 || !strings.HasPrefix(strings.TrimSpace(template[mainEnd+len("</main>"):]), footer) {
+			t.Fatalf("%s must render the shared footer once immediately after </main>, outside the setup shell", name)
+		}
 	}
 	wizard, err := assets.ReadFile("templates/setup_wizard.html")
 	if err != nil {
