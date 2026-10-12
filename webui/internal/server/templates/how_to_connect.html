@@ -1,0 +1,63 @@
+{{define "how_to_connect.html"}}<!doctype html>
+<html lang="en" class="connect-document">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>JustVoxel — How to connect</title>
+  <link rel="icon" type="image/png" href="/static/justvoxel-favicon.png">
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/how-to-connect.css">
+  <script src="/static/how-to-connect.js" defer></script>
+</head>
+<body class="connect-page">
+<header class="connect-navigation"><a href="/" aria-label="JustVoxel dashboard"><img src="/static/justvoxel-logo.png" alt="JustVoxel"></a><span>How to connect</span></header>
+<main class="connect-shell" data-connect-page{{if .ConnectionGuide.Configured}} data-java-port="{{.ConnectionGuide.JavaPort}}"{{if .ConnectionGuide.Bedrock}} data-bedrock-port="{{.ConnectionGuide.BedrockPort}}"{{end}}{{end}}>
+{{if not .ConnectionGuide.Configured}}
+<section class="connect-empty"><h1>Minecraft is not configured yet</h1><p>Ask the server owner to complete Minecraft setup. A connection guide will be available here once the server is configured.</p></section>
+{{else}}
+<section class="connect-controls" aria-labelledby="connect-title">
+  <p class="connect-eyebrow">JUSTVOXEL · SHARE THE ADVENTURE</p>
+  <h1 id="connect-title">How to connect</h1>
+  <p>Choose how your friends will join. Preview the guide below, then save a copy to share.</p>
+  <label class="connect-server">Server<select aria-label="Server"><option>{{.ConnectionGuide.Server}}</option></select></label>
+  <div class="connect-methods">
+  {{range .ConnectionGuide.Methods}}
+    <div class="connect-method">
+      <label class="connect-method-label" for="connect-{{.ID}}"><strong>{{.Name}}</strong><small>{{.Status}}</small></label>
+      <label class="connect-switch"><input id="connect-{{.ID}}" type="checkbox" role="switch" aria-label="Include {{.Name}}" data-connect-method="{{.ID}}"{{if .Default}} checked{{end}}{{if not .Available}} disabled{{end}}><span aria-hidden="true"></span></label>
+      {{if eq .ID "custom"}}<div class="connect-domain"><label for="connect-domain">Hostname / domain</label><input id="connect-domain" type="text" autocomplete="off" spellcheck="false" maxlength="253" placeholder="minecraft.example.com" aria-describedby="connect-domain-help" disabled><small id="connect-domain-help">Enter a hostname only, without a URL, path or port. This is used only in this guide.</small></div>{{end}}
+    </div>
+  {{end}}
+  </div>
+  <div class="connect-actions"><p data-connect-message role="status">Choose at least one available connection method.</p><button type="button" data-connect-print disabled>Save as PDF</button></div>
+  <noscript><p>Enable JavaScript to select connection methods and generate your guide.</p></noscript>
+</section>
+<article class="connect-guide" data-connect-guide hidden>
+  <header class="connect-guide-heading"><img src="/static/justvoxel-logo.png" alt="JustVoxel"><p class="connect-eyebrow">LET’S PLAY TOGETHER</p><h1>Minecraft Friends Connection Guide</h1><p>{{.ConnectionGuide.Server}}</p><span class="connect-editions">Java Edition{{if .ConnectionGuide.Bedrock}} + Bedrock Edition{{end}}</span><p>Connection methods: <span data-connect-summary></span></p></header>
+  <section aria-labelledby="connect-addresses"><h2 id="connect-addresses">Your connection options</h2><div class="connect-cards">
+  {{range .ConnectionGuide.Methods}}
+    {{if .Available}}<section class="connect-card" data-connect-card="{{.ID}}" data-connect-name="{{.Name}}" hidden><h3>{{.Name}}</h3><p>{{.Note}}</p>
+      {{if eq .ID "custom"}}
+      <div class="connect-endpoint"><h4>Java</h4><p>Address: <strong data-connect-domain-address></strong></p><p>Port: {{$.ConnectionGuide.JavaPort}}</p><p>Enter in Minecraft: <code data-connect-domain-java></code></p></div>
+      {{if $.ConnectionGuide.Bedrock}}<div class="connect-endpoint"><h4>Bedrock</h4><p>Address: <strong data-connect-domain-address></strong></p><p>Port: {{$.ConnectionGuide.BedrockPort}}</p></div>{{end}}
+      {{else}}{{range .Endpoints}}
+      <div class="connect-endpoint"><h4>{{.Edition}}</h4><p>Address: <strong>{{.Address}}</strong></p>{{if .Port}}<p>Port: <strong>{{.Port}}</strong></p>{{else}}{{if eq .Edition "Bedrock"}}<p>The tunnel did not report a public port. Ask the server owner for the public Bedrock port before joining.</p>{{end}}{{end}}{{if eq .Edition "Java"}}<p>Enter in Minecraft: <code>{{.JoinAddress}}</code></p>{{end}}</div>
+      {{end}}{{end}}
+    </section>{{end}}
+  {{end}}
+  </div></section>
+  <section class="connect-instructions"><h2>Join with Java Edition</h2><ol><li>Open Minecraft Launcher and start Minecraft: Java Edition.</li><li>Choose <strong>Multiplayer</strong>.</li><li>Choose <strong>Add Server</strong>.</li><li>Enter a server name — any name you like.</li><li>Use one of the Java connection addresses shown above in <strong>Server Address</strong>.</li><li>Choose <strong>Done</strong>, select the server and choose <strong>Join Server</strong>.</li></ol><p>For a quick visit, choose <strong>Direct Connection</strong> instead of Add Server, enter the same Java address and choose Join Server.</p>{{if eq .ConnectionGuide.JavaPort 25565}}<p>For methods using the configured Java port, Minecraft normally lets you omit <code>:25565</code>. Keep any explicit public Playit port shown above.</p>{{else}}<p>For methods using the configured Java port, enter <code>address:{{.ConnectionGuide.JavaPort}}</code>. For Playit, use its exact public Java address above.</p>{{end}}</section>
+  {{if .ConnectionGuide.Bedrock}}
+  <section class="connect-instructions"><h2>Join with Bedrock Edition</h2><p>For Windows, iPhone, iPad and Android.</p><ol><li>Open Minecraft Bedrock Edition.</li><li>Choose <strong>Play</strong>.</li><li>Open <strong>Servers</strong>.</li><li>Choose <strong>Add Server</strong>.</li><li>Enter a server name and one of the Bedrock addresses shown above.</li><li>Enter that method’s corresponding <strong>Bedrock port</strong>.</li><li>Choose <strong>Add</strong>, then <strong>Play</strong>.</li></ol><p>Java and Bedrock ports may differ. Use the Bedrock address and port together; Playit can use a different public port.</p><p>If a selected method has only Java information, choose another method for Bedrock.</p></section>
+  <section class="connect-instructions"><h2>PS5 · Method 1: BedrockConnect DNS</h2><ol><li>Open PS5 <strong>Settings → Network → Settings → Set Up Internet Connection</strong>.</li><li>Highlight your active Wi-Fi or wired connection and open <strong>Advanced Settings</strong>.</li><li>Change <strong>DNS Settings</strong> from Automatic to <strong>Manual</strong>.</li><li>Set <strong>Primary DNS: 45.55.68.52</strong> and <strong>Secondary DNS: 8.8.8.8</strong>.</li><li>Save and wait for the network test.</li><li>Open Minecraft → <strong>Play → Servers</strong>.</li><li>Open a compatible featured server to reach the BedrockConnect list.</li><li>Choose <strong>Connect to a Server / Add Server</strong>.</li><li>Enter one of the enabled Bedrock addresses and its matching port from this guide.</li></ol><p class="connect-callout"><strong>The PS5 DNS address is not the Minecraft server address.</strong> DNS helps you open the server list; use a Bedrock connection address from this guide to join Minecraft.</p><p>If PS5 internet stops working, restore <strong>DNS Settings → Automatic</strong> and use the phone method below.</p></section>
+  <section class="connect-instructions"><h2>PS5 · Method 2: BedrockTogether phone app</h2><ol><li>Connect your phone and PS5 to the <strong>same home router/network</strong>. Disable cellular data and VPN on the phone while testing.</li><li>Install <strong>BedrockTogether for Minecraft</strong> on iPhone or Android.</li><li>Allow the required <strong>Local Network / nearby-device permissions</strong>.</li><li>Enter one of the Bedrock addresses in this guide and its matching port.</li><li>Choose <strong>Start / Run</strong> in BedrockTogether and leave it open.</li><li>On PS5, open Minecraft → <strong>Play → Friends</strong>.</li><li>Look under <strong>LAN Games</strong> and join the server that appears.</li></ol><p>After joining successfully, the phone app can normally be closed.</p><p>If the server does not appear: avoid guest Wi-Fi and mobile hotspots; turn off VPN and iCloud Private Relay while testing; keep BedrockTogether running; restart Minecraft once if necessary.</p><p>Tailscale and NetBird still require access to the relevant private network on the connecting device. These PS5 methods do not grant that access.</p></section>
+  {{end}}
+  <section class="connect-instructions"><h2>“You are not whitelisted”</h2><p>If Minecraft says the player is not whitelisted, <strong>the network connection succeeded</strong>.</p><p>Send the server owner your exact Minecraft gamertag and a clear screenshot/photo of the message.</p></section>
+  <section class="connect-instructions"><h2>Having trouble joining?</h2><ul><li>Check the correct Minecraft edition and selected connection method.</li><li>Check the address and the corresponding Java{{if .ConnectionGuide.Bedrock}} or Bedrock{{end}} port.</li><li>Update Minecraft and restart it once.</li>{{if .ConnectionGuide.Bedrock}}<li>For PS5 DNS problems, restore DNS Settings to Automatic.</li>{{end}}</ul><p>If it still fails, send the server owner your exact error screenshot, exact Minecraft gamertag, device type, {{if .ConnectionGuide.Bedrock}}Java or Bedrock edition{{else}}Minecraft edition{{end}}, and the connection method used.</p></section>
+  <footer class="connect-guide-footer">JustVoxel · Minecraft with friends</footer>
+</article>
+<div class="connect-print-blocked">Choose a valid connection method in JustVoxel before saving this guide as PDF.</div>
+{{end}}
+</main>
+</body>
+</html>{{end}}

@@ -62,8 +62,20 @@ var netbirdStatus = func(ctx context.Context) (bool, string) {
 		return false, ""
 	}
 	ip := strings.TrimSpace(state.IP)
-	if address := net.ParseIP(strings.Split(ip, "/")[0]); address == nil || address.To4() == nil {
+	var address net.IP
+	if strings.Contains(ip, "/") {
+		var err error
+		address, _, err = net.ParseCIDR(ip)
+		if err != nil {
+			return true, ""
+		}
+	} else {
+		address = net.ParseIP(ip)
+	}
+	if address == nil || address.To4() == nil {
 		ip = ""
+	} else {
+		ip = address.To4().String()
 	}
 	return true, ip
 }

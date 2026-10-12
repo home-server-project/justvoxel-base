@@ -1,0 +1,30 @@
+/* Dedicated page only. No existing workspace or Control Center selectors. */
+.connect-document{background:#10161a}
+.connect-page{margin:0;background:#10161a;color:#e5eee9;overflow:auto;min-height:100vh}
+.connect-page [hidden]{display:none!important}
+.connect-navigation{display:flex;align-items:center;justify-content:space-between;max-width:1080px;margin:auto;padding:22px 28px;border-bottom:1px solid #303c36;color:#b7c7be}
+.connect-navigation img{width:150px;height:auto;display:block}
+.connect-shell{max-width:1080px;margin:auto;padding:32px 28px 60px}
+.connect-controls,.connect-empty{background:#19221f;border:1px solid #34483b;border-radius:18px;padding:28px;margin-bottom:28px}
+.connect-page h1{font-size:clamp(1.8rem,4vw,2.5rem);line-height:1.15;margin:10px 0 16px}
+.connect-page h2{font-size:1.4rem;margin:0 0 16px}.connect-page h3{font-size:1.1rem;margin:0 0 12px}.connect-page h4{margin:0 0 8px}
+.connect-page p,.connect-page li{line-height:1.65}.connect-page p{margin:8px 0 14px}
+.connect-eyebrow{font-size:.75rem;font-weight:800;letter-spacing:.13em;color:#89cca4}
+.connect-server{display:block;font-weight:700;margin:24px 0 20px}.connect-server select{display:block;width:100%;margin-top:8px}
+.connect-methods{display:grid;gap:10px}.connect-method{display:grid;grid-template-columns:1fr auto;align-items:center;gap:12px;padding:16px 20px;border:1px solid #34443a;border-radius:12px;background:#141d19}
+.connect-method-label{margin:0}
+.connect-method-label strong,.connect-method-label small{display:block}.connect-method-label small{color:#a9bcb0;margin-top:4px}
+.connect-switch{position:relative;display:block;width:44px;height:26px;margin:0}.connect-switch input{position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer}.connect-switch span{display:block;width:44px;height:26px;border-radius:20px;background:#455148;pointer-events:none}.connect-switch span:after{content:"";position:absolute;top:4px;left:4px;width:18px;height:18px;background:#fff;border-radius:50%;transition:transform .15s}.connect-switch input:checked+span{background:#398559}.connect-switch input:checked+span:after{transform:translateX(18px)}.connect-switch input:focus-visible+span{outline:2px solid #a2e2bd;outline-offset:3px}.connect-switch input:disabled+span{opacity:.35}.connect-switch input:disabled{cursor:default}
+.connect-domain{grid-column:1/-1}.connect-domain label,.connect-domain small{display:block}.connect-domain input{width:100%;margin:8px 0}.connect-domain small{color:#a9bcb0}.connect-domain input[aria-invalid="true"]{border-color:#e6b276}
+.connect-actions{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-top:20px}.connect-actions p{font-size:.9rem;color:#bcd0c3;margin:0}.connect-actions button{white-space:nowrap}
+.connect-guide{background:#f8faf7;color:#203329;border-radius:18px;padding:36px}.connect-guide-heading{display:block;background:transparent;position:static;z-index:auto;padding:0;text-align:center;border-bottom:2px solid #c8dece;padding-bottom:24px;margin-bottom:28px}.connect-guide-heading img{width:170px;height:auto}.connect-guide .connect-eyebrow{color:#357248}.connect-guide .connect-editions{color:#203329;display:inline-block;background:#e0eee2;border-radius:20px;padding:6px 14px;font-weight:700}
+.connect-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:20px 0 30px}.connect-card{border:1px solid #c6d8ca;border-top:4px solid #4a8a5b;border-radius:10px;padding:20px;background:#fff;overflow-wrap:anywhere}.connect-card>p{color:#4d6656;font-size:.9rem}.connect-endpoint{border-top:1px solid #dfebe1;padding-top:14px;margin-top:14px}.connect-endpoint p{margin:4px 0}.connect-guide code{background:#e9f1e9;color:#203329;padding:2px 5px;border-radius:4px;white-space:normal;overflow-wrap:anywhere}
+.connect-instructions{margin-top:28px;padding-top:24px;border-top:1px solid #d0dfd3}.connect-instructions li{padding-left:4px;margin-bottom:7px}.connect-callout{background:#e7f0e7;border-left:4px solid #609369;padding:14px}.connect-guide-footer{text-align:center;margin-top:30px;padding-top:18px;border-top:1px solid #d0dfd3;font-size:.85rem;color:#506c58}.connect-print-blocked{display:none}
+@media(max-width:640px){.connect-shell{padding:20px 14px 40px}.connect-navigation{padding:18px}.connect-controls,.connect-empty,.connect-guide{padding:20px}.connect-cards{grid-template-columns:1fr}.connect-actions{align-items:stretch;flex-direction:column}.connect-method{padding:14px}}
+@media print{
+ @page{margin:16mm}
+ .connect-document{color-scheme:light;background:white!important}
+ .connect-page{background:white!important;color:#203329!important;font-size:10pt;min-height:0}
+ .connect-navigation,.connect-controls,.connect-page button,.connect-page input,.connect-page select,.connect-print-blocked{display:none!important}
+ .connect-shell{max-width:none;padding:0;margin:0}.connect-guide{padding:0;border-radius:0;background:white!important}.connect-guide-heading img{width:145px}.connect-page h1{font-size:25pt}.connect-page h2{font-size:16pt}.connect-cards{grid-template-columns:1fr 1fr;gap:12px}.connect-card,.connect-endpoint{break-inside:avoid}.connect-instructions h2,.connect-card h3,.connect-endpoint h4{break-after:avoid}.connect-guide-footer{break-inside:avoid}.connect-page:not(.connect-print-ready) .connect-guide{display:none!important}.connect-page:not(.connect-print-ready) .connect-print-blocked{display:block!important}
+}

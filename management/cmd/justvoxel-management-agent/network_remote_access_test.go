@@ -135,16 +135,57 @@ func TestNetBirdConnectedShowsAddressWithoutStartingLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 	remoteStat = func(string) (os.FileInfo, error) { return os.Stat(path) }
-	netbirdStatus = func(context.Context) (bool, string) { return true, "100.90.1.4/16" }
+	netbirdStatus = func(context.Context) (bool, string) { return true, "100.90.1.4" }
 	netbirdLogin = func() (string, error) { t.Fatal("login must not start when connected"); return "", nil }
 	netbird, _ := remoteProviderByID("netbird")
 	status, err := remoteProviderStatus(context.Background(), netbird)
-	if err != nil || !status.Connected || !status.Configured || status.Summary != "Connected" || status.IP != "100.90.1.4/16" {
+	if err != nil || !status.Connected || !status.Configured || status.Summary != "Connected" || status.IP != "100.90.1.4" {
 		t.Fatalf("NetBird status: %+v, %v", status, err)
 	}
 	rr := networkAdminRequest(adminServerForTest(), "/v1/admin/network/remote-access/netbird", `{"action":"activate"}`)
 	if rr.Code != http.StatusOK || strings.Contains(rr.Body.String(), "login.netbird.io") {
 		t.Fatalf("connected NetBird unexpectedly requested login: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestNetBirdStatusHelperProcess(t *testing.T) {
+	if os.Getenv("JUSTVOXEL_NETBIRD_STATUS_FIXTURE") != "1" {
+		return
+	}
+	_, _ = os.Stdout.WriteString(os.Getenv("JUSTVOXEL_NETBIRD_JSON"))
+	os.Exit(0)
+}
+
+func TestNetBirdStatusNormalizesIPv4(t *testing.T) {
+	oldCommand := netbirdCommand
+	t.Cleanup(func() { netbirdCommand = oldCommand })
+	for _, tc := range []struct {
+		ip, want string
+	}{
+		{"100.90.1.4/16", "100.90.1.4"},
+		{"100.90.1.4", "100.90.1.4"},
+		{"100.90.1.4/invalid", ""},
+		{"100.90.1.4/33", ""},
+		{"invalid/16", ""},
+		{"fd00::1234", ""},
+		{"fd00::1234/64", ""},
+		{"", ""},
+	} {
+		t.Run(tc.ip, func(t *testing.T) {
+			payload, err := json.Marshal(map[string]any{"daemonStatus": "Connected", "netbirdIp": tc.ip, "management": map[string]bool{"connected": true}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			netbirdCommand = func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+				cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestNetBirdStatusHelperProcess$")
+				cmd.Env = append(os.Environ(), "JUSTVOXEL_NETBIRD_STATUS_FIXTURE=1", "JUSTVOXEL_NETBIRD_JSON="+string(payload))
+				return cmd
+			}
+			connected, ip := netbirdStatus(context.Background())
+			if !connected || ip != tc.want {
+				t.Fatalf("connected=%v ip=%q, want connected=true ip=%q", connected, ip, tc.want)
+			}
+		})
 	}
 }
 

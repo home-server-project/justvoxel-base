@@ -69,6 +69,7 @@ type dashboardOperationAPI interface {
 }
 
 type pageData struct {
+	ConnectionGuide  *connectionGuide
 	Title            string
 	Version          string
 	Commit           string
@@ -157,6 +158,7 @@ func (a *App) Handler() http.Handler {
 	a.registerMinecraftWorkspaceRoutes(mux)
 	a.registerPluginsWorkspaceRoutes(mux)
 	a.registerSystemWorkspaceRoutes(mux)
+	mux.HandleFunc("GET /minecraft/how-to-connect", a.howToConnect)
 	mux.HandleFunc("GET /api/dashboard-status", a.dashboardStatus)
 	mux.HandleFunc("POST /minecraft/start", a.minecraftAction("start"))
 	mux.HandleFunc("POST /minecraft/stop", a.minecraftAction("stop"))
