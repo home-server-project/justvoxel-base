@@ -18,7 +18,7 @@ const assert = require("node:assert/strict");
 const vm = require("node:vm");
 const source = ` + fmt.Sprintf("%q", string(script)) + `;
 class Element {
-  constructor(tag) { this.tagName = tag; this.children = []; this.events = {}; this.attributes = {}; this.disabled = false; this.checked = false; this.value = ""; this.ownText = ""; }
+  constructor(tag) { this.dataset = {}; this.tagName = tag; this.children = []; this.events = {}; this.attributes = {}; this.disabled = false; this.checked = false; this.value = ""; this.ownText = ""; }
   set textContent(value) { this.ownText = String(value); this.children = []; }
   get textContent() { return this.ownText + this.children.map(child => child.textContent).join(" "); }
   append(...children) { for (const child of children) { child.parent = this; this.children.push(child); } }
@@ -33,10 +33,12 @@ class Element {
     return null;
   }
   set innerHTML(value) {
-    // Only the unchanged container-channel form uses innerHTML in the Software tab.
+    // Model the integrated channel form and its native controls.
     assert.match(value, /select name="channel"/);
     this.elements = { channel: new Element("select"), custom_tag: new Element("input") };
     this.custom = new Element("label");
+    this.custom.append(this.elements.custom_tag);
+    this.append(this.elements.channel, this.custom);
   }
 }
 async function open(currentSoftware, imageState = "up_to_date") {
@@ -59,7 +61,7 @@ async function open(currentSoftware, imageState = "up_to_date") {
     if (parsed.pathname === "/api/minecraft/workspace/settings") payload = { minecraft: { server_type: currentSoftware, image_tag: "stable" } };
     else if (parsed.pathname === "/api/version/workspace/status") {
       const target = parsed.searchParams.get("server_type");
-      payload = { server_software: (target || currentSoftware).replace(/^./, c => c.toUpperCase()), selected_candidate: "1.21.8", stack_state: "updates_available", server_supported: true, crossplay_enabled: true, crossplay_compatible: true, plan_fingerprint: "reviewed-" + target, image_state: imageState, managed_image_digest: "private-digest" };
+      payload = { server_software: (target || currentSoftware).replace(/^./, c => c.toUpperCase()), selected_candidate: "1.21.8", stack_state: "updates_available", installed: "1.21.8", update_available: true, runtime_update_required: true, server_supported: true, crossplay_enabled: true, crossplay_compatible: true, plan_fingerprint: "reviewed-" + target, image_state: imageState, managed_image_digest: "private-digest" };
     } else if (parsed.pathname === "/api/dashboard-status") payload = { players: { online: 3 } };
     else if (parsed.pathname === "/api/version/workspace/update") {
       assert.equal(options.method, "POST");
@@ -81,6 +83,13 @@ async function open(currentSoftware, imageState = "up_to_date") {
 }
 function cards(page) { return page.content.all().filter(node => node.className?.split(" ").includes("version-software-choice")); }
 function button(root, text) { return root.all().find(node => node.tagName === "button" && node.textContent === text); }
+async function review(page) {
+  const form = page.content.all().find(node => node.tagName === "form");
+  form.events.submit({ preventDefault() {} });
+  // Submit does not return preview's Promise. All fetch/json mocks resolve
+  // through microtasks, which finish before this next event-loop turn.
+  await new Promise(resolve => setImmediate(resolve));
+}
 (async () => {
   for (const [state, label] of [["up_to_date", "Current"], ["updates_available", "Update available"], ["unavailable", "Unable to check"], ["not_applicable", "Not applicable"]]) {
     const page = await open("paper", state);
@@ -94,121 +103,81 @@ function button(root, text) { return root.all().find(node => node.tagName === "b
     for (const choice of choices) {
       const type = choice.children[1].children[0].textContent.toLowerCase();
       const isCurrent = type === current;
+      assert.equal(choice.tagName, "button");
       assert.equal(choice.className.includes("is-current"), isCurrent);
       assert.equal(choice.className.includes("is-selected"), isCurrent);
+      assert.equal(choice.attributes["aria-pressed"], String(isCurrent));
       assert.equal(choice.children[1].children[1].textContent, isCurrent ? "Current" : (current === "vanilla" || type === "vanilla") ? "Switch Unavailable" : "Switch Available");
-      assert.ok(!choice.textContent.includes("Requires Reset"));
-      if (type === "vanilla") {
-        assert.equal(choice.tagName, "button");
-        assert.equal(choice.attributes["aria-disabled"], undefined);
-        assert.deepEqual(choice.children[1].children.slice(2).map(node => node.textContent), ["Original Minecraft", "Java only, no plugins"]);
-        const before = page.calls.length;
-        await choice.events.click();
-        assert.equal(page.calls.length, before);
-        const warning = page.content.all().find(node => node.className === "notice warning" && node.ownText === "Requires Reset Minecraft and setup again.");
-        assert.equal(warning.hidden, false);
-        assert.equal(button(page.content, "Apply server software change"), undefined);
-      } else if (!isCurrent && current === "vanilla") {
-        assert.equal(choice.attributes["aria-disabled"], "true");
-        assert.equal(choice.events.click, undefined);
-      } else if (isCurrent) {
-        assert.equal(choice.tagName, "button");
-        assert.equal(typeof choice.events.click, "function");
-        assert.equal(choice.attributes["aria-pressed"], "true");
-      }
+      if (type === "vanilla") assert.deepEqual(choice.children[1].children.slice(2).map(node => node.textContent), ["Original Minecraft", "Java only, no plugins"]);
     }
     assert.ok(!page.content.textContent.includes("Current server software"));
     assert.ok(!page.content.textContent.includes("Change to "));
+    const warning = page.content.all().find(node => node.className === "notice warning" && node.ownText.startsWith("Requires Reset Minecraft and setup again."));
+    const installed = choices.find(choice => choice.className.includes("is-current"));
+    const unsupported = choices.find(choice => current === "vanilla" ? choice.children[1].children[0].textContent === "Paper" : choice.children[1].children[0].textContent === "Vanilla");
+    const initialCalls = page.calls.length;
+    await unsupported.events.click(); await review(page);
+    assert.equal(page.calls.length, initialCalls);
+    assert.equal(warning.hidden, false);
+    assert.equal(button(page.content, "Apply changes"), undefined);
+    await installed.events.click(); assert.equal(warning.hidden, true);
     if (current === "vanilla") continue;
     const target = current === "paper" ? "purpur" : "paper";
     const selectable = choices.find(choice => choice.children[1].children[0].textContent.toLowerCase() === target);
-    assert.equal(selectable.tagName, "button");
     await selectable.events.click();
-    assert.equal(selectable.disabled, false);
+    assert.equal(page.calls.length, initialCalls);
     assert.equal(selectable.attributes["aria-pressed"], "true");
     assert.ok(selectable.className.includes("is-selected"));
-    const installed = choices.find(choice => choice.className.includes("is-current"));
-    assert.ok(!installed.className.includes("is-selected"));
     assert.equal(installed.children[1].children[1].textContent, "Current");
-    assert.equal(page.content.all().find(node => node.ownText === "Requires Reset Minecraft and setup again.").hidden, true);
-    const reviewedCalls = page.calls.length;
-    await selectable.events.click();
-    assert.equal(page.calls.length, reviewedCalls);
-    assert.equal(page.content.all().filter(node => node.ownText === "Review server software change").length, 1);
-    assert.ok(page.calls.some(call => new URL(call.url, "http://example").searchParams.get("server_type") === target));
-    assert.ok(page.calls.some(call => call.url === "/api/dashboard-status"));
-    assert.ok(page.content.textContent.includes("Review server software change"));
+    const form = page.content.all().find(node => node.tagName === "form");
+    assert.equal(form.elements.custom_tag.disabled, true);
+    form.elements.channel.value = "latest"; form.elements.channel.events.change();
+    await button(page.content, "Check for updates").events.click();
+    assert.equal(button(page.content, "Apply changes"), undefined);
+    await review(page);
+    assert.equal(page.content.all().filter(node => "versionReview" in node.dataset).length, 1);
     assert.ok(page.content.textContent.includes("Players online 3"));
     assert.ok(page.content.textContent.includes("Minecraft version 1.21.8"));
+    assert.ok(page.content.textContent.includes("Container channel stable → latest"));
     const transition = current === "paper" ? "Paper → Purpur" : "Purpur → Paper";
     assert.ok(page.content.textContent.includes("Server software " + transition));
-    assert.ok(!page.content.textContent.includes("cold backup"));
-    assert.ok(!page.content.textContent.includes("restore the previous configuration"));
-    let apply = button(page.content, "Apply server software change");
-    assert.equal(apply.disabled, true);
+    assert.ok(page.content.textContent.includes("cold backup"));
     assert.ok(!page.calls.some(call => call.options.method === "POST"));
-    const vanilla = choices.find(choice => choice.children[1].children[0].textContent === "Vanilla");
-    const warning = page.content.all().find(node => node.ownText === "Requires Reset Minecraft and setup again.");
     await installed.events.click();
-    assert.ok(installed.className.includes("is-selected"));
-    assert.equal(installed.attributes["aria-pressed"], "true");
-    assert.equal(selectable.attributes["aria-pressed"], "false");
-    assert.equal(button(page.content, "Apply server software change"), undefined);
-    assert.ok(!page.content.textContent.includes("Review server software change"));
-    await selectable.events.click();
-    assert.equal(page.content.all().filter(node => node.ownText === "Review server software change").length, 1);
-    const beforeVanilla = page.calls.length;
-    await vanilla.events.click();
-    assert.equal(page.calls.length, beforeVanilla);
-    for (const choice of choices) {
-      assert.equal(choice.className.includes("is-selected"), choice === vanilla);
-      assert.equal(choice.attributes["aria-pressed"], String(choice === vanilla));
-    }
+    assert.equal(button(page.content, "Apply changes"), undefined);
+    await selectable.events.click(); await review(page);
+    await unsupported.events.click();
     assert.equal(warning.hidden, false);
-    assert.equal(button(page.content, "Apply server software change"), undefined);
-    assert.ok(!page.content.textContent.includes("Review server software change"));
+    assert.equal(button(page.content, "Apply changes"), undefined);
     assert.equal(page.content.all().find(node => node.tagName === "input" && node.attributes.role === "switch"), undefined);
-    assert.ok(page.content.textContent.includes("Container updates"));
-    await installed.events.click();
-    assert.equal(warning.hidden, true);
-    assert.ok(installed.className.includes("is-selected"));
-    assert.equal(button(page.content, "Apply server software change"), undefined);
-    await vanilla.events.click();
-    await selectable.events.click();
-    assert.equal(warning.hidden, true);
-    assert.ok(selectable.className.includes("is-selected"));
-    assert.equal(page.content.all().filter(node => node.ownText === "Review server software change").length, 1);
-    assert.ok(page.content.textContent.includes("Server software " + transition));
-    assert.equal(installed.children[1].children[1].textContent, "Current");
-    assert.ok(!page.calls.some(call => call.options.method === "POST"));
-    apply = button(page.content, "Apply server software change");
+    await selectable.events.click(); await review(page);
+    let apply = button(page.content, "Apply changes");
     const cancel = button(page.content, "Cancel review");
-    assert.ok(cancel);
+    assert.equal(cancel.className, "secondary");
     assert.equal(cancel.parent, apply.parent);
-    assert.ok(cancel.parent.className.split(" ").includes("version-software-review-actions"));
-    assert.ok(cancel.parent.children.indexOf(cancel) < cancel.parent.children.indexOf(apply));
+    assert.deepEqual(cancel.parent.children, [cancel, apply]);
     cancel.events.click();
-    assert.equal(selectable.disabled, false);
     assert.equal(selectable.attributes["aria-pressed"], "false");
-    assert.ok(!selectable.className.includes("is-selected"));
     assert.ok(installed.className.includes("is-selected"));
-    assert.equal(button(page.content, "Apply server software change"), undefined);
-    assert.ok(!page.content.textContent.includes("Review server software change"));
+    assert.equal(form.elements.channel.value, "stable");
+    assert.equal(button(page.content, "Apply changes"), undefined);
     await selectable.events.click();
-    apply = button(page.content, "Apply server software change");
+    form.elements.channel.value = "custom"; form.elements.channel.events.change();
+    assert.equal(form.elements.custom_tag.disabled, false);
+    form.elements.custom_tag.value = "custom-release"; form.elements.custom_tag.events.input();
+    await review(page);
+    apply = button(page.content, "Apply changes");
     const consent = page.content.all().find(node => node.tagName === "input" && node.type === "checkbox");
-    assert.equal(consent.parent.textContent.trim(), "Confirm server software change");
+    assert.equal(consent.parent.textContent.trim(), "Confirm changes and allow interruption of online players.");
     assert.equal(consent.attributes.role, "switch");
-    assert.equal(consent.checked, false);
-    assert.equal(apply.disabled, true);
-    consent.checked = true;
-    consent.events.change();
-    assert.equal(apply.disabled, false);
+    assert.equal(consent.checked, false); assert.equal(apply.disabled, true);
+    consent.checked = true; consent.events.change(); assert.equal(apply.disabled, false);
     await apply.events.click();
     const posts = page.calls.filter(call => call.options.method === "POST");
     assert.equal(posts.length, 1);
     assert.equal(posts[0].url, "/api/version/workspace/update");
     assert.equal(posts[0].options.body.get("server_type"), target);
+    assert.equal(posts[0].options.body.get("image_tag"), "custom-release");
     assert.equal(posts[0].options.body.get("csrf"), "csrf-token");
     assert.equal(posts[0].options.body.get("plan_fingerprint"), "reviewed-" + target);
     assert.equal(posts[0].options.body.get("confirm_players"), "yes");

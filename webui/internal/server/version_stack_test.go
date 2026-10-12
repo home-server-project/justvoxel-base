@@ -112,9 +112,24 @@ func TestVersionStackUpdatePreservesPlayerConfirmation(t *testing.T) {
 	}
 	for _, choice := range []string{"yes", "no"} {
 		rr := httptest.NewRecorder()
-		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "http://example/api/version/workspace/update", "csrf=csrf-token&plan_fingerprint=refreshed&confirm_players="+choice))
-		if rr.Code != http.StatusAccepted || client.lastUpdate.PlanFingerprint != "refreshed" || client.lastUpdate.ConfirmPlayers != (choice == "yes") {
+		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "http://example/api/version/workspace/update", "csrf=csrf-token&server_type=purpur&image_tag=release_1.2-3&plan_fingerprint=refreshed&confirm_players="+choice))
+		if rr.Code != http.StatusAccepted || client.lastUpdate.ServerType != "purpur" || client.lastUpdate.ImageTag != "release_1.2-3" || client.lastUpdate.PlanFingerprint != "refreshed" || client.lastUpdate.ConfirmPlayers != (choice == "yes") {
 			t.Fatalf("update request lost reviewed fingerprint or player confirmation: status=%d request=%+v", rr.Code, client.lastUpdate)
+		}
+	}
+}
+
+func TestVersionCombinedRequestRejectsUnknownAndDuplicateFields(t *testing.T) {
+	client := &fakeVersionStackAPI{fakeDateTimeVersionAPI: &fakeDateTimeVersionAPI{fakeAPI: &fakeAPI{}, role: "administrator"}}
+	app, err := New(client, Config{ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, suffix := range []string{"&image_tag=stable&image_tag=latest", "&server_type=paper&server_type=purpur", "&command=pull", "&confirm_players=maybe", "&acknowledge=yes&operation_id=id&image_tag=latest"} {
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "http://example/api/version/workspace/update", "csrf=csrf-token&plan_fingerprint=reviewed"+suffix))
+		if rr.Code != http.StatusBadRequest || client.writes != 0 {
+			t.Fatalf("ambiguous combined request forwarded: %d %s", rr.Code, rr.Body.String())
 		}
 	}
 }

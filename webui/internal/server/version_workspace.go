@@ -3,12 +3,13 @@ package server
 import (
 	"context"
 	"net/http"
+	"slices"
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
 )
 
 type versionStatusAPI interface {
-	AdminVersionStatus(context.Context, string, string, string, string) (api.AdminVersionStatus, error)
+	AdminVersionStatus(context.Context, string, string, string, string, ...string) (api.AdminVersionStatus, error)
 }
 
 func (a *App) versionWorkspaceStatus(w http.ResponseWriter, r *http.Request) {
@@ -21,7 +22,7 @@ func (a *App) versionWorkspaceStatus(w http.ResponseWriter, r *http.Request) {
 		writeMinecraftWorkspaceError(w, http.StatusServiceUnavailable, "Version information is unavailable.")
 		return
 	}
-	status, err := client.AdminVersionStatus(r.Context(), session, r.URL.Query().Get("policy"), r.URL.Query().Get("version"), r.URL.Query().Get("server_type"))
+	status, err := client.AdminVersionStatus(r.Context(), session, r.URL.Query().Get("policy"), r.URL.Query().Get("version"), r.URL.Query().Get("server_type"), r.URL.Query().Get("image_tag"))
 	if err != nil {
 		a.writeMinecraftWorkspaceAPIError(w, err, "Version information is unavailable.")
 		return
@@ -37,6 +38,25 @@ type versionUpdateAPI interface {
 }
 
 func (a *App) versionWorkspaceUpdate(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	if r.ParseForm() != nil || len(r.URL.Query()) > 0 {
+		writeMinecraftWorkspaceError(w, http.StatusBadRequest, "Invalid server update request.")
+		return
+	}
+	allowed := []string{"csrf", "server_type", "image_tag", "plan_fingerprint", "confirm_players"}
+	if r.FormValue("acknowledge") == "yes" {
+		allowed = []string{"csrf", "acknowledge", "operation_id"}
+	}
+	for key, values := range r.PostForm {
+		if !slices.Contains(allowed, key) || len(values) != 1 {
+			writeMinecraftWorkspaceError(w, http.StatusBadRequest, "Invalid server update request.")
+			return
+		}
+	}
+	if choice := r.FormValue("confirm_players"); choice != "" && choice != "yes" && choice != "no" {
+		writeMinecraftWorkspaceError(w, http.StatusBadRequest, "Invalid player confirmation.")
+		return
+	}
 	if !a.validCSRF(r) {
 		writeMinecraftWorkspaceError(w, http.StatusForbidden, "Invalid CSRF token.")
 		return
@@ -60,7 +80,7 @@ func (a *App) versionWorkspaceUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := client.AdminMinecraftStackUpdate(r.Context(), session, api.MinecraftStackUpdateRequest{
-		ServerType: r.FormValue("server_type"), PlanFingerprint: r.FormValue("plan_fingerprint"), ConfirmPlayers: r.FormValue("confirm_players") == "yes",
+		ServerType: r.FormValue("server_type"), ImageTag: r.FormValue("image_tag"), PlanFingerprint: r.FormValue("plan_fingerprint"), ConfirmPlayers: r.FormValue("confirm_players") == "yes",
 	})
 	if err != nil {
 		a.writeMinecraftWorkspaceAPIError(w, err, "Server update could not start.")

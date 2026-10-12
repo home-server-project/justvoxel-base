@@ -12,9 +12,11 @@ import (
 
 type fakeDateTimeVersionAPI struct {
 	*fakeAPI
-	role         string
-	dateWrites   int
-	versionReads int
+	role             string
+	dateWrites       int
+	versionReads     int
+	proposedSoftware string
+	proposedImageTag string
 }
 
 func (f *fakeDateTimeVersionAPI) Session(ctx context.Context, session string) (api.SessionInfo, error) {
@@ -33,8 +35,12 @@ func (f *fakeDateTimeVersionAPI) AdminDateTimeApply(_ context.Context, _ string,
 	return api.AdminDateTimeState{Timezone: change.Timezone, Automatic: change.Automatic, TimeFormat: change.TimeFormat, DateFormat: change.DateFormat}, nil
 }
 
-func (f *fakeDateTimeVersionAPI) AdminVersionStatus(_ context.Context, _, policy, version, serverType string) (api.AdminVersionStatus, error) {
+func (f *fakeDateTimeVersionAPI) AdminVersionStatus(_ context.Context, _, policy, version, serverType string, imageTag ...string) (api.AdminVersionStatus, error) {
 	f.versionReads++
+	f.proposedSoftware = serverType
+	if len(imageTag) > 0 {
+		f.proposedImageTag = imageTag[0]
+	}
 	return api.AdminVersionStatus{ServerSoftware: "Paper", Installed: "26.2", Available: "26.3", Recommended: "26.2", SelectedCandidate: "26.2", Policy: "recommended", UpdateAvailable: true, PaperSupported: true}, nil
 }
 
@@ -100,5 +106,18 @@ func TestSharedDateTimeFormatForEveryRole(t *testing.T) {
 				t.Fatalf("format apply: %d %s", rr.Code, rr.Body.String())
 			}
 		})
+	}
+}
+
+func TestVersionCombinedPreviewForwardsSelectionsReadOnly(t *testing.T) {
+	client := &fakeDateTimeVersionAPI{fakeAPI: &fakeAPI{}, role: "administrator"}
+	app, err := New(client, Config{ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/api/version/workspace/status?server_type=purpur&image_tag=release_1.2-3", ""))
+	if rr.Code != http.StatusOK || client.versionReads != 1 || client.proposedSoftware != "purpur" || client.proposedImageTag != "release_1.2-3" || client.dateWrites != 0 {
+		t.Fatalf("combined preview forwarding: status=%d client=%+v", rr.Code, client)
 	}
 }

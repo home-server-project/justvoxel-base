@@ -28,6 +28,9 @@ type AdminVersionStatus struct {
 	SelectedCandidate      string `json:"selected_candidate"`
 	CandidateChannel       string `json:"candidate_channel"`
 	ImageTag               string `json:"image_tag"`
+	ConfiguredImageTag     string `json:"configured_image_tag"`
+	ConfiguredServerType   string `json:"configured_server_type"`
+	RuntimeUpdateRequired  bool   `json:"runtime_update_required"`
 	Policy                 string `json:"policy"`
 	ConfiguredVersion      string `json:"configured_version"`
 	UpdateAvailable        bool   `json:"update_available"`
@@ -71,9 +74,12 @@ func (c *Client) AdminSetupVersionPreview(ctx context.Context, session, policy, 
 	return out, err
 }
 
-func (c *Client) AdminVersionStatus(ctx context.Context, session, policy, version, serverType string) (AdminVersionStatus, error) {
+func (c *Client) AdminVersionStatus(ctx context.Context, session, policy, version, serverType string, imageTag ...string) (AdminVersionStatus, error) {
 	var out AdminVersionStatus
 	path := "/v1/admin/version/status?policy=" + url.QueryEscape(policy) + "&version=" + url.QueryEscape(version) + "&server_type=" + url.QueryEscape(serverType)
+	if len(imageTag) > 0 {
+		path += "&image_tag=" + url.QueryEscape(imageTag[0])
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://unix"+path, nil)
 	if err != nil {
 		return out, err
@@ -102,6 +108,7 @@ func (c *Client) AdminVersionStatus(ctx context.Context, session, policy, versio
 
 type MinecraftStackUpdateRequest struct {
 	ServerType      string `json:"server_type,omitempty"`
+	ImageTag        string `json:"image_tag,omitempty"`
 	PlanFingerprint string `json:"plan_fingerprint"`
 	ConfirmPlayers  bool   `json:"confirm_players"`
 }

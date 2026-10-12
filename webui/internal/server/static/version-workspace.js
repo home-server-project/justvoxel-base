@@ -14,7 +14,7 @@ if (versionLauncher && versionDialog) {
     if (!response.ok) throw new Error(payload.error || "Version information is unavailable.");
     return payload;
   };
-  const statusURL = (policy = "", version = "", server_type = "") => "/api/version/workspace/status?" + new URLSearchParams({ policy, version, server_type });
+  const statusURL = (policy = "", version = "", server_type = "", image_tag = "") => "/api/version/workspace/status?" + new URLSearchParams({ policy, version, server_type, image_tag });
   const policyLabel = (policy) => ({ recommended: "Recommended", latest: "Latest", pinned: "Specific version" })[policy] || "Unknown";
   const releaseLabel = (channel) => ({ STABLE: "Stable", BETA: "Beta", ALPHA: "Alpha", RELEASE: "Release" })[channel] || "Pre-release";
   const line = (label, value) => {
@@ -255,7 +255,12 @@ if (versionLauncher && versionDialog) {
     try {
       const [settings, status, pending] = await Promise.all([
         request("/api/minecraft/workspace/settings"), request(statusURL()),
-        request("/api/version/workspace/update-operation").catch(() => ({})),
+        request("/api/version/workspace/update-operation").catch((failure) => {
+          // Software changes require authoritative operation tracking, including
+          // reconnecting after a lost Apply response.
+          if (currentTab === "software") throw failure;
+          return {};
+        }),
       ]);
       if (ticket !== sequence) return;
       const minecraft = settings.minecraft || {};
@@ -291,26 +296,56 @@ if (versionLauncher && versionDialog) {
         const choices = document.createElement("div");
         choices.className = "version-software-choices";
         const currentSoftware = minecraft.server_type || "paper";
+        const configuredTag = minecraft.image_tag || "stable";
         let selectedSoftware = currentSoftware;
-        let softwareSelectionSequence = 0;
+        let selectionSequence = 0;
         let softwareReview;
+        let applying = false;
         const softwareCards = [];
-        const selectSoftware = (target) => {
-          ++softwareSelectionSequence;
-          selectedSoftware = target;
+        const panel = card("Software & container updates");
+        panel.dataset.versionCombinedControls = "";
+        const form = document.createElement("form");
+        form.className = "version-combined-form";
+        form.innerHTML = '<div class="version-channel-row"><label>Container update channel<select name="channel" aria-label="Container update channel"><option value="stable">Stable</option><option value="latest">Latest</option><option value="custom">Custom</option></select></label><label data-version-custom hidden>Custom tag<input name="custom_tag" autocomplete="off" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9._-]*"></label></div>';
+        const channel = form.elements.channel;
+        const customTag = form.elements.custom_tag;
+        const resetChannel = () => {
+          channel.value = ["stable", "latest"].includes(configuredTag) ? configuredTag : "custom";
+          customTag.value = channel.value === "custom" ? configuredTag : "";
+        };
+        const selectedTag = () => channel.value === "custom" ? customTag.value.trim() : channel.value;
+        const unsupported = () => selectedSoftware !== currentSoftware && [selectedSoftware, currentSoftware].includes("vanilla");
+        const imageLabel = (value) => ({ up_to_date: "Current", updates_available: "Update available", not_applicable: "Not applicable" })[value] || "Unable to check";
+        const imageStatus = line("Container image", imageLabel(status.image_state));
+        const vanillaWarning = document.createElement("p");
+        vanillaWarning.className = "notice warning";
+        vanillaWarning.textContent = "Requires Reset Minecraft and setup again. Multi-container support is coming in future JustVoxel updates.";
+        vanillaWarning.hidden = true;
+        const clearReview = () => {
+          ++selectionSequence;
           softwareReview?.remove();
           softwareReview = undefined;
-          vanillaWarning.hidden = target !== "vanilla";
+          form.hidden = false;
+        };
+        const sync = () => {
+          const custom = channel.value === "custom";
+          form.querySelector("[data-version-custom]").hidden = !custom;
+          customTag.required = custom;
+          customTag.disabled = !custom || Boolean(pending.operation);
+          vanillaWarning.hidden = !unsupported();
+          panel.hidden = unsupported();
+        };
+        const selectSoftware = (target) => {
+          if (applying || pending.operation) return;
+          clearReview();
+          selectedSoftware = target;
           state.textContent = "";
           softwareCards.forEach(({ node, type }) => {
             node.className = node.className.replace(/ is-selected/g, "") + (type === target ? " is-selected" : "");
-            if (node.tagName.toLowerCase() === "button") node.setAttribute("aria-pressed", String(type === target));
+            node.setAttribute("aria-pressed", String(type === target));
           });
+          sync();
         };
-        const vanillaWarning = document.createElement("p");
-        vanillaWarning.className = "notice warning";
-        vanillaWarning.textContent = "Requires Reset Minecraft and setup again.";
-        vanillaWarning.hidden = true;
         for (const [target, name, description] of [
           ["paper", "Paper", "Plugins and managed Bedrock cross-play."],
           ["purpur", "Purpur", "Plugins and managed Bedrock cross-play."],
@@ -318,7 +353,7 @@ if (versionLauncher && versionDialog) {
         ]) {
           const isCurrent = target === currentSoftware;
           const selectable = ["paper", "purpur"].includes(currentSoftware) && ["paper", "purpur"].includes(target);
-          const change = document.createElement(selectable || target === "vanilla" ? "button" : "div");
+          const change = document.createElement("button");
           change.className = "version-software-choice server-software-card" + (isCurrent ? " is-current is-selected" : selectable ? " secondary" : "");
           const title = document.createElement("strong");
           title.textContent = name;
@@ -345,89 +380,136 @@ if (versionLauncher && versionDialog) {
           softwareCards.push({ node: change, type: target });
           change.append(icon, copy);
           choices.appendChild(change);
-          if (selectable || target === "vanilla") change.setAttribute("aria-pressed", String(isCurrent));
-          if (target === "vanilla") {
-            change.type = "button";
-            change.addEventListener("click", () => { selectSoftware(target); });
-          } else if (!isCurrent && !selectable) change.setAttribute("aria-disabled", "true");
-          if (!selectable) continue;
           change.type = "button";
-          change.addEventListener("click", async () => {
-            if (selectedSoftware === target) return;
-            selectSoftware(target);
-            if (isCurrent) return;
-            const selectionTicket = softwareSelectionSequence;
-            try {
-              const [plan, snapshot] = await Promise.all([request(statusURL("", "", target)), request("/api/dashboard-status")]);
-              if (selectionTicket !== softwareSelectionSequence || ticket !== sequence) return;
-              const review = card("Review server software change");
-              const summary = document.createElement("div");
-              summary.className = "version-software-review-summary";
-              summary.append(line("Server software", `${status.server_software} → ${plan.server_software}`),
-                line("Minecraft version", plan.selected_candidate),
-                line("Players online", String(snapshot?.players?.online ?? "Unknown")));
-              review.appendChild(summary);
-              const consent = document.createElement("input"); consent.type = "checkbox";
-              consent.setAttribute("role", "switch");
-              consent.checked = false;
-              const label = document.createElement("label");
-              label.className = "minecraft-native-toggle system-ups-shutdown-switch";
-              const confirmation = document.createElement("span");
-              confirmation.textContent = "Confirm server software change";
-              label.append(confirmation, consent);
-              review.appendChild(label);
-              const apply = document.createElement("button"); apply.type = "button"; apply.textContent = "Apply server software change";
-              const safe = plan.stack_state === "updates_available" && plan.server_supported && (!plan.crossplay_enabled || plan.crossplay_compatible) && Boolean(plan.plan_fingerprint);
-              apply.disabled = true;
-              consent.addEventListener("change", () => { apply.disabled = !safe || !consent.checked; });
-              if (!safe) review.appendChild(line("Unavailable", plan.reason));
-              apply.addEventListener("click", async () => {
-                if (!safe || !consent.checked || apply.disabled) return;
-                apply.disabled = true;
-                cancel.disabled = true;
-                consent.disabled = true;
-                try {
-                  const body = new URLSearchParams({ csrf, server_type: target, plan_fingerprint: plan.plan_fingerprint, confirm_players: consent.checked ? "yes" : "no" });
-                  const result = await request("/api/version/workspace/update", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
-                  if (!result.operation?.operation_id) throw new Error("Server update tracking is unavailable.");
-                  await render("Server software change started."); watchUpdate(result.operation.operation_id);
-                } catch (failure) {
-                  state.textContent = failure.message;
-                  cancel.disabled = false;
-                  consent.disabled = false;
-                  apply.disabled = !safe || !consent.checked;
-                }
-              });
-              const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "secondary"; cancel.textContent = "Cancel review";
-              cancel.addEventListener("click", () => { selectSoftware(currentSoftware); });
-              const actions = document.createElement("div");
-              actions.className = "action-row version-software-review-actions";
-              actions.append(cancel, apply);
-              review.appendChild(actions);
-              softwareReview = review;
-              root.appendChild(review);
-            } catch (failure) {
-              if (selectionTicket !== softwareSelectionSequence || ticket !== sequence) return;
-              selectSoftware(currentSoftware);
-              state.textContent = failure.message;
-            }
-          });
+          change.setAttribute("aria-pressed", String(isCurrent));
+          change.disabled = Boolean(pending.operation);
+          change.addEventListener("click", () => { selectSoftware(target); });
         }
         software.append(choices, vanillaWarning);
         root.appendChild(software);
-        const panel = card("Container updates");
-        const form = document.createElement("form");
-        form.innerHTML = '<div class="version-selection-row"><select name="channel" aria-label="Container updates"><option value="stable">Stable</option><option value="latest">Latest</option><option value="custom">Custom</option></select><button type="submit">Review changes</button></div><label data-version-custom hidden>Custom tag<input name="custom_tag" autocomplete="off"></label>';
-        const channel = form.elements.channel;
-        channel.value = ["stable", "latest"].includes(minecraft.image_tag) ? minecraft.image_tag : "custom";
-        form.elements.custom_tag.value = channel.value === "custom" ? minecraft.image_tag || "" : "";
-        const sync = () => { form.querySelector("[data-version-custom]").hidden = channel.value !== "custom"; form.elements.custom_tag.required = channel.value === "custom"; };
-        channel.addEventListener("change", sync);
+        resetChannel();
+        channel.disabled = Boolean(pending.operation);
+        channel.addEventListener("change", () => { clearReview(); sync(); });
+        customTag.addEventListener("input", clearReview);
         sync();
-        panel.appendChild(line("Container image", ({ up_to_date: "Current", updates_available: "Update available", not_applicable: "Not applicable" })[status.image_state] || "Unable to check"));
-        panel.appendChild(form);
+        panel.append(imageStatus, line("Configured container channel", configuredTag), form);
+        const actions = document.createElement("div");
+        actions.className = "action-row";
+        const check = document.createElement("button");
+        check.type = "button";
+        check.className = "secondary";
+        check.textContent = "Check for updates";
+        const reviewButton = document.createElement("button");
+        reviewButton.type = "submit";
+        reviewButton.textContent = "Review changes";
+        actions.append(check, reviewButton);
+        form.appendChild(actions);
+        check.disabled = reviewButton.disabled = Boolean(pending.operation);
+        const preview = async (reviewRequested) => {
+          if (applying || pending.operation || unsupported()) return;
+          const target = selectedSoftware;
+          const imageTag = selectedTag();
+          if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(imageTag)) {
+            state.textContent = "Enter a valid Custom container tag.";
+            return;
+          }
+          clearReview();
+          const selectionTicket = selectionSequence;
+          check.disabled = reviewButton.disabled = true;
+          state.textContent = "Checking for updates…";
+          try {
+            const [plan, snapshot] = await Promise.all([
+              request(statusURL("", "", target, imageTag)), request("/api/dashboard-status"),
+            ]);
+            if (selectionTicket !== selectionSequence || ticket !== sequence) return;
+            imageStatus.replaceChildren(...line("Container image", imageLabel(plan.image_state)).children);
+            state.textContent = plan.reason || (plan.update_available ? "Changes are ready to review." : "No changes were found.");
+            if (!reviewRequested) return;
+            const review = card("Review changes");
+            review.dataset.versionReview = "";
+            const summary = document.createElement("div");
+            summary.className = "version-software-review-summary";
+            summary.append(line("Server software", `${status.server_software || currentSoftware} → ${plan.server_software || target}`),
+              line("Container channel", `${configuredTag} → ${imageTag}`),
+              line("Minecraft version", plan.installed === plan.selected_candidate ? plan.selected_candidate : `${plan.installed || "Unknown"} → ${plan.selected_candidate || "Unknown"}`),
+              line("Players online", String(snapshot?.players?.online ?? "Unknown")),
+              line("Container image", imageLabel(plan.image_state)),
+              line("Overall", stackLabel(plan.stack_state)));
+            review.appendChild(summary);
+            const actionable = plan.stack_state === "updates_available" && plan.update_available;
+            const safe = actionable && plan.server_supported && (!plan.crossplay_enabled || plan.crossplay_compatible) && Boolean(plan.plan_fingerprint);
+            const notice = document.createElement("p");
+            if (!actionable && ["up_to_date", "waiting_for_compatibility"].includes(plan.stack_state)) {
+              notice.textContent = plan.reason || "No changes were found.";
+            } else if (!safe) {
+              notice.className = "notice warning";
+              notice.textContent = plan.reason || "A safe server update could not be verified. Review changes again.";
+            } else if (plan.runtime_update_required) {
+              notice.className = "notice warning";
+              notice.textContent = "JustVoxel will create a cold backup and safely restart Minecraft. Online players will receive a shutdown countdown. A stopped server may start temporarily for verification and will be stopped again afterward.";
+            } else {
+              notice.textContent = "The selected channel uses the verified current image. Minecraft can keep its current running or stopped state.";
+            }
+            review.appendChild(notice);
+            const consent = document.createElement("input");
+            consent.type = "checkbox";
+            consent.setAttribute("role", "switch");
+            consent.checked = false;
+            if (safe) {
+              const label = document.createElement("label");
+              label.className = "minecraft-native-toggle system-ups-shutdown-switch";
+              const confirmation = document.createElement("span");
+              confirmation.textContent = plan.runtime_update_required && Number(snapshot?.players?.online || 0) > 0
+                ? "Confirm changes and allow interruption of online players."
+                : "Confirm changes";
+              label.append(confirmation, consent);
+              review.appendChild(label);
+            }
+            const cancel = document.createElement("button");
+            cancel.type = "button";
+            cancel.className = "secondary";
+            cancel.textContent = "Cancel review";
+            cancel.addEventListener("click", () => { resetChannel(); selectSoftware(currentSoftware); });
+            const apply = document.createElement("button");
+            apply.type = "button";
+            apply.textContent = "Apply changes";
+            apply.disabled = true;
+            consent.addEventListener("change", () => { apply.disabled = !safe || !consent.checked; });
+            apply.addEventListener("click", async () => {
+              if (!safe || !consent.checked || applying || apply.disabled) return;
+              applying = true;
+              apply.disabled = cancel.disabled = consent.disabled = true;
+              softwareCards.forEach(({ node }) => { node.disabled = true; });
+              state.textContent = "Starting server update…";
+              try {
+                const body = new URLSearchParams({ csrf, server_type: target, image_tag: imageTag, plan_fingerprint: plan.plan_fingerprint, confirm_players: consent.checked ? "yes" : "no" });
+                const result = await request("/api/version/workspace/update", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
+                if (!result.operation?.operation_id) throw new Error("Server update tracking is unavailable. Refresh Version to check its status.");
+                updateOperation = result.operation.operation_id;
+                await render("Server update started.");
+                watchUpdate(result.operation.operation_id);
+              } catch (failure) {
+                // A lost response may still have started maintenance. Reconnect before another review.
+                await render(failure.message);
+              }
+            });
+            const reviewActions = document.createElement("div");
+            reviewActions.className = "action-row version-software-review-actions";
+            reviewActions.append(cancel, apply);
+            review.appendChild(reviewActions);
+            softwareReview = review;
+            panel.appendChild(review);
+            form.hidden = true;
+            state.textContent = "";
+          } catch (failure) {
+            if (selectionTicket === selectionSequence && ticket === sequence) state.textContent = failure.message;
+          } finally {
+            if (!applying) check.disabled = reviewButton.disabled = Boolean(pending.operation);
+          }
+        };
+        check.addEventListener("click", () => preview(false));
+        form.addEventListener("submit", (event) => { event.preventDefault(); preview(true); });
         root.appendChild(panel);
-        wireForm(root, form, minecraft);
       } else {
         const panel = card("Minecraft Version");
         const grid = document.createElement("div");

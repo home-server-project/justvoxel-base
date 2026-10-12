@@ -13,9 +13,13 @@ paper_version_has_stable_build() { [[ $1 == 26.2 || $1 == 26.3 ]]; }
 paper_version_build_channel() { [[ $1 == 26.2 || $1 == 26.3 ]] && printf STABLE; }
 bedrock_crossplay_supports_version() { [[ -n $1 && $1 == "$2" ]]; }
 systemctl() { return 1; }
-minecraft_image_ref() { printf 'docker.io/itzg/minecraft-server:stable'; }
+minecraft_image_ref() { printf 'docker.io/itzg/minecraft-server:%s' "${MINECRAFT_IMAGE_TAG}"; }
+validate_minecraft_image_tag() { [[ $1 != missing && $1 != deprecated ]]; }
 jv_remote_platform_digest() { [[ ${IMAGE_STATE:-current} != unavailable ]] && printf 'sha256:%064d' 1; }
-podman() { printf 'sha256:%064d' 1; }
+podman() {
+    if [[ $* == *'.Digest'* ]]; then printf 'sha256:%064d' "${LOCAL_DIGEST_NUMBER:-1}";
+    else printf '%s' "${LOCAL_ID:-image-id}"; fi
+}
 jv_crossplay_metadata() {
     [[ ${COMPONENT_STATE:-up_to_date} != unavailable ]] || return 1
     printf '{"project":"%s","version":"2.99.0","build":19,"artifact":"fixture.jar","sha256":"%064d"}' "$1" 1
@@ -92,3 +96,41 @@ jq -e '.server_type == "purpur" and .server_software == "Purpur" and .stack_stat
 preview="$(bash "${fixture_dir}/status" --server-type vanilla recommended '' no)"
 jq -e '.server_type == "vanilla" and .server_supported and (.crossplay_enabled | not)' <<< "${preview}" >/dev/null
 if bash "${fixture_dir}/status" --server-type vanilla recommended; then echo 'In-place Vanilla status accepted' >&2; exit 1; fi
+
+# Combined previews bind both selections and image identity without writing state.
+export JV_CONFIG="${fixture_dir}/config"
+printf 'fixture administrator configuration\n' > "${JV_CONFIG}"
+before="$(sha256sum "${JV_CONFIG}" "${DATA_PATH}/logs/latest.log")"
+combined="$(bash "${fixture_dir}/status" --server-type purpur --image-tag latest recommended)"
+jq -e '.configured_server_type == "paper" and .configured_image_tag == "stable" and
+    .server_type == "purpur" and .image_tag == "latest" and .runtime_update_required and .update_available' <<< "${combined}" >/dev/null
+channel="$(bash "${fixture_dir}/status" --image-tag latest recommended)"
+jq -e '.update_available and (.runtime_update_required | not) and .image_state == "up_to_date"' <<< "${channel}" >/dev/null
+custom="$(bash "${fixture_dir}/status" --image-tag release_1.2-3 recommended)"
+for other in "${paper}" "${switch}" "${channel}" "${custom}"; do
+    [[ $(jq -r '.plan_fingerprint' <<< "${combined}") != "$(jq -r '.plan_fingerprint' <<< "${other}")" ]]
+done
+repeat="$(bash "${fixture_dir}/status" --server-type purpur --image-tag latest recommended)"
+[[ $(jq -r '.plan_fingerprint' <<< "${repeat}") == "$(jq -r '.plan_fingerprint' <<< "${combined}")" ]]
+identity="$(LOCAL_ID=other-image bash "${fixture_dir}/status" --server-type purpur --image-tag latest recommended)"
+[[ $(jq -r '.plan_fingerprint' <<< "${identity}") != "$(jq -r '.plan_fingerprint' <<< "${combined}")" ]]
+changed_digest="$(LOCAL_DIGEST_NUMBER=2 bash "${fixture_dir}/status" --server-type purpur --image-tag latest recommended)"
+[[ $(jq -r '.plan_fingerprint' <<< "${changed_digest}") != "$(jq -r '.plan_fingerprint' <<< "${combined}")" ]]
+for invalid in '../bad' '-bad' 'tag:other' missing deprecated "$(printf 'a%.0s' {1..129})"; do
+    if bash "${fixture_dir}/status" --image-tag "${invalid}" recommended; then echo 'Unsafe custom preview accepted' >&2; exit 1; fi
+done
+[[ $(sha256sum "${JV_CONFIG}" "${DATA_PATH}/logs/latest.log") == "${before}" ]]
+
+# Exercise the actual fixed-repository registry/deprecation validation too.
+sed -n '/^validate_minecraft_image_tag() {/,/^resolve_latest_itzg_release() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' > "${fixture_dir}/tag-validation"
+(
+    source "${fixture_dir}/tag-validation"
+    JV_MINECRAFT_IMAGE_REPO=docker.io/itzg/minecraft-server
+    JV_ITZG_IMAGES_URL=https://fixture.invalid/catalog
+    skopeo() { [[ $1 == inspect && $2 == docker://docker.io/itzg/minecraft-server:* && $2 != *:missing ]]; }
+    curl() { printf '[{"tag":"deprecated","deprecated":true},{"tag":"stable","deprecated":false}]'; }
+    for valid in stable latest release_1.2-3; do validate_minecraft_image_tag "${valid}"; done
+    for invalid in missing deprecated '../bad' 'repo:tag'; do
+        if validate_minecraft_image_tag "${invalid}"; then echo 'Registry/deprecation validation bypassed' >&2; exit 1; fi
+    done
+)

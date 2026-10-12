@@ -13,14 +13,18 @@ import (
 
 type minecraftStackUpdateRequest struct {
 	ServerType      string `json:"server_type,omitempty"`
+	ImageTag        string `json:"image_tag,omitempty"`
 	PlanFingerprint string `json:"plan_fingerprint"`
 	ConfirmPlayers  bool   `json:"confirm_players"`
 }
 
-var runMinecraftStackUpdate = func(ctx context.Context, fingerprint string, confirmPlayers bool, serverType string) error {
+var runMinecraftStackUpdate = func(ctx context.Context, fingerprint string, confirmPlayers bool, serverType, imageTag string) error {
 	args := []string{"--reviewed-stack", fingerprint}
 	if serverType != "" {
 		args = append([]string{"--server-type", serverType}, args...)
+	}
+	if imageTag != "" {
+		args = append([]string{"--image-tag", imageTag}, args...)
 	}
 	if confirmPlayers {
 		args = append(args, "--confirm-players")
@@ -33,6 +37,8 @@ var runMinecraftStackUpdate = func(ctx context.Context, fingerprint string, conf
 	message := "Server update stopped. Review Minecraft state before continuing."
 	text := string(output)
 	switch {
+	case strings.Contains(text, "operation requires attention"):
+		message = "Previous server recovery is incomplete. This update requires attention; verify the current server before continuing."
 	case strings.Contains(text, "download verification failed"):
 		message = "Cross-play download verification failed. Installed plugins were preserved."
 	case strings.Contains(text, "update download failed"):
@@ -73,9 +79,13 @@ func (s *server) adminMinecraftStackUpdate(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "Invalid server type")
 		return
 	}
-	data, err := runAdminVersionStatus(ctx, "", "", request.ServerType)
+	if request.ImageTag != "" && !imageTagInputPattern.MatchString(request.ImageTag) {
+		writeError(w, http.StatusBadRequest, "Invalid container image tag")
+		return
+	}
+	data, err := runAdminVersionStatus(ctx, "", "", request.ServerType, request.ImageTag)
 	var plan adminVersionStatus
-	if err != nil || json.Unmarshal(data, &plan) != nil || plan.StackState != "updates_available" || !plan.UpdateAvailable {
+	if err != nil || json.Unmarshal(data, &plan) != nil || plan.StackState != "updates_available" || !plan.UpdateAvailable || !plan.ServerSupported || (plan.CrossplayEnabled && !plan.CrossplayCompatible) {
 		writeError(w, http.StatusServiceUnavailable, "A safe server update could not be verified")
 		return
 	}
@@ -110,7 +120,7 @@ func executeMinecraftStackUpdate(ctx context.Context, s *server, operationID str
 	if _, err := s.operations.transition(operationID, operationRunning, "updating", "Preparing verified updates, a cold backup and a safe restart."); err != nil {
 		return err
 	}
-	err := runMinecraftStackUpdate(ctx, request.PlanFingerprint, request.ConfirmPlayers, request.ServerType)
+	err := runMinecraftStackUpdate(ctx, request.PlanFingerprint, request.ConfirmPlayers, request.ServerType, request.ImageTag)
 	success := err == nil
 	if err != nil {
 		message := "Server update stopped. Review Minecraft state before continuing."

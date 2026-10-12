@@ -10,11 +10,28 @@ fi
 
 configured_type="${MINECRAFT_SERVER_TYPE-paper}"
 target_type="${configured_type}"
-if [[ ${1:-} == --server-type ]]; then
+configured_image_tag="${MINECRAFT_IMAGE_TAG:-stable}"
+target_image_tag="${configured_image_tag}"
+while [[ ${1:-} == --* ]]; do
     (( $# >= 2 )) || exit 1
-    target_type="$2"
+    case "$1" in
+        --server-type) target_type="$2" ;;
+        --image-tag) target_image_tag="$2" ;;
+        *) exit 1 ;;
+    esac
     shift 2
+done
+(( $# <= 3 )) || exit 1
+[[ ${target_image_tag} =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || exit 1
+# Preserve setup preview: registry validation is only for an explicit new tag.
+if [[ ${target_image_tag} != "${configured_image_tag}" ]]; then
+    (( $# != 3 )) || exit 1
+    validate_minecraft_image_tag "${target_image_tag}" || { echo 'ERROR: container image tag could not be verified or is deprecated.' >&2; exit 1; }
 fi
+if (( $# != 3 )); then
+    current_image="$(minecraft_image_ref)"
+fi
+MINECRAFT_IMAGE_TAG="${target_image_tag}"
 validate_server_type "${target_type}" || exit 1
 if (( $# != 3 )); then server_allows_in_place_switch "${configured_type}" "${target_type}" || exit 1; fi
 MINECRAFT_SERVER_TYPE="${target_type}"
@@ -22,6 +39,8 @@ if (( $# == 3 )); then BEDROCK_ENABLED="$3"; fi
 validate_server_capabilities || exit 1
 software_changed=false
 [[ ${configured_type} == "${target_type}" ]] || software_changed=true
+channel_changed=false
+[[ ${configured_image_tag} == "${target_image_tag}" ]] || channel_changed=true
 installed=''
 latest_log="${DATA_PATH:-/var/lib/justvoxel/minecraft}/logs/latest.log"
 if (( $# != 3 )) && [[ -r ${latest_log} ]]; then
@@ -94,20 +113,28 @@ image_state=unavailable
 remote_digest=''
 local_digest=''
 local_id=''
+running_id=''
+service_state=stopped
 if (( $# != 3 )); then
     remote_digest="$(jv_remote_platform_digest "$(minecraft_image_ref)" || true)"
-    local_digest="$(podman image inspect "$(minecraft_image_ref)" --format '{{.Digest}}' 2>/dev/null || true)"
-    local_id="$(podman image inspect "$(minecraft_image_ref)" --format '{{.Id}}' 2>/dev/null || true)"
-fi
-if [[ ${remote_digest} =~ ^sha256:[0-9a-f]{64}$ ]]; then
-    image_state=updates_available
-    [[ ${remote_digest} != "${local_digest}" ]] || image_state=up_to_date
-    if [[ -n ${local_id} && ! ${local_digest} =~ ^sha256:[0-9a-f]{64}$ ]]; then image_state=unavailable; fi
-fi
-if [[ ${image_state} == up_to_date ]] && systemctl is-active --quiet minecraft.service; then
-    running_id="$(podman inspect minecraft --format '{{.Image}}' 2>/dev/null || true)"
-    if [[ -z ${running_id} ]]; then image_state=unavailable
-    elif [[ ${running_id} != "${local_id}" ]]; then image_state=updates_available
+    local_id="$(podman image inspect "${current_image}" --format '{{.Id}}' 2>/dev/null || true)"
+    if systemctl is-active --quiet minecraft.service; then
+        service_state=running
+        running_id="$(podman inspect minecraft --format '{{.Image}}' 2>/dev/null || true)"
+    fi
+    # Compare the proposed digest to the actual runtime, not a cached proposed tag.
+    identity="${local_id}"
+    [[ ${service_state} != running ]] || identity="${running_id}"
+    if [[ -n ${identity} ]]; then
+        local_digest="$(podman image inspect "${identity}" --format '{{.Digest}}' 2>/dev/null || true)"
+    fi
+    if [[ ${remote_digest} =~ ^sha256:[0-9a-f]{64}$ ]]; then
+        image_state=updates_available
+        if [[ -n ${identity} && ${local_digest} =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            [[ ${remote_digest} != "${local_digest}" ]] || image_state=up_to_date
+        elif [[ -n ${identity} || ${service_state} == running ]]; then
+            image_state=unavailable
+        fi
     fi
 fi
 if (( $# == 3 )); then
@@ -124,7 +151,7 @@ else
           ( ${bedrock} == yes && ${crossplay_compatible} != true ) ]]; then
         stack_state=unavailable
         minecraft_state=unavailable
-    elif [[ ${software_changed} == true || ${installed} != "${candidate}" || ${geyser_state} == updates_available ||
+    elif [[ ${channel_changed} == true || ${software_changed} == true || ${installed} != "${candidate}" || ${geyser_state} == updates_available ||
             ${floodgate_state} == updates_available || ${image_state} == updates_available ]]; then
         stack_state=updates_available
         [[ ${installed} == "${candidate}" ]] || minecraft_state=updates_available
@@ -138,20 +165,31 @@ else
         reason='Server update information could not be verified. Try again later.'
     fi
 fi
+runtime_update_required=false
+if [[ ${stack_state} == updates_available && ( ${software_changed} == true || ${installed} != "${candidate}" ||
+      ${image_state} == updates_available || ${geyser_state} == updates_available || ${floodgate_state} == updates_available ) ]]; then
+    runtime_update_required=true
+fi
 # Bind review to resolved artifacts and appliance configuration; no browser URLs.
 fingerprint=''
 if (( $# != 3 )); then
     fingerprint="sha256:$(jq -cn --arg server_type "${target_type}" --arg configured_type "${configured_type}" --arg candidate "${candidate}" --arg policy "${policy}" \
         --arg configured "${MINECRAFT_VERSION:-}" --arg bedrock "${bedrock}" \
+        --arg configured_tag "${configured_image_tag}" --arg proposed_tag "${target_image_tag}" \
+        --arg current_image "${current_image}" --arg local_digest "${local_digest}" --arg local_id "${local_id}" \
+        --arg running_id "${running_id}" --arg service_state "${service_state}" \
+        --arg config_identity "$(if [[ -r ${JV_CONFIG:-/etc/justvoxel/justvoxel.conf} ]]; then sha256sum "${JV_CONFIG:-/etc/justvoxel/justvoxel.conf}" | cut -d ' ' -f1; fi)" \
         --arg data_path "${DATA_PATH:-}" --arg image "$(minecraft_image_ref)" --arg digest "${remote_digest}" \
         --arg installed "${installed}" --argjson geyser "${geyser_metadata}" --argjson floodgate "${floodgate_metadata}" \
-        '[$server_type,$configured_type,$candidate,$policy,$configured,$bedrock,$data_path,$image,$digest,$installed,$geyser,$floodgate]' | sha256sum | cut -d ' ' -f1)"
+        '[$server_type,$configured_type,$candidate,$policy,$configured,$bedrock,$data_path,$image,$digest,$installed,$geyser,$floodgate,$configured_tag,$proposed_tag,$current_image,$local_digest,$local_id,$running_id,$service_state,$config_identity]' | sha256sum | cut -d ' ' -f1)"
 fi
 jq -n --arg server_type "${target_type}" --arg server_software "$(server_software_display_name)" \
     --arg viaversion_state "$(server_supports_plugins && printf managed_automatically || printf not_applicable)" \
     --arg installed "${installed}" --arg available "${available}" \
     --arg recommended "${recommended}" --arg candidate "${candidate}" \
     --arg available_channel "${available_channel}" --arg candidate_channel "${candidate_channel}" \
+    --arg configured_image_tag "${configured_image_tag}" --arg configured_server_type "${configured_type}" \
+    --argjson runtime_update_required "${runtime_update_required}" \
     --arg image_tag "${MINECRAFT_IMAGE_TAG:-stable}" --arg policy "${policy}" \
     --arg configured_version "${MINECRAFT_VERSION:-}" --arg geyser_version "${geyser_version}" \
     --arg reason "${reason}" --argjson server_supported "${server_supported}" \
@@ -161,7 +199,7 @@ jq -n --arg server_type "${target_type}" --arg server_software "$(server_softwar
     --argjson geyser_artifact "${geyser_metadata}" --argjson floodgate_artifact "${floodgate_metadata}" \
     --arg managed_image_digest "${remote_digest}" --arg image_state "${image_state}" --arg fingerprint "${fingerprint}" \
     --argjson crossplay_enabled "$([[ ${bedrock} == yes ]] && printf true || printf false)" \
-    '{server_type:$server_type,server_software:$server_software,installed:$installed,available:$available,available_channel:$available_channel,recommended:$recommended,selected_candidate:$candidate,candidate_channel:$candidate_channel,image_tag:$image_tag,policy:$policy,configured_version:$configured_version,
+    '{configured_server_type:$configured_server_type,configured_image_tag:$configured_image_tag,runtime_update_required:$runtime_update_required,server_type:$server_type,server_software:$server_software,installed:$installed,available:$available,available_channel:$available_channel,recommended:$recommended,selected_candidate:$candidate,candidate_channel:$candidate_channel,image_tag:$image_tag,policy:$policy,configured_version:$configured_version,
       managed_image_digest:$managed_image_digest,managed_artifacts:{geyser:$geyser_artifact,floodgate:$floodgate_artifact},update_available:($stack_state == "updates_available"),stack_state:$stack_state,minecraft_state:$minecraft_state,
       geyser_state:$geyser_state,floodgate_state:$floodgate_state,viaversion_state:$viaversion_state,image_state:$image_state,plan_fingerprint:$fingerprint,server_supported:$server_supported,paper_supported:($server_supported and $server_type == "paper"),
       crossplay_enabled:$crossplay_enabled,geyser_supported_version:$geyser_version,crossplay_compatible:$crossplay_compatible,reason:$reason}'

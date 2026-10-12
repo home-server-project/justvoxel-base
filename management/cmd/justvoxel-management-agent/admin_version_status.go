@@ -27,6 +27,9 @@ type adminVersionStatus struct {
 	SelectedCandidate      string `json:"selected_candidate"`
 	CandidateChannel       string `json:"candidate_channel"`
 	ImageTag               string `json:"image_tag"`
+	ConfiguredImageTag     string `json:"configured_image_tag"`
+	ConfiguredServerType   string `json:"configured_server_type"`
+	RuntimeUpdateRequired  bool   `json:"runtime_update_required"`
 	Policy                 string `json:"policy"`
 	ConfiguredVersion      string `json:"configured_version"`
 	UpdateAvailable        bool   `json:"update_available"`
@@ -38,8 +41,13 @@ type adminVersionStatus struct {
 }
 
 var versionInputPattern = regexp.MustCompile(`^[0-9A-Za-z._-]+$`)
-var runAdminVersionStatus = func(ctx context.Context, policy, version, serverType string) ([]byte, error) {
+var imageTagInputPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+
+var runAdminVersionStatus = func(ctx context.Context, policy, version, serverType, imageTag string) ([]byte, error) {
 	args := []string{policy, version}
+	if imageTag != "" {
+		args = append([]string{"--image-tag", imageTag}, args...)
+	}
 	if serverType != "" {
 		args = append([]string{"--server-type", serverType}, args...)
 	}
@@ -107,6 +115,11 @@ func (s *server) adminVersionStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid server type")
 		return
 	}
+	imageTag := r.URL.Query().Get("image_tag")
+	if imageTag != "" && !imageTagInputPattern.MatchString(imageTag) {
+		writeError(w, http.StatusBadRequest, "Invalid container image tag")
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
 	policy, version := r.URL.Query().Get("policy"), r.URL.Query().Get("version")
@@ -118,7 +131,7 @@ func (s *server) adminVersionStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid Minecraft version")
 		return
 	}
-	output, err := runAdminVersionStatus(ctx, policy, version, serverType)
+	output, err := runAdminVersionStatus(ctx, policy, version, serverType, imageTag)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "Version information is unavailable")
 		return

@@ -95,7 +95,7 @@ func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 	if strings.Contains(app, `id !== "migration" && id !== "version"`) || !strings.Contains(app, `if (Number.isFinite(saved.height) && saved.height > 0) element.style.height = saved.height + "px";`) {
 		t.Fatal("Version must restore its saved height when switching tabs")
 	}
-	if !strings.Contains(version, `form.querySelector("[data-version-custom]").hidden = channel.value !== "custom"`) {
+	if !strings.Contains(version, `form.querySelector("[data-version-custom]").hidden = !custom`) {
 		t.Fatal("Version custom tag must follow channel visibility")
 	}
 	if !strings.Contains(version, `tabs.forEach((tab) => tab.addEventListener("click", () => { currentTab = tab.dataset.versionTab;`) || strings.Contains(version, `versionDialog.style.height`) {
