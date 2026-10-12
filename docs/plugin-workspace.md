@@ -3,7 +3,7 @@
 ## Cycle 1 — read-only discovery and inventory
 
 Administrators can open **Control Center → Minecraft → Plugins**. The movable,
-resizable window has Discover, Installed and Updates tabs. The original Cycle 1 capability is read only:
+resizable window has only Discover and Installed tabs. The original Cycle 1 capability is read only:
 it cannot install, download, update, remove or hot load plugins, change server
 configuration, or interrupt Minecraft.
 
@@ -18,7 +18,7 @@ status or dependency summary. The entire card opens its overlay by click, Enter
 or Space. Keyboard focus is visible; selection uses the green Server Software
 card language and stays visible while the overlay is open. There are no separate
 Info or Install card buttons. Closing the overlay returns focus to the card;
-details never expand inside the results grid. Installed and Updates use the same
+details never expand inside the results grid. Installed uses the same
 whole-card selection and information/status overlays, without update or removal
 actions. Installable Discover cards open one combined information/install
 overlay; JustVoxel-managed and unavailable selections remain read only.
@@ -27,23 +27,29 @@ needed. Supported platforms use the same compact presentation. Publisher
 dependencies are grouped into compact rows, including cross-loader required
 metadata that will not be installed. Actual install dependencies remain explicit.
 Installed information has separate sections for JAR,
-Metadata, Management and Update status. Installed and Updates cards show ownership
+Metadata, Management and Update status. Installed cards show ownership
 and a compact status; update and removal actions remain unavailable.
 Discover uses three columns in wide windows, two in medium windows and one in
 narrow windows. Buttons stay distinct from badges. Authoritative Modrinth project
 IDs use real publisher logos through the Administrator-only same-origin
 `GET /api/plugins/workspace/icon?project_id=<id>` route and the Agent's
-`GET /v1/admin/plugins/icon?project_id=<id>` route. Only the Agent resolves the
-fixed Modrinth project API and fetches the verified HTTPS project CDN image;
-upstream URLs never reach the browser. PNG, JPEG and WebP are bounded to 512 KiB,
+`GET /v1/admin/plugins/icon?project_id=<id>` route. Discover reuses the search
+result's bounded, project-bound `icon_url`, validated
+with the strict icon URL rules. Cards and Discover overlays pass `project_id`
+and `icon_url` to the same-origin proxy; the Agent fetches the validated HTTPS
+CDN image directly without another project metadata request. Invalid or absent
+Discover icons use initials without failing the catalog. Installed inventory
+continues to pass only `project_id`, retaining the Agent's fixed Modrinth project
+metadata lookup fallback. The browser never uses a CDN URL as `img.src`.
+PNG, JPEG and WebP are bounded to 512 KiB,
 with no redirects or persistent image cache. Missing or rejected images leave
 the existing fixed-size deterministic initials tile without affecting any
 catalog or installation operation. Information and installation reuse the card identity tile.
 Progress and terminal results retain the selected identity in browser memory,
 bound to the returned operation ID; after reload they use fallback. Inventory
 exposes the existing manifest project/release IDs only after exact
-filename, SHA-512 and descriptor ownership verification. Installed and Updates
-reuse the same-origin logo helper, preferring the verified `project_id`, then the
+filename, SHA-512 and descriptor ownership verification. Installed
+reuses the same-origin logo helper, preferring the verified `project_id`, then the
 display-only `IconProjectID` (`icon_project_id` on the wire), then initials.
 JustVoxel-managed components receive explicit official Modrinth display identities
 from the existing exact trusted filename/main-class classification: Geyser
@@ -106,7 +112,7 @@ the new capacity. The Agent accepts only
 integer limits from 1 to 12 and defaults to 8 when omitted. Pagination stays at
 the bottom-right of Discover, in the order **Page X of Y**, **Previous**, **Next**.
 The page count uses Modrinth's authoritative total; Previous is disabled on the
-first UI page and Next when the Agent returns no next raw cursor. Installed and Updates have no catalog
+first UI page and Next when the Agent returns no next raw cursor. Installed has no catalog
 pagination. Bounded release qualification can still leave a partial or empty page; Next
 continues from the next consumed raw cursor when more raw results remain. Upstream failures are shown as
 unavailable metadata, never as proven incompatibility.
@@ -120,11 +126,13 @@ other JARs from appearing. No ownership database is created.
 
 Geyser, Floodgate and ViaVersion are displayed as JustVoxel managed. Their
 existing server update mechanism remains authoritative. All other JARs are
-Manual / unmanaged. Updates reports **Update status unknown - manually managed**
-for those JARs. Plugin names are never used to guess a Modrinth project identity.
+Manual / unmanaged. Installed shows their unknown update status. Future
+**Update available** status belongs on Installed cards; no update action exists
+yet. Plugin names are never used to guess a Modrinth project identity.
 
-The browser calls Administrator-only `/api/plugins/workspace/{discover,installed,updates}`
-WebUI routes. The WebUI calls `/v1/admin/plugins/{discover,installed,updates}` over
+The visible workspace calls Administrator-only `/api/plugins/workspace/{discover,installed}`
+WebUI routes. The existing `updates` routes/contracts remain for compatibility;
+there is no visible Updates view. The WebUI calls `/v1/admin/plugins/{discover,installed,updates}` over
 the existing Management API Unix socket. The Management Agent alone reads local
 JARs and contacts Modrinth's fixed HTTPS API. Requests have bounded timeouts and
 responses, send a JustVoxel User-Agent, require no API key and reject redirects.
@@ -192,8 +200,15 @@ action. Review starts no operation, backup or Minecraft mutation. Publisher load
 tags alone do not authorize an Install action. Modrinth platform metadata listing
 Paper support is not proof that the artifact is a direct Paper plugin. Direct
 artifact inspection remains authoritative for plugins-directory installs.
-Unsupported artifacts may require an external loader or a different installation
-path and are refused; JustVoxel does not claim which loader is required. No
+When no valid direct descriptor exists, exact known JAR entries
+`fabric.mod.json`, `quilt.mod.json`, `META-INF/mods.toml`,
+`META-INF/neoforge.mods.toml` and `META-INF/sponge_plugins.json` identify a
+loader-based server mod. Their presence only improves classification and the
+read-only rejection explanation; these files are never parsed or executed.
+A valid direct Paper/Bukkit descriptor remains authoritative, and normal strict
+descriptor validation still applies. Unknown JARs retain the generic rejection.
+Loader-based server mods remain outside current Plugin Install scope and require
+a separate loader/runtime installation path. No
 Ignite or other mod-loader support or mods directory is added, and releases such
 as NoDim or Slumber are not made installable by publisher metadata. The WebUI
 explains this distinction while preserving the Agent's fail-closed rejection.
@@ -278,13 +293,13 @@ show ownership attention instead of silently being adopted. Generic update and
 removal are not available yet.
 
 A transaction JAR can temporarily exist before runtime verification and ownership
-manifest commit. Installed and Updates check the current installation operation
+manifest commit. Installed checks the current installation operation
 and intentionally hide inventory during unverified or unresolved operations,
 including `needs_attention`, clearing stale cards and showing a verification/recovery
 message. This prevents transaction-created artifacts from being misrepresented as
 manual/unmanaged. Refresh and tabs remain usable, and Discover remains available.
 No current operation, or `succeeded`, `rolled_back` and `resolved` states, expose
-stable inventory again. A lightweight re-check runs only while an inventory tab
+stable inventory again. A lightweight re-check runs only while Installed
 is blocked, and automatically loads that requested inventory once the operation
 is settled. Switching to Discover or closing Plugins clears this timer.
 Rollback semantics are unchanged.
@@ -328,7 +343,9 @@ not reopen automatically. Review and final Install both check for an existing
 non-settled operation and resume it instead of starting another installation.
 Progress updates retain the same operation identity header and logo.
 Success offers View in
-Installed, Install another plugin and Done. Failure reports restored prior state
+Installed as a secondary/dark action and Done as the primary/green action.
+View in Installed closes the overlay and selects Installed; Done closes it and
+refreshes the current workspace state. Failure reports restored prior state
 or administrator attention; it never displays fake success. Terminal results use
 the existing audit event mechanism with `plugin_install` and the requested
 Modrinth project as target; failed/rolled-back installs are not successes.

@@ -1066,6 +1066,9 @@ func TestPluginInstallStagedZipEntryBound(t *testing.T) {
 
 func TestPluginInstallStagedDescriptorSafety(t *testing.T) {
 	for _, fields := range []map[string]string{
+		{"plugin.yml": ""},
+		{"paper-plugin.yml": ""},
+		{"paper-plugin.yml": "name: Root\nmain: invalid main class\n"},
 		{"plugin.yml": "name: Root\nname: Other\n"},
 		{"plugin.yml": "version: 1\n"},
 		{"plugin.yml": "name: Root\nmain: example.Root\nmain: example.Other\n"},
@@ -2034,14 +2037,23 @@ func TestPluginPlacementReadableWithRestrictiveUmask(t *testing.T) {
 }
 
 func TestPluginPlanDirectArtifactReview(t *testing.T) {
-	for _, valid := range []bool{true, false} {
-		t.Run(strconv.FormatBool(valid), func(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		entries   map[string]string
+		rejection string
+	}{
+		{name: "valid"},
+		{name: "unknown JAR", entries: map[string]string{"random.txt": "unknown"}, rejection: pluginDirectReviewRejection},
+		{name: "empty descriptor", entries: map[string]string{"paper-plugin.yml": ""}, rejection: pluginDirectReviewRejection},
+		{name: "loader with empty descriptor", entries: map[string]string{"paper-plugin.yml": "", "fabric.mod.json": `{ "id": "slumber" }`}, rejection: pluginLoaderReviewRejection},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			f := newPluginInstallFixture(t)
 			reviewTemp := t.TempDir()
 			t.Setenv("TMPDIR", reviewTemp)
-			if !valid {
+			if tc.entries != nil {
 				path := filepath.Join(t.TempDir(), "slumber.jar")
-				pluginTestJar(t, path, map[string]string{"paper-plugin.yml": "", "fabric.mod.json": `{ "id": "slumber" }`, "META-INF/mods.toml": "modLoader=javafml", "META-INF/neoforge.mods.toml": "modLoader=javafml"})
+				pluginTestJar(t, path, tc.entries)
 				raw, err := os.ReadFile(path)
 				if err != nil {
 					t.Fatal(err)
@@ -2055,10 +2067,10 @@ func TestPluginPlanDirectArtifactReview(t *testing.T) {
 			}
 			rr := httptest.NewRecorder()
 			f.s.adminPluginInstallPlan(rr, surfaceRequest(http.MethodPost, "/v1/admin/plugins/install/plan", `{"project_id":"root","version_id":"release"}`))
-			if valid && rr.Code != http.StatusOK {
+			if tc.rejection == "" && rr.Code != http.StatusOK {
 				t.Fatalf("valid review: %d %s", rr.Code, rr.Body.String())
 			}
-			if !valid && (rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), pluginDirectReviewRejection)) {
+			if tc.rejection != "" && (rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), tc.rejection)) {
 				t.Fatalf("invalid review: %d %s", rr.Code, rr.Body.String())
 			}
 			temporary, err := os.ReadDir(reviewTemp)
@@ -2380,5 +2392,60 @@ func TestPluginInstallUsesLatestStartupProof(t *testing.T) {
 				t.Fatal("runtime readiness or stack verifier removed")
 			}
 		})
+	}
+}
+
+func TestStagedPluginLoaderClassificationPreservesDescriptorValidation(t *testing.T) {
+	for _, metadata := range []string{"fabric.mod.json", "quilt.mod.json", "META-INF/mods.toml", "META-INF/neoforge.mods.toml", "META-INF/sponge_plugins.json"} {
+		for _, descriptor := range []string{"absent", "valid", "valid Paper", "empty", "malformed", "valid plus malformed"} {
+			t.Run(metadata+"/"+descriptor, func(t *testing.T) {
+				entries := map[string]string{metadata: "not parsed or executed"}
+				switch descriptor {
+				case "valid":
+					entries["plugin.yml"] = "name: Example\nversion: 1\nmain: example.Main\n"
+				case "valid Paper":
+					entries["paper-plugin.yml"] = "name: Example\nmain: example.Main\n"
+				case "empty":
+					entries["paper-plugin.yml"] = ""
+				case "malformed":
+					entries["plugin.yml"] = "name: Example\nmain: invalid main class\n"
+				case "valid plus malformed":
+					entries["paper-plugin.yml"] = ""
+					entries["plugin.yml"] = "name: Example\nmain: example.Main\n"
+				}
+				path := filepath.Join(t.TempDir(), "artifact.jar")
+				pluginTestJar(t, path, entries)
+				f, err := os.Open(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer f.Close()
+				identity, err := inspectStagedPlugin(f, "artifact.jar")
+				if descriptor == "valid" || descriptor == "valid Paper" {
+					if err != nil || identity.Name != "Example" {
+						t.Fatalf("direct plugin lost authority: %#v %v", identity, err)
+					}
+				} else if descriptor == "valid plus malformed" {
+					if err == nil || errors.Is(err, errPluginLoaderArtifact) {
+						t.Fatalf("loader classification bypassed descriptor validation: %v", err)
+					}
+				} else if !errors.Is(err, errPluginLoaderArtifact) {
+					t.Fatalf("loader evidence not classified: %v", err)
+				}
+			})
+		}
+	}
+	for _, entry := range []string{"random.txt", "nested/fabric.mod.json", "FABRIC.MOD.JSON"} {
+		path := filepath.Join(t.TempDir(), "random.jar")
+		pluginTestJar(t, path, map[string]string{entry: "unknown"})
+		f, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = inspectStagedPlugin(f, "random.jar")
+		f.Close()
+		if err == nil || errors.Is(err, errPluginLoaderArtifact) || err.Error() != "JAR has no Paper/Bukkit plugin descriptor" {
+			t.Fatalf("unknown JAR classification changed: %v", err)
+		}
 	}
 }

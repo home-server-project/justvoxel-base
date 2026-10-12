@@ -5814,28 +5814,31 @@ if (pluginsDialog && pluginsOpen) {
     node.className = className;
     return node;
   };
-  const identityTile = (name, projectID) => {
+  const identityTile = (name, projectID, iconURL) => {
     const tile = text("span", Array.from(name || "?").slice(0, 2).join("").toUpperCase(), "plugins-icon-tile");
     tile.setAttribute("aria-hidden", "true");
     tile.dataset.tone = String(Array.from(name || "?").reduce((sum, char) => sum + char.codePointAt(0), 0) & 3);
-    if (typeof projectID === "string" && /^[A-Za-z0-9]{1,64}$/.test(projectID)) {
+    // Empty Discover icons retain initials; omitted Installed icons use metadata fallback.
+    if (typeof projectID === "string" && /^[A-Za-z0-9]{1,64}$/.test(projectID) && iconURL !== "") {
       const image = document.createElement("img");
       image.alt = "";
       image.decoding = "async";
       image.hidden = true;
       image.addEventListener("load", () => { tile.classList.add("has-logo"); image.hidden = false; }, { once: true });
       image.addEventListener("error", () => { image.remove(); tile.classList.remove("has-logo"); }, { once: true });
-      image.src = `/api/plugins/workspace/icon?project_id=${encodeURIComponent(projectID)}`;
+      const query = new URLSearchParams({ project_id: projectID });
+      if (typeof iconURL === "string" && iconURL) query.set("icon_url", iconURL);
+      image.src = `/api/plugins/workspace/icon?${query}`;
       tile.append(image);
     }
     return tile;
   };
-  const overlayHeader = (name, description, badges, projectID, action = null) => {
+  const overlayHeader = (name, description, badges, projectID, action = null, iconURL) => {
     const header = document.createElement("header");
     header.className = "plugins-overlay-header";
     const identity = document.createElement("div");
     identity.className = "plugins-overlay-identity";
-    identity.append(identityTile(name, projectID), text("h3", name));
+    identity.append(identityTile(name, projectID, iconURL), text("h3", name));
     if (action) identity.append(action);
     header.append(identity);
     if (description) header.append(text("p", description, "plugins-overlay-description"));
@@ -5859,7 +5862,7 @@ if (pluginsDialog && pluginsOpen) {
     panelBody.append(footer);
     return footer;
   };
-  const interactiveCard = (card, name, activate, projectID) => {
+  const interactiveCard = (card, name, activate, projectID, iconURL) => {
     card.tabIndex = 0;
     card.setAttribute("role", "button");
     card.setAttribute("aria-label", `Open ${name}`);
@@ -5890,15 +5893,15 @@ if (pluginsDialog && pluginsOpen) {
     copy.append(heading);
     const description = card.querySelector(".plugins-card-description, .plugins-card-release");
     if (description) copy.append(description);
-    header.append(identityTile(name, projectID), copy);
+    header.append(identityTile(name, projectID, iconURL), copy);
   };
-  const addInfo = (card, name, renderInfo, projectID) => {
+  const addInfo = (card, name, renderInfo, projectID, iconURL) => {
     interactiveCard(card, name, () => {
       stopPolling();
       showPanel(`Info for ${name}`, true);
       renderInfo();
       overlayActions(panelAction("Close", closePanel, true));
-    }, projectID);
+    }, projectID, iconURL);
   };
   const infoRows = (container) => {
     const rows = document.createElement("dl");
@@ -5957,7 +5960,7 @@ if (pluginsDialog && pluginsOpen) {
       card.append(text("p", Array.from(counts, ([kind, count]) => `${count} ${kind}`).join(" · "), "plugins-card-meta"));
     }
     const renderInfo = () => {
-      overlayHeader(project.title, project.description, identityBadges, project.project_id);
+      overlayHeader(project.title, project.description, identityBadges, project.project_id, null, project.icon_url || "");
       const about = infoRows(overlaySection("About this version"));
       about("Release", version?.version_number || "Unavailable");
       about("Release type", version?.version_type || "Not provided");
@@ -5987,12 +5990,12 @@ if (pluginsDialog && pluginsOpen) {
       overlayActions(panelAction("Close", closePanel, true));
     };
     if (installable) {
-      interactiveCard(card, project.title, () => reviewRejection ? readOnlyReview(reviewRejection) : reviewPlugin(project.project_id, version.id, project, readOnlyReview), project.project_id);
+      interactiveCard(card, project.title, () => reviewRejection ? readOnlyReview(reviewRejection) : reviewPlugin(project.project_id, version.id, project, readOnlyReview), project.project_id, project.icon_url || "");
     } else {
       addInfo(card, project.title, () => {
         renderInfo();
         if (managed) infoRows(overlaySection("Management"))("Status", "JustVoxel managed");
-      }, project.project_id);
+      }, project.project_id, project.icon_url || "");
     }
     // Publisher data uses textContent; artifact URLs never reach this browser.
     return card;
@@ -6009,7 +6012,8 @@ if (pluginsDialog && pluginsOpen) {
     badges.append(text("span", management, "plugins-badge plugins-management"));
     card.append(badges);
     const attention = plugin.update_status?.startsWith("Attention:");
-    const updateStatus = attention ? plugin.update_status.replace(/; manual \/ unmanaged$/, "") : plugin.management === "justvoxel" ? "Via server updates" : plugin.management === "plugins" ? "Update and removal are not available yet" : "Unknown";
+    const updateAvailable = plugin.update_status?.startsWith("Update available");
+    const updateStatus = updateAvailable ? plugin.update_status : attention ? plugin.update_status.replace(/; manual \/ unmanaged$/, "") : plugin.management === "justvoxel" ? "Via server updates" : plugin.management === "plugins" ? "Update and removal are not available yet" : "Unknown";
     addInfo(card, name, () => {
       overlayHeader(name, "", [plugin.version || "Version unknown", management], projectID);
       overlaySection("JAR").append(text("p", plugin.filename));
@@ -6023,9 +6027,7 @@ if (pluginsDialog && pluginsOpen) {
       }
     }, projectID);
     let summary = plugin.metadata_status === "Metadata read" ? "Descriptor available" : "Metadata unavailable";
-    if (tab === "updates") {
-      summary = plugin.management === "justvoxel" ? "Updates via server updates" : plugin.management === "plugins" ? "Plugin updates are not available yet" : "Update status unknown";
-    }
+    if (updateAvailable) summary = plugin.update_status;
     if (attention) summary = "Needs attention";
     const status = text("p", summary, "plugins-inventory-status");
     if (attention) status.classList.add("is-attention");
@@ -6142,10 +6144,7 @@ if (pluginsDialog && pluginsOpen) {
       overlayActions(panelAction("View in Installed", () => {
         closePanel();
         pluginsDialog.querySelector('[data-plugins-tab="installed"]').click();
-      }), panelAction("Install another plugin", () => {
-        closePanel();
-        pluginsDialog.querySelector('[data-plugins-tab="discover"]').click();
-      }, true), panelAction("Done", () => { closePanel(); load(); }, true));
+      }, true), panelAction("Done", () => { closePanel(); load(); }));
     }
     if (attention) {
       panelBody.append(text("p", "Automatic recovery could not be proven. Review and repair the plugin and Minecraft state, then re-check. Maintenance remains reserved until verification succeeds.", "plugins-install-warning"));
@@ -6229,7 +6228,7 @@ if (pluginsDialog && pluginsOpen) {
       const plan = await pluginRequest("install/plan", { project_id: projectID, version_id: versionID }, installController.signal);
       if (current !== installGeneration) return;
       showPanel("Plugin installation", true);
-      overlayHeader(plan.project_name, plan.description || project?.description, [plan.version_number, plan.server.server_software, plan.server.minecraft_version && `MC ${plan.server.minecraft_version}`], plan.project_id, panelAction("Install", () => applyPlugin(plan)));
+      overlayHeader(plan.project_name, plan.description || project?.description, [plan.version_number, plan.server.server_software, plan.server.minecraft_version && `MC ${plan.server.minecraft_version}`], plan.project_id, panelAction("Install", () => applyPlugin(plan)), project?.project_id === plan.project_id ? project.icon_url || "" : undefined);
       const selectedVersion = project?.version?.id === plan.version_id ? project.version : null;
       const about = infoRows(overlaySection("About this version"));
       about("Release", plan.version_number);
@@ -6285,6 +6284,7 @@ if (pluginsDialog && pluginsOpen) {
     } catch (error) {
       if (current !== installGeneration || error.name === "AbortError") return;
       if (error.message === "This release is not a direct Paper/Bukkit plugin and cannot be installed into the plugins directory." && readOnlyReview) readOnlyReview("The publisher lists Paper support, but this JAR is not a direct Paper/Bukkit plugin. It may require an external loader or a different installation path, so JustVoxel will not place it in the plugins directory.");
+      else if (error.message === "This release is a loader-based server mod and is not supported by the current Plugin installer." && readOnlyReview) readOnlyReview("Loader-based server mod - not supported by the current Plugin installer. This release requires a separate loader/runtime installation path, so JustVoxel will not place it in the plugins directory.");
       else panelError(error);
     }
   };
@@ -6483,7 +6483,7 @@ if (dashboard) {
       const allowedTabs = {
         minecraft: ["overview", "memory", "gameplay", "players", "crossplay"],
         version: ["software", "minecraft"],
-        plugins: ["discover", "installed", "updates"],
+        plugins: ["discover", "installed"],
         system: ["health", "history", "users", "security", "logs", "date-time", "wallpaper", "reset", "ups", "about"],
         migration: ["export", "import", "recovery"],
       };

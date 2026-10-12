@@ -530,6 +530,10 @@ func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerCon
 	return plan, nil
 }
 
+var errPluginLoaderArtifact = errors.New("JAR contains loader metadata without a valid direct plugin descriptor")
+
+const pluginLoaderReviewRejection = "This release is a loader-based server mod and is not supported by the current Plugin installer."
+
 const pluginDirectReviewRejection = "This release is not a direct Paper/Bukkit plugin and cannot be installed into the plugins directory."
 
 // Review only the exact requested artifact. Installation still inspects every
@@ -553,6 +557,9 @@ func reviewRootPluginArtifact(ctx context.Context, plan pluginInstallPlan) error
 		}
 		_, inspectErr := inspectStagedPlugin(file, artifact.Filename)
 		closeErr := file.Close()
+		if errors.Is(inspectErr, errPluginLoaderArtifact) {
+			return errors.New(pluginLoaderReviewRejection)
+		}
 		if inspectErr != nil {
 			return errors.New(pluginDirectReviewRejection)
 		}
@@ -739,56 +746,76 @@ func inspectStagedPlugin(file *os.File, filename string) (installedPlugin, error
 	}
 	var identity installedPlugin
 	found := false
-	for _, wanted := range []string{"paper-plugin.yml", "plugin.yml"} {
-		count := 0
-		for _, entry := range archive.File {
-			if entry.Name != wanted {
-				continue
-			}
-			count++
-			if count > 1 || entry.UncompressedSize64 > pluginMetadataLimit {
-				return identity, errors.New("Ambiguous or oversized plugin descriptor")
-			}
-			r, err := entry.Open()
-			if err != nil {
-				return identity, err
-			}
-			data, err := io.ReadAll(io.LimitReader(r, pluginMetadataLimit+1))
-			closeErr := r.Close()
-			if err != nil || closeErr != nil || len(data) > pluginMetadataLimit {
-				return identity, errors.New("Unreadable plugin descriptor")
-			}
-			fields := pluginMetadataScalars(string(data))
-			name := fields["name"]
-			if !pluginNamePattern.MatchString(name) {
-				return identity, errors.New("Plugin descriptor lacks a usable plugin name")
-			}
-			main := ""
-			mainCount := 0
-			for _, line := range strings.Split(string(data), "\n") {
-				if strings.HasPrefix(strings.TrimSpace(line), "main:") {
-					mainCount++
-					match := managedPluginMain.FindStringSubmatch(line)
-					if match == nil {
-						return identity, errors.New("Malformed plugin main class")
-					}
-					main = match[1]
-				}
-			}
-			if mainCount > 1 {
-				return identity, errors.New("Ambiguous plugin main class")
-			}
-			if found && (identity.Name != name || (identity.Main != "" && main != "" && identity.Main != main)) {
-				return identity, errors.New("Conflicting Paper/Bukkit plugin identities")
-			}
-			if !found {
-				identity = installedPlugin{Name: name, Version: fields["version"], Filename: filename, Management: "manual"}
-			}
-			if main != "" {
-				identity.Main = main
-			}
-			found = true
+	loaderBased := false
+	for _, entry := range archive.File {
+		switch entry.Name {
+		case "fabric.mod.json", "quilt.mod.json", "META-INF/mods.toml", "META-INF/neoforge.mods.toml", "META-INF/sponge_plugins.json":
+			loaderBased = true // Presence only; never parse or execute loader metadata.
 		}
+	}
+	var descriptorErr error
+	for _, wanted := range []string{"paper-plugin.yml", "plugin.yml"} {
+		err := func() error {
+			count := 0
+			for _, entry := range archive.File {
+				if entry.Name != wanted {
+					continue
+				}
+				count++
+				if count > 1 || entry.UncompressedSize64 > pluginMetadataLimit {
+					return errors.New("Ambiguous or oversized plugin descriptor")
+				}
+				r, err := entry.Open()
+				if err != nil {
+					return err
+				}
+				data, err := io.ReadAll(io.LimitReader(r, pluginMetadataLimit+1))
+				closeErr := r.Close()
+				if err != nil || closeErr != nil || len(data) > pluginMetadataLimit {
+					return errors.New("Unreadable plugin descriptor")
+				}
+				fields := pluginMetadataScalars(string(data))
+				name := fields["name"]
+				if !pluginNamePattern.MatchString(name) {
+					return errors.New("Plugin descriptor lacks a usable plugin name")
+				}
+				main := ""
+				mainCount := 0
+				for _, line := range strings.Split(string(data), "\n") {
+					if strings.HasPrefix(strings.TrimSpace(line), "main:") {
+						mainCount++
+						match := managedPluginMain.FindStringSubmatch(line)
+						if match == nil {
+							return errors.New("Malformed plugin main class")
+						}
+						main = match[1]
+					}
+				}
+				if mainCount > 1 {
+					return errors.New("Ambiguous plugin main class")
+				}
+				if found && (identity.Name != name || (identity.Main != "" && main != "" && identity.Main != main)) {
+					return errors.New("Conflicting Paper/Bukkit plugin identities")
+				}
+				if !found {
+					identity = installedPlugin{Name: name, Version: fields["version"], Filename: filename, Management: "manual"}
+				}
+				if main != "" {
+					identity.Main = main
+				}
+				found = true
+			}
+			return nil
+		}()
+		if err != nil && descriptorErr == nil {
+			descriptorErr = err
+		}
+	}
+	if !found && loaderBased {
+		return identity, errPluginLoaderArtifact
+	}
+	if descriptorErr != nil {
+		return identity, descriptorErr
 	}
 	if !found {
 		return identity, errors.New("JAR has no Paper/Bukkit plugin descriptor")

@@ -181,6 +181,7 @@ func TestModrinthPluginDefaultFiltersAndReleaseDependencies(t *testing.T) {
 	}
 	calls := 0
 	expectedLimit := "8"
+	searchIcon := "https://cdn.modrinth.com/data/abc123/icon.png"
 	pluginCatalogClient = &http.Client{Transport: pluginTestTransport(func(r *http.Request) (*http.Response, error) {
 		calls++
 		if r.URL.Scheme != "https" || r.URL.Host != "api.modrinth.com" || !strings.Contains(r.Header.Get("User-Agent"), "JustVoxel") {
@@ -201,7 +202,7 @@ func TestModrinthPluginDefaultFiltersAndReleaseDependencies(t *testing.T) {
 			if strings.Contains(facets, "server_side:") {
 				t.Fatal("deprecated server-side facets sent")
 			}
-			body = `{"hits":[{"project_id":"abc123","title":"Example","description":"Plugin","versions":["1.21.8"]}],"total_hits":1}`
+			body = `{"hits":[{"project_id":"abc123","title":"Example","description":"Plugin","icon_url":` + strconv.Quote(searchIcon) + `,"versions":["1.21.8"]}],"total_hits":1}`
 		case "/v2/project/abc123/version":
 			if r.URL.Query().Get("include_changelog") != "false" {
 				t.Fatal("unused changelog requested")
@@ -223,9 +224,19 @@ func TestModrinthPluginDefaultFiltersAndReleaseDependencies(t *testing.T) {
 		t.Fatalf("catalog: %d %s", rr.Code, rr.Body.String())
 	}
 	project := out.Projects[0]
-	if project.Version == nil || project.Version.ID != "release" || len(project.Version.Dependencies) != 3 || !project.Compatible || project.Compatibility != "Compatible according to publisher metadata" || calls != 2 {
+	if project.IconURL != searchIcon || project.Version == nil || project.Version.ID != "release" || len(project.Version.Dependencies) != 3 || !project.Compatible || project.Compatibility != "Compatible according to publisher metadata" || calls != 2 {
 		t.Fatalf("project: %#v calls=%d", project, calls)
 	}
+	for _, invalid := range []string{"", "https://evil.example/data/abc123/icon.png", "https://cdn.modrinth.com/data/other/icon.png", strings.Repeat("x", 2049)} {
+		searchIcon = invalid
+		rr := httptest.NewRecorder()
+		s.adminPluginsDiscover(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/discover", ""))
+		var catalog pluginCatalog
+		if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &catalog) != nil || len(catalog.Projects) != 1 || catalog.Projects[0].IconURL != "" || catalog.Projects[0].Version == nil {
+			t.Fatalf("invalid icon failed catalog or escaped validation: %d %s", rr.Code, rr.Body.String())
+		}
+	}
+
 	for _, value := range []string{"1", "12"} {
 		expectedLimit = value
 		rr := httptest.NewRecorder()
@@ -706,5 +717,78 @@ func TestPluginDiscoverBoundedTopUpRawCursor(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPluginIconSearchURLSkipsMetadataAndVerifiesBytes(t *testing.T) {
+	const iconURL = "https://cdn.modrinth.com/data/root/icon.png"
+	old := pluginCatalogClient
+	defer func() { pluginCatalogClient = old }()
+	for _, tc := range []struct {
+		name, kind          string
+		oversized, mismatch bool
+		status, want        int
+	}{
+		{name: "valid", kind: "image/png", status: 200, want: 200},
+		{name: "bad MIME", kind: "text/html", status: 200, want: 502},
+		{name: "mismatch", kind: "image/png", mismatch: true, status: 200, want: 502},
+		{name: "oversized", kind: "image/png", oversized: true, status: 200, want: 502},
+		{name: "redirect", kind: "image/png", status: 302, want: 502},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			pluginCatalogClient = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }, Transport: pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+				calls++
+				if calls != 1 || r.URL.String() != iconURL {
+					t.Fatalf("Discover icon must fetch only CDN image: %s", r.URL)
+				}
+				data := pluginIconImage(t, "image/png")
+				if tc.oversized {
+					data = bytes.Repeat([]byte("x"), pluginIconLimit+1)
+				}
+				if tc.mismatch {
+					data = []byte("private upstream body")
+				}
+				return &http.Response{StatusCode: tc.status, Header: http.Header{"Content-Type": {tc.kind}, "Location": {"https://evil.example/"}}, Body: io.NopCloser(bytes.NewReader(data))}, nil
+			})}
+			s := surfaceTestServer(t, roleAdministrator)
+			rr := httptest.NewRecorder()
+			s.adminPluginIcon(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/icon?"+url.Values{"project_id": {"root"}, "icon_url": {iconURL}}.Encode(), ""))
+			if rr.Code != tc.want || calls != 1 {
+				t.Fatalf("icon: %d, calls %d", rr.Code, calls)
+			}
+			if tc.want != 200 && (bytes.Contains(rr.Body.Bytes(), []byte("private upstream body")) || rr.Header().Get("Content-Type") == "image/png") {
+				t.Fatal("unverified bytes exposed")
+			}
+		})
+	}
+}
+
+func TestPluginIconRejectsInvalidSearchURLQuery(t *testing.T) {
+	old := pluginCatalogClient
+	defer func() { pluginCatalogClient = old }()
+	pluginCatalogClient = &http.Client{Transport: pluginTestTransport(func(*http.Request) (*http.Response, error) {
+		t.Fatal("invalid URL contacted upstream")
+		return nil, nil
+	})}
+	s := surfaceTestServer(t, roleAdministrator)
+	const good = "https://cdn.modrinth.com/data/root/icon.png"
+	for _, raw := range []string{"", "http://cdn.modrinth.com/data/root/icon.png", "https://evil.example/data/root/icon.png", "https://cdn.modrinth.com/data/other/icon.png", "https://user@cdn.modrinth.com/data/root/icon.png", good + "?x=1", good + "?", good + "#x", good + "#", "https://cdn.modrinth.com/data/root/" + strings.Repeat("a", 2048) + ".png"} {
+		rr := httptest.NewRecorder()
+		s.adminPluginIcon(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/icon?"+url.Values{"project_id": {"root"}, "icon_url": {raw}}.Encode(), ""))
+		if rr.Code != 400 {
+			t.Fatalf("unsafe icon URL accepted %q: %d", raw, rr.Code)
+		}
+	}
+	for _, query := range []url.Values{
+		{"project_id": {"root"}, "icon_url": {good, good}},
+		{"project_id": {"root", "root"}, "icon_url": {good}},
+		{"project_id": {"root"}, "icon_url": {good}, "unknown": {"x"}},
+	} {
+		rr := httptest.NewRecorder()
+		s.adminPluginIcon(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/icon?"+query.Encode(), ""))
+		if rr.Code != 400 {
+			t.Fatalf("unsafe icon query accepted: %d", rr.Code)
+		}
 	}
 }

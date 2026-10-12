@@ -21,6 +21,7 @@ type fakePluginsWorkspaceAPI struct {
 	updates        bool
 	query          url.Values
 	iconCalls      int
+	iconURL        string
 	iconProjectID  string
 	iconError      error
 }
@@ -105,7 +106,7 @@ func TestPluginsWorkspaceUsesExistingWindowAndSafeRendering(t *testing.T) {
 		t.Fatal(err)
 	}
 	markup, behavior := string(header), string(script)
-	for _, want := range []string{`class="control-tile nav-admin-only" type="button" data-plugins-open`, `data-workspace-window="plugins"`, `data-plugins-tab="discover"`, `data-plugins-tab="installed"`, `data-plugins-tab="updates"`, `role="switch" name="compatible_only" type="checkbox" checked`, `role="switch" name="release_only" type="checkbox" checked`} {
+	for _, want := range []string{`class="control-tile nav-admin-only" type="button" data-plugins-open`, `data-workspace-window="plugins"`, `data-plugins-tab="discover"`, `data-plugins-tab="installed"`, `role="switch" name="compatible_only" type="checkbox" checked`, `role="switch" name="release_only" type="checkbox" checked`} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("plugin contract missing %s", want)
 		}
@@ -121,7 +122,7 @@ func TestPluginsWorkspaceUsesExistingWindowAndSafeRendering(t *testing.T) {
 			t.Fatalf("behavior missing %s", want)
 		}
 	}
-	for _, unsafe := range []string{"api.modrinth.com", "innerHTML", "outerHTML", "insertAdjacentHTML", "cdn.modrinth.com", "icon_url", "showModal("} {
+	for _, unsafe := range []string{"api.modrinth.com", "innerHTML", "outerHTML", "insertAdjacentHTML", "cdn.modrinth.com", "showModal("} {
 		if strings.Contains(pluginScript, unsafe) {
 			t.Fatalf("unsafe plugin browser behavior %s", unsafe)
 		}
@@ -147,7 +148,7 @@ func TestPluginsWorkspaceCompactInfoPresentation(t *testing.T) {
 		t.Fatal("compact plugin renderers missing")
 	}
 	info := behavior[start:project]
-	for _, want := range []string{`card.tabIndex = 0`, `card.setAttribute("role", "button")`, `card.setAttribute("aria-haspopup", "dialog")`, `card.setAttribute("aria-controls", "plugins-overlay")`, `event.key === "Enter" || event.key === " "`, `node.classList.toggle("is-selected", node === card)`, `card.addEventListener("click", open)`, "showPanel(`Info for ${name}`, true)", `renderInfo();`, `overlayActions(panelAction("Close"`, `"plugins-icon-tile"`, `header.append(identityTile(name, projectID), copy)`} {
+	for _, want := range []string{`card.tabIndex = 0`, `card.setAttribute("role", "button")`, `card.setAttribute("aria-haspopup", "dialog")`, `card.setAttribute("aria-controls", "plugins-overlay")`, `event.key === "Enter" || event.key === " "`, `node.classList.toggle("is-selected", node === card)`, `card.addEventListener("click", open)`, "showPanel(`Info for ${name}`, true)", `renderInfo();`, `overlayActions(panelAction("Close"`, `"plugins-icon-tile"`, `header.append(identityTile(name, projectID, iconURL), copy)`} {
 		if !strings.Contains(info, want) {
 			t.Fatalf("whole-card overlay behavior missing %s", want)
 		}
@@ -170,7 +171,7 @@ func TestPluginsWorkspaceCompactInfoPresentation(t *testing.T) {
 		}
 	}
 	inventory := behavior[installed:end]
-	for _, want := range []string{`const name = plugin.name || plugin.filename;`, `addInfo(card, name, () => {`, `overlayHeader(name, "", [plugin.version || "Version unknown", management], projectID)`, `tab === "updates"`, `"Needs attention"`, `"plugins-inventory-status"`, `"JustVoxel managed"`, `"Managed by Plugins"`, `"Manual / unmanaged"`} {
+	for _, want := range []string{`const name = plugin.name || plugin.filename;`, `addInfo(card, name, () => {`, `overlayHeader(name, "", [plugin.version || "Version unknown", management], projectID)`, `plugin.update_status?.startsWith("Update available")`, `"Needs attention"`, `"plugins-inventory-status"`, `"JustVoxel managed"`, `"Managed by Plugins"`, `"Manual / unmanaged"`} {
 		if !strings.Contains(inventory, want) {
 			t.Fatalf("Installed/Updates presentation missing %s", want)
 		}
@@ -337,7 +338,7 @@ func TestPluginsInstallReviewProgressAndOwnershipRendering(t *testing.T) {
 		`pluginRequest("install/plan"`, `plan.project_name`, `overlaySection("Compatibility")`, `plan.artifacts`, `plan.installation_location`,
 		`if (plan.confirmation_required)`, `plan.players`, `confirm_players: String(plan.confirmation_required === true)`,
 		`plan_fingerprint: plan.plan_fingerprint`, `operation.stage`, `operation.status`, `install-operation?id=`,
-		`"View in Installed"`, `"Install another plugin"`, `"Done"`, `"Managed by Plugins"`, `"JustVoxel managed"`, `"Manual / unmanaged"`,
+		`"View in Installed"`, `"Done"`, `"Managed by Plugins"`, `"JustVoxel managed"`, `"Manual / unmanaged"`,
 		`interactiveCard(card, project.title, () => reviewRejection`, `addInfo(card, name, () => {`, `"Administrator attention required"`,
 	} {
 		if !strings.Contains(script, want) {
@@ -421,7 +422,7 @@ func TestPluginsAdditionalInfoAndStructuredInstallPresentation(t *testing.T) {
 		}
 	}
 	helpers := script[:project]
-	for _, want := range []string{`"plugins-overlay-header"`, `"plugins-overlay-identity"`, `identity.append(identityTile(name, projectID), text("h3", name))`, `["required", "Required"]`, `["optional", "Optional"]`, `["incompatible", "Incompatible"]`, `["other", "Embedded / other"]`, `dependency.name || dependency.title || dependency.file_name`, `plugins-dependency-ids`} {
+	for _, want := range []string{`"plugins-overlay-header"`, `"plugins-overlay-identity"`, `identity.append(identityTile(name, projectID, iconURL), text("h3", name))`, `["required", "Required"]`, `["optional", "Optional"]`, `["incompatible", "Incompatible"]`, `["other", "Embedded / other"]`, `dependency.name || dependency.title || dependency.file_name`, `plugins-dependency-ids`} {
 		if !strings.Contains(helpers, want) {
 			t.Fatal("overlay header or dependency grouping missing", want)
 		}
@@ -468,7 +469,7 @@ func TestPluginsAdditionalInfoAndStructuredInstallPresentation(t *testing.T) {
 		}
 	}
 	progress := script[progressStart:poll]
-	for _, want := range []string{`["Prepare", "Backup", "Install", "Restart", "Verify"]`, `[operation.stage]`, `operation.state`, `operation.status`, `"Plugin installation verified"`, `"Plugin state verified"`, `"Installation did not complete"`, `"Administrator attention required"`, `"Re-check after repair"`, `pluginRequest("install/acknowledge"`, `operation_id: operation.operation_id`, `payload.operation.state !== "resolved"`, `"View in Installed"`, `"Install another plugin"`, `"Done"`, `overlayActions(`} {
+	for _, want := range []string{`["Prepare", "Backup", "Install", "Restart", "Verify"]`, `[operation.stage]`, `operation.state`, `operation.status`, `"Plugin installation verified"`, `"Plugin state verified"`, `"Installation did not complete"`, `"Administrator attention required"`, `"Re-check after repair"`, `pluginRequest("install/acknowledge"`, `operation_id: operation.operation_id`, `payload.operation.state !== "resolved"`, `"View in Installed"`, `"Done"`, `overlayActions(`} {
 		if !strings.Contains(progress, want) {
 			t.Fatal("persistent progress action missing", want)
 		}
@@ -493,12 +494,15 @@ func TestPluginsAdditionalInfoAndStructuredInstallPresentation(t *testing.T) {
 	}
 }
 
-func (f *fakePluginsWorkspaceAPI) AdminPluginIcon(_ context.Context, session, projectID string) (api.PluginIcon, error) {
+func (f *fakePluginsWorkspaceAPI) AdminPluginIcon(_ context.Context, session, projectID string, iconURL ...string) (api.PluginIcon, error) {
 	if session != "session-token" {
 		return api.PluginIcon{}, api.ErrUnauthorized
 	}
 	f.iconCalls++
 	f.iconProjectID = projectID
+	if len(iconURL) == 1 {
+		f.iconURL = iconURL[0]
+	}
 	return api.PluginIcon{ContentType: "image/png", Data: []byte("\x89PNG\r\n\x1a\nfixture")}, f.iconError
 }
 
@@ -573,7 +577,7 @@ func TestPluginsWorkspaceSharedSameOriginLogoAndFallback(t *testing.T) {
 		t.Fatal("identity helper missing")
 	}
 	helper := behavior[start : start+end]
-	for _, want := range []string{`(name, projectID)`, `"plugins-icon-tile"`, `tile.dataset.tone`, `typeof projectID === "string"`, `/^[A-Za-z0-9]{1,64}$/`, `document.createElement("img")`, `image.alt = ""`, `image.hidden = true`, `image.src = ` + "`/api/plugins/workspace/icon?project_id=${encodeURIComponent(projectID)}`", `image.addEventListener("error"`, `image.remove()`, `tile.classList.remove("has-logo")`, `tile.append(image)`} {
+	for _, want := range []string{`(name, projectID, iconURL)`, `"plugins-icon-tile"`, `tile.dataset.tone`, `typeof projectID === "string"`, `/^[A-Za-z0-9]{1,64}$/`, `document.createElement("img")`, `image.alt = ""`, `image.hidden = true`, `const query = new URLSearchParams({ project_id: projectID })`, `query.set("icon_url", iconURL)`, `image.src = ` + "`/api/plugins/workspace/icon?${query}`", `image.addEventListener("error"`, `image.remove()`, `tile.classList.remove("has-logo")`, `tile.append(image)`} {
 		if !strings.Contains(helper, want) {
 			t.Fatalf("shared icon contract missing %s", want)
 		}
@@ -582,16 +586,16 @@ func TestPluginsWorkspaceSharedSameOriginLogoAndFallback(t *testing.T) {
 	if strings.Count(workspace, `document.createElement("img")`) != 1 || strings.Count(workspace, `image.src =`) != 1 {
 		t.Fatal("plugin images must use only the shared identity helper")
 	}
-	for _, unsafe := range []string{"icon_url", "cdn.modrinth.com", "api.modrinth.com", "image.src = project", "image.src = plugin"} {
+	for _, unsafe := range []string{"cdn.modrinth.com", "api.modrinth.com", "image.src = project", "image.src = plugin"} {
 		if strings.Contains(workspace, unsafe) {
 			t.Fatalf("upstream icon leaked into frontend: %s", unsafe)
 		}
 	}
 	for _, want := range []string{
-		`identity.append(identityTile(name, projectID), text("h3", name))`,
-		`header.append(identityTile(name, projectID), copy)`,
-		`overlayHeader(project.title, project.description, identityBadges, project.project_id)`,
-		`}, project.project_id)`,
+		`identity.append(identityTile(name, projectID, iconURL), text("h3", name))`,
+		`header.append(identityTile(name, projectID, iconURL), copy)`,
+		`overlayHeader(project.title, project.description, identityBadges, project.project_id, null, project.icon_url || "")`,
+		`}, project.project_id, project.icon_url || "")`,
 		`overlayHeader(plan.project_name, plan.description || project?.description, [plan.version_number, plan.server.server_software,`,
 		`const projectID = plugin.project_id || plugin.icon_project_id || undefined`,
 		`overlayHeader(name, "", [plugin.version || "Version unknown", management], projectID)`,
@@ -635,7 +639,7 @@ func TestPluginsWorkspaceApprovedCompactHierarchyAndStageFlow(t *testing.T) {
 		return script[a : a+b]
 	}
 	header := between("  const interactiveCard =", "  const infoRows =")
-	for _, want := range []string{`copy.className = "plugins-card-copy"`, `copy.append(heading)`, `card.querySelector(".plugins-card-description, .plugins-card-release")`, `copy.append(description)`, `header.append(identityTile(name, projectID), copy)`} {
+	for _, want := range []string{`copy.className = "plugins-card-copy"`, `copy.append(heading)`, `card.querySelector(".plugins-card-description, .plugins-card-release")`, `copy.append(description)`, `header.append(identityTile(name, projectID, iconURL), copy)`} {
 		if !strings.Contains(header, want) {
 			t.Fatal("identity/header hierarchy missing", want)
 		}
@@ -655,7 +659,7 @@ func TestPluginsWorkspaceApprovedCompactHierarchyAndStageFlow(t *testing.T) {
 		}
 	}
 	discover := between("  const renderProject =", "  const renderInstalled =")
-	if strings.Contains(discover, `...(version?.loaders || [])`) || !strings.Contains(discover, `overlayHeader(project.title, project.description, identityBadges, project.project_id)`) {
+	if strings.Contains(discover, `...(version?.loaders || [])`) || !strings.Contains(discover, `overlayHeader(project.title, project.description, identityBadges, project.project_id, null, project.icon_url || "")`) {
 		t.Fatal("Info header must reuse concise server-context badges")
 	}
 	for _, want := range []string{`compatibility("Supported platforms", (version?.loaders || []).join(" / ")`, `new Set(version?.game_versions || [])`} {
@@ -1026,7 +1030,7 @@ func TestPluginsWorkspaceVMCorrectionHeaderButtonsAndBackdrop(t *testing.T) {
 		return script[a:b]
 	}
 	header := between("  const overlayHeader =", "  const overlaySection =")
-	for _, want := range []string{`projectID, action = null`, `identity.append(identityTile(name, projectID), text("h3", name));`, `if (action) identity.append(action);`, `header.append(identity);`} {
+	for _, want := range []string{`projectID, action = null`, `identity.append(identityTile(name, projectID, iconURL), text("h3", name));`, `if (action) identity.append(action);`, `header.append(identity);`} {
 		if !strings.Contains(header, want) {
 			t.Fatal("shared top identity action missing", want)
 		}
@@ -1104,7 +1108,6 @@ func TestPluginsWorkspaceVMCorrectionHeaderButtonsAndBackdrop(t *testing.T) {
 		`<button class="system-monitor-header-button workspace-header-close" type="button" data-plugins-close`,
 		`<button type="button" data-plugins-tab="discover"`,
 		`<button type="button" data-plugins-tab="installed"`,
-		`<button type="button" data-plugins-tab="updates"`,
 		`<button type="button" data-plugins-previous`,
 		`<button type="button" data-plugins-next`,
 	} {
@@ -1115,7 +1118,7 @@ func TestPluginsWorkspaceVMCorrectionHeaderButtonsAndBackdrop(t *testing.T) {
 	for _, want := range []string{
 		`const button = text("button", label, secondary ? "secondary" : "");`,
 		`panelAction("Install"`, `panelAction("Close"`, `panelAction("Done"`,
-		`panelAction("View in Installed"`, `panelAction("Install another plugin"`,
+		`panelAction("View in Installed"`,
 		`panelAction("Re-check after repair"`,
 		`const card = document.createElement("article");`,
 	} {
@@ -1293,7 +1296,7 @@ const pluginRequest = async (route) => { requests.push(route); if (route !== "in
   assert.deepEqual(shown, safe ? [] : [state]);
   if (state === "needs_attention") assert.equal(timers.size, 0);
  }
- for (const inventoryTab of ["installed","updates"]) {
+ for (const inventoryTab of ["installed"]) {
   tab = inventoryTab; pluginsDialog.open = true; operation = {state:"needs_attention"}; requests = []; timers.clear(); loads = 0;
   await recheckBlockedInventory(generation);
   assert.deepEqual(requests, ["install-operation"]); assert.equal(loads, 0); assert.equal(timers.size, 1);
@@ -1384,5 +1387,122 @@ assert.equal(loads,4);
 	command := exec.Command("node", "-e", program)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("live plugin search: %v\n%s", err, output)
+	}
+}
+
+func TestPluginWorkspaceApprovedPolish(t *testing.T) {
+	script := pluginWorkspaceScript(t)
+	header, err := assets.ReadFile("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(header), `data-plugins-tab="updates"`) || strings.Contains(script, `tab === "updates"`) || strings.Contains(script, `"Install another plugin"`) {
+		t.Fatal("removed workspace actions remain")
+	}
+	if !strings.Contains(string(header), `data-plugins-tab="discover"`) || !strings.Contains(string(header), `data-plugins-tab="installed"`) {
+		t.Fatal("supported tabs missing")
+	}
+	operation := pluginScriptSection(t, script, "  const showOperation =", "  const pollOperation =")
+	success := pluginScriptSection(t, operation, "    if (success) {", "    if (attention) {")
+	if strings.Count(success, "panelAction(") != 2 || !strings.Contains(success, `panelAction("View in Installed"`) || !strings.Contains(success, `}, true), panelAction("Done", () => { closePanel(); load(); }));`) || !strings.Contains(success, `pluginsDialog.querySelector('[data-plugins-tab="installed"]').click()`) {
+		t.Fatal("success must offer secondary Installed and primary refreshing Done")
+	}
+	inventory := pluginScriptSection(t, script, "  const renderInstalled =", "  // Review, progress")
+	for _, want := range []string{`plugin.update_status?.startsWith("Update available")`, `if (updateAvailable) summary = plugin.update_status;`, `if (attention) summary = "Needs attention"`, `status.classList.add("is-attention")`, `}, projectID)`} {
+		if !strings.Contains(inventory, want) {
+			t.Fatal("Installed status/fallback lost", want)
+		}
+	}
+	project := pluginScriptSection(t, script, "  const renderProject =", "  const renderInstalled =")
+	for _, want := range []string{`project.project_id, project.icon_url`, `project.project_id, null, project.icon_url`} {
+		if !strings.Contains(project, want) {
+			t.Fatal("Discover must supply validated search icon", want)
+		}
+	}
+	review := pluginScriptSection(t, script, "  const reviewPlugin =", "  const resumePluginInstall =")
+	for _, want := range []string{`project?.project_id === plan.project_id ? project.icon_url || "" : undefined`, `This release is a loader-based server mod and is not supported by the current Plugin installer.`, `Loader-based server mod - not supported by the current Plugin installer. This release requires a separate loader/runtime installation path, so JustVoxel will not place it in the plugins directory.`} {
+		if !strings.Contains(review, want) {
+			t.Fatal("Discover review explanation/icon missing", want)
+		}
+	}
+}
+
+func TestPluginsWorkspaceIconSearchURLValidationAndForwarding(t *testing.T) {
+	client := &fakePluginsWorkspaceAPI{}
+	client.role = "administrator"
+	app, err := New(client, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const good = "https://cdn.modrinth.com/data/root/icon.png"
+	request := func(query url.Values) *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/api/plugins/workspace/icon?"+query.Encode(), ""))
+		return rr
+	}
+	for _, raw := range []string{"", "http://cdn.modrinth.com/data/root/icon.png", "https://evil.example/data/root/icon.png", "https://cdn.modrinth.com/data/other/icon.png", "https://user@cdn.modrinth.com/data/root/icon.png", good + "?x=1", good + "?", good + "#x", good + "#", "https://cdn.modrinth.com/data/root/" + strings.Repeat("a", 2048) + ".png"} {
+		if rr := request(url.Values{"project_id": {"root"}, "icon_url": {raw}}); rr.Code != 400 {
+			t.Fatalf("unsafe icon accepted %q: %d", raw, rr.Code)
+		}
+	}
+	for _, query := range []url.Values{
+		{"project_id": {"root"}, "icon_url": {good, good}},
+		{"project_id": {"root", "root"}, "icon_url": {good}},
+		{"project_id": {"root"}, "icon_url": {good}, "unknown": {"x"}},
+	} {
+		if rr := request(query); rr.Code != 400 {
+			t.Fatalf("unsafe query accepted: %d", rr.Code)
+		}
+	}
+	if client.iconCalls != 0 {
+		t.Fatal("unsafe icon forwarded to Agent")
+	}
+	if rr := request(url.Values{"project_id": {"root"}, "icon_url": {good}}); rr.Code != 200 || client.iconURL != good || client.iconProjectID != "root" || client.iconCalls != 1 {
+		t.Fatal("validated Discover icon not forwarded")
+	}
+	client.iconURL = ""
+	if rr := request(url.Values{"project_id": {"root"}}); rr.Code != 200 || client.iconURL != "" || client.iconCalls != 2 {
+		t.Fatal("Installed project-only fallback broken")
+	}
+}
+
+func TestPluginWorkspaceLoaderReviewRejectionIsForwardedWithoutInstall(t *testing.T) {
+	message := "This release is a loader-based server mod and is not supported by the current Plugin installer."
+	client := &fakePluginsInstallAPI{planError: &api.ResponseError{StatusCode: http.StatusConflict, Message: message}}
+	app, err := New(client, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "http://example/api/plugins/workspace/install/plan", "csrf=csrf-token&project_id=root&version_id=release"))
+	if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), message) || client.plans != 1 || client.installs != 0 || client.operations != 0 {
+		t.Fatal("loader rejection lost or started mutation")
+	}
+}
+
+func TestPluginIdentityTileUsesSameOriginForSearchAndInstalled(t *testing.T) {
+	script := pluginWorkspaceScript(t)
+	helper := pluginScriptSection(t, script, "  const identityTile =", "  const overlayHeader =")
+	program := `
+const assert = require("node:assert/strict");
+const text = () => ({dataset:{}, setAttribute(){}, append(image){this.image=image;}, classList:{add(){},remove(){}}});
+const document = {createElement:()=>({addEventListener(){}})};
+` + helper + `
+const icon = "https://cdn.modrinth.com/data/root/icon.png";
+const discover = identityTile("Example", "root", icon);
+const installed = identityTile("Example", "root");
+for (const tile of [discover, installed]) {
+ const url = new URL(tile.image.src, "https://appliance.example");
+ assert.equal(url.origin, "https://appliance.example");
+ assert.equal(url.pathname, "/api/plugins/workspace/icon");
+ assert.equal(url.searchParams.get("project_id"), "root");
+}
+assert.equal(new URL(discover.image.src, "https://appliance.example").searchParams.get("icon_url"), icon);
+assert.equal(new URL(installed.image.src, "https://appliance.example").searchParams.has("icon_url"), false);
+assert.equal(identityTile("Manual", undefined).image, undefined);
+assert.equal(identityTile("No search icon", "root", "").image, undefined);
+`
+	if output, err := exec.Command("node", "-e", program).CombinedOutput(); err != nil {
+		t.Fatalf("same-origin icon delivery: %v\n%s", err, output)
 	}
 }

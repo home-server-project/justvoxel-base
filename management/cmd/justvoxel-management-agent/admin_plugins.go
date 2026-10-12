@@ -82,6 +82,7 @@ type pluginCatalogVersion struct {
 	Dependencies []pluginDependency   `json:"dependencies"`
 }
 type pluginCatalogProject struct {
+	IconURL          string                `json:"icon_url,omitempty"`
 	ID               string                `json:"project_id"`
 	Slug             string                `json:"slug"`
 	InstallAvailable bool                  `json:"install_available"`
@@ -576,6 +577,9 @@ func (s *server) adminPluginsDiscover(w http.ResponseWriter, r *http.Request) {
 			if !modrinthPluginID.MatchString(project.ID) {
 				continue
 			}
+			if _, err := pluginIconURL(project.IconURL, project.ID); err != nil {
+				project.IconURL = ""
+			}
 			project.Version = nil
 			project.InstallAvailable = false
 			project.Compatible = false
@@ -649,7 +653,7 @@ var pluginIconFilename = regexp.MustCompile(`^[A-Za-z0-9_-]+\.(png|jpg|jpeg|webp
 
 func pluginIconURL(raw, projectID string) (*url.URL, error) {
 	u, err := url.Parse(raw)
-	if err != nil || len(raw) > 2048 || u.Scheme != "https" || u.Host != "cdn.modrinth.com" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" {
+	if err != nil || len(raw) > 2048 || u.Scheme != "https" || u.Host != "cdn.modrinth.com" || u.User != nil || u.RawQuery != "" || u.ForceQuery || strings.Contains(raw, "#") || u.Fragment != "" || u.RawPath != "" {
 		return nil, errors.New("invalid plugin icon URL")
 	}
 	parts := strings.Split(u.Path, "/")
@@ -666,28 +670,38 @@ func (s *server) adminPluginIcon(w http.ResponseWriter, r *http.Request) {
 	}
 	query, err := url.ParseQuery(r.URL.RawQuery)
 	projectID := query.Get("project_id")
-	if err != nil || len(query) != 1 || len(query["project_id"]) != 1 || !modrinthPluginID.MatchString(projectID) {
+	if err != nil || len(query) > 2 || len(query["project_id"]) != 1 || (len(query) == 2 && len(query["icon_url"]) != 1) || len(query["icon_url"]) > 1 || !modrinthPluginID.MatchString(projectID) {
 		http.Error(w, "Invalid plugin icon request.", http.StatusBadRequest)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 	defer cancel()
-	var project struct {
-		ID      string `json:"id"`
-		IconURL string `json:"icon_url"`
-	}
-	if err := modrinthPluginJSON(ctx, "/project/"+projectID, nil, &project); err != nil || project.ID != projectID {
-		http.Error(w, "Plugin icon unavailable.", http.StatusBadGateway)
-		return
-	}
-	if project.IconURL == "" {
-		http.Error(w, "Plugin icon unavailable.", http.StatusNotFound)
-		return
-	}
-	icon, err := pluginIconURL(project.IconURL, projectID)
-	if err != nil {
-		http.Error(w, "Plugin icon unavailable.", http.StatusBadGateway)
-		return
+	rawIcon, supplied := query["icon_url"]
+	var icon *url.URL
+	if supplied {
+		icon, err = pluginIconURL(rawIcon[0], projectID)
+		if err != nil {
+			http.Error(w, "Invalid plugin icon request.", http.StatusBadRequest)
+			return
+		}
+	} else {
+		var project struct {
+			ID      string `json:"id"`
+			IconURL string `json:"icon_url"`
+		}
+		if err := modrinthPluginJSON(ctx, "/project/"+projectID, nil, &project); err != nil || project.ID != projectID {
+			http.Error(w, "Plugin icon unavailable.", http.StatusBadGateway)
+			return
+		}
+		if project.IconURL == "" {
+			http.Error(w, "Plugin icon unavailable.", http.StatusNotFound)
+			return
+		}
+		icon, err = pluginIconURL(project.IconURL, projectID)
+		if err != nil {
+			http.Error(w, "Plugin icon unavailable.", http.StatusBadGateway)
+			return
+		}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, icon.String(), nil)
 	if err != nil {

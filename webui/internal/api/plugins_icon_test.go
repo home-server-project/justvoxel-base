@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -71,5 +72,35 @@ func TestAdminPluginIconRejectsUnsafeAgentResponse(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAdminPluginIconForwardsSearchURLOnlyToAgent(t *testing.T) {
+	const iconURL = "https://cdn.modrinth.com/data/root/icon.png"
+	data := []byte("\x89PNG\r\n\x1a\nfixture")
+	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		query := r.URL.Query()
+		if r.URL.Host != "unix" || r.URL.Path != "/v1/admin/plugins/icon" || len(query) != 2 || query.Get("project_id") != "root" || len(query["icon_url"]) != 1 || query.Get("icon_url") != iconURL || r.Header.Get("Authorization") != "Bearer session-token" {
+			t.Fatalf("search icon bypassed Agent: %s", r.URL)
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"image/png"}}, Body: io.NopCloser(bytes.NewReader(data))}, nil
+	})}}
+	icon, err := client.AdminPluginIcon(context.Background(), "session-token", "root", iconURL)
+	if err != nil || !bytes.Equal(icon.Data, data) {
+		t.Fatal("verified search icon lost", err)
+	}
+	if _, err := client.AdminPluginIcon(context.Background(), "session-token", "root", iconURL, iconURL); err == nil {
+		t.Fatal("duplicate icon URL accepted")
+	}
+}
+
+func TestPluginCatalogSearchIconContract(t *testing.T) {
+	var project PluginCatalogProject
+	if err := json.Unmarshal([]byte(`{"project_id":"root","icon_url":"https://cdn.modrinth.com/data/root/icon.png"}`), &project); err != nil || project.IconURL != "https://cdn.modrinth.com/data/root/icon.png" {
+		t.Fatal("catalog icon lost", err)
+	}
+	encoded, err := json.Marshal(PluginCatalogProject{ID: "root"})
+	if err != nil || bytes.Contains(encoded, []byte(`"icon_url"`)) {
+		t.Fatal("absent icon must remain optional", err)
 	}
 }

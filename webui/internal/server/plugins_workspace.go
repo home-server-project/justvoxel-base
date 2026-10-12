@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strings"
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
 )
@@ -214,6 +215,21 @@ func (a *App) pluginsWorkspaceInstallAcknowledge(w http.ResponseWriter, r *http.
 
 var pluginIconProjectID = regexp.MustCompile(`^[A-Za-z0-9]{1,64}$`)
 
+// Match the Agent's strict project-bound CDN URL rules before forwarding.
+func pluginIconURL(raw, projectID string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil || len(raw) > 2048 || u.Scheme != "https" || u.Host != "cdn.modrinth.com" || u.User != nil || u.RawQuery != "" || u.ForceQuery || strings.Contains(raw, "#") || u.Fragment != "" || u.RawPath != "" {
+		return nil, errors.New("invalid plugin icon URL")
+	}
+	parts := strings.Split(u.Path, "/")
+	if len(parts) != 4 || parts[0] != "" || parts[1] != "data" || parts[2] != projectID || !pluginIconFilename.MatchString(parts[3]) {
+		return nil, errors.New("invalid plugin icon path")
+	}
+	return u, nil
+}
+
+var pluginIconFilename = regexp.MustCompile(`^[A-Za-z0-9_-]+\.(png|jpg|jpeg|webp)$`)
+
 func (a *App) pluginsWorkspaceIcon(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
@@ -222,18 +238,25 @@ func (a *App) pluginsWorkspaceIcon(w http.ResponseWriter, r *http.Request) {
 	}
 	query, err := url.ParseQuery(r.URL.RawQuery)
 	projectID := query.Get("project_id")
-	if err != nil || len(query) != 1 || len(query["project_id"]) != 1 || !pluginIconProjectID.MatchString(projectID) {
+	if err != nil || len(query) > 2 || len(query["project_id"]) != 1 || (len(query) == 2 && len(query["icon_url"]) != 1) || len(query["icon_url"]) > 1 || !pluginIconProjectID.MatchString(projectID) {
 		http.Error(w, "Invalid plugin icon request.", http.StatusBadRequest)
 		return
 	}
+	iconURL := query["icon_url"]
+	if len(iconURL) == 1 {
+		if _, err := pluginIconURL(iconURL[0], projectID); err != nil {
+			http.Error(w, "Invalid plugin icon request.", http.StatusBadRequest)
+			return
+		}
+	}
 	client, ok := a.api.(interface {
-		AdminPluginIcon(context.Context, string, string) (api.PluginIcon, error)
+		AdminPluginIcon(context.Context, string, string, ...string) (api.PluginIcon, error)
 	})
 	if !ok {
 		http.Error(w, "Plugin icon unavailable.", http.StatusServiceUnavailable)
 		return
 	}
-	icon, err := client.AdminPluginIcon(r.Context(), session, projectID)
+	icon, err := client.AdminPluginIcon(r.Context(), session, projectID, iconURL...)
 	if err != nil {
 		status := http.StatusBadGateway
 		var response *api.ResponseError

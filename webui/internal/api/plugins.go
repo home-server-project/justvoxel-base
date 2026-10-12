@@ -50,6 +50,7 @@ type PluginCatalogVersion struct {
 	Dependencies []PluginDependency `json:"dependencies"`
 }
 type PluginCatalogProject struct {
+	IconURL          string                `json:"icon_url,omitempty"`
 	ID               string                `json:"project_id"`
 	Slug             string                `json:"slug"`
 	InstallAvailable bool                  `json:"install_available"`
@@ -211,9 +212,15 @@ type PluginIcon struct {
 	ContentType string
 }
 
-func (c *Client) AdminPluginIcon(ctx context.Context, session, projectID string) (PluginIcon, error) {
+func (c *Client) AdminPluginIcon(ctx context.Context, session, projectID string, iconURL ...string) (PluginIcon, error) {
 	var out PluginIcon
 	query := url.Values{"project_id": {projectID}}
+	if len(iconURL) > 1 {
+		return out, errors.New("Invalid plugin icon request.")
+	}
+	if len(iconURL) == 1 {
+		query.Set("icon_url", iconURL[0])
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://unix/v1/admin/plugins/icon?"+query.Encode(), nil)
 	if err != nil {
 		return out, err
