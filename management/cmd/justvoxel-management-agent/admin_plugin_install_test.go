@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha512"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -993,6 +995,72 @@ func TestPluginInstallCatalogAvailabilityAndNoURLs(t *testing.T) {
 			}
 			if catalog.Projects[0].InstallAvailable != (kind == "eligible") || strings.Contains(rr.Body.String(), "cdn.modrinth.com") {
 				t.Fatal("unsafe availability or URL disclosure")
+			}
+		})
+	}
+}
+
+// Minimal synthetic fixture preserving TAB OzomWbbH's identity syntax and CRLF.
+// The real TAB archive has 4451 ZIP entries, above the former 4096 boundary
+// and intentionally accepted under the current 8192 hard limit.
+func TestPluginInstallStagedDescriptorTABCRLF(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tab.jar")
+	pluginTestJar(t, path, map[string]string{
+		"plugin.yml": "main: me.neznamy.tab.platforms.bukkit.BukkitTAB\r\nname: TAB\r\nversion: 6.2.0\r\n",
+	})
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	identity, err := inspectStagedPlugin(f, "tab.jar")
+	if err != nil || identity.Name != "TAB" || identity.Version != "6.2.0" || identity.Main != "me.neznamy.tab.platforms.bukkit.BukkitTAB" {
+		t.Fatalf("CRLF descriptor identity: %#v, %v", identity, err)
+	}
+}
+
+func TestPluginInstallStagedZipEntryBound(t *testing.T) {
+	for _, count := range []int{4451, 8193} {
+		t.Run(strconv.Itoa(count), func(t *testing.T) {
+			fields := map[string]string{
+				"plugin.yml": "name: TAB\nmain: me.neznamy.tab.platforms.bukkit.BukkitTAB\nversion: 6.2.0\n",
+			}
+			for i := 1; i < count; i++ {
+				fields["entry-"+strconv.Itoa(i)] = ""
+			}
+			path := filepath.Join(t.TempDir(), "tab.jar")
+			pluginTestJar(t, path, fields)
+			f, err := os.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer f.Close()
+			stat, err := f.Stat()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stat.Size() >= 1<<20 {
+				t.Fatal("synthetic JAR must remain below 1 MiB")
+			}
+			var end [22]byte
+			if _, err := f.ReadAt(end[:], stat.Size()-int64(len(end))); err != nil {
+				t.Fatal(err)
+			}
+			if string(end[:4]) != "PK\x05\x06" || int(binary.LittleEndian.Uint16(end[10:12])) != count {
+				t.Fatal("synthetic JAR must have the expected standard ZIP entry count")
+			}
+			if binary.LittleEndian.Uint32(end[12:16]) >= 1<<20 {
+				t.Fatal("synthetic central directory must remain below 1 MiB")
+			}
+			identity, err := inspectStagedPlugin(f, "tab.jar")
+			if count == 8193 {
+				if err == nil || err.Error() != "Malformed or oversized plugin JAR" {
+					t.Fatalf("ZIP entry ceiling was not enforced: %v", err)
+				}
+				return
+			}
+			if err != nil || identity.Name != "TAB" || identity.Version != "6.2.0" || identity.Main != "me.neznamy.tab.platforms.bukkit.BukkitTAB" {
+				t.Fatalf("larger plugin JAR identity: %#v, %v", identity, err)
 			}
 		})
 	}

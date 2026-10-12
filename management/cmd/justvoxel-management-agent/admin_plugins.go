@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -24,7 +25,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const pluginMetadataLimit = 64 << 10
+const (
+	pluginMetadataLimit = 64 << 10
+	pluginMaxZipEntries = 8192
+)
 
 // No redirects, caller-selected origins, credentials, or artifact downloads.
 var pluginCatalogClient = &http.Client{
@@ -47,6 +51,8 @@ type pluginServerContext struct {
 type installedPlugin struct {
 	Name           string `json:"name,omitempty"`
 	Version        string `json:"version,omitempty"`
+	ProjectID      string `json:"project_id,omitempty"`
+	VersionID      string `json:"version_id,omitempty"`
 	Filename       string `json:"filename"`
 	Management     string `json:"management"`
 	UpdateStatus   string `json:"update_status"`
@@ -100,6 +106,7 @@ func registerAdminPluginRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("GET /v1/admin/plugins/installed", s.adminPluginsInstalled)
 	mux.HandleFunc("GET /v1/admin/plugins/updates", s.adminPluginsInstalled)
 	mux.HandleFunc("GET /v1/admin/plugins/discover", s.adminPluginsDiscover)
+	mux.HandleFunc("GET /v1/admin/plugins/icon", s.adminPluginIcon)
 	mux.HandleFunc("POST /v1/admin/plugins/install/plan", s.adminPluginInstallPlan)
 	mux.HandleFunc("POST /v1/admin/plugins/install", s.adminPluginInstall)
 	mux.HandleFunc("POST /v1/admin/plugins/install/acknowledge", s.adminPluginInstallAcknowledge)
@@ -351,7 +358,7 @@ func pluginZipDirectoryBounded(file io.ReaderAt, size int64) bool {
 		return binary.LittleEndian.Uint16(tail[i+4:i+6]) == 0 &&
 			binary.LittleEndian.Uint16(tail[i+6:i+8]) == 0 &&
 			binary.LittleEndian.Uint16(tail[i+8:i+10]) == count &&
-			count <= 4096 && centralSize <= 1<<20 &&
+			count <= pluginMaxZipEntries && centralSize <= 1<<20 &&
 			int64(centralOffset)+int64(centralSize) == size-length+int64(i)
 	}
 	return false
@@ -589,4 +596,78 @@ func (s *server) adminPluginsDiscover(w http.ResponseWriter, r *http.Request) {
 		out.Projects = append(out.Projects, project)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+const pluginIconLimit = 512 << 10
+
+var pluginIconFilename = regexp.MustCompile(`^[A-Za-z0-9_-]+\.(png|jpg|jpeg|webp)$`)
+
+func pluginIconURL(raw, projectID string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil || len(raw) > 2048 || u.Scheme != "https" || u.Host != "cdn.modrinth.com" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" {
+		return nil, errors.New("invalid plugin icon URL")
+	}
+	parts := strings.Split(u.Path, "/")
+	if len(parts) != 4 || parts[0] != "" || parts[1] != "data" || parts[2] != projectID || !pluginIconFilename.MatchString(parts[3]) {
+		return nil, errors.New("invalid plugin icon path")
+	}
+	return u, nil
+}
+
+func (s *server) adminPluginIcon(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if _, ok := s.requireAdministrator(w, r); !ok {
+		return
+	}
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	projectID := query.Get("project_id")
+	if err != nil || len(query) != 1 || len(query["project_id"]) != 1 || !modrinthPluginID.MatchString(projectID) {
+		http.Error(w, "Invalid plugin icon request.", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	defer cancel()
+	var project struct {
+		ID      string `json:"id"`
+		IconURL string `json:"icon_url"`
+	}
+	if err := modrinthPluginJSON(ctx, "/project/"+projectID, nil, &project); err != nil || project.ID != projectID {
+		http.Error(w, "Plugin icon unavailable.", http.StatusBadGateway)
+		return
+	}
+	if project.IconURL == "" {
+		http.Error(w, "Plugin icon unavailable.", http.StatusNotFound)
+		return
+	}
+	icon, err := pluginIconURL(project.IconURL, projectID)
+	if err != nil {
+		http.Error(w, "Plugin icon unavailable.", http.StatusBadGateway)
+		return
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, icon.String(), nil)
+	if err != nil {
+		http.Error(w, "Plugin icon unavailable.", http.StatusBadGateway)
+		return
+	}
+	req.Header.Set("User-Agent", "JustVoxel/PluginWorkspace (https://github.com/home-server-project/justvoxel-base)")
+	req.Header.Set("Accept", "image/png, image/jpeg, image/webp")
+	response, err := pluginCatalogClient.Do(req)
+	if err != nil {
+		http.Error(w, "Plugin icon unavailable.", http.StatusBadGateway)
+		return
+	}
+	defer response.Body.Close()
+	contentType, _, typeErr := mime.ParseMediaType(response.Header.Get("Content-Type"))
+	if response.StatusCode != http.StatusOK || response.ContentLength > pluginIconLimit || typeErr != nil || (contentType != "image/png" && contentType != "image/jpeg" && contentType != "image/webp") {
+		http.Error(w, "Plugin icon unavailable.", http.StatusBadGateway)
+		return
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, pluginIconLimit+1))
+	if err != nil || len(data) > pluginIconLimit || http.DetectContentType(data) != contentType {
+		http.Error(w, "Plugin icon unavailable.", http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "private, max-age=300")
+	w.Write(data)
 }

@@ -2,6 +2,9 @@ package api
 
 import (
 	"context"
+	"errors"
+	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"time"
@@ -18,6 +21,8 @@ type PluginServerContext struct {
 type InstalledPlugin struct {
 	Name           string `json:"name,omitempty"`
 	Version        string `json:"version,omitempty"`
+	ProjectID      string `json:"project_id,omitempty"`
+	VersionID      string `json:"version_id,omitempty"`
 	Filename       string `json:"filename"`
 	Management     string `json:"management"`
 	UpdateStatus   string `json:"update_status"`
@@ -156,4 +161,47 @@ func (c *Client) AdminPluginInstallAcknowledge(ctx context.Context, session stri
 	var out PersistentOperationResponse
 	err := c.pluginPost(ctx, session, "/v1/admin/plugins/install/acknowledge", request, &out)
 	return out, err
+}
+
+// PluginIcon carries only Agent-verified bytes, never an upstream URL.
+type PluginIcon struct {
+	Data        []byte
+	ContentType string
+}
+
+func (c *Client) AdminPluginIcon(ctx context.Context, session, projectID string) (PluginIcon, error) {
+	var out PluginIcon
+	query := url.Values{"project_id": {projectID}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://unix/v1/admin/plugins/icon?"+query.Encode(), nil)
+	if err != nil {
+		return out, err
+	}
+	req.Header.Set("Authorization", "Bearer "+session)
+	req.Header.Set("Accept", "image/png, image/jpeg, image/webp")
+	client := *c.http
+	client.Timeout = 15 * time.Second
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	response, err := client.Do(req)
+	if err != nil {
+		return out, errors.New("Plugin icon unavailable.")
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusUnauthorized {
+		return out, ErrUnauthorized
+	}
+	if response.StatusCode == http.StatusForbidden {
+		return out, ErrPasswordChangeRequired
+	}
+	if response.StatusCode != http.StatusOK {
+		return out, &ResponseError{StatusCode: response.StatusCode, Message: "Plugin icon unavailable."}
+	}
+	contentType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
+	if err != nil || (contentType != "image/png" && contentType != "image/jpeg" && contentType != "image/webp") {
+		return out, errors.New("Plugin icon unavailable.")
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, (512<<10)+1))
+	if err != nil || len(data) > 512<<10 || http.DetectContentType(data) != contentType {
+		return out, errors.New("Plugin icon unavailable.")
+	}
+	return PluginIcon{Data: data, ContentType: contentType}, nil
 }

@@ -632,6 +632,8 @@ func classifyGenericPluginInventory(dataPath string, f *os.File, item *installed
 			return
 		}
 		item.Management = "plugins"
+		item.ProjectID = e.ProjectID
+		item.VersionID = e.VersionID
 		item.UpdateStatus = "Managed by Plugins; update and removal are not available yet"
 		return
 	}

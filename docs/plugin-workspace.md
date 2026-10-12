@@ -8,15 +8,31 @@ it cannot install, download, update, remove or hot load plugins, change server
 configuration, or interrupt Minecraft.
 
 Plugin results use compact summaries for scanning. Each card’s **Info** button
-opens compact labeled rows of additional publisher or installed JAR metadata
-and closes them again, without repeating the card description or release and
-compatibility summary. Supported Minecraft versions show their actual count
-first, with an explicit disclosure for the exact list. Dependencies are grouped
-by type, with identities first and IDs as secondary metadata. Installed Info has
-one row each for JAR, Metadata, Management and Update status. Details
-start collapsed; raw metadata and full dependency identities stay out of the
-default view to keep the workspace usable. Discover, Installed and Updates share
-this compact presentation, with one to three columns depending on window width.
+opens additional publisher or installed JAR metadata in the same bounded overlay
+used by installation Review, Progress and terminal results. Closing the overlay
+returns focus to the card; details never expand inside the results grid.
+Supported Minecraft versions appear as a wrapping list in the compatibility
+section. Dependencies are grouped by type, with identities
+first and IDs as secondary metadata. Installed Info has separate sections for JAR,
+Metadata, Management and Update status. Installed and Updates cards show ownership
+and a compact status; update and removal actions remain unavailable.
+Discover uses three columns in wide windows, two in medium windows and one in
+narrow windows. Buttons stay distinct from badges. Authoritative Modrinth project
+IDs use real publisher logos through the Administrator-only same-origin
+`GET /api/plugins/workspace/icon?project_id=<id>` route and the Agent's
+`GET /v1/admin/plugins/icon?project_id=<id>` route. Only the Agent resolves the
+fixed Modrinth project API and fetches the verified HTTPS project CDN image;
+upstream URLs never reach the browser. PNG, JPEG and WebP are bounded to 512 KiB,
+with no redirects or persistent image cache. Missing or rejected images leave
+the existing fixed-size deterministic initials tile without affecting any
+catalog or installation operation. Info and Review reuse the card identity tile.
+Progress and terminal results retain the selected identity in browser memory,
+bound to the returned operation ID; after reload they use fallback. Inventory
+exposes the existing manifest project/release IDs only after exact
+filename, SHA-512 and descriptor ownership verification. Installed and Updates
+reuse the same-origin logo helper for that authoritative project ID; unidentified
+JARs retain fallback without identity searches or changes to ownership records.
+The overlay scrolls within its own bounds on desktop and mobile.
 
 Paper and Purpur support plugins. Vanilla displays an unsupported state.
 The workspace reuses appliance configuration discovery and runtime status for
@@ -57,7 +73,7 @@ Stage 2 adds **Install** beside Info for compatible third-party Modrinth release
 on Paper and Purpur when the current Minecraft version is known and publisher
 file metadata is complete. Turning off Compatible only or Release only still
 permits browsing; incompatible, beta and alpha selections remain Info only.
-The existing compact cards and expandable Info details remain available.
+The existing compact cards and bounded Info overlay remain available.
 
 Installation uses an authoritative Management Agent plan. The browser supplies
 only Modrinth project/version IDs; it cannot choose download URLs, filenames,

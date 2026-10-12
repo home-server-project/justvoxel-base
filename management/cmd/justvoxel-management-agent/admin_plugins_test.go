@@ -4,8 +4,14 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/sha512"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -119,14 +125,18 @@ func TestPluginMetadataDoesNotInterpretYAMLInstructions(t *testing.T) {
 	}
 }
 func TestPluginRoutesAuthorizeBeforeDiscovery(t *testing.T) {
-	old := runAdminDiscoveryHelper
-	defer func() { runAdminDiscoveryHelper = old }()
+	old, oldClient := runAdminDiscoveryHelper, pluginCatalogClient
+	defer func() { runAdminDiscoveryHelper = old; pluginCatalogClient = oldClient }()
+	pluginCatalogClient = &http.Client{Transport: pluginTestTransport(func(*http.Request) (*http.Response, error) {
+		t.Fatal("unauthorized Modrinth access")
+		return nil, nil
+	})}
 	runAdminDiscoveryHelper = func(context.Context, string) ([]byte, error) { t.Fatal("unauthorized discovery"); return nil, nil }
 	for _, role := range []principalRole{roleViewer, roleOperator} {
 		s := surfaceTestServer(t, role)
 		mux := http.NewServeMux()
 		registerAdminPluginRoutes(mux, s)
-		for _, path := range []string{"installed", "updates", "discover"} {
+		for _, path := range []string{"installed", "updates", "discover", "icon?project_id=root"} {
 			rr := httptest.NewRecorder()
 			mux.ServeHTTP(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/"+path, ""))
 			if rr.Code != http.StatusForbidden {
@@ -367,6 +377,223 @@ func TestModrinthCatalogUnavailablePreservesLocalInventory(t *testing.T) {
 			}
 			if calls != 1 {
 				t.Fatalf("local inventory contacted catalog: %d requests", calls)
+			}
+		})
+	}
+}
+
+func pluginIconImage(t *testing.T, kind string) []byte {
+	t.Helper()
+	var b bytes.Buffer
+	switch kind {
+	case "image/png":
+		if err := png.Encode(&b, image.NewRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+			t.Fatal(err)
+		}
+	case "image/jpeg":
+		if err := jpeg.Encode(&b, image.NewRGBA(image.Rect(0, 0, 1, 1)), nil); err != nil {
+			t.Fatal(err)
+		}
+	case "image/webp":
+		data, err := base64.StdEncoding.DecodeString("UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+	return b.Bytes()
+}
+
+func TestPluginIconAuthoritativeBoundedImages(t *testing.T) {
+	const goodURL = "https://cdn.modrinth.com/data/root/icon.png"
+	for _, tc := range []struct {
+		name, iconURL, contentType                     string
+		status, want                                   int
+		oversized, mismatch, wrongID, metadataRedirect bool
+	}{
+		{name: "png", iconURL: goodURL, contentType: "image/png", want: 200},
+		{name: "jpeg", iconURL: "https://cdn.modrinth.com/data/root/icon.jpg", contentType: "image/jpeg", want: 200},
+		{name: "webp", iconURL: "https://cdn.modrinth.com/data/root/icon_96.webp", contentType: "image/webp", want: 200},
+		{name: "absent", want: 404},
+		{name: "http", iconURL: "http://cdn.modrinth.com/data/root/icon.png", want: 502},
+		{name: "host", iconURL: "https://evil.example/data/root/icon.png", want: 502},
+		{name: "host suffix", iconURL: "https://cdn.modrinth.com.evil.example/data/root/icon.png", want: 502},
+		{name: "credentials", iconURL: "https://user@cdn.modrinth.com/data/root/icon.png", want: 502},
+		{name: "port", iconURL: "https://cdn.modrinth.com:444/data/root/icon.png", want: 502},
+		{name: "other project", iconURL: "https://cdn.modrinth.com/data/other/icon.png", want: 502},
+		{name: "path", iconURL: "https://cdn.modrinth.com/other/root/icon.png", want: 502},
+		{name: "traversal", iconURL: "https://cdn.modrinth.com/data/root/../icon.png", want: 502},
+		{name: "encoded path", iconURL: "https://cdn.modrinth.com/data/root/%69con.png", want: 502},
+		{name: "query", iconURL: goodURL + "?url=https://evil.example", want: 502},
+		{name: "fragment", iconURL: goodURL + "#icon", want: 502},
+		{name: "redirect", iconURL: goodURL, contentType: "image/png", status: 302, want: 502},
+		{name: "metadata redirect", metadataRedirect: true, want: 502},
+		{name: "upstream missing", iconURL: goodURL, status: 404, want: 502},
+		{name: "oversized", iconURL: goodURL, contentType: "image/png", oversized: true, want: 502},
+		{name: "svg", iconURL: goodURL, contentType: "image/svg+xml", want: 502},
+		{name: "html", iconURL: goodURL, contentType: "text/html", want: 502},
+		{name: "binary", iconURL: goodURL, contentType: "application/octet-stream", want: 502},
+		{name: "type mismatch", iconURL: goodURL, contentType: "image/png", mismatch: true, want: 502},
+		{name: "identity mismatch", iconURL: goodURL, wrongID: true, want: 502},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			old := pluginCatalogClient
+			defer func() { pluginCatalogClient = old }()
+			client := *old // Retain the production timeout and redirect policy.
+			calls := 0
+			imageData := pluginIconImage(t, tc.contentType)
+			client.Transport = pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+				calls++
+				if calls == 1 {
+					if r.Method != http.MethodGet || r.URL.Scheme != "https" || r.URL.Host != "api.modrinth.com" || r.URL.Path != "/v2/project/root" || r.URL.RawQuery != "" {
+						t.Fatalf("unexpected metadata request: %s", r.URL)
+					}
+					id := "root"
+					if tc.wrongID {
+						id = "other"
+					}
+					data, _ := json.Marshal(map[string]string{"id": id, "icon_url": tc.iconURL})
+					status := 200
+					if tc.metadataRedirect {
+						status = 302
+					}
+					return &http.Response{StatusCode: status, Header: http.Header{"Location": {"https://evil.example/"}}, Body: io.NopCloser(bytes.NewReader(data))}, nil
+				}
+				if calls != 2 || r.URL.String() != tc.iconURL || r.URL.Host != "cdn.modrinth.com" {
+					t.Fatalf("unexpected image request: %s", r.URL)
+				}
+				data := imageData
+				if tc.oversized {
+					data = bytes.Repeat([]byte("x"), pluginIconLimit+1)
+				}
+				if tc.mismatch {
+					data = []byte("<html>private upstream body</html>")
+				}
+				status := tc.status
+				if status == 0 {
+					status = 200
+				}
+				return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": {tc.contentType}, "Location": {"https://evil.example/"}}, ContentLength: -1, Body: io.NopCloser(bytes.NewReader(data))}, nil
+			})
+			pluginCatalogClient = &client
+			s := surfaceTestServer(t, roleAdministrator)
+			mux := http.NewServeMux()
+			registerAdminPluginRoutes(mux, s)
+			rr := httptest.NewRecorder()
+			mux.ServeHTTP(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/icon?project_id=root", ""))
+			if rr.Code != tc.want || rr.Header().Get("X-Content-Type-Options") != "nosniff" {
+				t.Fatalf("icon: %d %s", rr.Code, rr.Body.String())
+			}
+			if tc.want == 200 && (rr.Header().Get("Content-Type") != tc.contentType || !bytes.Equal(rr.Body.Bytes(), imageData)) {
+				t.Fatal("verified image changed")
+			}
+			if tc.want != 200 && (strings.Contains(rr.Body.String(), "private upstream body") || strings.Contains(rr.Body.String(), "https://")) {
+				t.Fatal("upstream details exposed")
+			}
+			if _, err := pluginIconURL(tc.iconURL, "root"); err != nil || tc.wrongID || tc.metadataRedirect {
+				if calls != 1 {
+					t.Fatal("invalid resolved identity contacted CDN")
+				}
+			} else if calls != 2 {
+				t.Fatal("image was not fetched exactly once")
+			}
+		})
+	}
+}
+
+func TestPluginIconRejectsCallerURLAndUnboundedID(t *testing.T) {
+	old := pluginCatalogClient
+	defer func() { pluginCatalogClient = old }()
+	pluginCatalogClient = &http.Client{Transport: pluginTestTransport(func(*http.Request) (*http.Response, error) {
+		t.Fatal("invalid request contacted upstream")
+		return nil, nil
+	})}
+	s := surfaceTestServer(t, roleAdministrator)
+	for _, query := range []string{"", "url=https://evil.example", "project_id=root&url=https://evil.example", "project_id=root&project_id=other", "project_id=", "project_id=../root", "project_id=https://evil.example", "project_id=" + strings.Repeat("a", 65), "project_id=root&bad=%xx"} {
+		rr := httptest.NewRecorder()
+		s.adminPluginIcon(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/icon?"+query, ""))
+		if rr.Code != 400 {
+			t.Fatalf("unsafe query accepted: %q %d", query, rr.Code)
+		}
+	}
+	if !modrinthPluginID.MatchString(strings.Repeat("a", 64)) || modrinthPluginID.MatchString(strings.Repeat("a", 65)) {
+		t.Fatal("project ID bound changed")
+	}
+}
+
+// Inventory identity is presentation metadata from the verified ownership entry.
+func TestPluginInventoryExposesOnlyVerifiedManifestIdentity(t *testing.T) {
+	for _, kind := range []string{"verified", "hash mismatch", "name mismatch", "main mismatch", "manual", "unsafe manifest", "justvoxel"} {
+		t.Run(kind, func(t *testing.T) {
+			data := t.TempDir()
+			root := filepath.Join(data, "plugins")
+			if err := os.Mkdir(root, 0700); err != nil {
+				t.Fatal(err)
+			}
+			filename := "example.jar"
+			if kind == "justvoxel" {
+				filename = "geyser-spigot.jar"
+			}
+			path := filepath.Join(root, filename)
+			pluginTestJar(t, path, map[string]string{"plugin.yml": "name: Example\nversion: '1.0'\nmain: example.Plugin\n"})
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hash := sha512.Sum512(raw)
+			entry := pluginManifestEntry{ProjectID: "project123", VersionID: "release123", VersionNumber: "1.0", Filename: filename, SHA512: hex.EncodeToString(hash[:]), PluginName: "Example", Main: "example.Plugin"}
+			switch kind {
+			case "hash mismatch":
+				entry.SHA512 = strings.Repeat("a", 128)
+			case "name mismatch":
+				entry.PluginName = "Different"
+			case "main mismatch":
+				entry.Main = "example.Different"
+			}
+			if kind != "manual" && kind != "justvoxel" {
+				if _, err := commitPluginManifest(data, nil, pluginManifest{SchemaVersion: "v1", Artifacts: []pluginManifestEntry{entry}}); err != nil {
+					t.Fatal(err)
+				}
+				if kind == "unsafe manifest" {
+					if err := os.Chmod(filepath.Join(data, ".justvoxel", "plugins.json"), 0666); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			items, err := readPluginInventory(data)
+			if err != nil || len(items) != 1 {
+				t.Fatalf("inventory: %#v, %v", items, err)
+			}
+			item := items[0]
+			wantManagement := "manual"
+			if kind == "verified" {
+				wantManagement = "plugins"
+				if item.ProjectID != entry.ProjectID || item.VersionID != entry.VersionID {
+					t.Fatalf("verified identity missing: %#v", item)
+				}
+			} else if item.ProjectID != "" || item.VersionID != "" {
+				t.Fatalf("unverified identity exposed: %#v", item)
+			}
+			if kind == "justvoxel" {
+				wantManagement = "justvoxel"
+			}
+			if item.Management != wantManagement {
+				t.Fatalf("ownership changed: %#v", item)
+			}
+			encoded, err := json.Marshal(item)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, field := range []string{`"project_id":`, `"version_id":`} {
+				if bytes.Contains(encoded, []byte(field)) != (kind == "verified") {
+					t.Fatalf("optional inventory identity: %s", encoded)
+				}
+			}
+			if kind == "hash mismatch" && !strings.Contains(item.UpdateStatus, "JAR differs") {
+				t.Fatal("hash attention classification lost")
+			}
+			if (kind == "name mismatch" || kind == "main mismatch") && !strings.Contains(item.UpdateStatus, "descriptor differs") {
+				t.Fatal("descriptor attention classification lost")
 			}
 		})
 	}

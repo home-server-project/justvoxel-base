@@ -2,8 +2,10 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
@@ -18,6 +20,7 @@ func (a *App) registerPluginsWorkspaceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/plugins/workspace/installed", a.pluginsWorkspaceInventory)
 	mux.HandleFunc("GET /api/plugins/workspace/updates", a.pluginsWorkspaceInventory)
 	mux.HandleFunc("GET /api/plugins/workspace/discover", a.pluginsWorkspaceDiscover)
+	mux.HandleFunc("GET /api/plugins/workspace/icon", a.pluginsWorkspaceIcon)
 	mux.HandleFunc("POST /api/plugins/workspace/install/plan", a.pluginsWorkspaceInstallPlan)
 	mux.HandleFunc("POST /api/plugins/workspace/install", a.pluginsWorkspaceInstall)
 	mux.HandleFunc("POST /api/plugins/workspace/install/acknowledge", a.pluginsWorkspaceInstallAcknowledge)
@@ -202,4 +205,50 @@ func (a *App) pluginsWorkspaceInstallAcknowledge(w http.ResponseWriter, r *http.
 		return
 	}
 	writeMinecraftWorkspaceJSON(w, 200, out)
+}
+
+var pluginIconProjectID = regexp.MustCompile(`^[A-Za-z0-9]{1,64}$`)
+
+func (a *App) pluginsWorkspaceIcon(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
+	if !ok {
+		return
+	}
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	projectID := query.Get("project_id")
+	if err != nil || len(query) != 1 || len(query["project_id"]) != 1 || !pluginIconProjectID.MatchString(projectID) {
+		http.Error(w, "Invalid plugin icon request.", http.StatusBadRequest)
+		return
+	}
+	client, ok := a.api.(interface {
+		AdminPluginIcon(context.Context, string, string) (api.PluginIcon, error)
+	})
+	if !ok {
+		http.Error(w, "Plugin icon unavailable.", http.StatusServiceUnavailable)
+		return
+	}
+	icon, err := client.AdminPluginIcon(r.Context(), session, projectID)
+	if err != nil {
+		status := http.StatusBadGateway
+		var response *api.ResponseError
+		if errors.As(err, &response) && (response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusServiceUnavailable) {
+			status = response.StatusCode
+		}
+		if errors.Is(err, api.ErrUnauthorized) {
+			status = http.StatusUnauthorized
+		}
+		if errors.Is(err, api.ErrPasswordChangeRequired) {
+			status = http.StatusForbidden
+		}
+		http.Error(w, "Plugin icon unavailable.", status)
+		return
+	}
+	if len(icon.Data) > 512<<10 || (icon.ContentType != "image/png" && icon.ContentType != "image/jpeg" && icon.ContentType != "image/webp") || http.DetectContentType(icon.Data) != icon.ContentType {
+		http.Error(w, "Plugin icon unavailable.", http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", icon.ContentType)
+	w.Header().Set("Cache-Control", "private, max-age=300")
+	w.Write(icon.Data)
 }
