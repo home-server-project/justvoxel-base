@@ -329,7 +329,7 @@ if (versionLauncher && versionDialog) {
         panel.dataset.versionCombinedControls = "";
         const form = document.createElement("form");
         form.className = "version-combined-form";
-        form.innerHTML = '<p>Change update channel to:</p><div class="version-channel-row"><label><select name="channel" aria-label="Container update channel"><option value="stable">Stable</option><option value="latest">Latest</option><option value="custom">Custom</option></select></label><label data-version-custom>Custom tag<input name="custom_tag" autocomplete="off" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9._-]*"></label></div>';
+        form.innerHTML = '<div class="version-channel-row"><label>Change update channel to:<select name="channel" aria-label="Container update channel"><option value="stable">Stable</option><option value="latest">Latest</option><option value="custom">Custom</option></select></label><label data-version-custom>Custom tag<input name="custom_tag" autocomplete="off" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9._-]*"></label></div>';
         const channel = form.elements.channel;
         const customTag = form.elements.custom_tag;
         const resetChannel = () => {
@@ -341,6 +341,18 @@ if (versionLauncher && versionDialog) {
         const imageLabel = (value) => ({ up_to_date: "Current", updates_available: "Update available", not_applicable: "Not applicable" })[value] || "Unable to check";
         const imageStatus = line("Container image:", imageLabel(status.image_state));
         imageStatus.className += " version-container-detail";
+        const compatibility = document.createElement("p");
+        compatibility.dataset.versionCompatibility = "";
+        const updateNotice = (result, fallback = "") => {
+          const crossplayWarning = result.crossplay_enabled && (
+            result.crossplay_compatible === false || result.stack_state === "waiting_for_compatibility" ||
+            (["up_to_date", "updates_available"].includes(result.stack_state) && result.available && result.recommended && result.available !== result.recommended)
+          );
+          compatibility.className = crossplayWarning ? "notice warning" : "muted compact";
+          compatibility.textContent = result.reason || (crossplayWarning ? "Bedrock cross-play compatibility could not be confirmed." : fallback);
+          compatibility.hidden = !compatibility.textContent;
+        };
+        updateNotice(status);
         const vanillaWarning = document.createElement("p");
         vanillaWarning.className = "notice warning";
         vanillaWarning.textContent = "Requires Reset Minecraft and setup again. Multi-container support is coming in future JustVoxel updates.";
@@ -350,6 +362,8 @@ if (versionLauncher && versionDialog) {
           softwareReview?.remove();
           softwareReview = undefined;
           form.hidden = false;
+          updateNotice({});
+          state.textContent = "";
         };
         const sync = () => {
           const custom = channel.value === "custom";
@@ -415,9 +429,12 @@ if (versionLauncher && versionDialog) {
         channel.addEventListener("change", () => { clearReview(); sync(); });
         customTag.addEventListener("input", clearReview);
         sync();
-        const configuredChannel = line("Configured container channel:", ({ stable: "Stable", latest: "Latest" })[configuredTag] || "Custom");
+        const configuredChannel = line("Current container channel:", ({ stable: "Stable", latest: "Latest" })[configuredTag] || "Custom");
         configuredChannel.className += " version-container-detail";
-        panel.append(imageStatus, configuredChannel, form);
+        const containerStatus = document.createElement("div");
+        containerStatus.className = "version-container-status";
+        containerStatus.append(imageStatus, configuredChannel);
+        panel.append(containerStatus, form, compatibility);
         const channelRow = form.querySelector(".version-channel-row");
         const check = document.createElement("button");
         check.type = "button";
@@ -446,7 +463,8 @@ if (versionLauncher && versionDialog) {
             ]);
             if (selectionTicket !== selectionSequence || ticket !== sequence) return;
             imageStatus.replaceChildren(...line("Container image:", imageLabel(plan.image_state)).children);
-            state.textContent = plan.reason || (plan.update_available ? "Changes are ready to review." : "No changes were found.");
+            updateNotice(plan, plan.stack_state === "unavailable" ? "Server update information could not be verified. Try again later." : plan.update_available ? "Changes are ready to review." : "No changes were found.");
+            state.textContent = "";
             if (!reviewRequested) return;
             const review = card("Review changes");
             review.dataset.versionReview = "";
@@ -473,7 +491,7 @@ if (versionLauncher && versionDialog) {
             } else {
               notice.textContent = "The selected channel uses the verified current image. Minecraft can keep its current running or stopped state.";
             }
-            review.appendChild(notice);
+            if (notice.textContent !== compatibility.textContent) review.appendChild(notice);
             const consent = document.createElement("input");
             consent.type = "checkbox";
             consent.setAttribute("role", "switch");
@@ -529,7 +547,7 @@ if (versionLauncher && versionDialog) {
             reviewActions.append(cancel, apply);
             review.appendChild(reviewActions);
             softwareReview = review;
-            panel.appendChild(review);
+            panel.insertBefore(review, compatibility);
             form.hidden = true;
             state.textContent = "";
           } catch (failure) {

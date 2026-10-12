@@ -23,6 +23,7 @@ class Element {
   get textContent() { return this.ownText + this.children.map(child => child.textContent).join(" "); }
   append(...children) { for (const child of children) { child.parent = this; this.children.push(child); } }
   appendChild(child) { this.append(child); return child; }
+  insertBefore(child, reference) { const index = this.children.indexOf(reference); assert.ok(index >= 0); child.parent = this; this.children.splice(index, 0, child); }
   replaceChildren(...children) { this.children = []; this.append(...children); }
   remove() { this.parent.children = this.parent.children.filter(child => child !== this); }
   setAttribute(name, value) { this.attributes[name] = value; }

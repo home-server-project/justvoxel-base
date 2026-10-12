@@ -110,7 +110,7 @@ func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 			t.Fatalf("Version channel control contract missing %q", want)
 		}
 	}
-	if !strings.Contains(css, `.version-workspace-body .version-channel-row{display:grid;grid-template-columns:minmax(7rem,.8fr) minmax(8rem,1fr) auto auto`) {
+	if !strings.Contains(css, `.version-workspace-body .version-channel-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr)) auto auto`) {
 		t.Fatal("Version channel controls must share one desktop row")
 	}
 	if !strings.Contains(version, `tabs.forEach((tab) => tab.addEventListener("click", () => { currentTab = tab.dataset.versionTab;`) || strings.Contains(version, `versionDialog.style.height`) {

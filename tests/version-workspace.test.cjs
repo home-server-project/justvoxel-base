@@ -19,6 +19,12 @@ class Element {
   }
   append(...children) { children.forEach((child) => { child.parent = this; this.children.push(child); }); }
   appendChild(child) { this.append(child); }
+  insertBefore(child, reference) {
+    const index = this.children.indexOf(reference);
+    assert.ok(index >= 0);
+    child.parent = this;
+    this.children.splice(index, 0, child);
+  }
   setAttribute(name, value) { this[name] = value; }
   addEventListener(name, listener) { this.listeners[name] = listener; }
   querySelector(selector) {
@@ -33,14 +39,14 @@ class Element {
     this.html = value;
     this.elements = { channel: new Element('select'), custom_tag: new Element('input') };
     this.custom = new Element('label');
+    this.custom.textContent = value.match(/<label data-version-custom>([^<]*)/)?.[1];
     this.custom.append(this.elements.custom_tag);
     assert.doesNotMatch(value, /data-version-custom hidden/);
     this.channelRow = Object.assign(new Element('div'), { className: 'version-channel-row' });
     const channelLabel = new Element('label');
+    channelLabel.textContent = value.match(/<label>([^<]*)/)?.[1];
     channelLabel.append(this.elements.channel);
     this.channelRow.append(channelLabel, this.custom);
-    const prompt = Object.assign(new Element('p'), { textContent: value.match(/^<p>([^<]*)<\/p>/)?.[1] });
-    this.append(prompt);
     this.append(this.channelRow);
   }
   remove() { this.removed = true; if (this.parent) this.parent.children = this.parent.children.filter((child) => child !== this); }
@@ -188,7 +194,7 @@ function softwareWorkspace({ current = 'paper', tag = 'stable', online = 0, over
     Boolean, String, Number, URLSearchParams, csrf: 'csrf', state: {}, root, ticket: 1, sequence: 1,
     pending: { operation }, updateOperation: '', operationKinds: new Map(),
     minecraft: { server_type: current, image_tag: tag },
-    status: { server_software: current[0].toUpperCase() + current.slice(1), image_state: 'up_to_date' },
+    status: { server_software: current[0].toUpperCase() + current.slice(1), image_state: 'up_to_date', ...overrides },
     document: { createElement: (tag) => new Element(tag) },
     card: (title) => Object.assign(new Element('section'), { textContent: title }),
     line: (label, value) => {
@@ -239,7 +245,7 @@ function softwareWorkspace({ current = 'paper', tag = 'stable', online = 0, over
     check: () => find('Check for updates').listeners.click(),
     channel: value => { form.elements.channel.value = value; form.elements.channel.listeners.change(); },
     custom: value => { form.elements.custom_tag.value = value; form.elements.custom_tag.listeners.input(); },
-    warning: root.all().find(node => node.className === 'notice warning'),
+    warning: root.all().find(node => node.className === 'notice warning' && !('versionCompatibility' in node.dataset)),
     reviews: () => root.all().filter(node => 'versionReview' in node.dataset),
     consent: () => root.all().find(node => node.tag === 'input' && node.type === 'checkbox'),
   };
@@ -446,11 +452,16 @@ test('late or failed previews cannot replace a fresh review or undo a changed se
   page.click('purpur'); const old = page.review();
   page.click('vanilla'); page.click('purpur'); const fresh = page.review();
   plans[1].resolve(); await fresh; const review = page.reviews()[0];
+  const notice = page.root.all().find(node => 'versionCompatibility' in node.dataset);
+  const freshNotice = notice.textContent;
   plans[0].resolve(); await old; assert.deepEqual(page.reviews(), [review]);
+  assert.equal(notice.textContent, freshNotice);
   page.click('paper'); const failed = page.review(); page.click('vanilla');
   plans[2].reject(new Error('Old plan failed')); await failed;
   assertSoftwareSelection(page,'vanilla','paper'); assert.equal(page.reviews().length,0);
   assert.equal(page.state.textContent,'');
+  assert.equal(notice.hidden, true);
+  assert.equal(notice.textContent, '');
 });
 test('lost Apply response reconnects to persisted state without retry or partial success', async () => {
   const page = await softwareReview({}, {failApply:true});
@@ -499,16 +510,38 @@ test('channel controls share one desktop row and Custom stays present for all ch
   }
   assert.doesNotMatch(source, /\[data-version-custom\]"\)\.hidden/);
   assert.match(cssRule('.version-workspace-body form.version-combined-form'), /display:block/);
-  assert.match(cssRule('.version-workspace-body .version-channel-row'), /display:grid;grid-template-columns:minmax\(7rem,.8fr\) minmax\(8rem,1fr\) auto auto/);
+  assert.match(cssRule('.version-workspace-body .version-channel-row'), /display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\) auto auto;align-items:end/);
+  assert.ok(css.includes('@media(max-width:700px){.version-workspace-body .version-container-status{flex-wrap:wrap}.version-workspace-body .version-channel-row{grid-template-columns:repeat(2,minmax(0,1fr))}'));
+  assert.ok(css.includes('@media(max-width:430px){.version-workspace-body .version-channel-row{grid-template-columns:minmax(0,1fr)}}'));
 });
-test('the exact channel prompt appears above the channel controls', () => {
+test('both channel labels sit directly above equally sized fields with identical typography', () => {
   const page = softwareWorkspace();
-  assert.equal(page.form.children[0].tag, 'p');
-  assert.equal(page.form.children[0].textContent, 'Change update channel to:');
-  assert.equal(page.form.children[1], page.form.querySelector('.version-channel-row'));
-  assert.match(page.form.html, /^<p>Change update channel to:<\/p><div class="version-channel-row">/);
+  const row = page.form.querySelector('.version-channel-row');
+  assert.deepEqual(page.form.children, [row]);
+  assert.deepEqual(row.children.slice(0, 2).map(label => label.textContent), ['Change update channel to:', 'Custom tag']);
+  assert.match(page.form.html, /^<div class="version-channel-row"><label>Change update channel to:<select/);
+  assert.doesNotMatch(page.form.html, /<p>/);
+  const labels = cssRule('.version-workspace-body .version-channel-row>label');
+  assert.match(labels, /display:flex;flex-direction:column/);
+  assert.match(labels, /margin:0;font-size:.88rem;line-height:1.35/);
+  const fields = cssRule('.version-workspace-body .version-channel-row select,.version-workspace-body .version-channel-row input');
+  for (const declaration of ['width:100%', 'height:2.5rem', 'padding:.52rem .65rem', 'margin:.2rem 0 0', 'border:1px solid var(--jv-border-strong)', 'border-radius:8px', 'box-sizing:border-box', 'font:inherit']) {
+    assert.ok(fields.split(';').includes(declaration), declaration);
+  }
 });
-test('container detail labels and bold values have explicit layout spacing', () => {
+test('both container properties share one desktop status row with spaced labels and bold values', () => {
+  for (const [tag, channel] of [['stable', 'Stable'], ['latest', 'Latest'], ['custom-release', 'Custom']]) {
+    const page = softwareWorkspace({tag, overrides:{image_state:'updates_available', minecraft_state:'up_to_date'}});
+    const status = page.root.all().find(node => node.className === 'version-container-status');
+    assert.equal(status.parent, page.form.parent);
+    assert.deepEqual(status.children.map(row => row.children.map(node => node.textContent)), [
+      ['Container image:', 'Update available'], ['Current container channel:', channel],
+    ]);
+    for (const row of status.children) {
+      assert.deepEqual(row.children.map(node => node.tag), ['span', 'strong']);
+      assert.ok(row.className.includes('version-container-detail'));
+    }
+  }
   const context = vm.createContext({document:{createElement: tag => new Element(tag)}});
   vm.runInContext(source.slice(source.indexOf('  const line ='), source.indexOf('  const stackLabel =')) + '\nglobalThis.line = line;', context);
   const row = context.line('Container image:', 'Update available');
@@ -516,8 +549,193 @@ test('container detail labels and bold values have explicit layout spacing', () 
   assert.deepEqual(row.children.map(node => node.tag), ['span', 'strong']);
   assert.deepEqual(row.children.map(node => node.textContent), ['Container image:', 'Update available']);
   assert.match(cssRule('.version-workspace-body .version-container-detail'), /display:flex;align-items:baseline;gap:.4rem/);
+  assert.match(cssRule('.version-workspace-body .version-container-detail'), /white-space:nowrap/);
+  assert.match(cssRule('.version-workspace-body .version-container-status'), /display:flex;align-items:baseline;gap:1.5rem;flex-wrap:nowrap/);
+  assert.doesNotMatch(source, /Configured container channel:/);
   assert.ok(source.includes('configuredChannel.className += " version-container-detail"'));
   assert.ok(source.includes('stable: "Stable", latest: "Latest"'));
+});
+test('dynamic compatibility messages stay once at the bottom of updates, including after checks and reviews', async () => {
+  for (const [version, stackState, compatible] of [['26.3', 'updates_available', true], ['27.1', 'waiting_for_compatibility', false]]) {
+    const reason = `Minecraft ${version} is waiting for released cross-play support.\nCompatible server updates are ready to review.`;
+    const page = softwareWorkspace({overrides:{reason, crossplay_enabled:true, crossplay_compatible:compatible, stack_state:stackState, available:version, recommended:'26.2'}});
+    const notice = page.root.all().find(node => 'versionCompatibility' in node.dataset);
+    const panel = page.form.parent;
+    const assertNotice = () => {
+      assert.equal(notice.textContent, reason);
+      assert.equal(notice.className, page.warning.className);
+      assert.equal(notice.className, 'notice warning');
+      assert.equal(notice.hidden, false);
+      assert.equal(panel.children.at(-1), notice);
+      assert.equal(page.root.all().filter(node => node.textContent === reason).length, 1);
+      assert.ok(page.root.children.indexOf(panel) > page.root.children.indexOf(page.cards[0].parent.parent));
+      assert.ok(!page.state.textContent?.includes(reason));
+    };
+    assertNotice();
+    await page.check();
+    assertNotice();
+    assert.equal(page.state.textContent, '');
+    assert.equal(page.reviews().length, 0);
+    assert.ok(page.calls.every(call => !call.body));
+    await page.review();
+    assertNotice();
+    assert.equal(page.reviews()[0].parent, panel);
+    if (!compatible) {
+      assert.equal(page.consent(), undefined);
+      assert.equal(page.find('Apply changes').disabled, true);
+    } else assert.ok(page.root.all().some(node => node.textContent?.includes('cold backup')));
+    page.click('vanilla');
+    assert.equal(page.warning.hidden, false);
+    assert.equal(panel.hidden, true);
+    assert.match(page.warning.textContent, /Requires Reset Minecraft and setup again/);
+    page.click('paper');
+    assert.equal(page.warning.hidden, true);
+    assert.equal(panel.hidden, false);
+    assert.equal(notice.hidden, true);
+    assert.equal(notice.textContent, '');
+    await page.check();
+    assertNotice();
+  }
+  const page = softwareWorkspace();
+  assert.equal(page.root.all().find(node => 'versionCompatibility' in node.dataset).hidden, true);
+});
+test('routine update results keep neutral read-only feedback once at the bottom through Review and Cancel', async () => {
+  for (const [stackState, updateAvailable, reason, expected] of [
+    ['up_to_date', false, '', 'No changes were found.'],
+    ['up_to_date', false, 'Your JustVoxel server is up to date. No action needed.', 'Your JustVoxel server is up to date. No action needed.'],
+    ['updates_available', true, '', 'Changes are ready to review.'],
+    ['updates_available', true, 'Compatible server updates are ready to review.', 'Compatible server updates are ready to review.'],
+  ]) {
+    const page = softwareWorkspace({overrides:{stack_state:stackState, update_available:updateAvailable, reason, crossplay_enabled:true, crossplay_compatible:true, available:'26.2', recommended:'26.2'}});
+    const notice = page.root.all().find(node => 'versionCompatibility' in node.dataset);
+    const panel = page.form.parent;
+    if (reason) {
+      assert.equal(notice.textContent, reason);
+      assert.equal(notice.className, 'muted compact');
+      assert.equal(notice.hidden, false);
+    }
+    const assertFeedback = () => {
+      assert.equal(notice.textContent, expected);
+      assert.equal(notice.className, 'muted compact');
+      assert.equal(notice.hidden, false);
+      assert.equal(panel.children.at(-1), notice);
+      assert.equal(page.root.all().filter(node => node.textContent === expected).length, 1);
+      assert.equal(page.state.textContent, '');
+    };
+    await page.check();
+    assertFeedback();
+    assert.equal(page.reviews().length, 0);
+    assert.ok(page.calls.every(call => !call.body));
+    await page.review();
+    assertFeedback();
+    assert.equal(page.reviews()[0].parent, panel);
+    assert.ok(!page.reviews()[0].all().some(node => node.textContent === expected));
+    page.find('Cancel review').listeners.click();
+    assert.equal(page.reviews().length, 0);
+    assert.equal(page.form.hidden, false);
+    assert.equal(notice.hidden, true);
+    assert.equal(notice.textContent, '');
+    assert.equal(panel.children.at(-1), notice);
+    await page.check();
+    assertFeedback();
+    assert.ok(page.calls.every(call => !call.body));
+  }
+});
+test('structured cross-play states select warning style without matching reason text or fixed versions', async () => {
+  for (const fields of [
+    {crossplay_compatible:false, stack_state:'unavailable'},
+    {crossplay_compatible:true, stack_state:'waiting_for_compatibility', update_available:false},
+    {crossplay_compatible:true, stack_state:'updates_available', available:'future-release', recommended:'supported-release'},
+  ]) {
+    const reason = 'Compatibility guidance from the status contract.';
+    const page = softwareWorkspace({overrides:{crossplay_enabled:true, reason, ...fields}});
+    const notice = page.root.all().find(node => 'versionCompatibility' in node.dataset);
+    for (const preview of [page.check, page.review]) {
+      await preview();
+      assert.equal(notice.className, 'notice warning');
+      assert.equal(notice.textContent, reason);
+      assert.equal(notice.hidden, false);
+      assert.equal(page.root.all().filter(node => node.textContent === reason).length, 1);
+      assert.equal(page.form.parent.children.at(-1), notice);
+    }
+    page.find('Cancel review').listeners.click();
+    assert.equal(notice.hidden, true);
+    assert.equal(notice.textContent, '');
+    await page.check();
+    assert.equal(notice.className, 'notice warning');
+    assert.equal(notice.textContent, reason);
+  }
+});
+test('changing the selected channel or software clears compatibility and a different result replaces it', async () => {
+  const reason = 'A newer Minecraft release is waiting for cross-play support.';
+  let next = {reason, crossplay_enabled:true, crossplay_compatible:true, available:'new-release', recommended:'supported-release', stack_state:'updates_available'};
+  const page = softwareWorkspace({overrides:next, planning:plan => ({...plan, ...next})});
+  const notice = page.root.all().find(node => 'versionCompatibility' in node.dataset);
+  await page.review();
+  assert.equal(notice.className, 'notice warning');
+  assert.equal(page.root.all().filter(node => node.textContent === reason).length, 1);
+  page.channel('latest');
+  assert.equal(notice.hidden, true);
+  assert.equal(notice.textContent, '');
+  assert.equal(page.reviews().length, 0);
+  next = {reason:'', crossplay_enabled:true, crossplay_compatible:true, available:'supported-release', recommended:'supported-release', stack_state:'up_to_date', update_available:false};
+  await page.review();
+  assert.equal(notice.textContent, 'No changes were found.');
+  assert.equal(notice.className, 'muted compact');
+  assert.equal(page.root.all().filter(node => node.textContent === 'No changes were found.').length, 1);
+  assert.ok(!page.root.all().some(node => node.textContent === reason));
+  assert.equal(page.form.parent.children.at(-1), notice);
+  page.click('purpur');
+  assert.equal(notice.hidden, true);
+  assert.equal(notice.textContent, '');
+  await page.check();
+  assert.equal(notice.className, 'muted compact');
+  page.channel('custom');
+  await page.check();
+  page.custom('another-tag');
+  assert.equal(notice.hidden, true);
+  assert.equal(notice.textContent, '');
+});
+test('preview failure clears old compatibility feedback and preserves the actual failure without a review', async () => {
+  for (const reviewRequested of [false, true]) {
+    let fail = false;
+    const reason = 'Released cross-play support is not ready yet.';
+    const page = softwareWorkspace({overrides:{reason, crossplay_enabled:true, crossplay_compatible:false, stack_state:'unavailable'}, planning:plan => {
+      if (fail) throw new Error('Version preview failed.');
+      return plan;
+    }});
+    const notice = page.root.all().find(node => 'versionCompatibility' in node.dataset);
+    await page.review();
+    assert.equal(notice.className, 'notice warning');
+    assert.equal(page.root.all().filter(node => node.textContent === reason).length, 1);
+    fail = true;
+    if (reviewRequested) await page.review();
+    else await page.check();
+    assert.equal(page.state.textContent, 'Version preview failed.');
+    assert.equal(notice.hidden, true);
+    assert.equal(notice.textContent, '');
+    assert.equal(page.reviews().length, 0);
+    assert.ok(!page.root.all().some(node => node.textContent === reason));
+    assert.equal(page.find('Check for updates').disabled, false);
+    assert.equal(page.find('Review changes').disabled, false);
+    assert.equal(page.form.parent.children.at(-1), notice);
+    fail = false;
+    await page.check();
+    assert.equal(page.state.textContent, '');
+    assert.equal(notice.textContent, reason);
+    assert.equal(notice.className, 'notice warning');
+  }
+});
+test('container image status remains independent of Minecraft status on initial render and read-only checks', async () => {
+  for (const [minecraftState, imageState, label] of [['up_to_date', 'updates_available', 'Update available'], ['updates_available', 'up_to_date', 'Current']]) {
+    const page = softwareWorkspace({overrides:{minecraft_state:minecraftState, image_state:imageState}});
+    const image = page.root.all().find(node => node.children[0]?.textContent === 'Container image:');
+    assert.equal(image.children[1].textContent, label);
+    await page.check();
+    assert.equal(image.children[1].textContent, label);
+    assert.ok(page.calls.every(call => !call.body));
+    assert.equal(page.reviews().length, 0);
+  }
 });
 test('a verified image update remains reviewable on the unchanged Stable channel', async () => {
   const page = softwareWorkspace({overrides:{image_state:'updates_available'}});

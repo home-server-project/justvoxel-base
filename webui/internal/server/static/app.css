@@ -1582,19 +1582,21 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 
 /* Approved Version Workspace software and channel integration. */
 /* Version Workspace channel controls and persistent operation status. */
-.version-workspace-body .version-container-detail{display:flex;align-items:baseline;gap:.4rem;flex-wrap:wrap;margin-bottom:var(--jv-space-xs)}
+.version-workspace-body .version-container-status{display:flex;align-items:baseline;gap:1.5rem;flex-wrap:nowrap;margin-bottom:var(--jv-space-sm)}
+.version-workspace-body .version-container-detail{display:flex;align-items:baseline;gap:.4rem;white-space:nowrap}
 .version-workspace-body form.version-combined-form{display:block}
-.version-workspace-body .version-channel-row{display:grid;grid-template-columns:minmax(7rem,.8fr) minmax(8rem,1fr) auto auto;align-items:end;gap:var(--jv-space-sm)}
-.version-workspace-body .version-channel-row>label{min-width:0;margin:0}
-.version-workspace-body .version-channel-row select,.version-workspace-body .version-channel-row input{width:100%;margin-bottom:0}
+.version-workspace-body .version-channel-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr)) auto auto;align-items:end;gap:var(--jv-space-sm)}
+.version-workspace-body .version-channel-row>label{display:flex;flex-direction:column;min-width:0;margin:0;font-size:.88rem;line-height:1.35}
+.version-workspace-body .version-channel-row select,.version-workspace-body .version-channel-row input{width:100%;height:2.5rem;padding:.52rem .65rem;margin:.2rem 0 0;border:1px solid var(--jv-border-strong);border-radius:8px;box-sizing:border-box;font:inherit}
 .version-workspace-body .version-channel-row>button{margin:0;white-space:nowrap}
+.version-workspace-body [data-version-compatibility]{margin:var(--jv-space-md) 0 0}
 .version-workspace-body .version-status-grid>.version-new-minecraft{grid-column:1 / -1;border-bottom:0}
 .version-workspace-body .version-new-minecraft strong{white-space:nowrap;overflow-wrap:normal}
 .version-workspace-body .version-operation-status{border:1px solid var(--version-operation-accent);border-left-width:4px;border-radius:var(--jv-radius);background:color-mix(in srgb,var(--version-operation-accent) 12%,var(--jv-surface-sunken))}
 .version-workspace-body .version-operation-status.is-running{--version-operation-accent:var(--jv-warning)}
 .version-workspace-body .version-operation-status.is-succeeded{--version-operation-accent:var(--jv-success)}
 .version-workspace-body .version-operation-status.is-failed{--version-operation-accent:var(--jv-error)}
-@media(max-width:700px){.version-workspace-body .version-channel-row{grid-template-columns:repeat(2,minmax(0,1fr))}.version-workspace-body .version-new-minecraft strong{white-space:normal;overflow-wrap:anywhere}}
+@media(max-width:700px){.version-workspace-body .version-container-status{flex-wrap:wrap}.version-workspace-body .version-channel-row{grid-template-columns:repeat(2,minmax(0,1fr))}.version-workspace-body .version-new-minecraft strong{white-space:normal;overflow-wrap:anywhere}}
 @media(max-width:430px){.version-workspace-body .version-channel-row{grid-template-columns:minmax(0,1fr)}}
 
 /* Only the approved managed Plugin lifecycle actions use these colors. */
