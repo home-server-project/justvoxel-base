@@ -43,15 +43,17 @@ type PluginCatalogVersion struct {
 	Dependencies []PluginDependency `json:"dependencies"`
 }
 type PluginCatalogProject struct {
-	ID            string                `json:"project_id"`
-	Name          string                `json:"title"`
-	Description   string                `json:"description"`
-	Source        string                `json:"source"`
-	Versions      []string              `json:"versions"`
-	Version       *PluginCatalogVersion `json:"version,omitempty"`
-	Compatible    bool                  `json:"compatible"`
-	Compatibility string                `json:"compatibility"`
-	MetadataError string                `json:"metadata_error,omitempty"`
+	ID               string                `json:"project_id"`
+	Slug             string                `json:"slug"`
+	InstallAvailable bool                  `json:"install_available"`
+	Name             string                `json:"title"`
+	Description      string                `json:"description"`
+	Source           string                `json:"source"`
+	Versions         []string              `json:"versions"`
+	Version          *PluginCatalogVersion `json:"version,omitempty"`
+	Compatible       bool                  `json:"compatible"`
+	Compatibility    string                `json:"compatibility"`
+	MetadataError    string                `json:"metadata_error,omitempty"`
 }
 type PluginCatalog struct {
 	Server     PluginServerContext    `json:"server"`
@@ -82,5 +84,76 @@ func (c *Client) AdminPluginInventory(ctx context.Context, session string, updat
 func (c *Client) AdminPluginDiscover(ctx context.Context, session string, query url.Values) (PluginCatalog, error) {
 	var out PluginCatalog
 	err := c.pluginRead(ctx, session, "/v1/admin/plugins/discover?"+query.Encode(), &out)
+	return out, err
+}
+
+type PluginInstallRequest struct {
+	ProjectID string `json:"project_id"`
+	VersionID string `json:"version_id"`
+}
+type PluginInstallApplyRequest struct {
+	ProjectID       string `json:"project_id"`
+	VersionID       string `json:"version_id"`
+	PlanFingerprint string `json:"plan_fingerprint"`
+	ConfirmPlayers  bool   `json:"confirm_players"`
+}
+type PluginInstallArtifact struct {
+	ProjectID     string   `json:"project_id"`
+	VersionID     string   `json:"version_id"`
+	VersionNumber string   `json:"version_number"`
+	Name          string   `json:"project_name"`
+	Filename      string   `json:"filename"`
+	Size          int64    `json:"size"`
+	Requested     bool     `json:"requested"`
+	RequiredBy    []string `json:"required_by"`
+	Satisfied     string   `json:"satisfied,omitempty"`
+}
+type PluginInstallPlan struct {
+	ProjectID            string                  `json:"project_id"`
+	VersionID            string                  `json:"version_id"`
+	Name                 string                  `json:"project_name"`
+	Description          string                  `json:"description"`
+	VersionNumber        string                  `json:"version_number"`
+	Compatibility        string                  `json:"compatibility"`
+	Server               PluginServerContext     `json:"server"`
+	Location             string                  `json:"installation_location"`
+	RestartRequired      bool                    `json:"restart_required"`
+	Artifacts            []PluginInstallArtifact `json:"artifacts"`
+	DisplayDependencies  []PluginDependency      `json:"display_dependencies"`
+	Online               int                     `json:"online"`
+	Players              []string                `json:"players"`
+	ConfirmationRequired bool                    `json:"confirmation_required"`
+	Fingerprint          string                  `json:"plan_fingerprint"`
+}
+
+func (c *Client) pluginPost(ctx context.Context, session, path string, request, out any) error {
+	client := *c.http
+	client.Timeout = 100 * time.Second
+	scoped := &Client{http: &client}
+	return scoped.do(ctx, http.MethodPost, path, session, request, out)
+}
+func (c *Client) AdminPluginInstallPlan(ctx context.Context, session string, request PluginInstallRequest) (PluginInstallPlan, error) {
+	var out PluginInstallPlan
+	err := c.pluginPost(ctx, session, "/v1/admin/plugins/install/plan", request, &out)
+	return out, err
+}
+func (c *Client) AdminPluginInstall(ctx context.Context, session string, request PluginInstallApplyRequest) (PersistentOperationResponse, error) {
+	var out PersistentOperationResponse
+	err := c.pluginPost(ctx, session, "/v1/admin/plugins/install", request, &out)
+	return out, err
+}
+func (c *Client) AdminCurrentPluginInstall(ctx context.Context, session string) (PersistentOperationResponse, error) {
+	var out PersistentOperationResponse
+	err := c.do(ctx, http.MethodGet, "/v1/admin/plugins/install-operation", session, nil, &out)
+	return out, err
+}
+
+type PluginInstallAcknowledgeRequest struct {
+	OperationID string `json:"operation_id"`
+}
+
+func (c *Client) AdminPluginInstallAcknowledge(ctx context.Context, session string, request PluginInstallAcknowledgeRequest) (PersistentOperationResponse, error) {
+	var out PersistentOperationResponse
+	err := c.pluginPost(ctx, session, "/v1/admin/plugins/install/acknowledge", request, &out)
 	return out, err
 }

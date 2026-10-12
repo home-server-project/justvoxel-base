@@ -1525,3 +1525,21 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 .plugins-pagination{display:flex;align-items:center;justify-content:space-between;gap:.6rem;margin-top:.8rem;font-size:.82rem}
 .plugins-workspace-dialog [hidden]{display:none!important}
 @media(max-width:700px){.plugins-workspace-dialog{position:fixed;inset:52px .25rem .25rem .25rem!important;width:auto!important;height:calc(100dvh - 52px - .25rem)!important;min-width:0;min-height:0;max-width:none;max-height:calc(100dvh - 52px - .25rem);resize:none}.plugins-workspace-header{cursor:default;touch-action:auto}.plugins-search-field{flex-basis:100%}}
+
+/* Stage 2 uses one review/progress panel; existing compact cards retain geometry. */
+.plugins-install-panel{position:absolute;inset:3.2rem .6rem .6rem;z-index:5;display:flex;overflow:auto;background:var(--jv-bg,#161c22);border:1px solid var(--jv-border,#303942);border-radius:8px;padding:1rem}
+.plugins-install-content{width:100%;min-width:0;overflow-wrap:anywhere}
+.plugins-install-content h3{margin-top:0}
+.plugins-install-content button{margin:.5rem .5rem 0 0}
+.plugins-install-warning{padding:.6rem;border:1px solid var(--jv-border,#303942);font-weight:600}
+
+.plugins-info-rows{display:grid;grid-template-columns:minmax(0,auto) minmax(0,1fr);gap:.25rem .65rem;margin:.35rem 0;font-size:.75rem;line-height:1.35}
+.plugins-info-rows dt{color:var(--jv-muted,#aeb8c0)}.plugins-info-rows dd{min-width:0;margin:0;overflow-wrap:anywhere}
+.plugins-info-rows ul{margin:0;padding-left:1rem}.plugins-dependency-ids{display:block;color:var(--jv-muted,#aeb8c0)}
+.plugins-version-disclosure summary{cursor:pointer}.plugins-dependency-groups strong{font-size:.75rem}
+.plugins-review-section{padding:.45rem 0;border-bottom:1px solid var(--jv-border,#303942)}.plugins-review-section h4{margin:0 0 .35rem;font-size:.88rem}
+.plugins-review-section .plugins-info-rows{font-size:.82rem;grid-template-columns:minmax(0,11rem) minmax(0,1fr)}
+.plugins-install-stages{display:flex;flex-wrap:wrap;gap:.4rem;list-style:none;padding:0;margin:.65rem 0;font-size:.8rem}
+.plugins-install-stages li{padding:.3rem .6rem;border:1px solid var(--jv-border,#303942);border-radius:5px;color:var(--jv-muted,#aeb8c0)}
+.plugins-install-stages [aria-current="step"]{border-color:#496454;background:#25382e;color:#c8f2d7}.plugins-install-stages .is-complete{color:#c8f2d7}
+@media(max-width:700px){.plugins-review-section .plugins-info-rows{grid-template-columns:minmax(0,auto) minmax(0,1fr)}}

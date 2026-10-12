@@ -5792,7 +5792,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   if (readWorkspaceWindowState("system").open) workspaceWindow?.open();
 }
 
-// Read-only plugin workspace. All local inventory and Modrinth access stays
+// Plugin workspace. All local inventory and Modrinth access stays
 // behind the Administrator-only WebUI and Management Agent routes.
 const pluginsDialog = document.querySelector("[data-plugins-workspace-dialog]");
 const pluginsOpen = document.querySelector("[data-plugins-open]");
@@ -5835,6 +5835,39 @@ if (pluginsDialog && pluginsOpen) {
     card.append(details);
     return details;
   };
+  const infoRows = (container) => {
+    const rows = document.createElement("dl");
+    rows.className = "plugins-info-rows";
+    container.append(rows);
+    return (label, value) => {
+      rows.append(text("dt", label));
+      const cell = document.createElement("dd");
+      if (typeof value === "string") cell.textContent = value;
+      else cell.append(value);
+      rows.append(cell);
+    };
+  };
+  const dependencyGroups = (dependencies) => {
+    const groups = document.createElement("div");
+    groups.className = "plugins-dependency-groups";
+    for (const [type, label] of [["required", "Required"], ["optional", "Optional"], ["incompatible", "Incompatible"], ["other", "Embedded / other"]]) {
+      const entries = dependencies.filter((dependency) => type === "other" ? !["required", "optional", "incompatible"].includes(dependency.dependency_type) : dependency.dependency_type === type);
+      if (!entries.length) continue;
+      groups.append(text("strong", label));
+      const list = document.createElement("ul");
+      list.className = "plugins-dependencies";
+      entries.forEach((dependency) => {
+        const identity = dependency.name || dependency.title || dependency.file_name;
+        const ids = [dependency.project_id && `Project ${dependency.project_id}`, dependency.version_id && `Release ${dependency.version_id}`].filter(Boolean).join(" · ");
+        const item = text("li", identity || "Publisher dependency");
+        if (ids) item.append(text("small", ids, "plugins-dependency-ids"));
+        list.append(item);
+      });
+      groups.append(list);
+    }
+    if (!dependencies.length) groups.append(text("span", "None listed"));
+    return groups;
+  };
   const renderProject = (project, server) => {
     const card = document.createElement("article");
     card.className = "plugins-result-card";
@@ -5862,49 +5895,240 @@ if (pluginsDialog && pluginsOpen) {
       card.append(text("p", Array.from(counts, ([kind, count]) => `${count} ${kind}`).join(" · "), "plugins-card-meta"));
     }
     const details = addInfo(card, project.title);
-    details.append(text("p", project.description), text("p", `Source: ${project.source} · Project: ${project.project_id}`, "plugins-card-meta"));
-    details.append(text("p", project.compatibility, "plugins-card-meta"));
+    const row = infoRows(details);
+    row("Source", project.source || "Modrinth");
+    row("Project ID", project.project_id);
     if (version) {
-      details.append(text("p", `${project.compatible ? "Latest compatible" : "Latest listed"} ${version.version_type}: ${version.version_number}`, "plugins-card-release"));
-      details.append(text("p", `Release ID: ${version.id} · Published: ${version.date_published || "Not provided"}`, "plugins-card-meta"));
-      details.append(text("p", `Minecraft: ${(version.game_versions || []).join(", ") || "Not provided"} · Platforms: ${(version.loaders || []).join(", ") || "Not provided"}`, "plugins-card-meta"));
-      details.append(text("p", dependencies.length ? "Dependencies (publisher metadata):" : "No dependencies listed in publisher metadata.", "plugins-card-meta"));
-      if (dependencies.length) {
-        const list = document.createElement("ul");
-        list.className = "plugins-dependencies";
-        dependencies.forEach((dependency) => {
-          const kind = ({ required: "Required", optional: "Optional", incompatible: "Incompatible", embedded: "Embedded" })[dependency.dependency_type] || `Unspecified (${dependency.dependency_type || "not provided"})`;
-          const identity = [dependency.project_id && `Project ${dependency.project_id}`, dependency.version_id && `version ${dependency.version_id}`, dependency.file_name && `File ${dependency.file_name}`].filter(Boolean).join(" · ") || "Identity not provided";
-          list.append(text("li", `${kind}: ${identity}`));
-        });
-        details.append(list);
-      }
+      row("Release ID", version.id);
+      row("Release type", version.version_type);
+      row("Published", version.date_published || "Not provided");
+      row("Platforms", (version.loaders || []).join(" / ") || "Not provided");
+      const versions = [...new Set(version.game_versions || [])];
+      const disclosure = document.createElement("details");
+      disclosure.className = "plugins-version-disclosure";
+      disclosure.append(text("summary", `${versions.length} supported Minecraft versions`));
+      disclosure.append(text("p", versions.join(" · ") || "Not provided", "plugins-card-meta"));
+      row("Supported Minecraft versions", disclosure);
+      row("Dependencies", dependencyGroups(dependencies));
     }
-    if (project.versions?.length) details.append(text("p", `Project Minecraft versions: ${project.versions.join(", ")}`, "plugins-card-meta"));
     if (project.metadata_error || !version) details.append(text("p", project.metadata_error || "Release metadata unavailable.", "plugins-card-meta"));
-    // Metadata uses textContent throughout; no upstream HTML, image, URL,
-    // executable action, or dependency download is rendered.
+    const managed = ["geyser", "floodgate", "viaversion"].includes(project.slug);
+    if (managed) {
+      badges.append(text("span", "JustVoxel managed", "plugins-badge"));
+    } else if (project.install_available && project.compatible && server.supported && server.minecraft_version && version?.version_type === "release") {
+      const install = text("button", "Install", "plugins-info-button");
+      install.type = "button";
+      install.addEventListener("click", () => reviewPlugin(project.project_id, version.id));
+      card.querySelector(".plugins-card-heading").append(install);
+    }
+    // Publisher data uses textContent; artifact URLs never reach this browser.
     return card;
   };
   const renderInstalled = (plugin) => {
     const card = document.createElement("article");
     card.className = "plugins-result-card";
     const name = plugin.name || plugin.filename;
-    const management = plugin.management === "justvoxel" ? "JustVoxel managed" : "Manual / unmanaged";
+    const management = plugin.management === "justvoxel" ? "JustVoxel managed" : plugin.management === "plugins" ? "Managed by Plugins" : "Manual / unmanaged";
     card.append(text("h3", name), text("p", `Version: ${plugin.version || "Unknown"}`, "plugins-card-release"));
     const badges = document.createElement("div");
     badges.className = "plugins-card-badges";
     badges.append(text("span", management, "plugins-badge plugins-management"));
     card.append(badges);
-    if (tab === "updates" && plugin.update_status) card.append(text("p", plugin.management === "justvoxel" ? "Via server updates" : "Update status unknown", "plugins-card-meta"));
     const details = addInfo(card, name);
-    details.append(text("p", `JAR: ${plugin.filename}`, "plugins-card-meta"));
-    details.append(text("p", `Metadata status: ${plugin.metadata_status || "Unknown"}`, "plugins-card-meta"));
-    details.append(text("p", management, "plugins-management"));
-    details.append(text("p", plugin.management === "justvoxel" ? "Managed by JustVoxel’s existing server update mechanism." : "Manually managed. JustVoxel does not identify this JAR with a Modrinth project or manage its updates.", "plugins-card-meta"));
-    if (plugin.update_status) details.append(text("p", plugin.update_status, "plugins-card-meta"));
+    const row = infoRows(details);
+    row("JAR", plugin.filename);
+    row("Metadata", plugin.metadata_status || "Unknown");
+    row("Management", management);
+    const attention = plugin.update_status?.startsWith("Attention:");
+    const updateStatus = attention ? plugin.update_status.replace(/; manual \/ unmanaged$/, "") : plugin.management === "justvoxel" ? "Via server updates" : plugin.management === "plugins" ? "Update and removal are not available yet" : "Unknown";
+    row("Update status", updateStatus);
     return card;
   };
+  // Review, progress and completion reuse a single panel inside this workspace.
+  const panel = document.createElement("section");
+  panel.className = "plugins-install-panel";
+  panel.hidden = true;
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-label", "Plugin installation");
+  const panelBody = document.createElement("div");
+  panelBody.className = "plugins-install-content";
+  panel.append(panelBody);
+  pluginsDialog.append(panel);
+  let installGeneration = 0, pollTimer = null, installController = null, returnFocus = null;
+  const stopPolling = () => { clearTimeout(pollTimer); pollTimer = null; installController?.abort(); ++installGeneration; };
+  const closePanel = () => { stopPolling(); panel.hidden = true; returnFocus?.focus(); };
+  const showPanel = () => {
+    if (panel.hidden) returnFocus = document.activeElement;
+    panel.hidden = false;
+    panelBody.replaceChildren();
+  };
+  const panelAction = (label, action, secondary = false) => {
+    const button = text("button", label, secondary ? "secondary" : "");
+    button.type = "button";
+    button.addEventListener("click", action);
+    return button;
+  };
+  const pluginRequest = async (route, body, signal) => {
+    const options = { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" }, signal };
+    if (body) {
+      options.method = "POST";
+      options.body = new URLSearchParams({ csrf: document.querySelector('[data-minecraft-workspace-csrf]')?.value || document.querySelector('input[name="csrf"]')?.value || "", ...body });
+    }
+    const response = await fetch(`/api/plugins/workspace/${route}`, options);
+    const payload = await response.json();
+    if (response.status === 401) { window.location.assign("/login"); throw new Error("Sign in again."); }
+    if (response.status === 403 && String(payload.error || "").toLowerCase().includes("password")) { window.location.assign("/password"); throw new Error("Change your password first."); }
+    if (!response.ok) throw new Error(payload.error || payload.message || "Plugin installation is unavailable; review again.");
+    return payload;
+  };
+  const panelError = (error) => {
+    showPanel();
+    panelBody.append(text("h3", "Installation could not continue"), text("p", error.message || "Status is unavailable. Reopen Plugins to check the persistent operation."), panelAction("Done", closePanel, true));
+  };
+  const showOperation = (operation) => {
+    showPanel();
+    const success = operation.state === "succeeded";
+    const attention = operation.state === "needs_attention";
+    const terminal = ["succeeded", "rolled_back", "needs_attention", "resolved"].includes(operation.state);
+    panelBody.append(text("h3", success ? "Plugin installed" : attention ? "Administrator attention required" : operation.state === "rolled_back" ? "Installation did not complete" : operation.state === "resolved" ? "Plugin state verified" : "Installing plugin"));
+    if (!terminal) {
+      const stages = ["Prepare", "Backup", "Install", "Restart", "Verify"];
+      const index = ({ queued: 0, validating: 0, downloading: 0, player_check: 0, backup: 1, installing: 2, restarting: 3, verifying: 4 })[operation.stage];
+      const sequence = document.createElement("ol");
+      sequence.className = "plugins-install-stages";
+      stages.forEach((label, position) => {
+        const item = text("li", label);
+        if (position === index) item.setAttribute("aria-current", "step");
+        if (index !== undefined && position < index) item.className = "is-complete";
+        sequence.append(item);
+      });
+      panelBody.append(sequence);
+    }
+    // The persisted status is the single source of result and final service state.
+    panelBody.append(text("p", operation.status, "plugins-operation-status"));
+    if (success) {
+      panelBody.append(panelAction("View in Installed", () => {
+        closePanel();
+        pluginsDialog.querySelector('[data-plugins-tab="installed"]').click();
+      }), panelAction("Install another plugin", () => {
+        closePanel();
+        pluginsDialog.querySelector('[data-plugins-tab="discover"]').click();
+      }, true));
+    }
+    if (attention) {
+      panelBody.append(text("p", "Automatic recovery could not be proven. Review and repair the plugin and Minecraft state, then re-check. Maintenance remains reserved until verification succeeds.", "plugins-install-warning"));
+      const feedback = text("p", "", "plugins-operation-feedback");
+      const recheck = panelAction("Re-check after repair", async () => {
+        recheck.disabled = true;
+        feedback.textContent = "Re-checking plugin and Minecraft state…";
+        const current = installGeneration;
+        try {
+          const payload = await pluginRequest("install/acknowledge", { operation_id: operation.operation_id }, installController?.signal);
+          if (current !== installGeneration) return;
+          if (!payload.operation || payload.operation.state !== "resolved") throw new Error("Plugin state could not be resolved.");
+          showOperation(payload.operation);
+          load();
+        } catch (error) {
+          if (current === installGeneration && error.name !== "AbortError") {
+            feedback.textContent = error.message || "Re-check failed. Evidence and maintenance exclusion were preserved.";
+            recheck.disabled = false;
+          }
+        }
+      });
+      panelBody.append(recheck, panelAction("Close", closePanel, true), feedback);
+    } else if (terminal) panelBody.append(panelAction("Done", () => { closePanel(); load(); }, true));
+    else panelBody.append(panelAction("Close", closePanel, true));
+    return terminal;
+  };
+  const pollOperation = async (id, current) => {
+    if (current !== installGeneration) return;
+    try {
+      const payload = await pluginRequest(`install-operation?id=${encodeURIComponent(id)}`, null, installController?.signal);
+      if (current !== installGeneration) return;
+      if (!payload.operation) throw new Error("Installation status is unavailable.");
+      if (!showOperation(payload.operation)) pollTimer = setTimeout(() => pollOperation(id, current), 1500);
+    } catch (error) { if (current === installGeneration && error.name !== "AbortError") panelError(error); }
+  };
+  const applyPlugin = async (plan) => {
+    stopPolling();
+    const current = installGeneration;
+    installController = new AbortController();
+    showPanel();
+    panelBody.append(text("h3", "Submitting reviewed installation…"));
+    try {
+      const payload = await pluginRequest("install", {
+        project_id: plan.project_id, version_id: plan.version_id, plan_fingerprint: plan.plan_fingerprint,
+        confirm_players: String(plan.confirmation_required === true),
+      }, installController.signal);
+      if (current !== installGeneration) return;
+      if (!payload.operation) throw new Error("Installation did not start. Review again.");
+      if (!showOperation(payload.operation)) pollTimer = setTimeout(() => pollOperation(payload.operation.operation_id, current), 1000);
+    } catch (error) { if (current === installGeneration && error.name !== "AbortError") panelError(error); }
+  };
+  const reviewPlugin = async (projectID, versionID) => {
+    stopPolling();
+    const current = installGeneration;
+    installController = new AbortController();
+    showPanel();
+    panelBody.append(text("h3", "Preparing installation review…"), panelAction("Cancel", closePanel, true));
+    try {
+      const plan = await pluginRequest("install/plan", { project_id: projectID, version_id: versionID }, installController.signal);
+      if (current !== installGeneration) return;
+      showPanel();
+      panelBody.append(text("h3", "Review installation"));
+      const section = (label) => {
+        const group = document.createElement("section");
+        group.className = "plugins-review-section";
+        group.append(text("h4", label));
+        panelBody.append(group);
+        return infoRows(group);
+      };
+      const plugin = section("Plugin");
+      plugin("Name", plan.project_name);
+      plugin("Selected release", plan.version_number);
+      const compatibility = section("Compatibility");
+      compatibility("Server software", plan.server.server_software);
+      compatibility("Minecraft", plan.server.minecraft_version);
+      compatibility("Result", plan.compatibility);
+      const installation = section("Installation");
+      const files = document.createElement("ul");
+      plan.artifacts.filter((artifact) => !artifact.satisfied).forEach((artifact) => files.append(text("li", `${artifact.filename} · ${artifact.size.toLocaleString()} bytes`)));
+      installation("Files to install", files);
+      const required = plan.artifacts.filter((artifact) => !artifact.requested);
+      const dependencies = document.createElement("ul");
+      required.forEach((artifact) => dependencies.append(text("li", `${artifact.project_name} ${artifact.version_number} · ${artifact.satisfied || "Will be installed"}`)));
+      installation("Required dependencies", required.length ? dependencies : "None");
+      installation("Target plugins directory", plan.installation_location);
+      installation("Restart required", plan.restart_required ? "Yes · verified cold backup first; original service state restored" : "No");
+      if (plan.confirmation_required) {
+        const players = section("Players");
+        players("Online", `${plan.online} · ${(plan.players || []).join(", ") || "Names unavailable"}`);
+        panelBody.append(text("p", "Install confirms the player-aware shutdown and restart.", "plugins-install-warning"));
+      }
+      panelBody.append(panelAction("Cancel", closePanel, true), panelAction("Install", () => applyPlugin(plan)));
+      panelBody.querySelector("button")?.focus();
+    } catch (error) { if (current === installGeneration && error.name !== "AbortError") panelError(error); }
+  };
+  const resumePluginInstall = async () => {
+    const requestedGeneration = installGeneration;
+    try {
+      const payload = await pluginRequest("install-operation");
+      if (!pluginsDialog.open || !payload.operation || requestedGeneration !== installGeneration || !panel.hidden) return;
+      stopPolling();
+      installController = new AbortController();
+      const current = installGeneration;
+      if (!showOperation(payload.operation)) pollTimer = setTimeout(() => pollOperation(payload.operation.operation_id, current), 1000);
+    } catch (error) { state.textContent = error.message || "Plugin installation status is unavailable."; }
+  };
+  panel.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closePanel(); }
+    if (event.key === "Tab") {
+      const buttons = Array.from(panel.querySelectorAll("button,summary"));
+      const first = buttons[0], last = buttons.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    }
+  });
   const load = async () => {
     if (!document.body.classList.contains("role-administrator")) return;
     const current = ++generation;
@@ -5914,7 +6138,7 @@ if (pluginsDialog && pluginsOpen) {
     results.replaceChildren();
     pagination.hidden = true;
     form.hidden = tab !== "discover";
-    source.textContent = tab === "discover" ? "Source: Modrinth · Read only · Runtime compatibility has not been verified by JustVoxel." : "Source: installed JAR files · Read only";
+    source.textContent = tab === "discover" ? "Source: Modrinth · Compatible releases can be reviewed for installation." : "Source: installed JAR files";
     const query = new URLSearchParams({ q: form.elements.q.value, compatible_only: String(form.elements.compatible_only.checked), release_only: String(form.elements.release_only.checked), offset: String(offset) });
     try {
       const response = await fetch(`/api/plugins/workspace/${tab}${tab === "discover" ? "?" + query : ""}`, { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" }, signal: controller.signal });
@@ -5941,7 +6165,7 @@ if (pluginsDialog && pluginsOpen) {
       if (current === generation && error.name !== "AbortError") state.textContent = error.message || "Plugin information is unavailable.";
     }
   };
-  const workspaceWindow = setupWorkspaceWindow(pluginsDialog, { onOpen: load, onClose: () => { ++generation; controller?.abort(); } });
+  const workspaceWindow = setupWorkspaceWindow(pluginsDialog, { onOpen: () => { load(); resumePluginInstall(); }, onClose: () => { ++generation; controller?.abort(); closePanel(); } });
   pluginsOpen.addEventListener("click", () => {
     if (!document.body.classList.contains("role-administrator")) return;
     const controlCenter = document.querySelector("[data-control-center]");

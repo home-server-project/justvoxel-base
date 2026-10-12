@@ -51,6 +51,7 @@ type installedPlugin struct {
 	Management     string `json:"management"`
 	UpdateStatus   string `json:"update_status"`
 	MetadataStatus string `json:"metadata_status"`
+	Main           string `json:"-"`
 }
 type pluginInventory struct {
 	Server  pluginServerContext `json:"server"`
@@ -63,24 +64,28 @@ type pluginDependency struct {
 	Type      string `json:"dependency_type"`
 }
 type pluginCatalogVersion struct {
-	ID           string             `json:"id"`
-	Number       string             `json:"version_number"`
-	Type         string             `json:"version_type"`
-	Published    string             `json:"date_published"`
-	GameVersions []string           `json:"game_versions"`
-	Loaders      []string           `json:"loaders"`
-	Dependencies []pluginDependency `json:"dependencies"`
+	ID           string               `json:"id"`
+	ProjectID    string               `json:"project_id"`
+	Files        []pluginArtifactFile `json:"files,omitempty"`
+	Number       string               `json:"version_number"`
+	Type         string               `json:"version_type"`
+	Published    string               `json:"date_published"`
+	GameVersions []string             `json:"game_versions"`
+	Loaders      []string             `json:"loaders"`
+	Dependencies []pluginDependency   `json:"dependencies"`
 }
 type pluginCatalogProject struct {
-	ID            string                `json:"project_id"`
-	Name          string                `json:"title"`
-	Description   string                `json:"description"`
-	Source        string                `json:"source"`
-	Versions      []string              `json:"versions"`
-	Version       *pluginCatalogVersion `json:"version,omitempty"`
-	Compatible    bool                  `json:"compatible"`
-	Compatibility string                `json:"compatibility"`
-	MetadataError string                `json:"metadata_error,omitempty"`
+	ID               string                `json:"project_id"`
+	Slug             string                `json:"slug"`
+	InstallAvailable bool                  `json:"install_available"`
+	Name             string                `json:"title"`
+	Description      string                `json:"description"`
+	Source           string                `json:"source"`
+	Versions         []string              `json:"versions"`
+	Version          *pluginCatalogVersion `json:"version,omitempty"`
+	Compatible       bool                  `json:"compatible"`
+	Compatibility    string                `json:"compatibility"`
+	MetadataError    string                `json:"metadata_error,omitempty"`
 }
 type pluginCatalog struct {
 	Server     pluginServerContext    `json:"server"`
@@ -95,6 +100,10 @@ func registerAdminPluginRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("GET /v1/admin/plugins/installed", s.adminPluginsInstalled)
 	mux.HandleFunc("GET /v1/admin/plugins/updates", s.adminPluginsInstalled)
 	mux.HandleFunc("GET /v1/admin/plugins/discover", s.adminPluginsDiscover)
+	mux.HandleFunc("POST /v1/admin/plugins/install/plan", s.adminPluginInstallPlan)
+	mux.HandleFunc("POST /v1/admin/plugins/install", s.adminPluginInstall)
+	mux.HandleFunc("POST /v1/admin/plugins/install/acknowledge", s.adminPluginInstallAcknowledge)
+	mux.HandleFunc("GET /v1/admin/plugins/install-operation", s.adminPluginInstallCurrent)
 }
 
 // Reuse authoritative discovery and runtime status; never parse appliance config here.
@@ -176,6 +185,12 @@ func readPluginInventory(dataPath string) ([]installedPlugin, error) {
 	// protects against replacing the root or a JAR with a symlink between checks.
 	fd, err := unix.Open(filepath.Join(dataPath, "plugins"), unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if errors.Is(err, unix.ENOENT) {
+		manifest, _, manifestErr := readPluginManifest(dataPath)
+		if manifestErr == nil {
+			for _, entry := range manifest.Artifacts {
+				out = append(out, installedPlugin{Name: entry.PluginName, Filename: entry.Filename, Management: "manual", MetadataStatus: "Managed JAR missing or unavailable", UpdateStatus: "Attention: plugin directory is missing; ownership is unverified"})
+			}
+		}
 		return out, nil
 	}
 	if err != nil {
@@ -209,8 +224,26 @@ func readPluginInventory(dataPath string) ([]installedPlugin, error) {
 			continue
 		}
 		item := inspectPluginJar(file, info.Size(), entry.Name())
+		classifyGenericPluginInventory(dataPath, file, &item)
 		file.Close()
 		out = append(out, item)
+	}
+	// Missing manifest files are attention evidence, never trusted ownership.
+	manifest, _, manifestErr := readPluginManifest(dataPath)
+	if manifestErr == nil {
+		for _, managed := range manifest.Artifacts {
+			present := false
+			for _, item := range out {
+				if item.Filename == managed.Filename {
+					present = true
+					break
+				}
+			}
+			if !present {
+				out = append(out, installedPlugin{Name: managed.PluginName, Filename: managed.Filename, Management: "manual", MetadataStatus: "Managed JAR missing or unavailable", UpdateStatus: "Attention: manifest JAR is missing or unavailable; ownership is unverified"})
+			}
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i].Filename < out[j].Filename })
 	}
 	return out, nil
 }
@@ -254,6 +287,10 @@ func inspectPluginJar(file io.ReaderAt, size int64, filename string) installedPl
 				}
 			}
 			fields := pluginMetadataScalars(string(data))
+			if main := managedPluginMain.FindStringSubmatch(string(data)); main != nil {
+				item.Main = main[1]
+				classifyPluginManagement(&item, item.Main)
+			}
 			if item.Name == "" {
 				item.Name = fields["name"]
 			}
@@ -495,6 +532,7 @@ func (s *server) adminPluginsDiscover(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		project.Version = nil
+		project.InstallAvailable = false
 		project.Compatible = false
 		project.MetadataError = ""
 		project.Source = "Modrinth"
@@ -532,6 +570,9 @@ func (s *server) adminPluginsDiscover(w http.ResponseWriter, r *http.Request) {
 			if compatible && !matches {
 				continue
 			}
+			_, fileErr := selectPluginArtifact(v.Files)
+			project.InstallAvailable = matches && server.Supported && v.Type == "release" && v.ProjectID == project.ID && modrinthPluginID.MatchString(v.ID) && fileErr == nil && managedPluginSlug(project.Slug) == ""
+			v.Files = nil // Artifact URLs never leave the privileged agent.
 			project.Version = &v
 			project.Compatible = matches
 			if matches {
