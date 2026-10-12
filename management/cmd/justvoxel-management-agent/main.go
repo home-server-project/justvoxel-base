@@ -212,6 +212,7 @@ func serve(socket string) error {
 	registerAdminConfigurationRoutes(mux, s)
 	registerAdminDateTimeRoutes(mux, s)
 	registerAdminVersionStatusRoutes(mux, s)
+	registerAdminPluginRoutes(mux, s)
 	registerAdminValidationRoutes(mux, s)
 	registerAdminRestoreRoutes(mux, s)
 	registerAdminBackupDeleteRoutes(mux, s)

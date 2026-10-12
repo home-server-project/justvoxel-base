@@ -65,6 +65,7 @@
           <div class="control-tile-grid">
             <button class="control-tile" type="button" data-minecraft-open title="Minecraft overview, settings and players"><strong>Minecraft Settings</strong></button>
             <button class="control-tile nav-admin-only" type="button" data-version-open title="Server software and Minecraft version"><strong>Version</strong></button>
+            <button class="control-tile nav-admin-only" type="button" data-plugins-open title="Discover plugins and view installed plugins"><strong>Plugins</strong></button>
           </div>
         </section>
 
@@ -209,6 +210,29 @@
       <div class="minecraft-workspace-body">
         <p class="minecraft-workspace-state" data-minecraft-state>Choose a section.</p>
         <div class="minecraft-workspace-content" data-minecraft-workspace-content></div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="workspace-window plugins-workspace-dialog" data-workspace-window="plugins" data-plugins-workspace-dialog aria-labelledby="plugins-workspace-title">
+    <div class="plugins-workspace-shell">
+      <div class="plugins-workspace-header" data-workspace-drag-handle>
+        <div><p class="eyebrow">JustVoxel</p><h2 id="plugins-workspace-title">Plugins</h2></div>
+        <div><button class="system-monitor-header-button workspace-header-refresh" type="button" data-plugins-refresh aria-label="Refresh Plugins">Refresh</button><button class="system-monitor-header-button workspace-header-close" type="button" data-plugins-close aria-label="Close Plugins"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M5 5l14 14M19 5L5 19"/></svg></button></div>
+      </div>
+      <p class="plugins-server-context" data-plugins-context>Loading server information…</p>
+      <nav class="plugins-workspace-tabs" aria-label="Plugins workspace"><button type="button" data-plugins-tab="discover" aria-selected="true">Discover</button><button type="button" data-plugins-tab="installed" aria-selected="false">Installed</button><button type="button" data-plugins-tab="updates" aria-selected="false">Updates</button></nav>
+      <div class="plugins-workspace-body">
+        <form class="plugins-search" data-plugins-search role="search">
+          <label class="plugins-search-field">Search plugins<input name="q" type="search" maxlength="200" placeholder="Search Modrinth plugins" autocomplete="off"></label>
+          <button type="submit">Search</button>
+          <label class="plugins-filter"><input name="compatible_only" type="checkbox" checked>Compatible only</label>
+          <label class="plugins-filter"><input name="release_only" type="checkbox" checked>Release only</label>
+        </form>
+        <p class="plugins-source" data-plugins-source>Source: Modrinth · Read only</p>
+        <p class="plugins-workspace-state" data-plugins-state role="status" aria-live="polite"></p>
+        <div class="plugins-results" data-plugins-results></div>
+        <div class="plugins-pagination" data-plugins-pagination hidden><button type="button" data-plugins-previous>Previous</button><span data-plugins-page></span><button type="button" data-plugins-next>Next</button></div>
       </div>
     </div>
   </dialog>

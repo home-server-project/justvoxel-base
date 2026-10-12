@@ -48,7 +48,7 @@ func TestControlCenterNavigationUX(t *testing.T) {
 	if strings.Contains(navigation, "Temporary") {
 		t.Fatal("workspace launchers still labeled Temporary")
 	}
-	for _, item := range []string{"data-minecraft-open", "data-system-open", "data-network-open", "data-system-monitor-open", "data-system-update-open", "data-storage-open", "data-backups-open", "data-migration-open"} {
+	for _, item := range []string{"data-minecraft-open", "data-plugins-open", "data-system-open", "data-network-open", "data-system-monitor-open", "data-system-update-open", "data-storage-open", "data-backups-open", "data-migration-open"} {
 		if strings.Count(navigation, item) != 1 {
 			t.Fatalf("workspace launcher %s must appear once", item)
 		}
@@ -58,7 +58,7 @@ func TestControlCenterNavigationUX(t *testing.T) {
 			t.Fatalf("legacy standalone link remains: %s", old)
 		}
 	}
-	for _, item := range []string{`class="control-tile nav-admin-only" type="button" data-system-update-open`, `class="control-tile nav-admin-only" type="button" data-storage-open`, `class="control-tile nav-admin-only" type="button" data-backups-open`, `class="control-tile nav-admin-only" type="button" data-migration-open`} {
+	for _, item := range []string{`class="control-tile nav-admin-only" type="button" data-plugins-open`, `class="control-tile nav-admin-only" type="button" data-system-update-open`, `class="control-tile nav-admin-only" type="button" data-storage-open`, `class="control-tile nav-admin-only" type="button" data-backups-open`, `class="control-tile nav-admin-only" type="button" data-migration-open`} {
 		if !strings.Contains(navigation, item) {
 			t.Fatalf("administrator launcher lost role restriction: %s", item)
 		}

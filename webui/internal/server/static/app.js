@@ -5768,6 +5768,132 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   if (readWorkspaceWindowState("system").open) workspaceWindow?.open();
 }
 
+// Read-only plugin workspace. All local inventory and Modrinth access stays
+// behind the Administrator-only WebUI and Management Agent routes.
+const pluginsDialog = document.querySelector("[data-plugins-workspace-dialog]");
+const pluginsOpen = document.querySelector("[data-plugins-open]");
+if (pluginsDialog && pluginsOpen) {
+  const form = pluginsDialog.querySelector("[data-plugins-search]");
+  const results = pluginsDialog.querySelector("[data-plugins-results]");
+  const state = pluginsDialog.querySelector("[data-plugins-state]");
+  const context = pluginsDialog.querySelector("[data-plugins-context]");
+  const source = pluginsDialog.querySelector("[data-plugins-source]");
+  const pagination = pluginsDialog.querySelector("[data-plugins-pagination]");
+  const previous = pluginsDialog.querySelector("[data-plugins-previous]");
+  const next = pluginsDialog.querySelector("[data-plugins-next]");
+  let tab = "discover", offset = 0, nextOffset = -1, generation = 0, controller = null;
+  const text = (tag, value, className = "") => {
+    const node = document.createElement(tag);
+    node.textContent = value;
+    node.className = className;
+    return node;
+  };
+  const renderProject = (project) => {
+    const card = document.createElement("article");
+    card.className = "plugins-result-card";
+    card.append(text("h3", project.title), text("p", project.description), text("p", `Source: ${project.source} · Project: ${project.project_id}`, "plugins-card-meta"));
+    const version = project.version;
+    if (version) {
+      card.append(text("p", `${project.compatible ? "Latest compatible" : "Latest listed"} ${version.version_type}: ${version.version_number}`, "plugins-card-release"));
+      card.append(text("p", project.compatibility, "plugins-card-meta"));
+      card.append(text("p", `Minecraft: ${(version.game_versions || []).join(", ") || "Not provided"} · Platforms: ${(version.loaders || []).join(", ") || "Not provided"}`, "plugins-card-meta"));
+      const dependencies = version.dependencies || [];
+      card.append(text("p", dependencies.length ? "Dependencies (publisher metadata):" : "No dependencies listed in publisher metadata.", "plugins-card-meta"));
+      if (dependencies.length) {
+        const list = document.createElement("ul");
+        list.className = "plugins-dependencies";
+        dependencies.forEach((dependency) => {
+          const kind = ({ required: "Required", optional: "Optional", incompatible: "Incompatible", embedded: "Embedded" })[dependency.dependency_type] || "Unspecified";
+          const identity = [dependency.project_id && `Project ${dependency.project_id}`, dependency.version_id && `version ${dependency.version_id}`, dependency.file_name].filter(Boolean).join(" · ") || "Identity not provided";
+          list.append(text("li", `${kind}: ${identity}`));
+        });
+        card.append(list);
+      }
+    } else {
+      card.append(text("p", project.metadata_error || "Release metadata unavailable.", "plugins-card-meta"));
+    }
+    // Metadata uses textContent throughout; no upstream HTML, image, URL,
+    // executable action, or dependency download is rendered.
+    return card;
+  };
+  const renderInstalled = (plugin) => {
+    const card = document.createElement("article");
+    card.className = "plugins-result-card";
+    card.append(text("h3", plugin.name || plugin.filename));
+    card.append(text("p", `Version: ${plugin.version || "Unknown"} · JAR: ${plugin.filename}`, "plugins-card-meta"));
+    card.append(text("p", plugin.management === "justvoxel" ? "JustVoxel managed" : "Manual / unmanaged", "plugins-management"));
+    if (tab === "updates") card.append(text("p", plugin.update_status, "plugins-card-meta"));
+    if (plugin.metadata_status !== "Metadata read") card.append(text("p", plugin.metadata_status, "plugins-card-meta"));
+    return card;
+  };
+  const load = async () => {
+    if (!document.body.classList.contains("role-administrator")) return;
+    const current = ++generation;
+    controller?.abort();
+    controller = new AbortController();
+    state.textContent = "Loading plugins…";
+    results.replaceChildren();
+    pagination.hidden = true;
+    form.hidden = tab !== "discover";
+    source.textContent = tab === "discover" ? "Source: Modrinth · Read only · Runtime compatibility has not been verified by JustVoxel." : "Source: installed JAR files · Read only";
+    const query = new URLSearchParams({ q: form.elements.q.value, compatible_only: String(form.elements.compatible_only.checked), release_only: String(form.elements.release_only.checked), offset: String(offset) });
+    try {
+      const response = await fetch(`/api/plugins/workspace/${tab}${tab === "discover" ? "?" + query : ""}`, { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" }, signal: controller.signal });
+      const payload = await response.json();
+      if (current !== generation) return;
+      if (response.status === 401) { window.location.assign("/login"); return; }
+      if (response.status === 403 && String(payload.error || "").toLowerCase().includes("password")) { window.location.assign("/password"); return; }
+      if (!response.ok) throw new Error(payload.error || "Plugin information is unavailable.");
+      const server = payload.server;
+      context.textContent = `${server.server_software || "Minecraft"} · Minecraft ${server.minecraft_version || "version unavailable"}`;
+      form.querySelectorAll("input,button").forEach((control) => { control.disabled = !server.supported; });
+      if (!server.supported) { state.textContent = server.message; return; }
+      const items = tab === "discover" ? payload.projects : payload.plugins;
+      items.forEach((item) => results.append(tab === "discover" ? renderProject(item) : renderInstalled(item)));
+      state.textContent = server.message || (items.length ? "" : tab === "discover" ? "No plugins match these filters on this page." : "No installed plugin JARs found.");
+      if (tab === "discover") {
+        nextOffset = payload.next_offset;
+        pagination.hidden = offset === 0 && nextOffset < 0;
+        previous.disabled = offset === 0;
+        next.disabled = nextOffset < 0;
+        pluginsDialog.querySelector("[data-plugins-page]").textContent = `Catalog page ${Math.floor(offset / 8) + 1}`;
+      }
+    } catch (error) {
+      if (current === generation && error.name !== "AbortError") state.textContent = error.message || "Plugin information is unavailable.";
+    }
+  };
+  const workspaceWindow = setupWorkspaceWindow(pluginsDialog, { onOpen: load, onClose: () => { ++generation; controller?.abort(); } });
+  pluginsOpen.addEventListener("click", () => {
+    if (!document.body.classList.contains("role-administrator")) return;
+    const controlCenter = document.querySelector("[data-control-center]");
+    if (controlCenter) controlCenter.open = false;
+    workspaceWindow?.open();
+  });
+  pluginsDialog.querySelector("[data-plugins-close]").addEventListener("click", () => workspaceWindow?.close());
+  pluginsDialog.querySelector("[data-plugins-refresh]").addEventListener("click", load);
+  pluginsDialog.querySelectorAll("[data-plugins-tab]").forEach((button) => button.addEventListener("click", () => {
+    tab = button.dataset.pluginsTab;
+    offset = 0;
+    pluginsDialog.querySelectorAll("[data-plugins-tab]").forEach((node) => node.setAttribute("aria-selected", String(node === button)));
+    load();
+  }));
+  form.addEventListener("submit", (event) => { event.preventDefault(); offset = 0; load(); });
+  form.querySelectorAll('input[type="checkbox"]').forEach((control) => control.addEventListener("change", () => { offset = 0; load(); }));
+  previous.addEventListener("click", () => { offset = Math.max(0, offset - 8); load(); });
+  next.addEventListener("click", () => { if (nextOffset >= 0) { offset = nextOffset; load(); } });
+  // Role discovery is asynchronous. Restore only after Administrator identity
+  // has been established, matching the role-gated launcher.
+  const restore = () => {
+    if (document.body.classList.contains("role-pending")) return false;
+    if (document.body.classList.contains("role-administrator") && readWorkspaceWindowState("plugins").open) workspaceWindow?.open();
+    return true;
+  };
+  if (!restore()) {
+    const observer = new MutationObserver(() => { if (restore()) observer.disconnect(); });
+    observer.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+  }
+}
+
 // Bookmarked standalone pages land on the matching dashboard workspace.
 if (dashboard) {
   const destination = new URLSearchParams(window.location.search);
@@ -5780,6 +5906,7 @@ if (dashboard) {
     backups: "[data-backups-open]",
     migration: "[data-migration-open]",
     version: "[data-version-open]",
+    plugins: "[data-plugins-open]",
   };
   if (Object.hasOwn(launchers, workspace)) {
     const launch = () => {
@@ -5795,6 +5922,7 @@ if (dashboard) {
       const allowedTabs = {
         minecraft: ["overview", "memory", "gameplay", "players", "crossplay"],
         version: ["software", "minecraft"],
+        plugins: ["discover", "installed", "updates"],
         system: ["health", "history", "users", "security", "logs", "date-time", "wallpaper", "reset", "ups", "about"],
         migration: ["export", "import", "recovery"],
       };
