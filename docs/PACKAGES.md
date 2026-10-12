@@ -51,6 +51,13 @@ The Base includes the tools required for the containerized Minecraft workload an
 - Python 3
 - common JSON, TLS, archive, file, and process utilities
 
+## Plugin icon conversion
+
+`librsvg2-tools` is included only for bounded SVG/SVGZ plugin icon rendering.
+`netpbm-progs` is included only for bounded SGI RGB plugin icon conversion.
+These are image-composition dependencies, not runtime package installation.
+Composition checks require `rsvg-convert`, `sgitopnm` and `pnmtopng`.
+
 ## SELinux and system security
 
 JustVoxel keeps SELinux enforcing and includes the administration/policy tools required for container workloads and appliance-managed files:

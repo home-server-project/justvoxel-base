@@ -24,6 +24,7 @@ type fakePluginsWorkspaceAPI struct {
 	iconURL        string
 	iconProjectID  string
 	iconError      error
+	iconResult     *api.PluginIcon
 }
 
 func (f *fakePluginsWorkspaceAPI) AdminPluginInventory(_ context.Context, session string, updates bool) (api.PluginInventory, error) {
@@ -502,6 +503,9 @@ func (f *fakePluginsWorkspaceAPI) AdminPluginIcon(_ context.Context, session, pr
 	f.iconProjectID = projectID
 	if len(iconURL) == 1 {
 		f.iconURL = iconURL[0]
+	}
+	if f.iconResult != nil {
+		return *f.iconResult, f.iconError
 	}
 	return api.PluginIcon{ContentType: "image/png", Data: []byte("\x89PNG\r\n\x1a\nfixture")}, f.iconError
 }
@@ -1217,8 +1221,8 @@ func TestPluginsWorkspaceStableOperationIdentity(t *testing.T) {
 	if !strings.Contains(panel, `Array.from(panelBody.children).slice(1).forEach((node) => node.remove())`) || !strings.Contains(panel, `if (preserveIdentity) {`) {
 		t.Fatal("polling must preserve the header and logo")
 	}
-	if !strings.Contains(panel, `operationViewID = null;`) || !strings.Contains(script, `panel.hidden = true;
-    operationViewID = null;`) {
+	close := pluginScriptSection(t, script, "  const closePanel =", "  const showPanel =")
+	if !strings.Contains(panel, `operationViewID = null;`) || !strings.Contains(close, `panel.hidden = true;`) || !strings.Contains(close, `operationViewID = null;`) {
 		t.Fatal("new operations and reopened views must replace identity")
 	}
 }
@@ -1420,7 +1424,7 @@ func TestPluginWorkspaceApprovedPolish(t *testing.T) {
 		}
 	}
 	review := pluginScriptSection(t, script, "  const reviewPlugin =", "  const resumePluginInstall =")
-	for _, want := range []string{`project?.project_id === plan.project_id ? project.icon_url || "" : undefined`, `This release is a loader-based server mod and is not supported by the current Plugin installer.`, `Loader-based server mod - not supported by the current Plugin installer. This release requires a separate loader/runtime installation path, so JustVoxel will not place it in the plugins directory.`} {
+	for _, want := range []string{`project?.project_id === plan.project_id ? project.icon_url || "" : undefined`, `Loader-based server mod - not supported by the current version of JustVoxel Plugin installer. Should be available in future updates.`} {
 		if !strings.Contains(review, want) {
 			t.Fatal("Discover review explanation/icon missing", want)
 		}
@@ -1467,7 +1471,7 @@ func TestPluginsWorkspaceIconSearchURLValidationAndForwarding(t *testing.T) {
 }
 
 func TestPluginWorkspaceLoaderReviewRejectionIsForwardedWithoutInstall(t *testing.T) {
-	message := "This release is a loader-based server mod and is not supported by the current Plugin installer."
+	message := "Loader-based server mod - not supported by the current version of JustVoxel Plugin installer. Should be available in future updates."
 	client := &fakePluginsInstallAPI{planError: &api.ResponseError{StatusCode: http.StatusConflict, Message: message}}
 	app, err := New(client, Config{})
 	if err != nil {
@@ -1500,9 +1504,142 @@ for (const tile of [discover, installed]) {
 assert.equal(new URL(discover.image.src, "https://appliance.example").searchParams.get("icon_url"), icon);
 assert.equal(new URL(installed.image.src, "https://appliance.example").searchParams.has("icon_url"), false);
 assert.equal(identityTile("Manual", undefined).image, undefined);
-assert.equal(identityTile("No search icon", "root", "").image, undefined);
+assert.equal(new URL(identityTile("No search icon", "root", "").image.src, "https://appliance.example").searchParams.has("icon_url"), false);
 `
 	if output, err := exec.Command("node", "-e", program).CombinedOutput(); err != nil {
 		t.Fatalf("same-origin icon delivery: %v\n%s", err, output)
+	}
+}
+
+func TestPluginsWorkspaceVerifiedRasterBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		kind, data string
+		want       int
+	}{
+		{"image/bmp", "BMfixture", 200},
+		{"image/gif", "GIF89afixture", 200},
+		{"image/svg+xml", "<svg/>", 502},
+		{"image/png", "<svg/>", 502},
+		{"image/gif", `<?xml version="1.0"?><svg/>`, 502},
+		{"image/x-rgb", "\x01\xda", 502},
+	} {
+		t.Run(tc.kind+tc.data, func(t *testing.T) {
+			client := &fakePluginsWorkspaceAPI{iconResult: &api.PluginIcon{ContentType: tc.kind, Data: []byte(tc.data)}}
+			client.role = "administrator"
+			app, err := New(client, Config{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rr := httptest.NewRecorder()
+			app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/api/plugins/workspace/icon?project_id=root", ""))
+			if rr.Code != tc.want || rr.Header().Get("X-Content-Type-Options") != "nosniff" {
+				t.Fatal("unsafe icon boundary", rr.Code)
+			}
+			if tc.want == 200 && (rr.Header().Get("Content-Type") != tc.kind || rr.Body.String() != tc.data) {
+				t.Fatal("verified image changed")
+			}
+		})
+	}
+}
+
+func TestPluginsWorkspaceDocumentedIconExtensions(t *testing.T) {
+	for _, extension := range []string{"png", "jpg", "jpeg", "bmp", "gif", "webp", "svg", "svgz", "rgb"} {
+		if _, err := pluginIconURL("https://cdn.modrinth.com/data/root/icon."+extension, "root"); err != nil {
+			t.Fatal(extension, err)
+		}
+	}
+	for _, extension := range []string{"xml", "exe", "PNG"} {
+		if _, err := pluginIconURL("https://cdn.modrinth.com/data/root/icon."+extension, "root"); err == nil {
+			t.Fatal("unexpected extension", extension)
+		}
+	}
+}
+
+func TestPluginIdentityTileBoundedFallbackBehavior(t *testing.T) {
+	helper := pluginScriptSection(t, pluginWorkspaceScript(t), "  const identityTile =", "  const overlayHeader =")
+	program := `
+const assert = require("node:assert/strict");
+const text = (tag,value) => ({textContent:value,dataset:{},setAttribute(){},append(image){this.image=image;image.parent=this;},classList:{values:new Set(),add(v){this.values.add(v);},remove(v){this.values.delete(v);},contains(v){return this.values.has(v);}}});
+const document = {createElement:()=>({requests:[],listeners:{},removed:false,addEventListener(name,fn){this.listeners[name]=fn;},set src(value){this.requests.push(value);this.source=value;},get src(){return this.source;},remove(){this.removed=true;},emit(name){this.listeners[name]();}})};
+` + helper + `
+const icon = "https://cdn.modrinth.com/data/root/icon.png";
+const query = (image,index=0) => {
+ const url = new URL(image.requests[index],"https://appliance.example");
+ assert.equal(url.origin,"https://appliance.example");
+ assert.equal(url.pathname,"/api/plugins/workspace/icon");
+ assert.equal(url.searchParams.get("project_id"),"root");
+ return url.searchParams;
+};
+const first = identityTile("Example","root",icon), image = first.image;
+assert.equal(first.textContent,"EX"); assert.equal(image.hidden,true);
+assert.equal(query(image).get("icon_url"),icon);
+image.emit("error");
+assert.equal(image.requests.length,2); assert.equal(query(image,1).has("icon_url"),false);
+assert.equal(image.hidden,true); assert.equal(first.classList.contains("has-logo"),false);
+image.emit("error"); assert.equal(image.removed,true); assert.equal(first.textContent,"EX");
+for(let i=0;i<10;i++) image.emit("error");
+assert.equal(image.requests.length,2); assert.equal(first.classList.contains("has-logo"),false);
+for (const value of ["",undefined]) {
+ const tile = identityTile("Example","root",value), img = tile.image;
+ assert.equal(query(img).has("icon_url"),false); assert.equal(img.requests.length,1);
+ img.emit("error"); assert.equal(img.removed,true); img.emit("error"); assert.equal(img.requests.length,1);
+}
+const success = identityTile("Example","root",icon), loaded = success.image;
+loaded.emit("load"); assert.equal(loaded.hidden,false); assert.equal(success.classList.contains("has-logo"),true);
+assert.equal(loaded.requests.length,1); loaded.emit("error"); assert.equal(loaded.requests.length,1);
+const fallback = identityTile("Example","root",icon), retried = fallback.image;
+retried.emit("error"); retried.emit("load");
+assert.equal(retried.requests.length,2); assert.equal(retried.hidden,false);
+assert.equal(fallback.classList.contains("has-logo"),true); assert.equal(retried.removed,false);
+assert.equal(identityTile("Manual",undefined).image,undefined);
+`
+	if output, err := exec.Command("node", "-e", program).CombinedOutput(); err != nil {
+		t.Fatalf("icon fallback: %v\n%s", err, output)
+	}
+}
+
+func TestPluginsWorkspaceCardSelectionLifecycle(t *testing.T) {
+	script := pluginWorkspaceScript(t)
+	card := pluginScriptSection(t, script, "  const interactiveCard =", "  const addInfo =")
+	close := pluginScriptSection(t, script, "  const closePanel =", "  const showPanel =")
+	program := `
+const assert = require("node:assert/strict");
+class Card {
+ constructor(){this.attrs={};this.events={};this.heading={};this.classList={values:new Set(),toggle(v,on){if(on)this.values.add(v);else this.values.delete(v);},remove(v){this.values.delete(v);},contains(v){return this.values.has(v);}};}
+ setAttribute(k,v){this.attrs[k]=v;} addEventListener(k,v){this.events[k]=v;}
+ querySelector(s){return s==="h3"?this.heading:null;} insertBefore(){} focus(){}
+}
+const cards=[new Card(),new Card()],results={querySelectorAll:()=>cards};
+const document={createElement:()=>({append(){}})},identityTile=()=>({});
+let activations=0,stops=0,operationViewID="one",overlayDismissible=true,returnFocus=null;
+const panel={hidden:false},workspaceShell={inert:true},pluginsDialog={querySelector:()=>null};
+const stopPolling=()=>{stops++;};
+` + card + close + `
+for(const c of cards) {interactiveCard(c,"Example",()=>{activations++;});assert.equal(c.attrs["aria-pressed"],"false");assert.equal(c.classList.contains("is-selected"),false);}
+cards[0].events.click(); assert.equal(cards[0].classList.contains("is-selected"),true); assert.equal(cards[0].attrs["aria-pressed"],"true");
+cards[1].events.keydown({key:"Enter",preventDefault(){}});
+assert.equal(activations,2); assert.equal(cards[0].classList.contains("is-selected"),false);assert.equal(cards[1].classList.contains("is-selected"),true);
+closePanel(); assert.equal(panel.hidden,true);assert.equal(workspaceShell.inert,false);
+for(const c of cards){assert.equal(c.classList.contains("is-selected"),false);assert.equal(c.attrs["aria-pressed"],"false");}
+`
+	if output, err := exec.Command("node", "-e", program).CombinedOutput(); err != nil {
+		t.Fatalf("selection lifecycle: %v\n%s", err, output)
+	}
+	css, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected := `.plugins-result-card.is-selected{border-color:var(--jv-success);background:color-mix(in srgb,var(--jv-success) 18%,var(--jv-surface-sunken))}`
+	hover := `@media(hover:hover) and (pointer:fine){` + strings.Replace(selected, ".is-selected", ":hover", 1) + `}`
+	for _, want := range []string{selected, hover, `.plugins-result-card:focus-visible{outline:2px solid var(--jv-success);outline-offset:-3px}`} {
+		if !strings.Contains(string(css), want) {
+			t.Fatal("protected card visual missing", want)
+		}
+	}
+	discover := pluginScriptSection(t, script, "  const renderProject =", "  const renderInstalled =")
+	installed := pluginScriptSection(t, script, "  const renderInstalled =", "  // Review, progress")
+	info := pluginScriptSection(t, script, "  const addInfo =", "  const infoRows =")
+	if !strings.Contains(discover, "interactiveCard(card,") || !strings.Contains(installed, "addInfo(card,") || !strings.Contains(info, "interactiveCard(card,") {
+		t.Fatal("cards do not share interaction")
 	}
 }

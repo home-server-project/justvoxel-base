@@ -2,6 +2,8 @@ package main
 
 import (
 	"archive/zip"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -649,7 +651,7 @@ func (s *server) adminPluginsDiscover(w http.ResponseWriter, r *http.Request) {
 
 const pluginIconLimit = 512 << 10
 
-var pluginIconFilename = regexp.MustCompile(`^[A-Za-z0-9_-]+\.(png|jpg|jpeg|webp)$`)
+var pluginIconFilename = regexp.MustCompile(`^[A-Za-z0-9_-]+\.(png|jpg|jpeg|bmp|gif|webp|svg|svgz|rgb)$`)
 
 func pluginIconURL(raw, projectID string) (*url.URL, error) {
 	u, err := url.Parse(raw)
@@ -709,7 +711,7 @@ func (s *server) adminPluginIcon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Header.Set("User-Agent", "JustVoxel/PluginWorkspace (https://github.com/home-server-project/justvoxel-base)")
-	req.Header.Set("Accept", "image/png, image/jpeg, image/webp")
+	req.Header.Set("Accept", "image/png, image/jpeg, image/bmp, image/gif, image/webp, image/svg+xml, image/x-rgb")
 	response, err := pluginCatalogClient.Do(req)
 	if err != nil {
 		http.Error(w, "Plugin icon unavailable.", http.StatusBadGateway)
@@ -717,16 +719,124 @@ func (s *server) adminPluginIcon(w http.ResponseWriter, r *http.Request) {
 	}
 	defer response.Body.Close()
 	contentType, _, typeErr := mime.ParseMediaType(response.Header.Get("Content-Type"))
-	if response.StatusCode != http.StatusOK || response.ContentLength > pluginIconLimit || typeErr != nil || (contentType != "image/png" && contentType != "image/jpeg" && contentType != "image/webp") {
+	if response.StatusCode != http.StatusOK || response.ContentLength > pluginIconLimit || typeErr != nil {
 		http.Error(w, "Plugin icon unavailable.", http.StatusBadGateway)
 		return
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, pluginIconLimit+1))
-	if err != nil || len(data) > pluginIconLimit || http.DetectContentType(data) != contentType {
+	if err != nil || len(data) > pluginIconLimit {
+		http.Error(w, "Plugin icon unavailable.", http.StatusBadGateway)
+		return
+	}
+	data, contentType, err = verifiedPluginIcon(ctx, strings.TrimPrefix(filepath.Ext(icon.Path), "."), contentType, data)
+	if err != nil {
 		http.Error(w, "Plugin icon unavailable.", http.StatusBadGateway)
 		return
 	}
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "private, max-age=300")
 	w.Write(data)
+}
+
+// Only these two icon-specific converters are injectable; callers cannot choose commands.
+var convertPluginSVG = func(ctx context.Context, input []byte, output io.Writer) error {
+	cmd := exec.CommandContext(ctx, "/usr/bin/rsvg-convert", "--format=png", "--width=96", "--height=96", "--keep-aspect-ratio")
+	cmd.Stdin = bytes.NewReader(input)
+	cmd.Stdout = output
+	return cmd.Run()
+}
+var convertPluginRGB = func(ctx context.Context, input []byte, output io.Writer) error {
+	// A private, bounded PNM buffer joins the two fixed commands under one deadline.
+	intermediate := &pluginIconBuffer{limit: 16 << 20}
+	first := exec.CommandContext(ctx, "/usr/bin/sgitopnm")
+	first.Stdin = bytes.NewReader(input)
+	first.Stdout = intermediate
+	if err := first.Run(); err != nil {
+		return err
+	}
+	second := exec.CommandContext(ctx, "/usr/bin/pnmtopng")
+	second.Stdin = bytes.NewReader(intermediate.Bytes())
+	second.Stdout = output
+	return second.Run()
+}
+
+type pluginIconBuffer struct {
+	buffer   bytes.Buffer
+	limit    int
+	overflow bool
+}
+
+// Do not embed bytes.Buffer: its promoted ReadFrom would bypass the Write limit.
+func (b *pluginIconBuffer) Bytes() []byte { return b.buffer.Bytes() }
+func (b *pluginIconBuffer) Len() int      { return b.buffer.Len() }
+
+func (b *pluginIconBuffer) Write(p []byte) (int, error) {
+	if len(p) > b.limit-b.Len() {
+		b.overflow = true
+		return 0, errors.New("icon conversion output exceeds limit")
+	}
+	return b.buffer.Write(p)
+}
+
+func validPluginRGB(data []byte) bool {
+	if len(data) < 512 || binary.BigEndian.Uint16(data[:2]) != 0x01da || data[2] > 1 || (data[3] != 1 && data[3] != 2) {
+		return false
+	}
+	dimension := binary.BigEndian.Uint16(data[4:6])
+	width := binary.BigEndian.Uint16(data[6:8])
+	height := binary.BigEndian.Uint16(data[8:10])
+	channels := binary.BigEndian.Uint16(data[10:12])
+	return dimension >= 1 && dimension <= 3 && width > 0 && height > 0 && width <= 1024 && height <= 1024 && channels > 0 && channels <= 4 && binary.BigEndian.Uint32(data[104:108]) == 0
+}
+
+func verifiedPluginIcon(ctx context.Context, extension, kind string, data []byte) ([]byte, string, error) {
+	unavailable := errors.New("plugin icon unavailable")
+	if len(data) == 0 || len(data) > pluginIconLimit {
+		return nil, "", unavailable
+	}
+	canonical := map[string]string{"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "bmp": "image/bmp", "gif": "image/gif", "webp": "image/webp"}[extension]
+	if canonical != "" {
+		mimeOK := kind == canonical || (canonical == "image/bmp" && (kind == "image/x-ms-bmp" || kind == "image/x-bmp")) || (canonical == "image/jpeg" && kind == "image/jpg")
+		if !mimeOK || http.DetectContentType(data) != canonical {
+			return nil, "", unavailable
+		}
+		return data, canonical, nil
+	}
+	var convert func(context.Context, []byte, io.Writer) error
+	switch extension {
+	case "svg", "svgz":
+		if kind != "image/svg+xml" && !(extension == "svgz" && (kind == "application/gzip" || kind == "application/x-gzip")) {
+			return nil, "", unavailable
+		}
+		if extension == "svgz" {
+			if len(data) < 2 || data[0] != 0x1f || data[1] != 0x8b {
+				return nil, "", unavailable
+			}
+			reader, err := gzip.NewReader(bytes.NewReader(data))
+			if err != nil {
+				return nil, "", unavailable
+			}
+			decompressed, err := io.ReadAll(io.LimitReader(reader, pluginIconLimit+1))
+			closeErr := reader.Close()
+			if err != nil || closeErr != nil || len(decompressed) > pluginIconLimit || len(decompressed) == 0 {
+				return nil, "", unavailable
+			}
+			data = decompressed
+		}
+		convert = convertPluginSVG
+	case "rgb":
+		if (kind != "image/x-rgb" && kind != "image/sgi" && kind != "image/x-sgi" && kind != "image/rgb") || !validPluginRGB(data) {
+			return nil, "", unavailable
+		}
+		convert = convertPluginRGB
+	default:
+		return nil, "", unavailable
+	}
+	conversionCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	output := &pluginIconBuffer{limit: pluginIconLimit}
+	if err := convert(conversionCtx, data, output); err != nil || conversionCtx.Err() != nil || output.overflow || http.DetectContentType(output.Bytes()) != "image/png" {
+		return nil, "", unavailable
+	}
+	return output.Bytes(), "image/png", nil
 }

@@ -228,7 +228,7 @@ func pluginIconURL(raw, projectID string) (*url.URL, error) {
 	return u, nil
 }
 
-var pluginIconFilename = regexp.MustCompile(`^[A-Za-z0-9_-]+\.(png|jpg|jpeg|webp)$`)
+var pluginIconFilename = regexp.MustCompile(`^[A-Za-z0-9_-]+\.(png|jpg|jpeg|bmp|gif|webp|svg|svgz|rgb)$`)
 
 func (a *App) pluginsWorkspaceIcon(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -272,7 +272,7 @@ func (a *App) pluginsWorkspaceIcon(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Plugin icon unavailable.", status)
 		return
 	}
-	if len(icon.Data) > 512<<10 || (icon.ContentType != "image/png" && icon.ContentType != "image/jpeg" && icon.ContentType != "image/webp") || http.DetectContentType(icon.Data) != icon.ContentType {
+	if len(icon.Data) > 512<<10 || (icon.ContentType != "image/png" && icon.ContentType != "image/jpeg" && icon.ContentType != "image/webp" && icon.ContentType != "image/bmp" && icon.ContentType != "image/gif") || http.DetectContentType(icon.Data) != icon.ContentType {
 		http.Error(w, "Plugin icon unavailable.", http.StatusBadGateway)
 		return
 	}

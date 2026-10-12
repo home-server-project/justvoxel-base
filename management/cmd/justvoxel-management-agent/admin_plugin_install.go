@@ -532,7 +532,7 @@ func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerCon
 
 var errPluginLoaderArtifact = errors.New("JAR contains loader metadata without a valid direct plugin descriptor")
 
-const pluginLoaderReviewRejection = "This release is a loader-based server mod and is not supported by the current Plugin installer."
+const pluginLoaderReviewRejection = "Loader-based server mod - not supported by the current version of JustVoxel Plugin installer. Should be available in future updates."
 
 const pluginDirectReviewRejection = "This release is not a direct Paper/Bukkit plugin and cannot be installed into the plugins directory."
 

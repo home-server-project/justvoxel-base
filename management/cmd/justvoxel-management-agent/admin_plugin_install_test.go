@@ -2449,3 +2449,9 @@ func TestStagedPluginLoaderClassificationPreservesDescriptorValidation(t *testin
 		}
 	}
 }
+
+func TestPluginLoaderRejectionStableWording(t *testing.T) {
+	if pluginLoaderReviewRejection != "Loader-based server mod - not supported by the current version of JustVoxel Plugin installer. Should be available in future updates." {
+		t.Fatal("loader rejection wording changed")
+	}
+}

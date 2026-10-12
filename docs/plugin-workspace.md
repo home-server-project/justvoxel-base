@@ -33,18 +33,27 @@ Discover uses three columns in wide windows, two in medium windows and one in
 narrow windows. Buttons stay distinct from badges. Authoritative Modrinth project
 IDs use real publisher logos through the Administrator-only same-origin
 `GET /api/plugins/workspace/icon?project_id=<id>` route and the Agent's
-`GET /v1/admin/plugins/icon?project_id=<id>` route. Discover reuses the search
-result's bounded, project-bound `icon_url`, validated
-with the strict icon URL rules. Cards and Discover overlays pass `project_id`
-and `icon_url` to the same-origin proxy; the Agent fetches the validated HTTPS
-CDN image directly without another project metadata request. Invalid or absent
-Discover icons use initials without failing the catalog. Installed inventory
-continues to pass only `project_id`, retaining the Agent's fixed Modrinth project
-metadata lookup fallback. The browser never uses a CDN URL as `img.src`.
-PNG, JPEG and WebP are bounded to 512 KiB,
-with no redirects or persistent image cache. Missing or rejected images leave
-the existing fixed-size deterministic initials tile without affecting any
-catalog or installation operation. Information and installation reuse the card identity tile.
+`GET /v1/admin/plugins/icon?project_id=<id>` route. Discover first passes a validated
+search `icon_url` with `project_id` to the
+same-origin proxy. If that image fails, it retries exactly once using only
+`project_id`, allowing the Agent to look up fresh project metadata. Missing search
+icons begin with that metadata lookup. Installed uses project ID only. Initials
+stay visible until a logo loads and are the final fallback if metadata or image
+retrieval fails. The browser never uses a CDN URL as `img.src`.
+All documented Modrinth extensions are accepted: `png`, `jpg`, `jpeg`, `bmp`,
+`gif`, `webp`, `svg`, `svgz` and `rgb` (case-sensitive). Raster formats are
+verified against their extension, MIME and byte signature and proxied with a
+canonical image MIME. The Agent converts SVG/SVGZ and SGI RGB into bounded PNG
+using fixed image-composition tooling, private bounded buffers and a short timeout.
+SVGZ decompression is bounded; RGB headers and dimensions are checked before
+conversion. Browsers never receive raw SVG, SVGZ or RGB. Source and final image
+bytes are limited to 512 KiB, with no redirects or persistent image cache.
+Information and installation reuse the card identity tile.
+On hover-capable pointers, the existing green card frame/background follows the
+pointer. Cards begin unselected; selection can remain while their overlay is
+open. Closing clears every selected card and resets `aria-pressed` to false,
+so the green selection does not remain stale. Keyboard focus-visible styling
+remains available.
 Progress and terminal results retain the selected identity in browser memory,
 bound to the returned operation ID; after reload they use fallback. Inventory
 exposes the existing manifest project/release IDs only after exact
@@ -210,8 +219,9 @@ descriptor validation still applies. Unknown JARs retain the generic rejection.
 Loader-based server mods remain outside current Plugin Install scope and require
 a separate loader/runtime installation path. No
 Ignite or other mod-loader support or mods directory is added, and releases such
-as NoDim or Slumber are not made installable by publisher metadata. The WebUI
-explains this distinction while preserving the Agent's fail-closed rejection.
+as NoDim or Slumber are not made installable by publisher metadata. The Agent and
+WebUI use the same rejection:
+“Loader-based server mod - not supported by the current version of JustVoxel Plugin installer. Should be available in future updates.”
 Install-time inspection remains independent and authoritative.
 
 All needed JARs are downloaded, size/hash checked and inspected in private Agent

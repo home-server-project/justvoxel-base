@@ -245,7 +245,7 @@ func (c *Client) AdminPluginIcon(ctx context.Context, session, projectID string,
 		return out, &ResponseError{StatusCode: response.StatusCode, Message: "Plugin icon unavailable."}
 	}
 	contentType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
-	if err != nil || (contentType != "image/png" && contentType != "image/jpeg" && contentType != "image/webp") {
+	if err != nil || (contentType != "image/png" && contentType != "image/jpeg" && contentType != "image/webp" && contentType != "image/bmp" && contentType != "image/gif") {
 		return out, errors.New("Plugin icon unavailable.")
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, (512<<10)+1))

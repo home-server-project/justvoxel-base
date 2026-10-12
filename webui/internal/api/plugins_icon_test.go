@@ -12,7 +12,7 @@ import (
 )
 
 func TestAdminPluginIconOnlyUsesAgentAndPreservesVerifiedType(t *testing.T) {
-	for _, kind := range []string{"image/png", "image/jpeg", "image/webp"} {
+	for _, kind := range []string{"image/png", "image/jpeg", "image/bmp", "image/gif", "image/webp"} {
 		t.Run(kind, func(t *testing.T) {
 			data := []byte("\x89PNG\r\n\x1a\nfixture")
 			if kind == "image/jpeg" {
@@ -20,6 +20,12 @@ func TestAdminPluginIconOnlyUsesAgentAndPreservesVerifiedType(t *testing.T) {
 			}
 			if kind == "image/webp" {
 				data = []byte("RIFF\x00\x00\x00\x00WEBPVP8 fixture")
+			}
+			if kind == "image/bmp" {
+				data = []byte("BMfixture")
+			}
+			if kind == "image/gif" {
+				data = []byte("GIF89afixture")
 			}
 			calls := 0
 			client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -43,6 +49,8 @@ func TestAdminPluginIconRejectsUnsafeAgentResponse(t *testing.T) {
 		status           int
 	}{
 		{"svg", "image/svg+xml", "<svg/>", 200},
+		{"svg disguised as png", "image/png", "<svg/>", 200},
+		{"xml disguised as gif", "image/gif", `<?xml version="1.0"?><svg/>`, 200},
 		{"html", "text/html", "private upstream body", 200},
 		{"binary", "application/octet-stream", "private upstream body", 200},
 		{"mismatch", "image/png", "private upstream body", 200},

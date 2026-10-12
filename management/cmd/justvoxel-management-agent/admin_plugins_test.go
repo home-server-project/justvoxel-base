@@ -3,9 +3,11 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha512"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -21,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func pluginTestJar(t *testing.T, path string, fields map[string]string) {
@@ -790,5 +793,215 @@ func TestPluginIconRejectsInvalidSearchURLQuery(t *testing.T) {
 		if rr.Code != 400 {
 			t.Fatalf("unsafe icon query accepted: %d", rr.Code)
 		}
+	}
+}
+
+func TestPluginIconDocumentedExtensions(t *testing.T) {
+	for _, ext := range []string{"png", "jpg", "jpeg", "bmp", "gif", "webp", "svg", "svgz", "rgb"} {
+		if _, err := pluginIconURL("https://cdn.modrinth.com/data/root/icon."+ext, "root"); err != nil {
+			t.Fatal(ext, err)
+		}
+	}
+	for _, ext := range []string{"exe", "PNG", "xml", "pnm"} {
+		if _, err := pluginIconURL("https://cdn.modrinth.com/data/root/icon."+ext, "root"); err == nil {
+			t.Fatal("accepted", ext)
+		}
+	}
+}
+
+func TestPluginIconRasterFamilies(t *testing.T) {
+	for _, tc := range []struct {
+		ext, mime string
+		data      []byte
+	}{
+		{"png", "image/png", pluginIconImage(t, "image/png")},
+		{"jpg", "image/jpeg", pluginIconImage(t, "image/jpeg")},
+		{"jpeg", "image/jpeg", pluginIconImage(t, "image/jpeg")},
+		{"bmp", "image/bmp", []byte("BMfixture")},
+		{"gif", "image/gif", []byte("GIF89afixture")},
+		{"webp", "image/webp", pluginIconImage(t, "image/webp")},
+	} {
+		t.Run(tc.ext, func(t *testing.T) {
+			data, kind, err := verifiedPluginIcon(context.Background(), tc.ext, tc.mime, tc.data)
+			if err != nil || kind != tc.mime || !bytes.Equal(data, tc.data) {
+				t.Fatal("raster lost", kind, err)
+			}
+			if _, _, err := verifiedPluginIcon(context.Background(), tc.ext, "text/html", tc.data); err == nil {
+				t.Fatal("bad MIME accepted")
+			}
+			if _, _, err := verifiedPluginIcon(context.Background(), tc.ext, tc.mime, []byte("<svg/>")); err == nil {
+				t.Fatal("bad signature accepted")
+			}
+			other := "png"
+			if tc.ext == "png" {
+				other = "jpg"
+			}
+			if _, _, err := verifiedPluginIcon(context.Background(), other, tc.mime, tc.data); err == nil {
+				t.Fatal("extension mismatch accepted")
+			}
+		})
+	}
+	for _, alias := range []string{"image/x-bmp", "image/x-ms-bmp"} {
+		_, kind, err := verifiedPluginIcon(context.Background(), "bmp", alias, []byte("BMfixture"))
+		if err != nil || kind != "image/bmp" {
+			t.Fatal("BMP alias not canonicalized")
+		}
+	}
+}
+
+func pluginTestRGB() []byte {
+	data := make([]byte, 515)
+	binary.BigEndian.PutUint16(data[:2], 0x01da)
+	data[3] = 1
+	binary.BigEndian.PutUint16(data[4:6], 3)
+	binary.BigEndian.PutUint16(data[6:8], 1)
+	binary.BigEndian.PutUint16(data[8:10], 1)
+	binary.BigEndian.PutUint16(data[10:12], 3)
+	return data
+}
+
+func TestPluginIconBoundedConversions(t *testing.T) {
+	oldSVG, oldRGB := convertPluginSVG, convertPluginRGB
+	t.Cleanup(func() { convertPluginSVG, convertPluginRGB = oldSVG, oldRGB })
+	pngData := pluginIconImage(t, "image/png")
+	svgData := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>`)
+	var zipped bytes.Buffer
+	zipper := gzip.NewWriter(&zipped)
+	if _, err := zipper.Write(svgData); err != nil {
+		t.Fatal(err)
+	}
+	if err := zipper.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		ext, mime   string
+		data, input []byte
+	}{
+		{"svg", "image/svg+xml", svgData, svgData},
+		{"svgz", "image/svg+xml", zipped.Bytes(), svgData},
+		{"rgb", "image/x-rgb", pluginTestRGB(), pluginTestRGB()},
+	} {
+		t.Run(tc.ext, func(t *testing.T) {
+			calls := 0
+			converter := func(ctx context.Context, input []byte, output io.Writer) error {
+				calls++
+				deadline, ok := ctx.Deadline()
+				if !ok || time.Until(deadline) > 3*time.Second || !bytes.Equal(input, tc.input) {
+					t.Fatal("unbounded conversion or wrong input")
+				}
+				_, err := output.Write(pngData)
+				return err
+			}
+			convertPluginSVG, convertPluginRGB = converter, converter
+			data, mime, err := verifiedPluginIcon(context.Background(), tc.ext, tc.mime, tc.data)
+			if err != nil || calls != 1 || mime != "image/png" || !bytes.Equal(data, pngData) || bytes.Equal(data, tc.data) {
+				t.Fatal("conversion not authoritative", err)
+			}
+			for _, failure := range []string{"raw SVG", "invalid PNG", "failure", "timeout", "overflow"} {
+				t.Run(failure, func(t *testing.T) {
+					converter := func(ctx context.Context, _ []byte, output io.Writer) error {
+						switch failure {
+						case "raw SVG":
+							_, err := output.Write(svgData)
+							return err
+						case "invalid PNG":
+							_, err := output.Write([]byte("not a PNG"))
+							return err
+						case "failure":
+							return errors.New("converter failed")
+						case "timeout":
+							return context.DeadlineExceeded
+						case "overflow":
+							_, _ = output.Write(bytes.Repeat([]byte("x"), pluginIconLimit+1))
+							_, _ = output.Write(pngData)
+							return nil
+						}
+						return nil
+					}
+					convertPluginSVG, convertPluginRGB = converter, converter
+					data, _, err := verifiedPluginIcon(context.Background(), tc.ext, tc.mime, tc.data)
+					if err == nil || len(data) != 0 {
+						t.Fatal("unsafe conversion exposed")
+					}
+				})
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			convertPluginSVG, convertPluginRGB = converter, converter
+			if _, _, err := verifiedPluginIcon(ctx, tc.ext, tc.mime, tc.data); err == nil {
+				t.Fatal("expired conversion accepted")
+			}
+		})
+	}
+}
+
+func TestPluginIconMalformedConversionInputs(t *testing.T) {
+	oldSVG, oldRGB := convertPluginSVG, convertPluginRGB
+	t.Cleanup(func() { convertPluginSVG, convertPluginRGB = oldSVG, oldRGB })
+	never := func(context.Context, []byte, io.Writer) error { t.Fatal("invalid input reached converter"); return nil }
+	convertPluginSVG, convertPluginRGB = never, never
+	var overflow bytes.Buffer
+	zip := gzip.NewWriter(&overflow)
+	if _, err := zip.Write(bytes.Repeat([]byte("x"), pluginIconLimit+1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := zip.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, data := range [][]byte{[]byte("<svg/>"), {0x1f, 0x8b}, overflow.Bytes()} {
+		if _, _, err := verifiedPluginIcon(context.Background(), "svgz", "image/svg+xml", data); err == nil {
+			t.Fatal("invalid gzip accepted")
+		}
+	}
+	for _, mutation := range []string{"magic", "truncated", "zero width", "zero height", "wide", "tall", "channels", "storage", "depth", "dimension", "colormap"} {
+		t.Run(mutation, func(t *testing.T) {
+			data := pluginTestRGB()
+			switch mutation {
+			case "magic":
+				data[0] = 0
+			case "truncated":
+				data = data[:511]
+			case "zero width":
+				binary.BigEndian.PutUint16(data[6:8], 0)
+			case "zero height":
+				binary.BigEndian.PutUint16(data[8:10], 0)
+			case "wide":
+				binary.BigEndian.PutUint16(data[6:8], 1025)
+			case "tall":
+				binary.BigEndian.PutUint16(data[8:10], 1025)
+			case "channels":
+				binary.BigEndian.PutUint16(data[10:12], 5)
+			case "storage":
+				data[2] = 2
+			case "depth":
+				data[3] = 0
+			case "dimension":
+				binary.BigEndian.PutUint16(data[4:6], 0)
+			case "colormap":
+				data[107] = 1
+			}
+			if validPluginRGB(data) {
+				t.Fatal("invalid header accepted")
+			}
+			if _, _, err := verifiedPluginIcon(context.Background(), "rgb", "image/x-rgb", data); err == nil {
+				t.Fatal("invalid RGB accepted")
+			}
+		})
+	}
+	if !validPluginRGB(pluginTestRGB()) {
+		t.Fatal("valid RGB header rejected")
+	}
+	buffer := &pluginIconBuffer{limit: 4}
+	if _, err := buffer.Write([]byte("12345")); err == nil || buffer.Len() > 4 || !buffer.overflow {
+		t.Fatal("buffer overflow not bounded")
+	}
+}
+
+func TestPluginIconCopyCannotBypassBound(t *testing.T) {
+	// A reader without WriterTo exercises io.Copy's destination ReadFrom shortcut.
+	buffer := &pluginIconBuffer{limit: 8}
+	reader := struct{ io.Reader }{strings.NewReader(strings.Repeat("x", 32))}
+	if _, err := io.Copy(buffer, reader); err == nil || buffer.Len() > 8 || !buffer.overflow {
+		t.Fatal("copy bypassed output limit")
 	}
 }

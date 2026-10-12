@@ -96,6 +96,9 @@ for cmd in \
     lsblk blkid wipefs parted partprobe udevadm spf python3 btop; do
     command -v "${cmd}"
 done
+command -v rsvg-convert
+command -v sgitopnm
+command -v pnmtopng
 command -v glances
 
 rpm -q superfile glances

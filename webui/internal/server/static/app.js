@@ -5818,17 +5818,32 @@ if (pluginsDialog && pluginsOpen) {
     const tile = text("span", Array.from(name || "?").slice(0, 2).join("").toUpperCase(), "plugins-icon-tile");
     tile.setAttribute("aria-hidden", "true");
     tile.dataset.tone = String(Array.from(name || "?").reduce((sum, char) => sum + char.codePointAt(0), 0) & 3);
-    // Empty Discover icons retain initials; omitted Installed icons use metadata fallback.
-    if (typeof projectID === "string" && /^[A-Za-z0-9]{1,64}$/.test(projectID) && iconURL !== "") {
+    // Search logos get one metadata retry; absent search logos start with metadata.
+    if (typeof projectID === "string" && /^[A-Za-z0-9]{1,64}$/.test(projectID)) {
       const image = document.createElement("img");
       image.alt = "";
       image.decoding = "async";
       image.hidden = true;
-      image.addEventListener("load", () => { tile.classList.add("has-logo"); image.hidden = false; }, { once: true });
-      image.addEventListener("error", () => { image.remove(); tile.classList.remove("has-logo"); }, { once: true });
       const query = new URLSearchParams({ project_id: projectID });
       if (typeof iconURL === "string" && iconURL) query.set("icon_url", iconURL);
-      image.src = `/api/plugins/workspace/icon?${query}`;
+      let metadataAttempt = !query.has("icon_url");
+      let finished = false;
+      image.addEventListener("load", () => { finished = true; tile.classList.add("has-logo"); image.hidden = false; }, { once: true });
+      const requestImage = () => { image.src = `/api/plugins/workspace/icon?${query}`; };
+      image.addEventListener("error", () => {
+        if (finished) return;
+        image.hidden = true;
+        tile.classList.remove("has-logo");
+        if (!metadataAttempt) {
+          metadataAttempt = true;
+          query.delete("icon_url");
+          requestImage();
+        } else {
+          finished = true;
+          image.remove();
+        }
+      });
+      requestImage();
       tile.append(image);
     }
     return tile;
@@ -6059,6 +6074,10 @@ if (pluginsDialog && pluginsOpen) {
   const closePanel = () => {
     stopPolling();
     panel.hidden = true;
+    results.querySelectorAll(".plugins-result-card").forEach((node) => {
+      node.classList.remove("is-selected");
+      node.setAttribute("aria-pressed", "false");
+    });
     operationViewID = null;
     overlayDismissible = false;
     workspaceShell.inert = false;
@@ -6284,7 +6303,7 @@ if (pluginsDialog && pluginsOpen) {
     } catch (error) {
       if (current !== installGeneration || error.name === "AbortError") return;
       if (error.message === "This release is not a direct Paper/Bukkit plugin and cannot be installed into the plugins directory." && readOnlyReview) readOnlyReview("The publisher lists Paper support, but this JAR is not a direct Paper/Bukkit plugin. It may require an external loader or a different installation path, so JustVoxel will not place it in the plugins directory.");
-      else if (error.message === "This release is a loader-based server mod and is not supported by the current Plugin installer." && readOnlyReview) readOnlyReview("Loader-based server mod - not supported by the current Plugin installer. This release requires a separate loader/runtime installation path, so JustVoxel will not place it in the plugins directory.");
+      else if (error.message === "Loader-based server mod - not supported by the current version of JustVoxel Plugin installer. Should be available in future updates." && readOnlyReview) readOnlyReview("Loader-based server mod - not supported by the current version of JustVoxel Plugin installer. Should be available in future updates.");
       else panelError(error);
     }
   };
