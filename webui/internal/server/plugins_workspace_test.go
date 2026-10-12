@@ -115,9 +115,62 @@ func TestPluginsWorkspaceUsesExistingWindowAndSafeRendering(t *testing.T) {
 			t.Fatalf("behavior missing %s", want)
 		}
 	}
-	for _, unsafe := range []string{"api.modrinth.com", "innerHTML", "showModal(", "method: \"POST\""} {
+	for _, unsafe := range []string{"api.modrinth.com", "innerHTML", "outerHTML", "insertAdjacentHTML", `createElement("img")`, "showModal(", "method: \"POST\""} {
 		if strings.Contains(pluginScript, unsafe) {
 			t.Fatalf("unsafe plugin browser behavior %s", unsafe)
+		}
+	}
+}
+
+func TestPluginsWorkspaceCompactInfoPresentation(t *testing.T) {
+	script, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	behavior := string(script)
+	start := strings.Index(behavior, "  const addInfo = (card, name) => {")
+	project := strings.Index(behavior, "  const renderProject = (project, server) => {")
+	installed := strings.Index(behavior, "  const renderInstalled = (plugin) => {")
+	if start < 0 || project <= start || installed <= project {
+		t.Fatal("compact plugin renderers missing")
+	}
+	end := strings.Index(behavior[installed:], "  const load = async () => {")
+	if end < 0 {
+		t.Fatal("plugin load boundary missing")
+	}
+	info := behavior[start:project]
+	for _, want := range []string{`text("button", "Info"`, `button.type = "button"`, `details.hidden = true`, `button.setAttribute("aria-expanded", "false")`, `button.setAttribute("aria-controls", details.id)`, `details.hidden = !details.hidden`, `button.setAttribute("aria-expanded", String(!details.hidden))`, `card.append(details)`} {
+		if !strings.Contains(info, want) {
+			t.Fatalf("collapsed per-card Info behavior missing %s", want)
+		}
+	}
+	discover := behavior[project:installed]
+	for _, want := range []string{`addInfo(card, project.title)`, `"plugins-card-description"`, `counts.set(kind, (counts.get(kind) || 0) + 1)`, `details.append(list)`, `dependency.project_id`, `dependency.version_id`, `dependency.file_name`, `project.metadata_error`} {
+		if !strings.Contains(discover, want) {
+			t.Fatalf("Discover summary or Info metadata missing %s", want)
+		}
+	}
+	inventory := behavior[installed : installed+end]
+	if !strings.Contains(inventory, `const name = plugin.name || plugin.filename;`) || !strings.Contains(inventory, `card.append(text("h3", name)`) {
+		t.Fatal("Installed/Updates title must fall back to the JAR filename when plugin.name is empty")
+	}
+	for _, want := range []string{`addInfo(card, name)`, `tab === "updates"`, `details.append(text("p", ` + "`JAR: ${plugin.filename}`", `plugin.metadata_status`, `details.append(text("p", plugin.update_status`} {
+		if !strings.Contains(inventory, want) {
+			t.Fatalf("Installed/Updates summary or Info metadata missing %s", want)
+		}
+	}
+	for _, unsafe := range []string{`card.append(list)`, `card.append(text("p", project.compatibility`, `card.append(text("p", plugin.metadata_status`, `card.append(text("p", plugin.update_status`} {
+		if strings.Contains(discover+inventory, unsafe) {
+			t.Fatalf("full metadata leaked into scanning view: %s", unsafe)
+		}
+	}
+	for _, want := range []string{`.plugins-workspace-body{container-type:inline-size;`, `grid-template-columns:minmax(0,1fr)`, `@container(min-width:580px){.plugins-results{grid-template-columns:repeat(2,minmax(0,1fr))}}`, `@container(min-width:860px){.plugins-results{grid-template-columns:repeat(3,minmax(0,1fr))}}`, `-webkit-line-clamp:2`, `.plugins-workspace-dialog [hidden]{display:none!important}`} {
+		if !strings.Contains(string(css), want) {
+			t.Fatalf("compact workspace styling missing %s", want)
 		}
 	}
 }

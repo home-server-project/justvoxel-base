@@ -5,6 +5,12 @@ resizable window has Discover, Installed and Updates tabs. Cycle 1 is read only:
 it cannot install, download, update, remove or hot load plugins, change server
 configuration, or interrupt Minecraft.
 
+Plugin results use compact summaries for scanning. Each card’s **Info** button
+opens detailed publisher or installed JAR metadata and closes it again. Details
+start collapsed; raw metadata and full dependency identities stay out of the
+default view to keep the workspace usable. Discover, Installed and Updates share
+this compact presentation, with one to three columns depending on window width.
+
 Paper and Purpur support plugins. Vanilla displays an unsupported state.
 The workspace reuses appliance configuration discovery and runtime status for
 server software, Minecraft version and the configured data location.

@@ -5812,30 +5812,76 @@ if (pluginsDialog && pluginsOpen) {
     node.className = className;
     return node;
   };
-  const renderProject = (project) => {
+  let infoID = 0;
+  const addInfo = (card, name) => {
+    const details = document.createElement("div");
+    details.className = "plugins-card-details";
+    details.id = `plugins-info-${++infoID}`;
+    details.hidden = true;
+    const button = text("button", "Info", "plugins-info-button secondary");
+    button.type = "button";
+    button.setAttribute("aria-label", `Info for ${name}`);
+    button.setAttribute("aria-controls", details.id);
+    button.setAttribute("aria-expanded", "false");
+    button.addEventListener("click", () => {
+      details.hidden = !details.hidden;
+      button.setAttribute("aria-expanded", String(!details.hidden));
+    });
+    const heading = card.querySelector("h3");
+    const header = document.createElement("div");
+    header.className = "plugins-card-heading";
+    card.insertBefore(header, heading);
+    header.append(heading, button);
+    card.append(details);
+    return details;
+  };
+  const renderProject = (project, server) => {
     const card = document.createElement("article");
     card.className = "plugins-result-card";
-    card.append(text("h3", project.title), text("p", project.description), text("p", `Source: ${project.source} · Project: ${project.project_id}`, "plugins-card-meta"));
+    card.append(text("h3", project.title), text("p", project.description, "plugins-card-description"));
     const version = project.version;
+    const badges = document.createElement("div");
+    badges.className = "plugins-card-badges";
     if (version) {
-      card.append(text("p", `${project.compatible ? "Latest compatible" : "Latest listed"} ${version.version_type}: ${version.version_number}`, "plugins-card-release"));
-      card.append(text("p", project.compatibility, "plugins-card-meta"));
-      card.append(text("p", `Minecraft: ${(version.game_versions || []).join(", ") || "Not provided"} · Platforms: ${(version.loaders || []).join(", ") || "Not provided"}`, "plugins-card-meta"));
-      const dependencies = version.dependencies || [];
-      card.append(text("p", dependencies.length ? "Dependencies (publisher metadata):" : "No dependencies listed in publisher metadata.", "plugins-card-meta"));
+      card.append(text("p", `${project.compatible ? "Latest compatible" : "Latest listed"}: ${version.version_number}`, "plugins-card-release"));
+      const platforms = (version.loaders || []).filter((loader) => ["paper", "purpur", "spigot", "bukkit"].includes(loader.toLowerCase()));
+      if (platforms.length) badges.append(text("span", platforms.slice(0, 2).map((loader) => loader[0].toUpperCase() + loader.slice(1)).join(" / "), "plugins-badge"));
+    } else {
+      card.append(text("p", "Release metadata unavailable", "plugins-card-meta"));
+    }
+    const compatibility = !version || project.metadata_error ? "Compatibility unavailable" : !server.minecraft_version ? "Minecraft version unknown" : project.compatible ? `MC ${server.minecraft_version} · Publisher match` : `MC ${server.minecraft_version} · No publisher match`;
+    badges.append(text("span", compatibility, "plugins-card-meta"), text("span", project.source, "plugins-card-meta"));
+    card.append(badges);
+    const dependencies = version?.dependencies || [];
+    if (dependencies.length) {
+      const counts = new Map();
+      dependencies.forEach((dependency) => {
+        const kind = ["required", "optional", "incompatible", "embedded"].includes(dependency.dependency_type) ? dependency.dependency_type : "unspecified";
+        counts.set(kind, (counts.get(kind) || 0) + 1);
+      });
+      card.append(text("p", Array.from(counts, ([kind, count]) => `${count} ${kind}`).join(" · "), "plugins-card-meta"));
+    }
+    const details = addInfo(card, project.title);
+    details.append(text("p", project.description), text("p", `Source: ${project.source} · Project: ${project.project_id}`, "plugins-card-meta"));
+    details.append(text("p", project.compatibility, "plugins-card-meta"));
+    if (version) {
+      details.append(text("p", `${project.compatible ? "Latest compatible" : "Latest listed"} ${version.version_type}: ${version.version_number}`, "plugins-card-release"));
+      details.append(text("p", `Release ID: ${version.id} · Published: ${version.date_published || "Not provided"}`, "plugins-card-meta"));
+      details.append(text("p", `Minecraft: ${(version.game_versions || []).join(", ") || "Not provided"} · Platforms: ${(version.loaders || []).join(", ") || "Not provided"}`, "plugins-card-meta"));
+      details.append(text("p", dependencies.length ? "Dependencies (publisher metadata):" : "No dependencies listed in publisher metadata.", "plugins-card-meta"));
       if (dependencies.length) {
         const list = document.createElement("ul");
         list.className = "plugins-dependencies";
         dependencies.forEach((dependency) => {
-          const kind = ({ required: "Required", optional: "Optional", incompatible: "Incompatible", embedded: "Embedded" })[dependency.dependency_type] || "Unspecified";
-          const identity = [dependency.project_id && `Project ${dependency.project_id}`, dependency.version_id && `version ${dependency.version_id}`, dependency.file_name].filter(Boolean).join(" · ") || "Identity not provided";
+          const kind = ({ required: "Required", optional: "Optional", incompatible: "Incompatible", embedded: "Embedded" })[dependency.dependency_type] || `Unspecified (${dependency.dependency_type || "not provided"})`;
+          const identity = [dependency.project_id && `Project ${dependency.project_id}`, dependency.version_id && `version ${dependency.version_id}`, dependency.file_name && `File ${dependency.file_name}`].filter(Boolean).join(" · ") || "Identity not provided";
           list.append(text("li", `${kind}: ${identity}`));
         });
-        card.append(list);
+        details.append(list);
       }
-    } else {
-      card.append(text("p", project.metadata_error || "Release metadata unavailable.", "plugins-card-meta"));
     }
+    if (project.versions?.length) details.append(text("p", `Project Minecraft versions: ${project.versions.join(", ")}`, "plugins-card-meta"));
+    if (project.metadata_error || !version) details.append(text("p", project.metadata_error || "Release metadata unavailable.", "plugins-card-meta"));
     // Metadata uses textContent throughout; no upstream HTML, image, URL,
     // executable action, or dependency download is rendered.
     return card;
@@ -5843,11 +5889,20 @@ if (pluginsDialog && pluginsOpen) {
   const renderInstalled = (plugin) => {
     const card = document.createElement("article");
     card.className = "plugins-result-card";
-    card.append(text("h3", plugin.name || plugin.filename));
-    card.append(text("p", `Version: ${plugin.version || "Unknown"} · JAR: ${plugin.filename}`, "plugins-card-meta"));
-    card.append(text("p", plugin.management === "justvoxel" ? "JustVoxel managed" : "Manual / unmanaged", "plugins-management"));
-    if (tab === "updates") card.append(text("p", plugin.update_status, "plugins-card-meta"));
-    if (plugin.metadata_status !== "Metadata read") card.append(text("p", plugin.metadata_status, "plugins-card-meta"));
+    const name = plugin.name || plugin.filename;
+    const management = plugin.management === "justvoxel" ? "JustVoxel managed" : "Manual / unmanaged";
+    card.append(text("h3", name), text("p", `Version: ${plugin.version || "Unknown"}`, "plugins-card-release"));
+    const badges = document.createElement("div");
+    badges.className = "plugins-card-badges";
+    badges.append(text("span", management, "plugins-badge plugins-management"));
+    card.append(badges);
+    if (tab === "updates" && plugin.update_status) card.append(text("p", plugin.management === "justvoxel" ? "Via server updates" : "Update status unknown", "plugins-card-meta"));
+    const details = addInfo(card, name);
+    details.append(text("p", `JAR: ${plugin.filename}`, "plugins-card-meta"));
+    details.append(text("p", `Metadata status: ${plugin.metadata_status || "Unknown"}`, "plugins-card-meta"));
+    details.append(text("p", management, "plugins-management"));
+    details.append(text("p", plugin.management === "justvoxel" ? "Managed by JustVoxel’s existing server update mechanism." : "Manually managed. JustVoxel does not identify this JAR with a Modrinth project or manage its updates.", "plugins-card-meta"));
+    if (plugin.update_status) details.append(text("p", plugin.update_status, "plugins-card-meta"));
     return card;
   };
   const load = async () => {
@@ -5873,7 +5928,7 @@ if (pluginsDialog && pluginsOpen) {
       form.querySelectorAll("input,button").forEach((control) => { control.disabled = !server.supported; });
       if (!server.supported) { state.textContent = server.message; return; }
       const items = tab === "discover" ? payload.projects : payload.plugins;
-      items.forEach((item) => results.append(tab === "discover" ? renderProject(item) : renderInstalled(item)));
+      items.forEach((item) => results.append(tab === "discover" ? renderProject(item, server) : renderInstalled(item)));
       state.textContent = server.message || (items.length ? "" : tab === "discover" ? "No plugins match these filters on this page." : "No installed plugin JARs found.");
       if (tab === "discover") {
         nextOffset = payload.next_offset;
