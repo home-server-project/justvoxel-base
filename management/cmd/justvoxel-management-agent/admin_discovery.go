@@ -11,7 +11,14 @@ import (
 const adminDiscoveryHelper = "/usr/libexec/justvoxel/mjust/admin-discovery-json"
 
 var runAdminDiscoveryHelper = func(ctx context.Context, action string) ([]byte, error) {
-	return exec.CommandContext(ctx, adminDiscoveryHelper, action).CombinedOutput()
+	cmd := exec.CommandContext(ctx, adminDiscoveryHelper, action)
+	finish, err := attachOperationTrace(ctx, cmd)
+	if err != nil {
+		return nil, err
+	}
+	output, err := cmd.CombinedOutput()
+	finish(err)
+	return output, err
 }
 
 type adminMinecraftConfiguration struct {

@@ -2,6 +2,7 @@
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "${repo_root}/mjust/libexec/operation-trace.sh"
 source "${repo_root}/mjust/libexec/common.sh"
 source "${repo_root}/mjust/libexec/storage-lifecycle.sh"
 set +e

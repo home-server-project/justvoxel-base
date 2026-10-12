@@ -22,7 +22,14 @@ var adminMinecraftResetPlanTimeout = 20 * time.Second
 var adminMinecraftResetWorkerTimeout = 5 * time.Minute
 
 var runAdminMinecraftResetHelper = func(ctx context.Context, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, adminMinecraftResetHelper, args...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, adminMinecraftResetHelper, args...)
+	finish, err := attachOperationTrace(ctx, cmd)
+	if err != nil {
+		return nil, err
+	}
+	output, err := cmd.CombinedOutput()
+	finish(err)
+	return output, err
 }
 
 type adminMinecraftResetPlanResponse struct {
@@ -327,6 +334,8 @@ var startMinecraftResetWorker = func(s *server, operationID, expectedFingerprint
 }
 
 func executeMinecraftReset(ctx context.Context, s *server, operationID, expectedFingerprint string, actor session) error {
+	ctx = withOperationTrace(ctx, s.operations, operationID)
+	traceStage(ctx, "Validation")
 	if _, err := s.operations.transition(operationID, operationValidating, "validating", "Revalidating Minecraft reset plan."); err != nil {
 		return err
 	}
@@ -369,6 +378,7 @@ func executeMinecraftReset(ctx context.Context, s *server, operationID, expected
 	if _, err := s.operations.transition(operationID, operationVerifying, "verifying", "Verifying JustVoxel returned to first-setup mode."); err != nil {
 		return err
 	}
+	traceStage(ctx, "Verification")
 	configured, preflightErr := setupAlreadyConfiguredForApply(ctx)
 	if preflightErr != nil || configured {
 		_, _ = s.operations.transition(operationID, operationNeedsAttention, "verification_failed", "Minecraft reset finished with an unexpected appliance configuration state.")

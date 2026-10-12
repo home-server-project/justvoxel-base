@@ -49,7 +49,7 @@ function harness() {
   };
   const context = vm.createContext({
     window, URL, AbortController,
-    document: { body, createElement: (tag) => new Element(tag) },
+    document: { body, createElement: (tag) => new Element(tag), createElementNS: (_, tag) => new Element(tag) },
     fetch(url, options) { const next = deferred(); reads.push({ url, options }); pending.push(next); return next.promise; },
     setupWorkspaceWindow(element, options) {
       const workspace = {
@@ -81,7 +81,7 @@ test('one non-modal workspace, drag header, explicit opening, X and safe read-on
   assert.equal(h.workspaces[0].element.dataset.workspaceWindow, 'live-console');
   assert.ok(h.body.all().some((node) => 'data-workspace-drag-handle' in node.attributes));
   assert.equal(h.reads.length, 1);
-  assert.equal(h.reads[0].url, `/setup/progress/${A}/log/view`);
+  assert.equal(h.reads[0].url, `/api/operations/${A}/trace`);
   assert.equal(h.reads[0].options.credentials, 'same-origin');
   assert.equal(h.reads[0].options.cache, 'no-store');
   assert.equal(h.reads[0].options.headers.Accept, 'text/plain');
@@ -126,7 +126,7 @@ test('old operation and queued close events cannot overwrite or stop a reopened 
   const h = harness(); h.open(); h.api.close(); h.open('minecraft_reset', B);
   h.workspaces[0].options.onClose(); // delayed native close event from the prior opening
   assert.equal(h.reads.length, 2);
-  assert.equal(h.reads[1].url, `/api/system/workspace/logs/reset/${encodeURIComponent(B)}`);
+  assert.equal(h.reads[1].url, `/api/operations/${encodeURIComponent(B)}/trace`);
   h.pending[1].resolve(response('new transcript')); await flush();
   h.pending[0].resolve(response('old transcript')); await flush();
   assert.equal(h.viewer.textContent, 'new transcript'); assert.equal(h.timers.size, 1);
@@ -191,7 +191,7 @@ test('no arbitrary URL/category, command entry or browser execution capability',
   for (const config of [{ kind: 'journal', operationID: A }, { kind: 'setup', operationID: '../etc/passwd' }, { kind: 'reset', operationID: A }]) h.api.open(config);
   assert.equal(h.reads.length, 0); assert.equal(h.workspaces.length, 0);
   h.open('minecraft_reset', A, 'running', { url: '/arbitrary/path' });
-  assert.equal(h.reads[0].url, `/api/system/workspace/logs/reset/${A}`);
+  assert.equal(h.reads[0].url, `/api/operations/${A}/trace`);
   assert.doesNotMatch(consoleCode, /innerHTML|showModal|journalctl|systemctl|child_process|\b(?:exec|execSync|spawn|spawnSync)\b|\/bin\/(?:sh|bash)\b|\bshell\s*:|stdin/);
   assert.doesNotMatch(consoleCode, /(?:createElement|make)\(\s*["'](?:input|textarea|form)["']|contentEditable|contenteditable|onkeydown|onkeypress|addEventListener\(\s*["'](?:keydown|keypress|submit)["']/);
   assert.equal(h.body.all().filter((node) => ['input', 'textarea', 'form'].includes(node.tag)).length, 0);
@@ -220,7 +220,7 @@ test('setup console is available from queued through terminal states, with downl
     assert.equal(ids.get('setup-dashboard-link').hidden, !terminal);
     assert.equal(h.workspaces.length, 0);
     ids.get('setup-diagnostic-log-view').fire('click');
-    assert.equal(h.reads.at(-1).url, `/setup/progress/${A}/log/view`);
+    assert.equal(h.reads.at(-1).url, `/api/operations/${A}/trace`);
     ids.get('setup-dashboard-link').fire('click');
     assert.equal(h.workspaces[0].element.open, false);
   }
@@ -269,13 +269,13 @@ function resetHarness() {
   return { h, content, order, render: h.context.renderResetOperation };
 }
 
-test('both reset progress views open authoritative logs and rerender without duplicate polling', async () => {
+test('both reset progress views open authoritative traces and rerender without duplicate polling', async () => {
   for (const kind of ['minecraft_reset', 'factory_reset']) {
     const { h, content, render } = resetHarness();
     const operation = { operation_type: kind, operation_id: A, state: 'running', stage: 'working' };
     render(operation);
     content.all().find((node) => node.textContent === 'Live Console').fire('click');
-    assert.equal(h.reads[0].url, `/api/system/workspace/logs/reset/${encodeURIComponent(A)}`);
+    assert.equal(h.reads[0].url, `/api/operations/${encodeURIComponent(A)}/trace`);
     await h.answer('reset running');
     render({ ...operation, state: 'verifying' });
     content.all().find((node) => node.textContent === 'Live Console').fire('click');
@@ -346,5 +346,51 @@ test('diagnostic routes, confirmation/recovery and System Logs/Failed units rema
   assert.match(app, /factoryResetPollOperationID === activeFactoryResetOperationID/);
   assert.equal(read('webui/VERSION').trim(), '1.0.0-rc.1');
   assert.match(read('webui/internal/server/static/app.css'), /\.live-console-dialog\{[^}]*resize:both/);
-  assert.match(read('webui/internal/server/static/app.css'), /\.live-console-transcript\{[^}]*overflow:auto[^}]*white-space:pre/);
+  assert.match(read('webui/internal/server/static/app.css'), /\.live-console-transcript\{[^}]*overflow-y:auto[^}]*overflow-x:hidden[^}]*white-space:pre-wrap[^}]*overflow-wrap:anywhere/);
+});
+
+
+test('all supported kinds use only authoritative operation traces and ignore arbitrary URLs', async () => {
+  assert.doesNotMatch(consoleCode, /\/setup\/progress\/|\/api\/system\/workspace\/logs\/|config\.url/);
+  assert.doesNotMatch(consoleCode, /innerHTML|WebSocket|textarea|method: ["']POST|exec\(/);
+  for (const kind of ['setup', 'minecraft_reset', 'factory_reset']) {
+    const h = harness(); h.open(kind, A, 'running', { url: '/arbitrary/command', path: '/etc/shadow' });
+    assert.equal(h.reads[0].url, `/api/operations/${A}/trace`);
+    await h.answer('execution trace');
+    assert.equal(h.viewer.textContent, 'execution trace');
+  }
+  const h = harness(); h.open('shell'); assert.equal(h.reads.length, 0);
+});
+
+test('authoritative stages update context using text only and unknown stages fall back', async () => {
+  const h = harness(); h.open('setup', A, 'running', { stage: 'storage_preflight' });
+  const label = h.body.all().find(node => node.textContent === 'First-run Setup · Storage');
+  assert.ok(label); assert.equal(h.status.textContent, 'Running');
+  h.api.updateState(A, 'verifying', 'minecraft_verify');
+  assert.equal(label.textContent, 'First-run Setup · Minecraft');
+  assert.equal(h.status.textContent, 'Verifying');
+  h.api.updateState(A, 'running', '<script>unknown</script>');
+  assert.equal(label.textContent, 'First-run Setup');
+  h.api.updateState(A, 'running', '__proto__');
+  assert.equal(label.textContent, 'First-run Setup');
+  h.api.updateState(B, 'running', 'runtime_config');
+  assert.equal(label.textContent, 'First-run Setup');
+});
+
+test('dynamic close control shares accessible SVG contract and transcript wraps vertically', () => {
+  const h = harness(); h.open();
+  const close = h.body.all().find(node => node.attributes['aria-label'] === 'Close Live Console');
+  assert.ok(close.className.includes('workspace-header-close'));
+  assert.equal(close.textContent, '');
+  const svg = close.children[0]; assert.equal(svg.tag, 'svg');
+  assert.equal(svg.attributes.viewBox, '0 0 24 24');
+  assert.equal(svg.attributes.stroke, 'currentColor');
+  assert.equal(svg.children[0].attributes.d, 'M5 5l14 14M19 5L5 19');
+  assert.doesNotMatch(consoleCode, /×|&times;/);
+  const css = read('webui/internal/server/static/app.css');
+  const transcript = css.match(/\.live-console-transcript\{([^}]+)}/)[1];
+  assert.match(transcript, /overflow-y:auto/); assert.match(transcript, /overflow-x:hidden/);
+  assert.match(transcript, /white-space:pre-wrap/); assert.match(transcript, /overflow-wrap:anywhere/);
+  assert.doesNotMatch(transcript, /overflow:auto|white-space:pre;/);
+  assert.match(css, /\.live-console-dialog\{[^}]*max-width:calc\(100vw - 16px\)/);
 });

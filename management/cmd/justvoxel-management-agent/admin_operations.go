@@ -11,6 +11,7 @@ type adminOperationResponse struct {
 
 func registerAdminOperationRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("GET /v1/admin/operations/{id}", s.adminOperationStatus)
+	mux.HandleFunc("GET /v1/admin/operations/{id}/trace", s.adminOperationTrace)
 	mux.HandleFunc("GET /v1/admin/setup/current-operation", s.adminCurrentSetupOperation)
 	mux.HandleFunc("GET /v1/admin/restore/current-operation", s.adminCurrentRestoreOperation)
 	mux.HandleFunc("GET /v1/admin/data-migration/current-operation", s.adminCurrentDataMigrationOperation)

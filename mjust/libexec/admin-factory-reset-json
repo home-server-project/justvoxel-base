@@ -1,4 +1,6 @@
 #!/usr/bin/bash
+
+source "$(dirname -- "${BASH_SOURCE[0]}")/operation-trace.sh"
 set -euo pipefail
 
 source /usr/libexec/justvoxel/mjust/admin-storage-actions-common.sh
@@ -8,6 +10,7 @@ source /usr/libexec/justvoxel/mjust/storage-mount-ownership.sh
 require_root
 
 action="${1:-}"
+jv_trace_stage "RESET Validation"
 case "${action}" in
     plan|apply) ;;
     *)
@@ -78,7 +81,7 @@ fi
 
 players_json='{"configured":false,"state":"not_configured","online":0,"max":0,"names":[]}'
 if [[ ${configured} == true ]]; then
-    if status_json="$(/usr/libexec/justvoxel/mjust/web-status-json players 2>/dev/null)"; then
+    if status_json="$(jv_trace_run /usr/libexec/justvoxel/mjust/web-status-json players 2>/dev/null)"; then
         if jq -e 'type=="object" and (.online|type=="number") and (.names|type=="array")' <<<"${status_json}" >/dev/null 2>&1; then
             players_json="${status_json}"
         else
@@ -161,31 +164,31 @@ factory_reset_managed_mounts() {
                     live="$(jv_exact_mount_identity SOURCE "${point}")" || return 1
                     [[ ${live} == "${source}" ]] || return 1
                 fi
-                umount -- "${point}" || return 1
+                jv_trace_run umount -- "${point}" || return 1
             fi
             tmp="$(mktemp /etc/.fstab.justvoxel-reset.XXXXXX)" || return 1
             if ! awk -v mp="${point}" '$0 ~ /^[[:space:]]*#/ || NF < 2 || $2 != mp {print}' "${fstab}" > "${tmp}" ||
                ! chmod --reference="${fstab}" "${tmp}" || ! chown --reference="${fstab}" "${tmp}" ||
                ! cat -- "${tmp}" > "${fstab}"; then
-                rm -f -- "${tmp}"
+                jv_trace_run rm -f -- "${tmp}"
                 return 1
             fi
-            rm -f -- "${tmp}"
+            jv_trace_run rm -f -- "${tmp}"
             changed=true
-            systemctl daemon-reload || return 1
+            jv_trace_run systemctl daemon-reload || return 1
         fi
-        systemctl reset-failed "${unit}" >/dev/null 2>&1 || true
+        jv_trace_run systemctl reset-failed "${unit}" >/dev/null 2>&1 || true
     done
-    [[ ${changed} == false ]] || systemctl daemon-reload
+    [[ ${changed} == false ]] || jv_trace_run systemctl daemon-reload
 }
 
 if [[ ${confirm_players} != --confirm-players ]]; then
     factory_reset_fail "confirmation_required" "Full factory reset Apply requires explicit player interruption confirmation." 4
 fi
 
-if [[ ${configured} == true ]] && systemctl is-active --quiet minecraft.service 2>/dev/null; then
+if [[ ${configured} == true ]] && jv_trace_run systemctl is-active --quiet minecraft.service 2>/dev/null; then
     set +e
-    stop_output="$(/usr/libexec/justvoxel/mjust/web-status-json stop --confirm-players 2>/dev/null)"
+    stop_output="$(jv_trace_run /usr/libexec/justvoxel/mjust/web-status-json stop --confirm-players 2>/dev/null)"
     stop_rc=$?
     set -e
     if (( stop_rc != 0 )) || ! jq -e '.ok == true' <<<"${stop_output}" >/dev/null 2>&1; then
@@ -193,11 +196,14 @@ if [[ ${configured} == true ]] && systemctl is-active --quiet minecraft.service 
     fi
 fi
 
+jv_trace_stage "RESET Removing runtime"
+
 # Quadlet/systemd removal can finish even when Podman reports a removal error.
 if ! jv_reset_remove_minecraft_container; then
     factory_reset_fail "container_cleanup_failed" "Minecraft container cleanup failed. Retry Full Factory Reset after reviewing the container state."
 fi
 
+jv_trace_stage "RESET Cleaning appliance state"
 if [[ ${data_action} == delete ]]; then
     if ! cleanup_error="$(jv_reset_delete_tree_same_filesystem "${data_path}" 'Minecraft data' 2>&1)"; then
         factory_reset_fail "data_cleanup_failed" "Minecraft data cleanup failed: ${cleanup_error:-unknown cleanup error}"
@@ -209,6 +215,7 @@ if [[ ${backup_action} == delete ]]; then
     fi
 fi
 
+jv_trace_stage "RESET Retiring managed mounts"
 if ! storage_mount_retire_all || ! factory_reset_managed_mounts; then
     factory_reset_fail "mount_cleanup_failed" "JustVoxel-managed mount entries could not be cleaned safely. Review mount identity and /etc/fstab before retrying."
 fi
@@ -223,17 +230,18 @@ if [[ ${configured} == true ]]; then
         factory_reset_fail "configuration_cleanup_failed" "JustVoxel runtime configuration could not be removed completely."
     fi
 else
-    systemctl disable --now minecraft-backup.timer >/dev/null 2>&1 || true
-    rm -f -- "${JV_QUADLET}" "${JV_BACKUP_SERVICE}" "${JV_BACKUP_TIMER}" "${JV_PREVIOUS_IMAGE_STATE}"
-    rm -rf -- "${JV_CONFIG_DIR}"
-    if ! systemctl daemon-reload; then
+    jv_trace_run systemctl disable --now minecraft-backup.timer >/dev/null 2>&1 || true
+    jv_trace_run rm -f -- "${JV_QUADLET}" "${JV_BACKUP_SERVICE}" "${JV_BACKUP_TIMER}" "${JV_PREVIOUS_IMAGE_STATE}"
+    jv_trace_run rm -rf -- "${JV_CONFIG_DIR}"
+    if ! jv_trace_run systemctl daemon-reload; then
         factory_reset_fail "configuration_cleanup_failed" "systemd could not reload after JustVoxel runtime configuration cleanup."
     fi
-    systemctl reset-failed minecraft.service minecraft-backup.service minecraft-backup.timer >/dev/null 2>&1 || true
+    jv_trace_run systemctl reset-failed minecraft.service minecraft-backup.service minecraft-backup.timer >/dev/null 2>&1 || true
 fi
 
-if podman container exists minecraft >/dev/null 2>&1 ||
-   systemctl is-active --quiet minecraft.service 2>/dev/null ||
+jv_trace_stage "VERIFY Runtime cleanup"
+if jv_trace_run podman container exists minecraft >/dev/null 2>&1 ||
+   jv_trace_run systemctl is-active --quiet minecraft.service 2>/dev/null ||
    [[ -e ${JV_CONFIG} || -e ${JV_QUADLET} || -e ${JV_BACKUP_SERVICE} || -e ${JV_BACKUP_TIMER} ]]; then
     factory_reset_fail "runtime_cleanup_incomplete" "Full factory reset stopped because appliance-owned Minecraft runtime state is still present after cleanup."
 fi

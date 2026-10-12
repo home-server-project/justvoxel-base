@@ -22,7 +22,13 @@ var (
 var runAdminSetupStorageTransactionHelper = func(ctx context.Context, action string, request []byte) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, adminSetupStorageTransactionHelper, action)
 	cmd.Stdin = bytes.NewReader(request)
-	return cmd.CombinedOutput()
+	finish, err := attachOperationTrace(ctx, cmd)
+	if err != nil {
+		return nil, err
+	}
+	output, err := cmd.CombinedOutput()
+	finish(err)
+	return output, err
 }
 
 type setupStorageTransactionTarget struct {
@@ -166,6 +172,7 @@ func runSetupStorageRecoveryAction(parent context.Context, request []byte) (setu
 }
 
 func executeSetupStorage(parent context.Context, store *operationStore, operationID string, plan *adminSetupNormalizedPlan, smbPassword string) error {
+	parent = withOperationTrace(parent, store, operationID, smbPassword)
 	if store == nil {
 		return errors.New("operation store is unavailable")
 	}
@@ -279,6 +286,7 @@ func finishSetupStorageAfterApplyFailure(store *operationStore, operationID stri
 }
 
 func rollbackSetupStorage(parent context.Context, store *operationStore, operationID string, plan *adminSetupNormalizedPlan) (setupStorageTransactionResponse, error) {
+	parent = withOperationTrace(parent, store, operationID)
 	var response setupStorageTransactionResponse
 	if store == nil {
 		return response, errors.New("operation store is unavailable")

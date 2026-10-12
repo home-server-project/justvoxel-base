@@ -59,6 +59,7 @@ func (s *server) adminSetupRecover(w http.ResponseWriter, r *http.Request) {
 }
 
 func recoverSetupStorage(ctx context.Context, store *operationStore, current operationJournal) operationJournal {
+	ctx = withOperationTrace(ctx, store, current.OperationID)
 	request, err := setupRecoveryPayload(current)
 	var response setupStorageTransactionResponse
 	if err == nil {
@@ -103,6 +104,7 @@ func setupRecoveryPayload(current operationJournal) ([]byte, error) {
 }
 
 func recoverSetupTransaction(ctx context.Context, store *operationStore, current operationJournal) operationJournal {
+	ctx = withOperationTrace(ctx, store, current.OperationID)
 	if current.Stage != "runtime_rollback" {
 		return recoverSetupStorage(ctx, store, current)
 	}

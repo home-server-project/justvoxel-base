@@ -1701,11 +1701,23 @@ window.JustVoxelLiveConsole = (() => {
   let timer = null;
   let controller = null;
   let reconnecting = false;
+  const labels = { setup: "First-run Setup", minecraft_reset: "Reset Minecraft", factory_reset: "Full Factory Reset" };
+  const stageLabels = {
+    storage_preflight: "Storage", storage_snapshot: "Storage", storage_verified: "Storage",
+    runtime_preflight: "Runtime", runtime_config: "Runtime", minecraft_verify: "Minecraft",
+    final_validation: "Verification", verifying: "Verification", validating: "Validation",
+    runtime_rollback: "Recovery", storage_rollback: "Recovery", runtime_recovery: "Recovery", storage_recovery: "Recovery",
+    resetting: "Removing runtime", resetting_runtime: "Cleaning appliance state", resetting_identity: "Resetting users",
+    safety_backup: "Safety backup",
+  };
   const stateLabel = (state) => ({
     succeeded: "Complete", resolved: "Complete", rolled_back: "Rolled back",
-    needs_attention: "Needs attention",
+    needs_attention: "Needs attention", running: "Running", verifying: "Verifying",
+    queued: "Queued", validating: "Validating", rolling_back: "Rolling back",
   }[state] || "Live");
   const showState = () => {
+    const stage = Object.prototype.hasOwnProperty.call(stageLabels, selected.stage) ? stageLabels[selected.stage] : "";
+    label.textContent = labels[selected.kind] + (stage ? ` · ${stage}` : "");
     indicator.textContent = reconnecting ? "Reconnecting…" : stateLabel(selected.state);
   };
   const stop = () => {
@@ -1737,7 +1749,18 @@ window.JustVoxelLiveConsole = (() => {
     const title = make("h2", "", "Live Console");
     title.id = "live-console-title";
     heading.append(make("p", "eyebrow", "JustVoxel"), title);
-    const dismiss = make("button", "secondary system-monitor-header-button workspace-header-close", "×");
+    const dismiss = make("button", "secondary system-monitor-header-button workspace-header-close");
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "2");
+    svg.setAttribute("stroke-linecap", "round");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", "M5 5l14 14M19 5L5 19");
+    svg.append(path);
+    dismiss.append(svg);
     dismiss.type = "button";
     dismiss.setAttribute("aria-label", "Close Live Console");
     dismiss.addEventListener("click", close);
@@ -1749,7 +1772,7 @@ window.JustVoxelLiveConsole = (() => {
     context.append(label, indicator);
     viewer = make("pre", "live-console-transcript", "");
     viewer.tabIndex = 0;
-    viewer.setAttribute("aria-label", "Operation diagnostic transcript");
+    viewer.setAttribute("aria-label", "Operation execution trace");
     shell.append(header, context, viewer);
     dialog.append(shell);
     document.body.append(dialog);
@@ -1813,11 +1836,11 @@ window.JustVoxelLiveConsole = (() => {
     if (current()) timer = window.setTimeout(() => read(token), 2500);
   };
   const open = (config) => {
-    const labels = { setup: "First-run Setup", minecraft_reset: "Reset Minecraft", factory_reset: "Full Factory Reset" };
     if (!["setup", "minecraft_reset", "factory_reset"].includes(config.kind) || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(config.operationID)) return;
     ensureWindow();
     if (dialog.open && selected?.operationID === config.operationID && selected.kind === config.kind) {
       selected.state = config.state;
+      selected.stage = config.stage;
       showState();
       workspace.bringToFront();
       return;
@@ -1825,9 +1848,9 @@ window.JustVoxelLiveConsole = (() => {
     stop();
     const id = encodeURIComponent(config.operationID);
     selected = {
-      kind: config.kind, operationID: config.operationID, state: config.state,
+      kind: config.kind, operationID: config.operationID, state: config.state, stage: config.stage,
       onUnauthorized: config.onUnauthorized,
-      url: config.kind === "setup" ? `/setup/progress/${id}/log/view` : `/api/system/workspace/logs/reset/${id}`,
+      url: `/api/operations/${id}/trace`,
     };
     reconnecting = false;
     label.textContent = labels[config.kind];
@@ -1837,9 +1860,10 @@ window.JustVoxelLiveConsole = (() => {
     workspace.open();
     void read(generation);
   };
-  const updateState = (operationID, state) => {
+  const updateState = (operationID, state, stage) => {
     if (selected?.operationID !== operationID || !dialog?.open) return;
     selected.state = state;
+    selected.stage = stage;
     showState();
   };
   window.addEventListener("pagehide", close);
@@ -4710,7 +4734,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   const renderResetOperation = (operation) => {
     clearResetPoll();
     if (!content || !operation) return;
-    window.JustVoxelLiveConsole.updateState(operation.operation_id, operation.state);
+    window.JustVoxelLiveConsole.updateState(operation.operation_id, operation.state, operation.stage);
     if (operation.operation_type === "factory_reset" && operation.state === "succeeded") {
       showFactoryResetComplete();
       return;
@@ -4752,7 +4776,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     liveConsole.addEventListener("click", () => window.JustVoxelLiveConsole.open({
       kind: operation.operation_type,
       operationID: operation.operation_id,
-      state: operation.state,
+      state: operation.state, stage: operation.stage,
       onUnauthorized: () => resetLiveConsoleUnauthorized(operation),
     }));
     built.panel.appendChild(liveConsole);

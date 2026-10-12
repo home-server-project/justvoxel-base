@@ -137,6 +137,7 @@ done
 
 # Exercise real first-run verification with healthy startup and classifier-backed
 # validation. No system services or disk operations run: every command is mocked.
+source "${repo_root}/mjust/libexec/operation-trace.sh"
 source <(sed -n '/^_a55_verify_action() {/,/^}/p' "${repo_root}/mjust/libexec/admin-setup-runtime-transaction-json" |
     sed -e 's|/usr/libexec/justvoxel/mjust/validate-backend|mock_validate_backend|g' \
         -e 's|/usr/libexec/justvoxel/mjust/verify-minecraft-stack|mock_verify_stack|g')

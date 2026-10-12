@@ -195,7 +195,7 @@ a53_recover_action() {
         uuid="$(jq -r '.uuid' <<< "${entry}")"
         source="$(jq -r '.source' <<< "${entry}")"
         [[ -n ${source} && $(_a53_normalize_path "${mountpoint}") == "${mountpoint}" ]] && storage_validate_mountpoint_path "${mountpoint}" >/dev/null 2>&1 || { _a53_recovery_fail; return 0; }
-        if mountpoint -q -- "${mountpoint}"; then
+        if jv_trace_run mountpoint -q -- "${mountpoint}"; then
             current_source="$(jv_exact_mount_identity SOURCE "${mountpoint}" 2>/dev/null)" || { _a53_recovery_fail; return 0; }
             [[ ${current_source} == "${source}" ]] || { _a53_recovery_fail; return 0; }
             if [[ -n ${uuid} ]]; then
@@ -208,7 +208,7 @@ a53_recover_action() {
     _a53_manifest_set_rollback running recovery_in_progress >/dev/null 2>&1 || { _a53_recovery_fail; return 0; }
     for (( i=${#A53_MOUNTS_BY_US[@]}-1; i>=0; i-- )); do
         mountpoint="$(jq -r '.mountpoint' <<< "${A53_MOUNTS_BY_US[$i]}")"
-        if mountpoint -q -- "${mountpoint}"; then
+        if jv_trace_run mountpoint -q -- "${mountpoint}"; then
             source="$(jq -r '.source' <<< "${A53_MOUNTS_BY_US[$i]}")"
             uuid="$(jq -r '.uuid' <<< "${A53_MOUNTS_BY_US[$i]}")"
             current_source="$(jv_exact_mount_identity SOURCE "${mountpoint}" 2>/dev/null)" || { _a53_recovery_fail; return 0; }
@@ -217,8 +217,8 @@ a53_recover_action() {
                 current_uuid="$(jv_exact_mount_identity UUID "${mountpoint}" 2>/dev/null)" || { _a53_recovery_fail; return 0; }
                 [[ ${current_uuid} == "${uuid}" ]] || { _a53_recovery_fail; return 0; }
             fi
-            umount -- "${mountpoint}" >/dev/null 2>&1 || { _a53_recovery_fail; return 0; }
-            ! mountpoint -q -- "${mountpoint}" || { _a53_recovery_fail; return 0; }
+            jv_trace_run umount -- "${mountpoint}" >/dev/null 2>&1 || { _a53_recovery_fail; return 0; }
+            ! jv_trace_run mountpoint -q -- "${mountpoint}" || { _a53_recovery_fail; return 0; }
         fi
     done
     if [[ ${A53_FSTAB_CHANGED} == true ]]; then

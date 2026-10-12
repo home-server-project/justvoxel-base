@@ -3,7 +3,11 @@
 readonly JV_MINECRAFT_STOP_TIMEOUT_SECONDS="${JV_MINECRAFT_STOP_TIMEOUT_SECONDS:-150}"
 
 jv_player_list_raw() {
-    podman exec minecraft rcon-cli 'list' 2>/dev/null
+    if declare -F jv_trace_run >/dev/null; then
+        jv_trace_run podman exec minecraft rcon-cli 'list' 2>/dev/null
+    else
+        podman exec minecraft rcon-cli 'list' 2>/dev/null
+    fi
 }
 
 jv_player_online_count() {
@@ -42,7 +46,13 @@ jv_minecraft_announce_shutdown() {
 }
 
 jv_begin_minecraft_stop() {
-    if ! systemctl --no-block stop minecraft.service; then
+    if declare -F jv_trace_command >/dev/null; then jv_trace_stage "SERVICE Stopping Minecraft"; jv_trace_command systemctl --no-block stop minecraft.service; fi
+    local rc
+    if systemctl --no-block stop minecraft.service; then
+        if declare -F jv_trace_result >/dev/null; then jv_trace_result 0; fi
+    else
+        rc=$?
+        if declare -F jv_trace_result >/dev/null; then jv_trace_result "${rc}"; fi
         echo 'ERROR: Minecraft graceful stop request failed.' >&2
         return 1
     fi

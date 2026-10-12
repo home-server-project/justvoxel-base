@@ -83,7 +83,7 @@ func TestSystemWorkspaceLogsAreAdministratorOnlyAndDownloadText(t *testing.T) {
 	if read.Code != http.StatusOK || read.Header().Get("Content-Type") != "text/plain; charset=utf-8" || !strings.Contains(read.Body.String(), "rollback succeeded\n") {
 		t.Fatalf("log read = %d %s", read.Code, read.Body.String())
 	}
-	// Live Console uses the same Administrator-only plain-text route as System Logs.
+	// Reset forensic diagnostics remain available in System Logs.
 	reset := httptest.NewRecorder()
 	app.Handler().ServeHTTP(reset, authenticatedAdminRequest(http.MethodGet, "http://example/api/system/workspace/logs/reset/"+id, ""))
 	if reset.Code != http.StatusOK || reset.Header().Get("Content-Type") != "text/plain; charset=utf-8" || reset.Header().Get("Cache-Control") != "no-store" {

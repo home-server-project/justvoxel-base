@@ -5,6 +5,7 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 scratch="$(mktemp -d)"
 trap 'rm -rf -- "${scratch}"' EXIT
 mkdir -p "${scratch}/bin"
+cp -- "${repo}/mjust/libexec/operation-trace.sh" "${scratch}/operation-trace.sh"
 
 cat >"${scratch}/common.sh" <<'EOF'
 JV_CONFIG_DIR="${JV_TEST_ROOT}/config"

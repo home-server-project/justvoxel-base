@@ -1,4 +1,6 @@
 #!/usr/bin/bash
+
+source "$(dirname -- "${BASH_SOURCE[0]}")/operation-trace.sh"
 set -uo pipefail
 
 source /usr/libexec/justvoxel/mjust/common.sh
@@ -10,6 +12,7 @@ source /usr/libexec/justvoxel/mjust/admin-setup-storage-transaction-actions.sh
 require_root
 
 action="${1:-validate}"
+jv_trace_stage "STORAGE ${action}"
 case "${action}" in
     validate) a53_validate_action ;;
     apply) a53_apply_action ;;

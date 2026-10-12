@@ -1,13 +1,15 @@
 #!/usr/bin/bash
 
+source "$(dirname -- "${BASH_SOURCE[0]}")/operation-trace.sh"
+
 jv_reset_remove_minecraft_container() {
-    if podman rm --force --ignore minecraft >/dev/null 2>&1; then
+    if jv_trace_run podman rm --force --ignore minecraft >/dev/null 2>&1; then
         return 0
     fi
 
     # Podman may report a removal error after the container has already gone.
     # Only exit status 1 from `exists` confirms absence; other errors fail closed.
-    if podman container exists minecraft >/dev/null 2>&1; then
+    if jv_trace_run podman container exists minecraft >/dev/null 2>&1; then
         return 1
     else
         [[ $? -eq 1 ]]
@@ -107,7 +109,7 @@ jv_reset_delete_tree_same_filesystem() {
         return 1
     fi
 
-    find "${root}" -xdev -mindepth 1 -delete
+    jv_trace_run find "${root}" -xdev -mindepth 1 -delete
 }
 
 jv_reset_delete_internal_data() {
@@ -149,22 +151,22 @@ jv_reset_remove_active_configuration() {
         preserve_credentials="${JV_RESET_PRESERVE_CREDENTIALS}"
     fi
 
-    systemctl disable --now minecraft-backup.timer >/dev/null 2>&1 || true
+    jv_trace_run systemctl disable --now minecraft-backup.timer >/dev/null 2>&1 || true
 
-    firewall-cmd --permanent --remove-port="${java_port}/tcp" >/dev/null 2>&1 || true
+    jv_trace_run firewall-cmd --permanent --remove-port="${java_port}/tcp" >/dev/null 2>&1 || true
     if [[ ${bedrock_enabled} == yes ]]; then
-        firewall-cmd --permanent --remove-port="${bedrock_port}/udp" >/dev/null 2>&1 || true
+        jv_trace_run firewall-cmd --permanent --remove-port="${bedrock_port}/udp" >/dev/null 2>&1 || true
     fi
-    firewall-cmd --reload >/dev/null 2>&1 || true
+    jv_trace_run firewall-cmd --reload >/dev/null 2>&1 || true
 
-    rm -f -- "${JV_QUADLET}" "${JV_BACKUP_SERVICE}" "${JV_BACKUP_TIMER}"
+    jv_trace_run rm -f -- "${JV_QUADLET}" "${JV_BACKUP_SERVICE}" "${JV_BACKUP_TIMER}"
     if [[ ${preserve_credentials} == yes ]]; then
         # Keep the original private file in place; never copy its secret elsewhere.
-        find "${JV_CONFIG_DIR}" -mindepth 1 -maxdepth 1 ! -name smb-backup.credentials -exec rm -rf -- {} + || return 1
+        jv_trace_run find "${JV_CONFIG_DIR}" -mindepth 1 -maxdepth 1 ! -name smb-backup.credentials -exec rm -rf -- {} + || return 1
     else
-        rm -rf -- "${JV_CONFIG_DIR}" || return 1
+        jv_trace_run rm -rf -- "${JV_CONFIG_DIR}" || return 1
     fi
-    rm -f -- "${JV_PREVIOUS_IMAGE_STATE}"
-    systemctl daemon-reload
-    systemctl reset-failed minecraft.service minecraft-backup.service minecraft-backup.timer >/dev/null 2>&1 || true
+    jv_trace_run rm -f -- "${JV_PREVIOUS_IMAGE_STATE}"
+    jv_trace_run systemctl daemon-reload
+    jv_trace_run systemctl reset-failed minecraft.service minecraft-backup.service minecraft-backup.timer >/dev/null 2>&1 || true
 }

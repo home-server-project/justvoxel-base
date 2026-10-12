@@ -5,6 +5,7 @@ fixture="$(mktemp -d)"
 trap 'rm -rf -- "${fixture}"' EXIT
 helper="${repo_root}/mjust/libexec/admin-setup-runtime-transaction-json"
 # Load only production functions; never call appliance services or host Podman.
+source "${repo_root}/mjust/libexec/operation-trace.sh"
 source <(sed -n '/^_a55_evidence_set() {/,/^action=/{ /^action=/d; p; }' "${helper}")
 A53_TRANSACTION_ROOT="${fixture}/transactions"
 op=12345678-1234-4123-8123-123456789abc

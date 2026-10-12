@@ -108,7 +108,7 @@ _a53_parent_disk() {
     local real
     real="$(readlink -f -- "$1" 2>/dev/null || true)"
     [[ -n ${real} ]] || return 0
-    lsblk -s -nrpo NAME,TYPE "${real}" 2>/dev/null | awk '$2 == "disk" {print $1; exit}'
+    jv_trace_run lsblk -s -nrpo NAME,TYPE "${real}" 2>/dev/null | awk '$2 == "disk" {print $1; exit}'
 }
 
 _a53_file_sha256() {
@@ -242,8 +242,8 @@ _a53_validate_partition_target() {
 
     real_device="$(readlink -f -- "${device}" 2>/dev/null || true)"
     [[ -n ${real_device} && ${real_device} == "${device}" ]] || return 1
-    current_fs="$(blkid -s TYPE -o value "${device}" 2>/dev/null || true)"
-    current_uuid="$(blkid -s UUID -o value "${device}" 2>/dev/null || true)"
+    current_fs="$(jv_trace_run blkid -s TYPE -o value "${device}" 2>/dev/null || true)"
+    current_uuid="$(jv_trace_run blkid -s UUID -o value "${device}" 2>/dev/null || true)"
     [[ ${current_fs} == "${filesystem}" && ${current_uuid} == "${expected_uuid}" ]] || return 1
 
     current_parent="$(_a53_parent_disk "${device}")"
@@ -255,9 +255,9 @@ _a53_validate_partition_target() {
         storage_mount_is_critical "${mounted}" && return 1
     done < <(lsblk -nro MOUNTPOINT "${device}" 2>/dev/null | sed '/^$/d')
 
-    mounted_count="$(lsblk -nro MOUNTPOINT "${device}" 2>/dev/null | sed '/^$/d' | wc -l)"
+    mounted_count="$(jv_trace_run lsblk -nro MOUNTPOINT "${device}" 2>/dev/null | sed '/^$/d' | wc -l)"
     (( mounted_count <= 1 )) || return 1
-    mounted="$(lsblk -nro MOUNTPOINT "${device}" 2>/dev/null | sed '/^$/d' | head -n1)"
+    mounted="$(jv_trace_run lsblk -nro MOUNTPOINT "${device}" 2>/dev/null | sed '/^$/d' | head -n1)"
     normalized_mount="$(_a53_normalize_path "${mountpoint}")"
     normalized_path="$(_a53_normalize_path "${path}")"
     [[ -n ${normalized_mount} && -n ${normalized_path} ]] || return 1

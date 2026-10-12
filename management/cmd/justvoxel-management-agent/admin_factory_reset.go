@@ -25,13 +25,27 @@ var adminFactoryResetPlanTimeout = 20 * time.Second
 var adminFactoryResetWorkerTimeout = 5 * time.Minute
 
 var runAdminFactoryResetHelper = func(ctx context.Context, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, adminFactoryResetHelper, args...).Output()
+	cmd := exec.CommandContext(ctx, adminFactoryResetHelper, args...)
+	finish, err := attachOperationTrace(ctx, cmd)
+	if err != nil {
+		return nil, err
+	}
+	output, err := cmd.Output()
+	finish(err)
+	return output, err
 }
 
 var resetFactoryAuthenticationState = resetAuthenticationStateForFactoryReset
 
 var runFactoryCredentialCommand = func(ctx context.Context, path string, args ...string) error {
-	return exec.CommandContext(ctx, path, args...).Run()
+	cmd := exec.CommandContext(ctx, path, args...)
+	finish, err := attachOperationTrace(ctx, cmd)
+	if err != nil {
+		return err
+	}
+	err = cmd.Run()
+	finish(err)
+	return err
 }
 
 var restoreSystemAdministratorFactoryCredential = func(ctx context.Context) error {
@@ -455,6 +469,8 @@ var startFactoryResetWorker = func(s *server, operationID, expectedFingerprint s
 }
 
 func executeFactoryReset(ctx context.Context, s *server, operationID, expectedFingerprint string) error {
+	ctx = withOperationTrace(ctx, s.operations, operationID)
+	traceStage(ctx, "Validation")
 	if _, err := s.operations.transition(operationID, operationValidating, "validating", "Revalidating full factory reset plan."); err != nil {
 		return err
 	}
@@ -500,10 +516,12 @@ func executeFactoryReset(ctx context.Context, s *server, operationID, expectedFi
 		_, _ = s.operations.transition(operationID, operationNeedsAttention, "identity_failed", "WebUI identity storage is unavailable after local runtime cleanup.")
 		return errors.New("WebUI identity store is unavailable")
 	}
+	traceStage(ctx, "Resetting WebUI users and history")
 	if err := s.store.resetFactoryState(); err != nil {
 		_, _ = s.operations.transition(operationID, operationNeedsAttention, "identity_failed", "WebUI identity state could not be reset completely.")
 		return err
 	}
+	traceStage(ctx, "Resetting authentication")
 	if err := resetFactoryAuthenticationState(); err != nil {
 		_, _ = s.operations.transition(operationID, operationNeedsAttention, "identity_failed", "Authentication state could not be returned to System mode.")
 		return err
@@ -516,6 +534,7 @@ func executeFactoryReset(ctx context.Context, s *server, operationID, expectedFi
 	if _, err := s.operations.transition(operationID, operationVerifying, "verifying", "Verifying fresh JustVoxel first-use state."); err != nil {
 		return err
 	}
+	traceStage(ctx, "Verification")
 	configured, preflightErr := setupAlreadyConfiguredForApply(ctx)
 	if preflightErr != nil || configured {
 		_, _ = s.operations.transition(operationID, operationNeedsAttention, "verification_failed", "Factory reset finished with an unexpected appliance configuration state.")

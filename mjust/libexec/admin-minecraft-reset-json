@@ -1,4 +1,6 @@
 #!/usr/bin/bash
+
+source "$(dirname -- "${BASH_SOURCE[0]}")/operation-trace.sh"
 set -euo pipefail
 
 source /usr/libexec/justvoxel/mjust/common.sh
@@ -7,6 +9,7 @@ source /usr/libexec/justvoxel/mjust/minecraft-reset-common.sh
 require_root
 
 action="${1:-}"
+jv_trace_stage "RESET Validation"
 case "${action}" in
     plan|apply) ;;
     *)
@@ -48,7 +51,7 @@ if jv_reset_backup_nested_in_data "${DATA_PATH}" "${BACKUP_PATH}"; then
 fi
 
 players_json='{"configured":true,"state":"unknown","online":0,"max":0,"names":[]}'
-if status_json="$(/usr/libexec/justvoxel/mjust/web-status-json players 2>/dev/null)"; then
+if status_json="$(jv_trace_run /usr/libexec/justvoxel/mjust/web-status-json players 2>/dev/null)"; then
     if jq -e 'type=="object" and (.online|type=="number") and (.names|type=="array")' <<<"${status_json}" >/dev/null 2>&1; then
         players_json="${status_json}"
     else
@@ -100,9 +103,9 @@ if ! jv_reset_validate_storage_preservation; then
     minecraft_reset_fail "configuration_cleanup_failed" "Preserved SMB storage configuration is unsafe or inconsistent."
 fi
 
-if systemctl is-active --quiet minecraft.service 2>/dev/null; then
+if jv_trace_run systemctl is-active --quiet minecraft.service 2>/dev/null; then
     set +e
-    stop_output="$(/usr/libexec/justvoxel/mjust/web-status-json stop --confirm-players 2>/dev/null)"
+    stop_output="$(jv_trace_run /usr/libexec/justvoxel/mjust/web-status-json stop --confirm-players 2>/dev/null)"
     stop_rc=$?
     set -e
     if (( stop_rc != 0 )) || ! jq -e '.ok == true' <<<"${stop_output}" >/dev/null 2>&1; then
@@ -110,11 +113,14 @@ if systemctl is-active --quiet minecraft.service 2>/dev/null; then
     fi
 fi
 
+jv_trace_stage "RESET Removing runtime"
+
 # Quadlet/systemd removal can finish even when Podman reports a removal error.
 if ! jv_reset_remove_minecraft_container; then
     minecraft_reset_fail "container_cleanup_failed" "Minecraft container cleanup failed. Retry Reset Minecraft after reviewing the container state."
 fi
 
+jv_trace_stage "RESET Cleaning appliance state"
 if [[ ${data_action} == delete ]]; then
     if ! cleanup_error="$(jv_reset_delete_internal_data "${DATA_PATH}" "${BACKUP_PATH}" 2>&1)"; then
         minecraft_reset_fail "data_cleanup_failed" "Minecraft data cleanup failed: ${cleanup_error:-unknown cleanup error}"

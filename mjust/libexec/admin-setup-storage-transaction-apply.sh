@@ -12,10 +12,10 @@ _a53_prepare_transaction() {
         snapshot_credentials=true
     fi
 
-    install -d -m0700 -o root -g root "${A53_TRANSACTION_ROOT}" || return 1
+    jv_trace_run install -d -m0700 -o root -g root "${A53_TRANSACTION_ROOT}" || return 1
     A53_TX_DIR="${A53_TRANSACTION_ROOT}/${A53_OPERATION_ID}"
     [[ ! -e ${A53_TX_DIR} ]] || return 2
-    install -d -m0700 -o root -g root "${A53_TX_DIR}" || return 1
+    jv_trace_run install -d -m0700 -o root -g root "${A53_TX_DIR}" || return 1
     A53_MANIFEST="${A53_TX_DIR}/manifest.json"
     fstab_snapshot="${A53_TX_DIR}/fstab.before"
     if [[ -e ${A53_FSTAB} ]]; then
@@ -101,9 +101,9 @@ _a53_ensure_dir() {
     [[ -d ${current} ]] || return 1
     for (( i=${#missing[@]}-1; i>=0; i-- )); do
         if (( i == 0 )); then
-            install -d -m"${mode}" -o root -g root "${missing[$i]}" || return 1
+            jv_trace_run install -d -m"${mode}" -o root -g root "${missing[$i]}" || return 1
         else
-            install -d -m0755 -o root -g root "${missing[$i]}" || return 1
+            jv_trace_run install -d -m0755 -o root -g root "${missing[$i]}" || return 1
         fi
         _a53_record_created_dir "${missing[$i]}" || return 1
     done
@@ -115,11 +115,11 @@ _a53_write_local_fstab() {
     tmp="$(mktemp "$(dirname -- "${A53_FSTAB}")/.fstab.justvoxel-a53.XXXXXX")" || return 1
     awk -v mp="${mountpoint}" '/^[[:space:]]*#/ || NF < 2 || $2 != mp {print}' "${A53_FSTAB}" > "${tmp}" || { rm -f -- "${tmp}"; return 1; }
     printf 'UUID=%s %s %s noatime,nofail,x-systemd.device-timeout=10s 0 2\n' "${uuid}" "${mountpoint}" "${fstype}" >> "${tmp}" || { rm -f -- "${tmp}"; return 1; }
-    install -o root -g root -m0644 "${tmp}" "${A53_FSTAB}" || { rm -f -- "${tmp}"; return 1; }
+    jv_trace_run install -o root -g root -m0644 "${tmp}" "${A53_FSTAB}" || { rm -f -- "${tmp}"; return 1; }
     rm -f -- "${tmp}"
     A53_MUTATION_STARTED=true
     _a53_manifest_set_fstab_changed || return 1
-    systemctl daemon-reload >/dev/null 2>&1 || return 1
+    jv_trace_run systemctl daemon-reload >/dev/null 2>&1 || return 1
     _a53_evidence_set fstab_update ok
 }
 
@@ -129,11 +129,11 @@ _a54_write_network_fstab() {
     tmp="$(mktemp "$(dirname -- "${A53_FSTAB}")/.fstab.justvoxel-a54.XXXXXX")" || return 1
     awk -v mp="${mountpoint}" '/^[[:space:]]*#/ || NF < 2 || $2 != mp {print}' "${A53_FSTAB}" > "${tmp}" || { rm -f -- "${tmp}"; return 1; }
     printf '%s %s %s %s 0 0\n' "${source}" "${mountpoint}" "${fstype}" "${options}" >> "${tmp}" || { rm -f -- "${tmp}"; return 1; }
-    install -o root -g root -m0644 "${tmp}" "${A53_FSTAB}" || { rm -f -- "${tmp}"; return 1; }
+    jv_trace_run install -o root -g root -m0644 "${tmp}" "${A53_FSTAB}" || { rm -f -- "${tmp}"; return 1; }
     rm -f -- "${tmp}"
     A53_MUTATION_STARTED=true
     _a53_manifest_set_fstab_changed || return 1
-    systemctl daemon-reload >/dev/null 2>&1 || return 1
+    jv_trace_run systemctl daemon-reload >/dev/null 2>&1 || return 1
     _a53_evidence_set network_fstab_update ok
 }
 
@@ -191,9 +191,12 @@ _a54_mount_network_target() {
 
     local mount_output_file
     mount_output_file="$(mktemp "${A53_TX_DIR}/.mount-output.XXXXXX")" || return 1
+    jv_trace_command mount "${mountpoint}"
     mount "${mountpoint}" >"${mount_output_file}" 2>&1
     rc=$?
     output="$(cat -- "${mount_output_file}" 2>/dev/null || true)"
+    jv_trace_output "${output}"
+    jv_trace_result "${rc}"
     rm -f -- "${mount_output_file}"
     _a53_evidence_set_bounded backup_mount_output "${output}"
     if (( rc != 0 )); then
@@ -236,9 +239,12 @@ _a53_mount_target() {
     _a53_write_local_fstab "${expected_uuid}" "${mountpoint}" "${filesystem}" || return 1
     local mount_output_file
     mount_output_file="$(mktemp "${A53_TX_DIR}/.mount-output.XXXXXX")" || return 1
+    jv_trace_command mount "${mountpoint}"
     mount "${mountpoint}" >"${mount_output_file}" 2>&1
     rc=$?
     output="$(cat -- "${mount_output_file}" 2>/dev/null || true)"
+    jv_trace_output "${output}"
+    jv_trace_result "${rc}"
     rm -f -- "${mount_output_file}"
     _a53_evidence_set_bounded "${role}_mount_output" "${output}"
     if (( rc != 0 )); then
@@ -298,7 +304,7 @@ _a53_restore_fstab() {
     else
         rm -f -- "${A53_FSTAB}" || return 1
     fi
-    systemctl daemon-reload >/dev/null 2>&1 || return 1
+    jv_trace_run systemctl daemon-reload >/dev/null 2>&1 || return 1
     return 0
 }
 
@@ -312,7 +318,7 @@ _a54_restore_smb_credentials() {
     [[ ! -e ${A54_SMB_CREDENTIALS} || -f ${A54_SMB_CREDENTIALS} ]] || return 1
     if [[ ${A54_CREDENTIALS_EXISTED} == true ]]; then
         [[ -f ${snapshot} && ! -L ${snapshot} ]] || return 1
-        install -d -m0700 -o root -g root "$(dirname -- "${A54_SMB_CREDENTIALS}")" || return 1
+        jv_trace_run install -d -m0700 -o root -g root "$(dirname -- "${A54_SMB_CREDENTIALS}")" || return 1
         cat -- "${snapshot}" > "${A54_SMB_CREDENTIALS}" || return 1
         chmod "${A54_CREDENTIALS_MODE}" "${A54_SMB_CREDENTIALS}" || return 1
         chown "${A54_CREDENTIALS_UID}:${A54_CREDENTIALS_GID}" "${A54_SMB_CREDENTIALS}" || return 1
@@ -353,12 +359,13 @@ _a53_remove_created_empty_dirs() {
     for (( i=${#A53_DIRS_CREATED[@]}-1; i>=0; i-- )); do
         path="${A53_DIRS_CREATED[$i]}"
         if [[ -d ${path} ]]; then
-            rmdir -- "${path}" >/dev/null 2>&1 || true
+            jv_trace_run rmdir -- "${path}" >/dev/null 2>&1 || true
         fi
     done
 }
 
 _a53_rollback() {
+    jv_trace_stage "ROLLBACK Storage recovery"
     local mode="${1:-explicit}" failure=0 entry mountpoint uuid source current_uuid current_source path expected_after current_after
     _a53_manifest_set_rollback running rollback_in_progress >/dev/null 2>&1 || true
 
@@ -412,7 +419,7 @@ _a53_rollback() {
                 failure=1
                 continue
             fi
-            umount -- "${mountpoint}" >/dev/null 2>&1 || failure=1
+            jv_trace_run umount -- "${mountpoint}" >/dev/null 2>&1 || failure=1
         fi
     done
 
@@ -467,7 +474,7 @@ _a53_retire_obsolete_mounts() {
         if [[ ${was_mounted} == true ]]; then
             # Recheck immediately before disruption.
             jv_storage_identity_matches "${point}" "${source}" || return 1
-            umount -- "${point}" || return 1
+            jv_trace_run umount -- "${point}" || return 1
         fi
         jv_storage_remove_entry "${A53_FSTAB}" "${point}" || return 1
         _a53_manifest_set_fstab_changed || return 1
@@ -500,7 +507,7 @@ _a53_restore_retired_mounts() {
         if mountpoint -q -- "${point}"; then
             jv_storage_identity_matches "${point}" "${source}" || return 1
         else
-            mount "${point}" >/dev/null 2>&1 || return 1
+            jv_trace_run mount "${point}" >/dev/null 2>&1 || return 1
             jv_storage_identity_matches "${point}" "${source}" || return 1
         fi
     done < <(jq -c '.retired_mounts[]? | select(.was_mounted == true)' "${A53_MANIFEST}")

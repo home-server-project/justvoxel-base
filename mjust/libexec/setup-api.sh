@@ -77,9 +77,10 @@ jv_setup_diagnostic_start() {
 }
 
 jv_setup_diagnostic_event() {
-    local id="$1" event="$2" values="${3:-{}}" payload
+    local id="$1" event="$2" values="${3:-}" payload
+    [[ -n ${values} ]] || values="{}"
     [[ ${id} =~ ^[0-9a-f-]+$ ]] || return 0
-    payload="$(jq -cn --arg event "${event}" --argjson values "${values}" '{event:$event,values:$values}')" || return 0
+    payload="$(jq -cn --arg event "${event}" --argjson values "${values}" '{event:$event,values:$values}' 2>/dev/null)" || return 0
     printf '%s\n' "${payload}" | "${JV_SETUP_API_CLIENT}" POST "/v1/admin/setup/diagnostics/${id}/event" --data >/dev/null 2>&1 || true
 }
 

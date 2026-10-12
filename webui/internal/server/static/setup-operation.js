@@ -122,8 +122,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const elapsed = document.getElementById("setup-operation-elapsed");
 
   let consoleState = panel.dataset.initialState;
+  let consoleStage = panel.dataset.initialStage;
   diagnosticLogView?.addEventListener("click", () => window.JustVoxelLiveConsole.open({
-    kind: "setup", operationID: panel.dataset.operationId, state: consoleState,
+    kind: "setup", operationID: panel.dataset.operationId, state: consoleState, stage: consoleStage,
   }));
   dashboardLink?.addEventListener("click", () => window.JustVoxelLiveConsole.close());
 
@@ -211,7 +212,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const render = (operation) => {
     if (!operation) return;
     consoleState = operation.state;
-    window.JustVoxelLiveConsole.updateState(panel.dataset.operationId, operation.state);
+    consoleStage = operation.stage;
+    window.JustVoxelLiveConsole.updateState(panel.dataset.operationId, operation.state, operation.stage);
     failures = 0;
     if (reconnectNote) reconnectNote.hidden = true;
     if (statusText) statusText.textContent = operation.status || "Setup is running.";

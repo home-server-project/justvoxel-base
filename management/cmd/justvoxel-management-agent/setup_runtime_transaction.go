@@ -24,7 +24,13 @@ var (
 var runAdminSetupRuntimeTransactionHelper = func(ctx context.Context, action string, request []byte) ([]byte, []byte, error) {
 	cmd := exec.CommandContext(ctx, adminSetupRuntimeTransactionHelper, action)
 	cmd.Stdin = bytes.NewReader(request)
-	return captureSetupRuntimeTransactionOutput(cmd)
+	finish, err := attachOperationTrace(ctx, cmd)
+	if err != nil {
+		return nil, nil, err
+	}
+	output, stderr, err := captureSetupRuntimeTransactionOutput(cmd)
+	finish(err)
+	return output, stderr, err
 }
 
 // Drain stderr without retaining unlimited helper output in memory.
@@ -185,6 +191,7 @@ func runSetupRuntimeTransactionPayload(parent context.Context, action string, ti
 }
 
 func executeSetupTransaction(parent context.Context, store *operationStore, operationID string, plan *adminSetupNormalizedPlan, smbPassword []byte) error {
+	parent = withOperationTrace(parent, store, operationID)
 	if store == nil {
 		return errors.New("operation store is unavailable")
 	}
@@ -275,6 +282,7 @@ func executeSetupTransaction(parent context.Context, store *operationStore, oper
 }
 
 func failSetupAfterStorage(parent context.Context, store *operationStore, operationID string, plan *adminSetupNormalizedPlan, runtimeRequest setupRuntimeTransactionRequest, cause error) error {
+	parent = withOperationTrace(parent, store, operationID)
 	current, currentErr := store.get(operationID)
 	if currentErr != nil {
 		return cause

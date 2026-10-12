@@ -124,6 +124,7 @@ func (a *App) registerSystemWorkspaceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/system/workspace/reset/factory/resolve", a.systemWorkspaceFactoryResetResolve)
 	mux.HandleFunc("GET /api/system/workspace/reset/factory/current", a.systemWorkspaceFactoryResetCurrent)
 	mux.HandleFunc("GET /api/system/workspace/reset/operations/{id}", a.systemWorkspaceResetOperation)
+	mux.HandleFunc("GET /api/operations/{id}/trace", a.operationTrace)
 	mux.HandleFunc("GET /api/system/workspace/about", a.systemWorkspaceAbout)
 }
 

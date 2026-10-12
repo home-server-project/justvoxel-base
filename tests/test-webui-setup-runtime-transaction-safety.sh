@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "${repo_root}/mjust/libexec/operation-trace.sh"
 runtime_helper="${repo_root}/mjust/libexec/admin-setup-runtime-transaction-json"
 common="${repo_root}/mjust/libexec/common.sh"
 discovery="${repo_root}/mjust/libexec/admin-discovery-json"

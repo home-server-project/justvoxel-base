@@ -1,4 +1,6 @@
 #!/usr/bin/bash
+
+source "$(dirname -- "${BASH_SOURCE[0]}")/operation-trace.sh"
 set -uo pipefail
 
 source /usr/libexec/justvoxel/mjust/common.sh
@@ -190,8 +192,8 @@ _a55_validate_runtime_inputs() {
     for file in "${A55_RUNTIME_FILES[@]}"; do
         [[ ! -e ${file} ]] || return 1
     done
-    systemctl cat minecraft.service >/dev/null 2>&1 && return 1
-    systemctl cat minecraft-backup.timer >/dev/null 2>&1 && return 1
+    jv_trace_run systemctl cat minecraft.service >/dev/null 2>&1 && return 1
+    jv_trace_run systemctl cat minecraft-backup.timer >/dev/null 2>&1 && return 1
     [[ ! -e ${A55_SETUP_MARKER} ]] || return 1
     return 0
 }
@@ -260,25 +262,26 @@ _a55_record_initial_state() {
     if [[ -z ${first_entry} ]]; then
         data_identity="$(_a55_data_identity)" || data_identity=null
     fi
-    firewall-cmd --permanent --query-port="${JAVA_PORT}/tcp" >/dev/null 2>&1 && java_open=true
+    jv_trace_run firewall-cmd --permanent --query-port="${JAVA_PORT}/tcp" >/dev/null 2>&1 && java_open=true
     if [[ ${BEDROCK_ENABLED} == yes ]]; then
-        firewall-cmd --permanent --query-port="${BEDROCK_PORT}/udp" >/dev/null 2>&1 && bedrock_open=true
+        jv_trace_run firewall-cmd --permanent --query-port="${BEDROCK_PORT}/udp" >/dev/null 2>&1 && bedrock_open=true
     fi
     _a55_manifest_update ".runtime = {java_firewall_preexisting:${java_open},bedrock_firewall_preexisting:${bedrock_open},minecraft_started:false,timer_activated:false,marker:true,empty_data_identity:${data_identity}}" || return 1
 }
 
 _a55_apply_action() {
+    jv_trace_stage "RUNTIME Runtime configuration"
     _a55_load_values
     # Persist the complete non-secret request before the first runtime mutation.
     _a55_manifest_update ".runtime_request = ${A55_REQUEST}" || return 1
     _a55_record_initial_state || return 1
     install -d -m0700 -o root -g root "$(dirname -- "${A55_SETUP_MARKER}")" || return 1
     printf '%s %s\n' "${A55_OPERATION_ID}" "${A55_PLAN_FINGERPRINT}" > "${A55_SETUP_MARKER}" || return 1
-    chmod 0600 "${A55_SETUP_MARKER}" || return 1
+    jv_trace_run chmod 0600 "${A55_SETUP_MARKER}" || return 1
 
     if jq -e --arg p "${DATA_PATH}" '.directories_created | index($p) != null' "${A53_MANIFEST}" >/dev/null 2>&1; then
-        chown "${MINECRAFT_UID}:${MINECRAFT_GID}" "${DATA_PATH}" || return 1
-        chmod 0750 "${DATA_PATH}" || return 1
+        jv_trace_run chown "${MINECRAFT_UID}:${MINECRAFT_GID}" "${DATA_PATH}" || return 1
+        jv_trace_run chmod 0750 "${DATA_PATH}" || return 1
     fi
 
     write_main_config || return 1
@@ -286,13 +289,13 @@ _a55_apply_action() {
     render_runtime_files || return 1
     _a55_evidence_set runtime_files_rendered yes || return 1
 
-    firewall-cmd --permanent --add-port="${JAVA_PORT}/tcp" >/dev/null || return 1
+    jv_trace_run firewall-cmd --permanent --add-port="${JAVA_PORT}/tcp" >/dev/null || return 1
     _a55_evidence_set java_firewall_rule present || return 1
     if [[ ${BEDROCK_ENABLED} == yes ]]; then
-        firewall-cmd --permanent --add-port="${BEDROCK_PORT}/udp" >/dev/null || return 1
+        jv_trace_run firewall-cmd --permanent --add-port="${BEDROCK_PORT}/udp" >/dev/null || return 1
         _a55_evidence_set bedrock_firewall_rule present || return 1
     fi
-    firewall-cmd --reload >/dev/null || return 1
+    jv_trace_run firewall-cmd --reload >/dev/null || return 1
     _a55_evidence_set firewalld_reload ok || return 1
     _a55_json true true runtime_configured '' "${A55_EVIDENCE}"
 }
@@ -300,13 +303,14 @@ _a55_apply_action() {
 # First-run setup retains the full slow-start allowance but stops after three
 # automatic restarts since this start, rather than waiting out a crash loop.
 _a55_wait_for_rcon() {
+    jv_trace_stage "MINECRAFT Readiness"
     local timeout="$1" baseline="$2" elapsed=0 restarts
     while (( elapsed < timeout )); do
-        if podman exec minecraft rcon-cli list >/dev/null 2>&1 &&
-            systemctl is-active --quiet minecraft.service; then
+        if jv_trace_run podman exec minecraft rcon-cli list >/dev/null 2>&1 &&
+            jv_trace_run systemctl is-active --quiet minecraft.service; then
             return 0
         fi
-        restarts="$(systemctl show minecraft.service --property=NRestarts --value)" || return 1
+        restarts="$(jv_trace_run systemctl show minecraft.service --property=NRestarts --value)" || return 1
         [[ ${restarts} =~ ^[0-9]+$ ]] || return 1
         # A manual start can reset systemd's historical restart counter.
         if (( restarts < baseline )); then baseline=0; fi
@@ -323,20 +327,28 @@ _a55_wait_for_rcon() {
 }
 
 _a55_verify_action() {
+    jv_trace_stage "IMAGE Preparing Minecraft image"
     _a55_load_values
     local output rc rcon_started rcon_elapsed validation_output image restart_baseline
 
     image="$(minecraft_image_ref)" || return 1
+    jv_trace_command podman pull "${image}"
     output="$(podman pull "${image}" 2>&1)"
     rc=$?
+    jv_trace_output "${output}"
+    jv_trace_result "${rc}"
     _a55_evidence_set minecraft_image_pull "$([[ ${rc} -eq 0 ]] && printf ok || printf failed)" || return 1
     _a55_evidence_set_bounded minecraft_image_pull_output "${output}" || return 1
     (( rc == 0 )) || return 1
 
-    restart_baseline="$(systemctl show minecraft.service --property=NRestarts --value)" || return 1
+    jv_trace_stage "SERVICE Starting Minecraft"
+    restart_baseline="$(jv_trace_run systemctl show minecraft.service --property=NRestarts --value)" || return 1
     [[ ${restart_baseline} =~ ^[0-9]+$ ]] || return 1
+    jv_trace_command systemctl start minecraft.service
     output="$(systemctl start minecraft.service 2>&1)"
     rc=$?
+    jv_trace_output "${output}"
+    jv_trace_result "${rc}"
     if (( rc != 0 )); then
         _a55_evidence_set systemctl_start_result failed || return 1
         _a55_evidence_set_bounded systemctl_start_output "${output}" || return 1
@@ -360,25 +372,36 @@ _a55_verify_action() {
     if [[ ${BEDROCK_ENABLED} == yes ]]; then
         output="$(configure_geyser_floodgate 2>&1)"
         rc=$?
+        jv_trace_output "${output:-}"
         _a55_evidence_set geyser_floodgate_config "$([[ ${rc} -eq 0 ]] && printf ok || printf failed)" || return 1
         _a55_evidence_set_bounded geyser_floodgate_output "${output}" || return 1
         (( rc == 0 )) || return 1
 
+        jv_trace_command podman exec minecraft rcon-cli 'geyser version'
         output="$(podman exec minecraft rcon-cli 'geyser version' 2>&1)"
         rc=$?
+        jv_trace_output "${output}"
+        jv_trace_result "${rc}"
         _a55_evidence_set geyser_version_check "$([[ ${rc} -eq 0 ]] && printf ok || printf failed)" || return 1
         _a55_evidence_set_bounded geyser_version_output "${output}" || return 1
         (( rc == 0 )) || return 1
     fi
 
+    jv_trace_stage "VERIFY Minecraft stack"
+    jv_trace_command /usr/libexec/justvoxel/mjust/verify-minecraft-stack "${MINECRAFT_VERSION}"
     output="$(/usr/libexec/justvoxel/mjust/verify-minecraft-stack "${MINECRAFT_VERSION}" 2>&1)"
     rc=$?
+    jv_trace_output "${output}"
+    jv_trace_result "${rc}"
     _a55_evidence_set minecraft_version_check "$([[ ${rc} -eq 0 ]] && printf ok || printf failed)" || return 1
     _a55_evidence_set_bounded minecraft_version_output "${output}" || return 1
     (( rc == 0 )) || return 1
 
+    jv_trace_command /usr/libexec/justvoxel/mjust/validate-backend --first-run
     validation_output="$(/usr/libexec/justvoxel/mjust/validate-backend --first-run 2>&1)"
     rc=$?
+    jv_trace_output "${validation_output}"
+    jv_trace_result "${rc}"
     _a55_evidence_set final_validation "$([[ ${rc} -eq 0 ]] && printf passed || printf failed)" || return 1
     _a55_evidence_set_bounded final_validation_output "${validation_output}" || return 1
     (( rc == 0 )) || return 1
@@ -387,6 +410,7 @@ _a55_verify_action() {
 }
 
 _a55_rollback_action() {
+    jv_trace_stage "ROLLBACK Runtime recovery"
     _a55_load_values
     # A durable completed rollback survives interruption before the storage stage.
     # Do not erase anything again after this transaction's runtime was restored.
@@ -411,13 +435,13 @@ _a55_rollback_action() {
         return 0
     fi
 
-    systemctl disable --now minecraft-backup.timer >/dev/null 2>&1 || true
-    if systemctl is-active --quiet minecraft-backup.timer 2>/dev/null; then failure=1; reason='The backup timer is still active; setup data was preserved.'; fi
-    if ! systemctl stop minecraft.service >/dev/null 2>&1; then
+    jv_trace_run systemctl disable --now minecraft-backup.timer >/dev/null 2>&1 || true
+    if jv_trace_run systemctl is-active --quiet minecraft-backup.timer 2>/dev/null; then failure=1; reason='The backup timer is still active; setup data was preserved.'; fi
+    if ! jv_trace_run systemctl stop minecraft.service >/dev/null 2>&1; then
         # A prior rollback may already have removed the generated unit.
-        [[ $(systemctl show -p LoadState --value minecraft.service 2>/dev/null) == not-found ]] || failure=1
+        [[ $(jv_trace_run systemctl show -p LoadState --value minecraft.service 2>/dev/null) == not-found ]] || failure=1
     fi
-    if systemctl is-active --quiet minecraft.service 2>/dev/null; then
+    if jv_trace_run systemctl is-active --quiet minecraft.service 2>/dev/null; then
         failure=1
         reason='Minecraft is still active; setup data was preserved.'
     elif (( failure == 0 )); then
@@ -429,17 +453,17 @@ _a55_rollback_action() {
     fi
 
     rm -f -- "${JV_QUADLET}" "${JV_MC_ENV}" "${JV_BACKUP_ENV}" "${JV_BACKUP_SERVICE}" "${JV_BACKUP_TIMER}" "${JV_CONFIG}" || failure=1
-    systemctl daemon-reload >/dev/null 2>&1 || failure=1
+    jv_trace_run systemctl daemon-reload >/dev/null 2>&1 || failure=1
 
     if [[ ${java_pre} != true ]]; then
-        firewall-cmd --permanent --remove-port="${JAVA_PORT}/tcp" >/dev/null 2>&1 || true
-        firewall-cmd --permanent --query-port="${JAVA_PORT}/tcp" >/dev/null 2>&1 && failure=1
+        jv_trace_run firewall-cmd --permanent --remove-port="${JAVA_PORT}/tcp" >/dev/null 2>&1 || true
+        jv_trace_run firewall-cmd --permanent --query-port="${JAVA_PORT}/tcp" >/dev/null 2>&1 && failure=1
     fi
     if [[ ${BEDROCK_ENABLED} == yes && ${bedrock_pre} != true ]]; then
-        firewall-cmd --permanent --remove-port="${BEDROCK_PORT}/udp" >/dev/null 2>&1 || true
-        firewall-cmd --permanent --query-port="${BEDROCK_PORT}/udp" >/dev/null 2>&1 && failure=1
+        jv_trace_run firewall-cmd --permanent --remove-port="${BEDROCK_PORT}/udp" >/dev/null 2>&1 || true
+        jv_trace_run firewall-cmd --permanent --query-port="${BEDROCK_PORT}/udp" >/dev/null 2>&1 && failure=1
     fi
-    firewall-cmd --reload >/dev/null 2>&1 || failure=1
+    jv_trace_run firewall-cmd --reload >/dev/null 2>&1 || failure=1
 
     rm -f -- "${A55_SETUP_MARKER}" || failure=1
     if (( failure != 0 )); then
@@ -454,9 +478,10 @@ _a55_rollback_action() {
 }
 
 _a55_commit_action() {
+    jv_trace_stage "VERIFY Commit configured state"
     _a55_load_values
     [[ -f ${JV_CONFIG} && -f ${JV_QUADLET} && -f ${A55_SETUP_MARKER} ]] || { _a55_json false false runtime_commit 'Runtime configuration is incomplete.'; return 0; }
-    systemctl is-active --quiet minecraft.service || { _a55_json false false runtime_commit 'Minecraft is not active.'; return 0; }
+    jv_trace_run systemctl is-active --quiet minecraft.service || { _a55_json false false runtime_commit 'Minecraft is not active.'; return 0; }
 
     # The timer may immediately catch up on a missed run. Keep setup protected
     # by its marker and the existing maintenance lock until commit finishes.
@@ -472,6 +497,7 @@ _a55_commit_action() {
     else
         rc=$?
     fi
+    jv_trace_output "${output}"
     _a55_evidence_set backup_timer_activation "$([[ ${rc} -eq 0 ]] && printf ok || printf failed)" || return 1
     _a55_evidence_set_bounded backup_timer_output "${output}" || return 1
     if (( rc != 0 )); then
@@ -505,14 +531,14 @@ _a55_legacy_recovery_request() {
 
 _a55_legacy_unit_clean() {
     local unit="$1" state pid cgroup events path
-    state="$(systemctl show --property=ActiveState --value "${unit}")" || return 1
+    state="$(jv_trace_run systemctl show --property=ActiveState --value "${unit}")" || return 1
     case "${state}" in inactive|failed) ;; *) return 1 ;; esac
     if [[ ${unit} != *.timer ]]; then
         for pid in MainPID ControlPID; do
-            [[ $(systemctl show --property="${pid}" --value "${unit}") == 0 ]] || return 1
+            [[ $(jv_trace_run systemctl show --property="${pid}" --value "${unit}") == 0 ]] || return 1
         done
     fi
-    cgroup="$(systemctl show --property=ControlGroup --value "${unit}")" || return 1
+    cgroup="$(jv_trace_run systemctl show --property=ControlGroup --value "${unit}")" || return 1
     # Also inspect the known unit cgroup when systemd has forgotten the unit.
     for path in "/system.slice/${unit}" "${cgroup}"; do
         [[ -n ${path} ]] || continue
@@ -625,7 +651,7 @@ _a55_legacy_recover_action() {
             return 0
         fi
     done
-    if podman container exists minecraft >/dev/null 2>&1; then rc=0; else rc=$?; fi
+    if jv_trace_run podman container exists minecraft >/dev/null 2>&1; then rc=0; else rc=$?; fi
     if [[ ${rc} != 1 ]]; then
         _a55_json false false runtime_rollback 'The Minecraft container remains or its absence could not be verified.'
         return 0

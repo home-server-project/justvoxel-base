@@ -38,6 +38,20 @@ func TestWorkspaceHeaderControls(t *testing.T) {
 	if closes["system-monitor"] == "" {
 		t.Error("system monitor lost its close control")
 	}
+	app, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := strings.Split(strings.Split(string(app), "window.JustVoxelLiveConsole = (() => {")[1], "\n})();")[0]
+	for _, required := range []string{"workspace-header-close", `createElementNS("http://www.w3.org/2000/svg", "svg")`, `svg.setAttribute("viewBox", "0 0 24 24")`, `svg.setAttribute("stroke", "currentColor")`, `path.setAttribute("d", "M5 5l14 14M19 5L5 19")`, `dismiss.setAttribute("aria-label", "Close Live Console")`} {
+		if !strings.Contains(live, required) {
+			t.Errorf("Live Console shared SVG close contract missing %s", required)
+		}
+	}
+	if strings.Contains(live, "×") || strings.Contains(live, "&times;") {
+		t.Error("Live Console must not use a literal close glyph")
+	}
+
 	controlCenter := regexp.MustCompile(`(?s)<summary class="control-center-trigger"[^>]*>(.*?)</summary>`).FindStringSubmatch(string(header))
 	if len(controlCenter) != 2 || !strings.Contains(controlCenter[1], `<svg class="control-center-icon"`) || !strings.Contains(controlCenter[1], `aria-hidden="true"`) || !strings.Contains(controlCenter[1], `Control Center`) || strings.Contains(controlCenter[1], "⚙") {
 		t.Error("Control Center must retain its label and use an accessible SVG gear")

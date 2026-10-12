@@ -546,8 +546,8 @@ server_version_channel() {
 
 render_runtime_files() {
     require_config
-    install -d -m0700 -o root -g root "${JV_CONFIG_DIR}"
-    install -d -m0755 -o root -g root /etc/containers/systemd
+    if declare -F jv_trace_run >/dev/null; then jv_trace_run install -d -m0700 -o root -g root "${JV_CONFIG_DIR}"; else install -d -m0700 -o root -g root "${JV_CONFIG_DIR}"; fi
+    if declare -F jv_trace_run >/dev/null; then jv_trace_run install -d -m0755 -o root -g root /etc/containers/systemd; else install -d -m0755 -o root -g root /etc/containers/systemd; fi
 
     local rcon_password env_tmp quadlet_tmp backup_tmp service_tmp timer_tmp image_ref runtime_version paper_channel build_channel
     if [[ ${JUSTVOXEL_REGENERATE_RCON:-0} == 1 ]]; then
@@ -596,7 +596,7 @@ render_runtime_files() {
     replace_token "${env_tmp}" PLUGINS_LINE '# Cross-play binaries are managed by JustVoxel.'
     if [[ ${MINECRAFT_SERVER_TYPE} != paper ]]; then sed -i '/^PAPER_CHANNEL=/d' "${env_tmp}"; fi
     if ! server_supports_plugins; then sed -i '/^MODRINTH_PROJECTS=/d' "${env_tmp}"; fi
-    install -o root -g root -m0600 "${env_tmp}" "${JV_MC_ENV}"
+    if declare -F jv_trace_run >/dev/null; then jv_trace_run install -o root -g root -m0600 "${env_tmp}" "${JV_MC_ENV}"; else install -o root -g root -m0600 "${env_tmp}" "${JV_MC_ENV}"; fi
     rm -f "${env_tmp}"
 
     image_ref="$(minecraft_image_ref)"
@@ -614,7 +614,7 @@ render_runtime_files() {
     else
         replace_token "${quadlet_tmp}" BEDROCK_PUBLISH_PORT '# Bedrock port disabled.'
     fi
-    install -o root -g root -m0644 "${quadlet_tmp}" "${JV_QUADLET}"
+    if declare -F jv_trace_run >/dev/null; then jv_trace_run install -o root -g root -m0644 "${quadlet_tmp}" "${JV_QUADLET}"; else install -o root -g root -m0644 "${quadlet_tmp}" "${JV_QUADLET}"; fi
     rm -f "${quadlet_tmp}"
 
     backup_tmp="$(mktemp "${JV_CONFIG_DIR}/.minecraft-backup.env.XXXXXX")"
@@ -625,7 +625,7 @@ render_runtime_files() {
     replace_token "${backup_tmp}" BACKUP_MOUNT_POINT "${BACKUP_MOUNT_POINT}"
     replace_token "${backup_tmp}" BACKUP_EXPECTED_UUID "${BACKUP_EXPECTED_UUID}"
     replace_token "${backup_tmp}" BACKUP_EXPECTED_SOURCE "${BACKUP_EXPECTED_SOURCE}"
-    install -o root -g root -m0600 "${backup_tmp}" "${JV_BACKUP_ENV}"
+    if declare -F jv_trace_run >/dev/null; then jv_trace_run install -o root -g root -m0600 "${backup_tmp}" "${JV_BACKUP_ENV}"; else install -o root -g root -m0600 "${backup_tmp}" "${JV_BACKUP_ENV}"; fi
     rm -f "${backup_tmp}"
 
     service_tmp="$(mktemp /etc/systemd/system/.minecraft-backup.service.XXXXXX)"
@@ -636,24 +636,24 @@ render_runtime_files() {
     else
         replace_token "${service_tmp}" BACKUP_REQUIREMENT_PATH "${BACKUP_PATH}"
     fi
-    install -o root -g root -m0644 "${service_tmp}" "${JV_BACKUP_SERVICE}"
+    if declare -F jv_trace_run >/dev/null; then jv_trace_run install -o root -g root -m0644 "${service_tmp}" "${JV_BACKUP_SERVICE}"; else install -o root -g root -m0644 "${service_tmp}" "${JV_BACKUP_SERVICE}"; fi
     rm -f "${service_tmp}"
 
     timer_tmp="$(mktemp /etc/systemd/system/.minecraft-backup.timer.XXXXXX)"
     cp "${JV_TEMPLATE_ROOT}/systemd/minecraft-backup.timer.in" "${timer_tmp}"
     replace_token "${timer_tmp}" BACKUP_SCHEDULE "${BACKUP_SCHEDULE}"
-    install -o root -g root -m0644 "${timer_tmp}" "${JV_BACKUP_TIMER}"
+    if declare -F jv_trace_run >/dev/null; then jv_trace_run install -o root -g root -m0644 "${timer_tmp}" "${JV_BACKUP_TIMER}"; else install -o root -g root -m0644 "${timer_tmp}" "${JV_BACKUP_TIMER}"; fi
     rm -f "${timer_tmp}"
 
-    systemctl daemon-reload
+    if declare -F jv_trace_run >/dev/null; then jv_trace_run systemctl daemon-reload; else systemctl daemon-reload; fi
 }
 
 activate_backup_timer() {
     if [[ ${BACKUP_TIMER_ENABLED} == yes ]]; then
-        systemctl enable minecraft-backup.timer >/dev/null
-        systemctl restart minecraft-backup.timer
+        if declare -F jv_trace_run >/dev/null; then jv_trace_run systemctl enable minecraft-backup.timer >/dev/null; else systemctl enable minecraft-backup.timer >/dev/null; fi
+        if declare -F jv_trace_run >/dev/null; then jv_trace_run systemctl restart minecraft-backup.timer; else systemctl restart minecraft-backup.timer; fi
     else
-        systemctl disable --now minecraft-backup.timer 2>/dev/null || true
+        if declare -F jv_trace_run >/dev/null; then jv_trace_run systemctl disable --now minecraft-backup.timer 2>/dev/null || true; else systemctl disable --now minecraft-backup.timer 2>/dev/null || true; fi
     fi
 }
 

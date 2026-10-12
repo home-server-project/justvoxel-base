@@ -1,6 +1,9 @@
 #!/usr/bin/bash
 set -euo pipefail
 source /usr/libexec/justvoxel/mjust/common.sh
+if [[ ${JV_OPERATION_TRACE_FD:-} == 3 ]]; then
+    source "$(dirname -- "${BASH_SOURCE[0]}")/operation-trace.sh"
+fi
 source /usr/libexec/justvoxel/mjust/interrupt-safety.sh
 source /usr/libexec/justvoxel/mjust/status-lib.sh
 

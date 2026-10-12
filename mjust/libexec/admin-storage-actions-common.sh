@@ -52,11 +52,19 @@ storage_action_host_mountpoint_occupied() {
 }
 
 storage_action_host_unmount() {
-    nsenter --mount=/proc/1/ns/mnt -- umount -- "$1"
+    if declare -F jv_trace_run >/dev/null; then
+        jv_trace_run nsenter --mount=/proc/1/ns/mnt -- umount -- "$1"
+    else
+        nsenter --mount=/proc/1/ns/mnt -- umount -- "$1"
+    fi
 }
 
 storage_action_host_mount() {
-    nsenter --mount=/proc/1/ns/mnt -- mount -- "$1"
+    if declare -F jv_trace_run >/dev/null; then
+        jv_trace_run nsenter --mount=/proc/1/ns/mnt -- mount -- "$1"
+    else
+        nsenter --mount=/proc/1/ns/mnt -- mount -- "$1"
+    fi
 }
 
 storage_action_host_mount_identity() {

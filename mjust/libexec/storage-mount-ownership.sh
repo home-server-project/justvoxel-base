@@ -262,12 +262,12 @@ storage_mount_retire_record() {
     fi
     if [[ $(storage_mount_point_state "${point}") == unmounted ]] && storage_mount_verify_record "${uuid}" &&
        { if [[ -n ${device} ]]; then storage_mount_unique_device "${uuid}" "${device}"; else storage_mount_uuid_absent "${uuid}"; fi; } &&
-       storage_mount_remove_fstab_line "${line}" && rm -f -- "${state}" && systemctl daemon-reload; then
+       storage_mount_remove_fstab_line "${line}" && rm -f -- "${state}" && { if declare -F jv_trace_run >/dev/null; then jv_trace_run systemctl daemon-reload; else systemctl daemon-reload; fi; }; then
         rm -rf -- "${snapshot}"; return 0
     fi
     cp -a -- "${snapshot}/fstab" "${STORAGE_MOUNT_FSTAB}" || ok=false
     cp -a -- "${snapshot}/state" "${state}" || ok=false
-    systemctl daemon-reload || ok=false
+    if declare -F jv_trace_run >/dev/null; then jv_trace_run systemctl daemon-reload || ok=false; else systemctl daemon-reload || ok=false; fi
     [[ ${was_mounted} == false ]] || storage_action_host_mount "${point}" || ok=false
     if [[ ${ok} == true ]]; then rm -rf -- "${snapshot}"; else
         echo "Permanent-mount rollback incomplete; evidence preserved at ${snapshot}." >&2
