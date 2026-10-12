@@ -622,3 +622,69 @@ func TestPluginInventoryExposesOnlyVerifiedManifestIdentity(t *testing.T) {
 		})
 	}
 }
+
+func TestPluginDiscoverBoundedTopUpRawCursor(t *testing.T) {
+	for _, exhausted := range []bool{false, true} {
+		t.Run(strconv.FormatBool(exhausted), func(t *testing.T) {
+			oldDiscovery, oldRuntime, oldClient := runAdminDiscoveryHelper, runPluginRuntimeStatus, pluginCatalogClient
+			t.Cleanup(func() {
+				runAdminDiscoveryHelper, runPluginRuntimeStatus, pluginCatalogClient = oldDiscovery, oldRuntime, oldClient
+			})
+			runAdminDiscoveryHelper = func(context.Context, string) ([]byte, error) {
+				return []byte(`{"configured":true,"minecraft":{"server_type":"paper","data_path":"/unused"}}`), nil
+			}
+			runPluginRuntimeStatus = func(context.Context) ([]byte, error) {
+				return []byte(`{"minecraft":{"server_type":"paper","version":"26.2"}}`), nil
+			}
+			searches, inspected := 0, 0
+			pluginCatalogClient = &http.Client{Transport: pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+				var payload any
+				if r.URL.Path == "/v2/search" {
+					searches++
+					offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+					limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+					hits := []pluginCatalogProject{}
+					for i := offset; i < offset+limit; i++ {
+						hits = append(hits, pluginCatalogProject{ID: "project" + strconv.Itoa(i), Name: "Example"})
+					}
+					payload = map[string]any{"hits": hits, "total_hits": 100}
+				} else {
+					inspected++
+					id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v2/project/"), "/version")
+					versions := []pluginCatalogVersion{}
+					if !exhausted && id != "project0" {
+						versions = append(versions, pluginCatalogVersion{ID: "release" + id, ProjectID: id, Number: "1", Type: "release", Loaders: []string{"paper"}, GameVersions: []string{"26.2"}})
+					}
+					payload = versions
+				}
+				raw, err := json.Marshal(payload)
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(raw))}, err
+			})}
+			s := surfaceTestServer(t, roleAdministrator)
+			rr := httptest.NewRecorder()
+			s.adminPluginsDiscover(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/discover?limit=12", ""))
+			var out pluginCatalog
+			if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &out) != nil {
+				t.Fatalf("catalog: %d %s", rr.Code, rr.Body.String())
+			}
+			if out.Total != 100 {
+				t.Fatal("authoritative total lost")
+			}
+			if exhausted {
+				if inspected != 36 || searches != 3 || len(out.Projects) != 0 || out.NextOffset != 36 {
+					t.Fatalf("unbounded scan: searches=%d inspected=%d out=%+v", searches, inspected, out)
+				}
+			} else {
+				if len(out.Projects) != 12 || out.NextOffset != 13 || inspected != 13 || searches != 2 {
+					t.Fatalf("sparse page or incorrect raw cursor: searches=%d inspected=%d out=%+v", searches, inspected, out)
+				}
+				// The unused hits in the second fetched batch must be the next page.
+				rr = httptest.NewRecorder()
+				s.adminPluginsDiscover(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/discover?limit=12&offset=13", ""))
+				if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &out) != nil || len(out.Projects) != 12 || out.Projects[0].ID != "project13" || out.NextOffset != 25 {
+					t.Fatal("unconsumed hits skipped or duplicated", rr.Body.String())
+				}
+			}
+		})
+	}
+}

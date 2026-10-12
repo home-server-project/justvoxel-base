@@ -113,7 +113,13 @@ func newPluginInstallFixture(t *testing.T) *pluginInstallFixture {
 			payload = versions
 		} else if strings.HasPrefix(path, "project/") {
 			id := strings.TrimPrefix(path, "project/")
-			payload = map[string]string{"id": id, "slug": f.slugs[id], "title": id, "description": "Publisher <script>description</script>"}
+			loaders := []string{}
+			for _, version := range f.versions {
+				if version.ProjectID == id {
+					loaders = append(loaders, version.Loaders...)
+				}
+			}
+			payload = map[string]any{"id": id, "slug": f.slugs[id], "title": id, "description": "Publisher <script>description</script>", "loaders": loaders}
 		} else {
 			t.Fatalf("unexpected API request %s", path)
 		}
@@ -2028,5 +2034,159 @@ func TestPluginInstallCanonicalManagedDependencies(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// Umask is process-global: this regression must never run in parallel.
+func TestPluginPlacementReadableWithRestrictiveUmask(t *testing.T) {
+	unit, err := os.ReadFile("../../../system_files/usr/lib/systemd/system/justvoxel-management.service")
+	if err != nil || !strings.Contains(string(unit), "UMask=0007") {
+		t.Fatal("restrictive Agent umask changed", err)
+	}
+	f := newPluginInstallFixture(t)
+	artifact := f.plan(t).Artifacts[0]
+	staging := t.TempDir()
+	if err := os.WriteFile(filepath.Join(staging, artifact.Filename), f.jars[artifact.Filename], 0600); err != nil {
+		t.Fatal(err)
+	}
+	root, err := openPluginDirectory(f.data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	previous := unix.Umask(0007)
+	defer unix.Umask(previous)
+	placed, err := placePluginArtifact(root, staging, "readability", artifact)
+	if err != nil || !placed {
+		t.Fatalf("placement: %v %v", placed, err)
+	}
+	path := filepath.Join(f.data, "plugins", artifact.Filename)
+	stat, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stat.Mode().Perm() != 0644 {
+		t.Fatalf("published mode: %o", stat.Mode().Perm())
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(raw, f.jars[artifact.Filename]) {
+		t.Fatal("published content changed", err)
+	}
+	hash, err := hashPluginAt(root, artifact.Filename)
+	if err != nil || hash != artifact.SHA512 {
+		t.Fatal("published hash changed", err)
+	}
+}
+
+func TestPluginPlanDirectArtifactReview(t *testing.T) {
+	for _, valid := range []bool{true, false} {
+		t.Run(strconv.FormatBool(valid), func(t *testing.T) {
+			f := newPluginInstallFixture(t)
+			reviewTemp := t.TempDir()
+			t.Setenv("TMPDIR", reviewTemp)
+			if !valid {
+				path := filepath.Join(t.TempDir(), "slumber.jar")
+				pluginTestJar(t, path, map[string]string{"paper-plugin.yml": "", "fabric.mod.json": `{ "id": "slumber" }`, "META-INF/mods.toml": "modLoader=javafml", "META-INF/neoforge.mods.toml": "modLoader=javafml"})
+				raw, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				version := f.versions["release"]
+				sum := sha512.Sum512(raw)
+				version.Files[0].Size = int64(len(raw))
+				version.Files[0].Hashes.SHA512 = hex.EncodeToString(sum[:])
+				f.versions["release"] = version
+				f.jars["root.jar"] = raw
+			}
+			rr := httptest.NewRecorder()
+			f.s.adminPluginInstallPlan(rr, surfaceRequest(http.MethodPost, "/v1/admin/plugins/install/plan", `{"project_id":"root","version_id":"release"}`))
+			if valid && rr.Code != http.StatusOK {
+				t.Fatalf("valid review: %d %s", rr.Code, rr.Body.String())
+			}
+			if !valid && (rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), pluginDirectReviewRejection)) {
+				t.Fatalf("invalid review: %d %s", rr.Code, rr.Body.String())
+			}
+			temporary, err := os.ReadDir(reviewTemp)
+			if err != nil || len(temporary) != 0 {
+				t.Fatal("review staging was not removed", err)
+			}
+			operation, err := f.s.operations.currentPluginInstall()
+			if err != nil || operation != nil {
+				t.Fatal("review started operation", err)
+			}
+			if len(f.commands) != 0 || f.backup {
+				t.Fatal("review mutated Minecraft", f.commands)
+			}
+			entries, err := os.ReadDir(filepath.Join(f.data, "plugins"))
+			if err != nil || len(entries) != 0 {
+				t.Fatal("review placed files", err)
+			}
+			if _, err := os.Stat(filepath.Join(f.data, ".justvoxel")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("review created ownership evidence")
+			}
+		})
+	}
+}
+
+func TestPluginRequiredDependencyLoaderScoping(t *testing.T) {
+	for _, exact := range []bool{false, true} {
+		t.Run(strconv.FormatBool(exact), func(t *testing.T) {
+			f := newPluginInstallFixture(t)
+			f.addJar(t, "fabricapi", "fabricrelease", "fabric-api.jar", "FabricAPI", "fabric.API")
+			fabric := f.versions["fabricrelease"]
+			fabric.Loaders = []string{"fabric"}
+			f.versions["fabricrelease"] = fabric
+			dependency := pluginDependency{ProjectID: "fabricapi", Type: "required"}
+			if exact {
+				dependency.VersionID = "fabricrelease"
+			}
+			root := f.versions["release"]
+			root.Loaders = []string{"bukkit", "fabric", "paper", "purpur", "quilt", "spigot"}
+			root.Dependencies = []pluginDependency{dependency, {ProjectID: "modmenu", Type: "optional"}, {ProjectID: "yacl", Type: "optional"}}
+			f.versions["release"] = root
+			plan := f.plan(t)
+			if len(plan.Artifacts) != 1 || !plan.Artifacts[0].Requested {
+				t.Fatal("cross-loader dependency installed", plan.Artifacts)
+			}
+			if !slices.Contains(plan.DisplayDependencies, dependency) || len(plan.DisplayDependencies) != 3 {
+				t.Fatal("publisher metadata lost", plan.DisplayDependencies)
+			}
+			if err := reviewRootPluginArtifact(context.Background(), plan); err != nil {
+				t.Fatal("Paper root review rejected", err)
+			}
+		})
+	}
+}
+
+func TestPluginRequiredDependencyNoCompatibleReleaseAndIdentityMismatch(t *testing.T) {
+	for _, corrupt := range []bool{false, true} {
+		t.Run(strconv.FormatBool(corrupt), func(t *testing.T) {
+			f := newPluginInstallFixture(t)
+			f.addJar(t, "dependency", "dependencyrelease", "dependency.jar", "Dependency", "example.Dependency")
+			root := f.versions["release"]
+			dependency := pluginDependency{ProjectID: "dependency", Type: "required"}
+			if corrupt {
+				dependency.VersionID = "dependencyrelease"
+			}
+			root.Dependencies = []pluginDependency{dependency}
+			f.versions["release"] = root
+			version := f.versions["dependencyrelease"]
+			if corrupt {
+				version.ProjectID = "wrong"
+			} else {
+				version.GameVersions = []string{"1.20"}
+			}
+			f.versions["dependencyrelease"] = version
+			_, err := resolvePluginInstallPlan(context.Background(), pluginServerContext{Supported: true, ServerType: "paper", MinecraftVersion: "1.21.8"}, f.data, "root", "release")
+			if err == nil {
+				t.Fatal("unsafe dependency plan accepted")
+			}
+			if corrupt && !strings.Contains(err.Error(), "identity mismatch") {
+				t.Fatal("identity corruption misreported", err)
+			}
+			if !corrupt && (!strings.Contains(err.Error(), "Required dependency dependency has no compatible Paper release for Minecraft 1.21.8") || strings.Contains(err.Error(), "project mismatch")) {
+				t.Fatal("compatibility failure misreported", err)
+			}
+		})
 	}
 }

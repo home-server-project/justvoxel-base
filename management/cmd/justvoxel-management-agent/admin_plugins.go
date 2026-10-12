@@ -535,82 +535,97 @@ func (s *server) adminPluginsDiscover(w http.ResponseWriter, r *http.Request) {
 		facets = append(facets, []string{"categories:paper", "categories:purpur", "categories:spigot", "categories:bukkit"})
 	}
 	encoded, _ := json.Marshal(facets)
-	var search struct {
-		Hits  []pluginCatalogProject `json:"hits"`
-		Total *int                   `json:"total_hits"`
-	}
-	if err := modrinthPluginJSON(ctx, "/search", url.Values{"query": {r.URL.Query().Get("q")}, "facets": {string(encoded)}, "limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(offset)}}, &search); err != nil {
-		writeError(w, http.StatusBadGateway, "Modrinth catalog is unavailable. Try again later.")
-		return
-	}
-	if search.Hits == nil || search.Total == nil || len(search.Hits) > limit || *search.Total < 0 {
-		writeError(w, http.StatusBadGateway, "Modrinth catalog is unavailable. Try again later.")
-		return
-	}
-	out.Total = *search.Total
-	if len(search.Hits) > 0 && offset+len(search.Hits) < out.Total && offset+len(search.Hits) <= 10000 {
-		out.NextOffset = offset + len(search.Hits)
-	}
-	for _, project := range search.Hits {
-		if !modrinthPluginID.MatchString(project.ID) {
-			continue
+	cursor, scanned := offset, 0
+	for len(out.Projects) < limit && scanned < 3*limit && cursor <= 10000 {
+		var search struct {
+			Hits  []pluginCatalogProject `json:"hits"`
+			Total *int                   `json:"total_hits"`
 		}
-		project.Version = nil
-		project.InstallAvailable = false
-		project.Compatible = false
-		project.MetadataError = ""
-		project.Source = "Modrinth"
-		project.Compatibility = "Compatibility unknown"
-		query := url.Values{"include_changelog": {"false"}}
-		if compatible {
-			games, _ := json.Marshal([]string{server.MinecraftVersion})
-			platforms, _ := json.Marshal(loaders)
-			query.Set("game_versions", string(games))
-			query.Set("loaders", string(platforms))
+		batchLimit := min(limit, 3*limit-scanned)
+		if err := modrinthPluginJSON(ctx, "/search", url.Values{"query": {r.URL.Query().Get("q")}, "facets": {string(encoded)}, "limit": {strconv.Itoa(batchLimit)}, "offset": {strconv.Itoa(cursor)}}, &search); err != nil {
+			writeError(w, http.StatusBadGateway, "Modrinth catalog is unavailable. Try again later.")
+			return
 		}
-		var versions []pluginCatalogVersion
-		if err := modrinthPluginJSON(ctx, "/project/"+project.ID+"/version", query, &versions); err != nil {
-			project.MetadataError = "Release and dependency metadata unavailable"
-			out.Projects = append(out.Projects, project)
-			continue
+		if search.Hits == nil || search.Total == nil || len(search.Hits) > batchLimit || *search.Total < 0 {
+			writeError(w, http.StatusBadGateway, "Modrinth catalog is unavailable. Try again later.")
+			return
 		}
-		sort.SliceStable(versions, func(i, j int) bool { return versions[i].Published > versions[j].Published })
-		for _, v := range versions {
-			if release && v.Type != "release" {
-				continue
-			}
-			// Always restrict selected versions to server plugin platforms, including
-			// when browsing beyond the active server's compatibility filter.
-			plugin := false
-			for _, loader := range v.Loaders {
-				if slices.Contains([]string{"paper", "purpur", "spigot", "bukkit"}, loader) {
-					plugin = true
-				}
-			}
-			if !plugin {
-				continue
-			}
-			matches := pluginVersionCompatible(v, server)
-			if compatible && !matches {
-				continue
-			}
-			_, fileErr := selectPluginArtifact(v.Files)
-			project.InstallAvailable = matches && server.Supported && v.Type == "release" && v.ProjectID == project.ID && modrinthPluginID.MatchString(v.ID) && fileErr == nil && managedPluginSlug(project.Slug) == ""
-			v.Files = nil // Artifact URLs never leave the privileged agent.
-			project.Version = &v
-			project.Compatible = matches
-			if matches {
-				project.Compatibility = "Compatible according to publisher metadata"
-			} else if server.MinecraftVersion != "" {
-				project.Compatibility = "Not listed as compatible according to publisher metadata"
-			}
+		out.Total = *search.Total
+		if len(search.Hits) == 0 {
 			break
 		}
-		// Projects without a qualifying release do not pass the release filter.
-		if project.Version == nil {
-			continue
+		for _, project := range search.Hits {
+			if len(out.Projects) == limit || cursor >= out.Total || cursor > 10000 {
+				break
+			}
+			cursor++
+			scanned++
+			if !modrinthPluginID.MatchString(project.ID) {
+				continue
+			}
+			project.Version = nil
+			project.InstallAvailable = false
+			project.Compatible = false
+			project.MetadataError = ""
+			project.Source = "Modrinth"
+			project.Compatibility = "Compatibility unknown"
+			query := url.Values{"include_changelog": {"false"}}
+			if compatible {
+				games, _ := json.Marshal([]string{server.MinecraftVersion})
+				platforms, _ := json.Marshal(loaders)
+				query.Set("game_versions", string(games))
+				query.Set("loaders", string(platforms))
+			}
+			var versions []pluginCatalogVersion
+			if err := modrinthPluginJSON(ctx, "/project/"+project.ID+"/version", query, &versions); err != nil {
+				project.MetadataError = "Release and dependency metadata unavailable"
+				out.Projects = append(out.Projects, project)
+				continue
+			}
+			sort.SliceStable(versions, func(i, j int) bool { return versions[i].Published > versions[j].Published })
+			for _, v := range versions {
+				if release && v.Type != "release" {
+					continue
+				}
+				// Always restrict selected versions to server plugin platforms, including
+				// when browsing beyond the active server's compatibility filter.
+				plugin := false
+				for _, loader := range v.Loaders {
+					if slices.Contains([]string{"paper", "purpur", "spigot", "bukkit"}, loader) {
+						plugin = true
+					}
+				}
+				if !plugin {
+					continue
+				}
+				matches := pluginVersionCompatible(v, server)
+				if compatible && !matches {
+					continue
+				}
+				_, fileErr := selectPluginArtifact(v.Files)
+				project.InstallAvailable = matches && server.Supported && v.Type == "release" && v.ProjectID == project.ID && modrinthPluginID.MatchString(v.ID) && fileErr == nil && managedPluginSlug(project.Slug) == ""
+				v.Files = nil // Artifact URLs never leave the privileged agent.
+				project.Version = &v
+				project.Compatible = matches
+				if matches {
+					project.Compatibility = "Compatible according to publisher metadata"
+				} else if server.MinecraftVersion != "" {
+					project.Compatibility = "Not listed as compatible according to publisher metadata"
+				}
+				break
+			}
+			// Projects without a qualifying release do not pass the release filter.
+			if project.Version == nil {
+				continue
+			}
+			out.Projects = append(out.Projects, project)
 		}
-		out.Projects = append(out.Projects, project)
+		if cursor >= out.Total {
+			break
+		}
+	}
+	if scanned > 0 && cursor < out.Total && cursor <= 10000 {
+		out.NextOffset = cursor
 	}
 	writeJSON(w, http.StatusOK, out)
 }

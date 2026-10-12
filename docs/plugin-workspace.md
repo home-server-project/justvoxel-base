@@ -7,10 +7,10 @@ resizable window has Discover, Installed and Updates tabs. The original Cycle 1 
 it cannot install, download, update, remove or hot load plugins, change server
 configuration, or interrupt Minecraft.
 
-Discover has one compact desktop toolbar: a bounded search field and Search
-button, a fixed ON Modrinth source switch, an OFF disabled Hangar placeholder,
-and Compatible only / Release only switches. Hangar makes no requests and is not
-an available source. The toolbar may wrap in a genuinely narrow workspace.
+Discover has one compact desktop toolbar: a growing search field immediately
+followed by Search on the left, with the fixed ON Modrinth source, OFF disabled
+Hangar placeholder, and Compatible only / Release only switches grouped on the
+right. Hangar makes no requests and is not an available source. The toolbar may wrap in a genuinely narrow workspace.
 
 Plugin results use compact cards of uniform height, with a fixed-size logo,
 clamped name and description, release/platform/Minecraft badges and a short
@@ -22,9 +22,11 @@ details never expand inside the results grid. Installed and Updates use the same
 whole-card selection and information/status overlays, without update or removal
 actions. Installable Discover cards open one combined information/install
 overlay; JustVoxel-managed and unavailable selections remain read only.
-Supported Minecraft versions appear as a wrapping list in the compatibility
-section. Dependencies are grouped by type, with identities
-first and IDs as secondary metadata. Installed information has separate sections for JAR,
+Supported versions appear as compact slash-separated text that wraps when
+needed. Supported platforms use the same compact presentation. Publisher
+dependencies are grouped into compact rows, including cross-loader required
+metadata that will not be installed. Actual install dependencies remain explicit.
+Installed information has separate sections for JAR,
 Metadata, Management and Update status. Installed and Updates cards show ownership
 and a compact status; update and removal actions remain unavailable.
 Discover uses three columns in wide windows, two in medium windows and one in
@@ -43,11 +45,29 @@ exposes the existing manifest project/release IDs only after exact
 filename, SHA-512 and descriptor ownership verification. Installed and Updates
 reuse the same-origin logo helper for that authoritative project ID; unidentified
 JARs retain fallback without identity searches or changes to ownership records.
-The overlay scrolls within its own bounds on desktop and mobile.
+The combined overlay keeps one compact column, with metadata pairs sharing
+lines where they fit and each install file showing its filename and size in one
+row. Successful review places Install immediately after identity and badges,
+without a Cancel/Install footer. Info and terminal Done/Close actions align to
+the right. The compact layout is designed to fit the normal FHD workspace
+without an internal scrollbar. Overflow remains auto as a safety fallback so
+content is never clipped. Normal-FHD visual acceptance remains a human real-VM
+check.
 
 Paper and Purpur support plugins. Vanilla displays an unsupported state.
 The workspace reuses appliance configuration discovery and runtime status for
 server software, Minecraft version and the configured data location.
+
+Discover fills pages by scanning raw Modrinth hits in order and qualifying their
+release metadata. It tops up sparse pages while authoritative raw hits remain,
+with a hard ceiling of three times the requested card capacity (at most 36 raw
+projects). A ceiling-limited page can remain partial. `total` remains Modrinth's
+authoritative `total_hits`, not an eligible-result count. `next_offset` points
+immediately after the last consumed raw hit, including filtered hits and excluding
+unconsumed hits in fetched batches. Previous/Next use an in-memory history of raw
+cursors; the displayed page number comes from that history. Searches, filters and
+fresh Discover sessions reset it. Capacity changes retain the current raw cursor
+as the start of a fresh history, preventing overlap with older-capacity pages.
 
 Discover searches Modrinth server plugins. Compatible only and Release only
 start enabled. Compatibility means **Compatible according to publisher metadata**;
@@ -57,14 +77,14 @@ Minecraft version cannot be determined, the compatible search stays unavailable;
 turning off Compatible only permits browsing without claiming compatibility.
 Discover measures the actual grid columns and available result height to choose
 1–12 projects per page. Workspace resizing recalculates capacity after a brief
-debounce and realigns the previous first-result offset to a page under the new
-limit, preserving the approximate catalog position. The Agent accepts only
+debounce, retains the current raw cursor and starts a fresh cursor history for
+the new capacity. The Agent accepts only
 integer limits from 1 to 12 and defaults to 8 when omitted. Pagination stays at
 the bottom-right of Discover, in the order **Page X of Y**, **Previous**, **Next**.
 The page count uses Modrinth's authoritative total; Previous is disabled on the
-first page and Next on the final page. Installed and Updates have no catalog
-pagination. Release filtering can leave a page empty; Next continues to the next
-catalog page. Upstream failures are shown as
+first UI page and Next when the Agent returns no next raw cursor. Installed and Updates have no catalog
+pagination. Bounded release qualification can still leave a partial or empty page; Next
+continues from the next consumed raw cursor when more raw results remain. Upstream failures are shown as
 unavailable metadata, never as proven incompatibility.
 
 Installed reads regular JARs under the configured data directory's `plugins`
@@ -116,10 +136,16 @@ files and sizes, and the configured `<DataPath>/plugins` location. Publisher
 compatibility is a prerequisite, not a promise that the plugin will run.
 
 Only **required** dependencies are resolved recursively and automatically
-installed. Exact dependency versions must belong to the declared project and be
-compatible releases. Project-only dependencies select the newest compatible
-release. Optional, incompatible and embedded entries remain display-only Info
-metadata and are not automatically downloaded. Cycles, conflicting versions,
+installed. Exact dependency versions must belong to the declared project. Required
+Modrinth metadata is scoped to the active Paper-family loaders: exact versions
+with no loader overlap, and project-only dependencies whose authoritative project
+loaders have no overlap, remain publisher information and are not installed.
+For example, a multi-loader Paper plugin does not cause Fabric API to be installed
+on Paper. Required dependencies with target-loader support still need a compatible
+release for the active Minecraft version; missing releases fail closed with the
+dependency and compatibility problem identified. Project-only dependencies select
+the newest compatible release. Optional, incompatible and embedded entries remain
+display-only Info metadata and are not automatically downloaded. Cycles, conflicting versions,
 filename-only requirements and unresolved identities block installation. Bounds
 are six dependency levels, sixteen artifacts, 128 MiB per JAR and 256 MiB combined.
 
@@ -130,6 +156,17 @@ fingerprint. Player snapshots are excluded from the fingerprint and checked
 separately. Artifact URLs and private transaction evidence are never returned to
 the browser. Modrinth's fixed HTTPS API and `cdn.modrinth.com` are the only sources;
 redirects are rejected, and response sizes and timeouts are bounded.
+
+Before returning an install review, the Agent downloads only the exact selected
+root artifact into private temporary staging, using the existing bounded CDN,
+size, SHA-512 and timeout checks, then applies the existing strict Paper/Bukkit
+descriptor inspection. Temporary review material is removed immediately; there is
+no persistent artifact cache or catalog-wide download. A zero-byte descriptor
+provides no usable plugin identity. A rejected direct-plugin review opens the
+existing read-only project Info with the rejection explanation and no Install
+action. Review starts no operation, backup or Minecraft mutation. Publisher loader
+tags alone do not authorize an Install action. Install-time inspection remains
+independent and authoritative.
 
 All needed JARs are downloaded, size/hash checked and inspected in private Agent
 staging **before Minecraft downtime**. Staged Paper/Bukkit descriptors must provide
@@ -170,7 +207,12 @@ creation and archive verification succeeded; non-zero blocks plugin placement.
 Human-readable helper output is not a success contract. Minecraft must be stopped
 before placement.
 Each JAR is copied to a unique temporary file within the pinned, no-follow plugin
-directory, fsynced, and atomically renamed without replacement. Every potential
+directory, hash checked and fsynced. Its already-open destination descriptor is
+explicitly set to mode `0644` before closing and atomic rename without replacement;
+a mode-setting error fails placement. This makes the published JAR readable to
+Minecraft despite the Agent's intentional service-wide `UMask=0007`, which remains
+unchanged. Ownership, parent permissions and SELinux labeling remain unchanged.
+The plugin directory is fsynced after publication. Every potential
 placement has private durable transaction evidence under
 `/var/lib/justvoxel/management/plugin-install/<operation-id>/`.
 

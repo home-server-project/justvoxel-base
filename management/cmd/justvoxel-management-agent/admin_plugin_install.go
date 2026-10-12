@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -202,6 +203,10 @@ func (s *server) adminPluginInstallPlan(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
+	if err := reviewRootPluginArtifact(ctx, plan); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
 	online, names, err := pluginInstallPlayers(ctx)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "Player status unavailable; Minecraft has not been changed")
@@ -324,10 +329,29 @@ func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerCon
 			if err := modrinthPluginJSON(ctx, "/version/"+version, nil, &v); err != nil {
 				return errors.New("Required release metadata unavailable")
 			}
-			if v.ID != version || (project != "" && v.ProjectID != project) {
+			if v.ID != version || !modrinthPluginID.MatchString(v.ProjectID) || (project != "" && v.ProjectID != project) {
 				return errors.New("Modrinth project/version identity mismatch")
 			}
+			if parent != "" && !pluginLoaderOverlap(v.Loaders, serverContext.ServerType) {
+				plan.DisplayDependencies = append(plan.DisplayDependencies, pluginDependency{ProjectID: project, VersionID: version, Type: "required"})
+				return nil
+			}
 		} else {
+			var dependencyProject struct {
+				ID      string   `json:"id"`
+				Name    string   `json:"title"`
+				Loaders []string `json:"loaders"`
+			}
+			if err := modrinthPluginJSON(ctx, "/project/"+project, nil, &dependencyProject); err != nil {
+				return errors.New("Required dependency project metadata unavailable")
+			}
+			if dependencyProject.ID != project {
+				return errors.New("Modrinth dependency project identity mismatch")
+			}
+			if len(dependencyProject.Loaders) > 0 && !pluginLoaderOverlap(dependencyProject.Loaders, serverContext.ServerType) {
+				plan.DisplayDependencies = append(plan.DisplayDependencies, pluginDependency{ProjectID: project, Type: "required"})
+				return nil
+			}
 			var versions []pluginCatalogVersion
 			games, _ := json.Marshal([]string{serverContext.MinecraftVersion})
 			loaders, _ := json.Marshal(pluginLoaders(serverContext.ServerType))
@@ -340,14 +364,27 @@ func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerCon
 				}
 				return versions[i].Published > versions[j].Published
 			})
+			found := false
 			for _, candidate := range versions {
 				if candidate.Type == "release" && pluginVersionCompatible(candidate, serverContext) {
 					v = candidate
+					found = true
 					break
 				}
 			}
+			if !found {
+				name := dependencyProject.Name
+				if name == "" {
+					name = project
+				}
+				loader := "Paper"
+				if serverContext.ServerType == "purpur" {
+					loader = "Purpur"
+				}
+				return fmt.Errorf("Required dependency %s has no compatible %s release for Minecraft %s", name, loader, serverContext.MinecraftVersion)
+			}
 			if v.ProjectID != project {
-				return errors.New("Required dependency project mismatch")
+				return errors.New("Modrinth dependency project/version identity mismatch")
 			}
 		}
 		if !modrinthPluginID.MatchString(v.ID) || !modrinthPluginID.MatchString(v.ProjectID) || v.Type != "release" || !pluginVersionCompatible(v, serverContext) || v.Number == "" || len(v.Number) > 256 {
@@ -457,8 +494,15 @@ func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerCon
 		})
 		for _, d := range v.Dependencies {
 			if d.Type == "required" {
+				displayStart := len(plan.DisplayDependencies)
 				if err := visit(d.ProjectID, d.VersionID, project, depth+1); err != nil {
 					return err
+				}
+				if len(plan.DisplayDependencies) == displayStart+1 {
+					skipped := plan.DisplayDependencies[displayStart]
+					if skipped.Type == "required" && skipped.ProjectID == d.ProjectID && skipped.VersionID == d.VersionID {
+						plan.DisplayDependencies[displayStart] = d
+					}
 				}
 			} else {
 				plan.DisplayDependencies = append(plan.DisplayDependencies, d)
@@ -483,6 +527,47 @@ func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerCon
 	plan.Fingerprint = fingerprintPluginPlan(plan)
 	return plan, nil
 }
+
+const pluginDirectReviewRejection = "This release is not a direct Paper/Bukkit plugin and cannot be installed into the plugins directory."
+
+// Review only the exact requested artifact. Installation still inspects every
+// staged artifact independently before downtime; review creates no operation.
+func reviewRootPluginArtifact(ctx context.Context, plan pluginInstallPlan) error {
+	for _, artifact := range plan.Artifacts {
+		if !artifact.Requested {
+			continue
+		}
+		directory, err := os.MkdirTemp("", "justvoxel-plugin-review-")
+		if err != nil {
+			return errors.New("Plugin review staging unavailable")
+		}
+		defer os.RemoveAll(directory)
+		if err := downloadPluginArtifact(ctx, artifact, directory); err != nil {
+			return err
+		}
+		file, err := os.Open(filepath.Join(directory, artifact.Filename))
+		if err != nil {
+			return errors.New("Plugin review artifact unavailable")
+		}
+		_, inspectErr := inspectStagedPlugin(file, artifact.Filename)
+		closeErr := file.Close()
+		if inspectErr != nil {
+			return errors.New(pluginDirectReviewRejection)
+		}
+		return closeErr
+	}
+	return errors.New("Requested plugin artifact unavailable")
+}
+
+func pluginLoaderOverlap(loaders []string, serverType string) bool {
+	for _, loader := range loaders {
+		if slices.Contains(pluginLoaders(serverType), loader) {
+			return true
+		}
+	}
+	return false
+}
+
 func fingerprintPluginPlan(plan pluginInstallPlan) string {
 	plan.Artifacts = slices.Clone(plan.Artifacts)
 	sort.Slice(plan.Artifacts, func(i, j int) bool { return plan.Artifacts[i].ProjectID < plan.Artifacts[j].ProjectID })
@@ -1549,6 +1634,9 @@ func placePluginArtifact(root *os.File, directory, id string, a pluginInstallArt
 	}
 	if err == nil {
 		err = f.Sync()
+	}
+	if err == nil {
+		err = unix.Fchmod(fd, 0644)
 	}
 	closeErr := f.Close()
 	if err != nil {

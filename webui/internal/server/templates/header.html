@@ -226,10 +226,12 @@
         <form class="plugins-search" data-plugins-search role="search">
           <label class="plugins-search-field"><input aria-label="Search plugins" name="q" type="search" maxlength="200" placeholder="Search Modrinth plugins" autocomplete="off"></label>
           <button type="submit">Search</button>
-          <label class="plugins-filter plugins-source-fixed"><input type="checkbox" role="switch" data-plugins-modrinth checked aria-readonly="true" tabindex="-1">Modrinth</label>
-          <label class="plugins-filter plugins-source-unavailable"><input type="checkbox" role="switch" data-plugins-hangar disabled>Hangar</label>
-          <label class="plugins-filter"><input role="switch" name="compatible_only" type="checkbox" checked>Compatible only</label>
-          <label class="plugins-filter"><input role="switch" name="release_only" type="checkbox" checked>Release only</label>
+          <div class="plugins-search-filters">
+            <label class="plugins-filter plugins-source-fixed"><input type="checkbox" role="switch" data-plugins-modrinth checked aria-readonly="true" tabindex="-1">Modrinth</label>
+            <label class="plugins-filter plugins-source-unavailable"><input type="checkbox" role="switch" data-plugins-hangar disabled>Hangar</label>
+            <label class="plugins-filter"><input role="switch" name="compatible_only" type="checkbox" checked>Compatible only</label>
+            <label class="plugins-filter"><input role="switch" name="release_only" type="checkbox" checked>Release only</label>
+          </div>
         </form>
         <p class="plugins-workspace-state" data-plugins-state role="status" aria-live="polite"></p>
         <div class="plugins-results" data-plugins-results></div>
