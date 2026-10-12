@@ -5830,12 +5830,13 @@ if (pluginsDialog && pluginsOpen) {
     }
     return tile;
   };
-  const overlayHeader = (name, description, badges, projectID) => {
+  const overlayHeader = (name, description, badges, projectID, action = null) => {
     const header = document.createElement("header");
     header.className = "plugins-overlay-header";
     const identity = document.createElement("div");
     identity.className = "plugins-overlay-identity";
     identity.append(identityTile(name, projectID), text("h3", name));
+    if (action) identity.append(action);
     header.append(identity);
     if (description) header.append(text("p", description, "plugins-overlay-description"));
     const meta = document.createElement("div");
@@ -5894,7 +5895,7 @@ if (pluginsDialog && pluginsOpen) {
   const addInfo = (card, name, renderInfo, projectID) => {
     interactiveCard(card, name, () => {
       stopPolling();
-      showPanel(`Info for ${name}`);
+      showPanel(`Info for ${name}`, true);
       renderInfo();
       overlayActions(panelAction("Close", closePanel, true));
     }, projectID);
@@ -5980,7 +5981,7 @@ if (pluginsDialog && pluginsOpen) {
     let reviewRejection = "";
     const readOnlyReview = (reason) => {
       reviewRejection = reason;
-      showPanel(project.title);
+      showPanel(project.title, true);
       renderInfo();
       if (reason) overlaySection("Installation").append(text("p", reason));
       overlayActions(panelAction("Close", closePanel, true));
@@ -6000,7 +6001,7 @@ if (pluginsDialog && pluginsOpen) {
     const card = document.createElement("article");
     card.className = "plugins-result-card";
     const name = plugin.name || plugin.filename;
-    const projectID = plugin.project_id || undefined;
+    const projectID = plugin.project_id || plugin.icon_project_id || undefined;
     const management = plugin.management === "justvoxel" ? "JustVoxel managed" : plugin.management === "plugins" ? "Managed by Plugins" : "Manual / unmanaged";
     card.append(text("h3", name), text("p", `Version: ${plugin.version || "Unknown"}`, "plugins-card-release"));
     const badges = document.createElement("div");
@@ -6046,16 +6047,19 @@ if (pluginsDialog && pluginsOpen) {
   pluginsDialog.append(panel);
   let installGeneration = 0, pollTimer = null, installController = null, returnFocus = null;
   let operationIdentity = null;
+  let overlayDismissible = false;
   const stopPolling = () => { clearTimeout(pollTimer); pollTimer = null; installController?.abort(); ++installGeneration; };
   const workspaceShell = pluginsDialog.querySelector(".plugins-workspace-shell");
   const closePanel = () => {
     stopPolling();
     panel.hidden = true;
+    overlayDismissible = false;
     workspaceShell.inert = false;
     if (returnFocus?.isConnected) returnFocus.focus();
     else pluginsDialog.querySelector('[data-plugins-tab][aria-selected="true"]')?.focus();
   };
-  const showPanel = (label = "Plugin installation") => {
+  const showPanel = (label = "Plugin installation", dismissible = false) => {
+    overlayDismissible = dismissible;
     const focusedLabel = panel.contains(document.activeElement) ? document.activeElement.textContent : null;
     if (panel.hidden) returnFocus = document.activeElement;
     panel.setAttribute("aria-label", label);
@@ -6191,18 +6195,14 @@ if (pluginsDialog && pluginsOpen) {
     stopPolling();
     const current = installGeneration;
     installController = new AbortController();
-    showPanel();
+    showPanel("Plugin installation", true);
     panelBody.append(text("h3", "Preparing installation review…"));
     overlayActions(panelAction("Close", closePanel, true));
     try {
       const plan = await pluginRequest("install/plan", { project_id: projectID, version_id: versionID }, installController.signal);
       if (current !== installGeneration) return;
-      showPanel();
-      overlayHeader(plan.project_name, plan.description || project?.description, [plan.version_number, plan.server.server_software, plan.server.minecraft_version && `MC ${plan.server.minecraft_version}`], plan.project_id);
-      const installLane = document.createElement("div");
-      installLane.className = "plugins-review-install-action";
-      installLane.append(panelAction("Install", () => applyPlugin(plan)));
-      panelBody.append(installLane);
+      showPanel("Plugin installation", true);
+      overlayHeader(plan.project_name, plan.description || project?.description, [plan.version_number, plan.server.server_software, plan.server.minecraft_version && `MC ${plan.server.minecraft_version}`], plan.project_id, panelAction("Install", () => applyPlugin(plan)));
       const selectedVersion = project?.version?.id === plan.version_id ? project.version : null;
       const about = infoRows(overlaySection("About this version"));
       about("Release", plan.version_number);
@@ -6257,7 +6257,7 @@ if (pluginsDialog && pluginsOpen) {
       panelBody.querySelector("button")?.focus();
     } catch (error) {
       if (current !== installGeneration || error.name === "AbortError") return;
-      if (error.message === "This release is not a direct Paper/Bukkit plugin and cannot be installed into the plugins directory." && readOnlyReview) readOnlyReview(error.message);
+      if (error.message === "This release is not a direct Paper/Bukkit plugin and cannot be installed into the plugins directory." && readOnlyReview) readOnlyReview("The publisher lists Paper support, but this JAR is not a direct Paper/Bukkit plugin. It may require an external loader or a different installation path, so JustVoxel will not place it in the plugins directory.");
       else panelError(error);
     }
   };
@@ -6272,6 +6272,9 @@ if (pluginsDialog && pluginsOpen) {
       if (!showOperation(payload.operation)) pollTimer = setTimeout(() => pollOperation(payload.operation.operation_id, current), 1000);
     } catch (error) { state.textContent = error.message || "Plugin installation status is unavailable."; }
   };
+  panel.addEventListener("click", (event) => {
+    if (event.target === panel && overlayDismissible) closePanel();
+  });
   panel.addEventListener("keydown", (event) => {
     if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closePanel(); }
     if (event.key === "Tab") {
@@ -6282,6 +6285,7 @@ if (pluginsDialog && pluginsOpen) {
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
     }
   });
+  const pluginInventorySafe = (operation) => !operation || ["succeeded", "rolled_back", "resolved"].includes(operation.state);
   const load = async () => {
     if (!document.body.classList.contains("role-administrator")) return;
     const current = ++generation;
@@ -6295,6 +6299,14 @@ if (pluginsDialog && pluginsOpen) {
     form.hidden = tab !== "discover";
     const query = new URLSearchParams({ q: form.elements.q.value, compatible_only: String(form.elements.compatible_only.checked), release_only: String(form.elements.release_only.checked), offset: String(offset), limit: String(pageLimit) });
     try {
+      if (tab !== "discover") {
+        const installation = await pluginRequest("install-operation", null, controller.signal);
+        if (current !== generation) return;
+        if (!pluginInventorySafe(installation.operation)) {
+          state.textContent = "Plugin installation is still being verified or recovered. Installed inventory will be available after the operation reaches a verified final state.";
+          return;
+        }
+      }
       const response = await fetch(`/api/plugins/workspace/${tab}${tab === "discover" ? "?" + query : ""}`, { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" }, signal: controller.signal });
       const payload = await response.json();
       if (current !== generation) return;

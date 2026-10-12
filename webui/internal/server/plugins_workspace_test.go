@@ -30,7 +30,7 @@ func (f *fakePluginsWorkspaceAPI) AdminPluginInventory(_ context.Context, sessio
 	}
 	f.inventoryCalls++
 	f.updates = updates
-	return api.PluginInventory{Server: api.PluginServerContext{ServerSoftware: "Paper", Supported: true, MinecraftVersion: "1.21.8"}, Plugins: []api.InstalledPlugin{{Filename: "manual.jar", Management: "manual", UpdateStatus: "Update status unknown - manually managed"}, {Filename: "verified.jar", Management: "plugins", ProjectID: "project123", VersionID: "release123", UpdateStatus: "Managed by Plugins; update and removal are not available yet"}}}, nil
+	return api.PluginInventory{Server: api.PluginServerContext{ServerSoftware: "Paper", Supported: true, MinecraftVersion: "1.21.8"}, Plugins: []api.InstalledPlugin{{Filename: "manual.jar", Management: "manual", UpdateStatus: "Update status unknown - manually managed"}, {Filename: "verified.jar", Management: "plugins", ProjectID: "project123", VersionID: "release123", UpdateStatus: "Managed by Plugins; update and removal are not available yet"}, {Filename: "floodgate-spigot.jar", Management: "justvoxel", IconProjectID: "bWrNNfkb"}}}, nil
 }
 func (f *fakePluginsWorkspaceAPI) AdminPluginDiscover(_ context.Context, session string, query url.Values) (api.PluginCatalog, error) {
 	if session != "session-token" {
@@ -146,7 +146,7 @@ func TestPluginsWorkspaceCompactInfoPresentation(t *testing.T) {
 		t.Fatal("compact plugin renderers missing")
 	}
 	info := behavior[start:project]
-	for _, want := range []string{`card.tabIndex = 0`, `card.setAttribute("role", "button")`, `card.setAttribute("aria-haspopup", "dialog")`, `card.setAttribute("aria-controls", "plugins-overlay")`, `event.key === "Enter" || event.key === " "`, `node.classList.toggle("is-selected", node === card)`, `card.addEventListener("click", open)`, "showPanel(`Info for ${name}`)", `renderInfo();`, `overlayActions(panelAction("Close"`, `"plugins-icon-tile"`, `header.append(identityTile(name, projectID), copy)`} {
+	for _, want := range []string{`card.tabIndex = 0`, `card.setAttribute("role", "button")`, `card.setAttribute("aria-haspopup", "dialog")`, `card.setAttribute("aria-controls", "plugins-overlay")`, `event.key === "Enter" || event.key === " "`, `node.classList.toggle("is-selected", node === card)`, `card.addEventListener("click", open)`, "showPanel(`Info for ${name}`, true)", `renderInfo();`, `overlayActions(panelAction("Close"`, `"plugins-icon-tile"`, `header.append(identityTile(name, projectID), copy)`} {
 		if !strings.Contains(info, want) {
 			t.Fatalf("whole-card overlay behavior missing %s", want)
 		}
@@ -180,7 +180,7 @@ func TestPluginsWorkspaceCompactInfoPresentation(t *testing.T) {
 		}
 	}
 	style := string(css)
-	for _, want := range []string{`.plugins-workspace-body{container-type:inline-size;`, `grid-template-columns:minmax(0,1fr)`, `@container(min-width:580px){.plugins-results{grid-template-columns:repeat(2,minmax(0,1fr))}}`, `@container(min-width:860px){.plugins-results{grid-template-columns:repeat(3,minmax(0,1fr))}}`, `-webkit-line-clamp:2`, `.plugins-workspace-dialog [hidden]{display:none!important}`, `max-width:1080px`, `.plugins-result-card.is-selected`, `.plugins-icon-tile{display:grid;place-items:center;flex:none;width:40px;height:40px`, `.plugins-overlay-actions{display:flex;flex-wrap:wrap;`, `.plugins-install-content button{padding:.72rem 1rem}`, `word-break:normal`, `.plugins-version-list{display:flex;flex-wrap:wrap;`, `.plugins-info-rows{display:flex;flex-wrap:wrap;gap:.12rem 1rem;`} {
+	for _, want := range []string{`.plugins-workspace-body{container-type:inline-size;`, `grid-template-columns:minmax(0,1fr)`, `@container(min-width:580px){.plugins-results{grid-template-columns:repeat(2,minmax(0,1fr))}}`, `@container(min-width:860px){.plugins-results{grid-template-columns:repeat(3,minmax(0,1fr))}}`, `-webkit-line-clamp:2`, `.plugins-workspace-dialog [hidden]{display:none!important}`, `max-width:1080px`, `.plugins-result-card.is-selected`, `.plugins-icon-tile{display:grid;place-items:center;flex:none;width:40px;height:40px`, `.plugins-overlay-actions{display:flex;flex-wrap:wrap;`, `word-break:normal`, `.plugins-version-list{display:flex;flex-wrap:wrap;`, `.plugins-info-rows{display:flex;flex-wrap:wrap;gap:.12rem 1rem;`} {
 		if !strings.Contains(style, want) {
 			t.Fatalf("compact workspace styling missing %s", want)
 		}
@@ -442,7 +442,7 @@ func TestPluginsAdditionalInfoAndStructuredInstallPresentation(t *testing.T) {
 		}
 	}
 	review := script[reviewStart:resume]
-	for _, want := range []string{`overlayHeader(plan.project_name, plan.description || project?.description`, `overlaySection("About this version")`, `about("Release"`, `about("Release type"`, `about("Published"`, `about("Source"`, `about("Project ID"`, `about("Release ID"`, `overlaySection("Compatibility")`, `compatibility("Result"`, `compatibility("Server software"`, `compatibility("Active Minecraft version"`, `compatibility("Supported platforms"`, `compatibility("Supported versions"`, `overlaySection("Dependencies")`, `artifact.satisfied ? "Already satisfied" : "Will be installed"`, `const informational = plan.display_dependencies || []`, `overlaySection("Files to install")`, `readableSize(artifact.size)`, `overlaySection("Installation")`, `plan.installation_location`, `overlaySection("Restart")`, `restart("Required", plan.restart_required ? "Yes" : "No")`, `Verified cold backup before changes`, `Minecraft starts/restarts to load and verify plugins`, `Returns to stopped after verification`, `if (plan.confirmation_required) {`, `overlaySection("Players")`, `installLane.className = "plugins-review-install-action"`, `panelAction("Install", () => applyPlugin(plan))`} {
+	for _, want := range []string{`overlayHeader(plan.project_name, plan.description || project?.description`, `overlaySection("About this version")`, `about("Release"`, `about("Release type"`, `about("Published"`, `about("Source"`, `about("Project ID"`, `about("Release ID"`, `overlaySection("Compatibility")`, `compatibility("Result"`, `compatibility("Server software"`, `compatibility("Active Minecraft version"`, `compatibility("Supported platforms"`, `compatibility("Supported versions"`, `overlaySection("Dependencies")`, `artifact.satisfied ? "Already satisfied" : "Will be installed"`, `const informational = plan.display_dependencies || []`, `overlaySection("Files to install")`, `readableSize(artifact.size)`, `overlaySection("Installation")`, `plan.installation_location`, `overlaySection("Restart")`, `restart("Required", plan.restart_required ? "Yes" : "No")`, `Verified cold backup before changes`, `Minecraft starts/restarts to load and verify plugins`, `Returns to stopped after verification`, `if (plan.confirmation_required) {`, `overlaySection("Players")`, `panelAction("Install", () => applyPlugin(plan))`} {
 		if !strings.Contains(review, want) {
 			t.Fatal("combined plugin overlay missing", want)
 		}
@@ -592,7 +592,7 @@ func TestPluginsWorkspaceSharedSameOriginLogoAndFallback(t *testing.T) {
 		`overlayHeader(project.title, project.description, identityBadges, project.project_id)`,
 		`}, project.project_id)`,
 		`overlayHeader(plan.project_name, plan.description || project?.description, [plan.version_number, plan.server.server_software,`,
-		`const projectID = plugin.project_id || undefined`,
+		`const projectID = plugin.project_id || plugin.icon_project_id || undefined`,
 		`overlayHeader(name, "", [plugin.version || "Version unknown", management], projectID)`,
 		`}, projectID)`,
 		`operationIdentity?.operation_id === operation.operation_id`,
@@ -663,7 +663,7 @@ func TestPluginsWorkspaceApprovedCompactHierarchyAndStageFlow(t *testing.T) {
 		}
 	}
 	inventory := between("  const renderInstalled =", "  // Review, progress")
-	if !strings.Contains(inventory, `const projectID = plugin.project_id || undefined;`) || !strings.Contains(inventory, `}, projectID)`) {
+	if !strings.Contains(inventory, `const projectID = plugin.project_id || plugin.icon_project_id || undefined;`) || !strings.Contains(inventory, `}, projectID)`) {
 		t.Fatal("inventory must reuse only known authoritative project identity")
 	}
 	identity := between("  const identityTile =", "  const overlayHeader =")
@@ -710,21 +710,28 @@ func TestPluginsInventoryForwardsVerifiedOptionalIdentity(t *testing.T) {
 		if err := json.Unmarshal(rr.Body.Bytes(), &inventory); err != nil {
 			t.Fatal(err)
 		}
-		if len(inventory.Plugins) != 2 {
+		if len(inventory.Plugins) != 3 {
 			t.Fatal("inventory changed", inventory)
 		}
 		manual, managed := inventory.Plugins[0], inventory.Plugins[1]
-		if manual.Management != "manual" || manual.ProjectID != "" || manual.VersionID != "" {
+		if manual.Management != "manual" || manual.ProjectID != "" || manual.VersionID != "" || manual.IconProjectID != "" {
 			t.Fatal("manual identity inferred", manual)
 		}
 		if managed.Management != "plugins" || managed.ProjectID != "project123" || managed.VersionID != "release123" {
 			t.Fatal("verified identity lost", managed)
+		}
+		component := inventory.Plugins[2]
+		if component.Management != "justvoxel" || component.IconProjectID != "bWrNNfkb" || component.ProjectID != "" || component.VersionID != "" {
+			t.Fatal("display identity changed ownership", component)
 		}
 		var wire struct {
 			Plugins []map[string]json.RawMessage `json:"plugins"`
 		}
 		if err := json.Unmarshal(rr.Body.Bytes(), &wire); err != nil {
 			t.Fatal(err)
+		}
+		if _, exists := wire.Plugins[0]["icon_project_id"]; exists {
+			t.Fatal("manual display identity must be omitted")
 		}
 		if _, exists := wire.Plugins[0]["project_id"]; exists {
 			t.Fatal("unidentified project ID must be omitted")
@@ -838,12 +845,12 @@ func TestPluginCorrectionReviewAndCursorStructure(t *testing.T) {
 		t.Fatal("plugin workspace missing")
 	}
 	script = script[start:end]
-	for _, forbidden := range []string{`offset - pageLimit`, `Math.floor(offset / pageLimit)`, `Publisher-supported`, `versions.forEach`, `panelAction("Cancel"`, `dependency.dependency_type !== "required"`, `innerHTML`, `insertAdjacentHTML`, `cdn.modrinth.com`, `plugins-review-layout`, `plugins-review-primary`, `plugins-review-secondary`} {
+	for _, forbidden := range []string{`offset - pageLimit`, `Math.floor(offset / pageLimit)`, `Publisher-supported`, `versions.forEach`, `panelAction("Cancel"`, `dependency.dependency_type !== "required"`, `innerHTML`, `insertAdjacentHTML`, `cdn.modrinth.com`, `plugins-review-layout`, `plugins-review-primary`, `plugins-review-secondary`, `plugins-review-install-action`} {
 		if strings.Contains(script, forbidden) {
 			t.Fatal("rejected behavior remains", forbidden)
 		}
 	}
-	for _, want := range []string{`pageCursors = [0]`, `previous.disabled = pageIndex === 0`, `next.disabled = nextOffset < 0`, `nextOffset = payload.next_offset`, `pageCursors.push(nextOffset)`, `offset = pageCursors[--pageIndex]`, `const currentPage = pageIndex + 1`, `resetCursors();`, `form.elements.q.addEventListener("input"`, `readOnlyReview(error.message)`, `renderInfo();`, `"Supported platforms"`, `"Supported versions"`, `versions.join(" / ")`, `"plugins-publisher-dependency-row"`, `values.join(" / ")`, `text("li", artifact.filename, "plugins-file-row")`, `readableSize(artifact.size)`, `overlayActions(panelAction("Done", closePanel, true))`, `overlayActions(panelAction("Close", closePanel, true))`} {
+	for _, want := range []string{`pageCursors = [0]`, `previous.disabled = pageIndex === 0`, `next.disabled = nextOffset < 0`, `nextOffset = payload.next_offset`, `pageCursors.push(nextOffset)`, `offset = pageCursors[--pageIndex]`, `const currentPage = pageIndex + 1`, `resetCursors();`, `form.elements.q.addEventListener("input"`, `readOnlyReview("The publisher lists Paper support, but this JAR is not a direct Paper/Bukkit plugin. It may require an external loader or a different installation path, so JustVoxel will not place it in the plugins directory.")`, `renderInfo();`, `"Supported platforms"`, `"Supported versions"`, `versions.join(" / ")`, `"plugins-publisher-dependency-row"`, `values.join(" / ")`, `text("li", artifact.filename, "plugins-file-row")`, `readableSize(artifact.size)`, `overlayActions(panelAction("Done", closePanel, true))`, `overlayActions(panelAction("Close", closePanel, true))`} {
 		if !strings.Contains(script, want) {
 			t.Fatal("correction missing", want)
 		}
@@ -851,13 +858,17 @@ func TestPluginCorrectionReviewAndCursorStructure(t *testing.T) {
 	reviewStart, reviewEnd := strings.Index(script, "  const reviewPlugin ="), strings.Index(script, "  const resumePluginInstall =")
 	review := script[reviewStart:reviewEnd]
 	identity := strings.Index(review, `overlayHeader(plan.project_name`)
-	install := strings.Index(review, `installLane.append(panelAction("Install"`)
+	install := strings.Index(review, `panelAction("Install"`)
 	about := strings.Index(review, `overlaySection("About this version")`)
 	if identity < 0 || install <= identity || about <= install {
-		t.Fatal("Install must follow identity before details")
+		t.Fatal("Install must be passed to the identity header before details")
+	}
+	headerEnd := strings.Index(review[identity:], "\n") + identity
+	if headerEnd < install || !strings.Contains(review[identity:headerEnd], `plan.project_id, panelAction("Install", () => applyPlugin(plan))`) {
+		t.Fatal("Install must be the optional action passed within overlayHeader")
 	}
 	if strings.Count(review, `panelAction("Install"`) != 1 || strings.Contains(review, `overlayActions(panelAction("Install"`) {
-		t.Fatal("Install must only appear in the successful top action lane")
+		t.Fatal("Install must only appear in the successful identity header")
 	}
 	if strings.Index(review, `pluginRequest("install/plan"`) >= install {
 		t.Fatal("Install shown before plan review")
@@ -866,12 +877,12 @@ func TestPluginCorrectionReviewAndCursorStructure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`.plugins-overlay-actions{display:flex;flex-wrap:wrap;justify-content:flex-end`, `.plugins-review-install-action{display:flex;justify-content:flex-start`, `.plugins-file-row{display:flex;align-items:baseline;justify-content:space-between`, `.plugins-info-row{display:flex;align-items:baseline`, `width:min(100%,760px);max-height:100%;min-width:0;overflow:auto;overscroll-behavior:contain;overflow-wrap:anywhere;padding:.75rem;`, `.plugins-info-rows{display:flex;flex-wrap:wrap;gap:.12rem 1rem;`, `.plugins-info-row dt{flex:none}`, `.plugins-publisher-dependency-row{display:flex;align-items:baseline;gap:.65rem;margin:.15rem 0}`, `@container(max-width:700px){.plugins-search-filters{flex-wrap:wrap}.plugins-file-row{flex-wrap:wrap}.plugins-publisher-dependency-row{flex-wrap:wrap}}`, `@container(max-width:450px){.plugins-info-row{flex-wrap:wrap}.plugins-info-row dt{flex-basis:100%}}`} {
+	for _, want := range []string{`.plugins-overlay-actions{display:flex;flex-wrap:wrap;justify-content:flex-end`, `.plugins-file-row{display:flex;align-items:baseline;justify-content:space-between`, `.plugins-info-row{display:flex;align-items:baseline`, `width:min(100%,760px);max-height:100%;min-width:0;overflow:auto;overscroll-behavior:contain;overflow-wrap:anywhere;padding:.75rem;`, `.plugins-info-rows{display:flex;flex-wrap:wrap;gap:.12rem 1rem;`, `.plugins-info-row dt{flex:none}`, `.plugins-publisher-dependency-row{display:flex;align-items:baseline;gap:.65rem;margin:.15rem 0}`, `@container(max-width:700px){.plugins-search-filters{flex-wrap:wrap}.plugins-file-row{flex-wrap:wrap}.plugins-publisher-dependency-row{flex-wrap:wrap}}`, `@container(max-width:450px){.plugins-info-row{flex-wrap:wrap}.plugins-info-row dt{flex-basis:100%}}`} {
 		if !strings.Contains(string(css), want) {
 			t.Fatal("compact overlay rule missing", want)
 		}
 	}
-	for _, forbidden := range []string{`overflow:visible;overscroll-behavior:contain`, `@container(max-height:650px)`, `.plugins-install-panel{container-type:size}`, `.plugins-info-rows{display:grid`, `.plugins-info-rows{grid-template-columns:`} {
+	for _, forbidden := range []string{`overflow:visible;overscroll-behavior:contain`, `@container(max-height:650px)`, `.plugins-install-panel{container-type:size}`, `.plugins-info-rows{display:grid`, `.plugins-info-rows{grid-template-columns:`, `plugins-review-install-action`} {
 		if strings.Contains(string(css), forbidden) {
 			t.Fatal("unsafe or stale overlay rule remains", forbidden)
 		}
@@ -902,5 +913,182 @@ func TestPluginWorkspaceDirectReviewRejectionIsForwardedWithoutInstall(t *testin
 	}
 	if client.plans != 1 || client.installs != 0 || client.operations != 0 {
 		t.Fatal("rejected review started install or operation")
+	}
+}
+
+// Source assertions protect the inventory gate without claiming runtime acceptance.
+func TestPluginsWorkspaceInventoryRequiresVerifiedOperationState(t *testing.T) {
+	raw, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(raw)
+	start := strings.Index(script, "  const pluginInventorySafe =")
+	if start < 0 {
+		t.Fatal("inventory safety helper missing")
+	}
+	end := strings.Index(script[start:], "\n")
+	if end < 0 {
+		t.Fatal("inventory safety helper boundary missing")
+	}
+	helper := script[start : start+end]
+	if helper != `  const pluginInventorySafe = (operation) => !operation || ["succeeded", "rolled_back", "resolved"].includes(operation.state);` {
+		t.Fatal("inventory safety must allow no operation or only proven safe final states")
+	}
+	for _, tc := range []struct {
+		state string
+		safe  bool
+	}{
+		{"succeeded", true}, {"rolled_back", true}, {"resolved", true},
+		{"queued", false}, {"validating", false}, {"downloading", false},
+		{"player_check", false}, {"backup", false}, {"installing", false},
+		{"restarting", false}, {"verifying", false}, {"failed", false},
+		{"rolling_back", false}, {"needs_attention", false}, {"running", false},
+		{"unknown", false}, {"", false},
+	} {
+		t.Run(tc.state, func(t *testing.T) {
+			if allowed := strings.Contains(helper, `"`+tc.state+`"`); allowed != tc.safe {
+				t.Fatal("incorrect inventory state allowlist", tc.state)
+			}
+		})
+	}
+}
+
+func TestPluginsWorkspaceInventoryGatePrecedesFetchAndRendering(t *testing.T) {
+	raw, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(raw)
+	start := strings.Index(script, "  const pluginInventorySafe =")
+	if start < 0 {
+		t.Fatal("inventory gate missing")
+	}
+	end := strings.Index(script[start:], "  const discoverCapacity =")
+	if end < 0 {
+		t.Fatal("inventory loader boundary missing")
+	}
+	loader := script[start : start+end]
+	gate := `      if (tab !== "discover") {
+        const installation = await pluginRequest("install-operation", null, controller.signal);
+        if (current !== generation) return;
+        if (!pluginInventorySafe(installation.operation)) {
+          state.textContent = "Plugin installation is still being verified or recovered. Installed inventory will be available after the operation reaches a verified final state.";
+          return;
+        }
+      }`
+	check := strings.Index(loader, gate)
+	clear := strings.Index(loader, "results.replaceChildren();")
+	fetch := strings.Index(loader, "const response = await fetch(`/api/plugins/workspace/${tab}")
+	render := strings.Index(loader, `items.forEach((item) => results.append(tab === "discover" ? renderProject(item, server) : renderInstalled(item)))`)
+	if clear < 0 || check <= clear || fetch <= check+len(gate) || render <= fetch {
+		t.Fatal("Installed/Updates must clear stale cards and check operation before inventory fetch/render; Discover must bypass the check")
+	}
+	if strings.Count(loader, "await fetch(") != 1 || strings.Count(loader, `pluginRequest("install-operation"`) != 1 {
+		t.Fatal("inventory must not bypass the operation gate")
+	}
+	for _, forbidden := range []string{"filename", "timestamp", "mtime", "birthtime", "adopt", "manual", "disabled = true"} {
+		// Pagination disabling is existing Discover behavior; only inspect the new gate.
+		if strings.Contains(gate, forbidden) {
+			t.Fatal("inventory gate must use operation state without ownership heuristics or disabling controls", forbidden)
+		}
+	}
+	for _, want := range []string{
+		`pluginsDialog.querySelector("[data-plugins-refresh]").addEventListener("click", load)`,
+		`pluginsDialog.querySelectorAll("[data-plugins-tab]").forEach((button) => button.addEventListener("click"`,
+		`load(); resumePluginInstall();`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatal("inventory gate removed refresh, tabs or install resume", want)
+		}
+	}
+}
+
+func TestPluginsWorkspaceVMCorrectionHeaderButtonsAndBackdrop(t *testing.T) {
+	raw, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(raw)
+	start, end := strings.Index(script, "// Plugin workspace."), strings.Index(script, "// Bookmarked standalone pages")
+	if start < 0 || end <= start {
+		t.Fatal("plugin workspace missing")
+	}
+	script = script[start:end]
+	between := func(first, next string) string {
+		t.Helper()
+		a, b := strings.Index(script, first), strings.Index(script, next)
+		if a < 0 || b <= a {
+			t.Fatal("section missing", first, next)
+		}
+		return script[a:b]
+	}
+	header := between("  const overlayHeader =", "  const overlaySection =")
+	for _, want := range []string{`projectID, action = null`, `identity.append(identityTile(name, projectID), text("h3", name));`, `if (action) identity.append(action);`, `header.append(identity);`} {
+		if !strings.Contains(header, want) {
+			t.Fatal("shared top identity action missing", want)
+		}
+	}
+	if strings.Index(header, `if (action)`) >= strings.Index(header, `header.append(identity)`) || strings.Index(header, `header.append(identity)`) >= strings.Index(header, `if (description)`) {
+		t.Fatal("identity action must precede description and badges")
+	}
+	info := between("    const renderInfo =", "    // Publisher data uses textContent")
+	if strings.Contains(info, `panelAction("Install"`) || strings.Contains(info, `applyPlugin(`) {
+		t.Fatal("read-only information exposes Install")
+	}
+	for _, want := range []string{`showPanel(project.title, true)`, `renderInfo();`, `overlayActions(panelAction("Close", closePanel, true))`} {
+		if !strings.Contains(info, want) {
+			t.Fatal("read-only view missing", want)
+		}
+	}
+	panel := between("  let operationIdentity =", "  const panelAction =")
+	for _, want := range []string{`let overlayDismissible = false`, `dismissible = false`, `overlayDismissible = dismissible`, `overlayDismissible = false`, `returnFocus?.isConnected`, `returnFocus.focus()`} {
+		if !strings.Contains(panel, want) {
+			t.Fatal("overlay state/focus missing", want)
+		}
+	}
+	click := between(`  panel.addEventListener("click"`, `  panel.addEventListener("keydown"`)
+	if !strings.Contains(click, `if (event.target === panel && overlayDismissible) closePanel();`) || strings.Count(click, "closePanel()") != 1 || strings.Contains(click, "contains(") || strings.Contains(click, "closest(") {
+		t.Fatal("backdrop must require direct target and dismissible state")
+	}
+	for _, want := range []string{"showPanel(`Info for ${name}`, true)", `event.key === "Escape"`, `event.stopPropagation(); closePanel();`} {
+		if !strings.Contains(script, want) {
+			t.Fatal("passive info / Esc behavior missing", want)
+		}
+	}
+	review := between("  const reviewPlugin =", "  const resumePluginInstall =")
+	if strings.Count(review, `showPanel("Plugin installation", true)`) != 2 {
+		t.Fatal("review preparation and review must allow backdrop dismissal")
+	}
+	for _, area := range []string{between("  const showOperation =", "  const pollOperation ="), between("  const applyPlugin =", "  const readableSize ="), between("  const panelError =", "  const showOperation =")} {
+		if !strings.Contains(area, `showPanel();`) || strings.Contains(area, `showPanel("Plugin installation", true)`) || strings.Contains(area, "overlayDismissible = true") {
+			t.Fatal("operation rendering or submission allowed backdrop dismissal")
+		}
+	}
+	rawCSS, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(rawCSS)
+	for _, want := range []string{
+		`.workspace-window.plugins-workspace-dialog button{min-height:42px;border-radius:10px;padding:.5rem .75rem;font-size:.84rem!important}`,
+		`.workspace-window.plugins-workspace-dialog .workspace-header-close{width:42px;height:42px;min-height:42px;padding:0;border-radius:10px}`,
+		`.plugins-overlay-identity h3{flex:1;margin:0;min-width:0}`,
+		`.plugins-install-content .plugins-overlay-identity button{flex:none;margin:0 0 0 auto}`,
+		`.plugins-pagination button{flex:none;margin:0}`,
+		`.plugins-search button{flex:none;margin:0}`,
+	} {
+		if !strings.Contains(css, want) {
+			t.Fatal("unified plugin geometry missing", want)
+		}
+	}
+	for _, rule := range strings.Split(css, "}") {
+		selector, declarations, ok := strings.Cut(rule, "{")
+		if ok && strings.Contains(selector, ".plugins-") && strings.Contains(selector, "button") && (strings.Contains(declarations, "min-height:34px") || strings.Contains(declarations, "border-radius:8px") || strings.Contains(declarations, "padding:.72rem")) {
+			t.Fatal("conflicting plugin button geometry", rule)
+		}
+		if ok && strings.Contains(selector, ".plugins-result-card") && strings.Contains(declarations, "min-height:42px") {
+			t.Fatal("button geometry applied to article cards")
+		}
 	}
 }

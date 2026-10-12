@@ -1496,15 +1496,17 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 
 /* Plugin Workspace: bounded cards and reusable metadata/installation overlay. */
 .plugins-workspace-dialog{position:absolute;width:min(980px,calc(100vw - 1rem));height:min(740px,var(--jv-workspace-height,calc(100dvh - 76px)));min-width:min(540px,calc(100vw - 1rem));min-height:min(360px,calc(100dvh - 76px));max-width:calc(100vw - 1rem);max-height:calc(100dvh - 76px);padding:0;overflow:hidden;resize:both;border:1px solid var(--jv-border-strong,#3b454e);border-radius:16px;background:var(--jv-surface,#171d22);color:var(--jv-text,#eef1f4);box-shadow:0 28px 80px #000b}
+.workspace-window.plugins-workspace-dialog button{min-height:42px;border-radius:10px;padding:.5rem .75rem;font-size:.84rem!important}
+.workspace-window.plugins-workspace-dialog .workspace-header-close{width:42px;height:42px;min-height:42px;padding:0;border-radius:10px}
 .plugins-workspace-shell{display:flex;flex-direction:column;height:100%;min-height:0;min-width:0}
 .plugins-workspace-header{display:flex;flex:none;align-items:center;justify-content:space-between;gap:1rem;min-height:48px;padding:var(--jv-space-sm,.55rem) var(--jv-workspace-edge,.8rem);border-bottom:1px solid var(--jv-border,#303942);cursor:move;touch-action:none}
 .plugins-workspace-header>div{display:flex;align-items:center;gap:.5rem}.plugins-workspace-header .eyebrow{margin:0}.plugins-workspace-header h2{margin:0;font-size:1.05rem}
 .plugins-server-context{flex:none;margin:0;padding:.6rem var(--jv-workspace-edge,.8rem);font-size:.86rem;color:var(--jv-muted,#aeb8c0);border-bottom:1px solid var(--jv-border,#303942)}
 .plugins-workspace-tabs{display:flex;flex:none;gap:var(--jv-space-xs,.35rem);padding:.42rem var(--jv-workspace-edge,.8rem);border-bottom:1px solid var(--jv-border,#303942);background:var(--jv-surface-sunken,#11171b);overflow-x:auto}
-.plugins-workspace-tabs button{min-height:34px;padding:.38rem .7rem;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--jv-muted,#aeb8c0);font-size:.86rem}
+.plugins-workspace-tabs button{border:1px solid transparent;background:transparent;color:var(--jv-muted,#aeb8c0)}
 .plugins-workspace-tabs button[aria-selected="true"]{border-color:#496454;background:#25382e;color:#c8f2d7}
 .plugins-workspace-body{container-type:inline-size;display:flex;flex-direction:column;gap:.55rem;flex:1;min-height:0;min-width:0;overflow:hidden;padding:var(--jv-workspace-edge,.8rem);overscroll-behavior:contain}
-.plugins-search{display:flex;flex:none;align-items:center;flex-wrap:nowrap;gap:.5rem;margin:0}.plugins-search-field{flex:1 1 120px;min-width:120px;margin:0}.plugins-search-filters{display:flex;flex:none;align-items:center;gap:.5rem;margin-left:auto}.plugins-search-field input{width:100%;margin-bottom:0}.plugins-search button{flex:none;padding:.72rem 1rem;margin:0}.plugins-filter{white-space:nowrap;display:flex;flex:none;align-items:center;gap:.4rem;margin:0;font-size:.82rem}.plugins-filter input{appearance:none;position:relative;flex:none;width:28px;height:16px;border:1px solid var(--jv-border-strong);border-radius:12px;background:var(--jv-surface-sunken);margin:0;cursor:pointer}.plugins-filter input::before{content:"";position:absolute;width:10px;height:10px;top:2px;left:2px;border-radius:50%;background:var(--jv-muted)}.plugins-filter input:checked{background:var(--jv-success);border-color:var(--jv-success)}.plugins-filter input:checked::before{left:14px;background:var(--jv-text)}.plugins-filter input:focus-visible{outline:2px solid var(--jv-success);outline-offset:3px}.plugins-source-fixed input{cursor:default}.plugins-source-unavailable{opacity:.55}.plugins-source-unavailable input{cursor:not-allowed}
+.plugins-search{display:flex;flex:none;align-items:center;flex-wrap:nowrap;gap:.5rem;margin:0}.plugins-search-field{flex:1 1 120px;min-width:120px;margin:0}.plugins-search-filters{display:flex;flex:none;align-items:center;gap:.5rem;margin-left:auto}.plugins-search-field input{width:100%;margin-bottom:0}.plugins-search button{flex:none;margin:0}.plugins-filter{white-space:nowrap;display:flex;flex:none;align-items:center;gap:.4rem;margin:0;font-size:.82rem}.plugins-filter input{appearance:none;position:relative;flex:none;width:28px;height:16px;border:1px solid var(--jv-border-strong);border-radius:12px;background:var(--jv-surface-sunken);margin:0;cursor:pointer}.plugins-filter input::before{content:"";position:absolute;width:10px;height:10px;top:2px;left:2px;border-radius:50%;background:var(--jv-muted)}.plugins-filter input:checked{background:var(--jv-success);border-color:var(--jv-success)}.plugins-filter input:checked::before{left:14px;background:var(--jv-text)}.plugins-filter input:focus-visible{outline:2px solid var(--jv-success);outline-offset:3px}.plugins-source-fixed input{cursor:default}.plugins-source-unavailable{opacity:.55}.plugins-source-unavailable input{cursor:not-allowed}
 .plugins-workspace-state{flex:none;min-height:20px;color:var(--jv-muted,#aeb8c0);font-size:.82rem;line-height:1.4;margin:0}.plugins-workspace-state:empty{visibility:hidden}
 .plugins-results{--plugins-card-height:144px;display:grid;flex:1;min-height:0;width:100%;grid-template-columns:minmax(0,1fr);grid-auto-rows:var(--plugins-card-height);align-content:start;gap:.55rem;min-width:0;max-width:1080px;margin-inline:auto;overflow:auto;scrollbar-gutter:stable}
 .plugins-result-card{display:flex;flex-direction:column;height:var(--plugins-card-height);box-sizing:border-box;min-width:0;overflow:hidden;cursor:pointer;padding:.75rem;border:1px solid var(--jv-border,#303942);border-radius:var(--jv-radius,10px);background:var(--jv-surface-sunken,#11171b);overflow-wrap:anywhere}
@@ -1529,7 +1531,7 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 @container(min-width:580px){.plugins-results{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @container(min-width:860px){.plugins-results{grid-template-columns:repeat(3,minmax(0,1fr))}}
 .plugins-result-card>.plugins-card-badges{flex:none;flex-wrap:nowrap;height:24px;min-width:0;overflow:hidden;margin:.15rem 0}.plugins-result-card .plugins-badge{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.plugins-pagination{display:flex;flex:none;min-height:44px;align-items:center;justify-content:flex-end;gap:.6rem;margin-top:auto;font-size:.82rem}.plugins-pagination button{flex:none;padding:.72rem 1rem;margin:0}
+.plugins-pagination{display:flex;flex:none;min-height:44px;align-items:center;justify-content:flex-end;gap:.6rem;margin-top:auto;font-size:.82rem}.plugins-pagination button{flex:none;margin:0}
 @container(max-width:680px){.plugins-search{flex-wrap:wrap}.plugins-search-field{flex-basis:160px}}
 .plugins-workspace-dialog [hidden]{display:none!important}
 @media(max-width:700px){.plugins-workspace-dialog{position:fixed;inset:52px .25rem .25rem .25rem!important;width:auto!important;height:calc(100dvh - 52px - .25rem)!important;min-width:0;min-height:0;max-width:none;max-height:calc(100dvh - 52px - .25rem);resize:none}.plugins-workspace-header{cursor:default;touch-action:auto}}
@@ -1538,14 +1540,12 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 .plugins-install-panel{position:absolute;inset:0;z-index:5;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#0008;padding:clamp(.4rem,2%,1rem)}
 .plugins-install-content{container-type:inline-size;width:min(100%,760px);max-height:100%;min-width:0;overflow:auto;overscroll-behavior:contain;overflow-wrap:anywhere;padding:.75rem;background:var(--jv-surface,#171d22);border:1px solid var(--jv-border,#303942);border-radius:12px;box-sizing:border-box}
 .plugins-install-content h3{margin-top:0}
-/* Restore normal action padding where the shared workspace rule reduces it. */
-.plugins-install-content button{padding:.72rem 1rem}
 .plugins-install-content button{margin:.5rem .5rem 0 0}
 .plugins-install-warning{padding:.75rem;border:1px solid #735b35;border-radius:8px;background:#4c3f1f55;font-weight:600}
 
 .plugins-icon-tile.has-logo{color:transparent}
 .plugins-overlay-header{display:block;padding:0 0 .35rem;background:transparent;z-index:auto;border-bottom:1px solid var(--jv-border,#303942)}
-.plugins-overlay-identity{display:flex;align-items:center;gap:.65rem;min-width:0}.plugins-overlay-identity h3{margin:0;min-width:0}
+.plugins-overlay-identity{display:flex;align-items:center;gap:.65rem;min-width:0}.plugins-overlay-identity h3{flex:1;margin:0;min-width:0}.plugins-install-content .plugins-overlay-identity button{flex:none;margin:0 0 0 auto}
 .plugins-overlay-description{font-size:.9rem;line-height:1.45;margin:.3rem 0}
 .plugins-overlay-section{padding:.2rem 0;border-bottom:1px solid var(--jv-border,#303942)}.plugins-overlay-section h4{margin:0 0 .2rem;font-size:.9rem;line-height:1.25}.plugins-overlay-section p{margin:.2rem 0;line-height:1.35}
 .plugins-info-rows{display:flex;flex-wrap:wrap;gap:.12rem 1rem;margin:.15rem 0;font-size:.85rem;line-height:1.35}
@@ -1568,8 +1568,6 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 
 /* Compact single-column review is designed to fit normal FHD workspaces.
    Auto overflow keeps content reachable whenever it exceeds available space. */
-.plugins-review-install-action{display:flex;justify-content:flex-start;padding:.25rem 0}
-.plugins-install-content .plugins-review-install-action button{margin:0}
 .plugins-file-row{display:flex;align-items:baseline;justify-content:space-between;gap:.75rem}
 .plugins-file-row .plugins-list-secondary{display:inline;flex:none}
 .plugins-publisher-dependency-row{display:flex;align-items:baseline;gap:.65rem;margin:.15rem 0}

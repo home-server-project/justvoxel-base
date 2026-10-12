@@ -261,22 +261,23 @@ func TestPluginCatalogQueryAcceptsBoundedLimit(t *testing.T) {
 
 func TestPluginInventoryManagedIdentities(t *testing.T) {
 	for _, tc := range []struct {
-		name, filename, descriptor, management string
+		name, filename, descriptor, management, iconProjectID string
 	}{
-		{"geyser filename", "geyser-spigot.jar", "name: Example\n", "justvoxel"},
-		{"floodgate filename", "floodgate-spigot.jar", "name: Example\n", "justvoxel"},
-		{"viaversion filename", "viaversion.jar", "name: Example\n", "justvoxel"},
-		{"case insensitive filename", "ViaVersion.jar", "name: Example\n", "justvoxel"},
-		{"geyser main", "renamed-geyser.jar", "name: Example\nmain: org.geysermc.geyser.platform.spigot.GeyserSpigotPlugin\n", "justvoxel"},
-		{"floodgate main", "renamed-floodgate.jar", "name: Example\nmain: 'org.geysermc.floodgate.SpigotPlugin' # identity\n", "justvoxel"},
-		{"viaversion main", "renamed-via.jar", "name: Example\nmain: com.viaversion.viaversion.ViaVersionPlugin\n", "justvoxel"},
-		{"legacy viaversion main", "legacy-via.jar", "name: Example\nmain: us.myles.ViaVersion.ViaVersionPlugin\n", "justvoxel"},
-		{"misleading geyser name", "manual.jar", "name: Geyser\nmain: example.ManualPlugin\n", "manual"},
-		{"misleading geyser spigot name", "manual.jar", "name: Geyser-Spigot\n", "manual"},
-		{"misleading floodgate name", "manual.jar", "name: Floodgate\n", "manual"},
-		{"misleading viaversion name", "manual.jar", "name: ViaVersion\n", "manual"},
-		{"similar filename", "viaversion-custom.jar", "name: ViaVersion\n", "manual"},
-		{"similar main", "manual.jar", "name: ViaVersion\nmain: com.viaversion.viaversion.ViaVersionPluginFake\n", "manual"},
+		{"geyser filename", "geyser-spigot.jar", "name: Example\n", "justvoxel", "wKkoqHrH"},
+		{"floodgate filename", "floodgate-spigot.jar", "name: Example\n", "justvoxel", "bWrNNfkb"},
+		{"viaversion filename", "viaversion.jar", "name: Example\n", "justvoxel", "P1OZGk5p"},
+		{"case insensitive filename", "ViaVersion.jar", "name: Example\n", "justvoxel", "P1OZGk5p"},
+		{"geyser main", "renamed-geyser.jar", "name: Example\nmain: org.geysermc.geyser.platform.spigot.GeyserSpigotPlugin\n", "justvoxel", "wKkoqHrH"},
+		{"floodgate main", "renamed-floodgate.jar", "name: Example\nmain: 'org.geysermc.floodgate.SpigotPlugin' # identity\n", "justvoxel", "bWrNNfkb"},
+		{"viaversion main", "renamed-via.jar", "name: Example\nmain: com.viaversion.viaversion.ViaVersionPlugin\n", "justvoxel", "P1OZGk5p"},
+		{"legacy viaversion main", "legacy-via.jar", "name: Example\nmain: us.myles.ViaVersion.ViaVersionPlugin\n", "justvoxel", "P1OZGk5p"},
+		{"ordinary manual plugin", "manual.jar", "name: Example\nmain: example.ManualPlugin\n", "manual", ""},
+		{"misleading geyser name", "manual.jar", "name: Geyser\nmain: example.ManualPlugin\n", "manual", ""},
+		{"misleading geyser spigot name", "manual.jar", "name: Geyser-Spigot\n", "manual", ""},
+		{"misleading floodgate name", "manual.jar", "name: Floodgate\n", "manual", ""},
+		{"misleading viaversion name", "manual.jar", "name: ViaVersion\n", "manual", ""},
+		{"similar filename", "viaversion-custom.jar", "name: ViaVersion\n", "manual", ""},
+		{"similar main", "manual.jar", "name: ViaVersion\nmain: com.viaversion.viaversion.ViaVersionPluginFake\n", "manual", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			data := t.TempDir()
@@ -288,6 +289,15 @@ func TestPluginInventoryManagedIdentities(t *testing.T) {
 			plugins, err := readPluginInventory(data)
 			if err != nil || len(plugins) != 1 {
 				t.Fatalf("inventory: %v %#v", err, plugins)
+			}
+			if plugins[0].IconProjectID != tc.iconProjectID {
+				t.Fatalf("display icon: %#v, want %q", plugins[0], tc.iconProjectID)
+			}
+			if plugins[0].ProjectID != "" || plugins[0].VersionID != "" {
+				t.Fatalf("display identity caused adoption: %#v", plugins[0])
+			}
+			if _, err := os.Stat(filepath.Join(data, ".justvoxel", "plugins.json")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("inventory created ownership manifest: %v", err)
 			}
 			wantStatus := "Update status unknown - manually managed"
 			if tc.management == "justvoxel" {
@@ -604,9 +614,19 @@ func TestPluginInventoryExposesOnlyVerifiedManifestIdentity(t *testing.T) {
 			if item.Management != wantManagement {
 				t.Fatalf("ownership changed: %#v", item)
 			}
+			wantIcon := ""
+			if kind == "justvoxel" {
+				wantIcon = "wKkoqHrH"
+			}
+			if item.IconProjectID != wantIcon {
+				t.Fatalf("untrusted display identity: %#v", item)
+			}
 			encoded, err := json.Marshal(item)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if bytes.Contains(encoded, []byte(`"icon_project_id":`)) != (kind == "justvoxel") {
+				t.Fatalf("optional display identity: %s", encoded)
 			}
 			for _, field := range []string{`"project_id":`, `"version_id":`} {
 				if bytes.Contains(encoded, []byte(field)) != (kind == "verified") {

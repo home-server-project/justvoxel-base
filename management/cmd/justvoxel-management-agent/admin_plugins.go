@@ -52,6 +52,7 @@ type installedPlugin struct {
 	Name           string `json:"name,omitempty"`
 	Version        string `json:"version,omitempty"`
 	ProjectID      string `json:"project_id,omitempty"`
+	IconProjectID  string `json:"icon_project_id,omitempty"` // Display only; never generic ownership evidence.
 	VersionID      string `json:"version_id,omitempty"`
 	Filename       string `json:"filename"`
 	Management     string `json:"management"`
@@ -319,15 +320,27 @@ var managedPluginMain = regexp.MustCompile(`(?m)^[ 	]*main:\s*['"]?([A-Za-z0-9_.
 func classifyPluginManagement(item *installedPlugin, main string) {
 	owned := false
 	switch strings.ToLower(item.Filename) {
-	case "geyser-spigot.jar", "floodgate-spigot.jar", "viaversion.jar":
+	case "geyser-spigot.jar":
 		owned = true
+		item.IconProjectID = "wKkoqHrH"
+	case "floodgate-spigot.jar":
+		owned = true
+		item.IconProjectID = "bWrNNfkb"
+	case "viaversion.jar":
+		owned = true
+		item.IconProjectID = "P1OZGk5p"
 	}
 	switch main {
-	case "org.geysermc.geyser.platform.spigot.GeyserSpigotPlugin",
-		"org.geysermc.floodgate.SpigotPlugin",
-		"com.viaversion.viaversion.ViaVersionPlugin",
+	case "org.geysermc.geyser.platform.spigot.GeyserSpigotPlugin":
+		owned = true
+		item.IconProjectID = "wKkoqHrH"
+	case "org.geysermc.floodgate.SpigotPlugin":
+		owned = true
+		item.IconProjectID = "bWrNNfkb"
+	case "com.viaversion.viaversion.ViaVersionPlugin",
 		"us.myles.ViaVersion.ViaVersionPlugin":
 		owned = true
+		item.IconProjectID = "P1OZGk5p"
 	}
 	if owned {
 		item.Management = "justvoxel"

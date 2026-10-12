@@ -23,6 +23,7 @@ type InstalledPlugin struct {
 	Name           string `json:"name,omitempty"`
 	Version        string `json:"version,omitempty"`
 	ProjectID      string `json:"project_id,omitempty"`
+	IconProjectID  string `json:"icon_project_id,omitempty"`
 	VersionID      string `json:"version_id,omitempty"`
 	Filename       string `json:"filename"`
 	Management     string `json:"management"`

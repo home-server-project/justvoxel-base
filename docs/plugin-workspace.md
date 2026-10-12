@@ -43,16 +43,38 @@ Progress and terminal results retain the selected identity in browser memory,
 bound to the returned operation ID; after reload they use fallback. Inventory
 exposes the existing manifest project/release IDs only after exact
 filename, SHA-512 and descriptor ownership verification. Installed and Updates
-reuse the same-origin logo helper for that authoritative project ID; unidentified
-JARs retain fallback without identity searches or changes to ownership records.
+reuse the same-origin logo helper, preferring the verified `project_id`, then the
+display-only `IconProjectID` (`icon_project_id` on the wire), then initials.
+JustVoxel-managed components receive explicit official Modrinth display identities
+from the existing exact trusted filename/main-class classification: Geyser
+`wKkoqHrH`, Floodgate `bWrNNfkb`, and ViaVersion `P1OZGk5p`. Floodgate's identity
+is visual only and does not change its source or management. `IconProjectID`
+does not alter ownership, adoption, update ownership, install eligibility,
+manifest verification or artifact verification. Manual/unmanaged plugins receive
+no display identity and are never searched by name or filename, or guessed, to
+obtain a logo. Unidentified JARs retain initials without ownership changes.
 The combined overlay keeps one compact column, with metadata pairs sharing
 lines where they fit and each install file showing its filename and size in one
-row. Successful review places Install immediately after identity and badges,
-without a Cancel/Install footer. Info and terminal Done/Close actions align to
-the right. The compact layout is designed to fit the normal FHD workspace
+row. Successful review places Install at the top-right of the identity header,
+on the same horizontal row as the logo and plugin name. The action keeps a fixed
+flex size while the identity uses the remaining width; description and version
+badges stay below. There is no separate Install lane or Cancel/Install footer.
+Info and terminal Done/Close actions align to the right. The compact layout is designed to fit the normal FHD workspace
 without an internal scrollbar. Overflow remains auto as a safety fallback so
 content is never clipped. Normal-FHD visual acceptance remains a human real-VM
 check.
+
+Passive Info, read-only rejected information, pre-install Review and review
+preparation close by clicking directly on the dark backdrop or pressing Esc.
+Clicks inside the content never dismiss the overlay. Submitting an installation
+and operation rendering, including backup, install, restart, verification,
+rollback and needs-attention, are not backdrop-dismissible. Existing explicit
+Close/Done controls and Esc behavior remain, with keyboard focus restored.
+All actual Plugins buttons follow Control Center geometry: minimum height 42px,
+border radius 10px, compact consistent horizontal padding and text sizing for
+primary and secondary actions, including Previous/Next. The header X is an icon
+button exactly 42px by 42px with zero internal padding. Source/filter switches
+remain switches; whole-card article selections retain their card geometry.
 
 Paper and Purpur support plugins. Vanilla displays an unsupported state.
 The workspace reuses appliance configuration discovery and runtime status for
@@ -124,9 +146,9 @@ publisher entries remain informational without duplicating required entries.
 Restart explains the verified cold backup, Minecraft start/restart for plugin
 verification and return to an original stopped state; it does not promise
 continuous uptime. Players appears only when the plan requires player-aware
-confirmation, with online count and available names. The footer offers Cancel
-and Install. This source implementation still requires human real-VM visual
-acceptance.
+confirmation, with online count and available names. Install appears at the
+top-right of the identity header; read-only information has no Install button.
+This source implementation still requires human real-VM visual acceptance.
 
 Installation uses an authoritative Management Agent plan. The browser supplies
 only Modrinth project/version IDs; it cannot choose download URLs, filenames,
@@ -165,8 +187,15 @@ no persistent artifact cache or catalog-wide download. A zero-byte descriptor
 provides no usable plugin identity. A rejected direct-plugin review opens the
 existing read-only project Info with the rejection explanation and no Install
 action. Review starts no operation, backup or Minecraft mutation. Publisher loader
-tags alone do not authorize an Install action. Install-time inspection remains
-independent and authoritative.
+tags alone do not authorize an Install action. Modrinth platform metadata listing
+Paper support is not proof that the artifact is a direct Paper plugin. Direct
+artifact inspection remains authoritative for plugins-directory installs.
+Unsupported artifacts may require an external loader or a different installation
+path and are refused; JustVoxel does not claim which loader is required. No
+Ignite or other mod-loader support or mods directory is added, and releases such
+as NoDim or Slumber are not made installable by publisher metadata. The WebUI
+explains this distinction while preserving the Agent's fail-closed rejection.
+Install-time inspection remains independent and authoritative.
 
 All needed JARs are downloaded, size/hash checked and inspected in private Agent
 staging **before Minecraft downtime**. Staged Paper/Bukkit descriptors must provide
@@ -237,6 +266,15 @@ Installed distinguishes **JustVoxel managed**, **Managed by Plugins**, and
 entry, exact filename and current matching JAR hash. Changed or unavailable files
 show ownership attention instead of silently being adopted. Generic update and
 removal are not available yet.
+
+A transaction JAR can temporarily exist before runtime verification and ownership
+manifest commit. Installed and Updates check the current installation operation
+and intentionally hide inventory during unverified or unresolved operations,
+including `needs_attention`, clearing stale cards and showing a verification/recovery
+message. This prevents transaction-created artifacts from being misrepresented as
+manual/unmanaged. Refresh and tabs remain usable, and Discover remains available.
+No current operation, or `succeeded`, `rolled_back` and `resolved` states, expose
+stable inventory again. Rollback semantics are unchanged.
 
 A failure after placement stops the failed runtime and removes only JARs created
 by that transaction whose current SHA-512 still matches. Changed files are never
