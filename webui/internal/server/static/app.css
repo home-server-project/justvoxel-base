@@ -978,7 +978,7 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
 .workspace-window :is(.system-update-dialog-header,.system-monitor-header,.storage-workspace-header,.backups-workspace-header,.minecraft-workspace-header,.system-workspace-header,.migration-workspace-header,.version-workspace-header){flex:none;min-height:48px;padding:var(--jv-space-sm) var(--jv-workspace-edge);border-color:var(--jv-border)}
 .workspace-window :is(.system-update-header-actions,.system-monitor-header-actions,.storage-workspace-header-actions,.backups-workspace-header-actions,.minecraft-workspace-header-actions,.system-workspace-header-actions,.migration-workspace-header-actions){display:flex;align-items:center;gap:var(--jv-space-xs);flex:none}
 .workspace-window :is(.minecraft-workspace-tabs,.system-workspace-tabs,.migration-workspace-tabs,.version-workspace-tabs){flex:none;gap:var(--jv-space-xs);padding:.42rem var(--jv-workspace-edge);border-color:var(--jv-border);background:var(--jv-surface-sunken)}
-.workspace-window :is(.minecraft-workspace-tabs,.system-workspace-tabs,.migration-workspace-tabs,.version-workspace-tabs) button{min-height:34px;padding:.38rem .7rem;border-radius:8px;font-size:.86rem}
+.workspace-window :is(.minecraft-workspace-tabs,.system-workspace-tabs,.migration-workspace-tabs,.version-workspace-tabs,.plugins-workspace-tabs) button{min-height:34px;padding:.38rem .7rem;border-radius:8px;font-size:.86rem}
 .workspace-window :is(.system-update-dialog-body,.system-monitor-body,.storage-workspace-body,.backups-workspace-body,.minecraft-workspace-body,.system-workspace-body,.migration-workspace-body,.version-workspace-body){min-width:0;min-height:0;padding:var(--jv-workspace-edge);overscroll-behavior:contain}
 .workspace-window :is(.system-update-state,.system-monitor-state,.storage-workspace-state,.backups-workspace-state,.minecraft-workspace-state,.system-workspace-state,.migration-workspace-state,[data-version-state]){color:var(--jv-muted);font-size:.82rem;line-height:1.4}
 
@@ -1496,7 +1496,6 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 
 /* Plugin Workspace: bounded cards and reusable metadata/installation overlay. */
 .plugins-workspace-dialog{position:absolute;width:min(980px,calc(100vw - 1rem));height:min(740px,var(--jv-workspace-height,calc(100dvh - 76px)));min-width:min(540px,calc(100vw - 1rem));min-height:min(360px,calc(100dvh - 76px));max-width:calc(100vw - 1rem);max-height:calc(100dvh - 76px);padding:0;overflow:hidden;resize:both;border:1px solid var(--jv-border-strong,#3b454e);border-radius:16px;background:var(--jv-surface,#171d22);color:var(--jv-text,#eef1f4);box-shadow:0 28px 80px #000b}
-.workspace-window.plugins-workspace-dialog button{height:36px;min-height:36px;border-radius:8px;font-size:.84rem!important}
 .plugins-workspace-shell{display:flex;flex-direction:column;height:100%;min-height:0;min-width:0}
 .plugins-workspace-header{display:flex;flex:none;align-items:center;justify-content:space-between;gap:1rem;min-height:48px;padding:var(--jv-space-sm,.55rem) var(--jv-workspace-edge,.8rem);border-bottom:1px solid var(--jv-border,#303942);cursor:move;touch-action:none}
 .plugins-workspace-header>div{display:flex;align-items:center;gap:.5rem}.plugins-workspace-header .eyebrow{margin:0}.plugins-workspace-header h2{margin:0;font-size:1.05rem}

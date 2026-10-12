@@ -70,11 +70,11 @@ Clicks inside the content never dismiss the overlay. Submitting an installation
 and operation rendering, including backup, install, restart, verification,
 rollback and needs-attention, are not backdrop-dismissible. Existing explicit
 Close/Done controls and Esc behavior remain, with keyboard focus restored.
-All actual Plugins buttons follow Control Center geometry: minimum height 42px,
-border radius 10px, compact consistent horizontal padding and text sizing for
-primary and secondary actions, including Previous/Next. The header X is an icon
-button exactly 42px by 42px with zero internal padding. Source/filter switches
-remain switches; whole-card article selections retain their card geometry.
+Plugins tabs use the same shared workspace geometry as System, Minecraft,
+Migration and Version: minimum height 34px, padding `.38rem .7rem`, radius 8px
+and font size `.86rem`. Header Refresh/Close and normal actions retain their
+shared workspace button styling. Source/filter switches remain switches;
+whole-card article selections retain their card geometry.
 
 Paper and Purpur support plugins. Vanilla displays an unsupported state.
 The workspace reuses appliance configuration discovery and runtime status for
@@ -91,7 +91,9 @@ cursors; the displayed page number comes from that history. Searches, filters an
 fresh Discover sessions reset it. Capacity changes retain the current raw cursor
 as the start of a fresh history, preventing overlap with older-capacity pages.
 
-Discover searches Modrinth server plugins. Compatible only and Release only
+Discover searches Modrinth server plugins live while typing, with a 250 ms
+debounce and cancellation of stale requests. Enter submits immediately.
+Compatible only and Release only
 start enabled. Compatibility means **Compatible according to publisher metadata**;
 JustVoxel has not verified third-party runtime compatibility. Required, optional,
 incompatible and embedded dependencies are publisher metadata only. If the active
@@ -245,9 +247,17 @@ The plugin directory is fsynced after publication. Every potential
 placement has private durable transaction evidence under
 `/var/lib/justvoxel/management/plugin-install/<operation-id>/`.
 
-Minecraft starts for bounded RCON readiness and the existing
-`verify-minecraft-stack` checks. Every newly installed plugin/dependency must
-also appear as an exact, non-failed plugin-list entry in RCON `plugins` output.
+Minecraft starts for bounded RCON `rcon-cli list` readiness and the existing
+`verify-minecraft-stack` checks. `rcon-cli plugins` is not used for plugin identity.
+Every newly installed plugin/dependency must appear by exact descriptor name
+in the current Paper startup log, `<DataPath>/logs/latest.log`: both a Paper or
+Bukkit PluginInitializerManager inventory entry and `[PluginName] Enabling ...`
+evidence are required. The logger identity is authoritative even if the enable
+message spells the name differently. Only evidence after the last
+`[PluginInitializerManager] Initializing plugins...` marker counts. Reads are
+bounded and confined to a regular file without symlinks; malformed, incomplete,
+duplicate or detected load/enable failure evidence fails closed and runs the
+existing rollback.
 File existence or publisher metadata alone is insufficient. If Minecraft was
 running before maintenance, successful installation leaves it running. If it
 was intentionally stopped, it starts temporarily for verification and returns
@@ -274,7 +284,10 @@ including `needs_attention`, clearing stale cards and showing a verification/rec
 message. This prevents transaction-created artifacts from being misrepresented as
 manual/unmanaged. Refresh and tabs remain usable, and Discover remains available.
 No current operation, or `succeeded`, `rolled_back` and `resolved` states, expose
-stable inventory again. Rollback semantics are unchanged.
+stable inventory again. A lightweight re-check runs only while an inventory tab
+is blocked, and automatically loads that requested inventory once the operation
+is settled. Switching to Discover or closing Plugins clears this timer.
+Rollback semantics are unchanged.
 
 A failure after placement stops the failed runtime and removes only JARs created
 by that transaction whose current SHA-512 still matches. Changed files are never
@@ -293,7 +306,8 @@ transaction evidence, files, ownership and the original service state. It accept
 only all expected installed files with exact hashes and ownership, or all
 transaction-created files absent with no manifest claim on those artifacts.
 Running Minecraft must pass the existing stack verifier; an installed state must
-also prove the expected active plugin identities through RCON. Originally stopped
+also prove the expected active plugin identities from the current startup log
+using the same inventory-plus-enable checks. Originally stopped
 Minecraft must remain stopped; re-check does not start it. Unproven states return
 conflict and retain maintenance exclusion and evidence. Re-check never changes
 plugin files, retries installation or restores backups. Proven states become
@@ -308,7 +322,12 @@ not touched.
 
 Review, real persistent progress, completion and failure share one workspace
 panel. Progress uses recorded stages/status, without invented timing. Reopening
-the workspace discovers the current plugin installation. Success offers View in
+the workspace automatically resumes only a non-settled installation, including
+`needs_attention`; prior `succeeded`, `rolled_back` or `resolved` operations do
+not reopen automatically. Review and final Install both check for an existing
+non-settled operation and resume it instead of starting another installation.
+Progress updates retain the same operation identity header and logo.
+Success offers View in
 Installed, Install another plugin and Done. Failure reports restored prior state
 or administrator attention; it never displays fake success. Terminal results use
 the existing audit event mechanism with `plugin_install` and the requested

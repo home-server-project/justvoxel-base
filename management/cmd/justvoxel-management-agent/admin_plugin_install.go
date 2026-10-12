@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/zip"
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -23,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/sys/unix"
 )
@@ -984,158 +986,232 @@ func verifyPluginRuntime(ctx context.Context, version string) error {
 	return err
 }
 
-// Accept legacy comma lists and Paper's grouped Server/Bukkit/Paper lists.
-// Only structurally identified entries count; compare names literally and carry
-// failure colors across tokens. Unsupported formatting fails closed.
-var pluginANSIColor = regexp.MustCompile("\x1b\\[([0-9;]*)m")
-var pluginColorCode = regexp.MustCompile(`§[0-9a-fk-orxA-FK-ORX]`)
-var pluginListHeader = regexp.MustCompile(`^((?:ℹ\s*)?Server )?Plugins \(([0-9]+)\):`)
-var pluginListGroup = regexp.MustCompile(`^(Bukkit|Paper) Plugins(?: \([0-9]+\))?:`)
+// Startup proof is confined to the last initialization segment in latest.log.
+const pluginStartupLogLimit = 16 << 20
+const pluginStartupLineLimit = 16 << 10
 
-func pluginNamesLoaded(raw []byte, expected []string) bool {
-	if len(raw) > 64<<10 {
-		return false
-	}
-	text := pluginANSIColor.ReplaceAllStringFunc(string(raw), func(s string) string {
-		codes := strings.TrimSuffix(strings.TrimPrefix(s, "\x1b["), "m")
-		var normalized strings.Builder
-		for _, code := range strings.Split(codes, ";") {
-			switch code {
-			case "", "0", "39":
-				normalized.WriteString("§r")
-			case "31", "91":
-				normalized.WriteString("§c")
-			case "30", "32", "33", "34", "35", "36", "37", "90", "92", "93", "94", "95", "96", "97":
-				normalized.WriteString("§a")
-			case "1", "2", "3", "4", "5", "7", "8", "9", "22", "23", "24", "25", "27", "28", "29":
-			default:
-				normalized.WriteString("§?")
+var pluginStartupPrefix = regexp.MustCompile(`^(?:\[[0-9: .-]{1,64}\] )?\[[^\]\r\n]{1,256}\]:\s*`)
+var pluginStartupInventory = regexp.MustCompile(`^\[PluginInitializerManager\] (Paper|Bukkit) plugins \(([0-9]+)\):$`)
+var pluginStartupEntry = regexp.MustCompile(`^([A-Za-z0-9_][A-Za-z0-9_.-]{0,127}) \(([^\r\n]{1,256})\)$`)
+
+func splitPluginStartupEntries(line string) ([]string, bool) {
+	var entries []string
+	start, depth := 0, 0
+	for i := 0; i < len(line); i++ {
+		switch line[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth < 0 || (depth == 0 && i+1 < len(line) && !strings.HasPrefix(line[i+1:], ", ")) {
+				return nil, false
 			}
-		}
-		return normalized.String()
-	})
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	lines := strings.Split(strings.TrimSpace(text), "\n")
-	if len(lines) == 0 {
-		return false
-	}
-	plain := strings.TrimSpace(pluginColorCode.ReplaceAllString(lines[0], ""))
-	header := pluginListHeader.FindStringSubmatch(plain)
-	if header == nil {
-		return false
-	}
-	count, err := strconv.Atoi(header[2])
-	if err != nil || count > 4096 {
-		return false
-	}
-	entries := map[string]bool{}
-	duplicates := map[string]bool{}
-	total := 0
-	red := false
-	parse := func(rawLine string) bool {
-		failed := false
-		var token strings.Builder
-		finish := func() bool {
-			name := strings.TrimSpace(token.String())
-			token.Reset()
-			if name == "" {
-				return false
-			}
-			if !pluginNamePattern.MatchString(name) {
-				return false
-			}
-			if _, exists := entries[name]; exists {
-				duplicates[name] = true
-			}
-			entries[name] = !failed
-			total++
-			failed = false
-			return true
-		}
-		runes := []rune(rawLine)
-		for i := 0; i < len(runes); i++ {
-			c := runes[i]
-			if c == '§' {
-				if i+1 >= len(runes) {
-					return false
+		case ',':
+			if depth == 0 {
+				if !strings.HasPrefix(line[i:], ", ") {
+					return nil, false
 				}
+				entries = append(entries, line[start:i])
 				i++
-				code := runes[i]
-				if code == 'c' || code == 'C' || code == '4' {
-					red = true
-				} else if strings.ContainsRune("012356789abdefrABDEFR", code) {
-					red = false
-				} else if !strings.ContainsRune("klmnoxKLMNOX", code) {
-					return false
-				}
-				continue
-			}
-			if c == ',' {
-				if !finish() {
-					return false
-				}
-				continue
-			}
-			if c < 32 && c != '\t' {
-				return false
-			}
-			token.WriteRune(c)
-			if red && c != ' ' && c != '\t' {
-				failed = true
+				start = i + 1
 			}
 		}
-		if strings.TrimSpace(token.String()) == "" {
-			return total == 0
-		}
-		return finish()
 	}
-	colon := strings.Index(lines[0], ":")
-	if colon < 0 {
+	if depth != 0 {
+		return nil, false
+	}
+	return append(entries, line[start:]), true
+}
+
+func pluginStartupNamesLoaded(raw []byte, expected []string) bool {
+	if len(raw) > pluginStartupLogLimit || !utf8.Valid(raw) || len(raw) == 0 || raw[len(raw)-1] != '\n' || len(expected) == 0 || len(expected) > pluginMaxArtifacts {
 		return false
 	}
-	first := lines[0][colon+1:]
-	if strings.TrimSpace(pluginColorCode.ReplaceAllString(first, "")) != "" {
-		if !parse(first) {
-			return false
-		}
-	}
-	grouped := header[1] != ""
-	inGroup := false
-	for _, line := range lines[1:] {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		plain := strings.TrimSpace(pluginColorCode.ReplaceAllString(line, ""))
-		if grouped && pluginListGroup.MatchString(plain) {
-			inGroup = true
-			red = false // group headings are presentation, not plugin failure evidence
-			colon := strings.Index(line, ":")
-			tail := line[colon+1:]
-			if strings.TrimSpace(pluginColorCode.ReplaceAllString(tail, "")) != "" && !parse(tail) {
-				return false
-			}
-			continue
-		}
-		if !grouped || !inGroup {
-			return false
-		}
-		if strings.HasPrefix(plain, "- ") {
-			dash := strings.Index(line, "- ")
-			line = line[dash+2:]
-		}
-		if !parse(line) {
-			return false
-		}
-	}
-	if total != count {
-		return false
-	}
+	wanted := map[string]bool{}
 	for _, name := range expected {
-		if !entries[name] || duplicates[name] {
+		if !pluginNamePattern.MatchString(name) || wanted[name] {
+			return false
+		}
+		wanted[name] = true
+	}
+	inventory, enabled := map[string]bool{}, map[string]bool{}
+	groups := map[string]bool{}
+	started, valid := false, true
+	inventoryList := false
+	remaining := 0
+	scanner := bufio.NewScanner(bytes.NewReader(raw))
+	scanner.Buffer(make([]byte, 4096), pluginStartupLineLimit)
+	for scanner.Scan() {
+		line := strings.TrimSpace(pluginStartupPrefix.ReplaceAllString(scanner.Text(), ""))
+		if line == "[PluginInitializerManager] Initializing plugins..." {
+			started, valid, remaining = true, true, 0
+			inventoryList = false
+			inventory, enabled, groups = map[string]bool{}, map[string]bool{}, map[string]bool{}
+			continue
+		}
+		if !started {
+			continue
+		}
+		if strings.ContainsAny(line, "\x00") {
+			valid = false
+		}
+		if strings.HasPrefix(line, "[PluginInitializerManager] Paper plugins") || strings.HasPrefix(line, "[PluginInitializerManager] Bukkit plugins") {
+			match := pluginStartupInventory.FindStringSubmatch(line)
+			if match == nil || remaining != 0 {
+				valid = false
+				continue
+			}
+			count, err := strconv.Atoi(match[2])
+			if err != nil || count > 4096 || groups[match[1]] {
+				valid = false
+				continue
+			}
+			groups[match[1]], remaining = true, count
+			inventoryList = true
+			continue
+		}
+		if remaining > 0 {
+			if !strings.HasPrefix(line, "- ") {
+				valid = false
+				remaining = 0
+			} else {
+				entries, balanced := splitPluginStartupEntries(strings.TrimPrefix(line, "- "))
+				if !balanced {
+					valid = false
+				}
+				for _, entry := range entries {
+					match := pluginStartupEntry.FindStringSubmatch(entry)
+					if match == nil || remaining <= 0 {
+						valid = false
+						continue
+					}
+					if inventory[match[1]] {
+						valid = false
+					}
+					inventory[match[1]] = true
+					remaining--
+				}
+				continue
+			}
+		} else if inventoryList && strings.HasPrefix(line, "- ") {
+			valid = false
+		} else {
+			inventoryList = false
+		}
+		for name := range wanted {
+			logger := "[" + name + "] "
+			if strings.HasPrefix(line, logger+"Enabling ") {
+				if enabled[name] || strings.TrimSpace(strings.TrimPrefix(line, logger+"Enabling ")) == "" {
+					valid = false
+				}
+				enabled[name] = true
+			}
+			// Paper's standard failure messages identify the plugin by logger or
+			// by the name immediately following the load/enable failure phrase.
+			lower := strings.ToLower(line)
+			if strings.HasPrefix(line, logger) {
+				message := strings.ToLower(strings.TrimPrefix(line, logger))
+				for _, failure := range []string{"error ", "exception", "failed ", "could not ", "disabling "} {
+					if strings.HasPrefix(message, failure) {
+						valid = false
+					}
+				}
+			}
+			for _, phrase := range []string{"Error occurred while enabling ", "Error occurred while loading ", "Could not load plugin ", "Could not enable plugin ", "Failed to load plugin ", "Failed to enable plugin "} {
+				if at := strings.Index(lower, strings.ToLower(phrase)); at >= 0 {
+					tail := strings.TrimLeft(line[at+len(phrase):], "'\"")
+					if tail == name || strings.HasPrefix(tail, name+" ") || strings.HasPrefix(tail, name+"'") || strings.HasPrefix(tail, name+"\"") || strings.HasPrefix(tail, name+":") {
+						valid = false
+					}
+				}
+			}
+		}
+	}
+	if scanner.Err() != nil || !started || !valid || remaining != 0 {
+		return false
+	}
+	for name := range wanted {
+		if !inventory[name] || !enabled[name] {
 			return false
 		}
 	}
 	return true
+}
+
+func openPluginStartupLogs(dataPath string) (int, error) {
+	if !filepath.IsAbs(dataPath) || filepath.Clean(dataPath) != dataPath {
+		return -1, errors.New("unsafe data path")
+	}
+	// Walk every directory without following symlinks, then pin logs and the file.
+	fd, err := unix.Open("/", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return -1, err
+	}
+	for _, part := range strings.Split(strings.TrimPrefix(filepath.Join(dataPath, "logs"), "/"), "/") {
+		next, openErr := unix.Openat(fd, part, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+		unix.Close(fd)
+		if openErr != nil {
+			return -1, openErr
+		}
+		fd = next
+	}
+	return fd, nil
+}
+
+func verifyPluginStartup(dataPath string, expected []string) error {
+	failure := errors.New("Installed plugin runtime state could not be verified")
+	fd, err := openPluginStartupLogs(dataPath)
+	if err != nil {
+		return failure
+	}
+	defer unix.Close(fd)
+	logFD, err := unix.Openat(fd, "latest.log", unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return failure
+	}
+	file := os.NewFile(uintptr(logFD), "latest.log")
+	defer file.Close()
+	var initial unix.Stat_t
+	if unix.Fstat(logFD, &initial) != nil || initial.Mode&unix.S_IFMT != unix.S_IFREG || initial.Size > pluginStartupLogLimit {
+		return failure
+	}
+	raw, err := io.ReadAll(io.LimitReader(file, pluginStartupLogLimit+1))
+	if err != nil || !pluginStartupNamesLoaded(raw, expected) {
+		return failure
+	}
+	// Refuse a replaced log or directory while proof was being read.
+	currentFD, err := openPluginStartupLogs(dataPath)
+	if err != nil {
+		return failure
+	}
+	defer unix.Close(currentFD)
+	var directory, currentDirectory unix.Stat_t
+	if unix.Fstat(fd, &directory) != nil || unix.Fstat(currentFD, &currentDirectory) != nil || directory.Dev != currentDirectory.Dev || directory.Ino != currentDirectory.Ino {
+		return failure
+	}
+	var current unix.Stat_t
+	if unix.Fstatat(fd, "latest.log", &current, unix.AT_SYMLINK_NOFOLLOW) != nil {
+		return failure
+	}
+	var opened unix.Stat_t
+	if unix.Fstat(logFD, &opened) != nil || !pluginStartupSnapshotStable(initial, current, opened, int64(len(raw))) {
+		return failure
+	}
+	return nil
+}
+
+func pluginStartupSnapshotStable(initial, current, opened unix.Stat_t, snapshotSize int64) bool {
+	// Proof uses the completed bounded snapshot. Appends are safe, but observed
+	// truncation, replacement, and growth beyond the log bound are not.
+	if snapshotSize <= 0 || snapshotSize > pluginStartupLogLimit || initial.Size > snapshotSize {
+		return false
+	}
+	for _, stat := range []unix.Stat_t{initial, current, opened} {
+		if stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Dev != initial.Dev || stat.Ino != initial.Ino || stat.Size < 0 || stat.Size > pluginStartupLogLimit {
+			return false
+		}
+	}
+	return current.Size >= snapshotSize && opened.Size >= current.Size
 }
 
 var startPluginInstallWorker = func(s *server, id string, plan pluginInstallPlan, confirm bool, actor session) {
@@ -1438,7 +1514,7 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 	if err := pluginService(ctx, "start"); err != nil {
 		return rollback(errors.New("Minecraft could not start"))
 	}
-	if _, err := s.operations.transition(id, operationVerifying, "verifying", "Verifying Minecraft and the installed plugin identities through RCON."); err != nil {
+	if _, err := s.operations.transition(id, operationVerifying, "verifying", "Verifying Minecraft and installed plugin runtime state."); err != nil {
 		return rollback(err)
 	}
 	if err := verifyPluginRuntime(ctx, plan.Server.MinecraftVersion); err != nil {
@@ -1448,9 +1524,8 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 	for _, a := range created {
 		expected = append(expected, a.PluginName)
 	}
-	output, err := pluginInstallCommand(ctx, "podman", "exec", "minecraft", "rcon-cli", "plugins")
-	if err != nil || !pluginNamesLoaded(output, expected) {
-		return rollback(errors.New("Installed plugins could not be proven active through RCON"))
+	if err := verifyPluginStartup(plan.DataPath, expected); err != nil {
+		return rollback(err)
 	}
 	if !originallyRunning {
 		if err := pluginService(ctx, "stop"); err != nil {
@@ -2126,9 +2201,8 @@ func (s *server) adminPluginInstallAcknowledge(w http.ResponseWriter, r *http.Re
 			for _, a := range tx.Artifacts {
 				expected = append(expected, a.PluginName)
 			}
-			output, err := pluginInstallCommand(ctx, "podman", "exec", "minecraft", "rcon-cli", "plugins")
-			if err != nil || !pluginNamesLoaded(output, expected) {
-				writeError(w, 409, "Installed plugins could not be proven active")
+			if err := verifyPluginStartup(dataPath, expected); err != nil {
+				writeError(w, 409, "Installed plugin runtime state could not be verified")
 				return
 			}
 		}

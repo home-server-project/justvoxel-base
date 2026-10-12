@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -923,7 +924,7 @@ func TestPluginsWorkspaceInventoryRequiresVerifiedOperationState(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := string(raw)
-	start := strings.Index(script, "  const pluginInventorySafe =")
+	start := strings.Index(script, "  const pluginOperationSettled =")
 	if start < 0 {
 		t.Fatal("inventory safety helper missing")
 	}
@@ -932,7 +933,7 @@ func TestPluginsWorkspaceInventoryRequiresVerifiedOperationState(t *testing.T) {
 		t.Fatal("inventory safety helper boundary missing")
 	}
 	helper := script[start : start+end]
-	if helper != `  const pluginInventorySafe = (operation) => !operation || ["succeeded", "rolled_back", "resolved"].includes(operation.state);` {
+	if helper != `  const pluginOperationSettled = (operation) => !operation || ["succeeded", "rolled_back", "resolved"].includes(operation.state);` {
 		t.Fatal("inventory safety must allow no operation or only proven safe final states")
 	}
 	for _, tc := range []struct {
@@ -960,7 +961,7 @@ func TestPluginsWorkspaceInventoryGatePrecedesFetchAndRendering(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := string(raw)
-	start := strings.Index(script, "  const pluginInventorySafe =")
+	start := strings.Index(script, "  const load =")
 	if start < 0 {
 		t.Fatal("inventory gate missing")
 	}
@@ -974,6 +975,7 @@ func TestPluginsWorkspaceInventoryGatePrecedesFetchAndRendering(t *testing.T) {
         if (current !== generation) return;
         if (!pluginInventorySafe(installation.operation)) {
           state.textContent = "Plugin installation is still being verified or recovered. Installed inventory will be available after the operation reaches a verified final state.";
+          inventoryTimer = setTimeout(() => recheckBlockedInventory(current), 1500);
           return;
         }
       }`
@@ -1061,7 +1063,7 @@ func TestPluginsWorkspaceVMCorrectionHeaderButtonsAndBackdrop(t *testing.T) {
 		t.Fatal("review preparation and review must allow backdrop dismissal")
 	}
 	for _, area := range []string{between("  const showOperation =", "  const pollOperation ="), between("  const applyPlugin =", "  const readableSize ="), between("  const panelError =", "  const showOperation =")} {
-		if !strings.Contains(area, `showPanel();`) || strings.Contains(area, `showPanel("Plugin installation", true)`) || strings.Contains(area, "overlayDismissible = true") {
+		if (!strings.Contains(area, `showPanel();`) && !strings.Contains(area, `showPanel("Plugin installation", false, sameOperation);`)) || strings.Contains(area, `showPanel("Plugin installation", true)`) || strings.Contains(area, "overlayDismissible = true") {
 			t.Fatal("operation rendering or submission allowed backdrop dismissal")
 		}
 	}
@@ -1071,7 +1073,6 @@ func TestPluginsWorkspaceVMCorrectionHeaderButtonsAndBackdrop(t *testing.T) {
 	}
 	css := string(rawCSS)
 	for _, want := range []string{
-		`.workspace-window.plugins-workspace-dialog button{height:36px;min-height:36px;border-radius:8px;font-size:.84rem!important}`,
 		`.workspace-window .workspace-header-close{width:36px;height:36px;padding:0;font-size:inherit}`,
 		`:where(.workspace-window) :is(button,.button-link){padding:.5rem .75rem;border-radius:8px;line-height:1.25}`,
 		`.plugins-overlay-identity h3{flex:1;margin:0;min-width:0}`,
@@ -1083,31 +1084,13 @@ func TestPluginsWorkspaceVMCorrectionHeaderButtonsAndBackdrop(t *testing.T) {
 			t.Fatal("unified plugin geometry missing", want)
 		}
 	}
-	const buttonSelector = ".workspace-window.plugins-workspace-dialog button"
-	if strings.Count(css, buttonSelector+"{") != 1 {
-		t.Fatal("Plugins buttons must have one shared geometry rule")
-	}
 	for _, rule := range strings.Split(css, "}") {
 		selector, declarations, ok := strings.Cut(rule, "{")
-		if !ok || !strings.Contains(selector, ".plugins-") {
+		if !ok || !strings.Contains(selector, ".plugins-") || !strings.Contains(selector, "button") {
 			continue
 		}
-		for _, declaration := range strings.Split(declarations, ";") {
-			property, value, ok := strings.Cut(strings.TrimSpace(declaration), ":")
-			if !ok {
-				continue
-			}
-			property, value = strings.TrimSpace(property), strings.TrimSpace(value)
-			if (property == "height" || property == "min-height" || property == "width") && value == "42px" {
-				t.Fatal("oversized Plugins geometry remains", rule)
-			}
-			if strings.Contains(selector, "button") || strings.Contains(selector, ".workspace-header-close") {
-				if strings.TrimSpace(selector) != buttonSelector && (property == "height" || property == "min-height" || property == "border-radius" || property == "padding" || strings.HasPrefix(property, "padding-")) {
-					t.Fatal("tabs, pagination and actions must inherit the same Plugins button geometry", rule)
-				}
-			} else if (property == "height" || property == "min-height") && value == "36px" {
-				t.Fatal("button height applied to cards, switches, inputs or badges", rule)
-			}
+		if strings.Contains(declarations, "height:36px") || strings.Contains(declarations, "height:42px") {
+			t.Fatal("Plugins button height override remains", rule)
 		}
 	}
 	// Static toolbar buttons and dynamically created actions all use the same
@@ -1124,7 +1107,6 @@ func TestPluginsWorkspaceVMCorrectionHeaderButtonsAndBackdrop(t *testing.T) {
 		`<button type="button" data-plugins-tab="updates"`,
 		`<button type="button" data-plugins-previous`,
 		`<button type="button" data-plugins-next`,
-		`<button type="submit">Search</button>`,
 	} {
 		if !strings.Contains(string(rawHeader), want) {
 			t.Fatal("Plugins toolbar must use actual buttons covered by the shared rule", want)
@@ -1149,5 +1131,258 @@ func TestPluginsWorkspaceVMCorrectionHeaderButtonsAndBackdrop(t *testing.T) {
 		if !strings.Contains(css, want) {
 			t.Fatal("card and input geometry must remain independent of button sizing", want)
 		}
+	}
+}
+
+func pluginWorkspaceScript(t *testing.T) string {
+	t.Helper()
+	raw, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(raw)
+	a, b := strings.Index(s, "// Plugin workspace."), strings.Index(s, "// Bookmarked standalone pages")
+	if a < 0 || b <= a {
+		t.Fatal("plugin workspace missing")
+	}
+	return s[a:b]
+}
+
+func pluginScriptSection(t *testing.T, script, first, next string) string {
+	t.Helper()
+	a, b := strings.Index(script, first), strings.Index(script, next)
+	if a < 0 || b <= a {
+		t.Fatal("plugin section missing", first, next)
+	}
+	return script[a:b]
+}
+
+func TestPluginsWorkspaceApprovedLiveSearchAndSharedTabs(t *testing.T) {
+	header, err := assets.ReadFile("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(header), `<button type="submit">Search</button>`) {
+		t.Fatal("visible Search button remains")
+	}
+	raw, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(raw)
+	shared := `.workspace-window :is(.minecraft-workspace-tabs,.system-workspace-tabs,.migration-workspace-tabs,.version-workspace-tabs,.plugins-workspace-tabs) button{min-height:34px;padding:.38rem .7rem;border-radius:8px;font-size:.86rem}`
+	if !strings.Contains(css, shared) {
+		t.Fatal("Plugins tabs must use the existing shared geometry")
+	}
+	if strings.Contains(css, `.workspace-window.plugins-workspace-dialog button{`) {
+		t.Fatal("Plugins-wide button override remains")
+	}
+	script := pluginWorkspaceScript(t)
+	input := pluginScriptSection(t, script, `  form.elements.q.addEventListener("input"`, `  form.addEventListener("submit"`)
+	for _, want := range []string{`clearTimeout(searchTimer)`, `++generation`, `controller?.abort()`, `resetCursors()`, `searchTimer = setTimeout(() => load(), 250)`} {
+		if !strings.Contains(input, want) {
+			t.Fatal("live debounced search missing", want)
+		}
+	}
+	submit := pluginScriptSection(t, script, `  form.addEventListener("submit"`, `  previous.addEventListener`)
+	if !strings.Contains(submit, `event.preventDefault(); clearTimeout(searchTimer); resetCursors(); load();`) {
+		t.Fatal("form submit/Enter must load immediately")
+	}
+	if !strings.Contains(submit, `"change", () => { clearTimeout(searchTimer); resetCursors(); load(); }`) {
+		t.Fatal("filters must reload immediately")
+	}
+	if !strings.Contains(script, `onClose: () => { clearTimeout(capacityTimer); clearTimeout(searchTimer); clearInventoryTimer();`) {
+		t.Fatal("workspace close must clear timers")
+	}
+}
+
+func TestPluginsWorkspaceStableOperationIdentity(t *testing.T) {
+	script := pluginWorkspaceScript(t)
+	operation := pluginScriptSection(t, script, "  const showOperation =", "  const pollOperation =")
+	for _, want := range []string{`const sameOperation = !panel.hidden && operationViewID === operation.operation_id`, `showPanel("Plugin installation", false, sameOperation)`, `if (!sameOperation) {`, `operationViewID = operation.operation_id`} {
+		if !strings.Contains(operation, want) {
+			t.Fatal("operation identity lifecycle missing", want)
+		}
+	}
+	header := strings.Index(operation, "overlayHeader(")
+	guard := strings.Index(operation, "if (!sameOperation) {")
+	end := strings.Index(operation[guard:], "} else") + guard
+	if header < guard || header >= end || strings.Count(operation, "overlayHeader(") != 1 {
+		t.Fatal("operation header must be created only for a new identity view")
+	}
+	panel := pluginScriptSection(t, script, "  const showPanel =", "  const panelAction =")
+	if !strings.Contains(panel, `Array.from(panelBody.children).slice(1).forEach((node) => node.remove())`) || !strings.Contains(panel, `if (preserveIdentity) {`) {
+		t.Fatal("polling must preserve the header and logo")
+	}
+	if !strings.Contains(panel, `operationViewID = null;`) || !strings.Contains(script, `panel.hidden = true;
+    operationViewID = null;`) {
+		t.Fatal("new operations and reopened views must replace identity")
+	}
+}
+
+func TestPluginsWorkspaceOperationGatesAndInventoryRecheck(t *testing.T) {
+	script := pluginWorkspaceScript(t)
+	for _, area := range []struct{ first, next, request string }{
+		{"  const reviewPlugin =", "  const resumePluginInstall =", `pluginRequest("install/plan"`},
+		{"  const applyPlugin =", "  const readableSize =", `pluginRequest("install"`},
+	} {
+		section := pluginScriptSection(t, script, area.first, area.next)
+		guard := strings.Index(section, `if (await blockPluginInstall(current)) return;`)
+		if guard < 0 || strings.Index(section, area.request) <= guard {
+			t.Fatal("active operation gate must precede request", area.request)
+		}
+	}
+	resume := pluginScriptSection(t, script, "  const resumePluginInstall =", `  panel.addEventListener("click"`)
+	if !strings.Contains(resume, `pluginOperationSettled(payload.operation)`) {
+		t.Fatal("opening Plugins must skip settled operations")
+	}
+	recheck := pluginScriptSection(t, script, "  const recheckBlockedInventory =", "  const load =")
+	for _, want := range []string{`inventoryTimer = null`, `!pluginsDialog.open || tab === "discover" || current !== generation`, `pluginRequest("install-operation", null, controller.signal)`, `if (pluginInventorySafe(payload.operation)) { load(); return; }`, `inventoryTimer = setTimeout(() => recheckBlockedInventory(current), 1500)`} {
+		if !strings.Contains(recheck, want) {
+			t.Fatal("automatic safe inventory return missing", want)
+		}
+	}
+	loader := pluginScriptSection(t, script, "  const load =", "  const discoverCapacity =")
+	if !strings.Contains(loader, `clearInventoryTimer();`) {
+		t.Fatal("safe inventory load must clear its timer")
+	}
+	tabs := pluginScriptSection(t, script, `  pluginsDialog.querySelectorAll("[data-plugins-tab]").forEach((button) => button.addEventListener`, `  form.elements.q.addEventListener`)
+	if !strings.Contains(tabs, `clearInventoryTimer();`) {
+		t.Fatal("switching tabs must clear inventory timer")
+	}
+}
+
+// Execute the production gate/resume/recheck functions with controlled requests.
+// These checks establish frontend behavior, not real-VM visual acceptance.
+func TestPluginsWorkspaceOperationGateBehavior(t *testing.T) {
+	script := pluginWorkspaceScript(t)
+	settled := pluginScriptSection(t, script, "  const pluginOperationSettled =", "  let overlayDismissible =")
+	gates := pluginScriptSection(t, script, "  const resumeActiveOperation =", "  const readableSize =")
+	review := pluginScriptSection(t, script, "  const reviewPlugin =", "  const resumePluginInstall =")
+	resume := pluginScriptSection(t, script, "  const resumePluginInstall =", `  panel.addEventListener("click"`)
+	inventory := pluginScriptSection(t, script, "  const pluginInventorySafe =", "  const load =")
+	program := `
+const assert = require("node:assert/strict");
+let operation = null, requests = [], shown = [], installGeneration = 0, installController = null, pollTimer = null, operationIdentity = null;
+let generation = 1, tab = "installed", inventoryTimer = null, controller = new AbortController(), loads = 0, timers = new Map(), timerID = 0;
+const setTimeout = (fn, delay) => { timers.set(++timerID, {fn, delay}); return timerID; };
+const clearTimeout = (id) => timers.delete(id);
+const pluginsDialog = {open:true}, panel = {hidden:true}, panelBody = {append(){}}, state = {textContent:""};
+const text = () => ({}), overlayActions = () => {}, panelAction = () => ({}), showPanel = () => {};
+const closePanel = () => {}, panelError = () => {}, pollOperation = () => {}, load = () => { clearInventoryTimer(); loads++; };
+const stopPolling = () => { clearTimeout(pollTimer); installController?.abort(); ++installGeneration; };
+const clearInventoryTimer = () => { clearTimeout(inventoryTimer); inventoryTimer = null; };
+const showOperation = (op) => { shown.push(op.state); panel.hidden = false; return ["succeeded","rolled_back","resolved","needs_attention"].includes(op.state); };
+const pluginRequest = async (route) => { requests.push(route); if (route !== "install-operation") throw new Error("stop after authorized request"); return {operation}; };
+` + settled + gates + review + resume + inventory + `
+(async () => {
+ for (const state of [null,"succeeded","rolled_back","resolved","queued","validating","running","verifying","rolling_back","needs_attention","unknown",""]) {
+  operation = state === null ? null : {operation_id:"current", state};
+  const safe = state === null || ["succeeded","rolled_back","resolved"].includes(state);
+  assert.equal(pluginOperationSettled(operation), safe);
+  for (const invoke of [() => reviewPlugin("root","release"), () => applyPlugin({project_id:"root",version_id:"release"})]) {
+   requests = []; shown = []; timers.clear(); panel.hidden = true;
+   await invoke();
+   assert.equal(requests[0], "install-operation");
+   assert.equal(requests.length, safe ? 2 : 1);
+   if (safe) assert(["install/plan","install"].includes(requests[1]));
+   assert.deepEqual(shown, safe ? [] : [state]);
+  }
+  requests = []; shown = []; timers.clear(); panel.hidden = true;
+  await resumePluginInstall();
+  assert.deepEqual(shown, safe ? [] : [state]);
+  if (state === "needs_attention") assert.equal(timers.size, 0);
+ }
+ for (const inventoryTab of ["installed","updates"]) {
+  tab = inventoryTab; pluginsDialog.open = true; operation = {state:"needs_attention"}; requests = []; timers.clear(); loads = 0;
+  await recheckBlockedInventory(generation);
+  assert.deepEqual(requests, ["install-operation"]); assert.equal(loads, 0); assert.equal(timers.size, 1);
+  const timer = timers.get(inventoryTimer); timers.delete(inventoryTimer);
+  operation = {state:"resolved"}; await timer.fn();
+  assert.equal(loads, 1); assert.equal(timers.size, 0); assert.equal(inventoryTimer, null);
+ }
+ for (const closed of [false,true]) {
+  requests = []; timers.clear(); pluginsDialog.open = !closed; tab = closed ? "installed" : "discover";
+  await recheckBlockedInventory(generation);
+  assert.equal(requests.length, 0); assert.equal(timers.size, 0);
+ }
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+`
+	command := exec.Command("node", "-e", program)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("operation gates: %v\n%s", err, output)
+	}
+}
+
+func TestPluginsWorkspaceOperationKeepsLogoDOM(t *testing.T) {
+	script := pluginWorkspaceScript(t)
+	panel := pluginScriptSection(t, script, "  const showPanel =", "  const panelAction =")
+	operation := pluginScriptSection(t, script, "  const showOperation =", "  const pollOperation =")
+	program := `
+const assert = require("node:assert/strict");
+class Node {
+ constructor(tag = "div") { this.tag = tag; this.children = []; this.hidden = false; this.textContent = ""; this.isConnected = true; }
+ append(...nodes) { for (const node of nodes) { node.parent = this; this.children.push(node); } }
+ replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
+ remove() { this.parent.children = this.parent.children.filter((node) => node !== this); }
+ setAttribute() {} focus() {} contains() { return false; }
+ querySelector() { return this.children[0].children[0]; }
+ querySelectorAll() { return []; }
+}
+const document = {activeElement:null, createElement: (tag) => new Node(tag)};
+const queueMicrotask = () => {};
+const panel = new Node(), panelBody = new Node(), workspaceShell = {}, pluginsDialog = {querySelector: () => null};
+panel.hidden = true;
+let overlayDismissible = false, returnFocus = null, operationViewID = null, operationIdentity = null, headerCount = 0;
+const text = (tag, value) => { const node = new Node(tag); node.textContent = value; return node; };
+const overlayHeader = (name) => { const header = new Node("header"), title = text("h3",name), logo = new Node("img"); header.append(title,logo); panelBody.append(header); headerCount++; };
+const overlayActions = (...buttons) => { const actions = new Node(); actions.append(...buttons); panelBody.append(actions); };
+const panelAction = (label) => text("button",label), closePanel = () => {}, load = () => {};
+` + panel + operation + `
+const op = {operation_id:"one",state:"running",stage:"backup",status:"Backing up"};
+showOperation(op);
+const header = panelBody.children[0], image = header.children[1];
+for (const stage of ["installing","restarting","verifying"]) {
+ showOperation({...op,stage,status:stage});
+ assert.equal(panelBody.children[0],header); assert.equal(panelBody.children[0].children[1],image);
+}
+showOperation({...op,state:"succeeded",status:"Verified"});
+assert.equal(headerCount,1); assert.equal(panelBody.children[0],header);
+showOperation({...op,operation_id:"two"});
+assert.equal(headerCount,2); assert.notEqual(panelBody.children[0],header);
+panel.hidden = true; showOperation({...op,operation_id:"two"});
+assert.equal(headerCount,3);
+`
+	command := exec.Command("node", "-e", program)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("operation DOM lifecycle: %v\n%s", err, output)
+	}
+}
+
+func TestPluginsWorkspaceLiveSearchBehavior(t *testing.T) {
+	script := pluginWorkspaceScript(t)
+	events := pluginScriptSection(t, script, `  form.elements.q.addEventListener("input"`, `  previous.addEventListener`)
+	program := `
+const assert = require("node:assert/strict");
+const events = {}, formEvents = {}, filterEvents = [];
+const form = {elements:{q:{addEventListener:(event,handler) => events[event] = handler}},addEventListener:(event,handler) => formEvents[event] = handler,querySelectorAll:() => [0,1].map((index) => ({addEventListener:(event,handler) => filterEvents[index] = handler}))};
+let generation = 0, aborts = 0, resets = 0, loads = 0, searchTimer = null, timerID = 0;
+const controller = {abort:() => aborts++}, previous = {}, next = {}, page = {};
+const pluginsDialog = {querySelector:() => page}, resetCursors = () => resets++, load = () => loads++;
+const timers = new Map(), setTimeout = (fn,delay) => { timers.set(++timerID,{fn,delay}); return timerID; }, clearTimeout = (id) => timers.delete(id);
+` + events + `
+events.input(); events.input(); events.input();
+assert.equal(aborts,3); assert.equal(generation,3); assert.equal(resets,3); assert.equal(loads,0); assert.equal(timers.size,1);
+assert.equal(timers.get(searchTimer).delay,250);
+const timer = timers.get(searchTimer); timers.delete(searchTimer); timer.fn(); assert.equal(loads,1);
+events.input(); let prevented = false;
+formEvents.submit({preventDefault:() => prevented = true});
+assert(prevented); assert.equal(timers.size,0); assert.equal(loads,2);
+for (const filter of filterEvents) { events.input(); filter(); assert.equal(timers.size,0); }
+assert.equal(loads,4);
+`
+	command := exec.Command("node", "-e", program)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("live plugin search: %v\n%s", err, output)
 	}
 }

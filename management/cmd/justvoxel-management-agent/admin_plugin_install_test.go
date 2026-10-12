@@ -52,6 +52,7 @@ func newPluginInstallFixture(t *testing.T) *pluginInstallFixture {
 	if err := os.Mkdir(filepath.Join(f.data, "plugins"), 0700); err != nil {
 		t.Fatal(err)
 	}
+	writePluginStartup(t, f.data, pluginFixtureStartup)
 	f.s = surfaceTestServer(t, roleAdministrator)
 	store, err := openOperationStore(t.TempDir())
 	if err != nil {
@@ -182,6 +183,25 @@ func newPluginInstallFixture(t *testing.T) *pluginInstallFixture {
 					hasNew = true
 				}
 			}
+			if f.backup && hasNew {
+				m, _, err := readPluginManifest(f.data)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, entry := range m.Artifacts {
+					if entry.ProjectID == "root" {
+						t.Fatal("manifest committed before runtime verification")
+					}
+				}
+				raw := pluginFixtureStartup
+				if f.missingPlugin {
+					raw = "[PluginInitializerManager] Initializing plugins...\n[PluginInitializerManager] Bukkit plugins (0):\n"
+				}
+				if f.failedPlugin {
+					raw += "[Root] Error occurred while enabling Root v1.0\n"
+				}
+				writePluginStartup(t, f.data, raw)
+			}
 			if (f.failVerify && hasNew) || (f.failRollbackVerify && !hasNew) {
 				return nil, errors.New("verify failed")
 			}
@@ -189,25 +209,8 @@ func newPluginInstallFixture(t *testing.T) *pluginInstallFixture {
 		case command == "podman" && args[len(args)-1] == "list":
 			return []byte("There are 0 of a max of 20 players online:"), nil
 		case command == "podman" && args[len(args)-1] == "plugins":
-			if _, _, err := readPluginManifest(f.data); err != nil {
-				t.Fatal(err)
-			}
-			m, _, err := readPluginManifest(f.data)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, entry := range m.Artifacts {
-				if entry.ProjectID == "root" {
-					t.Fatal("manifest committed before RCON verification")
-				}
-			}
-			if f.missingPlugin {
-				return []byte("Plugins (0):"), nil
-			}
-			if f.failedPlugin {
-				return []byte("Plugins (1): §cRoot"), nil
-			}
-			return []byte("Plugins (2): §aRoot, Dependency"), nil
+			t.Fatal("plugin identity must not use the RCON plugins command")
+			return nil, errors.New("unexpected RCON plugins command")
 		default:
 			t.Fatalf("unexpected privileged command %s", action)
 			return nil, errors.New("unexpected")
@@ -245,6 +248,11 @@ func (f *pluginInstallFixture) execute(t *testing.T, plan pluginInstallPlan, con
 		t.Fatalf("begin: %v", err)
 	}
 	_ = executePluginInstall(context.Background(), f.s, journal.OperationID, plan, confirm, session{})
+	for _, command := range f.commands {
+		if strings.HasSuffix(command, "rcon-cli plugins") {
+			t.Fatal("RCON plugins used for identity")
+		}
+	}
 	journal, err = f.s.operations.get(journal.OperationID)
 	if err != nil {
 		t.Fatal(err)
@@ -716,22 +724,6 @@ func TestPluginInstallManifestSafety(t *testing.T) {
 				t.Fatal("unsafe manifest accepted")
 			}
 		})
-	}
-}
-func TestPluginNamesMustBeLoadedEntries(t *testing.T) {
-	for _, test := range []struct {
-		raw string
-		ok  bool
-	}{
-		{"Plugins (2): §aRoot, Dependency", true},
-		{"§6Server Plugins (2):\n§6Bukkit Plugins:\n§f - §aRoot, Dependency", true},
-		{"Server Plugins (1):\nBukkit Plugins: §aRoot", true},
-		{"Server Plugins (1):\nBukkit Plugins:\n - §cRoot", false},
-		{"Plugins (1): Root, Other", false}, {"Plugins (1): §cRoot", false}, {"Plugins (2): §cOther, §aRoot", true}, {"Plugins (1): RootExtra", false}, {"Plugins (1): OtherRoot", false}, {"Root successfully loaded", false}, {"Plugins (2): Root, Root", false}, {"Plugins (1): \x1b[31mRoot\x1b[0m", false}, {"Plugins (1): \x1b[32mRoot\x1b[0m", true},
-	} {
-		if got := pluginNamesLoaded([]byte(test.raw), []string{"Root"}); got != test.ok {
-			t.Fatalf("%q loaded=%v", test.raw, got)
-		}
 	}
 }
 func TestPluginInstallStoreExclusionProgressAndInterruption(t *testing.T) {
@@ -1339,15 +1331,8 @@ func TestPluginInstallAcknowledgeProofs(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			originalCommand := pluginInstallCommand
-			pluginInstallCommand = func(ctx context.Context, command string, args ...string) ([]byte, error) {
-				if command == "podman" && args[len(args)-1] == "plugins" {
-					if kind == "plugin inactive" {
-						return []byte("Plugins (1): §cRoot"), nil
-					}
-					return []byte("Plugins (1): §aRoot"), nil
-				}
-				return originalCommand(ctx, command, args...)
+			if kind == "plugin inactive" {
+				writePluginStartup(t, f.data, pluginFixtureStartup+"[Root] Error occurred while enabling Root v1.0\n")
 			}
 			raw, _ := json.Marshal(map[string]string{"operation_id": journal.OperationID})
 			rr := httptest.NewRecorder()
@@ -1922,66 +1907,6 @@ func TestPluginInstallDurableEvidenceBeforeMutation(t *testing.T) {
 	}
 }
 
-func TestPluginNamesRealPaperInfoHeader(t *testing.T) {
-	for _, test := range []struct {
-		raw string
-		ok  bool
-	}{
-		{"ℹ Server Plugins (2):\nBukkit Plugins: §aRoot\nPaper Plugins: §aOther", true},
-		{"§6ℹ §r§6Server Plugins (2):§r\n§6Bukkit Plugins:\n - §aRoot\n§6Paper Plugins:\n - §aOther", true},
-		{"\x1b[36mℹ Server Plugins (2):\x1b[0m\nBukkit Plugins: \x1b[32mRoot\x1b[0m\nPaper Plugins: Other", true},
-		{"ℹServer Plugins (1):\nBukkit Plugins: Root", true},
-		{"Plugins (1): §aRoot", true},
-		{"ℹ Server Plugins (1):\nBukkit Plugins: §cRoot", false},
-		{"ℹ Server Plugins (3):\nBukkit Plugins: Root\nPaper Plugins: Other", false},
-		{"ℹ ℹ Server Plugins (1):\nBukkit Plugins: Root", false},
-		{"ℹ Plugins (1): Root", false},
-		{"ℹ Server Plugins (x):\nBukkit Plugins: Root", false},
-		{"ℹ Server Plugins (1):\nUnsupported Plugins: Root", false},
-		{"ℹ Server Plugins (1):\nBukkit Plugins: RootExtra", false},
-		{"ℹ Server Plugins (2):\nBukkit Plugins: Root\nPaper Plugins: Root", false},
-		{strings.Repeat(" ", 64<<10) + "ℹ Server Plugins (1):\nBukkit Plugins: Root", false},
-	} {
-		if got := pluginNamesLoaded([]byte(test.raw), []string{"Root"}); got != test.ok {
-			t.Fatalf("%q: got %v", test.raw, got)
-		}
-	}
-}
-
-func TestPluginNamesPaper262Formatting(t *testing.T) {
-	const three = "§xℹ Server Plugins (3):\n§xBukkit Plugins:\n - floodgate, Geyser-Spigot, ViaVersion"
-	const four = "§xℹ Server Plugins (4):\n§xBukkit Plugins:\n - floodgate, Geyser-Spigot, ViaVersion, VeinMiner"
-	for _, test := range []struct {
-		name     string
-		raw      string
-		expected []string
-		ok       bool
-	}{
-		{"real three plugins", three, []string{"floodgate", "Geyser-Spigot", "ViaVersion"}, true},
-		{"real four plugins", four, []string{"floodgate", "Geyser-Spigot", "ViaVersion", "VeinMiner"}, true},
-		{"missing VeinMiner", three, []string{"VeinMiner"}, false},
-		{"malformed count", strings.Replace(four, "(4)", "(x)", 1), []string{"VeinMiner"}, false},
-		{"count mismatch", strings.Replace(four, "(4)", "(5)", 1), []string{"VeinMiner"}, false},
-		{"duplicate VeinMiner", strings.Replace(four, "(4)", "(5)", 1) + ", VeinMiner", []string{"VeinMiner"}, false},
-		{"uppercase presentation", strings.ReplaceAll(four, "§x", "§X"), []string{"VeinMiner"}, true},
-		{"entry presentation", strings.Replace(four, "VeinMiner", "§xVein§XMiner", 1), []string{"VeinMiner"}, true},
-		{"Paper group presentation", strings.Replace(four, ", VeinMiner", "\n§XPaper Plugins:\n - §xVeinMiner", 1), []string{"VeinMiner"}, true},
-		{"red entry", strings.Replace(four, "VeinMiner", "§c§xVeinMiner", 1), []string{"VeinMiner"}, false},
-		{"dark red entry", strings.Replace(four, "VeinMiner", "§4§XVeinMiner", 1), []string{"VeinMiner"}, false},
-		{"failed then reset entry", strings.Replace(four, "VeinMiner", "§cVein§x§aMiner", 1), []string{"VeinMiner"}, false},
-		{"red carries across entries", strings.Replace(four, "ViaVersion, VeinMiner", "§cViaVersion, §xVeinMiner", 1), []string{"VeinMiner"}, false},
-		{"unknown header formatting", strings.Replace(four, "§xℹ", "§zℹ", 1), []string{"VeinMiner"}, false},
-		{"unknown group formatting", strings.Replace(four, "§xBukkit", "§zBukkit", 1), []string{"VeinMiner"}, false},
-		{"unknown entry formatting", strings.Replace(four, "VeinMiner", "§zVeinMiner", 1), []string{"VeinMiner"}, false},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			if got := pluginNamesLoaded([]byte(test.raw), test.expected); got != test.ok {
-				t.Fatalf("%q: got %v, want %v", test.raw, got, test.ok)
-			}
-		})
-	}
-}
-
 func TestPluginInstallCanonicalManagedDependencies(t *testing.T) {
 	for _, component := range []struct{ slug, filename, main string }{
 		{"geyser", "geyser-spigot.jar", "org.geysermc.geyser.platform.spigot.GeyserSpigotPlugin"},
@@ -2216,6 +2141,243 @@ func TestPluginRequiredDependencyNoCompatibleReleaseAndIdentityMismatch(t *testi
 			}
 			if !corrupt && (!strings.Contains(err.Error(), "Required dependency dependency has no compatible Paper release for Minecraft 1.21.8") || strings.Contains(err.Error(), "project mismatch")) {
 				t.Fatal("compatibility failure misreported", err)
+			}
+		})
+	}
+}
+
+const pluginFixtureStartup = "[PluginInitializerManager] Initializing plugins...\n[PluginInitializerManager] Bukkit plugins (2):\n - Root (1.0), Dependency (1.0)\n[Root] Enabling Root v1.0\n[Dependency] Enabling Dependency v1.0\n"
+
+func writePluginStartup(t *testing.T, dataPath, raw string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dataPath, "logs"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataPath, "logs", "latest.log"), []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPluginStartupNamesLoaded(t *testing.T) {
+	const bukkit = `[PluginInitializerManager] Initializing plugins...
+[PluginInitializerManager] Initialized 5 plugins
+[PluginInitializerManager] Bukkit plugins (5):
+ - Geyser-Spigot (2.11.3-SNAPSHOT), ViaBackwards (5.12.1), ViaRewind (4.2.0), ViaVersion (5.12.1), floodgate (2.2.5-SNAPSHOT (b141-81b65cc))
+[ViaRewind] Loading server plugin ViaRewind v4.2.0
+[ViaRewind] Enabling ViaRewind v4.2.0
+`
+	const paper = `[PluginInitializerManager] Initializing plugins...
+[PluginInitializerManager] Initialized 4 plugins
+[PluginInitializerManager] Paper plugins (1):
+ - NeoSpeedZero (6.4.1)
+[PluginInitializerManager] Bukkit plugins (3):
+ - Geyser-Spigot (...), ViaVersion (...), floodgate (...)
+[NeoSpeedZero] Loading server plugin NeoSpeedZero v6.4.1
+[NeoSpeedZero] Enabling NeoSpeeZero v6.4.1
+`
+	for _, tc := range []struct {
+		name, raw string
+		expected  []string
+		ok        bool
+	}{
+		{"real Bukkit", bukkit, []string{"ViaRewind"}, true},
+		{"real Paper logger", paper, []string{"NeoSpeedZero"}, true},
+		{"timestamped", strings.ReplaceAll(bukkit, "[", "[12:34:56 INFO]: ["), []string{"ViaRewind"}, true},
+		{"thread timestamped", strings.ReplaceAll(bukkit, "[", "[12:34:56] [Server thread/INFO]: ["), []string{"ViaRewind"}, true},
+		{"incomplete line", strings.TrimSuffix(bukkit, "\n"), []string{"ViaRewind"}, false},
+		{"stale startup", bukkit + paper, []string{"ViaRewind"}, false},
+		{"earlier malformed startup", "[PluginInitializerManager] Initializing plugins...\n[PluginInitializerManager] Bukkit plugins (x):\n" + bukkit, []string{"ViaRewind"}, true},
+		{"no marker", strings.ReplaceAll(bukkit, "[PluginInitializerManager] Initializing plugins...\n", ""), []string{"ViaRewind"}, false},
+		{"no enable", strings.ReplaceAll(bukkit, "[ViaRewind] Enabling ViaRewind v4.2.0\n", ""), []string{"ViaRewind"}, false},
+		{"no inventory", strings.ReplaceAll(bukkit, "ViaRewind (4.2.0)", "Other (4.2.0)"), []string{"ViaRewind"}, false},
+		{"enable failure", bukkit + "[Server] Error occurred while enabling ViaRewind v4.2.0 (Is it up to date?)\n", []string{"ViaRewind"}, false},
+		{"logger failure", bukkit + "[ViaRewind] Failed to enable plugin\n", []string{"ViaRewind"}, false},
+		{"load failure", bukkit + "[Server] Could not load plugin 'ViaRewind'\n", []string{"ViaRewind"}, false},
+		{"malformed count", strings.Replace(bukkit, "plugins (5):", "plugins (x):", 1), []string{"ViaRewind"}, false},
+		{"count mismatch", strings.Replace(bukkit, "plugins (5):", "plugins (6):", 1), []string{"ViaRewind"}, false},
+		{"malformed entry", strings.ReplaceAll(bukkit, "ViaRewind (4.2.0)", "ViaRewind"), []string{"ViaRewind"}, false},
+		{"nested version comma", strings.ReplaceAll(bukkit, "ViaBackwards (5.12.1)", "ViaBackwards (5.12.1 (build 1, commit abc))"), []string{"ViaRewind"}, true},
+		{"outer version comma", strings.ReplaceAll(bukkit, "ViaBackwards (5.12.1)", "ViaBackwards (5.12.1, build 1)"), []string{"ViaRewind"}, true},
+		{"missing nested close", strings.ReplaceAll(bukkit, "(b141-81b65cc))", "(b141-81b65cc)"), []string{"ViaRewind"}, false},
+		{"extra nested close", strings.ReplaceAll(bukkit, "(b141-81b65cc))", "(b141-81b65cc)))"), []string{"ViaRewind"}, false},
+		{"reversed nested parentheses", strings.ReplaceAll(bukkit, "(b141-81b65cc))", ")b141-81b65cc()"), []string{"ViaRewind"}, false},
+		{"trailing version group", strings.ReplaceAll(bukkit, "(b141-81b65cc))", "(b141-81b65cc)) (extra)"), []string{"ViaRewind"}, false},
+		{"empty version", strings.ReplaceAll(bukkit, "ViaRewind (4.2.0)", "ViaRewind ()"), []string{"ViaRewind"}, false},
+		{"oversized nested version", strings.ReplaceAll(bukkit, "(b141-81b65cc)", "("+strings.Repeat("x", 256)+")"), []string{"ViaRewind"}, false},
+		{"unsafe inventory name", strings.ReplaceAll(bukkit, "ViaRewind (4.2.0)", "../ViaRewind (4.2.0)"), []string{"ViaRewind"}, false},
+		{"inventory name prefix", strings.ReplaceAll(bukkit, "ViaRewind (4.2.0)", "ViaRewindExtra (4.2.0)"), []string{"ViaRewind"}, false},
+		{"duplicate inventory", strings.ReplaceAll(bukkit, "ViaBackwards (5.12.1)", "ViaRewind (4.2.0)"), []string{"ViaRewind"}, false},
+		{"duplicate enable", bukkit + "[ViaRewind] Enabling ViaRewind v4.2.0\n", []string{"ViaRewind"}, false},
+		{"duplicate group", bukkit + "[PluginInitializerManager] Bukkit plugins (0):\n", []string{"ViaRewind"}, false},
+		{"multiline inventory", strings.ReplaceAll(bukkit, ", ViaRewind", "\n - ViaRewind"), []string{"ViaRewind"}, true},
+		{"unrelated plugin list", bukkit + "[Other] Features:\n - unrelated feature\n", []string{"ViaRewind"}, true},
+		{"error word in identity", strings.ReplaceAll(pluginFixtureStartup, "Root", "ErrorPlugin"), []string{"ErrorPlugin"}, true},
+		{"all artifacts", pluginFixtureStartup, []string{"Root", "Dependency"}, true},
+		{"missing dependency enable", strings.ReplaceAll(pluginFixtureStartup, "[Dependency] Enabling Dependency v1.0\n", ""), []string{"Root", "Dependency"}, false},
+		{"missing dependency inventory", strings.ReplaceAll(pluginFixtureStartup, "Dependency (1.0)", "Other (1.0)"), []string{"Root", "Dependency"}, false},
+		{"unsafe expected", bukkit, []string{"../ViaRewind"}, false},
+		{"duplicate expected", bukkit, []string{"ViaRewind", "ViaRewind"}, false},
+		{"no expected", bukkit, nil, false},
+		{"oversized line", bukkit + strings.Repeat("x", pluginStartupLineLimit) + "\n", []string{"ViaRewind"}, false},
+		{"oversized log", bukkit + strings.Repeat("x", pluginStartupLogLimit), []string{"ViaRewind"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := pluginStartupNamesLoaded([]byte(tc.raw), tc.expected); got != tc.ok {
+				t.Fatalf("loaded=%v, want %v", got, tc.ok)
+			}
+		})
+	}
+}
+
+func TestPluginStartupSnapshotStable(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(initial, current, opened *unix.Stat_t, snapshotSize *int64)
+		ok     bool
+	}{
+		{"unchanged regular file", func(_, _, _ *unix.Stat_t, _ *int64) {}, true},
+		{"append after snapshot", func(_, current, opened *unix.Stat_t, _ *int64) { current.Size++; opened.Size += 2 }, true},
+		{"append during snapshot", func(_, current, opened *unix.Stat_t, snapshotSize *int64) {
+			*snapshotSize++
+			current.Size++
+			opened.Size++
+		}, true},
+		{"opened truncated", func(_, _, opened *unix.Stat_t, _ *int64) { opened.Size-- }, false},
+		{"path truncated", func(_, current, _ *unix.Stat_t, _ *int64) { current.Size-- }, false},
+		{"truncated after growth", func(_, current, opened *unix.Stat_t, _ *int64) { current.Size += 2; opened.Size++ }, false},
+		{"truncated during read", func(initial, _, _ *unix.Stat_t, _ *int64) { initial.Size++ }, false},
+		{"changed path device", func(_, current, _ *unix.Stat_t, _ *int64) { current.Dev++ }, false},
+		{"changed path inode", func(_, current, _ *unix.Stat_t, _ *int64) { current.Ino++ }, false},
+		{"changed opened device", func(_, _, opened *unix.Stat_t, _ *int64) { opened.Dev++ }, false},
+		{"changed opened inode", func(_, _, opened *unix.Stat_t, _ *int64) { opened.Ino++ }, false},
+		{"both replaced", func(_, current, opened *unix.Stat_t, _ *int64) { current.Ino++; opened.Ino++ }, false},
+		{"path symlink", func(_, current, _ *unix.Stat_t, _ *int64) { current.Mode = unix.S_IFLNK }, false},
+		{"opened nonregular", func(_, _, opened *unix.Stat_t, _ *int64) { opened.Mode = unix.S_IFIFO }, false},
+		{"oversized path", func(_, current, _ *unix.Stat_t, _ *int64) { current.Size = pluginStartupLogLimit + 1 }, false},
+		{"oversized opened", func(_, _, opened *unix.Stat_t, _ *int64) { opened.Size = pluginStartupLogLimit + 1 }, false},
+		{"oversized snapshot", func(_, _, _ *unix.Stat_t, snapshotSize *int64) { *snapshotSize = pluginStartupLogLimit + 1 }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			initial := unix.Stat_t{Dev: 1, Ino: 2, Mode: unix.S_IFREG | 0600, Size: 100}
+			current, opened, snapshotSize := initial, initial, initial.Size
+			tc.mutate(&initial, &current, &opened, &snapshotSize)
+			if got := pluginStartupSnapshotStable(initial, current, opened, snapshotSize); got != tc.ok {
+				t.Fatalf("stable=%v, want %v", got, tc.ok)
+			}
+		})
+	}
+}
+
+func TestVerifyPluginStartupFilesystem(t *testing.T) {
+	for _, kind := range []string{"regular", "missing", "symlink file", "symlink logs", "symlink data", "directory", "fifo", "oversized", "historical only"} {
+		t.Run(kind, func(t *testing.T) {
+			data := t.TempDir()
+			writePluginStartup(t, data, pluginFixtureStartup)
+			path := filepath.Join(data, "logs", "latest.log")
+			switch kind {
+			case "missing", "historical only":
+				if err := os.Rename(path, filepath.Join(data, "logs", "old.log")); err != nil {
+					t.Fatal(err)
+				}
+			case "symlink file":
+				target := filepath.Join(t.TempDir(), "log")
+				if err := os.Rename(path, target); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(target, path); err != nil {
+					t.Fatal(err)
+				}
+			case "symlink logs":
+				target := filepath.Join(t.TempDir(), "logs")
+				if err := os.Rename(filepath.Join(data, "logs"), target); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(target, filepath.Join(data, "logs")); err != nil {
+					t.Fatal(err)
+				}
+			case "symlink data":
+				link := filepath.Join(t.TempDir(), "data")
+				if err := os.Symlink(data, link); err != nil {
+					t.Fatal(err)
+				}
+				data = link
+			case "directory", "fifo":
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				if kind == "directory" {
+					if err := os.Mkdir(path, 0700); err != nil {
+						t.Fatal(err)
+					}
+				} else if err := unix.Mkfifo(path, 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "oversized":
+				if err := os.Truncate(path, pluginStartupLogLimit+1); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := verifyPluginStartup(data, []string{"Root"}); (err == nil) != (kind == "regular") {
+				t.Fatalf("unexpected proof: %v", err)
+			}
+		})
+	}
+}
+
+func TestPluginInstallUsesLatestStartupProof(t *testing.T) {
+	for _, kind := range []string{"normal", "normal missing log", "recheck", "recheck missing log", "recheck stale startup"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newPluginInstallFixture(t)
+			original := pluginInstallCommand
+			pluginInstallCommand = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+				raw, err := original(ctx, command, args...)
+				if command == "/usr/libexec/justvoxel/mjust/verify-minecraft-stack" {
+					if strings.Contains(kind, "missing log") {
+						_ = os.Remove(filepath.Join(f.data, "logs", "latest.log"))
+					}
+					if strings.Contains(kind, "stale startup") {
+						writePluginStartup(t, f.data, pluginFixtureStartup+"[PluginInitializerManager] Initializing plugins...\n[PluginInitializerManager] Bukkit plugins (0):\n")
+					}
+				}
+				return raw, err
+			}
+			if strings.HasPrefix(kind, "normal") {
+				journal := f.execute(t, f.plan(t), false)
+				want := operationSucceeded
+				if strings.Contains(kind, "missing log") {
+					want = operationRolledBack
+				}
+				if journal.State != want {
+					t.Fatal(journal.State, journal.Status)
+				}
+			} else {
+				journal, tx := pluginAttentionFixture(t, f)
+				if err := os.WriteFile(filepath.Join(f.data, "plugins", "root.jar"), f.jars["root.jar"], 0644); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := commitPluginManifest(f.data, nil, pluginManifest{SchemaVersion: "v1", Artifacts: tx.Artifacts}); err != nil {
+					t.Fatal(err)
+				}
+				rr := httptest.NewRecorder()
+				f.s.adminPluginInstallAcknowledge(rr, surfaceRequest(http.MethodPost, "/", `{"operation_id":"`+journal.OperationID+`"}`))
+				want := http.StatusConflict
+				if kind == "recheck" {
+					want = http.StatusOK
+				}
+				if rr.Code != want {
+					t.Fatal(rr.Code, rr.Body.String())
+				}
+			}
+			readiness, stack := false, false
+			for _, command := range f.commands {
+				if strings.HasSuffix(command, "rcon-cli plugins") {
+					t.Fatal("RCON plugins command used")
+				}
+				readiness = readiness || strings.HasSuffix(command, "rcon-cli list")
+				stack = stack || strings.Contains(command, "verify-minecraft-stack")
+			}
+			if !readiness || !stack {
+				t.Fatal("runtime readiness or stack verifier removed")
 			}
 		})
 	}

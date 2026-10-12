@@ -6047,25 +6047,36 @@ if (pluginsDialog && pluginsOpen) {
   pluginsDialog.append(panel);
   let installGeneration = 0, pollTimer = null, installController = null, returnFocus = null;
   let operationIdentity = null;
+  let operationViewID = null;
+  let searchTimer = null, inventoryTimer = null;
+  const clearInventoryTimer = () => { clearTimeout(inventoryTimer); inventoryTimer = null; };
+  const pluginOperationSettled = (operation) => !operation || ["succeeded", "rolled_back", "resolved"].includes(operation.state);
   let overlayDismissible = false;
   const stopPolling = () => { clearTimeout(pollTimer); pollTimer = null; installController?.abort(); ++installGeneration; };
   const workspaceShell = pluginsDialog.querySelector(".plugins-workspace-shell");
   const closePanel = () => {
     stopPolling();
     panel.hidden = true;
+    operationViewID = null;
     overlayDismissible = false;
     workspaceShell.inert = false;
     if (returnFocus?.isConnected) returnFocus.focus();
     else pluginsDialog.querySelector('[data-plugins-tab][aria-selected="true"]')?.focus();
   };
-  const showPanel = (label = "Plugin installation", dismissible = false) => {
+  const showPanel = (label = "Plugin installation", dismissible = false, preserveIdentity = false) => {
     overlayDismissible = dismissible;
     const focusedLabel = panel.contains(document.activeElement) ? document.activeElement.textContent : null;
     if (panel.hidden) returnFocus = document.activeElement;
     panel.setAttribute("aria-label", label);
     panel.hidden = false;
     workspaceShell.inert = true;
-    panelBody.replaceChildren();
+    if (preserveIdentity) {
+      // Retain the identity header (including its image) for this operation.
+      Array.from(panelBody.children).slice(1).forEach((node) => node.remove());
+    } else {
+      operationViewID = null;
+      panelBody.replaceChildren();
+    }
     // Preserve keyboard position when authoritative operation polling rerenders.
     queueMicrotask(() => {
       if (panel.hidden) return;
@@ -6098,13 +6109,17 @@ if (pluginsDialog && pluginsOpen) {
     overlayActions(panelAction("Done", closePanel, true));
   };
   const showOperation = (operation) => {
-    showPanel();
+    const sameOperation = !panel.hidden && operationViewID === operation.operation_id;
+    showPanel("Plugin installation", false, sameOperation);
     const success = operation.state === "succeeded";
     const attention = operation.state === "needs_attention";
     const terminal = ["succeeded", "rolled_back", "needs_attention", "resolved"].includes(operation.state);
     const identity = operationIdentity?.operation_id === operation.operation_id ? operationIdentity : null;
     const heading = success ? "Plugin installation verified" : attention ? "Administrator attention required" : operation.state === "rolled_back" ? "Installation did not complete" : operation.state === "resolved" ? "Plugin state verified" : "Installing plugin";
-    overlayHeader(identity?.name || heading, "", [identity?.version], identity?.project_id);
+    if (!sameOperation) {
+      overlayHeader(identity?.name || heading, "", [identity?.version], identity?.project_id);
+      operationViewID = operation.operation_id;
+    } else if (!identity) panelBody.querySelector(".plugins-overlay-identity h3").textContent = heading;
     if (identity) panelBody.append(text("h3", heading));
     if (!terminal) {
       const stages = ["Prepare", "Backup", "Install", "Restart", "Verify"];
@@ -6167,6 +6182,16 @@ if (pluginsDialog && pluginsOpen) {
       if (!showOperation(payload.operation)) pollTimer = setTimeout(() => pollOperation(id, current), 1500);
     } catch (error) { if (current === installGeneration && error.name !== "AbortError") panelError(error); }
   };
+  const resumeActiveOperation = (operation, current) => {
+    if (!showOperation(operation)) pollTimer = setTimeout(() => pollOperation(operation.operation_id, current), 1000);
+  };
+  const blockPluginInstall = async (current) => {
+    const payload = await pluginRequest("install-operation", null, installController.signal);
+    if (current !== installGeneration) return true;
+    if (pluginOperationSettled(payload.operation)) return false;
+    resumeActiveOperation(payload.operation, current);
+    return true;
+  };
   const applyPlugin = async (plan) => {
     stopPolling();
     const current = installGeneration;
@@ -6174,6 +6199,7 @@ if (pluginsDialog && pluginsOpen) {
     showPanel();
     panelBody.append(text("h3", "Submitting reviewed installation…"));
     try {
+      if (await blockPluginInstall(current)) return;
       const payload = await pluginRequest("install", {
         project_id: plan.project_id, version_id: plan.version_id, plan_fingerprint: plan.plan_fingerprint,
         confirm_players: String(plan.confirmation_required === true),
@@ -6199,6 +6225,7 @@ if (pluginsDialog && pluginsOpen) {
     panelBody.append(text("h3", "Preparing installation review…"));
     overlayActions(panelAction("Close", closePanel, true));
     try {
+      if (await blockPluginInstall(current)) return;
       const plan = await pluginRequest("install/plan", { project_id: projectID, version_id: versionID }, installController.signal);
       if (current !== installGeneration) return;
       showPanel("Plugin installation", true);
@@ -6265,7 +6292,7 @@ if (pluginsDialog && pluginsOpen) {
     const requestedGeneration = installGeneration;
     try {
       const payload = await pluginRequest("install-operation");
-      if (!pluginsDialog.open || !payload.operation || requestedGeneration !== installGeneration || !panel.hidden) return;
+      if (!pluginsDialog.open || pluginOperationSettled(payload.operation) || requestedGeneration !== installGeneration || !panel.hidden) return;
       stopPolling();
       installController = new AbortController();
       const current = installGeneration;
@@ -6285,9 +6312,23 @@ if (pluginsDialog && pluginsOpen) {
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
     }
   });
-  const pluginInventorySafe = (operation) => !operation || ["succeeded", "rolled_back", "resolved"].includes(operation.state);
+  const pluginInventorySafe = pluginOperationSettled;
+  const recheckBlockedInventory = async (current) => {
+    inventoryTimer = null;
+    if (!pluginsDialog.open || tab === "discover" || current !== generation) return;
+    try {
+      const payload = await pluginRequest("install-operation", null, controller.signal);
+      if (!pluginsDialog.open || tab === "discover" || current !== generation) return;
+      if (pluginInventorySafe(payload.operation)) { load(); return; }
+    } catch (error) {
+      if (current !== generation || error.name === "AbortError") return;
+      state.textContent = error.message || "Plugin installation status is unavailable.";
+    }
+    inventoryTimer = setTimeout(() => recheckBlockedInventory(current), 1500);
+  };
   const load = async () => {
     if (!document.body.classList.contains("role-administrator")) return;
+    clearInventoryTimer();
     const current = ++generation;
     controller?.abort();
     controller = new AbortController();
@@ -6304,6 +6345,7 @@ if (pluginsDialog && pluginsOpen) {
         if (current !== generation) return;
         if (!pluginInventorySafe(installation.operation)) {
           state.textContent = "Plugin installation is still being verified or recovered. Installed inventory will be available after the operation reaches a verified final state.";
+          inventoryTimer = setTimeout(() => recheckBlockedInventory(current), 1500);
           return;
         }
       }
@@ -6362,7 +6404,7 @@ if (pluginsDialog && pluginsOpen) {
   });
   capacityObserver.observe(results);
   form.querySelector("[data-plugins-modrinth]").addEventListener("click", (event) => event.preventDefault());
-  const workspaceWindow = setupWorkspaceWindow(pluginsDialog, { onOpen: () => { resetCursors(); updateCapacity(false); load(); resumePluginInstall(); }, onClose: () => { clearTimeout(capacityTimer); ++generation; controller?.abort(); closePanel(); } });
+  const workspaceWindow = setupWorkspaceWindow(pluginsDialog, { onOpen: () => { resetCursors(); updateCapacity(false); load(); resumePluginInstall(); }, onClose: () => { clearTimeout(capacityTimer); clearTimeout(searchTimer); clearInventoryTimer(); ++generation; controller?.abort(); closePanel(); } });
   pluginsOpen.addEventListener("click", () => {
     if (!document.body.classList.contains("role-administrator")) return;
     const controlCenter = document.querySelector("[data-control-center]");
@@ -6372,6 +6414,8 @@ if (pluginsDialog && pluginsOpen) {
   pluginsDialog.querySelector("[data-plugins-close]").addEventListener("click", () => workspaceWindow?.close());
   pluginsDialog.querySelector("[data-plugins-refresh]").addEventListener("click", load);
   pluginsDialog.querySelectorAll("[data-plugins-tab]").forEach((button) => button.addEventListener("click", () => {
+    clearTimeout(searchTimer);
+    clearInventoryTimer();
     tab = button.dataset.pluginsTab;
     resetCursors();
     pluginsDialog.querySelectorAll("[data-plugins-tab]").forEach((node) => node.setAttribute("aria-selected", String(node === button)));
@@ -6379,15 +6423,17 @@ if (pluginsDialog && pluginsOpen) {
     load();
   }));
   form.elements.q.addEventListener("input", () => {
+    clearTimeout(searchTimer);
     ++generation;
     controller?.abort();
     resetCursors();
     previous.disabled = true;
     next.disabled = true;
     pluginsDialog.querySelector("[data-plugins-page]").textContent = "Page 1";
+    searchTimer = setTimeout(() => load(), 250);
   });
-  form.addEventListener("submit", (event) => { event.preventDefault(); resetCursors(); load(); });
-  form.querySelectorAll('input[name="compatible_only"],input[name="release_only"]').forEach((control) => control.addEventListener("change", () => { resetCursors(); load(); }));
+  form.addEventListener("submit", (event) => { event.preventDefault(); clearTimeout(searchTimer); resetCursors(); load(); });
+  form.querySelectorAll('input[name="compatible_only"],input[name="release_only"]').forEach((control) => control.addEventListener("change", () => { clearTimeout(searchTimer); resetCursors(); load(); }));
   previous.addEventListener("click", () => { if (pageIndex > 0) { offset = pageCursors[--pageIndex]; load(); } });
   next.addEventListener("click", () => {
     if (nextOffset < 0) return;
