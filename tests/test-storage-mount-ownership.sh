@@ -20,6 +20,7 @@ for name, dispatch in [('admin-storage-mounts-json', 'case "${1:-status}" in'),
     (work / name).write_text(text + '\n')
 PY
 # Only shared policy functions are loaded from this file.
+source "${repo_root}/mjust/libexec/operation-trace.sh"
 source <(sed '/^source /d' "${repo_root}/mjust/libexec/admin-storage-actions-common.sh")
 source "${repo_root}/mjust/libexec/storage-mount-ownership.sh"
 source "${work}/admin-storage-mounts-json"
