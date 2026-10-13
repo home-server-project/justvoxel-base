@@ -53,14 +53,25 @@ on:
   workflow_dispatch:
 ```
 
-When deliberately run from validated `main`, it publishes:
+Dispatch it from validated `main` to publish:
 
 ```text
 ghcr.io/home-server-project/justvoxel-base:stable
 stable-YYYYMMDD-<git-sha>
 ```
 
-No automatic stable schedule or main-push build is enabled during active development.
+The workflow does not currently restrict manual dispatch to `main`. No automatic stable schedule, `main` merge/push build, or PR-to-`main` validation is enabled yet.
+
+### Planned stable release triggers (not yet implemented)
+
+After the first validated promotion to `main`, the intended release model is:
+
+- **PR to `main`:** validate the proposed Base source without publishing a stable image.
+- **Accepted PR merge to `main`:** build and publish `:stable` from the merged source revision.
+- **Weekly rebuild:** refresh `:stable` using the validated `main` source.
+- **Manual rebuild:** publish `:stable` from validated `main` on demand.
+
+A stable build must use the validated `main` revision; publishing `:stable` from an unmerged development ref is not part of the release policy. The workflows must be updated and verified before this planned policy becomes active.
 
 ## Channel contract
 
