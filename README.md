@@ -2,9 +2,11 @@
 
 JustVoxel Base is the shared, VM-ready immutable appliance image used to develop and release the JustVoxel Minecraft server platform.
 
+This is the **development repository** for that Base image and its common appliance implementation. The separate JustVoxel product repository handles public-facing distribution; promoting code from `testing` to `main` here does not change this repository's development role.
+
 It is designed for people who are comfortable installing an operating system and following normal computer instructions, but who do not want to become Linux, container, systemd, firewall, SELinux, or Minecraft-server administrators just to run a reliable family or small-community server.
 
-> **Development status:** active Base development is on the `testing` branch. Stable Base publication remains manual-only until the development line is deliberately promoted.
+> **Development status:** active Base development is on `testing`; `main` is reserved for validated promotions. Stable Base publication is currently manual-only. See [the build model](docs/BUILD.md) for the planned release triggers.
 
 ## What JustVoxel is
 
@@ -119,8 +121,10 @@ Start with the document that matches what you are trying to do:
 
 ## Branch and channel model
 
-- `testing` — active development; push or manual workflow builds `justvoxel-base:testing`
-- `main` — validated Base source; stable workflow remains manual-only during active development
+This is the Base **development** repository, not the separate JustVoxel product repository.
+
+- `testing` — active development. Qualifying pushes or a manual workflow publish the Base `:testing` channel.
+- `main` — validated Base source promoted through review. Stable releases use the validated `main` source revision, not a separate implementation.
 
 Testing publishes:
 
@@ -129,14 +133,18 @@ ghcr.io/home-server-project/justvoxel-base:testing
 testing-YYYYMMDD-<git-sha>
 ```
 
-When deliberately run from validated `main`, the stable workflow publishes:
+Stable publishes:
 
 ```text
 ghcr.io/home-server-project/justvoxel-base:stable
 stable-YYYYMMDD-<git-sha>
 ```
 
-This repository publishes JustVoxel Base images only.
+**Current:** stable is manual-only. Dispatch the stable workflow from validated `main`; opening or merging a PR does not yet publish stable automatically.
+
+**Planned after the first validated `main` promotion:** stable rebuilds after accepted PR merges into `main`, weekly, or by manual dispatch. PR checks should validate proposed changes without publishing `:stable` from unmerged code. These triggers are **not enabled yet**.
+
+See [`docs/BUILD.md`](docs/BUILD.md) for the current workflow behavior and release policy. This repository publishes JustVoxel Base images only.
 
 ## License
 
