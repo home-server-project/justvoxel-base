@@ -67,6 +67,7 @@ type pluginInventory struct {
 	Plugins []installedPlugin   `json:"plugins"`
 }
 type pluginDependency struct {
+	Name      string `json:"name,omitempty"`
 	ProjectID string `json:"project_id,omitempty"`
 	VersionID string `json:"version_id,omitempty"`
 	Filename  string `json:"file_name,omitempty"`
@@ -97,13 +98,29 @@ type pluginCatalogProject struct {
 	Compatibility    string                `json:"compatibility"`
 	MetadataError    string                `json:"metadata_error,omitempty"`
 }
+type pluginCatalogCursor struct {
+	ModrinthOffset int  `json:"modrinth_offset"`
+	HangarOffset   int  `json:"hangar_offset"`
+	HangarFirst    bool `json:"hangar_first"`
+}
 type pluginCatalog struct {
 	Server     pluginServerContext    `json:"server"`
-	Source     string                 `json:"source"`
+	Modrinth   bool                   `json:"modrinth"`
+	Hangar     bool                   `json:"hangar"`
 	Projects   []pluginCatalogProject `json:"projects"`
-	Offset     int                    `json:"offset"`
-	NextOffset int                    `json:"next_offset"`
-	Total      int                    `json:"total"`
+	Cursor     pluginCatalogCursor    `json:"cursor"`
+	NextCursor *pluginCatalogCursor   `json:"next_cursor"`
+	Total      int                    `json:"total"` // Raw provider total, never an eligible-result count.
+}
+
+// Per-result raw positions prevent unconsumed top-up hits from being skipped.
+type pluginCatalogPage struct {
+	Projects   []pluginCatalogProject
+	Positions  []int
+	Offset     int
+	NextOffset int
+	Total      int
+	End        int
 }
 
 func registerAdminPluginRoutes(mux *http.ServeMux, s *server) {
@@ -481,75 +498,136 @@ func pluginVersionCompatible(v pluginCatalogVersion, server pluginServerContext)
 	}
 	return false
 }
-func pluginQuery(q url.Values) (bool, bool, int, int, error) {
+
+type pluginDiscoverQuery struct {
+	Compatible bool
+	Release    bool
+	Modrinth   bool
+	Hangar     bool
+	Cursor     pluginCatalogCursor
+	Limit      int
+	Search     string
+}
+
+func pluginQuery(q url.Values) (pluginDiscoverQuery, error) {
+	out := pluginDiscoverQuery{Compatible: true, Release: true, Modrinth: true, Limit: 8, Search: q.Get("q")}
 	for key, values := range q {
-		if (key != "q" && key != "compatible_only" && key != "release_only" && key != "offset" && key != "limit") || len(values) != 1 {
-			return false, false, 0, 0, errors.New("invalid catalog query")
+		if !slices.Contains([]string{"q", "compatible_only", "release_only", "modrinth", "hangar", "modrinth_offset", "hangar_offset", "hangar_first", "limit"}, key) || len(values) != 1 {
+			return out, errors.New("invalid catalog query")
 		}
 	}
-	if len(q.Get("q")) > 200 {
-		return false, false, 0, 0, errors.New("search is too long")
+	if len(out.Search) > 200 {
+		return out, errors.New("search is too long")
 	}
-	compatible, release := true, true
-	for key, target := range map[string]*bool{"compatible_only": &compatible, "release_only": &release} {
-		if value := q.Get(key); value != "" {
-			if value != "true" && value != "false" {
-				return false, false, 0, 0, errors.New("invalid filter")
+	for key, target := range map[string]*bool{"compatible_only": &out.Compatible, "release_only": &out.Release, "modrinth": &out.Modrinth, "hangar": &out.Hangar, "hangar_first": &out.Cursor.HangarFirst} {
+		if values, present := q[key]; present {
+			if values[0] != "true" && values[0] != "false" {
+				return out, errors.New("invalid catalog boolean")
 			}
-			*target = value == "true"
+			*target = values[0] == "true"
 		}
 	}
-	offset := 0
-	if value := q.Get("offset"); value != "" {
-		var err error
-		offset, err = strconv.Atoi(value)
-		if err != nil || offset < 0 || offset > 10000 {
-			return false, false, 0, 0, errors.New("invalid offset")
+	for key, target := range map[string]*int{"modrinth_offset": &out.Cursor.ModrinthOffset, "hangar_offset": &out.Cursor.HangarOffset, "limit": &out.Limit} {
+		if values, present := q[key]; present {
+			value := values[0]
+			if value == "" || strings.Trim(value, "0123456789") != "" {
+				return out, errors.New("invalid catalog position")
+			}
+			n, err := strconv.Atoi(value)
+			if err != nil || n < 0 || n > 10000 || (key == "limit" && (n < 1 || n > 12)) {
+				return out, errors.New("invalid catalog position")
+			}
+			*target = n
 		}
 	}
-	limit := 8
-	if values, present := q["limit"]; present {
-		value := values[0]
-		if value == "" || strings.Trim(value, "0123456789") != "" {
-			return false, false, 0, 0, errors.New("invalid limit")
-		}
-		var err error
-		limit, err = strconv.Atoi(value)
-		if err != nil || limit < 1 || limit > 12 {
-			return false, false, 0, 0, errors.New("invalid limit")
-		}
-	}
-	return compatible, release, offset, limit, nil
+	return out, nil
 }
 func (s *server) adminPluginsDiscover(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.requireAdministrator(w, r); !ok {
 		return
 	}
-	query, err := url.ParseQuery(r.URL.RawQuery)
+	values, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid catalog query")
+		writeError(w, 400, "invalid catalog query")
 		return
 	}
-	compatible, release, offset, limit, err := pluginQuery(query)
+	query, err := pluginQuery(values)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeError(w, 400, err.Error())
 		return
 	}
 	server, _, ok := s.pluginContext(w, r)
 	if !ok {
 		return
 	}
-	out := pluginCatalog{Server: server, Source: "Modrinth", Projects: []pluginCatalogProject{}, Offset: offset, NextOffset: -1}
-	if !server.Supported {
-		writeJSON(w, http.StatusOK, out)
+	out := pluginCatalog{Server: server, Modrinth: query.Modrinth, Hangar: query.Hangar, Cursor: query.Cursor, Projects: []pluginCatalogProject{}}
+	if !server.Supported || (query.Compatible && server.MinecraftVersion == "") || (!query.Modrinth && !query.Hangar) {
+		writeJSON(w, 200, out)
 		return
 	}
-	if compatible && server.MinecraftVersion == "" {
-		writeJSON(w, http.StatusOK, out)
-		return
+	timeout := 25 * time.Second
+	if query.Hangar {
+		timeout = 40 * time.Second
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
+	modrinth := pluginCatalogPage{Offset: query.Cursor.ModrinthOffset, End: query.Cursor.ModrinthOffset, NextOffset: -1}
+	hangar := pluginCatalogPage{Offset: query.Cursor.HangarOffset, End: query.Cursor.HangarOffset, NextOffset: -1}
+	if query.Modrinth {
+		modrinth, err = discoverModrinthPlugins(ctx, server, query.Search, query.Compatible, query.Release, query.Cursor.ModrinthOffset, query.Limit)
+		if err != nil {
+			writeError(w, 502, err.Error())
+			return
+		}
+	}
+	if query.Hangar {
+		hangar, err = discoverHangarPlugins(ctx, server, query)
+		if err != nil {
+			writeError(w, 502, "Hangar catalog is unavailable. Try again later.")
+			return
+		}
+	}
+	out.Projects, out.NextCursor = mergePluginCatalogPages(modrinth, hangar, query.Cursor, query.Limit)
+	out.Total = modrinth.Total + hangar.Total
+	writeJSON(w, 200, out)
+}
+
+// Fetch each provider independently, then consume only the records shown. Each
+// provider's order and unused raw positions survive the composite page boundary.
+func mergePluginCatalogPages(m, h pluginCatalogPage, cursor pluginCatalogCursor, limit int) ([]pluginCatalogProject, *pluginCatalogCursor) {
+	projects := []pluginCatalogProject{}
+	mi, hi := 0, 0
+	next := cursor
+	for len(projects) < limit && (mi < len(m.Projects) || hi < len(h.Projects)) {
+		if (next.HangarFirst && hi < len(h.Projects)) || mi == len(m.Projects) {
+			projects = append(projects, h.Projects[hi])
+			hi++
+			next.HangarFirst = false
+		} else {
+			projects = append(projects, m.Projects[mi])
+			mi++
+			next.HangarFirst = true
+		}
+	}
+	position := func(page pluginCatalogPage, used int) int {
+		if used == len(page.Projects) {
+			return page.End
+		}
+		if used == 0 {
+			return page.Offset
+		}
+		return page.Positions[used-1]
+	}
+	next.ModrinthOffset = position(m, mi)
+	next.HangarOffset = position(h, hi)
+	if mi < len(m.Projects) || hi < len(h.Projects) || m.NextOffset >= 0 || h.NextOffset >= 0 {
+		return projects, &next
+	}
+	return projects, nil
+}
+
+func discoverModrinthPlugins(ctx context.Context, server pluginServerContext, searchText string, compatible, release bool, offset, limit int) (pluginCatalogPage, error) {
+	out := pluginCatalogPage{Projects: []pluginCatalogProject{}, Offset: offset, NextOffset: -1, End: offset}
 	loaders := pluginLoaders(server.ServerType)
 	facets := [][]string{{"project_type:mod"}}
 	loaderFacets := []string{}
@@ -569,20 +647,21 @@ func (s *server) adminPluginsDiscover(w http.ResponseWriter, r *http.Request) {
 			Total *int                   `json:"total_hits"`
 		}
 		batchLimit := min(limit, 3*limit-scanned)
-		if err := modrinthPluginJSON(ctx, "/search", url.Values{"query": {r.URL.Query().Get("q")}, "facets": {string(encoded)}, "limit": {strconv.Itoa(batchLimit)}, "offset": {strconv.Itoa(cursor)}}, &search); err != nil {
-			writeError(w, http.StatusBadGateway, "Modrinth catalog is unavailable. Try again later.")
-			return
+		if err := modrinthPluginJSON(ctx, "/search", url.Values{"query": {searchText}, "facets": {string(encoded)}, "limit": {strconv.Itoa(batchLimit)}, "offset": {strconv.Itoa(cursor)}}, &search); err != nil {
+			return out, errors.New("Modrinth catalog is unavailable. Try again later.")
 		}
 		if search.Hits == nil || search.Total == nil || len(search.Hits) > batchLimit || *search.Total < 0 {
-			writeError(w, http.StatusBadGateway, "Modrinth catalog is unavailable. Try again later.")
-			return
+			return out, errors.New("Modrinth catalog is unavailable. Try again later.")
 		}
 		out.Total = *search.Total
+		if cursor >= 10000 {
+			break
+		}
 		if len(search.Hits) == 0 {
 			break
 		}
 		for _, project := range search.Hits {
-			if len(out.Projects) == limit || cursor >= out.Total || cursor > 10000 {
+			if len(out.Projects) == limit || cursor >= out.Total || cursor >= 10000 {
 				break
 			}
 			cursor++
@@ -610,6 +689,7 @@ func (s *server) adminPluginsDiscover(w http.ResponseWriter, r *http.Request) {
 			if err := modrinthPluginJSON(ctx, "/project/"+project.ID+"/version", query, &versions); err != nil {
 				project.MetadataError = "Release and dependency metadata unavailable"
 				out.Projects = append(out.Projects, project)
+				out.Positions = append(out.Positions, cursor)
 				continue
 			}
 			sort.SliceStable(versions, func(i, j int) bool { return versions[i].Published > versions[j].Published })
@@ -649,15 +729,215 @@ func (s *server) adminPluginsDiscover(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			out.Projects = append(out.Projects, project)
+			out.Positions = append(out.Positions, cursor)
 		}
 		if cursor >= out.Total {
 			break
 		}
 	}
-	if scanned > 0 && cursor < out.Total && cursor <= 10000 {
+	if scanned > 0 && cursor < out.Total && cursor < 10000 {
 		out.NextOffset = cursor
 	}
-	writeJSON(w, http.StatusOK, out)
+	out.End = cursor
+	return out, nil
+}
+
+// Hangar is discovery-only. Never decode download URLs or feed these records to
+// the Modrinth-native installer, dependency planner, or ownership manifest.
+func hangarPluginJSON(ctx context.Context, path string, query url.Values, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://hangar.papermc.io/api/v1"+path+"?"+query.Encode(), nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "JustVoxel/PluginWorkspace (https://github.com/home-server-project/justvoxel-base)")
+	req.Header.Set("Accept", "application/json")
+	response, err := pluginCatalogClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("Hangar response %d", response.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, (2<<20)+1))
+	if err != nil {
+		return err
+	}
+	if len(data) > 2<<20 {
+		return errors.New("Hangar response too large")
+	}
+	return json.Unmarshal(data, out)
+}
+
+type hangarPagination struct {
+	Count  *int `json:"count"`
+	Offset *int `json:"offset"`
+	Limit  *int `json:"limit"`
+}
+
+func (p hangarPagination) valid(offset, limit, received int) bool {
+	return p.Count != nil && *p.Count >= 0 && *p.Count <= 1000000000 && p.Offset != nil && *p.Offset == offset && p.Limit != nil && *p.Limit == limit && received <= limit
+}
+
+type hangarProject struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Namespace   struct {
+		Slug string `json:"slug"`
+	} `json:"namespace"`
+}
+type hangarVersion struct {
+	ID        int64  `json:"id"`
+	ProjectID int64  `json:"projectId"`
+	Name      string `json:"name"`
+	CreatedAt string `json:"createdAt"`
+	Channel   struct {
+		Name  string   `json:"name"`
+		Flags []string `json:"flags"`
+	} `json:"channel"`
+	PlatformDependencies map[string][]string `json:"platformDependencies"`
+	PluginDependencies   map[string][]struct {
+		Name     string `json:"name"`
+		Required bool   `json:"required"`
+	} `json:"pluginDependencies"`
+}
+
+func hangarVersionStable(v hangarVersion) bool {
+	// An absent flags list is not authoritative stability evidence. Hangar has
+	// custom channel names; never guess release/beta/alpha from their spelling.
+	if v.Channel.Name == "" || v.Channel.Flags == nil {
+		return false
+	}
+	for _, flag := range v.Channel.Flags {
+		if !slices.Contains([]string{"FROZEN", "PINNED", "SENDS_NOTIFICATIONS", "HIDE_BY_DEFAULT"}, flag) {
+			return false
+		}
+	}
+	return true
+}
+func selectHangarVersion(ctx context.Context, projectID int64, server pluginServerContext, compatible, release bool) (*pluginCatalogVersion, bool, error) {
+	query := url.Values{"platform": {"PAPER"}, "limit": {"25"}}
+	if compatible {
+		query.Set("platformVersion", server.MinecraftVersion)
+	}
+	// Bound inspection even when many unstable versions precede a stable one.
+	for offset, batches := 0, 0; batches < 3 && offset < 75; batches++ {
+		query.Set("offset", strconv.Itoa(offset))
+		var versions struct {
+			Pagination hangarPagination `json:"pagination"`
+			Result     []hangarVersion  `json:"result"`
+		}
+		if err := hangarPluginJSON(ctx, "/projects/"+strconv.FormatInt(projectID, 10)+"/versions", query, &versions); err != nil {
+			return nil, false, err
+		}
+		if versions.Result == nil || !versions.Pagination.valid(offset, 25, len(versions.Result)) {
+			return nil, false, errors.New("invalid Hangar versions")
+		}
+		for _, v := range versions.Result {
+			paper := v.PlatformDependencies["PAPER"]
+			if v.ID <= 0 || v.ProjectID != projectID || len(v.Name) == 0 || len(v.Name) > 256 || len(v.Channel.Name) > 128 || len(v.Channel.Flags) > 16 || len(v.CreatedAt) > 64 || len(paper) == 0 || len(paper) > 256 {
+				continue
+			}
+			valid := true
+			for _, game := range paper {
+				if len(game) == 0 || len(game) > 64 {
+					valid = false
+				}
+			}
+			if !valid || (release && !hangarVersionStable(v)) {
+				continue
+			}
+			matches := server.MinecraftVersion != "" && slices.Contains(paper, server.MinecraftVersion)
+			if compatible && !matches {
+				continue
+			}
+			// Keep provider-native channel wording and exact PAPER publisher metadata.
+			dependencies := []pluginDependency{}
+			if len(v.PluginDependencies["PAPER"]) > 128 {
+				continue
+			}
+			for _, dep := range v.PluginDependencies["PAPER"] {
+				if len(dep.Name) == 0 || len(dep.Name) > 256 {
+					valid = false
+					break
+				}
+				kind := "optional"
+				if dep.Required {
+					kind = "required"
+				}
+				dependencies = append(dependencies, pluginDependency{Name: dep.Name, Type: kind})
+			}
+			if !valid {
+				continue
+			}
+			return &pluginCatalogVersion{ID: strconv.FormatInt(v.ID, 10), Number: v.Name, Type: v.Channel.Name, Published: v.CreatedAt, GameVersions: paper, Loaders: []string{"paper"}, Dependencies: dependencies}, matches, nil
+		}
+		if len(versions.Result) == 0 || offset+len(versions.Result) >= *versions.Pagination.Count {
+			return nil, false, nil
+		}
+		offset += len(versions.Result)
+	}
+	return nil, false, nil
+}
+func discoverHangarPlugins(ctx context.Context, server pluginServerContext, q pluginDiscoverQuery) (pluginCatalogPage, error) {
+	offset, limit := q.Cursor.HangarOffset, q.Limit
+	out := pluginCatalogPage{Projects: []pluginCatalogProject{}, Offset: offset, End: offset, NextOffset: -1}
+	cursor, scanned := offset, 0
+	for len(out.Projects) < limit && scanned < 3*limit && cursor <= 10000 {
+		batchLimit := min(limit, 3*limit-scanned)
+		query := url.Values{"q": {q.Search}, "platform": {"PAPER"}, "offset": {strconv.Itoa(cursor)}, "limit": {strconv.Itoa(batchLimit)}, "sort": {"downloads"}}
+		var search struct {
+			Pagination hangarPagination `json:"pagination"`
+			Result     []hangarProject  `json:"result"`
+		}
+		if err := hangarPluginJSON(ctx, "/projects", query, &search); err != nil {
+			return out, err
+		}
+		if search.Result == nil || !search.Pagination.valid(cursor, batchLimit, len(search.Result)) {
+			return out, errors.New("invalid Hangar projects")
+		}
+		out.Total = *search.Pagination.Count
+		if cursor >= 10000 {
+			break
+		}
+		if len(search.Result) == 0 {
+			break
+		}
+		for _, hit := range search.Result {
+			if len(out.Projects) == limit || cursor >= out.Total || cursor >= 10000 {
+				break
+			}
+			cursor++
+			scanned++
+			if hit.ID <= 0 || len(hit.Name) == 0 || len(hit.Name) > 256 || len(hit.Description) > 4096 || len(hit.Namespace.Slug) > 128 {
+				continue
+			}
+			version, matches, err := selectHangarVersion(ctx, hit.ID, server, q.Compatible, q.Release)
+			if err != nil {
+				return out, err
+			}
+			if version == nil {
+				continue
+			}
+			project := pluginCatalogProject{ID: strconv.FormatInt(hit.ID, 10), Slug: hit.Namespace.Slug, Name: hit.Name, Description: hit.Description, Source: "Hangar", Version: version, Compatible: matches, Versions: version.GameVersions, InstallAvailable: false, Compatibility: "Compatibility unknown"}
+			if matches {
+				project.Compatibility = "Compatible according to publisher metadata"
+			} else if server.MinecraftVersion != "" {
+				project.Compatibility = "Not listed as compatible according to publisher metadata"
+			}
+			out.Projects = append(out.Projects, project)
+			out.Positions = append(out.Positions, cursor)
+		}
+		if cursor >= out.Total {
+			break
+		}
+	}
+	out.End = cursor
+	if scanned > 0 && cursor < out.Total && cursor < 10000 {
+		out.NextOffset = cursor
+	}
+	return out, nil
 }
 
 const pluginIconLimit = 512 << 10

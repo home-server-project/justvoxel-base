@@ -41,7 +41,7 @@ func (f *fakePluginsWorkspaceAPI) AdminPluginDiscover(_ context.Context, session
 	}
 	f.catalogCalls++
 	f.query = query
-	return api.PluginCatalog{Source: "Modrinth", Projects: []api.PluginCatalogProject{}}, nil
+	return api.PluginCatalog{Modrinth: true, Projects: []api.PluginCatalogProject{}}, nil
 }
 func TestPluginsWorkspaceRoutesEnforceAdministrator(t *testing.T) {
 	for _, role := range []string{"viewer", "operator", "administrator"} {
@@ -77,8 +77,8 @@ func TestPluginsWorkspaceForwardsCatalogFiltersAndRejectsMutation(t *testing.T) 
 		t.Fatal(err)
 	}
 	rr := httptest.NewRecorder()
-	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/api/plugins/workspace/discover?q=example&compatible_only=false&release_only=true&offset=8", ""))
-	if rr.Code != http.StatusOK || client.query.Get("q") != "example" || client.query.Get("compatible_only") != "false" || client.query.Get("offset") != "8" {
+	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/api/plugins/workspace/discover?q=example&compatible_only=false&release_only=true&modrinth_offset=8", ""))
+	if rr.Code != http.StatusOK || client.query.Get("q") != "example" || client.query.Get("compatible_only") != "false" || client.query.Get("modrinth_offset") != "8" {
 		t.Fatalf("query not forwarded: %d %#v", rr.Code, client.query)
 	}
 	for _, path := range []string{"discover", "installed", "updates"} {
@@ -149,7 +149,7 @@ func TestPluginsWorkspaceCompactInfoPresentation(t *testing.T) {
 		t.Fatal("compact plugin renderers missing")
 	}
 	info := behavior[start:project]
-	for _, want := range []string{`card.tabIndex = 0`, `card.setAttribute("role", "button")`, `card.setAttribute("aria-haspopup", "dialog")`, `card.setAttribute("aria-controls", "plugins-overlay")`, `event.key === "Enter" || event.key === " "`, `node.classList.toggle("is-selected", node === card)`, `card.addEventListener("click", open)`, "showPanel(`Info for ${name}`, true)", `renderInfo();`, `overlayActions(...actions, panelAction("Close"`, `"plugins-icon-tile"`, `header.append(identityTile(name, projectID, iconURL), copy)`} {
+	for _, want := range []string{`card.tabIndex = 0`, `card.setAttribute("role", "button")`, `card.setAttribute("aria-haspopup", "dialog")`, `card.setAttribute("aria-controls", "plugins-overlay")`, `event.key === "Enter" || event.key === " "`, `node.classList.toggle("is-selected", node === card)`, `card.addEventListener("click", open)`, "showPanel(`Info for ${name}`, true)", `renderInfo();`, `overlayActions(...actions, pluginAction("Close", closePanel, "plugins-done-action"))`, `"plugins-icon-tile"`, `header.append(identityTile(name, projectID, iconURL), copy)`} {
 		if !strings.Contains(info, want) {
 			t.Fatalf("whole-card overlay behavior missing %s", want)
 		}
@@ -166,7 +166,7 @@ func TestPluginsWorkspaceCompactInfoPresentation(t *testing.T) {
 		}
 	}
 	discover := behavior[project:installed]
-	for _, want := range []string{`interactiveCard(card, project.title, () => reviewRejection`, `"plugins-card-description"`, `counts.set(kind, (counts.get(kind) || 0) + 1)`, `"JustVoxel managed"`, `const installable = !managed && project.install_available`, `reviewPlugin(project.project_id, version.id, project, readOnlyReview)`} {
+	for _, want := range []string{`interactiveCard(card, project.title, () => reviewRejection`, `"plugins-card-description"`, `counts.set(kind, (counts.get(kind) || 0) + 1)`, `"JustVoxel managed"`, `const installable = project.source === "Modrinth" && !managed && project.install_available`, `reviewPlugin(project.project_id, version.id, project, readOnlyReview)`} {
 		if !strings.Contains(discover, want) {
 			t.Fatalf("Discover summary or Info missing %s", want)
 		}
@@ -417,7 +417,7 @@ func TestPluginsAdditionalInfoAndStructuredInstallPresentation(t *testing.T) {
 		t.Fatal("plugin presentation boundaries missing")
 	}
 	discoverInfo := script[project:installed]
-	for _, want := range []string{`overlayHeader(project.title, project.description`, `overlaySection("About this version")`, `about("Release"`, `about("Release type"`, `about("Published"`, `about("Source"`, `about("Project ID"`, `about("Release ID"`, `overlaySection("Compatibility")`, `compatibility("Active Minecraft version"`, `compatibility("Supported platforms"`, `compatibility("Supported versions"`, `new Set(version?.game_versions || [])`, `versions.join(" / ")`, `overlaySection("Dependencies").append(dependencyGroups(dependencies))`} {
+	for _, want := range []string{`overlayHeader(project.title, project.description`, `overlaySection("About this version")`, `about("Release"`, `about(project.source === "Hangar" ? "Channel" : "Release type", version?.version_type || "Not provided")`, `about("Published"`, `about("Source"`, `about("Project ID"`, `about("Release ID"`, `overlaySection("Compatibility")`, `compatibility("Active Minecraft version"`, `compatibility("Supported platforms"`, `compatibility("Supported versions"`, `new Set(version?.game_versions || [])`, `versions.join(" / ")`, `overlaySection("Dependencies").append(dependencyGroups(dependencies))`} {
 		if !strings.Contains(discoverInfo, want) {
 			t.Fatal("structured Discover Info missing", want)
 		}
@@ -598,8 +598,9 @@ func TestPluginsWorkspaceSharedSameOriginLogoAndFallback(t *testing.T) {
 	for _, want := range []string{
 		`identity.append(identityTile(name, projectID, iconURL), text("h3", name))`,
 		`header.append(identityTile(name, projectID, iconURL), copy)`,
-		`overlayHeader(project.title, project.description, identityBadges, project.project_id, null, project.icon_url || "")`,
-		`}, project.project_id, project.icon_url || "")`,
+		`const iconProjectID = project.source === "Modrinth" ? project.project_id : undefined;`,
+		`overlayHeader(project.title, project.description, identityBadges, iconProjectID, null, project.icon_url || "")`,
+		`}, iconProjectID, project.icon_url || "")`,
 		`overlayHeader(plan.project_name, plan.description || project?.description, [plan.version_number, plan.server.server_software,`,
 		`const projectID = plugin.project_id || plugin.icon_project_id || undefined`,
 		`overlayHeader(name, "", [plugin.version || "Version unknown", management, stateLabel], projectID)`,
@@ -663,7 +664,7 @@ func TestPluginsWorkspaceApprovedCompactHierarchyAndStageFlow(t *testing.T) {
 		}
 	}
 	discover := between("  const renderProject =", "  const renderInstalled =")
-	if strings.Contains(discover, `...(version?.loaders || [])`) || !strings.Contains(discover, `overlayHeader(project.title, project.description, identityBadges, project.project_id, null, project.icon_url || "")`) {
+	if strings.Contains(discover, `...(version?.loaders || [])`) || !strings.Contains(discover, `overlayHeader(project.title, project.description, identityBadges, iconProjectID, null, project.icon_url || "")`) {
 		t.Fatal("Info header must reuse concise server-context badges")
 	}
 	for _, want := range []string{`compatibility("Supported platforms", (version?.loaders || []).join(" / ")`, `new Set(version?.game_versions || [])`} {
@@ -759,6 +760,10 @@ func TestPluginsWorkspaceBoundedDiscoverQuery(t *testing.T) {
 		{"", true}, {"limit=1", true}, {"limit=12", true},
 		{"limit=0", false}, {"limit=13", false}, {"limit=abc", false},
 		{"limit=1.5", false}, {"limit=", false}, {"limit=%2B1", false},
+		{"modrinth=true&hangar=false", true}, {"modrinth=false&hangar=true", true}, {"modrinth=true&hangar=true", true}, {"modrinth=false&hangar=false", true},
+		{"modrinth_offset=10000&hangar_offset=10000&hangar_first=true", true},
+		{"hangar=", false}, {"modrinth=1", false}, {"hangar=true&hangar=false", false}, {"modrinth=true&modrinth=true", false},
+		{"hangar_offset=10001", false}, {"modrinth_offset=-1", false}, {"hangar_first=1", false}, {"hangar_offset=", false}, {"modrinth_offset=1&modrinth_offset=2", false}, {"offset=0", false},
 		{"limit=1&limit=12", false}, {"source=hangar", false}, {"url=https://example.com", false}, {"limit=1&bad=%xx", false},
 	} {
 		t.Run(tc.query, func(t *testing.T) {
@@ -775,7 +780,7 @@ func TestPluginsWorkspaceBoundedDiscoverQuery(t *testing.T) {
 					t.Fatal("catalog query rejected", rr.Code)
 				}
 				values, _ := url.ParseQuery(tc.query)
-				if client.query.Get("limit") != values.Get("limit") {
+				if client.query.Encode() != values.Encode() {
 					t.Fatal("limit was not forwarded")
 				}
 			} else if rr.Code != http.StatusBadRequest || client.catalogCalls != 0 {
@@ -805,7 +810,7 @@ func TestPluginsWorkspaceToolbarCapacityAndPagination(t *testing.T) {
 		t.Fatal("plugin workspace missing")
 	}
 	js = js[start:end]
-	for _, want := range []string{`aria-label="Search plugins"`, `placeholder="Search Modrinth plugins"`, `role="switch" data-plugins-modrinth checked aria-readonly="true"`, `role="switch" data-plugins-hangar disabled>Hangar`, `>Compatible only`, `>Release only`} {
+	for _, want := range []string{`aria-label="Search plugins"`, `placeholder="Search plugins"`, `role="switch" name="modrinth" data-plugins-modrinth checked`, `role="switch" name="hangar" data-plugins-hangar>Hangar`, `>Compatible only`, `>Release only`} {
 		if !strings.Contains(header, want) {
 			t.Fatal("toolbar control missing", want)
 		}
@@ -815,7 +820,7 @@ func TestPluginsWorkspaceToolbarCapacityAndPagination(t *testing.T) {
 			t.Fatal("visible toolbar text remains", forbidden)
 		}
 	}
-	for _, want := range []string{`limit: String(pageLimit)`, `results.getBoundingClientRect()`, `style.gridTemplateColumns`, `results.clientHeight`, `style.getPropertyValue("--plugins-card-height")`, `columns * rows`, `Math.min(12`, `new ResizeObserver`, `setTimeout(() => updateCapacity(), 200)`, `pageCursors = [offset]`, `pageIndex = 0`, `Math.ceil(payload.total / pageLimit)`, `const currentPage = pageIndex + 1`, "`Page ${currentPage} of ${totalPages}`", `offset = pageCursors[--pageIndex]`, `pageCursors.push(nextOffset)`, `event.preventDefault()`} {
+	for _, want := range []string{`limit: String(pageLimit)`, `results.getBoundingClientRect()`, `style.gridTemplateColumns`, `results.clientHeight`, `style.getPropertyValue("--plugins-card-height")`, `columns * rows`, `Math.min(12`, `new ResizeObserver`, `setTimeout(() => updateCapacity(), 200)`, `pageCursors = [cursor]`, `pageIndex = 0`, `const currentPage = pageIndex + 1`, "`Page ${currentPage}`", `cursor = pageCursors[--pageIndex]`, `pageCursors.push(nextCursor)`, `event.preventDefault()`} {
 		if !strings.Contains(js, want) {
 			t.Fatal("dynamic catalog behavior missing", want)
 		}
@@ -859,7 +864,7 @@ func TestPluginCorrectionReviewAndCursorStructure(t *testing.T) {
 			t.Fatal("rejected behavior remains", forbidden)
 		}
 	}
-	for _, want := range []string{`pageCursors = [0]`, `previous.disabled = pageIndex === 0`, `next.disabled = nextOffset < 0`, `nextOffset = payload.next_offset`, `pageCursors.push(nextOffset)`, `offset = pageCursors[--pageIndex]`, `const currentPage = pageIndex + 1`, `resetCursors();`, `form.elements.q.addEventListener("input"`, `readOnlyReview("The publisher lists Paper support, but this JAR is not a direct Paper/Bukkit plugin. It may require an external loader or a different installation path, so JustVoxel will not place it in the plugins directory.")`, `renderInfo();`, `"Supported platforms"`, `"Supported versions"`, `versions.join(" / ")`, `"plugins-publisher-dependency-row"`, `values.join(" / ")`, `text("li", artifact.filename, "plugins-file-row")`, `readableSize(artifact.size)`, `overlayActions(panelAction("Done", closePanel, true))`, `overlayActions(panelAction("Close", closePanel, true))`} {
+	for _, want := range []string{`pageCursors = [firstCursor()]`, `previous.disabled = pageIndex === 0`, `next.disabled = !nextCursor`, `nextCursor = payload.next_cursor`, `pageCursors.push(nextCursor)`, `cursor = pageCursors[--pageIndex]`, `const currentPage = pageIndex + 1`, `resetCursors();`, `form.elements.q.addEventListener("input"`, `readOnlyReview("The publisher lists Paper support, but this JAR is not a direct Paper/Bukkit plugin. It may require an external loader or a different installation path, so JustVoxel will not place it in the plugins directory.")`, `renderInfo();`, `"Supported platforms"`, `"Supported versions"`, `versions.join(" / ")`, `"plugins-publisher-dependency-row"`, `values.join(" / ")`, `text("li", artifact.filename, "plugins-file-row")`, `readableSize(artifact.size)`, `overlayActions(panelAction("Done", closePanel, true))`, `overlayActions(pluginAction("Close", closePanel, "plugins-done-action"))`} {
 		if !strings.Contains(script, want) {
 			t.Fatal("correction missing", want)
 		}
@@ -1049,7 +1054,7 @@ func TestPluginsWorkspaceVMCorrectionHeaderButtonsAndBackdrop(t *testing.T) {
 	if strings.Contains(info, `panelAction("Install"`) || strings.Contains(info, `applyPlugin(`) {
 		t.Fatal("read-only information exposes Install")
 	}
-	for _, want := range []string{`showPanel(project.title, true)`, `renderInfo();`, `overlayActions(panelAction("Close", closePanel, true))`} {
+	for _, want := range []string{`showPanel(project.title, true)`, `renderInfo();`, `overlayActions(pluginAction("Close", closePanel, "plugins-done-action"))`} {
 		if !strings.Contains(info, want) {
 			t.Fatal("read-only view missing", want)
 		}
@@ -1379,7 +1384,7 @@ func TestPluginsWorkspaceLiveSearchBehavior(t *testing.T) {
 	program := `
 const assert = require("node:assert/strict");
 const events = {}, formEvents = {}, filterEvents = [];
-const form = {elements:{q:{addEventListener:(event,handler) => events[event] = handler}},addEventListener:(event,handler) => formEvents[event] = handler,querySelectorAll:() => [0,1].map((index) => ({addEventListener:(event,handler) => filterEvents[index] = handler}))};
+const form = {elements:{q:{addEventListener:(event,handler) => events[event] = handler}},addEventListener:(event,handler) => formEvents[event] = handler,querySelectorAll:() => [0,1,2,3].map((index) => ({addEventListener:(event,handler) => filterEvents[index] = handler}))};
 let generation = 0, aborts = 0, resets = 0, loads = 0, searchTimer = null, timerID = 0;
 const controller = {abort:() => aborts++}, previous = {}, next = {}, page = {};
 const pluginsDialog = {querySelector:() => page}, resetCursors = () => resets++, load = () => loads++;
@@ -1393,7 +1398,7 @@ events.input(); let prevented = false;
 formEvents.submit({preventDefault:() => prevented = true});
 assert(prevented); assert.equal(timers.size,0); assert.equal(loads,2);
 for (const filter of filterEvents) { events.input(); filter(); assert.equal(timers.size,0); }
-assert.equal(loads,4);
+assert.equal(loads,6);
 `
 	command := exec.Command("node", "-e", program)
 	if output, err := command.CombinedOutput(); err != nil {
@@ -1425,7 +1430,7 @@ func TestPluginWorkspaceApprovedPolish(t *testing.T) {
 		}
 	}
 	project := pluginScriptSection(t, script, "  const renderProject =", "  const renderInstalled =")
-	for _, want := range []string{`project.project_id, project.icon_url`, `project.project_id, null, project.icon_url`} {
+	for _, want := range []string{`iconProjectID, project.icon_url`, `iconProjectID, null, project.icon_url`} {
 		if !strings.Contains(project, want) {
 			t.Fatal("Discover must supply validated search icon", want)
 		}
@@ -1761,5 +1766,161 @@ func TestGenericPluginWorkspaceOperationAcceptsAllFourMutations(t *testing.T) {
 				t.Fatal("active mutation not discovered", rr.Code, rr.Body.String())
 			}
 		})
+	}
+}
+
+func TestPluginsDiscoverSourceControlsAndReadOnlyCards(t *testing.T) {
+	script := pluginWorkspaceScript(t)
+	header, _ := assets.ReadFile("templates/header.html")
+	for _, want := range []string{`name="modrinth" data-plugins-modrinth checked`, `name="hangar" data-plugins-hangar>Hangar`, `placeholder="Search plugins"`} {
+		if !strings.Contains(string(header), want) {
+			t.Fatal("source control", want)
+		}
+	}
+	for _, bad := range []string{`aria-readonly="true"`, `data-plugins-hangar disabled`, `plugins-source-fixed`, `plugins-source-unavailable`} {
+		if strings.Contains(string(header), bad) {
+			t.Fatal("placeholder remains", bad)
+		}
+	}
+	for _, want := range []string{`modrinth: String(form.elements.modrinth.checked)`, `hangar: String(form.elements.hangar.checked)`, `modrinth_offset: String(cursor.modrinth_offset)`, `hangar_offset: String(cursor.hangar_offset)`, `hangar_first: String(cursor.hangar_first)`, `input[name="modrinth"],input[name="hangar"]`, `Enable Modrinth or Hangar to browse plugins.`, `pageCursors = [cursor]`} {
+		if !strings.Contains(script, want) {
+			t.Fatal("source/cursor request", want)
+		}
+	}
+	if strings.Contains(script, `data-plugins-modrinth]").addEventListener("click"`) {
+		t.Fatal("fixed source handler remains")
+	}
+	helpers := pluginScriptSection(t, script, "  const text =", "  const renderInstalled =")
+	actions := pluginScriptSection(t, script, "  const panelAction =", "  const returnToInstalled =")
+	program := `
+const assert = require("node:assert/strict");
+const imageRequests = [];
+class Node {
+ constructor(tag) { this.tag=tag; this.children=[]; this.events={}; this.attrs={}; this.dataset={}; this.className=""; this.textContent=""; this.classList={add:(c)=>{this.className+=" "+c},remove:()=>{},toggle:()=>{}}; }
+ append(...nodes) { this.children.push(...nodes); }
+ insertBefore(node,before) { this.children.splice(this.children.indexOf(before),0,node); }
+ setAttribute(k,v) { this.attrs[k]=v; }
+ addEventListener(k,v) { this.events[k]=v; }
+ focus() {}
+ querySelector(selector) { if(selector==="h3") return this.children.find(n=>n.tag==="h3"); return this.children.find(n=>n.className==="plugins-card-description"); }
+ querySelectorAll() {return this.children;}
+ set src(value) { imageRequests.push(value); }
+}
+const document = {createElement:(tag)=>new Node(tag)};
+const results = new Node("div"), panelBody = new Node("div");
+const stopPolling=()=>{}, showPanel=()=>{panelBody.children=[]}, closePanel=()=>{};
+const reviewPlugin=()=>{throw new Error("Hangar entered installer")};
+` + helpers + actions + `
+const server = {supported:true,minecraft_version:"1.21.8",server_type:"paper"};
+const base = {title:"Same name",description:"Plugin",project_id:"123",slug:"same",compatible:true,compatibility:"Compatible according to publisher metadata",version:{id:"1",version_number:"1",version_type:"release",loaders:["paper"],game_versions:["1.21.8"],dependencies:[]}};
+const hangar = renderProject({...base,source:"Hangar",install_available:true,icon_url:"https://hangar.papermc.io/avatar.png"},server);
+results.append(hangar); hangar.events.click();
+const flatten=(n)=>[n,...n.children.flatMap(flatten)];
+let nodes=flatten(panelBody);
+assert.equal(imageRequests.length,0);
+assert(nodes.some(n=>n.textContent==="Hangar"));
+assert(!nodes.some(n=>n.textContent==="Install"));
+assert(nodes.some(n=>n.textContent==="Channel"));
+assert(!nodes.some(n=>n.textContent==="Release type"));
+for (const root of [hangar,panelBody]) {
+ const tiles=flatten(root).filter(n=>n.className.includes("plugins-icon-tile"));
+ assert.equal(tiles.length,1); assert.equal(tiles[0].textContent,"SA");
+ assert(!tiles[0].children.some(n=>n.tag==="img"));
+}
+const close = nodes.find(n=>n.tag==="button" && n.textContent==="Close");
+assert(close.className.includes("plugins-done-action")); assert(!close.className.includes("secondary"));
+const modrinth=renderProject({...base,source:"Modrinth",install_available:false,icon_url:"https://cdn.modrinth.com/data/123/icon.png"},server);
+results.append(modrinth); modrinth.events.click();
+assert.equal(imageRequests.length,2);
+for (const request of imageRequests) {assert(request.startsWith("/api/plugins/workspace/icon?")); const q=new URL(request,"https://appliance.example").searchParams; assert.equal(q.get("project_id"),"123"); assert.equal(q.get("icon_url"),"https://cdn.modrinth.com/data/123/icon.png");}
+nodes=flatten(panelBody);
+assert(nodes.some(n=>n.textContent==="Modrinth"));
+assert(nodes.some(n=>n.textContent==="Release type"));
+assert(!nodes.some(n=>n.textContent==="Channel"));
+for (const root of [modrinth,panelBody]) {
+ const tiles=flatten(root).filter(n=>n.className.includes("plugins-icon-tile"));
+ assert.equal(tiles.length,1); assert.equal(tiles[0].textContent,"SA");
+ assert.equal(tiles[0].children.filter(n=>n.tag==="img").length,1);
+}
+`
+	command := exec.Command("node", "-e", program)
+	if out, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("catalog card source boundary: %v\n%s", err, out)
+	}
+}
+
+func TestPluginsDiscoverCompositeCursorNavigation(t *testing.T) {
+	script := pluginWorkspaceScript(t)
+	cursors := pluginScriptSection(t, script, "  const firstCursor =", "  const text =")
+	navigation := pluginScriptSection(t, script, `  previous.addEventListener("click"`, "  // Role discovery")
+	filters := pluginScriptSection(t, script, `  form.querySelectorAll('input[name="compatible_only"]`, `  previous.addEventListener`)
+	program := `
+const assert=require("node:assert/strict");
+const controls=[{name:"compatible_only"},{name:"release_only"},{name:"modrinth"},{name:"hangar"}];
+const form={querySelectorAll:(selector)=>{for(const c of controls)assert(selector.includes('input[name="'+c.name+'"]'));return controls.map(c=>({addEventListener:(event,fn)=>c.change=fn}));}};
+const previous={addEventListener:(event,fn)=>previous.click=fn},next={addEventListener:(event,fn)=>next.click=fn};
+let searchTimer=null,loads=0;
+const clearTimeout=()=>{},load=()=>{loads++};
+` + cursors + navigation + filters + `
+const original=firstCursor();
+const second={modrinth_offset:7,hangar_offset:3,hangar_first:true};
+const third={modrinth_offset:9,hangar_offset:8,hangar_first:false};
+nextCursor=second;next.click();assert.deepEqual(cursor,second);
+nextCursor=third;next.click();assert.deepEqual(cursor,third);
+previous.click();assert.deepEqual(cursor,second);
+previous.click();assert.deepEqual(cursor,original);
+assert.equal(pageCursors.length,3);
+for(const c of controls){pageIndex=2;cursor=third;nextCursor=third;c.change();assert.equal(pageIndex,0);assert.deepEqual(cursor,original);assert.deepEqual(pageCursors,[original]);assert.equal(nextCursor,null);}
+assert.equal(loads,8);
+`
+	command := exec.Command("node", "-e", program)
+	if out, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("composite cursor navigation: %v\n%s", err, out)
+	}
+}
+
+func TestPluginsDiscoverRequestsEnabledSources(t *testing.T) {
+	script := pluginWorkspaceScript(t)
+	loader := pluginScriptSection(t, script, "  const load =", "  const discoverCapacity =")
+	program := `
+const assert=require("node:assert/strict");
+const requests=[];
+const elements={q:{value:"query"},compatible_only:{checked:true},release_only:{checked:true},modrinth:{checked:true},hangar:{checked:false}};
+const form={elements,querySelectorAll:()=>Object.values(elements)};
+const state={},context={},pagination={},previous={},next={},page={};
+const document={body:{classList:{contains:()=>true}}};
+const pluginsDialog={querySelector:()=>page};
+const results={replaceChildren:()=>{},append:()=>{throw new Error("unexpected result")}};
+let generation=0,controller=null,tab="discover",pageLimit=1,pageIndex=0,nextCursor=null;
+let cursor={modrinth_offset:8,hangar_offset:3,hangar_first:true};
+const clearInventoryTimer=()=>{};
+const renderProject=()=>{throw new Error("unexpected card")};
+const server={supported:true,minecraft_version:"1.21.8",server_software:"Paper"};
+const window={location:{assign:()=>{throw new Error("unexpected navigation")}}};
+const fetch=async(url,options)=>{
+ requests.push({url,options});
+ return {ok:true,status:200,json:async()=>({server,modrinth:elements.modrinth.checked,hangar:elements.hangar.checked,projects:[],cursor,next_cursor:null,total:0})};
+};
+` + loader + `
+(async()=>{
+ for(const [m,h] of [[true,false],[false,true],[true,true],[false,false]]){
+  elements.modrinth.checked=m;elements.hangar.checked=h;
+  const before=controller;
+  await load();
+  if(before)assert(before.signal.aborted);
+  const req=requests.at(-1);assert(req.url.startsWith("/api/plugins/workspace/discover?"));
+  const q=new URL(req.url,"https://appliance.example").searchParams;
+  assert.equal(q.get("modrinth"),String(m));assert.equal(q.get("hangar"),String(h));
+  assert.equal(q.get("modrinth_offset"),"8");assert.equal(q.get("hangar_offset"),"3");assert.equal(q.get("hangar_first"),"true");
+  assert.equal(q.get("q"),"query");assert.equal(q.get("limit"),"1");assert.equal(req.options.credentials,"same-origin");
+  assert(!elements.modrinth.disabled);assert(!elements.hangar.disabled);
+ }
+ assert.equal(state.textContent,"Enable Modrinth or Hangar to browse plugins.");
+ assert(next.disabled);assert(previous.disabled);
+})().catch(error=>{console.error(error);process.exitCode=1;});
+`
+	command := exec.Command("node", "-e", program)
+	if out, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("source requests: %v\n%s", err, out)
 	}
 }

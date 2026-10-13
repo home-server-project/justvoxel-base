@@ -20,6 +20,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -253,12 +255,12 @@ func TestModrinthPluginDefaultFiltersAndReleaseDependencies(t *testing.T) {
 func TestPluginCatalogQueryRejectsUpstreamAndInvalidFilters(t *testing.T) {
 	for _, query := range []string{"url=https://example.com", "host=example.com", "compatible_only=maybe", "release_only=0", "offset=-1", "q=a&q=b", "limit=0", "limit=13", "limit=abc", "limit=1.5", "limit=", "limit=%2B1", "limit=1&limit=12"} {
 		values, _ := url.ParseQuery(query)
-		if _, _, _, _, err := pluginQuery(values); err == nil {
+		if _, err := pluginQuery(values); err == nil {
 			t.Fatalf("accepted %s", query)
 		}
 	}
-	compatible, release, offset, limit, err := pluginQuery(url.Values{})
-	if err != nil || !compatible || !release || offset != 0 || limit != 8 {
+	query, err := pluginQuery(url.Values{})
+	if err != nil || !query.Compatible || !query.Release || !query.Modrinth || query.Hangar || query.Cursor.ModrinthOffset != 0 || query.Limit != 8 {
 		t.Fatal("defaults not enabled")
 	}
 }
@@ -266,9 +268,9 @@ func TestPluginCatalogQueryRejectsUpstreamAndInvalidFilters(t *testing.T) {
 func TestPluginCatalogQueryAcceptsBoundedLimit(t *testing.T) {
 	for _, value := range []string{"1", "12"} {
 		want, _ := strconv.Atoi(value)
-		_, _, _, limit, err := pluginQuery(url.Values{"limit": {value}})
-		if err != nil || limit != want {
-			t.Fatalf("limit %s: %d %v", value, limit, err)
+		query, err := pluginQuery(url.Values{"limit": {value}})
+		if err != nil || query.Limit != want {
+			t.Fatalf("limit %s: %d %v", value, query.Limit, err)
 		}
 	}
 }
@@ -705,17 +707,17 @@ func TestPluginDiscoverBoundedTopUpRawCursor(t *testing.T) {
 				t.Fatal("authoritative total lost")
 			}
 			if exhausted {
-				if inspected != 36 || searches != 3 || len(out.Projects) != 0 || out.NextOffset != 36 {
+				if inspected != 36 || searches != 3 || len(out.Projects) != 0 || out.NextCursor == nil || out.NextCursor.ModrinthOffset != 36 {
 					t.Fatalf("unbounded scan: searches=%d inspected=%d out=%+v", searches, inspected, out)
 				}
 			} else {
-				if len(out.Projects) != 12 || out.NextOffset != 13 || inspected != 13 || searches != 2 {
+				if len(out.Projects) != 12 || out.NextCursor == nil || out.NextCursor.ModrinthOffset != 13 || inspected != 13 || searches != 2 {
 					t.Fatalf("sparse page or incorrect raw cursor: searches=%d inspected=%d out=%+v", searches, inspected, out)
 				}
 				// The unused hits in the second fetched batch must be the next page.
 				rr = httptest.NewRecorder()
-				s.adminPluginsDiscover(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/discover?limit=12&offset=13", ""))
-				if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &out) != nil || len(out.Projects) != 12 || out.Projects[0].ID != "project13" || out.NextOffset != 25 {
+				s.adminPluginsDiscover(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/discover?limit=12&modrinth_offset=13", ""))
+				if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &out) != nil || len(out.Projects) != 12 || out.Projects[0].ID != "project13" || out.NextCursor == nil || out.NextCursor.ModrinthOffset != 25 {
 					t.Fatal("unconsumed hits skipped or duplicated", rr.Body.String())
 				}
 			}
@@ -1168,5 +1170,276 @@ func TestPluginInventoryPrivateDisabledStoreDoesNotAdoptFiles(t *testing.T) {
 	}
 	if _, err = f.s.resolvePluginManage(context.Background(), "disable", f.entry.ProjectID); err == nil {
 		t.Fatal("unsafe disabled store accepted")
+	}
+}
+
+func TestPluginDiscoverSourceCursorContract(t *testing.T) {
+	for _, raw := range []string{"modrinth=true&hangar=false", "modrinth=false&hangar=true", "modrinth=true&hangar=true", "modrinth=false&hangar=false", "modrinth_offset=10000&hangar_offset=10000&hangar_first=true&limit=12"} {
+		q, _ := url.ParseQuery(raw)
+		if _, err := pluginQuery(q); err != nil {
+			t.Fatal(raw, err)
+		}
+	}
+	for _, raw := range []string{"modrinth=", "hangar=1", "modrinth=True", "hangar=true&hangar=false", "modrinth=true&modrinth=true", "hangar_first=maybe", "hangar_first=true&hangar_first=false", "modrinth_offset=10001", "hangar_offset=-1", "hangar_offset=", "modrinth_offset=%2B1", "modrinth_offset=1&modrinth_offset=2", "hangar_offset=1.2", "source=hangar", "provider=Hangar", "offset=0", "unknown=true"} {
+		q, _ := url.ParseQuery(raw)
+		if _, err := pluginQuery(q); err == nil {
+			t.Fatal("accepted", raw)
+		}
+	}
+}
+
+func TestHangarPaperCompatibilityAndNativeChannel(t *testing.T) {
+	old := pluginCatalogClient
+	t.Cleanup(func() { pluginCatalogClient = old })
+	id := int64(31)
+	version := func(number int64, channel string, flags []string, games map[string][]string) hangarVersion {
+		v := hangarVersion{ID: number, ProjectID: id, Name: strconv.FormatInt(number, 10), PlatformDependencies: games}
+		v.Channel.Name, v.Channel.Flags = channel, flags
+		return v
+	}
+	paper := func(game string) map[string][]string { return map[string][]string{"PAPER": {game}} }
+	tests := []struct {
+		name                string
+		versions            []hangarVersion
+		compatible, release bool
+		want                string
+		matches             bool
+	}{
+		{"stable custom channel", []hangarVersion{version(1, "Production", []string{}, paper("1.21.8"))}, true, true, "Production", true},
+		{"unstable excluded", []hangarVersion{version(1, "Release", []string{"UNSTABLE"}, paper("1.21.8")), version(2, "Stable", []string{"PINNED"}, paper("1.21.8"))}, true, true, "Stable", true},
+		{"native beta browsing", []hangarVersion{version(1, "Nightly", []string{"UNSTABLE"}, paper("1.21.8"))}, true, false, "Nightly", true},
+		{"unknown flags", []hangarVersion{version(1, "Release", []string{"NEW_FLAG"}, paper("1.21.8"))}, true, true, "", false},
+		{"missing flags", []hangarVersion{version(1, "Release", nil, paper("1.21.8"))}, true, true, "", false},
+		{"velocity excluded", []hangarVersion{version(1, "Release", []string{}, map[string][]string{"VELOCITY": {"1.21.8"}})}, false, false, "", false},
+		{"other paper excluded", []hangarVersion{version(1, "Release", []string{}, paper("1.20.4"))}, true, true, "", false},
+		{"other paper browsed", []hangarVersion{version(1, "Release", []string{}, paper("1.20.4"))}, false, true, "Release", false},
+		{"no wildcard inference", []hangarVersion{version(1, "Release", []string{}, paper("1.21.x"))}, true, true, "", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pluginCatalogClient = &http.Client{Transport: pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+				if r.URL.Scheme != "https" || r.URL.Host != "hangar.papermc.io" || r.URL.Path != "/api/v1/projects/31/versions" || r.URL.Query().Get("platform") != "PAPER" || r.Header.Get("Authorization") != "" {
+					t.Fatal(r.URL)
+				}
+				if (r.URL.Query().Get("platformVersion") == "1.21.8") != tc.compatible {
+					t.Fatal("compatibility query", r.URL)
+				}
+				body, _ := json.Marshal(map[string]any{"pagination": map[string]int{"count": len(tc.versions), "offset": 0, "limit": 25}, "result": tc.versions})
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(body))}, nil
+			})}
+			got, matches, err := selectHangarVersion(context.Background(), id, pluginServerContext{MinecraftVersion: "1.21.8"}, tc.compatible, tc.release)
+			if err != nil || matches != tc.matches || (tc.want == "") != (got == nil) {
+				t.Fatalf("%+v %v %v", got, matches, err)
+			}
+			if got != nil && (got.Type != tc.want || !slices.Contains(got.Loaders, "paper") || len(got.Files) != 0) {
+				t.Fatal(got)
+			}
+		})
+	}
+}
+
+func TestPluginDiscoverProviderIsolationAndCompositePagination(t *testing.T) {
+	oldDiscovery, oldRuntime, oldClient := runAdminDiscoveryHelper, runPluginRuntimeStatus, pluginCatalogClient
+	t.Cleanup(func() {
+		runAdminDiscoveryHelper, runPluginRuntimeStatus, pluginCatalogClient = oldDiscovery, oldRuntime, oldClient
+	})
+	runAdminDiscoveryHelper = func(context.Context, string) ([]byte, error) {
+		return []byte(`{"configured":true,"minecraft":{"server_type":"paper","data_path":"/unused"}}`), nil
+	}
+	runPluginRuntimeStatus = func(context.Context) ([]byte, error) {
+		return []byte(`{"minecraft":{"server_type":"paper","version":"1.21.8"}}`), nil
+	}
+	calls := map[string]int{}
+	pluginCatalogClient = &http.Client{Transport: pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Scheme != "https" || r.URL.User != nil || r.Header.Get("Authorization") != "" {
+			t.Fatal(r.URL)
+		}
+		calls[r.URL.Host]++
+		var payload any
+		switch {
+		case r.URL.Host == "api.modrinth.com" && r.URL.Path == "/v2/search":
+			offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+			limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+			hits := []pluginCatalogProject{}
+			for i := offset; i < min(offset+limit, 17); i++ {
+				hits = append(hits, pluginCatalogProject{ID: strconv.Itoa(i + 1), Name: "Same name", Slug: "same-slug"})
+			}
+			payload = map[string]any{"hits": hits, "total_hits": 17}
+		case r.URL.Host == "api.modrinth.com" && strings.HasSuffix(r.URL.Path, "/version"):
+			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v2/project/"), "/version")
+			versions := []pluginCatalogVersion{}
+			if id != "2" {
+				versions = append(versions, pluginCatalogVersion{ID: "v" + id, ProjectID: id, Type: "release", Loaders: []string{"paper"}, GameVersions: []string{"1.21.8"}})
+			}
+			payload = versions
+		case r.URL.Host == "hangar.papermc.io" && r.URL.Path == "/api/v1/projects":
+			if r.URL.Query().Get("platform") != "PAPER" || r.URL.Query().Get("q") != "same" {
+				t.Fatal(r.URL)
+			}
+			offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+			limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+			hits := []hangarProject{}
+			for i := offset; i < min(offset+limit, 11); i++ {
+				hit := hangarProject{ID: int64(i + 1), Name: "Same name"}
+				hit.Namespace.Slug = "same-slug"
+				hits = append(hits, hit)
+			}
+			payload = map[string]any{"pagination": map[string]int{"count": 11, "offset": offset, "limit": limit}, "result": hits}
+		case r.URL.Host == "hangar.papermc.io" && strings.HasSuffix(r.URL.Path, "/versions"):
+			id, _ := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/projects/"), "/versions"), 10, 64)
+			versions := []hangarVersion{}
+			if id != 3 {
+				v := hangarVersion{ID: id, ProjectID: id, Name: "1", PlatformDependencies: map[string][]string{"PAPER": {"1.21.8"}}}
+				v.Channel.Name = "Release"
+				v.Channel.Flags = []string{}
+				versions = append(versions, v)
+			}
+			payload = map[string]any{"pagination": map[string]int{"count": len(versions), "offset": 0, "limit": 25}, "result": versions}
+		default:
+			t.Fatal("unexpected catalog endpoint", r.URL)
+		}
+		raw, err := json.Marshal(payload)
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(raw))}, err
+	})}
+	s := surfaceTestServer(t, roleAdministrator)
+	read := func(q url.Values) pluginCatalog {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		s.adminPluginsDiscover(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/discover?"+q.Encode(), ""))
+		var out pluginCatalog
+		if rr.Code != 200 || json.Unmarshal(rr.Body.Bytes(), &out) != nil {
+			t.Fatal(rr.Code, rr.Body.String())
+		}
+		return out
+	}
+	for _, tc := range []struct{ m, h bool }{{true, false}, {false, true}, {false, false}, {true, true}} {
+		calls = map[string]int{}
+		out := read(url.Values{"q": {"same"}, "modrinth": {strconv.FormatBool(tc.m)}, "hangar": {strconv.FormatBool(tc.h)}})
+		if (calls["api.modrinth.com"] > 0) != tc.m || (calls["hangar.papermc.io"] > 0) != tc.h || out.Modrinth != tc.m || out.Hangar != tc.h {
+			t.Fatal(tc, calls, out)
+		}
+		for _, p := range out.Projects {
+			if p.Source == "Hangar" && (p.InstallAvailable || p.IconURL != "") {
+				t.Fatal("Hangar install/icon escaped", p)
+			}
+		}
+	}
+	for _, limit := range []int{1, 3, 12} {
+		q := url.Values{"q": {"same"}, "modrinth": {"true"}, "hangar": {"true"}, "limit": {strconv.Itoa(limit)}}
+		seen := map[string]bool{}
+		last := map[string]int{}
+		firstSource := ""
+		pages := 0
+		for {
+			out := read(q)
+			repeat := read(q)
+			if !reflect.DeepEqual(out, repeat) {
+				t.Fatal("non-deterministic replay")
+			}
+			if out.Total != 28 {
+				t.Fatal("raw totals", out.Total)
+			}
+			for _, p := range out.Projects {
+				key := p.Source + ":" + p.ID
+				n, _ := strconv.Atoi(p.ID)
+				if seen[key] || n <= last[p.Source] {
+					t.Fatal("duplicate/order", key)
+				}
+				if firstSource == "" {
+					firstSource = p.Source
+				} else if limit == 1 && pages == 1 && p.Source == firstSource {
+					t.Fatal("capacity 1 starves provider")
+				}
+				seen[key] = true
+				last[p.Source] = n
+				if p.Source == "Hangar" && p.InstallAvailable {
+					t.Fatal("Hangar installable")
+				}
+			}
+			pages++
+			if pages > 40 {
+				t.Fatal("pagination does not finish")
+			}
+			if out.NextCursor == nil {
+				break
+			}
+			c := out.NextCursor
+			q.Set("modrinth_offset", strconv.Itoa(c.ModrinthOffset))
+			q.Set("hangar_offset", strconv.Itoa(c.HangarOffset))
+			q.Set("hangar_first", strconv.FormatBool(c.HangarFirst))
+		}
+		if len(seen) != 26 {
+			t.Fatal("skipped records", limit, len(seen))
+		}
+	}
+	bounded := read(url.Values{"q": {"same"}, "modrinth": {"true"}, "hangar": {"true"}, "modrinth_offset": {"10000"}, "hangar_offset": {"10000"}})
+	if bounded.NextCursor != nil || len(bounded.Projects) != 0 || bounded.Total != 28 {
+		t.Fatal("terminal cursor lost raw totals", bounded)
+	}
+
+}
+
+func TestHangarBoundedHTTPSAndRedirects(t *testing.T) {
+	old := pluginCatalogClient
+	t.Cleanup(func() { pluginCatalogClient = old })
+	for _, tc := range []struct {
+		name, body string
+		status     int
+	}{
+		{"redirect", "{}", 302}, {"too large", strings.Repeat(" ", 2<<20) + "{}", 200}, {"invalid JSON", "{}{}", 200},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := *old
+			calls := 0
+			client.Transport = pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+				calls++
+				if r.URL.Scheme != "https" || r.URL.Host != "hangar.papermc.io" || r.URL.Path != "/api/v1/projects" || r.Header.Get("Authorization") != "" {
+					t.Fatal(r.URL)
+				}
+				return &http.Response{StatusCode: tc.status, Header: http.Header{"Location": {"https://evil.example/"}}, Body: io.NopCloser(strings.NewReader(tc.body)), Request: r}, nil
+			})
+			pluginCatalogClient = &client
+			var out any
+			if hangarPluginJSON(context.Background(), "/projects", url.Values{"limit": {"1"}}, &out) == nil || calls != 1 {
+				t.Fatal("unsafe response accepted or followed", calls)
+			}
+		})
+	}
+	if old.Timeout <= 0 || old.Timeout > 6*time.Second || old.CheckRedirect == nil {
+		t.Fatal("unbounded catalog client")
+	}
+}
+
+func TestHangarVersionInspectionBoundedAndValidation(t *testing.T) {
+	old := pluginCatalogClient
+	t.Cleanup(func() { pluginCatalogClient = old })
+	calls := 0
+	pluginCatalogClient = &http.Client{Transport: pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+		offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+		if offset != calls*25 {
+			t.Fatal("skipped version cursor", r.URL)
+		}
+		calls++
+		versions := []hangarVersion{}
+		for i := 0; i < 25; i++ {
+			v := hangarVersion{ID: int64(offset + i + 1), ProjectID: 1, Name: "beta", PlatformDependencies: map[string][]string{"PAPER": {"1.21.8"}}}
+			v.Channel.Name = "Beta"
+			v.Channel.Flags = []string{"UNSTABLE"}
+			versions = append(versions, v)
+		}
+		body, _ := json.Marshal(map[string]any{"pagination": map[string]int{"count": 1000, "offset": offset, "limit": 25}, "result": versions})
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(body))}, nil
+	})}
+	v, _, err := selectHangarVersion(context.Background(), 1, pluginServerContext{MinecraftVersion: "1.21.8"}, true, true)
+	if v != nil || err != nil || calls != 3 {
+		t.Fatal("unbounded version scan", v, err, calls)
+	}
+	for _, body := range []string{`{}`, `{"pagination":{"count":1,"offset":1,"limit":25},"result":[]}`, `{"pagination":{"count":-1,"offset":0,"limit":25},"result":[]}`} {
+		pluginCatalogClient = &http.Client{Transport: pluginTestTransport(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+		})}
+		if _, _, err := selectHangarVersion(context.Background(), 1, pluginServerContext{MinecraftVersion: "1.21.8"}, true, true); err == nil {
+			t.Fatal("unvalidated versions", body)
+		}
 	}
 }

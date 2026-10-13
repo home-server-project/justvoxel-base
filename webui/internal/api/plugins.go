@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -36,6 +37,7 @@ type PluginInventory struct {
 	Plugins []InstalledPlugin   `json:"plugins"`
 }
 type PluginDependency struct {
+	Name      string `json:"name,omitempty"`
 	ProjectID string `json:"project_id,omitempty"`
 	VersionID string `json:"version_id,omitempty"`
 	Filename  string `json:"file_name,omitempty"`
@@ -64,12 +66,18 @@ type PluginCatalogProject struct {
 	Compatibility    string                `json:"compatibility"`
 	MetadataError    string                `json:"metadata_error,omitempty"`
 }
+type PluginCatalogCursor struct {
+	ModrinthOffset int  `json:"modrinth_offset"`
+	HangarOffset   int  `json:"hangar_offset"`
+	HangarFirst    bool `json:"hangar_first"`
+}
 type PluginCatalog struct {
 	Server     PluginServerContext    `json:"server"`
-	Source     string                 `json:"source"`
+	Modrinth   bool                   `json:"modrinth"`
+	Hangar     bool                   `json:"hangar"`
 	Projects   []PluginCatalogProject `json:"projects"`
-	Offset     int                    `json:"offset"`
-	NextOffset int                    `json:"next_offset"`
+	Cursor     PluginCatalogCursor    `json:"cursor"`
+	NextCursor *PluginCatalogCursor   `json:"next_cursor"`
 	Total      int                    `json:"total"`
 }
 
@@ -94,22 +102,28 @@ func (c *Client) AdminPluginInventory(ctx context.Context, session string, updat
 // ValidatePluginDiscoverQuery permits only the bounded catalog contract.
 func ValidatePluginDiscoverQuery(query url.Values) error {
 	for key, values := range query {
-		if (key != "q" && key != "compatible_only" && key != "release_only" && key != "offset" && key != "limit") || len(values) != 1 {
+		if (key != "q" && key != "compatible_only" && key != "release_only" && key != "modrinth_offset" && key != "hangar_offset" && key != "modrinth" && key != "hangar" && key != "hangar_first" && key != "limit") || len(values) != 1 {
 			return errors.New("Invalid catalog query.")
 		}
 	}
 	if len(query.Get("q")) > 200 {
 		return errors.New("Search is too long.")
 	}
-	for _, key := range []string{"compatible_only", "release_only"} {
-		if value := query.Get(key); value != "" && value != "true" && value != "false" {
+	for _, key := range []string{"compatible_only", "release_only", "modrinth", "hangar", "hangar_first"} {
+		if values, present := query[key]; present && values[0] != "true" && values[0] != "false" {
 			return errors.New("Invalid catalog filter.")
 		}
 	}
-	if value := query.Get("offset"); value != "" {
-		offset, err := strconv.Atoi(value)
-		if err != nil || offset < 0 || offset > 10000 {
-			return errors.New("Invalid catalog offset.")
+	for _, key := range []string{"modrinth_offset", "hangar_offset"} {
+		if values, present := query[key]; present {
+			value := values[0]
+			if value == "" || strings.Trim(value, "0123456789") != "" {
+				return errors.New("Invalid catalog offset.")
+			}
+			offset, err := strconv.Atoi(value)
+			if err != nil || offset < 0 || offset > 10000 {
+				return errors.New("Invalid catalog offset.")
+			}
 		}
 	}
 	if values, present := query["limit"]; present {

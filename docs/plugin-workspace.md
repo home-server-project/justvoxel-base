@@ -7,10 +7,22 @@ resizable window has only Discover and Installed tabs. The original Cycle 1 capa
 it cannot install, download, update, remove or hot load plugins, change server
 configuration, or interrupt Minecraft.
 
-Discover has one compact desktop toolbar: a growing search field immediately
-followed by Search on the left, with the fixed ON Modrinth source, OFF disabled
-Hangar placeholder, and Compatible only / Release only switches grouped on the
-right. Hangar makes no requests and is not an available source. The toolbar may wrap in a genuinely narrow workspace.
+Discover has one compact desktop toolbar: a growing search field
+with independent Modrinth and Hangar source switches. Modrinth defaults ON and
+Hangar defaults OFF. Either source can be used alone, or both can populate the
+same grid. With both OFF, Discover makes no upstream catalog request and shows
+“Enable Modrinth or Hangar to browse plugins.” Source changes reset pagination.
+The toolbar may wrap in a genuinely narrow workspace.
+
+Hangar discovery and information are read only: cards open the normal information
+overlay, with publisher Paper compatibility and native channel wording, but no
+Install action. Modrinth remains the only install source. Source identities stay
+explicit; similarly named projects from different catalogs are separate records.
+Hangar cards and overlays use initials, never the Modrinth icon lookup or a
+browser-direct Hangar image. All catalog reads pass through the same-origin WebUI,
+then the Management Agent Unix API, then fixed HTTPS APIs; the browser never
+contacts an upstream catalog directly. Passive information footer Close actions
+reuse the existing green Plugins Done styling.
 
 Plugin results use compact cards of uniform height, with a fixed-size logo,
 clamped name and description, release/platform/Minecraft badges and a short
@@ -105,36 +117,49 @@ Paper and Purpur support plugins. Vanilla displays an unsupported state.
 The workspace reuses appliance configuration discovery and runtime status for
 server software, Minecraft version and the configured data location.
 
-Discover fills pages by scanning raw Modrinth hits in order and qualifying their
-release metadata. It tops up sparse pages while authoritative raw hits remain,
-with a hard ceiling of three times the requested card capacity (at most 36 raw
-projects). A ceiling-limited page can remain partial. `total` remains Modrinth's
-authoritative `total_hits`, not an eligible-result count. `next_offset` points
-immediately after the last consumed raw hit, including filtered hits and excluding
-unconsumed hits in fetched batches. Previous/Next use an in-memory history of raw
-cursors; the displayed page number comes from that history. Searches, filters and
-fresh Discover sessions reset it. Capacity changes retain the current raw cursor
-as the start of a fresh history, preventing overlap with older-capacity pages.
+Discover qualifies provider hits in order, scanning at most three times the
+requested capacity per provider (up to 36 projects each). Partial or empty pages
+can retain a Next cursor. Combined pages alternate sources, preserving each
+provider's order and carrying the next turn across pages, including capacity 1.
+Unconsumed hits are revisited, never skipped to the end of a fetched batch.
+`total` is the sum of enabled providers' raw totals (`total_hits` for Modrinth,
+`pagination.count` for Hangar), not a count of eligible projects. The UI shows
+**Page X**, **Previous**, **Next** without fabricating an eligible page count.
 
-Discover searches Modrinth server plugins live while typing, with a 250 ms
-debounce and cancellation of stale requests. Enter submits immediately.
-Compatible only and Release only
-start enabled. Compatibility means **Compatible according to publisher metadata**;
-JustVoxel has not verified third-party runtime compatibility. Required, optional,
-incompatible and embedded dependencies are publisher metadata only. If the active
-Minecraft version cannot be determined, the compatible search stays unavailable;
-turning off Compatible only permits browsing without claiming compatibility.
-Discover measures the actual grid columns and available result height to choose
-1–12 projects per page. Workspace resizing recalculates capacity after a brief
-debounce, retains the current raw cursor and starts a fresh cursor history for
-the new capacity. The Agent accepts only
-integer limits from 1 to 12 and defaults to 8 when omitted. Pagination stays at
-the bottom-right of Discover, in the order **Page X of Y**, **Previous**, **Next**.
-The page count uses Modrinth's authoritative total; Previous is disabled on the
-first UI page and Next when the Agent returns no next raw cursor. Installed has no catalog
-pagination. Bounded release qualification can still leave a partial or empty page; Next
-continues from the next consumed raw cursor when more raw results remain. Upstream failures are shown as
-unavailable metadata, never as proven incompatibility.
+The bounded Discover query accepts `q` (up to 200 bytes), `compatible_only`,
+`release_only`, `modrinth`, `hangar`, `hangar_first` (literal `true`/`false`),
+`modrinth_offset` and `hangar_offset` (0–10000), and `limit` (1–12, default 8).
+Omitted filters default ON; omitted sources default Modrinth ON/Hangar OFF;
+omitted offsets and turn default zero/Modrinth first. Unknown/repeated fields,
+legacy scalar `offset` or `source`, and malformed values are rejected.
+Responses contain enabled-source booleans, `cursor` and nullable `next_cursor`,
+each cursor carrying both offsets and `hangar_first`, plus projects and raw total.
+Previous/Next use the actual in-memory composite history. Search/filter/source
+changes and fresh sessions reset it; capacity changes rebase history at both
+current offsets and the current turn.
+
+Live search retains its 250 ms debounce, stale-request cancellation and immediate
+Enter submission. Compatible only and Release only start enabled and apply to
+each enabled provider. Modrinth interpretation remains unchanged. Hangar reads
+`GET https://hangar.papermc.io/api/v1/projects` with bounded `q`, `offset`, `limit`
+and `platform=PAPER`, then `/projects/<numeric-id>/versions` with `platform=PAPER`
+and, when compatible-only, `platformVersion=<active-version>`. It inspects up to
+75 versions per project in bounded pages. Exact `platformDependencies.PAPER`
+membership determines publisher compatibility; other platforms never qualify.
+Release only requires an explicit channel flags list without `UNSTABLE` or unknown
+flags. Native channel names are displayed; no release/beta/alpha equivalence is
+claimed. Missing stability evidence fails the release filter. Download URLs and
+avatars are not decoded or returned. Paper dependency names and required/optional
+flags are information only and never enter the install planner. Hangar uses the existing no-redirect,
+bounded-timeout client with a 2 MiB JSON body cap and needs no API key.
+
+Compatibility means **Compatible according to publisher metadata**, never verified
+third-party runtime compatibility. With Compatible only OFF, other Paper versions
+can be browsed without claiming compatibility. Unknown active Minecraft versions
+require that filter OFF. Upstream failures are reported as unavailable, not as
+proven incompatibility. Discover measures grid columns and available height for
+1–12 cards per page; resizing retains both current provider cursors and rebases
+history. Installed has no catalog pagination.
 
 Installed reads regular JARs under the configured data directory's `plugins`
 folder. It refuses a symlinked plugin folder and skips symlinked JARs and unrelated
@@ -205,8 +230,12 @@ path, selected files, exact SHA-512 hashes and authoritative CDN identities, plu
 dependency relationships. Apply re-resolves the plan and requires that exact
 fingerprint. Player snapshots are excluded from the fingerprint and checked
 separately. Artifact URLs and private transaction evidence are never returned to
-the browser. Modrinth's fixed HTTPS API and `cdn.modrinth.com` are the only sources;
-redirects are rejected, and response sizes and timeouts are bounded.
+the browser. Modrinth's catalog API remains fixed HTTPS; Hangar's catalog API is
+fixed at `hangar.papermc.io` through the Management Agent. `cdn.modrinth.com`
+remains the only supported remote icon source. Hangar images are not proxied or
+fetched by the browser. Hangar remains discovery/information only; Modrinth
+remains the only install source. Redirects are rejected, and response sizes and
+timeouts are bounded.
 
 Before returning an install review, the Agent downloads only the exact selected
 root artifact into private temporary staging, using the existing bounded CDN,

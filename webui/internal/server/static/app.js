@@ -5799,7 +5799,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   if (readWorkspaceWindowState("system").open) workspaceWindow?.open();
 }
 
-// Plugin workspace. All local inventory and Modrinth access stays
+// Plugin workspace. All local inventory and catalog access stays
 // behind the Administrator-only WebUI and Management Agent routes.
 const pluginsDialog = document.querySelector("[data-plugins-workspace-dialog]");
 const pluginsOpen = document.querySelector("[data-plugins-open]");
@@ -5812,9 +5812,10 @@ if (pluginsDialog && pluginsOpen) {
   const previous = pluginsDialog.querySelector("[data-plugins-previous]");
   const next = pluginsDialog.querySelector("[data-plugins-next]");
   let pageLimit = 8, capacityTimer = null;
-  let pageCursors = [0], pageIndex = 0;
-  const resetCursors = () => { pageCursors = [0]; pageIndex = 0; offset = 0; nextOffset = -1; };
-  let tab = "discover", offset = 0, nextOffset = -1, generation = 0, controller = null;
+  const firstCursor = () => ({ modrinth_offset: 0, hangar_offset: 0, hangar_first: false });
+  let pageCursors = [firstCursor()], pageIndex = 0;
+  const resetCursors = () => { pageCursors = [firstCursor()]; pageIndex = 0; cursor = firstCursor(); nextCursor = null; };
+  let tab = "discover", cursor = firstCursor(), nextCursor = null, generation = 0, controller = null;
   const text = (tag, value, className = "") => {
     const node = document.createElement(tag);
     node.textContent = value;
@@ -5923,7 +5924,7 @@ if (pluginsDialog && pluginsOpen) {
       showPanel(`Info for ${name}`, true);
       const infoActions = renderInfo();
       const actions = Array.isArray(infoActions) ? infoActions : [];
-      overlayActions(...actions, panelAction("Close", closePanel, true));
+      overlayActions(...actions, pluginAction("Close", closePanel, "plugins-done-action"));
     }, projectID, iconURL);
   };
   const infoRows = (container) => {
@@ -5983,12 +5984,12 @@ if (pluginsDialog && pluginsOpen) {
       card.append(text("p", Array.from(counts, ([kind, count]) => `${count} ${kind}`).join(" · "), "plugins-card-meta"));
     }
     const renderInfo = () => {
-      overlayHeader(project.title, project.description, identityBadges, project.project_id, null, project.icon_url || "");
+      overlayHeader(project.title, project.description, identityBadges, iconProjectID, null, project.icon_url || "");
       const about = infoRows(overlaySection("About this version"));
       about("Release", version?.version_number || "Unavailable");
-      about("Release type", version?.version_type || "Not provided");
+      about(project.source === "Hangar" ? "Channel" : "Release type", version?.version_type || "Not provided");
       about("Published", version?.date_published || "Not provided");
-      about("Source", project.source || "Modrinth");
+      about("Source", project.source);
       about("Project ID", project.project_id);
       about("Release ID", version?.id || "Unavailable");
       const compatibility = infoRows(overlaySection("Compatibility"));
@@ -6001,24 +6002,25 @@ if (pluginsDialog && pluginsOpen) {
       overlaySection("Dependencies").append(dependencyGroups(dependencies));
       if (project.metadata_error || !version) panelBody.append(text("p", project.metadata_error || "Release metadata unavailable.", "plugins-card-meta"));
     };
-    const managed = ["geyser", "floodgate", "viaversion"].includes(project.slug);
+    const iconProjectID = project.source === "Modrinth" ? project.project_id : undefined;
+    const managed = project.source === "Modrinth" && ["geyser", "floodgate", "viaversion"].includes(project.slug);
     if (managed) badges.append(text("span", "JustVoxel managed", "plugins-badge"));
-    const installable = !managed && project.install_available && project.compatible && server.supported && server.minecraft_version && version?.version_type === "release";
+    const installable = project.source === "Modrinth" && !managed && project.install_available && project.compatible && server.supported && server.minecraft_version && version?.version_type === "release";
     let reviewRejection = "";
     const readOnlyReview = (reason) => {
       reviewRejection = reason;
       showPanel(project.title, true);
       renderInfo();
       if (reason) overlaySection("Installation").append(text("p", reason));
-      overlayActions(panelAction("Close", closePanel, true));
+      overlayActions(pluginAction("Close", closePanel, "plugins-done-action"));
     };
     if (installable) {
-      interactiveCard(card, project.title, () => reviewRejection ? readOnlyReview(reviewRejection) : reviewPlugin(project.project_id, version.id, project, readOnlyReview), project.project_id, project.icon_url || "");
+      interactiveCard(card, project.title, () => reviewRejection ? readOnlyReview(reviewRejection) : reviewPlugin(project.project_id, version.id, project, readOnlyReview), iconProjectID, project.icon_url || "");
     } else {
       addInfo(card, project.title, () => {
         renderInfo();
         if (managed) infoRows(overlaySection("Management"))("Status", "JustVoxel managed");
-      }, project.project_id, project.icon_url || "");
+      }, iconProjectID, project.icon_url || "");
     }
     // Publisher data uses textContent; artifact URLs never reach this browser.
     return card;
@@ -6455,7 +6457,7 @@ if (pluginsDialog && pluginsOpen) {
     previous.disabled = true;
     next.disabled = true;
     form.hidden = tab !== "discover";
-    const query = new URLSearchParams({ q: form.elements.q.value, compatible_only: String(form.elements.compatible_only.checked), release_only: String(form.elements.release_only.checked), offset: String(offset), limit: String(pageLimit) });
+    const query = new URLSearchParams({ q: form.elements.q.value, compatible_only: String(form.elements.compatible_only.checked), release_only: String(form.elements.release_only.checked), modrinth: String(form.elements.modrinth.checked), hangar: String(form.elements.hangar.checked), modrinth_offset: String(cursor.modrinth_offset), hangar_offset: String(cursor.hangar_offset), hangar_first: String(cursor.hangar_first), limit: String(pageLimit) });
     try {
       if (tab !== "discover") {
         const installation = await pluginRequest("operation", null, controller.signal);
@@ -6474,20 +6476,19 @@ if (pluginsDialog && pluginsOpen) {
       if (!response.ok) throw new Error(payload.error || "Plugin information is unavailable.");
       const server = payload.server;
       context.textContent = `${server.server_software || "Minecraft"} · Minecraft ${server.minecraft_version || "version unavailable"}`;
-      form.querySelectorAll("input,button").forEach((control) => { control.disabled = control.hasAttribute("data-plugins-hangar") || !server.supported; });
+      form.querySelectorAll("input,button").forEach((control) => { control.disabled = !server.supported; });
       if (!server.supported) { state.textContent = server.message; return; }
       const items = tab === "discover" ? payload.projects : payload.plugins;
       items.forEach((item) => results.append(tab === "discover" ? renderProject(item, server) : renderInstalled(item)));
-      state.textContent = server.message || (items.length ? "" : tab === "discover" ? "No plugins match these filters on this page." : "No installed plugin JARs found.");
+      state.textContent = tab === "discover" && !payload.modrinth && !payload.hangar ? "Enable Modrinth or Hangar to browse plugins." : server.message || (items.length ? "" : tab === "discover" ? "No plugins match these filters on this page." : "No installed plugin JARs found.");
       if (tab === "discover") {
-        offset = payload.offset;
-        nextOffset = payload.next_offset;
+        cursor = payload.cursor;
+        nextCursor = payload.next_cursor;
         pagination.hidden = false;
         previous.disabled = pageIndex === 0;
-        const totalPages = Math.max(1, Math.ceil(payload.total / pageLimit));
         const currentPage = pageIndex + 1;
-        next.disabled = nextOffset < 0;
-        pluginsDialog.querySelector("[data-plugins-page]").textContent = `Page ${currentPage} of ${totalPages}`;
+        next.disabled = !nextCursor;
+        pluginsDialog.querySelector("[data-plugins-page]").textContent = `Page ${currentPage}`;
       }
     } catch (error) {
       if (current === generation && error.name !== "AbortError") state.textContent = error.message || "Plugin information is unavailable.";
@@ -6508,11 +6509,11 @@ if (pluginsDialog && pluginsOpen) {
     const newLimit = discoverCapacity();
     if (newLimit === pageLimit) return;
     pageLimit = newLimit;
-    // Keep this raw cursor. Prior pages used another capacity, so begin a
+    // Keep both raw provider cursors. Prior pages used another capacity, so begin a
     // fresh history here rather than revisiting overlapping earlier pages.
-    pageCursors = [offset];
+    pageCursors = [cursor];
     pageIndex = 0;
-    nextOffset = -1;
+    nextCursor = null;
     if (reload) load();
   };
   const capacityObserver = new ResizeObserver(() => {
@@ -6520,7 +6521,6 @@ if (pluginsDialog && pluginsOpen) {
     capacityTimer = setTimeout(() => updateCapacity(), 200);
   });
   capacityObserver.observe(results);
-  form.querySelector("[data-plugins-modrinth]").addEventListener("click", (event) => event.preventDefault());
   const workspaceWindow = setupWorkspaceWindow(pluginsDialog, { onOpen: () => { resetCursors(); updateCapacity(false); load(); resumePluginInstall(); }, onClose: () => { clearTimeout(capacityTimer); clearTimeout(searchTimer); clearInventoryTimer(); ++generation; controller?.abort(); closePanel(); } });
   pluginsOpen.addEventListener("click", () => {
     if (!document.body.classList.contains("role-administrator")) return;
@@ -6550,13 +6550,13 @@ if (pluginsDialog && pluginsOpen) {
     searchTimer = setTimeout(() => load(), 250);
   });
   form.addEventListener("submit", (event) => { event.preventDefault(); clearTimeout(searchTimer); resetCursors(); load(); });
-  form.querySelectorAll('input[name="compatible_only"],input[name="release_only"]').forEach((control) => control.addEventListener("change", () => { clearTimeout(searchTimer); resetCursors(); load(); }));
-  previous.addEventListener("click", () => { if (pageIndex > 0) { offset = pageCursors[--pageIndex]; load(); } });
+  form.querySelectorAll('input[name="compatible_only"],input[name="release_only"],input[name="modrinth"],input[name="hangar"]').forEach((control) => control.addEventListener("change", () => { clearTimeout(searchTimer); resetCursors(); load(); }));
+  previous.addEventListener("click", () => { if (pageIndex > 0) { cursor = pageCursors[--pageIndex]; load(); } });
   next.addEventListener("click", () => {
-    if (nextOffset < 0) return;
+    if (!nextCursor) return;
     pageCursors = pageCursors.slice(0, pageIndex + 1);
-    pageCursors.push(nextOffset);
-    offset = pageCursors[++pageIndex];
+    pageCursors.push(nextCursor);
+    cursor = pageCursors[++pageIndex];
     load();
   });
   // Role discovery is asynchronous. Restore only after Administrator identity
