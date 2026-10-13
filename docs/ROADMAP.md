@@ -15,11 +15,6 @@ This roadmap lists features that JustVoxel still plans to build. Working feature
 
 ## Planned features
 
-### Plugin management
-
-- Provide guided Paper/Purpur plugin installation, updates, disabling, and removal through the WebUI.
-- Show relevant compatibility information and protect server data before risky changes.
-
 ### Notifications
 
 - Notify administrators about useful events such as backup failures, low storage, repeated Minecraft failures, and available updates.
