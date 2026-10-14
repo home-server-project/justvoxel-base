@@ -7,6 +7,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -33,7 +35,7 @@ func TestAdminPluginIconOnlyUsesAgentAndPreservesVerifiedType(t *testing.T) {
 				if r.Header.Get("Accept") != "image/png, image/jpeg, image/bmp, image/gif, image/webp" {
 					t.Fatal("request must accept exactly the five canonical raster types")
 				}
-				if r.Method != http.MethodGet || r.URL.Host != "unix" || r.URL.Path != "/v1/admin/plugins/icon" || len(r.URL.Query()) != 1 || r.URL.Query().Get("project_id") != "root" || r.Header.Get("Authorization") != "Bearer session-token" {
+				if r.Method != http.MethodGet || r.URL.Host != "unix" || r.URL.Path != "/v1/admin/plugins/icon" || !reflect.DeepEqual(r.URL.Query(), url.Values{"source": {"Modrinth"}, "project_id": {"root"}}) || r.Header.Get("Authorization") != "Bearer session-token" {
 					t.Fatalf("unexpected Agent request: %s", r.URL)
 				}
 				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {kind}}, Body: io.NopCloser(bytes.NewReader(data))}, nil
@@ -91,7 +93,7 @@ func TestAdminPluginIconForwardsSearchURLOnlyToAgent(t *testing.T) {
 	data := []byte("\x89PNG\r\n\x1a\nfixture")
 	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		query := r.URL.Query()
-		if r.URL.Host != "unix" || r.URL.Path != "/v1/admin/plugins/icon" || len(query) != 2 || query.Get("project_id") != "root" || len(query["icon_url"]) != 1 || query.Get("icon_url") != iconURL || r.Header.Get("Authorization") != "Bearer session-token" {
+		if r.Method != http.MethodGet || r.URL.Host != "unix" || r.URL.Path != "/v1/admin/plugins/icon" || !reflect.DeepEqual(query, url.Values{"source": {"Modrinth"}, "project_id": {"root"}, "icon_url": {iconURL}}) || r.Header.Get("Authorization") != "Bearer session-token" {
 			t.Fatalf("search icon bypassed Agent: %s", r.URL)
 		}
 		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"image/png"}}, Body: io.NopCloser(bytes.NewReader(data))}, nil
@@ -102,6 +104,31 @@ func TestAdminPluginIconForwardsSearchURLOnlyToAgent(t *testing.T) {
 	}
 	if _, err := client.AdminPluginIcon(context.Background(), "session-token", "root", iconURL, iconURL); err == nil {
 		t.Fatal("duplicate icon URL accepted")
+	}
+}
+
+func TestAdminPluginSourceIconHangarOnlyUsesAgent(t *testing.T) {
+	data := []byte("\x89PNG\r\n\x1a\nfixture")
+	calls := 0
+	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if r.Method != http.MethodGet || r.URL.Host != "unix" || r.URL.Path != "/v1/admin/plugins/icon" || !reflect.DeepEqual(r.URL.Query(), url.Values{"source": {"Hangar"}, "project_id": {"123"}}) || r.Header.Get("Authorization") != "Bearer session-token" {
+			t.Fatalf("unexpected Hangar Agent request: %s", r.URL)
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"image/png"}}, Body: io.NopCloser(bytes.NewReader(data))}, nil
+	})}}
+	icon, err := client.AdminPluginSourceIcon(context.Background(), "session-token", "Hangar", "123")
+	if err != nil || calls != 1 || icon.ContentType != "image/png" || !bytes.Equal(icon.Data, data) {
+		t.Fatalf("verified Hangar icon lost: %#v %v", icon, err)
+	}
+	// Exercise the shared helper to prove caller-supplied URLs cannot reach the Agent.
+	for _, iconURL := range []string{"", "https://hangar.papermc.io/icon.png", "https://cdn.modrinth.com/data/root/icon.png"} {
+		if _, err := client.adminPluginIcon(context.Background(), "session-token", "Hangar", "123", iconURL); err == nil {
+			t.Fatal("Hangar accepted caller-supplied icon URL")
+		}
+	}
+	if calls != 1 {
+		t.Fatal("rejected Hangar icon URL caused a request")
 	}
 }
 

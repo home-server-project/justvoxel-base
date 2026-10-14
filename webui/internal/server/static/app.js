@@ -5822,7 +5822,7 @@ if (pluginsDialog && pluginsOpen) {
     node.className = className;
     return node;
   };
-  const identityTile = (name, projectID, iconURL) => {
+  const identityTile = (name, projectID, iconURL, source = "Modrinth") => {
     const tile = text("span", Array.from(name || "?").slice(0, 2).join("").toUpperCase(), "plugins-icon-tile");
     tile.setAttribute("aria-hidden", "true");
     tile.dataset.tone = String(Array.from(name || "?").reduce((sum, char) => sum + char.codePointAt(0), 0) & 3);
@@ -5832,8 +5832,8 @@ if (pluginsDialog && pluginsOpen) {
       image.alt = "";
       image.decoding = "async";
       image.hidden = true;
-      const query = new URLSearchParams({ project_id: projectID });
-      if (typeof iconURL === "string" && iconURL) query.set("icon_url", iconURL);
+      const query = new URLSearchParams({ source, project_id: projectID });
+      if (source === "Modrinth" && typeof iconURL === "string" && iconURL) query.set("icon_url", iconURL);
       let metadataAttempt = !query.has("icon_url");
       let finished = false;
       image.addEventListener("load", () => { finished = true; tile.classList.add("has-logo"); image.hidden = false; }, { once: true });
@@ -5856,12 +5856,12 @@ if (pluginsDialog && pluginsOpen) {
     }
     return tile;
   };
-  const overlayHeader = (name, description, badges, projectID, action = null, iconURL) => {
+  const overlayHeader = (name, description, badges, projectID, action = null, iconURL, source = "Modrinth") => {
     const header = document.createElement("header");
     header.className = "plugins-overlay-header";
     const identity = document.createElement("div");
     identity.className = "plugins-overlay-identity";
-    identity.append(identityTile(name, projectID, iconURL), text("h3", name));
+    identity.append(identityTile(name, projectID, iconURL, source), text("h3", name));
     if (action) identity.append(action);
     header.append(identity);
     if (description) header.append(text("p", description, "plugins-overlay-description"));
@@ -5885,7 +5885,7 @@ if (pluginsDialog && pluginsOpen) {
     panelBody.append(footer);
     return footer;
   };
-  const interactiveCard = (card, name, activate, projectID, iconURL) => {
+  const interactiveCard = (card, name, activate, projectID, iconURL, source = "Modrinth") => {
     card.tabIndex = 0;
     card.setAttribute("role", "button");
     card.setAttribute("aria-label", `Open ${name}`);
@@ -5916,16 +5916,16 @@ if (pluginsDialog && pluginsOpen) {
     copy.append(heading);
     const description = card.querySelector(".plugins-card-description, .plugins-card-release");
     if (description) copy.append(description);
-    header.append(identityTile(name, projectID, iconURL), copy);
+    header.append(identityTile(name, projectID, iconURL, source), copy);
   };
-  const addInfo = (card, name, renderInfo, projectID, iconURL) => {
+  const addInfo = (card, name, renderInfo, projectID, iconURL, source = "Modrinth") => {
     interactiveCard(card, name, () => {
       stopPolling();
       showPanel(`Info for ${name}`, true);
       const infoActions = renderInfo();
       const actions = Array.isArray(infoActions) ? infoActions : [];
       overlayActions(...actions, pluginAction("Close", closePanel, "plugins-done-action"));
-    }, projectID, iconURL);
+    }, projectID, iconURL, source);
   };
   const infoRows = (container) => {
     const rows = document.createElement("dl");
@@ -5984,7 +5984,7 @@ if (pluginsDialog && pluginsOpen) {
       card.append(text("p", Array.from(counts, ([kind, count]) => `${count} ${kind}`).join(" · "), "plugins-card-meta"));
     }
     const renderInfo = () => {
-      overlayHeader(project.title, project.description, identityBadges, iconProjectID, null, project.icon_url || "");
+      overlayHeader(project.title, project.description, identityBadges, iconProjectID, null, project.icon_url || "", project.source);
       const about = infoRows(overlaySection("About this version"));
       about("Release", version?.version_number || "Unavailable");
       about(project.source === "Hangar" ? "Channel" : "Release type", version?.version_type || "Not provided");
@@ -6002,10 +6002,10 @@ if (pluginsDialog && pluginsOpen) {
       overlaySection("Dependencies").append(dependencyGroups(dependencies));
       if (project.metadata_error || !version) panelBody.append(text("p", project.metadata_error || "Release metadata unavailable.", "plugins-card-meta"));
     };
-    const iconProjectID = project.source === "Modrinth" ? project.project_id : undefined;
+    const iconProjectID = ["Modrinth", "Hangar"].includes(project.source) ? project.project_id : undefined;
     const managed = project.source === "Modrinth" && ["geyser", "floodgate", "viaversion"].includes(project.slug);
     if (managed) badges.append(text("span", "JustVoxel managed", "plugins-badge"));
-    const installable = project.source === "Modrinth" && !managed && project.install_available && project.compatible && server.supported && server.minecraft_version && version?.version_type === "release";
+    const installable = ["Modrinth", "Hangar"].includes(project.source) && !managed && project.install_available && project.compatible && server.supported && server.minecraft_version && version?.id;
     let reviewRejection = "";
     const readOnlyReview = (reason) => {
       reviewRejection = reason;
@@ -6015,12 +6015,12 @@ if (pluginsDialog && pluginsOpen) {
       overlayActions(pluginAction("Close", closePanel, "plugins-done-action"));
     };
     if (installable) {
-      interactiveCard(card, project.title, () => reviewRejection ? readOnlyReview(reviewRejection) : reviewPlugin(project.project_id, version.id, project, readOnlyReview), iconProjectID, project.icon_url || "");
+      interactiveCard(card, project.title, () => reviewRejection ? readOnlyReview(reviewRejection) : reviewPlugin(project.project_id, version.id, project, readOnlyReview), iconProjectID, project.icon_url || "", project.source);
     } else {
       addInfo(card, project.title, () => {
         renderInfo();
         if (managed) infoRows(overlaySection("Management"))("Status", "JustVoxel managed");
-      }, iconProjectID, project.icon_url || "");
+      }, iconProjectID, project.icon_url || "", project.source);
     }
     // Publisher data uses textContent; artifact URLs never reach this browser.
     return card;
@@ -6043,7 +6043,7 @@ if (pluginsDialog && pluginsOpen) {
     const updateAvailable = plugin.update_status?.startsWith("Update available");
     const updateStatus = updateAvailable ? plugin.update_status : attention ? plugin.update_status.replace(/; manual \/ unmanaged$/, "") : plugin.management === "justvoxel" ? "Via server updates" : plugin.management === "plugins" ? "Updates are not available yet" : "Unknown";
     addInfo(card, name, () => {
-      overlayHeader(name, "", [plugin.version || "Version unknown", management, stateLabel], projectID);
+      overlayHeader(name, "", [plugin.version || "Version unknown", management, stateLabel], projectID, null, undefined, plugin.source || "Modrinth");
       overlaySection("JAR").append(text("p", plugin.filename));
       overlaySection("Metadata").append(text("p", plugin.metadata_status || "Unknown"));
       overlaySection("Management").append(text("p", plugin.management === "justvoxel" ? "Generic Install is unavailable for this component." : plugin.management === "plugins" ? "Lifecycle actions verify the exact recorded JAR. Plugin configuration and data are preserved." : "Plugins will not adopt or overwrite this JAR."));
@@ -6057,7 +6057,7 @@ if (pluginsDialog && pluginsOpen) {
         const action = plugin.state === "disabled" ? "enable" : "disable";
         return [pluginAction(action === "enable" ? "Enable" : "Disable", () => reviewManagedPlugin(plugin, action), "plugins-state-action"), pluginAction("Remove", () => reviewManagedPlugin(plugin, "remove"), "plugins-remove-action")];
       }
-    }, projectID);
+    }, projectID, undefined, plugin.source || "Modrinth");
     let summary = plugin.metadata_status === "Metadata read" ? "Descriptor available" : "Metadata unavailable";
     if (updateAvailable) summary = plugin.update_status;
     if (attention) summary = "Needs attention";
@@ -6145,11 +6145,11 @@ if (pluginsDialog && pluginsOpen) {
     panelBody.append(text("p", "Preparing the exact managed plugin action…"));
     try {
       if (await blockPluginInstall(current)) return;
-      const plan = await pluginRequest("manage/plan", { action, project_id: plugin.project_id }, installController.signal);
+      const plan = await pluginRequest("manage/plan", { source: plugin.source || "Modrinth", action, project_id: plugin.project_id }, installController.signal);
       if (current !== installGeneration) return;
       showPanel("Review plugin action", true);
       const label = action === "enable" ? "Enable" : action === "disable" ? "Disable" : "Remove";
-      overlayHeader(plan.project_name, "", [plugin.version, plan.state === "disabled" ? "Disabled" : "Enabled"], plan.project_id);
+      overlayHeader(plan.project_name, "", [plugin.version, plan.state === "disabled" ? "Disabled" : "Enabled"], plan.project_id, null, undefined, plan.source);
       const explanation = action === "enable"
         ? "The same verified stored JAR returns to /plugins. Plugin configuration/data is preserved. Minecraft restart and active-plugin verification follow."
         : action === "disable"
@@ -6168,9 +6168,9 @@ if (pluginsDialog && pluginsOpen) {
         apply.disabled = true;
         try {
           if (await blockPluginInstall(current)) return;
-          const payload = await pluginRequest("manage", { action: plan.action, project_id: plan.project_id, plan_fingerprint: plan.plan_fingerprint, confirm_players: String(Boolean(players?.checked)) }, installController.signal);
+          const payload = await pluginRequest("manage", { source: plan.source || "Modrinth", action: plan.action, project_id: plan.project_id, plan_fingerprint: plan.plan_fingerprint, confirm_players: String(Boolean(players?.checked)) }, installController.signal);
           if (current !== installGeneration) return;
-          operationIdentity = { operation_id: payload.operation.operation_id, project_id: plugin.project_id, name: plugin.name, version: plugin.version };
+          operationIdentity = { operation_id: payload.operation.operation_id, source: plugin.source, project_id: plugin.project_id, name: plugin.name, version: plugin.version };
           if (!showOperation(payload.operation)) pollTimer = setTimeout(() => pollOperation(payload.operation.operation_id, current), 1000);
         } catch (error) { if (current === installGeneration && error.name !== "AbortError") panelError(error); }
       }, action === "remove" ? "plugins-remove-action" : "plugins-state-action");
@@ -6232,7 +6232,7 @@ if (pluginsDialog && pluginsOpen) {
     const identity = operationIdentity?.operation_id === operation.operation_id ? operationIdentity : null;
     const heading = lifecycle ? (success ? "Plugin action verified" : attention ? "Administrator attention required" : operation.state === "rolled_back" ? "Plugin action did not complete" : operation.state === "resolved" ? "Plugin state verified" : "Changing managed plugin") : success ? "Plugin installation verified" : attention ? "Administrator attention required" : operation.state === "rolled_back" ? "Installation did not complete" : operation.state === "resolved" ? "Plugin state verified" : "Installing plugin";
     if (!sameOperation) {
-      overlayHeader(identity?.name || heading, "", [identity?.version], identity?.project_id);
+      overlayHeader(identity?.name || heading, "", [identity?.version], identity?.project_id, null, undefined, identity?.source || "Modrinth");
       operationViewID = operation.operation_id;
     } else if (!identity) panelBody.querySelector(".plugins-overlay-identity h3").textContent = heading;
     if (identity) panelBody.append(text("h3", heading));
@@ -6318,12 +6318,12 @@ if (pluginsDialog && pluginsOpen) {
     try {
       if (await blockPluginInstall(current)) return;
       const payload = await pluginRequest("install", {
-        project_id: plan.project_id, version_id: plan.version_id, plan_fingerprint: plan.plan_fingerprint,
+        source: plan.source, project_id: plan.project_id, version_id: plan.version_id, plan_fingerprint: plan.plan_fingerprint,
         confirm_players: String(plan.confirmation_required === true),
       }, installController.signal);
       if (current !== installGeneration) return;
       if (!payload.operation) throw new Error("Installation did not start. Review again.");
-      operationIdentity = { operation_id: payload.operation.operation_id, project_id: plan.project_id, name: plan.project_name, version: plan.version_number };
+      operationIdentity = { operation_id: payload.operation.operation_id, source: plan.source, project_id: plan.project_id, name: plan.project_name, version: plan.version_number };
       if (!showOperation(payload.operation)) pollTimer = setTimeout(() => pollOperation(payload.operation.operation_id, current), 1000);
     } catch (error) { if (current === installGeneration && error.name !== "AbortError") panelError(error); }
   };
@@ -6343,16 +6343,16 @@ if (pluginsDialog && pluginsOpen) {
     overlayActions(panelAction("Close", closePanel, true));
     try {
       if (await blockPluginInstall(current)) return;
-      const plan = await pluginRequest("install/plan", { project_id: projectID, version_id: versionID }, installController.signal);
+      const plan = await pluginRequest("install/plan", { source: project?.source || "Modrinth", project_id: projectID, version_id: versionID }, installController.signal);
       if (current !== installGeneration) return;
       showPanel("Plugin installation", true);
-      overlayHeader(plan.project_name, plan.description || project?.description, [plan.version_number, plan.server.server_software, plan.server.minecraft_version && `MC ${plan.server.minecraft_version}`], plan.project_id, panelAction("Install", () => applyPlugin(plan)), project?.project_id === plan.project_id ? project.icon_url || "" : undefined);
+      overlayHeader(plan.project_name, plan.description || project?.description, [plan.version_number, plan.server.server_software, plan.server.minecraft_version && `MC ${plan.server.minecraft_version}`], plan.project_id, panelAction("Install", () => applyPlugin(plan)), project?.project_id === plan.project_id ? project.icon_url || "" : undefined, plan.source);
       const selectedVersion = project?.version?.id === plan.version_id ? project.version : null;
       const about = infoRows(overlaySection("About this version"));
       about("Release", plan.version_number);
-      about("Release type", selectedVersion?.version_type || "Not provided");
+      about(plan.source === "Hangar" ? "Channel" : "Release type", selectedVersion?.version_type || "Not provided");
       about("Published", selectedVersion?.date_published || "Not provided");
-      about("Source", project?.project_id === plan.project_id && project.source ? project.source : "Modrinth");
+      about("Source", plan.source);
       about("Project ID", plan.project_id);
       about("Release ID", plan.version_id);
       const compatibility = infoRows(overlaySection("Compatibility"));
@@ -6487,8 +6487,9 @@ if (pluginsDialog && pluginsOpen) {
         pagination.hidden = false;
         previous.disabled = pageIndex === 0;
         const currentPage = pageIndex + 1;
+        const totalPages = Math.max(1, Math.ceil(payload.total / pageLimit));
         next.disabled = !nextCursor;
-        pluginsDialog.querySelector("[data-plugins-page]").textContent = `Page ${currentPage}`;
+        pluginsDialog.querySelector("[data-plugins-page]").textContent = `Page ${currentPage} of ${totalPages}`;
       }
     } catch (error) {
       if (current === generation && error.name !== "AbortError") state.textContent = error.message || "Plugin information is unavailable.";

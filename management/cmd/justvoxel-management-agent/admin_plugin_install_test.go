@@ -1495,7 +1495,18 @@ func TestPluginInstallAcknowledgeUnsafeEvidenceAndOwnership(t *testing.T) {
 				case "wrong hash":
 					manifest.Artifacts[0].SHA512 = strings.Repeat("a", 128)
 				}
-				if _, err := commitPluginManifest(f.data, nil, manifest); err != nil {
+				if kind == "managed ownership" {
+					if _, err := commitPluginManifest(f.data, nil, manifest); err == nil {
+						t.Fatal("invalid ownership commit accepted")
+					}
+					if err := os.MkdirAll(filepath.Join(f.data, ".justvoxel"), 0700); err != nil {
+						t.Fatal(err)
+					}
+					raw, _ := json.Marshal(manifest)
+					if err := os.WriteFile(filepath.Join(f.data, ".justvoxel", "plugins.json"), raw, 0600); err != nil {
+						t.Fatal(err)
+					}
+				} else if _, err := commitPluginManifest(f.data, nil, manifest); err != nil {
 					t.Fatal(err)
 				}
 				if kind == "malformed manifest" {

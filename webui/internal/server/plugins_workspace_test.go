@@ -23,6 +23,7 @@ type fakePluginsWorkspaceAPI struct {
 	iconCalls      int
 	iconURL        string
 	iconProjectID  string
+	iconSource     string
 	iconError      error
 	iconResult     *api.PluginIcon
 }
@@ -149,7 +150,7 @@ func TestPluginsWorkspaceCompactInfoPresentation(t *testing.T) {
 		t.Fatal("compact plugin renderers missing")
 	}
 	info := behavior[start:project]
-	for _, want := range []string{`card.tabIndex = 0`, `card.setAttribute("role", "button")`, `card.setAttribute("aria-haspopup", "dialog")`, `card.setAttribute("aria-controls", "plugins-overlay")`, `event.key === "Enter" || event.key === " "`, `node.classList.toggle("is-selected", node === card)`, `card.addEventListener("click", open)`, "showPanel(`Info for ${name}`, true)", `renderInfo();`, `overlayActions(...actions, pluginAction("Close", closePanel, "plugins-done-action"))`, `"plugins-icon-tile"`, `header.append(identityTile(name, projectID, iconURL), copy)`} {
+	for _, want := range []string{`card.tabIndex = 0`, `card.setAttribute("role", "button")`, `card.setAttribute("aria-haspopup", "dialog")`, `card.setAttribute("aria-controls", "plugins-overlay")`, `event.key === "Enter" || event.key === " "`, `node.classList.toggle("is-selected", node === card)`, `card.addEventListener("click", open)`, "showPanel(`Info for ${name}`, true)", `renderInfo();`, `overlayActions(...actions, pluginAction("Close", closePanel, "plugins-done-action"))`, `"plugins-icon-tile"`, `header.append(identityTile(name, projectID, iconURL, source), copy)`} {
 		if !strings.Contains(info, want) {
 			t.Fatalf("whole-card overlay behavior missing %s", want)
 		}
@@ -166,13 +167,13 @@ func TestPluginsWorkspaceCompactInfoPresentation(t *testing.T) {
 		}
 	}
 	discover := behavior[project:installed]
-	for _, want := range []string{`interactiveCard(card, project.title, () => reviewRejection`, `"plugins-card-description"`, `counts.set(kind, (counts.get(kind) || 0) + 1)`, `"JustVoxel managed"`, `const installable = project.source === "Modrinth" && !managed && project.install_available`, `reviewPlugin(project.project_id, version.id, project, readOnlyReview)`} {
+	for _, want := range []string{`interactiveCard(card, project.title, () => reviewRejection`, `"plugins-card-description"`, `counts.set(kind, (counts.get(kind) || 0) + 1)`, `"JustVoxel managed"`, `const installable = ["Modrinth", "Hangar"].includes(project.source) && !managed && project.install_available`, `reviewPlugin(project.project_id, version.id, project, readOnlyReview)`} {
 		if !strings.Contains(discover, want) {
 			t.Fatalf("Discover summary or Info missing %s", want)
 		}
 	}
 	inventory := behavior[installed:end]
-	for _, want := range []string{`const name = plugin.name || plugin.filename;`, `addInfo(card, name, () => {`, `overlayHeader(name, "", [plugin.version || "Version unknown", management, stateLabel], projectID)`, `plugin.update_status?.startsWith("Update available")`, `"Needs attention"`, `"plugins-inventory-status"`, `"JustVoxel managed"`, `"Managed by Plugins"`, `"Manual / unmanaged"`} {
+	for _, want := range []string{`const name = plugin.name || plugin.filename;`, `addInfo(card, name, () => {`, `overlayHeader(name, "", [plugin.version || "Version unknown", management, stateLabel], projectID, null, undefined, plugin.source || "Modrinth")`, `plugin.update_status?.startsWith("Update available")`, `"Needs attention"`, `"plugins-inventory-status"`, `"JustVoxel managed"`, `"Managed by Plugins"`, `"Manual / unmanaged"`} {
 		if !strings.Contains(inventory, want) {
 			t.Fatalf("Installed/Updates presentation missing %s", want)
 		}
@@ -240,7 +241,7 @@ func (f *fakePluginsInstallAPI) AdminPluginInstallPlan(_ context.Context, sessio
 	if f.planError != nil {
 		return api.PluginInstallPlan{}, f.planError
 	}
-	return api.PluginInstallPlan{ProjectID: r.ProjectID, VersionID: r.VersionID, Name: "Authoritative plugin", Location: "/data/plugins", ConfirmationRequired: true, Online: 1, Players: []string{"Alex"}, Fingerprint: "sha256:" + strings.Repeat("a", 64)}, nil
+	return api.PluginInstallPlan{Source: r.Source, ProjectID: r.ProjectID, VersionID: r.VersionID, Name: "Authoritative plugin", Location: "/data/plugins", ConfirmationRequired: true, Online: 1, Players: []string{"Alex"}, Fingerprint: "sha256:" + strings.Repeat("a", 64)}, nil
 }
 func (f *fakePluginsInstallAPI) AdminPluginInstall(_ context.Context, session string, r api.PluginInstallApplyRequest) (api.PersistentOperationResponse, error) {
 	f.installs++
@@ -334,7 +335,7 @@ func TestPluginsInstallReviewProgressAndOwnershipRendering(t *testing.T) {
 	}
 	script = script[start:end]
 	for _, want := range []string{
-		`project.install_available && project.compatible && server.supported && server.minecraft_version && version?.version_type === "release"`,
+		`project.install_available && project.compatible && server.supported && server.minecraft_version && version?.id`,
 		`["geyser", "floodgate", "viaversion"].includes(project.slug)`,
 		`pluginRequest("install/plan"`, `plan.project_name`, `overlaySection("Compatibility")`, `plan.artifacts`, `plan.installation_location`,
 		`if (plan.confirmation_required)`, `plan.players`, `confirm_players: String(plan.confirmation_required === true)`,
@@ -423,7 +424,7 @@ func TestPluginsAdditionalInfoAndStructuredInstallPresentation(t *testing.T) {
 		}
 	}
 	helpers := script[:project]
-	for _, want := range []string{`"plugins-overlay-header"`, `"plugins-overlay-identity"`, `identity.append(identityTile(name, projectID, iconURL), text("h3", name))`, `["required", "Required"]`, `["optional", "Optional"]`, `["incompatible", "Incompatible"]`, `["other", "Embedded / other"]`, `dependency.name || dependency.title || dependency.file_name`, `plugins-dependency-ids`} {
+	for _, want := range []string{`"plugins-overlay-header"`, `"plugins-overlay-identity"`, `identity.append(identityTile(name, projectID, iconURL, source), text("h3", name))`, `["required", "Required"]`, `["optional", "Optional"]`, `["incompatible", "Incompatible"]`, `["other", "Embedded / other"]`, `dependency.name || dependency.title || dependency.file_name`, `plugins-dependency-ids`} {
 		if !strings.Contains(helpers, want) {
 			t.Fatal("overlay header or dependency grouping missing", want)
 		}
@@ -445,7 +446,7 @@ func TestPluginsAdditionalInfoAndStructuredInstallPresentation(t *testing.T) {
 		}
 	}
 	review := script[reviewStart:resume]
-	for _, want := range []string{`overlayHeader(plan.project_name, plan.description || project?.description`, `overlaySection("About this version")`, `about("Release"`, `about("Release type"`, `about("Published"`, `about("Source"`, `about("Project ID"`, `about("Release ID"`, `overlaySection("Compatibility")`, `compatibility("Result"`, `compatibility("Server software"`, `compatibility("Active Minecraft version"`, `compatibility("Supported platforms"`, `compatibility("Supported versions"`, `overlaySection("Dependencies")`, `artifact.satisfied ? "Already satisfied" : "Will be installed"`, `const informational = plan.display_dependencies || []`, `overlaySection("Files to install")`, `readableSize(artifact.size)`, `overlaySection("Installation")`, `plan.installation_location`, `overlaySection("Restart")`, `restart("Required", plan.restart_required ? "Yes" : "No")`, `Verified cold backup before changes`, `Minecraft starts/restarts to load and verify plugins`, `Returns to stopped after verification`, `if (plan.confirmation_required) {`, `overlaySection("Players")`, `panelAction("Install", () => applyPlugin(plan))`} {
+	for _, want := range []string{`overlayHeader(plan.project_name, plan.description || project?.description`, `overlaySection("About this version")`, `about("Release"`, `about(plan.source === "Hangar" ? "Channel" : "Release type"`, `about("Published"`, `about("Source"`, `about("Project ID"`, `about("Release ID"`, `overlaySection("Compatibility")`, `compatibility("Result"`, `compatibility("Server software"`, `compatibility("Active Minecraft version"`, `compatibility("Supported platforms"`, `compatibility("Supported versions"`, `overlaySection("Dependencies")`, `artifact.satisfied ? "Already satisfied" : "Will be installed"`, `const informational = plan.display_dependencies || []`, `overlaySection("Files to install")`, `readableSize(artifact.size)`, `overlaySection("Installation")`, `plan.installation_location`, `overlaySection("Restart")`, `restart("Required", plan.restart_required ? "Yes" : "No")`, `Verified cold backup before changes`, `Minecraft starts/restarts to load and verify plugins`, `Returns to stopped after verification`, `if (plan.confirmation_required) {`, `overlaySection("Players")`, `panelAction("Install", () => applyPlugin(plan))`} {
 		if !strings.Contains(review, want) {
 			t.Fatal("combined plugin overlay missing", want)
 		}
@@ -581,7 +582,7 @@ func TestPluginsWorkspaceSharedSameOriginLogoAndFallback(t *testing.T) {
 		t.Fatal("identity helper missing")
 	}
 	helper := behavior[start : start+end]
-	for _, want := range []string{`(name, projectID, iconURL)`, `"plugins-icon-tile"`, `tile.dataset.tone`, `typeof projectID === "string"`, `/^[A-Za-z0-9]{1,64}$/`, `document.createElement("img")`, `image.alt = ""`, `image.hidden = true`, `const query = new URLSearchParams({ project_id: projectID })`, `query.set("icon_url", iconURL)`, `image.src = ` + "`/api/plugins/workspace/icon?${query}`", `image.addEventListener("error"`, `image.remove()`, `tile.classList.remove("has-logo")`, `tile.append(image)`} {
+	for _, want := range []string{`(name, projectID, iconURL, source = "Modrinth")`, `"plugins-icon-tile"`, `tile.dataset.tone`, `typeof projectID === "string"`, `/^[A-Za-z0-9]{1,64}$/`, `document.createElement("img")`, `image.alt = ""`, `image.hidden = true`, `const query = new URLSearchParams({ source, project_id: projectID })`, `query.set("icon_url", iconURL)`, `image.src = ` + "`/api/plugins/workspace/icon?${query}`", `image.addEventListener("error"`, `image.remove()`, `tile.classList.remove("has-logo")`, `tile.append(image)`} {
 		if !strings.Contains(helper, want) {
 			t.Fatalf("shared icon contract missing %s", want)
 		}
@@ -596,18 +597,18 @@ func TestPluginsWorkspaceSharedSameOriginLogoAndFallback(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		`identity.append(identityTile(name, projectID, iconURL), text("h3", name))`,
-		`header.append(identityTile(name, projectID, iconURL), copy)`,
-		`const iconProjectID = project.source === "Modrinth" ? project.project_id : undefined;`,
-		`overlayHeader(project.title, project.description, identityBadges, iconProjectID, null, project.icon_url || "")`,
-		`}, iconProjectID, project.icon_url || "")`,
+		`identity.append(identityTile(name, projectID, iconURL, source), text("h3", name))`,
+		`header.append(identityTile(name, projectID, iconURL, source), copy)`,
+		`const iconProjectID = ["Modrinth", "Hangar"].includes(project.source) ? project.project_id : undefined;`,
+		`overlayHeader(project.title, project.description, identityBadges, iconProjectID, null, project.icon_url || "", project.source)`,
+		`}, iconProjectID, project.icon_url || "", project.source)`,
 		`overlayHeader(plan.project_name, plan.description || project?.description, [plan.version_number, plan.server.server_software,`,
 		`const projectID = plugin.project_id || plugin.icon_project_id || undefined`,
-		`overlayHeader(name, "", [plugin.version || "Version unknown", management, stateLabel], projectID)`,
-		`}, projectID)`,
+		`overlayHeader(name, "", [plugin.version || "Version unknown", management, stateLabel], projectID, null, undefined, plugin.source || "Modrinth")`,
+		`}, projectID, undefined, plugin.source || "Modrinth")`,
 		`operationIdentity?.operation_id === operation.operation_id`,
 		`project_id: plan.project_id, name: plan.project_name`,
-		`overlayHeader(identity?.name || heading, "", [identity?.version], identity?.project_id)`,
+		`overlayHeader(identity?.name || heading, "", [identity?.version], identity?.project_id, null, undefined, identity?.source || "Modrinth")`,
 	} {
 		if !strings.Contains(workspace, want) {
 			t.Fatalf("identity reuse missing %s", want)
@@ -644,7 +645,7 @@ func TestPluginsWorkspaceApprovedCompactHierarchyAndStageFlow(t *testing.T) {
 		return script[a : a+b]
 	}
 	header := between("  const interactiveCard =", "  const infoRows =")
-	for _, want := range []string{`copy.className = "plugins-card-copy"`, `copy.append(heading)`, `card.querySelector(".plugins-card-description, .plugins-card-release")`, `copy.append(description)`, `header.append(identityTile(name, projectID, iconURL), copy)`} {
+	for _, want := range []string{`copy.className = "plugins-card-copy"`, `copy.append(heading)`, `card.querySelector(".plugins-card-description, .plugins-card-release")`, `copy.append(description)`, `header.append(identityTile(name, projectID, iconURL, source), copy)`} {
 		if !strings.Contains(header, want) {
 			t.Fatal("identity/header hierarchy missing", want)
 		}
@@ -664,7 +665,7 @@ func TestPluginsWorkspaceApprovedCompactHierarchyAndStageFlow(t *testing.T) {
 		}
 	}
 	discover := between("  const renderProject =", "  const renderInstalled =")
-	if strings.Contains(discover, `...(version?.loaders || [])`) || !strings.Contains(discover, `overlayHeader(project.title, project.description, identityBadges, iconProjectID, null, project.icon_url || "")`) {
+	if strings.Contains(discover, `...(version?.loaders || [])`) || !strings.Contains(discover, `overlayHeader(project.title, project.description, identityBadges, iconProjectID, null, project.icon_url || "", project.source)`) {
 		t.Fatal("Info header must reuse concise server-context badges")
 	}
 	for _, want := range []string{`compatibility("Supported platforms", (version?.loaders || []).join(" / ")`, `new Set(version?.game_versions || [])`} {
@@ -673,7 +674,7 @@ func TestPluginsWorkspaceApprovedCompactHierarchyAndStageFlow(t *testing.T) {
 		}
 	}
 	inventory := between("  const renderInstalled =", "  // Review, progress")
-	if !strings.Contains(inventory, `const projectID = plugin.project_id || plugin.icon_project_id || undefined;`) || !strings.Contains(inventory, `}, projectID)`) {
+	if !strings.Contains(inventory, `const projectID = plugin.project_id || plugin.icon_project_id || undefined;`) || !strings.Contains(inventory, `}, projectID, undefined, plugin.source || "Modrinth")`) {
 		t.Fatal("inventory must reuse only known authoritative project identity")
 	}
 	identity := between("  const identityTile =", "  const overlayHeader =")
@@ -681,7 +682,7 @@ func TestPluginsWorkspaceApprovedCompactHierarchyAndStageFlow(t *testing.T) {
 		t.Fatal("unidentified and failed icons must retain fallback")
 	}
 	review := between("  const reviewPlugin =", "  const resumePluginInstall =")
-	for _, want := range []string{`overlaySection("About this version")`, `overlaySection("Compatibility")`, `overlaySection("Dependencies")`, `overlaySection("Files to install")`, `overlaySection("Installation")`, `overlaySection("Restart")`, `overlaySection("Players")`, `readableSize(artifact.size)`, `project?.version?.id === plan.version_id`, `project?.project_id === plan.project_id && project.source`} {
+	for _, want := range []string{`overlaySection("About this version")`, `overlaySection("Compatibility")`, `overlaySection("Dependencies")`, `overlaySection("Files to install")`, `overlaySection("Installation")`, `overlaySection("Restart")`, `overlaySection("Players")`, `readableSize(artifact.size)`, `project?.version?.id === plan.version_id`, `about("Source", plan.source)`} {
 		if !strings.Contains(review, want) {
 			t.Fatal("single-column overlay structure missing", want)
 		}
@@ -820,12 +821,12 @@ func TestPluginsWorkspaceToolbarCapacityAndPagination(t *testing.T) {
 			t.Fatal("visible toolbar text remains", forbidden)
 		}
 	}
-	for _, want := range []string{`limit: String(pageLimit)`, `results.getBoundingClientRect()`, `style.gridTemplateColumns`, `results.clientHeight`, `style.getPropertyValue("--plugins-card-height")`, `columns * rows`, `Math.min(12`, `new ResizeObserver`, `setTimeout(() => updateCapacity(), 200)`, `pageCursors = [cursor]`, `pageIndex = 0`, `const currentPage = pageIndex + 1`, "`Page ${currentPage}`", `cursor = pageCursors[--pageIndex]`, `pageCursors.push(nextCursor)`, `event.preventDefault()`} {
+	for _, want := range []string{`limit: String(pageLimit)`, `results.getBoundingClientRect()`, `style.gridTemplateColumns`, `results.clientHeight`, `style.getPropertyValue("--plugins-card-height")`, `columns * rows`, `Math.min(12`, `new ResizeObserver`, `setTimeout(() => updateCapacity(), 200)`, `pageCursors = [cursor]`, `pageIndex = 0`, `const currentPage = pageIndex + 1`, `const totalPages = Math.max(1, Math.ceil(payload.total / pageLimit))`, "`Page ${currentPage} of ${totalPages}`", `cursor = pageCursors[--pageIndex]`, `pageCursors.push(nextCursor)`, `event.preventDefault()`} {
 		if !strings.Contains(js, want) {
 			t.Fatal("dynamic catalog behavior missing", want)
 		}
 	}
-	for _, forbidden := range []string{`Catalog page`, `offset / 8`, `offset - 8`, `source:`, `hangar.com`} {
+	for _, forbidden := range []string{`Catalog page`, `offset / 8`, `offset - 8`, `hangar.com`} {
 		if strings.Contains(js, forbidden) {
 			t.Fatal("obsolete or fake catalog behavior", forbidden)
 		}
@@ -839,6 +840,26 @@ func TestPluginsWorkspaceToolbarCapacityAndPagination(t *testing.T) {
 	for _, want := range []string{`display:flex;flex-direction:column;gap:.55rem;flex:1`, `.plugins-search{display:flex;flex:none;align-items:center;flex-wrap:nowrap`, `flex:1 1 120px`, `.plugins-search-filters{display:flex;flex:none;align-items:center;gap:.5rem;margin-left:auto}`, `--plugins-card-height:144px`, `height:var(--plugins-card-height)`, `.plugins-result-card.is-selected{border-color:var(--jv-success)`, `color-mix(in srgb,var(--jv-success) 18%,var(--jv-surface-sunken))`, `.plugins-result-card:focus-visible`, `justify-content:flex-end;gap:.6rem;margin-top:auto`, `@container(max-width:680px){.plugins-search{flex-wrap:wrap}`} {
 		if !strings.Contains(css, want) {
 			t.Fatal("approved layout rule missing", want)
+		}
+	}
+	for _, selector := range []string{".plugins-search", ".plugins-results", ".plugins-pagination"} {
+		start := strings.Index(css, selector+"{")
+		if start < 0 {
+			t.Fatal("plugin lane missing", selector)
+		}
+		rule := css[start : start+strings.Index(css[start:], "}")+1]
+		for _, want := range []string{"width:100%;", "max-width:1080px;", "margin-inline:auto"} {
+			if !strings.Contains(rule, want) {
+				t.Fatal("shared centered plugin lane rule missing", selector, want)
+			}
+		}
+		for _, forbidden := range []string{"scrollbar-gutter", "padding"} {
+			if strings.Contains(rule, forbidden) {
+				t.Fatal("plugin lane reserves unwanted gutter or padding", selector, forbidden)
+			}
+		}
+		if selector == ".plugins-results" && !strings.Contains(rule, "overflow:auto") {
+			t.Fatal("plugin results scrolling missing")
 		}
 	}
 	for _, forbidden := range []string{`plugins-review-layout`, `plugins-review-primary`, `plugins-review-secondary`, `plugins-card-actions`, `min-height:230px`} {
@@ -1042,7 +1063,7 @@ func TestPluginsWorkspaceVMCorrectionHeaderButtonsAndBackdrop(t *testing.T) {
 		return script[a:b]
 	}
 	header := between("  const overlayHeader =", "  const overlaySection =")
-	for _, want := range []string{`projectID, action = null`, `identity.append(identityTile(name, projectID, iconURL), text("h3", name));`, `if (action) identity.append(action);`, `header.append(identity);`} {
+	for _, want := range []string{`projectID, action = null`, `identity.append(identityTile(name, projectID, iconURL, source), text("h3", name));`, `if (action) identity.append(action);`, `header.append(identity);`} {
 		if !strings.Contains(header, want) {
 			t.Fatal("shared top identity action missing", want)
 		}
@@ -1424,7 +1445,7 @@ func TestPluginWorkspaceApprovedPolish(t *testing.T) {
 		t.Fatal("success must offer secondary Installed and primary refreshing Done")
 	}
 	inventory := pluginScriptSection(t, script, "  const renderInstalled =", "  // Review, progress")
-	for _, want := range []string{`plugin.update_status?.startsWith("Update available")`, `if (updateAvailable) summary = plugin.update_status;`, `if (attention) summary = "Needs attention"`, `status.classList.add("is-attention")`, `}, projectID)`} {
+	for _, want := range []string{`plugin.update_status?.startsWith("Update available")`, `if (updateAvailable) summary = plugin.update_status;`, `if (attention) summary = "Needs attention"`, `status.classList.add("is-attention")`, `}, projectID, undefined, plugin.source || "Modrinth")`} {
 		if !strings.Contains(inventory, want) {
 			t.Fatal("Installed status/fallback lost", want)
 		}
@@ -1603,6 +1624,9 @@ const fallback = identityTile("Example","root",icon), retried = fallback.image;
 retried.emit("error"); retried.emit("load");
 assert.equal(retried.requests.length,2); assert.equal(retried.hidden,false);
 assert.equal(fallback.classList.contains("has-logo"),true); assert.equal(retried.removed,false);
+const hangarTile=identityTile("Hangar","123","https://evil.example/icon.png","Hangar"), hangarImage=hangarTile.image;
+const hangarURL=new URL(hangarImage.src,"https://appliance.example");assert.equal(hangarURL.searchParams.get("source"),"Hangar");assert.equal(hangarURL.searchParams.get("project_id"),"123");assert(!hangarURL.searchParams.has("icon_url"));
+hangarImage.emit("error");assert.equal(hangarImage.removed,true);assert.equal(hangarTile.textContent,"HA");assert.equal(hangarImage.requests.length,1);assert(!hangarTile.classList.contains("has-logo"));
 assert.equal(identityTile("Manual",undefined).image,undefined);
 `
 	if output, err := exec.Command("node", "-e", program).CombinedOutput(); err != nil {
@@ -1809,15 +1833,17 @@ class Node {
 const document = {createElement:(tag)=>new Node(tag)};
 const results = new Node("div"), panelBody = new Node("div");
 const stopPolling=()=>{}, showPanel=()=>{panelBody.children=[]}, closePanel=()=>{};
-const reviewPlugin=()=>{throw new Error("Hangar entered installer")};
+const reviews=[]; const reviewPlugin=(id,version,project)=>{reviews.push(project.source)};
 ` + helpers + actions + `
 const server = {supported:true,minecraft_version:"1.21.8",server_type:"paper"};
 const base = {title:"Same name",description:"Plugin",project_id:"123",slug:"same",compatible:true,compatibility:"Compatible according to publisher metadata",version:{id:"1",version_number:"1",version_type:"release",loaders:["paper"],game_versions:["1.21.8"],dependencies:[]}};
-const hangar = renderProject({...base,source:"Hangar",install_available:true,icon_url:"https://hangar.papermc.io/avatar.png"},server);
+const hangar = renderProject({...base,source:"Hangar",install_available:false,icon_url:"https://hangar.papermc.io/avatar.png"},server);
 results.append(hangar); hangar.events.click();
 const flatten=(n)=>[n,...n.children.flatMap(flatten)];
 let nodes=flatten(panelBody);
-assert.equal(imageRequests.length,0);
+assert.equal(imageRequests.length,2);
+assert(imageRequests.every(request=>new URL(request,"https://appliance.example").searchParams.get("source")==="Hangar"));
+assert(imageRequests.every(request=>!new URL(request,"https://appliance.example").searchParams.has("icon_url")));
 assert(nodes.some(n=>n.textContent==="Hangar"));
 assert(!nodes.some(n=>n.textContent==="Install"));
 assert(nodes.some(n=>n.textContent==="Channel"));
@@ -1825,14 +1851,18 @@ assert(!nodes.some(n=>n.textContent==="Release type"));
 for (const root of [hangar,panelBody]) {
  const tiles=flatten(root).filter(n=>n.className.includes("plugins-icon-tile"));
  assert.equal(tiles.length,1); assert.equal(tiles[0].textContent,"SA");
- assert(!tiles[0].children.some(n=>n.tag==="img"));
+ assert(tiles[0].children.some(n=>n.tag==="img"));
 }
 const close = nodes.find(n=>n.tag==="button" && n.textContent==="Close");
 assert(close.className.includes("plugins-done-action")); assert(!close.className.includes("secondary"));
+const installableHangar=renderProject({...base,source:"Hangar",install_available:true},server);
+results.append(installableHangar); installableHangar.events.click(); assert.deepEqual(reviews,["Hangar"]);
+const incompatibleHangar=renderProject({...base,source:"Hangar",install_available:true,compatible:false},server);
+results.append(incompatibleHangar); incompatibleHangar.events.click(); assert.deepEqual(reviews,["Hangar"]);
 const modrinth=renderProject({...base,source:"Modrinth",install_available:false,icon_url:"https://cdn.modrinth.com/data/123/icon.png"},server);
 results.append(modrinth); modrinth.events.click();
-assert.equal(imageRequests.length,2);
-for (const request of imageRequests) {assert(request.startsWith("/api/plugins/workspace/icon?")); const q=new URL(request,"https://appliance.example").searchParams; assert.equal(q.get("project_id"),"123"); assert.equal(q.get("icon_url"),"https://cdn.modrinth.com/data/123/icon.png");}
+assert.equal(imageRequests.length,7);
+for (const request of imageRequests.slice(-2)) {assert(request.startsWith("/api/plugins/workspace/icon?")); const q=new URL(request,"https://appliance.example").searchParams; assert.equal(q.get("project_id"),"123"); assert.equal(q.get("icon_url"),"https://cdn.modrinth.com/data/123/icon.png");}
 nodes=flatten(panelBody);
 assert(nodes.some(n=>n.textContent==="Modrinth"));
 assert(nodes.some(n=>n.textContent==="Release type"));
@@ -1891,7 +1921,7 @@ const state={},context={},pagination={},previous={},next={},page={};
 const document={body:{classList:{contains:()=>true}}};
 const pluginsDialog={querySelector:()=>page};
 const results={replaceChildren:()=>{},append:()=>{throw new Error("unexpected result")}};
-let generation=0,controller=null,tab="discover",pageLimit=1,pageIndex=0,nextCursor=null;
+let generation=0,controller=null,tab="discover",pageLimit=1,pageIndex=0,nextCursor=null,total=0;
 let cursor={modrinth_offset:8,hangar_offset:3,hangar_first:true};
 const clearInventoryTimer=()=>{};
 const renderProject=()=>{throw new Error("unexpected card")};
@@ -1899,7 +1929,7 @@ const server={supported:true,minecraft_version:"1.21.8",server_software:"Paper"}
 const window={location:{assign:()=>{throw new Error("unexpected navigation")}}};
 const fetch=async(url,options)=>{
  requests.push({url,options});
- return {ok:true,status:200,json:async()=>({server,modrinth:elements.modrinth.checked,hangar:elements.hangar.checked,projects:[],cursor,next_cursor:null,total:0})};
+ return {ok:true,status:200,json:async()=>({server,modrinth:elements.modrinth.checked,hangar:elements.hangar.checked,projects:[],cursor,next_cursor:null,total})};
 };
 ` + loader + `
 (async()=>{
@@ -1916,11 +1946,50 @@ const fetch=async(url,options)=>{
   assert(!elements.modrinth.disabled);assert(!elements.hangar.disabled);
  }
  assert.equal(state.textContent,"Enable Modrinth or Hangar to browse plugins.");
+ assert.equal(page.textContent,"Page 1 of 1");
  assert(next.disabled);assert(previous.disabled);
+ elements.modrinth.checked=true;elements.hangar.checked=true;
+ total=25;pageLimit=8;
+ await load();assert.equal(page.textContent,"Page 1 of 4");
+ pageIndex=1;
+ await load();assert.equal(page.textContent,"Page 2 of 4");assert(!previous.disabled);
+ total=0;pageIndex=0;
+ await load();assert.equal(page.textContent,"Page 1 of 1");
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `
 	command := exec.Command("node", "-e", program)
 	if out, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("source requests: %v\n%s", err, out)
+	}
+}
+
+func (f *fakePluginsWorkspaceAPI) AdminPluginSourceIcon(ctx context.Context, session, source, project string) (api.PluginIcon, error) {
+	f.iconSource = source
+	return f.AdminPluginIcon(ctx, session, project)
+}
+func TestPluginsWorkspaceHangarContracts(t *testing.T) {
+	client := &fakePluginsInstallAPI{}
+	app, err := New(client, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/api/plugins/workspace/icon?source=Hangar&project_id=123", ""))
+	if rr.Code != 200 || client.iconSource != "Hangar" || client.iconProjectID != "123" || client.iconURL != "" {
+		t.Fatal("provider icon not proxied", rr.Code, client.iconSource)
+	}
+	rr = httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "http://example/api/plugins/workspace/install/plan", "csrf=csrf-token&source=Hangar&project_id=123&version_id=456"))
+	if rr.Code != 200 || !strings.Contains(rr.Body.String(), `"source":"Hangar"`) {
+		t.Fatal("plan source lost", rr.Code, rr.Body.String())
+	}
+	rr = httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "http://example/api/plugins/workspace/install", "csrf=csrf-token&source=Hangar&project_id=123&version_id=456&plan_fingerprint=sha256:"+strings.Repeat("a", 64)+"&confirm_players=false"))
+	if rr.Code != 202 || client.request.Source != "Hangar" {
+		t.Fatal("apply source lost", rr.Code, rr.Body.String())
+	}
+	script := pluginWorkspaceScript(t)
+	if !strings.Contains(script, `source: project?.source || "Modrinth"`) || !strings.Contains(script, `source: plan.source, project_id: plan.project_id`) || strings.Contains(script, `context.textContent.split`) {
+		t.Fatal("authoritative source/context contract missing")
 	}
 }

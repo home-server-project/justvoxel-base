@@ -50,6 +50,7 @@ type pluginServerContext struct {
 	Message          string `json:"message,omitempty"`
 }
 type installedPlugin struct {
+	Source         string `json:"source,omitempty"`
 	State          string `json:"state,omitempty"`
 	Name           string `json:"name,omitempty"`
 	Version        string `json:"version,omitempty"`
@@ -67,6 +68,7 @@ type pluginInventory struct {
 	Plugins []installedPlugin   `json:"plugins"`
 }
 type pluginDependency struct {
+	Source    string `json:"source,omitempty"`
 	Name      string `json:"name,omitempty"`
 	ProjectID string `json:"project_id,omitempty"`
 	VersionID string `json:"version_id,omitempty"`
@@ -485,7 +487,10 @@ func pluginLoaders(serverType string) []string {
 	if serverType == "purpur" {
 		return []string{"purpur", "paper", "spigot", "bukkit"}
 	}
-	return []string{"paper", "spigot", "bukkit"}
+	if serverType == "paper" {
+		return []string{"paper", "spigot", "bukkit"}
+	}
+	return nil
 }
 func pluginVersionCompatible(v pluginCatalogVersion, server pluginServerContext) bool {
 	if server.MinecraftVersion == "" || !slices.Contains(v.GameVersions, server.MinecraftVersion) {
@@ -742,8 +747,7 @@ func discoverModrinthPlugins(ctx context.Context, server pluginServerContext, se
 	return out, nil
 }
 
-// Hangar is discovery-only. Never decode download URLs or feed these records to
-// the Modrinth-native installer, dependency planner, or ownership manifest.
+// Hangar metadata is fetched only from its fixed official API.
 func hangarPluginJSON(ctx context.Context, path string, query url.Values, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://hangar.papermc.io/api/v1"+path+"?"+query.Encode(), nil)
 	if err != nil {
@@ -780,11 +784,13 @@ func (p hangarPagination) valid(offset, limit, received int) bool {
 }
 
 type hangarProject struct {
+	AvatarURL   string `json:"avatarUrl"`
 	ID          int64  `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Namespace   struct {
-		Slug string `json:"slug"`
+		Owner string `json:"owner"`
+		Slug  string `json:"slug"`
 	} `json:"namespace"`
 }
 type hangarVersion struct {
@@ -796,11 +802,9 @@ type hangarVersion struct {
 		Name  string   `json:"name"`
 		Flags []string `json:"flags"`
 	} `json:"channel"`
-	PlatformDependencies map[string][]string `json:"platformDependencies"`
-	PluginDependencies   map[string][]struct {
-		Name     string `json:"name"`
-		Required bool   `json:"required"`
-	} `json:"pluginDependencies"`
+	PlatformDependencies map[string][]string           `json:"platformDependencies"`
+	PluginDependencies   map[string][]hangarDependency `json:"pluginDependencies"`
+	Downloads            map[string]hangarDownload     `json:"downloads"`
 }
 
 func hangarVersionStable(v hangarVersion) bool {
@@ -816,8 +820,12 @@ func hangarVersionStable(v hangarVersion) bool {
 	}
 	return true
 }
-func selectHangarVersion(ctx context.Context, projectID int64, server pluginServerContext, compatible, release bool) (*pluginCatalogVersion, bool, error) {
-	query := url.Values{"platform": {"PAPER"}, "limit": {"25"}}
+func selectHangarVersion(ctx context.Context, projectID int64, server pluginServerContext, compatible, release bool, projects ...hangarProject) (*pluginCatalogVersion, bool, error) {
+	platform, err := hangarPluginPlatform(server.ServerType)
+	if err != nil {
+		return nil, false, err
+	}
+	query := url.Values{"platform": {platform}, "limit": {"25"}}
 	if compatible {
 		query.Set("platformVersion", server.MinecraftVersion)
 	}
@@ -835,7 +843,7 @@ func selectHangarVersion(ctx context.Context, projectID int64, server pluginServ
 			return nil, false, errors.New("invalid Hangar versions")
 		}
 		for _, v := range versions.Result {
-			paper := v.PlatformDependencies["PAPER"]
+			paper := v.PlatformDependencies[platform]
 			if v.ID <= 0 || v.ProjectID != projectID || len(v.Name) == 0 || len(v.Name) > 256 || len(v.Channel.Name) > 128 || len(v.Channel.Flags) > 16 || len(v.CreatedAt) > 64 || len(paper) == 0 || len(paper) > 256 {
 				continue
 			}
@@ -854,10 +862,10 @@ func selectHangarVersion(ctx context.Context, projectID int64, server pluginServ
 			}
 			// Keep provider-native channel wording and exact PAPER publisher metadata.
 			dependencies := []pluginDependency{}
-			if len(v.PluginDependencies["PAPER"]) > 128 {
+			if len(v.PluginDependencies[platform]) > 128 {
 				continue
 			}
-			for _, dep := range v.PluginDependencies["PAPER"] {
+			for _, dep := range v.PluginDependencies[platform] {
 				if len(dep.Name) == 0 || len(dep.Name) > 256 {
 					valid = false
 					break
@@ -866,12 +874,12 @@ func selectHangarVersion(ctx context.Context, projectID int64, server pluginServ
 				if dep.Required {
 					kind = "required"
 				}
-				dependencies = append(dependencies, pluginDependency{Name: dep.Name, Type: kind})
+				dependencies = append(dependencies, pluginDependency{Source: "Hangar", Name: dep.Name, ProjectID: hangarDependencyID(dep), Type: kind})
 			}
 			if !valid {
 				continue
 			}
-			return &pluginCatalogVersion{ID: strconv.FormatInt(v.ID, 10), Number: v.Name, Type: v.Channel.Name, Published: v.CreatedAt, GameVersions: paper, Loaders: []string{"paper"}, Dependencies: dependencies}, matches, nil
+			return &pluginCatalogVersion{ID: strconv.FormatInt(v.ID, 10), ProjectID: strconv.FormatInt(v.ProjectID, 10), Files: hangarCatalogFiles(v, platform, projects), Number: v.Name, Type: v.Channel.Name, Published: v.CreatedAt, GameVersions: paper, Loaders: []string{"paper"}, Dependencies: dependencies}, matches, nil
 		}
 		if len(versions.Result) == 0 || offset+len(versions.Result) >= *versions.Pagination.Count {
 			return nil, false, nil
@@ -881,12 +889,16 @@ func selectHangarVersion(ctx context.Context, projectID int64, server pluginServ
 	return nil, false, nil
 }
 func discoverHangarPlugins(ctx context.Context, server pluginServerContext, q pluginDiscoverQuery) (pluginCatalogPage, error) {
+	platform, err := hangarPluginPlatform(server.ServerType)
+	if err != nil {
+		return pluginCatalogPage{}, err
+	}
 	offset, limit := q.Cursor.HangarOffset, q.Limit
 	out := pluginCatalogPage{Projects: []pluginCatalogProject{}, Offset: offset, End: offset, NextOffset: -1}
 	cursor, scanned := offset, 0
 	for len(out.Projects) < limit && scanned < 3*limit && cursor <= 10000 {
 		batchLimit := min(limit, 3*limit-scanned)
-		query := url.Values{"q": {q.Search}, "platform": {"PAPER"}, "offset": {strconv.Itoa(cursor)}, "limit": {strconv.Itoa(batchLimit)}, "sort": {"downloads"}}
+		query := url.Values{"q": {q.Search}, "platform": {platform}, "offset": {strconv.Itoa(cursor)}, "limit": {strconv.Itoa(batchLimit)}, "sort": {"downloads"}}
 		var search struct {
 			Pagination hangarPagination `json:"pagination"`
 			Result     []hangarProject  `json:"result"`
@@ -913,14 +925,17 @@ func discoverHangarPlugins(ctx context.Context, server pluginServerContext, q pl
 			if hit.ID <= 0 || len(hit.Name) == 0 || len(hit.Name) > 256 || len(hit.Description) > 4096 || len(hit.Namespace.Slug) > 128 {
 				continue
 			}
-			version, matches, err := selectHangarVersion(ctx, hit.ID, server, q.Compatible, q.Release)
+			version, matches, err := selectHangarVersion(ctx, hit.ID, server, q.Compatible, q.Release, hit)
 			if err != nil {
 				return out, err
 			}
 			if version == nil {
 				continue
 			}
-			project := pluginCatalogProject{ID: strconv.FormatInt(hit.ID, 10), Slug: hit.Namespace.Slug, Name: hit.Name, Description: hit.Description, Source: "Hangar", Version: version, Compatible: matches, Versions: version.GameVersions, InstallAvailable: false, Compatibility: "Compatibility unknown"}
+			project := pluginCatalogProject{ID: strconv.FormatInt(hit.ID, 10), Slug: hit.Namespace.Slug, Name: hit.Name, Description: hit.Description, Source: "Hangar", Version: version, Compatible: matches, Versions: version.GameVersions, InstallAvailable: matches && len(version.Files) == 1, Compatibility: "Compatibility unknown"}
+			if _, err := hangarAvatarURL(hit.AvatarURL); err == nil {
+				project.IconURL = hit.AvatarURL
+			}
 			if matches {
 				project.Compatibility = "Compatible according to publisher metadata"
 			} else if server.MinecraftVersion != "" {
@@ -963,7 +978,8 @@ func (s *server) adminPluginIcon(w http.ResponseWriter, r *http.Request) {
 	}
 	query, err := url.ParseQuery(r.URL.RawQuery)
 	projectID := query.Get("project_id")
-	if err != nil || len(query) > 2 || len(query["project_id"]) != 1 || (len(query) == 2 && len(query["icon_url"]) != 1) || len(query["icon_url"]) > 1 || !modrinthPluginID.MatchString(projectID) {
+	source := pluginSource(query.Get("source"))
+	if err != nil || !validPluginIconQuery(query) {
 		http.Error(w, "Invalid plugin icon request.", http.StatusBadRequest)
 		return
 	}
@@ -971,7 +987,18 @@ func (s *server) adminPluginIcon(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	rawIcon, supplied := query["icon_url"]
 	var icon *url.URL
-	if supplied {
+	if source == "Hangar" {
+		var project hangarProject
+		if err := hangarPluginJSON(ctx, "/projects/"+projectID, nil, &project); err != nil || strconv.FormatInt(project.ID, 10) != projectID {
+			http.Error(w, "Plugin icon unavailable.", 502)
+			return
+		}
+		icon, err = hangarAvatarURL(project.AvatarURL)
+		if err != nil {
+			http.Error(w, "Plugin icon unavailable.", 502)
+			return
+		}
+	} else if supplied {
 		icon, err = pluginIconURL(rawIcon[0], projectID)
 		if err != nil {
 			http.Error(w, "Invalid plugin icon request.", http.StatusBadRequest)
@@ -1134,6 +1161,7 @@ func managedPluginInventoryItem(path string, e pluginManifestEntry) installedPlu
 	}
 	item.Management = "plugins"
 	item.State = state
+	item.Source = pluginSource(e.Source)
 	item.ProjectID = e.ProjectID
 	item.VersionID = e.VersionID
 	item.Version = e.VersionNumber

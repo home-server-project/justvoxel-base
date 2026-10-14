@@ -14,14 +14,14 @@ same grid. With both OFF, Discover makes no upstream catalog request and shows
 “Enable Modrinth or Hangar to browse plugins.” Source changes reset pagination.
 The toolbar may wrap in a genuinely narrow workspace.
 
-Hangar discovery and information are read only: cards open the normal information
-overlay, with publisher Paper compatibility and native channel wording, but no
-Install action. Modrinth remains the only install source. Source identities stay
-explicit; similarly named projects from different catalogs are separate records.
-Hangar cards and overlays use initials, never the Modrinth icon lookup or a
-browser-direct Hangar image. All catalog reads pass through the same-origin WebUI,
-then the Management Agent Unix API, then fixed HTTPS APIs; the browser never
-contacts an upstream catalog directly. Passive information footer Close actions
+Modrinth and Hangar share the information/install overlay. Hangar retains native
+Channel terminology; Modrinth uses Release type. Install appears only when the
+Agent proves compatibility and complete direct download metadata for the selected
+release. Source identities stay explicit: similarly named projects from different
+catalogs are separate records. All catalog and icon reads pass through the
+same-origin WebUI, the Management Agent Unix API and fixed HTTPS sources; the
+browser never contacts an upstream catalog or image server directly. Icons use
+initials when metadata, validation or retrieval fails. Passive information footer Close actions
 reuse the existing green Plugins Done styling.
 
 Plugin results use compact cards of uniform height, with a fixed-size logo,
@@ -42,10 +42,10 @@ Installed information has separate sections for JAR,
 Metadata, Management and Update status. Installed cards show ownership
 and a compact status; updates remain unavailable.
 Discover uses three columns in wide windows, two in medium windows and one in
-narrow windows. Buttons stay distinct from badges. Authoritative Modrinth project
-IDs use real publisher logos through the Administrator-only same-origin
-`GET /api/plugins/workspace/icon?project_id=<id>` route and the Agent's
-`GET /v1/admin/plugins/icon?project_id=<id>` route. Discover first passes a validated
+narrow windows. Buttons stay distinct from badges. Authoritative provider/project
+identities use real publisher logos through the Administrator-only same-origin
+`GET /api/plugins/workspace/icon?source=<Modrinth|Hangar>&project_id=<id>` route and the Agent's
+`GET /v1/admin/plugins/icon?source=<Modrinth|Hangar>&project_id=<id>` route. Modrinth Discover first passes a validated
 search `icon_url` with `project_id` to the
 same-origin proxy. If that image fails, it retries exactly once using only
 `project_id`, allowing the Agent to look up fresh project metadata. Missing search
@@ -70,6 +70,13 @@ conversion. Browsers never receive raw SVG, SVGZ or RGB. Source and final image
 bytes are limited to 512 KiB, with no redirects or persistent image cache. This
 improves compatibility with Modrinth CDN transforms while preserving the
 same-origin proxy and security boundary.
+Hangar icon requests send `source=Hangar` and the numeric project ID only. The
+Agent re-fetches official project metadata and takes `avatarUrl` from that exact
+project. Only HTTPS `hangarcdn.papermc.io/avatars/project/` paths with a bounded
+positive numeric project filename and PNG/JPEG/BMP/GIF/WebP extensions are approved.
+The optional `v` query must be a single bounded decimal version. No caller URL is
+accepted, redirects are rejected, and the same 512 KiB byte/signature bounds apply.
+Hangar SVG/source conversions are not supported. Modrinth icon behavior is unchanged.
 Information and installation reuse the card identity tile.
 On hover-capable pointers, the existing green card frame/background follows the
 pointer. Cards begin unselected; selection can remain while their overlay is
@@ -113,7 +120,15 @@ and font size `.86rem`. Header Refresh/Close and normal actions retain their
 shared workspace button styling. Source/filter switches remain switches;
 whole-card article selections retain their card geometry.
 
-Paper and Purpur support plugins. Vanilla displays an unsupported state.
+The selected `pluginContext()` / `pluginServerContext` is authoritative for both
+providers: ServerType, ServerSoftware and MinecraftVersion. Today Paper and Purpur
+are supported; the workspace displays that same context, including Purpur identity.
+Neither provider parses visible header text. Modrinth maps Paper to
+paper/spigot/bukkit and Purpur to purpur/paper/spigot/bukkit. Hangar maps both to
+PAPER only at its provider boundary, because Hangar exposes PAPER for these
+compatible servers and no distinct PURPUR platform. Future server types require an
+explicit provider mapping and otherwise fail closed. The future instance/server
+selector will supply this same authoritative context. Vanilla is unsupported.
 The workspace reuses appliance configuration discovery and runtime status for
 server software, Minecraft version and the configured data location.
 
@@ -124,7 +139,8 @@ provider's order and carrying the next turn across pages, including capacity 1.
 Unconsumed hits are revisited, never skipped to the end of a fetched batch.
 `total` is the sum of enabled providers' raw totals (`total_hits` for Modrinth,
 `pagination.count` for Hangar), not a count of eligible projects. The UI shows
-**Page X**, **Previous**, **Next** without fabricating an eligible page count.
+**Page X of Y**, **Previous**, **Next**, with Y calculated from that raw catalog
+total and the current page capacity rather than an eligible-result count.
 
 The bounded Discover query accepts `q` (up to 200 bytes), `compatible_only`,
 `release_only`, `modrinth`, `hangar`, `hangar_first` (literal `true`/`false`),
@@ -148,9 +164,10 @@ and, when compatible-only, `platformVersion=<active-version>`. It inspects up to
 membership determines publisher compatibility; other platforms never qualify.
 Release only requires an explicit channel flags list without `UNSTABLE` or unknown
 flags. Native channel names are displayed; no release/beta/alpha equivalence is
-claimed. Missing stability evidence fails the release filter. Download URLs and
-avatars are not decoded or returned. Paper dependency names and required/optional
-flags are information only and never enter the install planner. Hangar uses the existing no-redirect,
+claimed. Missing stability evidence fails the release filter. Direct download file metadata controls install availability. Required internal
+Hangar project dependencies enter its narrow planner; optional dependencies are
+displayed only. External downloads and external-only required dependencies are not
+followed. Numeric project/release IDs remain separate from Modrinth identities. Hangar uses the existing no-redirect,
 bounded-timeout client with a 2 MiB JSON body cap and needs no API key.
 
 Compatibility means **Compatible according to publisher metadata**, never verified
@@ -184,13 +201,15 @@ There are no mutation endpoints in this cycle.
 
 ## Stage 2 — third-party installation
 
-Stage 2 permits installation of compatible third-party Modrinth releases
+Managed installation permits compatible third-party Modrinth and Hangar releases
 on Paper and Purpur when the current Minecraft version is known and publisher
 file metadata is complete. Clicking an installable Discover card fetches the
 authoritative plan and opens a single-column combined information/install
 overlay. Turning off Compatible only or Release only still permits browsing;
-incompatible, beta, alpha and JustVoxel-managed selections have read-only
-information overlays with no generic Install action.
+incompatible and JustVoxel-managed selections have read-only
+information overlays with no generic Install action. Modrinth beta/alpha releases
+remain read only; Hangar keeps native channels and requires exact compatible
+direct artifact metadata for installation.
 
 The combined overlay shows About this version, Compatibility, Dependencies,
 Files to install, Installation and Restart as normal restrained information
@@ -205,7 +224,7 @@ top-right of the identity header; read-only information has no Install button.
 This source implementation still requires human real-VM visual acceptance.
 
 Installation uses an authoritative Management Agent plan. The browser supplies
-only Modrinth project/version IDs; it cannot choose download URLs, filenames,
+an explicit canonical source (`Modrinth` or `Hangar`) and exact project/version IDs; it cannot choose download URLs, filenames,
 hashes, paths or dependency lists. Review shows the selected release, publisher
 compatibility, active server/Minecraft version, required dependencies, exact
 files and sizes, and the configured `<DataPath>/plugins` location. Publisher
@@ -226,16 +245,38 @@ filename-only requirements and unresolved identities block installation. Bounds
 are six dependency levels, sixteen artifacts, 128 MiB per JAR and 256 MiB combined.
 
 A deterministic SHA-256 fingerprint binds server type, Minecraft version, data
-path, selected files, exact SHA-512 hashes and authoritative CDN identities, plus
+path, provider, selected files, authoritative provider hashes/download identities, plus
 dependency relationships. Apply re-resolves the plan and requires that exact
 fingerprint. Player snapshots are excluded from the fingerprint and checked
 separately. Artifact URLs and private transaction evidence are never returned to
 the browser. Modrinth's catalog API remains fixed HTTPS; Hangar's catalog API is
-fixed at `hangar.papermc.io` through the Management Agent. `cdn.modrinth.com`
-remains the only supported remote icon source. Hangar images are not proxied or
-fetched by the browser. Hangar remains discovery/information only; Modrinth
-remains the only install source. Redirects are rejected, and response sizes and
+fixed at `hangar.papermc.io` through the Management Agent. Modrinth icons remain on `cdn.modrinth.com`; Hangar icons use the approved project
+avatar source described above. Redirects are rejected, and response sizes and
 timeouts are bounded.
+
+Hangar installation re-fetches exact project and version metadata under
+`https://hangar.papermc.io/api/v1`, verifies bounded positive decimal numeric IDs,
+and requires the selected Minecraft version in the mapped platform's
+`platformDependencies`. Exact releases are re-fetched by numeric ID; dependencies use bounded compatible
+release metadata and then exact numeric release lookups. Direct
+`downloads.PAPER.fileInfo` supplies the safe filename, exact size and SHA-256.
+The Agent constructs the fixed HTTPS `hangarcdn.papermc.io/plugins/` endpoint from
+the trusted project namespace, release name, mapped platform and filename, and
+requires `downloadUrl` to match exactly. The API download route redirects to this
+CDN, so the Agent requests the validated CDN endpoint directly. ExternalUrl-only
+releases are rejected. Redirects are never followed. Download
+before downtime verifies the exact size and upstream SHA-256 while calculating
+SHA-512 locally. That local SHA-512 is the ownership/runtime evidence. Staged JAR
+inspection, player checks, durable evidence, verified cold backup, atomic placement,
+Minecraft start, stack/startup verification, original stopped-state restoration and
+rollback are the existing shared installer flow.
+
+Required Hangar dependencies with an internal numeric project ID resolve through
+Hangar using the same selected server type and Minecraft version. Required
+external-only dependencies block review with an explanation; optional dependencies
+are displayed without automatic installation. Provider identity participates in
+parents and duplicate/reuse checks. Cycle, depth, artifact-count, combined-download
+and filename-collision limits are preserved.
 
 Before returning an install review, the Agent downloads only the exact selected
 root artifact into private temporary staging, using the existing bounded CDN,
@@ -329,11 +370,20 @@ to stopped **before** ownership commit; completion reports the actual final stat
 
 After runtime/plugin verification and restoration of the original service state,
 the Agent atomically commits `<DataPath>/.justvoxel/plugins.json`. This explicit
-`v1` manifest records Modrinth project/version, filename, SHA-512, parsed plugin
+`v1` manifest records provider project/version, filename, SHA-512, parsed plugin
 name/main class, requested/dependency status and relationships. The directory and
 manifest cannot be symlinks; unsafe/malformed evidence blocks installation.
 Writes are private, atomic and fsynced. The existing full cold backup naturally
 includes the manifest with Minecraft data; backup code is unchanged.
+
+Ownership is `(Source, ProjectID)`, not project ID alone. The optional `source`
+field uses canonical `Modrinth` or `Hangar`. Existing v1 entries without source
+mean Modrinth in memory and are not rewritten or migrated by reads or inventory.
+New entries explicitly store their source. Hangar project/release IDs are bounded
+positive decimal identities; Modrinth keeps its existing ID rules. Legacy bare
+`required_by` parents mean Modrinth, and Hangar parents use `Hangar:<project-id>`.
+Install reuse, lifecycle actions/recovery, manifest commits, transaction evidence,
+and preserved-data Reset Minecraft cleanup use these provider-aware identities.
 
 Installed distinguishes **JustVoxel managed**, **Managed by Plugins**, and
 **Manual / unmanaged**. Generic ownership is trusted only for a valid manifest
@@ -397,7 +447,7 @@ View in Installed closes the overlay and selects Installed; Done closes it and
 refreshes the current workspace state. Failure reports restored prior state
 or administrator attention; it never displays fake success. Terminal results use
 the existing audit event mechanism with `plugin_install` and the requested
-Modrinth project as target; failed/rolled-back installs are not successes.
+selected project ID as target; failed/rolled-back installs are not successes.
 
 Administrator-only WebUI routes are
 `POST /api/plugins/workspace/install/plan`,
@@ -409,7 +459,7 @@ mirrors `POST /v1/admin/plugins/install/plan`,
 `POST /v1/admin/plugins/install`,
 `POST /v1/admin/plugins/install/acknowledge` (JSON `operation_id` only), and
 `GET /v1/admin/plugins/install-operation`; polling by ID reuses generic AdminOperation.
-Only the privileged Management Agent accesses Modrinth, artifacts or the filesystem.
+Only the privileged Management Agent accesses provider APIs, artifacts or the filesystem.
 
 Stage 2 adds no plugin update/removal, user batching, other marketplaces, Version
 Workspace integration, or multi-instance support. It makes **no SELinux policy,
@@ -426,7 +476,7 @@ action; disabled entries show **Disabled** and one yellow **Enable** action.
 Both offer red **Remove**. Disabled is a normal state. Manual/unmanaged plugins
 and JustVoxel-managed Geyser, Floodgate and ViaVersion stay read only.
 
-The existing `<DataPath>/.justvoxel/plugins.json` **v1 schema is unchanged**.
+The existing `<DataPath>/.justvoxel/plugins.json` **v1 schema remains backward compatible**.
 Enabled/disabled state is never persisted in that JSON: an enabled JAR is in
 `<DataPath>/plugins/<filename>`, and a disabled JAR is in the root-private,
 mode-0700 `<DataPath>/.justvoxel/disabled-plugins/<filename>` directory. Both

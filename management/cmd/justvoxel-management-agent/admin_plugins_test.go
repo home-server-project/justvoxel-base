@@ -1227,7 +1227,7 @@ func TestHangarPaperCompatibilityAndNativeChannel(t *testing.T) {
 				body, _ := json.Marshal(map[string]any{"pagination": map[string]int{"count": len(tc.versions), "offset": 0, "limit": 25}, "result": tc.versions})
 				return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(body))}, nil
 			})}
-			got, matches, err := selectHangarVersion(context.Background(), id, pluginServerContext{MinecraftVersion: "1.21.8"}, tc.compatible, tc.release)
+			got, matches, err := selectHangarVersion(context.Background(), id, pluginServerContext{ServerType: "paper", MinecraftVersion: "1.21.8"}, tc.compatible, tc.release)
 			if err != nil || matches != tc.matches || (tc.want == "") != (got == nil) {
 				t.Fatalf("%+v %v %v", got, matches, err)
 			}
@@ -1430,7 +1430,7 @@ func TestHangarVersionInspectionBoundedAndValidation(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{"pagination": map[string]int{"count": 1000, "offset": offset, "limit": 25}, "result": versions})
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(body))}, nil
 	})}
-	v, _, err := selectHangarVersion(context.Background(), 1, pluginServerContext{MinecraftVersion: "1.21.8"}, true, true)
+	v, _, err := selectHangarVersion(context.Background(), 1, pluginServerContext{ServerType: "paper", MinecraftVersion: "1.21.8"}, true, true)
 	if v != nil || err != nil || calls != 3 {
 		t.Fatal("unbounded version scan", v, err, calls)
 	}
@@ -1438,7 +1438,7 @@ func TestHangarVersionInspectionBoundedAndValidation(t *testing.T) {
 		pluginCatalogClient = &http.Client{Transport: pluginTestTransport(func(*http.Request) (*http.Response, error) {
 			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
 		})}
-		if _, _, err := selectHangarVersion(context.Background(), 1, pluginServerContext{MinecraftVersion: "1.21.8"}, true, true); err == nil {
+		if _, _, err := selectHangarVersion(context.Background(), 1, pluginServerContext{ServerType: "paper", MinecraftVersion: "1.21.8"}, true, true); err == nil {
 			t.Fatal("unvalidated versions", body)
 		}
 	}

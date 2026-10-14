@@ -34,10 +34,10 @@ func TestPluginManageExplicitClientContracts(t *testing.T) {
 				}
 				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(payload)), Header: make(http.Header)}, nil
 			})}}
-			if _, err := client.AdminPluginManagePlan(context.Background(), "session", PluginManageRequest{action, "root"}); err != nil {
+			if _, err := client.AdminPluginManagePlan(context.Background(), "session", PluginManageRequest{Action: action, ProjectID: "root"}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := client.AdminPluginManage(context.Background(), "session", PluginManageApplyRequest{action, "root", resetTestFingerprint, true}); err != nil {
+			if _, err := client.AdminPluginManage(context.Background(), "session", PluginManageApplyRequest{Action: action, ProjectID: "root", PlanFingerprint: resetTestFingerprint, ConfirmPlayers: true}); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := client.AdminPluginManageAcknowledge(context.Background(), "session", PluginInstallAcknowledgeRequest{resetTestOperationID}); err != nil {
@@ -54,7 +54,7 @@ func TestPluginManageExplicitClientContracts(t *testing.T) {
 }
 func TestPluginManageRejectsArbitraryActionsAndInvalidIdentity(t *testing.T) {
 	client := &Client{http: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) { t.Fatal("invalid request reached Agent"); return nil, nil })}}
-	for _, req := range []PluginManageRequest{{"update", "root"}, {"delete", "root"}, {"enable", "../root"}, {"disable", ""}} {
+	for _, req := range []PluginManageRequest{{Action: "update", ProjectID: "root"}, {Action: "delete", ProjectID: "root"}, {Action: "enable", ProjectID: "../root"}, {Action: "disable"}} {
 		if _, err := client.AdminPluginManagePlan(context.Background(), "session", req); err == nil {
 			t.Fatal("invalid request accepted", req)
 		}

@@ -674,7 +674,7 @@ func (s *server) readResetPluginTransaction(id string) (*minecraftResetPluginTra
 	} else if json.Unmarshal(tx.Plugins.Manifest, &manifest) != nil {
 		return nil, errors.New("Invalid original reset ownership")
 	}
-	if manifest.SchemaVersion != "v1" || len(manifest.Artifacts) != len(tx.Plugins.Entries) {
+	if validatePluginManifest(manifest) != nil || len(manifest.Artifacts) != len(tx.Plugins.Entries) {
 		return nil, errors.New("Incomplete reset plugin evidence")
 	}
 	for _, e := range tx.Plugins.Entries {

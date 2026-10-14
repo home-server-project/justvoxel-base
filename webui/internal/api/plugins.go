@@ -21,6 +21,7 @@ type PluginServerContext struct {
 	Message          string `json:"message,omitempty"`
 }
 type InstalledPlugin struct {
+	Source         string `json:"source,omitempty"`
 	State          string `json:"state,omitempty"`
 	Name           string `json:"name,omitempty"`
 	Version        string `json:"version,omitempty"`
@@ -37,6 +38,7 @@ type PluginInventory struct {
 	Plugins []InstalledPlugin   `json:"plugins"`
 }
 type PluginDependency struct {
+	Source    string `json:"source,omitempty"`
 	Name      string `json:"name,omitempty"`
 	ProjectID string `json:"project_id,omitempty"`
 	VersionID string `json:"version_id,omitempty"`
@@ -151,16 +153,19 @@ func (c *Client) AdminPluginDiscover(ctx context.Context, session string, query 
 }
 
 type PluginInstallRequest struct {
+	Source    string `json:"source,omitempty"`
 	ProjectID string `json:"project_id"`
 	VersionID string `json:"version_id"`
 }
 type PluginInstallApplyRequest struct {
+	Source          string `json:"source,omitempty"`
 	ProjectID       string `json:"project_id"`
 	VersionID       string `json:"version_id"`
 	PlanFingerprint string `json:"plan_fingerprint"`
 	ConfirmPlayers  bool   `json:"confirm_players"`
 }
 type PluginInstallArtifact struct {
+	Source        string   `json:"source,omitempty"`
 	ProjectID     string   `json:"project_id"`
 	VersionID     string   `json:"version_id"`
 	VersionNumber string   `json:"version_number"`
@@ -172,6 +177,7 @@ type PluginInstallArtifact struct {
 	Satisfied     string   `json:"satisfied,omitempty"`
 }
 type PluginInstallPlan struct {
+	Source               string                  `json:"source,omitempty"`
 	ProjectID            string                  `json:"project_id"`
 	VersionID            string                  `json:"version_id"`
 	Name                 string                  `json:"project_name"`
@@ -228,8 +234,17 @@ type PluginIcon struct {
 }
 
 func (c *Client) AdminPluginIcon(ctx context.Context, session, projectID string, iconURL ...string) (PluginIcon, error) {
+	return c.adminPluginIcon(ctx, session, "Modrinth", projectID, iconURL...)
+}
+func (c *Client) AdminPluginSourceIcon(ctx context.Context, session, source, projectID string) (PluginIcon, error) {
+	return c.adminPluginIcon(ctx, session, source, projectID)
+}
+func (c *Client) adminPluginIcon(ctx context.Context, session, source, projectID string, iconURL ...string) (PluginIcon, error) {
 	var out PluginIcon
-	query := url.Values{"project_id": {projectID}}
+	if !ValidPluginIdentity(source, projectID) || (source == "Hangar" && len(iconURL) > 0) {
+		return out, errors.New("Invalid plugin provider identity")
+	}
+	query := url.Values{"source": {source}, "project_id": {projectID}}
 	if len(iconURL) > 1 {
 		return out, errors.New("Invalid plugin icon request.")
 	}
@@ -273,16 +288,19 @@ func (c *Client) AdminPluginIcon(ctx context.Context, session, projectID string,
 // Explicit lifecycle requests share install's bounded transport and strict Agent
 // decoding. No caller-selected path or JAR filename is accepted.
 type PluginManageRequest struct {
+	Source    string `json:"source,omitempty"`
 	Action    string `json:"action"`
 	ProjectID string `json:"project_id"`
 }
 type PluginManageApplyRequest struct {
+	Source          string `json:"source,omitempty"`
 	Action          string `json:"action"`
 	ProjectID       string `json:"project_id"`
 	PlanFingerprint string `json:"plan_fingerprint"`
 	ConfirmPlayers  bool   `json:"confirm_players"`
 }
 type PluginManagePlan struct {
+	Source               string              `json:"source,omitempty"`
 	Action               string              `json:"action"`
 	ProjectID            string              `json:"project_id"`
 	Name                 string              `json:"project_name"`
@@ -300,7 +318,7 @@ func validPluginManageRequest(action, project string) bool {
 }
 func (c *Client) AdminPluginManagePlan(ctx context.Context, session string, request PluginManageRequest) (PluginManagePlan, error) {
 	var out PluginManagePlan
-	if !validPluginManageRequest(request.Action, request.ProjectID) {
+	if !validPluginManageRequest(request.Action, request.ProjectID) || !ValidPluginIdentity(request.Source, request.ProjectID) {
 		return out, errors.New("Invalid plugin management request")
 	}
 	err := c.pluginPost(ctx, session, "/v1/admin/plugins/manage/plan", request, &out)
@@ -308,7 +326,7 @@ func (c *Client) AdminPluginManagePlan(ctx context.Context, session string, requ
 }
 func (c *Client) AdminPluginManage(ctx context.Context, session string, request PluginManageApplyRequest) (PersistentOperationResponse, error) {
 	var out PersistentOperationResponse
-	if !validPluginManageRequest(request.Action, request.ProjectID) || !adminResetFingerprintPattern.MatchString(request.PlanFingerprint) {
+	if !validPluginManageRequest(request.Action, request.ProjectID) || !ValidPluginIdentity(request.Source, request.ProjectID) || !adminResetFingerprintPattern.MatchString(request.PlanFingerprint) {
 		return out, errors.New("Invalid plugin management request")
 	}
 	err := c.pluginPost(ctx, session, "/v1/admin/plugins/manage", request, &out)
@@ -336,4 +354,27 @@ func validPluginProjectID(project string) bool {
 		}
 	}
 	return true
+}
+
+// Empty source retains the deployed Modrinth request/manifest contract.
+func ValidPluginIdentity(source, id string) bool {
+	if source == "" || source == "Modrinth" {
+		return validPluginProjectID(id)
+	}
+	if source != "Hangar" || len(id) == 0 || len(id) > 19 || id[0] == '0' || strings.Trim(id, "0123456789") != "" {
+		return false
+	}
+	n, err := strconv.ParseInt(id, 10, 64)
+	return err == nil && n > 0
+}
+func ValidatePluginIconQuery(query url.Values) error {
+	for key, values := range query {
+		if (key != "source" && key != "project_id" && key != "icon_url") || len(values) != 1 {
+			return errors.New("Invalid plugin icon request")
+		}
+	}
+	if !ValidPluginIdentity(query.Get("source"), query.Get("project_id")) || (query.Get("source") == "Hangar" && len(query["icon_url"]) != 0) {
+		return errors.New("Invalid plugin icon request")
+	}
+	return nil
 }

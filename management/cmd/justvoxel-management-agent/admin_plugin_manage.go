@@ -29,10 +29,12 @@ type pluginManageAcknowledgeRequest struct {
 	OperationID string `json:"operation_id"`
 }
 type pluginManageRequest struct {
+	Source    string `json:"source,omitempty"`
 	Action    string `json:"action"`
 	ProjectID string `json:"project_id"`
 }
 type pluginManageApplyRequest struct {
+	Source          string `json:"source,omitempty"`
 	Action          string `json:"action"`
 	ProjectID       string `json:"project_id"`
 	PlanFingerprint string `json:"plan_fingerprint"`
@@ -43,6 +45,7 @@ type pluginLocationEvidence struct {
 	State string              `json:"state"`
 }
 type pluginManagePlan struct {
+	Source               string                   `json:"source,omitempty"`
 	Action               string                   `json:"action"`
 	ProjectID            string                   `json:"project_id"`
 	Name                 string                   `json:"project_name"`
@@ -219,9 +222,10 @@ func fingerprintPluginManagePlan(p pluginManagePlan) string {
 	sum := sha256.Sum256(raw)
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
-func resolvePluginManagePlan(ctx context.Context, server pluginServerContext, path, action, project string) (pluginManagePlan, error) {
-	p := pluginManagePlan{Action: action, ProjectID: project, Server: server, DataPath: path, Players: []string{}, Parents: []pluginLocationEvidence{}}
-	if !slices.Contains([]string{"enable", "disable", "remove"}, action) || !modrinthPluginID.MatchString(project) {
+func resolvePluginManagePlan(ctx context.Context, server pluginServerContext, path, action, project string, sources ...string) (pluginManagePlan, error) {
+	source := pluginRequestSource(sources)
+	p := pluginManagePlan{Source: source, Action: action, ProjectID: project, Server: server, DataPath: path, Players: []string{}, Parents: []pluginLocationEvidence{}}
+	if !slices.Contains([]string{"enable", "disable", "remove"}, action) || !validPluginIdentity(source, project) {
 		return p, errors.New("Invalid plugin action or project identity")
 	}
 	if !server.Supported || server.MinecraftVersion == "" {
@@ -244,7 +248,7 @@ func resolvePluginManagePlan(ctx context.Context, server pluginServerContext, pa
 	p.Manifest = raw
 	found := false
 	for _, e := range manifest.Artifacts {
-		if e.ProjectID == project {
+		if pluginIdentity(e.Source, e.ProjectID) == pluginIdentity(source, project) {
 			p.Entry = e
 			found = true
 		}
@@ -263,7 +267,7 @@ func resolvePluginManagePlan(ctx context.Context, server pluginServerContext, pa
 	for _, parent := range p.Entry.RequiredBy {
 		// Orphan relationships may remain after removal of the parent.
 		for _, e := range manifest.Artifacts {
-			if e.ProjectID == parent {
+			if pluginIdentity(e.Source, e.ProjectID) == pluginParentIdentity(parent) {
 				state, eerr := resolveManagedPluginLocation(path, e)
 				if eerr != nil {
 					return p, errors.New("Required managed parent state cannot be safely verified")
@@ -295,13 +299,13 @@ func resolvePluginManagePlan(ctx context.Context, server pluginServerContext, pa
 	p.Fingerprint = fingerprintPluginManagePlan(p)
 	return p, nil
 }
-func (s *server) resolvePluginManage(ctx context.Context, action, project string) (pluginManagePlan, error) {
+func (s *server) resolvePluginManage(ctx context.Context, action, project string, sources ...string) (pluginManagePlan, error) {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost/", nil)
 	server, path, ok := s.pluginContext(&pluginContextSink{header: make(http.Header)}, req)
 	if !ok {
 		return pluginManagePlan{}, errors.New("Authoritative server context unavailable")
 	}
-	return resolvePluginManagePlan(ctx, server, path, action, project)
+	return resolvePluginManagePlan(ctx, server, path, action, project, pluginRequestSource(sources))
 }
 func (s *server) adminPluginManagePlan(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.requireAdministrator(w, r); !ok {
@@ -311,7 +315,7 @@ func (s *server) adminPluginManagePlan(w http.ResponseWriter, r *http.Request) {
 	if !decodePluginInstallJSON(w, r, &req) {
 		return
 	}
-	plan, err := s.resolvePluginManage(r.Context(), req.Action, req.ProjectID)
+	plan, err := s.resolvePluginManage(r.Context(), req.Action, req.ProjectID, req.Source)
 	if err != nil {
 		writeError(w, 409, err.Error())
 		return
@@ -329,7 +333,7 @@ func (s *server) adminPluginManage(w http.ResponseWriter, r *http.Request) {
 	}
 	accepted := false
 	defer func() {
-		if !accepted && s.store != nil && slices.Contains([]string{"enable", "disable", "remove"}, req.Action) && modrinthPluginID.MatchString(req.ProjectID) {
+		if !accepted && s.store != nil && slices.Contains([]string{"enable", "disable", "remove"}, req.Action) && validPluginIdentity(req.Source, req.ProjectID) {
 			_ = s.store.recordAuditEvent(actor, "plugin_"+req.Action, req.ProjectID, false, "Managed plugin lifecycle request rejected")
 		}
 	}()
@@ -337,7 +341,7 @@ func (s *server) adminPluginManage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 503, "Plugin operation tracking is unavailable")
 		return
 	}
-	plan, err := s.resolvePluginManage(r.Context(), req.Action, req.ProjectID)
+	plan, err := s.resolvePluginManage(r.Context(), req.Action, req.ProjectID, req.Source)
 	if err != nil {
 		writeError(w, 409, err.Error())
 		return
@@ -490,7 +494,7 @@ func executePluginManage(ctx context.Context, s *server, id string, p pluginMana
 		return untouched(err)
 	}
 	defer lock.Close()
-	current, err := s.resolvePluginManage(ctx, p.Action, p.ProjectID)
+	current, err := s.resolvePluginManage(ctx, p.Action, p.ProjectID, p.Source)
 	if err != nil || current.Fingerprint != p.Fingerprint {
 		return untouched(errors.New("Plugin plan changed; review again"))
 	}
@@ -818,11 +822,11 @@ func readPluginManageTransaction(store *operationStore, id string) (pluginManage
 	if d.Decode(&tx) != nil || d.Decode(new(any)) != io.EOF || tx.SchemaVersion != "v1" || tx.OperationID != id || !operationFingerprintPattern.MatchString(tx.PlanFingerprint) || !slices.Contains([]string{"enable", "disable", "remove"}, tx.Action) || !slices.Contains([]string{"enabled", "disabled"}, tx.OriginalState) {
 		return tx, errors.New("Invalid transaction evidence")
 	}
-	if tx.Action == "enable" && tx.OriginalState != "disabled" || tx.Action == "disable" && tx.OriginalState != "enabled" || !versionInputPattern.MatchString(tx.MinecraftVersion) || !modrinthPluginID.MatchString(tx.Entry.ProjectID) || !modrinthPluginID.MatchString(tx.Entry.VersionID) {
+	if tx.Action == "enable" && tx.OriginalState != "disabled" || tx.Action == "disable" && tx.OriginalState != "enabled" || !versionInputPattern.MatchString(tx.MinecraftVersion) || !validPluginIdentity(tx.Entry.Source, tx.Entry.ProjectID) || !validPluginIdentity(tx.Entry.Source, tx.Entry.VersionID) {
 		return tx, errors.New("Invalid lifecycle transaction relationship")
 	}
 	var manifest pluginManifest
-	if json.Unmarshal(tx.Manifest, &manifest) != nil || manifest.SchemaVersion != "v1" || !slices.ContainsFunc(manifest.Artifacts, func(e pluginManifestEntry) bool { return reflect.DeepEqual(e, tx.Entry) }) || !safePluginFilename(tx.Entry.Filename) || !pluginHashPattern.MatchString(tx.Entry.SHA512) || !pluginNamePattern.MatchString(tx.Entry.PluginName) || !pluginMainPattern.MatchString(tx.Entry.Main) || managedPluginDescriptor(tx.Entry.Filename, tx.Entry.PluginName, tx.Entry.Main) != "" {
+	if json.Unmarshal(tx.Manifest, &manifest) != nil || validatePluginManifest(manifest) != nil || !slices.ContainsFunc(manifest.Artifacts, func(e pluginManifestEntry) bool { return reflect.DeepEqual(e, tx.Entry) }) || !safePluginFilename(tx.Entry.Filename) || !pluginHashPattern.MatchString(tx.Entry.SHA512) || !pluginNamePattern.MatchString(tx.Entry.PluginName) || !pluginMainPattern.MatchString(tx.Entry.Main) || managedPluginDescriptor(tx.Entry.Filename, tx.Entry.PluginName, tx.Entry.Main) != "" {
 		return tx, errors.New("Invalid original ownership evidence")
 	}
 	return tx, nil
