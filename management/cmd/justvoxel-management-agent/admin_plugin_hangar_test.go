@@ -492,17 +492,21 @@ func TestHangarLifecycleAndPreservedReset(t *testing.T) {
 	}
 }
 func TestHangarIconTrustBoundary(t *testing.T) {
-	for _, kind := range []string{"trusted", "host", "path", "redirect", "oversize", "unsupported", "identity", "caller URL"} {
+	for _, kind := range []string{"trusted", "user", "default", "host", "path", "redirect", "oversize", "unsupported", "identity", "caller URL"} {
 		t.Run(kind, func(t *testing.T) {
 			old := pluginCatalogClient
 			t.Cleanup(func() { pluginCatalogClient = old })
-			avatar := "https://hangarcdn.papermc.io/avatars/project/1.png?v=2"
+			avatar := "https://hangarcdn.papermc.io/avatars/project/1.webp?v=2"
 			status := 200
-			data := pluginIconImage(t, "image/png")
+			data := pluginIconImage(t, "image/webp")
 			count := 0
 			switch kind {
+			case "user":
+				avatar = "https://hangarcdn.papermc.io/avatars/user/123e4567-e89b-12d3-a456-426614174000.webp?v=7"
+			case "default":
+				avatar = "https://hangarcdn.papermc.io/avatars/default/default.webp?v=0"
 			case "host":
-				avatar = "https://evil.example/avatars/project/1.png?v=2"
+				avatar = "https://evil.example/avatars/project/1.webp?v=2"
 			case "path":
 				avatar = "https://hangarcdn.papermc.io/other/icon.png"
 			case "redirect":
@@ -520,6 +524,9 @@ func TestHangarIconTrustBoundary(t *testing.T) {
 					if kind == "identity" {
 						id = 2
 					}
+					if r.URL.Path != "/api/v1/projects/1" {
+						t.Fatal("exact project not re-fetched", r.URL)
+					}
 					raw, _ := json.Marshal(hangarProject{ID: id, AvatarURL: avatar})
 					return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(raw))}, nil
 				}
@@ -536,7 +543,7 @@ func TestHangarIconTrustBoundary(t *testing.T) {
 			}
 			s.adminPluginIcon(rr, surfaceRequest(http.MethodGet, path, ""))
 			want := 502
-			if kind == "trusted" {
+			if kind == "trusted" || kind == "user" || kind == "default" {
 				want = 200
 			}
 			if kind == "caller URL" {
@@ -545,8 +552,14 @@ func TestHangarIconTrustBoundary(t *testing.T) {
 			if rr.Code != want {
 				t.Fatal(rr.Code, rr.Body.String())
 			}
-			if kind == "trusted" && (rr.Header().Get("Content-Type") != "image/png" || !bytes.Equal(rr.Body.Bytes(), data)) {
+			if want == 200 && (rr.Header().Get("Content-Type") != "image/webp" || !bytes.Equal(rr.Body.Bytes(), data)) {
 				t.Fatal("verified raster lost")
+			}
+			if kind == "caller URL" && count != 0 {
+				t.Fatal("caller URL reached upstream", count)
+			}
+			if want == 200 && count != 2 {
+				t.Fatal("metadata and fixed-CDN image not fetched", count)
 			}
 			if kind == "redirect" && count != 2 {
 				t.Fatal("redirect followed")
@@ -718,5 +731,51 @@ func TestHangarManagedDescriptorRemainsReadOnly(t *testing.T) {
 	}
 	if len(f.commands) != 0 || f.backup {
 		t.Fatal("read-only review touched Minecraft")
+	}
+}
+
+func TestHangarAvatarURL(t *testing.T) {
+	const cdn = "https://hangarcdn.papermc.io"
+	for _, path := range []string{
+		"/avatars/project/123.webp?v=4",
+		"/avatars/user/123e4567-e89b-12d3-a456-426614174000.webp?v=7",
+		"/avatars/default/default.webp?v=0",
+	} {
+		if _, err := hangarAvatarURL(cdn + path); err != nil {
+			t.Fatal("official avatar rejected", path, err)
+		}
+	}
+	for _, raw := range []string{
+		cdn + "/avatars/other/123.webp?v=4",
+		cdn + "/other/project/123.webp?v=4",
+		cdn + "/avatars/user/123e4567-e89b-12d3-a456-42661417400.webp?v=7",
+		cdn + "/avatars/user/123E4567-e89b-12d3-a456-426614174000.webp?v=7",
+		cdn + "/avatars/user/123e4567-e89b-12d3-a456-426614174000.webp",
+		cdn + "/avatars/project/0.webp?v=4",
+		cdn + "/avatars/project/-1.webp?v=4",
+		cdn + "/avatars/project/abc.webp?v=4",
+		cdn + "/avatars/project/01.webp?v=4",
+		cdn + "/avatars/project/9223372036854775808.webp?v=4",
+		cdn + "/avatars/default/default.webp?v=1",
+		cdn + "/avatars/default/default.webp?v=00",
+		cdn + "/avatars/default/other.webp?v=0",
+		cdn + "/avatars/project/123.webp?v=4&other=1",
+		cdn + "/avatars/project/123.webp?v=4&v=5",
+		cdn + "/avatars/project/123.webp?v=-1",
+		cdn + "/avatars/project/123.webp?v=12345678901234567890",
+		cdn + "/avatars/project/123.webp?v=",
+		cdn + "/avatars/project/123.webp",
+		cdn + "/avatars/project/123.png?v=4",
+		cdn + "/avatars/project/123.webp?v=4#fragment",
+		cdn + "/avatars/project/123.webp?v=4#",
+		cdn + "/avatars/project/%31%32%33.webp?v=4",
+		"https://user@hangarcdn.papermc.io/avatars/project/123.webp?v=4",
+		"https://hangarcdn.papermc.io:443/avatars/project/123.webp?v=4",
+		"https://evil.example/avatars/project/123.webp?v=4",
+		"http://hangarcdn.papermc.io/avatars/project/123.webp?v=4",
+	} {
+		if _, err := hangarAvatarURL(raw); err == nil {
+			t.Error("unsafe avatar accepted", raw)
+		}
 	}
 }

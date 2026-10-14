@@ -373,16 +373,33 @@ func resolveHangarPluginInstallPlan(ctx context.Context, server pluginServerCont
 }
 
 var hangarAvatarVersion = regexp.MustCompile(`^[0-9]{1,19}$`)
-var hangarAvatarPath = regexp.MustCompile(`^/avatars/project/[1-9][0-9]{0,18}\.(png|jpg|jpeg|bmp|gif|webp)$`)
+var hangarUserAvatarSubject = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 func hangarAvatarURL(raw string) (*url.URL, error) {
 	u, err := url.Parse(raw)
-	if err != nil || len(raw) > 2048 || u.Scheme != "https" || u.Host != "hangarcdn.papermc.io" || u.User != nil || u.ForceQuery || u.RawPath != "" || u.Fragment != "" || strings.Contains(raw, "#") || !hangarAvatarPath.MatchString(u.Path) {
+	if err != nil || len(raw) > 2048 || u.Scheme != "https" || u.Host != "hangarcdn.papermc.io" || u.User != nil || u.ForceQuery || u.RawPath != "" || u.Fragment != "" || strings.Contains(raw, "#") {
 		return nil, errors.New("Invalid Hangar avatar URL")
 	}
 	query, err := url.ParseQuery(u.RawQuery)
-	if err != nil || len(query) > 1 || (len(query) == 1 && (len(query["v"]) != 1 || !hangarAvatarVersion.MatchString(query.Get("v")))) {
+	if err != nil || len(query) != 1 || len(query["v"]) != 1 || !hangarAvatarVersion.MatchString(query.Get("v")) {
 		return nil, errors.New("Invalid Hangar avatar version")
+	}
+	parts := strings.Split(u.Path, "/")
+	if len(parts) != 4 || parts[0] != "" || parts[1] != "avatars" || !strings.HasSuffix(parts[3], ".webp") {
+		return nil, errors.New("Invalid Hangar avatar path")
+	}
+	subject := strings.TrimSuffix(parts[3], ".webp")
+	valid := false
+	switch parts[2] {
+	case "project":
+		valid = validPluginIdentity("Hangar", subject)
+	case "user":
+		valid = hangarUserAvatarSubject.MatchString(subject)
+	case "default":
+		valid = subject == "default" && query.Get("v") == "0"
+	}
+	if !valid {
+		return nil, errors.New("Invalid Hangar avatar subject")
 	}
 	return u, nil
 }

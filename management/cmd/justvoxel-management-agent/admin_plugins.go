@@ -634,7 +634,7 @@ func mergePluginCatalogPages(m, h pluginCatalogPage, cursor pluginCatalogCursor,
 func discoverModrinthPlugins(ctx context.Context, server pluginServerContext, searchText string, compatible, release bool, offset, limit int) (pluginCatalogPage, error) {
 	out := pluginCatalogPage{Projects: []pluginCatalogProject{}, Offset: offset, NextOffset: -1, End: offset}
 	loaders := pluginLoaders(server.ServerType)
-	facets := [][]string{{"project_type:mod"}}
+	facets := [][]string{{"all_project_types:plugin"}}
 	loaderFacets := []string{}
 	if compatible {
 		for _, loader := range loaders {
@@ -645,13 +645,14 @@ func discoverModrinthPlugins(ctx context.Context, server pluginServerContext, se
 		facets = append(facets, []string{"categories:paper", "categories:purpur", "categories:spigot", "categories:bukkit"})
 	}
 	encoded, _ := json.Marshal(facets)
+	inspectionBudget := 8 * limit
 	cursor, scanned := offset, 0
-	for len(out.Projects) < limit && scanned < 3*limit && cursor <= 10000 {
+	for len(out.Projects) < limit && scanned < inspectionBudget && cursor <= 10000 {
 		var search struct {
 			Hits  []pluginCatalogProject `json:"hits"`
 			Total *int                   `json:"total_hits"`
 		}
-		batchLimit := min(limit, 3*limit-scanned)
+		batchLimit := min(limit, inspectionBudget-scanned)
 		if err := modrinthPluginJSON(ctx, "/search", url.Values{"query": {searchText}, "facets": {string(encoded)}, "limit": {strconv.Itoa(batchLimit)}, "offset": {strconv.Itoa(cursor)}}, &search); err != nil {
 			return out, errors.New("Modrinth catalog is unavailable. Try again later.")
 		}
@@ -895,10 +896,15 @@ func discoverHangarPlugins(ctx context.Context, server pluginServerContext, q pl
 	}
 	offset, limit := q.Cursor.HangarOffset, q.Limit
 	out := pluginCatalogPage{Projects: []pluginCatalogProject{}, Offset: offset, End: offset, NextOffset: -1}
+	// Count upstream projects, including rejected metadata and releases.
+	inspectionBudget := 8 * limit
 	cursor, scanned := offset, 0
-	for len(out.Projects) < limit && scanned < 3*limit && cursor <= 10000 {
-		batchLimit := min(limit, 3*limit-scanned)
+	for len(out.Projects) < limit && scanned < inspectionBudget && cursor <= 10000 {
+		batchLimit := min(limit, inspectionBudget-scanned)
 		query := url.Values{"q": {q.Search}, "platform": {platform}, "offset": {strconv.Itoa(cursor)}, "limit": {strconv.Itoa(batchLimit)}, "sort": {"downloads"}}
+		if q.Compatible && server.MinecraftVersion != "" {
+			query.Set("version", server.MinecraftVersion)
+		}
 		var search struct {
 			Pagination hangarPagination `json:"pagination"`
 			Result     []hangarProject  `json:"result"`

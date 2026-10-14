@@ -72,11 +72,15 @@ improves compatibility with Modrinth CDN transforms while preserving the
 same-origin proxy and security boundary.
 Hangar icon requests send `source=Hangar` and the numeric project ID only. The
 Agent re-fetches official project metadata and takes `avatarUrl` from that exact
-project. Only HTTPS `hangarcdn.papermc.io/avatars/project/` paths with a bounded
-positive numeric project filename and PNG/JPEG/BMP/GIF/WebP extensions are approved.
-The optional `v` query must be a single bounded decimal version. No caller URL is
+project. Only HTTPS `hangarcdn.papermc.io` WebP avatar paths are approved: project avatars
+(`/avatars/project/<positive-bounded-decimal-id>.webp`), owner/user fallback avatars
+(`/avatars/user/<canonical-UUID>.webp`), or the Hangar default avatar
+(`/avatars/default/default.webp`). Each requires exactly one bounded decimal `v`
+query value; the default requires exactly `v=0`. No caller URL is
 accepted, redirects are rejected, and the same 512 KiB byte/signature bounds apply.
-Hangar SVG/source conversions are not supported. Modrinth icon behavior is unchanged.
+All three forms remain Agent-proxied fixed-CDN images; initials are the fallback
+only when metadata/image validation or retrieval fails. Hangar SVG/source
+conversions are not supported. Modrinth icon behavior is unchanged.
 Information and installation reuse the card identity tile.
 On hover-capable pointers, the existing green card frame/background follows the
 pointer. Cards begin unselected; selection can remain while their overlay is
@@ -132,8 +136,8 @@ selector will supply this same authoritative context. Vanilla is unsupported.
 The workspace reuses appliance configuration discovery and runtime status for
 server software, Minecraft version and the configured data location.
 
-Discover qualifies provider hits in order, scanning at most three times the
-requested capacity per provider (up to 36 projects each). Partial or empty pages
+Discover qualifies provider hits in order, scanning at most eight times the
+requested capacity per provider (up to 96 projects each). Partial or empty pages
 can retain a Next cursor. Combined pages alternate sources, preserving each
 provider's order and carrying the next turn across pages, including capacity 1.
 Unconsumed hits are revisited, never skipped to the end of a fetched batch.
@@ -156,10 +160,28 @@ current offsets and the current turn.
 
 Live search retains its 250 ms debounce, stale-request cancellation and immediate
 Enter submission. Compatible only and Release only start enabled and apply to
-each enabled provider. Modrinth interpretation remains unchanged. Hangar reads
+each enabled provider. Modrinth discovery uses the fixed HTTPS API
+`https://api.modrinth.com/v2` and the search facet `all_project_types:plugin`.
+Compatible only adds one OR group of the selected JustVoxel server's compatible
+loader facets and the exact `versions:<MinecraftVersion>` facet from the
+authoritative context above. With Compatible only off, the loader OR group covers
+paper/purpur/spigot/bukkit and no active-version facet is sent. Release only selects
+`version_type == release` from project versions; it is a version-level filter,
+so the provider Total remains the raw search candidate count, not an exact
+post-release-filter count. Installability is intentionally narrower than
+discoverability: a compatible release, supported server, valid direct artifact,
+non-JustVoxel-managed project, and all installer safety checks are required.
+Hangar reads
 `GET https://hangar.papermc.io/api/v1/projects` with bounded `q`, `offset`, `limit`
-and `platform=PAPER`, then `/projects/<numeric-id>/versions` with `platform=PAPER`
-and, when compatible-only, `platformVersion=<active-version>`. It inspects up to
+and `platform=PAPER`. Compatible-only project search also sends
+`version=<active-version>` when the authoritative server version is known; it
+omits `version` when Compatible only is off. Exact release inspection remains
+authoritative afterward: `/projects/<numeric-id>/versions` uses `platform=PAPER`
+and, when compatible-only, `platformVersion=<active-version>`. Discovery attempts
+to fill the workspace page while inspecting at most `8 × limit` upstream projects
+per request, stopping when full, exhausted, or at the absolute cursor bound.
+Rejected projects advance the cursor; eligible unconsumed projects remain for the
+next page. Budget exhaustion may return a short page. It inspects up to
 75 versions per project in bounded pages. Exact `platformDependencies.PAPER`
 membership determines publisher compatibility; other platforms never qualify.
 Release only requires an explicit channel flags list without `UNSTABLE` or unknown
@@ -250,8 +272,8 @@ dependency relationships. Apply re-resolves the plan and requires that exact
 fingerprint. Player snapshots are excluded from the fingerprint and checked
 separately. Artifact URLs and private transaction evidence are never returned to
 the browser. Modrinth's catalog API remains fixed HTTPS; Hangar's catalog API is
-fixed at `hangar.papermc.io` through the Management Agent. Modrinth icons remain on `cdn.modrinth.com`; Hangar icons use the approved project
-avatar source described above. Redirects are rejected, and response sizes and
+fixed at `hangar.papermc.io` through the Management Agent. Modrinth icons remain on `cdn.modrinth.com`; Hangar icons use the approved project, user fallback, or default
+avatar sources described above. Redirects are rejected, and response sizes and
 timeouts are bounded.
 
 Hangar installation re-fetches exact project and version metadata under

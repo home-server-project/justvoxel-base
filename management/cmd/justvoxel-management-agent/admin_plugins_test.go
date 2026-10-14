@@ -199,12 +199,12 @@ func TestModrinthPluginDefaultFiltersAndReleaseDependencies(t *testing.T) {
 				t.Fatal("validated catalog limit not forwarded", r.URL)
 			}
 			facets := r.URL.Query().Get("facets")
-			for _, filter := range []string{"versions:1.21.8", "categories:paper", "categories:purpur", "categories:spigot", "categories:bukkit", "project_type:mod"} {
+			for _, filter := range []string{"versions:1.21.8", "categories:paper", "categories:purpur", "categories:spigot", "categories:bukkit", "all_project_types:plugin"} {
 				if !strings.Contains(facets, filter) {
 					t.Fatalf("missing facet %s: %s", filter, facets)
 				}
 			}
-			if strings.Contains(facets, "server_side:") {
+			if strings.Contains(facets, "server_side:") || strings.Contains(facets, "project_type:mod") {
 				t.Fatal("deprecated server-side facets sent")
 			}
 			body = `{"hits":[{"project_id":"abc123","title":"Example","description":"Plugin","icon_url":` + strconv.Quote(searchIcon) + `,"versions":["1.21.8"]}],"total_hits":1}`
@@ -707,7 +707,7 @@ func TestPluginDiscoverBoundedTopUpRawCursor(t *testing.T) {
 				t.Fatal("authoritative total lost")
 			}
 			if exhausted {
-				if inspected != 36 || searches != 3 || len(out.Projects) != 0 || out.NextCursor == nil || out.NextCursor.ModrinthOffset != 36 {
+				if inspected != 96 || searches != 8 || len(out.Projects) != 0 || out.NextCursor == nil || out.NextCursor.ModrinthOffset != 96 {
 					t.Fatalf("unbounded scan: searches=%d inspected=%d out=%+v", searches, inspected, out)
 				}
 			} else {
@@ -1273,7 +1273,7 @@ func TestPluginDiscoverProviderIsolationAndCompositePagination(t *testing.T) {
 			}
 			payload = versions
 		case r.URL.Host == "hangar.papermc.io" && r.URL.Path == "/api/v1/projects":
-			if r.URL.Query().Get("platform") != "PAPER" || r.URL.Query().Get("q") != "same" {
+			if !slices.Equal(r.URL.Query()["platform"], []string{"PAPER"}) || !slices.Equal(r.URL.Query()["version"], []string{"1.21.8"}) || r.URL.Query().Has("platformVersion") || r.URL.Query().Get("q") != "same" {
 				t.Fatal(r.URL)
 			}
 			offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
@@ -1441,5 +1441,254 @@ func TestHangarVersionInspectionBoundedAndValidation(t *testing.T) {
 		if _, _, err := selectHangarVersion(context.Background(), 1, pluginServerContext{ServerType: "paper", MinecraftVersion: "1.21.8"}, true, true); err == nil {
 			t.Fatal("unvalidated versions", body)
 		}
+	}
+}
+
+func TestHangarDiscoveryFillsPageAndBoundsInspection(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		compatible bool
+		game       string
+		rejectAll  bool
+	}{
+		{"compatible", true, "1.21.8", false},
+		{"unfiltered", false, "1.21.8", false},
+		{"unknown version", true, "", true},
+		{"bounded rejection", true, "1.21.8", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			old := pluginCatalogClient
+			t.Cleanup(func() { pluginCatalogClient = old })
+			const limit, total = 12, 200
+			inspected, batches := 0, 0
+			avatars := []string{
+				"https://hangarcdn.papermc.io/avatars/user/123e4567-e89b-12d3-a456-426614174000.webp?v=7",
+				"https://hangarcdn.papermc.io/avatars/default/default.webp?v=0",
+			}
+			pluginCatalogClient = &http.Client{Transport: pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+				if r.URL.Scheme != "https" || r.URL.Host != "hangar.papermc.io" {
+					t.Fatal("unsafe API request", r.URL)
+				}
+				query := r.URL.Query()
+				if !slices.Equal(query["platform"], []string{"PAPER"}) {
+					t.Fatal("platform query", r.URL)
+				}
+				var payload any
+				if r.URL.Path == "/api/v1/projects" {
+					batches++
+					if tc.compatible && tc.game != "" {
+						if !slices.Equal(query["version"], []string{tc.game}) {
+							t.Fatal("project version query", r.URL)
+						}
+					} else if query.Has("version") {
+						t.Fatal("unexpected project version query", r.URL)
+					}
+					if query.Has("platformVersion") {
+						t.Fatal("version-list filter sent to project search", r.URL)
+					}
+					offset, _ := strconv.Atoi(query.Get("offset"))
+					batchLimit, _ := strconv.Atoi(query.Get("limit"))
+					hits := []hangarProject{}
+					for i := offset; i < min(offset+batchLimit, total); i++ {
+						hit := hangarProject{ID: int64(i + 1), Name: "Plugin", AvatarURL: avatars[i%2]}
+						// Some projects fail metadata validation before version inspection.
+						if i >= 10 && i < 36 && i%2 == 0 {
+							hit.Name = ""
+						}
+						hits = append(hits, hit)
+					}
+					payload = map[string]any{"pagination": map[string]int{"count": total, "offset": offset, "limit": batchLimit}, "result": hits}
+				} else if strings.HasSuffix(r.URL.Path, "/versions") {
+					inspected++
+					if query.Has("version") || (tc.compatible && !slices.Equal(query["platformVersion"], []string{tc.game})) || (!tc.compatible && query.Has("platformVersion")) {
+						t.Fatal("version-list compatibility query", r.URL)
+					}
+					id, _ := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/projects/"), "/versions"), 10, 64)
+					v := hangarVersion{ID: id, ProjectID: id, Name: "1", PlatformDependencies: map[string][]string{"PAPER": {"1.21.8"}}}
+					v.Channel.Name, v.Channel.Flags = "Release", []string{}
+					// Only 10 qualify within the old 36-project budget.
+					if tc.rejectAll || (id > 10 && id <= 36) {
+						v.Channel.Flags = []string{"UNSTABLE"}
+					}
+					payload = map[string]any{"pagination": map[string]int{"count": 1, "offset": 0, "limit": 25}, "result": []hangarVersion{v}}
+				} else {
+					t.Fatal("unexpected endpoint", r.URL)
+				}
+				raw, err := json.Marshal(payload)
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(raw))}, err
+			})}
+			server := pluginServerContext{ServerType: "purpur", MinecraftVersion: tc.game}
+			q := pluginDiscoverQuery{Limit: limit, Compatible: tc.compatible, Release: true}
+			first, err := discoverHangarPlugins(context.Background(), server, q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.rejectAll {
+				if len(first.Projects) != 0 || first.End != 8*limit || first.NextOffset != 8*limit || batches != 8 || inspected > 8*limit {
+					t.Fatalf("inspection bound: page=%+v batches=%d inspected=%d", first, batches, inspected)
+				}
+				return
+			}
+			if len(first.Projects) != limit || first.NextOffset != 38 || first.End != 38 || batches != 4 {
+				t.Fatalf("short page or incorrect cursor: %+v batches=%d", first, batches)
+			}
+			want := []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "37", "38"}
+			seen := map[string]bool{}
+			for i, p := range first.Projects {
+				if p.ID != want[i] || p.IconURL != avatars[(first.Positions[i]-1)%2] {
+					t.Fatal("qualifying project/avatar lost", p, first.Positions)
+				}
+				seen[p.ID] = true
+			}
+			q.Cursor.HangarOffset = first.NextOffset
+			second, err := discoverHangarPlugins(context.Background(), server, q)
+			if err != nil || len(second.Projects) != limit || second.NextOffset != 50 {
+				t.Fatal("next page", second, err)
+			}
+			for i, p := range second.Projects {
+				if seen[p.ID] || p.ID != strconv.Itoa(39+i) {
+					t.Fatal("duplicate or skipped eligible project", p)
+				}
+			}
+			q.Cursor.HangarOffset = 0
+			replay, err := discoverHangarPlugins(context.Background(), server, q)
+			if err != nil || !reflect.DeepEqual(first, replay) {
+				t.Fatal("previous cursor replay changed", replay, err)
+			}
+		})
+	}
+}
+
+func TestModrinthDiscoveryExactFacets(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		serverType string
+		compatible bool
+		loaders    []string
+	}{
+		{"Paper compatible", "paper", true, []string{"categories:paper", "categories:spigot", "categories:bukkit"}},
+		{"Purpur compatible", "purpur", true, []string{"categories:purpur", "categories:paper", "categories:spigot", "categories:bukkit"}},
+		{"Paper broad", "paper", false, []string{"categories:paper", "categories:purpur", "categories:spigot", "categories:bukkit"}},
+		{"Purpur broad", "purpur", false, []string{"categories:paper", "categories:purpur", "categories:spigot", "categories:bukkit"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			old := pluginCatalogClient
+			t.Cleanup(func() { pluginCatalogClient = old })
+			calls := 0
+			pluginCatalogClient = &http.Client{Transport: pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+				calls++
+				if r.Method != http.MethodGet || r.URL.Scheme != "https" || r.URL.Host != "api.modrinth.com" || r.URL.Path != "/v2/search" {
+					t.Fatal("API must remain fixed HTTPS v2", r.URL)
+				}
+				want := url.Values{"query": {"Example"}, "limit": {"12"}, "offset": {"0"}}
+				facets := [][]string{{"all_project_types:plugin"}, tc.loaders}
+				if tc.compatible {
+					facets = append(facets, []string{"versions:1.21.8"})
+				}
+				encoded, _ := json.Marshal(facets)
+				want.Set("facets", string(encoded))
+				if !reflect.DeepEqual(r.URL.Query(), want) {
+					t.Fatalf("unexpected query: got %v want %v", r.URL.Query(), want)
+				}
+				for key := range r.Header {
+					lower := strings.ToLower(key)
+					if lower == "authorization" || strings.Contains(lower, "api-key") || strings.Contains(lower, "apikey") {
+						t.Fatal("unexpected authentication", key)
+					}
+				}
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"hits":[],"total_hits":0}`))}, nil
+			})}
+			_, err := discoverModrinthPlugins(context.Background(), pluginServerContext{ServerType: tc.serverType, MinecraftVersion: "1.21.8"}, "Example", tc.compatible, true, 0, 12)
+			if err != nil || calls != 1 {
+				t.Fatal("discovery", calls, err)
+			}
+		})
+	}
+}
+
+func TestModrinthDiscoveryReleasePageFillAndLargeTotal(t *testing.T) {
+	for _, rejectAll := range []bool{false, true} {
+		t.Run(strconv.FormatBool(rejectAll), func(t *testing.T) {
+			old := pluginCatalogClient
+			t.Cleanup(func() { pluginCatalogClient = old })
+			const limit, total = 12, 5200 // Synthetic upstream candidate total.
+			inspected, searches := 0, 0
+			pluginCatalogClient = &http.Client{Transport: pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+				var payload any
+				switch {
+				case r.URL.Path == "/v2/search":
+					searches++
+					offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+					batchLimit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+					hits := []pluginCatalogProject{}
+					for i := offset; i < min(offset+batchLimit, total); i++ {
+						hits = append(hits, pluginCatalogProject{ID: "project" + strconv.Itoa(i+1), Name: "Example"})
+					}
+					payload = map[string]any{"hits": hits, "total_hits": total}
+				case strings.HasPrefix(r.URL.Path, "/v2/project/") && strings.HasSuffix(r.URL.Path, "/version"):
+					inspected++
+					id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v2/project/"), "/version")
+					n, _ := strconv.Atoi(strings.TrimPrefix(id, "project"))
+					v := pluginCatalogVersion{ID: "release" + id, ProjectID: id, Type: "release", Loaders: []string{"paper"}, GameVersions: []string{"1.21.8"}}
+					// Only ten releases occur within the old 3*limit window.
+					if rejectAll || (n > 10 && n <= 36) {
+						v.Type = "beta"
+					}
+					payload = []pluginCatalogVersion{v}
+				default:
+					t.Fatal("unexpected endpoint", r.URL)
+				}
+				raw, err := json.Marshal(payload)
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(raw))}, err
+			})}
+			server := pluginServerContext{ServerType: "paper", MinecraftVersion: "1.21.8", Supported: true}
+			read := func(offset int) pluginCatalogPage {
+				t.Helper()
+				page, err := discoverModrinthPlugins(context.Background(), server, "", true, true, offset, limit)
+				if err != nil || page.Total != total {
+					t.Fatalf("raw provider total lost: %+v err=%v", page, err)
+				}
+				return page
+			}
+			first := read(0)
+			if rejectAll {
+				if len(first.Projects) != 0 || first.End != 8*limit || first.NextOffset != 8*limit || inspected != 8*limit || searches != 8 {
+					t.Fatalf("inspection bound: page=%+v inspected=%d searches=%d", first, inspected, searches)
+				}
+				return
+			}
+			if len(first.Projects) != limit || first.End != 38 || first.NextOffset != 38 || inspected != 38 || searches != 4 {
+				t.Fatalf("page fill/cursor: %+v inspected=%d searches=%d", first, inspected, searches)
+			}
+			wantPositions := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 37, 38}
+			if !slices.Equal(first.Positions, wantPositions) {
+				t.Fatal("rejected candidates did not advance cursor", first.Positions)
+			}
+			for i, p := range first.Projects {
+				if p.ID != "project"+strconv.Itoa(wantPositions[i]) || p.Version == nil || p.Version.Type != "release" {
+					t.Fatal("incorrect release selection", p)
+				}
+				if p.InstallAvailable {
+					t.Fatal("discoverable project without a direct artifact became installable", p)
+				}
+			}
+			// Continue through several local pages, including beyond the old scan budget.
+			offset := first.NextOffset
+			for pageIndex := 0; pageIndex < 5; pageIndex++ {
+				page := read(offset)
+				if len(page.Projects) != limit || page.End != offset+limit || page.NextOffset != offset+limit {
+					t.Fatal("pagination stopped early", page)
+				}
+				for i, p := range page.Projects {
+					if p.ID != "project"+strconv.Itoa(offset+i+1) || page.Positions[i] != offset+i+1 {
+						t.Fatal("duplicate or skipped eligible project", p, page.Positions)
+					}
+				}
+				offset = page.NextOffset
+			}
+			if replay := read(0); !reflect.DeepEqual(first, replay) {
+				t.Fatal("original cursor replay changed", replay)
+			}
+		})
 	}
 }
