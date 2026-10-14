@@ -59,7 +59,7 @@ function fixture({ local = true, bedrock = false } = {}) {
   return { guide, domain, print, summary, java, domainAddresses, switches, cards, classes, events, prints: () => prints };
 }
 
-test('local defaults to selected; preview and printing include exactly the selected methods', () => {
+test('local defaults to selected; print-ready guide includes exactly the selected methods', () => {
   const f = fixture();
   assert.equal(f.domain.disabled, true);
   assert.equal(f.guide.hidden, false);
@@ -109,7 +109,7 @@ test('custom domain immediately updates safe text and authoritative Java port', 
   assert.equal(f.prints(), 1);
 });
 
-test('invalid enabled custom domain blocks preview, print button and browser-menu printing', () => {
+test('invalid enabled custom domain blocks the guide, print button and browser-menu printing', () => {
   const f = fixture();
   f.switches[0].checked = true;
   for (const value of ['', 'https://example.com', 'example.com/path', 'user:password@example.com', '<img src=x onerror=alert(1)>', 'example.com:25565', 'a..com', '-bad.com', 'bad-.com', '192.168.1.2', 'javascript:alert(1)', 'x'.repeat(64) + '.com']) {
@@ -140,6 +140,7 @@ test('print rules hide all editing and unselected cards and block invalid browse
   assert.match(css, /\.connect-page \[hidden\]\{display:none!important\}/);
   const print = css.slice(css.indexOf('@media print'));
   for (const control of ['.connect-controls', '.connect-page button', '.connect-page input', '.connect-page select']) assert.ok(print.includes(control));
+  assert.match(print, /\.connect-page\.connect-print-ready \.connect-guide\{display:block\}/);
   assert.match(print, /\.connect-page:not\(\.connect-print-ready\) \.connect-guide\{display:none!important\}/);
   assert.match(print, /\.connect-page:not\(\.connect-print-ready\) \.connect-print-blocked\{display:block!important\}/);
 });
@@ -150,7 +151,7 @@ test('approved page layout uses shared JustVoxel components and a print-only log
   const app = readFileSync(path.join(__dirname, '../webui/internal/server/static/app.css'), 'utf8');
   const screen = css.slice(0, css.indexOf('@media print'));
   const print = css.slice(css.indexOf('@media print'));
-  for (const absent of ['connect-navigation', '/static/justvoxel-logo.png', 'Minecraft Friends Connection Guide', 'LET’S PLAY TOGETHER', 'Enter your hostname', 'Hostname / domain', 'connect-switch', '{{.Status}}', 'data-connect-message']) {
+  for (const absent of ['connect-navigation', '/static/justvoxel-logo.png', 'Minecraft Friends Connection Guide', 'LET’S PLAY TOGETHER', 'Enter your hostname', 'Hostname / domain', 'connect-switch', '{{.Status}}', 'data-connect-message', 'Save as PDF', 'Preview the guide below']) {
     assert.ok(!template.includes(absent), absent);
   }
   assert.match(template, /class="connect-controls panel"/);
@@ -158,20 +159,42 @@ test('approved page layout uses shared JustVoxel components and a print-only log
   assert.match(template, /class="connect-title-row title-row"><h1 id="connect-title">How to connect<\/h1><select class="connect-server" aria-label="Server">/);
   assert.ok(!template.includes('>Server<'));
   assert.match(template, /<label for="connect-domain">Custom domain<\/label>\s*<input id="connect-domain"[^>]+disabled>\s*<input id="connect-custom" type="checkbox" role="switch"/);
-  assert.ok(template.includes('Hostname only, for example minecraft.example.com. Do not include https:// or a port.'));
-  assert.match(template, /class="connect-actions"><button type="button" data-connect-print disabled>Save as PDF<\/button><\/div>/);
+  assert.ok(template.includes('Hostname only — no https:// or port.'));
+  assert.ok(template.includes('Choose how your friends will join, then save the connection guide to share.'));
+  const lane = template.slice(template.indexOf('<div class="connect-actions connect-domain">'), template.indexOf('<noscript>'));
+  assert.ok(template.indexOf('<div class="connect-methods">') < template.indexOf('<div class="connect-actions connect-domain">'));
+  assert.match(lane, /<label for="connect-domain">Custom domain<\/label>\s*<input id="connect-domain"[^>]+>\s*<input id="connect-custom"[^>]+>/);
+  assert.match(lane, /<button type="button" data-connect-print disabled>Save to PDF<\/button>/);
+  assert.equal((lane.match(/<p[ >]/g) || []).length, 0);
+  const method = template.slice(template.indexOf('{{define "connect-method-control"}}'));
+  assert.match(method, /<div class="connect-method">\s*<label[^>]+>{{.Name}}<\/label>\s*<input[^>]+role="switch"[^>]+>\s*<\/div>/);
+  assert.ok(!/<small|<span/.test(method));
+  const grid = template.slice(template.indexOf('<div class="connect-methods">'), template.indexOf('<div class="connect-actions connect-domain">'));
+  const order = Array.from(grid.matchAll(/eq \.ID "(local|playit|tailscale|netbird)"/g), match => match[1]);
+  assert.deepEqual(order, ['local', 'playit', 'tailscale', 'netbird']);
   assert.match(template, /class="connect-print-logo" src="\/static\/justvoxel-login-logo.png"/);
+  const login = readFileSync(path.join(__dirname, '../webui/internal/server/templates/login.html'), 'utf8');
+  assert.ok(login.includes('src="/static/justvoxel-login-logo.png"'));
+  assert.match(template, /connect-guide-top-row"><img[^>]+><p>{{.ConnectionGuide.Server}}<\/p>/);
+  assert.ok(!template.slice(0, template.indexOf('<article class="connect-guide"')).includes('<img'));
   assert.equal((template.match(/<img /g) || []).length, 1);
   assert.match(template, /<h1>JustVoxel Connection Guide<\/h1>/);
   assert.match(screen, /\.connect-print-logo\{display:none\}/);
   assert.match(screen, /\.connect-guide-top-row\{display:flex;align-items:center;justify-content:space-between;/);
   assert.match(print, /\.connect-print-logo\{display:block;width:145px;height:auto\}/);
   assert.match(screen, /\.connect-title-row\{align-items:center\}/);
-  assert.match(screen, /\.connect-domain\{display:grid;grid-template-columns:auto minmax\(0,1fr\) auto;/);
+  assert.match(screen, /\.connect-actions\{display:grid;grid-template-columns:auto minmax\(0,320px\) auto auto;/);
+  assert.match(screen, /\.connect-domain input\[type=text\]\{width:100%;max-width:320px;/);
+  assert.match(screen, /\.connect-domain small\{grid-column:2;grid-row:2;/);
+  assert.match(screen, /\.connect-guide\{display:none;/);
+  const frame = screen.match(/\.connect-method\{([^}]+)\}/)[1];
+  assert.ok(frame.includes('border:1px solid var(--jv-border)'));
+  assert.ok(frame.includes('background:var(--jv-surface-sunken)'));
+  assert.ok(frame.includes('border-radius:var(--jv-radius)'));
   assert.match(screen, /\.connect-methods\{display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\);/);
   assert.match(screen, /@media\(max-width:640px\)/);
   assert.match(screen, /\.connect-methods,\.connect-cards\{grid-template-columns:1fr\}/);
-  assert.match(screen, /\.connect-actions\{display:flex;justify-content:flex-end;/);
+  assert.match(screen, /\.connect-actions button\{grid-column:4;grid-row:1;white-space:nowrap\}/);
   // Colors are supplied by app.css classes/tokens, and switches have no local painting.
   assert.ok(!/#[a-f0-9]{3,8}\b/i.test(screen));
   assert.ok(!/appearance:|::?before|::?after|connect-switch/.test(css));

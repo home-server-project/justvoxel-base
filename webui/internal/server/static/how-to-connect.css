@@ -10,14 +10,14 @@
 .connect-title-row{align-items:center}.connect-title-row h1{margin:10px 0 16px}
 .connect-server{width:auto;max-width:100%;margin:0;min-width:0}
 .connect-methods{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 24px}
-.connect-method{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 0;min-width:0}
+.connect-method{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px;min-width:0;border:1px solid var(--jv-border);background:var(--jv-surface-sunken);border-radius:var(--jv-radius)}
 .connect-method-label{margin:0;font-weight:700}
-.connect-domain{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px 16px;margin:24px 0 20px}
-.connect-domain label{margin:0;font-weight:700}.connect-domain input[type=text]{margin:0;min-width:0}
-.connect-domain small{grid-column:2;line-height:1.5}
+.connect-actions{display:grid;grid-template-columns:auto minmax(0,320px) auto auto;align-items:center;justify-content:start;gap:4px 16px;margin-top:20px}
+.connect-domain label{margin:0;font-weight:700}.connect-domain input[type=text]{width:100%;max-width:320px;margin:0;min-width:0}
+.connect-domain small{grid-column:2;grid-row:2;line-height:1.5;font-size:.75rem}
 .connect-domain input[aria-invalid="true"]{border-color:var(--jv-error)}
-.connect-actions{display:flex;justify-content:flex-end;margin-top:20px}.connect-actions button{white-space:nowrap}
-.connect-guide{background:var(--jv-surface);color:var(--jv-text);border:1px solid var(--jv-border);border-radius:14px;padding:36px}
+.connect-actions button{grid-column:4;grid-row:1;white-space:nowrap}
+.connect-guide{display:none;background:var(--jv-surface);color:var(--jv-text);border:1px solid var(--jv-border);border-radius:14px;padding:36px}
 .connect-guide-heading{display:block;position:static;z-index:auto;padding:0 0 24px;background:transparent;text-align:center;border-bottom:2px solid var(--jv-border);margin-bottom:28px}
 .connect-guide-top-row{display:flex;align-items:center;justify-content:space-between;gap:20px}.connect-guide-top-row p{margin-left:auto}
 .connect-print-logo{display:none}
@@ -32,14 +32,15 @@
 @media(max-width:640px){
  .connect-shell{padding:20px 14px 40px}.connect-controls,.connect-empty,.connect-guide{padding:20px}
  .connect-title-row{align-items:stretch;flex-direction:column;gap:0}.connect-server{width:100%}
- .connect-methods,.connect-cards{grid-template-columns:1fr}.connect-method{padding:14px 0}
- .connect-domain{grid-template-columns:minmax(0,1fr) auto}.connect-domain label{grid-column:1/-1}.connect-domain small{grid-column:1/-1}
+ .connect-methods,.connect-cards{grid-template-columns:1fr}.connect-method{padding:14px}
+ .connect-actions{grid-template-columns:minmax(0,1fr) auto;gap:8px 16px}.connect-domain label{grid-column:1/-1}.connect-domain input[type=text]{max-width:320px}.connect-domain small{grid-column:1/-1;grid-row:auto}.connect-actions button{grid-column:1/-1;grid-row:4}
 }
 @media print{
  @page{margin:16mm}
  .connect-document{color-scheme:light;background:white!important}
  .connect-page{background:white!important;color:#203329!important;font-size:10pt;min-height:0}
  .connect-controls,.connect-page button,.connect-page input,.connect-page select,.connect-print-blocked{display:none!important}
+ .connect-page.connect-print-ready .connect-guide{display:block}
  .connect-guide{color:#203329}
  .connect-guide-heading{border-color:#c8dece}
  .connect-guide .connect-editions{color:#203329;background:#e0eee2;padding:6px 14px}

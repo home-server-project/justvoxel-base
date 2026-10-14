@@ -17,20 +17,20 @@
 <section class="connect-controls panel" aria-labelledby="connect-title">
   <p class="connect-eyebrow eyebrow">JUSTVOXEL · SHARE THE ADVENTURE</p>
   <div class="connect-title-row title-row"><h1 id="connect-title">How to connect</h1><select class="connect-server" aria-label="Server"><option>{{.ConnectionGuide.Server}}</option></select></div>
-  <p>Choose how your friends will join. Preview the guide below, then save a copy to share.</p>
-  {{range .ConnectionGuide.Methods}}{{if eq .ID "custom"}}
-  <div class="connect-domain">
-    <label for="connect-domain">Custom domain</label>
-    <input id="connect-domain" type="text" autocomplete="off" spellcheck="false" maxlength="253" placeholder="minecraft.example.com" aria-describedby="connect-domain-help" disabled>
-    <input id="connect-custom" type="checkbox" role="switch" aria-label="Include Custom domain" data-connect-method="custom"{{if not .Available}} disabled{{end}}>
-    <small class="muted" id="connect-domain-help">Hostname only, for example minecraft.example.com. Do not include https:// or a port.</small>
-  </div>
-  {{end}}{{end}}
+  <p>Choose how your friends will join, then save the connection guide to share.</p>
   <div class="connect-methods">
     {{range .ConnectionGuide.Methods}}{{if or (eq .ID "local") (eq .ID "playit")}}{{template "connect-method-control" .}}{{end}}{{end}}
     {{range .ConnectionGuide.Methods}}{{if or (eq .ID "tailscale") (eq .ID "netbird")}}{{template "connect-method-control" .}}{{end}}{{end}}
   </div>
-  <div class="connect-actions"><button type="button" data-connect-print disabled>Save as PDF</button></div>
+  <div class="connect-actions connect-domain">
+    {{range .ConnectionGuide.Methods}}{{if eq .ID "custom"}}
+    <label for="connect-domain">Custom domain</label>
+    <input id="connect-domain" type="text" autocomplete="off" spellcheck="false" maxlength="253" placeholder="minecraft.example.com" aria-describedby="connect-domain-help" disabled>
+    <input id="connect-custom" type="checkbox" role="switch" aria-label="Include Custom domain" data-connect-method="custom"{{if not .Available}} disabled{{end}}>
+    {{end}}{{end}}
+    <button type="button" data-connect-print disabled>Save to PDF</button>
+    <small class="muted" id="connect-domain-help">Hostname only — no https:// or port.</small>
+  </div>
   <noscript><p>Enable JavaScript to select connection methods and generate your guide.</p></noscript>
 </section>
 <article class="connect-guide" data-connect-guide hidden>

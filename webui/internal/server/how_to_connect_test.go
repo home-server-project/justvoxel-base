@@ -106,7 +106,7 @@ func TestConnectionGuidePageEditionsAndRoles(t *testing.T) {
 			if response.Code != 200 {
 				t.Fatalf("%s: %d %s", role, response.Code, body)
 			}
-			for _, want := range []string{"JustVoxel Connection Guide", "Paper 1.21.8", "192.0.2.10", "25571", "100.75.0.1", `role="switch"`, `Save as PDF`} {
+			for _, want := range []string{"JustVoxel Connection Guide", "Paper 1.21.8", "192.0.2.10", "25571", "100.75.0.1", `role="switch"`, `Save to PDF`} {
 				if !strings.Contains(body, want) {
 					t.Fatalf("missing %q", want)
 				}
@@ -136,7 +136,7 @@ func TestConnectionGuideUnconfigured(t *testing.T) {
 	if !strings.Contains(body, "Minecraft is not configured yet") {
 		t.Fatal(body)
 	}
-	for _, absent := range []string{"Save as PDF", "data-connect-method", "192.0.2.10", "25571", "JustVoxel Connection Guide"} {
+	for _, absent := range []string{"Save to PDF", "data-connect-method", "192.0.2.10", "25571", "JustVoxel Connection Guide"} {
 		if strings.Contains(body, absent) {
 			t.Fatalf("unconfigured rendered %q", absent)
 		}
@@ -350,12 +350,12 @@ func TestConnectionGuidePlayitRenderedPublicAddresses(t *testing.T) {
 func TestConnectionGuideApprovedVisualContract(t *testing.T) {
 	client := &connectionGuideAPI{fakeAPI: fakeAPI{statusResult: guideFixture()}}
 	body := guidePage(t, client, &http.Cookie{Name: sessionCookie, Value: "session-token"}).Body.String()
-	for _, absent := range []string{"connect-navigation", "/static/justvoxel-logo.png", "Minecraft Friends Connection Guide", "LET’S PLAY TOGETHER", ">Server<", "Enter your hostname", "Hostname / domain", "connect-switch", "data-connect-message", "<small>Available", "<small>Not connected", "<small>Stopped", "<small>Connected"} {
+	for _, absent := range []string{"connect-navigation", "/static/justvoxel-logo.png", "Minecraft Friends Connection Guide", "LET’S PLAY TOGETHER", ">Server<", "Enter your hostname", "Hostname / domain", "connect-switch", "data-connect-message", "<small>Available", "<small>Not connected", "<small>Stopped", "<small>Connected", "Save as PDF", "Preview the guide below"} {
 		if strings.Contains(body, absent) {
 			t.Fatalf("unapproved presentation %q", absent)
 		}
 	}
-	for _, want := range []string{`class="connect-controls panel"`, `class="connect-title-row title-row"`, `class="connect-server" aria-label="Server"`, `class="connect-print-logo" src="/static/justvoxel-login-logo.png"`, "JustVoxel Connection Guide", "Current server — Paper 1.21.8", "Hostname only, for example minecraft.example.com. Do not include https:// or a port."} {
+	for _, want := range []string{`class="connect-controls panel"`, `class="connect-title-row title-row"`, `class="connect-server" aria-label="Server"`, `class="connect-print-logo" src="/static/justvoxel-login-logo.png"`, "JustVoxel Connection Guide", "Current server — Paper 1.21.8", "Choose how your friends will join, then save the connection guide to share.", "Hostname only — no https:// or port."} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("approved presentation missing %q", want)
 		}
@@ -368,7 +368,11 @@ func TestConnectionGuideApprovedVisualContract(t *testing.T) {
 	if controlsStart < 0 {
 		t.Fatal("method grid missing")
 	}
-	controls := body[controlsStart:guideStart]
+	actionsStart := strings.Index(body, `<div class="connect-actions connect-domain">`)
+	if actionsStart <= controlsStart || actionsStart >= guideStart {
+		t.Fatal("bottom action lane must follow the method grid")
+	}
+	controls := body[controlsStart:actionsStart]
 	previous := -1
 	for _, id := range []string{"local", "playit", "tailscale", "netbird"} {
 		position := strings.Index(controls, `data-connect-method="`+id+`"`)
@@ -383,10 +387,23 @@ func TestConnectionGuideApprovedVisualContract(t *testing.T) {
 	label := strings.Index(body, `<label for="connect-domain">Custom domain</label>`)
 	input := strings.Index(body, `id="connect-domain" type="text"`)
 	switchInput := strings.Index(body, `id="connect-custom" type="checkbox" role="switch"`)
-	if label < 0 || input <= label || switchInput <= input || switchInput >= controlsStart {
-		t.Fatal("custom domain row must contain label, input, switch in that order")
+	if label < 0 || input <= label || switchInput <= input || label <= actionsStart || switchInput >= guideStart {
+		t.Fatal("bottom action lane must contain label, input, switch in that order")
 	}
-	if !strings.Contains(body, `<div class="connect-actions"><button type="button" data-connect-print disabled>Save as PDF</button></div>`) {
-		t.Fatal("Save as PDF action must have no adjacent status sentence")
+	actionsEnd := strings.Index(body[actionsStart:guideStart], "</div>")
+	if actionsEnd < 0 {
+		t.Fatal("bottom action lane is not closed")
+	}
+	actionsEnd += actionsStart
+	button := strings.Index(body, `<button type="button" data-connect-print disabled>Save to PDF</button>`)
+	if button <= switchInput || button >= actionsEnd || strings.Contains(body[actionsStart:actionsEnd], "<p") {
+		t.Fatal("Save to PDF must follow the custom switch in the same lane without a status sentence")
+	}
+	login, err := assets.ReadFile("templates/login.html")
+	if err != nil || !strings.Contains(string(login), `src="/static/justvoxel-login-logo.png"`) {
+		t.Fatal("print guide must use the exact login logo")
+	}
+	if !strings.Contains(body, `height="724"><p>Current server — Paper 1.21.8</p></div><h1>JustVoxel Connection Guide</h1>`) {
+		t.Fatal("print header must retain the logo, current server and exact guide title")
 	}
 }
