@@ -1534,8 +1534,6 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 @container(min-width:860px){.plugins-results{grid-template-columns:repeat(3,minmax(0,1fr))}}
 .plugins-result-card>.plugins-card-badges{flex:none;flex-wrap:nowrap;height:24px;min-width:0;overflow:hidden;margin:.15rem 0}.plugins-result-card .plugins-badge{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .plugins-pagination{display:flex;flex:none;min-height:44px;align-items:center;justify-content:flex-end;gap:.6rem;margin-top:auto;font-size:.82rem;width:100%;max-width:1080px;margin-inline:auto}.plugins-pagination button{flex:none;margin:0}
-.plugins-pagination [data-plugins-page]{display:inline-flex;align-items:center;gap:.3em}
-.plugins-pagination [data-plugins-page-input]{box-sizing:content-box;width:var(--plugins-page-width,1ch);min-width:1ch;margin:0;padding:.2rem .3rem;text-align:center;font:inherit}
 @container(max-width:680px){.plugins-search{flex-wrap:wrap}.plugins-search-field{flex-basis:160px}}
 .plugins-workspace-dialog [hidden]{display:none!important}
 @media(max-width:700px){.plugins-workspace-dialog{position:fixed;inset:52px .25rem .25rem .25rem!important;width:auto!important;height:calc(100dvh - 52px - .25rem)!important;min-width:0;min-height:0;max-width:none;max-height:calc(100dvh - 52px - .25rem);resize:none}.plugins-workspace-header{cursor:default;touch-action:auto}}
@@ -1615,3 +1613,29 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 .plugins-install-content button.plugins-remove-action:hover{background:#edc1c6;border-color:#a13945}
 .plugins-install-content button.plugins-done-action{background:#d5eddd;border-color:#479161;color:#235737}
 }
+
+/* Shared Plugins identity and status semantics. */
+.plugins-badge-version{color:#b5ccec;border-color:#344963;background:#203044}
+.plugins-badge-server{color:#d1c2ef;border-color:#51416a;background:#30273f}
+.plugins-badge-minecraft{color:#9eddd5;border-color:#32625c;background:#203b38}
+.plugins-badge-installed{color:#a9dbb5;border-color:#3d6348;background:#243b2a}
+.plugins-badge-enabled{color:#c1e8b1;border-color:#4e6740;background:#2c3d25}
+.plugins-badge-disabled{color:#ead293;border-color:#6a5830;background:#40351f}
+.plugins-badge-attention{color:#f1b5a5;border-color:#7a4940;background:#462c27}
+@media(prefers-color-scheme:light){
+.plugins-badge-version{color:#284f7d;border-color:#b8cde4;background:#edf3fb}
+.plugins-badge-server{color:#63448b;border-color:#cec0e0;background:#f4effa}
+.plugins-badge-minecraft{color:#22645c;border-color:#acd3cb;background:#ecf7f4}
+.plugins-badge-installed{color:#29613b;border-color:#b3d3bb;background:#edf7ef}
+.plugins-badge-enabled{color:#41662f;border-color:#bfd4b3;background:#f2f8ed}
+.plugins-badge-disabled{color:#785a19;border-color:#ddc88e;background:#fcf6e5}
+.plugins-badge-attention{color:#963f2c;border-color:#dfb5a8;background:#fcf0eb}
+}
+.plugins-overlay-identity .plugins-overlay-installed{flex:none;margin-left:auto;padding:.55rem .8rem;font-size:.85rem;font-weight:600;white-space:nowrap}
+
+/* Add-ons contain file controls and managed content lists within Plugins. */
+.plugins-results.plugins-addon-results{grid-auto-rows:auto}
+.plugins-addon-results>.plugins-result-card{height:auto;min-height:var(--plugins-card-height);overflow:visible;cursor:default}
+.plugins-addon-results input[type=file]{display:block;max-width:100%;margin:.3rem 0}
+.plugins-addon-results>.plugins-result-card>.plugins-card-badges{height:auto;flex-wrap:wrap}
+.plugins-addon-results>.plugins-result-card>button{margin-top:.4rem;align-self:flex-start}

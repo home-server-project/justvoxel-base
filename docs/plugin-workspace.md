@@ -3,7 +3,7 @@
 ## Cycle 1 — read-only discovery and inventory
 
 Administrators can open **Control Center → Minecraft → Plugins**. The movable,
-resizable window has only Discover and Installed tabs. The original Cycle 1 capability is read only:
+resizable window has Discover, Installed and Add-ons tabs. The original Cycle 1 capability is read only:
 it cannot install, download, update, remove or hot load plugins, change server
 configuration, or interrupt Minecraft.
 
@@ -32,16 +32,21 @@ with **Managed by Plugins** and **Updates are not available yet**. Install and
 install-plan are suppressed even if the catalog release differs. Manual JARs
 are not matched by name, and JustVoxel-managed projects retain their special treatment.
 
-The page number in **Page [N] of Y** is editable: Enter jumps to a valid page;
-invalid values or leaving the field restore the current number without navigation.
-Navigation follows composite provider cursors, resolving missing intermediate
-cursors without displaying those pages, then freshly fetching the destination.
-Only page cursors are kept temporarily in memory; catalog payloads and cards are
-never cached by this mechanism. Refresh, search changes/submission, source/filter
-changes, authoritative server-context changes, capacity changes and workspace
-close/reopen discard the entire history and return to page 1. Resolution is
-cancelled when the Discover generation changes. If pagination exhausts early,
-navigation stops at the last reachable page without inventing a cursor.
+Pagination displays **Page X of Y** with **Previous** and **Next** navigation
+using authoritative composite Modrinth/Hangar cursors. Next uses the returned
+next cursor; Previous uses an already-known cursor and freshly fetches that page.
+Only cursors are kept temporarily in memory; catalog payloads and cards are never
+cached. Refresh, search changes/submission, source/filter changes, authoritative
+server-context changes, capacity changes and workspace close/reopen clear cursor
+history and return to page 1.
+
+Plugin identity/status badges use restrained semantic colors in dark and light
+mode: blue for version, violet for server software, teal for Minecraft version,
+green for Installed/Enabled, amber for Disabled, and red/orange for Needs attention.
+Every authoritative server software label uses the same server badge treatment.
+Plugins-managed installed projects show a non-clickable green **Installed** status
+in the information overlay's top-right action position, with no Install action.
+Manual/unmanaged plugins and JustVoxel-managed components retain their presentation.
 
 Hangar's exact validated `https://hangarcdn.papermc.io/avatars/default/default.webp?v=0`
 uses the JustVoxel initials tile. The Agent rechecks authoritative metadata and
@@ -579,10 +584,10 @@ Only Modrinth project `99IreA6y` **and** descriptor main class
 `de.bluecolored.bluemap.entities.PaperEntrypoint` together receive the dedicated
 root-artifact review rejection:
 
-> BlueMap addon - separate installation path not supported by the current JustVoxel Plugin installer.
+> BlueMap native add-on belongs in Plugins -> Add-ons -> BlueMap Add-ons. Select its local file there.
 
-This addon is not installed into `/plugins`; BlueMap packs installation is
-outside this cycle. Either identity alone continues through normal strict
+This add-on is not installed into `/plugins`. Administrators select its local JAR
+in Add-ons → BlueMap Add-ons; no automatic provider download or handoff is performed. Either identity alone continues through normal strict
 validation. Names, descriptions and loader tags do not trigger this special
 case. PlayerDataSync has no special rejection, and Purpur compatibility and
 active-plugin verification remain unchanged.
@@ -590,7 +595,8 @@ active-plugin verification remain unchanged.
 ### Plugins diagnostics
 
 **System → Logs → Plugins** lists, reads and downloads the private Agent log for
-`plugin_install`, `plugin_enable`, `plugin_disable` and `plugin_remove`.
+`plugin_install`, `plugin_enable`, `plugin_disable`, `plugin_remove` and
+`plugin_addon_install`.
 `plugins-logs` uses the same private protections as other operation logs.
 Operation journals provide real stage/status history. Failed final startup
 verification adds only a small sanitized excerpt from the bounded final
@@ -619,3 +625,92 @@ completion rather than duplicating or losing JARs. Manual plugins and plugin
 configuration/data folders remain when the data path is preserved. Internal
 reset verifies that manifest/disabled ownership state did not survive deletion.
 Full Factory Reset policy is unchanged.
+
+
+## Managed Add-ons — local content uploads
+
+**Plugins → Add-ons** supports exactly five hosted content kinds. All destinations
+are relative to the configured Minecraft data root and are chosen by the Agent:
+
+| Kind | File | Authoritative destination |
+| --- | --- | --- |
+| PlaceholderAPI expansion | `.jar` | `plugins/PlaceholderAPI/expansions/` |
+| Geyser extension | `.jar` | `plugins/Geyser-Spigot/extensions/` |
+| BlueMap native add-on | `.jar` | `plugins/BlueMap/packs/` |
+| Skript script | `.sk` | `plugins/Skript/scripts/` |
+| WorldEdit schematic | `.schem`, `.schematic` | `plugins/WorldEdit/<saveDir>/` |
+
+An administrator chooses a **local file** and selects **Review / Install** in
+that host's section. There is no Add-ons catalog, arbitrary URL download or
+editable destination. The host must be identified by the existing plugin
+inventory/metadata and have a safe real data directory. Geyser uses the existing
+JustVoxel Geyser-Spigot classification. A directory name alone does not establish
+an installed host. Disabled Plugins-managed hosts are unavailable until enabled.
+Installed host metadata does not claim the host is currently runtime-active.
+
+Review and Install are separate bounded multipart uploads; both send the selected
+file. The browser keeps it only in memory. The unprivileged WebUI checks the
+Administrator role, CSRF cookie/origin and fixed field/type contract, then streams
+to the Agent over the Unix socket without a staging copy. The Agent creates a
+private temporary file, validates and hashes it, and deletes review staging before
+returning. Apply creates a fresh upload, repeats all validation and environment
+checks, and compares the fingerprint. Filename, SHA-512, size, authoritative
+relative target, host identity/hash/status, safe parent identity, WorldEdit saveDir,
+server context and current ownership evidence are bound to the plan. Player
+confirmation uses the existing live player checks rather than freezing player
+counts in the fingerprint. Uploads are limited to 128 MiB plus bounded multipart
+framing; scripts are limited to 4 MiB and descriptors to 32 KiB.
+
+JARs require a bounded structurally valid ZIP with readable entries. PlaceholderAPI
+expansions require normal class content and reject root plugin or other hosted
+runtime descriptors. This is a **format check**, not static proof of a
+PlaceholderExpansion implementation; PlaceholderAPI performs runtime loading.
+Geyser requires root `extension.yml` with plausible non-empty `id`, `name`, `main`,
+`api` and `version`. BlueMap requires root `bluemap.addon.json` with non-empty `id`
+and `entrypoint`. Skript scripts must be non-empty UTF-8 without NUL bytes; no
+Skript parser is implemented. Schematics must have a supported extension and be
+bounded and non-empty; validation does not claim full clipboard format parsing.
+Host software performs its own parsing/loading.
+
+Ownership is separate from Plugins JAR ownership:
+`<DataPath>/.justvoxel/plugin-addons.json`, schema **v1**, records only kind,
+filename, target relative path, SHA-512 and available display/descriptor identity.
+It never stores an absolute data path. Inventory verifies each exact owned file
+and hash. Missing or changed owned content shows **Needs attention** and cannot
+be silently reinstalled. Manual files are never adopted. Existing targets fail
+closed, including already-owned files; overwrite, updates and removal are not
+available in this version. Cards show filename/type, Installed, Managed by Add-ons,
+the destination and **Updates are not available yet**.
+
+Executable expansions, extensions, native add-ons and scripts share the existing
+maintenance exclusion and runtime lock. They recheck players and confirmation,
+persist synced transaction evidence, take the existing verified cold backup with
+`--leave-stopped`, atomically publish without replacement using Minecraft data
+ownership/mode, restart Minecraft and verify health. Originally stopped Minecraft
+is temporarily started for verification and returned to stopped. Success proves
+the exact file was installed and Minecraft returned healthy; it does not claim
+that the hosted add-on itself loaded. Failures remove only the exact new
+transaction-owned inode/hash and restore the original service state. Durable
+journal/log evidence remains available, including across Agent restart.
+**Retry recovery** uses that evidence; uncertain state retains maintenance
+exclusion and never deletes unknown content.
+
+WorldEdit schematics share the operation gate and atomic non-overwriting placement,
+but require **no restart, no player confirmation and no cold backup** solely for
+this additive passive content. Final placement verifies the exact hash; rollback
+removes only the newly created exact file and does not change Minecraft's state.
+
+WorldEdit reads only the root `saveDir` scalar from
+`plugins/WorldEdit/config.yml`, defaulting to `schematics` when absent. A safe
+custom relative value such as `custom/schematics` is resolved beneath
+`plugins/WorldEdit`; simple quoted values are accepted. Explicit empty values,
+absolute paths, traversal, control garbage, duplicate settings and unsafe/symlinked
+parents are rejected. The browser never supplies this setting or a target path.
+
+Administrator-only Agent routes are `GET /v1/admin/plugins/addons`,
+`POST /v1/admin/plugins/addons/plan`, `POST /v1/admin/plugins/addons/install` and
+`POST /v1/admin/plugins/addons/recover`. Corresponding WebUI routes live under
+`/api/plugins/workspace/addons`. Uploads use `X-CSRF-Token` with the established
+cookie/origin policy before streaming. Polling reuses the existing Plugins operation
+surface with operation type `plugin_addon_install`. There are no changes to the
+existing Plugins ownership schema, runtime targets or SELinux policy.

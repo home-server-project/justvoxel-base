@@ -5811,13 +5811,12 @@ if (pluginsDialog && pluginsOpen) {
   const pagination = pluginsDialog.querySelector("[data-plugins-pagination]");
   const previous = pluginsDialog.querySelector("[data-plugins-previous]");
   const next = pluginsDialog.querySelector("[data-plugins-next]");
-  const pageInput = pluginsDialog.querySelector("[data-plugins-page-input]");
-  const pageTotal = pluginsDialog.querySelector("[data-plugins-page-total]");
+  const pageLabel = pluginsDialog.querySelector("[data-plugins-page]");
   let totalPages = 1, discoverServerKey = null;
   let pageLimit = 8, capacityTimer = null;
   const firstCursor = () => ({ modrinth_offset: 0, hangar_offset: 0, hangar_first: false });
   let pageCursors = [firstCursor()], pageIndex = 0;
-  const resetCursors = () => { pageCursors = [firstCursor()]; pageIndex = 0; cursor = firstCursor(); nextCursor = null; totalPages = 1; pageInput.value = "1"; pageTotal.textContent = "1"; };
+  const resetCursors = () => { pageCursors = [firstCursor()]; pageIndex = 0; cursor = firstCursor(); nextCursor = null; totalPages = 1; pageLabel.textContent = "Page 1 of 1"; };
   let tab = "discover", cursor = firstCursor(), nextCursor = null, generation = 0, controller = null;
   const text = (tag, value, className = "") => {
     const node = document.createElement(tag);
@@ -5825,6 +5824,8 @@ if (pluginsDialog && pluginsOpen) {
     node.className = className;
     return node;
   };
+  const pluginBadge = (value, semanticClass = "") => text("span", value, `plugins-badge ${semanticClass}`.trim());
+  const installedStatus = () => pluginBadge("Installed", "plugins-badge-installed plugins-overlay-installed");
   const identityTile = (name, projectID, iconURL, source = "Modrinth") => {
     const tile = text("span", Array.from(name || "?").slice(0, 2).join("").toUpperCase(), "plugins-icon-tile");
     tile.setAttribute("aria-hidden", "true");
@@ -5870,7 +5871,7 @@ if (pluginsDialog && pluginsOpen) {
     if (description) header.append(text("p", description, "plugins-overlay-description"));
     const meta = document.createElement("div");
     meta.className = "plugins-card-badges";
-    badges.filter(Boolean).forEach((badge) => meta.append(text("span", badge, "plugins-badge")));
+    badges.filter((badge) => Array.isArray(badge) ? badge[0] : badge).forEach((badge) => meta.append(Array.isArray(badge) ? pluginBadge(...badge) : pluginBadge(badge)));
     header.append(meta);
     panelBody.append(header);
   };
@@ -5974,12 +5975,11 @@ if (pluginsDialog && pluginsOpen) {
     badges.className = "plugins-card-badges";
     const platform = server.server_software || server.server_type;
     const installedState = project.installed_state === "enabled" ? "Enabled" : project.installed_state === "disabled" ? "Disabled" : "Needs attention";
-    const identityBadges = [version?.version_number, platform, server.minecraft_version && `MC ${server.minecraft_version}`];
+    const identityBadges = [[version?.version_number, "plugins-badge-version"], [platform, "plugins-badge-server"], [server.minecraft_version && `MC ${server.minecraft_version}`, "plugins-badge-minecraft"]];
     if (project.installed) {
-      identityBadges.push("Installed");
-      if (["enabled", "disabled"].includes(project.installed_state)) identityBadges.push(installedState);
+      identityBadges.push(["Installed", "plugins-badge-installed"], [installedState, project.installed_state === "enabled" ? "plugins-badge-enabled" : project.installed_state === "disabled" ? "plugins-badge-disabled" : "plugins-badge-attention"]);
     }
-    identityBadges.filter(Boolean).forEach((badge) => badges.append(text("span", badge, "plugins-badge")));
+    identityBadges.filter(([value]) => value).forEach((badge) => badges.append(pluginBadge(...badge)));
     if (!version || project.metadata_error) card.append(text("p", "Release metadata unavailable", "plugins-card-meta"));
     card.append(badges);
     const dependencies = version?.dependencies || [];
@@ -5992,7 +5992,7 @@ if (pluginsDialog && pluginsOpen) {
       card.append(text("p", Array.from(counts, ([kind, count]) => `${count} ${kind}`).join(" · "), "plugins-card-meta"));
     }
     const renderInfo = () => {
-      overlayHeader(project.title, project.description, identityBadges, iconProjectID, project.installed ? text("span", "Installed", "plugins-badge") : null, project.icon_url || "", project.source);
+      overlayHeader(project.title, project.description, identityBadges, iconProjectID, project.installed && !managed ? installedStatus() : null, project.icon_url || "", project.source);
       const about = infoRows(overlaySection("About this version"));
       about("Release", version?.version_number || "Unavailable");
       about(project.source === "Hangar" ? "Channel" : "Release type", version?.version_type || "Not provided");
@@ -6051,13 +6051,16 @@ if (pluginsDialog && pluginsOpen) {
     badges.append(text("span", management, "plugins-badge plugins-management"));
     const managed = plugin.management === "plugins" && ["enabled", "disabled"].includes(plugin.state);
     const stateLabel = managed ? (plugin.state === "disabled" ? "Disabled" : "Enabled") : "";
-    if (stateLabel) badges.append(text("span", stateLabel, "plugins-badge plugins-state"));
+    const stateClass = plugin.state === "disabled" ? "plugins-badge-disabled" : "plugins-badge-enabled";
+    if (plugin.management === "plugins") badges.append(pluginBadge("Installed", "plugins-badge-installed"));
+    if (stateLabel) badges.append(pluginBadge(stateLabel, `plugins-state ${stateClass}`));
     card.append(badges);
     const attention = plugin.update_status?.startsWith("Attention:");
+    if (attention) badges.append(pluginBadge("Needs attention", "plugins-badge-attention"));
     const updateAvailable = plugin.update_status?.startsWith("Update available");
     const updateStatus = updateAvailable ? plugin.update_status : attention ? plugin.update_status.replace(/; manual \/ unmanaged$/, "") : plugin.management === "justvoxel" ? "Via server updates" : plugin.management === "plugins" ? "Updates are not available yet" : "Unknown";
     addInfo(card, name, () => {
-      overlayHeader(name, "", [plugin.version || "Version unknown", management, stateLabel], projectID, null, undefined, plugin.source || "Modrinth");
+      overlayHeader(name, "", [[plugin.version || "Version unknown", "plugins-badge-version"], management, [plugin.management === "plugins" && "Installed", "plugins-badge-installed"], [stateLabel, stateClass], [attention && "Needs attention", "plugins-badge-attention"]], projectID, plugin.management === "plugins" ? installedStatus() : null, undefined, plugin.source || "Modrinth");
       overlaySection("JAR").append(text("p", plugin.filename));
       overlaySection("Metadata").append(text("p", plugin.metadata_status || "Unknown"));
       overlaySection("Management").append(text("p", plugin.management === "justvoxel" ? "Generic Install is unavailable for this component." : plugin.management === "plugins" ? "Lifecycle actions verify the exact recorded JAR. Plugin configuration and data are preserved." : "Plugins will not adopt or overwrite this JAR."));
@@ -6163,7 +6166,7 @@ if (pluginsDialog && pluginsOpen) {
       if (current !== installGeneration) return;
       showPanel("Review plugin action", true);
       const label = action === "enable" ? "Enable" : action === "disable" ? "Disable" : "Remove";
-      overlayHeader(plan.project_name, "", [plugin.version, plan.state === "disabled" ? "Disabled" : "Enabled"], plan.project_id, null, undefined, plan.source);
+      overlayHeader(plan.project_name, "", [[plugin.version, "plugins-badge-version"], [plan.state === "disabled" ? "Disabled" : "Enabled", plan.state === "disabled" ? "plugins-badge-disabled" : "plugins-badge-enabled"]], plan.project_id, null, undefined, plan.source);
       const explanation = action === "enable"
         ? "The same verified stored JAR returns to /plugins. Plugin configuration/data is preserved. Minecraft restart and active-plugin verification follow."
         : action === "disable"
@@ -6236,7 +6239,27 @@ if (pluginsDialog && pluginsOpen) {
     panelBody.append(text("p", "See System -> Logs -> Plugins for diagnostic details."));
     overlayActions(panelAction("Done", closePanel, true));
   };
+  const showAddonOperation = (operation) => {
+    const terminal = ["succeeded", "rolled_back", "needs_attention", "resolved"].includes(operation.state);
+    showPanel("Add-ons installation", false);
+    panelBody.append(text("h3", "Add-ons installation"), text("p", operation.status, "plugins-operation-status"));
+    if (operation.state === "needs_attention") {
+      const feedback = text("p", "Retry recovery verifies the preserved file and Minecraft state.");
+      const retry = panelAction("Retry recovery", async () => {
+        retry.disabled = true;
+        try {
+          const payload = await pluginRequest("addons/recover", { operation_id: operation.operation_id }, installController?.signal);
+          showAddonOperation(payload.operation);
+          load();
+        } catch (error) { feedback.textContent = error.message; retry.disabled = false; }
+      });
+      panelBody.append(feedback);
+      overlayActions(retry, panelAction("Close", closePanel, true));
+    } else overlayActions(panelAction(terminal ? "Done" : "Close", () => { closePanel(); load(); }, true));
+    return terminal;
+  };
   const showOperation = (operation) => {
+    if (operation.operation_type === "plugin_addon_install") return showAddonOperation(operation);
     const sameOperation = !panel.hidden && operationViewID === operation.operation_id;
        const lifecycle = operation.operation_type !== "plugin_install";
     showPanel(lifecycle ? "Plugin management" : "Plugin installation", false, sameOperation);
@@ -6246,7 +6269,7 @@ if (pluginsDialog && pluginsOpen) {
     const identity = operationIdentity?.operation_id === operation.operation_id ? operationIdentity : null;
     const heading = lifecycle ? (success ? "Plugin action verified" : attention ? "Administrator attention required" : operation.state === "rolled_back" ? "Plugin action did not complete" : operation.state === "resolved" ? "Plugin state verified" : "Changing managed plugin") : success ? "Plugin installation verified" : attention ? "Administrator attention required" : operation.state === "rolled_back" ? "Installation did not complete" : operation.state === "resolved" ? "Plugin state verified" : "Installing plugin";
     if (!sameOperation) {
-      overlayHeader(identity?.name || heading, "", [identity?.version], identity?.project_id, null, undefined, identity?.source || "Modrinth");
+      overlayHeader(identity?.name || heading, "", [[identity?.version, "plugins-badge-version"]], identity?.project_id, null, undefined, identity?.source || "Modrinth");
       operationViewID = operation.operation_id;
     } else if (!identity) panelBody.querySelector(".plugins-overlay-identity h3").textContent = heading;
     if (identity) panelBody.append(text("h3", heading));
@@ -6361,7 +6384,7 @@ if (pluginsDialog && pluginsOpen) {
       const plan = await pluginRequest("install/plan", { source: project?.source || "Modrinth", project_id: projectID, version_id: versionID }, installController.signal);
       if (current !== installGeneration) return;
       showPanel("Plugin installation", true);
-      overlayHeader(plan.project_name, plan.description || project?.description, [plan.version_number, plan.server.server_software, plan.server.minecraft_version && `MC ${plan.server.minecraft_version}`], plan.project_id, panelAction("Install", () => applyPlugin(plan)), project?.project_id === plan.project_id ? project.icon_url || "" : undefined, plan.source);
+      overlayHeader(plan.project_name, plan.description || project?.description, [[plan.version_number, "plugins-badge-version"], [plan.server.server_software || plan.server.server_type, "plugins-badge-server"], [plan.server.minecraft_version && `MC ${plan.server.minecraft_version}`, "plugins-badge-minecraft"]], plan.project_id, panelAction("Install", () => applyPlugin(plan)), project?.project_id === plan.project_id ? project.icon_url || "" : undefined, plan.source);
       const selectedVersion = project?.version?.id === plan.version_id ? project.version : null;
       const about = infoRows(overlaySection("About this version"));
       about("Release", plan.version_number);
@@ -6417,7 +6440,7 @@ if (pluginsDialog && pluginsOpen) {
     } catch (error) {
       if (current !== installGeneration || error.name === "AbortError") return;
       if (error.message === "This release is not a direct Paper/Bukkit plugin and cannot be installed into the plugins directory." && readOnlyReview) readOnlyReview("The publisher lists Paper support, but this JAR is not a direct Paper/Bukkit plugin. It may require an external loader or a different installation path, so JustVoxel will not place it in the plugins directory.");
-      else if (error.message === "BlueMap addon - separate installation path not supported by the current JustVoxel Plugin installer." && readOnlyReview) readOnlyReview(error.message);
+      else if (error.message === "BlueMap native add-on belongs in Plugins -> Add-ons -> BlueMap Add-ons. Select its local file there." && readOnlyReview) readOnlyReview(error.message);
       else if (error.message === "Loader-based server mod - not supported by the current version of JustVoxel Plugin installer. Should be available in future updates." && readOnlyReview) readOnlyReview("Loader-based server mod - not supported by the current version of JustVoxel Plugin installer. Should be available in future updates.");
       else panelError(error);
     }
@@ -6469,6 +6492,97 @@ if (pluginsDialog && pluginsOpen) {
     if (changed) resetCursors();
     return !changed;
   };
+  const addonRequest = async (route, kind, file, plan = null, confirmPlayers = false) => {
+    const body = new FormData();
+    body.append("type", kind);
+    body.append("file", file, file.name);
+    if (plan) {
+      body.append("plan_fingerprint", plan.plan_fingerprint);
+      body.append("confirm_players", String(confirmPlayers));
+    }
+    const response = await fetch(`/api/plugins/workspace/addons/${route}`, {
+      method: "POST", credentials: "same-origin", cache: "no-store", body,
+      signal: installController?.signal,
+      headers: { Accept: "application/json", "X-CSRF-Token": document.querySelector('[data-minecraft-workspace-csrf]')?.value || document.querySelector('input[name="csrf"]')?.value || "" },
+    });
+    const payload = await response.json();
+    if (response.status === 401) { window.location.assign("/login"); throw new Error("Sign in again."); }
+    if (!response.ok) throw new Error(payload.error || "Add-ons upload could not continue; review again.");
+    return payload;
+  };
+  const reviewAddon = async (section, file) => {
+    stopPolling();
+    const current = installGeneration;
+    installController = new AbortController();
+    showPanel("Review Add-ons installation", true);
+    panelBody.append(text("p", "Checking the selected file and its host…"));
+    try {
+      if (await blockPluginInstall(current)) return;
+      const plan = await addonRequest("plan", section.kind, file);
+      if (current !== installGeneration) return;
+      showPanel("Review Add-ons installation", true);
+      overlayHeader(plan.display_name || plan.filename, plan.validation, [[section.name, ""]]);
+      const rows = infoRows(overlaySection("Installation"));
+      rows("Type", section.name);
+      rows("File", plan.filename);
+      rows("Size", readableSize(plan.size));
+      rows("Destination", plan.destination);
+      rows("Restart required", plan.restart_required ? "Yes — verified cold backup, restart and Minecraft health check" : "No — passive schematic content");
+      if (plan.restart_required) rows("Originally stopped", "Minecraft returns to stopped after health verification");
+      let players = null;
+      if (plan.confirmation_required) {
+        const label = document.createElement("label");
+        players = document.createElement("input");
+        players.type = "checkbox";
+        label.append(players, document.createTextNode(` Confirm restart with ${plan.online} player(s) online${plan.players?.length ? ": " + plan.players.join(", ") : ""}.`));
+        overlaySection("Players").append(label);
+      }
+      const apply = panelAction("Install", async () => {
+        apply.disabled = true;
+        try {
+          // The exact selected File is sent again; the Agent revalidates everything.
+          const payload = await addonRequest("install", section.kind, file, plan, Boolean(players?.checked));
+          if (current !== installGeneration) return;
+          if (!payload.operation) throw new Error("Add-ons installation did not start.");
+          if (!showOperation(payload.operation)) pollTimer = setTimeout(() => pollOperation(payload.operation.operation_id, current), 1000);
+        } catch (error) { if (current === installGeneration && error.name !== "AbortError") panelError(error); }
+      });
+      apply.disabled = Boolean(players && !players.checked);
+      players?.addEventListener("change", () => { apply.disabled = !players.checked; });
+      overlayActions(panelAction("Cancel", closePanel, true), apply);
+    } catch (error) { if (current === installGeneration && error.name !== "AbortError") panelError(error); }
+  };
+  const renderAddonSection = (section) => {
+    const card = document.createElement("article");
+    card.className = "plugins-result-card";
+    card.append(text("h3", section.name));
+    const badges = document.createElement("div");
+    badges.className = "plugins-card-badges";
+    badges.append(pluginBadge(section.host.available ? "Host installed" : section.host.status === "disabled" ? "Host disabled" : "Host unavailable", section.host.available ? "plugins-badge-installed" : section.host.status === "disabled" ? "plugins-badge-disabled" : "plugins-badge-attention"));
+    card.append(badges, text("p", section.host.message, "plugins-card-description"), text("p", section.destination, "plugins-card-release"));
+    for (const item of section.files) {
+      const content = document.createElement("section");
+      content.className = "plugins-overlay-section";
+      content.append(text("h4", item.display_name || item.filename), text("p", item.filename));
+      const managed = document.createElement("div");
+      managed.className = "plugins-card-badges";
+      managed.append(pluginBadge(section.name), pluginBadge(item.state === "installed" ? "Installed" : "Needs attention", item.state === "installed" ? "plugins-badge-installed" : "plugins-badge-attention"), pluginBadge("Managed by Add-ons"));
+      content.append(managed, text("p", item.target_relative_path), text("p", "Updates are not available yet"));
+      card.append(content);
+    }
+    const picker = document.createElement("input");
+    picker.type = "file";
+    picker.accept = section.accept;
+    picker.setAttribute("aria-label", `Choose file for ${section.name}`);
+    picker.disabled = !section.host.available;
+    const choose = document.createElement("label");
+    choose.append(document.createTextNode("Choose file"), picker);
+    const review = panelAction("Review / Install", () => { if (picker.files?.length === 1) reviewAddon(section, picker.files[0]); });
+    review.disabled = true;
+    picker.addEventListener("change", () => { review.disabled = !section.host.available || picker.files?.length !== 1; });
+    card.append(choose, review);
+    return card;
+  };
   const load = async () => {
     if (!document.body.classList.contains("role-administrator")) return;
     clearInventoryTimer();
@@ -6477,10 +6591,10 @@ if (pluginsDialog && pluginsOpen) {
     controller = new AbortController();
     state.textContent = "Loading plugins…";
     results.replaceChildren();
+    results.classList.toggle("plugins-addon-results", tab === "addons");
     pagination.hidden = tab !== "discover";
     previous.disabled = true;
     next.disabled = true;
-    pageInput.disabled = true;
     form.hidden = tab !== "discover";
     const query = discoverQuery(cursor);
     try {
@@ -6504,6 +6618,11 @@ if (pluginsDialog && pluginsOpen) {
       context.textContent = `${server.server_software || "Minecraft"} · Minecraft ${server.minecraft_version || "version unavailable"}`;
       form.querySelectorAll("input,button").forEach((control) => { control.disabled = !server.supported; });
       if (!server.supported) { state.textContent = server.message; return; }
+      if (tab === "addons") {
+        payload.sections.forEach((section) => results.append(renderAddonSection(section)));
+        state.textContent = "Select a local file. Host plugins perform runtime loading; updates and removal are not available yet.";
+        return true;
+      }
       const items = tab === "discover" ? payload.projects : payload.plugins;
       items.forEach((item) => results.append(tab === "discover" ? renderProject(item, server) : renderInstalled(item)));
       state.textContent = tab === "discover" && !payload.modrinth && !payload.hangar ? "Enable Modrinth or Hangar to browse plugins." : server.message || (items.length ? "" : tab === "discover" ? "No plugins match these filters on this page." : "No installed plugin JARs found.");
@@ -6518,69 +6637,17 @@ if (pluginsDialog && pluginsOpen) {
         if (nextCursor) pageCursors[pageIndex + 1] = nextCursor;
         else pageCursors.length = pageIndex + 1;
         next.disabled = !nextCursor;
-        pageInput.value = String(currentPage);
-        pageInput.style.setProperty("--plugins-page-width", `${String(totalPages).length}ch`);
-        pageTotal.textContent = String(totalPages);
+        pageLabel.textContent = `Page ${currentPage} of ${totalPages}`;
       }
       return true;
     } catch (error) {
       if (current === generation && error.name !== "AbortError") state.textContent = error.message || "Plugin information is unavailable.";
     } finally {
       if (current === generation) {
-        pageInput.disabled = false;
-        pageInput.value = String(pageIndex + 1);
         if (tab === "discover") {
           previous.disabled = pageIndex === 0;
           next.disabled = !nextCursor;
         }
-      }
-    }
-  };
-  const jumpToPage = async () => {
-    const value = pageInput.value.trim();
-    const requestedPage = Number(value);
-    pageInput.value = String(pageIndex + 1);
-    if (!/^\d+$/.test(value) || !Number.isSafeInteger(requestedPage) || requestedPage < 1 || requestedPage > totalPages || tab !== "discover" || pageInput.disabled) return;
-    const targetIndex = requestedPage - 1;
-    if (pageCursors[targetIndex]) {
-      pageIndex = targetIndex;
-      cursor = pageCursors[pageIndex];
-      await load();
-      return;
-    }
-    const current = ++generation;
-    controller?.abort();
-    controller = new AbortController();
-    const signal = controller.signal;
-    previous.disabled = next.disabled = pageInput.disabled = true;
-    state.textContent = `Finding page ${requestedPage}…`;
-    let reachableIndex = pageCursors.length - 1;
-    let exhausted = false;
-    try {
-      while (!pageCursors[targetIndex]) {
-        const response = await fetch(`/api/plugins/workspace/discover?${discoverQuery(pageCursors[reachableIndex])}`, { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" }, signal });
-        const payload = await response.json();
-        if (current !== generation || signal.aborted) return;
-        if (response.status === 401) { window.location.assign("/login"); return; }
-        if (response.status === 403 && String(payload.error || "").toLowerCase().includes("password")) { window.location.assign("/password"); return; }
-        if (!response.ok) throw new Error(payload.error || "Plugin information is unavailable.");
-        if (!acceptDiscoverContext(payload.server)) { load(); return; }
-        // Intermediate projects are discarded. Only the authoritative next cursor survives.
-        if (!payload.next_cursor) { exhausted = true; break; }
-        pageCursors[++reachableIndex] = payload.next_cursor;
-      }
-      pageIndex = exhausted ? reachableIndex : targetIndex;
-      cursor = pageCursors[pageIndex];
-      const loaded = await load();
-      if (loaded && exhausted && generation === current + 1) state.textContent = "Last reachable page with the current filters.";
-    } catch (error) {
-      if (current === generation && error.name !== "AbortError") state.textContent = error.message || "Plugin information is unavailable.";
-    } finally {
-      if (current === generation) {
-        previous.disabled = pageIndex === 0;
-        next.disabled = !nextCursor;
-        pageInput.disabled = false;
-        pageInput.value = String(pageIndex + 1);
       }
     }
   };
@@ -6632,7 +6699,6 @@ if (pluginsDialog && pluginsOpen) {
     resetCursors();
     previous.disabled = true;
     next.disabled = true;
-    pageInput.disabled = true;
     searchTimer = setTimeout(() => load(), 250);
   });
   form.addEventListener("submit", (event) => { event.preventDefault(); clearTimeout(searchTimer); resetCursors(); load(); });
@@ -6644,10 +6710,6 @@ if (pluginsDialog && pluginsOpen) {
     cursor = pageCursors[++pageIndex];
     load();
   });
-  pageInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") { event.preventDefault(); jumpToPage(); }
-  });
-  pageInput.addEventListener("blur", () => { pageInput.value = String(pageIndex + 1); });
   // Role discovery is asynchronous. Restore only after Administrator identity
   // has been established, matching the role-gated launcher.
   const restore = () => {

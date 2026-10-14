@@ -18,6 +18,10 @@ type pluginsWorkspaceAPI interface {
 }
 
 func (a *App) registerPluginsWorkspaceRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/plugins/workspace/addons", a.pluginsAddonInventory)
+	mux.HandleFunc("POST /api/plugins/workspace/addons/plan", a.pluginsAddonPlan)
+	mux.HandleFunc("POST /api/plugins/workspace/addons/install", a.pluginsAddonInstall)
+	mux.HandleFunc("POST /api/plugins/workspace/addons/recover", a.pluginsAddonRecover)
 	mux.HandleFunc("GET /api/plugins/workspace/installed", a.pluginsWorkspaceInventory)
 	mux.HandleFunc("GET /api/plugins/workspace/updates", a.pluginsWorkspaceInventory)
 	mux.HandleFunc("GET /api/plugins/workspace/discover", a.pluginsWorkspaceDiscover)
@@ -318,7 +322,7 @@ func (a *App) pluginsWorkspaceIcon(w http.ResponseWriter, r *http.Request) {
 }
 
 func isWorkspacePluginOperation(kind string) bool {
-	return kind == "plugin_install" || kind == "plugin_enable" || kind == "plugin_disable" || kind == "plugin_remove"
+	return kind == "plugin_addon_install" || kind == "plugin_install" || kind == "plugin_enable" || kind == "plugin_disable" || kind == "plugin_remove"
 }
 
 type pluginsManageAPI interface {

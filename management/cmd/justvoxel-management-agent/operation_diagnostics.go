@@ -170,25 +170,34 @@ func (s *operationStore) appendOperationDiagnostic(id, operationType, category, 
 
 func validDiagnosticOperationType(value string) bool {
 	switch value {
-	case operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove, operationTypeRestore, operationTypeDataMigration, operationTypeMinecraftReset, operationTypeFactoryReset, operationTypeMigrationExport, operationTypeMigrationImport, operationTypeMigrationRecovery:
+	case operationTypePluginAddonInstall, operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove, operationTypeRestore, operationTypeDataMigration, operationTypeMinecraftReset, operationTypeFactoryReset, operationTypeMigrationExport, operationTypeMigrationImport, operationTypeMigrationRecovery:
 		return true
 	}
 	return false
 }
 
 func validDiagnosticCategory(value string) bool {
-	switch value { case "setup", "migration", "restore", "plugins", "reset", "operation": return true }
+	switch value {
+	case "setup", "migration", "restore", "plugins", "reset", "operation":
+		return true
+	}
 	return false
 }
 
 func diagnosticCategoryForOperationType(value string) string {
 	switch value {
-	case operationTypeSetup: return "setup"
-	case operationTypeDataMigration, operationTypeMigrationExport, operationTypeMigrationImport, operationTypeMigrationRecovery: return "migration"
-	case operationTypeRestore: return "restore"
-	case operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove: return "plugins"
-	case operationTypeMinecraftReset, operationTypeFactoryReset: return "reset"
-	default: return ""
+	case operationTypeSetup:
+		return "setup"
+	case operationTypeDataMigration, operationTypeMigrationExport, operationTypeMigrationImport, operationTypeMigrationRecovery:
+		return "migration"
+	case operationTypeRestore:
+		return "restore"
+	case operationTypePluginAddonInstall, operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove:
+		return "plugins"
+	case operationTypeMinecraftReset, operationTypeFactoryReset:
+		return "reset"
+	default:
+		return ""
 	}
 }
 
@@ -235,8 +244,12 @@ func (s *operationStore) readDiagnosticLog(category, id string) ([]byte, error) 
 	}
 	if category == "operation" {
 		journal, err := s.get(id)
-		if err != nil { return nil, err }
-		if !validDiagnosticOperationType(journal.OperationType) { return nil, os.ErrNotExist }
+		if err != nil {
+			return nil, err
+		}
+		if !validDiagnosticOperationType(journal.OperationType) {
+			return nil, os.ErrNotExist
+		}
 		category = diagnosticCategoryForOperationType(journal.OperationType)
 	} else if journal, err := s.get(id); err == nil && diagnosticCategoryForOperationType(journal.OperationType) != category {
 		return nil, os.ErrNotExist
@@ -281,34 +294,42 @@ func (s *operationStore) listDiagnosticLogs() ([]diagnosticLogEntry, error) {
 	}
 	for _, category := range []string{"setup", "migration", "restore", "plugins", "reset"} {
 		dir := filepath.Join(s.logsDir, category+"-logs")
-		if err := validatePrivateDiagnosticDirectory(dir); err != nil { return nil, err }
+		if err := validatePrivateDiagnosticDirectory(dir); err != nil {
+			return nil, err
+		}
 		files, err := os.ReadDir(dir)
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		categoryEntries := make([]diagnosticLogEntry, 0, len(files))
 		for _, file := range files {
-		if file.Type() != 0 || !strings.HasSuffix(file.Name(), ".log") {
-			continue
-		}
-		id := strings.TrimSuffix(file.Name(), ".log")
-		if !validOperationID(id) {
-			continue
-		}
-		info, err := file.Info()
-		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || info.Size() > operationDiagnosticLimit {
-			continue
-		}
-		owner, owned := info.Sys().(*syscall.Stat_t)
-		if !owned || owner.Uid != uint32(os.Geteuid()) { continue }
-		entry := diagnosticLogEntry{Category: category, LogID: id, Timestamp: info.ModTime().UTC().Format("2006-01-02T15:04:05Z07:00")}
-		if journal, known := operations[id]; known && diagnosticCategoryForOperationType(journal.OperationType) == category {
-			entry.OperationID = id
-			entry.OperationType = journal.OperationType
-			entry.State = string(journal.State)
-		}
-		categoryEntries = append(categoryEntries, entry)
+			if file.Type() != 0 || !strings.HasSuffix(file.Name(), ".log") {
+				continue
+			}
+			id := strings.TrimSuffix(file.Name(), ".log")
+			if !validOperationID(id) {
+				continue
+			}
+			info, err := file.Info()
+			if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 || info.Size() > operationDiagnosticLimit {
+				continue
+			}
+			owner, owned := info.Sys().(*syscall.Stat_t)
+			if !owned || owner.Uid != uint32(os.Geteuid()) {
+				continue
+			}
+			entry := diagnosticLogEntry{Category: category, LogID: id, Timestamp: info.ModTime().UTC().Format("2006-01-02T15:04:05Z07:00")}
+			if journal, known := operations[id]; known && diagnosticCategoryForOperationType(journal.OperationType) == category {
+				entry.OperationID = id
+				entry.OperationType = journal.OperationType
+				entry.State = string(journal.State)
+			}
+			categoryEntries = append(categoryEntries, entry)
 		}
 		sort.Slice(categoryEntries, func(i, j int) bool { return categoryEntries[i].Timestamp > categoryEntries[j].Timestamp })
-		if len(categoryEntries) > 200 { categoryEntries = categoryEntries[:200] }
+		if len(categoryEntries) > 200 {
+			categoryEntries = categoryEntries[:200]
+		}
 		entries = append(entries, categoryEntries...)
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Timestamp > entries[j].Timestamp })

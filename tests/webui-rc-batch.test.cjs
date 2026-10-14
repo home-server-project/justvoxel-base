@@ -307,9 +307,13 @@ test('Installed lifecycle actions derive one toggle and preserve read-only owner
   const start = app.indexOf('  const renderInstalled =');
   const end = app.indexOf('  // Review, progress', start);
   let headerBadges = [];
+  let headerStatus;
+  const pluginBadge = (value, semanticClass) => lifecycleElement('span', value, 'plugins-badge ' + semanticClass);
   const context = vm.createContext({
     document: { createElement: tag => lifecycleElement(tag) }, text: lifecycleElement,
-    overlayHeader: (_, __, badges) => { headerBadges = badges; },
+    pluginBadge,
+    installedStatus: () => pluginBadge('Installed', 'plugins-badge-installed plugins-overlay-installed'),
+    overlayHeader: (_, __, badges, ___, status) => { headerBadges = badges; headerStatus = status; },
     overlaySection: () => lifecycleElement('section'), infoRows: () => () => {},
     addInfo: (card, _, render, projectID) => { card.info = render; card.iconProjectID = projectID; },
     pluginAction: (label, handler, style) => { const button = lifecycleElement('button', label, style); button.addEventListener('click', handler); return button; },
@@ -327,13 +331,23 @@ test('Installed lifecycle actions derive one toggle and preserve read-only owner
     assert.deepEqual(Array.from(buttons, node => node.textContent), labels);
     assert.ok(!(buttons.some(node => node.textContent === 'Enable') && buttons.some(node => node.textContent === 'Disable')));
     if (badge) {
-      assert.ok(card.all().some(node => node.textContent === badge));
-      assert.ok(headerBadges.includes(badge));
+      const stateClass = state === 'disabled' ? 'plugins-badge-disabled' : 'plugins-badge-enabled';
+      for (const [label, semanticClass] of [['Installed', 'plugins-badge-installed'], [badge, stateClass]]) {
+        assert.ok(card.all().some(node => node.textContent === label && node.className.split(' ').includes(semanticClass)));
+        assert.ok(headerBadges.some(descriptor => Array.isArray(descriptor) && descriptor[0] === label && descriptor[1] === semanticClass));
+      }
+      assert.equal(headerStatus.tag, 'span');
+      assert.equal(headerStatus.textContent, 'Installed');
+      assert.ok(headerStatus.className.split(' ').includes('plugins-badge-installed'));
+      assert.ok(headerStatus.className.split(' ').includes('plugins-overlay-installed'));
       assert.equal(buttons[0].className, 'plugins-state-action');
       assert.equal(buttons[1].className, 'plugins-remove-action');
       assert.equal(card.iconProjectID, 'root');
-    } else if (management === 'justvoxel') assert.equal(card.iconProjectID, 'wKkoqHrH');
-    else assert.equal(card.iconProjectID, undefined);
+    } else {
+      assert.equal(headerStatus, null);
+      if (management === 'justvoxel') assert.equal(card.iconProjectID, 'wKkoqHrH');
+      else assert.equal(card.iconProjectID, undefined);
+    }
   }
 });
 
@@ -396,4 +410,75 @@ test('Remove review requires both a fully armed slider and the final confirmatio
   assert.equal(page.submissions.length, 1);
   assert.equal(page.submissions[0].route, 'manage');
   assert.equal(page.submissions[0].request.action, 'remove');
+});
+
+test('Add-ons sections render host-aware local file controls and exact managed content', () => {
+  const start = app.indexOf('  const renderAddonSection =');
+  const end = app.indexOf('  const load =', start);
+  let reviewed;
+  const context = vm.createContext({
+    document: { createElement: tag => lifecycleElement(tag), createTextNode: value => lifecycleElement('text', value) },
+    text: lifecycleElement, pluginBadge: (value, style) => lifecycleElement('span', value, style),
+    panelAction: (label, action) => { const button = lifecycleElement('button', label); button.addEventListener('click', action); return button; },
+    reviewAddon: (section, file) => { reviewed = { section, file }; },
+  });
+  vm.runInContext(app.slice(start, end) + '\nthis.render = renderAddonSection;', context);
+  const section = { kind: 'skript_script', name: 'Skript Scripts', accept: '.sk', destination: 'plugins/Skript/scripts', host: { available: false, status: 'disabled', message: 'Host disabled' }, files: [{ filename: 'test.sk', state: 'installed', target_relative_path: 'plugins/Skript/scripts/test.sk' }] };
+  const unavailable = context.render(section);
+  const picker = unavailable.all().find(node => node.tag === 'input');
+  const button = unavailable.all().find(node => node.tag === 'button');
+  assert.equal(picker.type, 'file');
+  assert.equal(picker.accept, '.sk');
+  assert.equal(picker.disabled, true);
+  assert.equal(button.disabled, true);
+  const labels = unavailable.all().map(node => node.textContent);
+  for (const value of ['Host disabled', 'Installed', 'Managed by Add-ons', 'Updates are not available yet', 'plugins/Skript/scripts/test.sk']) assert.ok(labels.includes(value), value);
+  const available = context.render({ ...section, host: { available: true, status: 'installed', message: 'Host installed' } });
+  const choose = available.all().find(node => node.tag === 'input');
+  const review = available.all().find(node => node.tag === 'button');
+  const file = { name: 'selected.sk' };
+  choose.files = [file];
+  choose.events.change();
+  assert.equal(review.disabled, false);
+  review.click();
+  assert.equal(reviewed.file, file);
+  assert.equal(available.all().filter(node => node.tag === 'input').length, 1);
+});
+
+test('Add-ons plan and apply send the same selected File with a reviewed fingerprint', async () => {
+  const start = app.indexOf('  const addonRequest =');
+  const end = app.indexOf('  const reviewAddon =', start);
+  const requests = [];
+  class FormData { constructor() { this.fields = []; } append(...field) { this.fields.push(field); } }
+  const context = vm.createContext({
+    FormData, installController: { signal: 'signal' },
+    document: { querySelector: () => ({ value: 'csrf-token' }) },
+    fetch: async (route, options) => { requests.push({ route, options }); return { status: 200, ok: true, json: async () => ({}) }; },
+  });
+  vm.runInContext(app.slice(start, end) + '\nthis.request = addonRequest;', context);
+  const file = { name: 'castle.schem' };
+  await context.request('plan', 'worldedit_schematic', file);
+  await context.request('install', 'worldedit_schematic', file, { plan_fingerprint: 'reviewed-fingerprint' }, false);
+  for (const request of requests) {
+    assert.equal(request.options.headers['X-CSRF-Token'], 'csrf-token');
+    assert.equal(request.options.body.fields[0][0], 'type');
+    assert.equal(request.options.body.fields[1][1], file);
+    assert.equal(request.options.body.fields[1][2], file.name);
+    assert.ok(!request.options.body.fields.some(([key]) => ['path', 'destination', 'url'].includes(key)));
+  }
+  assert.equal(requests[0].options.body.fields.length, 2);
+  assert.equal(requests[1].options.body.fields[2][1], 'reviewed-fingerprint');
+  assert.equal(requests[1].options.body.fields[3][1], 'false');
+});
+
+test('Add-ons remain exactly five fixed kinds within the third Plugins tab', () => {
+  const header = read('webui/internal/server/templates/header.html');
+  assert.equal((header.match(/data-plugins-tab=/g) || []).length, 3);
+  assert.ok(header.includes('data-plugins-tab="addons"'));
+  const agent = read('management/cmd/justvoxel-management-agent/admin_plugin_addons.go');
+  const definitions = agent.slice(agent.indexOf('var addonDefinitions ='), agent.indexOf('func addonDefinitionFor'));
+  const kinds = [...definitions.matchAll(/\{"([a-z_]+)"/g)].map(match => match[1]);
+  assert.deepEqual(kinds, ['placeholderapi_expansion', 'geyser_extension', 'bluemap_addon', 'skript_script', 'worldedit_schematic']);
+  assert.ok(app.includes('BlueMap native add-on belongs in Plugins -> Add-ons -> BlueMap Add-ons. Select its local file there.'));
+  assert.ok(!app.includes('BlueMap addon - separate installation path not supported'));
 });

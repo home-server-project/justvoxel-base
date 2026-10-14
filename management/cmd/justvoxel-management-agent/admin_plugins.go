@@ -128,6 +128,10 @@ type pluginCatalogPage struct {
 }
 
 func registerAdminPluginRoutes(mux *http.ServeMux, s *server) {
+	mux.HandleFunc("GET /v1/admin/plugins/addons", s.adminAddonInventory)
+	mux.HandleFunc("POST /v1/admin/plugins/addons/plan", s.adminAddonPlan)
+	mux.HandleFunc("POST /v1/admin/plugins/addons/install", s.adminAddonInstall)
+	mux.HandleFunc("POST /v1/admin/plugins/addons/recover", s.adminAddonRecover)
 	mux.HandleFunc("GET /v1/admin/plugins/installed", s.adminPluginsInstalled)
 	mux.HandleFunc("GET /v1/admin/plugins/updates", s.adminPluginsInstalled)
 	mux.HandleFunc("GET /v1/admin/plugins/discover", s.adminPluginsDiscover)

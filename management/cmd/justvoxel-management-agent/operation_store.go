@@ -476,7 +476,7 @@ func (s *operationStore) loadAndRecover() error {
 					return errors.New("multiple active data migration operation journals require attention")
 				}
 				activeDataMigration = journal.OperationID
-			case operationTypeMinecraftReset, operationTypeMinecraftUpdate, operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove:
+			case operationTypeMinecraftReset, operationTypeMinecraftUpdate, operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove, operationTypePluginAddonInstall:
 				if activeMinecraftReset != "" {
 					return errors.New("multiple active Minecraft reset operation journals require attention")
 				}
@@ -1503,7 +1503,7 @@ func (s *operationStore) transition(id string, next operationState, stage, statu
 			if err := s.releaseDataMigrationLock(); err != nil {
 				return operationJournal{}, err
 			}
-		case operationTypeMinecraftReset, operationTypeMinecraftUpdate, operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove:
+		case operationTypeMinecraftReset, operationTypeMinecraftUpdate, operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove, operationTypePluginAddonInstall:
 			s.currentMinecraftResetID = ""
 			if err := s.releaseMinecraftResetLocks(); err != nil {
 				return operationJournal{}, err
@@ -1804,7 +1804,7 @@ func (s *operationStore) pluginCleanupWarning(id string) error {
 
 func isPluginOperationType(kind string) bool {
 	switch kind {
-	case operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove:
+	case operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove, operationTypePluginAddonInstall:
 		return true
 	}
 	return false

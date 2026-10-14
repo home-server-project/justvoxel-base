@@ -540,7 +540,7 @@ var errPluginLoaderArtifact = errors.New("JAR contains loader metadata without a
 
 const pluginLoaderReviewRejection = "Loader-based server mod - not supported by the current version of JustVoxel Plugin installer. Should be available in future updates."
 
-const pluginBlueMapReviewRejection = "BlueMap addon - separate installation path not supported by the current JustVoxel Plugin installer."
+const pluginBlueMapReviewRejection = "BlueMap native add-on belongs in Plugins -> Add-ons -> BlueMap Add-ons. Select its local file there."
 
 const pluginDirectReviewRejection = "This release is not a direct Paper/Bukkit plugin and cannot be installed into the plugins directory."
 

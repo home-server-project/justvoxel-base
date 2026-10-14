@@ -173,7 +173,7 @@ func TestPluginsWorkspaceCompactInfoPresentation(t *testing.T) {
 		}
 	}
 	inventory := behavior[installed:end]
-	for _, want := range []string{`const name = plugin.name || plugin.filename;`, `addInfo(card, name, () => {`, `overlayHeader(name, "", [plugin.version || "Version unknown", management, stateLabel], projectID, null, undefined, plugin.source || "Modrinth")`, `plugin.update_status?.startsWith("Update available")`, `"Needs attention"`, `"plugins-inventory-status"`, `"JustVoxel managed"`, `"Managed by Plugins"`, `"Manual / unmanaged"`} {
+	for _, want := range []string{`const name = plugin.name || plugin.filename;`, `addInfo(card, name, () => {`, `overlayHeader(name, "", [[plugin.version || "Version unknown", "plugins-badge-version"], management, [plugin.management === "plugins" && "Installed", "plugins-badge-installed"], [stateLabel, stateClass], [attention && "Needs attention", "plugins-badge-attention"]], projectID, plugin.management === "plugins" ? installedStatus() : null, undefined, plugin.source || "Modrinth")`, `plugin.update_status?.startsWith("Update available")`, `"Needs attention"`, `"plugins-inventory-status"`, `"JustVoxel managed"`, `"Managed by Plugins"`, `"Manual / unmanaged"`} {
 		if !strings.Contains(inventory, want) {
 			t.Fatalf("Installed/Updates presentation missing %s", want)
 		}
@@ -600,15 +600,15 @@ func TestPluginsWorkspaceSharedSameOriginLogoAndFallback(t *testing.T) {
 		`identity.append(identityTile(name, projectID, iconURL, source), text("h3", name))`,
 		`header.append(identityTile(name, projectID, iconURL, source), copy)`,
 		`const iconProjectID = ["Modrinth", "Hangar"].includes(project.source) ? project.project_id : undefined;`,
-		`overlayHeader(project.title, project.description, identityBadges, iconProjectID, project.installed ? text("span", "Installed", "plugins-badge") : null, project.icon_url || "", project.source)`,
+		`overlayHeader(project.title, project.description, identityBadges, iconProjectID, project.installed && !managed ? installedStatus() : null, project.icon_url || "", project.source)`,
 		`}, iconProjectID, project.icon_url || "", project.source)`,
-		`overlayHeader(plan.project_name, plan.description || project?.description, [plan.version_number, plan.server.server_software,`,
+		`overlayHeader(plan.project_name, plan.description || project?.description, [[plan.version_number, "plugins-badge-version"], [plan.server.server_software || plan.server.server_type,`,
 		`const projectID = plugin.project_id || plugin.icon_project_id || undefined`,
-		`overlayHeader(name, "", [plugin.version || "Version unknown", management, stateLabel], projectID, null, undefined, plugin.source || "Modrinth")`,
+		`overlayHeader(name, "", [[plugin.version || "Version unknown", "plugins-badge-version"], management, [plugin.management === "plugins" && "Installed", "plugins-badge-installed"], [stateLabel, stateClass], [attention && "Needs attention", "plugins-badge-attention"]], projectID, plugin.management === "plugins" ? installedStatus() : null, undefined, plugin.source || "Modrinth")`,
 		`}, projectID, undefined, plugin.source || "Modrinth")`,
 		`operationIdentity?.operation_id === operation.operation_id`,
 		`project_id: plan.project_id, name: plan.project_name`,
-		`overlayHeader(identity?.name || heading, "", [identity?.version], identity?.project_id, null, undefined, identity?.source || "Modrinth")`,
+		`overlayHeader(identity?.name || heading, "", [[identity?.version, "plugins-badge-version"]], identity?.project_id, null, undefined, identity?.source || "Modrinth")`,
 	} {
 		if !strings.Contains(workspace, want) {
 			t.Fatalf("identity reuse missing %s", want)
@@ -654,7 +654,7 @@ func TestPluginsWorkspaceApprovedCompactHierarchyAndStageFlow(t *testing.T) {
 		t.Fatal("actions detached from compact card header")
 	}
 	collapsed := between("  const renderProject =", "    const renderInfo =")
-	for _, want := range []string{`server.server_software || server.server_type`, `const identityBadges = [version?.version_number, platform,`, `server.minecraft_version`, `identityBadges.filter(Boolean)`, `"plugins-badge"`} {
+	for _, want := range []string{`server.server_software || server.server_type`, `const identityBadges = [[version?.version_number, "plugins-badge-version"], [platform, "plugins-badge-server"],`, `server.minecraft_version`, `identityBadges.filter(([value]) => value)`, `"plugins-badge-minecraft"`} {
 		if !strings.Contains(collapsed, want) {
 			t.Fatal("concise release/platform/MC badges missing", want)
 		}
@@ -665,7 +665,7 @@ func TestPluginsWorkspaceApprovedCompactHierarchyAndStageFlow(t *testing.T) {
 		}
 	}
 	discover := between("  const renderProject =", "  const renderInstalled =")
-	if strings.Contains(discover, `...(version?.loaders || [])`) || !strings.Contains(discover, `overlayHeader(project.title, project.description, identityBadges, iconProjectID, project.installed ? text("span", "Installed", "plugins-badge") : null, project.icon_url || "", project.source)`) {
+	if strings.Contains(discover, `...(version?.loaders || [])`) || !strings.Contains(discover, `overlayHeader(project.title, project.description, identityBadges, iconProjectID, project.installed && !managed ? installedStatus() : null, project.icon_url || "", project.source)`) {
 		t.Fatal("Info header must reuse concise server-context badges")
 	}
 	for _, want := range []string{`compatibility("Supported platforms", (version?.loaders || []).join(" / ")`, `new Set(version?.game_versions || [])`} {
@@ -821,7 +821,7 @@ func TestPluginsWorkspaceToolbarCapacityAndPagination(t *testing.T) {
 			t.Fatal("visible toolbar text remains", forbidden)
 		}
 	}
-	for _, want := range []string{`limit: String(pageLimit)`, `results.getBoundingClientRect()`, `style.gridTemplateColumns`, `results.clientHeight`, `style.getPropertyValue("--plugins-card-height")`, `columns * rows`, `Math.min(12`, `new ResizeObserver`, `setTimeout(() => updateCapacity(), 200)`, `resetCursors();`, `pageIndex = 0`, `const currentPage = pageIndex + 1`, `totalPages = Math.max(1, Math.ceil(payload.total / pageLimit))`, `pageInput.value = String(currentPage)`, `cursor = pageCursors[--pageIndex]`, `pageCursors[pageIndex + 1] = nextCursor`, `event.preventDefault()`} {
+	for _, want := range []string{`limit: String(pageLimit)`, `results.getBoundingClientRect()`, `style.gridTemplateColumns`, `results.clientHeight`, `style.getPropertyValue("--plugins-card-height")`, `columns * rows`, `Math.min(12`, `new ResizeObserver`, `setTimeout(() => updateCapacity(), 200)`, `resetCursors();`, `pageIndex = 0`, `const currentPage = pageIndex + 1`, `totalPages = Math.max(1, Math.ceil(payload.total / pageLimit))`, "pageLabel.textContent = `Page ${currentPage} of ${totalPages}`", `cursor = pageCursors[--pageIndex]`, `pageCursors[pageIndex + 1] = nextCursor`, `event.preventDefault()`} {
 		if !strings.Contains(js, want) {
 			t.Fatal("dynamic catalog behavior missing", want)
 		}
@@ -1002,7 +1002,7 @@ func TestPluginsWorkspaceInventoryGatePrecedesFetchAndRendering(t *testing.T) {
 	if start < 0 {
 		t.Fatal("inventory gate missing")
 	}
-	end := strings.Index(script[start:], "  const jumpToPage =")
+	end := strings.Index(script[start:], "  const discoverCapacity =")
 	if end < 0 {
 		t.Fatal("inventory loader boundary missing")
 	}
@@ -1407,8 +1407,8 @@ const assert = require("node:assert/strict");
 const events = {}, formEvents = {}, filterEvents = [];
 const form = {elements:{q:{addEventListener:(event,handler) => events[event] = handler}},addEventListener:(event,handler) => formEvents[event] = handler,querySelectorAll:() => [0,1,2,3].map((index) => ({addEventListener:(event,handler) => filterEvents[index] = handler}))};
 let generation = 0, aborts = 0, resets = 0, loads = 0, searchTimer = null, timerID = 0;
-const controller = {abort:() => aborts++}, previous = {}, next = {}, pageInput = {};
-const pluginsDialog = {querySelector:() => pageInput}, resetCursors = () => resets++, load = () => loads++;
+const controller = {abort:() => aborts++}, previous = {}, next = {}, pageLabel = {};
+const pluginsDialog = {querySelector:() => pageLabel}, resetCursors = () => resets++, load = () => loads++;
 const timers = new Map(), setTimeout = (fn,delay) => { timers.set(++timerID,{fn,delay}); return timerID; }, clearTimeout = (id) => timers.delete(id);
 ` + events + `
 events.input(); events.input(); events.input();
@@ -1451,7 +1451,7 @@ func TestPluginWorkspaceApprovedPolish(t *testing.T) {
 		}
 	}
 	project := pluginScriptSection(t, script, "  const renderProject =", "  const renderInstalled =")
-	for _, want := range []string{`iconProjectID, project.icon_url`, `iconProjectID, project.installed ? text("span", "Installed", "plugins-badge") : null, project.icon_url`} {
+	for _, want := range []string{`iconProjectID, project.icon_url`, `iconProjectID, project.installed && !managed ? installedStatus() : null, project.icon_url`} {
 		if !strings.Contains(project, want) {
 			t.Fatal("Discover must supply validated search icon", want)
 		}
@@ -1834,7 +1834,7 @@ const document = {createElement:(tag)=>new Node(tag)};
 const results = new Node("div"), panelBody = new Node("div");
 const stopPolling=()=>{}, showPanel=()=>{panelBody.children=[]}, closePanel=()=>{};
 const reviews=[]; const reviewPlugin=(id,version,project)=>{reviews.push(project.source)};
-` + helpers + actions + `
+` + helpers + actions + pluginScriptSection(t, script, "  const renderInstalled =", "  // Review, progress") + `
 const server = {supported:true,minecraft_version:"1.21.8",server_type:"paper"};
 const base = {title:"Same name",description:"Plugin",project_id:"123",slug:"same",compatible:true,compatibility:"Compatible according to publisher metadata",version:{id:"1",version_number:"1",version_type:"release",loaders:["paper"],game_versions:["1.21.8"],dependencies:[]}};
 const hangar = renderProject({...base,source:"Hangar",install_available:false,icon_url:"https://hangar.papermc.io/avatar.png"},server);
@@ -1863,12 +1863,30 @@ for (const source of ["Modrinth","Hangar"]) {
   const cardNodes=flatten(owned), infoNodes=flatten(panelBody);
   assert(cardNodes.some(n=>n.textContent==="Installed"));
   assert(infoNodes.some(n=>n.textContent==="Installed" && n.tag!=="button"));
-  if(state!=="attention") assert(cardNodes.some(n=>n.textContent===(state==="enabled"?"Enabled":"Disabled")));
+  const semantics=[["1","version"],["paper","server"],["MC 1.21.8","minecraft"],["Installed","installed"],[state==="enabled"?"Enabled":state==="disabled"?"Disabled":"Needs attention",state==="attention"?"attention":state]];
+  for(const rootNodes of [cardNodes,infoNodes]) for(const [label,semantic] of semantics) assert(rootNodes.some(n=>n.textContent===label && n.className.includes("plugins-badge-"+semantic)));
+  const topRight=infoNodes.find(n=>n.className.includes("plugins-overlay-installed"));
+  assert(topRight);assert.equal(topRight.tag,"span");assert.equal(topRight.attrs.role,undefined);assert.deepEqual(topRight.events,{});
   assert(infoNodes.some(n=>n.textContent==="Managed by Plugins"));
   assert(infoNodes.some(n=>n.textContent==="Updates are not available yet"));
   assert(infoNodes.some(n=>n.textContent===(state==="enabled"?"Enabled":state==="disabled"?"Disabled":"Needs attention")));
   assert(!infoNodes.some(n=>n.tag==="button" && n.textContent==="Install"));
  }
+}
+// Inventory uses the same header slot only for Plugins ownership.
+for(const management of ["plugins","manual","justvoxel"]) for(const state of ["enabled","disabled","attention"]) {
+ const plugin={name:"Inventory",filename:"inventory.jar",version:"2",management,state,update_status:state==="attention"?"Attention: changed JAR":"",metadata_status:"Metadata read"};
+ const card=renderInstalled(plugin);results.append(card);card.events.click();
+ const nodes=flatten(panelBody),status=nodes.find(n=>n.className.includes("plugins-overlay-installed"));
+ assert.equal(Boolean(status),management==="plugins");
+ if(status){assert.equal(status.tag,"span");assert.equal(status.textContent,"Installed");assert.deepEqual(status.events,{});assert.equal(status.attrs.role,undefined);assert(status.className.includes("plugins-badge-installed"));}
+ assert(nodes.some(n=>n.textContent==="2" && n.className.includes("plugins-badge-version")));
+ assert(!nodes.some(n=>n.tag==="button" && n.textContent==="Install"));
+}
+// Future authoritative server labels receive the same badge, without name matching.
+for(const label of ["Future server","Fabric","Quilt"]) {
+ const card=renderProject({...base,source:"Hangar"},{...server,server_software:label});results.append(card);card.events.click();
+ for(const root of [card,panelBody]) assert(flatten(root).some(n=>n.textContent===label && n.className.includes("plugins-badge-server")));
 }
 const imagesBeforeNoninstalled=imageRequests.length;
 const installableHangar=renderProject({...base,source:"Hangar",install_available:true},server);
@@ -1907,7 +1925,7 @@ const form={querySelectorAll:(selector)=>{for(const c of controls)assert(selecto
 const previous={addEventListener:(event,fn)=>previous.click=fn},next={addEventListener:(event,fn)=>next.click=fn};
 let searchTimer=null,loads=0;
 const clearTimeout=()=>{},load=()=>{loads++};
-let totalPages=1;const pageInput={addEventListener:()=>{}},pageTotal={};
+let totalPages=1;const pageLabel={};
 ` + cursors + navigation + filters + `
 const original=firstCursor();
 const second={modrinth_offset:7,hangar_offset:3,hangar_first:true};
@@ -1935,11 +1953,11 @@ const requests=[];
 const elements={q:{value:"query"},compatible_only:{checked:true},release_only:{checked:true},modrinth:{checked:true},hangar:{checked:false}};
 const form={elements,querySelectorAll:()=>Object.values(elements)};
 const state={},context={},pagination={},previous={},next={};
-const pageInput={style:{setProperty:()=>{}}},pageTotal={};
+const pageLabel={};
 let pageCursors=[],totalPages=1,discoverServerKey=null;const resetCursors=()=>{throw new Error("unexpected context reset")};
 const document={body:{classList:{contains:()=>true}}};
 const pluginsDialog={};
-const results={replaceChildren:()=>{},append:()=>{throw new Error("unexpected result")}};
+const results={classList:{toggle:()=>{}},replaceChildren:()=>{},append:()=>{throw new Error("unexpected result")}};
 let generation=0,controller=null,tab="discover",pageLimit=1,pageIndex=0,nextCursor=null,total=0;
 let cursor={modrinth_offset:8,hangar_offset:3,hangar_first:true};
 const clearInventoryTimer=()=>{};
@@ -1965,15 +1983,15 @@ const fetch=async(url,options)=>{
   assert(!elements.modrinth.disabled);assert(!elements.hangar.disabled);
  }
  assert.equal(state.textContent,"Enable Modrinth or Hangar to browse plugins.");
- assert.equal(pageInput.value,"1");assert.equal(pageTotal.textContent,"1");
+ assert.equal(pageLabel.textContent,"Page 1 of 1");
  assert(next.disabled);assert(previous.disabled);
  elements.modrinth.checked=true;elements.hangar.checked=true;
  total=25;pageLimit=8;
- await load();assert.equal(pageInput.value,"1");assert.equal(pageTotal.textContent,"4");
+ await load();assert.equal(pageLabel.textContent,"Page 1 of 4");
  pageIndex=1;
- await load();assert.equal(pageInput.value,"2");assert.equal(pageTotal.textContent,"4");assert(!previous.disabled);
+ await load();assert.equal(pageLabel.textContent,"Page 2 of 4");assert(!previous.disabled);
  total=0;pageIndex=0;
- await load();assert.equal(pageInput.value,"1");assert.equal(pageTotal.textContent,"1");
+ await load();assert.equal(pageLabel.textContent,"Page 1 of 1");
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `
 	command := exec.Command("node", "-e", program)
@@ -2013,85 +2031,6 @@ func TestPluginsWorkspaceHangarContracts(t *testing.T) {
 	}
 }
 
-func TestPluginsEditablePageJump(t *testing.T) {
-	script := pluginWorkspaceScript(t)
-	header, _ := assets.ReadFile("templates/header.html")
-	if !strings.Contains(string(header), `Page <input type="text" inputmode="numeric" data-plugins-page-input aria-label="Page number" value="1" size="1"> of <span data-plugins-page-total>1</span>`) {
-		t.Fatal("editable compact Page [input] of [total] markup missing")
-	}
-	for _, bad := range []string{`type="number" data-plugins-page`, `(page - 1) * pageLimit`, `(requestedPage - 1) * pageLimit`, `pageCursors.push(payload`, `pageCursors[pageIndex] = payload.projects`} {
-		if strings.Contains(script, bad) {
-			t.Fatal("invalid page cache/offset", bad)
-		}
-	}
-	cursors := pluginScriptSection(t, script, "  const firstCursor =", "  const text =")
-	loader := pluginScriptSection(t, script, "  const discoverQuery =", "  const discoverCapacity =")
-	events := pluginScriptSection(t, script, `  pageInput.addEventListener("keydown"`, "  // Role discovery")
-	program := `
-const assert=require("node:assert/strict");
-const handlers={},pageInput={value:"1",disabled:false,style:{setProperty:(key,value)=>pageInput.width=value},addEventListener:(event,fn)=>handlers[event]=fn},pageTotal={};
-let totalPages=1,discoverServerKey=null,pageLimit=2;
-const state={},context={},pagination={},previous={},next={};
-const elements={q:{value:""},compatible_only:{checked:true},release_only:{checked:true},modrinth:{checked:true},hangar:{checked:true}};
-const form={elements,querySelectorAll:()=>Object.values(elements)};
-const document={body:{classList:{contains:()=>true}}};
-const clearInventoryTimer=()=>{};
-const rendered=[],requests=[];
-const results={replaceChildren:()=>{rendered.length=0},append:(item)=>rendered.push(item)};
-const renderProject=(item)=>item;
-const server={supported:true,server_type:"paper",server_software:"Paper",minecraft_version:"1.21.8"};
-const positions=[{modrinth_offset:0,hangar_offset:0,hangar_first:false},{modrinth_offset:7,hangar_offset:2,hangar_first:true},{modrinth_offset:8,hangar_offset:9,hangar_first:false},{modrinth_offset:14,hangar_offset:10,hangar_first:true}];
-let end=3,fail=false,pending=null,pause=false,contextServer=server;
-const fetch=async(url,options)=>{
- const q=new URL(url,"https://appliance").searchParams;
- const index=positions.findIndex(p=>p.modrinth_offset===Number(q.get("modrinth_offset")) && p.hangar_offset===Number(q.get("hangar_offset")) && String(p.hangar_first)===q.get("hangar_first"));
- assert(index>=0,"cursor must be a returned composite position");
- assert.equal(q.get("limit"),String(pageLimit));
- assert.equal(options.cache,"no-store");
- requests.push({index,signal:options.signal});
- if(pause) await new Promise(resolve=>pending=resolve);
- return {ok:!fail,status:fail?502:200,json:async()=>({server:contextServer,modrinth:true,hangar:true,total:170,cursor:positions[index],next_cursor:index<end?positions[index+1]:null,projects:[{id:index,request:requests.length}]})};
-};
-const window={location:{assign:()=>{throw new Error("unexpected auth redirect")}}};
-` + cursors + loader + events + `
-(async()=>{
- await load();
- assert.equal(pageInput.value,"1");assert.equal(pageTotal.textContent,"85");assert.equal(pageInput.width,"2ch");
- assert.deepEqual(pageCursors,[positions[0],positions[1]]);
- pageInput.value="4";
- const jumping=jumpToPage();
- assert.equal(state.textContent,"Finding page 4…");assert(previous.disabled && next.disabled && pageInput.disabled);
- assert.deepEqual(rendered.map(p=>p.id),[0]);
- await jumping;
- assert.deepEqual(requests.map(r=>r.index),[0,1,2,3]); // No intermediate render or second fetch of destination in resolution.
- assert.deepEqual(rendered.map(p=>p.id),[3]);assert.equal(pageInput.value,"4");
- assert.deepEqual(pageCursors,positions);assert(pageCursors.every(c=>Object.keys(c).sort().join() === "hangar_first,hangar_offset,modrinth_offset"));
- assert(!pageInput.disabled && !previous.disabled);
- pageInput.value="2";await jumpToPage();assert.equal(requests.at(-1).index,1);assert.equal(rendered[0].id,1);
- const before=requests.length;
- for(const invalid of ["","0","86","1.5","-2","junk","1e1"]) {pageInput.value=invalid;await jumpToPage();assert.equal(pageInput.value,"2");}
- assert.equal(requests.length,before);
- pageInput.value="3";handlers.blur();assert.equal(pageInput.value,"2");assert.equal(requests.length,before);
- let prevented=false;pageInput.value="3";handlers.keydown({key:"Tab",preventDefault:()=>{throw new Error("Tab navigated")}});assert.equal(requests.length,before);
- handlers.keydown({key:"Enter",preventDefault:()=>prevented=true});await new Promise(resolve=>setImmediate(resolve));assert(prevented);assert.equal(requests.at(-1).index,2);assert.equal(pageInput.value,"3");
- resetCursors();end=1;await load();pageInput.value="4";await jumpToPage();
- assert.equal(pageIndex,1);assert.equal(pageInput.value,"2");assert.equal(pageCursors.length,2);assert.equal(nextCursor,null);
- assert.equal(requests.at(-1).index,1);assert.equal(state.textContent,"Last reachable page with the current filters.");assert(!pageInput.disabled && !previous.disabled && next.disabled);
- resetCursors();end=3;await load();fail=true;pageInput.value="4";await jumpToPage();assert(!pageInput.disabled && !next.disabled);assert.equal(pageInput.value,"1");fail=false;
- // A generation change aborts the active jump and cannot let its delayed response cache or render.
- resetCursors();await load();pause=true;pageInput.value="4";const stale=jumpToPage();const staleSignal=controller.signal;
- ++generation;controller.abort();resetCursors();pause=false;await load();const freshGeneration=generation;pending();await stale;
- assert(staleSignal.aborted);assert.equal(generation,freshGeneration);assert.deepEqual(pageCursors,[positions[0],positions[1]]);assert.equal(rendered[0].id,0);assert(!pageInput.disabled);
- // Authoritative server context change discards all old cursors and freshly loads page one.
- pageInput.value="2";await jumpToPage();contextServer={...server,minecraft_version:"1.21.9"};await load();await new Promise(resolve=>setImmediate(resolve));
- assert.equal(pageIndex,0);assert.equal(pageInput.value,"1");assert.equal(requests.at(-1).index,0);
-})().catch(error=>{console.error(error);process.exitCode=1});
-`
-	if out, err := exec.Command("node", "-e", program).CombinedOutput(); err != nil {
-		t.Fatalf("page jump: %v\n%s", err, out)
-	}
-}
-
 func TestPluginsPageCursorInvalidationEvents(t *testing.T) {
 	script := pluginWorkspaceScript(t)
 	cursors := pluginScriptSection(t, script, "  const firstCursor =", "  const text =")
@@ -2100,7 +2039,7 @@ func TestPluginsPageCursorInvalidationEvents(t *testing.T) {
 	program := `
 const assert=require("node:assert/strict");
 const eventNode=()=>({events:{},addEventListener(event,fn){this.events[event]=fn}});
-const pageInput=eventNode(),pageTotal={};let totalPages=1,pageLimit=8,capacityTimer=null,searchTimer=null,loads=0,resumes=0,closes=0,options;
+const pageLabel={};let totalPages=1,pageLimit=8,capacityTimer=null,searchTimer=null,loads=0,resumes=0,closes=0,options;
 let wantedCapacity=8;const discoverCapacity=()=>wantedCapacity;
 const controls=["compatible_only","release_only","modrinth","hangar"].map(name=>({...eventNode(),name}));
 const form={...eventNode(),elements:{q:eventNode()},querySelectorAll:()=>controls};
@@ -2109,13 +2048,17 @@ const tabs=[{...eventNode(),dataset:{pluginsTab:"discover"},setAttribute:()=>{}}
 const pluginsDialog={open:true,querySelector:s=>s.includes("refresh")?refresh:close,querySelectorAll:()=>tabs};
 const state={};const document={body:{classList:{contains:()=>true}},querySelector:()=>null};
 const setupWorkspaceWindow=(dialog,callbacks)=>{options=callbacks;return {open:callbacks.onOpen,close:callbacks.onClose}};
-const clearTimeout=()=>{},setTimeout=(fn)=>{searchTimer=fn;return fn},clearInventoryTimer=()=>{},closePanel=()=>closes++,resumePluginInstall=()=>resumes++,jumpToPage=()=>{};
+const clearTimeout=()=>{},setTimeout=(fn)=>{searchTimer=fn;return fn},clearInventoryTimer=()=>{},closePanel=()=>closes++,resumePluginInstall=()=>resumes++;
 ` + cursors + `
-const load=()=>{loads++;generation++;controller?.abort();pageInput.disabled=false};
+const load=()=>{loads++;generation++;controller?.abort();};
 ` + capacity + workspace + `
+let discoverServerKey=null;
+` + pluginScriptSection(t, script, "  const acceptDiscoverContext =", "  const load =") + `
 const second={modrinth_offset:7,hangar_offset:4,hangar_first:true};
-const dirty=()=>{pageCursors=[firstCursor(),second];pageIndex=1;cursor=second;nextCursor=second;totalPages=85;pageInput.value="2";controller=new AbortController()};
-const clean=()=>{assert.equal(pageIndex,0);assert.deepEqual(cursor,firstCursor());assert.deepEqual(pageCursors,[firstCursor()]);assert.equal(nextCursor,null);assert.equal(pageInput.value,"1");assert.equal(pageTotal.textContent,"1")};
+const dirty=()=>{pageCursors=[firstCursor(),second];pageIndex=1;cursor=second;nextCursor=second;totalPages=85;pageLabel.textContent="Page 2 of 85";controller=new AbortController()};
+const clean=()=>{assert.equal(pageIndex,0);assert.deepEqual(cursor,firstCursor());assert.deepEqual(pageCursors,[firstCursor()]);assert.equal(nextCursor,null);assert.equal(pageLabel.textContent,"Page 1 of 1")};
+assert(acceptDiscoverContext({server_software:"Paper",minecraft_version:"1"}));
+dirty();assert(!acceptDiscoverContext({server_software:"Future",minecraft_version:"2"}));clean();
 dirty();refresh.events.click();clean();assert.equal(loads,1);
 for(const control of controls){dirty();const signal=controller.signal;control.events.change();clean();assert(signal.aborted)}
 dirty();const searchSignal=controller.signal;form.elements.q.events.input();clean();assert(searchSignal.aborted);searchTimer();
@@ -2149,5 +2092,38 @@ const stopPolling=()=>{throw new Error("installed project entered installation")
 `
 	if out, err := exec.Command("node", "-e", program).CombinedOutput(); err != nil {
 		t.Fatalf("installed review guard: %v\n%s", err, out)
+	}
+}
+
+func TestPluginsPlainPaginationAndSemanticBadgeStyles(t *testing.T) {
+	script := pluginWorkspaceScript(t)
+	header, _ := assets.ReadFile("templates/header.html")
+	css, _ := assets.ReadFile("static/app.css")
+	if !strings.Contains(string(header), `<span data-plugins-page>Page 1 of 1</span>`) {
+		t.Fatal("plain page label missing")
+	}
+	for _, forbidden := range []string{"data-plugins-page-input", "data-plugins-page-total", "inputmode=", "jumpToPage", "Finding page", "reachableIndex", "(page - 1) * pageLimit", "(requestedPage - 1) * pageLimit"} {
+		if strings.Contains(script, forbidden) || strings.Contains(string(header), forbidden) || strings.Contains(string(css), forbidden) {
+			t.Fatal("page jump remains", forbidden)
+		}
+	}
+	style := string(css)
+	light := strings.LastIndex(style, "@media(prefers-color-scheme:light)")
+	if light < 0 {
+		t.Fatal("light theme missing")
+	}
+	for _, semantic := range []string{"version", "server", "minecraft", "installed", "enabled", "disabled", "attention"} {
+		selector := ".plugins-badge-" + semantic + "{color:"
+		if !strings.Contains(style[:light], selector) || !strings.Contains(style[light:], selector) {
+			t.Fatal("semantic dark/light treatment missing", semantic)
+		}
+	}
+	for _, forbidden := range []string{"plugins-badge-Paper", "plugins-badge-Purpur", `server === "Paper"`, `server === "Purpur"`, `platform === "Paper"`, `platform === "Purpur"`} {
+		if strings.Contains(script, forbidden) || strings.Contains(style, forbidden) {
+			t.Fatal("server-specific styling", forbidden)
+		}
+	}
+	if !strings.Contains(script, `panelAction("Install", () => applyPlugin(plan))`) {
+		t.Fatal("top-right install action missing")
 	}
 }
