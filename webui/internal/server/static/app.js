@@ -4008,6 +4008,19 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     return { panel, heading };
   };
 
+  const cleanSystemHealthOutput = (output) => {
+    return output
+      // Terminal control strings: OSC (including hyperlinks), DCS, SOS, PM and APC.
+      .replace(/(?:\u001b\]|\u009d)[\s\S]*?(?:\u0007|\u001b\\|\u009c)/g, "")
+      .replace(/(?:\u001b[PX^_]|[\u0090\u0098\u009e\u009f])[\s\S]*?(?:\u001b\\|\u009c)/g, "")
+      // CSI includes colors, cursor movement and erase commands; then other escapes.
+      .replace(/(?:\u001b\[|\u009b)[0-?]*[ -/]*[@-~]/g, "")
+      .replace(/\u001b[ -/]*[0-~]/g, "")
+      // Keep tabs, line feeds and carriage returns for the original layout.
+      .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, "")
+      .replace(/§x(?:§[0-9a-f]){6}|§[0-9a-fk-orx]/gi, "");
+  };
+
   const renderHealth = async (sequence) => {
     const payload = await systemFetchJSON("/api/system/workspace/health");
     if (!payload || sequence !== loadSequence || !content) return;
@@ -4021,7 +4034,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     const built = systemPanel("System health", "Health check details");
     const pre = document.createElement("pre");
     pre.className = "log-box";
-    pre.textContent = result.output || "No detailed health output was returned.";
+    pre.textContent = cleanSystemHealthOutput(result.output || "No detailed health output was returned.");
     built.panel.appendChild(pre);
     root.appendChild(built.panel);
     content.replaceChildren(root);
