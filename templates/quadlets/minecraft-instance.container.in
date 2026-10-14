@@ -1,0 +1,23 @@
+[Unit]
+Description=JustVoxel Minecraft @@INSTANCE_ID@@
+Wants=network-online.target
+After=network-online.target
+RequiresMountsFor=@@DATA_PATH@@
+
+[Container]
+Image=@@MINECRAFT_IMAGE@@
+ContainerName=minecraft-@@INSTANCE_ID@@
+PublishPort=@@JAVA_PORT@@:25565/tcp
+Volume=@@DATA_PATH@@:/data:Z
+EnvironmentFile=@@ENV_PATH@@
+Memory=@@CONTAINER_MEMORY@@
+StopTimeout=180
+LogDriver=journald
+
+[Service]
+ExecStartPre=/usr/libexec/justvoxel/mjust/validate-instance-data-mount @@INSTANCE_ID@@ "@@STORAGE_ROOT@@" "@@DATA_PATH@@" "@@DATA_MOUNT_POINT@@" "@@DATA_EXPECTED_UUID@@" "@@DATA_EXPECTED_SOURCE@@"
+Restart=always
+RestartSec=10
+TimeoutStartSec=900
+TimeoutStopSec=240
+@@INSTALL_SECTION@@

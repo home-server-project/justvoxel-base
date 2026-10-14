@@ -1,0 +1,43 @@
+#!/usr/bin/bash
+set -euo pipefail
+# Reuse only the exact-mount identity function, never require_config or the
+# global DATA_PATH. These arguments are non-secret, validated Quadlet literals.
+source /usr/libexec/justvoxel/mjust/common.sh
+require_root
+
+fail() { echo 'ERROR: instance Minecraft data path or mount validation failed.' >&2; exit 1; }
+[[ $# == 6 ]] || fail
+instance_id=$1
+storage_root=$2
+data_path=$3
+mount_point=$4
+expected_uuid=$5
+expected_source=$6
+[[ ${instance_id} =~ ^jv-[a-z0-9]{6,12}$ ]] || fail
+[[ ${data_path} == "${storage_root}/minecraft-instances/${instance_id}/data" ]] || fail
+
+# Require pre-existing directories; do not let Podman create a world directory
+# on an absent disk. Canonical equality rejects symlinks in every component,
+# including a link introduced after rendering. Never relabel or repair paths.
+for path in "${storage_root}" "${data_path}"; do
+    [[ ${path} =~ ^/[a-zA-Z0-9_./-]+$ && ${path} != / && -d ${path} ]] || fail
+    [[ $(realpath -e -- "${path}") == "${path}" ]] || fail
+done
+
+if [[ -z ${mount_point} ]]; then
+    [[ -z ${expected_uuid} && -z ${expected_source} ]] || fail
+    exit 0
+fi
+[[ ${mount_point} =~ ^/[a-zA-Z0-9_./-]+$ && ${mount_point} != / ]] || fail
+[[ $(realpath -e -- "${mount_point}") == "${mount_point}" ]] || fail
+[[ ${storage_root} == "${mount_point}" || ${storage_root} == "${mount_point}/"* ]] || fail
+[[ -n ${expected_uuid} || -n ${expected_source} ]] || fail
+mountpoint -q -- "${mount_point}" || fail
+if [[ -n ${expected_uuid} ]]; then
+    actual_uuid="$(jv_exact_mount_identity UUID "${mount_point}")" || fail
+    [[ ${actual_uuid} == "${expected_uuid}" ]] || fail
+fi
+if [[ -n ${expected_source} ]]; then
+    actual_source="$(jv_exact_mount_identity SOURCE "${mount_point}")" || fail
+    [[ ${actual_source} == "${expected_source}" ]] || fail
+fi
