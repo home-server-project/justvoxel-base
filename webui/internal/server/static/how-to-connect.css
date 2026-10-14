@@ -12,15 +12,15 @@
 .connect-methods{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 24px}
 .connect-method{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px;min-width:0;border:1px solid var(--jv-border);background:var(--jv-surface-sunken);border-radius:var(--jv-radius)}
 .connect-method-label{margin:0;font-weight:700}
-.connect-actions{display:grid;grid-template-columns:auto minmax(0,320px) auto auto;align-items:center;justify-content:start;gap:4px 16px;margin-top:20px}
-.connect-domain label{margin:0;font-weight:700}.connect-domain input[type=text]{width:100%;max-width:320px;margin:0;min-width:0}
+.connect-actions{display:grid;width:100%;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:4px 16px;margin-top:20px}
+.connect-domain label{margin:0;font-weight:700}.connect-domain input[type=text]{width:100%;max-width:none;margin:0;min-width:0}
 .connect-domain small{grid-column:2;grid-row:2;line-height:1.5;font-size:.75rem}
 .connect-domain input[aria-invalid="true"]{border-color:var(--jv-error)}
 .connect-actions button{grid-column:4;grid-row:1;white-space:nowrap}
-.connect-guide{display:none;background:var(--jv-surface);color:var(--jv-text);border:1px solid var(--jv-border);border-radius:14px;padding:36px}
+.connect-guide{background:var(--jv-surface);color:var(--jv-text);border:1px solid var(--jv-border);border-radius:14px;padding:36px}
 .connect-guide-heading{display:block;position:static;z-index:auto;padding:0 0 24px;background:transparent;text-align:center;border-bottom:2px solid var(--jv-border);margin-bottom:28px}
 .connect-guide-top-row{display:flex;align-items:center;justify-content:space-between;gap:20px}.connect-guide-top-row p{margin-left:auto}
-.connect-print-logo{display:none}
+.connect-print-logo{display:block;width:145px;height:auto}
 .connect-editions{display:inline-block;font-weight:700}
 .connect-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:20px 0 30px}
 .connect-card{border:1px solid var(--jv-border);border-top:4px solid var(--jv-success);border-radius:10px;padding:20px;background:var(--jv-surface);overflow-wrap:anywhere}
@@ -33,7 +33,7 @@
  .connect-shell{padding:20px 14px 40px}.connect-controls,.connect-empty,.connect-guide{padding:20px}
  .connect-title-row{align-items:stretch;flex-direction:column;gap:0}.connect-server{width:100%}
  .connect-methods,.connect-cards{grid-template-columns:1fr}.connect-method{padding:14px}
- .connect-actions{grid-template-columns:minmax(0,1fr) auto;gap:8px 16px}.connect-domain label{grid-column:1/-1}.connect-domain input[type=text]{max-width:320px}.connect-domain small{grid-column:1/-1;grid-row:auto}.connect-actions button{grid-column:1/-1;grid-row:4}
+ .connect-actions{grid-template-columns:minmax(0,1fr) auto;gap:8px 16px}.connect-domain label{grid-column:1/-1}.connect-domain small{grid-column:1;grid-row:3}.connect-actions button{grid-column:1/-1;grid-row:4}
 }
 @media print{
  @page{margin:16mm}

@@ -145,7 +145,7 @@ test('print rules hide all editing and unselected cards and block invalid browse
   assert.match(print, /\.connect-page:not\(\.connect-print-ready\) \.connect-print-blocked\{display:block!important\}/);
 });
 
-test('approved page layout uses shared JustVoxel components and a print-only login logo', () => {
+test('approved page layout uses a full-width action lane and the same guide and login logo for preview and print', () => {
   const template = readFileSync(path.join(__dirname, '../webui/internal/server/templates/how_to_connect.html'), 'utf8');
   const css = readFileSync(path.join(__dirname, '../webui/internal/server/static/how-to-connect.css'), 'utf8');
   const app = readFileSync(path.join(__dirname, '../webui/internal/server/static/app.css'), 'utf8');
@@ -165,6 +165,8 @@ test('approved page layout uses shared JustVoxel components and a print-only log
   assert.ok(template.indexOf('<div class="connect-methods">') < template.indexOf('<div class="connect-actions connect-domain">'));
   assert.match(lane, /<label for="connect-domain">Custom domain<\/label>\s*<input id="connect-domain"[^>]+>\s*<input id="connect-custom"[^>]+>/);
   assert.match(lane, /<button type="button" data-connect-print disabled>Save to PDF<\/button>/);
+  // The helper occupies a separate row; the button ends the four primary controls.
+  assert.match(lane, /<input id="connect-custom"[^>]+>\s*{{end}}{{end}}\s*<button[^>]+>Save to PDF<\/button>\s*<small class="muted" id="connect-domain-help">Hostname only — no https:\/\/ or port\.<\/small>\s*<\/div>\s*$/);
   assert.equal((lane.match(/<p[ >]/g) || []).length, 0);
   const method = template.slice(template.indexOf('{{define "connect-method-control"}}'));
   assert.match(method, /<div class="connect-method">\s*<label[^>]+>{{.Name}}<\/label>\s*<input[^>]+role="switch"[^>]+>\s*<\/div>/);
@@ -179,14 +181,26 @@ test('approved page layout uses shared JustVoxel components and a print-only log
   assert.ok(!template.slice(0, template.indexOf('<article class="connect-guide"')).includes('<img'));
   assert.equal((template.match(/<img /g) || []).length, 1);
   assert.match(template, /<h1>JustVoxel Connection Guide<\/h1>/);
-  assert.match(screen, /\.connect-print-logo\{display:none\}/);
+  assert.match(screen, /\.connect-print-logo\{display:block;width:145px;height:auto\}/);
   assert.match(screen, /\.connect-guide-top-row\{display:flex;align-items:center;justify-content:space-between;/);
   assert.match(print, /\.connect-print-logo\{display:block;width:145px;height:auto\}/);
   assert.match(screen, /\.connect-title-row\{align-items:center\}/);
-  assert.match(screen, /\.connect-actions\{display:grid;grid-template-columns:auto minmax\(0,320px\) auto auto;/);
-  assert.match(screen, /\.connect-domain input\[type=text\]\{width:100%;max-width:320px;/);
+  assert.match(screen, /\.connect-actions\{display:grid;width:100%;grid-template-columns:auto minmax\(0,1fr\) auto auto;/);
+  assert.ok(!screen.includes('max-width:320px'));
+  assert.ok(!screen.includes('justify-content:start'));
+  assert.match(screen, /\.connect-domain input\[type=text\]\{width:100%;max-width:none;/);
   assert.match(screen, /\.connect-domain small\{grid-column:2;grid-row:2;/);
-  assert.match(screen, /\.connect-guide\{display:none;/);
+  assert.match(screen, /\.connect-domain small\{grid-column:1;grid-row:3\}/);
+  const guideRules = Array.from(screen.matchAll(/([^{}]+)\{([^{}]*)\}/g))
+    .filter(([, selectors]) => /\.connect-guide(?:[\s,{:]|$)/.test(selectors));
+  assert.ok(guideRules.length > 0);
+  for (const [, selectors, declarations] of guideRules) {
+    assert.ok(!/display\s*:\s*none\b/.test(declarations), selectors);
+  }
+  assert.match(template, /<article class="connect-guide" data-connect-guide hidden>/);
+  assert.equal((template.match(/data-connect-guide/g) || []).length, 1);
+  assert.match(source, /guide\.hidden = !ready;/);
+  assert.match(source, /if \(update\(\)\) window\.print\(\);/);
   const frame = screen.match(/\.connect-method\{([^}]+)\}/)[1];
   assert.ok(frame.includes('border:1px solid var(--jv-border)'));
   assert.ok(frame.includes('background:var(--jv-surface-sunken)'));

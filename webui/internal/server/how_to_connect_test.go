@@ -362,7 +362,10 @@ func TestConnectionGuideApprovedVisualContract(t *testing.T) {
 	}
 	guideStart := strings.Index(body, `<article class="connect-guide"`)
 	if guideStart < 0 || strings.Contains(body[:guideStart], "<img") || strings.Count(body, "<img") != 1 {
-		t.Fatal("logo must exist only in the print guide")
+		t.Fatal("logo must exist only in the shared preview/print guide")
+	}
+	if strings.Count(body, `data-connect-guide`) != 1 || !strings.Contains(body, `<article class="connect-guide" data-connect-guide hidden>`) {
+		t.Fatal("preview and print must share one guide with visibility controlled by readiness")
 	}
 	controlsStart := strings.Index(body, `<div class="connect-methods">`)
 	if controlsStart < 0 {
@@ -381,7 +384,7 @@ func TestConnectionGuideApprovedVisualContract(t *testing.T) {
 		}
 		previous = position
 	}
-	if strings.Count(controls, `class="connect-method"`) != 4 || strings.Contains(controls, "<small") || strings.Contains(controls, "<span") {
+	if strings.Count(controls, `class="connect-method"`) != 4 || strings.Count(controls, `role="switch"`) != 4 || strings.Contains(controls, "<small") || strings.Contains(controls, "<span") {
 		t.Fatal("method cells must contain only their label and shared switch")
 	}
 	label := strings.Index(body, `<label for="connect-domain">Custom domain</label>`)
@@ -398,6 +401,10 @@ func TestConnectionGuideApprovedVisualContract(t *testing.T) {
 	button := strings.Index(body, `<button type="button" data-connect-print disabled>Save to PDF</button>`)
 	if button <= switchInput || button >= actionsEnd || strings.Contains(body[actionsStart:actionsEnd], "<p") {
 		t.Fatal("Save to PDF must follow the custom switch in the same lane without a status sentence")
+	}
+	buttonEnd := button + len(`<button type="button" data-connect-print disabled>Save to PDF</button>`)
+	if strings.TrimSpace(body[buttonEnd:actionsEnd]) != `<small class="muted" id="connect-domain-help">Hostname only — no https:// or port.</small>` {
+		t.Fatal("Save to PDF must end the primary row, followed only by the hostname helper on its own row")
 	}
 	login, err := assets.ReadFile("templates/login.html")
 	if err != nil || !strings.Contains(string(login), `src="/static/justvoxel-login-logo.png"`) {
