@@ -54,6 +54,7 @@ var runWebHelper = func(ctx context.Context, args ...string) ([]byte, int, error
 }
 
 func registerMinecraftRoutes(mux *http.ServeMux, s *server) {
+	registerInstanceRuntimeRoutes(mux, s)
 	mux.HandleFunc("GET /v1/minecraft/instances", s.minecraftInstancesList)
 	mux.HandleFunc("POST /v1/minecraft/instances/{id}/name", s.minecraftInstanceRename)
 	mux.HandleFunc("GET /v1/minecraft/identity", s.minecraftInstanceRead)

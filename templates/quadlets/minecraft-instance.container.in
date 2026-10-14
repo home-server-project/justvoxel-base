@@ -15,6 +15,7 @@ StopTimeout=180
 LogDriver=journald
 
 [Service]
+ExecStartPre=/usr/libexec/justvoxel/mjust/validate-instance-runtime-commit @@INSTANCE_ID@@
 ExecStartPre=/usr/libexec/justvoxel/mjust/validate-instance-data-mount @@INSTANCE_ID@@ "@@STORAGE_ROOT@@" "@@DATA_PATH@@" "@@DATA_MOUNT_POINT@@" "@@DATA_EXPECTED_UUID@@" "@@DATA_EXPECTED_SOURCE@@"
 Restart=always
 RestartSec=10

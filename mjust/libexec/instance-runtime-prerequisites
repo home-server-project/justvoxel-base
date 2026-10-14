@@ -1,0 +1,144 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+require_root
+fail() { echo 'ERROR: instance runtime prerequisites could not be verified.' >&2; exit 1; }
+case "${1:-}" in
+    snapshot)
+        [[ $# == 1 ]] || fail
+        require_config
+        [[ ${MINECRAFT_UID} =~ ^[1-9][0-9]*$ && ${MINECRAFT_GID} =~ ^[1-9][0-9]*$ ]] || fail
+        configuration="$(/usr/libexec/justvoxel/mjust/admin-discovery-json configuration)" || fail
+        memory="$(awk '/^MemTotal:/ {printf "%d\n", $2 / 1024; exit}' /proc/meminfo)"
+        [[ ${memory} =~ ^[1-9][0-9]*$ ]] || fail
+        jq -n --argjson configuration "${configuration}" --argjson memory "${memory}" \
+            --argjson uid "${MINECRAFT_UID}" --argjson gid "${MINECRAFT_GID}" \
+            '{configuration:$configuration,memory_mib:$memory,uid:$uid,gid:$gid}'
+        ;;
+    version)
+        [[ $# == 4 ]] || fail
+        MINECRAFT_SERVER_TYPE=$2
+        version=$3
+        channel=$4
+        [[ ${MINECRAFT_SERVER_TYPE} == paper || ${MINECRAFT_SERVER_TYPE} == purpur || ${MINECRAFT_SERVER_TYPE} == vanilla ]] || fail
+        [[ ${channel} == default || ${channel} == experimental ]] || fail
+        if [[ ${version} == LATEST ]]; then
+            [[ ${MINECRAFT_SERVER_TYPE} != paper || ${channel} == experimental ]] || fail
+            resolve_latest_server_version >/dev/null || fail
+        else
+            server_version_available "${version}" || fail
+            if [[ ${MINECRAFT_SERVER_TYPE} == paper && ${channel} == default ]]; then
+                paper_version_has_stable_build "${version}" || fail
+            fi
+        fi
+        ;;
+    preflight|preflight-new|provision|validate)
+        [[ $# == 9 ]] || fail
+        action=$1 instance_id=$2 storage_root=$3 data_path=$4 mount_point=$5 expected_uuid=$6 expected_source=$7 uid=$8 gid=$9
+        [[ ${instance_id} =~ ^jv-[a-z0-9]{6,12}$ ]] || fail
+        [[ ${uid} =~ ^[1-9][0-9]*$ && ${gid} =~ ^[1-9][0-9]*$ ]] || fail
+        (( uid < 4294967295 && gid < 4294967295 )) || fail
+        [[ ${storage_root} =~ ^/[a-zA-Z0-9_./-]+$ && ${storage_root} != / && -d ${storage_root} ]] || fail
+        [[ $(realpath -e -- "${storage_root}") == "${storage_root}" ]] || fail
+        root_owner="$(stat -c '%u' -- "${storage_root}")" || fail
+        root_mode="$(stat -c '%a' -- "${storage_root}")" || fail
+        [[ ${root_owner} == 0 && ${root_mode} =~ ^[0-7]{3,4}$ ]] || fail
+        (( (8#${root_mode} & 0022) == 0 )) || fail
+        [[ ${data_path} == "${storage_root}/minecraft-instances/${instance_id}/data" ]] || fail
+        if [[ -n ${mount_point} ]]; then
+            [[ ${mount_point} =~ ^/[a-zA-Z0-9_./-]+$ && ${mount_point} != / ]] || fail
+            [[ $(realpath -e -- "${mount_point}") == "${mount_point}" ]] || fail
+            [[ ${storage_root} == "${mount_point}" || ${storage_root} == "${mount_point}/"* ]] || fail
+            [[ -n ${expected_uuid} || -n ${expected_source} ]] || fail
+            mountpoint -q -- "${mount_point}" || fail
+            if [[ -n ${expected_uuid} ]]; then
+                [[ $(jv_exact_mount_identity UUID "${mount_point}") == "${expected_uuid}" ]] || fail
+            fi
+            if [[ -n ${expected_source} ]]; then
+                [[ $(jv_exact_mount_identity SOURCE "${mount_point}") == "${expected_source}" ]] || fail
+            fi
+        else
+            [[ -z ${expected_uuid} && -z ${expected_source} ]] || fail
+        fi
+        # Existing parent directories must be root owned and not writable by the
+        # container account. Never traverse a symlink, adopt a foreign world, or
+        # change ownership/labels of pre-existing data.
+        parent="${storage_root}/minecraft-instances"
+        instance_parent="${parent}/${instance_id}"
+        if [[ ${action} == preflight-new ]]; then
+            [[ ! -e ${instance_parent} && ! -L ${instance_parent} ]] || fail
+        fi
+        for path in "${parent}" "${instance_parent}"; do
+            if [[ -e ${path} || -L ${path} ]]; then
+                [[ -d ${path} && ! -L ${path} && $(realpath -e -- "${path}") == "${path}" ]] || fail
+                [[ $(stat -c '%u:%a' -- "${path}") == 0:700 ]] || fail
+            fi
+        done
+        marker="${instance_parent}/.provision.json"
+        marker_valid=no
+        if [[ -e ${marker} || -L ${marker} ]]; then
+            [[ -f ${marker} && ! -L ${marker} && $(realpath -e -- "${marker}") == "${marker}" ]] || fail
+            [[ $(stat -c '%u:%g:%a' -- "${marker}") == 0:0:600 ]] || fail
+            jq -e --arg id "${instance_id}" --arg uid "${uid}" --arg gid "${gid}" \
+                '.id == $id and .uid == $uid and .gid == $gid' "${marker}" >/dev/null || fail
+            marker_valid=yes
+        fi
+        repair_empty=no
+        if [[ -e ${data_path} || -L ${data_path} ]]; then
+            [[ -d ${data_path} && ! -L ${data_path} && $(realpath -e -- "${data_path}") == "${data_path}" ]] || fail
+            data_owner="$(stat -c '%u:%g' -- "${data_path}")" || fail
+            if [[ ${data_owner} != "${uid}:${gid}" ]]; then
+                # Only our durably marked, still-empty newly created directory
+                # can be completed after an interrupted mkdir/chown. Never
+                # repair ownership on existing worlds or invent missing proof.
+                [[ ${data_owner} == 0:* && ${marker_valid} == yes ]] || fail
+                first_entry="$(find "${data_path}" -mindepth 1 -maxdepth 1 -print -quit)" || fail
+                [[ -z ${first_entry} ]] || fail
+                repair_empty=yes
+            fi
+        elif [[ ${action} == validate ]]; then
+            fail
+        fi
+        if [[ ${action} == preflight || ${action} == preflight-new || ${action} == provision ]]; then
+            # Bounded minimum for provisioning; this is not a future-world size
+            # prediction. Fail if the existing configured mount is unavailable.
+            available="$(df -Pk -- "${storage_root}" | awk 'NR==2 {print $4}')" || fail
+            [[ ${available} =~ ^[0-9]+$ ]] || fail
+            (( available >= 1048576 )) || fail
+        fi
+        if [[ ${action} == provision ]]; then
+            for path in "${parent}" "${instance_parent}"; do
+                if [[ ! -e ${path} ]]; then
+                    mkdir -m0700 -- "${path}" || fail
+                    chown 0:0 -- "${path}" || fail
+                fi
+            done
+            if [[ ! -e ${data_path} ]]; then
+                if [[ ${marker_valid} != yes ]]; then
+                    marker_tmp="$(mktemp "${instance_parent}/.provision-XXXXXX")" || fail
+                    jq -n --arg id "${instance_id}" --arg uid "${uid}" --arg gid "${gid}" \
+                        '{id:$id,uid:$uid,gid:$gid}' > "${marker_tmp}" || fail
+                    chmod 0600 -- "${marker_tmp}" || fail
+                    chown 0:0 -- "${marker_tmp}" || fail
+                    sync -f "${marker_tmp}" || fail
+                    ln -- "${marker_tmp}" "${marker}" || fail
+                    rm -- "${marker_tmp}" || fail
+                    sync -f "${instance_parent}" || fail
+                fi
+                mkdir -m0750 -- "${data_path}" || fail
+                chown "${uid}:${gid}" -- "${data_path}" || fail
+            elif [[ ${repair_empty} == yes ]]; then
+                chown "${uid}:${gid}" -- "${data_path}" || fail
+            fi
+            # Sync the new directory entries before a boot-eligible publication.
+            sync -f "${instance_parent}" || fail
+            if [[ -e ${marker} ]]; then
+                rm -- "${marker}" || fail
+                sync -f "${instance_parent}" || fail
+            fi
+        elif [[ ${action} == validate && ${repair_empty} == yes ]]; then
+            fail
+        fi
+        ;;
+    *) fail ;;
+esac

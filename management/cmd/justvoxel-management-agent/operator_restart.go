@@ -110,6 +110,11 @@ func (g *operatorRestartGuard) cancel() {
 }
 
 func (g *operatorRestartGuard) accept(actor session) (int, error) {
+	return g.acceptTarget(actor, "minecraft.service")
+}
+
+// Target is derived internally by the authenticated lifecycle handler.
+func (g *operatorRestartGuard) acceptTarget(actor session, target string) (int, error) {
 	if g == nil || g.tx == nil || g.store == nil {
 		return 0, errors.New("operator restart guard is not active")
 	}
@@ -131,7 +136,7 @@ func (g *operatorRestartGuard) accept(actor session) (int, error) {
 		g.cancel()
 		return 0, fmt.Errorf("update global operator restart state: %w", err)
 	}
-	if err := insertAuditEventTx(g.tx, now, actor, "minecraft_restart", "minecraft.service", true, fmt.Sprintf("operator restart allowance %d/%d", used, operatorRestartLimit)); err != nil {
+	if err := insertAuditEventTx(g.tx, now, actor, "minecraft_restart", target, true, fmt.Sprintf("operator restart allowance %d/%d", used, operatorRestartLimit)); err != nil {
 		g.cancel()
 		return 0, err
 	}

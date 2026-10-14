@@ -1,0 +1,30 @@
+#!/usr/bin/bash
+set -euo pipefail
+# No legacy config, repair, world creation, or secret output. A pending apply
+# blocks startup until the administrator retries recovery through the Agent.
+fail() { echo 'ERROR: instance runtime is incomplete or requires recovery.' >&2; exit 1; }
+[[ $EUID == 0 && $# == 1 && $1 =~ ^jv-[a-z0-9]{6,12}$ ]] || fail
+id=$1
+dir="/etc/justvoxel/instances/${id}"
+config="${dir}/config.json"
+env="${dir}/minecraft.env"
+quadlet="/etc/containers/systemd/minecraft-${id}.container"
+identity="/var/lib/justvoxel/instances/${id}.json"
+for path in /etc/justvoxel/instances "${dir}" /var/lib/justvoxel/instances; do
+    [[ -d ${path} && ! -L ${path} && $(realpath -e -- "${path}") == "${path}" ]] || fail
+    [[ $(stat -c '%u:%g:%a' -- "${path}") == 0:0:700 ]] || fail
+done
+[[ ! -e ${dir}/pending.json && ! -L ${dir}/pending.json ]] || fail
+for path in "${config}" "${env}" "${quadlet}" "${identity}"; do
+    [[ -f ${path} && ! -L ${path} && $(realpath -e -- "${path}") == "${path}" ]] || fail
+    [[ $(stat -c '%u:%g:%a' -- "${path}") == 0:0:600 ]] || fail
+done
+jq -e --arg id "${id}" 'keys == ["id"] and .id == $id' "${identity}" >/dev/null || fail
+jq -e --arg id "${id}" '.schema_version == 1 and .runtime.id == $id and
+    (.environment_sha256 | type == "string" and test("^[a-f0-9]{64}$")) and
+    (.quadlet_sha256 | type == "string" and test("^[a-f0-9]{64}$"))' "${config}" >/dev/null || fail
+expected_env="$(jq -er '.environment_sha256' "${config}")" || fail
+expected_quadlet="$(jq -er '.quadlet_sha256' "${config}")" || fail
+actual_env="$(sha256sum -- "${env}")" || fail
+actual_quadlet="$(sha256sum -- "${quadlet}")" || fail
+[[ ${actual_env%% *} == "${expected_env}" && ${actual_quadlet%% *} == "${expected_quadlet}" ]] || fail

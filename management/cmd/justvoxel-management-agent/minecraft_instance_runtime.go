@@ -191,6 +191,12 @@ func instanceRuntimeBool(value bool) string {
 // lock; names are deliberately not loaded. Even malformed presentation metadata
 // cannot become a runtime identifier. Legacy identity cannot use a new Quadlet.
 func (s *minecraftInstanceStore) renderInstanceRuntimes(ctx minecraftInstanceRuntimeContext, configs []minecraftInstanceRuntimeConfig) ([]minecraftInstanceRuntimeFiles, error) {
+	return s.renderInstanceRuntimesCandidate(ctx, configs, "")
+}
+
+// A single internally generated candidate may be validated before registration.
+// This never publishes files or accepts an unregistered ID from an API.
+func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftInstanceRuntimeContext, configs []minecraftInstanceRuntimeConfig, candidate string) ([]minecraftInstanceRuntimeFiles, error) {
 	dir, err := s.openDirectory(false)
 	if err != nil {
 		return nil, err
@@ -280,7 +286,11 @@ func (s *minecraftInstanceStore) renderInstanceRuntimes(ctx minecraftInstanceRun
 		}
 		seen[c.ID] = true
 		id, err := s.readRecord(c.ID + ".json")
-		if err != nil || id != c.ID {
+		if c.ID == candidate {
+			if !errors.Is(err, os.ErrNotExist) {
+				return nil, errors.New("candidate identity is already registered or unavailable")
+			}
+		} else if err != nil || id != c.ID {
 			return nil, errors.New("runtime instance must already be registered")
 		}
 		dataPath := filepath.Join(ctx.StorageRoot, "minecraft-instances", c.ID, "data")

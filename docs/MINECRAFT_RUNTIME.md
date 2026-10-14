@@ -88,4 +88,165 @@ Rendering returns deterministic in-memory files, including private environment b
 
 Focused Go tests cover independent output, boot settings, identity/name independence, legacy contracts and read purity, stopped-instance reservations, ports, resources, malformed inputs, path overlap, symlinks, and atomic inactive staging. `tests/test-instance-runtime-mount.sh` uses temporary fixtures and stubbed mount identity checks. The optional Go generator test requires explicit `JUSTVOXEL_QUADLET_GENERATOR` selection and runs only the generator's dry-run mode; it starts no containers. These tests have been added but not executed for Phase 2. Formatting and shell syntax checks are separate from test or runtime acceptance.
 
-Phase 3 still needs the authoritative private configuration store and complete reservation discovery, activation-time locking/revalidation and recoverable live-file publication, explicit lifecycle operations, instance-aware cross-play helpers, shutdown coordination, and VM runtime acceptance. No first-run multi-instance startup, WebUI creation flow, firewall changes, or scheduled backups are introduced here.
+Phase 2 introduced no first-run multi-instance startup, WebUI creation flow, firewall changes, or scheduled backups. Phase 3A adds the backend activation and lifecycle behavior described below; instance-aware cross-play, full player-aware maintenance and host shutdown coordination remain future work.
+
+
+## Independent activation and lifecycle (Phase 3A)
+
+The administrator-only Management API can now create and activate independent
+Java instances. This backend phase does not add a WebUI wizard, backups, or
+multi-instance host shutdown coordination. The legacy service, environment,
+Quadlet template, world, identity, backup timer, and reset/import/restore routes
+keep their existing contracts. Independent instance routes reject the legacy
+identity rather than silently targeting `minecraft.service`.
+
+Each registered new instance has one authoritative private record at
+`/etc/justvoxel/instances/<id>/config.json`. It stores schema version 1, the
+Phase 2 runtime settings (including the generated private RCON password),
+trusted storage identity and derived data location, commitments for the live
+environment and Quadlet, and firewall rules this instance owns. Configuration
+is separate from the identity and friendly-name records. Runtime directories
+are root:root `0700`; records, journals, environments, and published Quadlets
+are root:root `0600`. Files are synced and atomically published, and runtime
+reads reject symlinks throughout the path. Read APIs return a dedicated public
+settings structure that excludes credentials, account IDs, and host paths.
+
+The public creation request is `{"display_name":"Family Survival","runtime":{…}}`.
+The `runtime` object accepts the following fields; it accepts no paths, image
+repositories, container names, unit names, environment overrides, account IDs,
+or private credentials:
+
+```json
+{
+  "java_port": 25566,
+  "bedrock_enabled": false,
+  "bedrock_port": 0,
+  "java_memory": "1G",
+  "container_memory": "2G",
+  "software": "paper",
+  "version": "1.21.4",
+  "paper_channel": "default",
+  "image_tag": "stable",
+  "start_on_boot": false,
+  "eula_accepted": true,
+  "timezone": "UTC",
+  "game_mode": "survival",
+  "difficulty": "normal",
+  "max_players": 20,
+  "whitelist": true,
+  "enforce_whitelist": true,
+  "motd": "Family Survival"
+}
+```
+
+This is a request-shape example, not a recommended current Minecraft version.
+Creation verifies software/version availability with the existing metadata
+helpers and derives container UID/GID from the configured legacy installation.
+A complete configured legacy server and its immutable identity are required.
+New-instance Bedrock cross-play remains explicitly unsupported.
+
+Creation takes the existing setup/restore/migration/reset operation locks and
+the shared Minecraft maintenance lock. It refreshes legacy configuration,
+physical RAM, and every persisted independent configuration, including stopped
+instances. Invalid records and orphan instance Quadlets fail closed; an outstanding activation journal blocks
+new applies and starts. Port and memory checks use configured reservations,
+including the legacy server, rather than free memory or listening sockets.
+Additional IPv4/IPv6 TCP bind checks detect occupied host ports. During apply,
+new and retired ports remain held until publication and rollback finish.
+
+Before registration, creation validates the full proposed configuration and
+checks the exact existing storage mount identity, canonical storage paths,
+root-owned storage parents, at least 1 GiB of available storage, and absence of
+an existing candidate instance data tree. It registers a generated immutable
+ID, persists the configuration, stages the complete set using Phase 2 under
+`/var/lib/justvoxel-instance-runtime`, and validates generated units with the
+installed Quadlet generator's dry-run mode. Staging stays outside Quadlet
+search paths and Minecraft storage. The staged files are then published only
+for the selected instance. Creation provisions only its derived data directory;
+it never starts a container or deletes, moves, adopts, or relabels existing
+world data. A mount-namespace helper checks storage against the host mount
+namespace and never repairs existing world ownership or labels. A small private
+`.provision.json` marker in a newly created instance parent allows completing
+ownership only on its still-empty, root-owned new data directory after an
+interrupted mkdir/chown; missing or invalid evidence fails closed.
+
+| Route | Permission and behavior |
+| --- | --- |
+| `POST /v1/minecraft/instances` | Administrator; register, configure, provision, validate, activate; return the immutable ID |
+| `GET /v1/minecraft/instances/runtime` | Authenticated read; list new logical instances and their independent runtime states |
+| `GET /v1/minecraft/instances/{id}/configuration` | Authenticated read; public runtime settings only |
+| `PUT /v1/minecraft/instances/{id}/configuration` | Administrator; full `{"runtime":{…}}` settings apply |
+| `POST /v1/minecraft/instances/{id}/activate` | Administrator; retry activation of the persisted configuration; body `{}` |
+| `POST /v1/minecraft/instances/{id}/recover` | Administrator; retry verified rollback from private activation evidence; body `{}` |
+| `GET /v1/minecraft/instances/{id}/status` | Authenticated read; actual unit/container evidence and storage availability |
+| `POST /v1/minecraft/instances/{id}/start` | Administrator or operator; request startup of the selected committed runtime; body `{}` |
+| `POST /v1/minecraft/instances/{id}/stop` | Administrator; verify no players and wait for ordinary graceful shutdown; body `{}` |
+| `POST /v1/minecraft/instances/{id}/restart` | Administrator or operator; verified graceful stop followed by startup; body `{}` |
+
+Operators retain the existing shared restart allowance and cooldown; independent
+instance restarts consume that allowance and audit the internally derived
+service. All mutation requests use the existing authenticated API and strict
+JSON decoder. Selected-instance Stop and Restart refuse online players,
+failed/unparseable RCON responses, or uncertain service/container evidence.
+There is no confirmation override or force stop in these routes. The ordinary
+itzg shutdown delay, Podman stop timeout, and systemd stop timeout remain intact.
+
+Full settings applies require the selected instance to be stopped, or failed
+with actual evidence that no live container remains. Changing
+only Start on Boot may be applied while running, after confirming the rendered
+environment and non-install Quadlet content are unchanged. ON uses the Phase 2
+`[Install]`/`WantedBy=multi-user.target` configuration; OFF omits it. Neither
+calls `systemctl enable` or changes current running state. Software changes on
+an already activated instance are outside Phase 3A; world conversion requires
+separate reviewed behavior.
+
+Firewall activation manages only the selected Java TCP port, in the current
+default firewalld zone, separately for runtime and permanent configuration.
+Already-open rules are preserved and are not claimed as owned. Port changes
+remove only recorded instance-owned rules after confirming the previous port
+is not occupied. Apply and rollback use explicit port actions and queries;
+they never reload firewalld or change unrelated services/rules. Failed applies
+reverse only the planned instance-owned changes. UDP remains unused for new
+instances because cross-play is unsupported.
+
+Before any provisioning or live mutation, the Agent durably publishes
+`pending.json` beside `config.json`. It contains the previous record, target
+record, exact previous private runtime bytes, and planned firewall changes.
+The new Quadlet's `validate-instance-runtime-commit` startup guard requires
+matching immutable registration, committed hashes, and absence of this journal. A crash at any stage
+therefore cannot boot an incomplete runtime. Successful publication syncs both
+live files and the authoritative record, reloads systemd, verifies generated
+service/container evidence, and clears the journal durably. It starts no unit.
+
+Failure restores the exact previous configuration and private files, reverses
+owned firewall changes, reloads systemd, and verifies restoration before
+clearing evidence. It preserves all instance data. Incomplete rollback reports
+`recovery_required`, retains evidence, and blocks uncertain startup. The
+administrator can retry the recovery route, then activate the same ID; a failed
+creation response includes its ID when registration already succeeded. If
+registration succeeded but the initial configuration write did not, a full
+configuration PUT can complete it only after proving no active files or data
+tree exist. Recovery never starts a service. A boot-only rollback can preserve
+a currently running instance; other rollback attempts refuse live containers.
+
+Status distinguishes `configured` (not activated), `running`, `stopped`,
+`starting`, `stopping`, `failed`, `recovery_required`, `invalid_configuration`,
+and `unavailable`. It checks systemd and exact container evidence; a failed or
+exited container is not counted as running. Reads never create directories,
+repair files, query upstream versions, or start services. Messages are bounded
+and exclude private runtime bytes and command diagnostics.
+
+Focused Go tests and `tests/test-instance-runtime-activation.sh` cover
+independent activation/creation, persistent settings, boot preferences,
+instance lifecycle and player refusal, host/configured port conflicts, memory
+reservations, mount failures, private files, authorization, rollback/retry,
+concurrent-operation protection, secret boundaries, and data preservation.
+They use temporary filesystem fixtures and mocked systemd, Podman, firewalld,
+and storage operations. Tests have been added but **not executed** for Phase 3A.
+Only Go formatting and shell syntax checks were performed. No image build,
+container execution, deployment, or runtime acceptance is claimed.
+
+Phase 3B still needs complete instance-aware player maintenance, race-aware
+shutdown coordination and appliance/host shutdown integration. Multi-instance
+cross-play, the creation wizard, independent backup workflows, and VM runtime
+acceptance remain separately scoped work.
