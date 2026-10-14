@@ -10,30 +10,31 @@
   <script src="/static/how-to-connect.js" defer></script>
 </head>
 <body class="connect-page">
-<header class="connect-navigation"><a href="/" aria-label="JustVoxel dashboard"><img src="/static/justvoxel-logo.png" alt="JustVoxel"></a><span>How to connect</span></header>
 <main class="connect-shell" data-connect-page{{if .ConnectionGuide.Configured}} data-java-port="{{.ConnectionGuide.JavaPort}}"{{if .ConnectionGuide.Bedrock}} data-bedrock-port="{{.ConnectionGuide.BedrockPort}}"{{end}}{{end}}>
 {{if not .ConnectionGuide.Configured}}
-<section class="connect-empty"><h1>Minecraft is not configured yet</h1><p>Ask the server owner to complete Minecraft setup. A connection guide will be available here once the server is configured.</p></section>
+<section class="connect-empty panel"><h1>Minecraft is not configured yet</h1><p>Ask the server owner to complete Minecraft setup. A connection guide will be available here once the server is configured.</p></section>
 {{else}}
-<section class="connect-controls" aria-labelledby="connect-title">
-  <p class="connect-eyebrow">JUSTVOXEL · SHARE THE ADVENTURE</p>
-  <h1 id="connect-title">How to connect</h1>
+<section class="connect-controls panel" aria-labelledby="connect-title">
+  <p class="connect-eyebrow eyebrow">JUSTVOXEL · SHARE THE ADVENTURE</p>
+  <div class="connect-title-row title-row"><h1 id="connect-title">How to connect</h1><select class="connect-server" aria-label="Server"><option>{{.ConnectionGuide.Server}}</option></select></div>
   <p>Choose how your friends will join. Preview the guide below, then save a copy to share.</p>
-  <label class="connect-server">Server<select aria-label="Server"><option>{{.ConnectionGuide.Server}}</option></select></label>
-  <div class="connect-methods">
-  {{range .ConnectionGuide.Methods}}
-    <div class="connect-method">
-      <label class="connect-method-label" for="connect-{{.ID}}"><strong>{{.Name}}</strong><small>{{.Status}}</small></label>
-      <label class="connect-switch"><input id="connect-{{.ID}}" type="checkbox" role="switch" aria-label="Include {{.Name}}" data-connect-method="{{.ID}}"{{if .Default}} checked{{end}}{{if not .Available}} disabled{{end}}><span aria-hidden="true"></span></label>
-      {{if eq .ID "custom"}}<div class="connect-domain"><label for="connect-domain">Hostname / domain</label><input id="connect-domain" type="text" autocomplete="off" spellcheck="false" maxlength="253" placeholder="minecraft.example.com" aria-describedby="connect-domain-help" disabled><small id="connect-domain-help">Enter a hostname only, without a URL, path or port. This is used only in this guide.</small></div>{{end}}
-    </div>
-  {{end}}
+  {{range .ConnectionGuide.Methods}}{{if eq .ID "custom"}}
+  <div class="connect-domain">
+    <label for="connect-domain">Custom domain</label>
+    <input id="connect-domain" type="text" autocomplete="off" spellcheck="false" maxlength="253" placeholder="minecraft.example.com" aria-describedby="connect-domain-help" disabled>
+    <input id="connect-custom" type="checkbox" role="switch" aria-label="Include Custom domain" data-connect-method="custom"{{if not .Available}} disabled{{end}}>
+    <small class="muted" id="connect-domain-help">Hostname only, for example minecraft.example.com. Do not include https:// or a port.</small>
   </div>
-  <div class="connect-actions"><p data-connect-message role="status">Choose at least one available connection method.</p><button type="button" data-connect-print disabled>Save as PDF</button></div>
+  {{end}}{{end}}
+  <div class="connect-methods">
+    {{range .ConnectionGuide.Methods}}{{if or (eq .ID "local") (eq .ID "playit")}}{{template "connect-method-control" .}}{{end}}{{end}}
+    {{range .ConnectionGuide.Methods}}{{if or (eq .ID "tailscale") (eq .ID "netbird")}}{{template "connect-method-control" .}}{{end}}{{end}}
+  </div>
+  <div class="connect-actions"><button type="button" data-connect-print disabled>Save as PDF</button></div>
   <noscript><p>Enable JavaScript to select connection methods and generate your guide.</p></noscript>
 </section>
 <article class="connect-guide" data-connect-guide hidden>
-  <header class="connect-guide-heading"><img src="/static/justvoxel-logo.png" alt="JustVoxel"><p class="connect-eyebrow">LET’S PLAY TOGETHER</p><h1>Minecraft Friends Connection Guide</h1><p>{{.ConnectionGuide.Server}}</p><span class="connect-editions">Java Edition{{if .ConnectionGuide.Bedrock}} + Bedrock Edition{{end}}</span><p>Connection methods: <span data-connect-summary></span></p></header>
+  <header class="connect-guide-heading"><div class="connect-guide-top-row"><img class="connect-print-logo" src="/static/justvoxel-login-logo.png" alt="JustVoxel" width="2172" height="724"><p>{{.ConnectionGuide.Server}}</p></div><h1>JustVoxel Connection Guide</h1><span class="connect-editions badge">Java Edition{{if .ConnectionGuide.Bedrock}} + Bedrock Edition{{end}}</span><p>Connection methods: <span data-connect-summary></span></p></header>
   <section aria-labelledby="connect-addresses"><h2 id="connect-addresses">Your connection options</h2><div class="connect-cards">
   {{range .ConnectionGuide.Methods}}
     {{if .Available}}<section class="connect-card" data-connect-card="{{.ID}}" data-connect-name="{{.Name}}" hidden><h3>{{.Name}}</h3><p>{{.Note}}</p>
@@ -61,3 +62,8 @@
 </main>
 </body>
 </html>{{end}}
+
+{{define "connect-method-control"}}<div class="connect-method">
+  <label class="connect-method-label" for="connect-{{.ID}}">{{.Name}}</label>
+  <input id="connect-{{.ID}}" type="checkbox" role="switch" aria-label="Include {{.Name}}" data-connect-method="{{.ID}}"{{if .Default}} checked{{end}}{{if not .Available}} disabled{{end}}>
+</div>{{end}}

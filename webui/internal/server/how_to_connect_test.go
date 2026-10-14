@@ -91,7 +91,7 @@ func TestConnectionGuideAuthentication(t *testing.T) {
 func TestConnectionGuideRemoteStatusPasswordBoundary(t *testing.T) {
 	client := &connectionGuideAPI{fakeAPI: fakeAPI{statusResult: guideFixture()}, remoteErr: api.ErrPasswordChangeRequired}
 	response := guidePage(t, client, &http.Cookie{Name: sessionCookie, Value: "session-token"})
-	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/password" || strings.Contains(response.Body.String(), "Minecraft Friends Connection Guide") {
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/password" || strings.Contains(response.Body.String(), "JustVoxel Connection Guide") {
 		t.Fatal("remote status bypassed the password-change boundary")
 	}
 }
@@ -106,15 +106,18 @@ func TestConnectionGuidePageEditionsAndRoles(t *testing.T) {
 			if response.Code != 200 {
 				t.Fatalf("%s: %d %s", role, response.Code, body)
 			}
-			for _, want := range []string{"Minecraft Friends Connection Guide", "Paper 1.21.8", "192.0.2.10", "25571", "100.75.0.1", `role="switch"`, `Save as PDF`} {
+			for _, want := range []string{"JustVoxel Connection Guide", "Paper 1.21.8", "192.0.2.10", "25571", "100.75.0.1", `role="switch"`, `Save as PDF`} {
 				if !strings.Contains(body, want) {
 					t.Fatalf("missing %q", want)
 				}
 			}
-			for _, marker := range []string{"Join with Bedrock Edition", "PS5 · Method 1", "PS5 · Method 2", "19139", "45.55.68.52"} {
+			for _, marker := range []string{"Join with Bedrock Edition", "PS5 · Method 1", "PS5 · Method 2", "19139", "45.55.68.52", "<h4>Bedrock</h4>", "Java Edition + Bedrock Edition"} {
 				if strings.Contains(body, marker) != bedrock {
 					t.Fatalf("bedrock=%v marker %q", bedrock, marker)
 				}
+			}
+			if !bedrock && strings.Contains(body, "Bedrock") {
+				t.Fatal("Java-only guide contains Bedrock text")
 			}
 			if strings.Contains(body, "private-auth") || strings.Contains(body, "25565") {
 				t.Fatal("auth URL or default port leaked")
@@ -133,7 +136,7 @@ func TestConnectionGuideUnconfigured(t *testing.T) {
 	if !strings.Contains(body, "Minecraft is not configured yet") {
 		t.Fatal(body)
 	}
-	for _, absent := range []string{"Save as PDF", "data-connect-method", "192.0.2.10", "25571", "Minecraft Friends Connection Guide"} {
+	for _, absent := range []string{"Save as PDF", "data-connect-method", "192.0.2.10", "25571", "JustVoxel Connection Guide"} {
 		if strings.Contains(body, absent) {
 			t.Fatalf("unconfigured rendered %q", absent)
 		}
@@ -307,8 +310,8 @@ func TestConnectionGuideRenderedUnavailableSwitches(t *testing.T) {
 			t.Fatalf("%s unavailable card rendered", id)
 		}
 	}
-	if !strings.Contains(body, "Stopped") {
-		t.Fatal("friendly provider status missing")
+	if strings.Contains(body, "Stopped") {
+		t.Fatal("provider status subtitle rendered")
 	}
 	if !strings.Contains(body, `id="connect-domain" type="text"`) || !strings.Contains(body, `aria-describedby="connect-domain-help" disabled`) {
 		t.Fatal("custom domain must start inactive")
@@ -341,5 +344,49 @@ func TestConnectionGuidePlayitRenderedPublicAddresses(t *testing.T) {
 	guide := newConnectionGuide(status, client.remote)
 	if len(guide.Methods[4].Endpoints) != 1 || guide.Methods[4].Endpoints[0].Edition != "Java" {
 		t.Fatal("invented Bedrock tunnel")
+	}
+}
+
+func TestConnectionGuideApprovedVisualContract(t *testing.T) {
+	client := &connectionGuideAPI{fakeAPI: fakeAPI{statusResult: guideFixture()}}
+	body := guidePage(t, client, &http.Cookie{Name: sessionCookie, Value: "session-token"}).Body.String()
+	for _, absent := range []string{"connect-navigation", "/static/justvoxel-logo.png", "Minecraft Friends Connection Guide", "LET’S PLAY TOGETHER", ">Server<", "Enter your hostname", "Hostname / domain", "connect-switch", "data-connect-message", "<small>Available", "<small>Not connected", "<small>Stopped", "<small>Connected"} {
+		if strings.Contains(body, absent) {
+			t.Fatalf("unapproved presentation %q", absent)
+		}
+	}
+	for _, want := range []string{`class="connect-controls panel"`, `class="connect-title-row title-row"`, `class="connect-server" aria-label="Server"`, `class="connect-print-logo" src="/static/justvoxel-login-logo.png"`, "JustVoxel Connection Guide", "Current server — Paper 1.21.8", "Hostname only, for example minecraft.example.com. Do not include https:// or a port."} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("approved presentation missing %q", want)
+		}
+	}
+	guideStart := strings.Index(body, `<article class="connect-guide"`)
+	if guideStart < 0 || strings.Contains(body[:guideStart], "<img") || strings.Count(body, "<img") != 1 {
+		t.Fatal("logo must exist only in the print guide")
+	}
+	controlsStart := strings.Index(body, `<div class="connect-methods">`)
+	if controlsStart < 0 {
+		t.Fatal("method grid missing")
+	}
+	controls := body[controlsStart:guideStart]
+	previous := -1
+	for _, id := range []string{"local", "playit", "tailscale", "netbird"} {
+		position := strings.Index(controls, `data-connect-method="`+id+`"`)
+		if position <= previous {
+			t.Fatalf("method %s is missing or out of row order", id)
+		}
+		previous = position
+	}
+	if strings.Count(controls, `class="connect-method"`) != 4 || strings.Contains(controls, "<small") || strings.Contains(controls, "<span") {
+		t.Fatal("method cells must contain only their label and shared switch")
+	}
+	label := strings.Index(body, `<label for="connect-domain">Custom domain</label>`)
+	input := strings.Index(body, `id="connect-domain" type="text"`)
+	switchInput := strings.Index(body, `id="connect-custom" type="checkbox" role="switch"`)
+	if label < 0 || input <= label || switchInput <= input || switchInput >= controlsStart {
+		t.Fatal("custom domain row must contain label, input, switch in that order")
+	}
+	if !strings.Contains(body, `<div class="connect-actions"><button type="button" data-connect-print disabled>Save as PDF</button></div>`) {
+		t.Fatal("Save as PDF action must have no adjacent status sentence")
 	}
 }

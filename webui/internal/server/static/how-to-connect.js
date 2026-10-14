@@ -7,7 +7,6 @@
   const cards = Array.from(page.querySelectorAll('[data-connect-card]'));
   const domain = page.querySelector('#connect-domain');
   const printButton = page.querySelector('[data-connect-print]');
-  const message = page.querySelector('[data-connect-message]');
   const summary = page.querySelector('[data-connect-summary]');
   // Presentation only: no DNS lookup, storage, HTML insertion or API request.
   const validHostname = (value) => value.length > 0 && value.length <= 253 &&
@@ -30,8 +29,6 @@
     guide.hidden = !ready;
     printButton.disabled = !ready;
     document.body.classList.toggle('connect-print-ready', ready);
-    message.textContent = invalid ? 'Enter a valid custom hostname to preview or save the guide.' :
-      selected.length === 0 ? 'Choose at least one available connection method.' : 'Your guide is ready. Save as PDF, then choose Save as PDF in the print dialog.';
     return ready;
   };
   switches.forEach(input => input.addEventListener('change', update));

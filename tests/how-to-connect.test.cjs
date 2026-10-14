@@ -23,7 +23,6 @@ class Element {
 function fixture({ local = true, bedrock = false } = {}) {
   const guide = new Element();
   const domain = new Element();
-  const message = new Element();
   const print = new Element();
   const summary = new Element();
   const java = new Element();
@@ -39,7 +38,6 @@ function fixture({ local = true, bedrock = false } = {}) {
     '[data-connect-guide]': guide,
     '#connect-domain': domain,
     '[data-connect-print]': print,
-    '[data-connect-message]': message,
     '[data-connect-summary]': summary,
     '[data-connect-domain-java]': java,
   })[selector];
@@ -58,7 +56,7 @@ function fixture({ local = true, bedrock = false } = {}) {
     },
     window: { print: () => { prints++; }, addEventListener: (type, fn) => { events[type] = fn; } },
   });
-  return { guide, domain, message, print, summary, java, domainAddresses, switches, cards, classes, events, prints: () => prints };
+  return { guide, domain, print, summary, java, domainAddresses, switches, cards, classes, events, prints: () => prints };
 }
 
 test('local defaults to selected; preview and printing include exactly the selected methods', () => {
@@ -79,7 +77,6 @@ test('local defaults to selected; preview and printing include exactly the selec
   assert.equal(f.guide.hidden, true);
   assert.equal(f.print.disabled, true);
   assert.equal(f.classes.has('connect-print-ready'), false);
-  assert.match(f.message.textContent, /Choose at least one/);
   f.print.listeners.click();
   assert.equal(f.prints(), 1);
 });
@@ -142,7 +139,43 @@ test('print rules hide all editing and unselected cards and block invalid browse
   const css = readFileSync(path.join(__dirname, '../webui/internal/server/static/how-to-connect.css'), 'utf8');
   assert.match(css, /\.connect-page \[hidden\]\{display:none!important\}/);
   const print = css.slice(css.indexOf('@media print'));
-  for (const control of ['.connect-navigation', '.connect-controls', '.connect-page button', '.connect-page input', '.connect-page select']) assert.ok(print.includes(control));
+  for (const control of ['.connect-controls', '.connect-page button', '.connect-page input', '.connect-page select']) assert.ok(print.includes(control));
   assert.match(print, /\.connect-page:not\(\.connect-print-ready\) \.connect-guide\{display:none!important\}/);
   assert.match(print, /\.connect-page:not\(\.connect-print-ready\) \.connect-print-blocked\{display:block!important\}/);
+});
+
+test('approved page layout uses shared JustVoxel components and a print-only login logo', () => {
+  const template = readFileSync(path.join(__dirname, '../webui/internal/server/templates/how_to_connect.html'), 'utf8');
+  const css = readFileSync(path.join(__dirname, '../webui/internal/server/static/how-to-connect.css'), 'utf8');
+  const app = readFileSync(path.join(__dirname, '../webui/internal/server/static/app.css'), 'utf8');
+  const screen = css.slice(0, css.indexOf('@media print'));
+  const print = css.slice(css.indexOf('@media print'));
+  for (const absent of ['connect-navigation', '/static/justvoxel-logo.png', 'Minecraft Friends Connection Guide', 'LET’S PLAY TOGETHER', 'Enter your hostname', 'Hostname / domain', 'connect-switch', '{{.Status}}', 'data-connect-message']) {
+    assert.ok(!template.includes(absent), absent);
+  }
+  assert.match(template, /class="connect-controls panel"/);
+  assert.match(template, /class="connect-eyebrow eyebrow"/);
+  assert.match(template, /class="connect-title-row title-row"><h1 id="connect-title">How to connect<\/h1><select class="connect-server" aria-label="Server">/);
+  assert.ok(!template.includes('>Server<'));
+  assert.match(template, /<label for="connect-domain">Custom domain<\/label>\s*<input id="connect-domain"[^>]+disabled>\s*<input id="connect-custom" type="checkbox" role="switch"/);
+  assert.ok(template.includes('Hostname only, for example minecraft.example.com. Do not include https:// or a port.'));
+  assert.match(template, /class="connect-actions"><button type="button" data-connect-print disabled>Save as PDF<\/button><\/div>/);
+  assert.match(template, /class="connect-print-logo" src="\/static\/justvoxel-login-logo.png"/);
+  assert.equal((template.match(/<img /g) || []).length, 1);
+  assert.match(template, /<h1>JustVoxel Connection Guide<\/h1>/);
+  assert.match(screen, /\.connect-print-logo\{display:none\}/);
+  assert.match(screen, /\.connect-guide-top-row\{display:flex;align-items:center;justify-content:space-between;/);
+  assert.match(print, /\.connect-print-logo\{display:block;width:145px;height:auto\}/);
+  assert.match(screen, /\.connect-title-row\{align-items:center\}/);
+  assert.match(screen, /\.connect-domain\{display:grid;grid-template-columns:auto minmax\(0,1fr\) auto;/);
+  assert.match(screen, /\.connect-methods\{display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\);/);
+  assert.match(screen, /@media\(max-width:640px\)/);
+  assert.match(screen, /\.connect-methods,\.connect-cards\{grid-template-columns:1fr\}/);
+  assert.match(screen, /\.connect-actions\{display:flex;justify-content:flex-end;/);
+  // Colors are supplied by app.css classes/tokens, and switches have no local painting.
+  assert.ok(!/#[a-f0-9]{3,8}\b/i.test(screen));
+  assert.ok(!/appearance:|::?before|::?after|connect-switch/.test(css));
+  assert.match(app, /input\[type=checkbox\]:not\(\.destructive-confirm-toggle\):not\(\.storage-confirm-toggle\)\{appearance:none;/);
+  assert.ok(!source.includes('Your guide is ready.'));
+  assert.ok(!source.includes('Enter a valid custom hostname to preview or save the guide.'));
 });
