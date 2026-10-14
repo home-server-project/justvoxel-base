@@ -22,7 +22,31 @@ catalogs are separate records. All catalog and icon reads pass through the
 same-origin WebUI, the Management Agent Unix API and fixed HTTPS sources; the
 browser never contacts an upstream catalog or image server directly. Icons use
 initials when metadata, validation or retrieval fails. Passive information footer Close actions
-reuse the existing green Plugins Done styling.
+use the normal green button styling shared by Previous and Next.
+
+Discover marks provider-aware `(Source, ProjectID)` ownership from the existing
+Plugins v1 manifest as **Installed**; source-less v1 entries mean Modrinth.
+Verified locations show Enabled or Disabled; uncertain local files show Needs
+attention while remaining Installed. These selections open read-only information
+with **Managed by Plugins** and **Updates are not available yet**. Install and
+install-plan are suppressed even if the catalog release differs. Manual JARs
+are not matched by name, and JustVoxel-managed projects retain their special treatment.
+
+The page number in **Page [N] of Y** is editable: Enter jumps to a valid page;
+invalid values or leaving the field restore the current number without navigation.
+Navigation follows composite provider cursors, resolving missing intermediate
+cursors without displaying those pages, then freshly fetching the destination.
+Only page cursors are kept temporarily in memory; catalog payloads and cards are
+never cached by this mechanism. Refresh, search changes/submission, source/filter
+changes, authoritative server-context changes, capacity changes and workspace
+close/reopen discard the entire history and return to page 1. Resolution is
+cancelled when the Discover generation changes. If pagination exhausts early,
+navigation stops at the last reachable page without inventing a cursor.
+
+Hangar's exact validated `https://hangarcdn.papermc.io/avatars/default/default.webp?v=0`
+uses the JustVoxel initials tile. The Agent rechecks authoritative metadata and
+returns no custom icon without contacting the CDN. Real project and user fallback
+WebP avatars remain strictly validated and proxied.
 
 Plugin results use compact cards of uniform height, with a fixed-size logo,
 clamped name and description, release/platform/Minecraft badges and a short
@@ -78,8 +102,9 @@ project. Only HTTPS `hangarcdn.papermc.io` WebP avatar paths are approved: proje
 (`/avatars/default/default.webp`). Each requires exactly one bounded decimal `v`
 query value; the default requires exactly `v=0`. No caller URL is
 accepted, redirects are rejected, and the same 512 KiB byte/signature bounds apply.
-All three forms remain Agent-proxied fixed-CDN images; initials are the fallback
-only when metadata/image validation or retrieval fails. Hangar SVG/source
+Project and user fallback avatars remain Agent-proxied fixed-CDN images. The
+exact default avatar returns HTTP 404 without a CDN fetch and uses initials;
+metadata/image validation or retrieval failures also use initials. Hangar SVG/source
 conversions are not supported. Modrinth icon behavior is unchanged.
 Information and installation reuse the card identity tile.
 On hover-capable pointers, the existing green card frame/background follows the
@@ -155,8 +180,9 @@ legacy scalar `offset` or `source`, and malformed values are rejected.
 Responses contain enabled-source booleans, `cursor` and nullable `next_cursor`,
 each cursor carrying both offsets and `hangar_first`, plus projects and raw total.
 Previous/Next use the actual in-memory composite history. Search/filter/source
-changes and fresh sessions reset it; capacity changes rebase history at both
-current offsets and the current turn.
+changes, Refresh, authoritative server-context changes and workspace close/reopen
+reset it. Capacity changes also discard history and restart both provider cursors
+at page 1.
 
 Live search retains its 250 ms debounce, stale-request cancellation and immediate
 Enter submission. Compatible only and Release only start enabled and apply to
@@ -197,8 +223,8 @@ third-party runtime compatibility. With Compatible only OFF, other Paper version
 can be browsed without claiming compatibility. Unknown active Minecraft versions
 require that filter OFF. Upstream failures are reported as unavailable, not as
 proven incompatibility. Discover measures grid columns and available height for
-1–12 cards per page; resizing retains both current provider cursors and rebases
-history. Installed has no catalog pagination.
+1–12 cards per page; a capacity change resets both provider cursors and history
+to page 1. Installed has no catalog pagination.
 
 Installed reads regular JARs under the configured data directory's `plugins`
 folder. It refuses a symlinked plugin folder and skips symlinked JARs and unrelated
@@ -272,8 +298,8 @@ dependency relationships. Apply re-resolves the plan and requires that exact
 fingerprint. Player snapshots are excluded from the fingerprint and checked
 separately. Artifact URLs and private transaction evidence are never returned to
 the browser. Modrinth's catalog API remains fixed HTTPS; Hangar's catalog API is
-fixed at `hangar.papermc.io` through the Management Agent. Modrinth icons remain on `cdn.modrinth.com`; Hangar icons use the approved project, user fallback, or default
-avatar sources described above. Redirects are rejected, and response sizes and
+fixed at `hangar.papermc.io` through the Management Agent. Modrinth icons remain on `cdn.modrinth.com`; Hangar icons use the approved project and user fallback
+avatar sources; the exact generic default uses initials as described above. Redirects are rejected, and response sizes and
 timeouts are bounded.
 
 Hangar installation re-fetches exact project and version metadata under

@@ -55,6 +55,8 @@ type PluginCatalogVersion struct {
 	Dependencies []PluginDependency `json:"dependencies"`
 }
 type PluginCatalogProject struct {
+	Installed        bool                  `json:"installed,omitempty"`
+	InstalledState   string                `json:"installed_state,omitempty"`
 	IconURL          string                `json:"icon_url,omitempty"`
 	ID               string                `json:"project_id"`
 	Slug             string                `json:"slug"`

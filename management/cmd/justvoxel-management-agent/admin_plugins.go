@@ -87,6 +87,8 @@ type pluginCatalogVersion struct {
 	Dependencies []pluginDependency   `json:"dependencies"`
 }
 type pluginCatalogProject struct {
+	Installed        bool                  `json:"installed,omitempty"`
+	InstalledState   string                `json:"installed_state,omitempty"`
 	IconURL          string                `json:"icon_url,omitempty"`
 	ID               string                `json:"project_id"`
 	Slug             string                `json:"slug"`
@@ -561,7 +563,7 @@ func (s *server) adminPluginsDiscover(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err.Error())
 		return
 	}
-	server, _, ok := s.pluginContext(w, r)
+	server, dataPath, ok := s.pluginContext(w, r)
 	if !ok {
 		return
 	}
@@ -594,7 +596,38 @@ func (s *server) adminPluginsDiscover(w http.ResponseWriter, r *http.Request) {
 	}
 	out.Projects, out.NextCursor = mergePluginCatalogPages(modrinth, hangar, query.Cursor, query.Limit)
 	out.Total = modrinth.Total + hangar.Total
+	if err := annotateInstalledPluginProjects(dataPath, out.Projects); err != nil {
+		writeError(w, 409, "Plugin ownership is unavailable. Discover cannot safely offer installation.")
+		return
+	}
 	writeJSON(w, 200, out)
+}
+
+// Ownership suppresses installation even when the owned JAR needs attention.
+// Read the existing v1 manifest without migrating or inferring ownership by name.
+func annotateInstalledPluginProjects(dataPath string, projects []pluginCatalogProject) error {
+	manifest, _, err := readPluginManifest(dataPath)
+	if err != nil {
+		return err
+	}
+	owned := make(map[string]pluginManifestEntry, len(manifest.Artifacts))
+	for _, entry := range manifest.Artifacts {
+		owned[pluginIdentity(entry.Source, entry.ProjectID)] = entry
+	}
+	for i := range projects {
+		project := &projects[i]
+		entry, ok := owned[pluginIdentity(project.Source, project.ID)]
+		if !ok {
+			continue
+		}
+		project.Installed = true
+		project.InstallAvailable = false
+		project.InstalledState = "attention"
+		if state, err := resolveManagedPluginLocation(dataPath, entry); err == nil {
+			project.InstalledState = state
+		}
+	}
+	return nil
 }
 
 // Fetch each provider independently, then consume only the records shown. Each
@@ -1002,6 +1035,10 @@ func (s *server) adminPluginIcon(w http.ResponseWriter, r *http.Request) {
 		icon, err = hangarAvatarURL(project.AvatarURL)
 		if err != nil {
 			http.Error(w, "Plugin icon unavailable.", 502)
+			return
+		}
+		if project.AvatarURL == "https://hangarcdn.papermc.io/avatars/default/default.webp?v=0" {
+			http.Error(w, "No custom plugin icon.", http.StatusNotFound)
 			return
 		}
 	} else if supplied {

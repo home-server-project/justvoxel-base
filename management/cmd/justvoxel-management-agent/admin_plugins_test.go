@@ -1692,3 +1692,118 @@ func TestModrinthDiscoveryReleasePageFillAndLargeTotal(t *testing.T) {
 		})
 	}
 }
+
+func TestPluginDiscoverInstalledOwnership(t *testing.T) {
+	for _, source := range []string{"", "Modrinth", "Hangar"} {
+		for _, state := range []string{"enabled", "disabled", "attention", "manual"} {
+			t.Run(source+"/"+state, func(t *testing.T) {
+				data := t.TempDir()
+				root := filepath.Join(data, "plugins")
+				if err := os.Mkdir(root, 0700); err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(root, "example.jar")
+				pluginTestJar(t, path, map[string]string{"plugin.yml": "name: Example\nversion: '1.0'\nmain: example.Plugin\n"})
+				raw, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				hash := sha512.Sum512(raw)
+				entry := pluginManifestEntry{Source: source, ProjectID: "123", VersionID: "456", VersionNumber: "1.0", Filename: "example.jar", SHA512: hex.EncodeToString(hash[:]), PluginName: "Example", Main: "example.Plugin"}
+				if state != "manual" {
+					if _, err := commitPluginManifest(data, nil, pluginManifest{SchemaVersion: "v1", Artifacts: []pluginManifestEntry{entry}}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if state == "disabled" {
+					disabled, err := openDisabledPluginDirectory(data, true)
+					if err != nil {
+						t.Fatal(err)
+					}
+					disabled.Close()
+					if err := os.Rename(path, filepath.Join(data, ".justvoxel", "disabled-plugins", "example.jar")); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if state == "attention" {
+					if err := os.WriteFile(path, []byte("changed"), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				projects := []pluginCatalogProject{{Source: "Modrinth", ID: "123", Name: "Different catalog title", InstallAvailable: true}, {Source: "Hangar", ID: "123", Name: "Example", InstallAvailable: true}, {Source: pluginSource(source), ID: "789", Name: "Example", InstallAvailable: true}, {Source: "Modrinth", ID: "special", Slug: "geyser", InstallAvailable: false}}
+				before, _ := os.ReadFile(filepath.Join(data, ".justvoxel", "plugins.json"))
+				if err := annotateInstalledPluginProjects(data, projects); err != nil {
+					t.Fatal(err)
+				}
+				for _, p := range projects {
+					want := state != "manual" && p.ID == "123" && p.Source == pluginSource(source)
+					if p.Installed != want {
+						t.Fatalf("provider isolation: %#v", p)
+					}
+					if want && (p.InstallAvailable || p.InstalledState != state) {
+						t.Fatalf("owned state: %#v", p)
+					}
+					if !want && p.InstalledState != "" {
+						t.Fatalf("guessed ownership: %#v", p)
+					}
+					if p.ID != "special" && !want && !p.InstallAvailable {
+						t.Fatalf("unowned install suppressed: %#v", p)
+					}
+				}
+				after, _ := os.ReadFile(filepath.Join(data, ".justvoxel", "plugins.json"))
+				if !bytes.Equal(before, after) {
+					t.Fatal("discovery mutated v1 manifest")
+				}
+			})
+		}
+	}
+}
+
+func TestPluginDiscoverUnsafeOwnershipFailsClosed(t *testing.T) {
+	data := t.TempDir()
+	if err := os.Mkdir(filepath.Join(data, ".justvoxel"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(data, ".justvoxel", "plugins.json"), []byte(`{"schema_version":"invalid"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := annotateInstalledPluginProjects(data, []pluginCatalogProject{{Source: "Modrinth", ID: "123", InstallAvailable: true}}); err == nil {
+		t.Fatal("unsafe ownership accepted")
+	}
+}
+
+func TestPluginDiscoverResponseIncludesAuthoritativeOwnership(t *testing.T) {
+	data := t.TempDir()
+	entry := pluginManifestEntry{ProjectID: "123", VersionID: "456", VersionNumber: "old-release", Filename: "example.jar", SHA512: strings.Repeat("a", 128), PluginName: "Example", Main: "example.Plugin"}
+	if _, err := commitPluginManifest(data, nil, pluginManifest{SchemaVersion: "v1", Artifacts: []pluginManifestEntry{entry}}); err != nil {
+		t.Fatal(err)
+	}
+	oldDiscovery, oldRuntime, oldClient := runAdminDiscoveryHelper, runPluginRuntimeStatus, pluginCatalogClient
+	t.Cleanup(func() {
+		runAdminDiscoveryHelper, runPluginRuntimeStatus, pluginCatalogClient = oldDiscovery, oldRuntime, oldClient
+	})
+	runAdminDiscoveryHelper = func(context.Context, string) ([]byte, error) {
+		return json.Marshal(map[string]any{"configured": true, "minecraft": map[string]string{"server_type": "paper", "data_path": data}})
+	}
+	runPluginRuntimeStatus = func(context.Context) ([]byte, error) {
+		return []byte(`{"minecraft":{"server_type":"paper","version":"1.21.8"}}`), nil
+	}
+	pluginCatalogClient = &http.Client{Transport: pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+		body := `[{"id":"999","project_id":"123","version_number":"new-release","version_type":"release","loaders":["paper"],"game_versions":["1.21.8"]}]`
+		if r.URL.Path == "/v2/search" {
+			body = `{"hits":[{"project_id":"123","slug":"example","title":"Example","description":"Plugin","versions":["1.21.8"]}],"total_hits":1}`
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}
+	s := surfaceTestServer(t, roleAdministrator)
+	rr := httptest.NewRecorder()
+	s.adminPluginsDiscover(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/discover", ""))
+	var out pluginCatalog
+	if rr.Code != 200 || json.Unmarshal(rr.Body.Bytes(), &out) != nil || len(out.Projects) != 1 {
+		t.Fatal(rr.Code, rr.Body.String())
+	}
+	p := out.Projects[0]
+	if !p.Installed || p.InstalledState != "attention" || p.InstallAvailable || p.Version == nil || p.Version.ID != "999" {
+		t.Fatalf("different catalog release exposed installation: %#v", p)
+	}
+}

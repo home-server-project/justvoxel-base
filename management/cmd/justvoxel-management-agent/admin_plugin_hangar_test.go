@@ -543,8 +543,14 @@ func TestHangarIconTrustBoundary(t *testing.T) {
 			}
 			s.adminPluginIcon(rr, surfaceRequest(http.MethodGet, path, ""))
 			want := 502
-			if kind == "trusted" || kind == "user" || kind == "default" {
+			if kind == "trusted" || kind == "user" {
 				want = 200
+			}
+			if kind == "default" {
+				want = 404
+				if count != 1 {
+					t.Fatal("default avatar contacted CDN", count)
+				}
 			}
 			if kind == "caller URL" {
 				want = 400

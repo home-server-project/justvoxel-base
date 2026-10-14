@@ -5811,10 +5811,13 @@ if (pluginsDialog && pluginsOpen) {
   const pagination = pluginsDialog.querySelector("[data-plugins-pagination]");
   const previous = pluginsDialog.querySelector("[data-plugins-previous]");
   const next = pluginsDialog.querySelector("[data-plugins-next]");
+  const pageInput = pluginsDialog.querySelector("[data-plugins-page-input]");
+  const pageTotal = pluginsDialog.querySelector("[data-plugins-page-total]");
+  let totalPages = 1, discoverServerKey = null;
   let pageLimit = 8, capacityTimer = null;
   const firstCursor = () => ({ modrinth_offset: 0, hangar_offset: 0, hangar_first: false });
   let pageCursors = [firstCursor()], pageIndex = 0;
-  const resetCursors = () => { pageCursors = [firstCursor()]; pageIndex = 0; cursor = firstCursor(); nextCursor = null; };
+  const resetCursors = () => { pageCursors = [firstCursor()]; pageIndex = 0; cursor = firstCursor(); nextCursor = null; totalPages = 1; pageInput.value = "1"; pageTotal.textContent = "1"; };
   let tab = "discover", cursor = firstCursor(), nextCursor = null, generation = 0, controller = null;
   const text = (tag, value, className = "") => {
     const node = document.createElement(tag);
@@ -5924,7 +5927,7 @@ if (pluginsDialog && pluginsOpen) {
       showPanel(`Info for ${name}`, true);
       const infoActions = renderInfo();
       const actions = Array.isArray(infoActions) ? infoActions : [];
-      overlayActions(...actions, pluginAction("Close", closePanel, "plugins-done-action"));
+      overlayActions(...actions, panelAction("Close", closePanel));
     }, projectID, iconURL, source);
   };
   const infoRows = (container) => {
@@ -5970,7 +5973,12 @@ if (pluginsDialog && pluginsOpen) {
     const badges = document.createElement("div");
     badges.className = "plugins-card-badges";
     const platform = server.server_software || server.server_type;
+    const installedState = project.installed_state === "enabled" ? "Enabled" : project.installed_state === "disabled" ? "Disabled" : "Needs attention";
     const identityBadges = [version?.version_number, platform, server.minecraft_version && `MC ${server.minecraft_version}`];
+    if (project.installed) {
+      identityBadges.push("Installed");
+      if (["enabled", "disabled"].includes(project.installed_state)) identityBadges.push(installedState);
+    }
     identityBadges.filter(Boolean).forEach((badge) => badges.append(text("span", badge, "plugins-badge")));
     if (!version || project.metadata_error) card.append(text("p", "Release metadata unavailable", "plugins-card-meta"));
     card.append(badges);
@@ -5984,7 +5992,7 @@ if (pluginsDialog && pluginsOpen) {
       card.append(text("p", Array.from(counts, ([kind, count]) => `${count} ${kind}`).join(" · "), "plugins-card-meta"));
     }
     const renderInfo = () => {
-      overlayHeader(project.title, project.description, identityBadges, iconProjectID, null, project.icon_url || "", project.source);
+      overlayHeader(project.title, project.description, identityBadges, iconProjectID, project.installed ? text("span", "Installed", "plugins-badge") : null, project.icon_url || "", project.source);
       const about = infoRows(overlaySection("About this version"));
       about("Release", version?.version_number || "Unavailable");
       about(project.source === "Hangar" ? "Channel" : "Release type", version?.version_type || "Not provided");
@@ -6000,19 +6008,25 @@ if (pluginsDialog && pluginsOpen) {
       const versions = [...new Set(version?.game_versions || [])];
       compatibility("Supported versions", versions.join(" / ") || "Not provided");
       overlaySection("Dependencies").append(dependencyGroups(dependencies));
+      if (project.installed) {
+        const management = infoRows(overlaySection("Management"));
+        management("Ownership", "Managed by Plugins");
+        management("State", installedState);
+        overlaySection("Update status").append(text("p", "Updates are not available yet"));
+      }
       if (project.metadata_error || !version) panelBody.append(text("p", project.metadata_error || "Release metadata unavailable.", "plugins-card-meta"));
     };
     const iconProjectID = ["Modrinth", "Hangar"].includes(project.source) ? project.project_id : undefined;
     const managed = project.source === "Modrinth" && ["geyser", "floodgate", "viaversion"].includes(project.slug);
     if (managed) badges.append(text("span", "JustVoxel managed", "plugins-badge"));
-    const installable = ["Modrinth", "Hangar"].includes(project.source) && !managed && project.install_available && project.compatible && server.supported && server.minecraft_version && version?.id;
+    const installable = ["Modrinth", "Hangar"].includes(project.source) && !managed && !project.installed && project.install_available && project.compatible && server.supported && server.minecraft_version && version?.id;
     let reviewRejection = "";
     const readOnlyReview = (reason) => {
       reviewRejection = reason;
       showPanel(project.title, true);
       renderInfo();
       if (reason) overlaySection("Installation").append(text("p", reason));
-      overlayActions(pluginAction("Close", closePanel, "plugins-done-action"));
+      overlayActions(panelAction("Close", closePanel));
     };
     if (installable) {
       interactiveCard(card, project.title, () => reviewRejection ? readOnlyReview(reviewRejection) : reviewPlugin(project.project_id, version.id, project, readOnlyReview), iconProjectID, project.icon_url || "", project.source);
@@ -6335,6 +6349,7 @@ if (pluginsDialog && pluginsOpen) {
     return `${Number(value.toFixed(1))} ${unit}`;
   };
   const reviewPlugin = async (projectID, versionID, project, readOnlyReview) => {
+    if (project?.installed) { readOnlyReview?.(); return; }
     stopPolling();
     const current = installGeneration;
     installController = new AbortController();
@@ -6445,6 +6460,15 @@ if (pluginsDialog && pluginsOpen) {
     }
     inventoryTimer = setTimeout(() => recheckBlockedInventory(current), 1500);
   };
+  const discoverQuery = (position) => new URLSearchParams({ q: form.elements.q.value, compatible_only: String(form.elements.compatible_only.checked), release_only: String(form.elements.release_only.checked), modrinth: String(form.elements.modrinth.checked), hangar: String(form.elements.hangar.checked), modrinth_offset: String(position.modrinth_offset), hangar_offset: String(position.hangar_offset), hangar_first: String(position.hangar_first), limit: String(pageLimit) });
+  // Compare authoritative context before accepting cursor history from any response.
+  const acceptDiscoverContext = (server) => {
+    const key = JSON.stringify(server);
+    const changed = discoverServerKey !== null && discoverServerKey !== key;
+    discoverServerKey = key;
+    if (changed) resetCursors();
+    return !changed;
+  };
   const load = async () => {
     if (!document.body.classList.contains("role-administrator")) return;
     clearInventoryTimer();
@@ -6456,8 +6480,9 @@ if (pluginsDialog && pluginsOpen) {
     pagination.hidden = tab !== "discover";
     previous.disabled = true;
     next.disabled = true;
+    pageInput.disabled = true;
     form.hidden = tab !== "discover";
-    const query = new URLSearchParams({ q: form.elements.q.value, compatible_only: String(form.elements.compatible_only.checked), release_only: String(form.elements.release_only.checked), modrinth: String(form.elements.modrinth.checked), hangar: String(form.elements.hangar.checked), modrinth_offset: String(cursor.modrinth_offset), hangar_offset: String(cursor.hangar_offset), hangar_first: String(cursor.hangar_first), limit: String(pageLimit) });
+    const query = discoverQuery(cursor);
     try {
       if (tab !== "discover") {
         const installation = await pluginRequest("operation", null, controller.signal);
@@ -6475,6 +6500,7 @@ if (pluginsDialog && pluginsOpen) {
       if (response.status === 403 && String(payload.error || "").toLowerCase().includes("password")) { window.location.assign("/password"); return; }
       if (!response.ok) throw new Error(payload.error || "Plugin information is unavailable.");
       const server = payload.server;
+      if (tab === "discover" && !acceptDiscoverContext(server)) { load(); return; }
       context.textContent = `${server.server_software || "Minecraft"} · Minecraft ${server.minecraft_version || "version unavailable"}`;
       form.querySelectorAll("input,button").forEach((control) => { control.disabled = !server.supported; });
       if (!server.supported) { state.textContent = server.message; return; }
@@ -6487,12 +6513,75 @@ if (pluginsDialog && pluginsOpen) {
         pagination.hidden = false;
         previous.disabled = pageIndex === 0;
         const currentPage = pageIndex + 1;
-        const totalPages = Math.max(1, Math.ceil(payload.total / pageLimit));
+        totalPages = Math.max(1, Math.ceil(payload.total / pageLimit));
+        pageCursors[pageIndex] = cursor;
+        if (nextCursor) pageCursors[pageIndex + 1] = nextCursor;
+        else pageCursors.length = pageIndex + 1;
         next.disabled = !nextCursor;
-        pluginsDialog.querySelector("[data-plugins-page]").textContent = `Page ${currentPage} of ${totalPages}`;
+        pageInput.value = String(currentPage);
+        pageInput.style.setProperty("--plugins-page-width", `${String(totalPages).length}ch`);
+        pageTotal.textContent = String(totalPages);
       }
+      return true;
     } catch (error) {
       if (current === generation && error.name !== "AbortError") state.textContent = error.message || "Plugin information is unavailable.";
+    } finally {
+      if (current === generation) {
+        pageInput.disabled = false;
+        pageInput.value = String(pageIndex + 1);
+        if (tab === "discover") {
+          previous.disabled = pageIndex === 0;
+          next.disabled = !nextCursor;
+        }
+      }
+    }
+  };
+  const jumpToPage = async () => {
+    const value = pageInput.value.trim();
+    const requestedPage = Number(value);
+    pageInput.value = String(pageIndex + 1);
+    if (!/^\d+$/.test(value) || !Number.isSafeInteger(requestedPage) || requestedPage < 1 || requestedPage > totalPages || tab !== "discover" || pageInput.disabled) return;
+    const targetIndex = requestedPage - 1;
+    if (pageCursors[targetIndex]) {
+      pageIndex = targetIndex;
+      cursor = pageCursors[pageIndex];
+      await load();
+      return;
+    }
+    const current = ++generation;
+    controller?.abort();
+    controller = new AbortController();
+    const signal = controller.signal;
+    previous.disabled = next.disabled = pageInput.disabled = true;
+    state.textContent = `Finding page ${requestedPage}…`;
+    let reachableIndex = pageCursors.length - 1;
+    let exhausted = false;
+    try {
+      while (!pageCursors[targetIndex]) {
+        const response = await fetch(`/api/plugins/workspace/discover?${discoverQuery(pageCursors[reachableIndex])}`, { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" }, signal });
+        const payload = await response.json();
+        if (current !== generation || signal.aborted) return;
+        if (response.status === 401) { window.location.assign("/login"); return; }
+        if (response.status === 403 && String(payload.error || "").toLowerCase().includes("password")) { window.location.assign("/password"); return; }
+        if (!response.ok) throw new Error(payload.error || "Plugin information is unavailable.");
+        if (!acceptDiscoverContext(payload.server)) { load(); return; }
+        // Intermediate projects are discarded. Only the authoritative next cursor survives.
+        if (!payload.next_cursor) { exhausted = true; break; }
+        pageCursors[++reachableIndex] = payload.next_cursor;
+      }
+      pageIndex = exhausted ? reachableIndex : targetIndex;
+      cursor = pageCursors[pageIndex];
+      const loaded = await load();
+      if (loaded && exhausted && generation === current + 1) state.textContent = "Last reachable page with the current filters.";
+    } catch (error) {
+      if (current === generation && error.name !== "AbortError") state.textContent = error.message || "Plugin information is unavailable.";
+    } finally {
+      if (current === generation) {
+        previous.disabled = pageIndex === 0;
+        next.disabled = !nextCursor;
+        pageInput.disabled = false;
+        pageInput.value = String(pageIndex + 1);
+      }
     }
   };
   const discoverCapacity = () => {
@@ -6510,11 +6599,7 @@ if (pluginsDialog && pluginsOpen) {
     const newLimit = discoverCapacity();
     if (newLimit === pageLimit) return;
     pageLimit = newLimit;
-    // Keep both raw provider cursors. Prior pages used another capacity, so begin a
-    // fresh history here rather than revisiting overlapping earlier pages.
-    pageCursors = [cursor];
-    pageIndex = 0;
-    nextCursor = null;
+    resetCursors();
     if (reload) load();
   };
   const capacityObserver = new ResizeObserver(() => {
@@ -6522,7 +6607,7 @@ if (pluginsDialog && pluginsOpen) {
     capacityTimer = setTimeout(() => updateCapacity(), 200);
   });
   capacityObserver.observe(results);
-  const workspaceWindow = setupWorkspaceWindow(pluginsDialog, { onOpen: () => { resetCursors(); updateCapacity(false); load(); resumePluginInstall(); }, onClose: () => { clearTimeout(capacityTimer); clearTimeout(searchTimer); clearInventoryTimer(); ++generation; controller?.abort(); closePanel(); } });
+  const workspaceWindow = setupWorkspaceWindow(pluginsDialog, { onOpen: () => { resetCursors(); updateCapacity(false); load(); resumePluginInstall(); }, onClose: () => { clearTimeout(capacityTimer); clearTimeout(searchTimer); clearInventoryTimer(); ++generation; controller?.abort(); resetCursors(); closePanel(); } });
   pluginsOpen.addEventListener("click", () => {
     if (!document.body.classList.contains("role-administrator")) return;
     const controlCenter = document.querySelector("[data-control-center]");
@@ -6530,7 +6615,7 @@ if (pluginsDialog && pluginsOpen) {
     workspaceWindow?.open();
   });
   pluginsDialog.querySelector("[data-plugins-close]").addEventListener("click", () => workspaceWindow?.close());
-  pluginsDialog.querySelector("[data-plugins-refresh]").addEventListener("click", load);
+  pluginsDialog.querySelector("[data-plugins-refresh]").addEventListener("click", () => { resetCursors(); load(); });
   pluginsDialog.querySelectorAll("[data-plugins-tab]").forEach((button) => button.addEventListener("click", () => {
     clearTimeout(searchTimer);
     clearInventoryTimer();
@@ -6547,7 +6632,7 @@ if (pluginsDialog && pluginsOpen) {
     resetCursors();
     previous.disabled = true;
     next.disabled = true;
-    pluginsDialog.querySelector("[data-plugins-page]").textContent = "Page 1";
+    pageInput.disabled = true;
     searchTimer = setTimeout(() => load(), 250);
   });
   form.addEventListener("submit", (event) => { event.preventDefault(); clearTimeout(searchTimer); resetCursors(); load(); });
@@ -6555,11 +6640,14 @@ if (pluginsDialog && pluginsOpen) {
   previous.addEventListener("click", () => { if (pageIndex > 0) { cursor = pageCursors[--pageIndex]; load(); } });
   next.addEventListener("click", () => {
     if (!nextCursor) return;
-    pageCursors = pageCursors.slice(0, pageIndex + 1);
-    pageCursors.push(nextCursor);
+    pageCursors[pageIndex + 1] = nextCursor;
     cursor = pageCursors[++pageIndex];
     load();
   });
+  pageInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") { event.preventDefault(); jumpToPage(); }
+  });
+  pageInput.addEventListener("blur", () => { pageInput.value = String(pageIndex + 1); });
   // Role discovery is asynchronous. Restore only after Administrator identity
   // has been established, matching the role-gated launcher.
   const restore = () => {
