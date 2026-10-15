@@ -41,6 +41,7 @@ func instancePublicSettings(c minecraftInstanceRuntimeConfig) instanceRuntimeSet
 	return instanceRuntimeSettings{JavaPort: c.JavaPort, BedrockEnabled: c.BedrockEnabled, BedrockPort: c.BedrockPort, JavaMemory: c.JavaMemory, ContainerMemory: c.ContainerMemory, Software: c.Software, Version: c.Version, PaperChannel: c.PaperChannel, ImageTag: c.ImageTag, StartOnBoot: c.StartOnBoot, EULAAccepted: c.EULAAccepted, Timezone: c.Timezone, GameMode: c.GameMode, Difficulty: c.Difficulty, MaxPlayers: c.MaxPlayers, Whitelist: c.Whitelist, EnforceWhitelist: c.EnforceWhitelist, MOTD: c.MOTD}
 }
 func registerInstanceRuntimeRoutes(mux *http.ServeMux, s *server) {
+	registerInstanceMaintenanceRoutes(mux, s)
 	mux.HandleFunc("POST /v1/minecraft/instances", s.instanceRuntimeCreate)
 	mux.HandleFunc("GET /v1/minecraft/instances/runtime", s.instanceRuntimeList)
 	mux.HandleFunc("GET /v1/minecraft/instances/{id}/configuration", s.instanceRuntimeConfiguration)
@@ -372,7 +373,7 @@ func (s *server) instanceRuntimeAction(w http.ResponseWriter, r *http.Request, a
 		defer guard.cancel()
 	}
 	s.withInstanceMutation(w, r, id, func(ctx context.Context) error {
-		if err := instanceRuntimes.action(ctx, id, action); err != nil {
+		if err := instanceRuntimes.actionWithWarnings(ctx, id, action, actor.Role == roleAdministrator); err != nil {
 			return err
 		}
 		if guard != nil {

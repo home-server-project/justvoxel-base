@@ -8,5 +8,11 @@ if [[ ${state} != stopping ]]; then
     exit 0
 fi
 
-jv_prepare_minecraft_for_host_shutdown
+# Preserve the legacy path while independent checks share one bounded window.
+jv_prepare_minecraft_for_host_shutdown &
+legacy_guard=$!
+/usr/libexec/justvoxel/mjust/instance-host-shutdown-prepare &
+instance_guard=$!
+wait "${legacy_guard}" || true
+wait "${instance_guard}" || true
 exit 0

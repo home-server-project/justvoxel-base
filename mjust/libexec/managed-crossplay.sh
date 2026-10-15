@@ -1,5 +1,7 @@
 #!/usr/bin/bash
 # Fixed JustVoxel Spigot components only. No caller-supplied download URLs.
+# Independent startup overrides this hook: Podman :Z owns its data labels.
+jv_crossplay_label() { restorecon -F "$1"; }
 jv_crossplay_metadata() {
     local project="$1" metadata
     case "${project}" in geyser|floodgate) ;; *) return 1 ;; esac
@@ -95,7 +97,7 @@ jv_crossplay_rollback() {
         elif [[ -f ${staging}/previous/${project}.jar ]]; then
             temporary="$(mktemp "${DATA_PATH}/plugins/.justvoxel-rollback-${project}.XXXXXX")" || { failed=1; continue; }
             if ! install -m0644 -o "${MINECRAFT_UID}" -g "${MINECRAFT_GID}" "${staging}/previous/${project}.jar" "${temporary}" ||
-                ! mv -fT -- "${temporary}" "${path}" || ! restorecon -F "${path}"; then
+                ! mv -fT -- "${temporary}" "${path}" || ! jv_crossplay_label "${path}"; then
                 rm -f -- "${temporary}"
                 failed=1
             fi
@@ -123,8 +125,8 @@ jv_crossplay_install() {
         fi
         temporary="$(mktemp "${DATA_PATH}/plugins/.justvoxel-${project}.XXXXXX")" || return 1
         if ! install -m0644 -o "${MINECRAFT_UID}" -g "${MINECRAFT_GID}" "${staging}/${project}.jar" "${temporary}" ||
-            ! restorecon -F "${temporary}" || ! mv -fT -- "${temporary}" "${DATA_PATH}/plugins/${name}" ||
-            ! restorecon -F "${DATA_PATH}/plugins/${name}"; then
+            ! jv_crossplay_label "${temporary}" || ! mv -fT -- "${temporary}" "${DATA_PATH}/plugins/${name}" ||
+            ! jv_crossplay_label "${DATA_PATH}/plugins/${name}"; then
             rm -f -- "${temporary}"
             return 1
         fi

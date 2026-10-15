@@ -32,7 +32,7 @@ case "${1:-}" in
             fi
         fi
         ;;
-    preflight|preflight-new|provision|validate)
+    preflight|preflight-new|provision|validate|version-empty)
         [[ $# == 9 ]] || fail
         action=$1 instance_id=$2 storage_root=$3 data_path=$4 mount_point=$5 expected_uuid=$6 expected_source=$7 uid=$8 gid=$9
         [[ ${instance_id} =~ ^jv-[a-z0-9]{6,12}$ ]] || fail
@@ -96,8 +96,13 @@ case "${1:-}" in
                 [[ -z ${first_entry} ]] || fail
                 repair_empty=yes
             fi
-        elif [[ ${action} == validate ]]; then
+        elif [[ ${action} == validate || ${action} == version-empty ]]; then
             fail
+        fi
+        if [[ ${action} == version-empty ]]; then
+            [[ ${repair_empty} == no ]] || fail
+            first_entry="$(find "${data_path}" -mindepth 1 -maxdepth 1 -print -quit)" || fail
+            [[ -z ${first_entry} ]] || fail
         fi
         if [[ ${action} == preflight || ${action} == preflight-new || ${action} == provision ]]; then
             # Bounded minimum for provisioning; this is not a future-world size

@@ -1,6 +1,7 @@
 [Unit]
 Description=JustVoxel Minecraft @@INSTANCE_ID@@
-Wants=network-online.target
+Wants=network-online.target justvoxel-minecraft-shutdown-guard.service
+Before=justvoxel-minecraft-shutdown-guard.service
 After=network-online.target
 RequiresMountsFor=@@DATA_PATH@@
 
@@ -8,6 +9,7 @@ RequiresMountsFor=@@DATA_PATH@@
 Image=@@MINECRAFT_IMAGE@@
 ContainerName=minecraft-@@INSTANCE_ID@@
 PublishPort=@@JAVA_PORT@@:25565/tcp
+@@BEDROCK_PUBLISH@@
 Volume=@@DATA_PATH@@:/data:Z
 EnvironmentFile=@@ENV_PATH@@
 Memory=@@CONTAINER_MEMORY@@
@@ -17,6 +19,7 @@ LogDriver=journald
 [Service]
 ExecStartPre=/usr/libexec/justvoxel/mjust/validate-instance-runtime-commit @@INSTANCE_ID@@
 ExecStartPre=/usr/libexec/justvoxel/mjust/validate-instance-data-mount @@INSTANCE_ID@@ "@@STORAGE_ROOT@@" "@@DATA_PATH@@" "@@DATA_MOUNT_POINT@@" "@@DATA_EXPECTED_UUID@@" "@@DATA_EXPECTED_SOURCE@@"
+ExecStartPre=/usr/libexec/justvoxel/mjust/instance-crossplay-start @@INSTANCE_ID@@
 Restart=always
 RestartSec=10
 TimeoutStartSec=900

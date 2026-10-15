@@ -115,6 +115,11 @@ func (f *instanceActivationFixture) command(ctx context.Context, command string,
 			if err := os.MkdirAll(data, 0750); err != nil {
 				f.t.Fatal(err)
 			}
+		case "version-empty":
+			entries, err := os.ReadDir(data)
+			if err != nil || len(entries) != 0 {
+				return nil, errors.New("nonempty world")
+			}
 		case "validate":
 			if info, err := os.Stat(data); err != nil || !info.IsDir() {
 				return nil, errors.New("missing data directory")
@@ -229,7 +234,11 @@ func (f *instanceActivationFixture) command(ctx context.Context, command string,
 				rule.Permanent = true
 			case strings.Contains(arg, "-port="):
 				_, value, _ := strings.Cut(arg, "=")
-				rule.Port, _ = strconv.Atoi(strings.TrimSuffix(value, "/tcp"))
+				port, protocol, _ := strings.Cut(value, "/")
+				rule.Port, _ = strconv.Atoi(port)
+				if protocol == "udp" {
+					rule.Protocol = "udp"
+				}
 			}
 			if strings.HasPrefix(arg, "--query-port=") {
 				action = "query"

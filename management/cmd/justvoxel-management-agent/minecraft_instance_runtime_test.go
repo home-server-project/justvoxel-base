@@ -149,6 +149,7 @@ func TestInstanceRuntimeValidation(t *testing.T) {
 			c[1].BedrockEnabled = true
 			c[0].BedrockPort = 19133
 			c[1].BedrockPort = 19133
+			c[1].Software = "purpur"
 		}},
 		{"low TCP", "port must", func(_ *minecraftInstanceRuntimeContext, c []minecraftInstanceRuntimeConfig) { c[0].JavaPort = 0 }},
 		{"high TCP", "port must", func(_ *minecraftInstanceRuntimeContext, c []minecraftInstanceRuntimeConfig) { c[0].JavaPort = 65536 }},
@@ -158,6 +159,7 @@ func TestInstanceRuntimeValidation(t *testing.T) {
 		}},
 		{"disabled UDP", "disabled Bedrock", func(_ *minecraftInstanceRuntimeContext, c []minecraftInstanceRuntimeConfig) { c[0].BedrockPort = 19133 }},
 		{"unsupported crossplay", "unsupported", func(_ *minecraftInstanceRuntimeContext, c []minecraftInstanceRuntimeConfig) {
+			c[0].Software = "vanilla"
 			c[0].BedrockEnabled = true
 			c[0].BedrockPort = 19133
 		}},

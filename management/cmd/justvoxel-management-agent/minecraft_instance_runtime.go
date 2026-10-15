@@ -305,6 +305,9 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		if err := reserve(c.JavaPort, tcp); err != nil {
 			return nil, err
 		}
+		if c.BedrockEnabled && c.Software != "paper" && c.Software != "purpur" {
+			return nil, errors.New("unsupported cross-play software")
+		}
 		if c.BedrockEnabled {
 			if err := reserve(c.BedrockPort, udp); err != nil {
 				return nil, err
@@ -354,11 +357,7 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 	if total > ctx.TotalMemoryMiB-1024 {
 		return nil, errors.New("configured container memory overcommits physical RAM; reserve at least 1 GiB for the appliance")
 	}
-	for _, c := range ordered {
-		if c.BedrockEnabled {
-			return nil, errors.New("instance cross-play rendering is unsupported until instance-aware startup helpers are implemented")
-		}
-	}
+
 	envTemplate, err := os.ReadFile(filepath.Join(ctx.TemplateRoot, "config", "minecraft.env.in"))
 	if err != nil {
 		return nil, err
@@ -393,8 +392,13 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		if c.StartOnBoot {
 			install = "[Install]\nWantedBy=multi-user.target"
 		}
+		bedrockPublish := ""
+		if c.BedrockEnabled {
+			bedrockPublish = "PublishPort=" + strconv.Itoa(c.BedrockPort) + ":19132/udp"
+		}
 		f.Quadlet, err = instanceRuntimeTemplate(quadletTemplate, map[string]string{
-			"INSTANCE_ID": c.ID, "DATA_PATH": f.DataPath, "ENV_PATH": f.EnvironmentPath, "STORAGE_ROOT": ctx.StorageRoot, "JAVA_PORT": strconv.Itoa(c.JavaPort),
+			"BEDROCK_PUBLISH": bedrockPublish,
+			"INSTANCE_ID":     c.ID, "DATA_PATH": f.DataPath, "ENV_PATH": f.EnvironmentPath, "STORAGE_ROOT": ctx.StorageRoot, "JAVA_PORT": strconv.Itoa(c.JavaPort),
 			"MINECRAFT_IMAGE": "docker.io/itzg/minecraft-server:" + c.ImageTag, "CONTAINER_MEMORY": strings.ToUpper(c.ContainerMemory),
 			"DATA_MOUNT_POINT": ctx.MountPoint, "DATA_EXPECTED_UUID": ctx.ExpectedUUID, "DATA_EXPECTED_SOURCE": ctx.ExpectedSource, "INSTALL_SECTION": install,
 		})

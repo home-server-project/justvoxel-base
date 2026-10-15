@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var instanceSHA256Pattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
@@ -172,6 +173,9 @@ func (b *instanceRuntimeBackend) observe(ctx context.Context, id string) (instan
 	return raw, nil
 }
 func (b *instanceRuntimeBackend) action(ctx context.Context, id, action string) error {
+	return b.actionWithWarnings(ctx, id, action, false)
+}
+func (b *instanceRuntimeBackend) actionWithWarnings(ctx context.Context, id, action string, warnings bool) error {
 	if !instanceIDPattern.MatchString(id) {
 		return errInstanceID
 	}
@@ -217,28 +221,24 @@ func (b *instanceRuntimeBackend) action(ctx context.Context, id, action string) 
 	if action == "stop" || action == "restart" {
 		switch state.State {
 		case "running":
-			output, err := b.command(ctx, "podman", "exec", "minecraft-"+id, "rcon-cli", "list")
+			players, err := b.players(ctx, id)
 			if err != nil {
-				return instanceRuntimeFailure("Player presence cannot be verified; the instance was not interrupted.")
+				return err
 			}
-			parts := instancePlayerListPattern.FindStringSubmatch(strings.TrimSpace(string(output)))
-			if parts == nil {
-				return instanceRuntimeFailure("Player presence cannot be verified; the instance was not interrupted.")
+			if players.Online > 0 && !warnings {
+				return instanceRuntimeFailure("Players are online; administrator interruption with warnings is required.")
 			}
-			online, e1 := strconv.Atoi(parts[1])
-			max, e2 := strconv.Atoi(parts[2])
-			if e1 != nil || e2 != nil || max < 1 || online < 0 || online > max {
-				return instanceRuntimeFailure("Player presence cannot be verified; the instance was not interrupted.")
-			}
-			if online > 0 {
-				return instanceRuntimeFailure("Players are online; the instance was not interrupted.")
-			}
-			if strings.TrimSpace(parts[3]) != "" {
-				return instanceRuntimeFailure("Player presence cannot be verified; the instance was not interrupted.")
-			}
-			// Preserve itzg's ordinary warning/delay and Podman's Quadlet StopTimeout.
-			if _, err = b.command(ctx, "systemctl", "stop", "--", unit); err != nil {
-				return instanceRuntimeFailure("Instance graceful stop failed.")
+			if players.Online > 0 {
+				if err = b.stopWithWarnings(ctx, id); err != nil {
+					return err
+				}
+			} else {
+				stopCtx, cancel := context.WithTimeout(ctx, 150*time.Second)
+				_, err = b.command(stopCtx, "systemctl", "stop", "--", unit)
+				cancel()
+				if err != nil {
+					return instanceRuntimeFailure("Instance graceful stop failed or exceeded the safety timeout; normal graceful shutdown continues.")
+				}
 			}
 			stopped, err := b.observeRaw(ctx, id)
 			if err != nil || stopped.State != "stopped" {
@@ -265,6 +265,13 @@ func (b *instanceRuntimeBackend) action(ctx context.Context, id, action string) 
 	} else if state.State != "stopped" && state.State != "failed" {
 		return instanceRuntimeFailure("Instance cannot be started in its current state.")
 	}
+	if record.Runtime.BedrockEnabled {
+		heldUDP, e := instanceHoldUDP(record.Runtime.BedrockPort)
+		if e != nil {
+			return e
+		}
+		heldUDP.Close()
+	}
 	// A stopped instance's reservation does not prove the host port is still free.
 	held, err := instanceHoldPort(record.Runtime.JavaPort)
 	if err != nil {
@@ -287,7 +294,7 @@ func (b *instanceRuntimeBackend) queryFirewall(ctx context.Context, r instanceFi
 	if r.Permanent {
 		args = append(args, "--permanent")
 	}
-	args = append(args, "--query-port="+strconv.Itoa(r.Port)+"/tcp")
+	args = append(args, "--query-port="+strconv.Itoa(r.Port)+"/"+r.protocol())
 	output, err := b.command(ctx, "firewall-cmd", args...)
 	value := strings.TrimSpace(string(output))
 	if err == nil && value == "yes" {
@@ -306,21 +313,27 @@ func (b *instanceRuntimeBackend) planFirewall(ctx context.Context, old, next ins
 	if err != nil || !instanceFirewallZonePattern.MatchString(zone) {
 		return nil, nil, instanceRuntimeFailure("Instance firewall zone is unavailable.")
 	}
-	if old.Runtime.JavaPort != next.Runtime.JavaPort {
-		for _, rule := range old.Firewall {
-			present, err := b.queryFirewall(ctx, rule)
-			if err != nil {
-				return nil, nil, err
-			}
-			if present {
-				changes = append(changes, instanceFirewallChange{Rule: rule, Add: false})
-			}
-		}
-	} else {
-		owned = append(owned, old.Firewall...)
-	}
+	desired := []instanceFirewallRule{}
 	for _, permanent := range []bool{true, false} {
-		rule := instanceFirewallRule{Zone: zone, Port: next.Runtime.JavaPort, Permanent: permanent}
+		desired = append(desired, instanceFirewallRule{Zone: zone, Port: next.Runtime.JavaPort, Permanent: permanent})
+		if next.Runtime.BedrockEnabled {
+			desired = append(desired, instanceFirewallRule{Zone: zone, Port: next.Runtime.BedrockPort, Permanent: permanent, Protocol: "udp"})
+		}
+	}
+	for _, rule := range old.Firewall {
+		if instanceRuleForRuntime(rule, next.Runtime) {
+			owned = append(owned, rule)
+			continue
+		}
+		present, err := b.queryFirewall(ctx, rule)
+		if err != nil {
+			return nil, nil, err
+		}
+		if present {
+			changes = append(changes, instanceFirewallChange{Rule: rule, Add: false})
+		}
+	}
+	for _, rule := range desired {
 		present, err := b.queryFirewall(ctx, rule)
 		if err != nil {
 			return nil, nil, err
@@ -336,7 +349,7 @@ func (b *instanceRuntimeBackend) planFirewall(ctx context.Context, old, next ins
 }
 func instanceRuleContains(rules []instanceFirewallRule, rule instanceFirewallRule) bool {
 	for _, r := range rules {
-		if r == rule {
+		if r.Zone == rule.Zone && r.Port == rule.Port && r.Permanent == rule.Permanent && r.protocol() == rule.protocol() {
 			return true
 		}
 	}
@@ -358,7 +371,7 @@ func (b *instanceRuntimeBackend) changeFirewall(ctx context.Context, c instanceF
 	if c.Add {
 		action = "--add-port="
 	}
-	args = append(args, action+strconv.Itoa(c.Rule.Port)+"/tcp")
+	args = append(args, action+strconv.Itoa(c.Rule.Port)+"/"+c.Rule.protocol())
 	if _, err = b.command(ctx, "firewall-cmd", args...); err != nil {
 		return instanceRuntimeFailure("Instance firewall update failed.")
 	}

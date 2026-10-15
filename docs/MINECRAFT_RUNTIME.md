@@ -76,7 +76,7 @@ For example, legacy `/var/lib/justvoxel/minecraft` yields `/var/lib/justvoxel/mi
 
 `minecraftInstanceRuntimeConfig` holds per-instance ports, Java and container memory, software, selected version, Paper channel, image tag, startup settings, explicit EULA acceptance, non-root container UID/GID, private RCON password, and Start on Boot. RCON passwords follow the existing generated hexadecimal convention (32–128 hex characters). The renderer reuses `templates/config/minecraft.env.in` and the established Paper/Purpur/Vanilla capability rules. The new Quadlet template uses `docker.io/itzg/minecraft-server:<selected tag>` with the existing moving or pinned tag convention; rendering does not resolve tags, fetch metadata, or resolve digests. Version inputs are a selected pin or `LATEST`; upstream availability checks remain a caller responsibility. Latest Paper requires its existing experimental channel convention.
 
-The trusted internal caller must supply **every configured instance, including stopped instances**, plus a fresh legacy reservation and physical RAM/configured-storage snapshot. This phase does not yet provide the authoritative persistent multi-instance configuration store or activation lock. Validation reserves Java TCP and enabled Bedrock UDP ports separately, rejects duplicates within each protocol and collisions with legacy reservations, and checks the 1–65535 range. Equal numeric TCP and UDP ports are allowed. Disabled Bedrock requires a zero port. Enabled instance Bedrock is validated but rendering then rejects it explicitly: the global `managed-crossplay-start` helper is never attached to new instances, and Phase 2 does not provide instance cross-play.
+The trusted internal caller must supply **every configured instance, including stopped instances**, plus a fresh legacy reservation and physical RAM/configured-storage snapshot. This phase does not yet provide the authoritative persistent multi-instance configuration store or activation lock. Validation reserves Java TCP and enabled Bedrock UDP ports separately, rejects duplicates within each protocol and collisions with legacy reservations, and checks the 1–65535 range. Equal numeric TCP and UDP ports are allowed. Disabled Bedrock requires a zero port. Phase 2 originally rejected enabled instance Bedrock after validation. Phase 3B adds the independent startup helper described below; the legacy global `managed-crossplay-start` is never attached to independent units.
 
 Memory uses positive `M`/`G` values (case insensitive), between 512 MiB and 1 TiB per quantity. Each container must allow at least 512 MiB above its Java allocation. Combined configured container limits, including the legacy container and stopped instances, must leave at least 1 GiB of physical RAM for the appliance. Free memory, listening sockets, swap, and zram do not determine reservations. Startup values and immutable IDs are validated before any output is returned; malformed JSON and unknown fields are rejected by the internal decoder. There are no arbitrary environment, image repository, unit, or data-path overrides.
 
@@ -88,7 +88,7 @@ Rendering returns deterministic in-memory files, including private environment b
 
 Focused Go tests cover independent output, boot settings, identity/name independence, legacy contracts and read purity, stopped-instance reservations, ports, resources, malformed inputs, path overlap, symlinks, and atomic inactive staging. `tests/test-instance-runtime-mount.sh` uses temporary fixtures and stubbed mount identity checks. The optional Go generator test requires explicit `JUSTVOXEL_QUADLET_GENERATOR` selection and runs only the generator's dry-run mode; it starts no containers. These tests have been added but not executed for Phase 2. Formatting and shell syntax checks are separate from test or runtime acceptance.
 
-Phase 2 introduced no first-run multi-instance startup, WebUI creation flow, firewall changes, or scheduled backups. Phase 3A adds the backend activation and lifecycle behavior described below; instance-aware cross-play, full player-aware maintenance and host shutdown coordination remain future work.
+Phase 2 introduced no first-run multi-instance startup, WebUI creation flow, firewall changes, or scheduled backups. Phase 3A adds the backend activation and lifecycle behavior described below; Phase 3B adds instance-aware cross-play, player-aware maintenance and host shutdown coordination below.
 
 
 ## Independent activation and lifecycle (Phase 3A)
@@ -143,7 +143,7 @@ This is a request-shape example, not a recommended current Minecraft version.
 Creation verifies software/version availability with the existing metadata
 helpers and derives container UID/GID from the configured legacy installation.
 A complete configured legacy server and its immutable identity are required.
-New-instance Bedrock cross-play remains explicitly unsupported.
+Phase 3B supports independent Paper/Purpur cross-play through the instance-specific startup helper.
 
 Creation takes the existing setup/restore/migration/reset operation locks and
 the shared Minecraft maintenance lock. It refreshes legacy configuration,
@@ -180,21 +180,22 @@ interrupted mkdir/chown; missing or invalid evidence fails closed.
 | `POST /v1/minecraft/instances/{id}/recover` | Administrator; retry verified rollback from private activation evidence; body `{}` |
 | `GET /v1/minecraft/instances/{id}/status` | Authenticated read; actual unit/container evidence and storage availability |
 | `POST /v1/minecraft/instances/{id}/start` | Administrator or operator; request startup of the selected committed runtime; body `{}` |
-| `POST /v1/minecraft/instances/{id}/stop` | Administrator; verify no players and wait for ordinary graceful shutdown; body `{}` |
+| `POST /v1/minecraft/instances/{id}/stop` | Administrator; player-aware warning/countdown and ordinary graceful shutdown; body `{}` |
 | `POST /v1/minecraft/instances/{id}/restart` | Administrator or operator; verified graceful stop followed by startup; body `{}` |
 
 Operators retain the existing shared restart allowance and cooldown; independent
 instance restarts consume that allowance and audit the internally derived
 service. All mutation requests use the existing authenticated API and strict
-JSON decoder. Selected-instance Stop and Restart refuse online players,
-failed/unparseable RCON responses, or uncertain service/container evidence.
-There is no confirmation override or force stop in these routes. The ordinary
+JSON decoder. Selected-instance Stop and Restart refuse failed/unparseable
+RCON responses or uncertain service/container evidence. Phase 3B administrators
+may interrupt online players with a mandatory warning/countdown; operators
+continue to require an empty server. There is no force stop. The ordinary
 itzg shutdown delay, Podman stop timeout, and systemd stop timeout remain intact.
 
 Full settings applies require the selected instance to be stopped, or failed
 with actual evidence that no live container remains. Changing
-only Start on Boot may be applied while running, after confirming the rendered
-environment and non-install Quadlet content are unchanged. ON uses the Phase 2
+only Start on Boot may be applied while running, while preserving the committed
+environment and non-install Quadlet content. ON uses the Phase 2
 `[Install]`/`WantedBy=multi-user.target` configuration; OFF omits it. Neither
 calls `systemctl enable` or changes current running state. Software changes on
 an already activated instance are outside Phase 3A; world conversion requires
@@ -206,8 +207,9 @@ Already-open rules are preserved and are not claimed as owned. Port changes
 remove only recorded instance-owned rules after confirming the previous port
 is not occupied. Apply and rollback use explicit port actions and queries;
 they never reload firewalld or change unrelated services/rules. Failed applies
-reverse only the planned instance-owned changes. UDP remains unused for new
-instances because cross-play is unsupported.
+reverse only the planned instance-owned changes. Phase 3B extends the same
+ownership model to enabled Bedrock UDP ports. Omitted ownership protocols in
+Phase 3A records continue to mean TCP.
 
 Before any provisioning or live mutation, the Agent durably publishes
 `pending.json` beside `config.json`. It contains the previous record, target
@@ -246,7 +248,118 @@ and storage operations. Tests have been added but **not executed** for Phase 3A.
 Only Go formatting and shell syntax checks were performed. No image build,
 container execution, deployment, or runtime acceptance is claimed.
 
-Phase 3B still needs complete instance-aware player maintenance, race-aware
-shutdown coordination and appliance/host shutdown integration. Multi-instance
-cross-play, the creation wizard, independent backup workflows, and VM runtime
-acceptance remain separately scoped work.
+Phase 3B adds instance-aware maintenance, cross-play and host shutdown
+coordination below. The creation wizard, independent backup workflows and
+VM runtime acceptance remain separately scoped work.
+
+
+## Independent maintenance (Phase 3B)
+
+All routes below require the existing authenticated session. They derive only
+`minecraft-<validated ID>` from authoritative independent runtime/identity
+records, and never fall back to `minecraft` or read legacy environment data.
+
+| Route | Permission and behavior |
+| --- | --- |
+| `GET /v1/minecraft/instances/{id}/players` | Any authenticated role; offline, online count/maximum, or explicit unknown state |
+| `GET /v1/minecraft/instances/{id}/logs` | Any authenticated role; selected unit's last 100 journal entries, at most 16 KiB of sanitized text |
+| `POST /v1/minecraft/instances/{id}/console` | Administrator; `{"command":"say …"}`, up to 256 bytes; no other console commands |
+| `GET /v1/minecraft/instances/{id}/version` | Any authenticated role; configured software/version and explicit absence of independent backups |
+| `POST /v1/minecraft/instances/{id}/version/verify` | Administrator; `{"version":"1.21.5"}` checks existing software-specific upstream availability without changing configuration |
+
+Console output is discarded; announcements are audited without their text.
+RCON runs inside the selected container using its private configuration; no
+password is put in arguments, API responses, or logs. Calls have a five-second
+limit. Player lists must match the complete expected response and consistent
+counts; unavailable, malformed or oversized responses mean unknown. Logs use
+fixed journal arguments, bounded capture, credential redaction and omission of
+private diagnostic lines. No arbitrary shell, systemctl or Podman arguments
+are accepted.
+
+Administrator Stop/Restart holds the Phase 3A appliance locks and shared
+Minecraft maintenance lock across player checking, graceful stop, verification
+and any subsequent start request. Occupied instances receive a 60-second announcement,
+then the existing 30/15/10/5/4/3/2/1-second warning sequence while systemd uses
+the ordinary itzg graceful shutdown. The countdown and stop confirmation share
+a 150-second safety deadline. Failed announcements or timeout return failure
+without a force stop or restart fallback. Empty instances still use the normal
+container stop delay, protecting players who join after the check. Operators
+retain Phase 3A's empty-server restriction, shared allowance, cooldown and
+audit accounting. Other instances are never stopped or restarted.
+
+Paper/Purpur cross-play is configured through the stopped-only runtime settings
+apply, with `bedrock_enabled` and `bedrock_port`. Vanilla is rejected. Every
+configured instance, including stopped instances, reserves its Java TCP and
+enabled Bedrock UDP ports alongside legacy reservations. Quadlets publish the
+selected host ports to container-local Java 25565 and Bedrock 19132. Only owned
+runtime/permanent UDP firewall rules are removed or rolled back; already-open
+rules remain unowned. Recovery accepts old TCP ownership records and validates
+both protocols against the previous/target runtime evidence.
+
+`instance-crossplay-start` validates the selected committed runtime, takes the
+same maintenance lock with a bounded wait, and prepares only that instance's
+plugins. It reuses managed Geyser/Floodgate metadata, checksum validation,
+prepare-before-replace and rollback functions. Existing canonical binaries
+survive upstream outages. Private durable staging retains failed rollback
+artifacts; the next start retries rollback before proceeding. Disabling removes
+only managed Geyser/Floodgate binaries at the next start, preserving their
+configuration and identity material. Geyser uses the instance's internal ports
+and Floodgate authentication. No legacy plugin folder is loaded; Podman `:Z`
+continues to own independent volume labels, without explicit relabeling.
+
+Administrator and operator Start, and the startup portion of Restart, submit
+`systemctl --no-block start -- minecraft-<ID>.service` while the Agent holds
+the maintenance lock. They return after job submission, without waiting for
+`ExecStartPre` or server readiness. The Agent releases its lock after the
+action and audit/quota accounting; the startup helper then acquires that same
+lock independently. A synchronous start here would wait on its own locked
+prerequisite and fail its five-second lock timeout. No lock bypass or inherited
+lock flag is used. Independent maintenance can win the lock before the helper;
+the helper then waits up to five seconds and refuses startup if still blocked,
+without preparing plugins. Boot-time startup and systemd automatic retries use
+the same helper and serialization. Independent activation recovery only rolls
+back configuration/firewall evidence and reloads systemd; it never starts a
+server. Legacy recovery startup remains on the separate `minecraft.service`
+path.
+
+The focused startup lock regression uses the real lifecycle API, a temporary
+flock and a controlled prerequisite process for administrator/operator Start
+and Restart. It requires the prerequisite to encounter the Agent's held lock,
+acquire it after the request releases it, and exclude independent maintenance
+until preparation completes. The helper fixture also checks that independent
+maintenance blocks preparation and that direct startup succeeds after release.
+These regression tests have been added but not executed.
+
+Version changes use the existing administrator configuration apply and existing
+software/version metadata verification. They require a stopped instance and
+an explicitly pinned target. Until Phase 4, an already activated instance may
+change versions only when its host-namespace data directory is verified empty.
+Any existing data, unknown storage evidence or a moving target is refused with
+an independent backup/migration explanation. Software-family conversion remains
+refused. Verification of availability alone does not authorize a world upgrade
+or imply that an independent backup exists.
+
+The existing host shutdown guard keeps the legacy path and checks independent
+instances concurrently in a shared six-second window, with an eight-second
+outer timeout. It reads private authoritative runtime/identity records and
+committed hashes, confirms actually running containers, and sends itzg's
+SIGUSR1 delay bypass only after reliably parsing zero players. Online players,
+missing RCON, malformed responses and unhealthy records retain normal graceful
+container shutdown. No server is started or forcibly killed. Warnings are
+aggregate and bounded, and shutdown takes no maintenance lock. New Quadlets
+order before the guard at startup, so the guard runs before their shutdown;
+no generated service is enabled manually. Older committed bundles remain
+usable; stop and reapply their runtime to install the new Quadlet ordering.
+A running Start on Boot-only change preserves its existing committed bundle.
+
+Focused Go and temporary-filesystem helper tests cover player protocols,
+container targeting, warnings and failure isolation, roles, bounded diagnostics,
+UDP reservations/ownership, empty-data version safety, independent plugin
+preservation/rollback, and coordinated shutdown. Phase 3A restart quota/audit
+and legacy adaptive-shutdown tests remain applicable. These tests have not been
+run for this phase. Formatting and Bash syntax checks do not establish runtime,
+firewall, upstream plugin compatibility, generated-unit or VM acceptance.
+
+Phase 4 still needs independent backups and their recovery/maintenance contracts
+before safe version upgrades of populated worlds can be offered. No independent
+backup implementation, scheduling, WebUI workflow or deployment is added here.

@@ -45,6 +45,7 @@ type instanceFirewallRule struct {
 	Zone      string `json:"zone"`
 	Port      int    `json:"port"`
 	Permanent bool   `json:"permanent"`
+	Protocol  string `json:"protocol,omitempty"`
 }
 type instanceFirewallChange struct {
 	Rule instanceFirewallRule `json:"rule"`
@@ -63,6 +64,7 @@ type instanceRuntimeBackend struct {
 	root, quadlets, staging string
 	store                   *minecraftInstanceStore
 	command                 func(context.Context, string, ...string) ([]byte, error)
+	pause                   func(context.Context, time.Duration) error
 	snapshot                func(context.Context) (minecraftInstanceRuntimeContext, uint32, uint32, error)
 }
 
@@ -298,7 +300,7 @@ func (b *instanceRuntimeBackend) readRecord(id string) (instanceRuntimeRecord, e
 	if err = instanceDecode(data, &record); err != nil {
 		return record, err
 	}
-	if record.SchemaVersion != 1 || record.Runtime.ID != id || !validSetupServerType(record.Runtime.Software) || record.Runtime.BedrockEnabled || record.Runtime.BedrockPort != 0 || !instanceRuntimeSecretPattern.MatchString(record.Runtime.RCONPassword) || record.Storage.DataPath != filepath.Join(record.Storage.Root, "minecraft-instances", id, "data") {
+	if record.SchemaVersion != 1 || record.Runtime.ID != id || !validSetupServerType(record.Runtime.Software) || !instanceCrossplayValid(record.Runtime) || !instanceRuntimeSecretPattern.MatchString(record.Runtime.RCONPassword) || record.Storage.DataPath != filepath.Join(record.Storage.Root, "minecraft-instances", id, "data") {
 		return record, instanceRuntimeFailure("Invalid ID-to-runtime mapping.")
 	}
 	for _, p := range []string{record.Storage.Root, record.Storage.DataPath} {
@@ -313,7 +315,7 @@ func (b *instanceRuntimeBackend) readRecord(id string) (instanceRuntimeRecord, e
 		return record, instanceRuntimeFailure("Invalid runtime commitment.")
 	}
 	for _, rule := range record.Firewall {
-		if !instanceFirewallZonePattern.MatchString(rule.Zone) || rule.Port != record.Runtime.JavaPort {
+		if !instanceFirewallZonePattern.MatchString(rule.Zone) || !instanceRuleForRuntime(rule, record.Runtime) {
 			return record, instanceRuntimeFailure("Invalid firewall ownership.")
 		}
 	}
@@ -545,17 +547,57 @@ func (b *instanceRuntimeBackend) apply(ctx context.Context, previous instanceRun
 	}
 	before, after := previous.Runtime, next.Runtime
 	before.StartOnBoot = after.StartOnBoot
-	bootOnly := previous.EnvironmentSHA256 != "" && reflect.DeepEqual(before, after) && instanceHash(files.Environment) == previous.EnvironmentSHA256
+	bootOnly := previous.EnvironmentSHA256 != "" && reflect.DeepEqual(before, after) && (state.State == "running" || previous.Runtime.StartOnBoot != next.Runtime.StartOnBoot)
 	if bootOnly {
-		_, _, oldQuadletPath := b.paths(id)
-		oldQuadlet, err := b.readPrivate(oldQuadletPath)
+		if err = b.verifyLive(previous); err != nil {
+			return err
+		}
+		_, oldEnvPath, oldQuadletPath := b.paths(id)
+		files.Environment, err = b.readPrivate(oldEnvPath)
 		if err != nil {
 			return err
 		}
-		bootOnly = instanceQuadletWithoutBoot(oldQuadlet) == instanceQuadletWithoutBoot(files.Quadlet)
+		oldQuadlet, e := b.readPrivate(oldQuadletPath)
+		if e != nil {
+			return e
+		}
+		install := "# Start on Boot disabled; service remains manually startable."
+		if after.StartOnBoot {
+			install = "[Install]\nWantedBy=multi-user.target"
+		}
+		files.Quadlet = []byte(instanceQuadletWithoutBoot(oldQuadlet) + "\n" + install + "\n")
+		for i := range all {
+			if all[i].ID == id {
+				all[i] = files
+			}
+		}
 	}
 	if state.State != "stopped" && state.State != "failed" && state.State != "configured" && !(bootOnly && state.State == "running") {
 		return instanceRuntimeFailure("Stop the selected instance before changing its runtime configuration.")
+	}
+	if previous.EnvironmentSHA256 != "" && previous.Runtime.Version != next.Runtime.Version {
+		// No world-version inference: until Phase 4 only a verified empty data
+		// directory can change versions. The shared maintenance lock is held.
+		if next.Runtime.Version == "LATEST" {
+			return instanceRuntimeFailure("Pin an explicit Minecraft version; world upgrades require independent backups in Phase 4.")
+		}
+		if err = b.storage(ctx, "version-empty", previous); err != nil {
+			return instanceRuntimeFailure("Version changes on existing data require independent backup/migration support in Phase 4. No version was changed.")
+		}
+	}
+	if !bootOnly && next.Runtime.BedrockEnabled {
+		heldUDP, e := instanceHoldUDP(next.Runtime.BedrockPort)
+		if e != nil {
+			return e
+		}
+		defer heldUDP.Close()
+	}
+	if !bootOnly && previous.Runtime.BedrockEnabled && (!next.Runtime.BedrockEnabled || previous.Runtime.BedrockPort != next.Runtime.BedrockPort) {
+		heldUDP, e := instanceHoldUDP(previous.Runtime.BedrockPort)
+		if e != nil {
+			return e
+		}
+		defer heldUDP.Close()
 	}
 	if previous.EnvironmentSHA256 != "" && previous.Runtime.Software != next.Runtime.Software {
 		return instanceRuntimeFailure("Changing software on an existing instance is outside Phase 3A.")
@@ -615,6 +657,14 @@ func (b *instanceRuntimeBackend) apply(ctx context.Context, previous instanceRun
 			}
 		}
 	}()
+	if bootOnly {
+		if err = b.writePrivate(filepath.Join(bundlePath, id+".env"), files.Environment, true); err != nil {
+			return err
+		}
+		if err = b.writePrivate(filepath.Join(bundlePath, "minecraft-"+id+".container"), files.Quadlet, true); err != nil {
+			return err
+		}
+	}
 	evidence := instanceActivationEvidence{SchemaVersion: 1, ID: id, Previous: previous, Target: next}
 	dir, env, quadlet := b.paths(id)
 	if previous.EnvironmentSHA256 != "" {
@@ -836,7 +886,7 @@ func (b *instanceRuntimeBackend) recover(ctx context.Context, id string) error {
 	if err != nil || (state.State != "stopped" && state.State != "failed" && state.State != "configured" && !runningBootOnly) {
 		return errInstanceRecovery
 	}
-	if e.Previous.SchemaVersion != 1 || e.Target.SchemaVersion != 1 || !reflect.DeepEqual(e.Previous.Storage, e.Target.Storage) || len(e.Changes) > 4 || (runningBootOnly && e.Previous.EnvironmentSHA256 != e.Target.EnvironmentSHA256) {
+	if e.Previous.SchemaVersion != 1 || e.Target.SchemaVersion != 1 || !reflect.DeepEqual(e.Previous.Storage, e.Target.Storage) || len(e.Changes) > 8 || (runningBootOnly && e.Previous.EnvironmentSHA256 != e.Target.EnvironmentSHA256) {
 		return errInstanceRecovery
 	}
 	for _, record := range []instanceRuntimeRecord{e.Previous, e.Target} {
@@ -847,16 +897,17 @@ func (b *instanceRuntimeBackend) recover(ctx context.Context, id string) error {
 			return errInstanceRecovery
 		}
 	}
-	seenPorts := map[int]bool{}
+	seenPorts := map[string]bool{}
 	for _, c := range e.Changes {
-		if !instanceFirewallZonePattern.MatchString(c.Rule.Zone) || c.Rule.Port < 1 || c.Rule.Port > 65535 || (c.Rule.Port != e.Previous.Runtime.JavaPort && c.Rule.Port != e.Target.Runtime.JavaPort) {
+		if !instanceFirewallZonePattern.MatchString(c.Rule.Zone) || c.Rule.Port < 1 || c.Rule.Port > 65535 || (!instanceRuleForRuntime(c.Rule, e.Previous.Runtime) && !instanceRuleForRuntime(c.Rule, e.Target.Runtime)) {
 			return errInstanceRecovery
 		}
-		if seenPorts[c.Rule.Port] {
+		key := strconv.Itoa(c.Rule.Port) + c.Rule.protocol()
+		if seenPorts[key] {
 			continue
 		}
-		seenPorts[c.Rule.Port] = true
-		held, err := instanceHoldPort(c.Rule.Port)
+		seenPorts[key] = true
+		held, err := instanceHoldFirewallPort(c.Rule)
 		if err != nil {
 			return errInstanceRecovery
 		}
