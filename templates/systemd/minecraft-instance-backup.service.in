@@ -1,0 +1,15 @@
+[Unit]
+Description=JustVoxel independent Minecraft cold backup @@INSTANCE_ID@@
+After=local-fs.target network-online.target justvoxel-management.service
+Wants=network-online.target
+Requires=justvoxel-management.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/justvoxel/mjust/instance-backup run @@INSTANCE_ID@@
+UMask=0077
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+TimeoutStartSec=6h
+# The Agent owns bounded cleanup and graceful restart; no retry loop.

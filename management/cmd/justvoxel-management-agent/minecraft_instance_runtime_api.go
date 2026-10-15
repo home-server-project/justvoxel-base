@@ -42,6 +42,7 @@ func instancePublicSettings(c minecraftInstanceRuntimeConfig) instanceRuntimeSet
 }
 func registerInstanceRuntimeRoutes(mux *http.ServeMux, s *server) {
 	registerInstanceMaintenanceRoutes(mux, s)
+	registerInstanceBackupRoutes(mux, s)
 	mux.HandleFunc("POST /v1/minecraft/instances", s.instanceRuntimeCreate)
 	mux.HandleFunc("GET /v1/minecraft/instances/runtime", s.instanceRuntimeList)
 	mux.HandleFunc("GET /v1/minecraft/instances/{id}/configuration", s.instanceRuntimeConfiguration)

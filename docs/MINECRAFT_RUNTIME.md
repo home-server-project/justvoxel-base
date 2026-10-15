@@ -363,3 +363,133 @@ firewall, upstream plugin compatibility, generated-unit or VM acceptance.
 Phase 4 still needs independent backups and their recovery/maintenance contracts
 before safe version upgrades of populated worlds can be offered. No independent
 backup implementation, scheduling, WebUI workflow or deployment is added here.
+
+## Independent cold backups and scheduling (Phase 4A)
+
+Phase 4A adds backend backups for independently activated instances. The legacy
+`minecraft-backup.service`, `minecraft-backup.timer`,
+`/etc/justvoxel/minecraft-backup.env`, worker, operator allowances, archive
+locations, restore and migration behavior remain unchanged. There is no new
+WebUI, restore operation, version-upgrade permission, daemon, or automatic retry.
+
+The existing configured backup-storage root is reused. Each independent instance
+writes directly into `<backup-root>/<immutable-id>/`. New archives are named
+`instance-backup-<software>-YYYY-MM-DD-HHMM[-collision].tar.gz`, with an adjacent
+`.meta.json`. The distinct prefix is intentional: legacy restore discovery scans
+all ID folders for `minecraft-*.tar.gz`. Independent backups must stay outside
+that legacy discovery/restore contract until Phase 4B can check their original
+instance. Existing archives are neither renamed nor moved. Friendly names never
+form paths. The archive contains `data/` and its Minecraft files, without adding
+an Instance ID or private host runtime configuration to the world.
+
+Private settings and status are separate from Quadlets in the existing private
+`/etc/justvoxel/instances/<id>/` runtime directory:
+
+- `backup-settings.json`: `enabled`, daily local `time` (`HH:MM`), and `retention`
+  (1–365 successful backups). Defaults are OFF, `04:00`, and 7.
+- `backup-status.json`: last attempt, last successful archive publication, stage,
+  bounded failure message, archive publication result, original running state,
+  and durable restart-required intent. These use the existing atomic, synced,
+  root:root `0600` private-file publisher.
+- `backup-schedule-pending.json`: previous settings, unit bytes, and timer state
+  while a settings transaction is applying. A failed apply rolls back. If apply
+  and rollback are interrupted or fail, a settings PUT retries rollback before
+  applying the requested configuration. Backups refuse pending schedule changes.
+
+Authenticated routes beneath `/v1/minecraft/instances/{id}/backups` are:
+
+| Method and suffix | Access | Behavior |
+| --- | --- | --- |
+| `GET` (no suffix) | Administrator, Operator, Viewer | Completed archive/metadata inventory |
+| `GET /status` | Administrator, Operator, Viewer | Last attempt/publication and restart state |
+| `GET /settings` | Administrator, Operator, Viewer | Independent schedule and retention preference |
+| `PUT /settings` | Administrator | Strict JSON `{enabled,time,retention}`; transactionally apply units/settings |
+| `POST` (no suffix) | Administrator, Operator | `{}` requests Backup Now through the native service |
+| `POST /run` | Local root Unix peer only | Internal synchronous systemd worker entry; WebUI sessions cannot call it |
+
+Manual requests return acceptance, not backup success. Operators use the same
+SQL allowance and global/personal cooldown as legacy manual backups, under the
+same process mutex. Switching instance or using the legacy route does not reset
+those limits. Systemd rejection does not consume the allowance; an accepted job
+consumes it even if the subsequent backup fails. Reads never create settings,
+probe files or folders, apply configuration, start Minecraft, or start a backup.
+The inventory only exposes a strict metadata allowlist, with bounded capture;
+unknown/incomplete files are excluded. It is not a restore-eligibility decision.
+
+Units are authored in `templates/systemd/minecraft-instance-backup.*.in`, rendered
+as ordinary `/etc/systemd/system/minecraft-backup-<id>.service` and `.timer`.
+They are installed on the first explicit settings update or manual request.
+Disabling stops/disables the timer while retaining its manually usable service.
+Enabling uses native systemd timer enable/start, `Persistent=true`, one-second
+accuracy, and no randomized delay. Missed scheduled runs may execute when an
+enabled timer starts after reboot. Viewing settings does not enable a timer.
+Generated Minecraft Quadlet services are never enabled by this backup code.
+
+Enabled instance schedules must be at least 30 minutes apart on the 24-hour
+clock, including across midnight and from the enabled or active legacy daily
+backup. The legacy timer is read from systemd; unknown timer state, non-daily
+expressions, multiple calendars, timer overrides, or unrecognized timer triggers
+refuse enabling/updating an enabled schedule. This check cannot prevent a later
+legacy schedule edit or a manually edited native unit. Shared maintenance locks
+still prevent simultaneous cold backups; conflicts fail without retrying. These
+are local wall-clock start preferences, not a guarantee of backup duration or
+elapsed separation around clock/DST changes.
+
+The Agent takes the existing setup, restore, migration and shared maintenance
+protection without waiting behind an active operation. It verifies committed
+instance/runtime/source storage, exact backup mount identity and canonical
+non-symlink destinations, and conservatively checks destination space before
+shutdown. Missing RCON or malformed player status refuses interruption. Online
+players receive Phase 3B's graceful warnings; shutdown must be confirmed and is
+never forced. An initially stopped instance stays stopped. The helper rechecks
+storage and capacity before archiving, uses an exclusive temporary filename,
+reads gzip to EOF for CRC/trailer validation, verifies tar entries, calculates
+SHA-256, and publishes the archive atomically without replacing an existing file.
+Metadata is staged and published separately; inventory requires both completed
+files with matching instance, archive and size. Filesystem sync or publication
+failure is reported, including on targets lacking required filesystem semantics.
+
+Metadata is bounded and contains the immutable ID, descriptive friendly name,
+software/version, UTC creation time, size, committed source configuration hash
+and archive SHA-256. It contains no RCON password, credentials, token or private
+runtime environment. The checksum records creation-time integrity; Phase 4B must
+recompute it and validate archive contents/compatibility before accepting restore.
+
+Retention runs only after verified publication and any required restart succeed,
+then reacquires maintenance protection and selects recognized completed
+pairs for that ID, and leaves legacy/other-instance/unrecognized/incomplete files
+and recovery evidence alone. The existing shared restore/maintenance protection
+excludes active restore selection/use. Phase 4B must hold those same locks while
+selecting and using an archive. Metadata is retired with its archive. Retention errors or a conflict while
+reacquiring maintenance are reported as warnings on the already successful
+backup; no retention occurs before a failed archive operation or restart.
+
+On ordinary failure the helper cleans only its own temporary files. SIGKILL or
+power loss may leave hidden `.instance-backup-*` files or an archive without
+completed metadata; these remain unadvertised, are never counted for retention,
+and are not glob-deleted. No failure deletes a completed backup or world data.
+The Agent releases maintenance protection before submitting a required start,
+so the Phase 3B ExecStartPre helper can acquire it. Restart is synchronous and
+observed; failure retains restart-required intent and reports failure even if the
+archive was published successfully. An interrupted persisted running attempt is
+shown as interrupted once its native worker is inactive. An administrator can
+retry Backup Now to reuse the preserved running intent; no terminal journal
+editing or reset is required. Status/metadata write failure is never success.
+
+Added Go fixtures cover independent lifecycle, occupied/unknown players,
+timeouts, release-before-start, restart failure/intent, maintenance collisions,
+shared legacy/operator quota, authentication, strict inputs, read-only endpoints,
+30-minute/midnight/legacy spacing, persistent timers, disabled schedules, failed
+apply rollback and interrupted schedule recovery. `tests/test-instance-backups.sh`
+uses temporary directories and mocked mount/runtime tools for archive contents,
+verification/publication failure, capacity/mount mismatch, interrupted cleanup,
+independent retention, symlinks, partial metadata, and legacy isolation. These
+tests were added but not run. Only gofmt and `bash -n` were run; compilation,
+source-test, image, native-systemd, network-filesystem, SELinux and VM acceptance
+remain unverified.
+
+Phase 4B still needs instance-aware restore planning, original-instance and
+configuration compatibility checks, checksum/content validation, selected-archive
+protection through restore completion/recovery, and transactional cold restore
+with rollback. Legacy restore must remain separate. Populated-world version
+changes remain restricted by the existing Phase 3B rules.

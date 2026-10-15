@@ -1,0 +1,289 @@
+#!/usr/bin/bash
+set -Eeuo pipefail
+umask 0077
+fail() { echo 'ERROR: instance backup prerequisite or storage operation failed.' >&2; exit 1; }
+[[ $EUID == 0 && $# == 2 && $2 =~ ^jv-[a-z0-9]{6,12}$ ]] || fail
+action=$1 id=$2
+if [[ ${action} == run ]]; then
+    # Local root peer authentication; no token, cookie, or runtime secret.
+    exec curl --silent --show-error --fail --max-time 21000 \
+        --unix-socket /run/justvoxel/management.sock \
+        --header 'Content-Type: application/json' --data '{}' \
+        "http://localhost/v1/minecraft/instances/${id}/backups/run"
+fi
+case ${action} in inventory|preflight|create|retain) ;; *) fail ;; esac
+source /usr/libexec/justvoxel/mjust/backup-common.sh
+# Read storage configuration only. Never run the legacy worker or container.
+config=/etc/justvoxel/minecraft-backup.env
+[[ -f ${config} && ! -L ${config} && $(realpath -e -- "${config}") == "${config}" ]] || fail
+[[ $(stat -c '%u:%g:%a' -- "${config}") == 0:0:600 ]] || fail
+jv_backup_load_config "${config}" >/dev/null 2>&1 || fail
+[[ ${MINECRAFT_BACKUP_PATH} == "${minecraft_backup_path}" ]] || fail
+if [[ ${BACKUP_TYPE} != system ]]; then
+    [[ -n ${BACKUP_MOUNT_POINT} && ( -n ${BACKUP_EXPECTED_UUID} || -n ${BACKUP_EXPECTED_SOURCE} ) ]] || fail
+else
+    [[ -z ${BACKUP_MOUNT_POINT} && -z ${BACKUP_EXPECTED_UUID} && -z ${BACKUP_EXPECTED_SOURCE} ]] || fail
+fi
+if [[ -n ${BACKUP_MOUNT_POINT} ]]; then
+    [[ $(realpath -e -- "${BACKUP_MOUNT_POINT}") == "${BACKUP_MOUNT_POINT}" ]] || fail
+fi
+jv_backup_require_read_target >/dev/null 2>&1 || fail
+export JV_INSTANCE_BACKUP_ROOT="${minecraft_backup_path}"
+# All paths below come from private committed runtime, never API input.
+/usr/libexec/justvoxel/mjust/validate-instance-runtime-commit "${id}" >/dev/null 2>&1 || fail
+if [[ ${action} != inventory ]]; then
+    mapfile -t fields < <(jq -er '[.runtime.id,.storage.root,.storage.data_path,.storage.mount_point,.storage.uuid,.storage.source,(.runtime.uid|tostring),(.runtime.gid|tostring)] | .[]' "/etc/justvoxel/instances/${id}/config.json")
+    [[ ${#fields[@]} == 8 && ${fields[0]} == "${id}" ]] || fail
+    /usr/libexec/justvoxel/mjust/instance-runtime-prerequisites validate "${fields[@]}" >/dev/null 2>&1 || fail
+fi
+python3 - "${action}" "${id}" <<'PY'
+import datetime, errno, gzip, hashlib, json, os, re, secrets, stat, sys, tarfile
+
+action, identity = sys.argv[1:]
+root = os.environ['JV_INSTANCE_BACKUP_ROOT']
+config_root = '/etc/justvoxel/instances'
+registry = '/var/lib/justvoxel/instances'
+archive_pattern = re.compile(r'^instance-backup-[a-z][a-z0-9-]{0,70}-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}(-[1-9][0-9]{0,2})?\.tar\.gz$')
+sha_pattern = re.compile(r'^[a-f0-9]{64}$')
+metadata_keys = {'schema','id','name','software','version','created','archive','size','configuration_sha256','sha256'}
+
+def open_dir(path):
+    if not path.startswith('/') or os.path.normpath(path) != path:
+        raise ValueError('path')
+    fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for component in path.split('/')[1:]:
+            nxt = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = nxt
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+def read_at(fd, name, limit=16384):
+    f = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+    with os.fdopen(f, 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > limit:
+            raise ValueError('file')
+        raw = stream.read(limit + 1)
+        if len(raw) > limit:
+            raise ValueError('size')
+        return raw
+
+def private(path, limit=65536):
+    fd = open_dir(os.path.dirname(path))
+    try:
+        info = os.stat(os.path.basename(path), dir_fd=fd, follow_symlinks=False)
+        if info.st_uid != 0 or info.st_gid != 0 or stat.S_IMODE(info.st_mode) != 0o600:
+            raise ValueError('private')
+        return read_at(fd, os.path.basename(path), limit)
+    finally:
+        os.close(fd)
+
+def validate_meta(fd, filename):
+    if not archive_pattern.fullmatch(filename) or len(filename) > 160:
+        raise ValueError('name')
+    m = json.loads(read_at(fd, filename + '.meta.json'))
+    if set(m) != metadata_keys or type(m['schema']) != int or m['schema'] != 1 or m['id'] != identity or m['archive'] != filename:
+        raise ValueError('identity')
+    if m['software'] not in ('paper','purpur','vanilla') or not isinstance(m['version'],str) or len(m['version']) > 64:
+        raise ValueError('software')
+    if not isinstance(m['name'],str) or len(m['name']) > 64 or any(ord(c)<32 for c in m['name']):
+        raise ValueError('description')
+    if not isinstance(m['created'],str) or len(m['created']) != 20:
+        raise ValueError('created')
+    datetime.datetime.strptime(m['created'], '%Y-%m-%dT%H:%M:%SZ')
+    if not sha_pattern.fullmatch(m['sha256']) or not sha_pattern.fullmatch(m['configuration_sha256']):
+        raise ValueError('hash')
+    info = os.stat(filename, dir_fd=fd, follow_symlinks=False)
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or type(m['size']) != int or info.st_size != m['size'] or m['size'] <= 0:
+        raise ValueError('archive')
+    return m
+
+def inventory(fd):
+    result = []
+    entries = os.listdir(fd)
+    if len(entries) > 10000:
+        raise ValueError('inventory bound')
+    for filename in entries:
+        if not archive_pattern.fullmatch(filename):
+            continue
+        try:
+            result.append(validate_meta(fd, filename))
+        except (ValueError, OSError, KeyError, TypeError):
+            continue # Incomplete, foreign, or unrecognized files are never owned.
+    return sorted(result, key=lambda m:(m['created'],m['archive']), reverse=True)
+
+def sync_dir(fd):
+    os.fsync(fd)
+
+def write_new(fd, name, data):
+    f = os.open(name, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600, dir_fd=fd)
+    with os.fdopen(f,'wb') as stream:
+        stream.write(data)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+try:
+    record_raw = private(config_root + '/' + identity + '/config.json')
+    record = json.loads(record_raw)
+    if json.loads(private(registry + '/' + identity + '.json')) != {'id':identity} or record['runtime']['id'] != identity:
+        raise ValueError('identity')
+    # The legacy identity may never be claimed by this worker.
+    legacy = json.loads(private(registry + '/minecraft.json'))
+    if legacy['id'] == identity:
+        raise ValueError('legacy')
+    source = record['storage']['data_path']
+    if source != record['storage']['root'] + '/minecraft-instances/' + identity + '/data':
+        raise ValueError('source')
+    if root == source or root.startswith(source + '/') or source.startswith(root + '/'):
+        raise ValueError('overlap')
+    root_fd = open_dir(root)
+    fd = None
+    try:
+        if action != 'inventory':
+            try:
+                os.mkdir(identity, 0o700, dir_fd=root_fd)
+                sync_dir(root_fd)
+            except FileExistsError:
+                pass
+        try:
+            fd = os.open(identity, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_fd)
+        except FileNotFoundError:
+            if action == 'inventory':
+                print('[]')
+                raise SystemExit(0)
+            raise
+        # No path substitutions after destination validation: operate on fd.
+        os.fchdir(fd)
+        if action == 'inventory':
+            print(json.dumps(inventory(fd), separators=(',',':')))
+        elif action == 'retain':
+            settings = json.loads(private(config_root + '/' + identity + '/backup-settings.json'))
+            keep = settings['retention']
+            if type(keep) != int or not 1 <= keep <= 365:
+                raise ValueError('retention')
+            # Caller holds the shared setup/restore/migration/maintenance locks.
+            # Phase 4B must hold the same locks while selecting/using an archive.
+            for m in inventory(fd)[keep:]:
+                filename = m['archive']
+                # Recheck ownership just before deletion; never glob-delete.
+                if validate_meta(fd, filename) != m:
+                    raise ValueError('changed metadata')
+                os.unlink(filename, dir_fd=fd)
+                os.unlink(filename + '.meta.json', dir_fd=fd)
+            sync_dir(fd)
+        else:
+            # Space check is intentionally conservative: no compression assumed,
+            # plus tar headers, long names and 64 MiB working margin.
+            source_fd = open_dir(source)
+            os.close(source_fd)
+            size = 64 * 1024 * 1024
+            def traversal_error(error):
+                raise error
+            for parent, dirs, files in os.walk(source, followlinks=False, onerror=traversal_error):
+                for name in dirs + files:
+                    info = os.lstat(os.path.join(parent,name))
+                    if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+                        raise ValueError('source links or special files')
+                    size += (info.st_size if stat.S_ISREG(info.st_mode) else 0) + 8192 + len(name.encode()) * 4
+            space = os.fstatvfs(fd)
+            if space.f_bavail * space.f_frsize < size:
+                raise ValueError('capacity')
+            if action == 'preflight':
+                probe = '.instance-backup-probe-' + secrets.token_hex(12)
+                # Cleanup is authorized only after our exclusive creation.
+                write_new(fd,probe,b'')
+                os.unlink(probe,dir_fd=fd)
+            else:
+                # Only our unique temporary files are cleaned. Stale files from
+                # SIGKILL/power loss stay unadvertised and are never glob-deleted.
+                tmp = '.instance-backup-' + secrets.token_hex(12)
+                meta_tmp = tmp + '.meta'
+                owned = set()
+                try:
+                    software = record['runtime']['software']
+                    if software not in ('paper','purpur','vanilla'):
+                        raise ValueError('software')
+                    now = datetime.datetime.now(datetime.timezone.utc)
+                    base = 'instance-backup-' + software + '-' + now.strftime('%Y-%m-%d-%H%M')
+                    filename = None
+                    for suffix in [''] + ['-' + str(n) for n in range(2,1000)]:
+                        candidate = base + suffix + '.tar.gz'
+                        if not os.path.lexists(candidate) and not os.path.lexists(candidate + '.meta.json'):
+                            filename = candidate
+                            break
+                    if filename is None:
+                        raise ValueError('collisions')
+                    f = os.open(tmp,os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW,0o600,dir_fd=fd)
+                    owned.add(tmp)
+                    with os.fdopen(f,'wb') as stream:
+                        with tarfile.open(fileobj=stream,mode='w:gz',dereference=False) as archive:
+                            def safe_member(member):
+                                if not (member.isfile() or member.isdir()) or member.islnk() or member.issym():
+                                    raise ValueError('source changed or unsupported entry')
+                                return member
+                            archive.add(source,arcname='data',filter=safe_member)
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    # Consume gzip to EOF to validate CRC/trailer, then validate
+                    # every tar member. No extraction and no ID inside the world.
+                    with gzip.open(tmp,'rb') as stream:
+                        while stream.read(1024*1024): pass
+                    members = 0
+                    with tarfile.open(tmp,'r:gz') as archive:
+                        for member in archive:
+                            path = member.name
+                            if not (path == 'data' or path.startswith('data/')) or '..' in path.split('/') or not (member.isfile() or member.isdir()) or member.islnk() or member.issym():
+                                raise ValueError('archive integrity')
+                            members += 1
+                    if not members:
+                        raise ValueError('empty archive')
+                    digest = hashlib.sha256()
+                    with open(tmp,'rb') as stream:
+                        while block := stream.read(1024*1024): digest.update(block)
+                    name = ''
+                    names_dir = registry + '/names'
+                    if os.path.lexists(names_dir + '/' + identity + '.json'):
+                        presentation = json.loads(private(names_dir + '/' + identity + '.json'))
+                        if presentation['id'] != identity:
+                            raise ValueError('name identity')
+                        name = presentation['display_name']
+                    m = dict(schema=1,id=identity,name=name,software=software,version=record['runtime']['version'],
+                             created=now.strftime('%Y-%m-%dT%H:%M:%SZ'),archive=filename,size=os.stat(tmp).st_size,
+                             configuration_sha256=hashlib.sha256(record_raw).hexdigest(),sha256=digest.hexdigest())
+                    encoded = json.dumps(m,separators=(',',':')).encode()
+                    if len(encoded)>16384:
+                        raise ValueError('metadata bound')
+                    # Claim cleanup ownership with O_EXCL before writing.
+                    meta_fd = os.open(meta_tmp,os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW,0o600,dir_fd=fd)
+                    owned.add(meta_tmp)
+                    with os.fdopen(meta_fd,'wb') as metadata:
+                        metadata.write(encoded)
+                        metadata.flush()
+                        os.fsync(metadata.fileno())
+                    # link() is an atomic no-replace publication on supported
+                    # local/NFS/SMB targets; unsupported targets fail safely.
+                    os.link(tmp,filename,src_dir_fd=fd,dst_dir_fd=fd,follow_symlinks=False)
+                    os.unlink(tmp,dir_fd=fd)
+                    sync_dir(fd)
+                    os.link(meta_tmp,filename+'.meta.json',src_dir_fd=fd,dst_dir_fd=fd,follow_symlinks=False)
+                    os.unlink(meta_tmp,dir_fd=fd)
+                    sync_dir(fd)
+                    validate_meta(fd,filename)
+                finally:
+                    for partial in owned:
+                        try: os.unlink(partial,dir_fd=fd)
+                        except FileNotFoundError: pass
+    finally:
+        if fd is not None: os.close(fd)
+        os.close(root_fd)
+except Exception:
+    # Never print exception text, private records, paths, tool output or secrets.
+    print('ERROR: instance backup storage or archive operation failed.',file=sys.stderr)
+    raise SystemExit(1)
+PY
+
+jv_backup_require_read_target >/dev/null 2>&1 || fail
