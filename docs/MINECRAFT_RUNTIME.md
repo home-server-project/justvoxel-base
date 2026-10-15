@@ -601,3 +601,23 @@ cannot be blindly resubmitted. Legacy Setup Plan/Apply, destination provisioning
 and recovery retain their existing contracts. Full independent management cards
 remain Phase 6; the single existing How to Connect implementation remains
 unchanged for Phase 8.
+
+## Server inventory and overview (Phase 6)
+
+The administrator-only `/minecraft/servers` workspace keeps the compact Add
+Minecraft Server entry first, followed by the original server and independent
+servers sorted by friendly name without regard to case. Independent inventory
+joins the registry with the existing runtime inventory, which excludes the
+legacy identity and includes registered servers whose runtime is unavailable.
+Cards and selected overviews use public configuration and status reads. Failed
+reads retain unavailable or attention states rather than implying a stopped
+server. Player counts are omitted.
+
+`/minecraft/servers/view/{id}` provides a read-only overview using the existing
+Minecraft workspace styles. Its authenticated, CSRF-protected lifecycle forms
+call the selected instance's existing Start/Stop/Restart APIs with no override
+arguments or automatic retry. The `original` route uses legacy discovery,
+status, and lifecycle contracts only. The legacy discovery contract does not
+provide Start on Boot, so that summary is shown only for independent servers.
+Settings editing, rename, deletion, and instance-aware How to Connect remain
+later phases. Opening inventory or overview never changes runtime state.

@@ -75,3 +75,51 @@ func TestIndependentInstanceBackupClientUsesSelectedInstance(t *testing.T) {
 		t.Fatal("schedule error lost")
 	}
 }
+
+func TestIndependentInstanceOverviewClientUsesExistingContracts(t *testing.T) {
+	for _, action := range []string{"start", "stop", "restart"} {
+		calls := 0
+		client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			calls++
+			if r.Header.Get("Authorization") != "Bearer session-token" {
+				t.Fatal("authentication missing")
+			}
+			response := `{"id":"jv-family1","state":"recovery_required","start_on_boot":true,"message":"Safe recovery message"}`
+			if calls == 1 {
+				if r.Method != "GET" || r.URL.Path != "/v1/minecraft/instances/jv-family1/status" {
+					t.Fatal("wrong status target")
+				}
+			} else {
+				if r.Method != "POST" || r.URL.Path != "/v1/minecraft/instances/jv-family1/"+action {
+					t.Fatal("wrong lifecycle target")
+				}
+				body, err := io.ReadAll(r.Body)
+				if err != nil || string(body) != `{}` {
+					t.Fatal("lifecycle added override arguments")
+				}
+				response = `{"ok":true,"id":"jv-family1"}`
+			}
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(response)), Header: make(http.Header)}, nil
+		})}}
+		status, err := client.MinecraftInstanceStatus(context.Background(), "session-token", "jv-family1")
+		if err != nil || status.ID != "jv-family1" || status.State != "recovery_required" || !status.StartOnBoot {
+			t.Fatalf("status mapping: %+v %v", status, err)
+		}
+		if err := client.MinecraftInstanceAction(context.Background(), "session-token", "jv-family1", action); err != nil {
+			t.Fatal(err)
+		}
+		if err := client.MinecraftInstanceAction(context.Background(), "session-token", "jv-family1", "delete"); err == nil || calls != 2 {
+			t.Fatal("unsupported action reached agent")
+		}
+	}
+}
+
+func TestIndependentInstanceLifecycleClientPreservesRefusal(t *testing.T) {
+	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 409, Body: io.NopCloser(strings.NewReader(`{"error":"Player status is unavailable. Server was not interrupted."}`)), Header: make(http.Header)}, nil
+	})}}
+	err := client.MinecraftInstanceAction(context.Background(), "session-token", "jv-family1", "stop")
+	if message, ok := ErrorMessage(err); !ok || !strings.Contains(message, "Player status is unavailable") {
+		t.Fatal("refusal discarded")
+	}
+}

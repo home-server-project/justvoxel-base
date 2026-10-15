@@ -62,6 +62,8 @@ func setupReviewsFor(r *http.Request) *setupReviewStore {
 
 func (a *App) registerAddServerWizardRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+minecraftServersPath, a.minecraftServersPage)
+	mux.HandleFunc("GET "+minecraftServersPath+"/view/{id}", a.minecraftSelectedServer)
+	mux.HandleFunc("POST "+minecraftServersPath+"/view/{id}/{action}", a.minecraftSelectedServerAction)
 	routes := map[string]http.HandlerFunc{
 		"GET ":                 a.addServerWizardPage,
 		"POST /start":          a.addServerWizardStart,
@@ -106,10 +108,17 @@ type minecraftServersPageData struct {
 	CSRF          string
 	Identity      api.SessionInfo
 	Message       string
+	Error         string
+	Servers       []minecraftServerSummary
+	Selected      *minecraftServerSummary
 }
 
 func (a *App) minecraftServersPage(w http.ResponseWriter, r *http.Request) {
-	_, _, identity, ok := a.adminDiscoveryRequest(w, r)
+	if mustChange(r) {
+		http.Redirect(w, r, "/password", http.StatusSeeOther)
+		return
+	}
+	session, _, identity, ok := a.adminDiscoveryRequest(w, r)
 	if !ok {
 		return
 	}
@@ -117,7 +126,9 @@ func (a *App) minecraftServersPage(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("created") == "yes" {
 		message = "Minecraft server created. It is stopped and ready for use."
 	}
-	a.renderAdminDiscovery(w, "minecraft_servers.html", minecraftServersPageData{Title: "Minecraft Servers", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI, CSRF: csrfFromRequest(r), Identity: identity, Message: message})
+	data := minecraftServersPageData{Title: "Minecraft Servers", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI, CSRF: csrfFromRequest(r), Identity: identity, Message: message}
+	data.Servers, data.Error = a.minecraftServerInventory(r.Context(), session)
+	a.renderAdminDiscovery(w, "minecraft_servers.html", data)
 }
 
 func (a *App) addServerWizardPage(w http.ResponseWriter, r *http.Request) {

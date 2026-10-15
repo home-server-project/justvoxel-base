@@ -1,0 +1,25 @@
+{{define "minecraft_server_overview.html"}}{{template "minecraft-servers-page-start" .}}
+<a class="button-link secondary" href="/minecraft/servers">Back to Minecraft Servers</a>
+{{if .Error}}<p class="notice error" role="alert">{{.Error}}</p>{{end}}
+{{with .Selected}}
+<section class="panel minecraft-selected-workspace minecraft-workspace-shell" aria-labelledby="selected-server-title">
+  <header class="minecraft-workspace-header"><div><p class="eyebrow">Minecraft Server · Overview</p><h1 id="selected-server-title">{{.Name}}</h1></div></header>
+  <div class="minecraft-workspace-body minecraft-workspace-content minecraft-overview-compact">
+    {{template "minecraft-server-summary" .}}
+    {{if .ConfigurationAvailable}}
+    {{if .BootKnown}}<div class="minecraft-overview-grid"><div class="minecraft-overview-card"><span>Start on Boot</span><strong>{{if .StartOnBoot}}Enabled{{else}}Disabled{{end}}</strong></div></div>{{end}}
+    <section class="panel details minecraft-workspace-section"><h2>Welcome message</h2><p>{{.MOTD}}</p></section>
+    {{end}}
+    <section class="panel details minecraft-workspace-section" aria-labelledby="selected-server-lifecycle">
+      <h2 id="selected-server-lifecycle">Lifecycle</h2>
+      <div class="action-row">
+      {{if .CanStart}}<form method="post" action="{{.URL}}/start"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button type="submit">Start</button></form>{{end}}
+      {{if .CanRestart}}<form method="post" action="{{.URL}}/restart"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button type="submit">Restart</button></form>{{end}}
+      {{if .CanStop}}<form method="post" action="{{.URL}}/stop"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary" type="submit">Stop</button></form>{{end}}
+      {{if not (or .CanStart .CanRestart .CanStop)}}<p class="muted">Lifecycle actions are unavailable in the current server state.</p>{{end}}
+      </div>
+    </section>
+  </div>
+</section>
+{{end}}
+{{template "minecraft-servers-page-end" .}}{{end}}

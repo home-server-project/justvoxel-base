@@ -38,6 +38,39 @@ type RegisteredMinecraftInstance struct {
 	DisplayName string `json:"display_name"`
 }
 
+type MinecraftInstanceStatus struct {
+	ID          string `json:"id"`
+	State       string `json:"state"`
+	StartOnBoot bool   `json:"start_on_boot"`
+}
+
+func (c *Client) MinecraftInstanceStatus(ctx context.Context, session, id string) (MinecraftInstanceStatus, error) {
+	var out MinecraftInstanceStatus
+	err := c.do(ctx, http.MethodGet, "/v1/minecraft/instances/"+url.PathEscape(id)+"/status", session, nil, &out)
+	return out, err
+}
+
+func (c *Client) MinecraftInstanceAction(ctx context.Context, session, id, action string) error {
+	switch action {
+	case "start", "stop", "restart":
+	default:
+		return fmt.Errorf("unsupported Minecraft action")
+	}
+	client := *c.http
+	client.Timeout = 310 * time.Second
+	caller := &Client{http: &client}
+	var out struct {
+		OK bool `json:"ok"`
+	}
+	if err := caller.do(ctx, http.MethodPost, "/v1/minecraft/instances/"+url.PathEscape(id)+"/"+action, session, struct{}{}, &out); err != nil {
+		return err
+	}
+	if !out.OK {
+		return fmt.Errorf("Minecraft action was not completed")
+	}
+	return nil
+}
+
 type InstanceBackupSettings struct {
 	Enabled   bool   `json:"enabled"`
 	Time      string `json:"time"`
