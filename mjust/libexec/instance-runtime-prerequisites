@@ -32,7 +32,7 @@ case "${1:-}" in
             fi
         fi
         ;;
-    preflight|preflight-new|provision|validate|version-empty)
+    preflight|preflight-new|provision|validate|version-empty|restore-validate)
         [[ $# == 9 ]] || fail
         action=$1 instance_id=$2 storage_root=$3 data_path=$4 mount_point=$5 expected_uuid=$6 expected_source=$7 uid=$8 gid=$9
         [[ ${instance_id} =~ ^jv-[a-z0-9]{6,12}$ ]] || fail

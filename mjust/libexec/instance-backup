@@ -165,10 +165,22 @@ try:
             keep = settings['retention']
             if type(keep) != int or not 1 <= keep <= 365:
                 raise ValueError('retention')
-            # Caller holds the shared setup/restore/migration/maintenance locks.
-            # Phase 4B must hold the same locks while selecting/using an archive.
+            # Live Restore holds the shared operation claims. Also protect its
+            # selection after process death, before administrator recovery.
+            pinned = None
+            try:
+                journal = json.loads(private(config_root + '/' + identity + '/restore-journal.json'))
+            except FileNotFoundError:
+                pass
+            else:
+                if journal['schema'] != 1 or journal['id'] != identity or not archive_pattern.fullmatch(journal['archive']):
+                    raise ValueError('restore journal')
+                if journal['stage'] not in ('completed','rolled_back'):
+                    pinned = journal['archive']
             for m in inventory(fd)[keep:]:
                 filename = m['archive']
+                if filename == pinned:
+                    continue
                 # Recheck ownership just before deletion; never glob-delete.
                 if validate_meta(fd, filename) != m:
                     raise ValueError('changed metadata')

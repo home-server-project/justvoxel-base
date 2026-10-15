@@ -1,0 +1,388 @@
+#!/usr/bin/bash
+# Private independent-instance restore protocol. Caller owns appliance locks.
+set -Eeuo pipefail
+umask 0077
+fail() { echo 'ERROR: independent restore validation or storage operation failed.' >&2; exit 1; }
+[[ $EUID == 0 && $# == 5 && $2 =~ ^jv-[a-z0-9]{6,12}$ ]] || fail
+action=$1 id=$2 archive=$3 fingerprint=$4 running=$5
+case ${action} in plan|prepare|activate|rollback|shutdown|verifying|rollback-verifying|completed|rolled-back|recovery-required) ;; *) fail ;; esac
+[[ ${running} == true || ${running} == false ]] || fail
+# Recovery must work with backup storage disconnected and even when data has
+# been moved aside. restore-validate checks mount and protected parents without
+# imposing a provisioning free-space requirement on recovery.
+mapfile -t fields < <(jq -er '[.runtime.id,.storage.root,.storage.data_path,.storage.mount_point,.storage.uuid,.storage.source,(.runtime.uid|tostring),(.runtime.gid|tostring)] | .[]' "/etc/justvoxel/instances/${id}/config.json")
+[[ ${#fields[@]} == 8 && ${fields[0]} == "${id}" ]] || fail
+/usr/libexec/justvoxel/mjust/instance-runtime-prerequisites restore-validate "${fields[@]}" >/dev/null 2>&1 || fail
+if [[ ${action} == plan || ${action} == prepare ]]; then
+    /usr/libexec/justvoxel/mjust/validate-instance-runtime-commit "${id}" >/dev/null 2>&1 || fail
+    source /usr/libexec/justvoxel/mjust/backup-common.sh
+    config=/etc/justvoxel/minecraft-backup.env
+    [[ -f ${config} && ! -L ${config} && $(realpath -e -- "${config}") == "${config}" && $(stat -c '%u:%g:%a' -- "${config}") == 0:0:600 ]] || fail
+    jv_backup_load_config "${config}" >/dev/null 2>&1 || fail
+    [[ ${MINECRAFT_BACKUP_PATH} == "${minecraft_backup_path}" ]] || fail
+    if [[ ${BACKUP_TYPE} != system ]]; then
+        [[ -n ${BACKUP_MOUNT_POINT} && ( -n ${BACKUP_EXPECTED_UUID} || -n ${BACKUP_EXPECTED_SOURCE} ) ]] || fail
+    else
+        [[ -z ${BACKUP_MOUNT_POINT} && -z ${BACKUP_EXPECTED_UUID} && -z ${BACKUP_EXPECTED_SOURCE} ]] || fail
+    fi
+    jv_backup_require_read_target >/dev/null 2>&1 || fail
+    export JV_INSTANCE_BACKUP_ROOT="${minecraft_backup_path}"
+fi
+python3 - "${action}" "${id}" "${archive}" "${fingerprint}" "${running}" <<'PY'
+import ctypes, datetime, gzip, hashlib, io, json, os, re, secrets, shutil, stat, struct, sys, tarfile
+
+CONFIG_ROOT = '/etc/justvoxel/instances'
+REGISTRY = '/var/lib/justvoxel/instances'
+MAX_BYTES = 128 * 1024**3
+MAX_ENTRIES = 250000
+MARGIN = 64 * 1024**2
+ARCHIVE = re.compile(r'instance-backup-[a-z][a-z0-9-]{0,70}-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}(-[1-9][0-9]{0,2})?\.tar\.gz')
+SHA = re.compile(r'[a-f0-9]{64}')
+KEYS = {'schema','id','name','software','version','created','archive','size','configuration_sha256','sha256'}
+TERMINAL = ('completed','rolled_back')
+
+class Refusal(Exception):
+    pass
+
+def directory(path):
+    if not path.startswith('/') or os.path.normpath(path) != path:
+        raise ValueError('path')
+    fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in path.split('/')[1:]:
+            nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = nxt
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+def read(fd, name, private=False, limit=65536):
+    f = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+    with os.fdopen(f, 'rb') as stream:
+        s = os.fstat(stream.fileno())
+        if not stat.S_ISREG(s.st_mode) or s.st_nlink != 1 or s.st_size > limit:
+            raise ValueError('file')
+        if private and (s.st_uid != 0 or (private is True and s.st_gid != 0) or stat.S_IMODE(s.st_mode) != 0o600):
+            raise ValueError('private')
+        raw = stream.read(limit + 1)
+        if len(raw) > limit: raise ValueError('limit')
+        return raw
+
+def private(path):
+    fd = directory(os.path.dirname(path))
+    try: return read(fd, os.path.basename(path), True)
+    finally: os.close(fd)
+
+def encoded(v): return json.dumps(v, sort_keys=True, separators=(',',':')).encode()
+def digest(v): return hashlib.sha256(v).hexdigest()
+def inode(fd):
+    s = os.fstat(fd)
+    return [s.st_dev, s.st_ino]
+
+def write_journal(j):
+    name = '.restore-journal-' + secrets.token_hex(12)
+    f = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=cfg)
+    os.fchown(f,0,0)
+    with os.fdopen(f,'wb') as stream:
+        stream.write(encoded(j)); stream.flush(); os.fsync(stream.fileno())
+    os.rename(name, 'restore-journal.json', src_dir_fd=cfg, dst_dir_fd=cfg)
+    os.fsync(cfg)
+
+def stage(j, state):
+    j['stage'] = state
+    write_journal(j)
+
+def open_archive(fd, name):
+    f = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+    s = os.fstat(f)
+    if not stat.S_ISREG(s.st_mode) or s.st_nlink != 1 or s.st_uid != 0 or stat.S_IMODE(s.st_mode) != 0o600:
+        os.close(f); raise ValueError('archive ownership')
+    return os.fdopen(f,'rb')
+
+class BoundedGzip:
+    def __init__(self, raw):
+        self.stream = gzip.GzipFile(fileobj=raw)
+        self.count = 0
+    def read(self, n=-1):
+        if n < 0: n = 1024*1024
+        data = self.stream.read(min(n, 1024*1024))
+        self.count += len(data)
+        if self.count > MAX_BYTES + MAX_ENTRIES * 8192: raise ValueError('expanded stream limit')
+        return data
+
+def world_version(source):
+    # level.dat is gzip-compressed NBT. Bound bytes, nesting, and collection
+    # lengths; inspect the world's own version rather than trusting its label.
+    with gzip.GzipFile(fileobj=source) as stream:
+        raw = stream.read(16 * 1024**2 + 1)
+    if len(raw) > 16 * 1024**2: raise ValueError('world metadata limit')
+    stream = io.BytesIO(raw)
+    def take(n):
+        if n < 0 or n > len(raw): raise ValueError('NBT length')
+        v = stream.read(n)
+        if len(v) != n: raise ValueError('NBT truncation')
+        return v
+    def number(fmt): return struct.unpack(fmt, take(struct.calcsize(fmt)))[0]
+    def string(): return take(number('>H')).decode('utf-8')
+    def tag(kind, depth=0):
+        if depth > 64: raise ValueError('NBT depth')
+        formats = {1:'>b',2:'>h',3:'>i',4:'>q',5:'>f',6:'>d'}
+        if kind in formats: return number(formats[kind])
+        if kind == 8: return string()
+        if kind in (7,11,12):
+            count = number('>i')
+            take(count * {7:1,11:4,12:8}[kind])
+            return None
+        if kind == 9:
+            child, count = number('>B'), number('>i')
+            if not 0 <= count <= len(raw): raise ValueError('NBT list')
+            for _ in range(count): tag(child,depth+1)
+            return None
+        if kind == 10:
+            result = {}
+            while True:
+                child = number('>B')
+                if child == 0: return result
+                name = string()
+                if name in result: raise ValueError('NBT duplicate')
+                result[name] = tag(child,depth+1)
+        raise ValueError('NBT type')
+    if number('>B') != 10: raise ValueError('NBT root')
+    string()
+    root = tag(10)
+    if stream.read(1): raise ValueError('NBT trailing data')
+    data = root['Data']; version = data['Version']
+    if type(data['DataVersion']) != int or data['DataVersion'] <= 0 or version['Id'] != data['DataVersion'] or version['Name'] != runtime['version'] or version.get('Snapshot',0) != 0:
+        raise Refusal('incompatible_software_version')
+
+def inspect_archive(raw, m, destination=None):
+    raw.seek(0)
+    h = hashlib.sha256(); size = 0
+    while block := raw.read(1024*1024): h.update(block); size += len(block)
+    if size != m['size'] or h.hexdigest() != m['sha256']: raise ValueError('sha256')
+    raw.seek(0)
+    stream = BoundedGzip(raw)
+    seen = {}; parents = set(); total = 0; count = 0; worlds = 0
+    # Streaming parsing bounds both tar headers and gzip output. No extractall,
+    # archive links, supplied ownership, or unchecked host-path concatenation.
+    with tarfile.open(fileobj=stream, mode='r|') as tf:
+        for member in tf:
+            count += 1
+            path = member.name
+            parts = path.split('/')
+            if count > MAX_ENTRIES or len(path.encode()) > 4096 or any(len(p.encode()) > 255 for p in parts): raise ValueError('entry limit')
+            if parts[0] != 'data' or any(p in ('','.', '..') for p in parts) or '\\' in path or any(ord(c)<32 or ord(c)==127 for c in path): raise ValueError('path')
+            if path in seen or not (member.isdir() or member.isfile()) or member.linkname or member.sparse is not None: raise ValueError('entry type or duplicate')
+            if member.uid not in (0, runtime['uid']) or member.gid not in (0, runtime['gid']) or member.mode & ~0o777 or member.mode & 0o002: raise ValueError('ownership or mode')
+            if member.size < 0 or (member.isdir() and member.size): raise ValueError('size')
+            for n in range(1,len(parts)):
+                if seen.get('/'.join(parts[:n])) == 'file': raise ValueError('conflict')
+            if member.isfile() and path in parents: raise ValueError('conflict')
+            parents.update('/'.join(parts[:n]) for n in range(1,len(parts)))
+            seen[path] = 'directory' if member.isdir() else 'file'
+            total += member.size
+            if total > MAX_BYTES: raise ValueError('expanded limit')
+            content = None
+            if member.isfile() and len(parts) >= 3 and parts[-1] == 'level.dat':
+                if member.size > 16 * 1024**2: raise ValueError('world metadata limit')
+                with tf.extractfile(member) as source: content = source.read(16 * 1024**2 + 1)
+                world_version(io.BytesIO(content))
+                worlds += 1
+            if destination is not None:
+                target = os.path.join(destination, *parts)
+                os.makedirs(os.path.dirname(target), mode=0o750, exist_ok=True)
+                if member.isdir(): os.makedirs(target, mode=0o750, exist_ok=True)
+                else:
+                    with (io.BytesIO(content) if content is not None else tf.extractfile(member)) as source, open(target,'xb') as output:
+                        shutil.copyfileobj(source, output, 1024*1024)
+                        output.flush(); os.fsync(output.fileno())
+                    os.chmod(target, member.mode & 0o770)
+        end = tf.offset
+    # Tarfile stops at the first EOF and can buffer beyond it. Re-read the
+    # bounded gzip stream to require two zero blocks and only zero padding
+    # thereafter; this also verifies its complete CRC/trailer and rejects
+    # hidden concatenated tar archives and missing tar end markers.
+    raw.seek(0)
+    stream = BoundedGzip(raw)
+    position = 0; padding = 0
+    while block := stream.read(1024*1024):
+        if position + len(block) > end:
+            tail = block[max(0,end-position):]
+            if any(tail): raise ValueError('tar trailing data')
+            padding += len(tail)
+        position += len(block)
+    if padding < 1024 or position % 512: raise ValueError('tar end markers')
+    if seen.get('data') != 'directory' or count < 2 or worlds == 0: raise ValueError('missing world')
+    if destination is not None:
+        # All parents were created by this extraction in a private root. Chown
+        # only this new tree; preserve the existing Podman :Z labeling model.
+        for parent, dirs, files in os.walk(destination, topdown=False):
+            for name in files + dirs:
+                p = os.path.join(parent,name)
+                os.chown(p, runtime['uid'], runtime['gid'], follow_symlinks=False)
+            fd = directory(parent); os.fsync(fd); os.close(fd)
+    return {'expanded_bytes':total, 'entries':count}
+
+def metadata(fd, name):
+    if not ARCHIVE.fullmatch(name) or len(name)>160: raise ValueError('archive identifier')
+    # Phase 4A files inherit the Agent's primary group. Mode 0600 and root
+    # ownership keep this metadata private regardless of its group ID.
+    m = json.loads(read(fd,name+'.meta.json','metadata',16384))
+    if set(m) != KEYS or type(m['schema']) != int or m['schema'] != 1 or m['id'] != identity or m['archive'] != name: raise ValueError('metadata identity')
+    if m['software'] not in ('paper','purpur','vanilla') or not isinstance(m['version'],str) or not re.fullmatch(r'[0-9]+\.[0-9]+(?:\.[0-9]+)?',m['version']): raise Refusal('unverified_version')
+    if not isinstance(m['name'],str) or len(m['name'])>64 or any(ord(c)<32 for c in m['name']): raise ValueError('name')
+    datetime.datetime.strptime(m['created'],'%Y-%m-%dT%H:%M:%SZ')
+    if not SHA.fullmatch(m['sha256']) or not SHA.fullmatch(m['configuration_sha256']) or type(m['size']) != int or not 0<m['size']<=MAX_BYTES: raise ValueError('metadata')
+    if (m['software'],m['version']) != (runtime['software'],runtime['version']): raise Refusal('incompatible_software_version')
+    return m
+
+def inspect():
+    root = os.environ['JV_INSTANCE_BACKUP_ROOT']
+    if root == data or root.startswith(data+'/') or data.startswith(root+'/'): raise ValueError('overlap')
+    backup = directory(root + '/' + identity)
+    try:
+        m = metadata(backup,archive)
+        with open_archive(backup,archive) as raw:
+            details = inspect_archive(raw,m)
+            archive_stat = os.fstat(raw.fileno())
+        available = os.fstatvfs(parent)
+        # Original data is preserved by rename, requiring no second copy. Leave
+        # additional headroom for runtime writes and the failed replacement.
+        required = m['size'] + details['expanded_bytes'] + details['entries']*8192 + MARGIN
+        if (available.f_favail and available.f_favail < details['entries'] + 32) or available.f_bavail * available.f_frsize < required: raise Refusal('insufficient_staging_capacity')
+        evidence = dict(metadata=m,config_sha256=digest(record_raw),parent=inode(parent),source=inode(directory_data),backup=inode(backup),archive_identity=[archive_stat.st_dev,archive_stat.st_ino,archive_stat.st_size,archive_stat.st_mtime_ns,archive_stat.st_ctime_ns])
+        result = dict(metadata=m,current_software=runtime['software'],current_version=runtime['version'],integrity='verified',source_available=True,destination_available=True,compatibility='same_software_and_pinned_version',destructive_confirmation_required=True,required_bytes=required,**details)
+        result['fingerprint'] = digest(encoded(evidence))
+        return result, backup
+    except BaseException:
+        os.close(backup); raise
+
+def load_journal():
+    j = json.loads(read(cfg,'restore-journal.json',True))
+    if j['schema'] != 1 or j['id'] != identity or not re.fullmatch(r'[a-f0-9]{32}',j['transaction']) or j['config_sha256'] != digest(record_raw) or j['parent'] != inode(parent) or type(j['originally_running']) != bool:
+        raise ValueError('recovery identity')
+    return j
+
+def checked_dir(fd, name, expected=None):
+    child = os.open(name,os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,dir_fd=fd)
+    if expected is not None and inode(child) != expected:
+        os.close(child); raise ValueError('directory identity')
+    return child
+
+def exists(fd,name):
+    try: os.stat(name,dir_fd=fd,follow_symlinks=False); return True
+    except FileNotFoundError: return False
+
+def move(src, name, dst, target):
+    if exists(dst,target): raise ValueError('destination exists')
+    os.rename(name,target,src_dir_fd=src,dst_dir_fd=dst)
+    os.fsync(src); os.fsync(dst)
+
+try:
+    action, identity, archive, fingerprint, running = sys.argv[1:]
+    if os.geteuid()!=0 or not re.fullmatch(r'jv-[a-z0-9]{6,12}',identity): raise ValueError('identity')
+    record_raw = private(CONFIG_ROOT+'/'+identity+'/config.json')
+    record = json.loads(record_raw); runtime = record['runtime']; storage = record['storage']
+    if runtime['id'] != identity or json.loads(private(REGISTRY+'/'+identity+'.json')) != {'id':identity} or json.loads(private(REGISTRY+'/minecraft.json'))['id'] == identity: raise ValueError('identity')
+    data = storage['root']+'/minecraft-instances/'+identity+'/data'
+    if storage['data_path'] != data: raise ValueError('data path')
+    parent = directory(os.path.dirname(data)); cfg = directory(CONFIG_ROOT+'/'+identity)
+    # Reject nested mounts and direct data mountpoints before any rename.
+    with open('/proc/self/mountinfo') as mountinfo:
+        for line in mountinfo:
+            target = line.split()[4]
+            if target == data or target.startswith(data+'/'): raise ValueError('nested mount')
+    if action in ('plan','prepare'):
+        if exists(cfg,'restore-journal.json') and load_journal()['stage'] not in TERMINAL: raise ValueError('recovery required')
+        directory_data = checked_dir(parent,'data')
+        result, backup = inspect()
+        if action == 'plan': print(json.dumps(result,separators=(',',':')))
+        else:
+            if result['fingerprint'] != fingerprint: raise Refusal('stale_plan')
+            tx = secrets.token_hex(16)
+            j = dict(schema=1,id=identity,transaction=tx,config_sha256=digest(record_raw),parent=inode(parent),original=inode(directory_data),originally_running=running=='true',stage='staging',archive=archive,fingerprint=fingerprint)
+            write_journal(j) # Before creating any transaction-owned state.
+            txname = '.restore-'+tx
+            os.mkdir(txname,0o700,dir_fd=parent); os.fsync(parent)
+            txfd = checked_dir(parent,txname)
+            with open_archive(backup,archive) as src:
+                f = os.open('archive.tar.gz',os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_NOFOLLOW,0o600,dir_fd=txfd)
+                with os.fdopen(f,'wb') as dst:
+                    copied = 0
+                    while block := src.read(1024*1024):
+                        copied += len(block)
+                        if copied > result['metadata']['size']: raise ValueError('source grew')
+                        dst.write(block)
+                    dst.flush(); os.fsync(dst.fileno())
+            os.fsync(txfd)
+            # No reliance on the backup source from this point onward.
+            dest = os.path.dirname(data)+'/'+txname+'/replacement'
+            os.mkdir(dest,0o700)
+            with open_archive(txfd,'archive.tar.gz') as staged:
+                inspect_archive(staged,result['metadata'],dest)
+            newfd = directory(dest+'/data'); j['replacement']=inode(newfd); os.close(newfd)
+            os.fsync(txfd); stage(j,'ready_to_apply')
+        os.close(backup)
+    else:
+        j = load_journal()
+        txname = '.restore-'+j['transaction']
+        if action in ('activate','rollback'):
+            if action == 'rollback' and not exists(parent,txname):
+                old = checked_dir(parent,'data',j['original']); os.close(old)
+                stage(j,'original_restored')
+                raise SystemExit(0)
+            txfd = checked_dir(parent,txname)
+            if action == 'activate':
+                if j['stage'] != 'shutdown': raise ValueError('stage')
+                old = checked_dir(parent,'data',j['original']); os.close(old)
+                replacement = checked_dir(txfd,'replacement')
+                new = checked_dir(replacement,'data',j['replacement']); os.close(new)
+                # Intent precedes each rename, inode evidence resolves an
+                # interruption between rename and the next journal write.
+                stage(j,'preserving_original')
+                libc = ctypes.CDLL(None,use_errno=True)
+                if libc.renameat2(parent,b'data',replacement,b'data',2) != 0:
+                    raise OSError(ctypes.get_errno(),'atomic exchange unavailable')
+                os.fsync(parent); os.fsync(replacement)
+                stage(j,'replacement_activated')
+                move(replacement,'data',txfd,'original')
+                stage(j,'original_preserved')
+            else:
+                stage(j,'rollback_required')
+                original_fd = txfd
+                original_name = 'original'
+                if not exists(txfd,'original') and exists(txfd,'replacement'):
+                    replacement = checked_dir(txfd,'replacement')
+                    if exists(replacement,'data'):
+                        candidate = checked_dir(replacement,'data')
+                        if inode(candidate) == j['original']:
+                            original_fd,original_name = replacement,'data'
+                        os.close(candidate)
+                if exists(original_fd,original_name):
+                    old = checked_dir(original_fd,original_name,j['original']); os.close(old)
+                    if exists(parent,'data'):
+                        new = checked_dir(parent,'data',j.get('replacement')); os.close(new)
+                        move(parent,'data',txfd,'failed-replacement')
+                    move(original_fd,original_name,parent,'data')
+                # Repeating recovery after either rename verifies original by
+                # inode; it never mistakes a failed replacement for original.
+                old = checked_dir(parent,'data',j['original']); os.close(old)
+                stage(j,'original_restored')
+        else:
+            states={'shutdown':'shutdown','verifying':'runtime_verification','rollback-verifying':'rollback_verification','completed':'completed','rolled-back':'rolled_back','recovery-required':'recovery_required'}
+            if action not in states: raise ValueError('action')
+            if action in ('completed','rolled-back'):
+                expected = j['replacement'] if action == 'completed' else j['original']
+                current=checked_dir(parent,'data',expected); os.close(current)
+            stage(j,states[action])
+except Refusal as refusal:
+    print(json.dumps({'error':refusal.args[0]}))
+    raise SystemExit(1)
+except Exception:
+    # Diagnostics intentionally exclude private paths, runtime records, secrets,
+    # and archive-controlled strings.
+    print('ERROR: independent restore validation or storage operation failed.',file=sys.stderr)
+    raise SystemExit(1)
+PY

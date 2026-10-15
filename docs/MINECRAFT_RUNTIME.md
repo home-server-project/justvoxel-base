@@ -452,15 +452,16 @@ failure is reported, including on targets lacking required filesystem semantics.
 Metadata is bounded and contains the immutable ID, descriptive friendly name,
 software/version, UTC creation time, size, committed source configuration hash
 and archive SHA-256. It contains no RCON password, credentials, token or private
-runtime environment. The checksum records creation-time integrity; Phase 4B must
-recompute it and validate archive contents/compatibility before accepting restore.
+runtime environment. Restore recomputes the checksum and validates complete
+archive contents and compatibility before staging and again on the staged copy.
 
 Retention runs only after verified publication and any required restart succeed,
 then reacquires maintenance protection and selects recognized completed
 pairs for that ID, and leaves legacy/other-instance/unrecognized/incomplete files
 and recovery evidence alone. The existing shared restore/maintenance protection
-excludes active restore selection/use. Phase 4B must hold those same locks while
-selecting and using an archive. Metadata is retired with its archive. Retention errors or a conflict while
+excludes active Restore selection/use. Interrupted Restore journals also pin the
+selected archive against retention until completion or verified rollback.
+Metadata is retired with its archive. Retention errors or a conflict while
 reacquiring maintenance are reported as warnings on the already successful
 backup; no retention occurs before a failed archive operation or restart.
 
@@ -488,8 +489,95 @@ tests were added but not run. Only gofmt and `bash -n` were run; compilation,
 source-test, image, native-systemd, network-filesystem, SELinux and VM acceptance
 remain unverified.
 
-Phase 4B still needs instance-aware restore planning, original-instance and
-configuration compatibility checks, checksum/content validation, selected-archive
-protection through restore completion/recovery, and transactional cold restore
-with rollback. Legacy restore must remain separate. Populated-world version
-changes remain restricted by the existing Phase 3B rules.
+### Independent Restore (Phase 4B)
+
+Administrator-only routes beneath `/v1/minecraft/instances/{id}/backups/restore`:
+
+| Method | Route | Request / result |
+| --- | --- | --- |
+| POST | `/plan` | `archive`; returns reviewed `plan_id`, immutable ID, integrity, compatibility, capacity, running intent and player interruption requirements |
+| POST | `/apply` | `archive`, reviewed `plan_id`, `confirm_destructive: true`, and `confirm_players: true` when running; returns 202 acceptance |
+| GET | `/status` | Current stage, selected archive, running intent and `recovery_required` |
+| POST | `/recover` | `confirm_players: true`; returns 202 for retryable rollback and runtime verification |
+
+Only an archive belonging to the original immutable Instance ID is accepted.
+Friendly-name changes do not change identity. Apply recomputes the plan and
+refuses stale evidence or missing confirmation. Software family and exact pinned
+Minecraft version must match. LATEST, snapshots, software conversion and version
+changes are refused. Each archived world must have readable bounded gzip/NBT
+`level.dat` metadata whose release name matches the pinned version and whose
+DataVersion agrees with its embedded Version ID. Worlds without verifiable
+release metadata are refused. Populated-world version changes remain restricted
+by the existing Phase 3B rules.
+
+The private helper validates committed runtime/configuration, registry ownership,
+source/destination mount identity, root-owned private archive/metadata, size and
+SHA-256, full gzip CRC/trailer, tar headers/end markers, paths, duplicates,
+ancestor conflicts, links, special files, permissions and bounded expansion.
+Planning requires staging capacity for the compressed copy, expanded replacement,
+entry overhead and 64 MiB headroom. Rollback uses renames, preserving the original
+without requiring a second world-sized copy. A disconnected archive source cannot
+prevent recovery after staging.
+
+All copying, extraction, compatibility and integrity checks finish in a private
+`.restore-<transaction>` directory on the destination filesystem before downtime.
+Phase 3B's player-aware shutdown must verify the selected container is stopped.
+A root-private `restore-journal.json` is synced before creating transaction state
+and before each destructive transition. Linux atomic directory exchange activates
+the replacement while preserving the original, then moves the original into the
+transaction directory. Device/inode identities and the committed configuration
+hash resolve interruption around each rename without guessing ownership.
+Filesystem support for atomic exchange and durable fsync is required; failures
+retain evidence and use the same recovery path.
+
+Activation verifies committed runtime, storage and the original running intent;
+a running instance must answer RCON. Failure attempts rollback under the same
+protection. Recovery stops only the selected running instance through the graceful
+path, restores the original by inode, preserves a failed replacement, and verifies
+the original running/stopped intent. Incomplete rollback retains both worlds and
+its journal, reports recovery required, and allows administrator retry. A
+nonterminal or invalid journal blocks further independent backup/configuration
+mutations. Recovery never requires editing journals, deleting locks or resetting
+the appliance. Startup rejects interrupted journals except for a transaction-bound
+live Agent permit during runtime or rollback verification; stale permits cannot
+survive reboot or Agent PID reuse.
+
+Lock acquisition is nonblocking throughout:
+
+- Restore/Recover: Agent active claim, operation-store mutex, setup, restore,
+  data-migration and migration claims, shared restore-exclusion flock, maintenance.
+- Legacy backup: restore-exclusion, then its existing maintenance protection.
+  Existing maintenance-owning callers still acquire exclusion nonblockingly.
+- Independent backup/lifecycle: existing operation claims and maintenance;
+  the Restore active claim or durable journal refuses admission.
+
+The fixed exclusion identity is
+`/run/justvoxel-minecraft-restore-exclusion.lock`. Restore keeps its descriptor and
+operation claims through staging, activation, startup, rollback and recovery.
+Only maintenance is released for synchronous ExecStartPre, which can then acquire
+it normally. Legacy backup must first acquire exclusion and therefore cannot
+enter this handoff. No new environment-variable lock bypass is used. Failed
+acquisition unwinds acquired claims; there is no circular waiting. Completion or
+safe abandonment releases descriptors, while recovery evidence stays durable.
+Process termination releases flocks naturally. Lock files are never unlinked.
+The legacy worker changes only by adding this exclusion; its service, timer,
+archive format, storage, retention, quotas and shutdown/restart behavior stay as
+before.
+
+Completed transactions retain the original world (or failed replacement), staged
+archive and terminal journal for inspection. Automatic deletion of this recovery
+data is outside this phase; repeated restores therefore require additional free
+space. Legacy Restore APIs/helpers remain separate.
+
+The added Go tests cover authorization, strict input, reviewed-plan confirmation,
+staging order, player-aware stop, running intent, rollback/retry and actual
+separate-process flock acquisition during startup and rollback. Temporary-filesystem
+fixtures in `tests/test-instance-restore.sh` cover identity, integrity, tar safety,
+world compatibility, capacity, mount refusal, interruption, rename recovery,
+retention pins and legacy/other-instance isolation. Dedicated tests in
+`tests/test-legacy-backup-restore-exclusion.sh` run the real legacy worker with
+mocked appliance commands and separate flock holders, covering normal backup,
+bidirectional exclusion, handoff, nonblocking failure, completion and termination.
+Root-owned fixtures require root or an authorized rootless user namespace. Tests
+are added but intentionally unrun in this task; gofmt and shell syntax checks do
+not establish compilation, runtime, filesystem, SELinux or VM acceptance.

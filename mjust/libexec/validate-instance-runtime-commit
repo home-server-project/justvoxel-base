@@ -15,6 +15,27 @@ for path in /etc/justvoxel/instances "${dir}" /var/lib/justvoxel/instances; do
     [[ $(stat -c '%u:%g:%a' -- "${path}") == 0:0:700 ]] || fail
 done
 [[ ! -e ${dir}/pending.json && ! -L ${dir}/pending.json ]] || fail
+# Independent restore never borrows the activation pending.json schema. A
+# crashed transaction inhibits boot; only its live Agent may verify a restart.
+journal="${dir}/restore-journal.json"
+if [[ -e ${journal} || -L ${journal} ]]; then
+    [[ -f ${journal} && ! -L ${journal} && $(stat -c '%u:%g:%a' -- "${journal}") == 0:0:600 ]] || fail
+    stage="$(jq -er --arg id "${id}" 'select(.schema == 1 and .id == $id) | .stage' "${journal}")" || fail
+    case ${stage} in
+        completed|rolled_back) ;;
+        runtime_verification|rollback_verification)
+            permit="/run/justvoxel/instance-restore-start-${id}.json"
+            [[ -f ${permit} && ! -L ${permit} && $(stat -c '%u:%g:%a' -- "${permit}") == 0:0:600 ]] || fail
+            tx="$(jq -er '.transaction | select(test("^[a-f0-9]{32}$"))' "${journal}")" || fail
+            pid="$(jq -er --arg id "${id}" --arg tx "${tx}" 'select(.id == $id and .transaction == $tx) | .agent_pid | select(type == "number" and . > 1 and floor == .)' "${permit}")" || fail
+            [[ $(readlink -e -- "/proc/${pid}/exe") == /usr/libexec/justvoxel/management-agent ]] || fail
+            started="$(jq -er '.agent_start | select(type == "string" and test("^[0-9]+$"))' "${permit}")" || fail
+            [[ $(awk '{print $22}' "/proc/${pid}/stat") == "${started}" ]] || fail
+            kill -0 "${pid}" 2>/dev/null || fail
+            ;;
+        *) fail ;;
+    esac
+fi
 for path in "${config}" "${env}" "${quadlet}" "${identity}"; do
     [[ -f ${path} && ! -L ${path} && $(realpath -e -- "${path}") == "${path}" ]] || fail
     [[ $(stat -c '%u:%g:%a' -- "${path}") == 0:0:600 ]] || fail

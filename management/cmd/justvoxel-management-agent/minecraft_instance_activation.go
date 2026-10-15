@@ -457,6 +457,9 @@ func instanceHoldPort(port int) ([]net.Listener, error) {
 // Reserve the same persistent-operation locks without changing journal schemas.
 // Holding mu prevents another Agent operation from borrowing our held descriptors.
 func (s *server) lockInstanceRuntime() (func() error, error) {
+	if instanceRestoreActive.Load() {
+		return nil, errInstanceBusy
+	}
 	if s.operations == nil {
 		return nil, instanceRuntimeFailure("Appliance operation tracking is unavailable.")
 	}
@@ -465,6 +468,10 @@ func (s *server) lockInstanceRuntime() (func() error, error) {
 	if o.currentSetupID != "" || o.currentRestoreID != "" || o.currentDataMigrationID != "" || o.currentMigrationID != "" || o.currentMinecraftResetID != "" || o.currentFactoryResetID != "" {
 		o.mu.Unlock()
 		return nil, errInstanceBusy
+	}
+	if err := instanceRuntimes.requireNoInstanceRestore(); err != nil {
+		o.mu.Unlock()
+		return nil, err
 	}
 	if err := o.acquireMinecraftResetLocks(); err != nil {
 		o.mu.Unlock()

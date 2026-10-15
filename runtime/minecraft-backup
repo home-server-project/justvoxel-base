@@ -5,6 +5,7 @@ source /usr/libexec/justvoxel/mjust/backup-instance-storage.sh
 source /usr/libexec/justvoxel/mjust/interrupt-safety.sh
 
 readonly config_file="/etc/justvoxel/minecraft-backup.env"
+readonly restore_exclusion_lock="/run/justvoxel-minecraft-restore-exclusion.lock"
 readonly lock_file="/run/justvoxel-minecraft-maintenance.lock"
 readonly setup_marker="/var/lib/justvoxel/management/setup-in-progress"
 leave_stopped=0
@@ -31,6 +32,18 @@ if [[ -e ${setup_marker} ]]; then
     echo 'Skipping backup: first-run setup or rollback is in progress.'
     exit 0
 fi
+
+# Always acquire exclusion, including callers that already own maintenance.
+# Both acquisitions are nonblocking: an existing backup is never interrupted.
+restore_exclusion_umask=$(umask)
+umask 0077
+exec 8>"${restore_exclusion_lock}"
+umask "${restore_exclusion_umask}"
+if ! flock -n 8; then
+    echo 'ERROR: an independent Minecraft Restore operation is in progress.' >&2
+    exit 1
+fi
+# Descriptor 8 stays open through backup, restart, and the EXIT cleanup.
 
 jv_backup_load_config "${config_file}"
 if [[ ! -d ${minecraft_data_path} ]]; then

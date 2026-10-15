@@ -378,6 +378,7 @@ func (b *instanceRuntimeBackend) configureBackups(ctx context.Context, id string
 }
 
 func registerInstanceBackupRoutes(mux *http.ServeMux, s *server) {
+	registerInstanceRestoreRoutes(mux, s)
 	mux.HandleFunc("GET /v1/minecraft/instances/{id}/backups", s.instanceBackupRead)
 	mux.HandleFunc("GET /v1/minecraft/instances/{id}/backups/status", s.instanceBackupRead)
 	mux.HandleFunc("GET /v1/minecraft/instances/{id}/backups/settings", s.instanceBackupRead)
@@ -611,6 +612,9 @@ func (s *server) instanceBackupRun(w http.ResponseWriter, r *http.Request) {
 // Reserve existing operation locks without waiting behind active maintenance.
 // Other lifecycle operations retain their existing locking behavior.
 func (s *server) lockInstanceBackup() (func() error, error) {
+	if instanceRestoreActive.Load() {
+		return nil, errInstanceBusy
+	}
 	if s.operations == nil {
 		return nil, errInstanceBusy
 	}
@@ -621,6 +625,10 @@ func (s *server) lockInstanceBackup() (func() error, error) {
 	if o.currentSetupID != "" || o.currentRestoreID != "" || o.currentDataMigrationID != "" || o.currentMigrationID != "" || o.currentMinecraftResetID != "" || o.currentFactoryResetID != "" {
 		o.mu.Unlock()
 		return nil, errInstanceBusy
+	}
+	if err := instanceRuntimes.requireNoInstanceRestore(); err != nil {
+		o.mu.Unlock()
+		return nil, err
 	}
 	if err := o.acquireMinecraftResetLocks(); err != nil {
 		o.mu.Unlock()
