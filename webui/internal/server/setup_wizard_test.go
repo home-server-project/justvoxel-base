@@ -276,14 +276,6 @@ func TestSetupWizardCompactDesktopProgressContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(markup), `{{if ne .SetupMode "recommended"}}`) || strings.Count(string(markup), `class="setup-number"`) != 6 || strings.Count(string(markup), `action="/setup/navigate"`) != 5 {
-		t.Fatal("Advanced Review must retain six steps and navigation; Recommended omits progress")
-	}
-	for i, label := range []string{"Server", "Cross-play", "Memory", "Storage", "Backups", "Review"} {
-		if !strings.Contains(string(markup), fmt.Sprintf(`<span class="setup-number">%d</span><span>%s</span>`, i+1, label)) {
-			t.Fatalf("Setup progress missing step %d: %s", i+1, label)
-		}
-	}
 	wizard, err := assets.ReadFile("templates/setup_wizard.html")
 	if err != nil {
 		t.Fatal(err)
@@ -293,10 +285,25 @@ func TestSetupWizardCompactDesktopProgressContract(t *testing.T) {
 			t.Fatal("Setup header must not display redundant step badges")
 		}
 	}
-	for _, want := range []string{`{{range .Steps}}`, `{{if .Active}}aria-current="step"{{end}}`, `{{if .Complete}}<form method="post" action="/setup/navigate">`, `name="direction" value="jump"`, `name="step" value="{{.Number}}"`, `<span class="setup-number">{{.Number}}</span><span>{{.Name}}</span>`} {
-		if !strings.Contains(string(wizard), want) {
-			t.Fatalf("Setup wizard progress navigation missing %q", want)
-		}
+	for _, addServer := range []bool{false, true} {
+		t.Run(fmt.Sprintf("AddServer=%t", addServer), func(t *testing.T) {
+			app, basePath, drafts, _ := sixStepProgressFixture(t, addServer)
+			complete, _ := drafts.get(app, "session-token")
+			for current := setupServerStep; current <= setupReviewStep; current++ {
+				draft := complete
+				draft.CurrentStep = current
+				drafts.save(app, "session-token", draft)
+				route := basePath
+				if current == setupReviewStep {
+					route += "/review"
+				}
+				page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example"+route, ""))
+				if page.Code != http.StatusOK {
+					t.Fatalf("step %d: %d: %s", current, page.Code, page.Body.String())
+				}
+				assertRenderedSixStepProgress(t, page.Body.String(), basePath, current)
+			}
+		})
 	}
 }
 
@@ -756,7 +763,7 @@ func TestSetupVersionPreviewPresentationContract(t *testing.T) {
 			t.Fatalf("version preview contract missing %q", want)
 		}
 	}
-	if strings.Count(source, `fetch("/setup/version-preview?"`) != 1 {
+	if strings.Count(source, `form?.dataset.versionPreviewUrl || "/setup/version-preview"`) != 1 {
 		t.Fatal("version preview must use the existing endpoint")
 	}
 	if !strings.Contains(source, "const status = await response.json();") || !strings.Contains(source, "if (ticket === sequence) show(status, policy);") {

@@ -1,0 +1,28 @@
+{{define "minecraft_servers.html"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>JustVoxel - Minecraft Servers</title>
+  <link rel="icon" type="image/png" href="/static/justvoxel-favicon.png">
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/setup.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body class="role-administrator setup-body minecraft-servers-body">
+<header class="setup-header topbar setup-topbar">
+  <a class="brand-link brand-mark" href="/" aria-label="JustVoxel dashboard"><img class="brand-logo" src="/static/justvoxel-logo.png" alt="JustVoxel"></a>
+  <div class="topbar-clock" data-topbar-clock aria-label="Local time">--:--</div>
+  <form class="nav-logout setup-topbar-logout" method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Log out</button></form>
+</header>
+<main class="setup-shell">
+  <h1>Minecraft Servers</h1>
+  {{if .Message}}<p class="notice success" role="status">{{.Message}}</p>{{end}}
+  <div class="minecraft-server-entries">
+    <a class="panel minecraft-add-server-card" href="/minecraft/servers/add" aria-label="Add Minecraft Server"><span class="minecraft-add-server-plus" aria-hidden="true">+</span><strong>Add Minecraft Server</strong></a>
+  </div>
+  <a class="button-link secondary" href="/">Back to dashboard</a>
+</main>
+{{template "project-footer" .}}
+</body>
+</html>{{end}}

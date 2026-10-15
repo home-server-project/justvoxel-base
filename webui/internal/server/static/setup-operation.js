@@ -1,6 +1,7 @@
 document.addEventListener("DOMContentLoaded", () => {
   const applyForm = document.querySelector("[data-setup-apply]");
   if (applyForm) {
+    const addingServer = applyForm.dataset.addServer === "true";
     const eulaDialog = document.querySelector("[data-setup-eula-dialog]");
     const passwordDialog = document.querySelector("[data-setup-password-dialog]");
     const password = passwordDialog?.querySelector("[data-setup-password]");
@@ -64,14 +65,15 @@ document.addEventListener("DOMContentLoaded", () => {
       eulaDialog?.close();
       if (configure) {
         configure.disabled = true;
-        configure.textContent = "Starting setup…";
+        configure.textContent = addingServer ? "Creating server…" : "Starting setup…";
       }
       try {
-        const response = await resumeReviewedIdentitySubmission(() => fetch(applyForm.action, {
+        const submit = () => fetch(applyForm.action, {
           method: "POST", credentials: "same-origin", cache: "no-store",
           headers: {Accept: "text/html, application/json", "Content-Type": "application/x-www-form-urlencoded"},
           body: body.toString(),
-        }), body.get("csrf") || "");
+        });
+        const response = addingServer ? await submit() : await resumeReviewedIdentitySubmission(submit, body.get("csrf") || "");
         if (response.redirected) {
           window.location.assign(response.url);
           return;
@@ -84,13 +86,13 @@ document.addEventListener("DOMContentLoaded", () => {
         submitting = false;
         if (configure) {
           configure.disabled = false;
-          configure.textContent = "Configure JustVoxel";
+          configure.textContent = addingServer ? "Create Server" : "Configure JustVoxel";
         }
         const feedback = document.createElement("p");
         feedback.setAttribute("role", "alert");
         feedback.textContent = error?.message || "Could not start JustVoxel setup.";
         const review = document.createElement("a");
-        review.href = "/setup/review";
+        review.href = addingServer ? "/minecraft/servers/add/review" : "/setup/review";
         review.textContent = "Reload Review";
         applyForm.append(feedback, review);
       } finally {

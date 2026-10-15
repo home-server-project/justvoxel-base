@@ -581,3 +581,23 @@ bidirectional exclusion, handoff, nonblocking failure, completion and terminatio
 Root-owned fixtures require root or an authorized rootless user namespace. Tests
 are added but intentionally unrun in this task; gofmt and shell syntax checks do
 not establish compilation, runtime, filesystem, SELinux or VM acceptance.
+
+## Add Server wizard (Phase 5)
+
+The administrator's Minecraft Servers entry opens the existing Setup Wizard in an
+independent creation context. Recommended and Advanced share the maintained
+wizard and Review templates; Advanced retains Server, Cross-play, Memory,
+Storage, Backups, and Review. Add Server drafts and reviews are separate from
+legacy first-run state. Friendly server name and Minecraft MOTD remain separate.
+Storage is fixed to the appliance's configured Minecraft storage; the agent
+chooses the immutable identity and derives the data location. Backups reuse the
+appliance destination with per-instance schedule and retention settings.
+
+Creation calls the existing independent instance API and leaves the server
+stopped. Backup settings are applied afterward. If that second step fails, the
+wizard reports that the server exists and allows changing/retrying only its
+backup settings without creating another server. An uncertain creation result
+cannot be blindly resubmitted. Legacy Setup Plan/Apply, destination provisioning,
+and recovery retain their existing contracts. Full independent management cards
+remain Phase 6; the single existing How to Connect implementation remains
+unchanged for Phase 8.

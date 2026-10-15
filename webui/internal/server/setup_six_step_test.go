@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -57,7 +59,7 @@ func TestWizardSharedDesktopFrame(t *testing.T) {
 	if strings.Count(markup, `class="setup-step-content"`) != 5 || strings.Count(markup, `class="setup-step-actions"`) != 5 {
 		t.Fatal("all five forms need shared content then navigation")
 	}
-	for _, form := range strings.Split(markup, `<form method="post" action="/setup/`)[1:] {
+	for _, form := range strings.Split(markup, `<form method="post" action="{{$wizard.BasePath}}/`)[1:] {
 		if !strings.Contains(form, `class="setup-form"`) {
 			continue
 		}
@@ -410,41 +412,116 @@ func TestSixStepBackRoutesPreserveMemoryStorageAndBackups(t *testing.T) {
 	}
 }
 
-// A visited future step never becomes a forward shortcut, even for a valid draft.
-func TestSetupProgressCardsOnlyNavigateBackward(t *testing.T) {
-	app, err := New(setupReviewClient(), Config{Version: "test", ManagementAPI: "v1"})
-	if err != nil {
-		t.Fatal(err)
+// Both modes reach Review through their real forms before navigation is tested.
+func sixStepProgressFixture(t *testing.T, addServer bool) (*App, string, *setupDraftStore, *setupDraftStore) {
+	t.Helper()
+	if !addServer {
+		app, err := New(setupReviewClient(), Config{Version: "test", ManagementAPI: "v1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			firstRunSetupDrafts.delete(app, "session-token")
+			firstRunSetupReviews.delete(app, "session-token")
+			addServerDrafts.delete(app, "session-token")
+		})
+		advanceSetupToReview(t, app)
+		addServerDrafts.save(app, "session-token", setupDraft{AddServer: true, DisplayName: "Separate Add Server draft"})
+		return app, "/setup", &firstRunSetupDrafts, &addServerDrafts
 	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	defer firstRunSetupReviews.delete(app, "session-token")
-	advanceSetupToReview(t, app)
-	complete, _ := firstRunSetupDrafts.get(app, "session-token")
-	for current := setupServerStep; current <= setupReviewStep; current++ {
-		draft := complete
-		draft.CurrentStep = current
-		firstRunSetupDrafts.save(app, "session-token", draft)
-		route := "http://example/setup"
-		if current == setupReviewStep {
-			route += "/review"
+	app, _ := newAddServerTestApp(t)
+	firstRunSetupDrafts.save(app, "session-token", setupDraft{Started: true, CurrentStep: setupMemoryStep, Server: setupServerDraft{MOTD: "Separate first-run draft"}})
+	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/start", nil))
+	server := validServerValues()
+	server.Set("display_name", "Family Survival")
+	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/server", server))
+	connections := validConnectionValues()
+	connections.Set("java_port", "25567")
+	connections.Set("bedrock_port", "19134")
+	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/connections", connections))
+	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/resources", url.Values{"java_memory": {"1G"}, "container_memory": {"2G"}, "direction": {"next"}}))
+	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/storage", url.Values{"direction": {"next"}}))
+	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/backups", url.Values{"backup_daily_time": {"06:00"}, "backup_keep": {"9"}, "backup_automatic": {"on"}, "direction": {"next"}}))
+	return app, "/minecraft/servers/add", &addServerDrafts, &firstRunSetupDrafts
+}
+
+func assertRenderedSixStepProgress(t *testing.T, body, basePath string, current int) {
+	t.Helper()
+	progress := regexp.MustCompile(`(?s)<ol class="setup-progress"[^>]*>(.*?)</ol>`).FindStringSubmatch(body)
+	if len(progress) != 2 {
+		t.Fatal("rendered six-step progress missing")
+	}
+	items := regexp.MustCompile(`(?s)<li\b[^>]*>.*?</li>`).FindAllString(progress[1], -1)
+	labels := []string{"Server", "Cross-play", "Memory", "Storage", "Backups", "Review"}
+	if len(items) != len(labels) {
+		t.Fatalf("progress has %d steps, want six", len(items))
+	}
+	for i, label := range labels {
+		number := i + 1
+		item := items[i]
+		if !strings.Contains(item, fmt.Sprintf(`<span class="setup-number">%d</span><span>%s</span>`, number, label)) {
+			t.Fatalf("step %d missing label %q", number, label)
 		}
-		page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, route, ""))
-		body := page.Body.String()
-		if page.Code != http.StatusOK || strings.Count(body, `class="setup-number"`) != 6 || strings.Count(body, `action="/setup/navigate"`) != current-1 {
-			t.Fatalf("step %d has incorrect progress navigation: %d", current, page.Code)
+		if strings.Contains(item, `aria-current="step"`) != (number == current) {
+			t.Fatalf("step %d has incorrect active state at step %d", number, current)
 		}
-		for target := setupServerStep; target <= setupReviewStep; target++ {
-			firstRunSetupDrafts.save(app, "session-token", draft)
-			rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/navigate", fmt.Sprintf("csrf=csrf-token&direction=jump&step=%d", target)))
-			after, _ := firstRunSetupDrafts.get(app, "session-token")
-			if target >= current {
-				if rr.Code != http.StatusBadRequest || after.CurrentStep != current {
-					t.Fatalf("step %d jumped forward/current to visited step %d", current, target)
-				}
-			} else if rr.Code != http.StatusSeeOther || after.CurrentStep != target || after.Minecraft != draft.Minecraft || after.Storage != draft.Storage || after.Backups != draft.Backups {
-				t.Fatalf("backward jump %d -> %d lost draft", current, target)
+		forms := regexp.MustCompile(`(?s)<form\b[^>]*>.*?</form>`).FindAllString(item, -1)
+		if number >= current {
+			if len(forms) != 0 {
+				t.Fatalf("step %d offers current/forward navigation at step %d", number, current)
+			}
+			continue
+		}
+		if len(forms) != 1 {
+			t.Fatalf("completed step %d needs one navigation form", number)
+		}
+		for _, want := range []string{`method="post"`, `action="` + basePath + `/navigate"`, `name="csrf" value="csrf-token"`, `name="direction" value="jump"`, fmt.Sprintf(`name="step" value="%d"`, number), `<button type="submit">`} {
+			if !strings.Contains(forms[0], want) {
+				t.Fatalf("completed step %d navigation missing %q", number, want)
 			}
 		}
+	}
+}
+
+// A visited future step never becomes a forward shortcut, even for a valid draft.
+func TestSixStepProgressCardsOnlyNavigateBackward(t *testing.T) {
+	for _, addServer := range []bool{false, true} {
+		t.Run(fmt.Sprintf("AddServer=%t", addServer), func(t *testing.T) {
+			app, basePath, drafts, otherDrafts := sixStepProgressFixture(t, addServer)
+			complete, _ := drafts.get(app, "session-token")
+			if !setupDraftReadyForReview(complete) || complete.CurrentStep != setupReviewStep {
+				t.Fatal("fixture did not complete all six steps")
+			}
+			otherBefore, _ := otherDrafts.get(app, "session-token")
+			for current := setupServerStep; current <= setupReviewStep; current++ {
+				draft := complete
+				draft.CurrentStep = current
+				for target := setupServerStep; target <= setupReviewStep; target++ {
+					drafts.save(app, "session-token", draft)
+					rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example"+basePath+"/navigate", fmt.Sprintf("csrf=csrf-token&direction=jump&step=%d", target)))
+					after, _ := drafts.get(app, "session-token")
+					expected := draft
+					if target >= current {
+						if rr.Code != http.StatusBadRequest {
+							t.Fatalf("step %d jumped forward/current to visited step %d: %d", current, target, rr.Code)
+						}
+					} else {
+						expected.CurrentStep = target
+						if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != basePath {
+							t.Fatalf("backward jump %d -> %d: %d %q", current, target, rr.Code, rr.Header().Get("Location"))
+						}
+					}
+					expected.UpdatedAt = after.UpdatedAt
+					if !reflect.DeepEqual(expected, after) {
+						t.Fatalf("jump %d -> %d changed draft values", current, target)
+					}
+					otherAfter, exists := otherDrafts.get(app, "session-token")
+					if !exists || !reflect.DeepEqual(otherBefore, otherAfter) {
+						t.Fatal("navigation changed or resumed the other wizard's draft")
+					}
+				}
+			}
+		})
 	}
 	source, err := os.ReadFile("setup_wizard.go")
 	if err != nil {
@@ -452,5 +529,35 @@ func TestSetupProgressCardsOnlyNavigateBackward(t *testing.T) {
 	}
 	if strings.Contains(string(source), "setupVersion"+"Step") {
 		t.Fatal("Version navigation stage remains")
+	}
+}
+
+func TestSixStepRecommendedFirstRunOmitsProgressAndKeepsDefaults(t *testing.T) {
+	app, err := New(setupReviewClient(), Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		firstRunSetupDrafts.delete(app, "session-token")
+		firstRunSetupReviews.delete(app, "session-token")
+		addServerDrafts.delete(app, "session-token")
+	})
+	addServerDrafts.save(app, "session-token", setupDraft{AddServer: true, DisplayName: "Separate draft"})
+	otherBefore, _ := addServerDrafts.get(app, "session-token")
+	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recommended", "csrf=csrf-token&server_type=paper"))
+	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/setup/review" {
+		t.Fatalf("recommended: %d %q", rr.Code, rr.Header().Get("Location"))
+	}
+	draft, exists := firstRunSetupDrafts.get(app, "session-token")
+	if !exists || draft.AddServer || draft.Mode != "recommended" || draft.CurrentStep != setupReviewStep || !setupDraftReadyForReview(draft) || draft.Minecraft.ServerType != "paper" || !draft.Server.BedrockEnabled || draft.Storage.Type != "system" || draft.Backups.Type != "system" || !draft.Backups.Automatic || draft.Minecraft.JavaMemory != draft.Defaults.JavaMemory || draft.Minecraft.ContainerMemory != draft.Defaults.ContainerMemory {
+		t.Fatal("recommended first-run defaults or direct Review changed")
+	}
+	page := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup/review", ""))
+	if page.Code != http.StatusOK || strings.Contains(page.Body.String(), `class="setup-progress"`) || strings.Contains(page.Body.String(), `action="/setup/navigate"`) || !strings.Contains(page.Body.String(), `class="setup-review-summary"`) {
+		t.Fatalf("recommended Review presentation changed: %d", page.Code)
+	}
+	otherAfter, _ := addServerDrafts.get(app, "session-token")
+	if !reflect.DeepEqual(otherBefore, otherAfter) {
+		t.Fatal("recommended first-run changed the Add Server draft")
 	}
 }

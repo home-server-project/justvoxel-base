@@ -1,4 +1,4 @@
-{{define "setup_review.html"}}<!doctype html>
+{{define "setup_review.html"}}{{$wizard := .}}<!doctype html>
 <html lang="en">
 <head>
   <link rel="icon" type="image/png" href="/static/justvoxel-favicon.png">
@@ -13,7 +13,7 @@
 </head>
 <body class="role-administrator setup-body{{if ne .SetupMode "recommended"}} setup-advanced{{end}}">
 <header class="setup-header topbar setup-topbar">
-  <a class="brand-link brand-mark" href="/setup/review" aria-current="page" aria-label="JustVoxel first setup review"><img class="brand-logo" src="/static/justvoxel-logo.png" alt="JustVoxel"></a>
+  <a class="brand-link brand-mark" href="{{$wizard.BasePath}}/review" aria-current="page" aria-label="{{if .AddServer}}Create Server review{{else}}JustVoxel first setup review{{end}}"><img class="brand-logo" src="/static/justvoxel-logo.png" alt="JustVoxel"></a>
   <div class="topbar-clock" data-topbar-clock aria-label="Local time">--:--</div>
   <form class="nav-logout setup-topbar-logout" method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Log out</button></form>
 </header>
@@ -21,11 +21,11 @@
   <div class="setup-stage-header">
   {{if ne .SetupMode "recommended"}}
   <ol class="setup-progress" aria-label="Setup progress">
-    <li class="complete"><form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="1"><button type="submit"><span class="setup-number">1</span><span>Server</span></button></form></li>
-    <li class="complete"><form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="2"><button type="submit"><span class="setup-number">2</span><span>Cross-play</span></button></form></li>
-    <li class="complete"><form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="3"><button type="submit"><span class="setup-number">3</span><span>Memory</span></button></form></li>
-    <li class="complete"><form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="4"><button type="submit"><span class="setup-number">4</span><span>Storage</span></button></form></li>
-    <li class="complete"><form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="5"><button type="submit"><span class="setup-number">5</span><span>Backups</span></button></form></li>
+    <li class="complete"><form method="post" action="{{$wizard.BasePath}}/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="1"><button type="submit"><span class="setup-number">1</span><span>Server</span></button></form></li>
+    <li class="complete"><form method="post" action="{{$wizard.BasePath}}/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="2"><button type="submit"><span class="setup-number">2</span><span>Cross-play</span></button></form></li>
+    <li class="complete"><form method="post" action="{{$wizard.BasePath}}/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="3"><button type="submit"><span class="setup-number">3</span><span>Memory</span></button></form></li>
+    <li class="complete"><form method="post" action="{{$wizard.BasePath}}/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="4"><button type="submit"><span class="setup-number">4</span><span>Storage</span></button></form></li>
+    <li class="complete"><form method="post" action="{{$wizard.BasePath}}/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="5"><button type="submit"><span class="setup-number">5</span><span>Backups</span></button></form></li>
     <li class="active" aria-current="step"><span class="setup-number">6</span><span>Review</span></li>
   </ol>
   {{end}}
@@ -33,12 +33,13 @@
 
   <section class="panel setup-step-panel setup-review-panel{{if ne .SetupMode "recommended"}} setup-advanced-frame{{end}}">
     <div class="setup-review-content">
-    <div class="setup-review-header"><h2>Review</h2>{{if .Plan.OK}}<a class="button-link secondary" href="/setup/review/configuration">Download configuration</a>{{end}}</div>
-    {{if .Error}}<div class="notice error"><strong>Setup needs attention</strong><br>{{.Error}}</div>{{end}}
+    <div class="setup-review-header"><h2>Review</h2>{{if and .Plan.OK (not .AddServer)}}<a class="button-link secondary" href="{{$wizard.BasePath}}/review/configuration">Download configuration</a>{{end}}</div>
+    {{if .Error}}<div class="notice error" role="alert"><strong>Setup needs attention</strong><br>{{.Error}}</div>{{end}}
 
     {{if .Plan.OK}}
     <div class="setup-review-summary" aria-label="Setup summary">
       <section><h3>Server</h3><dl>
+        {{if .AddServer}}<div><dt>Server name</dt><dd>{{.DisplayName}}</dd></div><div><dt>Start on Boot</dt><dd>{{if .StartOnBoot}}Enabled{{else}}Disabled{{end}}</dd></div>{{end}}
         <div><dt>Server software</dt><dd>{{.ServerTypeLabel}}</dd></div>
         <div><dt>Welcome message</dt><dd>{{.Plan.Normalized.Server.MOTD}}</dd></div>
         <div><dt>Game mode</dt><dd>{{.GameModeLabel}}</dd></div>
@@ -73,7 +74,7 @@
 
 
 
-    <form id="setup-apply-form" method="post" action="/setup/review/apply" data-setup-apply data-instance-preflight data-eula-accepted="{{.EULAAccepted}}" data-smb-required="{{.Plan.Requirements.SMBPasswordRequired}}">
+    <form id="setup-apply-form" method="post" action="{{$wizard.BasePath}}/review/apply" data-setup-apply{{if .AddServer}} data-add-server="true"{{else}} data-instance-preflight{{end}} data-eula-accepted="{{.EULAAccepted}}" data-smb-required="{{.Plan.Requirements.SMBPasswordRequired}}">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <input type="hidden" name="plan_fingerprint" value="{{.Plan.PlanFingerprint}}">
     </form>
@@ -97,8 +98,8 @@
     </div>
 
     <div class="setup-step-actions setup-actions-split">
-      <form method="post" action="/setup/review/cancel"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Cancel setup</button></form>
-      <div class="setup-step-navigation"><form method="post" action="/setup/review/back"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Back</button></form>{{if .Plan.OK}}<button type="submit" form="setup-apply-form" data-setup-configure>Configure JustVoxel</button>{{else}}<span class="setup-configure-disabled" role="group" aria-disabled="true" tabindex="0" aria-describedby="setup-configure-help"><button type="button" disabled aria-describedby="setup-configure-help">Configure JustVoxel</button><span class="setup-configure-tooltip" id="setup-configure-help" role="tooltip">Setup is not ready. Resolve the items above first.</span></span>{{end}}</div>
+      <form method="post" action="{{$wizard.BasePath}}/review/cancel"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">{{if .AddServer}}Return to Minecraft Servers{{else}}Cancel setup{{end}}</button></form>
+      <div class="setup-step-navigation">{{if not .CreationBlocked}}<form method="post" action="{{$wizard.BasePath}}/review/back"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Back</button></form>{{end}}{{if and .Plan.OK (not .CreationBlocked)}}<button type="submit" form="setup-apply-form" data-setup-configure>{{if .AddServer}}Create Server{{else}}Configure JustVoxel{{end}}</button>{{else}}<span class="setup-configure-disabled" role="group" aria-disabled="true" tabindex="0" aria-describedby="setup-configure-help"><button type="button" disabled aria-describedby="setup-configure-help">{{if .AddServer}}Create Server{{else}}Configure JustVoxel{{end}}</button><span class="setup-configure-tooltip" id="setup-configure-help" role="tooltip">Setup is not ready. Resolve the items above first.</span></span>{{end}}</div>
     </div>
   </section>
 </main>

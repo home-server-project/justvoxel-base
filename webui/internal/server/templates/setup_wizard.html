@@ -1,23 +1,23 @@
-{{define "setup_wizard.html"}}<!doctype html>
+{{define "setup_wizard.html"}}{{$wizard := .}}<!doctype html>
 <html lang="en">
 <head>
   <link rel="icon" type="image/png" href="/static/justvoxel-favicon.png">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>JustVoxel - First setup</title>
+  <title>JustVoxel - {{if .AddServer}}Add Minecraft Server{{else}}First setup{{end}}</title>
   <link rel="stylesheet" href="/static/app.css">
   <link rel="stylesheet" href="/static/storage-browser.css">
   <link rel="stylesheet" href="/static/setup.css">
   <script src="/static/app.js" defer></script>
   <script src="/static/settings.js" defer></script>
-  <script src="/static/storage-browser.js" defer></script>
+  {{if not .AddServer}}<script src="/static/storage-browser.js" defer></script>
   <script src="/static/setup-storage-actions.js" defer></script>
-  <script src="/static/setup-storage.js" defer></script>
+  <script src="/static/setup-storage.js" defer></script>{{end}}
   <script src="/static/setup-motd.js" defer></script>
 </head>
 <body class="role-administrator setup-body{{if .Started}} setup-advanced{{end}}">
 <header class="setup-header topbar setup-topbar">
-  <a class="brand-link brand-mark" href="/setup" aria-current="page" aria-label="JustVoxel first setup"><img class="brand-logo" src="/static/justvoxel-logo.png" alt="JustVoxel"></a>
+  <a class="brand-link brand-mark" href="{{$wizard.BasePath}}" aria-current="page" aria-label="{{if .AddServer}}Add Minecraft Server{{else}}JustVoxel first setup{{end}}"><img class="brand-logo" src="/static/justvoxel-logo.png" alt="JustVoxel"></a>
   <div class="topbar-clock" data-topbar-clock aria-label="Local time">--:--</div>
   <form class="nav-logout setup-topbar-logout" method="post" action="/logout">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
@@ -28,17 +28,19 @@
   {{if not .Started}}
   <section class="panel setup-welcome setup-entry">
     <p class="eyebrow">Minecraft setup</p>
-    <h1>Set up your Minecraft server</h1>
-    <p class="setup-lead">Use recommended defaults to get running quickly, or choose Advanced setup to customize Minecraft, storage and backups before anything is applied.</p>
+    <h1>{{if .AddServer}}Add Minecraft Server{{else}}Set up your Minecraft server{{end}}</h1>
+    {{if .Error}}<div class="notice error" role="alert">{{.Error}}</div>{{end}}
+    <p class="setup-lead">{{if .AddServer}}Use recommended defaults or customize your new server. All servers use the existing Minecraft storage and appliance backup destination.{{else}}Use recommended defaults to get running quickly, or choose Advanced setup to customize Minecraft, storage and backups before anything is applied.{{end}}</p>
     <p class="field-help">You can change these settings later from the JustVoxel Control Center.</p>
 
     <div class="setup-mode-grid">
       <section class="setup-mode-card setup-mode-recommended">
         <span class="setup-mode-kicker">Fast path</span>
         <h2>Recommended setup</h2>
-        <p>JustVoxel chooses safe defaults for memory, ports, system storage, automatic backups and Minecraft version, and keeps the appliance timezone.</p>
-        <form method="post" action="/setup/recommended" class="setup-recommended-form">
+        <p>{{if .AddServer}}JustVoxel chooses defaults for memory, unused ports, Minecraft version and backups, and keeps the appliance timezone. Backup availability and schedule are shown in Review.{{else}}JustVoxel chooses safe defaults for memory, ports, system storage, automatic backups and Minecraft version, and keeps the appliance timezone.{{end}}</p>
+        <form method="post" action="{{$wizard.BasePath}}/recommended" class="setup-recommended-form">
           <input type="hidden" name="csrf" value="{{.CSRF}}">
+          {{if .AddServer}}{{template "setup-instance-name" .}}{{end}}
           <fieldset class="setup-server-types">
             <legend>Choose server software</legend>
             <label class="setup-server-type server-software-card is-available">
@@ -61,28 +63,28 @@
       <section class="setup-mode-card setup-mode-advanced">
         <span class="setup-mode-kicker">Custom path</span>
         <h2>Advanced setup</h2>
-        <p>Walk through the full guided setup and choose memory, ports, version policy, storage and backup destination yourself.</p>
-        <form method="post" action="/setup/start">
+        <p>{{if .AddServer}}Walk through the same six steps to choose server settings and backups using the configured appliance storage.{{else}}Walk through the full guided setup and choose memory, ports, version policy, storage and backup destination yourself.{{end}}</p>
+        <form method="post" action="{{$wizard.BasePath}}/start">
           <input type="hidden" name="csrf" value="{{.CSRF}}">
           <button class="secondary" type="submit">Start advanced setup</button>
         </form>
       </section>
     </div>
 
-    <div class="setup-terminal-note"><a class="button-link secondary setup-dashboard-exit" href="/">Back to dashboard</a><div class="setup-terminal-help"><span>Prefer the terminal?</span><code>mjust setup</code><small>Available from a local console or SSH.</small></div></div>
+    {{if .AddServer}}<div class="setup-terminal-note"><a class="button-link secondary setup-dashboard-exit" href="/minecraft/servers">Cancel</a></div>{{else}}<div class="setup-terminal-note"><a class="button-link secondary setup-dashboard-exit" href="/">Back to dashboard</a><div class="setup-terminal-help"><span>Prefer the terminal?</span><code>mjust setup</code><small>Available from a local console or SSH.</small></div></div>{{end}}
   </section>
   {{else}}
   <div class="setup-stage-header">
-  <ol class="setup-progress" aria-label="Setup progress">{{range .Steps}}<li class="{{if .Active}}active{{end}} {{if .Complete}}complete{{end}}" {{if .Active}}aria-current="step"{{end}}>{{if .Complete}}<form method="post" action="/setup/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="{{.Number}}"><button type="submit"><span class="setup-number">{{.Number}}</span><span>{{.Name}}</span></button></form>{{else}}<span class="setup-number">{{.Number}}</span><span>{{.Name}}</span>{{end}}</li>{{end}}</ol>
+  <ol class="setup-progress" aria-label="Setup progress">{{range .Steps}}<li class="{{if .Active}}active{{end}} {{if .Complete}}complete{{end}}" {{if .Active}}aria-current="step"{{end}}>{{if .Complete}}<form method="post" action="{{$wizard.BasePath}}/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="{{.Number}}"><button type="submit"><span class="setup-number">{{.Number}}</span><span>{{.Name}}</span></button></form>{{else}}<span class="setup-number">{{.Number}}</span><span>{{.Name}}</span>{{end}}</li>{{end}}</ol>
   </div>
 
   <section class="panel setup-step-panel setup-wizard-panel setup-advanced-frame">
     <h2>{{.Current.Name}}</h2>
     <p class="setup-lead">{{.Current.Description}}</p>
-    {{if .Error}}<div class="notice error">{{.Error}}</div>{{end}}
+    {{if .Error}}<div class="notice error" role="alert">{{.Error}}</div>{{end}}
 
     {{if eq .CurrentStep 1}}
-    <form method="post" action="/setup/server" class="setup-form">
+    <form method="post" action="{{$wizard.BasePath}}/server" class="setup-form">
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <fieldset class="setup-server-types setup-server-types-compact">
@@ -93,18 +95,19 @@
       </fieldset>
       <div class="setup-form-grid">
         <input type="hidden" name="motd_automatic" value="{{.Server.MOTDAutomatic}}" data-setup-motd-automatic>
-        <label class="setup-field">Server name<input value="Minecraft server" disabled aria-describedby="setup-server-name-help"><span class="field-help" id="setup-server-name-help">Future multi-instance placeholder. This name does not configure the server.</span></label>
+        {{if .AddServer}}{{template "setup-instance-name" .}}{{else}}<label class="setup-field">Server name<input value="Minecraft server" disabled aria-describedby="setup-server-name-help"><span class="field-help" id="setup-server-name-help">Future multi-instance placeholder. This name does not configure the server.</span></label>{{end}}
         <label class="setup-field">Welcome message<input name="motd" value="{{.Server.MOTD}}" autocomplete="off" {{if .Server.MOTDAutomatic}}placeholder="Automatic: JustVoxel {{if eq .Minecraft.ServerType "purpur"}}Purpur{{else if eq .Minecraft.ServerType "vanilla"}}Vanilla{{else}}Paper{{end}} Minecraft &lt;resolved version&gt; Server"{{end}} data-setup-motd><span class="field-help">Shown to players in the Minecraft server list. Technical name: MOTD.</span></label>
         <label class="setup-field">Game mode<select name="game_mode" required><option value="survival" {{if eq .Minecraft.GameMode "survival"}}selected{{end}}>Survival</option><option value="creative" {{if eq .Minecraft.GameMode "creative"}}selected{{end}}>Creative</option><option value="adventure" {{if eq .Minecraft.GameMode "adventure"}}selected{{end}}>Adventure</option><option value="spectator" {{if eq .Minecraft.GameMode "spectator"}}selected{{end}}>Spectator</option></select></label>
         <label class="setup-field">Maximum players<input name="max_players" type="number" min="1" step="1" value="{{.Server.MaxPlayers}}" inputmode="numeric"><span class="field-help">Used for the player limit and memory recommendations.</span></label>
 
       </div>
+      {{if .AddServer}}<label class="setup-toggle-field"><span>Start on Boot</span><input class="date-time-switch" type="checkbox" name="start_on_boot" {{if .StartOnBoot}}checked{{end}}></label>{{end}}
       </div>
-      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button type="submit">Continue</button></div></div>
+      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="{{$wizard.BasePath}}/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button type="submit">Continue</button></div></div>
     </form>
 
     {{else if eq .CurrentStep 2}}
-    <form method="post" action="/setup/connections" class="setup-form" data-setup-connections data-setup-version>
+    <form method="post" action="{{$wizard.BasePath}}/connections" class="setup-form" data-setup-connections data-setup-version{{if .AddServer}} data-version-preview-url="{{$wizard.BasePath}}/version-preview"{{end}}>
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <div class="setup-form-grid">
@@ -126,14 +129,14 @@
       <div class="setup-version-preview" id="setup-version-preview" role="status" aria-live="polite">Checking available versions…</div>
       <label class="date-time-automatic"><span><strong>Enable Bedrock cross-play</strong><small class="field-help">{{if eq .Minecraft.ServerType "vanilla"}}Select Paper or Purpur on Step 1 to enable Bedrock cross-play.{{else}}Allow supported Bedrock clients to join through Geyser/Floodgate. Compatibility is checked above.{{end}}</small></span><input class="date-time-switch" type="checkbox" name="bedrock_enabled" data-bedrock-toggle {{if eq .Minecraft.ServerType "vanilla"}}disabled{{end}} {{if .Server.BedrockEnabled}}checked{{end}}></label>
       </div>
-      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next" disabled>Continue</button></div></div>
+      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="{{$wizard.BasePath}}/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next" disabled>Continue</button></div></div>
     </form>
 
     {{else if eq .CurrentStep 3}}
-    <form method="post" action="/setup/resources" class="setup-form">
+    <form method="post" action="{{$wizard.BasePath}}/resources" class="setup-form">
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" id="max-players" value="{{.Server.MaxPlayers}}">
-      <div class="setup-memory" data-memory-settings data-system-memory-mib="{{.Defaults.SystemMemoryMiB}}" data-min-reserve-mib="{{.Defaults.SystemReserveMinimumMiB}}" data-recommended-reserve-mib="{{.Defaults.SystemReserveRecommendedMiB}}">
+      <div class="setup-memory" data-memory-settings data-system-memory-mib="{{.Defaults.SystemMemoryMiB}}" data-min-reserve-mib="{{.Defaults.SystemReserveMinimumMiB}}" data-recommended-reserve-mib="{{.Defaults.SystemReserveRecommendedMiB}}"{{if .AddServer}} data-other-memory-mib="{{.OtherMemoryMiB}}"{{end}}>
         <div class="setup-memory-summary"><div><span>System memory</span><strong>{{.SystemMemory}} detected</strong></div><div><span>Recommended headroom</span><strong>{{.SystemReserveRecommended}}</strong></div><div><span>Minimum headroom</span><strong>{{.SystemReserveMinimum}}</strong></div></div>
         <p class="field-help">JustVoxel typically uses 0.6–1.0 GiB. Memory outside Minecraft remains available for Linux, cache, backups, updates and temporary spikes.</p>
         <div class="memory-presets" aria-label="Minecraft memory presets"><button type="button" class="secondary" data-memory-preset="light">Light</button><button type="button" data-memory-preset="recommended">Recommended</button><button type="button" class="secondary" data-memory-preset="high">High memory</button><button type="button" class="secondary" data-memory-preset="custom">Custom</button></div>
@@ -142,13 +145,16 @@
         <div id="memory-status" class="memory-status" aria-live="polite"></div>
       </div>
       </div>
-      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
+      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="{{$wizard.BasePath}}/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
     </form>
 
     {{else if eq .CurrentStep 4}}
-    <form method="post" action="/setup/storage" class="setup-form" data-setup-storage-form data-csrf="{{.CSRF}}">
+    <form method="post" action="{{$wizard.BasePath}}/storage" class="setup-form"{{if not .AddServer}} data-setup-storage-form data-csrf="{{.CSRF}}"{{end}}>
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
+      {{if .AddServer}}
+      <div class="setup-target-card"><strong>Minecraft storage</strong><span><span aria-hidden="true">✓ </span>Existing JustVoxel Minecraft storage — selected</span><small>All Minecraft servers currently use the configured Minecraft storage. Per-server storage selection can be added later.</small></div>
+      {{else}}
       <input type="hidden" name="storage_type" value="{{.Storage.Type}}" data-setup-storage-type>
       <input type="hidden" name="storage_device" value="{{.Storage.Device}}" data-setup-storage-device>
       <input type="hidden" name="storage_mount_point" value="{{.Storage.MountPoint}}" data-setup-storage-mount>
@@ -182,15 +188,17 @@
 
 
       <div class="notice error" role="alert" data-setup-inventory-error hidden></div>
+      {{end}}
       </div>
-      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
+      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="{{$wizard.BasePath}}/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
       <input type="hidden" value="{{.CSRF}}" data-storage-action-csrf>
     </form>
 
     {{else if eq .CurrentStep 5}}
-    <form method="post" action="/setup/backups" class="setup-form" data-setup-backup-form data-csrf="{{.CSRF}}" data-data-device="{{.Storage.Device}}" data-data-mount="{{.Storage.MountPoint}}">
+    <form method="post" action="{{$wizard.BasePath}}/backups" class="setup-form"{{if not .AddServer}} data-setup-backup-form data-csrf="{{.CSRF}}" data-data-device="{{.Storage.Device}}" data-data-mount="{{.Storage.MountPoint}}"{{end}}>
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
+      {{if not .AddServer}}
       <input type="hidden" name="backup_type" value="{{.Backups.Type}}" data-setup-backup-type>
       <input type="hidden" name="backup_device" value="{{.Backups.Device}}" data-setup-backup-device>
       <input type="hidden" name="backup_mount_point" value="{{.Backups.MountPoint}}" data-setup-backup-mount>
@@ -199,6 +207,7 @@
       <input type="hidden" name="backup_username" value="{{.Backups.Username}}" data-setup-backup-username>
       <input type="hidden" name="backup_domain" value="{{.Backups.Domain}}" data-setup-backup-domain>
 
+      {{end}}
       <div class="setup-backup-topline">
         <div class="setup-backup-schedule">
           <label class="setup-field">Daily time<input name="backup_daily_time" type="time" value="{{.Backups.DailyTime}}"></label>
@@ -207,6 +216,9 @@
         <label class="setup-toggle-field setup-backup-automatic"><span>Automatic backups</span><input class="date-time-switch" type="checkbox" name="backup_automatic" {{if .Backups.Automatic}}checked{{end}}></label>
       </div>
 
+      {{if .AddServer}}
+      <div class="setup-target-card"><strong>Existing appliance backup destination</strong><small>{{if .BackupAvailable}}Uses the destination already configured for JustVoxel. Availability is verified when backups run. Daily backups must start at least 30 minutes apart.{{else}}Appliance backup storage is not configured. Turn automatic backups off to create this server; configure appliance backup storage separately before enabling backups.{{end}}</small></div>
+      {{else}}
       <div class="setup-backup-choice-grid">
         <button class="setup-backup-choice{{if eq .Backups.Type "system"}} is-selected{{end}}" type="button" data-setup-backup-choice="system" data-system-path="{{.Defaults.BackupPath}}">
           <span class="setup-storage-choice-kicker">Simple</span>
@@ -266,8 +278,9 @@
 
 
       <div class="notice error" role="alert" data-setup-inventory-error hidden></div>
+      {{end}}
       </div>
-      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="/setup/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
+      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="{{$wizard.BasePath}}/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
       <input type="hidden" value="{{.CSRF}}" data-storage-action-csrf>
     </form>
 
@@ -281,3 +294,5 @@
 {{template "project-footer" .}}
 </body>
 </html>{{end}}
+
+{{define "setup-instance-name"}}<label class="setup-field">Server name<input name="display_name" value="{{.DisplayName}}" placeholder="Family Survival" required maxlength="64" autocomplete="off" aria-describedby="setup-instance-name-help"><span class="field-help" id="setup-instance-name-help">Your name for this server in JustVoxel. Separate from the welcome message shown to players.</span></label>{{end}}

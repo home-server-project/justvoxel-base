@@ -44,6 +44,12 @@ if (memoryPanel) {
       status.classList.add("warning");
       return;
     }
+    const otherMemoryMiB = Number(memoryPanel.dataset.otherMemoryMib || 0);
+    if (otherMemoryMiB > 0 && totalMiB - maximumMiB - otherMemoryMiB < recommendedReserveMiB) {
+      status.textContent = `Other configured servers have memory limits totalling ${formatRemaining(otherMemoryMiB)}. Running them together may leave little system headroom; consider a smaller limit or running fewer servers at once.`;
+      status.classList.add("warning");
+      return;
+    }
     const remaining = totalMiB - maximumMiB;
     if (remaining < minimumReserveMiB) {
       status.textContent = `Not enough memory remains outside Minecraft: about ${formatRemaining(remaining)}. JustVoxel requires at least 1 GiB outside the Minecraft limit; reduce Maximum Minecraft memory before continuing.`;
@@ -181,7 +187,7 @@ if (versionPolicy && versionInput && specificVersionField) {
     const version = policy === "pinned" ? versionInput.value.trim() : "";
     if (policy === "pinned" && !version) { preview.textContent = "Enter a Minecraft version to check availability."; return; }
     try {
-      const response = await fetch("/setup/version-preview?" + new URLSearchParams({ policy, version, bedrock_enabled: form?.querySelector("[data-bedrock-toggle]")?.checked ? "on" : "off" }), { credentials: "same-origin", cache: "no-store" });
+      const response = await fetch((form?.dataset.versionPreviewUrl || "/setup/version-preview") + "?" + new URLSearchParams({ policy, version, bedrock_enabled: form?.querySelector("[data-bedrock-toggle]")?.checked ? "on" : "off" }), { credentials: "same-origin", cache: "no-store" });
       if (!response.ok) throw new Error();
       const status = await response.json();
       if (ticket === sequence) show(status, policy);

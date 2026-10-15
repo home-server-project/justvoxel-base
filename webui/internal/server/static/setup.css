@@ -451,3 +451,11 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
   .setup-advanced .storage-partition-grid{min-height:0;flex:0 1 auto}
   .setup-advanced .storage-partition-group>.storage-advanced-actions{flex:none}
 }
+
+/* Phase 5 entry only; independent management cards follow in Phase 6. */
+.minecraft-server-entries { display: flex; flex-wrap: wrap; gap: 1rem; }
+.minecraft-add-server-card { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .5rem; width: 10rem; min-height: 9rem; max-width: 100%; padding: 1rem; text-align: center; color: inherit; text-decoration: none; }
+.minecraft-add-server-plus { font-size: 3rem; line-height: 1; color: var(--jv-accent); }
+.minecraft-add-server-card:focus-visible { outline: 2px solid var(--jv-accent); outline-offset: 4px; }
+
+.minecraft-servers-body > .setup-shell { flex: none; padding-bottom: 2rem; gap: 1rem; }

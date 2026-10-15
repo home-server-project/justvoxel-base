@@ -22,12 +22,19 @@ type setupPlanningAPI interface {
 }
 
 type setupReviewState struct {
-	Request        api.AdminSetupPlanRequest
-	Plan           api.AdminSetupPlanResponse
-	EULAAccepted   bool
-	DraftUpdatedAt time.Time
-	SetupMode      string
-	ServerType     string
+	AddServer       bool
+	DisplayName     string
+	StartOnBoot     bool
+	BackupAvailable bool
+	CreationBlocked bool
+	InstanceRuntime api.InstanceRuntimeSettings
+	InstanceBackup  api.InstanceBackupSettings
+	Request         api.AdminSetupPlanRequest
+	Plan            api.AdminSetupPlanResponse
+	EULAAccepted    bool
+	DraftUpdatedAt  time.Time
+	SetupMode       string
+	ServerType      string
 }
 
 type setupReviewStore struct {
@@ -38,6 +45,11 @@ type setupReviewStore struct {
 var firstRunSetupReviews = setupReviewStore{reviews: make(map[setupDraftKey]setupReviewState)}
 
 type setupReviewPageData struct {
+	AddServer          bool
+	BasePath           string
+	DisplayName        string
+	StartOnBoot        bool
+	CreationBlocked    bool
 	Title              string
 	SetupMode          string
 	ServerTypeLabel    string
@@ -387,7 +399,13 @@ func setupReviewErrorMessage(err error) string {
 
 func (a *App) renderSetupReview(w http.ResponseWriter, identity api.SessionInfo, state setupReviewState, csrf, errorMessage string) {
 	plan := state.Plan
+	basePath := "/setup"
+	if state.AddServer {
+		basePath = addServerBasePath
+	}
 	data := setupReviewPageData{
+		AddServer: state.AddServer, BasePath: basePath, DisplayName: state.DisplayName,
+		StartOnBoot: state.StartOnBoot, CreationBlocked: state.CreationBlocked,
 		Title: "Review setup", SetupMode: state.SetupMode, ServerTypeLabel: setupServerTypeLabel(plan.Normalized.Minecraft.ServerType),
 		Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
 		CSRF: csrf, Identity: identity, Plan: plan, Error: errorMessage,
@@ -404,6 +422,13 @@ func (a *App) renderSetupReview(w http.ResponseWriter, identity api.SessionInfo,
 	}
 	if plan.Normalized.Backups.SizeBytes > 0 {
 		data.BackupSize = humanBytes(plan.Normalized.Backups.SizeBytes)
+	}
+	if state.AddServer {
+		data.StorageLabel = "Existing JustVoxel Minecraft storage"
+		data.BackupLabel = "Appliance backup storage is not configured"
+		if state.BackupAvailable {
+			data.BackupLabel = "Existing appliance backup destination (verified when backups run)"
+		}
 	}
 	a.renderAdminDiscovery(w, "setup_review.html", data)
 }
