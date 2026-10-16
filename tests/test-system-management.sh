@@ -101,7 +101,7 @@ grep -Fq 'reboot|poweroff|firmware-reboot)' "${system_actions_api}" || fail 'Sys
 grep -Fq 'action_confirmed:true' "${system_actions_api}" || fail 'System Actions frontend explicit action confirmation missing'
 grep -Fq 'confirm_players:$players_confirmed' "${system_actions_api}" || fail 'System Actions player confirmation replay missing'
 
-grep -Fq 'jv_stop_minecraft_adaptive' "${system_actions_backend}" || fail 'System Actions backend does not use adaptive Minecraft shutdown'
+grep -Fq 'instance-host-shutdown-prepare' "${system_actions_backend}" || fail 'System Actions backend does not use all-instance shutdown'
 grep -Fq 'busctl call org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager CanRebootToFirmwareSetup' "${system_actions_backend}" || fail 'System Actions backend must query login1 firmware capability'
 grep -Fq "'s \"yes\"'|'s \"challenge\"'" "${system_actions_backend}" || fail 'System Actions backend must accept supported login1 firmware capabilities'
 if grep -Fq 'systemctl reboot --firmware-setup --dry-run' "${system_actions_backend}"; then fail 'System Actions status must not arm firmware setup with a dry-run reboot'; fi
@@ -120,9 +120,9 @@ grep -Fq -- '--backup-minecraft' "${system_update_reboot_helper}" || fail 'Updat
 grep -Fq -- '--warning-seconds=10' "${system_update_reboot_helper}" || fail 'Update reboot helper quick-warning option missing'
 grep -Fq 'systemd-run --quiet --collect --unit="${unit_name}"' "${system_update_reboot_helper}" || fail 'Update reboot helper must queue the detached worker'
 grep -Fq 'state:"failed",accepted:false,confirmation_required:false,reason:"action_failed"' "${system_update_reboot_helper}" || fail 'Update reboot helper must persist worker-start failure state'
-grep -Fq 'minecraft-backup --leave-stopped' "${system_update_reboot_worker}" || fail 'Update reboot worker must use the existing verified cold backup'
+grep -Fq 'management-agent instance-version-backup' "${system_update_reboot_worker}" || fail 'Update reboot worker must use the existing verified cold backup'
 grep -Fq 'backup_failed' "${system_update_reboot_worker}" || fail 'Update reboot worker must report backup failure'
-grep -Fq 'restart_minecraft_if_needed' "${system_update_reboot_worker}" || fail 'Update reboot worker must recover Minecraft after failure'
+grep -Fq 'restore_instances' "${system_update_reboot_worker}" || fail 'Update reboot worker must recover Minecraft after failure'
 grep -Fq 'systemctl reboot' "${system_update_reboot_worker}" || fail 'Update reboot worker reboot action missing'
 grep -Fq 'system-update-reboot-worker /usr/libexec/justvoxel/system-update-reboot-worker' "${build_common}" || fail 'Update reboot worker is not installed in the Base image'
 

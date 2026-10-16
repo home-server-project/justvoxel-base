@@ -2,12 +2,18 @@
 set -u
 # One bounded window for all independent instances; no maintenance lock while
 # systemd drains services. Failed checks simply preserve the normal stop delay.
-timeout 8s python3 - <<'PY'
-import concurrent.futures, hashlib, json, os, re, stat, subprocess, time
+# Guard mode keeps its original short, non-blocking safety window. Explicit
+# requests use the same discovery and player parser, with bounded graceful stops.
+mode="${1:-guard}"
+window=180s
+case "${mode}" in guard|status|check) window=8s ;; esac
+timeout "${window}" python3 - "$@" <<'PY'
+import concurrent.futures, hashlib, json, os, re, stat, subprocess, sys, time
 
 root = '/etc/justvoxel/instances'
 registry = '/var/lib/justvoxel/instances'
-deadline = time.monotonic() + 6
+mode = sys.argv[1] if len(sys.argv) > 1 else 'guard'
+deadline = time.monotonic() + (6 if mode in ('guard', 'status', 'check') else 150)
 pattern = re.compile(r'^jv-[a-z0-9]{6,12}$')
 players = re.compile(r'^There are ([0-9]+) of a max of ([0-9]+) players online:?[ \t]*([^\r\n]*)$')
 
@@ -36,48 +42,193 @@ def run(*args):
     import tempfile
     with tempfile.TemporaryFile() as output:
         subprocess.run(args, check=True, stdout=output, stderr=subprocess.DEVNULL,
-                       timeout=min(2, remaining))
+                       timeout=min(2 if mode in ('guard', 'status', 'check') else 10, remaining))
         output.seek(0)
         data = output.read(8193)
     if len(data) > 8192:
         raise ValueError('output')
     return data.decode('utf-8').strip()
 
+def validate(instance):
+    if not pattern.fullmatch(instance):
+        raise ValueError('identity')
+    directory = root + '/' + instance
+    private(directory, True)
+    identity = json.loads(read(registry + '/' + instance + '.json'))
+    record = json.loads(read(directory + '/config.json'))
+    if identity != {'id': instance} or record.get('schema_version') != 1 or record['runtime']['id'] != instance:
+        raise ValueError('record')
+    for key, path in [('environment_sha256', directory + '/minecraft.env'),
+                      ('quadlet_sha256', '/etc/containers/systemd/minecraft-' + instance + '.container')]:
+        if hashlib.sha256(read(path)).hexdigest() != record.get(key):
+            raise ValueError('commitment')
+
+def player_state(instance):
+    raw = run('podman', 'exec', 'minecraft-' + instance, 'rcon-cli', 'list')
+    match = players.fullmatch(raw)
+    if not match:
+        raise ValueError('players')
+    online, maximum = int(match[1]), int(match[2])
+    names = [name.strip() for name in match[3].split(',')] if match[3].strip() else []
+    if not 0 <= online <= maximum <= 1000 or maximum == 0 or len(names) != online or any(not name for name in names):
+        raise ValueError('players')
+    return online, names
+
 def prepare(instance):
     try:
-        if not pattern.fullmatch(instance):
-            return False
-        directory = root + '/' + instance
-        private(directory, True)
-        identity = json.loads(read(registry + '/' + instance + '.json'))
-        record = json.loads(read(directory + '/config.json'))
-        if identity != {'id': instance} or record.get('schema_version') != 1 or record['runtime']['id'] != instance:
-            return False
-        # Incomplete runtime evidence must never authorize a delay bypass.
-        for key, path in [('environment_sha256', directory + '/minecraft.env'),
-                          ('quadlet_sha256', '/etc/containers/systemd/minecraft-' + instance + '.container')]:
-            if hashlib.sha256(read(path)).hexdigest() != record.get(key):
-                return False
+        validate(instance)
         container = 'minecraft-' + instance
         if run('podman', 'inspect', '--type', 'container', '--format', '{{.State.Running}}', container) != 'true':
             return True
-        raw = run('podman', 'exec', container, 'rcon-cli', 'list')
-        match = players.fullmatch(raw)
-        if not match:
-            return False
-        online, maximum = int(match[1]), int(match[2])
-        if not 0 <= online <= maximum <= 1000 or maximum == 0:
-            return False
-        names = match[3].strip()
+        online, names = player_state(instance)
         if online:
-            return bool(names) and len(names.split(', ')) == online
-        if names:
-            return False
+            return True
         # SIGUSR1 is itzg's graceful announcement-delay bypass, not a force kill.
         run('podman', 'kill', '--signal', 'SIGUSR1', container)
         return True
     except Exception:
         return False
+
+def discover():
+    # Reuse committed runtime directories and immutable registry identities.
+    # Also reject orphan Quadlets: missing runtime evidence cannot mean empty.
+    instances = []
+    if os.path.lexists(root):
+        private(root, True)
+        instances = sorted(os.listdir(root))
+    if len(instances) > 1024:
+        raise ValueError('count')
+    if os.path.lexists(registry):
+        private(registry, True)
+        # A registered identity with missing runtime evidence must not silently
+        # become an empty appliance. Presentation metadata is never identity.
+        for entry in os.listdir(registry):
+            if entry.startswith('jv-'):
+                identity = entry[:-5] if entry.endswith('.json') else ''
+                if identity not in instances or not pattern.fullmatch(identity):
+                    raise ValueError('registry coverage')
+    elif instances:
+        raise ValueError('registry unavailable')
+    for instance in instances:
+        validate(instance)
+    quadlets = '/etc/containers/systemd'
+    if os.path.lexists(quadlets):
+        for entry in os.listdir(quadlets):
+            if entry.startswith('minecraft-jv-') and entry.endswith('.container'):
+                if entry[len('minecraft-'):-len('.container')] not in instances:
+                    raise ValueError('coverage')
+    return instances
+
+def running(instance, draining=False):
+    unit = 'minecraft-' + instance + '.service'
+    state = run('systemctl', 'show', '--property=ActiveState', '--value', unit)
+    containers = run('podman', 'ps', '--filter', 'name=^minecraft-' + instance + '$', '--format', '{{.Names}}')
+    if draining and state in ('active', 'activating', 'deactivating', 'inactive', 'failed'):
+        return state not in ('inactive', 'failed') or bool(containers)
+    if state == 'active' and containers == 'minecraft-' + instance:
+        return True
+    if state in ('inactive', 'failed') and not containers:
+        return False
+    raise ValueError('runtime state')
+
+def snapshot(query_players):
+    instances = discover()
+    def observe(instance):
+        active = running(instance)
+        online, names = player_state(instance) if active and query_players else (0, [])
+        return dict(id=instance, running=active, online=online, players=names)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
+        states = list(pool.map(observe, instances))
+    return dict(instances=states, online=sum(s['online'] for s in states),
+                players=[name for s in states for name in s['players']])
+
+def saved_snapshot():
+    saved = json.loads(sys.argv[2])
+    states = saved['instances']
+    if len(states) > 1024 or len({s['id'] for s in states}) != len(states):
+        raise ValueError('snapshot')
+    for state in states:
+        if not pattern.fullmatch(state['id']) or type(state['running']) is not bool:
+            raise ValueError('snapshot')
+    return saved
+
+def restore(saved):
+    if not any(state['running'] for state in saved['instances']):
+        return
+    private(root, True)
+    private(registry, True)
+    failed = False
+    for state in saved['instances']:
+        if state['running']:
+            try:
+                validate(state['id'])
+                run('systemctl', 'start', 'minecraft-' + state['id'] + '.service')
+            except Exception:
+                failed = True
+    if failed:
+        raise ValueError('restoration')
+
+def stop(saved):
+    current = snapshot(True)
+    if [(s['id'], s['running']) for s in current['instances']] != [(s['id'], s['running']) for s in saved['instances']]:
+        raise ValueError('runtime changed')
+    confirmed = len(sys.argv) > 3 and sys.argv[3] == 'confirmed'
+    if current['online'] and not confirmed:
+        raise ValueError('players changed')
+    warning = int(sys.argv[4]) if len(sys.argv) > 4 else 60
+    if warning not in (10, 60):
+        raise ValueError('warning')
+    active = [s for s in current['instances'] if s['running']]
+    # Issue every stop before waiting, so siblings share the warning window.
+    for state in active:
+        run('systemctl', '--no-block', 'stop', 'minecraft-' + state['id'] + '.service')
+    def bypass(state):
+        try:
+            run('podman', 'kill', '--signal', 'SIGUSR1', 'minecraft-' + state['id'])
+        except Exception:
+            print('WARNING: Instance delay bypass unavailable; preserving normal graceful stop.', file=sys.stderr)
+    for state in active:
+        if not state['online']:
+            bypass(state)
+    if current['online']:
+        previous = warning
+        points = ([30, 15, 10] if warning == 60 else []) + [5, 4, 3, 2, 1]
+        if warning == 10:
+            points.insert(0, 10)
+        for point in points:
+            time.sleep(previous - point)
+            for state in active:
+                if state['online']:
+                    try:
+                        run('podman', 'exec', 'minecraft-' + state['id'], 'rcon-cli',
+                            'say Server shutting down in ' + str(point) + (' second' if point == 1 else ' seconds'))
+                    except Exception:
+                        pass  # A server may already have completed its graceful stop.
+            previous = point
+        time.sleep(1)
+        if warning == 10:
+            for state in active:
+                if state['online']:
+                    bypass(state)
+    while any(running(state['id'], draining=True) for state in active):
+        if time.monotonic() >= deadline:
+            raise ValueError('stop timeout')
+        time.sleep(1)
+
+if mode != 'guard':
+    try:
+        if mode in ('status', 'check'):
+            print(json.dumps(snapshot(mode == 'check')))
+        elif mode == 'stop':
+            stop(saved_snapshot())
+        elif mode == 'restore':
+            restore(saved_snapshot())
+        else:
+            raise ValueError('mode')
+    except Exception:
+        print('ERROR: Authoritative instance shutdown operation could not be completed safely.', file=sys.stderr)
+        raise SystemExit(1)
+    raise SystemExit(0)
 
 try:
     if not os.path.lexists(root):
@@ -95,6 +246,9 @@ except Exception:
     print('WARNING: Instance shutdown discovery was unavailable; normal graceful shutdown delays are preserved.', flush=True)
 PY
 status=$?
+if [[ ${mode} != guard ]]; then
+    exit "${status}"
+fi
 if (( status != 0 )); then
     echo 'WARNING: Instance shutdown preparation exceeded its safety window; normal graceful shutdown continues.' >&2
 fi

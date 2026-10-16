@@ -1,7 +1,6 @@
 [Unit]
 Description=JustVoxel Minecraft host shutdown guard
 Documentation=https://github.com/home-server-project/justvoxel
-After=minecraft.service
 Before=shutdown.target
 
 [Service]

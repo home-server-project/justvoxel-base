@@ -165,11 +165,17 @@ grep -Fq 'preserving the normal container shutdown delay' /tmp/jv-host-shutdown-
 
 guard_unit="${repo_root}/system_files/usr/lib/systemd/system/justvoxel-minecraft-shutdown-guard.service"
 guard_script="${repo_root}/mjust/libexec/host-shutdown-guard"
-grep -Fqx 'After=minecraft.service' "${guard_unit}" || fail 'shutdown guard is not ordered after minecraft.service for reverse shutdown ordering'
+if grep -Fq 'minecraft.service' "${guard_unit}"; then
+    fail 'shutdown guard still references the fixed minecraft.service unit'
+fi
+grep -Fqx 'Before=shutdown.target' "${guard_unit}" || fail 'shutdown guard is not ordered before shutdown.target'
 grep -Fqx 'ExecStop=/usr/libexec/justvoxel/mjust/host-shutdown-guard' "${guard_unit}" || fail 'shutdown guard ExecStop is not wired to the helper'
 grep -Fqx 'WantedBy=multi-user.target' "${guard_unit}" || fail 'shutdown guard is not enabled from multi-user.target'
 grep -Fq 'systemctl is-system-running' "${guard_script}" || fail 'shutdown guard does not distinguish host shutdown from manual service stop'
-grep -Fq 'jv_prepare_minecraft_for_host_shutdown' "${guard_script}" || fail 'shutdown guard does not call the adaptive host-shutdown helper'
+grep -Fqx '/usr/libexec/justvoxel/mjust/instance-host-shutdown-prepare' "${guard_script}" || fail 'shutdown guard does not call the instance host-shutdown helper'
+if grep -Fq 'jv_prepare_minecraft_for_host_shutdown' "${guard_script}"; then
+    fail 'shutdown guard still calls the legacy adaptive host-shutdown helper'
+fi
 
 rm -f /tmp/jv-host-shutdown-unknown.out
 echo 'adaptive Minecraft shutdown tests passed.'

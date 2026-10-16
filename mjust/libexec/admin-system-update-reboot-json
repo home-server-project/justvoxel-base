@@ -2,22 +2,12 @@
 set -euo pipefail
 
 source /usr/libexec/justvoxel/mjust/common.sh
-source /usr/libexec/justvoxel/mjust/interrupt-safety.sh
+readonly shutdown_helper=/usr/libexec/justvoxel/mjust/instance-host-shutdown-prepare
 require_root
 
 readonly state_file="/run/justvoxel/system-update-reboot.json"
 readonly worker="/usr/libexec/justvoxel/system-update-reboot-worker"
 readonly unit_name="justvoxel-update-reboot"
-
-player_names_json() {
-    local raw="$1" names
-    names="${raw#*:}"
-    if [[ ${names} == "${raw}" ]]; then
-        printf '[]'
-        return
-    fi
-    printf '%s\n' "${names}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | jq -Rsc 'split("\n") | map(select(length > 0))'
-}
 
 emit_state() {
     if [[ -r ${state_file} ]] && jq -e 'type == "object" and (.ok == true) and (.state | type == "string")' "${state_file}" >/dev/null 2>&1; then
@@ -34,7 +24,7 @@ emit_error() {
 
 request_reboot() {
     local confirm_players=no backup_minecraft=no warning_seconds=60
-    local was_active=no players='' online=0 players_json='[]'
+    local instances online=0 players_json='[]'
 
     shift
     while (( $# > 0 )); do
@@ -56,30 +46,23 @@ request_reboot() {
         return 2
     fi
 
-    if systemctl is-active --quiet minecraft.service 2>/dev/null; then
-        was_active=yes
-        players="$(jv_player_list_raw 2>/dev/null || true)"
-        if [[ -z ${players} ]]; then
-            emit_error player_status_unavailable 'Could not confirm Minecraft player status through RCON.'
-            return 3
-        fi
-        online="$(jv_player_online_count "${players}" 2>/dev/null || true)"
-        if [[ ! ${online} =~ ^[0-9]+$ ]]; then
-            emit_error player_status_unavailable 'Could not parse Minecraft player status through RCON.'
-            return 3
-        fi
-        players_json="$(player_names_json "${players}")"
-        if (( online > 0 )) && [[ ${confirm_players} != yes ]]; then
-            jq -cn --argjson online "${online}" --argjson players "${players_json}" --argjson warning "${warning_seconds}" --argjson backup "$([[ ${backup_minecraft} == yes ]] && echo true || echo false)"                 '{ok:false,state:"confirmation_required",accepted:false,confirmation_required:true,reason:"players_online",online:$online,players:$players,warning_seconds:$warning,backup_minecraft:$backup}'
-            return 10
-        fi
+    if ! instances="$("${shutdown_helper}" check)"; then
+        emit_error player_status_unavailable 'Could not confirm Minecraft player status through RCON.'
+        return 3
+    fi
+    online="$(jq '.online' <<<"${instances}")"
+    players_json="$(jq '.players' <<<"${instances}")"
+    if (( online > 0 )) && [[ ${confirm_players} != yes ]]; then
+        jq -cn --argjson online "${online}" --argjson players "${players_json}" --argjson warning "${warning_seconds}" --argjson backup "$([[ ${backup_minecraft} == yes ]] && echo true || echo false)" \
+            '{ok:false,state:"confirmation_required",accepted:false,confirmation_required:true,reason:"players_online",online:$online,players:$players,warning_seconds:$warning,backup_minecraft:$backup}'
+        return 10
     fi
 
     install -d -m0755 /run/justvoxel
     jq -cn --argjson warning "${warning_seconds}" --argjson backup "$([[ ${backup_minecraft} == yes ]] && echo true || echo false)"         '{ok:true,state:"queued",accepted:true,confirmation_required:false,warning_seconds:$warning,backup_minecraft:$backup}' > "${state_file}.tmp"
     mv -f "${state_file}.tmp" "${state_file}"
 
-    if ! systemd-run --quiet --collect --unit="${unit_name}"         --setenv="JV_UPDATE_REBOOT_BACKUP=${backup_minecraft}"         --setenv="JV_UPDATE_REBOOT_WARNING_SECONDS=${warning_seconds}"         --setenv="JV_UPDATE_REBOOT_WAS_ACTIVE=${was_active}"         "${worker}"; then
+    if ! systemd-run --quiet --collect --unit="${unit_name}"         --setenv="JV_UPDATE_REBOOT_BACKUP=${backup_minecraft}"         --setenv="JV_UPDATE_REBOOT_WARNING_SECONDS=${warning_seconds}"         "${worker}"; then
         jq -cn '{ok:true,state:"failed",accepted:false,confirmation_required:false,reason:"action_failed",message:"System update reboot workflow could not be started."}' > "${state_file}.tmp"
         mv -f "${state_file}.tmp" "${state_file}"
         emit_error action_failed 'System update reboot workflow could not be started.'
