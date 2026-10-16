@@ -124,7 +124,7 @@ func (b *instanceRuntimeBackend) stopWithWarnings(ctx context.Context, id string
 
 func registerInstanceMaintenanceRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("GET /v1/minecraft/instances/{id}/players", s.instanceMaintenanceRead)
-	mux.HandleFunc("GET /v1/minecraft/instances/{id}/logs", s.instanceMaintenanceRead)
+	mux.HandleFunc("GET /v1/minecraft/instances/{id}/logs", s.minecraftLogs)
 	mux.HandleFunc("GET /v1/minecraft/instances/{id}/version", s.instanceMaintenanceRead)
 	mux.HandleFunc("POST /v1/minecraft/instances/{id}/console", s.instanceConsole)
 	mux.HandleFunc("POST /v1/minecraft/instances/{id}/version/verify", s.instanceVersionVerify)
@@ -161,12 +161,6 @@ func (s *server) instanceMaintenanceRead(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusOK, p)
 		return
 	}
-	out, err := instanceRuntimes.command(ctx, "journalctl", "--unit=minecraft-"+id+".service", "--lines=100", "--output=cat", "--no-pager", "--quiet")
-	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "Instance logs are unavailable.")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": id, "logs": instanceDiagnosticText(out, record.Runtime.RCONPassword)})
 }
 func instanceDiagnosticText(out []byte, secret string) string {
 	text := strings.ToValidUTF8(string(out), "?")

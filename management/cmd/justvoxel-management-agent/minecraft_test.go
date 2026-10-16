@@ -124,7 +124,6 @@ func TestLocalRootCanControlMinecraftWithoutBearerSession(t *testing.T) {
 	}{
 		{action: "start", call: s.minecraftStart},
 		{action: "stop", call: s.minecraftStop},
-		{action: "restart", call: s.minecraftRestart},
 	}
 
 	for _, tc := range tests {
@@ -141,44 +140,6 @@ func TestLocalRootCanControlMinecraftWithoutBearerSession(t *testing.T) {
 				t.Fatalf("local root %s failed: %d %s", tc.action, rr.Code, rr.Body.String())
 			}
 		})
-	}
-}
-
-func TestLocalRootRestartStillRequiresExplicitPlayerConfirmation(t *testing.T) {
-	s := &server{sessions: make(map[string]session)}
-	oldRunner := runWebHelper
-	defer func() { runWebHelper = oldRunner }()
-
-	callCount := 0
-	runWebHelper = func(_ context.Context, args ...string) ([]byte, int, error) {
-		callCount++
-		switch callCount {
-		case 1:
-			if len(args) != 1 || args[0] != "restart" {
-				t.Fatalf("unexpected initial helper args: %#v", args)
-			}
-			return []byte(`{"ok":false,"action":"restart","confirmation_required":true,"reason":"players_online","players":["Alex"],"online":1}`), 10, errors.New("confirmation required")
-		case 2:
-			if len(args) != 2 || args[0] != "restart" || args[1] != "--confirm-players" {
-				t.Fatalf("unexpected confirmed helper args: %#v", args)
-			}
-			return []byte(`{"ok":true,"action":"restart","message":"Minecraft restart requested."}`), 0, nil
-		default:
-			t.Fatalf("unexpected helper call %d", callCount)
-			return nil, 0, nil
-		}
-	}
-
-	rr := httptest.NewRecorder()
-	s.minecraftRestart(rr, localRootMinecraftRequest(http.MethodPost, "http://unix/v1/minecraft/restart", `{}`))
-	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"confirmation_required":true`) {
-		t.Fatalf("local root restart did not require player confirmation: %d %s", rr.Code, rr.Body.String())
-	}
-
-	rr = httptest.NewRecorder()
-	s.minecraftRestart(rr, localRootMinecraftRequest(http.MethodPost, "http://unix/v1/minecraft/restart", `{"confirm_players":true}`))
-	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"ok":true`) {
-		t.Fatalf("confirmed local root restart failed: %d %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -207,7 +168,6 @@ func TestViewerCanReadPlayersButCannotMutateMinecraft(t *testing.T) {
 	}{
 		{"/v1/minecraft/start", s.minecraftStart},
 		{"/v1/minecraft/stop", s.minecraftStop},
-		{"/v1/minecraft/restart", s.minecraftRestart},
 	} {
 		rr = httptest.NewRecorder()
 		action.call(rr, authorizedRequest(http.MethodPost, action.path, `{}`))
@@ -241,7 +201,6 @@ func TestOperatorStartAllowedStopAndRestartClosedUntilQuotaLayer(t *testing.T) {
 		call func(http.ResponseWriter, *http.Request)
 	}{
 		{"/v1/minecraft/stop", s.minecraftStop},
-		{"/v1/minecraft/restart", s.minecraftRestart},
 	} {
 		rr = httptest.NewRecorder()
 		action.call(rr, authorizedRequest(http.MethodPost, action.path, `{}`))
@@ -264,45 +223,6 @@ func TestMinecraftStartUsesAllowlistedAction(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	s.minecraftStart(rr, authorizedRequest(http.MethodPost, "http://unix/v1/minecraft/start", `{}`))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-}
-
-func TestMinecraftRestartRequiresExplicitPlayerConfirmation(t *testing.T) {
-	s := adminServerForTest()
-	oldRunner := runWebHelper
-	runWebHelper = func(_ context.Context, args ...string) ([]byte, int, error) {
-		if len(args) != 1 || args[0] != "restart" {
-			t.Fatalf("unexpected helper args: %#v", args)
-		}
-		return []byte(`{"ok":false,"action":"restart","confirmation_required":true,"reason":"players_online","players":["Alex","Steve"],"online":2}`), 10, errors.New("confirmation required")
-	}
-	defer func() { runWebHelper = oldRunner }()
-
-	rr := httptest.NewRecorder()
-	s.minecraftRestart(rr, authorizedRequest(http.MethodPost, "http://unix/v1/minecraft/restart", `{}`))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200 confirmation response, got %d", rr.Code)
-	}
-	if !strings.Contains(rr.Body.String(), `"confirmation_required":true`) {
-		t.Fatalf("missing confirmation response: %s", rr.Body.String())
-	}
-}
-
-func TestMinecraftConfirmedRestartUsesOnlyConfirmationFlag(t *testing.T) {
-	s := adminServerForTest()
-	oldRunner := runWebHelper
-	runWebHelper = func(_ context.Context, args ...string) ([]byte, int, error) {
-		if len(args) != 2 || args[0] != "restart" || args[1] != "--confirm-players" {
-			t.Fatalf("unexpected helper args: %#v", args)
-		}
-		return []byte(`{"ok":true,"action":"restart","message":"Minecraft restart requested."}`), 0, nil
-	}
-	defer func() { runWebHelper = oldRunner }()
-
-	rr := httptest.NewRecorder()
-	s.minecraftRestart(rr, authorizedRequest(http.MethodPost, "http://unix/v1/minecraft/restart", `{"confirm_players":true}`))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -331,5 +251,15 @@ func TestMinecraftRoutesDoNotExposeArbitraryActions(t *testing.T) {
 	mux.ServeHTTP(rr, authorizedRequest(http.MethodPost, "http://unix/v1/minecraft/shell", `{}`))
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for unregistered action, got %d", rr.Code)
+	}
+}
+
+func TestGlobalMinecraftRestartRouteRetired(t *testing.T) {
+	mux := http.NewServeMux()
+	registerMinecraftRoutes(mux, adminServerForTest())
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, authorizedRequest("POST", "/v1/minecraft/restart", `{}`))
+	if rr.Code != http.StatusNotFound {
+		t.Fatal(rr.Code, rr.Body.String())
 	}
 }

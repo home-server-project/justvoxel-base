@@ -304,7 +304,7 @@ func TestInstanceMaintenanceAuthenticationAndBounds(t *testing.T) {
 	base := f.backend.command
 	f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
 		if command == "journalctl" {
-			if args[0] != "--unit=minecraft-"+id+".service" {
+			if len(args) != 7 || args[1] != "-u" || args[2] != "minecraft-"+id+".service" {
 				t.Fatal("wrong log target")
 			}
 			return []byte("RCON_PASSWORD=" + secret + "\nServer ready"), nil
@@ -396,12 +396,32 @@ func TestIndependentRestartQuotaCooldownAndAudit(t *testing.T) {
 		return rr
 	}
 	f.players = "There are 1 of a max of 20 players online: Alex"
-	if rr := restart(a); rr.Code != http.StatusConflict {
-		t.Fatal("operator interrupted occupied instance", rr.Code)
+	confirmationCalls := len(f.calls)
+	if rr := restart(a); rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"confirmation_required":true`) || !strings.Contains(rr.Body.String(), `"reason":"players_online"`) {
+		t.Fatal("online-player confirmation missing", rr.Code, rr.Body.String())
 	}
-	used, _, err := store.operatorRestartUsage(user.ID)
-	if err != nil || used != 0 {
-		t.Fatal("refusal consumed quota", used, err)
+	used, last, err := store.operatorRestartUsage(user.ID)
+	if err != nil || used != 0 || last != nil {
+		t.Fatal("online-player confirmation consumed quota or advanced cooldown", used, last, err)
+	}
+	var globalLast string
+	if err = store.db.QueryRow(`SELECT COALESCE(last_restart_at, '') FROM operator_global_state WHERE id=1`).Scan(&globalLast); err != nil || globalLast != "" {
+		t.Fatal("online-player confirmation advanced global cooldown", globalLast, err)
+	}
+	var confirmationAudits int
+	if err = store.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE action = 'minecraft_restart' AND success = 1`).Scan(&confirmationAudits); err != nil || confirmationAudits != 0 {
+		t.Fatal("online-player confirmation wrote successful restart audit", confirmationAudits, err)
+	}
+	for _, call := range f.calls[confirmationCalls:] {
+		if strings.Contains(call, "say Server shutting down") || strings.HasPrefix(call, "systemctl ") && !strings.HasPrefix(call, "systemctl show ") {
+			t.Fatal("online-player confirmation executed restart", call)
+		}
+		if strings.Contains(call, "minecraft-"+b) {
+			t.Fatal("online-player confirmation touched sibling instance", call)
+		}
+	}
+	if f.states[a] != "active" || f.containers[a] != "running" || f.states[b] != "active" || f.containers[b] != "running" {
+		t.Fatal("online-player confirmation changed running instance state")
 	}
 	f.players = "There are 0 of a max of 20 players online:"
 	if rr := restart(a); rr.Code != http.StatusOK {
@@ -412,22 +432,67 @@ func TestIndependentRestartQuotaCooldownAndAudit(t *testing.T) {
 		t.Fatal("accepted restart did not consume quota", used, err)
 	}
 	before := len(f.calls)
-	if rr := restart(b); rr.Code != http.StatusConflict {
-		t.Fatal("other instance bypassed cooldown", rr.Code)
+	rr := restart(b)
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("other instance bypassed global cooldown: status=%d body=%q headers=%v", rr.Code, rr.Body.Bytes(), rr.Header())
+	}
+	if rr.Header().Get("Retry-After") == "" {
+		t.Fatalf("cooldown response missing Retry-After: status=%d body=%q headers=%v", rr.Code, rr.Body.Bytes(), rr.Header())
+	}
+	var cooldown struct {
+		Reason            string `json:"reason"`
+		RestartUsed       int    `json:"restart_used"`
+		RestartLimit      int    `json:"restart_limit"`
+		RetryAfterSeconds int    `json:"retry_after_seconds"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &cooldown); err != nil {
+		t.Fatalf("decode cooldown response: %v; status=%d body=%q headers=%v", err, rr.Code, rr.Body.Bytes(), rr.Header())
+	}
+	if cooldown.Reason != "restart_cooldown" || cooldown.RestartUsed != 1 || cooldown.RestartLimit != operatorRestartLimit || cooldown.RetryAfterSeconds <= 0 {
+		t.Fatalf("incorrect cooldown response: %+v; status=%d body=%q headers=%v", cooldown, rr.Code, rr.Body.Bytes(), rr.Header())
 	}
 	if len(f.calls) != before {
 		t.Fatal("cooldown invoked instance commands")
 	}
+	used, last, err = store.operatorRestartUsage(user.ID)
+	if err != nil || used != 1 || last == nil || !last.Equal(now) {
+		t.Fatal("cooldown rejection changed allowance or restart time", used, last, err)
+	}
+	if f.states[a] != "active" || f.containers[a] != "running" || f.states[b] != "active" || f.containers[b] != "running" {
+		t.Fatal("cooldown rejection changed running instance state")
+	}
 	var audited int
-	if err = store.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE action = 'minecraft_restart' AND target = ?`, "minecraft-"+a+".service").Scan(&audited); err != nil {
+	if err = store.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE action = 'minecraft_restart' AND target = ? AND success = 1`, b).Scan(&audited); err != nil || audited != 0 {
+		t.Fatal("cooldown rejection wrote successful restart audit", audited, err)
+	}
+	if err = store.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE action = 'minecraft_restart' AND target = ? AND success = 1`, a).Scan(&audited); err != nil {
 		t.Fatal(err)
 	}
 	if audited != 1 {
 		t.Fatal("restart target audit missing", audited)
 	}
-	now = now.Add(16 * time.Minute)
-	if rr := restart(b); rr.Code != http.StatusOK {
+	// Cooldown is global even though execution and audit target the selected ID.
+	now = now.Add(operatorRestartCooldown + time.Minute)
+	if rr := restart(b); rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"id":"`+b+`"`) {
 		t.Fatal(rr.Code, rr.Body.String())
+	}
+	for _, call := range f.calls[before:] {
+		if strings.Contains(call, "minecraft-"+a) {
+			t.Fatal("selected restart touched sibling instance", call)
+		}
+	}
+	if !strings.Contains(strings.Join(f.calls[before:], "\n"), "systemctl --no-block start -- minecraft-"+b+".service") {
+		t.Fatal("selected restart did not start selected instance")
+	}
+	if f.states[a] != "active" || f.containers[a] != "running" || f.states[b] != "active" || f.containers[b] != "running" {
+		t.Fatal("selected restart changed sibling state or left selected instance stopped")
+	}
+	used, _, err = store.operatorRestartUsage(user.ID)
+	if err != nil || used != 2 {
+		t.Fatal("selected restart did not consume global operator allowance", used, err)
+	}
+	if err = store.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE action = 'minecraft_restart' AND target = ? AND success = 1`, b).Scan(&audited); err != nil || audited != 1 {
+		t.Fatal("selected restart target audit missing", audited, err)
 	}
 	now = now.Add(16 * time.Minute)
 	if rr := restart(a); rr.Code != http.StatusConflict {

@@ -67,27 +67,28 @@ type dashboardOperationAPI interface {
 }
 
 type pageData struct {
-	ConnectionGuide  *connectionGuide
-	Title            string
-	Version          string
-	Commit           string
-	ManagementAPI    string
-	Error            string
-	Message          string
-	CSRF             string
-	Username         string
-	Status           api.Status
-	Players          api.Players
-	PendingAction    string
-	ConfirmAction    string
-	ConfirmLabel     string
-	ConfirmOperation string
-	ConfirmProgress  string
-	ConfirmOnline    int
-	ConfirmPlayers   []string
-	Administrator    bool
-	InstanceRequired bool
-	Attention        *dashboardAttention
+	ConnectionGuide     *connectionGuide
+	Title               string
+	Version             string
+	Commit              string
+	ManagementAPI       string
+	Error               string
+	Message             string
+	CSRF                string
+	Username            string
+	Status              api.Status
+	Players             api.Players
+	PendingAction       string
+	SelectedMinecraftID string
+	ConfirmAction       string
+	ConfirmLabel        string
+	ConfirmOperation    string
+	ConfirmProgress     string
+	ConfirmOnline       int
+	ConfirmPlayers      []string
+	Administrator       bool
+	InstanceRequired    bool
+	Attention           *dashboardAttention
 }
 
 type dashboardSnapshot struct {
@@ -308,6 +309,7 @@ func (a *App) dashboard(w http.ResponseWriter, r *http.Request) {
 		a.handleDashboardError(w, r, err)
 		return
 	}
+	data.SelectedMinecraftID = r.URL.Query().Get("server")
 	result := r.URL.Query().Get("result")
 	data.Message = actionResultMessage(result)
 	data.PendingAction = pendingAction(result)
@@ -357,7 +359,44 @@ func (a *App) minecraftAction(action string) http.HandlerFunc {
 			return
 		}
 		confirmPlayers := r.FormValue("confirm_players") == "yes"
-		result, actionErr := a.api.MinecraftAction(r.Context(), session, action, confirmPlayers)
+		var result api.MinecraftActionResponse
+		var actionErr error
+		selectedID := ""
+		if action == "restart" {
+			// Reuse the authoritative resolver; a confirmation form carries the
+			// resolved identity rather than resolving a new selection on retry.
+			selectionRequest := r.Clone(r.Context())
+			selectionURL := *r.URL
+			selectionRequest.URL = &selectionURL
+			if values, exists := r.PostForm["server"]; exists {
+				if len(values) != 1 || !addServerIDPattern.MatchString(values[0]) {
+					http.Error(w, "Invalid server selection.", http.StatusBadRequest)
+					return
+				}
+				query := selectionURL.Query()
+				if existing, exists := query["server"]; exists && (len(existing) != 1 || existing[0] != values[0]) {
+					http.Error(w, "Invalid server selection.", http.StatusBadRequest)
+					return
+				}
+				query.Set("server", values[0])
+				selectionURL.RawQuery = query.Encode()
+			}
+			selected, ok := a.selectedMinecraft(w, selectionRequest, session)
+			if !ok {
+				return
+			}
+			selectedID = selected.ID
+			client, ok := a.api.(interface {
+				MinecraftInstanceActionConfirmed(context.Context, string, string, string, bool) (api.MinecraftActionResponse, error)
+			})
+			if !ok {
+				http.Error(w, "Minecraft control is unavailable.", http.StatusServiceUnavailable)
+				return
+			}
+			result, actionErr = client.MinecraftInstanceActionConfirmed(r.Context(), session, selectedID, action, confirmPlayers)
+		} else {
+			result, actionErr = a.api.MinecraftAction(r.Context(), session, action, confirmPlayers)
+		}
 		if errors.Is(actionErr, api.ErrUnauthorized) {
 			a.clearSessionCookies(w)
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
@@ -373,6 +412,7 @@ func (a *App) minecraftAction(action string) http.HandlerFunc {
 				a.handleDashboardError(w, r, err)
 				return
 			}
+			data.SelectedMinecraftID = selectedID
 			data.ConfirmAction = action
 			data.ConfirmLabel = actionLabel(action)
 			data.ConfirmOperation = actionOperation(action)
@@ -388,6 +428,7 @@ func (a *App) minecraftAction(action string) http.HandlerFunc {
 				a.handleDashboardError(w, r, err)
 				return
 			}
+			data.SelectedMinecraftID = selectedID
 			if result.Message != "" {
 				data.Error = result.Message
 			} else {
@@ -397,7 +438,11 @@ func (a *App) minecraftAction(action string) http.HandlerFunc {
 			a.render(w, "dashboard.html", data)
 			return
 		}
-		http.Redirect(w, r, "/?result="+action, http.StatusSeeOther)
+		destination := "/?result=" + action
+		if selectedID != "" {
+			destination += "&server=" + selectedID
+		}
+		http.Redirect(w, r, destination, http.StatusSeeOther)
 	}
 }
 

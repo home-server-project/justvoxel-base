@@ -16,8 +16,8 @@ var runWhitelistHelper = func(ctx context.Context, args ...string) ([]byte, erro
 	return exec.CommandContext(ctx, whitelistHelper, args...).CombinedOutput()
 }
 
-var readMinecraftLogs = func(ctx context.Context, limit int, outputMode string) ([]byte, error) {
-	return exec.CommandContext(ctx, "journalctl", "--no-pager", "-u", "minecraft.service", "-n", strconv.Itoa(limit), "-o", outputMode).CombinedOutput()
+var readMinecraftLogs = func(ctx context.Context, unit string, limit int, outputMode string) ([]byte, error) {
+	return instanceRuntimes.command(ctx, "journalctl", "--no-pager", "-u", unit, "-n", strconv.Itoa(limit), "-o", outputMode)
 }
 
 type publicActivityView struct {
@@ -29,7 +29,6 @@ type publicActivityView struct {
 func registerOperationalRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("GET /v1/minecraft/instances/{id}/whitelist", s.whitelistList)
 	mux.HandleFunc("POST /v1/minecraft/instances/{id}/whitelist", s.whitelistChange)
-	mux.HandleFunc("GET /v1/logs/minecraft", s.minecraftLogs)
 	mux.HandleFunc("GET /v1/activity", s.publicActivity)
 }
 
@@ -194,6 +193,15 @@ func (s *server) minecraftLogs(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.requireRoles(w, r, roleAdministrator, roleOperator); !ok {
 		return
 	}
+	id, ok := instanceRequestID(w, r)
+	if !ok {
+		return
+	}
+	record, err := instanceRuntimes.readRecord(id)
+	if err != nil {
+		instanceRuntimeError(w, err, id)
+		return
+	}
 	limit := boundedQueryLimit(r, 100, 200)
 	outputMode := "short-iso"
 	switch strings.TrimSpace(r.URL.Query().Get("format")) {
@@ -206,12 +214,18 @@ func (s *server) minecraftLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	output, err := readMinecraftLogs(ctx, limit, outputMode)
+	state, err := instanceRuntimes.observe(ctx, id)
+	if err != nil || (state.State != "running" && state.State != "stopped" && state.State != "configured" && state.State != "failed") {
+		writeError(w, http.StatusConflict, "Instance runtime is unavailable.")
+		return
+	}
+	output, err := readMinecraftLogs(ctx, "minecraft-"+id+".service", limit, outputMode)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "Minecraft logs are unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"lines": strings.Split(strings.TrimRight(string(output), "\n"), "\n")})
+	text := instanceDiagnosticText(output, record.Runtime.RCONPassword)
+	writeJSON(w, http.StatusOK, map[string]any{"id": id, "logs": text, "lines": strings.Split(strings.TrimRight(text, "\n"), "\n")})
 }
 
 func (s *server) publicActivity(w http.ResponseWriter, r *http.Request) {

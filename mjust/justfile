@@ -15,14 +15,14 @@ configure-max-players:
 status:
     @sudo /usr/libexec/justvoxel/mjust/status
 
-start:
-    @sudo /usr/libexec/justvoxel/mjust/service start
+start instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/service start --instance "{{instance_id}}"; else sudo /usr/libexec/justvoxel/mjust/service start; fi
 
-stop:
-    @sudo /usr/libexec/justvoxel/mjust/service stop
+stop instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/service stop --instance "{{instance_id}}"; else sudo /usr/libexec/justvoxel/mjust/service stop; fi
 
-restart:
-    @sudo /usr/libexec/justvoxel/mjust/service restart
+restart instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/service restart --instance "{{instance_id}}"; else sudo /usr/libexec/justvoxel/mjust/service restart; fi
 
 players instance_id="":
     @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/players --instance "{{instance_id}}" ; else sudo /usr/libexec/justvoxel/mjust/players ; fi
@@ -63,8 +63,8 @@ migration-recover transaction="":
 update-minecraft instance_id="":
     @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/update-minecraft --instance "{{instance_id}}" ; else sudo /usr/libexec/justvoxel/mjust/update-minecraft ; fi
 
-logs:
-    @sudo /usr/libexec/justvoxel/mjust/logs
+logs instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/logs --instance "{{instance_id}}"; else sudo /usr/libexec/justvoxel/mjust/logs; fi
 
 validate:
     @sudo /usr/libexec/justvoxel/mjust/validate

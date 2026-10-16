@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"regexp"
 	"time"
 )
 
@@ -136,9 +137,25 @@ func (c *Client) MinecraftAction(ctx context.Context, session, action string, co
 	return c.doMinecraftAction(ctx, path, session, body)
 }
 
-func minecraftActionPath(action string) (string, error) {
+// Confirmation always carries the immutable selection; no global restart path.
+func (c *Client) MinecraftInstanceActionConfirmed(ctx context.Context, session, id, action string, confirmPlayers bool) (MinecraftActionResponse, error) {
+	if !minecraftSelectedIDPattern.MatchString(id) {
+		return MinecraftActionResponse{}, fmt.Errorf("invalid Minecraft instance ID")
+	}
 	switch action {
 	case "start", "stop", "restart":
+	default:
+		return MinecraftActionResponse{}, fmt.Errorf("unsupported Minecraft action")
+	}
+	client := *c.http
+	client.Timeout = 310 * time.Second
+	caller := &Client{http: &client}
+	return caller.doMinecraftAction(ctx, "/v1/minecraft/instances/"+id+"/"+action, session, map[string]bool{"confirm_players": confirmPlayers})
+}
+
+func minecraftActionPath(action string) (string, error) {
+	switch action {
+	case "start", "stop":
 		return "/v1/minecraft/" + action, nil
 	default:
 		return "", fmt.Errorf("unsupported Minecraft action %q", action)
@@ -269,3 +286,5 @@ func (c *Client) SaveMinecraftIdentity(ctx context.Context, session, suffix stri
 	}{Suffix: suffix}, &out)
 	return out, err
 }
+
+var minecraftSelectedIDPattern = regexp.MustCompile(`^jv-[a-z0-9]{6,12}$`)

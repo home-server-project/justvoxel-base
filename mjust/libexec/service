@@ -12,16 +12,29 @@ action="${1:-}"
 case "${action}" in
     start|stop|restart) ;;
     *)
-        echo 'Usage: service {start|stop|restart}' >&2
+        echo 'Usage: service {start|stop|restart} [--instance jv-...]' >&2
         exit 2
         ;;
 esac
+
+shift
+instance_id=""
+if [[ ${1:-} == --instance && $# == 2 ]]; then instance_id=$2
+elif [[ $# == 1 ]]; then instance_id=$1
+elif (( $# != 0 )); then echo 'Usage: service {start|stop|restart} [--instance jv-...]' >&2; exit 2; fi
+if (( $# > 0 )) && [[ -z ${instance_id} ]]; then
+    echo 'ERROR: invalid Minecraft server ID.' >&2
+    exit 2
+fi
+source /usr/libexec/justvoxel/mjust/instance-selection.sh
+instance_id="$(jv_select_registered_instance "${instance_id}")" || exit 1
+readonly instance_id
 
 api_action() {
     local confirm_players="${1:-false}" response rc message
 
     set +e
-    response="$(printf '{"confirm_players":%s}\n' "${confirm_players}" | "${api_client}" POST "/v1/minecraft/${action}" --data)"
+    response="$(printf '{"confirm_players":%s}\n' "${confirm_players}" | "${api_client}" POST "/v1/minecraft/instances/${instance_id}/${action}" --data)"
     rc=$?
     set -e
 

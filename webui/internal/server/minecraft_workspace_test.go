@@ -65,7 +65,7 @@ func (f *fakeMinecraftWorkspaceAPI) WhitelistChange(_ context.Context, session, 
 	return f.whitelistChange, nil
 }
 
-func (f *fakeMinecraftWorkspaceAPI) MinecraftLogs(_ context.Context, session string, limit int) (api.LogsResponse, error) {
+func (f *fakeMinecraftWorkspaceAPI) MinecraftLogs(_ context.Context, session, id string, limit int) (api.LogsResponse, error) {
 	if session != "session-token" {
 		return api.LogsResponse{}, api.ErrUnauthorized
 	}

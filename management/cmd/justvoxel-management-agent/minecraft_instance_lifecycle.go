@@ -172,6 +172,16 @@ func (b *instanceRuntimeBackend) observe(ctx context.Context, id string) (instan
 	}
 	return raw, nil
 }
+
+type instancePlayersConfirmation struct {
+	Players instancePlayers
+	Names   []string
+}
+
+func (e *instancePlayersConfirmation) Error() string {
+	return "Players are online; explicit interruption confirmation is required."
+}
+
 func (b *instanceRuntimeBackend) action(ctx context.Context, id, action string) error {
 	return b.actionWithWarnings(ctx, id, action, false)
 }
@@ -221,12 +231,17 @@ func (b *instanceRuntimeBackend) actionWithWarnings(ctx context.Context, id, act
 	if action == "stop" || action == "restart" {
 		switch state.State {
 		case "running":
-			players, err := b.players(ctx, id)
+			rawPlayers, err := b.rcon(ctx, id, "list")
+			if err != nil {
+				return err
+			}
+			players, err := parseInstancePlayers(id, rawPlayers)
 			if err != nil {
 				return err
 			}
 			if players.Online > 0 && !warnings {
-				return instanceRuntimeFailure("Players are online; administrator interruption with warnings is required.")
+				names := instancePlayerListPattern.FindStringSubmatch(strings.TrimSpace(string(rawPlayers)))[3]
+				return &instancePlayersConfirmation{Players: players, Names: strings.Split(names, ", ")}
 			}
 			if players.Online > 0 {
 				if err = b.stopWithWarnings(ctx, id); err != nil {

@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
+	"net/http"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -107,10 +110,6 @@ func (g *operatorRestartGuard) cancel() {
 	}
 	_ = g.tx.Rollback()
 	g.tx = nil
-}
-
-func (g *operatorRestartGuard) accept(actor session) (int, error) {
-	return g.acceptTarget(actor, "minecraft.service")
 }
 
 // Target is derived internally by the authenticated lifecycle handler.
@@ -255,4 +254,46 @@ func (s *webUIStore) operatorRestartUsage(userID int64) (int, *time.Time, error)
 		return 0, nil, err
 	}
 	return used, &parsed, nil
+}
+
+// Called only after the selected immutable identity has been validated.
+func (s *server) instanceOperatorRestartGuard(w http.ResponseWriter, sess session, id string) (*operatorRestartGuard, bool) {
+	guard, availability, err := s.store.beginOperatorRestart(sess.WebUserID)
+	if err != nil {
+		_ = s.store.recordAuditEvent(sess, "minecraft_restart", id, false, "operator restart eligibility check failed")
+		writeError(w, http.StatusServiceUnavailable, "operator restart allowance is unavailable")
+		return nil, false
+	}
+	if !availability.Allowed {
+		contextText := availability.Reason
+		_ = s.store.recordAuditEvent(sess, "minecraft_restart", id, false, contextText)
+		switch availability.Reason {
+		case "restart_limit_reached":
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":                        "restart allowance exhausted",
+				"reason":                       availability.Reason,
+				"restart_used":                 availability.Used,
+				"restart_limit":                availability.Limit,
+				"administrator_reset_required": true,
+			})
+		case "restart_cooldown":
+			seconds := int(math.Ceil(availability.RetryAfter.Seconds()))
+			if seconds < 1 {
+				seconds = 1
+			}
+			w.Header().Set("Retry-After", strconv.Itoa(seconds))
+			writeJSON(w, http.StatusTooManyRequests, map[string]any{
+				"error":               "restart cooldown active",
+				"reason":              availability.Reason,
+				"restart_used":        availability.Used,
+				"restart_limit":       availability.Limit,
+				"retry_after_seconds": seconds,
+			})
+		default:
+			writeError(w, http.StatusConflict, "operator restart is not currently available")
+		}
+		return nil, false
+	}
+
+	return guard, true
 }

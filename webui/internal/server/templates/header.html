@@ -113,6 +113,7 @@
                 </form>
                 <form method="post" action="/minecraft/restart" class="action-form role-admin-or-operator" data-progress="Restarting…" data-minecraft-action="restart">
                   <input type="hidden" name="csrf" value="{{.CSRF}}">
+                  {{if .SelectedMinecraftID}}<input type="hidden" name="server" value="{{.SelectedMinecraftID}}">{{end}}
                   <button type="submit">Restart</button>
                 </form>
               </div>

@@ -105,9 +105,12 @@ func (c *Client) ManualBackup(ctx context.Context, session string) (ManualBackup
 	return out, nil
 }
 
-func (c *Client) MinecraftLogs(ctx context.Context, session string, limit int) (LogsResponse, error) {
+func (c *Client) MinecraftLogs(ctx context.Context, session, id string, limit int) (LogsResponse, error) {
+	if !minecraftSelectedIDPattern.MatchString(id) {
+		return LogsResponse{}, fmt.Errorf("invalid Minecraft instance ID")
+	}
 	var out LogsResponse
-	err := c.do(ctx, http.MethodGet, fmt.Sprintf("/v1/logs/minecraft?limit=%d", limit), session, nil, &out)
+	err := c.do(ctx, http.MethodGet, fmt.Sprintf("/v1/minecraft/instances/%s/logs?limit=%d", id, limit), session, nil, &out)
 	return out, err
 }
 

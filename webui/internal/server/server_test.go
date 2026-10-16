@@ -406,11 +406,11 @@ func TestMinecraftRestartRendersPlayerConfirmation(t *testing.T) {
 	fake := &fakeAPI{actionResult: api.MinecraftActionResponse{
 		Action: "restart", ConfirmationRequired: true, Reason: "players_online", Online: 2, Players: []string{"Alex", "Steve"},
 	}}
-	app, err := New(fake, Config{Version: "1.0.0", ManagementAPI: "v1", ExternalScheme: "http"})
+	app, err := New(&dashboardRestartAPI{fakeAPI: fake}, Config{Version: "1.0.0", ManagementAPI: "v1", ExternalScheme: "http"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := actionRequest("http://example/minecraft/restart", "csrf=token")
+	req := actionRequest("http://example/minecraft/restart?server=jv-a1b2c3", "csrf=token")
 	rr := httptest.NewRecorder()
 	app.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -426,14 +426,14 @@ func TestMinecraftRestartRendersPlayerConfirmation(t *testing.T) {
 
 func TestMinecraftConfirmedRestartRedirectsAfterSuccess(t *testing.T) {
 	fake := &fakeAPI{actionResult: api.MinecraftActionResponse{OK: true, Action: "restart", Message: "Minecraft restart requested."}}
-	app, err := New(fake, Config{ExternalScheme: "http"})
+	app, err := New(&dashboardRestartAPI{fakeAPI: fake}, Config{ExternalScheme: "http"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := actionRequest("http://example/minecraft/restart", "csrf=token&confirm_players=yes")
+	req := actionRequest("http://example/minecraft/restart?server=jv-a1b2c3", "csrf=token&confirm_players=yes")
 	rr := httptest.NewRecorder()
 	app.Handler().ServeHTTP(rr, req)
-	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/?result=restart" {
+	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/?result=restart&server=jv-a1b2c3" {
 		t.Fatalf("unexpected result %d %q", rr.Code, rr.Header().Get("Location"))
 	}
 	if fake.action != "restart" || !fake.confirmed {
@@ -572,5 +572,41 @@ func TestPlayitInitialStylesMatchCSP(t *testing.T) {
 		if strings.Contains(style, "url(") || strings.Contains(style, "@import") {
 			t.Fatal("Initial styling must not wait for external resources")
 		}
+	}
+}
+
+// Two registered instances ensure the dashboard never guesses the first server.
+type dashboardRestartAPI struct {
+	*fakeAPI
+	selectedID string
+}
+
+func (f *dashboardRestartAPI) MinecraftInstances(context.Context, string) ([]api.RegisteredMinecraftInstance, error) {
+	return []api.RegisteredMinecraftInstance{{ID: "jv-a1b2c3"}, {ID: "jv-b1b2c3"}}, nil
+}
+func (f *dashboardRestartAPI) MinecraftInstanceRuntimes(context.Context, string) ([]string, error) {
+	return []string{"jv-a1b2c3", "jv-b1b2c3"}, nil
+}
+func (f *dashboardRestartAPI) MinecraftInstanceActionConfirmed(ctx context.Context, session, id, action string, confirm bool) (api.MinecraftActionResponse, error) {
+	f.selectedID = id
+	return f.fakeAPI.MinecraftAction(ctx, session, action, confirm)
+}
+
+func TestDashboardRestartConfirmationKeepsResolvedID(t *testing.T) {
+	fake := &dashboardRestartAPI{fakeAPI: &fakeAPI{actionResult: api.MinecraftActionResponse{Action: "restart", ConfirmationRequired: true, Reason: "players_online", Online: 1, Players: []string{"Alex"}}}}
+	app, err := New(fake, Config{ExternalScheme: "http"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, actionRequest("http://example/minecraft/restart?server=jv-b1b2c3", "csrf=token"))
+	if rr.Code != 200 || fake.selectedID != "jv-b1b2c3" || !strings.Contains(rr.Body.String(), `name="server" value="jv-b1b2c3"`) {
+		t.Fatal(rr.Code, fake.selectedID, rr.Body.String())
+	}
+	fake.actionResult = api.MinecraftActionResponse{OK: true, Action: "restart"}
+	rr = httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, actionRequest("http://example/minecraft/restart", "csrf=token&confirm_players=yes&server=jv-b1b2c3"))
+	if rr.Code != http.StatusSeeOther || fake.selectedID != "jv-b1b2c3" || !fake.confirmed {
+		t.Fatal(rr.Code, fake.selectedID, fake.confirmed)
 	}
 }

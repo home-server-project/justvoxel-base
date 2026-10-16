@@ -54,6 +54,7 @@
       <form method="post" action="/minecraft/{{.ConfirmAction}}" class="action-form" data-progress="{{.ConfirmProgress}}" data-minecraft-action="{{.ConfirmAction}}">
         <input type="hidden" name="csrf" value="{{.CSRF}}">
         <input type="hidden" name="confirm_players" value="yes">
+        {{if .SelectedMinecraftID}}<input type="hidden" name="server" value="{{.SelectedMinecraftID}}">{{end}}
         <button class="danger" type="submit">{{.ConfirmLabel}}</button>
       </form>
     </div>

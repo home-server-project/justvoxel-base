@@ -4,18 +4,24 @@ source /usr/libexec/justvoxel/mjust/ui.sh
 
 readonly api_client=/usr/libexec/justvoxel/mjust/api-client
 
-if (( $# > 0 )); then
-    echo 'Usage: logs' >&2
-    exit 2
-fi
-
 if (( EUID != 0 )); then
     echo 'ERROR: this operation must run as root.' >&2
     exit 1
 fi
 
+instance_id=""
+if [[ ${1:-} == --instance && $# == 2 ]]; then instance_id=$2
+elif [[ $# == 1 ]]; then instance_id=$1
+elif (( $# != 0 )); then echo 'Usage: logs [--instance jv-...]' >&2; exit 2; fi
+if (( $# > 0 )) && [[ -z ${instance_id} ]]; then
+    echo 'ERROR: invalid Minecraft server ID.' >&2
+    exit 2
+fi
+source /usr/libexec/justvoxel/mjust/instance-selection.sh
+instance_id="$(jv_select_registered_instance "${instance_id}")" || exit 1
+
 set +e
-response="$("${api_client}" GET '/v1/logs/minecraft?limit=100&format=cat')"
+response="$("${api_client}" GET "/v1/minecraft/instances/${instance_id}/logs?limit=100&format=cat")"
 rc=$?
 set -e
 

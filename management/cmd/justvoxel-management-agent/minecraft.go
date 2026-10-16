@@ -4,10 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"math"
 	"net/http"
 	"os/exec"
-	"strconv"
 	"time"
 )
 
@@ -22,6 +20,7 @@ type operatorRestartUsageView struct {
 }
 
 type minecraftActionResponse struct {
+	ID                   string                    `json:"id,omitempty"`
 	OK                   bool                      `json:"ok"`
 	Action               string                    `json:"action,omitempty"`
 	Message              string                    `json:"message,omitempty"`
@@ -63,7 +62,6 @@ func registerMinecraftRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("GET /v1/players", s.players)
 	mux.HandleFunc("POST /v1/minecraft/start", s.minecraftStart)
 	mux.HandleFunc("POST /v1/minecraft/stop", s.minecraftStop)
-	mux.HandleFunc("POST /v1/minecraft/restart", s.minecraftRestart)
 }
 
 func (s *server) players(w http.ResponseWriter, r *http.Request) {
@@ -92,99 +90,6 @@ func (s *server) minecraftStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.minecraftAction(w, r, "stop")
-}
-
-func (s *server) minecraftRestart(w http.ResponseWriter, r *http.Request) {
-	sess, ok := s.requireRoles(w, r, roleAdministrator, roleOperator)
-	if !ok {
-		return
-	}
-	if sess.Role == roleAdministrator {
-		s.minecraftAction(w, r, "restart")
-		return
-	}
-	if s.store == nil {
-		writeError(w, http.StatusForbidden, "operator restart controls are unavailable")
-		return
-	}
-	s.operatorMinecraftRestart(w, r, sess)
-}
-
-func (s *server) operatorMinecraftRestart(w http.ResponseWriter, r *http.Request, sess session) {
-	var request minecraftActionRequest
-	if !decodeJSON(w, r, &request) {
-		return
-	}
-
-	operatorRestartMu.Lock()
-	defer operatorRestartMu.Unlock()
-
-	guard, availability, err := s.store.beginOperatorRestart(sess.WebUserID)
-	if err != nil {
-		_ = s.store.recordAuditEvent(sess, "minecraft_restart", "minecraft.service", false, "operator restart eligibility check failed")
-		writeError(w, http.StatusServiceUnavailable, "operator restart allowance is unavailable")
-		return
-	}
-	if !availability.Allowed {
-		contextText := availability.Reason
-		_ = s.store.recordAuditEvent(sess, "minecraft_restart", "minecraft.service", false, contextText)
-		switch availability.Reason {
-		case "restart_limit_reached":
-			writeJSON(w, http.StatusConflict, map[string]any{
-				"error":                        "restart allowance exhausted",
-				"reason":                       availability.Reason,
-				"restart_used":                 availability.Used,
-				"restart_limit":                availability.Limit,
-				"administrator_reset_required": true,
-			})
-		case "restart_cooldown":
-			seconds := int(math.Ceil(availability.RetryAfter.Seconds()))
-			if seconds < 1 {
-				seconds = 1
-			}
-			w.Header().Set("Retry-After", strconv.Itoa(seconds))
-			writeJSON(w, http.StatusTooManyRequests, map[string]any{
-				"error":               "restart cooldown active",
-				"reason":              availability.Reason,
-				"restart_used":        availability.Used,
-				"restart_limit":       availability.Limit,
-				"retry_after_seconds": seconds,
-			})
-		default:
-			writeError(w, http.StatusConflict, "operator restart is not currently available")
-		}
-		return
-	}
-
-	args := []string{"restart"}
-	if request.ConfirmPlayers {
-		args = append(args, "--confirm-players")
-	}
-	execution := executeMinecraftAction(r.Context(), args)
-	if !execution.Accepted {
-		guard.cancel()
-		if execution.Status >= 400 {
-			contextText := execution.Result.Reason
-			if contextText == "" {
-				contextText = execution.ErrorMessage
-			}
-			_ = s.store.recordAuditEvent(sess, "minecraft_restart", "minecraft.service", false, contextText)
-		}
-		writeMinecraftActionExecution(w, execution)
-		return
-	}
-
-	used, err := guard.accept(sess)
-	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "Minecraft restart was requested, but restart allowance accounting failed")
-		return
-	}
-	execution.Result.OperatorUsage = &operatorRestartUsageView{
-		RestartUsed:     used,
-		RestartLimit:    operatorRestartLimit,
-		CooldownSeconds: int(operatorRestartCooldown.Seconds()),
-	}
-	writeJSON(w, execution.Status, execution.Result)
 }
 
 func (s *server) minecraftAction(w http.ResponseWriter, r *http.Request, action string) {

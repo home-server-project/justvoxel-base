@@ -20,7 +20,7 @@ type minecraftWorkspaceSettingsAPI interface {
 }
 
 type minecraftWorkspaceOperationsAPI interface {
-	MinecraftLogs(ctx context.Context, session string, limit int) (api.LogsResponse, error)
+	MinecraftLogs(ctx context.Context, session, id string, limit int) (api.LogsResponse, error)
 }
 
 type minecraftWorkspaceSettingsResponse struct {

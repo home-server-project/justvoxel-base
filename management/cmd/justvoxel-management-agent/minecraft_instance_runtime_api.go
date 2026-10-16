@@ -356,8 +356,15 @@ func (s *server) instanceRuntimeAction(w http.ResponseWriter, r *http.Request, a
 	if !ok {
 		return
 	}
-	var request struct{}
+	var request struct {
+		ConfirmPlayers *bool `json:"confirm_players"`
+	}
 	if !decodeJSON(w, r, &request) {
+		return
+	}
+	// Reject stale identities before opening an allowance transaction.
+	if _, err := instanceRuntimes.readRecord(id); err != nil {
+		instanceRuntimeError(w, err, id)
 		return
 	}
 	var guard *operatorRestartGuard
@@ -365,29 +372,66 @@ func (s *server) instanceRuntimeAction(w http.ResponseWriter, r *http.Request, a
 		operatorRestartMu.Lock()
 		defer operatorRestartMu.Unlock()
 		if s.store == nil {
-			writeError(w, http.StatusForbidden, "Operator restart controls are unavailable.")
+			writeError(w, http.StatusForbidden, "operator restart controls are unavailable")
 			return
 		}
-		var availability operatorRestartAvailability
-		var err error
-		guard, availability, err = s.store.beginOperatorRestart(actor.WebUserID)
-		if err != nil || !availability.Allowed {
-			writeError(w, http.StatusConflict, "Operator restart allowance or cooldown prevents this restart.")
+		guard, ok = s.instanceOperatorRestartGuard(w, actor, id)
+		if !ok {
 			return
 		}
 		defer guard.cancel()
 	}
-	s.withInstanceMutation(w, r, id, func(ctx context.Context) error {
-		if err := instanceRuntimes.actionWithWarnings(ctx, id, action, actor.Role == roleAdministrator); err != nil {
-			return err
-		}
+	release, err := s.lockInstanceRuntime()
+	if err != nil {
+		instanceRuntimeError(w, err, id)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 300*time.Second)
+	// Existing administrator lifecycle callers send an empty object and
+	// retain their graceful warning behavior. Interactive callers explicitly
+	// send false before asking for confirmation, then true on the same ID.
+	warnings := actor.Role == roleAdministrator
+	if request.ConfirmPlayers != nil {
+		warnings = *request.ConfirmPlayers
+	}
+	err = instanceRuntimes.actionWithWarnings(ctx, id, action, warnings)
+	cancel()
+	releaseErr := release()
+	var confirmation *instancePlayersConfirmation
+	if errors.As(err, &confirmation) && releaseErr == nil {
+		writeJSON(w, http.StatusOK, minecraftActionResponse{ID: id, Action: action, ConfirmationRequired: true,
+			Reason: "players_online", Online: confirmation.Players.Online, Players: confirmation.Names})
+		return
+	}
+	// A failed action never consumes allowance. If systemd accepted the action,
+	// account for it once even if releasing a maintenance lock reports failure.
+	if err != nil {
 		if guard != nil {
-			_, err := guard.acceptTarget(actor, "minecraft-"+id+".service")
-			return err
+			guard.cancel()
 		}
 		if s.store != nil {
-			return s.store.recordAuditEvent(actor, "minecraft_"+action, "minecraft-"+id+".service", true, "Instance lifecycle action completed")
+			_ = s.store.recordAuditEvent(actor, "minecraft_"+action, id, false, "Instance lifecycle action failed")
 		}
-		return nil
-	})
+		instanceRuntimeError(w, errors.Join(err, releaseErr), id)
+		return
+	}
+	result := minecraftActionResponse{ID: id, OK: true, Action: action}
+	if guard != nil {
+		used, accountingErr := guard.acceptTarget(actor, id)
+		if accountingErr != nil {
+			writeError(w, http.StatusServiceUnavailable, "Minecraft restart was requested, but restart allowance accounting failed")
+			return
+		}
+		result.OperatorUsage = &operatorRestartUsageView{RestartUsed: used, RestartLimit: operatorRestartLimit, CooldownSeconds: int(operatorRestartCooldown.Seconds())}
+	} else if s.store != nil {
+		if err = s.store.recordAuditEvent(actor, "minecraft_"+action, id, true, "Instance lifecycle action completed"); err != nil {
+			writeError(w, http.StatusServiceUnavailable, "Minecraft action completed, but audit recording failed")
+			return
+		}
+	}
+	if releaseErr != nil {
+		instanceRuntimeError(w, releaseErr, id)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }

@@ -24,7 +24,7 @@ func surfaceTestServer(t *testing.T, role principalRole) *server {
 func surfaceRequest(method, path, body string) *http.Request {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	if strings.HasPrefix(path, "/v1/minecraft/instances/") {
-		parts := strings.Split(path, "/")
+		parts := strings.Split(req.URL.Path, "/")
 		if len(parts) > 4 {
 			req.SetPathValue("id", parts[4])
 		}
@@ -57,6 +57,7 @@ func selectedWhitelistTestArgs(t *testing.T, args []string) []string {
 func serveWhitelistSurface(s *server, w http.ResponseWriter, r *http.Request) {
 	mux := http.NewServeMux()
 	registerOperationalRoutes(mux, s)
+	registerInstanceMaintenanceRoutes(mux, s)
 	mux.ServeHTTP(w, r)
 }
 
@@ -114,21 +115,28 @@ func TestLocalRootCanUseWhitelistWithoutBearerSession(t *testing.T) {
 }
 
 func TestLocalRootCanReadMinecraftLogsWithoutBearerSession(t *testing.T) {
+	whitelistSurfaceFixture(t)
 	s := &server{sessions: make(map[string]session)}
 	old := readMinecraftLogs
 	defer func() { readMinecraftLogs = old }()
 
 	gotLimit := 0
 	gotMode := ""
-	readMinecraftLogs = func(_ context.Context, limit int, outputMode string) ([]byte, error) {
+	readMinecraftLogs = func(_ context.Context, unit string, limit int, outputMode string) ([]byte, error) {
+		if unit != "minecraft-jv-a1b2c3.service" {
+			t.Fatal("wrong log target", unit)
+		}
 		gotLimit = limit
+		if unit != "minecraft-jv-a1b2c3.service" {
+			t.Fatal("wrong log target", unit)
+		}
 		gotMode = outputMode
 		return []byte("line one\nline two\n"), nil
 	}
 
-	req := requestWithPeerUID(http.MethodGet, "http://unix/v1/logs/minecraft?limit=50&format=cat", 0)
+	req := requestWithPeerUID(http.MethodGet, "http://unix/v1/minecraft/instances/jv-a1b2c3/logs?limit=50&format=cat", 0)
 	rr := httptest.NewRecorder()
-	s.minecraftLogs(rr, req)
+	serveWhitelistSurface(s, rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("local root Minecraft logs returned %d: %s", rr.Code, rr.Body.String())
 	}
@@ -141,18 +149,22 @@ func TestLocalRootCanReadMinecraftLogsWithoutBearerSession(t *testing.T) {
 }
 
 func TestMinecraftLogsDefaultFormatRemainsShortISO(t *testing.T) {
+	whitelistSurfaceFixture(t)
 	s := surfaceTestServer(t, roleOperator)
 	old := readMinecraftLogs
 	defer func() { readMinecraftLogs = old }()
 
 	gotMode := ""
-	readMinecraftLogs = func(_ context.Context, _ int, outputMode string) ([]byte, error) {
+	readMinecraftLogs = func(_ context.Context, unit string, _ int, outputMode string) ([]byte, error) {
+		if unit != "minecraft-jv-a1b2c3.service" {
+			t.Fatal("wrong log target", unit)
+		}
 		gotMode = outputMode
 		return []byte("timestamped line\n"), nil
 	}
 
 	rr := httptest.NewRecorder()
-	s.minecraftLogs(rr, surfaceRequest(http.MethodGet, "/v1/logs/minecraft", ""))
+	serveWhitelistSurface(s, rr, surfaceRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/logs", ""))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("default Minecraft logs returned %d: %s", rr.Code, rr.Body.String())
 	}
@@ -162,18 +174,19 @@ func TestMinecraftLogsDefaultFormatRemainsShortISO(t *testing.T) {
 }
 
 func TestMinecraftLogsRejectUnsupportedFormat(t *testing.T) {
+	whitelistSurfaceFixture(t)
 	s := surfaceTestServer(t, roleOperator)
 	old := readMinecraftLogs
 	defer func() { readMinecraftLogs = old }()
 
 	called := false
-	readMinecraftLogs = func(_ context.Context, _ int, _ string) ([]byte, error) {
+	readMinecraftLogs = func(_ context.Context, unit string, _ int, _ string) ([]byte, error) {
 		called = true
 		return nil, nil
 	}
 
 	rr := httptest.NewRecorder()
-	s.minecraftLogs(rr, surfaceRequest(http.MethodGet, "/v1/logs/minecraft?format=json", ""))
+	serveWhitelistSurface(s, rr, surfaceRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/logs?format=json", ""))
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("unsupported Minecraft logs format returned %d: %s", rr.Code, rr.Body.String())
 	}
@@ -194,7 +207,7 @@ func TestViewerCannotAccessWhitelistOrRawMinecraftLogs(t *testing.T) {
 	}
 
 	rr = httptest.NewRecorder()
-	s.minecraftLogs(rr, surfaceRequest(http.MethodGet, "/v1/logs/minecraft", ""))
+	serveWhitelistSurface(s, rr, surfaceRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/logs", ""))
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("viewer logs status = %d, want 403", rr.Code)
 	}
@@ -394,6 +407,54 @@ func TestWhitelistObsoleteAndStaleRoutesNeverReachHelper(t *testing.T) {
 		serveWhitelistSurface(s, rr, surfaceRequest("GET", path, ""))
 		if rr.Code < 400 {
 			t.Fatal(path, rr.Code, rr.Body.String())
+		}
+	}
+}
+
+func TestMinecraftLogsRejectInvalidAndRetiredSelections(t *testing.T) {
+	whitelistSurfaceFixture(t)
+	s := surfaceTestServer(t, roleOperator)
+	old := readMinecraftLogs
+	defer func() { readMinecraftLogs = old }()
+	readMinecraftLogs = func(context.Context, string, int, string) ([]byte, error) {
+		t.Error("invalid selection reached journal")
+		return nil, nil
+	}
+	for _, path := range []string{"/v1/logs/minecraft", "/v1/minecraft/instances/original/logs", "/v1/minecraft/instances/jv-absent1/logs", "/v1/minecraft/instances/invalid/logs"} {
+		rr := httptest.NewRecorder()
+		serveWhitelistSurface(s, rr, surfaceRequest("GET", path, ""))
+		if rr.Code < 400 {
+			t.Fatal(path, rr.Code)
+		}
+	}
+}
+
+func TestMinecraftSelectedLogsBoundsAndRoles(t *testing.T) {
+	whitelistSurfaceFixture(t)
+	old := readMinecraftLogs
+	defer func() { readMinecraftLogs = old }()
+	for _, role := range []principalRole{roleAdministrator, roleOperator} {
+		s := surfaceTestServer(t, role)
+		for _, tc := range []struct {
+			query string
+			limit int
+			mode  string
+		}{
+			{"", 100, "short-iso"}, {"?limit=1&format=cat", 1, "cat"}, {"?limit=500&format=short-iso", 200, "short-iso"},
+		} {
+			calls := 0
+			readMinecraftLogs = func(_ context.Context, unit string, limit int, mode string) ([]byte, error) {
+				calls++
+				if unit != "minecraft-jv-a1b2c3.service" || limit != tc.limit || mode != tc.mode {
+					t.Error(unit, limit, mode)
+				}
+				return []byte("selected server log"), nil
+			}
+			rr := httptest.NewRecorder()
+			serveWhitelistSurface(s, rr, surfaceRequest("GET", "/v1/minecraft/instances/jv-a1b2c3/logs"+tc.query, ""))
+			if rr.Code != 200 || calls != 1 {
+				t.Fatal(role, rr.Code, calls, rr.Body.String())
+			}
 		}
 	}
 }
