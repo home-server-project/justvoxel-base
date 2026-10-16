@@ -70,15 +70,15 @@ For a registered `jv-a1b2c3`, the runtime layout prepared for a future explicit 
 | Generated service | `minecraft-jv-a1b2c3.service` |
 | Container | `minecraft-jv-a1b2c3` |
 | Private environment | `/etc/justvoxel/instances/jv-a1b2c3/minecraft.env` |
-| Data | `<configured legacy data parent>/minecraft-instances/jv-a1b2c3/data` |
+| Data | `<appliance Minecraft storage root>/minecraft-instances/jv-a1b2c3/data` |
 
-For example, legacy `/var/lib/justvoxel/minecraft` yields `/var/lib/justvoxel/minecraft-instances/jv-a1b2c3/data`; another configured storage parent yields corresponding sibling paths. Data never enters the legacy world, backup root, or Phase 1 identity directory. The renderer rejects layouts where those paths overlap, including configurations whose mount contains only the legacy world and cannot safely hold siblings. It does not create, move, delete, repair, or relabel worlds. All existing path components must be directories without symlinks. Future activation must explicitly provision and verify the data directory before startup.
+The default appliance storage root `/var/lib/justvoxel` yields `/var/lib/justvoxel/minecraft-instances/jv-a1b2c3/data`; another configured storage root yields the same relative instance paths. The appliance storage policy currently comes from the parent of `DATA_PATH` and its mount identity fields in `/etc/justvoxel/justvoxel.conf`, when present; absence uses the existing system-storage default. No fixed server, environment, Quadlet, service, or identity is required. Backup storage remains appliance-wide. Data never enters the backup root or Phase 1 identity directory; overlapping paths and mounts that cannot safely hold the derived instance paths are rejected. It does not create, move, delete, repair, or relabel worlds. All existing path components must be directories without symlinks. Future activation must explicitly provision and verify the data directory before startup.
 
 `minecraftInstanceRuntimeConfig` holds per-instance ports, Java and container memory, software, selected version, Paper channel, image tag, startup settings, explicit EULA acceptance, non-root container UID/GID, private RCON password, and Start on Boot. RCON passwords follow the existing generated hexadecimal convention (32–128 hex characters). The renderer reuses `templates/config/minecraft.env.in` and the established Paper/Purpur/Vanilla capability rules. The new Quadlet template uses `docker.io/itzg/minecraft-server:<selected tag>` with the existing moving or pinned tag convention; rendering does not resolve tags, fetch metadata, or resolve digests. Version inputs are a selected pin or `LATEST`; upstream availability checks remain a caller responsibility. Latest Paper requires its existing experimental channel convention.
 
-The trusted internal caller must supply **every configured instance, including stopped instances**, plus a fresh legacy reservation and physical RAM/configured-storage snapshot. This phase does not yet provide the authoritative persistent multi-instance configuration store or activation lock. Validation reserves Java TCP and enabled Bedrock UDP ports separately, rejects duplicates within each protocol and collisions with legacy reservations, and checks the 1–65535 range. Equal numeric TCP and UDP ports are allowed. Disabled Bedrock requires a zero port. Phase 2 originally rejected enabled instance Bedrock after validation. Phase 3B adds the independent startup helper described below; the legacy global `managed-crossplay-start` is never attached to independent units.
+The trusted internal caller must supply **every configured instance, including stopped instances**, plus a fresh appliance physical RAM/configured-storage snapshot. There is no fixed-server port or memory reservation. This phase does not yet provide the authoritative persistent multi-instance configuration store or activation lock. Validation reserves Java TCP and enabled Bedrock UDP ports separately, rejects duplicates within each protocol across instances, and checks the 1–65535 range. Equal numeric TCP and UDP ports are allowed. Disabled Bedrock requires a zero port. Phase 2 originally rejected enabled instance Bedrock after validation. Phase 3B adds the independent startup helper described below; the legacy global `managed-crossplay-start` is never attached to independent units.
 
-Memory uses positive `M`/`G` values (case insensitive), between 512 MiB and 1 TiB per quantity. Each container must allow at least 512 MiB above its Java allocation. Combined configured container limits, including the legacy container and stopped instances, must leave at least 1 GiB of physical RAM for the appliance. Free memory, listening sockets, swap, and zram do not determine reservations. Startup values and immutable IDs are validated before any output is returned; malformed JSON and unknown fields are rejected by the internal decoder. There are no arbitrary environment, image repository, unit, or data-path overrides.
+Memory uses positive `M`/`G` values (case insensitive), between 512 MiB and 1 TiB per quantity. Each container must allow at least 512 MiB above its Java allocation. Combined configured container limits, including stopped instances, must leave at least 1 GiB of physical RAM for the appliance. Free memory, listening sockets, swap, and zram do not determine reservations. Startup values and immutable IDs are validated before any output is returned; malformed JSON and unknown fields are rejected by the internal decoder. There are no arbitrary environment, image repository, unit, or data-path overrides.
 
 Start on Boot ON renders `[Install]` with `WantedBy=multi-user.target`. OFF omits boot installation while retaining the complete Quadlet for manual service startup after explicit activation. It is independent of running state and never calls `systemctl enable` on generated services. The runtime preserves `:Z`, journald, `Restart=always`, `RestartSec=10`, `StopTimeout=180`, `TimeoutStartSec=900`, and `TimeoutStopSec=240`.
 
@@ -141,16 +141,23 @@ or private credentials:
 
 This is a request-shape example, not a recommended current Minecraft version.
 Creation verifies software/version availability with the existing metadata
-helpers and derives container UID/GID from the configured legacy installation.
-A complete configured legacy server and its immutable identity are required.
+helpers and obtains container UID/GID from the existing appliance-level
+`resolve_minecraft_ids` helper shared with Setup planning: valid invoking sudo
+account IDs, otherwise the `voxel` account, otherwise its established `1000:1000`
+default. It never derives ownership from another server. Creation is self-sufficient
+on an appliance with zero configured servers. Every server-specific value comes
+from the selected immutable `jv-*` ID and its authoritative registry, configuration,
+and committed runtime evidence; friendly names remain presentation only.
+First-run Setup Apply is intentionally unchanged in convergence slice C1.
 Phase 3B supports independent Paper/Purpur cross-play through the instance-specific startup helper.
 
 Creation takes the existing setup/restore/migration/reset operation locks and
-the shared Minecraft maintenance lock. It refreshes legacy configuration,
-physical RAM, and every persisted independent configuration, including stopped
+the shared Minecraft maintenance lock. It refreshes appliance storage policy,
+physical RAM, and every persisted instance configuration, including stopped
 instances. Invalid records and orphan instance Quadlets fail closed; an outstanding activation journal blocks
 new applies and starts. Port and memory checks use configured reservations,
-including the legacy server, rather than free memory or listening sockets.
+across `jv-*` instances, rather than free memory or listening sockets. Pending
+activation/recovery evidence continues to block unsafe publication.
 Additional IPv4/IPv6 TCP bind checks detect occupied host ports. During apply,
 new and retired ports remain held until publication and rollback finish.
 
@@ -290,7 +297,7 @@ audit accounting. Other instances are never stopped or restarted.
 Paper/Purpur cross-play is configured through the stopped-only runtime settings
 apply, with `bedrock_enabled` and `bedrock_port`. Vanilla is rejected. Every
 configured instance, including stopped instances, reserves its Java TCP and
-enabled Bedrock UDP ports alongside legacy reservations. Quadlets publish the
+enabled Bedrock UDP ports. Quadlets publish the
 selected host ports to container-local Java 25565 and Bedrock 19132. Only owned
 runtime/permanent UDP firewall rules are removed or rolled back; already-open
 rules remain unowned. Recovery accepts old TCP ownership records and validates

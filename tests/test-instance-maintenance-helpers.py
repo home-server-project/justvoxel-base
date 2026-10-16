@@ -252,5 +252,21 @@ jv_crossplay_install() {
         self.assertFalse((data / 'plugins').exists())
 
 
+class InstanceRuntimeArchitecture(unittest.TestCase):
+    def test_instance_helpers_have_no_fixed_runtime_target(self):
+        for helper in ('instance-runtime-prerequisites', 'instance-crossplay-start',
+                       'instance-host-shutdown-prepare',
+                       'validate-instance-runtime-commit', 'validate-instance-data-mount'):
+            source = '\n'.join(line for line in (LIB / helper).read_text().splitlines()
+                               if not line.lstrip().startswith('#'))
+            with self.subTest(helper=helper):
+                for forbidden in ('require_config', 'admin-discovery-json',
+                                  '/etc/justvoxel/minecraft.env',
+                                  'ContainerName=minecraft\n'):
+                    self.assertNotIn(forbidden, source)
+                self.assertNotRegex(source, r'(?<![A-Za-z0-9_-])minecraft\.service(?![A-Za-z0-9_-])')
+                self.assertNotRegex(source, r'podman[^\n]*(?:exec|inspect|kill) ["\']?minecraft(?:["\']?\s|["\']?$)')
+
+
 if __name__ == '__main__':
     unittest.main()

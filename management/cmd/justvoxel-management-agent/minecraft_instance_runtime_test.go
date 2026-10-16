@@ -14,7 +14,7 @@ import (
 func instanceRuntimeFixture(t *testing.T) (*minecraftInstanceStore, minecraftInstanceRuntimeContext, []minecraftInstanceRuntimeConfig) {
 	t.Helper()
 	store := testMinecraftInstances(t)
-	identity, err := store.register("legacy1", true)
+	_, err := store.register("legacy1", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func instanceRuntimeFixture(t *testing.T) (*minecraftInstanceStore, minecraftIns
 		t.Fatal(err)
 	}
 	ctx := minecraftInstanceRuntimeContext{
-		Legacy:      minecraftLegacyRuntimeReservation{ID: identity.ID, DataPath: filepath.Join(root, "minecraft"), BackupPath: filepath.Join(root, "backups"), JavaPort: 25565, BedrockEnabled: true, BedrockPort: 19132, ContainerMemory: "2G"},
+		BackupPath:  filepath.Join(root, "backups"),
 		StorageRoot: root, TotalMemoryMiB: 8192, TemplateRoot: templates,
 	}
 	a := minecraftInstanceRuntimeConfig{ID: "jv-a1b2c3", JavaPort: 25566, JavaMemory: "1G", ContainerMemory: "2G", Software: "paper", Version: "1.21.4", PaperChannel: "default", ImageTag: "stable", StartOnBoot: true, EULAAccepted: true, UID: 1000, GID: 1000, Timezone: "UTC", GameMode: "survival", Difficulty: "normal", MaxPlayers: 20, Whitelist: true, EnforceWhitelist: true, MOTD: `Family "Survival" \ world`, RCONPassword: strings.Repeat("a", 48)}
@@ -131,18 +131,11 @@ func TestInstanceRuntimeValidation(t *testing.T) {
 		{"missing ID", "Invalid Instance ID", func(_ *minecraftInstanceRuntimeContext, c []minecraftInstanceRuntimeConfig) { c[0].ID = "" }},
 		{"unsafe ID", "Invalid Instance ID", func(_ *minecraftInstanceRuntimeContext, c []minecraftInstanceRuntimeConfig) { c[0].ID = "jv-../../etc" }},
 		{"unregistered ID", "already be registered", func(_ *minecraftInstanceRuntimeContext, c []minecraftInstanceRuntimeConfig) { c[0].ID = "jv-abcdef" }},
-		{"legacy ID", "legacy instance ID", func(x *minecraftInstanceRuntimeContext, c []minecraftInstanceRuntimeConfig) { c[0].ID = x.Legacy.ID }},
+		{"non-instance identity", "already be registered", func(_ *minecraftInstanceRuntimeContext, c []minecraftInstanceRuntimeConfig) { c[0].ID = "jv-legacy1" }},
 		{"duplicate ID", "duplicate", func(_ *minecraftInstanceRuntimeContext, c []minecraftInstanceRuntimeConfig) { c[1].ID = c[0].ID }},
 		{"Java collision", "conflicting", func(_ *minecraftInstanceRuntimeContext, c []minecraftInstanceRuntimeConfig) {
 			c[1].JavaPort = c[0].JavaPort
 			c[1].StartOnBoot = false
-		}},
-		{"legacy TCP collision", "conflicting", func(x *minecraftInstanceRuntimeContext, c []minecraftInstanceRuntimeConfig) {
-			c[0].JavaPort = x.Legacy.JavaPort
-		}},
-		{"legacy UDP collision", "conflicting", func(x *minecraftInstanceRuntimeContext, c []minecraftInstanceRuntimeConfig) {
-			c[0].BedrockEnabled = true
-			c[0].BedrockPort = x.Legacy.BedrockPort
 		}},
 		{"UDP collision", "conflicting", func(_ *minecraftInstanceRuntimeContext, c []minecraftInstanceRuntimeConfig) {
 			c[0].BedrockEnabled = true
@@ -173,20 +166,13 @@ func TestInstanceRuntimeValidation(t *testing.T) {
 		{"no headroom", "512 MiB", func(_ *minecraftInstanceRuntimeContext, c []minecraftInstanceRuntimeConfig) {
 			c[0].ContainerMemory = "1G"
 		}},
-		{"overcommit including legacy and stopped", "overcommits", func(x *minecraftInstanceRuntimeContext, _ []minecraftInstanceRuntimeConfig) { x.TotalMemoryMiB = 6144 }},
+		{"overcommit including stopped", "overcommits", func(x *minecraftInstanceRuntimeContext, _ []minecraftInstanceRuntimeConfig) { x.TotalMemoryMiB = 4096 }},
 		{"missing RAM", "physical memory", func(x *minecraftInstanceRuntimeContext, _ []minecraftInstanceRuntimeConfig) { x.TotalMemoryMiB = 0 }},
-		{"wrong storage parent", "storage parent", func(x *minecraftInstanceRuntimeContext, _ []minecraftInstanceRuntimeConfig) {
-			x.StorageRoot += "/elsewhere"
-		}},
 		{"path traversal", "unsafe", func(x *minecraftInstanceRuntimeContext, _ []minecraftInstanceRuntimeConfig) {
-			x.Legacy.DataPath = filepath.Join(x.StorageRoot, "minecraft") + "/../world"
-			x.StorageRoot = filepath.Dir(x.Legacy.DataPath)
+			x.StorageRoot += "/../world"
 		}},
 		{"backup overlap", "overlaps", func(x *minecraftInstanceRuntimeContext, _ []minecraftInstanceRuntimeConfig) {
-			x.Legacy.BackupPath = filepath.Join(x.StorageRoot, "minecraft-instances")
-		}},
-		{"legacy world overlap", "overlaps", func(x *minecraftInstanceRuntimeContext, _ []minecraftInstanceRuntimeConfig) {
-			x.Legacy.DataPath = filepath.Join(x.StorageRoot, "minecraft-instances")
+			x.BackupPath = filepath.Join(x.StorageRoot, "minecraft-instances")
 		}},
 		{"wrong mount", "outside", func(x *minecraftInstanceRuntimeContext, _ []minecraftInstanceRuntimeConfig) {
 			x.MountPoint = filepath.Join(x.StorageRoot, "other")
@@ -241,7 +227,10 @@ func TestInstanceRuntimeValidation(t *testing.T) {
 func TestInstanceRuntimeProtocolsAndMountEvidence(t *testing.T) {
 	store, ctx, configs := instanceRuntimeFixture(t)
 	// Equal numeric ports on different protocols are not a collision.
-	configs[0].JavaPort = ctx.Legacy.BedrockPort
+	configs[0].JavaPort = 19133
+	configs[1].Software = "purpur"
+	configs[1].BedrockEnabled = true
+	configs[1].BedrockPort = 19133
 	ctx.MountPoint = ctx.StorageRoot
 	ctx.ExpectedUUID = "1234-abcd"
 	ctx.ExpectedSource = "/dev/mapper/data"
@@ -364,7 +353,7 @@ func TestInstanceRuntimeAtomicInactiveStaging(t *testing.T) {
 	if !reflect.DeepEqual(before, registrySnapshot(t, store)) {
 		t.Fatal("staging mutated identities")
 	}
-	for _, path := range []string{filepath.Join(ctx.StorageRoot, "minecraft-instances"), ctx.Legacy.DataPath, ctx.Legacy.BackupPath} {
+	for _, path := range []string{filepath.Join(ctx.StorageRoot, "minecraft-instances"), filepath.Join(ctx.StorageRoot, "minecraft"), ctx.BackupPath} {
 		if _, err := os.Lstat(path); !os.IsNotExist(err) {
 			t.Fatal("staging created data or backup directories")
 		}
@@ -416,7 +405,7 @@ func TestInstanceRuntimeLegacyCompatibility(t *testing.T) {
 			t.Fatal("legacy contract changed")
 		}
 	}
-	for _, path := range []string{ctx.Legacy.DataPath, ctx.Legacy.BackupPath} {
+	for _, path := range []string{filepath.Join(ctx.StorageRoot, "minecraft"), ctx.BackupPath} {
 		if err := os.Mkdir(path, 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -440,7 +429,7 @@ func TestInstanceRuntimeLegacyCompatibility(t *testing.T) {
 	if !reflect.DeepEqual(before, registrySnapshot(t, store)) {
 		t.Fatal("legacy identity changed")
 	}
-	for _, path := range []string{ctx.Legacy.DataPath, ctx.Legacy.BackupPath} {
+	for _, path := range []string{filepath.Join(ctx.StorageRoot, "minecraft"), ctx.BackupPath} {
 		data, err := os.ReadFile(filepath.Join(path, "existing.dat"))
 		if err != nil || string(data) != "existing protected data" {
 			t.Fatal("render modified existing world or backup")
@@ -531,5 +520,43 @@ func TestInstanceRuntimeStagingRejectsUnsafeDestination(t *testing.T) {
 	entries, err := os.ReadDir(badMode)
 	if err != nil || len(entries) != 0 {
 		t.Fatal("unsafe staging left output")
+	}
+}
+
+func TestInstanceRuntimeFirstInstancePlanning(t *testing.T) {
+	store, ctx, configs := instanceRuntimeFixture(t)
+	// The image supplies an empty private registry directory, not a server.
+	if err := os.RemoveAll(store.directory); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(store.directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	c := configs[0]
+	c.ID, c.JavaPort, c.BedrockEnabled, c.BedrockPort = "jv-first123", 25565, true, 19132
+	ctx.TotalMemoryMiB = 3072 // 2 GiB container + the existing 1 GiB appliance reserve.
+	files, err := store.renderInstanceRuntimesCandidate(ctx, []minecraftInstanceRuntimeConfig{c}, c.ID)
+	if err != nil || len(files) != 1 {
+		t.Fatal("first-instance planning requires a fixed server", err)
+	}
+	if files[0].UnitName != "minecraft-"+c.ID+".service" || files[0].ContainerName != "minecraft-"+c.ID || files[0].DataPath != instanceStorageFor(ctx, c.ID).DataPath {
+		t.Fatal("first server uses different identity/path rules")
+	}
+	if _, err := os.Lstat(filepath.Join(store.directory, "minecraft.json")); !os.IsNotExist(err) {
+		t.Fatal("planning wrote fixed identity")
+	}
+	ctx.TotalMemoryMiB--
+	if _, err := store.renderInstanceRuntimesCandidate(ctx, []minecraftInstanceRuntimeConfig{c}, c.ID); err == nil {
+		t.Fatal("first instance bypassed appliance memory reservation")
+	}
+}
+
+func TestInstanceRuntimeRejectsDuplicateRegistryIdentity(t *testing.T) {
+	store, ctx, configs := instanceRuntimeFixture(t)
+	if err := os.WriteFile(filepath.Join(store.directory, "jv-abcdef.json"), []byte(`{"id":"jv-a1b2c3"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.renderInstanceRuntimes(ctx, configs); err == nil {
+		t.Fatal("duplicate/mismatched registry identity accepted")
 	}
 }

@@ -30,13 +30,26 @@ else
     exec "${real_stat}" "\$@"
 fi
 STUB
+# Exercise the actual shared account resolver and appliance configuration path.
+sed "s|/etc/justvoxel|${test_root}/etc/justvoxel|g" \
+    "${repo_root}/mjust/libexec/common.sh" > "${test_root}/account-common.sh"
 cat > "${test_root}/common.sh" <<'STUB'
+source "${TEST_ROOT}/account-common.sh"
 require_root() { :; }
 require_config() { exit 91; }
 jv_exact_mount_identity() { printf '%s\n' test-uuid; }
 server_version_available() { [[ $1 == 1.21.4 ]]; }
 paper_version_has_stable_build() { [[ $1 == 1.21.4 ]]; }
 resolve_latest_server_version() { printf '%s\n' 1.21.4; }
+STUB
+cat > "${test_root}/bin/id" <<'STUB'
+#!/usr/bin/bash
+case "$*" in
+    voxel) exit 0 ;;
+    '-u voxel') echo 1234 ;;
+    '-g voxel') echo 2345 ;;
+    *) exit 1 ;;
+esac
 STUB
 cat > "${test_root}/bin/mountpoint" <<'STUB'
 #!/usr/bin/bash
@@ -68,6 +81,29 @@ sed -e "s|/etc/justvoxel/instances|${test_root}/etc/justvoxel/instances|g" \
     "${repo_root}/mjust/libexec/validate-instance-runtime-commit" > "${test_root}/guard"
 sed "s|source /usr/libexec/justvoxel/mjust/common.sh|source ${test_root}/common.sh|" \
     "${repo_root}/mjust/libexec/instance-runtime-prerequisites" > "${test_root}/storage"
+# Fresh-appliance discovery must not call require_config or discover a fixed
+# environment/Quadlet/service/identity. Account IDs come from the real resolver.
+SUDO_UID='' SUDO_GID='' bash "${test_root}/storage" snapshot > "${test_root}/snapshot.json"
+jq -e '.storage.root == "/var/lib/justvoxel" and .uid == 1234 and .gid == 2345 and .memory_mib > 0 and (has("configuration") | not)' "${test_root}/snapshot.json" >/dev/null
+# Existing appliance storage policy is usable without a complete server config.
+cat > "${test_root}/etc/justvoxel/justvoxel.conf" <<STUB
+DATA_PATH=${test_root}/disk/minecraft
+DATA_MOUNT_POINT=${test_root}/disk
+DATA_EXPECTED_UUID=test-uuid
+BACKUP_PATH=${test_root}/backups
+MINECRAFT_UID=99
+MINECRAFT_GID=99
+MINECRAFT_SERVER_TYPE=invalid
+STUB
+chmod 0600 "${test_root}/etc/justvoxel/justvoxel.conf"
+SUDO_UID='' SUDO_GID='' bash "${test_root}/storage" snapshot > "${test_root}/snapshot.json"
+jq -e --arg root "${test_root}/disk" '.storage.root == $root and .storage.mount_point == $root and .storage.uuid == "test-uuid" and .uid == 1234 and .gid == 2345' "${test_root}/snapshot.json" >/dev/null
+mv "${test_root}/etc/justvoxel/justvoxel.conf" "${test_root}/appliance.conf"
+ln -s "${test_root}/appliance.conf" "${test_root}/etc/justvoxel/justvoxel.conf"
+if bash "${test_root}/storage" snapshot >/dev/null 2>&1; then
+    echo 'FAIL: symlinked appliance configuration accepted' >&2; exit 1
+fi
+rm "${test_root}/etc/justvoxel/justvoxel.conf"
 printf '{"id":"jv-a1b2c3"}\n' > "${test_root}/var/lib/justvoxel/instances/jv-a1b2c3.json"
 chmod 0600 "${test_root}/var/lib/justvoxel/instances/jv-a1b2c3.json"
 dir="${test_root}/etc/justvoxel/instances/jv-a1b2c3"

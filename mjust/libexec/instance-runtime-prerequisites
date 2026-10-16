@@ -6,14 +6,28 @@ fail() { echo 'ERROR: instance runtime prerequisites could not be verified.' >&2
 case "${1:-}" in
     snapshot)
         [[ $# == 1 ]] || fail
-        require_config
-        [[ ${MINECRAFT_UID} =~ ^[1-9][0-9]*$ && ${MINECRAFT_GID} =~ ^[1-9][0-9]*$ ]] || fail
-        configuration="$(/usr/libexec/justvoxel/mjust/admin-discovery-json configuration)" || fail
+        # Storage policy is appliance-wide. Do not load/validate a server,
+        # its environment, identity, Quadlet, or service state.
+        DATA_PATH=/var/lib/justvoxel/minecraft
+        BACKUP_PATH=/var/lib/justvoxel/backups
+        DATA_MOUNT_POINT='' DATA_EXPECTED_UUID='' DATA_EXPECTED_SOURCE=''
+        if [[ -e ${JV_CONFIG} || -L ${JV_CONFIG} ]]; then
+            [[ -f ${JV_CONFIG} && ! -L ${JV_CONFIG} && $(realpath -e -- "${JV_CONFIG}") == "${JV_CONFIG}" ]] || fail
+            [[ $(stat -c '%u' -- "${JV_CONFIG}") == 0 ]] || fail
+            config_mode="$(stat -c '%a' -- "${JV_CONFIG}")" || fail
+            (( (8#${config_mode} & 0022) == 0 )) || fail
+            source "${JV_CONFIG}"
+        fi
+        storage_root="$(dirname -- "${DATA_PATH}")" || fail
+        read -r uid gid id_source < <(resolve_minecraft_ids)
+        validate_nonroot_id "${uid}" && validate_nonroot_id "${gid}" || fail
         memory="$(awk '/^MemTotal:/ {printf "%d\n", $2 / 1024; exit}' /proc/meminfo)"
         [[ ${memory} =~ ^[1-9][0-9]*$ ]] || fail
-        jq -n --argjson configuration "${configuration}" --argjson memory "${memory}" \
-            --argjson uid "${MINECRAFT_UID}" --argjson gid "${MINECRAFT_GID}" \
-            '{configuration:$configuration,memory_mib:$memory,uid:$uid,gid:$gid}'
+        jq -n --arg root "${storage_root}" --arg mount "${DATA_MOUNT_POINT}" \
+            --arg uuid "${DATA_EXPECTED_UUID}" --arg source "${DATA_EXPECTED_SOURCE}" \
+            --arg backup "${BACKUP_PATH}" --argjson memory "${memory}" \
+            --argjson uid "${uid}" --argjson gid "${gid}" \
+            '{storage:{root:$root,mount_point:$mount,uuid:$uuid,source:$source},backup_path:$backup,memory_mib:$memory,uid:$uid,gid:$gid}'
         ;;
     version)
         [[ $# == 4 ]] || fail

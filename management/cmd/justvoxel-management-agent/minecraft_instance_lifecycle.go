@@ -384,7 +384,7 @@ func (b *instanceRuntimeBackend) changeFirewall(ctx context.Context, c instanceF
 
 // Creation leaves a complete configured reservation even if activation fails.
 // Retrying apply uses this immutable ID rather than allocating another world.
-func (b *instanceRuntimeBackend) create(ctx context.Context, c minecraftInstanceRuntimeConfig, name string, snapshot minecraftInstanceRuntimeContext, legacySoftware string) (string, error) {
+func (b *instanceRuntimeBackend) create(ctx context.Context, c minecraftInstanceRuntimeConfig, name string, snapshot minecraftInstanceRuntimeContext) (string, error) {
 	if _, err := validateInstanceName(name); err != nil {
 		return "", err
 	}
@@ -430,7 +430,7 @@ func (b *instanceRuntimeBackend) create(ctx context.Context, c minecraftInstance
 	for _, l := range held {
 		l.Close()
 	}
-	registered, err := b.identities().registerLogicalInstance(strings.TrimPrefix(c.ID, "jv-"), true, c.Software, name, legacySoftware)
+	registered, err := b.identities().registerLogicalInstance(strings.TrimPrefix(c.ID, "jv-"), true, c.Software, name, "")
 	if err != nil {
 		return "", err
 	}

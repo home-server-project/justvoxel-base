@@ -163,9 +163,9 @@ func TestInstanceCrossplayRenderingAndReservations(t *testing.T) {
 			if strings.Contains(string(files[1].Quadlet), "PublishPort=19133") || files[0].DataPath == files[1].DataPath {
 				t.Fatal("shared cross-play runtime")
 			}
-			configs[0].BedrockPort = snapshot.Legacy.BedrockPort
-			if _, err = store.renderInstanceRuntimes(snapshot, configs); err == nil {
-				t.Fatal("legacy UDP collision accepted")
+			configs[0].BedrockPort = 19132
+			if _, err = store.renderInstanceRuntimes(snapshot, configs); err != nil {
+				t.Fatal("unused default UDP port rejected", err)
 			}
 			configs[0].BedrockPort = 19133
 			configs[1].Software = "purpur"

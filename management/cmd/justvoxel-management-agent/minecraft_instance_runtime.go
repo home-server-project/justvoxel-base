@@ -23,7 +23,7 @@ import (
 // Internal Phase 2 inputs. No HTTP route, identity creation, world creation,
 // service reload/start, or active runtime publication is attached to this code.
 // Callers must provide the COMPLETE configured set, including stopped instances,
-// and a fresh trusted snapshot of legacy configuration and physical RAM.
+// and a fresh trusted snapshot of appliance storage and physical RAM.
 // Runtime secrets never enter the Phase 1 identity/name store.
 type minecraftInstanceRuntimeConfig struct {
 	ID               string `json:"id"`
@@ -50,19 +50,9 @@ type minecraftInstanceRuntimeConfig struct {
 	RCONPassword     string `json:"rcon_password"`
 }
 
-type minecraftLegacyRuntimeReservation struct {
-	ID              string
-	DataPath        string
-	BackupPath      string
-	JavaPort        int
-	BedrockEnabled  bool
-	BedrockPort     int
-	ContainerMemory string
-}
-
 type minecraftInstanceRuntimeContext struct {
-	Legacy minecraftLegacyRuntimeReservation
-	// Parent of the configured legacy data directory, not a hardcoded disk.
+	// Appliance-wide storage policy; never discovered from another server.
+	BackupPath     string
 	StorageRoot    string
 	MountPoint     string
 	ExpectedUUID   string
@@ -206,17 +196,32 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		return nil, err
 	}
 	defer syscall.Flock(int(dir.Fd()), syscall.LOCK_UN)
-	legacyID, err := s.readRecord("minecraft.json")
-	if err != nil || legacyID != ctx.Legacy.ID {
-		return nil, errors.New("legacy identity reservation is missing or inconsistent")
+	// Validate the active identity collection without loading presentation names.
+	entries, err := dir.ReadDir(-1)
+	if err != nil {
+		return nil, err
+	}
+	registered := map[string]string{}
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		id, err := s.readRecord(entry.Name())
+		if err != nil {
+			return nil, err
+		}
+		if registered[id] != "" {
+			return nil, errInstanceDuplicate
+		}
+		if strings.HasPrefix(entry.Name(), "jv-") && entry.Name() != id+".json" {
+			return nil, errors.New("instance record filename does not match ID")
+		}
+		registered[id] = entry.Name()
 	}
 	if len(configs) == 0 || len(configs) > 1024 {
 		return nil, errors.New("invalid runtime configuration count")
 	}
-	if ctx.StorageRoot != filepath.Dir(ctx.Legacy.DataPath) {
-		return nil, errors.New("instance storage must share the configured legacy storage parent")
-	}
-	for _, path := range []string{ctx.StorageRoot, ctx.Legacy.DataPath, ctx.Legacy.BackupPath} {
+	for _, path := range []string{ctx.StorageRoot, ctx.BackupPath} {
 		if err := validateInstanceRuntimePath(path); err != nil {
 			return nil, err
 		}
@@ -259,22 +264,11 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		ports[port] = true
 		return nil
 	}
-	if err := reserve(ctx.Legacy.JavaPort, tcp); err != nil {
-		return nil, err
-	}
-	if ctx.Legacy.BedrockEnabled {
-		if err := reserve(ctx.Legacy.BedrockPort, udp); err != nil {
-			return nil, err
-		}
-	}
-	total, err := instanceRuntimeMemoryMiB(ctx.Legacy.ContainerMemory)
-	if err != nil {
-		return nil, err
-	}
+	var total int64
 	if ctx.TotalMemoryMiB < 2048 || ctx.TotalMemoryMiB > 16777216 {
 		return nil, errors.New("invalid physical memory reservation")
 	}
-	seen := map[string]bool{legacyID: true}
+	seen := map[string]bool{}
 	ordered := append([]minecraftInstanceRuntimeConfig(nil), configs...)
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
 	for _, c := range ordered {
@@ -282,22 +276,21 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 			return nil, errInstanceID
 		}
 		if seen[c.ID] {
-			return nil, errors.New("duplicate or legacy instance ID")
+			return nil, errors.New("duplicate instance ID")
 		}
 		seen[c.ID] = true
-		id, err := s.readRecord(c.ID + ".json")
 		if c.ID == candidate {
-			if !errors.Is(err, os.ErrNotExist) {
+			if registered[c.ID] != "" {
 				return nil, errors.New("candidate identity is already registered or unavailable")
 			}
-		} else if err != nil || id != c.ID {
+		} else if registered[c.ID] != c.ID+".json" {
 			return nil, errors.New("runtime instance must already be registered")
 		}
 		dataPath := filepath.Join(ctx.StorageRoot, "minecraft-instances", c.ID, "data")
 		if err := validateInstanceRuntimePath(dataPath); err != nil {
 			return nil, err
 		}
-		for _, reserved := range []string{ctx.Legacy.DataPath, ctx.Legacy.BackupPath, s.directory} {
+		for _, reserved := range []string{ctx.BackupPath, s.directory} {
 			if instanceRuntimeInside(dataPath, reserved) || instanceRuntimeInside(reserved, dataPath) {
 				return nil, errors.New("instance data overlaps protected state")
 			}
@@ -425,7 +418,7 @@ func (s *minecraftInstanceStore) stageInstanceRuntimes(ctx minecraftInstanceRunt
 	if strings.Contains(parent+"/", "/containers/systemd/") {
 		return errors.New("staging must be outside Quadlet search paths")
 	}
-	for _, active := range []string{"/etc", "/usr", "/run", "/boot", "/proc", "/sys", "/dev", ctx.StorageRoot, ctx.Legacy.BackupPath, s.directory} {
+	for _, active := range []string{"/etc", "/usr", "/run", "/boot", "/proc", "/sys", "/dev", ctx.StorageRoot, ctx.BackupPath, s.directory} {
 		if instanceRuntimeInside(parent, active) {
 			return errors.New("staging must be outside active configuration and Minecraft storage")
 		}

@@ -337,7 +337,7 @@ func TestInstanceActivationIndependentAndPersistent(t *testing.T) {
 	if !reflect.DeepEqual(legacyBefore, registrySnapshot(t, f.backend.store)) {
 		t.Fatal("runtime changed legacy identities/names")
 	}
-	if _, err := os.Lstat(f.snapshot.Legacy.DataPath); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Lstat(filepath.Join(f.snapshot.StorageRoot, "minecraft")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("runtime created legacy world")
 	}
 	for _, call := range f.calls {
@@ -695,7 +695,7 @@ func TestInstanceApplyPreservesPreviousFilesOnFailure(t *testing.T) {
 	}
 }
 func TestInstanceReservationsMountAndUnsafeFiles(t *testing.T) {
-	for _, kind := range []string{"stopped-port", "legacy-port", "overcommit", "mount", "storage-change", "symlink", "permissions", "malformed"} {
+	for _, kind := range []string{"stopped-port", "overcommit", "mount", "storage-change", "symlink", "permissions", "malformed"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newInstanceActivationFixture(t)
 			id := f.configs[0].ID
@@ -711,8 +711,6 @@ func TestInstanceReservationsMountAndUnsafeFiles(t *testing.T) {
 			switch kind {
 			case "stopped-port":
 				next.Runtime.JavaPort = f.configs[1].JavaPort
-			case "legacy-port":
-				next.Runtime.JavaPort = f.snapshot.Legacy.JavaPort
 			case "overcommit":
 				next.Runtime.ContainerMemory = "8G"
 			case "mount":
@@ -870,10 +868,10 @@ func TestInstanceRuntimeLocks(t *testing.T) {
 func TestInstanceCreationRegistersAndActivatesTwoNewWorlds(t *testing.T) {
 	f := newInstanceActivationFixture(t)
 	f.snapshot.TotalMemoryMiB = 16384
-	if err := os.Mkdir(f.snapshot.Legacy.DataPath, 0700); err != nil {
+	if err := os.Mkdir(filepath.Join(f.snapshot.StorageRoot, "minecraft"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	legacyWorld := filepath.Join(f.snapshot.Legacy.DataPath, "world.dat")
+	legacyWorld := filepath.Join(filepath.Join(f.snapshot.StorageRoot, "minecraft"), "world.dat")
 	if err := os.WriteFile(legacyWorld, []byte("existing world"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -881,7 +879,7 @@ func TestInstanceCreationRegistersAndActivatesTwoNewWorlds(t *testing.T) {
 	for i, name := range []string{"Family Survival", "Creative World"} {
 		c := f.configs[i]
 		c.JavaPort = instanceTestPort(t)
-		id, err := f.backend.create(context.Background(), c, name, f.snapshot, "paper")
+		id, err := f.backend.create(context.Background(), c, name, f.snapshot)
 		if err != nil {
 			t.Fatal(id, err)
 		}
@@ -1041,5 +1039,117 @@ func TestInstanceSafeStopRemainsAvailableAfterResourceChange(t *testing.T) {
 	}
 	if f.states[id] != "inactive" {
 		t.Fatal("safe stop did not stop selected instance")
+	}
+}
+
+func TestInstanceCreationWithoutFixedServer(t *testing.T) {
+	f := newInstanceActivationFixture(t)
+	// Empty appliance identity/config stores; no fixed server files or state.
+	for _, path := range []string{f.backend.store.directory, f.backend.root} {
+		if err := os.RemoveAll(path); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(path, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old, oldLock, oldDiscovery := instanceRuntimes, pluginRuntimeLockPath, runAdminDiscoveryHelper
+	instanceRuntimes = f.backend
+	pluginRuntimeLockPath = filepath.Join(t.TempDir(), "maintenance.lock")
+	runAdminDiscoveryHelper = func(context.Context, string) ([]byte, error) {
+		t.Fatal("first-instance creation queried fixed-server discovery")
+		return nil, errors.New("fixed server unavailable")
+	}
+	t.Cleanup(func() {
+		instanceRuntimes, pluginRuntimeLockPath, runAdminDiscoveryHelper = old, oldLock, oldDiscovery
+	})
+	s := adminServerForTest()
+	s.operations = openTestOperationStore(t)
+	mux := http.NewServeMux()
+	registerMinecraftRoutes(mux, s)
+	c := f.configs[0]
+	// The normal first-server ports have no special reservation.
+	c.BedrockEnabled, c.BedrockPort = true, 19132
+	body, err := json.Marshal(map[string]any{"runtime": instancePublicSettings(c), "display_name": "First server"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, authorizedRequest("POST", "/v1/minecraft/instances", string(body)))
+	if rr.Code != http.StatusCreated {
+		t.Fatal(rr.Code, rr.Body.String())
+	}
+	var result struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(rr.Body.Bytes(), &result) != nil || !instanceIDPattern.MatchString(result.ID) {
+		t.Fatal("missing immutable identity", rr.Body.String())
+	}
+	r, err := f.backend.readRecord(result.ID)
+	if err != nil || f.backend.verifyLive(r) != nil {
+		t.Fatal("first instance lacks committed runtime", err)
+	}
+	if r.Runtime.UID != 1000 || r.Runtime.GID != 1000 || r.Storage != instanceStorageFor(f.snapshot, result.ID) || len(r.Firewall) == 0 {
+		t.Fatal("missing ownership, derived storage, or firewall evidence")
+	}
+	if _, err = os.Stat(r.Storage.DataPath); err != nil {
+		t.Fatal(err)
+	}
+	if pending, err := f.backend.pending(result.ID); err != nil || pending {
+		t.Fatal("activation journal did not finish", err)
+	}
+	if _, err := os.Lstat(filepath.Join(f.backend.store.directory, "minecraft.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("creation required or wrote fixed identity", err)
+	}
+	for _, id := range []string{"", "original", "minecraft", "jv-../../etc", "jv-abcdef"} {
+		calls := len(f.calls)
+		if _, err := f.backend.readRecord(id); err == nil {
+			t.Fatal("invalid/stale identity accepted", id)
+		}
+		if err := f.backend.action(context.Background(), id, "start"); err == nil {
+			t.Fatal("invalid/stale lifecycle target accepted", id)
+		}
+		if len(f.calls) != calls {
+			t.Fatal("invalid/stale identity reached runtime commands", id)
+		}
+	}
+}
+
+func TestInstanceRuntimeSnapshotApplianceOnly(t *testing.T) {
+	data := []byte(`{"storage":{"root":"/var/lib/justvoxel","mount_point":"","uuid":"","source":""},"backup_path":"/var/lib/justvoxel/backups","memory_mib":4096,"uid":1234,"gid":2345}`)
+	ctx, uid, gid, err := decodeInstanceRuntimeSnapshot(data)
+	if err != nil || uid != 1234 || gid != 2345 || ctx.StorageRoot != "/var/lib/justvoxel" || ctx.TotalMemoryMiB != 4096 {
+		t.Fatal("appliance-only snapshot rejected", err)
+	}
+	for _, data := range []string{
+		`{}`, string(bytes.ReplaceAll(data, []byte(`"uid":1234`), []byte(`"uid":0`))),
+		string(bytes.ReplaceAll(data, []byte(`"gid":2345`), []byte(`"gid":4294967295`))),
+		string(bytes.ReplaceAll(data, []byte(`"source":""`), []byte(`"source":"","data_path":"/arbitrary"`))),
+	} {
+		if _, _, _, err := decodeInstanceRuntimeSnapshot([]byte(data)); err == nil {
+			t.Fatal("unsafe appliance snapshot accepted")
+		}
+	}
+}
+
+func TestInstanceRuntimeCreateRejectsTargetOverrides(t *testing.T) {
+	_, _, configs := instanceRuntimeFixture(t)
+	mux := http.NewServeMux()
+	registerMinecraftRoutes(mux, adminServerForTest())
+	for _, field := range []string{"id", "unit", "container_name", "data_path", "environment_path", "uid", "gid"} {
+		t.Run(field, func(t *testing.T) {
+			data, _ := json.Marshal(instancePublicSettings(configs[0]))
+			var runtime map[string]any
+			if err := json.Unmarshal(data, &runtime); err != nil {
+				t.Fatal(err)
+			}
+			runtime[field] = "arbitrary-target"
+			payload, _ := json.Marshal(map[string]any{"runtime": runtime})
+			rr := httptest.NewRecorder()
+			mux.ServeHTTP(rr, authorizedRequest("POST", "/v1/minecraft/instances", string(payload)))
+			if rr.Code != http.StatusBadRequest {
+				t.Fatal("caller runtime target override accepted", rr.Code, rr.Body.String())
+			}
+		})
 	}
 }

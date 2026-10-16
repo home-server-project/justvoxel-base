@@ -97,7 +97,7 @@ func TestInstanceDeleteExactScopeAndRetainedIdentity(t *testing.T) {
 	}
 	_, siblingEnv, siblingQuadlet := b.paths(sibling)
 	preserved := []string{filepath.Join(b.store.directory, "minecraft.json"), filepath.Join(b.store.directory, sibling+".json"), siblingEnv, siblingQuadlet, filepath.Join(instanceBackupUnits, instanceBackupUnit(sibling, "timer")), filepath.Join(instanceBackupUnits, instanceBackupUnit(sibling, "service"))}
-	for _, path := range []string{filepath.Join(f.snapshot.Legacy.DataPath, "world"), filepath.Join(f.snapshot.Legacy.BackupPath, id, "archive.tar.gz"), filepath.Join(f.snapshot.Legacy.BackupPath, id, "archive.json"), filepath.Join(instanceStorageFor(f.snapshot, sibling).DataPath, "world")} {
+	for _, path := range []string{filepath.Join(f.snapshot.StorageRoot, "minecraft", "world"), filepath.Join(f.snapshot.BackupPath, id, "archive.tar.gz"), filepath.Join(f.snapshot.BackupPath, id, "archive.json"), filepath.Join(instanceStorageFor(f.snapshot, sibling).DataPath, "world")} {
 		if e := os.MkdirAll(filepath.Dir(path), 0700); e != nil {
 			t.Fatal(e)
 		}
@@ -158,7 +158,7 @@ func TestInstanceDeleteRefusesBeforeDurableIntent(t *testing.T) {
 			case "invalid":
 				id = "../legacy"
 			case "legacy":
-				id = f.snapshot.Legacy.ID
+				id = "jv-legacy1"
 			case "wrong_name":
 				name = "Other"
 			case "stale_name":

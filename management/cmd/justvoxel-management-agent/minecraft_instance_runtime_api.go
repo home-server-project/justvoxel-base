@@ -136,7 +136,7 @@ func (s *server) instanceRuntimeCreate(w http.ResponseWriter, r *http.Request) {
 		var secret [24]byte
 		if _, err = rand.Read(secret[:]); err == nil {
 			c := request.Runtime.runtime("", uid, gid, hex.EncodeToString(secret[:]))
-			id, err = instanceRuntimes.create(ctx, c, request.DisplayName, snapshot, minecraftLegacyNameSoftware(r))
+			id, err = instanceRuntimes.create(ctx, c, request.DisplayName, snapshot)
 		}
 	}
 	err = errors.Join(err, release())

@@ -86,26 +86,31 @@ func instanceRuntimeCommand(ctx context.Context, command string, args ...string)
 	return output.Bytes(), err
 }
 func instanceRuntimeSnapshot(ctx context.Context) (minecraftInstanceRuntimeContext, uint32, uint32, error) {
-	var out struct {
-		Configuration adminConfigurationDiscovery `json:"configuration"`
-		Memory        int64                       `json:"memory_mib"`
-		UID           uint32                      `json:"uid"`
-		GID           uint32                      `json:"gid"`
-	}
 	data, err := instanceRuntimeCommand(ctx, instanceRuntimeHelper, "snapshot")
-	if err != nil || json.Unmarshal(data, &out) != nil || !out.Configuration.Configured || out.UID == 0 || out.GID == 0 {
-		return minecraftInstanceRuntimeContext{}, 0, 0, instanceRuntimeFailure("Configured legacy storage and resource discovery is unavailable.")
+	if err != nil {
+		return minecraftInstanceRuntimeContext{}, 0, 0, instanceRuntimeFailure("Appliance storage and resource discovery is unavailable.")
 	}
-	identity, err := minecraftInstances.read()
-	if err != nil || identity.ID == "" {
-		return minecraftInstanceRuntimeContext{}, 0, 0, instanceRuntimeFailure("Legacy instance identity is unavailable.")
+	return decodeInstanceRuntimeSnapshot(data)
+}
+
+func decodeInstanceRuntimeSnapshot(data []byte) (minecraftInstanceRuntimeContext, uint32, uint32, error) {
+	var out struct {
+		Storage    instanceRuntimeStorage `json:"storage"`
+		BackupPath string                 `json:"backup_path"`
+		Memory     int64                  `json:"memory_mib"`
+		UID        uint32                 `json:"uid"`
+		GID        uint32                 `json:"gid"`
 	}
-	c := out.Configuration
+	if instanceDecode(data, &out) != nil || out.UID == 0 || out.GID == 0 || out.UID == ^uint32(0) || out.GID == ^uint32(0) || out.Memory <= 0 || validateInstanceRuntimePath(out.Storage.Root) != nil || validateInstanceRuntimePath(out.BackupPath) != nil || out.Storage.DataPath != "" {
+		return minecraftInstanceRuntimeContext{}, 0, 0, instanceRuntimeFailure("Appliance storage and resource discovery is unavailable.")
+	}
 	return minecraftInstanceRuntimeContext{
-		Legacy:      minecraftLegacyRuntimeReservation{ID: identity.ID, DataPath: c.Minecraft.DataPath, BackupPath: c.Backup.Path, JavaPort: c.Minecraft.JavaPort, BedrockEnabled: c.Minecraft.BedrockEnabled, BedrockPort: c.Minecraft.BedrockPort, ContainerMemory: c.Minecraft.ContainerMemory},
-		StorageRoot: filepath.Dir(c.Minecraft.DataPath), MountPoint: c.Minecraft.DataMountPoint, ExpectedUUID: c.Minecraft.DataExpectedUUID, ExpectedSource: c.Minecraft.DataExpectedSource, TotalMemoryMiB: out.Memory, TemplateRoot: "/usr/share/justvoxel/templates",
+		BackupPath: out.BackupPath, StorageRoot: out.Storage.Root,
+		MountPoint: out.Storage.MountPoint, ExpectedUUID: out.Storage.UUID, ExpectedSource: out.Storage.Source,
+		TotalMemoryMiB: out.Memory, TemplateRoot: "/usr/share/justvoxel/templates",
 	}, out.UID, out.GID, nil
 }
+
 func (b *instanceRuntimeBackend) identities() *minecraftInstanceStore {
 	if b.store != nil {
 		return b.store
