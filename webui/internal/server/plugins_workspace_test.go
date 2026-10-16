@@ -16,6 +16,8 @@ import (
 
 type fakePluginsWorkspaceAPI struct {
 	fakeDiscoveryAPI
+	selectedIDs    []string
+	selectedSeen   string
 	inventoryCalls int
 	catalogCalls   int
 	updates        bool
@@ -28,10 +30,11 @@ type fakePluginsWorkspaceAPI struct {
 	iconResult     *api.PluginIcon
 }
 
-func (f *fakePluginsWorkspaceAPI) AdminPluginInventory(_ context.Context, session string, updates bool) (api.PluginInventory, error) {
+func (f *fakePluginsWorkspaceAPI) AdminPluginInventory(ctx context.Context, session string, updates bool) (api.PluginInventory, error) {
 	if session != "session-token" {
 		return api.PluginInventory{}, api.ErrUnauthorized
 	}
+	f.selectedSeen = api.MinecraftMaintenanceInstance(ctx)
 	f.inventoryCalls++
 	f.updates = updates
 	return api.PluginInventory{Server: api.PluginServerContext{ServerSoftware: "Paper", Supported: true, MinecraftVersion: "1.21.8"}, Plugins: []api.InstalledPlugin{{Filename: "manual.jar", Management: "manual", UpdateStatus: "Update status unknown - manually managed"}, {Filename: "verified.jar", Management: "plugins", ProjectID: "project123", VersionID: "release123", UpdateStatus: "Managed by Plugins; update and removal are not available yet"}, {Filename: "floodgate-spigot.jar", Management: "justvoxel", IconProjectID: "bWrNNfkb"}}}, nil
@@ -246,7 +249,7 @@ func (f *fakePluginsInstallAPI) AdminPluginInstallPlan(_ context.Context, sessio
 func (f *fakePluginsInstallAPI) AdminPluginInstall(_ context.Context, session string, r api.PluginInstallApplyRequest) (api.PersistentOperationResponse, error) {
 	f.installs++
 	f.request = r
-	return api.PersistentOperationResponse{Operation: &api.PersistentOperation{OperationType: "plugin_install", OperationID: "12345678-1234-4123-8123-123456789abc", Stage: "downloading", State: "running", Status: "Downloading verified JARs."}}, nil
+	return api.PersistentOperationResponse{Operation: &api.PersistentOperation{InstanceID: "jv-family1", OperationType: "plugin_install", OperationID: "12345678-1234-4123-8123-123456789abc", Stage: "downloading", State: "running", Status: "Downloading verified JARs."}}, nil
 }
 func (f *fakePluginsInstallAPI) AdminCurrentPluginInstall(_ context.Context, session string) (api.PersistentOperationResponse, error) {
 	f.operations++
@@ -254,7 +257,7 @@ func (f *fakePluginsInstallAPI) AdminCurrentPluginInstall(_ context.Context, ses
 	if kind == "" {
 		kind = "plugin_install"
 	}
-	return api.PersistentOperationResponse{Operation: &api.PersistentOperation{OperationType: kind, Stage: "backup", State: "running", Status: "Creating cold backup."}}, nil
+	return api.PersistentOperationResponse{Operation: &api.PersistentOperation{InstanceID: "jv-family1", OperationType: kind, Stage: "backup", State: "running", Status: "Creating cold backup."}}, nil
 }
 func (f *fakePluginsInstallAPI) AdminOperation(ctx context.Context, session, id string) (api.PersistentOperationResponse, error) {
 	return f.AdminCurrentPluginInstall(ctx, session)
@@ -356,7 +359,7 @@ func TestPluginsInstallReviewProgressAndOwnershipRendering(t *testing.T) {
 
 func (f *fakePluginsInstallAPI) AdminPluginInstallAcknowledge(_ context.Context, session string, request api.PluginInstallAcknowledgeRequest) (api.PersistentOperationResponse, error) {
 	f.operations++
-	return api.PersistentOperationResponse{Operation: &api.PersistentOperation{OperationType: "plugin_install", OperationID: request.OperationID, State: "resolved", Status: "Plugin state verified; Minecraft remains stopped."}}, nil
+	return api.PersistentOperationResponse{Operation: &api.PersistentOperation{InstanceID: "jv-family1", OperationType: "plugin_install", OperationID: request.OperationID, State: "resolved", Status: "Plugin state verified; Minecraft remains stopped."}}, nil
 }
 
 func TestPluginsAcknowledgeRequiresAdministratorCSRFAndExactForm(t *testing.T) {
@@ -765,7 +768,7 @@ func TestPluginsWorkspaceBoundedDiscoverQuery(t *testing.T) {
 		{"modrinth_offset=10000&hangar_offset=10000&hangar_first=true", true},
 		{"hangar=", false}, {"modrinth=1", false}, {"hangar=true&hangar=false", false}, {"modrinth=true&modrinth=true", false},
 		{"hangar_offset=10001", false}, {"modrinth_offset=-1", false}, {"hangar_first=1", false}, {"hangar_offset=", false}, {"modrinth_offset=1&modrinth_offset=2", false}, {"offset=0", false},
-		{"limit=1&limit=12", false}, {"source=hangar", false}, {"url=https://example.com", false}, {"limit=1&bad=%xx", false},
+		{"limit=1&limit=12", false}, {"source=hangar", false}, {"url=https://example.com", false}, {"limit=1&bad=%xx", false}, {"server=jv-a1b2c3&limit=1&bad=%xx", false},
 	} {
 		t.Run(tc.query, func(t *testing.T) {
 			client := &fakePluginsWorkspaceAPI{}
@@ -1018,7 +1021,7 @@ func TestPluginsWorkspaceInventoryGatePrecedesFetchAndRendering(t *testing.T) {
       }`
 	check := strings.Index(loader, gate)
 	clear := strings.Index(loader, "results.replaceChildren();")
-	fetch := strings.Index(loader, "const response = await fetch(`/api/plugins/workspace/${tab}")
+	fetch := strings.Index(loader, "const response = await fetch(globalThis.justVoxelSelectedURL(`/api/plugins/workspace/${tab}")
 	render := strings.Index(loader, `items.forEach((item) => results.append(tab === "discover" ? renderProject(item, server) : renderInstalled(item)))`)
 	if clear < 0 || check <= clear || fetch <= check+len(gate) || render <= fetch {
 		t.Fatal("Installed/Updates must clear stale cards and check operation before inventory fetch/render; Discover must bypass the check")
@@ -1344,7 +1347,7 @@ const pluginRequest = async (route) => { requests.push(route); if (route !== "op
  }
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 `
-	command := exec.Command("node", "-e", program)
+	command := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value;\n"+program)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("operation gates: %v\n%s", err, output)
 	}
@@ -1393,7 +1396,7 @@ panel.hidden = true; showOperation({...op,operation_id:"two"});
 assert.equal(headerCount,3);
 }
 `
-	command := exec.Command("node", "-e", program)
+	command := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value;\n"+program)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("operation DOM lifecycle: %v\n%s", err, output)
 	}
@@ -1421,7 +1424,7 @@ assert(prevented); assert.equal(timers.size,0); assert.equal(loads,2);
 for (const filter of filterEvents) { events.input(); filter(); assert.equal(timers.size,0); }
 assert.equal(loads,6);
 `
-	command := exec.Command("node", "-e", program)
+	command := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value;\n"+program)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("live plugin search: %v\n%s", err, output)
 	}
@@ -1539,7 +1542,7 @@ assert.equal(new URL(installed.image.src, "https://appliance.example").searchPar
 assert.equal(identityTile("Manual", undefined).image, undefined);
 assert.equal(new URL(identityTile("No search icon", "root", "").image.src, "https://appliance.example").searchParams.has("icon_url"), false);
 `
-	if output, err := exec.Command("node", "-e", program).CombinedOutput(); err != nil {
+	if output, err := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value;\n"+program).CombinedOutput(); err != nil {
 		t.Fatalf("same-origin icon delivery: %v\n%s", err, output)
 	}
 }
@@ -1629,7 +1632,7 @@ const hangarURL=new URL(hangarImage.src,"https://appliance.example");assert.equa
 hangarImage.emit("error");assert.equal(hangarImage.removed,true);assert.equal(hangarTile.textContent,"HA");assert.equal(hangarImage.requests.length,1);assert(!hangarTile.classList.contains("has-logo"));
 assert.equal(identityTile("Manual",undefined).image,undefined);
 `
-	if output, err := exec.Command("node", "-e", program).CombinedOutput(); err != nil {
+	if output, err := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value;\n"+program).CombinedOutput(); err != nil {
 		t.Fatalf("icon fallback: %v\n%s", err, output)
 	}
 }
@@ -1658,7 +1661,7 @@ assert.equal(activations,2); assert.equal(cards[0].classList.contains("is-select
 closePanel(); assert.equal(panel.hidden,true);assert.equal(workspaceShell.inert,false);
 for(const c of cards){assert.equal(c.classList.contains("is-selected"),false);assert.equal(c.attrs["aria-pressed"],"false");}
 `
-	if output, err := exec.Command("node", "-e", program).CombinedOutput(); err != nil {
+	if output, err := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value;\n"+program).CombinedOutput(); err != nil {
 		t.Fatalf("selection lifecycle: %v\n%s", err, output)
 	}
 	css, err := assets.ReadFile("static/app.css")
@@ -1723,11 +1726,11 @@ func (f *fakePluginsManageAPI) AdminPluginManagePlan(_ context.Context, _ string
 func (f *fakePluginsManageAPI) AdminPluginManage(_ context.Context, _ string, r api.PluginManageApplyRequest) (api.PersistentOperationResponse, error) {
 	f.manageCalls++
 	f.manageRequest = r
-	return api.PersistentOperationResponse{Operation: &api.PersistentOperation{OperationType: "plugin_" + r.Action, OperationID: "12345678-1234-4123-8123-123456789abc", State: "running"}}, nil
+	return api.PersistentOperationResponse{Operation: &api.PersistentOperation{InstanceID: "jv-family1", OperationType: "plugin_" + r.Action, OperationID: "12345678-1234-4123-8123-123456789abc", State: "running"}}, nil
 }
 func (f *fakePluginsManageAPI) AdminPluginManageAcknowledge(_ context.Context, _ string, r api.PluginInstallAcknowledgeRequest) (api.PersistentOperationResponse, error) {
 	f.manageCalls++
-	return api.PersistentOperationResponse{Operation: &api.PersistentOperation{OperationType: "plugin_disable", OperationID: r.OperationID, State: "resolved"}}, nil
+	return api.PersistentOperationResponse{Operation: &api.PersistentOperation{InstanceID: "jv-family1", OperationType: "plugin_disable", OperationID: r.OperationID, State: "resolved"}}, nil
 }
 func (f *fakePluginsManageAPI) AdminCurrentPluginOperation(ctx context.Context, session string) (api.PersistentOperationResponse, error) {
 	return f.AdminCurrentPluginInstall(ctx, session)
@@ -1907,7 +1910,7 @@ for (const root of [modrinth,panelBody]) {
  assert.equal(tiles[0].children.filter(n=>n.tag==="img").length,1);
 }
 `
-	command := exec.Command("node", "-e", program)
+	command := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value;\n"+program)
 	if out, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("catalog card source boundary: %v\n%s", err, out)
 	}
@@ -1938,7 +1941,7 @@ assert.equal(pageCursors.length,3);
 for(const c of controls){pageIndex=2;cursor=third;nextCursor=third;c.change();assert.equal(pageIndex,0);assert.deepEqual(cursor,original);assert.deepEqual(pageCursors,[original]);assert.equal(nextCursor,null);}
 assert.equal(loads,8);
 `
-	command := exec.Command("node", "-e", program)
+	command := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value;\n"+program)
 	if out, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("composite cursor navigation: %v\n%s", err, out)
 	}
@@ -1994,7 +1997,7 @@ const fetch=async(url,options)=>{
  await load();assert.equal(pageLabel.textContent,"Page 1 of 1");
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `
-	command := exec.Command("node", "-e", program)
+	command := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value;\n"+program)
 	if out, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("source requests: %v\n%s", err, out)
 	}
@@ -2071,7 +2074,7 @@ dirty();tabs[1].events.click();clean();assert.equal(tab,"installed");tabs[0].eve
 nextCursor=second;next.events.click();assert.deepEqual(cursor,second);assert.equal(pageIndex,1);
 previous.events.click();assert.deepEqual(cursor,firstCursor());assert.equal(pageIndex,0);
 `
-	if out, err := exec.Command("node", "-e", program).CombinedOutput(); err != nil {
+	if out, err := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value;\n"+program).CombinedOutput(); err != nil {
 		t.Fatalf("cursor invalidation: %v\n%s", err, out)
 	}
 }
@@ -2090,7 +2093,7 @@ const stopPolling=()=>{throw new Error("installed project entered installation")
  assert.equal(infos,2);assert.equal(requests,0);
 })().catch(error=>{console.error(error);process.exitCode=1});
 `
-	if out, err := exec.Command("node", "-e", program).CombinedOutput(); err != nil {
+	if out, err := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value;\n"+program).CombinedOutput(); err != nil {
 		t.Fatalf("installed review guard: %v\n%s", err, out)
 	}
 }
@@ -2125,5 +2128,41 @@ func TestPluginsPlainPaginationAndSemanticBadgeStyles(t *testing.T) {
 	}
 	if !strings.Contains(script, `panelAction("Install", () => applyPlugin(plan))`) {
 		t.Fatal("top-right install action missing")
+	}
+}
+
+func (f *fakePluginsWorkspaceAPI) MinecraftInstances(context.Context, string) ([]api.RegisteredMinecraftInstance, error) {
+	ids := f.selectedIDs
+	if ids == nil {
+		ids = []string{"jv-family1"}
+	}
+	out := []api.RegisteredMinecraftInstance{}
+	for _, id := range ids {
+		out = append(out, api.RegisteredMinecraftInstance{ID: id, DisplayName: id})
+	}
+	return out, nil
+}
+func (f *fakePluginsWorkspaceAPI) MinecraftInstanceRuntimes(context.Context, string) ([]string, error) {
+	if f.selectedIDs == nil {
+		return []string{"jv-family1"}, nil
+	}
+	return f.selectedIDs, nil
+}
+func TestPluginsSelectedServerRequests(t *testing.T) {
+	for _, tc := range []struct {
+		query, want string
+		status      int
+	}{{"?server=jv-family1", "jv-family1", 200}, {"?server=jv-sibling1", "jv-sibling1", 200}, {"", "", 409}, {"?server=jv-stale1", "", 404}, {"?server=bad", "", 400}} {
+		client := &fakePluginsWorkspaceAPI{selectedIDs: []string{"jv-family1", "jv-sibling1"}}
+		client.role = "administrator"
+		app, err := New(client, Config{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, authenticatedAdminRequest("GET", "/api/plugins/workspace/installed"+tc.query, ""))
+		if rr.Code != tc.status || client.selectedSeen != tc.want {
+			t.Fatal(tc, rr.Code, client.selectedSeen, rr.Body.String())
+		}
 	}
 }

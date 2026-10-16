@@ -1835,3 +1835,18 @@ func (s *operationStore) currentPluginOperation() (*operationJournal, error) {
 	}
 	return journal, err
 }
+
+// A worker must agree with the durable selection before disruption or file changes.
+func (s *operationStore) requireMaintenanceInstance(operationID, instanceID string) error {
+	if !instanceIDPattern.MatchString(instanceID) {
+		return errInstanceID
+	}
+	journal, err := s.get(operationID)
+	if err != nil {
+		return err
+	}
+	if journal.InstanceID != instanceID {
+		return errInstanceRecovery
+	}
+	return nil
+}

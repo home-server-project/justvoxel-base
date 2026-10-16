@@ -20,6 +20,7 @@ import (
 // Evidence precedes backup/stop and atomic publication. The inode of our
 // exclusive temporary file proves which final file recovery may remove.
 type addonTransaction struct {
+	InstanceID        string     `json:"instance_id"`
 	SchemaVersion     string     `json:"schema_version"`
 	OperationID       string     `json:"operation_id"`
 	Fingerprint       string     `json:"plan_fingerprint"`
@@ -135,33 +136,35 @@ func addonTransactionFile(root *os.File, name string, tx addonTransaction) (bool
 	return true, nil
 }
 func restoreAddonRuntime(ctx context.Context, tx addonTransaction) error {
+	ctx = withPluginInstance(ctx, tx.InstanceID)
 	if !tx.RestartRequired {
 		return nil
 	}
-	active, err := pluginServiceActive(ctx)
+	active, err := pluginServiceActive(ctx, pluginInstanceID(ctx))
 	if err != nil {
 		return err
 	}
 	if tx.OriginallyRunning {
 		if !active {
-			if err = pluginService(ctx, "start"); err != nil {
+			if err = pluginService(ctx, pluginInstanceID(ctx), "start"); err != nil {
 				return err
 			}
 		}
-		return verifyPluginRuntime(ctx, tx.Version)
+		return verifyPluginRuntime(ctx, pluginInstanceID(ctx), tx.Version)
 	}
 	if active {
-		if err = pluginService(ctx, "stop"); err != nil {
+		if err = pluginService(ctx, pluginInstanceID(ctx), "stop"); err != nil {
 			return err
 		}
 	}
-	active, err = pluginServiceActive(ctx)
+	active, err = pluginServiceActive(ctx, pluginInstanceID(ctx))
 	if err != nil || active {
 		return errors.New("Original stopped state unverified")
 	}
 	return nil
 }
 func rollbackAddon(ctx context.Context, tx addonTransaction) error {
+	ctx = withPluginInstance(ctx, tx.InstanceID)
 	_, raw, err := loadAddonManifest(tx.DataPath)
 	if err != nil {
 		return err
@@ -170,10 +173,10 @@ func rollbackAddon(ctx context.Context, tx addonTransaction) error {
 		return errors.New("Ownership commit requires target verification; rollback will not guess")
 	}
 	if tx.RestartRequired {
-		if err = pluginService(ctx, "stop"); err != nil {
+		if err = pluginService(ctx, pluginInstanceID(ctx), "stop"); err != nil {
 			return err
 		}
-		active, e := pluginServiceActive(ctx)
+		active, e := pluginServiceActive(ctx, pluginInstanceID(ctx))
 		if e != nil || active {
 			return errors.New("Stopped runtime unverified")
 		}
@@ -200,6 +203,7 @@ func rollbackAddon(ctx context.Context, tx addonTransaction) error {
 	return restoreAddonRuntime(ctx, tx)
 }
 func (s *server) revalidateAddon(ctx context.Context, p addonPlan, file *os.File) error {
+	ctx = withPluginInstance(ctx, p.Server.InstanceID)
 	r, _ := http.NewRequestWithContext(ctx, "GET", "http://localhost/", nil)
 	sc, data, ok := s.pluginContext(&pluginContextSink{header: make(http.Header)}, r)
 	if !ok {
@@ -212,6 +216,7 @@ func (s *server) revalidateAddon(ctx context.Context, p addonPlan, file *os.File
 	return nil
 }
 func (s *server) checkAddonEnvironment(ctx context.Context, p addonPlan) error {
+	ctx = withPluginInstance(ctx, p.Server.InstanceID)
 	r, _ := http.NewRequestWithContext(ctx, "GET", "http://localhost/", nil)
 	current, data, ok := s.pluginContext(&pluginContextSink{header: make(http.Header)}, r)
 	if !ok || data != p.DataPath || current != p.Server {
@@ -232,8 +237,11 @@ func (s *server) checkAddonEnvironment(ctx context.Context, p addonPlan) error {
 	return nil
 }
 func executeAddonInstall(s *server, id string, p addonPlan, file *os.File, confirm bool, actor session) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	ctx, cancel := context.WithTimeout(withPluginInstance(context.Background(), p.Server.InstanceID), 20*time.Minute)
 	defer cancel()
+	if err := s.operations.requireMaintenanceInstance(id, p.Server.InstanceID); err != nil {
+		return
+	}
 	success := false
 	defer func() {
 		if s.store != nil {
@@ -259,7 +267,7 @@ func executeAddonInstall(s *server, id string, p addonPlan, file *os.File, confi
 		return
 	}
 	if p.RestartRequired {
-		online, _, e := pluginInstallPlayers(ctx)
+		online, _, e := pluginInstallPlayers(ctx, pluginInstanceID(ctx))
 		if e != nil || online > 0 && !confirm {
 			failUntouched(errors.New("Player status needs review and confirmation"))
 			return
@@ -267,7 +275,7 @@ func executeAddonInstall(s *server, id string, p addonPlan, file *os.File, confi
 	}
 	originallyRunning := false
 	if p.RestartRequired {
-		originallyRunning, err = pluginServiceActive(ctx)
+		originallyRunning, err = pluginServiceActive(ctx, pluginInstanceID(ctx))
 		if err != nil {
 			failUntouched(err)
 			return
@@ -322,7 +330,7 @@ func executeAddonInstall(s *server, id string, p addonPlan, file *os.File, confi
 		failUntouched(err)
 		return
 	}
-	tx := addonTransaction{"v1", id, p.Fingerprint, p.DataPath, p.Server.MinecraftVersion, p.addonEntry, p.RestartRequired, originallyRunning, raw, uint64(parent.Dev), parent.Ino, uint64(fst.Dev), fst.Ino, temp}
+	tx := addonTransaction{p.Server.InstanceID, "v1", id, p.Fingerprint, p.DataPath, p.Server.MinecraftVersion, p.addonEntry, p.RestartRequired, originallyRunning, raw, uint64(parent.Dev), parent.Ino, uint64(fst.Dev), fst.Ino, temp}
 	evidenceBase := filepath.Join(s.operations.baseDir, "plugin-addons")
 	if err = ensurePrivateDirectory(evidenceBase); err == nil {
 		err = os.Mkdir(filepath.Join(evidenceBase, id), 0700)
@@ -369,7 +377,7 @@ func executeAddonInstall(s *server, id string, p addonPlan, file *os.File, confi
 			s.operations.transition(id, operationNeedsAttention, "rollback", "Recovery evidence preserved; rollback journal could not be saved.")
 			return
 		}
-		recoveryCtx, c := context.WithTimeout(context.Background(), 20*time.Minute)
+		recoveryCtx, c := context.WithTimeout(withPluginInstance(context.Background(), p.Server.InstanceID), 20*time.Minute)
 		defer c()
 		if e := rollbackAddon(recoveryCtx, tx); e != nil {
 			s.operations.transition(id, operationNeedsAttention, "rollback", "Add-ons recovery needs attention. Retry recovery uses preserved evidence: "+e.Error())
@@ -390,11 +398,11 @@ func executeAddonInstall(s *server, id string, p addonPlan, file *os.File, confi
 			fail(err)
 			return
 		}
-		if _, err = pluginInstallCommand(ctx, "/usr/libexec/justvoxel/minecraft-backup", "--leave-stopped"); err != nil {
+		if err = instanceMaintenanceColdBackup(ctx, p.Server.InstanceID); err != nil {
 			fail(errors.New("Verified cold backup failed"))
 			return
 		}
-		if active, e := pluginServiceActive(ctx); e != nil || active {
+		if active, e := pluginServiceActive(ctx, pluginInstanceID(ctx)); e != nil || active {
 			fail(errors.New("Minecraft did not stop after backup"))
 			return
 		}
@@ -448,7 +456,7 @@ func executeAddonInstall(s *server, id string, p addonPlan, file *os.File, confi
 			fail(err)
 			return
 		}
-		if err = pluginService(ctx, "start"); err != nil {
+		if err = pluginService(ctx, pluginInstanceID(ctx), "start"); err != nil {
 			fail(err)
 			return
 		}
@@ -458,7 +466,7 @@ func executeAddonInstall(s *server, id string, p addonPlan, file *os.File, confi
 		return
 	}
 	if p.RestartRequired {
-		if err = verifyPluginRuntime(ctx, p.Server.MinecraftVersion); err != nil {
+		if err = verifyPluginRuntime(ctx, pluginInstanceID(ctx), p.Server.MinecraftVersion); err != nil {
 			fail(err)
 			return
 		}
@@ -521,7 +529,7 @@ func readAddonTransaction(s *server, id string) (addonTransaction, error) {
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
-	if dec.Decode(&tx) != nil || dec.Decode(new(any)) != io.EOF || tx.SchemaVersion != "v1" || tx.OperationID != id || !filepath.IsAbs(tx.DataPath) || tx.Temp != ".addon-"+id+".tmp" || tx.FileInode == 0 || tx.ParentInode == 0 || tx.RestartRequired != (tx.Entry.Kind != "worldedit_schematic") {
+	if dec.Decode(&tx) != nil || dec.Decode(new(any)) != io.EOF || tx.SchemaVersion != "v1" || validatePluginInstance(tx.InstanceID, tx.DataPath) != nil || tx.OperationID != id || !filepath.IsAbs(tx.DataPath) || tx.Temp != ".addon-"+id+".tmp" || tx.FileInode == 0 || tx.ParentInode == 0 || tx.RestartRequired != (tx.Entry.Kind != "worldedit_schematic") {
 		return tx, errors.New("Invalid Add-ons recovery evidence")
 	}
 	if err = validateAddonManifest(addonManifest{"v1", []addonEntry{tx.Entry}}); err != nil {
@@ -550,7 +558,7 @@ func (s *server) adminAddonRecover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	journal, err := s.operations.get(req.OperationID)
-	if err != nil || journal.OperationType != operationTypePluginAddonInstall || journal.State != operationNeedsAttention {
+	if err != nil || journal.OperationType != operationTypePluginAddonInstall || journal.State != operationNeedsAttention || journal.InstanceID != pluginInstanceID(r.Context()) {
 		writeError(w, 409, "Add-ons operation is not awaiting recovery")
 		return
 	}
@@ -570,7 +578,7 @@ func (s *server) adminAddonRecover(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, adminOperationResponse{Operation: &resolved})
 		return
 	}
-	if err != nil || tx.Fingerprint != journal.PlanFingerprint {
+	if err != nil || tx.Fingerprint != journal.PlanFingerprint || tx.InstanceID != journal.InstanceID {
 		writeError(w, 409, "Exact Add-ons recovery evidence unavailable; maintenance remains reserved")
 		return
 	}

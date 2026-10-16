@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -39,6 +38,8 @@ var runAdminMinecraftResetHelper = func(ctx context.Context, args ...string) ([]
 }
 
 type adminMinecraftResetPlanResponse struct {
+	InstanceID           string                    `json:"instance_id"`
+	InstanceName         string                    `json:"-"`
 	OK                   bool                      `json:"ok"`
 	SchemaVersion        string                    `json:"schema_version,omitempty"`
 	Mode                 string                    `json:"mode,omitempty"`
@@ -91,6 +92,7 @@ type adminMinecraftResetHelperApplyResponse struct {
 }
 
 type minecraftResetFingerprintPayload struct {
+	InstanceID           string                    `json:"instance_id"`
 	SchemaVersion        string                    `json:"schema_version"`
 	Mode                 string                    `json:"mode"`
 	DataPath             string                    `json:"data_path"`
@@ -106,8 +108,11 @@ type minecraftResetFingerprintPayload struct {
 }
 
 func registerAdminMinecraftResetRoutes(mux *http.ServeMux, s *server) {
-	mux.HandleFunc("POST /v1/admin/reset/minecraft/plan", s.adminMinecraftResetPlan)
-	mux.HandleFunc("POST /v1/admin/reset/minecraft/apply", s.adminMinecraftResetApply)
+	mux.HandleFunc("POST /v1/minecraft/instances/{id}/reset/plan", s.selectedResetHandler(s.adminMinecraftResetPlan))
+	mux.HandleFunc("POST /v1/minecraft/instances/{id}/reset/apply", s.selectedResetHandler(s.adminMinecraftResetApply))
+	mux.HandleFunc("POST /v1/minecraft/instances/{id}/reset/recover", s.selectedResetHandler(s.adminMinecraftResetApply))
+	mux.HandleFunc("GET /v1/minecraft/instances/{id}/reset/current-operation", s.selectedResetHandler(s.selectedResetCurrent))
+	mux.HandleFunc("GET /v1/minecraft/instances/{id}/reset/operations/{operation}", s.selectedResetHandler(s.selectedResetStatus))
 }
 
 func (s *server) adminMinecraftResetPlan(w http.ResponseWriter, r *http.Request) {
@@ -148,6 +153,10 @@ func (s *server) adminMinecraftResetApply(w http.ResponseWriter, r *http.Request
 	}
 	retrying := false
 	if current != nil {
+		if current.InstanceID != pluginInstanceID(r.Context()) {
+			writeError(w, 409, "Reset operation instance mismatch")
+			return
+		}
 		if current.State == operationNeedsAttention {
 			retrying = true
 		} else if current.PlanFingerprint == request.PlanFingerprint {
@@ -178,7 +187,7 @@ func (s *server) adminMinecraftResetApply(w http.ResponseWriter, r *http.Request
 	if retrying {
 		operation, err = s.operations.retryMinecraftReset(current.OperationID, plan.PlanFingerprint)
 	} else {
-		operation, created, err = s.operations.beginMinecraftReset(plan.PlanFingerprint)
+		operation, created, err = s.operations.beginMinecraftMaintenance(plan.PlanFingerprint, operationTypeMinecraftReset, plan.InstanceID)
 	}
 	if err != nil {
 		if errors.Is(err, errMinecraftResetOperationBusy) ||
@@ -204,50 +213,56 @@ func (s *server) adminMinecraftResetApply(w http.ResponseWriter, r *http.Request
 }
 
 func authoritativeAdminMinecraftResetPlan(parent context.Context) (adminMinecraftResetPlanResponse, int) {
-	ctx, cancel := context.WithTimeout(parent, adminMinecraftResetPlanTimeout)
-	defer cancel()
-
-	output, runErr := runAdminMinecraftResetHelper(ctx, "plan")
-	var plan adminMinecraftResetPlanResponse
-	if err := decodeAdminMinecraftResetPlanResponse(output, &plan); err != nil {
-		return adminMinecraftResetPlanResponse{
-			OK: false, Code: "plan_unavailable", Error: "Minecraft reset planning returned invalid data",
-			Players: []string{}, Warnings: []string{},
-		}, http.StatusServiceUnavailable
+	id := pluginInstanceID(parent)
+	record, err := instanceRuntimes.readRecord(id)
+	if err == nil {
+		err = instanceRuntimes.verifyLive(record)
 	}
-	if plan.Players == nil {
-		plan.Players = []string{}
+	fail := func(err error) (adminMinecraftResetPlanResponse, int) {
+		return adminMinecraftResetPlanResponse{OK: false, Code: "plan_unavailable", Error: err.Error(), Players: []string{}, Warnings: []string{}}, 409
 	}
-	if plan.Warnings == nil {
-		plan.Warnings = []string{}
-	}
-	if runErr != nil || !plan.OK {
-		status := http.StatusBadRequest
-		if plan.Code == "not_configured" {
-			status = http.StatusConflict
-		}
-		if plan.Error == "" {
-			plan.Error = "Minecraft reset could not be planned"
-		}
-		return plan, status
-	}
-	if err := validateAdminMinecraftResetPlan(plan); err != nil {
-		return adminMinecraftResetPlanResponse{
-			OK: false, Code: "invalid_plan", Error: "Minecraft reset planning returned unsupported data",
-			Players: []string{}, Warnings: []string{},
-		}, http.StatusInternalServerError
-	}
-	if err := prepareMinecraftResetPlugins(&plan); err != nil {
-		return adminMinecraftResetPlanResponse{OK: false, Code: "plugins_unsafe", Error: "Managed plugin cleanup cannot be safely planned: " + err.Error(), Players: []string{}, Warnings: []string{}}, http.StatusConflict
-	}
-	fingerprint, err := minecraftResetPlanFingerprint(plan)
 	if err != nil {
-		return adminMinecraftResetPlanResponse{
-			OK: false, Code: "fingerprint_failed", Error: "Minecraft reset plan fingerprint could not be created",
-			Players: []string{}, Warnings: []string{},
-		}, http.StatusInternalServerError
+		return fail(err)
 	}
-	plan.PlanFingerprint = fingerprint
+	snapshot, _, _, err := instanceRuntimes.snapshot(parent)
+	if err != nil {
+		return fail(err)
+	}
+	if record.Storage != instanceStorageFor(snapshot, id) {
+		return fail(errInstanceRecovery)
+	}
+	if err = instanceRuntimes.storage(parent, "validate", record); err != nil {
+		return fail(err)
+	}
+	// Reuse the existing Reset preservation classification, in the host mount namespace.
+	raw, err := instanceRuntimes.command(parent, "nsenter", "--mount=/proc/1/ns/mnt", "--", "bash", "-c", `source /usr/libexec/justvoxel/mjust/minecraft-reset-common.sh; jv_reset_data_scope "$1"`, "reset-data-scope", record.Storage.DataPath)
+	if err != nil {
+		return fail(err)
+	}
+	scope := strings.TrimSpace(string(raw))
+	action := "preserve"
+	if scope == "internal" {
+		action = "delete"
+	}
+	if scope != "internal" && scope != "external" && scope != "network" && scope != "unknown" {
+		return fail(errInstanceRecovery)
+	}
+	names, err := instanceRuntimes.identities().readNames()
+	if err != nil || names[id].DisplayName == "" {
+		return fail(errInstanceRecovery)
+	}
+	plan := adminMinecraftResetPlanResponse{OK: true, InstanceID: id, InstanceName: names[id].DisplayName, SchemaVersion: "v1", Mode: "minecraft", DataPath: record.Storage.DataPath, DataScope: scope, DataAction: action, BackupPath: snapshot.BackupPath, BackupAction: "preserve", StorageLayoutAction: "preserve", AuthenticationAction: "preserve", WebUIUsersAction: "preserve", Players: []string{}, Warnings: []string{}}
+	plan.PlayersOnline, plan.Players, err = pluginInstallPlayers(parent, id)
+	if err != nil {
+		return fail(err)
+	}
+	if err = prepareMinecraftResetPlugins(&plan); err != nil {
+		return fail(err)
+	}
+	plan.PlanFingerprint, err = minecraftResetPlanFingerprint(plan)
+	if err != nil {
+		return fail(err)
+	}
 	return plan, 0
 }
 
@@ -294,6 +309,7 @@ func minecraftResetPlanFingerprint(plan adminMinecraftResetPlanResponse) (string
 		}
 	}
 	payload, err := json.Marshal(minecraftResetFingerprintPayload{
+		InstanceID:           plan.InstanceID,
 		SchemaVersion:        plan.SchemaVersion,
 		Mode:                 plan.Mode,
 		DataPath:             plan.DataPath,
@@ -359,114 +375,67 @@ var startMinecraftResetWorker = func(s *server, operationID, expectedFingerprint
 }
 
 func executeMinecraftReset(ctx context.Context, s *server, operationID, expectedFingerprint string, actor session) error {
-	ctx = withOperationTrace(ctx, s.operations, operationID)
-	traceStage(ctx, "Validation")
-	if _, err := s.operations.transition(operationID, operationValidating, "validating", "Revalidating Minecraft reset plan."); err != nil {
+	journal, err := s.operations.get(operationID)
+	if err != nil {
 		return err
 	}
+	fail := func(err error) error {
+		_, _ = s.operations.transition(operationID, operationNeedsAttention, "reset_recovery", "Selected Minecraft reset needs recovery: "+err.Error())
+		return err
+	}
+	if !instanceIDPattern.MatchString(journal.InstanceID) || journal.OperationType != operationTypeMinecraftReset || journal.PlanFingerprint != expectedFingerprint {
+		return fail(errInstanceRecovery)
+	}
+	ctx = withPluginInstance(withOperationTrace(ctx, s.operations, operationID), journal.InstanceID)
 
 	plan, status := s.minecraftResetPlanWithRecovery(ctx)
-	if status != 0 || !plan.OK || plan.PlanFingerprint != expectedFingerprint {
-		_, _ = s.operations.transition(operationID, operationNeedsAttention, "plan_changed", "Minecraft reset stopped because the reviewed plan changed.")
-		return errors.New("Minecraft reset plan changed before execution")
+	if status != 0 || !plan.OK || plan.InstanceID != journal.InstanceID || plan.PlanFingerprint != expectedFingerprint {
+		return fail(errInstanceRecovery)
 	}
-
-	var pluginTx *minecraftResetPluginTransaction
+	if _, err = s.operations.transition(operationID, operationValidating, "validating", "Revalidating selected Minecraft reset."); err != nil {
+		return err
+	}
+	lock, err := acquirePluginRuntimeLock()
+	if err != nil {
+		return fail(err)
+	}
+	defer lock.Close()
+	tx, err := s.prepareResetPluginTransaction(ctx, operationID, plan)
+	if err != nil {
+		return fail(err)
+	}
+	if _, err = s.operations.transition(operationID, operationRunning, "resetting", "Retiring the selected Minecraft server."); err != nil {
+		return err
+	}
+	if !s.resetPluginHelperComplete(operationID) {
+		if err = instanceRuntimes.retireSelectedInstance(ctx, plan.InstanceID, tx.InstanceName, plan.DataAction); err != nil {
+			return fail(err)
+		}
+		if err = s.markResetPluginHelperComplete(*tx); err != nil {
+			return fail(err)
+		}
+	}
+	if _, err = s.operations.transition(operationID, operationVerifying, "verifying", "Verifying selected Minecraft retirement."); err != nil {
+		return err
+	}
 	if plan.DataAction == "preserve" {
-		lock, err := acquirePluginRuntimeLock()
-		if err != nil {
-			_, _ = s.operations.transition(operationID, operationNeedsAttention, "plugins_cleanup", "Minecraft maintenance is busy; reset can be retried safely.")
-			return err
+		if err = commitResetPluginCleanup(*tx); err != nil {
+			return fail(err)
 		}
-		defer lock.Close()
-		pluginTx, err = s.prepareResetPluginTransaction(ctx, operationID, plan)
-		if err != nil {
-			_, _ = s.operations.transition(operationID, operationNeedsAttention, "plugins_cleanup", "Managed plugin staging requires recovery; durable evidence was retained.")
-			return err
-		}
+	} else if err = verifyResetInternalPluginAbsence(plan.DataPath); err != nil {
+		return fail(err)
 	}
-
-	if _, err := s.operations.transition(operationID, operationRunning, "resetting", "Stopping Minecraft and removing appliance-owned Minecraft state."); err != nil {
-		return err
+	if _, err = instanceRuntimes.readRecord(plan.InstanceID); !errors.Is(err, os.ErrNotExist) && !errors.Is(err, errInstanceNotFound) {
+		return fail(errInstanceRecovery)
 	}
-
-	var output []byte
-	var runErr error
-	if pluginTx != nil && s.resetPluginHelperComplete(operationID) {
-		output, _ = json.Marshal(adminMinecraftResetHelperApplyResponse{OK: true, SchemaVersion: "v1", Mode: "minecraft", DataPath: plan.DataPath, DataScope: plan.DataScope, DataAction: plan.DataAction, BackupAction: "preserve", AuthenticationAction: "preserve", WebUIUsersAction: "preserve"})
-	} else {
-		output, runErr = runAdminMinecraftResetHelper(ctx, "apply", "--confirm-players")
+	if err = instanceRuntimes.removePrivate(instanceRuntimes.deletePath(plan.InstanceID)); err != nil {
+		return fail(err)
 	}
-	var applied adminMinecraftResetHelperApplyResponse
-	if decodeErr := decodeAdminMinecraftResetApplyResponse(output, &applied); decodeErr != nil || runErr != nil || !applied.OK {
-		if pluginTx != nil {
-			if err := restoreResetPluginJars(*pluginTx); err != nil {
-				_, _ = s.operations.transition(operationID, operationNeedsAttention, "plugins_recovery", "Minecraft reset failed and exact managed plugin recovery remains unverified. Recovery evidence is retained.")
-				return err
-			}
-		}
-		status := "Minecraft reset did not complete. Review appliance state before retrying."
-		if strings.TrimSpace(applied.Error) != "" {
-			status = "Minecraft reset stopped: " + strings.TrimSpace(applied.Error)
-			if len(status) > 512 {
-				status = status[:512]
-			}
-		}
-		_, _ = s.operations.transition(operationID, operationNeedsAttention, "reset_failed", status)
-		if decodeErr != nil {
-			return decodeErr
-		}
-		if applied.Error != "" {
-			return errors.New(applied.Error)
-		}
-		return runErr
-	}
-
-	if applied.BackupAction != "preserve" || applied.AuthenticationAction != "preserve" || applied.WebUIUsersAction != "preserve" || (pluginTx != nil && (applied.SchemaVersion != "v1" || applied.Mode != "minecraft" || applied.DataPath != plan.DataPath || applied.DataAction != plan.DataAction || applied.DataScope != plan.DataScope)) {
-		_, _ = s.operations.transition(operationID, operationNeedsAttention, "verification_failed", "Minecraft reset returned an invalid preservation result.")
-		return errors.New("Minecraft reset preservation contract changed during Apply")
-	}
-
-	if _, err := s.operations.transition(operationID, operationVerifying, "verifying", "Verifying JustVoxel returned to first-setup mode."); err != nil {
-		return err
-	}
-	traceStage(ctx, "Verification")
-	configured, preflightErr := setupAlreadyConfiguredForApply(ctx)
-	if preflightErr != nil || configured {
-		_, _ = s.operations.transition(operationID, operationNeedsAttention, "verification_failed", "Minecraft reset finished with an unexpected appliance configuration state.")
-		if preflightErr != nil {
-			return errors.New(preflightErr.message)
-		}
-		return errors.New("appliance is still configured after Minecraft reset")
-	}
-
-	if pluginTx != nil {
-		if err := s.markResetPluginHelperComplete(*pluginTx); err != nil {
-			_, _ = s.operations.transition(operationID, operationNeedsAttention, "plugins_cleanup", "Reset helper completed; durable plugin cleanup recovery is retained.")
-			return err
-		}
-		if err := commitResetPluginCleanup(*pluginTx); err != nil {
-			_, _ = s.operations.transition(operationID, operationNeedsAttention, "plugins_cleanup", "Reset helper completed; exact managed plugin ownership cleanup requires recovery.")
-			return err
-		}
-	} else if plan.DataAction == "delete" {
-		if err := verifyResetInternalPluginAbsence(plan.DataPath); err != nil {
-			_, _ = s.operations.transition(operationID, operationNeedsAttention, "plugins_cleanup", "Internal Minecraft data deletion left unexpected plugin ownership state.")
-			return err
-		}
-	}
-
-	if err := minecraftInstances.retire(); err != nil {
-		failure := fmt.Errorf("Minecraft Instance ID retirement failed: %w", err)
-		_, _ = s.operations.transition(operationID, operationNeedsAttention, "instance_retirement_failed", failure.Error())
-		return failure
-	}
-
-	if _, err := s.operations.transition(operationID, operationSucceeded, "complete", "Minecraft reset completed. JustVoxel is ready for first setup."); err != nil {
+	if _, err = s.operations.transition(operationID, operationSucceeded, "complete", "Selected Minecraft server reset completed."); err != nil {
 		return err
 	}
 	if s.store != nil {
-		_ = s.store.recordAuditEvent(actor, "reset_minecraft", "minecraft", true, "Minecraft configuration and appliance-owned internal data reset; backups and authentication preserved")
+		_ = s.store.recordAuditEvent(actor, "reset_minecraft", plan.InstanceID, true, "Selected Minecraft instance retired; backups and authentication preserved")
 	}
 	return nil
 }
@@ -499,6 +468,8 @@ type minecraftResetPluginPlan struct {
 const resetPluginTransactionLimit = 8 << 20
 
 type minecraftResetPluginTransaction struct {
+	InstanceID        string                          `json:"instance_id"`
+	InstanceName      string                          `json:"instance_name"`
 	SchemaVersion     string                          `json:"schema_version"`
 	OperationID       string                          `json:"operation_id"`
 	Plan              adminMinecraftResetPlanResponse `json:"plan"`
@@ -660,13 +631,18 @@ func (s *server) readResetPluginTransaction(id string) (*minecraftResetPluginTra
 	if err = readPrivatePluginJSON(dir, "transaction.json", &tx, resetPluginTransactionLimit); err != nil {
 		return nil, err
 	}
-	tx.Plan.PluginEvidence = &tx.Plugins
+	if tx.Plan.DataAction == "preserve" {
+		tx.Plan.PluginEvidence = &tx.Plugins
+	}
 	fingerprint, err := minecraftResetPlanFingerprint(tx.Plan)
-	if err != nil || tx.SchemaVersion != "v1" || tx.OperationID != id || tx.Plan.DataAction != "preserve" || tx.Plan.PluginsAction != "remove_managed_jars" || tx.Plan.DataPath != tx.Plugins.DataPath || fingerprint != tx.Plan.PlanFingerprint {
+	if err != nil || tx.SchemaVersion != "v1" || tx.OperationID != id || !instanceIDPattern.MatchString(tx.InstanceID) || tx.InstanceID != tx.Plan.InstanceID || tx.InstanceName == "" || (tx.Plan.DataAction == "preserve" && (tx.Plan.PluginsAction != "remove_managed_jars" || tx.Plan.DataPath != tx.Plugins.DataPath)) || fingerprint != tx.Plan.PlanFingerprint {
 		return nil, errors.New("Invalid reset plugin evidence identity")
 	}
 	if err = validateAdminMinecraftResetPlan(tx.Plan); err != nil {
 		return nil, err
+	}
+	if tx.Plan.DataAction == "delete" {
+		return &tx, nil
 	}
 	var manifest pluginManifest
 	if len(tx.Plugins.Manifest) == 0 {
@@ -687,31 +663,43 @@ func (s *server) readResetPluginTransaction(id string) (*minecraftResetPluginTra
 func (s *server) minecraftResetPlanWithRecovery(ctx context.Context) (adminMinecraftResetPlanResponse, int) {
 	if s.operations != nil {
 		current, err := s.operations.currentMinecraftReset()
-		if err == nil && current != nil {
+		if err != nil {
+			return adminMinecraftResetPlanResponse{Code: "recovery_unavailable"}, 503
+		}
+		if current != nil {
+			if current.InstanceID != pluginInstanceID(ctx) || !instanceIDPattern.MatchString(current.InstanceID) {
+				return adminMinecraftResetPlanResponse{Code: "instance_mismatch"}, 409
+			}
 			tx, err := s.readResetPluginTransaction(current.OperationID)
 			if err == nil {
-				if current.PlanFingerprint != tx.Plan.PlanFingerprint {
-					return adminMinecraftResetPlanResponse{OK: false, Code: "plugins_recovery", Error: "Reset plugin recovery identity changed", Players: []string{}, Warnings: []string{}}, 409
+				if tx.InstanceID != current.InstanceID || tx.Plan.PlanFingerprint != current.PlanFingerprint {
+					return adminMinecraftResetPlanResponse{Code: "instance_mismatch"}, 409
 				}
-				// Player snapshots are not fingerprint fields, matching the
-				// existing reset contract. Refresh them even while JARs are
-				// staged, without re-planning or changing ownership evidence.
-				output, runErr := runAdminMinecraftResetHelper(ctx, "plan")
-				var fresh adminMinecraftResetPlanResponse
-				if decodeAdminMinecraftResetPlanResponse(output, &fresh) == nil && fresh.OK && runErr == nil {
-					if validateAdminMinecraftResetPlan(fresh) != nil || fresh.DataPath != tx.Plan.DataPath || fresh.DataAction != tx.Plan.DataAction || fresh.DataScope != tx.Plan.DataScope {
-						return adminMinecraftResetPlanResponse{OK: false, Code: "plan_changed", Error: "Reset configuration changed; preserved plugin recovery remains reserved", Players: []string{}, Warnings: []string{}}, 409
+				// Refresh players only while the committed selected runtime still exists.
+				// Once retirement begins, the pinned transaction is the recovery authority.
+				if _, e := instanceRuntimes.deleteJournal(current.InstanceID); errors.Is(e, os.ErrNotExist) && !s.resetPluginHelperComplete(current.OperationID) {
+					online, players, e := pluginInstallPlayers(ctx, current.InstanceID)
+					if e != nil {
+						return adminMinecraftResetPlanResponse{Code: "players_unavailable"}, 409
 					}
-					tx.Plan.PlayersOnline = fresh.PlayersOnline
-					tx.Plan.Players = fresh.Players
-				} else if fresh.Code != "not_configured" {
-					return adminMinecraftResetPlanResponse{OK: false, Code: "plugins_recovery", Error: "Reset recovery player/configuration status unavailable", Players: []string{}, Warnings: []string{}}, 503
+					tx.Plan.PlayersOnline, tx.Plan.Players = online, players
 				}
 				return tx.Plan, 0
 			}
 			if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, unix.ENOENT) {
-				return adminMinecraftResetPlanResponse{OK: false, Code: "plugins_recovery", Error: "Reset plugin recovery evidence cannot be safely read", Players: []string{}, Warnings: []string{}}, 409
+				return adminMinecraftResetPlanResponse{Code: "recovery_evidence_missing"}, 409
 			}
+			// No destructive boundary is reachable before transaction publication.
+			// Recover an interrupted preflight only from the same live ID and exact plan,
+			// and only when no retirement intent exists. Never reconstruct lost intent.
+			if _, e := instanceRuntimes.deleteJournal(current.InstanceID); !errors.Is(e, os.ErrNotExist) {
+				return adminMinecraftResetPlanResponse{Code: "recovery_evidence_missing"}, 409
+			}
+			fresh, status := authoritativeAdminMinecraftResetPlan(ctx)
+			if status != 0 || fresh.PlanFingerprint != current.PlanFingerprint {
+				return adminMinecraftResetPlanResponse{Code: "plan_changed"}, 409
+			}
+			return fresh, 0
 		}
 	}
 	return authoritativeAdminMinecraftResetPlan(ctx)
@@ -722,22 +710,18 @@ func (s *server) prepareResetPluginTransaction(ctx context.Context, id string, p
 		return nil, err
 	}
 	if tx == nil {
-		if plan.PluginEvidence == nil {
-			return nil, errors.New("Missing managed plugin cleanup plan")
+		fresh, status := authoritativeAdminMinecraftResetPlan(ctx)
+		if status != 0 || fresh.InstanceID != plan.InstanceID || fresh.PlanFingerprint != plan.PlanFingerprint {
+			return nil, errInstanceRecovery
 		}
-		fresh := plan
-		if err = prepareMinecraftResetPlugins(&fresh); err != nil {
-			return nil, err
+		tx = &minecraftResetPluginTransaction{InstanceID: plan.InstanceID, InstanceName: fresh.InstanceName, SchemaVersion: "v1", OperationID: id, Plan: plan}
+		if plan.PluginEvidence != nil {
+			tx.Plugins = *plan.PluginEvidence
 		}
-		fingerprint, _ := minecraftResetPlanFingerprint(fresh)
-		if fingerprint != plan.PlanFingerprint {
-			return nil, errors.New("Managed plugin cleanup plan changed")
-		}
-		running, err := pluginServiceActive(ctx)
+		tx.OriginallyRunning, err = pluginServiceActive(ctx, plan.InstanceID)
 		if err != nil {
 			return nil, err
 		}
-		tx = &minecraftResetPluginTransaction{"v1", id, plan, *plan.PluginEvidence, running}
 		dir, err := s.resetPluginEvidenceDirectory(id, true)
 		if err != nil {
 			return nil, err
@@ -748,46 +732,44 @@ func (s *server) prepareResetPluginTransaction(ctx context.Context, id string, p
 			return nil, err
 		}
 	}
+	if tx.InstanceID != plan.InstanceID || tx.Plan.PlanFingerprint != plan.PlanFingerprint {
+		return nil, errInstanceRecovery
+	}
 	if s.resetPluginHelperComplete(id) {
 		return tx, nil
 	}
-	configured, preflightErr := setupAlreadyConfiguredForApply(ctx)
-	if preflightErr != nil {
-		return nil, errors.New("Reset configuration state unavailable")
-	}
-	if !configured {
-		if err := verifyInterruptedMinecraftResetRuntime(ctx); err != nil {
-			return nil, err
-		}
-		// First prove every JAR is still either original or private staging. If an
-		// interrupted helper completed, finish staging before ownership cleanup.
-		if err := stageResetPluginJars(*tx); err != nil {
-			return nil, err
-		}
-		if err := s.markResetPluginHelperComplete(*tx); err != nil {
-			return nil, err
-		}
+	// A retirement journal pins runtime/storage evidence after the first reload.
+	if _, err := instanceRuntimes.deleteJournal(plan.InstanceID); err == nil {
 		return tx, nil
-	}
-	if online, _, err := pluginInstallPlayers(ctx); err != nil || online > 0 && plan.PlayersOnline == 0 {
-		return nil, errors.New("Player state changed; refresh the reset review before retrying")
-	}
-
-	if err = checkResetPluginIdentity(tx.Plugins); err != nil {
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	if err = pluginService(ctx, "stop"); err != nil {
+	if err = validatePluginInstance(tx.InstanceID, plan.DataPath); err != nil {
 		return nil, err
 	}
-	if active, err := pluginServiceActive(ctx); err != nil || active {
-		return nil, errors.New("Minecraft must be stopped before managed plugin staging")
+	state, err := instanceRuntimes.observe(ctx, tx.InstanceID)
+	if err != nil {
+		return nil, err
 	}
-	if err = stageResetPluginJars(*tx); err != nil {
-		restoreErr := restoreResetPluginJars(*tx)
-		return nil, errors.Join(err, restoreErr)
+	if state.State == "running" {
+		err = instanceRuntimes.actionWithWarnings(ctx, tx.InstanceID, "stop", true)
+	} else if state.State != "stopped" {
+		err = errInstanceBusy
+	}
+	if err != nil {
+		return nil, err
+	}
+	if plan.DataAction == "preserve" {
+		if err = checkResetPluginIdentity(tx.Plugins); err == nil {
+			err = stageResetPluginJars(*tx)
+		}
+		if err != nil {
+			return nil, errors.Join(err, restoreResetPluginJars(*tx))
+		}
 	}
 	return tx, nil
 }
+
 func checkResetPluginIdentity(e minecraftResetPluginPlan) error {
 	data, err := openPluginDataDirectory(e.DataPath)
 	if err != nil {
@@ -935,8 +917,9 @@ func (s *server) resetPluginHelperComplete(id string) bool {
 	defer dir.Close()
 	var marker struct {
 		OperationID string `json:"operation_id"`
+		InstanceID  string `json:"instance_id"`
 	}
-	return readPrivatePluginJSON(dir, "helper-complete.json", &marker, pluginManifestLimit) == nil && marker.OperationID == id
+	return readPrivatePluginJSON(dir, "helper-complete.json", &marker, pluginManifestLimit) == nil && marker.OperationID == id && marker.InstanceID == pluginInstanceIDForResetEvidence(s, id)
 }
 func (s *server) markResetPluginHelperComplete(tx minecraftResetPluginTransaction) error {
 	if s.resetPluginHelperComplete(tx.OperationID) {
@@ -949,7 +932,8 @@ func (s *server) markResetPluginHelperComplete(tx minecraftResetPluginTransactio
 	defer dir.Close()
 	return publishPluginEvidence(dir, "helper-complete.json", struct {
 		OperationID string `json:"operation_id"`
-	}{tx.OperationID})
+		InstanceID  string `json:"instance_id"`
+	}{tx.OperationID, tx.InstanceID})
 }
 func commitResetPluginCleanup(tx minecraftResetPluginTransaction) error {
 	if err := checkResetPluginIdentity(tx.Plugins); err != nil {
@@ -1060,29 +1044,77 @@ func verifyResetInternalPluginAbsence(path string) error {
 
 // Prove a completed destructive helper after an interruption between its return
 // and the completion marker. Missing configuration alone is insufficient.
-var verifyInterruptedMinecraftResetRuntime = func(ctx context.Context) error {
-	for _, path := range []string{"/etc/justvoxel/justvoxel.conf", "/etc/justvoxel/minecraft.env", "/etc/justvoxel/minecraft-backup.env", "/etc/containers/systemd/minecraft.container", "/etc/systemd/system/minecraft-backup.service", "/etc/systemd/system/minecraft-backup.timer", "/var/lib/justvoxel/state/minecraft-previous-image-id"} {
-		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
-			return errors.New("Interrupted reset runtime cleanup cannot be proven")
-		}
-	}
-	_, err := pluginInstallCommand(ctx, "podman", "container", "exists", "minecraft")
-	var exit *exec.ExitError
-	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
-		return errors.New("Interrupted reset container absence cannot be proven")
-	}
-	// The helper's final reload is bounded and repeatable after files are proven
-	// absent, so a crash after configuration removal cannot strand recovery.
-	if _, err = pluginInstallCommand(ctx, "systemctl", "daemon-reload"); err != nil {
-		return errors.New("Interrupted reset runtime reload failed")
-	}
-	out, err := pluginInstallCommand(ctx, "systemctl", "show", "--property=ActiveState", "--value", "minecraft.service")
-	if err != nil || strings.TrimSpace(string(out)) != "inactive" {
-		return errors.New("Interrupted reset stopped runtime cannot be proven")
-	}
-	return nil
-}
+var verifyInterruptedMinecraftResetRuntime = func(context.Context) error { return errInstanceRecovery }
 
 func checkPinnedResetPluginDirectories(tx minecraftResetPluginTransaction, active, disabled, staging *os.File) error {
 	return checkPinnedManagedPluginDirectories(pluginManageTransaction{OperationID: tx.OperationID, DataPath: tx.Plugins.DataPath, DataDevice: tx.Plugins.Device, DataInode: tx.Plugins.Inode}, active, disabled, staging)
+}
+
+func (s *server) selectedResetHandler(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := s.requireAdministrator(w, r); !ok {
+			return
+		}
+		id, ok := instanceRequestID(w, r)
+		if !ok {
+			return
+		}
+		if r.PathValue("operation") != "" {
+			next(w, r.WithContext(withPluginInstance(r.Context(), id)))
+			return
+		}
+		if s.operations != nil {
+			current, err := s.operations.currentMinecraftReset()
+			if err != nil {
+				writeError(w, 503, "Reset tracking unavailable")
+				return
+			}
+			if current != nil && current.InstanceID != id {
+				writeError(w, 409, "Reset operation instance mismatch")
+				return
+			}
+			// Recovery remains available after the selected identity has been retired.
+			if current != nil {
+				next(w, r.WithContext(withPluginInstance(r.Context(), id)))
+				return
+			}
+		}
+		if err := validatePluginInstance(id, ""); err != nil {
+			instanceRuntimeError(w, err, id)
+			return
+		}
+		next(w, r.WithContext(withPluginInstance(r.Context(), id)))
+	}
+}
+func (s *server) selectedResetCurrent(w http.ResponseWriter, r *http.Request) {
+	if s.operations == nil {
+		writeError(w, 503, "Reset tracking unavailable")
+		return
+	}
+	journal, err := s.operations.currentMinecraftReset()
+	if err != nil || (journal != nil && journal.InstanceID != pluginInstanceID(r.Context())) {
+		writeError(w, 409, "Reset operation instance mismatch")
+		return
+	}
+	writeJSON(w, 200, adminOperationResponse{Operation: journal})
+}
+func (s *server) selectedResetStatus(w http.ResponseWriter, r *http.Request) {
+	if s.operations == nil {
+		writeError(w, 503, "Reset tracking unavailable")
+		return
+	}
+	journal, err := s.operations.get(r.PathValue("operation"))
+	if err != nil || journal.OperationType != operationTypeMinecraftReset || journal.InstanceID != pluginInstanceID(r.Context()) {
+		writeError(w, 409, "Reset operation instance mismatch")
+		return
+	}
+	writeJSON(w, 200, adminOperationResponse{Operation: &journal})
+}
+
+func pluginInstanceIDForResetEvidence(s *server, id string) string {
+	tx, err := s.readResetPluginTransaction(id)
+	if err != nil {
+		return ""
+	}
+	return tx.InstanceID
 }

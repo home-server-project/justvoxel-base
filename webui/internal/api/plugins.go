@@ -7,12 +7,14 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
 
 type PluginServerContext struct {
+	InstanceID       string `json:"instance_id"`
 	Configured       bool   `json:"configured"`
 	ServerType       string `json:"server_type"`
 	ServerSoftware   string `json:"server_software"`
@@ -88,10 +90,18 @@ type PluginCatalog struct {
 // Plugin reads can include bounded runtime discovery and catalog metadata reads.
 // Keep this timeout specific to these routes rather than changing the shared client.
 func (c *Client) pluginRead(ctx context.Context, session, path string, out any) error {
+	var err error
+	path, err = selectedMaintenancePath(ctx, path)
+	if err != nil {
+		return err
+	}
 	client := *c.http
 	client.Timeout = 50 * time.Second
 	scoped := &Client{http: &client}
-	return scoped.do(ctx, http.MethodGet, path, session, nil, out)
+	if err := scoped.do(ctx, http.MethodGet, path, session, nil, out); err != nil {
+		return err
+	}
+	return validateMaintenanceResponse(ctx, out)
 }
 func (c *Client) AdminPluginInventory(ctx context.Context, session string, updates bool) (PluginInventory, error) {
 	var out PluginInventory
@@ -198,10 +208,18 @@ type PluginInstallPlan struct {
 }
 
 func (c *Client) pluginPost(ctx context.Context, session, path string, request, out any) error {
+	var err error
+	path, err = selectedMaintenancePath(ctx, path)
+	if err != nil {
+		return err
+	}
 	client := *c.http
 	client.Timeout = 100 * time.Second
 	scoped := &Client{http: &client}
-	return scoped.do(ctx, http.MethodPost, path, session, request, out)
+	if err := scoped.do(ctx, http.MethodPost, path, session, request, out); err != nil {
+		return err
+	}
+	return validateMaintenanceResponse(ctx, out)
 }
 func (c *Client) AdminPluginInstallPlan(ctx context.Context, session string, request PluginInstallRequest) (PluginInstallPlan, error) {
 	var out PluginInstallPlan
@@ -215,7 +233,7 @@ func (c *Client) AdminPluginInstall(ctx context.Context, session string, request
 }
 func (c *Client) AdminCurrentPluginInstall(ctx context.Context, session string) (PersistentOperationResponse, error) {
 	var out PersistentOperationResponse
-	err := c.do(ctx, http.MethodGet, "/v1/admin/plugins/install-operation", session, nil, &out)
+	err := c.pluginRead(ctx, session, "/v1/admin/plugins/install-operation", &out)
 	return out, err
 }
 
@@ -343,7 +361,11 @@ func (c *Client) AdminPluginManageAcknowledge(ctx context.Context, session strin
 	return out, err
 }
 func (c *Client) AdminCurrentPluginOperation(ctx context.Context, session string) (PersistentOperationResponse, error) {
-	return c.getPersistentOperation(ctx, session, "/v1/admin/plugins/operation")
+	path, err := selectedMaintenancePath(ctx, "/v1/admin/plugins/operation")
+	if err != nil {
+		return PersistentOperationResponse{}, err
+	}
+	return c.getPersistentOperation(ctx, session, path)
 }
 
 func validPluginProjectID(project string) bool {
@@ -379,4 +401,65 @@ func ValidatePluginIconQuery(query url.Values) error {
 		return errors.New("Invalid plugin icon request")
 	}
 	return nil
+}
+
+type maintenanceSelectionKey struct{}
+type maintenanceSelection struct{ ID, Kind string }
+
+// WithMinecraftMaintenanceInstance carries a resolved immutable request selection.
+// It never chooses a server or falls back to appliance-global configuration.
+func WithMinecraftMaintenanceInstance(ctx context.Context, id, kind string) context.Context {
+	return context.WithValue(ctx, maintenanceSelectionKey{}, maintenanceSelection{id, kind})
+}
+func selectedMaintenancePath(ctx context.Context, path string) (string, error) {
+	selected, _ := ctx.Value(maintenanceSelectionKey{}).(maintenanceSelection)
+	if !minecraftMaintenanceIDPattern.MatchString(selected.ID) {
+		return "", errors.New("Minecraft server selection is required")
+	}
+	prefix := "/v1/minecraft/instances/" + url.PathEscape(selected.ID)
+	if strings.HasPrefix(path, "/v1/admin/plugins/") {
+		return prefix + "/plugins/" + strings.TrimPrefix(path, "/v1/admin/plugins/"), nil
+	}
+	if strings.HasPrefix(path, "/v1/admin/reset/minecraft/") {
+		return prefix + "/reset/" + strings.TrimPrefix(path, "/v1/admin/reset/minecraft/"), nil
+	}
+	return "", errors.New("Unsupported selected Minecraft operation")
+}
+
+var minecraftMaintenanceIDPattern = regexp.MustCompile(`^jv-[a-z0-9]{6,12}$`)
+
+func validateMaintenanceResponse(ctx context.Context, out any) error {
+	selected, _ := ctx.Value(maintenanceSelectionKey{}).(maintenanceSelection)
+	id := ""
+	switch v := out.(type) {
+	case *PluginInventory:
+		id = v.Server.InstanceID
+	case *PluginCatalog:
+		id = v.Server.InstanceID
+	case *PluginInstallPlan:
+		id = v.Server.InstanceID
+	case *PluginManagePlan:
+		id = v.Server.InstanceID
+	case *AddonInventory:
+		id = v.Server.InstanceID
+	case *AddonPlan:
+		id = v.Server.InstanceID
+	case *PersistentOperationResponse:
+		if v.Operation == nil {
+			return nil
+		}
+		id = v.Operation.InstanceID
+	default:
+		return errors.New("Unsupported Minecraft maintenance response")
+	}
+	if selected.ID == "" || selected.ID != id {
+		return errors.New("Minecraft maintenance response instance mismatch")
+	}
+	return nil
+}
+
+// MinecraftMaintenanceInstance returns only the immutable selection carried by this request.
+func MinecraftMaintenanceInstance(ctx context.Context) string {
+	selected, _ := ctx.Value(maintenanceSelectionKey{}).(maintenanceSelection)
+	return selected.ID
 }

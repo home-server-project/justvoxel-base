@@ -134,9 +134,9 @@ func TestResetCurrentOperationPaths(t *testing.T) {
 		call func(*Client) (PersistentOperationResponse, error)
 	}{
 		{
-			want: "/v1/admin/reset/minecraft/current-operation",
+			want: "/v1/minecraft/instances/jv-family1/reset/current-operation",
 			call: func(c *Client) (PersistentOperationResponse, error) {
-				return c.AdminCurrentMinecraftResetOperation(context.Background(), "session-token")
+				return c.AdminCurrentMinecraftResetOperation(WithMinecraftMaintenanceInstance(context.Background(), "jv-family1", "reset/minecraft"), "session-token")
 			},
 		},
 		{
@@ -219,12 +219,12 @@ func TestFactoryResetResolveClientContract(t *testing.T) {
 
 func TestMinecraftResetPlanCarriesManagedPluginCleanup(t *testing.T) {
 	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Path != adminMinecraftResetPlanPath {
+		if r.URL.Path != "/v1/minecraft/instances/jv-family1/reset/plan" {
 			t.Fatal(r.URL.Path)
 		}
-		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"ok":true,"schema_version":"v1","mode":"minecraft","plan_fingerprint":"` + resetTestFingerprint + `","data_action":"preserve","plugins_action":"remove_managed_jars","players":[],"warnings":[]}`))}, nil
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"instance_id":"jv-family1","ok":true,"schema_version":"v1","mode":"minecraft","plan_fingerprint":"` + resetTestFingerprint + `","data_action":"preserve","plugins_action":"remove_managed_jars","players":[],"warnings":[]}`))}, nil
 	})}}
-	plan, err := client.AdminMinecraftResetPlan(context.Background(), "session")
+	plan, err := client.AdminMinecraftResetPlan(WithMinecraftMaintenanceInstance(context.Background(), "jv-family1", "reset/minecraft"), "session")
 	if err != nil || plan.PluginsAction != "remove_managed_jars" || plan.DataAction != "preserve" {
 		t.Fatal("managed Plugin reset contract lost", plan, err)
 	}

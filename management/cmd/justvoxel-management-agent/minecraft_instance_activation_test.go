@@ -51,10 +51,35 @@ func instanceTestPort(t *testing.T) int {
 }
 func newInstanceActivationFixture(t *testing.T) *instanceActivationFixture {
 	t.Helper()
+	return newInstanceActivationFixtureFor(t, "", "")
+}
+
+func newInstanceActivationFixtureFor(t *testing.T, software, version string) *instanceActivationFixture {
+	t.Helper()
 	store, snapshot, configs := instanceRuntimeFixture(t)
-	root := t.TempDir()
+	if software != "" {
+		configs[0].Software = software
+	}
+	if version != "" {
+		configs[0].Version = version
+	}
+	// Runtime paths must remain valid even when subtest names contain '=' or '#'.
+	root, err := os.MkdirTemp("/tmp", "justvoxel-instance-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(root); err != nil {
+			t.Error(err)
+		}
+	})
+	snapshot.StorageRoot = filepath.Join(root, "storage")
+	snapshot.BackupPath = filepath.Join(snapshot.StorageRoot, "backups")
+	if err := os.Mkdir(snapshot.StorageRoot, 0700); err != nil {
+		t.Fatal(err)
+	}
 	f := &instanceActivationFixture{t: t, snapshot: snapshot, configs: configs, states: map[string]string{}, containers: map[string]string{}, firewall: map[instanceFirewallRule]bool{}, players: "There are 0 of a max of 20 players online:"}
-	b := &instanceRuntimeBackend{root: filepath.Join(root, "private"), quadlets: filepath.Join(root, "quadlets"), staging: filepath.Join(t.TempDir(), "staging"), store: store}
+	b := &instanceRuntimeBackend{root: filepath.Join(root, "private"), quadlets: filepath.Join(root, "quadlets"), staging: filepath.Join(root, "staging"), store: store}
 	if err := os.Mkdir(b.quadlets, 0755); err != nil {
 		t.Fatal(err)
 	}

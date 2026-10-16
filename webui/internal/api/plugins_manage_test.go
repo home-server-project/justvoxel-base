@@ -18,15 +18,15 @@ func TestPluginManageExplicitClientContracts(t *testing.T) {
 				if r.Header.Get("Authorization") != "Bearer session" {
 					t.Fatal("administrator session not forwarded")
 				}
-				payload := `{"operation":{"operation_id":"` + resetTestOperationID + `","operation_type":"plugin_` + action + `","state":"running"}}`
-				if r.URL.Path == "/v1/admin/plugins/manage/plan" {
+				payload := `{"operation":{"instance_id":"jv-family1","operation_id":"` + resetTestOperationID + `","operation_type":"plugin_` + action + `","state":"running"}}`
+				if r.URL.Path == "/v1/minecraft/instances/jv-family1/plugins/manage/plan" {
 					var request PluginManageRequest
 					if json.NewDecoder(r.Body).Decode(&request) != nil || request.Action != action || request.ProjectID != "root" {
 						t.Fatal("plan identity changed")
 					}
-					payload = `{"action":"` + action + `","project_id":"root","state":"enabled","plan_fingerprint":"` + resetTestFingerprint + `"}`
+					payload = `{"server":{"instance_id":"jv-family1"},"action":"` + action + `","project_id":"root","state":"enabled","plan_fingerprint":"` + resetTestFingerprint + `"}`
 				}
-				if r.URL.Path == "/v1/admin/plugins/manage" {
+				if r.URL.Path == "/v1/minecraft/instances/jv-family1/plugins/manage" {
 					var request PluginManageApplyRequest
 					if json.NewDecoder(r.Body).Decode(&request) != nil || request.Action != action || request.PlanFingerprint != resetTestFingerprint || !request.ConfirmPlayers {
 						t.Fatal("apply confirmation changed")
@@ -34,19 +34,19 @@ func TestPluginManageExplicitClientContracts(t *testing.T) {
 				}
 				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(payload)), Header: make(http.Header)}, nil
 			})}}
-			if _, err := client.AdminPluginManagePlan(context.Background(), "session", PluginManageRequest{Action: action, ProjectID: "root"}); err != nil {
+			if _, err := client.AdminPluginManagePlan(WithMinecraftMaintenanceInstance(context.Background(), "jv-family1", "plugins"), "session", PluginManageRequest{Action: action, ProjectID: "root"}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := client.AdminPluginManage(context.Background(), "session", PluginManageApplyRequest{Action: action, ProjectID: "root", PlanFingerprint: resetTestFingerprint, ConfirmPlayers: true}); err != nil {
+			if _, err := client.AdminPluginManage(WithMinecraftMaintenanceInstance(context.Background(), "jv-family1", "plugins"), "session", PluginManageApplyRequest{Action: action, ProjectID: "root", PlanFingerprint: resetTestFingerprint, ConfirmPlayers: true}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := client.AdminPluginManageAcknowledge(context.Background(), "session", PluginInstallAcknowledgeRequest{resetTestOperationID}); err != nil {
+			if _, err := client.AdminPluginManageAcknowledge(WithMinecraftMaintenanceInstance(context.Background(), "jv-family1", "plugins"), "session", PluginInstallAcknowledgeRequest{resetTestOperationID}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := client.AdminCurrentPluginOperation(context.Background(), "session"); err != nil {
+			if _, err := client.AdminCurrentPluginOperation(WithMinecraftMaintenanceInstance(context.Background(), "jv-family1", "plugins"), "session"); err != nil {
 				t.Fatal(err)
 			}
-			if strings.Join(calls, ",") != "/v1/admin/plugins/manage/plan,/v1/admin/plugins/manage,/v1/admin/plugins/manage/acknowledge,/v1/admin/plugins/operation" {
+			if strings.Join(calls, ",") != "/v1/minecraft/instances/jv-family1/plugins/manage/plan,/v1/minecraft/instances/jv-family1/plugins/manage,/v1/minecraft/instances/jv-family1/plugins/manage/acknowledge,/v1/minecraft/instances/jv-family1/plugins/operation" {
 				t.Fatal(calls)
 			}
 		})
@@ -55,14 +55,14 @@ func TestPluginManageExplicitClientContracts(t *testing.T) {
 func TestPluginManageRejectsArbitraryActionsAndInvalidIdentity(t *testing.T) {
 	client := &Client{http: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) { t.Fatal("invalid request reached Agent"); return nil, nil })}}
 	for _, req := range []PluginManageRequest{{Action: "update", ProjectID: "root"}, {Action: "delete", ProjectID: "root"}, {Action: "enable", ProjectID: "../root"}, {Action: "disable"}} {
-		if _, err := client.AdminPluginManagePlan(context.Background(), "session", req); err == nil {
+		if _, err := client.AdminPluginManagePlan(WithMinecraftMaintenanceInstance(context.Background(), "jv-family1", "plugins"), "session", req); err == nil {
 			t.Fatal("invalid request accepted", req)
 		}
 	}
-	if _, err := client.AdminPluginManage(context.Background(), "session", PluginManageApplyRequest{Action: "remove", ProjectID: "root", PlanFingerprint: "invalid"}); err == nil {
+	if _, err := client.AdminPluginManage(WithMinecraftMaintenanceInstance(context.Background(), "jv-family1", "plugins"), "session", PluginManageApplyRequest{Action: "remove", ProjectID: "root", PlanFingerprint: "invalid"}); err == nil {
 		t.Fatal("invalid fingerprint accepted")
 	}
-	if _, err := client.AdminPluginManageAcknowledge(context.Background(), "session", PluginInstallAcknowledgeRequest{OperationID: "../operation"}); err == nil {
+	if _, err := client.AdminPluginManageAcknowledge(WithMinecraftMaintenanceInstance(context.Background(), "jv-family1", "plugins"), "session", PluginInstallAcknowledgeRequest{OperationID: "../operation"}); err == nil {
 		t.Fatal("invalid acknowledgement accepted")
 	}
 }

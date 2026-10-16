@@ -19,6 +19,7 @@ import (
 const instanceDeleteHelper = "/usr/libexec/justvoxel/mjust/instance-delete"
 
 type instanceDeleteJournal struct {
+	ResetPolicy  string                `json:"reset_policy,omitempty"`
 	Schema       int                   `json:"schema"`
 	ID           string                `json:"id"`
 	Name         string                `json:"name"`
@@ -52,6 +53,9 @@ func (b *instanceRuntimeBackend) deleteJournal(id string) (instanceDeleteJournal
 		if !instanceFirewallZonePattern.MatchString(rule.Zone) || !instanceRuleForRuntime(rule, j.Record.Runtime) {
 			return j, errInstanceRecovery
 		}
+	}
+	if j.ResetPolicy != "" && j.ResetPolicy != "delete" && j.ResetPolicy != "preserve" {
+		return j, errInstanceRecovery
 	}
 	switch j.Stage {
 	case "intent", "runtime_retired", "data_removed", "identity_retired":
@@ -129,7 +133,12 @@ func (b *instanceRuntimeBackend) deleteStopped(ctx context.Context, id string, r
 	return nil
 }
 func (b *instanceRuntimeBackend) deleteInstance(ctx context.Context, id, name string) error {
-	if !instanceIDPattern.MatchString(id) {
+	return b.retireSelectedInstance(ctx, id, name, "")
+}
+
+// Reset supplies a durable, separate data policy; ordinary Delete always removes data.
+func (b *instanceRuntimeBackend) retireSelectedInstance(ctx context.Context, id, name, resetPolicy string) error {
+	if !instanceIDPattern.MatchString(id) || (resetPolicy != "" && resetPolicy != "delete" && resetPolicy != "preserve") {
 		return errInstanceID
 	}
 	entries, err := os.ReadDir(b.staging)
@@ -158,6 +167,9 @@ func (b *instanceRuntimeBackend) deleteInstance(ctx context.Context, id, name st
 	defer syscall.Flock(int(registry.Fd()), syscall.LOCK_UN)
 	j, err := b.deleteJournal(id)
 	retry := err == nil
+	if retry && j.ResetPolicy != resetPolicy {
+		return errInstanceRecovery
+	}
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -227,7 +239,7 @@ func (b *instanceRuntimeBackend) deleteInstance(ctx context.Context, id, name st
 		if e = b.deleteStopped(ctx, id, false); e != nil {
 			return e
 		}
-		j = instanceDeleteJournal{Schema: 1, ID: id, Name: name, Record: record, Stage: "intent"}
+		j = instanceDeleteJournal{ResetPolicy: resetPolicy, Schema: 1, ID: id, Name: name, Record: record, Stage: "intent"}
 		j.DataIdentity, e = b.deleteStorage(ctx, "inspect", j)
 		if e != nil {
 			return e
@@ -262,40 +274,15 @@ func (b *instanceRuntimeBackend) deleteInstance(ctx context.Context, id, name st
 	}
 	save := func(stage string) error { j.Stage = stage; return b.writeJSON(b.deletePath(id), j, true) }
 	if j.Stage == "intent" {
-		timer := instanceBackupUnit(id, "timer")
-		if _, e := os.Lstat(filepath.Join(instanceBackupUnits, timer)); e == nil {
-			if _, e = b.command(ctx, "systemctl", "disable", "--now", "--", timer); e != nil {
-				return errInstanceBusy
-			}
-		} else if !errors.Is(e, os.ErrNotExist) {
-			return e
-		}
-		if err = b.deleteStopped(ctx, id, true); err != nil {
+		if err = b.retireInstanceRuntime(ctx, j); err != nil {
 			return err
-		}
-		for _, rule := range j.Record.Firewall {
-			if err = b.changeFirewall(ctx, instanceFirewallChange{Rule: rule, Add: false}); err != nil {
-				return err
-			}
-		}
-		if _, err = b.command(ctx, "podman", "rm", "--ignore", "--", "minecraft-"+id); err != nil {
-			return errInstanceBusy
-		}
-		_, env, q := b.paths(id)
-		for _, path := range []string{env, q, filepath.Join(instanceBackupUnits, instanceBackupUnit(id, "timer")), filepath.Join(instanceBackupUnits, instanceBackupUnit(id, "service"))} {
-			if err = b.removePrivate(path); err != nil {
-				return err
-			}
-		}
-		if _, err = b.command(ctx, "systemctl", "daemon-reload"); err != nil {
-			return errInstanceBusy
 		}
 		if err = save("runtime_retired"); err != nil {
 			return err
 		}
 	}
 	if j.Stage == "runtime_retired" {
-		if _, err = b.deleteStorage(ctx, "remove", j); err != nil {
+		if err = b.applyInstanceRetirementDataPolicy(ctx, j); err != nil {
 			return err
 		}
 		if err = save("data_removed"); err != nil {
@@ -303,39 +290,10 @@ func (b *instanceRuntimeBackend) deleteInstance(ctx context.Context, id, name st
 		}
 	}
 	if j.Stage == "data_removed" {
-		if _, err = b.deleteStorage(ctx, "remove", j); err != nil {
+		if err = b.applyInstanceRetirementDataPolicy(ctx, j); err != nil {
 			return err
 		}
-		// Remove only known operational state. Archives/metadata live elsewhere.
-		for _, file := range []string{"settings", "status", "restore-result"} {
-			if err = b.removePrivate(b.backupPath(id, file)); err != nil {
-				return err
-			}
-		}
-		dir, _, _ := b.paths(id)
-		if err = b.removePrivate(filepath.Join(dir, "restore-journal.json")); err != nil {
-			return err
-		}
-		if err = b.removePrivate(filepath.Join(dir, "restore-result.json")); err != nil {
-			return err
-		}
-		if err = b.removePrivate(filepath.Join(dir, "config.json")); err != nil {
-			return err
-		}
-		if err = os.Remove(dir); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		parent, e := instanceOpen(b.root, syscall.O_RDONLY|syscall.O_DIRECTORY)
-		if e != nil {
-			return e
-		}
-		e = parent.Sync()
-		parent.Close()
-		if e != nil {
-			return e
-		}
-		// Identity LAST, synced, while historical name evidence remains untouched.
-		if err = b.removePrivate(filepath.Join(b.identities().directory, id+".json")); err != nil {
+		if err = b.retireInstanceStateAndIdentity(j); err != nil {
 			return err
 		}
 		if err = save("identity_retired"); err != nil {
@@ -353,6 +311,9 @@ func (b *instanceRuntimeBackend) deleteInstance(ctx context.Context, id, name st
 	defer parent.Close()
 	if err = parent.Sync(); err != nil {
 		return err
+	}
+	if resetPolicy != "" {
+		return nil
 	}
 	return b.removePrivate(b.deletePath(id))
 }
@@ -415,7 +376,95 @@ func (s *server) instanceDeletionInventory(w http.ResponseWriter, r *http.Reques
 			instanceRuntimeError(w, e, "")
 			return
 		}
+		// Reset owns recovery of its retirement journal; it is not a Delete retry.
+		if j.ResetPolicy != "" {
+			continue
+		}
 		out = append(out, minecraftRegisteredInstance{ID: id, DisplayName: j.Name})
 	}
 	writeJSON(w, 200, map[string]any{"deletions": out})
+}
+
+// Shared retirement stages retain Delete Server's ordering and exact ownership checks.
+// The caller durably records intent and its data policy before invoking them.
+func (b *instanceRuntimeBackend) retireInstanceRuntime(ctx context.Context, j instanceDeleteJournal) error {
+	id := j.ID
+	var err error
+	timer := instanceBackupUnit(id, "timer")
+	if _, e := os.Lstat(filepath.Join(instanceBackupUnits, timer)); e == nil {
+		if _, e = b.command(ctx, "systemctl", "disable", "--now", "--", timer); e != nil {
+			return errInstanceBusy
+		}
+	} else if !errors.Is(e, os.ErrNotExist) {
+		return e
+	}
+	if err = b.deleteStopped(ctx, id, true); err != nil {
+		return err
+	}
+	for _, rule := range j.Record.Firewall {
+		if err = b.changeFirewall(ctx, instanceFirewallChange{Rule: rule, Add: false}); err != nil {
+			return err
+		}
+	}
+	if _, err = b.command(ctx, "podman", "rm", "--ignore", "--", "minecraft-"+id); err != nil {
+		return errInstanceBusy
+	}
+	_, env, q := b.paths(id)
+	for _, path := range []string{env, q, filepath.Join(instanceBackupUnits, instanceBackupUnit(id, "timer")), filepath.Join(instanceBackupUnits, instanceBackupUnit(id, "service"))} {
+		if err = b.removePrivate(path); err != nil {
+			return err
+		}
+	}
+	if _, err = b.command(ctx, "systemctl", "daemon-reload"); err != nil {
+		return errInstanceBusy
+	}
+	return nil
+}
+func (b *instanceRuntimeBackend) removeInstanceData(ctx context.Context, j instanceDeleteJournal) error {
+	_, err := b.deleteStorage(ctx, "remove", j)
+	return err
+}
+func (b *instanceRuntimeBackend) retireInstanceStateAndIdentity(j instanceDeleteJournal) error {
+	id := j.ID
+	var err error
+	// Remove only known operational state. Archives/metadata live elsewhere.
+	for _, file := range []string{"settings", "status", "restore-result"} {
+		if err = b.removePrivate(b.backupPath(id, file)); err != nil {
+			return err
+		}
+	}
+	dir, _, _ := b.paths(id)
+	if err = b.removePrivate(filepath.Join(dir, "restore-journal.json")); err != nil {
+		return err
+	}
+	if err = b.removePrivate(filepath.Join(dir, "restore-result.json")); err != nil {
+		return err
+	}
+	if err = b.removePrivate(filepath.Join(dir, "config.json")); err != nil {
+		return err
+	}
+	if err = os.Remove(dir); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	parent, e := instanceOpen(b.root, syscall.O_RDONLY|syscall.O_DIRECTORY)
+	if e != nil {
+		return e
+	}
+	e = parent.Sync()
+	parent.Close()
+	if e != nil {
+		return e
+	}
+	// Identity LAST, synced, while historical name evidence remains untouched.
+	if err = b.removePrivate(filepath.Join(b.identities().directory, id+".json")); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (b *instanceRuntimeBackend) applyInstanceRetirementDataPolicy(ctx context.Context, j instanceDeleteJournal) error {
+	if j.ResetPolicy == "preserve" {
+		return nil
+	}
+	return b.removeInstanceData(ctx, j)
 }

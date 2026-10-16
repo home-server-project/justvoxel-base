@@ -37,11 +37,9 @@ var pluginCatalogClient = &http.Client{
 	Transport:     &http.Transport{DialContext: (&net.Dialer{Timeout: 3 * time.Second}).DialContext, TLSHandshakeTimeout: 3 * time.Second, ResponseHeaderTimeout: 4 * time.Second},
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
-var runPluginRuntimeStatus = func(ctx context.Context) ([]byte, error) {
-	return exec.CommandContext(ctx, statusHelper).Output()
-}
 
 type pluginServerContext struct {
+	InstanceID       string `json:"instance_id"`
 	Configured       bool   `json:"configured"`
 	ServerType       string `json:"server_type"`
 	ServerSoftware   string `json:"server_software"`
@@ -128,33 +126,42 @@ type pluginCatalogPage struct {
 }
 
 func registerAdminPluginRoutes(mux *http.ServeMux, s *server) {
-	mux.HandleFunc("GET /v1/admin/plugins/addons", s.adminAddonInventory)
-	mux.HandleFunc("POST /v1/admin/plugins/addons/plan", s.adminAddonPlan)
-	mux.HandleFunc("POST /v1/admin/plugins/addons/install", s.adminAddonInstall)
-	mux.HandleFunc("POST /v1/admin/plugins/addons/recover", s.adminAddonRecover)
-	mux.HandleFunc("GET /v1/admin/plugins/installed", s.adminPluginsInstalled)
-	mux.HandleFunc("GET /v1/admin/plugins/updates", s.adminPluginsInstalled)
-	mux.HandleFunc("GET /v1/admin/plugins/discover", s.adminPluginsDiscover)
+	mux.HandleFunc("GET /v1/minecraft/instances/{id}/plugins/operations/{operation}", s.selectedPluginHandler(s.selectedPluginStatus))
+	mux.HandleFunc("GET /v1/minecraft/instances/{id}/plugins/addons", s.selectedPluginHandler(s.adminAddonInventory))
+	mux.HandleFunc("POST /v1/minecraft/instances/{id}/plugins/addons/plan", s.selectedPluginHandler(s.adminAddonPlan))
+	mux.HandleFunc("POST /v1/minecraft/instances/{id}/plugins/addons/install", s.selectedPluginHandler(s.adminAddonInstall))
+	mux.HandleFunc("POST /v1/minecraft/instances/{id}/plugins/addons/recover", s.selectedPluginHandler(s.adminAddonRecover))
+	mux.HandleFunc("GET /v1/minecraft/instances/{id}/plugins/installed", s.selectedPluginHandler(s.adminPluginsInstalled))
+	mux.HandleFunc("GET /v1/minecraft/instances/{id}/plugins/updates", s.selectedPluginHandler(s.adminPluginsInstalled))
+	mux.HandleFunc("GET /v1/minecraft/instances/{id}/plugins/discover", s.selectedPluginHandler(s.adminPluginsDiscover))
 	mux.HandleFunc("GET /v1/admin/plugins/icon", s.adminPluginIcon)
-	mux.HandleFunc("POST /v1/admin/plugins/install/plan", s.adminPluginInstallPlan)
-	mux.HandleFunc("POST /v1/admin/plugins/install", s.adminPluginInstall)
-	mux.HandleFunc("POST /v1/admin/plugins/install/acknowledge", s.adminPluginInstallAcknowledge)
-	mux.HandleFunc("GET /v1/admin/plugins/install-operation", s.adminPluginInstallCurrent)
-	mux.HandleFunc("POST /v1/admin/plugins/manage/plan", s.adminPluginManagePlan)
-	mux.HandleFunc("POST /v1/admin/plugins/manage", s.adminPluginManage)
-	mux.HandleFunc("POST /v1/admin/plugins/manage/acknowledge", s.adminPluginManageAcknowledge)
-	mux.HandleFunc("GET /v1/admin/plugins/operation", s.adminPluginOperation)
+	mux.HandleFunc("POST /v1/minecraft/instances/{id}/plugins/install/plan", s.selectedPluginHandler(s.adminPluginInstallPlan))
+	mux.HandleFunc("POST /v1/minecraft/instances/{id}/plugins/install", s.selectedPluginHandler(s.adminPluginInstall))
+	mux.HandleFunc("POST /v1/minecraft/instances/{id}/plugins/install/acknowledge", s.selectedPluginHandler(s.adminPluginInstallAcknowledge))
+	mux.HandleFunc("GET /v1/minecraft/instances/{id}/plugins/install-operation", s.selectedPluginHandler(s.adminPluginInstallCurrent))
+	mux.HandleFunc("POST /v1/minecraft/instances/{id}/plugins/manage/plan", s.selectedPluginHandler(s.adminPluginManagePlan))
+	mux.HandleFunc("POST /v1/minecraft/instances/{id}/plugins/manage", s.selectedPluginHandler(s.adminPluginManage))
+	mux.HandleFunc("POST /v1/minecraft/instances/{id}/plugins/manage/acknowledge", s.selectedPluginHandler(s.adminPluginManageAcknowledge))
+	mux.HandleFunc("GET /v1/minecraft/instances/{id}/plugins/operation", s.selectedPluginHandler(s.adminPluginOperation))
 }
 
-// Reuse authoritative discovery and runtime status; never parse appliance config here.
+// All plugin context comes from the selected authoritative immutable record.
 func (s *server) pluginContext(w http.ResponseWriter, r *http.Request) (pluginServerContext, string, bool) {
-	var configuration adminConfigurationDiscovery
-	if !s.collectAdminDiscovery(w, r, "configuration", &configuration) {
+	id := pluginInstanceID(r.Context())
+	if r.PathValue("id") != "" {
+		id = r.PathValue("id")
+	}
+	record, err := instanceRuntimes.readRecord(id)
+	if err == nil {
+		err = instanceRuntimes.verifyLive(record)
+	}
+	if err != nil {
+		instanceRuntimeError(w, err, id)
 		return pluginServerContext{}, "", false
 	}
-	mc := configuration.Minecraft
-	out := pluginServerContext{Configured: configuration.Configured, ServerType: mc.ServerType, Supported: configuration.Configured && (mc.ServerType == "paper" || mc.ServerType == "purpur")}
-	switch mc.ServerType {
+	c := record.Runtime
+	out := pluginServerContext{InstanceID: id, Configured: true, ServerType: c.Software, MinecraftVersion: c.Version, Supported: c.Software == "paper" || c.Software == "purpur"}
+	switch c.Software {
 	case "paper":
 		out.ServerSoftware = "Paper"
 	case "purpur":
@@ -164,36 +171,58 @@ func (s *server) pluginContext(w http.ResponseWriter, r *http.Request) (pluginSe
 	}
 	if !out.Supported {
 		out.Message = "Plugins are available for Paper and Purpur. Vanilla does not support plugins."
-		if !out.Configured {
-			out.Message = "Set up a Minecraft server before browsing plugins."
-		}
-		if !out.Configured {
-			return out, mc.DataPath, true
-		}
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-	data, err := runPluginRuntimeStatus(ctx)
-	var runtime struct {
-		Minecraft struct {
-			Version    string `json:"version"`
-			ServerType string `json:"server_type"`
-		} `json:"minecraft"`
+	return out, record.Storage.DataPath, true
+}
+
+type pluginInstanceKey struct{}
+
+func pluginInstanceID(ctx context.Context) string {
+	id, _ := ctx.Value(pluginInstanceKey{}).(string)
+	return id
+}
+func withPluginInstance(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, pluginInstanceKey{}, id)
+}
+func validatePluginInstance(id, data string) error {
+	if !instanceIDPattern.MatchString(id) {
+		return errInstanceID
 	}
-	if err != nil || json.Unmarshal(data, &runtime) != nil {
-		if out.Message == "" {
-			out.Message = "Current Minecraft version is unavailable."
-		}
-	} else if runtime.Minecraft.ServerType != out.ServerType {
-		out.Message = "Server configuration changed. Refresh Plugins."
-	} else if versionInputPattern.MatchString(runtime.Minecraft.Version) && len(runtime.Minecraft.Version) <= 64 && runtime.Minecraft.Version != "Unavailable" && runtime.Minecraft.Version != "LATEST" {
-		out.MinecraftVersion = runtime.Minecraft.Version
-	} else {
-		if out.Message == "" {
-			out.Message = "Current Minecraft version is unavailable."
-		}
+	record, err := instanceRuntimes.readRecord(id)
+	if err != nil {
+		return err
 	}
-	return out, mc.DataPath, true
+	if data != "" && record.Storage.DataPath != data {
+		return errInstanceRecovery
+	}
+	return instanceRuntimes.verifyLive(record)
+}
+func (s *server) selectedPluginHandler(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := s.requireAdministrator(w, r); !ok {
+			return
+		}
+		id, ok := instanceRequestID(w, r)
+		if !ok {
+			return
+		}
+		if err := validatePluginInstance(id, ""); err != nil {
+			instanceRuntimeError(w, err, id)
+			return
+		}
+		if s.operations != nil {
+			current, err := s.operations.currentPluginOperation()
+			if err != nil {
+				writeError(w, 503, "Plugin operation tracking unavailable")
+				return
+			}
+			if current != nil && current.InstanceID != id {
+				writeError(w, 409, "Plugin operation belongs to another server or has no trustworthy instance identity")
+				return
+			}
+		}
+		next(w, r.WithContext(withPluginInstance(r.Context(), id)))
+	}
 }
 
 func (s *server) adminPluginsInstalled(w http.ResponseWriter, r *http.Request) {
@@ -1233,4 +1262,17 @@ func managedPluginInventoryItem(path string, e pluginManifestEntry) installedPlu
 	item.MetadataStatus = "Metadata read"
 	item.UpdateStatus = "Managed by Plugins; updates are not available yet"
 	return item
+}
+
+func (s *server) selectedPluginStatus(w http.ResponseWriter, r *http.Request) {
+	if s.operations == nil {
+		writeError(w, 503, "Plugin tracking unavailable")
+		return
+	}
+	journal, err := s.operations.get(r.PathValue("operation"))
+	if err != nil || !isPluginOperationType(journal.OperationType) || journal.InstanceID != pluginInstanceID(r.Context()) {
+		writeError(w, 409, "Plugin operation instance mismatch")
+		return
+	}
+	writeJSON(w, 200, adminOperationResponse{Operation: &journal})
 }

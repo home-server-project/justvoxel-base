@@ -171,7 +171,7 @@ func TestCompletedMinecraftResetReleasesAllOperationLocks(t *testing.T) {
 
 func TestCurrentMinecraftResetOperationAPIRequiresAdministratorAndAllowsLocalRoot(t *testing.T) {
 	store := openTestOperationStore(t)
-	journal, _, err := store.beginMinecraftReset(testMinecraftResetFingerprint)
+	journal, _, err := store.beginMinecraftMaintenance(testMinecraftResetFingerprint, operationTypeMinecraftReset, "jv-a1b2c3")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,8 +181,9 @@ func TestCurrentMinecraftResetOperationAPIRequiresAdministratorAndAllowsLocalRoo
 		attachTestOperationStore(t, s, store)
 		mux := http.NewServeMux()
 		registerAdminOperationRoutes(mux, s)
+		registerAdminMinecraftResetRoutes(mux, s)
 		rr := httptest.NewRecorder()
-		mux.ServeHTTP(rr, surfaceRequest(http.MethodGet, "/v1/admin/reset/minecraft/current-operation", ""))
+		mux.ServeHTTP(rr, surfaceRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/reset/current-operation", ""))
 		if rr.Code != http.StatusForbidden {
 			t.Fatalf("role %s status = %d, want 403", role, rr.Code)
 		}
@@ -190,8 +191,9 @@ func TestCurrentMinecraftResetOperationAPIRequiresAdministratorAndAllowsLocalRoo
 
 	s := surfaceTestServer(t, roleViewer)
 	attachTestOperationStore(t, s, store)
-	req := requestWithPeerUID(http.MethodGet, "http://unix/v1/admin/reset/minecraft/current-operation", 0)
+	req := requestWithPeerUID(http.MethodGet, "http://unix/v1/minecraft/instances/jv-a1b2c3/reset/current-operation", 0)
 	rr := httptest.NewRecorder()
+	req.SetPathValue("id", "jv-a1b2c3")
 	s.adminCurrentMinecraftResetOperation(rr, req)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), journal.OperationID) {
 		t.Fatalf("local-root current reset operation = %d: %s", rr.Code, rr.Body.String())

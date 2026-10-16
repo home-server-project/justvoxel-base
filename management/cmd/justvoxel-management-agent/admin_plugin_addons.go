@@ -897,7 +897,7 @@ func (s *server) adminAddonUpload(w http.ResponseWriter, r *http.Request, apply 
 		return
 	}
 	if p.RestartRequired {
-		p.Online, p.Players, err = pluginInstallPlayers(r.Context())
+		p.Online, p.Players, err = pluginInstallPlayers(r.Context(), pluginInstanceID(r.Context()))
 		if err != nil {
 			writeError(w, 503, "Player status unavailable")
 			return
@@ -924,7 +924,7 @@ func (s *server) adminAddonUpload(w http.ResponseWriter, r *http.Request, apply 
 		writeError(w, 503, "Maintenance tracking unavailable")
 		return
 	}
-	journal, created, err := s.operations.beginMinecraftMaintenance(p.Fingerprint, operationTypePluginAddonInstall)
+	journal, created, err := s.operations.beginMinecraftMaintenance(p.Fingerprint, operationTypePluginAddonInstall, p.Server.InstanceID)
 	if err != nil {
 		writeError(w, 409, "Another maintenance operation requires attention")
 		return

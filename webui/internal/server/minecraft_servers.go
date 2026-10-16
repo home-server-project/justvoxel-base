@@ -23,6 +23,11 @@ type minecraftServerSummary struct {
 	CanStart, CanStop, CanRestart                           bool
 }
 
+type minecraftInstanceInventoryAPI interface {
+	MinecraftInstances(context.Context, string) ([]api.RegisteredMinecraftInstance, error)
+	MinecraftInstanceRuntimes(context.Context, string) ([]string, error)
+}
+
 type minecraftServerInventoryAPI interface {
 	MinecraftInstances(context.Context, string) ([]api.RegisteredMinecraftInstance, error)
 	MinecraftInstanceRuntimes(context.Context, string) ([]string, error)
@@ -90,7 +95,7 @@ func (s *minecraftServerSummary) setState(state string) {
 // The runtime inventory explicitly excludes the legacy identity and includes
 // registered but unconfigured servers. Never guess identity from list position.
 func (a *App) independentServerInventory(ctx context.Context, session string) ([]api.RegisteredMinecraftInstance, error) {
-	client, ok := a.api.(minecraftServerInventoryAPI)
+	client, ok := a.api.(minecraftInstanceInventoryAPI)
 	if !ok {
 		return nil, errors.New("inventory unavailable")
 	}

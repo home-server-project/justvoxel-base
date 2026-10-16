@@ -33,9 +33,9 @@ func TestAddonKindsAndStreamingClient(t *testing.T) {
 		}
 		writer.Close()
 		c := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-			want := "/v1/admin/plugins/addons/plan"
+			want := "/v1/minecraft/instances/jv-family1/plugins/addons/plan"
 			if apply {
-				want = "/v1/admin/plugins/addons/install"
+				want = "/v1/minecraft/instances/jv-family1/plugins/addons/install"
 			}
 			if r.URL.Path != want || r.Header.Get("Authorization") != "Bearer session" {
 				t.Fatal("upload boundary", r.URL)
@@ -59,15 +59,15 @@ func TestAddonKindsAndStreamingClient(t *testing.T) {
 			if parts["file"] != "on join: stop" || parts["type"] != "skript_script" || apply && parts["plan_fingerprint"] != resetTestFingerprint {
 				t.Fatal("file resend lost", parts)
 			}
-			response := `{"kind":"skript_script","filename":"script.sk","restart_required":true}`
+			response := `{"server":{"instance_id":"jv-family1"},"kind":"skript_script","filename":"script.sk","restart_required":true}`
 			status := 200
 			if apply {
-				response = `{"operation":{"operation_type":"plugin_addon_install"}}`
+				response = `{"operation":{"instance_id":"jv-family1","operation_type":"plugin_addon_install"}}`
 				status = 202
 			}
 			return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(response))}, nil
 		})}}
-		plan, op, err := c.AdminAddonUpload(context.Background(), "session", writer.FormDataContentType(), &body, apply)
+		plan, op, err := c.AdminAddonUpload(WithMinecraftMaintenanceInstance(context.Background(), "jv-family1", "plugins"), "session", writer.FormDataContentType(), &body, apply)
 		if err != nil || !apply && plan.Kind != "skript_script" || apply && (op.Operation == nil || op.Operation.OperationType != "plugin_addon_install") {
 			t.Fatal(plan, op, err)
 		}

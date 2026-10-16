@@ -18,22 +18,22 @@ type pluginsWorkspaceAPI interface {
 }
 
 func (a *App) registerPluginsWorkspaceRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/plugins/workspace/addons", a.pluginsAddonInventory)
-	mux.HandleFunc("POST /api/plugins/workspace/addons/plan", a.pluginsAddonPlan)
-	mux.HandleFunc("POST /api/plugins/workspace/addons/install", a.pluginsAddonInstall)
-	mux.HandleFunc("POST /api/plugins/workspace/addons/recover", a.pluginsAddonRecover)
-	mux.HandleFunc("GET /api/plugins/workspace/installed", a.pluginsWorkspaceInventory)
-	mux.HandleFunc("GET /api/plugins/workspace/updates", a.pluginsWorkspaceInventory)
-	mux.HandleFunc("GET /api/plugins/workspace/discover", a.pluginsWorkspaceDiscover)
+	mux.HandleFunc("GET /api/plugins/workspace/addons", a.selectedPluginRequest(a.pluginsAddonInventory))
+	mux.HandleFunc("POST /api/plugins/workspace/addons/plan", a.selectedPluginRequest(a.pluginsAddonPlan))
+	mux.HandleFunc("POST /api/plugins/workspace/addons/install", a.selectedPluginRequest(a.pluginsAddonInstall))
+	mux.HandleFunc("POST /api/plugins/workspace/addons/recover", a.selectedPluginRequest(a.pluginsAddonRecover))
+	mux.HandleFunc("GET /api/plugins/workspace/installed", a.selectedPluginRequest(a.pluginsWorkspaceInventory))
+	mux.HandleFunc("GET /api/plugins/workspace/updates", a.selectedPluginRequest(a.pluginsWorkspaceInventory))
+	mux.HandleFunc("GET /api/plugins/workspace/discover", a.selectedPluginRequest(a.pluginsWorkspaceDiscover))
 	mux.HandleFunc("GET /api/plugins/workspace/icon", a.pluginsWorkspaceIcon)
-	mux.HandleFunc("POST /api/plugins/workspace/install/plan", a.pluginsWorkspaceInstallPlan)
-	mux.HandleFunc("POST /api/plugins/workspace/install", a.pluginsWorkspaceInstall)
-	mux.HandleFunc("POST /api/plugins/workspace/install/acknowledge", a.pluginsWorkspaceInstallAcknowledge)
-	mux.HandleFunc("GET /api/plugins/workspace/install-operation", a.pluginsWorkspaceInstallOperation)
-	mux.HandleFunc("GET /api/plugins/workspace/operation", a.pluginsWorkspaceInstallOperation)
-	mux.HandleFunc("POST /api/plugins/workspace/manage/plan", a.pluginsWorkspaceManagePlan)
-	mux.HandleFunc("POST /api/plugins/workspace/manage", a.pluginsWorkspaceManage)
-	mux.HandleFunc("POST /api/plugins/workspace/manage/acknowledge", a.pluginsWorkspaceManageAcknowledge)
+	mux.HandleFunc("POST /api/plugins/workspace/install/plan", a.selectedPluginRequest(a.pluginsWorkspaceInstallPlan))
+	mux.HandleFunc("POST /api/plugins/workspace/install", a.selectedPluginRequest(a.pluginsWorkspaceInstall))
+	mux.HandleFunc("POST /api/plugins/workspace/install/acknowledge", a.selectedPluginRequest(a.pluginsWorkspaceInstallAcknowledge))
+	mux.HandleFunc("GET /api/plugins/workspace/install-operation", a.selectedPluginRequest(a.pluginsWorkspaceInstallOperation))
+	mux.HandleFunc("GET /api/plugins/workspace/operation", a.selectedPluginRequest(a.pluginsWorkspaceInstallOperation))
+	mux.HandleFunc("POST /api/plugins/workspace/manage/plan", a.selectedPluginRequest(a.pluginsWorkspaceManagePlan))
+	mux.HandleFunc("POST /api/plugins/workspace/manage", a.selectedPluginRequest(a.pluginsWorkspaceManage))
+	mux.HandleFunc("POST /api/plugins/workspace/manage/acknowledge", a.selectedPluginRequest(a.pluginsWorkspaceManageAcknowledge))
 }
 func (a *App) pluginsWorkspaceInventory(w http.ResponseWriter, r *http.Request) {
 	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
@@ -195,7 +195,7 @@ func (a *App) pluginsWorkspaceInstallOperation(w http.ResponseWriter, r *http.Re
 		a.writeMinecraftWorkspaceAPIError(w, err, "Plugin installation status is unavailable.")
 		return
 	}
-	if out.Operation != nil && (!isWorkspacePluginOperation(out.Operation.OperationType) || (r.URL.Path == "/api/plugins/workspace/install-operation" && out.Operation.OperationType != "plugin_install")) {
+	if out.Operation != nil && (out.Operation.InstanceID != api.MinecraftMaintenanceInstance(r.Context()) || !isWorkspacePluginOperation(out.Operation.OperationType) || (r.URL.Path == "/api/plugins/workspace/install-operation" && out.Operation.OperationType != "plugin_install")) {
 		writeMinecraftWorkspaceError(w, 404, "Plugin installation not found.")
 		return
 	}
@@ -435,4 +435,26 @@ func (a *App) pluginsWorkspaceManageAcknowledge(w http.ResponseWriter, r *http.R
 		return
 	}
 	writeMinecraftWorkspaceJSON(w, 200, out)
+}
+
+func (a *App) selectedPluginRequest(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
+		if !ok {
+			return
+		}
+		query, err := url.ParseQuery(r.URL.RawQuery)
+		if err != nil {
+			writeMinecraftWorkspaceError(w, http.StatusBadRequest, "Invalid plugin request.")
+			return
+		}
+		selected, ok := a.selectedMinecraft(w, r, session)
+		if !ok {
+			return
+		}
+		query.Del("server")
+		copy := r.Clone(api.WithMinecraftMaintenanceInstance(r.Context(), selected.ID, "plugins"))
+		copy.URL.RawQuery = query.Encode()
+		next(w, copy)
+	}
 }

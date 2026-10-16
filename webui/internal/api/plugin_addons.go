@@ -78,6 +78,10 @@ func (c *Client) AdminAddonUpload(ctx context.Context, session, contentType stri
 	if apply {
 		path = "/v1/admin/plugins/addons/install"
 	}
+	path, err := selectedMaintenancePath(ctx, path)
+	if err != nil {
+		return plan, operation, err
+	}
 	req, err := http.NewRequestWithContext(ctx, "POST", "http://unix"+path, body)
 	if err != nil {
 		return plan, operation, err
@@ -122,7 +126,12 @@ func (c *Client) AdminAddonUpload(ctx context.Context, session, contentType stri
 	if err != nil {
 		return plan, operation, errors.New("Invalid Add-ons response")
 	}
-	return plan, operation, nil
+	if apply {
+		err = validateMaintenanceResponse(ctx, &operation)
+	} else {
+		err = validateMaintenanceResponse(ctx, &plan)
+	}
+	return plan, operation, err
 }
 func (c *Client) AdminAddonRecover(ctx context.Context, session string, request PluginInstallAcknowledgeRequest) (PersistentOperationResponse, error) {
 	var out PersistentOperationResponse

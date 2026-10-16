@@ -28,6 +28,7 @@ var (
 )
 
 type AdminResetPlanResponse struct {
+	InstanceID            string   `json:"instance_id,omitempty"`
 	OK                    bool     `json:"ok"`
 	SchemaVersion         string   `json:"schema_version,omitempty"`
 	Mode                  string   `json:"mode,omitempty"`
@@ -76,7 +77,11 @@ type AdminResetApplyResponse struct {
 }
 
 func (c *Client) AdminMinecraftResetPlan(ctx context.Context, session string) (AdminResetPlanResponse, error) {
-	return c.adminResetPlan(ctx, session, adminMinecraftResetPlanPath, "minecraft")
+	path, err := selectedMaintenancePath(ctx, adminMinecraftResetPlanPath)
+	if err != nil {
+		return AdminResetPlanResponse{}, err
+	}
+	return c.adminResetPlan(ctx, session, path, "minecraft")
 }
 
 func (c *Client) AdminFactoryResetPlan(ctx context.Context, session string) (AdminResetPlanResponse, error) {
@@ -87,7 +92,11 @@ func (c *Client) AdminMinecraftResetApply(ctx context.Context, session string, r
 	if !adminResetFingerprintPattern.MatchString(request.PlanFingerprint) {
 		return AdminResetApplyResponse{}, errors.New("invalid Minecraft reset fingerprint")
 	}
-	return c.adminResetApply(ctx, session, adminMinecraftResetApplyPath, request, "minecraft_reset")
+	path, err := selectedMaintenancePath(ctx, adminMinecraftResetApplyPath)
+	if err != nil {
+		return AdminResetApplyResponse{}, err
+	}
+	return c.adminResetApply(ctx, session, path, request, "minecraft_reset")
 }
 
 func (c *Client) AdminFactoryResetApply(ctx context.Context, session string, request AdminFactoryResetApplyRequest) (AdminResetApplyResponse, error) {
@@ -164,6 +173,10 @@ func (c *Client) adminResetPlan(ctx context.Context, session, path, mode string)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return out, &ResponseError{StatusCode: resp.StatusCode, Message: resetResponseMessage(out.Error, "reset planning was rejected")}
 	}
+	selected, _ := ctx.Value(maintenanceSelectionKey{}).(maintenanceSelection)
+	if mode == "minecraft" && (selected.ID == "" || out.InstanceID != selected.ID) {
+		return out, errors.New("Minecraft reset plan instance mismatch")
+	}
 	if !out.OK || out.Mode != mode || !adminResetFingerprintPattern.MatchString(out.PlanFingerprint) {
 		return out, errors.New("management API returned unsupported reset plan")
 	}
@@ -199,6 +212,10 @@ func (c *Client) adminResetApply(ctx context.Context, session, path string, body
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return out, &ResponseError{StatusCode: resp.StatusCode, Message: resetResponseMessage(out.Error, "reset could not start")}
+	}
+	selected, _ := ctx.Value(maintenanceSelectionKey{}).(maintenanceSelection)
+	if operationType == "minecraft_reset" && (out.Operation == nil || selected.ID == "" || out.Operation.InstanceID != selected.ID) {
+		return out, errors.New("Minecraft reset operation instance mismatch")
 	}
 	if !out.OK || out.Operation == nil || out.Operation.OperationType != operationType {
 		return out, errors.New("management API returned unsupported reset operation")

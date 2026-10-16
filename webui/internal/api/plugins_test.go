@@ -39,15 +39,19 @@ func TestPluginProviderRequestsAreExplicit(t *testing.T) {
 		if json.NewDecoder(r.Body).Decode(&req) != nil || req["source"] != "Hangar" || req["project_id"] != "123" || req["version_id"] != "456" {
 			t.Fatal("install provider lost", req)
 		}
-		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"source":"Hangar","project_id":"123","version_id":"456"}`))}, nil
+		payload := `{"server":{"instance_id":"jv-family1"},"source":"Hangar","project_id":"123","version_id":"456"}`
+		if strings.HasSuffix(r.URL.Path, "/install") {
+			payload = `{"operation":{"instance_id":"jv-family1","operation_type":"plugin_install"}}`
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(payload))}, nil
 	})}}
-	if _, err := c.AdminPluginInstallPlan(context.Background(), "session", PluginInstallRequest{Source: "Hangar", ProjectID: "123", VersionID: "456"}); err != nil {
+	if _, err := c.AdminPluginInstallPlan(WithMinecraftMaintenanceInstance(context.Background(), "jv-family1", "plugins"), "session", PluginInstallRequest{Source: "Hangar", ProjectID: "123", VersionID: "456"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.AdminPluginInstall(context.Background(), "session", PluginInstallApplyRequest{Source: "Hangar", ProjectID: "123", VersionID: "456", PlanFingerprint: resetTestFingerprint}); err != nil {
+	if _, err := c.AdminPluginInstall(WithMinecraftMaintenanceInstance(context.Background(), "jv-family1", "plugins"), "session", PluginInstallApplyRequest{Source: "Hangar", ProjectID: "123", VersionID: "456", PlanFingerprint: resetTestFingerprint}); err != nil {
 		t.Fatal(err)
 	}
-	_, _ = c.AdminPluginSourceIcon(context.Background(), "session", "Hangar", "123")
+	_, _ = c.AdminPluginSourceIcon(WithMinecraftMaintenanceInstance(context.Background(), "jv-family1", "plugins"), "session", "Hangar", "123")
 	if calls != 3 {
 		t.Fatal(calls)
 	}

@@ -57,7 +57,7 @@ func addonTestHost(t *testing.T, data string, d addonDefinition) {
 	pluginTestJar(t, filepath.Join(data, "plugins", d.Host+".jar"), map[string]string{"plugin.yml": "name: " + name + "\nversion: 1\nmain: " + main + "\n"})
 }
 func addonTestContext() pluginServerContext {
-	return pluginServerContext{Configured: true, ServerType: "paper", ServerSoftware: "Paper", MinecraftVersion: "1.21.8", Supported: true}
+	return pluginServerContext{InstanceID: "jv-a1b2c3", Configured: true, ServerType: "paper", ServerSoftware: "Paper", MinecraftVersion: "1.21.8", Supported: true}
 }
 func TestAddonHostsAndAuthoritativeTargets(t *testing.T) {
 	for _, d := range addonDefinitions {
@@ -316,7 +316,7 @@ func TestAddonOperationMaintenanceAndRollback(t *testing.T) {
 					t.Fatal(err)
 				}
 				fixture.failBackup = failBackup
-				journal, created, err := fixture.s.operations.beginMinecraftMaintenance(plan.Fingerprint, operationTypePluginAddonInstall)
+				journal, created, err := fixture.s.operations.beginMinecraftMaintenance(plan.Fingerprint, operationTypePluginAddonInstall, "jv-a1b2c3")
 				if err != nil || !created {
 					t.Fatal(err)
 				}
@@ -368,7 +368,7 @@ func TestAddonExecutablePlayerGateAndStoppedState(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		journal, _, err := fixture.s.operations.beginMinecraftMaintenance(p.Fingerprint, operationTypePluginAddonInstall)
+		journal, _, err := fixture.s.operations.beginMinecraftMaintenance(p.Fingerprint, operationTypePluginAddonInstall, "jv-a1b2c3")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -392,7 +392,7 @@ func TestAddonRollbackRefusesChangedFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	j, _, _ := fixture.s.operations.beginMinecraftMaintenance(p.Fingerprint, operationTypePluginAddonInstall)
+	j, _, _ := fixture.s.operations.beginMinecraftMaintenance(p.Fingerprint, operationTypePluginAddonInstall, "jv-a1b2c3")
 	executeAddonInstall(fixture.s, j.OperationID, p, file, false, session{})
 	tx, err := readAddonTransaction(fixture.s, j.OperationID)
 	if err != nil {
@@ -489,7 +489,7 @@ func TestAddonRollbackAfterRuntimeFailureAndDiagnostics(t *testing.T) {
 		}
 		return originalCommand(ctx, cmd, args...)
 	}
-	j, _, err := fixture.s.operations.beginMinecraftMaintenance(p.Fingerprint, operationTypePluginAddonInstall)
+	j, _, err := fixture.s.operations.beginMinecraftMaintenance(p.Fingerprint, operationTypePluginAddonInstall, "jv-a1b2c3")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -517,6 +517,8 @@ func TestAddonApplyRejectsChangedReviewedFileAndHost(t *testing.T) {
 	}
 	fields := [][2]string{{"type", d.Kind}, {"plan_fingerprint", p.Fingerprint}, {"confirm_players", "false"}}
 	request := addonMultipartRequest(t, fields, "file.schem", []byte("changed"))
+	request.SetPathValue("id", "jv-a1b2c3")
+	request = request.WithContext(withPluginInstance(request.Context(), "jv-a1b2c3"))
 	request.Header.Set("Authorization", "Bearer token")
 	rr := httptest.NewRecorder()
 	fixture.s.adminAddonInstall(rr, request)
@@ -525,6 +527,8 @@ func TestAddonApplyRejectsChangedReviewedFileAndHost(t *testing.T) {
 	}
 	os.WriteFile(filepath.Join(fixture.data, "plugins/WorldEdit/config.yml"), []byte("saveDir: other\n"), 0644)
 	request = addonMultipartRequest(t, fields, "file.schem", []byte("content"))
+	request.SetPathValue("id", "jv-a1b2c3")
+	request = request.WithContext(withPluginInstance(request.Context(), "jv-a1b2c3"))
 	request.Header.Set("Authorization", "Bearer token")
 	rr = httptest.NewRecorder()
 	fixture.s.adminAddonInstall(rr, request)

@@ -49,7 +49,7 @@ func pluginTestJar(t *testing.T, path string, fields map[string]string) {
 	}
 }
 func TestPluginInventoryReadOnlyAndIsolatedMetadata(t *testing.T) {
-	data := t.TempDir()
+	data := pluginTestData(t)
 	root := filepath.Join(data, "plugins")
 	if err := os.Mkdir(root, 0700); err != nil {
 		t.Fatal(err)
@@ -103,7 +103,7 @@ func TestPluginInventoryReadOnlyAndIsolatedMetadata(t *testing.T) {
 	}
 }
 func TestPluginInventoryRefusesSymlinkRoot(t *testing.T) {
-	data := t.TempDir()
+	data := pluginTestData(t)
 	elsewhere := t.TempDir()
 	if err := os.Symlink(elsewhere, filepath.Join(data, "plugins")); err != nil {
 		t.Fatal(err)
@@ -144,7 +144,11 @@ func TestPluginRoutesAuthorizeBeforeDiscovery(t *testing.T) {
 		registerAdminPluginRoutes(mux, s)
 		for _, path := range []string{"installed", "updates", "discover", "icon?project_id=root"} {
 			rr := httptest.NewRecorder()
-			mux.ServeHTTP(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/"+path, ""))
+			route := "/v1/minecraft/instances/jv-a1b2c3/plugins/" + path
+			if strings.HasPrefix(path, "icon") {
+				route = "/v1/admin/plugins/" + path
+			}
+			mux.ServeHTTP(rr, pluginTestRequest(http.MethodGet, route, ""))
 			if rr.Code != http.StatusForbidden {
 				t.Fatalf("%s %s: %d", role, path, rr.Code)
 			}
@@ -160,9 +164,10 @@ func TestVanillaPluginsUnsupportedWithoutCatalog(t *testing.T) {
 	runPluginRuntimeStatus = func(context.Context) ([]byte, error) {
 		return []byte(`{"minecraft":{"server_type":"vanilla","version":"1.21.8"}}`), nil
 	}
+	pluginTestDataFor(t, "vanilla", "1.21.8")
 	s := surfaceTestServer(t, roleAdministrator)
 	rr := httptest.NewRecorder()
-	s.adminPluginsDiscover(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/discover", ""))
+	s.adminPluginsDiscover(rr, pluginTestRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/plugins/discover", ""))
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"supported":false`) || !strings.Contains(rr.Body.String(), "Vanilla does not support plugins") || !strings.Contains(rr.Body.String(), `"minecraft_version":"1.21.8"`) {
 		t.Fatalf("vanilla: %d %s", rr.Code, rr.Body.String())
 	}
@@ -221,9 +226,10 @@ func TestModrinthPluginDefaultFiltersAndReleaseDependencies(t *testing.T) {
 		}
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
 	})}
+	pluginTestDataFor(t, "purpur", "1.21.8")
 	s := surfaceTestServer(t, roleAdministrator)
 	rr := httptest.NewRecorder()
-	s.adminPluginsDiscover(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/discover?q=Example", ""))
+	s.adminPluginsDiscover(rr, pluginTestRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/plugins/discover?q=Example", ""))
 	var out pluginCatalog
 	if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &out) != nil || len(out.Projects) != 1 {
 		t.Fatalf("catalog: %d %s", rr.Code, rr.Body.String())
@@ -235,7 +241,7 @@ func TestModrinthPluginDefaultFiltersAndReleaseDependencies(t *testing.T) {
 	for _, invalid := range []string{"", "https://evil.example/data/abc123/icon.png", "https://cdn.modrinth.com/data/other/icon.png", strings.Repeat("x", 2049)} {
 		searchIcon = invalid
 		rr := httptest.NewRecorder()
-		s.adminPluginsDiscover(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/discover", ""))
+		s.adminPluginsDiscover(rr, pluginTestRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/plugins/discover", ""))
 		var catalog pluginCatalog
 		if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &catalog) != nil || len(catalog.Projects) != 1 || catalog.Projects[0].IconURL != "" || catalog.Projects[0].Version == nil {
 			t.Fatalf("invalid icon failed catalog or escaped validation: %d %s", rr.Code, rr.Body.String())
@@ -245,7 +251,7 @@ func TestModrinthPluginDefaultFiltersAndReleaseDependencies(t *testing.T) {
 	for _, value := range []string{"1", "12"} {
 		expectedLimit = value
 		rr := httptest.NewRecorder()
-		s.adminPluginsDiscover(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/discover?q=Example&limit="+value, ""))
+		s.adminPluginsDiscover(rr, pluginTestRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/plugins/discover?q=Example&limit="+value, ""))
 		if rr.Code != http.StatusOK {
 			t.Fatal("bounded limit rejected", value, rr.Code, rr.Body.String())
 		}
@@ -296,7 +302,7 @@ func TestPluginInventoryManagedIdentities(t *testing.T) {
 		{"similar main", "manual.jar", "name: ViaVersion\nmain: com.viaversion.viaversion.ViaVersionPluginFake\n", "manual", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			data := t.TempDir()
+			data := pluginTestData(t)
 			root := filepath.Join(data, "plugins")
 			if err := os.Mkdir(root, 0700); err != nil {
 				t.Fatal(err)
@@ -333,7 +339,7 @@ func TestPaperPluginsSupported(t *testing.T) {
 		runPluginRuntimeStatus = oldRuntime
 		pluginCatalogClient = oldClient
 	}()
-	data := t.TempDir()
+	data := pluginTestData(t)
 	runAdminDiscoveryHelper = func(context.Context, string) ([]byte, error) {
 		return json.Marshal(map[string]any{"configured": true, "minecraft": map[string]string{"server_type": "paper", "data_path": data}})
 	}
@@ -346,7 +352,7 @@ func TestPaperPluginsSupported(t *testing.T) {
 	})}
 	s := surfaceTestServer(t, roleAdministrator)
 	rr := httptest.NewRecorder()
-	s.adminPluginsInstalled(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/installed", ""))
+	s.adminPluginsInstalled(rr, pluginTestRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/plugins/installed", ""))
 	var out pluginInventory
 	if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &out) != nil {
 		t.Fatalf("inventory: %d %s", rr.Code, rr.Body.String())
@@ -382,7 +388,7 @@ func TestModrinthCatalogUnavailablePreservesLocalInventory(t *testing.T) {
 				runPluginRuntimeStatus = oldRuntime
 				pluginCatalogClient = oldClient
 			}()
-			data := t.TempDir()
+			data := pluginTestData(t)
 			root := filepath.Join(data, "plugins")
 			if err := os.Mkdir(root, 0700); err != nil {
 				t.Fatal(err)
@@ -409,13 +415,13 @@ func TestModrinthCatalogUnavailablePreservesLocalInventory(t *testing.T) {
 			mux := http.NewServeMux()
 			registerAdminPluginRoutes(mux, s)
 			rr := httptest.NewRecorder()
-			mux.ServeHTTP(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/discover", ""))
+			mux.ServeHTTP(rr, pluginTestRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/plugins/discover", ""))
 			if rr.Code != http.StatusBadGateway || !strings.Contains(rr.Body.String(), "Modrinth catalog is unavailable. Try again later.") {
 				t.Fatalf("catalog failure: %d %s", rr.Code, rr.Body.String())
 			}
 			for _, route := range []string{"installed", "updates"} {
 				rr = httptest.NewRecorder()
-				mux.ServeHTTP(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/"+route, ""))
+				mux.ServeHTTP(rr, pluginTestRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/plugins/"+route, ""))
 				var out pluginInventory
 				if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &out) != nil || len(out.Plugins) != 1 {
 					t.Fatalf("local %s after catalog failure: %d %s", route, rr.Code, rr.Body.String())
@@ -530,7 +536,7 @@ func TestPluginIconAuthoritativeBoundedImages(t *testing.T) {
 			mux := http.NewServeMux()
 			registerAdminPluginRoutes(mux, s)
 			rr := httptest.NewRecorder()
-			mux.ServeHTTP(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/icon?project_id=root", ""))
+			mux.ServeHTTP(rr, pluginTestRequest(http.MethodGet, "/v1/admin/plugins/icon?project_id=root", ""))
 			if rr.Code != tc.want || rr.Header().Get("X-Content-Type-Options") != "nosniff" {
 				t.Fatalf("icon: %d %s", rr.Code, rr.Body.String())
 			}
@@ -561,7 +567,7 @@ func TestPluginIconRejectsCallerURLAndUnboundedID(t *testing.T) {
 	s := surfaceTestServer(t, roleAdministrator)
 	for _, query := range []string{"", "url=https://evil.example", "project_id=root&url=https://evil.example", "project_id=root&project_id=other", "project_id=", "project_id=../root", "project_id=https://evil.example", "project_id=" + strings.Repeat("a", 65), "project_id=root&bad=%xx"} {
 		rr := httptest.NewRecorder()
-		s.adminPluginIcon(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/icon?"+query, ""))
+		s.adminPluginIcon(rr, pluginTestRequest(http.MethodGet, "/v1/admin/plugins/icon?"+query, ""))
 		if rr.Code != 400 {
 			t.Fatalf("unsafe query accepted: %q %d", query, rr.Code)
 		}
@@ -575,7 +581,7 @@ func TestPluginIconRejectsCallerURLAndUnboundedID(t *testing.T) {
 func TestPluginInventoryExposesOnlyVerifiedManifestIdentity(t *testing.T) {
 	for _, kind := range []string{"verified", "hash mismatch", "name mismatch", "main mismatch", "manual", "unsafe manifest", "justvoxel"} {
 		t.Run(kind, func(t *testing.T) {
-			data := t.TempDir()
+			data := pluginTestData(t)
 			root := filepath.Join(data, "plugins")
 			if err := os.Mkdir(root, 0700); err != nil {
 				t.Fatal(err)
@@ -696,9 +702,10 @@ func TestPluginDiscoverBoundedTopUpRawCursor(t *testing.T) {
 				raw, err := json.Marshal(payload)
 				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(raw))}, err
 			})}
+			pluginTestDataFor(t, "paper", "26.2")
 			s := surfaceTestServer(t, roleAdministrator)
 			rr := httptest.NewRecorder()
-			s.adminPluginsDiscover(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/discover?limit=12", ""))
+			s.adminPluginsDiscover(rr, pluginTestRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/plugins/discover?limit=12", ""))
 			var out pluginCatalog
 			if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &out) != nil {
 				t.Fatalf("catalog: %d %s", rr.Code, rr.Body.String())
@@ -716,7 +723,7 @@ func TestPluginDiscoverBoundedTopUpRawCursor(t *testing.T) {
 				}
 				// The unused hits in the second fetched batch must be the next page.
 				rr = httptest.NewRecorder()
-				s.adminPluginsDiscover(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/discover?limit=12&modrinth_offset=13", ""))
+				s.adminPluginsDiscover(rr, pluginTestRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/plugins/discover?limit=12&modrinth_offset=13", ""))
 				if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &out) != nil || len(out.Projects) != 12 || out.Projects[0].ID != "project13" || out.NextCursor == nil || out.NextCursor.ModrinthOffset != 25 {
 					t.Fatal("unconsumed hits skipped or duplicated", rr.Body.String())
 				}
@@ -768,7 +775,7 @@ func TestPluginIconSearchURLSkipsMetadataAndVerifiesBytes(t *testing.T) {
 			})}
 			s := surfaceTestServer(t, roleAdministrator)
 			rr := httptest.NewRecorder()
-			s.adminPluginIcon(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/icon?"+url.Values{"project_id": {"root"}, "icon_url": {iconURL}}.Encode(), ""))
+			s.adminPluginIcon(rr, pluginTestRequest(http.MethodGet, "/v1/admin/plugins/icon?"+url.Values{"project_id": {"root"}, "icon_url": {iconURL}}.Encode(), ""))
 			if rr.Code != tc.want || calls != 1 {
 				t.Fatalf("icon: %d, calls %d", rr.Code, calls)
 			}
@@ -853,7 +860,7 @@ func TestPluginIconCDNRepresentations(t *testing.T) {
 			pluginCatalogClient = &client
 			s := surfaceTestServer(t, roleAdministrator)
 			rr := httptest.NewRecorder()
-			s.adminPluginIcon(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/icon?"+url.Values{"project_id": {"root"}, "icon_url": {iconURL}}.Encode(), ""))
+			s.adminPluginIcon(rr, pluginTestRequest(http.MethodGet, "/v1/admin/plugins/icon?"+url.Values{"project_id": {"root"}, "icon_url": {iconURL}}.Encode(), ""))
 			if rr.Code != http.StatusOK || rr.Header().Get("Content-Type") != tc.wantType || !bytes.Equal(rr.Body.Bytes(), tc.wantData) || rr.Header().Get("X-Content-Type-Options") != "nosniff" || calls != 1 {
 				t.Fatalf("CDN representation lost: status=%d type=%s", rr.Code, rr.Header().Get("Content-Type"))
 			}
@@ -879,7 +886,7 @@ func TestPluginIconRejectsInvalidSearchURLQuery(t *testing.T) {
 	const good = "https://cdn.modrinth.com/data/root/icon.png"
 	for _, raw := range []string{"", "http://cdn.modrinth.com/data/root/icon.png", "https://evil.example/data/root/icon.png", "https://cdn.modrinth.com/data/other/icon.png", "https://user@cdn.modrinth.com/data/root/icon.png", good + "?x=1", good + "?", good + "#x", good + "#", "https://cdn.modrinth.com/data/root/" + strings.Repeat("a", 2048) + ".png"} {
 		rr := httptest.NewRecorder()
-		s.adminPluginIcon(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/icon?"+url.Values{"project_id": {"root"}, "icon_url": {raw}}.Encode(), ""))
+		s.adminPluginIcon(rr, pluginTestRequest(http.MethodGet, "/v1/admin/plugins/icon?"+url.Values{"project_id": {"root"}, "icon_url": {raw}}.Encode(), ""))
 		if rr.Code != 400 {
 			t.Fatalf("unsafe icon URL accepted %q: %d", raw, rr.Code)
 		}
@@ -890,7 +897,7 @@ func TestPluginIconRejectsInvalidSearchURLQuery(t *testing.T) {
 		{"project_id": {"root"}, "icon_url": {good}, "unknown": {"x"}},
 	} {
 		rr := httptest.NewRecorder()
-		s.adminPluginIcon(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/icon?"+query.Encode(), ""))
+		s.adminPluginIcon(rr, pluginTestRequest(http.MethodGet, "/v1/admin/plugins/icon?"+query.Encode(), ""))
 		if rr.Code != 400 {
 			t.Fatalf("unsafe icon query accepted: %d", rr.Code)
 		}
@@ -1168,7 +1175,7 @@ func TestPluginInventoryPrivateDisabledStoreDoesNotAdoptFiles(t *testing.T) {
 	if err = os.Chmod(filepath.Join(f.data, ".justvoxel", "disabled-plugins"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.s.resolvePluginManage(context.Background(), "disable", f.entry.ProjectID); err == nil {
+	if _, err = f.s.resolvePluginManage(withPluginInstance(context.Background(), "jv-a1b2c3"), "disable", f.entry.ProjectID); err == nil {
 		t.Fatal("unsafe disabled store accepted")
 	}
 }
@@ -1227,7 +1234,7 @@ func TestHangarPaperCompatibilityAndNativeChannel(t *testing.T) {
 				body, _ := json.Marshal(map[string]any{"pagination": map[string]int{"count": len(tc.versions), "offset": 0, "limit": 25}, "result": tc.versions})
 				return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(body))}, nil
 			})}
-			got, matches, err := selectHangarVersion(context.Background(), id, pluginServerContext{ServerType: "paper", MinecraftVersion: "1.21.8"}, tc.compatible, tc.release)
+			got, matches, err := selectHangarVersion(context.Background(), id, pluginServerContext{InstanceID: "jv-a1b2c3", ServerType: "paper", MinecraftVersion: "1.21.8"}, tc.compatible, tc.release)
 			if err != nil || matches != tc.matches || (tc.want == "") != (got == nil) {
 				t.Fatalf("%+v %v %v", got, matches, err)
 			}
@@ -1239,16 +1246,9 @@ func TestHangarPaperCompatibilityAndNativeChannel(t *testing.T) {
 }
 
 func TestPluginDiscoverProviderIsolationAndCompositePagination(t *testing.T) {
-	oldDiscovery, oldRuntime, oldClient := runAdminDiscoveryHelper, runPluginRuntimeStatus, pluginCatalogClient
-	t.Cleanup(func() {
-		runAdminDiscoveryHelper, runPluginRuntimeStatus, pluginCatalogClient = oldDiscovery, oldRuntime, oldClient
-	})
-	runAdminDiscoveryHelper = func(context.Context, string) ([]byte, error) {
-		return []byte(`{"configured":true,"minecraft":{"server_type":"paper","data_path":"/unused"}}`), nil
-	}
-	runPluginRuntimeStatus = func(context.Context) ([]byte, error) {
-		return []byte(`{"minecraft":{"server_type":"paper","version":"1.21.8"}}`), nil
-	}
+	pluginTestDataFor(t, "paper", "1.21.8")
+	oldClient := pluginCatalogClient
+	t.Cleanup(func() { pluginCatalogClient = oldClient })
 	calls := map[string]int{}
 	pluginCatalogClient = &http.Client{Transport: pluginTestTransport(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Scheme != "https" || r.URL.User != nil || r.Header.Get("Authorization") != "" {
@@ -1305,7 +1305,7 @@ func TestPluginDiscoverProviderIsolationAndCompositePagination(t *testing.T) {
 	read := func(q url.Values) pluginCatalog {
 		t.Helper()
 		rr := httptest.NewRecorder()
-		s.adminPluginsDiscover(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/discover?"+q.Encode(), ""))
+		s.adminPluginsDiscover(rr, pluginTestRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/plugins/discover?"+q.Encode(), ""))
 		var out pluginCatalog
 		if rr.Code != 200 || json.Unmarshal(rr.Body.Bytes(), &out) != nil {
 			t.Fatal(rr.Code, rr.Body.String())
@@ -1430,7 +1430,7 @@ func TestHangarVersionInspectionBoundedAndValidation(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{"pagination": map[string]int{"count": 1000, "offset": offset, "limit": 25}, "result": versions})
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(body))}, nil
 	})}
-	v, _, err := selectHangarVersion(context.Background(), 1, pluginServerContext{ServerType: "paper", MinecraftVersion: "1.21.8"}, true, true)
+	v, _, err := selectHangarVersion(context.Background(), 1, pluginServerContext{InstanceID: "jv-a1b2c3", ServerType: "paper", MinecraftVersion: "1.21.8"}, true, true)
 	if v != nil || err != nil || calls != 3 {
 		t.Fatal("unbounded version scan", v, err, calls)
 	}
@@ -1438,7 +1438,7 @@ func TestHangarVersionInspectionBoundedAndValidation(t *testing.T) {
 		pluginCatalogClient = &http.Client{Transport: pluginTestTransport(func(*http.Request) (*http.Response, error) {
 			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
 		})}
-		if _, _, err := selectHangarVersion(context.Background(), 1, pluginServerContext{ServerType: "paper", MinecraftVersion: "1.21.8"}, true, true); err == nil {
+		if _, _, err := selectHangarVersion(context.Background(), 1, pluginServerContext{InstanceID: "jv-a1b2c3", ServerType: "paper", MinecraftVersion: "1.21.8"}, true, true); err == nil {
 			t.Fatal("unvalidated versions", body)
 		}
 	}
@@ -1517,7 +1517,7 @@ func TestHangarDiscoveryFillsPageAndBoundsInspection(t *testing.T) {
 				raw, err := json.Marshal(payload)
 				return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(raw))}, err
 			})}
-			server := pluginServerContext{ServerType: "purpur", MinecraftVersion: tc.game}
+			server := pluginServerContext{InstanceID: "jv-a1b2c3", ServerType: "purpur", MinecraftVersion: tc.game}
 			q := pluginDiscoverQuery{Limit: limit, Compatible: tc.compatible, Release: true}
 			first, err := discoverHangarPlugins(context.Background(), server, q)
 			if err != nil {
@@ -1598,7 +1598,7 @@ func TestModrinthDiscoveryExactFacets(t *testing.T) {
 				}
 				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"hits":[],"total_hits":0}`))}, nil
 			})}
-			_, err := discoverModrinthPlugins(context.Background(), pluginServerContext{ServerType: tc.serverType, MinecraftVersion: "1.21.8"}, "Example", tc.compatible, true, 0, 12)
+			_, err := discoverModrinthPlugins(context.Background(), pluginServerContext{InstanceID: "jv-a1b2c3", ServerType: tc.serverType, MinecraftVersion: "1.21.8"}, "Example", tc.compatible, true, 0, 12)
 			if err != nil || calls != 1 {
 				t.Fatal("discovery", calls, err)
 			}
@@ -1641,7 +1641,7 @@ func TestModrinthDiscoveryReleasePageFillAndLargeTotal(t *testing.T) {
 				raw, err := json.Marshal(payload)
 				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(raw))}, err
 			})}
-			server := pluginServerContext{ServerType: "paper", MinecraftVersion: "1.21.8", Supported: true}
+			server := pluginServerContext{InstanceID: "jv-a1b2c3", ServerType: "paper", MinecraftVersion: "1.21.8", Supported: true}
 			read := func(offset int) pluginCatalogPage {
 				t.Helper()
 				page, err := discoverModrinthPlugins(context.Background(), server, "", true, true, offset, limit)
@@ -1697,7 +1697,7 @@ func TestPluginDiscoverInstalledOwnership(t *testing.T) {
 	for _, source := range []string{"", "Modrinth", "Hangar"} {
 		for _, state := range []string{"enabled", "disabled", "attention", "manual"} {
 			t.Run(source+"/"+state, func(t *testing.T) {
-				data := t.TempDir()
+				data := pluginTestData(t)
 				root := filepath.Join(data, "plugins")
 				if err := os.Mkdir(root, 0700); err != nil {
 					t.Fatal(err)
@@ -1760,7 +1760,7 @@ func TestPluginDiscoverInstalledOwnership(t *testing.T) {
 }
 
 func TestPluginDiscoverUnsafeOwnershipFailsClosed(t *testing.T) {
-	data := t.TempDir()
+	data := pluginTestData(t)
 	if err := os.Mkdir(filepath.Join(data, ".justvoxel"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -1773,7 +1773,7 @@ func TestPluginDiscoverUnsafeOwnershipFailsClosed(t *testing.T) {
 }
 
 func TestPluginDiscoverResponseIncludesAuthoritativeOwnership(t *testing.T) {
-	data := t.TempDir()
+	data := pluginTestData(t)
 	entry := pluginManifestEntry{ProjectID: "123", VersionID: "456", VersionNumber: "old-release", Filename: "example.jar", SHA512: strings.Repeat("a", 128), PluginName: "Example", Main: "example.Plugin"}
 	if _, err := commitPluginManifest(data, nil, pluginManifest{SchemaVersion: "v1", Artifacts: []pluginManifestEntry{entry}}); err != nil {
 		t.Fatal(err)
@@ -1797,7 +1797,7 @@ func TestPluginDiscoverResponseIncludesAuthoritativeOwnership(t *testing.T) {
 	})}
 	s := surfaceTestServer(t, roleAdministrator)
 	rr := httptest.NewRecorder()
-	s.adminPluginsDiscover(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/discover", ""))
+	s.adminPluginsDiscover(rr, pluginTestRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/plugins/discover", ""))
 	var out pluginCatalog
 	if rr.Code != 200 || json.Unmarshal(rr.Body.Bytes(), &out) != nil || len(out.Projects) != 1 {
 		t.Fatal(rr.Code, rr.Body.String())

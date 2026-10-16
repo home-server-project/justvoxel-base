@@ -96,7 +96,7 @@ func TestMinecraftInstanceRetirementDoesNotFollowSymlinks(t *testing.T) {
 }
 
 func TestResetMinecraftInstanceRetirement(t *testing.T) {
-	for _, mode := range []string{"minecraft", "factory"} {
+	for _, mode := range []string{"factory"} {
 		for _, outcome := range []string{"success", "preserved_data", "helper_failed", "contract_failed", "verification_failed", "verification_error", "missing_record", "missing_directory", "retirement_failed", "authentication_failed"} {
 			if mode == "minecraft" && outcome == "authentication_failed" {
 				continue

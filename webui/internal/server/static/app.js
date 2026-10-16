@@ -3991,7 +3991,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   };
 
   const systemFetchJSON = async (url, options = {}, factoryResetPollOperationID = "") => {
-    const response = await fetch(url, {
+    const response = await fetch(url.includes("/reset/minecraft/") || url.includes("/reset/operations/") ? globalThis.justVoxelSelectedURL(url) : url, {
       credentials: "same-origin",
       cache: "no-store",
       ...options,
@@ -6280,7 +6280,7 @@ if (pluginsDialog && pluginsOpen) {
       options.method = "POST";
       options.body = new URLSearchParams({ csrf: document.querySelector('[data-minecraft-workspace-csrf]')?.value || document.querySelector('input[name="csrf"]')?.value || "", ...body });
     }
-    const response = await fetch(`/api/plugins/workspace/${route}`, options);
+    const response = await fetch(globalThis.justVoxelSelectedURL(`/api/plugins/workspace/${route}`), options);
     const payload = await response.json();
     if (response.status === 401) { window.location.assign("/login"); throw new Error("Sign in again."); }
     if (response.status === 403 && String(payload.error || "").toLowerCase().includes("password")) { window.location.assign("/password"); throw new Error("Change your password first."); }
@@ -6554,7 +6554,7 @@ if (pluginsDialog && pluginsOpen) {
       body.append("plan_fingerprint", plan.plan_fingerprint);
       body.append("confirm_players", String(confirmPlayers));
     }
-    const response = await fetch(`/api/plugins/workspace/addons/${route}`, {
+    const response = await fetch(globalThis.justVoxelSelectedURL(`/api/plugins/workspace/addons/${route}`), {
       method: "POST", credentials: "same-origin", cache: "no-store", body,
       signal: installController?.signal,
       headers: { Accept: "application/json", "X-CSRF-Token": document.querySelector('[data-minecraft-workspace-csrf]')?.value || document.querySelector('input[name="csrf"]')?.value || "" },
@@ -6661,7 +6661,7 @@ if (pluginsDialog && pluginsOpen) {
           return;
         }
       }
-      const response = await fetch(`/api/plugins/workspace/${tab}${tab === "discover" ? "?" + query : ""}`, { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" }, signal: controller.signal });
+      const response = await fetch(globalThis.justVoxelSelectedURL(`/api/plugins/workspace/${tab}${tab === "discover" ? "?" + query : ""}`), { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" }, signal: controller.signal });
       const payload = await response.json();
       if (current !== generation) return;
       if (response.status === 401) { window.location.assign("/login"); return; }

@@ -48,7 +48,12 @@ type pluginInstallFixture struct {
 
 func newPluginInstallFixture(t *testing.T) *pluginInstallFixture {
 	t.Helper()
-	f := &pluginInstallFixture{data: t.TempDir(), versions: map[string]pluginCatalogVersion{}, slugs: map[string]string{}, jars: map[string][]byte{}, active: true}
+	return newPluginInstallFixtureFor(t, "paper", "1.21.8")
+}
+
+func newPluginInstallFixtureFor(t *testing.T, software, version string) *pluginInstallFixture {
+	t.Helper()
+	f := &pluginInstallFixture{data: pluginTestDataFor(t, software, version), versions: map[string]pluginCatalogVersion{}, slugs: map[string]string{}, jars: map[string][]byte{}, active: true}
 	if err := os.Mkdir(filepath.Join(f.data, "plugins"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -59,25 +64,17 @@ func newPluginInstallFixture(t *testing.T) *pluginInstallFixture {
 		t.Fatal(err)
 	}
 	f.s.operations = store
-	oldCatalog, oldDownload, oldDiscovery, oldRuntime, oldPlayers, oldCommand, oldLock := pluginCatalogClient, pluginDownloadClient, runAdminDiscoveryHelper, runPluginRuntimeStatus, pluginInstallPlayers, pluginInstallCommand, pluginRuntimeLockPath
+	oldCatalog, oldDownload, oldPlayers, oldCommand, oldLock := pluginCatalogClient, pluginDownloadClient, pluginInstallPlayers, pluginInstallCommand, pluginRuntimeLockPath
 	t.Cleanup(func() {
 		store.close()
 		pluginCatalogClient = oldCatalog
 		pluginDownloadClient = oldDownload
-		runAdminDiscoveryHelper = oldDiscovery
-		runPluginRuntimeStatus = oldRuntime
 		pluginInstallPlayers = oldPlayers
 		pluginInstallCommand = oldCommand
 		pluginRuntimeLockPath = oldLock
 	})
 	pluginRuntimeLockPath = filepath.Join(t.TempDir(), "maintenance.lock")
-	runAdminDiscoveryHelper = func(context.Context, string) ([]byte, error) {
-		return json.Marshal(map[string]any{"configured": true, "minecraft": map[string]string{"server_type": "paper", "data_path": f.data}})
-	}
-	runPluginRuntimeStatus = func(context.Context) ([]byte, error) {
-		return []byte(`{"minecraft":{"server_type":"paper","version":"1.21.8"}}`), nil
-	}
-	pluginInstallPlayers = func(context.Context) (int, []string, error) {
+	pluginInstallPlayers = func(context.Context, string) (int, []string, error) {
 		f.playerChecks++
 		if f.playerUnavailable {
 			return 0, nil, errors.New("unavailable")
@@ -155,21 +152,8 @@ func newPluginInstallFixture(t *testing.T) *pluginInstallFixture {
 			f.active = false
 			return nil, nil
 		case command == "/usr/libexec/justvoxel/minecraft-backup":
-			if args[0] != "--leave-stopped" {
-				t.Fatal("backup contract")
-			}
-			entries, _ := os.ReadDir(filepath.Join(f.data, "plugins"))
-			for _, entry := range entries {
-				if entry.Name() == "root.jar" {
-					t.Fatal("placement before cold backup")
-				}
-			}
-			if f.failBackup {
-				return []byte("Verifying new archive\n"), errors.New("backup failed")
-			}
-			f.backup = true
-			f.active = false
-			return nil, nil
+			t.Fatal("legacy global backup invoked")
+			return nil, errors.New("legacy backup")
 		case command == "/usr/libexec/justvoxel/mjust/verify-minecraft-stack":
 			if f.mutateOnVerify {
 				if err := os.WriteFile(filepath.Join(f.data, "plugins", "root.jar"), []byte("changed manually"), 0600); err != nil {
@@ -216,6 +200,59 @@ func newPluginInstallFixture(t *testing.T) *pluginInstallFixture {
 			return nil, errors.New("unexpected")
 		}
 	}
+	oldBackup := instanceBackupStorageCommand
+	t.Cleanup(func() { instanceBackupStorageCommand = oldBackup })
+	instanceBackupStorageCommand = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+		if len(args) != 5 || args[2] != instanceBackupHelper || args[4] != "jv-a1b2c3" {
+			t.Fatalf("wrong backup target: %s %v", command, args)
+		}
+		if args[3] == "preflight" {
+			return nil, nil
+		}
+		if args[3] != "create" {
+			t.Fatal(args)
+		}
+		f.commands = append(f.commands, "instance-backup create jv-a1b2c3")
+		if f.failBackup {
+			return nil, errors.New("backup failed")
+		}
+		f.backup = true
+		return nil, nil
+	}
+	runtime := instanceRuntimes.command
+	instanceRuntimes.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+		selected := "jv-a1b2c3"
+		unit := "minecraft-" + selected + ".service"
+		if command == "systemctl" && len(args) > 0 && args[len(args)-1] == unit {
+			if args[0] == "show" && args[1] == "--property=LoadState,ActiveState,SubState" {
+				state := "inactive"
+				if f.active {
+					state = "active"
+				}
+				return []byte("LoadState=loaded\nActiveState=" + state + "\nSubState=running\n"), nil
+			}
+			if args[0] == "stop" {
+				_, err := pluginInstallCommand(ctx, "systemctl", "stop", unit)
+				return nil, err
+			}
+		}
+		if command == "podman" {
+			if len(args) > 0 && args[0] == "ps" {
+				return []byte("minecraft-" + selected), nil
+			}
+			if len(args) > 0 && args[0] == "inspect" {
+				state := "exited 0"
+				if f.active {
+					state = "running 0"
+				}
+				return []byte(state), nil
+			}
+			if len(args) > 0 && args[0] == "exec" {
+				return []byte("There are 0 of a max of 20 players online:"), nil
+			}
+		}
+		return runtime(ctx, command, args...)
+	}
 	f.addJar(t, "root", "release", "root.jar", "Root", "example.Root")
 	return f
 }
@@ -235,7 +272,7 @@ func (f *pluginInstallFixture) addJar(t *testing.T, project, version, filename, 
 }
 func (f *pluginInstallFixture) plan(t *testing.T) pluginInstallPlan {
 	t.Helper()
-	plan, err := resolvePluginInstallPlan(context.Background(), pluginServerContext{Configured: true, ServerType: "paper", ServerSoftware: "Paper", MinecraftVersion: "1.21.8", Supported: true}, f.data, "root", "release")
+	plan, err := resolvePluginInstallPlan(context.Background(), pluginServerContext{InstanceID: "jv-a1b2c3", Configured: true, ServerType: "paper", ServerSoftware: "Paper", MinecraftVersion: "1.21.8", Supported: true}, f.data, "root", "release")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +280,7 @@ func (f *pluginInstallFixture) plan(t *testing.T) pluginInstallPlan {
 }
 func (f *pluginInstallFixture) execute(t *testing.T, plan pluginInstallPlan, confirm bool) operationJournal {
 	t.Helper()
-	journal, created, err := f.s.operations.beginMinecraftMaintenance(plan.Fingerprint, operationTypePluginInstall)
+	journal, created, err := f.s.operations.beginMinecraftMaintenance(plan.Fingerprint, operationTypePluginInstall, "jv-a1b2c3")
 	if err != nil || !created {
 		t.Fatalf("begin: %v", err)
 	}
@@ -281,7 +318,7 @@ func TestPluginInstallAdministratorAndStrictRequests(t *testing.T) {
 		s := surfaceTestServer(t, role)
 		for _, route := range []string{"plan", "apply", "current"} {
 			rr := httptest.NewRecorder()
-			r := surfaceRequest(http.MethodPost, "/", `{}`)
+			r := pluginTestRequest(http.MethodPost, "/", `{}`)
 			switch route {
 			case "plan":
 				s.adminPluginInstallPlan(rr, r)
@@ -299,7 +336,7 @@ func TestPluginInstallAdministratorAndStrictRequests(t *testing.T) {
 	for _, body := range []string{`{"project_id":"root","version_id":"release","url":"https://cdn.modrinth.com/data/x"}`, `{"project_id":"root","version_id":"release","filename":"x.jar"}`, `{"project_id":"root","version_id":"release","hash":"abc"}`, `{"project_id":"root","version_id":"release","target_path":"/tmp"}`, `{"project_id":"root","version_id":"release","dependencies":[]}`, `{"project_id":"root","version_id":"release"} {}`, `null`, `{"project_id":"../root","version_id":"release"}`} {
 		for _, apply := range []bool{false, true} {
 			rr := httptest.NewRecorder()
-			r := surfaceRequest(http.MethodPost, "/", body)
+			r := pluginTestRequest(http.MethodPost, "/", body)
 			if apply {
 				s.adminPluginInstall(rr, r)
 			} else {
@@ -378,7 +415,7 @@ func TestPluginInstallExactReleaseCompatibility(t *testing.T) {
 				v.Loaders = []string{"fabric"}
 			}
 			f.versions["release"] = v
-			_, err := resolvePluginInstallPlan(context.Background(), pluginServerContext{Supported: true, ServerType: "paper", MinecraftVersion: "1.21.8"}, f.data, "root", "release")
+			_, err := resolvePluginInstallPlan(context.Background(), pluginServerContext{InstanceID: "jv-a1b2c3", Supported: true, ServerType: "paper", MinecraftVersion: "1.21.8"}, f.data, "root", "release")
 			if err == nil {
 				t.Fatal("unsafe release accepted")
 			}
@@ -461,7 +498,7 @@ func TestPluginInstallRequiredDependencyFailures(t *testing.T) {
 				}
 			}
 			f.versions["release"] = v
-			_, err := resolvePluginInstallPlan(context.Background(), pluginServerContext{Supported: true, ServerType: "paper", MinecraftVersion: "1.21.8"}, f.data, "root", "release")
+			_, err := resolvePluginInstallPlan(context.Background(), pluginServerContext{InstanceID: "jv-a1b2c3", Supported: true, ServerType: "paper", MinecraftVersion: "1.21.8"}, f.data, "root", "release")
 			if err == nil {
 				t.Fatal("unsafe graph accepted")
 			}
@@ -489,7 +526,7 @@ func TestPluginInstallManagedComponentBoundary(t *testing.T) {
 			if available {
 				pluginTestJar(t, filepath.Join(f.data, "plugins", "viaversion.jar"), map[string]string{"plugin.yml": "name: ViaVersion\nmain: com.viaversion.viaversion.ViaVersionPlugin\n"})
 			}
-			plan, err := resolvePluginInstallPlan(context.Background(), pluginServerContext{Supported: true, ServerType: "paper", MinecraftVersion: "1.21.8"}, f.data, "root", "release")
+			plan, err := resolvePluginInstallPlan(context.Background(), pluginServerContext{InstanceID: "jv-a1b2c3", Supported: true, ServerType: "paper", MinecraftVersion: "1.21.8"}, f.data, "root", "release")
 			if !available {
 				if err == nil {
 					t.Fatal("missing component accepted")
@@ -517,6 +554,9 @@ func TestPluginInstallUntouchedPreparationFailures(t *testing.T) {
 	for _, kind := range []string{"download", "hash", "lock", "manual identity", "context changed"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newPluginInstallFixture(t)
+			if kind == "context changed" {
+				f.active = false
+			}
 			plan := f.plan(t)
 			switch kind {
 			case "download":
@@ -535,12 +575,41 @@ func TestPluginInstallUntouchedPreparationFailures(t *testing.T) {
 			case "manual identity":
 				pluginTestJar(t, filepath.Join(f.data, "plugins", "manual.jar"), map[string]string{"plugin.yml": "name: Root\nmain: example.Root\n"})
 			case "context changed":
-				runPluginRuntimeStatus = func(context.Context) ([]byte, error) {
-					return []byte(`{"minecraft":{"server_type":"paper","version":"1.20"}}`), nil
+				backend := instanceRuntimes
+				previous, err := backend.readRecord("jv-a1b2c3")
+				if err != nil {
+					t.Fatal(err)
 				}
+				records, err := backend.records()
+				if err != nil {
+					t.Fatal(err)
+				}
+				snapshot, _, _, err := backend.snapshot(context.Background())
+				if err != nil {
+					t.Fatal(err)
+				}
+				next := previous
+				next.Runtime.Version = "1.21.9"
+				if err := backend.applyVersion(context.Background(), previous, instanceReplaceRecord(records, next), snapshot, true); err != nil {
+					t.Fatal(err)
+				}
+				current, err := backend.readRecord(previous.Runtime.ID)
+				if err != nil || current.Runtime.Version != next.Runtime.Version {
+					t.Fatal("selected instance version was not committed", current.Runtime.Version, err)
+				}
+				if err := backend.verifyLive(current); err != nil {
+					t.Fatal("changed instance is not valid", err)
+				}
+				// Only the old plan's Apply must leave runtime and files untouched.
+				f.commands = nil
 			}
 			journal := f.execute(t, plan, false)
 			f.assertUntouched(t, journal)
+			if kind == "context changed" {
+				if f.active || !strings.Contains(journal.Status, "Plugin plan or server context changed; review again") {
+					t.Fatal("stale authoritative context was not rejected before runtime mutation", journal)
+				}
+			}
 			if kind == "manual identity" {
 				if _, err := os.Stat(filepath.Join(f.data, "plugins", "manual.jar")); err != nil {
 					t.Fatal("manual file touched")
@@ -560,7 +629,7 @@ func TestPluginInstallFinalPlayerCheck(t *testing.T) {
 			case "online":
 				f.players = 1
 			case "joined":
-				if _, _, err := pluginInstallPlayers(context.Background()); err != nil {
+				if _, _, err := pluginInstallPlayers(context.Background(), "jv-a1b2c3"); err != nil {
 					t.Fatal(err)
 				}
 				f.joinAt = 2
@@ -729,11 +798,11 @@ func TestPluginInstallManifestSafety(t *testing.T) {
 func TestPluginInstallStoreExclusionProgressAndInterruption(t *testing.T) {
 	f := newPluginInstallFixture(t)
 	plan := f.plan(t)
-	journal, created, err := f.s.operations.beginMinecraftMaintenance(plan.Fingerprint, operationTypePluginInstall)
+	journal, created, err := f.s.operations.beginMinecraftMaintenance(plan.Fingerprint, operationTypePluginInstall, "jv-a1b2c3")
 	if err != nil || !created {
 		t.Fatal(err)
 	}
-	duplicate, created, err := f.s.operations.beginMinecraftMaintenance(plan.Fingerprint, operationTypePluginInstall)
+	duplicate, created, err := f.s.operations.beginMinecraftMaintenance(plan.Fingerprint, operationTypePluginInstall, "jv-a1b2c3")
 	if err != nil || created || duplicate.OperationID != journal.OperationID {
 		t.Fatal("duplicate worker")
 	}
@@ -773,7 +842,7 @@ func TestPluginInstallQueuedRestartCancelsUntouched(t *testing.T) {
 			t.Run(kind+"/"+nextType, func(t *testing.T) {
 				f := newPluginInstallFixture(t)
 				plan := f.plan(t)
-				journal, created, err := f.s.operations.beginMinecraftMaintenance(plan.Fingerprint, operationTypePluginInstall)
+				journal, created, err := f.s.operations.beginMinecraftMaintenance(plan.Fingerprint, operationTypePluginInstall, "jv-a1b2c3")
 				if err != nil || !created {
 					t.Fatal("begin", err)
 				}
@@ -799,7 +868,7 @@ func TestPluginInstallQueuedRestartCancelsUntouched(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					evidence := pluginPreflight{SchemaVersion: "v1", OperationID: journal.OperationID, PlanFingerprint: plan.Fingerprint, DataPath: f.data, MinecraftVersion: plan.Server.MinecraftVersion, ProjectID: plan.ProjectID, VersionID: plan.VersionID}
+					evidence := pluginPreflight{InstanceID: "jv-a1b2c3", SchemaVersion: "v1", OperationID: journal.OperationID, PlanFingerprint: plan.Fingerprint, DataPath: f.data, MinecraftVersion: plan.Server.MinecraftVersion, ProjectID: plan.ProjectID, VersionID: plan.VersionID}
 					err = publishPluginEvidence(d, "preflight.json", evidence)
 					d.Close()
 					if err != nil {
@@ -889,7 +958,7 @@ func TestPluginInstallApplyStaleAndDuplicate(t *testing.T) {
 	send := func() *httptest.ResponseRecorder {
 		raw, _ := json.Marshal(request)
 		rr := httptest.NewRecorder()
-		f.s.adminPluginInstall(rr, surfaceRequest(http.MethodPost, "/", string(raw)))
+		f.s.adminPluginInstall(rr, pluginTestRequest(http.MethodPost, "/", string(raw)))
 		return rr
 	}
 	if rr := send(); rr.Code != 409 || calls != 0 {
@@ -914,7 +983,7 @@ func TestPluginInstallManualFilenameBlocksPlan(t *testing.T) {
 	if err := os.WriteFile(path, manual, 0600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := resolvePluginInstallPlan(context.Background(), pluginServerContext{Supported: true, ServerType: "paper", MinecraftVersion: "1.21.8"}, f.data, "root", "release")
+	_, err := resolvePluginInstallPlan(context.Background(), pluginServerContext{InstanceID: "jv-a1b2c3", Supported: true, ServerType: "paper", MinecraftVersion: "1.21.8"}, f.data, "root", "release")
 	if err == nil {
 		t.Fatal("manual filename accepted")
 	}
@@ -945,7 +1014,7 @@ func TestPluginInstallManagedDependencyReuse(t *testing.T) {
 			if _, err := commitPluginManifest(f.data, nil, pluginManifest{SchemaVersion: "v1", Artifacts: []pluginManifestEntry{entry}}); err != nil {
 				t.Fatal(err)
 			}
-			plan, err := resolvePluginInstallPlan(context.Background(), pluginServerContext{Supported: true, ServerType: "paper", MinecraftVersion: "1.21.8"}, f.data, "root", "release")
+			plan, err := resolvePluginInstallPlan(context.Background(), pluginServerContext{InstanceID: "jv-a1b2c3", Supported: true, ServerType: "paper", MinecraftVersion: "1.21.8"}, f.data, "root", "release")
 			if kind != "exact" {
 				if err == nil {
 					t.Fatal("unsafe reuse")
@@ -986,7 +1055,7 @@ func TestPluginInstallCatalogAvailabilityAndNoURLs(t *testing.T) {
 				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(raw))}, nil
 			})}
 			rr := httptest.NewRecorder()
-			f.s.adminPluginsDiscover(rr, surfaceRequest(http.MethodGet, "/v1/admin/plugins/discover?"+url.Values{"compatible_only": {"false"}, "release_only": {"false"}}.Encode(), ""))
+			f.s.adminPluginsDiscover(rr, pluginTestRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/plugins/discover?"+url.Values{"compatible_only": {"false"}, "release_only": {"false"}}.Encode(), ""))
 			var catalog pluginCatalog
 			if rr.Code != 200 || json.Unmarshal(rr.Body.Bytes(), &catalog) != nil || len(catalog.Projects) != 1 {
 				t.Fatal(rr.Body.String())
@@ -1092,17 +1161,17 @@ func TestPluginInstallCurrentRoutesStayDistinct(t *testing.T) {
 	whitelistSurfaceFixture(t)
 	f := newPluginInstallFixture(t)
 	plan := f.plan(t)
-	journal, _, err := f.s.operations.beginMinecraftMaintenance(plan.Fingerprint, operationTypePluginInstall)
+	journal, _, err := f.s.operations.beginMinecraftMaintenance(plan.Fingerprint, operationTypePluginInstall, "jv-a1b2c3")
 	if err != nil {
 		t.Fatal(err)
 	}
 	rr := httptest.NewRecorder()
-	f.s.adminMinecraftStackUpdateCurrent(rr, surfaceRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/version/update/current", ""))
+	f.s.adminMinecraftStackUpdateCurrent(rr, pluginTestRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/version/update/current", ""))
 	if rr.Code != 200 || !strings.Contains(rr.Body.String(), `"operation":null`) {
 		t.Fatalf("update endpoint did not exclude plugin install: %d %s", rr.Code, rr.Body.String())
 	}
 	rr = httptest.NewRecorder()
-	f.s.adminPluginInstallCurrent(rr, surfaceRequest(http.MethodGet, "/", ""))
+	f.s.adminPluginInstallCurrent(rr, pluginTestRequest(http.MethodGet, "/", ""))
 	if rr.Code != 200 || !strings.Contains(rr.Body.String(), journal.OperationID) {
 		t.Fatal("plugin current missing")
 	}
@@ -1120,7 +1189,7 @@ func TestPluginInstallCurrentRoutesStayDistinct(t *testing.T) {
 		t.Fatal("plugin current reported update", update)
 	}
 	rr = httptest.NewRecorder()
-	f.s.adminMinecraftStackUpdateCurrent(rr, surfaceRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/version/update/current", ""))
+	f.s.adminMinecraftStackUpdateCurrent(rr, pluginTestRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/version/update/current", ""))
 	if rr.Code != 200 || !strings.Contains(rr.Body.String(), update.OperationID) {
 		t.Fatalf("update current missing: %d %s", rr.Code, rr.Body.String())
 	}
@@ -1128,7 +1197,7 @@ func TestPluginInstallCurrentRoutesStayDistinct(t *testing.T) {
 func TestPluginInstallDuplicateAfterPlacementIsLookup(t *testing.T) {
 	f := newPluginInstallFixture(t)
 	plan := f.plan(t)
-	journal, _, err := f.s.operations.beginMinecraftMaintenance(plan.Fingerprint, operationTypePluginInstall)
+	journal, _, err := f.s.operations.beginMinecraftMaintenance(plan.Fingerprint, operationTypePluginInstall, "jv-a1b2c3")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1140,7 +1209,7 @@ func TestPluginInstallDuplicateAfterPlacementIsLookup(t *testing.T) {
 	startPluginInstallWorker = func(*server, string, pluginInstallPlan, bool, session) { t.Fatal("duplicate launched worker") }
 	raw, _ := json.Marshal(pluginInstallApplyRequest{ProjectID: "root", VersionID: "release", PlanFingerprint: plan.Fingerprint})
 	rr := httptest.NewRecorder()
-	f.s.adminPluginInstall(rr, surfaceRequest(http.MethodPost, "/", string(raw)))
+	f.s.adminPluginInstall(rr, pluginTestRequest(http.MethodPost, "/", string(raw)))
 	if rr.Code != 202 || !strings.Contains(rr.Body.String(), journal.OperationID) {
 		t.Fatalf("placed transaction confused with collision: %d %s", rr.Code, rr.Body.String())
 	}
@@ -1276,7 +1345,7 @@ func pluginAttentionFixture(t *testing.T, f *pluginInstallFixture) (operationJou
 	plan := f.plan(t)
 	a := plan.Artifacts[0]
 	a.PluginName, a.Main = "Root", "example.Root"
-	journal, _, err := f.s.operations.beginMinecraftMaintenance(plan.Fingerprint, operationTypePluginInstall)
+	journal, _, err := f.s.operations.beginMinecraftMaintenance(plan.Fingerprint, operationTypePluginInstall, "jv-a1b2c3")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1294,7 +1363,7 @@ func pluginAttentionFixture(t *testing.T, f *pluginInstallFixture) (operationJou
 	if err := os.Mkdir(directory, 0700); err != nil {
 		t.Fatal(err)
 	}
-	tx := pluginTransaction{SchemaVersion: "v1", OperationID: journal.OperationID, PlanFingerprint: plan.Fingerprint, DataPath: f.data, MinecraftVersion: plan.Server.MinecraftVersion, OriginallyRunning: f.active, Artifacts: []pluginManifestEntry{pluginManifestArtifact(a)}}
+	tx := pluginTransaction{InstanceID: "jv-a1b2c3", SchemaVersion: "v1", OperationID: journal.OperationID, PlanFingerprint: plan.Fingerprint, DataPath: f.data, MinecraftVersion: plan.Server.MinecraftVersion, OriginallyRunning: f.active, Artifacts: []pluginManifestEntry{pluginManifestArtifact(a)}}
 	if err := persistPluginTransaction(directory, tx); err != nil {
 		t.Fatal(err)
 	}
@@ -1345,7 +1414,7 @@ func TestPluginInstallAcknowledgeProofs(t *testing.T) {
 			}
 			raw, _ := json.Marshal(map[string]string{"operation_id": journal.OperationID})
 			rr := httptest.NewRecorder()
-			f.s.adminPluginInstallAcknowledge(rr, surfaceRequest(http.MethodPost, "/", string(raw)))
+			f.s.adminPluginInstallAcknowledge(rr, pluginTestRequest(http.MethodPost, "/", string(raw)))
 			safe := strings.HasPrefix(kind, "installed") || strings.HasPrefix(kind, "previous") || kind == "legacy evidence"
 			if safe {
 				if rr.Code != 200 {
@@ -1386,20 +1455,20 @@ func TestPluginInstallAcknowledgeStrictIdentityAndAuthorization(t *testing.T) {
 	journal, _ := pluginAttentionFixture(t, f)
 	for _, body := range []string{`null`, `{}`, `{"operation_id":"invalid"}`, `{"operation_id":"` + journal.OperationID + `","force":true}`, `{"operation_id":"` + journal.OperationID + `"} {}`} {
 		rr := httptest.NewRecorder()
-		f.s.adminPluginInstallAcknowledge(rr, surfaceRequest(http.MethodPost, "/", body))
+		f.s.adminPluginInstallAcknowledge(rr, pluginTestRequest(http.MethodPost, "/", body))
 		if rr.Code != 400 {
 			t.Fatal("invalid acknowledge accepted", rr.Code)
 		}
 	}
 	for _, role := range []principalRole{roleViewer, roleOperator} {
 		rr := httptest.NewRecorder()
-		surfaceTestServer(t, role).adminPluginInstallAcknowledge(rr, surfaceRequest(http.MethodPost, "/", `{"operation_id":"`+journal.OperationID+`"}`))
+		surfaceTestServer(t, role).adminPluginInstallAcknowledge(rr, pluginTestRequest(http.MethodPost, "/", `{"operation_id":"`+journal.OperationID+`"}`))
 		if rr.Code != 403 {
 			t.Fatal("unauthorized acknowledge")
 		}
 	}
 	rr := httptest.NewRecorder()
-	f.s.adminPluginInstallAcknowledge(rr, surfaceRequest(http.MethodPost, "/", `{"operation_id":"12345678-1234-4123-8123-123456789abc"}`))
+	f.s.adminPluginInstallAcknowledge(rr, pluginTestRequest(http.MethodPost, "/", `{"operation_id":"12345678-1234-4123-8123-123456789abc"}`))
 	if rr.Code != 409 {
 		t.Fatal("wrong operation accepted")
 	}
@@ -1522,7 +1591,7 @@ func TestPluginInstallAcknowledgeUnsafeEvidenceAndOwnership(t *testing.T) {
 				}
 			}
 			rr := httptest.NewRecorder()
-			f.s.adminPluginInstallAcknowledge(rr, surfaceRequest(http.MethodPost, "/", `{"operation_id":"`+journal.OperationID+`"}`))
+			f.s.adminPluginInstallAcknowledge(rr, pluginTestRequest(http.MethodPost, "/", `{"operation_id":"`+journal.OperationID+`"}`))
 			if rr.Code != 409 {
 				t.Fatal("unsafe evidence accepted", rr.Code, rr.Body.String())
 			}
@@ -1549,7 +1618,7 @@ func TestPluginInstallAcknowledgeRequiresCurrentTypeAndState(t *testing.T) {
 				}
 			}
 			rr := httptest.NewRecorder()
-			f.s.adminPluginInstallAcknowledge(rr, surfaceRequest(http.MethodPost, "/", `{"operation_id":"`+journal.OperationID+`"}`))
+			f.s.adminPluginInstallAcknowledge(rr, pluginTestRequest(http.MethodPost, "/", `{"operation_id":"`+journal.OperationID+`"}`))
 			if rr.Code != 409 {
 				t.Fatal("wrong type/state acknowledged", rr.Code)
 			}
@@ -1600,7 +1669,7 @@ func TestPluginInstallPreflightRestartAcknowledgement(t *testing.T) {
 			f := newPluginInstallFixture(t)
 			f.active = kind != "stopped"
 			plan := f.plan(t)
-			journal, _, err := f.s.operations.beginMinecraftMaintenance(plan.Fingerprint, operationTypePluginInstall)
+			journal, _, err := f.s.operations.beginMinecraftMaintenance(plan.Fingerprint, operationTypePluginInstall, "jv-a1b2c3")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1617,7 +1686,7 @@ func TestPluginInstallPreflightRestartAcknowledgement(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			evidence := pluginPreflight{SchemaVersion: "v1", OperationID: journal.OperationID, PlanFingerprint: plan.Fingerprint, DataPath: f.data, MinecraftVersion: plan.Server.MinecraftVersion, ProjectID: plan.ProjectID, VersionID: plan.VersionID}
+			evidence := pluginPreflight{InstanceID: "jv-a1b2c3", SchemaVersion: "v1", OperationID: journal.OperationID, PlanFingerprint: plan.Fingerprint, DataPath: f.data, MinecraftVersion: plan.Server.MinecraftVersion, ProjectID: plan.ProjectID, VersionID: plan.VersionID}
 			switch kind {
 			case "wrong path":
 				evidence.DataPath = t.TempDir()
@@ -1684,7 +1753,7 @@ func TestPluginInstallPreflightRestartAcknowledgement(t *testing.T) {
 			}
 			f.failRollbackVerify = kind == "runtime failure"
 			rr := httptest.NewRecorder()
-			f.s.adminPluginInstallAcknowledge(rr, surfaceRequest(http.MethodPost, "/", `{"operation_id":"`+journal.OperationID+`"}`))
+			f.s.adminPluginInstallAcknowledge(rr, pluginTestRequest(http.MethodPost, "/", `{"operation_id":"`+journal.OperationID+`"}`))
 			safe := kind == "running" || kind == "stopped"
 			current, err = reloaded.get(journal.OperationID)
 			if err != nil {
@@ -1735,7 +1804,7 @@ func TestPluginInstallQueuedUntilPreflightDurable(t *testing.T) {
 		t.Run("failure="+failure, func(t *testing.T) {
 			f := newPluginInstallFixture(t)
 			plan := f.plan(t)
-			journal, created, err := f.s.operations.beginMinecraftMaintenance(plan.Fingerprint, operationTypePluginInstall)
+			journal, created, err := f.s.operations.beginMinecraftMaintenance(plan.Fingerprint, operationTypePluginInstall, "jv-a1b2c3")
 			if err != nil || !created {
 				t.Fatal(err)
 			}
@@ -1889,9 +1958,9 @@ func TestPluginInstallDurableEvidenceBeforeMutation(t *testing.T) {
 				}
 				return oldDownload.RoundTrip(r)
 			})
-			oldCommand := pluginInstallCommand
-			pluginInstallCommand = func(ctx context.Context, command string, args ...string) ([]byte, error) {
-				if strings.Contains(command, "minecraft-backup") {
+			oldCommand := instanceBackupStorageCommand
+			instanceBackupStorageCommand = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+				if len(args) > 3 && args[3] == "preflight" {
 					if !transactionFileSynced || !transactionDirectorySynced || f.playerChecks == 0 {
 						t.Fatal("backup before durable evidence or player check")
 					}
@@ -1969,7 +2038,7 @@ func TestPluginInstallCanonicalManagedDependencies(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				plan, err := resolvePluginInstallPlan(context.Background(), pluginServerContext{Supported: true, ServerType: "paper", MinecraftVersion: "1.21.8"}, f.data, "root", "release")
+				plan, err := resolvePluginInstallPlan(context.Background(), pluginServerContext{InstanceID: "jv-a1b2c3", Supported: true, ServerType: "paper", MinecraftVersion: "1.21.8"}, f.data, "root", "release")
 				if kind == "unreadable renamed" || kind == "display name only" || kind == "duplicate" {
 					if err == nil {
 						t.Fatal("unproven or duplicate ownership accepted")
@@ -2089,7 +2158,7 @@ func TestPluginPlanDirectArtifactReview(t *testing.T) {
 				f.jars["root.jar"] = raw
 			}
 			rr := httptest.NewRecorder()
-			f.s.adminPluginInstallPlan(rr, surfaceRequest(http.MethodPost, "/v1/admin/plugins/install/plan", `{"project_id":"root","version_id":"release"}`))
+			f.s.adminPluginInstallPlan(rr, pluginTestRequest(http.MethodPost, "/v1/minecraft/instances/jv-a1b2c3/plugins/install/plan", `{"project_id":"root","version_id":"release"}`))
 			if tc.rejection == "" && rr.Code != http.StatusOK {
 				t.Fatalf("valid review: %d %s", rr.Code, rr.Body.String())
 			}
@@ -2167,7 +2236,7 @@ func TestPluginRequiredDependencyNoCompatibleReleaseAndIdentityMismatch(t *testi
 				version.GameVersions = []string{"1.20"}
 			}
 			f.versions["dependencyrelease"] = version
-			_, err := resolvePluginInstallPlan(context.Background(), pluginServerContext{Supported: true, ServerType: "paper", MinecraftVersion: "1.21.8"}, f.data, "root", "release")
+			_, err := resolvePluginInstallPlan(context.Background(), pluginServerContext{InstanceID: "jv-a1b2c3", Supported: true, ServerType: "paper", MinecraftVersion: "1.21.8"}, f.data, "root", "release")
 			if err == nil {
 				t.Fatal("unsafe dependency plan accepted")
 			}
@@ -2394,7 +2463,7 @@ func TestPluginInstallUsesLatestStartupProof(t *testing.T) {
 					t.Fatal(err)
 				}
 				rr := httptest.NewRecorder()
-				f.s.adminPluginInstallAcknowledge(rr, surfaceRequest(http.MethodPost, "/", `{"operation_id":"`+journal.OperationID+`"}`))
+				f.s.adminPluginInstallAcknowledge(rr, pluginTestRequest(http.MethodPost, "/", `{"operation_id":"`+journal.OperationID+`"}`))
 				want := http.StatusConflict
 				if kind == "recheck" {
 					want = http.StatusOK
@@ -2487,7 +2556,7 @@ func TestBlueMapEntitiesExactNonstandardRootReview(t *testing.T) {
 		t.Run(tc.project+tc.main, func(t *testing.T) {
 			f := newPluginInstallFixture(t)
 			f.addJar(t, tc.project, "bluemapRelease", "addon.jar", "Addon", tc.main)
-			p, err := resolvePluginInstallPlan(context.Background(), pluginServerContext{Configured: true, ServerType: "purpur", ServerSoftware: "Purpur", MinecraftVersion: "1.21.8", Supported: true}, f.data, tc.project, "bluemapRelease")
+			p, err := resolvePluginInstallPlan(context.Background(), pluginServerContext{InstanceID: "jv-a1b2c3", Configured: true, ServerType: "purpur", ServerSoftware: "Purpur", MinecraftVersion: "1.21.8", Supported: true}, f.data, tc.project, "bluemapRelease")
 			if err != nil {
 				t.Fatal(err)
 			}

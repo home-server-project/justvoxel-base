@@ -46,22 +46,7 @@ func instanceVersionCommand(ctx context.Context, args []string) error {
 		if len(args) != 2 {
 			return errInstanceID
 		}
-		if _, err = b.backupStorage(ctx, "preflight", id); err != nil {
-			return err
-		}
-		state, err := b.observe(ctx, id)
-		if err != nil {
-			return err
-		}
-		if state.State == "running" {
-			if err = b.actionWithWarnings(ctx, id, "stop", true); err != nil {
-				return err
-			}
-		} else if state.State != "stopped" {
-			return errInstanceBusy
-		}
-		_, err = b.backupStorage(ctx, "create", id)
-		return err
+		return instanceMaintenanceColdBackup(ctx, id)
 	case "instance-version-publish":
 		if len(args) != 7 || (args[6] != "" && !operationFingerprintPattern.MatchString(args[6])) || !validSetupServerType(args[2]) || !imageTagInputPattern.MatchString(args[3]) || !instanceRuntimeVersionPattern.MatchString(args[4]) || (args[5] != "recommended" && args[5] != "latest" && args[5] != "pinned") {
 			return errInstanceID
@@ -90,4 +75,35 @@ func instanceVersionCommand(ctx context.Context, args []string) error {
 		return b.applyVersion(ctx, previous, instanceReplaceRecord(records, next), snapshot, true)
 	}
 	return errInstanceID
+}
+
+// instanceMaintenanceColdBackup leaves only the selected instance stopped for maintenance.
+func instanceMaintenanceColdBackup(ctx context.Context, id string) error {
+	if !instanceIDPattern.MatchString(id) {
+		return errInstanceID
+	}
+	b := instanceRuntimes
+	record, err := b.readRecord(id)
+	if err != nil {
+		return err
+	}
+	if err = b.verifyLive(record); err != nil {
+		return err
+	}
+	if _, err = b.backupStorage(ctx, "preflight", id); err != nil {
+		return err
+	}
+	state, err := b.observe(ctx, id)
+	if err != nil {
+		return err
+	}
+	if state.State == "running" {
+		if err = b.actionWithWarnings(ctx, id, "stop", true); err != nil {
+			return err
+		}
+	} else if state.State != "stopped" {
+		return errInstanceBusy
+	}
+	_, err = b.backupStorage(ctx, "create", id)
+	return err
 }

@@ -64,6 +64,7 @@ type pluginManagePlan struct {
 	Fingerprint          string                   `json:"plan_fingerprint"`
 }
 type pluginManageTransaction struct {
+	InstanceID        string              `json:"instance_id"`
 	SchemaVersion     string              `json:"schema_version"`
 	OperationID       string              `json:"operation_id"`
 	Action            string              `json:"action"`
@@ -223,6 +224,7 @@ func fingerprintPluginManagePlan(p pluginManagePlan) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 func resolvePluginManagePlan(ctx context.Context, server pluginServerContext, path, action, project string, sources ...string) (pluginManagePlan, error) {
+	ctx = withPluginInstance(ctx, server.InstanceID)
 	source := pluginRequestSource(sources)
 	p := pluginManagePlan{Source: source, Action: action, ProjectID: project, Server: server, DataPath: path, Players: []string{}, Parents: []pluginLocationEvidence{}}
 	if !slices.Contains([]string{"enable", "disable", "remove"}, action) || !validPluginIdentity(source, project) {
@@ -290,7 +292,7 @@ func resolvePluginManagePlan(ctx context.Context, server pluginServerContext, pa
 			return p, err
 		}
 	}
-	p.Online, p.Players, err = pluginInstallPlayers(ctx)
+	p.Online, p.Players, err = pluginInstallPlayers(ctx, pluginInstanceID(ctx))
 	if err != nil {
 		return p, err
 	}
@@ -354,7 +356,7 @@ func (s *server) adminPluginManage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 409, "Online players require interruption confirmation")
 		return
 	}
-	journal, created, err := s.operations.beginMinecraftMaintenance(plan.Fingerprint, "plugin_"+plan.Action)
+	journal, created, err := s.operations.beginMinecraftMaintenance(plan.Fingerprint, "plugin_"+plan.Action, plan.Server.InstanceID)
 	if err != nil {
 		writeError(w, 409, "Another Minecraft maintenance operation is active")
 		return
@@ -466,6 +468,10 @@ func checkManageDataIdentity(tx pluginManageTransaction) error {
 	return nil
 }
 func executePluginManage(ctx context.Context, s *server, id string, p pluginManagePlan, confirm bool, actor session) (result error) {
+	ctx = withPluginInstance(ctx, p.Server.InstanceID)
+	if err := s.operations.requireMaintenanceInstance(id, p.Server.InstanceID); err != nil {
+		return err
+	}
 	success := false
 	defer func() {
 		if s.store != nil {
@@ -498,15 +504,15 @@ func executePluginManage(ctx context.Context, s *server, id string, p pluginMana
 	if err != nil || current.Fingerprint != p.Fingerprint {
 		return untouched(errors.New("Plugin plan changed; review again"))
 	}
-	online, _, err := pluginInstallPlayers(ctx)
+	online, _, err := pluginInstallPlayers(ctx, pluginInstanceID(ctx))
 	if err != nil || online > 0 && !confirm {
 		return untouched(errors.New("Final player check requires review and confirmation"))
 	}
-	running, err := pluginServiceActive(ctx)
+	running, err := pluginServiceActive(ctx, pluginInstanceID(ctx))
 	if err != nil {
 		return untouched(err)
 	}
-	tx := pluginManageTransaction{"v1", id, p.Action, p.Fingerprint, p.DataPath, p.DataDevice, p.DataInode, p.Server.MinecraftVersion, running, p.Entry, p.State, p.Manifest}
+	tx := pluginManageTransaction{p.Server.InstanceID, "v1", id, p.Action, p.Fingerprint, p.DataPath, p.DataDevice, p.DataInode, p.Server.MinecraftVersion, running, p.Entry, p.State, p.Manifest}
 	evidence, err := createPluginManageEvidence(s.operations, id, tx)
 	if err != nil {
 		return untouched(errors.New("Private plugin transaction evidence could not be saved"))
@@ -515,7 +521,7 @@ func executePluginManage(ctx context.Context, s *server, id string, p pluginMana
 	if _, err = s.operations.transition(id, operationValidating, "validating", "Preparing the reviewed plugin action."); err != nil {
 		return err
 	}
-	online, _, err = pluginInstallPlayers(ctx)
+	online, _, err = pluginInstallPlayers(ctx, pluginInstanceID(ctx))
 	if err != nil || online > 0 && !confirm {
 		return untouched(errors.New("Final player status changed or requires interruption confirmation"))
 	}
@@ -523,10 +529,10 @@ func executePluginManage(ctx context.Context, s *server, id string, p pluginMana
 	if _, err = s.operations.transition(id, operationRunning, "backup", "Creating a verified cold Minecraft backup."); err != nil {
 		return untouched(err)
 	}
-	if _, err = pluginInstallCommand(ctx, "/usr/libexec/justvoxel/minecraft-backup", "--leave-stopped"); err != nil {
+	if err = instanceMaintenanceColdBackup(ctx, p.Server.InstanceID); err != nil {
 		return rollback(errors.New("Cold backup failed"))
 	}
-	if active, err := pluginServiceActive(ctx); err != nil || active {
+	if active, err := pluginServiceActive(ctx, pluginInstanceID(ctx)); err != nil || active {
 		return rollback(errors.New("Minecraft stopped state could not be proven"))
 	}
 	if err = checkManageDataIdentity(tx); err != nil {
@@ -584,13 +590,13 @@ func executePluginManage(ctx context.Context, s *server, id string, p pluginMana
 	if err != nil {
 		return rollback(err)
 	}
-	if err = pluginService(ctx, "start"); err != nil {
+	if err = pluginService(ctx, pluginInstanceID(ctx), "start"); err != nil {
 		return rollback(errors.New("Minecraft could not start"))
 	}
 	if _, err = s.operations.transition(id, operationVerifying, "verifying", "Verifying Minecraft and managed plugin state."); err != nil {
 		return rollback(err)
 	}
-	if err = verifyPluginRuntime(ctx, p.Server.MinecraftVersion); err != nil {
+	if err = verifyPluginRuntime(ctx, pluginInstanceID(ctx), p.Server.MinecraftVersion); err != nil {
 		recordPluginStartupEvidence(s.operations, id, p.DataPath, []string{p.Entry.PluginName})
 		return rollback(errors.New("Minecraft stack verification failed"))
 	}
@@ -608,10 +614,10 @@ func executePluginManage(ctx context.Context, s *server, id string, p pluginMana
 		return rollback(err)
 	}
 	if !running {
-		if err = pluginService(ctx, "stop"); err != nil {
+		if err = pluginService(ctx, pluginInstanceID(ctx), "stop"); err != nil {
 			return rollback(err)
 		}
-		if active, err := pluginServiceActive(ctx); err != nil || active {
+		if active, err := pluginServiceActive(ctx, pluginInstanceID(ctx)); err != nil || active {
 			return rollback(errors.New("Original stopped state unavailable"))
 		}
 	}
@@ -739,14 +745,15 @@ func restorePluginManageFiles(tx pluginManageTransaction) error {
 	return nil
 }
 func restorePluginManageRuntime(ctx context.Context, tx pluginManageTransaction) error {
+	ctx = withPluginInstance(ctx, tx.InstanceID)
 	previous, err := snapshotPluginLifecycleStartup(tx.DataPath)
 	if err != nil {
 		return err
 	}
-	if err := pluginService(ctx, "start"); err != nil {
+	if err := pluginService(ctx, pluginInstanceID(ctx), "start"); err != nil {
 		return err
 	}
-	if err := verifyPluginRuntime(ctx, tx.MinecraftVersion); err != nil {
+	if err := verifyPluginRuntime(ctx, pluginInstanceID(ctx), tx.MinecraftVersion); err != nil {
 		return err
 	}
 	if err = verifyPluginLifecycleStartupFresh(tx.DataPath, previous); err != nil {
@@ -761,10 +768,10 @@ func restorePluginManageRuntime(ctx context.Context, tx pluginManageTransaction)
 		return err
 	}
 	if !tx.OriginallyRunning {
-		if err = pluginService(ctx, "stop"); err != nil {
+		if err = pluginService(ctx, pluginInstanceID(ctx), "stop"); err != nil {
 			return err
 		}
-		if active, err := pluginServiceActive(ctx); err != nil || active {
+		if active, err := pluginServiceActive(ctx, pluginInstanceID(ctx)); err != nil || active {
 			return errors.New("Stopped runtime could not be proven")
 		}
 	}
@@ -774,11 +781,11 @@ func rollbackPluginManage(s *server, id string, tx pluginManageTransaction, caus
 	_ = s.operations.appendOperationDiagnostic(id, "plugin_"+tx.Action, "failure", "Managed plugin action failed", map[string]string{"reason": cause.Error()})
 	_, _ = s.operations.transition(id, operationFailed, "rollback", "Plugin action failed; restoring the exact original state.")
 	_, _ = s.operations.transition(id, operationRollingBack, "rollback", "Restoring verified JAR location, ownership and Minecraft state.")
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	ctx, cancel := context.WithTimeout(withPluginInstance(context.Background(), tx.InstanceID), 20*time.Minute)
 	defer cancel()
-	err := pluginService(ctx, "stop")
+	err := pluginService(ctx, pluginInstanceID(ctx), "stop")
 	if err == nil {
-		if active, e := pluginServiceActive(ctx); e != nil || active {
+		if active, e := pluginServiceActive(ctx, pluginInstanceID(ctx)); e != nil || active {
 			err = errors.New("Failed runtime could not be stopped")
 		}
 	}
@@ -819,7 +826,7 @@ func readPluginManageTransaction(store *operationStore, id string) (pluginManage
 	}
 	d := json.NewDecoder(io.LimitReader(f, 2*pluginManifestLimit+1))
 	d.DisallowUnknownFields()
-	if d.Decode(&tx) != nil || d.Decode(new(any)) != io.EOF || tx.SchemaVersion != "v1" || tx.OperationID != id || !operationFingerprintPattern.MatchString(tx.PlanFingerprint) || !slices.Contains([]string{"enable", "disable", "remove"}, tx.Action) || !slices.Contains([]string{"enabled", "disabled"}, tx.OriginalState) {
+	if d.Decode(&tx) != nil || d.Decode(new(any)) != io.EOF || tx.SchemaVersion != "v1" || validatePluginInstance(tx.InstanceID, tx.DataPath) != nil || tx.OperationID != id || !operationFingerprintPattern.MatchString(tx.PlanFingerprint) || !slices.Contains([]string{"enable", "disable", "remove"}, tx.Action) || !slices.Contains([]string{"enabled", "disabled"}, tx.OriginalState) {
 		return tx, errors.New("Invalid transaction evidence")
 	}
 	if tx.Action == "enable" && tx.OriginalState != "disabled" || tx.Action == "disable" && tx.OriginalState != "enabled" || !versionInputPattern.MatchString(tx.MinecraftVersion) || !validPluginIdentity(tx.Entry.Source, tx.Entry.ProjectID) || !validPluginIdentity(tx.Entry.Source, tx.Entry.VersionID) {
@@ -859,13 +866,13 @@ func (s *server) adminPluginManageAcknowledge(w http.ResponseWriter, r *http.Req
 	if err != nil && journal.Stage == "interrupted_queued" && (errors.Is(err, unix.ENOENT) || errors.Is(err, os.ErrNotExist)) {
 		// Queued lifecycle operations cannot have changed runtime or files: the
 		// durable transaction must precede their first non-queued transition.
-		active, stateErr := pluginServiceActive(r.Context())
+		active, stateErr := pluginServiceActive(r.Context(), pluginInstanceID(r.Context()))
 		if stateErr == nil && active {
 			server, _, ok := s.pluginContext(&pluginContextSink{header: make(http.Header)}, r)
 			if !ok || server.MinecraftVersion == "" {
 				stateErr = errors.New("Server context unavailable")
 			} else {
-				stateErr = verifyPluginRuntime(r.Context(), server.MinecraftVersion)
+				stateErr = verifyPluginRuntime(r.Context(), pluginInstanceID(r.Context()), server.MinecraftVersion)
 			}
 		}
 		if stateErr != nil {
@@ -880,7 +887,7 @@ func (s *server) adminPluginManageAcknowledge(w http.ResponseWriter, r *http.Req
 		writeJSON(w, 200, map[string]any{"operation": resolved})
 		return
 	}
-	if err != nil || journal.OperationType != "plugin_"+tx.Action || journal.PlanFingerprint != tx.PlanFingerprint {
+	if err != nil || journal.OperationType != "plugin_"+tx.Action || journal.PlanFingerprint != tx.PlanFingerprint || journal.InstanceID != tx.InstanceID {
 		writeError(w, 409, "Exact recovery evidence is unavailable; maintenance remains reserved")
 		return
 	}
@@ -911,8 +918,8 @@ func (s *server) adminPluginManageAcknowledge(w http.ResponseWriter, r *http.Req
 	}
 	// Bounded deterministic rollback is safe only with one exact rollback copy
 	// and either the original or transaction-specific committed manifest.
-	if err = pluginService(ctx, "stop"); err == nil {
-		if active, e := pluginServiceActive(ctx); e != nil || active {
+	if err = pluginService(ctx, pluginInstanceID(ctx), "stop"); err == nil {
+		if active, e := pluginServiceActive(ctx, pluginInstanceID(ctx)); e != nil || active {
 			err = errors.New("Stopped runtime unavailable")
 		}
 	}
@@ -1241,20 +1248,21 @@ func pluginManageTargetState(tx pluginManageTransaction) error {
 	return nil
 }
 func verifyPluginManageTargetRuntime(ctx context.Context, tx pluginManageTransaction) error {
-	if err := pluginService(ctx, "stop"); err != nil {
+	ctx = withPluginInstance(ctx, tx.InstanceID)
+	if err := pluginService(ctx, pluginInstanceID(ctx), "stop"); err != nil {
 		return err
 	}
-	if active, err := pluginServiceActive(ctx); err != nil || active {
+	if active, err := pluginServiceActive(ctx, pluginInstanceID(ctx)); err != nil || active {
 		return errors.New("Recovery stopped state unverified")
 	}
 	previous, err := snapshotPluginLifecycleStartup(tx.DataPath)
 	if err != nil {
 		return err
 	}
-	if err := pluginService(ctx, "start"); err != nil {
+	if err := pluginService(ctx, pluginInstanceID(ctx), "start"); err != nil {
 		return err
 	}
-	if err := verifyPluginRuntime(ctx, tx.MinecraftVersion); err != nil {
+	if err := verifyPluginRuntime(ctx, pluginInstanceID(ctx), tx.MinecraftVersion); err != nil {
 		return err
 	}
 	if err = verifyPluginLifecycleStartupFresh(tx.DataPath, previous); err != nil {
@@ -1269,10 +1277,10 @@ func verifyPluginManageTargetRuntime(ctx context.Context, tx pluginManageTransac
 		return err
 	}
 	if !tx.OriginallyRunning {
-		if err = pluginService(ctx, "stop"); err != nil {
+		if err = pluginService(ctx, pluginInstanceID(ctx), "stop"); err != nil {
 			return err
 		}
-		if active, err := pluginServiceActive(ctx); err != nil || active {
+		if active, err := pluginServiceActive(ctx, pluginInstanceID(ctx)); err != nil || active {
 			return errors.New("Original stopped state unverified")
 		}
 	}

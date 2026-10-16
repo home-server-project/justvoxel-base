@@ -72,12 +72,8 @@ func newPluginManageFixture(t *testing.T, state string) *pluginManageFixture {
 				return nil, nil
 			}
 		case "/usr/libexec/justvoxel/minecraft-backup":
-			if len(args) != 1 || args[0] != "--leave-stopped" {
-				t.Fatal("cold backup contract")
-			}
-			f.backup = true
-			f.active = false
-			return nil, nil
+			t.Fatal("legacy global backup invoked")
+			return nil, errors.New("legacy backup")
 		case "podman":
 			if args[len(args)-1] != "list" {
 				t.Fatal("RCON plugin verifier used")
@@ -133,7 +129,7 @@ func newPluginManageFixture(t *testing.T, state string) *pluginManageFixture {
 }
 func (f *pluginManageFixture) managePlan(t *testing.T, action string) pluginManagePlan {
 	t.Helper()
-	p, err := f.s.resolvePluginManage(context.Background(), action, f.entry.ProjectID)
+	p, err := f.s.resolvePluginManage(withPluginInstance(context.Background(), "jv-a1b2c3"), action, f.entry.ProjectID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +137,7 @@ func (f *pluginManageFixture) managePlan(t *testing.T, action string) pluginMana
 }
 func (f *pluginManageFixture) manage(t *testing.T, p pluginManagePlan, confirm bool) operationJournal {
 	t.Helper()
-	j, created, err := f.s.operations.beginMinecraftMaintenance(p.Fingerprint, "plugin_"+p.Action)
+	j, created, err := f.s.operations.beginMinecraftMaintenance(p.Fingerprint, "plugin_"+p.Action, "jv-a1b2c3")
 	if err != nil || !created {
 		t.Fatal(err)
 	}
@@ -213,13 +209,13 @@ func TestManagedPluginPlanStateAndOwnershipBoundaries(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			f := newPluginManageFixture(t, state)
 			for _, action := range []string{"enable", "disable", "remove"} {
-				_, err := f.s.resolvePluginManage(context.Background(), action, f.entry.ProjectID)
+				_, err := f.s.resolvePluginManage(withPluginInstance(context.Background(), "jv-a1b2c3"), action, f.entry.ProjectID)
 				allowed := action == "remove" || action == "enable" && state == "disabled" || action == "disable" && state == "enabled"
 				if (err == nil) != allowed {
 					t.Fatalf("%s from %s: %v", action, state, err)
 				}
 			}
-			if _, err := f.s.resolvePluginManage(context.Background(), "remove", "manual"); err == nil {
+			if _, err := f.s.resolvePluginManage(withPluginInstance(context.Background(), "jv-a1b2c3"), "remove", "manual"); err == nil {
 				t.Fatal("adopted manual plugin")
 			}
 		})
@@ -259,7 +255,7 @@ func TestManagedPluginDependencySafety(t *testing.T) {
 						}
 					}
 				}
-				_, err := f.s.resolvePluginManage(context.Background(), action, target.ProjectID)
+				_, err := f.s.resolvePluginManage(withPluginInstance(context.Background(), "jv-a1b2c3"), action, target.ProjectID)
 				if (err == nil) != (parentState == "disabled") {
 					t.Fatalf("dependency state %s: %v", parentState, err)
 				}
@@ -317,17 +313,18 @@ func TestManagedPluginEnableIdentityCollision(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(f.data, "plugins", "manual.jar"), f.jars[f.entry.Filename], 0644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.s.resolvePluginManage(context.Background(), "enable", f.entry.ProjectID); err == nil {
+	if _, err := f.s.resolvePluginManage(withPluginInstance(context.Background(), "jv-a1b2c3"), "enable", f.entry.ProjectID); err == nil {
 		t.Fatal("manual identity collision accepted")
 	}
 }
 func TestManagedPluginStrictAdministratorEndpoints(t *testing.T) {
+	pluginTestData(t)
 	for _, path := range []string{"manage/plan", "manage", "manage/acknowledge"} {
 		s := surfaceTestServer(t, roleAdministrator)
 		mux := http.NewServeMux()
 		registerAdminPluginRoutes(mux, s)
 		rr := httptest.NewRecorder()
-		mux.ServeHTTP(rr, surfaceRequest(http.MethodPost, "/v1/admin/plugins/"+path, `{"unexpected":true}`))
+		mux.ServeHTTP(rr, pluginTestRequest(http.MethodPost, "/v1/minecraft/instances/jv-a1b2c3/plugins/"+path, `{"unexpected":true}`))
 		if rr.Code != 400 {
 			t.Fatal(path, rr.Code)
 		}
@@ -336,11 +333,11 @@ func TestManagedPluginStrictAdministratorEndpoints(t *testing.T) {
 func TestManagedPluginInterruptedEvidenceAndAmbiguousAcknowledge(t *testing.T) {
 	f := newPluginManageFixture(t, "enabled")
 	p := f.managePlan(t, "disable")
-	j, _, err := f.s.operations.beginMinecraftMaintenance(p.Fingerprint, operationTypePluginDisable)
+	j, _, err := f.s.operations.beginMinecraftMaintenance(p.Fingerprint, operationTypePluginDisable, "jv-a1b2c3")
 	if err != nil {
 		t.Fatal(err)
 	}
-	tx := pluginManageTransaction{"v1", j.OperationID, "disable", p.Fingerprint, p.DataPath, p.DataDevice, p.DataInode, p.Server.MinecraftVersion, true, p.Entry, p.State, p.Manifest}
+	tx := pluginManageTransaction{"jv-a1b2c3", "v1", j.OperationID, "disable", p.Fingerprint, p.DataPath, p.DataDevice, p.DataInode, p.Server.MinecraftVersion, true, p.Entry, p.State, p.Manifest}
 	evidence, err := createPluginManageEvidence(f.s.operations, j.OperationID, tx)
 	if err != nil {
 		t.Fatal(err)
@@ -376,7 +373,7 @@ func TestManagedPluginInterruptedEvidenceAndAmbiguousAcknowledge(t *testing.T) {
 	}
 	body, _ := json.Marshal(pluginManageAcknowledgeRequest{OperationID: j.OperationID})
 	rr := httptest.NewRecorder()
-	f.s.adminPluginManageAcknowledge(rr, surfaceRequest(http.MethodPost, "/v1/admin/plugins/manage/acknowledge", string(body)))
+	f.s.adminPluginManageAcknowledge(rr, pluginTestRequest(http.MethodPost, "/v1/minecraft/instances/jv-a1b2c3/plugins/manage/acknowledge", string(body)))
 	if rr.Code != 409 {
 		t.Fatal("ambiguous state resolved", rr.Code)
 	}
@@ -391,11 +388,11 @@ func TestManagedPluginAcknowledgementVerifiesCompleteTargetOrRestoredOriginal(t 
 		t.Run(fmt.Sprint(target), func(t *testing.T) {
 			f := newPluginManageFixture(t, "enabled")
 			p := f.managePlan(t, "disable")
-			j, _, err := f.s.operations.beginMinecraftMaintenance(p.Fingerprint, operationTypePluginDisable)
+			j, _, err := f.s.operations.beginMinecraftMaintenance(p.Fingerprint, operationTypePluginDisable, "jv-a1b2c3")
 			if err != nil {
 				t.Fatal(err)
 			}
-			tx := pluginManageTransaction{"v1", j.OperationID, "disable", p.Fingerprint, p.DataPath, p.DataDevice, p.DataInode, p.Server.MinecraftVersion, true, p.Entry, p.State, p.Manifest}
+			tx := pluginManageTransaction{"jv-a1b2c3", "v1", j.OperationID, "disable", p.Fingerprint, p.DataPath, p.DataDevice, p.DataInode, p.Server.MinecraftVersion, true, p.Entry, p.State, p.Manifest}
 			dir, err := createPluginManageEvidence(f.s.operations, j.OperationID, tx)
 			if err != nil {
 				t.Fatal(err)
@@ -419,7 +416,7 @@ func TestManagedPluginAcknowledgementVerifiesCompleteTargetOrRestoredOriginal(t 
 			}
 			body, _ := json.Marshal(pluginManageAcknowledgeRequest{OperationID: j.OperationID})
 			rr := httptest.NewRecorder()
-			f.s.adminPluginManageAcknowledge(rr, surfaceRequest(http.MethodPost, "/v1/admin/plugins/manage/acknowledge", string(body)))
+			f.s.adminPluginManageAcknowledge(rr, pluginTestRequest(http.MethodPost, "/v1/minecraft/instances/jv-a1b2c3/plugins/manage/acknowledge", string(body)))
 			if rr.Code != 200 {
 				t.Fatal("recovery failed", rr.Code, rr.Body.String())
 			}
@@ -490,7 +487,7 @@ func TestGenericLifecycleCannotAdoptApplianceComponent(t *testing.T) {
 		t.Fatal("component missing")
 	}
 	for _, action := range []string{"enable", "disable", "remove"} {
-		if _, err = f.s.resolvePluginManage(context.Background(), action, "wKkoqHrH"); err == nil {
+		if _, err = f.s.resolvePluginManage(withPluginInstance(context.Background(), "jv-a1b2c3"), action, "wKkoqHrH"); err == nil {
 			t.Fatal("component received generic action")
 		}
 	}

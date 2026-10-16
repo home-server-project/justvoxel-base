@@ -56,14 +56,8 @@ type hangarInstallFixture struct {
 
 func newHangarInstallFixture(t *testing.T, serverType string) *hangarInstallFixture {
 	t.Helper()
-	f := &hangarInstallFixture{pluginInstallFixture: newPluginInstallFixture(t), releases: map[string]hangarVersion{}, serverType: serverType}
+	f := &hangarInstallFixture{pluginInstallFixture: newPluginInstallFixtureFor(t, serverType, "1.21.8"), releases: map[string]hangarVersion{}, serverType: serverType}
 	f.add(t, 1, 10, "root.jar", "Root", "example.Root")
-	runAdminDiscoveryHelper = func(context.Context, string) ([]byte, error) {
-		return json.Marshal(map[string]any{"configured": true, "minecraft": map[string]string{"server_type": f.serverType, "data_path": f.data}})
-	}
-	runPluginRuntimeStatus = func(context.Context) ([]byte, error) {
-		return json.Marshal(map[string]any{"minecraft": map[string]string{"server_type": f.serverType, "version": "1.21.8"}})
-	}
 	pluginCatalogClient = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }, Transport: pluginTestTransport(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Scheme != "https" || r.URL.Host != "hangar.papermc.io" || r.Header.Get("Authorization") != "" {
 			t.Fatal("unsafe Hangar API request", r.URL)
@@ -131,7 +125,7 @@ func (f *hangarInstallFixture) add(t *testing.T, project, release int64, filenam
 }
 func (f *hangarInstallFixture) hangarPlan(t *testing.T) pluginInstallPlan {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := pluginTestRequest(http.MethodGet, "/", "")
 	server, path, ok := f.s.pluginContext(httptest.NewRecorder(), req)
 	if !ok {
 		t.Fatal("no authoritative context")
@@ -214,7 +208,7 @@ func TestHangarInstallFailuresPreserveRuntime(t *testing.T) {
 			}
 			v.Downloads["PAPER"] = d
 			f.releases["1"] = v
-			server := pluginServerContext{ServerType: "purpur", ServerSoftware: "Purpur", Supported: true, MinecraftVersion: "1.21.8"}
+			server := pluginServerContext{InstanceID: "jv-a1b2c3", ServerType: "purpur", ServerSoftware: "Purpur", Supported: true, MinecraftVersion: "1.21.8"}
 			p, err := resolveHangarPluginInstallPlan(context.Background(), server, f.data, "1", "10")
 			if slices.Contains([]string{"external", "identity", "incompatible"}, kind) {
 				if err == nil || len(f.commands) > 0 {
@@ -289,7 +283,7 @@ func TestHangarDependenciesAndLimits(t *testing.T) {
 				f.releases["2"] = dep
 			}
 			f.releases["1"] = v
-			p, err := resolveHangarPluginInstallPlan(context.Background(), pluginServerContext{ServerType: "paper", Supported: true, MinecraftVersion: "1.21.8"}, f.data, "1", "10")
+			p, err := resolveHangarPluginInstallPlan(context.Background(), pluginServerContext{InstanceID: "jv-a1b2c3", ServerType: "paper", Supported: true, MinecraftVersion: "1.21.8"}, f.data, "1", "10")
 			if kind != "internal" && kind != "optional" {
 				if err == nil {
 					t.Fatal("unsafe graph accepted", kind)
@@ -368,7 +362,7 @@ func TestHangarInstallManifestCanonicalProviderOrder(t *testing.T) {
 			if _, err := commitPluginManifest(f.data, nil, pluginManifest{"v1", []pluginManifestEntry{legacy}}); err != nil {
 				t.Fatal(err)
 			}
-			request := httptest.NewRequest(http.MethodGet, "/", nil)
+			request := pluginTestRequest(http.MethodGet, "/", "")
 			server, path, ok := f.s.pluginContext(httptest.NewRecorder(), request)
 			if !ok {
 				t.Fatal("no authoritative context")
@@ -467,7 +461,7 @@ func TestHangarLifecycleAndPreservedReset(t *testing.T) {
 				}
 				return
 			}
-			p, err := f.s.resolvePluginManage(context.Background(), action, "1", "Hangar")
+			p, err := f.s.resolvePluginManage(withPluginInstance(context.Background(), "jv-a1b2c3"), action, "1", "Hangar")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -541,7 +535,7 @@ func TestHangarIconTrustBoundary(t *testing.T) {
 			if kind == "caller URL" {
 				path += "&icon_url=https://evil.example/icon.png"
 			}
-			s.adminPluginIcon(rr, surfaceRequest(http.MethodGet, path, ""))
+			s.adminPluginIcon(rr, pluginTestRequest(http.MethodGet, path, ""))
 			want := 502
 			if kind == "trusted" || kind == "user" {
 				want = 200
@@ -626,7 +620,7 @@ func TestHangarDiscoveryAuthoritativeInstallAvailability(t *testing.T) {
 				raw, _ := json.Marshal(payload)
 				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(raw))}, nil
 			})}
-			out, err := discoverHangarPlugins(context.Background(), pluginServerContext{ServerType: "purpur", ServerSoftware: "Purpur", Supported: true, MinecraftVersion: "1.21.8"}, pluginDiscoverQuery{Limit: 1})
+			out, err := discoverHangarPlugins(context.Background(), pluginServerContext{InstanceID: "jv-a1b2c3", ServerType: "purpur", ServerSoftware: "Purpur", Supported: true, MinecraftVersion: "1.21.8"}, pluginDiscoverQuery{Limit: 1})
 			if err != nil || len(out.Projects) != 1 {
 				t.Fatal(err, out)
 			}

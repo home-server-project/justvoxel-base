@@ -215,7 +215,7 @@ func (s *server) adminPluginInstallPlan(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
-	online, names, err := pluginInstallPlayers(ctx)
+	online, names, err := pluginInstallPlayers(ctx, pluginInstanceID(ctx))
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "Player status unavailable; Minecraft has not been changed")
 		return
@@ -272,7 +272,7 @@ func (s *server) adminPluginInstall(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusAccepted, adminOperationResponse{Operation: current})
 		return
 	}
-	online, names, err := pluginInstallPlayers(ctx)
+	online, names, err := pluginInstallPlayers(ctx, pluginInstanceID(ctx))
 	if err != nil {
 		writeError(w, 503, "Player status unavailable; Minecraft has not been changed")
 		return
@@ -281,7 +281,7 @@ func (s *server) adminPluginInstall(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, minecraftActionResponse{ConfirmationRequired: true, Online: online, Players: names, Message: "Players joined; review and confirm the restart"})
 		return
 	}
-	journal, created, err := s.operations.beginMinecraftMaintenance(plan.Fingerprint, operationTypePluginInstall)
+	journal, created, err := s.operations.beginMinecraftMaintenance(plan.Fingerprint, operationTypePluginInstall, plan.Server.InstanceID)
 	if err != nil {
 		writeError(w, 409, "Another Minecraft maintenance operation requires attention")
 		return
@@ -613,10 +613,10 @@ func fingerprintPluginPlan(plan pluginInstallPlan) string {
 		artifacts = append(artifacts, evidence{a, a.URL, fingerprintPluginHash(a), a.SHA256, a.ExistingFilename, a.ExistingHash})
 	}
 	data, _ := json.Marshal(struct {
-		Server, Version, Path, Source, Project, Release string
-		Artifacts                                       []evidence
-		Display                                         []pluginDependency
-	}{plan.Server.ServerType, plan.Server.MinecraftVersion, plan.DataPath, pluginSource(plan.Source), plan.ProjectID, plan.VersionID, artifacts, plan.DisplayDependencies})
+		InstanceID, Server, Version, Path, Source, Project, Release string
+		Artifacts                                                   []evidence
+		Display                                                     []pluginDependency
+	}{plan.Server.InstanceID, plan.Server.ServerType, plan.Server.MinecraftVersion, plan.DataPath, pluginSource(plan.Source), plan.ProjectID, plan.VersionID, artifacts, plan.DisplayDependencies})
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
@@ -892,20 +892,34 @@ func findManagedPluginComponent(root *os.File, component string) (string, string
 	return filename, hash, result, nil
 }
 
-var pluginInstallPlayers = func(ctx context.Context) (int, []string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	raw, code, err := runWebHelper(ctx, "players")
-	var view struct {
-		Configured bool     `json:"configured"`
-		State      string   `json:"state"`
-		Online     *int     `json:"online"`
-		Names      []string `json:"names"`
+var pluginInstallPlayers = func(ctx context.Context, id string) (int, []string, error) {
+	if err := validatePluginInstance(id, ""); err != nil {
+		return 0, nil, err
 	}
-	if err != nil || code != 0 || len(raw) > 64<<10 || json.Unmarshal(raw, &view) != nil || !view.Configured || view.Online == nil || *view.Online < 0 || *view.Online > 10000 || (view.State != "running" && view.State != "stopped") || (view.State == "stopped" && *view.Online != 0) {
-		return 0, nil, errors.New("Player status unavailable")
+	state, err := instanceRuntimes.observe(ctx, id)
+	if err != nil {
+		return 0, nil, err
 	}
-	return *view.Online, view.Names, nil
+	if state.State == "stopped" {
+		return 0, []string{}, nil
+	}
+	if state.State != "running" {
+		return 0, nil, errInstanceBusy
+	}
+	raw, err := instanceRuntimes.rcon(ctx, id, "list")
+	if err != nil {
+		return 0, nil, err
+	}
+	players, err := parseInstancePlayers(id, raw)
+	if err != nil {
+		return 0, nil, err
+	}
+	parts := instancePlayerListPattern.FindStringSubmatch(strings.TrimSpace(string(raw)))
+	names := []string{}
+	if players.Online > 0 {
+		names = strings.Split(strings.TrimSpace(parts[3]), ", ")
+	}
+	return players.Online, names, nil
 }
 
 var pluginDownloadClient = &http.Client{Timeout: 2 * time.Minute, Transport: &http.Transport{TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 15 * time.Second}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
@@ -990,8 +1004,11 @@ func acquirePluginRuntimeLock() (*os.File, error) {
 	}
 	return f, nil
 }
-func pluginServiceActive(ctx context.Context) (bool, error) {
-	out, err := pluginInstallCommand(ctx, "systemctl", "is-active", "minecraft.service")
+func pluginServiceActive(ctx context.Context, id string) (bool, error) {
+	if err := validatePluginInstance(id, ""); err != nil {
+		return false, err
+	}
+	out, err := pluginInstallCommand(ctx, "systemctl", "is-active", "minecraft-"+id+".service")
 	switch strings.TrimSpace(string(out)) {
 	case "active":
 		return err == nil, err
@@ -1001,17 +1018,23 @@ func pluginServiceActive(ctx context.Context) (bool, error) {
 		return false, errors.New("Minecraft service state is unavailable")
 	}
 }
-func pluginService(ctx context.Context, action string) error {
-	_, err := pluginInstallCommand(ctx, "systemctl", action, "minecraft.service")
+func pluginService(ctx context.Context, id, action string) error {
+	if err := validatePluginInstance(id, ""); err != nil {
+		return err
+	}
+	_, err := pluginInstallCommand(ctx, "systemctl", action, "minecraft-"+id+".service")
 	return err
 }
-func verifyPluginRuntime(ctx context.Context, version string) error {
+func verifyPluginRuntime(ctx context.Context, id, version string) error {
+	if err := validatePluginInstance(id, ""); err != nil {
+		return err
+	}
 	deadline := time.NewTimer(900 * time.Second)
 	defer deadline.Stop()
 	for {
 		probe, cancel := context.WithTimeout(ctx, 10*time.Second)
-		_, err := pluginInstallCommand(probe, "podman", "exec", "minecraft", "rcon-cli", "list")
-		active, stateErr := pluginServiceActive(probe)
+		_, err := pluginInstallCommand(probe, "podman", "exec", "minecraft-"+id, "rcon-cli", "list")
+		active, stateErr := pluginServiceActive(probe, id)
 		cancel()
 		if err == nil && stateErr == nil && active {
 			break
@@ -1029,7 +1052,7 @@ func verifyPluginRuntime(ctx context.Context, version string) error {
 	}
 	verify, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	_, err := pluginInstallCommand(verify, "/usr/libexec/justvoxel/mjust/verify-minecraft-stack", version)
+	_, err := pluginInstallCommand(verify, "/usr/libexec/justvoxel/mjust/verify-minecraft-stack", "--instance", id, version)
 	return err
 }
 
@@ -1272,6 +1295,7 @@ var startPluginInstallWorker = func(s *server, id string, plan pluginInstallPlan
 // Durable transaction evidence is private, independent of browser-safe journals.
 // It records all potential placements before touching the plugin directory.
 type pluginTransaction struct {
+	InstanceID        string                `json:"instance_id"`
 	DataPath          string                `json:"data_path,omitempty"`
 	MinecraftVersion  string                `json:"minecraft_version,omitempty"`
 	SchemaVersion     string                `json:"schema_version"`
@@ -1284,6 +1308,7 @@ type pluginTransaction struct {
 // Preflight records creation before any Minecraft/service/plugin mutation. It
 // deliberately contains no original service-state claim.
 type pluginPreflight struct {
+	InstanceID       string `json:"instance_id"`
 	Source           string `json:"source,omitempty"`
 	SchemaVersion    string `json:"schema_version"`
 	OperationID      string `json:"operation_id"`
@@ -1360,6 +1385,10 @@ func persistPluginTransaction(directory string, tx pluginTransaction) error {
 	return publishPluginEvidence(d, "transaction.json", tx)
 }
 func executePluginInstall(ctx context.Context, s *server, id string, plan pluginInstallPlan, confirm bool, actor session) (result error) {
+	ctx = withPluginInstance(ctx, plan.Server.InstanceID)
+	if err := s.operations.requireMaintenanceInstance(id, plan.Server.InstanceID); err != nil {
+		return err
+	}
 	succeeded := false
 	defer func() {
 		if s.store != nil {
@@ -1400,7 +1429,7 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 		return failUntouched(errors.New("Private transaction evidence unavailable"))
 	}
 	defer evidenceDirectory.Close()
-	preflight := pluginPreflight{Source: pluginSource(plan.Source), SchemaVersion: "v1", OperationID: id, PlanFingerprint: plan.Fingerprint, DataPath: plan.DataPath, MinecraftVersion: plan.Server.MinecraftVersion, ProjectID: plan.ProjectID, VersionID: plan.VersionID}
+	preflight := pluginPreflight{InstanceID: plan.Server.InstanceID, Source: pluginSource(plan.Source), SchemaVersion: "v1", OperationID: id, PlanFingerprint: plan.Fingerprint, DataPath: plan.DataPath, MinecraftVersion: plan.Server.MinecraftVersion, ProjectID: plan.ProjectID, VersionID: plan.VersionID}
 	if err := publishPluginEvidence(evidenceDirectory, "preflight.json", preflight); err != nil {
 		return failUntouched(errors.New("Pre-mutation evidence could not be saved"))
 	}
@@ -1502,11 +1531,11 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 	if err := checkPluginInstallCollisions(root, plan); err != nil {
 		return failUntouched(err)
 	}
-	originallyRunning, err := pluginServiceActive(ctx)
+	originallyRunning, err := pluginServiceActive(ctx, pluginInstanceID(ctx))
 	if err != nil {
 		return failUntouched(err)
 	}
-	tx := pluginTransaction{DataPath: plan.DataPath, MinecraftVersion: plan.Server.MinecraftVersion, SchemaVersion: "v1", OperationID: id, PlanFingerprint: plan.Fingerprint, OriginallyRunning: originallyRunning, Artifacts: []pluginManifestEntry{}}
+	tx := pluginTransaction{InstanceID: plan.Server.InstanceID, DataPath: plan.DataPath, MinecraftVersion: plan.Server.MinecraftVersion, SchemaVersion: "v1", OperationID: id, PlanFingerprint: plan.Fingerprint, OriginallyRunning: originallyRunning, Artifacts: []pluginManifestEntry{}}
 	for _, a := range plan.Artifacts {
 		if a.Satisfied == "" {
 			tx.Artifacts = append(tx.Artifacts, pluginManifestArtifact(a))
@@ -1515,14 +1544,14 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 	if err := s.operations.pluginProgress(id, "player_check", "Checking current players immediately before the cold backup."); err != nil {
 		return failUntouched(err)
 	}
-	online, _, err := pluginInstallPlayers(ctx)
+	online, _, err := pluginInstallPlayers(ctx, pluginInstanceID(ctx))
 	if err != nil {
 		return failUntouched(errors.New("Final player status unavailable"))
 	}
 	if online > 0 && !confirm {
 		return failUntouched(errors.New("A player joined; review and confirm the restart"))
 	}
-	// minecraft-backup may stop Minecraft: durable evidence precedes this boundary.
+	// The selected instance cold backup may stop Minecraft: durable evidence precedes this boundary.
 	if err := publishPluginEvidence(evidenceDirectory, "transaction.json", tx); err != nil {
 		return failUntouched(errors.New("Transaction evidence could not be saved"))
 	}
@@ -1533,11 +1562,11 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 	rollback := func(cause error) error {
 		return rollbackPluginInstall(s, id, plan, root, created, originallyRunning, cause)
 	}
-	_, err = pluginInstallCommand(ctx, "/usr/libexec/justvoxel/minecraft-backup", "--leave-stopped")
+	err = instanceMaintenanceColdBackup(ctx, plan.Server.InstanceID)
 	if err != nil {
 		return rollback(errors.New("Cold backup failed or did not create a verified archive; no plugins were installed"))
 	}
-	if active, err := pluginServiceActive(ctx); err != nil || active {
+	if active, err := pluginServiceActive(ctx, pluginInstanceID(ctx)); err != nil || active {
 		return rollback(errors.New("Minecraft did not stop after the cold backup"))
 	}
 	if err := checkPluginDirectoryIdentity(plan.DataPath, root); err != nil {
@@ -1564,13 +1593,13 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 	if err := s.operations.pluginProgress(id, "restarting", "Starting Minecraft for runtime verification."); err != nil {
 		return rollback(err)
 	}
-	if err := pluginService(ctx, "start"); err != nil {
+	if err := pluginService(ctx, pluginInstanceID(ctx), "start"); err != nil {
 		return rollback(errors.New("Minecraft could not start"))
 	}
 	if _, err := s.operations.transition(id, operationVerifying, "verifying", "Verifying Minecraft and installed plugin runtime state."); err != nil {
 		return rollback(err)
 	}
-	if err := verifyPluginRuntime(ctx, plan.Server.MinecraftVersion); err != nil {
+	if err := verifyPluginRuntime(ctx, pluginInstanceID(ctx), plan.Server.MinecraftVersion); err != nil {
 		recordPluginStartupEvidence(s.operations, id, plan.DataPath, pluginInstallExpectedNames(plan))
 		return rollback(errors.New("Existing Minecraft stack verification failed"))
 	}
@@ -1583,10 +1612,10 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 		return rollback(err)
 	}
 	if !originallyRunning {
-		if err := pluginService(ctx, "stop"); err != nil {
+		if err := pluginService(ctx, pluginInstanceID(ctx), "stop"); err != nil {
 			return rollback(errors.New("Minecraft could not return to its original stopped state"))
 		}
-		if active, err := pluginServiceActive(ctx); err != nil || active {
+		if active, err := pluginServiceActive(ctx, pluginInstanceID(ctx)); err != nil || active {
 			return rollback(errors.New("Original stopped state could not be verified"))
 		}
 	}
@@ -1661,6 +1690,7 @@ func pluginManifestArtifact(a pluginInstallArtifact) pluginManifestEntry {
 	return pluginManifestEntry{Source: pluginSource(a.Source), ProjectID: a.ProjectID, VersionID: a.VersionID, VersionNumber: a.VersionNumber, Filename: a.Filename, SHA512: a.SHA512, PluginName: a.PluginName, Main: a.Main, Requested: a.Requested, RequiredBy: a.RequiredBy}
 }
 func revalidatePluginInstall(ctx context.Context, s *server, plan pluginInstallPlan) error {
+	ctx = withPluginInstance(ctx, plan.Server.InstanceID)
 	// pluginContext remains the single authoritative context implementation.
 	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost/", nil)
 	recorder := &pluginContextSink{header: make(http.Header)}
@@ -1890,25 +1920,25 @@ func rollbackPluginInstall(s *server, id string, plan pluginInstallPlan, root *o
 		return errors.Join(cause, err)
 	}
 	// Recovery has its own bounded context; a timed-out worker must still recover.
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	ctx, cancel := context.WithTimeout(withPluginInstance(context.Background(), plan.Server.InstanceID), 20*time.Minute)
 	defer cancel()
 	if len(created) == 0 {
 		var recoverErr error
-		active, stateErr := pluginServiceActive(ctx)
+		active, stateErr := pluginServiceActive(ctx, pluginInstanceID(ctx))
 		recoverErr = stateErr
 		if recoverErr == nil && originallyRunning {
 			if !active {
-				recoverErr = pluginService(ctx, "start")
+				recoverErr = pluginService(ctx, pluginInstanceID(ctx), "start")
 			}
 			if recoverErr == nil {
-				recoverErr = verifyPluginRuntime(ctx, plan.Server.MinecraftVersion)
+				recoverErr = verifyPluginRuntime(ctx, pluginInstanceID(ctx), plan.Server.MinecraftVersion)
 			}
 		}
 		if recoverErr == nil && !originallyRunning && active {
-			recoverErr = pluginService(ctx, "stop")
+			recoverErr = pluginService(ctx, pluginInstanceID(ctx), "stop")
 		}
 		if recoverErr == nil && !originallyRunning {
-			active, stateErr = pluginServiceActive(ctx)
+			active, stateErr = pluginServiceActive(ctx, pluginInstanceID(ctx))
 			if stateErr != nil || active {
 				recoverErr = errors.New("Original stopped state unavailable")
 			}
@@ -1920,9 +1950,9 @@ func rollbackPluginInstall(s *server, id string, plan pluginInstallPlan, root *o
 		_, err := s.operations.transition(id, operationRolledBack, "complete", "Plugin installation failed before placement. Plugin files were untouched and the original Minecraft service state was restored.")
 		return errors.Join(cause, err)
 	}
-	recoverErr := pluginService(ctx, "stop")
+	recoverErr := pluginService(ctx, pluginInstanceID(ctx), "stop")
 	if recoverErr == nil {
-		active, err := pluginServiceActive(ctx)
+		active, err := pluginServiceActive(ctx, pluginInstanceID(ctx))
 		if err != nil || active {
 			recoverErr = errors.New("Failed runtime could not be proven stopped")
 		}
@@ -1938,9 +1968,9 @@ func rollbackPluginInstall(s *server, id string, plan pluginInstallPlan, root *o
 		}
 	}
 	if recoverErr == nil && originallyRunning {
-		recoverErr = pluginService(ctx, "start")
+		recoverErr = pluginService(ctx, pluginInstanceID(ctx), "start")
 		if recoverErr == nil {
-			recoverErr = verifyPluginRuntime(ctx, plan.Server.MinecraftVersion)
+			recoverErr = verifyPluginRuntime(ctx, pluginInstanceID(ctx), plan.Server.MinecraftVersion)
 		}
 	}
 	if recoverErr != nil {
@@ -2051,7 +2081,7 @@ func readPluginTransaction(base, id string) (pluginTransaction, error) {
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&tx) != nil || decoder.Decode(new(any)) != io.EOF || tx.SchemaVersion != "v1" || tx.OperationID != id || !operationFingerprintPattern.MatchString(tx.PlanFingerprint) || len(tx.Artifacts) == 0 || len(tx.Artifacts) > pluginMaxArtifacts {
+	if decoder.Decode(&tx) != nil || decoder.Decode(new(any)) != io.EOF || tx.SchemaVersion != "v1" || validatePluginInstance(tx.InstanceID, tx.DataPath) != nil || tx.OperationID != id || !operationFingerprintPattern.MatchString(tx.PlanFingerprint) || len(tx.Artifacts) == 0 || len(tx.Artifacts) > pluginMaxArtifacts {
 		return tx, errors.New("Invalid transaction evidence")
 	}
 	projects, filenames := map[string]bool{}, map[string]bool{}
@@ -2132,7 +2162,7 @@ func readPluginPreflight(base, id string) (pluginPreflight, error) {
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
-	if d.Decode(&evidence) != nil || d.Decode(new(any)) != io.EOF || evidence.SchemaVersion != "v1" || !validOperationID(evidence.OperationID) || evidence.OperationID != id || !operationFingerprintPattern.MatchString(evidence.PlanFingerprint) || !filepath.IsAbs(evidence.DataPath) || filepath.Clean(evidence.DataPath) != evidence.DataPath || len(evidence.DataPath) > 4096 || strings.ContainsAny(evidence.DataPath, "\x00\r\n") || evidence.MinecraftVersion == "" || len(evidence.MinecraftVersion) > 128 || strings.ContainsAny(evidence.MinecraftVersion, "\x00\r\n") || !validPluginIdentity(evidence.Source, evidence.ProjectID) || !validPluginIdentity(evidence.Source, evidence.VersionID) {
+	if d.Decode(&evidence) != nil || d.Decode(new(any)) != io.EOF || evidence.SchemaVersion != "v1" || validatePluginInstance(evidence.InstanceID, evidence.DataPath) != nil || !validOperationID(evidence.OperationID) || evidence.OperationID != id || !operationFingerprintPattern.MatchString(evidence.PlanFingerprint) || !filepath.IsAbs(evidence.DataPath) || filepath.Clean(evidence.DataPath) != evidence.DataPath || len(evidence.DataPath) > 4096 || strings.ContainsAny(evidence.DataPath, "\x00\r\n") || evidence.MinecraftVersion == "" || len(evidence.MinecraftVersion) > 128 || strings.ContainsAny(evidence.MinecraftVersion, "\x00\r\n") || !validPluginIdentity(evidence.Source, evidence.ProjectID) || !validPluginIdentity(evidence.Source, evidence.VersionID) {
 		return evidence, errors.New("Invalid preflight evidence")
 	}
 	return evidence, nil
@@ -2163,7 +2193,7 @@ func provePluginPreflight(base string, journal operationJournal, dataPath string
 // service state, retries installation, removes plugin files, or restores backups.
 func (s *server) acknowledgePluginPreflight(w http.ResponseWriter, r *http.Request, journal operationJournal, actor session) {
 	evidence, err := readPluginPreflight(s.operations.baseDir, journal.OperationID)
-	if err != nil || evidence.PlanFingerprint != journal.PlanFingerprint {
+	if err != nil || evidence.PlanFingerprint != journal.PlanFingerprint || evidence.InstanceID != journal.InstanceID {
 		writeError(w, 409, "Pre-mutation evidence could not be verified; evidence was preserved")
 		return
 	}
@@ -2176,20 +2206,20 @@ func (s *server) acknowledgePluginPreflight(w http.ResponseWriter, r *http.Reque
 		writeError(w, 409, "Pre-mutation state could not be proven; evidence was preserved")
 		return
 	}
-	active, err := pluginServiceActive(r.Context())
+	active, err := pluginServiceActive(r.Context(), pluginInstanceID(r.Context()))
 	if err != nil {
 		writeError(w, 409, "Minecraft service state could not be verified")
 		return
 	}
 	if active {
-		if err := verifyPluginRuntime(r.Context(), evidence.MinecraftVersion); err != nil {
+		if err := verifyPluginRuntime(r.Context(), pluginInstanceID(r.Context()), evidence.MinecraftVersion); err != nil {
 			writeError(w, 409, "Minecraft runtime could not be verified")
 			return
 		}
 	}
 	finalEvidence, evidenceErr := readPluginPreflight(s.operations.baseDir, journal.OperationID)
 	finalContext, finalPath, contextOK := s.pluginContext(&pluginContextSink{header: make(http.Header)}, r)
-	finalActive, stateErr := pluginServiceActive(r.Context())
+	finalActive, stateErr := pluginServiceActive(r.Context(), pluginInstanceID(r.Context()))
 	if evidenceErr != nil || finalEvidence != evidence || !contextOK || !finalContext.Supported || finalContext.ServerType != serverContext.ServerType || finalPath != dataPath || finalContext.MinecraftVersion != evidence.MinecraftVersion || stateErr != nil || finalActive != active || provePluginPreflight(s.operations.baseDir, journal, dataPath) != nil {
 		writeError(w, 409, "Pre-mutation evidence or service state changed during re-check")
 		return
@@ -2247,7 +2277,7 @@ func (s *server) adminPluginInstallAcknowledge(w http.ResponseWriter, r *http.Re
 		s.acknowledgePluginPreflight(w, r.WithContext(ctx), *journal, actor)
 		return
 	}
-	if err != nil || tx.PlanFingerprint != journal.PlanFingerprint {
+	if err != nil || tx.PlanFingerprint != journal.PlanFingerprint || tx.InstanceID != journal.InstanceID {
 		writeError(w, 409, "Transaction evidence could not be verified; keep this operation for review")
 		return
 	}
@@ -2263,7 +2293,7 @@ func (s *server) adminPluginInstallAcknowledge(w http.ResponseWriter, r *http.Re
 		writeError(w, 409, "Plugin state is not coherent; repair and re-check. Evidence was preserved")
 		return
 	}
-	active, err := pluginServiceActive(ctx)
+	active, err := pluginServiceActive(ctx, pluginInstanceID(ctx))
 	if err != nil || active != tx.OriginallyRunning {
 		writeError(w, 409, "Minecraft must match its original running or stopped state before re-check")
 		return
@@ -2273,7 +2303,7 @@ func (s *server) adminPluginInstallAcknowledge(w http.ResponseWriter, r *http.Re
 		if version == "" {
 			version = tx.MinecraftVersion
 		}
-		if err := verifyPluginRuntime(ctx, version); err != nil {
+		if err := verifyPluginRuntime(ctx, pluginInstanceID(ctx), version); err != nil {
 			writeError(w, 409, "Minecraft runtime could not be verified")
 			return
 		}
@@ -2290,7 +2320,7 @@ func (s *server) adminPluginInstallAcknowledge(w http.ResponseWriter, r *http.Re
 	}
 	// Runtime probing can take time; re-check the file proof and final state.
 	finalInstalled, proofErr := provePluginTransactionFiles(dataPath, tx)
-	active, stateErr := pluginServiceActive(ctx)
+	active, stateErr := pluginServiceActive(ctx, pluginInstanceID(ctx))
 	if proofErr != nil || finalInstalled != installed || stateErr != nil || active != tx.OriginallyRunning {
 		writeError(w, 409, "Plugin or service state changed during re-check")
 		return

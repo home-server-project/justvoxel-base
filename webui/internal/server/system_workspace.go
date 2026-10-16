@@ -505,6 +505,10 @@ func (a *App) systemWorkspaceMinecraftResetPlan(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
+	r, ok = a.selectedResetRequest(w, r, session, client)
+	if !ok {
+		return
+	}
 	result, err := client.AdminMinecraftResetPlan(r.Context(), session)
 	if err != nil {
 		a.writeSystemWorkspaceAPIError(w, err, "Minecraft reset could not be planned.")
@@ -528,6 +532,10 @@ func (a *App) systemWorkspaceFactoryResetPlan(w http.ResponseWriter, r *http.Req
 
 func (a *App) systemWorkspaceMinecraftResetApply(w http.ResponseWriter, r *http.Request) {
 	session, client, ok := a.systemWorkspaceResetClient(w, r, true)
+	if !ok {
+		return
+	}
+	r, ok = a.selectedResetRequest(w, r, session, client)
 	if !ok {
 		return
 	}
@@ -588,6 +596,10 @@ func (a *App) systemWorkspaceMinecraftResetCurrent(w http.ResponseWriter, r *htt
 	if !ok {
 		return
 	}
+	r, ok = a.selectedResetRequest(w, r, session, client)
+	if !ok {
+		return
+	}
 	result, err := client.AdminCurrentMinecraftResetOperation(r.Context(), session)
 	if err != nil {
 		a.writeSystemWorkspaceAPIError(w, err, "Minecraft reset status is unavailable.")
@@ -622,6 +634,28 @@ func (a *App) systemWorkspaceResetOperation(w http.ResponseWriter, r *http.Reque
 	if result.Operation != nil && result.Operation.OperationType != "minecraft_reset" && result.Operation.OperationType != "factory_reset" {
 		writeSystemWorkspaceError(w, http.StatusNotFound, "Reset operation was not found.")
 		return
+	}
+	if result.Operation != nil && result.Operation.OperationType == "minecraft_reset" {
+		values, explicit := r.URL.Query()["server"]
+		requested := ""
+		if explicit {
+			if len(values) != 1 || !addServerIDPattern.MatchString(values[0]) {
+				writeSystemWorkspaceError(w, 400, "Invalid server selection.")
+				return
+			}
+			requested = values[0]
+		}
+		if !explicit {
+			selected, ok := a.selectedMinecraft(w, r, session)
+			if !ok {
+				return
+			}
+			requested = selected.ID
+		}
+		if !addServerIDPattern.MatchString(requested) || result.Operation.InstanceID != requested {
+			writeSystemWorkspaceError(w, 409, "Reset operation instance mismatch.")
+			return
+		}
 	}
 	writeSystemWorkspaceJSON(w, http.StatusOK, result)
 }
@@ -674,4 +708,20 @@ func writeSystemWorkspaceJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func (a *App) selectedResetRequest(w http.ResponseWriter, r *http.Request, session string, client systemWorkspaceResetAPI) (*http.Request, bool) {
+	values, explicit := r.URL.Query()["server"]
+	if explicit && len(values) == 1 && addServerIDPattern.MatchString(values[0]) {
+		ctx := api.WithMinecraftMaintenanceInstance(r.Context(), values[0], "reset/minecraft")
+		current, err := client.AdminCurrentMinecraftResetOperation(ctx, session)
+		if err == nil && current.Operation != nil && current.Operation.InstanceID == values[0] {
+			return r.WithContext(ctx), true
+		}
+	}
+	selected, ok := a.selectedMinecraft(w, r, session)
+	if !ok {
+		return r, false
+	}
+	return r.WithContext(api.WithMinecraftMaintenanceInstance(r.Context(), selected.ID, "reset/minecraft")), true
 }
