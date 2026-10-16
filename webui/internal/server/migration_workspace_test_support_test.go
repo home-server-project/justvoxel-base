@@ -24,6 +24,7 @@ type fakeServerMigrationAPI struct {
 	operation       *api.PersistentOperation
 	discoveryCalls  int
 	mutationCalls   []string
+	instances       []api.RegisteredMinecraftInstance
 }
 
 func (f *fakeServerMigrationAPI) Session(_ context.Context, session string) (api.SessionInfo, error) {
@@ -72,6 +73,9 @@ func (f *fakeServerMigrationAPI) AdminCurrentMigrationOperation(_ context.Contex
 		return api.PersistentOperationResponse{}, nil
 	}
 	copy := *f.current
+	if copy.InstanceID == "" {
+		copy.InstanceID = "jv-a1b2c3"
+	}
 	return api.PersistentOperationResponse{Operation: &copy}, nil
 }
 
@@ -83,6 +87,9 @@ func (f *fakeServerMigrationAPI) AdminOperation(_ context.Context, session, id s
 		return api.PersistentOperationResponse{}, &api.ResponseError{StatusCode: http.StatusNotFound, Message: "operation not found"}
 	}
 	copy := *f.operation
+	if copy.InstanceID == "" {
+		copy.InstanceID = "jv-a1b2c3"
+	}
 	return api.PersistentOperationResponse{Operation: &copy}, nil
 }
 
@@ -365,4 +372,19 @@ func recoveryDiscoveryFixture() api.AdminMigrationRecoveryDiscoveryResponse {
 
 func recoveryWebRequest(method, target string, values url.Values) *http.Request {
 	return exportWebRequest(method, target, values)
+}
+
+func (f *fakeServerMigrationAPI) MinecraftInstances(context.Context, string) ([]api.RegisteredMinecraftInstance, error) {
+	if f.instances != nil {
+		return f.instances, nil
+	}
+	return []api.RegisteredMinecraftInstance{{ID: "jv-a1b2c3", DisplayName: "Selected server"}}, nil
+}
+func (f *fakeServerMigrationAPI) MinecraftInstanceRuntimes(ctx context.Context, session string) ([]string, error) {
+	instances, _ := f.MinecraftInstances(ctx, session)
+	ids := []string{}
+	for _, i := range instances {
+		ids = append(ids, i.ID)
+	}
+	return ids, nil
 }

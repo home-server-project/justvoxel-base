@@ -41,7 +41,7 @@ var runAdminMigrationExportTransactionHelper = func(ctx context.Context, request
 	if err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, adminMigrationExportTransactionHelper)
+	cmd := exec.CommandContext(ctx, adminMigrationExportTransactionHelper, "--instance", migrationInstanceID(ctx))
 	cmd.Stdin = bytes.NewReader(payload)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -101,6 +101,10 @@ func executeMigrationExportTransaction(parent context.Context, store *operationS
 	if err != nil {
 		return err
 	}
+	if !instanceIDPattern.MatchString(operation.InstanceID) {
+		return errors.New("missing durable migration instance identity")
+	}
+	parent = context.WithValue(parent, migrationInstanceContextKey{}, operation.InstanceID)
 	if operation.OperationType != operationTypeMigrationExport || operation.PlanFingerprint == "" {
 		return errors.New("invalid server migration export operation identity")
 	}

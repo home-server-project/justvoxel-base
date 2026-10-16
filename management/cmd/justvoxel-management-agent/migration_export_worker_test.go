@@ -24,7 +24,7 @@ func testMigrationExportExecutionPlan() migrationExportExecutionPlan {
 
 func TestExecuteMigrationExportTransactionSuccessTracksProgress(t *testing.T) {
 	store := openTestOperationStore(t)
-	operation, _, err := store.beginMigrationExport(testMigrationExportFingerprint)
+	operation, _, err := store.beginMigrationExport("jv-a1b2c3", testMigrationExportFingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestExecuteMigrationExportTransactionSuccessTracksProgress(t *testing.T) {
 
 func TestExecuteMigrationExportTransactionSafeFailureTracksRolledBack(t *testing.T) {
 	store := openTestOperationStore(t)
-	operation, _, err := store.beginMigrationExport(testMigrationExportFingerprint)
+	operation, _, err := store.beginMigrationExport("jv-a1b2c3", testMigrationExportFingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestExecuteMigrationExportTransactionSafeFailureTracksRolledBack(t *testing
 
 func TestExecuteMigrationExportTransactionUnexpectedBackendFailureNeedsAttention(t *testing.T) {
 	store := openTestOperationStore(t)
-	operation, _, err := store.beginMigrationExport(testMigrationExportFingerprint)
+	operation, _, err := store.beginMigrationExport("jv-a1b2c3", testMigrationExportFingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestExecuteMigrationExportTransactionUnexpectedBackendFailureNeedsAttention
 
 func TestMigrationExportIdentityDiagnosticsExcludeCredentialsAndRetainRedaction(t *testing.T) {
 	store := openTestOperationStore(t)
-	operation, _, err := store.beginMigrationExport(testMigrationExportFingerprint)
+	operation, _, err := store.beginMigrationExport("jv-a1b2c3", testMigrationExportFingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -63,94 +63,13 @@ fi
 # Imported configuration is data; managed binaries belong to JustVoxel.
 BEDROCK_MANAGED_PLUGINS=yes
 
-# Destination-specific configuration.
-MINECRAFT_VERSION_MODE=pinned
-MINECRAFT_VERSION="${source_version}"
-if [[ ${configured} == no ]]; then
-    read -r MINECRAFT_UID MINECRAFT_GID _ < <(resolve_minecraft_ids)
-    read -r JAVA_MEMORY CONTAINER_MEMORY < <(suggest_memory_values)
-    TIMEZONE="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
-    TIMEZONE="${TIMEZONE:-UTC}"
-    MINECRAFT_IMAGE_TAG=stable
-    if [[ ${JV_MIGRATION_API_MODE:-0} == 1 ]]; then
-        MINECRAFT_UID="${JV_MIGRATION_API_MINECRAFT_UID:-${MINECRAFT_UID}}"
-        MINECRAFT_GID="${JV_MIGRATION_API_MINECRAFT_GID:-${MINECRAFT_GID}}"
-        validate_nonroot_id "${MINECRAFT_UID}" && validate_nonroot_id "${MINECRAFT_GID}" || { echo 'ERROR: reviewed Minecraft runtime identity is invalid.' >&2; exit 1; }
-        JAVA_MEMORY="${JV_MIGRATION_API_JAVA_MEMORY:-${JAVA_MEMORY}}"
-        CONTAINER_MEMORY="${JV_MIGRATION_API_CONTAINER_MEMORY:-${CONTAINER_MEMORY}}"
-        TIMEZONE="${JV_MIGRATION_API_TIMEZONE:-${TIMEZONE}}"
-        MINECRAFT_IMAGE_TAG="${JV_MIGRATION_API_IMAGE_TAG:-stable}"
-    fi
-else
-    # Destination ownership, memory, timezone, image channel and backup policy remain destination-specific.
-    :
-fi
+# Capture the reviewed Minecraft-side settings, never source appliance identity.
+jq -cn --arg id "${JV_INSTANCE_ID}" --arg game_mode "${GAME_MODE}" --arg difficulty "${DIFFICULTY}" --argjson whitelist "$([[ ${WHITELIST_ENABLED} == yes ]] && echo true || echo false)" --argjson enforce "$([[ ${ENFORCE_WHITELIST} == yes ]] && echo true || echo false)" --argjson max_players "${MAX_PLAYERS}" --arg motd "${MOTD}" '{instance_id:$id,game_mode:$game_mode,difficulty:$difficulty,whitelist:$whitelist,enforce_whitelist:$enforce,max_players:$max_players,motd:$motd}' > "${transaction}/portable.json"
+chmod 0600 "${transaction}/portable.json"
 
-if [[ -n ${java_hint} && ${java_hint} =~ ^[0-9]+$ ]]; then
-    echo "Source Java port hint: ${java_hint}/tcp"
-fi
-if [[ ${configured} == yes ]]; then default_java="${old_java}"; else default_java="${java_hint:-25565}"; fi
-if [[ ${JV_MIGRATION_API_MODE:-0} == 1 ]]; then
-    JAVA_PORT="${JV_MIGRATION_API_JAVA_PORT:-${default_java}}"
-else
-    JAVA_PORT="$(jui_input 'Destination Java host TCP port' "${default_java}")" || exit 1
-fi
-validate_port "${JAVA_PORT}" || { echo 'ERROR: invalid Java port.' >&2; exit 1; }
-jv_migration_check_candidate_port tcp "${JAVA_PORT}" "${old_java}" || exit 1
-
-if [[ ${BEDROCK_ENABLED} == yes ]]; then
-    [[ -n ${bedrock_hint} && ${bedrock_hint} =~ ^[0-9]+$ ]] && echo "Source Bedrock port hint: ${bedrock_hint}/udp"
-    if [[ ${configured} == yes && ${old_bedrock_enabled} == yes ]]; then default_bedrock="${old_bedrock}"; else default_bedrock="${bedrock_hint:-19132}"; fi
-    if [[ ${JV_MIGRATION_API_MODE:-0} == 1 ]]; then
-        BEDROCK_PORT="${JV_MIGRATION_API_BEDROCK_PORT:-${default_bedrock}}"
-    else
-        BEDROCK_PORT="$(jui_input 'Destination Bedrock host UDP port' "${default_bedrock}")" || exit 1
-    fi
-    validate_port "${BEDROCK_PORT}" || { echo 'ERROR: invalid Bedrock port.' >&2; exit 1; }
-    if [[ ${configured} == yes ]]; then
-        jv_migration_check_import_bedrock_port "${BEDROCK_PORT}" "${old_bedrock_enabled}" "${old_bedrock}" || exit 1
-    else
-        jv_migration_check_candidate_port udp "${BEDROCK_PORT}" || exit 1
-    fi
-else
-    BEDROCK_PORT="${BEDROCK_PORT:-19132}"
-fi
-
-if [[ ${configured} == no ]]; then
-    if [[ ${JV_MIGRATION_API_MODE:-0} != 1 ]]; then
-        JAVA_MEMORY="$(jui_input 'Minecraft Java heap' "${JAVA_MEMORY}")" || exit 1
-        CONTAINER_MEMORY="$(jui_input 'Maximum total Minecraft memory' "${CONTAINER_MEMORY}")" || exit 1
-    fi
-    validate_memory "${JAVA_MEMORY}" && validate_memory "${CONTAINER_MEMORY}" || { echo 'ERROR: invalid memory values.' >&2; exit 1; }
-    (( $(memory_to_mib "${CONTAINER_MEMORY}") > $(memory_to_mib "${JAVA_MEMORY}") )) || { echo 'ERROR: container memory must be larger than Java heap.' >&2; exit 1; }
-
-    if prepare_fresh_backup_configuration; then :; else rc=$?; (( rc == 2 )) && { echo 'Import cancelled.'; exit 0; }; exit "${rc}"; fi
-
-    echo
-    echo 'Minecraft EULA acceptance is required before JustVoxel can start the imported server.'
-    echo 'The source eula.txt, if present, is NOT accepted as destination administrator consent.'
-    echo 'Review: https://aka.ms/MinecraftEULA'
-    if [[ ${JV_MIGRATION_API_MODE:-0} == 1 ]]; then
-        [[ ${JV_MIGRATION_API_EULA_ACCEPTED:-no} == yes ]] || { echo 'ERROR: Minecraft EULA acceptance was not explicitly confirmed.' >&2; exit 1; }
-    else
-        printf 'Type ACCEPT to confirm that you accept the Minecraft EULA: ' >/dev/tty
-        IFS= read -r eula_acceptance </dev/tty
-        [[ ${eula_acceptance} == ACCEPT ]] || { echo 'EULA not accepted. Imported data was not activated.'; exit 1; }
-    fi
-fi
-
-# Confirm the destination container image policy is still available before live data changes.
-if validate_minecraft_image_tag "${MINECRAFT_IMAGE_TAG}"; then
-    :
-else
-    image_rc=$?
-    if (( image_rc == 2 )); then
-        echo "ERROR: destination container tag '${MINECRAFT_IMAGE_TAG}' is deprecated upstream." >&2
-    else
-        echo "ERROR: destination container tag '${MINECRAFT_IMAGE_TAG}' could not be verified." >&2
-    fi
-    exit 1
-fi
+# The destination's committed runtime owns ports, resources, software and identity.
+# Source runtime settings never replace the selected instance configuration.
+jv_migration_load_instance "${JV_INSTANCE_ID}"
 
 # Recalculate data destination ownership and normalize only appliance-specific runtime values.
 jv_migration_normalize_staged_runtime_files "${staged_server}" "${BEDROCK_ENABLED}"
@@ -171,11 +90,7 @@ echo "Game mode / difficulty: ${GAME_MODE} / ${DIFFICULTY}"
 echo "Whitelist / enforce whitelist: ${WHITELIST_ENABLED} / ${ENFORCE_WHITELIST}"
 echo "Maximum players: ${MAX_PLAYERS}"
 echo "Plugins preserved: ${plugin_count} JAR(s) detected"
-if [[ ${configured} == yes ]]; then
-    echo 'Destination mode: REPLACE existing JustVoxel persistent Minecraft server state'
-    echo 'The original data/config/runtime/firewall state will be protected until validation succeeds.'
-else
-    echo 'Destination mode: first-server import into fresh JustVoxel'
-fi
+echo 'Destination mode: REPLACE selected Minecraft instance data'
+echo 'The selected destination instance configuration remains authoritative.'
 
 players_override=no

@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"html"
 	"io/fs"
 	"net/http"
 	"net/url"
@@ -11,6 +12,29 @@ import (
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
 )
+
+func migrationNavigationURLMatches(raw, path, workspace, tab, operation string) bool {
+	destination, err := url.Parse(raw)
+	if err != nil || destination.Path != path {
+		return false
+	}
+	query := destination.Query()
+	for key, want := range map[string]string{"workspace": workspace, "tab": tab, "operation": operation, "server": "jv-a1b2c3"} {
+		if query.Get(key) != want || (want == "" && query.Has(key)) {
+			return false
+		}
+	}
+	return true
+}
+
+func migrationMarkupHasURL(markup, path, workspace, tab, operation string) bool {
+	for _, match := range regexp.MustCompile(`href="([^"]*)"`).FindAllStringSubmatch(markup, -1) {
+		if migrationNavigationURLMatches(html.UnescapeString(match[1]), path, workspace, tab, operation) {
+			return true
+		}
+	}
+	return false
+}
 
 func TestMigrationWorkspaceImportReviewOnlyContinuesForHumanInput(t *testing.T) {
 	for _, tc := range []struct {
@@ -63,7 +87,7 @@ func TestMigrationWorkspaceImportDeterministicPlanHasNoContinueLoop(t *testing.T
 			}
 			page := httptestResponse(app, importWebRequest(http.MethodPost, "http://example/workspace/migration/import/"+route, values))
 			body := page.Body.String()
-			if page.Code != http.StatusBadRequest || !strings.Contains(body, client.plan.Error) || !strings.Contains(body, `href="/?workspace=migration&amp;tab=import"`) || strings.Contains(body, "Continue review") {
+			if page.Code != http.StatusBadRequest || !strings.Contains(body, client.plan.Error) || !migrationMarkupHasURL(body, "/", "migration", "import", "") || strings.Contains(body, "Continue review") {
 				t.Fatalf("deterministic %s response = %d: %s", route, page.Code, body)
 			}
 			if client.applyCalls != 0 {
@@ -83,16 +107,16 @@ func TestMigrationWorkspaceProgressBrowserRedirectAndInternalFragment(t *testing
 	}
 	address := "http://example/workspace/migration/progress/" + serverMigrationOperationID
 	browser := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, address, ""))
-	if browser.Code != http.StatusSeeOther || browser.Header().Get("Location") != migrationWorkspaceOperationURL(serverMigrationOperationID) {
+	if browser.Code != http.StatusSeeOther || !migrationNavigationURLMatches(browser.Header().Get("Location"), "/", "migration", "", serverMigrationOperationID) {
 		t.Fatalf("browser progress response = %d, location %q", browser.Code, browser.Header().Get("Location"))
 	}
 	fragmentRequest := authenticatedAdminRequest(http.MethodGet, address, "")
 	fragmentRequest.Header.Set(migrationWorkspaceFragmentHeader, "1")
 	fragment := httptestResponse(app, fragmentRequest)
-	if fragment.Code != http.StatusOK || !strings.Contains(fragment.Body.String(), "data-migration-workspace-root") || !strings.Contains(fragment.Body.String(), `href="/?workspace=migration&amp;tab=recovery"`) || !strings.Contains(fragment.Body.String(), "Review Migration Recovery") {
+	if fragment.Code != http.StatusOK || !strings.Contains(fragment.Body.String(), "data-migration-workspace-root") || !migrationMarkupHasURL(fragment.Body.String(), "/", "migration", "recovery", "") || !strings.Contains(fragment.Body.String(), "Review Migration Recovery") {
 		t.Fatalf("internal progress response = %d: %s", fragment.Code, fragment.Body.String())
 	}
-	if !strings.Contains(fragment.Body.String(), `id="server-migration-back-link" href="/?workspace=migration" hidden>Back</a>`) {
+	if !migrationMarkupHasURL(regexp.MustCompile(`<a\b[^>]*\bid="server-migration-back-link"[^>]*>Back</a>`).FindString(fragment.Body.String()), "/", "migration", "", "") || !strings.Contains(fragment.Body.String(), `hidden>Back</a>`) {
 		t.Fatal("needs-attention progress exposes looping Server Migration navigation")
 	}
 }
@@ -119,7 +143,7 @@ func TestMigrationWorkspaceApplyRedirectRendersCanonicalProgress(t *testing.T) {
 	request.Header.Set(migrationWorkspaceFragmentHeader, "1")
 	started := httptestResponse(app, request)
 	progressURL := "/workspace/migration/progress/" + serverMigrationOperationID
-	if started.Code != http.StatusSeeOther || started.Header().Get("Location") != progressURL {
+	if started.Code != http.StatusSeeOther || !migrationNavigationURLMatches(started.Header().Get("Location"), progressURL, "", "", "") {
 		t.Fatalf("Migration Apply response = %d, location %q: %s", started.Code, started.Header().Get("Location"), started.Body.String())
 	}
 	progressRequest := authenticatedAdminRequest(http.MethodGet, "http://example"+started.Header().Get("Location"), "")
@@ -166,13 +190,13 @@ func TestMigrationWorkspacePagesRedirectBrowserAndServeInternalFragments(t *test
 	}
 	for _, tc := range []struct {
 		path   string
-		url    string
+		tab    string
 		client API
 	}{
-		{path: "/workspace/migration", url: "/?workspace=migration", client: &fakeServerMigrationAPI{exportDiscovery: base.exportDiscovery, importDiscovery: base.importDiscovery, recovery: base.recovery}},
-		{path: "/workspace/migration/export", url: "/?workspace=migration&tab=export", client: &fakeServerMigrationExportAPI{fakeServerMigrationAPI: base}},
-		{path: "/workspace/migration/import", url: "/?workspace=migration&tab=import", client: &fakeServerMigrationImportAPI{fakeServerMigrationAPI: base, storage: importStorageFixture()}},
-		{path: "/workspace/migration/recovery", url: "/?workspace=migration&tab=recovery", client: &fakeServerMigrationRecoveryAPI{fakeServerMigrationAPI: base}},
+		{path: "/workspace/migration", tab: "", client: &fakeServerMigrationAPI{exportDiscovery: base.exportDiscovery, importDiscovery: base.importDiscovery, recovery: base.recovery}},
+		{path: "/workspace/migration/export", tab: "export", client: &fakeServerMigrationExportAPI{fakeServerMigrationAPI: base}},
+		{path: "/workspace/migration/import", tab: "import", client: &fakeServerMigrationImportAPI{fakeServerMigrationAPI: base, storage: importStorageFixture()}},
+		{path: "/workspace/migration/recovery", tab: "recovery", client: &fakeServerMigrationRecoveryAPI{fakeServerMigrationAPI: base}},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
 			app, err := New(tc.client, Config{Version: "test", ManagementAPI: "v1"})
@@ -181,7 +205,7 @@ func TestMigrationWorkspacePagesRedirectBrowserAndServeInternalFragments(t *test
 			}
 			address := "http://example" + tc.path
 			browser := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, address, ""))
-			if browser.Code != http.StatusSeeOther || browser.Header().Get("Location") != tc.url {
+			if browser.Code != http.StatusSeeOther || !migrationNavigationURLMatches(browser.Header().Get("Location"), "/", "migration", tc.tab, "") {
 				t.Fatalf("browser response = %d, location %q", browser.Code, browser.Header().Get("Location"))
 			}
 			request := authenticatedAdminRequest(http.MethodGet, address, "")
@@ -202,7 +226,7 @@ func TestMigrationWorkspaceExplicitURLStateContract(t *testing.T) {
 	js := string(script)
 	for _, want := range []string{
 		`const migrationRequested = migrationDestination.get("workspace") === "migration"`,
-		`const destination = new URL("/?workspace=migration", window.location.href);`,
+		`const destination = new URL(globalThis.justVoxelSelectedURL("/?workspace=migration"), window.location.href);`,
 		`if (operation) destination.searchParams.set("operation", operation);`,
 		`else if (Object.hasOwn(tabURLs, tab)) destination.searchParams.set("tab", tab);`,
 		`if (window.location.pathname + window.location.search !== nextURL) {`,
@@ -256,18 +280,21 @@ func TestMigrationWorkspaceImportAttentionActionsAndResolvedNavigation(t *testin
 					}
 					wantBack := state == "succeeded" || state == "rolled_back" || state == "resolved"
 					backLink := backAnchor.FindString(body)
-					if backLink == "" || !strings.Contains(backLink, `href="/?workspace=migration"`) || hiddenAttribute.MatchString(backLink) == wantBack {
+					if backLink == "" || !migrationMarkupHasURL(backLink, "/", "migration", "", "") || hiddenAttribute.MatchString(backLink) == wantBack {
 						t.Fatalf("%s progress Back navigation incorrect: %s", state, body)
 					}
 					if strings.Contains(body, ">Server Migration</a>") {
 						t.Fatalf("progress navigation still labelled Server Migration: %s", body)
 					}
-					if state == "succeeded" && !strings.Contains(body, `href="/" >Open dashboard</a>`) {
-						t.Fatalf("succeeded progress missing visible dashboard action: %s", body)
+					if state == "succeeded" {
+						dashboardLink := regexp.MustCompile(`<a\b[^>]*\bid="server-migration-dashboard-link"[^>]*>Open dashboard</a>`).FindString(body)
+						if !migrationMarkupHasURL(dashboardLink, "/", "", "", "") || hiddenAttribute.MatchString(dashboardLink) {
+							t.Fatalf("succeeded progress missing visible dashboard action: %s", body)
+						}
 					}
 					if state == "needs_attention" {
-						recoveryLink := `href="/?workspace=migration&amp;tab=recovery" >Review Migration Recovery</a>`
-						if !strings.Contains(body, recoveryLink) {
+						recoveryLink := regexp.MustCompile(`<a\b[^>]*\bid="server-migration-recovery-link"[^>]*>Review Migration Recovery</a>`).FindString(body)
+						if !migrationMarkupHasURL(recoveryLink, "/", "migration", "recovery", "") || hiddenAttribute.MatchString(recoveryLink) {
 							t.Fatalf("needs-attention progress actions loop or omit Recovery: %s", body)
 						}
 					}
@@ -289,7 +316,7 @@ func TestMigrationWorkspacePolledAttentionHidesLoopingNavigation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(markup), `class="button-link secondary migration-progress-navigation" id="server-migration-back-link" href="/?workspace=migration"`) {
+	if !strings.Contains(string(markup), `class="button-link secondary migration-progress-navigation" id="server-migration-back-link" href="/?workspace=migration&amp;server={{.ServerID}}"`) {
 		t.Fatal("normal Migration navigation is not connected to the polled attention styling")
 	}
 
@@ -453,7 +480,7 @@ func TestMigrationWorkspaceExportTerminalDoneAndLogLinks(t *testing.T) {
 				t.Fatalf("progress = %d: %s", page.Code, body)
 			}
 			done := doneAnchor.FindString(body)
-			if done == "" || !strings.Contains(done, `href="/?workspace=migration&amp;tab=export"`) || hiddenAttribute.MatchString(done) == (state == "succeeded") {
+			if done == "" || !migrationMarkupHasURL(done, "/", "migration", "export", "") || hiddenAttribute.MatchString(done) == (state == "succeeded") {
 				t.Fatalf("Export Done action incorrect for %s: %s", state, done)
 			}
 			if strings.Contains(body, ">Open dashboard</a>") {

@@ -43,7 +43,7 @@ func TestOperationStoreMinecraftResetIsIdempotentAndBlocksOtherOperations(t *tes
 			return err
 		},
 		"server migration": func() error {
-			_, _, err := store.beginMigrationExport("sha256:9999999999999999999999999999999999999999999999999999999999999999")
+			_, _, err := store.beginMigrationExport("jv-a1b2c3", "sha256:9999999999999999999999999999999999999999999999999999999999999999")
 			return err
 		},
 	} {
@@ -82,7 +82,7 @@ func TestOperationStoreMinecraftResetCannotStartDuringOtherOperation(t *testing.
 		{
 			name: "server migration",
 			begin: func(store *operationStore) error {
-				_, _, err := store.beginMigrationExport("sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+				_, _, err := store.beginMigrationExport("jv-a1b2c3", "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 				return err
 			},
 		},

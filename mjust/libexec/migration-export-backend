@@ -7,6 +7,10 @@ source /usr/libexec/justvoxel/mjust/interrupt-safety.sh
 source /usr/libexec/justvoxel/mjust/migration-common.sh
 source /usr/libexec/justvoxel/mjust/migration-transport.sh
 require_root
+source /usr/libexec/justvoxel/mjust/migration-instance.sh
+[[ ${1:-} == --instance && ${2:-} =~ ^jv-[a-z0-9]{6,12}$ ]] || { echo 'ERROR: --instance jv-... is required.' >&2; exit 2; }
+jv_migration_load_instance "$2" || exit 1
+shift 2
 require_config
 
 if (( $# > 1 )); then
@@ -28,7 +32,7 @@ cleanup() {
     fi
     if [[ ${restart_required} == yes ]]; then
         echo 'Restarting Minecraft after interrupted/failed export.' >&2
-        systemctl start minecraft.service || rc=1
+        systemctl start "${JV_INSTANCE_UNIT}" || rc=1
         restart_required=no
     fi
     if [[ ${transport_started} == yes ]]; then
@@ -38,7 +42,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-/usr/libexec/justvoxel/mjust/validate-data-mount
+jv_migration_validate_data
 [[ -d ${DATA_PATH} ]] || { echo "ERROR: Minecraft data directory does not exist: ${DATA_PATH}" >&2; exit 1; }
 
 stamp="$(date +%Y-%m-%d-%H%M)"
@@ -105,20 +109,20 @@ fi
 server_reported="${JV_MIGRATION_EXPORT_SERVER_REPORTED:-}"
 geyser_reported="${JV_MIGRATION_EXPORT_GEYSER_REPORTED:-}"
 plugins_reported=''
-if systemctl is-active --quiet minecraft.service; then
+if systemctl is-active --quiet "${JV_INSTANCE_UNIT}"; then
     was_active=yes
     if server_supports_plugins; then
-        server_reported="$(podman exec minecraft rcon-cli 'version' 2>/dev/null | head -n1 || true)"
-        geyser_reported="$(podman exec minecraft rcon-cli 'geyser version' 2>/dev/null | head -n1 || true)"
+        server_reported="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli 'version' 2>/dev/null | head -n1 || true)"
+        geyser_reported="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli 'geyser version' 2>/dev/null | head -n1 || true)"
     else
-        server_reported="$(podman exec minecraft mc-monitor status --json 2>/dev/null | jq -er '.server_info.version.name | select(type == "string")' || true)"
+        server_reported="$(podman exec "${JV_INSTANCE_CONTAINER}" mc-monitor status --json 2>/dev/null | jq -er '.server_info.version.name | select(type == "string")' || true)"
     fi
-    if server_supports_plugins; then plugins_reported="$(podman exec minecraft rcon-cli 'plugins' 2>/dev/null | head -n1 || true)"; fi
+    if server_supports_plugins; then plugins_reported="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli 'plugins' 2>/dev/null | head -n1 || true)"; fi
     jv_player_check_before_interrupt 'Export server' || { echo 'Export cancelled.'; exit 0; }
     echo 'Stopping Minecraft through its configured graceful shutdown path.'
     restart_required=yes
-    systemctl stop minecraft.service
-    if systemctl is-active --quiet minecraft.service; then
+    systemctl stop "${JV_INSTANCE_UNIT}"
+    if systemctl is-active --quiet "${JV_INSTANCE_UNIT}"; then
         echo 'ERROR: Minecraft is still active; export will not start.' >&2
         exit 1
     fi
@@ -157,7 +161,7 @@ source_version="$(jq -r '.minecraftVersion // empty' <<< "${candidate}")"
     exit 1
 }
 
-image_ref="$(minecraft_image_ref)"
+image_ref="${JV_INSTANCE_IMAGE_REF}"
 image_digest="$(podman image inspect "${image_ref}" --format '{{.Digest}}' 2>/dev/null || true)"
 variant="$(cat /usr/lib/justvoxel/variant 2>/dev/null || true)"
 bootc_json="$(bootc status --json --format-version=1 2>/dev/null || true)"
@@ -186,6 +190,7 @@ jq -n \
     --argjson schemaVersion "${JV_MIGRATION_SCHEMA_VERSION}" \
     --arg createdAt "${created_at}" \
     --arg bundleId "${bundle_id}" \
+    --arg sourceInstanceID "${JV_INSTANCE_ID}" \
     --arg variant "${variant}" \
     --arg architecture "$(uname -m)" \
     --arg bootcImage "${bootc_ref}" \
@@ -218,6 +223,7 @@ jq -n \
         schemaVersion: $schemaVersion,
         createdAt: $createdAt,
         bundleId: $bundleId,
+        sourceInstanceID: $sourceInstanceID,
         source: {
             type: "justvoxel",
             variant: (if $variant == "" then null else $variant end),
@@ -284,7 +290,7 @@ manifest_tmp=''
 
 if [[ ${restart_required} == yes ]]; then
     echo 'Starting Minecraft.'
-    systemctl start minecraft.service
+    systemctl start "${JV_INSTANCE_UNIT}"
     restart_required=no
     wait_for_rcon 900 || {
         echo 'ERROR: export completed, but Minecraft did not become RCON-ready after restart.' >&2

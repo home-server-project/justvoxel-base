@@ -21,6 +21,9 @@ type adminMigrationImportResolveCheck struct {
 }
 
 func (s *server) adminMigrationImportResolve(w http.ResponseWriter, r *http.Request) {
+	if !s.migrationInstanceRequest(w, r) {
+		return
+	}
 	actor, ok := s.requireAdministrator(w, r)
 	if !ok {
 		return
@@ -56,11 +59,11 @@ func (s *server) adminMigrationImportResolve(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "current server migration operation could not be read")
 		return
 	}
-	if current == nil || current.OperationID != request.OperationID {
+	if current == nil || current.InstanceID != r.PathValue("id") || current.OperationID != request.OperationID {
 		writeError(w, http.StatusNotFound, "server migration Import operation was not found")
 		return
 	}
-	if current.OperationType != operationTypeMigrationImport || current.State != operationNeedsAttention {
+	if current.InstanceID != r.PathValue("id") || current.OperationType != operationTypeMigrationImport || current.State != operationNeedsAttention {
 		writeError(w, http.StatusConflict, "server migration Import cannot be resolved in its current state")
 		return
 	}

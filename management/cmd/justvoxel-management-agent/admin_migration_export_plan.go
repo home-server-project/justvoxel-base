@@ -26,7 +26,7 @@ var (
 )
 
 var runAdminMigrationExportPlanHelper = func(ctx context.Context, action string, request []byte) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, adminMigrationExportPlanHelper, action)
+	cmd := exec.CommandContext(ctx, adminMigrationExportPlanHelper, "--instance", migrationInstanceID(ctx), action)
 	if len(request) > 0 {
 		cmd.Stdin = bytes.NewReader(request)
 	}
@@ -162,6 +162,9 @@ type adminMigrationExportPlanningError struct {
 }
 
 func (s *server) adminMigrationExportDiscover(w http.ResponseWriter, r *http.Request) {
+	if !s.migrationInstanceRequest(w, r) {
+		return
+	}
 	if _, ok := s.requireAdministrator(w, r); !ok {
 		return
 	}
@@ -193,6 +196,9 @@ func (s *server) adminMigrationExportDiscover(w http.ResponseWriter, r *http.Req
 }
 
 func (s *server) adminMigrationExportPlan(w http.ResponseWriter, r *http.Request) {
+	if !s.migrationInstanceRequest(w, r) {
+		return
+	}
 	if _, ok := s.requireAdministrator(w, r); !ok {
 		return
 	}

@@ -45,15 +45,15 @@ func TestAdminMigrationExportApplyExactReviewedPlanCreatesQueuedOperation(t *tes
 		return []byte(validMigrationExportPlanHelper), nil
 	}
 
-	s := surfaceTestServer(t, roleAdministrator)
+	s := migrationSurfaceTestServer(t, roleAdministrator)
 	store := openTestOperationStore(t)
 	attachTestOperationStore(t, s, store)
 	fingerprint := exactMigrationExportFingerprint(t)
 
 	rr := httptest.NewRecorder()
-	s.adminMigrationExportApply(rr, surfaceRequest(
+	s.adminMigrationExportApply(rr, migrationSurfaceRequest(
 		http.MethodPost,
-		"/v1/admin/migration/export/apply",
+		"/v1/minecraft/instances/jv-a1b2c3/migration/export/apply",
 		migrationExportApplyBody(t, fingerprint, true, false, ""),
 	))
 	if rr.Code != http.StatusAccepted {
@@ -83,12 +83,12 @@ func TestAdminMigrationExportApplyRequiresConfirmationBeforePlanning(t *testing.
 		return []byte(validMigrationExportPlanHelper), nil
 	}
 
-	s := surfaceTestServer(t, roleAdministrator)
+	s := migrationSurfaceTestServer(t, roleAdministrator)
 	attachTestOperationStore(t, s, openTestOperationStore(t))
 	rr := httptest.NewRecorder()
-	s.adminMigrationExportApply(rr, surfaceRequest(
+	s.adminMigrationExportApply(rr, migrationSurfaceRequest(
 		http.MethodPost,
-		"/v1/admin/migration/export/apply",
+		"/v1/minecraft/instances/jv-a1b2c3/migration/export/apply",
 		migrationExportApplyBody(t, exactMigrationExportFingerprint(t), false, false, ""),
 	))
 	if rr.Code != http.StatusBadRequest ||
@@ -107,14 +107,14 @@ func TestAdminMigrationExportApplyRejectsStalePlanWithoutOperation(t *testing.T)
 		return []byte(validMigrationExportPlanHelper), nil
 	}
 
-	s := surfaceTestServer(t, roleAdministrator)
+	s := migrationSurfaceTestServer(t, roleAdministrator)
 	store := openTestOperationStore(t)
 	attachTestOperationStore(t, s, store)
 	stale := "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 	rr := httptest.NewRecorder()
-	s.adminMigrationExportApply(rr, surfaceRequest(
+	s.adminMigrationExportApply(rr, migrationSurfaceRequest(
 		http.MethodPost,
-		"/v1/admin/migration/export/apply",
+		"/v1/minecraft/instances/jv-a1b2c3/migration/export/apply",
 		migrationExportApplyBody(t, stale, true, false, ""),
 	))
 	if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), `"code":"stale_plan"`) {
@@ -126,11 +126,11 @@ func TestAdminMigrationExportApplyRejectsStalePlanWithoutOperation(t *testing.T)
 }
 
 func TestAdminMigrationExportApplySameFingerprintReconnectsWithoutPreflight(t *testing.T) {
-	s := surfaceTestServer(t, roleAdministrator)
+	s := migrationSurfaceTestServer(t, roleAdministrator)
 	store := openTestOperationStore(t)
 	attachTestOperationStore(t, s, store)
 	fingerprint := exactMigrationExportFingerprint(t)
-	operation, _, err := store.beginMigrationExport(fingerprint)
+	operation, _, err := store.beginMigrationExport("jv-a1b2c3", fingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,9 +144,9 @@ func TestAdminMigrationExportApplySameFingerprintReconnectsWithoutPreflight(t *t
 	}
 
 	rr := httptest.NewRecorder()
-	s.adminMigrationExportApply(rr, surfaceRequest(
+	s.adminMigrationExportApply(rr, migrationSurfaceRequest(
 		http.MethodPost,
-		"/v1/admin/migration/export/apply",
+		"/v1/minecraft/instances/jv-a1b2c3/migration/export/apply",
 		migrationExportApplyBody(t, fingerprint, true, false, ""),
 	))
 	if rr.Code != http.StatusOK ||
@@ -182,12 +182,12 @@ func TestAdminMigrationExportApplyRequiresPlayerConfirmation(t *testing.T) {
 		return payload, nil
 	}
 
-	s := surfaceTestServer(t, roleAdministrator)
+	s := migrationSurfaceTestServer(t, roleAdministrator)
 	attachTestOperationStore(t, s, openTestOperationStore(t))
 	rr := httptest.NewRecorder()
-	s.adminMigrationExportApply(rr, surfaceRequest(
+	s.adminMigrationExportApply(rr, migrationSurfaceRequest(
 		http.MethodPost,
-		"/v1/admin/migration/export/apply",
+		"/v1/minecraft/instances/jv-a1b2c3/migration/export/apply",
 		migrationExportApplyBody(t, fingerprint, true, false, ""),
 	))
 	if rr.Code != http.StatusBadRequest ||
@@ -235,12 +235,12 @@ func TestAdminMigrationExportApplyAcceptsLiveMeasurementDrift(t *testing.T) {
 		}
 	}
 
-	s := surfaceTestServer(t, roleAdministrator)
+	s := migrationSurfaceTestServer(t, roleAdministrator)
 	attachTestOperationStore(t, s, openTestOperationStore(t))
 	rr := httptest.NewRecorder()
-	s.adminMigrationExportApply(rr, surfaceRequest(
+	s.adminMigrationExportApply(rr, migrationSurfaceRequest(
 		http.MethodPost,
-		"/v1/admin/migration/export/apply",
+		"/v1/minecraft/instances/jv-a1b2c3/migration/export/apply",
 		migrationExportApplyBody(t, fingerprint, true, false, ""),
 	))
 	if rr.Code != http.StatusAccepted {
@@ -279,12 +279,12 @@ func TestAdminMigrationExportApplyRechecksPlayersWithoutStalePlan(t *testing.T) 
 		return payload, nil
 	}
 
-	s := surfaceTestServer(t, roleAdministrator)
+	s := migrationSurfaceTestServer(t, roleAdministrator)
 	attachTestOperationStore(t, s, openTestOperationStore(t))
 	rr := httptest.NewRecorder()
-	s.adminMigrationExportApply(rr, surfaceRequest(
+	s.adminMigrationExportApply(rr, migrationSurfaceRequest(
 		http.MethodPost,
-		"/v1/admin/migration/export/apply",
+		"/v1/minecraft/instances/jv-a1b2c3/migration/export/apply",
 		migrationExportApplyBody(t, fingerprint, true, false, ""),
 	))
 	if rr.Code != http.StatusBadRequest ||
@@ -295,4 +295,3 @@ func TestAdminMigrationExportApplyRechecksPlayersWithoutStalePlan(t *testing.T) 
 		t.Fatalf("live player change incorrectly invalidated reviewed export: %s", rr.Body.String())
 	}
 }
-

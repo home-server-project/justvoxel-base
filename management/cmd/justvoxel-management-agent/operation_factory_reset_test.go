@@ -146,7 +146,7 @@ func TestOperationStoreFactoryResetIsIdempotentAndBlocksOtherOperations(t *testi
 			return err
 		},
 		"server migration": func() error {
-			_, _, err := store.beginMigrationExport("sha256:abababababababababababababababababababababababababababababababab")
+			_, _, err := store.beginMigrationExport("jv-a1b2c3", "sha256:abababababababababababababababababababababababababababababababab")
 			return err
 		},
 	} {
@@ -250,7 +250,7 @@ func TestOperationStoreFactoryResetCannotStartDuringOtherOperation(t *testing.T)
 		{
 			name: "server migration",
 			begin: func(store *operationStore) error {
-				_, _, err := store.beginMigrationExport("sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd")
+				_, _, err := store.beginMigrationExport("jv-a1b2c3", "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd")
 				return err
 			},
 		},

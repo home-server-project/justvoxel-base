@@ -1,8 +1,8 @@
-{{define "migration_workspace_export.html"}}<div class="migration-workspace-content" data-migration-workspace-root>
+{{define "migration_workspace_export.html"}}<div class="migration-workspace-content" data-migration-workspace-root data-server-id="{{.ServerID}}">
 <p class="muted migration-workspace-helper">Create a complete migration bundle. JustVoxel reviews the destination, players, integrity and final action.</p>
   {{if .Error}}<div class="notice error"><strong>Server Export cannot continue as submitted.</strong><br>{{.Error}}</div>{{end}}
 
-  <form method="post" action="/workspace/migration/export/review" data-server-export-form>
+  <form method="post" action="/workspace/migration/export/review?server={{.ServerID}}" data-server-export-form>
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <section class="panel">
       <p class="eyebrow">Destination</p>
@@ -59,6 +59,6 @@
       <p class="muted">JustVoxel supplied this suggested filename. You may change it before review.</p>
     </section>
 
-    <div class="action-row"><a class="button-link secondary" href="/?workspace=migration">Cancel</a><button type="submit">Review Server Export</button></div>
+    <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;server={{.ServerID}}">Cancel</a><button type="submit">Review Server Export</button></div>
   </form>
 </div>{{end}}

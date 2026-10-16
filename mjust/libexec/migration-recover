@@ -3,6 +3,13 @@ set -euo pipefail
 source /usr/libexec/justvoxel/mjust/ui.sh
 source /usr/libexec/justvoxel/mjust/migration-api.sh
 (( EUID == 0 )) || { echo "ERROR: mjust migration-recover must run through sudo/root." >&2; exit 1; }
+selected_instance=''
+if [[ ${1:-} == --instance ]]; then
+    [[ $# -ge 2 ]] || exit 2
+    selected_instance="$2"
+    shift 2
+fi
+jv_migration_select_instance "${selected_instance}" || exit 1
 (( $# <= 1 )) || { echo "Usage: migration-recover [TRANSACTION_DIR]" >&2; exit 2; }
 
 current="$(jv_migration_current_operation)" || exit 1
@@ -14,8 +21,8 @@ if [[ -n ${current_id} ]]; then
         exit $?
     fi
     current_state="$(jq -r '.operation.state // empty' <<< "${current}")"
-    if [[ ${current_type} == migration_import && ${current_state} == needs_attention ]]; then
-        echo "The previous server migration Import needs attention."
+    if [[ ( ${current_type} == migration_import || ${current_type} == migration_export ) && ${current_state} == needs_attention ]]; then
+        echo "The previous server migration operation needs attention."
         echo "Recovery can take ownership of its retained rollback state after you review and confirm the transaction."
     else
         echo "ERROR: another server migration operation is already active: ${current_type}" >&2

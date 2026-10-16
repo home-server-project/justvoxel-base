@@ -10,7 +10,7 @@ import (
 
 func TestOperationDiagnosticUsesCanonicalPrivateLogAndOperationID(t *testing.T) {
 	store := openTestOperationStore(t)
-	operation, _, err := store.beginMigrationImport(testMigrationImportFingerprint)
+	operation, _, err := store.beginMigrationImport("jv-a1b2c3", testMigrationImportFingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestOperationDiagnosticRejectsPathsAndSymlinks(t *testing.T) {
 			t.Fatalf("accepted unsafe id %q", id)
 		}
 	}
-	operation, _, err := store.beginMigrationImport(testMigrationImportFingerprint)
+	operation, _, err := store.beginMigrationImport("jv-a1b2c3", testMigrationImportFingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestOperationDiagnosticRejectsPathsAndSymlinks(t *testing.T) {
 
 func TestMigrationDiagnosticRetainsBoundedFailureTailWithoutSecrets(t *testing.T) {
 	store := openTestOperationStore(t)
-	operation, _, err := store.beginMigrationImport(testMigrationImportFingerprint)
+	operation, _, err := store.beginMigrationImport("jv-a1b2c3", testMigrationImportFingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -40,12 +40,16 @@ type migrationExportExecutionPlan struct {
 }
 
 func registerAdminMigrationExportRoutes(mux *http.ServeMux, s *server) {
-	mux.HandleFunc("GET /v1/admin/migration/export", s.adminMigrationExportDiscover)
-	mux.HandleFunc("POST /v1/admin/migration/export/plan", s.adminMigrationExportPlan)
-	mux.HandleFunc("POST /v1/admin/migration/export/apply", s.adminMigrationExportApply)
+	registerMigrationInstanceOperationRoutes(mux, s)
+	mux.HandleFunc("GET /v1/minecraft/instances/{id}/migration/export", s.adminMigrationExportDiscover)
+	mux.HandleFunc("POST /v1/minecraft/instances/{id}/migration/export/plan", s.adminMigrationExportPlan)
+	mux.HandleFunc("POST /v1/minecraft/instances/{id}/migration/export/apply", s.adminMigrationExportApply)
 }
 
 func (s *server) adminMigrationExportApply(w http.ResponseWriter, r *http.Request) {
+	if !s.migrationInstanceRequest(w, r) {
+		return
+	}
 	actor, ok := s.requireAdministrator(w, r)
 	if !ok {
 		return
@@ -74,7 +78,7 @@ func (s *server) adminMigrationExportApply(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if current != nil {
-		if current.OperationType == operationTypeMigrationExport && current.PlanFingerprint == request.PlanFingerprint {
+		if current.OperationType == operationTypeMigrationExport && current.InstanceID == r.PathValue("id") && current.PlanFingerprint == request.PlanFingerprint {
 			writeJSON(w, http.StatusOK, adminMigrationExportApplyResponse{OK: true, Created: false, Operation: current})
 			return
 		}
@@ -116,7 +120,7 @@ func (s *server) adminMigrationExportApply(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	operation, created, err := s.operations.beginMigrationExport(request.PlanFingerprint)
+	operation, created, err := s.operations.beginMigrationExport(r.PathValue("id"), request.PlanFingerprint)
 	if err != nil {
 		if errors.Is(err, errFactoryResetOperationBusy) {
 			writeAdminMigrationExportApplyFailure(w, http.StatusConflict, "factory_reset_needs_attention", "Resolve the failed Full Factory Reset by keeping the current server, or retry the reset, before Server Export can start")
@@ -130,7 +134,7 @@ func (s *server) adminMigrationExportApply(w http.ResponseWriter, r *http.Reques
 			current, currentErr := s.operations.currentMigration()
 			if currentErr == nil && current != nil &&
 				current.OperationType == operationTypeMigrationExport &&
-				current.PlanFingerprint == request.PlanFingerprint {
+				current.InstanceID == r.PathValue("id") && current.PlanFingerprint == request.PlanFingerprint {
 				writeJSON(w, http.StatusOK, adminMigrationExportApplyResponse{OK: true, Created: false, Operation: current})
 				return
 			}

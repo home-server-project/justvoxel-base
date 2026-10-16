@@ -546,7 +546,7 @@ func TestAdminFactoryResetResolveKeepsCurrentStateAndReleasesLocks(t *testing.T)
 	if current, err := store.currentFactoryReset(); err != nil || current != nil {
 		t.Fatalf("factory reset remained current after resolve: %#v err=%v", current, err)
 	}
-	if _, _, err := store.beginMigrationExport(testSetupFingerprint); err != nil {
+	if _, _, err := store.beginMigrationExport("jv-a1b2c3", testSetupFingerprint); err != nil {
 		t.Fatalf("migration lock remained held after resolve: %v", err)
 	}
 }

@@ -11,19 +11,19 @@ import (
 
 func TestOperationStoreMigrationExportIsIdempotent(t *testing.T) {
 	store := openTestOperationStore(t)
-	first, created, err := store.beginMigrationExport(testMigrationExportFingerprint)
+	first, created, err := store.beginMigrationExport("jv-a1b2c3", testMigrationExportFingerprint)
 	if err != nil || !created {
 		t.Fatalf("first export begin: created=%t err=%v", created, err)
 	}
-	if first.OperationType != operationTypeMigrationExport {
+	if first.InstanceID != "jv-a1b2c3" || first.OperationType != operationTypeMigrationExport {
 		t.Fatalf("unexpected operation type: %#v", first)
 	}
-	second, created, err := store.beginMigrationExport(testMigrationExportFingerprint)
+	second, created, err := store.beginMigrationExport("jv-a1b2c3", testMigrationExportFingerprint)
 	if err != nil || created || second.OperationID != first.OperationID {
 		t.Fatalf("idempotent export begin: created=%t err=%v operation=%#v", created, err, second)
 	}
 	other := "sha256:7777777777777777777777777777777777777777777777777777777777777777"
-	if _, _, err := store.beginMigrationExport(other); !errors.Is(err, errMigrationOperationBusy) {
+	if _, _, err := store.beginMigrationExport("jv-a1b2c3", other); !errors.Is(err, errMigrationOperationBusy) {
 		t.Fatalf("different export plan error = %v, want busy", err)
 	}
 }
@@ -34,7 +34,7 @@ func TestOperationStoreRestartMarksInterruptedMigrationExportNeedsAttention(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	journal, _, err := first.beginMigrationExport(testMigrationExportFingerprint)
+	journal, _, err := first.beginMigrationExport("jv-a1b2c3", testMigrationExportFingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestOperationStoreRestartMarksInterruptedMigrationExportNeedsAttention(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if current == nil || current.OperationID != journal.OperationID {
+	if current == nil || current.InstanceID != "jv-a1b2c3" || current.OperationID != journal.OperationID {
 		t.Fatalf("current server migration = %#v, want %s", current, journal.OperationID)
 	}
 	if current.State != operationNeedsAttention || current.Stage != "interrupted" || current.InterruptedAt == "" {
@@ -70,26 +70,28 @@ func TestOperationStoreRestartMarksInterruptedMigrationExportNeedsAttention(t *t
 
 func TestCurrentMigrationOperationAPIRequiresAdministratorAndAllowsLocalRoot(t *testing.T) {
 	store := openTestOperationStore(t)
-	journal, _, err := store.beginMigrationExport(testMigrationExportFingerprint)
+	journal, _, err := store.beginMigrationExport("jv-a1b2c3", testMigrationExportFingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	for _, role := range []principalRole{roleOperator, roleViewer} {
-		s := surfaceTestServer(t, role)
+		s := migrationSurfaceTestServer(t, role)
 		attachTestOperationStore(t, s, store)
 		mux := http.NewServeMux()
 		registerAdminOperationRoutes(mux, s)
+		registerMigrationInstanceOperationRoutes(mux, s)
 		rr := httptest.NewRecorder()
-		mux.ServeHTTP(rr, surfaceRequest(http.MethodGet, "/v1/admin/migration/current-operation", ""))
+		mux.ServeHTTP(rr, migrationSurfaceRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/migration/current-operation", ""))
 		if rr.Code != http.StatusForbidden {
 			t.Fatalf("role %s status = %d, want 403", role, rr.Code)
 		}
 	}
 
-	s := surfaceTestServer(t, roleViewer)
+	s := migrationSurfaceTestServer(t, roleViewer)
 	attachTestOperationStore(t, s, store)
-	req := requestWithPeerUID(http.MethodGet, "http://unix/v1/admin/migration/current-operation", 0)
+	req := requestWithPeerUID(http.MethodGet, "http://unix/v1/minecraft/instances/jv-a1b2c3/migration/current-operation", 0)
+	req.SetPathValue("id", "jv-a1b2c3")
 	rr := httptest.NewRecorder()
 	s.adminCurrentMigrationOperation(rr, req)
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), journal.OperationID) {

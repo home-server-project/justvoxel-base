@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
@@ -18,6 +17,7 @@ type adminMigrationWorkspaceImportAPI interface {
 }
 
 type migrationWorkspaceImportPageData struct {
+	ServerID      string
 	Title         string
 	Version       string
 	ManagementAPI string
@@ -35,6 +35,7 @@ type migrationWorkspaceImportPageData struct {
 }
 
 type migrationWorkspaceImportReviewPageData struct {
+	ServerID            string
 	Title               string
 	Version             string
 	ManagementAPI       string
@@ -96,7 +97,7 @@ func (a *App) migrationWorkspaceImportPage(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	a.renderMigrationWorkspaceImportPage(w, http.StatusOK, identity, discovery, devices, inventory, csrfFromRequest(r), "")
+	a.renderMigrationWorkspaceImportPage(w, http.StatusOK, identity, discovery, devices, inventory, csrfFromRequest(r), "", migrationWorkspaceSelectedID(r))
 }
 
 func (a *App) migrationWorkspaceImportReview(w http.ResponseWriter, r *http.Request) {
@@ -113,7 +114,7 @@ func (a *App) migrationWorkspaceImportReview(w http.ResponseWriter, r *http.Requ
 	}
 	request, err := parseMigrationWorkspaceImportForm(r, discovery, devices, inventory)
 	if err != nil {
-		a.renderMigrationWorkspaceImportPage(w, http.StatusBadRequest, identity, discovery, devices, inventory, csrfFromRequest(r), err.Error())
+		a.renderMigrationWorkspaceImportPage(w, http.StatusBadRequest, identity, discovery, devices, inventory, csrfFromRequest(r), err.Error(), migrationWorkspaceSelectedID(r))
 		return
 	}
 	plan, err := client.AdminMigrationImportPlan(r.Context(), session, request)
@@ -121,16 +122,16 @@ func (a *App) migrationWorkspaceImportReview(w http.ResponseWriter, r *http.Requ
 		var responseErr *api.ResponseError
 		if errors.As(err, &responseErr) && responseErr.StatusCode == http.StatusBadRequest && plan.SchemaVersion != "" {
 			if migrationWorkspaceImportPlanNeedsInput(plan.Code) {
-				a.renderMigrationWorkspaceImportReview(w, http.StatusOK, identity, scrubMigrationWorkspaceImportSecrets(request), plan, csrfFromRequest(r), migrationWorkspaceImportPrompt(plan), "")
+				a.renderMigrationWorkspaceImportReview(w, http.StatusOK, identity, scrubMigrationWorkspaceImportSecrets(request), plan, csrfFromRequest(r), migrationWorkspaceImportPrompt(plan), "", migrationWorkspaceSelectedID(r))
 				return
 			}
-			a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, scrubMigrationWorkspaceImportSecrets(request), plan, csrfFromRequest(r), "", migrationWorkspaceImportPlanError(plan, err, "Server Import planning was rejected."))
+			a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, scrubMigrationWorkspaceImportSecrets(request), plan, csrfFromRequest(r), "", migrationWorkspaceImportPlanError(plan, err, "Server Import planning was rejected."), migrationWorkspaceSelectedID(r))
 			return
 		}
 		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Import planning is unavailable.")
 		return
 	}
-	a.renderMigrationWorkspaceImportReview(w, http.StatusOK, identity, scrubMigrationWorkspaceImportSecrets(request), plan, csrfFromRequest(r), "", "")
+	a.renderMigrationWorkspaceImportReview(w, http.StatusOK, identity, scrubMigrationWorkspaceImportSecrets(request), plan, csrfFromRequest(r), "", "", migrationWorkspaceSelectedID(r))
 }
 
 func (a *App) migrationWorkspaceImportApply(w http.ResponseWriter, r *http.Request) {
@@ -147,7 +148,7 @@ func (a *App) migrationWorkspaceImportApply(w http.ResponseWriter, r *http.Reque
 	}
 	request, err := parseMigrationWorkspaceImportForm(r, discovery, devices, inventory)
 	if err != nil {
-		a.renderMigrationWorkspaceImportPage(w, http.StatusBadRequest, identity, discovery, devices, inventory, csrfFromRequest(r), err.Error())
+		a.renderMigrationWorkspaceImportPage(w, http.StatusBadRequest, identity, discovery, devices, inventory, csrfFromRequest(r), err.Error(), migrationWorkspaceSelectedID(r))
 		return
 	}
 	plan, err := client.AdminMigrationImportPlan(r.Context(), session, request)
@@ -158,7 +159,7 @@ func (a *App) migrationWorkspaceImportApply(w http.ResponseWriter, r *http.Reque
 			if migrationWorkspaceImportPlanNeedsInput(plan.Code) {
 				prompt = migrationWorkspaceImportPrompt(plan)
 			}
-			a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, scrubMigrationWorkspaceImportSecrets(request), plan, csrfFromRequest(r), prompt, migrationWorkspaceImportPlanError(plan, err, "Server Import changed and must be reviewed again."))
+			a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, scrubMigrationWorkspaceImportSecrets(request), plan, csrfFromRequest(r), prompt, migrationWorkspaceImportPlanError(plan, err, "Server Import changed and must be reviewed again."), migrationWorkspaceSelectedID(r))
 			return
 		}
 		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Import planning is unavailable.")
@@ -167,16 +168,16 @@ func (a *App) migrationWorkspaceImportApply(w http.ResponseWriter, r *http.Reque
 
 	publicRequest := scrubMigrationWorkspaceImportSecrets(request)
 	if submitted := strings.TrimSpace(r.FormValue("plan_fingerprint")); submitted == "" || submitted != plan.PlanFingerprint {
-		a.renderMigrationWorkspaceImportReview(w, http.StatusConflict, identity, publicRequest, plan, csrfFromRequest(r), "", "This Server Import changed since it was reviewed. Review the current source and destination again before continuing.")
+		a.renderMigrationWorkspaceImportReview(w, http.StatusConflict, identity, publicRequest, plan, csrfFromRequest(r), "", "This Server Import changed since it was reviewed. Review the current source and destination again before continuing.", migrationWorkspaceSelectedID(r))
 		return
 	}
 	if strings.TrimSpace(r.FormValue("import_confirmation")) != "IMPORT" {
-		a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", "Complete the Import confirmation slider before starting this Server Import.")
+		a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", "Complete the Import confirmation slider before starting this Server Import.", migrationWorkspaceSelectedID(r))
 		return
 	}
 	requirements := plan.Requirements
 	if requirements == nil {
-		a.renderMigrationWorkspaceImportReview(w, http.StatusBadGateway, identity, publicRequest, plan, csrfFromRequest(r), "", "Server Import did not return its required safety confirmations.")
+		a.renderMigrationWorkspaceImportReview(w, http.StatusBadGateway, identity, publicRequest, plan, csrfFromRequest(r), "", "Server Import did not return its required safety confirmations.", migrationWorkspaceSelectedID(r))
 		return
 	}
 	playersConfirmed := r.FormValue("players_confirmed") == "yes"
@@ -186,34 +187,23 @@ func (a *App) migrationWorkspaceImportApply(w http.ResponseWriter, r *http.Reque
 	onlineModeConfirmed := r.FormValue("online_mode_confirmed") == "yes"
 
 	if requirements.PlayersConfirmationRequired && !playersConfirmed {
-		a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", "Confirm that the online players may be interrupted before starting Server Import.")
-		return
-	}
-	if requirements.EULAAcceptanceRequired && !eulaAccepted {
-		a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", "Accept the Minecraft EULA for this fresh Server Import.")
+		a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", "Confirm that the online players may be interrupted before starting Server Import.", migrationWorkspaceSelectedID(r))
 		return
 	}
 	if requirements.VanillaConfirmationRequired && !vanillaConfirmed {
-		a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", "Confirm the reviewed Vanilla-to-Paper conversion before starting Server Import.")
+		a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", "Confirm the reviewed Vanilla-to-Paper conversion before starting Server Import.", migrationWorkspaceSelectedID(r))
 		return
 	}
 	if requirements.PluginsConfirmationRequired && !pluginsConfirmed {
-		a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", "Confirm that the reviewed external plugin JARs may be preserved and executed.")
+		a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", "Confirm that the reviewed external plugin JARs may be preserved and executed.", migrationWorkspaceSelectedID(r))
 		return
 	}
 	if requirements.OnlineModeConfirmationRequired && !onlineModeConfirmed {
-		a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", "Confirm that the source used online-mode=true before starting Server Import.")
+		a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", "Confirm that the source used online-mode=true before starting Server Import.", migrationWorkspaceSelectedID(r))
 		return
 	}
 
 	backupSMBPassword := ""
-	if requirements.BackupSMBPasswordRequired {
-		backupSMBPassword = r.FormValue("backup_smb_password")
-		if backupSMBPassword == "" {
-			a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", "Enter the SMB backup password to start this reviewed fresh Server Import.")
-			return
-		}
-	}
 
 	result, err := client.AdminMigrationImportApply(r.Context(), session, api.AdminMigrationImportApplyRequest{
 		PlanFingerprint:     plan.PlanFingerprint,
@@ -228,19 +218,15 @@ func (a *App) migrationWorkspaceImportApply(w http.ResponseWriter, r *http.Reque
 	})
 	request.Source.SMBPassword = ""
 	backupSMBPassword = ""
-	if result.Code == "identity_required" && strings.Contains(r.Header.Get("Accept"), "application/json") {
-		writeMinecraftWorkspaceJSON(w, http.StatusConflict, map[string]string{"code": "identity_required", "error": result.Error})
-		return
-	}
 	if err != nil {
-		a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", apiMessage(err, "Could not start Server Import."))
+		a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", apiMessage(err, "Could not start Server Import."), migrationWorkspaceSelectedID(r))
 		return
 	}
 	if !result.OK || result.Operation == nil || result.Operation.OperationType != "migration_import" {
-		a.renderMigrationWorkspaceImportReview(w, http.StatusBadGateway, identity, publicRequest, plan, csrfFromRequest(r), "", "Server Import did not return a valid persistent operation.")
+		a.renderMigrationWorkspaceImportReview(w, http.StatusBadGateway, identity, publicRequest, plan, csrfFromRequest(r), "", "Server Import did not return a valid persistent operation.", migrationWorkspaceSelectedID(r))
 		return
 	}
-	http.Redirect(w, r, "/workspace/migration/progress/"+result.Operation.OperationID, http.StatusSeeOther)
+	http.Redirect(w, r, migrationSelectedURL(r, "/workspace/migration/progress/"+result.Operation.OperationID), http.StatusSeeOther)
 }
 
 func (a *App) migrationWorkspaceImportDependencies(w http.ResponseWriter, r *http.Request, session string, client adminMigrationWorkspaceImportAPI) (api.AdminMigrationImportDiscoveryResponse, api.AdminMigrationExportDiscoveryResponse, api.AdminStorageDiscovery, bool) {
@@ -256,12 +242,10 @@ func (a *App) migrationWorkspaceImportDependencies(w http.ResponseWriter, r *htt
 	}
 	inventory := api.AdminStorageDiscovery{}
 	if !discovery.Configured {
-		inventory, err = client.AdminStorage(r.Context(), session)
-		if err != nil {
-			a.handleMigrationWorkspaceRequestError(w, r, err, "Fresh Server Import storage discovery is unavailable.")
-			return api.AdminMigrationImportDiscoveryResponse{}, api.AdminMigrationExportDiscoveryResponse{}, api.AdminStorageDiscovery{}, false
-		}
+		http.Error(w, "Create a Minecraft server through Setup / Add Server before Import.", http.StatusConflict)
+		return api.AdminMigrationImportDiscoveryResponse{}, api.AdminMigrationExportDiscoveryResponse{}, inventory, false
 	}
+
 	return discovery, devices, inventory, true
 }
 
@@ -365,110 +349,7 @@ func parseMigrationWorkspaceImportDestination(r *http.Request, discovery api.Adm
 		}, nil
 	}
 
-	javaPort, err := parseSetupPort(r.FormValue("java_port"), "Minecraft Java port")
-	if err != nil {
-		return api.AdminMigrationImportDestinationRequest{}, err
-	}
-	bedrockPort, err := parseSetupPort(r.FormValue("bedrock_port"), "Bedrock UDP port")
-	if err != nil {
-		return api.AdminMigrationImportDestinationRequest{}, err
-	}
-	javaMemory := strings.TrimSpace(r.FormValue("java_memory"))
-	containerMemory := strings.TrimSpace(r.FormValue("container_memory"))
-	if _, ok := setupMemoryMiB(javaMemory); !ok {
-		return api.AdminMigrationImportDestinationRequest{}, errors.New("Minecraft game memory must use a size such as 4G or 4096M.")
-	}
-	if _, ok := setupMemoryMiB(containerMemory); !ok {
-		return api.AdminMigrationImportDestinationRequest{}, errors.New("Maximum Minecraft memory must use a size such as 6G or 6144M.")
-	}
-	javaMiB, _ := setupMemoryMiB(javaMemory)
-	containerMiB, _ := setupMemoryMiB(containerMemory)
-	if containerMiB <= javaMiB {
-		return api.AdminMigrationImportDestinationRequest{}, errors.New("Maximum Minecraft memory must be larger than Minecraft game memory.")
-	}
-	timezone := strings.TrimSpace(r.FormValue("timezone"))
-	if !setupTimezonePattern.MatchString(timezone) || strings.Contains(timezone, "..") || strings.HasPrefix(timezone, "/") {
-		return api.AdminMigrationImportDestinationRequest{}, errors.New("Timezone must look like UTC or America/Toronto.")
-	}
-	backupKeep, err := strconv.Atoi(strings.TrimSpace(r.FormValue("backup_keep")))
-	if err != nil || backupKeep < 1 {
-		return api.AdminMigrationImportDestinationRequest{}, errors.New("Backup retention must be a positive number.")
-	}
-	backupAutomatic := r.FormValue("backup_automatic") == "on"
-	backupDailyTime := strings.TrimSpace(r.FormValue("backup_daily_time"))
-	if backupAutomatic {
-		backupDailyTime, err = normalizeSetupBackupTime(backupDailyTime)
-		if err != nil {
-			return api.AdminMigrationImportDestinationRequest{}, err
-		}
-	}
-	if backupDailyTime == "" {
-		backupDailyTime = defaults.BackupDailyTime
-	}
-
-	setupDefaults := api.AdminSetupDefaults{
-		DataPath:        defaults.DataPath,
-		BackupPath:      defaults.BackupPath,
-		BackupKeep:      defaults.BackupKeep,
-		BackupDailyTime: defaults.BackupDailyTime,
-	}
-	storageDraft := setupStorageDraft{
-		Type:       strings.TrimSpace(r.FormValue("storage_type")),
-		Path:       strings.TrimSpace(r.FormValue("data_path")),
-		Device:     strings.TrimSpace(r.FormValue("data_device")),
-		MountPoint: strings.TrimSpace(r.FormValue("data_mount_point")),
-	}
-	if storageDraft.Type == "system" {
-		storageDraft.Path = defaults.DataPath
-		storageDraft.Device = ""
-		storageDraft.MountPoint = ""
-	}
-	if err := validateSetupStorage(storageDraft, inventory, setupDefaults); err != nil {
-		return api.AdminMigrationImportDestinationRequest{}, err
-	}
-
-	backupDraft := setupBackupDraft{
-		Automatic:  backupAutomatic,
-		DailyTime:  backupDailyTime,
-		Keep:       strconv.Itoa(backupKeep),
-		Type:       strings.TrimSpace(r.FormValue("backup_type")),
-		Path:       strings.TrimSpace(r.FormValue("backup_path")),
-		Device:     strings.TrimSpace(r.FormValue("backup_device")),
-		MountPoint: strings.TrimSpace(r.FormValue("backup_mount_point")),
-		Source:     strings.TrimSpace(r.FormValue("backup_source")),
-		Username:   strings.TrimSpace(r.FormValue("backup_username")),
-		Domain:     strings.TrimSpace(r.FormValue("backup_domain")),
-	}
-	if backupDraft.Type == "system" {
-		backupDraft.Path = defaults.BackupPath
-		backupDraft.Device = ""
-		backupDraft.MountPoint = ""
-		backupDraft.Source = ""
-		backupDraft.Username = ""
-		backupDraft.Domain = ""
-	}
-	if err := validateSetupBackups(backupDraft, storageDraft, inventory, setupDefaults); err != nil {
-		return api.AdminMigrationImportDestinationRequest{}, err
-	}
-
-	return api.AdminMigrationImportDestinationRequest{
-		JavaPort:        javaPort,
-		BedrockPort:     bedrockPort,
-		JavaMemory:      javaMemory,
-		ContainerMemory: containerMemory,
-		Timezone:        timezone,
-		BackupKeep:      backupKeep,
-		BackupDailyTime: backupDailyTime,
-		BackupAutomatic: backupAutomatic,
-		Storage: api.AdminSetupPlanStorageRequest{
-			Type: storageDraft.Type, Path: storageDraft.Path, Device: storageDraft.Device, MountPoint: storageDraft.MountPoint,
-		},
-		Backups: api.AdminSetupPlanBackupsRequest{
-			Automatic: backupDraft.Automatic, DailyTime: backupDraft.DailyTime, Keep: backupKeep,
-			Type: backupDraft.Type, Path: backupDraft.Path, Device: backupDraft.Device, MountPoint: backupDraft.MountPoint,
-			Source: backupDraft.Source, Username: backupDraft.Username, Domain: backupDraft.Domain,
-		},
-	}, nil
+	return api.AdminMigrationImportDestinationRequest{}, errors.New("Create a Minecraft server through Setup / Add Server before Import.")
 }
 
 func importServerSoftwareLabel(serverType string) string {
@@ -518,12 +399,13 @@ func migrationWorkspaceImportPrompt(plan api.AdminMigrationImportPlanResponse) s
 	}
 }
 
-func (a *App) renderMigrationWorkspaceImportPage(w http.ResponseWriter, status int, identity api.SessionInfo, discovery api.AdminMigrationImportDiscoveryResponse, devices api.AdminMigrationExportDiscoveryResponse, inventory api.AdminStorageDiscovery, csrf, errorMessage string) {
+func (a *App) renderMigrationWorkspaceImportPage(w http.ResponseWriter, status int, identity api.SessionInfo, discovery api.AdminMigrationImportDiscoveryResponse, devices api.AdminMigrationExportDiscoveryResponse, inventory api.AdminStorageDiscovery, csrf, errorMessage string, serverID string) {
 	deviceViews := make([]migrationWorkspaceExportDeviceView, 0, len(devices.Devices))
 	for _, device := range devices.Devices {
 		deviceViews = append(deviceViews, migrationWorkspaceExportDeviceView{Device: device, Size: humanBytes(device.SizeBytes)})
 	}
 	a.renderMigrationWorkspace(w, "migration_workspace_import.html", status, migrationWorkspaceImportPageData{
+		ServerID:      serverID,
 		Title:         "Server Import",
 		Version:       a.config.Version,
 		ManagementAPI: a.config.ManagementAPI,
@@ -541,7 +423,7 @@ func (a *App) renderMigrationWorkspaceImportPage(w http.ResponseWriter, status i
 	})
 }
 
-func (a *App) renderMigrationWorkspaceImportReview(w http.ResponseWriter, status int, identity api.SessionInfo, request api.AdminMigrationImportRequest, plan api.AdminMigrationImportPlanResponse, csrf, prompt, errorMessage string) {
+func (a *App) renderMigrationWorkspaceImportReview(w http.ResponseWriter, status int, identity api.SessionInfo, request api.AdminMigrationImportRequest, plan api.AdminMigrationImportPlanResponse, csrf, prompt, errorMessage string, serverID string) {
 	incompatible := !plan.OK && plan.Code == "unsupported_server_type" && plan.Normalized != nil
 	sourceSoftware, destinationSoftware := "", ""
 	if plan.Normalized != nil {
@@ -569,6 +451,7 @@ func (a *App) renderMigrationWorkspaceImportReview(w http.ResponseWriter, status
 		}
 	}
 	a.renderMigrationWorkspace(w, "migration_workspace_import_review.html", status, migrationWorkspaceImportReviewPageData{
+		ServerID:            serverID,
 		Title:               "Review Server Import",
 		Version:             a.config.Version,
 		ManagementAPI:       a.config.ManagementAPI,

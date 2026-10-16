@@ -4,6 +4,13 @@ source /usr/libexec/justvoxel/mjust/ui.sh
 source /usr/libexec/justvoxel/mjust/migration-api.sh
 
 (( EUID == 0 )) || { echo 'ERROR: mjust import must run through sudo/root.' >&2; exit 1; }
+selected_instance=''
+if [[ ${1:-} == --instance ]]; then
+    [[ $# -ge 2 ]] || exit 2
+    selected_instance="$2"
+    shift 2
+fi
+jv_migration_select_instance "${selected_instance}" || exit 1
 (( $# <= 1 )) || { echo 'Usage: migration-import [SOURCE]' >&2; exit 2; }
 
 current="$(jv_migration_current_operation)" || exit 1
@@ -130,98 +137,9 @@ backup_mount=''
 backup_source=''
 backup_username=''
 backup_domain=''
-choose_partition() {
-    local title="$1" choice
-    local -a paths=() labels=()
-    while IFS=$'\t' read -r path model fs size; do
-        [[ -n ${path} ]] || continue
-        paths+=("${path}")
-        labels+=("${path} - ${fs}, ${size} GiB${model:+ - ${model}}")
-    done < <(jq -r '
-        .devices[]
-        | select(.type == "part" and (.read_only == false))
-        | select(.filesystem == "xfs" or .filesystem == "ext4" or .filesystem == "btrfs")
-        | select((.mountpoints // []) | all(. != "/" and . != "/var" and . != "/boot" and . != "/boot/efi"))
-        | [.path, (.model // ""), .filesystem, (((.size_bytes / 1073741824) * 10 | floor) / 10 | tostring)]
-        | @tsv
-    ' <<< "${inventory}")
-    (( ${#paths[@]} > 0 )) || { echo 'No safe existing formatted partition is available.' >&2; return 1; }
-    labels+=('Back')
-    choice="$(jui_choose "${title}" "${labels[@]}")" || return 1
-    [[ ${choice} != Back ]] || return 1
-    for i in "${!paths[@]}"; do
-        if [[ ${choice} == "${labels[$i]}" ]]; then printf '%s\n' "${paths[$i]}"; return 0; fi
-    done
-    return 1
-}
-
-partition_mount() {
-    local device="$1" fallback="$2" mounted
-    mounted="$(jq -r --arg device "${device}" '.devices[] | select(.path == $device) | (.mountpoints[0] // "")' <<< "${inventory}")"
-    if [[ -n ${mounted} ]]; then printf '%s\n' "${mounted}"; else jui_input 'Mount point' "${fallback}"; fi
-}
-
+[[ ${configured} == true ]] || { echo 'ERROR: create a Minecraft server using Setup / Add Server before Import.' >&2; exit 1; }
 jui_has_tty || { echo 'ERROR: destination review requires a controlling terminal.' >&2; exit 1; }
-if [[ ${configured} == true ]]; then
-    java_port="$(jui_input 'Destination Java host TCP port' "${java_port}")" || exit 0
-    bedrock_port="$(jui_input 'Destination Bedrock host UDP port' "${bedrock_port}")" || exit 0
-else
-    java_memory="$(jui_input 'Minecraft Java heap' "${java_memory}")" || exit 0
-    container_memory="$(jui_input 'Maximum total Minecraft memory' "${container_memory}")" || exit 0
-    timezone="$(jui_input 'Timezone' "${timezone}")" || exit 0
-    java_port="$(jui_input 'Destination Java host TCP port' "${java_port}")" || exit 0
-    bedrock_port="$(jui_input 'Destination Bedrock host UDP port' "${bedrock_port}")" || exit 0
-    inventory="$(jv_migration_storage_discovery)" || exit 1
-
-    data_choice="$(jui_choose 'Destination Minecraft storage' 'Directory on the JustVoxel system filesystem' 'Use an existing filesystem/partition' 'Back')" || exit 0
-    case "${data_choice}" in
-        'Directory on the JustVoxel system filesystem')
-            storage_type=system
-            storage_path="$(jq -r '.defaults.data_path' <<< "${discovery}")"
-            ;;
-        'Use an existing filesystem/partition')
-            storage_type=partition
-            storage_device="$(choose_partition 'Minecraft data filesystem')" || exit 0
-            storage_mount="$(partition_mount "${storage_device}" '/var/mnt/justvoxel-data')" || exit 0
-            storage_path="$(jui_input 'Minecraft data directory' "${storage_mount}/minecraft")" || exit 0
-            ;;
-        *) exit 0 ;;
-    esac
-
-    backup_choice="$(jui_choose 'Backup storage' 'Directory on the JustVoxel system filesystem' 'Use an existing filesystem/partition' 'NFS network share' 'SMB/CIFS network share' 'Back')" || exit 0
-    case "${backup_choice}" in
-        'Directory on the JustVoxel system filesystem')
-            backup_type=system
-            backup_path="$(jq -r '.defaults.backup_path' <<< "${discovery}")"
-            ;;
-        'Use an existing filesystem/partition')
-            backup_type=partition
-            backup_device="$(choose_partition 'Backup filesystem')" || exit 0
-            backup_mount="$(partition_mount "${backup_device}" '/var/mnt/justvoxel-backup')" || exit 0
-            backup_path="$(jui_input 'Backup directory' "${backup_mount}/backups")" || exit 0
-            ;;
-        'NFS network share')
-            backup_type=nfs
-            backup_source="$(jui_input 'NFS source (server:/export)' 'server:/export')" || exit 0
-            backup_mount="$(jui_input 'Local mount point' '/var/mnt/justvoxel-backup')" || exit 0
-            backup_path="$(jui_input 'Backup directory' "${backup_mount}/backups")" || exit 0
-            ;;
-        'SMB/CIFS network share')
-            backup_type=smb
-            backup_source="$(jui_input 'SMB source (//server/share)' '//server/share')" || exit 0
-            backup_mount="$(jui_input 'Local mount point' '/var/mnt/justvoxel-backup')" || exit 0
-            backup_path="$(jui_input 'Backup directory' "${backup_mount}/backups")" || exit 0
-            backup_username="$(jui_input 'SMB username' '')" || exit 0
-            backup_domain="$(jui_input 'SMB domain/workgroup (optional)' '')" || exit 0
-            ;;
-        *) exit 0 ;;
-    esac
-
-    backup_keep="$(jui_input 'Number of backups to keep' "${backup_keep}")" || exit 0
-    backup_daily_time="$(jui_input 'Daily backup time' "${backup_daily_time}")" || exit 0
-    automatic_choice="$(jui_choose 'Automatic daily backups' 'Enable automatic backups' 'Disable automatic backups')" || exit 0
-    if [[ ${automatic_choice} == 'Enable automatic backups' ]]; then backup_automatic=true; else backup_automatic=false; fi
-fi
+echo "Selected destination: ${JV_MIGRATION_INSTANCE}"
 [[ ${java_port} =~ ^[0-9]+$ && ${bedrock_port} =~ ^[0-9]+$ ]] || { echo 'ERROR: Minecraft ports must be numbers.' >&2; exit 1; }
 [[ ${backup_keep} =~ ^[1-9][0-9]*$ ]] || { echo 'ERROR: backup retention must be a positive integer.' >&2; exit 1; }
 

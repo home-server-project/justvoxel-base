@@ -25,10 +25,10 @@ jv_migration_post() {
     printf '%s' "${response}"
 }
 
-jv_migration_current_operation() { jv_migration_get /v1/admin/migration/current-operation; }
+jv_migration_current_operation() { jv_migration_get "/v1/minecraft/instances/${JV_MIGRATION_INSTANCE:?}/migration/current-operation"; }
 jv_migration_operation() {
     local id="$1"; [[ ${id} =~ ^[0-9a-f-]+$ ]] || { echo "ERROR: invalid server migration operation id." >&2; return 1; }
-    jv_migration_get "/v1/admin/operations/${id}"
+    jv_migration_get "/v1/minecraft/instances/${JV_MIGRATION_INSTANCE:?}/migration/operations/${id}"
 }
 jv_migration_post_review() {
     local path="$1" payload="$2" response rc stderr_file code
@@ -49,16 +49,16 @@ jv_migration_post_review() {
     return "${rc}"
 }
 
-jv_migration_import_discovery() { jv_migration_get /v1/admin/migration/import; }
+jv_migration_import_discovery() { jv_migration_get "/v1/minecraft/instances/${JV_MIGRATION_INSTANCE:?}/migration/import"; }
 jv_migration_storage_discovery() { jv_migration_get /v1/admin/storage; }
-jv_migration_import_plan_review() { jv_migration_post_review /v1/admin/migration/import/plan "$1"; }
-jv_migration_import_apply() { jv_migration_post /v1/admin/migration/import/apply "$1"; }
-jv_migration_export_discovery() { jv_migration_get /v1/admin/migration/export; }
-jv_migration_export_plan() { jv_migration_post /v1/admin/migration/export/plan "$1"; }
-jv_migration_export_apply() { jv_migration_post /v1/admin/migration/export/apply "$1"; }
-jv_migration_recovery_discovery() { jv_migration_get /v1/admin/migration/recovery; }
-jv_migration_recovery_plan() { jv_migration_post /v1/admin/migration/recovery/plan "$1"; }
-jv_migration_recovery_apply() { jv_migration_post /v1/admin/migration/recovery/apply "$1"; }
+jv_migration_import_plan_review() { jv_migration_post_review "/v1/minecraft/instances/${JV_MIGRATION_INSTANCE:?}/migration/import/plan" "$1"; }
+jv_migration_import_apply() { jv_migration_post "/v1/minecraft/instances/${JV_MIGRATION_INSTANCE:?}/migration/import/apply" "$1"; }
+jv_migration_export_discovery() { jv_migration_get "/v1/minecraft/instances/${JV_MIGRATION_INSTANCE:?}/migration/export"; }
+jv_migration_export_plan() { jv_migration_post "/v1/minecraft/instances/${JV_MIGRATION_INSTANCE:?}/migration/export/plan" "$1"; }
+jv_migration_export_apply() { jv_migration_post "/v1/minecraft/instances/${JV_MIGRATION_INSTANCE:?}/migration/export/apply" "$1"; }
+jv_migration_recovery_discovery() { jv_migration_get "/v1/minecraft/instances/${JV_MIGRATION_INSTANCE:?}/migration/recovery"; }
+jv_migration_recovery_plan() { jv_migration_post "/v1/minecraft/instances/${JV_MIGRATION_INSTANCE:?}/migration/recovery/plan" "$1"; }
+jv_migration_recovery_apply() { jv_migration_post "/v1/minecraft/instances/${JV_MIGRATION_INSTANCE:?}/migration/recovery/apply" "$1"; }
 
 jv_migration_monitor_operation() {
     local id="$1" expected="$2" label="$3" response type state stage status last=""
@@ -67,6 +67,7 @@ jv_migration_monitor_operation() {
     echo "You may leave this terminal and rerun the same mjust migration command to reconnect."
     while true; do
         response="$(jv_migration_operation "${id}")" || return 1
+        [[ $(jq -r '.operation.instance_id // empty' <<< "${response}") == "${JV_MIGRATION_INSTANCE}" ]] || { echo 'ERROR: migration operation belongs to another Minecraft instance.' >&2; return 1; }
         type="$(jq -r '.operation.operation_type // "unknown"' <<< "${response}")"
         [[ ${type} == "${expected}" ]] || { echo "ERROR: Management Agent returned a different server migration operation." >&2; return 1; }
         state="$(jq -r '.operation.state // "unknown"' <<< "${response}")"
@@ -80,4 +81,9 @@ jv_migration_monitor_operation() {
         esac
         sleep 2
     done
+}
+
+jv_migration_select_instance() {
+    source /usr/libexec/justvoxel/mjust/instance-selection.sh
+    JV_MIGRATION_INSTANCE="$(jv_select_registered_instance "${1:-}")" || return 1
 }

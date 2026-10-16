@@ -4,6 +4,10 @@ source /usr/libexec/justvoxel/mjust/common.sh
 source /usr/libexec/justvoxel/mjust/migration-common.sh
 source /usr/libexec/justvoxel/mjust/migration-import-source.sh
 require_root
+source /usr/libexec/justvoxel/mjust/migration-instance.sh
+[[ ${1:-} == --instance && ${2:-} =~ ^jv-[a-z0-9]{6,12}$ ]] || { echo 'ERROR: --instance jv-... is required.' >&2; exit 2; }
+jv_migration_load_instance "$2" || exit 1
+shift 2
 
 final_result_emitted=no
 current_stage=initializing
@@ -31,6 +35,8 @@ if ! jq -e '
 operation_id="$(jq -r '.operation_id' <<< "$payload")"
 plan_fingerprint="$(jq -r '.plan_fingerprint' <<< "$payload")"
 reviewed_normalized="$(jq -c '.normalized' <<< "$payload")"
+expected_config_identity="$(jq -r ' .context.config_identity' <<< "$payload")"
+[[ ${expected_config_identity} =~ ^[a-f0-9]{64}$ && $(sha256sum "${JV_MIGRATION_INSTANCE_CONFIG}" | awk '{print $1}') == "${expected_config_identity}" ]] || { emit_result rolled_back 'The selected destination configuration changed; no live Import was started.'; exit 0; }
 expected_source_identity="$(jq -r '.context.source_identity' <<< "$payload")"
 players_confirmed="$(jq -r '.players_confirmed' <<< "$payload")"
 eula_accepted="$(jq -r '.eula_accepted' <<< "$payload")"
@@ -90,31 +96,14 @@ backup_mount="$(jq -r '.destination.backups.mount_point // ""' <<< "$reviewed_no
 backup_uuid="$(jq -r '.destination.backups.expected_uuid // ""' <<< "$reviewed_normalized")"
 backup_source_expected="$(jq -r '.destination.backups.expected_source // ""' <<< "$reviewed_normalized")"
 
-if [[ "$mode" == fresh ]]; then
-    emit_progress running import_storage 'Preparing and verifying the reviewed fresh Import storage through the Management Agent transaction backend.'
-    storage_target="$(jq -c '.destination.storage | {type,path,device:(.device//""),parent_disk:(.parent_disk//""),filesystem:(.filesystem//""),uuid:(.uuid//""),mount_point:(.mount_point//""),expected_uuid:(.expected_uuid//""),expected_source:(.expected_source//"")}' <<< "$reviewed_normalized")"
-    backup_target="$(jq -c '.destination.backups | {type,path,device:(.device//""),parent_disk:(.parent_disk//""),filesystem:(.filesystem//""),uuid:(.uuid//""),mount_point:(.mount_point//""),expected_uuid:(.expected_uuid//""),expected_source:(.expected_source//""),source:(.source//""),username:(.username//""),domain:(.domain//""),credentials_required:(.credentials_required//false)}' <<< "$reviewed_normalized")"
-    storage_payload="$(jq -cn --arg op "$operation_id" --arg fp "$plan_fingerprint" --argjson storage "$storage_target" --argjson backups "$backup_target" --arg password "$backup_smb_password" '{schema_version:"v1",operation_id:$op,plan_fingerprint:$fp,storage:$storage,backups:$backups,smb_password:$password}')"
-    unset backup_smb_password
-    storage_result="$(printf '%s\n' "$storage_payload" | /usr/libexec/justvoxel/mjust/admin-setup-storage-transaction-json apply 2>/dev/null || true)"
-    unset storage_payload
-    if [[ "$(jq -r '.ok // false' <<< "$storage_result" 2>/dev/null)" != true || "$(jq -r '.applied // false' <<< "$storage_result" 2>/dev/null)" != true ]]; then
-        if [[ "$(jq -r '.rollback_result // ""' <<< "$storage_result" 2>/dev/null)" == needs_attention ]]; then
-            emit_result needs_attention 'Fresh Import storage preparation failed and its rollback could not be confirmed.'
-        else
-            emit_result rolled_back "$(jq -r '.error // "Fresh Import storage could not be prepared; no Minecraft Import was started."' <<< "$storage_result" 2>/dev/null || echo 'Fresh Import storage could not be prepared; no Minecraft Import was started.')"
-        fi
-        exit 0
-    fi
-else
-    unset backup_smb_password
-fi
+[[ ${mode} == replace && ${data_path} == "${DATA_PATH}" ]] || { emit_result needs_attention 'Import requires the existing selected destination.'; exit 0; }
+unset backup_smb_password
 
 result_file="$JV_MIGRATION_RUN_ROOT/import-$operation_id.result"
 rm -f -- "$result_file" "$result_file.tmp."* 2>/dev/null || true
 emit_progress running import_execute 'Staging, activating, and validating the reviewed Minecraft server Import through the authoritative backend.'
 set +e
-JV_MIGRATION_API_SOURCE_TRANSPORT_STARTED="$transport_started" JV_MIGRATION_API_SOURCE_TRANSPORT_ROOT="${JV_MIGRATION_TRANSPORT_ROOT:-}" JV_MIGRATION_API_SOURCE_OWNED_MOUNT="${JV_MIGRATION_OWNED_MOUNT:-}" JV_MIGRATION_API_SOURCE_MEDIA_MOUNT="${JV_MIGRATION_MEDIA_MOUNT:-}" JV_MIGRATION_API_SOURCE_SMB_CREDENTIALS="${JV_MIGRATION_SMB_CREDENTIALS:-}" JV_MIGRATION_API_MODE=1 JV_MIGRATION_API_RESULT_FILE="$result_file" JV_MIGRATION_API_SELECTED_ROOT_REL="$selected_root" JV_MIGRATION_API_SOURCE_VERSION="$source_version" JV_MIGRATION_API_ONLINE_MODE_CONFIRMED="$([[ "$online_confirmed" == true ]] && echo yes || echo no)" JV_MIGRATION_API_VANILLA_CONFIRMED="$([[ "$vanilla_confirmed" == true ]] && echo yes || echo no)" JV_MIGRATION_API_PLUGINS_CONFIRMED="$([[ "$plugins_confirmed" == true ]] && echo yes || echo no)" JV_MIGRATION_API_PLAYERS_CONFIRMED="$([[ "$players_confirmed" == true ]] && echo yes || echo no)" JV_MIGRATION_API_IMPORT_CONFIRMED=yes JV_MIGRATION_API_EULA_ACCEPTED="$([[ "$eula_accepted" == true ]] && echo yes || echo no)" JV_MIGRATION_API_JAVA_PORT="$java_port" JV_MIGRATION_API_BEDROCK_PORT="$bedrock_port" JV_MIGRATION_API_JAVA_MEMORY="$java_memory" JV_MIGRATION_API_CONTAINER_MEMORY="$container_memory" JV_MIGRATION_API_TIMEZONE="$timezone" JV_MIGRATION_API_IMAGE_TAG="$image_tag" JV_MIGRATION_API_MINECRAFT_UID="$minecraft_uid" JV_MIGRATION_API_MINECRAFT_GID="$minecraft_gid" JV_MIGRATION_API_DATA_PATH="$data_path" JV_MIGRATION_API_DATA_MOUNT_POINT="$data_mount" JV_MIGRATION_API_DATA_EXPECTED_UUID="$data_uuid" JV_MIGRATION_API_DATA_EXPECTED_SOURCE="$data_source" JV_MIGRATION_API_BACKUP_TYPE="$backup_type" JV_MIGRATION_API_BACKUP_PATH="$backup_path" JV_MIGRATION_API_BACKUP_MOUNT_POINT="$backup_mount" JV_MIGRATION_API_BACKUP_EXPECTED_UUID="$backup_uuid" JV_MIGRATION_API_BACKUP_EXPECTED_SOURCE="$backup_source_expected" JV_MIGRATION_API_BACKUP_KEEP="$backup_keep" JV_MIGRATION_API_BACKUP_SCHEDULE="$backup_schedule" JV_MIGRATION_API_BACKUP_TIMER_ENABLED="$([[ "$backup_auto" == true ]] && echo yes || echo no)"     /usr/libexec/justvoxel/mjust/migration-import-backend "$source_path" >&2
+JV_MIGRATION_API_SOURCE_TRANSPORT_STARTED="$transport_started" JV_MIGRATION_API_SOURCE_TRANSPORT_ROOT="${JV_MIGRATION_TRANSPORT_ROOT:-}" JV_MIGRATION_API_SOURCE_OWNED_MOUNT="${JV_MIGRATION_OWNED_MOUNT:-}" JV_MIGRATION_API_SOURCE_MEDIA_MOUNT="${JV_MIGRATION_MEDIA_MOUNT:-}" JV_MIGRATION_API_SOURCE_SMB_CREDENTIALS="${JV_MIGRATION_SMB_CREDENTIALS:-}" JV_MIGRATION_API_MODE=1 JV_MIGRATION_API_CONFIG_IDENTITY="$expected_config_identity" JV_MIGRATION_API_RESULT_FILE="$result_file" JV_MIGRATION_API_SELECTED_ROOT_REL="$selected_root" JV_MIGRATION_API_SOURCE_VERSION="$source_version" JV_MIGRATION_API_ONLINE_MODE_CONFIRMED="$([[ "$online_confirmed" == true ]] && echo yes || echo no)" JV_MIGRATION_API_VANILLA_CONFIRMED="$([[ "$vanilla_confirmed" == true ]] && echo yes || echo no)" JV_MIGRATION_API_PLUGINS_CONFIRMED="$([[ "$plugins_confirmed" == true ]] && echo yes || echo no)" JV_MIGRATION_API_PLAYERS_CONFIRMED="$([[ "$players_confirmed" == true ]] && echo yes || echo no)" JV_MIGRATION_API_IMPORT_CONFIRMED=yes JV_MIGRATION_API_EULA_ACCEPTED="$([[ "$eula_accepted" == true ]] && echo yes || echo no)" JV_MIGRATION_API_JAVA_PORT="$java_port" JV_MIGRATION_API_BEDROCK_PORT="$bedrock_port" JV_MIGRATION_API_JAVA_MEMORY="$java_memory" JV_MIGRATION_API_CONTAINER_MEMORY="$container_memory" JV_MIGRATION_API_TIMEZONE="$timezone" JV_MIGRATION_API_IMAGE_TAG="$image_tag" JV_MIGRATION_API_MINECRAFT_UID="$minecraft_uid" JV_MIGRATION_API_MINECRAFT_GID="$minecraft_gid" JV_MIGRATION_API_DATA_PATH="$data_path" JV_MIGRATION_API_DATA_MOUNT_POINT="$data_mount" JV_MIGRATION_API_DATA_EXPECTED_UUID="$data_uuid" JV_MIGRATION_API_DATA_EXPECTED_SOURCE="$data_source" JV_MIGRATION_API_BACKUP_TYPE="$backup_type" JV_MIGRATION_API_BACKUP_PATH="$backup_path" JV_MIGRATION_API_BACKUP_MOUNT_POINT="$backup_mount" JV_MIGRATION_API_BACKUP_EXPECTED_UUID="$backup_uuid" JV_MIGRATION_API_BACKUP_EXPECTED_SOURCE="$backup_source_expected" JV_MIGRATION_API_BACKUP_KEEP="$backup_keep" JV_MIGRATION_API_BACKUP_SCHEDULE="$backup_schedule" JV_MIGRATION_API_BACKUP_TIMER_ENABLED="$([[ "$backup_auto" == true ]] && echo yes || echo no)"     /usr/libexec/justvoxel/mjust/migration-import-backend --instance "${JV_INSTANCE_ID}" "$source_path" >&2
 backend_rc=$?
 set -e
 

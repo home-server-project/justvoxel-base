@@ -297,6 +297,10 @@ func (s *server) adminOperationTrace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "operation trace not found")
 		return
 	}
+	if isServerMigrationOperation(op.OperationType) && (migrationInstanceID(r.Context()) == "" || migrationInstanceID(r.Context()) != op.InstanceID) {
+		writeError(w, 404, "migration operation trace not found")
+		return
+	}
 	data, err := s.operations.readTrace(id)
 	if err != nil {
 		writeError(w, 500, "operation trace could not be read")

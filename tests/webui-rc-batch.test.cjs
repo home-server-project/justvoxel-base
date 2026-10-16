@@ -55,13 +55,28 @@ test('Control Center offsets only desktop padding/border and preserves compact p
   assert.ok(!css.includes('.server-software-card.is-current'));
 });
 
+const selectedMigrationURL = value => {
+  const destination = new URL(value, 'http://example');
+  if (!destination.searchParams.has('server')) destination.searchParams.set('server', 'jv-a1b2c3');
+  return destination.pathname + destination.search;
+};
+
+const assertFreshExportURL = value => {
+  const destination = new URL(value, 'http://example');
+  assert.equal(destination.pathname, '/');
+  assert.equal(destination.searchParams.get('workspace'), 'migration');
+  assert.equal(destination.searchParams.get('tab'), 'export');
+  assert.equal(destination.searchParams.get('server'), 'jv-a1b2c3');
+  assert.equal(destination.searchParams.has('operation'), false);
+};
+
 test('Export Done clears operation navigation, selects Export, and reopening loads fresh Export', async () => {
   const loads = [];
   const root = { addEventListener(name, handler) { this[name] = handler; }, contains: () => true };
-  const location = { href: 'http://example/?workspace=migration&operation=old-operation', origin: 'http://example', pathname: '/', search: '?workspace=migration&operation=old-operation' };
+  const location = { href: 'http://example/?workspace=migration&operation=old-operation&server=jv-a1b2c3', origin: 'http://example', pathname: '/', search: '?workspace=migration&operation=old-operation&server=jv-a1b2c3' };
   let windowOptions;
   const context = vm.createContext({
-    URL, URLSearchParams, Object, root, currentTab: 'export', currentURL: '/workspace/migration/progress/old-operation',
+    URL, URLSearchParams, Object, justVoxelSelectedURL: selectedMigrationURL, root, currentTab: 'export', currentURL: '/workspace/migration/progress/old-operation',
     migrationDialog: {}, migrationSourceSMBPassword: '', migrationExportSMBPassword: '', migrationSubmitController: null,
     tabURLs: { export: '/workspace/migration/export', import: '/workspace/migration/import', recovery: '/workspace/migration/recovery' },
     window: { location, history: { state: {}, replaceState(_, __, next) { const url = new URL(next, location.href); location.href = url.href; location.search = url.search; } } },
@@ -75,11 +90,11 @@ test('Export Done clears operation navigation, selects Export, and reopening loa
   const windowStart = app.indexOf('  const workspaceWindow = setupWorkspaceWindow(migrationDialog, {');
   const windowSource = app.slice(windowStart, app.indexOf('  migrationOpen.addEventListener', windowStart));
   vm.runInContext(update + windowSource + click, context);
-  const link = { getAttribute: () => '/?workspace=migration&tab=export' };
+  const link = { getAttribute: () => selectedMigrationURL('/?workspace=migration&tab=export') };
   let prevented = false;
   await root.click({ target: { closest: () => link }, preventDefault() { prevented = true; } });
   assert.ok(prevented);
-  assert.equal(location.search, '?workspace=migration&tab=export');
+  assertFreshExportURL(location.href);
   assert.equal(context.currentTab, 'export');
   assert.equal(context.currentURL, '/workspace/migration/export');
   assert.deepEqual(loads, ['select-export', '/workspace/migration/export']);
@@ -138,11 +153,17 @@ test('Export polling exposes Logs on success/failure/attention and Done only on 
   const render = source.slice(start, source.indexOf('  const poll = async () => {', start));
   for (const state of ['running', 'succeeded', 'rolled_back', 'failed', 'needs_attention']) {
     const dashboardLink = {}, exportLogDetails = {}, backLink = {};
-    const context = vm.createContext({ supportedType: () => true, terminalState: () => false, operationName: () => 'Server Export', stateLabel: () => state, stageLabel: () => '', reconnectNote: null, nameText: null, statusText: null, stateBadge: null, stageText: null, successNote: null, rollbackNote: null, attentionNote: null, recoveryLink: null, dashboardLink, exportLogDetails, backLink });
+    const panel = {
+      closest(selector) {
+        assert.equal(selector, '[data-server-id]');
+        return { dataset: { serverId: 'jv-a1b2c3' } };
+      },
+    };
+    const context = vm.createContext({ panel, supportedType: () => true, terminalState: () => false, operationName: () => 'Server Export', stateLabel: () => state, stageLabel: () => '', reconnectNote: null, nameText: null, statusText: null, stateBadge: null, stageText: null, successNote: null, rollbackNote: null, attentionNote: null, recoveryLink: null, dashboardLink, exportLogDetails, backLink });
     vm.runInContext(render + '\nrender({ operation_type: "migration_export", state: ' + JSON.stringify(state) + ' });', context);
     assert.equal(dashboardLink.hidden, state !== 'succeeded');
     assert.equal(dashboardLink.textContent, 'Done');
-    assert.equal(dashboardLink.href, '/?workspace=migration&tab=export');
+    assertFreshExportURL(dashboardLink.href);
     assert.equal(exportLogDetails.hidden, state === 'running');
   }
   const template = read('webui/internal/server/templates/migration_workspace_progress.html');

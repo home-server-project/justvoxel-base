@@ -103,12 +103,12 @@ function initServerMigrationOperation(root = document) {
       dashboardLink.hidden = !succeeded;
       if (operation.operation_type === "migration_export") {
         dashboardLink.textContent = "Done";
-        dashboardLink.href = "/?workspace=migration&tab=export";
+        dashboardLink.href = "/?workspace=migration&tab=export&server=" + encodeURIComponent(panel.closest("[data-server-id]").dataset.serverId);
       }
     }
     if (exportLogDetails) exportLogDetails.hidden = !(operation.operation_type === "migration_export" && ["succeeded", "rolled_back", "failed", "needs_attention"].includes(operation.state));
     if (backLink) backLink.hidden = !(succeeded || rolledBack || resolved);
-    if (recoveryLink) recoveryLink.hidden = !(needsAttention && ["migration_import", "migration_recovery"].includes(operation.operation_type));
+    if (recoveryLink) recoveryLink.hidden = !(needsAttention && ["migration_import", "migration_export", "migration_recovery"].includes(operation.operation_type));
     if (terminalState(operation.state)) finished = true;
   };
 

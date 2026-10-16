@@ -134,7 +134,7 @@ func TestMigrationWorkspaceStatusAndChoiceStyling(t *testing.T) {
 	operationJS := string(operationScript)
 	for _, want := range []string{
 		`root.querySelector("#server-migration-recovery-link")`,
-		`recoveryLink.hidden = !(needsAttention && ["migration_import", "migration_recovery"].includes(operation.operation_type))`,
+		`recoveryLink.hidden = !(needsAttention && ["migration_import", "migration_export", "migration_recovery"].includes(operation.operation_type))`,
 		`dashboardLink.hidden = !succeeded`,
 	} {
 		if !strings.Contains(operationJS, want) {

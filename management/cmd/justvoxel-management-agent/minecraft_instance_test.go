@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -334,68 +335,72 @@ func useTestMinecraftInstances(t *testing.T) {
 }
 
 func TestImportDestinationIdentityWithoutArchiveIdentity(t *testing.T) {
-	for _, mode := range []string{"fresh", "replace"} {
-		t.Run(mode, func(t *testing.T) {
-			useTestMinecraftInstances(t)
-			expected := ""
-			if mode == "replace" {
-				identity, err := minecraftInstances.register("DEST123", true)
-				if err != nil {
-					t.Fatal(err)
-				}
-				expected = identity.ID
-				minecraftInstances.random = bytes.NewReader(nil)
-			}
-			helper := step5A2ImportHelper(false) // Source contains no Instance ID.
-			helper.Normalized.Destination.Mode = mode
-			if mode == "fresh" {
-				helper.Normalized.Destination.Storage = &adminSetupPlanStorage{}
-				helper.Normalized.Destination.Backups = &adminSetupPlanBackups{}
-				helper.Requirements.EULAAcceptanceRequired = true
-			}
-			installStep5A2ImportPlanHelper(t, helper)
-			request := step5A2ImportRequest()
-			plan, planningErr := authoritativeAdminMigrationImportPlan(context.Background(), request)
-			if planningErr != nil || !plan.OK {
-				t.Fatalf("plan=%+v error=%v", plan, planningErr)
-			}
-			body, err := json.Marshal(adminMigrationImportApplyRequest{PlanFingerprint: plan.PlanFingerprint, Request: request, ImportConfirmed: true, EULAAccepted: true})
-			if err != nil {
-				t.Fatal(err)
-			}
-			workers := 0
-			oldWorker := startMigrationImportWorker
-			t.Cleanup(func() { startMigrationImportWorker = oldWorker })
-			startMigrationImportWorker = func(_ *server, _ string, _ migrationImportExecutionPlan) {
-				workers++
-				identity, err := minecraftInstances.read()
-				if err != nil || identity.Status != "available" {
-					t.Fatal("Import worker missing destination identity")
-				}
-				if mode == "replace" && identity.ID != expected {
-					t.Fatal("Replace changed destination identity")
-				}
-			}
-			s := surfaceTestServer(t, roleAdministrator)
-			store := openTestOperationStore(t)
-			attachTestOperationStore(t, s, store)
-			if mode == "fresh" {
-				minecraftInstances.random = bytes.NewReader(nil)
-				rr := httptest.NewRecorder()
-				s.adminMigrationImportApply(rr, surfaceRequest(http.MethodPost, "/v1/admin/migration/import/apply", string(body)))
-				if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "identity_required") || workers != 0 {
-					t.Fatalf("Import proceeded without identity: %d %s", rr.Code, rr.Body.String())
-				}
-				if current, err := store.currentMigration(); err != nil || current != nil {
-					t.Fatal("identity failure left a partial Import")
-				}
-				minecraftInstances.random = rand.Reader
-			}
-			rr := httptest.NewRecorder()
-			s.adminMigrationImportApply(rr, surfaceRequest(http.MethodPost, "/v1/admin/migration/import/apply", string(body)))
-			if rr.Code != http.StatusAccepted || workers != 1 {
-				t.Fatalf("Import: %d %s", rr.Code, rr.Body.String())
-			}
-		})
+	const selectedID = "jv-a1b2c3"
+	s := migrationSurfaceTestServer(t, roleAdministrator)
+	store := openTestOperationStore(t)
+	attachTestOperationStore(t, s, store)
+	destination, err := instanceRuntimes.readRecord(selectedID)
+	if err != nil || destination.Runtime.ID != selectedID {
+		t.Fatalf("selected destination must already exist: %+v, %v", destination, err)
+	}
+	helper := step5A2ImportHelper(false) // Portable source has no JustVoxel identity.
+	helper.Normalized.Source.Path = "/tmp/server.tar.gz"
+	helper.Normalized.Destination.DataPath = destination.Storage.DataPath
+	source, err := json.Marshal(helper.Normalized.Source)
+	if err != nil || strings.Contains(string(source), "jv-") {
+		t.Fatalf("source unexpectedly contains a JustVoxel identity: %s, %v", source, err)
+	}
+	installStep5A2ImportPlanHelper(t, helper)
+	installedHelper := runAdminMigrationImportPlanHelper
+	helperCalls := 0
+	runAdminMigrationImportPlanHelper = func(ctx context.Context, action string, body []byte) ([]byte, error) {
+		helperCalls++
+		if migrationInstanceID(ctx) != selectedID {
+			t.Fatal("Import planning lost selected destination context")
+		}
+		return installedHelper(ctx, action, body)
+	}
+	request := step5A2ImportRequest()
+	request.Source.Path = helper.Normalized.Source.Path
+	ctx := context.WithValue(context.Background(), migrationInstanceContextKey{}, selectedID)
+	plan, planningErr := authoritativeAdminMigrationImportPlan(ctx, request)
+	if planningErr != nil || !plan.OK {
+		t.Fatalf("reviewed plan=%+v error=%v", plan, planningErr)
+	}
+	body, err := json.Marshal(adminMigrationImportApplyRequest{PlanFingerprint: plan.PlanFingerprint, Request: request, ImportConfirmed: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workers := 0
+	oldWorker := startMigrationImportWorker
+	t.Cleanup(func() { startMigrationImportWorker = oldWorker })
+	startMigrationImportWorker = func(workerServer *server, operationID string, execution migrationImportExecutionPlan) {
+		workers++
+		operation, err := workerServer.operations.get(operationID)
+		if err != nil || operation.InstanceID != selectedID {
+			t.Fatalf("Import worker lost selected destination: %+v, %v", operation, err)
+		}
+		if execution.Context != *plan.Context || !reflect.DeepEqual(execution.Normalized, *plan.Normalized) {
+			t.Fatal("Import worker lost reviewed source and destination")
+		}
+		current, err := instanceRuntimes.readRecord(operation.InstanceID)
+		if err != nil || current.Runtime.ID != destination.Runtime.ID || execution.Normalized.Destination.DataPath != current.Storage.DataPath {
+			t.Fatal("Import worker destination identity or data path changed")
+		}
+	}
+	mux := http.NewServeMux()
+	registerAdminMigrationImportRoutes(mux, s)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, migrationSurfaceRequest(http.MethodPost, "/v1/minecraft/instances/"+selectedID+"/migration/import/apply", string(body)))
+	if rr.Code != http.StatusAccepted || workers != 1 || helperCalls != 2 {
+		t.Fatalf("Import: %d %s (workers=%d helper calls=%d)", rr.Code, rr.Body.String(), workers, helperCalls)
+	}
+	operation, err := store.currentMigration()
+	if err != nil || operation == nil || operation.InstanceID != selectedID {
+		t.Fatalf("Import operation lost selected destination: %+v, %v", operation, err)
+	}
+	current, err := instanceRuntimes.readRecord(selectedID)
+	if err != nil || current.Runtime.ID != destination.Runtime.ID {
+		t.Fatal("Import changed destination identity")
 	}
 }

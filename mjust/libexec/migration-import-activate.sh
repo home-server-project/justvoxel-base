@@ -1,7 +1,7 @@
 #!/usr/bin/bash
 # Sourced by migration-import: maintenance lock, activation, validation and cleanup.
-query_players() { podman exec minecraft rcon-cli 'list' 2>/dev/null || true; }
-if [[ ${configured} == yes ]] && systemctl is-active --quiet minecraft.service; then
+query_players() { podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli 'list' 2>/dev/null || true; }
+if [[ ${configured} == yes ]] && systemctl is-active --quiet "${JV_INSTANCE_UNIT}"; then
     minecraft_was_active=yes
     initial_players="$(query_players)"
     [[ -n ${initial_players} ]] || { echo 'ERROR: could not confirm player state. Nothing was activated.' >&2; exit 1; }
@@ -30,12 +30,13 @@ if ! flock -n 9; then
     exit 1
 fi
 
+if [[ ${JV_MIGRATION_API_MODE:-0} == 1 ]]; then
+    [[ $(sha256sum "${JV_MIGRATION_INSTANCE_CONFIG}" | awk '{print $1}') == "${JV_MIGRATION_API_CONFIG_IDENTITY:?}" ]] || { echo 'ERROR: selected destination configuration changed before activation.' >&2; exit 1; }
+fi
+
 # The source was already copied and validated into local transaction staging.
 # Activation uses staged data only; the original source is no longer consulted.
 
-if [[ ${configured} == no ]]; then
-    jv_migration_assert_fresh_selinux_path "${DATA_PATH}"
-fi
 jv_migration_snapshot_runtime "${transaction}" "${old_java}" "${old_bedrock_enabled}" "${old_bedrock}" "${JAVA_PORT}" "${BEDROCK_ENABLED}" "${BEDROCK_PORT}"
 jv_migration_write_state "${transaction}" ready-to-switch "${JV_MIGRATION_SOURCE}" "${source_class}"
 
@@ -56,6 +57,7 @@ if [[ ${configured} == yes && ${minecraft_was_active} == yes ]]; then
     echo 'Stopping Minecraft through the player-aware graceful shutdown path.'
     stop_mode=required
     [[ ${players_override} == yes ]] && stop_mode=confirmed
+    minecraft_stopped_by_import=yes
     set +e
     JV_INTERRUPT_CONFIRMATION_MODE="${stop_mode}" \
         jv_stop_minecraft_adaptive 'Import Minecraft data'
@@ -83,7 +85,7 @@ if [[ ${configured} == yes && ${minecraft_was_active} == yes ]]; then
     minecraft_stopped_by_import=yes
 fi
 
-if [[ ${configured} == yes ]]; then /usr/libexec/justvoxel/mjust/validate-data-mount; fi
+if [[ ${configured} == yes ]]; then jv_migration_validate_data; fi
 jv_migration_write_state "${transaction}" switching "${JV_MIGRATION_SOURCE}" "${source_class}"
 live_modified=yes
 echo 'Activating staged Minecraft data.'
@@ -91,24 +93,18 @@ jv_migration_activate_data "${transaction}" "${DATA_PATH}" "${staged_server}" "$
 
 chown -R "${MINECRAFT_UID}:${MINECRAFT_GID}" "${DATA_PATH}"
 
-# Fresh import now creates JustVoxel configuration; replacement import updates
-# only portable/source-derived settings while destination-specific settings remain local.
-write_main_config
-apply_data_selinux
-echo 'Generating the imported Minecraft runtime.'
-JUSTVOXEL_REGENERATE_RCON=1 render_runtime
-if [[ ${configured} == yes ]]; then
-    jv_migration_apply_candidate_firewall "${old_java}" "${old_bedrock_enabled}" "${old_bedrock}"
-else
-    configure_firewall_initial
-fi
+# Runtime definitions, ports, ownership and backup relationships stay destination-owned.
 jv_migration_write_state "${transaction}" imported-active "${JV_MIGRATION_SOURCE}" "${source_class}"
 
+# Publish only the reviewed version using the existing selected-instance backend.
+# The transaction retains the original selected runtime for rollback.
+/usr/libexec/justvoxel/management-agent instance-version-publish "${JV_INSTANCE_ID}" "${MINECRAFT_SERVER_TYPE}" "${MINECRAFT_IMAGE_TAG}" "${source_version}" pinned "${JV_INSTANCE_IMAGE_DIGEST}" --migration "${transaction}"
+jv_migration_load_instance "${JV_INSTANCE_ID}"
 echo 'Starting imported Minecraft server.'
-systemctl start minecraft.service
+systemctl start "${JV_INSTANCE_UNIT}"
 echo 'Validating the imported Minecraft server.'
 jv_migration_write_state "${transaction}" validating "${JV_MIGRATION_SOURCE}" "${source_class}"
-/usr/libexec/justvoxel/mjust/restore-runtime-validate "${source_version}"
+jv_migration_validate_runtime "${source_version}"
 
 post_plugin_count="$(find "${DATA_PATH}/plugins" -maxdepth 1 -type f -iname '*.jar' 2>/dev/null | wc -l | tr -d ' ')"
 [[ ${post_plugin_count} =~ ^[0-9]+$ ]] || post_plugin_count=0
@@ -117,7 +113,7 @@ if [[ ${plugin_count} =~ ^[0-9]+$ ]] && (( post_plugin_count < plugin_count )); 
     exit 1
 fi
 
-JUSTVOXEL_RUNTIME_ALREADY_VALIDATED=1 JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/validate-backend
+if [[ ${minecraft_was_active} != yes ]]; then systemctl stop "${JV_INSTANCE_UNIT}"; fi
 validated=yes
 jv_migration_write_state "${transaction}" validated "${JV_MIGRATION_SOURCE}" "${source_class}"
 
@@ -135,7 +131,9 @@ jv_migration_api_result succeeded validated '' 'Server migration Import complete
 removable_owned=no
 if [[ ${transport_started} == yes ]]; then
     [[ ${JV_MIGRATION_MEDIA_REMOVABLE:-no} == yes && -n ${JV_MIGRATION_OWNED_MOUNT:-} ]] && removable_owned=yes
-    jv_migration_transport_cleanup
+    if ! jv_migration_transport_cleanup; then
+        echo 'WARNING: Import is validated; temporary source mount cleanup remains incomplete.' >&2
+    fi
     transport_started=no
 fi
 trap - EXIT INT TERM

@@ -2295,6 +2295,7 @@ if (migrationOpen && migrationDialog) {
   const content = migrationDialog.querySelector("[data-migration-workspace-content]");
   const tabs = Array.from(migrationDialog.querySelectorAll("[data-migration-tab]"));
   const recoveryTab = tabs.find((button) => button.dataset.migrationTab === "recovery");
+  globalThis.justVoxelServerSelection(migrationDialog.querySelector(".workspace-window-header") || migrationDialog).catch((error) => { if (state) state.textContent = error.message; });
   const tabURLs = {
     export: "/workspace/migration/export",
     import: "/workspace/migration/import",
@@ -2312,7 +2313,7 @@ if (migrationOpen && migrationDialog) {
   let migrationSubmitController = null;
 
   const updateMigrationLocation = (tab = "", operation = "") => {
-    const destination = new URL("/?workspace=migration", window.location.href);
+    const destination = new URL(globalThis.justVoxelSelectedURL("/?workspace=migration"), window.location.href);
     if (operation) destination.searchParams.set("operation", operation);
     else if (Object.hasOwn(tabURLs, tab)) destination.searchParams.set("tab", tab);
     const nextURL = destination.pathname + destination.search;
@@ -2494,6 +2495,11 @@ if (migrationOpen && migrationDialog) {
     const progress = renderedURL.origin === window.location.origin
       ? renderedURL.pathname.match(/^\/workspace\/migration\/progress\/([A-Za-z0-9_-]+)$/)
       : null;
+    if (root.dataset.serverId && !new URLSearchParams(window.location.search).has("server")) {
+      const selectedURL = new URL(window.location.href);
+      selectedURL.searchParams.set("server", root.dataset.serverId);
+      window.history.replaceState(window.history.state, "", selectedURL.pathname + selectedURL.search);
+    }
     if (progress) updateMigrationLocation("", progress[1]);
     currentTab = inferMigrationTab(responseURL, root);
     syncMigrationTabs();
@@ -2639,9 +2645,7 @@ if (migrationOpen && migrationDialog) {
           redirect: "follow",
           signal: submitController.signal,
         });
-        const response = action.pathname === "/workspace/migration/import/apply"
-          ? await resumeReviewedIdentitySubmission(sendMigration, body.get("csrf") || "")
-          : await sendMigration();
+        const response = await sendMigration();
         if (await handleMigrationAuth(response)) return;
         if (response.status === 403) throw new Error("Administrator access required.");
 
@@ -2722,7 +2726,7 @@ if (migrationOpen && migrationDialog) {
     if (refreshButton) refreshButton.disabled = true;
     try {
       await ensureMigrationAssets();
-      const response = await fetch(url, {
+      const response = await fetch(globalThis.justVoxelSelectedURL(url), {
         method: "GET",
         credentials: "same-origin",
         headers: { Accept: "text/html", "X-JustVoxel-Migration-Fragment": "1" },
@@ -2765,7 +2769,7 @@ if (migrationOpen && migrationDialog) {
     if (refreshButton) refreshButton.disabled = true;
     try {
       await ensureMigrationAssets();
-      const response = await fetch("/workspace/migration", {
+      const response = await fetch(globalThis.justVoxelSelectedURL("/workspace/migration"), {
         method: "GET",
         credentials: "same-origin",
         headers: { Accept: "text/html", "X-JustVoxel-Migration-Fragment": "1" },
@@ -2787,7 +2791,14 @@ if (migrationOpen && migrationDialog) {
       }
       const entryMarkup = await response.text();
       const entryRoot = extractMigrationRoot(entryMarkup);
-      if (entryRoot) syncMigrationRecoveryAvailability(entryRoot);
+      if (entryRoot) {
+        syncMigrationRecoveryAvailability(entryRoot);
+        if (entryRoot.dataset.serverId && !new URLSearchParams(window.location.search).has("server")) {
+          const selectedURL = new URL(window.location.href);
+          selectedURL.searchParams.set("server", entryRoot.dataset.serverId);
+          window.history.replaceState(window.history.state, "", selectedURL.pathname + selectedURL.search);
+        }
+      }
       await loadMigration(tabURLs[currentTab]);
     } catch (error) {
       if (error?.name === "AbortError" || sequence !== loadSequence) return;

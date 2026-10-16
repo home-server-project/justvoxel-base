@@ -1,11 +1,11 @@
-{{define "migration_workspace_recovery_review.html"}}<div class="migration-workspace-content" data-migration-workspace-root>
+{{define "migration_workspace_recovery_review.html"}}<div class="migration-workspace-content" data-migration-workspace-root data-server-id="{{.ServerID}}">
 {{if .Error}}<div class="notice error"><strong>Cleanup needs another review.</strong><br>{{.Error}}</div>{{end}}
 {{if .Plan.OK}}
 <section class="panel">
   <p class="eyebrow">Previous Server Import</p>
   {{if and .Plan.Normalized (eq .Plan.Normalized.Phase "rolled-back")}}
-  <h2>Your original server was restored</h2>
-  <p>✓ The failed Import was rolled back.<br>✓ Your original Minecraft server was restored.<br>✓ Your server data is safe.</p>
+  <h2>The selected destination instance was restored</h2>
+  <p>✓ The failed Import was rolled back.<br>✓ The selected destination instance was restored.<br>✓ Your server data is safe.</p>
   <p>JustVoxel kept temporary recovery files from the failed Import. They are no longer needed. Before removing them, JustVoxel will first make sure the current Minecraft server is working.</p>
   {{else if and .Plan.Normalized (eq .Plan.Normalized.Phase "rolled-back-fresh") (eq .Plan.Normalized.Mode "fresh-unconfigured")}}
   <h2>Your setup state was restored</h2>
@@ -13,17 +13,17 @@
   <p>Temporary recovery files from the failed Import can now be cleaned up.</p>
   {{else}}
   <h2>Server Import needs attention</h2>
-  <div class="notice warning">JustVoxel cannot confirm that your original server was fully restored. Review the current server before cleaning up any recovery files.</div>
+  <div class="notice warning">JustVoxel cannot confirm that the selected destination instance was fully restored. Review the current server before cleaning up any recovery files.</div>
   <p>JustVoxel will check the current server before it removes leftover files. If the checks fail, cleanup will stop.</p>
   {{end}}
 </section>
 {{if .Plan.Warnings}}<section class="panel">{{range .Plan.Warnings}}<div class="notice warning">{{.Message}}</div>{{end}}</section>{{end}}
-<form method="post" action="/workspace/migration/recovery/apply" data-recovery-cleanup-form>
+<form method="post" action="/workspace/migration/recovery/apply?server={{.ServerID}}" data-recovery-cleanup-form>
   <input type="hidden" name="csrf" value="{{.CSRF}}">
   <input type="hidden" name="transaction" value="{{.Request.Transaction}}">
   <input type="hidden" name="plan_fingerprint" value="{{.Plan.PlanFingerprint}}">
   <input type="hidden" name="cleanup_confirmed" value="" data-recovery-confirmed>
-  <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;tab=recovery">Cancel</a><button type="button" data-recovery-open-confirmation>Clean Up Recovery Files</button></div>
+  <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;tab=recovery&amp;server={{.ServerID}}">Cancel</a><button type="button" data-recovery-open-confirmation>Clean Up Recovery Files</button></div>
   <dialog class="system-action-dialog" aria-labelledby="recovery-cleanup-title" data-recovery-confirmation-dialog>
     <div class="system-action-dialog-content">
       <h2 id="recovery-cleanup-title">Clean up recovery files?</h2>
@@ -31,8 +31,8 @@
       <p>JustVoxel will make sure the appliance is still ready for setup and then remove the leftover files from the failed Import.</p>
       <p>No Minecraft server or world data will be changed.</p>
       {{else}}
-      <p>JustVoxel will make sure your current server is working and then remove the leftover files from the failed Import.</p>
-      <p>Your Minecraft server and world data will not be changed.</p>
+      <p>JustVoxel will recover and validate the selected destination instance, then remove its retained migration files.</p>
+      <p>Recovery may restore the selected destination instance’s pre-import data. Other servers are untouched.</p>
       {{end}}
       <div class="action-row"><button type="button" class="secondary" data-recovery-cancel>Cancel</button><button type="button" data-recovery-confirm>Clean Up</button></div>
     </div>
@@ -40,6 +40,6 @@
 </form>
 {{else}}
 <section class="panel"><div class="notice error">{{if .Plan.Error}}{{.Plan.Error}}{{else}}JustVoxel cannot safely clean up these files right now.{{end}}</div></section>
-<div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;tab=recovery">Back to Recovery</a></div>
+<div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;tab=recovery&amp;server={{.ServerID}}">Back to Recovery</a></div>
 {{end}}
 </div>{{end}}

@@ -22,6 +22,7 @@ type migrationWorkspaceExportDeviceView struct {
 }
 
 type migrationWorkspaceExportPageData struct {
+	ServerID         string
 	Title            string
 	Version          string
 	ManagementAPI    string
@@ -39,6 +40,7 @@ type migrationWorkspaceExportPageData struct {
 }
 
 type migrationWorkspaceExportReviewPageData struct {
+	ServerID      string
 	Title         string
 	Version       string
 	ManagementAPI string
@@ -91,7 +93,7 @@ func (a *App) migrationWorkspaceExportPage(w http.ResponseWriter, r *http.Reques
 		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Export discovery is unavailable.")
 		return
 	}
-	a.renderMigrationWorkspaceExportPage(w, http.StatusOK, identity, discovery, csrfFromRequest(r), "")
+	a.renderMigrationWorkspaceExportPage(w, http.StatusOK, identity, discovery, csrfFromRequest(r), "", migrationWorkspaceSelectedID(r))
 }
 
 func (a *App) migrationWorkspaceExportReview(w http.ResponseWriter, r *http.Request) {
@@ -109,20 +111,20 @@ func (a *App) migrationWorkspaceExportReview(w http.ResponseWriter, r *http.Requ
 	}
 	request, err := parseMigrationWorkspaceExportForm(r, discovery)
 	if err != nil {
-		a.renderMigrationWorkspaceExportPage(w, http.StatusBadRequest, identity, discovery, csrfFromRequest(r), err.Error())
+		a.renderMigrationWorkspaceExportPage(w, http.StatusBadRequest, identity, discovery, csrfFromRequest(r), err.Error(), migrationWorkspaceSelectedID(r))
 		return
 	}
 	plan, err := client.AdminMigrationExportPlan(r.Context(), session, request)
 	if err != nil {
 		var responseErr *api.ResponseError
 		if errors.As(err, &responseErr) && responseErr.StatusCode == http.StatusBadRequest && plan.SchemaVersion != "" {
-			a.renderMigrationWorkspaceExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), apiMessage(err, "Server Export planning was rejected."))
+			a.renderMigrationWorkspaceExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), apiMessage(err, "Server Export planning was rejected."), migrationWorkspaceSelectedID(r))
 			return
 		}
 		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Export planning is unavailable.")
 		return
 	}
-	a.renderMigrationWorkspaceExportReview(w, http.StatusOK, identity, request, plan, csrfFromRequest(r), "")
+	a.renderMigrationWorkspaceExportReview(w, http.StatusOK, identity, request, plan, csrfFromRequest(r), "", migrationWorkspaceSelectedID(r))
 }
 
 func (a *App) migrationWorkspaceExportApply(w http.ResponseWriter, r *http.Request) {
@@ -140,14 +142,14 @@ func (a *App) migrationWorkspaceExportApply(w http.ResponseWriter, r *http.Reque
 	}
 	request, err := parseMigrationWorkspaceExportForm(r, discovery)
 	if err != nil {
-		a.renderMigrationWorkspaceExportPage(w, http.StatusBadRequest, identity, discovery, csrfFromRequest(r), err.Error())
+		a.renderMigrationWorkspaceExportPage(w, http.StatusBadRequest, identity, discovery, csrfFromRequest(r), err.Error(), migrationWorkspaceSelectedID(r))
 		return
 	}
 	plan, err := client.AdminMigrationExportPlan(r.Context(), session, request)
 	if err != nil {
 		var responseErr *api.ResponseError
 		if errors.As(err, &responseErr) && responseErr.StatusCode == http.StatusBadRequest && plan.SchemaVersion != "" {
-			a.renderMigrationWorkspaceExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), apiMessage(err, "Server Export planning was rejected."))
+			a.renderMigrationWorkspaceExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), apiMessage(err, "Server Export planning was rejected."), migrationWorkspaceSelectedID(r))
 			return
 		}
 		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Export planning is unavailable.")
@@ -156,16 +158,16 @@ func (a *App) migrationWorkspaceExportApply(w http.ResponseWriter, r *http.Reque
 
 	submittedFingerprint := strings.TrimSpace(r.FormValue("plan_fingerprint"))
 	if submittedFingerprint == "" || submittedFingerprint != plan.PlanFingerprint {
-		a.renderMigrationWorkspaceExportReview(w, http.StatusConflict, identity, request, plan, csrfFromRequest(r), "This Server Export changed since it was reviewed. Review the current destination again before continuing.")
+		a.renderMigrationWorkspaceExportReview(w, http.StatusConflict, identity, request, plan, csrfFromRequest(r), "This Server Export changed since it was reviewed. Review the current destination again before continuing.", migrationWorkspaceSelectedID(r))
 		return
 	}
 	if strings.TrimSpace(r.FormValue("export_confirmation")) != "EXPORT" {
-		a.renderMigrationWorkspaceExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), "Complete the Export confirmation slider before starting this Server Export.")
+		a.renderMigrationWorkspaceExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), "Complete the Export confirmation slider before starting this Server Export.", migrationWorkspaceSelectedID(r))
 		return
 	}
 	playersConfirmed := r.FormValue("players_confirmed") == "yes"
 	if plan.Requirements != nil && plan.Requirements.PlayersConfirmationRequired && !playersConfirmed {
-		a.renderMigrationWorkspaceExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), "Confirm that the online players may be interrupted before starting Server Export.")
+		a.renderMigrationWorkspaceExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), "Confirm that the online players may be interrupted before starting Server Export.", migrationWorkspaceSelectedID(r))
 		return
 	}
 
@@ -173,7 +175,7 @@ func (a *App) migrationWorkspaceExportApply(w http.ResponseWriter, r *http.Reque
 	if plan.Requirements != nil && plan.Requirements.SMBPasswordRequired {
 		smbPassword = r.FormValue("smb_password")
 		if smbPassword == "" {
-			a.renderMigrationWorkspaceExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), "Enter the SMB password to start this reviewed Server Export.")
+			a.renderMigrationWorkspaceExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), "Enter the SMB password to start this reviewed Server Export.", migrationWorkspaceSelectedID(r))
 			return
 		}
 	}
@@ -187,14 +189,14 @@ func (a *App) migrationWorkspaceExportApply(w http.ResponseWriter, r *http.Reque
 	})
 	smbPassword = ""
 	if err != nil {
-		a.renderMigrationWorkspaceExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), apiMessage(err, "Could not start Server Export."))
+		a.renderMigrationWorkspaceExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), apiMessage(err, "Could not start Server Export."), migrationWorkspaceSelectedID(r))
 		return
 	}
 	if !result.OK || result.Operation == nil || result.Operation.OperationType != "migration_export" {
-		a.renderMigrationWorkspaceExportReview(w, http.StatusBadGateway, identity, request, plan, csrfFromRequest(r), "Server Export did not return a valid persistent operation.")
+		a.renderMigrationWorkspaceExportReview(w, http.StatusBadGateway, identity, request, plan, csrfFromRequest(r), "Server Export did not return a valid persistent operation.", migrationWorkspaceSelectedID(r))
 		return
 	}
-	http.Redirect(w, r, "/workspace/migration/progress/"+result.Operation.OperationID, http.StatusSeeOther)
+	http.Redirect(w, r, migrationSelectedURL(r, "/workspace/migration/progress/"+result.Operation.OperationID), http.StatusSeeOther)
 }
 
 func parseMigrationWorkspaceExportForm(r *http.Request, discovery api.AdminMigrationExportDiscoveryResponse) (api.AdminMigrationExportTargetRequest, error) {
@@ -277,7 +279,7 @@ func migrationWorkspaceExportKindAvailable(kinds []string, wanted string) bool {
 	return false
 }
 
-func (a *App) renderMigrationWorkspaceExportPage(w http.ResponseWriter, status int, identity api.SessionInfo, discovery api.AdminMigrationExportDiscoveryResponse, csrf, errorMessage string) {
+func (a *App) renderMigrationWorkspaceExportPage(w http.ResponseWriter, status int, identity api.SessionInfo, discovery api.AdminMigrationExportDiscoveryResponse, csrf, errorMessage string, serverID string) {
 	attached := []migrationWorkspaceExportDeviceView{}
 	removable := []migrationWorkspaceExportDeviceView{}
 	for _, device := range discovery.Devices {
@@ -289,6 +291,7 @@ func (a *App) renderMigrationWorkspaceExportPage(w http.ResponseWriter, status i
 		}
 	}
 	a.renderMigrationWorkspace(w, "migration_workspace_export.html", status, migrationWorkspaceExportPageData{
+		ServerID:         serverID,
 		Title:            "Server Export",
 		Version:          a.config.Version,
 		ManagementAPI:    a.config.ManagementAPI,
@@ -306,7 +309,7 @@ func (a *App) renderMigrationWorkspaceExportPage(w http.ResponseWriter, status i
 	})
 }
 
-func (a *App) renderMigrationWorkspaceExportReview(w http.ResponseWriter, status int, identity api.SessionInfo, request api.AdminMigrationExportTargetRequest, plan api.AdminMigrationExportPlanResponse, csrf, errorMessage string) {
+func (a *App) renderMigrationWorkspaceExportReview(w http.ResponseWriter, status int, identity api.SessionInfo, request api.AdminMigrationExportTargetRequest, plan api.AdminMigrationExportPlanResponse, csrf, errorMessage string, serverID string) {
 	dataSize := ""
 	availableSize := ""
 	if plan.Normalized != nil {
@@ -316,6 +319,7 @@ func (a *App) renderMigrationWorkspaceExportReview(w http.ResponseWriter, status
 		}
 	}
 	a.renderMigrationWorkspace(w, "migration_workspace_export_review.html", status, migrationWorkspaceExportReviewPageData{
+		ServerID:      serverID,
 		Title:         "Review Server Export",
 		Version:       a.config.Version,
 		ManagementAPI: a.config.ManagementAPI,
@@ -338,11 +342,11 @@ func (a *App) redirectCurrentMigrationWorkspaceOperation(w http.ResponseWriter, 
 	if response.Operation == nil {
 		return false
 	}
-	if !migrationWorkspaceOperationType(response.Operation.OperationType) {
+	if response.Operation.InstanceID != migrationWorkspaceSelectedID(r) || !migrationWorkspaceOperationType(response.Operation.OperationType) {
 		http.Error(w, "Server Migration operation status is invalid", http.StatusBadGateway)
 		return true
 	}
-	http.Redirect(w, r, "/workspace/migration/progress/"+response.Operation.OperationID, http.StatusSeeOther)
+	http.Redirect(w, r, migrationSelectedURL(r, "/workspace/migration/progress/"+response.Operation.OperationID), http.StatusSeeOther)
 	return true
 }
 
@@ -375,6 +379,14 @@ func (a *App) migrationWorkspaceProgressStatus(w http.ResponseWriter, r *http.Re
 		http.Error(w, "Administrator access required", http.StatusForbidden)
 		return
 	}
+	selected, ok := a.selectedMinecraft(w, r, session)
+	if !ok {
+		return
+	}
+	*r = *r.WithContext(api.WithMigrationInstance(r.Context(), selected.ID))
+	q := r.URL.Query()
+	q.Set("server", selected.ID)
+	r.URL.RawQuery = q.Encode()
 	response, err := client.AdminOperation(r.Context(), session, r.PathValue("id"))
 	if err != nil {
 		var responseErr *api.ResponseError
@@ -394,7 +406,7 @@ func (a *App) migrationWorkspaceProgressStatus(w http.ResponseWriter, r *http.Re
 		http.Error(w, "Server Migration operation status is unavailable", http.StatusBadGateway)
 		return
 	}
-	if response.Operation == nil || !migrationWorkspaceOperationType(response.Operation.OperationType) {
+	if response.Operation == nil || response.Operation.InstanceID != migrationWorkspaceSelectedID(r) || !migrationWorkspaceOperationType(response.Operation.OperationType) {
 		http.Error(w, "Server Migration operation not found", http.StatusNotFound)
 		return
 	}

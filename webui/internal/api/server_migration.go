@@ -434,7 +434,7 @@ func (c *Client) AdminMigrationImportResolve(ctx context.Context, session string
 	if status != http.StatusOK {
 		return out, &ResponseError{StatusCode: status, Message: serverMigrationMessage(out.Error, "Failed Server Import could not be resolved")}
 	}
-	if out.Operation == nil || !persistentOperationIDPattern.MatchString(out.Operation.OperationID) ||
+	if out.Operation == nil || out.Operation.InstanceID != migrationSelectedID(ctx) || !persistentOperationIDPattern.MatchString(out.Operation.OperationID) ||
 		out.Operation.OperationType != "migration_import" || out.Operation.State != "resolved" {
 		return out, errors.New("management API returned invalid server migration Import resolution")
 	}
@@ -463,8 +463,8 @@ func (c *Client) AdminMigrationRecoveryResolve(ctx context.Context, session stri
 	if status != http.StatusOK {
 		return out, &ResponseError{StatusCode: status, Message: serverMigrationMessage(out.Error, "Failed Migration Recovery could not be resolved")}
 	}
-	if out.Operation == nil || !persistentOperationIDPattern.MatchString(out.Operation.OperationID) ||
-		out.Operation.OperationID != request.OperationID || out.Operation.OperationType != "migration_recovery" || out.Operation.State != "resolved" {
+	if out.Operation == nil || out.Operation.InstanceID != migrationSelectedID(ctx) || !persistentOperationIDPattern.MatchString(out.Operation.OperationID) ||
+		out.Operation.OperationID != request.OperationID || (out.Operation.OperationType != "migration_recovery" && out.Operation.OperationType != "migration_export") || out.Operation.State != "resolved" {
 		return out, errors.New("management API returned invalid migration recovery resolution")
 	}
 	return out, nil
@@ -503,6 +503,9 @@ func (c *Client) adminMigrationApply(ctx context.Context, path, session string, 
 		return out, &ResponseError{StatusCode: status, Message: serverMigrationMessage(out.Error, "Server migration operation could not start")}
 	}
 	if out.Operation != nil {
+		if out.Operation.InstanceID != migrationSelectedID(ctx) {
+			return out, errors.New("migration instance mismatch")
+		}
 		if !persistentOperationIDPattern.MatchString(out.Operation.OperationID) ||
 			out.Operation.OperationType != operationType ||
 			out.Operation.PlanFingerprint != fingerprint ||
@@ -524,6 +527,10 @@ func validateMigrationPlanIdentity(ok bool, schemaVersion, fingerprint string) e
 }
 
 func (c *Client) serverMigrationJSON(ctx context.Context, method, path, session string, body, out any, timeout time.Duration, decodedStatuses ...int) (int, error) {
+	path, err := selectedMigrationPath(ctx, path)
+	if err != nil {
+		return 0, err
+	}
 	var reader io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
@@ -594,4 +601,25 @@ func serverMigrationMessage(message, fallback string) string {
 		return fallback
 	}
 	return message
+}
+
+// A request-local selection comes from the existing C2 resolver, never a global current server.
+type migrationSelectionKey struct{}
+
+func WithMigrationInstance(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, migrationSelectionKey{}, id)
+}
+func migrationSelectedID(ctx context.Context) string {
+	id, _ := ctx.Value(migrationSelectionKey{}).(string)
+	return id
+}
+func selectedMigrationPath(ctx context.Context, path string) (string, error) {
+	id := migrationSelectedID(ctx)
+	if !minecraftMaintenanceIDPattern.MatchString(id) {
+		return "", errors.New("Minecraft server selection is required")
+	}
+	if !strings.HasPrefix(path, "/v1/admin/migration/") && path != "/v1/admin/migration/export" && path != "/v1/admin/migration/import" && path != "/v1/admin/migration/recovery" {
+		return "", errors.New("unsupported migration path")
+	}
+	return "/v1/minecraft/instances/" + id + "/migration/" + strings.TrimPrefix(path, "/v1/admin/migration/"), nil
 }

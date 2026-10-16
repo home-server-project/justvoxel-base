@@ -175,25 +175,3 @@ func TestReviewedSetupIdentityRequiredResponsePreservesSubmission(t *testing.T) 
 		t.Fatal("same reviewed setup was not retained for manual resumption")
 	}
 }
-
-func TestReviewedImportIdentityRequiredResponsePreservesSubmission(t *testing.T) {
-	client := migrationSafetyImportClient(successfulImportPlan("replace"))
-	client.apply = api.AdminMigrationApplyResponse{Code: "identity_required", Error: "Instance ID could not be generated."}
-	client.applyErr = &api.ResponseError{StatusCode: http.StatusConflict, Message: client.apply.Error}
-	app := migrationSafetyApp(t, client)
-	values := migrationSafetyImportValues("local")
-	request := importWebRequest(http.MethodPost, "http://example/workspace/migration/import/apply", values)
-	request.Header.Set("Accept", "application/json")
-	response := httptestResponse(app, request)
-	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"code":"identity_required"`) {
-		t.Fatalf("identity response: %d %s", response.Code, response.Body.String())
-	}
-	first := client.applyReq
-	client.applyErr = nil
-	client.apply = migrationSafetyOperation("migration_import")
-	response = httptestResponse(app, importWebRequest(http.MethodPost, "http://example/workspace/migration/import/apply", values))
-	migrationSafetyStarted(t, response)
-	if client.applyCalls != 2 || client.applyReq != first {
-		t.Fatal("same reviewed Import was not retained for manual resumption")
-	}
-}

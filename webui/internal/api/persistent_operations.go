@@ -38,6 +38,17 @@ type PersistentOperationResponse struct {
 }
 
 func (c *Client) AdminOperation(ctx context.Context, session, id string) (PersistentOperationResponse, error) {
+	if migrationSelectedID(ctx) != "" {
+		if !persistentOperationIDPattern.MatchString(id) {
+			return PersistentOperationResponse{}, errors.New("invalid operation id")
+		}
+		path, err := selectedMigrationPath(ctx, "/v1/admin/migration/operations/"+id)
+		if err != nil {
+			return PersistentOperationResponse{}, err
+		}
+		return c.getPersistentOperation(ctx, session, path)
+	}
+
 	if !persistentOperationIDPattern.MatchString(id) {
 		return PersistentOperationResponse{}, errors.New("invalid operation id")
 	}
@@ -77,7 +88,11 @@ func (c *Client) AdminCurrentFactoryResetOperation(ctx context.Context, session 
 }
 
 func (c *Client) AdminCurrentMigrationOperation(ctx context.Context, session string) (PersistentOperationResponse, error) {
-	return c.getPersistentOperation(ctx, session, "/v1/admin/migration/current-operation")
+	path, err := selectedMigrationPath(ctx, "/v1/admin/migration/current-operation")
+	if err != nil {
+		return PersistentOperationResponse{}, err
+	}
+	return c.getPersistentOperation(ctx, session, path)
 }
 
 func (c *Client) getPersistentOperation(ctx context.Context, session, path string) (PersistentOperationResponse, error) {
@@ -104,6 +119,9 @@ func (c *Client) getPersistentOperation(ctx context.Context, session, path strin
 	}
 	if err := decodePersistentOperationResponse(resp.Body, &out); err != nil {
 		return out, fmt.Errorf("management API returned invalid operation response: %w", err)
+	}
+	if id := migrationSelectedID(ctx); id != "" && out.Operation != nil && out.Operation.InstanceID != id {
+		return PersistentOperationResponse{}, errors.New("migration instance mismatch")
 	}
 	selected, _ := ctx.Value(maintenanceSelectionKey{}).(maintenanceSelection)
 	if selected.ID != "" && out.Operation != nil && out.Operation.InstanceID != selected.ID {

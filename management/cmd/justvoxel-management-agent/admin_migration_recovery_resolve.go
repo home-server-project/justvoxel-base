@@ -22,6 +22,9 @@ type adminMigrationRecoveryResolveCheck struct {
 }
 
 func (s *server) adminMigrationRecoveryResolve(w http.ResponseWriter, r *http.Request) {
+	if !s.migrationInstanceRequest(w, r) {
+		return
+	}
 	actor, ok := s.requireAdministrator(w, r)
 	if !ok {
 		return
@@ -57,11 +60,11 @@ func (s *server) adminMigrationRecoveryResolve(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusInternalServerError, "current server migration operation could not be read")
 		return
 	}
-	if current == nil || current.OperationID != request.OperationID {
+	if current == nil || current.InstanceID != r.PathValue("id") || current.OperationID != request.OperationID {
 		writeError(w, http.StatusNotFound, "migration recovery operation was not found")
 		return
 	}
-	if current.OperationType != operationTypeMigrationRecovery || current.State != operationNeedsAttention {
+	if (current.OperationType != operationTypeMigrationRecovery && current.OperationType != operationTypeMigrationExport) || current.State != operationNeedsAttention {
 		writeError(w, http.StatusConflict, "migration recovery cannot be resolved in its current state")
 		return
 	}

@@ -3,6 +3,13 @@ set -euo pipefail
 source /usr/libexec/justvoxel/mjust/ui.sh
 source /usr/libexec/justvoxel/mjust/migration-api.sh
 (( EUID == 0 )) || { echo "ERROR: mjust export must run through sudo/root." >&2; exit 1; }
+selected_instance=''
+if [[ ${1:-} == --instance ]]; then
+    [[ $# -ge 2 ]] || exit 2
+    selected_instance="$2"
+    shift 2
+fi
+jv_migration_select_instance "${selected_instance}" || exit 1
 (( $# <= 1 )) || { echo "Usage: migration-export [DESTINATION]" >&2; exit 2; }
 
 current="$(jv_migration_current_operation)" || exit 1

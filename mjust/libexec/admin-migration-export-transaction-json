@@ -9,6 +9,10 @@ source /usr/libexec/justvoxel/mjust/migration-common.sh
 source /usr/libexec/justvoxel/mjust/migration-transport-device.sh
 
 require_root
+source /usr/libexec/justvoxel/mjust/migration-instance.sh
+[[ ${1:-} == --instance && ${2:-} =~ ^jv-[a-z0-9]{6,12}$ ]] || { echo 'ERROR: --instance jv-... is required.' >&2; exit 2; }
+jv_migration_load_instance "$2" || exit 1
+shift 2
 
 result_emitted=no
 restart_required=no
@@ -39,13 +43,10 @@ cleanup() {
     if [[ -n "$staged_bundle" ]]; then
         rm -f -- "$staged_bundle" "$staged_bundle.partial" 2>/dev/null || safe=no
     fi
-    if [[ -n "$staging_dir" && -d "$staging_dir" ]]; then
-        rmdir -- "$staging_dir" 2>/dev/null || safe=no
-    fi
 
     if [[ "$restart_required" == yes ]]; then
-        if systemctl start minecraft.service >/dev/null 2>&1 \
-            && /usr/libexec/justvoxel/mjust/restore-runtime-validate >/dev/null 2>&1; then
+        if systemctl start "${JV_INSTANCE_UNIT}" >/dev/null 2>&1 \
+            && jv_migration_validate_runtime >/dev/null 2>&1; then
             restart_required=no
         else
             safe=no
@@ -57,6 +58,9 @@ cleanup() {
         transport_started=no
     fi
 
+    if [[ -n "$staging_dir" && -d "$staging_dir" && "$safe" == yes ]]; then
+        rm -rf -- "$staging_dir" || safe=no
+    fi
     if [[ "$result_emitted" == yes ]]; then
         exit "$rc"
     fi
@@ -104,7 +108,7 @@ case "$expected_minecraft_state" in running|stopped) ;; *) failure_status='Revie
 
 emit_progress validating export_preflight 'Revalidating the reviewed server migration export before touching Minecraft.'
 
-replan="$(printf '%s\n' "$plan_request" | /usr/libexec/justvoxel/mjust/admin-migration-export-plan-json plan)"
+replan="$(printf '%s\n' "$plan_request" | /usr/libexec/justvoxel/mjust/admin-migration-export-plan-json --instance "${JV_INSTANCE_ID}" plan)"
 if [[ "$(jq -r '.ok // false' <<< "$replan")" != true ]]; then
     failure_status="$(jq -r '.error // "Server migration export target is no longer valid."' <<< "$replan")"
     exit 1
@@ -144,7 +148,7 @@ case "$kind" in
         target_root="$path"
         ;;
     backup)
-        jv_backup_load_config >/dev/null
+        jv_migration_backup_load_config >/dev/null
         jv_backup_prepare_write_target >/dev/null
         target_root="$minecraft_backup_path"
         ;;
@@ -223,25 +227,32 @@ if ! flock -n 9; then
     exit 1
 fi
 
-if systemctl is-active --quiet minecraft.service; then
+[[ $(sha256sum "${JV_MIGRATION_INSTANCE_CONFIG}" | awk '{print $1}') == "${expected_config_identity}" ]] || { failure_status='Selected destination configuration changed before export.'; exit 1; }
+jv_migration_validate_data || { failure_status='Selected instance storage changed before export.'; exit 1; }
+if systemctl is-active --quiet "${JV_INSTANCE_UNIT}"; then
     live_minecraft_state=running
 else
     live_minecraft_state=stopped
 fi
 [[ "$live_minecraft_state" == "$expected_minecraft_state" ]] || { failure_status='Minecraft service state changed after export review.'; exit 1; }
 
+minecraft_was_active=no
+[[ ${live_minecraft_state} == running ]] && minecraft_was_active=yes
+jv_migration_snapshot_runtime "${staging_dir}"
+jv_migration_write_state "${staging_dir}" exporting "${DATA_PATH}" export
 server_reported=''
 geyser_reported=''
 if [[ "$live_minecraft_state" == running ]]; then
     if server_supports_plugins; then
-        server_reported="$(podman exec minecraft rcon-cli 'version' 2>/dev/null | head -n1 || true)"
-        geyser_reported="$(podman exec minecraft rcon-cli 'geyser version' 2>/dev/null | head -n1 || true)"
+        server_reported="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli 'version' 2>/dev/null | head -n1 || true)"
+        geyser_reported="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli 'geyser version' 2>/dev/null | head -n1 || true)"
     else
-        server_reported="$(podman exec minecraft mc-monitor status --json 2>/dev/null | jq -er '.server_info.version.name | select(type == "string")' || true)"
+        server_reported="$(podman exec "${JV_INSTANCE_CONTAINER}" mc-monitor status --json 2>/dev/null | jq -er '.server_info.version.name | select(type == "string")' || true)"
     fi
     emit_progress running player_recheck 'Rechecking players immediately before the cold export.'
     stop_mode=required
     [[ "$players_confirmed" == true ]] && stop_mode=confirmed
+    restart_required=yes
     set +e
     JV_INTERRUPT_CONFIRMATION_MODE="$stop_mode" jv_stop_minecraft_adaptive 'Export server' >/dev/null 2>&1
     stop_rc=$?
@@ -258,15 +269,15 @@ emit_progress running exporting 'Creating and verifying the cold portable JustVo
 JV_MIGRATION_EXPORT_MAINTENANCE_LOCK_HELD=1 \
 JV_MIGRATION_EXPORT_SERVER_REPORTED="$server_reported" \
 JV_MIGRATION_EXPORT_GEYSER_REPORTED="$geyser_reported" \
-    /usr/libexec/justvoxel/mjust/migration-export-backend "$staged_bundle" >/dev/null
+    /usr/libexec/justvoxel/mjust/migration-export-backend --instance "${JV_INSTANCE_ID}" "$staged_bundle" >/dev/null
 [[ -f "$staged_bundle" ]] || { failure_status='Local cold export staging did not produce the reviewed migration bundle.'; exit 1; }
 
 if [[ "$restart_required" == yes ]]; then
     emit_progress running minecraft_restart 'Restarting Minecraft immediately after the local cold export.'
-    systemctl start minecraft.service
+    systemctl start "${JV_INSTANCE_UNIT}"
     restart_required=no
     emit_progress verifying minecraft_runtime 'Validating Minecraft before final export transfer.'
-    /usr/libexec/justvoxel/mjust/restore-runtime-validate >/dev/null
+    jv_migration_validate_runtime >/dev/null
 else
     emit_progress verifying minecraft_runtime 'Minecraft was already stopped; local cold export staging is complete.'
 fi
@@ -288,14 +299,14 @@ sync -f -- "$destination" 2>/dev/null || sync
 
 rm -f -- "$staged_bundle"
 staged_bundle=''
-rmdir -- "$staging_dir"
-staging_dir=''
-
 if [[ "$transport_started" == yes ]]; then
     sync
     jv_migration_transport_cleanup
     transport_started=no
 fi
+
+rm -rf -- "$staging_dir"
+staging_dir=''
 
 emit_progress verifying export_complete 'Verified migration bundle transferred successfully; Minecraft runtime is healthy.'
 emit_result succeeded 'Server migration export completed successfully and the prior Minecraft runtime state is healthy.'

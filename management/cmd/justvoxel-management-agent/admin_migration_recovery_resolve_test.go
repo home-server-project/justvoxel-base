@@ -15,7 +15,7 @@ const testMigrationRecoveryFingerprint = "sha256:9999999999999999999999999999999
 
 func beginAttentionMigrationRecovery(t *testing.T, store *operationStore) operationJournal {
 	t.Helper()
-	operation, _, err := store.beginMigrationRecovery(testMigrationRecoveryFingerprint)
+	operation, _, err := store.beginMigrationRecovery("jv-a1b2c3", testMigrationRecoveryFingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestAdminMigrationRecoveryResolvePersistedOperation(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.close() })
-	s := surfaceTestServer(t, roleAdministrator)
+	s := migrationSurfaceTestServer(t, roleAdministrator)
 	attachTestOperationStore(t, s, store)
 	previous := runAdminMigrationRecoveryHelper
 	runAdminMigrationRecoveryHelper = func(_ context.Context, action string, _ []byte) ([]byte, error) {
@@ -56,7 +56,7 @@ func TestAdminMigrationRecoveryResolvePersistedOperation(t *testing.T) {
 
 	body, _ := json.Marshal(adminMigrationRecoveryResolveRequest{OperationID: operation.OperationID, KeepCurrentState: true})
 	rr := httptest.NewRecorder()
-	s.adminMigrationRecoveryResolve(rr, surfaceRequest(http.MethodPost, "/v1/admin/migration/recovery/resolve", string(body)))
+	s.adminMigrationRecoveryResolve(rr, migrationSurfaceRequest(http.MethodPost, "/v1/minecraft/instances/jv-a1b2c3/migration/recovery/resolve", string(body)))
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"state":"resolved"`) {
 		t.Fatalf("resolve status=%d: %s", rr.Code, rr.Body.String())
 	}
@@ -74,7 +74,7 @@ func TestAdminMigrationRecoveryResolvePersistedOperation(t *testing.T) {
 	if current, err := store.currentMigration(); err != nil || current != nil {
 		t.Fatalf("recovery remained current: %#v err=%v", current, err)
 	}
-	if _, _, err := store.beginMigrationExport(testMigrationExportFingerprint); err != nil {
+	if _, _, err := store.beginMigrationExport("jv-a1b2c3", testMigrationExportFingerprint); err != nil {
 		t.Fatalf("migration lock remained held: %v", err)
 	}
 }
@@ -98,15 +98,15 @@ func TestAdminMigrationRecoveryResolveFailsClosed(t *testing.T) {
 		{name: "confirmation missing", output: `{"ok":true,"schema_version":"v1","safe_to_resolve":true}`, wantStatus: http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := surfaceTestServer(t, roleAdministrator)
+			s := migrationSurfaceTestServer(t, roleAdministrator)
 			store := openTestOperationStore(t)
 			attachTestOperationStore(t, s, store)
 			var operation operationJournal
 			var err error
 			if tc.wrongType {
-				operation, _, err = store.beginMigrationImport(testMigrationImportFingerprint)
+				operation, _, err = store.beginMigrationImport("jv-a1b2c3", testMigrationImportFingerprint)
 			} else {
-				operation, _, err = store.beginMigrationRecovery(testMigrationRecoveryFingerprint)
+				operation, _, err = store.beginMigrationRecovery("jv-a1b2c3", testMigrationRecoveryFingerprint)
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -137,7 +137,7 @@ func TestAdminMigrationRecoveryResolveFailsClosed(t *testing.T) {
 			}
 			body, _ := json.Marshal(adminMigrationRecoveryResolveRequest{OperationID: id, KeepCurrentState: tc.confirmed})
 			rr := httptest.NewRecorder()
-			s.adminMigrationRecoveryResolve(rr, surfaceRequest(http.MethodPost, "/v1/admin/migration/recovery/resolve", string(body)))
+			s.adminMigrationRecoveryResolve(rr, migrationSurfaceRequest(http.MethodPost, "/v1/minecraft/instances/jv-a1b2c3/migration/recovery/resolve", string(body)))
 			if rr.Code != tc.wantStatus {
 				t.Fatalf("status=%d want=%d: %s", rr.Code, tc.wantStatus, rr.Body.String())
 			}
@@ -145,7 +145,7 @@ func TestAdminMigrationRecoveryResolveFailsClosed(t *testing.T) {
 			if err != nil || current == nil || current.OperationID != operation.OperationID {
 				t.Fatalf("current = %#v, err=%v", current, err)
 			}
-			if _, _, err := store.beginMigrationExport(testMigrationExportFingerprint); !errors.Is(err, errMigrationOperationBusy) {
+			if _, _, err := store.beginMigrationExport("jv-a1b2c3", testMigrationExportFingerprint); !errors.Is(err, errMigrationOperationBusy) {
 				t.Fatalf("migration lock released after refusal: %v", err)
 			}
 		})

@@ -16,7 +16,7 @@ line_of() {
 
 local_preflight="$(line_of 'local_available="$(jv_migration_available_bytes "$data_parent")"')"
 downtime_start="$(line_of '# COLD EXPORT DOWNTIME STARTS HERE.')"
-backend_local="$(line_of 'migration-export-backend "$staged_bundle"')"
+backend_local="$(line_of 'migration-export-backend --instance "${JV_INSTANCE_ID}" "$staged_bundle"')"
 downtime_end="$(line_of '# COLD EXPORT DOWNTIME ENDS HERE.')"
 final_transfer="$(line_of '# FINAL TARGET TRANSFER STARTS HERE.')"
 copy_line="$(line_of 'cp --reflink=auto --sparse=always -- "$staged_bundle" "$destination.partial"')"
@@ -33,8 +33,8 @@ done
 if grep -Fq 'migration-export-backend "$destination"' "${txn}"; then
     fail 'Agent export backend still writes the cold bundle directly to the final target'
 fi
-grep -Fq 'systemctl start minecraft.service' "${txn}" || fail 'Export transaction no longer restarts Minecraft after cold capture'
-grep -Fq 'restore-runtime-validate' "${txn}" || fail 'Export transaction no longer validates Minecraft before final transfer'
+grep -Fq 'systemctl start "${JV_INSTANCE_UNIT}"' "${txn}" || fail 'Export transaction no longer restarts Minecraft after cold capture'
+grep -Fq 'jv_migration_validate_runtime' "${txn}" || fail 'Export transaction no longer validates Minecraft before final transfer'
 grep -Fq 'staged_size=' "${txn}" || fail 'Export transaction does not measure the completed local bundle before transfer'
 grep -Fq 'jv_migration_available_bytes "$target_root"' "${txn}" || fail 'Export target free space is not rechecked before final transfer'
 grep -Fq 'rm -f -- "$staged_bundle"' "${txn}" || fail 'Successful export does not clean local staging'

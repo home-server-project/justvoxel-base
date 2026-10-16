@@ -1,8 +1,8 @@
-{{define "migration_workspace_import.html"}}<div class="migration-workspace-content" data-migration-workspace-root>
+{{define "migration_workspace_import.html"}}<div class="migration-workspace-content" data-migration-workspace-root data-server-id="{{.ServerID}}">
 <p class="migration-workspace-helper"><strong>Choose a source. JustVoxel discovers the server, reviews the destination and runs a validated Import with rollback protection.</strong></p>
   {{if .Error}}<div class="notice error"><strong>Server Import cannot continue as submitted.</strong><br>{{.Error}}</div>{{end}}
 
-  <form method="post" action="/workspace/migration/import/review" autocomplete="off" data-server-import-form>
+  <form method="post" action="/workspace/migration/import/review?server={{.ServerID}}" autocomplete="off" data-server-import-form>
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <section class="panel">
       <p class="eyebrow">Import source</p>
@@ -51,70 +51,14 @@
 
     </section>
 
-    {{if .Discovery.Configured}}
+
     <section class="panel migration-destination-helper">
       <p class="eyebrow">Destination</p>
       <h2>Replace the configured JustVoxel server</h2>
       <p>Current storage, memory, timezone, backups and ports stay destination specific. JustVoxel reviews and protects the running server before replacement.</p>
     </section>
-    {{else}}
-    <section class="panel">
-      <p class="eyebrow">Fresh destination</p>
-      <h2>Configure this unconfigured JustVoxel appliance</h2>
-      <div class="admin-form-grid">
-        <label>Minecraft Java port<input name="java_port" value="{{.Discovery.Defaults.JavaPort}}" inputmode="numeric" required></label>
-        <label>Bedrock UDP port<input name="bedrock_port" value="{{.Discovery.Defaults.BedrockPort}}" inputmode="numeric" required></label>
-        <label>Minecraft game memory<input name="java_memory" value="{{.Discovery.Defaults.JavaMemory}}" required></label>
-        <label>Maximum Minecraft memory<input name="container_memory" value="{{.Discovery.Defaults.ContainerMemory}}" required></label>
-        <label>Timezone<input name="timezone" value="{{.Discovery.Defaults.Timezone}}" required></label>
-        <label>Backups to keep<input name="backup_keep" value="{{.Discovery.Defaults.BackupKeep}}" inputmode="numeric" required></label>
-        <label>Daily backup time<input name="backup_daily_time" value="{{.Discovery.Defaults.BackupDailyTime}}" required></label>
-      </div>
-      <label><input type="checkbox" name="backup_automatic" {{if .Discovery.Defaults.BackupAutomatic}}checked{{end}}> Enable automatic daily backups</label>
 
-      <h3>Minecraft data storage</h3>
-      <label for="server-import-storage-type">Storage type</label>
-      <select id="server-import-storage-type" name="storage_type" data-server-import-storage-kind>
-        <option value="system">JustVoxel system storage</option>
-        <option value="partition">Existing local filesystem / partition</option>
-      </select>
-      <div data-server-import-storage="system"><div class="notice">Minecraft data will use <code>{{.Discovery.Defaults.DataPath}}</code>.</div></div>
-      <div data-server-import-storage="partition" hidden>
-        <label>Filesystem<select name="data_device"><option value="">Choose a safe filesystem</option>{{range .Filesystems}}<option value="{{.Path}}">{{.Path}} · {{.Size}} · {{.Filesystem}}{{if .Model}} · {{.Model}}{{end}}</option>{{end}}</select></label>
-        <label>Mount point<input name="data_mount_point" placeholder="/var/mnt/justvoxel-data" autocomplete="off"></label>
-        <label>Minecraft data directory<input name="data_path" placeholder="/var/mnt/justvoxel-data/minecraft" autocomplete="off"></label>
-      </div>
 
-      <h3>Backup storage</h3>
-      <label for="server-import-backup-type">Backup destination</label>
-      <select id="server-import-backup-type" name="backup_type" data-server-import-backup-kind>
-        <option value="system">JustVoxel system storage</option>
-        <option value="partition">Existing local filesystem / partition</option>
-        <option value="nfs">NFS share</option>
-        <option value="smb">SMB / CIFS share</option>
-      </select>
-      <div data-server-import-backup="system"><div class="notice">Backups will use <code>{{.Discovery.Defaults.BackupPath}}</code>.</div></div>
-      <div data-server-import-backup="partition" hidden>
-        <label>Filesystem<select name="backup_device"><option value="">Choose a safe filesystem</option>{{range .Filesystems}}<option value="{{.Path}}">{{.Path}} · {{.Size}} · {{.Filesystem}}{{if .Model}} · {{.Model}}{{end}}</option>{{end}}</select></label>
-        <label>Mount point<input name="backup_mount_point" placeholder="/var/mnt/justvoxel-backups" autocomplete="off"></label>
-        <label>Backup directory<input name="backup_path" placeholder="/var/mnt/justvoxel-backups/minecraft" autocomplete="off"></label>
-      </div>
-      <div data-server-import-backup="nfs" hidden>
-        <label>NFS source<input name="backup_source" placeholder="nas:/exports/justvoxel" autocomplete="off"></label>
-        <label>Local mount point<input name="backup_mount_point" placeholder="/var/mnt/justvoxel-backups" autocomplete="off"></label>
-        <label>Backup directory<input name="backup_path" placeholder="/var/mnt/justvoxel-backups/minecraft" autocomplete="off"></label>
-      </div>
-      <div data-server-import-backup="smb" hidden>
-        <label>SMB source<input name="backup_source" placeholder="//nas/justvoxel" autocomplete="off"></label>
-        <label>SMB username<input name="backup_username" autocomplete="off"></label>
-        <label>SMB domain <span class="muted">optional</span><input name="backup_domain" autocomplete="off"></label>
-        <label>Local mount point<input name="backup_mount_point" placeholder="/var/mnt/justvoxel-backups" autocomplete="off"></label>
-        <label>Backup directory<input name="backup_path" placeholder="/var/mnt/justvoxel-backups/minecraft" autocomplete="off"></label>
-        <div class="notice"><strong>No backup SMB password is collected during planning.</strong><br>If JustVoxel validates this destination, the password is requested only on the final Apply form.</div>
-      </div>
-    </section>
-    {{end}}
-
-    <div class="action-row"><a class="button-link secondary" href="/?workspace=migration">Cancel</a><button type="submit">Inspect and review Server Import</button></div>
+    <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;server={{.ServerID}}">Cancel</a><button type="submit">Inspect and review Server Import</button></div>
   </form>
 </div>{{end}}

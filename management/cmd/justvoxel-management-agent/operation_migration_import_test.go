@@ -11,28 +11,28 @@ const testMigrationImportFingerprint = "sha256:888888888888888888888888888888888
 
 func TestOperationStoreMigrationImportIsIdempotentAndSharesFamilyLock(t *testing.T) {
 	store := openTestOperationStore(t)
-	first, created, err := store.beginMigrationImport(testMigrationImportFingerprint)
+	first, created, err := store.beginMigrationImport("jv-a1b2c3", testMigrationImportFingerprint)
 	if err != nil || !created {
 		t.Fatalf("first import begin: created=%t err=%v", created, err)
 	}
 	if first.OperationType != operationTypeMigrationImport {
 		t.Fatalf("unexpected operation type: %#v", first)
 	}
-	second, created, err := store.beginMigrationImport(testMigrationImportFingerprint)
+	second, created, err := store.beginMigrationImport("jv-a1b2c3", testMigrationImportFingerprint)
 	if err != nil || created || second.OperationID != first.OperationID {
 		t.Fatalf("idempotent import begin: created=%t err=%v operation=%#v", created, err, second)
 	}
-	if _, _, err := store.beginMigrationExport(testMigrationExportFingerprint); !errors.Is(err, errMigrationOperationBusy) {
+	if _, _, err := store.beginMigrationExport("jv-a1b2c3", testMigrationExportFingerprint); !errors.Is(err, errMigrationOperationBusy) {
 		t.Fatalf("export during import error = %v, want migration busy", err)
 	}
 }
 
 func TestOperationStoreMigrationExportBlocksImport(t *testing.T) {
 	store := openTestOperationStore(t)
-	if _, _, err := store.beginMigrationExport(testMigrationExportFingerprint); err != nil {
+	if _, _, err := store.beginMigrationExport("jv-a1b2c3", testMigrationExportFingerprint); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := store.beginMigrationImport(testMigrationImportFingerprint); !errors.Is(err, errMigrationOperationBusy) {
+	if _, _, err := store.beginMigrationImport("jv-a1b2c3", testMigrationImportFingerprint); !errors.Is(err, errMigrationOperationBusy) {
 		t.Fatalf("import during export error = %v, want migration busy", err)
 	}
 }
@@ -43,7 +43,7 @@ func TestOperationStoreRestartMarksInterruptedMigrationImportNeedsAttention(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	journal, _, err := first.beginMigrationImport(testMigrationImportFingerprint)
+	journal, _, err := first.beginMigrationImport("jv-a1b2c3", testMigrationImportFingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,34 +77,44 @@ func TestOperationStoreRestartMarksInterruptedMigrationImportNeedsAttention(t *t
 	}
 }
 
-
 func TestOperationStoreRecoveryTakesOwnershipOfNeedsAttentionImport(t *testing.T) {
 	store := openTestOperationStore(t)
-	imp, _, err := store.beginMigrationImport(testMigrationImportFingerprint)
-	if err != nil { t.Fatal(err) }
-	if _, err := store.transition(imp.OperationID, operationValidating, "import_preflight", "Checking Import."); err != nil { t.Fatal(err) }
-	if _, err := store.transition(imp.OperationID, operationNeedsAttention, "import_attention", "Recovery required."); err != nil { t.Fatal(err) }
+	imp, _, err := store.beginMigrationImport("jv-a1b2c3", testMigrationImportFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.transition(imp.OperationID, operationValidating, "import_preflight", "Checking Import."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.transition(imp.OperationID, operationNeedsAttention, "import_attention", "Recovery required."); err != nil {
+		t.Fatal(err)
+	}
 
 	recoveryFingerprint := "sha256:9999999999999999999999999999999999999999999999999999999999999999"
-	recovery, created, err := store.beginMigrationRecovery(recoveryFingerprint)
-	if err != nil || !created { t.Fatalf("begin recovery: created=%t err=%v", created, err) }
+	recovery, created, err := store.beginMigrationRecovery("jv-a1b2c3", recoveryFingerprint)
+	if err != nil || !created {
+		t.Fatalf("begin recovery: created=%t err=%v", created, err)
+	}
 
 	previous, err := store.get(imp.OperationID)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if previous.State != operationRolledBack || previous.Stage != "recovery_handoff" || previous.Rollback.Result != "recovery_handoff" {
 		t.Fatalf("Import attention was not transferred to Recovery: %#v", previous)
 	}
 	current, err := store.currentMigration()
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if current == nil || current.OperationID != recovery.OperationID || current.OperationType != operationTypeMigrationRecovery {
 		t.Fatalf("current migration = %#v, want Recovery %s", current, recovery.OperationID)
 	}
 }
 
-
 func TestOperationStoreResolvesNeedsAttentionImportAndReleasesMigrationLock(t *testing.T) {
 	store := openTestOperationStore(t)
-	imp, _, err := store.beginMigrationImport(testMigrationImportFingerprint)
+	imp, _, err := store.beginMigrationImport("jv-a1b2c3", testMigrationImportFingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +135,7 @@ func TestOperationStoreResolvesNeedsAttentionImportAndReleasesMigrationLock(t *t
 	if current, err := store.currentMigration(); err != nil || current != nil {
 		t.Fatalf("Import remained current after resolve: %#v err=%v", current, err)
 	}
-	if _, _, err := store.beginMigrationExport(testMigrationExportFingerprint); err != nil {
+	if _, _, err := store.beginMigrationExport("jv-a1b2c3", testMigrationExportFingerprint); err != nil {
 		t.Fatalf("migration lock remained held after resolving Import: %v", err)
 	}
 }

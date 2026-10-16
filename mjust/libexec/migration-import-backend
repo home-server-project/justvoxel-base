@@ -9,6 +9,10 @@ source /usr/libexec/justvoxel/mjust/storage-common.sh
 source /usr/libexec/justvoxel/mjust/migration-common.sh
 source /usr/libexec/justvoxel/mjust/migration-transport.sh
 require_root
+source /usr/libexec/justvoxel/mjust/migration-instance.sh
+[[ ${1:-} == --instance && ${2:-} =~ ^jv-[a-z0-9]{6,12}$ ]] || { echo 'ERROR: --instance jv-... is required.' >&2; exit 2; }
+jv_migration_load_instance "$2" || exit 1
+shift 2
 
 if (( $# > 1 )); then
     echo 'Usage: migration-import [SOURCE]' >&2
@@ -20,11 +24,7 @@ if [[ ${JV_MIGRATION_API_MODE:-0} != 1 ]] && ! jui_has_tty; then
     exit 1
 fi
 
-configured=no
-if [[ -r ${JV_CONFIG} && -e ${JV_QUADLET} ]]; then
-    configured=yes
-    require_config
-fi
+configured=yes
 
 transport_started=no
 transaction=''

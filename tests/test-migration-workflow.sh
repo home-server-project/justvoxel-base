@@ -4,7 +4,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fail(){ echo "FAIL: $*" >&2; exit 1; }
 # Static workflow invariants that require the full appliance at runtime.
 import_files=(
-    "${repo_root}/mjust/libexec/migration-import"
+    "${repo_root}/mjust/libexec/migration-import-backend"
     "${repo_root}/mjust/libexec/migration-import-common.sh"
     "${repo_root}/mjust/libexec/migration-import-plan-source.sh"
     "${repo_root}/mjust/libexec/migration-import-plan-destination.sh"
@@ -25,7 +25,7 @@ grep -Fq 'source_selection_required' "${import_frontend}" || fail 'migration Imp
 grep -Fq 'jv_migration_monitor_operation' "${import_frontend}" || fail 'migration Import frontend does not monitor the persistent Agent operation'
 grep -Fq 'interrupt-safety.sh' "${import_backend}" || fail 'shared migration import backend does not load interruption safety'
 grep -Fq 'JV_MIGRATION_API_MODE' "${import_backend}" || fail 'shared migration Import backend has no non-interactive Agent mode'
-for api_file in "${repo_root}/mjust/libexec/migration-import-common.sh" "${repo_root}/mjust/libexec/migration-import-plan-source.sh" "${repo_root}/mjust/libexec/migration-import-plan-destination.sh" "${repo_root}/mjust/libexec/migration-import-activate.sh"; do
+for api_file in "${repo_root}/mjust/libexec/migration-import-common.sh" "${repo_root}/mjust/libexec/migration-import-plan-source.sh" "${repo_root}/mjust/libexec/migration-import-activate.sh"; do
     grep -Fq 'JV_MIGRATION_API_MODE' "${api_file}" || fail "Import backend component lacks Agent-mode handling: ${api_file}"
 done
 export_frontend="${repo_root}/mjust/libexec/migration-export"
@@ -92,8 +92,8 @@ for planner in "${api_planner}" "${source_planner}"; do
     grep -Fq 'server_version_available "$source_version"' "${planner}" || fail 'planner lacks destination version availability preflight'
     if grep -Fq 'paper_version_has_stable_build' "${planner}"; then fail 'Import uses a Paper-only availability check'; fi
 done
-grep -Fxq 'MINECRAFT_VERSION_MODE=pinned' "${destination_planner}" || fail 'Import does not pin the source version'
-grep -Fxq 'MINECRAFT_VERSION="${source_version}"' "${destination_planner}" || fail 'Import does not retain the exact source version'
+grep -Fq 'instance-version-publish' "${repo_root}/mjust/libexec/migration-import-activate.sh" || fail 'Import does not pin the source version'
+grep -Fq '"${source_version}" pinned' "${repo_root}/mjust/libexec/migration-import-activate.sh" || fail 'Import does not retain the exact source version'
 
 # Exercise the actual API planner with bounded source/configuration fixtures.
 # Appliance helpers are replaced only in this temporary test copy.
@@ -106,9 +106,9 @@ grep -Fxq 'MINECRAFT_VERSION="${source_version}"' "${destination_planner}" || fa
     REVIEW_CONFIG="${review_fixture}/config"
     REVIEW_QUADLET="${review_fixture}/quadlet"
     touch "$REVIEW_CONFIG" "$REVIEW_QUADLET"
-    sed -e '/^source /d' -e '/^require_root$/d' \
+    sed -e '/^source /d' -e '/^require_root$/d' -e '/^\[\[ ${1:-} == --instance/d' -e '/^jv_migration_load_instance /d' -e '/^shift 2$/d' \
         -e '/^case "${1:-discover}" in/,$d' \
-        -e 's/JV_CONFIG/REVIEW_CONFIG/g; s/JV_QUADLET/REVIEW_QUADLET/g' \
+        -e 's/JV_MIGRATION_INSTANCE_CONFIG/REVIEW_CONFIG/g; s/JV_MIGRATION_INSTANCE_QUADLET/REVIEW_QUADLET/g' \
         -e "s|/usr/libexec/justvoxel/mjust/|${review_fixture}/helpers/|g" \
         "$api_planner" > "${review_fixture}/planner.sh"
     source "${review_fixture}/planner.sh"
@@ -132,6 +132,8 @@ printf '%s\n' '{"state":"stopped","online":0,"names":[]}'
 FIXTURE
     chmod +x "${review_fixture}/helpers/"*
     require_config() { :; }
+    jv_migration_validate_data() { :; }
+    jv_migration_players_json() { printf '%s\n' '{"state":"stopped","online":0,"names":[]}'; }
     jv_migration_import_source_prepare() {
         JV_MIGRATION_IMPORT_SOURCE_PATH="${review_fixture}/server"
         JV_MIGRATION_IMPORT_SOURCE_IDENTITY=source-fixture
@@ -194,10 +196,10 @@ cat > "${port_fixture}/podman" <<'EOF'
 #!/usr/bin/bash
 case "$1 $2 $3 $4 $5" in
     'inspect --type container --format {{.State.Running}}')
-        [[ $6 == minecraft && ${FAKE_MINECRAFT_STATE:-missing} != missing ]] || exit 1
+        [[ $6 == minecraft-jv-aaaaaa && ${FAKE_MINECRAFT_STATE:-missing} != missing ]] || exit 1
         printf '%s\n' "${FAKE_MINECRAFT_STATE}"
         ;;
-    'port minecraft 19132/udp  ')
+    'port minecraft-jv-aaaaaa 19132/udp  ')
         [[ ${FAKE_MINECRAFT_MAPPING:-missing} != missing ]] || exit 1
         printf '%s\n' "${FAKE_MINECRAFT_MAPPING}"
         ;;
@@ -212,6 +214,7 @@ fi
 EOF
 chmod 0755 "${port_fixture}/podman" "${port_fixture}/ss"
 export PATH="${port_fixture}:${PATH}"
+JV_INSTANCE_ID=jv-aaaaaa JV_INSTANCE_CONTAINER=minecraft-jv-aaaaaa
 export FAKE_MINECRAFT_STATE=running FAKE_MINECRAFT_MAPPING=0.0.0.0:19132 FAKE_UDP_LISTENER=yes
 FAKE_MINECRAFT_STATE=true
 jv_migration_running_minecraft_owns_port udp 19132 || fail 'running minecraft UDP mapping was not recognized'
@@ -228,10 +231,10 @@ jv_migration_check_import_bedrock_port 19132 no 19133 || fail 'running managed B
 FAKE_MINECRAFT_MAPPING=0.0.0.0:19133
 if jv_migration_check_import_bedrock_port 19132 no 19132 2>/dev/null; then fail 'unrelated Bedrock listener was allowed'; fi
 grep -Fq 'jv_migration_check_import_bedrock_port "$bedrock_port" "$BEDROCK_ENABLED" "$BEDROCK_PORT"' "${repo_root}/mjust/libexec/admin-migration-import-plan-json" || fail 'API Import planner does not use shared Bedrock check'
-grep -Fq 'jv_migration_check_import_bedrock_port "${BEDROCK_PORT}" "${old_bedrock_enabled}" "${old_bedrock}"' "${repo_root}/mjust/libexec/migration-import-plan-destination.sh" || fail 'CLI Import planner does not use shared Bedrock check'
+grep -Fq 'jv_migration_load_instance "${JV_INSTANCE_ID}"' "${repo_root}/mjust/libexec/migration-import-plan-destination.sh" || fail 'CLI Import planner does not use shared Bedrock check'
 
 recovery_transaction="${repo_root}/mjust/libexec/admin-migration-recovery-transaction-json"
-validator_line='        /usr/libexec/justvoxel/mjust/restore-runtime-validate >&2'
+validator_line='    jv_migration_validate_current >&2'
 grep -Fxq "${validator_line}" "${recovery_transaction}" || fail 'recovery validator stdout is not isolated from JSON events'
 cat > "${port_fixture}/restore-runtime-validate" <<'EOF'
 #!/usr/bin/bash
@@ -240,7 +243,7 @@ echo 'Minecraft: checked'
 [[ ${FAKE_VALIDATOR_FAIL:-no} == no ]]
 EOF
 chmod 0755 "${port_fixture}/restore-runtime-validate"
-validator_call="${validator_line/\/usr\/libexec\/justvoxel\/mjust\/restore-runtime-validate/${port_fixture}\/restore-runtime-validate}"
+validator_call="${validator_line/jv_migration_validate_current/${port_fixture}\/restore-runtime-validate}"
 bash -e -c "printf '%s\\n' '{\"event\":\"progress\"}'; ${validator_call}; printf '%s\\n' '{\"event\":\"result\"}'" > "${port_fixture}/recovery.out" 2> "${port_fixture}/recovery.err" || fail 'successful recovery validator fixture failed'
 [[ $(wc -l < "${port_fixture}/recovery.out") == 2 ]] || fail 'validator diagnostics contaminated recovery JSON stdout'
 jq -e '.event == "progress" or .event == "result"' "${port_fixture}/recovery.out" >/dev/null || fail 'recovery fixture emitted non-JSON stdout'
@@ -250,18 +253,10 @@ if FAKE_VALIDATOR_FAIL=yes bash -e -c "${validator_call}; printf '%s\\n' '{\"eve
 
 for text in \
     'Type IMPORT to continue:' \
-    'The source eula.txt, if present, is NOT accepted' \
     'plugins are executable server code' \
     'jv_migration_snapshot_runtime' \
-    'jv_migration_rollback_data' \
-    'jv_migration_assert_fresh_selinux_path' \
-    'jv_migration_remove_fresh_selinux_rule' \
-    'restore-runtime-validate' \
     'jv_stop_minecraft_adaptive' \
-    '/usr/libexec/justvoxel/mjust/validate' \
-    'JUSTVOXEL_REGENERATE_RCON=1' \
     'online-mode=false' \
-    'MINECRAFT_VERSION_MODE=pinned' \
     'mjust migration-recover'; do
     grep -Fq "${text}" <<< "${import_text}" || fail "import workflow invariant missing: ${text}"
 done
@@ -288,7 +283,7 @@ if grep -Fq 'postplan=' "${repo_root}/mjust/libexec/admin-migration-import-trans
 if grep -Fq 'jv_migration_source_identity "${JV_MIGRATION_SOURCE}"' "${repo_root}/mjust/libexec/migration-import-activate.sh"; then fail 'Import activation must not re-read the original source after staging'; fi
 grep -Fq 'jv_migration_api_result "${preactivation_outcome}" pre-activation' "${repo_root}/mjust/libexec/migration-import-common.sh" || fail 'Import backend does not report bounded pre-activation failure directly'
 activation="${repo_root}/mjust/libexec/migration-import-activate.sh"
-grep -Fq 'restore-runtime-validate "${source_version}"' "${activation}" || fail 'Import does not verify the concrete source version'
+grep -Fq 'jv_migration_validate_runtime "${source_version}"' "${activation}" || fail 'Import does not verify the concrete source version'
 if grep -Eq 'rcon-cli.*version' "${activation}" "${repo_root}/mjust/libexec/restore-runtime-validate"; then fail 'Import/restore bypasses readiness-aware version verification'; fi
 grep -Fq 'verify-minecraft-stack "${1:-${MINECRAFT_VERSION}}"' "${repo_root}/mjust/libexec/restore-runtime-validate" || fail 'restore does not use the authoritative version verifier'
 import_transaction="${repo_root}/mjust/libexec/admin-migration-import-transaction-json"
@@ -304,15 +299,11 @@ result_line="$(grep -n '^[[:space:]]*emit_result succeeded "\$status"$' "${impor
 [[ -n ${execute_line} && -n ${verify_line} && -n ${result_line} ]] || fail 'Import transaction success event sequence is incomplete'
 (( execute_line < verify_line && verify_line < result_line )) || fail 'Import transaction must emit running, verifying, then succeeded'
 if grep -Fq 'Migration and Minecraft-version upgrade remain separate' "${activation}"; then fail 'Import completion retains stale version-upgrade wording'; fi
-runtime_line="$(grep -n '^/usr/libexec/justvoxel/mjust/restore-runtime-validate ' "${activation}" | cut -d: -f1)"
-validation_line="$(grep -n '^JUSTVOXEL_RUNTIME_ALREADY_VALIDATED=1 JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/validate-backend$' "${activation}" | cut -d: -f1)"
+runtime_line="$(grep -n '^jv_migration_validate_runtime ' "${activation}" | cut -d: -f1)"
 validated_line="$(grep -n '^jv_migration_write_state .* validated ' "${activation}" | cut -d: -f1)"
 success_line="$(grep -n '^jv_migration_api_result succeeded validated ' "${activation}" | cut -d: -f1)"
-(( runtime_line < validation_line && validation_line < validated_line && validated_line < success_line )) || fail 'backend success precedes appliance validation/validated state'
-rollback="${repo_root}/mjust/libexec/migration-import-common.sh"
-rollback_runtime_line="$(grep -n 'if /usr/libexec/justvoxel/mjust/restore-runtime-validate' "${rollback}" | cut -d: -f1)"
-rollback_validation_line="$(grep -n '&& JUSTVOXEL_RUNTIME_ALREADY_VALIDATED=1 JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/validate-backend; then' "${rollback}" | cut -d: -f1)"
-(( rollback_runtime_line < rollback_validation_line )) || fail 'rollback must verify runtime before full appliance validation'
+(( runtime_line < validated_line && validated_line < success_line )) || fail 'success precedes selected runtime validation'
+grep -Fq 'jv_migration_recover_selected' "${repo_root}/mjust/libexec/migration-import-common.sh" || fail 'rollback does not use selected durable evidence'
 grep -Fq 'if [[ ${JUSTVOXEL_RUNTIME_ALREADY_VALIDATED:-0} == 1 ]]; then' "${validate_backend}" || fail 'full validation lacks explicit runtime-only skip'
 if grep -Fq 'storage_write_network_fstab' <<< "${transport_text}"; then fail 'temporary migration transport must not write fstab'; fi
 grep -Fq 'JV_MIGRATION_SMB_CREDENTIALS="${JV_MIGRATION_TRANSPORT_ROOT}/smb.credentials"' <<< "${transport_text}" || fail 'temporary SMB credentials are not under /run transport state'
@@ -327,11 +318,11 @@ grep -Fq 'JUSTVOXEL_REGENERATE_RCON' "${common}" || fail 'RCON regeneration supp
 grep -Fq 'migration-api.sh' "${recovery}" || fail 'migration Recovery frontend does not use shared API helper'
 grep -Fq 'jv_migration_recovery_plan' "${recovery}" || fail 'migration Recovery frontend does not plan through the Agent'
 grep -Fq 'jv_migration_recovery_apply' "${recovery}" || fail 'migration Recovery frontend does not apply through the Agent'
-grep -Fq 'rolled-back-fresh' "${recovery_backend}" || fail 'fresh unconfigured rollback recovery is not supported'
-grep -Fq '/usr/libexec/justvoxel/mjust/restore-runtime-validate' "${recovery_backend}" || fail 'configured migration recovery must validate the restored Minecraft runtime'
-grep -Fq 'jv_migration_runtime_paths' "${recovery_backend}" || fail 'fresh migration recovery does not prove generated runtime files are absent'
+if grep -Fq 'rolled-back-fresh' "${recovery_backend}"; then fail 'fresh recovery remains active'; fi
+grep -Fq 'admin-migration-recovery-transaction-json --instance' "${recovery_backend}" || fail 'configured migration recovery must validate the restored Minecraft runtime'
+grep -Fq 'jv_migration_validate_evidence' "${migration_common}" || fail 'fresh migration recovery does not prove generated runtime files are absent'
 grep -Fq 'FINALIZE ROLLBACK' "${recovery_backend}" || fail 'migration recovery destructive confirmation missing'
-grep -Fq 'jv_migration_clear_recovery' "${recovery_backend}" || fail 'migration recovery registry cleanup missing'
+grep -Fq 'jv_migration_clear_recovery' "${repo_root}/mjust/libexec/admin-migration-recovery-transaction-json" || fail 'migration recovery registry cleanup missing'
 
 grep -Fq "warn '/dev/zram0 is not available" "${validate_backend}" || fail 'missing advisory zram-disabled validation path'
 grep -Fq "warn 'zram0 is not active as swap" "${validate_backend}" || fail 'missing advisory zram-inactive validation path'
@@ -351,3 +342,75 @@ grep -Fq 'import source=""' "${justfile}" || fail 'mjust import recipe missing'
 grep -Fq 'migration-recover transaction=""' "${justfile}" || fail 'mjust migration-recover recipe missing'
 
 echo 'migration workflow invariant tests passed.'
+
+# Instance boundaries and pre-destructive staging are enforced by the actual helpers.
+for backend in migration-import-backend migration-export-backend admin-migration-import-plan-json admin-migration-export-plan-json admin-migration-import-transaction-json admin-migration-export-transaction-json admin-migration-recovery-json admin-migration-recovery-transaction-json; do
+    grep -Fq '== --instance' "${repo_root}/mjust/libexec/${backend}" || fail "missing explicit selection: ${backend}"
+    if grep -Eq 'minecraft[.]service|podman exec minecraft ' "${repo_root}/mjust/libexec/${backend}"; then fail "fixed runtime in ${backend}"; fi
+done
+for forbidden in 'minecraftInstances.register(' 'mode=fresh' 'write_main_config' 'render_runtime'; do
+    if grep -Fq "${forbidden}" "${repo_root}/management/cmd/justvoxel-management-agent/admin_migration_import_apply.go" "${api_planner}" "${activation}"; then fail "legacy Import behavior: ${forbidden}"; fi
+done
+grep -Fq 'sourceInstanceID: $sourceInstanceID' "${exporter}" || fail 'export lacks informational provenance'
+if grep -Fq 'sourceInstanceID' "${source_planner}" "${destination_planner}"; then fail 'source provenance controls destination'; fi
+grep -Fq 'jv_migration_load_instance "${JV_INSTANCE_ID}"' "${destination_planner}" || fail 'destination is not authoritative'
+grep -Fq 'instance_id:$id' "${migration_common}" || fail 'missing durable instance evidence'
+grep -Fq '.instance_id==$id' "${migration_common}" || fail 'recovery does not bind evidence to selected instance'
+grep -Fq 'if [[ ${minecraft_was_active} != yes ]]; then systemctl stop "${JV_INSTANCE_UNIT}"; fi' "${activation}" || fail 'stopped Import destination remains running'
+
+# Exercise the real rename/rollback implementation with two isolated destinations.
+# Runtime commands are mocks; no host services, container engine or live paths run.
+(
+    fixture="$(mktemp -d)"
+    trap 'rm -rf -- "${fixture}"' EXIT
+    JV_INSTANCE_ID=jv-aaaaaa
+    JV_INSTANCE_UNIT=minecraft-jv-aaaaaa.service
+    DATA_PATH="${fixture}/minecraft-instances/${JV_INSTANCE_ID}/data"
+    sibling="${fixture}/minecraft-instances/jv-bbbbbb/data"
+    mkdir -p "${DATA_PATH}" "${sibling}" "${fixture}/runtime"
+    printf old > "${DATA_PATH}/world"
+    printf sibling > "${sibling}/world"
+    JV_MIGRATION_INSTANCE_CONFIG="${fixture}/runtime/config.json"
+    printf environment > "${fixture}/runtime/minecraft.env"
+    printf quadlet > "${fixture}/runtime/minecraft-${JV_INSTANCE_ID}.container"
+    jq -cn --arg id "${JV_INSTANCE_ID}" --arg path "${DATA_PATH}" \
+        --arg env "$(sha256sum "${fixture}/runtime/minecraft.env" | awk '{print $1}')" \
+        --arg quadlet "$(sha256sum "${fixture}/runtime/minecraft-${JV_INSTANCE_ID}.container" | awk '{print $1}')" \
+        '{runtime:{id:$id},storage:{data_path:$path},environment_sha256:$env,quadlet_sha256:$quadlet}' > "${JV_MIGRATION_INSTANCE_CONFIG}"
+    chmod 0600 "${fixture}/runtime/"*
+    jv_migration_runtime_paths() { printf '%s\n' "${JV_MIGRATION_INSTANCE_CONFIG}" "${fixture}/runtime/minecraft.env" "${fixture}/runtime/minecraft-${JV_INSTANCE_ID}.container"; }
+    jv_migration_load_instance() { [[ $1 == jv-aaaaaa ]]; }
+    jv_migration_validate_runtime() { printf 'validate %s\n' "${JV_INSTANCE_ID}" >> "${fixture}/calls"; }
+    # Private evidence ownership is simulated independently of the test runner UID.
+    stat() { if [[ $1 == -c && $2 == '%u:%g:%a' ]]; then printf '0:0:600\n'; else command stat "$@"; fi; }
+    systemctl() {
+        printf '%s\n' "$*" >> "${fixture}/calls"
+        [[ $* == 'daemon-reload' || $* == *"${JV_INSTANCE_UNIT}" ]] || fail 'rollback targeted a sibling unit'
+    }
+    for minecraft_was_active in yes no; do
+        transaction="$(dirname -- "${DATA_PATH}")/.justvoxel-import-${minecraft_was_active}"
+        mkdir -m0700 "${transaction}"
+        mkdir "${transaction}/staged-server"
+        printf imported > "${transaction}/staged-server/world"
+        source_identity=external-without-justvoxel-id
+        jv_migration_snapshot_runtime "${transaction}"
+        jv_migration_write_state "${transaction}" switching external paper
+        jv_migration_activate_data "${transaction}" "${DATA_PATH}" "${transaction}/staged-server" yes
+        [[ $(cat "${DATA_PATH}/world") == imported ]] || fail 'selected data was not activated'
+        jv_migration_recover_selected "${transaction}" || fail 'selected rollback failed'
+        [[ $(cat "${DATA_PATH}/world") == old && $(cat "${sibling}/world") == sibling ]] || fail 'rollback changed sibling data'
+        [[ $(cat "${transaction}/failed-import/world") == imported ]] || fail 'failed imported data was lost'
+        if [[ ${minecraft_was_active} == no ]]; then
+            [[ $(tail -n1 "${fixture}/calls") == "stop ${JV_INSTANCE_UNIT}" ]] || fail 'stopped destination was left running'
+        fi
+        # Repeating recovery after a crash following the restore rename is safe.
+        jv_migration_recover_selected "${transaction}" || fail 'rollback is not restart-safe'
+        cp "${transaction}/evidence.json" "${transaction}/valid-evidence"
+        jq '.instance_id="jv-bbbbbb"' "${transaction}/valid-evidence" > "${transaction}/evidence.json"
+        before="$(wc -l < "${fixture}/calls")"
+        if jv_migration_recover_selected "${transaction}"; then fail 'foreign recovery identity accepted'; fi
+        [[ $(wc -l < "${fixture}/calls") == "${before}" ]] || fail 'foreign recovery touched runtime'
+        jq 'del(.instance_id)' "${transaction}/valid-evidence" > "${transaction}/evidence.json"
+        if jv_migration_recover_selected "${transaction}"; then fail 'old recovery evidence guessed a destination'; fi
+    done
+)

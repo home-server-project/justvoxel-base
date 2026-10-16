@@ -8,6 +8,10 @@ source /usr/libexec/justvoxel/mjust/migration-common.sh
 source /usr/libexec/justvoxel/mjust/migration-transport-device.sh
 
 require_root
+source /usr/libexec/justvoxel/mjust/migration-instance.sh
+[[ ${1:-} == --instance && ${2:-} =~ ^jv-[a-z0-9]{6,12}$ ]] || { echo 'ERROR: --instance jv-... is required.' >&2; exit 2; }
+jv_migration_load_instance "$2" || exit 1
+shift 2
 
 emit_error() {
     local code="$1" message="$2"
@@ -71,7 +75,7 @@ discover() {
         fi
     done < <(lsblk -lnpo NAME,TYPE | awk '$2 == "part" || $2 == "disk" {print $1}')
 
-    if jv_backup_load_config >/dev/null 2>&1 && jv_backup_validate_mount_identity >/dev/null 2>&1; then
+    if jv_migration_backup_load_config >/dev/null 2>&1 && jv_backup_validate_mount_identity >/dev/null 2>&1; then
         backup_available=true
     fi
     filename="justvoxel-migration-$(jv_archive_server_label)-$(date -u +%Y-%m-%d-%H%M).tar.gz"
@@ -119,7 +123,7 @@ plan() {
         return 0
     }
 
-    /usr/libexec/justvoxel/mjust/validate-data-mount >/dev/null 2>&1 || {
+    jv_migration_validate_data >/dev/null 2>&1 || {
         emit_error data_unavailable 'Minecraft data storage could not be validated.'
         return 0
     }
@@ -152,7 +156,7 @@ plan() {
             target_fstype="$(findmnt -n -o FSTYPE --target "$parent" 2>/dev/null || true)"
             ;;
         backup)
-            jv_backup_load_config >/dev/null 2>&1 || { emit_error backup_unavailable 'Configured JustVoxel backup storage is unavailable.'; return 0; }
+            jv_migration_backup_load_config >/dev/null 2>&1 || { emit_error backup_unavailable 'Configured JustVoxel backup storage is unavailable.'; return 0; }
             jv_backup_validate_mount_identity >/dev/null 2>&1 || { emit_error backup_unavailable 'Configured JustVoxel backup storage identity could not be verified.'; return 0; }
             normalized_path="$minecraft_backup_path"
             target_display="$normalized_path/$filename"
@@ -230,7 +234,7 @@ plan() {
         return 0
     fi
 
-    player_json="$(/usr/libexec/justvoxel/mjust/web-status-json players 2>/dev/null)" || {
+    player_json="$(jv_migration_players_json 2>/dev/null)" || {
         emit_error player_status_unavailable 'Minecraft player status could not be checked safely.'
         return 0
     }
@@ -244,7 +248,7 @@ plan() {
     players="$(jq -c '.names' <<< "$player_json")"
     if [[ "$state" == running && "$online" =~ ^[0-9]+$ ]] && (( online > 0 )); then players_confirmation=true; fi
 
-    config_identity="$(sha256sum "$JV_CONFIG" | awk '{print $1}')"
+    config_identity="$(sha256sum "$JV_MIGRATION_INSTANCE_CONFIG" | awk '{print $1}')"
     data_identity="$(stat -Lc '%d:%i' "$DATA_PATH" 2>/dev/null || true)"
     [[ -n "$config_identity" && -n "$data_identity" ]] || { emit_error data_unavailable 'Export source identity could not be captured safely.'; return 0; }
 

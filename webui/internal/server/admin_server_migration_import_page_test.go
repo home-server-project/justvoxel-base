@@ -98,8 +98,8 @@ func TestServerImportIncompatibleWorkspaceReview(t *testing.T) {
 					"Reviewed source plan", "Reviewed destination plan", "Online identity", "Imported data", "Game settings", "Plugins",
 					"Minecraft data", "Backups", "Ports", "Memory / timezone",
 					`<section class="panel notice error">`, "Safety checks and confirmations", "This import can’t continue",
-					`class="button-link" href="/?workspace=version&amp;tab=software">Server Version`,
-					`class="button-link secondary" href="/?workspace=migration&amp;tab=import">Back to Server Import`,
+					`class="button-link" href="/?workspace=version&amp;tab=software&amp;server=jv-a1b2c3">Server Version`,
+					`class="button-link secondary" href="/?workspace=migration&amp;tab=import&amp;server=jv-a1b2c3">Back to Server Import`,
 				} {
 					if !strings.Contains(body, want) {
 						t.Fatalf("missing %q: %s", want, body)

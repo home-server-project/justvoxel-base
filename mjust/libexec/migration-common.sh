@@ -140,9 +140,9 @@ jv_migration_running_minecraft_owns_port() {
         *) return 1 ;;
     esac
     [[ ${port} =~ ^[0-9]+$ ]] || return 1
-    running="$(podman inspect --type container --format '{{.State.Running}}' minecraft 2>/dev/null)" || return 1
+    running="$(podman inspect --type container --format '{{.State.Running}}' "${JV_INSTANCE_CONTAINER:?}" 2>/dev/null)" || return 1
     [[ ${running} == true ]] || return 1
-    mappings="$(podman port minecraft "${container_port}/${proto}" 2>/dev/null)" || return 1
+    mappings="$(podman port "${JV_INSTANCE_CONTAINER:?}" "${container_port}/${proto}" 2>/dev/null)" || return 1
     while IFS= read -r mapping; do
         [[ ${mapping} =~ ^.+:([0-9]+)$ && ${BASH_REMATCH[1]} == "${port}" ]] && return 0
     done <<< "${mappings}"
@@ -164,6 +164,7 @@ jv_migration_write_state() {
     local transaction="$1" phase="$2" source="$3" source_type="${4:-unknown}" tmp
     tmp="${transaction}/.state.tmp"
     {
+        printf 'instance_id=%q\n' "${JV_INSTANCE_ID:?}"
         printf 'phase=%q\n' "${phase}"
         printf 'source=%q\n' "${source}"
         printf 'source_type=%q\n' "${source_type}"
@@ -171,146 +172,104 @@ jv_migration_write_state() {
     } > "${tmp}"
     chmod 0600 "${tmp}"
     mv -f -- "${tmp}" "${transaction}/state"
+    sync -f "${transaction}/state"
 }
 
+# Portable import never changes appliance storage, backups or firewall ownership.
 jv_migration_runtime_paths() {
-    cat <<'PATHS'
-/etc/justvoxel/justvoxel.conf
-/etc/justvoxel/minecraft.env
-/etc/justvoxel/minecraft-backup.env
-/etc/containers/systemd/minecraft.container
-/etc/systemd/system/minecraft-backup.service
-/etc/systemd/system/minecraft-backup.timer
-PATHS
+    printf '%s\n' "/etc/justvoxel/instances/${JV_INSTANCE_ID:?}/config.json" "/etc/justvoxel/instances/${JV_INSTANCE_ID}/minecraft.env" "/etc/containers/systemd/minecraft-${JV_INSTANCE_ID}.container"
 }
-
 jv_migration_snapshot_runtime() {
-    local transaction="$1" old_java="$2" old_bedrock_enabled="$3" old_bedrock="$4" candidate_java="$5" candidate_bedrock_enabled="$6" candidate_bedrock="$7"
-    local state_dir path rel enabled active proto port exists
-    state_dir="${transaction}/destination-state"
-    install -d -m0700 -o root -g root "${state_dir}/files"
-    : > "${state_dir}/files.tsv"
-
+    local transaction="$1" path
+    install -d -m0700 "${transaction}/destination-state"
     while IFS= read -r path; do
-        [[ -n ${path} ]] || continue
-        rel="${path#/}"
-        if [[ -e ${path} || -L ${path} ]]; then
-            printf 'present\t%s\n' "${path}" >> "${state_dir}/files.tsv"
-            install -d -m0700 -o root -g root "${state_dir}/files/$(dirname -- "${rel}")"
-            cp -a -- "${path}" "${state_dir}/files/${rel}"
-        else
-            printf 'absent\t%s\n' "${path}" >> "${state_dir}/files.tsv"
-        fi
+        [[ -f ${path} && ! -L ${path} ]] || return 1
+        cp -a -- "${path}" "${transaction}/destination-state/$(basename -- "${path}")" || return 1
     done < <(jv_migration_runtime_paths)
-
-    enabled="$(systemctl is-enabled minecraft-backup.timer 2>/dev/null || true)"
-    active="$(systemctl is-active minecraft-backup.timer 2>/dev/null || true)"
-    printf '%s\n' "${enabled}" > "${state_dir}/backup-timer.enabled"
-    printf '%s\n' "${active}" > "${state_dir}/backup-timer.active"
-
-    : > "${state_dir}/firewall.tsv"
-    declare -A seen=()
-    for spec in "tcp:${old_java}" "udp:${old_bedrock}" "tcp:${candidate_java}" "udp:${candidate_bedrock}"; do
-        proto="${spec%%:*}"
-        port="${spec#*:}"
-        [[ ${port} =~ ^[0-9]+$ ]] || continue
-        if [[ ${proto} == udp ]]; then
-            if [[ ${port} == "${old_bedrock}" && ${old_bedrock_enabled} != yes && ${port} != "${candidate_bedrock}" ]]; then continue; fi
-            if [[ ${port} == "${candidate_bedrock}" && ${candidate_bedrock_enabled} != yes && ${port} != "${old_bedrock}" ]]; then continue; fi
-            if [[ ${port} == "${old_bedrock}" && ${port} == "${candidate_bedrock}" && ${old_bedrock_enabled} != yes && ${candidate_bedrock_enabled} != yes ]]; then continue; fi
-        fi
-        [[ -n ${seen[${proto}:${port}]:-} ]] && continue
-        seen["${proto}:${port}"]=1
-        if firewall-cmd --permanent --query-port="${port}/${proto}" >/dev/null 2>&1; then exists=1; else exists=0; fi
-        printf '%s\t%s\t%s\n' "${proto}" "${port}" "${exists}" >> "${state_dir}/firewall.tsv"
-    done
+    jq -cn --arg id "${JV_INSTANCE_ID}" --arg data "${DATA_PATH}" --arg tx "${transaction}" \
+        --arg config "$(sha256sum "${JV_MIGRATION_INSTANCE_CONFIG}" | awk '{print $1}')" \
+        --arg data_identity "$(stat -Lc '%d:%i' "${DATA_PATH}")" \
+        --arg staged "$(if [[ -d ${transaction}/staged-server ]]; then jv_migration_source_identity "${transaction}/staged-server"; elif [[ $(basename -- "${transaction}") == .justvoxel-export-* ]]; then printf export; else printf pending; fi)" \
+        --arg source "${source_identity:-}" --argjson running "$([[ ${minecraft_was_active} == yes ]] && echo true || echo false)" \
+        '{schema:1,instance_id:$id,data_path:$data,transaction:$tx,config_identity:$config,data_identity:$data_identity,staged_identity:$staged,source_identity:$source,was_running:$running}' > "${transaction}/.evidence.tmp"
+    chmod 0600 "${transaction}/.evidence.tmp"
+    sync -f "${transaction}/.evidence.tmp"
+    mv -f -- "${transaction}/.evidence.tmp" "${transaction}/evidence.json"
+    sync -f "${transaction}/evidence.json"
 }
-
-jv_migration_restore_firewall() {
-    local transaction="$1" proto port expected
-    local state_dir="${transaction}/destination-state"
-    [[ -r ${state_dir}/firewall.tsv ]] || return 0
-    while IFS=$'\t' read -r proto port expected; do
-        [[ -n ${proto} && ${port} =~ ^[0-9]+$ ]] || continue
-        if [[ ${expected} == 1 ]]; then
-            firewall-cmd --permanent --add-port="${port}/${proto}" >/dev/null 2>&1 || return 1
-        else
-            firewall-cmd --permanent --remove-port="${port}/${proto}" >/dev/null 2>&1 || true
-        fi
-    done < "${state_dir}/firewall.tsv"
-    firewall-cmd --reload >/dev/null 2>&1
+jv_migration_validate_evidence() {
+    local transaction="$1" id parent
+    parent="$(dirname -- "${DATA_PATH}")"
+    [[ ${JV_INSTANCE_ID:-} =~ ^jv-[a-z0-9]{6,12}$ && $(dirname -- "${transaction}") == "${parent}" ]] || return 1
+    case $(basename -- "${transaction}") in .justvoxel-import-*|.justvoxel-export-*) ;; *) return 1 ;; esac
+    [[ -d ${transaction} && ! -L ${transaction} && $(realpath -e -- "${transaction}") == "${transaction}" ]] || return 1
+    [[ -f ${transaction}/evidence.json && ! -L ${transaction}/evidence.json && $(stat -c '%u:%g:%a' "${transaction}/evidence.json") == 0:0:600 ]] || return 1
+    jq -e --arg id "${JV_INSTANCE_ID}" --arg data "${DATA_PATH}" --arg tx "${transaction}" \
+        '.schema==1 and .instance_id==$id and .data_path==$data and .transaction==$tx and (.was_running|type=="boolean") and (.data_identity|type=="string") and (.config_identity|test("^[a-f0-9]{64}$")) and (.staged_identity|type=="string")' "${transaction}/evidence.json" >/dev/null || return 1
+    [[ $(sed -n 's/^instance_id=//p' "${transaction}/state") == "${JV_INSTANCE_ID}" ]] || return 1
+    # Validate the complete selected snapshot before restoring any file.
+    local path saved
+    while IFS= read -r path; do
+        saved="${transaction}/destination-state/$(basename -- "${path}")"
+        [[ -f ${saved} && ! -L ${saved} && $(stat -c '%u:%g:%a' "${saved}") == 0:0:600 ]] || return 1
+    done < <(jv_migration_runtime_paths)
+    [[ $(sha256sum "${transaction}/destination-state/config.json" | awk '{print $1}') == $(jq -r '.config_identity' "${transaction}/evidence.json") ]] || return 1
+    [[ $(sha256sum "${transaction}/destination-state/minecraft.env" | awk '{print $1}') == $(jq -r '.environment_sha256' "${transaction}/destination-state/config.json") ]] || return 1
+    [[ $(sha256sum "${transaction}/destination-state/minecraft-${JV_INSTANCE_ID}.container" | awk '{print $1}') == $(jq -r '.quadlet_sha256' "${transaction}/destination-state/config.json") ]] || return 1
+    jq -e --arg id "${JV_INSTANCE_ID}" --arg path "${DATA_PATH}" '.runtime.id==$id and .storage.data_path==$path' "${transaction}/destination-state/config.json" >/dev/null
 }
-
 jv_migration_restore_runtime() {
-    local transaction="$1" state_dir status path rel timer_enabled timer_active
-    state_dir="${transaction}/destination-state"
-    [[ -r ${state_dir}/files.tsv ]] || {
-        echo 'ERROR: destination runtime snapshot is missing.' >&2
-        return 1
-    }
-
-    systemctl stop minecraft.service >/dev/null 2>&1 || true
-    systemctl disable --now minecraft-backup.timer >/dev/null 2>&1 || true
-
-    while IFS=$'\t' read -r status path; do
-        [[ -n ${path} ]] || continue
-        rel="${path#/}"
-        if [[ ${status} == present ]]; then
-            install -d -m0755 -o root -g root "$(dirname -- "${path}")"
-            rm -rf -- "${path}"
-            cp -a -- "${state_dir}/files/${rel}" "${path}"
-        else
-            rm -rf -- "${path}"
+    local transaction="$1" path tmp
+    jv_migration_validate_evidence "${transaction}" || return 1
+    while IFS= read -r path; do
+        tmp="$(mktemp "$(dirname -- "${path}")/.migration-recovery.XXXXXX")" || return 1
+        cp -a -- "${transaction}/destination-state/$(basename -- "${path}")" "${tmp}" || return 1
+        sync -f "${tmp}" || return 1
+        mv -f -- "${tmp}" "${path}" || return 1
+        sync -f "${path}" || return 1
+    done < <(jv_migration_runtime_paths)
+    systemctl daemon-reload || return 1
+    jv_migration_load_instance "${JV_INSTANCE_ID}"
+}
+# Recovery is idempotent across interruption between either rename and state write.
+jv_migration_recover_selected() {
+    local transaction="$1" phase running current_identity
+    jv_migration_validate_evidence "${transaction}" || return 1
+    phase="$(sed -n 's/^phase=//p' "${transaction}/state")"
+    running="$(jq -r '.was_running' "${transaction}/evidence.json")"
+    if [[ $(basename -- "${transaction}") == .justvoxel-export-* ]]; then
+        jv_migration_validate_data || return 1
+        [[ $(stat -Lc '%d:%i' "${DATA_PATH}") == $(jq -r '.data_identity' "${transaction}/evidence.json") ]] || return 1
+        if [[ ${running} == true ]]; then systemctl start "${JV_INSTANCE_UNIT}" || return 1; jv_migration_validate_runtime || return 1
+        elif systemctl is-active --quiet "${JV_INSTANCE_UNIT}"; then return 1; fi
+        return 0
+    fi
+    case "${phase}" in
+        validated) return 0 ;;
+        staging|prepared|ready-to-switch|switching|imported-active|validating|rollback|critical-rollback|rolled-back) ;;
+        *) return 1 ;;
+    esac
+    systemctl stop "${JV_INSTANCE_UNIT}" || return 1
+    if [[ -d ${transaction}/pre-import && ! -L ${transaction}/pre-import ]]; then
+        [[ $(stat -Lc '%d:%i' "${transaction}/pre-import") == $(jq -r '.data_identity' "${transaction}/evidence.json") ]] || return 1
+        if [[ -e ${DATA_PATH} ]]; then
+            [[ -d ${DATA_PATH} && ! -L ${DATA_PATH} && ! -e ${transaction}/failed-import ]] || return 1
+            mv -- "${DATA_PATH}" "${transaction}/failed-import" || return 1
         fi
-    done < "${state_dir}/files.tsv"
-
-    systemctl daemon-reload
-    timer_enabled="$(cat "${state_dir}/backup-timer.enabled" 2>/dev/null || true)"
-    timer_active="$(cat "${state_dir}/backup-timer.active" 2>/dev/null || true)"
-    if [[ ${timer_enabled} == enabled ]]; then
-        systemctl enable minecraft-backup.timer >/dev/null 2>&1 || return 1
+        mv -- "${transaction}/pre-import" "${DATA_PATH}" || return 1
     else
-        systemctl disable minecraft-backup.timer >/dev/null 2>&1 || true
+        [[ -d ${DATA_PATH} && ! -L ${DATA_PATH} && $(stat -Lc '%d:%i' "${DATA_PATH}") == $(jq -r '.data_identity' "${transaction}/evidence.json") ]] || return 1
     fi
-    if [[ ${timer_active} == active ]]; then
-        systemctl start minecraft-backup.timer >/dev/null 2>&1 || return 1
-    else
-        systemctl stop minecraft-backup.timer >/dev/null 2>&1 || true
-    fi
-
-    jv_migration_restore_firewall "${transaction}"
-}
-
-jv_migration_remove_fresh_container() {
-    systemctl stop minecraft.service >/dev/null 2>&1 || true
-    podman rm -f minecraft >/dev/null 2>&1 || true
-}
-
-jv_migration_selinux_pattern() {
-    local path="$1" escaped
-    escaped="$(printf '%s' "${path}" | sed 's/[][\\.^$*+?(){}|]/\\&/g')"
-    printf '%s(/.*)?' "${escaped}"
-}
-
-jv_migration_assert_fresh_selinux_path() {
-    local path="$1" pattern
-    pattern="$(jv_migration_selinux_pattern "${path}")"
-    if semanage fcontext -l -C 2>/dev/null | awk -v p="${pattern}" '$1 == p {found=1} END {exit !found}'; then
-        echo "ERROR: fresh import destination already has a local SELinux fcontext rule: ${pattern}" >&2
-        echo 'Choose another Minecraft data path or remove/reconcile that administrator rule manually before import.' >&2
+    jv_migration_restore_runtime "${transaction}" || return 1
+    if ! systemctl start "${JV_INSTANCE_UNIT}"; then
+        if [[ ${running} != true ]]; then systemctl stop "${JV_INSTANCE_UNIT}" || true; fi
         return 1
     fi
-}
-
-jv_migration_remove_fresh_selinux_rule() {
-    local path="$1" pattern
-    pattern="$(jv_migration_selinux_pattern "${path}")"
-    semanage fcontext -d "${pattern}" >/dev/null 2>&1 || true
-}
-
-jv_migration_apply_candidate_firewall() {
-    local old_java="$1" old_bedrock_enabled="$2" old_bedrock="$3"
-    update_firewall_ports "${old_java}" "${old_bedrock_enabled}" "${old_bedrock}"
+    local valid=yes
+    jv_migration_validate_runtime || valid=no
+    if [[ ${running} != true ]]; then systemctl stop "${JV_INSTANCE_UNIT}" || valid=no; fi
+    [[ ${valid} == yes ]] || return 1
+    jv_migration_write_state "${transaction}" rolled-back recovery recovery
 }
 
 jv_migration_manifest_field() {

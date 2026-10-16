@@ -36,7 +36,7 @@ func migrationSafetyResponse(t *testing.T, response *httptest.ResponseRecorder, 
 func migrationSafetyStarted(t *testing.T, response *httptest.ResponseRecorder) {
 	t.Helper()
 	migrationSafetyResponse(t, response, http.StatusSeeOther)
-	if got := response.Header().Get("Location"); got != "/workspace/migration/progress/"+serverMigrationOperationID {
+	if got := response.Header().Get("Location"); got != "/workspace/migration/progress/"+serverMigrationOperationID+"?server=jv-a1b2c3" {
 		t.Fatalf("progress redirect=%q", got)
 	}
 }
@@ -214,13 +214,12 @@ func TestMigrationWorkspaceExportApplyRejectsStaleReviewedPlan(t *testing.T) {
 
 func TestMigrationWorkspaceImportRequiredConfirmationsBlockApply(t *testing.T) {
 	for _, tc := range []struct{ field, message string }{
-		{"players_confirmed", "online players"}, {"eula_accepted", "Minecraft EULA"},
+		{"players_confirmed", "online players"},
 		{"vanilla_confirmed", "Vanilla-to-Paper"}, {"plugins_confirmed", "external plugin JARs"},
 		{"online_mode_confirmed", "online-mode=true"},
 	} {
 		t.Run(tc.field, func(t *testing.T) {
 			plan := successfulImportPlan("replace")
-			plan.Requirements.EULAAcceptanceRequired = true
 			plan.Requirements.VanillaConfirmationRequired = true
 			client := migrationSafetyImportClient(plan)
 			values := migrationSafetyImportValues("local")
@@ -251,7 +250,7 @@ func TestMigrationWorkspaceImportSMBSourcePasswordIsNotEchoed(t *testing.T) {
 	values := configuredImportRequestValues("smb")
 	values.Set("source_smb_password", secret)
 	response := httptestResponse(migrationSafetyApp(t, client), importWebRequest(http.MethodPost, "http://example/workspace/migration/import/review", values))
-	migrationSafetyResponse(t, response, http.StatusOK, `action="/workspace/migration/import/apply"`)
+	migrationSafetyResponse(t, response, http.StatusOK, `action="/workspace/migration/import/apply?server=jv-a1b2c3"`)
 	if client.planCalls != 1 || client.applyCalls != 0 || client.planReq.Source.SMBPassword != secret {
 		t.Fatal("SMB planning must receive the ephemeral source credential without Apply")
 	}
@@ -261,8 +260,8 @@ func TestMigrationWorkspaceImportSMBSourcePasswordIsNotEchoed(t *testing.T) {
 }
 
 func TestMigrationWorkspaceImportApplyReplansAndStartsPersistentOperation(t *testing.T) {
-	client := migrationSafetyImportClient(successfulImportPlan("fresh"))
-	client.importDiscovery = importDiscoveryFixture(false)
+	client := migrationSafetyImportClient(successfulImportPlan("replace"))
+	client.importDiscovery = importDiscoveryFixture(true)
 	client.storage = importStorageFixture()
 	client.apply = migrationSafetyOperation("migration_import")
 	values := migrationSafetyImportValues("smb")
@@ -285,7 +284,7 @@ func TestMigrationWorkspaceImportApplyReplansAndStartsPersistentOperation(t *tes
 	}
 	req := client.applyReq
 	if !req.ImportConfirmed || !req.PlayersConfirmed || !req.EULAAccepted || !req.VanillaConfirmed || !req.PluginsConfirmed || !req.OnlineModeConfirmed ||
-		req.BackupSMBPassword != backupSecret || req.PlanFingerprint != client.plan.PlanFingerprint || req.Request.Source.SMBPassword != sourceSecret ||
+		req.BackupSMBPassword != "" || req.PlanFingerprint != client.plan.PlanFingerprint || req.Request.Source.SMBPassword != sourceSecret ||
 		client.planReq.Source.SMBPassword != sourceSecret {
 		t.Fatal("Import Apply lost confirmations or ephemeral credentials")
 	}

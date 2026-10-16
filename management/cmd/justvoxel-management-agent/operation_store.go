@@ -683,6 +683,15 @@ func (s *operationStore) loadAndRecover() error {
 			}
 			s.operations[journal.OperationID] = journal
 		}
+		if journal.InstanceID == "" && journal.State != operationNeedsAttention {
+			journal.State = operationNeedsAttention
+			journal.Stage = "instance_identity_missing"
+			journal.Status = "Migration recovery evidence has no trustworthy instance ID; no destination was selected."
+			if err := s.persist(journal); err != nil {
+				return err
+			}
+			s.operations[journal.OperationID] = journal
+		}
 		s.currentMigrationID = activeMigration
 	}
 	return nil
@@ -950,8 +959,8 @@ func (s *operationStore) beginDataMigration(planFingerprint string) (operationJo
 	return journal, true, nil
 }
 
-func (s *operationStore) beginMigrationExport(planFingerprint string) (operationJournal, bool, error) {
-	if !operationFingerprintPattern.MatchString(planFingerprint) {
+func (s *operationStore) beginMigrationExport(instanceID, planFingerprint string) (operationJournal, bool, error) {
+	if !instanceIDPattern.MatchString(instanceID) || !operationFingerprintPattern.MatchString(planFingerprint) {
 		return operationJournal{}, false, errors.New("invalid server migration export plan fingerprint")
 	}
 	s.mu.Lock()
@@ -965,7 +974,7 @@ func (s *operationStore) beginMigrationExport(planFingerprint string) (operation
 	}
 	if s.currentMigrationID != "" {
 		current := s.operations[s.currentMigrationID]
-		if current.PlanFingerprint == planFingerprint && current.OperationType == operationTypeMigrationExport {
+		if current.InstanceID == instanceID && current.PlanFingerprint == planFingerprint && current.OperationType == operationTypeMigrationExport {
 			return current, false, nil
 		}
 		return operationJournal{}, false, errMigrationOperationBusy
@@ -982,6 +991,7 @@ func (s *operationStore) beginMigrationExport(planFingerprint string) (operation
 	now := s.now().UTC().Format(time.RFC3339Nano)
 	journal := operationJournal{
 		SchemaVersion:   operationSchemaVersion,
+		InstanceID:      instanceID,
 		OperationID:     id,
 		OperationType:   operationTypeMigrationExport,
 		PlanFingerprint: planFingerprint,
@@ -1001,8 +1011,8 @@ func (s *operationStore) beginMigrationExport(planFingerprint string) (operation
 	return journal, true, nil
 }
 
-func (s *operationStore) beginMigrationImport(planFingerprint string) (operationJournal, bool, error) {
-	if !operationFingerprintPattern.MatchString(planFingerprint) {
+func (s *operationStore) beginMigrationImport(instanceID, planFingerprint string) (operationJournal, bool, error) {
+	if !instanceIDPattern.MatchString(instanceID) || !operationFingerprintPattern.MatchString(planFingerprint) {
 		return operationJournal{}, false, errors.New("invalid server migration import plan fingerprint")
 	}
 	s.mu.Lock()
@@ -1016,7 +1026,7 @@ func (s *operationStore) beginMigrationImport(planFingerprint string) (operation
 	}
 	if s.currentMigrationID != "" {
 		current := s.operations[s.currentMigrationID]
-		if current.PlanFingerprint == planFingerprint && current.OperationType == operationTypeMigrationImport {
+		if current.InstanceID == instanceID && current.PlanFingerprint == planFingerprint && current.OperationType == operationTypeMigrationImport {
 			return current, false, nil
 		}
 		return operationJournal{}, false, errMigrationOperationBusy
@@ -1033,6 +1043,7 @@ func (s *operationStore) beginMigrationImport(planFingerprint string) (operation
 	now := s.now().UTC().Format(time.RFC3339Nano)
 	journal := operationJournal{
 		SchemaVersion:   operationSchemaVersion,
+		InstanceID:      instanceID,
 		OperationID:     id,
 		OperationType:   operationTypeMigrationImport,
 		PlanFingerprint: planFingerprint,
@@ -1052,8 +1063,8 @@ func (s *operationStore) beginMigrationImport(planFingerprint string) (operation
 	return journal, true, nil
 }
 
-func (s *operationStore) beginMigrationRecovery(planFingerprint string) (operationJournal, bool, error) {
-	if !operationFingerprintPattern.MatchString(planFingerprint) {
+func (s *operationStore) beginMigrationRecovery(instanceID, planFingerprint string) (operationJournal, bool, error) {
+	if !instanceIDPattern.MatchString(instanceID) || !operationFingerprintPattern.MatchString(planFingerprint) {
 		return operationJournal{}, false, errors.New("invalid server migration recovery plan fingerprint")
 	}
 	s.mu.Lock()
@@ -1068,10 +1079,10 @@ func (s *operationStore) beginMigrationRecovery(planFingerprint string) (operati
 	}
 	if s.currentMigrationID != "" {
 		current := s.operations[s.currentMigrationID]
-		if current.PlanFingerprint == planFingerprint && current.OperationType == operationTypeMigrationRecovery {
+		if current.InstanceID == instanceID && current.PlanFingerprint == planFingerprint && current.OperationType == operationTypeMigrationRecovery {
 			return current, false, nil
 		}
-		if current.OperationType != operationTypeMigrationImport || current.State != operationNeedsAttention {
+		if current.InstanceID != instanceID || (current.OperationType != operationTypeMigrationImport && current.OperationType != operationTypeMigrationExport) || current.State != operationNeedsAttention {
 			return operationJournal{}, false, errMigrationOperationBusy
 		}
 		original := current
@@ -1110,7 +1121,7 @@ func (s *operationStore) beginMigrationRecovery(planFingerprint string) (operati
 		return operationJournal{}, false, err
 	}
 	now := s.now().UTC().Format(time.RFC3339Nano)
-	journal := operationJournal{SchemaVersion: operationSchemaVersion, OperationID: id, OperationType: operationTypeMigrationRecovery, PlanFingerprint: planFingerprint, State: operationQueued, Stage: "queued", Status: "Server migration recovery operation queued.", StartedAt: now, UpdatedAt: now, Rollback: operationRollback{State: "not_started"}}
+	journal := operationJournal{SchemaVersion: operationSchemaVersion, OperationID: id, OperationType: operationTypeMigrationRecovery, InstanceID: instanceID, PlanFingerprint: planFingerprint, State: operationQueued, Stage: "queued", Status: "Server migration recovery operation queued.", StartedAt: now, UpdatedAt: now, Rollback: operationRollback{State: "not_started"}}
 	if err := s.persist(journal); err != nil {
 		if handedOff != nil {
 			_ = s.persist(*handedOff)
@@ -1380,7 +1391,7 @@ func (s *operationStore) resolveMigrationRecovery(id, status string) (operationJ
 	if current == nil || current.OperationID != id {
 		return operationJournal{}, errOperationNotFound
 	}
-	if current.OperationType != operationTypeMigrationRecovery || current.State != operationNeedsAttention {
+	if (current.OperationType != operationTypeMigrationRecovery && current.OperationType != operationTypeMigrationExport) || current.State != operationNeedsAttention {
 		return operationJournal{}, errors.New("migration recovery is not resolvable")
 	}
 	return s.transition(id, operationResolved, "resolved", status)

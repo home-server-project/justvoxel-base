@@ -10,11 +10,11 @@ import (
 )
 
 func TestAdminMigrationImportResolveKeepsValidatedCurrentStateAndReleasesLock(t *testing.T) {
-	s := surfaceTestServer(t, roleAdministrator)
+	s := migrationSurfaceTestServer(t, roleAdministrator)
 	store := openTestOperationStore(t)
 	attachTestOperationStore(t, s, store)
 
-	operation, _, err := store.beginMigrationImport(testMigrationImportFingerprint)
+	operation, _, err := store.beginMigrationImport("jv-a1b2c3", testMigrationImportFingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestAdminMigrationImportResolveKeepsValidatedCurrentStateAndReleasesLock(t 
 		t.Fatal(err)
 	}
 	rr := httptest.NewRecorder()
-	s.adminMigrationImportResolve(rr, surfaceRequest(http.MethodPost, "/v1/admin/migration/import/resolve", string(body)))
+	s.adminMigrationImportResolve(rr, migrationSurfaceRequest(http.MethodPost, "/v1/minecraft/instances/jv-a1b2c3/migration/import/resolve", string(body)))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("resolve status=%d: %s", rr.Code, rr.Body.String())
 	}
@@ -52,11 +52,11 @@ func TestAdminMigrationImportResolveKeepsValidatedCurrentStateAndReleasesLock(t 
 }
 
 func TestAdminMigrationImportResolveRefusesRetainedRecoveryState(t *testing.T) {
-	s := surfaceTestServer(t, roleAdministrator)
+	s := migrationSurfaceTestServer(t, roleAdministrator)
 	store := openTestOperationStore(t)
 	attachTestOperationStore(t, s, store)
 
-	operation, _, err := store.beginMigrationImport(testMigrationImportFingerprint)
+	operation, _, err := store.beginMigrationImport("jv-a1b2c3", testMigrationImportFingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestAdminMigrationImportResolveRefusesRetainedRecoveryState(t *testing.T) {
 
 	body, _ := json.Marshal(adminMigrationImportResolveRequest{OperationID: operation.OperationID, KeepCurrentState: true})
 	rr := httptest.NewRecorder()
-	s.adminMigrationImportResolve(rr, surfaceRequest(http.MethodPost, "/v1/admin/migration/import/resolve", string(body)))
+	s.adminMigrationImportResolve(rr, migrationSurfaceRequest(http.MethodPost, "/v1/minecraft/instances/jv-a1b2c3/migration/import/resolve", string(body)))
 	if rr.Code != http.StatusConflict {
 		t.Fatalf("retained state resolve status=%d: %s", rr.Code, rr.Body.String())
 	}
@@ -88,11 +88,11 @@ func TestAdminMigrationImportResolveRefusesRetainedRecoveryState(t *testing.T) {
 }
 
 func TestAdminMigrationImportResolveRequiresExplicitKeepCurrentState(t *testing.T) {
-	s := surfaceTestServer(t, roleAdministrator)
+	s := migrationSurfaceTestServer(t, roleAdministrator)
 	store := openTestOperationStore(t)
 	attachTestOperationStore(t, s, store)
 
-	operation, _, err := store.beginMigrationImport(testMigrationImportFingerprint)
+	operation, _, err := store.beginMigrationImport("jv-a1b2c3", testMigrationImportFingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestAdminMigrationImportResolveRequiresExplicitKeepCurrentState(t *testing.
 
 	body, _ := json.Marshal(adminMigrationImportResolveRequest{OperationID: operation.OperationID})
 	rr := httptest.NewRecorder()
-	s.adminMigrationImportResolve(rr, surfaceRequest(http.MethodPost, "/v1/admin/migration/import/resolve", string(body)))
+	s.adminMigrationImportResolve(rr, migrationSurfaceRequest(http.MethodPost, "/v1/minecraft/instances/jv-a1b2c3/migration/import/resolve", string(body)))
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("missing keep-current confirmation status=%d: %s", rr.Code, rr.Body.String())
 	}

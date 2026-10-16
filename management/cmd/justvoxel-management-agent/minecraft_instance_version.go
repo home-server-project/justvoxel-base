@@ -48,7 +48,7 @@ func instanceVersionCommand(ctx context.Context, args []string) error {
 		}
 		return instanceMaintenanceColdBackup(ctx, id)
 	case "instance-version-publish":
-		if len(args) != 7 || (args[6] != "" && !operationFingerprintPattern.MatchString(args[6])) || !validSetupServerType(args[2]) || !imageTagInputPattern.MatchString(args[3]) || !instanceRuntimeVersionPattern.MatchString(args[4]) || (args[5] != "recommended" && args[5] != "latest" && args[5] != "pinned") {
+		if (len(args) != 7 && (len(args) != 9 || args[7] != "--migration")) || (args[6] != "" && !operationFingerprintPattern.MatchString(args[6])) || !validSetupServerType(args[2]) || !imageTagInputPattern.MatchString(args[3]) || !instanceRuntimeVersionPattern.MatchString(args[4]) || (args[5] != "recommended" && args[5] != "latest" && args[5] != "pinned") {
 			return errInstanceID
 		}
 		snapshot, _, _, err := b.snapshot(ctx)
@@ -60,6 +60,12 @@ func instanceVersionCommand(ctx context.Context, args []string) error {
 			return err
 		}
 		next := previous
+		if len(args) == 9 {
+			next, err = b.migrationPortableSettings(previous, args[8])
+			if err != nil {
+				return err
+			}
+		}
 		next.Runtime.Software = args[2]
 		next.Runtime.ImageTag = args[3]
 		next.Runtime.Version = args[4]

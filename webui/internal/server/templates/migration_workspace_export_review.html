@@ -1,4 +1,4 @@
-{{define "migration_workspace_export_review.html"}}<div class="migration-workspace-content" data-migration-workspace-root>
+{{define "migration_workspace_export_review.html"}}<div class="migration-workspace-content" data-migration-workspace-root data-server-id="{{.ServerID}}">
 {{if .Error}}<div class="notice error"><strong>Server Export cannot continue as submitted.</strong><br>{{.Error}}</div>{{end}}
 
   {{if .Plan.Normalized}}
@@ -31,7 +31,7 @@
     {{end}}
   </section>
 
-  <form method="post" action="/workspace/migration/export/apply" autocomplete="off">
+  <form method="post" action="/workspace/migration/export/apply?server={{.ServerID}}" autocomplete="off">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <input type="hidden" name="kind" value="{{.Request.Kind}}">
     <input type="hidden" name="path" value="{{.Request.Path}}">
@@ -51,9 +51,9 @@
       </div>
       <label class="destructive-confirm-toggle-row" data-destructive-toggle-row hidden><span class="destructive-confirm-toggle-callout">Confirm &gt;</span><input class="destructive-confirm-toggle" type="checkbox" data-destructive-toggle aria-label="Confirm Server Export"></label>
     </div>
-    <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;tab=export">Cancel</a><button type="submit" data-destructive-submit disabled>Start Server Export</button></div>
+    <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;tab=export&amp;server={{.ServerID}}">Cancel</a><button type="submit" data-destructive-submit disabled>Start Server Export</button></div>
   </form>
   {{else}}
-  <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;tab=export">Choose another Export destination</a></div>
+  <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;tab=export&amp;server={{.ServerID}}">Choose another Export destination</a></div>
   {{end}}
 </div>{{end}}

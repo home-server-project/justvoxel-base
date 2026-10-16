@@ -163,7 +163,7 @@ func TestPersistentOperationClientMapsAuthorizationErrors(t *testing.T) {
 
 func TestAdminCurrentMigrationOperationSupportsNoCurrentOperation(t *testing.T) {
 	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Path != "/v1/admin/migration/current-operation" {
+		if r.URL.Path != "/v1/minecraft/instances/jv-a1b2c3/migration/current-operation" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
 		return &http.Response{
@@ -173,7 +173,7 @@ func TestAdminCurrentMigrationOperationSupportsNoCurrentOperation(t *testing.T) 
 		}, nil
 	})}}
 
-	response, err := client.AdminCurrentMigrationOperation(context.Background(), "session-token")
+	response, err := client.AdminCurrentMigrationOperation(WithMigrationInstance(context.Background(), "jv-a1b2c3"), "session-token")
 	if err != nil {
 		t.Fatal(err)
 	}

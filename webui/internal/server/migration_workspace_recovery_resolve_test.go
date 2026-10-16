@@ -34,19 +34,19 @@ func TestMigrationWorkspaceRecoveryAttentionWithoutTransactions(t *testing.T) {
 	request := authenticatedAdminRequest(http.MethodGet, "http://example/workspace/migration/recovery", "")
 	request.Header.Set(migrationWorkspaceFragmentHeader, "1")
 	page := httptestResponse(app, request)
-	for _, want := range []string{"Migration Recovery needs attention", "No retained recovery files remain", "Keep current server and continue", `data-migration-recovery-available="true"`, `action="/workspace/migration/recovery/resolve"`} {
+	for _, want := range []string{"Migration Recovery needs attention", "No retained recovery files remain", "Keep current server and continue", `data-migration-recovery-available="true"`, `action="/workspace/migration/recovery/resolve?server=jv-a1b2c3"`} {
 		if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), want) {
 			t.Fatalf("recovery page missing %q: %d %s", want, page.Code, page.Body.String())
 		}
 	}
 
-	if strings.Contains(page.Body.String(), "Back to Server Migration") || strings.Contains(page.Body.String(), `href="/?workspace=migration"`) {
+	if strings.Contains(page.Body.String(), "Back to Server Migration") || strings.Contains(page.Body.String(), `href="/?workspace=migration&amp;server=jv-a1b2c3"`) {
 		t.Fatal("unresolved Recovery exposes looping Server Migration navigation")
 	}
 
 	values := url.Values{"csrf": {"csrf-token"}, "operation_id": {current.OperationID}, "keep_current_state": {"yes"}}
 	resolved := httptestResponse(app, recoveryWebRequest(http.MethodPost, "http://example/workspace/migration/recovery/resolve", values))
-	if resolved.Code != http.StatusSeeOther || resolved.Header().Get("Location") != "/workspace/migration" {
+	if resolved.Code != http.StatusSeeOther || resolved.Header().Get("Location") != "/workspace/migration?server=jv-a1b2c3" {
 		t.Fatalf("resolve response = %d %q: %s", resolved.Code, resolved.Header().Get("Location"), resolved.Body.String())
 	}
 	if client.recoveryResolveCalls != 1 || client.resolveCalls != 0 || client.recoveryResolveReq.OperationID != current.OperationID || !client.recoveryResolveReq.KeepCurrentState {
@@ -66,7 +66,7 @@ func TestMigrationWorkspaceRecoveryAttentionWithoutTransactions(t *testing.T) {
 	recoveryRequest := authenticatedAdminRequest(http.MethodGet, "http://example/workspace/migration/recovery", "")
 	recoveryRequest.Header.Set(migrationWorkspaceFragmentHeader, "1")
 	recoveryPage := httptestResponse(app, recoveryRequest)
-	if recoveryPage.Code != http.StatusOK || !strings.Contains(recoveryPage.Body.String(), `href="/?workspace=migration">Back to Server Migration`) {
+	if recoveryPage.Code != http.StatusOK || !strings.Contains(recoveryPage.Body.String(), `href="/?workspace=migration&amp;server=jv-a1b2c3">Back to Server Migration`) {
 		t.Fatalf("resolved Recovery lost normal navigation: %d %s", recoveryPage.Code, recoveryPage.Body.String())
 	}
 	client.current = current
@@ -115,7 +115,7 @@ func TestMigrationWorkspaceRecoveryAttentionNavigation(t *testing.T) {
 				request.Header.Set(migrationWorkspaceFragmentHeader, "1")
 				page := httptestResponse(app, request)
 				body := page.Body.String()
-				if page.Code != http.StatusOK || strings.Contains(body, "Back to Server Migration") || strings.Contains(body, `href="/?workspace=migration"`) {
+				if page.Code != http.StatusOK || strings.Contains(body, "Back to Server Migration") || strings.Contains(body, `href="/?workspace=migration&amp;server=jv-a1b2c3"`) {
 					t.Fatalf("unresolved Recovery navigation loops: %d %s", page.Code, body)
 				}
 				attentionNotice := "Server Import needs attention."
@@ -126,10 +126,10 @@ func TestMigrationWorkspaceRecoveryAttentionNavigation(t *testing.T) {
 					t.Fatalf("current operation attention notice missing: %s", body)
 				}
 				if retained {
-					if !strings.Contains(body, `action="/workspace/migration/recovery/review"`) || !strings.Contains(body, "Clean Up Recovery Files") {
+					if !strings.Contains(body, `action="/workspace/migration/recovery/review?server=jv-a1b2c3"`) || !strings.Contains(body, "Clean Up Recovery Files") {
 						t.Fatalf("Recovery cleanup action missing: %s", body)
 					}
-				} else if !strings.Contains(body, `action="/workspace/migration/recovery/resolve"`) || !strings.Contains(body, "Keep current server and continue") {
+				} else if !strings.Contains(body, `action="/workspace/migration/recovery/resolve?server=jv-a1b2c3"`) || !strings.Contains(body, "Keep current server and continue") {
 					t.Fatalf("Recovery resolve action missing: %s", body)
 				}
 				if !retained && !strings.Contains(body, `name="operation_id" value="`+serverMigrationOperationID+`"`) {
@@ -142,10 +142,10 @@ func TestMigrationWorkspaceRecoveryAttentionNavigation(t *testing.T) {
 				releasedRequest.Header.Set(migrationWorkspaceFragmentHeader, "1")
 				releasedPage := httptestResponse(app, releasedRequest)
 				releasedBody := releasedPage.Body.String()
-				if releasedPage.Code != http.StatusOK || !strings.Contains(releasedBody, `href="/?workspace=migration">Back to Server Migration`) {
+				if releasedPage.Code != http.StatusOK || !strings.Contains(releasedBody, `href="/?workspace=migration&amp;server=jv-a1b2c3">Back to Server Migration`) {
 					t.Fatalf("released operation lost normal navigation: %d %s", releasedPage.Code, releasedBody)
 				}
-				if strings.Contains(releasedBody, "Server Import needs attention.") || strings.Contains(releasedBody, "Migration Recovery needs attention.") || strings.Contains(releasedBody, `action="/workspace/migration/recovery/resolve"`) {
+				if strings.Contains(releasedBody, "Server Import needs attention.") || strings.Contains(releasedBody, "Migration Recovery needs attention.") || strings.Contains(releasedBody, `action="/workspace/migration/recovery/resolve?server=jv-a1b2c3"`) {
 					t.Fatalf("released operation still requires attention: %s", releasedBody)
 				}
 			})

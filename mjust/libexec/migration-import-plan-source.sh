@@ -5,7 +5,7 @@ if (( $# == 1 )); then
     JV_MIGRATION_SOURCE="$(realpath -m -- "$1")"
     [[ -e ${JV_MIGRATION_SOURCE} ]] || { echo "ERROR: source does not exist: ${JV_MIGRATION_SOURCE}" >&2; exit 1; }
 else
-    if [[ ${configured} == yes ]]; then jv_backup_load_config; fi
+    if [[ ${configured} == yes ]]; then jv_migration_backup_load_config; fi
     transport_started=yes
     if jv_migration_select_import_source "${configured}"; then
         :
@@ -17,6 +17,7 @@ else
 fi
 
 jv_migration_validate_source_name "${JV_MIGRATION_SOURCE}" || exit 1
+source_identity="$(jv_migration_source_identity "${JV_MIGRATION_SOURCE}")"
 source_info="$(/usr/libexec/justvoxel/mjust/migration-archive inspect "${JV_MIGRATION_SOURCE}")" || exit 1
 expanded_bytes="$(jq -r '.expandedBytes' <<< "${source_info}")"
 is_native="$(jq -r '.nativeBundle' <<< "${source_info}")"
@@ -45,16 +46,9 @@ if [[ ${is_native} == true ]]; then
     native_manifest="$(/usr/libexec/justvoxel/mjust/migration-archive verify-native "${JV_MIGRATION_SOURCE}")" || exit 1
 fi
 
-# Existing destinations already know their data filesystem. Fresh destinations
-# choose data storage before extraction so staging can live on that same filesystem.
-if [[ ${configured} == yes ]]; then
-    /usr/libexec/justvoxel/mjust/validate-data-mount
-    jv_restore_validate_data_layout "${DATA_PATH}"
-    had_existing_data=yes
-else
-    if prepare_fresh_data_destination; then :; else rc=$?; (( rc == 2 )) && { echo 'Import cancelled.'; exit 0; }; exit "${rc}"; fi
-    had_existing_data=no
-fi
+jv_migration_validate_data
+jv_restore_validate_data_layout "${DATA_PATH}"
+had_existing_data=yes
 
 data_parent="$(dirname -- "${DATA_PATH}")"
 install -d -m0755 -o root -g root "${data_parent}"
@@ -70,6 +64,8 @@ jv_migration_require_staging_space "${data_parent}" "${expanded_bytes}"
 
 transaction="${data_parent}/.justvoxel-import-$(date +%Y%m%d-%H%M%S)-$$"
 install -d -m0700 -o root -g root "${transaction}"
+if systemctl is-active --quiet "${JV_INSTANCE_UNIT}"; then minecraft_was_active=yes; fi
+jv_migration_snapshot_runtime "${transaction}"
 jv_migration_write_state "${transaction}" staging "${JV_MIGRATION_SOURCE}" unknown
 
 staging_source="${transaction}/staging-source"
@@ -80,8 +76,11 @@ echo 'Copying and validating the source into migration staging.'
 # The original archive belongs to the user. JustVoxel does not move, delete,
 # retain, or re-check it after staging. Validation continues against staged data.
 if [[ ${transport_started} == yes ]]; then
-    jv_migration_transport_cleanup
-    transport_started=no
+    if jv_migration_transport_cleanup; then
+        transport_started=no
+    else
+        echo 'WARNING: verified local staging is authoritative; temporary source transport cleanup is deferred.' >&2
+    fi
 fi
 if [[ ${is_native} == true ]]; then
     detection_base="${staging_source}/justvoxel-migration/server"

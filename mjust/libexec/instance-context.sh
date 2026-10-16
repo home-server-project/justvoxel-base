@@ -4,7 +4,18 @@
 jv_load_instance() {
     local id="$1" record key value
     [[ ${id} =~ ^jv-[a-z0-9]{6,12}$ ]] || return 1
-    /usr/libexec/justvoxel/mjust/validate-instance-runtime-commit "${id}" >/dev/null || return 1
+    if [[ ${2:-} == migration-recovery ]]; then
+        # Read identity only while recovery reviews a pending runtime transaction.
+        # Startup remains blocked by validate-instance-runtime-commit; the Agent
+        # must recover the selected C2 commitment before rollback or validation.
+        local config="/etc/justvoxel/instances/${id}/config.json" identity="/var/lib/justvoxel/instances/${id}.json"
+        [[ -f ${config} && ! -L ${config} && -f ${identity} && ! -L ${identity} ]] || return 1
+        [[ $(stat -c '%u:%g:%a' "${config}") == 0:0:600 && $(stat -c '%u:%g:%a' "${identity}") == 0:0:600 ]] || return 1
+        jq -e --arg id "${id}" '.runtime.id==$id and .schema_version==1' "${config}" >/dev/null || return 1
+        jq -e --arg id "${id}" 'keys==["id"] and .id==$id' "${identity}" >/dev/null || return 1
+    else
+        /usr/libexec/justvoxel/mjust/validate-instance-runtime-commit "${id}" >/dev/null || return 1
+    fi
     record="/etc/justvoxel/instances/${id}/config.json"
     JV_INSTANCE_ID=${id}
     JV_INSTANCE_CONTAINER="minecraft-${id}"

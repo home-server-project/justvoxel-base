@@ -20,7 +20,7 @@ func migrationWorkspaceRedirectBrowser(w http.ResponseWriter, r *http.Request, d
 	if r.Header.Get(migrationWorkspaceFragmentHeader) == "1" {
 		return false
 	}
-	http.Redirect(w, r, destination, http.StatusSeeOther)
+	http.Redirect(w, r, migrationSelectedURL(r, destination), http.StatusSeeOther)
 	return true
 }
 
@@ -60,6 +60,7 @@ func splitMigrationSMBLocation(raw string) (string, string, error) {
 }
 
 type migrationWorkspacePageData struct {
+	ServerID      string
 	Title         string
 	Version       string
 	ManagementAPI string
@@ -73,6 +74,7 @@ type migrationWorkspacePageData struct {
 }
 
 type migrationWorkspaceProgressPageData struct {
+	ServerID          string
 	Title             string
 	Version           string
 	ManagementAPI     string
@@ -117,6 +119,14 @@ func (a *App) migrationWorkspaceRequest(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Administrator access required", http.StatusForbidden)
 		return "", nil, api.SessionInfo{}, false
 	}
+	selected, ok := a.selectedMinecraft(w, r, session)
+	if !ok {
+		return "", nil, api.SessionInfo{}, false
+	}
+	*r = *r.WithContext(api.WithMigrationInstance(r.Context(), selected.ID))
+	q := r.URL.Query()
+	q.Set("server", selected.ID)
+	r.URL.RawQuery = q.Encode()
 	return session, client, identity, true
 }
 
@@ -134,7 +144,7 @@ func (a *App) migrationWorkspacePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if current.Operation != nil {
-		http.Redirect(w, r, "/workspace/migration/progress/"+current.Operation.OperationID, http.StatusSeeOther)
+		http.Redirect(w, r, migrationSelectedURL(r, "/workspace/migration/progress/"+current.Operation.OperationID), http.StatusSeeOther)
 		return
 	}
 
@@ -155,6 +165,7 @@ func (a *App) migrationWorkspacePage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.renderMigrationWorkspace(w, "migration_workspace.html", http.StatusOK, migrationWorkspacePageData{
+		ServerID:      migrationWorkspaceSelectedID(r),
 		Title:         "Server Migration",
 		Version:       a.config.Version,
 		ManagementAPI: a.config.ManagementAPI,
@@ -186,11 +197,12 @@ func (a *App) migrationWorkspaceProgressPage(w http.ResponseWriter, r *http.Requ
 		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Migration operation status is unavailable.")
 		return
 	}
-	if response.Operation == nil || !migrationWorkspaceOperationType(response.Operation.OperationType) {
+	if response.Operation == nil || response.Operation.InstanceID != migrationWorkspaceSelectedID(r) || !migrationWorkspaceOperationType(response.Operation.OperationType) {
 		http.Error(w, "Server Migration operation not found", http.StatusNotFound)
 		return
 	}
 	a.renderMigrationWorkspace(w, "migration_workspace_progress.html", http.StatusOK, migrationWorkspaceProgressPageData{
+		ServerID:          migrationWorkspaceSelectedID(r),
 		Title:             "Server Migration progress",
 		Version:           a.config.Version,
 		ManagementAPI:     a.config.ManagementAPI,
@@ -200,7 +212,7 @@ func (a *App) migrationWorkspaceProgressPage(w http.ResponseWriter, r *http.Requ
 		OperationName:     migrationWorkspaceOperationName(response.Operation.OperationType),
 		StateLabel:        migrationWorkspaceStateLabel(response.Operation.State),
 		StageLabel:        migrationWorkspaceStageLabel(response.Operation.OperationType, response.Operation.Stage),
-		CanReviewRecovery: (response.Operation.OperationType == "migration_import" || response.Operation.OperationType == "migration_recovery") && response.Operation.State == "needs_attention",
+		CanReviewRecovery: (response.Operation.OperationType == "migration_import" || response.Operation.OperationType == "migration_export" || response.Operation.OperationType == "migration_recovery") && response.Operation.State == "needs_attention",
 	})
 }
 
@@ -302,4 +314,16 @@ func (a *App) renderMigrationWorkspace(w http.ResponseWriter, templateName strin
 	if err := a.templates.ExecuteTemplate(w, templateName, data); err != nil {
 		http.Error(w, "render error", http.StatusInternalServerError)
 	}
+}
+
+func migrationWorkspaceSelectedID(r *http.Request) string { return r.URL.Query().Get("server") }
+func migrationSelectedURL(r *http.Request, destination string) string {
+	u, err := url.Parse(destination)
+	if err != nil {
+		return destination
+	}
+	q := u.Query()
+	q.Set("server", migrationWorkspaceSelectedID(r))
+	u.RawQuery = q.Encode()
+	return u.String()
 }
