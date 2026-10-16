@@ -6,6 +6,7 @@
   <header class="minecraft-workspace-header"><div><p class="eyebrow">Minecraft Server · Overview</p><h1 id="selected-server-title">{{.Name}}</h1></div></header>
   <div class="minecraft-workspace-body minecraft-workspace-content minecraft-overview-compact">
     {{template "minecraft-server-summary" .}}
+    <div class="action-row"><a class="button-link" href="/?workspace=minecraft&amp;server={{.ContextID}}">Minecraft settings</a><a class="button-link secondary" href="/?workspace=backups&amp;server={{.ContextID}}">Backups</a></div>
     {{if .ConfigurationAvailable}}
     {{if .BootKnown}}<div class="minecraft-overview-grid"><div class="minecraft-overview-card"><span>Start on Boot</span><strong>{{if .StartOnBoot}}Enabled{{else}}Disabled{{end}}</strong></div></div>{{end}}
     <section class="panel details minecraft-workspace-section"><h2>Welcome message</h2><p>{{.MOTD}}</p></section>
@@ -19,6 +20,17 @@
       {{if not (or .CanStart .CanRestart .CanStop)}}<p class="muted">Lifecycle actions are unavailable in the current server state.</p>{{end}}
       </div>
     </section>
+    {{if ne .ContextID "original"}}
+    <section class="panel details minecraft-workspace-section"><h2>Server name</h2>
+      <form data-selected-presentation action="/api/minecraft/workspace/rename?server={{.ContextID}}" method="post"><input type="hidden" name="csrf" value="{{$.CSRF}}"><label>Server name<input name="display_name" value="{{.Name}}" maxlength="64" required></label><button type="submit">Rename</button></form>
+    </section>
+    <section class="panel details minecraft-workspace-section"><h2>Danger zone</h2><h3>Delete {{.Name}}</h3>
+      <p>Permanently removes this active server and its world data. Existing backup archives are preserved. The server must be stopped first.</p>
+      <p>Backups are preserved as historical archives. Current Restore remains tied to this server identity.</p>
+      <form data-selected-presentation data-delete-name="{{.Name}}" action="/api/minecraft/workspace/delete?server={{.ContextID}}" method="post"><input type="hidden" name="csrf" value="{{$.CSRF}}"><label>Type the current server name<input name="confirm_name" required autocomplete="off"></label><button class="danger" type="submit" disabled>Delete Server</button></form>
+      <p class="notice" data-selected-action-status role="status"></p>
+    </section>
+    {{end}}
   </div>
 </section>
 {{end}}

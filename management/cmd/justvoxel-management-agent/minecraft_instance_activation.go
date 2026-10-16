@@ -376,6 +376,9 @@ func (b *instanceRuntimeBackend) records() ([]instanceRuntimeRecord, error) {
 	return records, b.verifyRuntimeCoverage(records)
 }
 func (b *instanceRuntimeBackend) pending(id string) (bool, error) {
+	if _, err := b.readPrivate(b.deletePath(id)); !errors.Is(err, os.ErrNotExist) {
+		return true, errInstanceRecovery
+	}
 	dir, _, _ := b.paths(id)
 	_, err := b.readPrivate(filepath.Join(dir, "pending.json"))
 	if errors.Is(err, os.ErrNotExist) {

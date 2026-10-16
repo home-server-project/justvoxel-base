@@ -38,6 +38,7 @@ func TestAdminConfigurationCommandReturnsOnlyStdoutJSON(t *testing.T) {
 
 func TestLocalRootCanPlanAndApplyConfigurationWithoutBearerSession(t *testing.T) {
 	s := surfaceTestServer(t, roleViewer)
+	configureAdminMutationStore(t, s)
 	old := runAdminConfigurationHelper
 	defer func() { runAdminConfigurationHelper = old }()
 
@@ -92,6 +93,7 @@ func TestAdminConfigurationChangeRequiresAdministrator(t *testing.T) {
 
 	for _, role := range []principalRole{roleOperator, roleViewer} {
 		s := surfaceTestServer(t, role)
+		configureAdminMutationStore(t, s)
 		rr := httptest.NewRecorder()
 		s.adminConfigurationPlan(rr, surfaceRequest(http.MethodPost, "/v1/admin/configuration/plan", `{}`))
 		if rr.Code != http.StatusForbidden {
@@ -105,6 +107,7 @@ func TestAdminConfigurationChangeRequiresAdministrator(t *testing.T) {
 
 func TestAdminConfigurationPlanUsesFixedHelperAndReturnsReview(t *testing.T) {
 	s := surfaceTestServer(t, roleAdministrator)
+	configureAdminMutationStore(t, s)
 	old := runAdminConfigurationHelper
 	defer func() { runAdminConfigurationHelper = old }()
 
@@ -136,6 +139,7 @@ func TestAdminConfigurationPlanUsesFixedHelperAndReturnsReview(t *testing.T) {
 
 func TestAdminConfigurationApplyReturnsMemoryRestartConfirmation(t *testing.T) {
 	s := surfaceTestServer(t, roleAdministrator)
+	configureAdminMutationStore(t, s)
 	old := runAdminConfigurationHelper
 	defer func() { runAdminConfigurationHelper = old }()
 	runAdminConfigurationHelper = func(_ context.Context, action string, request []byte) ([]byte, error) {
@@ -162,6 +166,7 @@ func TestAdminConfigurationApplyReturnsMemoryRestartConfirmation(t *testing.T) {
 }
 func TestAdminConfigurationApplyErrorsAreSanitized(t *testing.T) {
 	s := surfaceTestServer(t, roleAdministrator)
+	configureAdminMutationStore(t, s)
 	old := runAdminConfigurationHelper
 	defer func() { runAdminConfigurationHelper = old }()
 	runAdminConfigurationHelper = func(_ context.Context, _ string, _ []byte) ([]byte, error) {
@@ -180,6 +185,7 @@ func TestAdminConfigurationApplyErrorsAreSanitized(t *testing.T) {
 
 func TestAdminConfigurationValidationFailureIsReturnedWithoutRawHelperData(t *testing.T) {
 	s := surfaceTestServer(t, roleAdministrator)
+	configureAdminMutationStore(t, s)
 	old := runAdminConfigurationHelper
 	defer func() { runAdminConfigurationHelper = old }()
 	runAdminConfigurationHelper = func(_ context.Context, action string, _ []byte) ([]byte, error) {
@@ -228,6 +234,7 @@ func TestAdminConfigurationWhitelistFieldIsOptionalAndPreservesExplicitFalse(t *
 				return []byte(`{"ok":true,"applied":true}`), nil
 			}
 			s := surfaceTestServer(t, roleAdministrator)
+			configureAdminMutationStore(t, s)
 			rr := httptest.NewRecorder()
 			s.runAdminConfigurationChange(rr, surfaceRequest(http.MethodPost, "/v1/admin/configuration/"+action, body), action, session{})
 			runAdminConfigurationHelper = old

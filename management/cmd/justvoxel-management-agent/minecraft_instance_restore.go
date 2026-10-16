@@ -87,6 +87,9 @@ func (b *instanceRuntimeBackend) restoreJournal(id string) (instanceRestoreJourn
 // Called under existing appliance operation protection. An interrupted restore
 // blocks configuration, version changes, and backups until dedicated recovery.
 func (b *instanceRuntimeBackend) requireNoInstanceRestore() error {
+	if err := b.requireNoInstanceDelete(); err != nil {
+		return err
+	}
 	records, err := b.records()
 	if err != nil {
 		return err
@@ -578,6 +581,10 @@ func (s *server) instanceRestoreRecover(w http.ResponseWriter, r *http.Request) 
 	}
 	id, ok := instanceRequestID(w, r)
 	if !ok {
+		return
+	}
+	if err := instanceRuntimes.requireNoInstanceDelete(); err != nil {
+		instanceRuntimeError(w, err, "")
 		return
 	}
 	var request struct {

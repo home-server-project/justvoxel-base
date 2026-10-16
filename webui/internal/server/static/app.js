@@ -1,3 +1,24 @@
+// Selection is explicit in each server-specific request. Changing it reloads
+// the document, disposing every pending form/review before another target opens.
+globalThis.justVoxelSelectedURL = (value) => {
+  const location = globalThis.location;
+  if (!location?.origin) return value;
+  const target = new URL(value, location.origin);
+  const selected = new URLSearchParams(location.search || "");
+  if (!target.searchParams.has("server")) selected.getAll("server").forEach((id) => target.searchParams.append("server", id));
+  return target.pathname + target.search;
+};
+globalThis.justVoxelServerSelection = async (container) => {
+  if (!container || container.querySelector("[data-selected-server]")) return;
+  const response = await fetch(globalThis.justVoxelSelectedURL("/api/minecraft/workspace/selection"), {credentials:"same-origin",cache:"no-store"});
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "Server selection is unavailable.");
+  const label = document.createElement("label"); label.dataset.selectedServer = "";label.textContent = "Server ";
+  const select = document.createElement("select");select.setAttribute("aria-label","Selected server");
+  data.servers.forEach((server) => {const option=document.createElement("option");option.value=server.id;option.textContent=server.name;option.selected=server.id===data.selected.id;select.append(option);});
+  select.addEventListener("change",()=>{const target=new URL(window.location.href);target.searchParams.set("server",select.value);window.location.assign(target);});
+  label.append(select);container.prepend(label);
+};
 // Identity fallback belongs to the active reviewed workflow or administrator session.
 const saveRequiredMinecraftIdentity = (csrf) => new Promise((resolve) => {
   const dialog = document.createElement("dialog");
@@ -2023,6 +2044,7 @@ if (backupsOpen && backupsDialog) {
       if (backupsDestination.has(key)) backupParams.set(key, backupsDestination.get(key));
     }
   }
+  globalThis.justVoxelServerSelection(backupsDialog.querySelector(".workspace-window-header") || backupsDialog).catch((error)=>{if(state)state.textContent=error.message;});
   let currentURL = "/workspace/backups" + (backupParams.size ? "?" + backupParams : "");
   let loadSequence = 0;
 
@@ -2080,7 +2102,7 @@ if (backupsOpen && backupsDialog) {
       try {
         const body = new URLSearchParams();
         new FormData(form).forEach((value, key) => body.append(key, String(value)));
-        const response = await fetch(action.pathname + action.search, {
+        const response = await fetch(globalThis.justVoxelSelectedURL(action.pathname + action.search), {
           method: (form.method || "POST").toUpperCase(),
           credentials: "same-origin",
           headers: {
@@ -2164,7 +2186,7 @@ if (backupsOpen && backupsDialog) {
     if (refreshButton) refreshButton.disabled = true;
     try {
       await ensureBackupsAssets();
-      const response = await fetch(url, {
+      const response = await fetch(globalThis.justVoxelSelectedURL(url), {
         method: "GET",
         credentials: "same-origin",
         headers: { Accept: "text/html" },
@@ -3132,6 +3154,7 @@ if (minecraftOpen && minecraftDialog) {
   const tabs = Array.from(minecraftDialog.querySelectorAll("[data-minecraft-tab]"));
   const csrf = document.querySelector("[data-minecraft-workspace-csrf]")?.value || "";
   const settingsTabs = new Set(["memory", "gameplay", "crossplay"]);
+  globalThis.justVoxelServerSelection(minecraftDialog.querySelector(".minecraft-workspace-header") || minecraftDialog).catch((error)=>{if(state)state.textContent=error.message;});
   let currentTab = "overview";
   let loadSequence = 0;
 
@@ -3150,7 +3173,8 @@ if (minecraftOpen && minecraftDialog) {
   };
 
   const requestWorkspaceJSON = async (url, options = {}) => {
-    const response = await fetch(url, {
+    if (new URLSearchParams(globalThis.location?.search || "").get("server") && new URLSearchParams(globalThis.location?.search || "").get("server") !== "original" && url === "/api/dashboard-status") url = "/api/minecraft/workspace/snapshot";
+    const response = await fetch(globalThis.justVoxelSelectedURL(url), {
       credentials: "same-origin",
       cache: "no-store",
       ...options,
@@ -3207,6 +3231,22 @@ if (minecraftOpen && minecraftDialog) {
       grid.appendChild(card);
     });
     root.appendChild(grid);
+    const selected = new URLSearchParams(globalThis.location?.search || "").get("server");
+    if (selected && selected !== "original" && document.body.classList.contains("role-administrator")) {
+      const boot = document.createElement("form");boot.dataset.minecraftSettingsTab="overview";
+      boot.innerHTML='<label>Start on Boot <select name="start_on_boot"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><button type="submit">Review changes</button>';
+      boot.querySelector("select").value=String(Boolean(minecraft.start_on_boot));
+      boot.addEventListener("submit",async(event)=>{event.preventDefault();try{const params=settingsParams(boot);const plan=await requestWorkspaceJSON("/api/minecraft/workspace/settings/plan",{method:"POST",body:params});if(sequence===loadSequence)renderSettingsReview(root,plan,params);}catch(error){if(state)state.textContent=error.message;}});root.append(boot);
+      const context=await requestWorkspaceJSON("/api/minecraft/workspace/selection");if(sequence!==loadSequence)return;
+      const name=context.selected.name;
+      const rename=document.createElement("form");rename.innerHTML='<label>Server name<input name="display_name" required maxlength="64"></label><button type="submit">Rename</button>';rename.querySelector("input").value=name;
+      rename.addEventListener("submit",async(event)=>{event.preventDefault();try{const params=new URLSearchParams(new FormData(rename));params.set("csrf",csrf);await requestWorkspaceJSON("/api/minecraft/workspace/rename",{method:"POST",body:params});window.location.reload();}catch(error){if(state)state.textContent=error.message;}});root.append(rename);
+      const danger=document.createElement("section");danger.className="panel details minecraft-workspace-section";
+      const heading=document.createElement("h2");heading.textContent="Danger zone";const title=document.createElement("h3");title.textContent=`Delete ${name}`;
+      danger.append(heading,title,messageNode("Permanently removes this active server and its world data. Existing backup archives are preserved. The server must be stopped first."),messageNode("Backups are preserved as historical archives. Current Restore remains tied to this server identity."));
+      const form=document.createElement("form");form.innerHTML='<label>Type the current server name<input name="confirm_name" required autocomplete="off"></label><button type="submit" class="danger" disabled>Delete Server</button>';const input=form.querySelector("input"),button=form.querySelector("button");input.addEventListener("input",()=>{button.disabled=input.value!==name;});
+      form.addEventListener("submit",async(event)=>{event.preventDefault();if(input.value!==name)return;button.disabled=true;try{const params=new URLSearchParams({csrf,confirm_name:input.value});const result=await requestWorkspaceJSON("/api/minecraft/workspace/delete",{method:"POST",body:params});window.location.assign(result.redirect);}catch(error){if(state)state.textContent=error.message;button.disabled=input.value!==name;}});danger.append(form);root.append(danger);
+    }
 
     const playerLine = document.createElement("div");
     playerLine.className = "minecraft-overview-playerline";
@@ -3420,8 +3460,9 @@ if (minecraftOpen && minecraftDialog) {
       section.querySelector('[name="bedrock_enabled"]').checked = Boolean(minecraft.bedrock_enabled);
       section.querySelector('[name="bedrock_enabled"]').disabled = minecraft.server_type === "vanilla";
       if (minecraft.server_type === "vanilla") section.querySelector('[data-crossplay-compatibility]').textContent = "Managed Bedrock cross-play currently requires Paper or Purpur.";
+      if (payload.independent) section.querySelector('[data-open-version]').hidden = true;
       section.querySelector('[data-open-version]')?.addEventListener("click", () => document.querySelector("[data-version-open]")?.click());
-      requestWorkspaceJSON("/api/version/workspace/status").then((status) => {
+      (payload.independent ? Promise.resolve({installed:minecraft.version,reason:"Software and version are read-only for this server."}) : requestWorkspaceJSON("/api/version/workspace/status")).then((status) => {
         const node = section.querySelector("[data-crossplay-compatibility]");
         if (!node || !status) return;
         const installed = status.installed || "Unknown";
@@ -3568,6 +3609,7 @@ if (minecraftOpen && minecraftDialog) {
       if (state) state.textContent = plan.memory_restart_required ? "Applying and restarting Minecraft…" : "Applying…";
       try {
         const applyParams = new URLSearchParams(params);
+        if (plan.review) applyParams.set("review", plan.review);
         if (plan.confirmation_required) applyParams.set("confirm_players", "yes");
         const result = await requestWorkspaceJSON("/api/minecraft/workspace/settings/apply", {
           method: "POST",
@@ -3629,6 +3671,13 @@ if (minecraftOpen && minecraftDialog) {
     ]);
     if (!snapshot || !payload || sequence !== loadSequence || !content) return;
     const root = document.createElement("div");
+    if (payload.independent) {
+      const playerStatus = payload.players.state === "online"
+        ? `Online players: ${payload.players.online} / ${payload.players.maximum}`
+        : payload.players.state === "offline" ? "This server is stopped." : "Player information is temporarily unavailable.";
+      root.append(messageNode(playerStatus),messageNode(payload.message));
+      content.replaceChildren(root);return;
+    }
     root.className = "minecraft-native-operations";
     if (message) root.appendChild(noticeNode(message));
 
@@ -6786,3 +6835,15 @@ if (dashboard) {
     }
   }
 }
+
+// Standalone selected overview remains a usable Delete retry surface even if
+// an interrupted deletion has already removed runtime configuration.
+document.querySelectorAll("[data-selected-presentation]").forEach((form)=>{
+ const button=form.querySelector("button"),input=form.querySelector('[name="confirm_name"]');
+ if(input)input.addEventListener("input",()=>{button.disabled=input.value!==form.dataset.deleteName;});
+ form.addEventListener("submit",async(event)=>{event.preventDefault();if(input && input.value!==form.dataset.deleteName)return;button.disabled=true;
+ const status=document.querySelector("[data-selected-action-status]");
+ try{const response=await fetch(form.action,{method:"POST",credentials:"same-origin",body:new URLSearchParams(new FormData(form))});const result=await response.json();if(!response.ok || !result.ok)throw new Error(result.error || "Server action did not complete. Retry this action.");if(input)window.location.assign(result.redirect);else window.location.reload();}
+ catch(error){if(status)status.textContent=error.message;button.disabled=input ? input.value!==form.dataset.deleteName : false;}
+ });
+});

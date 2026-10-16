@@ -95,7 +95,18 @@ test('unrelated conflicts never open an identity popup or resubmit', async () =>
 
 test('Overview contains no identity display, form, automatic registration or storage workaround', () => {
   const overview = source.slice(source.indexOf('  const renderOverview ='), source.indexOf('  const formatRemainingMemory ='));
-  assert.doesNotMatch(overview, /identity|Instance ID|sessionStorage/);
+  assert.doesNotMatch(overview, /Instance ID|instance[-_ ]?id|renderInstanceIdentity|minecraft-instance-identity|sessionStorage|registerMinecraftIdentity|identityRequired|<(?:input|form)[^>]*(?:identity|jv-)|automatic identity registration/i);
   assert.doesNotMatch(source, /instanceAttemptKey|renderInstanceIdentity|minecraft-instance-identity|justvoxel\.minecraft\.identity\.attempted/);
   assert.doesNotMatch(readFileSync(`${__dirname}/../webui/internal/server/static/app.css`, 'utf8'), /minecraft-instance-identity/);
+});
+
+test('selected URLs preserve Original fallback and explicit server targets without Window', () => {
+  const context = vm.createContext({URL, URLSearchParams});
+  vm.runInContext(block, context);
+  assert.equal(context.justVoxelSelectedURL('/api/minecraft/workspace/settings'), '/api/minecraft/workspace/settings');
+  context.location = {origin: 'https://example.test', search: '?server=jv-family1'};
+  assert.equal(context.justVoxelSelectedURL('/workspace/backups/backup'), '/workspace/backups/backup?server=jv-family1');
+  assert.equal(context.justVoxelSelectedURL('/workspace/backups/backup?server=jv-kids001'), '/workspace/backups/backup?server=jv-kids001');
+  context.location.search = '?server=jv-family1&server=jv-kids001';
+  assert.equal(context.justVoxelSelectedURL('/workspace/backups'), '/workspace/backups?server=jv-family1&server=jv-kids001');
 });

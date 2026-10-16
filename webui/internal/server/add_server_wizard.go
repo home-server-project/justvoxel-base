@@ -123,6 +123,9 @@ func (a *App) minecraftServersPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	message := ""
+	if r.URL.Query().Get("deleted") == "yes" {
+		message = "Server deleted. Backup archives were preserved as historical archives. Current Restore remains tied to that server identity."
+	}
 	if r.URL.Query().Get("created") == "yes" {
 		message = "Minecraft server created. It is stopped and ready for use."
 	}

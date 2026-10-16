@@ -621,3 +621,87 @@ status, and lifecycle contracts only. The legacy discovery contract does not
 provide Start on Boot, so that summary is shown only for independent servers.
 Settings editing, rename, deletion, and instance-aware How to Connect remain
 later phases. Opening inventory or overview never changes runtime state.
+
+### Phase 7: selected server settings and deletion
+
+The Minecraft and Backups workspaces share explicit selected-server context.
+`original` uses only the existing legacy contracts. Independent selection is a
+validated active immutable `jv-*` identity, never a name or inventory position.
+Changing selection reloads the document and discards pending settings reviews.
+Invalid or stale selections fail closed. How to Connect remains unchanged.
+
+Independent Memory, Gameplay and Cross-play reuse the existing controls.
+Start on Boot is editable from Overview. Review commits the selected identity,
+current public configuration and proposed allowed fields. Apply reads current
+configuration again, refuses a stale review, overlays only those allowed fields,
+and PUTs the full public runtime configuration. Software, version, channel,
+image, timezone, EULA and private runtime details cannot be edited here. These
+changes require a stopped server and never request a stop or restart.
+Independent Players reads selected player status; independent whitelist mutation
+is unavailable. Original Players and Version retain their existing behavior.
+
+Independent Backups uses only the selected identity's Phase 4 inventory, status,
+settings, Backup Now and Restore plan/apply/status/recover routes. It reuses the
+Backups template, schedule controls, archive cards and Restore review. Independent
+Restore replaces complete server data and remains **same immutable ID only**.
+No cross-instance Restore or independent backup deletion is introduced.
+
+Administrator rename calls the existing name route. Name metadata changes do not
+change identity, data location, units or archive ownership. Deletion is
+`POST /v1/minecraft/instances/{id}/delete` with strict JSON
+`{"confirm_name":"Current friendly name"}`. Both the WebUI and Agent require
+Administrator authority; WebUI requests also require CSRF. Original cannot be
+deleted by this contract. The name is checked under the registry lock.
+
+Deletion takes the existing nonblocking backup worker gate, then reuses Restore's
+nonblocking claim order: operation mutex, existing
+setup/restore/data-migration/migration claims, restore exclusion, then runtime
+maintenance lock; the registry lock is acquired last without waiting. The Agent
+refuses unsettled runtime state, queued lifecycle work, active Backup/Restore,
+activation or backup recovery, and unverified storage/configuration evidence.
+It never stops Minecraft automatically.
+
+Original configuration Apply (`POST /v1/admin/configuration/apply`) uses the
+same Agent mutation claim as Delete, including the backup worker gate. The
+operation-store mutex and active-operation checks stay held with the persistent
+claims, so concurrent requests in the same Agent cannot reuse process-tracked
+locks as if they had acquired independent ownership. A conflict returns HTTP 409
+before the configuration helper runs and is never audited as success. The
+existing helper still owns all validation, player confirmation, configuration
+backup/rollback, rendering, firewall updates and memory restart behavior. Its
+response and successful-Apply audit contract are unchanged. Release occurs after
+the helper exits on success, rejection, failure or invalid output. Configuration
+Plan stays read-only and does not acquire this mutation claim.
+
+The private journal is `/var/lib/justvoxel-instance-runtime/delete-{id}.json`,
+outside the world and runtime directories. Intent records committed runtime and
+storage evidence plus the exact data directory device/inode before retiring any
+material. Startup validation refuses a pending deletion. An explicit repeated
+Delete Server request resumes the same ID, same confirmed name and same evidence;
+there is no background cleanup or rollback claim after world bytes are erased.
+The selected backup timer is disabled, owned firewall entries and selected
+runtime/native backup units are retired, and the exact data tree is removed in
+the host mount namespace. The helper rejects symlink substitution, changed inode,
+and nested mounts and uses descriptor-relative symlink-safe removal. Removal and
+runtime cleanup are verified and synced before active identity retirement.
+Historical names remain reserved, so Add Server cannot deliberately reuse the ID.
+Only then is transaction evidence cleared.
+
+`GET /v1/minecraft/instances/deletions` provides a separate safe recovery inventory
+of incomplete deletions. These entries remain reachable in Minecraft Servers,
+including when runtime configuration or active identity has already been retired.
+The selected overview retains the typed-name Delete retry action when ordinary
+settings are unavailable. Successful deletion redirects to Minecraft Servers.
+
+Completed archives and metadata, retained historical names, sibling servers,
+legacy runtime/data, shared storage roots and unrelated import/migration/export
+material are preserved. Preserved archives remain historical archives; current
+Restore remains tied to the deleted server identity. Creating a new server does
+not make those archives restorable into its new identity.
+
+The root-filesystem regression is `tests/test-instance-delete.sh`, intended for
+independent verification with `podman unshare bash tests/test-instance-delete.sh`.
+It stubs runtime discovery while executing the production filesystem remover on
+real temporary directories. Implementation-pass validation is restricted to
+formatting and syntax checks; application and root-namespace execution is left
+to independent verification.

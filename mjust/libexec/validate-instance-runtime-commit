@@ -14,6 +14,7 @@ for path in /etc/justvoxel/instances "${dir}" /var/lib/justvoxel/instances; do
     [[ -d ${path} && ! -L ${path} && $(realpath -e -- "${path}") == "${path}" ]] || fail
     [[ $(stat -c '%u:%g:%a' -- "${path}") == 0:0:700 ]] || fail
 done
+[[ ! -e /var/lib/justvoxel-instance-runtime/delete-${id}.json && ! -L /var/lib/justvoxel-instance-runtime/delete-${id}.json ]] || fail
 [[ ! -e ${dir}/pending.json && ! -L ${dir}/pending.json ]] || fail
 # Independent restore never borrows the activation pending.json schema. A
 # crashed transaction inhibits boot; only its live Agent may verify a restart.

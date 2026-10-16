@@ -105,29 +105,83 @@ func TestBackupsWorkspaceUsesIndependentWorkspaceRoutes(t *testing.T) {
 		}
 	}
 
-	templateBytes, err := assets.ReadFile("templates/backups_workspace.html")
+	for _, selected := range []string{"", "jv-family1"} {
+		t.Run("render-"+selected, func(t *testing.T) {
+			markup := renderBackupsRoutes(t, selected)
+			suffix := ""
+			if selected != "" {
+				suffix = "?server=" + selected
+			}
+			for _, route := range []string{"backup", "automatic/plan", "automatic/apply", "restore/plan", "restore/apply"} {
+				if !strings.Contains(markup, `action="/workspace/backups/`+route+suffix+`"`) {
+					t.Fatalf("rendered route missing: %s%s", route, suffix)
+				}
+			}
+			if selected == "" {
+				for _, want := range []string{`action="/workspace/backups/destination/plan"`, `action="/workspace/backups/restore/resolve-reset"`, "Keep current server and continue Restore", "Retry Restore review", "Player status is temporarily unavailable."} {
+					if !strings.Contains(markup, want) {
+						t.Fatalf("Original behavior missing %q", want)
+					}
+				}
+			} else if !strings.Contains(markup, `action="/workspace/backups/restore/recover?server=jv-family1"`) {
+				t.Fatal("selected recovery route missing")
+			}
+			if strings.Contains(markup, "jv-kids001") || strings.Contains(markup, "/settings/new-backups") {
+				t.Fatal("foreign server or legacy page substituted")
+			}
+		})
+	}
+	// Original, including its explicit selection, retains the native routes.
+	original, err := New(&fakeNewBackupsAPI{role: "administrator"}, Config{ManagementAPI: "v1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	markup := string(templateBytes)
-	if !strings.Contains(markup, `data-backups-workspace-root`) {
-		t.Fatal("native Backups fragment root missing")
+	for _, suffix := range []string{"", "?server=original"} {
+		response := phase7Request(original, http.MethodGet, "/workspace/backups"+suffix, "")
+		if response.Code != 200 {
+			t.Fatal(response.Code, response.Body.String())
+		}
+		for _, route := range []string{"backup", "automatic/plan", "restore/plan"} {
+			if !strings.Contains(response.Body.String(), `action="/workspace/backups/`+route+`"`) {
+				t.Fatal("Original handler route changed", route)
+			}
+		}
 	}
-	if strings.Contains(markup, "/settings/new-backups") {
-		t.Fatal("native Backups fragment still posts or links to the legacy page")
-	}
-	for _, want := range []string{
-		`action="/workspace/backups/backup"`,
-		`action="/workspace/backups/automatic/plan"`,
-		`action="{{.DestinationWorkspace}}/destination/plan"`,
-		`action="/workspace/backups/restore/plan"`,
-		`action="/workspace/backups/restore/resolve-reset"`,
-		`Keep current server and continue Restore`,
-		`Retry Restore review`,
-		`Player status is temporarily unavailable.`,
+	// Both handler paths use the maintained fragment, with validated selection.
+	app, f := phase7App(t)
+	for _, item := range []struct{ path, body, action string }{
+		{"/workspace/backups", "", "inventory"},
+		{"/workspace/backups/backup", "csrf=csrf-token", "now"},
+		{"/workspace/backups/automatic/plan", "csrf=csrf-token&daily_time=04%3A00&backup_keep=7", "settings"},
+		{"/workspace/backups/automatic/apply", "csrf=csrf-token&daily_time=04%3A00&backup_keep=7", "configure"},
+		{"/workspace/backups/restore/plan", "csrf=csrf-token&backup_id=archive.tar.gz&mode=full", "restore/plan"},
+		{"/workspace/backups/restore/apply", "csrf=csrf-token&backup_id=archive.tar.gz&confirmation=RESTORE&plan_fingerprint=" + strings.Repeat("a", 64), "restore/apply"},
+		{"/workspace/backups/restore/recover", "csrf=csrf-token&confirm_players=yes", "restore/recover"},
 	} {
-		if !strings.Contains(markup, want) {
-			t.Fatalf("native Backups fragment missing route %q", want)
+		method := http.MethodPost
+		if item.body == "" {
+			method = http.MethodGet
+		}
+		response := phase7Request(app, method, item.path+"?server=jv-family1", item.body)
+		if response.Code != 200 || !strings.Contains(response.Body.String(), `data-backups-workspace-root`) || !strings.Contains(response.Body.String(), `action="/workspace/backups/backup?server=jv-family1"`) {
+			t.Fatalf("selected handler %s: %d %s", item.path, response.Code, response.Body.String())
+		}
+		if !strings.Contains(strings.Join(f.backupCalls, "|"), "jv-family1:"+item.action) {
+			t.Fatal("selected backend action missing", item.action)
+		}
+	}
+	for _, call := range f.backupCalls {
+		if !strings.HasPrefix(call, "jv-family1:") {
+			t.Fatal("foreign backend target", call)
+		}
+	}
+	entries, err := assets.ReadDir("templates")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), "backups_workspace") && entry.Name() != "backups_workspace.html" {
+			t.Fatal("second Backups template", entry.Name())
 		}
 	}
 }
@@ -263,11 +317,7 @@ func TestQuickLookManualBackupUsesWorkspaceNativeAPI(t *testing.T) {
 	if strings.Contains(source, "/operations#manual-backup") || strings.Contains(block, "/operations") {
 		t.Fatal("Quick Look manual backup still navigates to Operations")
 	}
-	markup, err := assets.ReadFile("templates/backups_workspace.html")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(markup), `action="/workspace/backups/backup"`) {
+	if !strings.Contains(renderBackupsRoutes(t, ""), `action="/workspace/backups/backup"`) {
 		t.Fatal("Administrator Backups Workspace manual backup route changed")
 	}
 	for _, role := range []string{"operator", "viewer"} {
@@ -484,4 +534,22 @@ func TestStandaloneNewBackupsUIRetired(t *testing.T) {
 			t.Fatalf("Backups script retains standalone fallback %q", retired)
 		}
 	}
+}
+
+// Render conditional routes through the same maintained template as both handlers.
+func renderBackupsRoutes(t *testing.T, selected string) string {
+	t.Helper()
+	app, _ := phase7App(t)
+	data := backupsWorkspaceData{
+		SelectedServer: selected, SelectedRestoreRecovery: selected != "",
+		DestinationWorkspace:  "/workspace/backups",
+		AutomaticPlan:         &api.AdminConfigurationChangeResponse{OK: true, Changes: []api.AdminConfigurationChange{{Field: "backup"}}},
+		RestorePlan:           &api.AdminRestorePlanResponse{OK: true, Normalized: &api.AdminRestorePlanNormalized{}, Requirements: &api.AdminRestorePlanRequirements{}},
+		RestoreRetryAvailable: true, RestoreBlockedResetID: "reset-test",
+	}
+	var output bytes.Buffer
+	if err := app.templates.ExecuteTemplate(&output, "backups_workspace.html", data); err != nil {
+		t.Fatal(err)
+	}
+	return output.String()
 }

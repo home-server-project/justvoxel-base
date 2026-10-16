@@ -11,7 +11,7 @@ if (versionLauncher && versionDialog) {
   const operationKinds = new Map();
   let completedOperation = null;
   const request = async (url, options = {}) => {
-    const response = await fetch(url, { credentials: "same-origin", cache: "no-store", ...options });
+    const response = await fetch((globalThis.justVoxelSelectedURL?.(url) ?? url), { credentials: "same-origin", cache: "no-store", ...options });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "Version information is unavailable.");
     return payload;
@@ -272,6 +272,10 @@ if (versionLauncher && versionDialog) {
     });
   };
   const render = async (message = "", confirmedOperation = completedOperation) => {
+    const selected = new URLSearchParams(globalThis.location?.search || "").get("server");
+    if (selected && selected !== "original") {
+      try {const settings=await request("/api/minecraft/workspace/settings");const panel=card("Software & version");panel.append(line("Software",settings.minecraft.server_type),line("Minecraft",settings.minecraft.version),line("Changes","Software and version are read-only for this server."));content.replaceChildren(panel);state.textContent="";}catch(error){state.textContent=error.message;}return;
+    }
     const ticket = ++sequence;
     await settleSelectChange();
     if (ticket !== sequence) return;

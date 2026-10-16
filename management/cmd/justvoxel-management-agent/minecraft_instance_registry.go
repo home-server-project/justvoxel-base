@@ -377,6 +377,12 @@ func (s *minecraftInstanceStore) renameInstance(id, name, legacySoftware string)
 		return minecraftRegisteredInstance{}, err
 	}
 	defer syscall.Flock(int(dir.Fd()), syscall.LOCK_UN)
+	// Deletion holds this same registry lock through name confirmation and
+	// retirement. After interruption, its durable intent prevents a rename from
+	// invalidating the only supported typed-name retry.
+	if _, e := instanceRuntimes.readPrivate(instanceRuntimes.deletePath(id)); !errors.Is(e, os.ErrNotExist) {
+		return minecraftRegisteredInstance{}, errInstanceRecovery
+	}
 	instances, names, err := s.registeredInstances(legacySoftware)
 	if err != nil {
 		return minecraftRegisteredInstance{}, err

@@ -13,6 +13,11 @@ type versionStatusAPI interface {
 }
 
 func (a *App) versionWorkspaceStatus(w http.ResponseWriter, r *http.Request) {
+	if values, exists := r.URL.Query()["server"]; exists && (len(values) != 1 || values[0] != "original") {
+		writeMinecraftWorkspaceError(w, http.StatusConflict, "Software and version are read-only for the selected independent server.")
+		return
+	}
+
 	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
 	if !ok {
 		return
@@ -38,6 +43,15 @@ type versionUpdateAPI interface {
 }
 
 func (a *App) versionWorkspaceUpdate(w http.ResponseWriter, r *http.Request) {
+	if values, exists := r.URL.Query()["server"]; exists && (len(values) != 1 || values[0] != "original") {
+		writeMinecraftWorkspaceError(w, http.StatusConflict, "Software and version are read-only for the selected independent server.")
+		return
+	}
+
+	// Explicit Original selection still uses the exact legacy update contract.
+	query := r.URL.Query()
+	query.Del("server")
+	r.URL.RawQuery = query.Encode()
 	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 	if r.ParseForm() != nil || len(r.URL.Query()) > 0 {
 		writeMinecraftWorkspaceError(w, http.StatusBadRequest, "Invalid server update request.")
@@ -90,6 +104,11 @@ func (a *App) versionWorkspaceUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) versionWorkspaceUpdateOperation(w http.ResponseWriter, r *http.Request) {
+	if values, exists := r.URL.Query()["server"]; exists && (len(values) != 1 || values[0] != "original") {
+		writeMinecraftWorkspaceError(w, http.StatusConflict, "Software and version are read-only for the selected independent server.")
+		return
+	}
+
 	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
 	if !ok {
 		return

@@ -92,9 +92,9 @@ func requireNoPrivateServerContent(t *testing.T, body string) {
 			t.Errorf("private visible content: %s", forbidden)
 		}
 	}
-	for _, forbidden := range []string{`name="display_name"`, `name="software"`, `name="version"`, `name="java_port"`, `name="bedrock_port"`, `name="java_memory"`, `name="container_memory"`, `name="storage"`, `name="start_on_boot"`, "Edit Settings", ">Delete", ">Rename", "How to Connect", "delete-world"} {
+	for _, forbidden := range []string{`name="software"`, `name="version"`, `name="java_port"`, `name="bedrock_port"`, `name="java_memory"`, `name="container_memory"`, `name="storage"`, `name="start_on_boot"`, "Edit Settings", "How to Connect", "delete-world"} {
 		if strings.Contains(body, forbidden) {
-			t.Errorf("later-phase control: %s", forbidden)
+			t.Errorf("out-of-scope control: %s", forbidden)
 		}
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os/exec"
@@ -101,9 +102,21 @@ func (s *server) runAdminConfigurationChange(w http.ResponseWriter, r *http.Requ
 	if action == "apply" {
 		timeout = 90 * time.Second
 	}
+	var release func() error
+	if action == "apply" {
+		release, err = s.claimMinecraftMutation()
+		if err != nil {
+			_ = s.store.recordAuditEvent(actor, "update_minecraft_configuration", "justvoxel.conf", false, "configuration apply busy")
+			writeError(w, http.StatusConflict, "Another Minecraft maintenance operation is active. Try again after it finishes.")
+			return
+		}
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 	output, err := runAdminConfigurationHelper(ctx, action, payload)
+	if release != nil {
+		err = errors.Join(err, release())
+	}
 	if err != nil {
 		if action == "apply" {
 			_ = s.store.recordAuditEvent(actor, "update_minecraft_configuration", "justvoxel.conf", false, "configuration apply failed")

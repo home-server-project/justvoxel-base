@@ -41,6 +41,8 @@ func instancePublicSettings(c minecraftInstanceRuntimeConfig) instanceRuntimeSet
 	return instanceRuntimeSettings{JavaPort: c.JavaPort, BedrockEnabled: c.BedrockEnabled, BedrockPort: c.BedrockPort, JavaMemory: c.JavaMemory, ContainerMemory: c.ContainerMemory, Software: c.Software, Version: c.Version, PaperChannel: c.PaperChannel, ImageTag: c.ImageTag, StartOnBoot: c.StartOnBoot, EULAAccepted: c.EULAAccepted, Timezone: c.Timezone, GameMode: c.GameMode, Difficulty: c.Difficulty, MaxPlayers: c.MaxPlayers, Whitelist: c.Whitelist, EnforceWhitelist: c.EnforceWhitelist, MOTD: c.MOTD}
 }
 func registerInstanceRuntimeRoutes(mux *http.ServeMux, s *server) {
+	mux.HandleFunc("GET /v1/minecraft/instances/deletions", s.instanceDeletionInventory)
+	mux.HandleFunc("POST /v1/minecraft/instances/{id}/delete", s.instanceDelete)
 	registerInstanceMaintenanceRoutes(mux, s)
 	registerInstanceBackupRoutes(mux, s)
 	mux.HandleFunc("POST /v1/minecraft/instances", s.instanceRuntimeCreate)

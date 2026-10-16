@@ -61,6 +61,11 @@ type backupsWorkspacePartitionView struct {
 }
 
 type backupsWorkspaceData struct {
+	SelectedServer               string
+	SelectedName                 string
+	SelectedBackupStatus         string
+	SelectedRestoreStatus        string
+	SelectedRestoreRecovery      bool
 	DestinationWorkspace         string
 	CSRF                         string
 	Identity                     api.SessionInfo
@@ -94,6 +99,11 @@ type backupsWorkspaceData struct {
 }
 
 func (a *App) registerBackupsWorkspaceRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("POST /workspace/backups/restore/recover", func(w http.ResponseWriter, r *http.Request) {
+		if !a.selectedBackupsWorkspace(w, r) {
+			http.NotFound(w, r)
+		}
+	})
 	mux.HandleFunc("GET /workspace/backups", a.backupsWorkspacePage)
 	mux.HandleFunc("POST /workspace/backups/backup", a.backupsWorkspaceBackupNow)
 	mux.HandleFunc("POST /workspace/backups/automatic/plan", a.backupsWorkspaceAutomaticPlan)
@@ -137,6 +147,10 @@ func (a *App) backupsWorkspaceRequest(w http.ResponseWriter, r *http.Request, re
 }
 
 func (a *App) backupsWorkspacePage(w http.ResponseWriter, r *http.Request) {
+	if a.selectedBackupsWorkspace(w, r) {
+		return
+	}
+
 	session, client, identity, ok := a.backupsWorkspaceRequest(w, r, false)
 	if !ok {
 		return
@@ -165,6 +179,10 @@ func (a *App) backupsWorkspacePage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) backupsWorkspaceBackupNow(w http.ResponseWriter, r *http.Request) {
+	if a.selectedBackupsWorkspace(w, r) {
+		return
+	}
+
 	session, client, identity, ok := a.backupsWorkspaceRequest(w, r, true)
 	if !ok {
 		return
@@ -185,6 +203,10 @@ func (a *App) backupsWorkspaceBackupNow(w http.ResponseWriter, r *http.Request) 
 }
 
 func (a *App) backupsWorkspaceAutomaticPlan(w http.ResponseWriter, r *http.Request) {
+	if a.selectedBackupsWorkspace(w, r) {
+		return
+	}
+
 	session, client, identity, ok := a.backupsWorkspaceRequest(w, r, true)
 	if !ok {
 		return
@@ -213,6 +235,10 @@ func (a *App) backupsWorkspaceAutomaticPlan(w http.ResponseWriter, r *http.Reque
 }
 
 func (a *App) backupsWorkspaceAutomaticApply(w http.ResponseWriter, r *http.Request) {
+	if a.selectedBackupsWorkspace(w, r) {
+		return
+	}
+
 	session, client, identity, ok := a.backupsWorkspaceRequest(w, r, true)
 	if !ok {
 		return
@@ -250,6 +276,10 @@ func (a *App) backupsWorkspaceAutomaticApply(w http.ResponseWriter, r *http.Requ
 }
 
 func (a *App) backupsWorkspaceDestinationPlan(w http.ResponseWriter, r *http.Request) {
+	if a.selectedBackupsWorkspace(w, r) {
+		return
+	}
+
 	session, client, identity, ok := a.backupsWorkspaceRequest(w, r, true)
 	if !ok {
 		return
@@ -268,6 +298,10 @@ func (a *App) backupsWorkspaceDestinationPlan(w http.ResponseWriter, r *http.Req
 }
 
 func (a *App) backupsWorkspaceDestinationApply(w http.ResponseWriter, r *http.Request) {
+	if a.selectedBackupsWorkspace(w, r) {
+		return
+	}
+
 	session, client, identity, ok := a.backupsWorkspaceRequest(w, r, true)
 	if !ok {
 		return
@@ -294,6 +328,10 @@ func (a *App) backupsWorkspaceDestinationApply(w http.ResponseWriter, r *http.Re
 }
 
 func (a *App) backupsWorkspaceRestorePlan(w http.ResponseWriter, r *http.Request) {
+	if a.selectedBackupsWorkspace(w, r) {
+		return
+	}
+
 	session, client, identity, ok := a.backupsWorkspaceRequest(w, r, true)
 	if !ok {
 		return
@@ -324,6 +362,10 @@ func (a *App) backupsWorkspaceRestorePlan(w http.ResponseWriter, r *http.Request
 }
 
 func (a *App) backupsWorkspaceRestoreApply(w http.ResponseWriter, r *http.Request) {
+	if a.selectedBackupsWorkspace(w, r) {
+		return
+	}
+
 	session, client, identity, ok := a.backupsWorkspaceRequest(w, r, true)
 	if !ok {
 		return
@@ -375,6 +417,10 @@ func (a *App) backupsWorkspaceRestoreApply(w http.ResponseWriter, r *http.Reques
 }
 
 func (a *App) backupsWorkspaceRestoreResolveReset(w http.ResponseWriter, r *http.Request) {
+	if a.selectedBackupsWorkspace(w, r) {
+		return
+	}
+
 	session, client, identity, ok := a.backupsWorkspaceRequest(w, r, true)
 	if !ok {
 		return

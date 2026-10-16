@@ -107,6 +107,10 @@ type minecraftWorkspaceErrorResponse struct {
 }
 
 func (a *App) registerMinecraftWorkspaceRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/minecraft/workspace/selection", a.minecraftSelection)
+	mux.HandleFunc("GET /api/minecraft/workspace/snapshot", a.selectedMinecraftSnapshot)
+	mux.HandleFunc("POST /api/minecraft/workspace/rename", a.selectedMinecraftPresentation)
+	mux.HandleFunc("POST /api/minecraft/workspace/delete", a.selectedMinecraftPresentation)
 	mux.HandleFunc("GET /api/minecraft/workspace/identity", a.minecraftWorkspaceInstance)
 	mux.HandleFunc("POST /api/minecraft/workspace/identity/ensure", a.minecraftWorkspaceInstance)
 	mux.HandleFunc("POST /api/minecraft/workspace/identity/manual", a.minecraftWorkspaceInstance)
@@ -156,6 +160,9 @@ func (a *App) minecraftWorkspaceSettings(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	if a.selectedMinecraftWorkspace(w, r, session, false) {
+		return
+	}
 	client, ok := a.api.(minecraftWorkspaceSettingsAPI)
 	if !ok {
 		writeMinecraftWorkspaceError(w, http.StatusServiceUnavailable, "Minecraft settings are unavailable.")
@@ -191,6 +198,9 @@ func (a *App) minecraftWorkspaceSettingsChange(w http.ResponseWriter, r *http.Re
 	}
 	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
 	if !ok {
+		return
+	}
+	if a.selectedMinecraftWorkspace(w, r, session, apply) {
 		return
 	}
 	client, ok := a.api.(minecraftWorkspaceSettingsAPI)
@@ -288,6 +298,9 @@ func (a *App) minecraftWorkspaceWhitelist(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
+	if a.selectedMinecraftWorkspace(w, r, session, false) {
+		return
+	}
 	client, ok := a.api.(minecraftWorkspaceOperationsAPI)
 	if !ok {
 		writeMinecraftWorkspaceError(w, http.StatusServiceUnavailable, "Minecraft whitelist is unavailable.")
@@ -309,6 +322,9 @@ func (a *App) minecraftWorkspaceWhitelistChange(w http.ResponseWriter, r *http.R
 	}
 	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator", "operator")
 	if !ok {
+		return
+	}
+	if a.selectedMinecraftWorkspace(w, r, session, false) {
 		return
 	}
 	client, ok := a.api.(minecraftWorkspaceOperationsAPI)
@@ -340,6 +356,9 @@ func (a *App) minecraftWorkspaceWhitelistChange(w http.ResponseWriter, r *http.R
 func (a *App) minecraftWorkspaceLogs(w http.ResponseWriter, r *http.Request) {
 	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator", "operator")
 	if !ok {
+		return
+	}
+	if a.selectedMinecraftWorkspace(w, r, session, false) {
 		return
 	}
 	client, ok := a.api.(minecraftWorkspaceOperationsAPI)
@@ -400,6 +419,9 @@ func (a *App) minecraftWorkspaceWhitelistState(w http.ResponseWriter, r *http.Re
 	}
 	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
 	if !ok {
+		return
+	}
+	if a.selectedMinecraftWorkspace(w, r, session, false) {
 		return
 	}
 	client, ok := a.api.(minecraftWorkspaceSettingsAPI)

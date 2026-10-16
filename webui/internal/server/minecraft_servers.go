@@ -15,6 +15,7 @@ import (
 // runtime objects wholesale: legacy discovery also contains private host paths.
 type minecraftServerSummary struct {
 	Name, URL, Software, Version, State, ConfigurationError string
+	ContextID                                               string
 	JavaPort, BedrockPort                                   int
 	ConfigurationAvailable, BedrockEnabled                  bool
 	BootKnown, StartOnBoot                                  bool
@@ -87,7 +88,7 @@ func (s *minecraftServerSummary) setState(state string) {
 }
 
 func (a *App) originalServerSummary(ctx context.Context, session string) minecraftServerSummary {
-	s := minecraftServerSummary{Name: "Original server", URL: serverOverviewURL("original"), State: "Status unavailable", Software: "Software unavailable", Version: "Version unavailable"}
+	s := minecraftServerSummary{ContextID: "original", Name: "Original server", URL: serverOverviewURL("original"), State: "Status unavailable", Software: "Software unavailable", Version: "Version unavailable"}
 	if client, ok := a.api.(interface {
 		AdminConfiguration(context.Context, string) (api.AdminConfigurationDiscovery, error)
 	}); ok {
@@ -143,6 +144,23 @@ func (a *App) independentServerInventory(ctx context.Context, session string) ([
 			instances = append(instances, instance)
 		}
 	}
+	if recovery, ok := a.api.(interface {
+		MinecraftInstanceDeletions(context.Context, string) ([]api.RegisteredMinecraftInstance, error)
+	}); ok {
+		pending, e := recovery.MinecraftInstanceDeletions(ctx, session)
+		if e != nil {
+			return nil, e
+		}
+		seen := map[string]bool{}
+		for _, i := range instances {
+			seen[i.ID] = true
+		}
+		for _, i := range pending {
+			if !seen[i.ID] && addServerIDPattern.MatchString(i.ID) {
+				instances = append(instances, i)
+			}
+		}
+	}
 	sort.Slice(instances, func(i, j int) bool {
 		left, right := strings.ToLower(instances[i].DisplayName), strings.ToLower(instances[j].DisplayName)
 		if left == right {
@@ -154,7 +172,7 @@ func (a *App) independentServerInventory(ctx context.Context, session string) ([
 }
 
 func (a *App) independentServerSummary(ctx context.Context, session string, instance api.RegisteredMinecraftInstance) minecraftServerSummary {
-	s := minecraftServerSummary{Name: instance.DisplayName, URL: serverOverviewURL(instance.ID), Software: "Software unavailable", Version: "Version unavailable", State: "Status unavailable"}
+	s := minecraftServerSummary{ContextID: instance.ID, Name: instance.DisplayName, URL: serverOverviewURL(instance.ID), Software: "Software unavailable", Version: "Version unavailable", State: "Status unavailable"}
 	if s.Name == "" {
 		s.Name = "Minecraft server"
 	}

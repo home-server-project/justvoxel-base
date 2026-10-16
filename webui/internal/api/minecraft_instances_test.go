@@ -123,3 +123,47 @@ func TestIndependentInstanceLifecycleClientPreservesRefusal(t *testing.T) {
 		t.Fatal("refusal discarded")
 	}
 }
+
+func TestPhase7SelectedWrappersNeverUseLegacyContracts(t *testing.T) {
+	requests := []string{}
+	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		if !strings.HasPrefix(r.URL.Path, "/v1/minecraft/instances/jv-family1/") {
+			t.Fatal("legacy or foreign target", r.URL.Path)
+		}
+		body := `{"ok":true}`
+		if strings.HasSuffix(r.URL.Path, "/players") {
+			body = `{"id":"jv-family1","state":"offline"}`
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})}}
+	ctx := context.Background()
+	if e := client.SetMinecraftInstanceConfiguration(ctx, "session-token", "jv-family1", InstanceRuntimeSettings{JavaMemory: "4G"}); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := client.MinecraftInstancePlayers(ctx, "session-token", "jv-family1"); e != nil {
+		t.Fatal(e)
+	}
+	if e := client.RenameMinecraftInstance(ctx, "session-token", "jv-family1", "Renamed"); e != nil {
+		t.Fatal(e)
+	}
+	if e := client.DeleteMinecraftInstance(ctx, "session-token", "jv-family1", "Renamed"); e != nil {
+		t.Fatal(e)
+	}
+	for _, action := range []string{"inventory", "status", "settings", "now", "configure", "restore/plan", "restore/apply", "restore/status", "restore/recover"} {
+		if _, e := client.MinecraftInstanceBackups(ctx, "session-token", "jv-family1", action, struct{}{}); e != nil {
+			t.Fatal(action, e)
+		}
+	}
+	for _, want := range []string{"PUT /v1/minecraft/instances/jv-family1/configuration", "GET /v1/minecraft/instances/jv-family1/players", "POST /v1/minecraft/instances/jv-family1/name", "POST /v1/minecraft/instances/jv-family1/delete", "POST /v1/minecraft/instances/jv-family1/backups/restore/apply"} {
+		found := false
+		for _, request := range requests {
+			if request == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal(want)
+		}
+	}
+}

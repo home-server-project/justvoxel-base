@@ -1,11 +1,13 @@
-{{define "backups_workspace.html"}}<div class="new-backups-shell backups-workspace-content" data-backups-workspace-root>
+{{define "backups_workspace.html"}}<div class="new-backups-shell backups-workspace-content" data-backups-workspace-root data-selected-server-id="{{.SelectedServer}}">
+  {{if .SelectedServer}}<p><strong>{{.SelectedName}}</strong> · Backup: {{.SelectedBackupStatus}} · Restore: {{.SelectedRestoreStatus}}</p>
+  {{if .SelectedRestoreRecovery}}<form method="post" action="/workspace/backups/restore/recover{{if .SelectedServer}}?server={{.SelectedServer}}{{end}}"><input type="hidden" name="csrf" value="{{.CSRF}}"><label><input type="checkbox" name="confirm_players" value="yes" required> Allow safe recovery interruption</label><button type="submit">Retry Restore Recovery</button></form>{{end}}{{end}}
   {{if .Message}}<div class="notice success">{{.Message}}</div>{{end}}
   {{if .Error}}<div class="notice error">{{.Error}}</div>{{end}}
 
   <section class="backup-library-section" id="backup-library">
     <div class="section-heading">
       <div><p class="eyebrow">Backup library</p><h2>Existing backups</h2></div>
-      {{if .Backups}}
+      {{if and .Backups (not .SelectedServer)}}
       <label class="backup-server-filter">Server
         <select data-backup-server-filter aria-label="Filter backups by server">
           <option value="all">All servers</option>
@@ -49,8 +51,8 @@
       </div>
       <div class="backup-command-actions">
         <button type="button" data-backup-restore-selected data-restore-busy="{{if .RestoreOperation}}1{{else}}0{{end}}" disabled>Restore selected</button>
-        <button class="danger" type="button" data-backup-delete-selected disabled>Delete selected</button>
-        <form method="post" action="/workspace/backups/backup">
+        {{if not .SelectedServer}}<button class="danger" type="button" data-backup-delete-selected disabled>Delete selected</button>{{end}}
+        <form method="post" action="/workspace/backups/backup{{if .SelectedServer}}?server={{.SelectedServer}}{{end}}">
           <input type="hidden" name="csrf" value="{{.CSRF}}">
           <button type="submit">Backup Now</button>
         </form>
@@ -85,7 +87,7 @@
     <div class="section-heading"><div><p class="eyebrow">Restore review</p><h2>{{if .RestoreModeTitle}}{{.RestoreModeTitle}}{{else}}Review Restore{{end}}</h2></div><span class="badge">Destructive</span></div>
     {{if .RestoreError}}<div class="notice error"><strong>Restore cannot continue as submitted.</strong><br>{{.RestoreError}}</div>{{end}}
     {{if .RestoreRetryAvailable}}
-    <form method="post" action="/workspace/backups/restore/plan" class="backup-restore-retry">
+    <form method="post" action="/workspace/backups/restore/plan{{if .SelectedServer}}?server={{.SelectedServer}}{{end}}" class="backup-restore-retry">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <input type="hidden" name="backup_id" value="{{.RestoreRequest.BackupID}}">
       <input type="hidden" name="mode" value="{{.RestoreRequest.Mode}}">
@@ -94,7 +96,7 @@
     </form>
     {{end}}
     {{if .RestoreBlockedResetID}}
-    <form method="post" action="/workspace/backups/restore/resolve-reset" class="backup-restore-reset-recovery">
+    <form method="post" action="/workspace/backups/restore/resolve-reset{{if .SelectedServer}}?server={{.SelectedServer}}{{end}}" class="backup-restore-reset-recovery">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <input type="hidden" name="operation_id" value="{{.RestoreBlockedResetID}}">
       <input type="hidden" name="backup_id" value="{{.RestoreRequest.BackupID}}">
@@ -124,7 +126,7 @@
       {{if .RestorePlan.Requirements.PlayersConfirmationRequired}}
       <div class="notice warning"><strong>{{.RestorePlan.Requirements.Online}} player(s) are online.</strong><br>{{range .RestorePlan.Requirements.Players}}{{.}}<br>{{end}}Restore will use the player-aware graceful shutdown path.</div>
       {{end}}
-      <form class="backup-restore-apply" method="post" action="/workspace/backups/restore/apply">
+      <form class="backup-restore-apply" method="post" action="/workspace/backups/restore/apply{{if .SelectedServer}}?server={{.SelectedServer}}{{end}}">
         <input type="hidden" name="csrf" value="{{.CSRF}}">
         <input type="hidden" name="backup_id" value="{{.RestoreRequest.BackupID}}">
         <input type="hidden" name="mode" value="{{.RestoreRequest.Mode}}">
@@ -139,7 +141,7 @@
           </div>
           <label class="destructive-confirm-toggle-row" data-destructive-toggle-row hidden><span class="destructive-confirm-toggle-callout">Confirm &gt;</span><input class="destructive-confirm-toggle" type="checkbox" data-destructive-toggle aria-label="Confirm restore"></label>
         </div>
-        <div class="action-row"><a class="button-link secondary" href="/workspace/backups">Cancel</a><button class="danger" type="submit" data-destructive-submit disabled>Start Restore</button></div>
+        <div class="action-row"><a class="button-link secondary" href="/workspace/backups{{if .SelectedServer}}?server={{.SelectedServer}}{{end}}">Cancel</a><button class="danger" type="submit" data-destructive-submit disabled>Start Restore</button></div>
       </form>
       {{end}}
     {{end}}
@@ -151,7 +153,7 @@
       <div><p class="eyebrow">Automatic backups</p><h2>Schedule & retention</h2></div>
       <span class="badge">{{if .Automatic.Enabled}}Enabled{{else}}Off{{end}}</span>
     </div>
-    <form class="backup-automatic-form" method="post" action="/workspace/backups/automatic/plan">
+    <form class="backup-automatic-form" method="post" action="/workspace/backups/automatic/plan{{if .SelectedServer}}?server={{.SelectedServer}}{{end}}">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <label class="backup-automatic-toggle"><input name="automatic_enabled" type="checkbox" {{if .Automatic.Enabled}}checked{{end}}> Enable automatic backups</label>
       <label>Daily time
@@ -174,12 +176,12 @@
         <div class="backup-automatic-change"><strong>Daily time</strong><span>{{.Automatic.DailyTime}}{{if .Timezone}} · {{.Timezone}}{{end}}</span></div>
         <div class="backup-automatic-change"><strong>Keep last</strong><span>{{.Automatic.Keep}} backups</span></div>
       </div>
-      <form class="backup-automatic-apply" method="post" action="/workspace/backups/automatic/apply">
+      <form class="backup-automatic-apply" method="post" action="/workspace/backups/automatic/apply{{if .SelectedServer}}?server={{.SelectedServer}}{{end}}">
         <input type="hidden" name="csrf" value="{{.CSRF}}">
         {{if .Automatic.Enabled}}<input type="hidden" name="automatic_enabled" value="on">{{end}}
         <input type="hidden" name="daily_time" value="{{.Automatic.DailyTime}}">
         <input type="hidden" name="backup_keep" value="{{.Automatic.Keep}}">
-        <div class="action-row"><a class="button-link secondary" href="/workspace/backups">Cancel</a><button type="submit">Apply settings</button></div>
+        <div class="action-row"><a class="button-link secondary" href="/workspace/backups{{if .SelectedServer}}?server={{.SelectedServer}}{{end}}">Cancel</a><button type="submit">Apply settings</button></div>
       </form>
       {{else}}
       <p class="muted compact">No automatic backup changes were detected.</p>
@@ -188,11 +190,11 @@
     {{end}}
   </section>
 
-  {{template "backup_destination_content" .}}
+  {{if not .SelectedServer}}{{template "backup_destination_content" .}}{{end}}
 
 
   <dialog class="backup-restore-dialog" data-backup-restore-dialog>
-    <form class="backup-restore-dialog-card" method="post" action="/workspace/backups/restore/plan">
+    <form class="backup-restore-dialog-card" method="post" action="/workspace/backups/restore/plan{{if .SelectedServer}}?server={{.SelectedServer}}{{end}}">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <input type="hidden" name="backup_id" data-backup-restore-id>
       <div class="backup-restore-dialog-heading">
@@ -200,8 +202,8 @@
         <button class="backup-restore-dialog-close" type="button" data-backup-restore-close aria-label="Close Restore">×</button>
       </div>
       <p class="backup-restore-selected-name">Selected: <code data-backup-restore-name></code></p>
-      <label class="backup-restore-mode"><input type="radio" name="mode" value="world" checked><span><strong>Restore world</strong><small>Replace the primary world plus its Nether and End world directories.</small></span></label>
-      <label class="backup-restore-mode"><input type="radio" name="mode" value="full"><span><strong>Restore full Minecraft data</strong><small>Replace the complete Minecraft persistent data directory, including plugins and Minecraft-side configuration.</small></span></label>
+      {{if not .SelectedServer}}<label class="backup-restore-mode"><input type="radio" name="mode" value="world" checked><span><strong>Restore world</strong><small>Replace the primary world plus its Nether and End world directories.</small></span></label>{{end}}
+      <label class="backup-restore-mode"><input type="radio" name="mode" value="full" {{if .SelectedServer}}checked{{end}}><span><strong>Restore full Minecraft data</strong><small>Replace the complete Minecraft persistent data directory, including plugins and Minecraft-side configuration.</small></span></label>
       <p class="muted compact">Nothing changes during Review. The JustVoxel will build the authoritative Restore plan before Apply.</p>
       <div class="action-row backup-restore-dialog-actions"><button class="secondary" type="button" data-backup-restore-cancel>Cancel</button><button type="submit">Review Restore</button></div>
     </form>

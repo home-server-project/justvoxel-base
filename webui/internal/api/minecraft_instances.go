@@ -169,3 +169,89 @@ func (c *Client) CreateMinecraftInstance(ctx context.Context, session string, se
 	}
 	return out, nil
 }
+
+func (c *Client) SetMinecraftInstanceConfiguration(ctx context.Context, session, id string, settings InstanceRuntimeSettings) error {
+	client := *c.http
+	client.Timeout = 310 * time.Second
+	caller := &Client{http: &client}
+	return caller.do(ctx, http.MethodPut, "/v1/minecraft/instances/"+url.PathEscape(id)+"/configuration", session, struct {
+		Runtime InstanceRuntimeSettings `json:"runtime"`
+	}{settings}, nil)
+}
+func (c *Client) RenameMinecraftInstance(ctx context.Context, session, id, name string) error {
+	return c.do(ctx, http.MethodPost, "/v1/minecraft/instances/"+url.PathEscape(id)+"/name", session, struct {
+		DisplayName string `json:"display_name"`
+	}{name}, nil)
+}
+func (c *Client) DeleteMinecraftInstance(ctx context.Context, session, id, name string) error {
+	client := *c.http
+	client.Timeout = 310 * time.Second
+	caller := &Client{http: &client}
+	var out struct {
+		OK bool `json:"ok"`
+	}
+	err := caller.do(ctx, http.MethodPost, "/v1/minecraft/instances/"+url.PathEscape(id)+"/delete", session, struct {
+		ConfirmName string `json:"confirm_name"`
+	}{name}, &out)
+	if err == nil && !out.OK {
+		return fmt.Errorf("Server deletion did not complete")
+	}
+	return err
+}
+
+type InstancePlayers struct {
+	ID      string `json:"id"`
+	State   string `json:"state"`
+	Online  int    `json:"online"`
+	Maximum int    `json:"maximum"`
+}
+
+func (c *Client) MinecraftInstancePlayers(ctx context.Context, session, id string) (InstancePlayers, error) {
+	var out InstancePlayers
+	err := c.do(ctx, http.MethodGet, "/v1/minecraft/instances/"+url.PathEscape(id)+"/players", session, nil, &out)
+	return out, err
+}
+func (c *Client) MinecraftInstanceLogs(ctx context.Context, session, id string) (string, error) {
+	var out struct {
+		Logs string `json:"logs"`
+	}
+	err := c.do(ctx, http.MethodGet, "/v1/minecraft/instances/"+url.PathEscape(id)+"/logs", session, nil, &out)
+	return out.Logs, err
+}
+
+// The caller selects from this finite Phase 4 surface; it cannot supply an API
+// path, unit, container or filesystem path.
+func (c *Client) MinecraftInstanceBackups(ctx context.Context, session, id, action string, request any) (json.RawMessage, error) {
+	method, suffix := http.MethodGet, ""
+	switch action {
+	case "inventory":
+	case "status", "settings":
+		suffix = "/" + action
+	case "now":
+		method = http.MethodPost
+	case "configure":
+		method = http.MethodPut
+		suffix = "/settings"
+	case "restore/plan", "restore/apply", "restore/recover":
+		method = http.MethodPost
+		suffix = "/" + action
+	case "restore/status":
+		suffix = "/restore/status"
+	default:
+		return nil, fmt.Errorf("Unsupported backup operation")
+	}
+	client := *c.http
+	client.Timeout = 2*time.Hour + time.Minute
+	caller := &Client{http: &client}
+	var out json.RawMessage
+	err := caller.do(ctx, method, "/v1/minecraft/instances/"+url.PathEscape(id)+"/backups"+suffix, session, request, &out)
+	return out, err
+}
+
+func (c *Client) MinecraftInstanceDeletions(ctx context.Context, session string) ([]RegisteredMinecraftInstance, error) {
+	var out struct {
+		Deletions []RegisteredMinecraftInstance `json:"deletions"`
+	}
+	err := c.do(ctx, http.MethodGet, "/v1/minecraft/instances/deletions", session, nil, &out)
+	return out.Deletions, err
+}
