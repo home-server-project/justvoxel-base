@@ -44,7 +44,7 @@ test('automatic success continues silently without a popup or manual request', a
   assert.equal(r.calls.length, 0);
 });
 
-for (const workflow of ['setup', 'fresh import']) {
+for (const workflow of ['fresh import']) {
   test(`${workflow}: unresolved registration pauses, manual Save resumes the same reviewed submission`, async () => {
     const r = renderer();
     // Credentials and reviewed approvals stay in the caller's memory.
@@ -100,7 +100,7 @@ test('Overview contains no identity display, form, automatic registration or sto
   assert.doesNotMatch(readFileSync(`${__dirname}/../webui/internal/server/static/app.css`, 'utf8'), /minecraft-instance-identity/);
 });
 
-test('selected URLs preserve Original fallback and explicit server targets without Window', () => {
+test('selected URLs preserve explicit immutable IDs and leave missing selection for authoritative resolution', () => {
   const context = vm.createContext({URL, URLSearchParams});
   vm.runInContext(block, context);
   assert.equal(context.justVoxelSelectedURL('/api/minecraft/workspace/settings'), '/api/minecraft/workspace/settings');

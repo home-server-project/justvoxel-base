@@ -1,116 +1,43 @@
-# Minecraft restore
+# Minecraft Restore
 
-JustVoxel provides two deliberately separate restore operations.
+Restore replaces the complete persistent data of one selected Minecraft server:
+worlds, player data, plugins, plugin data, server.properties and whitelist/ops.
+It preserves the instance identity, appliance storage policy, runtime definition,
+container channel, Minecraft version policy and operating-system deployment.
 
-## Management architecture
-
-Restore has one authoritative implementation behind the JustVoxel Management API.
-
-The terminal interface is a thin frontend: it discovers completed backups through
-the API, asks the Management Agent to plan the selected restore, presents the
-Agent's warnings and confirmation requirements, submits the reviewed plan, and
-displays persistent operation progress.
-
-The Management Agent owns restore safety and execution. It validates the
-configured backup source, archive identity and Minecraft compatibility, performs
-the destructive transaction through the shared restore backend, records progress,
-validates the restored runtime, and controls rollback/recovery state.
-
-Restore operations are persistent. If the terminal disconnects while a restore
-is running, rerunning `mjust restore` reconnects to the current Restore
-operation instead of starting a second transaction. The WebUI behaves the same
-way: opening the Restore page while an operation is active redirects to that
-operation, and refreshing the progress page continues monitoring it rather than
-starting another transaction.
-
-The WebUI Restore page uses this same Management API and backend. It discovers
-backups, requests the authoritative plan, presents the Agent's warnings and
-confirmation requirements, submits the reviewed fingerprint, and reconnects to
-the same persistent Restore operation after refresh or browser reconnect. The
-WebUI does not duplicate Restore compatibility, archive, storage, shutdown,
-runtime-validation, or rollback policy.
-
-## Restore world
+Select the server in the WebUI Backups workspace, or use:
 
 ```text
-mjust restore
+mjust restore jv-a1b2c3
 ```
 
-This is the normal rollback operation when gameplay or world state needs to be
-returned to an earlier JustVoxel backup.
+`mjust restore-full` is an alias. An omitted ID is accepted only when exactly
+one actual registered server exists. Zero or multiple servers require a choice.
+Friendly names are presentation metadata and cannot select a backend target.
+Legacy world-only Restore is not an instance Restore mode.
 
-It restores the primary Minecraft world and its standard Nether/End world
-directories. Normal world-based player data such as inventories, positions,
-advancements and statistics rolls back with the world.
+The Management Agent owns planning, archive verification, player safety, staging,
+data switching, runtime verification and recovery. Both frontends use
+`/v1/minecraft/instances/{id}/backups/restore/...`. Archives and metadata must
+belong to that exact immutable ID. Renaming a server preserves its backup
+identity; cross-instance Restore is refused.
 
-It does **not** replace current plugins, plugin data stored outside the world
-directories, `server.properties`, whitelist/ops, JustVoxel configuration, the
-Minecraft Quadlet, container image policy, Minecraft version policy, or the
-bootc operating-system deployment.
+Review the selected archive and current/backup versions before applying. Restore
+requires deliberate destructive confirmation and, when necessary, confirmation
+of online-player interruption. Planning and Apply bind the same reviewed plan;
+a changed or stale plan requires a new explicit review.
 
-## Restore full Minecraft data
+The existing instance transaction validates mount identity, metadata, integrity,
+archive layout, compatibility, staging space and stopped/runtime safety. It
+protects the previous data until the restored runtime passes verification.
+Failure retains durable recovery evidence; it never switches to another server
+or uses Factory Reset or Minecraft Reset as a substitute for Restore Recovery.
 
-```text
-mjust restore-full
-```
+Reopening Backups or rerunning `mjust restore <same-instance-id>` reconnects to
+that instance’s persistent Restore state. If recovery is required, use Retry
+Restore Recovery, or confirm recovery in the terminal command. Progress polling
+does not automatically retry Apply or re-plan the operation.
 
-This replaces the complete backed-up Minecraft persistent data directory,
-including worlds, plugins, plugin data and Minecraft-side configuration.
-
-It still does **not** restore `/etc/justvoxel`, the Minecraft Quadlet, the
-container channel/tag, the current Minecraft version policy, or the JustVoxel
-OS deployment.
-
-## Safety model
-
-Both restore modes:
-
-- validate the configured backup mount/source identity before discovering files;
-- offer only completed `minecraft-*.tar.gz` archives and ignore `.partial` files;
-- verify gzip integrity and reject unsafe tar paths/special files before live data is touched;
-- prepare restore data on the same filesystem as the current Minecraft data;
-- use the shared JustVoxel maintenance lock;
-- check players through RCON and use the normal graceful Minecraft shutdown path;
-- require the exact typed confirmation `RESTORE`;
-- preserve the affected current data as a pre-restore safety copy;
-- apply the currently configured Minecraft UID/GID and SELinux labeling;
-- start Minecraft and validate RCON, Paper/version reporting, ViaVersion and, when enabled, Geyser/Floodgate;
-- automatically roll back to the preserved pre-restore state if the restored server fails validation;
-- remove temporary staging and safety-copy state only after successful validation;
-- never modify or delete the selected backup archive during restore.
-
-A previous incomplete restore transaction blocks another restore until an
-administrator reviews the preserved recovery state. An interrupted persistent
-Restore operation is reported as needing administrator attention rather than
-being silently restarted.
-
-## Backup metadata
-
-New backups keep the existing archive contents and optional sidecar metadata, but use readable minute-resolution filenames. For example:
-
-```text
-minecraft-paper-2026-10-09-1506.tar.gz
-minecraft-paper-2026-10-09-1506.tar.gz.meta.json
-minecraft-paper-2026-10-09-1506-2.tar.gz
-```
-
-The leading `minecraft` is today's default server name; `paper` is the configured server type. The second archive in a minute gets a numeric suffix instead of overwriting the first. Old names such as `minecraft-2026-09-15-043000.tar.gz` remain fully supported. New backups use a child folder named after the current local JustVoxel Instance ID inside the configured backup destination (for example, `BACKUP_PATH/jv-abc123/minecraft-paper-2026-10-09-1506.tar.gz`). Existing root-level backups remain in place, visible and restorable. Each instance folder has separate automatic retention. The configured backup path and mount never change, and no JustVoxel Instance ID is embedded in an archive.
-
-The metadata records restore-useful information such as configured Minecraft
-version policy, reported server version when available, container image/digest,
-UID/GID, Bedrock/Geyser/Floodgate state and JustVoxel bootc image identity.
-
-Old backups without metadata remain supported.
-
-When metadata shows that a backup comes from an older Minecraft version,
-JustVoxel warns that the restored data will still start with the currently
-configured version. A backup from a newer pinned Minecraft version is refused
-when the current pinned version is older, because opening newer world data with
-an older Minecraft version is an unsafe downgrade direction.
-
-## Configuration recovery is separate
-
-Current `minecraft-*.tar.gz` backups contain Minecraft persistent data only.
-They do not contain `/etc/justvoxel` or the Minecraft Quadlet. A future
-configuration/disaster-recovery feature may snapshot and restore those files
-separately; world restore and full Minecraft-data restore intentionally do not.
+Legacy fixed-server Restore helpers remain in the repository for later
+convergence and deployed-state compatibility. They are not the active normal
+instance Restore path.

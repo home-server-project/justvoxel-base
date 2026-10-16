@@ -105,22 +105,6 @@ func (c *Client) ManualBackup(ctx context.Context, session string) (ManualBackup
 	return out, nil
 }
 
-func (c *Client) Whitelist(ctx context.Context, session string) (TextOutputResponse, error) {
-	var out TextOutputResponse
-	err := c.do(ctx, http.MethodGet, "/v1/whitelist", session, nil, &out)
-	return out, err
-}
-
-func (c *Client) WhitelistChange(ctx context.Context, session, platform, action, name string) (TextOutputResponse, error) {
-	var out TextOutputResponse
-	err := c.do(ctx, http.MethodPost, "/v1/whitelist", session, map[string]string{
-		"platform": platform,
-		"action":   action,
-		"name":     name,
-	}, &out)
-	return out, err
-}
-
 func (c *Client) MinecraftLogs(ctx context.Context, session string, limit int) (LogsResponse, error) {
 	var out LogsResponse
 	err := c.do(ctx, http.MethodGet, fmt.Sprintf("/v1/logs/minecraft?limit=%d", limit), session, nil, &out)

@@ -13,33 +13,11 @@ import (
 	"github.com/home-server-project/justvoxel-webui/internal/api"
 )
 
-func TestBackupsWorkspaceDisplaysDestinationCapacity(t *testing.T) {
-	for _, status := range []string{"ready", "unmounted"} {
-		t.Run(status, func(t *testing.T) {
-			current := api.AdminBackupStorageTarget{Status: status, Type: "system", Path: "/var/lib/justvoxel/backups"}
-			if status == "ready" {
-				current.AvailableBytes = 40 * 1024 * 1024 * 1024
-				current.FilesystemBytes = 80 * 1024 * 1024 * 1024
-			}
-			client := &fakeNewBackupsAPI{role: "administrator", destinationStatus: api.AdminBackupStorageResponse{OK: true, Current: current}}
-			app, err := New(client, Config{ManagementAPI: "v1"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			response := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/backups", ""))
-			if response.Code != http.StatusOK {
-				t.Fatalf("workspace returned HTTP %d: %s", response.Code, response.Body.String())
-			}
-			for label, value := range map[string]uint64{"Available": current.AvailableBytes, "Filesystem size": current.FilesystemBytes} {
-				formatted := "Unknown"
-				if value > 0 {
-					formatted = humanBytes(value)
-				}
-				if !strings.Contains(response.Body.String(), "<dt>"+label+"</dt><dd>"+formatted+"</dd>") {
-					t.Fatalf("workspace does not display %s as %s", label, formatted)
-				}
-			}
-		})
+func TestBackupsWorkspaceUsesOnlyNormalInstanceBackupContext(t *testing.T) {
+	app, _ := phase7App(t)
+	response := phase7Request(app, "GET", "/workspace/backups?server=jv-family1", "")
+	if response.Code != 200 || !strings.Contains(response.Body.String(), `data-selected-server-id="jv-family1"`) || strings.Contains(response.Body.String(), "Original server") {
+		t.Fatal(response.Code, response.Body.String())
 	}
 }
 
@@ -105,46 +83,10 @@ func TestBackupsWorkspaceUsesIndependentWorkspaceRoutes(t *testing.T) {
 		}
 	}
 
-	for _, selected := range []string{"", "jv-family1"} {
-		t.Run("render-"+selected, func(t *testing.T) {
-			markup := renderBackupsRoutes(t, selected)
-			suffix := ""
-			if selected != "" {
-				suffix = "?server=" + selected
-			}
-			for _, route := range []string{"backup", "automatic/plan", "automatic/apply", "restore/plan", "restore/apply"} {
-				if !strings.Contains(markup, `action="/workspace/backups/`+route+suffix+`"`) {
-					t.Fatalf("rendered route missing: %s%s", route, suffix)
-				}
-			}
-			if selected == "" {
-				for _, want := range []string{`action="/workspace/backups/destination/plan"`, `action="/workspace/backups/restore/resolve-reset"`, "Keep current server and continue Restore", "Retry Restore review", "Player status is temporarily unavailable."} {
-					if !strings.Contains(markup, want) {
-						t.Fatalf("Original behavior missing %q", want)
-					}
-				}
-			} else if !strings.Contains(markup, `action="/workspace/backups/restore/recover?server=jv-family1"`) {
-				t.Fatal("selected recovery route missing")
-			}
-			if strings.Contains(markup, "jv-kids001") || strings.Contains(markup, "/settings/new-backups") {
-				t.Fatal("foreign server or legacy page substituted")
-			}
-		})
-	}
-	// Original, including its explicit selection, retains the native routes.
-	original, err := New(&fakeNewBackupsAPI{role: "administrator"}, Config{ManagementAPI: "v1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, suffix := range []string{"", "?server=original"} {
-		response := phase7Request(original, http.MethodGet, "/workspace/backups"+suffix, "")
-		if response.Code != 200 {
-			t.Fatal(response.Code, response.Body.String())
-		}
-		for _, route := range []string{"backup", "automatic/plan", "restore/plan"} {
-			if !strings.Contains(response.Body.String(), `action="/workspace/backups/`+route+`"`) {
-				t.Fatal("Original handler route changed", route)
-			}
+	markup := renderBackupsRoutes(t, "jv-family1")
+	for _, route := range []string{"backup", "automatic/plan", "automatic/apply", "restore/plan", "restore/apply", "restore/recover"} {
+		if !strings.Contains(markup, `action="/workspace/backups/`+route+`?server=jv-family1"`) {
+			t.Fatal("selected route missing", route)
 		}
 	}
 	// Both handler paths use the maintained fragment, with validated selection.
@@ -303,7 +245,7 @@ func TestQuickLookManualBackupUsesWorkspaceNativeAPI(t *testing.T) {
 	}
 	block := source[start : start+end]
 	for _, want := range []string{
-		`fetch("/api/backups/manual"`, `method: "POST"`, `credentials: "same-origin"`,
+		`fetch(globalThis.justVoxelSelectedURL("/api/backups/manual")`, `method: "POST"`, `credentials: "same-origin"`,
 		`[data-quick-look-backup-csrf]`, `new URLSearchParams({ csrf: backupCSRF?.value || "" })`,
 		`if (backupCreate.disabled) return`, `backupCreate.disabled = true`,
 		`backupCreate.textContent = "Starting…"`, `response.ok && result.ok`,
@@ -317,7 +259,7 @@ func TestQuickLookManualBackupUsesWorkspaceNativeAPI(t *testing.T) {
 	if strings.Contains(source, "/operations#manual-backup") || strings.Contains(block, "/operations") {
 		t.Fatal("Quick Look manual backup still navigates to Operations")
 	}
-	if !strings.Contains(renderBackupsRoutes(t, ""), `action="/workspace/backups/backup"`) {
+	if !strings.Contains(renderBackupsRoutes(t, "jv-family1"), `action="/workspace/backups/backup?server=jv-family1"`) {
 		t.Fatal("Administrator Backups Workspace manual backup route changed")
 	}
 	for _, role := range []string{"operator", "viewer"} {
@@ -487,8 +429,8 @@ func TestStandaloneBackupStorageUIRetired(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, action := range []string{
-		`action="{{.DestinationWorkspace}}/destination/plan"`,
-		`action="{{.DestinationWorkspace}}/destination/apply"`,
+		`action="{{.DestinationWorkspace}}/destination/plan{{if .SelectedServer}}?server={{.SelectedServer}}{{end}}"`,
+		`action="{{.DestinationWorkspace}}/destination/apply{{if .SelectedServer}}?server={{.SelectedServer}}{{end}}"`,
 	} {
 		if !strings.Contains(string(markup), action) {
 			t.Fatalf("Backups workspace missing replacement %q", action)

@@ -8,6 +8,13 @@ if (( EUID != 0 )); then
     exit 1
 fi
 
+instance_id=""
+if [[ ${1:-} == --instance ]]; then
+    [[ $# -ge 2 && $2 =~ ^jv-[a-z0-9]{6,12}$ ]] || exit 2
+    instance_id=$2
+    shift 2
+fi
+
 action="${1:-list}"
 name="${2:-}"
 
@@ -28,9 +35,22 @@ api_get() {
     printf '%s' "${response}"
 }
 
+# Existing terminal menus may omit selection only for one actual registered server.
+instances="$(api_get /v1/minecraft/instances/runtime)" || exit 1
+jq -e '.instances | type == "array" and all(.[]; .id | test("^jv-[a-z0-9]{6,12}$"))' <<<"${instances}" >/dev/null || exit 1
+if [[ -z ${instance_id} ]]; then
+    [[ $(jq '.instances | length' <<<"${instances}") == 1 ]] || {
+        echo 'ERROR: choose a Minecraft server with --instance jv-...; exactly one server is required for automatic selection.' >&2
+        exit 1
+    }
+    instance_id="$(jq -r '.instances[0].id' <<<"${instances}")"
+fi
+jq -e --arg id "${instance_id}" 'any(.instances[]; .id == $id)' <<<"${instances}" >/dev/null || exit 1
+whitelist_path="/v1/minecraft/instances/${instance_id}/whitelist"
+
 whitelist_list() {
     local response output
-    response="$(api_get /v1/whitelist)" || return 1
+    response="$(api_get "${whitelist_path}")" || return 1
     if ! jq -e 'type == "object" and (.output | type == "string")' <<<"${response}" >/dev/null 2>&1; then
         echo 'ERROR: JustVoxel Management API returned invalid whitelist information.' >&2
         return 1
@@ -44,7 +64,7 @@ whitelist_change() {
     payload="$(jq -cn --arg platform "${platform}" --arg action "${verb}" --arg name "${player}"         '{platform:$platform,action:$action,name:$name}')"
 
     set +e
-    response="$(printf '%s\n' "${payload}" | "${api_client}" POST /v1/whitelist --data)"
+    response="$(printf '%s\n' "${payload}" | "${api_client}" POST "${whitelist_path}" --data)"
     rc=$?
     set -e
 
@@ -70,8 +90,8 @@ whitelist_change() {
 
 bedrock_enabled() {
     local response
-    response="$(api_get /v1/status)" || return 1
-    jq -e '.minecraft.bedrock == true' <<<"${response}" >/dev/null 2>&1
+    response="$(api_get "/v1/minecraft/instances/${instance_id}/configuration")" || return 1
+    jq -e '.runtime.bedrock_enabled == true' <<<"${response}" >/dev/null 2>&1
 }
 
 case "${action}" in

@@ -52,13 +52,14 @@ type instanceFirewallChange struct {
 	Add  bool                 `json:"add"`
 }
 type instanceActivationEvidence struct {
-	SchemaVersion int                      `json:"schema_version"`
-	ID            string                   `json:"id"`
-	Previous      instanceRuntimeRecord    `json:"previous"`
-	Target        instanceRuntimeRecord    `json:"target"`
-	Environment   []byte                   `json:"environment"`
-	Quadlet       []byte                   `json:"quadlet"`
-	Changes       []instanceFirewallChange `json:"changes"`
+	LiveDefinition bool                     `json:"live_definition,omitempty"`
+	SchemaVersion  int                      `json:"schema_version"`
+	ID             string                   `json:"id"`
+	Previous       instanceRuntimeRecord    `json:"previous"`
+	Target         instanceRuntimeRecord    `json:"target"`
+	Environment    []byte                   `json:"environment"`
+	Quadlet        []byte                   `json:"quadlet"`
+	Changes        []instanceFirewallChange `json:"changes"`
 }
 type instanceRuntimeBackend struct {
 	root, quadlets, staging string
@@ -305,7 +306,7 @@ func (b *instanceRuntimeBackend) readRecord(id string) (instanceRuntimeRecord, e
 	if err = instanceDecode(data, &record); err != nil {
 		return record, err
 	}
-	if record.SchemaVersion != 1 || record.Runtime.ID != id || !validSetupServerType(record.Runtime.Software) || !instanceCrossplayValid(record.Runtime) || !instanceRuntimeSecretPattern.MatchString(record.Runtime.RCONPassword) || record.Storage.DataPath != filepath.Join(record.Storage.Root, "minecraft-instances", id, "data") {
+	if record.SchemaVersion != 1 || record.Runtime.ID != id || (record.Runtime.ImageDigest != "" && !operationFingerprintPattern.MatchString(record.Runtime.ImageDigest)) || !validSetupServerType(record.Runtime.Software) || !instanceCrossplayValid(record.Runtime) || !instanceRuntimeSecretPattern.MatchString(record.Runtime.RCONPassword) || record.Storage.DataPath != filepath.Join(record.Storage.Root, "minecraft-instances", id, "data") {
 		return record, instanceRuntimeFailure("Invalid ID-to-runtime mapping.")
 	}
 	for _, p := range []string{record.Storage.Root, record.Storage.DataPath} {
@@ -516,6 +517,12 @@ func instanceReplaceRecord(records []instanceRuntimeRecord, next instanceRuntime
 // Apply only to the selected instance. Recovery evidence is durable before any
 // live-file/firewall mutation. Data is never removed, including on rollback.
 func (b *instanceRuntimeBackend) apply(ctx context.Context, previous instanceRuntimeRecord, records []instanceRuntimeRecord, snapshot minecraftInstanceRuntimeContext) (result error) {
+	return b.applyVersion(ctx, previous, records, snapshot, false)
+}
+
+// Only the root maintenance worker may publish reviewed version changes after
+// its cold backup. All ordinary configuration callers retain stopped-only rules.
+func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous instanceRuntimeRecord, records []instanceRuntimeRecord, snapshot minecraftInstanceRuntimeContext, maintenance bool) (result error) {
 	id := previous.Runtime.ID
 	for _, record := range records {
 		pending, err := b.pending(record.Runtime.ID)
@@ -587,10 +594,43 @@ func (b *instanceRuntimeBackend) apply(ctx context.Context, previous instanceRun
 			}
 		}
 	}
-	if state.State != "stopped" && state.State != "failed" && state.State != "configured" && !(bootOnly && state.State == "running") {
+	whitelistOnly := false
+	if previous.EnvironmentSHA256 != "" && previous.Runtime.Whitelist != next.Runtime.Whitelist {
+		before, after := previous.Runtime, next.Runtime
+		before.Whitelist = after.Whitelist
+		before.StartOnBoot = after.StartOnBoot
+		whitelistOnly = reflect.DeepEqual(before, after)
+	}
+	channelOnly := false
+	if maintenance && previous.EnvironmentSHA256 != "" {
+		before, after := previous.Runtime, next.Runtime
+		before.ImageTag = after.ImageTag
+		before.ImageDigest = after.ImageDigest
+		before.VersionPolicy = after.VersionPolicy
+		before.Version = after.Version
+		before.PaperChannel = after.PaperChannel
+		channelOnly = reflect.DeepEqual(before, after)
+		if channelOnly && state.State == "running" {
+			oldImage := instanceRuntimeImage(previous.Runtime)
+			newImage := instanceRuntimeImage(next.Runtime)
+			oldID, e1 := b.command(ctx, "podman", "image", "inspect", oldImage, "--format", "{{.Id}}")
+			newID, e2 := b.command(ctx, "podman", "image", "inspect", newImage, "--format", "{{.Id}}")
+			running, e3 := b.command(ctx, "podman", "inspect", "minecraft-"+id, "--format", "{{.Image}}")
+			if e1 != nil || e2 != nil || e3 != nil || strings.TrimSpace(string(oldID)) == "" || string(oldID) != string(newID) || string(oldID) != string(running) {
+				return errInstanceRecovery
+			}
+			if instanceHash(files.Environment) != previous.EnvironmentSHA256 {
+				if _, err = b.command(ctx, "env", "JUSTVOXEL_MAINTENANCE_LOCK_HELD=1", "/usr/libexec/justvoxel/mjust/verify-minecraft-stack", "--instance", id, next.Runtime.Version); err != nil {
+					return instanceRuntimeFailure("Running Minecraft does not match this definition-only change.")
+				}
+			}
+
+		}
+	}
+	if state.State != "stopped" && state.State != "failed" && state.State != "configured" && !((bootOnly || channelOnly || whitelistOnly) && state.State == "running") {
 		return instanceRuntimeFailure("Stop the selected instance before changing its runtime configuration.")
 	}
-	if previous.EnvironmentSHA256 != "" && previous.Runtime.Version != next.Runtime.Version {
+	if !maintenance && previous.EnvironmentSHA256 != "" && previous.Runtime.Version != next.Runtime.Version {
 		// No world-version inference: until Phase 4 only a verified empty data
 		// directory can change versions. The shared maintenance lock is held.
 		if next.Runtime.Version == "LATEST" {
@@ -600,7 +640,7 @@ func (b *instanceRuntimeBackend) apply(ctx context.Context, previous instanceRun
 			return instanceRuntimeFailure("Version changes on existing data require independent backup/migration support in Phase 4. No version was changed.")
 		}
 	}
-	if !bootOnly && next.Runtime.BedrockEnabled {
+	if !bootOnly && !channelOnly && !whitelistOnly && next.Runtime.BedrockEnabled {
 		heldUDP, e := instanceHoldUDP(next.Runtime.BedrockPort)
 		if e != nil {
 			return e
@@ -614,7 +654,7 @@ func (b *instanceRuntimeBackend) apply(ctx context.Context, previous instanceRun
 		}
 		defer heldUDP.Close()
 	}
-	if previous.EnvironmentSHA256 != "" && previous.Runtime.Software != next.Runtime.Software {
+	if previous.EnvironmentSHA256 != "" && previous.Runtime.Software != next.Runtime.Software && !(maintenance && previous.Runtime.Software != "vanilla" && next.Runtime.Software != "vanilla") {
 		return instanceRuntimeFailure("Changing software on an existing instance is outside Phase 3A.")
 	}
 	var held []net.Listener
@@ -640,7 +680,7 @@ func (b *instanceRuntimeBackend) apply(ctx context.Context, previous instanceRun
 			}
 		}()
 	}
-	if !bootOnly {
+	if !bootOnly && !whitelistOnly {
 		if err = b.validateSoftware(ctx, next.Runtime); err != nil {
 			return err
 		}
@@ -680,7 +720,7 @@ func (b *instanceRuntimeBackend) apply(ctx context.Context, previous instanceRun
 			return err
 		}
 	}
-	evidence := instanceActivationEvidence{SchemaVersion: 1, ID: id, Previous: previous, Target: next}
+	evidence := instanceActivationEvidence{SchemaVersion: 1, ID: id, Previous: previous, Target: next, LiveDefinition: channelOnly && state.State == "running" && previous.EnvironmentSHA256 != instanceHash(files.Environment)}
 	dir, env, quadlet := b.paths(id)
 	if previous.EnvironmentSHA256 != "" {
 		if err = b.verifyLive(previous); err != nil {
@@ -735,6 +775,15 @@ func (b *instanceRuntimeBackend) apply(ctx context.Context, previous instanceRun
 			return instanceRuntimeFailure("Runtime was rolled back; inactive staging cleanup failed.")
 		}
 		return instanceRuntimeFailure("Instance activation failed; previous runtime was restored. Instance data was preserved.")
+	}
+	if whitelistOnly && state.State == "running" {
+		command := "whitelist off"
+		if next.Runtime.Whitelist {
+			command = "whitelist on"
+		}
+		if _, err = b.rcon(ctx, id, command); err != nil {
+			return fail()
+		}
 	}
 	if err = b.storage(ctx, "provision", next); err != nil {
 		return fail()
@@ -813,6 +862,21 @@ func (b *instanceRuntimeBackend) validateBundle(ctx context.Context, path string
 func (b *instanceRuntimeBackend) rollback(ctx context.Context, e instanceActivationEvidence) error {
 	id := e.ID
 	dir, env, q := b.paths(id)
+	if e.Previous.Runtime.Whitelist != e.Target.Runtime.Whitelist {
+		state, err := b.observeRaw(ctx, id)
+		if err != nil {
+			return err
+		}
+		if state.State == "running" {
+			command := "whitelist off"
+			if e.Previous.Runtime.Whitelist {
+				command = "whitelist on"
+			}
+			if _, err = b.rcon(ctx, id, command); err != nil {
+				return err
+			}
+		}
+	}
 	// Pending stays present until restoration, firewall, reload and hashes agree.
 	// No stop, start, world removal, or unrelated firewall reload occurs here.
 	if e.Previous.EnvironmentSHA256 != "" {
@@ -897,11 +961,30 @@ func (b *instanceRuntimeBackend) recover(ctx context.Context, id string) error {
 	state, err := b.observeRaw(ctx, id)
 	before, after := e.Previous.Runtime, e.Target.Runtime
 	before.StartOnBoot = after.StartOnBoot
+	if e.Previous.EnvironmentSHA256 == e.Target.EnvironmentSHA256 {
+		before.ImageTag = after.ImageTag
+		before.ImageDigest = after.ImageDigest
+		before.VersionPolicy = after.VersionPolicy
+	}
+	if e.LiveDefinition {
+		before.ImageTag = after.ImageTag
+		before.ImageDigest = after.ImageDigest
+		before.VersionPolicy = after.VersionPolicy
+		before.Version = after.Version
+		before.PaperChannel = after.PaperChannel
+	}
+	whitelistBefore, whitelistAfter := e.Previous.Runtime, e.Target.Runtime
+	whitelistBefore.Whitelist = whitelistAfter.Whitelist
+	whitelistBefore.StartOnBoot = whitelistAfter.StartOnBoot
+	runningWhitelist := state.State == "running" && e.Previous.EnvironmentSHA256 != "" && e.Previous.Runtime.Whitelist != e.Target.Runtime.Whitelist && reflect.DeepEqual(whitelistBefore, whitelistAfter) && len(e.Changes) == 0
 	runningBootOnly := state.State == "running" && e.Previous.EnvironmentSHA256 != "" && reflect.DeepEqual(before, after) && len(e.Changes) == 0
-	if err != nil || (state.State != "stopped" && state.State != "failed" && state.State != "configured" && !runningBootOnly) {
+	if err != nil || (state.State != "stopped" && state.State != "failed" && state.State != "configured" && !runningBootOnly && !runningWhitelist) {
 		return errInstanceRecovery
 	}
-	if e.Previous.SchemaVersion != 1 || e.Target.SchemaVersion != 1 || !reflect.DeepEqual(e.Previous.Storage, e.Target.Storage) || len(e.Changes) > 8 || (runningBootOnly && e.Previous.EnvironmentSHA256 != e.Target.EnvironmentSHA256) {
+	if e.LiveDefinition && (!reflect.DeepEqual(before, after) || len(e.Changes) != 0 || e.Previous.Runtime.Software != e.Target.Runtime.Software) {
+		return errInstanceRecovery
+	}
+	if e.Previous.SchemaVersion != 1 || e.Target.SchemaVersion != 1 || !reflect.DeepEqual(e.Previous.Storage, e.Target.Storage) || len(e.Changes) > 8 || (runningBootOnly && !e.LiveDefinition && e.Previous.EnvironmentSHA256 != e.Target.EnvironmentSHA256) {
 		return errInstanceRecovery
 	}
 	for _, record := range []instanceRuntimeRecord{e.Previous, e.Target} {

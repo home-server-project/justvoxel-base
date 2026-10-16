@@ -95,6 +95,9 @@ func (f *instanceActivationFixture) command(ctx context.Context, command string,
 	f.calls = append(f.calls, command+" "+strings.Join(args, " "))
 	switch command {
 	case instanceRuntimeHelper:
+		if len(args) > 0 && args[0] == "channel" {
+			return []byte("default"), nil
+		}
 		if len(args) > 0 && args[0] == "version" {
 			return nil, nil
 		}

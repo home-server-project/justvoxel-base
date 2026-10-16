@@ -3,9 +3,22 @@ set -euo pipefail
 source /usr/libexec/justvoxel/mjust/common.sh
 source /usr/libexec/justvoxel/mjust/update-policy.sh
 require_root
-require_config
+instance_id=""
+if [[ ${1:-} == --instance ]]; then
+    [[ $# == 2 && $2 =~ ^jv-[a-z0-9]{6,12}$ ]] || exit 2
+    instance_id=$2
+elif (( $# != 0 )); then exit 2
+fi
+if [[ -z ${instance_id} ]]; then
+    inventory="$(/usr/libexec/justvoxel/mjust/api-client GET /v1/minecraft/instances/runtime)" || exit 1
+    instance_id="$(jq -er '.instances | select(length == 1) | .[0].id | select(test("^jv-[a-z0-9]{6,12}$"))' <<<"${inventory}")" || {
+        echo 'ERROR: choose a Minecraft server with --instance jv-....' >&2; exit 1;
+    }
+fi
+source /usr/libexec/justvoxel/mjust/instance-context.sh
+jv_load_instance "${instance_id}" || exit 1
 
-image="$(minecraft_image_ref)"
+image="${JV_INSTANCE_IMAGE_REF}"
 latest_mc=''
 game_state='moving'
 
@@ -14,7 +27,7 @@ if [[ ${MINECRAFT_VERSION_MODE} == pinned ]]; then
     game_state="$(jv_game_version_state "${MINECRAFT_VERSION_MODE}" "${MINECRAFT_VERSION}" "${latest_mc}")"
 fi
 
-remote_digest="$(jv_remote_platform_digest "${image}" || true)"
+remote_digest="$(jv_remote_platform_digest "$(minecraft_image_ref)" || true)"
 if [[ ! ${remote_digest} =~ ^sha256:[0-9a-f]{64}$ ]]; then
     echo 'Minecraft update'
     echo '----------------'
@@ -27,9 +40,9 @@ local_digest="$(podman image inspect "${image}" --format '{{.Digest}}' 2>/dev/nu
 local_id="$(podman image inspect "${image}" --format '{{.Id}}' 2>/dev/null || true)"
 running_id=''
 was_active=no
-if systemctl is-active --quiet minecraft.service; then
+if systemctl is-active --quiet "${JV_INSTANCE_UNIT}"; then
     was_active=yes
-    running_id="$(podman inspect minecraft --format '{{.Image}}' 2>/dev/null || true)"
+    running_id="$(podman inspect "${JV_INSTANCE_CONTAINER}" --format '{{.Image}}' 2>/dev/null || true)"
 fi
 
 if [[ -z ${local_id} ]]; then
@@ -86,4 +99,28 @@ esac
 echo
 
 echo 'Opening maintenance details and safety checks...'
-exec /usr/libexec/justvoxel/mjust/update-minecraft-backend
+plan="$(/usr/libexec/justvoxel/mjust/api-client GET "/v1/minecraft/instances/${instance_id}/version/status")" || exit 1
+jq -e --arg id "${instance_id}" '.instance_id == $id and .update_available and .stack_state == "updates_available" and (.plan_fingerprint | type == "string")' <<<"${plan}" >/dev/null || { echo 'No verified server update is available.'; exit 1; }
+confirm 'Create a cold backup and apply the reviewed Minecraft update?' || { echo 'Update cancelled.'; exit 0; }
+players=false
+if [[ ${was_active} == yes ]]; then
+    player_state="$(/usr/libexec/justvoxel/mjust/api-client GET "/v1/minecraft/instances/${instance_id}/players")" || exit 1
+    jq -e --arg id "${instance_id}" '.id == $id and .state == "online"' <<<"${player_state}" >/dev/null || exit 1
+    if (( $(jq '.online' <<<"${player_state}") > 0 )); then
+        confirm 'Allow the update to interrupt online players with the safe shutdown countdown?' || exit 0
+        players=true
+    fi
+fi
+payload="$(jq -cn --arg fingerprint "$(jq -r '.plan_fingerprint' <<<"${plan}")" --argjson players "${players}" '{plan_fingerprint:$fingerprint,confirm_players:$players}')"
+result="$(printf '%s' "${payload}" | /usr/libexec/justvoxel/mjust/api-client POST "/v1/minecraft/instances/${instance_id}/version/update" --data)" || exit 1
+operation_id="$(jq -er --arg id "${instance_id}" '.operation | select(.instance_id == $id) | .operation_id' <<<"${result}")" || exit 1
+while :; do
+    result="$(/usr/libexec/justvoxel/mjust/api-client GET "/v1/minecraft/instances/${instance_id}/version/update/current?operation_id=${operation_id}")" || exit 1
+    jq -e --arg id "${instance_id}" --arg op "${operation_id}" '.operation.instance_id == $id and .operation.operation_id == $op' <<<"${result}" >/dev/null || exit 1
+    jq -r '.operation.status' <<<"${result}"
+    case "$(jq -r '.operation.state' <<<"${result}")" in
+        succeeded|resolved) exit 0 ;;
+        failed|needs_attention) echo 'Server update needs attention. Use Version for this server to verify and keep the current runtime.' >&2; exit 1 ;;
+    esac
+    sleep 2
+ done

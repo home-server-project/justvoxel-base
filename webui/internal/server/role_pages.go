@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,72 +38,28 @@ func manualBackupErrorMessage(result api.ManualBackupResponse, err error) string
 }
 
 func (a *App) quickLookManualBackup(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	respond := func(status int, ok bool, message string) {
-		payload := struct {
-			OK      bool   `json:"ok"`
-			Message string `json:"message,omitempty"`
-			Error   string `json:"error,omitempty"`
-		}{OK: ok}
-		if ok {
-			payload.Message = message
-		} else {
-			payload.Error = message
-		}
-		w.WriteHeader(status)
-		if err := json.NewEncoder(w).Encode(payload); err != nil {
-			http.Error(w, "could not encode manual backup response", http.StatusInternalServerError)
-		}
-	}
-	session, ok := sessionFromRequest(r)
-	if !ok {
-		respond(http.StatusUnauthorized, false, "Sign in required.")
-		return
-	}
-	if mustChange(r) {
-		respond(http.StatusForbidden, false, "Password change required.")
-		return
-	}
 	if !a.validCSRF(r) {
-		respond(http.StatusForbidden, false, "invalid CSRF token")
+		writeMinecraftWorkspaceError(w, 403, "invalid CSRF token")
 		return
 	}
-	client, ok := a.api.(interface {
-		Session(context.Context, string) (api.SessionInfo, error)
-		ManualBackup(context.Context, string) (api.ManualBackupResponse, error)
-	})
+	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator", "operator")
 	if !ok {
-		respond(http.StatusServiceUnavailable, false, "Backup management is unavailable.")
 		return
 	}
-	identity, err := client.Session(r.Context(), session)
-	if err != nil {
-		status := http.StatusBadGateway
-		if errors.Is(err, api.ErrUnauthorized) {
-			status = http.StatusUnauthorized
-		}
-		respond(status, false, "Sign in could not be verified.")
+	selected, ok := a.selectedMinecraft(w, r, session)
+	if !ok {
 		return
 	}
-	if identity.MustChange {
-		respond(http.StatusForbidden, false, "Password change required.")
+	client, ok := a.api.(selectedBackupsAPI)
+	if !ok {
+		writeMinecraftWorkspaceError(w, 503, "Backup management is unavailable.")
 		return
 	}
-	if identity.Role != "administrator" && identity.Role != "operator" {
-		respond(http.StatusForbidden, false, "operation not permitted for this role")
+	if _, err := client.MinecraftInstanceBackups(r.Context(), session, selected.ID, "now", struct{}{}); err != nil {
+		a.writeMinecraftWorkspaceAPIError(w, err, "Backup could not start.")
 		return
 	}
-	result, err := client.ManualBackup(r.Context(), session)
-	if err != nil {
-		status := http.StatusBadRequest
-		if errors.Is(err, api.ErrUnauthorized) {
-			status = http.StatusUnauthorized
-		}
-		respond(status, false, manualBackupErrorMessage(result, err))
-		return
-	}
-	respond(http.StatusOK, true, "Backup started. It will appear in the library when the backup service finishes.")
+	writeMinecraftWorkspaceJSON(w, 200, map[string]any{"ok": true, "message": "Backup started. It will appear in the library when the backup service finishes."})
 }
 
 func (a *App) rolePageRequest(w http.ResponseWriter, r *http.Request) (string, sessionIdentityAPI, api.SessionInfo, bool) {

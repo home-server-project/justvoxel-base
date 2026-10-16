@@ -87,38 +87,6 @@ func (s *minecraftServerSummary) setState(state string) {
 	}
 }
 
-func (a *App) originalServerSummary(ctx context.Context, session string) minecraftServerSummary {
-	s := minecraftServerSummary{ContextID: "original", Name: "Original server", URL: serverOverviewURL("original"), State: "Status unavailable", Software: "Software unavailable", Version: "Version unavailable"}
-	if client, ok := a.api.(interface {
-		AdminConfiguration(context.Context, string) (api.AdminConfigurationDiscovery, error)
-	}); ok {
-		config, err := client.AdminConfiguration(ctx, session)
-		if err == nil && config.Configured {
-			c := config.Minecraft
-			s.ConfigurationAvailable = true
-			s.Software = serverSoftware(c.ServerType)
-			if c.Version != "" {
-				s.Version = c.Version
-			}
-			s.JavaPort, s.BedrockEnabled, s.BedrockPort, s.MOTD = c.JavaPort, c.BedrockEnabled, c.BedrockPort, c.MOTD
-		}
-	}
-	if !s.ConfigurationAvailable {
-		s.ConfigurationError = "Server configuration could not be checked."
-	}
-	status, err := a.api.Status(ctx, session)
-	if err == nil {
-		s.setState(status.Minecraft.State)
-		if status.Minecraft.ServerSoftware != "" {
-			s.Software = serverSoftware(status.Minecraft.ServerSoftware)
-		}
-		if status.Minecraft.Version != "" {
-			s.Version = status.Minecraft.Version
-		}
-	}
-	return s
-}
-
 // The runtime inventory explicitly excludes the legacy identity and includes
 // registered but unconfigured servers. Never guess identity from list position.
 func (a *App) independentServerInventory(ctx context.Context, session string) ([]api.RegisteredMinecraftInstance, error) {
@@ -140,7 +108,7 @@ func (a *App) independentServerInventory(ctx context.Context, session string) ([
 	}
 	instances := []api.RegisteredMinecraftInstance{}
 	for _, instance := range registry {
-		if independent[instance.ID] {
+		if addServerIDPattern.MatchString(instance.ID) && independent[instance.ID] {
 			instances = append(instances, instance)
 		}
 	}
@@ -207,10 +175,10 @@ func (a *App) independentServerSummary(ctx context.Context, session string, inst
 }
 
 func (a *App) minecraftServerInventory(ctx context.Context, session string) ([]minecraftServerSummary, string) {
-	servers := []minecraftServerSummary{a.originalServerSummary(ctx, session)}
+	servers := []minecraftServerSummary{}
 	instances, err := a.independentServerInventory(ctx, session)
 	if err != nil {
-		return servers, "Independent servers could not be checked. Try opening Minecraft Servers again."
+		return servers, "Minecraft instances could not be checked. Try opening Minecraft Servers again."
 	}
 	for _, instance := range instances {
 		servers = append(servers, a.independentServerSummary(ctx, session, instance))
@@ -220,9 +188,6 @@ func (a *App) minecraftServerInventory(ctx context.Context, session string) ([]m
 
 func (a *App) selectedServerSummary(w http.ResponseWriter, r *http.Request, session string) (minecraftServerSummary, bool) {
 	id := r.PathValue("id")
-	if id == "original" {
-		return a.originalServerSummary(r.Context(), session), true
-	}
 	if !addServerIDPattern.MatchString(id) {
 		http.Error(w, "Server not found.", http.StatusNotFound)
 		return minecraftServerSummary{}, false
@@ -282,17 +247,7 @@ func (a *App) minecraftSelectedServerAction(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var err error
-	if r.PathValue("id") == "original" {
-		var result api.MinecraftActionResponse
-		result, err = a.api.MinecraftAction(r.Context(), session, action, false)
-		if err == nil && (result.ConfirmationRequired || !result.OK) {
-			message := result.Message
-			if message == "" {
-				message = "The server could not be interrupted safely. Check player and server status before trying again."
-			}
-			err = &api.ResponseError{StatusCode: http.StatusConflict, Message: message}
-		}
-	} else if client, supported := a.api.(minecraftServerLifecycleAPI); supported {
+	if client, supported := a.api.(minecraftServerLifecycleAPI); supported {
 		err = client.MinecraftInstanceAction(r.Context(), session, r.PathValue("id"), action)
 	} else {
 		err = errors.New("lifecycle unavailable")

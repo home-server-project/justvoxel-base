@@ -1,13 +1,14 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -114,10 +115,23 @@ func TestAdminSetupApplyExactReviewedPlanCreatesQueuedOperation(t *testing.T) {
 	useTestMinecraftInstances(t)
 	oldWorker := startSetupWorker
 	workerCalls := 0
-	startSetupWorker = func(_ *server, _ string, _ adminSetupNormalizedPlan, secret []byte) {
+	startSetupWorker = func(s *server, id string, _ adminSetupNormalizedPlan, secret []byte) {
 		workerCalls++
-		if identity, err := minecraftInstances.read(); err != nil || identity.Status != "available" {
-			t.Fatal("setup worker started without persisted destination identity")
+		raw, err := os.ReadFile(filepath.Join(s.operations.operationsDir, id+".json"))
+		if err != nil {
+			t.Fatal("setup worker started without persisted operation", err)
+		}
+		var durable operationJournal
+		if err := json.Unmarshal(raw, &durable); err != nil {
+			t.Fatal(err)
+		}
+		if !durable.InstanceSetup || durable.OperationType != operationTypeSetup || durable.OperationID != id || durable.PlanFingerprint != exactSetupApplyFingerprint(t) || durable.State != operationQueued || durable.Rollback.State != "not_started" {
+			t.Fatalf("setup worker started without durable instance Setup recovery state: %#v", durable)
+		}
+		// No runtime has been published yet. Shared instance creation owns the
+		// generated identity and its transaction evidence after the worker starts.
+		if identity, err := minecraftInstances.read(); err != nil || identity.ID != "" {
+			t.Fatal("queued Setup created a fixed identity", identity, err)
 		}
 		zeroBytes(secret)
 	}
@@ -442,9 +456,8 @@ func TestAdminSetupApplyPreflightFailureIsSanitized(t *testing.T) {
 	}
 }
 
-func TestSetupIdentityFailureDoesNotCreateOperationAndManualSaveResumes(t *testing.T) {
+func TestSetupApplyQueuesNormalInstanceCreationWithoutFixedIdentity(t *testing.T) {
 	useTestMinecraftInstances(t)
-	minecraftInstances.random = bytes.NewReader(nil)
 	oldPlan, oldDiscovery, oldWorker := runAdminSetupPlanHelper, runAdminDiscoveryHelper, startSetupWorker
 	t.Cleanup(func() {
 		runAdminSetupPlanHelper, runAdminDiscoveryHelper, startSetupWorker = oldPlan, oldDiscovery, oldWorker
@@ -454,32 +467,21 @@ func TestSetupIdentityFailureDoesNotCreateOperationAndManualSaveResumes(t *testi
 		return []byte(`{"configured":false,"minecraft":{},"backup":{}}`), nil
 	}
 	workers := 0
-	startSetupWorker = func(_ *server, _ string, _ adminSetupNormalizedPlan, secret []byte) {
-		workers++
-		zeroBytes(secret)
-		identity, err := minecraftInstances.read()
-		if err != nil || identity.ID != "jv-manual1" {
-			t.Fatal("worker missing saved identity")
-		}
-	}
+	startSetupWorker = func(_ *server, _ string, _ adminSetupNormalizedPlan, secret []byte) { workers++; zeroBytes(secret) }
 	s := surfaceTestServer(t, roleAdministrator)
 	store := openTestOperationStore(t)
 	attachTestOperationStore(t, s, store)
-	body := setupApplyBody(t, exactSetupApplyFingerprint(t))
 	rr := httptest.NewRecorder()
-	s.adminSetupApply(rr, surfaceRequest(http.MethodPost, "/v1/admin/setup/apply", body))
-	if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), `"code":"identity_required"`) || workers != 0 {
-		t.Fatalf("unresolved identity: %d %s", rr.Code, rr.Body.String())
-	}
-	if current, err := store.currentSetup(); err != nil || current != nil {
-		t.Fatal("identity failure created partial setup")
-	}
-	if _, err := minecraftInstances.register("MANUAL1", true); err != nil {
-		t.Fatal(err)
-	}
-	rr = httptest.NewRecorder()
-	s.adminSetupApply(rr, surfaceRequest(http.MethodPost, "/v1/admin/setup/apply", body))
+	s.adminSetupApply(rr, surfaceRequest(http.MethodPost, "/v1/admin/setup/apply", setupApplyBody(t, exactSetupApplyFingerprint(t))))
 	if rr.Code != http.StatusAccepted || workers != 1 {
-		t.Fatalf("same reviewed submission did not resume: %d %s", rr.Code, rr.Body.String())
+		t.Fatal(rr.Code, rr.Body.String())
+	}
+	identity, err := minecraftInstances.read()
+	if err != nil || identity.ID != "" {
+		t.Fatal("Setup created a fixed identity", identity, err)
+	}
+	current, err := store.currentSetup()
+	if err != nil || current == nil || !current.InstanceSetup {
+		t.Fatal("missing instance Setup journal", current, err)
 	}
 }

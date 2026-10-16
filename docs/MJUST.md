@@ -81,7 +81,7 @@ The same adaptive shutdown path is reused by host reboot/poweroff and disruptive
 
 ## Players and whitelist
 
-`mjust players` shows the current player list through the server's internal RCON connection.
+`mjust players [instance_id]` shows the selected server’s player counts through the Management API. Player names are shown only when supplied by that instance API.
 
 Whitelist management has separate Java and Bedrock/Floodgate operations:
 
@@ -91,25 +91,25 @@ Whitelist management has separate Java and Bedrock/Floodgate operations:
 - `mjust whitelist-add-bedrock <gamertag>`
 - `mjust whitelist-remove-bedrock <gamertag>`
 
+These commands accept an optional immutable instance ID after their other arguments, for example `mjust whitelist-add-java Alex jv-a1b2c3`. An omitted ID resolves only when exactly one registered server exists. With zero or multiple servers, the command requires an explicit server choice. Names never select a backend target.
+
 RCON remains internal to the Minecraft container and is not published as a host port.
 
 ## Backups
 
-`mjust backup` creates a verified cold backup of the complete persistent Minecraft data directory.
+`mjust backup [instance_id]` creates a verified cold backup of the complete persistent Minecraft data directory.
 
 The backup flow validates the configured destination before stopping Minecraft, acquires the shared maintenance lock, gracefully stops the server when required, creates the archive as a temporary partial file, verifies it, publishes it atomically, applies retention, and restarts Minecraft only when appropriate.
 
 A missing or incorrect external/network backup mount fails closed before Minecraft is stopped. This prevents a failed network mount from silently writing backups to the root filesystem.
 
-Manual backups, scheduled backups, pre-update backups, and pre-migration backups use the same retention policy.
+Manual and scheduled instance backups use the selected instance’s retention policy. Version maintenance creates a same-instance cold backup before disruptive changes. Import/Export convergence remains separate.
 
 ## Restore
 
-JustVoxel provides two restore levels.
+`mjust restore [instance_id]` restores the selected server’s complete backed-up persistent data, including worlds, plugins, player data, whitelist/ops and Minecraft-side configuration. `mjust restore-full [instance_id]` is an alias for the same full-data operation.
 
-`mjust restore` restores the main Minecraft world and its normal Nether/End world directories while keeping current plugins and Minecraft/JustVoxel configuration.
-
-`mjust restore-full` restores the complete backed-up Minecraft persistent-data directory, including plugins, plugin data, and Minecraft-side configuration.
+Archives belong to the immutable ID. A renamed server retains its backups; another server cannot restore them. World-only legacy Restore is not a mode of the instance Restore API. Omitted selection resolves only for exactly one registered server.
 
 The Restore command is a thin Management API frontend. Backup discovery,
 compatibility decisions, archive validation, staging, player-safety policy,
@@ -117,7 +117,7 @@ shutdown, data switching, SELinux handling, runtime validation and rollback are
 owned by the Management Agent and shared Restore backend. The terminal keeps the
 human-facing selection and exact `RESTORE` confirmation.
 
-If the terminal disconnects during a Restore, running `mjust restore` again
+If the terminal disconnects during a Restore, running `mjust restore <same-instance-id>` again
 reconnects to the persistent Restore operation and resumes progress display.
 
 See `RESTORE.md` for the detailed recovery model and boundaries.

@@ -385,9 +385,20 @@ func (b *instanceRuntimeBackend) changeFirewall(ctx context.Context, c instanceF
 // Creation leaves a complete configured reservation even if activation fails.
 // Retrying apply uses this immutable ID rather than allocating another world.
 func (b *instanceRuntimeBackend) create(ctx context.Context, c minecraftInstanceRuntimeConfig, name string, snapshot minecraftInstanceRuntimeContext) (string, error) {
+	return b.createTracked(ctx, c, name, snapshot, nil)
+}
+
+// Setup records the generated identity before registration. Both entry points
+// use exactly the same validation, publication and activation transaction.
+func (b *instanceRuntimeBackend) createTracked(ctx context.Context, c minecraftInstanceRuntimeConfig, name string, snapshot minecraftInstanceRuntimeContext, track func(instanceRuntimeRecord) error) (string, error) {
 	if _, err := validateInstanceName(name); err != nil {
 		return "", err
 	}
+	registry, err := b.identities().openDirectory(true)
+	if err != nil {
+		return "", err
+	}
+	registry.Close()
 	records, err := b.records()
 	if err != nil {
 		return "", err
@@ -429,6 +440,11 @@ func (b *instanceRuntimeBackend) create(ctx context.Context, c minecraftInstance
 	}
 	for _, l := range held {
 		l.Close()
+	}
+	if track != nil {
+		if err = track(next); err != nil {
+			return "", err
+		}
 	}
 	registered, err := b.identities().registerLogicalInstance(strings.TrimPrefix(c.ID, "jv-"), true, c.Software, name, "")
 	if err != nil {

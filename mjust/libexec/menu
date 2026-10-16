@@ -136,10 +136,10 @@ whitelist_menu() {
 backup_menu() {
     local choice
     while true; do
-        choice="$(jui_choose 'Backups' 'Create backup now' 'Restore world' 'Restore full Minecraft data' 'Automatic backup settings' 'Backup storage location' 'Back')" || return 0
+        choice="$(jui_choose 'Backups' 'Create backup now' 'Restore Minecraft data' 'Restore full Minecraft data' 'Automatic backup settings' 'Backup storage location' 'Back')" || return 0
         case "${choice}" in
             'Create backup now') run_and_pause /usr/bin/mjust backup || true ;;
-            'Restore world') run_and_pause /usr/bin/mjust restore || true ;;
+            'Restore Minecraft data') run_and_pause /usr/bin/mjust restore || true ;;
             'Restore full Minecraft data') run_and_pause /usr/bin/mjust restore-full || true ;;
             'Automatic backup settings') sudo /usr/libexec/justvoxel/mjust/configure backup || true ;;
             'Backup storage location') sudo /usr/libexec/justvoxel/mjust/storage-provision backup || true ;;

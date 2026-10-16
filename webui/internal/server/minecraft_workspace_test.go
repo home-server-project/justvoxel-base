@@ -14,6 +14,9 @@ import (
 )
 
 type fakeMinecraftWorkspaceAPI struct {
+	selectedIDs    []string
+	instanceReads  []string
+	instanceWrites []string
 	fakeDiscoveryAPI
 	planned          api.AdminConfigurationChangeRequest
 	applied          api.AdminConfigurationChangeRequest
@@ -73,7 +76,7 @@ func (f *fakeMinecraftWorkspaceAPI) MinecraftLogs(_ context.Context, session str
 }
 
 func configuredMinecraftWorkspaceAPI() *fakeMinecraftWorkspaceAPI {
-	client := &fakeMinecraftWorkspaceAPI{}
+	client := &fakeMinecraftWorkspaceAPI{selectedIDs: []string{"jv-family1"}}
 	client.configuration.Configured = true
 	client.configuration.Minecraft.JavaMemory = "4G"
 	client.configuration.Minecraft.ContainerMemory = "6G"
@@ -112,104 +115,41 @@ func TestMinecraftWorkspaceSettingsUsesNativeJSONDiscovery(t *testing.T) {
 			t.Fatalf("settings response missing %q: %s", want, rr.Body.String())
 		}
 	}
-	if client.configurationHit != 1 || client.defaultsHit != 1 {
+	if client.configurationHit != 0 || client.defaultsHit != 1 || len(client.instanceReads) != 1 || client.instanceReads[0] != "jv-family1" {
 		t.Fatalf("configuration calls=%d defaults calls=%d", client.configurationHit, client.defaultsHit)
 	}
 }
 
-func TestMinecraftWorkspaceMemoryPlanPreservesOtherCurrentSettings(t *testing.T) {
-	client := configuredMinecraftWorkspaceAPI()
-	client.planResult = api.AdminConfigurationChangeResponse{OK: true}
-	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := "csrf=csrf-token&tab=memory&java_memory=6G&container_memory=8G"
-	rr := httptest.NewRecorder()
-	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "http://example/api/minecraft/workspace/settings/plan", body))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("plan status=%d body=%s", rr.Code, rr.Body.String())
-	}
-	if client.planned.JavaMemory != "6G" || client.planned.ContainerMemory != "8G" {
-		t.Fatalf("memory fields not applied to request: %#v", client.planned)
-	}
-	if client.planned.MaxPlayers != 10 || client.planned.MOTD != "JustVoxel" || client.planned.JavaPort != 25565 {
-		t.Fatalf("unrelated Minecraft settings were not preserved: %#v", client.planned)
-	}
-	if client.planned.BackupKeep != 7 || client.planned.BackupSchedule != "*-*-* 04:30:00" || !client.planned.BackupTimerEnabled {
-		t.Fatalf("backup settings were not preserved: %#v", client.planned)
+func TestMinecraftWorkspaceMemoryReviewIsReadOnlyAndTargetsInstance(t *testing.T) {
+	app, f := phase7App(t)
+	w := phase7Request(app, "POST", "/api/minecraft/workspace/settings/plan?server=jv-family1", "csrf=csrf-token&tab=memory&java_memory=6G&container_memory=8G")
+	if w.Code != 200 || len(f.writes) != 0 || !strings.Contains(w.Body.String(), `"review":`) {
+		t.Fatal(w.Code, w.Body.String())
 	}
 }
 
-func TestMinecraftWorkspaceCrossplayPlanCanDisableBedrockWithoutChangingOtherTabs(t *testing.T) {
-	client := configuredMinecraftWorkspaceAPI()
-	client.planResult = api.AdminConfigurationChangeResponse{OK: true}
-	app, err := New(client, Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := "csrf=csrf-token&tab=crossplay&java_port=25566&bedrock_port=19133"
-	rr := httptest.NewRecorder()
-	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "http://example/api/minecraft/workspace/settings/plan", body))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("plan status=%d body=%s", rr.Code, rr.Body.String())
-	}
-	if client.planned.JavaPort != 25566 || client.planned.BedrockPort != 19133 || client.planned.BedrockEnabled {
-		t.Fatalf("cross-play request not mapped correctly: %#v", client.planned)
-	}
-	if client.planned.JavaMemory != "4G" || client.planned.ImageTag != "stable" || client.planned.MaxPlayers != 10 {
-		t.Fatalf("cross-play update changed unrelated fields: %#v", client.planned)
+func TestMinecraftWorkspaceCrossplayReviewKeepsSiblingConfiguration(t *testing.T) {
+	app, f := phase7App(t)
+	before := f.runtimes["jv-kids001"]
+	w := phase7Request(app, "POST", "/api/minecraft/workspace/settings/plan?server=jv-family1", "csrf=csrf-token&tab=crossplay&java_port=25566&bedrock_port=19133")
+	if w.Code != 200 || len(f.writes) != 0 || !reflect.DeepEqual(before, f.runtimes["jv-kids001"]) {
+		t.Fatal(w.Code, w.Body.String())
 	}
 }
 
-func TestMinecraftWorkspaceGameplayGameModePlanAndApplyPreserveConfiguration(t *testing.T) {
-	client := configuredMinecraftWorkspaceAPI()
-	client.planResult = api.AdminConfigurationChangeResponse{
-		OK:              true,
-		Changes:         []api.AdminConfigurationChange{{Field: "game_mode", Label: "Game mode", Before: "Survival", After: "Creative", RestartRequired: true}},
-		RestartRequired: true,
+func TestMinecraftWorkspaceGameplayReviewMustMatchBeforeApply(t *testing.T) {
+	app, f := phase7App(t)
+	body := "csrf=csrf-token&tab=gameplay&motd=Family&max_players=10&game_mode=creative"
+	plan := phase7Request(app, "POST", "/api/minecraft/workspace/settings/plan?server=jv-family1", body)
+	var review struct {
+		Review string `json:"review"`
 	}
-	client.applyResult = api.AdminConfigurationChangeResponse{OK: true, Applied: true, RestartRequired: true, RestartDeferred: true}
-	app, err := New(client, Config{})
-	if err != nil {
-		t.Fatal(err)
+	if json.Unmarshal(plan.Body.Bytes(), &review) != nil || review.Review == "" {
+		t.Fatal(plan.Body.String())
 	}
-	body := "csrf=csrf-token&tab=gameplay&max_players=12&motd=Creative+world&game_mode=creative"
-	for _, path := range []string{"plan", "apply"} {
-		rr := httptest.NewRecorder()
-		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "http://example/api/minecraft/workspace/settings/"+path, body))
-		if rr.Code != http.StatusOK {
-			t.Fatalf("%s status=%d body=%s", path, rr.Code, rr.Body.String())
-		}
-		request := client.planned
-		if path == "apply" {
-			request = client.applied
-		}
-		if request.MaxPlayers != 12 || request.MOTD != "Creative world" || request.GameMode != "creative" {
-			t.Fatalf("%s gameplay fields: %#v", path, request)
-		}
-		if request.VersionPolicy != "pinned" || request.Version != "1.21.8" || request.ImageTag != "stable" ||
-			request.JavaMemory != "4G" || request.ContainerMemory != "6G" || request.JavaPort != 25565 ||
-			!request.BedrockEnabled || request.BedrockPort != 19132 || request.Timezone != "America/Toronto" ||
-			request.BackupKeep != 7 || request.BackupSchedule != "*-*-* 04:30:00" || !request.BackupTimerEnabled {
-			t.Fatalf("%s changed unrelated settings: %#v", path, request)
-		}
-		if request.ConfirmPlayers {
-			t.Fatalf("%s requested player confirmation for a deferred restart", path)
-		}
-		if path == "plan" {
-			for _, want := range []string{`"label":"Game mode"`, `"before":"Survival"`, `"after":"Creative"`, `"restart_required":true`, `"memory_restart_required":false`, `"confirmation_required":false`} {
-				if !strings.Contains(rr.Body.String(), want) {
-					t.Fatalf("plan response missing %q: %s", want, rr.Body.String())
-				}
-			}
-		} else {
-			for _, want := range []string{`"restart_deferred":true`, `"restarted":false`} {
-				if !strings.Contains(rr.Body.String(), want) {
-					t.Fatalf("apply response missing %q: %s", want, rr.Body.String())
-				}
-			}
-		}
+	w := phase7Request(app, "POST", "/api/minecraft/workspace/settings/apply?server=jv-family1", body+"&review="+review.Review)
+	if w.Code != 200 || !reflect.DeepEqual(f.writes, []string{"jv-family1"}) || f.runtimes["jv-family1"].GameMode != "creative" {
+		t.Fatal(w.Code, w.Body.String())
 	}
 }
 
@@ -703,4 +643,67 @@ func TestMinecraftWorkspaceWhitelistStateAndPreservation(t *testing.T) {
 			t.Fatal("configuration did not preserve whitelist")
 		}
 	}
+}
+
+// This fixture models one actual registered instance. Its configuration payload
+// is shared with old discovery-page fixtures only as test input data.
+func (f *fakeMinecraftWorkspaceAPI) MinecraftInstances(context.Context, string) ([]api.RegisteredMinecraftInstance, error) {
+	out := []api.RegisteredMinecraftInstance{}
+	for _, id := range f.selectedIDs {
+		out = append(out, api.RegisteredMinecraftInstance{ID: id, DisplayName: "Family"})
+	}
+	return out, nil
+}
+func (f *fakeMinecraftWorkspaceAPI) MinecraftInstanceRuntimes(context.Context, string) ([]string, error) {
+	return f.selectedIDs, nil
+}
+func (f *fakeMinecraftWorkspaceAPI) MinecraftInstanceConfiguration(_ context.Context, _, id string) (api.InstanceRuntimeSettings, error) {
+	f.instanceReads = append(f.instanceReads, id)
+	if len(f.selectedIDs) != 1 || id != f.selectedIDs[0] {
+		return api.InstanceRuntimeSettings{}, &api.ResponseError{StatusCode: 404}
+	}
+	c := f.configuration.Minecraft
+	return api.InstanceRuntimeSettings{JavaPort: c.JavaPort, BedrockEnabled: c.BedrockEnabled, BedrockPort: c.BedrockPort, JavaMemory: c.JavaMemory, ContainerMemory: c.ContainerMemory, Software: c.ServerType, Version: c.Version, VersionPolicy: c.VersionMode, ImageTag: c.ImageTag, Timezone: c.Timezone, GameMode: c.GameMode, Difficulty: c.Difficulty, MaxPlayers: c.MaxPlayers, Whitelist: c.WhitelistEnabled, EnforceWhitelist: c.EnforceWhitelist, MOTD: c.MOTD}, nil
+}
+func (f *fakeMinecraftWorkspaceAPI) MinecraftInstanceStatus(_ context.Context, _, id string) (api.MinecraftInstanceStatus, error) {
+	return api.MinecraftInstanceStatus{ID: id, State: "stopped"}, nil
+}
+func (f *fakeMinecraftWorkspaceAPI) MinecraftInstancePlayers(_ context.Context, _, id string) (api.InstancePlayers, error) {
+	return api.InstancePlayers{ID: id, State: "offline"}, nil
+}
+func (f *fakeMinecraftWorkspaceAPI) MinecraftInstanceLogs(_ context.Context, _, id string) (string, error) {
+	f.instanceReads = append(f.instanceReads, id)
+	return strings.Join(f.logs, "\n"), nil
+}
+func (f *fakeMinecraftWorkspaceAPI) SetMinecraftInstanceConfiguration(_ context.Context, _, id string, c api.InstanceRuntimeSettings) error {
+	f.instanceWrites = append(f.instanceWrites, id)
+	f.applied = configurationRequestFromDiscovery(f.configuration)
+	f.applied.JavaMemory = c.JavaMemory
+	f.applied.ContainerMemory = c.ContainerMemory
+	f.applied.MOTD = c.MOTD
+	f.applied.MaxPlayers = c.MaxPlayers
+	f.applied.GameMode = c.GameMode
+	f.applied.JavaPort = c.JavaPort
+	f.applied.BedrockEnabled = c.BedrockEnabled
+	f.applied.BedrockPort = c.BedrockPort
+	enabled := c.Whitelist
+	f.applied.WhitelistEnabled = &enabled
+	return nil
+}
+func (f *fakeMinecraftWorkspaceAPI) RenameMinecraftInstance(context.Context, string, string, string) error {
+	return nil
+}
+func (f *fakeMinecraftWorkspaceAPI) DeleteMinecraftInstance(context.Context, string, string, string) error {
+	return nil
+}
+func (f *fakeMinecraftWorkspaceAPI) MinecraftInstanceWhitelist(ctx context.Context, session, id string, request any) (api.TextOutputResponse, error) {
+	f.instanceReads = append(f.instanceReads, id)
+	if len(f.selectedIDs) != 1 || id != f.selectedIDs[0] {
+		return api.TextOutputResponse{}, &api.ResponseError{StatusCode: 404}
+	}
+	if request == nil {
+		return f.Whitelist(ctx, session)
+	}
+	v := request.(map[string]string)
+	return f.WhitelistChange(ctx, session, v["platform"], v["action"], v["name"])
 }

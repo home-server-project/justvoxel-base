@@ -29,6 +29,20 @@ case "${1:-}" in
             --argjson uid "${uid}" --argjson gid "${gid}" \
             '{storage:{root:$root,mount_point:$mount,uuid:$uuid,source:$source},backup_path:$backup,memory_mib:$memory,uid:$uid,gid:$gid}'
         ;;
+    channel)
+        [[ $# == 4 ]] || fail
+        MINECRAFT_SERVER_TYPE=$2
+        version=$3 policy=$4
+        validate_server_type "${MINECRAFT_SERVER_TYPE}" || fail
+        [[ ${policy} == pinned || ${policy} == recommended || ${policy} == latest ]] || fail
+        if [[ ${MINECRAFT_SERVER_TYPE} != paper ]]; then printf 'default';
+        elif [[ ${version} == LATEST || ${policy} == latest ]]; then printf 'experimental';
+        else
+            [[ ${version} =~ ^[0-9A-Za-z._-]+$ ]] || fail
+            channel="$(paper_version_build_channel "${version}")" || fail
+            if [[ ${channel} == STABLE ]]; then printf 'default'; else printf 'experimental'; fi
+        fi
+        ;;
     version)
         [[ $# == 4 ]] || fail
         MINECRAFT_SERVER_TYPE=$2

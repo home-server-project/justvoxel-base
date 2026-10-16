@@ -477,7 +477,7 @@ if (quickLook && quickLookToggle) {
     backupCreate.disabled = true;
     backupCreate.textContent = "Starting…";
     try {
-      const response = await fetch("/api/backups/manual", {
+      const response = await fetch(globalThis.justVoxelSelectedURL("/api/backups/manual"), {
         method: "POST",
         credentials: "same-origin",
         headers: { Accept: "application/json" },
@@ -3173,7 +3173,7 @@ if (minecraftOpen && minecraftDialog) {
   };
 
   const requestWorkspaceJSON = async (url, options = {}) => {
-    if (new URLSearchParams(globalThis.location?.search || "").get("server") && new URLSearchParams(globalThis.location?.search || "").get("server") !== "original" && url === "/api/dashboard-status") url = "/api/minecraft/workspace/snapshot";
+    if (url === "/api/dashboard-status") url = "/api/minecraft/workspace/snapshot";
     const response = await fetch(globalThis.justVoxelSelectedURL(url), {
       credentials: "same-origin",
       cache: "no-store",
@@ -3232,7 +3232,7 @@ if (minecraftOpen && minecraftDialog) {
     });
     root.appendChild(grid);
     const selected = new URLSearchParams(globalThis.location?.search || "").get("server");
-    if (selected && selected !== "original" && document.body.classList.contains("role-administrator")) {
+    if (document.body.classList.contains("role-administrator")) {
       const boot = document.createElement("form");boot.dataset.minecraftSettingsTab="overview";
       boot.innerHTML='<label>Start on Boot <select name="start_on_boot"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><button type="submit">Review changes</button>';
       boot.querySelector("select").value=String(Boolean(minecraft.start_on_boot));
@@ -3460,9 +3460,8 @@ if (minecraftOpen && minecraftDialog) {
       section.querySelector('[name="bedrock_enabled"]').checked = Boolean(minecraft.bedrock_enabled);
       section.querySelector('[name="bedrock_enabled"]').disabled = minecraft.server_type === "vanilla";
       if (minecraft.server_type === "vanilla") section.querySelector('[data-crossplay-compatibility]').textContent = "Managed Bedrock cross-play currently requires Paper or Purpur.";
-      if (payload.independent) section.querySelector('[data-open-version]').hidden = true;
       section.querySelector('[data-open-version]')?.addEventListener("click", () => document.querySelector("[data-version-open]")?.click());
-      (payload.independent ? Promise.resolve({installed:minecraft.version,reason:"Software and version are read-only for this server."}) : requestWorkspaceJSON("/api/version/workspace/status")).then((status) => {
+      requestWorkspaceJSON("/api/version/workspace/status").then((status) => {
         const node = section.querySelector("[data-crossplay-compatibility]");
         if (!node || !status) return;
         const installed = status.installed || "Unknown";
@@ -3671,13 +3670,6 @@ if (minecraftOpen && minecraftDialog) {
     ]);
     if (!snapshot || !payload || sequence !== loadSequence || !content) return;
     const root = document.createElement("div");
-    if (payload.independent) {
-      const playerStatus = payload.players.state === "online"
-        ? `Online players: ${payload.players.online} / ${payload.players.maximum}`
-        : payload.players.state === "offline" ? "This server is stopped." : "Player information is temporarily unavailable.";
-      root.append(messageNode(playerStatus),messageNode(payload.message));
-      content.replaceChildren(root);return;
-    }
     root.className = "minecraft-native-operations";
     if (message) root.appendChild(noticeNode(message));
 

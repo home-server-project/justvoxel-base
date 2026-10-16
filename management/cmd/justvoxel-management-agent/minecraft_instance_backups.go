@@ -195,6 +195,15 @@ func (b *instanceRuntimeBackend) backupSeparation(ctx context.Context, id string
 			return instanceRuntimeFailure("Daily backups must start at least 30 minutes apart.")
 		}
 	}
+	// A fresh converged appliance has no fixed-server backup timer. Consult
+	// deployed legacy timer evidence only when a legacy identity actually exists.
+	legacy, err := b.identities().read()
+	if err != nil {
+		return err
+	}
+	if legacy.ID == "" {
+		return nil
+	}
 	enabled, e := b.command(ctx, "systemctl", "is-enabled", "minecraft-backup.timer")
 	active, a := b.command(ctx, "systemctl", "is-active", "minecraft-backup.timer")
 	en, ac := strings.TrimSpace(string(enabled)), strings.TrimSpace(string(active))

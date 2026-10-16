@@ -11,6 +11,7 @@ import (
 )
 
 func TestMinecraftStackStatusStatesAndPrivateArtifactMetadata(t *testing.T) {
+	whitelistSurfaceFixture(t)
 	old := runAdminVersionStatus
 	defer func() { runAdminVersionStatus = old }()
 	admin := surfaceTestServer(t, roleAdministrator)
@@ -21,7 +22,7 @@ func TestMinecraftStackStatusStatesAndPrivateArtifactMetadata(t *testing.T) {
 		}
 		runAdminVersionStatus = func(_ context.Context, _, _, _, _ string) ([]byte, error) { return data, nil }
 		rr := httptest.NewRecorder()
-		admin.adminVersionStatus(rr, surfaceRequest(http.MethodGet, "/v1/admin/version/status", ""))
+		admin.adminVersionStatus(rr, surfaceRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/version/status", ""))
 		var result adminVersionStatus
 		if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &result) != nil || result.StackState != state || result.UpdateAvailable != (state == "updates_available") || result.ViaVersionState != "managed_automatically" {
 			t.Fatalf("state %s: %s", state, rr.Body.String())
@@ -33,6 +34,7 @@ func TestMinecraftStackStatusStatesAndPrivateArtifactMetadata(t *testing.T) {
 }
 
 func TestMinecraftStackApplyAuthorizationStrictRequestAndReview(t *testing.T) {
+	whitelistSurfaceFixture(t)
 	oldStatus, oldWorker := runAdminVersionStatus, startMinecraftStackUpdateWorker
 	defer func() { runAdminVersionStatus = oldStatus; startMinecraftStackUpdateWorker = oldWorker }()
 	reads, starts := 0, 0
@@ -50,7 +52,7 @@ func TestMinecraftStackApplyAuthorizationStrictRequestAndReview(t *testing.T) {
 	for _, role := range []principalRole{roleViewer, roleOperator} {
 		s := surfaceTestServer(t, role)
 		rr := httptest.NewRecorder()
-		s.adminMinecraftStackUpdate(rr, surfaceRequest(http.MethodPost, "/v1/admin/version/update", body))
+		s.adminMinecraftStackUpdate(rr, surfaceRequest(http.MethodPost, "/v1/minecraft/instances/jv-a1b2c3/version/update", body))
 		if rr.Code != http.StatusForbidden || reads != 0 || starts != 0 {
 			t.Fatalf("role %s reached apply", role)
 		}
@@ -59,20 +61,20 @@ func TestMinecraftStackApplyAuthorizationStrictRequestAndReview(t *testing.T) {
 	s.operations = openTestOperationStore(t)
 	for _, invalid := range []string{`{}`, body + ` {}`, `{"plan_fingerprint":"` + testMinecraftResetFingerprint + `","url":"https://example.invalid"}`} {
 		rr := httptest.NewRecorder()
-		s.adminMinecraftStackUpdate(rr, surfaceRequest(http.MethodPost, "/v1/admin/version/update", invalid))
+		s.adminMinecraftStackUpdate(rr, surfaceRequest(http.MethodPost, "/v1/minecraft/instances/jv-a1b2c3/version/update", invalid))
 		if rr.Code != http.StatusBadRequest {
 			t.Fatalf("invalid request: %d %s", rr.Code, rr.Body.String())
 		}
 	}
 	stale := strings.Replace(body, testMinecraftResetFingerprint, "sha256:"+strings.Repeat("7", 64), 1)
 	rr := httptest.NewRecorder()
-	s.adminMinecraftStackUpdate(rr, surfaceRequest(http.MethodPost, "/v1/admin/version/update", stale))
+	s.adminMinecraftStackUpdate(rr, surfaceRequest(http.MethodPost, "/v1/minecraft/instances/jv-a1b2c3/version/update", stale))
 	if rr.Code != http.StatusConflict || starts != 0 {
 		t.Fatal("stale plan applied")
 	}
 	for i := 0; i < 2; i++ {
 		rr = httptest.NewRecorder()
-		s.adminMinecraftStackUpdate(rr, surfaceRequest(http.MethodPost, "/v1/admin/version/update", body))
+		s.adminMinecraftStackUpdate(rr, surfaceRequest(http.MethodPost, "/v1/minecraft/instances/jv-a1b2c3/version/update", body))
 		if rr.Code != http.StatusAccepted {
 			t.Fatalf("apply: %d %s", rr.Code, rr.Body.String())
 		}
@@ -89,11 +91,12 @@ func TestMinecraftStackApplyAuthorizationStrictRequestAndReview(t *testing.T) {
 }
 
 func TestMinecraftStackWorkerFailureIsPersistentAndNeverRetries(t *testing.T) {
+	whitelistSurfaceFixture(t)
 	old := runMinecraftStackUpdate
 	defer func() { runMinecraftStackUpdate = old }()
 	s := surfaceTestServer(t, roleAdministrator)
 	s.operations = openTestOperationStore(t)
-	journal, _, err := s.operations.beginMinecraftMaintenance(testMinecraftResetFingerprint, operationTypeMinecraftUpdate)
+	journal, _, err := s.operations.beginMinecraftMaintenance(testMinecraftResetFingerprint, operationTypeMinecraftUpdate, "jv-a1b2c3")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +105,7 @@ func TestMinecraftStackWorkerFailureIsPersistentAndNeverRetries(t *testing.T) {
 		calls++
 		return errors.New("fixture failure")
 	}
-	if executeMinecraftStackUpdate(context.Background(), s, journal.OperationID, minecraftStackUpdateRequest{PlanFingerprint: testMinecraftResetFingerprint}, session{}) == nil {
+	if executeMinecraftStackUpdate(context.Background(), s, journal.OperationID, minecraftStackUpdateRequest{InstanceID: "jv-a1b2c3", PlanFingerprint: testMinecraftResetFingerprint}, session{}) == nil {
 		t.Fatal("failure reported success")
 	}
 	current, err := s.operations.currentMinecraftMaintenance()
@@ -112,11 +115,12 @@ func TestMinecraftStackWorkerFailureIsPersistentAndNeverRetries(t *testing.T) {
 }
 
 func TestMinecraftStackWorkerSuccessAndAcknowledgeRequireRuntimeVerification(t *testing.T) {
+	whitelistSurfaceFixture(t)
 	oldRun, oldVerify := runMinecraftStackUpdate, verifyMinecraftStack
 	defer func() { runMinecraftStackUpdate = oldRun; verifyMinecraftStack = oldVerify }()
 	s := surfaceTestServer(t, roleAdministrator)
 	s.operations = openTestOperationStore(t)
-	journal, _, err := s.operations.beginMinecraftMaintenance(testMinecraftResetFingerprint, operationTypeMinecraftUpdate)
+	journal, _, err := s.operations.beginMinecraftMaintenance(testMinecraftResetFingerprint, operationTypeMinecraftUpdate, "jv-a1b2c3")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,14 +130,14 @@ func TestMinecraftStackWorkerSuccessAndAcknowledgeRequireRuntimeVerification(t *
 		}
 		return nil
 	}
-	if err := executeMinecraftStackUpdate(context.Background(), s, journal.OperationID, minecraftStackUpdateRequest{ServerType: "purpur", ImageTag: "latest", PlanFingerprint: testMinecraftResetFingerprint, ConfirmPlayers: true}, session{}); err != nil {
+	if err := executeMinecraftStackUpdate(context.Background(), s, journal.OperationID, minecraftStackUpdateRequest{InstanceID: "jv-a1b2c3", ServerType: "purpur", ImageTag: "latest", PlanFingerprint: testMinecraftResetFingerprint, ConfirmPlayers: true}, session{}); err != nil {
 		t.Fatal(err)
 	}
 	finished, err := s.operations.get(journal.OperationID)
 	if err != nil || finished.State != operationSucceeded {
 		t.Fatalf("completion: %#v %v", finished, err)
 	}
-	journal, _, err = s.operations.beginMinecraftMaintenance(testMinecraftResetFingerprint, operationTypeMinecraftUpdate)
+	journal, _, err = s.operations.beginMinecraftMaintenance(testMinecraftResetFingerprint, operationTypeMinecraftUpdate, "jv-a1b2c3")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,13 +147,13 @@ func TestMinecraftStackWorkerSuccessAndAcknowledgeRequireRuntimeVerification(t *
 	body := `{"operation_id":"` + journal.OperationID + `"}`
 	verifyMinecraftStack = func(_ context.Context) error { return errors.New("not ready") }
 	rr := httptest.NewRecorder()
-	s.adminMinecraftStackUpdateAcknowledge(rr, surfaceRequest(http.MethodPost, "/v1/admin/version/update/acknowledge", body))
+	s.adminMinecraftStackUpdateAcknowledge(rr, surfaceRequest(http.MethodPost, "/v1/minecraft/instances/jv-a1b2c3/version/update/acknowledge", body))
 	if rr.Code != http.StatusConflict {
 		t.Fatal("unverified runtime acknowledged")
 	}
 	verifyMinecraftStack = func(_ context.Context) error { return nil }
 	rr = httptest.NewRecorder()
-	s.adminMinecraftStackUpdateAcknowledge(rr, surfaceRequest(http.MethodPost, "/v1/admin/version/update/acknowledge", body))
+	s.adminMinecraftStackUpdateAcknowledge(rr, surfaceRequest(http.MethodPost, "/v1/minecraft/instances/jv-a1b2c3/version/update/acknowledge", body))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("acknowledge: %s", rr.Body.String())
 	}
@@ -159,12 +163,13 @@ func TestMinecraftStackWorkerSuccessAndAcknowledgeRequireRuntimeVerification(t *
 }
 
 func TestMinecraftStackInterruptedUpdateRecoversWithoutRetry(t *testing.T) {
+	whitelistSurfaceFixture(t)
 	base := t.TempDir()
 	first, err := openOperationStore(base)
 	if err != nil {
 		t.Fatal(err)
 	}
-	journal, _, err := first.beginMinecraftMaintenance(testMinecraftResetFingerprint, operationTypeMinecraftUpdate)
+	journal, _, err := first.beginMinecraftMaintenance(testMinecraftResetFingerprint, operationTypeMinecraftUpdate, "jv-a1b2c3")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,12 +191,13 @@ func TestMinecraftStackInterruptedUpdateRecoversWithoutRetry(t *testing.T) {
 	if err != nil || current == nil || current.OperationType != operationTypeMinecraftUpdate || current.State != operationNeedsAttention || current.Stage != "interrupted" {
 		t.Fatalf("recovery: %#v %v", current, err)
 	}
-	if _, _, err = second.beginMinecraftMaintenance("sha256:"+strings.Repeat("7", 64), operationTypeMinecraftUpdate); err == nil {
+	if _, _, err = second.beginMinecraftMaintenance("sha256:"+strings.Repeat("7", 64), operationTypeMinecraftUpdate, "jv-a1b2c3"); err == nil {
 		t.Fatal("interrupted update automatically retried")
 	}
 }
 
 func TestCombinedStackSelectionValidationAndWorkerBinding(t *testing.T) {
+	whitelistSurfaceFixture(t)
 	oldStatus, oldWorker := runAdminVersionStatus, startMinecraftStackUpdateWorker
 	defer func() { runAdminVersionStatus = oldStatus; startMinecraftStackUpdateWorker = oldWorker }()
 	reads, starts := 0, 0
@@ -211,23 +217,23 @@ func TestCombinedStackSelectionValidationAndWorkerBinding(t *testing.T) {
 	s := surfaceTestServer(t, roleAdministrator)
 	s.operations = openTestOperationStore(t)
 	for _, tag := range []string{"../bad", "-bad", "tag:other", strings.Repeat("a", 129)} {
-		body, err := json.Marshal(minecraftStackUpdateRequest{ServerType: "purpur", ImageTag: tag, PlanFingerprint: testMinecraftResetFingerprint})
+		body, err := json.Marshal(minecraftStackUpdateRequest{InstanceID: "jv-a1b2c3", ServerType: "purpur", ImageTag: tag, PlanFingerprint: testMinecraftResetFingerprint})
 		if err != nil {
 			t.Fatal(err)
 		}
 		rr := httptest.NewRecorder()
-		s.adminMinecraftStackUpdate(rr, surfaceRequest(http.MethodPost, "/v1/admin/version/update", string(body)))
+		s.adminMinecraftStackUpdate(rr, surfaceRequest(http.MethodPost, "/v1/minecraft/instances/jv-a1b2c3/version/update", string(body)))
 		if rr.Code != http.StatusBadRequest || reads != 0 || starts != 0 {
 			t.Fatalf("invalid tag reached maintenance: %q %d", tag, rr.Code)
 		}
 	}
-	body, err := json.Marshal(minecraftStackUpdateRequest{ServerType: "purpur", ImageTag: "release_1.2-3", PlanFingerprint: testMinecraftResetFingerprint, ConfirmPlayers: true})
+	body, err := json.Marshal(minecraftStackUpdateRequest{InstanceID: "jv-a1b2c3", ServerType: "purpur", ImageTag: "release_1.2-3", PlanFingerprint: testMinecraftResetFingerprint, ConfirmPlayers: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 2; i++ {
 		rr := httptest.NewRecorder()
-		s.adminMinecraftStackUpdate(rr, surfaceRequest(http.MethodPost, "/v1/admin/version/update", string(body)))
+		s.adminMinecraftStackUpdate(rr, surfaceRequest(http.MethodPost, "/v1/minecraft/instances/jv-a1b2c3/version/update", string(body)))
 		if rr.Code != http.StatusAccepted {
 			t.Fatalf("combined update: %d %s", rr.Code, rr.Body.String())
 		}
@@ -238,11 +244,12 @@ func TestCombinedStackSelectionValidationAndWorkerBinding(t *testing.T) {
 }
 
 func TestCombinedStackWorkerPersistsIncompleteRecovery(t *testing.T) {
+	whitelistSurfaceFixture(t)
 	old := runMinecraftStackUpdate
 	defer func() { runMinecraftStackUpdate = old }()
 	s := surfaceTestServer(t, roleAdministrator)
 	s.operations = openTestOperationStore(t)
-	journal, _, err := s.operations.beginMinecraftMaintenance(testMinecraftResetFingerprint, operationTypeMinecraftUpdate)
+	journal, _, err := s.operations.beginMinecraftMaintenance(testMinecraftResetFingerprint, operationTypeMinecraftUpdate, "jv-a1b2c3")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +261,7 @@ func TestCombinedStackWorkerPersistsIncompleteRecovery(t *testing.T) {
 		}
 		return &minecraftStackMaintenanceError{message: "Previous server recovery is incomplete."}
 	}
-	err = executeMinecraftStackUpdate(context.Background(), s, journal.OperationID, minecraftStackUpdateRequest{ServerType: "purpur", ImageTag: "latest", PlanFingerprint: testMinecraftResetFingerprint, ConfirmPlayers: true}, session{})
+	err = executeMinecraftStackUpdate(context.Background(), s, journal.OperationID, minecraftStackUpdateRequest{InstanceID: "jv-a1b2c3", ServerType: "purpur", ImageTag: "latest", PlanFingerprint: testMinecraftResetFingerprint, ConfirmPlayers: true}, session{})
 	current, readErr := s.operations.currentMinecraftMaintenance()
 	if err == nil || readErr != nil || current == nil || current.State != operationNeedsAttention || !strings.Contains(current.Status, "recovery is incomplete") || calls != 1 {
 		t.Fatalf("incomplete recovery: %#v %v %v calls=%d", current, err, readErr, calls)

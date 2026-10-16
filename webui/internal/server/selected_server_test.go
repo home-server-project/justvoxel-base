@@ -18,6 +18,8 @@ type phase7API struct {
 	writes            []string
 	players           []string
 	backupCalls       []string
+	whitelistCalls    []string
+	versionCalls      []string
 	renames           []string
 	deleted           []string
 	backupInventoryID string
@@ -56,6 +58,13 @@ func (f *phase7API) RenameMinecraftInstance(_ context.Context, _, id, name strin
 }
 func (f *phase7API) DeleteMinecraftInstance(_ context.Context, _, id, name string) error {
 	f.deleted = append(f.deleted, id)
+	for i, v := range f.instances {
+		if v.ID == id {
+			f.instances = append(f.instances[:i], f.instances[i+1:]...)
+			break
+		}
+	}
+	delete(f.runtimes, id)
 	return nil
 }
 func (f *phase7API) MinecraftInstanceBackups(_ context.Context, _, id, action string, request any) (json.RawMessage, error) {
@@ -182,19 +191,19 @@ func TestSelectedStoppedRefusalAndStaleReview(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 }
-func TestSelectedPlayersAndWhitelistBoundary(t *testing.T) {
+func TestSelectedPlayersAndWhitelistExactIdentity(t *testing.T) {
 	app, f := phase7App(t)
-	w := phase7Request(app, "GET", "/api/minecraft/workspace/whitelist?server=jv-family1", "")
-	if w.Code != 200 || !reflect.DeepEqual(f.players, []string{"jv-family1"}) {
-		t.Fatal(w.Code, w.Body.String())
-	}
-	for _, route := range []string{"whitelist", "whitelist/state"} {
-		w = phase7Request(app, "POST", "/api/minecraft/workspace/"+route+"?server=jv-family1", "csrf=csrf-token&name=Player&action=add&platform=java&enabled=true")
-		if w.Code != 409 {
+	for _, item := range []struct{ method, path, body string }{{"GET", "snapshot", ""}, {"GET", "whitelist", ""}, {"POST", "whitelist", "csrf=csrf-token&platform=java&action=add&name=Alex"}} {
+		w := phase7Request(app, item.method, "/api/minecraft/workspace/"+item.path+"?server=jv-family1", item.body)
+		if w.Code != 200 {
 			t.Fatal(w.Code, w.Body.String())
 		}
 	}
+	if !reflect.DeepEqual(f.players, []string{"jv-family1"}) || !reflect.DeepEqual(f.whitelistCalls, []string{"jv-family1", "jv-family1"}) {
+		t.Fatal(f.players, f.whitelistCalls)
+	}
 }
+
 func TestSelectedRenameKeepsTargetAndCSRF(t *testing.T) {
 	app, f := phase7App(t)
 	w := phase7Request(app, "POST", "/api/minecraft/workspace/rename?server=jv-family1", "csrf=csrf-token&display_name=Renamed")
@@ -233,27 +242,21 @@ func TestSelectedBackupsReuseAndTarget(t *testing.T) {
 	}
 }
 
-func TestPhase7OriginalSettingsAndPlayersKeepLegacyContracts(t *testing.T) {
-	f := configuredMinecraftWorkspaceAPI()
-	app, e := New(f, Config{Version: "test", ManagementAPI: "v1"})
-	if e != nil {
-		t.Fatal(e)
+func TestSingleRealInstanceMayResolveImplicitSelection(t *testing.T) {
+	app, f := phase7App(t)
+	f.instances = []api.RegisteredMinecraftInstance{{ID: "jv-family1", DisplayName: "Family"}}
+	delete(f.runtimes, "jv-kids001")
+	for _, path := range []string{"settings", "snapshot", "whitelist", "selection"} {
+		w := phase7Request(app, "GET", "/api/minecraft/workspace/"+path, "")
+		if w.Code != 200 || strings.Contains(w.Body.String(), "original") {
+			t.Fatal(path, w.Code, w.Body.String())
+		}
 	}
-	for _, selection := range []string{"", "?server=original"} {
-		w := phase7Request(app, "GET", "/api/minecraft/workspace/settings"+selection, "")
-		if w.Code != 200 || !strings.Contains(w.Body.String(), `"java_memory":"4G"`) {
-			t.Fatal(w.Code, w.Body.String())
-		}
-		w = phase7Request(app, "POST", "/api/minecraft/workspace/settings/apply"+selection, "csrf=csrf-token&tab=memory&java_memory=5G&container_memory=7G")
-		if w.Code != 200 || f.applied.JavaMemory != "5G" {
-			t.Fatal("Original lost legacy apply", w.Code)
-		}
-		w = phase7Request(app, "POST", "/api/minecraft/workspace/whitelist"+selection, "csrf=csrf-token&platform=java&action=add&name=Alex")
-		if w.Code != 200 || f.whitelistRequest != [3]string{"java", "add", "Alex"} {
-			t.Fatal("Original whitelist changed", w.Code)
-		}
+	if len(f.whitelistCalls) != 1 || f.whitelistCalls[0] != "jv-family1" {
+		t.Fatal(f.whitelistCalls)
 	}
 }
+
 func TestPhase7BackendStoppedOnlyRefusalIsSurfaced(t *testing.T) {
 	app, f := phase7App(t)
 	body := "csrf=csrf-token&tab=memory&java_memory=4G&container_memory=6G"
@@ -270,17 +273,16 @@ func TestPhase7BackendStoppedOnlyRefusalIsSurfaced(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 }
-func TestPhase7NoIndependentVersionMutation(t *testing.T) {
+func TestVersionReviewAndApplyUseExactSelectedIdentity(t *testing.T) {
 	app, f := phase7App(t)
-	for _, route := range []string{"settings/apply", "settings/plan"} {
-		w := phase7Request(app, "POST", "/api/minecraft/workspace/"+route+"?server=jv-family1", "csrf=csrf-token&tab=version&version=LATEST&image_tag=latest")
-		if w.Code != 400 {
-			t.Fatal(w.Code, w.Body.String())
-		}
+	sibling := f.runtimes["jv-kids001"]
+	w := phase7Request(app, "POST", "/api/minecraft/workspace/settings/plan?server=jv-family1", "csrf=csrf-token&tab=version&version_policy=pinned&version=1.21.9&image_tag=stable")
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
 	}
-	w := phase7Request(app, "POST", "/api/version/workspace/update?server=jv-family1", "csrf=csrf-token")
-	if w.Code != 409 || len(f.actions) != 0 || len(f.writes) != 0 {
-		t.Fatal("independent Version reached mutation", w.Code)
+	w = phase7Request(app, "POST", "/api/version/workspace/update?server=jv-family1", "csrf=csrf-token&plan_fingerprint=reviewed&policy=pinned&version=1.21.9")
+	if w.Code != 202 || !reflect.DeepEqual(f.versionCalls, []string{"jv-family1:status", "jv-family1:apply"}) || !reflect.DeepEqual(sibling, f.runtimes["jv-kids001"]) {
+		t.Fatal(w.Code, w.Body.String(), f.versionCalls)
 	}
 }
 
@@ -302,16 +304,17 @@ func TestPhase7StaleReviewRequiresReviewAgain(t *testing.T) {
 		t.Fatal("stale review applied", w.Code)
 	}
 }
-func TestPhase7OriginalHasNoIndependentDeleteOrRename(t *testing.T) {
+func TestDeleteLastServerLeavesZeroServerInventory(t *testing.T) {
 	app, f := phase7App(t)
-	for _, action := range []string{"rename", "delete"} {
-		w := phase7Request(app, "POST", "/api/minecraft/workspace/"+action+"?server=original", "csrf=csrf-token&confirm_name=Original&display_name=Other")
-		if w.Code != 400 {
-			t.Fatal(w.Code, w.Body.String())
-		}
+	f.instances = []api.RegisteredMinecraftInstance{{ID: "jv-family1", DisplayName: "Family"}}
+	delete(f.runtimes, "jv-kids001")
+	w := phase7Request(app, "POST", "/api/minecraft/workspace/delete?server=jv-family1", "csrf=csrf-token&confirm_name=Family")
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
 	}
-	if len(f.deleted) != 0 || len(f.renames) != 0 {
-		t.Fatal("Original reached independent action")
+	w = phase7Request(app, "GET", "/api/minecraft/workspace/selection", "")
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"servers":[]`) || strings.Contains(w.Body.String(), "original") {
+		t.Fatal(w.Code, w.Body.String())
 	}
 }
 
@@ -360,5 +363,47 @@ func TestPhase7SelectedRestoreUsesSameIdentityContract(t *testing.T) {
 		if !strings.HasPrefix(call, "jv-family1:") {
 			t.Fatal("foreign restore target", call)
 		}
+	}
+}
+
+func (f *phase7API) MinecraftInstanceWhitelist(_ context.Context, _, id string, request any) (api.TextOutputResponse, error) {
+	f.whitelistCalls = append(f.whitelistCalls, id)
+	enabled := f.runtimes[id].Whitelist
+	return api.TextOutputResponse{Output: "There are 0 whitelisted player(s):", WhitelistEnabled: &enabled}, nil
+}
+func (f *phase7API) MinecraftInstanceVersionStatus(_ context.Context, _, id, policy, version, software string, imageTag ...string) (api.AdminVersionStatus, error) {
+	f.versionCalls = append(f.versionCalls, id+":status")
+	return api.AdminVersionStatus{PlanFingerprint: "sha256:" + strings.Repeat("a", 64), StackState: "updates_available", ServerSupported: true, UpdateAvailable: true, Installed: "1.21.8", SelectedCandidate: "1.21.9", Policy: policy, ImageTag: "stable"}, nil
+}
+func (f *phase7API) MinecraftInstanceStackUpdate(_ context.Context, _, id string, v api.MinecraftStackUpdateRequest) (api.PersistentOperationResponse, error) {
+	f.versionCalls = append(f.versionCalls, id+":apply")
+	return api.PersistentOperationResponse{Operation: &api.PersistentOperation{InstanceID: id, OperationType: "minecraft_update", OperationID: "12345678-1234-4123-8123-123456789abc"}}, nil
+}
+func (f *phase7API) MinecraftInstanceStackUpdateOperation(_ context.Context, _, id, op string) (api.PersistentOperationResponse, error) {
+	f.versionCalls = append(f.versionCalls, id+":operation")
+	return api.PersistentOperationResponse{}, nil
+}
+func (f *phase7API) MinecraftInstanceAcknowledgeStackUpdate(_ context.Context, _, id, op string) (api.PersistentOperationResponse, error) {
+	f.versionCalls = append(f.versionCalls, id+":acknowledge")
+	return api.PersistentOperationResponse{}, nil
+}
+
+func TestServerSelectorListsOnlyRealImmutableIdentities(t *testing.T) {
+	app, f := phase7App(t)
+	w := phase7Request(app, "GET", "/api/minecraft/workspace/selection", "")
+	var out struct {
+		Selected selectedServerContext   `json:"selected"`
+		Servers  []selectedServerContext `json:"servers"`
+	}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &out) != nil || out.Selected.ID != "" || len(out.Servers) != 2 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	for _, choice := range out.Servers {
+		if choice.ID != "jv-family1" && choice.ID != "jv-kids001" {
+			t.Fatal("synthetic selector identity", choice)
+		}
+	}
+	if len(f.reads) != 0 || len(f.writes) != 0 {
+		t.Fatal("selection changed or read server runtime")
 	}
 }

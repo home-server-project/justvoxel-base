@@ -3,32 +3,45 @@ set -Eeuo pipefail
 source /usr/libexec/justvoxel/mjust/common.sh
 source /usr/libexec/justvoxel/mjust/update-policy.sh
 require_root
+[[ ! -e ${JV_SETUP_IN_PROGRESS} && ! -L ${JV_SETUP_IN_PROGRESS} ]] || { echo 'ERROR: first-run Setup or its recovery is active.' >&2; exit 1; }
 exec 9>"${JV_MAINTENANCE_LOCK}"
 if ! flock -n 9; then
     echo 'ERROR: another JustVoxel maintenance operation is already running.' >&2
     exit 1
 fi
-require_config
+[[ ${1:-} == --instance && $# -ge 2 ]] || { echo 'ERROR: --instance jv-... is required.' >&2; exit 2; }
+source /usr/libexec/justvoxel/mjust/instance-context.sh
+jv_load_instance "$2" || exit 1
+instance_args=(--instance "$2")
+shift 2
+write_main_config() {
+    /usr/libexec/justvoxel/management-agent instance-version-publish "${JV_INSTANCE_ID}" "${MINECRAFT_SERVER_TYPE}" "${MINECRAFT_IMAGE_TAG}" "${MINECRAFT_VERSION}" "${MINECRAFT_VERSION_MODE}" "${JV_UPDATE_IMAGE_DIGEST:-${JV_INSTANCE_IMAGE_DIGEST}}"
+}
+render_runtime() { :; } # publication above uses the authoritative Go renderer
 
-old_image="$(minecraft_image_ref)"
+old_image="${JV_INSTANCE_IMAGE_REF}"
 old_image_tag="${MINECRAFT_IMAGE_TAG}"
 target_image_tag="${old_image_tag}"
 source /usr/libexec/justvoxel/mjust/managed-crossplay.sh
 old_server_type="${MINECRAFT_SERVER_TYPE-paper}"
 target_server_type="${old_server_type}"
-while [[ ${1:-} == --server-type || ${1:-} == --image-tag ]]; do
+target_policy="${MINECRAFT_VERSION_MODE}"
+target_version="${MINECRAFT_VERSION}"
+while [[ ${1:-} == --server-type || ${1:-} == --image-tag || ${1:-} == --policy || ${1:-} == --version ]]; do
     (( $# >= 2 )) || exit 1
     case "$1" in
         --server-type) target_server_type="$2" ;;
         --image-tag) target_image_tag="$2" ;;
+        --policy) target_policy="$2" ;;
+        --version) target_version="$2" ;;
     esac
     shift 2
 done
 [[ ${target_image_tag} =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || exit 1
 # Build only the fixed repository reference; configuration remains untouched.
-image="${old_image%:*}:${target_image_tag}"
+image="${JV_MINECRAFT_IMAGE_REPO}:${target_image_tag}"
 server_allows_in_place_switch "${old_server_type}" "${target_server_type}" || { echo 'ERROR: changing to/from Vanilla requires Minecraft reset and setup again.' >&2; exit 1; }
-status_args=()
+status_args=("${instance_args[@]}")
 if [[ ${target_server_type} != "${old_server_type}" ]]; then status_args+=(--server-type "${target_server_type}"); fi
 if [[ ${target_image_tag} != "${old_image_tag}" ]]; then status_args+=(--image-tag "${target_image_tag}"); fi
 reviewed=no
@@ -44,7 +57,7 @@ if (( $# > 0 )); then
         players_override=yes
     fi
 fi
-stack_plan="$(/usr/libexec/justvoxel/mjust/admin-version-status-json "${status_args[@]}")"
+stack_plan="$(/usr/libexec/justvoxel/mjust/admin-version-status-json "${status_args[@]}" "${target_policy}" "${target_version}")"
 stack_state="$(jq -r '.stack_state' <<< "${stack_plan}")"
 if [[ ${reviewed} == yes ]]; then
     [[ ${stack_state} == updates_available &&
@@ -70,7 +83,7 @@ old_game_mode="${MINECRAFT_VERSION_MODE}"
 old_game_version="${MINECRAFT_VERSION}"
 old_managed_plugins="${BEDROCK_MANAGED_PLUGINS:-yes}"
 # Specific version remains explicit; Recommended follows verified compatibility.
-if [[ ${MINECRAFT_VERSION_MODE} == recommended && ${MINECRAFT_VERSION} != "${latest_mc}" ]]; then
+if [[ ${MINECRAFT_VERSION} != "${latest_mc}" ]]; then
     repin_game=yes
 fi
 printf 'Minecraft: %s -> %s\n' "$(jq -r '.installed' <<< "${stack_plan}")" "${latest_mc}"
@@ -97,14 +110,18 @@ fi
     echo 'ERROR: the reviewed image changed; review again.' >&2; exit 1;
 }
 
+target_registry_image="${image}"
+image="${JV_MINECRAFT_IMAGE_REPO}@${remote_digest}"
+JV_UPDATE_IMAGE_DIGEST="${remote_digest}"
+
 local_digest="$(podman image inspect "${old_image}" --format '{{.Digest}}' 2>/dev/null || true)"
 local_id="$(podman image inspect "${old_image}" --format '{{.Id}}' 2>/dev/null || true)"
 
 was_active=no
 running_id=''
-if systemctl is-active --quiet minecraft.service; then
+if systemctl is-active --quiet "${JV_INSTANCE_UNIT}"; then
     was_active=yes
-    running_id="$(podman inspect minecraft --format '{{.Image}}' 2>/dev/null || true)"
+    running_id="$(podman inspect "${JV_INSTANCE_CONTAINER}" --format '{{.Image}}' 2>/dev/null || true)"
     [[ -n ${running_id} ]] || { echo 'ERROR: Minecraft service is active but running image identity is unknown.' >&2; exit 1; }
 fi
 
@@ -133,7 +150,7 @@ echo "Remote platform digest: ${remote_digest}"
 [[ -n ${running_id} ]] && echo "Running image ID:       ${running_id}"
 
 query_players() {
-    podman exec minecraft rcon-cli 'list' 2>/dev/null || true
+    podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli 'list' 2>/dev/null || true
 }
 
 approve_online_players() {
@@ -166,13 +183,16 @@ cleanup() {
     if (( result != 0 )) && [[ ${maintenance_started} == yes ]]; then
         # Never replace JARs underneath a running failed runtime.
         if [[ ${config_only} == yes ]]; then
+            MINECRAFT_VERSION_MODE="${old_game_mode}"
+            MINECRAFT_VERSION="${old_game_version}"
             MINECRAFT_SERVER_TYPE="${old_server_type}"
             MINECRAFT_IMAGE_TAG="${old_image_tag}"
+            JV_UPDATE_IMAGE_DIGEST="${JV_INSTANCE_IMAGE_DIGEST}"
             if ! write_main_config || ! render_runtime; then recovery_ok=no; fi
-            if [[ ${was_active} == yes && $(podman inspect minecraft --format '{{.Image}}' 2>/dev/null || true) != "${old_running_id}" ]]; then recovery_ok=no; fi
-            if [[ ${was_active} != yes ]] && systemctl is-active --quiet minecraft.service; then recovery_ok=no; fi
-            if [[ ${was_active} == yes ]] && ! JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack "${old_game_version}"; then recovery_ok=no; fi
-        elif ! systemctl stop minecraft.service; then
+            if [[ ${was_active} == yes && $(podman inspect "${JV_INSTANCE_CONTAINER}" --format '{{.Image}}' 2>/dev/null || true) != "${old_running_id}" ]]; then recovery_ok=no; fi
+            if [[ ${was_active} != yes ]] && systemctl is-active --quiet "${JV_INSTANCE_UNIT}"; then recovery_ok=no; fi
+            if [[ ${was_active} == yes ]] && ! JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack "${instance_args[@]}" "${old_game_version}"; then recovery_ok=no; fi
+        elif ! systemctl stop "${JV_INSTANCE_UNIT}"; then
             echo 'ERROR: Minecraft could not be stopped for rollback; operation requires attention.' >&2
             recovery_ok=no
         else
@@ -183,13 +203,13 @@ cleanup() {
             BEDROCK_MANAGED_PLUGINS="${old_managed_plugins}"
             MINECRAFT_SERVER_TYPE="${old_server_type}"
             MINECRAFT_IMAGE_TAG="${old_image_tag}"
+            JV_UPDATE_IMAGE_DIGEST="${JV_INSTANCE_IMAGE_DIGEST}"
             MINECRAFT_VERSION_MODE="${old_game_mode}"
             MINECRAFT_VERSION="${old_game_version}"
             if [[ ${game_config_changed} == yes ]] && ! write_main_config; then recovery_ok=no; fi
-            if [[ -n ${old_running_id:-${old_local_id}} ]] && ! podman tag "${old_running_id:-${old_local_id}}" "${old_image}"; then recovery_ok=no; fi
             if ! render_runtime; then recovery_ok=no; fi
             if [[ -n ${old_running_id:-${old_local_id}} && $(podman image inspect "${old_image}" --format '{{.Id}}' 2>/dev/null || true) != "${old_running_id:-${old_local_id}}" ]]; then recovery_ok=no; fi
-            if [[ ${was_active} != yes ]] && systemctl is-active --quiet minecraft.service; then recovery_ok=no; fi
+            if [[ ${was_active} != yes ]] && systemctl is-active --quiet "${JV_INSTANCE_UNIT}"; then recovery_ok=no; fi
             # The start helper would recreate absent managed JARs. Keep the exact
             # restored state and require attention when that restart is unsafe.
             if [[ ${was_active} == yes && ${BEDROCK_ENABLED} == yes &&
@@ -199,7 +219,7 @@ cleanup() {
                 recovery_ok=no
             fi
             if [[ ${recovery_ok} == yes && ${was_active} == yes ]]; then
-                if ! systemctl start minecraft.service || ! wait_for_rcon 900 || [[ $(podman inspect minecraft --format '{{.Image}}' 2>/dev/null || true) != "${old_running_id:-${old_local_id}}" ]] || ! JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack "${old_game_version}"; then recovery_ok=no; fi
+                if ! systemctl start "${JV_INSTANCE_UNIT}" || ! wait_for_rcon 900 || [[ $(podman inspect "${JV_INSTANCE_CONTAINER}" --format '{{.Image}}' 2>/dev/null || true) != "${old_running_id:-${old_local_id}}" ]] || ! JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack "${instance_args[@]}" "${old_game_version}"; then recovery_ok=no; fi
             fi
         fi
         if [[ ${recovery_ok} != yes ]]; then
@@ -212,9 +232,9 @@ cleanup() {
 trap cleanup EXIT
 
 # A tag-only alias of the verified runtime needs a definition change, not downtime.
-if [[ ${target_image_tag} != "${old_image_tag}" && ${target_server_type} == "${old_server_type}" &&
+if [[ ${target_server_type} == "${old_server_type}" &&
       $(jq -r '.runtime_update_required' <<< "${stack_plan}") == false ]]; then
-    current_plan="$(/usr/libexec/justvoxel/mjust/admin-version-status-json "${status_args[@]}")"
+    current_plan="$(/usr/libexec/justvoxel/mjust/admin-version-status-json "${status_args[@]}" "${target_policy}" "${target_version}")"
     [[ $(jq -r '.plan_fingerprint' <<< "${current_plan}") == "$(jq -r '.plan_fingerprint' <<< "${stack_plan}")" ]] || {
         echo 'ERROR: server update plan changed; review again.' >&2; exit 1;
     }
@@ -223,25 +243,26 @@ if [[ ${target_image_tag} != "${old_image_tag}" && ${target_server_type} == "${o
         echo 'ERROR: current Minecraft image cannot be verified; review again.' >&2; exit 1;
     }
     if [[ ${was_active} == yes ]]; then
-        JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack "${latest_mc}"
+        JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack "${instance_args[@]}" "${latest_mc}"
     fi
     if [[ ${reviewed} != yes ]] && ! confirm 'Save the verified container channel?'; then
         echo 'Update cancelled.'
         exit 0
     fi
-    podman tag "${verified_id}" "${image}"
     config_only=yes
     maintenance_started=yes
     game_config_changed=yes
     MINECRAFT_IMAGE_TAG="${target_image_tag}"
+    MINECRAFT_VERSION_MODE="${target_policy}"
+    MINECRAFT_VERSION="${latest_mc}"
     write_main_config
     render_runtime
     [[ $(podman image inspect "${image}" --format '{{.Id}}' 2>/dev/null || true) == "${verified_id}" ]] || exit 1
     if [[ ${was_active} == yes ]]; then
-        [[ $(podman inspect minecraft --format '{{.Image}}' 2>/dev/null || true) == "${old_running_id}" ]] || exit 1
-        JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack "${latest_mc}"
+        [[ $(podman inspect "${JV_INSTANCE_CONTAINER}" --format '{{.Image}}' 2>/dev/null || true) == "${old_running_id}" ]] || exit 1
+        JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack "${instance_args[@]}" "${latest_mc}"
     else
-        ! systemctl is-active --quiet minecraft.service || exit 1
+        ! systemctl is-active --quiet "${JV_INSTANCE_UNIT}" || exit 1
     fi
     echo 'Container channel saved; verified runtime is unchanged.'
     exit 0
@@ -271,14 +292,14 @@ if [[ ${BEDROCK_ENABLED} == yes ]]; then
         }
     done
 fi
-current_plan="$(/usr/libexec/justvoxel/mjust/admin-version-status-json "${status_args[@]}")"
+current_plan="$(/usr/libexec/justvoxel/mjust/admin-version-status-json "${status_args[@]}" "${target_policy}" "${target_version}")"
 [[ $(jq -r '.plan_fingerprint' <<< "${current_plan}") == "$(jq -r '.plan_fingerprint' <<< "${stack_plan}")" &&
    $(jq -r '.stack_state' <<< "${current_plan}") == updates_available &&
    $(jq -r '.update_available' <<< "${current_plan}") == true ]] || {
     echo 'ERROR: server update plan changed before shutdown; review again.' >&2; exit 1;
 }
 
-if systemctl is-active --quiet minecraft.service; then
+if systemctl is-active --quiet "${JV_INSTANCE_UNIT}"; then
     echo 'Final player check immediately before the graceful stop.'
     players="$(query_players)"
     if [[ -z ${players} ]]; then
@@ -301,8 +322,7 @@ fi
 
 maintenance_started=yes
 echo 'Creating pre-update cold backup.'
-JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 \
-    /usr/libexec/justvoxel/minecraft-backup --leave-stopped
+/usr/libexec/justvoxel/management-agent instance-version-backup "${JV_INSTANCE_ID}"
 
 if [[ ${state} == update_available || ${state} == image_missing ]]; then
     echo "Pulling ${image}"
@@ -316,7 +336,7 @@ new_local_digest="$(podman image inspect "${image}" --format '{{.Digest}}' 2>/de
 
 # Refresh the remote digest after pulling so a tag that moved during maintenance
 # is compared against its current platform manifest rather than a stale index.
-remote_digest_after="$(jv_remote_platform_digest "${image}" || true)"
+remote_digest_after="$(jv_remote_platform_digest "${target_registry_image}" || true)"
 [[ ${remote_digest_after} =~ ^sha256:[0-9a-f]{64}$ ]] || { echo 'ERROR: could not re-check the remote Minecraft platform digest.' >&2; exit 1; }
 if [[ ${new_local_digest} != "${remote_digest_after}" || ${new_local_digest} != "$(jq -r '.managed_image_digest' <<< "${stack_plan}")" ]]; then
     echo 'ERROR: pulled Minecraft image does not match the current remote platform digest.' >&2
@@ -328,6 +348,7 @@ remote_digest="${remote_digest_after}"
 
 MINECRAFT_SERVER_TYPE="${target_server_type}"
 MINECRAFT_IMAGE_TAG="${target_image_tag}"
+MINECRAFT_VERSION_MODE="${target_policy}"
 if [[ ${repin_game} == yes ]]; then
     MINECRAFT_VERSION="${latest_mc}"
 fi
@@ -343,26 +364,26 @@ render_runtime
 
 # A startup pass refreshes ViaVersion through the existing Modrinth integration.
 # Stopped servers start temporarily for verification, then return to stopped.
-systemctl start minecraft.service
+systemctl start "${JV_INSTANCE_UNIT}"
 if ! wait_for_rcon 900; then
     echo 'ERROR: Minecraft did not become ready after the update.' >&2
     echo "Previous image ID retained for rollback: ${old_running_id:-${old_local_id:-unknown}}" >&2
     exit 1
 fi
 
-new_running_id="$(podman inspect minecraft --format '{{.Image}}' 2>/dev/null || true)"
+new_running_id="$(podman inspect "${JV_INSTANCE_CONTAINER}" --format '{{.Image}}' 2>/dev/null || true)"
 if [[ ${new_running_id} != ${new_local_id} ]]; then
     echo 'ERROR: Minecraft is not running the newly selected local image.' >&2
     exit 1
 fi
 
-JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack "${latest_mc}"
+JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack "${instance_args[@]}" "${latest_mc}"
 if [[ ${BEDROCK_ENABLED} == yes ]]; then
     jv_crossplay_verify "${component_staging}"
 fi
 
 if [[ ${was_active} != yes ]]; then
-    systemctl stop minecraft.service
+    systemctl stop "${JV_INSTANCE_UNIT}"
 fi
 
 candidate_previous_id=''
@@ -374,25 +395,12 @@ fi
 
 if [[ -n ${candidate_previous_id} ]]; then
     install -d -m0700 -o root -g root "${JV_STATE_DIR}"
-    older_previous_id=''
-    if [[ -r ${JV_PREVIOUS_IMAGE_STATE} ]]; then
-        older_previous_id="$(head -n1 "${JV_PREVIOUS_IMAGE_STATE}" 2>/dev/null || true)"
-    fi
-
-    if [[ -n ${older_previous_id} && ${older_previous_id} != ${candidate_previous_id} && ${older_previous_id} != ${new_local_id} ]]; then
-        if [[ -n $(podman ps -a --filter "ancestor=${older_previous_id}" -q 2>/dev/null || true) ]]; then
-            echo "Older Minecraft image ${older_previous_id} is still used by a container; leaving it in place."
-        elif podman image exists "${older_previous_id}" 2>/dev/null; then
-            echo "Removing Minecraft image older than the one-generation rollback copy: ${older_previous_id}"
-            podman image rm "${older_previous_id}" >/dev/null || \
-                echo "WARNING: could not remove older Minecraft image ${older_previous_id}; no broad image prune was attempted." >&2
-        fi
-    fi
-
+    # Images are shared cache objects. Retiring one instance's previous image
+    # must not remove an image still referenced by a stopped sibling's runtime.
     tmp_state="$(mktemp "${JV_STATE_DIR}/.minecraft-previous-image.XXXXXX")"
     printf '%s\n' "${candidate_previous_id}" > "${tmp_state}"
     chmod 0600 "${tmp_state}"
-    mv -f "${tmp_state}" "${JV_PREVIOUS_IMAGE_STATE}"
+    mv -f "${tmp_state}" "${JV_STATE_DIR}/minecraft-${JV_INSTANCE_ID}-previous-image-id"
     echo "Previous Minecraft image retained for rollback: ${candidate_previous_id}"
 fi
 

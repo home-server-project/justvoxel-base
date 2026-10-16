@@ -108,10 +108,13 @@ func recoverSetupTransaction(ctx context.Context, store *operationStore, current
 	if current.Stage != "runtime_rollback" {
 		return recoverSetupStorage(ctx, store, current)
 	}
-	request, err := setupRecoveryPayload(current)
-	var response setupRuntimeTransactionResponse
-	if err == nil {
-		response, err = runSetupRuntimeTransactionPayload(ctx, "recover", setupRuntimeRollbackTimeout, request)
+	response, handled, err := recoverSetupInstance(ctx, current)
+	if !handled {
+		var request []byte
+		request, err = setupRecoveryPayload(current)
+		if err == nil {
+			response, err = runSetupRuntimeTransactionPayload(ctx, "recover", setupRuntimeRollbackTimeout, request)
+		}
 	}
 	store.appendSetupRuntimeHelperEvidenceBestEffort(current.OperationID, "recover", response.Evidence)
 	if err == nil && response.OK && !response.Applied && response.Phase == "runtime_rolled_back" && response.Error == "" {

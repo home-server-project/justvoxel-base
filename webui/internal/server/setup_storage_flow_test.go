@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"regexp"
 	"strings"
@@ -99,7 +100,19 @@ func TestNormalSetupStorageSelectsBackendFilesystemIdentity(t *testing.T) {
 
 }
 
-type storageDestinationTestClient struct{ *fakeNewBackupsAPI }
+type storageDestinationTestClient struct {
+	*fakeNewBackupsAPI
+	instanceBackupMutations int
+}
+
+func (f *storageDestinationTestClient) MinecraftInstanceBackups(ctx context.Context, session, id, action string, request any) (json.RawMessage, error) {
+	switch action {
+	case "settings", "inventory", "status", "restore/status":
+	default:
+		f.instanceBackupMutations++
+	}
+	return f.fakeNewBackupsAPI.MinecraftInstanceBackups(ctx, session, id, action, request)
+}
 
 func (f *storageDestinationTestClient) AdminSetupDefaults(context.Context, string) (api.AdminSetupDefaults, error) {
 	return api.AdminSetupDefaults{}, nil
@@ -122,7 +135,7 @@ func TestStorageWorkspaceRendersDiskAndPartitionBrowserOnly(t *testing.T) {
 				}
 				inventory.Devices = devices
 			}
-			client := &storageDestinationTestClient{&fakeNewBackupsAPI{role: "administrator", storage: inventory}}
+			client := &storageDestinationTestClient{fakeNewBackupsAPI: &fakeNewBackupsAPI{role: "administrator", storage: inventory}}
 			app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
 			if err != nil {
 				t.Fatal(err)
@@ -187,7 +200,7 @@ func TestStorageWorkspaceRendersDiskAndPartitionBrowserOnly(t *testing.T) {
 }
 
 func TestBackupsWorkspaceDestinationPlanAndApply(t *testing.T) {
-	client := &storageDestinationTestClient{&fakeNewBackupsAPI{role: "administrator"}}
+	client := &storageDestinationTestClient{fakeNewBackupsAPI: &fakeNewBackupsAPI{role: "administrator"}}
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
 	if err != nil {
 		t.Fatal(err)
@@ -196,7 +209,7 @@ func TestBackupsWorkspaceDestinationPlanAndApply(t *testing.T) {
 	if page.Code != http.StatusOK {
 		t.Fatalf("Backups: %d %s", page.Code, page.Body.String())
 	}
-	for _, want := range []string{"Backup destination", "Current location", "Change destination", `action="/workspace/backups/destination/plan"`, "Existing local partition / filesystem", "NFS share", "SMB / CIFS share", "40.0 GiB"} {
+	for _, want := range []string{"Backup destination", "Current location", "Change destination", `action="/workspace/backups/destination/plan?server=jv-family1"`, "Existing local partition / filesystem", "NFS share", "SMB / CIFS share", "40.0 GiB"} {
 		if !strings.Contains(page.Body.String(), want) {
 			t.Fatalf("Backups missing %q", want)
 		}
@@ -205,8 +218,8 @@ func TestBackupsWorkspaceDestinationPlanAndApply(t *testing.T) {
 		t.Fatal("Backups leaves workspace architecture")
 	}
 	form := "csrf=csrf-token&type=system&path=%2Fvar%2Flib%2Fjustvoxel%2Fbackups"
-	plan := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/workspace/backups/destination/plan", form))
-	if plan.Code != http.StatusOK || client.destinationPlanCalls != 1 || client.destinationApplyCalls != 0 || !strings.Contains(plan.Body.String(), `action="/workspace/backups/destination/apply"`) {
+	plan := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/workspace/backups/destination/plan?server=jv-family1", form))
+	if plan.Code != http.StatusOK || client.destinationPlanCalls != 1 || client.destinationApplyCalls != 0 || !strings.Contains(plan.Body.String(), `action="/workspace/backups/destination/apply?server=jv-family1"`) {
 		t.Fatalf("Backups plan: %d %s", plan.Code, plan.Body.String())
 	}
 	apply := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/workspace/backups/destination/apply", form))
@@ -223,5 +236,13 @@ func TestBackupsWorkspaceDestinationPlanAndApply(t *testing.T) {
 	denied := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/workspace/backups/destination/apply", form))
 	if denied.Code != http.StatusForbidden || client.destinationApplyCalls != 1 {
 		t.Fatal("Backups bypasses administrator role")
+	}
+	client.role = "administrator"
+	apply = httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/workspace/backups/destination/apply?server=jv-family1", form))
+	if apply.Code != http.StatusSeeOther || client.destinationApplyCalls != 2 || apply.Header().Get("Location") != "/workspace/backups?result=destination&server=jv-family1" {
+		t.Fatalf("Backups destination lost selection: %d %s", apply.Code, apply.Header().Get("Location"))
+	}
+	if client.instanceBackupMutations != 0 || client.backupCalls != 0 || client.restorePlanCalls != 0 || client.restoreApplyCalls != 0 || client.configurationPlanCalls != 0 || client.configurationApplyCalls != 0 {
+		t.Fatal("appliance-wide destination change invoked server backup, restore, or fixed configuration operations")
 	}
 }

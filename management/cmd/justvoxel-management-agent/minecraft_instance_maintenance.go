@@ -143,7 +143,7 @@ func (s *server) instanceMaintenanceRead(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if strings.HasSuffix(r.URL.Path, "/version") {
-		writeJSON(w, http.StatusOK, map[string]any{"id": id, "software": record.Runtime.Software, "version": record.Runtime.Version, "independent_backup_available": false})
+		writeJSON(w, http.StatusOK, map[string]any{"id": id, "software": record.Runtime.Software, "version": record.Runtime.Version, "backup_available": true})
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
@@ -261,5 +261,5 @@ func (s *server) instanceVersionVerify(w http.ResponseWriter, r *http.Request) {
 		instanceRuntimeError(w, err, id)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": id, "version": request.Version, "available": true, "independent_backup_available": false})
+	writeJSON(w, http.StatusOK, map[string]any{"id": id, "version": request.Version, "available": true, "backup_available": true})
 }

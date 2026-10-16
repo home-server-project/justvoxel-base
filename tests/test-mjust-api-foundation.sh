@@ -108,8 +108,8 @@ if grep -Fq 'Authorization:' "${api_client}"; then
     fail 'mJust API client must not introduce a persistent bearer token'
 fi
 
-grep -Fq '"${api_client}" GET /v1/players' "${players}" || fail 'mJust Players does not use the Management API'
-grep -Fq 'players:' "${justfile}" || fail 'mJust Players recipe is missing'
+grep -Fq '"${api_client}" GET "/v1/minecraft/instances/${instance_id}/players"' "${players}" || fail 'mJust Players does not use the Management API'
+grep -Fq 'players instance_id=' "${justfile}" || fail 'mJust Players recipe is missing'
 grep -Fq 'sudo /usr/libexec/justvoxel/mjust/players' "${justfile}" || fail 'mJust Players must enter the API path through sudo/root'
 for forbidden in 'systemctl ' 'podman ' 'rcon-cli'; do
     if grep -Fq "${forbidden}" "${players}"; then
@@ -146,18 +146,18 @@ if grep -Fq "rcon-cli 'version'" "${web_status}"; then
 fi
 
 grep -Fq '"${api_client}" GET "${path}"' "${whitelist}" || fail 'mJust whitelist GET helper does not use the Management API client'
-grep -Fq 'api_get /v1/whitelist' "${whitelist}" || fail 'mJust whitelist list does not use the Management API'
-grep -Fq 'POST /v1/whitelist --data' "${whitelist}" || fail 'mJust whitelist changes do not use the Management API'
-grep -Fq 'api_get /v1/status' "${whitelist}" || fail 'mJust Bedrock availability check does not use the Management API'
+grep -Fq 'api_get "${whitelist_path}"' "${whitelist}" || fail 'mJust whitelist list does not use the Management API'
+grep -Fq 'POST "${whitelist_path}" --data' "${whitelist}" || fail 'mJust whitelist changes do not use the Management API'
+grep -Fq 'api_get "/v1/minecraft/instances/${instance_id}/configuration"' "${whitelist}" || fail 'mJust Bedrock availability check does not use the Management API'
 grep -Fq 'whitelist-backend' "${operator_surfaces}" || fail 'Management Agent does not use the whitelist backend helper'
 for forbidden in 'systemctl ' 'podman ' 'rcon-cli' 'source "${JV_LIBEXEC_DIR}/common.sh"' 'require_config'; do
     if grep -Fq "${forbidden}" "${whitelist}"; then
         fail "mJust whitelist frontend still performs direct backend work: ${forbidden}"
     fi
 done
-grep -Fq 'podman exec minecraft rcon-cli' "${whitelist_backend}" || fail 'whitelist backend lost authoritative RCON implementation'
+grep -Fq 'podman exec "${container}" rcon-cli' "${whitelist_backend}" || fail 'whitelist backend lost authoritative RCON implementation'
 
-grep -Fq '"${api_client}" POST /v1/backups/manual' "${backup}" || fail 'mJust manual backup does not use the Management API'
+grep -Fq '"${api_client}" POST "/v1/minecraft/instances/${instance_id}/backups/now" --data' "${backup}" || fail 'mJust manual backup does not use the Management API'
 grep -Fq 'sudo /usr/libexec/justvoxel/mjust/backup' "${justfile}" || fail 'mJust backup recipe does not use the API frontend'
 for forbidden in 'systemctl ' '/usr/libexec/justvoxel/minecraft-backup' 'flock ' 'tar '; do
     if grep -Fq "${forbidden}" "${backup}"; then
@@ -422,15 +422,11 @@ if grep -Fq 'Authorization:' "${setup_api}"; then
 fi
 
 grep -Fq 'restore-api.sh' "${restore}" || fail 'mJust Restore does not use the Restore API helper'
-grep -Fq 'jv_restore_current_operation' "${restore}" || fail 'mJust Restore cannot reconnect to an active Restore operation'
-grep -Fq 'jv_restore_backups' "${restore}" || fail 'mJust Restore does not discover backups through the Agent'
-grep -Fq 'jv_restore_plan' "${restore}" || fail 'mJust Restore does not plan through the Agent'
-grep -Fq 'jv_restore_apply' "${restore}" || fail 'mJust Restore does not apply through the Agent'
-grep -Fq 'jv_restore_monitor_operation' "${restore}" || fail 'mJust Restore does not monitor the persistent Agent operation'
-grep -Fq 'jv_restore_get /v1/admin/restore/backups' "${restore_api}" || fail 'Restore backup discovery API route is missing from the frontend helper'
-grep -Fq 'jv_restore_get /v1/admin/restore/current-operation' "${restore_api}" || fail 'Restore current-operation API route is missing from the frontend helper'
-grep -Fq 'jv_restore_post /v1/admin/restore/plan' "${restore_api}" || fail 'Restore planning API route is missing from the frontend helper'
-grep -Fq 'jv_restore_post /v1/admin/restore/apply' "${restore_api}" || fail 'Restore apply API route is missing from the frontend helper'
+for selected_route in 'restore/status' 'restore/plan' 'restore/apply' 'restore/recover'; do
+    grep -Fq "${selected_route}" "${restore}" || fail "selected Restore API route missing: ${selected_route}"
+done
+grep -Fq 'jv_select_registered_instance' "${restore}" || fail 'Restore does not resolve a registered immutable ID'
+
 grep -Fq 'POST /v1/admin/restore/apply' "${admin_restore}" || fail 'Management Agent Restore apply route is not registered'
 grep -Fq 'authoritativeAdminRestorePlan' "${admin_restore_apply}" || fail 'Restore apply does not re-run authoritative planning'
 grep -Fq 'adminRestoreTransactionHelper' "${restore_worker}" || fail 'Restore worker does not use the authoritative transaction backend'
@@ -448,7 +444,7 @@ grep -Fq 'adminValidationHelper = "/usr/libexec/justvoxel/mjust/validate-backend
 grep -Fq 'GET /v1/admin/validation' "${admin_validation}" || fail 'Management Agent validation route is missing'
 grep -Fq 'registerAdminValidationRoutes(mux, s)' "${main}" || fail 'Management Agent validation route is not registered'
 grep -Fq 'systemctl --failed' "${validate_backend}" || fail 'validation backend lost systemd health checks'
-grep -Fq 'podman exec minecraft rcon-cli' "${validate_backend}" || fail 'validation backend lost Minecraft RCON checks'
+grep -Fq 'podman exec "${container}" rcon-cli' "${validate_backend}" || fail 'validation backend lost Minecraft RCON checks'
 
 for forbidden in 'systemctl ' 'podman ' 'rcon-cli' 'firewall-cmd ' 'findmnt ' 'mountpoint ' 'swapon ' '/proc/' '/sys/' 'ls -Z' 'storage-summary'; do
     if grep -Fq "${forbidden}" "${validate}"; then

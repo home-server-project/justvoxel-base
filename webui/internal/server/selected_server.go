@@ -28,29 +28,33 @@ type selectedServerContext struct {
 	Name string `json:"name"`
 }
 
-// Empty context is the pre-existing Original contract. An explicit invalid or
-// stale independent ID NEVER becomes Original, including on a mutation.
+// Selection resolves only registered immutable identities. Missing context is
+// accepted only when the actual inventory contains exactly one server.
 func (a *App) selectedMinecraft(w http.ResponseWriter, r *http.Request, session string) (selectedServerContext, bool) {
 	values, exists := r.URL.Query()["server"]
-	if !exists {
-		return selectedServerContext{ID: "original", Name: "Original server"}, true
-	}
-	if len(values) != 1 || values[0] == "" {
-		writeMinecraftWorkspaceError(w, 400, "Choose a server again.")
-		return selectedServerContext{}, false
-	}
-	id := values[0]
-	if id == "original" {
-		return selectedServerContext{ID: id, Name: "Original server"}, true
-	}
-	if !addServerIDPattern.MatchString(id) {
-		writeMinecraftWorkspaceError(w, 400, "Invalid server selection.")
-		return selectedServerContext{}, false
+	id := ""
+	if exists {
+		if len(values) != 1 || !addServerIDPattern.MatchString(values[0]) {
+			writeMinecraftWorkspaceError(w, 400, "Invalid server selection.")
+			return selectedServerContext{}, false
+		}
+		id = values[0]
 	}
 	instances, err := a.independentServerInventory(r.Context(), session)
 	if err != nil {
 		writeMinecraftWorkspaceError(w, 503, "Server selection could not be checked.")
 		return selectedServerContext{}, false
+	}
+	if !exists {
+		if len(instances) == 0 {
+			writeMinecraftWorkspaceError(w, 409, "No Minecraft servers are configured. Add a Minecraft server.")
+			return selectedServerContext{}, false
+		}
+		if len(instances) != 1 {
+			writeMinecraftWorkspaceError(w, 409, "Choose a Minecraft server.")
+			return selectedServerContext{}, false
+		}
+		id = instances[0].ID
 	}
 	for _, instance := range instances {
 		if instance.ID == id {
@@ -65,16 +69,20 @@ func (a *App) minecraftSelection(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	selected, ok := a.selectedMinecraft(w, r, session)
-	if !ok {
-		return
-	}
 	instances, err := a.independentServerInventory(r.Context(), session)
 	if err != nil {
 		a.writeMinecraftWorkspaceAPIError(w, err, "Server list is unavailable.")
 		return
 	}
-	choices := []selectedServerContext{{ID: "original", Name: "Original server"}}
+	selected := selectedServerContext{}
+	if _, explicit := r.URL.Query()["server"]; explicit || len(instances) == 1 {
+		var valid bool
+		selected, valid = a.selectedMinecraft(w, r, session)
+		if !valid {
+			return
+		}
+	}
+	choices := []selectedServerContext{}
 	for _, i := range instances {
 		choices = append(choices, selectedServerContext{ID: i.ID, Name: i.DisplayName})
 	}
@@ -87,9 +95,6 @@ func (a *App) selectedMinecraftWorkspace(w http.ResponseWriter, r *http.Request,
 	if !ok {
 		return true
 	}
-	if selected.ID == "original" {
-		return false
-	}
 	client, ok := a.api.(selectedMinecraftAPI)
 	if !ok {
 		writeMinecraftWorkspaceError(w, 503, "Selected server controls are unavailable.")
@@ -97,20 +102,7 @@ func (a *App) selectedMinecraftWorkspace(w http.ResponseWriter, r *http.Request,
 	}
 	path := r.URL.Path
 	if strings.Contains(path, "/whitelist") {
-		if r.Method != http.MethodGet {
-			writeMinecraftWorkspaceError(w, 409, "Whitelist changes are unavailable for this server.")
-			return true
-		}
-		players, err := client.MinecraftInstancePlayers(r.Context(), session, selected.ID)
-		if err != nil {
-			a.writeMinecraftWorkspaceAPIError(w, err, "Players are unavailable.")
-			return true
-		}
-		if players.ID != selected.ID {
-			writeMinecraftWorkspaceError(w, 503, "Selected player status could not be verified.")
-			return true
-		}
-		writeMinecraftWorkspaceJSON(w, 200, map[string]any{"ok": true, "independent": true, "players": players, "message": "Whitelist changes are unavailable for this server."})
+		a.selectedWhitelist(w, r, session, selected, client)
 		return true
 	}
 	if strings.HasSuffix(path, "/logs") {
@@ -133,6 +125,13 @@ func (a *App) selectedMinecraftWorkspace(w http.ResponseWriter, r *http.Request,
 		var minecraft map[string]any
 		_ = json.Unmarshal(raw, &minecraft)
 		minecraft["server_type"] = current.Software
+		minecraft["version_mode"] = current.VersionPolicy
+		if current.VersionPolicy == "" {
+			minecraft["version_mode"] = "pinned"
+			if current.Version == "LATEST" {
+				minecraft["version_mode"] = "latest"
+			}
+		}
 		defaults := map[string]any{}
 		if discovery, ok := a.api.(interface {
 			AdminSetupDefaults(context.Context, string) (api.AdminSetupDefaults, error)
@@ -143,7 +142,11 @@ func (a *App) selectedMinecraftWorkspace(w http.ResponseWriter, r *http.Request,
 				defaults["system_reserve_recommended_mib"] = v.SystemReserveRecommendedMiB
 			}
 		}
-		writeMinecraftWorkspaceJSON(w, 200, map[string]any{"ok": true, "configured": true, "independent": true, "minecraft": minecraft, "defaults": defaults})
+		writeMinecraftWorkspaceJSON(w, 200, map[string]any{"ok": true, "configured": true, "minecraft": minecraft, "defaults": defaults})
+		return true
+	}
+	if r.FormValue("tab") == "version" {
+		a.selectedVersionReview(w, r, session, selected, current, apply)
 		return true
 	}
 	next, err := selectedSettingsOverlay(r, current)
@@ -192,9 +195,6 @@ func selectedSettingsOverlay(r *http.Request, current api.InstanceRuntimeSetting
 		current.StartOnBoot = v
 		return current, nil
 	}
-	if r.FormValue("tab") == "version" {
-		return current, errors.New("Software and version are read-only for this server.")
-	}
 	request, err := minecraftWorkspaceConfigurationRequest(r, api.AdminConfigurationDiscovery{})
 	if err != nil {
 		return current, err
@@ -223,10 +223,6 @@ func (a *App) selectedMinecraftSnapshot(w http.ResponseWriter, r *http.Request) 
 	}
 	selected, ok := a.selectedMinecraft(w, r, session)
 	if !ok {
-		return
-	}
-	if selected.ID == "original" {
-		writeMinecraftWorkspaceError(w, 400, "Use Original status.")
 		return
 	}
 	client, ok := a.api.(selectedMinecraftAPI)
@@ -270,10 +266,6 @@ func (a *App) selectedMinecraftPresentation(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	if selected.ID == "original" {
-		writeMinecraftWorkspaceError(w, 400, "This action is available only for independent servers.")
-		return
-	}
 	client, ok := a.api.(selectedMinecraftAPI)
 	if !ok {
 		writeMinecraftWorkspaceError(w, 503, "Server controls are unavailable.")
@@ -290,4 +282,52 @@ func (a *App) selectedMinecraftPresentation(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	writeMinecraftWorkspaceJSON(w, 200, map[string]any{"ok": true, "redirect": "/minecraft/servers?deleted=yes"})
+}
+
+func (a *App) selectedWhitelist(w http.ResponseWriter, r *http.Request, session string, selected selectedServerContext, settings selectedMinecraftAPI) {
+	client, ok := a.api.(interface {
+		MinecraftInstanceWhitelist(context.Context, string, string, any) (api.TextOutputResponse, error)
+	})
+	if !ok {
+		writeMinecraftWorkspaceError(w, 503, "Whitelist is unavailable.")
+		return
+	}
+	if strings.HasSuffix(r.URL.Path, "/state") {
+		enabled, err := strconv.ParseBool(r.FormValue("enabled"))
+		if err != nil {
+			writeMinecraftWorkspaceError(w, 400, "Whitelist state is required.")
+			return
+		}
+		current, err := settings.MinecraftInstanceConfiguration(r.Context(), session, selected.ID)
+		if err != nil {
+			a.writeMinecraftWorkspaceAPIError(w, err, "Whitelist is unavailable.")
+			return
+		}
+		current.Whitelist = enabled
+		if err = settings.SetMinecraftInstanceConfiguration(r.Context(), session, selected.ID, current); err != nil {
+			a.writeMinecraftWorkspaceAPIError(w, err, "Whitelist change failed.")
+			return
+		}
+		writeMinecraftWorkspaceJSON(w, 200, minecraftWorkspaceTextResponse{OK: true, Message: "Whitelist updated."})
+		return
+	}
+	var request any
+	if r.Method != http.MethodGet {
+		request = map[string]string{"platform": r.FormValue("platform"), "action": r.FormValue("action"), "name": r.FormValue("name")}
+	}
+	result, err := client.MinecraftInstanceWhitelist(r.Context(), session, selected.ID, request)
+	if err != nil {
+		a.writeMinecraftWorkspaceAPIError(w, err, "Whitelist is unavailable.")
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeMinecraftWorkspaceJSON(w, 200, minecraftWorkspaceTextResponse{OK: true, Output: result.Output, Message: "Whitelist updated."})
+		return
+	}
+	entries, parsed := parseMinecraftWorkspaceWhitelist(result.Output)
+	_, identity, ok := a.minecraftWorkspaceIdentity(w, r, "administrator", "operator")
+	if !ok {
+		return
+	}
+	writeMinecraftWorkspaceJSON(w, 200, minecraftWorkspaceWhitelistResponse{OK: true, Entries: entries, Parsed: parsed, Output: result.Output, WhitelistEnabled: result.WhitelistEnabled, CanToggle: identity.Role == "administrator"})
 }

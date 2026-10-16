@@ -61,6 +61,7 @@ const statusFor = (candidate, extra = {}) => ({
 function review(candidate, { changes = [policyChange], online = 0, refreshed = candidate, container = false, planExtra = {} } = {}) {
   const calls = [];
   const context = vm.createContext({
+    location: {origin: 'https://example.test', search: '?server=jv-family1'},
     Boolean, Number, URLSearchParams, csrf: 'csrf', state: {}, updateOperation: '',
     document: { createElement: (tag) => new Element(tag) },
     card: (title) => Object.assign(new Element('section'), { textContent: title }),
@@ -87,25 +88,25 @@ function review(candidate, { changes = [policyChange], online = 0, refreshed = c
   return { root, apply, consent, calls, state: context.state };
 }
 
-test('same-version mode changes save without starting an update, even with unrelated stack updates available', async () => {
+test('same-version policy changes use one reviewed instance operation', async () => {
   for (const change of [policyChange, { ...policyChange, before: 'pinned', after: 'recommended' }]) {
     const result = review(statusFor('26.2'), { changes: [change, { field: 'version', before: 'LATEST', after: '26.2' }], online: 2 });
     assert.ok(result.apply);
     assert.equal(result.consent, undefined);
     assert.equal(result.root.all().filter((element) => element.textContent?.startsWith('Minecraft:')).length, 0);
     await result.apply.listeners.click();
-    assert.deepEqual(result.calls.filter((call) => call.url).map((call) => call.url), ['/api/minecraft/workspace/settings/apply', '/api/version/workspace/status']);
-    assert.equal(result.calls.at(-1).message, 'Changes saved.');
+    assert.deepEqual(result.calls.filter((call) => call.url).map((call) => call.url), ['/api/version/workspace/update']);
+    assert.equal(result.calls.at(-1).watch, 'operation-1');
   }
 });
 
-test('one Apply saves, refreshes, starts the existing update with its new fingerprint, and watches progress', async () => {
+test('one Apply forwards the reviewed fingerprint to one instance operation and watches progress', async () => {
   const result = review(statusFor('26.3', { plan_fingerprint: 'preview' }), { refreshed: statusFor('26.3') });
   assert.equal(result.root.all().filter((element) => element.tag === 'button' && element.textContent.startsWith('Apply')).length, 1);
   await result.apply.listeners.click();
-  assert.deepEqual(result.calls.filter((call) => call.url).map((call) => call.url), ['/api/minecraft/workspace/settings/apply', '/api/version/workspace/status', '/api/version/workspace/update']);
+  assert.deepEqual(result.calls.filter((call) => call.url).map((call) => call.url), ['/api/version/workspace/update']);
   const update = result.calls.find((call) => call.url?.endsWith('/update'));
-  assert.equal(update.body.get('plan_fingerprint'), 'refreshed');
+  assert.equal(update.body.get('plan_fingerprint'), 'preview');
   assert.equal(update.body.get('confirm_players'), 'no');
   assert.equal(result.calls.at(-1).watch, 'operation-1');
 });
@@ -131,12 +132,13 @@ test('cross-play incompatibility blocks Apply and explains how to proceed', () =
   assert.ok(result.root.all().some((element) => element.textContent?.includes('Disable Cross-play first')));
 });
 
-test('changed candidate after saving stops before the updater without automatic retries', async () => {
-  const result = review(statusFor('26.3'), { refreshed: statusFor('26.4') });
+test('review Apply never automatically replans or retries', async () => {
+  const result = review(statusFor('26.3', {plan_fingerprint: 'reviewed-instance-plan'}), { refreshed: statusFor('26.4') });
   await result.apply.listeners.click();
-  assert.equal(result.calls.filter((call) => call.url?.endsWith('/settings/apply')).length, 1);
-  assert.equal(result.calls.filter((call) => call.url?.endsWith('/update')).length, 0);
-  assert.match(result.calls.at(-1).message, /Changes saved.*Review changes again/);
+  const calls = result.calls.filter(call => call.url);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, '/api/version/workspace/update');
+  assert.equal(calls[0].body.get('plan_fingerprint'), 'reviewed-instance-plan');
 });
 
 test('persistent polling updates the frame, keeps journal messages once, and renders terminal evidence', async () => {
@@ -191,9 +193,10 @@ function softwareWorkspace({ current = 'paper', tag = 'stable', online = 0, over
   const previewPlans = [];
   const root = new Element('div');
   const context = vm.createContext({
+    location: {origin: 'https://example.test', search: '?server=jv-family1'},
     Boolean, String, Number, URLSearchParams, csrf: 'csrf', state: {}, root, ticket: 1, sequence: 1,
     pending: { operation }, updateOperation: '', operationKinds: new Map(),
-    minecraft: { server_type: current, image_tag: tag },
+    minecraft: { id: 'jv-family1', server_type: current, image_tag: tag },
     status: { server_software: current[0].toUpperCase() + current.slice(1), image_state: 'up_to_date', ...overrides },
     document: { createElement: (tag) => new Element(tag) },
     card: (title) => Object.assign(new Element('section'), { textContent: title }),
@@ -215,7 +218,7 @@ function softwareWorkspace({ current = 'paper', tag = 'stable', online = 0, over
         previewPlans.push(response);
         return response;
       }
-      if (url === '/api/dashboard-status') return { players: { online } };
+      if (url === '/api/minecraft/workspace/snapshot') return { players: { online } };
       if (url === '/api/version/workspace/update') {
         if (failApply) throw new Error('Response lost');
         return { operation: { operation_id: 'software-1' } };

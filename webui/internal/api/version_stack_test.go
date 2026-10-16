@@ -11,7 +11,7 @@ import (
 
 func TestMinecraftStackUpdateClientUsesFixedAuthenticatedEndpoint(t *testing.T) {
 	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/admin/version/update" || r.Header.Get("Authorization") != "Bearer session-token" {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/minecraft/instances/jv-family1/version/update" || r.Header.Get("Authorization") != "Bearer session-token" {
 			t.Fatalf("unexpected update request: %s %s", r.Method, r.URL.Path)
 		}
 		var request MinecraftStackUpdateRequest
@@ -20,7 +20,7 @@ func TestMinecraftStackUpdateClientUsesFixedAuthenticatedEndpoint(t *testing.T) 
 		}
 		return &http.Response{StatusCode: http.StatusAccepted, Body: io.NopCloser(strings.NewReader(strings.ReplaceAll(persistentOperationTestBody, `"setup"`, `"minecraft_update"`))), Header: make(http.Header)}, nil
 	})}}
-	result, err := client.AdminMinecraftStackUpdate(context.Background(), "session-token", MinecraftStackUpdateRequest{PlanFingerprint: persistentOperationTestFingerprint, ConfirmPlayers: true})
+	result, err := client.MinecraftInstanceStackUpdate(context.Background(), "session-token", "jv-family1", MinecraftStackUpdateRequest{PlanFingerprint: persistentOperationTestFingerprint, ConfirmPlayers: true})
 	if err != nil || result.Operation == nil || result.Operation.OperationType != "minecraft_update" {
 		t.Fatalf("result: %#v %v", result, err)
 	}

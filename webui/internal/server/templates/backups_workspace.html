@@ -190,7 +190,7 @@
     {{end}}
   </section>
 
-  {{if not .SelectedServer}}{{template "backup_destination_content" .}}{{end}}
+  {{if .DestinationWorkspace}}{{template "backup_destination_content" .}}{{end}}
 
 
   <dialog class="backup-restore-dialog" data-backup-restore-dialog>
@@ -260,7 +260,7 @@
 
     <details class="backup-destination-change" {{if .DestinationPlan}}open{{end}}>
       <summary>Change destination</summary>
-      <form class="backup-destination-form" method="post" action="{{.DestinationWorkspace}}/destination/plan" data-backup-destination-form>
+      <form class="backup-destination-form" method="post" action="{{.DestinationWorkspace}}/destination/plan{{if .SelectedServer}}?server={{.SelectedServer}}{{end}}" data-backup-destination-form>
         <input type="hidden" name="csrf" value="{{.CSRF}}">
         <label>Destination type
           <select name="type" data-backup-destination-type>
@@ -342,7 +342,7 @@
           <div><dt>Filesystem size</dt><dd>{{.ProposedDestinationSize}}</dd></div>
         </dl>
         {{if .DestinationPlan.Changed}}
-        <form class="backup-destination-apply" method="post" action="{{.DestinationWorkspace}}/destination/apply">
+        <form class="backup-destination-apply" method="post" action="{{.DestinationWorkspace}}/destination/apply{{if .SelectedServer}}?server={{.SelectedServer}}{{end}}">
           <input type="hidden" name="csrf" value="{{.CSRF}}">
           <input type="hidden" name="type" value="{{.DestinationPlan.Proposed.Type}}">
           <input type="hidden" name="path" value="{{.DestinationPlan.Proposed.Path}}">
@@ -357,7 +357,7 @@
             <span class="muted compact">Requested only now for the reviewed SMB destination.</span>
           </label>
           {{end}}
-          <div class="action-row"><a class="button-link secondary" href="{{.DestinationWorkspace}}">Cancel</a><button type="submit">Apply destination</button></div>
+          <div class="action-row"><a class="button-link secondary" href="{{.DestinationWorkspace}}{{if .SelectedServer}}?server={{.SelectedServer}}{{end}}">Cancel</a><button type="submit">Apply destination</button></div>
         </form>
         {{else}}<p class="muted compact">This destination already matches the current backup configuration.</p>{{end}}
       </div>

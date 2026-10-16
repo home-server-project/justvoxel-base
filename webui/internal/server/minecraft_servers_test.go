@@ -106,7 +106,7 @@ func TestMinecraftServersInventoryOrderAndCompactAdd(t *testing.T) {
 		t.Fatalf("status %d: %s", response.Code, body)
 	}
 	previous := -1
-	for _, label := range []string{`class="panel minecraft-add-server-card"`, "<h2>Original server</h2>", "<h2>family Survival</h2>", "<h2>Kids Creative</h2>"} {
+	for _, label := range []string{`class="panel minecraft-add-server-card"`, "<h2>family Survival</h2>", "<h2>Kids Creative</h2>"} {
 		index := strings.Index(body, label)
 		if index <= previous {
 			t.Fatalf("wrong order/missing %s", label)
@@ -176,7 +176,7 @@ func TestMinecraftServerUnavailableDoesNotHideOtherCards(t *testing.T) {
 	app, f := newServerInventoryApp(t)
 	f.inventoryError = errors.New("private /host/registry secret")
 	response := inventoryRequest(app, "GET", "", "")
-	if response.Code != 200 || !strings.Contains(response.Body.String(), "Independent servers could not be checked") || !strings.Contains(response.Body.String(), "Original server") {
+	if response.Code != 200 || !strings.Contains(response.Body.String(), "Minecraft instances could not be checked") || strings.Contains(response.Body.String(), "Original server") {
 		t.Fatal(response.Body.String())
 	}
 	requireNoPrivateServerContent(t, response.Body.String())
@@ -204,21 +204,19 @@ func TestMinecraftSelectedServerIsolationAndReadOnly(t *testing.T) {
 		}
 	}
 }
-func TestMinecraftOriginalServerUsesLegacyOnly(t *testing.T) {
+func TestMinecraftZeroServerInventoryHasNoSyntheticServer(t *testing.T) {
 	app, f := newServerInventoryApp(t)
-	response := inventoryRequest(app, "GET", "/view/original", "")
-	if response.Code != 200 || !strings.Contains(response.Body.String(), "Original server") || !strings.Contains(response.Body.String(), "25565") || strings.Contains(response.Body.String(), "25567") {
-		t.Fatal(response.Body.String())
+	f.instances = nil
+	f.runtimes = map[string]api.InstanceRuntimeSettings{}
+	response := inventoryRequest(app, "GET", "", "")
+	if response.Code != 200 || strings.Contains(response.Body.String(), "Original server") || strings.Contains(response.Body.String(), "Open Server") {
+		t.Fatal(response.Code, response.Body.String())
 	}
-	if len(f.reads) != 0 {
-		t.Fatal("legacy read independent configuration/status")
+	if len(f.reads) != 0 || len(f.actions) != 0 {
+		t.Fatal("zero-server inventory used a runtime")
 	}
-	response = inventoryRequest(app, "POST", "/view/original/stop", "csrf=csrf-token&confirm_players=yes")
-	if response.Code != 303 || f.action != "stop" || f.confirmed || len(f.actions) != 0 {
-		t.Fatal("legacy lifecycle isolation/override failure")
-	}
-
 }
+
 func TestMinecraftSelectedLifecycleSecurityAndRefusal(t *testing.T) {
 	for _, action := range []string{"start", "stop", "restart"} {
 		app, f := newServerInventoryApp(t)
@@ -284,29 +282,29 @@ func TestMinecraftSelectedLifecycleSecurityAndRefusal(t *testing.T) {
 	}
 }
 
-func TestMinecraftOriginalUnavailableAndSelectedStatusMismatch(t *testing.T) {
+func TestMinecraftSelectedStatusMismatchFailsClosed(t *testing.T) {
 	app, f := newServerInventoryApp(t)
-	f.legacyStatusError = true
-	result := inventoryRequest(app, "GET", "/view/original", "")
-	body := result.Body.String()
-	if result.Code != 200 || !strings.Contains(body, "Status unavailable") || strings.Contains(body, ">Stopped<") || strings.Contains(body, "/original/start") {
-		t.Fatal(body)
-	}
-	requireNoPrivateServerContent(t, body)
 	f.states["jv-family1"] = api.MinecraftInstanceStatus{ID: "jv-kids001", State: "stopped"}
-	result = inventoryRequest(app, "GET", "/view/jv-family1", "")
-	body = result.Body.String()
-	if !strings.Contains(body, "Status unavailable") || strings.Contains(body, ">Stopped<") {
-		t.Fatal("another server status accepted")
+	result := inventoryRequest(app, "GET", "/view/jv-family1", "")
+	if !strings.Contains(result.Body.String(), "Status unavailable") || strings.Contains(result.Body.String(), ">Stopped<") {
+		t.Fatal(result.Body.String())
 	}
 }
 
-func TestMinecraftLegacyLifecycleRefusalHasNoOverride(t *testing.T) {
+func TestMinecraftStaleLifecycleHasNoFallback(t *testing.T) {
 	app, f := newServerInventoryApp(t)
-	f.actionResult = api.MinecraftActionResponse{ConfirmationRequired: true, Message: "Players are online. Server was not interrupted."}
-	result := inventoryRequest(app, "POST", "/view/original/stop", "csrf=csrf-token&confirm_players=yes")
-	body := result.Body.String()
-	if !strings.Contains(body, `role="alert"`) || !strings.Contains(body, "Players are online") || strings.Contains(body, `name="confirm_players"`) || f.confirmed || len(f.actions) != 0 {
-		t.Fatal("legacy refusal/override mismatch")
+	result := inventoryRequest(app, "POST", "/view/jv-absent1/stop", "csrf=csrf-token&confirm_players=yes")
+	if result.Code != 404 || len(f.actions) != 0 || f.action != "" {
+		t.Fatal(result.Code, result.Body.String())
+	}
+}
+
+func TestMinecraftOneServerInventoryContainsExactlyActualIdentity(t *testing.T) {
+	app, f := newServerInventoryApp(t)
+	f.instances = []api.RegisteredMinecraftInstance{{ID: "jv-family1", DisplayName: "Family"}}
+	delete(f.runtimes, "jv-kids001")
+	servers, message := app.minecraftServerInventory(context.Background(), "session-token")
+	if message != "" || len(servers) != 1 || servers[0].ContextID != "jv-family1" || servers[0].Name != "Family" {
+		t.Fatal(servers, message)
 	}
 }

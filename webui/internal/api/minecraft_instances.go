@@ -19,6 +19,7 @@ type InstanceRuntimeSettings struct {
 	JavaMemory       string `json:"java_memory"`
 	ContainerMemory  string `json:"container_memory"`
 	Software         string `json:"software"`
+	VersionPolicy    string `json:"version_policy,omitempty"`
 	Version          string `json:"version"`
 	PaperChannel     string `json:"paper_channel"`
 	ImageTag         string `json:"image_tag"`
@@ -114,9 +115,13 @@ func (c *Client) MinecraftInstanceRuntimes(ctx context.Context, session string) 
 
 func (c *Client) MinecraftInstanceConfiguration(ctx context.Context, session, id string) (InstanceRuntimeSettings, error) {
 	var out struct {
+		ID      string                  `json:"id"`
 		Runtime InstanceRuntimeSettings `json:"runtime"`
 	}
 	err := c.do(ctx, http.MethodGet, "/v1/minecraft/instances/"+url.PathEscape(id)+"/configuration", session, nil, &out)
+	if err == nil && out.ID != id {
+		return InstanceRuntimeSettings{}, fmt.Errorf("selected instance configuration identity mismatch")
+	}
 	return out.Runtime, err
 }
 
@@ -254,4 +259,21 @@ func (c *Client) MinecraftInstanceDeletions(ctx context.Context, session string)
 	}
 	err := c.do(ctx, http.MethodGet, "/v1/minecraft/instances/deletions", session, nil, &out)
 	return out.Deletions, err
+}
+
+func (c *Client) MinecraftInstanceWhitelist(ctx context.Context, session, id string, request any) (TextOutputResponse, error) {
+	var out struct {
+		ID string `json:"id"`
+		TextOutputResponse
+	}
+
+	method := http.MethodGet
+	if request != nil {
+		method = http.MethodPost
+	}
+	err := c.do(ctx, method, "/v1/minecraft/instances/"+url.PathEscape(id)+"/whitelist", session, request, &out)
+	if err == nil && out.ID != id {
+		return TextOutputResponse{}, fmt.Errorf("selected whitelist identity mismatch")
+	}
+	return out.TextOutputResponse, err
 }

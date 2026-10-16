@@ -9,6 +9,8 @@ import (
 )
 
 func TestWhitelistAddAlreadyPresentIsIdempotent(t *testing.T) {
+	fixture := whitelistSurfaceFixture(t)
+	_ = fixture
 	cases := []struct {
 		name     string
 		role     principalRole
@@ -28,6 +30,7 @@ func TestWhitelistAddAlreadyPresentIsIdempotent(t *testing.T) {
 			defer func() { runWhitelistHelper = old }()
 			calls := 0
 			runWhitelistHelper = func(_ context.Context, args ...string) ([]byte, error) {
+				args = selectedWhitelistTestArgs(t, args)
 				calls++
 				if len(args) != 1 || args[0] != "list" {
 					t.Fatalf("unexpected mutation helper call: %#v", args)
@@ -37,7 +40,7 @@ func TestWhitelistAddAlreadyPresentIsIdempotent(t *testing.T) {
 
 			rr := httptest.NewRecorder()
 			body := `{"platform":"` + tc.platform + `","action":"add","name":"` + tc.player + `"}`
-			s.whitelistChange(rr, surfaceRequest(http.MethodPost, "/v1/whitelist", body))
+			serveWhitelistSurface(s, rr, surfaceRequest(http.MethodPost, "/v1/minecraft/instances/jv-a1b2c3/whitelist", body))
 			if rr.Code != http.StatusOK {
 				t.Fatalf("status = %d: %s", rr.Code, rr.Body.String())
 			}
@@ -52,11 +55,14 @@ func TestWhitelistAddAlreadyPresentIsIdempotent(t *testing.T) {
 }
 
 func TestWhitelistRemoveAbsentIsIdempotent(t *testing.T) {
+	fixture := whitelistSurfaceFixture(t)
+	_ = fixture
 	s := surfaceTestServer(t, roleOperator)
 	old := runWhitelistHelper
 	defer func() { runWhitelistHelper = old }()
 	calls := 0
 	runWhitelistHelper = func(_ context.Context, args ...string) ([]byte, error) {
+		args = selectedWhitelistTestArgs(t, args)
 		calls++
 		if len(args) != 1 || args[0] != "list" {
 			t.Fatalf("unexpected mutation helper call: %#v", args)
@@ -65,7 +71,7 @@ func TestWhitelistRemoveAbsentIsIdempotent(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	s.whitelistChange(rr, surfaceRequest(http.MethodPost, "/v1/whitelist", `{"platform":"java","action":"remove","name":"MissingPlayer"}`))
+	serveWhitelistSurface(s, rr, surfaceRequest(http.MethodPost, "/v1/minecraft/instances/jv-a1b2c3/whitelist", `{"platform":"java","action":"remove","name":"MissingPlayer"}`))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", rr.Code, rr.Body.String())
 	}

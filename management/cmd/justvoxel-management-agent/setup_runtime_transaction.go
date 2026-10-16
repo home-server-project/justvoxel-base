@@ -100,6 +100,7 @@ type setupRuntimeBackups struct {
 }
 
 type setupRuntimeTransactionRequest struct {
+	InstanceOnly    bool                  `json:"instance_only,omitempty"`
 	SchemaVersion   string                `json:"schema_version"`
 	OperationID     string                `json:"operation_id"`
 	PlanFingerprint string                `json:"plan_fingerprint"`
@@ -135,7 +136,7 @@ func setupRuntimeRequestForOperation(operation operationJournal, plan *adminSetu
 		return setupRuntimeTransactionRequest{}, errors.New("invalid server capabilities")
 	}
 	return setupRuntimeTransactionRequest{
-		SchemaVersion: operationSchemaVersion, OperationID: operation.OperationID, PlanFingerprint: operation.PlanFingerprint,
+		InstanceOnly: true, SchemaVersion: operationSchemaVersion, OperationID: operation.OperationID, PlanFingerprint: operation.PlanFingerprint,
 		Server:    setupRuntimeServer{MOTD: plan.Server.MOTD, MaxPlayers: plan.Server.MaxPlayers, BedrockEnabled: plan.Server.BedrockEnabled, Timezone: plan.Server.Timezone},
 		Minecraft: setupRuntimeMinecraft{ServerType: serverType, GameMode: plan.Minecraft.GameMode, JavaMemory: plan.Minecraft.JavaMemory, ContainerMemory: plan.Minecraft.ContainerMemory, JavaPort: plan.Minecraft.JavaPort, BedrockPort: plan.Minecraft.BedrockPort, ImageTag: plan.Minecraft.ImageTag, VersionPolicy: plan.Minecraft.VersionPolicy, Version: plan.Minecraft.Version, MinecraftUID: plan.Minecraft.MinecraftUID, MinecraftGID: plan.Minecraft.MinecraftGID},
 		Storage:   setupRuntimeStorage{Type: plan.Storage.Type, Path: plan.Storage.Path, MountPoint: plan.Storage.MountPoint, ExpectedUUID: plan.Storage.ExpectedUUID, ExpectedSource: plan.Storage.ExpectedSource},
@@ -144,6 +145,9 @@ func setupRuntimeRequestForOperation(operation operationJournal, plan *adminSetu
 }
 
 func runSetupRuntimeTransactionAction(parent context.Context, action string, timeout time.Duration, request setupRuntimeTransactionRequest) (setupRuntimeTransactionResponse, error) {
+	if request.InstanceOnly {
+		return runSetupInstanceRuntimeAction(parent, action, request)
+	}
 	var response setupRuntimeTransactionResponse
 	switch action {
 	case "validate", "apply", "verify", "rollback", "commit":

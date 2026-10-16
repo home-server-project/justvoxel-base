@@ -1,175 +1,81 @@
 #!/usr/bin/bash
 set -euo pipefail
 source /usr/libexec/justvoxel/mjust/ui.sh
-source /usr/libexec/justvoxel/mjust/restore-api.sh
-
-mode="${1:-world}"
-case "${mode}" in
-    world|full) ;;
-    *) echo 'Usage: restore {world|full}' >&2; exit 2 ;;
-esac
-
-if (( EUID != 0 )); then
-    echo 'ERROR: this operation must run as root.' >&2
-    exit 1
+source /usr/libexec/justvoxel/mjust/instance-selection.sh
+(( EUID == 0 )) || { echo 'ERROR: this operation must run as root.' >&2; exit 1; }
+instance_id=""
+if [[ ${1:-} == --instance ]]; then
+    [[ $# -ge 2 ]] || exit 2
+    instance_id=$2
+    shift 2
 fi
-if ! jui_has_tty; then
-    echo 'ERROR: restore is interactive and requires a controlling terminal.' >&2
-    echo 'For SSH, allocate a terminal, for example: ssh -t <host> mjust restore' >&2
-    exit 1
-fi
-
-current="$(jv_restore_current_operation)" || exit 1
-if [[ $(jq -r '.operation != null' <<<"${current}") == true ]]; then
-    operation_id="$(jq -r '.operation.operation_id // empty' <<<"${current}")"
-    [[ -n ${operation_id} ]] || { echo 'ERROR: Management Agent returned an invalid current Restore operation.' >&2; exit 1; }
-    echo "Reconnecting to Restore operation ${operation_id}."
-    jv_restore_monitor_operation "${operation_id}"
+[[ $# -le 1 && ${1:-full} == full ]] || { echo 'Usage: restore [--instance jv-...] [full]' >&2; exit 2; }
+jui_has_tty || { echo 'ERROR: Restore requires a controlling terminal. For SSH, allocate a terminal with ssh -t.' >&2; exit 1; }
+instance_id="$(jv_select_registered_instance "${instance_id}")" || exit 1
+readonly api_client=/usr/libexec/justvoxel/mjust/api-client
+base="/v1/minecraft/instances/${instance_id}/backups"
+request() {
+    local method=$1 path=$2 body=${3:-} response
+    if [[ ${method} == GET ]]; then
+        response="$("${api_client}" GET "${base}/${path}")" || { echo 'ERROR: Restore information is unavailable.' >&2; return 1; }
+    else
+        response="$(printf '%s' "${body}" | "${api_client}" POST "${base}/${path}" --data)" || {
+            jq -r '.error // "Restore could not proceed. Review this server and retry the same action."' <<<"${response}" >&2
+            return 1
+        }
+    fi
+    printf '%s' "${response}"
+}
+monitor() {
+    local status state
+    while :; do
+        status="$(request GET restore/status)" || return 1
+        jq -e --arg id "${instance_id}" '.id == $id' <<<"${status}" >/dev/null || return 1
+        state="$(jq -r '.state' <<<"${status}")"
+        printf 'Restore: %s %s\n' "${state}" "$(jq -r '.stage // ""' <<<"${status}")"
+        case ${state} in
+            succeeded|completed|finished) echo 'Restore completed.'; return 0 ;;
+            rolled_back) echo 'Restore was rolled back safely. The previous server was kept.'; return 1 ;;
+            recovery_required|needs_attention|failed|interrupted)
+                echo 'Restore needs recovery. Run Restore for this same server again to retry recovery.' >&2
+                return 1 ;;
+            idle) echo 'Restore has not started.' >&2; return 1 ;;
+        esac
+        sleep 2
+    done
+}
+status="$(request GET restore/status)" || exit 1
+jq -e --arg id "${instance_id}" '.id == $id' <<<"${status}" >/dev/null || exit 1
+if [[ $(jq -r '.recovery_required // false' <<<"${status}") == true ]]; then
+    echo 'The selected server has an interrupted Restore.'
+    read -r -p 'Type RECOVER to allow safe recovery interruption: ' confirmation
+    [[ ${confirmation} == RECOVER ]] || { echo 'Recovery cancelled.'; exit 0; }
+    request POST restore/recover '{"confirm_players":true}' >/dev/null || exit 1
+    monitor
     exit $?
 fi
-
-backups="$(jv_restore_backups)" || exit 1
-if ! jq -e '.backups | type == "array"' <<<"${backups}" >/dev/null 2>&1; then
-    echo 'ERROR: Management Agent returned invalid Restore backup discovery data.' >&2
-    exit 1
+case "$(jq -r '.state' <<<"${status}")" in
+    idle|succeeded|completed|finished|rolled_back|failed|interrupted) ;;
+    *) monitor; exit $? ;;
+esac
+backups="$(request GET inventory)" || exit 1
+jq -e --arg id "${instance_id}" '.id == $id and (.backups | type == "array" and all(.[]; .id == $id))' <<<"${backups}" >/dev/null || exit 1
+mapfile -t archives < <(jq -r '.backups[].archive' <<<"${backups}")
+(( ${#archives[@]} > 0 )) || { echo 'No completed backups exist for this server. Nothing was changed.'; exit 0; }
+archive="$(jui_choose 'Restore full Minecraft data from backup' "${archives[@]}")" || { echo 'Restore cancelled.'; exit 0; }
+jq -e --arg archive "${archive}" 'any(.backups[]; .archive == $archive)' <<<"${backups}" >/dev/null || exit 1
+plan="$(request POST restore/plan "$(jq -cn --arg archive "${archive}" '{archive:$archive}')")" || exit 1
+jq -e --arg id "${instance_id}" --arg archive "${archive}" '.metadata.id == $id and .metadata.archive == $archive and .integrity == "verified" and (.plan_id | type == "string")' <<<"${plan}" >/dev/null || exit 1
+printf 'Selected backup: %s\nBackup version: %s\nCurrent version: %s\n' "${archive}" "$(jq -r '.metadata.version' <<<"${plan}")" "$(jq -r '.current_version' <<<"${plan}")"
+echo 'Restore replaces the complete persistent data of this selected server only. Current data remains protected until runtime verification succeeds.'
+players=false
+if [[ $(jq -r '.players_confirmation_required' <<<"${plan}") == true ]]; then
+    read -r -p 'Type YES to allow interruption of online players with the safe shutdown countdown: ' confirmation
+    [[ ${confirmation} == YES ]] || { echo 'Restore cancelled.'; exit 0; }
+    players=true
 fi
-backup_count="$(jq -r '.backups | length' <<<"${backups}")"
-if (( backup_count == 0 )); then
-    echo 'No completed JustVoxel Minecraft backups were found.'
-    echo 'Nothing was changed.'
-    exit 0
-fi
-
-choices=()
-backup_ids=()
-for (( index=0; index<backup_count; index++ )); do
-    backup_id="$(jq -r ".backups[${index}].id" <<<"${backups}")"
-    created_at="$(jq -r ".backups[${index}].created_at" <<<"${backups}")"
-    size_bytes="$(jq -r ".backups[${index}].size_bytes" <<<"${backups}")"
-    metadata_status="$(jq -r ".backups[${index}].metadata_status" <<<"${backups}")"
-    human_date="$(date -d "${created_at}" '+%b %d, %Y  %H:%M' 2>/dev/null || printf '%s' "${created_at}")"
-    human_size="$(numfmt --to=iec-i --suffix=B "${size_bytes}" 2>/dev/null || printf '%s bytes' "${size_bytes}")"
-    newest=''
-    (( index == 0 )) && newest='   newest'
-    metadata_note=''
-    case "${metadata_status}" in
-        missing) metadata_note='   metadata unavailable' ;;
-        invalid) metadata_note='   metadata invalid' ;;
-    esac
-    choices+=("${human_date}   ${human_size}${newest}${metadata_note}   ${backup_id}")
-    backup_ids+=("${backup_id}")
-done
-
-if [[ ${mode} == world ]]; then
-    selector_title='Restore world from backup'
-else
-    selector_title='Restore full Minecraft data from backup'
-fi
-selection="$(jui_choose "${selector_title}" "${choices[@]}")" || {
-    echo 'Restore cancelled.'
-    exit 0
-}
-
-selected_index=-1
-for index in "${!choices[@]}"; do
-    if [[ ${choices[index]} == "${selection}" ]]; then
-        selected_index="${index}"
-        break
-    fi
-done
-(( selected_index >= 0 )) || { echo 'ERROR: selected backup could not be resolved.' >&2; exit 1; }
-backup_id="${backup_ids[selected_index]}"
-
-plan_request="$(jq -cn --arg backup_id "${backup_id}" --arg mode "${mode}" '{backup_id:$backup_id,mode:$mode}')"
-plan="$(jv_restore_plan "${plan_request}")" || exit 1
-if ! jq -e '.ok == true and (.plan_fingerprint | type == "string") and (.normalized | type == "object") and (.requirements | type == "object")' <<<"${plan}" >/dev/null 2>&1; then
-    jv_restore_api_error "${plan}" 'Restore planning returned invalid data.'
-    exit 1
-fi
-
-echo
-echo 'Selected backup:'
-printf '  %s\n' "$(jq -r '.normalized.created_at' <<<"${plan}")"
-size_bytes="$(jq -r '.normalized.size_bytes' <<<"${plan}")"
-printf '  Size: %s\n' "$(numfmt --to=iec-i --suffix=B "${size_bytes}" 2>/dev/null || printf '%s bytes' "${size_bytes}")"
-backup_version="$(jq -r '.normalized.metadata.minecraft.configured_version // "Unknown"' <<<"${plan}")"
-backup_version_mode="$(jq -r '.normalized.metadata.minecraft.version_mode // "unknown"' <<<"${plan}")"
-current_version="$(jq -r '.normalized.current.version' <<<"${plan}")"
-current_version_mode="$(jq -r '.normalized.current.version_mode' <<<"${plan}")"
-printf '  Backup Minecraft version: %s (%s)\n' "${backup_version}" "${backup_version_mode}"
-printf '  Current configured version: %s (%s)\n' "${current_version}" "${current_version_mode}"
-
-if [[ $(jq -r '.warnings | length' <<<"${plan}") -gt 0 ]]; then
-    echo
-    echo 'Restore warnings:'
-    jq -r '.warnings[] | "  " + .message' <<<"${plan}"
-fi
-
-echo
-if [[ ${mode} == world ]]; then
-    cat <<'TEXT'
-Restore world
-
-This will replace the primary Minecraft world and its standard Nether/End
-world directories with the selected backup. Normal world-based player data
-(inventories, positions, advancements and statistics) rolls back with the world.
-
-Current plugins, plugin data stored outside the world directories,
-server.properties, whitelist/ops, JustVoxel configuration, container policy,
-Minecraft version policy and the operating-system deployment stay unchanged.
-
-The Management Agent will protect the current world data until the restored
-server passes runtime validation.
-TEXT
-else
-    cat <<'TEXT'
-Restore full Minecraft data
-
-This will replace the complete Minecraft persistent data directory with the
-selected backup, including worlds, normal player data, plugins, plugin data,
-server.properties, whitelist/ops and other Minecraft-side persistent files.
-
-JustVoxel system configuration, container policy, Minecraft version policy and
-the operating-system deployment stay unchanged.
-
-The Management Agent will protect the current Minecraft data until the restored
-server passes runtime validation.
-TEXT
-fi
-
-players_confirmed=false
-if [[ $(jq -r '.requirements.players_confirmation_required // false' <<<"${plan}") == true ]]; then
-    echo
-    online="$(jq -r '.requirements.online // 0' <<<"${plan}")"
-    echo "Players currently online: ${online}"
-    if [[ $(jq -r '.requirements.players | length' <<<"${plan}") -gt 0 ]]; then
-        jq -r '.requirements.players[] | "  " + .' <<<"${plan}"
-    fi
-    echo 'Restore will use Minecraft graceful shutdown before changing live data.'
-    if jui_confirm 'Continue with this Restore even though players are online?'; then
-        players_confirmed=true
-    else
-        echo 'Restore cancelled.'
-        exit 0
-    fi
-fi
-
-echo
-printf 'Type RESTORE to continue: ' >/dev/tty
-IFS= read -r confirmation </dev/tty
-if [[ ${confirmation} != RESTORE ]]; then
-    echo 'Restore cancelled.'
-    exit 0
-fi
-
-fingerprint="$(jq -r '.plan_fingerprint' <<<"${plan}")"
-apply_payload="$(jq -cn \
-    --arg fingerprint "${fingerprint}" \
-    --argjson request "${plan_request}" \
-    --argjson players_confirmed "${players_confirmed}" \
-    '{plan_fingerprint:$fingerprint,request:$request,destructive_confirmed:true,players_confirmed:$players_confirmed}')"
-apply="$(jv_restore_apply "${apply_payload}")" || exit 1
-operation_id="$(jq -r '.operation.operation_id // empty' <<<"${apply}")"
-[[ -n ${operation_id} ]] || { echo 'ERROR: Management Agent did not return a Restore operation id.' >&2; exit 1; }
-
-jv_restore_monitor_operation "${operation_id}"
+read -r -p 'Type RESTORE to replace this server data: ' confirmation
+[[ ${confirmation} == RESTORE ]] || { echo 'Restore cancelled.'; exit 0; }
+payload="$(jq -cn --arg archive "${archive}" --arg plan "$(jq -r '.plan_id' <<<"${plan}")" --argjson players "${players}" '{archive:$archive,plan_id:$plan,confirm_destructive:true,confirm_players:$players}')"
+request POST restore/apply "${payload}" >/dev/null || exit 1
+monitor

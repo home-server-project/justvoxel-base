@@ -65,11 +65,11 @@ async function open(currentSoftware, imageState = "up_to_date") {
     calls.push({ url, options });
     const parsed = new URL(url, "http://example");
     let payload;
-    if (parsed.pathname === "/api/minecraft/workspace/settings") payload = { minecraft: { server_type: currentSoftware, image_tag: "stable" } };
+    if (parsed.pathname === "/api/minecraft/workspace/settings") payload = { minecraft: { id: "jv-family1", server_type: currentSoftware, image_tag: "stable" } };
     else if (parsed.pathname === "/api/version/workspace/status") {
       const target = parsed.searchParams.get("server_type");
       payload = { server_software: (target || currentSoftware).replace(/^./, c => c.toUpperCase()), selected_candidate: "1.21.8", stack_state: "updates_available", installed: "1.21.8", update_available: true, runtime_update_required: true, server_supported: true, crossplay_enabled: true, crossplay_compatible: true, plan_fingerprint: "reviewed-" + target, image_state: imageState, managed_image_digest: "private-digest" };
-    } else if (parsed.pathname === "/api/dashboard-status") payload = { players: { online: 3 } };
+    } else if (parsed.pathname === "/api/minecraft/workspace/snapshot") payload = { players: { online: 3 } };
     else if (parsed.pathname === "/api/version/workspace/update") {
       assert.equal(options.method, "POST");
       currentSoftware = options.body.get("server_type");
@@ -80,6 +80,8 @@ async function open(currentSoftware, imageState = "up_to_date") {
     return { ok: true, json: async () => payload };
   }
   vm.runInNewContext(source, {
+    location: {origin: "http://example", search: "?server=jv-family1"},
+    justVoxelSelectedURL: value => {const u=new URL(value,"http://example");u.searchParams.set("server","jv-family1");return u.pathname+u.search;},
     document, fetch, URLSearchParams, setTimeout,
     setupWorkspaceWindow: (_, options) => { openWindow = options.onOpen; return { open: options.onOpen }; },
     readWorkspaceWindowState: () => ({ open: false })
@@ -182,13 +184,13 @@ async function review(page) {
     await apply.events.click();
     const posts = page.calls.filter(call => call.options.method === "POST");
     assert.equal(posts.length, 1);
-    assert.equal(posts[0].url, "/api/version/workspace/update");
+    assert.equal(posts[0].url, "/api/version/workspace/update?server=jv-family1");
     assert.equal(posts[0].options.body.get("server_type"), target);
     assert.equal(posts[0].options.body.get("image_tag"), "custom-release");
     assert.equal(posts[0].options.body.get("csrf"), "csrf-token");
     assert.equal(posts[0].options.body.get("plan_fingerprint"), "reviewed-" + target);
     assert.equal(posts[0].options.body.get("confirm_players"), "yes");
-    assert.ok(page.calls.some(call => call.url === "/api/version/workspace/update-operation?id=switch-operation"));
+    assert.ok(page.calls.some(call => call.url === "/api/version/workspace/update-operation?id=switch-operation&server=jv-family1"));
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });
 `

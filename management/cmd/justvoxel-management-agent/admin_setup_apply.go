@@ -122,12 +122,7 @@ func (s *server) adminSetupApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := minecraftInstances.register("", false); err != nil {
-		writeAdminSetupApplyFailure(w, http.StatusConflict, "identity_required", "Instance ID could not be generated: "+err.Error())
-		return
-	}
-
-	operation, created, err := s.operations.beginSetupWithDiagnostic(request.PlanFingerprint, diagnosticID)
+	operation, created, err := s.operations.beginSetupWithDiagnostic(request.PlanFingerprint, diagnosticID, true)
 	if err != nil {
 		if errors.Is(err, errSetupOperationBusy) || errors.Is(err, errSetupLockBusy) {
 			current, currentErr := s.operations.currentSetup()

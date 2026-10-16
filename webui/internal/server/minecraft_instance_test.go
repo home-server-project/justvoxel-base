@@ -48,7 +48,7 @@ func TestMinecraftInstanceProxyPermissionsAndCSRF(t *testing.T) {
 			}
 			rr := httptest.NewRecorder()
 			app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "/api/minecraft/workspace/identity", ""))
-			if rr.Code != 200 || client.reads != 1 || client.ensures != 0 || client.saves != 0 {
+			if rr.Code != 200 || !strings.Contains(rr.Body.String(), `"id":"jv-family1"`) || client.reads != 0 || client.ensures != 0 || client.saves != 0 || len(client.instanceWrites) != 0 {
 				t.Fatalf("read side effects or denied: %d", rr.Code)
 			}
 			for _, action := range []string{"ensure", "manual"} {
@@ -56,24 +56,20 @@ func TestMinecraftInstanceProxyPermissionsAndCSRF(t *testing.T) {
 				app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "/api/minecraft/workspace/identity/"+action, "csrf=csrf-token&suffix=ABC123"))
 				want := 403
 				if role == "administrator" {
-					want = 200
+					want = http.StatusConflict
 				}
 				if rr.Code != want {
 					t.Fatalf("%s %s: %d %s", role, action, rr.Code, rr.Body.String())
 				}
 			}
-			if role == "administrator" {
-				if client.ensures != 1 || client.saves != 1 || client.suffix != "ABC123" {
-					t.Fatal("incorrect proxy request")
-				}
-			} else if client.ensures != 0 || client.saves != 0 {
-				t.Fatal("role bypass")
+			if client.reads != 0 || client.ensures != 0 || client.saves != 0 || len(client.instanceWrites) != 0 {
+				t.Fatal("immutable identity route accessed fixed identity or mutated an instance")
 			}
 			before := client.ensures + client.saves
 			for _, action := range []string{"ensure", "manual"} {
 				rr = httptest.NewRecorder()
 				app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "/api/minecraft/workspace/identity/"+action, "csrf=wrong&suffix=ABC123"))
-				if rr.Code != 403 || client.ensures+client.saves != before {
+				if rr.Code != 403 || client.ensures+client.saves != before || client.reads != 0 || len(client.instanceWrites) != 0 {
 					t.Fatal("CSRF bypass")
 				}
 			}
@@ -91,8 +87,8 @@ func TestMinecraftInstanceFailureLeavesWorkspaceAndDashboardUsable(t *testing.T)
 	}
 	rr := httptest.NewRecorder()
 	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "/api/minecraft/workspace/identity", ""))
-	if rr.Code != 502 {
-		t.Fatalf("identity failure=%d", rr.Code)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"id":"jv-family1"`) {
+		t.Fatalf("registered identity unavailable: %d %s", rr.Code, rr.Body.String())
 	}
 	for _, route := range []string{"/api/minecraft/workspace/settings", "/api/minecraft/workspace/logs", "/api/dashboard-status", "/"} {
 		rr = httptest.NewRecorder()
@@ -101,81 +97,52 @@ func TestMinecraftInstanceFailureLeavesWorkspaceAndDashboardUsable(t *testing.T)
 			t.Fatalf("identity failure broke %s: %d %s", route, rr.Code, rr.Body.String())
 		}
 	}
-	if client.reads != 2 || client.ensures != 1 || client.saves != 0 {
-		t.Fatal("administrator dashboard did not attempt legacy registration once")
+	if client.reads != 0 || client.ensures != 0 || client.saves != 0 || len(client.instanceWrites) != 0 {
+		t.Fatal("read-only workspace or dashboard accessed fixed identity or mutated an instance")
 	}
-	for _, failure := range []struct {
-		status  int
-		message string
-	}{{400, "Use 6-12 letters and numbers after jv-."}, {409, "Instance ID is already used. Choose another value."}} {
-		client.identityError = &api.ResponseError{StatusCode: failure.status, Message: failure.message}
-		rr = httptest.NewRecorder()
-		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "/api/minecraft/workspace/identity/manual", "csrf=csrf-token&suffix=bad"))
-		if rr.Code != failure.status || !strings.Contains(rr.Body.String(), failure.message) {
-			t.Fatalf("lost validation error: %d %s", rr.Code, rr.Body.String())
+	rr = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "/api/minecraft/workspace/selection", ""))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"selected":{"id":"jv-family1"`) || strings.Contains(rr.Body.String(), "jv-auto123") {
+		t.Fatalf("registered instance is not authoritative: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestDashboardNeverSynthesizesFixedServerIdentity(t *testing.T) {
+	for _, role := range []string{"administrator", "operator", "viewer"} {
+		client := &fakeMinecraftInstanceAPI{fakeMinecraftWorkspaceAPI: configuredMinecraftWorkspaceAPI(), identityError: errors.New("unavailable")}
+		client.role = role
+		client.statusResult = defaultStatus()
+		client.statusResult.Minecraft.Configured = true
+		client.playersResult = defaultPlayers()
+		app, err := New(client, Config{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < 2; i++ {
+			rr := httptest.NewRecorder()
+			app.Handler().ServeHTTP(rr, authenticatedAdminRequest("GET", "/", ""))
+			if rr.Code != 200 || strings.Contains(rr.Body.String(), `data-instance-required="true"`) {
+				t.Fatal(rr.Code, rr.Body.String())
+			}
+		}
+		if client.ensures != 0 || client.reads != 0 || client.saves != 0 {
+			t.Fatal("dashboard accessed fixed identity")
 		}
 	}
 }
 
-func TestInstalledServerIdentityAttemptOncePerAdministratorSession(t *testing.T) {
-	for _, role := range []string{"administrator", "operator", "viewer"} {
-		t.Run(role, func(t *testing.T) {
-			client := &fakeMinecraftInstanceAPI{fakeMinecraftWorkspaceAPI: configuredMinecraftWorkspaceAPI(), identityError: errors.New("generation unavailable")}
-			client.role = role
-			client.statusResult = defaultStatus()
-			client.statusResult.Minecraft.Configured = true
-			client.playersResult = defaultPlayers()
-			app, err := New(client, Config{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			for i := 0; i < 2; i++ {
-				rr := httptest.NewRecorder()
-				app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "/", ""))
-				if rr.Code != 200 {
-					t.Fatalf("dashboard: %d", rr.Code)
-				}
-				required := strings.Contains(rr.Body.String(), `data-instance-required="true"`)
-				if required != (role == "administrator") {
-					t.Fatal("manual popup not aligned with administrator role")
-				}
-			}
-			want := 0
-			if role == "administrator" {
-				want = 1
-			}
-			if client.ensures != want {
-				t.Fatalf("automatic attempts=%d want=%d", client.ensures, want)
-			}
-			client.identityError = nil
-			client.identity = api.MinecraftIdentity{ID: "jv-local123", Status: "available"}
-			rr := httptest.NewRecorder()
-			app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "/", ""))
-			if strings.Contains(rr.Body.String(), `data-instance-required="true"`) || client.ensures != want {
-				t.Fatal("existing valid identity prompted or was replaced")
-			}
-		})
-	}
-}
-
-func TestInstalledServerAutomaticIdentitySuccessIsSilent(t *testing.T) {
+func TestDashboardKeepsZeroServerIdentityAbsent(t *testing.T) {
 	client := &fakeMinecraftInstanceAPI{fakeMinecraftWorkspaceAPI: configuredMinecraftWorkspaceAPI(), identity: api.MinecraftIdentity{Status: "unavailable"}}
+	client.selectedIDs = nil
 	client.statusResult = defaultStatus()
-	client.statusResult.Minecraft.Configured = true
 	client.playersResult = defaultPlayers()
 	app, err := New(client, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 2; i++ {
-		rr := httptest.NewRecorder()
-		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "/", ""))
-		if rr.Code != 200 || strings.Contains(rr.Body.String(), `data-instance-required="true"`) {
-			t.Fatal("automatic success required interaction")
-		}
-	}
-	if client.ensures != 1 || client.identity.ID != "jv-auto123" {
-		t.Fatal("automatic registration was repeated or did not persist")
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, authenticatedAdminRequest("GET", "/", ""))
+	if rr.Code != 200 || client.ensures != 0 || client.identity.ID != "" {
+		t.Fatal("zero-server dashboard recreated fixed identity", rr.Code)
 	}
 }
 

@@ -24,32 +24,32 @@ stop:
 restart:
     @sudo /usr/libexec/justvoxel/mjust/service restart
 
-players:
-    @sudo /usr/libexec/justvoxel/mjust/players
+players instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/players --instance "{{instance_id}}" ; else sudo /usr/libexec/justvoxel/mjust/players ; fi
 
-whitelist-list:
-    @sudo /usr/libexec/justvoxel/mjust/whitelist list
+whitelist-list instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/whitelist --instance "{{instance_id}}" list; else sudo /usr/libexec/justvoxel/mjust/whitelist list; fi
 
-whitelist-add-java name:
-    @sudo /usr/libexec/justvoxel/mjust/whitelist add-java "{{name}}"
+whitelist-add-java name instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/whitelist --instance "{{instance_id}}" add-java "{{name}}"; else sudo /usr/libexec/justvoxel/mjust/whitelist add-java "{{name}}"; fi
 
-whitelist-remove-java name:
-    @sudo /usr/libexec/justvoxel/mjust/whitelist remove-java "{{name}}"
+whitelist-remove-java name instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/whitelist --instance "{{instance_id}}" remove-java "{{name}}"; else sudo /usr/libexec/justvoxel/mjust/whitelist remove-java "{{name}}"; fi
 
-whitelist-add-bedrock gamertag:
-    @sudo /usr/libexec/justvoxel/mjust/whitelist add-bedrock "{{gamertag}}"
+whitelist-add-bedrock gamertag instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/whitelist --instance "{{instance_id}}" add-bedrock "{{gamertag}}"; else sudo /usr/libexec/justvoxel/mjust/whitelist add-bedrock "{{gamertag}}"; fi
 
-whitelist-remove-bedrock gamertag:
-    @sudo /usr/libexec/justvoxel/mjust/whitelist remove-bedrock "{{gamertag}}"
+whitelist-remove-bedrock gamertag instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/whitelist --instance "{{instance_id}}" remove-bedrock "{{gamertag}}"; else sudo /usr/libexec/justvoxel/mjust/whitelist remove-bedrock "{{gamertag}}"; fi
 
-backup:
-    @sudo /usr/libexec/justvoxel/mjust/backup
+backup instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/backup --instance "{{instance_id}}" ; else sudo /usr/libexec/justvoxel/mjust/backup ; fi
 
-restore:
-    @sudo /usr/libexec/justvoxel/mjust/restore world
+restore instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/restore --instance "{{instance_id}}" full; else sudo /usr/libexec/justvoxel/mjust/restore full; fi
 
-restore-full:
-    @sudo /usr/libexec/justvoxel/mjust/restore full
+restore-full instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/restore --instance "{{instance_id}}" full; else sudo /usr/libexec/justvoxel/mjust/restore full; fi
 
 export destination="":
     @if [ -n "{{destination}}" ]; then sudo /usr/libexec/justvoxel/mjust/migration-export "{{destination}}"; else sudo /usr/libexec/justvoxel/mjust/migration-export; fi
@@ -60,8 +60,8 @@ import source="":
 migration-recover transaction="":
     @if [ -n "{{transaction}}" ]; then sudo /usr/libexec/justvoxel/mjust/migration-recover "{{transaction}}"; else sudo /usr/libexec/justvoxel/mjust/migration-recover; fi
 
-update-minecraft:
-    @sudo /usr/libexec/justvoxel/mjust/update-minecraft
+update-minecraft instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/update-minecraft --instance "{{instance_id}}" ; else sudo /usr/libexec/justvoxel/mjust/update-minecraft ; fi
 
 logs:
     @sudo /usr/libexec/justvoxel/mjust/logs

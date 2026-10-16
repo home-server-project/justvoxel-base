@@ -35,7 +35,10 @@ func (f *fakeDateTimeVersionAPI) AdminDateTimeApply(_ context.Context, _ string,
 	return api.AdminDateTimeState{Timezone: change.Timezone, Automatic: change.Automatic, TimeFormat: change.TimeFormat, DateFormat: change.DateFormat}, nil
 }
 
-func (f *fakeDateTimeVersionAPI) AdminVersionStatus(_ context.Context, _, policy, version, serverType string, imageTag ...string) (api.AdminVersionStatus, error) {
+func (f *fakeDateTimeVersionAPI) MinecraftInstanceVersionStatus(_ context.Context, _, id, policy, version, serverType string, imageTag ...string) (api.AdminVersionStatus, error) {
+	if id != "jv-family1" {
+		return api.AdminVersionStatus{}, api.ErrUnauthorized
+	}
 	f.versionReads++
 	f.proposedSoftware = serverType
 	if len(imageTag) > 0 {
@@ -120,4 +123,17 @@ func TestVersionCombinedPreviewForwardsSelectionsReadOnly(t *testing.T) {
 	if rr.Code != http.StatusOK || client.versionReads != 1 || client.proposedSoftware != "purpur" || client.proposedImageTag != "release_1.2-3" || client.dateWrites != 0 {
 		t.Fatalf("combined preview forwarding: status=%d client=%+v", rr.Code, client)
 	}
+}
+
+func (f *fakeDateTimeVersionAPI) MinecraftInstances(context.Context, string) ([]api.RegisteredMinecraftInstance, error) {
+	return []api.RegisteredMinecraftInstance{{ID: "jv-family1", DisplayName: "Family"}}, nil
+}
+func (f *fakeDateTimeVersionAPI) MinecraftInstanceRuntimes(context.Context, string) ([]string, error) {
+	return []string{"jv-family1"}, nil
+}
+func (f *fakeDateTimeVersionAPI) MinecraftInstanceConfiguration(context.Context, string, string) (api.InstanceRuntimeSettings, error) {
+	return api.InstanceRuntimeSettings{Software: "paper", Version: "26.2"}, nil
+}
+func (f *fakeDateTimeVersionAPI) MinecraftInstanceStatus(context.Context, string, string) (api.MinecraftInstanceStatus, error) {
+	return api.MinecraftInstanceStatus{ID: "jv-family1", State: "stopped"}, nil
 }

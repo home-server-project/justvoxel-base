@@ -2,10 +2,12 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"html"
 	"net/http"
 	"net/url"
 	"os/exec"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -244,23 +246,79 @@ func TestSetupMOTDHasNoVisibleAutomaticControl(t *testing.T) {
 	}
 }
 
-func TestPostSetupMOTDRemainsExplicitConfiguration(t *testing.T) {
-	client := configuredSettingsFake()
-	client.configuration.Minecraft.MOTD = "JustVoxel Paper Minecraft 26.3 Server"
-	request := configurationRequestFromDiscovery(client.configuration)
-	if request.MOTD != client.configuration.Minecraft.MOTD {
-		t.Fatal("configured MOTD changed on discovery")
+// Keep actual instance state separate from the retired fixed-server discovery.
+type postSetupMOTDClient struct {
+	*fakeMinecraftWorkspaceAPI
+	runtime                  api.InstanceRuntimeSettings
+	fixedPlans, fixedApplies int
+}
+
+func (f *postSetupMOTDClient) MinecraftInstanceConfiguration(_ context.Context, _, id string) (api.InstanceRuntimeSettings, error) {
+	f.instanceReads = append(f.instanceReads, id)
+	if id != "jv-family1" {
+		return api.InstanceRuntimeSettings{}, &api.ResponseError{StatusCode: http.StatusNotFound}
 	}
+	return f.runtime, nil
+}
+
+func (f *postSetupMOTDClient) SetMinecraftInstanceConfiguration(ctx context.Context, session, id string, settings api.InstanceRuntimeSettings) error {
+	if id != "jv-family1" {
+		return &api.ResponseError{StatusCode: http.StatusNotFound}
+	}
+	if err := f.fakeMinecraftWorkspaceAPI.SetMinecraftInstanceConfiguration(ctx, session, id, settings); err != nil {
+		return err
+	}
+	f.runtime = settings
+	return nil
+}
+
+func (f *postSetupMOTDClient) AdminConfigurationPlan(context.Context, string, api.AdminConfigurationChangeRequest) (api.AdminConfigurationChangeResponse, error) {
+	f.fixedPlans++
+	return api.AdminConfigurationChangeResponse{}, &api.ResponseError{StatusCode: http.StatusGone}
+}
+
+func (f *postSetupMOTDClient) AdminConfigurationApply(context.Context, string, api.AdminConfigurationChangeRequest) (api.AdminConfigurationChangeResponse, error) {
+	f.fixedApplies++
+	return api.AdminConfigurationChangeResponse{}, &api.ResponseError{StatusCode: http.StatusGone}
+}
+
+func TestPostSetupMOTDRemainsExplicitConfiguration(t *testing.T) {
+	client := &postSetupMOTDClient{fakeMinecraftWorkspaceAPI: configuredMinecraftWorkspaceAPI()}
+	client.configuration.Minecraft.ServerType = "paper"
+	client.configuration.Minecraft.Version = "26.3"
+	client.configuration.Minecraft.MOTD = "JustVoxel Paper Minecraft 26.3 Server"
+	before, err := client.fakeMinecraftWorkspaceAPI.MinecraftInstanceConfiguration(context.Background(), "session-token", "jv-family1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.runtime = before
 	values := settingsFormValues()
 	values.Set("motd", "My new welcome message")
+	values.Set("max_players", "10")
 	values.Set("tab", "gameplay")
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/api/minecraft/workspace/settings/plan", values.Encode()))
-	if rr.Code != http.StatusOK || client.planCalls != 1 || client.plannedRequest.MOTD != "My new welcome message" {
-		t.Fatalf("post-setup MOTD edit changed: status=%d request=%#v", rr.Code, client.plannedRequest)
+	var plan struct {
+		Review  string                         `json:"review"`
+		Changes []api.AdminConfigurationChange `json:"changes"`
+	}
+	if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &plan) != nil || plan.Review == "" || len(plan.Changes) != 1 || plan.Changes[0].Field != "motd" || len(client.instanceWrites) != 0 {
+		t.Fatalf("post-setup MOTD review: %d %s", rr.Code, rr.Body.String())
+	}
+	values.Set("review", plan.Review)
+	rr = httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/api/minecraft/workspace/settings/apply", values.Encode()))
+	want := configurationRequestFromDiscovery(client.configuration)
+	want.MOTD = "My new welcome message"
+	if rr.Code != http.StatusOK || !reflect.DeepEqual(client.instanceWrites, []string{"jv-family1"}) || !reflect.DeepEqual(client.applied, want) {
+		t.Fatalf("post-setup MOTD apply: %d writes=%v request=%#v", rr.Code, client.instanceWrites, client.applied)
+	}
+	wantRuntime := before
+	wantRuntime.MOTD = "My new welcome message"
+	if !reflect.DeepEqual(client.runtime, wantRuntime) || client.fixedPlans != 0 || client.fixedApplies != 0 {
+		t.Fatal("MOTD edit changed other settings or used fixed-server configuration")
 	}
 	for _, path := range []string{"/setup/start", "/setup/recommended"} {
 		rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example"+path, "csrf=csrf-token&server_type=purpur"))
@@ -268,7 +326,7 @@ func TestPostSetupMOTDRemainsExplicitConfiguration(t *testing.T) {
 			t.Fatal("configured server entered first-run setup")
 		}
 	}
-	if client.configuration.Minecraft.MOTD != request.MOTD {
-		t.Fatal("existing server MOTD changed")
+	if client.configuration.Minecraft.MOTD != before.MOTD || len(client.instanceWrites) != 1 {
+		t.Fatal("first-run setup changed existing server MOTD")
 	}
 }

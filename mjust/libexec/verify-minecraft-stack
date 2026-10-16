@@ -2,19 +2,28 @@
 set -euo pipefail
 source /usr/libexec/justvoxel/mjust/common.sh
 require_root
-require_config
+if [[ ${1:-} == --instance ]]; then
+    [[ $# -ge 2 ]] || exit 1
+    source /usr/libexec/justvoxel/mjust/instance-context.sh
+    jv_load_instance "$2" || exit 1
+    shift 2
+else
+    require_config
+    JV_INSTANCE_CONTAINER=minecraft
+    JV_INSTANCE_UNIT=minecraft.service
+fi
 if [[ ${JUSTVOXEL_MAINTENANCE_LOCK_HELD:-0} != 1 ]]; then
     exec 9>"${JV_MAINTENANCE_LOCK}"
     flock -n 9 || { echo 'ERROR: another Minecraft maintenance operation is running.' >&2; exit 1; }
 fi
-systemctl is-active --quiet minecraft.service || { echo 'ERROR: Minecraft service is not active.' >&2; exit 1; }
+systemctl is-active --quiet "${JV_INSTANCE_UNIT}" || { echo 'ERROR: Minecraft service is not active.' >&2; exit 1; }
 wait_for_rcon 60 || { echo 'ERROR: Minecraft RCON is not ready.' >&2; exit 1; }
 expected_version="${1:-${MINECRAFT_VERSION}}"
 if [[ ${MINECRAFT_SERVER_TYPE-paper} == vanilla ]]; then
-    status="$(podman exec minecraft mc-monitor status --json)" || { echo 'ERROR: Minecraft status probe failed.' >&2; exit 1; }
+    status="$(podman exec "${JV_INSTANCE_CONTAINER}" mc-monitor status --json)" || { echo 'ERROR: Minecraft status probe failed.' >&2; exit 1; }
     actual="$(jq -er '.server_info.version.name | select(type == "string" and length > 0)' <<< "${status}")" || { echo 'ERROR: Minecraft status version is invalid.' >&2; exit 1; }
     [[ ${expected_version} == LATEST || ${actual} == "${expected_version}" ]] || { echo 'ERROR: Minecraft is not running the selected game version.' >&2; exit 1; }
-    podman exec minecraft rcon-cli list >/dev/null || { echo 'ERROR: Minecraft RCON check failed.' >&2; exit 1; }
+    podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli list >/dev/null || { echo 'ERROR: Minecraft RCON check failed.' >&2; exit 1; }
     printf 'Minecraft version: %s\n' "${actual}"
     exit 0
 fi
@@ -23,7 +32,7 @@ fi
 # After the same bounded wait, local status can verify the running software and game version.
 version_wait=0
 while :; do
-    version="$(podman exec minecraft rcon-cli version)"
+    version="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli version)"
     # Normalize terminal presentation only; keep the raw completed response for validation.
     comparison_version="$(printf '%s' "${version}" | sed $'s/\033\\[[0-9;]*m//g')"
     comparison_version="${comparison_version//$'\r'/}"
@@ -32,7 +41,7 @@ while :; do
     [[ ${comparison_version} == 'Checking version, please wait...' ]] || break
     if (( version_wait >= 60 )); then
         [[ ${MINECRAFT_SERVER_TYPE-paper} == paper || ${MINECRAFT_SERVER_TYPE-paper} == purpur ]] || { echo 'ERROR: Minecraft server software cannot use the local version fallback.' >&2; exit 1; }
-        status="$(podman exec minecraft mc-monitor status --json)" || { echo 'ERROR: Minecraft status probe failed.' >&2; exit 1; }
+        status="$(podman exec "${JV_INSTANCE_CONTAINER}" mc-monitor status --json)" || { echo 'ERROR: Minecraft status probe failed.' >&2; exit 1; }
         actual="$(jq -er '.server_info.version.name | select(type == "string" and length > 0) | select(contains("\n") | not)' <<< "${status}")" || { echo 'ERROR: Minecraft status version is invalid.' >&2; exit 1; }
         [[ ${actual} =~ ^(Paper|Purpur)\ ([0-9A-Za-z._-]+)$ ]] || { echo 'ERROR: Minecraft status version is invalid.' >&2; exit 1; }
         actual_software="${BASH_REMATCH[1]}"
@@ -59,12 +68,12 @@ if [[ ${comparison_version} != 'Checking version, please wait...' ]]; then
         }
     fi
 fi
-plugins="$(podman exec minecraft rcon-cli plugins)"
+plugins="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli plugins)"
 printf 'Plugins: %s\n' "${plugins}"
 [[ ${plugins} == *ViaVersion* && ${plugins} != *§cViaVersion* ]] || { echo 'ERROR: ViaVersion could not be verified.' >&2; exit 1; }
 if [[ ${BEDROCK_ENABLED} == yes ]]; then
     [[ ${plugins} == *Geyser* && ${plugins,,} == *floodgate* && ${plugins} != *§cGeyser* && ${plugins,,} != *§cfloodgate* ]] || { echo 'ERROR: Cross-play plugins could not be verified.' >&2; exit 1; }
-    geyser="$(podman exec minecraft rcon-cli 'geyser version')"
+    geyser="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli 'geyser version')"
     printf 'Geyser: %s\n' "${geyser}"
     [[ ${geyser} == *Geyser* && ${geyser,,} == *version* && ${geyser,,} != *'unknown command'* ]] || {
         echo 'ERROR: Geyser version response could not be verified.' >&2; exit 1;

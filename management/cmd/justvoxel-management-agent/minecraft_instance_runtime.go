@@ -33,9 +33,11 @@ type minecraftInstanceRuntimeConfig struct {
 	JavaMemory       string `json:"java_memory"`
 	ContainerMemory  string `json:"container_memory"`
 	Software         string `json:"software"`
+	VersionPolicy    string `json:"version_policy,omitempty"`
 	Version          string `json:"version"` // resolved pin or LATEST, as in the legacy environment
 	PaperChannel     string `json:"paper_channel"`
 	ImageTag         string `json:"image_tag"`
+	ImageDigest      string `json:"image_digest,omitempty"`
 	StartOnBoot      bool   `json:"start_on_boot"`
 	EULAAccepted     bool   `json:"eula_accepted"`
 	UID              uint32 `json:"uid"`
@@ -320,7 +322,7 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 			return nil, errors.New("container memory must leave at least 512 MiB above Java memory")
 		}
 		total += limit
-		if !validSetupServerType(c.Software) || !instanceRuntimeVersionPattern.MatchString(c.Version) || !imageTagInputPattern.MatchString(c.ImageTag) {
+		if (c.ImageDigest != "" && !operationFingerprintPattern.MatchString(c.ImageDigest)) || (c.VersionPolicy != "" && c.VersionPolicy != "pinned" && c.VersionPolicy != "recommended" && c.VersionPolicy != "latest") || !validSetupServerType(c.Software) || !instanceRuntimeVersionPattern.MatchString(c.Version) || !imageTagInputPattern.MatchString(c.ImageTag) {
 			return nil, errors.New("invalid Minecraft software, version, or image tag")
 		}
 		if c.PaperChannel != "default" && c.PaperChannel != "experimental" {
@@ -392,7 +394,7 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		f.Quadlet, err = instanceRuntimeTemplate(quadletTemplate, map[string]string{
 			"BEDROCK_PUBLISH": bedrockPublish,
 			"INSTANCE_ID":     c.ID, "DATA_PATH": f.DataPath, "ENV_PATH": f.EnvironmentPath, "STORAGE_ROOT": ctx.StorageRoot, "JAVA_PORT": strconv.Itoa(c.JavaPort),
-			"MINECRAFT_IMAGE": "docker.io/itzg/minecraft-server:" + c.ImageTag, "CONTAINER_MEMORY": strings.ToUpper(c.ContainerMemory),
+			"MINECRAFT_IMAGE": instanceRuntimeImage(c), "CONTAINER_MEMORY": strings.ToUpper(c.ContainerMemory),
 			"DATA_MOUNT_POINT": ctx.MountPoint, "DATA_EXPECTED_UUID": ctx.ExpectedUUID, "DATA_EXPECTED_SOURCE": ctx.ExpectedSource, "INSTALL_SECTION": install,
 		})
 		if err != nil {
@@ -495,4 +497,11 @@ func (s *minecraftInstanceStore) stageInstanceRuntimes(ctx minecraftInstanceRunt
 		return fmt.Errorf("complete runtime bundle published but durability is uncertain: %w", err)
 	}
 	return nil
+}
+
+func instanceRuntimeImage(c minecraftInstanceRuntimeConfig) string {
+	if c.ImageDigest != "" {
+		return "docker.io/itzg/minecraft-server@" + c.ImageDigest
+	}
+	return "docker.io/itzg/minecraft-server:" + c.ImageTag
 }

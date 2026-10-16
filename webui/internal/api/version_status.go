@@ -11,6 +11,7 @@ import (
 )
 
 type AdminVersionStatus struct {
+	InstanceID             string `json:"instance_id,omitempty"`
 	ServerType             string `json:"server_type"`
 	ServerSupported        bool   `json:"server_supported"`
 	StackState             string `json:"stack_state"`
@@ -74,9 +75,9 @@ func (c *Client) AdminSetupVersionPreview(ctx context.Context, session, policy, 
 	return out, err
 }
 
-func (c *Client) AdminVersionStatus(ctx context.Context, session, policy, version, serverType string, imageTag ...string) (AdminVersionStatus, error) {
+func (c *Client) MinecraftInstanceVersionStatus(ctx context.Context, session, id, policy, version, serverType string, imageTag ...string) (AdminVersionStatus, error) {
 	var out AdminVersionStatus
-	path := "/v1/admin/version/status?policy=" + url.QueryEscape(policy) + "&version=" + url.QueryEscape(version) + "&server_type=" + url.QueryEscape(serverType)
+	path := "/v1/minecraft/instances/" + url.PathEscape(id) + "/version/status?policy=" + url.QueryEscape(policy) + "&version=" + url.QueryEscape(version) + "&server_type=" + url.QueryEscape(serverType)
 	if len(imageTag) > 0 {
 		path += "&image_tag=" + url.QueryEscape(imageTag[0])
 	}
@@ -103,23 +104,28 @@ func (c *Client) AdminVersionStatus(ctx context.Context, session, policy, versio
 		return out, readResponseError(resp)
 	}
 	err = json.NewDecoder(resp.Body).Decode(&out)
+	if err == nil && out.InstanceID != id {
+		return AdminVersionStatus{}, fmt.Errorf("selected version identity mismatch")
+	}
 	return out, err
 }
 
 type MinecraftStackUpdateRequest struct {
+	Policy          string `json:"policy,omitempty"`
+	Version         string `json:"version,omitempty"`
 	ServerType      string `json:"server_type,omitempty"`
 	ImageTag        string `json:"image_tag,omitempty"`
 	PlanFingerprint string `json:"plan_fingerprint"`
 	ConfirmPlayers  bool   `json:"confirm_players"`
 }
 
-func (c *Client) AdminMinecraftStackUpdate(ctx context.Context, session string, change MinecraftStackUpdateRequest) (PersistentOperationResponse, error) {
+func (c *Client) MinecraftInstanceStackUpdate(ctx context.Context, session, id string, change MinecraftStackUpdateRequest) (PersistentOperationResponse, error) {
 	var out PersistentOperationResponse
 	body, err := json.Marshal(change)
 	if err != nil {
 		return out, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://unix/v1/admin/version/update", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://unix/v1/minecraft/instances/"+url.PathEscape(id)+"/version/update", bytes.NewReader(body))
 	if err != nil {
 		return out, err
 	}
@@ -139,17 +145,17 @@ func (c *Client) AdminMinecraftStackUpdate(ctx context.Context, session string, 
 	return out, err
 }
 
-func (c *Client) AdminCurrentMinecraftStackUpdate(ctx context.Context, session string) (PersistentOperationResponse, error) {
-	return c.getPersistentOperation(ctx, session, "/v1/admin/version/update/current")
+func (c *Client) MinecraftInstanceStackUpdateOperation(ctx context.Context, session, id, operationID string) (PersistentOperationResponse, error) {
+	return c.getPersistentOperation(ctx, session, "/v1/minecraft/instances/"+url.PathEscape(id)+"/version/update/current?operation_id="+url.QueryEscape(operationID))
 }
 
-func (c *Client) AdminAcknowledgeMinecraftStackUpdate(ctx context.Context, session, id string) (PersistentOperationResponse, error) {
+func (c *Client) MinecraftInstanceAcknowledgeStackUpdate(ctx context.Context, session, instanceID, id string) (PersistentOperationResponse, error) {
 	var out PersistentOperationResponse
 	body, err := json.Marshal(map[string]string{"operation_id": id})
 	if err != nil {
 		return out, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://unix/v1/admin/version/update/acknowledge", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://unix/v1/minecraft/instances/"+url.PathEscape(instanceID)+"/version/update/acknowledge", bytes.NewReader(body))
 	if err != nil {
 		return out, err
 	}

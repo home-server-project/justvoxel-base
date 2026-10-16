@@ -20,7 +20,6 @@
       {{if not (or .CanStart .CanRestart .CanStop)}}<p class="muted">Lifecycle actions are unavailable in the current server state.</p>{{end}}
       </div>
     </section>
-    {{if ne .ContextID "original"}}
     <section class="panel details minecraft-workspace-section"><h2>Server name</h2>
       <form data-selected-presentation action="/api/minecraft/workspace/rename?server={{.ContextID}}" method="post"><input type="hidden" name="csrf" value="{{$.CSRF}}"><label>Server name<input name="display_name" value="{{.Name}}" maxlength="64" required></label><button type="submit">Rename</button></form>
     </section>
@@ -30,7 +29,6 @@
       <form data-selected-presentation data-delete-name="{{.Name}}" action="/api/minecraft/workspace/delete?server={{.ContextID}}" method="post"><input type="hidden" name="csrf" value="{{$.CSRF}}"><label>Type the current server name<input name="confirm_name" required autocomplete="off"></label><button class="danger" type="submit" disabled>Delete Server</button></form>
       <p class="notice" data-selected-action-status role="status"></p>
     </section>
-    {{end}}
   </div>
 </section>
 {{end}}

@@ -4,7 +4,16 @@ source /usr/libexec/justvoxel/mjust/common.sh
 source /usr/libexec/justvoxel/mjust/managed-crossplay.sh
 source /usr/libexec/justvoxel/mjust/update-policy.sh
 require_root
-if [[ -r ${JV_CONFIG:-/etc/justvoxel/justvoxel.conf} ]]; then
+instance_args=()
+JV_INSTANCE_CONTAINER=minecraft
+JV_INSTANCE_UNIT=minecraft.service
+if [[ ${1:-} == --instance ]]; then
+    [[ $# -ge 2 ]] || exit 1
+    source /usr/libexec/justvoxel/mjust/instance-context.sh
+    jv_load_instance "$2" || exit 1
+    instance_args=(--instance "$2")
+    shift 2
+elif [[ -r ${JV_CONFIG:-/etc/justvoxel/justvoxel.conf} ]]; then
     require_config
 fi
 
@@ -29,7 +38,7 @@ if [[ ${target_image_tag} != "${configured_image_tag}" ]]; then
     validate_minecraft_image_tag "${target_image_tag}" || { echo 'ERROR: container image tag could not be verified or is deprecated.' >&2; exit 1; }
 fi
 if (( $# != 3 )); then
-    current_image="$(minecraft_image_ref)"
+    current_image="${JV_INSTANCE_IMAGE_REF:-$(minecraft_image_ref)}"
 fi
 MINECRAFT_IMAGE_TAG="${target_image_tag}"
 validate_server_type "${target_type}" || exit 1
@@ -118,9 +127,9 @@ service_state=stopped
 if (( $# != 3 )); then
     remote_digest="$(jv_remote_platform_digest "$(minecraft_image_ref)" || true)"
     local_id="$(podman image inspect "${current_image}" --format '{{.Id}}' 2>/dev/null || true)"
-    if systemctl is-active --quiet minecraft.service; then
+    if systemctl is-active --quiet "${JV_INSTANCE_UNIT}"; then
         service_state=running
-        running_id="$(podman inspect minecraft --format '{{.Image}}' 2>/dev/null || true)"
+        running_id="$(podman inspect "${JV_INSTANCE_CONTAINER}" --format '{{.Image}}' 2>/dev/null || true)"
     fi
     # Compare the proposed digest to the actual runtime, not a cached proposed tag.
     identity="${local_id}"
@@ -165,10 +174,19 @@ else
         reason='Server update information could not be verified. Try again later.'
     fi
 fi
+if (( $# != 3 )) && [[ ${stack_state} == up_to_date ]] &&
+    [[ ${policy} != "${MINECRAFT_VERSION_MODE:-pinned}" || ( ${policy} == pinned && ${candidate} != "${MINECRAFT_VERSION:-}" ) ]]; then
+    stack_state=updates_available
+fi
 runtime_update_required=false
 if [[ ${stack_state} == updates_available && ( ${software_changed} == true || ${installed} != "${candidate}" ||
       ${image_state} == updates_available || ${geyser_state} == updates_available || ${floodgate_state} == updates_available ) ]]; then
     runtime_update_required=true
+fi
+# An explicit same-version policy edit must not install unrelated stack updates.
+if (( $# != 3 )) && [[ -n ${1:-} && ${policy} != "${MINECRAFT_VERSION_MODE:-pinned}" &&
+    ${installed} == "${candidate}" && ${software_changed} == false && ${channel_changed} == false ]]; then
+    runtime_update_required=false
 fi
 # Bind review to resolved artifacts and appliance configuration; no browser URLs.
 fingerprint=''
@@ -178,7 +196,7 @@ if (( $# != 3 )); then
         --arg configured_tag "${configured_image_tag}" --arg proposed_tag "${target_image_tag}" \
         --arg current_image "${current_image}" --arg local_digest "${local_digest}" --arg local_id "${local_id}" \
         --arg running_id "${running_id}" --arg service_state "${service_state}" \
-        --arg config_identity "$(if [[ -r ${JV_CONFIG:-/etc/justvoxel/justvoxel.conf} ]]; then sha256sum "${JV_CONFIG:-/etc/justvoxel/justvoxel.conf}" | cut -d ' ' -f1; fi)" \
+        --arg config_identity "$(if [[ -n ${JV_INSTANCE_ID:-} ]]; then sha256sum "/etc/justvoxel/instances/${JV_INSTANCE_ID}/config.json"; elif [[ -r ${JV_CONFIG} ]]; then sha256sum "${JV_CONFIG}"; fi | cut -d ' ' -f1)" \
         --arg data_path "${DATA_PATH:-}" --arg image "$(minecraft_image_ref)" --arg digest "${remote_digest}" \
         --arg installed "${installed}" --argjson geyser "${geyser_metadata}" --argjson floodgate "${floodgate_metadata}" \
         '[$server_type,$configured_type,$candidate,$policy,$configured,$bedrock,$data_path,$image,$digest,$installed,$geyser,$floodgate,$configured_tag,$proposed_tag,$current_image,$local_digest,$local_id,$running_id,$service_state,$config_identity]' | sha256sum | cut -d ' ' -f1)"

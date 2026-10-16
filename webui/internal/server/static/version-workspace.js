@@ -111,7 +111,7 @@ if (versionLauncher && versionDialog) {
     }
     if (channelChange) {
       const note = document.createElement("p");
-      note.textContent = "Applying saves the channel, then re-checks the configured image. If an update is needed, JustVoxel will update the container.";
+      note.textContent = "Applying verifies the reviewed channel and updates this server when needed.";
       review.appendChild(note);
     }
     if (runtimePossible) {
@@ -189,51 +189,16 @@ if (versionLauncher && versionDialog) {
         let saved = false;
         try {
           if (confirmationRequired && !checkbox.checked) throw new Error("Confirm online player interruption before applying.");
-          if (plan.changes?.length) {
-            const body = new URLSearchParams(params);
-            body.set("confirm_players", checkbox.checked ? "yes" : "no");
-            const result = await request("/api/minecraft/workspace/settings/apply", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
-            if (!result.applied) throw new Error(result.error || "The change was not applied. Review again.");
-            saved = true;
-          }
-          if (!versionReview && runtimePossible) {
-            state.textContent = "Checking configured container image…";
-            const refreshed = await request(statusURL());
-            if (refreshed.image_state === "updates_available") {
-              if (refreshed.stack_state !== "updates_available" || !refreshed.update_available || !refreshed.plan_fingerprint || !(refreshed.server_supported ?? refreshed.paper_supported) || (refreshed.crossplay_enabled && !refreshed.crossplay_compatible)) throw new Error(refreshed.reason || "A safe container update could not be verified. Review changes again.");
-              const body = new URLSearchParams({ csrf, plan_fingerprint: refreshed.plan_fingerprint, confirm_players: checkbox.checked ? "yes" : "no" });
-              const result = await request("/api/version/workspace/update", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
-              if (!result.operation?.operation_id) throw new Error("Server update tracking is unavailable. Refresh Version to check its status.");
-              review.remove();
-              updateOperation = result.operation.operation_id;
-              await render("Container update started.");
-              watchUpdate(result.operation.operation_id);
-              return;
-            }
-            if (refreshed.image_state !== "up_to_date") throw new Error("Unable to check the configured container image. Review changes again.");
-          }
-          if (versionReview) {
-            state.textContent = "Refreshing version information…";
-            const refreshed = await request(statusURL());
-            if (needsUpdate) {
-              if (refreshed.selected_candidate !== status.selected_candidate) throw new Error("The selected Minecraft version changed. Review changes again before continuing.");
-              if (refreshed.crossplay_enabled && !refreshed.crossplay_compatible) throw new Error("Disable Cross-play first before updating to this Minecraft version.");
-              if (refreshed.update_available) {
-                if (refreshed.stack_state !== "updates_available" || !refreshed.plan_fingerprint) throw new Error(refreshed.reason || "A safe Minecraft update could not be verified.");
-                state.textContent = "Starting Minecraft update…";
-                const body = new URLSearchParams({ csrf, plan_fingerprint: refreshed.plan_fingerprint, confirm_players: checkbox.checked ? "yes" : "no" });
-                const result = await request("/api/version/workspace/update", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
-                if (!result.operation?.operation_id) throw new Error("Server update tracking is unavailable. Refresh Version to check its status.");
-                review.remove();
-                updateOperation = result.operation.operation_id;
-                await render("Minecraft update started.");
-                watchUpdate(result.operation.operation_id);
-                return;
-              }
-              if (refreshed.installed !== refreshed.selected_candidate) throw new Error(refreshed.reason || "The Minecraft update is unavailable. Review changes again before continuing.");
-            }
-          }
-          await render("Changes saved.");
+          // Both policy and channel reviews apply one immutable-ID operation.
+          // The reviewed fingerprint is revalidated by the Agent; no re-plan loop.
+          const body = new URLSearchParams({ csrf, plan_fingerprint: status.plan_fingerprint, confirm_players: checkbox.checked ? "yes" : "no", policy: params.get("version_policy") || "", version: params.get("version") || "", image_tag: params.get("image_tag") || "" });
+          const result = await request("/api/version/workspace/update", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
+          if (!result.operation?.operation_id) throw new Error("Server update tracking is unavailable. Refresh Version to check its status.");
+          review.remove();
+          updateOperation = result.operation.operation_id;
+          await render("Minecraft update started.");
+          watchUpdate(result.operation.operation_id);
+          return;
         } catch (failure) {
           // A saved configuration is never automatically reapplied or retried.
           if (saved) await render("Changes saved. " + failure.message);
@@ -263,8 +228,8 @@ if (versionLauncher && versionDialog) {
       try {
         const [plan, candidate, snapshot] = await Promise.all([
           request("/api/minecraft/workspace/settings/plan", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: params }),
-          request(statusURL(policy, version)),
-          request("/api/dashboard-status"),
+          request(statusURL(policy, version, "", imageTag)),
+          request("/api/minecraft/workspace/snapshot"),
         ]);
         showReview(root, form, plan, params, candidate, snapshot?.players);
         state.textContent = "";
@@ -272,10 +237,6 @@ if (versionLauncher && versionDialog) {
     });
   };
   const render = async (message = "", confirmedOperation = completedOperation) => {
-    const selected = new URLSearchParams(globalThis.location?.search || "").get("server");
-    if (selected && selected !== "original") {
-      try {const settings=await request("/api/minecraft/workspace/settings");const panel=card("Software & version");panel.append(line("Software",settings.minecraft.server_type),line("Minecraft",settings.minecraft.version),line("Changes","Software and version are read-only for this server."));content.replaceChildren(panel);state.textContent="";}catch(error){state.textContent=error.message;}return;
-    }
     const ticket = ++sequence;
     await settleSelectChange();
     if (ticket !== sequence) return;
@@ -463,7 +424,7 @@ if (versionLauncher && versionDialog) {
           state.textContent = "Checking for updates…";
           try {
             const [plan, snapshot] = await Promise.all([
-              request(statusURL("", "", target, imageTag)), request("/api/dashboard-status"),
+              request(statusURL("", "", target, imageTag)), request("/api/minecraft/workspace/snapshot"),
             ]);
             if (selectionTicket !== selectionSequence || ticket !== sequence) return;
             imageStatus.replaceChildren(...line("Container image:", imageLabel(plan.image_state)).children);

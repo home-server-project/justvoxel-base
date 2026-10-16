@@ -10,7 +10,7 @@ mkdir -p "${tmp}/bin" "${tmp}/libexec"
 cat > "${tmp}/libexec/common.sh" <<'EOF'
 #!/usr/bin/bash
 require_root() { :; }
-require_config() { BEDROCK_ENABLED=yes; }
+
 EOF
 
 cat > "${tmp}/bin/systemctl" <<'EOF'
@@ -27,7 +27,7 @@ cat > "${tmp}/bin/podman" <<'EOF'
 set -euo pipefail
 state="${JV_WHITELIST_TEST_STATE:?}"
 log="${JV_WHITELIST_TEST_LOG:?}"
-[[ $1 == exec && $2 == minecraft && $3 == rcon-cli ]]
+[[ $1 == exec && $2 == minecraft-jv-family1 && $3 == rcon-cli ]]
 cmd="$4"
 printf '%s\n' "${cmd}" >> "${log}"
 
@@ -81,6 +81,18 @@ export JV_WHITELIST_TEST_STATE="${tmp}/state"
 export JV_WHITELIST_TEST_LOG="${tmp}/rcon.log"
 printf '%s\n' '.CatchaLlama' > "${JV_WHITELIST_TEST_STATE}"
 : > "${JV_WHITELIST_TEST_LOG}"
+
+# Exercise name/Floodgate semantics with a fixed immutable test context.
+# Production context validation is asserted separately; no production test bypass.
+grep -Fq '[[ ${1:-} == --instance ]]' "${helper}"
+if grep -Eq '^container=minecraft$|^unit=minecraft.service$|require_config' "${helper}"; then
+    echo 'FAIL: whitelist backend retains a fixed-server fallback' >&2; exit 1
+fi
+{
+    printf '%s\n' '#!/usr/bin/bash' 'set -euo pipefail' 'BEDROCK_ENABLED=yes' 'container=minecraft-jv-family1' 'unit=minecraft-jv-family1.service'
+    sed -n '/^action=/,$p' "${helper}"
+} > "${tmp}/selected-whitelist"
+helper="${tmp}/selected-whitelist"
 
 remove_output="$(bash "${helper}" remove-bedrock .CatchaLlama)"
 grep -Fq 'Removed CatchaLlama from the whitelist.' <<< "${remove_output}" || {

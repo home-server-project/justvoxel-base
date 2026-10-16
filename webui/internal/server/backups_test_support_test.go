@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
@@ -257,4 +258,40 @@ func (f *fakeNewBackupsAPI) AdminOperation(_ context.Context, session, id string
 	}
 	copy := *f.restoreOperation
 	return api.PersistentOperationResponse{Operation: &copy}, nil
+}
+
+// All workspace backup fixtures have one actual registered immutable identity.
+func (f *fakeNewBackupsAPI) MinecraftInstances(context.Context, string) ([]api.RegisteredMinecraftInstance, error) {
+	return []api.RegisteredMinecraftInstance{{ID: "jv-family1", DisplayName: "Family"}}, nil
+}
+func (f *fakeNewBackupsAPI) MinecraftInstanceRuntimes(context.Context, string) ([]string, error) {
+	return []string{"jv-family1"}, nil
+}
+func (f *fakeNewBackupsAPI) MinecraftInstanceConfiguration(context.Context, string, string) (api.InstanceRuntimeSettings, error) {
+	return api.InstanceRuntimeSettings{Software: "paper", Version: "26.3"}, nil
+}
+func (f *fakeNewBackupsAPI) MinecraftInstanceStatus(context.Context, string, string) (api.MinecraftInstanceStatus, error) {
+	return api.MinecraftInstanceStatus{ID: "jv-family1", State: "stopped"}, nil
+}
+func (f *fakeNewBackupsAPI) MinecraftInstanceBackups(ctx context.Context, session, id, action string, request any) (json.RawMessage, error) {
+	if id != "jv-family1" {
+		return nil, &api.ResponseError{StatusCode: 404}
+	}
+	switch action {
+	case "now":
+		result, err := f.ManualBackup(ctx, session)
+		if err != nil {
+			return nil, &api.ResponseError{StatusCode: 400, Message: manualBackupErrorMessage(result, err)}
+		}
+		return json.RawMessage(`{"ok":true}`), nil
+	case "inventory":
+		f.discoveryCalls++
+		return json.RawMessage(`{"id":"jv-family1","backups":[]}`), nil
+	case "settings":
+		return json.RawMessage(`{"enabled":true,"time":"04:30","retention":7}`), nil
+	case "restore/status":
+		return json.RawMessage(`{"id":"jv-family1","state":"idle"}`), nil
+	default:
+		return json.RawMessage(`{"ok":true,"state":"idle"}`), nil
+	}
 }

@@ -89,6 +89,11 @@ configuration_json() {
         return 0
     fi
     require_config
+    if [[ ${APPLIANCE_CONFIGURED:-no} == yes ]]; then
+        jq -n --arg path "${BACKUP_PATH}" --arg type "${BACKUP_TYPE}" --arg mount "${BACKUP_MOUNT_POINT}" --arg uuid "${BACKUP_EXPECTED_UUID}" --arg source "${BACKUP_EXPECTED_SOURCE}" \
+            '{configured:true,minecraft:{},backup:{path:$path,type:$type,mount_point:$mount,expected_uuid:$uuid,expected_source:$source}}'
+        return 0
+    fi
     configuration_values_json
 }
 

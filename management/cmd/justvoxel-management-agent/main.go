@@ -107,6 +107,10 @@ func main() {
 		if err := serve(socket); err != nil {
 			fatal("serve: %v", err)
 		}
+	case "instance-version-publish", "instance-version-backup":
+		if err := instanceVersionCommand(context.Background(), args); err != nil {
+			fatal("instance version operation: %v", err)
+		}
 	case "version":
 		meta, _ := readReleaseMetadata()
 		fmt.Printf("JustVoxel Management API %s\nWebUI %s\n", managementAPI, valueOr(meta.Version, "unknown"))

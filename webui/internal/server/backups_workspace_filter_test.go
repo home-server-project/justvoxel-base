@@ -6,31 +6,19 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/home-server-project/justvoxel-webui/internal/api"
 )
 
-func TestBackupsWorkspaceServerFilterMarkupPreservesArchiveReferences(t *testing.T) {
-	client := &fakeNewBackupsAPI{backups: api.AdminRestoreBackupsResponse{
-		Backups: []api.AdminRestoreBackup{
-			{ID: "jv-abc123/minecraft-paper-2026-10-09-1506.tar.gz", SizeBytes: 2048, CreatedAt: "2026-10-09T15:06:00Z", MetadataStatus: "missing"},
-			{ID: "jv-def456/minecraft-purpur-2026-10-09-1506.tar.gz", SizeBytes: 3072, CreatedAt: "2026-10-09T15:06:00Z", MetadataStatus: "missing"},
-			{ID: "minecraft-2026-09-15-043000.tar.gz", SizeBytes: 1024, CreatedAt: "2026-09-15T04:30:00Z", MetadataStatus: "missing"},
-		},
-	}}
-	response := backupsSafetyRequest(t, client, http.MethodGet, "/workspace/backups", nil)
+func TestBackupsWorkspaceSelectedServerPreservesArchiveReferences(t *testing.T) {
+	app, client := phase7App(t)
+	response := phase7Request(app, http.MethodGet, "/workspace/backups?server=jv-family1", "")
 	if response.Code != http.StatusOK {
 		t.Fatalf("Backups workspace returned %d: %s", response.Code, response.Body.String())
 	}
 	page := response.Body.String()
 	for _, want := range []string{
-		`data-backup-server-filter`,
-		`<option value="all">All servers</option>`,
-		`<option value="legacy">Older / Unassigned</option>`,
-		`data-backup-size-bytes="2048"`,
-		`value="jv-abc123/minecraft-paper-2026-10-09-1506.tar.gz"`,
-		`value="jv-def456/minecraft-purpur-2026-10-09-1506.tar.gz"`,
-		`value="minecraft-2026-09-15-043000.tar.gz"`,
+		`data-selected-server-id="jv-family1"`,
+		`data-backup-size-bytes="1"`,
+		`value="minecraft-family-2026-01-01-1200.tar.gz"`,
 		`data-backup-visible-count`,
 		`data-backup-visible-size`,
 		`data-backup-filter-empty`,
@@ -41,6 +29,17 @@ func TestBackupsWorkspaceServerFilterMarkupPreservesArchiveReferences(t *testing
 	}
 	if strings.Contains(page, `/instances/jv-`) {
 		t.Fatal("filter incorrectly introduces a new instances/ backup directory")
+	}
+	if strings.Contains(page, `data-backup-server-filter`) {
+		t.Fatal("selected-instance Backups exposed the global server filter")
+	}
+	if !strings.Contains(strings.Join(client.backupCalls, "|"), "jv-family1:inventory") {
+		t.Fatal("selected server inventory was not requested", client.backupCalls)
+	}
+	for _, call := range client.backupCalls {
+		if !strings.HasPrefix(call, "jv-family1:") {
+			t.Fatal("Backups requested another server", call)
+		}
 	}
 }
 

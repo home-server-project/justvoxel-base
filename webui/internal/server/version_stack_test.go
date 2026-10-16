@@ -17,18 +17,18 @@ type fakeVersionStackAPI struct {
 	lastUpdate api.MinecraftStackUpdateRequest
 }
 
-func (f *fakeVersionStackAPI) AdminMinecraftStackUpdate(_ context.Context, _ string, request api.MinecraftStackUpdateRequest) (api.PersistentOperationResponse, error) {
+func (f *fakeVersionStackAPI) MinecraftInstanceStackUpdate(_ context.Context, _, id string, request api.MinecraftStackUpdateRequest) (api.PersistentOperationResponse, error) {
 	f.writes++
 	f.lastUpdate = request
-	return api.PersistentOperationResponse{Operation: &api.PersistentOperation{OperationType: "minecraft_update", PlanFingerprint: request.PlanFingerprint}}, nil
+	return api.PersistentOperationResponse{Operation: &api.PersistentOperation{InstanceID: id, OperationType: "minecraft_update", PlanFingerprint: request.PlanFingerprint}}, nil
 }
 func (f *fakeVersionStackAPI) AdminOperation(_ context.Context, _, _ string) (api.PersistentOperationResponse, error) {
 	return api.PersistentOperationResponse{}, nil
 }
-func (f *fakeVersionStackAPI) AdminCurrentMinecraftStackUpdate(_ context.Context, _ string) (api.PersistentOperationResponse, error) {
+func (f *fakeVersionStackAPI) MinecraftInstanceStackUpdateOperation(_ context.Context, _, _, _ string) (api.PersistentOperationResponse, error) {
 	return api.PersistentOperationResponse{}, nil
 }
-func (f *fakeVersionStackAPI) AdminAcknowledgeMinecraftStackUpdate(_ context.Context, _, _ string) (api.PersistentOperationResponse, error) {
+func (f *fakeVersionStackAPI) MinecraftInstanceAcknowledgeStackUpdate(_ context.Context, _, _, _ string) (api.PersistentOperationResponse, error) {
 	f.writes++
 	return api.PersistentOperationResponse{}, nil
 }
@@ -72,17 +72,13 @@ func TestVersionStackUIUsesSafeStackStateAndSingleReview(t *testing.T) {
 		"Managed automatically",
 		"status.installed} → ${status.selected_candidate",
 		`needsUpdate && !channelChange && status.stack_state !== "updates_available"`,
-		"csrf, plan_fingerprint: refreshed.plan_fingerprint",
+		"csrf, plan_fingerprint: status.plan_fingerprint",
 		"Verify and keep current server",
 		`up_to_date: "Up to date"`,
 		`waiting_for_compatibility: "Waiting for compatibility"`,
 		"may start temporarily for verification and will be stopped again afterward",
 		`(!plan.changes?.length && status.update_available`,
 		`status.installed !== status.selected_candidate`,
-		`const refreshed = await request(statusURL())`,
-		`if (needsUpdate) {`,
-		`refreshed.selected_candidate !== status.selected_candidate`,
-		`refreshed.crossplay_enabled && !refreshed.crossplay_compatible`,
 		"Disable Cross-play first",
 		`needsUpdate && Number(players?.online || 0) > 0`,
 		`if (confirmationRequired && !blocked)`,

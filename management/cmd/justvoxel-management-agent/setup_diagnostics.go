@@ -234,8 +234,8 @@ func (s *operationStore) beginSetupDiagnostic(interfaceName string) (string, err
 	return id, nil
 }
 
-func (s *operationStore) beginSetupWithDiagnostic(planFingerprint, sessionID string) (operationJournal, bool, error) {
-	operation, created, err := s.beginSetup(planFingerprint)
+func (s *operationStore) beginSetupWithDiagnostic(planFingerprint, sessionID string, instanceSetup ...bool) (operationJournal, bool, error) {
+	operation, created, err := s.beginSetup(planFingerprint, instanceSetup...)
 	if err != nil {
 		return operationJournal{}, false, err
 	}

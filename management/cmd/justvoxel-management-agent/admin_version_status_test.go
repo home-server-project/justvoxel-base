@@ -9,6 +9,7 @@ import (
 )
 
 func TestVersionStatusIsAdministratorOnlyAndValidatesInputs(t *testing.T) {
+	whitelistSurfaceFixture(t)
 	old := runAdminVersionStatus
 	defer func() { runAdminVersionStatus = old }()
 	called := false
@@ -18,18 +19,18 @@ func TestVersionStatusIsAdministratorOnlyAndValidatesInputs(t *testing.T) {
 	}
 	viewer := surfaceTestServer(t, roleViewer)
 	rr := httptest.NewRecorder()
-	viewer.adminVersionStatus(rr, surfaceRequest(http.MethodGet, "/v1/admin/version/status", ""))
+	viewer.adminVersionStatus(rr, surfaceRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/version/status", ""))
 	if rr.Code != http.StatusForbidden || called {
 		t.Fatalf("viewer: %d, helper=%v", rr.Code, called)
 	}
 	admin := surfaceTestServer(t, roleAdministrator)
 	rr = httptest.NewRecorder()
-	admin.adminVersionStatus(rr, surfaceRequest(http.MethodGet, "/v1/admin/version/status?policy=pinned&version=26.3%3Bbad", ""))
+	admin.adminVersionStatus(rr, surfaceRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/version/status?policy=pinned&version=26.3%3Bbad", ""))
 	if rr.Code != http.StatusBadRequest || called {
 		t.Fatalf("unsafe version: %d, helper=%v", rr.Code, called)
 	}
 	rr = httptest.NewRecorder()
-	admin.adminVersionStatus(rr, surfaceRequest(http.MethodGet, "/v1/admin/version/status?policy=recommended", ""))
+	admin.adminVersionStatus(rr, surfaceRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/version/status?policy=recommended", ""))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status: %d %s", rr.Code, rr.Body.String())
 	}
@@ -41,6 +42,7 @@ func TestVersionStatusIsAdministratorOnlyAndValidatesInputs(t *testing.T) {
 }
 
 func TestSetupVersionPreviewUsesAdministratorAndExplicitBedrockChoice(t *testing.T) {
+	whitelistSurfaceFixture(t)
 	old := runSetupVersionPreview
 	defer func() { runSetupVersionPreview = old }()
 	called := false

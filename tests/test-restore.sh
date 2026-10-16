@@ -140,22 +140,11 @@ menu="${repo_root}/mjust/libexec/menu"
 justfile="${repo_root}/mjust/justfile"
 
 for text in \
-    'restore-api.sh' \
-    'jv_restore_current_operation' \
-    'jv_restore_backups' \
-    'jv_restore_plan' \
-    'jv_restore_apply' \
-    'jv_restore_monitor_operation' \
-    '.requirements.players_confirmation_required' \
-    'Type RESTORE to continue:'; do
-    grep -Fq "${text}" "${restore}" || fail "mJust Restore API frontend behavior missing: ${text}"
+    'instance-selection.sh' 'jv_select_registered_instance' 'restore/status' \
+    'restore/plan' 'restore/apply' 'restore/recover' '.players_confirmation_required' \
+    'confirm_destructive:true' 'Type RESTORE to replace this server data:'; do
+    grep -Fq "${text}" "${restore}" || fail "mJust instance Restore behavior missing: ${text}"
 done
-
-grep -Fq 'jv_restore_get /v1/admin/restore/backups' "${restore_api}" || fail 'Restore frontend does not discover backups through the Management API'
-grep -Fq 'jv_restore_get /v1/admin/restore/current-operation' "${restore_api}" || fail 'Restore frontend cannot reconnect through the Management API'
-grep -Fq 'jv_restore_post /v1/admin/restore/plan' "${restore_api}" || fail 'Restore frontend does not plan through the Management API'
-grep -Fq 'jv_restore_post /v1/admin/restore/apply' "${restore_api}" || fail 'Restore frontend does not apply through the Management API'
-grep -Fq 'jv_restore_get "/v1/admin/operations/${id}"' "${restore_api}" || fail 'Restore frontend does not monitor persistent operations through the Management API'
 
 for forbidden in \
     'JV_MAINTENANCE_LOCK' \
@@ -179,9 +168,9 @@ if grep -Fq 'Authorization:' "${restore_api}"; then
     fail 'mJust Restore API helper must not introduce a bearer token'
 fi
 
-grep -Fq 'restore world' "${justfile}" || fail 'mjust restore world recipe missing'
+grep -Fq 'restore instance_id=' "${justfile}" || fail 'mjust selected Restore recipe missing'
 grep -Fq 'restore full' "${justfile}" || fail 'mjust restore-full recipe missing'
-grep -Fq 'Restore world' "${menu}" || fail 'TUI world restore missing'
+grep -Fq 'Restore Minecraft data' "${menu}" || fail 'TUI world restore missing'
 grep -Fq 'Restore full Minecraft data' "${menu}" || fail 'TUI full restore missing'
 grep -Fq 'mjust restore' "${menu}" || fail 'direct world restore command not discoverable'
 grep -Fq 'mjust restore-full' "${menu}" || fail 'direct full restore command not discoverable'

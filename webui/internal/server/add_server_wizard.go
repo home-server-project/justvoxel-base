@@ -459,7 +459,7 @@ func (a *App) addServerReviewState(ctx context.Context, session string, draft se
 	runtime := api.InstanceRuntimeSettings{
 		JavaPort: javaPort, BedrockEnabled: draft.Server.BedrockEnabled, BedrockPort: bedrockPort,
 		JavaMemory: draft.Minecraft.JavaMemory, ContainerMemory: draft.Minecraft.ContainerMemory,
-		Software: draft.Minecraft.ServerType, Version: version.SelectedCandidate, PaperChannel: "default", ImageTag: draft.Minecraft.ImageTag,
+		Software: draft.Minecraft.ServerType, VersionPolicy: draft.Minecraft.VersionPolicy, Version: version.SelectedCandidate, PaperChannel: "default", ImageTag: draft.Minecraft.ImageTag,
 		StartOnBoot: draft.StartOnBoot, EULAAccepted: true, Timezone: draft.Server.Timezone,
 		GameMode: draft.Minecraft.GameMode, Difficulty: "normal", MaxPlayers: maxPlayers, MOTD: motd,
 	}

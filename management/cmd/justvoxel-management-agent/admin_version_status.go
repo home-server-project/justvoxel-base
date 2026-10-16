@@ -10,6 +10,7 @@ import (
 )
 
 type adminVersionStatus struct {
+	InstanceID             string `json:"instance_id,omitempty"`
 	ServerType             string `json:"server_type"`
 	ServerSupported        bool   `json:"server_supported"`
 	StackState             string `json:"stack_state"`
@@ -51,6 +52,9 @@ var runAdminVersionStatus = func(ctx context.Context, policy, version, serverTyp
 	if serverType != "" {
 		args = append([]string{"--server-type", serverType}, args...)
 	}
+	if id, ok := ctx.Value(instanceVersionKey{}).(string); ok {
+		args = append([]string{"--instance", id}, args...)
+	}
 	return exec.CommandContext(ctx, "/usr/libexec/justvoxel/mjust/admin-version-status-json", args...).CombinedOutput()
 }
 var runSetupVersionPreview = func(ctx context.Context, policy, version, bedrock, serverType string) ([]byte, error) {
@@ -62,10 +66,10 @@ var runSetupVersionPreview = func(ctx context.Context, policy, version, bedrock,
 }
 
 func registerAdminVersionStatusRoutes(mux *http.ServeMux, s *server) {
-	mux.HandleFunc("GET /v1/admin/version/status", s.adminVersionStatus)
-	mux.HandleFunc("POST /v1/admin/version/update", s.adminMinecraftStackUpdate)
-	mux.HandleFunc("GET /v1/admin/version/update/current", s.adminMinecraftStackUpdateCurrent)
-	mux.HandleFunc("POST /v1/admin/version/update/acknowledge", s.adminMinecraftStackUpdateAcknowledge)
+	mux.HandleFunc("GET /v1/minecraft/instances/{id}/version/status", s.adminVersionStatus)
+	mux.HandleFunc("POST /v1/minecraft/instances/{id}/version/update", s.adminMinecraftStackUpdate)
+	mux.HandleFunc("GET /v1/minecraft/instances/{id}/version/update/current", s.adminMinecraftStackUpdateCurrent)
+	mux.HandleFunc("POST /v1/minecraft/instances/{id}/version/update/acknowledge", s.adminMinecraftStackUpdateAcknowledge)
 	mux.HandleFunc("GET /v1/admin/setup/version-preview", s.adminSetupVersionPreview)
 }
 
@@ -110,6 +114,11 @@ func (s *server) adminVersionStatus(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.requireAdministrator(w, r); !ok {
 		return
 	}
+	id, ok := validatedVersionInstance(w, r)
+	if !ok {
+		return
+	}
+	r = r.WithContext(context.WithValue(r.Context(), instanceVersionKey{}, id))
 	serverType := r.URL.Query().Get("server_type")
 	if serverType != "" && !validSetupServerType(serverType) {
 		writeError(w, http.StatusBadRequest, "Invalid server type")
@@ -141,5 +150,6 @@ func (s *server) adminVersionStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "Version information is unavailable")
 		return
 	}
+	out.InstanceID = id
 	writeJSON(w, http.StatusOK, out)
 }

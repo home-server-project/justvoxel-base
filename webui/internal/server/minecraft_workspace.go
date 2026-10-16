@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
 )
@@ -21,8 +20,6 @@ type minecraftWorkspaceSettingsAPI interface {
 }
 
 type minecraftWorkspaceOperationsAPI interface {
-	Whitelist(ctx context.Context, session string) (api.TextOutputResponse, error)
-	WhitelistChange(ctx context.Context, session, platform, action, name string) (api.TextOutputResponse, error)
 	MinecraftLogs(ctx context.Context, session string, limit int) (api.LogsResponse, error)
 }
 
@@ -146,6 +143,10 @@ func (a *App) minecraftWorkspaceIdentity(w http.ResponseWriter, r *http.Request,
 		a.writeMinecraftWorkspaceAPIError(w, err, "Session information is unavailable.")
 		return "", api.SessionInfo{}, false
 	}
+	if identity.MustChange {
+		writeMinecraftWorkspaceError(w, 403, "Password change required.")
+		return "", api.SessionInfo{}, false
+	}
 	for _, role := range allowed {
 		if identity.Role == role {
 			return session, identity, true
@@ -160,27 +161,7 @@ func (a *App) minecraftWorkspaceSettings(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	if a.selectedMinecraftWorkspace(w, r, session, false) {
-		return
-	}
-	client, ok := a.api.(minecraftWorkspaceSettingsAPI)
-	if !ok {
-		writeMinecraftWorkspaceError(w, http.StatusServiceUnavailable, "Minecraft settings are unavailable.")
-		return
-	}
-	configuration, err := client.AdminConfiguration(r.Context(), session)
-	if err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Minecraft settings are unavailable.")
-		return
-	}
-	defaults, err := client.AdminSetupDefaults(r.Context(), session)
-	if err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Minecraft settings defaults are unavailable.")
-		return
-	}
-	writeMinecraftWorkspaceJSON(w, http.StatusOK, minecraftWorkspaceSettingsResponse{
-		OK: true, Configured: configuration.Configured, Minecraft: configuration.Minecraft, Defaults: defaults,
-	})
+	a.selectedMinecraftWorkspace(w, r, session, false)
 }
 
 func (a *App) minecraftWorkspaceSettingsPlan(w http.ResponseWriter, r *http.Request) {
@@ -200,39 +181,7 @@ func (a *App) minecraftWorkspaceSettingsChange(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
-	if a.selectedMinecraftWorkspace(w, r, session, apply) {
-		return
-	}
-	client, ok := a.api.(minecraftWorkspaceSettingsAPI)
-	if !ok {
-		writeMinecraftWorkspaceError(w, http.StatusServiceUnavailable, "Minecraft settings are unavailable.")
-		return
-	}
-	current, err := client.AdminConfiguration(r.Context(), session)
-	if err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Minecraft settings are unavailable.")
-		return
-	}
-	if !current.Configured {
-		writeMinecraftWorkspaceError(w, http.StatusConflict, "Minecraft is not configured yet.")
-		return
-	}
-	request, err := minecraftWorkspaceConfigurationRequest(r, current)
-	if err != nil {
-		writeMinecraftWorkspaceError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	var result api.AdminConfigurationChangeResponse
-	if apply {
-		result, err = client.AdminConfigurationApply(r.Context(), session, request)
-	} else {
-		result, err = client.AdminConfigurationPlan(r.Context(), session, request)
-	}
-	if err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Minecraft settings could not be processed.")
-		return
-	}
-	writeMinecraftWorkspaceJSON(w, http.StatusOK, result)
+	a.selectedMinecraftWorkspace(w, r, session, apply)
 }
 
 func minecraftWorkspaceConfigurationRequest(r *http.Request, current api.AdminConfigurationDiscovery) (api.AdminConfigurationChangeRequest, error) {
@@ -294,25 +243,11 @@ func minecraftWorkspaceConfigurationRequest(r *http.Request, current api.AdminCo
 }
 
 func (a *App) minecraftWorkspaceWhitelist(w http.ResponseWriter, r *http.Request) {
-	session, identity, ok := a.minecraftWorkspaceIdentity(w, r, "administrator", "operator")
+	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator", "operator")
 	if !ok {
 		return
 	}
-	if a.selectedMinecraftWorkspace(w, r, session, false) {
-		return
-	}
-	client, ok := a.api.(minecraftWorkspaceOperationsAPI)
-	if !ok {
-		writeMinecraftWorkspaceError(w, http.StatusServiceUnavailable, "Minecraft whitelist is unavailable.")
-		return
-	}
-	result, err := client.Whitelist(r.Context(), session)
-	if err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Minecraft whitelist is unavailable.")
-		return
-	}
-	entries, parsed := parseMinecraftWorkspaceWhitelist(result.Output)
-	writeMinecraftWorkspaceJSON(w, http.StatusOK, minecraftWorkspaceWhitelistResponse{WhitelistEnabled: result.WhitelistEnabled, CanToggle: identity.Role == "administrator", OK: true, Entries: entries, Parsed: parsed, Output: result.Output})
+	a.selectedMinecraftWorkspace(w, r, session, false)
 }
 
 func (a *App) minecraftWorkspaceWhitelistChange(w http.ResponseWriter, r *http.Request) {
@@ -324,33 +259,7 @@ func (a *App) minecraftWorkspaceWhitelistChange(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
-	if a.selectedMinecraftWorkspace(w, r, session, false) {
-		return
-	}
-	client, ok := a.api.(minecraftWorkspaceOperationsAPI)
-	if !ok {
-		writeMinecraftWorkspaceError(w, http.StatusServiceUnavailable, "Minecraft whitelist is unavailable.")
-		return
-	}
-	if err := r.ParseForm(); err != nil {
-		writeMinecraftWorkspaceError(w, http.StatusBadRequest, "Could not read the whitelist request.")
-		return
-	}
-	platform := strings.ToLower(strings.TrimSpace(r.FormValue("platform")))
-	action := strings.ToLower(strings.TrimSpace(r.FormValue("action")))
-	name := strings.TrimSpace(r.FormValue("name"))
-	if name == "" {
-		writeMinecraftWorkspaceError(w, http.StatusBadRequest, "Player name or UUID is required.")
-		return
-	}
-	result, err := client.WhitelistChange(r.Context(), session, platform, action, name)
-	if err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Whitelist change was rejected.")
-		return
-	}
-	writeMinecraftWorkspaceJSON(w, http.StatusOK, minecraftWorkspaceTextResponse{
-		OK: true, Output: result.Output, Message: "Whitelist updated.",
-	})
+	a.selectedMinecraftWorkspace(w, r, session, false)
 }
 
 func (a *App) minecraftWorkspaceLogs(w http.ResponseWriter, r *http.Request) {
@@ -358,23 +267,7 @@ func (a *App) minecraftWorkspaceLogs(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if a.selectedMinecraftWorkspace(w, r, session, false) {
-		return
-	}
-	client, ok := a.api.(minecraftWorkspaceOperationsAPI)
-	if !ok {
-		writeMinecraftWorkspaceError(w, http.StatusServiceUnavailable, "Minecraft logs are unavailable.")
-		return
-	}
-	result, err := client.MinecraftLogs(r.Context(), session, 100)
-	if err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Minecraft logs are unavailable.")
-		return
-	}
-	if result.Lines == nil {
-		result.Lines = []string{}
-	}
-	writeMinecraftWorkspaceJSON(w, http.StatusOK, minecraftWorkspaceLogsResponse{OK: true, Lines: result.Lines})
+	a.selectedMinecraftWorkspace(w, r, session, false)
 }
 
 func (a *App) writeMinecraftWorkspaceAPIError(w http.ResponseWriter, err error, fallback string) {
@@ -421,46 +314,7 @@ func (a *App) minecraftWorkspaceWhitelistState(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
-	if a.selectedMinecraftWorkspace(w, r, session, false) {
-		return
-	}
-	client, ok := a.api.(minecraftWorkspaceSettingsAPI)
-	if !ok {
-		writeMinecraftWorkspaceError(w, http.StatusServiceUnavailable, "Minecraft settings are unavailable.")
-		return
-	}
-	enabled, err := strconv.ParseBool(r.FormValue("enabled"))
-	if err != nil {
-		writeMinecraftWorkspaceError(w, http.StatusBadRequest, "Whitelist state is required.")
-		return
-	}
-	current, err := client.AdminConfiguration(r.Context(), session)
-	if err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Minecraft settings are unavailable.")
-		return
-	}
-	if !current.Configured {
-		writeMinecraftWorkspaceError(w, http.StatusConflict, "Minecraft is not configured yet.")
-		return
-	}
-	request := configurationRequestFromDiscovery(current)
-	request.WhitelistEnabled = &enabled
-	result, err := client.AdminConfigurationApply(r.Context(), session, request)
-	if err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Whitelist change failed.")
-		return
-	}
-	if !result.OK || !result.Applied {
-		writeMinecraftWorkspaceError(w, http.StatusBadRequest, "Whitelist change was not applied.")
-		return
-	}
-	writeMinecraftWorkspaceJSON(w, http.StatusOK, minecraftWorkspaceTextResponse{OK: true, Message: "Whitelist updated."})
-}
-
-type minecraftInstanceAPI interface {
-	MinecraftIdentity(context.Context, string) (api.MinecraftIdentity, error)
-	EnsureMinecraftIdentity(context.Context, string) (api.MinecraftIdentity, error)
-	SaveMinecraftIdentity(context.Context, string, string) (api.MinecraftIdentity, error)
+	a.selectedMinecraftWorkspace(w, r, session, false)
 }
 
 func (a *App) minecraftWorkspaceInstance(w http.ResponseWriter, r *http.Request) {
@@ -476,50 +330,13 @@ func (a *App) minecraftWorkspaceInstance(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	client, ok := a.api.(minecraftInstanceAPI)
+	selected, ok := a.selectedMinecraft(w, r, session)
 	if !ok {
-		writeMinecraftWorkspaceError(w, http.StatusServiceUnavailable, "Instance ID is unavailable.")
 		return
 	}
-	var result api.MinecraftIdentity
-	var err error
-	switch {
-	case r.Method == http.MethodGet:
-		result, err = client.MinecraftIdentity(r.Context(), session)
-	case strings.HasSuffix(r.URL.Path, "/ensure"):
-		result, err = client.EnsureMinecraftIdentity(r.Context(), session)
-	default:
-		result, err = client.SaveMinecraftIdentity(r.Context(), session, r.FormValue("suffix"))
-	}
-	if err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Instance ID registration is unavailable. You can save a manual ID.")
+	if r.Method != http.MethodGet {
+		writeMinecraftWorkspaceError(w, http.StatusConflict, "Server identity is immutable.")
 		return
 	}
-	writeMinecraftWorkspaceJSON(w, http.StatusOK, result)
-}
-
-// One synchronous attempt per administrator session. No operation or runtime change.
-type minecraftSessionIdentityAttempt struct {
-	once sync.Once
-	err  error
-}
-
-func (a *App) ensureSessionMinecraftIdentity(ctx context.Context, session string) bool {
-	client, ok := a.api.(minecraftInstanceAPI)
-	if !ok {
-		return false
-	}
-	identity, err := client.MinecraftIdentity(ctx, session)
-	if err == nil && identity.Status == "available" {
-		return false
-	}
-	value, _ := a.instanceSessionAttempts.LoadOrStore(session, &minecraftSessionIdentityAttempt{})
-	attempt := value.(*minecraftSessionIdentityAttempt)
-	attempt.once.Do(func() {
-		identity, attempt.err = client.EnsureMinecraftIdentity(ctx, session)
-		if attempt.err == nil && identity.Status != "available" {
-			attempt.err = errors.New("Instance ID was not saved.")
-		}
-	})
-	return attempt.err != nil
+	writeMinecraftWorkspaceJSON(w, http.StatusOK, api.MinecraftIdentity{Status: "available", ID: selected.ID})
 }

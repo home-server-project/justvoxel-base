@@ -3,7 +3,23 @@ set -euo pipefail
 JV_LIBEXEC_DIR="${JV_LIBEXEC_DIR:-/usr/libexec/justvoxel/mjust}"
 source "${JV_LIBEXEC_DIR}/common.sh"
 require_root
-require_config
+[[ ${1:-} == --instance ]] || { echo "ERROR: --instance jv-... is required." >&2; exit 2; }
+if [[ ${1:-} == --instance ]]; then
+    [[ $# -ge 3 && $2 =~ ^jv-[a-z0-9]{6,12}$ ]] || exit 1
+    instance_id=$2
+    shift 2
+    config="/etc/justvoxel/instances/${instance_id}/config.json"
+    registry="/var/lib/justvoxel/instances/${instance_id}.json"
+    for path in "${config}" "${registry}"; do
+        [[ -f ${path} && ! -L ${path} && $(realpath -e -- "${path}") == "${path}" && $(stat -c '%u:%g:%a' -- "${path}") == 0:0:600 ]] || exit 1
+    done
+    jq -e --arg id "${instance_id}" '.id == $id' "${registry}" >/dev/null || exit 1
+    jq -e --arg id "${instance_id}" '.runtime.id == $id and (.runtime.bedrock_enabled | type == "boolean")' "${config}" >/dev/null || exit 1
+    BEDROCK_ENABLED=$(jq -r 'if .runtime.bedrock_enabled then "yes" else "no" end' "${config}")
+    container="minecraft-${instance_id}"
+    unit="${container}.service"
+fi
+/usr/libexec/justvoxel/mjust/validate-instance-runtime-commit "${instance_id}" >/dev/null || exit 1
 
 action="${1:-list}"
 name="${2:-}"
@@ -13,13 +29,13 @@ if [[ ${action} == bedrock-enabled ]]; then
     exit $?
 fi
 
-[[ $(systemctl is-active minecraft.service 2>/dev/null || true) == active ]] || {
+[[ $(systemctl is-active "${unit}" 2>/dev/null || true) == active ]] || {
     echo 'Minecraft must be running for whitelist changes.' >&2
     exit 1
 }
 
 run_rcon() {
-    podman exec minecraft rcon-cli "$1"
+    podman exec "${container}" rcon-cli "$1"
 }
 
 whitelist_list() {

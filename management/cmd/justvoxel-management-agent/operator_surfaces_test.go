@@ -23,6 +23,12 @@ func surfaceTestServer(t *testing.T, role principalRole) *server {
 
 func surfaceRequest(method, path, body string) *http.Request {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	if strings.HasPrefix(path, "/v1/minecraft/instances/") {
+		parts := strings.Split(path, "/")
+		if len(parts) > 4 {
+			req.SetPathValue("id", parts[4])
+		}
+	}
 	req.Header.Set("Authorization", "Bearer token")
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
@@ -30,7 +36,33 @@ func surfaceRequest(method, path, body string) *http.Request {
 	return req
 }
 
+func whitelistSurfaceFixture(t *testing.T) *instanceActivationFixture {
+	t.Helper()
+	f := newInstanceActivationFixture(t)
+	old := instanceRuntimes
+	instanceRuntimes = f.backend
+	t.Cleanup(func() { instanceRuntimes = old })
+	if err := f.apply("jv-a1b2c3"); err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+func selectedWhitelistTestArgs(t *testing.T, args []string) []string {
+	t.Helper()
+	if len(args) < 3 || args[0] != "--instance" || args[1] != "jv-a1b2c3" {
+		t.Fatalf("wrong immutable whitelist target: %#v", args)
+	}
+	return args[2:]
+}
+func serveWhitelistSurface(s *server, w http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+	registerOperationalRoutes(mux, s)
+	mux.ServeHTTP(w, r)
+}
+
 func TestLocalRootCanUseWhitelistWithoutBearerSession(t *testing.T) {
+	fixture := whitelistSurfaceFixture(t)
+	_ = fixture
 	oldDiscovery := runAdminDiscoveryHelper
 	defer func() { runAdminDiscoveryHelper = oldDiscovery }()
 	runAdminDiscoveryHelper = func(_ context.Context, action string) ([]byte, error) {
@@ -46,6 +78,7 @@ func TestLocalRootCanUseWhitelistWithoutBearerSession(t *testing.T) {
 
 	calls := make([][]string, 0, 3)
 	runWhitelistHelper = func(_ context.Context, args ...string) ([]byte, error) {
+		args = selectedWhitelistTestArgs(t, args)
 		calls = append(calls, append([]string(nil), args...))
 		if len(args) == 1 && args[0] == "list" {
 			if len(calls) == 1 {
@@ -60,18 +93,18 @@ func TestLocalRootCanUseWhitelistWithoutBearerSession(t *testing.T) {
 		return nil, nil
 	}
 
-	req := requestWithPeerUID(http.MethodGet, "http://unix/v1/whitelist", 0)
+	req := requestWithPeerUID(http.MethodGet, "http://unix/v1/minecraft/instances/jv-a1b2c3/whitelist", 0)
 	rr := httptest.NewRecorder()
-	s.whitelistList(rr, req)
+	serveWhitelistSurface(s, rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("local root whitelist list failed: %d %s", rr.Code, rr.Body.String())
 	}
 
-	req = requestWithPeerUID(http.MethodPost, "http://unix/v1/whitelist", 0)
+	req = requestWithPeerUID(http.MethodPost, "http://unix/v1/minecraft/instances/jv-a1b2c3/whitelist", 0)
 	req.Body = io.NopCloser(strings.NewReader(`{"platform":"java","action":"add","name":"Alex"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rr = httptest.NewRecorder()
-	s.whitelistChange(rr, req)
+	serveWhitelistSurface(s, rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("local root whitelist change failed: %d %s", rr.Code, rr.Body.String())
 	}
@@ -150,10 +183,12 @@ func TestMinecraftLogsRejectUnsupportedFormat(t *testing.T) {
 }
 
 func TestViewerCannotAccessWhitelistOrRawMinecraftLogs(t *testing.T) {
+	fixture := whitelistSurfaceFixture(t)
+	_ = fixture
 	s := surfaceTestServer(t, roleViewer)
 
 	rr := httptest.NewRecorder()
-	s.whitelistList(rr, surfaceRequest(http.MethodGet, "/v1/whitelist", ""))
+	serveWhitelistSurface(s, rr, surfaceRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/whitelist", ""))
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("viewer whitelist status = %d, want 403", rr.Code)
 	}
@@ -166,11 +201,14 @@ func TestViewerCannotAccessWhitelistOrRawMinecraftLogs(t *testing.T) {
 }
 
 func TestOperatorWhitelistUsesOnlyFixedHelperActions(t *testing.T) {
+	fixture := whitelistSurfaceFixture(t)
+	_ = fixture
 	s := surfaceTestServer(t, roleOperator)
 	old := runWhitelistHelper
 	defer func() { runWhitelistHelper = old }()
 	calls := make([][]string, 0, 2)
 	runWhitelistHelper = func(_ context.Context, args ...string) ([]byte, error) {
+		args = selectedWhitelistTestArgs(t, args)
 		calls = append(calls, append([]string(nil), args...))
 		if len(args) == 1 && args[0] == "list" {
 			return []byte("There are 0 whitelisted player(s):\n"), nil
@@ -179,7 +217,7 @@ func TestOperatorWhitelistUsesOnlyFixedHelperActions(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	s.whitelistChange(rr, surfaceRequest(http.MethodPost, "/v1/whitelist", `{"platform":"java","action":"add","name":"Alex"}`))
+	serveWhitelistSurface(s, rr, surfaceRequest(http.MethodPost, "/v1/minecraft/instances/jv-a1b2c3/whitelist", `{"platform":"java","action":"add","name":"Alex"}`))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("operator whitelist status = %d: %s", rr.Code, rr.Body.String())
 	}
@@ -189,11 +227,14 @@ func TestOperatorWhitelistUsesOnlyFixedHelperActions(t *testing.T) {
 }
 
 func TestAdministratorCanAddFirstJavaWhitelistEntry(t *testing.T) {
+	fixture := whitelistSurfaceFixture(t)
+	_ = fixture
 	s := surfaceTestServer(t, roleAdministrator)
 	old := runWhitelistHelper
 	defer func() { runWhitelistHelper = old }()
 	calls := make([][]string, 0, 2)
 	runWhitelistHelper = func(_ context.Context, args ...string) ([]byte, error) {
+		args = selectedWhitelistTestArgs(t, args)
 		calls = append(calls, append([]string(nil), args...))
 		if len(args) == 1 && args[0] == "list" {
 			return []byte("There are 0 whitelisted player(s):\n"), nil
@@ -205,7 +246,7 @@ func TestAdministratorCanAddFirstJavaWhitelistEntry(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	s.whitelistChange(rr, surfaceRequest(http.MethodPost, "/v1/whitelist", `{"platform":"java","action":"add","name":"FirstPlayer"}`))
+	serveWhitelistSurface(s, rr, surfaceRequest(http.MethodPost, "/v1/minecraft/instances/jv-a1b2c3/whitelist", `{"platform":"java","action":"add","name":"FirstPlayer"}`))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("administrator whitelist status = %d: %s", rr.Code, rr.Body.String())
 	}
@@ -215,11 +256,14 @@ func TestAdministratorCanAddFirstJavaWhitelistEntry(t *testing.T) {
 }
 
 func TestBedrockWhitelistStripsFloodgatePrefix(t *testing.T) {
+	fixture := whitelistSurfaceFixture(t)
+	_ = fixture
 	s := surfaceTestServer(t, roleOperator)
 	old := runWhitelistHelper
 	defer func() { runWhitelistHelper = old }()
 	calls := make([][]string, 0, 2)
 	runWhitelistHelper = func(_ context.Context, args ...string) ([]byte, error) {
+		args = selectedWhitelistTestArgs(t, args)
 		calls = append(calls, append([]string(nil), args...))
 		if len(args) == 1 && args[0] == "list" {
 			return []byte("There are 0 whitelisted player(s):\n"), nil
@@ -228,7 +272,7 @@ func TestBedrockWhitelistStripsFloodgatePrefix(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	s.whitelistChange(rr, surfaceRequest(http.MethodPost, "/v1/whitelist", `{"platform":"bedrock","action":"add","name":".CatchaLlama"}`))
+	serveWhitelistSurface(s, rr, surfaceRequest(http.MethodPost, "/v1/minecraft/instances/jv-a1b2c3/whitelist", `{"platform":"bedrock","action":"add","name":".CatchaLlama"}`))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("bedrock whitelist status = %d: %s", rr.Code, rr.Body.String())
 	}
@@ -238,10 +282,12 @@ func TestBedrockWhitelistStripsFloodgatePrefix(t *testing.T) {
 }
 
 func TestBedrockFloodgateCacheErrorIsFriendly(t *testing.T) {
+	whitelistSurfaceFixture(t)
 	s := surfaceTestServer(t, roleOperator)
 	old := runWhitelistHelper
 	defer func() { runWhitelistHelper = old }()
 	runWhitelistHelper = func(_ context.Context, args ...string) ([]byte, error) {
+		args = selectedWhitelistTestArgs(t, args)
 		if len(args) == 1 && args[0] == "list" {
 			return []byte("There are 0 whitelisted player(s):\n"), nil
 		}
@@ -249,7 +295,7 @@ func TestBedrockFloodgateCacheErrorIsFriendly(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	s.whitelistChange(rr, surfaceRequest(http.MethodPost, "/v1/whitelist", `{"platform":"bedrock","action":"add","name":"CatchaLlama"}`))
+	serveWhitelistSurface(s, rr, surfaceRequest(http.MethodPost, "/v1/minecraft/instances/jv-a1b2c3/whitelist", `{"platform":"bedrock","action":"add","name":"CatchaLlama"}`))
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("bedrock error status = %d: %s", rr.Code, rr.Body.String())
 	}
@@ -292,9 +338,20 @@ func TestViewerGetsSanitizedActivityOnly(t *testing.T) {
 }
 
 func TestWhitelistListExposesOnlyAuthoritativeStateForOperators(t *testing.T) {
+	fixture := whitelistSurfaceFixture(t)
+	_ = fixture
 	oldDiscovery, oldWhitelist := runAdminDiscoveryHelper, runWhitelistHelper
 	defer func() { runAdminDiscoveryHelper, runWhitelistHelper = oldDiscovery, oldWhitelist }()
 	for _, enabled := range []bool{true, false} {
+		record, err := fixture.backend.readRecord("jv-a1b2c3")
+		if err != nil {
+			t.Fatal(err)
+		}
+		record.Runtime.Whitelist = enabled
+		dir, _, _ := fixture.backend.paths("jv-a1b2c3")
+		if err = fixture.backend.writeJSON(dir+"/config.json", record, true); err != nil {
+			t.Fatal(err)
+		}
 		runAdminDiscoveryHelper = func(_ context.Context, action string) ([]byte, error) {
 			if action != "configuration" {
 				t.Fatal(action)
@@ -302,21 +359,41 @@ func TestWhitelistListExposesOnlyAuthoritativeStateForOperators(t *testing.T) {
 			return []byte(fmt.Sprintf(`{"configured":true,"minecraft":{"whitelist_enabled":%t,"enforce_whitelist":true,"motd":"private-configuration"}}`, enabled)), nil
 		}
 		runWhitelistHelper = func(_ context.Context, args ...string) ([]byte, error) {
+			args = selectedWhitelistTestArgs(t, args)
 			return []byte("There are 0 whitelisted player(s):"), nil
 		}
 		s := surfaceTestServer(t, roleOperator)
 		rr := httptest.NewRecorder()
-		s.whitelistList(rr, surfaceRequest(http.MethodGet, "/v1/whitelist", ""))
+		serveWhitelistSurface(s, rr, surfaceRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/whitelist", ""))
 		if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), fmt.Sprintf(`"whitelist_enabled":%t`, enabled)) || strings.Contains(rr.Body.String(), "private-configuration") {
 			t.Fatal(rr.Body.String())
 		}
 		runWhitelistHelper = func(_ context.Context, args ...string) ([]byte, error) {
+			args = selectedWhitelistTestArgs(t, args)
 			return []byte("Minecraft must be running for whitelist changes."), fmt.Errorf("stopped")
 		}
 		rr = httptest.NewRecorder()
-		s.whitelistList(rr, surfaceRequest(http.MethodGet, "/v1/whitelist", ""))
+		serveWhitelistSurface(s, rr, surfaceRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/whitelist", ""))
 		if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), fmt.Sprintf(`"whitelist_enabled":%t`, enabled)) || !strings.Contains(rr.Body.String(), "Whitelist list unavailable") {
 			t.Fatal(rr.Body.String())
+		}
+	}
+}
+
+func TestWhitelistObsoleteAndStaleRoutesNeverReachHelper(t *testing.T) {
+	whitelistSurfaceFixture(t)
+	s := surfaceTestServer(t, roleOperator)
+	old := runWhitelistHelper
+	runWhitelistHelper = func(context.Context, ...string) ([]byte, error) {
+		t.Fatal("invalid target reached helper")
+		return nil, nil
+	}
+	t.Cleanup(func() { runWhitelistHelper = old })
+	for _, path := range []string{"/v1/whitelist", "/v1/minecraft/instances/original/whitelist", "/v1/minecraft/instances/jv-absent1/whitelist"} {
+		rr := httptest.NewRecorder()
+		serveWhitelistSurface(s, rr, surfaceRequest("GET", path, ""))
+		if rr.Code < 400 {
+			t.Fatal(path, rr.Code, rr.Body.String())
 		}
 	}
 }

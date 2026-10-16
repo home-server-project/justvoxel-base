@@ -12,6 +12,9 @@ import (
 )
 
 type minecraftStackUpdateRequest struct {
+	InstanceID      string `json:"-"`
+	Policy          string `json:"policy,omitempty"`
+	Version         string `json:"version,omitempty"`
 	ServerType      string `json:"server_type,omitempty"`
 	ImageTag        string `json:"image_tag,omitempty"`
 	PlanFingerprint string `json:"plan_fingerprint"`
@@ -28,6 +31,12 @@ var runMinecraftStackUpdate = func(ctx context.Context, fingerprint string, conf
 	}
 	if confirmPlayers {
 		args = append(args, "--confirm-players")
+	}
+	if choice, ok := ctx.Value(instanceVersionSelectionKey{}).([2]string); ok && choice[0] != "" {
+		args = append([]string{"--policy", choice[0], "--version", choice[1]}, args...)
+	}
+	if id, ok := ctx.Value(instanceVersionKey{}).(string); ok {
+		args = append([]string{"--instance", id}, args...)
 	}
 	// Output stays privileged; the operation journal exposes appliance messages.
 	output, err := exec.CommandContext(ctx, "/usr/libexec/justvoxel/mjust/update-minecraft-backend", args...).CombinedOutput()
@@ -58,6 +67,11 @@ func (s *server) adminMinecraftStackUpdate(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+	id, ok := validatedVersionInstance(w, r)
+	if !ok {
+		return
+	}
+	r = r.WithContext(context.WithValue(r.Context(), instanceVersionKey{}, id))
 	var request minecraftStackUpdateRequest
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
 	decoder.DisallowUnknownFields()
@@ -69,6 +83,7 @@ func (s *server) adminMinecraftStackUpdate(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "Invalid reviewed server update")
 		return
 	}
+	request.InstanceID = id
 	if s.operations == nil {
 		writeError(w, http.StatusServiceUnavailable, "Server update tracking is unavailable")
 		return
@@ -83,7 +98,15 @@ func (s *server) adminMinecraftStackUpdate(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "Invalid container image tag")
 		return
 	}
-	data, err := runAdminVersionStatus(ctx, "", "", request.ServerType, request.ImageTag)
+	if request.Policy != "" && request.Policy != "pinned" && request.Policy != "latest" && request.Policy != "recommended" {
+		writeError(w, 400, "Invalid version policy")
+		return
+	}
+	if request.Version != "" && (len(request.Version) > 64 || !versionInputPattern.MatchString(request.Version)) {
+		writeError(w, 400, "Invalid Minecraft version")
+		return
+	}
+	data, err := runAdminVersionStatus(ctx, request.Policy, request.Version, request.ServerType, request.ImageTag)
 	var plan adminVersionStatus
 	if err != nil || json.Unmarshal(data, &plan) != nil || plan.StackState != "updates_available" || !plan.UpdateAvailable || !plan.ServerSupported || (plan.CrossplayEnabled && !plan.CrossplayCompatible) {
 		writeError(w, http.StatusServiceUnavailable, "A safe server update could not be verified")
@@ -93,7 +116,7 @@ func (s *server) adminMinecraftStackUpdate(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusConflict, "Server updates changed; review again")
 		return
 	}
-	journal, created, err := s.operations.beginMinecraftMaintenance(request.PlanFingerprint, operationTypeMinecraftUpdate)
+	journal, created, err := s.operations.beginMinecraftMaintenance(request.PlanFingerprint, operationTypeMinecraftUpdate, id)
 	if err != nil {
 		writeError(w, http.StatusConflict, "Another appliance maintenance operation requires attention")
 		return
@@ -114,13 +137,22 @@ var startMinecraftStackUpdateWorker = func(s *server, operationID string, reques
 }
 
 func executeMinecraftStackUpdate(ctx context.Context, s *server, operationID string, request minecraftStackUpdateRequest, actor session) error {
+	journal, err := s.operations.get(operationID)
+	if err != nil {
+		return err
+	}
+	if !instanceIDPattern.MatchString(request.InstanceID) || journal.InstanceID != request.InstanceID || journal.PlanFingerprint != request.PlanFingerprint {
+		return errInstanceID
+	}
 	if _, err := s.operations.transition(operationID, operationValidating, "validating", "Revalidating the reviewed server stack."); err != nil {
 		return err
 	}
 	if _, err := s.operations.transition(operationID, operationRunning, "updating", "Preparing verified updates, a cold backup and a safe restart."); err != nil {
 		return err
 	}
-	err := runMinecraftStackUpdate(ctx, request.PlanFingerprint, request.ConfirmPlayers, request.ServerType, request.ImageTag)
+	ctx = context.WithValue(ctx, instanceVersionKey{}, request.InstanceID)
+	ctx = context.WithValue(ctx, instanceVersionSelectionKey{}, [2]string{request.Policy, request.Version})
+	err = runMinecraftStackUpdate(ctx, request.PlanFingerprint, request.ConfirmPlayers, request.ServerType, request.ImageTag)
 	success := err == nil
 	if err != nil {
 		message := "Server update stopped. Review Minecraft state before continuing."
@@ -140,7 +172,7 @@ func executeMinecraftStackUpdate(ctx context.Context, s *server, operationID str
 		}
 	}
 	if s.store != nil {
-		_ = s.store.recordAuditEvent(actor, "minecraft_update", "minecraft", success, "Managed server stack maintenance")
+		_ = s.store.recordAuditEvent(actor, "minecraft_update", request.InstanceID, success, "Managed server stack maintenance")
 	}
 	return err
 }
@@ -153,23 +185,36 @@ func (s *server) adminMinecraftStackUpdateCurrent(w http.ResponseWriter, r *http
 	if _, ok := s.requireAdministrator(w, r); !ok {
 		return
 	}
+	id, ok := validatedVersionInstance(w, r, false)
+	if !ok {
+		return
+	}
 	if s.operations == nil {
 		writeError(w, http.StatusServiceUnavailable, "Server update tracking is unavailable")
 		return
 	}
 	journal, err := s.operations.currentMinecraftMaintenance()
+	if operationID := r.URL.Query().Get("operation_id"); operationID != "" {
+		var found operationJournal
+		found, err = s.operations.get(operationID)
+		journal = &found
+	}
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "Server update tracking is unavailable")
 		return
 	}
-	if journal != nil && journal.OperationType != operationTypeMinecraftUpdate {
+	if journal != nil && (journal.OperationType != operationTypeMinecraftUpdate || journal.InstanceID != id) {
 		journal = nil
 	}
 	writeJSON(w, http.StatusOK, adminOperationResponse{Operation: journal})
 }
 
 var verifyMinecraftStack = func(ctx context.Context) error {
-	return exec.CommandContext(ctx, "/usr/libexec/justvoxel/mjust/verify-minecraft-stack").Run()
+	args := []string{}
+	if id, ok := ctx.Value(instanceVersionKey{}).(string); ok {
+		args = []string{"--instance", id}
+	}
+	return exec.CommandContext(ctx, "/usr/libexec/justvoxel/mjust/verify-minecraft-stack", args...).Run()
 }
 
 // Acknowledging a failed update keeps the current verified runtime. It never retries.
@@ -177,6 +222,11 @@ func (s *server) adminMinecraftStackUpdateAcknowledge(w http.ResponseWriter, r *
 	if _, ok := s.requireAdministrator(w, r); !ok {
 		return
 	}
+	id, ok := validatedVersionInstance(w, r)
+	if !ok {
+		return
+	}
+	r = r.WithContext(context.WithValue(r.Context(), instanceVersionKey{}, id))
 	if s.operations == nil {
 		writeError(w, http.StatusServiceUnavailable, "Server update tracking is unavailable")
 		return
@@ -191,7 +241,7 @@ func (s *server) adminMinecraftStackUpdateAcknowledge(w http.ResponseWriter, r *
 		return
 	}
 	journal, err := s.operations.currentMinecraftMaintenance()
-	if err != nil || journal == nil || journal.OperationID != request.OperationID || journal.OperationType != operationTypeMinecraftUpdate || journal.State != operationNeedsAttention {
+	if err != nil || journal == nil || journal.OperationID != request.OperationID || journal.OperationType != operationTypeMinecraftUpdate || journal.InstanceID != id || journal.State != operationNeedsAttention {
 		writeError(w, http.StatusConflict, "No failed server update can be acknowledged")
 		return
 	}

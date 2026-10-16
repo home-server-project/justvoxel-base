@@ -74,6 +74,8 @@ type operationRollback struct {
 }
 
 type operationJournal struct {
+	InstanceSetup   bool              `json:"instance_setup,omitempty"`
+	InstanceID      string            `json:"instance_id,omitempty"`
 	SchemaVersion   string            `json:"schema_version"`
 	OperationID     string            `json:"operation_id"`
 	OperationType   string            `json:"operation_type"`
@@ -724,6 +726,13 @@ func legacyFactoryResetPasswordJournal(journal operationJournal) bool {
 }
 
 func validateOperationJournal(journal operationJournal) error {
+	if journal.InstanceSetup && journal.OperationType != operationTypeSetup {
+		return errors.New("invalid instance Setup operation")
+	}
+
+	if journal.InstanceID != "" && !instanceIDPattern.MatchString(journal.InstanceID) {
+		return errInstanceID
+	}
 	if journal.SchemaVersion != operationSchemaVersion {
 		return errors.New("unsupported operation journal schema")
 	}
@@ -785,7 +794,7 @@ func operationInterruptedByRestart(state operationState) bool {
 	}
 }
 
-func (s *operationStore) beginSetup(planFingerprint string) (operationJournal, bool, error) {
+func (s *operationStore) beginSetup(planFingerprint string, instanceSetup ...bool) (operationJournal, bool, error) {
 	if !operationFingerprintPattern.MatchString(planFingerprint) {
 		return operationJournal{}, false, errors.New("invalid setup plan fingerprint")
 	}
@@ -826,6 +835,9 @@ func (s *operationStore) beginSetup(planFingerprint string) (operationJournal, b
 		StartedAt:       now,
 		UpdatedAt:       now,
 		Rollback:        operationRollback{State: "not_started"},
+	}
+	if len(instanceSetup) > 0 {
+		journal.InstanceSetup = instanceSetup[0]
 	}
 	if err := s.persist(journal); err != nil {
 		_ = s.releaseSetupLock()
@@ -1118,7 +1130,7 @@ func (s *operationStore) beginMinecraftReset(planFingerprint string) (operationJ
 }
 
 // Update, reset and plugin installation share the existing maintenance locks.
-func (s *operationStore) beginMinecraftMaintenance(planFingerprint, kind string) (operationJournal, bool, error) {
+func (s *operationStore) beginMinecraftMaintenance(planFingerprint, kind string, instanceID ...string) (operationJournal, bool, error) {
 	if kind != operationTypeMinecraftReset && kind != operationTypeMinecraftUpdate && !isPluginOperationType(kind) {
 		return operationJournal{}, false, errors.New("invalid Minecraft maintenance type")
 	}
@@ -1130,7 +1142,7 @@ func (s *operationStore) beginMinecraftMaintenance(planFingerprint, kind string)
 
 	if s.currentMinecraftResetID != "" {
 		current := s.operations[s.currentMinecraftResetID]
-		if current.PlanFingerprint == planFingerprint && current.OperationType == kind {
+		if current.PlanFingerprint == planFingerprint && current.OperationType == kind && (len(instanceID) == 0 || current.InstanceID == instanceID[0]) {
 			return current, false, nil
 		}
 		return operationJournal{}, false, errMinecraftResetOperationBusy
@@ -1165,6 +1177,13 @@ func (s *operationStore) beginMinecraftMaintenance(planFingerprint, kind string)
 		PlanFingerprint: planFingerprint, State: operationQueued, Stage: "queued",
 		Status: status, StartedAt: now, UpdatedAt: now,
 		Rollback: operationRollback{State: "not_started"},
+	}
+	if len(instanceID) > 0 {
+		if len(instanceID) != 1 || !instanceIDPattern.MatchString(instanceID[0]) {
+			_ = s.releaseMinecraftResetLocks()
+			return operationJournal{}, false, errInstanceID
+		}
+		journal.InstanceID = instanceID[0]
 	}
 	if err := s.persist(journal); err != nil {
 		_ = s.releaseMinecraftResetLocks()

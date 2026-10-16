@@ -1089,6 +1089,7 @@ func TestPluginInstallStagedDescriptorSafety(t *testing.T) {
 	}
 }
 func TestPluginInstallCurrentRoutesStayDistinct(t *testing.T) {
+	whitelistSurfaceFixture(t)
 	f := newPluginInstallFixture(t)
 	plan := f.plan(t)
 	journal, _, err := f.s.operations.beginMinecraftMaintenance(plan.Fingerprint, operationTypePluginInstall)
@@ -1096,9 +1097,9 @@ func TestPluginInstallCurrentRoutesStayDistinct(t *testing.T) {
 		t.Fatal(err)
 	}
 	rr := httptest.NewRecorder()
-	f.s.adminMinecraftStackUpdateCurrent(rr, surfaceRequest(http.MethodGet, "/", ""))
+	f.s.adminMinecraftStackUpdateCurrent(rr, surfaceRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/version/update/current", ""))
 	if rr.Code != 200 || !strings.Contains(rr.Body.String(), `"operation":null`) {
-		t.Fatal("update endpoint reported plugin install")
+		t.Fatalf("update endpoint did not exclude plugin install: %d %s", rr.Code, rr.Body.String())
 	}
 	rr = httptest.NewRecorder()
 	f.s.adminPluginInstallCurrent(rr, surfaceRequest(http.MethodGet, "/", ""))
@@ -1110,13 +1111,18 @@ func TestPluginInstallCurrentRoutesStayDistinct(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	update, _, err := f.s.operations.beginMinecraftMaintenance(plan.Fingerprint, operationTypeMinecraftUpdate)
+	update, _, err := f.s.operations.beginMinecraftMaintenance(plan.Fingerprint, operationTypeMinecraftUpdate, "jv-a1b2c3")
 	if err != nil {
 		t.Fatal("plugin locks not released", err)
 	}
 	current, err := f.s.operations.currentPluginInstall()
 	if err != nil || current != nil {
 		t.Fatal("plugin current reported update", update)
+	}
+	rr = httptest.NewRecorder()
+	f.s.adminMinecraftStackUpdateCurrent(rr, surfaceRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/version/update/current", ""))
+	if rr.Code != 200 || !strings.Contains(rr.Body.String(), update.OperationID) {
+		t.Fatalf("update current missing: %d %s", rr.Code, rr.Body.String())
 	}
 }
 func TestPluginInstallDuplicateAfterPlacementIsLookup(t *testing.T) {

@@ -27,8 +27,8 @@ type publicActivityView struct {
 }
 
 func registerOperationalRoutes(mux *http.ServeMux, s *server) {
-	mux.HandleFunc("GET /v1/whitelist", s.whitelistList)
-	mux.HandleFunc("POST /v1/whitelist", s.whitelistChange)
+	mux.HandleFunc("GET /v1/minecraft/instances/{id}/whitelist", s.whitelistList)
+	mux.HandleFunc("POST /v1/minecraft/instances/{id}/whitelist", s.whitelistChange)
 	mux.HandleFunc("GET /v1/logs/minecraft", s.minecraftLogs)
 	mux.HandleFunc("GET /v1/activity", s.publicActivity)
 }
@@ -39,22 +39,50 @@ func (s *server) whitelistList(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	var configuration adminConfigurationDiscovery
-	if !s.collectAdminDiscovery(w, r, "configuration", &configuration) {
+	id, ok := instanceRequestID(w, r)
+	if !ok {
 		return
 	}
-	output, err := runWhitelistHelper(ctx, "list")
+	record, err := instanceRuntimes.readRecord(id)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"output": "Whitelist list unavailable. " + strings.TrimSpace(string(output)), "whitelist_enabled": configuration.Minecraft.WhitelistEnabled})
+		instanceRuntimeError(w, err, id)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"output": strings.TrimSpace(string(output)), "whitelist_enabled": configuration.Minecraft.WhitelistEnabled})
+	if err = instanceRuntimes.verifyLive(record); err != nil {
+		instanceRuntimeError(w, err, id)
+		return
+	}
+	runSelectedWhitelist := func(ctx context.Context, args ...string) ([]byte, error) {
+		return runWhitelistHelper(ctx, append([]string{"--instance", id}, args...)...)
+	}
+	output, err := runSelectedWhitelist(ctx, "list")
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"id": id, "output": "Whitelist list unavailable. " + strings.TrimSpace(string(output)), "whitelist_enabled": record.Runtime.Whitelist})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"id": id, "output": strings.TrimSpace(string(output)), "whitelist_enabled": record.Runtime.Whitelist})
 }
 
 func (s *server) whitelistChange(w http.ResponseWriter, r *http.Request) {
 	actor, ok := s.requireRoles(w, r, roleAdministrator, roleOperator)
 	if !ok {
 		return
+	}
+	id, ok := instanceRequestID(w, r)
+	if !ok {
+		return
+	}
+	record, err := instanceRuntimes.readRecord(id)
+	if err != nil {
+		instanceRuntimeError(w, err, id)
+		return
+	}
+	if err = instanceRuntimes.verifyLive(record); err != nil {
+		instanceRuntimeError(w, err, id)
+		return
+	}
+	runSelectedWhitelist := func(ctx context.Context, args ...string) ([]byte, error) {
+		return runWhitelistHelper(ctx, append([]string{"--instance", id}, args...)...)
 	}
 	var request struct {
 		Platform string `json:"platform"`
@@ -82,7 +110,7 @@ func (s *server) whitelistChange(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	listOutput, listErr := runWhitelistHelper(ctx, "list")
+	listOutput, listErr := runSelectedWhitelist(ctx, "list")
 	if listErr != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "whitelist is unavailable"})
 		return
@@ -91,34 +119,34 @@ func (s *server) whitelistChange(w http.ResponseWriter, r *http.Request) {
 	if action == "add" && present {
 		message := name + " is already on the whitelist."
 		if s.store != nil {
-			_ = s.store.recordAuditEvent(actor, "whitelist_add", name, true, platform+" already_present")
+			_ = s.store.recordAuditEvent(actor, "whitelist_add", id+":"+name, true, platform+" already_present")
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"output": message})
+		writeJSON(w, http.StatusOK, map[string]string{"id": id, "output": message})
 		return
 	}
 	if action == "remove" && !present {
 		message := name + " is not currently on the whitelist."
 		if s.store != nil {
-			_ = s.store.recordAuditEvent(actor, "whitelist_remove", name, true, platform+" already_absent")
+			_ = s.store.recordAuditEvent(actor, "whitelist_remove", id+":"+name, true, platform+" already_absent")
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"output": message})
+		writeJSON(w, http.StatusOK, map[string]string{"id": id, "output": message})
 		return
 	}
 
 	helperAction := action + "-" + platform
-	output, err := runWhitelistHelper(ctx, helperAction, name)
+	output, err := runSelectedWhitelist(ctx, helperAction, name)
 	if err != nil {
 		if s.store != nil {
-			_ = s.store.recordAuditEvent(actor, "whitelist_"+action, name, false, platform)
+			_ = s.store.recordAuditEvent(actor, "whitelist_"+action, id+":"+name, false, platform)
 		}
 		message := whitelistChangeError(platform, string(output))
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": message})
 		return
 	}
 	if s.store != nil {
-		_ = s.store.recordAuditEvent(actor, "whitelist_"+action, name, true, platform)
+		_ = s.store.recordAuditEvent(actor, "whitelist_"+action, id+":"+name, true, platform)
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"output": strings.TrimSpace(string(output))})
+	writeJSON(w, http.StatusOK, map[string]string{"id": id, "output": strings.TrimSpace(string(output))})
 }
 
 func whitelistContains(output, platform, name string) bool {

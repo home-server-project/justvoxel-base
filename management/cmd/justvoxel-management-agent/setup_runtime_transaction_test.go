@@ -11,6 +11,17 @@ import (
 
 func setupPlanForRuntimeTest(t *testing.T) *adminSetupNormalizedPlan {
 	t.Helper()
+	oldInstance := runSetupInstanceRuntimeAction
+	t.Cleanup(func() { runSetupInstanceRuntimeAction = oldInstance })
+	// Orchestration tests fake the runtime boundary; instance publication itself
+	// is covered by setup_instance_transaction_test.go with the real backend.
+	runSetupInstanceRuntimeAction = func(ctx context.Context, action string, request setupRuntimeTransactionRequest) (setupRuntimeTransactionResponse, error) {
+		payload, err := json.Marshal(request)
+		if err != nil {
+			return setupRuntimeTransactionResponse{}, err
+		}
+		return runSetupRuntimeTransactionPayload(ctx, action, setupRuntimeVerifyTimeout, payload)
+	}
 	var response adminSetupPlanResponse
 	if err := json.Unmarshal([]byte(validAdminSetupPlanResponse), &response); err != nil {
 		t.Fatal(err)

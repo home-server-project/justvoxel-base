@@ -13,6 +13,15 @@ import (
 type selectedBackupsAPI interface {
 	MinecraftInstanceBackups(context.Context, string, string, string, any) (json.RawMessage, error)
 }
+
+// The physical backup destination belongs to the appliance, independently of
+// the selected server's backup execution, schedule, and restore operations.
+type selectedBackupDestinationAPI interface {
+	storageDestinationAPI
+	AdminBackupStoragePlan(context.Context, string, api.AdminBackupStorageRequest) (api.AdminBackupStorageResponse, error)
+	AdminBackupStorageApply(context.Context, string, api.AdminBackupStorageRequest) (api.AdminBackupStorageResponse, error)
+}
+
 type selectedBackupMetadata struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
@@ -32,12 +41,6 @@ type selectedRestorePlan struct {
 }
 
 func (a *App) selectedBackupsWorkspace(w http.ResponseWriter, r *http.Request) bool {
-	if _, exists := r.URL.Query()["server"]; !exists {
-		return false
-	}
-	if values := r.URL.Query()["server"]; len(values) == 1 && values[0] == "original" {
-		return false
-	}
 	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
 	if !ok {
 		return true
@@ -66,6 +69,22 @@ func (a *App) selectedBackupsWorkspace(w http.ResponseWriter, r *http.Request) b
 		return true
 	}
 	data := backupsWorkspaceData{CSRF: csrfFromRequest(r), Identity: identity, SelectedServer: selected.ID, SelectedName: selected.Name, RestoreScope: "Restore this backup to the same server identity only. The complete server data is replaced.", RestoreModeTitle: "Restore full Minecraft data"}
+	destinationClient, hasDestination := a.api.(selectedBackupDestinationAPI)
+	if hasDestination {
+		destination, err := a.storageDestinationData(r, session, identity, data.CSRF, nil, nil)
+		if err != nil {
+			data.Error = apiMessage(err, "Backup destination is unavailable.")
+		} else {
+			data = destination
+			data.SelectedServer, data.SelectedName = selected.ID, selected.Name
+			data.RestoreScope = "Restore this backup to the same server identity only. The complete server data is replaced."
+			data.RestoreModeTitle = "Restore full Minecraft data"
+		}
+		data.DestinationWorkspace = "/workspace/backups"
+	}
+	if r.URL.Query().Get("result") == "destination" {
+		data.Message = "Backup destination updated. New manual and automatic backups will use it."
+	}
 	call := func(action string, request any, target any) bool {
 		raw, e := client.MinecraftInstanceBackups(r.Context(), session, selected.ID, action, request)
 		if e != nil {
@@ -81,6 +100,43 @@ func (a *App) selectedBackupsWorkspace(w http.ResponseWriter, r *http.Request) b
 	path := r.URL.Path
 	if r.Method == http.MethodPost {
 		switch path {
+		case "/workspace/backups/destination/plan", "/workspace/backups/destination/apply":
+			if !hasDestination {
+				data.Error = "This operation is unavailable for the selected server."
+				break
+			}
+			apply := strings.HasSuffix(path, "/apply")
+			request, err := parseBackupsWorkspaceStorageForm(r, apply)
+			data.DestinationForm = request
+			if err != nil {
+				data.Error = err.Error()
+				break
+			}
+			var result api.AdminBackupStorageResponse
+			if apply {
+				result, err = destinationClient.AdminBackupStorageApply(r.Context(), session, request)
+			} else {
+				result, err = destinationClient.AdminBackupStoragePlan(r.Context(), session, request)
+			}
+			if err != nil {
+				data.Error = apiMessage(err, "Backup destination could not be updated.")
+				break
+			}
+			if apply && result.Applied {
+				target := "/workspace/backups?result=destination"
+				if r.URL.Query().Has("server") {
+					target += "&server=" + selected.ID
+				}
+				http.Redirect(w, r, target, http.StatusSeeOther)
+				return true
+			}
+			data.DestinationPlan = &result
+			data.ProposedDestinationAvailable = backupsWorkspaceFormatOptionalBytes(result.Proposed.AvailableBytes)
+			data.ProposedDestinationSize = backupsWorkspaceFormatOptionalBytes(result.Proposed.FilesystemBytes)
+			if apply {
+				data.Error = "Backup destination was not applied."
+			}
+
 		case "/workspace/backups/backup":
 			if call("now", struct{}{}, nil) {
 				data.Message = "Backup requested for this server."

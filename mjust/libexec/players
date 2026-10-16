@@ -8,8 +8,14 @@ if (( EUID != 0 )); then
     exit 1
 fi
 
+instance_id=""
+if [[ ${1:-} == --instance && $# == 2 ]]; then instance_id=$2
+elif (( $# != 0 )); then echo 'Usage: players [--instance jv-...]' >&2; exit 2; fi
+source /usr/libexec/justvoxel/mjust/instance-selection.sh
+instance_id="$(jv_select_registered_instance "${instance_id}")" || exit 1
+
 set +e
-response="$("${api_client}" GET /v1/players)"
+response="$("${api_client}" GET "/v1/minecraft/instances/${instance_id}/players")"
 rc=$?
 set -e
 
@@ -22,44 +28,29 @@ if (( rc != 0 )); then
     exit 1
 fi
 
-if ! jq -e '
-    type == "object" and
-    (.configured | type == "boolean") and
-    (.state | type == "string") and
-    (.online | type == "number") and
-    (.max | type == "number") and
-    (.names | type == "array")
-' <<<"${response}" >/dev/null 2>&1; then
-    echo 'ERROR: JustVoxel Management API returned invalid player information.' >&2
-    exit 1
+if ! jq -e --arg id "${instance_id}" '.id == $id and (.state | type == "string") and (.online | type == "number") and (.maximum | type == "number")' <<<"${response}" >/dev/null; then
+    echo 'ERROR: selected player information could not be verified.' >&2; exit 1
 fi
-
-configured="$(jq -r '.configured' <<<"${response}")"
 state="$(jq -r '.state' <<<"${response}")"
 online="$(jq -r '.online' <<<"${response}")"
-maximum="$(jq -r '.max' <<<"${response}")"
-
-if [[ ${configured} != true || ${state} == not_configured ]]; then
-    echo 'ERROR: JustVoxel has not been configured yet. Run: mjust setup' >&2
-    exit 1
-fi
+maximum="$(jq -r '.maximum' <<<"${response}")"
 
 case "${state}" in
-    stopped)
+    offline)
         echo 'Minecraft is stopped.'
         echo 'Player information is unavailable until the server is running.'
         ;;
-    unavailable)
+    unknown)
         echo 'Players: Unknown'
         jq -r '.error // "Player information is unavailable."' <<<"${response}"
         exit 1
         ;;
-    running)
+    online)
         echo "Players online: ${online} / ${maximum}"
         if (( online == 0 )); then
             echo 'No players are currently online.'
         else
-            names="$(jq -r '.names | join(", ")' <<<"${response}")"
+            names="$(jq -r '(.names // []) | join(", ")' <<<"${response}")"
             if [[ -n ${names} ]]; then
                 echo "Online: ${names}"
             else
