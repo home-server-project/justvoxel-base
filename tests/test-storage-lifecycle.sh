@@ -61,8 +61,8 @@ credentials
 printf 'malformed\n' >> "$JV_CONFIG_DIR/smb-backup.credentials"
 if jv_reset_validate_storage_preservation; then fail 'malformed credentials accepted'; fi
 credentials
-# Factory Reset keeps the default removal mode and its own managed-mount cleanup.
-grep -Fq 'jv_reset_remove_active_configuration "${java_port}" "${bedrock_enabled}" "${bedrock_port}";' "$repo_root/mjust/libexec/admin-factory-reset-json"
+# Factory Reset owns configuration removal after all-instance retirement.
+grep -Fq 'jv_trace_run rm -rf -- "${JV_CONFIG_DIR}"' "$repo_root/mjust/libexec/admin-factory-reset-json"
 jv_reset_remove_active_configuration 25565 no 19132
 [[ ! -e $JV_CONFIG_DIR ]] || fail 'factory mode preserved credentials'
 

@@ -107,6 +107,13 @@ func main() {
 		if err := serve(socket); err != nil {
 			fatal("serve: %v", err)
 		}
+	case "factory-reset-runtime-empty":
+		if os.Geteuid() != 0 || len(args) != 1 {
+			fatal("factory reset runtime: invalid command")
+		}
+		if err := instanceRuntimes.factoryResetEmpty(context.Background()); err != nil {
+			fatal("factory reset runtime: managed runtime remains or cannot be inspected")
+		}
 	case "data-migration-runtime":
 		if err := dataMigrationRuntimeCommand(context.Background(), args[1:]); err != nil {
 			fatal("data migration runtime: %v", err)

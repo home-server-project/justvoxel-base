@@ -35,7 +35,7 @@ grep -Fq 'if j.ResetPolicy == "preserve" {' "${retirement}"
 grep -Fq 'return b.removeInstanceData(ctx, j)' "${retirement}"
 grep -Fq '"podman", "rm", "--ignore", "--", "minecraft-"+id' "${retirement}"
 
-# The shared library still protects the fixed-runtime Factory Reset and Start Over.
+# Fixed container removal remains shared with legacy Setup recovery; Factory Reset no longer calls it.
 grep -Fq 'podman rm --force --ignore minecraft' "${common}"
 grep -Fq 'podman container exists minecraft' "${common}"
 if grep -Fq 'podman rm minecraft' "${agent}" "${retirement}" "${common}"; then

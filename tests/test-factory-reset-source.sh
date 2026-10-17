@@ -24,10 +24,15 @@ grep -Fq 'storage_layout_action:"preserve"' "${helper}"
 grep -Fq 'config_backups_action:"delete"' "${helper}"
 grep -Fq 'jv_reset_delete_tree_same_filesystem "${backup_path}"' "${helper}"
 grep -Fq 'jv_reset_delete_tree_same_filesystem "${config_backup_dir}"' "${helper}"
-grep -Fq 'jv_reset_remove_minecraft_container' "${helper}"
+# Fixed execution survives only in shared Setup helpers, never Factory Reset.
+if rg 'minecraft\.service|podman.*minecraft|web-status-json|jv_reset_remove_minecraft_container|jv_reset_remove_active_configuration|disable --now.*minecraft-backup\.timer' "${helper}"; then
+    echo 'ERROR: Factory Reset retained fixed-runtime execution.' >&2; exit 1
+fi
+grep -Fq 'factory-reset-runtime-empty' "${helper}"
+grep -Fq 'JUSTVOXEL_FACTORY_RESET_INSTANCES_RETIRED' "${helper}"
+grep -Fq 'Compatibility cleanup only' "${helper}"
 grep -Fq 'podman rm --force --ignore minecraft' "${common}"
 grep -Fq 'podman container exists minecraft' "${common}"
-grep -Fq 'container_cleanup_failed' "${helper}"
 grep -Fq 'data_cleanup_failed' "${helper}"
 grep -Fq 'backup_cleanup_failed' "${helper}"
 grep -Fq 'configuration_cleanup_failed' "${helper}"

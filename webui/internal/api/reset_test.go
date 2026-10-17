@@ -89,7 +89,8 @@ func TestFactoryResetPlanAndApplyClientContract(t *testing.T) {
 		}
 	})}}
 
-	plan, err := client.AdminFactoryResetPlan(context.Background(), "session-token")
+	ctx := WithMinecraftMaintenanceInstance(context.Background(), "jv-sibling", "reset/minecraft")
+	plan, err := client.AdminFactoryResetPlan(ctx, "session-token")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +99,7 @@ func TestFactoryResetPlanAndApplyClientContract(t *testing.T) {
 		t.Fatalf("unexpected factory reset plan: %#v", plan)
 	}
 
-	applied, err := client.AdminFactoryResetApply(context.Background(), "session-token", AdminFactoryResetApplyRequest{
+	applied, err := client.AdminFactoryResetApply(ctx, "session-token", AdminFactoryResetApplyRequest{
 		PlanFingerprint: resetTestFingerprint,
 		ConfirmPlayers:  true,
 		SystemPassword:  "system-secret",

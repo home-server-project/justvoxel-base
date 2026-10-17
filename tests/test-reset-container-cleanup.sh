@@ -46,11 +46,26 @@ exit 0
 EOF
 chmod +x "${scratch}/bin/"*
 
+# The shared fixed remover remains live in Setup recovery, independently of
+# Factory Reset. Check its absence-vs-inspection-error distinction directly.
+for exists_rc in 1 0 125; do
+    if PATH="${scratch}/bin:${PATH}" JV_TEST_EXISTS_RC="${exists_rc}" bash -c 'source "$1/mjust/libexec/minecraft-reset-common.sh"; jv_reset_remove_minecraft_container' bash "${repo}"; then
+        [[ ${exists_rc} == 1 ]] || exit 1
+    else
+        [[ ${exists_rc} != 1 ]] || exit 1
+    fi
+done
+cat >"${scratch}/bin/factory-agent" <<'EOF'
+#!/usr/bin/bash
+[[ $1 == factory-reset-runtime-empty && ${JV_TEST_EXISTS_RC} == 1 ]]
+EOF
+chmod +x "${scratch}/bin/factory-agent"
 for mode in factory; do
     sed -e "s@source /usr/libexec/justvoxel/mjust/common.sh@source ${scratch}/common.sh@" \
         -e "s@source /usr/libexec/justvoxel/mjust/admin-storage-actions-common.sh@source ${scratch}/common.sh@" \
         -e '\@source /usr/libexec/justvoxel/mjust/minecraft-reset-common.sh@d' \
         -e '\@source /usr/libexec/justvoxel/mjust/storage-mount-ownership.sh@d' \
+        -e "s@/usr/libexec/justvoxel/management-agent@${scratch}/bin/factory-agent@g" \
         "${repo}/mjust/libexec/admin-${mode}-reset-json" >"${scratch}/${mode}-reset"
 
     if grep -Eq '^[[:space:]]*source[[:space:]]+/usr/libexec/justvoxel/mjust/(admin-storage-actions-common|minecraft-reset-common|storage-mount-ownership)\.sh' "${scratch}/${mode}-reset"; then
@@ -69,7 +84,7 @@ BEDROCK_ENABLED=no
 BEDROCK_PORT=19132
 EOF
         export JV_TEST_REPO="${repo}" JV_TEST_ROOT="${root}" JV_TEST_EXISTS_RC="${exists_rc}"
-        if output="$(PATH="${scratch}/bin:${PATH}" bash "${scratch}/${mode}-reset" apply --confirm-players)"; then
+        if output="$(JUSTVOXEL_FACTORY_RESET_INSTANCES_RETIRED=1 PATH="${scratch}/bin:${PATH}" bash "${scratch}/${mode}-reset" apply --confirm-players)"; then
             status=0
         else
             status=$?
@@ -81,10 +96,10 @@ EOF
             [[ ! -e ${root}/config/minecraft.conf ]] || { echo "ERROR: ${mode} reset did not remove active configuration." >&2; exit 1; }
         else
             [[ ${status} != 0 ]] || { echo "ERROR: ${mode} reset accepted remaining or unverified container." >&2; exit 1; }
-            jq -e '.code == "container_cleanup_failed"' <<<"${output}" >/dev/null
+            jq -e '.code == "instance_cleanup_required"' <<<"${output}" >/dev/null
             [[ -e ${root}/config/minecraft.conf ]] || { echo "ERROR: ${mode} reset cleared configuration after container cleanup failure." >&2; exit 1; }
         fi
     done
 done
 
-echo 'Reset container cleanup race regression OK'
+echo 'Shared Setup container cleanup race and Factory Reset all-instance guard regression OK'

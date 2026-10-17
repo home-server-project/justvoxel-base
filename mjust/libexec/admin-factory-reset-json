@@ -26,23 +26,17 @@ data_action='none'
 backup_path=''
 backup_scope='none'
 backup_action='none'
-java_port=''
-bedrock_enabled='no'
-bedrock_port=''
 warnings=()
 
 if [[ -r ${JV_CONFIG} ]]; then
     configured=true
     # shellcheck disable=SC1090
-    MINECRAFT_SERVER_TYPE=paper
     source "${JV_CONFIG}"
-    validate_server_type "${MINECRAFT_SERVER_TYPE}" || exit 1
+    # Server runtime comes exclusively from the instance registry.
+    # This historical config supplies shared appliance storage policy only.
 
     data_path="${DATA_PATH}"
     backup_path="${BACKUP_PATH}"
-    java_port="${JAVA_PORT}"
-    bedrock_enabled="${BEDROCK_ENABLED}"
-    bedrock_port="${BEDROCK_PORT}"
 
     data_scope="$(jv_reset_path_scope "${data_path}")"
     case "${data_scope}" in
@@ -79,18 +73,8 @@ if [[ -r ${JV_CONFIG} ]]; then
     esac
 fi
 
-players_json='{"configured":false,"state":"not_configured","online":0,"max":0,"names":[]}'
-if [[ ${configured} == true ]]; then
-    if status_json="$(jv_trace_run /usr/libexec/justvoxel/mjust/web-status-json players 2>/dev/null)"; then
-        if jq -e 'type=="object" and (.online|type=="number") and (.names|type=="array")' <<<"${status_json}" >/dev/null 2>&1; then
-            players_json="${status_json}"
-        else
-            warnings+=("Player status could not be validated during factory reset planning.")
-        fi
-    else
-        warnings+=("Player status could not be validated during factory reset planning.")
-    fi
-fi
+# Player safety is inspected for every authoritative instance by the Agent.
+players_json='{"online":0,"names":[]}'
 
 emit_plan() {
     local warnings_json
@@ -186,24 +170,15 @@ if [[ ${confirm_players} != --confirm-players ]]; then
     factory_reset_fail "confirmation_required" "Full factory reset Apply requires explicit player interruption confirmation." 4
 fi
 
-if [[ ${configured} == true ]] && jv_trace_run systemctl is-active --quiet minecraft.service 2>/dev/null; then
-    set +e
-    stop_output="$(jv_trace_run /usr/libexec/justvoxel/mjust/web-status-json stop --confirm-players 2>/dev/null)"
-    stop_rc=$?
-    set -e
-    if (( stop_rc != 0 )) || ! jq -e '.ok == true' <<<"${stop_output}" >/dev/null 2>&1; then
-        factory_reset_fail "minecraft_stop_failed" "Minecraft could not be stopped safely. Factory reset did not continue."
-    fi
-fi
-
-jv_trace_stage "RESET Removing runtime"
-
-# Quadlet/systemd removal can finish even when Podman reports a removal error.
-if ! jv_reset_remove_minecraft_container; then
-    factory_reset_fail "container_cleanup_failed" "Minecraft container cleanup failed. Retry Full Factory Reset after reviewing the container state."
+# The Agent persists, quiesces and retires the entire authoritative instance set
+# first. A direct legacy helper invocation must not bypass that contract.
+if [[ ${JUSTVOXEL_FACTORY_RESET_INSTANCES_RETIRED:-} != 1 ]] ||
+   ! jv_trace_run /usr/libexec/justvoxel/management-agent factory-reset-runtime-empty; then
+    factory_reset_fail "instance_cleanup_required" "Factory Reset requires verified appliance-wide Minecraft cleanup."
 fi
 
 jv_trace_stage "RESET Cleaning appliance state"
+# Compatibility cleanup of the historical data directory, never runtime authority.
 if [[ ${data_action} == delete ]]; then
     if ! cleanup_error="$(jv_reset_delete_tree_same_filesystem "${data_path}" 'Minecraft data' 2>&1)"; then
         factory_reset_fail "data_cleanup_failed" "Minecraft data cleanup failed: ${cleanup_error:-unknown cleanup error}"
@@ -225,25 +200,33 @@ if ! cleanup_error="$(jv_reset_delete_tree_same_filesystem "${config_backup_dir}
     factory_reset_fail "config_backup_cleanup_failed" "JustVoxel configuration backup cleanup failed: ${cleanup_error:-unknown cleanup error}"
 fi
 
-if [[ ${configured} == true ]]; then
-    if ! jv_reset_remove_active_configuration "${java_port}" "${bedrock_enabled}" "${bedrock_port}"; then
-        factory_reset_fail "configuration_cleanup_failed" "JustVoxel runtime configuration could not be removed completely."
+# Compatibility cleanup only: historical fixed Quadlet/timer files are not live
+# lifecycle targets. The Agent already proved fixed runtime inactivity.
+# Remove the historical enablement link without starting/stopping a fixed job.
+# factory-reset-runtime-empty proved this optional legacy timer is inactive.
+if [[ -e ${JV_BACKUP_TIMER} || -L ${JV_BACKUP_TIMER} ]]; then
+    if ! jv_trace_run systemctl disable -- minecraft-backup.timer; then
+        factory_reset_fail "configuration_cleanup_failed" "Historical backup timer configuration could not be retired."
     fi
-else
-    jv_trace_run systemctl disable --now minecraft-backup.timer >/dev/null 2>&1 || true
-    jv_trace_run rm -f -- "${JV_QUADLET}" "${JV_BACKUP_SERVICE}" "${JV_BACKUP_TIMER}" "${JV_PREVIOUS_IMAGE_STATE}"
-    jv_trace_run rm -rf -- "${JV_CONFIG_DIR}"
-    if ! jv_trace_run systemctl daemon-reload; then
-        factory_reset_fail "configuration_cleanup_failed" "systemd could not reload after JustVoxel runtime configuration cleanup."
-    fi
-    jv_trace_run systemctl reset-failed minecraft.service minecraft-backup.service minecraft-backup.timer >/dev/null 2>&1 || true
 fi
-
+# Preserve the historical contract for Minecraft firewall openings recorded in
+# the old appliance configuration. These ports never select an active runtime.
+if [[ ${configured} == true && -n ${JAVA_PORT:-} ]]; then
+    jv_trace_run firewall-cmd --permanent --remove-port="${JAVA_PORT}/tcp" >/dev/null 2>&1 || true
+    if [[ ${BEDROCK_ENABLED:-no} == yes && -n ${BEDROCK_PORT:-} ]]; then
+        jv_trace_run firewall-cmd --permanent --remove-port="${BEDROCK_PORT}/udp" >/dev/null 2>&1 || true
+    fi
+    jv_trace_run firewall-cmd --reload >/dev/null 2>&1 || true
+fi
+jv_trace_run rm -f -- "${JV_QUADLET}" "${JV_BACKUP_SERVICE}" "${JV_BACKUP_TIMER}" "${JV_PREVIOUS_IMAGE_STATE}"
+jv_trace_run rm -rf -- "${JV_CONFIG_DIR}"
+if ! jv_trace_run systemctl daemon-reload; then
+    factory_reset_fail "configuration_cleanup_failed" "systemd could not reload after JustVoxel configuration cleanup."
+fi
 jv_trace_stage "VERIFY Runtime cleanup"
-if jv_trace_run podman container exists minecraft >/dev/null 2>&1 ||
-   jv_trace_run systemctl is-active --quiet minecraft.service 2>/dev/null ||
-   [[ -e ${JV_CONFIG} || -e ${JV_QUADLET} || -e ${JV_BACKUP_SERVICE} || -e ${JV_BACKUP_TIMER} ]]; then
-    factory_reset_fail "runtime_cleanup_incomplete" "Full factory reset stopped because appliance-owned Minecraft runtime state is still present after cleanup."
+if [[ -e ${JV_CONFIG} || -e ${JV_QUADLET} || -e ${JV_BACKUP_SERVICE} || -e ${JV_BACKUP_TIMER} ]] ||
+   ! jv_trace_run /usr/libexec/justvoxel/management-agent factory-reset-runtime-empty; then
+    factory_reset_fail "runtime_cleanup_incomplete" "Factory Reset could not verify complete Minecraft cleanup."
 fi
 
 jq -n \

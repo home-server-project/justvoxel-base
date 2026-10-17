@@ -11,6 +11,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -26,6 +27,9 @@ var adminFactoryResetWorkerTimeout = 5 * time.Minute
 
 var runAdminFactoryResetHelper = func(ctx context.Context, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, adminFactoryResetHelper, args...)
+	if len(args) > 0 && args[0] == "apply" {
+		cmd.Env = append(os.Environ(), "JUSTVOXEL_FACTORY_RESET_INSTANCES_RETIRED=1")
+	}
 	finish, err := attachOperationTrace(ctx, cmd)
 	if err != nil {
 		return nil, err
@@ -62,30 +66,32 @@ var restoreSystemAdministratorFactoryCredential = func(ctx context.Context) erro
 }
 
 type adminFactoryResetPlanResponse struct {
-	OK                    bool     `json:"ok"`
-	SchemaVersion         string   `json:"schema_version,omitempty"`
-	Mode                  string   `json:"mode,omitempty"`
-	PlanFingerprint       string   `json:"plan_fingerprint,omitempty"`
-	Code                  string   `json:"code,omitempty"`
-	Error                 string   `json:"error,omitempty"`
-	MinecraftConfigured   bool     `json:"minecraft_configured"`
-	DataPath              string   `json:"data_path,omitempty"`
-	DataScope             string   `json:"data_scope,omitempty"`
-	DataAction            string   `json:"data_action,omitempty"`
-	BackupPath            string   `json:"backup_path,omitempty"`
-	BackupScope           string   `json:"backup_scope,omitempty"`
-	BackupAction          string   `json:"backup_action,omitempty"`
-	ConfigBackupsAction   string   `json:"config_backups_action,omitempty"`
-	StorageLayoutAction   string   `json:"storage_layout_action,omitempty"`
-	ExternalStorageAction string   `json:"external_storage_action,omitempty"`
-	NetworkStorageAction  string   `json:"network_storage_action,omitempty"`
-	AuthenticationAction  string   `json:"authentication_action,omitempty"`
-	WebUIUsersAction      string   `json:"webui_users_action,omitempty"`
-	PasswordAction        string   `json:"password_action,omitempty"`
-	SessionsAction        string   `json:"sessions_action,omitempty"`
-	PlayersOnline         int      `json:"players_online,omitempty"`
-	Players               []string `json:"players"`
-	Warnings              []string `json:"warnings"`
+	Instances             []factoryResetInstance         `json:"-"`
+	SharedPlan            *adminFactoryResetPlanResponse `json:"-"`
+	OK                    bool                           `json:"ok"`
+	SchemaVersion         string                         `json:"schema_version,omitempty"`
+	Mode                  string                         `json:"mode,omitempty"`
+	PlanFingerprint       string                         `json:"plan_fingerprint,omitempty"`
+	Code                  string                         `json:"code,omitempty"`
+	Error                 string                         `json:"error,omitempty"`
+	MinecraftConfigured   bool                           `json:"minecraft_configured"`
+	DataPath              string                         `json:"data_path,omitempty"`
+	DataScope             string                         `json:"data_scope,omitempty"`
+	DataAction            string                         `json:"data_action,omitempty"`
+	BackupPath            string                         `json:"backup_path,omitempty"`
+	BackupScope           string                         `json:"backup_scope,omitempty"`
+	BackupAction          string                         `json:"backup_action,omitempty"`
+	ConfigBackupsAction   string                         `json:"config_backups_action,omitempty"`
+	StorageLayoutAction   string                         `json:"storage_layout_action,omitempty"`
+	ExternalStorageAction string                         `json:"external_storage_action,omitempty"`
+	NetworkStorageAction  string                         `json:"network_storage_action,omitempty"`
+	AuthenticationAction  string                         `json:"authentication_action,omitempty"`
+	WebUIUsersAction      string                         `json:"webui_users_action,omitempty"`
+	PasswordAction        string                         `json:"password_action,omitempty"`
+	SessionsAction        string                         `json:"sessions_action,omitempty"`
+	PlayersOnline         int                            `json:"players_online,omitempty"`
+	Players               []string                       `json:"players"`
+	Warnings              []string                       `json:"warnings"`
 }
 
 type adminFactoryResetApplyRequest struct {
@@ -129,6 +135,8 @@ type adminFactoryResetHelperApplyResponse struct {
 }
 
 type factoryResetFingerprintPayload struct {
+	Participants          string `json:"participants,omitempty"`
+	SharedPlanFingerprint string `json:"shared_plan_fingerprint,omitempty"`
 	SchemaVersion         string `json:"schema_version"`
 	Mode                  string `json:"mode"`
 	MinecraftConfigured   bool   `json:"minecraft_configured"`
@@ -158,7 +166,7 @@ func (s *server) adminFactoryResetPlan(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.requireAdministrator(w, r); !ok {
 		return
 	}
-	plan, status := authoritativeAdminFactoryResetPlan(r.Context())
+	plan, status := s.factoryResetPlan(r.Context())
 	if status != 0 {
 		writeJSON(w, status, plan)
 		return
@@ -189,6 +197,21 @@ func (s *server) adminFactoryResetResolve(w http.ResponseWriter, r *http.Request
 	}
 	if !request.KeepCurrentState {
 		writeError(w, http.StatusBadRequest, "explicit keep-current-state confirmation is required")
+		return
+	}
+	current, err := s.operations.currentFactoryReset()
+	if err != nil || current == nil || current.OperationID != request.OperationID || current.State != operationNeedsAttention {
+		writeError(w, http.StatusConflict, "factory reset operation cannot be resolved in its current state")
+		return
+	}
+	lock, err := acquirePluginRuntimeLock()
+	if err != nil {
+		writeError(w, 409, "another Minecraft operation is active")
+		return
+	}
+	defer lock.Close()
+	if err = s.resolveFactoryResetParticipants(r.Context(), request.OperationID); err != nil {
+		writeError(w, 409, "Factory Reset has partially retired Minecraft state. Review and retry Factory Reset to complete cleanup.")
 		return
 	}
 	operation, err := s.operations.resolveFactoryReset(request.OperationID, "Failed Full Factory Reset was resolved without retrying; current server state was kept unchanged.")
@@ -264,7 +287,7 @@ func (s *server) adminFactoryResetApply(w http.ResponseWriter, r *http.Request) 
 	}
 	request.SystemPassword = ""
 
-	plan, status := authoritativeAdminFactoryResetPlan(r.Context())
+	plan, status := s.factoryResetPlan(r.Context())
 	if status != 0 {
 		writeJSON(w, status, plan)
 		return
@@ -398,7 +421,16 @@ func validFactoryResetStorageAction(scope, action string) bool {
 }
 
 func factoryResetPlanFingerprint(plan adminFactoryResetPlanResponse) (string, error) {
+	// Instance summaries replace the public historical data scope/action. Bind
+	// the original helper plan as well so its cleanup policy cannot change
+	// unnoticed between Review and Apply. Empty-instance plans are unmodified.
+	sharedFingerprint := ""
+	if len(plan.Instances) > 0 && plan.SharedPlan != nil {
+		sharedFingerprint = plan.SharedPlan.PlanFingerprint
+	}
 	payload, err := json.Marshal(factoryResetFingerprintPayload{
+		Participants:          factoryResetParticipantsHash(plan.Instances),
+		SharedPlanFingerprint: sharedFingerprint,
 		SchemaVersion:         plan.SchemaVersion,
 		Mode:                  plan.Mode,
 		MinecraftConfigured:   plan.MinecraftConfigured,
@@ -470,12 +502,26 @@ var startFactoryResetWorker = func(s *server, operationID, expectedFingerprint s
 
 func executeFactoryReset(ctx context.Context, s *server, operationID, expectedFingerprint string) error {
 	ctx = withOperationTrace(ctx, s.operations, operationID)
+	failInstances := func(err error) error {
+		_, _ = s.operations.transition(operationID, operationNeedsAttention, "instance_cleanup_failed", "Factory Reset could not complete verified Minecraft instance cleanup. Review and retry Factory Reset.")
+		return err
+	}
+	lock, err := acquirePluginRuntimeLock()
+	if err != nil {
+		return failInstances(err)
+	}
+	defer lock.Close()
+	exclusion, err := acquireInstanceRestoreExclusion()
+	if err != nil {
+		return failInstances(err)
+	}
+	defer exclusion.Close()
 	traceStage(ctx, "Validation")
 	if _, err := s.operations.transition(operationID, operationValidating, "validating", "Revalidating full factory reset plan."); err != nil {
 		return err
 	}
 
-	plan, status := authoritativeAdminFactoryResetPlan(ctx)
+	plan, status := s.factoryResetPlan(ctx)
 	if status != 0 || !plan.OK || plan.PlanFingerprint != expectedFingerprint {
 		_, _ = s.operations.transition(operationID, operationNeedsAttention, "plan_changed", "Full factory reset stopped because the reviewed plan changed.")
 		return errors.New("factory reset plan changed before execution")
@@ -485,6 +531,9 @@ func executeFactoryReset(ctx context.Context, s *server, operationID, expectedFi
 		return err
 	}
 
+	if err := s.retireFactoryResetInstances(ctx, operationID, plan); err != nil {
+		return failInstances(err)
+	}
 	output, runErr := runAdminFactoryResetHelper(ctx, "apply", "--confirm-players")
 	var applied adminFactoryResetHelperApplyResponse
 	if decodeErr := decodeAdminFactoryResetApplyResponse(output, &applied); decodeErr != nil || runErr != nil || !applied.OK {
@@ -560,6 +609,9 @@ func executeFactoryReset(ctx context.Context, s *server, operationID, expectedFi
 		return errors.New("WebUI users remain after full factory reset")
 	}
 
+	if err := instanceRuntimes.factoryResetEmpty(ctx); err != nil {
+		return failInstances(err)
+	}
 	if err := minecraftInstances.retire(); err != nil {
 		failure := fmt.Errorf("Minecraft Instance ID retirement failed: %w", err)
 		_, _ = s.operations.transition(operationID, operationNeedsAttention, "instance_retirement_failed", failure.Error())
@@ -575,6 +627,9 @@ func executeFactoryReset(ctx context.Context, s *server, operationID, expectedFi
 }
 
 func validateFactoryResetApplyResult(plan adminFactoryResetPlanResponse, applied adminFactoryResetHelperApplyResponse) error {
+	if plan.SharedPlan != nil {
+		plan = *plan.SharedPlan
+	}
 	if applied.SchemaVersion != "v1" || applied.Mode != "factory" {
 		return errors.New("factory reset Apply returned unsupported data")
 	}

@@ -305,12 +305,14 @@ import sys
 root, work = map(Path, sys.argv[1:])
 text = (root / 'mjust/libexec/admin-factory-reset-json').read_text()
 text = '\n'.join(line for line in text.splitlines() if not line.startswith('source '))
+text = text.replace('/usr/libexec/justvoxel/management-agent', 'factory_agent')
 text = text.replace('local fstab=/etc/fstab', 'local fstab="${STORAGE_MOUNT_FSTAB}"')
 text = text.replace('config_backup_dir=/var/lib/justvoxel/config-backups', 'config_backup_dir="${work}/config-backups"')
 (work / 'factory-reset').write_text(text + '\n')
 PY
 require_root() { :; }
-jv_reset_remove_minecraft_container() { :; }
+factory_agent() { [[ ${1:-} == factory-reset-runtime-empty ]]; }
+JUSTVOXEL_FACTORY_RESET_INSTANCES_RETIRED=1
 jv_reset_delete_tree_same_filesystem() { :; }
 systemd-escape() { printf 'fixture.mount\n'; }
 mountpoint() { storage_action_host_mountpoint_occupied "${@: -1}"; }

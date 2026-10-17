@@ -29,6 +29,7 @@ func exactFactoryResetFingerprint(t *testing.T) string {
 }
 
 func TestAdminFactoryResetPlanComputesFingerprintAndPreservesExternalStorage(t *testing.T) {
+	useEmptyFactoryResetRuntime(t)
 	old := runAdminFactoryResetHelper
 	defer func() { runAdminFactoryResetHelper = old }()
 	runAdminFactoryResetHelper = func(_ context.Context, args ...string) ([]byte, error) {
@@ -63,6 +64,7 @@ func TestAdminFactoryResetPlanComputesFingerprintAndPreservesExternalStorage(t *
 }
 
 func TestAdminFactoryResetPlanRejectsChangedPreservationContract(t *testing.T) {
+	useEmptyFactoryResetRuntime(t)
 	old := runAdminFactoryResetHelper
 	defer func() { runAdminFactoryResetHelper = old }()
 	runAdminFactoryResetHelper = func(_ context.Context, _ ...string) ([]byte, error) {
@@ -78,6 +80,7 @@ func TestAdminFactoryResetPlanRejectsChangedPreservationContract(t *testing.T) {
 }
 
 func TestFactoryResetStorageActionsPreserveExternalAndNetwork(t *testing.T) {
+	useEmptyFactoryResetRuntime(t)
 	for _, scope := range []string{"external", "network", "unknown"} {
 		if !validFactoryResetStorageAction(scope, "preserve") {
 			t.Fatalf("%s storage was not accepted for preservation", scope)
@@ -95,6 +98,7 @@ func TestFactoryResetStorageActionsPreserveExternalAndNetwork(t *testing.T) {
 }
 
 func TestAdminFactoryResetApplyRequiresRealSystemPasswordBeforePlanning(t *testing.T) {
+	useEmptyFactoryResetRuntime(t)
 	oldReadMode := readAuthMode
 	defer func() { readAuthMode = oldReadMode }()
 	readAuthMode = func() (authMode, error) { return authModeSeparate, nil }
@@ -136,6 +140,7 @@ func TestAdminFactoryResetApplyRequiresRealSystemPasswordBeforePlanning(t *testi
 }
 
 func TestAdminFactoryResetApplySystemModeDoesNotRequireDuplicatePassword(t *testing.T) {
+	useEmptyFactoryResetRuntime(t)
 	oldReadMode := readAuthMode
 	defer func() { readAuthMode = oldReadMode }()
 	readAuthMode = func() (authMode, error) { return authModeSystem, nil }
@@ -169,6 +174,7 @@ func TestAdminFactoryResetApplySystemModeDoesNotRequireDuplicatePassword(t *test
 }
 
 func TestAdminFactoryResetApplyCreatesQueuedOperationFromExactPlan(t *testing.T) {
+	useEmptyFactoryResetRuntime(t)
 	oldAuth := systemAuthenticate
 	defer func() { systemAuthenticate = oldAuth }()
 	systemAuthenticate = func(username, password string) (systemauth.AuthResult, error) {
@@ -227,6 +233,7 @@ func TestAdminFactoryResetApplyCreatesQueuedOperationFromExactPlan(t *testing.T)
 }
 
 func TestAdminFactoryResetApplyRequiresPlayerConfirmation(t *testing.T) {
+	useEmptyFactoryResetRuntime(t)
 	var plan adminFactoryResetPlanResponse
 	if err := decodeAdminFactoryResetPlanResponse([]byte(validFactoryResetPlanHelper), &plan); err != nil {
 		t.Fatal(err)
@@ -273,6 +280,7 @@ func TestAdminFactoryResetApplyRequiresPlayerConfirmation(t *testing.T) {
 }
 
 func TestAdminFactoryResetApplySameFingerprintReconnectsWithoutPasswordOrPlanning(t *testing.T) {
+	useEmptyFactoryResetRuntime(t)
 	s := surfaceTestServer(t, roleAdministrator)
 	store := openTestOperationStore(t)
 	attachTestOperationStore(t, s, store)
@@ -311,6 +319,7 @@ func TestAdminFactoryResetApplySameFingerprintReconnectsWithoutPasswordOrPlannin
 }
 
 func TestExecuteFactoryResetReturnsToFreshFirstUseState(t *testing.T) {
+	useEmptyFactoryResetRuntime(t)
 	useTestMinecraftInstances(t)
 	oldHelper := runAdminFactoryResetHelper
 	defer func() { runAdminFactoryResetHelper = oldHelper }()
@@ -403,6 +412,7 @@ func TestExecuteFactoryResetReturnsToFreshFirstUseState(t *testing.T) {
 }
 
 func TestRestoreSystemAdministratorFactoryCredential(t *testing.T) {
+	useEmptyFactoryResetRuntime(t)
 	for _, test := range []struct {
 		name      string
 		failCall  int
@@ -452,6 +462,7 @@ func TestRestoreSystemAdministratorFactoryCredential(t *testing.T) {
 }
 
 func TestExecuteFactoryResetCredentialFailureKeepsSessions(t *testing.T) {
+	useEmptyFactoryResetRuntime(t)
 	for _, failure := range []string{"locked bootstrap installation", "expiration", "unlock"} {
 		t.Run(failure, func(t *testing.T) {
 			oldHelper := runAdminFactoryResetHelper
@@ -519,6 +530,7 @@ func TestExecuteFactoryResetCredentialFailureKeepsSessions(t *testing.T) {
 }
 
 func TestAdminFactoryResetResolveKeepsCurrentStateAndReleasesLocks(t *testing.T) {
+	useEmptyFactoryResetRuntime(t)
 	s := surfaceTestServer(t, roleAdministrator)
 	store := openTestOperationStore(t)
 	attachTestOperationStore(t, s, store)
@@ -552,6 +564,7 @@ func TestAdminFactoryResetResolveKeepsCurrentStateAndReleasesLocks(t *testing.T)
 }
 
 func TestAdminFactoryResetResolveRequiresExplicitKeepCurrentState(t *testing.T) {
+	useEmptyFactoryResetRuntime(t)
 	s := surfaceTestServer(t, roleAdministrator)
 	store := openTestOperationStore(t)
 	attachTestOperationStore(t, s, store)
