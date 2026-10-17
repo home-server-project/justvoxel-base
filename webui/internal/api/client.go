@@ -122,21 +122,6 @@ func (c *Client) Status(ctx context.Context, session string) (Status, error) {
 	return out, err
 }
 
-func (c *Client) Players(ctx context.Context, session string) (Players, error) {
-	var out Players
-	err := c.do(ctx, http.MethodGet, "/v1/players", session, nil, &out)
-	return out, err
-}
-
-func (c *Client) MinecraftAction(ctx context.Context, session, action string, confirmPlayers bool) (MinecraftActionResponse, error) {
-	path, err := minecraftActionPath(action)
-	if err != nil {
-		return MinecraftActionResponse{}, err
-	}
-	body := map[string]bool{"confirm_players": confirmPlayers}
-	return c.doMinecraftAction(ctx, path, session, body)
-}
-
 // Confirmation always carries the immutable selection; no global restart path.
 func (c *Client) MinecraftInstanceActionConfirmed(ctx context.Context, session, id, action string, confirmPlayers bool) (MinecraftActionResponse, error) {
 	if !minecraftSelectedIDPattern.MatchString(id) {
@@ -151,15 +136,6 @@ func (c *Client) MinecraftInstanceActionConfirmed(ctx context.Context, session, 
 	client.Timeout = 310 * time.Second
 	caller := &Client{http: &client}
 	return caller.doMinecraftAction(ctx, "/v1/minecraft/instances/"+id+"/"+action, session, map[string]bool{"confirm_players": confirmPlayers})
-}
-
-func minecraftActionPath(action string) (string, error) {
-	switch action {
-	case "start", "stop":
-		return "/v1/minecraft/" + action, nil
-	default:
-		return "", fmt.Errorf("unsupported Minecraft action %q", action)
-	}
 }
 
 func (c *Client) doMinecraftAction(ctx context.Context, path, session string, body any) (MinecraftActionResponse, error) {

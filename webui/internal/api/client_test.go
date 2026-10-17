@@ -9,20 +9,29 @@ import (
 	"testing"
 )
 
-func TestMinecraftActionPathAllowlist(t *testing.T) {
-	for _, action := range []string{"start", "stop"} {
-		path, err := minecraftActionPath(action)
-		if err != nil {
+func TestSelectedInstanceActionAllowlist(t *testing.T) {
+	calls := 0
+	expectedAction := ""
+	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/minecraft/instances/jv-a1b2c3/"+expectedAction {
+			t.Fatal(r.Method, r.URL.Path)
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"ok":true}`)), Header: make(http.Header)}, nil
+	})}}
+	for _, action := range []string{"start", "stop", "restart"} {
+		expectedAction = action
+		if _, err := client.MinecraftInstanceActionConfirmed(context.Background(), "token", "jv-a1b2c3", action, false); err != nil {
 			t.Fatalf("%s rejected: %v", action, err)
 		}
-		if path != "/v1/minecraft/"+action {
-			t.Fatalf("unexpected path for %s: %s", action, path)
-		}
 	}
-	for _, action := range []string{"restart", "shell", "restart/../../shell", "", "poweroff"} {
-		if _, err := minecraftActionPath(action); err == nil {
+	for _, action := range []string{"shell", "restart/../../shell", "", "poweroff"} {
+		if _, err := client.MinecraftInstanceActionConfirmed(context.Background(), "token", "jv-a1b2c3", action, false); err == nil {
 			t.Fatalf("unsupported action %q was accepted", action)
 		}
+	}
+	if calls != 3 {
+		t.Fatalf("unexpected request count: %d", calls)
 	}
 }
 

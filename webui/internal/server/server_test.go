@@ -79,31 +79,6 @@ func (f *fakeAPI) Status(_ context.Context, session string) (api.Status, error) 
 	return defaultStatus(), nil
 }
 
-func (f *fakeAPI) Players(_ context.Context, session string) (api.Players, error) {
-	if session != "session-token" {
-		return api.Players{}, api.ErrUnauthorized
-	}
-	if f.playersErr != nil {
-		return api.Players{}, f.playersErr
-	}
-	if f.playersResult.State != "" {
-		return f.playersResult, nil
-	}
-	return defaultPlayers(), nil
-}
-
-func (f *fakeAPI) MinecraftAction(_ context.Context, session, action string, confirmPlayers bool) (api.MinecraftActionResponse, error) {
-	if session != "session-token" {
-		return api.MinecraftActionResponse{}, api.ErrUnauthorized
-	}
-	f.action = action
-	f.confirmed = confirmPlayers
-	if f.actionResult.Action != "" || f.actionResult.ConfirmationRequired || f.actionResult.Message != "" {
-		return f.actionResult, f.actionErr
-	}
-	return api.MinecraftActionResponse{OK: true, Action: action}, f.actionErr
-}
-
 func TestUnauthenticatedDashboardRedirects(t *testing.T) {
 	app, err := New(&fakeAPI{}, Config{Version: "1.0.0", ManagementAPI: "v1"})
 	if err != nil {
@@ -589,7 +564,15 @@ func (f *dashboardRestartAPI) MinecraftInstanceRuntimes(context.Context, string)
 }
 func (f *dashboardRestartAPI) MinecraftInstanceActionConfirmed(ctx context.Context, session, id, action string, confirm bool) (api.MinecraftActionResponse, error) {
 	f.selectedID = id
-	return f.fakeAPI.MinecraftAction(ctx, session, action, confirm)
+	if session != "session-token" {
+		return api.MinecraftActionResponse{}, api.ErrUnauthorized
+	}
+	f.action = action
+	f.confirmed = confirm
+	if f.actionResult.Action != "" || f.actionResult.ConfirmationRequired || f.actionResult.Message != "" {
+		return f.actionResult, f.actionErr
+	}
+	return api.MinecraftActionResponse{OK: true, Action: action}, f.actionErr
 }
 
 func TestDashboardRestartConfirmationKeepsResolvedID(t *testing.T) {
@@ -636,6 +619,15 @@ func (f *fakeAPI) MinecraftInstanceStatus(ctx context.Context, session, id strin
 	return api.MinecraftInstanceStatus{ID: id, State: strings.ToLower(status.Minecraft.State)}, err
 }
 func (f *fakeAPI) MinecraftInstancePlayers(ctx context.Context, session, id string) (api.InstancePlayers, error) {
-	players, err := f.Players(ctx, session)
-	return api.InstancePlayers{ID: id, State: players.State, Online: players.Online, Maximum: players.Max}, err
+	if session != "session-token" {
+		return api.InstancePlayers{}, api.ErrUnauthorized
+	}
+	if f.playersErr != nil {
+		return api.InstancePlayers{}, f.playersErr
+	}
+	players := f.playersResult
+	if players.State == "" {
+		players = defaultPlayers()
+	}
+	return api.InstancePlayers{ID: id, State: players.State, Online: players.Online, Maximum: players.Max}, nil
 }

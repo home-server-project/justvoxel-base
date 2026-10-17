@@ -114,9 +114,9 @@ for forbidden in 'systemctl ' 'podman ' 'rcon-cli'; do
 done
 
 grep -Fq 'start|stop|restart)' "${service}" || fail 'mJust service action allowlist is missing'
-grep -Fq 'POST "/v1/minecraft/${action}"' "${service}" || fail 'mJust service does not use the Minecraft Management API'
+grep -Fq 'POST "/v1/minecraft/instances/${instance_id}/${action}"' "${service}" || fail 'mJust service does not use the instance-addressed Minecraft Management API'
 for action in start stop restart; do
-    grep -Fq "${action}:" "${justfile}" || fail "mJust ${action} recipe is missing"
+    grep -Eq "^${action}([[:blank:]]+[^:]*)?:" "${justfile}" || fail "mJust ${action} recipe is missing"
     grep -Fq "sudo /usr/libexec/justvoxel/mjust/service ${action}" "${justfile}" || fail "mJust ${action} must enter the API path through sudo/root"
 done
 grep -Fq '.confirmation_required // false' "${service}" || fail 'mJust service frontend does not handle player confirmation responses'

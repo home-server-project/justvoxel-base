@@ -29,8 +29,6 @@ type API interface {
 	Logout(ctx context.Context, session string) error
 	ChangePassword(ctx context.Context, session, currentPassword, newPassword string) error
 	Status(ctx context.Context, session string) (api.Status, error)
-	Players(ctx context.Context, session string) (api.Players, error)
-	MinecraftAction(ctx context.Context, session, action string, confirmPlayers bool) (api.MinecraftActionResponse, error)
 }
 
 type sessionIdentityAPI interface {

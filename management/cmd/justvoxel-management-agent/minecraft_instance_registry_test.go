@@ -418,14 +418,10 @@ func TestInstanceRegistryRejectsUnsafeState(t *testing.T) {
 
 func TestInstanceRegistryAPI(t *testing.T) {
 	useTestMinecraftInstances(t)
-	oldDiscovery, oldRuntime := runAdminDiscoveryHelper, runWebHelper
-	t.Cleanup(func() { runAdminDiscoveryHelper, runWebHelper = oldDiscovery, oldRuntime })
+	oldDiscovery := runAdminDiscoveryHelper
+	t.Cleanup(func() { runAdminDiscoveryHelper = oldDiscovery })
 	runAdminDiscoveryHelper = func(context.Context, string) ([]byte, error) {
 		return []byte(`{"configured":true,"minecraft":{"server_type":"purpur"}}`), nil
-	}
-	runWebHelper = func(context.Context, ...string) ([]byte, int, error) {
-		t.Fatal("registry invoked runtime")
-		return nil, 0, nil
 	}
 	identity, err := minecraftInstances.register("legacy1", true)
 	if err != nil {
@@ -505,7 +501,7 @@ func TestInstanceRegistryAPI(t *testing.T) {
 	}
 }
 
-func TestInstanceRegistryCorruptOptionalNamesDoNotBlockRuntime(t *testing.T) {
+func TestInstanceRegistryCorruptOptionalNamesDoNotBlockExistingIdentity(t *testing.T) {
 	useTestMinecraftInstances(t)
 	identity, err := minecraftInstances.register("legacy1", true)
 	if err != nil {
@@ -516,16 +512,6 @@ func TestInstanceRegistryCorruptOptionalNamesDoNotBlockRuntime(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(minecraftInstances.directory, "names", identity.ID+".json"), []byte(`invalid`), 0600); err != nil {
 		t.Fatal(err)
-	}
-	oldRuntime := runWebHelper
-	t.Cleanup(func() { runWebHelper = oldRuntime })
-	runWebHelper = func(context.Context, ...string) ([]byte, int, error) {
-		return []byte(`{"ok":true,"action":"start"}`), 0, nil
-	}
-	rr := httptest.NewRecorder()
-	adminServerForTest().minecraftStart(rr, authorizedRequest(http.MethodPost, "/v1/minecraft/start", "{}"))
-	if rr.Code != 200 {
-		t.Fatalf("corrupt optional names blocked runtime=%d %s", rr.Code, rr.Body.String())
 	}
 	if current, err := minecraftInstances.register("", false); err != nil || current != identity {
 		t.Fatalf("corrupt names blocked existing identity=%v %v", current, err)

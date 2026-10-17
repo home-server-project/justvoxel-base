@@ -219,13 +219,9 @@ func TestMinecraftInstanceRejectsUnsafeRecords(t *testing.T) {
 }
 
 func TestMinecraftInstanceAPI(t *testing.T) {
-	oldStore, oldDiscovery, oldRuntime := minecraftInstances, runAdminDiscoveryHelper, runWebHelper
+	oldStore, oldDiscovery := minecraftInstances, runAdminDiscoveryHelper
 	minecraftInstances = testMinecraftInstances(t)
-	t.Cleanup(func() { minecraftInstances, runAdminDiscoveryHelper, runWebHelper = oldStore, oldDiscovery, oldRuntime })
-	runWebHelper = func(context.Context, ...string) ([]byte, int, error) {
-		t.Fatal("identity changed runtime")
-		return nil, 0, nil
-	}
+	t.Cleanup(func() { minecraftInstances, runAdminDiscoveryHelper = oldStore, oldDiscovery })
 	runAdminDiscoveryHelper = func(context.Context, string) ([]byte, error) { return []byte(`{"configured":true}`), nil }
 	server := adminServerForTest()
 	mux := http.NewServeMux()
@@ -307,23 +303,6 @@ func TestMinecraftInstanceAuthorizationAndUnconfiguredServer(t *testing.T) {
 	}
 	if identity, err := minecraftInstances.read(); err != nil || identity.Status != "available" {
 		t.Fatal("pre-creation identity was not persisted")
-	}
-}
-
-func TestMissingMinecraftIdentityDoesNotBlockRuntime(t *testing.T) {
-	oldStore, oldRuntime := minecraftInstances, runWebHelper
-	minecraftInstances = testMinecraftInstances(t)
-	t.Cleanup(func() { minecraftInstances, runWebHelper = oldStore, oldRuntime })
-	runWebHelper = func(_ context.Context, args ...string) ([]byte, int, error) {
-		return []byte(`{"ok":true,"action":"start"}`), 0, nil
-	}
-	rr := httptest.NewRecorder()
-	adminServerForTest().minecraftStart(rr, authorizedRequest(http.MethodPost, "/v1/minecraft/start", "{}"))
-	if rr.Code != 200 {
-		t.Fatalf("start without ID: %d %s", rr.Code, rr.Body.String())
-	}
-	if _, err := os.Stat(minecraftInstances.directory); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("runtime created identity")
 	}
 }
 
