@@ -191,8 +191,13 @@ test -f /usr/lib/sysusers.d/justvoxel-web.conf
 grep -Fq 'u justvoxel-web ' /usr/lib/sysusers.d/justvoxel-web.conf
 test -f /usr/lib/tmpfiles.d/justvoxel-web.conf
 test -f /usr/lib/systemd/system/justvoxel-minecraft-shutdown-guard.service
-grep -Fqx 'After=minecraft.service' /usr/lib/systemd/system/justvoxel-minecraft-shutdown-guard.service
+if grep -Eq '^[[:blank:]]*(After|Before|Wants|Requires|Requisite|BindsTo|PartOf)[[:blank:]]*=.*\bminecraft\.service\b' /usr/lib/systemd/system/justvoxel-minecraft-shutdown-guard.service; then
+    echo 'ERROR: shutdown guard must not depend on the fixed minecraft.service.' >&2
+    exit 1
+fi
 grep -Fqx 'ExecStop=/usr/libexec/justvoxel/mjust/host-shutdown-guard' /usr/lib/systemd/system/justvoxel-minecraft-shutdown-guard.service
+test -x /usr/libexec/justvoxel/mjust/instance-host-shutdown-prepare
+grep -Fqx '/usr/libexec/justvoxel/mjust/instance-host-shutdown-prepare' /usr/libexec/justvoxel/mjust/host-shutdown-guard
 test -f /usr/lib/systemd/system/justvoxel-management.service
 test -f /usr/lib/systemd/system/justvoxel-webui.service
 test -f /usr/lib/systemd/system/justvoxel-web-bootstrap.service

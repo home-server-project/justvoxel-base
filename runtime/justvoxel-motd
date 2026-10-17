@@ -120,7 +120,15 @@ elif [[ ${ethernet_connecting} == yes ]]; then
     network_state='Ethernet connected, obtaining address...'
 fi
 
-if [[ -f /etc/containers/systemd/minecraft.container ]]; then
+# A committed modern Quadlet is public evidence for MOTD presentation.
+modern_quadlet_found=no
+for quadlet in /etc/containers/systemd/minecraft-jv-*.container; do
+    [[ ${quadlet##*/} =~ ^minecraft-jv-[a-z0-9]{6,12}\.container$ ]] || continue
+    [[ -f ${quadlet} && ! -L ${quadlet} ]] || continue
+    modern_quadlet_found=yes
+    break
+done
+if [[ ${modern_quadlet_found} == yes ]]; then
     minecraft_state='Configured'
     needs_setup=no
 else

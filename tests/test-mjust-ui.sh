@@ -207,7 +207,8 @@ if grep -Fq "'Operating system status' 'Check / download OS update'" "${menu}"; 
 fi
 
 grep -Fq "logs) /usr/bin/mjust logs || true ;;" "${menu}" || fail 'Logs menu does not open the API-backed Minecraft log view directly'
-grep -Fq '/v1/logs/minecraft?limit=100&format=cat' "${logs}" || fail 'Minecraft logs must use the message-only Management API view'
+grep -Fq '"${api_client}" GET "/v1/minecraft/instances/${instance_id}/logs?limit=100&format=cat"' "${logs}" || fail 'Minecraft logs must use the instance-addressed message-only Management API view'
+grep -Fq 'instance_id="$(jv_select_registered_instance "${instance_id}")" || exit 1' "${logs}" || fail 'Minecraft logs must select an immutable registered instance'
 if grep -Fq -- '--advanced' "${logs}" || grep -Fq 'journalctl ' "${logs}" || grep -Fq 'Advanced / full system log' "${menu}"; then
     fail 'legacy advanced/full-system logs remain exposed through mJust'
 fi

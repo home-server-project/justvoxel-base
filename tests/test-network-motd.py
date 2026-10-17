@@ -22,6 +22,9 @@ class ProviderMOTD(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.directory = Path(self.temp.name)
         self.source = (ROOT / "runtime/justvoxel-motd").read_text()
+        self.quadlets = self.directory / "quadlets"
+        self.quadlets.mkdir()
+        self.source = self.source.replace("/etc/containers/systemd/", str(self.quadlets) + "/")
         self.configs = {}
         for path in ["/var/lib/netbird/default.json", "/etc/netbird/config.json",
                      "/etc/netbird/config.yaml", "/etc/playit/playit.toml"]:
@@ -55,11 +58,50 @@ class ProviderMOTD(unittest.TestCase):
             path.write_text("#!/usr/bin/bash\n" + body + "\n")
             path.chmod(0o755)
 
-    def rows(self, issue=False):
+    def rows(self, issue=False, labels="Tailscale|NetBird|Playit"):
         result = subprocess.run(["bash", str(self.script)] + (["--issue"] if issue else []),
                                 env=self.env, capture_output=True, text=True, check=True)
         text = re.sub(r"\\e\[[0-9;]*m", "", result.stdout)
-        return dict(re.findall(r"^\s*(Tailscale|NetBird|Playit):\s+([^\n]+)", text, re.M))
+        return dict(re.findall(rf"^\s*({labels}):\s+([^\n]+)", text, re.M))
+
+    def assert_minecraft_state(self, expected):
+        for issue in (False, True):
+            self.assertEqual(self.rows(issue, labels="Minecraft"), {"Minecraft": expected})
+
+    def test_zero_modern_quadlets(self):
+        self.assert_minecraft_state("Not configured")
+
+    def test_one_modern_quadlet(self):
+        (self.quadlets / "minecraft-jv-abc123.container").touch()
+        self.assert_minecraft_state("Configured")
+
+    def test_multiple_modern_quadlets(self):
+        for instance_id in ("jv-abc123", "jv-abcdef123456"):
+            (self.quadlets / f"minecraft-{instance_id}.container").touch()
+        self.assert_minecraft_state("Configured")
+
+    def test_old_fixed_quadlet_alone_is_not_configuration(self):
+        (self.quadlets / "minecraft.container").touch()
+        self.assert_minecraft_state("Not configured")
+
+    def test_invalid_modern_quadlet_filenames_are_not_configuration(self):
+        for name in ("minecraft-jv-abc12.container",
+                     "minecraft-jv-abcdef1234567.container",
+                     "minecraft-jv-ABC123.container",
+                     "minecraft-jv-abc-123.container",
+                     "minecraft-jv-abc123.container.bak"):
+            (self.quadlets / name).touch()
+        self.assert_minecraft_state("Not configured")
+
+    def test_symlink_modern_quadlet_is_not_configuration(self):
+        target = self.directory / "target.container"
+        target.touch()
+        (self.quadlets / "minecraft-jv-abc123.container").symlink_to(target)
+        self.assert_minecraft_state("Not configured")
+
+    def test_directory_modern_quadlet_is_not_configuration(self):
+        (self.quadlets / "minecraft-jv-abc123.container").mkdir()
+        self.assert_minecraft_state("Not configured")
 
     def test_fresh_services_are_not_configuration(self):
         expected = {name: "Not configured" for name in ["Tailscale", "NetBird", "Playit"]}

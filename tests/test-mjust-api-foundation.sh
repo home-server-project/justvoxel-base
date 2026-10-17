@@ -161,7 +161,8 @@ for forbidden in 'systemctl ' '/usr/libexec/justvoxel/minecraft-backup' 'flock '
     fi
 done
 
-grep -Fq "'/v1/logs/minecraft?limit=100&format=cat'" "${logs}" || fail 'mJust logs do not use the Management API'
+grep -Fq '"${api_client}" GET "/v1/minecraft/instances/${instance_id}/logs?limit=100&format=cat"' "${logs}" || fail 'mJust logs do not use the instance-addressed Management API'
+grep -Fq 'instance_id="$(jv_select_registered_instance "${instance_id}")" || exit 1' "${logs}" || fail 'mJust logs do not select an immutable registered instance'
 if grep -Fq -- '--advanced' "${logs}" || grep -Fq 'journalctl ' "${logs}"; then
     fail 'mJust logs still expose the removed direct advanced journal path'
 fi
