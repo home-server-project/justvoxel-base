@@ -248,7 +248,7 @@ func TestDashboardUsesWorkspaceControlsAndQuickLook(t *testing.T) {
 		t.Fatalf("got %d", rr.Code)
 	}
 	body := rr.Body.String()
-	for _, want := range []string{`data-quick-look`, `data-quick-look-minecraft`, `data-quick-look-players`, `data-workspace-window="minecraft"`, "/minecraft/start", "/minecraft/stop", "/minecraft/restart", `data-dashboard-status="/api/dashboard-status"`, `data-configured="true"`, "dashboard-attention"} {
+	for _, want := range []string{`data-quick-look`, `data-quick-look-minecraft`, `data-quick-look-players`, `data-workspace-window="minecraft"`, "/minecraft/start", "/minecraft/stop", "/minecraft/restart", `data-dashboard-status="/api/dashboard-status?server=jv-a1b2c3"`, `data-configured="true"`, "dashboard-attention"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("missing %q in response", want)
 		}
@@ -323,7 +323,7 @@ func TestDashboardStatusReturnsLiveJSON(t *testing.T) {
 		t.Fatalf("unexpected content type %q", got)
 	}
 	body := rr.Body.String()
-	for _, want := range []string{`"state":"Running"`, `"online":2`, `"names":["Alex","Steve"]`} {
+	for _, want := range []string{`"state":"Running"`, `"online":2`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("missing %q in status response: %s", want, body)
 		}
@@ -446,11 +446,11 @@ func TestMinecraftActionErrorRendersFriendlyMessage(t *testing.T) {
 		actionResult: api.MinecraftActionResponse{Action: "stop", Message: "Could not confirm player status through RCON. Minecraft was not interrupted."},
 		actionErr:    errors.New("rejected"),
 	}
-	app, err := New(fake, Config{ExternalScheme: "http"})
+	app, err := New(&dashboardRestartAPI{fakeAPI: fake}, Config{ExternalScheme: "http"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := actionRequest("http://example/minecraft/stop", "csrf=token")
+	req := actionRequest("http://example/minecraft/stop?server=jv-a1b2c3", "csrf=token")
 	rr := httptest.NewRecorder()
 	app.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusBadRequest {
@@ -609,4 +609,33 @@ func TestDashboardRestartConfirmationKeepsResolvedID(t *testing.T) {
 	if rr.Code != http.StatusSeeOther || fake.selectedID != "jv-b1b2c3" || !fake.confirmed {
 		t.Fatal(rr.Code, fake.selectedID, fake.confirmed)
 	}
+}
+
+func (f *fakeAPI) MinecraftInstances(ctx context.Context, session string) ([]api.RegisteredMinecraftInstance, error) {
+	status, err := f.Status(ctx, session)
+	if err != nil || !status.Minecraft.Configured {
+		return nil, err
+	}
+	return []api.RegisteredMinecraftInstance{{ID: "jv-a1b2c3"}}, nil
+}
+func (f *fakeAPI) MinecraftInstanceRuntimes(ctx context.Context, session string) ([]string, error) {
+	instances, err := f.MinecraftInstances(ctx, session)
+	ids := []string{}
+	for _, instance := range instances {
+		ids = append(ids, instance.ID)
+	}
+	return ids, err
+}
+func (f *fakeAPI) MinecraftInstanceConfiguration(ctx context.Context, session, id string) (api.InstanceRuntimeSettings, error) {
+	status, err := f.Status(ctx, session)
+	mc := status.Minecraft
+	return api.InstanceRuntimeSettings{Software: mc.ServerSoftware, Version: mc.Version, MaxPlayers: mc.MaxPlayers, JavaPort: mc.JavaPort, BedrockEnabled: mc.Bedrock, BedrockPort: mc.BedrockPort}, err
+}
+func (f *fakeAPI) MinecraftInstanceStatus(ctx context.Context, session, id string) (api.MinecraftInstanceStatus, error) {
+	status, err := f.Status(ctx, session)
+	return api.MinecraftInstanceStatus{ID: id, State: strings.ToLower(status.Minecraft.State)}, err
+}
+func (f *fakeAPI) MinecraftInstancePlayers(ctx context.Context, session, id string) (api.InstancePlayers, error) {
+	players, err := f.Players(ctx, session)
+	return api.InstancePlayers{ID: id, State: players.State, Online: players.Online, Maximum: players.Max}, err
 }

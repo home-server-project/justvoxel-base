@@ -12,7 +12,7 @@ func TestWorkspaceWindowStateIsScopedToAuthenticatedUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := app.dashboardData(context.Background(), "session-token", "csrf")
+	data, err := app.dashboardData(context.Background(), "session-token", "csrf", selectedServerContext{})
 	if err != nil {
 		t.Fatal(err)
 	}

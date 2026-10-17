@@ -276,7 +276,7 @@ func TestConnectionGuidePlayitMapping(t *testing.T) {
 }
 func TestConnectionGuideControlCenterAndSafety(t *testing.T) {
 	header, _ := assets.ReadFile("templates/header.html")
-	if !strings.Contains(string(header), `class="control-tile" href="/minecraft/how-to-connect" target="_blank" rel="noopener"`) {
+	if !strings.Contains(string(header), `class="control-tile" href="/minecraft/how-to-connect{{if .SelectedMinecraftID}}?server={{.SelectedMinecraftID}}{{end}}" target="_blank" rel="noopener"`) {
 		t.Fatal("safe read-only launcher missing")
 	}
 	js, _ := assets.ReadFile("static/how-to-connect.js")
@@ -286,9 +286,9 @@ func TestConnectionGuideControlCenterAndSafety(t *testing.T) {
 		}
 	}
 	status := guideFixture()
-	status.Minecraft.ServerSoftware = `<script>alert('x')</script>`
+	status.Minecraft.Version = `<script>alert('x')</script>`
 	body := guidePage(t, &connectionGuideAPI{fakeAPI: fakeAPI{statusResult: status}}, &http.Cookie{Name: sessionCookie, Value: "session-token"}).Body.String()
-	if strings.Contains(body, status.Minecraft.ServerSoftware) || !strings.Contains(body, "&lt;script&gt;") {
+	if strings.Contains(body, status.Minecraft.Version) || !strings.Contains(body, "&lt;script&gt;") {
 		t.Fatal("unescaped server label")
 	}
 }

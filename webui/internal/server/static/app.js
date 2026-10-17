@@ -178,6 +178,7 @@ document.addEventListener("submit", (event) => {
   const form = event.target.closest(".action-form");
   if (!form) return;
 
+  if (form.dataset.minecraftAction) form.action = globalThis.justVoxelSelectedURL(form.action);
   const submitted = form.querySelector('button[type="submit"]');
   document.querySelectorAll(".action-form button").forEach((button) => {
     button.disabled = true;
@@ -248,6 +249,12 @@ if (navigationGroups.length > 0) {
 }
 
 const dashboard = document.querySelector("#dashboard[data-dashboard-status]");
+// Pin the resolver's sole-instance selection for polling, links and reloads.
+if (dashboard?.dataset.selectedMinecraftId && !new URLSearchParams(window.location.search).has("server")) {
+  const target = new URL(window.location.href);
+  target.searchParams.set("server", dashboard.dataset.selectedMinecraftId);
+  window.history.replaceState(window.history.state, "", target);
+}
 if (dashboard) {
   const statusURL = dashboard.dataset.dashboardStatus;
   const sessionURL = dashboard.dataset.sessionInfo;
@@ -416,11 +423,15 @@ if (dashboard) {
 
 
 
+document.querySelectorAll('a[href^="/minecraft/how-to-connect"]').forEach((link) => {
+  link.href = globalThis.justVoxelSelectedURL(link.getAttribute("href"));
+});
+
 const quickLook = document.querySelector("[data-quick-look]");
 const quickLookToggle = document.querySelector("[data-quick-look-toggle]");
 if (quickLook && quickLookToggle) {
   const identityURL = "/api/session-info";
-  const statusURL = "/api/dashboard-status";
+  const statusURL = dashboard?.dataset.dashboardStatus || globalThis.justVoxelSelectedURL("/api/dashboard-status");
   const actionMenus = Array.from(quickLook.querySelectorAll("[data-quick-look-actions]"));
   let identity = null;
   let refreshTimer = null;
@@ -1015,7 +1026,7 @@ const initSystemUpdateWorkspace = () => {
     minecraftConfigured = false;
     syncActionAvailability();
     try {
-      const response = await fetch("/api/dashboard-status", {
+      const response = await fetch(globalThis.justVoxelSelectedURL("/api/dashboard-status"), {
         method: "GET",
         credentials: "same-origin",
         headers: { Accept: "application/json" },

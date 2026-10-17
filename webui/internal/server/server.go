@@ -304,12 +304,15 @@ func (a *App) dashboard(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
-	data, err := a.dashboardData(r.Context(), session, csrfFromRequest(r))
+	selected, ok := a.dashboardMinecraftSelection(w, r, session)
+	if !ok {
+		return
+	}
+	data, err := a.dashboardData(r.Context(), session, csrfFromRequest(r), selected)
 	if err != nil {
 		a.handleDashboardError(w, r, err)
 		return
 	}
-	data.SelectedMinecraftID = r.URL.Query().Get("server")
 	result := r.URL.Query().Get("result")
 	data.Message = actionResultMessage(result)
 	data.PendingAction = pendingAction(result)
@@ -327,7 +330,11 @@ func (a *App) dashboardStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "authentication required", http.StatusUnauthorized)
 		return
 	}
-	data, err := a.dashboardData(r.Context(), session, "")
+	selected, ok := a.dashboardMinecraftSelection(w, r, session)
+	if !ok {
+		return
+	}
+	data, err := a.dashboardData(r.Context(), session, "", selected)
 	if err != nil {
 		if errors.Is(err, api.ErrUnauthorized) {
 			a.clearSessionCookies(w)
@@ -359,44 +366,37 @@ func (a *App) minecraftAction(action string) http.HandlerFunc {
 			return
 		}
 		confirmPlayers := r.FormValue("confirm_players") == "yes"
-		var result api.MinecraftActionResponse
-		var actionErr error
-		selectedID := ""
-		if action == "restart" {
-			// Reuse the authoritative resolver; a confirmation form carries the
-			// resolved identity rather than resolving a new selection on retry.
-			selectionRequest := r.Clone(r.Context())
-			selectionURL := *r.URL
-			selectionRequest.URL = &selectionURL
-			if values, exists := r.PostForm["server"]; exists {
-				if len(values) != 1 || !addServerIDPattern.MatchString(values[0]) {
-					http.Error(w, "Invalid server selection.", http.StatusBadRequest)
-					return
-				}
-				query := selectionURL.Query()
-				if existing, exists := query["server"]; exists && (len(existing) != 1 || existing[0] != values[0]) {
-					http.Error(w, "Invalid server selection.", http.StatusBadRequest)
-					return
-				}
-				query.Set("server", values[0])
-				selectionURL.RawQuery = query.Encode()
-			}
-			selected, ok := a.selectedMinecraft(w, selectionRequest, session)
-			if !ok {
+		// Reuse the authoritative resolver; a confirmation form carries the
+		// resolved identity rather than resolving a new selection on retry.
+		selectionRequest := r.Clone(r.Context())
+		selectionURL := *r.URL
+		selectionRequest.URL = &selectionURL
+		if values, exists := r.PostForm["server"]; exists {
+			if len(values) != 1 || !addServerIDPattern.MatchString(values[0]) {
+				http.Error(w, "Invalid server selection.", http.StatusBadRequest)
 				return
 			}
-			selectedID = selected.ID
-			client, ok := a.api.(interface {
-				MinecraftInstanceActionConfirmed(context.Context, string, string, string, bool) (api.MinecraftActionResponse, error)
-			})
-			if !ok {
-				http.Error(w, "Minecraft control is unavailable.", http.StatusServiceUnavailable)
+			query := selectionURL.Query()
+			if existing, exists := query["server"]; exists && (len(existing) != 1 || existing[0] != values[0]) {
+				http.Error(w, "Invalid server selection.", http.StatusBadRequest)
 				return
 			}
-			result, actionErr = client.MinecraftInstanceActionConfirmed(r.Context(), session, selectedID, action, confirmPlayers)
-		} else {
-			result, actionErr = a.api.MinecraftAction(r.Context(), session, action, confirmPlayers)
+			query.Set("server", values[0])
+			selectionURL.RawQuery = query.Encode()
 		}
+		selected, ok := a.selectedMinecraft(w, selectionRequest, session)
+		if !ok {
+			return
+		}
+		selectedID := selected.ID
+		client, ok := a.api.(interface {
+			MinecraftInstanceActionConfirmed(context.Context, string, string, string, bool) (api.MinecraftActionResponse, error)
+		})
+		if !ok {
+			http.Error(w, "Minecraft control is unavailable.", http.StatusServiceUnavailable)
+			return
+		}
+		result, actionErr := client.MinecraftInstanceActionConfirmed(r.Context(), session, selectedID, action, confirmPlayers)
 		if errors.Is(actionErr, api.ErrUnauthorized) {
 			a.clearSessionCookies(w)
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
@@ -407,7 +407,7 @@ func (a *App) minecraftAction(action string) http.HandlerFunc {
 			return
 		}
 		if actionErr == nil && result.ConfirmationRequired {
-			data, err := a.dashboardData(r.Context(), session, csrfFromRequest(r))
+			data, err := a.dashboardData(r.Context(), session, csrfFromRequest(r), selectedServerContext{ID: selectedID})
 			if err != nil {
 				a.handleDashboardError(w, r, err)
 				return
@@ -423,7 +423,7 @@ func (a *App) minecraftAction(action string) http.HandlerFunc {
 			return
 		}
 		if actionErr != nil {
-			data, err := a.dashboardData(r.Context(), session, csrfFromRequest(r))
+			data, err := a.dashboardData(r.Context(), session, csrfFromRequest(r), selectedServerContext{ID: selectedID})
 			if err != nil {
 				a.handleDashboardError(w, r, err)
 				return
@@ -446,26 +446,89 @@ func (a *App) minecraftAction(action string) http.HandlerFunc {
 	}
 }
 
-func (a *App) dashboardData(ctx context.Context, session, csrf string) (pageData, error) {
+// Keep the existing setup experience only for an authoritatively empty inventory.
+// All actual selection decisions belong to selectedMinecraft.
+func (a *App) dashboardMinecraftSelection(w http.ResponseWriter, r *http.Request, session string) (selectedServerContext, bool) {
+	if _, explicit := r.URL.Query()["server"]; !explicit {
+		instances, err := a.independentServerInventory(r.Context(), session)
+		if err != nil {
+			a.handleDashboardError(w, r, err)
+			return selectedServerContext{}, false
+		}
+		if len(instances) == 0 {
+			return selectedServerContext{}, true
+		}
+	}
+	return a.selectedMinecraft(w, r, session)
+}
+
+// Translate verified instance configuration into the existing presentation contract.
+// The configuration client verifies the response identity before returning settings.
+func instancePresentation(configuration api.InstanceRuntimeSettings) api.Status {
+	var status api.Status
+	mc := &status.Minecraft
+	mc.Configured = true
+	mc.State = "Unavailable"
+	mc.ServerSoftware = serverSoftware(configuration.Software)
+	mc.ServerType = configuration.Software
+	mc.Version = configuration.Version
+	mc.MaxPlayers = configuration.MaxPlayers
+	mc.JavaPort = configuration.JavaPort
+	mc.Bedrock = configuration.BedrockEnabled
+	mc.BedrockPort = configuration.BedrockPort
+	return status
+}
+
+func (a *App) dashboardData(ctx context.Context, session, csrf string, selected selectedServerContext) (pageData, error) {
 	status, err := a.api.Status(ctx, session)
 	if err != nil {
 		return pageData{}, err
 	}
-	players, err := a.api.Players(ctx, session)
-	if err != nil {
-		if errors.Is(err, api.ErrUnauthorized) || errors.Is(err, api.ErrPasswordChangeRequired) {
-			return pageData{}, err
+	// Appliance status supplies host, backup and JustVoxel information only.
+	status.Minecraft = (api.Status{}).Minecraft
+	status.Minecraft.State = "Not configured"
+	players := api.Players{State: "not_configured"}
+	if selected.ID != "" {
+		status.Minecraft.State = "Unavailable"
+		players = api.Players{State: "unavailable", Error: "Player information is temporarily unavailable."}
+		if client, ok := a.api.(interface {
+			MinecraftInstanceConfiguration(context.Context, string, string) (api.InstanceRuntimeSettings, error)
+			MinecraftInstanceStatus(context.Context, string, string) (api.MinecraftInstanceStatus, error)
+			MinecraftInstancePlayers(context.Context, string, string) (api.InstancePlayers, error)
+		}); ok {
+			configuration, configErr := client.MinecraftInstanceConfiguration(ctx, session, selected.ID)
+			if configErr == nil {
+				status.Minecraft = instancePresentation(configuration).Minecraft
+				players.Configured, players.Max = true, configuration.MaxPlayers
+			}
+			runtime, runtimeErr := client.MinecraftInstanceStatus(ctx, session, selected.ID)
+			if runtimeErr == nil && runtime.ID == selected.ID {
+				summary := minecraftServerSummary{}
+				summary.setState(runtime.State)
+				status.Minecraft.State = summary.State
+			}
+			currentPlayers, playersErr := client.MinecraftInstancePlayers(ctx, session, selected.ID)
+			if playersErr == nil && currentPlayers.ID == selected.ID {
+				players.State, players.Online, players.Max = currentPlayers.State, currentPlayers.Online, currentPlayers.Maximum
+				players.Error = ""
+				status.Minecraft.Players = currentPlayers.Online
+			}
+			for _, readErr := range []error{configErr, runtimeErr, playersErr} {
+				if errors.Is(readErr, api.ErrUnauthorized) || errors.Is(readErr, api.ErrPasswordChangeRequired) {
+					return pageData{}, readErr
+				}
+			}
 		}
-		players = api.Players{Configured: status.Minecraft.Configured, State: "unavailable", Max: status.Minecraft.MaxPlayers, Error: "Player information is temporarily unavailable."}
 	}
 	data := pageData{
-		Title:         "Dashboard",
-		Version:       a.config.Version,
-		Commit:        a.config.Commit,
-		ManagementAPI: a.config.ManagementAPI,
-		CSRF:          csrf,
-		Status:        status,
-		Players:       players,
+		SelectedMinecraftID: selected.ID,
+		Title:               "Dashboard",
+		Version:             a.config.Version,
+		Commit:              a.config.Commit,
+		ManagementAPI:       a.config.ManagementAPI,
+		CSRF:                csrf,
+		Status:              status,
+		Players:             players,
 	}
 	if identityClient, ok := a.api.(sessionIdentityAPI); ok {
 		identity, identityErr := identityClient.Session(ctx, session)

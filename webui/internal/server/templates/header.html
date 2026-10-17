@@ -65,7 +65,7 @@
           <div class="control-tile-grid">
             <a class="control-tile nav-admin-only" href="/minecraft/servers"><strong>Minecraft Servers</strong></a>
             <button class="control-tile" type="button" data-minecraft-open title="Minecraft overview, settings and players"><strong>Minecraft Settings</strong></button>
-            <a class="control-tile" href="/minecraft/how-to-connect" target="_blank" rel="noopener" title="Create a friends connection guide"><strong>How to connect</strong></a>
+            <a class="control-tile" href="/minecraft/how-to-connect{{if .SelectedMinecraftID}}?server={{.SelectedMinecraftID}}{{end}}" target="_blank" rel="noopener" title="Create a friends connection guide"><strong>How to connect</strong></a>
             <button class="control-tile nav-admin-only" type="button" data-version-open title="Server software and Minecraft version"><strong>Version</strong></button>
             <button class="control-tile nav-admin-only" type="button" data-plugins-open title="Discover plugins and view installed plugins"><strong>Plugins</strong></button>
           </div>
@@ -105,10 +105,12 @@
               <div class="quick-look-action-menu">
                 <form method="post" action="/minecraft/start" class="action-form role-admin-or-operator" data-progress="Starting…" data-minecraft-action="start">
                   <input type="hidden" name="csrf" value="{{.CSRF}}">
+                  {{if .SelectedMinecraftID}}<input type="hidden" name="server" value="{{.SelectedMinecraftID}}">{{end}}
                   <button type="submit">Start</button>
                 </form>
                 <form method="post" action="/minecraft/stop" class="action-form role-admin" data-progress="Stopping…" data-minecraft-action="stop">
                   <input type="hidden" name="csrf" value="{{.CSRF}}">
+                  {{if .SelectedMinecraftID}}<input type="hidden" name="server" value="{{.SelectedMinecraftID}}">{{end}}
                   <button type="submit">Stop</button>
                 </form>
                 <form method="post" action="/minecraft/restart" class="action-form role-admin-or-operator" data-progress="Restarting…" data-minecraft-action="restart">

@@ -80,6 +80,25 @@ func (a *App) howToConnect(w http.ResponseWriter, r *http.Request) {
 		a.handleDashboardError(w, r, err)
 		return
 	}
+	selected, ok := a.dashboardMinecraftSelection(w, r, session)
+	if !ok {
+		return
+	}
+	status.Minecraft = (api.Status{}).Minecraft
+	if selected.ID != "" {
+		client, ok := a.api.(interface {
+			MinecraftInstanceConfiguration(context.Context, string, string) (api.InstanceRuntimeSettings, error)
+		})
+		if ok {
+			configuration, configErr := client.MinecraftInstanceConfiguration(r.Context(), session, selected.ID)
+			if configErr == nil {
+				status.Minecraft = instancePresentation(configuration).Minecraft
+			} else if errors.Is(configErr, api.ErrUnauthorized) || errors.Is(configErr, api.ErrPasswordChangeRequired) {
+				a.handleDashboardError(w, r, configErr)
+				return
+			}
+		}
+	}
 	var remote api.RemoteAccessStatus
 	if status.Minecraft.Configured {
 		if client, ok := a.api.(connectionStatusAPI); ok {
@@ -90,7 +109,7 @@ func (a *App) howToConnect(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	a.render(w, "how_to_connect.html", pageData{Title: "How to connect", ConnectionGuide: newConnectionGuide(status, remote)})
+	a.render(w, "how_to_connect.html", pageData{Title: "How to connect", SelectedMinecraftID: selected.ID, ConnectionGuide: newConnectionGuide(status, remote)})
 }
 
 func usableConnectionIP(value string, ipv4 bool) bool {
