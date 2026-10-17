@@ -126,6 +126,15 @@ reject_guard() {
 }
 bash "${test_root}/guard" jv-a1b2c3
 reject_guard invalid
+# An interrupted physical migration never starts through a guessed current ID
+# or without an operation-bound live Agent permit.
+printf '{"schema":1,"id":"jv-a1b2c3","operation_id":"f06104cc-06b8-49d2-9061-6431a3a47e57"}' > "${dir}/data-migration.json"
+chmod 0600 "${dir}/data-migration.json"
+reject_guard jv-a1b2c3
+printf '{"schema":1,"id":"jv-d4e5f6","operation_id":"f06104cc-06b8-49d2-9061-6431a3a47e57"}' > "${dir}/data-migration.json"
+reject_guard jv-a1b2c3
+rm -- "${dir}/data-migration.json"
+bash "${test_root}/guard" jv-a1b2c3
 printf '{}' > "${dir}/pending.json"
 reject_guard jv-a1b2c3
 rm -- "${dir}/pending.json"

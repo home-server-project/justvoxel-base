@@ -26,6 +26,7 @@ type adminDataMigrationApplyResponse struct {
 }
 
 type dataMigrationExecutionPlan struct {
+	Participants           []dataMigrationParticipant
 	Request                adminDataMigrationRequest
 	TargetIdentity         string
 	ConfigIdentity         string
@@ -34,6 +35,7 @@ type dataMigrationExecutionPlan struct {
 }
 
 func registerAdminDataMigrationRoutes(mux *http.ServeMux, s *server) {
+	mux.HandleFunc("POST /v1/admin/data-migration/recover", s.adminDataMigrationRecover)
 	mux.HandleFunc("GET /v1/admin/data-migration", s.adminDataMigrationDiscover)
 	mux.HandleFunc("POST /v1/admin/data-migration/plan", s.adminDataMigrationPlan)
 	mux.HandleFunc("POST /v1/admin/data-migration/apply", s.adminDataMigrationApply)
@@ -133,6 +135,7 @@ func (s *server) adminDataMigrationApply(w http.ResponseWriter, r *http.Request)
 
 	if created {
 		startDataMigrationWorker(s, operation.OperationID, dataMigrationExecutionPlan{
+			Participants:           plan.Context.Participants,
 			Request:                request.Request,
 			TargetIdentity:         plan.Context.TargetIdentity,
 			ConfigIdentity:         plan.Context.ConfigIdentity,

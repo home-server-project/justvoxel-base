@@ -928,6 +928,9 @@ func (s *operationStore) beginDataMigration(planFingerprint string) (operationJo
 		}
 		return operationJournal{}, false, errDataMigrationOperationBusy
 	}
+	if s.currentSetupID != "" || s.currentRestoreID != "" || s.currentMigrationID != "" {
+		return operationJournal{}, false, errDataMigrationOperationBusy
+	}
 	if err := s.acquireDataMigrationLock(); err != nil {
 		return operationJournal{}, false, err
 	}
@@ -1488,7 +1491,8 @@ func (s *operationStore) transition(id string, next operationState, stage, statu
 	}
 	setupRecovery := journal.OperationType == operationTypeSetup && journal.State == operationNeedsAttention && ((journal.Stage == "storage_rollback" && stage == "storage_recovery") || (journal.Stage == "runtime_rollback" && stage == "runtime_recovery")) && next == operationRollingBack
 	queuedPluginCancellation := isPluginOperationType(journal.OperationType) && journal.State == operationQueued && next == operationRolledBack && stage == "complete"
-	if !setupRecovery && !queuedPluginCancellation && !operationTransitionAllowed(journal.State, next) {
+	dataMigrationRecovery := journal.OperationType == operationTypeDataMigration && journal.State == operationNeedsAttention && next == operationRollingBack && stage == "migration_recovery"
+	if !dataMigrationRecovery && !setupRecovery && !queuedPluginCancellation && !operationTransitionAllowed(journal.State, next) {
 		return operationJournal{}, fmt.Errorf("invalid operation transition %s -> %s", journal.State, next)
 	}
 	recoveryFailed := journal.OperationType == operationTypeSetup && journal.State == operationRollingBack && (journal.Stage == "storage_recovery" || journal.Stage == "runtime_recovery") && next == operationNeedsAttention && (stage == "storage_rollback" || stage == "runtime_rollback")

@@ -87,24 +87,57 @@ The runtime records the expected UUID/source and validates it before Minecraft o
 
 `mjust storage-migrate` and **WebUI -> Storage & Backups -> Minecraft data storage** are thin Administrator frontends over the shared Minecraft data migration Management API. Both use Agent-discovered safe targets, display the authoritative plan and warnings, collect the exact destructive phrase when storage preparation requires one, confirm player interruption when required, and monitor/reconnect to the same persistent migration operation.
 
-The Management Agent owns the migration transaction:
+Physical data migration is an appliance-wide Administrator operation. The server
+selected in the WebUI does not choose its participants. The operation moves the
+physical Minecraft storage root, including every authoritative independent
+instance under `minecraft-instances/<immutable-id>/data`. The historical
+`DATA_PATH` leaf is retained as appliance storage policy; when it exists, its
+contents are copied as well. Backup storage stays in its configured location.
 
-1. revalidate the exact reviewed target, configuration identity, capacity, and player state
-2. prepare or adopt the reviewed local destination
-3. refuse a non-empty destination data directory
-4. hold the shared Minecraft maintenance lock
-5. recheck players immediately before interruption
-6. create a verified pre-migration cold backup and leave Minecraft stopped
-7. copy the complete persistent data tree with rsync
-8. run a dry-run rsync verification before switching configuration
-9. update the administrator-owned data path and persistent mount identity
-10. restore SELinux labels and regenerate runtime configuration
-11. start and validate Minecraft when it was running before migration
-12. roll back to the old data-path configuration/runtime if migrated runtime validation fails
+Review requires at least one managed instance and a verifiable registry, committed
+runtime, stopped/running state, storage identity, and cold-backup destination for
+every instance. It checks target capacity, aggregate backup capacity, mount
+topology, source/destination separation, and appliance maintenance exclusions.
+An active fixed Minecraft unit or any fixed Minecraft container prevents migration;
+it is never used as a fallback. The reserved historical `minecraft.json` identity
+is compatibility metadata, not an independent runtime participant.
 
-The operation is journaled persistently. Re-running `mjust storage-migrate` or reopening the WebUI migration entry point reconnects to an active operation instead of starting a second migration. If the Agent or appliance is interrupted before a safe terminal result can be proven, the operation becomes `needs_attention` and preserves migration recovery state for administrator review.
+Apply revalidates the complete reviewed participant set under appliance-wide
+exclusion, maintenance, operation, and shared registry locks. Before shutdown or
+target preparation it durably records each immutable ID, derived unit/container,
+original running/stopped state, and original committed runtime files. Every running
+instance receives the existing instance-aware player check and graceful shutdown.
+Each participant gets an independently verified cold backup. The complete instance
+tree and any historical data leaf are copied with attributes and verified with a
+dry-run rsync before storage policy changes.
 
-The old Minecraft data directory is never deleted automatically. After a successful migration the administrator removes it only after verifying normal gameplay and backups. Storage preparation already completed on a reviewed target may remain after a safe rollback; the original Minecraft configuration/runtime remains authoritative.
+The shared runtime renderer and Quadlet dry-run validator validate the destination
+configuration for all participants. Only storage paths and mount expectations
+change; server settings, credentials, ports, software, and boot preferences remain
+attached to their own immutable IDs. Per-instance mount and runtime checks follow.
+Only previously running instances restart; previously stopped instances stay
+stopped. Existing volume `:Z` labeling remains authoritative.
+
+The old source data is never automatically removed. Prepared target-storage
+changes can remain after rollback. Private terminal evidence is retained across
+the helper/Agent completion handoff so interruption cannot erase recovery identity.
+
+Reopening the WebUI or running `mjust storage-migrate` reconnects to the persistent
+operation and its progress/attention state. For an interrupted modern migration,
+`mjust storage-migrate` offers a confirmed recovery retry through
+`POST /v1/admin/data-migration/recover`. Recovery verifies the exact operation and
+participant evidence, refuses unrelated configuration changes, safely quiesces
+participants, restores original appliance storage policy and runtime files, and
+restores every recorded runtime state. A failed retry preserves evidence and the
+operation claim. Startup guards prevent partially relocated instances from booting;
+only the live root Agent's operation-bound permit authorizes verification startup.
+No terminal edits, journal deletion, reset, or reinstall are recovery steps.
+
+Historical migration journals without immutable participant evidence remain visible
+and read-only. They cannot be safely translated to any current instance or selected
+server. Recovery refuses them without changing their evidence or releasing their
+operation claim. See [physical migration convergence](PHYSICAL-DATA-MIGRATION.md)
+for the compatibility boundary and retained helper audit.
 
 ## Backup retention and failure behavior
 

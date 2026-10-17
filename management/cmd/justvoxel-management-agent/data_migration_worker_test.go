@@ -36,6 +36,7 @@ func TestExecuteDataMigrationTransactionSuccessTracksProgress(t *testing.T) {
 	}
 
 	err = executeDataMigrationTransaction(context.Background(), store, operation.OperationID, dataMigrationExecutionPlan{
+		Participants: []dataMigrationParticipant{{ID: "jv-aaaaaa", Unit: "minecraft-jv-aaaaaa.service", Container: "minecraft-jv-aaaaaa", State: "running", Configuration: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}},
 		Request: adminDataMigrationRequest{
 			Operation: "use_partition", Device: "/dev/vdb1",
 			MountPoint: "/var/mnt/justvoxel-data", Path: "/var/mnt/justvoxel-data/minecraft", SizeGiB: "all",
@@ -84,6 +85,7 @@ func TestExecuteDataMigrationTransactionRollbackTracksTerminalState(t *testing.T
 	}
 
 	if err := executeDataMigrationTransaction(context.Background(), store, operation.OperationID, dataMigrationExecutionPlan{
+		Participants: []dataMigrationParticipant{{ID: "jv-aaaaaa", Unit: "minecraft-jv-aaaaaa.service", Container: "minecraft-jv-aaaaaa", State: "running", Configuration: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}},
 		Request: adminDataMigrationRequest{
 			Operation: "use_partition", Device: "/dev/vdb1",
 			MountPoint: "/var/mnt/justvoxel-data", Path: "/var/mnt/justvoxel-data/minecraft", SizeGiB: "all",
@@ -117,6 +119,7 @@ func TestExecuteDataMigrationTransactionUnexpectedBackendFailureNeedsAttention(t
 	}
 
 	err = executeDataMigrationTransaction(context.Background(), store, operation.OperationID, dataMigrationExecutionPlan{
+		Participants: []dataMigrationParticipant{{ID: "jv-aaaaaa", Unit: "minecraft-jv-aaaaaa.service", Container: "minecraft-jv-aaaaaa", State: "running", Configuration: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}},
 		Request: adminDataMigrationRequest{
 			Operation: "use_partition", Device: "/dev/vdb1",
 			MountPoint: "/var/mnt/justvoxel-data", Path: "/var/mnt/justvoxel-data/minecraft", SizeGiB: "all",

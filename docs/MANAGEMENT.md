@@ -229,3 +229,18 @@ For an administrator who knows the command they want, direct `mjust` commands av
 For Linux troubleshooting or deliberate customization, normal host tools remain available.
 
 The design goal is simple: **JustVoxel behaves like an appliance when that is useful, and like a normal immutable Linux server when an administrator needs deeper control.**
+
+### Appliance-wide physical data migration
+
+Physical migration stays under `/v1/admin/data-migration` (discover, plan, apply,
+current-operation) and the existing persistent-operation status endpoints. It has
+no selected-instance route or browser-supplied unit. The Plan fingerprint commits
+the complete authoritative participant set, its runtime configuration identities,
+and original runtime states. Root-only `data-migration-runtime` Agent commands
+reuse the instance registry/runtime implementation inside the storage transaction.
+
+`POST /v1/admin/data-migration/recover` accepts only `operation_id` and explicit
+`confirm_recovery: true`. It retries rollback for the current `needs_attention`
+operation using private immutable participant evidence. Legacy identity-less
+journals remain read-only. [Storage](STORAGE.md#minecraft-data-migration) describes
+state restoration, startup protection, and recovery behavior.

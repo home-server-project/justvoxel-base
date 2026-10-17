@@ -100,19 +100,20 @@ type adminDataMigrationRequirements struct {
 }
 
 type adminDataMigrationContext struct {
-	ConfigIdentity        string `json:"config_identity"`
-	TargetIdentity        string `json:"target_identity"`
-	CurrentDataIdentity   string `json:"current_data_identity"`
-	CurrentDataPath       string `json:"current_data_path"`
-	CurrentMountPoint     string `json:"current_mount_point"`
-	CurrentExpectedUUID   string `json:"current_expected_uuid"`
-	CurrentExpectedSource string `json:"current_expected_source"`
-	MinecraftUID          string `json:"minecraft_uid"`
-	MinecraftGID          string `json:"minecraft_gid"`
-	BackupPath            string `json:"backup_path"`
-	BackupMountPoint      string `json:"backup_mount_point"`
-	BackupExpectedUUID    string `json:"backup_expected_uuid"`
-	BackupExpectedSource  string `json:"backup_expected_source"`
+	Participants          []dataMigrationParticipant `json:"participants"`
+	ConfigIdentity        string                     `json:"config_identity"`
+	TargetIdentity        string                     `json:"target_identity"`
+	CurrentDataIdentity   string                     `json:"current_data_identity"`
+	CurrentDataPath       string                     `json:"current_data_path"`
+	CurrentMountPoint     string                     `json:"current_mount_point"`
+	CurrentExpectedUUID   string                     `json:"current_expected_uuid"`
+	CurrentExpectedSource string                     `json:"current_expected_source"`
+	MinecraftUID          string                     `json:"minecraft_uid"`
+	MinecraftGID          string                     `json:"minecraft_gid"`
+	BackupPath            string                     `json:"backup_path"`
+	BackupMountPoint      string                     `json:"backup_mount_point"`
+	BackupExpectedUUID    string                     `json:"backup_expected_uuid"`
+	BackupExpectedSource  string                     `json:"backup_expected_source"`
 }
 
 type adminDataMigrationHelperResponse struct {
@@ -322,6 +323,12 @@ func validateSuccessfulAdminDataMigrationPlan(request adminDataMigrationRequest,
 	}
 	if req.Online < 0 || req.Players == nil || (req.PlayersConfirmationRequired && req.Online == 0) {
 		return errors.New("invalid player safety state")
+	}
+	if len(ctx.Participants) == 0 {
+		return errors.New("migration requires authoritative managed participants")
+	}
+	if err := validateDataMigrationParticipants(ctx.Participants); err != nil {
+		return err
 	}
 	if ctx.ConfigIdentity == "" ||
 		ctx.TargetIdentity == "" ||

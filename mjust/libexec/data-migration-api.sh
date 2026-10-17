@@ -105,3 +105,9 @@ jv_data_migration_monitor_operation() {
         sleep 2
     done
 }
+
+jv_data_migration_recover() {
+    local payload
+    payload="$(jq -cn --arg id "$1" '{operation_id:$id,confirm_recovery:true}')" || return 1
+    jv_data_migration_post /v1/admin/data-migration/recover "${payload}"
+}

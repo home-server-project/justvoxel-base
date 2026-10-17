@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-const validDataMigrationPlanHelper = `{"ok":true,"schema_version":"v1","normalized":{"operation":"use_partition","device":"/dev/vdb1","model":"Virtual Disk","transport":"virtio","filesystem":"xfs","mount_point":"/var/mnt/justvoxel-data","path":"/var/mnt/justvoxel-data/minecraft","size_gib":"all","size_bytes":10737418240,"data_bytes":2147483648,"target_capacity_bytes":8589934592,"current_data_path":"/var/lib/justvoxel/minecraft","free_start":"","free_end":"","planned_end":"","free_mib":0,"planned_mib":0},"warnings":[{"code":"old_data_retained","message":"Old data retained."}],"requirements":{"migration_confirmation_required":true,"destructive_confirmation_required":false,"confirmation_phrase":"","players_confirmation_required":false,"minecraft_state":"running","online":0,"players":[],"exact_space_validation_on_apply":true,"cold_backup_required":true,"copy_verification_required":true,"runtime_validation_required":true},"context":{"config_identity":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","target_identity":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","current_data_identity":"1:2:3:4","current_data_path":"/var/lib/justvoxel/minecraft","current_mount_point":"","current_expected_uuid":"","current_expected_source":"","minecraft_uid":"1000","minecraft_gid":"1000","backup_path":"/var/lib/justvoxel/backups","backup_mount_point":"","backup_expected_uuid":"","backup_expected_source":""}}`
+const validDataMigrationPlanHelper = `{"ok":true,"schema_version":"v1","normalized":{"operation":"use_partition","device":"/dev/vdb1","model":"Virtual Disk","transport":"virtio","filesystem":"xfs","mount_point":"/var/mnt/justvoxel-data","path":"/var/mnt/justvoxel-data/minecraft","size_gib":"all","size_bytes":10737418240,"data_bytes":2147483648,"target_capacity_bytes":8589934592,"current_data_path":"/var/lib/justvoxel/minecraft","free_start":"","free_end":"","planned_end":"","free_mib":0,"planned_mib":0},"warnings":[{"code":"old_data_retained","message":"Old data retained."}],"requirements":{"migration_confirmation_required":true,"destructive_confirmation_required":false,"confirmation_phrase":"","players_confirmation_required":false,"minecraft_state":"running","online":0,"players":[],"exact_space_validation_on_apply":true,"cold_backup_required":true,"copy_verification_required":true,"runtime_validation_required":true},"context":{"participants":[{"id":"jv-aaaaaa","unit":"minecraft-jv-aaaaaa.service","container":"minecraft-jv-aaaaaa","state":"running","configuration":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}],"config_identity":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","target_identity":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","current_data_identity":"1:2:3:4","current_data_path":"/var/lib/justvoxel/minecraft","current_mount_point":"","current_expected_uuid":"","current_expected_source":"","minecraft_uid":"1000","minecraft_gid":"1000","backup_path":"/var/lib/justvoxel/backups","backup_mount_point":"","backup_expected_uuid":"","backup_expected_source":""}}`
 
 func TestAdminDataMigrationPlanComputesFingerprintAndHidesContext(t *testing.T) {
 	old := runAdminDataMigrationPlanHelper
@@ -114,5 +114,28 @@ func TestDataMigrationFingerprintChangesWithTargetIdentity(t *testing.T) {
 	}
 	if first == second {
 		t.Fatal("migration plan fingerprint did not change when target identity changed")
+	}
+}
+
+func TestDataMigrationFingerprintIncludesAllParticipantStatesAndIdentities(t *testing.T) {
+	var helper adminDataMigrationHelperResponse
+	if err := decodeAdminDataMigrationJSON([]byte(validDataMigrationPlanHelper), &helper); err != nil {
+		t.Fatal(err)
+	}
+	first, err := adminDataMigrationPlanFingerprint(helper.SchemaVersion, helper.Normalized, helper.Requirements, helper.Context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sibling := helper.Context.Participants[0]
+	sibling.ID = "jv-bbbbbb"
+	sibling.Unit = "minecraft-jv-bbbbbb.service"
+	sibling.Container = "minecraft-jv-bbbbbb"
+	sibling.State = "stopped"
+	helper.Context.Participants = append(helper.Context.Participants, sibling)
+	second, _ := adminDataMigrationPlanFingerprint(helper.SchemaVersion, helper.Normalized, helper.Requirements, helper.Context)
+	helper.Context.Participants[1].State = "running"
+	third, _ := adminDataMigrationPlanFingerprint(helper.SchemaVersion, helper.Normalized, helper.Requirements, helper.Context)
+	if first == second || second == third {
+		t.Fatal("participant addition or sibling state drift did not invalidate Review")
 	}
 }

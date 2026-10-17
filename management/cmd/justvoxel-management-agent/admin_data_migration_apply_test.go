@@ -211,3 +211,53 @@ func TestAdminDataMigrationApplyRequiresPlayerConfirmationFromAuthoritativePlan(
 		t.Fatalf("players status = %d: %s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestAdminDataMigrationApplyRefusesReviewedSiblingDrift(t *testing.T) {
+	for _, drift := range []string{"state", "configuration", "appeared", "disappeared"} {
+		t.Run(drift, func(t *testing.T) {
+			var helper adminDataMigrationHelperResponse
+			if err := decodeAdminDataMigrationJSON([]byte(validDataMigrationPlanHelper), &helper); err != nil {
+				t.Fatal(err)
+			}
+			sibling := helper.Context.Participants[0]
+			sibling.ID = "jv-bbbbbb"
+			sibling.Unit = "minecraft-jv-bbbbbb.service"
+			sibling.Container = "minecraft-jv-bbbbbb"
+			sibling.State = "stopped"
+			helper.Context.Participants = append(helper.Context.Participants, sibling)
+			reviewed, err := adminDataMigrationPlanFingerprint(helper.SchemaVersion, helper.Normalized, helper.Requirements, helper.Context)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch drift {
+			case "state":
+				helper.Context.Participants[1].State = "running"
+			case "configuration":
+				helper.Context.Participants[1].Configuration = strings.Repeat("e", 64)
+			case "appeared":
+				third := sibling
+				third.ID = "jv-cccccc"
+				third.Unit = "minecraft-jv-cccccc.service"
+				third.Container = "minecraft-jv-cccccc"
+				helper.Context.Participants = append(helper.Context.Participants, third)
+			case "disappeared":
+				helper.Context.Participants = helper.Context.Participants[:1]
+			}
+			output, err := json.Marshal(helper)
+			if err != nil {
+				t.Fatal(err)
+			}
+			oldPlan, oldWorker := runAdminDataMigrationPlanHelper, startDataMigrationWorker
+			defer func() { runAdminDataMigrationPlanHelper = oldPlan; startDataMigrationWorker = oldWorker }()
+			runAdminDataMigrationPlanHelper = func(context.Context, string, []byte) ([]byte, error) { return output, nil }
+			startDataMigrationWorker = func(*server, string, dataMigrationExecutionPlan) { t.Error("stale plan reached worker") }
+			s := surfaceTestServer(t, roleAdministrator)
+			s.operations = openTestOperationStore(t)
+			rr := httptest.NewRecorder()
+			s.adminDataMigrationApply(rr, surfaceRequest(http.MethodPost, "/v1/admin/data-migration/apply", dataMigrationApplyBody(t, reviewed, true, false, "")))
+			if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "stale_plan") {
+				t.Fatalf("drift %s accepted: %d %s", drift, rr.Code, rr.Body.String())
+			}
+		})
+	}
+}

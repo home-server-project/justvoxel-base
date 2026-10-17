@@ -58,5 +58,7 @@ this retirement does not invent identity, discard evidence, or release locks.
 Selected Restore recovery continues through the same instance ID.
 
 Shared `backup-common.sh`, `restore-common.sh`, `restore-archive`, and
-`restore-runtime-validate` remain. Physical data migration still invokes the
-runtime validator; migration import still uses Restore layout validation.
+`restore-runtime-validate` remain. Physical data migration now uses the shared
+instance runtime implementation rather than the fixed-runtime validator. The old
+validator is retained as legacy compatibility code with no production physical
+migration caller. Migration import still uses Restore layout validation.

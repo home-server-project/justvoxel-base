@@ -17,13 +17,15 @@ const adminDataMigrationTransactionHelper = "/usr/libexec/justvoxel/mjust/admin-
 var dataMigrationWorkerTimeout = 8 * time.Hour
 
 type dataMigrationTransactionRequest struct {
-	OperationID            string                    `json:"operation_id"`
-	PlanFingerprint        string                    `json:"plan_fingerprint"`
-	Request                adminDataMigrationRequest `json:"request"`
-	TargetIdentity         string                    `json:"target_identity"`
-	ConfigIdentity         string                    `json:"config_identity"`
-	ExpectedMinecraftState string                    `json:"expected_minecraft_state"`
-	PlayersConfirmed       bool                      `json:"players_confirmed"`
+	Recovery               bool                       `json:"recovery,omitempty"`
+	Participants           []dataMigrationParticipant `json:"participants"`
+	OperationID            string                     `json:"operation_id"`
+	PlanFingerprint        string                     `json:"plan_fingerprint"`
+	Request                adminDataMigrationRequest  `json:"request"`
+	TargetIdentity         string                     `json:"target_identity"`
+	ConfigIdentity         string                     `json:"config_identity"`
+	ExpectedMinecraftState string                     `json:"expected_minecraft_state"`
+	PlayersConfirmed       bool                       `json:"players_confirmed"`
 }
 
 type dataMigrationTransactionEvent struct {
@@ -102,7 +104,7 @@ func executeDataMigrationTransaction(parent context.Context, store *operationSto
 	if operation.OperationType != operationTypeDataMigration || operation.PlanFingerprint == "" {
 		return errors.New("invalid Minecraft data migration operation identity")
 	}
-	if !validAdminDataMigrationRequest(plan.Request) ||
+	if validateDataMigrationParticipants(plan.Participants) != nil || !validAdminDataMigrationRequest(plan.Request) ||
 		plan.TargetIdentity == "" ||
 		plan.ConfigIdentity == "" ||
 		(plan.ExpectedMinecraftState != "running" && plan.ExpectedMinecraftState != "stopped") {
@@ -113,6 +115,7 @@ func executeDataMigrationTransaction(parent context.Context, store *operationSto
 	}
 
 	request := dataMigrationTransactionRequest{
+		Participants:           plan.Participants,
 		OperationID:            operationID,
 		PlanFingerprint:        operation.PlanFingerprint,
 		Request:                plan.Request,

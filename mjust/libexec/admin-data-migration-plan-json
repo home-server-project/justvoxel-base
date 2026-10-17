@@ -139,6 +139,27 @@ discover() {
 
 plan() {
     require_config
+    [[ -d /var/lib/justvoxel/instances && ! -L /var/lib/justvoxel/instances ]] || { emit_error no_managed_instances 'No authoritative managed Minecraft instance registry is available; physical migration is unavailable.'; return 0; }
+    if [[ ${JV_DATA_MIGRATION_LOCKS_HELD:-0} != 1 ]]; then
+        umask 0077
+        for lock in /run/justvoxel-minecraft-restore-exclusion.lock "${JV_MAINTENANCE_LOCK}"; do
+            [[ ! -L ${lock} ]] || { emit_error migration_busy 'Minecraft maintenance lock identity is unsafe.'; return 0; }
+        done
+        exec 8>/run/justvoxel-minecraft-restore-exclusion.lock
+        flock -n 8 || { emit_error migration_busy 'Minecraft maintenance is active.'; return 0; }
+        exec 9>"${JV_MAINTENANCE_LOCK}"
+        flock -n 9 || { emit_error migration_busy 'Minecraft maintenance is active.'; return 0; }
+        exec 6>/var/lib/justvoxel/management/setup.lock
+        flock -n 6 || { emit_error migration_busy 'Setup or recovery is active.'; return 0; }
+        exec 5>/var/lib/justvoxel/management/restore.lock
+        flock -n 5 || { emit_error migration_busy 'Restore is active.'; return 0; }
+        exec 4>/var/lib/justvoxel/management/server-migration.lock
+        flock -n 4 || { emit_error migration_busy 'Server migration is active.'; return 0; }
+        exec 3>/var/lib/justvoxel/management/data-migration.lock
+        flock -n 3 || { emit_error migration_busy 'Physical migration or recovery is active.'; return 0; }
+        exec 7</var/lib/justvoxel/instances
+        flock -s -n 7 || { emit_error migration_busy 'Instance registry is changing.'; return 0; }
+    fi
     local request operation raw_device_path device raw_mount mount_point raw_path data_path size_gib current_data
     local model transport size filesystem mounted parent current_parent table free_line free_size
     local free_start='' free_end='' planned_end='' planned_mib=0 free_mib=0
@@ -268,7 +289,34 @@ plan() {
             ;;
     esac
 
-    data_bytes="$(du -sb -- "${current_data}" 2>/dev/null | awk '{print $1}' || true)"
+    # DATA_PATH is the historical leaf. Independent worlds are its siblings.
+    local current_root new_root instance_bytes legacy_bytes=0
+    current_root="$(dirname -- "${current_data}")"
+    new_root="$(dirname -- "${data_path}")"
+    [[ ${new_root} == "${mount_point}" || ${new_root} == "${mount_point}/"* ]] || { emit_error invalid_path 'Instance storage root must remain inside the selected mount.'; return 0; }
+    [[ ${new_root} != "${current_root}" && ${new_root}/ != "${current_root}/"* && ${current_root}/ != "${new_root}/"* ]] || { emit_error overlapping_roots 'Source and destination storage roots must be separate.'; return 0; }
+    [[ ! -e ${new_root}/minecraft-instances && ! -L ${new_root}/minecraft-instances ]] || { emit_error target_not_empty 'Destination already contains an instance tree.'; return 0; }
+    [[ ${data_path} != "${new_root}/minecraft-instances" && ${data_path} != "${new_root}/minecraft-instances/"* ]] || { emit_error invalid_path 'Data path conflicts with the instance tree.'; return 0; }
+    case "${BACKUP_PATH}/" in "${data_path}/"*|"${new_root}/minecraft-instances/"*) emit_error overlapping_backup 'Migration must preserve independent backup storage.'; return 0 ;; esac
+    instance_bytes="$(du -sb -- "${current_root}/minecraft-instances" 2>/dev/null | awk '{print $1}' || true)"
+    if [[ -d ${current_data} && ! -L ${current_data} ]]; then legacy_bytes="$(du -sb -- "${current_data}" | awk '{print $1}')"; fi
+    [[ ${instance_bytes} =~ ^[0-9]+$ && ${legacy_bytes} =~ ^[0-9]+$ ]] || { emit_error data_unavailable 'Managed instance data size could not be measured safely.'; return 0; }
+    data_bytes=$((instance_bytes + legacy_bytes))
+    # Copy/verification must not traverse an unreviewed nested filesystem.
+    if [[ -e ${new_root} ]]; then
+        [[ -d ${new_root} && ! -L ${new_root} && $(realpath -e "${new_root}") == "${new_root}" && $(stat -c '%u' "${new_root}") == 0 ]] || { emit_error unsafe_root 'Destination instance storage root must be a real root-owned directory.'; return 0; }
+        local root_mode
+        root_mode="$(stat -c '%a' "${new_root}")"
+        (( (8#${root_mode} & 0022) == 0 )) || { emit_error unsafe_root 'Destination instance storage root is writable by other users.'; return 0; }
+    fi
+    local target mount_targets
+    mount_targets="$(findmnt -rn -o TARGET)" || { emit_error mounts_unavailable 'Source mount topology could not be verified.'; return 0; }
+    while IFS= read -r target; do
+        case "${target}/" in
+            "${current_root}/minecraft-instances/"*|"${current_data}/"*) emit_error nested_mount 'Minecraft data contains a nested or direct data mount that cannot be migrated safely.'; return 0 ;;
+        esac
+    done <<< "${mount_targets}"
+    case "${BACKUP_PATH}/" in "${current_data}/"*|"${current_root}/minecraft-instances/"*) emit_error overlapping_backup 'Backup storage overlaps the data being migrated.'; return 0 ;; esac
     [[ ${data_bytes} =~ ^[0-9]+$ ]] || { emit_error data_unavailable 'Current Minecraft data size could not be measured safely.'; return 0; }
     [[ ${target_bytes} =~ ^[0-9]+$ ]] || target_bytes=0
     if (( target_bytes > 0 && target_bytes <= data_bytes )); then
@@ -276,26 +324,26 @@ plan() {
         return 0
     fi
 
-    players_json="$(/usr/libexec/justvoxel/mjust/web-status-json players 2>/dev/null)" || {
-        emit_error player_status_unavailable 'Minecraft player status could not be checked safely.'
+    players_json="$(/usr/libexec/justvoxel/management-agent data-migration-runtime plan 2>/dev/null)" || {
+        emit_error instance_state_unavailable 'Physical migration requires at least one managed Minecraft instance. All registered Minecraft instances, runtime identities, storage and backup prerequisites must be verifiable.'
         return 0
     }
-    if ! jq -e 'type=="object" and (.state|type=="string") and (.online|type=="number") and (.names|type=="array")' >/dev/null 2>&1 <<< "${players_json}"; then
-        emit_error player_status_unavailable 'Minecraft player status could not be checked safely.'
-        return 0
-    fi
-    state="$(jq -r '.state' <<< "${players_json}")"
-    case "${state}" in running|stopped) ;; *) emit_error player_status_unavailable 'Minecraft player status could not be checked safely.'; return 0 ;; esac
-    online="$(jq -r '.online' <<< "${players_json}")"
-    players="$(jq -c '.names' <<< "${players_json}")"
-    if [[ ${state} == running && ${online} =~ ^[0-9]+$ ]] && (( online > 0 )); then
-        players_confirmation=true
-    fi
+    local backup_free backup_entries backup_required participant_count
+    backup_free="$(df -B1 --output=avail "${BACKUP_PATH}" | tail -n1 | tr -d ' ')"
+    backup_entries="$(find "${current_root}/minecraft-instances" -print | wc -l)"
+    participant_count="$(jq '.participants | length' <<< "${players_json}")"
+    [[ ${backup_free} =~ ^[0-9]+$ && ${backup_entries} =~ ^[0-9]+$ ]] || { emit_error backup_capacity_unavailable 'Aggregate cold backup capacity could not be established.'; return 0; }
+    backup_required=$((instance_bytes + backup_entries * 16384 + participant_count * 64 * 1024 * 1024))
+    (( backup_free > backup_required )) || { emit_error insufficient_backup_space 'Backup storage must have space for every managed server cold backup.'; return 0; }
+    state="$(jq -er '.state' <<< "${players_json}")"
+    online="$(jq -er '.online' <<< "${players_json}")"
+    players='[]'
+    (( online == 0 )) || players_confirmation=true
 
     config_identity="$(sha256sum "${JV_CONFIG}" | awk '{print $1}')"
     identity="$(target_identity "${device}")"
     [[ -n ${identity} ]] || { emit_error target_unavailable 'Selected target identity could not be captured safely.'; return 0; }
-    current_identity="$(stat -Lc '%d:%i:%s:%Y' "${current_data}" 2>/dev/null || true)"
+    current_identity="$(stat -Lc '%d:%i:%s:%Y' "${current_root}/minecraft-instances" 2>/dev/null || true)"
     [[ -n ${current_identity} ]] || { emit_error data_unavailable 'Current Minecraft data identity could not be captured safely.'; return 0; }
     current_mount="${DATA_MOUNT_POINT:-}"
     current_uuid="${DATA_EXPECTED_UUID:-}"
@@ -321,12 +369,13 @@ plan() {
         '{migration_confirmation_required:true,destructive_confirmation_required:$destructive,confirmation_phrase:$confirmation,players_confirmation_required:$players_confirmation,minecraft_state:$minecraft_state,online:$online,players:$players,exact_space_validation_on_apply:true,cold_backup_required:true,copy_verification_required:true,runtime_validation_required:true}')"
 
     context="$(jq -cn \
+        --argjson participants "$(jq -c .participants <<< "${players_json}")" \
         --arg config_identity "${config_identity}" --arg target_identity "${identity}" --arg current_data_identity "${current_identity}" \
         --arg current_data_path "${current_data}" --arg current_mount_point "${current_mount}" --arg current_expected_uuid "${current_uuid}" \
         --arg current_expected_source "${current_source}" --arg minecraft_uid "${MINECRAFT_UID}" --arg minecraft_gid "${MINECRAFT_GID}" \
         --arg backup_path "${BACKUP_PATH}" --arg backup_mount_point "${BACKUP_MOUNT_POINT:-}" \
         --arg backup_expected_uuid "${BACKUP_EXPECTED_UUID:-}" --arg backup_expected_source "${BACKUP_EXPECTED_SOURCE:-}" \
-        '{config_identity:$config_identity,target_identity:$target_identity,current_data_identity:$current_data_identity,current_data_path:$current_data_path,current_mount_point:$current_mount_point,current_expected_uuid:$current_expected_uuid,current_expected_source:$current_expected_source,minecraft_uid:$minecraft_uid,minecraft_gid:$minecraft_gid,backup_path:$backup_path,backup_mount_point:$backup_mount_point,backup_expected_uuid:$backup_expected_uuid,backup_expected_source:$backup_expected_source}')"
+        '{participants:$participants,config_identity:$config_identity,target_identity:$target_identity,current_data_identity:$current_data_identity,current_data_path:$current_data_path,current_mount_point:$current_mount_point,current_expected_uuid:$current_expected_uuid,current_expected_source:$current_expected_source,minecraft_uid:$minecraft_uid,minecraft_gid:$minecraft_gid,backup_path:$backup_path,backup_mount_point:$backup_mount_point,backup_expected_uuid:$backup_expected_uuid,backup_expected_source:$backup_expected_source}')"
 
     jq -cn --argjson normalized "${normalized}" --argjson warnings "${warnings}" --argjson requirements "${requirements}" --argjson context "${context}" \
         '{ok:true,schema_version:"v1",normalized:$normalized,warnings:$warnings,requirements:$requirements,context:$context}'

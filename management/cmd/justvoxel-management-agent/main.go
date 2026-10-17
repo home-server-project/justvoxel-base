@@ -107,6 +107,10 @@ func main() {
 		if err := serve(socket); err != nil {
 			fatal("serve: %v", err)
 		}
+	case "data-migration-runtime":
+		if err := dataMigrationRuntimeCommand(context.Background(), args[1:]); err != nil {
+			fatal("data migration runtime: %v", err)
+		}
 	case "instance-version-publish", "instance-version-backup":
 		if err := instanceVersionCommand(context.Background(), args); err != nil {
 			fatal("instance version operation: %v", err)

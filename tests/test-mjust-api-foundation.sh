@@ -244,9 +244,9 @@ grep -Fq 'authoritativeAdminDataMigrationPlan' "${admin_data_migration_apply}" |
 grep -Fq 'adminDataMigrationTransactionHelper' "${data_migration_worker}" || fail 'data migration worker does not use the authoritative transaction backend'
 grep -Fq 'admin-data-migration-plan-json plan' "${data_migration_transaction_backend}" || fail 'data migration transaction does not revalidate the reviewed plan'
 grep -Fq 'JV_MAINTENANCE_LOCK' "${data_migration_transaction_backend}" || fail 'data migration transaction lost the shared Minecraft maintenance lock'
-grep -Fq 'minecraft-backup --leave-stopped' "${data_migration_transaction_backend}" || fail 'data migration transaction lost the verified pre-migration cold backup'
+grep -Fq 'runtime backup' "${data_migration_transaction_backend}" || fail 'data migration transaction lost the verified pre-migration cold backup'
 grep -Fq 'rsync -aHAX' "${data_migration_transaction_backend}" || fail 'data migration transaction lost copy/verification semantics'
-grep -Fq 'restore-runtime-validate' "${data_migration_transaction_backend}" || fail 'data migration transaction lost runtime validation'
+grep -Fq 'runtime relocate' "${data_migration_transaction_backend}" || fail 'data migration transaction lost runtime validation'
 for forbidden in 'systemctl ' 'podman ' 'rcon-cli' 'rsync ' 'flock ' 'mkfs' 'parted ' 'wipefs ' 'write_main_config' 'render_runtime' 'apply_data_selinux' 'storage-common.sh' 'storage_prepare_' 'lsblk ' 'findmnt ' '/etc/fstab' 'JV_MAINTENANCE_LOCK'; do
     if grep -Fq "${forbidden}" "${data_migration}"; then
         fail "mJust data migration frontend still performs direct backend/safety work: ${forbidden}"

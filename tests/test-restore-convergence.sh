@@ -24,5 +24,5 @@ done
 grep -Fq 'o.currentRestoreID != ""' management/cmd/justvoxel-management-agent/minecraft_instance_restore.go || fail 'legacy journal exclusion removed'
 grep -Fq 'acquireInstanceRestoreExclusion()' management/cmd/justvoxel-management-agent/minecraft_instance_restore.go || fail 'backup exclusion removed'
 grep -Fq 'acquirePluginRuntimeLock()' management/cmd/justvoxel-management-agent/minecraft_instance_restore.go || fail 'maintenance exclusion removed'
-grep -Fq 'restore-runtime-validate' mjust/libexec/admin-data-migration-transaction-json || fail 'physical migration validator removed'
+grep -Fq 'runtime relocate' mjust/libexec/admin-data-migration-transaction-json || fail 'physical migration instance validator removed'
 echo 'PASS: global Restore retired; selected identity paths and shared safety retained.'

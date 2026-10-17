@@ -18,6 +18,12 @@ current="$(jv_data_migration_current_operation)" || exit 1
 if [[ $(jq -r '.operation != null' <<<"${current}") == true ]]; then
     operation_id="$(jq -r '.operation.operation_id // empty' <<<"${current}")"
     [[ -n ${operation_id} ]] || { echo 'ERROR: Management Agent returned an invalid current Minecraft data migration operation.' >&2; exit 1; }
+    if [[ $(jq -r '.operation.state' <<< "${current}") == needs_attention ]]; then
+        echo 'Recovery restores the original appliance storage and the recorded state of every managed Minecraft server.'
+        echo 'Running servers may be interrupted. Prepared target-storage changes may remain.'
+        jui_confirm 'Retry recovery of this Minecraft data migration?' || exit 0
+        jv_data_migration_recover "${operation_id}" >/dev/null || exit 1
+    fi
     echo "Reconnecting to Minecraft data migration operation ${operation_id}."
     jv_data_migration_monitor_operation "${operation_id}"
     exit $?
