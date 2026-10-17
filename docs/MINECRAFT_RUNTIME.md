@@ -712,3 +712,33 @@ It stubs runtime discovery while executing the production filesystem remover on
 real temporary directories. Implementation-pass validation is restricted to
 formatting and syntax checks; application and root-namespace execution is left
 to independent verification.
+
+### Appliance-wide Start Over
+
+`mjust start-over` calls `GET /v1/admin/start-over/plan` and
+`POST /v1/admin/start-over/apply`. Both require local root Unix-peer identity;
+bearer/WebUI administrator access does not authorize this operation. Planning
+binds every authoritative modern immutable ID, committed runtime ownership,
+storage/data identity, recovery evidence and configuration into a fingerprint.
+Apply re-plans under the existing appliance Minecraft mutation exclusion.
+
+Every running instance uses exact-ID player inspection and graceful shutdown
+with the existing warnings/countdown. Unknown presence fails closed and online
+players require explicit interruption confirmation. Failed instances require
+proof of no live container and safe stop normalization. No instance is started.
+
+Start Over reuses the durable deletion retirement stages with the explicit
+`start_over` policy. This policy preserves data and verifies its pinned identity;
+ordinary Delete continues deleting data and selected Reset is unchanged. Start
+Over journals are excluded from ordinary Delete recovery inventory. Retries
+resume the exact journal even after registry retirement; completed participants
+remain retired. Unresolved evidence prevents new instance creation.
+
+After all managed runtime/container/backup-unit/firewall and active identities
+are retired, only the active setup policy pair is removed. Worlds/data, backup
+archives/metadata, storage layout/mounts/ownership, SMB credentials, `/etc/fstab`,
+authentication/users/history, images and unrelated containers remain preserved.
+An optional verified root-only configuration archive is published atomically
+before any runtime mutation. There is no fixed-runtime execution fallback; fixed
+artifacts never authorize a modern participant. See `START_OVER.md` for the
+complete boundary and operator flow.

@@ -406,6 +406,9 @@ func (b *instanceRuntimeBackend) create(ctx context.Context, c minecraftInstance
 // Setup records the generated identity before registration. Both entry points
 // use exactly the same validation, publication and activation transaction.
 func (b *instanceRuntimeBackend) createTracked(ctx context.Context, c minecraftInstanceRuntimeConfig, name string, snapshot minecraftInstanceRuntimeContext, track func(instanceRuntimeRecord) error) (string, error) {
+	if err := b.requireNoStartOver(); err != nil {
+		return "", err
+	}
 	if _, err := validateInstanceName(name); err != nil {
 		return "", err
 	}

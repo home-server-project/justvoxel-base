@@ -69,7 +69,7 @@ if grep -Eq 'systemctl |podman |rcon-cli|jv_player_check_before_interrupt' "${se
 fi
 grep -Fq 'jv_stop_minecraft_adaptive' "${repo_root}/mjust/libexec/web-status-json" || fail 'Minecraft API backend does not use adaptive shutdown'
 grep -Fq 'jv_stop_minecraft_adaptive' "${repo_root}/runtime/minecraft-backup" || fail 'cold backup does not use adaptive shutdown'
-grep -Fq '/usr/libexec/justvoxel/mjust/service stop' "${repo_root}/mjust/libexec/start-over" || fail 'Start Over does not use the shared Minecraft stop path'
+grep -Fq 'POST /v1/admin/start-over/apply' "${repo_root}/mjust/libexec/start-over" || fail 'Start Over does not use the Management API retirement path'
 grep -Fq 'system-actions-api.sh' "${power}" || fail 'system power frontend does not use the System Actions API helper'
 grep -Fq 'system-actions-api.sh' "${firmware}" || fail 'firmware frontend does not use the System Actions API helper'
 grep -Fq 'jv_system_actions_get' "${power}" || fail 'system power frontend does not read Agent capabilities'

@@ -224,13 +224,11 @@ The goal is to fail visibly when the appliance does not match its recorded confi
 
 ## Start over / reset Minecraft
 
-`mjust start-over` returns an installed JustVoxel Minecraft configuration to first-setup state without deleting Minecraft world data or existing backup archives.
+`mjust start-over` uses the local root Management API to retire **all configured Minecraft servers** and return the appliance to Setup. It preserves every world/data tree, backup archive and metadata, storage layout/mounts, storage ownership and SMB credentials, authentication, WebUI users and history.
 
-The operation can save a root-only configuration archive first, handles a running Minecraft server through the normal player-aware shutdown path, and requires the exact phrase `START OVER` before removing active JustVoxel configuration.
+It reviews exact immutable instance IDs, offers a verified root-only configuration archive before mutation, and requires `START OVER`. Online players require separate interruption approval; every running instance uses its normal graceful shutdown and player countdown. Modern containers and owned runtime/backup units/firewall rules are retired; images and unrelated containers remain.
 
-It does not erase storage filesystems, Minecraft world data, backup archives, Podman images, unrelated containers, or bootc deployments.
-
-See `START_OVER.md` for the full reset boundary.
+Interrupted work resumes from exact durable Start Over retirement evidence. Unrelated recovery transactions and fixed-runtime artifacts block the operation; this frontend has no legacy execution fallback. See `START_OVER.md` for the preservation and recovery boundary.
 
 ## Login welcome controls
 

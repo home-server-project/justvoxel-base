@@ -54,7 +54,7 @@ func (b *instanceRuntimeBackend) deleteJournal(id string) (instanceDeleteJournal
 			return j, errInstanceRecovery
 		}
 	}
-	if j.ResetPolicy != "" && j.ResetPolicy != "delete" && j.ResetPolicy != "preserve" {
+	if j.ResetPolicy != "" && j.ResetPolicy != "delete" && j.ResetPolicy != "preserve" && j.ResetPolicy != "start_over" {
 		return j, errInstanceRecovery
 	}
 	switch j.Stage {
@@ -138,7 +138,7 @@ func (b *instanceRuntimeBackend) deleteInstance(ctx context.Context, id, name st
 
 // Reset supplies a durable, separate data policy; ordinary Delete always removes data.
 func (b *instanceRuntimeBackend) retireSelectedInstance(ctx context.Context, id, name, resetPolicy string) error {
-	if !instanceIDPattern.MatchString(id) || (resetPolicy != "" && resetPolicy != "delete" && resetPolicy != "preserve") {
+	if !instanceIDPattern.MatchString(id) || (resetPolicy != "" && resetPolicy != "delete" && resetPolicy != "preserve" && resetPolicy != "start_over") {
 		return errInstanceID
 	}
 	entries, err := os.ReadDir(b.staging)
@@ -182,6 +182,9 @@ func (b *instanceRuntimeBackend) retireSelectedInstance(ctx context.Context, id,
 	}
 	if retry && j.Name != name {
 		return errInstanceRecovery
+	}
+	if retry && resetPolicy == "start_over" {
+		return b.resumeStartOverRetirement(ctx, j)
 	}
 	if !retry {
 		if err = b.requireNoInstanceRestore(); err != nil {
@@ -252,6 +255,9 @@ func (b *instanceRuntimeBackend) retireSelectedInstance(ctx context.Context, id,
 		if e = b.writeJSON(b.deletePath(id), j, false); e != nil {
 			return e
 		}
+	}
+	if resetPolicy == "start_over" {
+		return b.resumeStartOverRetirement(ctx, j)
 	}
 	if err = b.deleteStopped(ctx, id, true); err != nil {
 		return err
@@ -463,6 +469,13 @@ func (b *instanceRuntimeBackend) retireInstanceStateAndIdentity(j instanceDelete
 }
 
 func (b *instanceRuntimeBackend) applyInstanceRetirementDataPolicy(ctx context.Context, j instanceDeleteJournal) error {
+	if j.ResetPolicy == "start_over" {
+		identity, err := b.deleteStorage(ctx, "inspect", j)
+		if err != nil || identity != j.DataIdentity {
+			return errInstanceRecovery
+		}
+		return nil
+	}
 	if j.ResetPolicy == "preserve" {
 		return nil
 	}

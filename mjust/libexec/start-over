@@ -1,161 +1,56 @@
 #!/usr/bin/bash
 set -euo pipefail
 source /usr/libexec/justvoxel/mjust/common.sh
-source /usr/libexec/justvoxel/mjust/minecraft-reset-common.sh
 source /usr/libexec/justvoxel/mjust/ui.sh
 require_root
-require_config
-jv_reset_validate_storage_preservation || { echo 'ERROR: preserved SMB storage configuration is unsafe or inconsistent.' >&2; exit 1; }
+[[ -t 0 && -t 1 ]] || { echo 'ERROR: Start Over needs an interactive terminal.' >&2; exit 1; }
+readonly api=/usr/libexec/justvoxel/mjust/api-client
 
-timestamp="$(date +%Y%m%d-%H%M%S)"
-data_path="${DATA_PATH}"
-backup_path="${BACKUP_PATH}"
-java_port="${JAVA_PORT}"
-bedrock_enabled="${BEDROCK_ENABLED}"
-bedrock_port="${BEDROCK_PORT}"
-config_backup=''
-container_action='none'
-preserved_container=''
-keep_dropin=/run/systemd/system/minecraft.service.d/justvoxel-keep-container.conf
+if ! plan="$("${api}" GET /v1/admin/start-over/plan)"; then
+    echo 'ERROR: Start Over could not be planned. Resolve the reported recovery state and review again.' >&2
+    exit 1
+fi
+jq -e '.ok == true and .mode == "start_over"' <<<"${plan}" >/dev/null
 
-echo 'Start over'
+echo 'Start Over returns JustVoxel Minecraft to first-setup state.'
+echo 'ALL configured Minecraft servers will be retired from JustVoxel.'
+echo 'Every world/data tree and every backup archive will remain on disk.'
 echo
-echo 'This removes the active JustVoxel Minecraft configuration and returns'
-echo 'the appliance to first-setup mode.'
+jq -r '.participants[] | "  \(.display_name) [\(.id)] — \(.state), \(.players_online) players online"' <<<"${plan}"
 echo
-echo 'Minecraft world/data will NOT be deleted.'
-echo
-echo "Current Minecraft data: ${data_path}"
-echo "Current backups:        ${backup_path}"
-echo
-
 backup_choice="$(jui_choose 'Configuration backup' \
     'Save a backup of the current JustVoxel configuration (recommended)' \
     'Continue without a configuration backup' \
     'Cancel')" || exit 0
 case "${backup_choice}" in
-    'Save a backup of the current JustVoxel configuration (recommended)') save_config=yes ;;
-    'Continue without a configuration backup') save_config=no ;;
-    *) echo 'Start over cancelled.'; exit 0 ;;
+    'Save a backup of the current JustVoxel configuration (recommended)') save_config=true ;;
+    'Continue without a configuration backup') save_config=false ;;
+    *) echo 'Start Over cancelled.'; exit 0 ;;
 esac
-
-if podman container exists minecraft 2>/dev/null; then
-    container_choice="$(jui_choose 'Existing Minecraft container' \
-        'Remove the old Minecraft container (recommended)' \
-        'Keep the old container stopped' \
-        'Cancel')" || exit 0
-    case "${container_choice}" in
-        'Remove the old Minecraft container (recommended)') container_action=remove ;;
-        'Keep the old container stopped') container_action=keep ;;
-        *) echo 'Start over cancelled.'; exit 0 ;;
-    esac
+confirm_players=false
+if (( $(jq -r '.total_players_online' <<<"${plan}") > 0 )); then
+    echo 'Online players are present. Each running server uses its normal graceful shutdown and player countdown.'
+    jq -r '.participants[] | select(.players_online > 0) | "  \(.display_name) [\(.id)]: \(.players_online) online; \(.players | join(", "))"' <<<"${plan}"
+    read -r -p 'Interrupt online players? [yes/no] ' interrupt
+    [[ ${interrupt,,} == yes ]] || { echo 'Start Over cancelled.'; exit 0; }
+    confirm_players=true
 fi
-
 echo
-echo 'The Minecraft world/data and existing backup archives will be preserved.'
-echo 'Storage partitions, mounts and /etc/fstab entries will not be changed.'
-echo 'Podman images and unrelated containers will not be removed.'
-echo
+echo 'Worlds/data, backups, storage layout and mounts, authentication and WebUI users are preserved.'
+echo 'Managed Minecraft containers are retired. Images and unrelated containers are preserved.'
 echo 'Type exactly: START OVER'
 read -r -p '> ' confirmation
-[[ ${confirmation} == 'START OVER' ]] || {
-    echo 'Start over cancelled.'
-    exit 0
-}
-
-if [[ ${container_action} == keep ]]; then
-    # Quadlet normally removes its service-managed container during stop. Clear
-    # only ExecStopPost for this one stop so the stopped container can be
-    # preserved and renamed after the normal graceful stop completes.
-    install -d -m0755 "$(dirname "${keep_dropin}")"
-    printf '[Service]\nExecStopPost=\n' > "${keep_dropin}"
-    systemctl daemon-reload
+[[ ${confirmation} == 'START OVER' ]] || { echo 'Start Over cancelled.'; exit 0; }
+request="$(jq -cn --arg fingerprint "$(jq -r '.plan_fingerprint' <<<"${plan}")" \
+    --argjson players "${confirm_players}" --argjson backup "${save_config}" \
+    '{plan_fingerprint:$fingerprint,confirm_players:$players,save_configuration_backup:$backup}')"
+if ! result="$("${api}" POST /v1/admin/start-over/apply --data <<<"${request}")"; then
+    echo 'ERROR: Start Over did not complete. Review and retry Start Over to resume exact retirement evidence.' >&2
+    exit 1
 fi
-
-cleanup_keep_override() {
-    rm -f -- "${keep_dropin}"
-    rmdir /run/systemd/system/minecraft.service.d 2>/dev/null || true
-    systemctl daemon-reload >/dev/null 2>&1 || true
-}
-trap cleanup_keep_override EXIT
-
-# Reuse the normal player-aware shutdown path. If player state is unknown, or
-# the administrator refuses to interrupt online players, this exits before any
-# configuration is removed.
-if systemctl is-active --quiet minecraft.service 2>/dev/null; then
-    /usr/libexec/justvoxel/mjust/service stop
-fi
-
-if [[ ${container_action} == keep ]]; then
-    podman container exists minecraft 2>/dev/null || {
-        echo 'ERROR: the stopped Minecraft container could not be preserved. Configuration was not removed.' >&2
-        exit 1
-    }
-    preserved_container="minecraft-preserved-${timestamp}"
-    suffix=1
-    while podman container exists "${preserved_container}" 2>/dev/null; do
-        preserved_container="minecraft-preserved-${timestamp}-${suffix}"
-        suffix=$((suffix + 1))
-    done
-    podman rename minecraft "${preserved_container}"
-    cleanup_keep_override
-    trap - EXIT
-fi
-
-if [[ ${save_config} == yes ]]; then
-    config_backup_dir=/var/lib/justvoxel/config-backups
-    install -d -m0700 -o root -g root "${config_backup_dir}"
-    config_backup="${config_backup_dir}/justvoxel-config-${timestamp}.tar.gz"
-    partial="${config_backup}.partial"
-    rm -f -- "${partial}"
-
-    archive_paths=()
-    for path in \
-        etc/justvoxel \
-        etc/containers/systemd/minecraft.container \
-        etc/systemd/system/minecraft-backup.service \
-        etc/systemd/system/minecraft-backup.timer; do
-        [[ -e "/${path}" ]] && archive_paths+=("${path}")
-    done
-
-    (( ${#archive_paths[@]} > 0 )) || {
-        echo 'ERROR: no active JustVoxel configuration files were found to archive.' >&2
-        exit 1
-    }
-    tar -C / -czf "${partial}" "${archive_paths[@]}"
-    tar -tzf "${partial}" >/dev/null
-    chmod 0600 "${partial}"
-    mv -f -- "${partial}" "${config_backup}"
-fi
-
-if [[ ${container_action} == remove ]] && podman container exists minecraft 2>/dev/null; then
-    podman rm minecraft >/dev/null
-fi
-
-jv_reset_remove_active_configuration "${java_port}" "${bedrock_enabled}" "${bedrock_port}" preserve-storage
-
-echo
-echo 'JustVoxel Minecraft configuration has been removed.'
-echo
-echo 'Preserved Minecraft data:'
-echo "  ${data_path}"
-echo
-echo 'Preserved backups:'
-echo "  ${backup_path}"
-if [[ -n ${config_backup} ]]; then
-    echo
-    echo 'Configuration backup:'
-    echo "  ${config_backup}"
-fi
-if [[ -n ${preserved_container} ]]; then
-    echo
-    echo 'Preserved stopped container:'
-    echo "  ${preserved_container}"
-elif [[ ${container_action} == remove ]]; then
-    echo
-    echo 'The old Minecraft container was removed. Its image was kept.'
-fi
-
-echo
-echo 'JustVoxel is ready for first setup.'
-echo 'Run: mjust'
+jq -e '.ok == true' <<<"${result}" >/dev/null
+archive="$(jq -r '.configuration_backup_path // empty' <<<"${result}")"
+[[ -z ${archive} ]] || printf 'Configuration backup: %s\n' "${archive}"
+echo 'All configured Minecraft servers have been retired.'
+echo 'All worlds/data, backups, storage mounts, authentication and WebUI users remain preserved.'
+echo 'JustVoxel is ready for Setup. Run: mjust'

@@ -42,7 +42,7 @@ printf '//nas/backups %s cifs credentials=%s/smb-backup.credentials,nofail 0 0\n
 cp "$JV_FSTAB" "$TMP/reset.fstab.expected"
 cp "$JV_CONFIG_DIR/smb-backup.credentials" "$TMP/credentials.expected"
 # Start Over still preserves the appliance storage configuration.
-grep -Fq 'preserve-storage' "$repo_root/mjust/libexec/start-over" || fail 'Start Over did not request preservation'
+grep -Fq 'StorageLayoutAction: "preserve"' "$repo_root/management/cmd/justvoxel-management-agent/admin_start_over.go" || fail 'Start Over did not request preservation'
 printf 'configuration\n' > "$JV_CONFIG"
 jv_reset_remove_active_configuration 25565 no 19132 preserve-storage
 cmp "$JV_FSTAB" "$TMP/reset.fstab.expected"

@@ -58,7 +58,7 @@ if grep -Eq 'umount|wipefs|parted|sgdisk|mkfs\.' "${agent}" "${retirement}" "${c
     exit 1
 fi
 
-grep -Fq 'source /usr/libexec/justvoxel/mjust/minecraft-reset-common.sh' "${start_over}"
+grep -Fq 'POST /v1/admin/start-over/apply' "${start_over}"
 grep -Eq '^[[:space:]]*operationTypeMinecraftReset[[:space:]]*=[[:space:]]*"minecraft_reset"[[:space:]]*$' "${operations}"
 for route in \
     'POST /v1/minecraft/instances/{id}/reset/plan' \
