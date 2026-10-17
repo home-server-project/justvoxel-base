@@ -1,14 +1,5 @@
 package api
 
-import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"time"
-)
-
 type AdminConfigurationChangeRequest struct {
 	WhitelistEnabled   *bool  `json:"whitelist_enabled,omitempty"`
 	GameMode           string `json:"game_mode"`
@@ -54,51 +45,4 @@ type AdminConfigurationChangeResponse struct {
 	Restarted             bool                        `json:"restarted"`
 	RestartDeferred       bool                        `json:"restart_deferred"`
 	Message               string                      `json:"message,omitempty"`
-}
-
-func (c *Client) AdminConfigurationPlan(ctx context.Context, session string, request AdminConfigurationChangeRequest) (AdminConfigurationChangeResponse, error) {
-	return c.adminConfigurationChange(ctx, "/v1/admin/configuration/plan", session, request)
-}
-
-func (c *Client) AdminConfigurationApply(ctx context.Context, session string, request AdminConfigurationChangeRequest) (AdminConfigurationChangeResponse, error) {
-	return c.adminConfigurationChange(ctx, "/v1/admin/configuration/apply", session, request)
-}
-
-func (c *Client) adminConfigurationChange(ctx context.Context, path, session string, request AdminConfigurationChangeRequest) (AdminConfigurationChangeResponse, error) {
-	var out AdminConfigurationChangeResponse
-	data, err := json.Marshal(request)
-	if err != nil {
-		return out, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://unix"+path, bytes.NewReader(data))
-	if err != nil {
-		return out, err
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+session)
-
-	client := *c.http
-	client.Timeout = 30 * time.Second
-	if path == "/v1/admin/configuration/apply" {
-		client.Timeout = 95 * time.Second
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return out, fmt.Errorf("management API unavailable: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusUnauthorized {
-		return out, ErrUnauthorized
-	}
-	if resp.StatusCode == http.StatusForbidden {
-		return out, ErrPasswordChangeRequired
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return out, readResponseError(resp)
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return out, fmt.Errorf("management API returned invalid configuration response: %w", err)
-	}
-	return out, nil
 }

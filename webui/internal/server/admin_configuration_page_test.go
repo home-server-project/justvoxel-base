@@ -1,40 +1,13 @@
 package server
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-
-	"github.com/home-server-project/justvoxel-webui/internal/api"
 )
 
 type fakeConfigurationAPI struct {
 	fakeDiscoveryAPI
-	plannedRequest api.AdminConfigurationChangeRequest
-	appliedRequest api.AdminConfigurationChangeRequest
-	planResponse   api.AdminConfigurationChangeResponse
-	applyResponse  api.AdminConfigurationChangeResponse
-	planCalls      int
-	applyCalls     int
-}
-
-func (f *fakeConfigurationAPI) AdminConfigurationPlan(_ context.Context, session string, request api.AdminConfigurationChangeRequest) (api.AdminConfigurationChangeResponse, error) {
-	if session != "session-token" {
-		return api.AdminConfigurationChangeResponse{}, api.ErrUnauthorized
-	}
-	f.planCalls++
-	f.plannedRequest = request
-	return f.planResponse, nil
-}
-
-func (f *fakeConfigurationAPI) AdminConfigurationApply(_ context.Context, session string, request api.AdminConfigurationChangeRequest) (api.AdminConfigurationChangeResponse, error) {
-	if session != "session-token" {
-		return api.AdminConfigurationChangeResponse{}, api.ErrUnauthorized
-	}
-	f.applyCalls++
-	f.appliedRequest = request
-	return f.applyResponse, nil
 }
 
 func configuredSettingsFake() *fakeConfigurationAPI {

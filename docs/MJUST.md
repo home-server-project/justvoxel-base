@@ -45,13 +45,13 @@ Setup refuses to silently overwrite an already-configured JustVoxel installation
 
 ## Configure an installed server
 
-`mjust configure` changes supported Minecraft and backup settings after first setup.
+`mjust configure [--instance jv-...] [backup]` configures a registered Minecraft server. `mjust configure-max-players [--instance jv-...]` opens the focused player/RAM guidance screen. Omit the ID only when exactly one server is registered; zero or multiple servers require resolving that selection first. Friendly names are never identities. The selected immutable ID stays the same through submenus and refreshes.
 
-The current configuration flow can change memory limits, Java/Bedrock ports, MOTD, backup schedule and timer state, storage/migration settings, Minecraft container-image policy, and Minecraft/Paper version policy.
+Ordinary settings (memory, ports, Bedrock cross-play, MOTD and maximum players) use that server's complete public runtime configuration. Stop the selected server through normal lifecycle controls before applying settings, then start it normally when ready. Configure does not stop or restart it automatically.
 
-`mjust configure-max-players` provides a focused guided screen for changing the maximum player count.
+Automatic backup settings use the same selected server's backup API: daily time (HH:MM), enabled state and retention. `backup` opens this screen directly. These settings are separate from runtime configuration.
 
-Configuration changes that require Minecraft to restart are not applied through an automatic disruptive restart. JustVoxel tells the user when a restart is needed.
+The Version/image entry delegates to the existing `update-minecraft --instance jv-...` workflow for the selected server's configured policy; Configure no longer edits image/version policy directly. The storage entry delegates to `storage-migrate`'s existing data-migration frontend. Physical data migration is appliance-wide, covers all managed servers, and does not take a selected instance ID.
 
 ## Status and health
 

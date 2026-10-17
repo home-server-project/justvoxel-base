@@ -9,29 +9,20 @@ import (
 
 type fakeNewBackupsAPI struct {
 	fakeAPI
-	role                          string
-	backupErr                     error
-	backupCalls                   int
-	discoveryCalls                int
-	configuration                 api.AdminConfigurationDiscovery
-	configurationPlan             api.AdminConfigurationChangeResponse
-	configurationApply            api.AdminConfigurationChangeResponse
-	configurationPlanErr          error
-	configurationApplyErr         error
-	plannedConfiguration          api.AdminConfigurationChangeRequest
-	appliedConfiguration          api.AdminConfigurationChangeRequest
-	configurationPlanCalls        int
-	configurationApplyCalls       int
-	configurationPlanCallsAtApply int
-	storage                       api.AdminStorageDiscovery
-	destinationStatus             api.AdminBackupStorageResponse
-	destinationPlan               api.AdminBackupStorageResponse
-	destinationApply              api.AdminBackupStorageResponse
-	plannedDestination            api.AdminBackupStorageRequest
-	appliedDestination            api.AdminBackupStorageRequest
-	destinationStatusCalls        int
-	destinationPlanCalls          int
-	destinationApplyCalls         int
+	role                   string
+	backupErr              error
+	backupCalls            int
+	discoveryCalls         int
+	configuration          api.AdminConfigurationDiscovery
+	storage                api.AdminStorageDiscovery
+	destinationStatus      api.AdminBackupStorageResponse
+	destinationPlan        api.AdminBackupStorageResponse
+	destinationApply       api.AdminBackupStorageResponse
+	plannedDestination     api.AdminBackupStorageRequest
+	appliedDestination     api.AdminBackupStorageRequest
+	destinationStatusCalls int
+	destinationPlanCalls   int
+	destinationApplyCalls  int
 }
 
 func defaultNewBackupsConfiguration() api.AdminConfigurationDiscovery {
@@ -68,35 +59,6 @@ func (f *fakeNewBackupsAPI) AdminConfiguration(_ context.Context, session string
 		return f.configuration, nil
 	}
 	return defaultNewBackupsConfiguration(), nil
-}
-
-func (f *fakeNewBackupsAPI) AdminConfigurationPlan(_ context.Context, session string, request api.AdminConfigurationChangeRequest) (api.AdminConfigurationChangeResponse, error) {
-	if session != "session-token" {
-		return api.AdminConfigurationChangeResponse{}, api.ErrUnauthorized
-	}
-	f.configurationPlanCalls++
-	f.plannedConfiguration = request
-	if f.configurationPlan.OK || f.configurationPlanErr != nil {
-		return f.configurationPlan, f.configurationPlanErr
-	}
-	return api.AdminConfigurationChangeResponse{
-		OK:       true,
-		Changes:  []api.AdminConfigurationChange{},
-		Proposed: defaultNewBackupsConfiguration(),
-	}, nil
-}
-
-func (f *fakeNewBackupsAPI) AdminConfigurationApply(_ context.Context, session string, request api.AdminConfigurationChangeRequest) (api.AdminConfigurationChangeResponse, error) {
-	if session != "session-token" {
-		return api.AdminConfigurationChangeResponse{}, api.ErrUnauthorized
-	}
-	f.configurationPlanCallsAtApply = f.configurationPlanCalls
-	f.configurationApplyCalls++
-	f.appliedConfiguration = request
-	if f.configurationApply.OK || f.configurationApplyErr != nil {
-		return f.configurationApply, f.configurationApplyErr
-	}
-	return api.AdminConfigurationChangeResponse{OK: true, Applied: true}, nil
 }
 
 func (f *fakeNewBackupsAPI) AdminStorage(_ context.Context, session string) (api.AdminStorageDiscovery, error) {

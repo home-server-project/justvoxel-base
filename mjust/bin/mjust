@@ -6,6 +6,8 @@ if [[ ${1:-} == --list ]]; then
     cat <<'TEXT'
 
 Additional command forms:
+  mjust configure [--instance jv-...] [backup]
+  mjust configure-max-players [--instance jv-...]
   mjust status --details
   mjust web status
   mjust web enable
@@ -30,5 +32,13 @@ if [[ ${1:-} == status ]]; then
             ;;
     esac
 fi
+
+case "${1:-}" in
+    configure|configure-max-players)
+        command="$1"
+        shift
+        exec sudo "/usr/libexec/justvoxel/mjust/${command}" "$@"
+        ;;
+esac
 
 exec /usr/bin/just --justfile /usr/share/justvoxel/mjust/justfile "$@"

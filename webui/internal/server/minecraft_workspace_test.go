@@ -18,36 +18,11 @@ type fakeMinecraftWorkspaceAPI struct {
 	instanceReads  []string
 	instanceWrites []string
 	fakeDiscoveryAPI
-	planned          api.AdminConfigurationChangeRequest
 	applied          api.AdminConfigurationChangeRequest
-	planResult       api.AdminConfigurationChangeResponse
-	applyResult      api.AdminConfigurationChangeResponse
 	whitelist        string
 	whitelistChange  api.TextOutputResponse
 	whitelistRequest [3]string
 	logs             []string
-}
-
-func (f *fakeMinecraftWorkspaceAPI) AdminConfigurationPlan(_ context.Context, session string, request api.AdminConfigurationChangeRequest) (api.AdminConfigurationChangeResponse, error) {
-	if session != "session-token" {
-		return api.AdminConfigurationChangeResponse{}, api.ErrUnauthorized
-	}
-	f.planned = request
-	if f.planResult.OK || len(f.planResult.Changes) > 0 || f.planResult.ConfirmationRequired {
-		return f.planResult, nil
-	}
-	return api.AdminConfigurationChangeResponse{OK: true, Proposed: f.configuration}, nil
-}
-
-func (f *fakeMinecraftWorkspaceAPI) AdminConfigurationApply(_ context.Context, session string, request api.AdminConfigurationChangeRequest) (api.AdminConfigurationChangeResponse, error) {
-	if session != "session-token" {
-		return api.AdminConfigurationChangeResponse{}, api.ErrUnauthorized
-	}
-	f.applied = request
-	if f.applyResult.OK || f.applyResult.Applied || f.applyResult.ConfirmationRequired {
-		return f.applyResult, nil
-	}
-	return api.AdminConfigurationChangeResponse{OK: true, Applied: true, Proposed: f.configuration}, nil
 }
 
 func (f *fakeMinecraftWorkspaceAPI) Whitelist(_ context.Context, session string) (api.TextOutputResponse, error) {

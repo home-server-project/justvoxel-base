@@ -3,17 +3,26 @@ set -euo pipefail
 source /usr/libexec/justvoxel/mjust/ui.sh
 source /usr/libexec/justvoxel/mjust/player-guidance.sh
 source /usr/libexec/justvoxel/mjust/configuration-api.sh
+source /usr/libexec/justvoxel/mjust/instance-selection.sh
 
 if (( EUID != 0 )); then
     echo 'ERROR: this operation must run as root.' >&2
     exit 1
 fi
 
-configuration="$(jv_config_get)"
+instance_id=''
+if [[ ${1:-} == --instance && $# == 2 ]]; then
+    instance_id="$2"
+elif (( $# )); then
+    echo 'Usage: configure-max-players [--instance jv-...]' >&2; exit 2
+fi
+instance_id="$(jv_select_registered_instance "${instance_id}")" || exit 1
+readonly instance_id
+configuration="$(jv_config_get "${instance_id}")"
 status="$(jv_config_status)"
-current="$(jq -r '.minecraft.max_players' <<<"${configuration}")"
-java_memory="$(jq -r '.minecraft.java_memory' <<<"${configuration}")"
-container_memory="$(jq -r '.minecraft.container_memory' <<<"${configuration}")"
+current="$(jq -r '.runtime.max_players' <<<"${configuration}")"
+java_memory="$(jq -r '.runtime.java_memory' <<<"${configuration}")"
+container_memory="$(jq -r '.runtime.container_memory' <<<"${configuration}")"
 ram_kib="$(jq -r '.extended.system.physical_ram_kib // 0' <<<"${status}")"
 [[ ${ram_kib} =~ ^[0-9]+$ ]] || ram_kib=0
 ram_gib=$(((ram_kib + 524288) / 1048576))
@@ -41,5 +50,5 @@ echo
 print_player_ram_notice "${new_max}" "${ram_gib}"
 echo
 
-payload="$(jv_config_payload <<<"${configuration}" | jq -c --argjson maximum "${new_max}" '.max_players=$maximum')"
-jv_config_apply_payload "${payload}"
+payload="$(jv_config_payload <<<"${configuration}" | jq -c --argjson maximum "${new_max}" '.runtime.max_players=$maximum')"
+jv_config_apply_payload "${instance_id}" "${payload}"

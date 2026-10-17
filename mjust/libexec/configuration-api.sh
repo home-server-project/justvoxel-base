@@ -1,142 +1,85 @@
 #!/usr/bin/bash
-
+# Selected immutable-instance configuration; appliance discovery is separate.
 readonly JV_CONFIG_API_CLIENT=/usr/libexec/justvoxel/mjust/api-client
 
 jv_config_api_error() {
     local response="${1:-}" fallback="${2:-Configuration request failed.}" message
-    if jq -e 'type == "object"' <<<"${response}" >/dev/null 2>&1; then
-        message="$(jq -r '.error // .message // empty' <<<"${response}")"
-        if [[ -n ${message} ]]; then
-            printf 'ERROR: %s\n' "${message}" >&2
-            return
-        fi
+    message="$(jq -r '.error // .message // empty' <<<"${response}" 2>/dev/null)" || message=''
+    printf 'ERROR: %s\n' "${message:-${fallback}}" >&2
+}
+
+jv_config_request() {
+    local method="$1" path="$2" payload="${3:-}" response
+    if [[ ${method} == PUT ]]; then
+        response="$(printf '%s\n' "${payload}" | "${JV_CONFIG_API_CLIENT}" PUT "${path}" --data)" || {
+            jv_config_api_error "${response}"; return 1;
+        }
+    else
+        response="$("${JV_CONFIG_API_CLIENT}" GET "${path}")" || {
+            jv_config_api_error "${response}"; return 1;
+        }
     fi
-    printf 'ERROR: %s\n' "${fallback}" >&2
+    jq -e 'type == "object"' <<<"${response}" >/dev/null 2>&1 || {
+        echo 'ERROR: Management API returned invalid configuration data.' >&2; return 1;
+    }
+    printf '%s' "${response}"
+}
+
+jv_config_validate_id() {
+    [[ ${1:-} =~ ^jv-[a-z0-9]{6,12}$ ]] || {
+        echo 'ERROR: invalid Minecraft server ID.' >&2; return 1;
+    }
 }
 
 jv_config_get() {
-    local response rc
-    set +e
-    response="$("${JV_CONFIG_API_CLIENT}" GET /v1/admin/configuration)"
-    rc=$?
-    set -e
-    if (( rc != 0 )); then
-        jv_config_api_error "${response}" 'Configuration is unavailable from the JustVoxel Management API.'
-        return 1
-    fi
-    if ! jq -e '
-        type == "object" and
-        (.configured | type == "boolean") and
-        (.minecraft | type == "object") and
-        (.backup | type == "object")
-    ' <<<"${response}" >/dev/null 2>&1; then
-        echo 'ERROR: JustVoxel Management API returned invalid configuration data.' >&2
-        return 1
-    fi
-    if [[ $(jq -r '.configured' <<<"${response}") != true ]]; then
-        echo 'ERROR: JustVoxel has not been configured yet. Run: mjust setup' >&2
-        return 1
-    fi
+    local id="$1" response
+    jv_config_validate_id "${id}" || return 1
+    response="$(jv_config_request GET "/v1/minecraft/instances/${id}/configuration")" || return 1
+    jq -e --arg id "${id}" '.id == $id and (.runtime | type == "object")' <<<"${response}" >/dev/null || {
+        echo 'ERROR: configuration does not match the selected Minecraft server.' >&2; return 1;
+    }
     printf '%s' "${response}"
 }
 
 jv_config_status() {
-    local response rc
-    set +e
-    response="$("${JV_CONFIG_API_CLIENT}" GET /v1/status)"
-    rc=$?
-    set -e
-    if (( rc != 0 )); then
-        jv_config_api_error "${response}" 'Status is unavailable from the JustVoxel Management API.'
-        return 1
-    fi
-    printf '%s' "${response}"
+    jv_config_request GET /v1/status
 }
 
 jv_config_payload() {
-    jq -c '{
-        java_memory:.minecraft.java_memory,
-        container_memory:.minecraft.container_memory,
-        java_port:.minecraft.java_port,
-        bedrock_enabled:.minecraft.bedrock_enabled,
-        bedrock_port:.minecraft.bedrock_port,
-        timezone:.minecraft.timezone,
-        max_players:.minecraft.max_players,
-        motd:.minecraft.motd,
-        image_tag:.minecraft.image_tag,
-        version_policy:.minecraft.version_mode,
-        version:.minecraft.version,
-        game_mode:.minecraft.game_mode,
-        whitelist_enabled:.minecraft.whitelist_enabled,
-        backup_keep:.backup.keep,
-        backup_schedule:.backup.schedule,
-        backup_timer_enabled:.backup.timer_enabled,
-        confirm_players:false
-    }'
-}
-
-jv_config_post() {
-    local path="$1" payload="$2" response rc
-    set +e
-    response="$(printf '%s\n' "${payload}" | "${JV_CONFIG_API_CLIENT}" POST "${path}" --data)"
-    rc=$?
-    set -e
-    if (( rc != 0 )); then
-        jv_config_api_error "${response}" 'Configuration operation failed through the JustVoxel Management API.'
-        return 1
-    fi
-    printf '%s' "${response}"
+    jq -c '{runtime:.runtime}'
 }
 
 jv_config_apply_payload() {
-    local payload="$1" plan response answer names message
-    plan="$(jv_config_post /v1/admin/configuration/plan "${payload}")" || return 1
-
-    if ! jq -e 'type == "object" and (.ok == true) and (.changes | type == "array") and (.warnings | type == "array")' <<<"${plan}" >/dev/null 2>&1; then
-        jv_config_api_error "${plan}" 'Configuration validation returned invalid data.'
+    local id="$1" payload="$2" status response
+    jv_config_validate_id "${id}" || return 1
+    status="$(jv_config_request GET "/v1/minecraft/instances/${id}/status")" || return 1
+    jq -e --arg id "${id}" '.id == $id and .state == "stopped"' <<<"${status}" >/dev/null || {
+        echo "ERROR: stop Minecraft server ${id} through its normal lifecycle controls before applying settings." >&2
         return 1
-    fi
+    }
+    response="$(jv_config_request PUT "/v1/minecraft/instances/${id}/configuration" "${payload}")" || return 1
+    jq -e --arg id "${id}" '.ok == true and .id == $id' <<<"${response}" >/dev/null || {
+        echo 'ERROR: configuration update did not confirm the selected Minecraft server.' >&2; return 1;
+    }
+    echo 'Server settings saved. The server stays stopped. Start it normally when ready.'
+}
 
-    if [[ $(jq '.changes | length' <<<"${plan}") -eq 0 ]]; then
-        echo 'No configuration changes are needed.'
-        return 0
-    fi
+jv_config_backup_get() {
+    local id="$1" response
+    jv_config_validate_id "${id}" || return 1
+    response="$(jv_config_request GET "/v1/minecraft/instances/${id}/backups/settings")" || return 1
+    jq -e '(.enabled | type == "boolean") and (.time | type == "string") and (.retention | type == "number")' <<<"${response}" >/dev/null || {
+        echo 'ERROR: invalid selected-server backup settings.' >&2; return 1;
+    }
+    printf '%s' "${response}"
+}
 
-    if [[ $(jq '.warnings | length' <<<"${plan}") -gt 0 ]]; then
-        echo 'Notice:'
-        jq -r '.warnings[] | "  " + .' <<<"${plan}"
-        echo
-    fi
-
-    response="$(jv_config_post /v1/admin/configuration/apply "${payload}")" || return 1
-
-    if [[ $(jq -r '.confirmation_required // false' <<<"${response}") == true ]]; then
-        names="$(jq -r '.players // [] | join(", ")' <<<"${response}")"
-        if [[ -n ${names} ]]; then
-            echo "Players online: ${names}"
-        else
-            echo "Players online: $(jq -r '.online // 0' <<<"${response}")"
-        fi
-        read -r -p 'Apply the memory change and restart Minecraft anyway? [y/N]: ' answer
-        if [[ ${answer,,} != y && ${answer,,} != yes ]]; then
-            echo 'Cancelled. No settings were changed.'
-            return 0
-        fi
-        payload="$(jq -c '.confirm_players = true' <<<"${payload}")"
-        response="$(jv_config_post /v1/admin/configuration/apply "${payload}")" || return 1
-    fi
-
-    if ! jq -e 'type == "object" and (.ok == true)' <<<"${response}" >/dev/null 2>&1; then
-        jv_config_api_error "${response}" 'Configuration update was not accepted.'
-        return 1
-    fi
-
-    message="$(jq -r '.message // empty' <<<"${response}")"
-    if [[ -n ${message} ]]; then
-        printf '%s\n' "${message}"
-    elif [[ $(jq -r '.applied // false' <<<"${response}") == true ]]; then
-        echo 'Configuration updated.'
-    else
-        echo 'No configuration changes were applied.'
-    fi
+jv_config_backup_put() {
+    local id="$1" payload="$2" response
+    jv_config_validate_id "${id}" || return 1
+    response="$(jv_config_request PUT "/v1/minecraft/instances/${id}/backups/settings" "${payload}")" || return 1
+    jq -e --arg id "${id}" '.ok == true and .id == $id' <<<"${response}" >/dev/null || {
+        echo 'ERROR: backup update did not confirm the selected Minecraft server.' >&2; return 1;
+    }
+    echo 'Selected-server backup settings saved.'
 }

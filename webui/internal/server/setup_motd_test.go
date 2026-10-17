@@ -249,8 +249,7 @@ func TestSetupMOTDHasNoVisibleAutomaticControl(t *testing.T) {
 // Keep actual instance state separate from the retired fixed-server discovery.
 type postSetupMOTDClient struct {
 	*fakeMinecraftWorkspaceAPI
-	runtime                  api.InstanceRuntimeSettings
-	fixedPlans, fixedApplies int
+	runtime api.InstanceRuntimeSettings
 }
 
 func (f *postSetupMOTDClient) MinecraftInstanceConfiguration(_ context.Context, _, id string) (api.InstanceRuntimeSettings, error) {
@@ -270,16 +269,6 @@ func (f *postSetupMOTDClient) SetMinecraftInstanceConfiguration(ctx context.Cont
 	}
 	f.runtime = settings
 	return nil
-}
-
-func (f *postSetupMOTDClient) AdminConfigurationPlan(context.Context, string, api.AdminConfigurationChangeRequest) (api.AdminConfigurationChangeResponse, error) {
-	f.fixedPlans++
-	return api.AdminConfigurationChangeResponse{}, &api.ResponseError{StatusCode: http.StatusGone}
-}
-
-func (f *postSetupMOTDClient) AdminConfigurationApply(context.Context, string, api.AdminConfigurationChangeRequest) (api.AdminConfigurationChangeResponse, error) {
-	f.fixedApplies++
-	return api.AdminConfigurationChangeResponse{}, &api.ResponseError{StatusCode: http.StatusGone}
 }
 
 func TestPostSetupMOTDRemainsExplicitConfiguration(t *testing.T) {
@@ -317,7 +306,7 @@ func TestPostSetupMOTDRemainsExplicitConfiguration(t *testing.T) {
 	}
 	wantRuntime := before
 	wantRuntime.MOTD = "My new welcome message"
-	if !reflect.DeepEqual(client.runtime, wantRuntime) || client.fixedPlans != 0 || client.fixedApplies != 0 {
+	if !reflect.DeepEqual(client.runtime, wantRuntime) {
 		t.Fatal("MOTD edit changed other settings or used fixed-server configuration")
 	}
 	for _, path := range []string{"/setup/start", "/setup/recommended"} {

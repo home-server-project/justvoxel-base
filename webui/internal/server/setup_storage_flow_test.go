@@ -242,7 +242,7 @@ func TestBackupsWorkspaceDestinationPlanAndApply(t *testing.T) {
 	if apply.Code != http.StatusSeeOther || client.destinationApplyCalls != 2 || apply.Header().Get("Location") != "/workspace/backups?result=destination&server=jv-family1" {
 		t.Fatalf("Backups destination lost selection: %d %s", apply.Code, apply.Header().Get("Location"))
 	}
-	if client.instanceBackupMutations != 0 || client.backupCalls != 0 || client.configurationPlanCalls != 0 || client.configurationApplyCalls != 0 {
+	if client.instanceBackupMutations != 0 || client.backupCalls != 0 {
 		t.Fatal("appliance-wide destination change invoked server backup, restore, or fixed configuration operations")
 	}
 }

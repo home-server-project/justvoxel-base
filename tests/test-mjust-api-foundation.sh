@@ -69,7 +69,6 @@ admin_setup_plan="${repo_root}/management/cmd/justvoxel-management-agent/admin_s
 admin_setup_apply="${repo_root}/management/cmd/justvoxel-management-agent/admin_setup_apply.go"
 admin_operations="${repo_root}/management/cmd/justvoxel-management-agent/admin_operations.go"
 admin_validation="${repo_root}/management/cmd/justvoxel-management-agent/admin_validation.go"
-admin_configuration="${repo_root}/management/cmd/justvoxel-management-agent/admin_configuration.go"
 admin_discovery="${repo_root}/management/cmd/justvoxel-management-agent/admin_discovery.go"
 operator_surfaces="${repo_root}/management/cmd/justvoxel-management-agent/operator_surfaces.go"
 files="${repo_root}/mjust/libexec/files"
@@ -81,7 +80,7 @@ fail() {
     exit 1
 }
 
-for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${backup_storage}" "${backup_storage_api}" "${setup}" "${setup_api}" "${restore}" "${validate}" "${validate_backend}" "${storage_provision}" "${storage_plan}" "${storage_api}" "${data_migration}" "${data_migration_api}" "${data_migration_plan_backend}" "${data_migration_transaction_backend}" "${admin_data_migration_plan}" "${admin_data_migration_apply}" "${data_migration_worker}" "${migration_export}" "${migration_api}" "${migration_export_backend}" "${migration_export_plan_backend}" "${migration_export_transaction_backend}" "${admin_migration_export_plan}" "${admin_migration_export_apply}" "${migration_export_worker}" "${migration_recovery}" "${migration_recovery_backend}" "${migration_recovery_plan_backend}" "${migration_recovery_transaction_backend}" "${admin_migration_recovery}" "${admin_migration_recovery_apply}" "${migration_recovery_worker}" "${migration_import}" "${migration_import_backend}" "${migration_import_plan_backend}" "${migration_import_transaction_backend}" "${admin_migration_import_plan}" "${admin_migration_import_apply}" "${migration_import_worker}" "${webui_migration_api}" "${webui_persistent_operations}" "${webui_migration_workspace}" "${webui_migration_workspace_export}" "${webui_migration_workspace_import}" "${webui_migration_workspace_recovery}" "${webui_migration_progress}" "${admin_backup_storage}" "${admin_storage_provision}" "${admin_setup_plan}" "${admin_setup_apply}" "${admin_operations}" "${admin_validation}" "${admin_configuration}" "${admin_discovery}" "${operator_surfaces}" "${files}" "${menu}" "${justfile}"; do
+for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${backup_storage}" "${backup_storage_api}" "${setup}" "${setup_api}" "${restore}" "${validate}" "${validate_backend}" "${storage_provision}" "${storage_plan}" "${storage_api}" "${data_migration}" "${data_migration_api}" "${data_migration_plan_backend}" "${data_migration_transaction_backend}" "${admin_data_migration_plan}" "${admin_data_migration_apply}" "${data_migration_worker}" "${migration_export}" "${migration_api}" "${migration_export_backend}" "${migration_export_plan_backend}" "${migration_export_transaction_backend}" "${admin_migration_export_plan}" "${admin_migration_export_apply}" "${migration_export_worker}" "${migration_recovery}" "${migration_recovery_backend}" "${migration_recovery_plan_backend}" "${migration_recovery_transaction_backend}" "${admin_migration_recovery}" "${admin_migration_recovery_apply}" "${migration_recovery_worker}" "${migration_import}" "${migration_import_backend}" "${migration_import_plan_backend}" "${migration_import_transaction_backend}" "${admin_migration_import_plan}" "${admin_migration_import_apply}" "${migration_import_worker}" "${webui_migration_api}" "${webui_persistent_operations}" "${webui_migration_workspace}" "${webui_migration_workspace_export}" "${webui_migration_workspace_import}" "${webui_migration_workspace_recovery}" "${webui_migration_progress}" "${admin_backup_storage}" "${admin_storage_provision}" "${admin_setup_plan}" "${admin_setup_apply}" "${admin_operations}" "${admin_validation}" "${admin_discovery}" "${operator_surfaces}" "${files}" "${menu}" "${justfile}"; do
     [[ -f ${file} ]] || fail "missing mJust Management API file: ${file}"
 done
 
@@ -170,17 +169,13 @@ grep -Fq 'outputMode := "short-iso"' "${operator_surfaces}" || fail 'WebUI/defau
 grep -Fq 'case "cat":' "${operator_surfaces}" || fail 'Management API message-only log format is missing'
 grep -Fq 'unsupported Minecraft log format' "${operator_surfaces}" || fail 'Management API log format allowlist is missing'
 
-grep -Fq 'GET /v1/admin/configuration' "${configuration_api}" || fail 'mJust configuration does not read current state through the Management API'
-grep -Fq 'jv_config_post /v1/admin/configuration/plan' "${configuration_api}" || fail 'mJust configuration does not validate changes through the Management API'
-grep -Fq 'jv_config_post /v1/admin/configuration/apply' "${configuration_api}" || fail 'mJust configuration does not apply changes through the Management API'
-grep -Fq '"${JV_CONFIG_API_CLIENT}" POST "${path}" --data' "${configuration_api}" || fail 'mJust configuration POST helper does not use the Management API client'
-grep -Fq 'GET /v1/status' "${configuration_api}" || fail 'mJust configuration guidance does not use API status'
-grep -Fq '.confirmation_required // false' "${configuration_api}" || fail 'mJust configuration does not handle player restart confirmation'
+grep -Fq 'GET "/v1/minecraft/instances/${id}/configuration"' "${configuration_api}" || fail 'configuration read must address an immutable instance'
+grep -Fq 'PUT "/v1/minecraft/instances/${id}/configuration"' "${configuration_api}" || fail 'configuration write must address the same immutable instance'
+grep -Fq 'GET /v1/status' "${configuration_api}" || fail 'configuration RAM guidance must use host status'
 grep -Fq 'configuration-api.sh' "${configure}" || fail 'main mJust configure frontend does not use the configuration API helper'
 grep -Fq 'configuration-api.sh' "${configure_max}" || fail 'maximum-player frontend does not use the configuration API helper'
 grep -Fq 'jv_config_apply_payload' "${configure}" || fail 'main mJust configure frontend does not apply through the Agent'
 grep -Fq 'jv_config_apply_payload' "${configure_max}" || fail 'maximum-player frontend does not apply through the Agent'
-grep -Fq 'registerAdminConfigurationRoutes' "${admin_configuration}" || fail 'Management Agent configuration routes are missing'
 grep -Fq 'GET /v1/admin/configuration' "${admin_discovery}" || fail 'Management Agent configuration discovery route is missing'
 
 for frontend in "${configure}" "${configure_max}"; do

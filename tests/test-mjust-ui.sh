@@ -144,8 +144,6 @@ fi
 grep -Fq "jui_choose 'Configure Minecraft'" "${configure}" || fail 'Configure must use the flattened interactive selector'
 grep -Fq "'Show current configuration'         'Maximum players'         'Change memory limits'" "${configure}" || fail 'Configure flattened menu entries missing'
 if grep -Fq "'Other safe Minecraft settings'" "${menu}"; then fail 'legacy Configure intermediate submenu remains'; fi
-grep -Fq "jui_choose 'Container image policy'" "${configure}" || fail 'container image policy must use the interactive selector'
-grep -Fq "jui_choose 'Minecraft version policy'" "${configure}" || fail 'Minecraft version policy must use the interactive selector'
 grep -Fq "'Back'" "${configure}" || fail 'Configure nested menus must expose Back navigation'
 grep -Fq 'Enable / disable Bedrock cross-play' "${configure}" || fail 'post-setup Bedrock toggle missing'
 
@@ -222,5 +220,7 @@ grep -Fq 'HWS backup choices:' "${storage_plan}" || fail 'HWS storage guidance m
 
 grep -Fq 'All mjust commands' "${menu}" || fail 'advanced all-commands entry missing'
 grep -Fq '/usr/bin/mjust --list' "${menu}" || fail 'all-commands entry must use authoritative mjust --list output'
+
+grep -Fq 'mjust/update-minecraft --instance "${instance_id}"' "${configure}" || fail 'Configure must delegate selected Version updates'
 
 echo 'mjust UI regression tests passed.'

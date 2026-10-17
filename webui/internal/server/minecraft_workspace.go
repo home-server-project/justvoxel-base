@@ -15,8 +15,6 @@ import (
 type minecraftWorkspaceSettingsAPI interface {
 	AdminConfiguration(ctx context.Context, session string) (api.AdminConfigurationDiscovery, error)
 	AdminSetupDefaults(ctx context.Context, session string) (api.AdminSetupDefaults, error)
-	AdminConfigurationPlan(ctx context.Context, session string, request api.AdminConfigurationChangeRequest) (api.AdminConfigurationChangeResponse, error)
-	AdminConfigurationApply(ctx context.Context, session string, request api.AdminConfigurationChangeRequest) (api.AdminConfigurationChangeResponse, error)
 }
 
 type minecraftWorkspaceOperationsAPI interface {
