@@ -12,7 +12,8 @@ import (
 
 const adminValidationPath = "/v1/admin/validation"
 
-var adminValidationClientTimeout = 50 * time.Second
+// Management validates the host and every immutable instance within ten minutes.
+var adminValidationClientTimeout = 10*time.Minute + 15*time.Second
 
 type AdminValidationResponse struct {
 	OK       bool   `json:"ok"`

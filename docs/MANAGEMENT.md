@@ -58,6 +58,18 @@ used by WebUI. They remain suitable entry points for normal SSH administration,
 documentation, automation, and troubleshooting, but they do not own duplicate
 business logic or safety policy.
 
+Administrator-only `GET /v1/admin/validation` combines the default host-only
+`validate-backend` result with independent checks of every registered modern
+immutable instance. Registry and committed runtime coverage must agree; retained
+`minecraft.json` compatibility identity is excluded. Zero modern instances is
+valid. Stopped servers are structurally checked without starting them; running
+servers receive `verify-minecraft-stack --instance <id> <version>`. Storage,
+SELinux contexts, owned firewall rules and backup settings/status/timer/destination
+checks are read-only. The appliance-wide deadline is ten minutes. Expected
+problems return HTTP 200 with `ok=false` and `exit_code=1`; infrastructure failures
+return sanitized HTTP 503. Historical `validate-backend --first-run` recovery
+keeps its fixed-runtime contract and is never part of normal validation.
+
 ## Native Linux administration remains available
 
 JustVoxel is still a normal immutable Linux server.

@@ -2,7 +2,6 @@
 set -euo pipefail
 source /usr/libexec/justvoxel/mjust/common.sh
 require_root
-require_config
 
 failures=0
 warnings=0
@@ -24,14 +23,7 @@ check_file() {
     fi
 }
 
-check_file "${JV_CONFIG}" 600
-check_file "${JV_MC_ENV}" 600
-check_file "${JV_BACKUP_ENV}" 600
-check_file "${JV_QUADLET}" 644
-check_file "${JV_BACKUP_SERVICE}" 644
-check_file "${JV_BACKUP_TIMER}" 644
-
-# The first-run transaction alone requests this policy. Ordinary validation
+# Historical first-run recovery alone requests this policy. Ordinary validation
 # still treats every failed unit as a blocking appliance-health problem.
 decode_dependency_units() {
     local line token decoded char i
@@ -67,7 +59,10 @@ validate_failed_units() {
     local -A required=()
     local -a pending=(minecraft.service minecraft-backup.service minecraft-backup.timer basic.target sysinit.target local-fs.target)
     if [[ ${mode} != first-run ]]; then
-        failed_units="$(systemctl --failed --no-legend --plain 2>/dev/null || true)"
+        if ! failed_units="$(systemctl --failed --no-legend --plain 2>/dev/null)"; then
+            fail 'could not enumerate failed systemd units'
+            return
+        fi
         if [[ -z ${failed_units} ]]; then
             pass 'Failed system services: none'
         else
@@ -151,207 +146,230 @@ validate_failed_units() {
     done <<< "${failed_units}"
 }
 
+validate_host() {
+    validate_failed_units "${validation_mode}"
+    # JustVoxel ships zram-generator's default min(RAM/2, 4096 MiB) policy, but
+    # administrators may intentionally disable or tune zram. Treat drift from the
+    # appliance default as advisory rather than an appliance-health failure.
+    mem_kib="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+    expected_zram_bytes=$((mem_kib * 1024 / 2))
+    zram_cap_bytes=$((4096 * 1024 * 1024))
+    if (( expected_zram_bytes > zram_cap_bytes )); then
+        expected_zram_bytes=${zram_cap_bytes}
+    fi
+    zram_tolerance_bytes=$((expected_zram_bytes / 100))
+    (( zram_tolerance_bytes < 1024 * 1024 )) && zram_tolerance_bytes=$((1024 * 1024))
+
+    if [[ -r /sys/block/zram0/disksize ]]; then
+        actual_zram_bytes="$(cat /sys/block/zram0/disksize)"
+        delta=$((actual_zram_bytes - expected_zram_bytes))
+        (( delta < 0 )) && delta=$((-delta))
+        if (( delta <= zram_tolerance_bytes )); then
+            pass "zram0 size follows the default min(RAM/2, 4096 MiB) policy closely: $((actual_zram_bytes / 1024 / 1024)) MiB"
+        else
+            warn "zram0 size is ${actual_zram_bytes} bytes; JustVoxel default is approximately ${expected_zram_bytes} bytes"
+        fi
+    else
+        warn '/dev/zram0 is not available; the JustVoxel default zram policy is disabled or unavailable'
+    fi
+
+    active_swaps="$(swapon --show=NAME --noheadings 2>/dev/null | awk '{$1=$1; print}' || true)"
+    if grep -Fxq '/dev/zram0' <<< "${active_swaps}"; then
+        pass 'zram0 is active as swap'
+    else
+        warn 'zram0 is not active as swap; this is allowed when the administrator intentionally changes swap policy'
+    fi
+
+    extra_swaps="$(grep -Fvx '/dev/zram0' <<< "${active_swaps}" | sed '/^$/d' || true)"
+    if [[ -z ${extra_swaps} ]]; then
+        pass 'No disk or swap-file device is active by default'
+    else
+        echo 'INFO: additional swap is active; this is not part of the JustVoxel default policy:'
+        echo "${extra_swaps}"
+    fi
+
+}
+
+# Normal appliance-wide validation is instance-aware and orchestrated by
+# Management. --first-run exists ONLY for historical non-InstanceOnly setup
+# recovery evidence; its fixed runtime and failed-unit classifier are retained.
+# New Setup verifies its immutable instance directly and must not call this mode.
+validate_legacy_first_run_runtime() {
+    check_file "${JV_CONFIG}" 600
+    check_file "${JV_MC_ENV}" 600
+    check_file "${JV_BACKUP_ENV}" 600
+    check_file "${JV_QUADLET}" 644
+    check_file "${JV_BACKUP_SERVICE}" 644
+    check_file "${JV_BACKUP_TIMER}" 644
+
+    if [[ -L ${JV_QUADLET} || -L ${JV_MC_ENV} || -L ${JV_BACKUP_ENV} ]]; then
+        fail 'active runtime files must be local administrator-owned copies, not symlinks into the immutable image'
+    else
+        pass 'active runtime files are local copies under /etc'
+    fi
+
+    expected_image="$(minecraft_image_ref)"
+    if grep -Fqx "Image=${expected_image}" "${JV_QUADLET}" 2>/dev/null; then
+        pass "Minecraft container image policy is rendered as ${expected_image}"
+    else
+        fail "Quadlet does not contain configured image ${expected_image}"
+    fi
+
+    case "${MINECRAFT_VERSION_MODE}" in
+        pinned|recommended)
+            if [[ ${MINECRAFT_VERSION} == LATEST ]] || grep -Fq 'VERSION=LATEST' "${JV_MC_ENV}" 2>/dev/null; then
+                fail "Minecraft ${MINECRAFT_VERSION_MODE} version policy requires an exact version, but runtime uses LATEST"
+            else
+                pass "Minecraft ${MINECRAFT_VERSION_MODE} game version is ${MINECRAFT_VERSION}"
+            fi
+            ;;
+        latest)
+            if grep -Fqx 'VERSION=LATEST' "${JV_MC_ENV}" 2>/dev/null; then
+                pass 'Minecraft game version intentionally follows the LATEST release channel'
+            else
+                fail 'Minecraft version policy says latest but runtime is not VERSION=LATEST'
+            fi
+            ;;
+        *)
+            fail "unknown Minecraft version policy: ${MINECRAFT_VERSION_MODE}"
+            ;;
+    esac
+
+    if grep -Eq '(^|[=:])25575([/:]|$)|podman\.sock' "${JV_QUADLET}" 2>/dev/null; then
+        fail 'Quadlet exposes RCON or Podman socket access'
+    else
+        pass 'Quadlet does not publish RCON or mount the Podman socket'
+    fi
+
+    if [[ -n ${DATA_MOUNT_POINT:-} ]]; then
+        if /usr/libexec/justvoxel/mjust/validate-data-mount; then
+            pass "Minecraft data mount identity is valid: ${DATA_MOUNT_POINT}"
+        else
+            fail "Minecraft data mount validation failed: ${DATA_MOUNT_POINT}"
+        fi
+    fi
+
+    if [[ -d ${DATA_PATH} ]]; then
+        pass "Minecraft data directory exists: ${DATA_PATH}"
+        data_context="$(ls -Zd "${DATA_PATH}" 2>/dev/null || true)"
+        if grep -q 'container_file_t' <<< "${data_context}"; then
+            pass 'Minecraft data has container_file_t SELinux labeling'
+        else
+            fail "Minecraft data is not labeled container_file_t: ${data_context:-unknown}"
+        fi
+    else
+        fail "Minecraft data directory is missing: ${DATA_PATH}"
+    fi
+
+    if [[ -n ${BACKUP_MOUNT_POINT} ]]; then
+        if mountpoint -q -- "${BACKUP_MOUNT_POINT}"; then
+            pass "backup mount is present: ${BACKUP_MOUNT_POINT}"
+        else
+            fail "backup mount is missing: ${BACKUP_MOUNT_POINT}"
+        fi
+        if [[ -n ${BACKUP_EXPECTED_UUID} ]]; then
+            actual_uuid="$(jv_exact_mount_identity UUID "${BACKUP_MOUNT_POINT}" 2>/dev/null || true)"
+            [[ ${actual_uuid} == "${BACKUP_EXPECTED_UUID}" ]] && pass 'backup filesystem UUID matches' || fail 'backup filesystem UUID does not match configuration'
+        fi
+        if [[ -n ${BACKUP_EXPECTED_SOURCE} ]]; then
+            actual_source="$(jv_exact_mount_identity SOURCE "${BACKUP_MOUNT_POINT}" 2>/dev/null || true)"
+            [[ ${actual_source} == "${BACKUP_EXPECTED_SOURCE}" ]] && pass 'backup mount source matches' || fail 'backup mount source does not match configuration'
+        fi
+    fi
+
+    if [[ -d ${BACKUP_PATH} && -w ${BACKUP_PATH} ]]; then
+        pass "backup path is present and writable: ${BACKUP_PATH}"
+    else
+        fail "backup path is missing or not writable: ${BACKUP_PATH}"
+    fi
+
+    if firewall-cmd --permanent --query-port="${JAVA_PORT}/tcp" >/dev/null 2>&1; then
+        pass "firewall allows Java ${JAVA_PORT}/tcp"
+    else
+        fail "firewall does not allow Java ${JAVA_PORT}/tcp"
+    fi
+    if [[ ${BEDROCK_ENABLED} == yes ]]; then
+        if firewall-cmd --permanent --query-port="${BEDROCK_PORT}/udp" >/dev/null 2>&1; then
+            pass "firewall allows Bedrock ${BEDROCK_PORT}/udp"
+        else
+            fail "firewall does not allow Bedrock ${BEDROCK_PORT}/udp"
+        fi
+    fi
+
+    if systemctl cat minecraft.service >/dev/null 2>&1; then
+        pass 'minecraft.service is generated from the local Quadlet'
+    else
+        fail 'minecraft.service was not generated'
+    fi
+
+    if [[ ${BACKUP_TIMER_ENABLED} == yes ]]; then
+        if [[ $(systemctl is-enabled minecraft-backup.timer 2>/dev/null || true) == enabled ]]; then
+            pass 'Minecraft backup timer is enabled'
+        elif [[ -f ${JV_SETUP_IN_PROGRESS} ]]; then
+            pass 'Minecraft backup timer will be activated after first-run verification'
+        else
+            fail 'Minecraft backup timer should be enabled but is not'
+        fi
+    else
+        pass 'Minecraft backup timer is intentionally disabled'
+    fi
+
+    if systemctl is-active --quiet minecraft.service; then
+        pass 'minecraft.service is active'
+        # Maintenance callers may skip these probes only after restore-runtime-validate succeeds.
+        if [[ ${JUSTVOXEL_RUNTIME_ALREADY_VALIDATED:-0} == 1 ]]; then
+            pass 'Minecraft runtime already verified by restore-runtime-validate'
+        else
+            if players="$(podman exec minecraft rcon-cli 'list' 2>/dev/null)"; then
+                pass "RCON responded: ${players}"
+            else
+                fail 'RCON did not respond'
+            fi
+            if version="$(/usr/libexec/justvoxel/mjust/verify-minecraft-stack 2>/dev/null)"; then
+                pass "Minecraft reports: ${version}"
+            else
+                fail 'Minecraft version query failed'
+            fi
+            if [[ ${BEDROCK_ENABLED} == yes ]]; then
+                if geyser="$(podman exec minecraft rcon-cli 'geyser version' 2>/dev/null)"; then
+                    pass "Geyser reports: ${geyser}"
+                else
+                    fail 'Geyser version query failed'
+                fi
+            fi
+        fi
+        if [[ ${BEDROCK_ENABLED} == yes ]]; then
+            geyser_config="${DATA_PATH}/plugins/Geyser-Spigot/config.yml"
+            if grep -Eq '^[[:space:]]*auth-type:[[:space:]]*floodgate[[:space:]]*$' "${geyser_config}" 2>/dev/null; then
+                pass 'Geyser auth-type is floodgate'
+            else
+                fail 'Geyser auth-type is not confirmed as floodgate'
+            fi
+        fi
+    else
+        fail 'minecraft.service is not active'
+    fi
+
+    echo
+    /usr/libexec/justvoxel/mjust/storage-summary || fail 'storage summary could not be generated'
+
+}
+
 validation_mode=global
 case "${1:-}" in
-    '') ;;
+    '') [[ $# == 0 ]] || { fail 'unknown validation mode'; exit 1; } ;;
     --first-run)
-        [[ -f ${JV_SETUP_IN_PROGRESS} ]] || { fail 'first-run validation requires an active setup transaction'; exit 1; }
+        [[ $# == 1 && -f ${JV_SETUP_IN_PROGRESS} ]] || { fail 'first-run validation requires an active setup transaction'; exit 1; }
         validation_mode=first-run
+        # The historical classifier needs the selected legacy storage paths.
+        require_config
         ;;
     *) fail 'unknown validation mode'; exit 1 ;;
 esac
-validate_failed_units "${validation_mode}"
-
-# JustVoxel ships zram-generator's default min(RAM/2, 4096 MiB) policy, but
-# administrators may intentionally disable or tune zram. Treat drift from the
-# appliance default as advisory rather than an appliance-health failure.
-mem_kib="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
-expected_zram_bytes=$((mem_kib * 1024 / 2))
-zram_cap_bytes=$((4096 * 1024 * 1024))
-if (( expected_zram_bytes > zram_cap_bytes )); then
-    expected_zram_bytes=${zram_cap_bytes}
+validate_host
+if [[ ${validation_mode} == first-run ]]; then
+    validate_legacy_first_run_runtime
 fi
-zram_tolerance_bytes=$((expected_zram_bytes / 100))
-(( zram_tolerance_bytes < 1024 * 1024 )) && zram_tolerance_bytes=$((1024 * 1024))
-
-if [[ -r /sys/block/zram0/disksize ]]; then
-    actual_zram_bytes="$(cat /sys/block/zram0/disksize)"
-    delta=$((actual_zram_bytes - expected_zram_bytes))
-    (( delta < 0 )) && delta=$((-delta))
-    if (( delta <= zram_tolerance_bytes )); then
-        pass "zram0 size follows the default min(RAM/2, 4096 MiB) policy closely: $((actual_zram_bytes / 1024 / 1024)) MiB"
-    else
-        warn "zram0 size is ${actual_zram_bytes} bytes; JustVoxel default is approximately ${expected_zram_bytes} bytes"
-    fi
-else
-    warn '/dev/zram0 is not available; the JustVoxel default zram policy is disabled or unavailable'
-fi
-
-active_swaps="$(swapon --show=NAME --noheadings 2>/dev/null | awk '{$1=$1; print}' || true)"
-if grep -Fxq '/dev/zram0' <<< "${active_swaps}"; then
-    pass 'zram0 is active as swap'
-else
-    warn 'zram0 is not active as swap; this is allowed when the administrator intentionally changes swap policy'
-fi
-
-extra_swaps="$(grep -Fvx '/dev/zram0' <<< "${active_swaps}" | sed '/^$/d' || true)"
-if [[ -z ${extra_swaps} ]]; then
-    pass 'No disk or swap-file device is active by default'
-else
-    echo 'INFO: additional swap is active; this is not part of the JustVoxel default policy:'
-    echo "${extra_swaps}"
-fi
-
-if [[ -L ${JV_QUADLET} || -L ${JV_MC_ENV} || -L ${JV_BACKUP_ENV} ]]; then
-    fail 'active runtime files must be local administrator-owned copies, not symlinks into the immutable image'
-else
-    pass 'active runtime files are local copies under /etc'
-fi
-
-expected_image="$(minecraft_image_ref)"
-if grep -Fqx "Image=${expected_image}" "${JV_QUADLET}" 2>/dev/null; then
-    pass "Minecraft container image policy is rendered as ${expected_image}"
-else
-    fail "Quadlet does not contain configured image ${expected_image}"
-fi
-
-case "${MINECRAFT_VERSION_MODE}" in
-    pinned|recommended)
-        if [[ ${MINECRAFT_VERSION} == LATEST ]] || grep -Fq 'VERSION=LATEST' "${JV_MC_ENV}" 2>/dev/null; then
-            fail "Minecraft ${MINECRAFT_VERSION_MODE} version policy requires an exact version, but runtime uses LATEST"
-        else
-            pass "Minecraft ${MINECRAFT_VERSION_MODE} game version is ${MINECRAFT_VERSION}"
-        fi
-        ;;
-    latest)
-        if grep -Fqx 'VERSION=LATEST' "${JV_MC_ENV}" 2>/dev/null; then
-            pass 'Minecraft game version intentionally follows the LATEST release channel'
-        else
-            fail 'Minecraft version policy says latest but runtime is not VERSION=LATEST'
-        fi
-        ;;
-    *)
-        fail "unknown Minecraft version policy: ${MINECRAFT_VERSION_MODE}"
-        ;;
-esac
-
-if grep -Eq '(^|[=:])25575([/:]|$)|podman\.sock' "${JV_QUADLET}" 2>/dev/null; then
-    fail 'Quadlet exposes RCON or Podman socket access'
-else
-    pass 'Quadlet does not publish RCON or mount the Podman socket'
-fi
-
-if [[ -n ${DATA_MOUNT_POINT:-} ]]; then
-    if /usr/libexec/justvoxel/mjust/validate-data-mount; then
-        pass "Minecraft data mount identity is valid: ${DATA_MOUNT_POINT}"
-    else
-        fail "Minecraft data mount validation failed: ${DATA_MOUNT_POINT}"
-    fi
-fi
-
-if [[ -d ${DATA_PATH} ]]; then
-    pass "Minecraft data directory exists: ${DATA_PATH}"
-    data_context="$(ls -Zd "${DATA_PATH}" 2>/dev/null || true)"
-    if grep -q 'container_file_t' <<< "${data_context}"; then
-        pass 'Minecraft data has container_file_t SELinux labeling'
-    else
-        fail "Minecraft data is not labeled container_file_t: ${data_context:-unknown}"
-    fi
-else
-    fail "Minecraft data directory is missing: ${DATA_PATH}"
-fi
-
-if [[ -n ${BACKUP_MOUNT_POINT} ]]; then
-    if mountpoint -q -- "${BACKUP_MOUNT_POINT}"; then
-        pass "backup mount is present: ${BACKUP_MOUNT_POINT}"
-    else
-        fail "backup mount is missing: ${BACKUP_MOUNT_POINT}"
-    fi
-    if [[ -n ${BACKUP_EXPECTED_UUID} ]]; then
-        actual_uuid="$(jv_exact_mount_identity UUID "${BACKUP_MOUNT_POINT}" 2>/dev/null || true)"
-        [[ ${actual_uuid} == "${BACKUP_EXPECTED_UUID}" ]] && pass 'backup filesystem UUID matches' || fail 'backup filesystem UUID does not match configuration'
-    fi
-    if [[ -n ${BACKUP_EXPECTED_SOURCE} ]]; then
-        actual_source="$(jv_exact_mount_identity SOURCE "${BACKUP_MOUNT_POINT}" 2>/dev/null || true)"
-        [[ ${actual_source} == "${BACKUP_EXPECTED_SOURCE}" ]] && pass 'backup mount source matches' || fail 'backup mount source does not match configuration'
-    fi
-fi
-
-if [[ -d ${BACKUP_PATH} && -w ${BACKUP_PATH} ]]; then
-    pass "backup path is present and writable: ${BACKUP_PATH}"
-else
-    fail "backup path is missing or not writable: ${BACKUP_PATH}"
-fi
-
-if firewall-cmd --permanent --query-port="${JAVA_PORT}/tcp" >/dev/null 2>&1; then
-    pass "firewall allows Java ${JAVA_PORT}/tcp"
-else
-    fail "firewall does not allow Java ${JAVA_PORT}/tcp"
-fi
-if [[ ${BEDROCK_ENABLED} == yes ]]; then
-    if firewall-cmd --permanent --query-port="${BEDROCK_PORT}/udp" >/dev/null 2>&1; then
-        pass "firewall allows Bedrock ${BEDROCK_PORT}/udp"
-    else
-        fail "firewall does not allow Bedrock ${BEDROCK_PORT}/udp"
-    fi
-fi
-
-if systemctl cat minecraft.service >/dev/null 2>&1; then
-    pass 'minecraft.service is generated from the local Quadlet'
-else
-    fail 'minecraft.service was not generated'
-fi
-
-if [[ ${BACKUP_TIMER_ENABLED} == yes ]]; then
-    if [[ $(systemctl is-enabled minecraft-backup.timer 2>/dev/null || true) == enabled ]]; then
-        pass 'Minecraft backup timer is enabled'
-    elif [[ -f ${JV_SETUP_IN_PROGRESS} ]]; then
-        pass 'Minecraft backup timer will be activated after first-run verification'
-    else
-        fail 'Minecraft backup timer should be enabled but is not'
-    fi
-else
-    pass 'Minecraft backup timer is intentionally disabled'
-fi
-
-if systemctl is-active --quiet minecraft.service; then
-    pass 'minecraft.service is active'
-    # Maintenance callers may skip these probes only after restore-runtime-validate succeeds.
-    if [[ ${JUSTVOXEL_RUNTIME_ALREADY_VALIDATED:-0} == 1 ]]; then
-        pass 'Minecraft runtime already verified by restore-runtime-validate'
-    else
-        if players="$(podman exec minecraft rcon-cli 'list' 2>/dev/null)"; then
-            pass "RCON responded: ${players}"
-        else
-            fail 'RCON did not respond'
-        fi
-        if version="$(/usr/libexec/justvoxel/mjust/verify-minecraft-stack 2>/dev/null)"; then
-            pass "Minecraft reports: ${version}"
-        else
-            fail 'Minecraft version query failed'
-        fi
-        if [[ ${BEDROCK_ENABLED} == yes ]]; then
-            if geyser="$(podman exec minecraft rcon-cli 'geyser version' 2>/dev/null)"; then
-                pass "Geyser reports: ${geyser}"
-            else
-                fail 'Geyser version query failed'
-            fi
-        fi
-    fi
-    if [[ ${BEDROCK_ENABLED} == yes ]]; then
-        geyser_config="${DATA_PATH}/plugins/Geyser-Spigot/config.yml"
-        if grep -Eq '^[[:space:]]*auth-type:[[:space:]]*floodgate[[:space:]]*$' "${geyser_config}" 2>/dev/null; then
-            pass 'Geyser auth-type is floodgate'
-        else
-            fail 'Geyser auth-type is not confirmed as floodgate'
-        fi
-    fi
-else
-    fail 'minecraft.service is not active'
-fi
-
-echo
-/usr/libexec/justvoxel/mjust/storage-summary || fail 'storage summary could not be generated'
 
 if (( failures > 0 )); then
     echo

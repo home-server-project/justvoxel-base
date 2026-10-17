@@ -425,7 +425,7 @@ grep -Fq 'adminValidationHelper = "/usr/libexec/justvoxel/mjust/validate-backend
 grep -Fq 'GET /v1/admin/validation' "${admin_validation}" || fail 'Management Agent validation route is missing'
 grep -Fq 'registerAdminValidationRoutes(mux, s)' "${main}" || fail 'Management Agent validation route is not registered'
 grep -Fq 'systemctl --failed' "${validate_backend}" || fail 'validation backend lost systemd health checks'
-grep -Fq 'podman exec "${container}" rcon-cli' "${validate_backend}" || fail 'validation backend lost Minecraft RCON checks'
+grep -Fq '"/usr/libexec/justvoxel/mjust/verify-minecraft-stack", "--instance", id, record.Runtime.Version' "${admin_validation}" || fail 'validation lost instance-aware live stack verification'
 
 for forbidden in 'systemctl ' 'podman ' 'rcon-cli' 'firewall-cmd ' 'findmnt ' 'mountpoint ' 'swapon ' '/proc/' '/sys/' 'ls -Z' 'storage-summary'; do
     if grep -Fq "${forbidden}" "${validate}"; then

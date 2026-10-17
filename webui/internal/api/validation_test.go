@@ -38,7 +38,7 @@ func TestAdminValidationClientPreservesDetectedProblems(t *testing.T) {
 	client := &Client{http: &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader("{\"ok\":false,\"output\":\"FAIL: minecraft.service is not active\\n\\nJustVoxel validation failed with 1 problem(s).\\n\",\"exit_code\":1}")),
+			Body:       io.NopCloser(strings.NewReader("{\"ok\":false,\"output\":\"FAIL: Instance storage identity\\n\\nJustVoxel validation failed with 1 problem(s).\\n\",\"exit_code\":1}")),
 			Header:     make(http.Header),
 		}, nil
 	})}}
@@ -47,7 +47,7 @@ func TestAdminValidationClientPreservesDetectedProblems(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.OK || result.ExitCode != 1 || !strings.Contains(result.Output, "FAIL: minecraft.service is not active") {
+	if result.OK || result.ExitCode != 1 || !strings.Contains(result.Output, "FAIL: Instance storage identity") {
 		t.Fatalf("detected problems were not preserved: %#v", result)
 	}
 }
@@ -113,5 +113,11 @@ func TestAdminValidationClientUsesBoundedTimeout(t *testing.T) {
 	}
 	if elapsed := time.Since(started); elapsed > 200*time.Millisecond {
 		t.Fatalf("validation timeout took too long: %s", elapsed)
+	}
+}
+
+func TestAdminValidationTimeoutSupportsApplianceWideChecks(t *testing.T) {
+	if adminValidationClientTimeout <= 10*time.Minute || adminValidationClientTimeout > 11*time.Minute {
+		t.Fatal("WebUI validation timeout must exceed the bounded Management deadline")
 	}
 }

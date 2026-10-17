@@ -117,9 +117,11 @@ In **Separate WebUI password** mode, recovery resets only the WebUI-local creden
 
 ## System validation
 
-Administrator users can open **Administration -> Validation** to run the same authoritative appliance validation used by `mjust validate`.
+Administrator users can open **System -> Validation** to run the same authoritative appliance validation used by `mjust validate`.
 
-The WebUI calls `GET /v1/admin/validation` through the local Management API. It does not run systemd, Podman, RCON, firewall, storage, or other validation checks directly. The Management Agent executes the shared validation backend and returns its result.
+The WebUI calls `GET /v1/admin/validation` through the local Management API. It does not run systemd, Podman, RCON, firewall, storage, or other validation checks directly. The Management Agent checks the host once and every modern immutable Minecraft instance independently. Zero servers is valid if host checks pass. Stopped servers receive structural validation without being started; running servers also receive live instance-aware stack verification. The report includes each server’s display name and immutable ID. The operation has a ten-minute appliance-wide deadline, with a slightly longer WebUI API timeout.
+
+The default host helper does not inspect fixed Minecraft runtime files. `validate-backend --first-run` remains only for historical fixed-runtime Setup recovery, outside normal validation.
 
 The page deliberately distinguishes three outcomes:
 

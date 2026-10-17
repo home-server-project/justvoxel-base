@@ -214,7 +214,11 @@ Logs remain separate from the friendly status dashboard and the stricter validat
 
 ## Validation
 
-`mjust validate` checks the active JustVoxel deployment, including important runtime files and permissions, SELinux labels, firewall state, storage identity, backup target availability, generated service state, RCON response, Minecraft version, Bedrock/Geyser state when enabled, zram, and failed systemd units.
+`mjust validate` is appliance-wide: Management runs host checks once (failed systemd units and swap/zram policy), then validates every modern immutable Minecraft instance independently. Zero servers is valid when the host checks pass. Display names label the report; immutable `jv-*` IDs identify every server check.
+
+Each instance receives runtime commitment/file permissions, storage identity, read-only SELinux context, owned firewall rules, service/container state, and backup destination/settings/status/timer checks. Deliberately stopped servers receive structural checks and are never started merely to validate. Running servers also receive live instance-aware stack verification, including RCON, software/version, ViaVersion where applicable, and enabled Geyser/Floodgate integration.
+
+`mjust validate` remains a thin frontend to `GET /v1/admin/validation`. The default `validate-backend` helper checks only the host. Its `--first-run` mode retains fixed-runtime semantics solely for historical Setup recovery evidence; normal validation and new Setup do not use that mode.
 
 The goal is to fail visibly when the appliance does not match its recorded configuration rather than continuing with an unexpected mount or incomplete runtime.
 
