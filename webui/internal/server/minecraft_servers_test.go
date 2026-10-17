@@ -166,6 +166,7 @@ func TestMinecraftServerCardControlsAndIdentity(t *testing.T) {
 			`href="/?workspace=minecraft&amp;server=` + id + `">Settings</a>`,
 			`href="/minecraft/servers/view/` + id + `">Open server</a>`,
 			`href="/minecraft/how-to-connect?server=` + id + `">How to connect</a>`,
+			`href="/minecraft/how-to-connect?server=` + id + `&amp;invite=1">Invite friends</a>`,
 			"Start on Boot", ">More</summary>", "data-server-normal-actions", "data-server-arrange-actions hidden",
 			"data-server-move-earlier", "data-server-move-later",
 		} {
@@ -183,6 +184,10 @@ func TestMinecraftServerCardControlsAndIdentity(t *testing.T) {
 			t.Fatalf("%s missing More menu", id)
 		}
 		more := card[moreStart:moreEnd]
+		inviteLinks := regexp.MustCompile(`<a href="/minecraft/how-to-connect[^"]*">Invite friends</a>`).FindAllString(more, -1)
+		if len(inviteLinks) != 1 || inviteLinks[0] != `<a href="/minecraft/how-to-connect?server=`+id+`&amp;invite=1">Invite friends</a>` {
+			t.Errorf("%s invitation must target only this immutable ID: %v", id, inviteLinks)
+		}
 		for _, forbidden := range []string{"Rename", "Delete", ">Settings<"} {
 			if strings.Contains(more, forbidden) {
 				t.Errorf("unexpected More entry %s", forbidden)

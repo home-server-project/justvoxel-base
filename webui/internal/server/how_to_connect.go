@@ -32,6 +32,7 @@ type connectionMethod struct {
 type connectionGuide struct {
 	Configured  bool
 	Server      string
+	ServerName  string
 	Bedrock     bool
 	JavaPort    int
 	BedrockPort int
@@ -109,7 +110,7 @@ func (a *App) howToConnect(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	a.render(w, "how_to_connect.html", pageData{Title: "How to connect", SelectedMinecraftID: selected.ID, ConnectionGuide: newConnectionGuide(status, remote)})
+	a.render(w, "how_to_connect.html", pageData{Title: "How to connect", SelectedMinecraftID: selected.ID, ConnectionGuide: newConnectionGuide(status, remote, selected.Name)})
 }
 
 func usableConnectionIP(value string, ipv4 bool) bool {
@@ -169,13 +170,17 @@ func localConnectionEndpoints(host string, status api.Status) []connectionEndpoi
 	}
 	return endpoints
 }
-func newConnectionGuide(status api.Status, remote api.RemoteAccessStatus) *connectionGuide {
+func newConnectionGuide(status api.Status, remote api.RemoteAccessStatus, serverName string) *connectionGuide {
 	mc := status.Minecraft
 	software := mc.ServerSoftware
 	if software == "" {
 		software = mc.ServerType
 	}
-	guide := &connectionGuide{Configured: mc.Configured, Server: "Current server", Bedrock: mc.Bedrock, JavaPort: mc.JavaPort, BedrockPort: mc.BedrockPort}
+	serverName = strings.TrimSpace(serverName)
+	if serverName == "" {
+		serverName = "Current server"
+	}
+	guide := &connectionGuide{Configured: mc.Configured, Server: serverName, ServerName: serverName, Bedrock: mc.Bedrock, JavaPort: mc.JavaPort, BedrockPort: mc.BedrockPort}
 	if !mc.Configured {
 		return guide
 	}

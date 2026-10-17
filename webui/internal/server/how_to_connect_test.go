@@ -152,7 +152,7 @@ func TestConnectionGuideAvailability(t *testing.T) {
 				status := guideFixture()
 				status.System.IPv4 = value
 				remote := api.RemoteAccessStatus{Providers: []api.RemoteAccessProvider{{ID: id, Connected: connected, IP: value, Summary: "Not connected"}}}
-				guide := newConnectionGuide(status, remote)
+				guide := newConnectionGuide(status, remote, "")
 				for _, method := range guide.Methods {
 					if method.ID == id {
 						want := usableConnectionIP(value, id == "local") && (id == "local" || connected)
@@ -167,7 +167,7 @@ func TestConnectionGuideAvailability(t *testing.T) {
 	// Provider IDs are exact; system legacy fields do not substitute for status.
 	status := guideFixture()
 	status.System.Tailscale = "100.0.0.1"
-	guide := newConnectionGuide(status, api.RemoteAccessStatus{Providers: []api.RemoteAccessProvider{{ID: "Tailscale", Connected: true, IP: "100.0.0.1"}}})
+	guide := newConnectionGuide(status, api.RemoteAccessStatus{Providers: []api.RemoteAccessProvider{{ID: "Tailscale", Connected: true, IP: "100.0.0.1"}}}, "")
 	if guide.Methods[2].Available {
 		t.Fatal("matched wrong provider")
 	}
@@ -185,7 +185,7 @@ func TestConnectionGuideNetBirdCleanIP(t *testing.T) {
 		status := guideFixture()
 		status.Minecraft.Bedrock = true
 		remote := api.RemoteAccessStatus{Providers: []api.RemoteAccessProvider{{ID: "netbird", Connected: true, IP: tc.ip, Summary: "Connected"}}}
-		method := newConnectionGuide(status, remote).Methods[3]
+		method := newConnectionGuide(status, remote, "").Methods[3]
 		if method.Available != (tc.address != "") {
 			t.Fatalf("reported IP %q: %+v", tc.ip, method)
 		}
@@ -200,7 +200,7 @@ func TestConnectionGuideNetBirdCleanIP(t *testing.T) {
 			t.Fatalf("NetBird host presentation for %q: %s", tc.ip, body)
 		}
 		remote.Providers[0].Connected = false
-		if newConnectionGuide(status, remote).Methods[3].Available {
+		if newConnectionGuide(status, remote, "").Methods[3].Available {
 			t.Fatal("disconnected NetBird provider is selectable")
 		}
 	}
@@ -240,7 +240,7 @@ func TestConnectionGuidePlayitMapping(t *testing.T) {
 		{DisplayAddress: "https://claim.example/token", Destination: "127.0.0.1:25571"},
 	}}
 	remote := api.RemoteAccessStatus{Providers: []api.RemoteAccessProvider{provider}}
-	method := newConnectionGuide(status, remote).Methods[4]
+	method := newConnectionGuide(status, remote, "").Methods[4]
 	if !method.Available || len(method.Endpoints) != 2 {
 		t.Fatalf("%+v", method)
 	}
@@ -248,12 +248,12 @@ func TestConnectionGuidePlayitMapping(t *testing.T) {
 		t.Fatalf("%+v", method.Endpoints)
 	}
 	status.Minecraft.Bedrock = false
-	if endpoints := newConnectionGuide(status, remote).Methods[4].Endpoints; len(endpoints) != 1 || endpoints[0].Edition != "Java" {
+	if endpoints := newConnectionGuide(status, remote, "").Methods[4].Endpoints; len(endpoints) != 1 || endpoints[0].Edition != "Java" {
 		t.Fatalf("Java-only: %+v", endpoints)
 	}
 	status.Minecraft.Bedrock = true
 	status.Minecraft.BedrockPort = status.Minecraft.JavaPort
-	if newConnectionGuide(status, remote).Methods[4].Available {
+	if newConnectionGuide(status, remote, "").Methods[4].Available {
 		t.Fatal("ambiguous destination guessed")
 	}
 	status = guideFixture()
@@ -262,7 +262,7 @@ func TestConnectionGuidePlayitMapping(t *testing.T) {
 			provider.ServiceActive = active
 			provider.Connected = connected
 			remote.Providers[0] = provider
-			if newConnectionGuide(status, remote).Methods[4].Available != (active && connected) {
+			if newConnectionGuide(status, remote, "").Methods[4].Available != (active && connected) {
 				t.Fatal("inactive tunnels selectable")
 			}
 		}
@@ -341,7 +341,7 @@ func TestConnectionGuidePlayitRenderedPublicAddresses(t *testing.T) {
 	}
 	// An identified Java tunnel does not invent a Bedrock counterpart.
 	client.remote.Providers[0].Tunnels = client.remote.Providers[0].Tunnels[:1]
-	guide := newConnectionGuide(status, client.remote)
+	guide := newConnectionGuide(status, client.remote, "")
 	if len(guide.Methods[4].Endpoints) != 1 || guide.Methods[4].Endpoints[0].Edition != "Java" {
 		t.Fatal("invented Bedrock tunnel")
 	}
@@ -412,5 +412,60 @@ func TestConnectionGuideApprovedVisualContract(t *testing.T) {
 	}
 	if !strings.Contains(body, `height="724"><p>Current server — Paper 1.21.8</p></div><h1>JustVoxel Connection Guide</h1>`) {
 		t.Fatal("print header must retain the logo, current server and exact guide title")
+	}
+}
+
+func TestConnectionGuideSelectedFriendlyNameAndInvitation(t *testing.T) {
+	app, client := newServerInventoryApp(t)
+	for _, name := range []string{"Family Survival", "Renamed Family", "", "   ", "<script>bad</script>"} {
+		client.instances[2].DisplayName = name
+		client.reads = nil
+		response := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "/minecraft/how-to-connect?server=jv-family1&invite=1", ""))
+		body := response.Body.String()
+		if response.Code != http.StatusOK {
+			t.Fatalf("status %d: %s", response.Code, body)
+		}
+		label := strings.TrimSpace(name)
+		if label == "" {
+			label = "Current server"
+		}
+		if name == "<script>bad</script>" {
+			label = "&lt;script&gt;bad&lt;/script&gt;"
+		}
+		for _, want := range []string{
+			label + " — Paper 1.21.8",
+			`data-connect-server-name="` + label + `"`,
+			`<dialog class="connect-invitation"`,
+			`data-connect-invitation-text readonly`,
+			`data-connect-copy>Copy invitation</button>`,
+			`data-connect-invitation-close>Close</button>`,
+			`data-connect-join="192.0.2.10:25567"`,
+			`data-connect-endpoint="Bedrock" data-connect-address="192.0.2.10" data-connect-port="19134"`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("name %q missing %q", name, want)
+			}
+		}
+		if strings.Contains(body, "jv-") || strings.Contains(body, "Kids Creative") || strings.Contains(body, "<script>bad</script>") {
+			t.Fatal("invitation presentation exposed identity, another server, or unescaped name")
+		}
+		if strings.Join(client.reads, ",") != "configuration:jv-family1" {
+			t.Fatalf("friendly name changed selection: %v", client.reads)
+		}
+	}
+	for _, tc := range []struct {
+		query string
+		code  int
+	}{
+		{"?invite=1", http.StatusConflict},
+		{"?server=Family+Survival&invite=1", http.StatusBadRequest},
+		{"?server=jv-missing&invite=1", http.StatusNotFound},
+		{"?server=jv-family1&server=jv-kids001&invite=1", http.StatusBadRequest},
+	} {
+		client.reads = nil
+		response := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "/minecraft/how-to-connect"+tc.query, ""))
+		if response.Code != tc.code || len(client.reads) != 0 {
+			t.Fatalf("invalid selection %q: status %d reads %v", tc.query, response.Code, client.reads)
+		}
 	}
 }

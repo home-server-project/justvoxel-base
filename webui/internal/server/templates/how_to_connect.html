@@ -10,7 +10,7 @@
   <script src="/static/how-to-connect.js" defer></script>
 </head>
 <body class="connect-page">
-<main class="connect-shell" data-connect-page{{if .ConnectionGuide.Configured}} data-java-port="{{.ConnectionGuide.JavaPort}}"{{if .ConnectionGuide.Bedrock}} data-bedrock-port="{{.ConnectionGuide.BedrockPort}}"{{end}}{{end}}>
+<main class="connect-shell" data-connect-page data-connect-server-name="{{.ConnectionGuide.ServerName}}"{{if .ConnectionGuide.Configured}} data-java-port="{{.ConnectionGuide.JavaPort}}"{{if .ConnectionGuide.Bedrock}} data-bedrock-port="{{.ConnectionGuide.BedrockPort}}"{{end}}{{end}}>
 {{if not .ConnectionGuide.Configured}}
 <section class="connect-empty panel"><h1>Minecraft is not configured yet</h1><p>Ask the server owner to complete Minecraft setup. A connection guide will be available here once the server is configured.</p></section>
 {{else}}
@@ -31,18 +31,27 @@
     <button type="button" data-connect-print disabled>Save to PDF</button>
     <small class="muted" id="connect-domain-help">Hostname only — no https:// or port.</small>
   </div>
+  <div class="connect-invite-controls"><button type="button" data-connect-invite disabled>Invite friends</button></div>
   <noscript><p>Enable JavaScript to select connection methods and generate your guide.</p></noscript>
 </section>
+<dialog class="connect-invitation" data-connect-invitation aria-labelledby="connect-invitation-title">
+  <h2 id="connect-invitation-title">Invite friends</h2>
+  <p>{{.ConnectionGuide.ServerName}}</p>
+  <label for="connect-invitation-text">Invitation</label>
+  <textarea id="connect-invitation-text" data-connect-invitation-text readonly rows="10" spellcheck="false"></textarea>
+  <p data-connect-copy-status role="status" aria-live="polite"></p>
+  <div class="action-row"><button type="button" data-connect-copy>Copy invitation</button><button type="button" class="secondary" data-connect-invitation-close>Close</button></div>
+</dialog>
 <article class="connect-guide" data-connect-guide hidden>
   <header class="connect-guide-heading"><div class="connect-guide-top-row"><img class="connect-print-logo" src="/static/justvoxel-login-logo.png" alt="JustVoxel" width="2172" height="724"><p>{{.ConnectionGuide.Server}}</p></div><h1>JustVoxel Connection Guide</h1><span class="connect-editions badge">Java Edition{{if .ConnectionGuide.Bedrock}} + Bedrock Edition{{end}}</span><p>Connection methods: <span data-connect-summary></span></p></header>
   <section aria-labelledby="connect-addresses"><h2 id="connect-addresses">Your connection options</h2><div class="connect-cards">
   {{range .ConnectionGuide.Methods}}
     {{if .Available}}<section class="connect-card" data-connect-card="{{.ID}}" data-connect-name="{{.Name}}" hidden><h3>{{.Name}}</h3><p>{{.Note}}</p>
       {{if eq .ID "custom"}}
-      <div class="connect-endpoint"><h4>Java</h4><p>Address: <strong data-connect-domain-address></strong></p><p>Port: {{$.ConnectionGuide.JavaPort}}</p><p>Enter in Minecraft: <code data-connect-domain-java></code></p></div>
-      {{if $.ConnectionGuide.Bedrock}}<div class="connect-endpoint"><h4>Bedrock</h4><p>Address: <strong data-connect-domain-address></strong></p><p>Port: {{$.ConnectionGuide.BedrockPort}}</p></div>{{end}}
+      <div class="connect-endpoint" data-connect-endpoint="Java"><h4>Java</h4><p>Address: <strong data-connect-domain-address></strong></p><p>Port: {{$.ConnectionGuide.JavaPort}}</p><p>Enter in Minecraft: <code data-connect-domain-java></code></p></div>
+      {{if $.ConnectionGuide.Bedrock}}<div class="connect-endpoint" data-connect-endpoint="Bedrock" data-connect-port="{{$.ConnectionGuide.BedrockPort}}"><h4>Bedrock</h4><p>Address: <strong data-connect-domain-address></strong></p><p>Port: {{$.ConnectionGuide.BedrockPort}}</p></div>{{end}}
       {{else}}{{range .Endpoints}}
-      <div class="connect-endpoint"><h4>{{.Edition}}</h4><p>Address: <strong>{{.Address}}</strong></p>{{if .Port}}<p>Port: <strong>{{.Port}}</strong></p>{{else}}{{if eq .Edition "Bedrock"}}<p>The tunnel did not report a public port. Ask the server owner for the public Bedrock port before joining.</p>{{end}}{{end}}{{if eq .Edition "Java"}}<p>Enter in Minecraft: <code>{{.JoinAddress}}</code></p>{{end}}</div>
+      <div class="connect-endpoint" data-connect-endpoint="{{.Edition}}" data-connect-address="{{.Address}}" data-connect-port="{{.Port}}" data-connect-join="{{.JoinAddress}}"><h4>{{.Edition}}</h4><p>Address: <strong>{{.Address}}</strong></p>{{if .Port}}<p>Port: <strong>{{.Port}}</strong></p>{{else}}{{if eq .Edition "Bedrock"}}<p>The tunnel did not report a public port. Ask the server owner for the public Bedrock port before joining.</p>{{end}}{{end}}{{if eq .Edition "Java"}}<p>Enter in Minecraft: <code>{{.JoinAddress}}</code></p>{{end}}</div>
       {{end}}{{end}}
     </section>{{end}}
   {{end}}
