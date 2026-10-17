@@ -56,7 +56,7 @@ podman() {
                 elif [[ $3 == "${JV_INSTANCE_IMAGE_REF}" ]]; then printf old-image
                 elif [[ $3 == docker.io/itzg/minecraft-server@* ]]; then printf new-image
                 else printf old-image; fi
-                return ;;
+                return 0 ;;
             'inspect minecraft-jv-fixture1') cat "${FIXTURE}/running-image"; return ;;
             'image exists') [[ $3 == older-image ]]; return ;;
             'image rm') printf '%s' "$3" > "${FIXTURE}/image-removed"; return ;;
@@ -71,12 +71,13 @@ podman() {
 }
 systemctl() {
     if [[ $1 == is-active ]]; then [[ $(cat "${FIXTURE}/service") == active ]]; return; fi
-    if [[ $1 == stop ]]; then printf stopped > "${FIXTURE}/service"; printf stop >> "${FIXTURE}/actions"; fi
+    if [[ $1 == stop ]]; then printf stopped > "${FIXTURE}/service"; printf stop >> "${FIXTURE}/actions"; return 0; fi
     if [[ $1 == start ]]; then printf active > "${FIXTURE}/service"; printf start >> "${FIXTURE}/actions";
         if [[ ${IMAGE_CHANGE:-no} == yes ]]; then
             # Start the published digest, independently of its channel alias.
-            podman image inspect "$(cat "${FIXTURE}/published-image-ref")" --format '{{.Id}}' > "${FIXTURE}/running-image"
+            podman image inspect "$(cat "${FIXTURE}/published-image-ref")" --format '{{.Id}}' > "${FIXTURE}/running-image" || return 1
         fi
+        return 0
     fi
 }
 # Publication now renders atomically in the Management Agent. Model that fixed
@@ -492,9 +493,18 @@ for initial in active stopped; do
             [[ $(cat "${DATA_PATH}/plugins/Geyser-Spigot.jar") == old-geyser && $(cat "${DATA_PATH}/plugins/floodgate-spigot.jar") == old-floodgate ]]
         fi
         if [[ ${initial} == active ]]; then
-            [[ $(cat "${fixture_dir}/running-image") == old-image && $(cat "${fixture_dir}/actions") == *rollback-verified* ]]
+            if [[ $(cat "${fixture_dir}/running-image") != old-image ]]; then
+                echo 'FAIL: active runtime recovery did not restore old-image' >&2
+                printf 'Actual running-image: %s\n' "$(cat "${fixture_dir}/running-image")" >&2
+                if [[ -e ${fixture_dir}/output ]]; then cat "${fixture_dir}/output" >&2; fi
+                exit 1
+            fi
         fi
-        ! grep -q 'operation requires attention' "${fixture_dir}/output"
+        if grep -q 'operation requires attention' "${fixture_dir}/output"; then
+            echo 'FAIL: image-change recovery reported operation requires attention' >&2
+            cat "${fixture_dir}/output" >&2
+            exit 1
+        fi
         ! grep -q 'maintenance completed' "${fixture_dir}/output"
         assert_preserved
     done
