@@ -202,7 +202,7 @@ jobs:
           sudo podman run --rm \
             --pull=always \
             --security-opt=label=disable \
-            -v "${PWD}/management:/src:ro" \
+            -v "${PWD}:/repo:ro" \
             -v "${PWD}/system_files/usr/libexec/justvoxel:/system_files/usr/libexec/justvoxel:ro" \
             -v "${PWD}/system_files/etc/pam.d/justvoxel:/etc/pam.d/justvoxel:ro" \
             -v "${PWD}/tests/run-pam-integration-alma.sh:/run-pam-integration-alma.sh:ro" \
@@ -212,22 +212,23 @@ jobs:
               set -euo pipefail
               dnf install -y gcc golang pam-devel libpwquality-devel diffutils authselect authselect-libs shadow-utils
               mkdir -p /work /tmp/go-home /tmp/go-build-cache /tmp/go-path
-              cp -a /src/. /work/
-              cd /work
+              cp -a /repo/management /repo/templates /repo/mjust /repo/system_files /work/
+              cd /work/management
               HOME=/tmp/go-home GOCACHE=/tmp/go-build-cache GOPATH=/tmp/go-path GOENV=off go mod tidy
               dirty=0
-              diff -u /src/go.mod /work/go.mod || dirty=1
-              diff -u /src/go.sum /work/go.sum || dirty=1
+              diff -u /repo/management/go.mod /work/management/go.mod || dirty=1
+              diff -u /repo/management/go.sum /work/management/go.sum || dirty=1
               if (( dirty != 0 )); then
                 echo "ERROR: AlmaLinux Go requires module metadata changes shown above." >&2
                 exit 1
               fi
               HOME=/tmp/go-home GOCACHE=/tmp/go-build-cache GOPATH=/tmp/go-path GOENV=off CGO_ENABLED=1 go test -mod=readonly ./...
+              # Adapt the runner working directory without changing the source script.
               HOME=/tmp/go-home \
               GOCACHE=/tmp/go-build-cache \
               GOPATH=/tmp/go-path \
               GOENV=off \
-              bash /run-pam-integration-alma.sh
+              bash <(sed "s|^cd /work$|cd /work/management|" /run-pam-integration-alma.sh)
               HOME=/tmp/go-home GOCACHE=/tmp/go-build-cache GOPATH=/tmp/go-path GOENV=off CGO_ENABLED=1 go build -mod=readonly -trimpath -o /out/management-agent ./cmd/justvoxel-management-agent
             '
           sudo chmod 0755 build_artifacts/management/management-agent
