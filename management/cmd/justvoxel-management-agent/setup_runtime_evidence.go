@@ -58,67 +58,76 @@ func (s *operationStore) appendSetupRuntimeFailureBundleBestEffort(operationID, 
 	if cause != nil {
 		values["error"] = cause.Error()
 	}
-	if id := values["instance_id"]; id != "" {
-		if instanceIDPattern.MatchString(id) {
-			values["minecraft_journal"] = setupDiagnosticRuntimeJournal("minecraft-" + id + ".service")
-		} else {
-			values["minecraft_journal"] = "<not_created>"
-		}
-	} else {
-		values["minecraft_journal"] = setupDiagnosticRuntimeJournal()
+	values["minecraft_journal"] = "<not_created>"
+	values["validation_snapshot"] = "Runtime validation is not applicable before an authoritative instance identity exists."
+	if id := values["instance_id"]; instanceIDPattern.MatchString(id) {
+		values["minecraft_journal"] = setupDiagnosticRuntimeJournal("minecraft-" + id + ".service")
+		values["validation_snapshot"] = "Instance runtime evidence is recorded above; fixed-server appliance validation is not applicable."
+	} else if values["container_present"] == "<unavailable>" {
+		values["minecraft_journal"] = "<unavailable>"
 	}
 	values["selinux_avc"] = setupDiagnosticRecentAVC()
-	if values["instance_id"] != "" {
-		values["validation_snapshot"] = "Instance runtime evidence is recorded above; fixed-server appliance validation is not applicable."
-	} else {
-		values["validation_snapshot"] = setupDiagnosticValidationSnapshot()
-	}
-	values["dns_docker_io"] = setupDiagnosticDNSStatus("docker.io")
-	values["dns_papermc_io"] = setupDiagnosticDNSStatus("fill.papermc.io")
-	if plan != nil && plan.Server.BedrockEnabled {
-		values["dns_geysermc_org"] = setupDiagnosticDNSStatus("download.geysermc.org")
-	}
 	_ = s.appendSetupDiagnostic(operationID, "FAILURE", "runtime failure evidence", values)
 }
 
 func collectSetupRuntimeEvidence(plan *adminSetupNormalizedPlan, instanceID ...string) map[string]string {
-	container, unit, timer := "minecraft", "minecraft.service", "minecraft-backup.timer"
-	env, quadlet := "/etc/justvoxel/minecraft.env", "/etc/containers/systemd/minecraft.container"
-	dataPath := ""
-	if len(instanceID) > 0 && instanceIDPattern.MatchString(instanceID[0]) {
+	var container, unit, timer, env, quadlet, dataPath, authoritativeID string
+	runtimeStatus := "<not_created>"
+	if len(instanceID) > 0 && instanceID[0] != "" {
+		runtimeStatus = "<unavailable>"
 		id := instanceID[0]
-		container = "minecraft-" + id
-		unit = container + ".service"
-		timer = instanceBackupUnit(id, "timer")
-		_, env, quadlet = instanceRuntimes.paths(id)
-		if record, err := instanceRuntimes.readRecord(id); err == nil {
-			dataPath = record.Storage.DataPath
+		if instanceIDPattern.MatchString(id) {
+			// A matching ID is only a candidate until the authoritative record resolves.
+			if record, err := instanceRuntimes.readRecord(id); err == nil {
+				authoritativeID = id
+				container = "minecraft-" + id
+				unit = container + ".service"
+				timer = instanceBackupUnit(id, "timer")
+				_, env, quadlet = instanceRuntimes.paths(id)
+				dataPath = record.Storage.DataPath
+			}
 		}
 	}
 
 	values := map[string]string{
-		"quadlet_present":          setupDiagnosticPathPresence(quadlet),
+		"quadlet_present":          runtimeStatus,
 		"config_present":           setupDiagnosticPathPresence("/etc/justvoxel/justvoxel.conf"),
-		"minecraft_env_present":    setupDiagnosticPathPresence(env),
+		"minecraft_env_present":    runtimeStatus,
 		"setup_marker_present":     setupDiagnosticPathPresence("/var/lib/justvoxel/management/setup-in-progress"),
 		"podman_network_backend":   setupDiagnosticCommandValue(4*time.Second, "podman", "info", "--format", "{{.Host.NetworkBackend}}"),
 		"podman_default_network":   setupDiagnosticCommandPresence(4*time.Second, "podman", "network", "exists", "podman"),
 		"podman_network_summary":   "<unavailable>",
-		"container_present":        setupDiagnosticCommandPresence(4*time.Second, "podman", "container", "exists", container),
-		"container_state":          "<unavailable>",
-		"container_exit_code":      "<unavailable>",
-		"container_image_id":       "<unavailable>",
-		"container_networks":       "<unavailable>",
+		"container_present":        runtimeStatus,
+		"container_state":          runtimeStatus,
+		"container_exit_code":      runtimeStatus,
+		"container_image_id":       runtimeStatus,
+		"container_networks":       runtimeStatus,
 		"minecraft_image_digest":   "<unavailable>",
 		"minecraft_image_local_id": "<unavailable>",
 		"network_online_target":    setupDiagnosticCommandValue(4*time.Second, "systemctl", "is-active", "network-online.target"),
 		"network_connectivity":     setupDiagnosticCommandValue(4*time.Second, "nmcli", "-t", "-f", "CONNECTIVITY", "general"),
 	}
 
+	values["backup_timer_enabled"] = runtimeStatus
+	values["backup_timer_active"] = runtimeStatus
+	if authoritativeID != "" {
+		values["instance_id"] = authoritativeID
+		values["quadlet_present"] = setupDiagnosticPathPresence(quadlet)
+		values["minecraft_env_present"] = setupDiagnosticPathPresence(env)
+		values["container_present"] = setupDiagnosticCommandPresence(4*time.Second, "podman", "container", "exists", container)
+		values["backup_timer_enabled"] = setupDiagnosticCommandValue(4*time.Second, "systemctl", "is-enabled", timer)
+		values["backup_timer_active"] = setupDiagnosticCommandValue(4*time.Second, "systemctl", "is-active", timer)
+	}
+
 	for key, value := range setupDiagnosticMinecraftServiceState(unit) {
+		if unit == "" {
+			value = runtimeStatus
+		}
 		values[key] = value
 	}
 
+	values["dns_docker_io"] = setupDiagnosticDNSStatus("docker.io")
+	values["dns_papermc_io"] = setupDiagnosticDNSStatus("fill.papermc.io")
 	if values["podman_default_network"] == "present" {
 		values["podman_network_summary"] = setupDiagnosticCommandValue(4*time.Second, "podman", "network", "inspect", "podman", "--format", "{{.Name}}|{{.Driver}}|{{.NetworkInterface}}|{{.DNSEnabled}}")
 	}
@@ -130,6 +139,9 @@ func collectSetupRuntimeEvidence(plan *adminSetupNormalizedPlan, instanceID ...s
 	}
 
 	if plan != nil {
+		if plan.Server.BedrockEnabled {
+			values["dns_geysermc_org"] = setupDiagnosticDNSStatus("download.geysermc.org")
+		}
 		values["minecraft_image_tag"] = plan.Minecraft.ImageTag
 		values["java_firewall_open"] = setupDiagnosticCommandPresence(4*time.Second, "firewall-cmd", "--permanent", "--query-port="+strconv.Itoa(plan.Minecraft.JavaPort)+"/tcp")
 		if plan.Server.BedrockEnabled {
@@ -137,9 +149,8 @@ func collectSetupRuntimeEvidence(plan *adminSetupNormalizedPlan, instanceID ...s
 		} else {
 			values["bedrock_firewall_open"] = "not_enabled"
 		}
-		values["data_selinux_type"] = setupDiagnosticSELinuxType(plan.Storage.Path)
-		if dataPath != "" {
-			values["data_selinux_type"] = setupDiagnosticSELinuxType(dataPath)
+		if dataPath == "" {
+			values["data_selinux_type"] = setupDiagnosticSELinuxType(plan.Storage.Path)
 		}
 		imageRef := fmt.Sprintf("%s:%s", setupRuntimeDiagnosticImageRepo, plan.Minecraft.ImageTag)
 		if setupDiagnosticCommandPresence(4*time.Second, "podman", "image", "exists", imageRef) == "present" {
@@ -148,22 +159,25 @@ func collectSetupRuntimeEvidence(plan *adminSetupNormalizedPlan, instanceID ...s
 		}
 	}
 
-	values["backup_timer_enabled"] = setupDiagnosticCommandValue(4*time.Second, "systemctl", "is-enabled", timer)
-	values["backup_timer_active"] = setupDiagnosticCommandValue(4*time.Second, "systemctl", "is-active", timer)
+	if dataPath != "" {
+		values["data_selinux_type"] = setupDiagnosticSELinuxType(dataPath)
+	}
 	return values
 }
 
-func setupDiagnosticMinecraftServiceState(units ...string) map[string]string {
-	unit := "minecraft.service"
-	if len(units) > 0 {
-		unit = units[0]
-	}
+func setupDiagnosticMinecraftServiceState(unit string) map[string]string {
 	values := map[string]string{
 		"service_load_state":   "<unavailable>",
 		"service_active_state": "<unavailable>",
 		"service_sub_state":    "<unavailable>",
 		"service_result":       "<unavailable>",
 		"service_exit_status":  "<unavailable>",
+	}
+	if strings.TrimSpace(unit) == "" {
+		for key := range values {
+			values[key] = "<not_created>"
+		}
+		return values
 	}
 	output, _ := setupDiagnosticRunCommand(4*time.Second, "systemctl", "show", unit, "--property=LoadState,ActiveState,SubState,Result,ExecMainStatus", "--no-pager")
 	for _, line := range strings.Split(string(output), "\n") {
@@ -206,10 +220,9 @@ func setupDiagnosticSELinuxType(path string) string {
 	return parts[2]
 }
 
-func setupDiagnosticRuntimeJournal(units ...string) string {
-	unit := "minecraft.service"
-	if len(units) > 0 {
-		unit = units[0]
+func setupDiagnosticRuntimeJournal(unit string) string {
+	if strings.TrimSpace(unit) == "" {
+		return "<not_created>"
 	}
 	output, _ := setupDiagnosticRunCommand(6*time.Second, "journalctl", "-u", unit, "--no-pager", "-n", "80", "-o", "short-iso")
 	return setupDiagnosticBoundedText(output, 12*1024)
@@ -228,11 +241,6 @@ func setupDiagnosticRecentAVC() string {
 		return "<none>"
 	}
 	return setupDiagnosticBoundedText([]byte(strings.Join(lines, "\n")), 6*1024)
-}
-
-func setupDiagnosticValidationSnapshot() string {
-	output, _ := setupDiagnosticRunCommand(15*time.Second, "/usr/libexec/justvoxel/mjust/validate-backend")
-	return setupDiagnosticBoundedText(output, 12*1024)
 }
 
 func setupDiagnosticDNSStatus(host string) string {
@@ -294,12 +302,14 @@ func (s *operationStore) setupRuntimeEvidenceForOperation(operationID string, pl
 	}
 	e, err := setupInstanceRead(operationID, operation.PlanFingerprint)
 	if err == nil && instanceIDPattern.MatchString(e.Record.Runtime.ID) {
-		values := collectSetupRuntimeEvidence(plan, e.Record.Runtime.ID)
-		values["instance_id"] = e.Record.Runtime.ID
-		return values
+		return collectSetupRuntimeEvidence(plan, e.Record.Runtime.ID)
 	}
 	if operation.InstanceSetup || err == nil {
-		return map[string]string{"instance_id": "pending", "setup_marker_present": setupDiagnosticPathPresence(setupInstanceMarker), "config_present": setupDiagnosticPathPresence(filepath.Join(setupPolicyRoot, "justvoxel.conf"))}
+		values := collectSetupRuntimeEvidence(plan)
+		values["instance_id"] = "pending"
+		values["setup_marker_present"] = setupDiagnosticPathPresence(setupInstanceMarker)
+		values["config_present"] = setupDiagnosticPathPresence(filepath.Join(setupPolicyRoot, "justvoxel.conf"))
+		return values
 	}
 	return collectSetupRuntimeEvidence(plan)
 }

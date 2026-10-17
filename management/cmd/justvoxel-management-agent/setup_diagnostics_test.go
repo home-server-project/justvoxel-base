@@ -127,21 +127,30 @@ func TestSetupHelperFailureDetailIsSanitizedAndNotExposedByError(t *testing.T) {
 	store := openTestOperationStore(t)
 	store.diagnosticHostname = "private-vm-host"
 	id, err := store.beginSetupDiagnostic("webui")
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	helperErr := newSetupHelperExecutionError("runtime", "verify", errors.New("exit status 1"), []byte("podman network connect failed on private-vm-host 192.168.0.59 via nas.private.example password=do-not-leak"))
-	if strings.Contains(helperErr.Error(), "192.168.0.59") || strings.Contains(helperErr.Error(), "do-not-leak") { t.Fatalf("helper Error() exposed diagnostic detail: %v", helperErr) }
+	if strings.Contains(helperErr.Error(), "192.168.0.59") || strings.Contains(helperErr.Error(), "do-not-leak") {
+		t.Fatalf("helper Error() exposed diagnostic detail: %v", helperErr)
+	}
 	store.appendSetupHelperFailureBestEffort(id, "runtime", "verify", helperErr)
 	data, err := store.readSetupDiagnostic(id)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	text := string(data)
 	for _, forbidden := range []string{"private-vm-host", "192.168.0.59", "nas.private.example", "do-not-leak"} {
-		if strings.Contains(strings.ToLower(text), strings.ToLower(forbidden)) { t.Fatalf("diagnostic helper output leaked %q: %s", forbidden, text) }
+		if strings.Contains(strings.ToLower(text), strings.ToLower(forbidden)) {
+			t.Fatalf("diagnostic helper output leaked %q: %s", forbidden, text)
+		}
 	}
 	for _, want := range []string{"podman network connect failed", "<HOSTNAME-REDACTED>", "<IP-REDACTED>", "password=<REDACTED>"} {
-		if !strings.Contains(text, want) { t.Fatalf("diagnostic helper output missing %q: %s", want, text) }
+		if !strings.Contains(text, want) {
+			t.Fatalf("diagnostic helper output missing %q: %s", want, text)
+		}
 	}
 }
-
 
 func TestSetupDiagnosticEnvironmentSnapshotIsPrivacySafe(t *testing.T) {
 	originalBootc := runBootcStatusJSON
@@ -222,14 +231,31 @@ func TestSetupDiagnosticEnvironmentSnapshotIsPrivacySafe(t *testing.T) {
 }
 
 func TestSetupRuntimeFailureEvidenceCapturesPodmanWithoutLeakingIdentity(t *testing.T) {
+	backend, records := setupRuntimeEvidenceFixture(t)
+	record := records[0]
+	instanceID := record.Runtime.ID
+	if instanceID != "jv-a1b2c3" {
+		t.Fatalf("unexpected fixture instance: %s", instanceID)
+	}
+	container := "minecraft-" + instanceID
+	unit := container + ".service"
+	timer := instanceBackupUnit(instanceID, "timer")
+	_, env, quadlet := backend.paths(instanceID)
+	for _, path := range []string{env, quadlet} {
+		if err := os.WriteFile(path, []byte("selected"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var calls []string
 	originalBootc := runBootcStatusJSON
 	originalCommand := runSetupDiagnosticCommand
 	originalRead := readSetupDiagnosticFile
 	runBootcStatusJSON = func(context.Context) ([]byte, error) { return nil, errors.New("bootc unavailable") }
 	runSetupDiagnosticCommand = func(_ context.Context, name string, args ...string) ([]byte, error) {
 		key := name + " " + strings.Join(args, " ")
+		calls = append(calls, key)
 		switch key {
-		case "systemctl show minecraft.service --property=LoadState,ActiveState,SubState,Result,ExecMainStatus --no-pager":
+		case "systemctl show " + unit + " --property=LoadState,ActiveState,SubState,Result,ExecMainStatus --no-pager":
 			return []byte("LoadState=loaded\nActiveState=failed\nSubState=failed\nResult=exit-code\nExecMainStatus=125\n"), nil
 		case "podman info --format {{.Host.NetworkBackend}}":
 			return []byte("netavark\n"), nil
@@ -237,15 +263,15 @@ func TestSetupRuntimeFailureEvidenceCapturesPodmanWithoutLeakingIdentity(t *test
 			return nil, nil
 		case "podman network inspect podman --format {{.Name}}|{{.Driver}}|{{.NetworkInterface}}|{{.DNSEnabled}}":
 			return []byte("podman|bridge|podman0|true\n"), nil
-		case "podman container exists minecraft":
+		case "podman container exists " + container:
 			return nil, nil
-		case "podman inspect minecraft --format {{.State.Status}}":
+		case "podman inspect " + container + " --format {{.State.Status}}":
 			return []byte("configured\n"), nil
-		case "podman inspect minecraft --format {{.State.ExitCode}}":
+		case "podman inspect " + container + " --format {{.State.ExitCode}}":
 			return []byte("125\n"), nil
-		case "podman inspect minecraft --format {{.Image}}":
+		case "podman inspect " + container + " --format {{.Image}}":
 			return []byte("sha256:containerimage\n"), nil
-		case "podman inspect minecraft --format {{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}":
+		case "podman inspect " + container + " --format {{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}":
 			return []byte("podman\n"), nil
 		case "podman image exists docker.io/itzg/minecraft-server:stable":
 			return nil, nil
@@ -257,22 +283,20 @@ func TestSetupRuntimeFailureEvidenceCapturesPodmanWithoutLeakingIdentity(t *test
 			return []byte("yes\n"), nil
 		case "firewall-cmd --permanent --query-port=19132/udp":
 			return []byte("yes\n"), nil
-		case "ls -Zd -- /var/lib/justvoxel/minecraft":
-			return []byte("system_u:object_r:container_file_t:s0 /var/lib/justvoxel/minecraft\n"), nil
-		case "systemctl is-enabled minecraft-backup.timer":
+		case "ls -Zd -- " + record.Storage.DataPath:
+			return []byte("system_u:object_r:container_file_t:s0 " + record.Storage.DataPath + "\n"), nil
+		case "systemctl is-enabled " + timer:
 			return []byte("enabled\n"), nil
-		case "systemctl is-active minecraft-backup.timer":
+		case "systemctl is-active " + timer:
 			return []byte("inactive\n"), errors.New("inactive")
 		case "systemctl is-active network-online.target":
 			return []byte("active\n"), nil
 		case "nmcli -t -f CONNECTIVITY general":
 			return []byte("full\n"), nil
-		case "journalctl -u minecraft.service --no-pager -n 80 -o short-iso":
+		case "journalctl -u " + unit + " --no-pager -n 80 -o short-iso":
 			return []byte("podman failed to connect network at 192.168.0.59 on private-vm-host RCON_PASSWORD=supersecret\n"), nil
 		case "journalctl -k --no-pager -n 300 -o short-iso":
 			return []byte("kernel: avc: denied for private-vm-host 192.168.0.59\n"), nil
-		case "/usr/libexec/justvoxel/mjust/validate-backend ":
-			return []byte("FAIL: minecraft.service is not active\n"), errors.New("validation failed")
 		case "getent ahosts docker.io", "getent ahosts fill.papermc.io", "getent ahosts download.geysermc.org":
 			return []byte("203.0.113.10 STREAM example\n"), nil
 		default:
@@ -288,29 +312,86 @@ func TestSetupRuntimeFailureEvidenceCapturesPodmanWithoutLeakingIdentity(t *test
 
 	store := openTestOperationStore(t)
 	store.diagnosticHostname = "private-vm-host"
-	id, err := store.beginSetupDiagnostic("webui")
+	operation, _, err := store.beginSetup(testSetupFingerprint, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := setupPlanForRuntimeTest(t)
+	id := operation.OperationID
+	request := setupRuntimeTransactionRequest{InstanceOnly: true, OperationID: id, PlanFingerprint: testSetupFingerprint}
+	evidence := setupInstanceEvidence{Schema: 1, Request: request, Record: record, Policy: setupInstancePolicy(request)}
+	if err := backend.writeJSON(setupInstancePath(id), evidence, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ensureSetupOperationDiagnostic(id); err != nil {
+		t.Fatal(err)
+	}
+	plan := setupRuntimeEvidencePlan()
+	if values := store.setupRuntimeEvidenceForOperation(id, plan); values["instance_id"] != instanceID {
+		t.Fatalf("setup runtime evidence did not resolve authoritative instance %q: %v", instanceID, values)
+	}
 	store.appendSetupRuntimeFailureBundleBestEffort(id, "verify", plan, errors.New("Minecraft runtime verification failed"))
 	data, err := store.readSetupDiagnostic(id)
 	if err != nil {
 		t.Fatal(err)
+	}
+	assertSetupRuntimeProbeScope(t, calls, instanceID)
+	for _, want := range []string{
+		"systemctl show " + unit + " --property=LoadState,ActiveState,SubState,Result,ExecMainStatus --no-pager",
+		"podman container exists " + container,
+		"podman inspect " + container + " --format {{.State.Status}}",
+		"podman inspect " + container + " --format {{.State.ExitCode}}",
+		"podman inspect " + container + " --format {{.Image}}",
+		"podman inspect " + container + " --format {{range $name, $_ := .NetworkSettings.Networks}}{{$name}} {{end}}",
+		"systemctl is-enabled " + timer,
+		"systemctl is-active " + timer,
+		"journalctl -u " + unit + " --no-pager -n 80 -o short-iso",
+		"ls -Zd -- " + record.Storage.DataPath,
+	} {
+		found := false
+		for _, call := range calls {
+			if call == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("missing runtime command %q: %v", want, calls)
+		}
 	}
 	logText := string(data)
 	for _, want := range []string{
 		"FAILURE runtime failure evidence",
 		"podman_network_backend=\"netavark\"",
 		"podman_network_summary=\"podman|bridge|podman0|true\"",
+		"instance_id=\"" + instanceID + "\"",
+		"minecraft_env_present=\"present\"",
+		"quadlet_present=\"present\"",
+		"container_present=\"present\"",
+		"container_state=\"configured\"",
+		"container_exit_code=\"125\"",
+		"container_image_id=\"sha256:containerimage\"",
+		"service_load_state=\"loaded\"",
+		"service_active_state=\"failed\"",
+		"service_sub_state=\"failed\"",
 		"service_result=\"exit-code\"",
 		"service_exit_status=\"125\"",
 		"minecraft_image_digest=\"sha256:registrydigest\"",
 		"dns_docker_io=\"ok\"",
+		"dns_papermc_io=\"ok\"",
+		"dns_geysermc_org=\"ok\"",
+		"network_online_target=\"active\"",
+		"network_connectivity=\"full\"",
+		"java_firewall_open=\"present\"",
+		"bedrock_firewall_open=\"present\"",
+		"backup_timer_enabled=\"enabled\"",
+		"backup_timer_active=\"inactive\"",
+		"podman failed to connect network",
+		"selinux_avc=\"kernel: avc: denied",
 		"container_networks=\"podman\"",
 		"container_file_t",
 		"<IP-REDACTED>",
 		"<HOSTNAME-REDACTED>",
+		"PASSWORD=<REDACTED>",
 		"<REDACTED>",
 	} {
 		if !strings.Contains(logText, want) {
@@ -324,7 +405,6 @@ func TestSetupRuntimeFailureEvidenceCapturesPodmanWithoutLeakingIdentity(t *test
 	}
 }
 
-
 func TestSetupDiagnosticPreservesSystemdUnitNamesWhileRedactingHosts(t *testing.T) {
 	value := sanitizeSetupDiagnosticText("minecraft.service failed on private.example at 192.168.1.20", "")
 	if !strings.Contains(value, "minecraft.service") {
@@ -334,4 +414,3 @@ func TestSetupDiagnosticPreservesSystemdUnitNamesWhileRedactingHosts(t *testing.
 		t.Fatalf("network identity was not redacted: %s", value)
 	}
 }
-
