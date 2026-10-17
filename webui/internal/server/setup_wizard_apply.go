@@ -166,6 +166,15 @@ func (a *App) setupWizardReviewApply(w http.ResponseWriter, r *http.Request) {
 			a.handleAdminDiscoveryError(w, r, err)
 			return
 		}
+		current, currentErr := executor.AdminCurrentSetupOperation(r.Context(), session)
+		if errors.Is(currentErr, api.ErrUnauthorized) || errors.Is(currentErr, api.ErrPasswordChangeRequired) {
+			a.handleAdminDiscoveryError(w, r, currentErr)
+			return
+		}
+		if currentErr == nil && current.Operation != nil && current.Operation.PlanFingerprint == state.Plan.PlanFingerprint && setupOperationIDPattern.MatchString(current.Operation.OperationID) {
+			http.Redirect(w, r, "/setup/progress/"+current.Operation.OperationID, http.StatusSeeOther)
+			return
+		}
 		message := "Could not start JustVoxel setup."
 		if apiMessage, ok := api.ErrorMessage(err); ok {
 			message = apiMessage

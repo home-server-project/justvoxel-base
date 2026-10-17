@@ -104,6 +104,7 @@ test('Export Done clears operation navigation, selects Export, and reopening loa
   assert.ok(!loads.some(value => value.includes('/progress/')));
 });
 
+const diagnosticTimestampSource = app.slice(app.indexOf('function formatDiagnosticLogTimestamp('), app.indexOf('if (topbarClock) {'));
 const logSource = app.slice(app.indexOf('  const systemLogDestination ='), app.indexOf('  const renderUsers =', app.indexOf('  const systemLogDestination =')));
 async function openLogs(search, logs, live = {}) {
   const listCalls = [];
@@ -111,12 +112,13 @@ async function openLogs(search, logs, live = {}) {
   const content = new Element('div');
   const context = vm.createContext({
     URLSearchParams, Number, JSON, Array, Math, String, encodeURIComponent, loadSequence: 1, content,
+    topbarClock: { dataset: { systemTimezone: 'UTC' } }, clockPreferences: { time: '24', date: 'mdy' },
     window: { location: { search } }, document: { createElement: tag => new Element(tag) },
     localStorage: { getItem: () => null }, ResizeObserver: class { observe() {} disconnect() {} },
     systemSplitter: () => new Element('div'), systemFetchJSON: async url => { listCalls.push(url); return { logs, ...live }; }, systemHandleAuth: () => false,
     fetch: async url => { calls.push(url); return { ok: !live.journalError, text: async () => live.journalText || 'Export evidence' }; },
   });
-  vm.runInContext(logSource + '\nglobalThis.renderLogs = renderLogs;', context);
+  vm.runInContext(diagnosticTimestampSource + '\n' + logSource + '\nglobalThis.renderLogs = renderLogs;', context);
   await context.renderLogs(1);
   await new Promise(resolve => setImmediate(resolve));
   return { content, calls, listCalls, render: async () => { await context.renderLogs(1); } };

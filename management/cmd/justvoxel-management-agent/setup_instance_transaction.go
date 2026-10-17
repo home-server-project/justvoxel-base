@@ -181,6 +181,9 @@ func runSetupInstanceAction(ctx context.Context, action string, r setupRuntimeTr
 		if err = b.actionWithWarnings(ctx, id, "start", true); err != nil {
 			return response, err
 		}
+		if err = b.waitSetupInstanceRunning(ctx, id); err != nil {
+			return response, err
+		}
 		if _, err = b.command(ctx, "/usr/libexec/justvoxel/mjust/verify-minecraft-stack", "--instance", id, r.Minecraft.Version); err != nil {
 			return response, instanceRuntimeFailure("The selected Minecraft instance did not pass readiness verification.")
 		}
@@ -215,6 +218,38 @@ func runSetupInstanceAction(ctx context.Context, action string, r setupRuntimeTr
 	}
 	return response, nil
 }
+
+// The Verify action context supplies the first-boot allowance. Only the short
+// submission-to-activation gap may report stopped; after Starting it is unsafe.
+func (b *instanceRuntimeBackend) waitSetupInstanceRunning(ctx context.Context, id string) error {
+	graceUntil := time.Now().Add(2 * time.Second)
+	starting := false
+	for {
+		if ctx.Err() != nil {
+			return instanceRuntimeFailure("Setup instance startup readiness timed out or was cancelled.")
+		}
+		state, err := b.observeRaw(ctx, id)
+		if err != nil {
+			return err
+		}
+		switch state.State {
+		case "running":
+			return nil
+		case "starting":
+			starting = true
+		case "stopped":
+			if starting || !time.Now().Before(graceUntil) {
+				return instanceRuntimeFailure("Setup instance stopped before startup readiness was confirmed.")
+			}
+		default:
+			return instanceRuntimeFailure("Setup instance startup readiness could not be confirmed.")
+		}
+		if b.waitMaintenance(ctx, 250*time.Millisecond) != nil {
+			return instanceRuntimeFailure("Setup instance startup readiness timed out or was cancelled.")
+		}
+	}
+}
+
 func rollbackSetupInstance(ctx context.Context, e *setupInstanceEvidence, save func() error) error {
 	b := instanceRuntimes
 	if e.RolledBack {
@@ -228,9 +263,34 @@ func rollbackSetupInstance(ctx context.Context, e *setupInstanceEvidence, save f
 			return err
 		}
 		if state.State == "running" {
-			if err = b.actionWithWarnings(ctx, id, "stop", true); err != nil {
+			// Pending activation is expected here and blocks ordinary lifecycle
+			// validation. Preserve its player-safe stop for this operation's ID.
+			players, err := b.players(ctx, id)
+			if err != nil {
 				return err
 			}
+			if players.Online > 0 {
+				if err = b.stopWithWarnings(ctx, id); err != nil {
+					return err
+				}
+			} else {
+				stopCtx, cancel := context.WithTimeout(ctx, 150*time.Second)
+				_, err = b.command(stopCtx, "systemctl", "stop", "--", "minecraft-"+id+".service")
+				cancel()
+				if err != nil {
+					return instanceRuntimeFailure("Instance graceful stop failed or exceeded the safety timeout; normal graceful shutdown continues.")
+				}
+			}
+		}
+		if state.State == "starting" {
+			// Cancel the accepted start job and wait for this generated unit only.
+			if _, err = b.command(ctx, "systemctl", "stop", "--", "minecraft-"+id+".service"); err != nil {
+				return instanceRuntimeFailure("Setup instance startup could not be stopped safely.")
+			}
+		}
+		stopped, err := b.observeRaw(ctx, id)
+		if err != nil || (stopped.State != "stopped" && stopped.State != "failed" && stopped.State != "configured") {
+			return errInstanceRecovery
 		}
 		if pending, err := b.pending(id); err != nil {
 			return err

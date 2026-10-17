@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 func setupPlanForRuntimeTest(t *testing.T) *adminSetupNormalizedPlan {
@@ -300,5 +301,28 @@ func TestSetupRuntimeStderrCaptureIsBounded(t *testing.T) {
 	stdout, stderr, err := captureSetupRuntimeTransactionOutput(cmd)
 	if err != nil || string(stdout) != "stdout is separate" || len(stderr) != 16*1024 {
 		t.Fatalf("stdout=%q err=%v retained stderr bytes=%d", stdout, err, len(stderr))
+	}
+}
+
+func TestInstanceOnlySetupActionTimeouts(t *testing.T) {
+	old := runSetupInstanceRuntimeAction
+	t.Cleanup(func() { runSetupInstanceRuntimeAction = old })
+	for _, action := range []string{"validate", "apply", "verify", "rollback", "commit"} {
+		t.Run(action, func(t *testing.T) {
+			runSetupInstanceRuntimeAction = func(ctx context.Context, got string, _ setupRuntimeTransactionRequest) (setupRuntimeTransactionResponse, error) {
+				if got != action {
+					t.Fatal(got)
+				}
+				if _, ok := ctx.Deadline(); !ok {
+					t.Fatal("missing action deadline")
+				}
+				<-ctx.Done()
+				return setupRuntimeTransactionResponse{}, ctx.Err()
+			}
+			_, err := runSetupRuntimeTransactionAction(context.Background(), action, time.Millisecond, setupRuntimeTransactionRequest{InstanceOnly: true})
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatal(err)
+			}
+		})
 	}
 }

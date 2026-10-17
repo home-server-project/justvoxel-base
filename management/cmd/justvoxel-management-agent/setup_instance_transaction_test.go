@@ -2,11 +2,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestFreshSetupCreatesOneNormalInstanceThroughSharedCreation(t *testing.T) {
@@ -245,5 +250,338 @@ func TestWritePrivateStillRejectsMissingParent(t *testing.T) {
 	}
 	if _, err := os.Lstat(parent); !os.IsNotExist(err) {
 		t.Fatal("missing parent was created", err)
+	}
+}
+
+// Bind a fixture runtime to protected Setup evidence. All recovery targets
+// come from this operation-bound record.
+func bindSetupRuntimeFixture(t *testing.T, f *instanceActivationFixture, r setupRuntimeTransactionRequest) setupInstanceEvidence {
+	t.Helper()
+	old, oldRoot, oldMarker := instanceRuntimes, setupPolicyRoot, setupInstanceMarker
+	instanceRuntimes = f.backend
+	setupPolicyRoot = t.TempDir()
+	setupInstanceMarker = filepath.Join(t.TempDir(), "setup-in-progress")
+	t.Cleanup(func() { instanceRuntimes = old; setupPolicyRoot = oldRoot; setupInstanceMarker = oldMarker })
+	record, err := f.backend.readRecord(f.configs[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := setupInstanceEvidence{Schema: 1, Request: r, Record: record, Policy: setupInstancePolicy(r), HadInstancesRoot: true}
+	dir, err := f.backend.privateDirectory(f.backend.staging, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir.Close()
+	if err = f.backend.writeJSON(setupInstancePath(r.OperationID), e, false); err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range e.Policy {
+		if err = f.backend.writePrivate(filepath.Join(setupPolicyRoot, name), value, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = f.backend.writePrivate(setupInstanceMarker, []byte(r.OperationID+" "+r.PlanFingerprint+"\n"), false); err != nil {
+		t.Fatal(err)
+	}
+	return e
+}
+
+func TestSetupSlowStartReachesNormalCommit(t *testing.T) {
+	f := newInstanceBackupFixture(t)
+	store := openTestOperationStore(t)
+	op := beginStorageTestOperation(t, store)
+	plan := setupPlanForRuntimeTest(t)
+	plan.Backups.Automatic = true
+	plan.Backups.Schedule = "*-*-* 06:30:00"
+	plan.Backups.Keep = 9
+	r, err := setupRuntimeRequestForOperation(op, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := bindSetupRuntimeFixture(t, f.instanceActivationFixture, r)
+	id := e.Record.Runtime.ID
+	oldStorage := runAdminSetupStorageTransactionHelper
+	t.Cleanup(func() { runAdminSetupStorageTransactionHelper = oldStorage })
+	runAdminSetupStorageTransactionHelper = func(_ context.Context, action string, _ []byte) ([]byte, error) {
+		if action == "validate" {
+			return []byte(`{"ok":true,"applied":false,"phase":"storage_preflight","rollback_state":"not_started","rollback_result":"no_changes"}`), nil
+		}
+		if action == "apply" {
+			return []byte(`{"ok":true,"applied":true,"phase":"storage_verified","rollback_state":"not_started","rollback_result":""}`), nil
+		}
+		t.Fatal(action)
+		return nil, nil
+	}
+	// Publication is covered above; run the real Verify and Commit under the
+	// actual persistent-operation orchestrator, including its action deadlines.
+	runSetupInstanceRuntimeAction = func(ctx context.Context, action string, request setupRuntimeTransactionRequest) (setupRuntimeTransactionResponse, error) {
+		if action == "validate" || action == "apply" {
+			return setupRuntimeTransactionResponse{OK: true, Applied: action == "apply"}, nil
+		}
+		return runSetupInstanceAction(ctx, action, request)
+	}
+	base := f.backend.command
+	started, verified, pauses := false, false, 0
+	f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+		if command == "systemctl" && reflect.DeepEqual(args, []string{"--no-block", "start", "--", "minecraft-" + id + ".service"}) {
+			started = true
+			f.states[id] = "activating"
+			return nil, nil
+		}
+		if command == "/usr/libexec/justvoxel/mjust/verify-minecraft-stack" {
+			if !started || pauses < 3 || f.states[id] != "active" || !reflect.DeepEqual(args, []string{"--instance", id, r.Minecraft.Version}) {
+				t.Fatal("verification before readiness", args)
+			}
+			verified = true
+			return nil, nil
+		}
+		return base(ctx, command, args...)
+	}
+	f.backend.pause = func(ctx context.Context, _ time.Duration) error {
+		if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) < 19*time.Minute {
+			t.Fatal("first-boot verify allowance shortened")
+		}
+		if verified {
+			t.Fatal("unexpected wait after verification")
+		}
+		if _, err := os.Stat(f.backend.backupPath(id, "settings")); !os.IsNotExist(err) {
+			t.Fatal("backup settings created before commit")
+		}
+		pauses++
+		if pauses == 3 {
+			f.states[id] = "active"
+			f.containers[id] = "running"
+		}
+		return ctx.Err()
+	}
+	if err = executeSetupTransaction(context.Background(), store, op.OperationID, plan, nil); err != nil {
+		t.Fatal(err)
+	}
+	finished, err := store.get(op.OperationID)
+	if err != nil || finished.State != operationSucceeded || !verified {
+		t.Fatal(finished, err)
+	}
+	if current, err := store.currentSetup(); err != nil || current != nil {
+		t.Fatal("unfinished setup", current, err)
+	}
+	if _, err := os.Stat(setupInstanceMarker); !os.IsNotExist(err) {
+		t.Fatal("setup marker survived commit", err)
+	}
+	settings, err := f.backend.backupSettings(id)
+	if err != nil || !settings.Enabled || settings.Time != "06:30" || settings.Retention != 9 || !f.timerEnabled[instanceBackupUnit(id, "timer")] {
+		t.Fatal(settings, err)
+	}
+}
+
+func TestSetupStartupFailsClosed(t *testing.T) {
+	for _, mode := range []string{"failed", "timeout", "cancelled", "stopping", "configured", "stopped-after-starting", "submission-gap"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newInstanceActivationFixture(t)
+			id := f.configs[0].ID
+			allowance := time.Minute
+			if mode == "timeout" {
+				allowance = time.Millisecond
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), allowance)
+			defer cancel()
+			f.states[id] = "activating"
+			pauses := 0
+			if mode == "failed" {
+				f.states[id] = "failed"
+			}
+			if mode == "stopping" {
+				f.states[id] = "deactivating"
+			}
+			if mode == "configured" {
+				delete(f.states, id)
+			}
+			if mode == "submission-gap" {
+				f.states[id] = "inactive"
+			}
+			f.backend.pause = func(context.Context, time.Duration) error {
+				pauses++
+				switch mode {
+				case "timeout":
+					<-ctx.Done()
+					return ctx.Err()
+				case "cancelled":
+					cancel()
+					return ctx.Err()
+				case "stopped-after-starting":
+					f.states[id] = "inactive"
+				case "submission-gap":
+					f.states[id] = "active"
+					f.containers[id] = "running"
+				default:
+					t.Fatal("unsafe state was retried")
+				}
+				return nil
+			}
+			err := f.backend.waitSetupInstanceRunning(ctx, id)
+			if mode == "submission-gap" {
+				if err != nil || pauses != 1 {
+					t.Fatal(err, pauses)
+				}
+				return
+			}
+			var safe *instanceRuntimeSafeError
+			if !errors.As(err, &safe) {
+				t.Fatal("missing safe failure", err)
+			}
+			if mode == "failed" && pauses != 0 {
+				t.Fatal("failed startup did not fail promptly")
+			}
+		})
+	}
+}
+
+func TestExplicitSetupRecoveryStopsTrackedInstanceBeforeActivationRecovery(t *testing.T) {
+	for _, mode := range []string{"starting", "running", "players-online", "players-unknown", "stop-error", "still-starting"} {
+		t.Run(mode, func(t *testing.T) {
+			d := newDeleteFixture(t)
+			f := d.f
+			server, store, op := setupRecoveryOperation(t, operationNeedsAttention, "runtime_rollback")
+			r := setupRuntimeTransactionRequest{InstanceOnly: true, OperationID: op.OperationID, PlanFingerprint: op.PlanFingerprint}
+			e := bindSetupRuntimeFixture(t, f, r)
+			id, sibling := e.Record.Runtime.ID, f.configs[1].ID
+			// Valid pending activation evidence must still go through recover().
+			_, env, quadlet := f.backend.paths(id)
+			envBytes, err := f.backend.readPrivate(env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			quadletBytes, err := f.backend.readPrivate(quadlet)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pending := instanceActivationEvidence{SchemaVersion: 1, ID: id, Previous: e.Record, Target: e.Record, Environment: envBytes, Quadlet: quadletBytes}
+			dir, _, _ := f.backend.paths(id)
+			if err = f.backend.writeJSON(filepath.Join(dir, "pending.json"), pending, false); err != nil {
+				t.Fatal(err)
+			}
+			f.states[id] = "activating"
+			if mode == "running" || mode == "players-online" || mode == "players-unknown" {
+				f.states[id] = "active"
+				f.containers[id] = "running"
+			}
+			if mode == "players-online" {
+				f.players = "There are 1 of a max of 20 players online: Alex"
+			}
+			if mode == "players-unknown" {
+				f.players = "unavailable"
+			}
+			base := f.backend.command
+			stopped := false
+			elapsed := time.Duration(0)
+			warnings := []string{}
+			siblingState, siblingContainer := f.states[sibling], f.containers[sibling]
+			f.backend.pause = func(_ context.Context, duration time.Duration) error {
+				if mode != "players-online" || !stopped {
+					t.Fatal("unexpected recovery countdown")
+				}
+				elapsed += duration
+				if elapsed >= 60*time.Second {
+					f.states[id] = "inactive"
+					f.containers[id] = "exited"
+				}
+				return nil
+			}
+			f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+				if command == "podman" && len(args) == 4 && args[0] == "exec" && args[2] == "rcon-cli" {
+					if args[1] != "minecraft-"+id {
+						t.Fatal("player safety escaped target", args)
+					}
+					if strings.HasPrefix(args[3], "say ") {
+						warnings = append(warnings, args[3])
+						return nil, nil
+					}
+				}
+				if command == "systemctl" && reflect.DeepEqual(args, []string{"--no-block", "stop", "--", "minecraft-" + id + ".service"}) {
+					if mode != "players-online" || len(warnings) != 1 || warnings[0] != "say Server shutting down in 60 seconds" {
+						t.Fatal("shutdown requested without initial player warning")
+					}
+					stopped = true
+					f.states[id] = "deactivating"
+					return nil, nil
+				}
+				if command == "systemctl" && reflect.DeepEqual(args, []string{"stop", "--", "minecraft-" + id + ".service"}) {
+					if mode == "players-online" || mode == "players-unknown" {
+						t.Fatal("unsafe immediate interruption")
+					}
+					if _, ok := ctx.Deadline(); !ok {
+						t.Fatal("unbounded rollback stop")
+					}
+					if mode == "running" {
+						if deadline, _ := ctx.Deadline(); time.Until(deadline) > 150*time.Second {
+							t.Fatal("zero-player stop exceeded normal safety timeout")
+						}
+					}
+					if mode == "stop-error" {
+						return nil, fmt.Errorf("injected stop failure")
+					}
+					stopped = true
+					if mode == "still-starting" {
+						return nil, nil
+					}
+				}
+				if command == "systemctl" && len(args) == 1 && args[0] == "daemon-reload" && (!stopped || f.states[id] != "inactive" || f.containers[id] == "running") {
+					t.Fatal("activation recovery before stop")
+				}
+				return base(ctx, command, args...)
+			}
+			oldStorage := runAdminSetupStorageTransactionHelper
+			t.Cleanup(func() { runAdminSetupStorageTransactionHelper = oldStorage })
+			runAdminSetupStorageTransactionHelper = func(_ context.Context, action string, _ []byte) ([]byte, error) {
+				if action != "recover" || !stopped || !d.removed {
+					t.Fatal("storage recovery before runtime rollback")
+				}
+				return []byte(`{"ok":true,"applied":false,"phase":"storage_rolled_back","rollback_state":"succeeded","rollback_result":"rolled_back"}`), nil
+			}
+			rr := httptest.NewRecorder()
+			server.adminSetupRecover(rr, surfaceRequest(http.MethodPost, "/v1/admin/setup/recover", `{"operation_id":"`+r.OperationID+`","retry_recovery":true}`))
+			if rr.Code != http.StatusOK {
+				t.Fatal(rr.Code, rr.Body.String())
+			}
+			finished, err := store.get(r.OperationID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode == "stop-error" || mode == "still-starting" || mode == "players-unknown" {
+				if finished.State != operationNeedsAttention || finished.Stage != "runtime_rollback" || d.removed {
+					t.Fatal("unsafe recovery succeeded", finished)
+				}
+				if current, err := store.currentSetup(); err != nil || current == nil {
+					t.Fatal("lost recovery lock", err)
+				}
+				for _, path := range []string{setupInstanceMarker, setupInstancePath(r.OperationID), filepath.Join(dir, "pending.json"), env, quadlet} {
+					if _, err := os.Stat(path); err != nil {
+						t.Fatal("lost recovery evidence", path, err)
+					}
+				}
+			} else {
+				if finished.State != operationRolledBack || !stopped || !d.removed {
+					t.Fatal(finished)
+				}
+				if current, err := store.currentSetup(); err != nil || current != nil {
+					t.Fatal("setup lock retained", current, err)
+				}
+				if _, err := os.Stat(setupInstanceMarker); !os.IsNotExist(err) {
+					t.Fatal("marker survived recovery", err)
+				}
+				recovered, err := setupInstanceRead(r.OperationID, r.PlanFingerprint)
+				if err != nil || !recovered.RolledBack {
+					t.Fatal(recovered, err)
+				}
+			}
+			if mode == "players-online" && (elapsed != 60*time.Second || len(warnings) != 9) {
+				t.Fatal("player shutdown countdown changed", elapsed, warnings)
+			}
+			if _, err := f.backend.readRecord(sibling); err != nil {
+				t.Fatal("sibling touched", err)
+			}
+			if f.states[sibling] != siblingState || f.containers[sibling] != siblingContainer {
+				t.Fatal("sibling runtime changed")
+			}
+		})
 	}
 }

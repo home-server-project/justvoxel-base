@@ -67,6 +67,7 @@ document.addEventListener("DOMContentLoaded", () => {
         configure.disabled = true;
         configure.textContent = addingServer ? "Creating server…" : "Starting setup…";
       }
+      let submissionMessage = "Setup status could not be confirmed. Reload Review to check the current operation.";
       try {
         const submit = () => fetch(applyForm.action, {
           method: "POST", credentials: "same-origin", cache: "no-store",
@@ -81,7 +82,8 @@ document.addEventListener("DOMContentLoaded", () => {
         const markup = await response.text();
         const page = new DOMParser().parseFromString(markup, "text/html");
         const message = page.querySelector(".notice.error")?.textContent.trim();
-        throw new Error(message || "Could not start JustVoxel setup. Reload Review to check the current configuration.");
+        submissionMessage = message || submissionMessage;
+        throw new Error(submissionMessage);
       } catch (error) {
         submitting = false;
         if (configure) {
@@ -90,7 +92,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         const feedback = document.createElement("p");
         feedback.setAttribute("role", "alert");
-        feedback.textContent = error?.message || "Could not start JustVoxel setup.";
+        feedback.textContent = submissionMessage;
         const review = document.createElement("a");
         review.href = addingServer ? "/minecraft/servers/add/review" : "/setup/review";
         review.textContent = "Reload Review";

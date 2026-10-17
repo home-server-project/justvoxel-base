@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -19,6 +20,9 @@ type fakeSetupExecutionAPI struct {
 	applyErr      error
 	applyRequest  api.AdminSetupApplyRequest
 	applyCalls    int
+	applyCurrent  *api.PersistentOperation
+	currentErr    error
+	currentCalls  int
 	recoverCalls  int
 	recoverID     string
 	current       *api.PersistentOperation
@@ -43,6 +47,9 @@ func (f *fakeSetupExecutionAPI) AdminSetupApply(_ context.Context, session strin
 		return api.AdminSetupApplyResponse{}, api.ErrUnauthorized
 	}
 	f.applyCalls++
+	if f.applyCurrent != nil {
+		f.current = f.applyCurrent
+	}
 	f.applyRequest = request
 	return f.applyResponse, f.applyErr
 }
@@ -61,6 +68,10 @@ func (f *fakeSetupExecutionAPI) AdminOperation(_ context.Context, session, id st
 func (f *fakeSetupExecutionAPI) AdminCurrentSetupOperation(_ context.Context, session string) (api.PersistentOperationResponse, error) {
 	if session != "session-token" {
 		return api.PersistentOperationResponse{}, api.ErrUnauthorized
+	}
+	f.currentCalls++
+	if f.currentErr != nil {
+		return api.PersistentOperationResponse{}, f.currentErr
 	}
 	if f.current == nil {
 		return api.PersistentOperationResponse{}, nil
@@ -594,5 +605,67 @@ func TestSetupProgressActionsUseNormalButtonLayout(t *testing.T) {
 	css := correctionSource(t, "static/setup-review.css")
 	if !strings.Contains(css, `.setup-operation-actions{display:flex;align-items:center;justify-content:flex-end;gap:.65rem;flex-wrap:wrap}`) {
 		t.Fatal("setup actions must wrap and keep their natural height on desktop and mobile")
+	}
+}
+
+func TestSetupApplyErrorReconcilesOnlyExactReviewedOperation(t *testing.T) {
+	for _, mode := range []string{"matching", "different", "none", "unauthorized", "password-change", "lookup-unauthorized", "lookup-password-change", "lookup-error", "invalid-id"} {
+		t.Run(mode, func(t *testing.T) {
+			client := setupExecutionClient()
+			app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer firstRunSetupDrafts.delete(app, "session-token")
+			defer firstRunSetupReviews.delete(app, "session-token")
+			advanceSetupToReview(t, app)
+			acceptSetupEULA(t, app)
+			client.applyErr = errors.New("response connection lost")
+			client.applyCurrent = &api.PersistentOperation{OperationID: setupExecutionOperationID, PlanFingerprint: setupReviewFingerprint, State: "running"}
+			switch mode {
+			case "different":
+				client.applyCurrent.PlanFingerprint = strings.Repeat("a", 64)
+			case "lookup-error":
+				client.currentErr = errors.New("status unavailable")
+			case "invalid-id":
+				client.applyCurrent.OperationID = "invalid"
+			case "none":
+				client.applyCurrent = nil
+			case "unauthorized":
+				client.applyErr = api.ErrUnauthorized
+			case "password-change":
+				client.applyErr = api.ErrPasswordChangeRequired
+			case "lookup-unauthorized":
+				client.currentErr = api.ErrUnauthorized
+			case "lookup-password-change":
+				client.currentErr = api.ErrPasswordChangeRequired
+			}
+			before := client.currentCalls
+			rr := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/review/apply", "csrf=csrf-token&plan_fingerprint="+setupReviewFingerprint))
+			if client.applyCalls != 1 {
+				t.Fatal("Apply was retried", client.applyCalls)
+			}
+			switch mode {
+			case "matching":
+				if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/setup/progress/"+setupExecutionOperationID {
+					t.Fatal(rr.Code, rr.Header(), rr.Body.String())
+				}
+			case "different", "none", "lookup-error", "invalid-id":
+				if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "Could not start JustVoxel setup.") {
+					t.Fatal(rr.Code, rr.Body.String())
+				}
+			default:
+				want := "/login"
+				if strings.Contains(mode, "password-change") {
+					want = "/password"
+				}
+				if rr.Header().Get("Location") != want || rr.Code != http.StatusSeeOther {
+					t.Fatal("authentication handling overridden", rr.Code, rr.Header())
+				}
+				if (mode == "unauthorized" || mode == "password-change") && client.currentCalls != before {
+					t.Fatal("looked up operation after authoritative auth error")
+				}
+			}
+		})
 	}
 }

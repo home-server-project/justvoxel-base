@@ -147,7 +147,9 @@ func setupRuntimeRequestForOperation(operation operationJournal, plan *adminSetu
 
 func runSetupRuntimeTransactionAction(parent context.Context, action string, timeout time.Duration, request setupRuntimeTransactionRequest) (setupRuntimeTransactionResponse, error) {
 	if request.InstanceOnly {
-		return runSetupInstanceRuntimeAction(parent, action, request)
+		ctx, cancel := context.WithTimeout(parent, timeout)
+		defer cancel()
+		return runSetupInstanceRuntimeAction(ctx, action, request)
 	}
 	var response setupRuntimeTransactionResponse
 	switch action {

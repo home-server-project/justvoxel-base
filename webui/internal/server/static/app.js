@@ -692,6 +692,21 @@ window.JustVoxelClockDisplay = {
 };
 
 const topbarClock = document.querySelector("[data-topbar-clock]");
+function formatDiagnosticLogTimestamp(value) {
+  if (!value) return "";
+  try {
+    const instant = new Date(value);
+    if (!Number.isFinite(instant.getTime())) return value;
+    const timeZone = topbarClock?.dataset.systemTimezone || undefined;
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone }).formatToParts(instant).map(({ type, value }) => [type, value]));
+    const date = clockPreferences.date === "dmy" ? `${parts.day} ${parts.month} ${parts.year}` : `${parts.month} ${parts.day} ${parts.year}`;
+    const time = new Intl.DateTimeFormat("en-US", { hour: "2-digit", minute: "2-digit", ...(clockPreferences.time === "12" ? { hour12: true } : { hourCycle: "h23" }), timeZone }).format(instant);
+    return `${date} · ${time}`;
+  } catch (_) {
+    return value;
+  }
+}
+
 if (topbarClock) {
   const initialSystemTime = Number(topbarClock.dataset.systemNow);
   let systemClockOffset = Number.isFinite(initialSystemTime) && initialSystemTime > 0 ? initialSystemTime - Date.now() : 0;
@@ -4400,7 +4415,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         const title = document.createElement("strong");
         title.textContent = live ? entry.unit : entry.log_id + ".log";
         const meta = document.createElement("span");
-        meta.textContent = live ? [entry.description, entry.active_state, entry.sub_state].filter(Boolean).join(" · ") : [entry.operation_type?.replaceAll("_", " ") || "", entry.state || "", entry.timestamp || ""].filter(Boolean).join(" · ");
+        meta.textContent = live ? [entry.description, entry.active_state, entry.sub_state].filter(Boolean).join(" · ") : [entry.operation_type?.replaceAll("_", " ") || "", entry.state || "", formatDiagnosticLogTimestamp(entry.timestamp)].filter(Boolean).join(" · ");
         button.append(title, meta);
         button.addEventListener("click", async () => {
           selectedFile = identity;

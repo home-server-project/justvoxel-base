@@ -316,6 +316,17 @@ configuration and identity material. Geyser uses the instance's internal ports
 and Floodgate authentication. No legacy plugin folder is loaded; Podman `:Z`
 continues to own independent volume labels, without explicit relabeling.
 
+First-run Setup also submits normal asynchronous Start, then waits for the
+operation-bound instance to report Running before checking Minecraft readiness.
+Its existing 20-minute Verify deadline covers both waits. Starting is expected;
+a stopped service has only a two-second submission grace before activation.
+Setup rollback cancels an in-flight start with a bounded synchronous stop and
+confirms a safe inactive state before activation recovery or instance deletion.
+Explicit Setup recovery uses the same rollback path if that instance has since
+become Running; persistent evidence and the setup marker remain until recovery
+is verified. Successful Setup configures instance backups and clears the marker
+only at normal commit.
+
 Administrator and operator Start, and the startup portion of Restart, submit
 `systemctl --no-block start -- minecraft-<ID>.service` while the Agent holds
 the maintenance lock. They return after job submission, without waiting for
