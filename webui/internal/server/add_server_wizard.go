@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -62,6 +63,7 @@ func setupReviewsFor(r *http.Request) *setupReviewStore {
 
 func (a *App) registerAddServerWizardRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+minecraftServersPath, a.minecraftServersPage)
+	mux.HandleFunc("GET /workspace/minecraft-servers", a.minecraftServersWorkspace)
 	mux.HandleFunc("GET "+minecraftServersPath+"/view/{id}", a.minecraftSelectedServer)
 	mux.HandleFunc("POST "+minecraftServersPath+"/view/{id}/{action}", a.minecraftSelectedServerAction)
 	routes := map[string]http.HandlerFunc{
@@ -118,6 +120,23 @@ func (a *App) minecraftServersPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/password", http.StatusSeeOther)
 		return
 	}
+	if _, _, _, ok := a.adminDiscoveryRequest(w, r); !ok {
+		return
+	}
+	query := url.Values{"workspace": {"minecraft-servers"}}
+	for _, key := range []string{"created", "deleted"} {
+		if r.URL.Query().Get(key) == "yes" {
+			query.Set(key, "yes")
+		}
+	}
+	http.Redirect(w, r, "/?"+query.Encode(), http.StatusSeeOther)
+}
+
+func (a *App) minecraftServersWorkspace(w http.ResponseWriter, r *http.Request) {
+	if mustChange(r) {
+		http.Redirect(w, r, "/password", http.StatusSeeOther)
+		return
+	}
 	session, _, identity, ok := a.adminDiscoveryRequest(w, r)
 	if !ok {
 		return
@@ -170,7 +189,9 @@ func (a *App) validateAddServerName(ctx context.Context, session, name string, e
 			return errors.New("Use letters, numbers, spaces, or . _ - ' ( ) in the server name.")
 		}
 	}
-	client, ok := a.api.(addServerAPI)
+	client, ok := a.api.(interface {
+		MinecraftInstances(context.Context, string) ([]api.RegisteredMinecraftInstance, error)
+	})
 	if !ok {
 		return errors.New("Independent server creation is unavailable.")
 	}

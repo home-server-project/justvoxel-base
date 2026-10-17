@@ -135,6 +135,9 @@ func setupConfigurationSnapshot(plan api.AdminSetupPlanResponse) string {
 	b.WriteString("Validated plan: " + shortSetupPlanReference(plan.PlanFingerprint) + "\n\n")
 
 	b.WriteString("Server\n")
+	if plan.Normalized.Server.DisplayName != "" {
+		b.WriteString("Server name: " + plan.Normalized.Server.DisplayName + "\n")
+	}
 	b.WriteString("Welcome message: " + plan.Normalized.Server.MOTD + "\n")
 	b.WriteString("Maximum players: " + strconv.Itoa(plan.Normalized.Server.MaxPlayers) + "\n")
 	if plan.Normalized.Server.BedrockEnabled {
@@ -303,7 +306,7 @@ func (a *App) setupReviewState(ctx context.Context, session string, client admin
 	plan, err := planner.AdminSetupPlan(ctx, session, request)
 	state := setupReviewState{
 		Request: request, Plan: plan, DraftUpdatedAt: draft.UpdatedAt,
-		SetupMode: draft.Mode, ServerType: draft.Minecraft.ServerType,
+		SetupMode: draft.Mode, ServerType: draft.Minecraft.ServerType, DisplayName: plan.Normalized.Server.DisplayName,
 	}
 	if err != nil {
 		if errors.Is(err, api.ErrUnauthorized) {
@@ -364,7 +367,7 @@ func setupPlanRequestFromDraft(draft setupDraft) (api.AdminSetupPlanRequest, err
 	return api.AdminSetupPlanRequest{
 		DiagnosticSessionID: draft.DiagnosticSessionID,
 		Server: api.AdminSetupPlanServerRequest{
-			MOTD: draft.Server.MOTD, MOTDAutomatic: draft.Server.MOTDAutomatic, MaxPlayers: maxPlayers,
+			DisplayName: draft.DisplayName, MOTD: draft.Server.MOTD, MOTDAutomatic: draft.Server.MOTDAutomatic, MaxPlayers: maxPlayers,
 			BedrockEnabled: draft.Server.BedrockEnabled, Timezone: draft.Server.Timezone,
 		},
 		Minecraft: api.AdminSetupPlanMinecraftRequest{

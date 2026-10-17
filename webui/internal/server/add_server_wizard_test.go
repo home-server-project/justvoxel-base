@@ -115,7 +115,7 @@ func addCreateValues(state setupReviewState) url.Values {
 
 func TestAddServerEntryAndSharedRecommended(t *testing.T) {
 	app, client := newAddServerTestApp(t)
-	workspace := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example"+minecraftServersPath, ""))
+	workspace := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/minecraft-servers", ""))
 	body := workspace.Body.String()
 	if workspace.Code != http.StatusOK || !strings.Contains(body, `class="panel minecraft-add-server-card" href="/minecraft/servers/add" aria-label="Add Minecraft Server"`) {
 		t.Fatalf("entry missing: %d %s", workspace.Code, body)

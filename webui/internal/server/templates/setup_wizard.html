@@ -95,7 +95,7 @@
       </fieldset>
       <div class="setup-form-grid">
         <input type="hidden" name="motd_automatic" value="{{.Server.MOTDAutomatic}}" data-setup-motd-automatic>
-        {{if .AddServer}}{{template "setup-instance-name" .}}{{else}}<label class="setup-field">Server name<input value="Minecraft server" disabled aria-describedby="setup-server-name-help"><span class="field-help" id="setup-server-name-help">Future multi-instance placeholder. This name does not configure the server.</span></label>{{end}}
+        {{template "setup-instance-name" .}}
         <label class="setup-field">Welcome message<input name="motd" value="{{.Server.MOTD}}" autocomplete="off" {{if .Server.MOTDAutomatic}}placeholder="Automatic: JustVoxel {{if eq .Minecraft.ServerType "purpur"}}Purpur{{else if eq .Minecraft.ServerType "vanilla"}}Vanilla{{else}}Paper{{end}} Minecraft &lt;resolved version&gt; Server"{{end}} data-setup-motd><span class="field-help">Shown to players in the Minecraft server list. Technical name: MOTD.</span></label>
         <label class="setup-field">Game mode<select name="game_mode" required><option value="survival" {{if eq .Minecraft.GameMode "survival"}}selected{{end}}>Survival</option><option value="creative" {{if eq .Minecraft.GameMode "creative"}}selected{{end}}>Creative</option><option value="adventure" {{if eq .Minecraft.GameMode "adventure"}}selected{{end}}>Adventure</option><option value="spectator" {{if eq .Minecraft.GameMode "spectator"}}selected{{end}}>Spectator</option></select></label>
         <label class="setup-field">Maximum players<input name="max_players" type="number" min="1" step="1" value="{{.Server.MaxPlayers}}" inputmode="numeric"><span class="field-help">Used for the player limit and memory recommendations.</span></label>

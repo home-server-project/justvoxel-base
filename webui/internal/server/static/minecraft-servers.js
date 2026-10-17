@@ -1,10 +1,13 @@
 (() => {
   'use strict';
 
-  const list = document.querySelector('.minecraft-server-entries');
-  const arrange = document.querySelector('[data-server-arrange]');
-  const done = document.querySelector('[data-server-arrange-done]');
-  if (!list || !arrange || !done) return;
+  const initialized = new WeakSet();
+  globalThis.justVoxelMinecraftServers = (root = document) => {
+  const list = root.querySelector('.minecraft-server-entries');
+  const arrange = root.querySelector('[data-server-arrange]');
+  const done = root.querySelector('[data-server-arrange-done]');
+  if (!list || !arrange || !done || initialized.has(list)) return;
+  initialized.add(list);
 
   const key = 'justvoxel:minecraft-server-order:v1';
   const idPattern = /^jv-[a-z0-9]{6,12}$/;
@@ -91,4 +94,6 @@
     normal.addEventListener('submit', suppress, true);
   }
   updateBounds();
+  };
+  globalThis.justVoxelMinecraftServers();
 })();

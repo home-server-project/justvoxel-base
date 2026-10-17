@@ -25,6 +25,7 @@ var runAdminSetupPlanHelper = func(ctx context.Context, request []byte) ([]byte,
 }
 
 type adminSetupPlanServerRequest struct {
+	DisplayName    string `json:"display_name,omitempty"`
 	MOTD           string `json:"motd"`
 	MOTDAutomatic  bool   `json:"motd_automatic,omitempty"`
 	MaxPlayers     int    `json:"max_players"`
@@ -78,6 +79,7 @@ type adminSetupPlanWarning struct {
 }
 
 type adminSetupPlanServer struct {
+	DisplayName    string `json:"display_name,omitempty"`
 	MOTD           string `json:"motd"`
 	MaxPlayers     int    `json:"max_players"`
 	BedrockEnabled bool   `json:"bedrock_enabled"`
@@ -292,7 +294,22 @@ func authoritativeAdminSetupPlan(parent context.Context, request adminSetupPlanR
 	if !validSetupServerType(request.Minecraft.ServerType) || (request.Minecraft.ServerType == "vanilla" && request.Server.BedrockEnabled) {
 		return out, &adminSetupPlanningError{status: http.StatusBadRequest, message: "invalid server software or Bedrock choice"}
 	}
+	// Friendly names belong to the Go instance registry, not the shell planner.
+	displayName, nameErr := validateInstanceName(request.Server.DisplayName)
+	if nameErr != nil || (request.Server.DisplayName != "" && displayName == "") {
+		return out, &adminSetupPlanningError{status: http.StatusBadRequest, message: "invalid server name"}
+	}
+	if displayName != "" {
+		instances, err := instanceRuntimes.identities().listInstances("")
+		if err != nil {
+			return out, &adminSetupPlanningError{status: http.StatusServiceUnavailable, message: "server names could not be checked"}
+		}
+		if instanceNameUsed(instances, "", displayName) {
+			return out, &adminSetupPlanningError{status: http.StatusBadRequest, message: "another server already uses this name"}
+		}
+	}
 	helperRequest := request
+	helperRequest.Server.DisplayName = ""
 	helperRequest.DiagnosticSessionID = ""
 	// The shell helper keeps its existing strict contract. The agent generates
 	// this WebUI default only after the helper resolves the final version.
@@ -335,6 +352,7 @@ func authoritativeAdminSetupPlan(parent context.Context, request adminSetupPlanR
 		software := map[string]string{"paper": "Paper", "purpur": "Purpur", "vanilla": "Vanilla"}[out.Normalized.Minecraft.ServerType]
 		out.Normalized.Server.MOTD = "JustVoxel " + software + " Minecraft " + version + " Server"
 	}
+	out.Normalized.Server.DisplayName = displayName
 	fingerprint, err := adminSetupPlanFingerprint(out.SchemaVersion, out.Normalized, out.Requirements)
 	if err != nil {
 		return out, &adminSetupPlanningError{status: http.StatusInternalServerError, message: "first-run setup plan identity could not be created"}

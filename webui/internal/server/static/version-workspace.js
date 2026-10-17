@@ -585,7 +585,7 @@ if (versionLauncher && versionDialog) {
       state.textContent = operation && message === operation.status ? "" : message;
     } catch (failure) { if (ticket === sequence) state.textContent = failure.message; }
   };
-  const windowControl = setupWorkspaceWindow(versionDialog, { onOpen: () => render() });
+  const windowControl = setupWorkspaceWindow(versionDialog, { onOpen: () => { globalThis.justVoxelServerSelection(versionDialog.querySelector("[data-server-selector-slot]")).catch(error => { state.textContent = error.message; }); return render(); } });
   versionLauncher.addEventListener("click", () => { document.querySelector("[data-control-center]")?.removeAttribute("open"); windowControl?.open(); });
   versionDialog.querySelector("[data-version-close]").addEventListener("click", () => windowControl?.close());
   versionDialog.querySelector("[data-version-refresh]").addEventListener("click", () => render());

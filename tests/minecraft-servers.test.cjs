@@ -101,11 +101,13 @@ function page({ saved = null, readFails = false, accessFails = false, writeFails
       writes.push(value);
     },
   };
-  vm.runInNewContext(source, { document, window: { get localStorage() {
+  const context = { document, window: { get localStorage() {
     if (accessFails) throw new Error('storage access denied');
     return localStorage;
-  } } });
+  } } };
+  vm.runInNewContext(source, context);
   return {
+    initialize: () => context.justVoxelMinecraftServers(document),
     list, add, arrange, done, cards, writes,
     order: () => list.querySelectorAll('[data-minecraft-server-card]').map(card => card.dataset.serverId),
   };
@@ -236,8 +238,20 @@ test('script is page scoped and has no backend or configuration mutation path', 
   const template = readFileSync(`${root}templates/minecraft_servers.html`, 'utf8');
   const sharedHeader = template.slice(0, template.indexOf('{{define "minecraft_servers.html"}}'));
   assert.ok(!sharedHeader.includes('/static/minecraft-servers.js'));
-  assert.equal((template.match(/src="\/static\/minecraft-servers.js"/g) || []).length, 1);
+  const header = readFileSync(`${root}templates/header.html`, 'utf8');
+  assert.equal((header.match(/src="\/static\/minecraft-servers.js"/g) || []).length, 1);
   assert.doesNotMatch(source, /fetch\s*\(|XMLHttpRequest|\.submit\s*\(|\.requestSubmit\s*\(|\.Servers\[0\]|\.instances\[0\]|default.server|first.server/i);
   assert.doesNotMatch(source, /textContent|innerHTML|location|\/api\/|\/var\/|password|token|csrf/);
   assert.match(source, /JSON\.stringify\(cards\(\)\.map\(card => card\.dataset\.serverId\)/);
+});
+
+
+test('dynamic inventory initialization is idempotent', () => {
+  const p = page();
+  p.initialize(); p.initialize();
+  assert.equal(p.arrange.listeners.click.length, 1);
+  p.arrange.fire('click');
+  later(p.cards[0]).fire('click');
+  assert.deepEqual(p.order(), [ids[1], ids[0], ids[2]]);
+  assert.equal(p.writes.length, 1);
 });

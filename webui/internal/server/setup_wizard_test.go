@@ -339,6 +339,9 @@ func saveServerStep(t *testing.T, app *App, values url.Values) *httptest.Respons
 		values = url.Values{}
 	}
 	values.Set("csrf", "csrf-token")
+	if _, supplied := values["display_name"]; !supplied {
+		values.Set("display_name", "Minecraft server")
+	}
 	return httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/server", values.Encode()))
 }
 
@@ -518,7 +521,10 @@ func TestSetupWizardStartsWithFriendlyServerDefaults(t *testing.T) {
 		t.Fatalf("server step returned %d: %s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"<h2>Server</h2>", "Server name", "Welcome message", "Future multi-instance placeholder.", "Family", "Maximum players", "Server software", "Paper", "Technical name: MOTD"} {
+	if strings.Contains(body, "Future multi-instance placeholder") {
+		t.Fatal("obsolete naming placeholder remains")
+	}
+	for _, want := range []string{"<h2>Server</h2>", "Server name", "Welcome message", `name="display_name"`, `value="Minecraft server"`, "Family", "Maximum players", "Server software", "Paper", "Technical name: MOTD"} {
 		if want == "Family" {
 			continue
 		}

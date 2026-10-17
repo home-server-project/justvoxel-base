@@ -20,3 +20,7 @@
 .minecraft-server-more summary:focus-visible { outline: 2px solid var(--jv-accent); outline-offset: 4px; }
 .minecraft-server-more-items { display: flex; flex-direction: column; align-items: flex-start; gap: .75rem; padding-top: .75rem; overflow-wrap: anywhere; }
 .minecraft-server-card [hidden], .minecraft-server-arrange-toolbar [hidden] { display: none !important; }
+/* The inventory fragment keeps the existing card layout inside its workspace. */
+[data-minecraft-servers-content] .minecraft-server-entries { display: flex; flex-wrap: wrap; gap: 1rem; }
+[data-minecraft-servers-content] .minecraft-add-server-card { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .5rem; width: 10rem; min-height: 9rem; max-width: 100%; padding: 1rem; text-align: center; color: inherit; text-decoration: none; }
+[data-minecraft-servers-content] .minecraft-add-server-plus { font-size: 3rem; line-height: 1; color: var(--jv-accent); }

@@ -74,7 +74,11 @@ func newServerInventoryApp(t *testing.T) (*App, *serverInventoryTestAPI) {
 	return app, f
 }
 func inventoryRequest(app *App, method, path, body string) *httptest.ResponseRecorder {
-	return httptestResponse(app, authenticatedAdminRequest(method, "http://example"+minecraftServersPath+path, body))
+	target := minecraftServersPath + path
+	if path == "" {
+		target = "/workspace/minecraft-servers"
+	}
+	return httptestResponse(app, authenticatedAdminRequest(method, "http://example"+target, body))
 }
 
 var htmlTags = regexp.MustCompile(`<[^>]*>`)
@@ -223,10 +227,20 @@ func TestMinecraftServerCardControlsAndIdentity(t *testing.T) {
 			t.Error("another identity leaked into card")
 		}
 	}
-	for _, want := range []string{"data-server-arrange hidden>Arrange", "data-server-arrange-done hidden>Done", `src="/static/minecraft-servers.js"`} {
+	for _, want := range []string{"data-server-arrange hidden>Arrange", "data-server-arrange-done hidden>Done"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %s", want)
 		}
+	}
+	if strings.Contains(body, `src="/static/minecraft-servers.js"`) {
+		t.Error("inventory fragment must not load the shared Minecraft Servers asset")
+	}
+	header, err := assets.ReadFile("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(header), `src="/static/minecraft-servers.js"`) != 1 || !strings.Contains(string(header), `<script src="/static/minecraft-servers.js" defer></script>`) {
+		t.Error("shared header must load the deferred Minecraft Servers asset exactly once")
 	}
 	if len(f.actions) != 0 {
 		t.Fatal("card rendering mutated server")
@@ -418,5 +432,37 @@ func TestMinecraftOneServerInventoryContainsExactlyActualIdentity(t *testing.T) 
 	servers, message := app.minecraftServerInventory(context.Background(), "session-token")
 	if message != "" || len(servers) != 1 || servers[0].ContextID != "jv-family1" || servers[0].Name != "Family" {
 		t.Fatal(servers, message)
+	}
+}
+
+func TestMinecraftServersWorkspaceCompatibilityAndHeader(t *testing.T) {
+	app, _ := newServerInventoryApp(t)
+	for _, result := range []string{"created", "deleted"} {
+		response := httptestResponse(app, authenticatedAdminRequest("GET", "http://example/minecraft/servers?"+result+"=yes", ""))
+		if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/?"+result+"=yes&workspace=minecraft-servers" {
+			t.Fatal(response.Code, response.Header())
+		}
+		fragment := httptestResponse(app, authenticatedAdminRequest("GET", "http://example/workspace/minecraft-servers?"+result+"=yes", ""))
+		body := fragment.Body.String()
+		if fragment.Code != 200 || strings.Contains(body, "<!doctype") || strings.Contains(body, "data-server-selector-slot") || !strings.Contains(body, "notice success") {
+			t.Fatal(body)
+		}
+	}
+	header, _ := assets.ReadFile("templates/header.html")
+	markup := string(header)
+	if strings.Contains(markup, `href="/minecraft/servers"`) || !strings.Contains(markup, `type="button" data-minecraft-servers-open`) {
+		t.Fatal("inventory launcher must open a workspace")
+	}
+	window := regexp.MustCompile(`(?s)<dialog[^>]*data-workspace-window="minecraft-servers".*?</dialog>`).FindString(markup)
+	if window == "" || strings.Contains(window, "data-server-selector-slot") || !strings.Contains(window, "data-workspace-drag-handle") {
+		t.Fatal(window)
+	}
+	for _, name := range []string{"minecraft", "version", "plugins", "backups", "migration"} {
+		window := regexp.MustCompile(`(?s)<dialog[^>]*data-workspace-window="` + name + `".*?</dialog>`).FindString(markup)
+		lane := strings.Split(window, "data-workspace-drag-handle")[1]
+		lane = strings.Split(lane, "data-"+name+"-refresh")[0]
+		if !strings.Contains(lane, `data-server-selector-slot data-server-workspace="`+name+`"`) || strings.Count(window, "data-server-selector-slot") != 1 {
+			t.Fatalf("missing common header slot: %s", name)
+		}
 	}
 }

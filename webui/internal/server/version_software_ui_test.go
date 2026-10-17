@@ -81,6 +81,7 @@ async function open(currentSoftware, imageState = "up_to_date") {
   }
   vm.runInNewContext(source, {
     location: {origin: "http://example", search: "?server=jv-family1"},
+    justVoxelServerSelection: async () => {},
     justVoxelSelectedURL: value => {const u=new URL(value,"http://example");u.searchParams.set("server","jv-family1");return u.pathname+u.search;},
     document, fetch, URLSearchParams, setTimeout,
     setupWorkspaceWindow: (_, options) => { openWindow = options.onOpen; return { open: options.onOpen }; },

@@ -8,16 +8,50 @@ globalThis.justVoxelSelectedURL = (value) => {
   if (!target.searchParams.has("server")) selected.getAll("server").forEach((id) => target.searchParams.append("server", id));
   return target.pathname + target.search;
 };
-globalThis.justVoxelServerSelection = async (container) => {
-  if (!container || container.querySelector("[data-selected-server]")) return;
-  const response = await fetch(globalThis.justVoxelSelectedURL("/api/minecraft/workspace/selection"), {credentials:"same-origin",cache:"no-store"});
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "Server selection is unavailable.");
-  const label = document.createElement("label"); label.dataset.selectedServer = "";label.textContent = "Server ";
-  const select = document.createElement("select");select.setAttribute("aria-label","Selected server");
-  data.servers.forEach((server) => {const option=document.createElement("option");option.value=server.id;option.textContent=server.name;option.selected=server.id===data.selected.id;select.append(option);});
-  select.addEventListener("change",()=>{const target=new URL(window.location.href);target.searchParams.set("server",select.value);window.location.assign(target);});
-  label.append(select);container.prepend(label);
+globalThis.justVoxelServerSelection = async (slot) => {
+  if (!slot || slot.dataset.selectionLoading || slot.querySelector("[data-selected-server]")) return;
+  slot.dataset.selectionLoading = "true";
+  try {
+    const response = await fetch(globalThis.justVoxelSelectedURL("/api/minecraft/workspace/selection"), {credentials:"same-origin",cache:"no-store"});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Server selection is unavailable.");
+    const label = document.createElement("label");
+    label.dataset.selectedServer = "";
+    label.textContent = "Server: ";
+    const select = document.createElement("select");
+    select.setAttribute("aria-label", "Selected server");
+    if (!data.selected.id) {
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = data.servers.length ? "Choose server" : "No servers";
+      placeholder.disabled = true;
+      placeholder.selected = true;
+      select.append(placeholder);
+    }
+    select.disabled = data.servers.length === 0;
+    data.servers.forEach((server) => {
+      const option = document.createElement("option");
+      option.value = server.id;
+      option.textContent = server.name;
+      option.selected = server.id === data.selected.id;
+      select.append(option);
+    });
+    select.addEventListener("change", () => {
+      if (!select.value) return;
+      const target = new URL(window.location.href);
+      target.searchParams.set("server", select.value);
+      target.searchParams.set("workspace", slot.dataset.serverWorkspace);
+      const dialog = slot.closest("[data-workspace-window]");
+      const tab = dialog?.querySelector('[aria-selected="true"]');
+      const tabName = tab?.getAttribute(`data-${slot.dataset.serverWorkspace}-tab`);
+      if (tabName) target.searchParams.set("tab", tabName);
+      window.location.assign(target);
+    });
+    label.append(select);
+    slot.replaceChildren(label);
+  } finally {
+    delete slot.dataset.selectionLoading;
+  }
 };
 // Identity fallback belongs to the active reviewed workflow or administrator session.
 const saveRequiredMinecraftIdentity = (csrf) => new Promise((resolve) => {
@@ -2055,7 +2089,7 @@ if (backupsOpen && backupsDialog) {
       if (backupsDestination.has(key)) backupParams.set(key, backupsDestination.get(key));
     }
   }
-  globalThis.justVoxelServerSelection(backupsDialog.querySelector(".workspace-window-header") || backupsDialog).catch((error)=>{if(state)state.textContent=error.message;});
+  globalThis.justVoxelServerSelection(backupsDialog.querySelector("[data-server-selector-slot]")).catch((error)=>{if(state)state.textContent=error.message;});
   let currentURL = "/workspace/backups" + (backupParams.size ? "?" + backupParams : "");
   let loadSequence = 0;
 
@@ -2301,7 +2335,7 @@ if (migrationOpen && migrationDialog) {
   const content = migrationDialog.querySelector("[data-migration-workspace-content]");
   const tabs = Array.from(migrationDialog.querySelectorAll("[data-migration-tab]"));
   const recoveryTab = tabs.find((button) => button.dataset.migrationTab === "recovery");
-  globalThis.justVoxelServerSelection(migrationDialog.querySelector(".workspace-window-header") || migrationDialog).catch((error) => { if (state) state.textContent = error.message; });
+  globalThis.justVoxelServerSelection(migrationDialog.querySelector("[data-server-selector-slot]")).catch((error) => { if (state) state.textContent = error.message; });
   const tabURLs = {
     export: "/workspace/migration/export",
     import: "/workspace/migration/import",
@@ -3171,7 +3205,7 @@ if (minecraftOpen && minecraftDialog) {
   const tabs = Array.from(minecraftDialog.querySelectorAll("[data-minecraft-tab]"));
   const csrf = document.querySelector("[data-minecraft-workspace-csrf]")?.value || "";
   const settingsTabs = new Set(["memory", "gameplay", "crossplay"]);
-  globalThis.justVoxelServerSelection(minecraftDialog.querySelector(".minecraft-workspace-header") || minecraftDialog).catch((error)=>{if(state)state.textContent=error.message;});
+  globalThis.justVoxelServerSelection(minecraftDialog.querySelector("[data-server-selector-slot]")).catch((error)=>{if(state)state.textContent=error.message;});
   let currentTab = "overview";
   let loadSequence = 0;
 
@@ -5879,6 +5913,7 @@ if (pluginsDialog && pluginsOpen) {
   const results = pluginsDialog.querySelector("[data-plugins-results]");
   const state = pluginsDialog.querySelector("[data-plugins-state]");
   const context = pluginsDialog.querySelector("[data-plugins-context]");
+  globalThis.justVoxelServerSelection(pluginsDialog.querySelector("[data-server-selector-slot]")).catch(error => { if (state) state.textContent = error.message; });
   const pagination = pluginsDialog.querySelector("[data-plugins-pagination]");
   const previous = pluginsDialog.querySelector("[data-plugins-previous]");
   const next = pluginsDialog.querySelector("[data-plugins-next]");
@@ -6794,12 +6829,60 @@ if (pluginsDialog && pluginsOpen) {
   }
 }
 
+const minecraftServersDialog = document.querySelector("[data-minecraft-servers-workspace-dialog]");
+const minecraftServersOpen = document.querySelector("[data-minecraft-servers-open]");
+if (minecraftServersDialog && minecraftServersOpen) {
+  const content = minecraftServersDialog.querySelector("[data-minecraft-servers-content]");
+  const state = minecraftServersDialog.querySelector("[data-minecraft-servers-state]");
+  let sequence = 0;
+  const load = async () => {
+    const current = ++sequence;
+    const query = new URLSearchParams();
+    const destination = new URLSearchParams(window.location.search);
+    for (const key of ["created", "deleted"]) if (destination.get(key) === "yes") query.set(key, "yes");
+    state.textContent = "Loading Minecraft Servers…";
+    try {
+      const response = await fetch("/workspace/minecraft-servers?" + query, {credentials:"same-origin", cache:"no-store"});
+      if (!response.ok || response.redirected) throw new Error("Minecraft Servers could not be loaded.");
+      const html = await response.text();
+      if (current !== sequence) return;
+      const range = document.createRange();
+      range.selectNodeContents(content);
+      const fragment = range.createContextualFragment(html);
+      content.replaceChildren(fragment);
+      globalThis.justVoxelMinecraftServers(content);
+      state.textContent = "";
+    } catch (error) {
+      if (current !== sequence) return;
+      content.replaceChildren();
+      state.textContent = error.message;
+    }
+  };
+  const workspaceWindow = setupWorkspaceWindow(minecraftServersDialog, {onOpen: load});
+  minecraftServersOpen.addEventListener("click", () => {
+    if (controlCenter) controlCenter.open = false;
+    workspaceWindow?.open();
+  });
+  minecraftServersDialog.querySelector("[data-minecraft-servers-close]").addEventListener("click", () => workspaceWindow?.close());
+  minecraftServersDialog.querySelector("[data-minecraft-servers-refresh]").addEventListener("click", load);
+  const restore = () => {
+    if (document.body.classList.contains("role-pending")) return false;
+    if (document.body.classList.contains("role-administrator") && readWorkspaceWindowState("minecraft-servers").open) workspaceWindow?.open();
+    return true;
+  };
+  if (!restore()) {
+    const observer = new MutationObserver(() => { if (restore()) observer.disconnect(); });
+    observer.observe(document.body, {attributes:true, attributeFilter:["class"]});
+  }
+}
+
 // Bookmarked standalone pages land on the matching dashboard workspace.
 if (dashboard) {
   const destination = new URLSearchParams(window.location.search);
   let workspace = destination.get("workspace");
   if (workspace === "minecraft" && window.location.hash === "#manual-backup") workspace = "backups";
   const launchers = {
+    "minecraft-servers": "[data-minecraft-servers-open]",
     minecraft: "[data-minecraft-open]",
     system: "[data-system-open]",
     storage: "[data-storage-open]",
@@ -6822,7 +6905,7 @@ if (dashboard) {
       const allowedTabs = {
         minecraft: ["overview", "memory", "gameplay", "players", "crossplay"],
         version: ["software", "minecraft"],
-        plugins: ["discover", "installed"],
+        plugins: ["discover", "installed", "addons"],
         system: ["health", "history", "users", "security", "logs", "date-time", "wallpaper", "reset", "ups", "about"],
         migration: ["export", "import", "recovery"],
       };

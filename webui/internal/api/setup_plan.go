@@ -16,6 +16,7 @@ const adminSetupPlanPath = "/v1/admin/setup/plan"
 var adminSetupPlanClientTimeout = 30 * time.Second
 
 type AdminSetupPlanServerRequest struct {
+	DisplayName    string `json:"display_name,omitempty"`
 	MOTD           string `json:"motd"`
 	MOTDAutomatic  bool   `json:"motd_automatic,omitempty"`
 	MaxPlayers     int    `json:"max_players"`
@@ -69,6 +70,7 @@ type AdminSetupPlanWarning struct {
 }
 
 type AdminSetupPlanServer struct {
+	DisplayName    string `json:"display_name,omitempty"`
 	MOTD           string `json:"motd"`
 	MaxPlayers     int    `json:"max_players"`
 	BedrockEnabled bool   `json:"bedrock_enabled"`

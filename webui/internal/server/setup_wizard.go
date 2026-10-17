@@ -267,6 +267,7 @@ func (a *App) setupWizardStart(w http.ResponseWriter, r *http.Request) {
 	firstRunSetupDrafts.start(a, session, normalizedSetupDefaults(defaults), storage)
 	if draft, exists := firstRunSetupDrafts.get(a, session); exists {
 		draft.Mode = "advanced"
+		draft.DisplayName = "Minecraft server"
 		draft.DiagnosticSessionID = diagnosticID
 		firstRunSetupDrafts.save(a, session, draft)
 		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "initial WebUI setup defaults loaded", draft)
@@ -388,9 +389,11 @@ func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
 	if serverType == "vanilla" {
 		draft.Server.BedrockEnabled = false
 	}
-	if draft.AddServer {
+	if draft.AddServer || draft.Mode == "advanced" {
 		draft.DisplayName = r.FormValue("display_name")
-		draft.StartOnBoot = r.FormValue("start_on_boot") == "on"
+		if draft.AddServer {
+			draft.StartOnBoot = r.FormValue("start_on_boot") == "on"
+		}
 		if err := a.validateAddServerName(r.Context(), session, draft.DisplayName); err != nil {
 			draft.Server.Complete = false
 			setupDraftsFor(r).save(a, session, draft)

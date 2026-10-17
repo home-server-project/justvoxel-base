@@ -39,7 +39,7 @@
     {{if .Plan.OK}}
     <div class="setup-review-summary" aria-label="Setup summary">
       <section><h3>Server</h3><dl>
-        {{if .AddServer}}<div><dt>Server name</dt><dd>{{.DisplayName}}</dd></div><div><dt>Start on Boot</dt><dd>{{if .StartOnBoot}}Enabled{{else}}Disabled{{end}}</dd></div>{{end}}
+        {{if .DisplayName}}<div><dt>Server name</dt><dd>{{.DisplayName}}</dd></div>{{end}}{{if .AddServer}}<div><dt>Start on Boot</dt><dd>{{if .StartOnBoot}}Enabled{{else}}Disabled{{end}}</dd></div>{{end}}
         <div><dt>Server software</dt><dd>{{.ServerTypeLabel}}</dd></div>
         <div><dt>Welcome message</dt><dd>{{.Plan.Normalized.Server.MOTD}}</dd></div>
         <div><dt>Game mode</dt><dd>{{.GameModeLabel}}</dd></div>

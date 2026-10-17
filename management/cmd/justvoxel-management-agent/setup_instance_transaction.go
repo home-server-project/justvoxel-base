@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -18,13 +19,15 @@ import (
 // evidence owns only appliance policy files and a normal generated instance.
 // Old setup evidence continues through the original runtime recovery helper.
 type setupInstanceEvidence struct {
-	Schema           int                            `json:"schema"`
-	Request          setupRuntimeTransactionRequest `json:"request"`
-	Record           instanceRuntimeRecord          `json:"record"`
-	Policy           map[string][]byte              `json:"policy"`
-	DataIdentity     string                         `json:"data_identity,omitempty"`
-	HadInstancesRoot bool                           `json:"had_instances_root"`
-	RolledBack       bool                           `json:"rolled_back"`
+	Schema       int                            `json:"schema"`
+	Request      setupRuntimeTransactionRequest `json:"request"`
+	Record       instanceRuntimeRecord          `json:"record"`
+	Policy       map[string][]byte              `json:"policy"`
+	DataIdentity string                         `json:"data_identity,omitempty"`
+	// Nil means older evidence: never claim ownership of its policy directory.
+	HadPolicyRoot    *bool `json:"had_policy_root,omitempty"`
+	HadInstancesRoot bool  `json:"had_instances_root"`
+	RolledBack       bool  `json:"rolled_back"`
 }
 
 var runSetupInstanceRuntimeAction = runSetupInstanceAction
@@ -78,6 +81,13 @@ func runSetupInstanceAction(ctx context.Context, action string, r setupRuntimeTr
 	}
 	e, err := setupInstanceRead(r.OperationID, r.PlanFingerprint)
 	if action == "validate" && errors.Is(err, os.ErrNotExist) {
+		policyDir, policyErr := b.privateDirectory(setupPolicyRoot, false)
+		hadPolicyRoot := policyErr == nil
+		if policyErr == nil {
+			policyDir.Close()
+		} else if !errors.Is(policyErr, os.ErrNotExist) {
+			return response, policyErr
+		}
 		for name := range setupInstancePolicy(r) {
 			if _, err = b.readPrivate(filepath.Join(setupPolicyRoot, name)); !errors.Is(err, os.ErrNotExist) {
 				return response, errInstanceRecovery
@@ -88,7 +98,7 @@ func runSetupInstanceAction(ctx context.Context, action string, r setupRuntimeTr
 			return response, createErr
 		}
 		dir.Close()
-		e = setupInstanceEvidence{Schema: 1, Request: r, Policy: setupInstancePolicy(r)}
+		e = setupInstanceEvidence{Schema: 1, Request: r, Policy: setupInstancePolicy(r), HadPolicyRoot: &hadPolicyRoot}
 		if info, statErr := os.Lstat(filepath.Join(filepath.Dir(r.Storage.Path), "minecraft-instances")); statErr == nil {
 			if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 				return response, errInstanceRecovery
@@ -119,6 +129,11 @@ func runSetupInstanceAction(ctx context.Context, action string, r setupRuntimeTr
 		if err = b.writePrivate(setupInstanceMarker, []byte(r.OperationID+" "+r.PlanFingerprint+"\n"), false); err != nil {
 			return response, err
 		}
+		policyDir, policyErr := b.privateDirectory(setupPolicyRoot, true)
+		if policyErr != nil {
+			return response, policyErr
+		}
+		policyDir.Close()
 		for name, data := range e.Policy {
 			if err = b.writePrivate(filepath.Join(setupPolicyRoot, name), data, false); err != nil {
 				return response, err
@@ -145,7 +160,7 @@ func runSetupInstanceAction(ctx context.Context, action string, r setupRuntimeTr
 			return response, instanceRuntimeFailure("Selected release channel could not be verified.")
 		}
 		c.PaperChannel = strings.TrimSpace(string(channel))
-		_, err = b.createTracked(ctx, c, "", snapshot, func(record instanceRuntimeRecord) error { e.Record = record; return save() })
+		_, err = b.createTracked(ctx, c, r.Server.DisplayName, snapshot, func(record instanceRuntimeRecord) error { e.Record = record; return save() })
 		if err != nil {
 			return response, err
 		}
@@ -324,6 +339,19 @@ func rollbackSetupInstance(ctx context.Context, e *setupInstanceEvidence, save f
 			return errInstanceRecovery
 		}
 		if err = b.removePrivate(path); err != nil {
+			return err
+		}
+	}
+	// Remove only a directory that this transaction proved was absent. Old
+	// evidence leaves it alone. Unrelated content is preserved by rmdir semantics.
+	if e.HadPolicyRoot != nil && !*e.HadPolicyRoot {
+		dir, err := b.privateDirectory(setupPolicyRoot, false)
+		if err == nil {
+			dir.Close()
+			if err = os.Remove(setupPolicyRoot); err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, syscall.ENOTEMPTY) && !errors.Is(err, syscall.EEXIST) {
+				return err
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 	}

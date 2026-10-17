@@ -60,6 +60,7 @@ func captureSetupRuntimeTransactionOutput(cmd *exec.Cmd) ([]byte, []byte, error)
 }
 
 type setupRuntimeServer struct {
+	DisplayName    string `json:"display_name,omitempty"`
 	MOTD           string `json:"motd"`
 	MaxPlayers     int    `json:"max_players"`
 	BedrockEnabled bool   `json:"bedrock_enabled"`
@@ -137,7 +138,7 @@ func setupRuntimeRequestForOperation(operation operationJournal, plan *adminSetu
 	}
 	return setupRuntimeTransactionRequest{
 		InstanceOnly: true, SchemaVersion: operationSchemaVersion, OperationID: operation.OperationID, PlanFingerprint: operation.PlanFingerprint,
-		Server:    setupRuntimeServer{MOTD: plan.Server.MOTD, MaxPlayers: plan.Server.MaxPlayers, BedrockEnabled: plan.Server.BedrockEnabled, Timezone: plan.Server.Timezone},
+		Server:    setupRuntimeServer{DisplayName: plan.Server.DisplayName, MOTD: plan.Server.MOTD, MaxPlayers: plan.Server.MaxPlayers, BedrockEnabled: plan.Server.BedrockEnabled, Timezone: plan.Server.Timezone},
 		Minecraft: setupRuntimeMinecraft{ServerType: serverType, GameMode: plan.Minecraft.GameMode, JavaMemory: plan.Minecraft.JavaMemory, ContainerMemory: plan.Minecraft.ContainerMemory, JavaPort: plan.Minecraft.JavaPort, BedrockPort: plan.Minecraft.BedrockPort, ImageTag: plan.Minecraft.ImageTag, VersionPolicy: plan.Minecraft.VersionPolicy, Version: plan.Minecraft.Version, MinecraftUID: plan.Minecraft.MinecraftUID, MinecraftGID: plan.Minecraft.MinecraftGID},
 		Storage:   setupRuntimeStorage{Type: plan.Storage.Type, Path: plan.Storage.Path, MountPoint: plan.Storage.MountPoint, ExpectedUUID: plan.Storage.ExpectedUUID, ExpectedSource: plan.Storage.ExpectedSource},
 		Backups:   setupRuntimeBackups{Type: plan.Backups.Type, Path: plan.Backups.Path, MountPoint: plan.Backups.MountPoint, ExpectedUUID: plan.Backups.ExpectedUUID, ExpectedSource: plan.Backups.ExpectedSource, Automatic: plan.Backups.Automatic, Schedule: plan.Backups.Schedule, Keep: plan.Backups.Keep},
