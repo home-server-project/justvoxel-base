@@ -163,8 +163,8 @@ func (a *App) selectedBackupsWorkspace(w http.ResponseWriter, r *http.Request) b
 					data.Error = "Backup identity or integrity could not be verified."
 					break
 				}
-				data.RestoreRequest = api.AdminRestorePlanRequest{BackupID: archive, Mode: "full"}
-				data.RestorePlan = &api.AdminRestorePlanResponse{OK: true, PlanFingerprint: plan.PlanID, Normalized: &api.AdminRestorePlanNormalized{BackupID: archive, CreatedAt: plan.Metadata.Created, Current: api.AdminRestorePlanCurrent{Version: plan.CurrentVersion}, VersionRelation: "Same server identity and compatible version verified"}, Requirements: &api.AdminRestorePlanRequirements{DestructiveConfirmationRequired: true, PlayersConfirmationRequired: plan.PlayersConfirmationRequired, Online: plan.Players.Online}}
+				data.RestoreRequest = backupsRestoreRequest{BackupID: archive, Mode: "full"}
+				data.RestorePlan = &backupsRestorePlan{OK: true, PlanFingerprint: plan.PlanID, Normalized: &backupsRestoreNormalized{BackupID: archive, CreatedAt: plan.Metadata.Created, Current: backupsRestoreCurrent{Version: plan.CurrentVersion}, VersionRelation: "Same server identity and compatible version verified"}, Requirements: &backupsRestoreRequirements{DestructiveConfirmationRequired: true, PlayersConfirmationRequired: plan.PlayersConfirmationRequired, Online: plan.Players.Online}}
 			}
 		case "/workspace/backups/restore/apply":
 			if r.FormValue("confirmation") != "RESTORE" {
@@ -172,7 +172,9 @@ func (a *App) selectedBackupsWorkspace(w http.ResponseWriter, r *http.Request) b
 				break
 			}
 			if call("restore/apply", map[string]any{"archive": r.FormValue("backup_id"), "plan_id": r.FormValue("plan_fingerprint"), "confirm_destructive": true, "confirm_players": r.FormValue("players_confirmed") == "yes"}, nil) {
-				data.Message = "Restore accepted. Refresh to check progress."
+				data.Message = "Restore accepted. Progress will update automatically."
+				progress := presentSelectedRestore(selectedRestoreProgress{ID: selected.ID, State: "validating"})
+				data.SelectedRestoreProgress = &progress
 			}
 		case "/workspace/backups/restore/recover":
 			if r.FormValue("confirm_players") != "yes" {
@@ -180,7 +182,9 @@ func (a *App) selectedBackupsWorkspace(w http.ResponseWriter, r *http.Request) b
 				break
 			}
 			if call("restore/recover", map[string]any{"confirm_players": true}, nil) {
-				data.Message = "Restore Recovery accepted. Refresh to check progress."
+				data.Message = "Restore Recovery accepted. Progress will update automatically."
+				progress := presentSelectedRestore(selectedRestoreProgress{ID: selected.ID, State: "recovering"})
+				data.SelectedRestoreProgress = &progress
 			}
 		default:
 			data.Error = "This operation is unavailable for the selected server."
@@ -223,17 +227,13 @@ func (a *App) selectedBackupsWorkspace(w http.ResponseWriter, r *http.Request) b
 			data.SelectedBackupStatus += " · " + status.Message
 		}
 	}
-	var restore struct {
-		ID               string `json:"id"`
-		State            string `json:"state"`
-		RecoveryRequired bool   `json:"recovery_required"`
-	}
-	if call("restore/status", nil, &restore) {
-		if restore.ID != selected.ID {
-			data.Error = "Restore identity could not be verified."
-		} else {
-			data.SelectedRestoreStatus = restore.State
-			data.SelectedRestoreRecovery = restore.RecoveryRequired
+	if progress, err := readSelectedRestore(r.Context(), client, session, selected.ID); err != nil {
+		data.Error = "Restore status or identity could not be verified."
+	} else {
+		data.SelectedRestoreStatus = progress.StateLabel
+		data.SelectedRestoreRecovery = progress.State != "idle" && progress.RecoveryRequired
+		if progress.State != "idle" {
+			data.SelectedRestoreProgress = &progress
 		}
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

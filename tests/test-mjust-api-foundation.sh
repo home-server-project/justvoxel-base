@@ -22,10 +22,6 @@ backup_storage_api="${repo_root}/mjust/libexec/backup-storage-api.sh"
 setup="${repo_root}/mjust/libexec/setup"
 setup_api="${repo_root}/mjust/libexec/setup-api.sh"
 restore="${repo_root}/mjust/libexec/restore"
-restore_api="${repo_root}/mjust/libexec/restore-api.sh"
-admin_restore="${repo_root}/management/cmd/justvoxel-management-agent/admin_restore.go"
-admin_restore_apply="${repo_root}/management/cmd/justvoxel-management-agent/admin_restore_apply.go"
-restore_worker="${repo_root}/management/cmd/justvoxel-management-agent/restore_worker.go"
 validate="${repo_root}/mjust/libexec/validate"
 validate_backend="${repo_root}/mjust/libexec/validate-backend"
 storage_provision="${repo_root}/mjust/libexec/storage-provision"
@@ -85,7 +81,7 @@ fail() {
     exit 1
 }
 
-for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${backup_storage}" "${backup_storage_api}" "${setup}" "${setup_api}" "${restore}" "${restore_api}" "${admin_restore}" "${admin_restore_apply}" "${restore_worker}" "${validate}" "${validate_backend}" "${storage_provision}" "${storage_plan}" "${storage_api}" "${data_migration}" "${data_migration_api}" "${data_migration_plan_backend}" "${data_migration_transaction_backend}" "${admin_data_migration_plan}" "${admin_data_migration_apply}" "${data_migration_worker}" "${migration_export}" "${migration_api}" "${migration_export_backend}" "${migration_export_plan_backend}" "${migration_export_transaction_backend}" "${admin_migration_export_plan}" "${admin_migration_export_apply}" "${migration_export_worker}" "${migration_recovery}" "${migration_recovery_backend}" "${migration_recovery_plan_backend}" "${migration_recovery_transaction_backend}" "${admin_migration_recovery}" "${admin_migration_recovery_apply}" "${migration_recovery_worker}" "${migration_import}" "${migration_import_backend}" "${migration_import_plan_backend}" "${migration_import_transaction_backend}" "${admin_migration_import_plan}" "${admin_migration_import_apply}" "${migration_import_worker}" "${webui_migration_api}" "${webui_persistent_operations}" "${webui_migration_workspace}" "${webui_migration_workspace_export}" "${webui_migration_workspace_import}" "${webui_migration_workspace_recovery}" "${webui_migration_progress}" "${admin_backup_storage}" "${admin_storage_provision}" "${admin_setup_plan}" "${admin_setup_apply}" "${admin_operations}" "${admin_validation}" "${admin_configuration}" "${admin_discovery}" "${operator_surfaces}" "${files}" "${menu}" "${justfile}"; do
+for file in "${api_client}" "${authorization}" "${identity}" "${main}" "${players}" "${service}" "${status}" "${whitelist}" "${whitelist_backend}" "${backup}" "${logs}" "${configure}" "${configure_max}" "${configuration_api}" "${backup_storage}" "${backup_storage_api}" "${setup}" "${setup_api}" "${restore}" "${validate}" "${validate_backend}" "${storage_provision}" "${storage_plan}" "${storage_api}" "${data_migration}" "${data_migration_api}" "${data_migration_plan_backend}" "${data_migration_transaction_backend}" "${admin_data_migration_plan}" "${admin_data_migration_apply}" "${data_migration_worker}" "${migration_export}" "${migration_api}" "${migration_export_backend}" "${migration_export_plan_backend}" "${migration_export_transaction_backend}" "${admin_migration_export_plan}" "${admin_migration_export_apply}" "${migration_export_worker}" "${migration_recovery}" "${migration_recovery_backend}" "${migration_recovery_plan_backend}" "${migration_recovery_transaction_backend}" "${admin_migration_recovery}" "${admin_migration_recovery_apply}" "${migration_recovery_worker}" "${migration_import}" "${migration_import_backend}" "${migration_import_plan_backend}" "${migration_import_transaction_backend}" "${admin_migration_import_plan}" "${admin_migration_import_apply}" "${migration_import_worker}" "${webui_migration_api}" "${webui_persistent_operations}" "${webui_migration_workspace}" "${webui_migration_workspace_export}" "${webui_migration_workspace_import}" "${webui_migration_workspace_recovery}" "${webui_migration_progress}" "${admin_backup_storage}" "${admin_storage_provision}" "${admin_setup_plan}" "${admin_setup_apply}" "${admin_operations}" "${admin_validation}" "${admin_configuration}" "${admin_discovery}" "${operator_surfaces}" "${files}" "${menu}" "${justfile}"; do
     [[ -f ${file} ]] || fail "missing mJust Management API file: ${file}"
 done
 
@@ -413,23 +409,16 @@ if grep -Fq 'Authorization:' "${setup_api}"; then
     fail 'mJust setup API helper must not introduce a bearer token'
 fi
 
-grep -Fq 'restore-api.sh' "${restore}" || fail 'mJust Restore does not use the Restore API helper'
 for selected_route in 'restore/status' 'restore/plan' 'restore/apply' 'restore/recover'; do
     grep -Fq "${selected_route}" "${restore}" || fail "selected Restore API route missing: ${selected_route}"
 done
 grep -Fq 'jv_select_registered_instance' "${restore}" || fail 'Restore does not resolve a registered immutable ID'
 
-grep -Fq 'POST /v1/admin/restore/apply' "${admin_restore}" || fail 'Management Agent Restore apply route is not registered'
-grep -Fq 'authoritativeAdminRestorePlan' "${admin_restore_apply}" || fail 'Restore apply does not re-run authoritative planning'
-grep -Fq 'adminRestoreTransactionHelper' "${restore_worker}" || fail 'Restore worker does not use the authoritative transaction backend'
 for forbidden in 'JV_MAINTENANCE_LOCK' 'jv_backup_require_read_target' 'gzip -t' 'restore-archive' 'restore-runtime-validate' 'systemctl ' 'podman ' 'rcon-cli' 'chown ' 'restorecon '; do
     if grep -Fq "${forbidden}" "${restore}"; then
         fail "mJust Restore frontend still performs direct backend/safety work: ${forbidden}"
     fi
 done
-if grep -Fq 'Authorization:' "${restore_api}"; then
-    fail 'mJust Restore API helper must not introduce a bearer token'
-fi
 
 grep -Fq '"${api_client}" GET /v1/admin/validation' "${validate}" || fail 'mJust validate does not use the Management API'
 grep -Fq 'adminValidationHelper = "/usr/libexec/justvoxel/mjust/validate-backend"' "${admin_validation}" || fail 'Management Agent validation helper is not the preserved backend'

@@ -1,6 +1,6 @@
 {{define "backups_workspace.html"}}<div class="new-backups-shell backups-workspace-content" data-backups-workspace-root data-selected-server-id="{{.SelectedServer}}">
   {{if .SelectedServer}}<p><strong>{{.SelectedName}}</strong> · Backup: {{.SelectedBackupStatus}} · Restore: {{.SelectedRestoreStatus}}</p>
-  {{if .SelectedRestoreRecovery}}<form method="post" action="/workspace/backups/restore/recover{{if .SelectedServer}}?server={{.SelectedServer}}{{end}}"><input type="hidden" name="csrf" value="{{.CSRF}}"><label><input type="checkbox" name="confirm_players" value="yes" required> Allow safe recovery interruption</label><button type="submit">Retry Restore Recovery</button></form>{{end}}{{end}}
+  {{end}}
   {{if .Message}}<div class="notice success">{{.Message}}</div>{{end}}
   {{if .Error}}<div class="notice error">{{.Error}}</div>{{end}}
 
@@ -50,7 +50,7 @@
         <div><span>Selected</span><strong data-backup-selected-count>0</strong></div>
       </div>
       <div class="backup-command-actions">
-        <button type="button" data-backup-restore-selected data-restore-busy="{{if .RestoreOperation}}1{{else}}0{{end}}" disabled>Restore selected</button>
+        <button type="button" data-backup-restore-selected data-restore-busy="{{if and .SelectedRestoreProgress .SelectedRestoreProgress.Busy}}1{{else}}0{{end}}" disabled>Restore selected</button>
         {{if not .SelectedServer}}<button class="danger" type="button" data-backup-delete-selected disabled>Delete selected</button>{{end}}
         <form method="post" action="/workspace/backups/backup{{if .SelectedServer}}?server={{.SelectedServer}}{{end}}">
           <input type="hidden" name="csrf" value="{{.CSRF}}">
@@ -64,20 +64,22 @@
   <input type="hidden" value="{{.CSRF}}" data-backup-delete-csrf>
   <p class="backup-delete-page-error" data-backup-delete-page-error hidden></p>
 
-  {{if .RestoreOperation}}
-  <section class="backup-restore-progress">
+  {{if and .SelectedServer .SelectedRestoreProgress}}
+  {{$progress := .SelectedRestoreProgress}}
+  <section class="backup-restore-progress" data-selected-restore data-selected-server-id="{{.SelectedServer}}" data-status-url="/workspace/backups/restore/status?server={{.SelectedServer}}">
     <div class="section-heading">
       <div><p class="eyebrow">Restore</p><h2>Restore progress</h2></div>
-      <span class="badge" id="restore-operation-state">{{.RestoreStateLabel}}</span>
+      <span class="badge" data-restore-state>{{$progress.StateLabel}}</span>
     </div>
-    <div data-restore-operation data-status-url="/api/restore/progress/{{.RestoreOperation.OperationID}}">
-      <p id="restore-operation-status">{{.RestoreOperation.Status}}</p>
-      <div class="backup-restore-operation-details">Stage: <strong id="restore-operation-stage">{{.RestoreStageLabel}}</strong><span>Operation <code>{{.RestoreOperation.OperationID}}</code></span></div>
-      <div class="notice" id="restore-reconnect-note" hidden><strong>Reconnecting to JustVoxel…</strong><br>Restore may still be running. Refreshing New Backups does not start another Restore.</div>
-      <div class="notice success" id="restore-operation-success" {{if ne .RestoreOperation.State "succeeded"}}hidden{{end}}><strong>Minecraft Restore completed successfully.</strong><br>The restored runtime passed validation.</div>
-      <div class="notice warning" id="restore-operation-rollback" {{if ne .RestoreOperation.State "rolled_back"}}hidden{{end}}><strong>Restore was rolled back safely.</strong><br>The restored runtime did not pass validation and the previous Minecraft data was restored.</div>
-      <div class="notice error" id="restore-operation-attention" {{if ne .RestoreOperation.State "needs_attention"}}hidden{{end}}><strong>Restore needs administrator attention.</strong><br>Do not start another Restore until the preserved recovery state is reviewed.</div>
-      <div class="action-row"><a class="button-link secondary" href="#backup-library">Backup library</a><a class="button-link" id="restore-dashboard-link" href="/" {{if ne .RestoreOperation.State "succeeded"}}hidden{{end}}>Open dashboard</a></div>
+    <div>
+      <p data-restore-status>{{$progress.Status}}</p>
+      <div class="backup-restore-operation-details">Stage: <strong data-restore-stage>{{$progress.StageLabel}}</strong></div>
+      <div class="notice" data-restore-reconnect hidden><strong>Reconnecting to JustVoxel…</strong><br>Restore may still be running. Progress will reconnect automatically.</div>
+      <div class="notice success" data-restore-success {{if not $progress.Complete}}hidden{{end}}><strong>Minecraft Restore completed successfully.</strong><br>The restored runtime passed validation.</div>
+      <div class="notice warning" data-restore-rollback {{if not $progress.RolledBack}}hidden{{end}}><strong>Restore was rolled back safely.</strong><br>The previous Minecraft data was restored and verified.</div>
+      <div class="notice error" data-restore-attention {{if not $progress.Attention}}hidden{{end}}><strong>Restore needs administrator attention.</strong><br>Review recovery before starting another Restore.</div>
+      <form method="post" data-restore-recovery action="/workspace/backups/restore/recover?server={{.SelectedServer}}" {{if not $progress.RecoveryRequired}}hidden{{end}}><input type="hidden" name="csrf" value="{{.CSRF}}"><label><input type="checkbox" name="confirm_players" value="yes" required> Allow safe recovery interruption</label><button type="submit">Retry Restore Recovery</button></form>
+      <div class="action-row"><a class="button-link secondary" href="#backup-library">Backup library</a><a class="button-link" data-restore-dashboard href="/?server={{.SelectedServer}}" {{if not $progress.Complete}}hidden{{end}}>Open dashboard</a></div>
     </div>
   </section>
   {{end}}
@@ -86,25 +88,6 @@
   <section class="backup-restore-review">
     <div class="section-heading"><div><p class="eyebrow">Restore review</p><h2>{{if .RestoreModeTitle}}{{.RestoreModeTitle}}{{else}}Review Restore{{end}}</h2></div><span class="badge">Destructive</span></div>
     {{if .RestoreError}}<div class="notice error"><strong>Restore cannot continue as submitted.</strong><br>{{.RestoreError}}</div>{{end}}
-    {{if .RestoreRetryAvailable}}
-    <form method="post" action="/workspace/backups/restore/plan{{if .SelectedServer}}?server={{.SelectedServer}}{{end}}" class="backup-restore-retry">
-      <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <input type="hidden" name="backup_id" value="{{.RestoreRequest.BackupID}}">
-      <input type="hidden" name="mode" value="{{.RestoreRequest.Mode}}">
-      <div class="notice"><strong>Player status is temporarily unavailable.</strong><br>Restore stays blocked until JustVoxel can confirm whether anyone is online. No backup data has been changed.</div>
-      <div class="action-row"><button type="submit" class="secondary">Retry Restore review</button></div>
-    </form>
-    {{end}}
-    {{if .RestoreBlockedResetID}}
-    <form method="post" action="/workspace/backups/restore/resolve-reset{{if .SelectedServer}}?server={{.SelectedServer}}{{end}}" class="backup-restore-reset-recovery">
-      <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <input type="hidden" name="operation_id" value="{{.RestoreBlockedResetID}}">
-      <input type="hidden" name="backup_id" value="{{.RestoreRequest.BackupID}}">
-      <input type="hidden" name="mode" value="{{.RestoreRequest.Mode}}">
-      <div class="notice warning"><strong>A previous Full Factory Reset stopped before completion.</strong><br>Keep the current server data, release the blocked operation, and return directly to this Restore review.</div>
-      <div class="action-row"><button type="submit" class="secondary">Keep current server and continue Restore</button></div>
-    </form>
-    {{end}}
     {{if .RestorePlan}}
       {{if .RestorePlan.Normalized}}
       <p>{{.RestoreScope}}</p>

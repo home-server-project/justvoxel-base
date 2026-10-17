@@ -3,42 +3,13 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"net/http"
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
 )
 
-const restorePageFingerprint = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-
-func restorePlan(players bool) api.AdminRestorePlanResponse {
-	requirements := &api.AdminRestorePlanRequirements{
-		DestructiveConfirmationRequired: true, PlayersConfirmationRequired: players,
-		MinecraftState: "running", Online: 0, Players: []string{},
-		ArchiveIntegrityValidationOnApply: true, ArchiveSafetyValidationOnApply: true, StagingSpaceValidationOnApply: true,
-	}
-	if players {
-		requirements.Online = 1
-		requirements.Players = []string{"PlayerOne"}
-	}
-	return api.AdminRestorePlanResponse{
-		OK: true, SchemaVersion: "v1", PlanFingerprint: restorePageFingerprint,
-		Normalized: &api.AdminRestorePlanNormalized{
-			BackupID: "minecraft-2026-09-20-043000.tar.gz", Mode: "world", CreatedAt: "2026-09-20T08:30:00Z",
-			SizeBytes: 12345, MetadataStatus: "valid",
-			Metadata:        &api.AdminRestoreBackupMetadata{Minecraft: api.AdminRestoreMetadataMinecraft{VersionMode: "pinned", ConfiguredVersion: "26.2"}},
-			Current:         api.AdminRestorePlanCurrent{VersionMode: "pinned", Version: "26.3"},
-			VersionRelation: "backup_older",
-			Validation:      api.AdminRestorePlanValidation{ArchiveIntegrity: "pending_apply", ArchiveSafety: "pending_apply", StagingSpace: "pending_apply"},
-		},
-		Warnings:     []api.AdminRestorePlanWarning{{Code: "backup_older", Message: "This backup is older than the configured Minecraft version."}},
-		Requirements: requirements,
-	}
-}
-
 type fakeNewBackupsAPI struct {
 	fakeAPI
 	role                          string
-	backups                       api.AdminRestoreBackupsResponse
 	backupResult                  api.ManualBackupResponse
 	backupErr                     error
 	backupCalls                   int
@@ -62,17 +33,6 @@ type fakeNewBackupsAPI struct {
 	destinationStatusCalls        int
 	destinationPlanCalls          int
 	destinationApplyCalls         int
-	restorePlanResult             api.AdminRestorePlanResponse
-	restorePlanErr                error
-	restoreApplyResult            api.AdminRestoreApplyResponse
-	restoreApplyErr               error
-	restorePlanRequest            api.AdminRestorePlanRequest
-	restoreApplyRequest           api.AdminRestoreApplyRequest
-	restorePlanCalls              int
-	restoreApplyCalls             int
-	currentRestoreOperation       *api.PersistentOperation
-	restoreOperation              *api.PersistentOperation
-	restoreOperationCalls         int
 }
 
 func defaultNewBackupsConfiguration() api.AdminConfigurationDiscovery {
@@ -110,14 +70,6 @@ func (f *fakeNewBackupsAPI) ManualBackup(_ context.Context, session string) (api
 		return api.ManualBackupResponse{OK: true, Message: "Manual backup requested."}, nil
 	}
 	return f.backupResult, f.backupErr
-}
-
-func (f *fakeNewBackupsAPI) AdminRestoreBackups(_ context.Context, session string) (api.AdminRestoreBackupsResponse, error) {
-	if session != "session-token" {
-		return api.AdminRestoreBackupsResponse{}, api.ErrUnauthorized
-	}
-	f.discoveryCalls++
-	return f.backups, nil
 }
 
 func (f *fakeNewBackupsAPI) AdminConfiguration(_ context.Context, session string) (api.AdminConfigurationDiscovery, error) {
@@ -214,50 +166,6 @@ func (f *fakeNewBackupsAPI) AdminBackupStorageApply(_ context.Context, session s
 		return f.destinationApply, nil
 	}
 	return api.AdminBackupStorageResponse{OK: true, Changed: true, Applied: true, Proposed: api.AdminBackupStorageTarget{Type: request.Type, Path: request.Path}}, nil
-}
-
-func (f *fakeNewBackupsAPI) AdminRestorePlan(_ context.Context, session string, request api.AdminRestorePlanRequest) (api.AdminRestorePlanResponse, error) {
-	if session != "session-token" {
-		return api.AdminRestorePlanResponse{}, api.ErrUnauthorized
-	}
-	f.restorePlanCalls++
-	f.restorePlanRequest = request
-	if f.restorePlanResult.SchemaVersion != "" || f.restorePlanErr != nil {
-		return f.restorePlanResult, f.restorePlanErr
-	}
-	return restorePlan(false), nil
-}
-
-func (f *fakeNewBackupsAPI) AdminRestoreApply(_ context.Context, session string, request api.AdminRestoreApplyRequest) (api.AdminRestoreApplyResponse, error) {
-	if session != "session-token" {
-		return api.AdminRestoreApplyResponse{}, api.ErrUnauthorized
-	}
-	f.restoreApplyCalls++
-	f.restoreApplyRequest = request
-	return f.restoreApplyResult, f.restoreApplyErr
-}
-
-func (f *fakeNewBackupsAPI) AdminCurrentRestoreOperation(_ context.Context, session string) (api.PersistentOperationResponse, error) {
-	if session != "session-token" {
-		return api.PersistentOperationResponse{}, api.ErrUnauthorized
-	}
-	if f.currentRestoreOperation == nil {
-		return api.PersistentOperationResponse{}, nil
-	}
-	copy := *f.currentRestoreOperation
-	return api.PersistentOperationResponse{Operation: &copy}, nil
-}
-
-func (f *fakeNewBackupsAPI) AdminOperation(_ context.Context, session, id string) (api.PersistentOperationResponse, error) {
-	if session != "session-token" {
-		return api.PersistentOperationResponse{}, api.ErrUnauthorized
-	}
-	f.restoreOperationCalls++
-	if f.restoreOperation == nil || f.restoreOperation.OperationID != id {
-		return api.PersistentOperationResponse{}, &api.ResponseError{StatusCode: http.StatusNotFound, Message: "operation not found"}
-	}
-	copy := *f.restoreOperation
-	return api.PersistentOperationResponse{Operation: &copy}, nil
 }
 
 // All workspace backup fixtures have one actual registered immutable identity.

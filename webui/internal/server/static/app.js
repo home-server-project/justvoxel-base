@@ -2051,7 +2051,7 @@ if (backupsOpen && backupsDialog) {
   const backupsDestination = new URLSearchParams(window.location.search);
   const backupParams = new URLSearchParams();
   if (backupsDestination.get("workspace") === "backups") {
-    for (const key of ["result", "count", "restore_operation"]) {
+    for (const key of ["result", "count"]) {
       if (backupsDestination.has(key)) backupParams.set(key, backupsDestination.get(key));
     }
   }
@@ -2172,11 +2172,6 @@ if (backupsOpen && backupsDialog) {
       if (href === "#backup-library") {
         event.preventDefault();
         root.querySelector("#backup-library")?.scrollIntoView({ behavior: "smooth", block: "start" });
-        return;
-      }
-      if (href === "/" && link.id === "restore-dashboard-link") {
-        event.preventDefault();
-        workspaceWindow?.close();
         return;
       }
       if (href.startsWith("/workspace/backups")) {

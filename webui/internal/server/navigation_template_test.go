@@ -900,9 +900,7 @@ func TestBackupsWorkspaceCompactLibraryLayout(t *testing.T) {
 	}
 	for _, want := range []string{
 		`loadBackupsScript("/static/new-backups.js"`,
-		`loadBackupsScript("/static/restore-operation.js"`,
 		`window.JustVoxelNewBackups?.init(root)`,
-		`window.JustVoxelRestoreOperation?.init(root)`,
 	} {
 		if !strings.Contains(string(loaderContent), want) {
 			t.Fatalf("Backups workspace loader missing %q", want)

@@ -145,7 +145,6 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /factory-reset-complete", a.factoryResetCompletePage)
 	a.registerRolePages(mux)
 	a.registerAdminDiscoveryPages(mux)
-	a.registerAdminRestorePages(mux)
 	a.registerBackupsWorkspaceRoutes(mux)
 	a.registerNewBackupsDeleteRoutes(mux)
 	a.registerAdminMigrationWorkspacePages(mux)
@@ -538,6 +537,14 @@ func (a *App) dashboardData(ctx context.Context, session, csrf string, selected 
 			if operations, ok := a.api.(dashboardOperationAPI); ok && identity.Role == "administrator" {
 				data.Attention = dashboardCurrentAttention(ctx, operations, session)
 			}
+			if identity.Role == "administrator" && selected.ID != "" {
+				if client, ok := a.api.(selectedBackupsAPI); ok {
+					progress, restoreErr := readSelectedRestore(ctx, client, session, selected.ID)
+					if data.Attention == nil && restoreErr == nil && progress.RecoveryRequired {
+						data.Attention = &dashboardAttention{Title: "Restore needs attention", Status: progress.Status, Action: "/workspace/backups?server=" + url.QueryEscape(selected.ID), Label: "Review Restore"}
+					}
+				}
+			}
 		}
 	}
 	return data, nil
@@ -562,12 +569,12 @@ func dashboardCurrentAttention(ctx context.Context, operations dashboardOperatio
 			Label:  label,
 		}
 	}
+	// Legacy journals have no authoritative instance ID. Keep attention visible;
+	// TODO: offer recovery only when original target ownership can be proven.
 	if current, err := operations.AdminCurrentRestoreOperation(ctx, session); err == nil && current.Operation != nil && current.Operation.State == "needs_attention" {
 		return &dashboardAttention{
 			Title:  "Restore needs attention",
 			Status: current.Operation.Status,
-			Action: "/workspace/backups?restore_operation=" + current.Operation.OperationID,
-			Label:  "Review Restore",
 		}
 	}
 	if current, err := operations.AdminCurrentFactoryResetOperation(ctx, session); err == nil && current.Operation != nil && current.Operation.State == "needs_attention" {

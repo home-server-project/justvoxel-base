@@ -146,21 +146,6 @@ func TestBackupsScriptsCanInitializeInsideWorkspaceFragment(t *testing.T) {
 			t.Fatalf("Backups fragment script missing %q", want)
 		}
 	}
-
-	restore, err := assets.ReadFile("static/restore-operation.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	restoreSource := string(restore)
-	for _, want := range []string{
-		"function initRestoreOperation(root = document)",
-		`root.querySelector("[data-restore-operation]")`,
-		"window.JustVoxelRestoreOperation = { init: initRestoreOperation }",
-	} {
-		if !strings.Contains(restoreSource, want) {
-			t.Fatalf("Restore fragment script missing %q", want)
-		}
-	}
 }
 
 func TestBackupsWorkspaceNormalCardsShowOnlyFilenameAndSize(t *testing.T) {
@@ -484,10 +469,10 @@ func renderBackupsRoutes(t *testing.T, selected string) string {
 	app, _ := phase7App(t)
 	data := backupsWorkspaceData{
 		SelectedServer: selected, SelectedRestoreRecovery: selected != "",
-		DestinationWorkspace:  "/workspace/backups",
-		AutomaticPlan:         &api.AdminConfigurationChangeResponse{OK: true, Changes: []api.AdminConfigurationChange{{Field: "backup"}}},
-		RestorePlan:           &api.AdminRestorePlanResponse{OK: true, Normalized: &api.AdminRestorePlanNormalized{}, Requirements: &api.AdminRestorePlanRequirements{}},
-		RestoreRetryAvailable: true, RestoreBlockedResetID: "reset-test",
+		SelectedRestoreProgress: &selectedRestoreProgress{ID: selected, RecoveryRequired: true},
+		DestinationWorkspace:    "/workspace/backups",
+		AutomaticPlan:           &api.AdminConfigurationChangeResponse{OK: true, Changes: []api.AdminConfigurationChange{{Field: "backup"}}},
+		RestorePlan:             &backupsRestorePlan{OK: true, Normalized: &backupsRestoreNormalized{}, Requirements: &backupsRestoreRequirements{}},
 	}
 	var output bytes.Buffer
 	if err := app.templates.ExecuteTemplate(&output, "backups_workspace.html", data); err != nil {

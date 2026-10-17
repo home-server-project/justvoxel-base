@@ -35,9 +35,28 @@ or uses Factory Reset or Minecraft Reset as a substitute for Restore Recovery.
 
 Reopening Backups or rerunning `mjust restore <same-instance-id>` reconnects to
 that instance’s persistent Restore state. If recovery is required, use Retry
-Restore Recovery, or confirm recovery in the terminal command. Progress polling
-does not automatically retry Apply or re-plan the operation.
+Restore Recovery, or confirm recovery in the terminal command. After Apply or
+Recovery is accepted, Backups shows live progress automatically.
+The browser polls `/workspace/backups/restore/status?server=<immutable-id>`;
+the WebUI verifies the selected identity against the returned instance ID.
+Progress shows completion, verified rollback, or administrator attention without
+exposing transaction evidence. Polling does not retry Apply or re-plan.
+Administrators also receive a selected-server Review Restore dashboard link
+when that instance requires recovery. Legacy global notices remain informational.
 
-Legacy fixed-server Restore helpers remain in the repository for later
-convergence and deployed-state compatibility. They are not the active normal
-instance Restore path.
+The legacy global execution endpoints (`GET /v1/admin/restore/backups`,
+`POST /v1/admin/restore/plan`, `POST /v1/admin/restore/apply`) and their
+fixed-server workers are retired without translation to an instance.
+
+Previously deployed global operation journals, Restore locks, diagnostic logs,
+and the read-only `/v1/admin/restore/current-operation` endpoint remain for
+upgrade compatibility. Interrupted legacy journals still block conflicting
+operations and remain visible as dashboard attention. They cannot safely be
+translated to selected-instance recovery because they lack an immutable target
+ID. TODO: provide legacy recovery only when original ownership can be proven;
+this retirement does not invent identity, discard evidence, or release locks.
+Selected Restore recovery continues through the same instance ID.
+
+Shared `backup-common.sh`, `restore-common.sh`, `restore-archive`, and
+`restore-runtime-validate` remain. Physical data migration still invokes the
+runtime validator; migration import still uses Restore layout validation.

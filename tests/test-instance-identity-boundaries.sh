@@ -9,7 +9,6 @@ if grep -REn 'minecraftInstances|registerSetupMinecraftInstance|/var/lib/justvox
     "${repo_root}/mjust/libexec/backup-common.sh" \
     "${repo_root}/mjust/libexec/restore-common.sh" \
     "${repo_root}/mjust/libexec/restore-archive" \
-    "${repo_root}/mjust/libexec/admin-restore-transaction-json" \
     "${repo_root}/mjust/libexec/migration-import-activate.sh" \
     "${repo_root}/mjust/libexec/migration-import-common.sh" \
     "${repo_root}/runtime" "${repo_root}/templates"; then

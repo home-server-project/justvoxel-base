@@ -89,7 +89,7 @@ func TestBackupsWorkspaceManualBackupRejectsBadCSRF(t *testing.T) {
 }
 func TestBackupsDoNotExposeFixedServerDestinationOrResetActions(t *testing.T) {
 	app, f := phase7App(t)
-	for _, path := range []string{"destination/plan", "destination/apply", "restore/resolve-reset"} {
+	for _, path := range []string{"destination/plan", "destination/apply"} {
 		w := phase7Request(app, "POST", "/workspace/backups/"+path+"?server=jv-family1", "csrf=csrf-token")
 		if !strings.Contains(w.Body.String(), "This operation is unavailable") {
 			t.Fatal(path, w.Code, w.Body.String())

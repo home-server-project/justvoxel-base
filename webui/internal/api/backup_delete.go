@@ -7,7 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"time"
+)
+
+var (
+	backupDeleteIDPattern          = regexp.MustCompile(`^(?:jv-[a-z0-9]{6,12}/)?minecraft-(?:[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}|[a-z][a-z0-9-]{0,70}-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}(?:-[1-9][0-9]{0,2})?)\.tar\.gz$`)
+	backupDeleteFingerprintPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 )
 
 const (
@@ -57,11 +63,11 @@ func (c *Client) adminBackupDeleteChange(ctx context.Context, path, session stri
 		return out, errors.New("invalid backup delete selection")
 	}
 	for _, id := range request.BackupIDs {
-		if !restoreBackupIDPattern.MatchString(id) {
+		if !backupDeleteIDPattern.MatchString(id) {
 			return out, errors.New("invalid backup id")
 		}
 	}
-	if request.Fingerprint != "" && !restoreFingerprintPattern.MatchString(request.Fingerprint) {
+	if request.Fingerprint != "" && !backupDeleteFingerprintPattern.MatchString(request.Fingerprint) {
 		return out, errors.New("invalid backup delete fingerprint")
 	}
 
