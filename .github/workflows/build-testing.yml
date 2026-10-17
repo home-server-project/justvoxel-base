@@ -41,12 +41,12 @@ jobs:
           check-latest: true
           cache: false
 
-      - name: Install PAM source-test dependencies
+      - name: Install source-test dependencies
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y libpam0g-dev libpwquality-dev
+          sudo apt-get install -y libpam0g-dev libpwquality-dev ripgrep podman
 
       - name: Run shell and mjust regression tests
         shell: bash
@@ -88,7 +88,12 @@ jobs:
             [[ -f "${test_script}" ]] || continue
             test_count=$((test_count + 1))
             printf 'Running test: %s\n' "${test_script}"
-            if bash "${test_script}"; then
+            # Real ownership checks need root inside a rootless user namespace.
+            test_command=(bash "${test_script}")
+            if [[ "${test_script}" == tests/test-instance-delete.sh ]]; then
+              test_command=(podman unshare bash "${test_script}")
+            fi
+            if "${test_command[@]}"; then
               printf 'PASS: %s\n' "${test_script}"
             else
               test_status=$?

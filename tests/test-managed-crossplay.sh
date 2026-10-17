@@ -90,8 +90,13 @@ done
 # Exercise actual import ownership selection independently of host transport.
 selected='{"geyserEnabled":true,"geyserAuthType":"floodgate","floodgateEnabled":true,"pluginJars":["old-geyser.jar","old-floodgate.jar"]}'
 source_bedrock_manifest=''
-source <(sed -n '/^source_geyser=/,/^# Destination-specific/p' "${repo_root}/mjust/libexec/migration-import-plan-destination.sh")
+readonly JV_INSTANCE_ID=jv-fixture1
+GAME_MODE=survival DIFFICULTY=normal WHITELIST_ENABLED=yes ENFORCE_WHITELIST=yes MAX_PLAYERS=10 MOTD=Fixture
+transaction="${fixture_dir}/import-transaction"
+mkdir -p "${transaction}"
+source <(sed -n '/^source_geyser=/,/^# The destination/p' "${repo_root}/mjust/libexec/migration-import-plan-destination.sh" | sed '$d')
 [[ ${BEDROCK_ENABLED} == yes && ${BEDROCK_MANAGED_PLUGINS} == yes ]]
+jq -e --arg id "${JV_INSTANCE_ID}" '.instance_id == $id and .game_mode == "survival" and .whitelist == true' "${transaction}/portable.json" >/dev/null
 # Staged normalization preserves imported configuration/key content except port.
 source "${repo_root}/mjust/libexec/migration-common.sh"
 printf 'online-mode=true\nserver-port=12345\n' > "${DATA_PATH}/server.properties"

@@ -205,10 +205,12 @@ test('recommended memory warning boundary is 1536 MiB and hard reserve remains 1
   const discovery = read('mjust/libexec/admin-discovery-json');
   const setup = read('mjust/libexec/admin-setup-plan-json');
   assert.ok(discovery.includes('system_reserve_minimum_mib:1024,system_reserve_recommended_mib:1536'));
-  assert.ok(discovery.includes('remaining_mib < 1536'));
-  assert.ok(setup.includes('SETUP_RECOMMENDED_SYSTEM_RESERVE_MIB=1536'));
-  assert.ok(setup.includes('SETUP_MIN_SYSTEM_RESERVE_MIB=1024'));
-  assert.ok(discovery.includes('recommended 1.5 GiB headroom'));
+  const minimum = Number(setup.match(/readonly SETUP_MIN_SYSTEM_RESERVE_MIB=(\d+)/)[1]);
+  const recommended = Number(setup.match(/readonly SETUP_RECOMMENDED_SYSTEM_RESERVE_MIB=(\d+)/)[1]);
+  assert.equal(minimum, 1024);
+  assert.equal(recommended, 1536);
+  assert.match(setup, /remaining_mib < SETUP_MIN_SYSTEM_RESERVE_MIB/);
+  assert.match(setup, /remaining_mib < SETUP_RECOMMENDED_SYSTEM_RESERVE_MIB/);
   assert.ok(setup.includes('recommended 1.5 GiB'));
   assert.ok(read('webui/internal/server/setup_wizard.go').includes('defaults.SystemReserveRecommendedMiB = 1536'));
 });

@@ -14,6 +14,17 @@ grep -Fq 'Running container:' "${ui}" || fail 'friendly running-container state 
 grep -Fq 'No update is needed.' "${ui}" || fail 'current-state summary missing'
 if grep -Fq 'Running image ID:' "${ui}"; then fail 'raw running image ID leaked into normal update UI'; fi
 grep -Fq 'Running image ID:' "${backend}" || fail 'advanced maintenance backend lost image identity detail'
-grep -Fq 'exec /usr/libexec/justvoxel/mjust/update-minecraft-backend' "${ui}" || fail 'friendly update UI does not hand maintenance to the safety backend'
+# The selected immutable ID owns planning, execution, and operation polling.
+for contract in \
+    'jv_load_instance "${instance_id}"' \
+    '/v1/minecraft/instances/${instance_id}/version/status' \
+    '.instance_id == $id and .update_available' \
+    'api-client POST "/v1/minecraft/instances/${instance_id}/version/update" --data' \
+    '.operation | select(.instance_id == $id) | .operation_id' \
+    '/v1/minecraft/instances/${instance_id}/version/update/current?operation_id=${operation_id}' \
+    '.operation.instance_id == $id and .operation.operation_id == $op'; do
+    grep -Fq "${contract}" "${ui}" || fail "selected-instance update handoff missing: ${contract}"
+done
+if grep -Fq 'exec /usr/libexec/justvoxel/mjust/update-minecraft-backend' "${ui}"; then fail 'update UI bypasses the Management API'; fi
 
 echo 'Minecraft update UI regression tests passed.'

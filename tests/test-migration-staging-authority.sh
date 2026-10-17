@@ -17,8 +17,12 @@ boundary="$(grep -nF "${marker}" "${source_plan}" | cut -d: -f1)"
 pre_stage="$(head -n "${boundary}" "${source_plan}")"
 post_stage="$(tail -n "+$((boundary + 1))" "${source_plan}")"
 
-grep -Fq 'migration-archive extract "${JV_MIGRATION_SOURCE}" "${staging_source}"' <<< "${pre_stage}" || fail 'Import no longer stages the reviewed source locally'
-if grep -Fq 'jv_migration_source_identity "${JV_MIGRATION_SOURCE}"' <<< "${pre_stage}"; then fail 'Import still re-checks user-owned source contents after staging'; fi
+grep -Fxq '/usr/libexec/justvoxel/mjust/migration-archive extract "${JV_MIGRATION_SOURCE}" "${staging_source}"' <<< "${pre_stage}" || fail 'Import no longer stages the reviewed source locally with an unguarded extraction'
+# Identity validation is required while the user source is authoritative.
+identity_line="$(grep -nF 'jv_migration_source_identity "${JV_MIGRATION_SOURCE}"' "${source_plan}" | cut -d: -f1)"
+extract_line="$(grep -nF 'migration-archive extract "${JV_MIGRATION_SOURCE}" "${staging_source}"' "${source_plan}" | cut -d: -f1)"
+[[ ${identity_line} =~ ^[0-9]+$ && ${extract_line} =~ ^[0-9]+$ && ${identity_line} -lt ${extract_line} && ${extract_line} -lt ${boundary} ]] || fail 'Source identity, extraction, and staged handoff are out of order'
+grep -Eq '^set -[[:alpha:]]*e[[:alpha:]]*([[:space:]]|$)' "${repo_root}/mjust/libexec/migration-import-backend" || fail 'Extraction failure must stop import before handoff'
 grep -Fq 'source_backup_meta_mode=' <<< "${pre_stage}" || fail 'JustVoxel backup metadata is not captured before staging authority changes'
 grep -Fq 'source_backup_meta_version=' <<< "${pre_stage}" || fail 'JustVoxel backup version metadata is not captured before staging authority changes'
 grep -Fq 'jv_migration_transport_cleanup' <<< "${post_stage}" || fail 'JustVoxel-managed source transport is not released after staging'
@@ -27,7 +31,7 @@ grep -Fq 'transport_started=no' <<< "${post_stage}" || fail 'Import transport st
 if grep -Fq 'JV_MIGRATION_SOURCE' <<< "${post_stage}"; then
     fail 'Import still reads or depends on the original source after local staging becomes authoritative'
 fi
-if grep -Fq 'jv_migration_source_identity "${JV_MIGRATION_SOURCE}"' "${activate}"; then
+if grep -Eq '(jv_migration_source_identity|migration-archive (inspect|extract|verify-native)).*JV_MIGRATION_SOURCE' "${activate}"; then
     fail 'Import activation re-reads the original source after staging'
 fi
 

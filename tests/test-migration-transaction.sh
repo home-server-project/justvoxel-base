@@ -39,18 +39,25 @@ fi
 [[ -d ${tmp}/tx-failed ]] || fail 'failed rollback recovery transaction was removed'
 [[ -f ${tmp}/tx-failed/failed-import/state ]] || fail 'failed rollback did not preserve candidate evidence'
 
-# Runtime/firewall state rollback with command stubs.
+# Portable import restores selected runtime files without changing firewall ownership.
 stub="${tmp}/stub"
 mkdir -p "${stub}" "${tmp}/runtime"
-printf old-runtime > "${tmp}/runtime/a"
+readonly JV_INSTANCE_ID=jv-fixture1
+DATA_PATH="${tmp}/runtime-data"
+JV_MIGRATION_INSTANCE_CONFIG="${tmp}/runtime/config.json"
+minecraft_was_active=yes
+mkdir -p "${DATA_PATH}"
+printf old-runtime > "${tmp}/runtime/minecraft.env"
+printf old-quadlet > "${tmp}/runtime/minecraft-${JV_INSTANCE_ID}.container"
+jq -cn --arg id "${JV_INSTANCE_ID}" --arg data "${DATA_PATH}" \
+    --arg env "$(sha256sum "${tmp}/runtime/minecraft.env" | awk '{print $1}')" \
+    --arg quadlet "$(sha256sum "${tmp}/runtime/minecraft-${JV_INSTANCE_ID}.container" | awk '{print $1}')" \
+    '{runtime:{id:$id},storage:{data_path:$data},environment_sha256:$env,quadlet_sha256:$quadlet}' > "${JV_MIGRATION_INSTANCE_CONFIG}"
+chmod 0600 "${tmp}/runtime/"*
 printf 'tcp 25565 1\nudp 19132 1\ntcp 25566 0\nudp 19133 0\n' > "${tmp}/firewall-state"
 cat > "${stub}/systemctl" <<'SH'
 #!/usr/bin/bash
-case "${1:-}" in
-  is-enabled) echo enabled; exit 0 ;;
-  is-active) echo active; exit 0 ;;
-  *) exit 0 ;;
-esac
+[[ $* == daemon-reload ]] || exit 1
 SH
 cat > "${stub}/install" <<'SH'
 #!/usr/bin/bash
@@ -62,37 +69,55 @@ chmod 0700 "${destination}"
 SH
 cat > "${stub}/firewall-cmd" <<'SH'
 #!/usr/bin/bash
-set -euo pipefail
-state="${JV_TEST_FIREWALL_STATE}"
-for arg in "$@"; do
-  case "$arg" in
-    --query-port=*) spec="${arg#--query-port=}"; proto="${spec#*/}"; port="${spec%/*}"; awk -v p="$proto" -v n="$port" '$1==p && $2==n {exit $3!=1} END {if(NR==0) exit 1}' "$state"; exit $? ;;
-    --add-port=*) spec="${arg#--add-port=}"; proto="${spec#*/}"; port="${spec%/*}"; awk -v p="$proto" -v n="$port" 'BEGIN{f=0} $1==p&&$2==n{$3=1;f=1} {print} END{if(!f) print p,n,1}' "$state" > "$state.tmp"; mv "$state.tmp" "$state"; exit 0 ;;
-    --remove-port=*) spec="${arg#--remove-port=}"; proto="${spec#*/}"; port="${spec%/*}"; awk -v p="$proto" -v n="$port" 'BEGIN{f=0} $1==p&&$2==n{$3=0;f=1} {print} END{if(!f) print p,n,0}' "$state" > "$state.tmp"; mv "$state.tmp" "$state"; exit 0 ;;
-  esac
-done
-exit 0
+printf '%s\n' "$*" >> "${JV_TEST_FIREWALL_STATE}.unexpected"
+echo 'Portable import must preserve appliance firewall ownership.' >&2
+exit 1
 SH
 chmod +x "${stub}/systemctl" "${stub}/install" "${stub}/firewall-cmd"
 old_path="${PATH}"
 PATH="${stub}:${PATH}"
 export PATH JV_TEST_FIREWALL_STATE="${tmp}/firewall-state"
-jv_migration_runtime_paths() { printf '%s\n' "${tmp}/runtime/a" "${tmp}/runtime/b"; }
-mkdir -p "${tmp}/runtime-tx"
-jv_migration_snapshot_runtime "${tmp}/runtime-tx" 25565 yes 19132 25566 yes 19133
-printf changed > "${tmp}/runtime/a"
-printf generated > "${tmp}/runtime/b"
-"${stub}/firewall-cmd" --permanent --remove-port=25565/tcp
-"${stub}/firewall-cmd" --permanent --remove-port=19132/udp
-"${stub}/firewall-cmd" --permanent --add-port=25566/tcp
-"${stub}/firewall-cmd" --permanent --add-port=19133/udp
-jv_migration_restore_runtime "${tmp}/runtime-tx"
-[[ $(cat "${tmp}/runtime/a") == old-runtime ]] || fail 'runtime rollback did not restore previous file'
-[[ ! -e ${tmp}/runtime/b ]] || fail 'runtime rollback did not remove newly generated file'
-awk '$1=="tcp"&&$2==25565&&$3==1{ok=1} END{exit !ok}' "${tmp}/firewall-state" || fail 'old Java firewall state not restored'
-awk '$1=="udp"&&$2==19132&&$3==1{ok=1} END{exit !ok}' "${tmp}/firewall-state" || fail 'old Bedrock firewall state not restored'
-awk '$1=="tcp"&&$2==25566&&$3==0{ok=1} END{exit !ok}' "${tmp}/firewall-state" || fail 'candidate Java firewall rule not removed'
-awk '$1=="udp"&&$2==19133&&$3==0{ok=1} END{exit !ok}' "${tmp}/firewall-state" || fail 'candidate Bedrock firewall rule not removed'
+jv_migration_runtime_paths() {
+    printf '%s\n' "${JV_TEST_MIGRATION_ROOT}/runtime/config.json" "${JV_TEST_MIGRATION_ROOT}/runtime/minecraft.env" "${JV_TEST_MIGRATION_ROOT}/runtime/minecraft-${JV_INSTANCE_ID}.container"
+}
+jv_migration_load_instance() {
+    [[ $# == 1 && $1 == "${JV_INSTANCE_ID}" ]] || return 1
+    jq -e --arg id "$1" '.runtime.id == $id' "${JV_MIGRATION_INSTANCE_CONFIG}" >/dev/null
+}
+# Model appliance root ownership only for caller-owned fixture files. Real
+# file types, symlinks, permissions, hashes and instance evidence remain checked.
+readonly JV_TEST_MIGRATION_ROOT="${tmp}"
+stat() {
+    if [[ $# == 3 && $1 == -c && $2 == '%u:%g:%a' && $3 == "${JV_TEST_MIGRATION_ROOT}/"* ]]; then
+        [[ $(command stat -c '%u:%g' "$3") == "$(id -u):$(id -g)" ]] || return 1
+        printf '0:0:%s\n' "$(command stat -c '%a' "$3")"
+    else
+        command stat "$@"
+    fi
+}
+runtime_tx="${tmp}/.justvoxel-import-runtime"
+mkdir -p "${runtime_tx}"
+jv_migration_write_state "${runtime_tx}" prepared fixture paper
+jv_migration_snapshot_runtime "${runtime_tx}"
+cp "${JV_MIGRATION_INSTANCE_CONFIG}" "${tmp}/expected-config"
+printf changed > "${tmp}/runtime/minecraft.env"
+printf changed > "${tmp}/runtime/minecraft-${JV_INSTANCE_ID}.container"
+jv_migration_restore_runtime "${runtime_tx}"
+[[ $(cat "${tmp}/runtime/minecraft.env") == old-runtime ]] || fail 'runtime environment was not restored'
+[[ $(cat "${tmp}/runtime/minecraft-${JV_INSTANCE_ID}.container") == old-quadlet ]] || fail 'selected Quadlet was not restored'
+cmp -s "${JV_MIGRATION_INSTANCE_CONFIG}" "${tmp}/expected-config" || fail 'selected config was not restored'
+[[ ! -e ${tmp}/firewall-state.unexpected ]] || fail 'portable import attempted firewall mutation'
+awk '$1=="tcp"&&$2==25565&&$3==1{ok=1} END{exit !ok}' "${tmp}/firewall-state" || fail 'old Java firewall state changed'
+awk '$1=="udp"&&$2==19132&&$3==1{ok=1} END{exit !ok}' "${tmp}/firewall-state" || fail 'old Bedrock firewall state changed'
+awk '$1=="tcp"&&$2==25566&&$3==0{ok=1} END{exit !ok}' "${tmp}/firewall-state" || fail 'candidate Java firewall rule added'
+awk '$1=="udp"&&$2==19133&&$3==0{ok=1} END{exit !ok}' "${tmp}/firewall-state" || fail 'candidate Bedrock firewall rule added'
+# Foreign instance evidence cannot authorize restoration or erase recovery files.
+jq '.instance_id="jv-foreign1"' "${runtime_tx}/evidence.json" > "${runtime_tx}/foreign"
+mv "${runtime_tx}/foreign" "${runtime_tx}/evidence.json"
+chmod 0600 "${runtime_tx}/evidence.json"
+if jv_migration_restore_runtime "${runtime_tx}"; then fail 'foreign instance evidence accepted'; fi
+[[ -f ${runtime_tx}/destination-state/config.json ]] || fail 'rejected recovery evidence was discarded'
+unset -f stat
 PATH="${old_path}"; export PATH
 
 # Temporary mount and SMB credential cleanup.
