@@ -27,6 +27,7 @@ type diagnosticLogEntry struct {
 }
 
 func registerAdminDiagnosticLogRoutes(mux *http.ServeMux, s *server) {
+	mux.HandleFunc("POST /v1/admin/logs/support", s.adminSupportReport)
 	mux.HandleFunc("GET /v1/admin/logs", s.adminDiagnosticLogList)
 	mux.HandleFunc("GET /v1/admin/logs/{category}/{id}", s.adminDiagnosticLogRead)
 }
@@ -178,7 +179,7 @@ func validDiagnosticOperationType(value string) bool {
 
 func validDiagnosticCategory(value string) bool {
 	switch value {
-	case "setup", "migration", "restore", "plugins", "reset", "operation":
+	case "setup", "migration", "restore", "plugins", "reset", "support", "operation":
 		return true
 	}
 	return false
@@ -251,7 +252,7 @@ func (s *operationStore) readDiagnosticLog(category, id string) ([]byte, error) 
 			return nil, os.ErrNotExist
 		}
 		category = diagnosticCategoryForOperationType(journal.OperationType)
-	} else if journal, err := s.get(id); err == nil && diagnosticCategoryForOperationType(journal.OperationType) != category {
+	} else if journal, err := s.get(id); category != "support" && err == nil && diagnosticCategoryForOperationType(journal.OperationType) != category {
 		return nil, os.ErrNotExist
 	}
 	s.diagnosticMu.Lock()
@@ -259,7 +260,7 @@ func (s *operationStore) readDiagnosticLog(category, id string) ([]byte, error) 
 	if err := validatePrivateDiagnosticDirectory(s.logsDir); err != nil {
 		return nil, err
 	}
-	dir := filepath.Join(s.logsDir, category+"-logs")
+	dir := s.diagnosticCategoryDirectory(category)
 	if err := validatePrivateDiagnosticDirectory(dir); err != nil {
 		return nil, err
 	}
@@ -288,12 +289,14 @@ func (s *operationStore) listDiagnosticLogs() ([]diagnosticLogEntry, error) {
 		operations[id] = journal
 	}
 	s.mu.Unlock()
+	s.diagnosticMu.Lock()
+	defer s.diagnosticMu.Unlock()
 	entries := make([]diagnosticLogEntry, 0)
 	if err := validatePrivateDiagnosticDirectory(s.logsDir); err != nil {
 		return nil, err
 	}
-	for _, category := range []string{"setup", "migration", "restore", "plugins", "reset"} {
-		dir := filepath.Join(s.logsDir, category+"-logs")
+	for _, category := range []string{"setup", "migration", "restore", "plugins", "reset", "support"} {
+		dir := s.diagnosticCategoryDirectory(category)
 		if err := validatePrivateDiagnosticDirectory(dir); err != nil {
 			return nil, err
 		}
@@ -334,4 +337,12 @@ func (s *operationStore) listDiagnosticLogs() ([]diagnosticLogEntry, error) {
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Timestamp > entries[j].Timestamp })
 	return entries, nil
+}
+
+// Support predates the operation category directories and retains its established path.
+func (s *operationStore) diagnosticCategoryDirectory(category string) string {
+	if category == "support" {
+		return filepath.Join(s.logsDir, "support")
+	}
+	return filepath.Join(s.logsDir, category+"-logs")
 }

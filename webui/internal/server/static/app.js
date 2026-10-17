@@ -4315,6 +4315,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     ? { group: systemLogDestination.get("log_group") === "plugins" ? "Plugins" : "Migration", id: systemLogDestination.get("log_id") || "" } : null;
 
   let failedUnitsSelected = false;
+  let supportLogsSelected = false;
 
   const renderLogs = async (sequence) => {
     const payload = await systemFetchJSON("/api/system/workspace/logs");
@@ -4347,9 +4348,17 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     groupColumn.className = "system-logs-groups";
     groupColumn.setAttribute("aria-label", "Log categories");
     const fileColumn = makeColumn("Files", "system-logs-files");
+    const generateSupport = document.createElement("button");
+    generateSupport.type = "button";
+    generateSupport.className = "secondary";
+    generateSupport.textContent = "Generate support report";
+    const supportProgress = document.createElement("p");
+    supportProgress.className = "muted";
+    supportProgress.setAttribute("role", "status");
+    supportProgress.hidden = true;
     const fileList = document.createElement("div");
     fileList.className = "system-logs-list";
-    fileColumn.appendChild(fileList);
+    fileColumn.append(generateSupport, supportProgress, fileList);
     const reader = makeColumn("Viewer", "system-logs-reader");
     const viewer = document.createElement("div");
     viewer.className = "system-logs-viewer";
@@ -4361,7 +4370,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     documentText.textContent = "Select a file to read it here.";
     viewer.append(download, documentText);
     reader.appendChild(viewer);
-    let selectedGroup = requestedMigrationLog?.group || (failedUnitsSelected ? "Failed units" : "Setup");
+    let selectedGroup = requestedMigrationLog?.group || (failedUnitsSelected ? "Failed units" : supportLogsSelected ? "Support" : "Setup");
     let selectedFile = "";
     let requestedEntry = requestedMigrationLog ? logs.find((entry) => entry.category === requestedMigrationLog.group.toLowerCase() && entry.log_id === requestedMigrationLog.id) : null;
     requestedMigrationLog = null;
@@ -4370,13 +4379,15 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       viewer.scrollTop = 0;
       download.hidden = true;
       const live = selectedGroup === "Failed units";
+      generateSupport.hidden = selectedGroup !== "Support";
+      supportProgress.hidden = selectedGroup !== "Support" || !supportProgress.textContent;
       fileColumn.children[0].textContent = live ? "Units" : "Files";
       documentText.textContent = live ? "Select a unit to read its last 60 current-boot journal lines here." : "Select a file to read it here.";
       const entries = live ? failedUnits : logs.filter((entry) => entry.category === selectedGroup.toLowerCase());
       if (!entries.length) {
         const empty = document.createElement("p");
         empty.className = "muted";
-        empty.textContent = live ? (payload.failed_units_error ? "Failed systemd units are unavailable." : "No failed systemd units.") : selectedGroup === "Support" ? "No support bundles generated." : "No " + selectedGroup.toLowerCase() + " logs available.";
+        empty.textContent = live ? (payload.failed_units_error ? "Failed systemd units are unavailable." : "No failed systemd units.") : selectedGroup === "Support" ? "No support reports generated." : "No " + selectedGroup.toLowerCase() + " logs available.";
         fileList.appendChild(empty);
         return;
       }
@@ -4419,6 +4430,26 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         }
       });
     };
+    generateSupport.addEventListener("click", async () => {
+      generateSupport.disabled = true;
+      supportProgress.textContent = "Generating support report…";
+      supportProgress.hidden = false;
+      try {
+        const result = await systemPostForm("/api/system/workspace/logs/support");
+        if (!result?.ok || !result.log || result.log.category !== "support") throw new Error("Support report could not be generated.");
+        if (sequence !== loadSequence || !root.isConnected) return;
+        logs.unshift(result.log);
+        requestedEntry = result.log;
+        supportProgress.textContent = "Support report generated.";
+        if (selectedGroup === "Support") renderFiles();
+      } catch {
+        if (sequence !== loadSequence || !root.isConnected) return;
+        supportProgress.textContent = "Support report could not be generated. Try again.";
+      } finally {
+        generateSupport.disabled = false;
+        supportProgress.hidden = selectedGroup !== "Support";
+      }
+    });
     groups.forEach((group) => {
       const button = document.createElement("button");
       button.type = "button";
@@ -4428,6 +4459,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       button.addEventListener("click", () => {
         selectedGroup = group;
         failedUnitsSelected = group === "Failed units";
+        supportLogsSelected = group === "Support";
         selectedFile = "";
         groupColumn.querySelectorAll("button").forEach((item) => item.setAttribute("aria-pressed", item === button ? "true" : "false"));
         renderFiles();
@@ -5912,7 +5944,6 @@ if (pluginsDialog && pluginsOpen) {
   const form = pluginsDialog.querySelector("[data-plugins-search]");
   const results = pluginsDialog.querySelector("[data-plugins-results]");
   const state = pluginsDialog.querySelector("[data-plugins-state]");
-  const context = pluginsDialog.querySelector("[data-plugins-context]");
   globalThis.justVoxelServerSelection(pluginsDialog.querySelector("[data-server-selector-slot]")).catch(error => { if (state) state.textContent = error.message; });
   const pagination = pluginsDialog.querySelector("[data-plugins-pagination]");
   const previous = pluginsDialog.querySelector("[data-plugins-previous]");
@@ -6721,7 +6752,6 @@ if (pluginsDialog && pluginsOpen) {
       if (!response.ok) throw new Error(payload.error || "Plugin information is unavailable.");
       const server = payload.server;
       if (tab === "discover" && !acceptDiscoverContext(server)) { load(); return; }
-      context.textContent = `${server.server_software || "Minecraft"} · Minecraft ${server.minecraft_version || "version unavailable"}`;
       form.querySelectorAll("input,button").forEach((control) => { control.disabled = !server.supported; });
       if (!server.supported) { state.textContent = server.message; return; }
       if (tab === "addons") {

@@ -26,7 +26,7 @@
     <button type="button" data-server-arrange-done hidden>Done</button>
   </div>
   <div class="minecraft-server-entries">
-    <a class="panel minecraft-add-server-card" href="/minecraft/servers/add" aria-label="Add Minecraft Server"><span class="minecraft-add-server-plus" aria-hidden="true">+</span><strong>Add Minecraft Server</strong></a>
+    <a class="panel minecraft-add-server-card" href="{{if .Configured}}/minecraft/servers/add{{else}}/setup{{end}}" aria-label="Add Minecraft Server"><span class="minecraft-add-server-plus" aria-hidden="true">+</span><strong>Add Minecraft Server</strong></a>
     {{range .Servers}}
     <article class="panel minecraft-server-card" data-minecraft-server-card data-server-id="{{.ContextID}}">
       <h2>{{.Name}}</h2>

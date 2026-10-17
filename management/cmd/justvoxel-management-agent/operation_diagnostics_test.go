@@ -1,10 +1,15 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -197,5 +202,225 @@ func TestPluginStartupEvidenceRedactsAllSensitiveFamiliesAndHostIdentity(t *test
 	lines := pluginStartupDiagnosticExcerpt([]byte(raw), []string{"Root"}, "private-host")
 	if len(lines) != 1 || strings.Contains(lines[0], "private-host") || strings.Contains(lines[0], "10.20.30.40") {
 		t.Fatal("host identity escaped startup sanitation", lines)
+	}
+}
+
+func TestSupportReportPrivateStorageAndExistingLogFlow(t *testing.T) {
+	store := openTestOperationStore(t)
+	id, err := newOperationID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := store.storeSupportReport(id, []byte("support evidence\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !validDiagnosticCategory("support") || !validOperationID(entry.LogID) || entry.Category != "support" || entry.OperationID != "" {
+		t.Fatal(entry)
+	}
+	path := filepath.Join(store.logsDir, "support", id+".log")
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm() != 0600 || info.Sys().(*syscall.Stat_t).Uid != uint32(os.Geteuid()) {
+		t.Fatal("unsafe support file")
+	}
+	if _, err := os.Stat(filepath.Join(store.logsDir, "support-logs")); !os.IsNotExist(err) {
+		t.Fatal("parallel support directory")
+	}
+	if _, err := store.storeSupportReport(id, []byte("collision")); err == nil {
+		t.Fatal("appended collided ID")
+	}
+	for _, bad := range []string{"../private", id + ".log"} {
+		if _, err := store.storeSupportReport(bad, nil); err == nil {
+			t.Fatal("unsafe identity")
+		}
+	}
+	data, err := store.readDiagnosticLog("support", id)
+	if err != nil || string(data) != "support evidence\n" {
+		t.Fatal(string(data), err)
+	}
+	entries, err := store.listDiagnosticLogs()
+	if err != nil || len(entries) != 1 || entries[0].LogID != id || entries[0].Timestamp == "" {
+		t.Fatal(entries, err)
+	}
+	if _, err := store.storeSupportReport(id, make([]byte, supportReportLimit+1)); err == nil {
+		t.Fatal("oversized report")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "outside"), path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.storeSupportReport(id, nil); err == nil {
+		t.Fatal("created through symlink")
+	}
+	if _, err := store.readDiagnosticLog("support", id); err == nil {
+		t.Fatal("read symlink")
+	}
+	dir := filepath.Join(store.logsDir, "support")
+	if err := os.Chmod(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.storeSupportReport(id, nil); err == nil {
+		t.Fatal("unsafe directory")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.storeSupportReport(id, nil); err == nil {
+		t.Fatal("followed support directory symlink")
+	}
+}
+
+func TestSupportReportBoundedRedactedFixedCommandsAndFailure(t *testing.T) {
+	old := runSupportCommand
+	defer func() { runSupportCommand = old }()
+	store := openTestOperationStore(t)
+	store.diagnosticHostname = "private-appliance"
+	calls := 0
+	runSupportCommand = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		calls++
+		if _, ok := ctx.Deadline(); !ok {
+			t.Fatal("missing deadline")
+		}
+		joined := strings.Join(args, " ")
+		unit := "justvoxel-management.service"
+		if calls == 2 || calls == 4 {
+			unit = "justvoxel-webui.service"
+		}
+		want := "show " + unit + " --no-pager --property=ActiveState,SubState,Result,NRestarts,ExecMainCode,ExecMainStatus"
+		wantName := "systemctl"
+		if calls > 2 {
+			wantName = "journalctl"
+			lines := "300"
+			if calls == 4 {
+				lines = "150"
+			}
+			want = "-b -u " + unit + " --no-pager -n " + lines + " -o cat"
+		}
+		if name != wantName || joined != want {
+			t.Fatal("unexpected command", name, joined)
+		}
+		if calls == 2 {
+			return []byte("unsafe raw output"), errors.New("internal password=unsafe")
+		}
+		return []byte("failure in justvoxel-management.service on private-appliance 10.20.30.40 2001:db8::1\npassword=hidden\nTOKEN hidden\nCookie hidden\nAuthorization: Bearer hidden\ncredential hidden\ncsrf hidden\nAPI key hidden\nSMB secret hidden\nRCON_PASSWORD hidden\n"), nil
+	}
+	entry, err := store.generateSupportReport(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := store.readDiagnosticLog("support", entry.LogID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 4 || len(data) > supportReportLimit {
+		t.Fatal("collection bounds", calls, len(data))
+	}
+	for _, bad := range []string{"hidden", "private-appliance", "10.20.30.40", "2001:db8::1", "unsafe", "internal password"} {
+		if strings.Contains(string(data), bad) {
+			t.Fatal("privacy leak", bad)
+		}
+	}
+	for _, want := range []string{"justvoxel-management.service", "<section unavailable>", "<sensitive diagnostic detail redacted>", "MANAGEMENT STATE INVENTORY", "REPORT METADATA"} {
+		if !strings.Contains(string(data), want) {
+			t.Fatal("missing evidence", want)
+		}
+	}
+	var report supportReport
+	for i := 0; i < 20; i++ {
+		report.section("bounded", []byte(strings.Repeat("a", 1500)+"\n"+strings.Repeat("line\n", 20000)))
+	}
+	if report.Len() > supportReportLimit || !strings.Contains(report.String(), "truncated") {
+		t.Fatal("report bound")
+	}
+	if got := sanitizeSupportLine(strings.Repeat("x", supportLineLimit+1), ""); !strings.Contains(got, "truncated") {
+		t.Fatal("line bound")
+	}
+	var output supportCommandOutput
+	_, _ = output.Write(make([]byte, supportSectionLimit*2))
+	if output.Len() != supportSectionLimit || !output.truncated {
+		t.Fatal("command output bound")
+	}
+}
+
+func TestSupportInventoryDepthLimitAndNoSymlinkTraversal(t *testing.T) {
+	base := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "must-not-appear"), []byte("secret contents"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(base, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(base, "one", "two"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(base, "one", "two", "too-deep"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	data := string(supportInventory(base))
+	if strings.Contains(data, "must-not-appear") || strings.Contains(data, "too-deep") || strings.Contains(data, "secret contents") || !strings.Contains(data, "link") || !strings.Contains(data, "one/two") {
+		t.Fatal(data)
+	}
+	for i := 0; i < supportInventoryLimit+10; i++ {
+		if err := os.WriteFile(filepath.Join(base, fmt.Sprintf("entry-%03d", i)), nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data = string(supportInventory(base))
+	if strings.Count(data, "exists type=") > supportInventoryLimit || !strings.Contains(data, "inventory truncated") {
+		t.Fatal("inventory not bounded")
+	}
+}
+
+func TestSupportGenerationRouteAdministratorOnlyAndNoInput(t *testing.T) {
+	old := runSupportCommand
+	defer func() { runSupportCommand = old }()
+	calls := 0
+	runSupportCommand = func(context.Context, string, ...string) ([]byte, error) {
+		calls++
+		return nil, errors.New("internal secret")
+	}
+	for _, role := range []principalRole{roleViewer, roleOperator, roleAdministrator} {
+		server := surfaceTestServer(t, role)
+		server.operations = openTestOperationStore(t)
+		mux := http.NewServeMux()
+		registerAdminDiagnosticLogRoutes(mux, server)
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, surfaceRequest(http.MethodPost, "/v1/admin/logs/support", ""))
+		want := http.StatusForbidden
+		if role == roleAdministrator {
+			want = http.StatusOK
+		}
+		if response.Code != want || strings.Contains(response.Body.String(), "internal secret") {
+			t.Fatal(role, response.Code, response.Body.String())
+		}
+	}
+	if calls != 4 {
+		t.Fatal("unauthorized collection", calls)
+	}
+	server := surfaceTestServer(t, roleAdministrator)
+	server.operations = openTestOperationStore(t)
+	mux := http.NewServeMux()
+	registerAdminDiagnosticLogRoutes(mux, server)
+	for _, path := range []string{"/v1/admin/logs/support?unit=other.service", "/v1/admin/logs/support?path=/etc/passwd"} {
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, surfaceRequest(http.MethodPost, path, ""))
+		if response.Code != 400 {
+			t.Fatal("accepted input", response.Code)
+		}
+	}
+	if calls != 4 {
+		t.Fatal("input reached collector")
 	}
 }

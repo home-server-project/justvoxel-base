@@ -19,7 +19,17 @@ func TestSystemLogsGroupedResizableWorkspace(t *testing.T) {
 	for _, want := range []string{
 		`["Setup", "Migration", "Restore", "Plugins", "Reset", "Support", "Failed units"]`,
 		`entry.category === selectedGroup.toLowerCase()`,
-		`No support bundles generated.`,
+		`No support reports generated.`,
+		`generateSupport.textContent = "Generate support report"`,
+		`generateSupport.hidden = selectedGroup !== "Support"`,
+		`generateSupport.disabled = true`,
+		`Generating support report…`,
+		`systemPostForm("/api/system/workspace/logs/support")`,
+		`logs.unshift(result.log)`,
+		`requestedEntry = result.log`,
+		`supportLogsSelected = group === "Support"`,
+		`download.href = url + "?download=1"`,
+		`documentText.textContent = data`,
 		`justvoxel.system.logs.columns`,
 		`handle.dataset.logsSplitter`,
 		`setPointerCapture`,
@@ -27,6 +37,9 @@ func TestSystemLogsGroupedResizableWorkspace(t *testing.T) {
 		if !strings.Contains(string(js), want) {
 			t.Fatalf("Logs workspace missing %q", want)
 		}
+	}
+	if strings.Count(string(js), `root.className = "system-logs-layout"`) != 1 || strings.Count(string(js), `const reader = makeColumn("Viewer", "system-logs-reader")`) != 1 {
+		t.Fatal("Support must reuse the existing Logs workspace and Viewer")
 	}
 	for _, want := range []string{
 		`.system-logs-list{`, `.system-logs-viewer{`, `overflow-y:auto`,

@@ -1,10 +1,16 @@
 package api
 
-import "testing"
+import (
+	"context"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+)
 
 func TestValidDiagnosticLogIdentifier(t *testing.T) {
 	const validID = "12345678-1234-4234-8234-123456789abc"
-	categories := []string{"setup", "migration", "restore", "plugins", "reset", "operation"}
+	categories := []string{"setup", "migration", "restore", "plugins", "reset", "support", "operation"}
 	for _, category := range categories {
 		t.Run(category, func(t *testing.T) {
 			if !validDiagnosticLogIdentifier(category, validID) {
@@ -57,6 +63,32 @@ func TestPluginsCategoryKeepsExactUUIDValidation(t *testing.T) {
 	for _, id := range []string{"../private", "12345678-1234-4234-8234-123456789abc.log", "12345678-1234-1234-8234-123456789abc"} {
 		if validDiagnosticLogIdentifier("plugins", id) {
 			t.Fatal("unsafe Plugins ID accepted", id)
+		}
+	}
+}
+
+func TestSupportGenerationExactRouteAndValidatedResponse(t *testing.T) {
+	body := `{"ok":true,"log":{"category":"support","log_id":"12345678-1234-4234-8234-123456789abc","timestamp":"2026-10-17T12:00:00Z"}}`
+	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/admin/logs/support" || r.URL.RawQuery != "" || r.Body != nil || r.Header.Get("Authorization") != "Bearer session" {
+			t.Fatal("unsafe generation request", r)
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})}}
+	entry, err := client.AdminGenerateSupportReport(context.Background(), "session")
+	if err != nil || entry.Category != "support" {
+		t.Fatal(entry, err)
+	}
+	original := body
+	for _, bad := range []string{
+		strings.Replace(original, `"support"`, `"setup"`, 1),
+		strings.Replace(original, "12345678-1234-4234-8234-123456789abc", "../file", 1),
+		strings.Replace(original, "2026-10-17T12:00:00Z", "invalid", 1),
+		original + ` {}`, strings.Replace(original, `"ok":true`, `"ok":false`, 1),
+	} {
+		body = bad
+		if _, err := client.AdminGenerateSupportReport(context.Background(), "session"); err == nil {
+			t.Fatal("accepted malformed identity", body)
 		}
 	}
 }

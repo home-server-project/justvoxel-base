@@ -122,6 +122,26 @@ func TestPluginsWorkspaceUsesExistingWindowAndSafeRendering(t *testing.T) {
 		t.Fatal("workspace implementation missing")
 	}
 	pluginScript := behavior[start:end]
+	for _, obsolete := range []string{"plugins-server-context", "data-plugins-context"} {
+		if strings.Contains(markup, obsolete) || strings.Contains(pluginScript, obsolete) {
+			t.Fatalf("obsolete Plugins context lane remains: %s", obsolete)
+		}
+	}
+	if strings.Contains(pluginScript, "context.textContent") {
+		t.Fatal("Plugins still writes the legacy context row")
+	}
+	css, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(css), ".plugins-server-context") {
+		t.Fatal("obsolete Plugins context styling remains")
+	}
+	for _, want := range []string{`const server = payload.server;`, `acceptDiscoverContext(server)`, `control.disabled = !server.supported`, `if (!server.supported)`, `renderProject(item, server)`, `const platform = server.server_software || server.server_type;`, `server.minecraft_version`, `project.compatible && server.supported`, `data-server-selector-slot data-server-workspace="plugins"`} {
+		if !strings.Contains(pluginScript, want) && !strings.Contains(markup, want) {
+			t.Fatalf("authoritative Plugins server context missing: %s", want)
+		}
+	}
 	for _, want := range []string{"setupWorkspaceWindow(pluginsDialog", `document.body.classList.contains("role-administrator")`, `node.textContent = value`, `/api/plugins/workspace/`, "Manual / unmanaged", "JustVoxel managed"} {
 		if !strings.Contains(pluginScript, want) {
 			t.Fatalf("behavior missing %s", want)

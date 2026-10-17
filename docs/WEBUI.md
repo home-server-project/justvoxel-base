@@ -12,6 +12,8 @@ Because default local WebUI traffic is not protected by TLS, administrator crede
 
 If remote access is required, place JustVoxel behind a properly secured solution that provides trusted HTTPS or private-network access, such as an appropriately configured reverse proxy, VPN, Tailscale, or similar protected access. Those advanced access methods are separate from the default JustVoxel local WebUI.
 
+In the Minecraft Servers dashboard workspace, **Add Minecraft Server** opens the maintained first-run Setup flow (`/setup`) until appliance configuration is complete. After configuration it opens Add Server (`/minecraft/servers/add`). A bookmarked Add Server GET also redirects to Setup on an unconfigured appliance; stale Add Server POST requests are refused without starting first-run mutations.
+
 ## Administrator account
 
 The default authentication mode is **System account**.
@@ -184,6 +186,8 @@ list/select/read/download flow as other operation groups. Deep links accept
 `workspace=system&tab=logs&log_group=plugins&log_id=<operation UUID>` with existing
 identifier validation. Plugin startup failure evidence is bounded and sanitized;
 it does not expose the full Minecraft server log.
+
+In **System -> Logs -> Support**, administrators can select **Generate support report** to create a bounded, redacted local appliance snapshot. The new report opens in the existing Viewer; **Download log** saves it locally. Reports remain in private appliance storage until normal log/state cleanup removes them. There is no external transmission or automatic upload.
 
 **System → Factory Reset → Reset Minecraft** review states that Plugins-managed
 JARs installed through JustVoxel will be removed. When Minecraft data outside

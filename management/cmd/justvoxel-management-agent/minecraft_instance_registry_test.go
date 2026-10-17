@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 )
 
@@ -551,5 +552,149 @@ func TestInstanceRegistryDefaultsRespectUnnamedLegacyServer(t *testing.T) {
 	}
 	if current, err := store.read(); err != nil || current != legacy {
 		t.Fatalf("rename replaced legacy identity=%v err=%v", current, err)
+	}
+}
+
+func TestNamesDirectoryCreationOwnership(t *testing.T) {
+	store := testMinecraftInstances(t)
+	parent, err := store.openDirectory(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent.Close()
+	dir, err := store.openNames(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dir.Close()
+	info, err := dir.Stat()
+	if err != nil || !info.IsDir() || !store.private(info, 0700) {
+		t.Fatalf("new names directory violates exact ownership/mode contract: %v", err)
+	}
+}
+
+// Supply ownership evidence to the policy without needing privileged chown in
+// ordinary tests. All filesystem checks and final verification still use real FDs.
+type namesDirectoryTestInfo struct {
+	os.FileInfo
+	stat syscall.Stat_t
+	mode os.FileMode
+}
+
+func (i namesDirectoryTestInfo) Sys() any          { return &i.stat }
+func (i namesDirectoryTestInfo) Mode() os.FileMode { return i.mode }
+func (i namesDirectoryTestInfo) IsDir() bool       { return i.mode.IsDir() }
+
+func TestNamesGroupRepairPolicyAndEmptyDirectory(t *testing.T) {
+	for _, kind := range []string{"empty-wrong-gid", "valid", "nonempty", "hidden-entry", "wrong-mode", "setuid", "setgid", "sticky", "wrong-uid", "symlink", "non-directory"} {
+		t.Run(kind, func(t *testing.T) {
+			store := testMinecraftInstances(t)
+			dir, err := os.Open(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer dir.Close()
+			if err := dir.Chmod(0700); err != nil {
+				t.Fatal(err)
+			}
+			info, err := dir.Stat()
+			if err != nil {
+				t.Fatal(err)
+			}
+			evidence := namesDirectoryTestInfo{FileInfo: info, stat: *info.Sys().(*syscall.Stat_t), mode: info.Mode()}
+			evidence.stat.Gid = uint32(store.gid + 1)
+			switch kind {
+			case "valid":
+				evidence.stat.Gid = uint32(store.gid)
+			case "nonempty", "hidden-entry":
+				name := "record.json"
+				if kind == "hidden-entry" {
+					name = ".name-unpublished"
+				}
+				if err := os.WriteFile(filepath.Join(dir.Name(), name), []byte("evidence"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "wrong-mode":
+				evidence.mode = os.ModeDir | 0750
+			case "setuid":
+				evidence.mode |= os.ModeSetuid
+			case "setgid":
+				evidence.mode |= os.ModeSetgid
+			case "sticky":
+				evidence.mode |= os.ModeSticky
+			case "wrong-uid":
+				evidence.stat.Uid++
+			case "symlink":
+				evidence.mode = os.ModeSymlink | 0700
+			case "non-directory":
+				evidence.mode = 0700
+			}
+			before := registrySnapshot(t, &minecraftInstanceStore{directory: dir.Name()})
+			err = store.repairNamesGroup(dir, evidence)
+			if kind == "empty-wrong-gid" {
+				if err != nil {
+					t.Fatalf("eligible repair: %v", err)
+				}
+				actual, err := dir.Stat()
+				if err != nil || !store.private(actual, 0700) {
+					t.Fatalf("repair did not verify private contract: %v", err)
+				}
+			} else {
+				if err == nil {
+					t.Fatal("ineligible repair accepted")
+				}
+				if !reflect.DeepEqual(before, registrySnapshot(t, &minecraftInstanceStore{directory: dir.Name()})) {
+					t.Fatal("refused repair changed state")
+				}
+			}
+		})
+	}
+}
+
+func TestNamesStartupReconciliation(t *testing.T) {
+	for _, kind := range []string{"missing-registry", "missing-names", "valid", "wrong-mode", "symlink", "non-directory"} {
+		t.Run(kind, func(t *testing.T) {
+			store := testMinecraftInstances(t)
+			path := filepath.Join(store.directory, "names")
+			if kind != "missing-registry" {
+				parent, err := store.openDirectory(true)
+				if err != nil {
+					t.Fatal(err)
+				}
+				parent.Close()
+			}
+			if kind != "missing-registry" && kind != "missing-names" {
+				switch kind {
+				case "symlink":
+					if err := os.Symlink(t.TempDir(), path); err != nil {
+						t.Fatal(err)
+					}
+				case "non-directory":
+					if err := os.WriteFile(path, nil, 0700); err != nil {
+						t.Fatal(err)
+					}
+				default:
+					dir, err := store.openNames(true)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if kind == "wrong-mode" {
+						if err := dir.Chmod(0750); err != nil {
+							t.Fatal(err)
+						}
+					}
+					dir.Close()
+				}
+			}
+			before := registrySnapshot(t, store)
+			err := store.reconcileNamesAtStartup()
+			valid := kind == "missing-registry" || kind == "missing-names" || kind == "valid"
+			if (err == nil) != valid {
+				t.Fatalf("startup reconciliation: %v", err)
+			}
+			if !reflect.DeepEqual(before, registrySnapshot(t, store)) {
+				t.Fatal("startup created or changed state")
+			}
+		})
 	}
 }

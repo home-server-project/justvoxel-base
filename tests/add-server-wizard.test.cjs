@@ -21,7 +21,7 @@ test('Add Server reuses the maintained wizard, software controls and six-step pr
 test('compact first entry has native link semantics and a visible keyboard focus rule', () => {
   const markup = read('templates/minecraft_servers.html');
   const entries = markup.slice(markup.indexOf('<div class="minecraft-server-entries">'));
-  assert.match(entries, /^<div class="minecraft-server-entries">\s*<a class="panel minecraft-add-server-card" href="\/minecraft\/servers\/add" aria-label="Add Minecraft Server">/);
+  assert.match(entries, /^<div class="minecraft-server-entries">\s*<a class="panel minecraft-add-server-card" href="\{\{if \.Configured\}\}\/minecraft\/servers\/add\{\{else\}\}\/setup\{\{end\}\}" aria-label="Add Minecraft Server">/);
   assert.ok(entries.includes('aria-hidden="true">+</span>'));
   assert.equal((entries.match(/minecraft-add-server-card/g) || []).length, 1);
   const css = read('static/setup.css');

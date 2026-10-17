@@ -15,7 +15,7 @@ import (
 
 func TestWorkspaceLogIdentifiersAreAllowlisted(t *testing.T) {
 	id := "12345678-1234-4123-8123-123456789abc"
-	for _, category := range []string{"setup", "migration", "restore", "plugins", "reset", "operation"} {
+	for _, category := range []string{"setup", "migration", "restore", "plugins", "reset", "support", "operation"} {
 		if !validWorkspaceLogID(category, id) {
 			t.Fatalf("rejected %s log", category)
 		}
@@ -40,6 +40,7 @@ type fakeDiagnosticLogsAPI struct {
 	unitReads    int
 	unitLists    int
 	journalError error
+	supportCalls int
 }
 
 func (f *fakeDiagnosticLogsAPI) Session(ctx context.Context, session string) (api.SessionInfo, error) {
@@ -212,6 +213,52 @@ func TestPluginsLogsReadAndDownloadExactAgentContent(t *testing.T) {
 		}
 		if query != "" && !strings.Contains(rr.Header().Get("Content-Disposition"), "justvoxel-plugins-"+id+".log") {
 			t.Fatal("wrong download filename")
+		}
+	}
+}
+
+func (f *fakeDiagnosticLogsAPI) AdminGenerateSupportReport(_ context.Context, _ string) (api.DiagnosticLogEntry, error) {
+	f.supportCalls++
+	return api.DiagnosticLogEntry{Category: "support", LogID: "12345678-1234-4234-8234-123456789abc", Timestamp: "2026-10-17T12:00:00Z"}, nil
+}
+
+func TestSupportReportGenerationRequiresAdministratorCSRFAndNoCapabilities(t *testing.T) {
+	client := &fakeDiagnosticLogsAPI{fakeAPI: &fakeAPI{}, role: "administrator"}
+	app, err := New(client, Config{ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		role, body, query string
+		want              int
+	}{
+		{"viewer", "csrf=csrf-token", "", 403},
+		{"operator", "csrf=csrf-token", "", 403},
+		{"administrator", "", "", 403},
+		{"administrator", "csrf=wrong", "", 403},
+		{"administrator", "csrf=csrf-token&path=/etc/passwd", "", 400},
+		{"administrator", "csrf=csrf-token&unit=other.service", "", 400},
+		{"administrator", "csrf=csrf-token", "?unit=other.service", 400},
+		{"administrator", "csrf=csrf-token", "", 200},
+	} {
+		client.role = tc.role
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodPost, "http://example/api/system/workspace/logs/support"+tc.query, tc.body))
+		if rr.Code != tc.want {
+			t.Fatal(tc, rr.Code, rr.Body.String())
+		}
+	}
+	if client.supportCalls != 1 || client.reads != 0 || client.unitReads != 0 {
+		t.Fatal("incorrect API reached", client)
+	}
+	for _, query := range []string{"", "?download=1"} {
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/api/system/workspace/logs/support/12345678-1234-4234-8234-123456789abc"+query, ""))
+		if rr.Code != 200 || !strings.Contains(rr.Body.String(), "rollback succeeded") {
+			t.Fatal("existing viewer unavailable", rr.Code)
+		}
+		if query != "" && !strings.Contains(rr.Header().Get("Content-Disposition"), "attachment") {
+			t.Fatal("existing download unavailable")
 		}
 	}
 }

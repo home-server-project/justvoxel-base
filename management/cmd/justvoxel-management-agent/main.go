@@ -168,6 +168,9 @@ func resetPassword() (string, error) {
 
 func serve(socket string) error {
 	reconcileConfiguredStorageAtStartup()
+	if err := minecraftInstances.reconcileNamesAtStartup(); err != nil {
+		log.Printf("instance name directory reconciliation: %v", err)
+	}
 	if _, _, err := bootstrap(); err != nil {
 		return err
 	}

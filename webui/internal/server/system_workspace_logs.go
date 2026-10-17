@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
 )
@@ -82,7 +83,7 @@ func (a *App) systemWorkspaceLog(w http.ResponseWriter, r *http.Request) {
 
 func validWorkspaceLogID(category, id string) bool {
 	switch category {
-	case "setup", "migration", "restore", "plugins", "reset", "operation":
+	case "setup", "migration", "restore", "plugins", "reset", "support", "operation":
 	default:
 		return false
 	}
@@ -147,4 +148,46 @@ func (a *App) systemWorkspaceFailedUnitJournal(w http.ResponseWriter, r *http.Re
 		w.Header().Set("Content-Disposition", `attachment; filename="justvoxel-failed-unit.log"`)
 	}
 	_, _ = w.Write(data)
+}
+
+type systemWorkspaceSupportAPI interface {
+	AdminGenerateSupportReport(context.Context, string) (api.DiagnosticLogEntry, error)
+}
+
+func (a *App) systemWorkspaceSupportReport(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	if !a.validCSRF(r) {
+		writeSystemWorkspaceError(w, http.StatusForbidden, "Invalid CSRF token.")
+		return
+	}
+	session, _, ok := a.systemWorkspaceIdentity(w, r, "administrator")
+	if !ok {
+		return
+	}
+	if r.URL.RawQuery != "" || r.ParseForm() != nil || len(r.PostForm) > 1 || len(r.PostForm["csrf"]) > 1 {
+		writeSystemWorkspaceError(w, http.StatusBadRequest, "Support report takes no input.")
+		return
+	}
+	for key := range r.PostForm {
+		if key != "csrf" {
+			writeSystemWorkspaceError(w, http.StatusBadRequest, "Support report takes no input.")
+			return
+		}
+	}
+	client, ok := a.api.(systemWorkspaceSupportAPI)
+	if !ok {
+		writeSystemWorkspaceError(w, http.StatusServiceUnavailable, "Support report is unavailable.")
+		return
+	}
+	entry, err := client.AdminGenerateSupportReport(r.Context(), session)
+	if err != nil {
+		a.writeSystemWorkspaceAPIError(w, err, "Support report could not be generated.")
+		return
+	}
+	_, timestampErr := time.Parse(time.RFC3339Nano, entry.Timestamp)
+	if entry.Category != "support" || !validWorkspaceLogID(entry.Category, entry.LogID) || timestampErr != nil || entry.OperationID != "" || entry.OperationType != "" || entry.State != "" {
+		writeSystemWorkspaceError(w, http.StatusBadGateway, "Support report is unavailable.")
+		return
+	}
+	writeSystemWorkspaceJSON(w, http.StatusOK, map[string]any{"ok": true, "log": entry})
 }

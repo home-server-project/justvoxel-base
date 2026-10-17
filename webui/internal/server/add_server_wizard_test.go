@@ -368,3 +368,56 @@ func TestLegacyWizardKeepsEditableDestinationsAndIndependentDraft(t *testing.T) 
 		t.Fatal("legacy setup changed the independent draft")
 	}
 }
+
+func TestMinecraftServersAddTileUsesApplianceConfiguration(t *testing.T) {
+	for _, configured := range []bool{false, true} {
+		label, target := "first-setup", "/setup"
+		if configured {
+			label, target = "configured", addServerBasePath
+		}
+		t.Run(label, func(t *testing.T) {
+			app, client := newAddServerTestApp(t)
+			client.configuration.Configured = configured
+			client.instances = nil
+			client.runtimes = nil
+			response := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/minecraft-servers", ""))
+			want := `class="panel minecraft-add-server-card" href="` + target + `"`
+			if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), want) || client.configurationHit == 0 {
+				t.Fatalf("tile must use authoritative configuration: %d %s", response.Code, response.Body.String())
+			}
+			if strings.Contains(response.Body.String(), "<!doctype") {
+				t.Fatal("Minecraft Servers must remain a dashboard workspace fragment")
+			}
+		})
+	}
+}
+
+func TestUnconfiguredAddServerRedirectsGETAndRefusesPOST(t *testing.T) {
+	app, client := newAddServerTestApp(t)
+	// Preserve a stale reviewed Add Server draft from before the appliance became
+	// unconfigured. A POST must never apply it through either creation path.
+	state := recommendedAddReview(t, app, "paper")
+	before, _ := addServerDrafts.get(app, "session-token")
+	client.configuration.Configured = false
+	response := addWizardRequest(app, http.MethodGet, "", nil)
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/setup" {
+		t.Fatalf("first-run GET: %d %v", response.Code, response.Header())
+	}
+	for _, suffix := range []string{"/start", "/recommended", "/server", "/review/apply", "/cancel"} {
+		response := addWizardRequest(app, http.MethodPost, suffix, addCreateValues(state))
+		if response.Code != http.StatusConflict || response.Header().Get("Location") != "" || !strings.Contains(response.Body.String(), "Complete appliance setup before adding a server.") {
+			t.Fatalf("stale POST %s: %d %s", suffix, response.Code, response.Body.String())
+		}
+	}
+	malformed := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example"+addServerBasePath+"/review/apply", "csrf=invalid&plan_fingerprint=stale"))
+	if malformed.Code != http.StatusForbidden || malformed.Header().Get("Location") != "" {
+		t.Fatalf("malformed POST did not fail closed: %d", malformed.Code)
+	}
+	after, _ := addServerDrafts.get(app, "session-token")
+	if !reflect.DeepEqual(before, after) || len(client.created) != 0 || len(client.backupWrites) != 0 {
+		t.Fatal("unconfigured Add Server mutated state")
+	}
+	if _, exists := firstRunSetupDrafts.get(app, "session-token"); exists {
+		t.Fatal("Add Server POST became first-run setup")
+	}
+}

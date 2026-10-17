@@ -111,6 +111,7 @@ type minecraftServersPageData struct {
 	Identity      api.SessionInfo
 	Message       string
 	Error         string
+	Configured    bool
 	Servers       []minecraftServerSummary
 	Selected      *minecraftServerSummary
 }
@@ -137,8 +138,13 @@ func (a *App) minecraftServersWorkspace(w http.ResponseWriter, r *http.Request) 
 		http.Redirect(w, r, "/password", http.StatusSeeOther)
 		return
 	}
-	session, _, identity, ok := a.adminDiscoveryRequest(w, r)
+	session, client, identity, ok := a.adminDiscoveryRequest(w, r)
 	if !ok {
+		return
+	}
+	configuration, err := client.AdminConfiguration(r.Context(), session)
+	if err != nil {
+		a.handleAdminDiscoveryError(w, r, err)
 		return
 	}
 	message := ""
@@ -148,7 +154,7 @@ func (a *App) minecraftServersWorkspace(w http.ResponseWriter, r *http.Request) 
 	if r.URL.Query().Get("created") == "yes" {
 		message = "Minecraft server created. It is stopped and ready for use."
 	}
-	data := minecraftServersPageData{Title: "Minecraft Servers", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI, CSRF: csrfFromRequest(r), Identity: identity, Message: message}
+	data := minecraftServersPageData{Title: "Minecraft Servers", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI, CSRF: csrfFromRequest(r), Identity: identity, Message: message, Configured: configuration.Configured}
 	data.Servers, data.Error = a.minecraftServerInventory(r.Context(), session)
 	a.renderAdminDiscovery(w, "minecraft_servers.html", data)
 }

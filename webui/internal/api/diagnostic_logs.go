@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 type DiagnosticLogEntry struct {
@@ -19,7 +20,7 @@ type DiagnosticLogEntry struct {
 }
 
 func validDiagnosticLogIdentifier(category, id string) bool {
-	return (category == "setup" || category == "migration" || category == "restore" || category == "plugins" || category == "reset" || category == "operation") && persistentOperationIDPattern.MatchString(id)
+	return (category == "setup" || category == "migration" || category == "restore" || category == "plugins" || category == "reset" || category == "operation" || category == "support") && persistentOperationIDPattern.MatchString(id)
 }
 
 func (c *Client) AdminDiagnosticLogs(ctx context.Context, session string) ([]DiagnosticLogEntry, error) {
@@ -47,11 +48,11 @@ func (c *Client) AdminDiagnosticLogs(ctx context.Context, session string) ([]Dia
 	var payload struct {
 		Logs []DiagnosticLogEntry `json:"logs"`
 	}
-	decoder := json.NewDecoder(io.LimitReader(response.Body, 128*1024))
+	decoder := json.NewDecoder(io.LimitReader(response.Body, 512*1024))
 	if err := decoder.Decode(&payload); err != nil {
 		return nil, err
 	}
-	if len(payload.Logs) > 200 {
+	if len(payload.Logs) > 6*200 {
 		return nil, errors.New("management API returned too many diagnostic logs")
 	}
 	for _, entry := range payload.Logs {
@@ -95,4 +96,47 @@ func (c *Client) AdminDiagnosticLog(ctx context.Context, session, category, id s
 		return nil, errors.New("management API returned oversized diagnostic log")
 	}
 	return data, nil
+}
+
+// AdminGenerateSupportReport has no caller-controlled paths, units or command arguments.
+func (c *Client) AdminGenerateSupportReport(ctx context.Context, session string) (DiagnosticLogEntry, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://unix/v1/admin/logs/support", nil)
+	if err != nil {
+		return DiagnosticLogEntry{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+session)
+	client := *c.http
+	// Four fixed commands may take four seconds each, plus bounded collection.
+	client.Timeout = 25 * time.Second
+	response, err := client.Do(req)
+	if err != nil {
+		return DiagnosticLogEntry{}, errors.New("support report is unavailable")
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusUnauthorized {
+		return DiagnosticLogEntry{}, ErrUnauthorized
+	}
+	if response.StatusCode == http.StatusForbidden {
+		return DiagnosticLogEntry{}, ErrPasswordChangeRequired
+	}
+	if response.StatusCode != http.StatusOK {
+		return DiagnosticLogEntry{}, readResponseError(response)
+	}
+	var payload struct {
+		OK  bool               `json:"ok"`
+		Log DiagnosticLogEntry `json:"log"`
+	}
+	decoder := json.NewDecoder(io.LimitReader(response.Body, 4096))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&payload); err != nil {
+		return DiagnosticLogEntry{}, errors.New("invalid support report response")
+	}
+	_, timestampErr := time.Parse(time.RFC3339Nano, payload.Log.Timestamp)
+	if !payload.OK || payload.Log.Category != "support" || !validDiagnosticLogIdentifier(payload.Log.Category, payload.Log.LogID) || timestampErr != nil || payload.Log.OperationID != "" || payload.Log.OperationType != "" || payload.Log.State != "" {
+		return DiagnosticLogEntry{}, errors.New("invalid support report identity")
+	}
+	if decoder.Decode(new(any)) != io.EOF {
+		return DiagnosticLogEntry{}, errors.New("invalid support report response")
+	}
+	return payload.Log, nil
 }

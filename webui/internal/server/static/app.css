@@ -1502,7 +1502,6 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 .plugins-workspace-shell{display:flex;flex-direction:column;height:100%;min-height:0;min-width:0}
 .plugins-workspace-header{display:flex;flex:none;align-items:center;justify-content:space-between;gap:1rem;min-height:48px;padding:var(--jv-space-sm,.55rem) var(--jv-workspace-edge,.8rem);border-bottom:1px solid var(--jv-border,#303942);cursor:move;touch-action:none}
 .plugins-workspace-header>div{display:flex;align-items:center;gap:.5rem}.plugins-workspace-header .eyebrow{margin:0}.plugins-workspace-header h2{margin:0;font-size:1.05rem}
-.plugins-server-context{flex:none;margin:0;padding:.6rem var(--jv-workspace-edge,.8rem);font-size:.86rem;color:var(--jv-muted,#aeb8c0);border-bottom:1px solid var(--jv-border,#303942)}
 .plugins-workspace-tabs{display:flex;flex:none;gap:var(--jv-space-xs,.35rem);padding:.42rem var(--jv-workspace-edge,.8rem);border-bottom:1px solid var(--jv-border,#303942);background:var(--jv-surface-sunken,#11171b);overflow-x:auto}
 .plugins-workspace-tabs button{border:1px solid transparent;background:transparent;color:var(--jv-muted,#aeb8c0)}
 .plugins-workspace-tabs button[aria-selected="true"]{border-color:#496454;background:#25382e;color:#c8f2d7}

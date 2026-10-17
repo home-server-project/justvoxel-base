@@ -96,23 +96,118 @@ func generatedInstanceName(instances []minecraftRegisteredInstance, id, software
 	return name
 }
 
+// Only the empty directory left by the wrong-service-group release is eligible.
+// Keep this policy separate so ownership decisions can be tested without root.
+func (s *minecraftInstanceStore) namesGroupRepairable(info os.FileInfo) bool {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return ok && info.IsDir() && int(stat.Uid) == s.uid && int(stat.Gid) != s.gid &&
+		info.Mode().Perm() == 0700 && info.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) == 0
+}
+
 func (s *minecraftInstanceStore) openNames(create bool) (*os.File, error) {
+	return s.openNamesDirectory(create, false)
+}
+
+// repair is used only by startup reconciliation, under the identity-directory lock.
+func (s *minecraftInstanceStore) openNamesDirectory(create, repair bool) (*os.File, error) {
 	path := filepath.Join(s.directory, "names")
+	created := false
 	if create {
-		if err := os.Mkdir(path, 0700); err != nil && !errors.Is(err, os.ErrExist) {
+		err := os.Mkdir(path, 0700)
+		if err != nil && !errors.Is(err, os.ErrExist) {
 			return nil, err
 		}
+		created = err == nil
 	}
 	dir, err := os.OpenFile(path, os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return nil, err
 	}
-	info, err := dir.Stat()
-	if err != nil || !s.private(info, 0700) {
+	fail := func(err error) (*os.File, error) {
 		dir.Close()
-		return nil, errors.New("instance name directory must be private and owned by root")
+		return nil, err
+	}
+	info, err := dir.Stat()
+	if err != nil {
+		return fail(err)
+	}
+	if !created && repair && !s.private(info, 0700) {
+		if err := s.repairNamesGroup(dir, info); err != nil {
+			return fail(err)
+		}
+		info, err = dir.Stat()
+		if err != nil {
+			return fail(err)
+		}
+	}
+	if created {
+		if err := dir.Chown(s.uid, s.gid); err != nil {
+			return fail(err)
+		}
+		if err := dir.Sync(); err != nil {
+			return fail(err)
+		}
+		info, err = dir.Stat()
+		if err != nil {
+			return fail(err)
+		}
+	}
+	if !s.private(info, 0700) {
+		return fail(errors.New("instance name directory must be private and owned by root"))
 	}
 	return dir, nil
+}
+
+// info comes from the no-follow directory FD. Recheck the normal contract after
+// repair; eligibility alone never makes malformed metadata acceptable.
+func (s *minecraftInstanceStore) repairNamesGroup(dir *os.File, info os.FileInfo) error {
+	if !s.namesGroupRepairable(info) {
+		return errors.New("instance name directory is not eligible for group repair")
+	}
+	// Even hidden files and unpublished temporary records disqualify repair.
+	entries, err := dir.ReadDir(1)
+	if len(entries) != 0 || err != io.EOF {
+		return errors.New("instance name directory is not verified empty")
+	}
+	if err := dir.Chown(s.uid, s.gid); err != nil {
+		return err
+	}
+	if err := dir.Sync(); err != nil {
+		return err
+	}
+	info, err = dir.Stat()
+	if err != nil {
+		return err
+	}
+	if !s.private(info, 0700) {
+		return errors.New("instance name directory must be private and owned by root")
+	}
+	return nil
+}
+
+// Reconcile existing optional metadata before serving inventory. Never create it.
+// Unsafe state remains untouched and continues to fail normal registry validation.
+func (s *minecraftInstanceStore) reconcileNamesAtStartup() error {
+	dir, err := s.openDirectory(false)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	if err := syscall.Flock(int(dir.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	defer syscall.Flock(int(dir.Fd()), syscall.LOCK_UN)
+	names, err := s.openNamesDirectory(false, true)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return names.Close()
 }
 
 func (s *minecraftInstanceStore) readNames() (map[string]minecraftInstanceNameRecord, error) {

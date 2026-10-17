@@ -595,6 +595,10 @@ func (a *App) setupWizardRequest(w http.ResponseWriter, r *http.Request, require
 			return "", nil, api.SessionInfo{}, false
 		}
 		if !configuration.Configured {
+			if r.Method == http.MethodGet {
+				http.Redirect(w, r, "/setup", http.StatusSeeOther)
+				return "", nil, api.SessionInfo{}, false
+			}
 			http.Error(w, "Complete appliance setup before adding a server.", http.StatusConflict)
 			return "", nil, api.SessionInfo{}, false
 		}
