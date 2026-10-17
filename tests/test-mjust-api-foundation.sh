@@ -96,9 +96,12 @@ grep -Fq 'uid != 0' "${authorization}" || fail 'local-root principal is not rest
 grep -Fq 'if sess, ok := localRootAdministrator(r); ok {' "${main}" || fail 'root-peer authorization is not wired into the Agent'
 
 grep -Fq 'EUID != 0' "${api_client}" || fail 'mJust API client does not require root'
+grep -Fxq '    GET|POST|PUT|PATCH|DELETE) ;;' "${api_client}" || fail 'mJust API client must accept exactly GET, POST, PUT, PATCH and DELETE'
 grep -Fq -- '--unix-socket' "${api_client}" || fail 'mJust API client does not use the Unix socket'
 grep -Fq 'JV_MANAGEMENT_SOCKET' "${api_client}" || fail 'mJust API client socket contract is missing'
 grep -Fq -- '--data-binary @-' "${api_client}" || fail 'mJust API request bodies must come from stdin'
+grep -Fq 'if [[ ${path} != /v1/* || ${path} == *$'"'"'\n'"'"'* || ${path} == *$'"'"'\r'"'"'* ]]; then' "${api_client}" || fail 'mJust API path validation must remain unchanged'
+grep -Fq -- '--fail-with-body' "${api_client}" || fail 'mJust API client must preserve curl HTTP failure behavior'
 if grep -Fq 'Authorization:' "${api_client}"; then
     fail 'mJust API client must not introduce a persistent bearer token'
 fi
@@ -171,6 +174,9 @@ grep -Fq 'unsupported Minecraft log format' "${operator_surfaces}" || fail 'Mana
 
 grep -Fq 'GET "/v1/minecraft/instances/${id}/configuration"' "${configuration_api}" || fail 'configuration read must address an immutable instance'
 grep -Fq 'PUT "/v1/minecraft/instances/${id}/configuration"' "${configuration_api}" || fail 'configuration write must address the same immutable instance'
+grep -Fq 'PUT "/v1/minecraft/instances/${id}/backups/settings"' "${configuration_api}" || fail 'backup settings write must address the selected immutable instance'
+grep -Fxq 'readonly JV_CONFIG_API_CLIENT=/usr/libexec/justvoxel/mjust/api-client' "${configuration_api}" || fail 'configuration must use the shared API client'
+grep -Fq '"${JV_CONFIG_API_CLIENT}" PUT "${path}" --data' "${configuration_api}" || fail 'configuration PUT must use the shared client and stdin body transport'
 grep -Fq 'GET /v1/status' "${configuration_api}" || fail 'configuration RAM guidance must use host status'
 grep -Fq 'configuration-api.sh' "${configure}" || fail 'main mJust configure frontend does not use the configuration API helper'
 grep -Fq 'configuration-api.sh' "${configure_max}" || fail 'maximum-player frontend does not use the configuration API helper'

@@ -3,8 +3,23 @@ set -euo pipefail
 source /usr/libexec/justvoxel/mjust/common.sh
 source /usr/libexec/justvoxel/mjust/ui.sh
 
-configured=no
-[[ -e /etc/containers/systemd/minecraft.container ]] && configured=yes
+configured=unavailable
+
+refresh_inventory() {
+    local inventory count
+    local -a client=(/usr/libexec/justvoxel/mjust/api-client)
+    configured=unavailable
+    if (( EUID != 0 )); then client=(sudo "${client[@]}"); fi
+    inventory="$("${client[@]}" GET /v1/minecraft/instances/runtime)" || return 0
+    count="$(jq -ers '
+        select(length == 1) | .[0] | select(type == "object") |
+        .instances | select(type == "array") |
+        select(all(.[]; type == "object" and
+            (.id | type == "string" and test("^jv-[a-z0-9]{6,12}$")))) |
+        length
+    ' <<<"${inventory}" 2>/dev/null)" || return 0
+    if [[ ${count} == 0 ]]; then configured=no; else configured=yes; fi
+}
 
 preview() {
     case "${1:-}" in
@@ -262,8 +277,10 @@ select_rich() {
 
     if [[ ${configured} == yes ]]; then
         rows=$'status\tStatus\nplayers\tPlayers\nconfigure\tConfigure Minecraft\nservice\tStart / Stop / Restart\nwhitelist\tWhitelist\nbackups\tBackups\nmigration\tMigration\nstorage\tStorage\nupdate\tUpdate Minecraft\nsystem\tSystem\nvalidate\tValidation\nlogs\tLogs\nadvanced\tAdvanced\nexit\tExit'
-    else
+    elif [[ ${configured} == no ]]; then
         rows=$'setup\tFirst setup\nstatus\tStatus\nstorage\tStorage\nsystem\tSystem\nexit\tExit'
+    else
+        rows=$'status\tStatus\nsystem\tSystem\nexit\tExit'
     fi
 
     cols="$(jui_terminal_cols)"
@@ -315,14 +332,20 @@ select_compact() {
             'Whitelist') printf 'whitelist' ;; 'Backups') printf 'backups' ;; 'Migration') printf 'migration' ;; 'Storage') printf 'storage' ;; 'Update Minecraft') printf 'update' ;; 'System') printf 'system' ;;
             'Validation') printf 'validate' ;; 'Logs') printf 'logs' ;; 'Advanced') printf 'advanced' ;; *) printf 'exit' ;;
         esac
-    else
+    elif [[ ${configured} == no ]]; then
         choice="$(jui_choose 'JustVoxel' 'First setup' 'Status' 'Storage' 'System' 'Exit')" || { printf 'exit'; return 0; }
         case "${choice}" in 'First setup') printf 'setup' ;; 'Status') printf 'status' ;; 'Storage') printf 'storage' ;; 'System') printf 'system' ;; *) printf 'exit' ;; esac
+    else
+        choice="$(jui_choose 'JustVoxel' 'Status' 'System' 'Exit')" || { printf 'exit'; return 0; }
+        case "${choice}" in 'Status') printf 'status' ;; 'System') printf 'system' ;; *) printf 'exit' ;; esac
     fi
 }
 
 while true; do
-    [[ -e /etc/containers/systemd/minecraft.container ]] && configured=yes || configured=no
+    refresh_inventory
+    if [[ ${configured} == unavailable ]]; then
+        echo 'Management API / Minecraft inventory unavailable.' >&2
+    fi
     if jui_is_interactive && command -v fzf >/dev/null 2>&1; then action="$(select_rich)"; else action="$(select_compact)"; fi
     echo
     case "${action}" in

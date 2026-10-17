@@ -17,7 +17,7 @@ path="${2:-}"
 body_mode="${3:-}"
 
 case "${method}" in
-    GET|POST|PATCH|DELETE) ;;
+    GET|POST|PUT|PATCH|DELETE) ;;
     *)
         usage
         exit 2

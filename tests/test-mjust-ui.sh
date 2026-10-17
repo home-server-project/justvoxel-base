@@ -79,6 +79,66 @@ for id in setup status players configure service whitelist backups migration sto
     grep -Fq "${id})" "${menu}" || fail "menu preview/dispatch id missing: ${id}"
 done
 
+for forbidden in '/etc/containers/systemd/minecraft.container' 'minecraft-jv-' '/v1/admin/configuration' '.instances[0]' 'jv_select_registered_instance'; do
+    if grep -Fq "${forbidden}" "${menu}"; then fail "menu inventory must not use fallback authority or select a server: ${forbidden}"; fi
+done
+grep -Fq 'local -a client=(/usr/libexec/justvoxel/mjust/api-client)' "${menu}" || fail 'menu must use the shared API client'
+grep -Fq 'if (( EUID != 0 )); then client=(sudo "${client[@]}"); fi' "${menu}" || fail 'unprivileged menu inventory must use sudo'
+grep -Fq '"${client[@]}" GET /v1/minecraft/instances/runtime' "${menu}" || fail 'menu must request authoritative runtime inventory'
+grep -A1 -Fx 'while true; do' "${menu}" | grep -Fxq '    refresh_inventory' || fail 'main loop must refresh inventory before showing the menu'
+grep -Fq 'Management API / Minecraft inventory unavailable.' "${menu}" || fail 'unavailable inventory must have a concise diagnostic'
+
+# Exercise the real inventory parsing, replacing only the transport and EUID
+# so root and ordinary-user paths can be covered without appliance access.
+(
+    source <(sed -n '/^refresh_inventory() {/,/^}/p' "${menu}" |
+        sed 's@/usr/libexec/justvoxel/mjust/api-client@menu_api_client@g; s/EUID/menu_test_euid/g')
+    menu_api_client() {
+        printf 'direct %s\n' "$*" >> "${visible}"
+        printf '%s' "${inventory_response}"
+        return "${inventory_rc}"
+    }
+    sudo() {
+        printf 'sudo %s\n' "$*" >> "${visible}"
+        [[ $1 == menu_api_client ]] || return 1
+        shift
+        menu_api_client "$@"
+    }
+    for menu_test_euid in 0 1000; do
+        inventory_rc=0
+        for inventory_response in \
+            '{"instances":[]}' \
+            '{"instances":[{"id":"jv-abc123"}]}' \
+            '{"instances":[{"id":"jv-abc123"},{"id":"jv-def456"}]}'; do
+            : > "${visible}"
+            configured=unavailable
+            refresh_inventory
+            if [[ ${inventory_response} == '{"instances":[]}' ]]; then expected=no; else expected=yes; fi
+            [[ ${configured} == "${expected}" ]] || fail "incorrect inventory state: ${inventory_response}"
+            expected='direct GET /v1/minecraft/instances/runtime'
+            if (( menu_test_euid != 0 )); then expected=$'sudo menu_api_client GET /v1/minecraft/instances/runtime\n'"${expected}"; fi
+            [[ $(cat "${visible}") == "${expected}" ]] || fail 'inventory request used incorrect root/sudo transport'
+        done
+        # Include invalid later IDs, missing fields/types and multiple JSON documents.
+        for inventory_response in \
+            'not JSON' '{}' '[]' 'null' '{"instances":null}' '{"instances":{}}' \
+            '{"instances":[{"id":"minecraft"}]}' \
+            '{"instances":[{"id":"jv-abc123"},{"id":"bad"}]}' \
+            '{"instances":[{}]}' '{"instances":[{"id":123}]}' \
+            '{"instances":["jv-abc123"]}' \
+            '{"instances":[]} {"instances":[]}'; do
+            configured=yes
+            refresh_inventory
+            [[ ${configured} == unavailable ]] || fail "invalid inventory was treated as healthy or empty: ${inventory_response}"
+        done
+        inventory_rc=1
+        inventory_response='{"instances":[]}'
+        configured=no
+        refresh_inventory
+        [[ ${configured} == unavailable ]] || fail 'failed API request must not be treated as zero servers'
+    done
+)
+
 # Capture both main-menu selectors without invoking any appliance commands.
 (
     source <(sed -n '/^select_rich() {/,/^}/p; /^select_compact() {/,/^}/p; /^migration_menu() {/,/^}/p' "${menu}")
@@ -100,8 +160,23 @@ done
     configured=yes
     select_rich >/dev/null
     grep -Fxq $'migration\tMigration' "${visible}" || fail 'configured rich menu must retain Migration'
+    expected=$'status\tStatus\nplayers\tPlayers\nconfigure\tConfigure Minecraft\nservice\tStart / Stop / Restart\nwhitelist\tWhitelist\nbackups\tBackups\nmigration\tMigration\nstorage\tStorage\nupdate\tUpdate Minecraft\nsystem\tSystem\nvalidate\tValidation\nlogs\tLogs\nadvanced\tAdvanced\nexit\tExit'
+    [[ $(cat "${visible}") == "${expected}" ]] || fail 'configured rich menu has incorrect entries or order'
     select_compact >/dev/null
     grep -Fxq 'Migration' "${visible}" || fail 'configured compact menu must retain Migration'
+    expected=$'JustVoxel\nStatus\nPlayers\nConfigure Minecraft\nStart / Stop / Restart\nWhitelist\nBackups\nMigration\nStorage\nUpdate Minecraft\nSystem\nValidation\nLogs\nAdvanced\nExit'
+    [[ $(cat "${visible}") == "${expected}" ]] || fail 'configured compact menu has incorrect entries or order'
+
+    configured=unavailable
+    select_rich >/dev/null
+    expected=$'status\tStatus\nsystem\tSystem\nexit\tExit'
+    [[ $(cat "${visible}") == "${expected}" ]] || fail 'unavailable rich menu must expose only Status, System and Exit'
+    if grep -Fq 'First setup' "${visible}"; then fail 'unavailable rich menu must not offer First setup'; fi
+    select_compact >/dev/null
+    expected=$'JustVoxel\nStatus\nSystem\nExit'
+    [[ $(cat "${visible}") == "${expected}" ]] || fail 'unavailable compact menu must expose only Status, System and Exit'
+    if grep -Fq 'First setup' "${visible}"; then fail 'unavailable compact menu must not offer First setup'; fi
+
     migration_menu
     expected=$'Migration\nExport server\nImport server\nRecover / finalize interrupted import\nBack'
     [[ $(cat "${visible}") == "${expected}" ]] || fail 'Migration submenu has incorrect entries or order'
