@@ -5,16 +5,12 @@ source /usr/libexec/justvoxel/mjust/managed-crossplay.sh
 source /usr/libexec/justvoxel/mjust/update-policy.sh
 require_root
 instance_args=()
-JV_INSTANCE_CONTAINER=minecraft
-JV_INSTANCE_UNIT=minecraft.service
 if [[ ${1:-} == --instance ]]; then
     [[ $# -ge 2 ]] || exit 1
     source /usr/libexec/justvoxel/mjust/instance-context.sh
     jv_load_instance "$2" || exit 1
     instance_args=(--instance "$2")
     shift 2
-elif [[ -r ${JV_CONFIG:-/etc/justvoxel/justvoxel.conf} ]]; then
-    require_config
 fi
 
 configured_type="${MINECRAFT_SERVER_TYPE-paper}"
@@ -31,6 +27,11 @@ while [[ ${1:-} == --* ]]; do
     shift 2
 done
 (( $# <= 3 )) || exit 1
+# Only the exact three-positional-argument setup preview is ID-less.
+if (( $# != 3 && ${#instance_args[@]} == 0 )); then
+    echo 'ERROR: --instance jv-... is required.' >&2
+    exit 2
+fi
 [[ ${target_image_tag} =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || exit 1
 # Preserve setup preview: registry validation is only for an explicit new tag.
 if [[ ${target_image_tag} != "${configured_image_tag}" ]]; then
@@ -51,9 +52,11 @@ software_changed=false
 channel_changed=false
 [[ ${configured_image_tag} == "${target_image_tag}" ]] || channel_changed=true
 installed=''
-latest_log="${DATA_PATH:-/var/lib/justvoxel/minecraft}/logs/latest.log"
-if (( $# != 3 )) && [[ -r ${latest_log} ]]; then
-    installed="$(grep -Eo 'Starting minecraft server version [0-9A-Za-z._-]+' "${latest_log}" 2>/dev/null | tail -n1 | awk '{print $5}' || true)"
+if (( $# != 3 )); then
+    latest_log="${DATA_PATH}/logs/latest.log"
+    if [[ -r ${latest_log} ]]; then
+        installed="$(grep -Eo 'Starting minecraft server version [0-9A-Za-z._-]+' "${latest_log}" 2>/dev/null | tail -n1 | awk '{print $5}' || true)"
+    fi
 fi
 available="$(resolve_latest_server_version || true)"
 available_channel=''
@@ -196,7 +199,7 @@ if (( $# != 3 )); then
         --arg configured_tag "${configured_image_tag}" --arg proposed_tag "${target_image_tag}" \
         --arg current_image "${current_image}" --arg local_digest "${local_digest}" --arg local_id "${local_id}" \
         --arg running_id "${running_id}" --arg service_state "${service_state}" \
-        --arg config_identity "$(if [[ -n ${JV_INSTANCE_ID:-} ]]; then sha256sum "/etc/justvoxel/instances/${JV_INSTANCE_ID}/config.json"; elif [[ -r ${JV_CONFIG} ]]; then sha256sum "${JV_CONFIG}"; fi | cut -d ' ' -f1)" \
+        --arg config_identity "$(sha256sum "/etc/justvoxel/instances/${JV_INSTANCE_ID}/config.json" | cut -d ' ' -f1)" \
         --arg data_path "${DATA_PATH:-}" --arg image "$(minecraft_image_ref)" --arg digest "${remote_digest}" \
         --arg installed "${installed}" --argjson geyser "${geyser_metadata}" --argjson floodgate "${floodgate_metadata}" \
         '[$server_type,$configured_type,$candidate,$policy,$configured,$bedrock,$data_path,$image,$digest,$installed,$geyser,$floodgate,$configured_tag,$proposed_tag,$current_image,$local_digest,$local_id,$running_id,$service_state,$config_identity]' | sha256sum | cut -d ' ' -f1)"
