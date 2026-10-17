@@ -414,10 +414,10 @@ Authenticated routes beneath `/v1/minecraft/instances/{id}/backups` are:
 | `POST` (no suffix) | Administrator, Operator | `{}` requests Backup Now through the native service |
 | `POST /run` | Local root Unix peer only | Internal synchronous systemd worker entry; WebUI sessions cannot call it |
 
-Manual requests return acceptance, not backup success. Operators use the same
-SQL allowance and global/personal cooldown as legacy manual backups, under the
-same process mutex. Switching instance or using the legacy route does not reset
-those limits. Systemd rejection does not consume the allowance; an accepted job
+Manual requests return acceptance, not backup success. Operators use a
+shared SQL allowance and global/personal cooldown across all instance Backup Now
+requests, under the same process mutex. Switching instance does not reset those
+limits. Systemd rejection does not consume the allowance; an accepted job
 consumes it even if the subsequent backup fails. Reads never create settings,
 probe files or folders, apply configuration, start Minecraft, or start a backup.
 The inventory only exposes a strict metadata allowlist, with bounded capture;
@@ -486,7 +486,7 @@ editing or reset is required. Status/metadata write failure is never success.
 
 Added Go fixtures cover independent lifecycle, occupied/unknown players,
 timeouts, release-before-start, restart failure/intent, maintenance collisions,
-shared legacy/operator quota, authentication, strict inputs, read-only endpoints,
+shared Operator quota, authentication, strict inputs, read-only endpoints,
 30-minute/midnight/legacy spacing, persistent timers, disabled schedules, failed
 apply rollback and interrupted schedule recovery. `tests/test-instance-backups.sh`
 uses temporary directories and mocked mount/runtime tools for archive contents,

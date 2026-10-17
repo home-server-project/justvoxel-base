@@ -3,9 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
 )
@@ -25,16 +23,6 @@ func (a *App) sessionInfo(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(identity); err != nil {
 		http.Error(w, "could not encode session", http.StatusInternalServerError)
 	}
-}
-
-func manualBackupErrorMessage(result api.ManualBackupResponse, err error) string {
-	if result.Reason == "backup_cooldown" && result.RetryAfterSeconds > 0 {
-		return "Backup available in " + formatRemaining(result.RetryAfterSeconds) + "."
-	}
-	if result.AdministratorResetRequired || result.Reason == "backup_limit_reached" {
-		return "Backup unavailable. Administrator reset required."
-	}
-	return apiMessage(err, "Manual backup could not be started.")
 }
 
 func (a *App) quickLookManualBackup(w http.ResponseWriter, r *http.Request) {
@@ -93,17 +81,4 @@ func (a *App) handleRolePageError(w http.ResponseWriter, r *http.Request, err er
 		return
 	}
 	http.Error(w, "management service unavailable", http.StatusBadGateway)
-}
-
-func formatRemaining(seconds int) string {
-	if seconds < 0 {
-		seconds = 0
-	}
-	d := time.Duration(seconds) * time.Second
-	minutes := int(d / time.Minute)
-	secondsPart := int((d % time.Minute) / time.Second)
-	if minutes > 0 {
-		return fmt.Sprintf("%dm %02ds", minutes, secondsPart)
-	}
-	return fmt.Sprintf("%ds", secondsPart)
 }

@@ -581,7 +581,7 @@ func (s *server) instanceBackupNow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if guard != nil {
-		if _, err = guard.accept(actor); err != nil {
+		if _, err = guard.acceptTarget(actor, id); err != nil {
 			writeError(w, 503, "Backup requested but allowance accounting failed.")
 			return
 		}

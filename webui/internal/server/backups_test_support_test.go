@@ -10,7 +10,6 @@ import (
 type fakeNewBackupsAPI struct {
 	fakeAPI
 	role                          string
-	backupResult                  api.ManualBackupResponse
 	backupErr                     error
 	backupCalls                   int
 	discoveryCalls                int
@@ -59,17 +58,6 @@ func (f *fakeNewBackupsAPI) Session(_ context.Context, session string) (api.Sess
 		role = "administrator"
 	}
 	return api.SessionInfo{Username: "voxel", Role: role, AuthSource: "system"}, nil
-}
-
-func (f *fakeNewBackupsAPI) ManualBackup(_ context.Context, session string) (api.ManualBackupResponse, error) {
-	if session != "session-token" {
-		return api.ManualBackupResponse{}, api.ErrUnauthorized
-	}
-	f.backupCalls++
-	if f.backupResult.Message == "" && f.backupErr == nil {
-		return api.ManualBackupResponse{OK: true, Message: "Manual backup requested."}, nil
-	}
-	return f.backupResult, f.backupErr
 }
 
 func (f *fakeNewBackupsAPI) AdminConfiguration(_ context.Context, session string) (api.AdminConfigurationDiscovery, error) {
@@ -181,15 +169,18 @@ func (f *fakeNewBackupsAPI) MinecraftInstanceConfiguration(context.Context, stri
 func (f *fakeNewBackupsAPI) MinecraftInstanceStatus(context.Context, string, string) (api.MinecraftInstanceStatus, error) {
 	return api.MinecraftInstanceStatus{ID: "jv-family1", State: "stopped"}, nil
 }
-func (f *fakeNewBackupsAPI) MinecraftInstanceBackups(ctx context.Context, session, id, action string, request any) (json.RawMessage, error) {
+func (f *fakeNewBackupsAPI) MinecraftInstanceBackups(_ context.Context, session, id, action string, request any) (json.RawMessage, error) {
 	if id != "jv-family1" {
 		return nil, &api.ResponseError{StatusCode: 404}
 	}
 	switch action {
 	case "now":
-		result, err := f.ManualBackup(ctx, session)
-		if err != nil {
-			return nil, &api.ResponseError{StatusCode: 400, Message: manualBackupErrorMessage(result, err)}
+		if session != "session-token" {
+			return nil, api.ErrUnauthorized
+		}
+		f.backupCalls++
+		if f.backupErr != nil {
+			return nil, f.backupErr
 		}
 		return json.RawMessage(`{"ok":true}`), nil
 	case "inventory":

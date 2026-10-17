@@ -128,7 +128,9 @@ func (a *App) backupsWorkspacePage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) backupsWorkspaceBackupNow(w http.ResponseWriter, r *http.Request) {
-	a.selectedBackupsWorkspace(w, r)
+	if !a.selectedBackupsWorkspace(w, r) {
+		http.NotFound(w, r)
+	}
 }
 
 func (a *App) backupsWorkspaceAutomaticPlan(w http.ResponseWriter, r *http.Request) {

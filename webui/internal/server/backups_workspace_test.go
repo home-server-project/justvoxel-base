@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"html/template"
 	"net/http"
 	"strings"
@@ -344,35 +343,17 @@ func TestQuickLookManualBackupAPIRoles(t *testing.T) {
 			t.Fatalf("password change status=%d calls=%d", response.Code, client.backupCalls)
 		}
 	})
-	for _, tc := range []struct {
-		name    string
-		result  api.ManualBackupResponse
-		message string
-	}{
-		{"normal-failure", api.ManualBackupResponse{}, "Manual backup could not be started."},
-		{"cooldown", api.ManualBackupResponse{Reason: "backup_cooldown", RetryAfterSeconds: 65}, "Backup available in 1m 05s."},
-		{"reset-required", api.ManualBackupResponse{AdministratorResetRequired: true}, "Backup unavailable. Administrator reset required."},
-		{"limit-reached", api.ManualBackupResponse{Reason: "backup_limit_reached"}, "Backup unavailable. Administrator reset required."},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			client := &fakeNewBackupsAPI{role: "operator", backupResult: tc.result, backupErr: errors.New("backup rejected")}
-			app, err := New(client, Config{ManagementAPI: "v1"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			response := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/api/backups/manual", "csrf=csrf-token"))
-			var result struct {
-				OK    bool   `json:"ok"`
-				Error string `json:"error"`
-			}
-			if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
-				t.Fatal(err)
-			}
-			if response.Code != http.StatusBadRequest || result.OK || result.Error != tc.message || client.backupCalls != 1 {
-				t.Fatalf("backup rejection status=%d result=%+v calls=%d", response.Code, result, client.backupCalls)
-			}
-		})
-	}
+	t.Run("instance-backup-error", func(t *testing.T) {
+		client := &fakeNewBackupsAPI{role: "operator", backupErr: &api.ResponseError{StatusCode: 429, Message: "backup_cooldown"}}
+		app, err := New(client, Config{ManagementAPI: "v1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		response := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/api/backups/manual", "csrf=csrf-token"))
+		if response.Code != 429 || !strings.Contains(response.Body.String(), "backup_cooldown") || client.backupCalls != 1 {
+			t.Fatalf("status=%d body=%s calls=%d", response.Code, response.Body.String(), client.backupCalls)
+		}
+	})
 }
 
 type quickLookPasswordChangeAPI struct {

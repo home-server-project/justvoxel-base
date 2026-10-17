@@ -5,11 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"math"
-	"net/http"
-	"os/exec"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 )
@@ -17,7 +12,6 @@ import (
 const (
 	operatorBackupLimit    = 2
 	operatorBackupCooldown = 15 * time.Minute
-	manualBackupService    = "minecraft-backup.service"
 )
 
 var operatorBackupMu sync.Mutex
@@ -34,138 +28,6 @@ type operatorBackupGuard struct {
 	store  *webUIStore
 	tx     *sql.Tx
 	userID int64
-}
-
-type operatorBackupUsageView struct {
-	BackupUsed      int `json:"backup_used"`
-	BackupLimit     int `json:"backup_limit"`
-	CooldownSeconds int `json:"cooldown_seconds"`
-}
-
-type manualBackupResponse struct {
-	OK            bool                     `json:"ok"`
-	Message       string                   `json:"message"`
-	OperatorUsage *operatorBackupUsageView `json:"operator_usage,omitempty"`
-}
-
-var backupServiceState = func(ctx context.Context) (string, error) {
-	cmd := exec.CommandContext(ctx, "systemctl", "show", "--property=ActiveState", "--value", manualBackupService)
-	output, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(output)), nil
-}
-
-var requestManualBackup = func(ctx context.Context) error {
-	return exec.CommandContext(ctx, "systemctl", "--no-block", "start", manualBackupService).Run()
-}
-
-func (s *server) manualBackup(w http.ResponseWriter, r *http.Request) {
-	sess, ok := s.requireRoles(w, r, roleAdministrator, roleOperator)
-	if !ok {
-		return
-	}
-
-	operatorBackupMu.Lock()
-	defer operatorBackupMu.Unlock()
-
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-	state, err := backupServiceState(ctx)
-	if err != nil {
-		if s.store != nil {
-			_ = s.store.recordAuditEvent(sess, "manual_backup", manualBackupService, false, "backup service state unavailable")
-		}
-		writeError(w, http.StatusServiceUnavailable, "backup service is unavailable")
-		return
-	}
-	if state == "active" || state == "activating" || state == "deactivating" {
-		if s.store != nil {
-			_ = s.store.recordAuditEvent(sess, "manual_backup", manualBackupService, false, "backup already running")
-		}
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"error":  "backup already running",
-			"reason": "backup_in_progress",
-		})
-		return
-	}
-
-	if sess.Role == roleAdministrator {
-		if err := requestManualBackup(ctx); err != nil {
-			if s.store != nil {
-				_ = s.store.recordAuditEvent(sess, "manual_backup", manualBackupService, false, "systemd rejected manual backup request")
-			}
-			writeError(w, http.StatusServiceUnavailable, "manual backup could not be started")
-			return
-		}
-		if s.store != nil {
-			_ = s.store.recordAuditEvent(sess, "manual_backup", manualBackupService, true, "administrator manual backup accepted")
-		}
-		writeJSON(w, http.StatusAccepted, manualBackupResponse{OK: true, Message: "Manual backup requested."})
-		return
-	}
-
-	if s.store == nil {
-		writeError(w, http.StatusForbidden, "operator backup controls are unavailable")
-		return
-	}
-	guard, availability, err := s.store.beginOperatorBackup(sess.WebUserID)
-	if err != nil {
-		_ = s.store.recordAuditEvent(sess, "manual_backup", manualBackupService, false, "operator backup eligibility check failed")
-		writeError(w, http.StatusServiceUnavailable, "operator backup allowance is unavailable")
-		return
-	}
-	if !availability.Allowed {
-		_ = s.store.recordAuditEvent(sess, "manual_backup", manualBackupService, false, availability.Reason)
-		switch availability.Reason {
-		case "backup_limit_reached":
-			writeJSON(w, http.StatusConflict, map[string]any{
-				"error":                        "backup allowance exhausted",
-				"reason":                       availability.Reason,
-				"backup_used":                  availability.Used,
-				"backup_limit":                 availability.Limit,
-				"administrator_reset_required": true,
-			})
-		case "backup_cooldown":
-			seconds := int(math.Ceil(availability.RetryAfter.Seconds()))
-			if seconds < 1 {
-				seconds = 1
-			}
-			w.Header().Set("Retry-After", strconv.Itoa(seconds))
-			writeJSON(w, http.StatusTooManyRequests, map[string]any{
-				"error":               "backup cooldown active",
-				"reason":              availability.Reason,
-				"backup_used":         availability.Used,
-				"backup_limit":        availability.Limit,
-				"retry_after_seconds": seconds,
-			})
-		default:
-			writeError(w, http.StatusConflict, "operator backup is not currently available")
-		}
-		return
-	}
-
-	if err := requestManualBackup(ctx); err != nil {
-		guard.cancel()
-		_ = s.store.recordAuditEvent(sess, "manual_backup", manualBackupService, false, "systemd rejected manual backup request")
-		writeError(w, http.StatusServiceUnavailable, "manual backup could not be started")
-		return
-	}
-	used, err := guard.accept(sess)
-	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "Manual backup was requested, but backup allowance accounting failed")
-		return
-	}
-	writeJSON(w, http.StatusAccepted, manualBackupResponse{
-		OK:      true,
-		Message: "Manual backup requested.",
-		OperatorUsage: &operatorBackupUsageView{
-			BackupUsed:      used,
-			BackupLimit:     operatorBackupLimit,
-			CooldownSeconds: int(operatorBackupCooldown.Seconds()),
-		},
-	})
 }
 
 func (s *webUIStore) beginOperatorBackup(userID int64) (*operatorBackupGuard, operatorBackupAvailability, error) {
@@ -243,10 +105,15 @@ func (g *operatorBackupGuard) cancel() {
 	g.tx = nil
 }
 
-func (g *operatorBackupGuard) accept(actor session) (int, error) {
+func (g *operatorBackupGuard) acceptTarget(actor session, target string) (int, error) {
 	if g == nil || g.tx == nil || g.store == nil {
 		return 0, errors.New("operator backup guard is not active")
 	}
+	if !instanceIDPattern.MatchString(target) {
+		g.cancel()
+		return 0, errors.New("invalid Minecraft instance ID")
+	}
+
 	now := g.store.now().UTC()
 	nowText := formatWebUIStoreTime(now)
 	if _, err := g.tx.Exec(`UPDATE operator_usage
@@ -265,7 +132,7 @@ func (g *operatorBackupGuard) accept(actor session) (int, error) {
 		g.cancel()
 		return 0, fmt.Errorf("update global operator backup state: %w", err)
 	}
-	if err := insertAuditEventTx(g.tx, now, actor, "manual_backup", manualBackupService, true, fmt.Sprintf("operator backup allowance %d/%d", used, operatorBackupLimit)); err != nil {
+	if err := insertAuditEventTx(g.tx, now, actor, "instance_backup", target, true, fmt.Sprintf("operator backup allowance %d/%d", used, operatorBackupLimit)); err != nil {
 		g.cancel()
 		return 0, err
 	}

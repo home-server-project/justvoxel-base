@@ -407,3 +407,34 @@ func TestServerSelectorListsOnlyRealImmutableIdentities(t *testing.T) {
 		t.Fatal("selection changed or read server runtime")
 	}
 }
+
+func TestBackupNowRequiresSelectedImmutableInstance(t *testing.T) {
+	for _, path := range []string{"/api/backups/manual", "/workspace/backups/backup"} {
+		t.Run(path, func(t *testing.T) {
+			app, f := phase7App(t)
+			w := phase7Request(app, "POST", path, "csrf=csrf-token")
+			if w.Code != http.StatusConflict || len(f.backupCalls) != 0 {
+				t.Fatal(w.Code, w.Body.String(), f.backupCalls)
+			}
+			for _, id := range []string{"jv-family1", "jv-kids001"} {
+				f.backupCalls = nil
+				w = phase7Request(app, "POST", path+"?server="+id, "csrf=csrf-token")
+				if w.Code != http.StatusOK {
+					t.Fatal(w.Code, w.Body.String())
+				}
+				nowCalls := 0
+				for _, call := range f.backupCalls {
+					if !strings.HasPrefix(call, id+":") {
+						t.Fatal("backup escaped selected target", call)
+					}
+					if call == id+":now" {
+						nowCalls++
+					}
+				}
+				if nowCalls != 1 {
+					t.Fatal("Backup Now calls", f.backupCalls)
+				}
+			}
+		})
+	}
+}

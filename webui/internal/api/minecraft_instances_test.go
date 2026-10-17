@@ -155,7 +155,7 @@ func TestPhase7SelectedWrappersNeverUseLegacyContracts(t *testing.T) {
 			t.Fatal(action, e)
 		}
 	}
-	for _, want := range []string{"PUT /v1/minecraft/instances/jv-family1/configuration", "GET /v1/minecraft/instances/jv-family1/players", "POST /v1/minecraft/instances/jv-family1/name", "POST /v1/minecraft/instances/jv-family1/delete", "POST /v1/minecraft/instances/jv-family1/backups/restore/apply"} {
+	for _, want := range []string{"PUT /v1/minecraft/instances/jv-family1/configuration", "GET /v1/minecraft/instances/jv-family1/players", "POST /v1/minecraft/instances/jv-family1/backups", "POST /v1/minecraft/instances/jv-family1/name", "POST /v1/minecraft/instances/jv-family1/delete", "POST /v1/minecraft/instances/jv-family1/backups/restore/apply"} {
 		found := false
 		for _, request := range requests {
 			if request == want {

@@ -353,9 +353,8 @@ func TestInstanceBackupAPIReadOnlyAndAuthorization(t *testing.T) {
 		t.Fatal("unauthenticated read", rr.Code)
 	}
 }
-func TestInstanceOperatorQuotaSharedWithLegacy(t *testing.T) {
+func TestInstanceOperatorQuotaSharedAcrossInstances(t *testing.T) {
 	f := newInstanceBackupFixture(t)
-	withBackupTestDependencies(t)
 	store, _ := openTestWebUIStore(t)
 	now := time.Now().UTC()
 	store.now = func() time.Time { return now }
@@ -378,20 +377,106 @@ func TestInstanceOperatorQuotaSharedWithLegacy(t *testing.T) {
 	if code := post(f.configs[1].ID); code != 429 {
 		t.Fatal("instance switch bypassed cooldown", code)
 	}
+	usedFirst, _, err := store.operatorBackupUsage(user.ID)
+	if err != nil || usedFirst != 1 {
+		t.Fatal(usedFirst, err)
+	}
 	now = now.Add(16 * time.Minute)
-	requestManualBackup = func(context.Context) error { return nil }
-	rr := httptest.NewRecorder()
-	s.manualBackup(rr, authorizedRequest("POST", "/v1/backups/manual", ""))
-	if rr.Code != 202 {
-		t.Fatal(rr.Code)
+	if code := post(f.configs[1].ID); code != 202 {
+		t.Fatal(code)
 	}
 	now = now.Add(16 * time.Minute)
 	if code := post(f.configs[1].ID); code != 409 {
-		t.Fatal("legacy/instance quota separated", code)
+		t.Fatal("instance quotas separated", code)
+	}
+	for _, id := range []string{f.configs[0].ID, f.configs[1].ID} {
+		var audits int
+		if err := store.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE action='instance_backup' AND target=? AND success=1`, id).Scan(&audits); err != nil || audits != 1 {
+			t.Fatal(id, audits, err)
+		}
+	}
+	var notifications int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM notifications WHERE kind='operator_backup_limit' AND user_id=? AND resolved_at IS NULL`, user.ID).Scan(&notifications); err != nil || notifications != 1 {
+		t.Fatal(notifications, err)
+	}
+	starts := []string{}
+	for _, call := range f.scheduleCalls {
+		if strings.HasPrefix(call, "--no-block start ") {
+			starts = append(starts, call)
+		}
+	}
+	wantStarts := []string{"--no-block start minecraft-backup-" + f.configs[0].ID + ".service", "--no-block start minecraft-backup-" + f.configs[1].ID + ".service"}
+	if !reflect.DeepEqual(starts, wantStarts) {
+		t.Fatal(starts)
 	}
 	used, _, err := store.operatorBackupUsage(user.ID)
 	if err != nil || used != 2 {
 		t.Fatal(used, err)
+	}
+}
+
+func TestInstanceBackupNowSelectedTargetAndAccounting(t *testing.T) {
+	for _, role := range []principalRole{roleAdministrator, roleOperator, roleViewer} {
+		for _, fail := range []bool{false, true} {
+			t.Run(string(role)+map[bool]string{false: "/accepted", true: "/rejected"}[fail], func(t *testing.T) {
+				f := newInstanceBackupFixture(t)
+				store, _ := openTestWebUIStore(t)
+				s := roleServerForTest(role)
+				s.store, s.operations = store, f.server.operations
+				var user webUser
+				if role == roleOperator {
+					var err error
+					user, err = store.createWebUser("NativeBackupOperator", webUserRoleOperator, "operator-password")
+					if err != nil {
+						t.Fatal(err)
+					}
+					s = operatorServerForStore(store, user)
+					s.operations = f.server.operations
+				}
+				id := f.configs[1].ID
+				starts := 0
+				base := f.backend.command
+				f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+					if command == "systemctl" && len(args) > 1 && args[0] == "--no-block" && args[1] == "start" {
+						if !reflect.DeepEqual(args, []string{"--no-block", "start", "minecraft-backup-" + id + ".service"}) {
+							t.Fatal("backup escaped selected immutable target", args)
+						}
+						starts++
+						if fail {
+							return nil, errors.New("systemd rejected request")
+						}
+					}
+					return base(ctx, command, args...)
+				}
+				mux := http.NewServeMux()
+				registerInstanceBackupRoutes(mux, s)
+				rr := httptest.NewRecorder()
+				mux.ServeHTTP(rr, authorizedRequest("POST", "/v1/minecraft/instances/"+id+"/backups", `{}`))
+				wantCode, wantStarts, wantAudits := 202, 1, 1
+				if fail {
+					wantCode, wantAudits = 503, 0
+				}
+				if role == roleViewer {
+					wantCode, wantStarts, wantAudits = 403, 0, 0
+				}
+				if rr.Code != wantCode || starts != wantStarts {
+					t.Fatal(rr.Code, rr.Body.String(), starts)
+				}
+				var audits, badTargets int
+				if err := store.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE action='instance_backup' AND target=? AND success=1`, id).Scan(&audits); err != nil || audits != wantAudits {
+					t.Fatal(audits, err)
+				}
+				if err := store.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE action='manual_backup' OR (action='instance_backup' AND target<>?) OR target='minecraft-backup.service'`, id).Scan(&badTargets); err != nil || badTargets != 0 {
+					t.Fatal(badTargets, err)
+				}
+				if role == roleOperator {
+					used, last, err := store.operatorBackupUsage(user.ID)
+					if err != nil || used != wantAudits || (last != nil) != (wantAudits == 1) {
+						t.Fatal(used, last, err)
+					}
+				}
+			})
+		}
 	}
 }
 
