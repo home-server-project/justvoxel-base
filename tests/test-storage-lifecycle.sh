@@ -41,15 +41,14 @@ credentials
 printf '//nas/backups %s cifs credentials=%s/smb-backup.credentials,nofail 0 0\n' "$BACKUP_MOUNT_POINT" "$JV_CONFIG_DIR" > "$JV_FSTAB"
 cp "$JV_FSTAB" "$TMP/reset.fstab.expected"
 cp "$JV_CONFIG_DIR/smb-backup.credentials" "$TMP/credentials.expected"
-for caller in start-over admin-minecraft-reset-json; do
-    grep -Fq 'preserve-storage' "$repo_root/mjust/libexec/$caller" || fail "$caller did not request preservation"
-    printf 'configuration\n' > "$JV_CONFIG"
-    jv_reset_remove_active_configuration 25565 no 19132 preserve-storage
-    cmp "$JV_FSTAB" "$TMP/reset.fstab.expected"
-    cmp "$JV_CONFIG_DIR/smb-backup.credentials" "$TMP/credentials.expected"
-    [[ $(command stat -c %a "$JV_CONFIG_DIR/smb-backup.credentials") == 600 ]] || fail 'credential mode changed'
-    [[ ! -e $JV_CONFIG ]] || fail 'active configuration survived'
-done
+# Start Over still preserves the appliance storage configuration.
+grep -Fq 'preserve-storage' "$repo_root/mjust/libexec/start-over" || fail 'Start Over did not request preservation'
+printf 'configuration\n' > "$JV_CONFIG"
+jv_reset_remove_active_configuration 25565 no 19132 preserve-storage
+cmp "$JV_FSTAB" "$TMP/reset.fstab.expected"
+cmp "$JV_CONFIG_DIR/smb-backup.credentials" "$TMP/credentials.expected"
+[[ $(command stat -c %a "$JV_CONFIG_DIR/smb-backup.credentials") == 600 ]] || fail 'credential mode changed'
+[[ ! -e $JV_CONFIG ]] || fail 'active configuration survived'
 chmod 0644 "$JV_CONFIG_DIR/smb-backup.credentials"
 if jv_reset_validate_storage_preservation; then fail 'unsafe mode accepted'; fi
 chmod 0600 "$JV_CONFIG_DIR/smb-backup.credentials"

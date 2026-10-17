@@ -11,7 +11,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -21,21 +20,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const adminMinecraftResetHelper = "/usr/libexec/justvoxel/mjust/admin-minecraft-reset-json"
-
 var adminMinecraftResetPlanTimeout = 20 * time.Second
 var adminMinecraftResetWorkerTimeout = 5 * time.Minute
-
-var runAdminMinecraftResetHelper = func(ctx context.Context, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, adminMinecraftResetHelper, args...)
-	finish, err := attachOperationTrace(ctx, cmd)
-	if err != nil {
-		return nil, err
-	}
-	output, err := cmd.CombinedOutput()
-	finish(err)
-	return output, err
-}
 
 type adminMinecraftResetPlanResponse struct {
 	InstanceID           string                    `json:"instance_id"`
@@ -73,22 +59,6 @@ type adminMinecraftResetApplyResponse struct {
 	Created   bool              `json:"created"`
 	Players   []string          `json:"players,omitempty"`
 	Operation *operationJournal `json:"operation,omitempty"`
-}
-
-type adminMinecraftResetHelperApplyResponse struct {
-	OK                   bool   `json:"ok"`
-	SchemaVersion        string `json:"schema_version,omitempty"`
-	Mode                 string `json:"mode,omitempty"`
-	Code                 string `json:"code,omitempty"`
-	Error                string `json:"error,omitempty"`
-	DataPath             string `json:"data_path,omitempty"`
-	DataScope            string `json:"data_scope,omitempty"`
-	DataAction           string `json:"data_action,omitempty"`
-	BackupPath           string `json:"backup_path,omitempty"`
-	BackupAction         string `json:"backup_action,omitempty"`
-	AuthenticationAction string `json:"authentication_action,omitempty"`
-	WebUIUsersAction     string `json:"webui_users_action,omitempty"`
-	Message              string `json:"message,omitempty"`
 }
 
 type minecraftResetFingerprintPayload struct {
@@ -436,19 +406,6 @@ func executeMinecraftReset(ctx context.Context, s *server, operationID, expected
 	}
 	if s.store != nil {
 		_ = s.store.recordAuditEvent(actor, "reset_minecraft", plan.InstanceID, true, "Selected Minecraft instance retired; backups and authentication preserved")
-	}
-	return nil
-}
-
-func decodeAdminMinecraftResetApplyResponse(data []byte, target *adminMinecraftResetHelperApplyResponse) error {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
-		return err
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		return errors.New("unexpected trailing JSON value")
 	}
 	return nil
 }

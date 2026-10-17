@@ -2,34 +2,43 @@
 set -euo pipefail
 
 common=mjust/libexec/minecraft-reset-common.sh
-helper=mjust/libexec/admin-minecraft-reset-json
+retirement=management/cmd/justvoxel-management-agent/minecraft_instance_delete.go
 start_over=mjust/libexec/start-over
 agent=management/cmd/justvoxel-management-agent/admin_minecraft_reset.go
 operations=management/cmd/justvoxel-management-agent/operation_store.go
 
-for path in "${common}" "${helper}" "${start_over}" "${agent}" "${operations}"; do
+for path in "${common}" "${retirement}" "${start_over}" "${agent}" "${operations}"; do
     [[ -f "${path}" ]] || {
         echo "ERROR: missing Minecraft reset source: ${path}" >&2
         exit 1
     }
 done
 
-grep -Fq 'network|external|unknown)' "${helper}"
-grep -Fq 'data_action=preserve' "${helper}"
-grep -Fq 'data_action=delete' "${helper}"
-grep -Fq 'backup_action:"preserve"' "${helper}"
-grep -Fq 'storage_layout_action:"preserve"' "${helper}"
-grep -Fq 'authentication_action:"preserve"' "${helper}"
-grep -Fq 'webui_users_action:"preserve"' "${helper}"
-grep -Fq 'jv_reset_delete_internal_data "${DATA_PATH}" "${BACKUP_PATH}"' "${helper}"
-grep -Fq 'jv_reset_remove_active_configuration "${JAVA_PORT}" "${BEDROCK_ENABLED}" "${BEDROCK_PORT}"' "${helper}"
-grep -Fq 'jv_reset_remove_minecraft_container' "${helper}"
+# Selected Reset plans from authoritative instance storage and inspects selected players.
+grep -Fq 'instanceRuntimes.readRecord(id)' "${agent}"
+grep -Fq 'record.Storage != instanceStorageFor(snapshot, id)' "${agent}"
+grep -Fq 'instanceRuntimes.storage(parent, "validate", record)' "${agent}"
+grep -Fq '"nsenter", "--mount=/proc/1/ns/mnt"' "${agent}"
+grep -Fq 'minecraft-reset-common.sh; jv_reset_data_scope "$1"' "${agent}"
+grep -Fq 'scope != "internal" && scope != "external" && scope != "network" && scope != "unknown"' "${agent}"
+grep -Fq 'action := "preserve"' "${agent}"
+grep -Fq 'if scope == "internal" {' "${agent}"
+grep -Fq 'action = "delete"' "${agent}"
+grep -Fq 'BackupAction: "preserve", StorageLayoutAction: "preserve", AuthenticationAction: "preserve", WebUIUsersAction: "preserve"' "${agent}"
+grep -Fq 'pluginInstallPlayers(parent, id)' "${agent}"
+grep -Fq 'plan.InstanceID != journal.InstanceID' "${agent}"
+grep -Fq 's.prepareResetPluginTransaction(ctx, operationID, plan)' "${agent}"
+grep -Fq 'instanceRuntimes.retireSelectedInstance(ctx, plan.InstanceID, tx.InstanceName, plan.DataAction)' "${agent}"
+grep -Fq 'j.Record.Storage != instanceStorageFor(snapshot, id)' "${retirement}"
+grep -Fq 'retry && j.ResetPolicy != resetPolicy' "${retirement}"
+grep -Fq 'if j.ResetPolicy == "preserve" {' "${retirement}"
+grep -Fq 'return b.removeInstanceData(ctx, j)' "${retirement}"
+grep -Fq '"podman", "rm", "--ignore", "--", "minecraft-"+id' "${retirement}"
+
+# The shared library still protects the fixed-runtime Factory Reset and Start Over.
 grep -Fq 'podman rm --force --ignore minecraft' "${common}"
 grep -Fq 'podman container exists minecraft' "${common}"
-grep -Fq 'minecraft_reset_fail "container_cleanup_failed"' "${helper}"
-grep -Fq 'minecraft_reset_fail "data_cleanup_failed"' "${helper}"
-grep -Fq 'minecraft_reset_fail "configuration_cleanup_failed"' "${helper}"
-if grep -Fq 'podman rm minecraft' "${helper}" "${common}"; then
+if grep -Fq 'podman rm minecraft' "${agent}" "${retirement}" "${common}"; then
     echo 'ERROR: Minecraft reset must not use race-prone plain podman rm.' >&2
     exit 1
 fi
@@ -40,19 +49,29 @@ grep -Fq 'jv_reset_backup_nested_in_data' "${common}"
 grep -Fq 'jv_reset_nested_mounts' "${common}"
 grep -Fq 'find "${root}" -xdev -mindepth 1 -delete' "${common}"
 
-if grep -Eq 'rm[[:space:]]+-rf[[:space:]]+--?[[:space:]]*"?\$\{?BACKUP_PATH' "${helper}" "${common}"; then
+if grep -Eq 'rm[[:space:]]+-rf[[:space:]]+--?[[:space:]]*"?\$\{?BACKUP_PATH' "${agent}" "${retirement}" "${common}"; then
     echo 'ERROR: Minecraft reset must not delete backup storage.' >&2
     exit 1
 fi
-if grep -Eq 'umount|wipefs|parted|sgdisk|mkfs\.' "${helper}" "${common}"; then
+if grep -Eq 'umount|wipefs|parted|sgdisk|mkfs\.' "${agent}" "${retirement}" "${common}"; then
     echo 'ERROR: Minecraft reset must not alter storage layout or filesystems.' >&2
     exit 1
 fi
 
 grep -Fq 'source /usr/libexec/justvoxel/mjust/minecraft-reset-common.sh' "${start_over}"
 grep -Eq '^[[:space:]]*operationTypeMinecraftReset[[:space:]]*=[[:space:]]*"minecraft_reset"[[:space:]]*$' "${operations}"
-grep -Fq 'POST /v1/admin/reset/minecraft/plan' "${agent}"
-grep -Fq 'POST /v1/admin/reset/minecraft/apply' "${agent}"
+for route in \
+    'POST /v1/minecraft/instances/{id}/reset/plan' \
+    'POST /v1/minecraft/instances/{id}/reset/apply' \
+    'POST /v1/minecraft/instances/{id}/reset/recover' \
+    'GET /v1/minecraft/instances/{id}/reset/current-operation' \
+    'GET /v1/minecraft/instances/{id}/reset/operations/{operation}'; do
+    grep -Fq "${route}" "${agent}"
+done
+if [[ -e mjust/libexec/admin-minecraft-reset-json ]] || grep -Eq 'admin-minecraft-reset-json|adminMinecraftResetHelper|runAdminMinecraftResetHelper|adminMinecraftResetHelperApplyResponse|decodeAdminMinecraftResetApplyResponse|/v1/admin/reset/minecraft/' "${agent}"; then
+    echo 'ERROR: selected Minecraft reset must not depend on the obsolete fixed-server backend.' >&2
+    exit 1
+fi
 grep -Fq 'retryMinecraftReset' "${agent}"
 grep -Fq 'func (s *operationStore) retryMinecraftReset' "${operations}"
 

@@ -98,16 +98,8 @@ func TestMinecraftInstanceRetirementDoesNotFollowSymlinks(t *testing.T) {
 func TestResetMinecraftInstanceRetirement(t *testing.T) {
 	for _, mode := range []string{"factory"} {
 		for _, outcome := range []string{"success", "preserved_data", "helper_failed", "contract_failed", "verification_failed", "verification_error", "missing_record", "missing_directory", "retirement_failed", "authentication_failed"} {
-			if mode == "minecraft" && outcome == "authentication_failed" {
-				continue
-			}
 			t.Run(mode+"/"+outcome, func(t *testing.T) {
 				useTestMinecraftInstances(t)
-				var preserved *pluginInstallFixture
-				if mode == "minecraft" && outcome == "preserved_data" {
-					preserved = newPluginInstallFixture(t)
-				}
-				configured := preserved != nil
 				var original minecraftInstanceIdentity
 				var err error
 				if outcome != "missing_directory" {
@@ -129,11 +121,11 @@ func TestResetMinecraftInstanceRetirement(t *testing.T) {
 					}
 				}
 
-				oldMinecraft, oldFactory := runAdminMinecraftResetHelper, runAdminFactoryResetHelper
+				oldFactory := runAdminFactoryResetHelper
 				oldDiscovery := runAdminDiscoveryHelper
 				oldResetAuth, oldCredential, oldMode := resetFactoryAuthenticationState, restoreSystemAdministratorFactoryCredential, readAuthMode
 				t.Cleanup(func() {
-					runAdminMinecraftResetHelper, runAdminFactoryResetHelper = oldMinecraft, oldFactory
+					runAdminFactoryResetHelper = oldFactory
 					runAdminDiscoveryHelper = oldDiscovery
 					resetFactoryAuthenticationState, restoreSystemAdministratorFactoryCredential, readAuthMode = oldResetAuth, oldCredential, oldMode
 				})
@@ -153,9 +145,6 @@ func TestResetMinecraftInstanceRetirement(t *testing.T) {
 					if outcome == "verification_failed" {
 						return []byte(`{"configured":true}`), nil
 					}
-					if configured {
-						return json.Marshal(map[string]any{"configured": true, "minecraft": map[string]string{"server_type": "paper", "data_path": preserved.data}})
-					}
 					return []byte(`{"configured":false}`), nil
 				}
 				resetFactoryAuthenticationState = func() error {
@@ -167,56 +156,24 @@ func TestResetMinecraftInstanceRetirement(t *testing.T) {
 				restoreSystemAdministratorFactoryCredential = func(context.Context) error { return nil }
 				readAuthMode = func() (authMode, error) { return authModeSystem, nil }
 
-				planJSON := validMinecraftResetPlanHelper
-				if mode == "factory" {
-					planJSON = validFactoryResetPlanHelper
-				}
+				planJSON := validFactoryResetPlanHelper
 				if outcome == "preserved_data" {
 					planJSON = strings.Replace(planJSON, `"data_scope":"internal"`, `"data_scope":"external"`, 1)
 					planJSON = strings.Replace(planJSON, `"data_action":"delete"`, `"data_action":"preserve"`, 1)
 				}
-				var fingerprint string
-				var applied any
-				if mode == "minecraft" {
-					var plan adminMinecraftResetPlanResponse
-					if err := json.Unmarshal([]byte(planJSON), &plan); err != nil {
-						t.Fatal(err)
-					}
-					if preserved != nil {
-						plan.DataPath = preserved.data
-						// The helper returns configuration; the Agent adds exact
-						// filesystem evidence before fingerprinting the review.
-						raw, marshalErr := json.Marshal(plan)
-						if marshalErr != nil {
-							t.Fatal(marshalErr)
-						}
-						planJSON = string(raw)
-						if prepareErr := prepareMinecraftResetPlugins(&plan); prepareErr != nil {
-							t.Fatal(prepareErr)
-						}
-					}
-					fingerprint, err = minecraftResetPlanFingerprint(plan)
-					result := adminMinecraftResetHelperApplyResponse{OK: true, SchemaVersion: "v1", Mode: mode, DataPath: plan.DataPath, DataScope: plan.DataScope, DataAction: plan.DataAction, BackupPath: plan.BackupPath, BackupAction: plan.BackupAction, AuthenticationAction: plan.AuthenticationAction, WebUIUsersAction: plan.WebUIUsersAction}
-					if outcome == "contract_failed" {
-						result.BackupAction = "delete"
-					}
-					applied = result
-				} else {
-					var plan adminFactoryResetPlanResponse
-					if err := json.Unmarshal([]byte(planJSON), &plan); err != nil {
-						t.Fatal(err)
-					}
-					fingerprint, err = factoryResetPlanFingerprint(plan)
-					result := adminFactoryResetHelperApplyResponse{OK: true, SchemaVersion: "v1", Mode: mode, MinecraftWasConfigured: true, DataPath: plan.DataPath, DataScope: plan.DataScope, DataAction: plan.DataAction, BackupPath: plan.BackupPath, BackupScope: plan.BackupScope, BackupAction: plan.BackupAction, ConfigBackupsAction: plan.ConfigBackupsAction, StorageLayoutAction: plan.StorageLayoutAction, ExternalStorageAction: plan.ExternalStorageAction, NetworkStorageAction: plan.NetworkStorageAction}
-					if outcome == "contract_failed" {
-						result.ExternalStorageAction = "delete"
-					}
-					applied = result
+				var plan adminFactoryResetPlanResponse
+				if err := json.Unmarshal([]byte(planJSON), &plan); err != nil {
+					t.Fatal(err)
+				}
+				fingerprint, err := factoryResetPlanFingerprint(plan)
+				result := adminFactoryResetHelperApplyResponse{OK: true, SchemaVersion: "v1", Mode: mode, MinecraftWasConfigured: true, DataPath: plan.DataPath, DataScope: plan.DataScope, DataAction: plan.DataAction, BackupPath: plan.BackupPath, BackupScope: plan.BackupScope, BackupAction: plan.BackupAction, ConfigBackupsAction: plan.ConfigBackupsAction, StorageLayoutAction: plan.StorageLayoutAction, ExternalStorageAction: plan.ExternalStorageAction, NetworkStorageAction: plan.NetworkStorageAction}
+				if outcome == "contract_failed" {
+					result.ExternalStorageAction = "delete"
 				}
 				if err != nil {
 					t.Fatal(err)
 				}
-				applyJSON, err := json.Marshal(applied)
+				applyJSON, err := json.Marshal(result)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -230,27 +187,17 @@ func TestResetMinecraftInstanceRetirement(t *testing.T) {
 					if outcome == "helper_failed" {
 						return []byte(`{"ok":false,"error":"cleanup failed"}`), errors.New("cleanup failed")
 					}
-					configured = false
 					return applyJSON, nil
 				}
-				runAdminMinecraftResetHelper, runAdminFactoryResetHelper = helper, helper
+				runAdminFactoryResetHelper = helper
 				s := surfaceTestServer(t, roleAdministrator)
 				operations := openTestOperationStore(t)
 				attachTestOperationStore(t, s, operations)
-				var operation operationJournal
-				if mode == "minecraft" {
-					operation, _, err = operations.beginMinecraftReset(fingerprint)
-				} else {
-					operation, _, err = operations.beginFactoryReset(fingerprint)
-				}
+				operation, _, err := operations.beginFactoryReset(fingerprint)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if mode == "minecraft" {
-					err = executeMinecraftReset(context.Background(), s, operation.OperationID, fingerprint, session{})
-				} else {
-					err = executeFactoryReset(context.Background(), s, operation.OperationID, fingerprint)
-				}
+				err = executeFactoryReset(context.Background(), s, operation.OperationID, fingerprint)
 				succeeded := outcome == "success" || outcome == "preserved_data" || outcome == "missing_record" || outcome == "missing_directory"
 				if (err == nil) != succeeded {
 					t.Fatalf("reset outcome=%s err=%v", outcome, err)

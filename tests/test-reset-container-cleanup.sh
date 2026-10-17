@@ -46,14 +46,14 @@ exit 0
 EOF
 chmod +x "${scratch}/bin/"*
 
-for mode in minecraft factory; do
+for mode in factory; do
     sed -e "s@source /usr/libexec/justvoxel/mjust/common.sh@source ${scratch}/common.sh@" \
         -e "s@source /usr/libexec/justvoxel/mjust/admin-storage-actions-common.sh@source ${scratch}/common.sh@" \
         -e '\@source /usr/libexec/justvoxel/mjust/minecraft-reset-common.sh@d' \
         -e '\@source /usr/libexec/justvoxel/mjust/storage-mount-ownership.sh@d' \
         "${repo}/mjust/libexec/admin-${mode}-reset-json" >"${scratch}/${mode}-reset"
 
-    if [[ ${mode} == factory ]] && grep -Eq '^[[:space:]]*source[[:space:]]+/usr/libexec/justvoxel/mjust/(admin-storage-actions-common|minecraft-reset-common|storage-mount-ownership)\.sh' "${scratch}/${mode}-reset"; then
+    if grep -Eq '^[[:space:]]*source[[:space:]]+/usr/libexec/justvoxel/mjust/(admin-storage-actions-common|minecraft-reset-common|storage-mount-ownership)\.sh' "${scratch}/${mode}-reset"; then
         echo 'ERROR: Factory reset fixture retained an unresolved appliance source.' >&2
         exit 1
     fi
