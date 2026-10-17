@@ -36,6 +36,8 @@ type Status struct {
 		Tailscale string `json:"tailscale,omitempty"`
 		NetBird   string `json:"netbird,omitempty"`
 	} `json:"system"`
+	// Minecraft and Backup are selected-instance dashboard presentation fields.
+	// GET /v1/status supplies host/appliance information only.
 	Minecraft struct {
 		ServerType     string `json:"server_type"`
 		ServerSoftware string `json:"server_software"`

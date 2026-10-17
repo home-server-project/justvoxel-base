@@ -25,13 +25,12 @@ jv_status_format_kib() {
 }
 
 jv_status_overall() {
-    local service_state="$1" failed_count="$2" system_state="$3"
-    local network_state="$4" storage_state="$5" backup_state="$6"
+    local failed_count="$1" system_state="$2"
+    local network_state="$3" storage_state="$4"
 
-    if [[ ${service_state} == Failed ]] \
-        || (( failed_count > 0 )) \
+    if (( failed_count > 0 )) \
         || [[ ${system_state} == degraded || ${system_state} == maintenance || ${system_state} == stopping || ${system_state} == offline ]] \
-        || [[ ${network_state} == problem || ${storage_state} == problem || ${backup_state} == problem ]]; then
+        || [[ ${network_state} == problem || ${storage_state} == problem ]]; then
         printf 'Attention needed'
         return 0
     fi

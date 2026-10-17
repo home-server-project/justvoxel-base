@@ -481,11 +481,23 @@ func (a *App) dashboardData(ctx context.Context, session, csrf string, selected 
 	if err != nil {
 		return pageData{}, err
 	}
-	// Appliance status supplies host, backup and JustVoxel information only.
+	// Appliance status supplies host and JustVoxel information only.
+	status.Backup = (api.Status{}).Backup
 	status.Minecraft = (api.Status{}).Minecraft
 	status.Minecraft.State = "Not configured"
 	players := api.Players{State: "not_configured"}
 	if selected.ID != "" {
+		if client, ok := a.api.(interface {
+			MinecraftInstanceBackupSettings(context.Context, string, string) (api.InstanceBackupSettings, error)
+		}); ok {
+			settings, backupErr := client.MinecraftInstanceBackupSettings(ctx, session, selected.ID)
+			if errors.Is(backupErr, api.ErrUnauthorized) || errors.Is(backupErr, api.ErrPasswordChangeRequired) {
+				return pageData{}, backupErr
+			}
+			if backupErr == nil {
+				status.Backup.Enabled = settings.Enabled
+			}
+		}
 		status.Minecraft.State = "Unavailable"
 		players = api.Players{State: "unavailable", Error: "Player information is temporarily unavailable."}
 		if client, ok := a.api.(interface {

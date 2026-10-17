@@ -20,16 +20,25 @@ type dashboardInstanceAPI struct {
 	playerErr                    error
 	confirmation                 bool
 	confirmed                    bool
+	backupReads                  []string
+	backupReadErr                error
+	globalBackupEnabled          bool
 }
 
 func (f *dashboardInstanceAPI) Status(context.Context, string) (api.Status, error) {
 	s := defaultStatus()
+	s.Backup.Enabled = f.globalBackupEnabled
+	s.Backup.Last, s.Backup.Next = "GLOBAL LAST", "GLOBAL NEXT"
 	s.Minecraft.ServerSoftware = "GLOBAL SOFTWARE"
 	s.Minecraft.Version = "GLOBAL VERSION"
 	s.Minecraft.JavaPort = 25599
 	s.Minecraft.BedrockPort = 19999
 	s.Minecraft.Bedrock = false
 	return s, nil
+}
+func (f *dashboardInstanceAPI) MinecraftInstanceBackupSettings(_ context.Context, _, id string) (api.InstanceBackupSettings, error) {
+	f.backupReads = append(f.backupReads, id)
+	return f.backups[id], f.backupReadErr
 }
 func (f *dashboardInstanceAPI) Players(context.Context, string) (api.Players, error) {
 	f.legacyPlayers++
@@ -61,7 +70,9 @@ func (f *dashboardInstanceAPI) MinecraftInstanceActionConfirmed(_ context.Contex
 func newDashboardInstanceApp(t *testing.T) (*App, *dashboardInstanceAPI) {
 	t.Helper()
 	_, base := phase7App(t)
-	f := &dashboardInstanceAPI{phase7API: base}
+	f := &dashboardInstanceAPI{phase7API: base, globalBackupEnabled: true}
+	f.backups["jv-family1"] = api.InstanceBackupSettings{Enabled: true, Time: "04:00"}
+	f.backups["jv-kids001"] = api.InstanceBackupSettings{Enabled: false, Time: "05:00"}
 	config := f.runtimes["jv-family1"]
 	config.MaxPlayers = 14
 	f.runtimes["jv-family1"] = config
@@ -113,7 +124,7 @@ func TestDashboardInstanceReadsAndPolling(t *testing.T) {
 		t.Fatalf("unexpected selected presentation: %+v %+v", mc, snapshot.Players)
 	}
 	if !snapshot.Status.Backup.Enabled || snapshot.Status.System.IPv4 != "192.0.2.10" {
-		t.Fatal("appliance fields changed")
+		t.Fatal("selected backup or appliance host fields changed")
 	}
 	if len(f.actions) != 0 {
 		t.Fatal(f.actions)
@@ -283,4 +294,56 @@ func TestConnectionGuideInstanceIsolation(t *testing.T) {
 		t.Fatal("unverified configuration exposed", failed.Code)
 	}
 	requireNoDashboardLegacy(t, f)
+}
+
+func TestDashboardSelectedBackupSettings(t *testing.T) {
+	app, f := newDashboardInstanceApp(t)
+	// Poll A, B, then A again: global appliance values must never win.
+	for _, tc := range []struct {
+		id              string
+		enabled, global bool
+	}{
+		{"jv-family1", true, false},
+		{"jv-kids001", false, true},
+		{"jv-family1", true, false},
+	} {
+		f.globalBackupEnabled = tc.global
+		f.backupReads = nil
+		response := dashboardInstanceRequest(app, "GET", "/api/dashboard-status?server="+tc.id, "")
+		var snapshot dashboardSnapshot
+		if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &snapshot) != nil {
+			t.Fatal(response.Code, response.Body.String())
+		}
+		if !reflect.DeepEqual(f.backupReads, []string{tc.id}) || snapshot.Status.Backup.Enabled != tc.enabled || snapshot.Status.Backup.Last != "" || snapshot.Status.Backup.Next != "" {
+			t.Fatal(f.backupReads, snapshot.Status.Backup)
+		}
+		if snapshot.Status.Minecraft.Players != 3 || snapshot.Players.Online != 3 || snapshot.Players.Max != 14 {
+			t.Fatal("selected player behavior changed", snapshot)
+		}
+	}
+}
+
+func TestDashboardBackupWithoutSelectionOrAvailableSettings(t *testing.T) {
+	app, f := newDashboardInstanceApp(t)
+	f.globalBackupEnabled = true
+	data, err := app.dashboardData(context.Background(), "session-token", "", selectedServerContext{})
+	if err != nil || data.Status.Backup != (api.Status{}).Backup || len(f.backupReads) != 0 || data.Status.Minecraft.Configured {
+		t.Fatal("fabricated selected state", data.Status, err, f.backupReads)
+	}
+	f.backupReadErr = errors.New("unavailable")
+	data, err = app.dashboardData(context.Background(), "session-token", "", selectedServerContext{ID: "jv-family1"})
+	if err != nil || data.Status.Backup != (api.Status{}).Backup || data.Status.Minecraft.State != "Running" || data.Players.Online != 3 {
+		t.Fatal("independent selected reads changed", data.Status, data.Players, err)
+	}
+}
+
+func TestDashboardBackupAuthenticationErrors(t *testing.T) {
+	for _, want := range []error{api.ErrUnauthorized, api.ErrPasswordChangeRequired} {
+		app, f := newDashboardInstanceApp(t)
+		f.backupReadErr = want
+		_, err := app.dashboardData(context.Background(), "session-token", "", selectedServerContext{ID: "jv-family1"})
+		if !errors.Is(err, want) || !reflect.DeepEqual(f.backupReads, []string{"jv-family1"}) {
+			t.Fatal(err, f.backupReads)
+		}
+	}
 }

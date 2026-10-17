@@ -57,9 +57,9 @@ Configuration changes that require Minecraft to restart are not applied through 
 
 `mjust status` is the normal user-facing appliance dashboard.
 
-It presents short, readable information about the host, Minecraft state, players, Paper version, Bedrock support, network state, storage, backups, memory, service health, and the configured Minecraft container image.
+It presents host health, network and system storage, then summarizes every registered Minecraft server by display name and immutable ID. Each server has its own runtime, players, software/version, addresses, configured memory, start-on-boot, image tag and backup summary. Zero servers do not make the appliance unhealthy; missing or inconsistent instance evidence needs attention.
 
-`mjust status --details` shows the same friendly summary first and then adds administrator-oriented systemd, Podman, mount, and network detail.
+`mjust status --details` shows the same friendly summary first, then bounded host failed-service, system storage and network detail, plus additional public per-server configuration and backup information. Status uses the Management API throughout and does not select a first, sole or default server.
 
 `mjust validate` is different from status. Validation is the stricter correctness check used to confirm that the deployed appliance matches its recorded configuration and expected runtime state.
 

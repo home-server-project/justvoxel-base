@@ -10,63 +10,31 @@ Normal `mjust status` uses short appliance-oriented sections instead of raw Linu
 
 - overall health
 - host identity, variant, uptime, physical RAM, and failed-service summary
-- Minecraft state, players, Paper version, Bedrock cross-play, addresses, memory and uptime
-- primary network interface, IPv4 address, gateway and DNS
-- system/container storage, Minecraft data storage, backup storage and available capacity
-- automatic backup state, most recent completed backup and next scheduled backup
-- configured Minecraft container channel and image
+- every registered Minecraft server, identified by display name and immutable ID
+- per-server runtime, players, software/version, Java and Bedrock addresses, configured memory, start-on-boot, and image tag
+- per-server backup schedule, daily time, last success and current backup state
+- primary network interface, IPv4 address, Tailscale, NetBird, gateway and DNS
+- host system/container filesystem and available capacity
 
-Unavailable optional information is shown as `Unknown` instead of dumping command errors.
+`GET /v1/status` supplies host/appliance health and information only. Minecraft and backup information comes from the authoritative registry/runtime inventories and each registered immutable ID's configuration, players and backup APIs. Names are labels, never correlation keys. Status does not choose a first, sole or default server.
 
-A deliberately stopped Minecraft server is reported as `Stopped` and does not by itself make the appliance unhealthy.
+With zero servers, status says `No Minecraft servers configured.` An unavailable individual read is shown as unavailable while independent server information remains visible. Registered servers with missing runtime/configuration evidence remain visible as unavailable. Unregistered runtime identities produce an explicit attention condition; status never guesses their ownership.
 
 ## Overall health
 
 `Overall: Healthy` is a lightweight operational summary. It does not run `mjust validate` internally.
 
-The normal status view uses cheap local observations such as:
-
-- failed system services
-- failed Minecraft service state
-- basic network/default-route availability
-- configured data/backup storage availability
-- configured backup timer state
-
-Problems are summarized as `Attention needed`. When the system state cannot be determined reliably, status uses `Unknown`.
-
-## Failed services
-
-Failed services are part of the normal status dashboard rather than a separate normal-user command.
-
-When no service has failed, status reports:
-
-`System services: Healthy - no failed services`
-
-When failures exist, status shows the number of failed services and a short summary for up to three units: unit name, description and result. Additional failures are left to `mjust status --details` so the normal dashboard stays concise.
+Host health depends on failed system services, system state, basic network/default-route availability and system storage availability. mJust starts from that host health and reports `Attention needed` for unhealthy or unavailable instance evidence, mismatched inventories, failed/interrupted backups, or a required backup restart. A running or deliberately stopped server does not by itself make the appliance unhealthy. Zero servers are healthy when the host is healthy. Unknown host state remains `Unknown` unless instance evidence requires attention.
 
 ## Storage presentation
 
-Status is purpose-aware rather than a raw `df` listing.
-
-It identifies system/container storage, Minecraft data and backup storage. If Minecraft data shares the system/container filesystem, that relationship is stated instead of repeating capacity rows.
-
-If backups share the Minecraft-data filesystem, capacity is not printed twice. Status explains that same-filesystem backups help with world/configuration recovery but do not protect against physical disk failure.
-
-A separate disk, NFS or SMB filesystem is shown as its own backup target with its own available capacity.
+Storage shows the host system/container filesystem reported by `/v1/status`. It does not infer global Minecraft data or backup locations from one server.
 
 ## Administrator detail
 
-`mjust status --details` prints the same friendly dashboard first and then adds administrator-oriented information including:
+`mjust status --details` prints the same friendly dashboard first, then bounded host details for failed services, system storage, interfaces, routes and resolver state. Additional per-server details include timezone, backup retention, last backup attempt, backup stage and restart requirement, using the public responses already obtained. It does not inspect a fixed Minecraft service or container or expose private instance paths, credentials or image repositories.
 
-- complete failed-service output
-- Minecraft systemd status
-- Podman container and memory detail
-- raw mount/filesystem detail
-- interface, route and resolver detail
-
-`mjust logs` remains the dedicated Minecraft log viewer.
-
-`mjust validate` remains separate from both status modes. Validation is allowed to be stricter, perform more checks, return failure, and explain configuration/runtime mismatches.
+`mjust logs` remains the dedicated Minecraft log viewer. `mjust validate` remains a separate correctness check.
 
 ## System management is separate from status
 

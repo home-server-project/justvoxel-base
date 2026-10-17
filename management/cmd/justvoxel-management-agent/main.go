@@ -329,7 +329,7 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	args := []string{}
+	args := []string{"status"}
 	if r.URL.Query().Get("details") == "1" {
 		args = append(args, "--details")
 	}
