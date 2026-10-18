@@ -164,10 +164,20 @@ func (s *minecraftInstanceStore) repairNamesGroup(dir *os.File, info os.FileInfo
 	if !s.namesGroupRepairable(info) {
 		return errors.New("instance name directory is not eligible for group repair")
 	}
+	// Open a separate stream from the trusted FD so prior reads cannot hide entries.
 	// Even hidden files and unpublished temporary records disqualify repair.
-	entries, err := dir.ReadDir(1)
+	fd, err := syscall.Openat(int(dir.Fd()), ".", syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	check := os.NewFile(uintptr(fd), dir.Name())
+	entries, err := check.ReadDir(1)
+	closeErr := check.Close()
 	if len(entries) != 0 || err != io.EOF {
 		return errors.New("instance name directory is not verified empty")
+	}
+	if closeErr != nil {
+		return closeErr
 	}
 	if err := dir.Chown(s.uid, s.gid); err != nil {
 		return err

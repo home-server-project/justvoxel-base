@@ -15,15 +15,30 @@ import (
 
 func exactSetupApplyFingerprint(t *testing.T) string {
 	t.Helper()
-	var response adminSetupPlanResponse
-	if err := json.Unmarshal([]byte(validAdminSetupPlanResponse), &response); err != nil {
+	var request adminSetupPlanRequest
+	if err := json.Unmarshal([]byte(validAdminSetupPlanRequest), &request); err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := adminSetupPlanFingerprint(response.SchemaVersion, response.Normalized, response.Requirements)
+	return reviewedSetupApplyPlan(t, request, []byte(validAdminSetupPlanResponse)).PlanFingerprint
+}
+
+func reviewedSetupApplyPlan(t *testing.T, request adminSetupPlanRequest, helperResponse []byte) adminSetupPlanResponse {
+	t.Helper()
+	// Review includes Agent-owned normalization after the shell helper returns.
+	// Keep this fixture independent of Apply's preflight stubs and call counts.
+	oldPlan := runAdminSetupPlanHelper
+	defer func() { runAdminSetupPlanHelper = oldPlan }()
+	runAdminSetupPlanHelper = func(context.Context, []byte) ([]byte, error) {
+		return helperResponse, nil
+	}
+	plan, err := authoritativeAdminSetupPlan(context.Background(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return fingerprint
+	if !plan.OK || plan.PlanFingerprint == "" {
+		t.Fatalf("reviewed setup plan is invalid: %#v", plan)
+	}
+	return plan
 }
 
 func setupApplyBody(t *testing.T, fingerprint string) string {
@@ -163,7 +178,26 @@ func TestAdminSetupApplyExactReviewedPlanCreatesQueuedOperation(t *testing.T) {
 		return []byte(`{"configured":false,"minecraft":{},"backup":{}}`), nil
 	}
 
-	fingerprint := exactSetupApplyFingerprint(t)
+	var request adminSetupPlanRequest
+	if err := json.Unmarshal([]byte(validAdminSetupPlanRequest), &request); err != nil {
+		t.Fatal(err)
+	}
+	if request.AddServer || request.StartOnBoot {
+		t.Fatal("first-run request must use the default AddServer and StartOnBoot values")
+	}
+	review := httptest.NewRecorder()
+	s.adminSetupPlan(review, surfaceRequest(http.MethodPost, "/v1/admin/setup/plan", validAdminSetupPlanRequest))
+	if review.Code != http.StatusOK {
+		t.Fatalf("Review status = %d: %s", review.Code, review.Body.String())
+	}
+	var reviewed adminSetupPlanResponse
+	if err := json.Unmarshal(review.Body.Bytes(), &reviewed); err != nil {
+		t.Fatal(err)
+	}
+	if !reviewed.OK || reviewed.Normalized == nil || reviewed.Normalized.AddServer || !reviewed.Normalized.StartOnBoot || reviewed.Normalized.MountedOnly {
+		t.Fatalf("Review lost first-run normalization: %#v", reviewed)
+	}
+	fingerprint := reviewed.PlanFingerprint
 	rr := httptest.NewRecorder()
 	s.adminSetupApply(rr, surfaceRequest(http.MethodPost, "/v1/admin/setup/apply", setupApplyBody(t, fingerprint)))
 	if rr.Code != http.StatusAccepted {
@@ -179,8 +213,8 @@ func TestAdminSetupApplyExactReviewedPlanCreatesQueuedOperation(t *testing.T) {
 	if response.Operation.PlanFingerprint != fingerprint || response.Operation.State != operationQueued {
 		t.Fatalf("unexpected operation: %#v", response.Operation)
 	}
-	if planCalls != 1 || discoveryCalls != 1 {
-		t.Fatalf("preflight calls plan=%d discovery=%d, want 1/1", planCalls, discoveryCalls)
+	if planCalls != 2 || discoveryCalls != 1 {
+		t.Fatalf("Review/Apply calls plan=%d discovery=%d, want 2/1", planCalls, discoveryCalls)
 	}
 	current, err := store.currentSetup()
 	if err != nil || current == nil || current.OperationID != response.Operation.OperationID {
@@ -223,7 +257,8 @@ func TestAdminSetupApplyRejectsStaleReviewedFingerprintWithoutOperation(t *testi
 		runAdminDiscoveryHelper = oldDiscovery
 	}()
 	runAdminSetupPlanHelper = func(_ context.Context, _ []byte) ([]byte, error) {
-		return []byte(validAdminSetupPlanResponse), nil
+		// The resolved Minecraft version changed after Review.
+		return []byte(strings.Replace(validAdminSetupPlanResponse, `"version":"1.21.8"`, `"version":"1.21.9"`, 1)), nil
 	}
 	discoveryCalled := false
 	runAdminDiscoveryHelper = func(_ context.Context, _ string) ([]byte, error) {
@@ -231,7 +266,7 @@ func TestAdminSetupApplyRejectsStaleReviewedFingerprintWithoutOperation(t *testi
 		return []byte(`{"configured":false}`), nil
 	}
 
-	stale := "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+	stale := exactSetupApplyFingerprint(t)
 	rr := httptest.NewRecorder()
 	s.adminSetupApply(rr, surfaceRequest(http.MethodPost, "/v1/admin/setup/apply", setupApplyBody(t, stale)))
 	if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), `"code":"stale_plan"`) {
@@ -368,10 +403,6 @@ func TestAdminSetupApplyRequiresTransientSMBPasswordWithoutPersistingIt(t *testi
 	planned.Normalized.Backups.CredentialsRequired = true
 	planned.Requirements.SMBPasswordRequired = true
 	planned.Requirements.NetworkBackupValidationOnApply = true
-	fingerprint, err := adminSetupPlanFingerprint(planned.SchemaVersion, planned.Normalized, planned.Requirements)
-	if err != nil {
-		t.Fatal(err)
-	}
 	plannerJSON, err := json.Marshal(planned)
 	if err != nil {
 		t.Fatal(err)
@@ -386,6 +417,7 @@ func TestAdminSetupApplyRequiresTransientSMBPasswordWithoutPersistingIt(t *testi
 	request.Backups.MountPoint = "/var/mnt/backups"
 	request.Backups.Source = "//nas/backups"
 	request.Backups.Username = "backup-user"
+	fingerprint := reviewedSetupApplyPlan(t, request, plannerJSON).PlanFingerprint
 	body, err := json.Marshal(adminSetupApplyRequest{PlanFingerprint: fingerprint, Request: request, EULAAccepted: true})
 	if err != nil {
 		t.Fatal(err)

@@ -586,17 +586,28 @@ func (i namesDirectoryTestInfo) Mode() os.FileMode { return i.mode }
 func (i namesDirectoryTestInfo) IsDir() bool       { return i.mode.IsDir() }
 
 func TestNamesGroupRepairPolicyAndEmptyDirectory(t *testing.T) {
-	for _, kind := range []string{"empty-wrong-gid", "valid", "nonempty", "hidden-entry", "wrong-mode", "setuid", "setgid", "sticky", "wrong-uid", "symlink", "non-directory"} {
+	for _, kind := range []string{"empty-wrong-gid", "valid", "nonempty", "hidden-entry", "nonempty-cursor-advanced", "hidden-entry-cursor-advanced", "closed-directory", "wrong-mode", "setuid", "setgid", "sticky", "wrong-uid", "symlink", "non-directory"} {
 		t.Run(kind, func(t *testing.T) {
 			store := testMinecraftInstances(t)
-			dir, err := os.Open(t.TempDir())
+			path := t.TempDir()
+			if err := os.Chmod(path, 0700); err != nil {
+				t.Fatal(err)
+			}
+			switch kind {
+			case "nonempty", "hidden-entry", "nonempty-cursor-advanced", "hidden-entry-cursor-advanced":
+				name := "record.json"
+				if strings.HasPrefix(kind, "hidden-entry") {
+					name = ".name-unpublished"
+				}
+				if err := os.WriteFile(filepath.Join(path, name), []byte("evidence"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			dir, err := os.Open(path)
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer dir.Close()
-			if err := dir.Chmod(0700); err != nil {
-				t.Fatal(err)
-			}
 			info, err := dir.Stat()
 			if err != nil {
 				t.Fatal(err)
@@ -606,12 +617,13 @@ func TestNamesGroupRepairPolicyAndEmptyDirectory(t *testing.T) {
 			switch kind {
 			case "valid":
 				evidence.stat.Gid = uint32(store.gid)
-			case "nonempty", "hidden-entry":
-				name := "record.json"
-				if kind == "hidden-entry" {
-					name = ".name-unpublished"
+			case "nonempty-cursor-advanced", "hidden-entry-cursor-advanced":
+				entries, err := dir.ReadDir(-1)
+				if err != nil || len(entries) == 0 {
+					t.Fatalf("advance original directory stream: entries=%v err=%v", entries, err)
 				}
-				if err := os.WriteFile(filepath.Join(dir.Name(), name), []byte("evidence"), 0600); err != nil {
+			case "closed-directory":
+				if err := dir.Close(); err != nil {
 					t.Fatal(err)
 				}
 			case "wrong-mode":
@@ -630,6 +642,10 @@ func TestNamesGroupRepairPolicyAndEmptyDirectory(t *testing.T) {
 				evidence.mode = 0700
 			}
 			before := registrySnapshot(t, &minecraftInstanceStore{directory: dir.Name()})
+			beforeInfo, err := os.Stat(dir.Name())
+			if err != nil {
+				t.Fatal(err)
+			}
 			err = store.repairNamesGroup(dir, evidence)
 			if kind == "empty-wrong-gid" {
 				if err != nil {
@@ -645,6 +661,15 @@ func TestNamesGroupRepairPolicyAndEmptyDirectory(t *testing.T) {
 				}
 				if !reflect.DeepEqual(before, registrySnapshot(t, &minecraftInstanceStore{directory: dir.Name()})) {
 					t.Fatal("refused repair changed state")
+				}
+				afterInfo, err := os.Stat(dir.Name())
+				if err != nil {
+					t.Fatal(err)
+				}
+				beforeStat := beforeInfo.Sys().(*syscall.Stat_t)
+				afterStat := afterInfo.Sys().(*syscall.Stat_t)
+				if beforeStat.Uid != afterStat.Uid || beforeStat.Gid != afterStat.Gid || beforeStat.Ctim != afterStat.Ctim {
+					t.Fatal("refused repair changed ownership or metadata change time")
 				}
 			}
 		})
