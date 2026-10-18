@@ -2,8 +2,6 @@ package server
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -74,14 +72,14 @@ func (a *App) registerAddServerWizardRoutes(mux *http.ServeMux) {
 		"POST /connections":    a.setupWizardSaveConnections,
 		"POST /resources":      a.setupWizardSaveResources,
 		"GET /version-preview": a.setupWizardVersionPreview,
-		"POST /storage":        a.addServerWizardFixedStep,
-		"POST /backups":        a.addServerWizardFixedStep,
+		"POST /storage":        a.setupWizardSaveStorage,
+		"POST /backups":        a.setupWizardSaveBackups,
 		"POST /navigate":       a.setupWizardNavigate,
 		"POST /cancel":         a.setupWizardCancel,
 		"GET /review":          a.addServerWizardReview,
 		"POST /review/back":    a.addServerWizardReviewBack,
 		"POST /review/cancel":  a.setupWizardCancel,
-		"POST /review/apply":   a.addServerWizardCreate,
+		"POST /review/apply":   a.setupWizardReviewApply,
 	}
 	for route, handler := range routes {
 		method, suffix, _ := strings.Cut(route, " ")
@@ -160,8 +158,11 @@ func (a *App) minecraftServersWorkspace(w http.ResponseWriter, r *http.Request) 
 }
 
 func (a *App) addServerWizardPage(w http.ResponseWriter, r *http.Request) {
-	session, _, identity, ok := a.setupWizardRequest(w, r, false)
+	session, client, identity, ok := a.setupWizardRequest(w, r, false)
 	if !ok {
+		return
+	}
+	if a.redirectCurrentSetupOperation(w, r, session, client) {
 		return
 	}
 	draft, exists := addServerDrafts.get(a, session)
@@ -171,6 +172,15 @@ func (a *App) addServerWizardPage(w http.ResponseWriter, r *http.Request) {
 	if draft.CurrentStep == setupReviewStep {
 		http.Redirect(w, r, addServerBasePath+"/review", http.StatusSeeOther)
 		return
+	}
+	if draft.Started && (draft.CurrentStep == setupStorageStep || draft.CurrentStep == setupBackupsStep) {
+		inventory, err := client.AdminStorage(r.Context(), session)
+		if err != nil {
+			a.handleAdminDiscoveryError(w, r, err)
+			return
+		}
+		draft.Inventory = inventory
+		addServerDrafts.save(a, session, draft)
 	}
 	a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), "")
 }
@@ -252,12 +262,13 @@ func (a *App) newAddServerDraft(ctx context.Context, session string, client admi
 	}
 	defaults = normalizedSetupDefaults(defaults)
 	defaults.ImageTag, defaults.VersionMode = "stable", "recommended"
-	draft := draftFromSetupDefaults(defaults, api.AdminStorageDiscovery{})
+	inventory, err := client.AdminStorage(ctx, session)
+	if err != nil {
+		return setupDraft{}, err
+	}
+	draft := draftFromSetupDefaults(defaults, inventory)
 	draft.AddServer, draft.StartOnBoot = true, true
-	draft.Storage = setupStorageDraft{Complete: true}
-	draft.BackupAvailable = configuration.Backup.Path != ""
-	draft.Backups.Complete = true
-	draft.Backups.Automatic = draft.BackupAvailable
+	draft.BackupAvailable = true
 	javaUsed := map[int]bool{configuration.Minecraft.JavaPort: true}
 	bedrockUsed := map[int]bool{}
 	if configuration.Minecraft.BedrockEnabled {
@@ -362,6 +373,11 @@ func (a *App) addServerWizardStart(w http.ResponseWriter, r *http.Request) {
 	draft.Mode = "advanced"
 	if strings.HasSuffix(r.URL.Path, "/recommended") {
 		draft.Mode = "recommended"
+		if err := a.resolveRecommendedSetupStorage(r.Context(), session, &draft); err != nil {
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		draft.Storage.Complete, draft.Backups.Complete = true, true
 		draft.DisplayName = r.FormValue("display_name")
 		draft.Minecraft.ServerType = strings.ToLower(strings.TrimSpace(r.FormValue("server_type")))
 		if !validSetupServerType(draft.Minecraft.ServerType) {
@@ -386,141 +402,18 @@ func (a *App) addServerWizardStart(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, addServerBasePath, http.StatusSeeOther)
 }
 
-func (a *App) addServerWizardFixedStep(w http.ResponseWriter, r *http.Request) {
-	session, _, identity, ok := a.setupWizardRequest(w, r, true)
-	if !ok {
-		return
-	}
-	draft, exists := addServerDrafts.get(a, session)
-	step := setupStorageStep
-	if strings.HasSuffix(r.URL.Path, "/backups") {
-		step = setupBackupsStep
-	}
-	if !exists || draft.CurrentStep != step {
-		http.Redirect(w, r, addServerBasePath, http.StatusSeeOther)
-		return
-	}
-	if step == setupBackupsStep {
-		draft.Backups.Automatic = r.FormValue("backup_automatic") == "on"
-		draft.Backups.DailyTime = r.FormValue("backup_daily_time")
-		draft.Backups.Keep = r.FormValue("backup_keep")
-	}
-	if r.FormValue("direction") == "back" && !draft.CoreCreated {
-		draft.CurrentStep--
-	} else {
-		if step == setupBackupsStep {
-			if err := validateAddServerBackups(draft); err != nil {
-				draft.Backups.Complete = false
-				addServerDrafts.save(a, session, draft)
-				w.WriteHeader(http.StatusBadRequest)
-				a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
-				return
-			}
-			draft.Backups.Complete = true
-		}
-		draft.CurrentStep++
-	}
-	addServerReviews.delete(a, session)
-	addServerDrafts.save(a, session, draft)
-	http.Redirect(w, r, addServerBasePath, http.StatusSeeOther)
-}
-func validateAddServerBackups(draft setupDraft) error {
-	keep, err := strconv.Atoi(draft.Backups.Keep)
-	if err != nil || keep < 1 || keep > 365 || !addServerBackupTimePattern.MatchString(draft.Backups.DailyTime) {
-		return errors.New("Choose a daily backup time and keep between 1 and 365 backups.")
-	}
-	if draft.Backups.Automatic && !draft.BackupAvailable {
-		return errors.New("Appliance backup storage is not configured. Turn automatic backups off to create this server.")
-	}
-	return nil
-}
-
 func (a *App) addServerReviewState(ctx context.Context, session string, draft setupDraft) (setupReviewState, error) {
-	if cached, ok := addServerReviews.get(a, session); ok && cached.DraftUpdatedAt.Equal(draft.UpdatedAt) {
-		return cached, nil
-	}
 	if !setupDraftReadyForReview(draft) {
 		return setupReviewState{}, errors.New("Complete all six setup steps before creating the server.")
 	}
-	if err := a.validateAddServerName(ctx, session, draft.DisplayName, draft.CreatedID); err != nil {
-		return setupReviewState{}, err
-	}
-	if err := validateSetupServer(draft.Server); err != nil {
-		return setupReviewState{}, err
-	}
-	if err := validateSetupMinecraft(draft.Minecraft, draft.Defaults); err != nil {
-		return setupReviewState{}, err
-	}
-	if err := validateAddServerBackups(draft); err != nil {
-		return setupReviewState{}, err
-	}
-	preview, ok := a.api.(setupVersionPreviewAPI)
+	client, ok := a.api.(adminDiscoveryAPI)
 	if !ok {
-		return setupReviewState{}, errors.New("Version information is unavailable.")
+		return setupReviewState{}, errors.New("Setup planning is unavailable.")
 	}
-	var version api.AdminVersionStatus
-	var err error
-	if draft.CoreCreated {
-		version.SelectedCandidate = draft.CreatedRuntime.Version
-		version.CrossplayCompatible = true
-	} else {
-		version, err = preview.AdminSetupVersionPreview(ctx, session, draft.Minecraft.VersionPolicy, draft.Minecraft.Version, draft.Server.BedrockEnabled, draft.Minecraft.ServerType)
-	}
-	if err != nil || version.SelectedCandidate == "" {
-		return setupReviewState{}, errors.New("The selected Minecraft version could not be checked. Try again.")
-	}
-	if draft.Server.BedrockEnabled && !version.CrossplayCompatible {
-		return setupReviewState{}, errors.New("The selected Minecraft version does not support Bedrock cross-play. Go back and choose a compatible version or disable Bedrock cross-play.")
-	}
-	javaPort, _ := strconv.Atoi(draft.Minecraft.JavaPort)
-	bedrockPort, _ := strconv.Atoi(draft.Minecraft.BedrockPort)
-	if !draft.Server.BedrockEnabled {
-		bedrockPort = 0
-	}
-	maxPlayers, _ := strconv.Atoi(draft.Server.MaxPlayers)
-	keep, _ := strconv.Atoi(draft.Backups.Keep)
-	motd := strings.TrimSpace(draft.Server.MOTD)
-	if draft.Server.MOTDAutomatic || motd == "" {
-		motd = "JustVoxel " + setupServerTypeLabel(draft.Minecraft.ServerType) + " Minecraft " + version.SelectedCandidate + " Server"
-	}
-	runtime := api.InstanceRuntimeSettings{
-		JavaPort: javaPort, BedrockEnabled: draft.Server.BedrockEnabled, BedrockPort: bedrockPort,
-		JavaMemory: draft.Minecraft.JavaMemory, ContainerMemory: draft.Minecraft.ContainerMemory,
-		Software: draft.Minecraft.ServerType, VersionPolicy: draft.Minecraft.VersionPolicy, Version: version.SelectedCandidate, PaperChannel: "default", ImageTag: draft.Minecraft.ImageTag,
-		StartOnBoot: draft.StartOnBoot, EULAAccepted: true, Timezone: draft.Server.Timezone,
-		GameMode: draft.Minecraft.GameMode, Difficulty: "normal", MaxPlayers: maxPlayers, MOTD: motd,
-	}
-	if draft.Minecraft.VersionPolicy == "latest" {
-		runtime.Version = "LATEST"
-	}
-	if runtime.Software == "paper" && (draft.Minecraft.VersionPolicy == "latest" || (version.CandidateChannel != "" && version.CandidateChannel != "STABLE" && version.CandidateChannel != "RELEASE")) {
-		runtime.PaperChannel = "experimental"
-	}
-	if draft.CoreCreated {
-		runtime = draft.CreatedRuntime
-	}
-	state := setupReviewState{AddServer: true, DisplayName: draft.DisplayName, StartOnBoot: draft.StartOnBoot, BackupAvailable: draft.BackupAvailable,
-		SetupMode: draft.Mode, ServerType: draft.Minecraft.ServerType, DraftUpdatedAt: draft.UpdatedAt,
-		InstanceRuntime: runtime, InstanceBackup: api.InstanceBackupSettings{Enabled: draft.Backups.Automatic, Time: draft.Backups.DailyTime, Retention: keep},
-	}
-	// This is only the existing Review presentation model. It is never submitted
-	// to legacy Setup Plan/Apply and does not represent an appliance transaction.
-	state.Plan = api.AdminSetupPlanResponse{OK: true, Normalized: api.AdminSetupNormalizedPlan{
-		Server: api.AdminSetupPlanServer{MOTD: motd, MaxPlayers: maxPlayers, BedrockEnabled: runtime.BedrockEnabled, Timezone: runtime.Timezone},
-		Minecraft: api.AdminSetupPlanMinecraft{ServerType: runtime.Software, GameMode: runtime.GameMode, JavaMemory: runtime.JavaMemory, ContainerMemory: runtime.ContainerMemory,
-			JavaPort: javaPort, BedrockPort: bedrockPort, ImageTag: runtime.ImageTag, RequestedVersionPolicy: draft.Minecraft.VersionPolicy, Version: version.SelectedCandidate},
-		Backups: api.AdminSetupPlanBackups{Automatic: draft.Backups.Automatic, DailyTime: draft.Backups.DailyTime, Keep: keep},
-	}}
-	data, err := json.Marshal(struct {
-		Name    string
-		Runtime api.InstanceRuntimeSettings
-		Backup  api.InstanceBackupSettings
-	}{draft.DisplayName, runtime, state.InstanceBackup})
-	if err != nil {
+	state, err, _, ready := a.setupReviewState(ctx, session, client, draft)
+	if !ready {
 		return state, err
 	}
-	state.Plan.PlanFingerprint = fmt.Sprintf("sha256:%x", sha256.Sum256(data))
-	addServerReviews.save(a, session, state)
 	return state, nil
 }
 
@@ -530,7 +423,7 @@ func (a *App) addServerWizardReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	draft, exists := addServerDrafts.get(a, session)
-	if !exists {
+	if !exists || !setupDraftReadyForReview(draft) {
 		http.Redirect(w, r, addServerBasePath, http.StatusSeeOther)
 		return
 	}
@@ -562,86 +455,4 @@ func (a *App) addServerWizardReviewBack(w http.ResponseWriter, r *http.Request) 
 		addServerReviews.delete(a, session)
 	}
 	http.Redirect(w, r, addServerBasePath, http.StatusSeeOther)
-}
-
-func (a *App) addServerWizardCreate(w http.ResponseWriter, r *http.Request) {
-	session, _, identity, ok := a.setupWizardRequest(w, r, true)
-	if !ok {
-		return
-	}
-	draft, exists := addServerDrafts.get(a, session)
-	if !exists {
-		http.Redirect(w, r, addServerBasePath, http.StatusSeeOther)
-		return
-	}
-	state, reviewed := addServerReviews.get(a, session)
-	if !reviewed || !state.DraftUpdatedAt.Equal(draft.UpdatedAt) || r.FormValue("plan_fingerprint") != state.Plan.PlanFingerprint {
-		http.Error(w, "Setup changed since Review. Reload Review before creating the server.", http.StatusConflict)
-		return
-	}
-	if r.FormValue("eula_accepted") != "on" {
-		http.Error(w, "Accept the Minecraft EULA before creating the server.", http.StatusBadRequest)
-		return
-	}
-	client, ok := a.api.(addServerAPI)
-	if !ok {
-		http.Error(w, "Independent server creation is unavailable.", http.StatusServiceUnavailable)
-		return
-	}
-	fail := func(message string, blocked bool) {
-		draft.CreationError = message
-		addServerDrafts.save(a, session, draft)
-		draft, _ = addServerDrafts.get(a, session)
-		state.DraftUpdatedAt = draft.UpdatedAt
-		state.CreationBlocked = blocked
-		addServerReviews.save(a, session, state)
-		w.WriteHeader(http.StatusConflict)
-		a.renderSetupReview(w, identity, state, csrfFromRequest(r), message)
-	}
-	if draft.CreationAttempted && (draft.CreatedID == "" || state.CreationBlocked) {
-		fail(draft.CreationError, true)
-		return
-	}
-	if !draft.CreationAttempted {
-		if err := a.validateAddServerName(r.Context(), session, draft.DisplayName); err != nil {
-			fail(err.Error(), false)
-			return
-		}
-		draft.CreationAttempted = true
-		addServerDrafts.save(a, session, draft)
-		result, err := client.CreateMinecraftInstance(r.Context(), session, api.CreateMinecraftInstanceRequest{DisplayName: draft.DisplayName, Runtime: state.InstanceRuntime})
-		if addServerIDPattern.MatchString(result.ID) {
-			draft.CreatedID = result.ID
-		}
-		if err != nil || !result.OK || draft.CreatedID == "" || result.State != "stopped" {
-			message := "Creation outcome could not be verified. Check the registered servers before trying to create another server."
-			if draft.CreatedID != "" {
-				message = "Server registered, but configuration was not completed. The server and its data have been preserved."
-			}
-			if result.Error != "" {
-				message += " " + result.Error
-			}
-			// A definite refusal before registration can safely be edited and retried.
-			var responseErr *api.ResponseError
-			if draft.CreatedID == "" && errors.As(err, &responseErr) && (responseErr.StatusCode == http.StatusBadRequest || responseErr.StatusCode == http.StatusConflict) {
-				draft.CreationAttempted = false
-				message = "Server creation was refused. " + responseErr.Message
-			}
-			fail(message, draft.CreationAttempted)
-			return
-		}
-		draft.CoreCreated = true
-		draft.CreatedRuntime = state.InstanceRuntime
-	}
-	if err := client.SetMinecraftInstanceBackupSettings(r.Context(), session, draft.CreatedID, state.InstanceBackup); err != nil {
-		message := "Server created and left stopped. Backup settings were not confirmed. Use Back to adjust the backup schedule, select Create Server to retry only backup settings, or return to Minecraft Servers."
-		if detail, ok := api.ErrorMessage(err); ok {
-			message += " " + detail
-		}
-		fail(message, false)
-		return
-	}
-	addServerReviews.delete(a, session)
-	addServerDrafts.delete(a, session)
-	http.Redirect(w, r, minecraftServersPath+"?created=yes", http.StatusSeeOther)
 }

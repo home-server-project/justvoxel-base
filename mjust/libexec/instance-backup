@@ -13,24 +13,9 @@ if [[ ${action} == run ]]; then
 fi
 case ${action} in inventory|preflight|create|retain) ;; *) fail ;; esac
 source /usr/libexec/justvoxel/mjust/backup-common.sh
-# Read storage configuration only. Never run the legacy worker or container.
-config=/etc/justvoxel/minecraft-backup.env
-[[ -f ${config} && ! -L ${config} && $(realpath -e -- "${config}") == "${config}" ]] || fail
-[[ $(stat -c '%u:%g:%a' -- "${config}") == 0:0:600 ]] || fail
-jv_backup_load_config "${config}" >/dev/null 2>&1 || fail
-[[ ${MINECRAFT_BACKUP_PATH} == "${minecraft_backup_path}" ]] || fail
-if [[ ${BACKUP_TYPE} != system ]]; then
-    [[ -n ${BACKUP_MOUNT_POINT} && ( -n ${BACKUP_EXPECTED_UUID} || -n ${BACKUP_EXPECTED_SOURCE} ) ]] || fail
-else
-    [[ -z ${BACKUP_MOUNT_POINT} && -z ${BACKUP_EXPECTED_UUID} && -z ${BACKUP_EXPECTED_SOURCE} ]] || fail
-fi
-if [[ -n ${BACKUP_MOUNT_POINT} ]]; then
-    [[ $(realpath -e -- "${BACKUP_MOUNT_POINT}") == "${BACKUP_MOUNT_POINT}" ]] || fail
-fi
-jv_backup_require_read_target >/dev/null 2>&1 || fail
-export JV_INSTANCE_BACKUP_ROOT="${minecraft_backup_path}"
-# All paths below come from private committed runtime, never API input.
+# Validate private committed evidence before reading placement.
 /usr/libexec/justvoxel/mjust/validate-instance-runtime-commit "${id}" >/dev/null 2>&1 || fail
+jv_instance_backup_load_target "${id}" || fail
 if [[ ${action} != inventory ]]; then
     mapfile -t fields < <(jq -er '[.runtime.id,.storage.root,.storage.data_path,.storage.mount_point,.storage.uuid,.storage.source,(.runtime.uid|tostring),(.runtime.gid|tostring)] | .[]' "/etc/justvoxel/instances/${id}/config.json")
     [[ ${#fields[@]} == 8 && ${fields[0]} == "${id}" ]] || fail
@@ -129,6 +114,8 @@ def write_new(fd, name, data):
 try:
     record_raw = private(config_root + '/' + identity + '/config.json')
     record = json.loads(record_raw)
+    if 'backups' in record and (record['backups']['root'] != root or record['backups']['path'] != root + '/' + identity):
+        raise ValueError('backup placement changed')
     if json.loads(private(registry + '/' + identity + '.json')) != {'id':identity} or record['runtime']['id'] != identity:
         raise ValueError('identity')
     # The legacy identity may never be claimed by this worker.

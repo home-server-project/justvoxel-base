@@ -29,6 +29,7 @@ const instanceRuntimeHelper = "/usr/libexec/justvoxel/mjust/instance-runtime-pre
 type instanceRuntimeRecord struct {
 	SchemaVersion     int                            `json:"schema_version"`
 	Runtime           minecraftInstanceRuntimeConfig `json:"runtime"`
+	Backups           *instanceRuntimeBackupStorage  `json:"backups,omitempty"`
 	Storage           instanceRuntimeStorage         `json:"storage"`
 	EnvironmentSHA256 string                         `json:"environment_sha256"`
 	QuadletSHA256     string                         `json:"quadlet_sha256"`
@@ -76,6 +77,13 @@ var instanceRuntimes = &instanceRuntimeBackend{
 var errInstanceRecovery = instanceRuntimeFailure("Instance runtime recovery is required. Retry the instance recovery operation.")
 var errInstanceBusy = instanceRuntimeFailure("Another appliance operation is active.")
 
+// systemd 257 prints an empty Job value when no job is queued.
+// A failed query never establishes idleness.
+func systemdJobIdle(output []byte, err error) bool {
+	value := strings.TrimSpace(string(output))
+	return err == nil && (value == "" || value == "0")
+}
+
 func instanceRuntimeCommand(ctx context.Context, command string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
 	var output pluginBoundedOutput
@@ -83,7 +91,12 @@ func instanceRuntimeCommand(ctx context.Context, command string, args ...string)
 	// Do not merge stderr with protocol output or expose it in API errors.
 	cmd.Stderr = io.Discard
 	cmd.WaitDelay = time.Second
-	err := cmd.Run()
+	finish, err := attachOperationTrace(ctx, cmd)
+	if err != nil {
+		return nil, err
+	}
+	err = cmd.Run()
+	finish(err)
 	return output.Bytes(), err
 }
 func instanceRuntimeSnapshot(ctx context.Context) (minecraftInstanceRuntimeContext, uint32, uint32, error) {
@@ -96,17 +109,18 @@ func instanceRuntimeSnapshot(ctx context.Context) (minecraftInstanceRuntimeConte
 
 func decodeInstanceRuntimeSnapshot(data []byte) (minecraftInstanceRuntimeContext, uint32, uint32, error) {
 	var out struct {
-		Storage    instanceRuntimeStorage `json:"storage"`
-		BackupPath string                 `json:"backup_path"`
-		Memory     int64                  `json:"memory_mib"`
-		UID        uint32                 `json:"uid"`
-		GID        uint32                 `json:"gid"`
+		Storage    instanceRuntimeStorage        `json:"storage"`
+		Backups    *instanceRuntimeBackupStorage `json:"backups,omitempty"`
+		BackupPath string                        `json:"backup_path"`
+		Memory     int64                         `json:"memory_mib"`
+		UID        uint32                        `json:"uid"`
+		GID        uint32                        `json:"gid"`
 	}
 	if instanceDecode(data, &out) != nil || out.UID == 0 || out.GID == 0 || out.UID == ^uint32(0) || out.GID == ^uint32(0) || out.Memory <= 0 || validateInstanceRuntimePath(out.Storage.Root) != nil || validateInstanceRuntimePath(out.BackupPath) != nil || out.Storage.DataPath != "" {
 		return minecraftInstanceRuntimeContext{}, 0, 0, instanceRuntimeFailure("Appliance storage and resource discovery is unavailable.")
 	}
 	return minecraftInstanceRuntimeContext{
-		BackupPath: out.BackupPath, StorageRoot: out.Storage.Root,
+		BackupPlacement: out.Backups, BackupPath: out.BackupPath, StorageRoot: out.Storage.Root,
 		MountPoint: out.Storage.MountPoint, ExpectedUUID: out.Storage.UUID, ExpectedSource: out.Storage.Source,
 		TotalMemoryMiB: out.Memory, TemplateRoot: "/usr/share/justvoxel/templates",
 	}, out.UID, out.GID, nil
@@ -314,6 +328,9 @@ func (b *instanceRuntimeBackend) readRecord(id string) (instanceRuntimeRecord, e
 			return record, instanceRuntimeFailure("Invalid runtime storage.")
 		}
 	}
+	if err := validateInstanceRecordPlacement(record); err != nil {
+		return record, err
+	}
 	if (record.EnvironmentSHA256 == "") != (record.QuadletSHA256 == "") {
 		return record, instanceRuntimeFailure("Invalid runtime commitment.")
 	}
@@ -412,15 +429,21 @@ func (b *instanceRuntimeBackend) verifyLive(record instanceRuntimeRecord) error 
 	return nil
 }
 func (b *instanceRuntimeBackend) render(ctx minecraftInstanceRuntimeContext, records []instanceRuntimeRecord) ([]minecraftInstanceRuntimeFiles, error) {
+	return b.renderCandidate(ctx, records, "")
+}
+func (b *instanceRuntimeBackend) renderCandidate(ctx minecraftInstanceRuntimeContext, records []instanceRuntimeRecord, candidate string) ([]minecraftInstanceRuntimeFiles, error) {
+	ctx.Placements = make(map[string]instanceRuntimeRecord, len(records))
 	configs := make([]minecraftInstanceRuntimeConfig, 0, len(records))
 	for _, r := range records {
-		if r.Storage.Root != ctx.StorageRoot || r.Storage.MountPoint != ctx.MountPoint || r.Storage.UUID != ctx.ExpectedUUID || r.Storage.Source != ctx.ExpectedSource {
-			return nil, instanceRuntimeFailure("Configured storage identity changed; instance storage is unavailable.")
+		if err := validateInstanceRecordPlacement(r); err != nil {
+			return nil, err
 		}
+		ctx.Placements[r.Runtime.ID] = r
 		configs = append(configs, r.Runtime)
 	}
-	return b.identities().renderInstanceRuntimes(ctx, configs)
+	return b.identities().renderInstanceRuntimesCandidate(ctx, configs, candidate)
 }
+
 func (b *instanceRuntimeBackend) storage(ctx context.Context, action string, record instanceRuntimeRecord) error {
 	c := record.Runtime
 	s := record.Storage

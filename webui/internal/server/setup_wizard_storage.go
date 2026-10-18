@@ -93,9 +93,9 @@ func (a *App) setupWizardSaveStorage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	draft, exists := firstRunSetupDrafts.get(a, session)
+	draft, exists := setupDraftsFor(r).get(a, session)
 	if !exists || !draft.Started {
-		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
 		return
 	}
 	storage, err := client.AdminStorage(r.Context(), session)
@@ -109,14 +109,14 @@ func (a *App) setupWizardSaveStorage(w http.ResponseWriter, r *http.Request) {
 	if r.FormValue("direction") == "back" {
 		draft.Storage.Complete = false
 		draft.CurrentStep = setupMemoryStep
-		firstRunSetupDrafts.save(a, session, draft)
+		setupDraftsFor(r).save(a, session, draft)
 		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "storage settings changed; user returned to Memory", draft)
-		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
 		return
 	}
 	if err := validateSetupStorage(draft.Storage, draft.Inventory, draft.Defaults); err != nil {
 		draft.Storage.Complete = false
-		firstRunSetupDrafts.save(a, session, draft)
+		setupDraftsFor(r).save(a, session, draft)
 		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "storage settings rejected", draft)
 		w.WriteHeader(http.StatusBadRequest)
 		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
@@ -124,9 +124,9 @@ func (a *App) setupWizardSaveStorage(w http.ResponseWriter, r *http.Request) {
 	}
 	draft.Storage.Complete = true
 	draft.CurrentStep = setupBackupsStep
-	firstRunSetupDrafts.save(a, session, draft)
+	setupDraftsFor(r).save(a, session, draft)
 	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "storage settings saved", draft)
-	http.Redirect(w, r, "/setup", http.StatusSeeOther)
+	http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
 }
 
 func (a *App) setupWizardSaveBackups(w http.ResponseWriter, r *http.Request) {
@@ -134,9 +134,9 @@ func (a *App) setupWizardSaveBackups(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	draft, exists := firstRunSetupDrafts.get(a, session)
+	draft, exists := setupDraftsFor(r).get(a, session)
 	if !exists || !draft.Started {
-		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
 		return
 	}
 	storage, err := client.AdminStorage(r.Context(), session)
@@ -155,14 +155,14 @@ func (a *App) setupWizardSaveBackups(w http.ResponseWriter, r *http.Request) {
 	if r.FormValue("direction") == "back" {
 		draft.Backups.Complete = false
 		draft.CurrentStep = setupStorageStep
-		firstRunSetupDrafts.save(a, session, draft)
+		setupDraftsFor(r).save(a, session, draft)
 		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "backup settings changed; user returned to Storage", draft)
-		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
 		return
 	}
 	if err := validateSetupBackups(draft.Backups, draft.Storage, draft.Inventory, draft.Defaults); err != nil {
 		draft.Backups.Complete = false
-		firstRunSetupDrafts.save(a, session, draft)
+		setupDraftsFor(r).save(a, session, draft)
 		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "backup settings rejected", draft)
 		w.WriteHeader(http.StatusBadRequest)
 		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
@@ -170,9 +170,9 @@ func (a *App) setupWizardSaveBackups(w http.ResponseWriter, r *http.Request) {
 	}
 	draft.Backups.Complete = true
 	draft.CurrentStep = setupReviewStep
-	firstRunSetupDrafts.save(a, session, draft)
+	setupDraftsFor(r).save(a, session, draft)
 	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "backup settings saved; configuration ready for Review", draft)
-	http.Redirect(w, r, "/setup/review", http.StatusSeeOther)
+	http.Redirect(w, r, setupBasePath(r)+"/review", http.StatusSeeOther)
 }
 
 func initialSetupStorageDraft(defaults api.AdminSetupDefaults) setupStorageDraft {

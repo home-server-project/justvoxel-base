@@ -76,6 +76,9 @@ func testFreshSetupCreatesOneNormalInstance(t *testing.T, existing bool, name st
 	if record.Storage.DataPath != filepath.Join(f.snapshot.StorageRoot, "minecraft-instances", id, "data") || !record.Runtime.StartOnBoot || len(record.Firewall) == 0 {
 		t.Fatal("first server skipped normal activation", record.Storage)
 	}
+	if record.Backups == nil || record.Backups.Root != r.Backups.Path || record.Backups.Path != filepath.Join(r.Backups.Path, id) {
+		t.Fatal("resolved first-server backups not persisted", record.Backups)
+	}
 	expectedName := name
 	if name == "" {
 		expectedName = instanceDefaultName("paper")
@@ -604,5 +607,84 @@ func TestExplicitSetupRecoveryStopsTrackedInstanceBeforeActivationRecovery(t *te
 				t.Fatal("sibling runtime changed")
 			}
 		})
+	}
+}
+
+func TestAdditionalSetupPersistsManualPlacementWithoutChangingSiblings(t *testing.T) {
+	f := newInstanceActivationFixture(t)
+	f.activateBoth()
+	b := f.backend
+	old, oldPolicy, oldMarker := instanceRuntimes, setupPolicyRoot, setupInstanceMarker
+	instanceRuntimes = b
+	setupPolicyRoot = filepath.Join(filepath.Dir(b.root), "policy")
+	setupInstanceMarker = filepath.Join(filepath.Dir(b.root), "setup-in-progress")
+	t.Cleanup(func() { instanceRuntimes, setupPolicyRoot, setupInstanceMarker = old, oldPolicy, oldMarker })
+	if err := os.Mkdir(setupPolicyRoot, 0700); err != nil {
+		t.Fatal(err)
+	}
+	policy := filepath.Join(setupPolicyRoot, "justvoxel.conf")
+	if err := os.WriteFile(policy, []byte("existing appliance defaults\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Separate filesystem roots are represented by explicit mount identities; no
+	// test command may mount/unmount or operate on another Minecraft runtime.
+	dataRoot := filepath.Join(filepath.Dir(b.root), "selected-data")
+	backupRoot := filepath.Join(filepath.Dir(b.root), "selected-backups")
+	for _, root := range []string{dataRoot, backupRoot} {
+		if err := os.Mkdir(root, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	preserved := map[string][]byte{}
+	for _, c := range f.configs {
+		dir, env, q := b.paths(c.ID)
+		world := filepath.Join(instanceStorageFor(f.snapshot, c.ID).DataPath, "world")
+		if err := os.WriteFile(world, []byte("sibling world"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		for _, path := range []string{filepath.Join(b.store.directory, c.ID+".json"), filepath.Join(dir, "config.json"), env, q, world, policy} {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			preserved[path] = raw
+		}
+	}
+	r := setupRuntimeTransactionRequest{InstanceOnly: true, AddServer: true, StartOnBoot: false, SchemaVersion: "v1", OperationID: "12345678-1234-4123-8123-123456789abc", PlanFingerprint: testSetupFingerprint,
+		Server:    setupRuntimeServer{DisplayName: "New storage server", MOTD: "New server", MaxPlayers: 20, Timezone: "UTC"},
+		Minecraft: setupRuntimeMinecraft{ServerType: "paper", GameMode: "survival", JavaMemory: "1G", ContainerMemory: "2G", JavaPort: instanceTestPort(t), BedrockPort: 19132, ImageTag: "stable", VersionPolicy: "pinned", Version: "1.21.4", MinecraftUID: 1000, MinecraftGID: 1000},
+		Storage:   setupRuntimeStorage{Type: "partition", Path: filepath.Join(dataRoot, "minecraft"), MountPoint: dataRoot, ExpectedUUID: "selected-data-uuid", ExpectedSource: "/dev/selected-data"},
+		Backups:   setupRuntimeBackups{Type: "nfs", Path: backupRoot, MountPoint: backupRoot, ExpectedSource: "nas:/selected", Keep: 7, Schedule: "*-*-* 06:00:00"}}
+	f.calls = nil
+	for _, action := range []string{"validate", "apply", "verify"} {
+		out, err := runSetupInstanceAction(context.Background(), action, r)
+		if err != nil || !out.OK {
+			t.Fatal(action, out, err)
+		}
+	}
+	e, err := setupInstanceRead(r.OperationID, r.PlanFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := b.readRecord(e.Record.Runtime.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Storage.Root != dataRoot || record.Storage.UUID != "selected-data-uuid" || record.Backups == nil || record.Backups.Root != backupRoot || record.Backups.Path != filepath.Join(backupRoot, record.Runtime.ID) || record.Backups.Source != "nas:/selected" {
+		t.Fatal("placement not persisted", record.Storage, record.Backups)
+	}
+	if record.Runtime.StartOnBoot || record.Runtime.Whitelist || record.Runtime.EnforceWhitelist {
+		t.Fatal("existing add-server startup settings changed")
+	}
+	for path, want := range preserved {
+		got, err := os.ReadFile(path)
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Fatal("sibling or defaults changed", path, err)
+		}
+	}
+	for _, call := range f.calls {
+		if strings.Contains(call, "umount") || strings.Contains(call, "systemctl start") || strings.Contains(call, "systemctl stop") || strings.Contains(call, "systemctl restart") {
+			t.Fatal("creation disrupted runtime or topology", call)
+		}
 	}
 }

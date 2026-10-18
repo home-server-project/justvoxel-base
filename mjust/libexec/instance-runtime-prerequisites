@@ -4,6 +4,33 @@ source /usr/libexec/justvoxel/mjust/common.sh
 require_root
 fail() { echo 'ERROR: instance runtime prerequisites could not be verified.' >&2; exit 1; }
 case "${1:-}" in
+    placement-candidate)
+        [[ $# == 4 ]] || fail
+        point=$2 uuid=$3 expected_source=$4
+        [[ -d ${point} && -w ${point} && $(realpath -e -- "${point}") == "${point}" ]] || fail
+        owner="$(stat -c '%u' -- "${point}")" || fail
+        mode="$(stat -c '%a' -- "${point}")" || fail
+        [[ ${owner} == 0 && ${mode} =~ ^[0-7]{3,4}$ ]] || fail
+        (( (8#${mode} & 0022) == 0 )) || fail
+        if [[ -n ${uuid} || -n ${expected_source} ]]; then
+            mountpoint -q -- "${point}" || fail
+            [[ -n ${uuid} && $(jv_exact_mount_identity UUID "${point}") == "${uuid}" ]] || fail
+            [[ -z ${expected_source} || $(jv_exact_mount_identity SOURCE "${point}") == "${expected_source}" ]] || fail
+        fi
+        fs="$(findmnt -n -o FSTYPE --target "${point}")" || fail
+        case "${fs}" in xfs|ext4|btrfs) ;; *) fail ;; esac
+        options="$(findmnt -n -o OPTIONS --target "${point}")" || fail
+        [[ ,${options}, != *,ro,* ]] || fail
+        read -r size available < <(df -B1 --output=size,avail -- "${point}" | awk 'NR==2 {print $1, $2}')
+        [[ ${size} =~ ^[0-9]+$ && ${available} =~ ^[0-9]+$ ]] || fail
+        identity="$(findmnt -n -o UUID --target "${point}")" || fail
+        if [[ -n ${identity} ]]; then
+            identity="uuid:${identity}"
+        else
+            identity="device:$(stat -c '%d' -- "${point}")" || fail
+        fi
+        jq -cn --arg identity "${identity}" --argjson size "${size}" --argjson available "${available}" '{identity:$identity,size:$size,available:$available}'
+        ;;
     snapshot)
         [[ $# == 1 ]] || fail
         # Storage policy is appliance-wide. Do not load/validate a server,
@@ -11,6 +38,7 @@ case "${1:-}" in
         DATA_PATH=/var/lib/justvoxel/minecraft
         BACKUP_PATH=/var/lib/justvoxel/backups
         DATA_MOUNT_POINT='' DATA_EXPECTED_UUID='' DATA_EXPECTED_SOURCE=''
+        BACKUP_TYPE=system BACKUP_MOUNT_POINT='' BACKUP_EXPECTED_UUID='' BACKUP_EXPECTED_SOURCE=''
         if [[ -e ${JV_CONFIG} || -L ${JV_CONFIG} ]]; then
             [[ -f ${JV_CONFIG} && ! -L ${JV_CONFIG} && $(realpath -e -- "${JV_CONFIG}") == "${JV_CONFIG}" ]] || fail
             [[ $(stat -c '%u' -- "${JV_CONFIG}") == 0 ]] || fail
@@ -18,6 +46,7 @@ case "${1:-}" in
             (( (8#${config_mode} & 0022) == 0 )) || fail
             source "${JV_CONFIG}"
         fi
+        case "${BACKUP_TYPE}" in disk|local) BACKUP_TYPE=partition ;; esac
         storage_root="$(dirname -- "${DATA_PATH}")" || fail
         read -r uid gid id_source < <(resolve_minecraft_ids)
         validate_nonroot_id "${uid}" && validate_nonroot_id "${gid}" || fail
@@ -25,9 +54,10 @@ case "${1:-}" in
         [[ ${memory} =~ ^[1-9][0-9]*$ ]] || fail
         jq -n --arg root "${storage_root}" --arg mount "${DATA_MOUNT_POINT}" \
             --arg uuid "${DATA_EXPECTED_UUID}" --arg source "${DATA_EXPECTED_SOURCE}" \
-            --arg backup "${BACKUP_PATH}" --argjson memory "${memory}" \
+            --arg backup "${BACKUP_PATH}" --arg backup_type "${BACKUP_TYPE}" --arg backup_mount "${BACKUP_MOUNT_POINT}" \
+            --arg backup_uuid "${BACKUP_EXPECTED_UUID}" --arg backup_source "${BACKUP_EXPECTED_SOURCE}" --argjson memory "${memory}" \
             --argjson uid "${uid}" --argjson gid "${gid}" \
-            '{storage:{root:$root,mount_point:$mount,uuid:$uuid,source:$source},backup_path:$backup,memory_mib:$memory,uid:$uid,gid:$gid}'
+            '{storage:{root:$root,mount_point:$mount,uuid:$uuid,source:$source},backup_path:$backup,backups:{type:$backup_type,root:$backup,path:"",mount_point:$backup_mount,uuid:$backup_uuid,source:$backup_source},memory_mib:$memory,uid:$uid,gid:$gid}'
         ;;
     channel)
         [[ $# == 4 ]] || fail

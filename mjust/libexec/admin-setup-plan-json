@@ -267,10 +267,7 @@ if ! jq -e . >/dev/null 2>&1 <<< "${request}" || ! validate_request_shape "${req
     exit 0
 fi
 
-if [[ -e ${JV_CONFIG} || -e ${JV_QUADLET} ]]; then
-    json_error 'JustVoxel is already configured. First-run setup planning is available only before the initial configuration is created.' already_configured
-    exit 0
-fi
+# Planning is shared by first setup and additional instances. Apply owns admission.
 
 MINECRAFT_SERVER_TYPE="$(jq -r '.minecraft.server_type // "paper"' <<< "${request}")"
 motd="$(jq -r '.server.motd' <<< "${request}")"

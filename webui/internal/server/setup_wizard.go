@@ -310,6 +310,10 @@ func (a *App) setupWizardRecommended(w http.ResponseWriter, r *http.Request) {
 	}
 
 	draft.Mode = "recommended"
+	if err := a.resolveRecommendedSetupStorage(r.Context(), session, &draft); err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
 	draft.DiagnosticSessionID = diagnosticID
 	draft.Minecraft.ServerType = serverType
 	draft.Server.BedrockEnabled = recommendedServerSupportsBedrock(serverType)
@@ -327,14 +331,6 @@ func (a *App) setupWizardRecommended(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateSetupMinecraft(draft.Minecraft, draft.Defaults); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := validateSetupStorage(draft.Storage, draft.Inventory, draft.Defaults); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := validateSetupBackups(draft.Backups, draft.Storage, draft.Inventory, draft.Defaults); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -643,12 +639,6 @@ func (a *App) renderSetupWizard(w http.ResponseWriter, identity api.SessionInfo,
 	basePath := "/setup"
 	if draft.AddServer {
 		basePath = addServerBasePath
-		if draft.CurrentStep == setupStorageStep {
-			current.Description = "All servers use the configured JustVoxel Minecraft storage."
-		}
-		if draft.CurrentStep == setupBackupsStep {
-			current.Description = "Choose this server's automatic backup schedule and retention using the appliance backup destination."
-		}
 	}
 	data := setupWizardPageData{
 		AddServer: draft.AddServer, BasePath: basePath, DisplayName: draft.DisplayName,

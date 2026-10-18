@@ -169,7 +169,9 @@ _a53_parse_request() {
     A53_REQUEST="$(cat)"
     jq -e '
       type == "object" and
-      ((keys - ["schema_version","operation_id","plan_fingerprint","storage","backups","smb_password"]) | length == 0) and
+      ((keys - ["schema_version","operation_id","plan_fingerprint","storage","backups","smb_password","mounted_only","isolated_credentials"]) | length == 0) and
+      ((.mounted_only // false)|type == "boolean") and
+      ((.isolated_credentials // false)|type == "boolean") and
       .schema_version == "v1" and
       (.operation_id|type == "string") and
       (.plan_fingerprint|type == "string") and
@@ -201,6 +203,10 @@ _a53_parse_request() {
     A53_PLAN_FINGERPRINT="$(jq -r '.plan_fingerprint' <<< "${A53_REQUEST}")"
     [[ ${A53_OPERATION_ID} =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] || return 1
     [[ ${A53_PLAN_FINGERPRINT} =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+    if [[ $(jq -r '.backups.type' <<< "${A53_REQUEST}") == smb &&
+          $(jq -r '.isolated_credentials // false' <<< "${A53_REQUEST}") == true ]]; then
+        A54_SMB_CREDENTIALS="/etc/justvoxel/smb-backup-${A53_OPERATION_ID}.credentials"
+    fi
     return 0
 }
 
@@ -336,6 +342,12 @@ _a53_validate_target() {
 
 _a53_validate_all() {
     local storage backups storage_path backup_path backup_type
+    if [[ $(jq -r '.mounted_only // false' <<< "${A53_REQUEST}") == true ]]; then
+        local point
+        while IFS= read -r point; do
+            [[ -n ${point} ]] && mountpoint -q -- "${point}" || return 1
+        done < <(jq -r '[.storage,.backups][] | select(.type != "system") | .mount_point' <<< "${A53_REQUEST}")
+    fi
     storage="$(jq -c '.storage' <<< "${A53_REQUEST}")"
     backups="$(jq -c '.backups' <<< "${A53_REQUEST}")"
     _a53_validate_target data "${storage}" || return $?

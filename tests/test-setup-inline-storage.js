@@ -57,7 +57,7 @@ class Node {
     return this.kind === 'backup' ? s.includes('backup-form') : s.includes('storage-form');
   }
 }
-function fixture(kind, controlCenter = false, largeInventory = false, initial = {}) {
+function wizardFixture(basePath, kind, controlCenter = false, largeInventory = false, initial = {}) {
   let current, fresh;
   let workspaceRefreshes = 0;
   const requests = [];
@@ -79,7 +79,7 @@ function fixture(kind, controlCenter = false, largeInventory = false, initial = 
   function makeForm(devices = []) {
     const f = new Node({csrf: 'fixture-csrf'}); f.kind = kind;
     f.workspace = workspace;
-    f.attributes.action = kind === 'backup' ? '/setup/backups' : '/setup/storage';
+    f.attributes.action = basePath + (kind === 'backup' ? '/backups' : '/storage');
     f.parentElement = document;
     f.replaceWith = replacement => { current = replacement; };
     const fields = [];
@@ -178,7 +178,7 @@ function fixture(kind, controlCenter = false, largeInventory = false, initial = 
     DOMParser: class {parseFromString() { return {querySelector: () => fresh}; }},
     async fetch(url, options = {}) {
       requests.push({url, body: options.body ? new URLSearchParams(options.body) : null});
-      if (url === '/setup') { if (refreshFails) return {ok: false}; fresh = makeForm(['/dev/vdb1', '/dev/vdc1']); if (status.mounted) fresh.many['[data-storage-partition]'][0].dataset.mountpoint = status.current_mount_point; return {ok: true, text: async () => 'mocked wizard'}; }
+      if (url === basePath) { if (refreshFails) return {ok: false}; fresh = makeForm(['/dev/vdb1', '/dev/vdc1']); if (status.mounted) fresh.many['[data-storage-partition]'][0].dataset.mountpoint = status.current_mount_point; return {ok: true, text: async () => 'mocked wizard'}; }
       if (url.includes('/mounts/status')) return statusError && (!statusErrorDevice || url.endsWith(encodeURIComponent(statusErrorDevice))) ? {ok: false, json: async () => ({ok: false, error: statusError})} : {ok: true, json: async () => ({ok: true, proposed: status})};
       if (applyError && url.endsWith('/mounts/apply')) return {ok: false, json: async () => ({ok: false, error: applyError})};
       if (deny) return {ok: false, json: async () => ({ok: false, error: 'Protected or unavailable'})};
@@ -203,7 +203,8 @@ function assertPartitionSelection(card, selected) {
   assert.equal(card.getAttribute('aria-pressed'), String(selected));
   assert.equal(card.querySelector('.storage-partition-state').textContent, selected ? 'Selected' : card.dataset.role);
 }
-(async () => {
+async function verifyWizard(basePath) {
+  const fixture = (...args) => wizardFixture(basePath, ...args);
   // Both wizard steps show the destination choice, rather than the open detail card.
   for (const kind of ['storage', 'backup']) {
     const f = fixture(kind, false, false, {devices: ['/dev/vdb1', '/dev/vdc1']});
@@ -378,7 +379,7 @@ function assertPartitionSelection(card, selected) {
     f.get('create-confirm-toggle').checked = true;
     await f.get('create-confirm-toggle').emit('change');
     const oldForm = f.form();
-    const inventoryRefreshes = () => f.requests.filter(r => r.url === '/setup').length;
+    const inventoryRefreshes = () => f.requests.filter(r => r.url === basePath).length;
     const beforeCreate = inventoryRefreshes();
     await f.get('create-apply').emit('click'); await settle();
     assert.equal(inventoryRefreshes(), beforeCreate + 1, 'Wizard creation refreshes inventory exactly once');
@@ -396,7 +397,7 @@ function assertPartitionSelection(card, selected) {
       assertPartitionSelection(card, card.dataset.device === field('device').value);
     });
     assert.equal(f.get('action-csrf').value, 'new-csrf');
-    assert.equal(f.form().getAttribute('action'), kind === 'backup' ? '/setup/backups' : '/setup/storage');
+    assert.equal(f.form().getAttribute('action'), basePath + (kind === 'backup' ? '/backups' : '/storage'));
     assert.equal(f.form().many['[data-storage-disk]'][0].getAttribute('aria-pressed'), 'true');
     if (kind === 'backup') {
       assert.equal(f.form().one['[data-setup-network-source="smb"]'].value, '//nas/unsaved');
@@ -479,7 +480,7 @@ function assertPartitionSelection(card, selected) {
     assert.equal(recovery.getAttribute('role'), 'alert');
     assert(recovery.children[0].textContent.startsWith('Storage updated.'));
     assert(recovery.children[0].textContent.includes('go Back, or cancel setup'));
-    for (const submitter of [new Node({}, 'back'), Object.assign(new Node(), {attributes: {formaction: '/setup/cancel'}})]) {
+    for (const submitter of [new Node({}, 'back'), Object.assign(new Node(), {attributes: {formaction: basePath + '/cancel'}})]) {
       let blocked = false;
       stale.dispatchEvent({type: 'submit', submitter, preventDefault() {blocked = true;}});
       assert.equal(blocked, false);
@@ -538,7 +539,7 @@ function assertPartitionSelection(card, selected) {
       f.get('detail-close').click();
       assert.equal(f.get('detail-dialog').open, false);
     }
-    for (const submitter of [new Node({}, 'back'), Object.assign(new Node(), {attributes: {formaction: '/setup/cancel'}})]) {
+    for (const submitter of [new Node({}, 'back'), Object.assign(new Node(), {attributes: {formaction: basePath + '/cancel'}})]) {
       let blocked = false;
       f.form().dispatchEvent({type: 'submit', submitter, preventDefault() {blocked = true;}});
       assert.equal(blocked, false, 'Recovery must preserve wizard navigation');
@@ -600,7 +601,7 @@ function assertPartitionSelection(card, selected) {
     f.applyFailure('The drive did not respond.');
     await f.get('action-apply-button').emit('click');
     assert(f.get('action-error').textContent.includes('Mount operation failed. The drive did not respond.'));
-    assert.equal(f.requests.filter(r => r.url === '/setup').length, 0, 'Failed actions must retain their error dialog without refreshing');
+    assert.equal(f.requests.filter(r => r.url === basePath).length, 0, 'Failed actions must retain their error dialog without refreshing');
     assert.equal(f.workspaceRefreshes(), 0);
   }
   for (const kind of ['storage', 'backup']) {
@@ -653,6 +654,9 @@ function assertPartitionSelection(card, selected) {
     }
     await settle();
     assert.equal(f.workspaceRefreshes(), 1, 'Successful Control Center ' + operation + ' refreshes its workspace exactly once');
-    assert.equal(f.requests.filter(r => r.url === '/setup').length, 0, 'Control Center must not refresh wizard inventory');
+    assert.equal(f.requests.filter(r => r.url === basePath).length, 0, 'Control Center must not refresh wizard inventory');
   }
+}
+(async () => {
+  for (const basePath of ['/setup', '/minecraft/servers/add']) await verifyWizard(basePath);
 })().catch(error => { console.error(error); process.exitCode = 1; });

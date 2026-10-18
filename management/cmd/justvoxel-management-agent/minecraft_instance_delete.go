@@ -123,11 +123,11 @@ func (b *instanceRuntimeBackend) deleteStopped(ctx context.Context, id string, r
 	if props["LoadState"] != "not-found" && (props["LoadState"] != "loaded" || (props["ActiveState"] != "inactive" && props["ActiveState"] != "failed")) {
 		return errInstanceBusy
 	}
-	if props["Job"] != "" && props["Job"] != "0" {
+	if !systemdJobIdle([]byte(props["Job"]), nil) {
 		return errInstanceBusy
 	}
 	job, e := b.command(ctx, "systemctl", "show", "--property=Job", "--value", "--", "minecraft-"+id+".service")
-	if e != nil || strings.TrimSpace(string(job)) != "0" {
+	if !systemdJobIdle(job, e) {
 		return errInstanceBusy
 	}
 	return nil
@@ -197,11 +197,7 @@ func (b *instanceRuntimeBackend) retireSelectedInstance(ctx context.Context, id,
 		if e = b.verifyLive(record); e != nil {
 			return e
 		}
-		snapshot, _, _, e := b.snapshot(ctx)
-		if e != nil {
-			return e
-		}
-		if record.Storage != instanceStorageFor(snapshot, id) {
+		if validateInstanceRecordPlacement(record) != nil {
 			return errInstanceRecovery
 		}
 		if e = b.storage(ctx, "validate", record); e != nil {
@@ -262,11 +258,7 @@ func (b *instanceRuntimeBackend) retireSelectedInstance(ctx context.Context, id,
 	if err = b.deleteStopped(ctx, id, true); err != nil {
 		return err
 	}
-	snapshot, _, _, err := b.snapshot(ctx)
-	if err != nil {
-		return err
-	}
-	if j.Record.Storage != instanceStorageFor(snapshot, id) {
+	if validateInstanceRecordPlacement(j.Record) != nil {
 		return errInstanceRecovery
 	}
 	if record, e := b.readRecord(id); e == nil {

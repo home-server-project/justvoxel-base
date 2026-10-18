@@ -156,16 +156,9 @@ func (b *instanceRuntimeBackend) factoryResetParticipants(ctx context.Context) (
 	}
 	entries := []factoryResetInstance{}
 	online := 0
-	var snapshot minecraftInstanceRuntimeContext
-	if len(records) > 0 {
-		snapshot, _, _, err = b.snapshot(ctx)
-		if err != nil {
-			return nil, 0, err
-		}
-	}
 	for _, r := range records {
 		id := r.Runtime.ID
-		if !registered[id] || r.Storage != instanceStorageFor(snapshot, id) {
+		if !registered[id] || validateInstanceRecordPlacement(r) != nil {
 			return nil, 0, errInstanceRecovery
 		}
 		if err = b.verifyLive(r); err != nil {
@@ -197,7 +190,7 @@ func (b *instanceRuntimeBackend) factoryResetParticipants(ctx context.Context) (
 			return nil, 0, errInstanceRecovery
 		}
 		job, jobErr := b.command(ctx, "systemctl", "show", "--property=Job", "--value", "--", "minecraft-"+id+".service")
-		if jobErr != nil || strings.TrimSpace(string(job)) != "0" {
+		if !systemdJobIdle(job, jobErr) {
 			return nil, 0, errInstanceBusy
 		}
 		state, e := b.observe(ctx, id)
@@ -358,8 +351,7 @@ func (b *instanceRuntimeBackend) checkFactoryResetEvidence(ctx context.Context, 
 			return errInstanceRecovery
 		}
 		if !late {
-			snapshot, _, _, er := b.snapshot(ctx)
-			if er != nil || r.Record.Storage != instanceStorageFor(snapshot, id) {
+			if validateInstanceRecordPlacement(r.Record) != nil {
 				return errInstanceRecovery
 			}
 			if er = b.factoryResetBackupIdle(ctx, id); er != nil {
@@ -593,7 +585,7 @@ func (b *instanceRuntimeBackend) factoryResetBackupIdle(ctx context.Context, id 
 	if props["LoadState"] != "not-found" && (props["LoadState"] != "loaded" || (props["ActiveState"] != "inactive" && props["ActiveState"] != "failed")) {
 		return errInstanceBusy
 	}
-	if props["Job"] != "0" && props["Job"] != "" {
+	if !systemdJobIdle([]byte(props["Job"]), nil) {
 		return errInstanceBusy
 	}
 	return nil

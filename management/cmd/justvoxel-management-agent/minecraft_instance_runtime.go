@@ -53,14 +53,16 @@ type minecraftInstanceRuntimeConfig struct {
 }
 
 type minecraftInstanceRuntimeContext struct {
-	// Appliance-wide storage policy; never discovered from another server.
-	BackupPath     string
-	StorageRoot    string
-	MountPoint     string
-	ExpectedUUID   string
-	ExpectedSource string
-	TotalMemoryMiB int64 // physical RAM, never free memory, swap, or zram
-	TemplateRoot   string
+	// Defaults for new instances; existing instances use their pinned placement.
+	Placements      map[string]instanceRuntimeRecord
+	BackupPlacement *instanceRuntimeBackupStorage
+	BackupPath      string
+	StorageRoot     string
+	MountPoint      string
+	ExpectedUUID    string
+	ExpectedSource  string
+	TotalMemoryMiB  int64 // physical RAM, never free memory, swap, or zram
+	TemplateRoot    string
 }
 
 type minecraftInstanceRuntimeFiles struct {
@@ -80,6 +82,52 @@ var instanceRuntimeVersionPattern = regexp.MustCompile(`^(LATEST|[0-9]+\.[0-9]+(
 var instanceRuntimeSecretPattern = regexp.MustCompile(`^[a-fA-F0-9]{32,128}$`)
 var instanceRuntimeTimezonePattern = regexp.MustCompile(`^[A-Za-z0-9_+/-]{1,128}$`)
 var instanceRuntimeUUIDPattern = regexp.MustCompile(`^[A-Za-z0-9-]{1,128}$`)
+
+func (ctx minecraftInstanceRuntimeContext) forInstance(id string) minecraftInstanceRuntimeContext {
+	if r, ok := ctx.Placements[id]; ok {
+		ctx.StorageRoot, ctx.MountPoint, ctx.ExpectedUUID, ctx.ExpectedSource = r.Storage.Root, r.Storage.MountPoint, r.Storage.UUID, r.Storage.Source
+		if r.Backups != nil {
+			ctx.BackupPath = r.Backups.Root
+		}
+	}
+	return ctx
+}
+
+func validateInstanceStorageContext(ctx minecraftInstanceRuntimeContext) error {
+	for _, path := range []string{ctx.StorageRoot, ctx.BackupPath} {
+		if err := validateInstanceRuntimePath(path); err != nil {
+			return err
+		}
+	}
+	// Avoid known OS/configuration trees even if supplied as the storage parent.
+	for _, unsafe := range []string{"/etc", "/usr", "/boot", "/proc", "/sys", "/dev", "/run"} {
+		if instanceRuntimeInside(ctx.StorageRoot, unsafe) {
+			return errors.New("unsafe storage root")
+		}
+	}
+	if ctx.MountPoint == "" {
+		if ctx.ExpectedUUID != "" || ctx.ExpectedSource != "" {
+			return errors.New("mount evidence requires a mount point")
+		}
+	} else {
+		if err := validateInstanceRuntimePath(ctx.MountPoint); err != nil {
+			return err
+		}
+		if !instanceRuntimeInside(ctx.StorageRoot, ctx.MountPoint) {
+			return errors.New("instance storage is outside the configured data mount")
+		}
+		if ctx.ExpectedUUID == "" && ctx.ExpectedSource == "" {
+			return errors.New("configured mount requires identity evidence")
+		}
+	}
+	if ctx.ExpectedUUID != "" && !instanceRuntimeUUIDPattern.MatchString(ctx.ExpectedUUID) {
+		return errors.New("invalid mount UUID")
+	}
+	if ctx.ExpectedSource != "" && (!instanceRuntimePathPattern.MatchString(ctx.ExpectedSource) || filepath.Clean(ctx.ExpectedSource) != ctx.ExpectedSource) {
+		return errors.New("invalid mount source")
+	}
+	return nil
+}
 
 func decodeMinecraftInstanceRuntime(r io.Reader) ([]minecraftInstanceRuntimeConfig, error) {
 	data, err := io.ReadAll(io.LimitReader(r, 1024*1024+1))
@@ -223,37 +271,20 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 	if len(configs) == 0 || len(configs) > 1024 {
 		return nil, errors.New("invalid runtime configuration count")
 	}
-	for _, path := range []string{ctx.StorageRoot, ctx.BackupPath} {
-		if err := validateInstanceRuntimePath(path); err != nil {
+	if len(ctx.Placements) == 0 {
+		if err := validateInstanceStorageContext(ctx); err != nil {
 			return nil, err
-		}
-	}
-	// Avoid known OS/configuration trees even if supplied as the storage parent.
-	for _, unsafe := range []string{"/etc", "/usr", "/boot", "/proc", "/sys", "/dev", "/run"} {
-		if instanceRuntimeInside(ctx.StorageRoot, unsafe) {
-			return nil, errors.New("unsafe storage root")
-		}
-	}
-	if ctx.MountPoint == "" {
-		if ctx.ExpectedUUID != "" || ctx.ExpectedSource != "" {
-			return nil, errors.New("mount evidence requires a mount point")
 		}
 	} else {
-		if err := validateInstanceRuntimePath(ctx.MountPoint); err != nil {
-			return nil, err
+		for _, c := range configs {
+			placement, ok := ctx.Placements[c.ID]
+			if !ok || validateInstanceRecordPlacement(placement) != nil {
+				return nil, errors.New("invalid instance placement")
+			}
+			if err := validateInstanceStorageContext(ctx.forInstance(c.ID)); err != nil {
+				return nil, err
+			}
 		}
-		if !instanceRuntimeInside(ctx.StorageRoot, ctx.MountPoint) {
-			return nil, errors.New("instance storage is outside the configured data mount")
-		}
-		if ctx.ExpectedUUID == "" && ctx.ExpectedSource == "" {
-			return nil, errors.New("configured mount requires identity evidence")
-		}
-	}
-	if ctx.ExpectedUUID != "" && !instanceRuntimeUUIDPattern.MatchString(ctx.ExpectedUUID) {
-		return nil, errors.New("invalid mount UUID")
-	}
-	if ctx.ExpectedSource != "" && (!instanceRuntimePathPattern.MatchString(ctx.ExpectedSource) || filepath.Clean(ctx.ExpectedSource) != ctx.ExpectedSource) {
-		return nil, errors.New("invalid mount source")
 	}
 	tcp, udp := map[int]bool{}, map[int]bool{}
 	reserve := func(port int, ports map[int]bool) error {
@@ -274,6 +305,7 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 	ordered := append([]minecraftInstanceRuntimeConfig(nil), configs...)
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
 	for _, c := range ordered {
+		ctx := ctx.forInstance(c.ID)
 		if !instanceIDPattern.MatchString(c.ID) {
 			return nil, errInstanceID
 		}
@@ -363,6 +395,7 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 	}
 	files := make([]minecraftInstanceRuntimeFiles, 0, len(ordered))
 	for _, c := range ordered {
+		ctx := ctx.forInstance(c.ID)
 		name := "minecraft-" + c.ID
 		f := minecraftInstanceRuntimeFiles{ID: c.ID, UnitName: name + ".service", ContainerName: name, QuadletPath: "/etc/containers/systemd/" + name + ".container", EnvironmentPath: "/etc/justvoxel/instances/" + c.ID + "/minecraft.env", DataPath: filepath.Join(ctx.StorageRoot, "minecraft-instances", c.ID, "data")}
 		values := map[string]string{

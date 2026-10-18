@@ -350,7 +350,7 @@ func (b *instanceRuntimeBackend) planStartOver(ctx context.Context) (startOverPl
 				return p, err
 			}
 		}
-		if j.Record.Storage != instanceStorageFor(snapshot, id) {
+		if validateInstanceRecordPlacement(j.Record) != nil {
 			return p, errInstanceRecovery
 		}
 		if err = b.storage(ctx, "validate", j.Record); err != nil {
@@ -435,7 +435,7 @@ func (b *instanceRuntimeBackend) startOverInstanceIdle(ctx context.Context, id s
 		}
 	}
 	job, err := b.command(ctx, "systemctl", "show", "--property=Job", "--value", "--", "minecraft-"+id+".service")
-	if err != nil || strings.TrimSpace(string(job)) != "0" {
+	if !systemdJobIdle(job, err) {
 		return errInstanceBusy
 	}
 	return nil

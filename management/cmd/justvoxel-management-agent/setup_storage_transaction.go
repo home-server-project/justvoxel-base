@@ -48,12 +48,14 @@ type setupStorageTransactionTarget struct {
 }
 
 type setupStorageTransactionRequest struct {
-	SchemaVersion   string                        `json:"schema_version"`
-	OperationID     string                        `json:"operation_id"`
-	PlanFingerprint string                        `json:"plan_fingerprint"`
-	Storage         setupStorageTransactionTarget `json:"storage"`
-	Backups         setupStorageTransactionTarget `json:"backups"`
-	SMBPassword     string                        `json:"smb_password,omitempty"`
+	MountedOnly         bool                          `json:"mounted_only,omitempty"`
+	IsolatedCredentials bool                          `json:"isolated_credentials,omitempty"`
+	SchemaVersion       string                        `json:"schema_version"`
+	OperationID         string                        `json:"operation_id"`
+	PlanFingerprint     string                        `json:"plan_fingerprint"`
+	Storage             setupStorageTransactionTarget `json:"storage"`
+	Backups             setupStorageTransactionTarget `json:"backups"`
+	SMBPassword         string                        `json:"smb_password,omitempty"`
 }
 
 type setupStorageTransactionResponse struct {
@@ -106,7 +108,7 @@ func setupStorageTransactionRequestForOperation(operation operationJournal, plan
 		return setupStorageTransactionRequest{}, err
 	}
 	return setupStorageTransactionRequest{
-		SchemaVersion:   operationSchemaVersion,
+		MountedOnly: plan.MountedOnly, IsolatedCredentials: true, SchemaVersion: operationSchemaVersion,
 		OperationID:     operation.OperationID,
 		PlanFingerprint: operation.PlanFingerprint,
 		Storage:         storage,

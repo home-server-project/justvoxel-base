@@ -99,10 +99,10 @@ jv_storage_credentials_referenced() {
     ' "$1"
 }
 
-# Compatibility repair for configured appliances, not a general fstab cleaner.
+# Non-destructive inspection of configured appliances.
 # Only the two historical reserved paths provide ownership without old config.
 jv_storage_reconcile_configured() {
-    local fstab="$1" credentials="$2" point source device live status=0 value
+    local fstab="$1" credentials="$2" point source status=0 value
     [[ ! -e ${JV_SETUP_IN_PROGRESS} ]] || return 0
     [[ -e ${JV_CONFIG} || -L ${JV_CONFIG} ]] || return 0
     if [[ ! -f ${JV_CONFIG} || -L ${JV_CONFIG} ]] || ! require_config; then
@@ -140,48 +140,8 @@ jv_storage_reconcile_configured() {
             echo "Storage reconciliation skipped for safety at ${point}: ambiguous ownership." >&2
             status=1; continue;
         }
-        if mountpoint -q -- "${point}"; then
-            if ! jv_storage_identity_matches "${point}" "${source}"; then
-                echo "Storage reconciliation skipped for safety at ${point}: live identity mismatch." >&2
-                status=1; continue
-            fi
-            if [[ ${source} == UUID=* ]]; then
-                # Verify both UUID and its actual block-device SOURCE. UUID alone
-                # cannot distinguish conflicting devices carrying a cloned UUID.
-                device="$(blkid -U "${source#UUID=}")" || device=''
-                live="$(jv_exact_mount_identity SOURCE "${point}")" || live=''
-                if [[ -z ${device} || -z ${live} ]] ||
-                   ! device="$(realpath -e -- "${device}")" ||
-                   ! live="$(realpath -e -- "${live}")" || [[ ${device} != "${live}" ]]; then
-                    echo "Storage reconciliation skipped for safety at ${point}: local SOURCE mismatch." >&2
-                    status=1; continue
-                fi
-            fi
-            if ! umount -- "${point}"; then
-                echo "Storage reconciliation could not unmount ${point}; definition preserved." >&2
-                status=1; continue
-            fi
-        fi
-        # Recheck persisted ownership immediately before removing the exact entry.
-        if [[ $(jv_storage_managed_entry "${fstab}" "${point}" "${credentials}") != "${source}" ]] ||
-           ! jv_storage_remove_entry "${fstab}" "${point}"; then
-            echo "Storage reconciliation could not safely retire ${point}." >&2
-            status=1; continue
-        fi
-        if ! jv_storage_clear_retired_failure "${point}"; then
-            echo "Storage reconciliation could not reload or clear the failed state of the retired mount at ${point}." >&2
-            status=1
-        fi
+        # Configuration is only a default. Other instances may own this mount.
+        echo "Storage reconciliation preserved ${point}: not referenced by appliance defaults." >&2
     done
-    if [[ ${BACKUP_TYPE} != smb ]] && ! jv_storage_credentials_referenced "${fstab}" "${credentials}" &&
-       [[ -e ${credentials} || -L ${credentials} ]]; then
-        if ! jv_storage_credentials_safe "${credentials}"; then
-            echo 'Storage reconciliation skipped unsafe obsolete SMB credentials.' >&2
-            status=1
-        elif ! rm -f -- "${credentials}"; then
-            echo 'Storage reconciliation could not remove obsolete SMB credentials.' >&2
-            status=1
-        fi
-    fi
     return "${status}"
 }

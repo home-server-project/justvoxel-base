@@ -4,7 +4,8 @@
   const selectableChoices = root => [...root.querySelectorAll('[data-setup-existing-partition], [data-setup-backup-existing]')]
     .filter(button => button.dataset.system !== 'Yes' && button.dataset.readonly !== 'Yes');
   async function refreshWizardInventory(successMessage = '') {
-    const response = await fetch('/setup', {credentials: 'same-origin', cache: 'no-store', headers: {Accept: 'text/html'}});
+    const wizardPath = form().getAttribute('action').replace(/\/[^/]+$/, '');
+    const response = await fetch(wizardPath, {credentials: 'same-origin', cache: 'no-store', headers: {Accept: 'text/html'}});
     if (!response.ok || response.redirected) throw new Error('Inventory could not be refreshed. Sign in again if your session expired.');
     const page = new DOMParser().parseFromString(await response.text(), 'text/html');
     const replacement = page.querySelector(formSelector), current = form();
@@ -85,7 +86,7 @@
       if (current.dataset.setupOperationsInitialized) return;
       current.dataset.setupOperationsInitialized = 'true';
       current.addEventListener('submit', event => {
-        if (event.submitter?.value === 'back' || event.submitter?.getAttribute('formaction') === '/setup/cancel') return;
+        if (event.submitter?.value === 'back' || event.submitter?.getAttribute('formaction')?.endsWith('/cancel')) return;
         if (current.dataset.inventoryStale === 'true' && current.querySelector('[data-setup-storage-type], [data-setup-backup-type]')?.value === 'partition') event.preventDefault();
       });
       const choices = () => selectableChoices(current);

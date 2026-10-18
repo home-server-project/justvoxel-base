@@ -29,6 +29,20 @@ class IndependentRestore(unittest.TestCase):
     config = Base.config
     run_helper = Base.run_helper
     inventory = Base.inventory
+    pin_backup = Base.pin_backup
+
+    def test_restore_uses_persisted_backup_namespace(self):
+        selected=self.root/'selected-backups'
+        self.pin_backup('jv-aaaaaa',selected)
+        (self.data/'world/level.dat').write_bytes(world_metadata())
+        self.run_helper('create')
+        item=self.inventory()[0]
+        self.archive=item['archive']
+        self.config(network=True)
+        self.env['FIXTURE_MOUNT_ID']='disconnected-global-default'
+        result=self.plan()
+        self.assertEqual(result['metadata']['id'],'jv-aaaaaa')
+        self.assertTrue((selected/'jv-aaaaaa'/self.archive).exists())
 
     def setUp(self):
         Base.setUp(self)

@@ -3,8 +3,10 @@ _a53_prepare_transaction() {
     [[ ! -L ${A53_FSTAB} && ( ! -e ${A53_FSTAB} || -f ${A53_FSTAB} ) ]] || return 1
     backup_type="$(jq -r '.backups.type' <<< "${A53_REQUEST}")"
     backup_mount="$(_a53_normalize_path "$(jq -r '.backups.mount_point // ""' <<< "${A53_REQUEST}")")"
-    if { [[ ${backup_type} == smb && -n ${backup_mount} ]] && ! mountpoint -q -- "${backup_mount}"; } ||
-       jv_storage_credentials_referenced "${A53_FSTAB}" "${A54_SMB_CREDENTIALS}"; then
+    if [[ ${backup_type} == smb ]] && {
+       { [[ -n ${backup_mount} ]] && ! mountpoint -q -- "${backup_mount}"; } ||
+       jv_storage_credentials_referenced "${A53_FSTAB}" "${A54_SMB_CREDENTIALS}";
+    }; then
         [[ ! -L ${A54_SMB_CREDENTIALS} && $(_a53_normalize_path "${A54_SMB_CREDENTIALS}") == "${A54_SMB_CREDENTIALS}" ]] || return 1
         if [[ -e ${A54_SMB_CREDENTIALS} || -L ${A54_SMB_CREDENTIALS} ]]; then
             jv_storage_credentials_safe "${A54_SMB_CREDENTIALS}" || return 1
@@ -74,7 +76,7 @@ _a53_prepare_transaction() {
         --arg credentials_uid "${A54_CREDENTIALS_UID}" \
         --arg credentials_gid "${A54_CREDENTIALS_GID}" \
         '{schema_version:"v1",operation_id:$operation_id,plan_fingerprint:$plan_fingerprint,phase:"storage_snapshot",fstab_existed:$fstab_existed,fstab_before_sha256:$fstab_before_sha256,fstab_mode:$fstab_mode,fstab_uid:$fstab_uid,fstab_gid:$fstab_gid,fstab_changed:false,fstab_after_sha256:"",credentials_existed:$credentials_existed,credentials_before_sha256:$credentials_before_sha256,credentials_mode:$credentials_mode,credentials_uid:$credentials_uid,credentials_gid:$credentials_gid,credentials_changed:false,credentials_after_sha256:"",mounts_by_transaction:[],retired_mounts:[],directories_created:[],rollback:{state:"not_started",result:""}}')" || return 1
-    manifest="$(jq -c --argjson request "${A53_REQUEST}" '. + {storage_request:$request}' <<< "${manifest}")" || return 1
+    manifest="$(jq -c --arg credentials_path "${A54_SMB_CREDENTIALS}" --argjson request "${A53_REQUEST}" '. + {storage_request:$request} | if $request.backups.type == "smb" then . + {credentials_path:$credentials_path} else . end' <<< "${manifest}")" || return 1
     _a53_manifest_write "${manifest}" || return 1
     return 0
 }
@@ -111,6 +113,10 @@ _a53_ensure_dir() {
 
 _a53_write_local_fstab() {
     local uuid="$1" mountpoint="$2" fstype="$3" tmp
+    if awk -v mp="${mountpoint}" '$0 !~ /^[[:space:]]*#/ && $2==mp {found=1} END {exit !found}' "${A53_FSTAB}"; then
+        awk -v mp="${mountpoint}" -v src="UUID=${uuid}" -v fs="${fstype}" '$0 !~ /^[[:space:]]*#/ && $2==mp {n++; if ($1!=src || $3!=fs) bad=1} END {exit (n!=1 || bad)}' "${A53_FSTAB}"
+        return $?
+    fi
     [[ -e ${A53_FSTAB} ]] || : > "${A53_FSTAB}" || return 1
     tmp="$(mktemp "$(dirname -- "${A53_FSTAB}")/.fstab.justvoxel-a53.XXXXXX")" || return 1
     awk -v mp="${mountpoint}" '/^[[:space:]]*#/ || NF < 2 || $2 != mp {print}' "${A53_FSTAB}" > "${tmp}" || { rm -f -- "${tmp}"; return 1; }
@@ -139,6 +145,9 @@ _a54_write_network_fstab() {
 
 _a54_write_smb_credentials() {
     local username="$1" password="$2" domain="$3" after
+    if [[ $(jq -r '.isolated_credentials // false' <<< "${A53_REQUEST}") == true ]]; then
+        [[ ! -e ${A54_SMB_CREDENTIALS} && ! -L ${A54_SMB_CREDENTIALS} ]] || return 1
+    fi
     if [[ ! -d $(dirname -- "${A54_SMB_CREDENTIALS}") ]]; then
         _a53_ensure_dir "$(dirname -- "${A54_SMB_CREDENTIALS}")" 0700 || return 1
     fi
@@ -177,11 +186,14 @@ _a54_mount_network_target() {
         _a53_evidence_set backup_source_match no
         return 1
     fi
+    [[ $(jq -r '.mounted_only // false' <<< "${A53_REQUEST}") != true ]] || return 1
     if [[ ! -d ${mountpoint} ]]; then
         _a53_ensure_dir "${mountpoint}" 0755 || return 1
     fi
 
-    if [[ ${type} == nfs ]]; then
+    if awk -v mp="${mountpoint}" '$0 !~ /^[[:space:]]*#/ && $2==mp {found=1} END {exit !found}' "${A53_FSTAB}"; then
+        awk -v mp="${mountpoint}" -v src="${source}" -v fs="$([[ ${type} == smb ]] && echo cifs || echo nfs)" '$0 !~ /^[[:space:]]*#/ && $2==mp {n++; if ($1!=src || $3!=fs) bad=1} END {exit (n!=1 || bad)}' "${A53_FSTAB}" || return 1
+    elif [[ ${type} == nfs ]]; then
         _a54_write_network_fstab "${source}" "${mountpoint}" nfs 'rw,_netdev,nofail,x-systemd.mount-timeout=20s' || return 1
     else
         _a54_write_smb_credentials "${username}" "${A54_SMB_PASSWORD}" "${domain}" || return 1
@@ -233,6 +245,7 @@ _a53_mount_target() {
         return 0
     fi
 
+    [[ $(jq -r '.mounted_only // false' <<< "${A53_REQUEST}") != true ]] || return 1
     if [[ ! -d ${mountpoint} ]]; then
         _a53_ensure_dir "${mountpoint}" 0755 || return 1
     fi
@@ -336,6 +349,12 @@ _a53_load_manifest_for_rollback() {
     operation_id="$(jq -r '.operation_id // ""' "${A53_MANIFEST}" 2>/dev/null || true)"
     fingerprint="$(jq -r '.plan_fingerprint // ""' "${A53_MANIFEST}" 2>/dev/null || true)"
     [[ ${operation_id} == "${A53_OPERATION_ID}" && ${fingerprint} == "${A53_PLAN_FINGERPRINT}" ]] || return 1
+    local credentials_path
+    credentials_path="$(jq -r '.credentials_path // ""' "${A53_MANIFEST}")" || return 1
+    if [[ -n ${credentials_path} ]]; then
+        [[ ${credentials_path} == "/etc/justvoxel/smb-backup-${A53_OPERATION_ID}.credentials" || ${credentials_path} == "${A54_SMB_CREDENTIALS}" ]] || return 1
+        A54_SMB_CREDENTIALS="${credentials_path}"
+    fi
     A53_FSTAB_EXISTED="$(jq -r '.fstab_existed' "${A53_MANIFEST}")"
     A53_FSTAB_CHANGED="$(jq -r '.fstab_changed' "${A53_MANIFEST}")"
     A53_FSTAB_MODE="$(jq -r '.fstab_mode // ""' "${A53_MANIFEST}")"

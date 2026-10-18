@@ -46,7 +46,7 @@ grep -Fq 'Minecraft data and backups cannot use the same directory' "${helper}"
 grep -Fq 'same_physical_disk' "${helper}"
 grep -Fq 'resolve_recommended_server_version' "${helper}"
 grep -Fq 'selected server software did not confirm a released/usable build' "${helper}"
-grep -Fq 'JustVoxel is already configured' "${helper}"
+grep -Fq 'configured && !request.Request.AddServer' "${repo_root}/management/cmd/justvoxel-management-agent/admin_setup_apply.go"
 grep -Fq 'validate_game_mode "${game_mode}"' "${helper}"
 grep -Fq 'game_mode:$game_mode' "${helper}"
 

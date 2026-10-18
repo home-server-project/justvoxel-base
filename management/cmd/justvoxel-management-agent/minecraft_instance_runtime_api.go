@@ -223,7 +223,7 @@ func (b *instanceRuntimeBackend) configureRegistered(ctx context.Context, id str
 	if _, err = rand.Read(secret[:]); err != nil {
 		return err
 	}
-	next := instanceRuntimeRecord{SchemaVersion: 1, Runtime: settings.runtime(id, uid, gid, hex.EncodeToString(secret[:])), Storage: instanceStorageFor(snapshot, id), Firewall: []instanceFirewallRule{}}
+	next := instanceRuntimeRecord{SchemaVersion: 1, Runtime: settings.runtime(id, uid, gid, hex.EncodeToString(secret[:])), Storage: instanceStorageFor(snapshot, id), Backups: instanceBackupsFor(snapshot, id), Firewall: []instanceFirewallRule{}}
 	candidates := instanceReplaceRecord(records, next)
 	if _, err = b.render(snapshot, candidates); err != nil {
 		return err

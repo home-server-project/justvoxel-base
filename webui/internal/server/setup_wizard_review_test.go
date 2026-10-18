@@ -246,7 +246,7 @@ func TestFirstRunTemplatesUseUserFacingWording(t *testing.T) {
 	}
 }
 
-func TestRecommendedAndAdvancedModesUseSameAuthoritativePlanRequest(t *testing.T) {
+func TestRecommendedAndAdvancedPlanRequestsDifferOnlyInMountedOnly(t *testing.T) {
 	client := setupWizardClient()
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
 	if err != nil {
@@ -275,6 +275,10 @@ func TestRecommendedAndAdvancedModesUseSameAuthoritativePlanRequest(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !recommendedRequest.MountedOnly || advancedRequest.MountedOnly {
+		t.Fatalf("Recommended must be mounted-only and Advanced must allow manual preparation: recommended=%v advanced=%v", recommendedRequest.MountedOnly, advancedRequest.MountedOnly)
+	}
+	recommendedRequest.MountedOnly = advancedRequest.MountedOnly
 	if recommendedRequest != advancedRequest {
 		t.Fatalf("setup mode changed authoritative Agent plan request:\nrecommended=%#v\nadvanced=%#v", recommendedRequest, advancedRequest)
 	}

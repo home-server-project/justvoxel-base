@@ -10,9 +10,9 @@
   <link rel="stylesheet" href="/static/setup.css">
   <script src="/static/app.js" defer></script>
   <script src="/static/settings.js" defer></script>
-  {{if not .AddServer}}<script src="/static/storage-browser.js" defer></script>
+  <script src="/static/storage-browser.js" defer></script>
   <script src="/static/setup-storage-actions.js" defer></script>
-  <script src="/static/setup-storage.js" defer></script>{{end}}
+  <script src="/static/setup-storage.js" defer></script>
   <script src="/static/setup-motd.js" defer></script>
 </head>
 <body class="role-administrator setup-body{{if .Started}} setup-advanced{{end}}">
@@ -30,7 +30,7 @@
     <p class="eyebrow">Minecraft setup</p>
     <h1>{{if .AddServer}}Add Minecraft Server{{else}}Set up your Minecraft server{{end}}</h1>
     {{if .Error}}<div class="notice error" role="alert">{{.Error}}</div>{{end}}
-    <p class="setup-lead">{{if .AddServer}}Use recommended defaults or customize your new server. All servers use the existing Minecraft storage and appliance backup destination.{{else}}Use recommended defaults to get running quickly, or choose Advanced setup to customize Minecraft, storage and backups before anything is applied.{{end}}</p>
+    <p class="setup-lead">{{if .AddServer}}Use recommended defaults or customize your new server.{{else}}Use recommended defaults to get running quickly, or choose Advanced setup to customize Minecraft, storage and backups before anything is applied.{{end}}</p>
     <p class="field-help">You can change these settings later from the JustVoxel Control Center.</p>
 
     <div class="setup-mode-grid">
@@ -63,7 +63,7 @@
       <section class="setup-mode-card setup-mode-advanced">
         <span class="setup-mode-kicker">Custom path</span>
         <h2>Advanced setup</h2>
-        <p>{{if .AddServer}}Walk through the same six steps to choose server settings and backups using the configured appliance storage.{{else}}Walk through the full guided setup and choose memory, ports, version policy, storage and backup destination yourself.{{end}}</p>
+        <p>{{if .AddServer}}Walk through the same six steps to choose server settings and backups using your selected storage.{{else}}Walk through the full guided setup and choose memory, ports, version policy, storage and backup destination yourself.{{end}}</p>
         <form method="post" action="{{$wizard.BasePath}}/start">
           <input type="hidden" name="csrf" value="{{.CSRF}}">
           <button class="secondary" type="submit">Start advanced setup</button>
@@ -149,12 +149,9 @@
     </form>
 
     {{else if eq .CurrentStep 4}}
-    <form method="post" action="{{$wizard.BasePath}}/storage" class="setup-form"{{if not .AddServer}} data-setup-storage-form data-csrf="{{.CSRF}}"{{end}}>
+    <form method="post" action="{{$wizard.BasePath}}/storage" class="setup-form" data-setup-storage-form data-csrf="{{.CSRF}}">
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      {{if .AddServer}}
-      <div class="setup-target-card"><strong>Minecraft storage</strong><span><span aria-hidden="true">✓ </span>Existing JustVoxel Minecraft storage — selected</span><small>All Minecraft servers currently use the configured Minecraft storage. Per-server storage selection can be added later.</small></div>
-      {{else}}
       <input type="hidden" name="storage_type" value="{{.Storage.Type}}" data-setup-storage-type>
       <input type="hidden" name="storage_device" value="{{.Storage.Device}}" data-setup-storage-device>
       <input type="hidden" name="storage_mount_point" value="{{.Storage.MountPoint}}" data-setup-storage-mount>
@@ -188,17 +185,15 @@
 
 
       <div class="notice error" role="alert" data-setup-inventory-error hidden></div>
-      {{end}}
       </div>
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="{{$wizard.BasePath}}/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
       <input type="hidden" value="{{.CSRF}}" data-storage-action-csrf>
     </form>
 
     {{else if eq .CurrentStep 5}}
-    <form method="post" action="{{$wizard.BasePath}}/backups" class="setup-form"{{if not .AddServer}} data-setup-backup-form data-csrf="{{.CSRF}}" data-data-device="{{.Storage.Device}}" data-data-mount="{{.Storage.MountPoint}}"{{end}}>
+    <form method="post" action="{{$wizard.BasePath}}/backups" class="setup-form" data-setup-backup-form data-csrf="{{.CSRF}}" data-data-device="{{.Storage.Device}}" data-data-mount="{{.Storage.MountPoint}}">
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      {{if not .AddServer}}
       <input type="hidden" name="backup_type" value="{{.Backups.Type}}" data-setup-backup-type>
       <input type="hidden" name="backup_device" value="{{.Backups.Device}}" data-setup-backup-device>
       <input type="hidden" name="backup_mount_point" value="{{.Backups.MountPoint}}" data-setup-backup-mount>
@@ -207,7 +202,6 @@
       <input type="hidden" name="backup_username" value="{{.Backups.Username}}" data-setup-backup-username>
       <input type="hidden" name="backup_domain" value="{{.Backups.Domain}}" data-setup-backup-domain>
 
-      {{end}}
       <div class="setup-backup-topline">
         <div class="setup-backup-schedule">
           <label class="setup-field">Daily time<input name="backup_daily_time" type="time" value="{{.Backups.DailyTime}}"></label>
@@ -216,9 +210,6 @@
         <label class="setup-toggle-field setup-backup-automatic"><span>Automatic backups</span><input class="date-time-switch" type="checkbox" name="backup_automatic" {{if .Backups.Automatic}}checked{{end}}></label>
       </div>
 
-      {{if .AddServer}}
-      <div class="setup-target-card"><strong>Existing appliance backup destination</strong><small>{{if .BackupAvailable}}Uses the destination already configured for JustVoxel. Availability is verified when backups run. Daily backups must start at least 30 minutes apart.{{else}}Appliance backup storage is not configured. Turn automatic backups off to create this server; configure appliance backup storage separately before enabling backups.{{end}}</small></div>
-      {{else}}
       <div class="setup-backup-choice-grid">
         <button class="setup-backup-choice{{if eq .Backups.Type "system"}} is-selected{{end}}" type="button" data-setup-backup-choice="system" data-system-path="{{.Defaults.BackupPath}}">
           <span class="setup-storage-choice-kicker">Simple</span>
@@ -278,7 +269,6 @@
 
 
       <div class="notice error" role="alert" data-setup-inventory-error hidden></div>
-      {{end}}
       </div>
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="{{$wizard.BasePath}}/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
       <input type="hidden" value="{{.CSRF}}" data-storage-action-csrf>

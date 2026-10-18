@@ -437,13 +437,9 @@ func (b *instanceRuntimeBackend) createTracked(ctx context.Context, c minecraftI
 		return "", err
 	}
 	c.ID = "jv-" + hex.EncodeToString(entropy[:])
-	next := instanceRuntimeRecord{SchemaVersion: 1, Runtime: c, Storage: instanceStorageFor(snapshot, c.ID), Firewall: []instanceFirewallRule{}}
+	next := instanceRuntimeRecord{SchemaVersion: 1, Runtime: c, Storage: instanceStorageFor(snapshot, c.ID), Backups: instanceBackupsFor(snapshot, c.ID), Firewall: []instanceFirewallRule{}}
 	candidates := instanceReplaceRecord(records, next)
-	configs := []minecraftInstanceRuntimeConfig{}
-	for _, r := range candidates {
-		configs = append(configs, r.Runtime)
-	}
-	if _, err = b.identities().renderInstanceRuntimesCandidate(snapshot, configs, c.ID); err != nil {
+	if _, err = b.renderCandidate(snapshot, candidates, c.ID); err != nil {
 		return "", err
 	}
 	if err = b.storage(ctx, "preflight-new", next); err != nil {

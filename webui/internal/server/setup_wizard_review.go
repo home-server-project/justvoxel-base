@@ -296,7 +296,7 @@ func (a *App) setupReviewState(ctx context.Context, session string, client admin
 	if err != nil {
 		return setupReviewState{}, err, http.StatusBadRequest, false
 	}
-	if cached, ok := firstRunSetupReviews.get(a, session); ok && cached.DraftUpdatedAt.Equal(draft.UpdatedAt) && cached.Request == request && validSetupPlanFingerprint(cached.Plan.PlanFingerprint) {
+	if cached, ok := setupReviewStoreForDraft(draft).get(a, session); ok && cached.DraftUpdatedAt.Equal(draft.UpdatedAt) && cached.Request == request && validSetupPlanFingerprint(cached.Plan.PlanFingerprint) {
 		return cached, nil, http.StatusOK, true
 	}
 	planner, ok := client.(setupPlanningAPI)
@@ -305,7 +305,7 @@ func (a *App) setupReviewState(ctx context.Context, session string, client admin
 	}
 	plan, err := planner.AdminSetupPlan(ctx, session, request)
 	state := setupReviewState{
-		Request: request, Plan: plan, DraftUpdatedAt: draft.UpdatedAt,
+		AddServer: draft.AddServer, StartOnBoot: draft.StartOnBoot, BackupAvailable: true, Request: request, Plan: plan, DraftUpdatedAt: draft.UpdatedAt,
 		SetupMode: draft.Mode, ServerType: draft.Minecraft.ServerType, DisplayName: plan.Normalized.Server.DisplayName,
 	}
 	if err != nil {
@@ -327,7 +327,7 @@ func (a *App) setupReviewState(ctx context.Context, session string, client admin
 	if !validSetupPlanFingerprint(plan.PlanFingerprint) {
 		return state, errors.New("setup planning did not return a valid plan identity"), http.StatusBadGateway, false
 	}
-	firstRunSetupReviews.save(a, session, state)
+	setupReviewStoreForDraft(draft).save(a, session, state)
 	return state, nil, http.StatusOK, true
 }
 
@@ -365,7 +365,7 @@ func setupPlanRequestFromDraft(draft setupDraft) (api.AdminSetupPlanRequest, err
 		return api.AdminSetupPlanRequest{}, errors.New("Backup retention must be a positive number.")
 	}
 	return api.AdminSetupPlanRequest{
-		DiagnosticSessionID: draft.DiagnosticSessionID,
+		AddServer: draft.AddServer, StartOnBoot: draft.StartOnBoot, MountedOnly: draft.Mode == "recommended", DiagnosticSessionID: draft.DiagnosticSessionID,
 		Server: api.AdminSetupPlanServerRequest{
 			DisplayName: draft.DisplayName, MOTD: draft.Server.MOTD, MOTDAutomatic: draft.Server.MOTDAutomatic, MaxPlayers: maxPlayers,
 			BedrockEnabled: draft.Server.BedrockEnabled, Timezone: draft.Server.Timezone,
@@ -426,13 +426,11 @@ func (a *App) renderSetupReview(w http.ResponseWriter, identity api.SessionInfo,
 	if plan.Normalized.Backups.SizeBytes > 0 {
 		data.BackupSize = humanBytes(plan.Normalized.Backups.SizeBytes)
 	}
-	if state.AddServer {
-		data.StorageLabel = "Existing JustVoxel Minecraft storage"
-		data.BackupLabel = "Appliance backup storage is not configured"
-		if state.BackupAvailable {
-			data.BackupLabel = "Existing appliance backup destination (verified when backups run)"
-		}
+	if state.AddServer || state.SetupMode == "recommended" {
+		data.StorageLabel += " · " + plan.Normalized.Storage.Path
+		data.BackupLabel += " · " + plan.Normalized.Backups.Path
 	}
+
 	a.renderAdminDiscovery(w, "setup_review.html", data)
 }
 
@@ -545,4 +543,11 @@ func (s *setupReviewStore) delete(app *App, session string) {
 	s.mu.Lock()
 	delete(s.reviews, key)
 	s.mu.Unlock()
+}
+
+func setupReviewStoreForDraft(draft setupDraft) *setupReviewStore {
+	if draft.AddServer {
+		return &addServerReviews
+	}
+	return &firstRunSetupReviews
 }

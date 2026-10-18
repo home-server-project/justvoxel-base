@@ -73,7 +73,7 @@ a53_apply_action() {
     storage="$(jq -c '.storage' <<< "${A53_REQUEST}")"
     backups="$(jq -c '.backups' <<< "${A53_REQUEST}")"
     _a53_manifest_set_phase storage_mount || { _a53_apply_failure 'Could not persist storage transaction state.'; return 0; }
-    _a53_retire_obsolete_mounts || { _a53_apply_failure 'Obsolete managed storage could not be retired safely.'; return 0; }
+    # Instance creation never retires existing global mounts.
     _a53_mount_target "${storage}" data || { _a53_apply_failure 'Minecraft local storage could not be mounted safely.'; return 0; }
 
     case "$(jq -r '.type' <<< "${backups}")" in
@@ -94,7 +94,7 @@ a53_apply_action() {
 
     _a53_manifest_set_phase storage_paths || { _a53_apply_failure 'Could not persist storage transaction state.'; return 0; }
     _a53_prepare_paths || { _a53_apply_failure 'Local storage directories could not be prepared or verified writable.'; return 0; }
-    _a53_remove_obsolete_credentials || { _a53_apply_failure 'Obsolete SMB credentials could not be retired safely.'; return 0; }
+    # Credentials belonging to other destinations remain untouched.
     _a53_manifest_set_phase storage_verified || { _a53_apply_failure 'Could not persist the verified storage transaction state.'; return 0; }
     _a53_evidence_from_manifest
     _a53_json true true storage_verified not_started '' ''

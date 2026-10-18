@@ -744,8 +744,7 @@ func TestInstanceReservationsMountAndUnsafeFiles(t *testing.T) {
 			case "mount":
 				f.failMount = true
 			case "storage-change":
-				f.snapshot.ExpectedUUID = "different"
-				f.snapshot.MountPoint = f.snapshot.StorageRoot
+				next.Storage.DataPath = filepath.Join(next.Storage.Root, "wrong-instance", "data")
 			case "symlink":
 				dir, _, _ := f.backend.paths(id)
 				p := filepath.Join(dir, "config.json")

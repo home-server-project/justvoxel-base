@@ -50,7 +50,7 @@ func setupInstanceRead(id, fingerprint string) (setupInstanceEvidence, error) {
 	if instanceDecode(raw, &e) != nil || e.Schema != 1 || !e.Request.InstanceOnly || e.Request.OperationID != id || e.Request.PlanFingerprint != fingerprint {
 		return e, errInstanceRecovery
 	}
-	if e.Record.Runtime.ID != "" && (!instanceIDPattern.MatchString(e.Record.Runtime.ID) || e.Record.Storage.DataPath != filepath.Join(e.Record.Storage.Root, "minecraft-instances", e.Record.Runtime.ID, "data")) {
+	if e.Record.Runtime.ID != "" && (validateInstanceRecordPlacement(e.Record) != nil) {
 		return e, errInstanceRecovery
 	}
 	expected := setupInstancePolicy(e.Request)
@@ -62,6 +62,9 @@ func setupInstanceRead(id, fingerprint string) (setupInstanceEvidence, error) {
 func setupInstancePolicy(r setupRuntimeTransactionRequest) map[string][]byte {
 	// Shell policy contains appliance storage only. No Minecraft server identity,
 	// environment, Quadlet or default service is created here.
+	if r.AddServer {
+		return map[string][]byte{}
+	}
 	quote := func(v string) string { return "'" + strings.ReplaceAll(v, "'", "'\\''") + "'" }
 	policy := "# Appliance storage policy; Minecraft servers live in instances/.\nAPPLIANCE_CONFIGURED=yes\n"
 	for _, item := range [][2]string{{"DATA_PATH", r.Storage.Path}, {"DATA_MOUNT_POINT", r.Storage.MountPoint}, {"DATA_EXPECTED_UUID", r.Storage.ExpectedUUID}, {"DATA_EXPECTED_SOURCE", r.Storage.ExpectedSource}, {"BACKUP_TYPE", r.Backups.Type}, {"BACKUP_PATH", r.Backups.Path}, {"BACKUP_MOUNT_POINT", r.Backups.MountPoint}, {"BACKUP_EXPECTED_UUID", r.Backups.ExpectedUUID}, {"BACKUP_EXPECTED_SOURCE", r.Backups.ExpectedSource}} {
@@ -143,9 +146,12 @@ func runSetupInstanceAction(ctx context.Context, action string, r setupRuntimeTr
 		if err != nil {
 			return response, err
 		}
-		if snapshot.StorageRoot != filepath.Dir(r.Storage.Path) || snapshot.MountPoint != r.Storage.MountPoint || snapshot.ExpectedUUID != r.Storage.ExpectedUUID || snapshot.ExpectedSource != r.Storage.ExpectedSource || snapshot.BackupPath != r.Backups.Path || uid != r.Minecraft.MinecraftUID || gid != r.Minecraft.MinecraftGID {
+		if uid != r.Minecraft.MinecraftUID || gid != r.Minecraft.MinecraftGID {
 			return response, errInstanceRecovery
 		}
+		snapshot.StorageRoot, snapshot.MountPoint, snapshot.ExpectedUUID, snapshot.ExpectedSource = filepath.Dir(r.Storage.Path), r.Storage.MountPoint, r.Storage.ExpectedUUID, r.Storage.ExpectedSource
+		snapshot.BackupPath = r.Backups.Path
+		snapshot.BackupPlacement = &instanceRuntimeBackupStorage{Type: r.Backups.Type, Root: r.Backups.Path, MountPoint: r.Backups.MountPoint, UUID: r.Backups.ExpectedUUID, Source: r.Backups.ExpectedSource}
 		var secret [24]byte
 		if _, err = rand.Read(secret[:]); err != nil {
 			return response, err
@@ -154,7 +160,15 @@ func runSetupInstanceAction(ctx context.Context, action string, r setupRuntimeTr
 		if r.Server.BedrockEnabled {
 			port = r.Minecraft.BedrockPort
 		}
-		c := minecraftInstanceRuntimeConfig{JavaPort: r.Minecraft.JavaPort, BedrockEnabled: r.Server.BedrockEnabled, BedrockPort: port, JavaMemory: r.Minecraft.JavaMemory, ContainerMemory: r.Minecraft.ContainerMemory, Software: r.Minecraft.ServerType, Version: r.Minecraft.Version, VersionPolicy: r.Minecraft.VersionPolicy, PaperChannel: "default", ImageTag: r.Minecraft.ImageTag, StartOnBoot: true, EULAAccepted: true, UID: uid, GID: gid, Timezone: r.Server.Timezone, GameMode: r.Minecraft.GameMode, Difficulty: "normal", MaxPlayers: r.Server.MaxPlayers, Whitelist: true, EnforceWhitelist: true, MOTD: r.Server.MOTD, RCONPassword: hex.EncodeToString(secret[:])}
+		c := minecraftInstanceRuntimeConfig{JavaPort: r.Minecraft.JavaPort, BedrockEnabled: r.Server.BedrockEnabled, BedrockPort: port, JavaMemory: r.Minecraft.JavaMemory, ContainerMemory: r.Minecraft.ContainerMemory, Software: r.Minecraft.ServerType, Version: r.Minecraft.Version, VersionPolicy: r.Minecraft.VersionPolicy, PaperChannel: "default", ImageTag: r.Minecraft.ImageTag, StartOnBoot: !r.AddServer || r.StartOnBoot, EULAAccepted: true, UID: uid, GID: gid, Timezone: r.Server.Timezone, GameMode: r.Minecraft.GameMode, Difficulty: "normal", MaxPlayers: r.Server.MaxPlayers, Whitelist: true, EnforceWhitelist: true, MOTD: r.Server.MOTD, RCONPassword: hex.EncodeToString(secret[:])}
+		if r.AddServer {
+			// Preserve Add Server's existing startup settings while sharing
+			// the storage and activation transaction.
+			c.Whitelist, c.EnforceWhitelist = false, false
+			if c.VersionPolicy == "latest" {
+				c.Version = "LATEST"
+			}
+		}
 		channel, err := b.command(ctx, instanceRuntimeHelper, "channel", c.Software, c.Version, c.VersionPolicy)
 		if err != nil {
 			return response, instanceRuntimeFailure("Selected release channel could not be verified.")
@@ -178,6 +192,14 @@ func runSetupInstanceAction(ctx context.Context, action string, r setupRuntimeTr
 		if err = b.verifyLive(record); err != nil {
 			return response, err
 		}
+		if r.AddServer {
+			state, stateErr := b.observe(ctx, id)
+			if stateErr != nil || state.State != "stopped" {
+				return response, errInstanceRecovery
+			}
+			response.OK, response.Applied = true, true
+			return response, nil
+		}
 		if err = b.actionWithWarnings(ctx, id, "start", true); err != nil {
 			return response, err
 		}
@@ -192,7 +214,7 @@ func runSetupInstanceAction(ctx context.Context, action string, r setupRuntimeTr
 	case "commit":
 		id := e.Record.Runtime.ID
 		state, err := b.observe(ctx, id)
-		if err != nil || state.State != "running" {
+		if err != nil || (!r.AddServer && state.State != "running") || (r.AddServer && state.State != "stopped") {
 			return response, errInstanceRecovery
 		}
 		daily, err := legacyBackupDaily("[Timer]\nOnCalendar=" + r.Backups.Schedule + "\n")
@@ -442,7 +464,7 @@ func rollbackSetupInstance(ctx context.Context, e *setupInstanceEvidence, save f
 	}
 	if id != "" && !e.HadInstancesRoot {
 		root := filepath.Join(e.Record.Storage.Root, "minecraft-instances")
-		if err := os.Remove(root); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := os.Remove(root); err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, syscall.ENOTEMPTY) && !errors.Is(err, syscall.EEXIST) {
 			return err
 		}
 	}

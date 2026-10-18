@@ -57,6 +57,9 @@ type AdminSetupPlanBackupsRequest struct {
 }
 
 type AdminSetupPlanRequest struct {
+	AddServer           bool                           `json:"add_server,omitempty"`
+	StartOnBoot         bool                           `json:"start_on_boot,omitempty"`
+	MountedOnly         bool                           `json:"mounted_only,omitempty"`
 	DiagnosticSessionID string                         `json:"diagnostic_session_id,omitempty"`
 	Server              AdminSetupPlanServerRequest    `json:"server"`
 	Minecraft           AdminSetupPlanMinecraftRequest `json:"minecraft"`
@@ -140,10 +143,13 @@ type AdminSetupPlanBackups struct {
 }
 
 type AdminSetupNormalizedPlan struct {
-	Server    AdminSetupPlanServer    `json:"server"`
-	Minecraft AdminSetupPlanMinecraft `json:"minecraft"`
-	Storage   AdminSetupPlanStorage   `json:"storage"`
-	Backups   AdminSetupPlanBackups   `json:"backups"`
+	AddServer   bool                    `json:"add_server,omitempty"`
+	StartOnBoot bool                    `json:"start_on_boot,omitempty"`
+	MountedOnly bool                    `json:"mounted_only,omitempty"`
+	Server      AdminSetupPlanServer    `json:"server"`
+	Minecraft   AdminSetupPlanMinecraft `json:"minecraft"`
+	Storage     AdminSetupPlanStorage   `json:"storage"`
+	Backups     AdminSetupPlanBackups   `json:"backups"`
 }
 
 type AdminSetupPlanRequirements struct {
@@ -227,4 +233,15 @@ func normalizeAdminSetupPlanResponse(out *AdminSetupPlanResponse) {
 	if out != nil && out.Warnings == nil {
 		out.Warnings = []AdminSetupPlanWarning{}
 	}
+}
+
+type RecommendedSetupPlacement struct {
+	Storage AdminSetupPlanStorageRequest `json:"storage"`
+	Backups AdminSetupPlanBackupsRequest `json:"backups"`
+}
+
+func (c *Client) AdminRecommendedSetupStorage(ctx context.Context, session string) (RecommendedSetupPlacement, error) {
+	var out RecommendedSetupPlacement
+	err := c.do(ctx, http.MethodGet, "/v1/admin/setup/recommended-storage", session, nil, &out)
+	return out, err
 }

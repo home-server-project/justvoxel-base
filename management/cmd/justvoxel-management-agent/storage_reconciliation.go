@@ -14,7 +14,7 @@ const configuredStorageReconcileTimeout = 30 * time.Second
 
 var runConfiguredStorageReconciliation = func(ctx context.Context) error {
 	// The service's filesystem hardening creates a private mount namespace.
-	// Inspect and retire mounts in the host namespace using only fixed paths.
+	// Inspect mounts in the host namespace without changing mount topology.
 	cmd := exec.CommandContext(ctx, "/usr/bin/nsenter", "--mount=/proc/1/ns/mnt", "--", configuredStorageReconcileHelper)
 	cmd.Stderr = os.Stderr // Fixed helper diagnostics never contain credential contents.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

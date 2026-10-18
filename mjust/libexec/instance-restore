@@ -16,17 +16,7 @@ mapfile -t fields < <(jq -er '[.runtime.id,.storage.root,.storage.data_path,.sto
 if [[ ${action} == plan || ${action} == prepare ]]; then
     /usr/libexec/justvoxel/mjust/validate-instance-runtime-commit "${id}" >/dev/null 2>&1 || fail
     source /usr/libexec/justvoxel/mjust/backup-common.sh
-    config=/etc/justvoxel/minecraft-backup.env
-    [[ -f ${config} && ! -L ${config} && $(realpath -e -- "${config}") == "${config}" && $(stat -c '%u:%g:%a' -- "${config}") == 0:0:600 ]] || fail
-    jv_backup_load_config "${config}" >/dev/null 2>&1 || fail
-    [[ ${MINECRAFT_BACKUP_PATH} == "${minecraft_backup_path}" ]] || fail
-    if [[ ${BACKUP_TYPE} != system ]]; then
-        [[ -n ${BACKUP_MOUNT_POINT} && ( -n ${BACKUP_EXPECTED_UUID} || -n ${BACKUP_EXPECTED_SOURCE} ) ]] || fail
-    else
-        [[ -z ${BACKUP_MOUNT_POINT} && -z ${BACKUP_EXPECTED_UUID} && -z ${BACKUP_EXPECTED_SOURCE} ]] || fail
-    fi
-    jv_backup_require_read_target >/dev/null 2>&1 || fail
-    export JV_INSTANCE_BACKUP_ROOT="${minecraft_backup_path}"
+    jv_instance_backup_load_target "${id}" || fail
 fi
 python3 - "${action}" "${id}" "${archive}" "${fingerprint}" "${running}" <<'PY'
 import ctypes, datetime, gzip, hashlib, io, json, os, re, secrets, shutil, stat, struct, sys, tarfile
@@ -240,6 +230,8 @@ def metadata(fd, name):
 
 def inspect():
     root = os.environ['JV_INSTANCE_BACKUP_ROOT']
+    if 'backups' in record and (record['backups']['root'] != root or record['backups']['path'] != root + '/' + identity):
+        raise ValueError('backup placement changed')
     if root == data or root.startswith(data+'/') or data.startswith(root+'/'): raise ValueError('overlap')
     backup = directory(root + '/' + identity)
     try:

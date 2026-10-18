@@ -1177,3 +1177,8 @@ func (f *fakeDiscoveryAPI) AdminSetupVersionPreview(_ context.Context, session, 
 	}
 	return api.AdminVersionStatus{SelectedCandidate: candidate, CrossplayEnabled: bedrock, CrossplayCompatible: true}, nil
 }
+
+func (f *fakeDiscoveryAPI) AdminRecommendedSetupStorage(context.Context, string) (api.RecommendedSetupPlacement, error) {
+	defaults := normalizedSetupDefaults(f.defaults)
+	return api.RecommendedSetupPlacement{Storage: api.AdminSetupPlanStorageRequest{Type: "system", Path: defaults.DataPath}, Backups: api.AdminSetupPlanBackupsRequest{Type: "system", Path: defaults.BackupPath}}, nil
+}

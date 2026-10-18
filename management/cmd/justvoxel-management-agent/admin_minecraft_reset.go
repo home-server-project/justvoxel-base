@@ -194,15 +194,22 @@ func authoritativeAdminMinecraftResetPlan(parent context.Context) (adminMinecraf
 	if err != nil {
 		return fail(err)
 	}
-	snapshot, _, _, err := instanceRuntimes.snapshot(parent)
-	if err != nil {
-		return fail(err)
-	}
-	if record.Storage != instanceStorageFor(snapshot, id) {
+	if validateInstanceRecordPlacement(record) != nil {
 		return fail(errInstanceRecovery)
 	}
 	if err = instanceRuntimes.storage(parent, "validate", record); err != nil {
 		return fail(err)
+	}
+	backupPath := ""
+	if record.Backups != nil {
+		backupPath = record.Backups.Path
+	} else {
+		// Legacy records retain the appliance backup destination.
+		snapshot, _, _, snapshotErr := instanceRuntimes.snapshot(parent)
+		if snapshotErr != nil {
+			return fail(snapshotErr)
+		}
+		backupPath = snapshot.BackupPath
 	}
 	// Reuse the existing Reset preservation classification, in the host mount namespace.
 	raw, err := instanceRuntimes.command(parent, "nsenter", "--mount=/proc/1/ns/mnt", "--", "bash", "-c", `source /usr/libexec/justvoxel/mjust/minecraft-reset-common.sh; jv_reset_data_scope "$1"`, "reset-data-scope", record.Storage.DataPath)
@@ -221,7 +228,7 @@ func authoritativeAdminMinecraftResetPlan(parent context.Context) (adminMinecraf
 	if err != nil || names[id].DisplayName == "" {
 		return fail(errInstanceRecovery)
 	}
-	plan := adminMinecraftResetPlanResponse{OK: true, InstanceID: id, InstanceName: names[id].DisplayName, SchemaVersion: "v1", Mode: "minecraft", DataPath: record.Storage.DataPath, DataScope: scope, DataAction: action, BackupPath: snapshot.BackupPath, BackupAction: "preserve", StorageLayoutAction: "preserve", AuthenticationAction: "preserve", WebUIUsersAction: "preserve", Players: []string{}, Warnings: []string{}}
+	plan := adminMinecraftResetPlanResponse{OK: true, InstanceID: id, InstanceName: names[id].DisplayName, SchemaVersion: "v1", Mode: "minecraft", DataPath: record.Storage.DataPath, DataScope: scope, DataAction: action, BackupPath: backupPath, BackupAction: "preserve", StorageLayoutAction: "preserve", AuthenticationAction: "preserve", WebUIUsersAction: "preserve", Players: []string{}, Warnings: []string{}}
 	plan.PlayersOnline, plan.Players, err = pluginInstallPlayers(parent, id)
 	if err != nil {
 		return fail(err)

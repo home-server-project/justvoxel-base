@@ -18,8 +18,34 @@ type deleteFixture struct {
 }
 
 func newDeleteFixture(t *testing.T) *deleteFixture {
+	return newDeleteFixtureWithPlacement(t, false)
+}
+func newDeleteFixtureWithPlacement(t *testing.T, separate bool) *deleteFixture {
 	t.Helper()
 	f := newInstanceActivationFixture(t)
+	if separate {
+		records, err := f.backend.records()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := range records {
+			placement := f.snapshot
+			if records[i].Runtime.ID == f.configs[0].ID {
+				placement.StorageRoot = filepath.Join(f.snapshot.StorageRoot, "selected-filesystem")
+				placement.MountPoint = placement.StorageRoot
+				placement.ExpectedUUID = "selected-uuid"
+				placement.ExpectedSource = "/dev/selected"
+			}
+			placement.BackupPath = filepath.Join(placement.StorageRoot, "backups")
+			placement.BackupPlacement = &instanceRuntimeBackupStorage{Type: "system", Root: placement.BackupPath}
+			records[i].Storage = instanceStorageFor(placement, records[i].Runtime.ID)
+			records[i].Backups = instanceBackupsFor(placement, records[i].Runtime.ID)
+			dir, _, _ := f.backend.paths(records[i].Runtime.ID)
+			if err := f.backend.writeJSON(filepath.Join(dir, "config.json"), records[i], true); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	f.activateBoth()
 	d := &deleteFixture{f: f, backupState: "inactive"}
 	oldUnits := instanceBackupUnits
@@ -57,7 +83,7 @@ func newDeleteFixture(t *testing.T) *deleteFixture {
 					t.Fatal("runtime not retired first", p)
 				}
 			}
-			if e := os.RemoveAll(instanceStorageFor(f.snapshot, id).DataPath); e != nil {
+			if e := os.RemoveAll(args[6]); e != nil {
 				t.Fatal(e)
 			}
 			d.removed = true
@@ -409,5 +435,61 @@ func TestInstanceDeleteRetryAfterRuntimeAndIdentityRetirement(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDeleteUsesPinnedStorageAndLeavesSiblingFilesystemIntact(t *testing.T) {
+	d := newDeleteFixtureWithPlacement(t, true)
+	f, b := d.f, d.f.backend
+	selected, sibling := f.configs[0].ID, f.configs[1].ID
+	target, err := b.readRecord(selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := b.readRecord(sibling)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.Storage.Root == other.Storage.Root {
+		t.Fatal("fixture must use distinct filesystems")
+	}
+	dir, env, q := b.paths(sibling)
+	world := filepath.Join(other.Storage.DataPath, "world")
+	archive := filepath.Join(other.Backups.Path, "archive.tar.gz")
+	for _, path := range []string{world, archive} {
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("sibling bytes"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := map[string]string{}
+	for _, path := range []string{filepath.Join(b.store.directory, sibling+".json"), filepath.Join(dir, "config.json"), env, q, world, archive} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before[path] = string(raw)
+	}
+	f.calls = nil
+	if err := b.deleteInstance(context.Background(), selected, "JV Paper"); err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range before {
+		raw, err := os.ReadFile(path)
+		if err != nil || string(raw) != want {
+			t.Fatal("sibling changed", path, err)
+		}
+	}
+	for _, root := range []string{target.Storage.Root, other.Storage.Root} {
+		if info, err := os.Stat(root); err != nil || !info.IsDir() {
+			t.Fatal("containing filesystem lost", root, err)
+		}
+	}
+	for _, call := range f.calls {
+		if strings.HasPrefix(call, "umount ") || strings.HasPrefix(call, "mount ") || strings.Contains(call, "stop -- minecraft-"+sibling) || strings.Contains(call, "restart -- minecraft-"+sibling) || strings.Contains(call, "start -- minecraft-"+sibling) {
+			t.Fatal("sibling runtime or topology changed", call)
+		}
 	}
 }

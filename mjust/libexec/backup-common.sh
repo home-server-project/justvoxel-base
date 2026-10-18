@@ -271,3 +271,52 @@ jv_backup_write_metadata() {
     chmod 0600 "${tmp}" 2>/dev/null || true
     mv -f -- "${tmp}" "${metadata}"
 }
+
+# Independent workers call this after validating the selected runtime commitment.
+# JSON placement is data, never sourced as shell. Absence preserves legacy policy.
+jv_instance_backup_load_target() {
+    local id="$1" record="/etc/justvoxel/instances/$1/config.json" config placement_present
+    local -a placement=()
+    placement_present="$(jq -er 'has("backups") | tostring' "${record}")" || return 1
+    [[ ${placement_present} == true || ${placement_present} == false ]] || return 1
+    if [[ ${placement_present} == true ]]; then
+        jq -e --arg id "${id}" '
+          .runtime.id == $id and (.backups | type == "object") and
+          (.backups | keys == ["mount_point","path","root","source","type","uuid"]) and
+          ([.backups[]] | all(.[]; type == "string")) and
+          .backups.path == (.backups.root + "/" + $id)
+        ' "${record}" >/dev/null || return 1
+        mapfile -t placement < <(jq -er '[.backups.type,.backups.root,.backups.mount_point,.backups.uuid,.backups.source,.storage.data_path] | .[]' "${record}")
+        [[ ${#placement[@]} == 6 ]] || return 1
+        BACKUP_TYPE=${placement[0]} minecraft_backup_path=${placement[1]}
+        BACKUP_MOUNT_POINT=${placement[2]} BACKUP_EXPECTED_UUID=${placement[3]} BACKUP_EXPECTED_SOURCE=${placement[4]}
+        [[ ${minecraft_backup_path} =~ ^/[A-Za-z0-9_./-]+$ && ${minecraft_backup_path} != / && $(realpath -e -- "${minecraft_backup_path}") == "${minecraft_backup_path}" ]] || return 1
+        case "${minecraft_backup_path}" in /etc|/etc/*|/usr|/usr/*|/boot|/boot/*|/proc|/proc/*|/sys|/sys/*|/dev|/dev/*|/run|/run/*) return 1 ;; esac
+        [[ ${minecraft_backup_path} != "${placement[5]}" && ${minecraft_backup_path} != "${placement[5]}/"* && ${placement[5]} != "${minecraft_backup_path}/"* ]] || return 1
+        case "${BACKUP_TYPE}" in
+            system) [[ -z ${BACKUP_MOUNT_POINT} && -z ${BACKUP_EXPECTED_UUID} && -z ${BACKUP_EXPECTED_SOURCE} ]] || return 1 ;;
+            partition) [[ -n ${BACKUP_MOUNT_POINT} && -n ${BACKUP_EXPECTED_UUID} ]] || return 1 ;;
+            nfs) [[ -n ${BACKUP_MOUNT_POINT} && ${BACKUP_EXPECTED_SOURCE} == *:/* ]] || return 1 ;;
+            smb) [[ -n ${BACKUP_MOUNT_POINT} && ${BACKUP_EXPECTED_SOURCE} == //*/* ]] || return 1 ;;
+            *) return 1 ;;
+        esac
+        if [[ -n ${BACKUP_MOUNT_POINT} ]]; then
+            [[ $(realpath -e -- "${BACKUP_MOUNT_POINT}") == "${BACKUP_MOUNT_POINT}" ]] || return 1
+        fi
+    else
+        config=/etc/justvoxel/minecraft-backup.env
+        [[ -f ${config} && ! -L ${config} && $(realpath -e -- "${config}") == "${config}" && $(stat -c '%u:%g:%a' -- "${config}") == 0:0:600 ]] || return 1
+        jv_backup_load_config "${config}" >/dev/null 2>&1 || return 1
+        [[ ${MINECRAFT_BACKUP_PATH} == "${minecraft_backup_path}" ]] || return 1
+        if [[ ${BACKUP_TYPE} != system ]]; then
+            [[ -n ${BACKUP_MOUNT_POINT} && ( -n ${BACKUP_EXPECTED_UUID} || -n ${BACKUP_EXPECTED_SOURCE} ) ]] || return 1
+        else
+            [[ -z ${BACKUP_MOUNT_POINT} && -z ${BACKUP_EXPECTED_UUID} && -z ${BACKUP_EXPECTED_SOURCE} ]] || return 1
+        fi
+    fi
+    if [[ -n ${BACKUP_MOUNT_POINT} ]]; then
+        [[ $(realpath -e -- "${BACKUP_MOUNT_POINT}") == "${BACKUP_MOUNT_POINT}" ]] || return 1
+    fi
+    jv_backup_require_read_target >/dev/null 2>&1 || return 1
+    export JV_INSTANCE_BACKUP_ROOT="${minecraft_backup_path}"
+}

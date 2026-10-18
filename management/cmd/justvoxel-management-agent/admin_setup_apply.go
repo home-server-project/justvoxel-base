@@ -117,8 +117,13 @@ func (s *server) adminSetupApply(w http.ResponseWriter, r *http.Request) {
 		writeAdminSetupApplyFailure(w, preflightErr.status, "preflight_unavailable", preflightErr.message)
 		return
 	}
-	if configured {
+	if configured && !request.Request.AddServer {
 		writeAdminSetupApplyFailure(w, http.StatusConflict, "already_configured", "first-run setup is no longer available on this appliance")
+		return
+	}
+
+	if !configured && request.Request.AddServer {
+		writeAdminSetupApplyFailure(w, http.StatusConflict, "not_configured", "Complete appliance setup before adding a server")
 		return
 	}
 

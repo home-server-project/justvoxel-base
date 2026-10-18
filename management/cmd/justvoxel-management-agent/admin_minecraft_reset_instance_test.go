@@ -314,3 +314,36 @@ func TestSelectedPreservedResetManagedPluginsRecoverOnlySelected(t *testing.T) {
 		t.Fatal("sibling plugin changed", err)
 	}
 }
+
+func TestSelectedResetBackupPlacementAndLegacyFallback(t *testing.T) {
+	for _, pinned := range []bool{false, true} {
+		t.Run(map[bool]string{false: "legacy", true: "pinned"}[pinned], func(t *testing.T) {
+			d, s, ctx := selectedResetFixture(t, "internal")
+			b, id := d.f.backend, d.f.configs[0].ID
+			record, err := b.readRecord(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := d.f.snapshot.BackupPath
+			if pinned {
+				root := filepath.Join(d.f.snapshot.StorageRoot, "selected-backups")
+				record.Backups = &instanceRuntimeBackupStorage{Type: "system", Root: root, Path: filepath.Join(root, id)}
+				want = record.Backups.Path
+				b.snapshot = func(context.Context) (minecraftInstanceRuntimeContext, uint32, uint32, error) {
+					t.Fatal("pinned Reset must not consult current appliance placement")
+					return minecraftInstanceRuntimeContext{}, 0, 0, errInstanceRecovery
+				}
+			} else {
+				record.Backups = nil
+			}
+			dir, _, _ := b.paths(id)
+			if err := b.writeJSON(filepath.Join(dir, "config.json"), record, true); err != nil {
+				t.Fatal(err)
+			}
+			plan, status := s.minecraftResetPlanWithRecovery(ctx)
+			if status != 0 || plan.BackupPath != want || plan.DataPath != record.Storage.DataPath {
+				t.Fatalf("selected Reset placement changed: status=%d plan=%#v want backup=%q", status, plan, want)
+			}
+		})
+	}
+}

@@ -31,13 +31,24 @@ class InstanceBackups(unittest.TestCase):
         # Only this common mount identity primitive is mocked. The production
         # backup mount validation and read/write-target logic stay unchanged.
         self.private(self.helpers/'common.sh', 'JV_CONFIG=/nonexistent-fixture-config\njv_exact_mount_identity() { printf "%s\\n" "${FIXTURE_MOUNT_ID:-expected}"; }\n')
-        (self.helpers/'backup-common.sh').write_text((REPO/'mjust/libexec/backup-common.sh').read_text())
+        common = (REPO/'mjust/libexec/backup-common.sh').read_text().replace('/etc/justvoxel/instances',str(self.configs)).replace('/etc/justvoxel/minecraft-backup.env',str(self.root/'backup.env'))
+        (self.helpers/'backup-common.sh').write_text(common)
         # jq is used only for trusted source arguments; deterministic mock avoids
         # installing dependencies or querying any actual appliance config.
         self.tool(self.bin/'jq', '''#!/usr/bin/env python3
 import json,sys
-r=json.load(open(sys.argv[-1]));s=r['storage'];c=r['runtime']
-for value in (c['id'],s['root'],s['data_path'],s['mount_point'],s['uuid'],s['source'],c['uid'],c['gid']):print(value)
+r=json.load(open(sys.argv[-1]));s=r['storage'];c=r['runtime'];query=sys.argv[-2]
+if query == 'has("backups") | tostring':
+    print("true" if "backups" in r else "false");sys.exit(0)
+if '.backups | keys' in query:
+    b=r.get('backups')
+    valid=isinstance(b,dict) and set(b)=={'type','root','path','mount_point','uuid','source'} and all(isinstance(v,str) for v in b.values()) and b['path']==b['root']+'/'+c['id']
+    sys.exit(0 if valid else 1)
+if '.backups.type' in query:
+    b=r['backups']
+    for value in (b['type'],b['root'],b['mount_point'],b['uuid'],b['source'],s['data_path']):print(value)
+else:
+    for value in (c['id'],s['root'],s['data_path'],s['mount_point'],s['uuid'],s['source'],c['uid'],c['gid']):print(value)
 ''')
         self.source = (REPO/'mjust/libexec/instance-backup').read_text()
         self.source = self.source.replace('/usr/libexec/justvoxel/mjust/',str(self.helpers)+'/')
@@ -72,6 +83,39 @@ for value in (c['id'],s['root'],s['data_path'],s['mount_point'],s['uuid'],s['sou
 
     def inventory(self,identity='jv-aaaaaa'):
         return json.loads(self.run_helper('inventory',identity).stdout)
+
+    def pin_backup(self, identity, root, source=''):
+        root.mkdir(mode=0o700,exist_ok=True)
+        path=self.configs/identity/'config.json'
+        r=json.loads(path.read_text())
+        r['backups']=dict(type='nfs' if source else 'system',root=str(root),path=str(root/identity),mount_point=str(root) if source else '',uuid='',source=source)
+        self.private(path,json.dumps(r))
+
+    def test_persisted_backup_destinations_ignore_global_defaults(self):
+        selected=self.root/'selected-backups'
+        self.pin_backup('jv-aaaaaa',selected)
+        self.run_helper('create')
+        self.assertEqual(len(list((selected/'jv-aaaaaa').glob('*.tar.gz'))),1)
+        self.assertFalse((self.backups/'jv-aaaaaa').exists())
+        self.config(network=True)
+        self.env['FIXTURE_MOUNT_ID']='unavailable-global-default'
+        self.assertEqual(len(self.inventory()),1)
+        self.run_helper('create','jv-bbbbbb',ok=False)
+
+    def test_explicit_backup_identity_fails_closed(self):
+        selected=self.root/'selected-backups'
+        self.pin_backup('jv-aaaaaa',selected,'nas:/instance-a')
+        self.env['FIXTURE_MOUNT_ID']='nas:/instance-b'
+        self.run_helper('create',ok=False)
+        self.assertFalse((selected/'jv-aaaaaa').exists())
+
+    def test_explicit_backup_namespace_cannot_select_sibling(self):
+        selected=self.root/'selected-backups'
+        self.pin_backup('jv-aaaaaa',selected)
+        path=self.configs/'jv-aaaaaa/config.json'
+        r=json.loads(path.read_text());r['backups']['path']=str(selected/'jv-bbbbbb')
+        self.private(path,json.dumps(r))
+        self.run_helper('inventory',ok=False)
 
     def test_read_only_and_independent_archives_retention(self):
         self.assertEqual(self.inventory(),[])

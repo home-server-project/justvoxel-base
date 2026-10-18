@@ -440,8 +440,9 @@ func sixStepProgressFixture(t *testing.T, addServer bool) (*App, string, *setupD
 	connections.Set("bedrock_port", "19134")
 	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/connections", connections))
 	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/resources", url.Values{"java_memory": {"1G"}, "container_memory": {"2G"}, "direction": {"next"}}))
-	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/storage", url.Values{"direction": {"next"}}))
-	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/backups", url.Values{"backup_daily_time": {"06:00"}, "backup_keep": {"9"}, "backup_automatic": {"on"}, "direction": {"next"}}))
+	draft, _ := addServerDrafts.get(app, "session-token")
+	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/storage", url.Values{"storage_type": {draft.Storage.Type}, "storage_path": {draft.Storage.Path}, "direction": {"next"}}))
+	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/backups", url.Values{"backup_type": {draft.Backups.Type}, "backup_path": {draft.Backups.Path}, "backup_daily_time": {"06:00"}, "backup_keep": {"9"}, "backup_automatic": {"on"}, "direction": {"next"}}))
 	return app, "/minecraft/servers/add", &addServerDrafts, &firstRunSetupDrafts
 }
 

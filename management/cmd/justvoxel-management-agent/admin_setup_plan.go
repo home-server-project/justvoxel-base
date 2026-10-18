@@ -66,6 +66,9 @@ type adminSetupPlanBackupsRequest struct {
 }
 
 type adminSetupPlanRequest struct {
+	AddServer           bool                           `json:"add_server,omitempty"`
+	StartOnBoot         bool                           `json:"start_on_boot,omitempty"`
+	MountedOnly         bool                           `json:"mounted_only,omitempty"`
 	DiagnosticSessionID string                         `json:"diagnostic_session_id,omitempty"`
 	Server              adminSetupPlanServerRequest    `json:"server"`
 	Minecraft           adminSetupPlanMinecraftRequest `json:"minecraft"`
@@ -149,10 +152,13 @@ type adminSetupPlanBackups struct {
 }
 
 type adminSetupNormalizedPlan struct {
-	Server    adminSetupPlanServer    `json:"server"`
-	Minecraft adminSetupPlanMinecraft `json:"minecraft"`
-	Storage   adminSetupPlanStorage   `json:"storage"`
-	Backups   adminSetupPlanBackups   `json:"backups"`
+	AddServer   bool                    `json:"add_server,omitempty"`
+	StartOnBoot bool                    `json:"start_on_boot,omitempty"`
+	MountedOnly bool                    `json:"mounted_only,omitempty"`
+	Server      adminSetupPlanServer    `json:"server"`
+	Minecraft   adminSetupPlanMinecraft `json:"minecraft"`
+	Storage     adminSetupPlanStorage   `json:"storage"`
+	Backups     adminSetupPlanBackups   `json:"backups"`
 }
 
 type adminSetupPlanRequirements struct {
@@ -231,6 +237,9 @@ type adminSetupFingerprintNormalized struct {
 }
 
 type adminSetupFingerprintPayload struct {
+	AddServer     bool                            `json:"add_server,omitempty"`
+	StartOnBoot   bool                            `json:"start_on_boot,omitempty"`
+	MountedOnly   bool                            `json:"mounted_only,omitempty"`
 	SchemaVersion string                          `json:"schema_version"`
 	Normalized    adminSetupFingerprintNormalized `json:"normalized"`
 	Requirements  adminSetupPlanRequirements      `json:"requirements"`
@@ -238,6 +247,7 @@ type adminSetupFingerprintPayload struct {
 
 func registerAdminSetupPlanRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("POST /v1/admin/setup/plan", s.adminSetupPlan)
+	mux.HandleFunc("GET /v1/admin/setup/recommended-storage", s.adminRecommendedSetupStorage)
 }
 
 type adminSetupPlanningError struct {
@@ -311,6 +321,7 @@ func authoritativeAdminSetupPlan(parent context.Context, request adminSetupPlanR
 	helperRequest := request
 	helperRequest.Server.DisplayName = ""
 	helperRequest.DiagnosticSessionID = ""
+	helperRequest.AddServer, helperRequest.StartOnBoot, helperRequest.MountedOnly = false, false, false
 	// The shell helper keeps its existing strict contract. The agent generates
 	// this WebUI default only after the helper resolves the final version.
 	helperRequest.Server.MOTDAutomatic = false
@@ -353,6 +364,14 @@ func authoritativeAdminSetupPlan(parent context.Context, request adminSetupPlanR
 		out.Normalized.Server.MOTD = "JustVoxel " + software + " Minecraft " + version + " Server"
 	}
 	out.Normalized.Server.DisplayName = displayName
+	out.Normalized.AddServer = request.AddServer
+	out.Normalized.StartOnBoot = !request.AddServer || request.StartOnBoot
+	out.Normalized.MountedOnly = request.MountedOnly
+	if request.MountedOnly {
+		if err := validateRecommendedPlan(parent, out.Normalized); err != nil {
+			return out, &adminSetupPlanningError{status: http.StatusConflict, message: "Recommended storage is no longer available; return to storage selection"}
+		}
+	}
 	fingerprint, err := adminSetupPlanFingerprint(out.SchemaVersion, out.Normalized, out.Requirements)
 	if err != nil {
 		return out, &adminSetupPlanningError{status: http.StatusInternalServerError, message: "first-run setup plan identity could not be created"}
@@ -373,7 +392,7 @@ func adminSetupPlanFingerprint(schemaVersion string, normalized *adminSetupNorma
 		return "", errors.New("invalid server type")
 	}
 	canonical := adminSetupFingerprintPayload{
-		SchemaVersion: schemaVersion,
+		SchemaVersion: schemaVersion, AddServer: normalized.AddServer, StartOnBoot: normalized.StartOnBoot, MountedOnly: normalized.MountedOnly,
 		Normalized: adminSetupFingerprintNormalized{
 			Server: normalized.Server,
 			Minecraft: adminSetupFingerprintMinecraft{
