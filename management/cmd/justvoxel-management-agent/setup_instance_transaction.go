@@ -250,6 +250,63 @@ func (b *instanceRuntimeBackend) waitSetupInstanceRunning(ctx context.Context, i
 	}
 }
 
+// Only Setup rollback uses this bounded settle window for its recorded unit.
+// observeRaw also verifies that an inactive service has no live container.
+func (b *instanceRuntimeBackend) waitSetupInstanceInactive(ctx context.Context, id string) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	for range 120 {
+		if ctx.Err() != nil {
+			return errInstanceRecovery
+		}
+		state, err := b.observeRaw(ctx, id)
+		if err != nil {
+			return err
+		}
+		switch state.State {
+		case "stopped", "failed", "configured":
+			return nil
+		case "starting", "stopping":
+		default:
+			return errInstanceRecovery
+		}
+		if b.waitMaintenance(ctx, 250*time.Millisecond) != nil {
+			return errInstanceRecovery
+		}
+	}
+	return errInstanceRecovery
+}
+
+// Keep retirement under normal Delete's locks, safety checks and durable journal.
+// This retry allowance belongs only to the immutable ID in Setup evidence.
+func (b *instanceRuntimeBackend) deleteSetupInstance(ctx context.Context, e *setupInstanceEvidence, name string) error {
+	id := e.Record.Runtime.ID
+	retryCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	for range 40 {
+		if retryCtx.Err() != nil {
+			return errInstanceBusy
+		}
+		// Preserve the caller's allowance for a normal transactional deletion.
+		// The shorter context bounds only our busy retry window.
+		err := b.deleteInstance(ctx, id, name)
+		if !errors.Is(err, errInstanceBusy) {
+			return err
+		}
+		state, err := b.observeRaw(retryCtx, id)
+		if err != nil {
+			return err
+		}
+		if state.State != "stopped" && state.State != "failed" && state.State != "configured" {
+			return errInstanceRecovery
+		}
+		if b.waitMaintenance(retryCtx, 250*time.Millisecond) != nil {
+			return errInstanceBusy
+		}
+	}
+	return errInstanceBusy
+}
+
 func rollbackSetupInstance(ctx context.Context, e *setupInstanceEvidence, save func() error) error {
 	b := instanceRuntimes
 	if e.RolledBack {
@@ -288,90 +345,93 @@ func rollbackSetupInstance(ctx context.Context, e *setupInstanceEvidence, save f
 				return instanceRuntimeFailure("Setup instance startup could not be stopped safely.")
 			}
 		}
-		stopped, err := b.observeRaw(ctx, id)
-		if err != nil || (stopped.State != "stopped" && stopped.State != "failed" && stopped.State != "configured") {
-			return errInstanceRecovery
-		}
-		if pending, err := b.pending(id); err != nil {
+		if err = b.waitSetupInstanceInactive(ctx, id); err != nil {
 			return err
-		} else if pending {
-			if err = b.recover(ctx, id); err != nil {
-				return err
-			}
 		}
-		record, err := b.readRecord(id)
+		// Resume durable Delete evidence before pending(), which deliberately
+		// rejects an incomplete Delete during ordinary runtime operations.
 		if journal, journalErr := b.deleteJournal(id); journalErr == nil {
-			if err = b.deleteInstance(ctx, id, journal.Name); err != nil {
+			if err = b.deleteSetupInstance(ctx, e, journal.Name); err != nil {
 				return err
 			}
 		} else if !errors.Is(journalErr, os.ErrNotExist) {
 			return journalErr
-		} else if err == nil && record.EnvironmentSHA256 != "" {
-			if _, pendingErr := b.readPrivate(b.backupPath(id, "schedule-pending")); pendingErr == nil {
-				if err = b.configureBackups(ctx, id, instanceBackupSettings{Enabled: false, Time: "04:00", Retention: 7}); err != nil {
+		} else {
+			if pending, err := b.pending(id); err != nil {
+				return err
+			} else if pending {
+				if err = b.recover(ctx, id); err != nil {
 					return err
 				}
-			} else if !errors.Is(pendingErr, os.ErrNotExist) {
-				return pendingErr
 			}
-			names, err := b.identities().readNames()
-			if err != nil {
-				return err
-			}
-			if err = b.deleteInstance(ctx, id, names[id].DisplayName); err != nil {
-				return err
-			}
-		} else {
-			if err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, errInstanceNotFound) {
-				return err
-			}
-			// A failed initial activation leaves no committed runtime. Never adopt or
-			// erase any unexpected environment/Quadlet; normal activation recovery must
-			// first prove its own rollback.
-			dir, env, q := b.paths(id)
-			for _, path := range []string{env, q} {
-				if _, err = b.readPrivate(path); !errors.Is(err, os.ErrNotExist) {
+			record, err := b.readRecord(id)
+			if err == nil && record.EnvironmentSHA256 != "" {
+				if _, pendingErr := b.readPrivate(b.backupPath(id, "schedule-pending")); pendingErr == nil {
+					if err = b.configureBackups(ctx, id, instanceBackupSettings{Enabled: false, Time: "04:00", Retention: 7}); err != nil {
+						return err
+					}
+				} else if !errors.Is(pendingErr, os.ErrNotExist) {
+					return pendingErr
+				}
+				names, err := b.identities().readNames()
+				if err != nil {
+					return err
+				}
+				if err = b.deleteSetupInstance(ctx, e, names[id].DisplayName); err != nil {
+					return err
+				}
+			} else {
+				if err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, errInstanceNotFound) {
+					return err
+				}
+				// A failed initial activation leaves no committed runtime. Never adopt or
+				// erase any unexpected environment/Quadlet; normal activation recovery must
+				// first prove its own rollback.
+				dir, env, q := b.paths(id)
+				for _, path := range []string{env, q} {
+					if _, err = b.readPrivate(path); !errors.Is(err, os.ErrNotExist) {
+						return errInstanceRecovery
+					}
+				}
+				if record.Runtime.ID != "" && !reflect.DeepEqual(record, e.Record) {
 					return errInstanceRecovery
 				}
-			}
-			if record.Runtime.ID != "" && !reflect.DeepEqual(record, e.Record) {
-				return errInstanceRecovery
-			}
-			if _, parentErr := os.Lstat(filepath.Dir(e.Record.Storage.DataPath)); parentErr == nil {
-				// Complete only our existing bounded provisioning contract; its
-				// private marker is required to repair an interrupted empty mkdir.
-				if err = b.storage(ctx, "provision", e.Record); err != nil {
-					return err
-				}
-			} else if !errors.Is(parentErr, os.ErrNotExist) {
-				return parentErr
-			}
-			if _, err = os.Lstat(e.Record.Storage.DataPath); err == nil {
-				j := instanceDeleteJournal{ID: id, Record: e.Record}
-				if e.DataIdentity == "" {
-					e.DataIdentity, err = b.deleteStorage(ctx, "inspect", j)
-					if err != nil {
+				if _, parentErr := os.Lstat(filepath.Dir(e.Record.Storage.DataPath)); parentErr == nil {
+					// Complete only our existing bounded provisioning contract; its
+					// private marker is required to repair an interrupted empty mkdir.
+					if err = b.storage(ctx, "provision", e.Record); err != nil {
 						return err
 					}
-					if err = save(); err != nil {
+				} else if !errors.Is(parentErr, os.ErrNotExist) {
+					return parentErr
+				}
+				if _, err = os.Lstat(e.Record.Storage.DataPath); err == nil {
+					j := instanceDeleteJournal{ID: id, Record: e.Record}
+					if e.DataIdentity == "" {
+						e.DataIdentity, err = b.deleteStorage(ctx, "inspect", j)
+						if err != nil {
+							return err
+						}
+						if err = save(); err != nil {
+							return err
+						}
+					}
+					j.DataIdentity = e.DataIdentity
+					if _, err = b.deleteStorage(ctx, "remove", j); err != nil {
 						return err
 					}
-				}
-				j.DataIdentity = e.DataIdentity
-				if _, err = b.deleteStorage(ctx, "remove", j); err != nil {
+				} else if !errors.Is(err, os.ErrNotExist) {
 					return err
 				}
-			} else if !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-			if err = b.removePrivate(filepath.Join(dir, "config.json")); err != nil {
-				return err
-			}
-			if err = os.Remove(dir); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-			if err = b.removePrivate(filepath.Join(b.identities().directory, id+".json")); err != nil {
-				return err
+				if err = b.removePrivate(filepath.Join(dir, "config.json")); err != nil {
+					return err
+				}
+				if err = os.Remove(dir); err != nil && !errors.Is(err, os.ErrNotExist) {
+					return err
+				}
+				if err = b.removePrivate(filepath.Join(b.identities().directory, id+".json")); err != nil {
+					return err
+				}
 			}
 		}
 		// Empty instance parents contain no world bytes. Remove only this generated

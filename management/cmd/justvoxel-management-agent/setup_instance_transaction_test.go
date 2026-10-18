@@ -436,7 +436,7 @@ func TestSetupStartupFailsClosed(t *testing.T) {
 }
 
 func TestExplicitSetupRecoveryStopsTrackedInstanceBeforeActivationRecovery(t *testing.T) {
-	for _, mode := range []string{"starting", "running", "players-online", "players-unknown", "stop-error", "still-starting"} {
+	for _, mode := range []string{"starting", "running", "players-online", "players-unknown", "stop-error", "still-starting", "settling"} {
 		t.Run(mode, func(t *testing.T) {
 			d := newDeleteFixture(t)
 			f := d.f
@@ -474,8 +474,26 @@ func TestExplicitSetupRecoveryStopsTrackedInstanceBeforeActivationRecovery(t *te
 			stopped := false
 			elapsed := time.Duration(0)
 			warnings := []string{}
+			settlePauses := 0
 			siblingState, siblingContainer := f.states[sibling], f.containers[sibling]
-			f.backend.pause = func(_ context.Context, duration time.Duration) error {
+			f.backend.pause = func(ctx context.Context, duration time.Duration) error {
+				if mode == "still-starting" || mode == "settling" {
+					if !stopped || duration != 250*time.Millisecond {
+						t.Fatal("invalid settle wait", stopped, duration)
+					}
+					if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > 30*time.Second {
+						t.Fatal("unbounded settle wait")
+					}
+					settlePauses++
+					if mode == "settling" {
+						f.states[id] = "deactivating"
+						if settlePauses == 3 {
+							f.states[id] = "inactive"
+							f.containers[id] = "exited"
+						}
+					}
+					return nil
+				}
 				if mode != "players-online" || !stopped {
 					t.Fatal("unexpected recovery countdown")
 				}
@@ -520,7 +538,7 @@ func TestExplicitSetupRecoveryStopsTrackedInstanceBeforeActivationRecovery(t *te
 						return nil, fmt.Errorf("injected stop failure")
 					}
 					stopped = true
-					if mode == "still-starting" {
+					if mode == "still-starting" || mode == "settling" {
 						return nil, nil
 					}
 				}
@@ -572,6 +590,9 @@ func TestExplicitSetupRecoveryStopsTrackedInstanceBeforeActivationRecovery(t *te
 				if err != nil || !recovered.RolledBack {
 					t.Fatal(recovered, err)
 				}
+			}
+			if (mode == "settling" && settlePauses != 3) || (mode == "still-starting" && settlePauses != 120) {
+				t.Fatal("unexpected settle polling", settlePauses)
 			}
 			if mode == "players-online" && (elapsed != 60*time.Second || len(warnings) != 9) {
 				t.Fatal("player shutdown countdown changed", elapsed, warnings)

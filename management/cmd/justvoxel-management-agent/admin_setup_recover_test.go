@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func setupRecoveryOperation(t *testing.T, state operationState, stage string) (*server, *operationStore, operationJournal) {
@@ -310,6 +313,128 @@ func TestInterruptedRuntimeSetupRecoveryReload(t *testing.T) {
 			}
 			if _, err := reloaded.transition(op.OperationID, operationRollingBack, "runtime_recovery", "Retrying preserved recovery."); err != nil {
 				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestSetupRecoveryRetriesNormalDeleteBusy(t *testing.T) {
+	for _, mode := range []string{"transient", "persistent", "resume-journal"} {
+		t.Run(mode, func(t *testing.T) {
+			d := newDeleteFixture(t)
+			f := d.f
+			s, store, op := setupRecoveryOperation(t, operationNeedsAttention, "runtime_rollback")
+			r := setupRuntimeTransactionRequest{InstanceOnly: true, OperationID: op.OperationID, PlanFingerprint: op.PlanFingerprint}
+			e := bindSetupRuntimeFixture(t, f, r)
+			id, sibling := e.Record.Runtime.ID, f.configs[1].ID
+			_, siblingEnv, siblingQuadlet := f.backend.paths(sibling)
+			preserved := map[string]string{}
+			for _, path := range []string{filepath.Join(f.backend.store.directory, sibling+".json"), filepath.Join(f.backend.store.directory, "names", sibling+".json"), filepath.Join(f.backend.root, sibling, "config.json"), siblingEnv, siblingQuadlet, filepath.Join(instanceBackupUnits, instanceBackupUnit(sibling, "timer")), filepath.Join(instanceBackupUnits, instanceBackupUnit(sibling, "service"))} {
+				raw, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				preserved[path] = string(raw)
+			}
+			siblingState, siblingContainer := f.states[sibling], f.containers[sibling]
+			if mode == "resume-journal" {
+				d.failRemove = true
+				if err := f.backend.deleteInstance(context.Background(), id, "JV Paper"); err == nil {
+					t.Fatal("expected interrupted normal Delete")
+				}
+				d.failRemove = false
+			}
+			base := f.backend.command
+			busy, busyChecks, waits := true, 0, 0
+			journalSeen := false
+			f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+				if command == "systemctl" && reflect.DeepEqual(args, []string{"show", "--property=Job", "--value", "--", "minecraft-" + id + ".service"}) && busy {
+					busyChecks++
+					return []byte("42\n"), nil // Normal deleteStopped safety check returns errInstanceBusy.
+				}
+				if command == "nsenter" && len(args) > 4 && args[2] == instanceDeleteHelper && args[3] == "remove" {
+					journal, err := f.backend.deleteJournal(id)
+					if err != nil || journal.ID != id || (journal.Stage != "runtime_retired" && journal.Stage != "data_removed") {
+						t.Fatal("storage removal without durable Delete evidence", journal, err)
+					}
+					journalSeen = true
+				}
+				return base(ctx, command, args...)
+			}
+			f.backend.pause = func(ctx context.Context, duration time.Duration) error {
+				if duration != 250*time.Millisecond || !store.setupLockHeld || busyChecks == 0 {
+					t.Fatal("invalid busy retry", duration, busyChecks)
+				}
+				if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > 10*time.Second {
+					t.Fatal("unbounded Delete retry")
+				}
+				if mode != "resume-journal" {
+					if _, err := os.Stat(f.backend.deletePath(id)); !os.IsNotExist(err) {
+						t.Fatal("busy check must precede journal creation", err)
+					}
+				}
+				waits++
+				if mode != "persistent" && waits == 2 {
+					busy = false
+				}
+				return nil
+			}
+			oldStorage := runAdminSetupStorageTransactionHelper
+			t.Cleanup(func() { runAdminSetupStorageTransactionHelper = oldStorage })
+			storageRecovered := false
+			runAdminSetupStorageTransactionHelper = func(_ context.Context, action string, _ []byte) ([]byte, error) {
+				recovered, err := setupInstanceRead(r.OperationID, r.PlanFingerprint)
+				if action != "recover" || !d.removed || !journalSeen || err != nil || !recovered.RolledBack || !store.setupLockHeld {
+					t.Fatal("storage recovery before verified runtime retirement", recovered, err)
+				}
+				storageRecovered = true
+				return []byte(`{"ok":true,"applied":false,"phase":"storage_rolled_back","rollback_state":"succeeded","rollback_result":"rolled_back"}`), nil
+			}
+			rr := httptest.NewRecorder()
+			s.adminSetupRecover(rr, surfaceRequest(http.MethodPost, "/v1/admin/setup/recover", `{"operation_id":"`+op.OperationID+`","retry_recovery":true}`))
+			if rr.Code != http.StatusOK {
+				t.Fatal(rr.Code, rr.Body.String())
+			}
+			finished, err := store.get(op.OperationID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			current, err := store.currentSetup()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode == "persistent" {
+				if waits != 40 || finished.State != operationNeedsAttention || finished.Stage != "runtime_rollback" || finished.Rollback.State != "failed" || current == nil || !store.setupLockHeld || d.removed || storageRecovered {
+					t.Fatal("persistent busy lost recovery", waits, finished, current)
+				}
+				recovered, err := setupInstanceRead(r.OperationID, r.PlanFingerprint)
+				if err != nil || recovered.RolledBack {
+					t.Fatal("lost Setup evidence", recovered, err)
+				}
+				_, env, quadlet := f.backend.paths(id)
+				for _, path := range []string{setupInstanceMarker, setupInstancePath(op.OperationID), filepath.Join(f.backend.root, id, "config.json"), env, quadlet, filepath.Join(f.backend.store.directory, id+".json"), filepath.Join(f.backend.store.directory, "names", id+".json")} {
+					if _, err := os.Stat(path); err != nil {
+						t.Fatal("lost recovery evidence", path, err)
+					}
+				}
+			} else if waits != 2 || finished.State != operationRolledBack || current != nil || store.setupLockHeld || !storageRecovered || !journalSeen {
+				t.Fatal("transient busy stranded Setup", waits, finished, current)
+			}
+			if mode != "persistent" {
+				for _, path := range []string{setupInstanceMarker, f.backend.deletePath(id), filepath.Join(f.backend.root, id), filepath.Join(f.backend.store.directory, id+".json")} {
+					if _, err := os.Stat(path); !os.IsNotExist(err) {
+						t.Fatal("retirement incomplete", path, err)
+					}
+				}
+			}
+			for path, expected := range preserved {
+				raw, err := os.ReadFile(path)
+				if err != nil || string(raw) != expected {
+					t.Fatal("sibling changed", path, err)
+				}
+			}
+			if f.states[sibling] != siblingState || f.containers[sibling] != siblingContainer {
+				t.Fatal("sibling runtime changed")
 			}
 		})
 	}

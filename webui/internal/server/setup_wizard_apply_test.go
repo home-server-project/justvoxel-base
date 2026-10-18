@@ -772,3 +772,61 @@ func TestSetupApplyErrorReconcilesOnlyExactReviewedOperation(t *testing.T) {
 		})
 	}
 }
+
+func TestSetupRecoveryRetryReconnectsToSameOperation(t *testing.T) {
+	for _, stage := range []string{"runtime_recovery", "storage_recovery"} {
+		t.Run(stage, func(t *testing.T) {
+			client := setupExecutionClient()
+			client.operation = &api.PersistentOperation{OperationID: setupExecutionOperationID, OperationType: "setup", State: "needs_attention", Stage: "runtime_rollback"}
+			if stage == "storage_recovery" {
+				client.operation.Stage = "storage_rollback"
+			}
+			client.current = client.operation
+			app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			post := func() {
+				t.Helper()
+				response := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recover", "csrf=csrf-token&operation_id="+setupExecutionOperationID))
+				if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/setup/progress/"+setupExecutionOperationID || client.recoverCalls != 1 || client.recoverID != setupExecutionOperationID {
+					t.Fatalf("recovery retry: %d location=%q calls=%d id=%q", response.Code, response.Header().Get("Location"), client.recoverCalls, client.recoverID)
+				}
+			}
+			post()
+			client.current.State = "rolling_back"
+			client.current.Stage = stage
+			post()
+		})
+	}
+}
+
+func TestSetupRecoveryRetryRefusesOtherOperationsAndStates(t *testing.T) {
+	for _, tc := range []struct {
+		state string
+		stage string
+		id    string
+	}{
+		{"rolling_back", "runtime_recovery", "11234567-89ab-4cde-8f01-23456789abcd"},
+		{"rolling_back", "storage_recovery", "11234567-89ab-4cde-8f01-23456789abcd"},
+		{"needs_attention", "runtime_rollback", "11234567-89ab-4cde-8f01-23456789abcd"},
+		{"running", "runtime_recovery", setupExecutionOperationID},
+		{"rolling_back", "runtime_rollback", setupExecutionOperationID},
+		{"rolling_back", "storage_rollback", setupExecutionOperationID},
+		{"needs_attention", "runtime_recovery", setupExecutionOperationID},
+		{"rolled_back", "storage_recovery", setupExecutionOperationID},
+	} {
+		t.Run(tc.state+"/"+tc.stage+"/"+tc.id, func(t *testing.T) {
+			client := setupExecutionClient()
+			client.current = &api.PersistentOperation{OperationID: setupExecutionOperationID, OperationType: "setup", State: tc.state, Stage: tc.stage}
+			app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			response := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/recover", "csrf=csrf-token&operation_id="+tc.id))
+			if response.Code != http.StatusConflict || response.Header().Get("Location") != "" || client.recoverCalls != 0 {
+				t.Fatalf("invalid recovery accepted: %d calls=%d", response.Code, client.recoverCalls)
+			}
+		})
+	}
+}

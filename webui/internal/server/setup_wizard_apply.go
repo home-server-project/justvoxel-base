@@ -60,6 +60,10 @@ func (a *App) setupWizardRecover(w http.ResponseWriter, r *http.Request) {
 		a.handleSetupProgressError(w, r, err)
 		return
 	}
+	if current.Operation != nil && current.Operation.OperationID == id && current.Operation.State == "rolling_back" && (current.Operation.Stage == "runtime_recovery" || current.Operation.Stage == "storage_recovery") {
+		http.Redirect(w, r, "/setup/progress/"+id, http.StatusSeeOther)
+		return
+	}
 	if current.Operation == nil || current.Operation.OperationID != id || current.Operation.State != "needs_attention" || (current.Operation.Stage != "storage_rollback" && current.Operation.Stage != "runtime_rollback") {
 		http.Error(w, "setup recovery is unavailable in the current state", http.StatusConflict)
 		return
