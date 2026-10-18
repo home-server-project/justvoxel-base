@@ -12,17 +12,18 @@ func TestRecommendedPlacementFiltersRanksAndSeparatesFilesystems(t *testing.T) {
 	add := func(path, mount, fs string, ro bool) {
 		devices = append(devices, adminStorageDevice{Type: "part", Path: path, Filesystem: fs, UUID: "fixture-uuid", Mountpoints: []string{mount}, ReadOnly: ro, SizeBytes: 10000 * gib})
 	}
-	add("/dev/a", "/srv/a", "xfs", false)
-	add("/dev/b", "/srv/b", "ext4", false)
-	add("/dev/c", "/srv/c", "btrfs", false)
+	// Missing test-only paths avoid depending on the host's directory layout.
+	add("/dev/a", "/jv-placement-test/a", "xfs", false)
+	add("/dev/b", "/jv-placement-test/b", "ext4", false)
+	add("/dev/c", "/jv-placement-test/c", "btrfs", false)
 	for _, unsafe := range []string{"/boot", "/etc/storage", "/proc", "/sys", "/run/storage", "/dev/shm", "/var/lib/containers/storage", "/srv/../unsafe", "relative"} {
 		add("/dev/unsafe", unsafe, "xfs", false)
 	}
-	add("/dev/readonly", "/srv/readonly", "xfs", true)
-	add("/dev/mount-ro", "/srv/mount-ro", "xfs", false)
-	add("/dev/pseudo", "/srv/pseudo", "tmpfs", false)
+	add("/dev/readonly", "/jv-placement-test/readonly", "xfs", true)
+	add("/dev/mount-ro", "/jv-placement-test/mount-ro", "xfs", false)
+	add("/dev/pseudo", "/jv-placement-test/pseudo", "tmpfs", false)
 	add("/dev/unmounted", "", "ext4", false)
-	add("/dev/low", "/srv/low", "ext4", false)
+	add("/dev/low", "/jv-placement-test/low", "ext4", false)
 	available := map[string]placementFilesystem{
 		"/dev/a":   {Available: 30 * gib, Size: 100 * gib, Identity: "a"},
 		"/dev/b":   {Available: 80 * gib, Size: 100 * gib, Identity: "b"},
@@ -77,7 +78,7 @@ func TestRecommendedSingleFilesystemFallbackAndReserve(t *testing.T) {
 	if recommendedCapacityOK(placementFilesystem{Available: 100 << 30, Size: 2000 << 30, Identity: "large"}) {
 		t.Fatal("proportional conservative reserve bypassed")
 	}
-	only := recommendedPlacementCandidate{MountPoint: "/srv/data", Device: "/dev/a", placementFilesystem: fs}
+	only := recommendedPlacementCandidate{MountPoint: "/jv-placement-test/data", Device: "/dev/a", placementFilesystem: fs}
 	out, err = chooseRecommendedPlacement([]recommendedPlacementCandidate{only})
 	if err != nil || out.Storage.Device != out.Backups.Device || out.Storage.Path == out.Backups.Path {
 		t.Fatal("single filesystem lost isolated data/backup directories", out, err)
