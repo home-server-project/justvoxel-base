@@ -193,7 +193,7 @@ var startOverFstabPath = "/etc/fstab"
 // Pin preserved policy contents plus mount/data/backup directory identities.
 // This is verification only: no mount, credential, backup or fstab writer exists
 // in Start Over. The active policy pair is deliberately excluded.
-func (b *instanceRuntimeBackend) startOverPreservationEvidence(entries []instanceDeleteJournal, backupPath string) (map[string]string, error) {
+func (b *instanceRuntimeBackend) startOverPreservationEvidence(entries []instanceDeleteJournal, legacyBackupPath string) (map[string]string, error) {
 	files, err := b.startOverConfiguration(nil)
 	if err != nil {
 		return nil, err
@@ -215,17 +215,25 @@ func (b *instanceRuntimeBackend) startOverPreservationEvidence(entries []instanc
 		return nil, errInstanceRecovery
 	}
 	out[startOverFstabPath] = instanceHash(raw)
+	// The value marks paths that must exist. Backup namespaces and the legacy
+	// backup destination may be absent; data roots and modern backup roots may not.
 	roots := map[string]bool{}
-	if backupPath != "" {
-		roots[backupPath] = true
+	addRoot := func(path string, required bool) {
+		roots[path] = roots[path] || required
 	}
 	for _, j := range entries {
-		roots[j.Record.Storage.Root] = true
+		addRoot(j.Record.Storage.Root, true)
+		if j.Record.Backups != nil {
+			addRoot(j.Record.Backups.Root, true)
+			addRoot(j.Record.Backups.Path, false)
+		} else if legacyBackupPath != "" {
+			addRoot(legacyBackupPath, false)
+		}
 	}
 	// Use the reviewed paths even after the active setup policy is removed.
 	for root := range roots {
 		f, err := instanceOpen(root, syscall.O_RDONLY|syscall.O_DIRECTORY)
-		if errors.Is(err, os.ErrNotExist) && root == backupPath {
+		if errors.Is(err, os.ErrNotExist) && !roots[root] {
 			out[root] = "absent"
 			continue
 		}

@@ -112,6 +112,185 @@ func startOverMutations(calls []string) []string {
 	}
 	return out
 }
+
+func (x *startOverFixture) setBackupPlacement(t *testing.T, index int, namespaceExists bool) *instanceRuntimeBackupStorage {
+	t.Helper()
+	r := &x.f.x.records[index]
+	root := filepath.Join(x.f.x.snapshot.StorageRoot, fmt.Sprintf("backup-%c", 'a'+index))
+	r.Backups = &instanceRuntimeBackupStorage{Type: "system", Root: root, Path: filepath.Join(root, r.Runtime.ID)}
+	path := root
+	if namespaceExists {
+		path = r.Backups.Path
+	}
+	if err := os.MkdirAll(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	dir, _, _ := x.f.x.b.paths(r.Runtime.ID)
+	if err := x.f.x.b.writeJSON(filepath.Join(dir, "config.json"), r, true); err != nil {
+		t.Fatal(err)
+	}
+	return r.Backups
+}
+
+func TestStartOverPerInstanceBackupPreservationAndLegacyFallback(t *testing.T) {
+	for _, modern := range []int{0, 1, 2} {
+		t.Run(fmt.Sprintf("modern-%d", modern), func(t *testing.T) {
+			x := newStartOverFixture(t, 2)
+			b := x.f.x.b
+			paths := []string{}
+			for i := 0; i < modern; i++ {
+				placement := x.setBackupPlacement(t, i, true)
+				paths = append(paths, placement.Root, placement.Path)
+			}
+			legacy := x.f.x.snapshot.BackupPath
+			if modern < 2 {
+				if err := os.MkdirAll(legacy, 0700); err != nil {
+					t.Fatal(err)
+				}
+				paths = append(paths, legacy)
+			}
+			snapshotCalls := 0
+			b.snapshot = func(context.Context) (minecraftInstanceRuntimeContext, uint32, uint32, error) {
+				snapshotCalls++
+				if modern == 2 {
+					t.Fatal("modern participants must not require the global snapshot")
+				}
+				return x.f.x.snapshot, 1000, 1000, nil
+			}
+			for _, path := range paths {
+				if err := os.WriteFile(filepath.Join(path, "archive.tar.gz"), []byte("preserved backup"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			p := x.plan(t)
+			if modern < 2 && (snapshotCalls == 0 || p.legacyBackupPath != legacy) {
+				t.Fatal("legacy placement did not come from the appliance snapshot")
+			}
+			if modern == 2 {
+				if _, ok := p.preserved[legacy]; ok || p.legacyBackupPath != "" {
+					t.Fatal("modern placement replaced by global backup destination")
+				}
+			}
+			for _, path := range paths {
+				var st syscall.Stat_t
+				if err := syscall.Stat(path, &st); err != nil {
+					t.Fatal(err)
+				}
+				if p.preserved[path] != fmt.Sprintf("%d:%d", st.Dev, st.Ino) {
+					t.Fatal("backup root or namespace not pinned", path, p.preserved)
+				}
+			}
+			if w := x.apply(t, p, false, false); w.Code != 200 {
+				t.Fatal(w.Code, w.Body.String())
+			}
+			// Re-use the reviewed entries after retirement and active policy cleanup.
+			got, err := b.startOverPreservationEvidence(p.entries, p.legacyBackupPath)
+			if err != nil || !reflect.DeepEqual(got, p.preserved) {
+				t.Fatal("preservation identities changed after Start Over", got, err)
+			}
+			for _, path := range paths {
+				if raw, err := os.ReadFile(filepath.Join(path, "archive.tar.gz")); err != nil || string(raw) != "preserved backup" {
+					t.Fatal("backup data changed", path, err)
+				}
+			}
+			if len(x.f.removals) != 0 {
+				t.Fatal("Start Over invoked data deletion")
+			}
+		})
+	}
+}
+
+func TestStartOverAbsentBackupNamespaceRemainsAbsent(t *testing.T) {
+	x := newStartOverFixture(t, 2)
+	for i := range x.f.x.records {
+		x.setBackupPlacement(t, i, false)
+	}
+	p := x.plan(t)
+	for _, j := range p.entries {
+		if p.preserved[j.Record.Backups.Path] != "absent" {
+			t.Fatal("missing namespace was not recorded as absent")
+		}
+	}
+	if w := x.apply(t, p, false, false); w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	for _, j := range p.entries {
+		if _, err := os.Lstat(j.Record.Backups.Path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("Start Over created a backup namespace", err)
+		}
+	}
+}
+
+func TestStartOverBackupIdentityChangesFailClosed(t *testing.T) {
+	for _, index := range []int{0, 1} {
+		for _, target := range []string{"root", "namespace"} {
+			for _, replace := range []bool{false, true} {
+				for _, duringRetirement := range []bool{false, true} {
+					t.Run(fmt.Sprintf("instance-%d-%s-replace-%t-retiring-%t", index, target, replace, duringRetirement), func(t *testing.T) {
+						x := newStartOverFixture(t, 2)
+						placements := []*instanceRuntimeBackupStorage{x.setBackupPlacement(t, 0, true), x.setBackupPlacement(t, 1, true)}
+						p := x.plan(t)
+						path := placements[index].Root
+						if target == "namespace" {
+							path = placements[index].Path
+						}
+						changed := false
+						change := func() {
+							// Keep the original inode allocated so replacement cannot reuse it.
+							if err := os.Rename(path, path+"-original"); err != nil {
+								t.Fatal(err)
+							}
+							if replace {
+								if err := os.MkdirAll(placements[index].Path, 0700); err != nil {
+									t.Fatal(err)
+								}
+							}
+							changed = true
+						}
+						if duringRetirement {
+							base := x.f.x.b.command
+							x.f.x.b.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+								if !changed && command == "systemctl" && reflect.DeepEqual(args, []string{"daemon-reload"}) {
+									change()
+								}
+								return base(ctx, command, args...)
+							}
+						} else {
+							change()
+						}
+						x.f.x.calls = nil
+						w := x.apply(t, p, false, false)
+						if !changed || (w.Code != 409 && w.Code != 500) {
+							t.Fatal("backup identity change accepted", w.Code, w.Body.String())
+						}
+						if !duringRetirement && len(startOverMutations(x.f.x.calls)) != 0 {
+							t.Fatal("stale backup review allowed retirement")
+						}
+						if _, err := os.Stat(filepath.Join(startOverPolicyRoot, "justvoxel.conf")); err != nil {
+							t.Fatal("active policy removed despite preservation failure", err)
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+func TestStartOverRequiresPerInstanceStorageValidation(t *testing.T) {
+	x := newStartOverFixture(t, 2)
+	for i := range x.f.x.records {
+		x.setBackupPlacement(t, i, true)
+	}
+	id := x.f.x.records[1].Runtime.ID
+	x.fail = instanceRuntimeHelper + " validate " + id
+	if _, err := x.f.x.b.planStartOver(context.Background()); err == nil {
+		t.Fatal("unvalidated participant storage accepted")
+	}
+	if len(startOverMutations(x.f.x.calls)) != 0 {
+		t.Fatal("storage validation failure mutated runtimes")
+	}
+}
+
 func TestStartOverParticipantSetsAndPreservation(t *testing.T) {
 	for _, states := range [][]string{{}, {"stopped"}, {"running"}, {"running", "stopped"}, {"failed"}} {
 		t.Run(fmt.Sprint(states), func(t *testing.T) {

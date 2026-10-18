@@ -16,8 +16,28 @@ done
 
 # Selected Reset plans from authoritative instance storage and inspects selected players.
 grep -Fq 'instanceRuntimes.readRecord(id)' "${agent}"
-grep -Fq 'record.Storage != instanceStorageFor(snapshot, id)' "${agent}"
+grep -Fq 'validateInstanceRecordPlacement(record)' "${agent}"
 grep -Fq 'instanceRuntimes.storage(parent, "validate", record)' "${agent}"
+# Modern backups use persisted placement; only the legacy branch uses the snapshot.
+grep -Fq 'if record.Backups != nil {' "${agent}"
+grep -Fq 'backupPath = record.Backups.Path' "${agent}"
+grep -Fq 'backupPath = snapshot.BackupPath' "${agent}"
+grep -Fq 'BackupPath: backupPath, BackupAction: "preserve"' "${agent}"
+awk '
+    /if record.Backups != nil \{/ { placement = 1 }
+    placement == 1 && /backupPath = record.Backups.Path/ { modern = 1 }
+    placement == 1 && /} else \{/ { placement = 2 }
+    placement == 2 && /instanceRuntimes.snapshot\(parent\)/ { legacy_snapshot = 1 }
+    placement == 2 && /backupPath = snapshot.BackupPath/ { legacy = 1; placement = 0 }
+    END { exit !(modern && legacy_snapshot && legacy) }
+' "${agent}" || {
+    echo 'ERROR: Minecraft reset backup selection must keep snapshot fallback in the legacy branch.' >&2
+    exit 1
+}
+if grep -Fq 'instanceStorageFor(' "${agent}" "${retirement}"; then
+    echo 'ERROR: Minecraft reset must validate persisted per-instance placement, not global storage equality.' >&2
+    exit 1
+fi
 grep -Fq '"nsenter", "--mount=/proc/1/ns/mnt"' "${agent}"
 grep -Fq 'minecraft-reset-common.sh; jv_reset_data_scope "$1"' "${agent}"
 grep -Fq 'scope != "internal" && scope != "external" && scope != "network" && scope != "unknown"' "${agent}"
@@ -29,7 +49,7 @@ grep -Fq 'pluginInstallPlayers(parent, id)' "${agent}"
 grep -Fq 'plan.InstanceID != journal.InstanceID' "${agent}"
 grep -Fq 's.prepareResetPluginTransaction(ctx, operationID, plan)' "${agent}"
 grep -Fq 'instanceRuntimes.retireSelectedInstance(ctx, plan.InstanceID, tx.InstanceName, plan.DataAction)' "${agent}"
-grep -Fq 'j.Record.Storage != instanceStorageFor(snapshot, id)' "${retirement}"
+grep -Fq 'validateInstanceRecordPlacement(j.Record)' "${retirement}"
 grep -Fq 'retry && j.ResetPolicy != resetPolicy' "${retirement}"
 grep -Fq 'if j.ResetPolicy == "preserve" {' "${retirement}"
 grep -Fq 'return b.removeInstanceData(ctx, j)' "${retirement}"

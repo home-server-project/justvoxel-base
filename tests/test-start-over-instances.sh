@@ -16,8 +16,14 @@ done
 for required in 'api-client' 'START OVER' 'confirm_players' 'save_configuration_backup' 'total_players_online' 'configuration_backup_path' 'ALL configured Minecraft servers'; do
     grep -Fq "${required}" "${frontend}" || fail "missing frontend contract: ${required}"
 done
-for required in 'localRootAdministrator(r)' 's.claimMinecraftMutation()' 'planStartOver(ctx)' 'PlanFingerprint != req.PlanFingerprint' 'plan.TotalPlayersOnline > 0 && !req.ConfirmPlayers' 'actionWithWarnings(ctx, j.ID, "stop", req.ConfirmPlayers)' 'retireSelectedInstance(ctx, j.ID, j.Name, "start_over")' '"minecraft_instances"' 'checkStartOverRetirement' 'instanceStorageFor(snapshot, id)' 'b.verifyLive(r)' 'b.factoryResetCoverage(ctx, coverage)'; do
+for required in 'localRootAdministrator(r)' 's.claimMinecraftMutation()' 'planStartOver(ctx)' 'PlanFingerprint != req.PlanFingerprint' 'plan.TotalPlayersOnline > 0 && !req.ConfirmPlayers' 'actionWithWarnings(ctx, j.ID, "stop", req.ConfirmPlayers)' 'retireSelectedInstance(ctx, j.ID, j.Name, "start_over")' '"minecraft_instances"' 'checkStartOverRetirement' 'validateInstanceRecordPlacement(j.Record)' 'b.storage(ctx, "validate", j.Record)' 'b.verifyLive(r)' 'b.factoryResetCoverage(ctx, coverage)' 'if j.Record.Backups == nil {' 'p.legacyBackupPath = snapshot.BackupPath' 'startOverPreservationEvidence(plan.entries, plan.legacyBackupPath)' '!reflect.DeepEqual(preserved, plan.preserved)'; do
     grep -Fq "${required}" "${agent}" || fail "missing Agent contract: ${required}"
+done
+if grep -Fq 'instanceStorageFor(' "${agent}"; then
+    fail 'Start Over must validate persisted per-instance placement, not global storage equality'
+fi
+for required in 'addRoot(j.Record.Storage.Root, true)' 'if j.Record.Backups != nil {' 'addRoot(j.Record.Backups.Root, true)' 'addRoot(j.Record.Backups.Path, false)' 'else if legacyBackupPath != "" {' 'addRoot(legacyBackupPath, false)' 'instanceOpen(root, syscall.O_RDONLY|syscall.O_DIRECTORY)' 'out[root] = "absent"' 'v.Dev, v.Ino' 'out[startOverFstabPath] = instanceHash(raw)' 'out[path] = instanceHash(raw)'; do
+    grep -Fq "${required}" "${archive}" || fail "missing preservation contract: ${required}"
 done
 for required in 'j.ResetPolicy == "start_over"' 'identity != j.DataIdentity' 'return b.removeInstanceData(ctx, j)'; do
     grep -Fq "${required}" "${retirement}" || fail "missing data policy: ${required}"

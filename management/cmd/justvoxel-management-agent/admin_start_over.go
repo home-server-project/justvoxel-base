@@ -39,7 +39,7 @@ type startOverPlan struct {
 	WebUIUsersAction             string                 `json:"webui_users_action"`
 	PodmanImagesAction           string                 `json:"podman_images_action"`
 	entries                      []instanceDeleteJournal
-	backupPath                   string
+	legacyBackupPath             string
 	preserved                    map[string]string
 }
 type startOverRequest struct {
@@ -175,7 +175,7 @@ func (s *server) adminStartOverApply(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	preserved, err := instanceRuntimes.startOverPreservationEvidence(plan.entries, plan.backupPath)
+	preserved, err := instanceRuntimes.startOverPreservationEvidence(plan.entries, plan.legacyBackupPath)
 	if err != nil || !reflect.DeepEqual(preserved, plan.preserved) {
 		startOverFailure(w, err)
 		return
@@ -192,7 +192,7 @@ func (s *server) adminStartOverApply(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	preserved, err = instanceRuntimes.startOverPreservationEvidence(plan.entries, plan.backupPath)
+	preserved, err = instanceRuntimes.startOverPreservationEvidence(plan.entries, plan.legacyBackupPath)
 	if err != nil || !reflect.DeepEqual(preserved, plan.preserved) {
 		startOverFailure(w, err)
 		return
@@ -285,13 +285,6 @@ func (b *instanceRuntimeBackend) planStartOver(ctx context.Context) (startOverPl
 		sorted = append(sorted, id)
 	}
 	sort.Strings(sorted)
-	var snapshot minecraftInstanceRuntimeContext
-	if len(all) > 0 {
-		snapshot, _, _, err = b.snapshot(ctx)
-		if err != nil {
-			return p, err
-		}
-	}
 	coverage := []factoryResetInstance{}
 	for _, id := range sorted {
 		j, retry := journals[id]
@@ -382,8 +375,17 @@ func (b *instanceRuntimeBackend) planStartOver(ctx context.Context) (startOverPl
 	if err != nil {
 		return p, err
 	}
-	p.backupPath = snapshot.BackupPath
-	p.preserved, err = b.startOverPreservationEvidence(p.entries, p.backupPath)
+	for _, j := range p.entries {
+		if j.Record.Backups == nil {
+			snapshot, _, _, snapshotErr := b.snapshot(ctx)
+			if snapshotErr != nil {
+				return p, snapshotErr
+			}
+			p.legacyBackupPath = snapshot.BackupPath
+			break
+		}
+	}
+	p.preserved, err = b.startOverPreservationEvidence(p.entries, p.legacyBackupPath)
 	if err != nil {
 		return p, err
 	}
