@@ -280,6 +280,9 @@ func (a *App) setupWizardRecommended(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if a.redirectCurrentSetupOperation(w, r, session, client) {
+		return
+	}
 	serverType := strings.ToLower(strings.TrimSpace(r.FormValue("server_type")))
 	if !validSetupServerType(serverType) {
 		http.Error(w, "selected Minecraft server type is not available yet", http.StatusBadRequest)

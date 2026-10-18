@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
 )
@@ -423,39 +424,141 @@ func TestSetupElapsedTimerSource(t *testing.T) {
 }
 
 func TestRolledBackSetupCanStartFreshDraft(t *testing.T) {
-	client := setupExecutionClient()
-	client.current = &api.PersistentOperation{OperationID: setupExecutionOperationID, OperationType: "setup", State: "rolled_back"}
-	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer firstRunSetupDrafts.delete(app, "session-token")
-	start := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/start", "csrf=csrf-token"))
-	if start.Code != http.StatusSeeOther || start.Header().Get("Location") != "/setup" {
-		t.Fatalf("start over returned %d %q", start.Code, start.Header().Get("Location"))
-	}
-	wizard := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/setup", ""))
-	if wizard.Code != http.StatusOK || !strings.Contains(wizard.Body.String(), "<h2>Server</h2>") {
-		t.Fatalf("fresh draft unavailable: %d", wizard.Code)
-	}
-	if client.applyCalls != 0 {
-		t.Fatal("starting a fresh draft launched another setup operation")
+	for _, mode := range []string{"advanced", "recommended"} {
+		t.Run(mode, func(t *testing.T) {
+			client := setupExecutionClient()
+			client.current = &api.PersistentOperation{InstanceSetup: true, OperationID: setupExecutionOperationID, OperationType: "setup", State: "rolled_back"}
+			app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer firstRunSetupDrafts.delete(app, "session-token")
+			defer firstRunSetupReviews.delete(app, "session-token")
+			path, form, location := "/setup/start", "csrf=csrf-token", "/setup"
+			if mode == "recommended" {
+				path, form, location = "/setup/recommended", "csrf=csrf-token&server_type=paper", "/setup/review"
+			}
+			start := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example"+path, form))
+			if start.Code != http.StatusSeeOther || start.Header().Get("Location") != location {
+				t.Fatalf("start over returned %d %q", start.Code, start.Header().Get("Location"))
+			}
+			draft, exists := firstRunSetupDrafts.get(app, "session-token")
+			if !exists || !draft.Started || draft.Mode != mode {
+				t.Fatalf("fresh %s draft unavailable: %#v", mode, draft)
+			}
+			wizard := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example"+location, ""))
+			if wizard.Code != http.StatusOK {
+				t.Fatalf("fresh setup unavailable: %d", wizard.Code)
+			}
+			if mode == "advanced" && !strings.Contains(wizard.Body.String(), "<h2>Server</h2>") {
+				t.Fatal("fresh advanced draft did not open the Server step")
+			}
+			if client.applyCalls != 0 {
+				t.Fatal("starting a fresh draft launched another setup operation")
+			}
+		})
 	}
 }
 
 func TestNeedsAttentionSetupCannotStartFreshDraft(t *testing.T) {
-	client := setupExecutionClient()
-	client.current = &api.PersistentOperation{OperationID: setupExecutionOperationID, OperationType: "setup", State: "needs_attention"}
-	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
-	if err != nil {
-		t.Fatal(err)
+	for _, entry := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/setup"},
+		{http.MethodPost, "/setup/start"},
+		{http.MethodPost, "/setup/recommended"},
+		{http.MethodGet, "/setup/review"},
+	} {
+		t.Run(entry.path, func(t *testing.T) {
+			client := &fakeSetupEntryDiagnosticAPI{fakeSetupExecutionAPI: setupExecutionClient()}
+			client.current = &api.PersistentOperation{
+				InstanceSetup: true, OperationID: setupExecutionOperationID, OperationType: "setup",
+				State: "needs_attention", Stage: "runtime_rollback",
+			}
+			app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer firstRunSetupDrafts.delete(app, "session-token")
+			defer firstRunSetupReviews.delete(app, "session-token")
+			firstRunSetupReviews.save(app, "session-token", setupReviewState{EULAAccepted: true, DraftUpdatedAt: time.Now()})
+			response := httptestResponse(app, authenticatedAdminRequest(entry.method, "http://example"+entry.path, "csrf=csrf-token&server_type=paper"))
+			if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/setup/progress/"+setupExecutionOperationID {
+				t.Fatalf("recovery lock was bypassed: %d %q", response.Code, response.Header().Get("Location"))
+			}
+			if client.currentCalls != 1 || client.diagnosticCalls != 0 || client.defaultsHit != 0 || client.storageHit != 0 || client.planHit != 0 || client.applyCalls != 0 {
+				t.Fatalf("entry bypassed recovery discovery: %#v", client)
+			}
+			if _, exists := firstRunSetupDrafts.get(app, "session-token"); exists {
+				t.Fatal("recovery lock created a fresh setup draft")
+			}
+			if review, exists := firstRunSetupReviews.get(app, "session-token"); !exists || !review.EULAAccepted {
+				t.Fatal("recovery lock discarded the existing review")
+			}
+		})
 	}
-	start := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/start", "csrf=csrf-token"))
-	if start.Code != http.StatusSeeOther || start.Header().Get("Location") != "/setup/progress/"+setupExecutionOperationID {
-		t.Fatalf("recovery lock was bypassed: %d %q", start.Code, start.Header().Get("Location"))
-	}
-	if client.applyCalls != 0 {
-		t.Fatal("recovery lock launched another setup operation")
+}
+
+type fakeSetupEntryDiagnosticAPI struct {
+	*fakeSetupExecutionAPI
+	diagnosticCalls int
+}
+
+func (f *fakeSetupEntryDiagnosticAPI) AdminSetupDiagnosticSession(context.Context, string, string) (api.AdminSetupDiagnosticSessionResponse, error) {
+	f.diagnosticCalls++
+	return api.AdminSetupDiagnosticSessionResponse{}, nil
+}
+
+func (f *fakeSetupEntryDiagnosticAPI) AdminSetupDiagnosticEvent(context.Context, string, string, string, map[string]string) error {
+	f.diagnosticCalls++
+	return nil
+}
+
+func TestSetupEntryCurrentOperationErrorsFailClosed(t *testing.T) {
+	for _, failure := range []struct {
+		name     string
+		err      error
+		status   int
+		location string
+	}{
+		{"lookup", errors.New("management API unavailable"), http.StatusBadGateway, ""},
+		{"decode", errors.New("management API returned invalid operation response: json: unknown field"), http.StatusBadGateway, ""},
+		{"API", &api.ResponseError{StatusCode: http.StatusInternalServerError, Message: "unavailable"}, http.StatusBadGateway, ""},
+		{"unauthorized", api.ErrUnauthorized, http.StatusSeeOther, "/login"},
+		{"password change", api.ErrPasswordChangeRequired, http.StatusSeeOther, "/password"},
+	} {
+		t.Run(failure.name, func(t *testing.T) {
+			for _, path := range []string{"/setup", "/setup/start", "/setup/recommended", "/setup/review"} {
+				t.Run(path, func(t *testing.T) {
+					client := &fakeSetupEntryDiagnosticAPI{fakeSetupExecutionAPI: setupExecutionClient()}
+					client.currentErr = failure.err
+					app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer firstRunSetupDrafts.delete(app, "session-token")
+					defer firstRunSetupReviews.delete(app, "session-token")
+					method := http.MethodGet
+					if path == "/setup/start" || path == "/setup/recommended" {
+						method = http.MethodPost
+					}
+					response := httptestResponse(app, authenticatedAdminRequest(method, "http://example"+path, "csrf=csrf-token&server_type=paper"))
+					if response.Code != failure.status || response.Header().Get("Location") != failure.location {
+						t.Fatalf("current operation error returned %d %q: %s", response.Code, response.Header().Get("Location"), response.Body.String())
+					}
+					if failure.status == http.StatusBadGateway && strings.TrimSpace(response.Body.String()) != "setup operation status is unavailable" {
+						t.Fatalf("expected existing Setup progress error, got %q", response.Body.String())
+					}
+					if client.currentCalls != 1 || client.diagnosticCalls != 0 || client.defaultsHit != 0 || client.storageHit != 0 || client.planHit != 0 || client.applyCalls != 0 {
+						t.Fatalf("current operation error allowed setup entry: %#v", client)
+					}
+					if _, exists := firstRunSetupDrafts.get(app, "session-token"); exists {
+						t.Fatal("current operation error created a fresh setup draft")
+					}
+				})
+			}
+		})
 	}
 }
 

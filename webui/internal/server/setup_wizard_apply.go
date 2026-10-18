@@ -77,7 +77,11 @@ func (a *App) redirectCurrentSetupOperation(w http.ResponseWriter, r *http.Reque
 		return false
 	}
 	response, err := executor.AdminCurrentSetupOperation(r.Context(), session)
-	if err != nil || response.Operation == nil {
+	if err != nil {
+		a.handleSetupProgressError(w, r, err)
+		return true
+	}
+	if response.Operation == nil {
 		return false
 	}
 	if response.Operation.State == "rolled_back" {

@@ -18,6 +18,7 @@ type PersistentOperationRollback struct {
 }
 
 type PersistentOperation struct {
+	InstanceSetup   bool                        `json:"instance_setup,omitempty"`
 	InstanceID      string                      `json:"instance_id,omitempty"`
 	SchemaVersion   string                      `json:"schema_version"`
 	OperationID     string                      `json:"operation_id"`

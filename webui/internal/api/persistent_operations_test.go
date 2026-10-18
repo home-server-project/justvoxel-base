@@ -78,6 +78,49 @@ func TestAdminCurrentSetupOperationSupportsNoCurrentOperation(t *testing.T) {
 	}
 }
 
+func TestAdminCurrentSetupOperationDecodesInstanceSetupRecovery(t *testing.T) {
+	const body = `{
+  "operation":{
+    "instance_setup":true,
+    "schema_version":"v1",
+    "operation_id":"5ee3b4e8-6454-42cb-a9fe-1caf2e488d00",
+    "operation_type":"setup",
+    "plan_fingerprint":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "state":"needs_attention",
+    "stage":"runtime_rollback",
+    "status":"Minecraft recovery needs attention.",
+    "started_at":"2026-09-17T18:30:00Z",
+    "updated_at":"2026-09-17T18:30:05Z",
+    "rollback":{"state":"running"}
+  }
+}`
+	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/admin/setup/current-operation" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     make(http.Header),
+		}, nil
+	})}}
+
+	response, err := client.AdminCurrentSetupOperation(context.Background(), "session-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Operation == nil || !response.Operation.InstanceSetup {
+		t.Fatalf("instance Setup operation missing: %#v", response.Operation)
+	}
+	operation := response.Operation
+	if operation.OperationID != "5ee3b4e8-6454-42cb-a9fe-1caf2e488d00" || operation.SchemaVersion != "v1" || operation.OperationType != "setup" || operation.PlanFingerprint != persistentOperationTestFingerprint {
+		t.Fatalf("unexpected operation identity: %#v", operation)
+	}
+	if operation.State != "needs_attention" || operation.Stage != "runtime_rollback" || operation.Rollback.State != "running" {
+		t.Fatalf("unexpected recovery status: %#v", operation)
+	}
+}
+
 func TestAdminCurrentRestoreOperationSupportsNoCurrentOperation(t *testing.T) {
 	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path != "/v1/admin/restore/current-operation" {
