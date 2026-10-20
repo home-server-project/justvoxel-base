@@ -61,7 +61,26 @@ fi
 for file in mjust/libexec/validate-data-mount mjust/libexec/validate-backend mjust/libexec/admin-setup-storage-transaction-common.sh mjust/libexec/admin-setup-storage-transaction-apply.sh; do
     require_source_text "${file}" 'jv_exact_mount_identity'
 done
-require_source_text mjust/libexec/admin-setup-storage-transaction-apply.sh 'if ! current_source="$(jv_exact_mount_identity SOURCE'
+require_source_text mjust/libexec/storage-lifecycle.sh 'jv_storage_identity_matches() {'
+identity_helper_source="$(sed -n '/^jv_storage_identity_matches() {$/,/^}$/p' mjust/libexec/storage-lifecycle.sh)"
+for field in UUID SOURCE; do
+    if [[ ${identity_helper_source} != *"jv_exact_mount_identity ${field}"* ]]; then
+        printf 'ERROR: storage identity helper does not validate canonical %s\n' "${field}" >&2
+        exit 1
+    fi
+done
+
+entrypoint_source="$(cat mjust/libexec/admin-setup-storage-transaction-json)"
+if [[ ${entrypoint_source} != *'source /usr/libexec/justvoxel/mjust/storage-lifecycle.sh'*'source /usr/libexec/justvoxel/mjust/admin-setup-storage-transaction-apply.sh'* ]]; then
+    echo 'ERROR: storage transaction entrypoint must source storage-lifecycle.sh before the apply helper' >&2
+    exit 1
+fi
+
+rollback_source="$(sed -n '/^_a53_rollback() {$/,/^}$/p' mjust/libexec/admin-setup-storage-transaction-apply.sh)"
+if [[ ${rollback_source} != *'jv_storage_identity_matches'*'jv_trace_run umount'* ]]; then
+    echo 'ERROR: storage rollback must validate mount identity before unmounting' >&2
+    exit 1
+fi
 require_source_text mjust/libexec/storage-summary 'findmnt -n --first-only -o SOURCE --target "$1" 2>/dev/null || printf '\''Unknown'\'''
 require_source_text mjust/libexec/storage-summary 'findmnt -n --first-only -o TARGET --target "$1" 2>/dev/null || printf '\''Unknown'\'''
 

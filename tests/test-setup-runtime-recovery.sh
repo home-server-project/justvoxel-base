@@ -66,6 +66,7 @@ reset_manifest
 # Exercise the real compatibility
 # verification and existing storage recovery without host service/container calls.
 (
+    source "${repo_root}/mjust/libexec/storage-lifecycle.sh"
     source "${repo_root}/mjust/libexec/admin-setup-storage-transaction-common.sh"
     source "${repo_root}/mjust/libexec/admin-setup-storage-transaction-apply.sh"
     source "${repo_root}/mjust/libexec/admin-setup-storage-transaction-actions.sh"
@@ -135,9 +136,10 @@ reset_manifest
     # Paths are in a temporary fixture; use the real canonical/inode/mount checks.
     jv_reset_data_scope() { printf 'internal\n'; }
     legacy_manifest() {
-        printf '# original fstab\n' > "${A53_TX_DIR}/fstab.before"
+        printf '# original unrelated fstab\n' > "${A53_TX_DIR}/fstab.before"
         chmod 0600 "${A53_TX_DIR}/fstab.before"
-        printf '# transaction fstab\n' > "${A53_FSTAB}"
+        cat "${A53_TX_DIR}/fstab.before" > "${A53_FSTAB}"
+        printf 'UUID=fixture-uuid %s xfs noatime,nofail,x-systemd.device-timeout=10s 0 2\n' "${fixture}/legacy-mount" >> "${A53_FSTAB}"
         # Restore fixture ownership without requiring root; private evidence ownership is mocked above.
         jq -cn --argjson identity "${identity}" --arg data "${A53_DEFAULT_DATA_PATH}" --arg backups "${A53_DEFAULT_BACKUP_PATH}" \
           --arg mount "${fixture}/legacy-mount" --arg before "$(_a53_file_sha256 "${A53_TX_DIR}/fstab.before")" --arg after "$(_a53_file_sha256 "${A53_FSTAB}")" \
@@ -161,8 +163,13 @@ reset_manifest
     # The original storage helper accepts the verified runtime handoff.
     a53_recover_action <<< "${identity}" > "${fixture}/legacy-storage-result"
     jq -e '.ok == true and .phase == "storage_rolled_back" and .rollback_result == "rolled_back"' "${fixture}/legacy-storage-result" >/dev/null
-    jq -e '.rollback.state == "succeeded" and .phase == "storage_rolled_back"' "${A53_MANIFEST}" >/dev/null
+    jq -e '.rollback.state == "succeeded" and .rollback.result == "rolled_back" and .phase == "storage_rolled_back"' "${A53_MANIFEST}" >/dev/null
     [[ ${selected_mounted} == false ]]
+    # Legacy evidence grants ownership of this exact created resource only.
+    jq -e --arg mount "${fixture}/legacy-mount" '
+      .legacy_fstab_resources == [{mountpoint:$mount,source:"UUID=fixture-uuid",uuid:"fixture-uuid",filesystem:"xfs",action:"created",
+        exact_line:("UUID=fixture-uuid " + $mount + " xfs noatime,nofail,x-systemd.device-timeout=10s 0 2")}]' "${A53_MANIFEST}" >/dev/null
+    # Removing only that entry leaves the unrelated pre-transaction content intact.
     cmp "${A53_TX_DIR}/fstab.before" "${A53_FSTAB}"
     [[ $(cat "${A53_DEFAULT_DATA_PATH}/world.dat") == 'preserved world' && $(cat "${A53_DEFAULT_BACKUP_PATH}/backup.zip") == 'preserved backup' ]]
 
