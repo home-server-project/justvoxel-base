@@ -443,8 +443,8 @@ func (a *App) minecraftAction(action string) http.HandlerFunc {
 	}
 }
 
-// Keep the existing setup experience only for an authoritatively empty inventory.
-// All actual selection decisions belong to selectedMinecraft.
+// Preserve the empty-inventory setup experience, including the connection guide.
+// Only the appliance dashboard may leave a multi-server inventory unselected.
 func (a *App) dashboardMinecraftSelection(w http.ResponseWriter, r *http.Request, session string) (selectedServerContext, bool) {
 	if _, explicit := r.URL.Query()["server"]; !explicit {
 		instances, err := a.independentServerInventory(r.Context(), session)
@@ -453,6 +453,9 @@ func (a *App) dashboardMinecraftSelection(w http.ResponseWriter, r *http.Request
 			return selectedServerContext{}, false
 		}
 		if len(instances) == 0 {
+			return selectedServerContext{}, true
+		}
+		if len(instances) > 1 && (r.URL.Path == "/" || r.URL.Path == "/api/dashboard-status") {
 			return selectedServerContext{}, true
 		}
 	}
@@ -486,6 +489,17 @@ func (a *App) dashboardData(ctx context.Context, session, csrf string, selected 
 	status.Minecraft = (api.Status{}).Minecraft
 	status.Minecraft.State = "Not configured"
 	players := api.Players{State: "not_configured"}
+	if selected.ID == "" {
+		instances, inventoryErr := a.independentServerInventory(ctx, session)
+		if inventoryErr != nil {
+			return pageData{}, inventoryErr
+		}
+		if len(instances) > 0 {
+			status.Minecraft.Configured = true
+			status.Minecraft.State = "Choose server"
+			players = api.Players{Configured: true, State: "selection_required"}
+		}
+	}
 	if selected.ID != "" {
 		if client, ok := a.api.(interface {
 			MinecraftInstanceBackupSettings(context.Context, string, string) (api.InstanceBackupSettings, error)

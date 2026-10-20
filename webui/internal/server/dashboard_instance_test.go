@@ -23,6 +23,12 @@ type dashboardInstanceAPI struct {
 	backupReads                  []string
 	backupReadErr                error
 	globalBackupEnabled          bool
+	inventoryReads               int
+}
+
+func (f *dashboardInstanceAPI) MinecraftInstances(ctx context.Context, session string) ([]api.RegisteredMinecraftInstance, error) {
+	f.inventoryReads++
+	return f.addServerTestAPI.MinecraftInstances(ctx, session)
 }
 
 func (f *dashboardInstanceAPI) Status(context.Context, string) (api.Status, error) {
@@ -71,13 +77,14 @@ func newDashboardInstanceApp(t *testing.T) (*App, *dashboardInstanceAPI) {
 	t.Helper()
 	_, base := phase7App(t)
 	f := &dashboardInstanceAPI{phase7API: base, globalBackupEnabled: true}
+	f.instances = []api.RegisteredMinecraftInstance{{ID: "jv-family1", DisplayName: "Family Survival"}, {ID: "jv-kids001", DisplayName: "Kids Creative"}}
 	f.backups["jv-family1"] = api.InstanceBackupSettings{Enabled: true, Time: "04:00"}
 	f.backups["jv-kids001"] = api.InstanceBackupSettings{Enabled: false, Time: "05:00"}
 	config := f.runtimes["jv-family1"]
 	config.MaxPlayers = 14
 	f.runtimes["jv-family1"] = config
 	f.states["jv-family1"] = api.MinecraftInstanceStatus{ID: "jv-family1", State: "running", StartOnBoot: true}
-	app, err := New(f, Config{ExternalScheme: "http"})
+	app, err := New(f, Config{ExternalScheme: "http", ManagementAPI: "v1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,6 +102,97 @@ func requireNoDashboardLegacy(t *testing.T, f *dashboardInstanceAPI) {
 		t.Fatalf("legacy calls: actions=%d players=%d", f.legacyActions, f.legacyPlayers)
 	}
 }
+
+func requireUnselectedDashboard(t *testing.T, page *httptest.ResponseRecorder) {
+	t.Helper()
+	if page.Code != http.StatusOK || !strings.HasPrefix(page.Header().Get("Content-Type"), "text/html") {
+		t.Fatal(page.Code, page.Header(), page.Body.String())
+	}
+	for _, want := range []string{
+		`data-selected-minecraft-id=""`,
+		`data-dashboard-status="/api/dashboard-status"`,
+		`data-configured="true"`,
+		`data-instance-required="false"`,
+		`data-dashboard-setup-area hidden`,
+		`data-server-selector-slot data-server-workspace="minecraft"`,
+	} {
+		if !strings.Contains(page.Body.String(), want) {
+			t.Fatalf("missing dashboard contract: %s", want)
+		}
+	}
+	if strings.Contains(page.Body.String(), "Choose a Minecraft server.") {
+		t.Fatal("dashboard returned selection error")
+	}
+}
+
+func TestDashboardMultipleServersWithoutSelection(t *testing.T) {
+	app, f := newDashboardInstanceApp(t)
+	requireUnselectedDashboard(t, dashboardInstanceRequest(app, "GET", "/", ""))
+	response := dashboardInstanceRequest(app, "GET", "/api/dashboard-status", "")
+	var snapshot dashboardSnapshot
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "application/json" || json.Unmarshal(response.Body.Bytes(), &snapshot) != nil {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	mc := snapshot.Status.Minecraft
+	if !mc.Configured || mc.State != "Choose server" || mc.Version != "" || mc.JavaPort != 0 || mc.BedrockPort != 0 || mc.MaxPlayers != 0 || mc.Players != 0 {
+		t.Fatalf("fabricated selected or unconfigured state: %+v", mc)
+	}
+	if !snapshot.Players.Configured || snapshot.Players.State != "selection_required" || snapshot.Players.Online != 0 || snapshot.Players.Max != 0 || snapshot.Status.Backup != (api.Status{}).Backup {
+		t.Fatal(snapshot.Players, snapshot.Status.Backup)
+	}
+	if snapshot.Status.System.IPv4 != "192.0.2.10" || snapshot.Status.System.Health != "Healthy" || snapshot.Status.JustVoxel.Version != "10-test" {
+		t.Fatal("appliance status unavailable", snapshot.Status)
+	}
+	if strings.Contains(response.Body.String(), "GLOBAL") || strings.Contains(response.Body.String(), "Not configured") || strings.Contains(response.Body.String(), "not_configured") {
+		t.Fatal("global or first-run presentation leaked", response.Body.String())
+	}
+	selection := dashboardInstanceRequest(app, "GET", "/api/minecraft/workspace/selection", "")
+	var choices struct {
+		Selected selectedServerContext   `json:"selected"`
+		Servers  []selectedServerContext `json:"servers"`
+	}
+	if selection.Code != http.StatusOK || json.Unmarshal(selection.Body.Bytes(), &choices) != nil || choices.Selected.ID != "" || len(choices.Servers) != 2 {
+		t.Fatal("existing selector contract changed", selection.Code, selection.Body.String())
+	}
+	if len(f.reads) != 0 || len(f.actions) != 0 || len(f.backupReads) != 0 || len(f.backupCalls) != 0 {
+		t.Fatal("unselected dashboard accessed an individual server", f.reads, f.actions, f.backupReads, f.backupCalls)
+	}
+	requireNoDashboardLegacy(t, f)
+}
+
+func TestDashboardMultipleServersLoginDestination(t *testing.T) {
+	app, f := newDashboardInstanceApp(t)
+	request := httptest.NewRequest(http.MethodPost, "http://example/login", strings.NewReader("username=admin&password=secret"))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	login := httptestResponse(app, request)
+	if login.Code != http.StatusSeeOther || login.Header().Get("Location") != "/" {
+		t.Fatal("successful login destination changed", login.Code, login.Header())
+	}
+	request = httptest.NewRequest(http.MethodGet, "http://example"+login.Header().Get("Location"), nil)
+	for _, cookie := range login.Result().Cookies() {
+		if cookie.Value != "" {
+			request.AddCookie(cookie)
+		}
+	}
+	requireUnselectedDashboard(t, httptestResponse(app, request))
+	if len(f.reads) != 0 || len(f.actions) != 0 || len(f.backupReads) != 0 || len(f.backupCalls) != 0 {
+		t.Fatal("login destination accessed an individual server", f.reads, f.actions, f.backupReads, f.backupCalls)
+	}
+	requireNoDashboardLegacy(t, f)
+}
+
+func TestAddServerMultipleServersWithoutSelection(t *testing.T) {
+	app, f := newDashboardInstanceApp(t)
+	page := dashboardInstanceRequest(app, "GET", "/minecraft/servers/add", "")
+	if page.Code != http.StatusOK || !strings.HasPrefix(page.Header().Get("Content-Type"), "text/html") || !strings.Contains(page.Body.String(), "<h1>Add Minecraft Server</h1>") || strings.Contains(page.Body.String(), "Choose a Minecraft server.") {
+		t.Fatal(page.Code, page.Body.String())
+	}
+	if f.inventoryReads != 0 || len(f.reads) != 0 || len(f.actions) != 0 || len(f.backupReads) != 0 || len(f.backupCalls) != 0 {
+		t.Fatal("Add Server resolved an existing server", f.inventoryReads, f.reads, f.actions, f.backupReads, f.backupCalls)
+	}
+	requireNoDashboardLegacy(t, f)
+}
+
 func TestDashboardInstanceReadsAndPolling(t *testing.T) {
 	app, f := newDashboardInstanceApp(t)
 	page := dashboardInstanceRequest(app, "GET", "/?server=jv-family1", "")
@@ -167,8 +265,11 @@ func TestDashboardInstanceLifecycleAndConfirmation(t *testing.T) {
 	}
 }
 func TestDashboardInstanceSelectionFailures(t *testing.T) {
-	for _, query := range []string{"?server=family", "?server=jv-stale1", "?server=jv-family1&server=jv-kids001", ""} {
+	for _, query := range []string{"?server=", "?server=family", "?server=jv-stale1", "?server=jv-family1&server=jv-kids001", "?server=jv-family1&server=jv-family1", ""} {
 		for _, path := range []string{"/", "/api/dashboard-status", "/minecraft/how-to-connect", "/minecraft/start", "/minecraft/stop", "/minecraft/restart"} {
+			if query == "" && (path == "/" || path == "/api/dashboard-status") {
+				continue
+			}
 			t.Run(path+query, func(t *testing.T) {
 				app, f := newDashboardInstanceApp(t)
 				method, form := "GET", ""
@@ -179,8 +280,8 @@ func TestDashboardInstanceSelectionFailures(t *testing.T) {
 				if response.Code < 400 {
 					t.Fatal(response.Code, response.Body.String())
 				}
-				if len(f.reads) != 0 || len(f.actions) != 0 {
-					t.Fatal("read/mutated unresolved or sibling server", f.reads, f.actions)
+				if len(f.reads) != 0 || len(f.actions) != 0 || len(f.backupReads) != 0 || len(f.backupCalls) != 0 {
+					t.Fatal("read/mutated unresolved or sibling server", f.reads, f.actions, f.backupReads, f.backupCalls)
 				}
 				requireNoDashboardLegacy(t, f)
 			})
@@ -327,7 +428,7 @@ func TestDashboardBackupWithoutSelectionOrAvailableSettings(t *testing.T) {
 	app, f := newDashboardInstanceApp(t)
 	f.globalBackupEnabled = true
 	data, err := app.dashboardData(context.Background(), "session-token", "", selectedServerContext{})
-	if err != nil || data.Status.Backup != (api.Status{}).Backup || len(f.backupReads) != 0 || data.Status.Minecraft.Configured {
+	if err != nil || data.Status.Backup != (api.Status{}).Backup || len(f.backupReads) != 0 || !data.Status.Minecraft.Configured || data.Status.Minecraft.State != "Choose server" || data.SelectedMinecraftID != "" || data.InstanceRequired {
 		t.Fatal("fabricated selected state", data.Status, err, f.backupReads)
 	}
 	f.backupReadErr = errors.New("unavailable")
