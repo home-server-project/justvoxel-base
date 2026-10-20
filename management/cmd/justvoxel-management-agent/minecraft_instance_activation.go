@@ -302,6 +302,12 @@ func (b *instanceRuntimeBackend) readRecord(id string) (instanceRuntimeRecord, e
 	if err != nil || instanceDecode(identityBytes, &identity) != nil || identity.ID != id {
 		return record, errInstanceNotFound
 	}
+	return b.readRuntimeConfig(id)
+}
+
+// Internal configuration reader. Public lifecycle callers must use readRecord.
+func (b *instanceRuntimeBackend) readRuntimeConfig(id string) (instanceRuntimeRecord, error) {
+	var record instanceRuntimeRecord
 	dir, _, _ := b.paths(id)
 	f, err := b.privateDirectory(b.root, false)
 	if err != nil {

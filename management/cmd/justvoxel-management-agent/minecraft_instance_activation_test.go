@@ -127,6 +127,18 @@ func (f *instanceActivationFixture) command(ctx context.Context, command string,
 			return nil, nil
 		}
 	case "nsenter":
+		if len(args) > 3 && args[2] == instanceDeleteHelper {
+			if len(args) != 13 {
+				f.t.Fatal("unsafe data identity argv", args)
+			}
+			if args[3] == "inspect" {
+				return []byte(`{"identity":"1:2"}`), nil
+			}
+			if args[3] == "remove" && args[12] == "1:2" {
+				return nil, os.RemoveAll(args[6])
+			}
+			f.t.Fatal("unexpected data identity action", args)
+		}
 		if len(args) != 12 || args[0] != "--mount=/proc/1/ns/mnt" || args[1] != "--" || args[2] != instanceRuntimeHelper {
 			f.t.Fatalf("unsafe storage argv: %v", args)
 		}
@@ -140,6 +152,9 @@ func (f *instanceActivationFixture) command(ctx context.Context, command string,
 				return nil, errors.New("existing data tree")
 			}
 		case "provision":
+			if err := os.MkdirAll(filepath.Dir(data), 0700); err != nil {
+				f.t.Fatal(err)
+			}
 			if err := os.MkdirAll(data, 0750); err != nil {
 				f.t.Fatal(err)
 			}
@@ -220,6 +235,22 @@ func (f *instanceActivationFixture) command(ctx context.Context, command string,
 		}
 		if reflect.DeepEqual(args, []string{"--no-block", "start", "--", "minecraft-" + id + ".service"}) {
 			record, err := f.backend.readRecord(id)
+			if errors.Is(err, errInstanceNotFound) {
+				var permit struct {
+					ID          string `json:"id"`
+					Schema      int    `json:"schema"`
+					OperationID string `json:"operation_id"`
+					Fingerprint string `json:"plan_fingerprint"`
+					Evidence    string `json:"evidence_sha256"`
+					PID         int    `json:"agent_pid"`
+					Start       string `json:"agent_start"`
+				}
+				raw, permitErr := f.backend.readPrivate(setupPermitPath(id))
+				if permitErr != nil || instanceDecode(raw, &permit) != nil || permit.ID != id {
+					f.t.Fatal("provisional start without exact permit")
+				}
+				record, err = f.backend.readRuntimeConfig(id)
+			}
 			if err != nil || f.backend.verifyLive(record) != nil {
 				f.t.Fatal("start before complete committed configuration")
 			}

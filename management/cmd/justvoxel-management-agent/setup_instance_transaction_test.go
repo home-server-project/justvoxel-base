@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-func TestFreshSetupCreatesOneNormalInstanceThroughSharedCreation(t *testing.T) {
+func TestFreshSetupPublishesOneVerifiedProvisionalInstance(t *testing.T) {
 	for _, existing := range []bool{false, true} {
 		t.Run(fmt.Sprint("existing-policy-root=", existing), func(t *testing.T) {
 			for _, name := range []string{"", "Family Survival"} {
@@ -25,6 +25,7 @@ func TestFreshSetupCreatesOneNormalInstanceThroughSharedCreation(t *testing.T) {
 }
 func testFreshSetupCreatesOneNormalInstance(t *testing.T, existing bool, name string) {
 	f := newInstanceActivationFixture(t)
+	setupProvisionalTestHelpers(t, f)
 	// A fresh registry has no minecraft.json or pre-existing server records.
 	f.backend.store = testMinecraftInstances(t)
 	registry, err := f.backend.store.openDirectory(true)
@@ -69,15 +70,29 @@ func testFreshSetupCreatesOneNormalInstance(t *testing.T, existing bool, name st
 	if !instanceIDPattern.MatchString(id) {
 		t.Fatal("first server has no generated immutable ID")
 	}
-	record, err := f.backend.readRecord(id)
+	record, err := f.backend.readRuntimeConfig(id)
 	if err != nil || f.backend.verifyLive(record) != nil {
-		t.Fatal("first server is not a committed normal runtime", err)
+		t.Fatal("first server has no complete provisional runtime", err)
 	}
 	if record.Storage.DataPath != filepath.Join(f.snapshot.StorageRoot, "minecraft-instances", id, "data") || !record.Runtime.StartOnBoot || len(record.Firewall) == 0 {
 		t.Fatal("first server skipped normal activation", record.Storage)
 	}
 	if record.Backups == nil || record.Backups.Root != r.Backups.Path || record.Backups.Path != filepath.Join(r.Backups.Path, id) {
 		t.Fatal("resolved first-server backups not persisted", record.Backups)
+	}
+	if registered, err := f.backend.identities().listInstances(""); err != nil || len(registered) != 0 {
+		t.Fatal("provisional instance became visible", registered, err)
+	}
+	if _, err := os.Lstat(filepath.Join(f.backend.store.directory, id+".json")); !os.IsNotExist(err) {
+		t.Fatal("provisional identity exists", err)
+	}
+	for _, action := range []string{"verify", "commit"} {
+		if response, err := runSetupInstanceAction(context.Background(), action, r); err != nil || !response.OK {
+			t.Fatal(action, response, err)
+		}
+	}
+	if _, err := f.backend.readRecord(id); err != nil {
+		t.Fatal("exact ID not published", err)
 	}
 	expectedName := name
 	if name == "" {
@@ -612,6 +627,7 @@ func TestExplicitSetupRecoveryStopsTrackedInstanceBeforeActivationRecovery(t *te
 
 func TestAdditionalSetupPersistsManualPlacementWithoutChangingSiblings(t *testing.T) {
 	f := newInstanceActivationFixture(t)
+	setupProvisionalTestHelpers(t, f)
 	f.activateBoth()
 	b := f.backend
 	old, oldPolicy, oldMarker := instanceRuntimes, setupPolicyRoot, setupInstanceMarker
@@ -666,7 +682,7 @@ func TestAdditionalSetupPersistsManualPlacementWithoutChangingSiblings(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err := b.readRecord(e.Record.Runtime.ID)
+	record, err := b.readRuntimeConfig(e.Record.Runtime.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

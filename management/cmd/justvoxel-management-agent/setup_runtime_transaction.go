@@ -310,6 +310,10 @@ func failSetupAfterStorage(parent context.Context, store *operationStore, operat
 		if err != nil {
 			store.appendSetupHelperFailureBestEffort(operationID, "runtime", "rollback", err)
 		}
+		if err == nil && rolledRuntime.OK && rolledRuntime.Applied && rolledRuntime.Phase == setupRuntimeCommitted && rolledRuntime.Error == "" {
+			_, finishErr := store.transition(operationID, operationSucceeded, "completed", "Setup publication verified; setup completed successfully.")
+			return finishErr
+		}
 		if err != nil || !rolledRuntime.OK || rolledRuntime.Applied || rolledRuntime.Phase != "runtime_rolled_back" || rolledRuntime.Error != "" {
 			if err == nil {
 				err = errors.New(setupRuntimeFirstNonEmpty(rolledRuntime.Error, "runtime rollback could not be confirmed"))

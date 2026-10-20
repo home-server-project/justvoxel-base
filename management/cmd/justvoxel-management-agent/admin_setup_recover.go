@@ -117,6 +117,13 @@ func recoverSetupTransaction(ctx context.Context, store *operationStore, current
 		}
 	}
 	store.appendSetupRuntimeHelperEvidenceBestEffort(current.OperationID, "recover", response.Evidence)
+	if err == nil && response.OK && response.Applied && response.Phase == setupRuntimeCommitted && response.Error == "" {
+		finished, transitionErr := store.transition(current.OperationID, operationSucceeded, "completed", "Setup publication verified; setup completed successfully.")
+		if transitionErr == nil {
+			return finished
+		}
+		err = transitionErr
+	}
 	if err == nil && response.OK && !response.Applied && response.Phase == "runtime_rolled_back" && response.Error == "" {
 		if _, err = store.updateProgress(current.OperationID, operationRollingBack, "storage_recovery", "Runtime recovery verified; restoring the preserved storage transaction."); err == nil {
 			return recoverSetupStorage(ctx, store, current)

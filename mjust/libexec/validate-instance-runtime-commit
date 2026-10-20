@@ -53,11 +53,48 @@ if [[ -e ${journal} || -L ${journal} ]]; then
     [[ $(awk '{print $22}' "/proc/${pid}/stat") == "${started}" ]] || fail
     kill -0 "${pid}" 2>/dev/null || fail
 fi
-for path in "${config}" "${env}" "${quadlet}" "${identity}"; do
+for path in "${config}" "${env}" "${quadlet}"; do
     [[ -f ${path} && ! -L ${path} && $(realpath -e -- "${path}") == "${path}" ]] || fail
     [[ $(stat -c '%u:%g:%a' -- "${path}") == 0:0:600 ]] || fail
 done
-jq -e --arg id "${id}" 'keys == ["id"] and .id == $id' "${identity}" >/dev/null || fail
+if [[ -e ${identity} || -L ${identity} ]]; then
+    [[ -f ${identity} && ! -L ${identity} && $(realpath -e -- "${identity}") == "${identity}" ]] || fail
+    [[ $(stat -c '%u:%g:%a' -- "${identity}") == 0:0:600 ]] || fail
+    jq -e --arg id "${id}" 'keys == ["id"] and .id == $id' "${identity}" >/dev/null || fail
+else
+    # Identity absence is allowed only while this live Agent verifies the exact
+    # operation-bound provisional Setup. Persistent evidence alone grants nothing.
+    for path in /run/justvoxel/setup-instance-start /var/lib/justvoxel-instance-runtime; do
+        [[ -d ${path} && ! -L ${path} && $(realpath -e -- "${path}") == "${path}" ]] || fail
+        [[ $(stat -c '%u:%g:%a' -- "${path}") == 0:0:700 ]] || fail
+    done
+    permit="/run/justvoxel/setup-instance-start/setup-instance-start-${id}.json"
+    [[ -f ${permit} && ! -L ${permit} && $(stat -c '%u:%g:%a' -- "${permit}") == 0:0:600 ]] || fail
+    op="$(jq -er --arg id "${id}" 'select(.schema == 1 and .id == $id) | .operation_id | select(type == "string" and test("^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"))' "${permit}")" || fail
+    fingerprint="$(jq -er '.plan_fingerprint | select(type == "string" and test("^sha256:[a-f0-9]{64}$"))' "${permit}")" || fail
+    evidence="/var/lib/justvoxel-instance-runtime/setup-${op}.json"
+    [[ -f ${evidence} && ! -L ${evidence} && $(stat -c '%u:%g:%a' -- "${evidence}") == 0:0:600 ]] || fail
+    expected_evidence="$(jq -er '.evidence_sha256 | select(type == "string" and test("^[a-f0-9]{64}$"))' "${permit}")" || fail
+    actual_evidence="$(sha256sum -- "${evidence}")" || fail
+    [[ ${actual_evidence%% *} == "${expected_evidence}" ]] || fail
+    jq -e --arg id "${id}" --arg op "${op}" --arg fp "${fingerprint}" --slurpfile config "${config}" '
+        .schema == 2 and .request.instance_only == true and
+        .request.operation_id == $op and .request.plan_fingerprint == $fp and
+        .rolled_back == false and .publication.stage == "runtime_prepared" and
+        .record.runtime.id == $id and .record == $config[0]' "${evidence}" >/dev/null || fail
+    # Provisional Setup cannot borrow restore or migration startup exceptions.
+    for path in "${dir}/restore-journal.json" "${dir}/data-migration.json"; do
+        [[ ! -e ${path} && ! -L ${path} ]] || fail
+    done
+    pid="$(jq -er '.agent_pid | select(type == "number" and . > 1 and floor == .)' "${permit}")" || fail
+    [[ $(readlink -e -- "/proc/${pid}/exe") == /usr/libexec/justvoxel/management-agent ]] || fail
+    started="$(jq -er '.agent_start | select(type == "string" and test("^[0-9]+$"))' "${permit}")" || fail
+    proc_stat="$(cat "/proc/${pid}/stat")" || fail
+    proc_fields=${proc_stat##*) }
+    read -r -a fields <<< "${proc_fields}"
+    [[ ${fields[19]:-} == "${started}" && ${fields[0]:-} != Z && ${fields[0]:-} != X ]] || fail
+    kill -0 "${pid}" 2>/dev/null || fail
+fi
 jq -e --arg id "${id}" '.schema_version == 1 and .runtime.id == $id and
     (.environment_sha256 | type == "string" and test("^[a-f0-9]{64}$")) and
     (.quadlet_sha256 | type == "string" and test("^[a-f0-9]{64}$"))' "${config}" >/dev/null || fail

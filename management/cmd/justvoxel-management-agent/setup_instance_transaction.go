@@ -16,14 +16,16 @@ import (
 )
 
 // New setups retain the storage transaction and its recovery contract. This
-// evidence owns only appliance policy files and a normal generated instance.
-// Old setup evidence continues through the original runtime recovery helper.
+// schema-2 evidence owns policy and an operation-bound provisional instance.
+// Schema 1 retains its historical early-publication recovery contract.
 type setupInstanceEvidence struct {
-	Schema       int                            `json:"schema"`
-	Request      setupRuntimeTransactionRequest `json:"request"`
-	Record       instanceRuntimeRecord          `json:"record"`
-	Policy       map[string][]byte              `json:"policy"`
-	DataIdentity string                         `json:"data_identity,omitempty"`
+	Publication        *setupInstancePublication      `json:"publication,omitempty"`
+	Schema             int                            `json:"schema"`
+	Request            setupRuntimeTransactionRequest `json:"request"`
+	Record             instanceRuntimeRecord          `json:"record"`
+	Policy             map[string][]byte              `json:"policy"`
+	DataParentIdentity string                         `json:"data_parent_identity,omitempty"`
+	DataIdentity       string                         `json:"data_identity,omitempty"`
 	// Nil means older evidence: never claim ownership of its policy directory.
 	HadPolicyRoot    *bool `json:"had_policy_root,omitempty"`
 	HadInstancesRoot bool  `json:"had_instances_root"`
@@ -47,11 +49,30 @@ func setupInstanceRead(id, fingerprint string) (setupInstanceEvidence, error) {
 	if err != nil {
 		return e, err
 	}
-	if instanceDecode(raw, &e) != nil || e.Schema != 1 || !e.Request.InstanceOnly || e.Request.OperationID != id || e.Request.PlanFingerprint != fingerprint {
+	if instanceDecode(raw, &e) != nil || (e.Schema != 1 && e.Schema != 2) || !e.Request.InstanceOnly || e.Request.OperationID != id || e.Request.PlanFingerprint != fingerprint {
 		return e, errInstanceRecovery
 	}
 	if e.Record.Runtime.ID != "" && (validateInstanceRecordPlacement(e.Record) != nil) {
 		return e, errInstanceRecovery
+	}
+	if e.Schema == 1 && e.Publication != nil {
+		return e, errInstanceRecovery
+	}
+	if e.Schema == 2 {
+		if e.Record.Runtime.ID != "" && (e.Publication == nil || !instanceIDPattern.MatchString(e.Record.Runtime.ID)) {
+			return e, errInstanceRecovery
+		}
+		if e.Publication != nil {
+			name, err := validateInstanceName(e.Publication.Name)
+			if err != nil || name == "" || name != e.Publication.Name {
+				return e, errInstanceRecovery
+			}
+			switch e.Publication.Stage {
+			case "prepared", "runtime_prepared", "verified", "commit_ready", "published", "finalized", "rolling_back", "rolled_back":
+			default:
+				return e, errInstanceRecovery
+			}
+		}
 	}
 	expected := setupInstancePolicy(e.Request)
 	if !reflect.DeepEqual(e.Policy, expected) {
@@ -101,7 +122,7 @@ func runSetupInstanceAction(ctx context.Context, action string, r setupRuntimeTr
 			return response, createErr
 		}
 		dir.Close()
-		e = setupInstanceEvidence{Schema: 1, Request: r, Policy: setupInstancePolicy(r), HadPolicyRoot: &hadPolicyRoot}
+		e = setupInstanceEvidence{Schema: 2, Request: r, Policy: setupInstancePolicy(r), HadPolicyRoot: &hadPolicyRoot}
 		if info, statErr := os.Lstat(filepath.Join(filepath.Dir(r.Storage.Path), "minecraft-instances")); statErr == nil {
 			if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 				return response, errInstanceRecovery
@@ -174,13 +195,22 @@ func runSetupInstanceAction(ctx context.Context, action string, r setupRuntimeTr
 			return response, instanceRuntimeFailure("Selected release channel could not be verified.")
 		}
 		c.PaperChannel = strings.TrimSpace(string(channel))
-		_, err = b.createTracked(ctx, c, r.Server.DisplayName, snapshot, func(record instanceRuntimeRecord) error { e.Record = record; return save() })
+		if e.Schema == 2 {
+			err = b.prepareSetupInstance(ctx, c, snapshot, &e, save)
+		} else {
+			_, err = b.createTracked(ctx, c, r.Server.DisplayName, snapshot, func(record instanceRuntimeRecord) error { e.Record = record; return save() })
+		}
 		if err != nil {
 			return response, err
 		}
 		response.OK = true
 		response.Applied = true
 	case "verify":
+		if e.Schema == 2 {
+			err = b.verifyProvisionalSetup(ctx, &e, save)
+			response.OK, response.Applied = err == nil, err == nil
+			return response, err
+		}
 		id := e.Record.Runtime.ID
 		if id == "" {
 			return response, errInstanceRecovery
@@ -212,6 +242,31 @@ func runSetupInstanceAction(ctx context.Context, action string, r setupRuntimeTr
 		response.OK = true
 		response.Applied = true
 	case "commit":
+		if e.Schema == 2 {
+			if e.Publication == nil {
+				return response, errInstanceRecovery
+			}
+			if e.Publication.Stage == "verified" {
+				if err = b.exactSetupRuntime(ctx, e); err != nil {
+					return response, err
+				}
+				state, stateErr := b.observeRaw(ctx, e.Record.Runtime.ID)
+				if stateErr != nil || (!r.AddServer && state.State != "running") || (r.AddServer && state.State != "stopped") {
+					return response, errInstanceRecovery
+				}
+				if err = b.prepareSetupBackups(ctx, &e, save); err != nil {
+					return response, err
+				}
+				e.Publication.Stage = "commit_ready"
+				if err = save(); err != nil {
+					return response, err
+				}
+			}
+			err = b.finishSetupPublication(ctx, &e, save)
+			response.OK, response.Applied = err == nil, err == nil
+			response.Phase = setupRuntimeCommitted
+			return response, err
+		}
 		id := e.Record.Runtime.ID
 		state, err := b.observe(ctx, id)
 		if err != nil || (!r.AddServer && state.State != "running") || (r.AddServer && state.State != "stopped") {
@@ -230,6 +285,18 @@ func runSetupInstanceAction(ctx context.Context, action string, r setupRuntimeTr
 		response.OK = true
 		response.Applied = true
 	case "rollback":
+		if e.Schema == 2 {
+			present, pubErr := b.setupPublicationPresent(e)
+			if pubErr != nil {
+				return response, pubErr
+			}
+			if present || (e.Publication != nil && (e.Publication.Stage == "published" || e.Publication.Stage == "finalized")) {
+				err = b.finishSetupPublication(ctx, &e, save)
+				response.OK, response.Applied = err == nil, err == nil
+				response.Phase = setupRuntimeCommitted
+				return response, err
+			}
+		}
 		if err = rollbackSetupInstance(ctx, &e, save); err != nil {
 			return response, err
 		}
@@ -335,7 +402,11 @@ func rollbackSetupInstance(ctx context.Context, e *setupInstanceEvidence, save f
 		return nil
 	}
 	id := e.Record.Runtime.ID
-	if id != "" {
+	if id != "" && e.Schema == 2 {
+		if err := b.rollbackProvisionalSetup(ctx, e, save); err != nil {
+			return err
+		}
+	} else if id != "" {
 		// Only the generated ID recorded before registration can be recovered here.
 		state, err := b.observeRaw(ctx, id)
 		if err != nil {
@@ -501,6 +572,9 @@ func rollbackSetupInstance(ctx context.Context, e *setupInstanceEvidence, save f
 		return err
 	}
 	e.RolledBack = true
+	if e.Schema == 2 && e.Publication != nil {
+		e.Publication.Stage = "rolled_back"
+	}
 	return save()
 }
 

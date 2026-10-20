@@ -183,6 +183,13 @@ func (b *instanceRuntimeBackend) backupSeparation(ctx context.Context, id string
 	if err != nil {
 		return err
 	}
+	return b.backupSeparationRecords(ctx, id, v, records)
+}
+
+func (b *instanceRuntimeBackend) backupSeparationRecords(ctx context.Context, id string, v instanceBackupSettings, records []instanceRuntimeRecord) error {
+	if !v.Enabled {
+		return nil
+	}
 	for _, r := range records {
 		if r.Runtime.ID == id {
 			continue
