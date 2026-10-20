@@ -87,13 +87,9 @@ func TestOperatorRestartConsumesAllowanceAndCreatesNotification(t *testing.T) {
 	if audits != 2 || notifications != 1 || badTargets != 0 {
 		t.Fatal(audits, notifications, badTargets)
 	}
+	assertSiblingAdmissionObservations(t, f.calls, sibling, 2)
 	starts := 0
 	for _, call := range f.calls {
-		if strings.Contains(call, "systemctl") || strings.Contains(call, "podman") {
-			if strings.Contains(call, "minecraft-"+sibling) || strings.Contains(call, "minecraft.service") {
-				t.Fatal("wrong target", call)
-			}
-		}
 		if strings.Contains(call, "systemctl --no-block start -- minecraft-"+id+".service") {
 			starts++
 		}
@@ -186,11 +182,7 @@ func TestOperatorConfirmedRestartConsumesAllowanceOnce(t *testing.T) {
 	if err := store.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE action='minecraft_restart' AND target=? AND success=1`, id).Scan(&audits); err != nil || audits != 1 {
 		t.Fatal(audits, err)
 	}
-	for _, call := range f.calls {
-		if strings.Contains(call, "minecraft-"+f.configs[1].ID) || strings.Contains(call, "minecraft.service") {
-			t.Error("restart escaped selected instance", call)
-		}
-	}
+	assertSiblingAdmissionObservations(t, f.calls, f.configs[1].ID, 1)
 	rr = instanceRestartRequest(s, id, `{"confirm_players":true}`)
 	if rr.Code != http.StatusTooManyRequests {
 		t.Fatal(rr.Code, rr.Body.String())

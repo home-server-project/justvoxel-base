@@ -366,6 +366,34 @@ func TestInstanceConsoleRolesAndMaintenanceLock(t *testing.T) {
 	}
 }
 
+// Admission may observe each sibling through these exact read-only commands
+// once per accepted restart. All other sibling commands remain forbidden.
+func assertSiblingAdmissionObservations(t *testing.T, calls []string, id string, admissions int) {
+	t.Helper()
+	allowed := map[string]int{
+		"systemctl show --property=LoadState,ActiveState -- minecraft-" + id + ".service":                0,
+		"systemctl show --property=LoadState,ActiveState,SubState -- minecraft-" + id + ".service":       0,
+		"podman ps --all --filter name=^minecraft-" + id + "$ --format {{.Names}}":                       0,
+		"podman inspect --type container --format {{.State.Status}} {{.State.ExitCode}} minecraft-" + id: 0,
+	}
+	for _, call := range calls {
+		if strings.Contains(call, "minecraft.service") {
+			t.Fatal("restart escaped selected instance", call)
+		}
+		if !strings.Contains(call, id) {
+			continue
+		}
+		count, ok := allowed[call]
+		if !ok {
+			t.Fatal("restart issued a sibling command beyond read-only memory admission", call)
+		}
+		if count >= admissions {
+			t.Fatal("restart exceeded bounded sibling admission observations", call)
+		}
+		allowed[call] = count + 1
+	}
+}
+
 func TestIndependentRestartQuotaCooldownAndAudit(t *testing.T) {
 	f := newInstanceActivationFixture(t)
 	f.activateBoth()
@@ -476,11 +504,7 @@ func TestIndependentRestartQuotaCooldownAndAudit(t *testing.T) {
 	if rr := restart(b); rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"id":"`+b+`"`) {
 		t.Fatal(rr.Code, rr.Body.String())
 	}
-	for _, call := range f.calls[before:] {
-		if strings.Contains(call, "minecraft-"+a) {
-			t.Fatal("selected restart touched sibling instance", call)
-		}
-	}
+	assertSiblingAdmissionObservations(t, f.calls[before:], a, 1)
 	if !strings.Contains(strings.Join(f.calls[before:], "\n"), "systemctl --no-block start -- minecraft-"+b+".service") {
 		t.Fatal("selected restart did not start selected instance")
 	}

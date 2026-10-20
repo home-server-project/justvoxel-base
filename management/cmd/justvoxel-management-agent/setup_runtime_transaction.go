@@ -102,6 +102,7 @@ type setupRuntimeBackups struct {
 
 type setupRuntimeTransactionRequest struct {
 	AddServer       bool                  `json:"add_server,omitempty"`
+	StartAfterSetup bool                  `json:"start_after_setup,omitempty"`
 	StartOnBoot     bool                  `json:"start_on_boot,omitempty"`
 	InstanceOnly    bool                  `json:"instance_only,omitempty"`
 	SchemaVersion   string                `json:"schema_version"`
@@ -139,7 +140,7 @@ func setupRuntimeRequestForOperation(operation operationJournal, plan *adminSetu
 		return setupRuntimeTransactionRequest{}, errors.New("invalid server capabilities")
 	}
 	return setupRuntimeTransactionRequest{
-		AddServer: plan.AddServer, StartOnBoot: plan.StartOnBoot, InstanceOnly: true, SchemaVersion: operationSchemaVersion, OperationID: operation.OperationID, PlanFingerprint: operation.PlanFingerprint,
+		AddServer: plan.AddServer, StartOnBoot: plan.StartOnBoot, StartAfterSetup: plan.StartAfterSetup, InstanceOnly: true, SchemaVersion: operationSchemaVersion, OperationID: operation.OperationID, PlanFingerprint: operation.PlanFingerprint,
 		Server:    setupRuntimeServer{DisplayName: plan.Server.DisplayName, MOTD: plan.Server.MOTD, MaxPlayers: plan.Server.MaxPlayers, BedrockEnabled: plan.Server.BedrockEnabled, Timezone: plan.Server.Timezone},
 		Minecraft: setupRuntimeMinecraft{ServerType: serverType, GameMode: plan.Minecraft.GameMode, JavaMemory: plan.Minecraft.JavaMemory, ContainerMemory: plan.Minecraft.ContainerMemory, JavaPort: plan.Minecraft.JavaPort, BedrockPort: plan.Minecraft.BedrockPort, ImageTag: plan.Minecraft.ImageTag, VersionPolicy: plan.Minecraft.VersionPolicy, Version: plan.Minecraft.Version, MinecraftUID: plan.Minecraft.MinecraftUID, MinecraftGID: plan.Minecraft.MinecraftGID},
 		Storage:   setupRuntimeStorage{Type: plan.Storage.Type, Path: plan.Storage.Path, MountPoint: plan.Storage.MountPoint, ExpectedUUID: plan.Storage.ExpectedUUID, ExpectedSource: plan.Storage.ExpectedSource},
@@ -286,7 +287,14 @@ func executeSetupTransaction(parent context.Context, store *operationStore, oper
 	}
 	store.appendSetupRuntimeEvidenceBestEffort(operationID, "committed", plan)
 	store.appendSetupStorageEvidenceBestEffort(operationID, "final", plan, "passed")
-	_, err = store.transition(operationID, operationSucceeded, "completed", "JustVoxel first-run setup completed successfully.")
+	message := "JustVoxel first-run setup completed successfully."
+	if plan.AddServer {
+		message = "Minecraft server created successfully."
+	}
+	if warning := committed.Evidence["start_after_setup"]; warning != "" {
+		message = warning
+	}
+	_, err = store.transition(operationID, operationSucceeded, "completed", message)
 	return err
 }
 

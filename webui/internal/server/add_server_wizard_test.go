@@ -15,6 +15,7 @@ import (
 )
 
 type addServerTestAPI struct {
+	states map[string]string
 	*fakeSetupExecutionAPI
 	instances    []api.RegisteredMinecraftInstance
 	runtimes     map[string]api.InstanceRuntimeSettings
@@ -490,7 +491,7 @@ func (f *addServerTestAPI) AdminSetupPlan(_ context.Context, _ string, r api.Adm
 		r.Server.MOTD = "JustVoxel " + setupServerTypeLabel(r.Minecraft.ServerType) + " Minecraft 1.21.8 Server"
 	}
 	return api.AdminSetupPlanResponse{OK: true, SchemaVersion: "v1", PlanFingerprint: setupReviewFingerprint, Requirements: api.AdminSetupPlanRequirements{}, Normalized: api.AdminSetupNormalizedPlan{
-		AddServer: r.AddServer, StartOnBoot: r.StartOnBoot, MountedOnly: r.MountedOnly,
+		AddServer: r.AddServer, StartOnBoot: r.StartOnBoot, StartAfterSetup: r.StartAfterSetup, MountedOnly: r.MountedOnly,
 		Server:    api.AdminSetupPlanServer{DisplayName: r.Server.DisplayName, MOTD: r.Server.MOTD, MaxPlayers: r.Server.MaxPlayers, BedrockEnabled: r.Server.BedrockEnabled, Timezone: r.Server.Timezone},
 		Minecraft: api.AdminSetupPlanMinecraft{ServerType: r.Minecraft.ServerType, GameMode: r.Minecraft.GameMode, JavaMemory: r.Minecraft.JavaMemory, ContainerMemory: r.Minecraft.ContainerMemory, JavaPort: r.Minecraft.JavaPort, BedrockPort: r.Minecraft.BedrockPort, ImageTag: r.Minecraft.ImageTag, Version: "1.21.8", RequestedVersionPolicy: r.Minecraft.VersionPolicy},
 		Storage:   api.AdminSetupPlanStorage{Type: r.Storage.Type, Path: r.Storage.Path, Device: r.Storage.Device, MountPoint: r.Storage.MountPoint},
@@ -542,4 +543,104 @@ func TestAddServerDefiniteSetupRefusalRemainsEditable(t *testing.T) {
 		t.Fatal("definite refusal stranded editable setup")
 	}
 	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/review/back", nil))
+}
+
+func (f *addServerTestAPI) MinecraftInstanceStatus(_ context.Context, _, id string) (api.MinecraftInstanceStatus, error) {
+	state := f.states[id]
+	if state == "" {
+		state = "stopped"
+	}
+	return api.MinecraftInstanceStatus{ID: id, State: state}, nil
+}
+
+func TestAddServerCapacityChoicesAndNoLegacyDoubleCount(t *testing.T) {
+	for _, tc := range []struct {
+		name, state, existing, candidate string
+		boot, afterAllowed, bootAllowed  bool
+	}{
+		{"VM stopped", "stopped", "6G", "6G", true, true, false},
+		{"VM running", "running", "6G", "6G", true, false, false},
+		{"VM starting", "starting", "6G", "6G", false, false, true},
+		{"safe simultaneous", "running", "4G", "2G", true, true, true},
+		{"unsafe boot only", "stopped", "4G", "4G", true, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app, client := newAddServerTestApp(t)
+			client.defaults.SystemMemoryMiB = 7867
+			client.defaults.JavaMemory, client.defaults.ContainerMemory = "1G", tc.candidate
+			client.configuration.Minecraft.ContainerMemory = tc.existing
+			client.runtimes = map[string]api.InstanceRuntimeSettings{"jv-other01": {ContainerMemory: tc.existing, StartOnBoot: tc.boot, JavaPort: 25565}}
+			client.states = map[string]string{"jv-other01": tc.state}
+			draft, err := app.newAddServerDraft(context.Background(), "session-token", client)
+			if err != nil {
+				t.Fatal(err)
+			}
+			expected, _ := setupMemoryMiB(tc.existing)
+			if draft.OtherMemoryMiB != expected {
+				t.Fatalf("first server counted twice: %d, want %d", draft.OtherMemoryMiB, expected)
+			}
+			if draft.Minecraft.ContainerMemory != tc.candidate {
+				t.Fatal("installed server memory reduced candidate")
+			}
+			if draft.StartAfterSetup != tc.afterAllowed || draft.StartOnBoot != tc.bootAllowed {
+				t.Fatalf("independent choices: after=%v boot=%v", draft.StartAfterSetup, draft.StartOnBoot)
+			}
+			if draft.StartAfterUnavailable == tc.afterAllowed || draft.StartBootUnavailable == tc.bootAllowed {
+				t.Fatal("unavailable choices were not disabled")
+			}
+			if err := validateSetupResources(draft.Minecraft, draft.Defaults); err != nil {
+				t.Fatal("installed memory blocked configuration", err)
+			}
+		})
+	}
+}
+
+func TestAddServerLegacyMemoryFallbackOnlyWhenConfigured(t *testing.T) {
+	for _, configured := range []bool{false, true} {
+		app, client := newAddServerTestApp(t)
+		client.configuration.Configured = configured
+		client.runtimes = nil
+		draft, err := app.newAddServerDraft(context.Background(), "session-token", client)
+		if err != nil {
+			t.Fatal(err)
+		}
+		expected := 0
+		if configured {
+			expected = 2048
+		}
+		if draft.OtherMemoryMiB != expected {
+			t.Fatal("incorrect legacy fallback", draft.OtherMemoryMiB)
+		}
+	}
+}
+
+func TestAddServerDisabledStartupSwitchesUseExistingWarnings(t *testing.T) {
+	app, client := newAddServerTestApp(t)
+	client.defaults.SystemMemoryMiB = 7867
+	client.defaults.JavaMemory, client.defaults.ContainerMemory = "4G", "6G"
+	client.runtimes = map[string]api.InstanceRuntimeSettings{"jv-other01": {JavaPort: 25565, ContainerMemory: "6G", StartOnBoot: true}}
+	client.states = map[string]string{"jv-other01": "running"}
+	requireAddRedirect(t, addWizardRequest(app, http.MethodPost, "/start", nil))
+	page := addWizardRequest(app, http.MethodGet, "", nil)
+	if page.Code != http.StatusOK {
+		t.Fatal(page.Code, page.Body.String())
+	}
+	body := page.Body.String()
+	after, boot := strings.Index(body, "<span>Start after setup</span>"), strings.Index(body, "<span>Start on Boot</span>")
+	if after < 0 || boot <= after {
+		t.Fatal("incorrect switch order")
+	}
+	for _, name := range []string{"start_after_setup", "start_on_boot"} {
+		start := strings.Index(body, `name="`+name+`"`)
+		if start < 0 {
+			t.Fatal("missing switch", name)
+		}
+		input := body[start : start+strings.Index(body[start:], ">")]
+		if !strings.Contains(input, "disabled") || strings.Contains(input, "checked") {
+			t.Fatal("unavailable switch not disabled/off", input)
+		}
+	}
+	if strings.Count(body, `class="memory-status danger"`) != 2 {
+		t.Fatal("missing existing red framed explanations")
+	}
 }

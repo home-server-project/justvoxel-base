@@ -101,7 +101,12 @@
         <label class="setup-field">Maximum players<input name="max_players" type="number" min="1" step="1" value="{{.Server.MaxPlayers}}" inputmode="numeric"><span class="field-help">Used for the player limit and memory recommendations.</span></label>
 
       </div>
-      {{if .AddServer}}<label class="setup-toggle-field"><span>Start on Boot</span><input class="date-time-switch" type="checkbox" name="start_on_boot" {{if .StartOnBoot}}checked{{end}}></label>{{end}}
+      {{if .AddServer}}
+      <label class="setup-toggle-field"><span>Start after setup</span><input class="date-time-switch" type="checkbox" name="start_after_setup" {{if and .StartAfterSetup (not .StartAfterUnavailable)}}checked{{end}} {{if .StartAfterUnavailable}}disabled{{end}}></label>
+      {{if .StartAfterUnavailable}}<div class="memory-status danger">Not enough Minecraft memory capacity to start this server after setup. {{if .RunningMemory}}Running or starting servers already reserve {{.RunningMemory}}. {{end}}You can still create this server and start it after another server is stopped.</div>{{end}}
+      <label class="setup-toggle-field"><span>Start on Boot</span><input class="date-time-switch" type="checkbox" name="start_on_boot" {{if and .StartOnBoot (not .StartBootUnavailable)}}checked{{end}} {{if .StartBootUnavailable}}disabled{{end}}></label>
+      {{if .StartBootUnavailable}}<div class="memory-status danger">Start on Boot is unavailable because the boot-enabled Minecraft servers would exceed available memory. You can still create this server with automatic start disabled.</div>{{end}}
+      {{end}}
       </div>
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="{{$wizard.BasePath}}/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button type="submit">Continue</button></div></div>
     </form>

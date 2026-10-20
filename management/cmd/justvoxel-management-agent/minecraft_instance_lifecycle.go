@@ -199,6 +199,28 @@ func (b *instanceRuntimeBackend) actionWithWarnings(ctx context.Context, id, act
 	if err = b.verifyLive(record); err != nil {
 		return err
 	}
+	if err = b.storage(ctx, "validate", record); err != nil {
+		return err
+	}
+	state, err := b.observeRaw(ctx, id)
+	if err != nil {
+		return err
+	}
+	var players instancePlayers
+	if (action == "stop" || action == "restart") && state.State == "running" {
+		rawPlayers, err := b.rcon(ctx, id, "list")
+		if err != nil {
+			return err
+		}
+		players, err = parseInstancePlayers(id, rawPlayers)
+		if err != nil {
+			return err
+		}
+		if players.Online > 0 && !warnings {
+			names := instancePlayerListPattern.FindStringSubmatch(strings.TrimSpace(string(rawPlayers)))[3]
+			return &instancePlayersConfirmation{Players: players, Names: strings.Split(names, ", ")}
+		}
+	}
 	// Reservation validation is needed before startup, not to refuse a safe
 	// graceful stop that can reduce an existing resource overcommit.
 	if action != "stop" {
@@ -219,30 +241,14 @@ func (b *instanceRuntimeBackend) actionWithWarnings(ctx context.Context, id, act
 		if _, err = b.render(snapshot, records); err != nil {
 			return err
 		}
-	}
-	if err = b.storage(ctx, "validate", record); err != nil {
-		return err
-	}
-	state, err := b.observeRaw(ctx, id)
-	if err != nil {
-		return err
+		if err = b.admitMemory(ctx, snapshot.TotalMemoryMiB, records, record.Runtime, false); err != nil {
+			return err
+		}
 	}
 	unit := "minecraft-" + id + ".service"
 	if action == "stop" || action == "restart" {
 		switch state.State {
 		case "running":
-			rawPlayers, err := b.rcon(ctx, id, "list")
-			if err != nil {
-				return err
-			}
-			players, err := parseInstancePlayers(id, rawPlayers)
-			if err != nil {
-				return err
-			}
-			if players.Online > 0 && !warnings {
-				names := instancePlayerListPattern.FindStringSubmatch(strings.TrimSpace(string(rawPlayers)))[3]
-				return &instancePlayersConfirmation{Players: players, Names: strings.Split(names, ", ")}
-			}
 			if players.Online > 0 {
 				if err = b.stopWithWarnings(ctx, id); err != nil {
 					return err
@@ -439,6 +445,11 @@ func (b *instanceRuntimeBackend) createTracked(ctx context.Context, c minecraftI
 	c.ID = "jv-" + hex.EncodeToString(entropy[:])
 	next := instanceRuntimeRecord{SchemaVersion: 1, Runtime: c, Storage: instanceStorageFor(snapshot, c.ID), Backups: instanceBackupsFor(snapshot, c.ID), Firewall: []instanceFirewallRule{}}
 	candidates := instanceReplaceRecord(records, next)
+	if c.StartOnBoot {
+		if err = b.admitMemory(ctx, snapshot.TotalMemoryMiB, candidates, c, true); err != nil {
+			return "", err
+		}
+	}
 	if _, err = b.renderCandidate(snapshot, candidates, c.ID); err != nil {
 		return "", err
 	}

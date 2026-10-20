@@ -187,9 +187,7 @@ suggest_memory_values() {
     nominal_gib=$(( (total_mib + 512) / 1024 ))
     (( total_mib > 0 )) || nominal_gib=8
     if (( nominal_gib >= 16 )); then
-        heap_mib=8192 maximum_mib=12288
-    elif (( nominal_gib >= 12 )); then
-        heap_mib=8192 maximum_mib=10240
+        heap_mib=6144 maximum_mib=8192
     elif (( nominal_gib >= 8 )); then
         heap_mib=4096 maximum_mib=6144
     elif (( nominal_gib >= 6 )); then
@@ -201,10 +199,10 @@ suggest_memory_values() {
     fi
     if (( total_mib > 0 )); then
         allowed_mib=$(( total_mib - 1024 ))
-        (( allowed_mib >= 2 )) || return 1
+        (( allowed_mib >= 1024 )) || return 1
         # Preserve the tier heap when a MiB-precision container limit fits.
         (( maximum_mib <= allowed_mib )) || maximum_mib=${allowed_mib}
-        if (( heap_mib >= maximum_mib )); then
+        if (( heap_mib > maximum_mib - 512 )); then
             heap_mib=$(( maximum_mib >= 2048 ? maximum_mib - 1024 : maximum_mib / 2 ))
         fi
     fi

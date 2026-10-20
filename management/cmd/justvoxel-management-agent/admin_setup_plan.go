@@ -67,6 +67,7 @@ type adminSetupPlanBackupsRequest struct {
 
 type adminSetupPlanRequest struct {
 	AddServer           bool                           `json:"add_server,omitempty"`
+	StartAfterSetup     bool                           `json:"start_after_setup,omitempty"`
 	StartOnBoot         bool                           `json:"start_on_boot,omitempty"`
 	MountedOnly         bool                           `json:"mounted_only,omitempty"`
 	DiagnosticSessionID string                         `json:"diagnostic_session_id,omitempty"`
@@ -152,13 +153,14 @@ type adminSetupPlanBackups struct {
 }
 
 type adminSetupNormalizedPlan struct {
-	AddServer   bool                    `json:"add_server,omitempty"`
-	StartOnBoot bool                    `json:"start_on_boot,omitempty"`
-	MountedOnly bool                    `json:"mounted_only,omitempty"`
-	Server      adminSetupPlanServer    `json:"server"`
-	Minecraft   adminSetupPlanMinecraft `json:"minecraft"`
-	Storage     adminSetupPlanStorage   `json:"storage"`
-	Backups     adminSetupPlanBackups   `json:"backups"`
+	AddServer       bool                    `json:"add_server,omitempty"`
+	StartAfterSetup bool                    `json:"start_after_setup,omitempty"`
+	StartOnBoot     bool                    `json:"start_on_boot,omitempty"`
+	MountedOnly     bool                    `json:"mounted_only,omitempty"`
+	Server          adminSetupPlanServer    `json:"server"`
+	Minecraft       adminSetupPlanMinecraft `json:"minecraft"`
+	Storage         adminSetupPlanStorage   `json:"storage"`
+	Backups         adminSetupPlanBackups   `json:"backups"`
 }
 
 type adminSetupPlanRequirements struct {
@@ -237,12 +239,13 @@ type adminSetupFingerprintNormalized struct {
 }
 
 type adminSetupFingerprintPayload struct {
-	AddServer     bool                            `json:"add_server,omitempty"`
-	StartOnBoot   bool                            `json:"start_on_boot,omitempty"`
-	MountedOnly   bool                            `json:"mounted_only,omitempty"`
-	SchemaVersion string                          `json:"schema_version"`
-	Normalized    adminSetupFingerprintNormalized `json:"normalized"`
-	Requirements  adminSetupPlanRequirements      `json:"requirements"`
+	AddServer       bool                            `json:"add_server,omitempty"`
+	StartAfterSetup bool                            `json:"start_after_setup,omitempty"`
+	StartOnBoot     bool                            `json:"start_on_boot,omitempty"`
+	MountedOnly     bool                            `json:"mounted_only,omitempty"`
+	SchemaVersion   string                          `json:"schema_version"`
+	Normalized      adminSetupFingerprintNormalized `json:"normalized"`
+	Requirements    adminSetupPlanRequirements      `json:"requirements"`
 }
 
 func registerAdminSetupPlanRoutes(mux *http.ServeMux, s *server) {
@@ -321,7 +324,7 @@ func authoritativeAdminSetupPlan(parent context.Context, request adminSetupPlanR
 	helperRequest := request
 	helperRequest.Server.DisplayName = ""
 	helperRequest.DiagnosticSessionID = ""
-	helperRequest.AddServer, helperRequest.StartOnBoot, helperRequest.MountedOnly = false, false, false
+	helperRequest.AddServer, helperRequest.StartOnBoot, helperRequest.MountedOnly, helperRequest.StartAfterSetup = false, false, false, false
 	// The shell helper keeps its existing strict contract. The agent generates
 	// this WebUI default only after the helper resolves the final version.
 	helperRequest.Server.MOTDAutomatic = false
@@ -364,12 +367,31 @@ func authoritativeAdminSetupPlan(parent context.Context, request adminSetupPlanR
 		out.Normalized.Server.MOTD = "JustVoxel " + software + " Minecraft " + version + " Server"
 	}
 	out.Normalized.Server.DisplayName = displayName
+	out.Normalized.StartAfterSetup = request.AddServer && request.StartAfterSetup
 	out.Normalized.AddServer = request.AddServer
 	out.Normalized.StartOnBoot = !request.AddServer || request.StartOnBoot
 	out.Normalized.MountedOnly = request.MountedOnly
 	if request.MountedOnly {
 		if err := validateRecommendedPlan(parent, out.Normalized); err != nil {
 			return out, &adminSetupPlanningError{status: http.StatusConflict, message: "Recommended storage is no longer available; return to storage selection"}
+		}
+	}
+	if request.AddServer {
+		snapshot, _, _, err := instanceRuntimes.snapshot(parent)
+		if err != nil {
+			return out, &adminSetupPlanningError{status: http.StatusConflict, message: "Minecraft memory capacity could not be verified."}
+		}
+		records, err := instanceRuntimes.records()
+		if err != nil {
+			return out, &adminSetupPlanningError{status: http.StatusConflict, message: "Existing server settings could not be verified."}
+		}
+		candidate := minecraftInstanceRuntimeConfig{ContainerMemory: out.Normalized.Minecraft.ContainerMemory}
+		for _, boot := range []bool{false, true} {
+			if (!boot && request.StartAfterSetup) || (boot && request.StartOnBoot) {
+				if err := instanceRuntimes.admitMemory(parent, snapshot.TotalMemoryMiB, records, candidate, boot); err != nil {
+					return out, &adminSetupPlanningError{status: http.StatusConflict, message: err.Error() + " Return to Server to disable the selected startup option, or reduce memory."}
+				}
+			}
 		}
 	}
 	fingerprint, err := adminSetupPlanFingerprint(out.SchemaVersion, out.Normalized, out.Requirements)
@@ -392,7 +414,7 @@ func adminSetupPlanFingerprint(schemaVersion string, normalized *adminSetupNorma
 		return "", errors.New("invalid server type")
 	}
 	canonical := adminSetupFingerprintPayload{
-		SchemaVersion: schemaVersion, AddServer: normalized.AddServer, StartOnBoot: normalized.StartOnBoot, MountedOnly: normalized.MountedOnly,
+		SchemaVersion: schemaVersion, AddServer: normalized.AddServer, StartOnBoot: normalized.StartOnBoot, StartAfterSetup: normalized.StartAfterSetup, MountedOnly: normalized.MountedOnly,
 		Normalized: adminSetupFingerprintNormalized{
 			Server: normalized.Server,
 			Minecraft: adminSetupFingerprintMinecraft{

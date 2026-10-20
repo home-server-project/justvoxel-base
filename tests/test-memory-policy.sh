@@ -36,12 +36,13 @@ check_plan() {
 check_plan 4  '2G 3G'
 check_plan 6  '3G 4G'
 check_plan 8  '4G 6G'
-check_plan 12 '8G 10G'
-check_plan 16 '8G 12G'
-check_plan 32 '8G 12G'
+check_plan 12 '4G 6G'
+check_plan 16 '6G 8G'
+check_plan 32 '6G 8G'
+check_plan 64 '6G 8G'
 
 # Kernel/firmware reservations must not demote nominal RAM sizing classes.
-for mib in 7884 7936 8064; do
+for mib in 7867 7884 7936 8064; do
     TEST_MEM_KIB=$((mib * 1024))
     [[ $(suggest_memory_values) == '4G 6G' ]] || fail "8 GB-class ${mib} MiB recommendation did not preserve actual system headroom"
 done
@@ -51,12 +52,12 @@ TEST_MEM_KIB=$((5888 * 1024))
 [[ $(suggest_memory_values) == '3G 4G' ]] || fail 'nominal 6 GB-class recommendation exceeded its memory budget'
 
 # Reduced MemTotal must always retain the hard reserve, even below normal tiers.
-for mib in 1536 2048 2560 3072 3584 3840 5632 7680 7884 15872 32256; do
+for mib in 2048 2560 3072 3584 3840 5632 7680 7884 15872 32256; do
     TEST_MEM_KIB=$((mib * 1024))
     read -r heap maximum <<< "$(suggest_memory_values)"
     heap_mib=$(memory_to_mib "${heap}")
     maximum_mib=$(memory_to_mib "${maximum}")
-    (( heap_mib > 0 && heap_mib < maximum_mib )) || fail "${mib} MiB produced an unusable heap/container pair"
+    (( heap_mib > 0 && maximum_mib - heap_mib >= 512 )) || fail "${mib} MiB produced an unusable heap/container pair"
     (( mib - maximum_mib >= 1024 )) || fail "${mib} MiB recommendation violated the hard reserve"
 done
 TEST_MEM_KIB=$((1024 * 1024))

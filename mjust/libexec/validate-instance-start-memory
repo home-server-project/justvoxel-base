@@ -1,0 +1,113 @@
+#!/usr/bin/bash
+set -euo pipefail
+# Caller holds the existing maintenance lock. Activating units reserve their
+# complete limit even before their own preparation acquires that lock.
+[[ $EUID == 0 && $# == 1 && $1 =~ ^jv-[a-z0-9]{6,12}$ ]] || exit 1
+python3 - "$1" <<'PY'
+import json
+import os
+import re
+import stat
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path('/etc/justvoxel/instances')
+QUADLETS = Path('/etc/containers/systemd')
+MEMINFO = Path('/proc/meminfo')
+ID = re.compile(r'jv-[a-z0-9]{6,12}')
+
+
+def command(*args):
+    return subprocess.check_output(['systemctl', *args], timeout=10, text=True, stderr=subprocess.DEVNULL)
+
+
+def private_json(path):
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_gid != 0 or stat.S_IMODE(info.st_mode) != 0o600 or path.resolve() != path:
+        raise ValueError()
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError()
+            result[key] = value
+        return result
+    with path.open() as stream:
+        raw = stream.read(1048577)
+    if len(raw) > 1048576:
+        raise ValueError()
+    return json.loads(raw, object_pairs_hook=unique)
+
+
+def limit(identifier):
+    record = private_json(ROOT / identifier / 'config.json')
+    runtime = record['runtime']
+    if record['schema_version'] != 1 or runtime['id'] != identifier:
+        raise ValueError()
+    match = re.fullmatch(r'([1-9][0-9]{0,8})([MmGg])', runtime['container_memory'])
+    if not match:
+        raise ValueError()
+    value = int(match[1]) * (1024 if match[2].upper() == 'G' else 1)
+    if not 512 <= value <= 1048576:
+        raise ValueError()
+    return value
+
+
+def admit(candidate):
+    if not ID.fullmatch(candidate):
+        raise ValueError()
+    matches = re.findall(r'^MemTotal:\s+([0-9]+) kB$', MEMINFO.read_text(), re.M)
+    if len(matches) != 1:
+        raise ValueError()
+    total = int(matches[0]) // 1024
+    if not 2048 <= total <= 16777216:
+        raise ValueError()
+    identifiers = {candidate}
+    for path in ROOT.iterdir():
+        if ID.fullmatch(path.name):
+            identifiers.add(path.name)
+    for path in QUADLETS.glob('minecraft-jv-*.container'):
+        identifier = path.name[len('minecraft-'):-len('.container')]
+        if not ID.fullmatch(identifier):
+            raise ValueError()
+        identifiers.add(identifier)
+    # Include even an active unit whose config/Quadlet disappeared. Its missing
+    # reservation evidence must fail closed rather than disappear from budget.
+    for line in command('list-units', '--all', '--plain', '--no-legend', '--no-pager', 'minecraft-jv-*.service').splitlines():
+        fields = line.split()
+        if not fields or not fields[0].startswith('minecraft-jv-') or not fields[0].endswith('.service'):
+            raise ValueError()
+        identifier = fields[0][len('minecraft-'):-len('.service')]
+        if not ID.fullmatch(identifier):
+            raise ValueError()
+        identifiers.add(identifier)
+    used = limit(candidate)
+    for identifier in sorted(identifiers):
+        if identifier == candidate:
+            continue
+        properties = {}
+        for line in command('show', '--property=LoadState,ActiveState', '--', 'minecraft-' + identifier + '.service').splitlines():
+            key, value = line.split('=', 1)
+            if key in properties:
+                raise ValueError()
+            properties[key] = value
+        load, active = properties['LoadState'], properties['ActiveState']
+        if load not in ('loaded', 'not-found'):
+            raise ValueError()
+        if active in ('active', 'activating', 'reloading'):
+            if load != 'loaded':
+                raise ValueError()
+            used += limit(identifier)
+        elif active != 'inactive':
+            raise ValueError()
+    if used + 1024 > total:
+        raise ValueError()
+
+
+try:
+    admit(sys.argv[1])
+except Exception:
+    print('Not enough Minecraft memory capacity to start this server, or capacity could not be verified. Stop another server or reduce a memory limit, then try again.', file=sys.stderr)
+    sys.exit(1)
+PY

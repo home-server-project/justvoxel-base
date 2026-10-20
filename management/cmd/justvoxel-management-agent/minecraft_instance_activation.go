@@ -579,6 +579,11 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 			files = f
 		}
 	}
+	if next.Runtime.StartOnBoot {
+		if err = b.admitMemory(ctx, snapshot.TotalMemoryMiB, records, next.Runtime, true); err != nil {
+			return err
+		}
+	}
 	if next.Runtime.ID == "" || files.ID == "" {
 		return errInstanceNotFound
 	}

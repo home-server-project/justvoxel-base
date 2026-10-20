@@ -166,7 +166,7 @@ func TestInstanceRuntimeValidation(t *testing.T) {
 		{"no headroom", "512 MiB", func(_ *minecraftInstanceRuntimeContext, c []minecraftInstanceRuntimeConfig) {
 			c[0].ContainerMemory = "1G"
 		}},
-		{"overcommit including stopped", "overcommits", func(x *minecraftInstanceRuntimeContext, _ []minecraftInstanceRuntimeConfig) { x.TotalMemoryMiB = 4096 }},
+		{"individual reserve", "1 GiB", func(x *minecraftInstanceRuntimeContext, _ []minecraftInstanceRuntimeConfig) { x.TotalMemoryMiB = 2560 }},
 		{"missing RAM", "physical memory", func(x *minecraftInstanceRuntimeContext, _ []minecraftInstanceRuntimeConfig) { x.TotalMemoryMiB = 0 }},
 		{"path traversal", "unsafe", func(x *minecraftInstanceRuntimeContext, _ []minecraftInstanceRuntimeConfig) {
 			x.StorageRoot += "/../world"

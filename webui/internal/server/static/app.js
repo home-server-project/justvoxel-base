@@ -3425,25 +3425,22 @@ if (minecraftOpen && minecraftDialog) {
         return;
       }
       if (!gameMemory || !maxMemory) return;
-      const playerGroups = Math.max(1, Math.ceil(Math.max(1, maxPlayers) / 10));
-      const playerExtra = Math.min(Math.max(playerGroups - 1, 0), 4);
-      const totalGiB = totalMiB > 0 ? totalMiB / 1024 : 8;
-      let baseRecommended = totalGiB < 6 ? 2 : Math.max(4, Math.min(8, Math.floor((totalGiB - 2) / 2)));
-      const recommendedHeap = Math.min(12, baseRecommended + playerExtra);
-      let heapGiB = recommendedHeap;
-      if (name === "light") heapGiB = Math.max(2, recommendedHeap - 2);
-      if (name === "high") heapGiB = Math.min(14, recommendedHeap + 2);
-      let maximumGiB = heapGiB + (heapGiB >= 4 ? 2 : 1);
+      // Recommended tiers are capped by actual MemTotal.
+      const totalGiB = totalMiB > 0 ? Math.round(totalMiB / 1024) : 8;
+      const baseHeap = totalGiB >= 16 ? 6 : totalGiB >= 8 ? 4 : totalGiB >= 6 ? 3 : totalGiB >= 4 ? 2 : 1;
+      const baseMaximum = totalGiB >= 16 ? 8 : totalGiB >= 8 ? 6 : totalGiB >= 6 ? 4 : totalGiB >= 4 ? 3 : 2;
+      let heapGiB = name === "light" ? Math.max(2, baseHeap - 2) : name === "high" ? Math.min(14, baseHeap + 2) : baseHeap;
+      let heapMiB = heapGiB * 1024;
+      let maximumMiB = (name === "recommended" ? baseMaximum : heapGiB + (heapGiB >= 4 ? 2 : 1)) * 1024;
       if (totalMiB > 0) {
-        const reserveMiB = name === "high" ? minimumReserveMiB : recommendedReserveMiB;
-        const allowedMaximumGiB = Math.floor(Math.max(0, totalMiB - reserveMiB) / 1024);
-        if (allowedMaximumGiB >= 2 && maximumGiB > allowedMaximumGiB) {
-          maximumGiB = allowedMaximumGiB;
-          heapGiB = Math.max(1, Math.min(heapGiB, maximumGiB - 1));
-        }
+        const allowed = Math.floor(totalMiB - Math.max(1024, minimumReserveMiB));
+        if (allowed < 1024) return;
+        const limit = name === "high" && allowed >= 2048 ? Math.floor(allowed / 1024) * 1024 : allowed;
+        maximumMiB = Math.min(maximumMiB, limit);
+        if (heapMiB > maximumMiB - 512) heapMiB = maximumMiB >= 2048 ? maximumMiB - 1024 : Math.floor(maximumMiB / 2);
       }
-      gameMemory.value = memoryValue(heapGiB * 1024);
-      maxMemory.value = memoryValue(maximumGiB * 1024);
+      gameMemory.value = memoryValue(heapMiB);
+      maxMemory.value = memoryValue(maximumMiB);
       markPreset(name);
       updateStatus();
     };

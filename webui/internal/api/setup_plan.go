@@ -58,6 +58,7 @@ type AdminSetupPlanBackupsRequest struct {
 
 type AdminSetupPlanRequest struct {
 	AddServer           bool                           `json:"add_server,omitempty"`
+	StartAfterSetup     bool                           `json:"start_after_setup,omitempty"`
 	StartOnBoot         bool                           `json:"start_on_boot,omitempty"`
 	MountedOnly         bool                           `json:"mounted_only,omitempty"`
 	DiagnosticSessionID string                         `json:"diagnostic_session_id,omitempty"`
@@ -143,13 +144,14 @@ type AdminSetupPlanBackups struct {
 }
 
 type AdminSetupNormalizedPlan struct {
-	AddServer   bool                    `json:"add_server,omitempty"`
-	StartOnBoot bool                    `json:"start_on_boot,omitempty"`
-	MountedOnly bool                    `json:"mounted_only,omitempty"`
-	Server      AdminSetupPlanServer    `json:"server"`
-	Minecraft   AdminSetupPlanMinecraft `json:"minecraft"`
-	Storage     AdminSetupPlanStorage   `json:"storage"`
-	Backups     AdminSetupPlanBackups   `json:"backups"`
+	AddServer       bool                    `json:"add_server,omitempty"`
+	StartAfterSetup bool                    `json:"start_after_setup,omitempty"`
+	StartOnBoot     bool                    `json:"start_on_boot,omitempty"`
+	MountedOnly     bool                    `json:"mounted_only,omitempty"`
+	Server          AdminSetupPlanServer    `json:"server"`
+	Minecraft       AdminSetupPlanMinecraft `json:"minecraft"`
+	Storage         AdminSetupPlanStorage   `json:"storage"`
+	Backups         AdminSetupPlanBackups   `json:"backups"`
 }
 
 type AdminSetupPlanRequirements struct {

@@ -21,6 +21,8 @@ var setupInstancePermitRoot = "/run/justvoxel/setup-instance-start"
 // Only schema 2 has provisional semantics. Record is the immutable preparation
 // intent, then the exact committed runtime, always persisted before mutation.
 type setupInstancePublication struct {
+	StartAttempted bool                   `json:"start_attempted,omitempty"`
+	StartError     string                 `json:"start_error,omitempty"`
 	Stage          string                 `json:"stage"`
 	Name           string                 `json:"name"`
 	BackupSettings instanceBackupSettings `json:"backup_settings"`
@@ -148,6 +150,11 @@ func (b *instanceRuntimeBackend) prepareSetupInstance(ctx context.Context, c min
 	}
 	next := instanceRuntimeRecord{SchemaVersion: 1, Runtime: c, Storage: instanceStorageFor(snapshot, c.ID), Backups: instanceBackupsFor(snapshot, c.ID), Firewall: []instanceFirewallRule{}}
 	candidates := instanceReplaceRecord(records, next)
+	if c.StartOnBoot {
+		if err = b.admitMemory(ctx, snapshot.TotalMemoryMiB, candidates, c, true); err != nil {
+			return err
+		}
+	}
 	files, err := b.renderCandidate(snapshot, candidates, c.ID)
 	if err != nil {
 		return err
@@ -364,7 +371,23 @@ func (b *instanceRuntimeBackend) finishSetupPublication(ctx context.Context, e *
 		return err
 	}
 	e.Publication.Stage = "finalized"
-	return save()
+	if err := save(); err != nil {
+		return err
+	}
+	// At most one normal start submission, bound to the schema-2 reviewed intent.
+	// Persist before submission so recovery can never restart a server later
+	// stopped by its owner. A start failure cannot undo publication.
+	if e.Schema == 2 && e.Request.AddServer && e.Request.StartAfterSetup && !e.Publication.StartAttempted {
+		e.Publication.StartAttempted = true
+		if err := save(); err != nil {
+			return err
+		}
+		if err := b.action(ctx, e.Record.Runtime.ID, "start"); err != nil {
+			e.Publication.StartError = "Server created, but it could not be started. Use Start after checking Minecraft memory capacity and server status."
+			return save()
+		}
+	}
+	return nil
 }
 
 func setupPermitPath(id string) string {

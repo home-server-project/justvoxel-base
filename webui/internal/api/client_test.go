@@ -87,3 +87,18 @@ func TestSelectedInstanceLogsPathAndLimit(t *testing.T) {
 		t.Fatal("invalid log target accepted")
 	}
 }
+
+func TestSelectedInstanceStartSurfacesMemoryConflict(t *testing.T) {
+	const message = "Not enough Minecraft memory capacity to start this server. Stop another server or reduce a memory limit, then try again."
+	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/v1/minecraft/instances/jv-a1b2c3/start" {
+			t.Fatal(r.URL.Path)
+		}
+		body, _ := json.Marshal(map[string]string{"error": message})
+		return &http.Response{StatusCode: http.StatusConflict, Body: io.NopCloser(strings.NewReader(string(body))), Header: make(http.Header)}, nil
+	})}}
+	result, err := client.MinecraftInstanceActionConfirmed(context.Background(), "token", "jv-a1b2c3", "start", false)
+	if err == nil || result.Message != message {
+		t.Fatal("normal start lost the safe API conflict", result, err)
+	}
+}

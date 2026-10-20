@@ -317,6 +317,7 @@ container_memory="${container_memory^^}"
 java_mib="$(memory_to_mib "${java_memory}")"
 container_mib="$(memory_to_mib "${container_memory}")"
 (( container_mib > java_mib )) || { json_error 'Maximum Minecraft memory must be larger than Minecraft game memory.' invalid_minecraft; exit 0; }
+(( container_mib - java_mib >= 512 )) || { json_error 'Maximum Minecraft memory must leave at least 512 MiB above Minecraft game memory.' invalid_minecraft; exit 0; }
 total_mib="$(system_memory_mib)"
 remaining_mib=$(( total_mib - container_mib ))
 if (( total_mib > 0 && remaining_mib < SETUP_MIN_SYSTEM_RESERVE_MIB )); then

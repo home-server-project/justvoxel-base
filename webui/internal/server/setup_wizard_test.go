@@ -133,11 +133,11 @@ function open(mib, heap, maximum, players = "10") {
 }
 // Fresh discovery defaults come from suggest_memory_values and must select Recommended.
 for (const [mib, heap, maximum] of [
-  [1536, "256M", "512M"], [2560, "1G", "1536M"],
+  [2560, "1G", "1536M"],
   [3840, "2G", "2816M"], [4096, "2G", "3G"],
   [5888, "3G", "4G"], [6144, "3G", "4G"],
-  [7884, "4G", "6G"], [7936, "4G", "6G"], [8064, "4G", "6G"], [8192, "4G", "6G"],
-  [12288, "8G", "10G"], [16384, "8G", "12G"], [32768, "8G", "12G"]
+  [7867, "4G", "6G"], [7884, "4G", "6G"], [7936, "4G", "6G"], [8064, "4G", "6G"], [8192, "4G", "6G"],
+  [12288, "4G", "6G"], [16384, "6G", "8G"], [32768, "6G", "8G"], [65536, "6G", "8G"]
 ]) {
   for (const swapMiB of [0, 65536]) {
     const defaults = backendDefaults(mib, swapMiB);
@@ -194,7 +194,7 @@ edited.player.value = "10";
 edited.max.events.input();
 assert.equal(edited.selected(), "recommended");
 assert.deepEqual([edited.game.value, edited.max.value], ["4G", "6G"]);
-for (const mib of [1536, 2048, 2560, 3072, 3584, 3840, 5632, 7680, 7884, 15872, 32256]) {
+for (const mib of [2048, 2560, 3072, 3584, 3840, 5632, 7680, 7884, 15872, 32256]) {
   for (const name of ["light", "recommended", "high"]) {
     const page = open(mib, "1G", "2G");
     page.click(name);

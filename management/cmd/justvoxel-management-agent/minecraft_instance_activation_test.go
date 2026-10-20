@@ -1088,7 +1088,7 @@ func TestInstanceSafeStopRemainsAvailableAfterResourceChange(t *testing.T) {
 	if err := f.backend.action(context.Background(), id, "start"); err != nil {
 		t.Fatal(err)
 	}
-	f.snapshot.TotalMemoryMiB = 4096
+	f.snapshot.TotalMemoryMiB = 2560
 	if err := f.backend.action(context.Background(), id, "restart"); err == nil {
 		t.Fatal("overcommitted restart accepted")
 	}

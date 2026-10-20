@@ -225,6 +225,11 @@ func (b *instanceRuntimeBackend) configureRegistered(ctx context.Context, id str
 	}
 	next := instanceRuntimeRecord{SchemaVersion: 1, Runtime: settings.runtime(id, uid, gid, hex.EncodeToString(secret[:])), Storage: instanceStorageFor(snapshot, id), Backups: instanceBackupsFor(snapshot, id), Firewall: []instanceFirewallRule{}}
 	candidates := instanceReplaceRecord(records, next)
+	if next.Runtime.StartOnBoot {
+		if err = b.admitMemory(ctx, snapshot.TotalMemoryMiB, candidates, next.Runtime, true); err != nil {
+			return err
+		}
+	}
 	if _, err = b.render(snapshot, candidates); err != nil {
 		return err
 	}

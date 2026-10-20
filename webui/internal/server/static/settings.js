@@ -45,15 +45,13 @@ if (memoryPanel) {
       return;
     }
     const otherMemoryMiB = Number(memoryPanel.dataset.otherMemoryMib || 0);
-    if (otherMemoryMiB > 0 && totalMiB - maximumMiB - otherMemoryMiB < recommendedReserveMiB) {
-      status.textContent = `Other configured servers have memory limits totalling ${formatRemaining(otherMemoryMiB)}. Running them together may leave little system headroom; consider a smaller limit or running fewer servers at once.`;
-      status.classList.add("warning");
-      return;
-    }
     const remaining = totalMiB - maximumMiB;
     if (remaining < minimumReserveMiB) {
       status.textContent = `Not enough memory remains outside Minecraft: about ${formatRemaining(remaining)}. JustVoxel requires at least 1 GiB outside the Minecraft limit; reduce Maximum Minecraft memory before continuing.`;
       status.classList.add("danger");
+    } else if (otherMemoryMiB > 0 && remaining - otherMemoryMiB < minimumReserveMiB) {
+      status.textContent = `Other configured servers have memory limits totalling ${formatRemaining(otherMemoryMiB)}. These servers can remain installed, but they cannot all run at the same time.`;
+      status.classList.add("warning");
     } else if (remaining < recommendedReserveMiB) {
       status.textContent = `Tight memory configuration: about ${formatRemaining(remaining)} remains outside Minecraft. JustVoxel itself typically uses roughly 0.6–1.0 GiB; recommended 1.5 GiB headroom gives extra room for cache, backups, updates and temporary spikes.`;
       status.classList.add("warning");
@@ -67,8 +65,7 @@ if (memoryPanel) {
     const totalGiB = totalMiB > 0 ? Math.round(totalMiB / 1024) : 8;
 
     let baseRecommended, baseMaximum;
-    if (totalGiB >= 16) { baseRecommended = 8; baseMaximum = 12; }
-    else if (totalGiB >= 12) { baseRecommended = 8; baseMaximum = 10; }
+    if (totalGiB >= 16) { baseRecommended = 6; baseMaximum = 8; }
     else if (totalGiB >= 8) { baseRecommended = 4; baseMaximum = 6; }
     else if (totalGiB >= 6) { baseRecommended = 3; baseMaximum = 4; }
     else if (totalGiB >= 4) { baseRecommended = 2; baseMaximum = 3; }
@@ -82,13 +79,13 @@ if (memoryPanel) {
 
     if (totalMiB > 0) {
       const allowedMaximumMiB = Math.floor(totalMiB - Math.max(1024, minimumReserveMiB));
-      if (allowedMaximumMiB < 2) return null;
+      if (allowedMaximumMiB < 1024) return null;
       // High retains whole-GiB sizing; Recommended and Light can use MiB
       // precision to preserve their heap despite firmware/kernel reservations.
       const limitMiB = name === "high" && allowedMaximumMiB >= 2048
         ? Math.floor(allowedMaximumMiB / 1024) * 1024 : allowedMaximumMiB;
       maximumMiB = Math.min(maximumMiB, limitMiB);
-      if (heapMiB >= maximumMiB) {
+      if (heapMiB > maximumMiB - 512) {
         heapMiB = maximumMiB >= 2048 ? maximumMiB - 1024 : Math.floor(maximumMiB / 2);
       }
     }

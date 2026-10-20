@@ -7,6 +7,7 @@ id=$1
 exec 9>/run/justvoxel-minecraft-maintenance.lock
 flock -w 5 9 || fail
 /usr/libexec/justvoxel/mjust/validate-instance-runtime-commit "${id}" || fail
+/usr/libexec/justvoxel/mjust/validate-instance-start-memory "${id}" || fail
 config="/etc/justvoxel/instances/${id}/config.json"
 readarray -t values < <(jq -er '[.storage.data_path, (.runtime.uid|tostring), (.runtime.gid|tostring), (.runtime.bedrock_enabled|tostring), .runtime.software] | .[]' "${config}")
 [[ ${#values[@]} == 5 ]] || fail

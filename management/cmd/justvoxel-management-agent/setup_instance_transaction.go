@@ -55,7 +55,7 @@ func setupInstanceRead(id, fingerprint string) (setupInstanceEvidence, error) {
 	if e.Record.Runtime.ID != "" && (validateInstanceRecordPlacement(e.Record) != nil) {
 		return e, errInstanceRecovery
 	}
-	if e.Schema == 1 && e.Publication != nil {
+	if e.Schema == 1 && (e.Publication != nil || e.Request.StartAfterSetup) {
 		return e, errInstanceRecovery
 	}
 	if e.Schema == 2 {
@@ -265,6 +265,9 @@ func runSetupInstanceAction(ctx context.Context, action string, r setupRuntimeTr
 			err = b.finishSetupPublication(ctx, &e, save)
 			response.OK, response.Applied = err == nil, err == nil
 			response.Phase = setupRuntimeCommitted
+			if e.Publication != nil && e.Publication.StartError != "" {
+				response.Evidence = map[string]string{"start_after_setup": e.Publication.StartError}
+			}
 			return response, err
 		}
 		id := e.Record.Runtime.ID

@@ -508,3 +508,53 @@ test('Add-ons remain exactly five fixed kinds within the third Plugins tab', () 
   assert.ok(app.includes('BlueMap native add-on belongs in Plugins -> Add-ons -> BlueMap Add-ons. Select its local file there.'));
   assert.ok(!app.includes('BlueMap addon - separate installation path not supported'));
 });
+
+test('Recommended memory tiers agree in both forms and do not grow with player count', () => {
+  const settings = read('webui/internal/server/static/settings.js');
+  const start = app.indexOf('  const initNativeMemoryControls =');
+  const native = app.slice(start, app.indexOf('  const buildSettingsForm =', start));
+  for (const [mib, heap, maximum] of [
+    [3072, '1G', '2G'], [3840, '2G', '2816M'], [6144, '3G', '4G'],
+    [7867, '4G', '6G'], [12288, '4G', '6G'], [16384, '6G', '8G'],
+    [32768, '6G', '8G'], [65536, '6G', '8G'],
+  ]) {
+    for (const kind of ['settings', 'native']) {
+      const game = { value: '1G', addEventListener() {} };
+      const max = { value: '2G', addEventListener() {} };
+      let click;
+      const button = {
+        dataset: { memoryPreset: 'recommended', minecraftMemoryPreset: 'recommended' },
+        classList: { toggle() {} }, addEventListener(name, fn) { if (name === 'click') click = fn; },
+      };
+      const panel = { dataset: { systemMemoryMib: String(mib) }, querySelectorAll: () => [button] };
+      const context = vm.createContext({
+        document: { querySelector: selector => selector === '[data-memory-settings]' ? panel : null,
+          getElementById: id => ({ 'java-memory': game, 'container-memory': max })[id] || null },
+        window: { location: { hash: '' } },
+        root: { dataset: { maxPlayers: '200' }, querySelectorAll: () => [button],
+          querySelector: selector => ({ '[name="java_memory"]': game, '[name="container_memory"]': max })[selector] || null },
+      });
+      if (kind === 'settings') vm.runInContext(settings, context);
+      else vm.runInContext(native + `\ninitNativeMemoryControls(root, {system_memory_mib:${mib}});`, context);
+      click();
+      assert.deepEqual([game.value, max.value], [heap, maximum], `${kind} ${mib}`);
+    }
+  }
+});
+
+test('installed memory above simultaneous capacity is informational', () => {
+  const classes = new Set();
+  const status = { classList: { remove: (...names) => names.forEach(name => classes.delete(name)), add: name => classes.add(name) } };
+  const game = { value: '4G', addEventListener() {} };
+  const max = { value: '6G', addEventListener() {} };
+  const panel = { dataset: { systemMemoryMib: '7867', otherMemoryMib: '6144' }, querySelectorAll: () => [] };
+  const context = vm.createContext({ document: {
+    querySelector: selector => selector === '[data-memory-settings]' ? panel : null,
+    getElementById: id => ({ 'java-memory': game, 'container-memory': max, 'memory-status': status })[id] || null,
+  }, window: { location: { hash: '' } } });
+  vm.runInContext(read('webui/internal/server/static/settings.js'), context);
+  assert.equal(classes.has('danger'), false);
+  assert.equal(classes.has('warning'), true);
+  assert.match(status.textContent, /can remain installed/);
+  assert.match(status.textContent, /cannot all run at the same time/);
+});

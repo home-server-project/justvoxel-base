@@ -24,6 +24,7 @@ type setupPlanningAPI interface {
 type setupReviewState struct {
 	AddServer       bool
 	DisplayName     string
+	StartAfterSetup bool
 	StartOnBoot     bool
 	BackupAvailable bool
 	CreationBlocked bool
@@ -48,6 +49,7 @@ type setupReviewPageData struct {
 	AddServer          bool
 	BasePath           string
 	DisplayName        string
+	StartAfterSetup    bool
 	StartOnBoot        bool
 	CreationBlocked    bool
 	Title              string
@@ -305,7 +307,7 @@ func (a *App) setupReviewState(ctx context.Context, session string, client admin
 	}
 	plan, err := planner.AdminSetupPlan(ctx, session, request)
 	state := setupReviewState{
-		AddServer: draft.AddServer, StartOnBoot: draft.StartOnBoot, BackupAvailable: true, Request: request, Plan: plan, DraftUpdatedAt: draft.UpdatedAt,
+		AddServer: draft.AddServer, StartOnBoot: draft.StartOnBoot, StartAfterSetup: draft.StartAfterSetup, BackupAvailable: true, Request: request, Plan: plan, DraftUpdatedAt: draft.UpdatedAt,
 		SetupMode: draft.Mode, ServerType: draft.Minecraft.ServerType, DisplayName: plan.Normalized.Server.DisplayName,
 	}
 	if err != nil {
@@ -365,7 +367,7 @@ func setupPlanRequestFromDraft(draft setupDraft) (api.AdminSetupPlanRequest, err
 		return api.AdminSetupPlanRequest{}, errors.New("Backup retention must be a positive number.")
 	}
 	return api.AdminSetupPlanRequest{
-		AddServer: draft.AddServer, StartOnBoot: draft.StartOnBoot, MountedOnly: draft.Mode == "recommended", DiagnosticSessionID: draft.DiagnosticSessionID,
+		AddServer: draft.AddServer, StartOnBoot: draft.StartOnBoot, StartAfterSetup: draft.StartAfterSetup, MountedOnly: draft.Mode == "recommended", DiagnosticSessionID: draft.DiagnosticSessionID,
 		Server: api.AdminSetupPlanServerRequest{
 			DisplayName: draft.DisplayName, MOTD: draft.Server.MOTD, MOTDAutomatic: draft.Server.MOTDAutomatic, MaxPlayers: maxPlayers,
 			BedrockEnabled: draft.Server.BedrockEnabled, Timezone: draft.Server.Timezone,
@@ -408,7 +410,7 @@ func (a *App) renderSetupReview(w http.ResponseWriter, identity api.SessionInfo,
 	}
 	data := setupReviewPageData{
 		AddServer: state.AddServer, BasePath: basePath, DisplayName: state.DisplayName,
-		StartOnBoot: state.StartOnBoot, CreationBlocked: state.CreationBlocked,
+		StartOnBoot: state.StartOnBoot, StartAfterSetup: state.StartAfterSetup, CreationBlocked: state.CreationBlocked,
 		Title: "Review setup", SetupMode: state.SetupMode, ServerTypeLabel: setupServerTypeLabel(plan.Normalized.Minecraft.ServerType),
 		Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
 		CSRF: csrf, Identity: identity, Plan: plan, Error: errorMessage,

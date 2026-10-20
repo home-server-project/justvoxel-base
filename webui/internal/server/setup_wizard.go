@@ -67,28 +67,35 @@ type setupMinecraftDraft struct {
 }
 
 type setupDraft struct {
-	AddServer           bool
-	DisplayName         string
-	StartOnBoot         bool
-	BackupAvailable     bool
-	OtherMemoryMiB      int
-	CreatedRuntime      api.InstanceRuntimeSettings
-	CoreCreated         bool
-	CreatedID           string
-	CreationAttempted   bool
-	CreationError       string
-	Started             bool
-	Mode                string
-	CurrentStep         int
-	HighestStep         int
-	DiagnosticSessionID string
-	Server              setupServerDraft
-	Minecraft           setupMinecraftDraft
-	Storage             setupStorageDraft
-	Backups             setupBackupDraft
-	Defaults            api.AdminSetupDefaults
-	Inventory           api.AdminStorageDiscovery
-	UpdatedAt           time.Time
+	StartCapacityUnknown  bool
+	BootCapacityUnknown   bool
+	StartAfterUnavailable bool
+	StartBootUnavailable  bool
+	RunningMemoryMiB      int
+	BootMemoryMiB         int
+	AddServer             bool
+	DisplayName           string
+	StartAfterSetup       bool
+	StartOnBoot           bool
+	BackupAvailable       bool
+	OtherMemoryMiB        int
+	CreatedRuntime        api.InstanceRuntimeSettings
+	CoreCreated           bool
+	CreatedID             string
+	CreationAttempted     bool
+	CreationError         string
+	Started               bool
+	Mode                  string
+	CurrentStep           int
+	HighestStep           int
+	DiagnosticSessionID   string
+	Server                setupServerDraft
+	Minecraft             setupMinecraftDraft
+	Storage               setupStorageDraft
+	Backups               setupBackupDraft
+	Defaults              api.AdminSetupDefaults
+	Inventory             api.AdminStorageDiscovery
+	UpdatedAt             time.Time
 }
 
 type setupDraftStore struct {
@@ -108,9 +115,13 @@ type setupWizardStepView struct {
 }
 
 type setupWizardPageData struct {
+	RunningMemory            string
+	StartAfterUnavailable    bool
+	StartBootUnavailable     bool
 	AddServer                bool
 	BasePath                 string
 	DisplayName              string
+	StartAfterSetup          bool
 	StartOnBoot              bool
 	BackupAvailable          bool
 	OtherMemoryMiB           int
@@ -391,6 +402,7 @@ func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
 	if draft.AddServer || draft.Mode == "advanced" {
 		draft.DisplayName = r.FormValue("display_name")
 		if draft.AddServer {
+			draft.StartAfterSetup = r.FormValue("start_after_setup") == "on"
 			draft.StartOnBoot = r.FormValue("start_on_boot") == "on"
 		}
 		if err := a.validateAddServerName(r.Context(), session, draft.DisplayName); err != nil {
@@ -613,6 +625,11 @@ func (a *App) setupWizardRequest(w http.ResponseWriter, r *http.Request, require
 }
 
 func (a *App) renderSetupWizard(w http.ResponseWriter, identity api.SessionInfo, draft setupDraft, csrf, errorMessage string) {
+	if draft.AddServer {
+		candidate, valid := setupMemoryMiB(draft.Minecraft.ContainerMemory)
+		draft.StartAfterUnavailable = draft.StartCapacityUnknown || !valid || draft.RunningMemoryMiB+candidate+1024 > draft.Defaults.SystemMemoryMiB
+		draft.StartBootUnavailable = draft.BootCapacityUnknown || !valid || draft.BootMemoryMiB+candidate+1024 > draft.Defaults.SystemMemoryMiB
+	}
 	steps := make([]setupWizardStepView, len(setupWizardSteps))
 	copy(steps, setupWizardSteps)
 	current := setupWizardStepView{}
@@ -636,13 +653,17 @@ func (a *App) renderSetupWizard(w http.ResponseWriter, identity api.SessionInfo,
 			minecraftFilesystems = append(minecraftFilesystems, filesystem)
 		}
 	}
+	runningMemory := ""
+	if draft.RunningMemoryMiB > 0 {
+		runningMemory = formatMemoryMiB(draft.RunningMemoryMiB)
+	}
 	basePath := "/setup"
 	if draft.AddServer {
 		basePath = addServerBasePath
 	}
 	data := setupWizardPageData{
-		AddServer: draft.AddServer, BasePath: basePath, DisplayName: draft.DisplayName,
-		StartOnBoot: draft.StartOnBoot, BackupAvailable: draft.BackupAvailable, OtherMemoryMiB: draft.OtherMemoryMiB,
+		AddServer: draft.AddServer, BasePath: basePath, DisplayName: draft.DisplayName, RunningMemory: runningMemory,
+		StartOnBoot: draft.StartOnBoot, StartAfterSetup: draft.StartAfterSetup, StartAfterUnavailable: draft.StartAfterUnavailable, StartBootUnavailable: draft.StartBootUnavailable, BackupAvailable: draft.BackupAvailable, OtherMemoryMiB: draft.OtherMemoryMiB,
 		Title: "First setup", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
 		CSRF: csrf, Identity: identity, Started: draft.Started, CurrentStep: draft.CurrentStep,
 		Current: current, Steps: steps, Error: errorMessage,
@@ -802,8 +823,11 @@ func validateSetupResources(minecraft setupMinecraftDraft, defaults api.AdminSet
 	if containerMiB <= javaMiB {
 		return errors.New("Maximum Minecraft memory must be larger than Minecraft game memory.")
 	}
-	if defaults.SystemMemoryMiB > 0 && containerMiB >= defaults.SystemMemoryMiB {
-		return errors.New("Maximum Minecraft memory must leave some memory available for JustVoxel and system services.")
+	if containerMiB-javaMiB < 512 {
+		return errors.New("Maximum Minecraft memory must leave at least 512 MiB above Minecraft game memory.")
+	}
+	if defaults.SystemMemoryMiB > 0 && containerMiB > defaults.SystemMemoryMiB-1024 {
+		return errors.New("Maximum Minecraft memory must leave at least 1 GiB for JustVoxel and system services.")
 	}
 	return nil
 }

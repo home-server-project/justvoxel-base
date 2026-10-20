@@ -150,7 +150,7 @@ func (a *App) minecraftServersWorkspace(w http.ResponseWriter, r *http.Request) 
 		message = "Server deleted. Backup archives were preserved as historical archives. Current Restore remains tied to that server identity."
 	}
 	if r.URL.Query().Get("created") == "yes" {
-		message = "Minecraft server created. It is stopped and ready for use."
+		message = "Minecraft server created."
 	}
 	data := minecraftServersPageData{Title: "Minecraft Servers", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI, CSRF: csrfFromRequest(r), Identity: identity, Message: message, Configured: configuration.Configured}
 	data.Servers, data.Error = a.minecraftServerInventory(r.Context(), session)
@@ -274,7 +274,11 @@ func (a *App) newAddServerDraft(ctx context.Context, session string, client admi
 	if configuration.Minecraft.BedrockEnabled {
 		bedrockUsed[configuration.Minecraft.BedrockPort] = true
 	}
-	draft.OtherMemoryMiB, _ = setupMemoryMiB(configuration.Minecraft.ContainerMemory)
+	if len(ids) == 0 && configuration.Configured {
+		draft.OtherMemoryMiB, _ = setupMemoryMiB(configuration.Minecraft.ContainerMemory)
+		// Legacy runtime evidence is not sufficient to promise a simultaneous start.
+		draft.StartAfterUnavailable, draft.StartBootUnavailable = true, true
+	}
 	schedules := []string{}
 	if configuration.Backup.TimerEnabled {
 		// Discovery stores the ordinary daily OnCalendar expression.
@@ -286,7 +290,12 @@ func (a *App) newAddServerDraft(ctx context.Context, session string, client admi
 			draft.Backups.Automatic = false
 		}
 	}
+	seen := map[string]bool{}
 	for _, id := range ids {
+		if seen[id] {
+			return setupDraft{}, errors.New("Existing server inventory is ambiguous.")
+		}
+		seen[id] = true
 		runtime, err := instances.MinecraftInstanceConfiguration(ctx, session, id)
 		if err != nil {
 			return setupDraft{}, errors.New("Existing server settings could not be checked. Resolve the existing server's configuration before adding another.")
@@ -295,8 +304,33 @@ func (a *App) newAddServerDraft(ctx context.Context, session string, client admi
 		if runtime.BedrockEnabled {
 			bedrockUsed[runtime.BedrockPort] = true
 		}
-		memory, _ := setupMemoryMiB(runtime.ContainerMemory)
+		memory, valid := setupMemoryMiB(runtime.ContainerMemory)
+		if !valid {
+			return setupDraft{}, errors.New("Existing server memory could not be checked.")
+		}
 		draft.OtherMemoryMiB += memory
+		if runtime.StartOnBoot {
+			draft.BootMemoryMiB += memory
+		}
+		statusClient, ok := a.api.(interface {
+			MinecraftInstanceStatus(context.Context, string, string) (api.MinecraftInstanceStatus, error)
+		})
+		if !ok {
+			draft.StartAfterUnavailable = true
+		} else {
+			status, err := statusClient.MinecraftInstanceStatus(ctx, session, id)
+			if err != nil || status.ID != id {
+				draft.StartAfterUnavailable = true
+			} else {
+				switch status.State {
+				case "running", "starting":
+					draft.RunningMemoryMiB += memory
+				case "stopped", "configured", "failed":
+				default:
+					draft.StartAfterUnavailable = true
+				}
+			}
+		}
 		backup, err := instances.MinecraftInstanceBackupSettings(ctx, session, id)
 		if err != nil {
 			return setupDraft{}, err
@@ -308,14 +342,12 @@ func (a *App) newAddServerDraft(ctx context.Context, session string, client admi
 			schedules = append(schedules, backup.Time)
 		}
 	}
-	if defaults.SystemMemoryMiB > 0 {
-		available := defaults.SystemMemoryMiB - draft.OtherMemoryMiB - defaults.SystemReserveRecommendedMiB
-		current, _ := setupMemoryMiB(draft.Minecraft.ContainerMemory)
-		if available >= 1024 && available < current {
-			draft.Minecraft.ContainerMemory = strconv.Itoa(available) + "M"
-			draft.Minecraft.JavaMemory = strconv.Itoa(available-512) + "M"
-		}
-	}
+	draft.StartCapacityUnknown, draft.BootCapacityUnknown = draft.StartAfterUnavailable, draft.StartBootUnavailable
+	candidate, valid := setupMemoryMiB(draft.Minecraft.ContainerMemory)
+	draft.StartAfterUnavailable = draft.StartAfterUnavailable || !valid || defaults.SystemMemoryMiB <= 0 || draft.RunningMemoryMiB+candidate+1024 > defaults.SystemMemoryMiB
+	draft.StartBootUnavailable = draft.StartBootUnavailable || !valid || defaults.SystemMemoryMiB <= 0 || draft.BootMemoryMiB+candidate+1024 > defaults.SystemMemoryMiB
+	draft.StartAfterSetup, draft.StartOnBoot = !draft.StartAfterUnavailable, !draft.StartBootUnavailable
+
 	javaPort, err := availableInstancePort(defaults.JavaPort, javaUsed)
 	if err != nil {
 		return setupDraft{}, err

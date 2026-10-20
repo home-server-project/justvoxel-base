@@ -297,7 +297,6 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		ports[port] = true
 		return nil
 	}
-	var total int64
 	if ctx.TotalMemoryMiB < 2048 || ctx.TotalMemoryMiB > 16777216 {
 		return nil, errors.New("invalid physical memory reservation")
 	}
@@ -353,7 +352,9 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		if limit-heap < 512 {
 			return nil, errors.New("container memory must leave at least 512 MiB above Java memory")
 		}
-		total += limit
+		if limit > ctx.TotalMemoryMiB-1024 {
+			return nil, errors.New("container memory must leave at least 1 GiB for the appliance")
+		}
 		if (c.ImageDigest != "" && !operationFingerprintPattern.MatchString(c.ImageDigest)) || (c.VersionPolicy != "" && c.VersionPolicy != "pinned" && c.VersionPolicy != "recommended" && c.VersionPolicy != "latest") || !validSetupServerType(c.Software) || !instanceRuntimeVersionPattern.MatchString(c.Version) || !imageTagInputPattern.MatchString(c.ImageTag) {
 			return nil, errors.New("invalid Minecraft software, version, or image tag")
 		}
@@ -378,11 +379,6 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		if _, err := time.LoadLocation(c.Timezone); err != nil {
 			return nil, errors.New("invalid startup timezone")
 		}
-	}
-	// Leave at least 1 GiB for the OS, counting every configured instance even
-	// when stopped or autostart is off. Never rely on listening sockets/free RAM.
-	if total > ctx.TotalMemoryMiB-1024 {
-		return nil, errors.New("configured container memory overcommits physical RAM; reserve at least 1 GiB for the appliance")
 	}
 
 	envTemplate, err := os.ReadFile(filepath.Join(ctx.TemplateRoot, "config", "minecraft.env.in"))
