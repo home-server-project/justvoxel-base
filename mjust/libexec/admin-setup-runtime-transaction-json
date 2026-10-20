@@ -113,7 +113,7 @@ _a55_parse_request() {
     [[ $(jq -r '.plan_fingerprint // ""' "${A53_MANIFEST}") == "${A55_PLAN_FINGERPRINT}" ]] || return 1
     # Compare the selected paths and mount expectations with the original storage request.
     jq -e --argjson request "${A55_REQUEST}" '
-      . as $manifest | .schema_version == "v1" and
+      . as $manifest | (.schema_version == "v1" or .schema_version == "v2") and
       .storage_request.schema_version == $request.schema_version and
       .storage_request.operation_id == $request.operation_id and
       .storage_request.plan_fingerprint == $request.plan_fingerprint and
@@ -693,7 +693,7 @@ _a55_recover_request() {
     A53_MANIFEST="${A53_TX_DIR}/manifest.json"
     _a55_private_manifest || return 1
     jq -e --arg operation "${operation}" --arg fingerprint "${fingerprint}" '
-      .schema_version == "v1" and .operation_id == $operation and .plan_fingerprint == $fingerprint
+      (.schema_version == "v1" or .schema_version == "v2") and .operation_id == $operation and .plan_fingerprint == $fingerprint
     ' "${A53_MANIFEST}" >/dev/null 2>&1 || return 1
     A55_OPERATION_ID="${operation}"
     A55_PLAN_FINGERPRINT="${fingerprint}"

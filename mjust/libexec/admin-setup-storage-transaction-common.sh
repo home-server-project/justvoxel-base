@@ -2,7 +2,9 @@
 
 A53_FSTAB="${A53_FSTAB:-/etc/fstab}"
 A53_TRANSACTION_ROOT="${A53_TRANSACTION_ROOT:-/var/lib/justvoxel/management/transactions}"
-A53_SCHEMA_VERSION=v1
+A53_SCHEMA_VERSION=v2
+A53_INSTANCES_ROOT="${A53_INSTANCES_ROOT:-/etc/justvoxel/instances}"
+A53_SETUP_INSTANCE_ROOT="${A53_SETUP_INSTANCE_ROOT:-/var/lib/justvoxel-instance-runtime}"
 A53_DEFAULT_DATA_PATH=/var/lib/justvoxel/minecraft
 A53_DEFAULT_BACKUP_PATH=/var/lib/justvoxel/backups
 A54_SMB_CREDENTIALS="${A54_SMB_CREDENTIALS:-/etc/justvoxel/smb-backup.credentials}"
@@ -146,8 +148,10 @@ _a53_manifest_record_dir() {
 }
 
 _a53_manifest_record_mount() {
-    local mountpoint="$1" uuid="$2" source="$3" object
-    object="$(jq -cn --arg mountpoint "${mountpoint}" --arg uuid "${uuid}" --arg source "${source}" '{mountpoint:$mountpoint,uuid:$uuid,source:$source}')" || return 1
+    local mountpoint="$1" uuid="$2" source="$3" object line
+    line="$(_a53_fstab_lines "${A53_FSTAB}" "${mountpoint}")" || return 1
+    [[ -n ${line} && ${line} != *$'\n'* ]] || return 1
+    object="$(jq -cn --arg mountpoint "${mountpoint}" --arg uuid "${uuid}" --arg source "${source}" --arg line "${line}" '{mountpoint:$mountpoint,uuid:$uuid,source:$source,fstab_line:$line}')" || return 1
     _a53_manifest_update ".mounts_by_transaction += [${object}]"
 }
 
@@ -372,4 +376,294 @@ _a53_validate_all() {
         return 1
     fi
     return 0
+}
+
+# Infrastructure ownership is deliberately independent of current global defaults.
+_a53_resource_path_safe() {
+    [[ -n $1 && $1 != *[[:space:]]* && $(_a53_normalize_path "$1") == "$1" ]] &&
+        storage_validate_mountpoint_path "$1" >/dev/null 2>&1
+}
+
+_a53_fstab_lines() {
+    [[ -e $1 ]] || return 0
+    [[ -f $1 && ! -L $1 ]] || return 1
+    awk -v mp="$2" '$0 !~ /^[[:space:]]*#/ && NF >= 2 && $2 == mp {print}' "$1"
+}
+
+_a53_preserve_mount() {
+    local object
+    object="$(jq -cn --arg point "$1" --arg reason "$2" '{mountpoint:$point,reason:$reason}')" || return 1
+    _a53_evidence_set infrastructure_preserved "$2"
+    _a53_manifest_update ".preserved_resources = ((.preserved_resources // []) + [${object}] | unique_by(.mountpoint))"
+}
+
+_a53_mount_preserved() {
+    jq -e --arg point "$1" 'any(.preserved_resources[]?; .mountpoint == $point)' "${A53_MANIFEST}" >/dev/null
+}
+
+# Return success only on positive proof of no foreign references. Unreadable,
+# malformed, or incomplete evidence retains infrastructure, with a durable reason.
+_a53_mount_unused() {
+    local point="$1" uuid="$2" source="$3" root path json targets operation instance_id
+    A53_REFERENCE_REASON=uncertain_foreign_evidence
+    for root in "${A53_INSTANCES_ROOT}" "${A53_TRANSACTION_ROOT}" "${A53_SETUP_INSTANCE_ROOT}"; do
+        [[ ! -L ${root} ]] || return 1
+        [[ ! -e ${root} || ( -d ${root} && -r ${root} && -x ${root} ) ]] || return 1
+    done
+    local -a files=()
+    for path in "${A53_INSTANCES_ROOT}"/jv-*; do
+        [[ -e ${path} || -L ${path} ]] || continue
+        [[ -d ${path} && ! -L ${path} && -r ${path} && -x ${path} ]] || return 1
+        files+=("${path}/config.json")
+    done
+    for path in "${files[@]}"; do
+        [[ -f ${path} && ! -L ${path} && -r ${path} ]] || return 1
+        json="$(cat -- "${path}")" || return 1
+        instance_id="${path%/config.json}"; instance_id="${instance_id##*/}"
+        jq -e --arg id "${instance_id}" '.schema_version == 1 and .runtime.id == $id and
+          (.storage.root|type == "string") and (.storage.data_path|type == "string")' <<< "${json}" >/dev/null || return 1
+        # Legacy records without backup placement cannot prove backup non-use.
+        targets="$(jq -ce '[.storage,.backups] | if all(.[]; type == "object") then . else error("missing placement") end' <<< "${json}")" || return 1
+        _a53_targets_unused "${targets}" "${point}" "${uuid}" "${source}" || return 1
+    done
+    for path in "${A53_TRANSACTION_ROOT}"/*; do
+        [[ -e ${path} || -L ${path} ]] || continue
+        [[ ${path} != "${A53_TX_DIR}" ]] || continue
+        [[ -d ${path} && ! -L ${path} && -r ${path} && -x ${path} ]] || return 1
+        [[ -f ${path}/manifest.json && ! -L ${path}/manifest.json && -r ${path}/manifest.json ]] || return 1
+        json="$(cat -- "${path}/manifest.json")" || return 1
+        operation="${path##*/}"
+        jq -e --arg operation "${operation}" '(.schema_version == "v1" or .schema_version == "v2") and .operation_id == $operation and (.phase|type == "string") and (.rollback.state|type == "string")' <<< "${json}" >/dev/null || return 1
+        if jq -e '.phase == "storage_rolled_back" and .rollback.state == "succeeded" and .rollback.result == "rolled_back"' <<< "${json}" >/dev/null; then continue; fi
+        targets="$(jq -ce '[.storage_request.storage,.storage_request.backups] | if all(.[]; type == "object") then . else error("missing request") end' <<< "${json}")" || return 1
+        _a53_targets_unused "${targets}" "${point}" "${uuid}" "${source}" || return 1
+    done
+    # Phase-1 operation-bound provisional evidence is authoritative before its
+    # instance config is published. Never interpret friendly names as identity.
+    for path in "${A53_SETUP_INSTANCE_ROOT}"/setup-*.json; do
+        [[ -e ${path} || -L ${path} ]] || continue
+        [[ ${path##*/} != "setup-${A53_OPERATION_ID}.json" ]] || continue
+        [[ -f ${path} && ! -L ${path} && -r ${path} ]] || return 1
+        json="$(cat -- "${path}")" || return 1
+        operation="${path##*/setup-}"; operation="${operation%.json}"
+        jq -e --arg operation "${operation}" '(.schema == 1 or .schema == 2) and .request.operation_id == $operation and (.rolled_back|type == "boolean")' <<< "${json}" >/dev/null || return 1
+        if jq -e '.rolled_back == true' <<< "${json}" >/dev/null; then continue; fi
+        targets="$(jq -ce '[.request.storage,.request.backups] | if all(.[]; type == "object") then . else error("missing request") end' <<< "${json}")" || return 1
+        _a53_targets_unused "${targets}" "${point}" "${uuid}" "${source}" || return 1
+    done
+    A53_REFERENCE_REASON=unused
+    return 0
+}
+
+_a53_targets_unused() {
+    local targets="$1" point="$2" uuid="$3" source="$4" target_point
+    jq -e 'type == "array" and all(.[];
+        ((.mount_point|type == "string") or (.mount_point == null and .type == "system")) and
+        ((.uuid // "")|type == "string") and ((.source // "")|type == "string") and
+        ((.expected_uuid // "")|type == "string") and ((.expected_source // "")|type == "string") and
+        ((.device // "")|type == "string") and
+        ((.uuid // "") == "" or (.expected_uuid // "") == "" or .uuid == .expected_uuid) and
+        ((.source // "") == "" or (.expected_source // "") == "" or .source == .expected_source) and
+        (if (.mount_point // "") == "" then
+          ([.uuid,.source,.expected_uuid,.expected_source] | all(.[]; . == null or . == ""))
+        else ((.mount_point|startswith("/")) and
+          ([.uuid,.source,.expected_uuid,.expected_source] | any(.[]; type == "string" and length > 0))) end))' <<< "${targets}" >/dev/null || return 1
+    while IFS= read -r target_point; do
+        [[ -z ${target_point} ]] || _a53_resource_path_safe "${target_point}" || return 1
+    done < <(jq -r '.[].mount_point // ""' <<< "${targets}")
+    if jq -e --arg mp "${point}" --arg uuid "${uuid}" --arg source "${source}" 'any(.[];
+        .mount_point == $mp or
+        ($uuid != "" and (.uuid == $uuid or .expected_uuid == $uuid)) or
+        ($source != "" and (.source == $source or .expected_source == $source or .device == $source)))' <<< "${targets}" >/dev/null; then
+        A53_REFERENCE_REASON=foreign_storage_or_backup_reference
+        return 1
+    fi
+    return 0
+}
+
+_a53_snapshot_valid() {
+    local snapshot="${A53_TX_DIR}/fstab.before" expected
+    expected="$(jq -r '.fstab_before_sha256' "${A53_MANIFEST}")" || return 1
+    [[ -f ${snapshot} && ! -L ${snapshot} && ${expected} =~ ^[0-9a-f]{64}$ &&
+       $(_a53_file_sha256 "${snapshot}") == "${expected}" ]]
+}
+
+_a53_resource_object() {
+    local point="$1" line="$2" source filesystem rest uuid=''
+    [[ -n ${line} && ${line} != *$'\n'* && ${line} != *$'\r'* ]] || return 1
+    read -r source rest filesystem rest <<< "${line}"
+    case "${filesystem}:${source}" in
+        xfs:UUID=?*|ext4:UUID=?*|btrfs:UUID=?*) uuid="${source#UUID=}" ;;
+        nfs:*:/*|nfs4:*:/*|cifs://*/*) ;;
+        *) return 1 ;;
+    esac
+    [[ $(awk '{print NF}' <<< "${line}") == 6 && $(awk '{print $2}' <<< "${line}") == "${point}" ]] || return 1
+    jq -cn --arg point "${point}" --arg line "${line}" --arg source "${source}" --arg uuid "${uuid}" --arg fs "${filesystem}" \
+        '{mountpoint:$point,exact_line:$line,source:$source,uuid:$uuid,filesystem:$fs,action:"created"}'
+}
+
+_a53_prepare_rollback_resources() {
+    local schema entry point line old resource resources='[]' retired='[]' source uuid expected after
+    schema="$(jq -r '.schema_version' "${A53_MANIFEST}")" || return 1
+    [[ ! -L ${A53_FSTAB} && ( ! -e ${A53_FSTAB} || -f ${A53_FSTAB} ) ]] || return 1
+    jq -e '(.mounts_by_transaction|type == "array") and
+      all(.mounts_by_transaction[]; (.mountpoint|type == "string") and (.source|type == "string") and (.uuid|type == "string")) and
+      ((.preserved_resources // []) | type == "array" and all(.[]; (.mountpoint|type == "string") and (.reason|type == "string")))' "${A53_MANIFEST}" >/dev/null || return 1
+    if [[ ${schema} == v2 ]]; then
+        jq -e '(.fstab_resources|type == "array") and
+          all(.fstab_resources[]; (.mountpoint|type == "string") and (.exact_line|type == "string") and
+            (.source|type == "string") and (.uuid|type == "string") and (.filesystem|type == "string") and
+            (.action == "created" or .action == "pending")) and ((.retired_mounts // [])|length == 0)' "${A53_MANIFEST}" >/dev/null || return 1
+        while IFS= read -r entry; do
+            point="$(jq -r '.mountpoint' <<< "${entry}")"
+            _a53_resource_path_safe "${point}" || return 1
+            resource="$(_a53_resource_object "${point}" "$(jq -r '.exact_line' <<< "${entry}")")" || return 1
+            jq -e --argjson expected "${resource}" '(.mountpoint == $expected.mountpoint and .source == $expected.source and .uuid == $expected.uuid and .filesystem == $expected.filesystem)' <<< "${entry}" >/dev/null || return 1
+            if [[ $(jq -r '.action' <<< "${entry}") == pending ]]; then
+                _a53_preserve_mount "${point}" unconfirmed_fstab_creation || return 1
+            fi
+        done < <(jq -c '.fstab_resources[]' "${A53_MANIFEST}")
+        return 0
+    fi
+    [[ ${schema} == v1 ]] || return 1
+    # Derive bounded legacy ownership once, and persist it before any mutation.
+    # The original v1 schema and snapshot remain immutable compatibility evidence.
+    _a53_snapshot_valid || return 1
+    if jq -e 'has("legacy_fstab_resources") and has("legacy_retired_resources")' "${A53_MANIFEST}" >/dev/null; then
+        _a53_validate_legacy_resources
+        return $?
+    fi
+    jq -e '(.retired_mounts // []) | type == "array" and all(.[];
+      (.mountpoint|type == "string") and (.source|type == "string") and (.was_mounted|type == "boolean"))' "${A53_MANIFEST}" >/dev/null || return 1
+    while IFS= read -r entry; do
+        point="$(jq -r '.mountpoint' <<< "${entry}")"
+        source="$(jq -r '.source' <<< "${entry}")"
+        uuid="$(jq -r '.uuid // ""' <<< "${entry}")"
+        _a53_resource_path_safe "${point}" || return 1
+        old="$(_a53_fstab_lines "${A53_TX_DIR}/fstab.before" "${point}")" || return 1
+        resource="$(_a53_resource_object "${point}" "${old}")" || return 1
+        [[ $(jq -r '.source' <<< "${resource}") == "${source}" ]] || return 1
+        [[ -z ${uuid} || $(jq -r '.uuid' <<< "${resource}") == "${uuid}" ]] || return 1
+        resource="$(jq -c --argjson mounted "$(jq '.was_mounted' <<< "${entry}")" '. + {was_mounted:$mounted}' <<< "${resource}")" || return 1
+        retired="$(jq -c --argjson r "${resource}" '. + [$r]' <<< "${retired}")" || return 1
+    done < <(jq -c '.retired_mounts[]?' "${A53_MANIFEST}")
+    while IFS= read -r entry; do
+        point="$(jq -r '.mountpoint' <<< "${entry}")"
+        source="$(jq -r '.source' <<< "${entry}")"
+        uuid="$(jq -r '.uuid' <<< "${entry}")"
+        _a53_resource_path_safe "${point}" || return 1
+        old="$(_a53_fstab_lines "${A53_TX_DIR}/fstab.before" "${point}")" || return 1
+        [[ -z ${old} && ${A53_FSTAB_CHANGED} == true ]] || continue
+        line="$(_a53_fstab_lines "${A53_FSTAB}" "${point}")" || return 1
+        [[ -n ${line} ]] || continue
+        after="$(jq -r '.fstab_after_sha256' "${A53_MANIFEST}")"
+        if [[ $(_a53_file_sha256 "${A53_FSTAB}") != "${after}" ]]; then
+            _a53_preserve_mount "${point}" insufficient_legacy_fstab_ownership || return 1
+            continue
+        fi
+        resource="$(_a53_resource_object "${point}" "${line}")" || return 1
+        expected="$(jq -r '.source' <<< "${resource}")"
+        if [[ ${expected} == UUID=* ]]; then
+            [[ -n ${uuid} && ${expected#UUID=} == "${uuid}" ]] || return 1
+        else
+            [[ -n ${source} && ${expected} == "${source}" ]] || return 1
+        fi
+        resources="$(jq -c --argjson r "${resource}" '. + [$r]' <<< "${resources}")" || return 1
+    done < <(jq -c '.mounts_by_transaction[]' "${A53_MANIFEST}")
+    _a53_manifest_update ".legacy_fstab_resources = ${resources} | .legacy_retired_resources = ${retired}" || return 1
+    _a53_validate_legacy_resources
+}
+
+_a53_mount_definition_safe() {
+    local point="$1" resource line expected
+    resource="$(jq -c --arg mp "${point}" '(if .schema_version == "v2" then .fstab_resources else .legacy_fstab_resources end)[] | select(.mountpoint == $mp)' "${A53_MANIFEST}")" || return 1
+    if [[ -n ${resource} ]]; then
+        expected="$(jq -r '.exact_line' <<< "${resource}")" || return 1
+    else
+        # Mounting an existing entry grants no fstab ownership. It still must
+        # retain the reviewed definition before we may undo our live mount.
+        expected="$(jq -r --arg mp "${point}" '.mounts_by_transaction[] | select(.mountpoint == $mp) | .fstab_line // empty' "${A53_MANIFEST}")" || return 1
+        [[ -n ${expected} ]] || return 0
+    fi
+    line="$(_a53_fstab_lines "${A53_FSTAB}" "${point}")" || return 1
+    [[ -z ${line} || ${line} == "${expected}" ]]
+}
+
+_a53_rollback_fstab_resources() {
+    local entry point line expected source uuid failure=0
+    while IFS= read -r entry; do
+        point="$(jq -r '.mountpoint' <<< "${entry}")"
+        _a53_mount_preserved "${point}" && continue
+        source="$(jq -r '.source' <<< "${entry}")"
+        uuid="$(jq -r '.uuid' <<< "${entry}")"
+        if ! _a53_mount_unused "${point}" "${uuid}" "${source}"; then
+            _a53_preserve_mount "${point}" "${A53_REFERENCE_REASON}" || failure=1
+            continue
+        fi
+        line="$(_a53_fstab_lines "${A53_FSTAB}" "${point}")" || { failure=1; continue; }
+        [[ -n ${line} ]] || continue
+        expected="$(jq -r '.exact_line' <<< "${entry}")"
+        if [[ ${line} != "${expected}" ]]; then
+            _a53_preserve_mount "${point}" conflicting_fstab || true
+            failure=1
+            continue
+        fi
+        # A failed unmount or a subsequently mounted filesystem still needs its entry.
+        if mountpoint -q -- "${point}"; then failure=1; continue; fi
+        jv_storage_remove_entry "${A53_FSTAB}" "${point}" || failure=1
+    done < <(jq -c '(if .schema_version == "v2" then .fstab_resources else .legacy_fstab_resources end)[] | select(.action == "created")' "${A53_MANIFEST}")
+    jv_trace_run systemctl daemon-reload >/dev/null 2>&1 || failure=1
+    (( failure == 0 ))
+}
+
+_a53_restore_retired_entries() {
+    [[ $(jq -r .schema_version "${A53_MANIFEST}") == v1 ]] || return 0
+    local entry point line expected tmp
+    while IFS= read -r entry; do
+        point="$(jq -r '.mountpoint' <<< "${entry}")"
+        expected="$(jq -r '.exact_line' <<< "${entry}")"
+        line="$(_a53_fstab_lines "${A53_FSTAB}" "${point}")" || return 1
+        if [[ -n ${line} ]]; then
+            [[ ${line} == "${expected}" ]] || return 1
+            continue
+        fi
+        [[ -e ${A53_FSTAB} ]] || : > "${A53_FSTAB}" || return 1
+        tmp="$(mktemp "$(dirname -- "${A53_FSTAB}")/.fstab.retired.XXXXXX")" || return 1
+        if ! cat -- "${A53_FSTAB}" > "${tmp}" || ! printf '%s\n' "${expected}" >> "${tmp}" ||
+           ! cp --attributes-only --preserve=all -- "${A53_FSTAB}" "${tmp}" ||
+           ! sync -f -- "${tmp}" || ! mv -fT -- "${tmp}" "${A53_FSTAB}"; then
+            rm -f -- "${tmp}"
+            return 1
+        fi
+    done < <(jq -c '.legacy_retired_resources[]?' "${A53_MANIFEST}")
+    jv_trace_run systemctl daemon-reload >/dev/null 2>&1
+}
+
+# Revalidate derived compatibility resources on every retry against immutable
+# evidence; the cached lists grant no appliance-wide authority.
+_a53_validate_legacy_resources() {
+    local entry point resource old source uuid
+    jq -e '(.legacy_fstab_resources|type == "array") and (.legacy_retired_resources|type == "array")' "${A53_MANIFEST}" >/dev/null || return 1
+    while IFS= read -r entry; do
+        point="$(jq -r '.mountpoint' <<< "${entry}")"
+        _a53_resource_path_safe "${point}" || return 1
+        resource="$(_a53_resource_object "${point}" "$(jq -r '.exact_line' <<< "${entry}")")" || return 1
+        jq -e --argjson r "${resource}" '.source == $r.source and .uuid == $r.uuid and .filesystem == $r.filesystem and .action == "created"' <<< "${entry}" >/dev/null || return 1
+    done < <(jq -c '.legacy_fstab_resources[],.legacy_retired_resources[]' "${A53_MANIFEST}")
+    while IFS= read -r entry; do
+        point="$(jq -r '.mountpoint' <<< "${entry}")"
+        old="$(_a53_fstab_lines "${A53_TX_DIR}/fstab.before" "${point}")" || return 1
+        [[ ${old} == "$(jq -r '.exact_line' <<< "${entry}")" ]] || return 1
+        source="$(jq -r '.source' <<< "${entry}")"
+        jq -e --arg mp "${point}" --arg src "${source}" --argjson mounted "$(jq '.was_mounted' <<< "${entry}")" \
+          'any(.retired_mounts[]?; .mountpoint == $mp and .source == $src and .was_mounted == $mounted)' "${A53_MANIFEST}" >/dev/null || return 1
+    done < <(jq -c '.legacy_retired_resources[]' "${A53_MANIFEST}")
+    while IFS= read -r entry; do
+        point="$(jq -r '.mountpoint' <<< "${entry}")"
+        [[ -z $(_a53_fstab_lines "${A53_TX_DIR}/fstab.before" "${point}") ]] || return 1
+        source="$(jq -r '.source' <<< "${entry}")"
+        uuid="$(jq -r '.uuid' <<< "${entry}")"
+        jq -e --arg mp "${point}" --arg src "${source}" --arg uuid "${uuid}" \
+          'any(.mounts_by_transaction[]; .mountpoint == $mp and (if $uuid != "" then .uuid == $uuid else .source == $src end))' "${A53_MANIFEST}" >/dev/null || return 1
+    done < <(jq -c '.legacy_fstab_resources[]' "${A53_MANIFEST}")
 }

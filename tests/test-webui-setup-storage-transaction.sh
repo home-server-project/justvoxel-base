@@ -54,6 +54,8 @@ trap 'rm -rf "$TMP"' EXIT
 
 A53_FSTAB="$TMP/fstab"
 A53_TRANSACTION_ROOT="$TMP/transactions"
+A53_INSTANCES_ROOT="$TMP/instances"
+A53_SETUP_INSTANCE_ROOT="$TMP/setup-instances"
 A53_DEFAULT_DATA_PATH="$TMP/system/minecraft"
 A53_DEFAULT_BACKUP_PATH="$TMP/system/backups"
 A54_SMB_CREDENTIALS="$TMP/etc/justvoxel/smb-backup.credentials"
@@ -404,7 +406,7 @@ eval "$saved_ensure_dir"
     A54_CREDENTIALS_MODE="$(stat -c '%a' "$A54_SMB_CREDENTIALS")"
     A54_CREDENTIALS_UID="$(stat -c '%u' "$A54_SMB_CREDENTIALS")"
     A54_CREDENTIALS_GID="$(stat -c '%g' "$A54_SMB_CREDENTIALS")"
-    _a53_manifest_update "del(.credentials_path) | .credentials_existed = true |
+    _a53_manifest_update "del(.credentials_path) | .schema_version = \"v1\" | .credentials_existed = true |
       .credentials_before_sha256 = \"$(_a53_file_sha256 "$A53_TX_DIR/smb.credentials.before")\" |
       .credentials_mode = \"${A54_CREDENTIALS_MODE}\" | .credentials_uid = \"${A54_CREDENTIALS_UID}\" |
       .credentials_gid = \"${A54_CREDENTIALS_GID}\"" || fail 'historical v1 evidence'
@@ -486,8 +488,11 @@ rmdir "$(dirname "$A54_SMB_CREDENTIALS")"
     jq -e --arg path "$A54_SMB_CREDENTIALS" '.credentials_path == $path and .credentials_changed' "$A53_MANIFEST" >/dev/null || fail 'isolated credentials evidence missing'
     if _a54_write_smb_credentials user replacement ''; then fail 'isolated credentials overwritten'; fi
     _a53_load_manifest_for_rollback || fail 'isolated SMB rollback evidence'
-    _a54_restore_smb_credentials || fail 'isolated SMB rollback'
+    # Finish the operation as well as restoring its credential. Leaving its
+    # request unfinished would be a genuine foreign reference in later cases.
+    _a53_rollback explicit || fail 'isolated SMB rollback'
     [[ ! -e $A54_SMB_CREDENTIALS ]] || fail 'isolated SMB rollback retained credentials'
+    jq -e '.phase == "storage_rolled_back" and .rollback.state == "succeeded" and .rollback.result == "rolled_back"' "$A53_MANIFEST" >/dev/null || fail 'isolated SMB rollback left a live Setup reference'
 )
 
 # SMB execution: password only in root-private credentials file, never transaction evidence.
@@ -534,7 +539,7 @@ out="$ACTION_OUT"
 jq -e '.ok and .rollback_state=="succeeded"' >/dev/null <<< "$out" || fail "SMB existing-credential rollback failed: $out"
 cmp -s "$A54_SMB_CREDENTIALS" "$TMP/smb.credentials.expected" || fail 'SMB rollback did not restore previous credential contents'
 [[ $(stat -c '%a' "$A54_SMB_CREDENTIALS") == 600 ]] || fail 'SMB rollback did not restore previous credential mode'
-[[ ! -e $A53_TRANSACTION_ROOT/44444444-4444-4444-8444-666666666666/smb.credentials.before ]] || fail 'successful SMB rollback retained previous credential snapshot'
+[[ -f $A53_TRANSACTION_ROOT/44444444-4444-4444-8444-666666666666/smb.credentials.before ]] || fail 'SMB rollback lost immutable credential recovery evidence'
 rm -f "$A54_SMB_CREDENTIALS"
 rmdir "$(dirname "$A54_SMB_CREDENTIALS")" 2>/dev/null || true
 
@@ -553,6 +558,15 @@ jq -e '.ok and .applied' >/dev/null <<< "$out" || fail "already-mounted SMB appl
 [[ $MOUNT_CALLS -eq 0 ]] || fail 'already-mounted SMB source was remounted'
 cmp -s "$A54_SMB_CREDENTIALS" "$TMP/smb.mounted.expected" || fail 'already-mounted SMB credentials were modified'
 [[ ! -e $A53_TRANSACTION_ROOT/44444444-4444-4444-8444-777777777777/smb.credentials.before ]] || fail 'already-mounted SMB transaction created credential snapshot'
+# Finish this operation before reusing the mocked mount for another case.
+# Its unfinished backup request would otherwise be a real foreign reference.
+reset_runtime
+run_action a53_rollback_action "$req"
+jq -e '.ok and .rollback_state=="succeeded" and .rollback_result=="rolled_back"' >/dev/null <<< "$ACTION_OUT" || fail "already-mounted SMB rollback failed: $ACTION_OUT"
+jq -e '.phase=="storage_rolled_back" and .rollback.state=="succeeded" and .rollback.result=="rolled_back"' "$A53_MANIFEST" >/dev/null || fail 'already-mounted SMB rollback left a live Setup reference'
+[[ $MOUNTED -eq 1 ]] || fail 'already-mounted SMB rollback unmounted pre-existing storage'
+cmp -s "$A54_SMB_CREDENTIALS" "$TMP/smb.mounted.expected" || fail 'already-mounted SMB rollback modified pre-existing credentials'
+cmp -s "$A53_FSTAB" "$TMP/fstab.expected" || fail 'already-mounted SMB rollback changed unrelated fstab'
 MOUNTED=0
 rm -f "$A54_SMB_CREDENTIALS"
 rmdir "$(dirname "$A54_SMB_CREDENTIALS")" 2>/dev/null || true
@@ -583,7 +597,7 @@ out="$ACTION_OUT"
 jq -e '.ok and .applied' >/dev/null <<< "$out" || fail "SMB rollback-failure setup failed: $out"
 snapshot="$A53_TRANSACTION_ROOT/44444444-4444-4444-8444-888888888888/smb.credentials.before"
 [[ -f $snapshot ]] || fail 'SMB recovery snapshot missing before rollback failure'
-printf '# concurrent admin change\n' >> "$A53_FSTAB"
+MOUNT_SOURCE='//nas/different-share'
 reset_runtime
 req_without_password="$(jq 'del(.smb_password)' <<< "$req")"
 run_action a53_rollback_action "$req_without_password"
@@ -595,6 +609,7 @@ jq -e '.rollback.state=="failed" and .rollback.result=="needs_attention"' "$reco
 cp -p "$recovery_manifest" "$TMP/smb.failed.manifest.expected"
 cp -p "$snapshot" "$TMP/smb.failed.snapshot.expected"
 cp -p "$A53_FSTAB" "$TMP/smb.failed.fstab.expected"
+MOUNT_SOURCE='//nas/backups'
 reset_runtime
 run_action a53_apply_action "$req"
 jq -e '(.ok|not) and .error=="A storage transaction already exists for this operation."' >/dev/null <<< "$ACTION_OUT" || fail "failed SMB transaction ID was reused: $ACTION_OUT"
@@ -606,6 +621,11 @@ rm -f "$A54_SMB_CREDENTIALS"
 rmdir "$(dirname "$A54_SMB_CREDENTIALS")" 2>/dev/null || true
 
 # A genuinely different mounted source must block rollback before unmounting.
+# Use independent infrastructure from the intentionally unfinished SMB fixture.
+MOUNT="$TMP/source-conflict-mount"
+FAKE_PART="$TMP/source-conflict-partition"
+: > "$FAKE_PART"
+CURRENT_UUID=bbbbbbbb-cccc-dddd-eeee-ffffffffffff
 MOUNTED=0
 MOUNT_CALLS=0
 MOUNT_SOURCE="$FAKE_PART"
@@ -622,7 +642,12 @@ jq -e '(.ok|not) and .rollback_state=="failed" and .rollback_result=="needs_atte
 [[ $MOUNTED -eq 1 ]] || fail 'different mount source was unmounted'
 MOUNT_SOURCE="$FAKE_PART"
 
-# Concurrent fstab change must block explicit rollback and preserve recovery evidence.
+# An unrelated later fstab edit must survive resource-level rollback.
+MOUNT="$TMP/concurrent-mount"
+FAKE_PART="$TMP/concurrent-partition"
+: > "$FAKE_PART"
+MOUNT_SOURCE="$FAKE_PART"
+CURRENT_UUID=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
 MOUNTED=0
 MOUNT_CALLS=0
 req="$(make_partition_request 66666666-6666-4666-8666-666666666666)"
@@ -633,7 +658,9 @@ printf '# concurrent admin change\n' >> "$A53_FSTAB"
 reset_runtime
 run_action a53_rollback_action "$req"
 out="$ACTION_OUT"
-jq -e '(.ok|not) and .rollback_state=="failed" and .rollback_result=="needs_attention"' >/dev/null <<< "$out" || fail "rollback conflict response: $out"
-[[ $MOUNTED -eq 1 ]] || fail 'conflicted rollback changed mount before detecting fstab drift'
+jq -e '.ok and .rollback_state=="succeeded"' >/dev/null <<< "$out" || fail "resource rollback response: $out"
+[[ $MOUNTED -eq 0 ]] || fail 'unused transaction mount remained mounted'
+grep -Fxq '# concurrent admin change' "$A53_FSTAB" || fail 'resource rollback lost unrelated fstab edit'
+! grep -Fq "UUID=$CURRENT_UUID $MOUNT " "$A53_FSTAB" || fail 'transaction fstab resource remained'
 
 echo 'A5.4 storage transaction NFS/SMB tests passed.'

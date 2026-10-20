@@ -5,11 +5,18 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${repo_root}/mjust/libexec/operation-trace.sh"
 source "${repo_root}/mjust/libexec/common.sh"
 source "${repo_root}/mjust/libexec/storage-common-base.sh"
+source "${repo_root}/mjust/libexec/storage-lifecycle.sh"
 source "${repo_root}/mjust/libexec/admin-setup-storage-transaction-common.sh"
 source "${repo_root}/mjust/libexec/admin-setup-storage-transaction-apply.sh"
 source "${repo_root}/mjust/libexec/admin-setup-storage-transaction-actions.sh"
 
 systemctl() { return 0; }
+# Model root ownership for private appliance files in an unprivileged fixture.
+stat() {
+    if [[ ${2:-} == '%u:%g:%a:%h' ]]; then
+        printf '0:0:%s\n' "$(command stat -c '%a:%h' -- "${@: -1}")"
+    else command stat "$@"; fi
+}
 MOUNTED=false
 MOUNT_SOURCE=/dev/test
 MOUNT_UUID=test-uuid
@@ -26,6 +33,8 @@ install() {
 base="$(mktemp -d)"
 trap 'rm -rf -- "${base}"' EXIT
 A53_TRANSACTION_ROOT="${base}/transactions"
+A53_INSTANCES_ROOT="${base}/instances"
+A53_SETUP_INSTANCE_ROOT="${base}/setup-instances"
 A53_OPERATION_ID=12345678-1234-4123-8123-123456789abc
 A53_PLAN_FINGERPRINT="sha256:$(printf 'a%.0s' {1..64})"
 A53_FSTAB="${base}/fstab"
@@ -39,9 +48,10 @@ fixture() {
     A53_MANIFEST="${A53_TX_DIR}/manifest.json"
     printf '# keep exactly\n//old/share /var/mnt/justvoxel-backup cifs defaults 0 0\n' > "${A53_TX_DIR}/fstab.before"
     cp -- "${A53_TX_DIR}/fstab.before" "${A53_FSTAB}"
-    printf 'UUID=new /var/mnt/justvoxel-data xfs defaults 0 2\n' >> "${A53_FSTAB}"
+    printf 'UUID=test-uuid /var/mnt/justvoxel-data xfs defaults 0 2\n' >> "${A53_FSTAB}"
     printf 'username=old\npassword=old\n' > "${A53_TX_DIR}/smb.credentials.before"
     printf 'username=new\npassword=new\n' > "${A54_SMB_CREDENTIALS}"
+    chmod 0600 "${A54_SMB_CREDENTIALS}" "${A53_TX_DIR}/smb.credentials.before"
     local before after credentials_before credentials_after
     before="$(_a53_file_sha256 "${A53_TX_DIR}/fstab.before")"
     after="$(_a53_file_sha256 "${A53_FSTAB}")"
@@ -77,8 +87,10 @@ jq -e '.phase == "storage_rolled_back" and .rollback.state == "succeeded" and .r
 
 fixture
 printf '# unexpected\n' >> "${A53_FSTAB}"
-assert_result "$(recover)" needs_attention
+assert_result "$(recover)" rolled_back
 grep -q '^# unexpected$' "${A53_FSTAB}"
+grep -q '^UUID=test-uuid ' "${A53_FSTAB}"
+jq -e 'any(.preserved_resources[]; .reason == "insufficient_legacy_fstab_ownership")' "${A53_MANIFEST}" >/dev/null
 
 fixture
 jq '.fstab_changed = false | .fstab_after_sha256 = ""' "${A53_MANIFEST}" > "${base}/manifest.updated"

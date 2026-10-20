@@ -129,8 +129,7 @@ _a53_recovery_fail() {
 }
 
 a53_recover_action() {
-    local request before after current credentials_before credentials_after credentials_current
-    local entry mountpoint uuid source current_source current_uuid i
+    local request
     request="$(cat)"
     if ! jq -e 'type == "object" and (keys | sort) == ["operation_id","plan_fingerprint","schema_version"] and .schema_version == "v1" and (.operation_id|type == "string") and (.plan_fingerprint|type == "string")' >/dev/null 2>&1 <<< "${request}"; then
         _a53_json false false storage_rollback failed needs_attention 'Setup storage recovery request is invalid.'
@@ -144,7 +143,7 @@ a53_recover_action() {
     fi
     _a53_evidence_from_manifest
     if ! jq -e '
-        .schema_version == "v1" and
+        (.schema_version == "v1" or .schema_version == "v2") and
         (.fstab_existed|type == "boolean") and (.fstab_changed|type == "boolean") and
         (.credentials_existed|type == "boolean") and (.credentials_changed|type == "boolean") and
         (.mounts_by_transaction|type == "array") and
@@ -158,89 +157,12 @@ a53_recover_action() {
         return 0
     fi
 
-    if [[ ${A53_FSTAB_CHANGED} == true ]]; then
-        before="$(jq -r '.fstab_before_sha256 // ""' "${A53_MANIFEST}")"
-        after="$(jq -r '.fstab_after_sha256 // ""' "${A53_MANIFEST}")"
-        current="$(_a53_file_sha256 "${A53_FSTAB}")"
-        [[ ${A53_FSTAB_EXISTED} == true ]] || before=absent
-        if [[ ${A53_FSTAB_EXISTED} == true ]]; then
-            [[ -f ${A53_TX_DIR}/fstab.before && $(_a53_file_sha256 "${A53_TX_DIR}/fstab.before") == "${before}" ]] || { _a53_recovery_fail; return 0; }
-        fi
-        if [[ ${current} != "${before}" ]]; then
-            [[ ${after} =~ ^[0-9a-f]{64}$ && ${current} == "${after}" ]] || { _a53_recovery_fail; return 0; }
-        fi
-        _a53_evidence_set fstab_recovery_state "$([[ ${current} == "${before}" ]] && echo already_restored || echo after_state)"
-    else
-        _a53_evidence_set fstab_recovery_state not_changed
+    if ! _a53_rollback recovery; then
+        _a53_recovery_fail
+        return 0
     fi
-
-    if [[ ${A54_CREDENTIALS_CHANGED} == true ]]; then
-        [[ ! -L ${A54_SMB_CREDENTIALS} && $(_a53_normalize_path "${A54_SMB_CREDENTIALS}") == "${A54_SMB_CREDENTIALS}" ]] || { _a53_recovery_fail; return 0; }
-        credentials_before="$(jq -r '.credentials_before_sha256 // ""' "${A53_MANIFEST}")"
-        credentials_after="$(jq -r '.credentials_after_sha256 // ""' "${A53_MANIFEST}")"
-        credentials_current="$(_a53_file_sha256 "${A54_SMB_CREDENTIALS}")"
-        [[ ${A54_CREDENTIALS_EXISTED} == true ]] || credentials_before=absent
-        if [[ ${A54_CREDENTIALS_EXISTED} == true ]]; then
-            [[ -f ${A53_TX_DIR}/smb.credentials.before && $(_a53_file_sha256 "${A53_TX_DIR}/smb.credentials.before") == "${credentials_before}" ]] || { _a53_recovery_fail; return 0; }
-        fi
-        if [[ ${credentials_current} != "${credentials_before}" ]]; then
-            [[ ( ${credentials_after} =~ ^[0-9a-f]{64}$ || ${credentials_after} == absent ) && ${credentials_current} == "${credentials_after}" ]] || { _a53_recovery_fail; return 0; }
-        fi
-        _a53_evidence_set credentials_recovery_state "$([[ ${credentials_current} == "${credentials_before}" ]] && echo already_restored || echo after_state)"
-    fi
-
-    mapfile -t A53_MOUNTS_BY_US < <(jq -c '.mounts_by_transaction[]' "${A53_MANIFEST}")
-    for entry in "${A53_MOUNTS_BY_US[@]}"; do
-        mountpoint="$(jq -r '.mountpoint' <<< "${entry}")"
-        uuid="$(jq -r '.uuid' <<< "${entry}")"
-        source="$(jq -r '.source' <<< "${entry}")"
-        [[ -n ${source} && $(_a53_normalize_path "${mountpoint}") == "${mountpoint}" ]] && storage_validate_mountpoint_path "${mountpoint}" >/dev/null 2>&1 || { _a53_recovery_fail; return 0; }
-        if jv_trace_run mountpoint -q -- "${mountpoint}"; then
-            current_source="$(jv_exact_mount_identity SOURCE "${mountpoint}" 2>/dev/null)" || { _a53_recovery_fail; return 0; }
-            [[ ${current_source} == "${source}" ]] || { _a53_recovery_fail; return 0; }
-            if [[ -n ${uuid} ]]; then
-                current_uuid="$(jv_exact_mount_identity UUID "${mountpoint}" 2>/dev/null)" || { _a53_recovery_fail; return 0; }
-                [[ ${current_uuid} == "${uuid}" ]] || { _a53_recovery_fail; return 0; }
-            fi
-        fi
-    done
-
-    _a53_manifest_set_rollback running recovery_in_progress >/dev/null 2>&1 || { _a53_recovery_fail; return 0; }
-    for (( i=${#A53_MOUNTS_BY_US[@]}-1; i>=0; i-- )); do
-        mountpoint="$(jq -r '.mountpoint' <<< "${A53_MOUNTS_BY_US[$i]}")"
-        if jv_trace_run mountpoint -q -- "${mountpoint}"; then
-            source="$(jq -r '.source' <<< "${A53_MOUNTS_BY_US[$i]}")"
-            uuid="$(jq -r '.uuid' <<< "${A53_MOUNTS_BY_US[$i]}")"
-            current_source="$(jv_exact_mount_identity SOURCE "${mountpoint}" 2>/dev/null)" || { _a53_recovery_fail; return 0; }
-            [[ ${current_source} == "${source}" ]] || { _a53_recovery_fail; return 0; }
-            if [[ -n ${uuid} ]]; then
-                current_uuid="$(jv_exact_mount_identity UUID "${mountpoint}" 2>/dev/null)" || { _a53_recovery_fail; return 0; }
-                [[ ${current_uuid} == "${uuid}" ]] || { _a53_recovery_fail; return 0; }
-            fi
-            jv_trace_run umount -- "${mountpoint}" >/dev/null 2>&1 || { _a53_recovery_fail; return 0; }
-            ! jv_trace_run mountpoint -q -- "${mountpoint}" || { _a53_recovery_fail; return 0; }
-        fi
-    done
-    if [[ ${A53_FSTAB_CHANGED} == true ]]; then
-        current="$(_a53_file_sha256 "${A53_FSTAB}")"
-        if [[ ${current} != "${before}" ]]; then
-            [[ ${current} == "${after}" ]] || { _a53_recovery_fail; return 0; }
-            _a53_restore_fstab || { _a53_recovery_fail; return 0; }
-        fi
-        [[ $(_a53_file_sha256 "${A53_FSTAB}") == "${before}" ]] || { _a53_recovery_fail; return 0; }
-    fi
-    if [[ ${A54_CREDENTIALS_CHANGED} == true ]]; then
-        credentials_current="$(_a53_file_sha256 "${A54_SMB_CREDENTIALS}")"
-        if [[ ${credentials_current} != "${credentials_before}" ]]; then
-            [[ ${credentials_current} == "${credentials_after}" ]] || { _a53_recovery_fail; return 0; }
-            _a54_restore_smb_credentials || { _a53_recovery_fail; return 0; }
-        fi
-        [[ $(_a53_file_sha256 "${A54_SMB_CREDENTIALS}") == "${credentials_before}" ]] || { _a53_recovery_fail; return 0; }
-    fi
-    _a53_restore_retired_mounts || { _a53_recovery_fail; return 0; }
-    _a53_remove_created_empty_dirs
-    _a53_manifest_set_phase storage_rolled_back && _a53_manifest_set_rollback succeeded rolled_back || { _a53_recovery_fail; return 0; }
     _a53_evidence_set recovery_result rolled_back
+    _a53_evidence_set fstab_recovery_state "$([[ ${A53_FSTAB_CHANGED} == true ]] && echo resource_rollback || echo not_changed)"
     _a53_evidence_from_manifest
     _a53_json true false storage_rolled_back succeeded rolled_back ''
 }
