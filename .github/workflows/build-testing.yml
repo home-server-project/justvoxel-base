@@ -90,9 +90,11 @@ jobs:
             printf 'Running test: %s\n' "${test_script}"
             # Real ownership checks need root inside a rootless user namespace.
             test_command=(bash "${test_script}")
-            if [[ "${test_script}" == tests/test-instance-delete.sh ]]; then
-              test_command=(podman unshare bash "${test_script}")
-            fi
+            case "${test_script}" in
+              tests/test-instance-delete.sh|tests/test-instance-backups.sh|tests/test-instance-restore.sh|tests/test-legacy-backup-restore-exclusion.sh)
+                test_command=(podman unshare bash "${test_script}")
+                ;;
+            esac
             if "${test_command[@]}"; then
               printf 'PASS: %s\n' "${test_script}"
             else

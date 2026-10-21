@@ -37,7 +37,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y libpam0g-dev libpwquality-dev
+          sudo apt-get install -y libpam0g-dev libpwquality-dev podman
 
       - name: Run shell and mjust regression tests
         shell: bash
@@ -55,7 +55,14 @@ jobs:
           done
           for test_script in tests/test-*.sh; do
             [[ -f "${test_script}" ]] || continue
-            bash "${test_script}"
+            # Real ownership checks need root inside a rootless user namespace.
+            test_command=(bash "${test_script}")
+            case "${test_script}" in
+              tests/test-instance-delete.sh|tests/test-instance-backups.sh|tests/test-instance-restore.sh|tests/test-legacy-backup-restore-exclusion.sh)
+                test_command=(podman unshare bash "${test_script}")
+                ;;
+            esac
+            "${test_command[@]}"
           done
 
       - name: Build and test management agent source
