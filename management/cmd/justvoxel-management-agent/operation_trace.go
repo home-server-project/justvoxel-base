@@ -31,7 +31,7 @@ func withOperationTrace(ctx context.Context, store *operationStore, id string, s
 	return context.WithValue(ctx, operationTraceKey{}, operationTraceContext{store, id, secrets})
 }
 func supportedOperationTrace(kind string) bool {
-	return kind == operationTypeSetup || kind == operationTypeMinecraftReset || kind == operationTypeFactoryReset
+	return kind == operationTypeMinecraftContainerUpdate || kind == operationTypeSetup || kind == operationTypeMinecraftReset || kind == operationTypeFactoryReset
 }
 
 var traceANSI = regexp.MustCompile(`\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-_])`)

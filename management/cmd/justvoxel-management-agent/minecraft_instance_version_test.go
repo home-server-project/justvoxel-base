@@ -116,3 +116,58 @@ func TestVersionWorkerNeverRetagsOrRemovesSharedSiblingImages(t *testing.T) {
 		t.Fatal("image pulls are not bound to reviewed digest")
 	}
 }
+
+func TestContainerPublicationOnlyChangesSelectedDigestWhileRunning(t *testing.T) {
+	f := newInstanceActivationFixture(t)
+	f.activateBoth()
+	f.states["jv-a1b2c3"] = "active"
+	f.containers["jv-a1b2c3"] = "running"
+	previous, err := f.backend.readRecord("jv-a1b2c3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sibling, err := f.backend.readRecord("jv-d4e5f6")
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := f.backend.records()
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := previous
+	next.Runtime.ImageDigest = "sha256:" + strings.Repeat("b", 64)
+	originalCommand := f.backend.command
+	f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+		if command == "podman" && len(args) == 5 && args[0] == "image" && args[1] == "inspect" && args[4] == "{{.Digest}}" {
+			return []byte(next.Runtime.ImageDigest), nil
+		}
+		return originalCommand(ctx, command, args...)
+	}
+	f.calls = nil
+	if err = f.backend.applyVersion(context.Background(), previous, instanceReplaceRecord(records, next), f.snapshot, true, true); err != nil {
+		t.Fatal(err)
+	}
+	after, err := f.backend.readRecord(previous.Runtime.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(after.Runtime, next.Runtime) || after.EnvironmentSHA256 != previous.EnvironmentSHA256 || f.states[previous.Runtime.ID] != "active" {
+		t.Fatal("image publication changed runtime or process")
+	}
+	other, err := f.backend.readRecord(sibling.Runtime.ID)
+	if err != nil || !reflect.DeepEqual(other, sibling) {
+		t.Fatal("sibling changed", err)
+	}
+	for _, call := range f.calls {
+		for _, forbidden := range []string{"systemctl start", "systemctl stop", "firewall-cmd", " channel "} {
+			if strings.Contains(call, forbidden) {
+				t.Fatalf("image publication invoked %s", call)
+			}
+		}
+	}
+	// The same special path must never authorize adjacent configuration changes.
+	next.Runtime.Version = "1.21.5"
+	if err = f.backend.applyVersion(context.Background(), after, instanceReplaceRecord(records, next), f.snapshot, true, true); err == nil {
+		t.Fatal("image-only publication changed the Minecraft version")
+	}
+}

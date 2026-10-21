@@ -23,3 +23,18 @@ jv_trace_run() {
     jv_trace_result "${rc}"
     return "${rc}"
 }
+
+# Fixed Podman pull only. Ingest drains and bounds FD 3 on the Agent side.
+# PIPESTATUS preserves pull failure even when the trace consumer closes early.
+jv_trace_pull() {
+    local rc
+    if [[ ${JV_OPERATION_TRACE_FD:-} == 3 ]]; then
+        set +e
+        podman pull "$1" 2>&1 | tee /dev/fd/3
+        rc=${PIPESTATUS[0]}
+        set -e
+    else
+        if podman pull "$1"; then rc=0; else rc=$?; fi
+    fi
+    return "${rc}"
+}

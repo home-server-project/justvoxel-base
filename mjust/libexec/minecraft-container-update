@@ -1,0 +1,151 @@
+#!/usr/bin/bash
+set -Eeuo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/update-policy.sh
+source /usr/libexec/justvoxel/mjust/operation-trace.sh
+source /usr/libexec/justvoxel/mjust/instance-context.sh
+source /usr/libexec/justvoxel/mjust/minecraft-container-plan.sh
+require_root
+[[ $# -ge 3 && $1 == --instance && $2 =~ ^jv-[a-z0-9]{6,12}$ ]] || exit 2
+id="$2"; mode="$3"; shift 3
+case "${mode}" in
+    status|verify) [[ $# == 0 ]] || exit 2 ;;
+    update)
+        [[ $# == 4 && $1 =~ ^sha256:[a-f0-9]{64}$ && $2 =~ ^(true|false)$ && $3 =~ ^(true|false)$ && $4 =~ ^(true|false)$ ]] || exit 2
+        reviewed="$1"; restart="$2"; backup="$3"; confirm_players="$4"
+        [[ ${backup} != true || ${restart} == true ]] || exit 2
+        [[ ! -e ${JV_SETUP_IN_PROGRESS} && ! -L ${JV_SETUP_IN_PROGRESS} ]] || exit 1
+        exec 9>"${JV_MAINTENANCE_LOCK}"
+        flock -n 9 || exit 1 ;;
+    *) exit 2 ;;
+esac
+jv_load_instance "${id}" || exit 1
+if [[ ${mode} == verify ]]; then
+    active="$(systemctl show --property=ActiveState --value "${JV_INSTANCE_UNIT}")"
+    live="$(podman ps --filter "name=^${JV_INSTANCE_CONTAINER}$" --format '{{.Names}}')"
+    case "${active}" in
+        active)
+            [[ ${live} == "${JV_INSTANCE_CONTAINER}" ]] || exit 1
+            # A verified pull-only operation can deliberately leave the previous
+            # image running. Verify its identity and stack without restarting it.
+            running="$(podman inspect "${JV_INSTANCE_CONTAINER}" --format '{{.Image}}')"
+            [[ -n ${running} && $(podman image inspect "${running}" --format '{{.Digest}}') =~ ^sha256:[a-f0-9]{64}$ ]] || exit 1
+            JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack --instance "${id}" "${MINECRAFT_VERSION}" ;;
+        inactive|failed)
+            # A missing local image is a supported Download required state.
+            # Keep the verified stopped definition so a failed download can retry.
+            [[ -z ${live} ]] || exit 1 ;;
+        *) exit 1 ;;
+    esac
+    exit 0
+fi
+if ! jv_container_plan; then
+    [[ ${mode} != status ]] || { jq -cn --arg id "${id}" --arg image "${JV_MINECRAFT_IMAGE_REPO}:${MINECRAFT_IMAGE_TAG}" '{instance_id:$id,image:$image,state:"unavailable",running:false,plan_fingerprint:""}'; exit 0; }
+    jv_trace_output 'Unable to check the selected image. Refresh and review again.'
+    exit 1
+fi
+if [[ ${mode} == status ]]; then
+    jq -cn --arg id "${id}" --arg image "${image}" --arg state "${container_state}" --arg fingerprint "${fingerprint}" --argjson running "${container_running}" \
+        '{instance_id:$id,image:$image,state:$state,running:$running,plan_fingerprint:$fingerprint}'
+    exit 0
+fi
+jv_trace_output "Checking ${image}..."
+[[ ${fingerprint} == "${reviewed}" ]] || { jv_trace_output 'Image or runtime changed. Refresh and review again.'; exit 1; }
+[[ ${container_state} == update_available || ${container_state} == image_missing || ( ${container_state} == restart_needed && ${restart} == true ) ]] || exit 1
+[[ ${restart} != true || ${container_running} == true ]] || { jv_trace_output 'The server is stopped. Download without restarting; the image will be used on next server start.'; exit 1; }
+initial_plan="${plan}"
+old_digest="${JV_INSTANCE_IMAGE_DIGEST}"
+old_running="$(jq -r .running <<< "${plan}")"
+old_version="${MINECRAFT_VERSION}"
+# For legacy unpinned records retain the verified local image for rollback.
+if [[ -z ${old_digest} ]]; then old_digest="$(jq -r .local_digest <<< "${plan}")"; fi
+if [[ ${restart} == true ]]; then
+    # A previously deferred pull may have selected a newer image already.
+    # Rollback must restore the image that was actually serving players.
+    old_digest="$(podman image inspect "${old_running}" --format '{{.Digest}}')"
+    [[ ${old_digest} =~ ^sha256:[a-f0-9]{64}$ ]] || exit 1
+fi
+mutation_started=false
+published=false
+cleanup() {
+    local result=$? recovery=yes
+    trap - EXIT
+    if (( result != 0 )) && [[ ${mutation_started} == true ]]; then
+        jv_trace_stage 'Restoring previous selected image'
+        if [[ ${restart} == true ]]; then systemctl stop "${JV_INSTANCE_UNIT}" || recovery=no; fi
+        if [[ ${recovery} == yes && ${published} == true ]]; then
+            /usr/libexec/justvoxel/management-agent instance-container-publish "${id}" "${old_digest}" || recovery=no
+        fi
+        if [[ ${recovery} == yes && ${restart} == true ]]; then
+            systemctl start "${JV_INSTANCE_UNIT}" && wait_for_rcon 900 && \
+                [[ $(podman inspect "${JV_INSTANCE_CONTAINER}" --format '{{.Image}}') == "${old_running}" ]] && \
+                JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack --instance "${id}" "${old_version}" || recovery=no
+        fi
+        [[ ${recovery} == yes ]] || jv_trace_output 'Previous runtime recovery is incomplete; operation requires attention.'
+    fi
+    exit "${result}"
+}
+trap cleanup EXIT
+# All downloads precede disruption. No release metadata or plugin maintenance.
+if [[ -z $(jq -r .target_id <<< "${plan}") ]]; then
+    jv_trace_stage 'Pulling image'
+    jv_trace_pull "${target}"
+fi
+new_id="$(podman image inspect "${target}" --format '{{.Id}}')"
+[[ -n ${new_id} && $(podman image inspect "${target}" --format '{{.Digest}}') == "${remote}" ]] || exit 1
+[[ $(jv_remote_platform_digest "${image}") == "${remote}" ]] || { jv_trace_output 'The configured tag changed. Refresh and review again.'; exit 1; }
+# Downloading changes local image presence only. Revalidate record and running state.
+jv_load_instance "${id}" || exit 1
+jv_container_plan || exit 1
+[[ $(jq -c 'del(.target_id,.local_id,.local_digest)' <<< "${plan}") == "$(jq -c 'del(.target_id,.local_id,.local_digest)' <<< "${initial_plan}")" ]] || { jv_trace_output 'Runtime changed. Refresh and review again.'; exit 1; }
+if [[ -n $(jq -r .local_id <<< "${initial_plan}") ]]; then
+    [[ $(jq -r .local_id <<< "${plan}") == "$(jq -r .local_id <<< "${initial_plan}")" &&
+       $(jq -r .local_digest <<< "${plan}") == "$(jq -r .local_digest <<< "${initial_plan}")" ]] || { jv_trace_output 'Local image changed. Refresh and review again.'; exit 1; }
+else
+    [[ -z $(jq -r .local_id <<< "${plan}") ||
+       ( $(jq -r .local_id <<< "${plan}") == "${new_id}" && $(jq -r .local_digest <<< "${plan}") == "${remote}" ) ]] || exit 1
+fi
+jv_trace_output 'Image downloaded and verified.'
+if [[ ${restart} == true ]]; then
+    # Reuse exact-instance player parsing and the established graceful stop.
+    source /usr/libexec/justvoxel/mjust/interrupt-safety.sh
+    source /usr/libexec/justvoxel/mjust/migration-instance.sh
+    players="$(jv_migration_players_json)" || { jv_trace_output 'Player state is unknown. Server left untouched.'; exit 1; }
+    [[ $(jq -r .state <<< "${players}") == running ]] || exit 1
+    [[ $(jq -r .online <<< "${players}") == 0 || ${confirm_players} == true ]] || { jv_trace_output 'Online players require confirmation. Server left untouched.'; exit 1; }
+    JV_INTERRUPT_CONFIRMATION_MODE=required
+    [[ ${confirm_players} != true ]] || JV_INTERRUPT_CONFIRMATION_MODE=confirmed
+    # The stop helper repeats player checks immediately before shutdown.
+    jv_begin_minecraft_stop() {
+        mutation_started=true
+        systemctl --no-block stop "${JV_INSTANCE_UNIT}"
+    }
+    jv_trace_stage 'Gracefully stopping selected server'
+    jv_stop_minecraft_adaptive 'Update Minecraft container'
+    [[ ${mutation_started} == true ]] || { jv_trace_output 'The server stopped before maintenance. Refresh and review again.'; exit 1; }
+    if [[ ${backup} == true ]]; then
+        jv_trace_stage 'Creating cold backup'
+        /usr/libexec/justvoxel/management-agent instance-version-backup "${id}"
+    fi
+fi
+# Recheck the moving tag immediately before publication, also after a backup.
+[[ $(jv_remote_platform_digest "${image}") == "${remote}" ]] || { jv_trace_output 'The configured tag changed. Refresh and review again.'; exit 1; }
+mutation_started=true
+# Mark before publication: its durable transaction may need recovery on failure.
+published=true
+/usr/libexec/justvoxel/management-agent instance-container-publish "${id}" "${remote}"
+if [[ ${restart} == true ]]; then
+    jv_trace_stage 'Starting and verifying selected server'
+    systemctl start "${JV_INSTANCE_UNIT}"
+    wait_for_rcon 900
+    [[ $(podman inspect "${JV_INSTANCE_CONTAINER}" --format '{{.Image}}') == "${new_id}" ]] || exit 1
+    JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack --instance "${id}" "${old_version}"
+    jv_trace_output 'Selected server restarted and verified.'
+else
+    [[ $(systemctl show --property=ActiveState --value "${JV_INSTANCE_UNIT}") == "$(jq -r .active <<< "${initial_plan}")" ]] || exit 1
+    if [[ ${container_running} == true ]]; then
+        [[ $(podman inspect "${JV_INSTANCE_CONTAINER}" --format '{{.Image}}') == "${old_running}" ]] || exit 1
+    fi
+    jv_trace_output 'Restart deferred. The new image will be used on the next server start.'
+fi
+mutation_started=false

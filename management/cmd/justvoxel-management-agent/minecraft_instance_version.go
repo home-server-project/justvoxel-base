@@ -41,6 +41,13 @@ func instanceVersionCommand(ctx context.Context, args []string) error {
 	if err = b.verifyLive(previous); err != nil {
 		return err
 	}
+	containerOnly := args[0] == "instance-container-publish"
+	if containerOnly {
+		if len(args) != 3 || (args[2] != "" && !operationFingerprintPattern.MatchString(args[2])) {
+			return errInstanceID
+		}
+		args = []string{"instance-version-publish", id, previous.Runtime.Software, previous.Runtime.ImageTag, previous.Runtime.Version, previous.Runtime.VersionPolicy, args[2]}
+	}
 	switch args[0] {
 	case "instance-version-backup":
 		if len(args) != 2 {
@@ -48,7 +55,7 @@ func instanceVersionCommand(ctx context.Context, args []string) error {
 		}
 		return instanceMaintenanceColdBackup(ctx, id)
 	case "instance-version-publish":
-		if (len(args) != 7 && (len(args) != 9 || args[7] != "--migration")) || (args[6] != "" && !operationFingerprintPattern.MatchString(args[6])) || !validSetupServerType(args[2]) || !imageTagInputPattern.MatchString(args[3]) || !instanceRuntimeVersionPattern.MatchString(args[4]) || (args[5] != "recommended" && args[5] != "latest" && args[5] != "pinned") {
+		if (len(args) != 7 && (len(args) != 9 || args[7] != "--migration")) || (args[6] != "" && !operationFingerprintPattern.MatchString(args[6])) || !validSetupServerType(args[2]) || !imageTagInputPattern.MatchString(args[3]) || !instanceRuntimeVersionPattern.MatchString(args[4]) || (!containerOnly && args[5] != "recommended" && args[5] != "latest" && args[5] != "pinned") {
 			return errInstanceID
 		}
 		snapshot, _, _, err := b.snapshot(ctx)
@@ -78,7 +85,7 @@ func instanceVersionCommand(ctx context.Context, args []string) error {
 			}
 			next.Runtime.PaperChannel = strings.TrimSpace(string(channel))
 		}
-		return b.applyVersion(ctx, previous, instanceReplaceRecord(records, next), snapshot, true)
+		return b.applyVersion(ctx, previous, instanceReplaceRecord(records, next), snapshot, true, containerOnly)
 	}
 	return errInstanceID
 }

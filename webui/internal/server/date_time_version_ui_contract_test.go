@@ -39,7 +39,7 @@ func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 		}
 	}
 	version := read("static/version-workspace.js")
-	for _, want := range []string{"Paper", "Purpur", "Vanilla", "Reset Minecraft", "Installed", "Available", "Recommended", "Latest", "Specific version", "Geyser/Floodgate", "/api/minecraft/workspace/settings/plan", "compatibility_blocked"} {
+	for _, want := range []string{"Container", "Paper", "Purpur", "Installed", "Available", "Recommended", "Latest", "Specific version", "Geyser/Floodgate", "/api/minecraft/workspace/settings/plan", "compatibility_blocked"} {
 		if !strings.Contains(version, want) {
 			t.Fatalf("Version missing %q", want)
 		}
@@ -95,23 +95,23 @@ func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 	if strings.Contains(app, `id !== "migration" && id !== "version"`) || !strings.Contains(app, `if (Number.isFinite(saved.height) && saved.height > 0) element.style.height = saved.height + "px";`) {
 		t.Fatal("Version must restore its saved height when switching tabs")
 	}
-	if !strings.Contains(version, `<label data-version-custom>Custom tag<input`) || strings.Contains(version, `data-version-custom hidden`) || strings.Contains(version, `form.querySelector("[data-version-custom]").hidden`) {
-		t.Fatal("Version custom tag must remain visible for every channel")
-	}
 	for _, want := range []string{
-		`const custom = channel.value === "custom"`,
-		`customTag.required = custom`,
-		`customTag.disabled = !custom || Boolean(pending.operation)`,
-		`channel.addEventListener("change", () => { clearReview(); sync(); })`,
-		`const channelRow = form.querySelector(".version-channel-row")`,
-		`channelRow.append(check, reviewButton)`,
+		`identity.dataset.containerRow = "identity"`,
+		`controls.dataset.containerRow = "controls"`,
+		`actions.dataset.containerRow = "actions"`,
+		`card("Minecraft container")`,
+		`toggle("Restart server now")`,
+		`toggle("Create backup before restart")`,
+		`terminal.textContent = text`,
 	} {
 		if !strings.Contains(version, want) {
-			t.Fatalf("Version channel control contract missing %q", want)
+			t.Fatalf("Container workspace contract missing %q", want)
 		}
 	}
-	if !strings.Contains(css, `.version-workspace-body .version-channel-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr)) auto auto`) {
-		t.Fatal("Version channel controls must share one desktop row")
+	for _, forbidden := range []string{`data-version-custom`, `name="channel"`, `Check for updates`} {
+		if strings.Contains(version, forbidden) {
+			t.Fatalf("mixed Version image controls remain: %q", forbidden)
+		}
 	}
 	if !strings.Contains(version, `tabs.forEach((tab) => tab.addEventListener("click", () => { currentTab = tab.dataset.versionTab;`) || strings.Contains(version, `versionDialog.style.height`) {
 		t.Fatal("Version tab switching must keep the workspace height")

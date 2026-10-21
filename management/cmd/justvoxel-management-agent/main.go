@@ -118,7 +118,7 @@ func main() {
 		if err := dataMigrationRuntimeCommand(context.Background(), args[1:]); err != nil {
 			fatal("data migration runtime: %v", err)
 		}
-	case "instance-version-publish", "instance-version-backup":
+	case "instance-version-publish", "instance-version-backup", "instance-container-publish":
 		if err := instanceVersionCommand(context.Background(), args); err != nil {
 			fatal("instance version operation: %v", err)
 		}

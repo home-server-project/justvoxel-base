@@ -549,9 +549,10 @@ func (b *instanceRuntimeBackend) apply(ctx context.Context, previous instanceRun
 	return b.applyVersion(ctx, previous, records, snapshot, false)
 }
 
-// Only the root maintenance worker may publish reviewed version changes after
-// its cold backup. All ordinary configuration callers retain stopped-only rules.
-func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous instanceRuntimeRecord, records []instanceRuntimeRecord, snapshot minecraftInstanceRuntimeContext, maintenance bool) (result error) {
+// Root maintenance workers publish reviewed version or image changes. The
+// image-only path changes only the digest and can defer a running restart.
+// Ordinary configuration callers retain their existing stopped-only rules.
+func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous instanceRuntimeRecord, records []instanceRuntimeRecord, snapshot minecraftInstanceRuntimeContext, maintenance bool, imageOnly ...bool) (result error) {
 	id := previous.Runtime.ID
 	for _, record := range records {
 		pending, err := b.pending(record.Runtime.ID)
@@ -601,6 +602,20 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 			return err
 		}
 	}
+	containerOnly := len(imageOnly) == 1 && imageOnly[0]
+	if containerOnly {
+		before, after := previous.Runtime, next.Runtime
+		before.ImageDigest = after.ImageDigest
+		if !maintenance || !reflect.DeepEqual(before, after) || instanceHash(files.Environment) != previous.EnvironmentSHA256 {
+			return errInstanceRecovery
+		}
+		if next.Runtime.ImageDigest != "" {
+			digest, e := b.command(ctx, "podman", "image", "inspect", instanceRuntimeImage(next.Runtime), "--format", "{{.Digest}}")
+			if e != nil || strings.TrimSpace(string(digest)) != next.Runtime.ImageDigest {
+				return errInstanceRecovery
+			}
+		}
+	}
 	before, after := previous.Runtime, next.Runtime
 	before.StartOnBoot = after.StartOnBoot
 	bootOnly := previous.EnvironmentSHA256 != "" && reflect.DeepEqual(before, after) && (state.State == "running" || previous.Runtime.StartOnBoot != next.Runtime.StartOnBoot)
@@ -644,7 +659,7 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 		before.Version = after.Version
 		before.PaperChannel = after.PaperChannel
 		channelOnly = reflect.DeepEqual(before, after)
-		if channelOnly && state.State == "running" {
+		if channelOnly && state.State == "running" && !containerOnly {
 			oldImage := instanceRuntimeImage(previous.Runtime)
 			newImage := instanceRuntimeImage(next.Runtime)
 			oldID, e1 := b.command(ctx, "podman", "image", "inspect", oldImage, "--format", "{{.Id}}")
@@ -714,7 +729,7 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 			}
 		}()
 	}
-	if !bootOnly && !whitelistOnly {
+	if !bootOnly && !whitelistOnly && !containerOnly {
 		if err = b.validateSoftware(ctx, next.Runtime); err != nil {
 			return err
 		}
@@ -783,7 +798,7 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 	next.QuadletSHA256 = instanceHash(files.Quadlet)
 	var changes []instanceFirewallChange
 	owned := append([]instanceFirewallRule(nil), previous.Firewall...)
-	if !bootOnly {
+	if !bootOnly && !containerOnly {
 		changes, owned, err = b.planFirewall(ctx, previous, next)
 		if err != nil {
 			return err

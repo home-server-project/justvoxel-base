@@ -5,7 +5,7 @@ if (versionLauncher && versionDialog) {
   const state = versionDialog.querySelector("[data-version-state]");
   const tabs = Array.from(versionDialog.querySelectorAll("[data-version-tab]"));
   const csrf = document.querySelector("[data-minecraft-workspace-csrf]")?.value || "";
-  let currentTab = "software";
+  let currentTab = "container";
   let sequence = 0;
   let updateOperation = "";
   const operationKinds = new Map();
@@ -246,11 +246,159 @@ if (versionLauncher && versionDialog) {
       } catch (failure) { if (failure.staleSelection) return; state.textContent = failure.message; }
     });
   };
+  let containerCompleted = null;
+  const containerLabel = (value) => ({ up_to_date: "Up to date", update_available: "Update available", image_missing: "Download required", restart_needed: "Restart required", unavailable: "Unable to check" })[value] || "Unable to check";
+  const renderContainer = async (ticket, selection, message) => {
+    const current = () => ticket === sequence && selection === globalThis.justVoxelSelectionGeneration && currentTab === "container";
+    const root = document.createElement("div");
+    const panel = card("Minecraft container");
+    panel.className += " version-container-panel";
+    const identity = document.createElement("div");
+    identity.className = "version-container-row";
+    identity.dataset.containerRow = "identity";
+    const selector = versionDialog.querySelector("[data-selected-server] select");
+    const serverLine = line("Server:", selector?.selectedOptions?.[0]?.textContent || "Unavailable");
+    const imageLine = line("Image:", "Checking…");
+    identity.append(serverLine, imageLine);
+    const controls = document.createElement("div");
+    controls.className = "version-container-row";
+    controls.dataset.containerRow = "controls";
+    const toggle = (text) => {
+      const label = document.createElement("label");
+      label.className = "minecraft-native-toggle system-ups-shutdown-switch";
+      const title = document.createElement("span"); title.textContent = text;
+      const input = document.createElement("input"); input.type = "checkbox"; input.setAttribute("role", "switch");
+      input.checked = false; input.disabled = true;
+      label.append(title, input); controls.appendChild(label); return input;
+    };
+    const restart = toggle("Restart server now");
+    const backup = toggle("Create backup before restart");
+    const actions = document.createElement("div"); actions.className = "version-container-row version-container-actions";
+    actions.dataset.containerRow = "actions";
+    const statusLine = line("Status:", "Checking…");
+    const update = document.createElement("button"); update.type = "button"; update.textContent = "Update now"; update.disabled = true;
+    actions.append(statusLine, update);
+    const helper = document.createElement("p"); helper.className = "muted compact"; helper.hidden = true;
+    const progress = document.createElement("div");
+    const terminal = document.createElement("pre"); terminal.className = "log-box"; terminal.dataset.containerTerminal = "";
+    terminal.textContent = "Checking the selected container image…";
+    panel.append(identity, controls, actions, helper);
+    root.append(panel, progress, terminal);
+    if (!current()) return;
+    content.replaceChildren(root);
+    let plan = { state: "unavailable", running: false };
+    let operation;
+    let busy = true;
+    const sync = () => {
+      const actionable = ["update_available", "image_missing", "restart_needed"].includes(plan.state) && Boolean(plan.plan_fingerprint);
+      restart.disabled = backup.disabled = busy || !actionable || !plan.running;
+      if (!plan.running) restart.checked = backup.checked = false;
+      update.disabled = busy || !actionable || (plan.state === "restart_needed" && !restart.checked);
+    };
+    backup.addEventListener("change", () => { if (backup.checked) restart.checked = true; sync(); });
+    restart.addEventListener("change", () => { if (!restart.checked) backup.checked = false; sync(); });
+    const trace = async (id) => {
+      const response = await fetch(globalThis.justVoxelSelectedURL?.(`/api/operations/${encodeURIComponent(id)}/trace`) ?? `/api/operations/${encodeURIComponent(id)}/trace`, { credentials: "same-origin", cache: "no-store" });
+      const text = await response.text();
+      if (!current()) return;
+      if (!response.ok) throw new Error("Container operation output is unavailable.");
+      terminal.textContent = text;
+    };
+    const watch = async (id) => {
+      if (!current()) return;
+      try {
+        const result = await request("/api/version/container/operation?" + new URLSearchParams({ id }));
+        if (!current()) return;
+        operation = result.operation;
+        if (!operation) throw new Error("Container operation status is unavailable.");
+        // Trace failure must not stop operation-state polling.
+        try { await trace(id); } catch (failure) { if (current()) state.textContent = failure.message; }
+        if (!current()) return;
+        operationKinds.set(id, "container");
+        progress.replaceChildren(operationFrame(operation));
+        if (["succeeded", "resolved", "needs_attention", "failed"].includes(operation.state)) {
+          containerCompleted = operation;
+          await render();
+        } else setTimeout(() => watch(id), 2000);
+      } catch (failure) { if (!current() || failure.staleSelection) return; state.textContent = failure.message; }
+    };
+    update.addEventListener("click", async () => {
+      if (!current() || update.disabled) return;
+      busy = true; sync();
+      try {
+        let confirmPlayers = false;
+        if (restart.checked) {
+          const snapshot = await request("/api/minecraft/workspace/snapshot");
+          if (!current()) return;
+          const online = snapshot?.players?.online;
+          if (!Number.isInteger(online) || online < 0) throw new Error("Player state is unknown. Refresh and try again.");
+          if (online > 0) {
+            confirmPlayers = window.confirm("Players are online. Allow the server to restart with the normal shutdown countdown?");
+            if (!confirmPlayers) { busy = false; sync(); return; }
+          }
+        }
+        const body = new URLSearchParams({ csrf, plan_fingerprint: plan.plan_fingerprint, restart_now: restart.checked ? "yes" : "no", backup_before_restart: backup.checked ? "yes" : "no", confirm_players: confirmPlayers ? "yes" : "no" });
+        const result = await request("/api/version/container/update", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
+        if (!current()) return;
+        if (!result.operation?.operation_id) throw new Error("Container update tracking is unavailable. Refresh to check its status.");
+        containerCompleted = null;
+        operation = result.operation;
+        operationKinds.set(operation.operation_id, "container");
+        progress.replaceChildren(operationFrame(operation));
+        state.textContent = "";
+        void watch(operation.operation_id);
+      } catch (failure) {
+        if (!current() || failure.staleSelection) return;
+        // A lost POST response may still have started the operation.
+        await render(failure.message);
+      }
+    });
+    try {
+      const [status, pending] = await Promise.all([
+        request("/api/version/container/status").catch((failure) => { if (failure.staleSelection) throw failure; return { state: "unavailable", running: false }; }),
+        request("/api/version/container/operation"),
+      ]);
+      if (!current()) return;
+      plan = status;
+      if (status.server_name) serverLine.replaceChildren(...line("Server:", status.server_name).children);
+      imageLine.replaceChildren(...line("Image:", status.image).children);
+      statusLine.replaceChildren(...line("Status:", containerLabel(status.state)).children);
+      helper.hidden = status.running || status.state === "unavailable";
+      helper.textContent = "The new image will be used on the next server start.";
+      operation = pending.operation || containerCompleted;
+      busy = Boolean(pending.operation);
+      terminal.textContent = status.state === "unavailable" ? "Unable to check the selected container image." : `Checking ${status.image}...\n${containerLabel(status.state)}.`;
+      if (operation) {
+        operationKinds.set(operation.operation_id, "container");
+        progress.replaceChildren(operationFrame(operation));
+        try { await trace(operation.operation_id); } catch (failure) { if (current()) state.textContent = failure.message; }
+        if (!current()) return;
+        if (["needs_attention", "failed"].includes(operation.state)) {
+          const acknowledge = document.createElement("button"); acknowledge.type = "button";
+          acknowledge.textContent = "Verify and keep current server";
+          acknowledge.addEventListener("click", async () => {
+            acknowledge.disabled = true;
+            try {
+              const body = new URLSearchParams({ csrf, operation_id: operation.operation_id });
+              await request("/api/version/container/acknowledge", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
+              if (!current()) return;
+              containerCompleted = null; await render();
+            } catch (failure) { if (!current() || failure.staleSelection) return; state.textContent = failure.message; acknowledge.disabled = false; }
+          });
+          progress.appendChild(acknowledge);
+        } else if (!["succeeded", "resolved"].includes(operation.state)) void watch(operation.operation_id);
+      }
+      sync();
+      state.textContent = message || "";
+    } catch (failure) { if (!current() || failure.staleSelection) return; state.textContent = failure.message; statusLine.replaceChildren(...line("Status:", "Unable to check").children); }
+  };
+
   const render = async (message = "", confirmedOperation = completedOperation) => {
     const ticket = ++sequence;
     const selection = globalThis.justVoxelSelectionGeneration;
     await settleSelectChange();
     if (ticket !== sequence) return;
+    if (currentTab === "container") return renderContainer(ticket, selection, message);
     state.textContent = "Loading version information…";
     try {
       const [settings, status, pending] = await Promise.all([
@@ -295,28 +443,16 @@ if (versionLauncher && versionDialog) {
         const choices = document.createElement("div");
         choices.className = "version-software-choices";
         const currentSoftware = minecraft.server_type || "paper";
-        const configuredTag = minecraft.image_tag || "stable";
         let selectedSoftware = currentSoftware;
         let selectionSequence = 0;
         let softwareReview;
         let applying = false;
         const softwareCards = [];
-        const panel = card("Software & container updates");
+        const panel = card("Switch server software");
         panel.dataset.versionCombinedControls = "";
         const form = document.createElement("form");
         form.className = "version-combined-form";
-        form.innerHTML = '<div class="version-channel-row"><label>Change update channel to:<select name="channel" aria-label="Container update channel"><option value="stable">Stable</option><option value="latest">Latest</option><option value="custom">Custom</option></select></label><label data-version-custom>Custom tag<input name="custom_tag" autocomplete="off" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9._-]*"></label></div>';
-        const channel = form.elements.channel;
-        const customTag = form.elements.custom_tag;
-        const resetChannel = () => {
-          channel.value = ["stable", "latest"].includes(configuredTag) ? configuredTag : "custom";
-          customTag.value = channel.value === "custom" ? configuredTag : "";
-        };
-        const selectedTag = () => channel.value === "custom" ? customTag.value.trim() : channel.value;
-        const unsupported = () => selectedSoftware !== currentSoftware && [selectedSoftware, currentSoftware].includes("vanilla");
-        const imageLabel = (value) => ({ up_to_date: "Current", updates_available: "Update available", not_applicable: "Not applicable" })[value] || "Unable to check";
-        const imageStatus = line("Container image:", imageLabel(status.image_state));
-        imageStatus.className += " version-container-detail";
+        const unsupported = () => !["paper", "purpur"].includes(currentSoftware) || selectedSoftware === currentSoftware;
         const compatibility = document.createElement("p");
         compatibility.dataset.versionCompatibility = "";
         const updateNotice = (result, fallback = "") => {
@@ -329,10 +465,6 @@ if (versionLauncher && versionDialog) {
           compatibility.hidden = !compatibility.textContent;
         };
         updateNotice(status);
-        const vanillaWarning = document.createElement("p");
-        vanillaWarning.className = "notice warning";
-        vanillaWarning.textContent = "Requires Reset Minecraft and setup again. Multi-container support is coming in future JustVoxel updates.";
-        vanillaWarning.hidden = true;
         const clearReview = () => {
           ++selectionSequence;
           softwareReview?.remove();
@@ -341,13 +473,7 @@ if (versionLauncher && versionDialog) {
           updateNotice({});
           state.textContent = "";
         };
-        const sync = () => {
-          const custom = channel.value === "custom";
-          customTag.required = custom;
-          customTag.disabled = !custom || Boolean(pending.operation);
-          vanillaWarning.hidden = !unsupported();
-          panel.hidden = unsupported();
-        };
+        const sync = () => { reviewButton.disabled = Boolean(pending.operation) || unsupported(); };
         const selectSoftware = (target) => {
           if (applying || pending.operation) return;
           clearReview();
@@ -362,7 +488,6 @@ if (versionLauncher && versionDialog) {
         for (const [target, name, description] of [
           ["paper", "Paper", "Plugins and managed Bedrock cross-play."],
           ["purpur", "Purpur", "Plugins and managed Bedrock cross-play."],
-          ["vanilla", "Vanilla", "Original Minecraft"],
         ]) {
           const isCurrent = target === currentSoftware;
           const selectable = ["paper", "purpur"].includes(currentSoftware) && ["paper", "purpur"].includes(target);
@@ -385,60 +510,34 @@ if (versionLauncher && versionDialog) {
           const copy = document.createElement("span");
           copy.className = "server-software-copy";
           copy.append(title, availability, detail);
-          if (target === "vanilla") {
-            const javaOnly = document.createElement("small");
-            javaOnly.textContent = "Java only, no plugins";
-            copy.appendChild(javaOnly);
-          }
           softwareCards.push({ node: change, type: target });
           change.append(icon, copy);
           choices.appendChild(change);
           change.type = "button";
           change.setAttribute("aria-pressed", String(isCurrent));
-          change.disabled = Boolean(pending.operation);
+          change.disabled = Boolean(pending.operation) || !selectable;
           change.addEventListener("click", () => { selectSoftware(target); });
         }
-        software.append(choices, vanillaWarning);
+        software.append(choices);
         root.appendChild(software);
-        resetChannel();
-        channel.disabled = Boolean(pending.operation);
-        channel.addEventListener("change", () => { clearReview(); sync(); });
-        customTag.addEventListener("input", clearReview);
-        sync();
-        const configuredChannel = line("Current container channel:", ({ stable: "Stable", latest: "Latest" })[configuredTag] || "Custom");
-        configuredChannel.className += " version-container-detail";
-        const containerStatus = document.createElement("div");
-        containerStatus.className = "version-container-status";
-        containerStatus.append(imageStatus, configuredChannel);
-        panel.append(containerStatus, form, compatibility);
-        const channelRow = form.querySelector(".version-channel-row");
-        const check = document.createElement("button");
-        check.type = "button";
-        check.className = "secondary";
-        check.textContent = "Check for updates";
+        panel.append(form, compatibility);
         const reviewButton = document.createElement("button");
         reviewButton.type = "submit";
         reviewButton.textContent = "Review changes";
-        channelRow.append(check, reviewButton);
-        check.disabled = reviewButton.disabled = Boolean(pending.operation);
+        form.appendChild(reviewButton);
+        sync();
         const preview = async (reviewRequested) => {
           if (applying || pending.operation || unsupported()) return;
           const target = selectedSoftware;
-          const imageTag = selectedTag();
-          if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(imageTag)) {
-            state.textContent = "Enter a valid Custom container tag.";
-            return;
-          }
           clearReview();
           const selectionTicket = selectionSequence;
-          check.disabled = reviewButton.disabled = true;
+          reviewButton.disabled = true;
           state.textContent = "Checking for updates…";
           try {
             const [plan, snapshot] = await Promise.all([
-              request(statusURL("", "", target, imageTag)), request("/api/minecraft/workspace/snapshot"),
+              request(statusURL("", "", target)), request("/api/minecraft/workspace/snapshot"),
             ]);
             if (selectionTicket !== selectionSequence || ticket !== sequence) return;
-            imageStatus.replaceChildren(...line("Container image:", imageLabel(plan.image_state)).children);
             updateNotice(plan, plan.stack_state === "unavailable" ? "Server update information could not be verified. Try again later." : plan.update_available ? "Changes are ready to review." : "No changes were found.");
             state.textContent = "";
             if (!reviewRequested) return;
@@ -447,10 +546,8 @@ if (versionLauncher && versionDialog) {
             const summary = document.createElement("div");
             summary.className = "version-software-review-summary";
             summary.append(line("Server software", `${status.server_software || currentSoftware} → ${plan.server_software || target}`),
-              line("Container channel", `${configuredTag} → ${imageTag}`),
               line("Minecraft version", plan.installed === plan.selected_candidate ? plan.selected_candidate : `${plan.installed || "Unknown"} → ${plan.selected_candidate || "Unknown"}`),
               line("Players online", String(snapshot?.players?.online ?? "Unknown")),
-              line("Container image", imageLabel(plan.image_state)),
               line("Overall", stackLabel(plan.stack_state)));
             review.appendChild(summary);
             const actionable = plan.stack_state === "updates_available" && plan.update_available;
@@ -486,7 +583,7 @@ if (versionLauncher && versionDialog) {
             cancel.type = "button";
             cancel.className = "secondary";
             cancel.textContent = "Cancel review";
-            cancel.addEventListener("click", () => { resetChannel(); selectSoftware(currentSoftware); });
+            cancel.addEventListener("click", () => { selectSoftware(currentSoftware); });
             const apply = document.createElement("button");
             apply.type = "button";
             apply.textContent = "Apply changes";
@@ -499,17 +596,10 @@ if (versionLauncher && versionDialog) {
               softwareCards.forEach(({ node }) => { node.disabled = true; });
               state.textContent = "Starting server update…";
               try {
-                const body = new URLSearchParams({ csrf, server_type: target, image_tag: imageTag, plan_fingerprint: plan.plan_fingerprint, confirm_players: consent.checked ? "yes" : "no" });
+                const body = new URLSearchParams({ csrf, server_type: target, plan_fingerprint: plan.plan_fingerprint, confirm_players: consent.checked ? "yes" : "no" });
                 const result = await request("/api/version/workspace/update", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
                 if (!result.operation?.operation_id) throw new Error("Server update tracking is unavailable. Refresh Version to check its status.");
-                // Only the reviewed plan can establish a container-only update.
-                // Missing or inconclusive component evidence keeps the generic label.
-                const containerOnly = plan.image_state === "updates_available"
-                  && Boolean(plan.installed && plan.selected_candidate && plan.installed === plan.selected_candidate)
-                  && plan.minecraft_state === "up_to_date"
-                  && [plan.geyser_state, plan.floodgate_state, plan.viaversion_state]
-                    .every((component) => ["up_to_date", "disabled", "not_applicable", "managed_automatically"].includes(component));
-                operationKinds.set(result.operation.operation_id, target !== currentSoftware ? "switch" : containerOnly ? "container" : "server");
+                operationKinds.set(result.operation.operation_id, "switch");
                 updateOperation = result.operation.operation_id;
                 await render();
                 watchUpdate(result.operation.operation_id, selection);
@@ -531,10 +621,9 @@ if (versionLauncher && versionDialog) {
             if (failure.staleSelection) return;
             if (selectionTicket === selectionSequence && ticket === sequence) state.textContent = failure.message;
           } finally {
-            if (!applying) check.disabled = reviewButton.disabled = Boolean(pending.operation);
+            if (!applying) sync();
           }
         };
-        check.addEventListener("click", () => preview(false));
         form.addEventListener("submit", (event) => { event.preventDefault(); preview(true); });
         root.appendChild(panel);
       } else {
@@ -602,6 +691,7 @@ if (versionLauncher && versionDialog) {
     ++sequence;
     updateOperation = "";
     completedOperation = null;
+    containerCompleted = null;
     operationKinds.clear();
     content.replaceChildren();
     if (versionDialog.open) void render();

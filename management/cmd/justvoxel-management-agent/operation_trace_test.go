@@ -45,7 +45,7 @@ func TestOperationTraceAuthorizationAndScope(t *testing.T) {
 	s.operations = store
 	mux := http.NewServeMux()
 	registerAdminOperationRoutes(mux, s)
-	for _, kind := range []string{operationTypeSetup, operationTypeMinecraftReset, operationTypeFactoryReset, operationTypeRestore} {
+	for _, kind := range []string{operationTypeSetup, operationTypeMinecraftReset, operationTypeFactoryReset, operationTypeMinecraftContainerUpdate, operationTypeRestore} {
 		op := traceTestOperation(t, store, kind)
 		rr := httptest.NewRecorder()
 		mux.ServeHTTP(rr, surfaceRequest(http.MethodGet, "/v1/admin/operations/"+op+"/trace?path=/etc/shadow&type=setup", ""))
