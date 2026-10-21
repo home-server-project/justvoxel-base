@@ -515,6 +515,9 @@ func (s *operationStore) loadAndRecover() error {
 				journal.Stage = "interrupted_queued"
 			}
 			journal.Status = "Minecraft reset was interrupted before completion. Review appliance state before continuing."
+			if journal.OperationType == operationTypeMinecraftReset && journal.InstanceID == "" {
+				journal.Status = "Minecraft removal stopped before completion. Continue removal to finish removing the remaining servers."
+			}
 			if journal.OperationType == operationTypeMinecraftUpdate {
 				journal.Status = "Server update was interrupted. Review Minecraft state before continuing."
 			}
@@ -1253,6 +1256,9 @@ func (s *operationStore) retryMinecraftReset(id, planFingerprint string) (operat
 	journal.State = operationQueued
 	journal.Stage = "queued"
 	journal.Status = "Minecraft reset retry queued."
+	if journal.InstanceID == "" {
+		journal.Status = "Continue removal queued."
+	}
 	journal.UpdatedAt = s.now().UTC().Format(time.RFC3339Nano)
 	journal.FinishedAt = ""
 	journal.InterruptedAt = ""

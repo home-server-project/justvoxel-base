@@ -61,13 +61,13 @@ func TestAdvancedConnectionsBedrockToggleCapabilities(t *testing.T) {
 				body := page.Body.String()
 				const toggleStart = `<input class="date-time-switch" type="checkbox" name="bedrock_enabled" data-bedrock-toggle`
 				start := strings.Index(body, toggleStart)
-				if start < 0 || !strings.Contains(body, `<label class="date-time-automatic">`) {
-					t.Fatal("Bedrock control does not use the Date & Time switch pattern")
+				if start < 0 || !strings.Contains(body, `<label class="setup-toggle-card">`) {
+					t.Fatal("Bedrock control does not use the framed Setup switch pattern")
 				}
 				control := body[start : start+strings.Index(body[start:], ">")+1]
-				labelStart := strings.LastIndex(body[:start], `<label class="date-time-automatic">`)
+				labelStart := strings.LastIndex(body[:start], `<label class="setup-toggle-card">`)
 				if labelStart < 0 {
-					t.Fatal("Bedrock switch must follow its Date & Time label")
+					t.Fatal("Bedrock switch must follow its framed Setup label")
 				}
 				copy := body[labelStart:start]
 				if !strings.Contains(copy, `<span><strong>Enable Bedrock cross-play</strong><small class="field-help">`) || !strings.HasSuffix(copy, `</small></span>`) || !strings.HasPrefix(body[start+len(control):], `</label>`) {

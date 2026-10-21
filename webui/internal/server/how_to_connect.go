@@ -81,9 +81,26 @@ func (a *App) howToConnect(w http.ResponseWriter, r *http.Request) {
 		a.handleDashboardError(w, r, err)
 		return
 	}
-	selected, ok := a.dashboardMinecraftSelection(w, r, session)
-	if !ok {
+	instances, err := a.independentServerInventory(r.Context(), session)
+	if err != nil {
+		a.handleDashboardError(w, r, err)
 		return
+	}
+	selected := selectedServerContext{}
+	if _, explicit := r.URL.Query()["server"]; explicit || len(instances) == 1 {
+		var valid bool
+		selected, valid = a.selectedMinecraft(w, r, session)
+		if !valid {
+			return
+		}
+	}
+	choices := []selectedServerContext{}
+	for _, instance := range instances {
+		name := strings.TrimSpace(instance.DisplayName)
+		if name == "" {
+			name = "Current server"
+		}
+		choices = append(choices, selectedServerContext{ID: instance.ID, Name: name})
 	}
 	status.Minecraft = (api.Status{}).Minecraft
 	if selected.ID != "" {
@@ -110,7 +127,7 @@ func (a *App) howToConnect(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	a.render(w, "how_to_connect.html", pageData{Title: "How to connect", SelectedMinecraftID: selected.ID, ConnectionGuide: newConnectionGuide(status, remote, selected.Name)})
+	a.render(w, "how_to_connect.html", pageData{Title: "How to connect", SelectedMinecraftID: selected.ID, ConnectionServers: choices, ConnectionGuide: newConnectionGuide(status, remote, selected.Name)})
 }
 
 func usableConnectionIP(value string, ipv4 bool) bool {

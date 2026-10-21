@@ -446,7 +446,12 @@ func TestConnectionGuideSelectedFriendlyNameAndInvitation(t *testing.T) {
 				t.Errorf("name %q missing %q", name, want)
 			}
 		}
-		if strings.Contains(body, "jv-") || strings.Contains(body, "Kids Creative") || strings.Contains(body, "<script>bad</script>") {
+		guideStart := strings.Index(body, `<article class="connect-guide"`)
+		if guideStart < 0 {
+			t.Fatal("selected guide missing")
+		}
+		guide := body[guideStart:]
+		if strings.Contains(guide, "jv-") || strings.Contains(guide, "Kids Creative") || strings.Contains(body, "<script>bad</script>") {
 			t.Fatal("invitation presentation exposed identity, another server, or unescaped name")
 		}
 		if strings.Join(client.reads, ",") != "configuration:jv-family1" {
@@ -457,8 +462,9 @@ func TestConnectionGuideSelectedFriendlyNameAndInvitation(t *testing.T) {
 		query string
 		code  int
 	}{
-		{"?invite=1", http.StatusConflict},
+		{"?invite=1", http.StatusOK},
 		{"?server=Family+Survival&invite=1", http.StatusBadRequest},
+		{"?server=", http.StatusBadRequest},
 		{"?server=jv-missing&invite=1", http.StatusNotFound},
 		{"?server=jv-family1&server=jv-kids001&invite=1", http.StatusBadRequest},
 	} {
@@ -467,5 +473,38 @@ func TestConnectionGuideSelectedFriendlyNameAndInvitation(t *testing.T) {
 		if response.Code != tc.code || len(client.reads) != 0 {
 			t.Fatalf("invalid selection %q: status %d reads %v", tc.query, response.Code, client.reads)
 		}
+	}
+}
+
+func TestConnectionGuideOwnServerSelection(t *testing.T) {
+	app, client := newServerInventoryApp(t)
+	response := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "/minecraft/how-to-connect", ""))
+	body := response.Body.String()
+	if response.Code != http.StatusOK || !strings.Contains(response.Header().Get("Content-Type"), "text/html") {
+		t.Fatalf("selection page: %d %s", response.Code, body)
+	}
+	for _, want := range []string{`<option value="">Choose server</option>`, `value="jv-family1"`, `>family Survival</option>`, `value="jv-kids001"`, `>Kids Creative</option>`, "Choose a server to see its connection guide."} {
+		if !strings.Contains(body, want) {
+			t.Errorf("selection page missing %q", want)
+		}
+	}
+	for _, absent := range []string{"Choose a Minecraft server.", "Minecraft is not configured yet", "data-connect-guide", "jv-legacy1"} {
+		if strings.Contains(body, absent) {
+			t.Errorf("selection page contains %q", absent)
+		}
+	}
+	if len(client.reads) != 0 {
+		t.Fatalf("unselected page read server data: %v", client.reads)
+	}
+	response = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "/minecraft/how-to-connect?server=jv-kids001", ""))
+	body = response.Body.String()
+	if response.Code != http.StatusOK || !strings.Contains(body, `value="jv-kids001" selected>Kids Creative</option>`) || !strings.Contains(body, "Kids Creative — Purpur 1.21.8") || !strings.Contains(body, `value="jv-family1"`) {
+		t.Fatalf("explicit selection: %d %s", response.Code, body)
+	}
+	delete(client.runtimes, "jv-family1")
+	client.reads = nil
+	response = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "/minecraft/how-to-connect", ""))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Kids Creative — Purpur 1.21.8") || strings.Join(client.reads, ",") != "configuration:jv-kids001" {
+		t.Fatalf("single automatic selection: %d %v", response.Code, client.reads)
 	}
 }

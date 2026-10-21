@@ -26,7 +26,7 @@
 </header>
 <main class="setup-shell">
   {{if not .Started}}
-  <section class="panel setup-welcome setup-entry">
+  <section class="panel setup-welcome setup-entry{{if .AddServer}} setup-entry-add-server{{end}}">
     <p class="eyebrow">Minecraft setup</p>
     <h1>{{if .AddServer}}Add Minecraft Server{{else}}Set up your Minecraft server{{end}}</h1>
     {{if .Error}}<div class="notice error" role="alert">{{.Error}}</div>{{end}}
@@ -36,8 +36,8 @@
     <div class="setup-mode-grid">
       <section class="setup-mode-card setup-mode-recommended">
         <span class="setup-mode-kicker">Fast path</span>
-        <h2>Recommended setup</h2>
-        <p>{{if .AddServer}}JustVoxel chooses defaults for memory, unused ports, Minecraft version and backups, and keeps the appliance timezone. Backup availability and schedule are shown in Review.{{else}}JustVoxel chooses safe defaults for memory, ports, system storage, automatic backups and Minecraft version, and keeps the appliance timezone.{{end}}</p>
+        <h2>{{if .AddServer}}Simple setup{{else}}Recommended setup{{end}}</h2>
+        <p>{{if .AddServer}}JustVoxel chooses the defaults for you.{{else}}JustVoxel chooses safe defaults for memory, ports, system storage, automatic backups and Minecraft version, and keeps the appliance timezone.{{end}}</p>
         <form method="post" action="{{$wizard.BasePath}}/recommended" class="setup-recommended-form">
           <input type="hidden" name="csrf" value="{{.CSRF}}">
           {{if .AddServer}}{{template "setup-instance-name" .}}{{end}}
@@ -56,7 +56,7 @@
               <span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/vanilla.svg" alt="" width="48" height="48"></span><span class="server-software-copy"><strong>Vanilla</strong><span class="software-availability">Available</span><small>Original Minecraft · Java only · no plugins.</small></span>
             </label>
           </fieldset>
-          <button type="submit">Use recommended setup</button>
+          <button type="submit">{{if .AddServer}}Use simple setup{{else}}Use recommended setup{{end}}</button>
         </form>
       </section>
 
@@ -102,10 +102,16 @@
 
       </div>
       {{if .AddServer}}
-      <label class="setup-toggle-field"><span>Start after setup</span><input class="date-time-switch" type="checkbox" name="start_after_setup" {{if and .StartAfterSetup (not .StartAfterUnavailable)}}checked{{end}} {{if .StartAfterUnavailable}}disabled{{end}}></label>
+      <div class="setup-startup-grid">
+      <div class="setup-startup-option">
+      <label class="setup-toggle-card"><span>Start after setup</span><input class="date-time-switch" type="checkbox" name="start_after_setup" {{if and .StartAfterSetup (not .StartAfterUnavailable)}}checked{{end}} {{if .StartAfterUnavailable}}disabled{{end}}></label>
       {{if .StartAfterUnavailable}}<div class="memory-status danger">Not enough Minecraft memory capacity to start this server after setup. {{if .RunningMemory}}Running or starting servers already reserve {{.RunningMemory}}. {{end}}You can still create this server and start it after another server is stopped.</div>{{end}}
-      <label class="setup-toggle-field"><span>Start on Boot</span><input class="date-time-switch" type="checkbox" name="start_on_boot" {{if and .StartOnBoot (not .StartBootUnavailable)}}checked{{end}} {{if .StartBootUnavailable}}disabled{{end}}></label>
+      </div>
+      <div class="setup-startup-option">
+      <label class="setup-toggle-card"><span>Start on Boot</span><input class="date-time-switch" type="checkbox" name="start_on_boot" {{if and .StartOnBoot (not .StartBootUnavailable)}}checked{{end}} {{if .StartBootUnavailable}}disabled{{end}}></label>
       {{if .StartBootUnavailable}}<div class="memory-status danger">Start on Boot is unavailable because the boot-enabled Minecraft servers would exceed available memory. You can still create this server with automatic start disabled.</div>{{end}}
+      </div>
+      </div>
       {{end}}
       </div>
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="{{$wizard.BasePath}}/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button type="submit">Continue</button></div></div>
@@ -132,7 +138,7 @@
         </section>
       </div>
       <div class="setup-version-preview" id="setup-version-preview" role="status" aria-live="polite">Checking available versions…</div>
-      <label class="date-time-automatic"><span><strong>Enable Bedrock cross-play</strong><small class="field-help">{{if eq .Minecraft.ServerType "vanilla"}}Select Paper or Purpur on Step 1 to enable Bedrock cross-play.{{else}}Allow supported Bedrock clients to join through Geyser/Floodgate. Compatibility is checked above.{{end}}</small></span><input class="date-time-switch" type="checkbox" name="bedrock_enabled" data-bedrock-toggle {{if eq .Minecraft.ServerType "vanilla"}}disabled{{end}} {{if .Server.BedrockEnabled}}checked{{end}}></label>
+      <label class="setup-toggle-card"><span><strong>Enable Bedrock cross-play</strong><small class="field-help">{{if eq .Minecraft.ServerType "vanilla"}}Select Paper or Purpur on Step 1 to enable Bedrock cross-play.{{else}}Allow supported Bedrock clients to join through Geyser/Floodgate. Compatibility is checked above.{{end}}</small></span><input class="date-time-switch" type="checkbox" name="bedrock_enabled" data-bedrock-toggle {{if eq .Minecraft.ServerType "vanilla"}}disabled{{end}} {{if .Server.BedrockEnabled}}checked{{end}}></label>
       </div>
       <div class="setup-step-actions"><button class="secondary" type="submit" formaction="{{$wizard.BasePath}}/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next" disabled>Continue</button></div></div>
     </form>
@@ -290,4 +296,4 @@
 </body>
 </html>{{end}}
 
-{{define "setup-instance-name"}}<label class="setup-field">Server name<input name="display_name" value="{{.DisplayName}}" placeholder="Family Survival" required maxlength="64" autocomplete="off" aria-describedby="setup-instance-name-help"><span class="field-help" id="setup-instance-name-help">Your name for this server in JustVoxel. Separate from the welcome message shown to players.</span></label>{{end}}
+{{define "setup-instance-name"}}<label class="setup-field">Server name<input name="display_name" value="{{.DisplayName}}" placeholder="Family Survival" required maxlength="64" autocomplete="off" {{if not .AddServer}}aria-describedby="setup-instance-name-help"{{end}}>{{if not .AddServer}}<span class="field-help" id="setup-instance-name-help">Your name for this server in JustVoxel. Separate from the welcome message shown to players.</span>{{end}}</label>{{end}}

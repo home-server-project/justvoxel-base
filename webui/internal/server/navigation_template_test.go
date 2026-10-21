@@ -580,8 +580,8 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 			t.Fatalf("authenticated header must retain %s", want)
 		}
 	}
-	if !strings.Contains(markup, `<img class="dashboard-wallpaper wallpaper-theme-v2" data-dashboard-wallpaper src="/static/wallpapers/jv-wp-v2-day.webp" alt="" aria-hidden="true">`) {
-		t.Fatal("dashboard must include the decorative V2 Day built-in wallpaper fallback")
+	if !strings.Contains(markup, `<img class="dashboard-wallpaper" data-dashboard-wallpaper hidden alt="" aria-hidden="true">`) {
+		t.Fatal("dashboard must leave wallpaper hidden and unset for preference restoration")
 	}
 	if _, err := assets.ReadFile("static/justvoxel-default-wallpaper.jpg"); err != nil {
 		t.Fatal(err)

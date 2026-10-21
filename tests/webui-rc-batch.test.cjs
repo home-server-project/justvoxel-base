@@ -305,13 +305,28 @@ test('Plugins Logs selects and downloads the exact Agent operation log without r
   assert.deepEqual(unsafe.calls, []);
 });
 
-test('Reset Minecraft review distinguishes managed JAR cleanup from preserved external data', () => {
+test('appliance Reset Minecraft review preserves external data and removes internal data and all runtimes', () => {
   const start = app.indexOf('  const resetImpactFromPlan =');
   const end = app.indexOf('  const renderResetPlan =', start);
   assert.ok(start >= 0 && end > start);
   const context = vm.createContext({});
   vm.runInContext(app.slice(start, end) + '\nthis.impact = resetImpactFromPlan;', context);
   const result = context.impact('minecraft', { data_action: 'preserve', plugins_action: 'remove_managed_jars' });
+  assert.ok(result.remove.includes('ALL configured Minecraft server definitions, running or stopped.'));
+  assert.ok(result.remove.includes('Minecraft containers/runtime units and exact owned firewall/runtime state.'));
+  assert.ok(result.remove.includes('JustVoxel-owned INTERNAL Minecraft data, including managed plugins/runtime content.'));
+  assert.ok(result.keep.includes('External, USB, NFS, and SMB data are never erased.'));
+  assert.ok(result.keep.includes('All backup archives and archive metadata.'));
+  assert.ok(!result.remove.includes('Plugins-managed JARs installed through JustVoxel.'));
+});
+
+test('selected Reset Minecraft review retains managed JAR cleanup with preserved external data', () => {
+  const start = app.indexOf('  const resetImpactFromPlan =');
+  const end = app.indexOf('  const renderResetPlan =', start);
+  assert.ok(start >= 0 && end > start);
+  const context = vm.createContext({});
+  vm.runInContext(app.slice(start, end) + '\nthis.impact = resetImpactFromPlan;', context);
+  const result = context.impact('minecraft', { instance_id: 'jv-a1b2c3', data_action: 'preserve', plugins_action: 'remove_managed_jars' });
   assert.ok(result.remove.includes('Plugins-managed JARs installed through JustVoxel.'));
   assert.ok(result.keep.includes('Plugin configuration/data folders and manual plugins.'));
   assert.ok(!result.remove.some(item => item.includes('world/data')));

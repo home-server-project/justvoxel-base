@@ -361,3 +361,19 @@ test('invitation is a native dialog with selectable plain text outside the singl
     assert.ok(!source.includes(forbidden), forbidden);
   }
 });
+
+test('standalone server selector navigates by immutable ID and preserves only invite=1', () => {
+  for (const [search, expected] of [
+    ['', '/minecraft/how-to-connect?server=jv-kids001'],
+    ['?server=jv-family1&invite=1&domain=unsafe&other=discard', '/minecraft/how-to-connect?server=jv-kids001&invite=1'],
+    ['?invite=0&other=discard', '/minecraft/how-to-connect?server=jv-kids001'],
+  ]) {
+    const select = new Element();
+    const location = { search };
+    const page = { querySelector: selector => selector === '.connect-server' ? select : null };
+    vm.runInNewContext(source, { document: { querySelector: () => page }, window: { location }, URLSearchParams });
+    select.value = 'jv-kids001';
+    select.listeners.change();
+    assert.equal(location.href, expected);
+  }
+});

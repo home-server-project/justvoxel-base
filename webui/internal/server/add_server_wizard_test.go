@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -129,7 +130,7 @@ func TestAddServerEntryAndSharedRecommended(t *testing.T) {
 	firstRunSetupDrafts.save(app, "session-token", legacy)
 	before, _ := firstRunSetupDrafts.get(app, "session-token")
 	landing := addWizardRequest(app, http.MethodGet, "", nil).Body.String()
-	for _, want := range []string{"Recommended setup", "Advanced setup", `name="display_name"`, `value="paper" checked`, "server-software-card", `action="/minecraft/servers/add/recommended"`} {
+	for _, want := range []string{"Simple setup", "Use simple setup", "JustVoxel chooses the defaults for you.", "Advanced setup", `name="display_name"`, `value="paper" checked`, "server-software-card", `action="/minecraft/servers/add/recommended"`} {
 		if !strings.Contains(landing, want) {
 			t.Fatalf("shared landing missing %q", want)
 		}
@@ -166,6 +167,82 @@ func TestAddServerEntryAndSharedRecommended(t *testing.T) {
 	after, _ = firstRunSetupDrafts.get(app, "session-token")
 	if !reflect.DeepEqual(before, after) {
 		t.Fatal("Cancel changed the first-run draft")
+	}
+}
+
+// Both ways of observing authoritative success must release all wizard state.
+func TestAddServerProgressSuccessClearsDraftAndReview(t *testing.T) {
+	for _, endpoint := range []string{"/api/setup/progress/", "/setup/progress/"} {
+		t.Run(endpoint, func(t *testing.T) {
+			app, client := newAddServerTestApp(t)
+			review := recommendedAddReview(t, app, "paper")
+			draft, ok := addServerDrafts.get(app, "session-token")
+			if !ok || draft.CurrentStep != setupReviewStep {
+				t.Fatal("expected an Add Server draft at Review")
+			}
+			firstRunSetupDrafts.save(app, "session-token", draft)
+			firstRunSetupReviews.save(app, "session-token", review)
+			stale := addWizardRequest(app, http.MethodGet, "", nil)
+			if stale.Code != http.StatusSeeOther || stale.Header().Get("Location") != addServerBasePath+"/review" {
+				t.Fatal("fixture must reproduce the stale Review redirect")
+			}
+			client.operation = &api.PersistentOperation{OperationID: setupExecutionOperationID, OperationType: "setup", State: "succeeded"}
+			response := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example"+endpoint+setupExecutionOperationID, ""))
+			if response.Code != http.StatusOK {
+				t.Fatalf("progress returned %d: %s", response.Code, response.Body.String())
+			}
+			if endpoint == "/api/setup/progress/" {
+				var result api.PersistentOperationResponse
+				if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+					t.Fatal(err)
+				}
+				if result.Operation == nil || result.Operation.State != "succeeded" {
+					t.Fatal("status must report authoritative operation success")
+				}
+			}
+			for name, store := range map[string]*setupDraftStore{"add-server": &addServerDrafts, "first-run": &firstRunSetupDrafts} {
+				if _, ok := store.get(app, "session-token"); ok {
+					t.Fatalf("%s draft survived success", name)
+				}
+			}
+			for name, store := range map[string]*setupReviewStore{"add-server": &addServerReviews, "first-run": &firstRunSetupReviews} {
+				if _, ok := store.get(app, "session-token"); ok {
+					t.Fatalf("%s review survived success", name)
+				}
+			}
+			landing := addWizardRequest(app, http.MethodGet, "", nil)
+			if landing.Code != http.StatusOK || landing.Header().Get("Location") != "" {
+				t.Fatalf("fresh Add Server landing returned %d, location %q", landing.Code, landing.Header().Get("Location"))
+			}
+			for _, want := range []string{"Add Minecraft Server", "Simple setup", "Advanced setup", "Use simple setup"} {
+				if !strings.Contains(landing.Body.String(), want) {
+					t.Fatalf("fresh landing missing %q", want)
+				}
+			}
+			if client.applyCalls != 0 || len(client.created) != 0 {
+				t.Fatal("observing progress must not submit another creation")
+			}
+		})
+	}
+}
+
+func TestAddServerProgressStatusPreservesUnfinishedDraft(t *testing.T) {
+	for _, state := range []string{"running", "verifying", "needs_attention"} {
+		t.Run(state, func(t *testing.T) {
+			app, client := newAddServerTestApp(t)
+			review := recommendedAddReview(t, app, "paper")
+			draft, _ := addServerDrafts.get(app, "session-token")
+			client.operation = &api.PersistentOperation{OperationID: setupExecutionOperationID, OperationType: "setup", State: state}
+			response := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/api/setup/progress/"+setupExecutionOperationID, ""))
+			if response.Code != http.StatusOK {
+				t.Fatalf("progress returned %d", response.Code)
+			}
+			afterDraft, draftOK := addServerDrafts.get(app, "session-token")
+			afterReview, reviewOK := addServerReviews.get(app, "session-token")
+			if !draftOK || !reviewOK || !reflect.DeepEqual(draft, afterDraft) || !reflect.DeepEqual(review, afterReview) {
+				t.Fatal("unfinished operation lost its draft or review protection")
+			}
+		})
 	}
 }
 

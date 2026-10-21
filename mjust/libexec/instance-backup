@@ -118,10 +118,6 @@ try:
         raise ValueError('backup placement changed')
     if json.loads(private(registry + '/' + identity + '.json')) != {'id':identity} or record['runtime']['id'] != identity:
         raise ValueError('identity')
-    # The legacy identity may never be claimed by this worker.
-    legacy = json.loads(private(registry + '/minecraft.json'))
-    if legacy['id'] == identity:
-        raise ValueError('legacy')
     source = record['storage']['data_path']
     if source != record['storage']['root'] + '/minecraft-instances/' + identity + '/data':
         raise ValueError('source')

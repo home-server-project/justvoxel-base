@@ -60,7 +60,21 @@ func TestWallpaperUIContracts(t *testing.T) {
 		}
 	}
 	dashboard := read("templates/dashboard.html")
-	require(dashboard, "dashboard fallback", `src="/static/wallpapers/jv-wp-v2-day.webp"`, "wallpaper-theme-v2")
+	wallpapers := regexp.MustCompile(`<img\b[^>]*\bdata-dashboard-wallpaper\b[^>]*>`).FindAllString(dashboard, -1)
+	if len(wallpapers) != 1 {
+		t.Fatal("dashboard must contain one data-dashboard-wallpaper image")
+	}
+	if !regexp.MustCompile(`\shidden(?:\s|>)`).MatchString(wallpapers[0]) {
+		t.Fatal("dashboard wallpaper must begin hidden until its preferred source resolves")
+	}
+	if regexp.MustCompile(`(?i)\s(?:src|srcset)\s*=`).MatchString(wallpapers[0]) {
+		t.Fatal("dashboard HTML must not choose a wallpaper source")
+	}
+	for _, forbidden := range []string{"wallpaper-theme-", "data-wallpaper-theme", "data-wallpaper-appearance", "/static/wallpapers/jv-wp-"} {
+		if strings.Contains(dashboard, forbidden) {
+			t.Fatalf("dashboard HTML must leave wallpaper source and appearance to wallpaper.js: %q", forbidden)
+		}
+	}
 	if strings.Contains(dashboard, "/static/justvoxel-default-wallpaper.jpg") {
 		t.Fatal("Old JPG must not remain the configured-dashboard fallback")
 	}
@@ -69,6 +83,19 @@ func TestWallpaperUIContracts(t *testing.T) {
 	}
 
 	js := read("static/wallpaper.js")
+	require(js, "wallpaper source authority",
+		`document.querySelector("[data-dashboard-wallpaper]")`,
+		`const src = builtinImage(preference, now);`,
+		`await loadImage(src)`, `applyImage(src)`,
+		`wallpaper.src = src`, `wallpaper.hidden = false`,
+		`if (ticket === imageSequence) wallpaper.hidden = true;`,
+		`preference = defaultPreference();`, `refreshBuiltin();`,
+	)
+	for _, forbidden := range []string{"defaultImage", "/static/wallpapers/jv-wp-v2-day.webp"} {
+		if strings.Contains(js, forbidden) {
+			t.Fatalf("wallpaper must not force a universal static Day fallback: %q", forbidden)
+		}
+	}
 	require(js, "default and migration",
 		`mode: "builtin", theme: "v2", appearance: "auto", dayStart: "07:00", nightStart: "19:00"`,
 		`if (saved.mode === "default") return defaultPreference();`,

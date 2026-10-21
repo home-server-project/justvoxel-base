@@ -27,33 +27,45 @@ var (
 	adminResetFingerprintPattern = regexp.MustCompile("^sha256:[0-9a-f]{64}$")
 )
 
+type ResetParticipant struct {
+	ID            string   `json:"id"`
+	DisplayName   string   `json:"display_name"`
+	State         string   `json:"state"`
+	PlayersOnline int      `json:"players_online"`
+	Players       []string `json:"players"`
+	DataScope     string   `json:"data_scope"`
+	DataAction    string   `json:"data_action"`
+}
+
 type AdminResetPlanResponse struct {
-	InstanceID            string   `json:"instance_id,omitempty"`
-	OK                    bool     `json:"ok"`
-	SchemaVersion         string   `json:"schema_version,omitempty"`
-	Mode                  string   `json:"mode,omitempty"`
-	PlanFingerprint       string   `json:"plan_fingerprint,omitempty"`
-	Code                  string   `json:"code,omitempty"`
-	Error                 string   `json:"error,omitempty"`
-	MinecraftConfigured   bool     `json:"minecraft_configured,omitempty"`
-	DataPath              string   `json:"data_path,omitempty"`
-	DataScope             string   `json:"data_scope,omitempty"`
-	DataAction            string   `json:"data_action,omitempty"`
-	PluginsAction         string   `json:"plugins_action,omitempty"`
-	BackupPath            string   `json:"backup_path,omitempty"`
-	BackupScope           string   `json:"backup_scope,omitempty"`
-	BackupAction          string   `json:"backup_action,omitempty"`
-	ConfigBackupsAction   string   `json:"config_backups_action,omitempty"`
-	StorageLayoutAction   string   `json:"storage_layout_action,omitempty"`
-	ExternalStorageAction string   `json:"external_storage_action,omitempty"`
-	NetworkStorageAction  string   `json:"network_storage_action,omitempty"`
-	AuthenticationAction  string   `json:"authentication_action,omitempty"`
-	WebUIUsersAction      string   `json:"webui_users_action,omitempty"`
-	PasswordAction        string   `json:"password_action,omitempty"`
-	SessionsAction        string   `json:"sessions_action,omitempty"`
-	PlayersOnline         int      `json:"players_online,omitempty"`
-	Players               []string `json:"players"`
-	Warnings              []string `json:"warnings"`
+	Participants          []ResetParticipant `json:"participants,omitempty"`
+	TotalPlayersOnline    int                `json:"total_players_online,omitempty"`
+	InstanceID            string             `json:"instance_id,omitempty"`
+	OK                    bool               `json:"ok"`
+	SchemaVersion         string             `json:"schema_version,omitempty"`
+	Mode                  string             `json:"mode,omitempty"`
+	PlanFingerprint       string             `json:"plan_fingerprint,omitempty"`
+	Code                  string             `json:"code,omitempty"`
+	Error                 string             `json:"error,omitempty"`
+	MinecraftConfigured   bool               `json:"minecraft_configured,omitempty"`
+	DataPath              string             `json:"data_path,omitempty"`
+	DataScope             string             `json:"data_scope,omitempty"`
+	DataAction            string             `json:"data_action,omitempty"`
+	PluginsAction         string             `json:"plugins_action,omitempty"`
+	BackupPath            string             `json:"backup_path,omitempty"`
+	BackupScope           string             `json:"backup_scope,omitempty"`
+	BackupAction          string             `json:"backup_action,omitempty"`
+	ConfigBackupsAction   string             `json:"config_backups_action,omitempty"`
+	StorageLayoutAction   string             `json:"storage_layout_action,omitempty"`
+	ExternalStorageAction string             `json:"external_storage_action,omitempty"`
+	NetworkStorageAction  string             `json:"network_storage_action,omitempty"`
+	AuthenticationAction  string             `json:"authentication_action,omitempty"`
+	WebUIUsersAction      string             `json:"webui_users_action,omitempty"`
+	PasswordAction        string             `json:"password_action,omitempty"`
+	SessionsAction        string             `json:"sessions_action,omitempty"`
+	PlayersOnline         int                `json:"players_online,omitempty"`
+	Players               []string           `json:"players"`
+	Warnings              []string           `json:"warnings"`
 }
 
 type AdminMinecraftResetApplyRequest struct {
@@ -77,11 +89,7 @@ type AdminResetApplyResponse struct {
 }
 
 func (c *Client) AdminMinecraftResetPlan(ctx context.Context, session string) (AdminResetPlanResponse, error) {
-	path, err := selectedMaintenancePath(ctx, adminMinecraftResetPlanPath)
-	if err != nil {
-		return AdminResetPlanResponse{}, err
-	}
-	return c.adminResetPlan(ctx, session, path, "minecraft")
+	return c.adminResetPlan(ctx, session, adminMinecraftResetPlanPath, "minecraft")
 }
 
 func (c *Client) AdminFactoryResetPlan(ctx context.Context, session string) (AdminResetPlanResponse, error) {
@@ -92,11 +100,7 @@ func (c *Client) AdminMinecraftResetApply(ctx context.Context, session string, r
 	if !adminResetFingerprintPattern.MatchString(request.PlanFingerprint) {
 		return AdminResetApplyResponse{}, errors.New("invalid Minecraft reset fingerprint")
 	}
-	path, err := selectedMaintenancePath(ctx, adminMinecraftResetApplyPath)
-	if err != nil {
-		return AdminResetApplyResponse{}, err
-	}
-	return c.adminResetApply(ctx, session, path, request, "minecraft_reset")
+	return c.adminResetApply(ctx, session, adminMinecraftResetApplyPath, request, "minecraft_reset")
 }
 
 func (c *Client) AdminFactoryResetApply(ctx context.Context, session string, request AdminFactoryResetApplyRequest) (AdminResetApplyResponse, error) {
@@ -173,8 +177,7 @@ func (c *Client) adminResetPlan(ctx context.Context, session, path, mode string)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return out, &ResponseError{StatusCode: resp.StatusCode, Message: resetResponseMessage(out.Error, "reset planning was rejected")}
 	}
-	selected, _ := ctx.Value(maintenanceSelectionKey{}).(maintenanceSelection)
-	if mode == "minecraft" && (selected.ID == "" || out.InstanceID != selected.ID) {
+	if mode == "minecraft" && path == adminMinecraftResetPlanPath && out.InstanceID != "" {
 		return out, errors.New("Minecraft reset plan instance mismatch")
 	}
 	if !out.OK || out.Mode != mode || !adminResetFingerprintPattern.MatchString(out.PlanFingerprint) {
@@ -213,8 +216,7 @@ func (c *Client) adminResetApply(ctx context.Context, session, path string, body
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return out, &ResponseError{StatusCode: resp.StatusCode, Message: resetResponseMessage(out.Error, "reset could not start")}
 	}
-	selected, _ := ctx.Value(maintenanceSelectionKey{}).(maintenanceSelection)
-	if operationType == "minecraft_reset" && (out.Operation == nil || selected.ID == "" || out.Operation.InstanceID != selected.ID) {
+	if operationType == "minecraft_reset" && path == adminMinecraftResetApplyPath && (out.Operation == nil || out.Operation.InstanceID != "") {
 		return out, errors.New("Minecraft reset operation instance mismatch")
 	}
 	if !out.OK || out.Operation == nil || out.Operation.OperationType != operationType {
@@ -224,7 +226,7 @@ func (c *Client) adminResetApply(ctx context.Context, session, path string, body
 }
 
 func decodeAdminResetPlan(reader io.Reader, target *AdminResetPlanResponse) error {
-	decoder := json.NewDecoder(io.LimitReader(reader, 64*1024))
+	decoder := json.NewDecoder(io.LimitReader(reader, 2<<20))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		return err
@@ -275,4 +277,42 @@ func resetResponseMessage(message, fallback string) string {
 		return fallback
 	}
 	return message
+}
+
+// Historical reset recovery resolves its target only from the active operation,
+// never from a selector or caller-supplied server ID.
+func (c *Client) historicalMinecraftResetInstance(ctx context.Context, session string) (string, error) {
+	current, err := c.AdminCurrentMinecraftResetOperation(ctx, session)
+	if err != nil {
+		return "", err
+	}
+	if current.Operation == nil || !minecraftMaintenanceIDPattern.MatchString(current.Operation.InstanceID) {
+		return "", errors.New("historical Minecraft reset is unavailable")
+	}
+	return current.Operation.InstanceID, nil
+}
+func (c *Client) HistoricalMinecraftResetPlan(ctx context.Context, session string) (AdminResetPlanResponse, error) {
+	id, err := c.historicalMinecraftResetInstance(ctx, session)
+	if err != nil {
+		return AdminResetPlanResponse{}, err
+	}
+	plan, err := c.adminResetPlan(ctx, session, "/v1/minecraft/instances/"+id+"/reset/plan", "minecraft")
+	if err == nil && plan.InstanceID != id {
+		return AdminResetPlanResponse{}, errors.New("Minecraft reset plan instance mismatch")
+	}
+	return plan, err
+}
+func (c *Client) HistoricalMinecraftResetApply(ctx context.Context, session string, request AdminMinecraftResetApplyRequest) (AdminResetApplyResponse, error) {
+	if !adminResetFingerprintPattern.MatchString(request.PlanFingerprint) {
+		return AdminResetApplyResponse{}, errors.New("invalid Minecraft reset fingerprint")
+	}
+	id, err := c.historicalMinecraftResetInstance(ctx, session)
+	if err != nil {
+		return AdminResetApplyResponse{}, err
+	}
+	result, err := c.adminResetApply(ctx, session, "/v1/minecraft/instances/"+id+"/reset/apply", request, "minecraft_reset")
+	if err == nil && (result.Operation == nil || result.Operation.InstanceID != id) {
+		return AdminResetApplyResponse{}, errors.New("Minecraft reset operation instance mismatch")
+	}
+	return result, err
 }

@@ -46,7 +46,9 @@ class IndependentRestore(unittest.TestCase):
 
     def setUp(self):
         Base.setUp(self)
+        self.assertFalse((self.registry/'minecraft.json').exists())
         self.restore_source = (REPO/'mjust/libexec/instance-restore').read_text()
+        self.assertNotIn('minecraft.json', self.restore_source)
         for old,new in [('/usr/libexec/justvoxel/mjust/',str(self.helpers)+'/'),('/etc/justvoxel/instances',str(self.configs)),('/var/lib/justvoxel/instances',str(self.registry)),('/etc/justvoxel/minecraft-backup.env',str(self.root/'backup.env'))]:
             self.restore_source=self.restore_source.replace(old,new)
         world=self.root/'storage/minecraft-instances/jv-aaaaaa/data/world'

@@ -1,5 +1,7 @@
-// Selection is explicit in each server-specific request. Changing it reloads
-// the document, disposing every pending form/review before another target opens.
+// Selection is explicit in each server-specific request. Workspaces detach old
+// presentation on selection changes; submitted operations keep their original target.
+globalThis.justVoxelSelectionGeneration = 0;
+globalThis.justVoxelStaleSelection = () => Object.assign(new Error("Server selection changed."), { staleSelection: true });
 globalThis.justVoxelSelectedURL = (value) => {
   const location = globalThis.location;
   if (!location?.origin) return value;
@@ -11,16 +13,19 @@ globalThis.justVoxelSelectedURL = (value) => {
 globalThis.justVoxelServerSelection = async (slot) => {
   if (!slot || slot.dataset.selectionLoading || slot.querySelector("[data-selected-server]")) return;
   slot.dataset.selectionLoading = "true";
+  const inventoryGeneration = slot.dataset.inventoryGeneration;
   try {
     const response = await fetch(globalThis.justVoxelSelectedURL("/api/minecraft/workspace/selection"), {credentials:"same-origin",cache:"no-store"});
     const data = await response.json();
+    if (inventoryGeneration !== slot.dataset.inventoryGeneration) return;
     if (!response.ok) throw new Error(data.error || "Server selection is unavailable.");
+    const selectedId = new URLSearchParams(window.location.search).get("server") || data.selected.id;
     const label = document.createElement("label");
     label.dataset.selectedServer = "";
     label.textContent = "Server: ";
     const select = document.createElement("select");
     select.setAttribute("aria-label", "Selected server");
-    if (!data.selected.id) {
+    if (!data.servers.some((server) => server.id === selectedId)) {
       const placeholder = document.createElement("option");
       placeholder.value = "";
       placeholder.textContent = data.servers.length ? "Choose server" : "No servers";
@@ -33,11 +38,11 @@ globalThis.justVoxelServerSelection = async (slot) => {
       const option = document.createElement("option");
       option.value = server.id;
       option.textContent = server.name;
-      option.selected = server.id === data.selected.id;
+      option.selected = server.id === selectedId;
       select.append(option);
     });
     select.addEventListener("change", () => {
-      if (!select.value) return;
+      if (!data.servers.some((server) => server.id === select.value && /^jv-[a-z0-9]{6,12}$/.test(server.id))) return;
       const target = new URL(window.location.href);
       target.searchParams.set("server", select.value);
       target.searchParams.set("workspace", slot.dataset.serverWorkspace);
@@ -45,7 +50,16 @@ globalThis.justVoxelServerSelection = async (slot) => {
       const tab = dialog?.querySelector('[aria-selected="true"]');
       const tabName = tab?.getAttribute(`data-${slot.dataset.serverWorkspace}-tab`);
       if (tabName) target.searchParams.set("tab", tabName);
-      window.location.assign(target);
+      else target.searchParams.delete("tab");
+      target.searchParams.delete("operation");
+      window.history.replaceState(window.history.state, "", target);
+      ++globalThis.justVoxelSelectionGeneration;
+      document.querySelectorAll("[data-selected-server] select").forEach((control) => { control.value = select.value; });
+      const dashboard = document.querySelector("#dashboard[data-dashboard-status]");
+      if (dashboard) dashboard.dataset.selectedMinecraftId = select.value;
+      window.dispatchEvent(new CustomEvent("justvoxel:server-selection-changed", {
+        detail: { serverId: select.value, workspace: slot.dataset.serverWorkspace },
+      }));
     });
     label.append(select);
     slot.replaceChildren(label);
@@ -290,7 +304,7 @@ if (dashboard?.dataset.selectedMinecraftId && !new URLSearchParams(window.locati
   window.history.replaceState(window.history.state, "", target);
 }
 if (dashboard) {
-  const statusURL = dashboard.dataset.dashboardStatus;
+  const statusURL = "/api/dashboard-status";
   const sessionURL = dashboard.dataset.sessionInfo;
   let pendingAction = dashboard.dataset.pendingAction || "";
   let restartSawTransition = false;
@@ -412,13 +426,16 @@ if (dashboard) {
     setButtons(status);
 
     if (!pendingAction && window.location.search.includes("result=")) {
-      window.history.replaceState(null, "", window.location.pathname);
+      const target = new URL(window.location.href);
+      target.searchParams.delete("result");
+      window.history.replaceState(window.history.state, "", target);
     }
   };
 
   const refreshDashboard = async () => {
+    const selection = globalThis.justVoxelSelectionGeneration;
     try {
-      const response = await fetch(statusURL, {
+      const response = await fetch(globalThis.justVoxelSelectedURL(statusURL), {
         method: "GET",
         credentials: "same-origin",
         headers: { Accept: "application/json" },
@@ -433,7 +450,9 @@ if (dashboard) {
         return;
       }
       if (!response.ok) return;
-      renderDashboard(await response.json());
+      const snapshot = await response.json();
+      if (selection !== globalThis.justVoxelSelectionGeneration) return;
+      renderDashboard(snapshot);
     } catch (_) {
       // Keep the last known dashboard state and try again on the next poll.
     }
@@ -448,6 +467,21 @@ if (dashboard) {
     });
   }
 
+  window.addEventListener("justvoxel:server-selection-changed", () => {
+    pendingAction = "";
+    restartSawTransition = false;
+    document.querySelectorAll("[data-minecraft-action]").forEach((form) => {
+      const action = new URL(form.action, window.location.href);
+      action.searchParams.set("server", dashboard.dataset.selectedMinecraftId);
+      form.action = action.pathname + action.search;
+    });
+    document.querySelectorAll('a[href^="/minecraft/how-to-connect"]').forEach((link) => {
+      const target = new URL(link.href, window.location.href);
+      target.searchParams.set("server", dashboard.dataset.selectedMinecraftId);
+      link.href = target.pathname + target.search;
+    });
+    void refreshDashboard();
+  });
   loadRole();
   refreshDashboard();
   window.setInterval(refreshDashboard, 5000);
@@ -465,7 +499,7 @@ const quickLook = document.querySelector("[data-quick-look]");
 const quickLookToggle = document.querySelector("[data-quick-look-toggle]");
 if (quickLook && quickLookToggle) {
   const identityURL = "/api/session-info";
-  const statusURL = dashboard?.dataset.dashboardStatus || globalThis.justVoxelSelectedURL("/api/dashboard-status");
+  const statusURL = "/api/dashboard-status";
   const actionMenus = Array.from(quickLook.querySelectorAll("[data-quick-look-actions]"));
   let identity = null;
   let refreshTimer = null;
@@ -519,6 +553,7 @@ if (quickLook && quickLookToggle) {
   const backupCSRF = quickLook.querySelector("[data-quick-look-backup-csrf]");
   backupCreate?.addEventListener("click", async () => {
     if (backupCreate.disabled) return;
+    const selection = globalThis.justVoxelSelectionGeneration;
     backupCreate.disabled = true;
     backupCreate.textContent = "Starting…";
     try {
@@ -533,10 +568,12 @@ if (quickLook && quickLookToggle) {
         return;
       }
       const result = await response.json();
+      if (selection !== globalThis.justVoxelSelectionGeneration) return;
       setValue("[data-quick-look-backup]", response.ok && result.ok
         ? result.message
         : result.error || "Manual backup could not be started.");
     } catch (_) {
+      if (selection !== globalThis.justVoxelSelectionGeneration) return;
       setValue("[data-quick-look-backup]", "Manual backup could not be started.");
     } finally {
       backupCreate.disabled = false;
@@ -595,9 +632,11 @@ if (quickLook && quickLookToggle) {
     setActionAvailability(status);
   };
 
+  window.addEventListener("justvoxel:server-selection-changed", () => { lastMonitorData = null; void refreshQuickLook(); });
   async function refreshQuickLook() {
+    const selection = globalThis.justVoxelSelectionGeneration;
     try {
-      const response = await fetch(statusURL, {
+      const response = await fetch(globalThis.justVoxelSelectedURL(statusURL), {
         method: "GET",
         credentials: "same-origin",
         headers: { Accept: "application/json" },
@@ -622,6 +661,7 @@ if (quickLook && quickLookToggle) {
       } catch (_) {
         // Missing provider evidence is presented conservatively.
       }
+      if (selection !== globalThis.justVoxelSelectionGeneration) return;
       renderQuickLook(snapshot, providers);
     } catch (_) {
       // Keep the last values and retry on the next refresh.
@@ -2151,6 +2191,7 @@ if (backupsOpen && backupsDialog) {
       if (action.origin !== window.location.origin || !action.pathname.startsWith("/workspace/backups")) return;
 
       event.preventDefault();
+      const sequence = ++loadSequence;
       const reviewDialog = form.closest("[data-backup-review-dialog]");
       const reviewClose = reviewDialog?.querySelector("[data-backup-workflow-review-close]");
       const submitter = event.submitter;
@@ -2174,6 +2215,7 @@ if (backupsOpen && backupsDialog) {
           redirect: "follow",
         });
 
+        if (sequence !== loadSequence) return;
         if (response.redirected) {
           const target = new URL(response.url);
           if (target.pathname === "/login" || target.pathname === "/password") {
@@ -2203,9 +2245,11 @@ if (backupsOpen && backupsDialog) {
         }
 
         const responseMarkup = await response.text();
+        if (sequence !== loadSequence) return;
         renderBackupsMarkup(responseMarkup);
         if (state) state.textContent = "";
       } catch (error) {
+        if (sequence !== loadSequence) return;
         if (reviewDialog) reviewDialog.dataset.busy = "false";
         if (reviewClose) reviewClose.disabled = false;
         if (submitter) submitter.disabled = false;
@@ -2288,6 +2332,13 @@ if (backupsOpen && backupsDialog) {
       if (sequence === loadSequence && refreshButton) refreshButton.disabled = false;
     }
   };
+
+  window.addEventListener("justvoxel:server-selection-changed", () => {
+    ++loadSequence;
+    currentURL = "/workspace/backups";
+    content?.replaceChildren();
+    if (backupsDialog.open) void loadBackups();
+  });
 
   const workspaceWindow = setupWorkspaceWindow(backupsDialog, { onOpen: () => loadBackups(currentURL) });
 
@@ -2429,11 +2480,14 @@ if (migrationOpen && migrationDialog) {
     initializeSharedWebUIControls(dialog);
 
     const finish = (value) => {
+      window.removeEventListener("justvoxel:server-selection-changed", detach);
       input.value = "";
       if (dialog.open) dialog.close();
       dialog.remove();
       resolve(value);
     };
+    const detach = () => finish(null);
+    window.addEventListener("justvoxel:server-selection-changed", detach);
     cancel.addEventListener("click", () => finish(null), { once: true });
     dialog.addEventListener("cancel", (event) => {
       event.preventDefault();
@@ -2540,7 +2594,8 @@ if (migrationOpen && migrationDialog) {
     window.JustVoxelServerMigrationOperation?.init(root);
   };
 
-  const renderMigrationMarkup = (markup, responseURL) => {
+  const renderMigrationMarkup = (markup, responseURL, preserveLocation = false) => {
+    const selection = globalThis.justVoxelSelectionGeneration;
     if (!content) throw new Error("Migration workspace is unavailable.");
     const root = extractMigrationRoot(markup);
     if (!root) throw new Error("Migration response could not be rendered.");
@@ -2555,7 +2610,7 @@ if (migrationOpen && migrationDialog) {
       selectedURL.searchParams.set("server", root.dataset.serverId);
       window.history.replaceState(window.history.state, "", selectedURL.pathname + selectedURL.search);
     }
-    if (progress) updateMigrationLocation("", progress[1]);
+    if (progress && !preserveLocation) updateMigrationLocation("", progress[1]);
     currentTab = inferMigrationTab(responseURL, root);
     syncMigrationTabs();
     syncMigrationRecoveryAvailability(root);
@@ -2584,6 +2639,7 @@ if (migrationOpen && migrationDialog) {
         });
         if (await handleMigrationAuth(statusResponse) || !statusResponse.ok) return;
         const status = await statusResponse.json();
+        if (selection !== globalThis.justVoxelSelectionGeneration) return;
         const operation = status?.operation;
         if (!operation || operation.operation_type !== "factory_reset" || operation.state !== "needs_attention") return;
 
@@ -2625,9 +2681,11 @@ if (migrationOpen && migrationDialog) {
             if (await handleMigrationAuth(response)) return;
             const result = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(result.error || "Failed Factory Reset could not be resolved.");
+            if (selection !== globalThis.justVoxelSelectionGeneration) return;
             setMigrationBusy("Previous failed Factory Reset resolved. Reloading migration…", "info");
             await loadMigration(tabURLs[currentTab]);
           } catch (error) {
+            if (selection !== globalThis.justVoxelSelectionGeneration) return;
             button.disabled = false;
             setMigrationBusy(error?.message || "Failed Factory Reset could not be resolved.", "error");
           }
@@ -2661,6 +2719,7 @@ if (migrationOpen && migrationDialog) {
         if (sourceKind === "smb") {
           if (!migrationSourceSMBPassword) {
             const password = await requestMigrationSMBPassword("import");
+            if (selection !== globalThis.justVoxelSelectionGeneration) return;
             if (password === null) {
               if (submitter) submitter.disabled = false;
               setMigrationBusy("");
@@ -2677,6 +2736,7 @@ if (migrationOpen && migrationDialog) {
         if (exportKind === "smb" && action.pathname.endsWith("/export/apply")) {
           if (!migrationExportSMBPassword) {
             const password = await requestMigrationSMBPassword("export");
+            if (selection !== globalThis.justVoxelSelectionGeneration) return;
             if (password === null) {
               if (submitter) submitter.disabled = false;
               setMigrationBusy("");
@@ -2687,7 +2747,8 @@ if (migrationOpen && migrationDialog) {
           body.set("smb_password", migrationExportSMBPassword);
         }
         form.querySelectorAll('input[name="source_smb_password"],input[name="smb_password"]').forEach((input) => { input.value = ""; });
-        const sendMigration = () => fetch(action.pathname + action.search, {
+        if (selection !== globalThis.justVoxelSelectionGeneration) return;
+        const sendMigration = () => fetch(globalThis.justVoxelSelectedURL(action.pathname + action.search), {
           method: (form.method || "POST").toUpperCase(),
           credentials: "same-origin",
           headers: {
@@ -2701,10 +2762,12 @@ if (migrationOpen && migrationDialog) {
           signal: submitController.signal,
         });
         const response = await sendMigration();
+        if (selection !== globalThis.justVoxelSelectionGeneration) return;
         if (await handleMigrationAuth(response)) return;
         if (response.status === 403) throw new Error("Administrator access required.");
 
         const responseMarkup = await response.text();
+        if (selection !== globalThis.justVoxelSelectionGeneration) return;
         if (!response.ok && !responseMarkup.includes("data-migration-workspace-root")) {
           const detail = responseMarkup.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
           throw new Error(detail || `Migration request failed (HTTP ${response.status}).`);
@@ -2723,7 +2786,7 @@ if (migrationOpen && migrationDialog) {
         }
         setMigrationBusy("");
       } catch (error) {
-        if (error?.name === "AbortError") return;
+        if (error?.name === "AbortError" || selection !== globalThis.justVoxelSelectionGeneration) return;
         if (submitter && submitter.isConnected) submitter.disabled = false;
         setMigrationBusy(error?.message || "Migration operation could not be completed.", "error");
       } finally {
@@ -2772,7 +2835,7 @@ if (migrationOpen && migrationDialog) {
     initializeMigrationRoot(root);
   };
 
-  const loadMigration = async (url = currentURL) => {
+  const loadMigration = async (url = currentURL, preserveLocation = false) => {
     const sequence = ++loadSequence;
     migrationLoadController?.abort();
     const loadController = new AbortController();
@@ -2789,18 +2852,19 @@ if (migrationOpen && migrationDialog) {
         redirect: "follow",
         signal: loadController.signal,
       });
+      if (sequence !== loadSequence) return;
       if (await handleMigrationAuth(response)) return;
       if (response.status === 403) throw new Error("Administrator access required.");
       if (!response.ok) throw new Error("Migration is unavailable.");
 
       const finalURL = new URL(response.url || url, window.location.href);
       if (finalURL.pathname === "/workspace/migration") {
-        await loadMigration(tabURLs[currentTab]);
+        await loadMigration(tabURLs[currentTab], preserveLocation);
         return;
       }
       const markup = await response.text();
       if (sequence !== loadSequence) return;
-      renderMigrationMarkup(markup, finalURL.href);
+      renderMigrationMarkup(markup, finalURL.href, preserveLocation);
       setMigrationBusy("");
     } catch (error) {
       if (error?.name === "AbortError" || sequence !== loadSequence) return;
@@ -2832,6 +2896,7 @@ if (migrationOpen && migrationDialog) {
         redirect: "follow",
         signal: loadController.signal,
       });
+      if (sequence !== loadSequence) return;
       if (await handleMigrationAuth(response)) return;
       if (response.status === 403) throw new Error("Administrator access required.");
       if (!response.ok) throw new Error("Migration is unavailable.");
@@ -2840,11 +2905,13 @@ if (migrationOpen && migrationDialog) {
 
       if (finalURL.pathname !== "/workspace/migration") {
         const markup = await response.text();
+        if (sequence !== loadSequence) return;
         renderMigrationMarkup(markup, finalURL.href);
         setMigrationBusy("");
         return;
       }
       const entryMarkup = await response.text();
+      if (sequence !== loadSequence) return;
       const entryRoot = extractMigrationRoot(entryMarkup);
       if (entryRoot) {
         syncMigrationRecoveryAvailability(entryRoot);
@@ -2866,6 +2933,19 @@ if (migrationOpen && migrationDialog) {
       if (sequence === loadSequence && refreshButton) refreshButton.disabled = false;
     }
   };
+
+  window.addEventListener("justvoxel:server-selection-changed", () => {
+    ++loadSequence;
+    migrationLoadController?.abort();
+    // Do not abort an already submitted operation; only detach its presentation.
+    migrationSubmitController = null;
+    migrationSourceSMBPassword = "";
+    migrationExportSMBPassword = "";
+    currentURL = tabURLs[currentTab];
+    content?.replaceChildren();
+    setMigrationBusy("");
+    if (migrationDialog.open) void loadMigration(currentURL, true);
+  });
 
   const workspaceWindow = setupWorkspaceWindow(migrationDialog, {
     onOpen: () => {
@@ -3240,6 +3320,7 @@ if (minecraftOpen && minecraftDialog) {
 
   const requestWorkspaceJSON = async (url, options = {}) => {
     if (url === "/api/dashboard-status") url = "/api/minecraft/workspace/snapshot";
+    const selection = globalThis.justVoxelSelectionGeneration;
     const response = await fetch(globalThis.justVoxelSelectedURL(url), {
       credentials: "same-origin",
       cache: "no-store",
@@ -3255,6 +3336,7 @@ if (minecraftOpen && minecraftDialog) {
     } catch (_) {
       payload = {};
     }
+    if (selection !== globalThis.justVoxelSelectionGeneration) throw globalThis.justVoxelStaleSelection();
     if (response.status === 401) {
       window.location.assign("/login");
       return null;
@@ -3302,16 +3384,16 @@ if (minecraftOpen && minecraftDialog) {
       const boot = document.createElement("form");boot.dataset.minecraftSettingsTab="overview";
       boot.innerHTML='<label>Start on Boot <select name="start_on_boot"><option value="true">Enabled</option><option value="false">Disabled</option></select></label><button type="submit">Review changes</button>';
       boot.querySelector("select").value=String(Boolean(minecraft.start_on_boot));
-      boot.addEventListener("submit",async(event)=>{event.preventDefault();try{const params=settingsParams(boot);const plan=await requestWorkspaceJSON("/api/minecraft/workspace/settings/plan",{method:"POST",body:params});if(sequence===loadSequence)renderSettingsReview(root,plan,params);}catch(error){if(state)state.textContent=error.message;}});root.append(boot);
+      boot.addEventListener("submit",async(event)=>{ const selection = globalThis.justVoxelSelectionGeneration;event.preventDefault();try{const params=settingsParams(boot);const plan=await requestWorkspaceJSON("/api/minecraft/workspace/settings/plan",{method:"POST",body:params});if(sequence===loadSequence)renderSettingsReview(root,plan,params);}catch(error){if(error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration)return;if(state)state.textContent=error.message;}});root.append(boot);
       const context=await requestWorkspaceJSON("/api/minecraft/workspace/selection");if(sequence!==loadSequence)return;
       const name=context.selected.name;
       const rename=document.createElement("form");rename.innerHTML='<label>Server name<input name="display_name" required maxlength="64"></label><button type="submit">Rename</button>';rename.querySelector("input").value=name;
-      rename.addEventListener("submit",async(event)=>{event.preventDefault();try{const params=new URLSearchParams(new FormData(rename));params.set("csrf",csrf);await requestWorkspaceJSON("/api/minecraft/workspace/rename",{method:"POST",body:params});window.location.reload();}catch(error){if(state)state.textContent=error.message;}});root.append(rename);
+      rename.addEventListener("submit",async(event)=>{ const selection = globalThis.justVoxelSelectionGeneration;event.preventDefault();try{const params=new URLSearchParams(new FormData(rename));params.set("csrf",csrf);await requestWorkspaceJSON("/api/minecraft/workspace/rename",{method:"POST",body:params});window.location.reload();}catch(error){if(error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration)return;if(state)state.textContent=error.message;}});root.append(rename);
       const danger=document.createElement("section");danger.className="panel details minecraft-workspace-section";
       const heading=document.createElement("h2");heading.textContent="Danger zone";const title=document.createElement("h3");title.textContent=`Delete ${name}`;
       danger.append(heading,title,messageNode("Permanently removes this active server and its world data. Existing backup archives are preserved. The server must be stopped first."),messageNode("Backups are preserved as historical archives. Current Restore remains tied to this server identity."));
       const form=document.createElement("form");form.innerHTML='<label>Type the current server name<input name="confirm_name" required autocomplete="off"></label><button type="submit" class="danger" disabled>Delete Server</button>';const input=form.querySelector("input"),button=form.querySelector("button");input.addEventListener("input",()=>{button.disabled=input.value!==name;});
-      form.addEventListener("submit",async(event)=>{event.preventDefault();if(input.value!==name)return;button.disabled=true;try{const params=new URLSearchParams({csrf,confirm_name:input.value});const result=await requestWorkspaceJSON("/api/minecraft/workspace/delete",{method:"POST",body:params});window.location.assign(result.redirect);}catch(error){if(state)state.textContent=error.message;button.disabled=input.value!==name;}});danger.append(form);root.append(danger);
+      form.addEventListener("submit",async(event)=>{ const selection = globalThis.justVoxelSelectionGeneration;event.preventDefault();if(input.value!==name)return;button.disabled=true;try{const params=new URLSearchParams({csrf,confirm_name:input.value});const result=await requestWorkspaceJSON("/api/minecraft/workspace/delete",{method:"POST",body:params});window.location.assign(result.redirect);}catch(error){if(error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration)return;if(state)state.textContent=error.message;button.disabled=input.value!==name;}});danger.append(form);root.append(danger);
     }
 
     const playerLine = document.createElement("div");
@@ -3666,6 +3748,7 @@ if (minecraftOpen && minecraftDialog) {
     root.prepend(review);
 
     apply.addEventListener("click", async () => {
+      const selection = globalThis.justVoxelSelectionGeneration;
       apply.disabled = true;
       cancel.disabled = true;
       if (state) state.textContent = plan.memory_restart_required ? "Applying and restarting Minecraft…" : "Applying…";
@@ -3690,6 +3773,7 @@ if (minecraftOpen && minecraftDialog) {
         else if (result.restart_deferred) savedMessage = "Minecraft settings saved. Restart remains pending.";
         await loadCurrentTab(savedMessage);
       } catch (error) {
+        if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration) return;
         if (state) state.textContent = error?.message || "Minecraft settings could not be applied.";
         apply.disabled = false;
         cancel.disabled = false;
@@ -3704,6 +3788,7 @@ if (minecraftOpen && minecraftDialog) {
     content.replaceChildren(root);
     const form = root.querySelector("[data-minecraft-settings-tab]");
     form?.addEventListener("submit", async (event) => {
+      const selection = globalThis.justVoxelSelectionGeneration;
       event.preventDefault();
       const submitter = event.submitter;
       if (submitter) submitter.disabled = true;
@@ -3719,6 +3804,7 @@ if (minecraftOpen && minecraftDialog) {
         renderSettingsReview(root, plan, params);
         if (state) state.textContent = "";
       } catch (error) {
+        if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration) return;
         if (state) state.textContent = error?.message || "Minecraft settings could not be reviewed.";
       } finally {
         if (submitter) submitter.disabled = false;
@@ -3772,6 +3858,7 @@ if (minecraftOpen && minecraftDialog) {
       toggle.setAttribute("aria-label", "Whitelist");
       toggle.setAttribute("aria-checked", String(enabled));
       toggle.addEventListener("click", async () => {
+        const selection = globalThis.justVoxelSelectionGeneration;
         if (enabled && !window.confirm("Disable whitelist?\n\nPlayers not on the whitelist will be allowed to join.")) return;
         toggle.disabled = true;
         try {
@@ -3782,6 +3869,7 @@ if (minecraftOpen && minecraftDialog) {
           });
           if (result) await loadCurrentTab(result.message || "Whitelist updated.");
         } catch (error) {
+          if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration) return;
           const message = error?.message || "Whitelist change failed.";
           // Reload authoritative state after recovery; never optimistically flip.
           try { await loadCurrentTab(); } catch (_) { /* Keep the last authoritative state visible. */ }
@@ -3794,6 +3882,7 @@ if (minecraftOpen && minecraftDialog) {
     }
 
     const changeWhitelist = async (params, submitter) => {
+      const selection = globalThis.justVoxelSelectionGeneration;
       if (submitter) submitter.disabled = true;
       if (state) state.textContent = "Updating whitelist…";
       try {
@@ -3806,6 +3895,7 @@ if (minecraftOpen && minecraftDialog) {
         if (!result) return;
         await loadCurrentTab(result.message || "Whitelist updated.");
       } catch (error) {
+        if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration) return;
         if (state) state.textContent = error?.message || "Whitelist change could not be completed.";
       } finally {
         if (submitter) submitter.disabled = false;
@@ -3892,6 +3982,7 @@ if (minecraftOpen && minecraftDialog) {
   };
 
   async function loadCurrentTab(message = "") {
+    const selection = globalThis.justVoxelSelectionGeneration;
     const sequence = ++loadSequence;
     if (state) state.textContent = "Loading…";
     if (refreshButton) refreshButton.disabled = true;
@@ -3903,6 +3994,7 @@ if (minecraftOpen && minecraftDialog) {
       else await renderOverview(sequence, message);
       if (sequence === loadSequence && state?.textContent === "Loading…") state.textContent = "";
     } catch (error) {
+      if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration) return;
       if (sequence !== loadSequence) return;
       if (content) content.replaceChildren();
       if (state) state.textContent = error?.message || "Minecraft workspace is unavailable.";
@@ -3917,6 +4009,19 @@ if (minecraftOpen && minecraftDialog) {
     loadCurrentTab();
   };
 
+  window.addEventListener("justvoxel:server-selection-changed", () => {
+    ++loadSequence;
+    content?.replaceChildren();
+    if (globalThis.document?.querySelector("#dashboard[data-dashboard-status]")?.dataset.selectedMinecraftId === "" &&
+        !new URLSearchParams(globalThis.location?.search || "").has("server")) {
+      currentTab = "overview";
+      tabs.forEach((button) => button.setAttribute("aria-selected", button.dataset.minecraftTab === currentTab ? "true" : "false"));
+      content?.appendChild(messageNode("No Minecraft servers are configured. Start setup to add a Minecraft server."));
+      if (state) state.textContent = "Minecraft is ready for first setup.";
+      return;
+    }
+    if (minecraftDialog.open) void loadCurrentTab();
+  });
   const workspaceWindow = setupWorkspaceWindow(minecraftDialog, { onOpen: () => loadCurrentTab() });
 
   minecraftOpen.addEventListener("click", () => {
@@ -4054,7 +4159,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   };
 
   const systemFetchJSON = async (url, options = {}, factoryResetPollOperationID = "") => {
-    const response = await fetch(url.includes("/reset/minecraft/") || url.includes("/reset/operations/") ? globalThis.justVoxelSelectedURL(url) : url, {
+    const response = await fetch(url, {
       credentials: "same-origin",
       cache: "no-store",
       ...options,
@@ -4895,6 +5000,21 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       ++loadSequence;
       window.JustVoxelLiveConsole.close();
       workspaceWindow?.close();
+      if (!operation.instance_id) {
+        const target = new URL(window.location.href);
+        target.searchParams.delete("server");
+        window.history.replaceState(window.history.state, "", target);
+        ++globalThis.justVoxelSelectionGeneration;
+        const dashboard = document.querySelector("#dashboard[data-dashboard-status]");
+        if (dashboard) dashboard.dataset.selectedMinecraftId = "";
+        document.querySelectorAll("[data-server-selector-slot]").forEach((slot) => {
+          slot.replaceChildren();
+          slot.dataset.inventoryGeneration = String(globalThis.justVoxelSelectionGeneration);
+          delete slot.dataset.selectionLoading;
+          void globalThis.justVoxelServerSelection(slot);
+        });
+        window.dispatchEvent(new CustomEvent("justvoxel:server-selection-changed", { detail: { serverId: "" } }));
+      }
       window.dispatchEvent(new Event("justvoxel:minecraft-reset-complete"));
       return;
     }
@@ -4977,7 +5097,9 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     } else if (operation.state === "needs_attention") {
       const recovery = document.createElement("div");
       recovery.className = "notice warning";
-      recovery.innerHTML = "<strong>Minecraft Reset stopped before completion.</strong><br>Review the reset impact and retry the same persistent operation.";
+      recovery.innerHTML = operation.instance_id
+        ? "<strong>Minecraft Reset stopped before completion.</strong><br>Review the reset impact and retry the same persistent operation."
+        : "<strong>Minecraft removal stopped before completion.</strong><br>Continue removal to finish removing the remaining servers.";
       built.panel.appendChild(recovery);
 
       const actions = document.createElement("div");
@@ -4985,7 +5107,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       const retry = document.createElement("button");
       retry.type = "button";
       retry.className = "danger";
-      retry.textContent = "Retry Reset Minecraft";
+      retry.textContent = operation.instance_id ? "Retry Reset Minecraft" : "Continue removal";
       retry.addEventListener("click", () => planReset("minecraft"));
       actions.appendChild(retry);
       built.panel.appendChild(actions);
@@ -5003,7 +5125,8 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     resetPollTimer = window.setTimeout(async () => {
       if (currentTab !== "reset" || !content?.isConnected) return;
       try {
-        const payload = await systemFetchJSON("/api/system/workspace/reset/operations/" + operation.operation_id, {},
+        const operationURL = "/api/system/workspace/reset/operations/" + operation.operation_id;
+        const payload = await systemFetchJSON(operation.instance_id ? operationURL + "?server=" + encodeURIComponent(operation.instance_id) : operationURL, {},
           operation.operation_type === "factory_reset" ? operation.operation_id : "");
         if (payload?.operation) renderResetOperation(payload.operation);
       } catch (error) {
@@ -5024,7 +5147,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     const remove = [];
     const keep = [];
 
-    if (mode === "minecraft") {
+    if (mode === "minecraft" && plan.instance_id) {
       remove.push("Current Minecraft container and runtime configuration.");
       if (plan.data_action === "delete") remove.push("Minecraft world/data on appliance-owned internal storage.");
       else keep.push("Minecraft data outside appliance-owned internal storage.");
@@ -5034,6 +5157,15 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       keep.push("Current login password and WebUI accounts.");
       keep.push("Storage partitions, filesystems, mounts, and host configuration.");
       keep.push("USB, external, NFS, and SMB data.");
+    } else if (mode === "minecraft") {
+      remove.push("ALL configured Minecraft server definitions, running or stopped.");
+      remove.push("Minecraft containers/runtime units and exact owned firewall/runtime state.");
+      remove.push("JustVoxel-owned INTERNAL Minecraft data, including managed plugins/runtime content.");
+      keep.push("All backup archives and archive metadata.");
+      keep.push("Login/password, authentication mode, and WebUI users.");
+      keep.push("Storage layout, mounts, partitions, filesystems, and storage ownership records.");
+      keep.push("SMB credentials and unrelated host configuration.");
+      keep.push("External, USB, NFS, and SMB data are never erased.");
     } else {
       remove.push("Current Minecraft container and runtime configuration.");
       if (plan.data_action === "delete") remove.push("Minecraft world/data on appliance-owned internal storage.");
@@ -5064,9 +5196,15 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     description.className = "muted compact";
     description.textContent = mode === "factory"
       ? "This resets JustVoxel-owned local state. External and network storage are never erased."
-      : "This removes the current Minecraft installation while preserving backups, accounts, and storage layout.";
+      : plan.instance_id ? "This removes the current Minecraft installation while preserving backups, accounts, and storage layout."
+      : "Remove ALL existing Minecraft servers, running or stopped, and JustVoxel-owned internal Minecraft data. External, USB, NFS, and SMB data are never erased.";
     built.panel.appendChild(description);
 
+    if (mode === "minecraft" && Array.isArray(plan.participants)) {
+      built.panel.appendChild(systemResetList("Servers to remove: " + plan.participants.length,
+        plan.participants.map((participant) => participant.display_name + " — " +
+          ({ running: "Running", stopped: "Stopped", failed: "Failed", retiring: "Removing" }[participant.state] || participant.state))));
+    }
     const impact = resetImpactFromPlan(mode, plan);
     const impactGrid = document.createElement("div");
     impactGrid.className = "system-reset-impact-grid";
@@ -5268,7 +5406,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     minecraft.className = "system-reset-choice";
     minecraft.innerHTML =
       '<strong>Reset Minecraft</strong>' +
-      '<span>Remove the current Minecraft server and internal Minecraft data.</span>' +
+      '<span>Remove ALL existing Minecraft servers, running or stopped, and JustVoxel-owned internal Minecraft data.</span>' +
       '<small>Keeps backups, login/password, WebUI users, and storage layout.</small>';
     minecraft.addEventListener("click", () => planReset("minecraft"));
 
@@ -6254,7 +6392,7 @@ if (pluginsDialog && pluginsOpen) {
   let overlayDismissible = false;
   const stopPolling = () => { clearTimeout(pollTimer); pollTimer = null; installController?.abort(); ++installGeneration; };
   const workspaceShell = pluginsDialog.querySelector(".plugins-workspace-shell");
-  const closePanel = () => {
+  const closePanel = (restoreFocus = true) => {
     stopPolling();
     panel.hidden = true;
     results.querySelectorAll(".plugins-result-card").forEach((node) => {
@@ -6264,6 +6402,7 @@ if (pluginsDialog && pluginsOpen) {
     operationViewID = null;
     overlayDismissible = false;
     workspaceShell.inert = false;
+    if (!restoreFocus) return;
     if (returnFocus?.isConnected) returnFocus.focus();
     else pluginsDialog.querySelector('[data-plugins-tab][aria-selected="true"]')?.focus();
   };
@@ -6338,7 +6477,7 @@ if (pluginsDialog && pluginsOpen) {
           if (current !== installGeneration) return;
           operationIdentity = { operation_id: payload.operation.operation_id, source: plugin.source, project_id: plugin.project_id, name: plugin.name, version: plugin.version };
           if (!showOperation(payload.operation)) pollTimer = setTimeout(() => pollOperation(payload.operation.operation_id, current), 1000);
-        } catch (error) { if (current === installGeneration && error.name !== "AbortError") panelError(error); }
+        } catch (error) { if (error.staleSelection) return; if (current === installGeneration && error.name !== "AbortError") panelError(error); }
       }, action === "remove" ? "plugins-remove-action" : "plugins-state-action");
       let slider = null, finalConfirm = null;
       if (action === "remove") {
@@ -6367,20 +6506,27 @@ if (pluginsDialog && pluginsOpen) {
       players?.addEventListener("change", sync);
       sync();
       overlayActions(panelAction("Cancel", returnToInstalled, true), apply);
-    } catch (error) { if (current === installGeneration && error.name !== "AbortError") panelError(error); }
+    } catch (error) { if (error.staleSelection) return; if (current === installGeneration && error.name !== "AbortError") panelError(error); }
   };
   const pluginRequest = async (route, body, signal) => {
-    const options = { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" }, signal };
-    if (body) {
-      options.method = "POST";
-      options.body = new URLSearchParams({ csrf: document.querySelector('[data-minecraft-workspace-csrf]')?.value || document.querySelector('input[name="csrf"]')?.value || "", ...body });
+    const selection = globalThis.justVoxelSelectionGeneration;
+    try {
+      const options = { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" }, signal };
+      if (body) {
+        options.method = "POST";
+        options.body = new URLSearchParams({ csrf: document.querySelector('[data-minecraft-workspace-csrf]')?.value || document.querySelector('input[name="csrf"]')?.value || "", ...body });
+      }
+      const response = await fetch(globalThis.justVoxelSelectedURL(`/api/plugins/workspace/${route}`), options);
+      const payload = await response.json();
+      if (selection !== globalThis.justVoxelSelectionGeneration) throw globalThis.justVoxelStaleSelection();
+      if (response.status === 401) { window.location.assign("/login"); throw new Error("Sign in again."); }
+      if (response.status === 403 && String(payload.error || "").toLowerCase().includes("password")) { window.location.assign("/password"); throw new Error("Change your password first."); }
+      if (!response.ok) throw new Error(payload.error || payload.message || "Plugin installation is unavailable; review again.");
+      return payload;
+    } catch (error) {
+      if (selection !== globalThis.justVoxelSelectionGeneration) throw globalThis.justVoxelStaleSelection();
+      throw error;
     }
-    const response = await fetch(globalThis.justVoxelSelectedURL(`/api/plugins/workspace/${route}`), options);
-    const payload = await response.json();
-    if (response.status === 401) { window.location.assign("/login"); throw new Error("Sign in again."); }
-    if (response.status === 403 && String(payload.error || "").toLowerCase().includes("password")) { window.location.assign("/password"); throw new Error("Change your password first."); }
-    if (!response.ok) throw new Error(payload.error || payload.message || "Plugin installation is unavailable; review again.");
-    return payload;
   };
   const panelError = (error) => {
     showPanel();
@@ -6400,7 +6546,7 @@ if (pluginsDialog && pluginsOpen) {
           const payload = await pluginRequest("addons/recover", { operation_id: operation.operation_id }, installController?.signal);
           showAddonOperation(payload.operation);
           load();
-        } catch (error) { feedback.textContent = error.message; retry.disabled = false; }
+        } catch (error) { if (error.staleSelection) return; feedback.textContent = error.message; retry.disabled = false; }
       });
       panelBody.append(feedback);
       overlayActions(retry, panelAction("Close", closePanel, true));
@@ -6463,7 +6609,7 @@ if (pluginsDialog && pluginsOpen) {
           if (!payload.operation || payload.operation.state !== "resolved") throw new Error("Plugin state could not be resolved.");
           showOperation(payload.operation);
           load();
-        } catch (error) {
+        } catch (error) { if (error.staleSelection) return;
           if (current === installGeneration && error.name !== "AbortError") {
             feedback.textContent = error.message || "Re-check failed. Evidence and maintenance exclusion were preserved.";
             recheck.disabled = false;
@@ -6483,7 +6629,7 @@ if (pluginsDialog && pluginsOpen) {
       if (current !== installGeneration) return;
       if (!payload.operation) throw new Error("Installation status is unavailable.");
       if (!showOperation(payload.operation)) pollTimer = setTimeout(() => pollOperation(id, current), 1500);
-    } catch (error) { if (current === installGeneration && error.name !== "AbortError") panelError(error); }
+    } catch (error) { if (error.staleSelection) return; if (current === installGeneration && error.name !== "AbortError") panelError(error); }
   };
   const resumeActiveOperation = (operation, current) => {
     if (!showOperation(operation)) pollTimer = setTimeout(() => pollOperation(operation.operation_id, current), 1000);
@@ -6511,7 +6657,7 @@ if (pluginsDialog && pluginsOpen) {
       if (!payload.operation) throw new Error("Installation did not start. Review again.");
       operationIdentity = { operation_id: payload.operation.operation_id, source: plan.source, project_id: plan.project_id, name: plan.project_name, version: plan.version_number };
       if (!showOperation(payload.operation)) pollTimer = setTimeout(() => pollOperation(payload.operation.operation_id, current), 1000);
-    } catch (error) { if (current === installGeneration && error.name !== "AbortError") panelError(error); }
+    } catch (error) { if (error.staleSelection) return; if (current === installGeneration && error.name !== "AbortError") panelError(error); }
   };
   const readableSize = (size) => {
     if (!Number.isFinite(size) || size < 0) return "Size unavailable";
@@ -6586,7 +6732,7 @@ if (pluginsDialog && pluginsOpen) {
         players("Install", "Confirms the player-aware shutdown and restart.");
       }
       panelBody.querySelector("button")?.focus();
-    } catch (error) {
+    } catch (error) { if (error.staleSelection) return;
       if (current !== installGeneration || error.name === "AbortError") return;
       if (error.message === "This release is not a direct Paper/Bukkit plugin and cannot be installed into the plugins directory." && readOnlyReview) readOnlyReview("The publisher lists Paper support, but this JAR is not a direct Paper/Bukkit plugin. It may require an external loader or a different installation path, so JustVoxel will not place it in the plugins directory.");
       else if (error.message === "BlueMap native add-on belongs in Plugins -> Add-ons -> BlueMap Add-ons. Select its local file there." && readOnlyReview) readOnlyReview(error.message);
@@ -6603,7 +6749,7 @@ if (pluginsDialog && pluginsOpen) {
       installController = new AbortController();
       const current = installGeneration;
       if (!showOperation(payload.operation)) pollTimer = setTimeout(() => pollOperation(payload.operation.operation_id, current), 1000);
-    } catch (error) { state.textContent = error.message || "Plugin installation status is unavailable."; }
+    } catch (error) { if (error.staleSelection) return; state.textContent = error.message || "Plugin installation status is unavailable."; }
   };
   panel.addEventListener("click", (event) => {
     if (event.target === panel && overlayDismissible) closePanel();
@@ -6626,7 +6772,7 @@ if (pluginsDialog && pluginsOpen) {
       const payload = await pluginRequest("operation", null, controller.signal);
       if (!pluginsDialog.open || tab === "discover" || current !== generation) return;
       if (pluginInventorySafe(payload.operation)) { load(); return; }
-    } catch (error) {
+    } catch (error) { if (error.staleSelection) return;
       if (current !== generation || error.name === "AbortError") return;
       state.textContent = error.message || "Plugin installation status is unavailable.";
     }
@@ -6642,22 +6788,29 @@ if (pluginsDialog && pluginsOpen) {
     return !changed;
   };
   const addonRequest = async (route, kind, file, plan = null, confirmPlayers = false) => {
-    const body = new FormData();
-    body.append("type", kind);
-    body.append("file", file, file.name);
-    if (plan) {
-      body.append("plan_fingerprint", plan.plan_fingerprint);
-      body.append("confirm_players", String(confirmPlayers));
+    const selection = globalThis.justVoxelSelectionGeneration;
+    try {
+      const body = new FormData();
+      body.append("type", kind);
+      body.append("file", file, file.name);
+      if (plan) {
+        body.append("plan_fingerprint", plan.plan_fingerprint);
+        body.append("confirm_players", String(confirmPlayers));
+      }
+      const response = await fetch(globalThis.justVoxelSelectedURL(`/api/plugins/workspace/addons/${route}`), {
+        method: "POST", credentials: "same-origin", cache: "no-store", body,
+        signal: installController?.signal,
+        headers: { Accept: "application/json", "X-CSRF-Token": document.querySelector('[data-minecraft-workspace-csrf]')?.value || document.querySelector('input[name="csrf"]')?.value || "" },
+      });
+      const payload = await response.json();
+      if (selection !== globalThis.justVoxelSelectionGeneration) throw globalThis.justVoxelStaleSelection();
+      if (response.status === 401) { window.location.assign("/login"); throw new Error("Sign in again."); }
+      if (!response.ok) throw new Error(payload.error || "Add-ons upload could not continue; review again.");
+      return payload;
+    } catch (error) {
+      if (selection !== globalThis.justVoxelSelectionGeneration) throw globalThis.justVoxelStaleSelection();
+      throw error;
     }
-    const response = await fetch(globalThis.justVoxelSelectedURL(`/api/plugins/workspace/addons/${route}`), {
-      method: "POST", credentials: "same-origin", cache: "no-store", body,
-      signal: installController?.signal,
-      headers: { Accept: "application/json", "X-CSRF-Token": document.querySelector('[data-minecraft-workspace-csrf]')?.value || document.querySelector('input[name="csrf"]')?.value || "" },
-    });
-    const payload = await response.json();
-    if (response.status === 401) { window.location.assign("/login"); throw new Error("Sign in again."); }
-    if (!response.ok) throw new Error(payload.error || "Add-ons upload could not continue; review again.");
-    return payload;
   };
   const reviewAddon = async (section, file) => {
     stopPolling();
@@ -6694,12 +6847,12 @@ if (pluginsDialog && pluginsOpen) {
           if (current !== installGeneration) return;
           if (!payload.operation) throw new Error("Add-ons installation did not start.");
           if (!showOperation(payload.operation)) pollTimer = setTimeout(() => pollOperation(payload.operation.operation_id, current), 1000);
-        } catch (error) { if (current === installGeneration && error.name !== "AbortError") panelError(error); }
+        } catch (error) { if (error.staleSelection) return; if (current === installGeneration && error.name !== "AbortError") panelError(error); }
       });
       apply.disabled = Boolean(players && !players.checked);
       players?.addEventListener("change", () => { apply.disabled = !players.checked; });
       overlayActions(panelAction("Cancel", closePanel, true), apply);
-    } catch (error) { if (current === installGeneration && error.name !== "AbortError") panelError(error); }
+    } catch (error) { if (error.staleSelection) return; if (current === installGeneration && error.name !== "AbortError") panelError(error); }
   };
   const renderAddonSection = (section) => {
     const card = document.createElement("article");
@@ -6788,7 +6941,7 @@ if (pluginsDialog && pluginsOpen) {
         pageLabel.textContent = `Page ${currentPage} of ${totalPages}`;
       }
       return true;
-    } catch (error) {
+    } catch (error) { if (error.staleSelection) return;
       if (current === generation && error.name !== "AbortError") state.textContent = error.message || "Plugin information is unavailable.";
     } finally {
       if (current === generation) {
@@ -6822,6 +6975,22 @@ if (pluginsDialog && pluginsOpen) {
     capacityTimer = setTimeout(() => updateCapacity(), 200);
   });
   capacityObserver.observe(results);
+  window.addEventListener("justvoxel:server-selection-changed", () => {
+    clearTimeout(capacityTimer);
+    clearTimeout(searchTimer);
+    clearInventoryTimer();
+    ++generation;
+    controller?.abort();
+    // An in-flight POST still belongs to its original server.
+    installController = null;
+    closePanel(false);
+    panelBody.replaceChildren();
+    operationIdentity = null;
+    resetCursors();
+    discoverServerKey = null;
+    results.replaceChildren();
+    if (pluginsDialog.open) { load(); resumePluginInstall(); }
+  });
   const workspaceWindow = setupWorkspaceWindow(pluginsDialog, { onOpen: () => { resetCursors(); updateCapacity(false); load(); resumePluginInstall(); }, onClose: () => { clearTimeout(capacityTimer); clearTimeout(searchTimer); clearInventoryTimer(); ++generation; controller?.abort(); resetCursors(); closePanel(); } });
   pluginsOpen.addEventListener("click", () => {
     if (!document.body.classList.contains("role-administrator")) return;

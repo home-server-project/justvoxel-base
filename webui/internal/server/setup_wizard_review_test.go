@@ -287,7 +287,7 @@ func TestRecommendedAndAdvancedPlanRequestsDifferOnlyInMountedOnly(t *testing.T)
 		t.Fatal(err)
 	}
 	markup := string(reviewSource)
-	if strings.Count(markup, `<div class="setup-review-header">`) != 1 || strings.Count(markup, `class="setup-review-summary"`) != 1 ||
+	if strings.Count(markup, `<div class="setup-review-header">`) != 1 || strings.Count(markup, `class="setup-review-summary{{if .AddServer}} setup-review-summary-add-server{{end}}"`) != 1 ||
 		!strings.Contains(markup, `{{if ne .SetupMode "recommended"}}`) {
 		t.Fatal("Recommended and Advanced must share one Review presentation")
 	}

@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 const adminValidationHelper = "/usr/libexec/justvoxel/mjust/validate-backend"
@@ -151,20 +154,37 @@ func (b *instanceRuntimeBackend) validateApplianceInstance(ctx context.Context, 
 		return nil
 	}
 	check(true, "Instance runtime commitment gate")
-	check(b.storage(ctx, "validate", record) == nil, "Instance storage identity")
+	storageErr := b.storage(ctx, "validate", record)
+	check(storageErr == nil, "Instance storage identity")
+	state, stateErr := b.observe(ctx, id)
 	contextBytes, contextErr := b.command(ctx, "ls", "-Zd", "--", record.Storage.DataPath)
 	fields := strings.Fields(string(contextBytes))
 	contextOK := false
+	contextKnown := false
 	if contextErr == nil && len(fields) > 0 {
 		parts := strings.Split(fields[0], ":")
+		contextKnown = len(parts) >= 4 && parts[0] != "" && parts[1] != "" && parts[2] != ""
 		contextOK = len(parts) >= 3 && parts[2] == "container_file_t"
 	}
-	check(contextOK, "Instance data SELinux context is container_file_t")
-	for _, rule := range record.Firewall {
-		present, err := b.queryFirewall(ctx, rule)
-		check(err == nil && present, "Owned firewall rule "+fmt.Sprint(rule.Port)+"/"+rule.protocol())
+	if !contextOK && contextKnown && storageErr == nil && stateErr == nil && state.State == "stopped" && b.instancePendingFirstRelabel(ctx, record) {
+		check(true, "Instance data SELinux label will be applied on first start")
+	} else {
+		check(contextOK, "Instance data SELinux context is container_file_t")
 	}
-	state, stateErr := b.observe(ctx, id)
+	var firewallOrder []string
+	firewallOK := make(map[string]bool)
+	for _, rule := range record.Firewall {
+		key := fmt.Sprint(rule.Port) + "/" + rule.protocol()
+		if _, seen := firewallOK[key]; !seen {
+			firewallOrder = append(firewallOrder, key)
+			firewallOK[key] = true
+		}
+		present, err := b.queryFirewall(ctx, rule)
+		firewallOK[key] = firewallOK[key] && err == nil && present
+	}
+	for _, key := range firewallOrder {
+		check(firewallOK[key], "Owned firewall rule "+key)
+	}
 	check(stateErr == nil && (state.State == "running" || state.State == "stopped"), "Instance service and container state")
 	if stateErr == nil && state.State == "running" {
 		_, err := b.command(ctx, "/usr/libexec/justvoxel/mjust/verify-minecraft-stack", "--instance", id, record.Runtime.Version)
@@ -184,4 +204,36 @@ func (b *instanceRuntimeBackend) validateApplianceInstance(ctx context.Context, 
 	_, backupErr := b.backupStorage(ctx, "inventory", id)
 	check(backupErr == nil, "Instance backup destination inventory")
 	return nil
+}
+
+// Called only after committed runtime/storage checks and a stopped observation.
+// An empty data directory and absent container leave the committed :Z mount
+// pending its first start; no label is changed by this read-only check.
+func (b *instanceRuntimeBackend) instancePendingFirstRelabel(ctx context.Context, record instanceRuntimeRecord) bool {
+	data, err := instanceOpen(record.Storage.DataPath, unix.O_RDONLY|unix.O_DIRECTORY)
+	if err != nil {
+		return false
+	}
+	defer data.Close()
+	entries, err := data.Readdirnames(1)
+	if err != io.EOF || len(entries) != 0 {
+		return false
+	}
+	_, _, path := b.paths(record.Runtime.ID)
+	quadlet, err := b.readPrivate(path)
+	if err != nil || instanceHash(quadlet) != record.QuadletSHA256 {
+		return false
+	}
+	expected := "Volume=" + record.Storage.DataPath + ":/data:Z"
+	found := false
+	for _, line := range strings.Split(string(quadlet), "\n") {
+		if line == expected {
+			found = true
+		}
+	}
+	if !found {
+		return false
+	}
+	output, err := b.command(ctx, "podman", "ps", "--all", "--filter", "name=^minecraft-"+record.Runtime.ID+"$", "--format", "{{.Names}}")
+	return err == nil && strings.TrimSpace(string(output)) == ""
 }

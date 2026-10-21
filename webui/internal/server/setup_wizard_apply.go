@@ -313,6 +313,8 @@ func (a *App) setupWizardProgressStatus(w http.ResponseWriter, r *http.Request) 
 	}
 	switch response.Operation.State {
 	case "succeeded":
+		addServerReviews.delete(a, session)
+		addServerDrafts.delete(a, session)
 		firstRunSetupReviews.delete(a, session)
 		firstRunSetupDrafts.delete(a, session)
 	case "rolled_back":

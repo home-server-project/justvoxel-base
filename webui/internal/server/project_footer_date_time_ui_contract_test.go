@@ -102,6 +102,9 @@ func TestProjectFooterAndDateTimeUIContracts(t *testing.T) {
 	if !strings.Contains(wallpaperJS, "const wallpaper = document.querySelector(\"[data-dashboard-wallpaper]\");\n  if (!wallpaper) return;\n  const form =") {
 		t.Fatal("Wallpaper must require the dashboard wallpaper element before initialization")
 	}
+	if strings.Contains(wallpaperJS, "const defaultImage") || strings.Contains(wallpaperJS, `applyImage(defaultImage)`) {
+		t.Fatal("Wallpaper must resolve the selected appearance without a universal Day fallback")
+	}
 	for _, want := range []string{"justvoxel-wallpaper-preference", "localStorage.setItem", "indexedDB.open", `images.put(blob, "uploaded")`, `images.delete("uploaded")`, "URL.createObjectURL", "URL.revokeObjectURL", `url.protocol !== "http:" && url.protocol !== "https:"`, "10 * 1024 * 1024", `"image/jpeg", "image/png", "image/webp", "image/avif"`, "await loadImage(url)", "await loadImage(candidateObjectURL)"} {
 		if !strings.Contains(wallpaperJS, want) {
 			t.Fatalf("browser wallpaper behavior missing %q", want)

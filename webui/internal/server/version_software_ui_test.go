@@ -83,6 +83,7 @@ async function open(currentSoftware, imageState = "up_to_date") {
     location: {origin: "http://example", search: "?server=jv-family1"},
     justVoxelServerSelection: async () => {},
     justVoxelSelectedURL: value => {const u=new URL(value,"http://example");u.searchParams.set("server","jv-family1");return u.pathname+u.search;},
+    window: new EventTarget(),
     document, fetch, URLSearchParams, setTimeout,
     setupWorkspaceWindow: (_, options) => { openWindow = options.onOpen; return { open: options.onOpen }; },
     readWorkspaceWindowState: () => ({ open: false })

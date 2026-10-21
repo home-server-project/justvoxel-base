@@ -199,6 +199,14 @@ func (b *instanceRuntimeBackend) actionWithWarnings(ctx context.Context, id, act
 	if err = b.verifyLive(record); err != nil {
 		return err
 	}
+	return b.actionWithVerifiedRecordWarnings(ctx, record, action, warnings)
+}
+
+// Retirement callers must prove their exact durable intent before sharing the
+// normal player checks and graceful shutdown path.
+func (b *instanceRuntimeBackend) actionWithVerifiedRecordWarnings(ctx context.Context, record instanceRuntimeRecord, action string, warnings bool) error {
+	id := record.Runtime.ID
+	var err error
 	if err = b.storage(ctx, "validate", record); err != nil {
 		return err
 	}

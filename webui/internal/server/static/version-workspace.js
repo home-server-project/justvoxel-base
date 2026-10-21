@@ -11,10 +11,17 @@ if (versionLauncher && versionDialog) {
   const operationKinds = new Map();
   let completedOperation = null;
   const request = async (url, options = {}) => {
-    const response = await fetch((globalThis.justVoxelSelectedURL?.(url) ?? url), { credentials: "same-origin", cache: "no-store", ...options });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "Version information is unavailable.");
-    return payload;
+    const selection = globalThis.justVoxelSelectionGeneration;
+    try {
+      const response = await fetch((globalThis.justVoxelSelectedURL?.(url) ?? url), { credentials: "same-origin", cache: "no-store", ...options });
+      const payload = await response.json();
+      if (selection !== globalThis.justVoxelSelectionGeneration) throw globalThis.justVoxelStaleSelection();
+      if (!response.ok) throw new Error(payload.error || "Version information is unavailable.");
+      return payload;
+    } catch (failure) {
+      if (selection !== globalThis.justVoxelSelectionGeneration) throw globalThis.justVoxelStaleSelection();
+      throw failure;
+    }
   };
   const statusURL = (policy = "", version = "", server_type = "", image_tag = "") => "/api/version/workspace/status?" + new URLSearchParams({ policy, version, server_type, image_tag });
   const policyLabel = (policy) => ({ recommended: "Recommended", latest: "Latest", pinned: "Specific version" })[policy] || "Unknown";
@@ -56,7 +63,8 @@ if (versionLauncher && versionDialog) {
     progress.appendChild(notice);
     return progress;
   };
-  const watchUpdate = async (id) => {
+  const watchUpdate = async (id, selection = globalThis.justVoxelSelectionGeneration) => {
+    if (selection !== globalThis.justVoxelSelectionGeneration) return;
     updateOperation = id;
     try {
       const result = await request("/api/version/workspace/update-operation?" + new URLSearchParams({ id }));
@@ -74,9 +82,9 @@ if (versionLauncher && versionDialog) {
         completedOperation = operation;
         await render("", operation);
       } else {
-        setTimeout(() => watchUpdate(id), 2000);
+        setTimeout(() => watchUpdate(id, selection), 2000);
       }
-    } catch (failure) { state.textContent = failure.message; updateOperation = ""; }
+    } catch (failure) { if (failure.staleSelection) return; state.textContent = failure.message; updateOperation = ""; }
   };
   // Let the native select change event settle before changing form geometry.
   const settleSelectChange = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -85,6 +93,7 @@ if (versionLauncher && versionDialog) {
     (!plan.changes?.length && status.update_available && status.stack_state === "updates_available")
   ));
   const showReview = (root, form, plan, params, status, players) => {
+    const selection = globalThis.justVoxelSelectionGeneration;
     const versionReview = Boolean(form.elements.policy);
     const channelChange = !versionReview && Boolean(plan.changes?.length);
     const needsUpdate = versionReview ? requiresRuntimeUpdate(plan, status) : status?.image_state === "updates_available";
@@ -197,9 +206,10 @@ if (versionLauncher && versionDialog) {
           review.remove();
           updateOperation = result.operation.operation_id;
           await render("Minecraft update started.");
-          watchUpdate(result.operation.operation_id);
+          watchUpdate(result.operation.operation_id, selection);
           return;
         } catch (failure) {
+          if (failure.staleSelection) return;
           // A saved configuration is never automatically reapplied or retried.
           if (saved) await render("Changes saved. " + failure.message);
           else {
@@ -233,11 +243,12 @@ if (versionLauncher && versionDialog) {
         ]);
         showReview(root, form, plan, params, candidate, snapshot?.players);
         state.textContent = "";
-      } catch (failure) { state.textContent = failure.message; }
+      } catch (failure) { if (failure.staleSelection) return; state.textContent = failure.message; }
     });
   };
   const render = async (message = "", confirmedOperation = completedOperation) => {
     const ticket = ++sequence;
+    const selection = globalThis.justVoxelSelectionGeneration;
     await settleSelectChange();
     if (ticket !== sequence) return;
     state.textContent = "Loading version information…";
@@ -270,7 +281,7 @@ if (versionLauncher && versionDialog) {
               await request("/api/version/workspace/update", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
               completedOperation = null;
               await render("Current server verified and kept. Review changes again when ready.");
-            } catch (failure) { state.textContent = failure.message; acknowledge.disabled = false; }
+            } catch (failure) { if (failure.staleSelection) return; state.textContent = failure.message; acknowledge.disabled = false; }
           });
           progress.appendChild(acknowledge);
         } else if (!["succeeded", "resolved"].includes(operation.state) && !updateOperation) {
@@ -501,8 +512,9 @@ if (versionLauncher && versionDialog) {
                 operationKinds.set(result.operation.operation_id, target !== currentSoftware ? "switch" : containerOnly ? "container" : "server");
                 updateOperation = result.operation.operation_id;
                 await render();
-                watchUpdate(result.operation.operation_id);
+                watchUpdate(result.operation.operation_id, selection);
               } catch (failure) {
+                if (failure.staleSelection) return;
                 // A lost response may still have started maintenance. Reconnect before another review.
                 await render(failure.message);
               }
@@ -516,6 +528,7 @@ if (versionLauncher && versionDialog) {
             form.hidden = true;
             state.textContent = "";
           } catch (failure) {
+            if (failure.staleSelection) return;
             if (selectionTicket === selectionSequence && ticket === sequence) state.textContent = failure.message;
           } finally {
             if (!applying) check.disabled = reviewButton.disabled = Boolean(pending.operation);
@@ -583,8 +596,16 @@ if (versionLauncher && versionDialog) {
       content.replaceChildren(root);
       initializePreview?.();
       state.textContent = operation && message === operation.status ? "" : message;
-    } catch (failure) { if (ticket === sequence) state.textContent = failure.message; }
+    } catch (failure) { if (failure.staleSelection) return; if (ticket === sequence) state.textContent = failure.message; }
   };
+  window.addEventListener("justvoxel:server-selection-changed", () => {
+    ++sequence;
+    updateOperation = "";
+    completedOperation = null;
+    operationKinds.clear();
+    content.replaceChildren();
+    if (versionDialog.open) void render();
+  });
   const windowControl = setupWorkspaceWindow(versionDialog, { onOpen: () => { globalThis.justVoxelServerSelection(versionDialog.querySelector("[data-server-selector-slot]")).catch(error => { state.textContent = error.message; }); return render(); } });
   versionLauncher.addEventListener("click", () => { document.querySelector("[data-control-center]")?.removeAttribute("open"); windowControl?.open(); });
   versionDialog.querySelector("[data-version-close]").addEventListener("click", () => windowControl?.close());

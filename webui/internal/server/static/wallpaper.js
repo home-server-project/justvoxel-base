@@ -7,7 +7,6 @@
   if (!wallpaper) return;
   const form = panel.querySelector("[data-wallpaper-form]");
   const error = form.querySelector("[data-wallpaper-error]");
-  const defaultImage = "/static/wallpapers/jv-wp-v2-day.webp";
   const defaultPreference = () => ({
     mode: "builtin", theme: "v2", appearance: "auto", dayStart: "07:00", nightStart: "19:00",
   });
@@ -22,6 +21,8 @@
   let committing = false;
   let operation = 0;
   let restoreCanceled = false;
+  let preferenceResolved = false;
+  let imageSequence = 0;
 
   const validateURL = (value) => {
     if (typeof value !== "string" || !/^https?:\/\//i.test(value)) {
@@ -81,9 +82,11 @@
   });
 
   const applyImage = (src, objectURL = null) => {
+    ++imageSequence;
     wallpaper.classList.toggle("wallpaper-theme-v1", preference.mode === "builtin" && preference.theme === "v1");
     wallpaper.classList.toggle("wallpaper-theme-v2", preference.mode === "builtin" && preference.theme === "v2");
     if (wallpaper.getAttribute("src") !== src) wallpaper.src = src;
+    wallpaper.hidden = false;
     if (activeObjectURL) URL.revokeObjectURL(activeObjectURL);
     activeObjectURL = objectURL;
   };
@@ -123,11 +126,20 @@
     if (automaticTimer !== null) window.clearTimeout(automaticTimer);
     automaticTimer = null;
   };
-  const refreshBuiltin = () => {
+  const refreshBuiltin = async () => {
     clearAutomaticTimer();
-    if (preference.mode !== "builtin") return;
+    if (!preferenceResolved || preference.mode !== "builtin") return;
     const now = new Date();
-    applyImage(builtinImage(preference, now));
+    const src = builtinImage(preference, now);
+    const ticket = ++imageSequence;
+    try {
+      await loadImage(src);
+      if (ticket !== imageSequence) return;
+      applyImage(src);
+    } catch {
+      if (ticket === imageSequence) wallpaper.hidden = true;
+      return;
+    }
     if (preference.appearance !== "auto") return;
     const boundaries = [preference.dayStart, preference.nightStart].map((time) => {
       const minutes = timeMinutes(time);
@@ -146,6 +158,8 @@
       throw new Error("This browser could not save the wallpaper preference.");
     }
     preference = next;
+    preferenceResolved = true;
+    ++imageSequence;
     clearAutomaticTimer();
   };
   const showError = (failure) => {
@@ -183,13 +197,13 @@
     try { await storedImage("delete"); } catch (problem) { failure = failure || problem; }
     if (failure) throw failure;
   };
-  refreshBuiltin();
   void (async () => {
     let restoredObjectURL = null;
     try {
       const saved = JSON.parse(localStorage.getItem(preferenceKey) || '{"mode":"default"}');
       if (saved.mode === "default" || saved.mode === "builtin") {
         preference = builtinPreference(saved);
+        preferenceResolved = true;
         refreshBuiltin();
         return;
       }
@@ -198,6 +212,7 @@
         await loadImage(url);
         if (restoreCanceled) return;
         preference = { mode: "url", url };
+        preferenceResolved = true;
         clearAutomaticTimer();
         applyImage(url);
       } else if (saved.mode === "upload") {
@@ -209,25 +224,27 @@
           return;
         }
         preference = { mode: "upload" };
+        preferenceResolved = true;
         clearAutomaticTimer();
         applyImage(restoredObjectURL, restoredObjectURL);
         restoredObjectURL = null;
+      } else {
+        throw new Error("Unknown wallpaper preference.");
       }
     } catch {
       if (restoredObjectURL) URL.revokeObjectURL(restoredObjectURL);
       if (!restoreCanceled) {
         preference = defaultPreference();
+        preferenceResolved = true;
         refreshBuiltin();
       }
     }
   })();
   wallpaper.addEventListener("error", () => {
-    if (preference.mode !== "builtin") {
+    wallpaper.hidden = true;
+    if (preferenceResolved && preference.mode !== "builtin") {
       preference = defaultPreference();
       refreshBuiltin();
-    } else if (wallpaper.getAttribute("src") !== defaultImage) {
-      clearAutomaticTimer();
-      applyImage(defaultImage);
     }
   });
   document.addEventListener("visibilitychange", () => {

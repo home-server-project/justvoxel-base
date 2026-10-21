@@ -277,7 +277,7 @@ try:
     if os.geteuid()!=0 or not re.fullmatch(r'jv-[a-z0-9]{6,12}',identity): raise ValueError('identity')
     record_raw = private(CONFIG_ROOT+'/'+identity+'/config.json')
     record = json.loads(record_raw); runtime = record['runtime']; storage = record['storage']
-    if runtime['id'] != identity or json.loads(private(REGISTRY+'/'+identity+'.json')) != {'id':identity} or json.loads(private(REGISTRY+'/minecraft.json'))['id'] == identity: raise ValueError('identity')
+    if runtime['id'] != identity or json.loads(private(REGISTRY+'/'+identity+'.json')) != {'id':identity}: raise ValueError('identity')
     data = storage['root']+'/minecraft-instances/'+identity+'/data'
     if storage['data_path'] != data: raise ValueError('data path')
     parent = directory(os.path.dirname(data)); cfg = directory(CONFIG_ROOT+'/'+identity)

@@ -135,7 +135,7 @@ func TestResetCurrentOperationPaths(t *testing.T) {
 		call func(*Client) (PersistentOperationResponse, error)
 	}{
 		{
-			want: "/v1/minecraft/instances/jv-family1/reset/current-operation",
+			want: "/v1/admin/reset/minecraft/current-operation",
 			call: func(c *Client) (PersistentOperationResponse, error) {
 				return c.AdminCurrentMinecraftResetOperation(WithMinecraftMaintenanceInstance(context.Background(), "jv-family1", "reset/minecraft"), "session-token")
 			},
@@ -218,15 +218,61 @@ func TestFactoryResetResolveClientContract(t *testing.T) {
 	}
 }
 
-func TestMinecraftResetPlanCarriesManagedPluginCleanup(t *testing.T) {
+func TestMinecraftResetAllClientIgnoresSelectedServer(t *testing.T) {
+	for _, selection := range []string{"", "jv-family1", "jv-sibling"} {
+		t.Run(selection, func(t *testing.T) {
+			ctx := context.Background()
+			if selection != "" {
+				ctx = WithMinecraftMaintenanceInstance(ctx, selection, "reset/minecraft")
+			}
+			client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if r.URL.RawQuery != "" {
+					t.Fatal("selection query sent", r.URL)
+				}
+				body := ""
+				switch r.URL.Path {
+				case adminMinecraftResetPlanPath:
+					body = `{"ok":true,"schema_version":"v1","mode":"minecraft","plan_fingerprint":"` + resetTestFingerprint + `","participants":[{"id":"jv-family1","display_name":"Family","state":"running","players_online":1,"players":["Alex"],"data_scope":"internal","data_action":"delete"},{"id":"jv-sibling","display_name":"Creative","state":"stopped","players_online":0,"players":[],"data_scope":"network","data_action":"preserve"}],"total_players_online":1,"players_online":1,"players":["Alex"],"warnings":[],"backup_action":"preserve","storage_layout_action":"preserve","authentication_action":"preserve","webui_users_action":"preserve"}`
+				case adminMinecraftResetApplyPath:
+					body = `{"ok":true,"created":true,"operation":{"operation_id":"` + resetTestOperationID + `","operation_type":"minecraft_reset","state":"queued"}}`
+				default:
+					t.Fatal("selected route used", r.URL.Path)
+				}
+				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+			})}}
+			plan, err := client.AdminMinecraftResetPlan(ctx, "session")
+			if err != nil || len(plan.Participants) != 2 || plan.TotalPlayersOnline != 1 {
+				t.Fatal(plan, err)
+			}
+			applied, err := client.AdminMinecraftResetApply(ctx, "session", AdminMinecraftResetApplyRequest{PlanFingerprint: plan.PlanFingerprint, ConfirmPlayers: true})
+			if err != nil || applied.Operation == nil || applied.Operation.InstanceID != "" {
+				t.Fatal(applied, err)
+			}
+		})
+	}
+}
+
+func TestHistoricalResetRecoveryUsesStoredImmutableTarget(t *testing.T) {
 	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Path != "/v1/minecraft/instances/jv-family1/reset/plan" {
-			t.Fatal(r.URL.Path)
+		body := ""
+		switch r.URL.Path {
+		case "/v1/admin/reset/minecraft/current-operation":
+			body = `{"operation":{"operation_id":"` + resetTestOperationID + `","operation_type":"minecraft_reset","instance_id":"jv-family1","state":"needs_attention"}}`
+		case "/v1/minecraft/instances/jv-family1/reset/plan":
+			body = `{"ok":true,"mode":"minecraft","instance_id":"jv-family1","plan_fingerprint":"` + resetTestFingerprint + `","data_action":"preserve","plugins_action":"remove_managed_jars"}`
+		case "/v1/minecraft/instances/jv-family1/reset/apply":
+			body = `{"ok":true,"operation":{"operation_id":"` + resetTestOperationID + `","operation_type":"minecraft_reset","instance_id":"jv-family1","state":"queued"}}`
+		default:
+			t.Fatal("historical target changed", r.URL.Path)
 		}
-		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"instance_id":"jv-family1","ok":true,"schema_version":"v1","mode":"minecraft","plan_fingerprint":"` + resetTestFingerprint + `","data_action":"preserve","plugins_action":"remove_managed_jars","players":[],"warnings":[]}`))}, nil
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
 	})}}
-	plan, err := client.AdminMinecraftResetPlan(WithMinecraftMaintenanceInstance(context.Background(), "jv-family1", "reset/minecraft"), "session")
-	if err != nil || plan.PluginsAction != "remove_managed_jars" || plan.DataAction != "preserve" {
-		t.Fatal("managed Plugin reset contract lost", plan, err)
+	plan, err := client.HistoricalMinecraftResetPlan(context.Background(), "session")
+	if err != nil || plan.InstanceID != "jv-family1" || plan.PluginsAction != "remove_managed_jars" {
+		t.Fatal(plan, err)
+	}
+	result, err := client.HistoricalMinecraftResetApply(context.Background(), "session", AdminMinecraftResetApplyRequest{PlanFingerprint: plan.PlanFingerprint})
+	if err != nil || result.Operation == nil || result.Operation.InstanceID != "jv-family1" {
+		t.Fatal(result, err)
 	}
 }

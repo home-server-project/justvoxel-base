@@ -66,6 +66,7 @@ type dashboardOperationAPI interface {
 
 type pageData struct {
 	ConnectionGuide     *connectionGuide
+	ConnectionServers   []selectedServerContext
 	Title               string
 	Version             string
 	Commit              string

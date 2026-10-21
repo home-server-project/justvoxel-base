@@ -136,7 +136,7 @@ func TestOperationStoreRestartMarksInterruptedMinecraftResetNeedsAttention(t *te
 	if current.State != operationNeedsAttention || current.Stage != "interrupted" || current.InterruptedAt == "" {
 		t.Fatalf("interrupted reset not preserved conservatively: %#v", current)
 	}
-	if !strings.Contains(current.Status, "Review appliance state") {
+	if current.Status != "Minecraft removal stopped before completion. Continue removal to finish removing the remaining servers." {
 		t.Fatalf("interrupted reset status is not recovery-oriented: %q", current.Status)
 	}
 }
@@ -223,7 +223,7 @@ func TestOperationStoreMinecraftResetNeedsAttentionCanBeRetried(t *testing.T) {
 	}
 	if retried.OperationID != operation.OperationID || retried.PlanFingerprint != newFingerprint ||
 		retried.State != operationQueued || retried.Stage != "queued" ||
-		retried.Status != "Minecraft reset retry queued." ||
+		retried.Status != "Continue removal queued." ||
 		retried.FinishedAt != "" || retried.InterruptedAt != "" {
 		t.Fatalf("unexpected retried Minecraft reset journal: %#v", retried)
 	}
@@ -244,5 +244,37 @@ func TestOperationStoreMinecraftResetRetryRequiresNeedsAttention(t *testing.T) {
 	}
 	if _, err := store.retryMinecraftReset(operation.OperationID, testMinecraftResetFingerprint); err == nil {
 		t.Fatal("queued Minecraft reset unexpectedly accepted for retry")
+	}
+}
+
+func TestSelectedMinecraftResetRetainsRecoveryWordingAndInstance(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "management")
+	store, err := openOperationStore(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const instanceID = "jv-a1b2c3"
+	op, _, err := store.beginMinecraftMaintenance(testMinecraftResetFingerprint, operationTypeMinecraftReset, instanceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.transition(op.OperationID, operationValidating, "validating", "Revalidating Minecraft reset plan."); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.close(); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := openOperationStore(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reloaded.close()
+	current, err := reloaded.currentMinecraftReset()
+	if err != nil || current == nil || current.OperationID != op.OperationID || current.InstanceID != instanceID || current.Status != "Minecraft reset was interrupted before completion. Review appliance state before continuing." {
+		t.Fatal(current, err)
+	}
+	retried, err := reloaded.retryMinecraftReset(current.OperationID, testMinecraftResetFingerprint)
+	if err != nil || retried.InstanceID != instanceID || retried.OperationID != op.OperationID || retried.Status != "Minecraft reset retry queued." {
+		t.Fatal(retried, err)
 	}
 }

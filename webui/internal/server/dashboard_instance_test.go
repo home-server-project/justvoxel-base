@@ -229,9 +229,48 @@ func TestDashboardInstanceReadsAndPolling(t *testing.T) {
 	}
 	requireNoDashboardLegacy(t, f)
 	source, _ := assets.ReadFile("static/app.js")
-	for _, want := range []string{`const statusURL = dashboard.dataset.dashboardStatus;`, `const statusURL = dashboard?.dataset.dashboardStatus || globalThis.justVoxelSelectedURL("/api/dashboard-status");`, `target.searchParams.set("server", dashboard.dataset.selectedMinecraftId);`, `window.history.replaceState(window.history.state, "", target);`} {
-		if !strings.Contains(string(source), want) {
-			t.Fatalf("missing polling/reload plumbing: %s", want)
+	js := string(source)
+	if strings.Count(js, `const statusURL = "/api/dashboard-status";`) != 2 {
+		t.Fatal("Dashboard and Quick Look must both resolve the selected server at polling time")
+	}
+	for _, poll := range []struct{ start, end, render string }{
+		{"const refreshDashboard = async", "if (pendingAction)", "renderDashboard(snapshot);"},
+		{"async function refreshQuickLook()", "const loadQuickLookIdentity =", "renderQuickLook(snapshot, providers);"},
+	} {
+		start := strings.Index(js, poll.start)
+		if start < 0 {
+			t.Fatalf("missing selected-server poll: %s", poll.start)
+		}
+		end := strings.Index(js[start:], poll.end)
+		if end < 0 {
+			t.Fatalf("missing polling boundary: %s", poll.end)
+		}
+		body := js[start : start+end]
+		for _, want := range []string{
+			`const selection = globalThis.justVoxelSelectionGeneration;`,
+			`fetch(globalThis.justVoxelSelectedURL(statusURL)`,
+			`if (selection !== globalThis.justVoxelSelectionGeneration) return;`,
+			poll.render,
+		} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("selected-server polling missing %q", want)
+			}
+		}
+		if strings.Index(body, `if (selection !== globalThis.justVoxelSelectionGeneration) return;`) > strings.Index(body, poll.render) {
+			t.Fatal("old-server polling response must be rejected before rendering")
+		}
+	}
+	for _, want := range []string{
+		`const statusURL = "/api/dashboard-status";`,
+		`target.searchParams.set("server", dashboard.dataset.selectedMinecraftId);`,
+		`window.history.replaceState(window.history.state, "", target);`,
+		`window.addEventListener("justvoxel:server-selection-changed",`,
+		`void refreshDashboard();`, `lastMonitorData = null; void refreshQuickLook();`,
+		// An absent explicit selection stays absent; inventory order supplies no fallback.
+		`selected.getAll("server").forEach((id) => target.searchParams.append("server", id))`,
+	} {
+		if !strings.Contains(js, want) {
+			t.Fatalf("missing in-page polling plumbing: %s", want)
 		}
 	}
 }
@@ -267,7 +306,7 @@ func TestDashboardInstanceLifecycleAndConfirmation(t *testing.T) {
 func TestDashboardInstanceSelectionFailures(t *testing.T) {
 	for _, query := range []string{"?server=", "?server=family", "?server=jv-stale1", "?server=jv-family1&server=jv-kids001", "?server=jv-family1&server=jv-family1", ""} {
 		for _, path := range []string{"/", "/api/dashboard-status", "/minecraft/how-to-connect", "/minecraft/start", "/minecraft/stop", "/minecraft/restart"} {
-			if query == "" && (path == "/" || path == "/api/dashboard-status") {
+			if query == "" && (path == "/" || path == "/api/dashboard-status" || path == "/minecraft/how-to-connect") {
 				continue
 			}
 			t.Run(path+query, func(t *testing.T) {

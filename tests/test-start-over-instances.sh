@@ -5,6 +5,7 @@ frontend=mjust/libexec/start-over
 agent=management/cmd/justvoxel-management-agent/admin_start_over.go
 archive=management/cmd/justvoxel-management-agent/admin_start_over_archive.go
 retirement=management/cmd/justvoxel-management-agent/minecraft_instance_delete.go
+policy=management/cmd/justvoxel-management-agent/admin_minecraft_reset_all.go
 fail() { echo "ERROR: $*" >&2; exit 1; }
 for route in 'GET /v1/admin/start-over/plan' 'POST /v1/admin/start-over/apply'; do
     grep -Fq "${route}" "${frontend}" || fail "frontend route missing: ${route}"
@@ -16,8 +17,13 @@ done
 for required in 'api-client' 'START OVER' 'confirm_players' 'save_configuration_backup' 'total_players_online' 'configuration_backup_path' 'ALL configured Minecraft servers'; do
     grep -Fq "${required}" "${frontend}" || fail "missing frontend contract: ${required}"
 done
-for required in 'localRootAdministrator(r)' 's.claimMinecraftMutation()' 'planStartOver(ctx)' 'PlanFingerprint != req.PlanFingerprint' 'plan.TotalPlayersOnline > 0 && !req.ConfirmPlayers' 'actionWithWarnings(ctx, j.ID, "stop", req.ConfirmPlayers)' 'retireSelectedInstance(ctx, j.ID, j.Name, "start_over")' '"minecraft_instances"' 'checkStartOverRetirement' 'validateInstanceRecordPlacement(j.Record)' 'b.storage(ctx, "validate", j.Record)' 'b.verifyLive(r)' 'b.factoryResetCoverage(ctx, coverage)' 'if j.Record.Backups == nil {' 'p.legacyBackupPath = snapshot.BackupPath' 'startOverPreservationEvidence(plan.entries, plan.legacyBackupPath)' '!reflect.DeepEqual(preserved, plan.preserved)'; do
+for required in 'localRootAdministrator(r)' 's.claimMinecraftMutation()' 'planStartOver(ctx)' 'PlanFingerprint != req.PlanFingerprint' 'plan.TotalPlayersOnline > 0 && !req.ConfirmPlayers' 'actionWithWarnings(ctx, j.ID, "stop", req.ConfirmPlayers)' 'retireSelectedInstance(ctx, j.ID, j.Name, "start_over")' '"minecraft_instances"' 'checkStartOverRetirement' 'validateInstanceRecordPlacement(j.Record)' 'b.validateRetirementStorage(ctx, j)' 'b.verifyLive(r)' 'b.factoryResetCoverage(ctx, coverage)' 'if j.Record.Backups == nil {' 'p.legacyBackupPath = snapshot.BackupPath' 'startOverPreservationEvidence(plan.entries, plan.legacyBackupPath)' '!reflect.DeepEqual(preserved, plan.preserved)'; do
     grep -Fq "${required}" "${agent}" || fail "missing Agent contract: ${required}"
+done
+# The shared validator always uses exact committed placement. Only reset_all
+# deletion after intent permits an absent data leaf; Start Over uses validate.
+for required in 'func (b *instanceRuntimeBackend) validateRetirementStorage' 'action := "validate"' 'j.ResetPolicy == "reset_all" && j.DataAction == "delete" && j.Stage != "intent"' 'return b.storage(ctx, action, j.Record)'; do
+    grep -Fq "${required}" "${policy}" || fail "missing shared storage validation: ${required}"
 done
 if grep -Fq 'instanceStorageFor(' "${agent}"; then
     fail 'Start Over must validate persisted per-instance placement, not global storage equality'

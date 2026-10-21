@@ -85,13 +85,40 @@ func TestVersionStackUIUsesSafeStackStateAndSingleReview(t *testing.T) {
 		`minecraft-native-toggle system-ups-shutdown-switch`,
 		`checkbox.setAttribute("role", "switch")`,
 		`confirm_players: checkbox.checked ? "yes" : "no"`,
-		`watchUpdate(result.operation.operation_id)`,
+		`watchUpdate(result.operation.operation_id, selection)`,
 		`/api/version/workspace/update-operation?`,
-		`setTimeout(() => watchUpdate(id), 2000)`,
+		`setTimeout(() => watchUpdate(id, selection), 2000)`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("stack UI missing %q", want)
 		}
+	}
+	// The persisted ID is watched with the review's selection generation. Old
+	// callbacks detach presentation; requests never cancel submitted operations.
+	watchStart := strings.Index(text, "const watchUpdate =")
+	watchEnd := strings.Index(text, "// Let the native select")
+	if watchStart < 0 || watchEnd <= watchStart {
+		t.Fatal("Version operation watcher missing")
+	}
+	for _, want := range []string{
+		`selection = globalThis.justVoxelSelectionGeneration`,
+		`if (selection !== globalThis.justVoxelSelectionGeneration) return;`,
+		`new URLSearchParams({ id })`,
+		`progress.replaceChildren(...refreshed.children);`,
+		`if (failure.staleSelection) return;`,
+	} {
+		if !strings.Contains(text[watchStart:watchEnd], want) {
+			t.Fatalf("selection-aware operation watcher missing %q", want)
+		}
+	}
+	requestStart := strings.Index(text, "const request = async")
+	requestEnd := strings.Index(text, "const statusURL =")
+	if requestStart < 0 || requestEnd <= requestStart {
+		t.Fatal("Version request helper missing")
+	}
+	request := text[requestStart:requestEnd]
+	if !strings.Contains(request, `if (selection !== globalThis.justVoxelSelectionGeneration) throw globalThis.justVoxelStaleSelection();`) || strings.Contains(request, "signal:") {
+		t.Fatal("Version requests must reject stale responses without aborting submitted operations")
 	}
 	for _, forbidden := range []string{"Review updates", "Apply update", `status.update_available ? "Available"`, "Update Geyser", "Update Floodgate", "Update ViaVersion", "sha256", "A stopped server will start for verification.", "BEDROCK_MANAGED_PLUGINS", "MODRINTH_PROJECTS", "PLUGINS="} {
 		if strings.Contains(text, forbidden) {

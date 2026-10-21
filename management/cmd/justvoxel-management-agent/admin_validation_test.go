@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -407,5 +408,190 @@ func TestApplianceValidationInstanceInfrastructureFailureIsSanitized(t *testing.
 	surfaceTestServer(t, roleAdministrator).adminValidation(rr, surfaceRequest(http.MethodGet, "/v1/admin/validation", ""))
 	if rr.Code != http.StatusServiceUnavailable || strings.Contains(rr.Body.String(), "private") {
 		t.Fatalf("infrastructure response: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestApplianceValidationFirstStartSELinuxLabel(t *testing.T) {
+	for _, tc := range []struct {
+		name, state, container, label, volume, data string
+		pass                                        bool
+	}{
+		{name: "established", state: "active", container: "running", label: "container_file_t", pass: true},
+		{name: "pristine", state: "inactive", label: "var_lib_t", pass: true},
+		{name: "running wrong label", state: "active", container: "running", label: "var_lib_t"},
+		{name: "nonempty", state: "inactive", label: "var_lib_t", data: "world"},
+		{name: "exited container", state: "inactive", container: "exited", label: "var_lib_t"},
+		{name: "created container", state: "inactive", container: "created", label: "var_lib_t"},
+		{name: "missing volume", state: "inactive", label: "var_lib_t", volume: "missing"},
+		{name: "wrong volume", state: "inactive", label: "var_lib_t", volume: "wrong"},
+		{name: "symlink data", state: "inactive", label: "var_lib_t", data: "symlink"},
+		{name: "missing data", state: "inactive", label: "var_lib_t", data: "missing"},
+		{name: "container query error", state: "inactive", label: "var_lib_t"},
+		{name: "ambiguous container", state: "inactive", label: "var_lib_t"},
+		{name: "unreadable context", state: "inactive", label: "var_lib_t"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := validationFixture(t, 1)
+			id := f.configs[0].ID
+			record, err := f.backend.readRecord(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			must := func(err error) {
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			f.states[id], f.containers[id] = tc.state, tc.container
+			switch tc.data {
+			case "world":
+				must(os.WriteFile(filepath.Join(record.Storage.DataPath, "level.dat"), []byte("world"), 0600))
+			case "symlink":
+				must(os.Remove(record.Storage.DataPath))
+				must(os.Symlink(t.TempDir(), record.Storage.DataPath))
+			case "missing":
+				must(os.Remove(record.Storage.DataPath))
+			}
+			if tc.volume != "" {
+				dir, _, quadlet := f.backend.paths(id)
+				raw, err := f.backend.readPrivate(quadlet)
+				must(err)
+				expected := "Volume=" + record.Storage.DataPath + ":/data:Z"
+				if !strings.Contains(string(raw), expected) {
+					t.Fatal("fixture lacks expected :Z volume")
+				}
+				replacement := ""
+				if tc.volume == "wrong" {
+					replacement = "Volume=" + record.Storage.DataPath + ":/data:z"
+				}
+				raw = []byte(strings.ReplaceAll(string(raw), expected, replacement))
+				must(f.backend.writePrivate(quadlet, raw, true))
+				record.QuadletSHA256 = instanceHash(raw)
+				must(f.backend.writeJSON(filepath.Join(dir, "config.json"), record, true))
+			}
+			command := f.backend.command
+			f.backend.command = func(ctx context.Context, cmd string, args ...string) ([]byte, error) {
+				if cmd == "ls" {
+					if tc.name == "unreadable context" {
+						return nil, errors.New("unreadable")
+					}
+					return []byte("system_u:object_r:" + tc.label + ":s0 data"), nil
+				}
+				if cmd == "podman" && args[0] == "ps" {
+					if tc.name == "container query error" {
+						return nil, errors.New("unavailable")
+					}
+					if tc.name == "ambiguous container" {
+						return []byte("minecraft-" + id + "\nminecraft-" + id), nil
+					}
+				}
+				return command(ctx, cmd, args...)
+			}
+			result := validationRequest(t, tc.pass)
+			if tc.data == "symlink" {
+				for _, want := range []string{"FAIL: Committed runtime inventory and coverage", "FAIL: Committed instance record", "JustVoxel validation failed."} {
+					if !strings.Contains(result.Output, want) {
+						t.Fatalf("missing %q: %s", want, result.Output)
+					}
+				}
+				if strings.Contains(result.Output, "PASS: Instance data SELinux label will be applied on first start") {
+					t.Fatalf("unsafe data path qualified for first-start exception: %s", result.Output)
+				}
+				return
+			}
+			want := "FAIL: Instance data SELinux context is container_file_t"
+			if tc.name == "established" {
+				want = "PASS: Instance data SELinux context is container_file_t"
+			} else if tc.pass {
+				want = "PASS: Instance data SELinux label will be applied on first start"
+				if strings.Contains(result.Output, "PASS: Instance data SELinux context is container_file_t") {
+					t.Fatal("pending label reported as container_file_t")
+				}
+			}
+			if !strings.Contains(result.Output, want) {
+				t.Fatalf("missing %q: %s", want, result.Output)
+			}
+		})
+	}
+}
+
+func TestApplianceValidationGroupsOwnedFirewallRepresentations(t *testing.T) {
+	for _, protocol := range []string{"tcp", "udp"} {
+		for _, failure := range []string{"none", "runtime absent", "permanent absent", "runtime error", "permanent error"} {
+			t.Run(protocol+"/"+failure, func(t *testing.T) {
+				f := validationFixture(t, 1)
+				id := f.configs[0].ID
+				record, err := f.backend.readRecord(id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				record.Runtime.BedrockEnabled, record.Runtime.BedrockPort = true, 19133
+				tcp := instanceFirewallRule{Zone: "public", Port: record.Runtime.JavaPort}
+				udp := instanceFirewallRule{Zone: "public", Port: record.Runtime.BedrockPort, Protocol: "udp"}
+				tcpPermanent, udpPermanent := tcp, udp
+				tcpPermanent.Permanent, udpPermanent.Permanent = true, true
+				record.Firewall = []instanceFirewallRule{tcp, udp, tcpPermanent, udpPermanent}
+				for _, rule := range record.Firewall {
+					f.firewall[rule] = true
+				}
+				files, err := f.backend.render(f.snapshot, []instanceRuntimeRecord{record})
+				if err != nil {
+					t.Fatal(err)
+				}
+				dir, env, quadlet := f.backend.paths(id)
+				for path, raw := range map[string][]byte{env: files[0].Environment, quadlet: files[0].Quadlet} {
+					if err := f.backend.writePrivate(path, raw, true); err != nil {
+						t.Fatal(err)
+					}
+				}
+				record.EnvironmentSHA256, record.QuadletSHA256 = instanceHash(files[0].Environment), instanceHash(files[0].Quadlet)
+				if err := f.backend.writeJSON(filepath.Join(dir, "config.json"), record, true); err != nil {
+					t.Fatal(err)
+				}
+				queries := []string{}
+				command := f.backend.command
+				f.backend.command = func(ctx context.Context, cmd string, args ...string) ([]byte, error) {
+					if cmd == "firewall-cmd" {
+						joined := strings.Join(args, " ")
+						queries = append(queries, joined)
+						permanent := strings.Contains(joined, "--permanent")
+						if strings.HasSuffix(joined, "/"+protocol) && failure != "none" && permanent == strings.HasPrefix(failure, "permanent") {
+							if strings.HasSuffix(failure, "error") {
+								return nil, errors.New("unavailable")
+							}
+							return []byte("no"), instanceTestExit{}
+						}
+					}
+					return command(ctx, cmd, args...)
+				}
+				result := validationRequest(t, failure == "none")
+				if len(queries) != 4 {
+					t.Fatalf("expected all four queries: %v", queries)
+				}
+				for i, rule := range record.Firewall {
+					want := "--zone=public "
+					if rule.Permanent {
+						want += "--permanent "
+					}
+					want += "--query-port=" + fmt.Sprint(rule.Port) + "/" + rule.protocol()
+					if queries[i] != want {
+						t.Fatalf("query %d = %q, want %q", i, queries[i], want)
+					}
+				}
+				for _, rule := range []instanceFirewallRule{tcp, udp} {
+					label := "Owned firewall rule " + fmt.Sprint(rule.Port) + "/" + rule.protocol()
+					prefix := "PASS: "
+					if failure != "none" && rule.protocol() == protocol {
+						prefix = "FAIL: "
+					}
+					if strings.Count(result.Output, label) != 1 || !strings.Contains(result.Output, prefix+label) {
+						t.Fatalf("expected one %s%s: %s", prefix, label, result.Output)
+					}
+				}
+				if strings.Index(result.Output, "/tcp") > strings.Index(result.Output, "/udp") {
+					t.Fatal("logical firewall order changed")
+				}
+			})
+		}
 	}
 }

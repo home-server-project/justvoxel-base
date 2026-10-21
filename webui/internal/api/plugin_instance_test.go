@@ -35,10 +35,10 @@ func TestSelectedPluginPathsAndMismatchedOperations(t *testing.T) {
 	}
 }
 
-func TestSelectedResetPathAndMismatchedPlan(t *testing.T) {
+func TestSystemResetRejectsSelectedPlan(t *testing.T) {
 	ctx := WithMinecraftMaintenanceInstance(context.Background(), "jv-family1", "reset/minecraft")
 	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Path != "/v1/minecraft/instances/jv-family1/reset/plan" {
+		if r.URL.Path != "/v1/admin/reset/minecraft/plan" {
 			t.Fatal(r.URL)
 		}
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"ok":true,"instance_id":"jv-sibling1","mode":"minecraft","plan_fingerprint":"` + resetTestFingerprint + `"}`))}, nil

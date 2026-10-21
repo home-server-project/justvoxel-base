@@ -23,7 +23,6 @@ class InstanceBackups(unittest.TestCase):
         for path in (self.configs,self.registry,self.backups,self.helpers,self.bin):
             path.mkdir(mode=0o700)
         self.env = dict(os.environ, PATH=str(self.bin)+':'+os.environ['PATH'])
-        self.private(self.registry/'minecraft.json',json.dumps({'id':'jv-legacy0'}))
         self.private(self.backups/'minecraft-paper-2026-01-01-0000.tar.gz','legacy evidence')
         self.tool(self.bin/'mountpoint','#!/usr/bin/bash\nexit 0\n')
         self.tool(self.helpers/'validate-instance-runtime-commit','#!/usr/bin/bash\nexit 0\n')
@@ -118,6 +117,8 @@ else:
         self.run_helper('inventory',ok=False)
 
     def test_read_only_and_independent_archives_retention(self):
+        self.assertFalse((self.registry/'minecraft.json').exists())
+        self.assertNotIn('minecraft.json', self.source)
         self.assertEqual(self.inventory(),[])
         self.assertFalse((self.backups/'jv-aaaaaa').exists())
         for identity in ('jv-aaaaaa','jv-bbbbbb'):

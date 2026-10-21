@@ -11,12 +11,15 @@
 </head>
 <body class="connect-page">
 <main class="connect-shell" data-connect-page data-connect-server-name="{{.ConnectionGuide.ServerName}}"{{if .ConnectionGuide.Configured}} data-java-port="{{.ConnectionGuide.JavaPort}}"{{if .ConnectionGuide.Bedrock}} data-bedrock-port="{{.ConnectionGuide.BedrockPort}}"{{end}}{{end}}>
-{{if not .ConnectionGuide.Configured}}
+{{if and (not .ConnectionGuide.Configured) (or .SelectedMinecraftID (not .ConnectionServers))}}
 <section class="connect-empty panel"><h1>Minecraft is not configured yet</h1><p>Ask the server owner to complete Minecraft setup. A connection guide will be available here once the server is configured.</p></section>
 {{else}}
 <section class="connect-controls panel" aria-labelledby="connect-title">
   <p class="connect-eyebrow eyebrow">JUSTVOXEL · SHARE THE ADVENTURE</p>
-  <div class="connect-title-row title-row"><h1 id="connect-title">How to connect</h1><select class="connect-server" aria-label="Server"><option>{{.ConnectionGuide.Server}}</option></select></div>
+  <div class="connect-title-row title-row"><h1 id="connect-title">How to connect</h1><select class="connect-server" aria-label="Server">{{if not .SelectedMinecraftID}}<option value="">Choose server</option>{{end}}{{range .ConnectionServers}}<option value="{{.ID}}"{{if eq .ID $.SelectedMinecraftID}} selected{{end}}>{{.Name}}</option>{{end}}</select></div>
+  {{if not .SelectedMinecraftID}}<p>Choose a server to see its connection guide.</p>
+</section>
+  {{else}}
   <p>Choose how your friends will join, then save the connection guide to share.</p>
   <div class="connect-methods">
     {{range .ConnectionGuide.Methods}}{{if or (eq .ID "local") (eq .ID "playit")}}{{template "connect-method-control" .}}{{end}}{{end}}
@@ -67,6 +70,7 @@
   <footer class="connect-guide-footer">JustVoxel · Minecraft with friends</footer>
 </article>
 <div class="connect-print-blocked">Choose a valid connection method in JustVoxel before saving this guide as PDF.</div>
+{{end}}
 {{end}}
 </main>
 </body>

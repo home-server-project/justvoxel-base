@@ -195,6 +195,7 @@ function softwareWorkspace({ current = 'paper', tag = 'stable', online = 0, over
   const context = vm.createContext({
     location: {origin: 'https://example.test', search: '?server=jv-family1'},
     Boolean, String, Number, URLSearchParams, csrf: 'csrf', state: {}, root, ticket: 1, sequence: 1,
+    selection: 0, justVoxelSelectionGeneration: 0,
     pending: { operation }, updateOperation: '', operationKinds: new Map(),
     minecraft: { id: 'jv-family1', server_type: current, image_tag: tag },
     status: { server_software: current[0].toUpperCase() + current.slice(1), image_state: 'up_to_date', ...overrides },
@@ -817,4 +818,29 @@ test('failed operation keeps verified acknowledgement and reconnect polling stay
   assert.ok(source.includes('completedOperation = operation;'));
   assert.ok(source.includes('confirmedOperation = completedOperation'));
   assert.ok(source.includes('watchUpdate(operation.operation_id)'));
+});
+
+test('selection generation detaches scheduled update watching without cancelling the backend operation', async () => {
+  const requests = [];
+  let nextPoll;
+  const context = vm.createContext({
+    justVoxelSelectionGeneration:0, URLSearchParams, updateOperation:'', completedOperation:null,
+    state:{}, content:{querySelector:()=>null},
+    request:async url => {
+      requests.push(url);
+      return {operation:{operation_id:'old-operation',state:'running'}};
+    },
+    setTimeout:callback=>{nextPoll=callback;},
+  });
+  const start = source.indexOf('  const watchUpdate =');
+  const end = source.indexOf('  // Let the native select', start);
+  vm.runInContext(source.slice(start,end) + '\nglobalThis.watch = watchUpdate;', context);
+  await context.watch('old-operation');
+  assert.equal(requests.length,1);
+  context.justVoxelSelectionGeneration++;
+  context.state.textContent = 'New server';
+  await nextPoll();
+  assert.equal(requests.length,1, 'old watcher must not request the operation through the new selection');
+  assert.equal(context.state.textContent,'New server');
+  assert.ok(requests.every(url=>url.startsWith('/api/version/workspace/update-operation?')));
 });

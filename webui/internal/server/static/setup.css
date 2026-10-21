@@ -459,3 +459,35 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
 .minecraft-add-server-card:focus-visible { outline: 2px solid var(--jv-accent); outline-offset: 4px; }
 
 .minecraft-servers-body > .setup-shell { flex: none; padding-bottom: 2rem; gap: 1rem; }
+
+/* Add Server entry keeps the ordinary page flow, including its footer. */
+.setup-entry-add-server{margin-top:0;padding:.8rem 1rem}
+.setup-entry-add-server .eyebrow{margin:.2rem 0}
+.setup-entry-add-server h1{margin:.25rem 0 .4rem}
+.setup-entry-add-server .setup-mode-grid{margin-top:.5rem;gap:.65rem}
+.setup-entry-add-server .setup-mode-card{padding:.7rem .8rem}
+.setup-entry-add-server .setup-mode-card p{margin-bottom:.45rem}
+.setup-entry-add-server .setup-server-type.server-software-card{min-height:0;padding:.5rem .65rem}
+.setup-entry-add-server .setup-terminal-note{margin-top:.5rem;padding:.45rem .65rem}
+
+/* Setup-local framed switches reuse the shared Date & Time widget. */
+.setup-startup-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem}
+.setup-startup-option{min-width:0}
+.setup-toggle-card{display:flex;align-items:center;justify-content:space-between;gap:1rem;min-width:0;margin:0;padding:.8rem;border:1px solid var(--jv-border);border-radius:var(--jv-radius);background:var(--jv-surface-sunken);color:var(--jv-text);font-size:.83rem;font-weight:700}
+.setup-toggle-card>span{display:grid;gap:.2rem;min-width:0}
+.setup-toggle-card .date-time-switch{flex:none}
+.setup-wizard-panel .memory-status.danger{color:var(--jv-text)}
+@media(max-width:850px){.setup-startup-grid{grid-template-columns:1fr}}
+
+/* Server balances Cross-play and Startup; the remaining cards follow below. */
+.setup-review-summary.setup-review-summary-add-server{grid-template-areas:"server cross-play" "server startup" "minecraft storage";align-items:start}
+.setup-review-summary-add-server>.setup-review-server{grid-area:server}
+.setup-review-summary-add-server>.setup-review-cross-play{grid-area:cross-play}
+.setup-review-summary-add-server>.setup-review-startup{grid-area:startup}
+.setup-review-summary-add-server>.setup-review-minecraft{grid-area:minecraft}
+.setup-review-summary-add-server>.setup-review-storage{grid-area:storage}
+@media(max-width:700px){
+  .setup-review-summary.setup-review-summary-add-server{grid-template-areas:"server" "cross-play" "startup" "minecraft" "storage"}
+}
+/* Long content and zoom can extend Add Server Review without clipping actions. */
+.setup-body.setup-add-server-review{height:auto;min-height:100dvh;overflow:visible}

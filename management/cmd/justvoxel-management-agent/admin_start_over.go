@@ -23,6 +23,8 @@ type startOverParticipant struct {
 	State         string   `json:"state"`
 	PlayersOnline int      `json:"players_online"`
 	Players       []string `json:"players"`
+	DataScope     string   `json:"data_scope,omitempty"`
+	DataAction    string   `json:"data_action,omitempty"`
 }
 type startOverPlan struct {
 	OK                           bool                   `json:"ok"`
@@ -40,6 +42,8 @@ type startOverPlan struct {
 	PodmanImagesAction           string                 `json:"podman_images_action"`
 	entries                      []instanceDeleteJournal
 	legacyBackupPath             string
+	legacyIdentity               string
+	retirementNames              map[string]minecraftInstanceNameRecord
 	preserved                    map[string]string
 }
 type startOverRequest struct {
@@ -204,6 +208,9 @@ func (s *server) adminStartOverApply(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *instanceRuntimeBackend) startOverJournals() (map[string]instanceDeleteJournal, error) {
+	return b.applianceRetirementJournals("start_over")
+}
+func (b *instanceRuntimeBackend) applianceRetirementJournals(policy string) (map[string]instanceDeleteJournal, error) {
 	out := map[string]instanceDeleteJournal{}
 	files, err := os.ReadDir(b.staging)
 	if errors.Is(err, os.ErrNotExist) {
@@ -219,7 +226,7 @@ func (b *instanceRuntimeBackend) startOverJournals() (map[string]instanceDeleteJ
 		}
 		id := strings.TrimSuffix(strings.TrimPrefix(f.Name(), "delete-"), ".json")
 		j, e := b.deleteJournal(id)
-		if e != nil || j.ResetPolicy != "start_over" {
+		if e != nil || j.ResetPolicy != policy {
 			return nil, errInstanceRecovery
 		}
 		out[id] = j
@@ -230,8 +237,14 @@ func (b *instanceRuntimeBackend) startOverJournals() (map[string]instanceDeleteJ
 	return out, nil
 }
 func (b *instanceRuntimeBackend) planStartOver(ctx context.Context) (startOverPlan, error) {
+	return b.planApplianceRetirement(ctx, "start_over")
+}
+func (b *instanceRuntimeBackend) planApplianceRetirement(ctx context.Context, policy string) (startOverPlan, error) {
+	if policy != "start_over" && policy != "reset_all" {
+		return startOverPlan{}, errInstanceRecovery
+	}
 	p := startOverPlan{OK: true, SchemaVersion: "v1", Mode: "start_over", Participants: []startOverParticipant{}, ConfigurationBackupSupported: true, DataAction: "preserve", BackupAction: "preserve", StorageLayoutAction: "preserve", AuthenticationAction: "preserve", WebUIUsersAction: "preserve", PodmanImagesAction: "preserve"}
-	journals, err := b.startOverJournals()
+	journals, err := b.applianceRetirementJournals(policy)
 	if err != nil {
 		return p, err
 	}
@@ -242,6 +255,14 @@ func (b *instanceRuntimeBackend) planStartOver(ctx context.Context) (startOverPl
 	names, err := b.identities().readNames()
 	if err != nil {
 		return p, err
+	}
+	if policy == "reset_all" {
+		p.retirementNames = names
+		legacy, e := b.identities().read()
+		if e != nil {
+			return p, e
+		}
+		p.legacyIdentity = legacy.ID
 	}
 	registered := map[string]bool{}
 	records := map[string]instanceRuntimeRecord{}
@@ -299,13 +320,28 @@ func (b *instanceRuntimeBackend) planStartOver(ctx context.Context) (startOverPl
 			if !hasRecord && j.Stage != "data_removed" && j.Stage != "identity_retired" {
 				return p, errInstanceRecovery
 			}
-			if names[id].DisplayName != j.Name {
+			if names[id].DisplayName != j.Name && !(policy == "reset_all" && (j.Stage == "data_removed" || j.Stage == "identity_retired") && names[id].DisplayName == "") {
 				return p, errInstanceRecovery
 			}
 			if err = b.checkStartOverRetirement(ctx, j); err != nil {
 				return p, err
 			}
 			state = "retiring"
+			if policy == "reset_all" && j.Stage == "intent" {
+				observed, e := b.observeRaw(ctx, id)
+				if e != nil {
+					return p, e
+				}
+				if observed.State == "running" {
+					players, playerNames, err = b.factoryResetPlayers(ctx, id)
+					if err != nil {
+						return p, err
+					}
+					for i, name := range playerNames {
+						playerNames[i] = startOverPlayerName(name)
+					}
+				}
+			}
 		} else {
 			if !registered[id] || !hasRecord || names[id].DisplayName == "" {
 				return p, errInstanceRecovery
@@ -337,8 +373,17 @@ func (b *instanceRuntimeBackend) planStartOver(ctx context.Context) (startOverPl
 					playerNames[i] = startOverPlayerName(name)
 				}
 			}
-			j = instanceDeleteJournal{Schema: 1, ID: id, Name: names[id].DisplayName, Record: r, ResetPolicy: "start_over", Stage: "intent"}
+			j = instanceDeleteJournal{Schema: 1, ID: id, Name: names[id].DisplayName, Record: r, ResetPolicy: policy, Stage: "intent"}
+			if policy == "start_over" {
+				j.DataAction = "preserve"
+			}
 			j.DataIdentity, err = b.deleteStorage(ctx, "inspect", j)
+			if err != nil {
+				return p, err
+			}
+		}
+		if policy == "reset_all" && !retry {
+			j.DataScope, j.DataAction, err = b.resetAllDataPolicy(ctx, j.Record.Storage.DataPath)
 			if err != nil {
 				return p, err
 			}
@@ -346,7 +391,7 @@ func (b *instanceRuntimeBackend) planStartOver(ctx context.Context) (startOverPl
 		if validateInstanceRecordPlacement(j.Record) != nil {
 			return p, errInstanceRecovery
 		}
-		if err = b.storage(ctx, "validate", j.Record); err != nil {
+		if err = b.validateRetirementStorage(ctx, j); err != nil {
 			return p, err
 		}
 		bounded := j
@@ -357,7 +402,7 @@ func (b *instanceRuntimeBackend) planStartOver(ctx context.Context) (startOverPl
 		}
 		p.entries = append(p.entries, j)
 		coverage = append(coverage, factoryResetInstance{Retirement: j})
-		p.Participants = append(p.Participants, startOverParticipant{ID: id, DisplayName: j.Name, State: state, PlayersOnline: players, Players: playerNames})
+		p.Participants = append(p.Participants, startOverParticipant{ID: id, DisplayName: j.Name, State: state, PlayersOnline: players, Players: playerNames, DataScope: j.DataScope, DataAction: j.DataAction})
 		p.TotalPlayersOnline += players
 	}
 	// This existing coverage check rejects orphan modern units/containers and
@@ -385,6 +430,11 @@ func (b *instanceRuntimeBackend) planStartOver(ctx context.Context) (startOverPl
 			break
 		}
 	}
+	if policy == "reset_all" {
+		if err = resetAllBackupSeparation(p.entries, p.legacyBackupPath); err != nil {
+			return p, err
+		}
+	}
 	p.preserved, err = b.startOverPreservationEvidence(p.entries, p.legacyBackupPath)
 	if err != nil {
 		return p, err
@@ -393,7 +443,9 @@ func (b *instanceRuntimeBackend) planStartOver(ctx context.Context) (startOverPl
 	// storage identity, journal progress and committed configuration are bound.
 	entries := append([]instanceDeleteJournal{}, p.entries...)
 	for i := range entries {
-		entries[i].Name = ""
+		if policy == "start_over" {
+			entries[i].Name = ""
+		}
 	}
 	payload, err := json.Marshal(struct {
 		Entries       []instanceDeleteJournal
@@ -404,6 +456,12 @@ func (b *instanceRuntimeBackend) planStartOver(ctx context.Context) (startOverPl
 		return p, err
 	}
 	p.PlanFingerprint = "sha256:" + instanceHash(payload)
+	if policy == "reset_all" {
+		p.PlanFingerprint, err = resetAllFingerprint(p.PlanFingerprint, p.entries, p.retirementNames, p.legacyIdentity)
+		if err != nil {
+			return p, err
+		}
+	}
 	return p, nil
 }
 func (b *instanceRuntimeBackend) startOverInstanceIdle(ctx context.Context, id string) error {
@@ -443,8 +501,13 @@ func (b *instanceRuntimeBackend) startOverInstanceIdle(ctx context.Context, id s
 	return nil
 }
 func (b *instanceRuntimeBackend) checkStartOverRetirement(ctx context.Context, j instanceDeleteJournal) error {
-	if j.ResetPolicy != "start_over" {
+	if j.ResetPolicy != "start_over" && j.ResetPolicy != "reset_all" {
 		return errInstanceRecovery
+	}
+	if j.ResetPolicy == "reset_all" {
+		if err := b.checkResetAllJournal(j); err != nil {
+			return err
+		}
 	}
 	if err := b.factoryResetBackupIdle(ctx, j.ID); err != nil {
 		return err
@@ -472,13 +535,30 @@ func (b *instanceRuntimeBackend) checkStartOverRetirement(ctx context.Context, j
 			return errInstanceRecovery
 		}
 	}
-	if err := b.applyInstanceRetirementDataPolicy(ctx, j); err != nil {
+	if err := b.checkRetirementDataPolicy(ctx, j); err != nil {
 		return err
 	}
-	if err := b.storage(ctx, "validate", j.Record); err != nil {
+	if err := b.validateRetirementStorage(ctx, j); err != nil {
 		return err
 	}
-	if err := b.deleteStopped(ctx, j.ID, true); err != nil {
+	if j.ResetPolicy == "reset_all" && j.Stage == "intent" {
+		observed, e := b.observeRaw(ctx, j.ID)
+		if e != nil {
+			return e
+		}
+		switch observed.State {
+		case "running", "failed":
+			if e = b.checkResetAllLiveRuntime(j); e != nil {
+				return e
+			}
+		case "stopped", "configured":
+			if e = b.deleteStopped(ctx, j.ID, true); e != nil {
+				return e
+			}
+		default:
+			return errInstanceRecovery
+		}
+	} else if err := b.deleteStopped(ctx, j.ID, true); err != nil {
 		return err
 	}
 	r, err := b.readRecord(j.ID)
@@ -505,6 +585,9 @@ func (b *instanceRuntimeBackend) checkStartOverRetirement(ctx context.Context, j
 	for path, hash := range map[string]string{env: j.Record.EnvironmentSHA256, q: j.Record.QuadletSHA256} {
 		raw, e := b.readPrivate(path)
 		if e == nil {
+			if j.ResetPolicy == "reset_all" && j.Stage != "intent" {
+				return errInstanceRecovery
+			}
 			if instanceHash(raw) != hash {
 				return errInstanceRecovery
 			}
@@ -518,6 +601,11 @@ func (b *instanceRuntimeBackend) resumeStartOverRetirement(ctx context.Context, 
 	if err := b.checkStartOverRetirement(ctx, j); err != nil {
 		return err
 	}
+	// intent pins identity, runtime hashes and data policy; runtime_retired
+	// permits absent runtime artifacts and an interrupted internal deletion;
+	// data_removed requires deleted data absent (or preserved data unchanged)
+	// and permits partial identity cleanup; identity_retired requires identity
+	// absent. The journal is removed only after the final absence proof.
 	save := func(stage string) error { j.Stage = stage; return b.writeJSON(b.deletePath(j.ID), j, true) }
 	if j.Stage == "intent" {
 		if err := b.retireInstanceRuntime(ctx, j); err != nil {
@@ -543,7 +631,7 @@ func (b *instanceRuntimeBackend) resumeStartOverRetirement(ctx context.Context, 
 			return err
 		}
 	}
-	if err := b.applyInstanceRetirementDataPolicy(ctx, j); err != nil {
+	if err := b.checkRetirementDataPolicy(ctx, j); err != nil {
 		return err
 	}
 	dir, env, q := b.paths(j.ID)
@@ -594,7 +682,7 @@ func (b *instanceRuntimeBackend) requireNoStartOver() error {
 		}
 		id := strings.TrimSuffix(strings.TrimPrefix(f.Name(), "delete-"), ".json")
 		j, e := b.deleteJournal(id)
-		if e != nil || j.ResetPolicy == "start_over" {
+		if e != nil || (j.ResetPolicy == "start_over" || j.ResetPolicy == "reset_all") {
 			return errInstanceRecovery
 		}
 	}

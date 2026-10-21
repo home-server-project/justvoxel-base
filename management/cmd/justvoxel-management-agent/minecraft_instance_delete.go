@@ -19,6 +19,8 @@ import (
 const instanceDeleteHelper = "/usr/libexec/justvoxel/mjust/instance-delete"
 
 type instanceDeleteJournal struct {
+	DataScope    string                `json:"data_scope,omitempty"`
+	DataAction   string                `json:"data_action,omitempty"`
 	ResetPolicy  string                `json:"reset_policy,omitempty"`
 	Schema       int                   `json:"schema"`
 	ID           string                `json:"id"`
@@ -54,7 +56,15 @@ func (b *instanceRuntimeBackend) deleteJournal(id string) (instanceDeleteJournal
 			return j, errInstanceRecovery
 		}
 	}
-	if j.ResetPolicy != "" && j.ResetPolicy != "delete" && j.ResetPolicy != "preserve" && j.ResetPolicy != "start_over" {
+	if j.ResetPolicy != "" && j.ResetPolicy != "delete" && j.ResetPolicy != "preserve" && j.ResetPolicy != "start_over" && j.ResetPolicy != "reset_all" {
+		return j, errInstanceRecovery
+	}
+	if j.ResetPolicy == "reset_all" && !validResetAllDataPolicy(j.DataScope, j.DataAction) {
+		return j, errInstanceRecovery
+	}
+	// Deployed Start Over journals omitted these fields. That legacy omission
+	// still means preserve; destructive policy can never become Start Over evidence.
+	if j.ResetPolicy == "start_over" && (j.DataScope != "" || (j.DataAction != "" && j.DataAction != "preserve")) {
 		return j, errInstanceRecovery
 	}
 	switch j.Stage {
@@ -239,6 +249,9 @@ func (b *instanceRuntimeBackend) retireSelectedInstance(ctx context.Context, id,
 			return e
 		}
 		j = instanceDeleteJournal{ResetPolicy: resetPolicy, Schema: 1, ID: id, Name: name, Record: record, Stage: "intent"}
+		if resetPolicy == "start_over" {
+			j.DataAction = "preserve"
+		}
 		j.DataIdentity, e = b.deleteStorage(ctx, "inspect", j)
 		if e != nil {
 			return e
@@ -453,15 +466,30 @@ func (b *instanceRuntimeBackend) retireInstanceStateAndIdentity(j instanceDelete
 	if e != nil {
 		return e
 	}
-	// Identity LAST, synced, while historical name evidence remains untouched.
+	// Identity LAST, synced. Appliance-wide removal also retires its private name.
 	if err = b.removePrivate(filepath.Join(b.identities().directory, id+".json")); err != nil {
 		return err
+	}
+	if j.ResetPolicy == "reset_all" {
+		return b.removePrivate(filepath.Join(b.identities().directory, "names", id+".json"))
 	}
 	return nil
 }
 
 func (b *instanceRuntimeBackend) applyInstanceRetirementDataPolicy(ctx context.Context, j instanceDeleteJournal) error {
+	if j.ResetPolicy == "reset_all" {
+		if err := b.checkResetAllJournal(j); err != nil {
+			return err
+		}
+		if j.DataAction == "delete" {
+			return b.removeInstanceData(ctx, j)
+		}
+		return b.checkRetirementDataPolicy(ctx, j)
+	}
 	if j.ResetPolicy == "start_over" {
+		if j.DataScope != "" || (j.DataAction != "" && j.DataAction != "preserve") {
+			return errInstanceRecovery
+		}
 		identity, err := b.deleteStorage(ctx, "inspect", j)
 		if err != nil || identity != j.DataIdentity {
 			return errInstanceRecovery

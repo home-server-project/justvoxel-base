@@ -1,7 +1,7 @@
 #!/usr/bin/bash
 # Agent-only trusted storage arguments, following the runtime host-mount contract.
 set -euo pipefail
-[[ $# == 10 && ( $1 == inspect || $1 == remove ) ]] || exit 1
+[[ $# == 10 && ( $1 == inspect || $1 == remove || $1 == verify || $1 == absent ) ]] || exit 1
 action=$1
 shift
 /usr/libexec/justvoxel/mjust/instance-runtime-prerequisites restore-validate "${@:1:8}"
@@ -28,10 +28,12 @@ def main():
         try:
             st = os.stat('data', dir_fd=fd, follow_symlinks=False)
         except FileNotFoundError:
-            if action == 'remove' and evidence != '-':
+            if action in ('remove', 'verify', 'absent') and evidence != '-':
                 os.fsync(fd)
                 return
             raise
+        if action == 'absent':
+            raise ValueError()
         if not stat.S_ISDIR(st.st_mode) or st.st_uid != int(uid) or st.st_gid != int(gid):
             raise ValueError()
         token = str(st.st_dev) + ':' + str(st.st_ino)
@@ -51,6 +53,8 @@ def main():
             return
         if token != evidence or not shutil.rmtree.avoids_symlink_attacks:
             raise ValueError()
+        if action == 'verify':
+            return
         shutil.rmtree('data', dir_fd=fd)
         os.fsync(fd)
         try:

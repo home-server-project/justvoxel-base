@@ -171,7 +171,9 @@ func TestMigrationWorkspaceApplyRedirectRendersCanonicalProgress(t *testing.T) {
 		`const renderedURL = new URL(responseURL, window.location.href);`,
 		`renderedURL.origin === window.location.origin`,
 		`renderedURL.pathname.match(/^\/workspace\/migration\/progress\/([A-Za-z0-9_-]+)$/)`,
-		`if (progress) updateMigrationLocation("", progress[1]);`,
+		`if (progress && !preserveLocation) updateMigrationLocation("", progress[1]);`,
+		`const renderMigrationMarkup = (markup, responseURL, preserveLocation = false) => {`,
+		`currentURL = renderedURL.pathname + renderedURL.search;`,
 	} {
 		if !strings.Contains(js[render:submit], want) {
 			t.Fatalf("redirected progress URL contract missing %q", want)
@@ -179,6 +181,28 @@ func TestMigrationWorkspaceApplyRedirectRendersCanonicalProgress(t *testing.T) {
 	}
 	if !strings.Contains(js[submit:], `renderMigrationMarkup(responseMarkup, response.url || action.pathname);`) {
 		t.Fatal("Migration submission does not render the final redirected response URL")
+	}
+	// Submitted redirects use the default canonicalization path, while a
+	// selection-driven refetch may preserve the new server's browser location.
+	click := strings.Index(js[submit:], `root.addEventListener("click"`)
+	if click < 0 {
+		t.Fatal("Migration submission boundary missing")
+	}
+	submission := js[submit : submit+click]
+	responseText := strings.Index(submission, `const responseMarkup = await response.text();`)
+	renderResponse := strings.Index(submission, `renderMigrationMarkup(responseMarkup, response.url || action.pathname);`)
+	if responseText < 0 || renderResponse <= responseText || !strings.Contains(submission[responseText:renderResponse], `if (selection !== globalThis.justVoxelSelectionGeneration) return;`) {
+		t.Fatal("Migration submission must reject old-server responses before rendering canonical progress")
+	}
+	locationStart := strings.Index(js, "const updateMigrationLocation =")
+	locationEnd := strings.Index(js, "const setMigrationBusy =")
+	if locationStart < 0 || locationEnd <= locationStart {
+		t.Fatal("Migration canonical browser location helper missing")
+	}
+	for _, want := range []string{`destination.searchParams.set("operation", operation)`, `window.history.replaceState(window.history.state, "", nextURL)`} {
+		if !strings.Contains(js[locationStart:locationEnd], want) {
+			t.Fatalf("Migration canonical progress location missing %q", want)
+		}
 	}
 }
 

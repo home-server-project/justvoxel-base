@@ -1,6 +1,14 @@
 (() => {
   'use strict';
   const page = document.querySelector('[data-connect-page]');
+  const serverSelect = page?.querySelector('.connect-server');
+  serverSelect?.addEventListener('change', () => {
+    const params = new URLSearchParams();
+    if (serverSelect.value) params.set('server', serverSelect.value);
+    if (new URLSearchParams(window.location.search).get('invite') === '1') params.set('invite', '1');
+    const query = params.toString();
+    window.location.href = '/minecraft/how-to-connect' + (query ? '?' + query : '');
+  });
   const guide = page?.querySelector('[data-connect-guide]');
   if (!guide) return;
   const switches = Array.from(page.querySelectorAll('[data-connect-method]'));

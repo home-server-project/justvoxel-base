@@ -506,11 +506,24 @@ func (a *App) systemWorkspaceMinecraftResetPlan(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
-	r, ok = a.selectedResetRequest(w, r, session, client)
-	if !ok {
+	current, err := client.AdminCurrentMinecraftResetOperation(r.Context(), session)
+	if err != nil {
+		a.writeSystemWorkspaceAPIError(w, err, "Minecraft reset status is unavailable.")
 		return
 	}
-	result, err := client.AdminMinecraftResetPlan(r.Context(), session)
+	var result api.AdminResetPlanResponse
+	if current.Operation != nil && current.Operation.InstanceID != "" {
+		recovery, ok := client.(interface {
+			HistoricalMinecraftResetPlan(context.Context, string) (api.AdminResetPlanResponse, error)
+		})
+		if !ok {
+			writeSystemWorkspaceError(w, 503, "Existing Minecraft reset recovery is unavailable.")
+			return
+		}
+		result, err = recovery.HistoricalMinecraftResetPlan(r.Context(), session)
+	} else {
+		result, err = client.AdminMinecraftResetPlan(r.Context(), session)
+	}
 	if err != nil {
 		a.writeSystemWorkspaceAPIError(w, err, "Minecraft reset could not be planned.")
 		return
@@ -536,14 +549,25 @@ func (a *App) systemWorkspaceMinecraftResetApply(w http.ResponseWriter, r *http.
 	if !ok {
 		return
 	}
-	r, ok = a.selectedResetRequest(w, r, session, client)
-	if !ok {
+	current, err := client.AdminCurrentMinecraftResetOperation(r.Context(), session)
+	if err != nil {
+		a.writeSystemWorkspaceAPIError(w, err, "Minecraft reset status is unavailable.")
 		return
 	}
-	result, err := client.AdminMinecraftResetApply(r.Context(), session, api.AdminMinecraftResetApplyRequest{
-		PlanFingerprint: r.FormValue("plan_fingerprint"),
-		ConfirmPlayers:  r.FormValue("confirm_players") == "yes",
-	})
+	request := api.AdminMinecraftResetApplyRequest{PlanFingerprint: r.FormValue("plan_fingerprint"), ConfirmPlayers: r.FormValue("confirm_players") == "yes"}
+	var result api.AdminResetApplyResponse
+	if current.Operation != nil && current.Operation.InstanceID != "" {
+		recovery, ok := client.(interface {
+			HistoricalMinecraftResetApply(context.Context, string, api.AdminMinecraftResetApplyRequest) (api.AdminResetApplyResponse, error)
+		})
+		if !ok {
+			writeSystemWorkspaceError(w, 503, "Existing Minecraft reset recovery is unavailable.")
+			return
+		}
+		result, err = recovery.HistoricalMinecraftResetApply(r.Context(), session, request)
+	} else {
+		result, err = client.AdminMinecraftResetApply(r.Context(), session, request)
+	}
 	if err != nil {
 		a.writeSystemWorkspaceAPIError(w, err, "Minecraft reset could not start.")
 		return
@@ -597,10 +621,6 @@ func (a *App) systemWorkspaceMinecraftResetCurrent(w http.ResponseWriter, r *htt
 	if !ok {
 		return
 	}
-	r, ok = a.selectedResetRequest(w, r, session, client)
-	if !ok {
-		return
-	}
 	result, err := client.AdminCurrentMinecraftResetOperation(r.Context(), session)
 	if err != nil {
 		a.writeSystemWorkspaceAPIError(w, err, "Minecraft reset status is unavailable.")
@@ -636,7 +656,7 @@ func (a *App) systemWorkspaceResetOperation(w http.ResponseWriter, r *http.Reque
 		writeSystemWorkspaceError(w, http.StatusNotFound, "Reset operation was not found.")
 		return
 	}
-	if result.Operation != nil && result.Operation.OperationType == "minecraft_reset" {
+	if result.Operation != nil && result.Operation.OperationType == "minecraft_reset" && result.Operation.InstanceID != "" {
 		values, explicit := r.URL.Query()["server"]
 		requested := ""
 		if explicit {
