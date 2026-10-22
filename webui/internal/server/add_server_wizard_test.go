@@ -123,7 +123,7 @@ func TestAddServerReviewGridRows(t *testing.T) {
 	}
 	styles := string(css)
 	for _, want := range []string{
-		`.setup-review-summary.setup-review-summary-add-server{grid-template-areas:"server cross-play" "minecraft startup" "storage storage";align-items:stretch}`,
+		`.setup-review-summary.setup-review-summary-add-server{grid-template-areas:"server cross-play" "server startup" "minecraft storage";align-items:stretch}`,
 		`.setup-review-summary-add-server>.setup-review-server{grid-area:server}`,
 		`.setup-review-summary-add-server>.setup-review-cross-play{grid-area:cross-play}`,
 		`.setup-review-summary-add-server>.setup-review-minecraft{grid-area:minecraft}`,
@@ -133,6 +133,11 @@ func TestAddServerReviewGridRows(t *testing.T) {
 	} {
 		if !strings.Contains(styles, want) {
 			t.Fatalf("Add Server Review grid missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{`"minecraft startup"`, `"storage storage"`} {
+		if strings.Contains(styles, forbidden) {
+			t.Fatalf("Add Server Review contains rejected grid row %q", forbidden)
 		}
 	}
 	reviewCSS, err := assets.ReadFile("static/setup-review.css")
@@ -188,7 +193,7 @@ func TestAddServerEntryAndSharedRecommended(t *testing.T) {
 	app, client := newAddServerTestApp(t)
 	workspace := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/minecraft-servers", ""))
 	body := workspace.Body.String()
-	if workspace.Code != http.StatusOK || !strings.Contains(body, `href="/minecraft/servers/add">Add Server</a>`) {
+	if workspace.Code != http.StatusOK || !strings.Contains(body, `href="/minecraft/servers/add" target="_blank" rel="noopener">Add Server</a>`) {
 		t.Fatalf("entry missing: %d %s", workspace.Code, body)
 	}
 	if strings.Contains(body, "minecraft-add-server-card") || strings.Contains(body, "data-minecraft-action") {
@@ -226,7 +231,10 @@ func TestAddServerEntryAndSharedRecommended(t *testing.T) {
 			t.Fatalf("private or legacy controls exposed: %s", forbidden)
 		}
 	}
-	for _, want := range []string{"Family Survival", "Create Server", "JustVoxel system storage", "Start on Boot", "setup-review-summary"} {
+	for _, want := range []string{"Family Survival", "Create Server", "JustVoxel system storage", "Start on Boot", "setup-review-summary",
+		`<form method="post" action="/minecraft/servers/add/review/cancel" data-add-server-review-cancel><input type="hidden" name="csrf" value="csrf-token">`,
+		`data-add-server-cancel-error hidden`,
+	} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("review missing %s", want)
 		}
@@ -578,9 +586,9 @@ func TestLegacyWizardKeepsEditableDestinationsAndIndependentDraft(t *testing.T) 
 
 func TestMinecraftServersAddActionUsesApplianceConfiguration(t *testing.T) {
 	for _, configured := range []bool{false, true} {
-		label, target := "first-setup", "/setup"
+		label, want := "first-setup", `<a href="/setup">Add Server</a>`
 		if configured {
-			label, target = "configured", addServerBasePath
+			label, want = "configured", `<a href="/minecraft/servers/add" target="_blank" rel="noopener">Add Server</a>`
 		}
 		t.Run(label, func(t *testing.T) {
 			app, client := newAddServerTestApp(t)
@@ -588,7 +596,6 @@ func TestMinecraftServersAddActionUsesApplianceConfiguration(t *testing.T) {
 			client.instances = nil
 			client.runtimes = nil
 			response := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/minecraft-servers", ""))
-			want := `href="` + target + `">Add Server</a>`
 			if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), want) || client.configurationHit == 0 {
 				t.Fatalf("action must use authoritative configuration: %d %s", response.Code, response.Body.String())
 			}

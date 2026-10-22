@@ -341,6 +341,12 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 			t.Fatalf("review layout missing %q: %s", want, body)
 		}
 	}
+	if strings.Contains(body, "data-add-server-review-cancel") || strings.Contains(body, "data-add-server-cancel-error") {
+		t.Fatal("first-run Review must not install Add Server tab closing behavior")
+	}
+	if !strings.Contains(body, `<form method="post" action="/setup/review/cancel"><input type="hidden" name="csrf" value="csrf-token">`) {
+		t.Fatal("first-run Review must preserve its normal cancellation form")
+	}
 	if strings.Contains(body, "setup-review-summary-add-server") || strings.Contains(body, "setup-review-startup") {
 		t.Fatal("first-run Review must not use the Add Server grid or Startup card")
 	}
@@ -641,5 +647,27 @@ func TestSetupReviewPlannerUnavailableIsFriendly(t *testing.T) {
 	}
 	if errors.Is(errors.New(rr.Body.String()), api.ErrUnauthorized) {
 		t.Fatal("planner outage was misclassified as authentication failure")
+	}
+}
+
+func TestSetupReviewCancelPreservesFirstRunDestination(t *testing.T) {
+	app, err := New(setupReviewClient(), Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		firstRunSetupDrafts.delete(app, "session-token")
+		firstRunSetupReviews.delete(app, "session-token")
+	})
+	advanceSetupToReview(t, app)
+	response := httptestResponse(app, authenticatedAdminRequest(http.MethodPost, "http://example/setup/review/cancel", "csrf=csrf-token"))
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/setup" {
+		t.Fatalf("first-run cancel returned %d %q", response.Code, response.Header().Get("Location"))
+	}
+	if _, exists := firstRunSetupDrafts.get(app, "session-token"); exists {
+		t.Fatal("first-run cancel retained its draft")
+	}
+	if _, exists := firstRunSetupReviews.get(app, "session-token"); exists {
+		t.Fatal("first-run cancel retained its review")
 	}
 }

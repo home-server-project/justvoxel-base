@@ -24,7 +24,7 @@
   {{if .Message}}<p class="notice success" role="status">{{.Message}}</p>{{end}}
   <section class="minecraft-server-inventory" data-server-csrf="{{.CSRF}}">
   <nav class="minecraft-workspace-tabs minecraft-server-arrange-toolbar" aria-label="Minecraft Servers actions">
-    <a href="{{if .Configured}}/minecraft/servers/add{{else}}/setup{{end}}">Add Server</a>
+    <a href="{{if .Configured}}/minecraft/servers/add{{else}}/setup{{end}}"{{if .Configured}} target="_blank" rel="noopener"{{end}}>Add Server</a>
     <button type="button" data-server-arrange hidden>Rearrange</button>
     <button type="button" data-server-arrange-done hidden>Done</button>
     <a href="/?workspace=migration&amp;tab=import" data-server-import>Import</a>

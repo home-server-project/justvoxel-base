@@ -14,6 +14,7 @@
   <script src="/static/setup-storage-actions.js" defer></script>
   <script src="/static/setup-storage.js" defer></script>
   <script src="/static/setup-motd.js" defer></script>
+  <script src="/static/setup-operation.js" defer></script>
 </head>
 <body class="role-administrator setup-body{{if .Started}} setup-advanced{{end}}">
 <header class="setup-header topbar setup-topbar">
@@ -71,7 +72,7 @@
       </section>
     </div>
 
-    {{if .AddServer}}<div class="setup-terminal-note"><a class="button-link secondary setup-dashboard-exit" href="/minecraft/servers">Cancel</a></div>{{else}}<div class="setup-terminal-note"><a class="button-link secondary setup-dashboard-exit" href="/">Back to dashboard</a><div class="setup-terminal-help"><span>Prefer the terminal?</span><code>mjust setup</code><small>Available from a local console or SSH.</small></div></div>{{end}}
+    {{if .AddServer}}<div class="setup-terminal-note"><a class="button-link secondary setup-dashboard-exit" href="/?workspace=minecraft-servers" data-add-server-cancel>Cancel</a></div>{{else}}<div class="setup-terminal-note"><a class="button-link secondary setup-dashboard-exit" href="/">Back to dashboard</a><div class="setup-terminal-help"><span>Prefer the terminal?</span><code>mjust setup</code><small>Available from a local console or SSH.</small></div></div>{{end}}
   </section>
   {{else}}
   <div class="setup-stage-header">

@@ -34,6 +34,7 @@
   <section class="panel setup-step-panel setup-review-panel{{if ne .SetupMode "recommended"}} setup-advanced-frame{{end}}">
     <div class="setup-review-content">
     <div class="setup-review-header"><h2>Review</h2>{{if and .Plan.OK (not .AddServer)}}<a class="button-link secondary" href="{{$wizard.BasePath}}/review/configuration">Download configuration</a>{{end}}</div>
+    {{if .AddServer}}<p class="notice error" role="alert" data-add-server-cancel-error hidden></p>{{end}}
     {{if .Error}}<div class="notice error" role="alert"><strong>Setup needs attention</strong><br>{{.Error}}</div>{{end}}
 
     {{if .Plan.OK}}
@@ -102,7 +103,7 @@
     </div>
 
     <div class="setup-step-actions setup-actions-split">
-      <form method="post" action="{{$wizard.BasePath}}/review/cancel"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">{{if .AddServer}}Return to Minecraft Servers{{else}}Cancel setup{{end}}</button></form>
+      <form method="post" action="{{$wizard.BasePath}}/review/cancel"{{if .AddServer}} data-add-server-review-cancel{{end}}><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">{{if .AddServer}}Return to Minecraft Servers{{else}}Cancel setup{{end}}</button></form>
       <div class="setup-step-navigation">{{if not .CreationBlocked}}<form method="post" action="{{$wizard.BasePath}}/review/back"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Back</button></form>{{end}}{{if and .Plan.OK (not .CreationBlocked)}}<button type="submit" form="setup-apply-form" data-setup-configure>{{if .AddServer}}Create Server{{else}}Configure JustVoxel{{end}}</button>{{else}}<span class="setup-configure-disabled" role="group" aria-disabled="true" tabindex="0" aria-describedby="setup-configure-help"><button type="button" disabled aria-describedby="setup-configure-help">{{if .AddServer}}Create Server{{else}}Configure JustVoxel{{end}}</button><span class="setup-configure-tooltip" id="setup-configure-help" role="tooltip">Setup is not ready. Resolve the items above first.</span></span>{{end}}</div>
     </div>
   </section>

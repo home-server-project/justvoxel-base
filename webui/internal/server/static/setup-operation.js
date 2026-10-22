@@ -1,4 +1,56 @@
 document.addEventListener("DOMContentLoaded", () => {
+  // Add Server runs in a secondary tab; only its explicit exits close that tab.
+  (() => {
+    const cancelLink = document.querySelector("[data-add-server-cancel]");
+    const cancelForm = document.querySelector("[data-add-server-review-cancel]");
+    if (!cancelLink && !cancelForm) return;
+
+    const closeWizard = (destination) => {
+      try {
+        window.close();
+      } catch {
+        // A browser may reject closing a tab; use the same navigation fallback.
+      }
+      setTimeout(() => {
+        if (!window.closed) window.location.assign(destination);
+      }, 100);
+    };
+    cancelLink?.addEventListener("click", (event) => {
+      if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      closeWizard(cancelLink.href);
+    });
+
+    let cancelling = false;
+    cancelForm?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (cancelling) return;
+      cancelling = true;
+      const error = document.querySelector("[data-add-server-cancel-error]");
+      error.hidden = true;
+      try {
+        const response = await fetch(cancelForm.action, {
+          method: "POST",
+          credentials: "same-origin",
+          redirect: "follow",
+          body: new FormData(cancelForm),
+        });
+        const destination = new URL(response.url);
+        if (!response.ok || !response.redirected || destination.origin !== window.location.origin ||
+            destination.pathname !== "/" || destination.search !== "?workspace=minecraft-servers") {
+          throw new Error("Add Server cancellation failed");
+        }
+      } catch {
+        error.textContent = "Could not cancel Add Server. Please try again.";
+        error.hidden = false;
+        cancelling = false;
+        return;
+      }
+      cancelling = false;
+      closeWizard("/?workspace=minecraft-servers");
+    });
+  })();
+
   const applyForm = document.querySelector("[data-setup-apply]");
   if (applyForm) {
     const addingServer = applyForm.dataset.addServer === "true";
