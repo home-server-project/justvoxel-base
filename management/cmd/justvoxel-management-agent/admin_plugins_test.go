@@ -248,7 +248,7 @@ func TestModrinthPluginDefaultFiltersAndReleaseDependencies(t *testing.T) {
 		}
 	}
 
-	for _, value := range []string{"1", "12"} {
+	for _, value := range []string{"1", "12", "13", "24"} {
 		expectedLimit = value
 		rr := httptest.NewRecorder()
 		s.adminPluginsDiscover(rr, pluginTestRequest(http.MethodGet, "/v1/minecraft/instances/jv-a1b2c3/plugins/discover?q=Example&limit="+value, ""))
@@ -259,7 +259,7 @@ func TestModrinthPluginDefaultFiltersAndReleaseDependencies(t *testing.T) {
 
 }
 func TestPluginCatalogQueryRejectsUpstreamAndInvalidFilters(t *testing.T) {
-	for _, query := range []string{"url=https://example.com", "host=example.com", "compatible_only=maybe", "release_only=0", "offset=-1", "q=a&q=b", "limit=0", "limit=13", "limit=abc", "limit=1.5", "limit=", "limit=%2B1", "limit=1&limit=12"} {
+	for _, query := range []string{"url=https://example.com", "host=example.com", "compatible_only=maybe", "release_only=0", "offset=-1", "q=a&q=b", "limit=0", "limit=25", "limit=abc", "limit=1.5", "limit=", "limit=%2B1", "limit=1&limit=12"} {
 		values, _ := url.ParseQuery(query)
 		if _, err := pluginQuery(values); err == nil {
 			t.Fatalf("accepted %s", query)
@@ -272,7 +272,7 @@ func TestPluginCatalogQueryRejectsUpstreamAndInvalidFilters(t *testing.T) {
 }
 
 func TestPluginCatalogQueryAcceptsBoundedLimit(t *testing.T) {
-	for _, value := range []string{"1", "12"} {
+	for _, value := range []string{"1", "12", "13", "24"} {
 		want, _ := strconv.Atoi(value)
 		query, err := pluginQuery(url.Values{"limit": {value}})
 		if err != nil || query.Limit != want {
@@ -1181,7 +1181,7 @@ func TestPluginInventoryPrivateDisabledStoreDoesNotAdoptFiles(t *testing.T) {
 }
 
 func TestPluginDiscoverSourceCursorContract(t *testing.T) {
-	for _, raw := range []string{"modrinth=true&hangar=false", "modrinth=false&hangar=true", "modrinth=true&hangar=true", "modrinth=false&hangar=false", "modrinth_offset=10000&hangar_offset=10000&hangar_first=true&limit=12"} {
+	for _, raw := range []string{"modrinth=true&hangar=false", "modrinth=false&hangar=true", "modrinth=true&hangar=true", "modrinth=false&hangar=false", "modrinth_offset=10000&hangar_offset=10000&hangar_first=true&limit=12", "limit=24"} {
 		q, _ := url.ParseQuery(raw)
 		if _, err := pluginQuery(q); err != nil {
 			t.Fatal(raw, err)
@@ -1324,7 +1324,7 @@ func TestPluginDiscoverProviderIsolationAndCompositePagination(t *testing.T) {
 			}
 		}
 	}
-	for _, limit := range []int{1, 3, 12} {
+	for _, limit := range []int{1, 3, 12, 24} {
 		q := url.Values{"q": {"same"}, "modrinth": {"true"}, "hangar": {"true"}, "limit": {strconv.Itoa(limit)}}
 		seen := map[string]bool{}
 		last := map[string]int{}
@@ -1459,7 +1459,11 @@ func TestHangarDiscoveryFillsPageAndBoundsInspection(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			old := pluginCatalogClient
 			t.Cleanup(func() { pluginCatalogClient = old })
-			const limit, total = 12, 200
+			const total = 200
+			limit := 12
+			if tc.rejectAll {
+				limit = 24 // At most 192 candidates may be inspected.
+			}
 			inspected, batches := 0, 0
 			avatars := []string{
 				"https://hangarcdn.papermc.io/avatars/user/123e4567-e89b-12d3-a456-426614174000.webp?v=7",
@@ -1611,7 +1615,11 @@ func TestModrinthDiscoveryReleasePageFillAndLargeTotal(t *testing.T) {
 		t.Run(strconv.FormatBool(rejectAll), func(t *testing.T) {
 			old := pluginCatalogClient
 			t.Cleanup(func() { pluginCatalogClient = old })
-			const limit, total = 12, 5200 // Synthetic upstream candidate total.
+			const total = 5200 // Synthetic upstream candidate total.
+			limit := 12
+			if rejectAll {
+				limit = 24 // At most 192 candidates may be inspected.
+			}
 			inspected, searches := 0, 0
 			pluginCatalogClient = &http.Client{Transport: pluginTestTransport(func(r *http.Request) (*http.Response, error) {
 				var payload any

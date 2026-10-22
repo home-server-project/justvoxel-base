@@ -781,8 +781,8 @@ func TestPluginsWorkspaceBoundedDiscoverQuery(t *testing.T) {
 		query    string
 		accepted bool
 	}{
-		{"", true}, {"limit=1", true}, {"limit=12", true},
-		{"limit=0", false}, {"limit=13", false}, {"limit=abc", false},
+		{"", true}, {"limit=1", true}, {"limit=12", true}, {"limit=13", true}, {"limit=24", true},
+		{"limit=0", false}, {"limit=25", false}, {"limit=abc", false},
 		{"limit=1.5", false}, {"limit=", false}, {"limit=%2B1", false},
 		{"modrinth=true&hangar=false", true}, {"modrinth=false&hangar=true", true}, {"modrinth=true&hangar=true", true}, {"modrinth=false&hangar=false", true},
 		{"modrinth_offset=10000&hangar_offset=10000&hangar_first=true", true},

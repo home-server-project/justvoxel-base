@@ -15,7 +15,7 @@ import (
 // runtime objects wholesale: legacy discovery also contains private host paths.
 type minecraftServerSummary struct {
 	Name, URL, Software, Version, State, ConfigurationError string
-	ContextID                                               string
+	ContextID, SoftwareIcon                                 string
 	JavaMemory, ContainerMemory, StateClass                 string
 	Running, CanSwitch, CanConfigureBoot                    bool
 	JavaPort, BedrockPort                                   int
@@ -59,6 +59,15 @@ func serverSoftware(value string) string {
 		return "NeoForge"
 	default:
 		return "Software unavailable"
+	}
+}
+
+func serverSoftwareIcon(value string) string {
+	switch strings.ToLower(value) {
+	case "vanilla", "paper", "purpur":
+		return "/static/server-software/" + strings.ToLower(value) + ".svg"
+	default:
+		return ""
 	}
 }
 
@@ -165,6 +174,7 @@ func (a *App) independentServerSummary(ctx context.Context, session string, inst
 	if err == nil {
 		s.ConfigurationAvailable = true
 		s.Software = serverSoftware(c.Software)
+		s.SoftwareIcon = serverSoftwareIcon(c.Software)
 		if c.Version != "" {
 			s.Version = c.Version
 		}

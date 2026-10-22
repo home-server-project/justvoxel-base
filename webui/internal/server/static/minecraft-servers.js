@@ -97,6 +97,19 @@
     initializeCard(card, root, () => arranging);
   }
   updateBounds();
+  const importLink = root.querySelector('[data-server-import]');
+  importLink?.addEventListener('click', event => {
+    if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    const launcher = document.querySelector('[data-migration-open]');
+    if (!launcher) return;
+    event.preventDefault();
+    const destination = new URL(window.location.href);
+    destination.searchParams.set('workspace', 'migration');
+    destination.searchParams.set('tab', 'import');
+    destination.searchParams.delete('operation');
+    window.history.replaceState(window.history.state, '', destination);
+    launcher.click();
+  });
   };
   function initializeCard(card, root, isArranging) {
     const id = card.dataset.serverId;
@@ -155,6 +168,11 @@
       const requested = running.checked;
       running.checked = !requested;
       operation(() => mutate(async () => {
+        const status = card.querySelector('.minecraft-server-state');
+        if (status) {
+          status.textContent = requested ? 'Starting' : 'Stopping';
+          status.className = 'minecraft-server-state warning';
+        }
         const result = await request('/api/minecraft/servers/lifecycle', {method: 'POST', body: new URLSearchParams({csrf, action: requested ? 'start' : 'stop'})});
         if (!result.ok) throw new Error('Server action was not completed.');
       }));

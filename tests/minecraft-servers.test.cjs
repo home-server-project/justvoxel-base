@@ -251,6 +251,9 @@ test('dynamic inventory initialization is idempotent', () => {
 function cardHarness({responses = [], bootChecked = false, runningChecked = false, connected = true, helperAvailable = true, launcherAvailable = true} = {}) {
   const card = new Element('card', {serverId: ids[1], serverName: 'Kids Creative'});
   card.isConnected = connected;
+  const status = card.appendChild(new Element('.minecraft-server-state'));
+  status.textContent = runningChecked ? 'Running' : 'Stopped';
+  status.className = 'minecraft-server-state ' + (runningChecked ? 'success' : 'error');
   const running = card.appendChild(new Element('[data-server-running]')); running.checked = runningChecked;
   const boot = card.appendChild(new Element('[data-server-boot]')); boot.checked = bootChecked;
   const restart = card.appendChild(new Element('[data-server-restart]'));
@@ -279,7 +282,11 @@ function cardHarness({responses = [], bootChecked = false, runningChecked = fals
   let refreshes = 0;
   const inventoryRoot = {
     querySelector: selector => selector === '[data-server-csrf]' ? {dataset: {serverCsrf: 'csrf-token'}} : feedback,
-    justVoxelRefreshServers: async () => { refreshes++; },
+    justVoxelRefreshServers: async () => {
+      refreshes++;
+      status.textContent = runningChecked ? 'Running' : 'Stopped';
+      status.className = 'minecraft-server-state ' + (runningChecked ? 'success' : 'error');
+    },
   };
   const create = tag => {
     const node = new Element(tag);
@@ -305,7 +312,8 @@ function cardHarness({responses = [], bootChecked = false, runningChecked = fals
     justVoxelOpenDeleteServer: options => deletes.push(options),
     fetch: async (url, options) => {
       calls.push({url, body: options.body});
-      const result = responses.shift() ?? {ok: true};
+      const response = responses.shift() ?? {ok: true};
+      const result = await (typeof response === 'function' ? response() : response);
       if (result instanceof Error) throw result;
       return {ok: !result.error, redirected: false, json: async () => result};
     },
@@ -331,7 +339,7 @@ function cardHarness({responses = [], bootChecked = false, runningChecked = fals
     for (const {handler} of control.listeners[type] || []) handler(event);
     return event;
   };
-  return {card, running, boot, restart, remove, invite, feedback, calls, deletes, dialogs, menu, links, guide, selections, launches, copied, context, location, dashboard, dropdowns, selectionEvents,
+  return {card, status, running, boot, restart, remove, invite, feedback, calls, deletes, dialogs, menu, links, guide, selections, launches, copied, context, location, dashboard, dropdowns, selectionEvents,
     fire, arrange: () => { arranging = true; }, refreshes: () => refreshes,
     // operation() runs asynchronously from the native change/click handler.
     settle: async () => { for (let i = 0; i < 25; i++) await Promise.resolve(); },
@@ -441,11 +449,13 @@ test('Inventory reuses the actual Storage menu and bounded responsive card grid'
   assert.match(template, /<span>Server running<\/span>/);
   assert.match(template, /{{if \.BedrockEnabled}}{{\.BedrockPort}}{{else}}Disabled{{end}}{{else}}Unavailable/);
   for (const page of [template, header]) assert.ok(page.includes('href="/static/storage-browser.css"'));
-  assert.doesNotMatch(css, /minecraft-server-more>summary|minecraft-server-more-items[^\n]*(?:background|border|color|font)/);
+  assert.doesNotMatch(css, /minecraft-server-more>summary/);
+  const menuSurface = css.match(/\.minecraft-server-more \.minecraft-server-more-items \{([^}]+)\}/)[1];
+  assert.doesNotMatch(menuSurface, /background|border|color|font/);
   assert.match(css, /\.minecraft-server-more \.minecraft-server-more-items \{[^}]*box-shadow: none;/);
   assert.doesNotMatch(css, /repeat\(2,minmax\(0,1fr\)\)/);
-  assert.match(css, /repeat\(auto-fill,minmax\(min\(100%,380px\),420px\)\)/);
-  assert.match(css, /@container \(max-width: 600px\)[^\n]*grid-template-columns: 1fr/);
+  assert.match(css, /repeat\(auto-fill,minmax\(min\(100%,420px\),420px\)\)/);
+  assert.match(css, /@container \(max-width: 600px\)[^\n]*grid-template-columns: min\(100%,420px\)/);
   const shared = readFileSync(`${root}static/storage-browser.css`, 'utf8');
   assert.match(shared, /storage-action-menu\[open\]>summary/);
   assert.match(shared, /\.storage-action-menu-popover\{[^}]*box-shadow:0 14px 36px #0008/);
@@ -528,7 +538,7 @@ test('Plugins capacity uses actual geometry up to 24 and retains resize paginati
     assert.equal(context.capacity(), expected);
   }
   const capacity = app.slice(start, app.indexOf('  capacityObserver.observe(results);', end));
-  assert.match(capacity, /columns \* rows/);
+  assert.match(capacity, /Math\.min\(24, columns \* rows\)/);
   assert.match(capacity, /new ResizeObserver/);
   assert.match(capacity, /if \(newLimit === pageLimit\) return;/);
   assert.match(capacity, /pageLimit = newLimit;\s*resetCursors\(\);\s*if \(reload\) load\(\)/);
@@ -629,4 +639,121 @@ test('invitation closes outside its rectangle, keeps internal clicks and copy op
   assert.equal(dialog.open, false);
   assert.equal(dialog.removed, true);
   assert.doesNotMatch(source, /document\.addEventListener\(['"]click/);
+});
+
+for (const runningChecked of [false, true]) {
+  for (const failed of [false, true]) {
+    test(`card shows ${runningChecked ? 'Stopping' : 'Starting'} until authoritative refresh, failure=${failed}`, async () => {
+      let resolve;
+      const f = cardHarness({runningChecked, responses: [() => new Promise(done => { resolve = done; })]});
+      f.running.checked = !runningChecked;
+      f.fire(f.running, 'change');
+      assert.equal(f.status.textContent, runningChecked ? 'Stopping' : 'Starting');
+      assert.equal(f.status.className, 'minecraft-server-state warning');
+      assert.equal(f.running.checked, runningChecked);
+      assert.equal(f.running.disabled, true);
+      assert.equal(f.refreshes(), 0);
+      resolve(failed ? {error: 'Lifecycle refused.'} : {ok: true});
+      await f.settle();
+      assert.equal(f.refreshes(), 1);
+      assert.equal(f.status.textContent, runningChecked ? 'Running' : 'Stopped');
+      if (failed) assert.equal(f.feedback.textContent, 'Lifecycle refused.');
+    });
+  }
+}
+
+test('card metrics keep equal tracks and center exact Bedrock port labels and values', () => {
+  const template = readFileSync(`${root}templates/minecraft_servers.html`, 'utf8');
+  const css = readFileSync(`${root}static/minecraft-servers.css`, 'utf8');
+  assert.match(template, /<span>Bedrock port<\/span>/);
+  assert.match(css, /\.minecraft-server-metrics \{[^}]*grid-template-columns: repeat\(3,minmax\(0,1fr\)\)/);
+  assert.match(css, /\.minecraft-server-metrics>div \{[^}]*text-align: center/);
+  assert.match(css, /repeat\(auto-fill,minmax\(min\(100%,420px\),420px\)\)/);
+  assert.doesNotMatch(css, /380px/);
+  for (const query of ['@media (max-width: 700px)', '@container (max-width: 600px)']) {
+    assert.ok(css.includes(query + ' { .minecraft-server-inventory .minecraft-server-entries { grid-template-columns: min(100%,420px); } }'));
+  }
+});
+
+test('Minecraft menu scopes a full separator before the bold success/danger action group', () => {
+  const template = readFileSync(`${root}templates/minecraft_servers.html`, 'utf8');
+  const css = readFileSync(`${root}static/minecraft-servers.css`, 'utf8');
+  const menu = template.slice(template.indexOf('class="storage-action-menu-popover'), template.indexOf('</details>'));
+  let previous = -1;
+  for (const token of ['>Settings<', '>Backups<', '>Version<', '>Plugins<', '>Invite friends<', '>How to connect<', '<hr>', '{{if .CanRestart}}', '>Restart<', '>Delete server<']) {
+    const index = menu.indexOf(token);
+    assert.ok(index > previous, token); previous = index;
+  }
+  assert.match(css, /\.minecraft-server-more \.minecraft-server-more-items>hr \{[^}]*width: 100%;[^}]*height: 0;[^}]*border: 0;[^}]*border-top: 1px solid var\(--jv-border\)/);
+  for (const [action, color] of [['restart', 'success'], ['delete', 'error']]) {
+    assert.ok(css.includes(`.minecraft-server-more .minecraft-server-more-items>[data-server-${action}] { color: var(--jv-${color}); font-weight: 800; }`));
+  }
+  assert.match(css, /\.minecraft-server-more \.minecraft-server-more-items \{[^}]*box-shadow: none/);
+});
+
+test('card software icon is small, proportional and precedes the existing text', () => {
+  const template = readFileSync(`${root}templates/minecraft_servers.html`, 'utf8');
+  const css = readFileSync(`${root}static/minecraft-servers.css`, 'utf8');
+  assert.match(template, /{{if \.SoftwareIcon}}<img class="minecraft-server-software-icon" src="{{\.SoftwareIcon}}" alt="">{{end}}<span>{{\.Software}} · {{\.Version}}<\/span>/);
+  assert.match(css, /\.minecraft-server-software-icon \{[^}]*width: 1\.1rem; height: 1\.1rem; object-fit: contain; flex: none; align-self: center;/);
+  assert.match(css, /\.minecraft-server-software-row>p \{[^}]*align-items: baseline/);
+});
+
+function importHarness(launcherAvailable = true) {
+  const link = new Element('[data-server-import]');
+  link.href = '/?workspace=migration&tab=import';
+  const location = {href: 'https://justvoxel.test/?workspace=minecraft-servers&operation=stale&server=jv-kids001'};
+  const replacements = [], launches = [];
+  const state = {keep: true};
+  const context = vm.createContext({
+    URL,
+    root: {querySelector: selector => selector === '[data-server-import]' ? link : null},
+    document: {querySelector: selector => {
+      assert.equal(selector, '[data-migration-open]');
+      return launcherAvailable ? {click() { launches.push(new URL(location.href)); }} : null;
+    }},
+    window: {location, history: {state, replaceState(value, title, destination) {
+      assert.equal(value, state); assert.equal(title, '');
+      replacements.push(destination); location.href = destination.href;
+    }}},
+  });
+  const start = source.indexOf("  const importLink = root.querySelector('[data-server-import]');");
+  const end = source.indexOf('\n  };', start);
+  assert.ok(start >= 0 && end > start);
+  vm.runInContext(source.slice(start, end), context);
+  const click = (fields = {}) => {
+    const event = {button: 0, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, ...fields};
+    link.listeners.click[0].handler(event); return event;
+  };
+  return {link, location, replacements, launches, click};
+}
+
+test('Import keeps Dashboard alive, replaces URL state and clicks the existing launcher', () => {
+  const f = importHarness();
+  assert.equal(f.click().defaultPrevented, true);
+  assert.equal(f.replacements.length, 1); assert.equal(f.launches.length, 1);
+  const destination = f.launches[0];
+  assert.equal(destination.searchParams.get('workspace'), 'migration');
+  assert.equal(destination.searchParams.get('tab'), 'import');
+  assert.equal(destination.searchParams.has('operation'), false);
+  assert.equal(destination.searchParams.get('server'), 'jv-kids001');
+  assert.equal(f.link.href, '/?workspace=migration&tab=import');
+  assert.doesNotMatch(source, /location\.(?:reload|assign|replace)\s*\(|location\.href\s*=/);
+  const template = readFileSync(`${root}templates/minecraft_servers.html`, 'utf8');
+  assert.match(template, /href="\/\?workspace=migration&amp;tab=import" data-server-import>Import<\/a>/);
+  const p = page();
+  p.initialize();
+  assert.equal(p.arrange.listeners.click.length, 1);
+});
+
+test('Import preserves modified, middle and prevented clicks and missing-launcher fallback', () => {
+  for (const fields of [{ctrlKey:true}, {metaKey:true}, {shiftKey:true}, {altKey:true}, {button:1}, {button:2}, {defaultPrevented:true}]) {
+    const f = importHarness();
+    const event = f.click(fields);
+    assert.equal(event.defaultPrevented, !!fields.defaultPrevented);
+    assert.equal(f.replacements.length, 0); assert.equal(f.launches.length, 0);
+  }
+  const f = importHarness(false);
+  assert.equal(f.click().defaultPrevented, false);
+  assert.equal(f.replacements.length, 0); assert.equal(f.launches.length, 0);
 });

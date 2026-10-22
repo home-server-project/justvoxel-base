@@ -270,7 +270,7 @@ test('Overview places both exact switch labels in one wrapping lane', () => {
   assert.equal((lane.match(/role="switch"/g) || []).length, 2);
   assert.doesNotMatch(lane, />Server<|Review changes/);
   assert.match(css, /\.minecraft-overview-lifecycle\{display:flex;flex-wrap:wrap;gap:/);
-  assert.match(css, /\.minecraft-overview-lifecycle>\.minecraft-overview-boot-card\{flex:0 1 260px\}/);
+  assert.match(css, /\.minecraft-overview-lifecycle>\.minecraft-overview-boot-card\{flex:1 1 260px\}/);
 });
 
 test('Start on Boot immediately plans and applies the real fingerprint for the immutable selection', async () => {
@@ -405,4 +405,15 @@ test('Recent logs has an uninterrupted Health-style flex chain and overrides the
   for (const declaration of ['flex:1', 'min-height:0', 'max-height:none', 'overflow:auto']) assert.ok(rule.includes(declaration));
   assert.match(css, /\.system-health-view>\.panel\{display:flex;flex:1;min-height:0;flex-direction:column;margin:0!important;overflow:hidden\}/);
   assert.match(css, /\.system-health-view>\.panel \.log-box\{flex:1;min-height:120px;max-height:none\}/);
+});
+
+test('Recent logs reuses the System Health inline baseline heading geometry', () => {
+  const logs = between('  const renderLogs =', '  async function loadCurrentTab');
+  assert.match(logs, /heading.className = "section-heading"/);
+  assert.match(logs, /headingText.append\(eyebrow, title\)/);
+  assert.match(logs, /eyebrow.textContent = "Diagnostics"/);
+  assert.match(logs, /title.textContent = "Recent Minecraft logs"/);
+  assert.match(css, /\.system-workspace-content \.panel>\.section-heading>div:first-child,\.minecraft-recent-logs-view>\.panel>\.section-heading>div:first-child\{display:flex;align-items:baseline;gap:\.4rem;flex-wrap:wrap\}/);
+  assert.match(css, /\.minecraft-recent-logs-view>\.panel>\.section-heading\{margin-bottom:\.35rem\}/);
+  assert.match(css, /\.minecraft-recent-logs-view>\.panel>\.section-heading :is\(h2,\.eyebrow\)\{margin:0\}/);
 });

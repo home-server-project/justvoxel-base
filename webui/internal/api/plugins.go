@@ -148,7 +148,7 @@ func ValidatePluginDiscoverQuery(query url.Values) error {
 			}
 		}
 		limit, err := strconv.Atoi(value)
-		if err != nil || limit < 1 || limit > 12 {
+		if err != nil || limit < 1 || limit > 24 {
 			return errors.New("Invalid catalog limit.")
 		}
 	}

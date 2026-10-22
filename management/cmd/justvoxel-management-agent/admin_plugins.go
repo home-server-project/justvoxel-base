@@ -574,7 +574,7 @@ func pluginQuery(q url.Values) (pluginDiscoverQuery, error) {
 				return out, errors.New("invalid catalog position")
 			}
 			n, err := strconv.Atoi(value)
-			if err != nil || n < 0 || n > 10000 || (key == "limit" && (n < 1 || n > 12)) {
+			if err != nil || n < 0 || n > 10000 || (key == "limit" && (n < 1 || n > 24)) {
 				return out, errors.New("invalid catalog position")
 			}
 			*target = n

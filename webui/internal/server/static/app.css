@@ -1040,7 +1040,7 @@ button.quick-look-backup-action{padding:0;border:0;border-radius:0;background:tr
 .system-workspace-content .panel>.section-heading,.minecraft-overview-logs>.section-heading{margin-bottom:.35rem}
 .system-workspace-content .panel>.section-heading .eyebrow,.minecraft-overview-logs>.section-heading .eyebrow{margin:0;font-size:.7rem}
 .system-workspace-content .panel>.section-heading h2,.minecraft-overview-logs>.section-heading h2{margin:0;font-size:.98rem}
-.system-workspace-content .panel>.section-heading>div:first-child{display:flex;align-items:baseline;gap:.4rem;flex-wrap:wrap}
+.system-workspace-content .panel>.section-heading>div:first-child,.minecraft-recent-logs-view>.panel>.section-heading>div:first-child{display:flex;align-items:baseline;gap:.4rem;flex-wrap:wrap}
 .system-health-view{gap:.45rem}
 .system-health-view>.panel,.minecraft-overview-compact .minecraft-overview-logs{margin:0;padding:.55rem .7rem}
 .system-health-view>.panel .log-box,.minecraft-overview-logs .log-box{margin:.35rem 0 0;padding:.65rem;overflow:auto}
@@ -1700,8 +1700,10 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 .minecraft-recent-logs-view{display:flex;flex-direction:column;flex:1;min-height:0;gap:.7rem;overflow:hidden}
 .minecraft-recent-logs-view>.notice{flex:none;margin:0}
 .minecraft-recent-logs-view>.panel{display:flex;flex:1;min-height:0;flex-direction:column;margin:0!important;overflow:hidden}
-.minecraft-workspace-content .minecraft-recent-logs-view .log-box{flex:1;min-height:0;max-height:none;overflow:auto}
+.minecraft-recent-logs-view>.panel>.section-heading{margin-bottom:.35rem}
+.minecraft-recent-logs-view>.panel>.section-heading :is(h2,.eyebrow){margin:0}
+.minecraft-workspace-content .minecraft-recent-logs-view .log-box{margin-top:.35rem;flex:1;min-height:0;max-height:none;overflow:auto}
 .minecraft-overview-lifecycle{display:flex;flex-wrap:wrap;gap:.7rem}
-.minecraft-overview-lifecycle>.minecraft-overview-boot-card{flex:0 1 260px}
+.minecraft-overview-lifecycle>.minecraft-overview-boot-card{flex:1 1 260px}
 .minecraft-workspace-tabs a{display:inline-flex;align-items:center;box-sizing:border-box;text-decoration:none}
 .minecraft-server-arrange-toolbar [hidden]{display:none!important}

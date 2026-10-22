@@ -479,8 +479,8 @@ button.setup-storage-segment:hover,button.setup-storage-segment:focus-visible{bo
 .setup-wizard-panel .memory-status.danger{color:var(--jv-text)}
 @media(max-width:850px){.setup-startup-grid{grid-template-columns:1fr}}
 
-/* Server balances Cross-play and Startup; the remaining cards follow below. */
-.setup-review-summary.setup-review-summary-add-server{grid-template-areas:"server cross-play" "server startup" "minecraft storage";align-items:start}
+/* Pair cards in equal-height rows, with Storage & backups spanning the final row. */
+.setup-review-summary.setup-review-summary-add-server{grid-template-areas:"server cross-play" "minecraft startup" "storage storage";align-items:stretch}
 .setup-review-summary-add-server>.setup-review-server{grid-area:server}
 .setup-review-summary-add-server>.setup-review-cross-play{grid-area:cross-play}
 .setup-review-summary-add-server>.setup-review-startup{grid-area:startup}

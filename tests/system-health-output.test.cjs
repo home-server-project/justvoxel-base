@@ -33,11 +33,11 @@ function harness(result) {
     document: { createElement: tag => new Element(tag) },
     fetch: async (url, options) => {
       reads.push({ url, options });
-      return { status: 200, ok: true, json: async () => ({ result }) };
+      return { status: 200, ok: true, json: async () => ({ result: await result }) };
     },
   });
   vm.runInContext(healthCode + '\nglobalThis.clean = cleanSystemHealthOutput; globalThis.render = renderHealth;', context);
-  return { content, reads, clean: context.clean, render: context.render };
+  return { content, reads, context, clean: context.clean, render: context.render };
 }
 
 const cases = [
@@ -98,4 +98,36 @@ test('stale Health responses do not render', async () => {
   const h = harness({ ok: true, output: '§aOK§r' });
   await h.render(0);
   assert.equal(h.content.children.length, 0);
+});
+
+test('Health panel and running terminal precede the response; real output replaces the placeholder', async () => {
+  let resolve;
+  const h = harness(new Promise(done => { resolve = done; }));
+  const pending = h.render(1);
+  const root = h.content.children[0];
+  assert.equal(root.className, 'system-health-view');
+  assert.equal(root.children[0].className, 'panel details');
+  const pre = h.content.all().find(node => node.tag === 'pre');
+  assert.equal(pre.className, 'log-box');
+  assert.equal(pre.textContent, 'Running system health checks…');
+  assert.equal(h.content.all().some(node => node.className.startsWith('notice ')), false);
+  assert.equal(h.reads[0].url, '/api/system/workspace/health');
+  resolve({ok: false, output: '§cERROR§r Real validation output'});
+  await pending;
+  assert.equal(h.content.all().find(node => node.tag === 'pre'), pre);
+  assert.equal(pre.textContent, 'ERROR Real validation output');
+  assert.equal(root.children[0].className, 'notice error');
+});
+
+test('stale in-flight Health output cannot replace newer workspace content', async () => {
+  let resolve;
+  const h = harness(new Promise(done => { resolve = done; }));
+  const pending = h.render(1);
+  h.context.loadSequence++;
+  const newer = new Element('section');
+  h.content.replaceChildren(newer);
+  resolve({ok: true, output: 'Old health output'});
+  await pending;
+  assert.deepEqual(h.content.children, [newer]);
+  assert.equal(h.content.all().some(node => node.className.startsWith('notice ')), false);
 });

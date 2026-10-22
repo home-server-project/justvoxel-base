@@ -178,7 +178,7 @@ total and the current page capacity rather than an eligible-result count.
 
 The bounded Discover query accepts `q` (up to 200 bytes), `compatible_only`,
 `release_only`, `modrinth`, `hangar`, `hangar_first` (literal `true`/`false`),
-`modrinth_offset` and `hangar_offset` (0–10000), and `limit` (1–12, default 8).
+`modrinth_offset` and `hangar_offset` (0–10000), and `limit` (1–24, default 8).
 Omitted filters default ON; omitted sources default Modrinth ON/Hangar OFF;
 omitted offsets and turn default zero/Modrinth first. Unknown/repeated fields,
 legacy scalar `offset` or `source`, and malformed values are rejected.

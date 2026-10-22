@@ -581,7 +581,7 @@ func (a *App) setupWizardCancel(w http.ResponseWriter, r *http.Request) {
 	setupDraftsFor(r).delete(a, session)
 	destination := setupBasePath(r)
 	if isAddServerRequest(r) {
-		destination = minecraftServersPath
+		destination = "/?workspace=minecraft-servers"
 	}
 	http.Redirect(w, r, destination, http.StatusSeeOther)
 }

@@ -116,6 +116,74 @@ func addCreateValues(state setupReviewState) url.Values {
 	return url.Values{"plan_fingerprint": {state.Plan.PlanFingerprint}, "eula_accepted": {"on"}}
 }
 
+func TestAddServerReviewGridRows(t *testing.T) {
+	css, err := assets.ReadFile("static/setup.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles := string(css)
+	for _, want := range []string{
+		`.setup-review-summary.setup-review-summary-add-server{grid-template-areas:"server cross-play" "minecraft startup" "storage storage";align-items:stretch}`,
+		`.setup-review-summary-add-server>.setup-review-server{grid-area:server}`,
+		`.setup-review-summary-add-server>.setup-review-cross-play{grid-area:cross-play}`,
+		`.setup-review-summary-add-server>.setup-review-minecraft{grid-area:minecraft}`,
+		`.setup-review-summary-add-server>.setup-review-startup{grid-area:startup}`,
+		`.setup-review-summary-add-server>.setup-review-storage{grid-area:storage}`,
+		"@media(max-width:700px){\n  .setup-review-summary.setup-review-summary-add-server{grid-template-areas:\"server\" \"cross-play\" \"startup\" \"minecraft\" \"storage\"}",
+	} {
+		if !strings.Contains(styles, want) {
+			t.Fatalf("Add Server Review grid missing %q", want)
+		}
+	}
+	reviewCSS, err := assets.ReadFile("static/setup-review.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`.setup-review-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.7rem;margin:.7rem 0}`,
+		`@media(max-width:700px){.setup-review-summary{grid-template-columns:1fr}`,
+	} {
+		if !strings.Contains(string(reviewCSS), want) {
+			t.Fatalf("shared Review grid changed: missing %q", want)
+		}
+	}
+}
+
+func TestAddServerReviewCancelClearsStateAndReturnsDirectlyToWorkspace(t *testing.T) {
+	for _, suffix := range []string{"/review/cancel", "/cancel"} {
+		t.Run(suffix, func(t *testing.T) {
+			app, _ := newAddServerTestApp(t)
+			review := recommendedAddReview(t, app, "paper")
+			draft, exists := addServerDrafts.get(app, "session-token")
+			if !exists {
+				t.Fatal("missing Add Server draft before cancellation")
+			}
+			firstRunSetupDrafts.save(app, "session-token", draft)
+			firstRunSetupReviews.save(app, "session-token", review)
+			firstRunDraft, _ := firstRunSetupDrafts.get(app, "session-token")
+			firstRunReview, _ := firstRunSetupReviews.get(app, "session-token")
+
+			response := addWizardRequest(app, http.MethodPost, suffix, nil)
+			requireAddRedirect(t, response)
+			if location := response.Header().Get("Location"); location != "/?workspace=minecraft-servers" {
+				t.Fatalf("cancel Location = %q; want direct workspace destination", location)
+			}
+			if _, exists := addServerDrafts.get(app, "session-token"); exists {
+				t.Fatal("cancel retained the Add Server draft")
+			}
+			if _, exists := addServerReviews.get(app, "session-token"); exists {
+				t.Fatal("cancel retained the Add Server review")
+			}
+			if got, exists := firstRunSetupDrafts.get(app, "session-token"); !exists || !reflect.DeepEqual(got, firstRunDraft) {
+				t.Fatal("Add Server cancel changed the first-run draft")
+			}
+			if got, exists := firstRunSetupReviews.get(app, "session-token"); !exists || !reflect.DeepEqual(got, firstRunReview) {
+				t.Fatal("Add Server cancel changed the first-run review")
+			}
+		})
+	}
+}
+
 func TestAddServerEntryAndSharedRecommended(t *testing.T) {
 	app, client := newAddServerTestApp(t)
 	workspace := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/minecraft-servers", ""))

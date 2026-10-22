@@ -4445,22 +4445,24 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   };
 
   const renderHealth = async (sequence) => {
-    const payload = await systemFetchJSON("/api/system/workspace/health");
-    if (!payload || sequence !== loadSequence || !content) return;
+    if (sequence !== loadSequence || !content) return;
     const root = document.createElement("div");
     root.className = "system-health-view";
-    const result = payload.result || {};
-    root.appendChild(systemNotice(
-      result.ok ? "System health check passed." : "System health check found problems.",
-      result.ok ? "success" : "error"
-    ));
     const built = systemPanel("System health", "Health check details");
     const pre = document.createElement("pre");
     pre.className = "log-box";
-    pre.textContent = cleanSystemHealthOutput(result.output || "No detailed health output was returned.");
+    pre.textContent = "Running system health checks…";
     built.panel.appendChild(pre);
     root.appendChild(built.panel);
     content.replaceChildren(root);
+    const payload = await systemFetchJSON("/api/system/workspace/health");
+    if (!payload || sequence !== loadSequence) return;
+    const result = payload.result || {};
+    pre.textContent = cleanSystemHealthOutput(result.output || "No detailed health output was returned.");
+    root.replaceChildren(systemNotice(
+      result.ok ? "System health check passed." : "System health check found problems.",
+      result.ok ? "success" : "error"
+    ), built.panel);
   };
 
   const systemSplitter = (label, move) => {

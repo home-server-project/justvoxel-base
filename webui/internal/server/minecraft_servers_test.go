@@ -136,7 +136,7 @@ func TestMinecraftServersInventoryOrderAndActionBar(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"repeat(auto-fill,minmax(min(100%,380px),420px))", "box-shadow", ":focus-visible", "@media (max-width: 700px)", "@container (max-width: 600px)"} {
+	for _, want := range []string{"repeat(auto-fill,minmax(min(100%,420px),420px))", "box-shadow", ":focus-visible", "@media (max-width: 700px)", "@container (max-width: 600px)"} {
 		if !strings.Contains(string(cards), want) {
 			t.Errorf("missing card treatment %s", want)
 		}
@@ -510,5 +510,40 @@ func TestMinecraftCardRestartJSON(t *testing.T) {
 	response = httptestResponse(app, request)
 	if response.Code != 409 || strings.Contains(response.Body.String(), `"ok":true`) {
 		t.Fatal("restart refusal lost", response.Body.String())
+	}
+}
+
+func TestMinecraftServerSoftwareArtwork(t *testing.T) {
+	app, f := newServerInventoryApp(t)
+	for _, software := range []string{"vanilla", "paper", "purpur", "fabric", "forge", "neoforge", "", "../paper", "https://example.test/icon"} {
+		t.Run(software, func(t *testing.T) {
+			c := f.runtimes["jv-family1"]
+			c.Software = software
+			f.runtimes["jv-family1"] = c
+			summary := app.independentServerSummary(context.Background(), "session", api.RegisteredMinecraftInstance{ID: "jv-family1", DisplayName: "Family"})
+			want := ""
+			if software == "vanilla" || software == "paper" || software == "purpur" {
+				want = "/static/server-software/" + software + ".svg"
+				if _, err := os.Stat("static/server-software/" + software + ".svg"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if summary.SoftwareIcon != want {
+				t.Fatalf("software %q: icon %q, want %q", software, summary.SoftwareIcon, want)
+			}
+			body := inventoryRequest(app, "GET", "", "").Body.String()
+			card := strings.Split(strings.Split(body, `data-server-id="jv-family1"`)[1], "</article>")[0]
+			if want == "" {
+				if strings.Contains(card, "minecraft-server-software-icon") {
+					t.Fatal("unsupported software rendered artwork")
+				}
+			} else {
+				icon := strings.Index(card, `src="`+want+`" alt=""`)
+				text := strings.Index(card, "<span>"+serverSoftware(software)+" · ")
+				if icon < 0 || text < icon {
+					t.Fatal("local software icon must precede software/version text")
+				}
+			}
+		})
 	}
 }

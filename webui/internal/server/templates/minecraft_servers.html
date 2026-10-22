@@ -27,14 +27,14 @@
     <a href="{{if .Configured}}/minecraft/servers/add{{else}}/setup{{end}}">Add Server</a>
     <button type="button" data-server-arrange hidden>Rearrange</button>
     <button type="button" data-server-arrange-done hidden>Done</button>
-    <a href="/?workspace=migration&amp;tab=import">Import</a>
+    <a href="/?workspace=migration&amp;tab=import" data-server-import>Import</a>
   </nav>
   <p class="notice error" role="status" data-server-feedback hidden></p>
   <div class="minecraft-server-entries">
     {{range .Servers}}
     <article class="panel minecraft-server-card" data-minecraft-server-card data-server-id="{{.ContextID}}" data-server-name="{{.Name}}">
       <div class="minecraft-server-heading"><h2>{{.Name}}</h2><strong class="minecraft-server-state {{.StateClass}}">{{.State}}</strong></div>
-      <div class="minecraft-server-software-row"><p class="muted">{{.Software}} · {{.Version}}</p>
+      <div class="minecraft-server-software-row"><p class="muted">{{if .SoftwareIcon}}<img class="minecraft-server-software-icon" src="{{.SoftwareIcon}}" alt="">{{end}}<span>{{.Software}} · {{.Version}}</span></p>
         <details class="storage-action-menu minecraft-server-more" data-server-normal-actions>
           <summary aria-label="Server actions for {{.Name}}">⋯</summary>
           <div class="storage-action-menu-popover minecraft-server-more-items" popover="auto">
@@ -44,8 +44,8 @@
             <a href="/?workspace=plugins&amp;server={{.ContextID}}" data-server-workspace="plugins">Plugins</a>
             <button type="button" data-server-invite>Invite friends</button>
             <a href="/minecraft/how-to-connect?server={{.ContextID}}" target="_blank" rel="noopener">How to connect</a>
-            {{if .CanRestart}}<button type="button" data-server-restart>Restart</button>{{end}}
             <hr>
+            {{if .CanRestart}}<button type="button" data-server-restart>Restart</button>{{end}}
             <button type="button" class="storage-action-danger" data-server-delete>Delete server</button>
           </div>
         </details>
@@ -53,7 +53,7 @@
       {{if .ConfigurationError}}<p class="notice error">{{.ConfigurationError}}</p>{{end}}
       <div class="minecraft-server-metrics">
         <div><span>Java port</span><strong>{{if .JavaPort}}{{.JavaPort}}{{else}}Unavailable{{end}}</strong></div>
-        <div><span>Bedrock</span><strong>{{if .ConfigurationAvailable}}{{if .BedrockEnabled}}{{.BedrockPort}}{{else}}Disabled{{end}}{{else}}Unavailable{{end}}</strong></div>
+        <div><span>Bedrock port</span><strong>{{if .ConfigurationAvailable}}{{if .BedrockEnabled}}{{.BedrockPort}}{{else}}Disabled{{end}}{{else}}Unavailable{{end}}</strong></div>
         <div><span>Memory</span><strong>{{if .JavaMemory}}{{.JavaMemory}}{{else}}Unavailable{{end}} / {{if .ContainerMemory}}{{.ContainerMemory}}{{else}}Unavailable{{end}}</strong></div>
       </div>
       <div class="minecraft-server-switches" data-server-normal-actions>

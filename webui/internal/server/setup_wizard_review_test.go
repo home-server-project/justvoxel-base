@@ -341,6 +341,9 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 			t.Fatalf("review layout missing %q: %s", want, body)
 		}
 	}
+	if strings.Contains(body, "setup-review-summary-add-server") || strings.Contains(body, "setup-review-startup") {
+		t.Fatal("first-run Review must not use the Add Server grid or Startup card")
+	}
 	if strings.Contains(body, "Back to backups") {
 		t.Fatal("review still uses the old Back to backups label")
 	}
